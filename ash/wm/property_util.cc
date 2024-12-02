@@ -52,6 +52,14 @@ bool GetTrackedByWorkspace(aura::Window* window) {
   return window->GetProperty(internal::kWindowTrackedByWorkspaceKey);
 }
 
+void SetIgnoredByShelf(aura::Window* window, bool value) {
+  window->SetProperty(internal::kIgnoredByShelfKey, value);
+}
+
+bool GetIgnoredByShelf(aura::Window* window) {
+  return window->GetProperty(internal::kIgnoredByShelfKey);
+}
+
 void SetPersistsAcrossAllWorkspaces(
     aura::Window* window,
     WindowPersistsAcrossAllWorkspacesType type) {
@@ -78,7 +86,8 @@ void SetDefaultPersistsAcrossAllWorkspaces(bool value) {
 
 internal::RootWindowController* GetRootWindowController(
     aura::RootWindow* root_window) {
-  return root_window->GetProperty(internal::kRootWindowControllerKey);
+  return root_window ?
+      root_window->GetProperty(internal::kRootWindowControllerKey) : NULL;
 }
 
 void SetRootWindowController(aura::RootWindow* root_window,

@@ -11,6 +11,7 @@
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_stream_test_util.h"
 #include "net/spdy/spdy_test_util_spdy2.h"
+#include "net/spdy/spdy_websocket_test_util_spdy2.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using namespace net::test_spdy2;
@@ -179,7 +180,7 @@ TEST_F(SpdyStreamSpdy2Test, SendHeaderAndDataAfterOpen) {
   session_ = SpdySessionDependencies::SpdyCreateSession(&session_deps);
   SpdySessionPoolPeer pool_peer_(session_->spdy_session_pool());
 
-  scoped_ptr<SpdyFrame> expected_request(ConstructSpdyWebSocket(
+  scoped_ptr<SpdyFrame> expected_request(ConstructSpdyWebSocketSynStream(
       1,
       "/chat",
       "server.example.com",
@@ -232,7 +233,7 @@ TEST_F(SpdyStreamSpdy2Test, SendHeaderAndDataAfterOpen) {
   scoped_refptr<SpdyStream> stream;
   ASSERT_EQ(
       OK,
-      session->CreateStream(url, LOWEST, &stream, BoundNetLog(),
+      session->CreateStream(url, HIGHEST, &stream, BoundNetLog(),
                             CompletionCallback()));
   scoped_refptr<IOBufferWithSize> buf(new IOBufferWithSize(6));
   memcpy(buf->data(), "hello!", 6);
@@ -266,10 +267,9 @@ TEST_F(SpdyStreamSpdy2Test, SendHeaderAndDataAfterOpen) {
 
   EXPECT_TRUE(delegate->send_headers_completed());
   EXPECT_EQ("101", (*delegate->response())["status"]);
+  EXPECT_EQ(1, delegate->headers_sent());
   EXPECT_EQ(std::string(), delegate->received_data());
-  // TODO(toyoshim): OnDataSent should be invoked when each data frame is sent.
-  // But current implementation invokes also when each HEADERS frame is sent.
-  //EXPECT_EQ(6, delegate->data_sent());
+  EXPECT_EQ(6, delegate->data_sent());
 }
 
 TEST_F(SpdyStreamSpdy2Test, PushedStream) {

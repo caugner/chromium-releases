@@ -35,6 +35,21 @@ class ShellUtil {
     SYSTEM_LEVEL = 0x2   // Make any shell changes only at the system level
   };
 
+  enum VerifyShortcutStatus {
+    VERIFY_SHORTCUT_SUCCESS = 0,
+    VERIFY_SHORTCUT_FAILURE_UNEXPECTED,
+    VERIFY_SHORTCUT_FAILURE_PATH,
+    VERIFY_SHORTCUT_FAILURE_DESCRIPTION,
+    VERIFY_SHORTCUT_FAILURE_ICON_INDEX,
+  };
+
+  // Chrome's default handler state for a given protocol.
+  enum DefaultState {
+    UNKNOWN_DEFAULT,
+    NOT_DEFAULT,
+    IS_DEFAULT,
+  };
+
   // Relative path of the URL Protocol registry entry (prefixed with '\').
   static const wchar_t* kRegURLProtocol;
 
@@ -265,6 +280,13 @@ class ShellUtil {
   // on the Windows shell to prompt the user. This is the case for versions of
   // Windows prior to Windows 8.
   static bool CanMakeChromeDefaultUnattended();
+
+  // Returns the DefaultState of Chrome for HTTP and HTTPS.
+  static DefaultState GetChromeDefaultState();
+
+  // Returns the DefaultState of Chrome for |protocol|.
+  static DefaultState GetChromeDefaultProtocolClientState(
+      const string16& protocol);
 
   // Make Chrome the default browser. This function works by going through
   // the url protocols and file associations that are related to general

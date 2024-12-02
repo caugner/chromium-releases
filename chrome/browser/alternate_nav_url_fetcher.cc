@@ -5,10 +5,10 @@
 #include "chrome/browser/alternate_nav_url_fetcher.h"
 
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/api/infobars/link_infobar_delegate.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/link_infobar_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/navigation_controller.h"
@@ -89,7 +89,7 @@ bool AlternateNavInfoBarDelegate::LinkClicked(
       // the future.
       content::PAGE_TRANSITION_TYPED,
       false);
-  owner()->web_contents()->OpenURL(params);
+  owner()->GetWebContents()->OpenURL(params);
 
   // We should always close, even if the navigation did not occur within this
   // WebContents.
@@ -184,15 +184,14 @@ void AlternateNavURLFetcher::OnURLFetchComplete(
 
 void AlternateNavURLFetcher::StartFetch(NavigationController* controller) {
   controller_ = controller;
-  registrar_.Add(
-      this,
-      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-      content::Source<content::WebContents>(controller_->GetWebContents()));
+  content::WebContents* web_contents = controller_->GetWebContents();
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                 content::Source<content::WebContents>(web_contents));
 
   DCHECK_EQ(NOT_STARTED, state_);
   state_ = IN_PROGRESS;
-  fetcher_.reset(net::URLFetcher::Create(
-      GURL(alternate_nav_url_), net::URLFetcher::HEAD, this));
+  fetcher_.reset(net::URLFetcher::Create(GURL(alternate_nav_url_),
+                                         net::URLFetcher::HEAD, this));
   fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
   fetcher_->SetRequestContext(
       controller_->GetBrowserContext()->GetRequestContext());
@@ -221,16 +220,14 @@ void AlternateNavURLFetcher::SetStatusFromURLFetch(
 }
 
 void AlternateNavURLFetcher::ShowInfobarIfPossible() {
-  if (!navigated_to_entry_ || state_ != SUCCEEDED) {
-    if (state_ == FAILED)
-      delete this;
+  if (navigated_to_entry_ && (state_ == SUCCEEDED)) {
+    InfoBarTabHelper* infobar_helper =
+        TabContents::FromWebContents(controller_->GetWebContents())->
+            infobar_tab_helper();
+    infobar_helper->AddInfoBar(
+        new AlternateNavInfoBarDelegate(infobar_helper, alternate_nav_url_));
+  } else if (state_ != FAILED) {
     return;
   }
-
-  InfoBarTabHelper* infobar_helper =
-      TabContents::FromWebContents(controller_->GetWebContents())->
-          infobar_tab_helper();
-  infobar_helper->AddInfoBar(
-      new AlternateNavInfoBarDelegate(infobar_helper, alternate_nav_url_));
   delete this;
 }

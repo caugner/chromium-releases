@@ -63,7 +63,10 @@ TEST_F(PrintPreviewUIUnitTest, PrintPreviewData) {
       printing::PrintPreviewTabController::GetInstance();
   ASSERT_TRUE(controller);
 
-  initiator_tab->print_view_manager()->PrintPreviewNow();
+  printing::PrintViewManager* print_view_manager =
+      printing::PrintViewManager::FromWebContents(
+          initiator_tab->web_contents());
+  print_view_manager->PrintPreviewNow();
   TabContents* preview_tab = controller->GetOrCreatePreviewTab(initiator_tab);
 
   EXPECT_NE(initiator_tab, preview_tab);
@@ -114,7 +117,10 @@ TEST_F(PrintPreviewUIUnitTest, PrintPreviewDraftPages) {
       printing::PrintPreviewTabController::GetInstance();
   ASSERT_TRUE(controller);
 
-  initiator_tab->print_view_manager()->PrintPreviewNow();
+  printing::PrintViewManager* print_view_manager =
+      printing::PrintViewManager::FromWebContents(
+          initiator_tab->web_contents());
+  print_view_manager->PrintPreviewNow();
   TabContents* preview_tab = controller->GetOrCreatePreviewTab(initiator_tab);
 
   EXPECT_NE(initiator_tab, preview_tab);
@@ -172,7 +178,10 @@ TEST_F(PrintPreviewUIUnitTest, GetCurrentPrintPreviewStatus) {
       printing::PrintPreviewTabController::GetInstance();
   ASSERT_TRUE(controller);
 
-  initiator_tab->print_view_manager()->PrintPreviewNow();
+  printing::PrintViewManager* print_view_manager =
+      printing::PrintViewManager::FromWebContents(
+          initiator_tab->web_contents());
+  print_view_manager->PrintPreviewNow();
   TabContents* preview_tab = controller->GetOrCreatePreviewTab(initiator_tab);
 
   EXPECT_NE(initiator_tab, preview_tab);
@@ -225,7 +234,7 @@ TEST_F(PrintPreviewUIUnitTest, InitiatorTabGetsFocusOnPrintPreviewTabClose) {
   WebContentsTester* initiator_tester =
       WebContentsTester::For(initiator_contents);
   chrome::AddWebContents(browser(), NULL, initiator_contents,
-                         NEW_FOREGROUND_TAB, gfx::Rect(), false);
+                         NEW_FOREGROUND_TAB, gfx::Rect(), false, NULL);
   TabContents* initiator_tab = TabContents::FromWebContents(initiator_contents);
   ASSERT_TRUE(initiator_tab);
   EXPECT_EQ(2, browser()->tab_count());
@@ -235,7 +244,10 @@ TEST_F(PrintPreviewUIUnitTest, InitiatorTabGetsFocusOnPrintPreviewTabClose) {
       printing::PrintPreviewTabController::GetInstance();
   ASSERT_TRUE(controller);
 
-  initiator_tab->print_view_manager()->PrintPreviewNow();
+  printing::PrintViewManager* print_view_manager =
+      printing::PrintViewManager::FromWebContents(
+          initiator_tab->web_contents());
+  print_view_manager->PrintPreviewNow();
   TabContents* preview_tab = controller->GetOrCreatePreviewTab(initiator_tab);
 
   EXPECT_NE(initiator_tab, preview_tab);

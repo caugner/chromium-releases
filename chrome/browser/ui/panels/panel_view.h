@@ -45,7 +45,6 @@ class PanelView : public NativePanel,
   virtual gfx::NativeWindow GetNativePanelHandle() OVERRIDE;
   virtual void UpdatePanelTitleBar() OVERRIDE;
   virtual void UpdatePanelLoadingAnimations(bool should_animate) OVERRIDE;
-  virtual FindBar* CreatePanelFindBar() OVERRIDE;
   virtual void NotifyPanelOnUserChangedTheme() OVERRIDE;
   virtual void PanelWebContentsFocused(content::WebContents* contents) OVERRIDE;
   virtual void PanelCut() OVERRIDE;
@@ -53,14 +52,10 @@ class PanelView : public NativePanel,
   virtual void PanelPaste() OVERRIDE;
   virtual void DrawAttention(bool draw_attention) OVERRIDE;
   virtual bool IsDrawingAttention() const OVERRIDE;
-  virtual bool PreHandlePanelKeyboardEvent(
-      const content::NativeWebKeyboardEvent& event,
-      bool* is_keyboard_shortcut) OVERRIDE;
   virtual void HandlePanelKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
   virtual void FullScreenModeChanged(bool is_full_screen) OVERRIDE;
-  virtual Browser* GetPanelBrowser() const OVERRIDE;
-  virtual void EnsurePanelFullyVisible() OVERRIDE;
+  virtual bool IsPanelAlwaysOnTop() const OVERRIDE;
   virtual void SetPanelAlwaysOnTop(bool on_top) OVERRIDE;
   virtual void EnableResizeByMouse(bool enable) OVERRIDE;
   virtual void UpdatePanelMinimizeRestoreButtonVisibility() OVERRIDE;
@@ -117,6 +112,7 @@ class PanelView : public NativePanel,
   virtual views::Widget* GetWidget() OVERRIDE;
   virtual const views::Widget* GetWidget() const OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual gfx::ImageSkia GetWindowAppIcon() OVERRIDE;
   virtual gfx::ImageSkia GetWindowIcon() OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual void OnWindowBeginUserBoundsChange() OVERRIDE;
@@ -160,6 +156,9 @@ class PanelView : public NativePanel,
 
   // The view hosting the web contents.
   views::WebView* web_view_;
+
+  // True if the panel should always stay on top of other windows.
+  bool always_on_top_;
 
   // Is the panel receiving the focus?
   bool focused_;

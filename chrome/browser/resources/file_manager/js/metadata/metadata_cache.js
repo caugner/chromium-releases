@@ -84,7 +84,7 @@ function MetadataCache() {
 }
 
 /**
- * Observer type: it will be notified if the url changed is exactlt the same
+ * Observer type: it will be notified if the url changed is exactly the same
  * as the url passed.
  */
 MetadataCache.EXACT = 0;
@@ -296,8 +296,10 @@ MetadataCache.prototype.getCached = function(items, type) {
  * @param {Array.<Object>} values List of corresponding metadata values.
  */
 MetadataCache.prototype.set = function(items, type, values) {
-  if (!(items instanceof Array))
+  if (!(items instanceof Array)) {
     items = [items];
+    values = [values];
+  }
 
   this.startBatchUpdates();
   for (var index = 0; index < items.length; index++) {
@@ -733,7 +735,8 @@ GDataProvider.prototype.convert_ = function(data) {
     availableWhenMetered: GDataProvider.isAvailableWhenMetered(data),
     contentUrl: (data.contentUrl || '').replace(/\?.*$/gi, ''),
     editUrl: data.editUrl || '',
-    driveApps: data.driveApps || []
+    driveApps: data.driveApps || [],
+    contentMimeType: data.contentMimeType || ''
   };
 
   if (!data.isPresent) {
@@ -744,7 +747,7 @@ GDataProvider.prototype.convert_ = function(data) {
 
   if ('thumbnailUrl' in data) {
     result.thumbnail = {
-      url: data.thumbnailUrl.replace(/s220/, 's320'),
+      url: data.thumbnailUrl.replace(/s220/, 's500'),
       transform: null
     };
   }
@@ -843,7 +846,7 @@ ContentProvider.prototype.onMessage_ = function(event) {
       'on' + data.verb.substr(0, 1).toUpperCase() + data.verb.substr(1) + '_';
 
   if (!(methodName in this)) {
-    console.log('Unknown message from metadata reader: ' + data.verb, data);
+    console.error('Unknown message from metadata reader: ' + data.verb, data);
     return;
   }
 
@@ -928,7 +931,8 @@ ContentProvider.prototype.onResult_ = function(url, metadata) {
  * @private
  */
 ContentProvider.prototype.onError_ = function(url, step, error, metadata) {
-  console.warn('metadata: ' + url + ': ' + step + ': ' + error);
+  if (localStorage.logMetadata)  // Avoid log spam by default.
+    console.warn('metadata: ' + url + ': ' + step + ': ' + error);
   metadata = metadata || {};
   // Prevent asking for thumbnail again.
   metadata.thumbnailURL = '';
@@ -941,5 +945,6 @@ ContentProvider.prototype.onError_ = function(url, step, error, metadata) {
  * @private
  */
 ContentProvider.prototype.onLog_ = function(arglist) {
-  console.log.apply(console, ['metadata:'].concat(arglist));
+  if (localStorage.logMetadata)  // Avoid log spam by default.
+    console.log.apply(console, ['metadata:'].concat(arglist));
 };

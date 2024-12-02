@@ -27,13 +27,14 @@ common_check_toolchain() {
 common_vars_defines() {
 
   # Set toolchain path according to product architecture.
-  toolchain_arch="arm"
+  toolchain_arch="arm-linux-androideabi"
   if [[ "${TARGET_PRODUCT}" =~ .*x86.* ]]; then
     toolchain_arch="x86"
   fi
 
+  toolchain_version="4.6"
   toolchain_target=$(basename \
-    ${ANDROID_NDK_ROOT}/toolchains/${toolchain_arch}-*)
+    ${ANDROID_NDK_ROOT}/toolchains/${toolchain_arch}-${toolchain_version})
   toolchain_path="${ANDROID_NDK_ROOT}/toolchains/${toolchain_target}"\
 "/prebuilt/${toolchain_dir}/bin/"
 
@@ -47,6 +48,13 @@ common_vars_defines() {
   export PATH=$PATH:${ANDROID_NDK_ROOT}
   export PATH=$PATH:${ANDROID_SDK_ROOT}/tools
   export PATH=$PATH:${ANDROID_SDK_ROOT}/platform-tools
+
+  # This must be set before ANDROID_TOOLCHAIN, so that clang could find the
+  # gold linker.
+  # TODO(michaelbai): Remove this path once the gold linker become the default
+  # linker.
+  export PATH=$PATH:${CHROME_SRC}/build/android/${toolchain_arch}-gold
+
   # Must have tools like arm-linux-androideabi-gcc on the path for ninja
   export PATH=$PATH:${ANDROID_TOOLCHAIN}
 
@@ -54,6 +62,7 @@ common_vars_defines() {
   # Must be after CHROME_SRC is set.
   export PATH=$PATH:${CHROME_SRC}/build/android
 
+  # TODO(beverloo): Remove these once all consumers updated to --strip-binary.
   export OBJCOPY=$(echo ${ANDROID_TOOLCHAIN}/*-objcopy)
   export STRIP=$(echo ${ANDROID_TOOLCHAIN}/*-strip)
 
@@ -62,7 +71,7 @@ common_vars_defines() {
   DEFINES="OS=android"
   DEFINES+=" host_os=${host_os}"
 
-  if [ -n "$CHROME_ANDROID_OFFICIAL_BUILD" ]; then
+  if [[ -n "$CHROME_ANDROID_OFFICIAL_BUILD" ]]; then
     DEFINES+=" branding=Chrome"
     DEFINES+=" buildtype=Official"
 
@@ -89,31 +98,47 @@ common_vars_defines() {
   # and V8 mksnapshot.
   case "${TARGET_PRODUCT}" in
     "passion"|"soju"|"sojua"|"sojus"|"yakju"|"mysid"|"nakasi")
-      DEFINES+=" target_arch=arm"
       DEFINES+=" arm_neon=1 armv7=1 arm_thumb=1"
       DEFINES+=" ${ORDER_DEFINES}"
+      TARGET_ARCH="arm"
       ;;
     "trygon"|"tervigon")
-      DEFINES+=" target_arch=arm"
       DEFINES+=" arm_neon=0 armv7=1 arm_thumb=1 arm_fpu=vfpv3-d16"
       DEFINES+=" ${ORDER_DEFINES}"
+      TARGET_ARCH="arm"
       ;;
     "full")
-      DEFINES+=" target_arch=arm"
       DEFINES+=" arm_neon=0 armv7=0 arm_thumb=1 arm_fpu=vfp"
+      TARGET_ARCH="arm"
       ;;
     *x86*)
     # TODO(tedbo): The ia32 build fails on ffmpeg, so we disable it here.
-      DEFINES+=" target_arch=ia32 use_libffmpeg=0"
+      DEFINES+=" use_libffmpeg=0"
 
       host_arch=$(uname -m | sed -e \
         's/i.86/ia32/;s/x86_64/x64/;s/amd64/x64/;s/arm.*/arm/;s/i86pc/ia32/')
       DEFINES+=" host_arch=${host_arch}"
+      TARGET_ARCH="x86"
       ;;
     *)
       echo "TARGET_PRODUCT: ${TARGET_PRODUCT} is not supported." >& 2
       return 1
   esac
+
+  case "${TARGET_ARCH}" in
+    "arm")
+      DEFINES+=" target_arch=arm"
+      ;;
+    "x86")
+      DEFINES+=" target_arch=ia32"
+      ;;
+    *)
+      echo "TARGET_ARCH: ${TARGET_ARCH} is not supported." >& 2
+      return 1
+  esac
+
+  DEFINES+=" android_gdbserver=${ANDROID_NDK_ROOT}/prebuilt/\
+android-${TARGET_ARCH}/gdbserver/gdbserver"
 }
 
 
@@ -122,7 +147,9 @@ common_vars_defines() {
 ################################################################################
 common_gyp_vars() {
   export GYP_DEFINES="${DEFINES}"
-  export GYP_GENERATORS="make-android"
+
+  # Set GYP_GENERATORS to make-android if it's currently unset or null.
+  export GYP_GENERATORS="${GYP_GENERATORS:-make-android}"
 
   # Use our All target as the default
   export GYP_GENERATOR_FLAGS="${GYP_GENERATOR_FLAGS} default_target=All"
@@ -146,16 +173,18 @@ common_gyp_vars() {
 #  > make
 ################################################################################
 sdk_build_init() {
-  if [ ! -d "${ANDROID_NDK_ROOT}" ]; then
-    echo "ANDROID_NDK_ROOT must be set to the path of Android NDK." >& 2
-    echo "which could be installed by" >& 2
-    echo "<chromium_tree>/src/build/install-build-deps-android-sdk.sh" >& 2
-    return 1
+  # If ANDROID_NDK_ROOT is set when envsetup is run, use the ndk pointed to by
+  # the environment variable.  Otherwise, use the default ndk from the tree.
+  if [[ -z "${ANDROID_NDK_ROOT}" || ! -d "${ANDROID_NDK_ROOT}" ]]; then
+    export ANDROID_NDK_ROOT="${CHROME_SRC}/third_party/android_tools/ndk/"
   fi
 
-  # If ANDROID_SDK_ROOT is set when envsetup is run, use the sdk pointed to by
-  # the environment variable.  Otherwise, use the default sdk from the tree.
-  if [ ! -d "${ANDROID_SDK_ROOT}" ]; then
+  # If ANDROID_SDK_ROOT is set when envsetup is run, and if it has the
+  # right SDK-compatible directory layout, use the sdk pointed to by the
+  # environment variable.  Otherwise, use the default sdk from the tree.
+  local sdk_suffix=platforms/android-${ANDROID_SDK_VERSION}
+  if [[ -z "${ANDROID_SDK_ROOT}" || \
+       ! -d "${ANDROID_SDK_ROOT}/${sdk_suffix}" ]]; then
     export ANDROID_SDK_ROOT="${CHROME_SRC}/third_party/android_tools/sdk/"
   fi
 
@@ -165,8 +194,6 @@ sdk_build_init() {
   # Set default target.
   export TARGET_PRODUCT="${TARGET_PRODUCT:-trygon}"
 
-  # Android sdk platform version to use
-  export ANDROID_SDK_VERSION=15
   # Unset toolchain so that it can be set based on TARGET_PRODUCT.
   # This makes it easy to switch between architectures.
   unset ANDROID_TOOLCHAIN
@@ -189,8 +216,7 @@ sdk_build_init() {
   DEFINES+=" android_product_out=${CHROME_SRC}/out/android"
   DEFINES+=" android_lib='NOT_SDK_COMPLIANT'"
   DEFINES+=" android_static_lib='NOT_SDK_COMPLIANT'"
-  DEFINES+=\
-" android_sdk=${ANDROID_SDK_ROOT}/platforms/android-${ANDROID_SDK_VERSION}"
+  DEFINES+=" android_sdk=${ANDROID_SDK_ROOT}/${sdk_suffix}"
   DEFINES+=" android_sdk_root=${ANDROID_SDK_ROOT}"
   DEFINES+=" android_sdk_tools=${ANDROID_SDK_ROOT}/platform-tools"
   DEFINES+=" android_sdk_version=${ANDROID_SDK_VERSION}"
@@ -198,7 +224,7 @@ sdk_build_init() {
 
   common_gyp_vars
 
-  if [ -n "$CHROME_ANDROID_BUILD_WEBVIEW" ]; then
+  if [[ -n "$CHROME_ANDROID_BUILD_WEBVIEW" ]]; then
     # Can not build WebView with NDK/SDK because it needs the Android build
     # system and build inside an Android source tree.
     echo "Can not build WebView with NDK/SDK.  Requires android source tree." \
@@ -208,7 +234,6 @@ sdk_build_init() {
   fi
 
 }
-
 
 ################################################################################
 # Initializes environment variables for build with android source.  This expects
@@ -223,11 +248,14 @@ non_sdk_build_init() {
   # having to cd to $ANDROID_BUILD_TOP.
   export TOP="$ANDROID_BUILD_TOP"
 
-  # We export "ANDROID_NDK_ROOT" for building Chromium for Android by NDK.
-  export ANDROID_NDK_ROOT=${ANDROID_BUILD_TOP}/prebuilts/ndk/android-ndk-r7
-
-  # Android sdk platform version to use
-  export ANDROID_SDK_VERSION=15
+  # Set "ANDROID_NDK_ROOT" as checked-in version, if it was not set.
+  if [[ "${ANDROID_NDK_ROOT}" || ! -d "$ANDROID_NDK_ROOT" ]] ; then
+    export ANDROID_NDK_ROOT="${CHROME_SRC}/third_party/android_tools/ndk/"
+  fi
+  if [[ ! -d "${ANDROID_NDK_ROOT}" ]] ; then
+    echo "Can not find Android NDK root ${ANDROID_NDK_ROOT}." >& 2
+    return 1
+  fi
 
   # We export "ANDROID_SDK_ROOT" for building Java source with the SDK.
   export ANDROID_SDK_ROOT=${ANDROID_BUILD_TOP}/prebuilts/sdk/\
@@ -235,12 +263,16 @@ ${ANDROID_SDK_VERSION}
   # Needed by android antfiles when creating apks.
   export ANDROID_SDK_HOME=${ANDROID_SDK_ROOT}
 
+  # Unset ANDROID_TOOLCHAIN, so it could be set to checked-in 64-bit toolchain.
+  # in common_vars_defines
+  unset ANDROID_TOOLCHAIN
+
   common_vars_defines
 
   DEFINES+=" sdk_build=0"
   DEFINES+=" android_product_out=${ANDROID_PRODUCT_OUT}"
 
-  if [ -n "$CHROME_ANDROID_BUILD_WEBVIEW" ]; then
+  if [[ -n "$CHROME_ANDROID_BUILD_WEBVIEW" ]]; then
     webview_build_init
     return
   fi

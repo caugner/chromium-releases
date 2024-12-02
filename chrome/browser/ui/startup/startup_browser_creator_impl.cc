@@ -4,8 +4,12 @@
 
 #include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
 
+#include <algorithm>
+#include <vector>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/environment.h"
 #include "base/event_recorder.h"
@@ -29,6 +33,7 @@
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
+#include "chrome/browser/performance_monitor/startup_timer.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
@@ -42,6 +47,7 @@
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/browser/ui/app_list/app_list_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -73,13 +79,23 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "content/public/browser/child_process_security_policy.h"
+#include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/rect.h"
+#include "ui/gfx/screen.h"
+
+#if defined(USE_ASH)
+#include "ash/launcher/launcher_types.h"
+#include "ash/shell.h"
+#include "ui/aura/window.h"
+#endif
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
@@ -204,6 +220,25 @@ bool GetAppLaunchContainer(
   return true;
 }
 
+// Parse two comma-separated integers from string. Return true on success.
+bool ParseCommaSeparatedIntegers(const std::string& str,
+                                 int* ret_num1,
+                                 int* ret_num2) {
+  std::vector<std::string> dimensions;
+  base::SplitString(str, ',', &dimensions);
+  if (dimensions.size() != 2)
+    return false;
+
+  int num1, num2;
+  if (!base::StringToInt(dimensions[0], &num1) ||
+      !base::StringToInt(dimensions[1], &num2))
+    return false;
+
+  *ret_num1 = num1;
+  *ret_num2 = num2;
+  return true;
+}
+
 void RecordCmdLineAppHistogram() {
   AppLauncherHandler::RecordAppLaunchType(
       extension_misc::APP_LAUNCH_CMD_LINE_APP);
@@ -313,7 +348,7 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
         frontend_str = command_line_.GetSwitchValueASCII(
             switches::kRemoteDebuggingFrontend);
       }
-      g_browser_process->InitDevToolsHttpProtocolHandler(
+      g_browser_process->CreateDevToolsHttpProtocolHandler(
           profile,
           "127.0.0.1",
           static_cast<int>(port),
@@ -321,6 +356,11 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
     } else {
       DLOG(WARNING) << "Invalid http debugger port number " << port;
     }
+  }
+
+  if (command_line_.HasSwitch(switches::kShowAppList)) {
+    app_list_controller::ShowAppList();
+    return true;
   }
 
   // Open the required browser windows and tabs. First, see if
@@ -331,8 +371,7 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
   // Special case is when app switches are passed but we do want to restore
   // session. In that case open app window + focus it after session is restored.
   content::WebContents* app_contents = NULL;
-  if (OpenApplicationWindow(profile, &app_contents) &&
-      !browser_defaults::kAppRestoreSession) {
+  if (OpenApplicationWindow(profile, &app_contents)) {
     RecordLaunchModeHistogram(LM_AS_WEBAPP);
   } else {
     RecordLaunchModeHistogram(urls_to_open.empty() ?
@@ -342,22 +381,11 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
     // affecting browser startup have been detected.
     CheckPreferencesBackup(profile);
 
-    // Watch for |app_contents| closing since ProcessLaunchURLs might run a
-    // synchronous session restore which has a nested message loop and could
-    // close |app_contents|.
-    WebContentsCloseObserver app_contents_observer;
-    if (browser_defaults::kAppRestoreSession && app_contents)
-      app_contents_observer.SetContents(app_contents);
-
     ProcessLaunchURLs(process_startup, urls_to_open);
 
     // If this is an app launch, but we didn't open an app window, it may
     // be an app tab.
     OpenApplicationTab(profile);
-
-    // In case of app mode + session restore we want to focus that app.
-    if (app_contents_observer.contents())
-      app_contents_observer.contents()->GetView()->SetInitialFocus();
 
     if (process_startup) {
       if (browser_defaults::kOSSupportsOtherBrowsers &&
@@ -403,6 +431,26 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
 #endif  // defined(OS_WIN)
 
   return true;
+}
+
+void StartupBrowserCreatorImpl::ExtractOptionalAppWindowSize(
+    gfx::Rect* bounds) {
+  if (command_line_.HasSwitch(switches::kAppWindowSize)) {
+    int width, height;
+    width = height = 0;
+    std::string switch_value =
+        command_line_.GetSwitchValueASCII(switches::kAppWindowSize);
+    if (ParseCommaSeparatedIntegers(switch_value, &width, &height)) {
+      const gfx::Rect work_area = gfx::Screen::GetPrimaryDisplay().work_area();
+      width = std::min(width, work_area.width());
+      height = std::min(height, work_area.height());
+      bounds->set_size(gfx::Size(width, height));
+      bounds->set_x((work_area.width() - bounds->width()) / 2);
+      // TODO(nkostylev): work_area does include launcher but should not.
+      // Launcher auto hide pref is synced and is most likely not applied here.
+      bounds->set_y((work_area.height() - bounds->height()) / 2);
+    }
+  }
 }
 
 bool StartupBrowserCreatorImpl::IsAppLaunch(std::string* app_url,
@@ -511,9 +559,13 @@ bool StartupBrowserCreatorImpl::OpenApplicationWindow(
             extension_misc::APP_LAUNCH_CMD_LINE_APP_LEGACY);
       }
 
+      gfx::Rect override_bounds;
+      ExtractOptionalAppWindowSize(&override_bounds);
+
       WebContents* app_tab = application_launch::OpenAppShortcutWindow(
           profile,
-          url);
+          url,
+          override_bounds);
 
       if (out_app_contents)
         *out_app_contents = app_tab;
@@ -567,14 +619,18 @@ void StartupBrowserCreatorImpl::ProcessLaunchURLs(
   }
 
   // Session startup didn't occur, open the urls.
-
   Browser* browser = NULL;
   std::vector<GURL> adjust_urls = urls_to_open;
-  if (adjust_urls.empty())
+  if (adjust_urls.empty()) {
     AddStartupURLs(&adjust_urls);
-  else if (!command_line_.HasSwitch(switches::kOpenInNewWindow))
-    browser = browser::FindLastActiveWithProfile(profile_);
-
+    if (StartupBrowserCreatorImpl::OpenStartupURLsInExistingBrowser(
+            profile_, adjust_urls))
+      return;
+  } else if (!command_line_.HasSwitch(switches::kOpenInNewWindow)) {
+    // Always open a list of urls in a window on the native desktop.
+    browser = browser::FindBrowserWithProfile(profile_,
+                                              chrome::HOST_DESKTOP_TYPE_NATIVE);
+  }
   // This will launch a browser; prevent session restore.
   in_synchronous_profile_launch = true;
   browser = OpenURLsInBrowser(browser, process_startup, adjust_urls);
@@ -605,8 +661,13 @@ bool StartupBrowserCreatorImpl::ProcessStartupURLs(
       return false;
     }
 
-  uint32 restore_behavior = SessionRestore::SYNCHRONOUS |
-                            SessionRestore::ALWAYS_CREATE_TABBED_BROWSER;
+    uint32 restore_behavior = SessionRestore::SYNCHRONOUS;
+    if (browser_defaults::kAlwaysCreateTabbedBrowserOnSessionRestore ||
+        CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kCreateBrowserOnStartupForTests)) {
+      restore_behavior |= SessionRestore::ALWAYS_CREATE_TABBED_BROWSER;
+    }
+
 #if defined(OS_MACOSX)
     // On Mac, when restoring a session with no windows, suppress the creation
     // of a new window in the case where the system is launching Chrome via a
@@ -617,10 +678,18 @@ bool StartupBrowserCreatorImpl::ProcessStartupURLs(
     }
 #endif
 
+    // Pause the StartupTimer. Since the restore here is synchronous, we can
+    // keep these two metrics (browser startup time and session restore time)
+    // separate.
+    performance_monitor::StartupTimer::PauseTimer();
+
     Browser* browser = SessionRestore::RestoreSession(profile_,
                                                       NULL,
                                                       restore_behavior,
                                                       urls_to_open);
+
+    performance_monitor::StartupTimer::UnpauseTimer();
+
     AddInfoBarsIfNecessary(browser, chrome::startup::IS_PROCESS_STARTUP);
     return true;
   }
@@ -630,6 +699,16 @@ bool StartupBrowserCreatorImpl::ProcessStartupURLs(
     return false;
 
   AddInfoBarsIfNecessary(browser, chrome::startup::IS_PROCESS_STARTUP);
+
+  // Session restore may occur if the startup preference is "last" or if the
+  // crash infobar is displayed. Otherwise, it's safe for the DOM storage system
+  // to start deleting leftover data.
+  if (pref.type != SessionStartupPref::LAST &&
+      !HasPendingUncleanExit(profile_)) {
+    content::BrowserContext::GetDefaultStoragePartition(profile_)->
+        GetDOMStorageContext()->StartScavengingUnusedSessionStorage();
+  }
+
   return true;
 }
 
@@ -729,6 +808,20 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(Browser* browser,
 #endif
   }
 
+#if defined(USE_ASH)
+  if (ash::Shell::HasInstance()) {
+    // Set the browser's root window to be an active root window now so
+    // that that web contents can determine correct scale factor for the
+    // renderer. This is a short term fix for crbug.com/155201.  Without
+    // this, the renderer may use wrong scale factor first, then
+    // switched to the correct scale factor, which can cause race
+    // condition and lead to the results rendered at wrong scale factor.
+    // Long term fix is tracked in crbug.com/15543.
+    ash::Shell::GetInstance()->set_active_root_window(
+        browser->window()->GetNativeWindow()->GetRootWindow());
+  }
+#endif
+
   // In kiosk mode, we want to always be fullscreen, so switch to that now.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode))
     chrome::ToggleFullscreenMode(browser);
@@ -753,7 +846,7 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(Browser* browser,
     int index = chrome::GetIndexForInsertionDuringRestore(browser, i);
 
     chrome::NavigateParams params(browser, tabs[i].url,
-                                  content::PAGE_TRANSITION_START_PAGE);
+                                  content::PAGE_TRANSITION_AUTO_TOPLEVEL);
     params.disposition = first_tab ? NEW_FOREGROUND_TAB : NEW_BACKGROUND_TAB;
     params.tabstrip_index = index;
     params.tabstrip_add_types = add_types;
@@ -774,12 +867,8 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(Browser* browser,
   // value of StartupBrowserCreated::show_main_browser_window_. If this was set
   // to true ahead of this place, it means another task must have been spawned
   // to take care of that.
-  if (!browser_creator_ || browser_creator_->show_main_browser_window()) {
+  if (!browser_creator_ || browser_creator_->show_main_browser_window())
     browser->window()->Show();
-    // TODO(jcampan): http://crbug.com/8123 we should not need to set the
-    //                initial focus explicitly.
-    chrome::GetActiveWebContents(browser)->GetView()->SetInitialFocus();
-  }
 
   return browser;
 }
@@ -926,3 +1015,13 @@ void StartupBrowserCreatorImpl::CheckPreferencesBackup(Profile* profile) {
         backup_show_home_button));
   }
 }
+
+#if !defined(OS_WIN) || defined(USE_AURA)
+// static
+bool StartupBrowserCreatorImpl::OpenStartupURLsInExistingBrowser(
+    Profile* profile,
+    const std::vector<GURL>& startup_urls) {
+  return false;
+}
+#endif
+

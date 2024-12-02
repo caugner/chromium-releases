@@ -10,6 +10,7 @@ for more details about the presubmit API built into gcl.
 
 
 import re
+import subprocess
 import sys
 
 
@@ -21,6 +22,9 @@ _EXCLUDED_PATHS = (
     r"^v8[\\\/].*",
     r".*MakeFile$",
     r".+_autogen\.h$",
+    r"^cc[\\\/].*",
+    r"^webkit[\\\/]compositor_bindings[\\\/].*",
+    r".+[\\\/]pnacl_shim\.c$",
 )
 
 
@@ -138,15 +142,6 @@ _BANNED_CPP_FUNCTIONS = (
     ),
     (
       'browser::FindLastActiveWithProfile',
-      (
-       'This function is deprecated and we\'re working on removing it. Pass',
-       'more context to get a Browser*, like a WebContents, window, or session',
-       'id. Talk to ben@ or jam@ for more information.',
-      ),
-      True,
-    ),
-    (
-      'browser::FindBrowserWithProfile',
       (
        'This function is deprecated and we\'re working on removing it. Pass',
        'more context to get a Browser*, like a WebContents, window, or session',
@@ -382,6 +377,25 @@ def _CheckNoPragmaOnce(input_api, output_api):
   return []
 
 
+def _CheckNoTrinaryTrueFalse(input_api, output_api):
+  """Checks to make sure we don't introduce use of foo ? true : false."""
+  problems = []
+  pattern = input_api.re.compile(r'\?\s*(true|false)\s*:\s*(true|false)')
+  for f in input_api.AffectedFiles():
+    if not f.LocalPath().endswith(('.cc', '.h', '.inl', '.m', '.mm')):
+      continue
+
+    for line_num, line in f.ChangedContents():
+      if pattern.match(line):
+        problems.append('    %s:%d' % (f.LocalPath(), line_num))
+
+  if not problems:
+    return []
+  return [output_api.PresubmitPromptWarning(
+      'Please consider avoiding the "? true : false" pattern if possible.\n' +
+      '\n'.join(problems))]
+
+
 def _CheckUnwantedDependencies(input_api, output_api):
   """Runs checkdeps on #include statements added in this
   change. Breaking - rules is an error, breaking ! rules is a
@@ -427,11 +441,33 @@ def _CheckUnwantedDependencies(input_api, output_api):
         'You added one or more #includes that violate checkdeps rules.',
         error_descriptions))
   if warning_descriptions:
-    results.append(output_api.PresubmitPromptWarning(
+    if not input_api.is_committing:
+      warning_factory = output_api.PresubmitPromptWarning
+    else:
+      # We don't want to block use of the CQ when there is a warning
+      # of this kind, so we only show a message when committing.
+      warning_factory = output_api.PresubmitNotifyResult
+    results.append(warning_factory(
         'You added one or more #includes of files that are temporarily\n'
         'allowed but being removed. Can you avoid introducing the\n'
         '#include? See relevant DEPS file(s) for details and contacts.',
         warning_descriptions))
+  return results
+
+
+def _CheckFilePermissions(input_api, output_api):
+  """Check that all files have their permissions properly set."""
+  args = [sys.executable, 'tools/checkperms/checkperms.py', '--root',
+          input_api.change.RepositoryRoot()]
+  for f in input_api.AffectedFiles():
+    args += ['--file', f.LocalPath()]
+  errors = []
+  (errors, stderrdata) = subprocess.Popen(args).communicate()
+
+  results = []
+  if errors:
+    results.append(output_api.PreSubmitError('checkperms.py failed.',
+                                             errors))
   return results
 
 
@@ -449,7 +485,9 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckNoDEPSGIT(input_api, output_api))
   results.extend(_CheckNoBannedFunctions(input_api, output_api))
   results.extend(_CheckNoPragmaOnce(input_api, output_api))
+  results.extend(_CheckNoTrinaryTrueFalse(input_api, output_api))
   results.extend(_CheckUnwantedDependencies(input_api, output_api))
+  results.extend(_CheckFilePermissions(input_api, output_api))
   return results
 
 
@@ -563,19 +601,24 @@ def GetPreferredTrySlaves(project, change):
   if not files:
     return []
 
-  if all(re.search('\.(m|mm)$|[/_]mac[/_.]', f) for f in files):
-    return ['mac_rel']
-  if all(re.search('[/_]win[/_.]', f) for f in files):
+  if all(re.search('\.(m|mm)$|(^|[/_])mac[/_.]', f) for f in files):
+    return ['mac_rel', 'mac_asan']
+  if all(re.search('(^|[/_])win[/_.]', f) for f in files):
     return ['win_rel']
-  if all(re.search('[/_]android[/_.]', f) for f in files):
-    return ['android']
+  if all(re.search('(^|[/_])android[/_.]', f) for f in files):
+    return ['android_dbg']
 
   trybots = ['win_rel', 'linux_rel', 'mac_rel', 'linux_clang:compile',
-             'android']
+             'linux_chromeos', 'android_dbg', 'linux_asan', 'mac_asan']
 
   # Match things like path/aura/file.cc and path/file_aura.cc.
-  # Same for chromeos.
-  if any(re.search('[/_](aura|chromeos)', f) for f in files):
-    trybots += ['linux_chromeos', 'linux_chromeos_clang:compile']
+  # Same for ash and chromeos.
+  if any(re.search('[/_](ash|aura)', f) for f in files):
+    trybots += ['linux_chromeos', 'linux_chromeos_clang:compile', 'win_aura',
+                'linux_chromeos_asan']
+  else:
+    if any(re.search('[/_]chromeos', f) for f in files):
+      trybots += ['linux_chromeos', 'linux_chromeos_clang:compile',
+                  'linux_chromeos_asan']
 
   return trybots

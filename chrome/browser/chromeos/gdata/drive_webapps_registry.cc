@@ -4,9 +4,15 @@
 
 #include "chrome/browser/chromeos/gdata/drive_webapps_registry.h"
 
+#include <algorithm>
+#include <utility>
+#include <vector>
+
+#include "base/file_path.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "content/public/browser/browser_thread.h"
+#include "chrome/browser/google_apis/drive_api_parser.h"
 
 using content::BrowserThread;
 
@@ -33,6 +39,12 @@ std::string GetWebStoreIdFromUrl(const GURL& url) {
   return components[components.size() - 1];
 }
 
+// TODO(kochi): This is duplicate from gdata_wapi_parser.cc.
+bool SortBySize(const InstalledApp::IconList::value_type& a,
+                const InstalledApp::IconList::value_type& b) {
+  return a.first < b.first;
+}
+
 }  // namespace
 
 // DriveWebAppInfo struct implementation.
@@ -56,7 +68,7 @@ DriveWebAppInfo::DriveWebAppInfo(const std::string& app_id,
 DriveWebAppInfo::~DriveWebAppInfo() {
 }
 
-// GDataFileSystem::WebAppFileSelector struct implementation.
+// DriveFileSystem::WebAppFileSelector struct implementation.
 
 DriveWebAppsRegistry::WebAppFileSelector::WebAppFileSelector(
     const GURL& product_link,
@@ -106,9 +118,14 @@ void DriveWebAppsRegistry::GetWebAppsForFile(
   if (!mime_type.empty())
     FindWebAppsForSelector(mime_type, webapp_mimetypes_map_, &result_map);
 
+  // Insert found web apps into |apps|, but skip duplicate results.
+  std::set<std::string> inserted_app_ids;
   for (SelectorWebAppList::const_iterator it = result_map.begin();
        it != result_map.end(); ++it) {
-    apps->push_back(it->second);
+    if (inserted_app_ids.find(it->second->app_id) == inserted_app_ids.end()) {
+      inserted_app_ids.insert(it->second->app_id);
+      apps->push_back(it->second);
+    }
   }
 }
 
@@ -126,58 +143,142 @@ std::set<std::string> DriveWebAppsRegistry::GetExtensionsForWebStoreApp(
   return extensions;
 }
 
-void DriveWebAppsRegistry::UpdateFromFeed(AccountMetadataFeed* metadata) {
+void DriveWebAppsRegistry::UpdateFromFeed(
+    const AccountMetadataFeed& metadata) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   url_to_name_map_.clear();
   STLDeleteValues(&webapp_extension_map_);
   STLDeleteValues(&webapp_mimetypes_map_);
   for (ScopedVector<InstalledApp>::const_iterator it =
-           metadata->installed_apps().begin();
-       it != metadata->installed_apps().end(); ++it) {
-    const InstalledApp* app = *it;
-    GURL product_url = app->GetProductUrl();
+           metadata.installed_apps().begin();
+       it != metadata.installed_apps().end(); ++it) {
+    const InstalledApp& app = **it;
+    GURL product_url = app.GetProductUrl();
     if (product_url.is_empty())
       continue;
 
     InstalledApp::IconList app_icons =
-        app->GetIconsForCategory(AppIcon::APPLICATION);
+        app.GetIconsForCategory(AppIcon::ICON_APPLICATION);
     InstalledApp::IconList document_icons =
-        app->GetIconsForCategory(AppIcon::DOCUMENT);
+        app.GetIconsForCategory(AppIcon::ICON_DOCUMENT);
+
+    if (VLOG_IS_ON(1)) {
+      std::vector<std::string> mime_types;
+      for (size_t i = 0; app.primary_mimetypes().size(); ++i)
+        mime_types.push_back(*app.primary_mimetypes()[i]);
+      for (size_t i = 0; app.secondary_mimetypes().size(); ++i)
+        mime_types.push_back(*app.secondary_mimetypes()[i]);
+
+      std::vector<std::string> extensions;
+      for (size_t i = 0; app.primary_extensions().size(); ++i)
+        extensions.push_back(*app.primary_extensions()[i]);
+      for (size_t i = 0; app.secondary_extensions().size(); ++i)
+        extensions.push_back(*app.secondary_extensions()[i]);
+
+      VLOG(1) << "Adding app " << app.app_name()
+              << " to app registry.  mime_types: "
+              << JoinString(mime_types, ',') << " extensions: "
+              << JoinString(extensions, ',');
+    }
 
     url_to_name_map_.insert(
-        std::make_pair(product_url, app->app_name()));
+        std::make_pair(product_url, app.app_name()));
     AddAppSelectorList(product_url,
                        app_icons,
                        document_icons,
-                       app->object_type(),
-                       app->app_id(),
+                       app.object_type(),
+                       app.app_id(),
                        true,   // primary
-                       app->primary_mimetypes(),
+                       app.primary_mimetypes(),
                        &webapp_mimetypes_map_);
     AddAppSelectorList(product_url,
                        app_icons,
                        document_icons,
-                       app->object_type(),
-                       app->app_id(),
+                       app.object_type(),
+                       app.app_id(),
                        false,   // primary
-                       app->secondary_mimetypes(),
+                       app.secondary_mimetypes(),
                        &webapp_mimetypes_map_);
     AddAppSelectorList(product_url,
                        app_icons,
                        document_icons,
-                       app->object_type(),
-                       app->app_id(),
+                       app.object_type(),
+                       app.app_id(),
                        true,   // primary
-                       app->primary_extensions(),
+                       app.primary_extensions(),
                        &webapp_extension_map_);
     AddAppSelectorList(product_url,
                        app_icons,
                        document_icons,
-                       app->object_type(),
-                       app->app_id(),
+                       app.object_type(),
+                       app.app_id(),
                        false,   // primary
-                       app->secondary_extensions(),
+                       app.secondary_extensions(),
+                       &webapp_extension_map_);
+  }
+}
+
+void DriveWebAppsRegistry::UpdateFromApplicationList(const AppList& applist) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  url_to_name_map_.clear();
+  STLDeleteValues(&webapp_extension_map_);
+  STLDeleteValues(&webapp_mimetypes_map_);
+  for (size_t i = 0; i < applist.items().size(); ++i) {
+    const AppResource& app = *applist.items()[i];
+    if (app.product_url().is_empty())
+      continue;
+
+    InstalledApp::IconList app_icons;
+    InstalledApp::IconList document_icons;
+    for (size_t j = 0; j < app.icons().size(); ++j) {
+      const DriveAppIcon& icon = *app.icons()[j];
+      if (icon.icon_url().is_empty())
+        continue;
+      if (icon.category() == DriveAppIcon::APPLICATION)
+        app_icons.push_back(std::make_pair(icon.icon_side_length(),
+                                           icon.icon_url()));
+      if (icon.category() == DriveAppIcon::DOCUMENT)
+        document_icons.push_back(std::make_pair(icon.icon_side_length(),
+                                                icon.icon_url()));
+    }
+    std::sort(app_icons.begin(), app_icons.end(), SortBySize);
+    std::sort(document_icons.begin(), document_icons.end(), SortBySize);
+
+    url_to_name_map_.insert(
+        std::make_pair(app.product_url(), UTF8ToUTF16(app.name())));
+    AddAppSelectorList(app.product_url(),
+                       app_icons,
+                       document_icons,
+                       UTF8ToUTF16(app.object_type()),
+                       app.application_id(),
+                       true,   // primary
+                       app.primary_mimetypes(),
+                       &webapp_mimetypes_map_);
+    AddAppSelectorList(app.product_url(),
+                       app_icons,
+                       document_icons,
+                       UTF8ToUTF16(app.object_type()),
+                       app.application_id(),
+                       false,   // primary
+                       app.secondary_mimetypes(),
+                       &webapp_mimetypes_map_);
+    AddAppSelectorList(app.product_url(),
+                       app_icons,
+                       document_icons,
+                       UTF8ToUTF16(app.object_type()),
+                       app.application_id(),
+                       true,   // primary
+                       app.primary_file_extensions(),
+                       &webapp_extension_map_);
+    AddAppSelectorList(app.product_url(),
+                       app_icons,
+                       document_icons,
+                       UTF8ToUTF16(app.object_type()),
+                       app.application_id(),
+                       false,   // primary
+                       app.secondary_file_extensions(),
                        &webapp_extension_map_);
   }
 }

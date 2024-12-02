@@ -17,6 +17,7 @@
 #include "content/public/browser/browser_child_process_host_delegate.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_channel_handle.h"
+#include "net/base/tcp_listen_socket.h"
 
 class ChromeRenderMessageFilter;
 class CommandLine;
@@ -24,6 +25,10 @@ class ExtensionInfoMap;
 
 namespace content {
 class BrowserChildProcessHost;
+}
+
+namespace IPC {
+class ChannelProxy;
 }
 
 // Represents the browser side of the browser <--> NaCl communication
@@ -60,11 +65,24 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   bool Send(IPC::Message* msg);
 
  private:
+  friend class PluginListener;
+
   // Internal class that holds the nacl::Handle objecs so that
   // nacl_process_host.h doesn't include NaCl headers.  Needed since it's
   // included by src\content, which can't depend on the NaCl gyp file because it
   // depends on chrome.gyp (circular dependency).
   struct NaClInternal;
+
+  // PluginListener that forwards any messages from untrusted code that aren't
+  // handled by the PepperMessageFilter to us.
+  class PluginListener : public IPC::Listener {
+   public:
+    explicit PluginListener(NaClProcessHost* host);
+    virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+   private:
+    // Non-owning pointer so we can forward messages to the host.
+    NaClProcessHost* host_;
+  };
 
 #if defined(OS_WIN)
   // Create command line for launching loader under nacl-gdb.
@@ -73,6 +91,12 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
 #elif defined(OS_LINUX)
   bool LaunchNaClGdb(base::ProcessId pid);
   void OnNaClGdbAttached();
+#endif
+#if defined(OS_POSIX)
+  // Create bound TCP socket in the browser process so that the NaCl GDB debug
+  // stub can use it to accept incoming connections even when the Chrome sandbox
+  // is enabled.
+  SocketDescriptor GetDebugStubSocketHandle();
 #endif
   // Get path to manifest on local disk if possible.
   FilePath GetManifestPath();
@@ -113,7 +137,11 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
                                    IPC::Message* reply_msg);
 #endif
 
+  // Called when a PPAPI IPC channel has been created.
   void OnPpapiChannelCreated(const IPC::ChannelHandle& channel_handle);
+  // Called by PluginListener, so messages from the untrusted side of
+  // the IPC proxy can be handled.
+  bool OnUntrustedMessageForwarded(const IPC::Message& msg);
 
   GURL manifest_url_;
 
@@ -153,10 +181,16 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   scoped_ptr<content::BrowserChildProcessHost> process_;
 
   bool enable_exception_handling_;
+  bool enable_debug_stub_;
 
   bool off_the_record_;
 
   bool enable_ipc_proxy_;
+
+  // Channel proxy to terminate the NaCl-Browser PPAPI channel.
+  scoped_ptr<IPC::ChannelProxy> ipc_proxy_channel_;
+  // Plugin listener, to forward browser channel messages to us.
+  PluginListener ipc_plugin_listener_;
 
   DISALLOW_COPY_AND_ASSIGN(NaClProcessHost);
 };

@@ -15,18 +15,19 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/mock_cert_library.h"
 #include "chrome/browser/chromeos/cros/mock_cryptohome_library.h"
-#include "chrome/browser/chromeos/cryptohome/mock_async_method_caller.h"
 #include "chrome/browser/chromeos/login/mock_login_status_consumer.h"
 #include "chrome/browser/chromeos/login/mock_url_fetchers.h"
 #include "chrome/browser/chromeos/login/mock_user_manager.h"
 #include "chrome/browser/chromeos/login/test_attempt_state.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
 #include "chrome/browser/chromeos/settings/stub_cros_settings_provider.h"
-#include "chrome/common/net/gaia/mock_url_fetcher_factory.h"
 #include "chrome/test/base/testing_profile.h"
+#include "chromeos/cryptohome/mock_async_method_caller.h"
 #include "chromeos/dbus/mock_cryptohome_client.h"
 #include "chromeos/dbus/mock_dbus_thread_manager.h"
 #include "content/public/test/test_browser_thread.h"
+#include "google_apis/gaia/mock_url_fetcher_factory.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request_status.h"
@@ -34,13 +35,13 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
-using content::BrowserThread;
 using ::testing::AnyNumber;
 using ::testing::DoAll;
 using ::testing::Invoke;
 using ::testing::Return;
 using ::testing::SetArgPointee;
 using ::testing::_;
+using content::BrowserThread;
 
 namespace chromeos {
 
@@ -208,8 +209,10 @@ class ParallelAuthenticatorTest : public testing::Test {
   std::string password_;
   std::string hash_ascii_;
 
+  ScopedDeviceSettingsTestHelper device_settings_test_helper_;
+
   // Initializes / shuts down a stub CrosLibrary.
-  chromeos::ScopedStubCrosEnabler stub_cros_enabler_;
+  ScopedStubCrosEnabler stub_cros_enabler_;
 
   // Mocks, destroyed by CrosLibrary class.
   MockCertLibrary* mock_cert_library_;
@@ -317,6 +320,8 @@ TEST_F(ParallelAuthenticatorTest, ResolveOwnerNeededFailedMount) {
 
   MockDBusThreadManager* mock_dbus_thread_manager =
       new MockDBusThreadManager;
+  EXPECT_CALL(*mock_dbus_thread_manager, GetSystemBus())
+      .WillRepeatedly(Return(reinterpret_cast<dbus::Bus*>(NULL)));
   DBusThreadManager::InitializeForTesting(mock_dbus_thread_manager);
   EXPECT_CALL(*mock_dbus_thread_manager->mock_cryptohome_client(), Unmount(_))
       .WillOnce(DoAll(SetArgPointee<0>(true), Return(true)));
@@ -338,8 +343,8 @@ TEST_F(ParallelAuthenticatorTest, ResolveOwnerNeededFailedMount) {
 
   EXPECT_EQ(ParallelAuthenticator::CONTINUE,
             SetAndResolveState(auth_, state_.release()));
-  // Let the owner verification run on the FILE thread...
-  message_loop_.RunAllPending();
+  // Let the owner verification run.
+  device_settings_test_helper_.Flush();
   // and test that the mount has succeeded.
   state_.reset(new TestAttemptState(username_,
                                     password_,

@@ -123,7 +123,14 @@ void ChromeWebContentsViewDelegateViews::RestoreFocus() {
 }
 
 void ChromeWebContentsViewDelegateViews::ShowContextMenu(
-    const content::ContextMenuParams& params) {
+    const content::ContextMenuParams& params,
+    content::ContextMenuSourceType type) {
+  // Menus need a Widget to work. If we're not the active tab we won't
+  // necessarily be in a widget.
+  views::Widget* top_level_widget = GetTopLevelWidget();
+  if (!top_level_widget)
+    return;
+
   context_menu_.reset(
       RenderViewContextMenuViews::Create(web_contents_, params));
   context_menu_->Init();
@@ -141,8 +148,10 @@ void ChromeWebContentsViewDelegateViews::ShowContextMenu(
   aura::RootWindow* root_window = web_contents_window->GetRootWindow();
   aura::client::ScreenPositionClient* screen_position_client =
       aura::client::GetScreenPositionClient(root_window);
-  screen_position_client->ConvertPointToScreen(web_contents_window,
-                                               &screen_point);
+  if (screen_position_client) {
+    screen_position_client->ConvertPointToScreen(web_contents_window,
+                                                 &screen_point);
+  }
 #else
   POINT temp = screen_point.ToPOINT();
   ClientToScreen(web_contents_->GetView()->GetNativeView(), &temp);
@@ -152,7 +161,7 @@ void ChromeWebContentsViewDelegateViews::ShowContextMenu(
   // Enable recursive tasks on the message loop so we can get updates while
   // the context menu is being displayed.
   MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
-  context_menu_->RunMenuAt(GetTopLevelWidget(), screen_point);
+  context_menu_->RunMenuAt(top_level_widget, screen_point, type);
 }
 
 void ChromeWebContentsViewDelegateViews::SizeChanged(const gfx::Size& size) {

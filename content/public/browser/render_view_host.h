@@ -217,8 +217,6 @@ class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
   // RenderView. See BindingsPolicy for details.
   virtual int GetEnabledBindings() const = 0;
 
-  virtual SessionStorageNamespace* GetSessionStorageNamespace() = 0;
-
   virtual SiteInstance* GetSiteInstance() const = 0;
 
   // Requests the renderer to evaluate an xpath to a frame and insert css
@@ -267,6 +265,16 @@ class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
   // Passes a list of Webkit preferences to the renderer.
   virtual void UpdateWebkitPreferences(
       const webkit_glue::WebPreferences& prefs) = 0;
+
+#if defined(OS_ANDROID)
+  // Selects and zooms to the find result nearest to the point (x,y)
+  // defined in find-in-page coordinates.
+  virtual void ActivateNearestFindResult(int request_id, float x, float y) = 0;
+
+  // Asks the renderer to send the rects of the current find matches.
+  virtual void RequestFindMatchRects(int current_version) = 0;
+#endif
+
 };
 
 }  // namespace content

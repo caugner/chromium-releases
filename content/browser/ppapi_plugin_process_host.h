@@ -12,6 +12,7 @@
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "content/browser/renderer_host/pepper/browser_ppapi_host_impl.h"
 #include "content/browser/renderer_host/pepper/pepper_file_message_filter.h"
 #include "content/browser/renderer_host/pepper/pepper_message_filter.h"
 #include "content/public/browser/browser_child_process_host_delegate.h"
@@ -79,6 +80,19 @@ class PpapiPluginProcessHost : public content::BrowserChildProcessHostDelegate,
   static PpapiPluginProcessHost* CreateBrokerHost(
       const content::PepperPluginInfo& info);
 
+  // Notification that a PP_Instance has been created for the given
+  // RenderView/Process pair for the given plugin. This is necessary so that
+  // when the plugin calls us with a PP_Instance we can find the RenderView
+  // associated with it without trusting the plugin.
+  static void DidCreateOutOfProcessInstance(int plugin_process_id,
+                                            int32 pp_instance,
+                                            int render_process_id,
+                                            int render_view_id);
+
+  // The opposite of DIdCreate... above.
+  static void DidDeleteOutOfProcessInstance(int plugin_process_id,
+                                            int32 pp_instance);
+
   // IPC::Sender implementation:
   virtual bool Send(IPC::Message* message) OVERRIDE;
 
@@ -123,6 +137,8 @@ class PpapiPluginProcessHost : public content::BrowserChildProcessHostDelegate,
 
   // Handles most requests from the plugin. May be NULL.
   scoped_refptr<PepperMessageFilter> filter_;
+
+  scoped_refptr<content::BrowserPpapiHostImpl> host_impl_;
 
   // Handles filesystem requests from flash plugins. May be NULL.
   scoped_refptr<PepperFileMessageFilter> file_filter_;

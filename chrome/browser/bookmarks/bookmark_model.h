@@ -16,7 +16,7 @@
 #include "base/string16.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
-#include "chrome/browser/bookmarks/bookmark_service.h"
+#include "chrome/browser/api/bookmarks/bookmark_service.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/history/history.h"
@@ -238,19 +238,17 @@ class BookmarkModel : public content::NotificationObserver,
   void AddObserver(BookmarkModelObserver* observer);
   void RemoveObserver(BookmarkModelObserver* observer);
 
-  // Notifies the observers that that an extensive set of changes is about to
-  // happen, such as during import or sync, so they can delay any expensive
-  // UI updates until it's finished.
+  // Notifies the observers that an extensive set of changes is about to happen,
+  // such as during import or sync, so they can delay any expensive UI updates
+  // until it's finished.
   void BeginExtensiveChanges();
   void EndExtensiveChanges();
 
   // Returns true if this bookmark model is currently in a mode where extensive
   // changes might happen, such as for import and sync. This is helpful for
-  // observers that are created after the mode has started, and
-  // want to check state during their own initializer, such as the NTP.
-  bool IsDoingExtensiveChanges() const {
-    return extensive_changes_ > 0;
-  }
+  // observers that are created after the mode has started, and want to check
+  // state during their own initializer, such as the NTP.
+  bool IsDoingExtensiveChanges() const { return extensive_changes_ > 0; }
 
   // Removes the node at the given |index| from |parent|. Removing a folder node
   // recursively removes all nodes. Observers are notified immediately.
@@ -414,8 +412,9 @@ class BookmarkModel : public content::NotificationObserver,
 
   // Notification that a favicon has finished loading. If we can decode the
   // favicon, FaviconLoaded is invoked.
-  void OnFaviconDataAvailable(FaviconService::Handle handle,
-                              history::FaviconData favicon);
+  void OnFaviconDataAvailable(
+      FaviconService::Handle handle,
+      const history::FaviconImageResult& image_result);
 
   // Invoked from the node to load the favicon. Requests the favicon from the
   // favicon service.

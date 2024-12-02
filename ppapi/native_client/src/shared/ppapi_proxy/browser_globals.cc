@@ -321,6 +321,20 @@ const PPB_NetAddress_Private* PPBNetAddressPrivateInterface() {
   return ppb;
 }
 
+const PPB_NetworkList_Private* PPBNetworkListPrivateInterface() {
+  static const PPB_NetworkList_Private* ppb =
+      static_cast<const PPB_NetworkList_Private*>(
+          GetBrowserInterfaceSafe(PPB_NETWORKLIST_PRIVATE_INTERFACE));
+  return ppb;
+}
+
+const PPB_NetworkMonitor_Private* PPBNetworkMonitorPrivateInterface() {
+  static const PPB_NetworkMonitor_Private* ppb =
+      static_cast<const PPB_NetworkMonitor_Private*>(
+          GetBrowserInterfaceSafe(PPB_NETWORKMONITOR_PRIVATE_INTERFACE));
+  return ppb;
+}
+
 const PPB_URLLoader* PPBURLLoaderInterface() {
   static const PPB_URLLoader* ppb =
       static_cast<const PPB_URLLoader*>(
@@ -426,13 +440,6 @@ const PPB_MouseLock* PPBMouseLockInterface() {
   return ppb;
 }
 
-const PPB_Scrollbar_Dev* PPBScrollbarInterface() {
-  static const PPB_Scrollbar_Dev* ppb =
-      static_cast<const PPB_Scrollbar_Dev*>(
-          GetBrowserInterfaceSafe(PPB_SCROLLBAR_DEV_INTERFACE));
-  return ppb;
-}
-
 const PPB_Testing_Dev* PPBTestingInterface() {
   static const PPB_Testing_Dev* ppb =
       static_cast<const PPB_Testing_Dev*>(
@@ -454,13 +461,6 @@ const PPB_WebSocket* PPBWebSocketInterface() {
   return ppb;
 }
 
-const PPB_Widget_Dev* PPBWidgetInterface() {
-  static const PPB_Widget_Dev* ppb =
-      static_cast<const PPB_Widget_Dev*>(
-          GetBrowserInterfaceSafe(PPB_WIDGET_DEV_INTERFACE));
-  return ppb;
-}
-
 const PPB_Zoom_Dev* PPBZoomInterface() {
   static const PPB_Zoom_Dev* ppb =
       static_cast<const PPB_Zoom_Dev*>(
@@ -469,13 +469,6 @@ const PPB_Zoom_Dev* PPBZoomInterface() {
 }
 
 // Private interfaces.
-const PPB_PDF* PPBPDFInterface() {
-  static const PPB_PDF* ppb =
-      static_cast<const PPB_PDF*>(
-          GetBrowserInterfaceSafe(PPB_PDF_INTERFACE));
-  return ppb;
-}
-
 const PPB_TCPServerSocket_Private* PPBTCPServerSocketPrivateInterface() {
   static const PPB_TCPServerSocket_Private* ppb =
       static_cast<const PPB_TCPServerSocket_Private*>(

@@ -34,6 +34,7 @@ class ResourceCreationAPI;
 
 namespace proxy {
 
+class GamepadResource;
 class ResourceMessageReplyParams;
 
 // Used to keep track of per-instance data.
@@ -47,6 +48,16 @@ struct InstanceData {
 
   // When non-NULL, indicates the callback to execute when mouse lock is lost.
   scoped_refptr<TrackedCallback> mouse_lock_callback;
+
+  // Lazily created the first time the plugin requests gamepad data.
+  scoped_refptr<GamepadResource> gamepad_resource;
+
+  // Calls to |RequestSurroundingText()| are done by posted tasks. Track whether
+  // a) a task is pending, to avoid redundant calls, and b) whether we should
+  // actually call |RequestSurroundingText()|, to avoid stale calls (i.e.,
+  // calling when we shouldn't).
+  bool is_request_surrounding_text_pending;
+  bool should_do_request_surrounding_text;
 };
 
 class PPAPI_PROXY_EXPORT PluginDispatcher
@@ -135,6 +146,13 @@ class PPAPI_PROXY_EXPORT PluginDispatcher
 
   uint32 plugin_dispatcher_id() const { return plugin_dispatcher_id_; }
   bool incognito() const { return incognito_; }
+
+  // Dispatches the given resource message to the appropriate resource in the
+  // plugin process. This should be wired to the various channels that messages
+  // come in from various other processes.
+  static void DispatchResourceReply(
+      const ppapi::proxy::ResourceMessageReplyParams& reply_params,
+      const IPC::Message& nested_msg);
 
  private:
   friend class PluginDispatcherTest;

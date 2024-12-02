@@ -39,8 +39,7 @@ namespace internal {
 //             NativeWidget implementations. This file should not be included
 //             in code that does not fall into one of these use cases.
 //
-class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
-                                         public internal::InputMethodDelegate {
+class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget {
  public:
   virtual ~NativeWidgetPrivate() {}
 
@@ -77,7 +76,6 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
   // the NativeWidget wants no special NonClientFrameView.
   virtual NonClientFrameView* CreateNonClientFrameView() = 0;
 
-  virtual void UpdateFrameAfterFrameChange() = 0;
   virtual bool ShouldUseNativeFrame() const = 0;
   virtual void FrameTypeChanged() = 0;
 
@@ -136,6 +134,9 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
   // TODO(suzhe): rename to GetInputMethod() when NativeWidget implementation
   // class doesn't inherit Widget anymore.
   virtual InputMethod* CreateInputMethod() = 0;
+
+  // Returns the InputMethodDelegate for this native widget.
+  virtual InputMethodDelegate* GetInputMethodDelegate() = 0;
 
 
   // Centers the window and sizes it to the specified size.
@@ -210,7 +211,7 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
   virtual void FocusNativeView(gfx::NativeView native_view) = 0;
   virtual gfx::Rect GetWorkAreaBoundsInScreen() const = 0;
   virtual void SetInactiveRenderingDisabled(bool value) = 0;
-  virtual Widget::MoveLoopResult RunMoveLoop() = 0;
+  virtual Widget::MoveLoopResult RunMoveLoop(const gfx::Point& drag_offset) = 0;
   virtual void EndMoveLoop() = 0;
   virtual void SetVisibilityChangedAnimationsEnabled(bool value) = 0;
 

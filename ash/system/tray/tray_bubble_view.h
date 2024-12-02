@@ -9,7 +9,7 @@
 #include "ui/aura/event_filter.h"
 #include "ui/views/bubble/bubble_delegate.h"
 
-namespace aura {
+namespace ui {
 class LocatedEvent;
 }
 
@@ -45,21 +45,23 @@ class TrayBubbleView : public views::BubbleDelegateView {
     virtual void OnMouseEnteredView() = 0;
     virtual void OnMouseExitedView() = 0;
     virtual void OnClickedOutsideView() = 0;
+    virtual string16 GetAccessibleName() = 0;
 
     // Overridden from aura::EventFilter.
     virtual bool PreHandleKeyEvent(aura::Window* target,
-                                   aura::KeyEvent* event) OVERRIDE;
+                                   ui::KeyEvent* event) OVERRIDE;
     virtual bool PreHandleMouseEvent(aura::Window* target,
-                                     aura::MouseEvent* event) OVERRIDE;
+                                     ui::MouseEvent* event) OVERRIDE;
     virtual ui::TouchStatus PreHandleTouchEvent(
         aura::Window* target,
-        aura::TouchEvent* event) OVERRIDE;
-    virtual ui::GestureStatus PreHandleGestureEvent(
+        ui::TouchEvent* event) OVERRIDE;
+    virtual ui::EventResult PreHandleGestureEvent(
         aura::Window* target,
-        aura::GestureEvent* event) OVERRIDE;
+        ui::GestureEvent* event) OVERRIDE;
 
    private:
-    void ProcessLocatedEvent(const aura::LocatedEvent& event);
+    void ProcessLocatedEvent(aura::Window* target,
+                             const ui::LocatedEvent& event);
 
     views::Widget* widget_;
     views::View* tray_view_;
@@ -97,6 +99,9 @@ class TrayBubbleView : public views::BubbleDelegateView {
   // Called when the host is destroyed.
   void reset_host() { host_ = NULL; }
 
+  void set_gesture_dragging(bool dragging) { is_gesture_dragging_ = dragging; }
+  bool is_gesture_dragging() const { return is_gesture_dragging_; }
+
   // Overridden from views::WidgetDelegate.
   virtual bool CanActivate() const OVERRIDE;
   virtual views::NonClientFrameView* CreateNonClientFrameView(
@@ -107,8 +112,8 @@ class TrayBubbleView : public views::BubbleDelegateView {
 
   // Overridden from views::View.
   virtual gfx::Size GetPreferredSize() OVERRIDE;
-  virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
  protected:
@@ -130,6 +135,7 @@ class TrayBubbleView : public views::BubbleDelegateView {
  private:
   InitParams params_;
   Host* host_;
+  bool is_gesture_dragging_;
 
   DISALLOW_COPY_AND_ASSIGN(TrayBubbleView);
 };

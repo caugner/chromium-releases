@@ -4,19 +4,24 @@
 
 #include "chrome/browser/chromeos/gdata/gdata_wapi_feed_loader.h"
 
+#include <set>
+
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/format_macros.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/stringprintf.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "base/values.h"
+#include "chrome/browser/chromeos/gdata/drive_cache.h"
+#include "chrome/browser/chromeos/gdata/drive_file_system_util.h"
+#include "chrome/browser/chromeos/gdata/drive_service_interface.h"
 #include "chrome/browser/chromeos/gdata/drive_webapps_registry.h"
-#include "chrome/browser/chromeos/gdata/gdata_cache.h"
-#include "chrome/browser/chromeos/gdata/gdata_documents_service.h"
-#include "chrome/browser/chromeos/gdata/gdata_util.h"
 #include "chrome/browser/chromeos/gdata/gdata_wapi_feed_processor.h"
+#include "chrome/browser/google_apis/drive_api_parser.h"
+#include "chrome/browser/google_apis/gdata_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -62,16 +67,16 @@ void LoadProtoOnBlockingPool(const FilePath& path,
                              LoadRootFeedParams* params) {
   base::PlatformFileInfo info;
   if (!file_util::GetFileInfo(path, &info)) {
-    params->load_error = GDATA_FILE_ERROR_NOT_FOUND;
+    params->load_error = DRIVE_FILE_ERROR_NOT_FOUND;
     return;
   }
   params->last_modified = info.last_modified;
   if (!file_util::ReadFileToString(path, &params->proto)) {
     LOG(WARNING) << "Proto file not found at " << path.value();
-    params->load_error = GDATA_FILE_ERROR_NOT_FOUND;
+    params->load_error = DRIVE_FILE_ERROR_NOT_FOUND;
     return;
   }
-  params->load_error = GDATA_FILE_OK;
+  params->load_error = DRIVE_FILE_OK;
 }
 
 // Saves json file content content in |feed| to |file_pathname| on blocking
@@ -129,42 +134,59 @@ void SaveProtoOnBlockingPool(const FilePath& path,
 }
 
 bool UseLevelDB() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kUseLevelDBForGData);
+  // TODO(achuith): Re-enable this.
+  return false;
+}
+
+// Run params->feed_load_callback with |error|.
+void RunFeedLoadCallback(scoped_ptr<LoadFeedParams> params,
+                         DriveFileError error) {
+  // Need a reference before calling Pass().
+  const LoadDocumentFeedCallback& feed_load_callback =
+      params->feed_load_callback;
+  feed_load_callback.Run(params.Pass(), error);
+}
+
+// Parses a DocumentFeed from |data|.
+void ParseFeedOnBlockingPool(
+    scoped_ptr<base::Value> data,
+    scoped_ptr<DocumentFeed>* out_current_feed) {
+  DCHECK(out_current_feed);
+  out_current_feed->reset(DocumentFeed::ExtractAndParse(*data).release());
 }
 
 }  // namespace
 
-GetDocumentsParams::GetDocumentsParams(
-    int start_changestamp,
-    int root_feed_changestamp,
-    std::vector<DocumentFeed*>* feed_list,
-    bool should_fetch_multiple_feeds,
-    const FilePath& search_file_path,
-    const std::string& search_query,
-    const std::string& directory_resource_id,
-    const FindEntryCallback& callback,
-    GetDocumentsUiState* ui_state)
-    : start_changestamp(start_changestamp),
-      root_feed_changestamp(root_feed_changestamp),
-      feed_list(feed_list),
-      should_fetch_multiple_feeds(should_fetch_multiple_feeds),
-      search_file_path(search_file_path),
-      search_query(search_query),
-      directory_resource_id(directory_resource_id),
-      callback(callback),
-      ui_state(ui_state) {
+LoadFeedParams::LoadFeedParams(
+    ContentOrigin initial_origin,
+    const LoadDocumentFeedCallback& feed_load_callback)
+    : initial_origin(initial_origin),
+      start_changestamp(0),
+      root_feed_changestamp(0),
+      feed_load_callback(feed_load_callback) {
+  DCHECK(!feed_load_callback.is_null());
 }
 
-GetDocumentsParams::~GetDocumentsParams() {
-  STLDeleteElements(feed_list.get());
+LoadFeedParams::~LoadFeedParams() {
+}
+
+LoadRootFeedParams::LoadRootFeedParams(
+    bool should_load_from_server,
+    const FileOperationCallback& callback)
+    : should_load_from_server(should_load_from_server),
+      load_error(DRIVE_FILE_OK),
+      load_start_time(base::Time::Now()),
+      callback(callback) {
+}
+
+LoadRootFeedParams::~LoadRootFeedParams() {
 }
 
 // Defines set of parameters sent to callback OnNotifyDocumentFeedFetched().
 // This is a trick to update the number of fetched documents frequently on
 // UI. Due to performance reason, we need to fetch a number of files at
 // a time. However, it'll take long time, and a user has no way to know
-// the current update state. In order to make users confortable,
+// the current update state. In order to make users comfortable,
 // we increment the number of fetched documents with more frequent but smaller
 // steps than actual fetching.
 struct GetDocumentsUiState {
@@ -191,17 +213,17 @@ struct GetDocumentsUiState {
 };
 
 GDataWapiFeedLoader::GDataWapiFeedLoader(
-    GDataDirectoryService* directory_service,
-    DocumentsServiceInterface* documents_service,
+    DriveResourceMetadata* resource_metadata,
+    DriveServiceInterface* drive_service,
     DriveWebAppsRegistryInterface* webapps_registry,
-    GDataCache* cache,
+    DriveCache* cache,
     scoped_refptr<base::SequencedTaskRunner> blocking_task_runner)
-    : directory_service_(directory_service),
-      documents_service_(documents_service),
+    : resource_metadata_(resource_metadata),
+      drive_service_(drive_service),
       webapps_registry_(webapps_registry),
       cache_(cache),
       blocking_task_runner_(blocking_task_runner),
-      weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
 }
 
 GDataWapiFeedLoader::~GDataWapiFeedLoader() {
@@ -219,9 +241,8 @@ void GDataWapiFeedLoader::RemoveObserver(Observer* observer) {
 
 void GDataWapiFeedLoader::ReloadFromServerIfNeeded(
     ContentOrigin initial_origin,
-    int local_changestamp,
-    const FilePath& search_file_path,
-    const FindEntryCallback& callback) {
+    int64 local_changestamp,
+    const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   DVLOG(1) << "ReloadFeedFromServerIfNeeded local_changestamp="
@@ -229,37 +250,49 @@ void GDataWapiFeedLoader::ReloadFromServerIfNeeded(
 
   // First fetch the latest changestamp to see if there were any new changes
   // there at all.
-  documents_service_->GetAccountMetadata(
+  if (gdata::util::IsDriveV2ApiEnabled()) {
+    drive_service_->GetAccountMetadata(
+        base::Bind(&GDataWapiFeedLoader::OnGetAboutResource,
+                   weak_ptr_factory_.GetWeakPtr(),
+                   initial_origin,
+                   local_changestamp,
+                   callback));
+    // Drive v2 needs a separate application list fetch operation.
+    // TODO(kochi): Application list rarely changes and is not necessarily
+    // refreshed as often as files.
+    drive_service_->GetApplicationInfo(
+        base::Bind(&GDataWapiFeedLoader::OnGetApplicationList,
+                   weak_ptr_factory_.GetWeakPtr()));
+    return;
+  }
+
+  drive_service_->GetAccountMetadata(
       base::Bind(&GDataWapiFeedLoader::OnGetAccountMetadata,
                  weak_ptr_factory_.GetWeakPtr(),
                  initial_origin,
                  local_changestamp,
-                 search_file_path,
                  callback));
 }
 
 void GDataWapiFeedLoader::OnGetAccountMetadata(
     ContentOrigin initial_origin,
-    int local_changestamp,
-    const FilePath& search_file_path,
-    const FindEntryCallback& callback,
+    int64 local_changestamp,
+    const FileOperationCallback& callback,
     GDataErrorCode status,
     scoped_ptr<base::Value> feed_data) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  GDataFileError error = util::GDataToGDataFileError(status);
-  if (error != GDATA_FILE_OK) {
+  scoped_ptr<LoadFeedParams> params(new LoadFeedParams(
+      initial_origin,
+      base::Bind(&GDataWapiFeedLoader::OnFeedFromServerLoaded,
+                 weak_ptr_factory_.GetWeakPtr())));
+  params->start_changestamp = local_changestamp + 1;
+  params->load_finished_callback = callback;
+
+  DriveFileError error = util::GDataToDriveFileError(status);
+  if (error != DRIVE_FILE_OK) {
     // Get changes starting from the next changestamp from what we have locally.
-    LoadFromServer(initial_origin,
-                   local_changestamp + 1, 0,
-                   true,  /* should_fetch_multiple_feeds */
-                   search_file_path,
-                   std::string() /* no search query */,
-                   GURL(), /* feed not explicitly set */
-                   std::string() /* no directory resource ID */,
-                   callback,
-                   base::Bind(&GDataWapiFeedLoader::OnFeedFromServerLoaded,
-                              weak_ptr_factory_.GetWeakPtr()));
+    LoadFromServer(params.Pass());
     return;
   }
 
@@ -269,7 +302,7 @@ void GDataWapiFeedLoader::OnGetAccountMetadata(
 #ifndef NDEBUG
     // Save account metadata feed for analysis.
     const FilePath path =
-        cache_->GetCacheDirectoryPath(GDataCache::CACHE_TYPE_META).Append(
+        cache_->GetCacheDirectoryPath(DriveCache::CACHE_TYPE_META).Append(
             kAccountMetadataFile);
     util::PostBlockingPoolSequencedTask(
         FROM_HERE,
@@ -280,20 +313,11 @@ void GDataWapiFeedLoader::OnGetAccountMetadata(
   }
 
   if (!account_metadata.get()) {
-    LoadFromServer(initial_origin,
-                   local_changestamp + 1, 0,
-                   true,  /* should_fetch_multiple_feeds */
-                   search_file_path,
-                   std::string() /* no search query */,
-                   GURL(), /* feed not explicitly set */
-                   std::string() /* no directory resource ID */,
-                   callback,
-                   base::Bind(&GDataWapiFeedLoader::OnFeedFromServerLoaded,
-                              weak_ptr_factory_.GetWeakPtr()));
+    LoadFromServer(params.Pass());
     return;
   }
 
-  webapps_registry_->UpdateFromFeed(account_metadata.get());
+  webapps_registry_->UpdateFromFeed(*account_metadata.get());
 
   bool changes_detected = true;
   if (local_changestamp >= account_metadata->largest_changestamp()) {
@@ -305,172 +329,251 @@ void GDataWapiFeedLoader::OnGetAccountMetadata(
     }
     // If our cache holds the latest state from the server, change the
     // state to FROM_SERVER.
-    directory_service_->set_origin(
+    resource_metadata_->set_origin(
         initial_origin == FROM_CACHE ? FROM_SERVER : initial_origin);
     changes_detected = false;
   }
 
-  // No changes detected, continue with search as planned.
+  // No changes detected, tell the client that the loading was successful.
   if (!changes_detected) {
-    if (!callback.is_null()) {
-      directory_service_->FindEntryByPathAndRunSync(search_file_path,
-                                                    callback);
-    }
+    if (!callback.is_null())
+      callback.Run(DRIVE_FILE_OK);
     return;
   }
 
   // Load changes from the server.
-  LoadFromServer(initial_origin,
-                 local_changestamp > 0 ? local_changestamp + 1 : 0,
-                 account_metadata->largest_changestamp(),
-                 true,  /* should_fetch_multiple_feeds */
-                 search_file_path,
-                 std::string() /* no search query */,
-                 GURL(), /* feed not explicitly set */
-                 std::string() /* no directory resource ID */,
-                 callback,
-                 base::Bind(&GDataWapiFeedLoader::OnFeedFromServerLoaded,
-                            weak_ptr_factory_.GetWeakPtr()));
+  params->start_changestamp = local_changestamp > 0 ? local_changestamp + 1 : 0;
+  params->root_feed_changestamp = account_metadata->largest_changestamp();
+  LoadFromServer(params.Pass());
 }
 
-void GDataWapiFeedLoader::LoadFromServer(
+void GDataWapiFeedLoader::OnGetAboutResource(
     ContentOrigin initial_origin,
-    int start_changestamp,
-    int root_feed_changestamp,
-    bool should_fetch_multiple_feeds,
-    const FilePath& search_file_path,
-    const std::string& search_query,
-    const GURL& feed_to_load,
-    const std::string& directory_resource_id,
-    const FindEntryCallback& entry_found_callback,
-    const LoadDocumentFeedCallback& feed_load_callback) {
+    int64 local_changestamp,
+    const FileOperationCallback& callback,
+    GDataErrorCode status,
+    scoped_ptr<base::Value> feed_data) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  // |feed_list| will contain the list of all collected feed updates that
-  // we will receive through calls of DocumentsService::GetDocuments().
-  scoped_ptr<std::vector<DocumentFeed*> > feed_list(
-      new std::vector<DocumentFeed*>);
-  const base::TimeTicks start_time = base::TimeTicks::Now();
-  documents_service_->GetDocuments(
-      feed_to_load,
-      start_changestamp,
-      search_query,
-      directory_resource_id,
-      base::Bind(&GDataWapiFeedLoader::OnGetDocuments,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 initial_origin,
-                 feed_load_callback,
-                 base::Owned(new GetDocumentsParams(start_changestamp,
-                                                    root_feed_changestamp,
-                                                    feed_list.release(),
-                                                    should_fetch_multiple_feeds,
-                                                    search_file_path,
-                                                    search_query,
-                                                    directory_resource_id,
-                                                    entry_found_callback,
-                                                    NULL)),
-                 start_time));
-}
+  scoped_ptr<LoadFeedParams> params(new LoadFeedParams(
+      initial_origin,
+      base::Bind(&GDataWapiFeedLoader::OnFeedFromServerLoaded,
+                 weak_ptr_factory_.GetWeakPtr())));
+  params->load_finished_callback = callback;
 
-void GDataWapiFeedLoader::OnFeedFromServerLoaded(GetDocumentsParams* params,
-                                                 GDataFileError error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  if (error != GDATA_FILE_OK) {
-    if (!params->callback.is_null())
-      params->callback.Run(error, NULL);
+  DriveFileError error = util::GDataToDriveFileError(status);
+  if (error != DRIVE_FILE_OK) {
+    // Get changes starting from the next changestamp from what we have locally.
+    LoadFromServer(params.Pass());
     return;
   }
 
-  error = UpdateFromFeed(*params->feed_list,
+  scoped_ptr<AboutResource> about_resource;
+  if (feed_data.get())
+    about_resource = AboutResource::CreateFrom(*feed_data);
+
+  if (!about_resource.get()) {
+    LoadFromServer(params.Pass());
+    return;
+  }
+
+  bool changes_detected = true;
+  int64 largest_changestamp = about_resource->largest_change_id();
+  resource_metadata_->InitializeRootEntry(about_resource->root_folder_id());
+
+  if (local_changestamp >= largest_changestamp) {
+    if (local_changestamp > largest_changestamp) {
+      LOG(WARNING) << "Cached client feed is fresher than server, client = "
+                   << local_changestamp
+                   << ", server = "
+                   << largest_changestamp;
+    }
+    // If our cache holds the latest state from the server, change the
+    // state to FROM_SERVER.
+    resource_metadata_->set_origin(
+        initial_origin == FROM_CACHE ? FROM_SERVER : initial_origin);
+    changes_detected = false;
+  }
+
+  // No changes detected, tell the client that the loading was successful.
+  if (!changes_detected) {
+    if (!callback.is_null())
+      callback.Run(DRIVE_FILE_OK);
+    return;
+  }
+
+  // Load changes from the server.
+  params->start_changestamp = local_changestamp > 0 ? local_changestamp + 1 : 0;
+  params->root_feed_changestamp = largest_changestamp;
+  LoadFromServer(params.Pass());
+}
+
+void GDataWapiFeedLoader::OnGetApplicationList(
+    GDataErrorCode status,
+    scoped_ptr<base::Value> json) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  DriveFileError error = util::GDataToDriveFileError(status);
+  if (error != DRIVE_FILE_OK)
+    return;
+
+  if (json.get()) {
+    scoped_ptr<AppList> applist(AppList::CreateFrom(*json));
+    if (applist.get()) {
+      VLOG(1) << "applist get success";
+      webapps_registry_->UpdateFromApplicationList(*applist.get());
+    }
+  }
+}
+
+void GDataWapiFeedLoader::LoadFromServer(scoped_ptr<LoadFeedParams> params) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  const base::TimeTicks start_time = base::TimeTicks::Now();
+
+  // base::Passed() may get evaluated first, so get a pointer to params.
+  LoadFeedParams* params_ptr = params.get();
+  if (gdata::util::IsDriveV2ApiEnabled()) {
+    drive_service_->GetDocuments(
+        params_ptr->feed_to_load,
+        params_ptr->start_changestamp,
+        std::string(),  // No search query.
+        std::string(),  // No directory resource ID.
+        base::Bind(&GDataWapiFeedLoader::OnGetChangelist,
+                   weak_ptr_factory_.GetWeakPtr(),
+                   base::Passed(&params),
+                   start_time));
+  } else {
+    drive_service_->GetDocuments(
+        params_ptr->feed_to_load,
+        params_ptr->start_changestamp,
+        params_ptr->search_query,
+        params_ptr->directory_resource_id,
+        base::Bind(&GDataWapiFeedLoader::OnGetDocuments,
+                   weak_ptr_factory_.GetWeakPtr(),
+                   base::Passed(&params),
+                   start_time));
+  }
+}
+
+void GDataWapiFeedLoader::LoadDirectoryFromServer(
+    ContentOrigin initial_origin,
+    const std::string& directory_resource_id,
+    const LoadDocumentFeedCallback& feed_load_callback) {
+  scoped_ptr<LoadFeedParams> params(new LoadFeedParams(
+      initial_origin, feed_load_callback));
+  params->directory_resource_id = directory_resource_id;
+  LoadFromServer(params.Pass());
+}
+
+void GDataWapiFeedLoader::SearchFromServer(
+    ContentOrigin initial_origin,
+    const std::string& search_query,
+    const GURL& next_feed,
+    const LoadDocumentFeedCallback& feed_load_callback) {
+  DCHECK(!feed_load_callback.is_null());
+
+  scoped_ptr<LoadFeedParams> params(new LoadFeedParams(
+      initial_origin, feed_load_callback));
+  params->search_query = search_query;
+  params->feed_to_load = next_feed;
+  LoadFromServer(params.Pass());
+}
+
+void GDataWapiFeedLoader::OnFeedFromServerLoaded(
+    scoped_ptr<LoadFeedParams> params,
+    DriveFileError error) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (error != DRIVE_FILE_OK) {
+    if (!params->load_finished_callback.is_null())
+      params->load_finished_callback.Run(error);
+    return;
+  }
+
+  error = UpdateFromFeed(params->feed_list,
                          params->start_changestamp,
                          params->root_feed_changestamp);
 
-  if (error != GDATA_FILE_OK) {
-    if (!params->callback.is_null())
-      params->callback.Run(error, NULL);
-
+  if (error != DRIVE_FILE_OK) {
+    if (!params->load_finished_callback.is_null())
+      params->load_finished_callback.Run(error);
     return;
   }
 
   // Save file system metadata to disk.
   SaveFileSystem();
 
-  // If we had someone to report this too, then this retrieval was done in a
-  // context of search... so continue search.
-  if (!params->callback.is_null()) {
-    directory_service_->FindEntryByPathAndRunSync(params->search_file_path,
-                                                  params->callback);
-  }
+  // Tell the client that the loading was successful.
+  if (!params->load_finished_callback.is_null())
+    params->load_finished_callback.Run(DRIVE_FILE_OK);
 
   FOR_EACH_OBSERVER(Observer, observers_, OnFeedFromServerLoaded());
 }
 
 void GDataWapiFeedLoader::OnGetDocuments(
-    ContentOrigin initial_origin,
-    const LoadDocumentFeedCallback& callback,
-    GetDocumentsParams* params,
+    scoped_ptr<LoadFeedParams> params,
     base::TimeTicks start_time,
     GDataErrorCode status,
     scoped_ptr<base::Value> data) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (params->feed_list->empty()) {
-    UMA_HISTOGRAM_TIMES("Gdata.InitialFeedLoadTime",
+  if (params->feed_list.empty()) {
+    UMA_HISTOGRAM_TIMES("Drive.InitialFeedLoadTime",
                         base::TimeTicks::Now() - start_time);
   }
 
-  GDataFileError error = util::GDataToGDataFileError(status);
-  if (error == GDATA_FILE_OK &&
+  DriveFileError error = util::GDataToDriveFileError(status);
+  if (error == DRIVE_FILE_OK &&
       (!data.get() || data->GetType() != Value::TYPE_DICTIONARY)) {
-    error = GDATA_FILE_ERROR_FAILED;
+    error = DRIVE_FILE_ERROR_FAILED;
   }
 
-  if (error != GDATA_FILE_OK) {
-    directory_service_->set_origin(initial_origin);
+  if (error != DRIVE_FILE_OK) {
+    resource_metadata_->set_origin(params->initial_origin);
+    RunFeedLoadCallback(params.Pass(), error);
+    return;
+  }
 
-    if (!callback.is_null())
-      callback.Run(params, error);
+  scoped_ptr<DocumentFeed>* current_feed = new scoped_ptr<DocumentFeed>;
+  util::PostBlockingPoolSequencedTaskAndReply(
+      FROM_HERE,
+      blocking_task_runner_,
+      base::Bind(&ParseFeedOnBlockingPool,
+                 base::Passed(&data),
+                 current_feed),
+      base::Bind(&GDataWapiFeedLoader::OnParseFeed,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 base::Passed(&params),
+                 start_time,
+                 base::Owned(current_feed)));
+}
 
+void GDataWapiFeedLoader::OnParseFeed(scoped_ptr<LoadFeedParams> params,
+                                      base::TimeTicks start_time,
+                                      scoped_ptr<DocumentFeed>* current_feed) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(current_feed);
+
+  if (!current_feed->get()) {
+    RunFeedLoadCallback(params.Pass(), DRIVE_FILE_ERROR_FAILED);
     return;
   }
 
   GURL next_feed_url;
-  scoped_ptr<DocumentFeed> current_feed(DocumentFeed::ExtractAndParse(*data));
-  if (!current_feed.get()) {
-    if (!callback.is_null()) {
-      callback.Run(params, GDATA_FILE_ERROR_FAILED);
-    }
-
-    return;
-  }
-  const bool has_next_feed_url = current_feed->GetNextFeedURL(&next_feed_url);
-
-#ifndef NDEBUG
-  // Save initial root feed for analysis.
-  std::string file_name =
-      base::StringPrintf("DEBUG_feed_%d.json",
-                         params->start_changestamp);
-  util::PostBlockingPoolSequencedTask(
-      FROM_HERE,
-      blocking_task_runner_,
-      base::Bind(&SaveFeedOnBlockingPoolForDebugging,
-                 cache_->GetCacheDirectoryPath(
-                     GDataCache::CACHE_TYPE_META).Append(file_name),
-                 base::Passed(&data)));
-#endif
+  const bool has_next_feed_url =
+      (*current_feed)->GetNextFeedURL(&next_feed_url);
 
   // Add the current feed to the list of collected feeds for this directory.
-  params->feed_list->push_back(current_feed.release());
+  params->feed_list.push_back(current_feed->release());
 
   // Compute and notify the number of entries fetched so far.
   int num_accumulated_entries = 0;
-  for (size_t i = 0; i < params->feed_list->size(); ++i)
-    num_accumulated_entries += params->feed_list->at(i)->entries().size();
+  for (size_t i = 0; i < params->feed_list.size(); ++i)
+    num_accumulated_entries += params->feed_list[i]->entries().size();
 
   // Check if we need to collect more data to complete the directory list.
-  if (params->should_fetch_multiple_feeds && has_next_feed_url &&
-      !next_feed_url.is_empty()) {
+  if (has_next_feed_url && !next_feed_url.is_empty()) {
     // Post an UI update event to make the UI smoother.
     GetDocumentsUiState* ui_state = params->ui_state.get();
     if (ui_state == NULL) {
@@ -482,7 +585,7 @@ void GDataWapiFeedLoader::OnGetDocuments(
     if ((ui_state->num_fetched_documents - ui_state->num_showing_documents)
         < kFetchUiUpdateStep) {
       // Currently the UI update is stopped. Start UI periodic callback.
-      MessageLoop::current()->PostTask(
+      base::MessageLoopProxy::current()->PostTask(
           FROM_HERE,
           base::Bind(&GDataWapiFeedLoader::OnNotifyDocumentFeedFetched,
                      weak_ptr_factory_.GetWeakPtr(),
@@ -491,40 +594,135 @@ void GDataWapiFeedLoader::OnGetDocuments(
     ui_state->num_fetched_documents = num_accumulated_entries;
     ui_state->feed_fetching_elapsed_time = base::TimeTicks::Now() - start_time;
 
-    // Kick of the remaining part of the feeds.
-    documents_service_->GetDocuments(
+    // |params| will be passed to the callback and thus nulled. Extract the
+    // pointer so we can use it bellow.
+    LoadFeedParams* params_ptr = params.get();
+    // Kick off the remaining part of the feeds.
+    drive_service_->GetDocuments(
         next_feed_url,
-        params->start_changestamp,
-        params->search_query,
-        params->directory_resource_id,
+        params_ptr->start_changestamp,
+        params_ptr->search_query,
+        params_ptr->directory_resource_id,
         base::Bind(&GDataWapiFeedLoader::OnGetDocuments,
                    weak_ptr_factory_.GetWeakPtr(),
-                   initial_origin,
-                   callback,
-                   base::Owned(
-                       new GetDocumentsParams(
-                           params->start_changestamp,
-                           params->root_feed_changestamp,
-                           params->feed_list.release(),
-                           params->should_fetch_multiple_feeds,
-                           params->search_file_path,
-                           params->search_query,
-                           params->directory_resource_id,
-                           params->callback,
-                           params->ui_state.release())),
+                   base::Passed(&params),
                    start_time));
     return;
   }
 
-  // Notify the observers that a document feed is fetched.
+  // Notify the observers that all document feeds are fetched.
   FOR_EACH_OBSERVER(Observer, observers_,
                     OnDocumentFeedFetched(num_accumulated_entries));
 
-  UMA_HISTOGRAM_TIMES("Gdata.EntireFeedLoadTime",
+  UMA_HISTOGRAM_TIMES("Drive.EntireFeedLoadTime",
                       base::TimeTicks::Now() - start_time);
 
-  if (!callback.is_null())
-    callback.Run(params, error);
+  // Run the callback so the client can process the retrieved feeds.
+  RunFeedLoadCallback(params.Pass(), DRIVE_FILE_OK);
+}
+
+void GDataWapiFeedLoader::OnGetChangelist(
+    scoped_ptr<LoadFeedParams> params,
+    base::TimeTicks start_time,
+    GDataErrorCode status,
+    scoped_ptr<base::Value> data) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (params->feed_list.empty()) {
+    UMA_HISTOGRAM_TIMES("Drive.InitialFeedLoadTime",
+                        base::TimeTicks::Now() - start_time);
+  }
+
+  DriveFileError error = util::GDataToDriveFileError(status);
+  if (error == DRIVE_FILE_OK &&
+      (!data.get() || data->GetType() != Value::TYPE_DICTIONARY)) {
+    error = DRIVE_FILE_ERROR_FAILED;
+  }
+
+  if (error != DRIVE_FILE_OK) {
+    resource_metadata_->set_origin(params->initial_origin);
+    RunFeedLoadCallback(params.Pass(), error);
+    return;
+  }
+
+  GURL next_feed_url;
+  scoped_ptr<ChangeList> current_feed(ChangeList::CreateFrom(*data));
+  if (!current_feed.get()) {
+    RunFeedLoadCallback(params.Pass(), DRIVE_FILE_ERROR_FAILED);
+    return;
+  }
+  const bool has_next_feed = !current_feed->next_page_token().empty();
+
+#ifndef NDEBUG
+  // Save initial root feed for analysis.
+  std::string file_name =
+      base::StringPrintf("DEBUG_changelist_%" PRId64 ".json",
+                         params->start_changestamp);
+  util::PostBlockingPoolSequencedTask(
+      FROM_HERE,
+      blocking_task_runner_,
+      base::Bind(&SaveFeedOnBlockingPoolForDebugging,
+                 cache_->GetCacheDirectoryPath(
+                     DriveCache::CACHE_TYPE_META).Append(file_name),
+                 base::Passed(&data)));
+#endif
+
+  // Add the current feed to the list of collected feeds for this directory.
+  scoped_ptr<DocumentFeed> feed =
+      DocumentFeed::CreateFromChangeList(*current_feed);
+  params->feed_list.push_back(feed.release());
+
+  // Compute and notify the number of entries fetched so far.
+  int num_accumulated_entries = 0;
+  for (size_t i = 0; i < params->feed_list.size(); ++i)
+    num_accumulated_entries += params->feed_list[i]->entries().size();
+
+  // Check if we need to collect more data to complete the directory list.
+  if (has_next_feed) {
+    // Post an UI update event to make the UI smoother.
+    GetDocumentsUiState* ui_state = params->ui_state.get();
+    if (ui_state == NULL) {
+      ui_state = new GetDocumentsUiState(base::TimeTicks::Now());
+      params->ui_state.reset(ui_state);
+    }
+    DCHECK(ui_state);
+
+    if ((ui_state->num_fetched_documents - ui_state->num_showing_documents)
+        < kFetchUiUpdateStep) {
+      // Currently the UI update is stopped. Start UI periodic callback.
+      base::MessageLoopProxy::current()->PostTask(
+          FROM_HERE,
+          base::Bind(&GDataWapiFeedLoader::OnNotifyDocumentFeedFetched,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     ui_state->weak_ptr_factory.GetWeakPtr()));
+    }
+    ui_state->num_fetched_documents = num_accumulated_entries;
+    ui_state->feed_fetching_elapsed_time = base::TimeTicks::Now() - start_time;
+
+    // Kick off the remaining part of the feeds.
+    // Extract the pointer so we can use it bellow.
+    LoadFeedParams* params_ptr = params.get();
+    drive_service_->GetDocuments(
+        current_feed->next_link(),
+        params_ptr->start_changestamp,
+        std::string(),  // No search query.
+        std::string(),  // No directory resource ID.
+        base::Bind(&GDataWapiFeedLoader::OnGetChangelist,
+                   weak_ptr_factory_.GetWeakPtr(),
+                   base::Passed(&params),
+                   start_time));
+    return;
+  }
+
+  // Notify the observers that all document feeds are fetched.
+  FOR_EACH_OBSERVER(Observer, observers_,
+                    OnDocumentFeedFetched(num_accumulated_entries));
+
+  UMA_HISTOGRAM_TIMES("Drive.EntireFeedLoadTime",
+                      base::TimeTicks::Now() - start_time);
+
+  // Run the callback so the client can process the retrieved feeds.
+  RunFeedLoadCallback(params.Pass(), error);
 }
 
 void GDataWapiFeedLoader::OnNotifyDocumentFeedFetched(
@@ -554,7 +752,7 @@ void GDataWapiFeedLoader::OnNotifyDocumentFeedFetched(
       // UI update timing.
       base::TimeDelta remaining_duration =
           ui_state->feed_fetching_elapsed_time - elapsed_time;
-      MessageLoop::current()->PostDelayedTask(
+      base::MessageLoopProxy::current()->PostDelayedTask(
           FROM_HERE,
           base::Bind(&GDataWapiFeedLoader::OnNotifyDocumentFeedFetched,
                      weak_ptr_factory_.GetWeakPtr(),
@@ -566,17 +764,15 @@ void GDataWapiFeedLoader::OnNotifyDocumentFeedFetched(
 
 void GDataWapiFeedLoader::LoadFromCache(
     bool should_load_from_server,
-    const FilePath& search_file_path,
-    const FindEntryCallback& callback) {
+    const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  LoadRootFeedParams* params = new LoadRootFeedParams(search_file_path,
-                                                      should_load_from_server,
+  LoadRootFeedParams* params = new LoadRootFeedParams(should_load_from_server,
                                                       callback);
-  FilePath path = cache_->GetCacheDirectoryPath(GDataCache::CACHE_TYPE_META);
+  FilePath path = cache_->GetCacheDirectoryPath(DriveCache::CACHE_TYPE_META);
   if (UseLevelDB()) {
     path = path.Append(kResourceMetadataDBFile);
-    directory_service_->InitFromDB(path, blocking_task_runner_,
+    resource_metadata_->InitFromDB(path, blocking_task_runner_,
         base::Bind(
             &GDataWapiFeedLoader::ContinueWithInitializedDirectoryService,
             weak_ptr_factory_.GetWeakPtr(),
@@ -595,18 +791,18 @@ void GDataWapiFeedLoader::OnProtoLoaded(LoadRootFeedParams* params) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // If we have already received updates from the server, bail out.
-  if (directory_service_->origin() == FROM_SERVER)
+  if (resource_metadata_->origin() == FROM_SERVER)
     return;
 
   // Update directory structure only if everything is OK and we haven't yet
   // received the feed from the server yet.
-  if (params->load_error == GDATA_FILE_OK) {
+  if (params->load_error == DRIVE_FILE_OK) {
     DVLOG(1) << "ParseFromString";
-    if (directory_service_->ParseFromString(params->proto)) {
-      directory_service_->set_last_serialized(params->last_modified);
-      directory_service_->set_serialized_size(params->proto.size());
+    if (resource_metadata_->ParseFromString(params->proto)) {
+      resource_metadata_->set_last_serialized(params->last_modified);
+      resource_metadata_->set_serialized_size(params->proto.size());
     } else {
-      params->load_error = GDATA_FILE_ERROR_FAILED;
+      params->load_error = DRIVE_FILE_ERROR_FAILED;
       LOG(WARNING) << "Parse of cached proto file failed";
     }
   }
@@ -616,20 +812,21 @@ void GDataWapiFeedLoader::OnProtoLoaded(LoadRootFeedParams* params) {
 
 void GDataWapiFeedLoader::ContinueWithInitializedDirectoryService(
     LoadRootFeedParams* params,
-    GDataFileError error) {
+    DriveFileError error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   DVLOG(1) << "Time elapsed to load directory service from disk="
            << (base::Time::Now() - params->load_start_time).InMilliseconds()
            << " milliseconds";
 
-  FindEntryCallback callback = params->callback;
-  // If we got feed content from cache, try search over it.
-  if (error == GDATA_FILE_OK && !callback.is_null()) {
-    // Continue file content search operation if the delegate hasn't terminated
-    // this search branch already.
-    directory_service_->FindEntryByPathAndRunSync(params->search_file_path,
-                                                  callback);
+  // TODO(satorux): Simplify the callback handling. crbug.com/142799
+  FileOperationCallback callback = params->callback;
+  // If we got feed content from cache, tell the client that the loading was
+  // successful.
+  if (error == DRIVE_FILE_OK && !callback.is_null()) {
+    callback.Run(DRIVE_FILE_OK);
+    // Reset the callback so we don't run the same callback once
+    // ReloadFeedFromServerIfNeeded() is complete.
     callback.Reset();
   }
 
@@ -642,40 +839,39 @@ void GDataWapiFeedLoader::ContinueWithInitializedDirectoryService(
   // By default, if directory content is not yet initialized, restore content
   // origin to UNINITIALIZED in case of failure.
   ContentOrigin initial_origin = UNINITIALIZED;
-  if (directory_service_->origin() != INITIALIZING) {
+  if (resource_metadata_->origin() != INITIALIZING) {
     // If directory content is already initialized, restore content origin
     // to FROM_CACHE in case of failure.
     initial_origin = FROM_CACHE;
-    directory_service_->set_origin(REFRESHING);
+    resource_metadata_->set_origin(REFRESHING);
   }
 
-  // Kick of the retrieval of the feed from server. If we have previously
+  // Kick off the retrieval of the feed from server. If we have previously
   // |reported| to the original callback, then we just need to refresh the
   // content without continuing search upon operation completion.
   ReloadFromServerIfNeeded(initial_origin,
-                           directory_service_->largest_changestamp(),
-                           params->search_file_path,
+                           resource_metadata_->largest_changestamp(),
                            callback);
 }
 
 void GDataWapiFeedLoader::SaveFileSystem() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (!ShouldSerializeFileSystemNow(directory_service_->serialized_size(),
-                                    directory_service_->last_serialized())) {
+  if (!ShouldSerializeFileSystemNow(resource_metadata_->serialized_size(),
+                                    resource_metadata_->last_serialized())) {
     return;
   }
 
   if (UseLevelDB()) {
-    directory_service_->SaveToDB();
+    resource_metadata_->SaveToDB();
   } else {
     const FilePath path =
-        cache_->GetCacheDirectoryPath(GDataCache::CACHE_TYPE_META).Append(
+        cache_->GetCacheDirectoryPath(DriveCache::CACHE_TYPE_META).Append(
             kFilesystemProtoFile);
     scoped_ptr<std::string> serialized_proto(new std::string());
-    directory_service_->SerializeToString(serialized_proto.get());
-    directory_service_->set_last_serialized(base::Time::Now());
-    directory_service_->set_serialized_size(serialized_proto->size());
+    resource_metadata_->SerializeToString(serialized_proto.get());
+    resource_metadata_->set_last_serialized(base::Time::Now());
+    resource_metadata_->set_serialized_size(serialized_proto->size());
     util::PostBlockingPoolSequencedTask(
         FROM_HERE,
         blocking_task_runner_,
@@ -684,17 +880,17 @@ void GDataWapiFeedLoader::SaveFileSystem() {
   }
 }
 
-GDataFileError GDataWapiFeedLoader::UpdateFromFeed(
-    const std::vector<DocumentFeed*>& feed_list,
-    int start_changestamp,
-    int root_feed_changestamp) {
+DriveFileError GDataWapiFeedLoader::UpdateFromFeed(
+    const ScopedVector<DocumentFeed>& feed_list,
+    int64 start_changestamp,
+    int64 root_feed_changestamp) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DVLOG(1) << "Updating directory with a feed";
 
   std::set<FilePath> changed_dirs;
 
-  GDataWapiFeedProcessor feed_processor(directory_service_);
-  const GDataFileError error = feed_processor.ApplyFeeds(
+  GDataWapiFeedProcessor feed_processor(resource_metadata_);
+  const DriveFileError error = feed_processor.ApplyFeeds(
       feed_list,
       start_changestamp,
       root_feed_changestamp,

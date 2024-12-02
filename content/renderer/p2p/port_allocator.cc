@@ -50,12 +50,22 @@ bool ParsePortNumber(
 
 }  // namespace
 
+P2PPortAllocator::Config::Config()
+    : stun_server_port(0),
+      relay_server_port(0),
+      legacy_relay(false),
+      disable_tcp_transport(false) {
+}
+
+P2PPortAllocator::Config::~Config() {
+}
+
 P2PPortAllocator::P2PPortAllocator(
     WebKit::WebFrame* web_frame,
     P2PSocketDispatcher* socket_dispatcher,
     talk_base::NetworkManager* network_manager,
     talk_base::PacketSocketFactory* socket_factory,
-    const webkit_glue::P2PTransport::Config& config)
+    const Config& config)
     : cricket::BasicPortAllocator(network_manager, socket_factory),
       web_frame_(web_frame),
       socket_dispatcher_(socket_dispatcher),
@@ -131,7 +141,8 @@ void P2PPortAllocatorSession::didFail(WebKit::WebURLLoader* loader,
 void P2PPortAllocatorSession::GetPortConfigurations() {
   // Add an empty configuration synchronously, so a local connection
   // can be started immediately.
-  ConfigReady(new cricket::PortConfiguration(talk_base::SocketAddress()));
+  ConfigReady(new cricket::PortConfiguration(talk_base::SocketAddress(),
+                                             "", ""));
 
   if (stun_server_address_.IsNil()) {
     ResolveStunServerAddress();
@@ -280,7 +291,7 @@ void P2PPortAllocatorSession::ParseRelayResponse() {
 
 void P2PPortAllocatorSession::AddConfig() {
   cricket::PortConfiguration* config =
-      new cricket::PortConfiguration(stun_server_address_);
+      new cricket::PortConfiguration(stun_server_address_, "", "");
 
   if (relay_ip_.ip() != 0) {
     cricket::PortConfiguration::PortList ports;

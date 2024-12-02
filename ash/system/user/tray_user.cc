@@ -59,7 +59,8 @@ class RoundedImageView : public views::View {
     image_size_ = size;
 
     // Try to get the best image quality for the avatar.
-    resized_ = gfx::ImageSkiaOperations::CreateResizedImage(image_, size);
+    resized_ = gfx::ImageSkiaOperations::CreateResizedImage(image_,
+        skia::ImageOperations::RESIZE_BEST, size);
     if (GetWidget() && visible()) {
       PreferredSizeChanged();
       SchedulePaint();
@@ -187,7 +188,7 @@ class UserView : public views::View,
 
   // Overridden from views::ButtonListener.
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE {
+                             const ui::Event& event) OVERRIDE {
     CHECK(sender == signout_);
     ash::SystemTrayDelegate* tray = ash::Shell::GetInstance()->tray_delegate();
     tray->SignOut();
@@ -200,6 +201,10 @@ class UserView : public views::View,
       size = user_info_->GetPreferredSize();
     if (signout_) {
       gfx::Size signout_size = signout_->GetPreferredSize();
+      // Make sure the user default view item at least as tall as the other
+      // tray popup items.
+      if (size.height() == 0)
+        size.set_height(kTrayPopupItemHeight);
       size.set_height(std::max(size.height(), signout_size.height()));
       size.set_width(size.width() + signout_size.width() +
           kTrayPopupPaddingHorizontal * 2 + kTrayPopupPaddingBetweenItems);
@@ -246,7 +251,8 @@ class UserView : public views::View,
 
 TrayUser::TrayUser()
     : user_(NULL),
-      avatar_(NULL) {
+      avatar_(NULL),
+      label_(NULL) {
 }
 
 TrayUser::~TrayUser() {
@@ -254,9 +260,18 @@ TrayUser::~TrayUser() {
 
 views::View* TrayUser::CreateTrayView(user::LoginStatus status) {
   CHECK(avatar_ == NULL);
-  avatar_ = new tray::RoundedImageView(kTrayRoundedBorderRadius);
+  CHECK(label_ == NULL);
+  if (status == user::LOGGED_IN_GUEST) {
+    label_ = new views::Label;
+    ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
+    label_->SetText(bundle.GetLocalizedString(IDS_ASH_STATUS_TRAY_GUEST_LABEL));
+    SetupLabelForTray(label_);
+  } else {
+    avatar_ = new tray::RoundedImageView(kTrayRoundedBorderRadius);
+  }
   UpdateAfterLoginStatusChange(status);
-  return avatar_;
+  return avatar_ ? static_cast<views::View*>(avatar_)
+                 : static_cast<views::View*>(label_);
 }
 
 views::View* TrayUser::CreateDefaultView(user::LoginStatus status) {
@@ -274,6 +289,7 @@ views::View* TrayUser::CreateDetailedView(user::LoginStatus status) {
 
 void TrayUser::DestroyTrayView() {
   avatar_ = NULL;
+  label_ = NULL;
 }
 
 void TrayUser::DestroyDefaultView() {
@@ -284,25 +300,52 @@ void TrayUser::DestroyDetailedView() {
 }
 
 void TrayUser::UpdateAfterLoginStatusChange(user::LoginStatus status) {
-  if (status != user::LOGGED_IN_NONE && status != user::LOGGED_IN_KIOSK &&
-      status != user::LOGGED_IN_GUEST) {
-    avatar_->SetImage(
-        ash::Shell::GetInstance()->tray_delegate()->GetUserImage(),
-        gfx::Size(kUserIconSize, kUserIconSize));
-    avatar_->SetVisible(true);
-  } else {
-    avatar_->SetVisible(false);
+  switch (status) {
+    case user::LOGGED_IN_LOCKED:
+    case user::LOGGED_IN_USER:
+    case user::LOGGED_IN_OWNER:
+      avatar_->SetImage(
+          ash::Shell::GetInstance()->tray_delegate()->GetUserImage(),
+          gfx::Size(kUserIconSize, kUserIconSize));
+      avatar_->SetVisible(true);
+      break;
+
+    case user::LOGGED_IN_GUEST:
+      label_->SetVisible(true);
+      break;
+
+    case user::LOGGED_IN_KIOSK:
+    case user::LOGGED_IN_NONE:
+      avatar_->SetVisible(false);
+      break;
   }
 }
 
 void TrayUser::UpdateAfterShelfAlignmentChange(ShelfAlignment alignment) {
-  SetTrayImageItemBorder(avatar_, alignment);
+  if (avatar_) {
+    SetTrayImageItemBorder(avatar_, alignment);
+  } else {
+    if (alignment == SHELF_ALIGNMENT_BOTTOM) {
+      label_->set_border(views::Border::CreateEmptyBorder(
+          0, kTrayLabelItemHorizontalPaddingBottomAlignment,
+          0, kTrayLabelItemHorizontalPaddingBottomAlignment));
+    } else {
+      label_->set_border(views::Border::CreateEmptyBorder(
+          kTrayLabelItemVerticalPaddingVeriticalAlignment,
+          kTrayLabelItemHorizontalPaddingBottomAlignment,
+          kTrayLabelItemVerticalPaddingVeriticalAlignment,
+          kTrayLabelItemHorizontalPaddingBottomAlignment));
+    }
+  }
 }
 
 void TrayUser::OnUserUpdate() {
-  avatar_->SetImage(
-      ash::Shell::GetInstance()->tray_delegate()->GetUserImage(),
-      gfx::Size(kUserIconSize, kUserIconSize));
+  // Check for null to avoid crbug.com/150944.
+  if (avatar_) {
+    avatar_->SetImage(
+        ash::Shell::GetInstance()->tray_delegate()->GetUserImage(),
+        gfx::Size(kUserIconSize, kUserIconSize));
+  }
 }
 
 }  // namespace internal

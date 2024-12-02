@@ -20,10 +20,6 @@ using base::android::ConvertUTF8ToJavaString;
 
 namespace content {
 
-base::StringPiece Shell::PlatformResourceProvider(int key) {
-  return base::StringPiece();
-}
-
 void Shell::PlatformInitialize() {
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   DCHECK(command_line->HasSwitch(switches::kForceCompositingMode));
@@ -64,7 +60,7 @@ void Shell::PlatformSetTitle(const string16& title) {
   NOTIMPLEMENTED();
 }
 
-void Shell::LoadProgressChanged(double progress) {
+void Shell::LoadProgressChanged(WebContents* source, double progress) {
   JNIEnv* env = AttachCurrentThread();
   Java_Shell_onLoadProgressChanged(env, java_object_.obj(), progress);
 }
@@ -72,6 +68,14 @@ void Shell::LoadProgressChanged(double progress) {
 void Shell::Close() {
   // TODO(tedchoc): Implement Close method for android shell
   NOTIMPLEMENTED();
+}
+
+void Shell::AttachLayer(WebContents* web_contents, WebKit::WebLayer* layer) {
+  ShellAttachLayer(layer);
+}
+
+void Shell::RemoveLayer(WebContents* web_contents, WebKit::WebLayer* layer) {
+  ShellRemoveLayer(layer);
 }
 
 // static

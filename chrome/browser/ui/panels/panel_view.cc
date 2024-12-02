@@ -4,13 +4,19 @@
 
 #include "chrome/browser/ui/panels/panel_view.h"
 
+#include <map>
 #include "base/logging.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_bounds_animation.h"
 #include "chrome/browser/ui/panels/panel_frame_view.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/web_contents_view.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/controls/button/image_button.h"
@@ -18,11 +24,53 @@
 #include "ui/views/widget/widget.h"
 
 #if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
+#include "ui/base/win/shell.h"
 #include "base/win/windows_version.h"
+#include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/panels/taskbar_window_thumbnailer_win.h"
 #endif
 
 namespace {
+
+// Supported accelerators.
+// Note: We can't use the acclerator table defined in chrome/browser/ui/views
+// due to checkdeps violation.
+struct AcceleratorMapping {
+  ui::KeyboardCode keycode;
+  int modifiers;
+  int command_id;
+};
+const AcceleratorMapping kPanelAcceleratorMap[] = {
+  { ui::VKEY_W, ui::EF_CONTROL_DOWN, IDC_CLOSE_WINDOW },
+  { ui::VKEY_W, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, IDC_CLOSE_WINDOW },
+  { ui::VKEY_F4, ui::EF_ALT_DOWN, IDC_CLOSE_WINDOW },
+  { ui::VKEY_R, ui::EF_CONTROL_DOWN, IDC_RELOAD },
+  { ui::VKEY_F5, ui::EF_NONE, IDC_RELOAD },
+  { ui::VKEY_R, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
+      IDC_RELOAD_IGNORING_CACHE },
+  { ui::VKEY_F5, ui::EF_CONTROL_DOWN, IDC_RELOAD_IGNORING_CACHE },
+  { ui::VKEY_F5, ui::EF_SHIFT_DOWN, IDC_RELOAD_IGNORING_CACHE },
+  { ui::VKEY_ESCAPE, ui::EF_NONE, IDC_STOP },
+  { ui::VKEY_OEM_MINUS, ui::EF_CONTROL_DOWN, IDC_ZOOM_MINUS },
+  { ui::VKEY_SUBTRACT, ui::EF_CONTROL_DOWN, IDC_ZOOM_MINUS },
+  { ui::VKEY_0, ui::EF_CONTROL_DOWN, IDC_ZOOM_NORMAL },
+  { ui::VKEY_NUMPAD0, ui::EF_CONTROL_DOWN, IDC_ZOOM_NORMAL },
+  { ui::VKEY_OEM_PLUS, ui::EF_CONTROL_DOWN, IDC_ZOOM_PLUS },
+  { ui::VKEY_ADD, ui::EF_CONTROL_DOWN, IDC_ZOOM_PLUS },
+};
+
+const std::map<ui::Accelerator, int>& GetAcceleratorTable() {
+  static std::map<ui::Accelerator, int>* accelerators = NULL;
+  if (!accelerators) {
+    accelerators = new std::map<ui::Accelerator, int>();
+    for (size_t i = 0; i < arraysize(kPanelAcceleratorMap); ++i) {
+      ui::Accelerator accelerator(kPanelAcceleratorMap[i].keycode,
+                                  kPanelAcceleratorMap[i].modifiers);
+      (*accelerators)[accelerator] = kPanelAcceleratorMap[i].command_id;
+    }
+  }
+  return *accelerators;
+}
 
 // NativePanelTesting implementation.
 class NativePanelTestingWin : public NativePanelTesting {
@@ -116,10 +164,19 @@ NativePanel* Panel::CreateNativePanel(Panel* panel, const gfx::Rect& bounds) {
   return new PanelView(panel, bounds);
 }
 
+// The panel window has to be created as always-on-top. We cannot create it
+// as non-always-on-top and then change it to always-on-top because Windows
+// system might deny making a window always-on-top if the application is not
+// a foreground application. In addition, we do not know if the panel should
+// be created as always-on-top at its creation time. To solve this issue,
+// always_on_top_ is default to true because we can always change from
+// always-on-top to not always-on-top but not the other way around.
 PanelView::PanelView(Panel* panel, const gfx::Rect& bounds)
     : panel_(panel),
+      bounds_(bounds),
       window_(NULL),
       web_view_(NULL),
+      always_on_top_(true),
       focused_(false),
       mouse_pressed_(false),
       mouse_dragging_state_(NO_DRAGGING),
@@ -142,10 +199,23 @@ PanelView::PanelView(Panel* panel, const gfx::Rect& bounds)
 
   OnViewWasResized();
 
+  // Register accelarators supported by panels.
   views::FocusManager* focus_manager = GetFocusManager();
-  ui::Accelerator accelerator(ui::VKEY_ESCAPE, ui::EF_NONE);
-  focus_manager->RegisterAccelerator(
-        accelerator, ui::AcceleratorManager::kNormalPriority, this);
+  const std::map<ui::Accelerator, int>& accelerator_table =
+      GetAcceleratorTable();
+  for (std::map<ui::Accelerator, int>::const_iterator iter =
+           accelerator_table.begin();
+       iter != accelerator_table.end(); ++iter) {
+    focus_manager->RegisterAccelerator(
+        iter->first, ui::AcceleratorManager::kNormalPriority, this);
+  }
+
+#if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
+  ui::win::SetAppIdForWindow(
+      ShellIntegration::GetAppModelIdForProfile(UTF8ToWide(panel->app_name()),
+                                                panel->profile()->GetPath()),
+      window_->GetNativeWindow());
+#endif
 }
 
 PanelView::~PanelView() {
@@ -155,6 +225,12 @@ PanelView::~PanelView() {
 void PanelView::ShowPanel() {
   ShowPanelInactive();
   ActivatePanel();
+
+  // Give web contents view a chance to set focus to the appropriate element
+  // when it is created for the first time.
+  content::WebContents* web_contents = panel_->GetWebContents();
+  if (web_contents)
+    web_contents->GetView()->RestoreFocus();
 }
 
 void PanelView::ShowPanelInactive() {
@@ -254,11 +330,6 @@ void PanelView::UpdatePanelLoadingAnimations(bool should_animate) {
   GetFrameView()->UpdateThrobber();
 }
 
-FindBar* PanelView::CreatePanelFindBar() {
-  NOTREACHED();  // legacy API from browser window. N/A for refactored panels.
-  return NULL;
-}
-
 void PanelView::NotifyPanelOnUserChangedTheme() {
   GetFrameView()->SchedulePaint();
 }
@@ -298,14 +369,18 @@ bool PanelView::IsDrawingAttention() const {
   return is_drawing_attention_;
 }
 
-bool PanelView::PreHandlePanelKeyboardEvent(
-    const content::NativeWebKeyboardEvent& event,
-    bool* is_keyboard_shortcut) {
-  return false;
-}
-
 void PanelView::HandlePanelKeyboardEvent(
     const content::NativeWebKeyboardEvent& event) {
+  views::FocusManager* focus_manager = GetFocusManager();
+  if (focus_manager->shortcut_handling_suspended())
+    return;
+
+  ui::Accelerator accelerator(
+      static_cast<ui::KeyboardCode>(event.windowsKeyCode),
+      content::GetModifiersFromNativeWebKeyboardEvent(event));
+  if (event.type == WebKit::WebInputEvent::KeyUp)
+    accelerator.set_type(ui::ET_KEY_RELEASED);
+  focus_manager->ProcessAccelerator(accelerator);
 }
 
 void PanelView::FullScreenModeChanged(bool is_full_screen) {
@@ -317,16 +392,15 @@ void PanelView::FullScreenModeChanged(bool is_full_screen) {
   }
 }
 
-Browser* PanelView::GetPanelBrowser() const {
-  NOTREACHED();  // legacy API from BrowserWindow. N/A for refactored panels.
-  return NULL;
-}
-
-void PanelView::EnsurePanelFullyVisible() {
-  // This method is going to be removed.
+bool PanelView::IsPanelAlwaysOnTop() const {
+  return always_on_top_;
 }
 
 void PanelView::SetPanelAlwaysOnTop(bool on_top) {
+  if (always_on_top_ == on_top)
+    return;
+  always_on_top_ = on_top;
+
   window_->SetAlwaysOnTop(on_top);
   window_->non_client_view()->Layout();
   window_->client_view()->Layout();
@@ -445,8 +519,17 @@ string16 PanelView::GetWindowTitle() const {
   return panel_->GetWindowTitle();
 }
 
+gfx::ImageSkia PanelView::GetWindowAppIcon() {
+  gfx::Image app_icon = panel_->app_icon();
+  if (app_icon.IsEmpty())
+    return GetWindowIcon();
+  else
+    return *app_icon.ToImageSkia();
+}
+
 gfx::ImageSkia PanelView::GetWindowIcon() {
-  return panel_->GetCurrentPageIcon();
+  gfx::Image icon = panel_->GetCurrentPageIcon();
+  return icon.IsEmpty() ? gfx::ImageSkia() : *icon.ToImageSkia();
 }
 
 void PanelView::DeleteDelegate() {
@@ -519,15 +602,19 @@ bool PanelView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   if (mouse_dragging_state_ == DRAGGING_STARTED)
     return true;
 
-  return views::View::AcceleratorPressed(accelerator);
+  const std::map<ui::Accelerator, int>& accelerator_table =
+      GetAcceleratorTable();
+  std::map<ui::Accelerator, int>::const_iterator iter =
+      accelerator_table.find(accelerator);
+  DCHECK(iter != accelerator_table.end());
+  return panel_->ExecuteCommandIfEnabled(iter->second);
 }
 
 void PanelView::OnWidgetActivationChanged(views::Widget* widget, bool active) {
 #if defined(OS_WIN) && !defined(USE_AURA)
   // The panel window is in focus (actually accepting keystrokes) if it is
   // active and belongs to a foreground application.
-  bool focused = active &&
-      GetFrameView()->GetWidget()->GetNativeView() == ::GetForegroundWindow();
+  bool focused = active && widget->GetNativeWindow() == ::GetForegroundWindow();
 #else
   NOTIMPLEMENTED();
   bool focused = active;

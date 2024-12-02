@@ -10,6 +10,7 @@
 
 #include "ash/launcher/launcher_button_host.h"
 #include "ash/launcher/launcher_model_observer.h"
+#include "ash/wm/gestures/shelf_gesture_handler.h"
 #include "ash/wm/shelf_types.h"
 #include "base/observer_list.h"
 #include "ui/views/animation/bounds_animator_observer.h"
@@ -144,10 +145,10 @@ class ASH_EXPORT LauncherView : public views::View,
 
   // Invoked when the pointer has moved enough to trigger a drag. Sets
   // internal state in preparation for the drag.
-  void PrepareForDrag(Pointer pointer, const views::LocatedEvent& event);
+  void PrepareForDrag(Pointer pointer, const ui::LocatedEvent& event);
 
   // Invoked when the mouse is dragged. Updates the models as appropriate.
-  void ContinueDrag(const views::LocatedEvent& event);
+  void ContinueDrag(const ui::LocatedEvent& event);
 
   // Returns true if |typea| and |typeb| should be in the same drag range.
   bool SameDragType(LauncherItemType typea, LauncherItemType typeb) const;
@@ -163,9 +164,6 @@ class ASH_EXPORT LauncherView : public views::View,
   // Common setup done for all children.
   void ConfigureChildView(views::View* view);
 
-  // Returns the items whose icons are not shown because they don't fit.
-  void GetOverflowItems(std::vector<LauncherItem>* items);
-
   // Shows the overflow menu.
   void ShowOverflowBubble();
 
@@ -176,6 +174,8 @@ class ASH_EXPORT LauncherView : public views::View,
 
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual ui::EventResult OnGestureEvent(
+      const ui::GestureEvent& event) OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
   virtual FocusTraversable* GetPaneFocusTraversable() OVERRIDE;
 
@@ -185,16 +185,17 @@ class ASH_EXPORT LauncherView : public views::View,
   virtual void LauncherItemChanged(int model_index,
                                    const ash::LauncherItem& old_item) OVERRIDE;
   virtual void LauncherItemMoved(int start_index, int target_index) OVERRIDE;
+  virtual void LauncherStatusChanged() OVERRIDE;
 
   // Overridden from LauncherButtonHost:
   virtual void PointerPressedOnButton(
       views::View* view,
       Pointer pointer,
-      const views::LocatedEvent& event) OVERRIDE;
+      const ui::LocatedEvent& event) OVERRIDE;
   virtual void PointerDraggedOnButton(
       views::View* view,
       Pointer pointer,
-      const views::LocatedEvent& event) OVERRIDE;
+      const ui::LocatedEvent& event) OVERRIDE;
   virtual void PointerReleasedOnButton(views::View* view,
                                        Pointer pointer,
                                        bool canceled) OVERRIDE;
@@ -206,7 +207,7 @@ class ASH_EXPORT LauncherView : public views::View,
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
 
   // Overridden from views::ContextMenuController:
   virtual void ShowContextMenuForView(views::View* source,
@@ -274,6 +275,8 @@ class ASH_EXPORT LauncherView : public views::View,
   // Amount content is inset on the left edge (or top edge for vertical
   // alignment).
   int leading_inset_;
+
+  ShelfGestureHandler gesture_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(LauncherView);
 };

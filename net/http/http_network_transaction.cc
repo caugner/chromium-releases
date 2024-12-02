@@ -374,9 +374,9 @@ LoadState HttpNetworkTransaction::GetLoadState() const {
   }
 }
 
-uint64 HttpNetworkTransaction::GetUploadProgress() const {
+UploadProgress HttpNetworkTransaction::GetUploadProgress() const {
   if (!stream_.get())
-    return 0;
+    return UploadProgress();
 
   return stream_->GetUploadProgress();
 }
@@ -747,7 +747,7 @@ int HttpNetworkTransaction::DoBuildRequest() {
   request_body_.reset(NULL);
   if (request_->upload_data) {
     request_body_.reset(new UploadDataStream(request_->upload_data));
-    const int error_code = request_body_->Init();
+    const int error_code = request_body_->InitSync();
     if (error_code != OK) {
       request_body_.reset(NULL);
       return error_code;

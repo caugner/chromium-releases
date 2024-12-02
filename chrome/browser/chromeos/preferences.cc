@@ -4,8 +4,6 @@
 
 #include "chrome/browser/chromeos/preferences.h"
 
-#include "ash/display/display_controller.h"
-#include "ash/shell.h"
 #include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
@@ -13,18 +11,20 @@
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/chromeos/display/display_preferences.h"
+#include "chrome/browser/chromeos/gdata/drive_file_system_util.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/system/drm_settings.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/chromeos/system/power_manager_settings.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/download/download_util.h"
-#include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -33,23 +33,10 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "googleurl/src/gurl.h"
-#include "ui/base/events.h"
+#include "ui/base/events/event_constants.h"
 #include "unicode/timezone.h"
 
 namespace chromeos {
-namespace {
-
-// TODO(achuith): Use a cmd-line flag + use flags for this instead.
-bool IsLumpy() {
-  std::string board;
-  system::StatisticsProvider::GetInstance()->GetMachineStatistic(
-      "CHROMEOS_RELEASE_BOARD", &board);
-  return StartsWithASCII(board, "lumpy", false);
-}
-
-}  // namespace
-
-using ash::internal::DisplayController;
 
 static const char kFallbackInputMethodLocale[] = "en-US";
 
@@ -71,15 +58,16 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
   if (base::chromeos::IsRunningOnChromeOS()) {
     input_method::InputMethodManager* manager =
         input_method::InputMethodManager::GetInstance();
-    hardware_keyboard_id =
-        manager->GetInputMethodUtil()->GetHardwareInputMethodId();
+    if (manager) {
+      hardware_keyboard_id =
+          manager->GetInputMethodUtil()->GetHardwareInputMethodId();
+    }
   } else {
     hardware_keyboard_id = "xkb:us::eng";  // only for testing.
   }
 
-  const bool enable_tap_to_click_default = IsLumpy();
   prefs->RegisterBooleanPref(prefs::kTapToClickEnabled,
-                             enable_tap_to_click_default,
+                             true,
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kEnableTouchpadThreeFingerClick,
                              false,
@@ -121,10 +109,10 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
   }
   prefs->RegisterIntegerPref(prefs::kMouseSensitivity,
                              3,
-                             PrefService::UNSYNCABLE_PREF);
+                             PrefService::SYNCABLE_PREF);
   prefs->RegisterIntegerPref(prefs::kTouchpadSensitivity,
                              3,
-                             PrefService::UNSYNCABLE_PREF);
+                             PrefService::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kUse24HourClock,
                              base::GetHourClockType() == base::k24HourClock,
                              PrefService::SYNCABLE_PREF);
@@ -153,6 +141,9 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
                             PrefService::UNSYNCABLE_PREF);
   prefs->RegisterStringPref(prefs::kLanguagePreloadEngines,
                             hardware_keyboard_id,
+                            PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterStringPref(prefs::kLanguageFilteredExtensionImes,
+                            "",
                             PrefService::UNSYNCABLE_PREF);
   for (size_t i = 0; i < language_prefs::kNumChewingBooleanPrefs; ++i) {
     prefs->RegisterBooleanPref(
@@ -246,11 +237,6 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
                              false,
                              PrefService::SYNCABLE_PREF);
 
-  // Secondary display layout.
-  prefs->RegisterIntegerPref(prefs::kSecondaryDisplayLayout,
-                             static_cast<int>(DisplayController::RIGHT),
-                             PrefService::UNSYNCABLE_PREF);
-
   // Mobile plan notifications default to on.
   prefs->RegisterBooleanPref(prefs::kShowPlanNotifications,
                              true,
@@ -284,6 +270,8 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kExternalStorageDisabled,
                              false,
                              PrefService::UNSYNCABLE_PREF);
+
+  RegisterDisplayPrefs(prefs);
 }
 
 void Preferences::InitUserPrefs(PrefService* prefs) {
@@ -297,16 +285,20 @@ void Preferences::InitUserPrefs(PrefService* prefs) {
   mouse_sensitivity_.Init(prefs::kMouseSensitivity, prefs, this);
   touchpad_sensitivity_.Init(prefs::kTouchpadSensitivity, prefs, this);
   use_24hour_clock_.Init(prefs::kUse24HourClock, prefs, this);
-  disable_gdata_.Init(prefs::kDisableGData, prefs, this);
-  disable_gdata_over_cellular_.Init(prefs::kDisableGDataOverCellular,
+  disable_drive_.Init(prefs::kDisableGData, prefs, this);
+  disable_drive_over_cellular_.Init(prefs::kDisableGDataOverCellular,
                                    prefs, this);
-  disable_gdata_hosted_files_.Init(prefs::kDisableGDataHostedFiles,
+  disable_drive_hosted_files_.Init(prefs::kDisableGDataHostedFiles,
+                                   prefs, this);
+  download_default_directory_.Init(prefs::kDownloadDefaultDirectory,
                                    prefs, this);
   primary_mouse_button_right_.Init(prefs::kPrimaryMouseButtonRight,
                                    prefs, this);
   preferred_languages_.Init(prefs::kLanguagePreferredLanguages,
                             prefs, this);
   preload_engines_.Init(prefs::kLanguagePreloadEngines, prefs, this);
+  filtered_extension_imes_.Init(prefs::kLanguageFilteredExtensionImes,
+                                prefs, this);
   current_input_method_.Init(prefs::kLanguageCurrentInputMethod, prefs, this);
   previous_input_method_.Init(prefs::kLanguagePreviousInputMethod, prefs, this);
 
@@ -358,8 +350,6 @@ void Preferences::InitUserPrefs(PrefService* prefs) {
 
   enable_screen_lock_.Init(prefs::kEnableScreenLock, prefs, this);
 
-  secondary_display_layout_.Init(prefs::kSecondaryDisplayLayout, prefs, this);
-
   enable_drm_.Init(prefs::kEnableCrosDRM, prefs, this);
 }
 
@@ -374,6 +364,8 @@ void Preferences::Init(PrefService* prefs) {
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kGuestSession)) {
     LoginUtils::Get()->SetFirstLoginPrefs(prefs);
   }
+
+  NotifyDisplayPrefChanged(prefs);
 }
 
 void Preferences::InitUserPrefsForTesting(PrefService* prefs) {
@@ -399,6 +391,13 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
       UMA_HISTOGRAM_BOOLEAN("Touchpad.TapToClick.Changed", enabled);
     else
       UMA_HISTOGRAM_BOOLEAN("Touchpad.TapToClick.Started", enabled);
+
+    // Save owner preference in local state to use on login screen.
+    if (chromeos::UserManager::Get()->IsCurrentUserOwner()) {
+      PrefService* prefs = g_browser_process->local_state();
+      if (prefs->GetBoolean(prefs::kOwnerTapToClickEnabled) != enabled)
+        prefs->SetBoolean(prefs::kOwnerTapToClickEnabled, enabled);
+    }
   }
   if (!pref_name || *pref_name == prefs::kEnableTouchpadThreeFingerClick) {
     const bool enabled = three_finger_click_enabled_.GetValue();
@@ -409,6 +408,17 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
       UMA_HISTOGRAM_BOOLEAN("Touchpad.ThreeFingerClick.Started", enabled);
   }
   if (!pref_name || *pref_name == prefs::kNaturalScroll) {
+    // Force natural scroll to on if kNaturalScrollDefault is specified on the
+    // cmd line.
+    if (CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kNaturalScrollDefault) &&
+        !pref_name &&
+        !prefs_->GetUserPrefValue(prefs::kNaturalScroll)) {
+      natural_scroll_.SetValue(true);
+      DVLOG(1) << "Natural scroll forced to true";
+      UMA_HISTOGRAM_BOOLEAN("Touchpad.NaturalScroll.Forced", true);
+    }
+
     const bool enabled = natural_scroll_.GetValue();
     ui::SetNaturalScroll(enabled);
     if (pref_name)
@@ -445,6 +455,25 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
       UMA_HISTOGRAM_BOOLEAN("Mouse.PrimaryButtonRight.Changed", right);
     else
       UMA_HISTOGRAM_BOOLEAN("Mouse.PrimaryButtonRight.Started", right);
+
+    // Save owner preference in local state to use on login screen.
+    if (chromeos::UserManager::Get()->IsCurrentUserOwner()) {
+      PrefService* prefs = g_browser_process->local_state();
+      if (prefs->GetBoolean(prefs::kOwnerPrimaryMouseButtonRight) != right)
+        prefs->SetBoolean(prefs::kOwnerPrimaryMouseButtonRight, right);
+    }
+  }
+  if (!pref_name || *pref_name == prefs::kDownloadDefaultDirectory) {
+    const bool default_download_to_drive = gdata::util::IsUnderDriveMountPoint(
+        download_default_directory_.GetValue());
+    if (pref_name)
+      UMA_HISTOGRAM_BOOLEAN(
+          "FileBrowser.DownloadDestination.IsGoogleDrive.Changed",
+          default_download_to_drive);
+    else
+      UMA_HISTOGRAM_BOOLEAN(
+          "FileBrowser.DownloadDestination.IsGoogleDrive.Started",
+          default_download_to_drive);
   }
 
   if (!pref_name || *pref_name == prefs::kLanguagePreferredLanguages) {
@@ -467,6 +496,16 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     SetLanguageConfigStringListAsCSV(language_prefs::kGeneralSectionName,
                                      language_prefs::kPreloadEnginesConfigName,
                                      preload_engines_.GetValue());
+  }
+
+  if (!pref_name || *pref_name == prefs::kLanguageFilteredExtensionImes) {
+    std::string value(filtered_extension_imes_.GetValue());
+
+    std::vector<std::string> split_values;
+    if (!value.empty())
+      base::SplitString(value, ',', &split_values);
+
+    input_method_manager_->SetFilteredExtensionImes(&split_values);
   }
 
   // Do not check |*pref_name| of the prefs for remembering current/previous
@@ -577,16 +616,6 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
         enable_screen_lock_.GetValue());
   }
 
-  if (!pref_name || *pref_name == prefs::kSecondaryDisplayLayout) {
-    int layout = secondary_display_layout_.GetValue();
-    if (static_cast<int>(DisplayController::TOP) <= layout &&
-        layout <= static_cast<int>(DisplayController::LEFT)) {
-      ash::Shell::GetInstance()->display_controller()->
-          SetSecondaryDisplayLayout(
-              static_cast<DisplayController::SecondaryDisplayLayout>(layout));
-    }
-  }
-
   // Init or update protected content (DRM) support.
   if (!pref_name || *pref_name == prefs::kEnableCrosDRM) {
     system::ToggleDrm(enable_drm_.GetValue());
@@ -595,10 +624,9 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
   // Change the download directory to the default value if a GData directory is
   // selected and GData is disabled.
   if (!pref_name || *pref_name == prefs::kDisableGData) {
-    if (disable_gdata_.GetValue()) {
-      const FilePath download_path =
-          prefs_->GetFilePath(prefs::kDownloadDefaultDirectory);
-      if (gdata::util::IsUnderGDataMountPoint(download_path)) {
+    if (disable_drive_.GetValue()) {
+      if (gdata::util::IsUnderDriveMountPoint(
+          download_default_directory_.GetValue())) {
         prefs_->SetFilePath(prefs::kDownloadDefaultDirectory,
                             download_util::GetDefaultDownloadDirectory());
       }

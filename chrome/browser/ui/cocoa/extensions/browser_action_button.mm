@@ -9,9 +9,8 @@
 
 #include "base/logging.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/browser/extensions/image_loading_tracker.h"
+#include "chrome/browser/extensions/extension_action_icon_factory.h"
 #include "chrome/browser/ui/cocoa/extensions/extension_action_context_menu.h"
-#import "chrome/browser/ui/cocoa/image_utils.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
@@ -36,43 +35,29 @@ NSString* const kBrowserActionButtonDraggingNotification =
 NSString* const kBrowserActionButtonDragEndNotification =
     @"BrowserActionButtonDragEndNotification";
 
-static const CGFloat kBrowserActionBadgeOriginYOffset = 5;
-
-namespace {
+const CGFloat kBrowserActionBadgeOriginYOffset = 5;
 const CGFloat kAnimationDuration = 0.2;
-}  // anonymous namespace
 
 // A helper class to bridge the asynchronous Skia bitmap loading mechanism to
 // the extension's button.
-class ExtensionImageTrackerBridge : public content::NotificationObserver,
-                                    public ImageLoadingTracker::Observer {
+class ExtensionActionIconFactoryBridge
+    : public content::NotificationObserver,
+      public ExtensionActionIconFactory::Observer {
  public:
-  ExtensionImageTrackerBridge(BrowserActionButton* owner,
-                              const Extension* extension)
+  ExtensionActionIconFactoryBridge(BrowserActionButton* owner,
+                                   const Extension* extension)
       : owner_(owner),
-        tracker_(this),
+        icon_factory_(extension, extension->browser_action(), this),
         browser_action_(extension->browser_action()) {
-    // The Browser Action API does not allow the default icon path to be
-    // changed at runtime, so we can load this now and cache it.
-    std::string path = extension->browser_action()->default_icon_path();
-    if (!path.empty()) {
-      tracker_.LoadImage(extension, extension->GetResource(path),
-                         gfx::Size(Extension::kBrowserActionIconMaxSize,
-                                   Extension::kBrowserActionIconMaxSize),
-                         ImageLoadingTracker::DONT_CACHE);
-    }
     registrar_.Add(
         this, chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
         content::Source<ExtensionAction>(browser_action_));
   }
 
-  ~ExtensionImageTrackerBridge() {}
+  virtual ~ExtensionActionIconFactoryBridge() {}
 
   // ImageLoadingTracker::Observer implementation.
-  void OnImageLoaded(const gfx::Image& image,
-                     const std::string& extension_id,
-                     int index) OVERRIDE {
-    browser_action_->CacheIcon(browser_action_->default_icon_path(), image);
+  void OnIconUpdated() OVERRIDE {
     [owner_ updateState];
   }
 
@@ -86,12 +71,19 @@ class ExtensionImageTrackerBridge : public content::NotificationObserver,
       NOTREACHED();
   }
 
+  gfx::Image GetIcon(int tabId) {
+    return icon_factory_.GetIcon(tabId);
+  }
+
  private:
   // Weak. Owns us.
   BrowserActionButton* owner_;
 
-  // Loads the button's icons for us on the file thread.
-  ImageLoadingTracker tracker_;
+  // The object that will be used to get the browser action icon for us.
+  // It may load the icon asynchronously (in which case the initial icon
+  // returned by the factory will be transparent), so we have to observe it for
+  // updates to the icon.
+  ExtensionActionIconFactory icon_factory_;
 
   // The browser action whose images we're loading.
   ExtensionAction* const browser_action_;
@@ -99,7 +91,7 @@ class ExtensionImageTrackerBridge : public content::NotificationObserver,
   // Used for registering to receive notifications and automatic clean up.
   content::NotificationRegistrar registrar_;
 
-  DISALLOW_COPY_AND_ASSIGN(ExtensionImageTrackerBridge);
+  DISALLOW_COPY_AND_ASSIGN(ExtensionActionIconFactoryBridge);
 };
 
 @interface BrowserActionCell (Internals)
@@ -137,6 +129,14 @@ class ExtensionImageTrackerBridge : public content::NotificationObserver,
     [cell
         accessibilitySetOverrideValue:base::SysUTF8ToNSString(extension->name())
         forAttribute:NSAccessibilityDescriptionAttribute];
+    [cell setImageID:IDR_BROWSER_ACTION
+      forButtonState:image_button_cell::kDefaultState];
+    [cell setImageID:IDR_BROWSER_ACTION_H
+      forButtonState:image_button_cell::kHoverState];
+    [cell setImageID:IDR_BROWSER_ACTION_P
+      forButtonState:image_button_cell::kPressedState];
+    [cell setImageID:IDR_BROWSER_ACTION
+      forButtonState:image_button_cell::kDisabledState];
 
     [self setTitle:@""];
     [self setButtonType:NSMomentaryChangeButton];
@@ -149,7 +149,8 @@ class ExtensionImageTrackerBridge : public content::NotificationObserver,
 
     tabId_ = tabId;
     extension_ = extension;
-    imageLoadingBridge_.reset(new ExtensionImageTrackerBridge(self, extension));
+    iconFactoryBridge_.reset(
+        new ExtensionActionIconFactoryBridge(self, extension));
 
     moveAnimation_.reset([[NSViewAnimation alloc] init]);
     [moveAnimation_ gtm_setDuration:kAnimationDuration
@@ -214,8 +215,7 @@ class ExtensionImageTrackerBridge : public content::NotificationObserver,
 - (void)endDrag {
   isBeingDragged_ = NO;
   [[NSNotificationCenter defaultCenter]
-      postNotificationName:kBrowserActionButtonDragEndNotification
-                    object:self];
+      postNotificationName:kBrowserActionButtonDragEndNotification object:self];
   [[self cell] setHighlighted:NO];
 }
 
@@ -249,14 +249,15 @@ class ExtensionImageTrackerBridge : public content::NotificationObserver,
     [self setToolTip:base::SysUTF8ToNSString(tooltip)];
   }
 
-  gfx::Image image = extension_->browser_action()->GetIcon(tabId_);
+  gfx::Image image = iconFactoryBridge_->GetIcon(tabId_);
+
   if (!image.IsEmpty())
     [self setImage:image.ToNSImage()];
 
   [[self cell] setTabId:tabId_];
 
   bool enabled = extension_->browser_action()->GetIsVisible(tabId_);
-  [self setEnabled:enabled ? YES : NO];
+  [self setEnabled:enabled];
 
   [self setNeedsDisplay:YES];
 }
@@ -283,7 +284,8 @@ class ExtensionImageTrackerBridge : public content::NotificationObserver,
                  fromRect:NSZeroRect
                 operation:NSCompositeSourceOver
                  fraction:1.0
-             neverFlipped:YES];
+           respectFlipped:YES
+                    hints:nil];
 
   bounds.origin.y += kBrowserActionBadgeOriginYOffset;
   [[self cell] drawBadgeWithinFrame:bounds];
@@ -306,9 +308,22 @@ class ExtensionImageTrackerBridge : public content::NotificationObserver,
   extensionAction_->PaintBadge(&canvas, boundingRect, tabId_);
 }
 
-- (void)drawInteriorWithFrame:(NSRect)cellFrame inView:(NSView*)controlView {
+- (void)drawWithFrame:(NSRect)cellFrame inView:(NSView*)controlView {
   gfx::ScopedNSGraphicsContextSaveGState scopedGState;
-  [super drawInteriorWithFrame:cellFrame inView:controlView];
+  [super drawWithFrame:cellFrame inView:controlView];
+  bool enabled = extensionAction_->GetIsVisible(tabId_);
+  const NSSize imageSize = self.image.size;
+  const NSRect imageRect =
+      NSMakeRect(std::floor((NSWidth(cellFrame) - imageSize.width) / 2.0),
+                 std::floor((NSHeight(cellFrame) - imageSize.height) / 2.0),
+                 imageSize.width, imageSize.height);
+  [self.image drawInRect:imageRect
+                fromRect:NSZeroRect
+               operation:NSCompositeSourceOver
+                fraction:enabled ? 1.0 : 0.4
+          respectFlipped:YES
+                   hints:nil];
+
   cellFrame.origin.y += kBrowserActionBadgeOriginYOffset;
   [self drawBadgeWithinFrame:cellFrame];
 }

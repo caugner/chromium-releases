@@ -21,6 +21,7 @@
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
+#include "media/base/media_switches.h"
 #include "ui/app_list/app_list_switches.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/ui_base_switches.h"
@@ -140,13 +141,23 @@ const Experiment::Choice kTouchOptimizedUIChoices[] = {
     switches::kTouchOptimizedUIDisabled }
 };
 
-const Experiment::Choice kPointerLockUIChoices[] = {
+const Experiment::Choice kAsyncDnsChoices[] = {
   { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
-  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
-    switches::kEnablePointerLock, ""},
   { IDS_GENERIC_EXPERIMENT_CHOICE_DISABLED,
-    switches::kDisablePointerLock, ""}
+    switches::kDisableAsyncDns, ""},
+  { IDS_GENERIC_EXPERIMENT_CHOICE_ENABLED,
+    switches::kEnableAsyncDns, ""}
 };
+
+#if defined(OS_CHROMEOS)
+const Experiment::Choice kAshBootAnimationFunction[] = {
+  { IDS_GENERIC_EXPERIMENT_CHOICE_DEFAULT, "", "" },
+  { IDS_FLAGS_ASH_BOOT_ANIMATION_FUNCTION2,
+    ash::switches::kAshBootAnimationFunction2, ""},
+  { IDS_FLAGS_ASH_BOOT_ANIMATION_FUNCTION3,
+    ash::switches::kAshBootAnimationFunction3, ""}
+};
+#endif
 
 
 // RECORDING USER METRICS FOR FLAGS:
@@ -216,13 +227,15 @@ const Experiment kExperiments[] = {
 #endif
     SINGLE_VALUE_TYPE(switches::kEnableCloudPrintProxy)
   },
+#if defined(OS_WIN)
   {
-    "print-setting-reset",  // FLAGS:RECORD_UMA
-    IDS_FLAGS_PRINT_SETTING_RESET_NAME,
-    IDS_FLAGS_PRINT_SETTING_RESET_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kPrintSettingsReset)
+    "print-raster",
+    IDS_FLAGS_PRINT_RASTER_NAME,
+    IDS_FLAGS_PRINT_RASTER_DESCRIPTION,
+    kOsWin,
+    SINGLE_VALUE_TYPE(switches::kPrintRaster)
   },
+#endif  // OS_WIN
   {
     "crxless-web-apps",
     IDS_FLAGS_CRXLESS_WEB_APPS_NAME,
@@ -257,6 +270,13 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_DISABLE_ACCELERATED_2D_CANVAS_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kDisableAccelerated2dCanvas)
+  },
+  {
+    "disable-deferred-2d-canvas",
+    IDS_FLAGS_DISABLE_DEFERRED_2D_CANVAS_NAME,
+    IDS_FLAGS_DISABLE_DEFERRED_2D_CANVAS_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kDisableDeferred2dCanvas)
   },
   {
     "disable-threaded-animation",
@@ -321,22 +341,29 @@ const Experiment kExperiments[] = {
     "enable-nacl-exception-handling",  // FLAGS:RECORD_UMA
     IDS_FLAGS_ENABLE_NACL_EXCEPTION_HANDLING_NAME,
     IDS_FLAGS_ENABLE_NACL_EXCEPTION_HANDLING_DESCRIPTION,
-    kOsWin,
+    kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnableNaClExceptionHandling)
   },
   {
-    "nacl-gdb",  // FLAGS:RECORD_UMA
-    IDS_FLAGS_NACL_GDB_NAME,
-    IDS_FLAGS_NACL_GDB_DESCRIPTION,
-    kOsWin,
-    SINGLE_VALUE_TYPE(switches::kNaClGdb)
+    "enable-nacl-debug",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_ENABLE_NACL_DEBUG_NAME,
+    IDS_FLAGS_ENABLE_NACL_DEBUG_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableNaClDebug)
   },
   {
-    "nacl-gdb-script",  // FLAGS:RECORD_UMA
-    IDS_FLAGS_NACL_GDB_SCRIPT_NAME,
-    IDS_FLAGS_NACL_GDB_SCRIPT_DESCRIPTION,
+    "enable-pnacl",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_ENABLE_PNACL_NAME,
+    IDS_FLAGS_ENABLE_PNACL_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kNaClGdbScript)
+    SINGLE_VALUE_TYPE(switches::kEnablePnacl)
+  },
+  {
+    "enable-scripted-speech",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_ENABLE_SCRIPTED_SPEECH_NAME,
+    IDS_FLAGS_ENABLE_SCRIPTED_SPEECH_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableScriptedSpeech)
   },
   {
     "extension-apis",  // FLAGS:RECORD_UMA
@@ -430,6 +457,13 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kDisableSyncAppNotifications)
   },
   {
+    "enable-gesture-tap-highlight",
+    IDS_FLAGS_ENABLE_GESTURE_TAP_HIGHLIGHTING_NAME,
+    IDS_FLAGS_ENABLE_GESTURE_TAP_HIGHLIGHTING_DESCRIPTION,
+    kOsLinux | kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnableGestureTapHighlight)
+  },
+  {
     "enable-smooth-scrolling",  // FLAGS:RECORD_UMA
     IDS_FLAGS_ENABLE_SMOOTH_SCROLLING_NAME,
     IDS_FLAGS_ENABLE_SMOOTH_SCROLLING_DESCRIPTION,
@@ -500,21 +534,14 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_ASYNC_DNS_NAME,
     IDS_FLAGS_ENABLE_ASYNC_DNS_DESCRIPTION,
     kOsWin | kOsMac | kOsLinux | kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kEnableAsyncDns)
+    MULTI_VALUE_TYPE(kAsyncDnsChoices)
   },
   {
-    "enable-video-track",
-    IDS_FLAGS_ENABLE_VIDEO_TRACK_NAME,
-    IDS_FLAGS_ENABLE_VIDEO_TRACK_DESCRIPTION,
+    "disable-media-source",
+    IDS_FLAGS_DISABLE_MEDIA_SOURCE_NAME,
+    IDS_FLAGS_DISABLE_MEDIA_SOURCE_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableVideoTrack)
-  },
-  {
-    "enable-media-source",
-    IDS_FLAGS_ENABLE_MEDIA_SOURCE_NAME,
-    IDS_FLAGS_ENABLE_MEDIA_SOURCE_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableMediaSource)
+    SINGLE_VALUE_TYPE(switches::kDisableMediaSource)
   },
   {
     "enable-encrypted-media",
@@ -522,13 +549,6 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_ENCRYPTED_MEDIA_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnableEncryptedMedia)
-  },
-  {
-    "enable-pointer-lock",
-    IDS_FLAGS_ENABLE_POINTER_LOCK_NAME,
-    IDS_FLAGS_ENABLE_POINTER_LOCK_DESCRIPTION,
-    kOsAll,
-    MULTI_VALUE_TYPE(kPointerLockUIChoices)
   },
 #if defined(USE_ASH)
   {
@@ -583,39 +603,18 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kDisableSoftwareRasterizer)
   },
   {
-    "enable-peer-connection",
-    IDS_FLAGS_PEER_CONNECTION_NAME,
-    IDS_FLAGS_PEER_CONNECTION_DESCRIPTION,
+    "enable-experimental-webkit-features",
+    IDS_FLAGS_EXPERIMENTAL_WEBKIT_FEATURES_NAME,
+    IDS_FLAGS_EXPERIMENTAL_WEBKIT_FEATURES_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnablePeerConnection)
+    SINGLE_VALUE_TYPE(switches::kEnableExperimentalWebKitFeatures)
   },
   {
-    "enable-shadow-dom",
-    IDS_FLAGS_SHADOW_DOM_NAME,
-    IDS_FLAGS_SHADOW_DOM_DESCRIPTION,
+    "enable-css-shaders",
+    IDS_FLAGS_CSS_SHADERS_NAME,
+    IDS_FLAGS_CSS_SHADERS_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableShadowDOM)
-  },
-  {
-    "enable-style-scoped",
-    IDS_FLAGS_STYLE_SCOPED_NAME,
-    IDS_FLAGS_STYLE_SCOPED_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableStyleScoped)
-  },
-  {
-    "enable-css-regions",
-    IDS_FLAGS_CSS_REGIONS_NAME,
-    IDS_FLAGS_CSS_REGIONS_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableCssRegions)
-  },
-  {
-    "enable-css-variables",
-    IDS_FLAGS_CSS_VARIABLES_NAME,
-    IDS_FLAGS_CSS_VARIABLES_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableCssVariables)
+    SINGLE_VALUE_TYPE(switches::kEnableCssShaders)
   },
   {
     "enable-extension-activity-ui",
@@ -661,13 +660,6 @@ const Experiment kExperiments[] = {
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnableDiscoveryInNewTabPage)
   },
-  {
-    "enable-chrome-to-mobile",  // FLAGS:RECORD_UMA
-    IDS_FLAGS_ENABLE_CHROME_TO_MOBILE_NAME,
-    IDS_FLAGS_ENABLE_CHROME_TO_MOBILE_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableChromeToMobile)
-  },
 #if defined(GOOGLE_CHROME_BUILD)
   {
     "disable-asynchronous-spellchecking",
@@ -681,8 +673,15 @@ const Experiment kExperiments[] = {
     "touch-optimized-ui",
     IDS_FLAGS_TOUCH_OPTIMIZED_UI_NAME,
     IDS_FLAGS_TOUCH_OPTIMIZED_UI_DESCRIPTION,
-    kOsWin | kOsCrOS,
+    kOsWin,
     MULTI_VALUE_TYPE(kTouchOptimizedUIChoices)
+  },
+  {
+    "enable-webkit-text-subpixel-positioning",
+    IDS_FLAGS_ENABLE_WEBKIT_TEXT_SUBPIXEL_POSITIONING_NAME,
+    IDS_FLAGS_ENABLE_WEBKIT_TEXT_SUBPIXEL_POSITIONING_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnableWebkitTextSubpixelPositioning)
   },
   {
     "enable-touch-events",
@@ -692,6 +691,20 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableTouchEvents)
   },
 #if defined(OS_CHROMEOS)
+  {
+    "enable-background-loader",
+    IDS_ENABLE_BACKLOADER_NAME,
+    IDS_ENABLE_BACKLOADER_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnableBackgroundLoader)
+  },
+  {
+    "enable-bezel-touch",
+    IDS_ENABLE_BEZEL_TOUCH_NAME,
+    IDS_ENABLE_BEZEL_TOUCH_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnableBezelTouch)
+  },
   {
     "no-discard-tabs",
     IDS_FLAGS_NO_DISCARD_TABS_NAME,
@@ -720,13 +733,6 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_FORCE_HIGH_DPI_DESCRIPTION,
     kOsCrOS,
     SINGLE_VALUE_TYPE_AND_VALUE(switches::kForceDeviceScaleFactor, "2")
-  },
-  {
-    "enable-hidpi-pdf-plugin",
-    IDS_FLAGS_ENABLE_HIGH_DPI_PDF_PLUGIN_NAME,
-    IDS_FLAGS_ENABLE_HIGH_DPI_PDF_PLUGIN_DESCRIPTION,
-    kOsCrOS | kOsMac,
-    SINGLE_VALUE_TYPE(switches::kEnableHighDPIPDFPlugin)
   },
 #if defined(OS_CHROMEOS)
   {
@@ -760,11 +766,11 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(ash::switches::kAshTouchHud)
   },
   {
-    "ash-notify",
+    "ash-notify-disabled",
     IDS_FLAGS_DISABLE_ASH_NOTIFY_NAME,
     IDS_FLAGS_DISABLE_ASH_NOTIFY_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(ash::switches::kAshNotify),
+    SINGLE_VALUE_TYPE(ash::switches::kAshNotifyDisabled),
   },
   {
     "enable-pinch",
@@ -780,21 +786,14 @@ const Experiment kExperiments[] = {
     kOsAll,
     SINGLE_VALUE_TYPE(app_list::switches::kAppListShowAppsOnly),
   },
-  {
-    "ash-extended-desktop",
-    IDS_FLAGS_ENABLE_ASH_EXTENDED_DESKTOP_NAME,
-    IDS_FLAGS_ENABLE_ASH_EXTENDED_DESKTOP_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(ash::switches::kAshExtendedDesktop)
-  },
 #endif  // defined(USE_ASH)
 #if defined(OS_CHROMEOS)
   {
-    "experimental-wallpaper-ui",
-    IDS_FLAGS_EXPERIMENTAL_WALLPAPER_UI_NAME,
-    IDS_FLAGS_EXPERIMENTAL_WALLPAPER_UI_DESCRIPTION,
+    "disable-new-wallpaper-picker-ui",
+    IDS_FLAGS_DISABLE_NEW_WALLPAPER_UI_NAME,
+    IDS_FLAGS_DISABLE_NEW_WALLPAPER_UI_DESCRIPTION,
     kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kExperimentalWallpaperUI)
+    SINGLE_VALUE_TYPE(switches::kDisableNewWallpaperUI)
   },
   {
     "enable-drive-v2-api",
@@ -825,11 +824,39 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kDisableNewOobe),
   },
   {
+    "disable-factory-reset",
+    IDS_FLAGS_DISABLE_FACTORY_RESET,
+    IDS_FLAGS_DISABLE_FACTORY_RESET_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kDisableFactoryReset),
+  },
+  {
     "disable-boot-animation",
     IDS_FLAGS_DISABLE_BOOT_ANIMATION,
     IDS_FLAGS_DISABLE_BOOT_ANIMATION_DESCRIPTION,
     kOsCrOS,
     SINGLE_VALUE_TYPE(switches::kDisableBootAnimation),
+  },
+  {
+    "disable-boot-animation2",
+    IDS_FLAGS_DISABLE_BOOT_ANIMATION2,
+    IDS_FLAGS_DISABLE_BOOT_ANIMATION2_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(ash::switches::kAshDisableBootAnimation2),
+  },
+  {
+    "boot-animation-fucntion",
+    IDS_FLAGS_ASH_BOOT_ANIMATION_FUNCTION,
+    IDS_FLAGS_ASH_BOOT_ANIMATION_FUNCTION_DESCRIPTION,
+    kOsCrOS,
+    MULTI_VALUE_TYPE(kAshBootAnimationFunction),
+  },
+  {
+    "disable-workspace2",
+    IDS_FLAGS_DISABLE_WORKSPACE2,
+    IDS_FLAGS_DISABLE_WORKSPACE2_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(ash::switches::kAshDisableWorkspace2),
   },
 #endif
   {
@@ -852,13 +879,6 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_FRAMELESS_DIALOG_DESCRIPTION,
     kOsWin | kOsCrOS,
     SINGLE_VALUE_TYPE(switches::kEnableFramelessConstrainedDialogs),
-  },
-  {
-    "disable-non-fullscreen-mouse-lock",
-    IDS_FLAGS_DISABLE_NON_FULLSCREEN_MOUSE_LOCK_NAME,
-    IDS_FLAGS_DISABLE_NON_FULLSCREEN_MOUSE_LOCK_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kDisableNonFullscreenMouseLock),
   },
 #if defined(OS_CHROMEOS)
   {
@@ -885,12 +905,50 @@ const Experiment kExperiments[] = {
   },
 #endif
   {
-    "enable-website-settings",  // FLAGS:RECORD_UMA
-    IDS_FLAGS_ENABLE_WEBSITE_SETTINGS_NAME,
-    IDS_FLAGS_ENABLE_WEBSITE_SETTINGS_DESCRIPTION,
+    "disable-website-settings",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_DISABLE_WEBSITE_SETTINGS_NAME,
+    IDS_FLAGS_DISABLE_WEBSITE_SETTINGS_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableWebsiteSettings),
+    SINGLE_VALUE_TYPE(switches::kDisableWebsiteSettings),
   },
+  {
+    "enable-webaudio-input",
+    IDS_FLAGS_ENABLE_WEBAUDIO_INPUT_NAME,
+    IDS_FLAGS_ENABLE_WEBAUDIO_INPUT_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableWebAudioInput),
+  },
+  {
+    "enable-contacts",
+    IDS_FLAGS_ENABLE_CONTACTS_NAME,
+    IDS_FLAGS_ENABLE_CONTACTS_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnableContacts)
+  },
+#if defined(USE_ASH)
+  { "ash-enable-advanced-gestures",
+    IDS_FLAGS_ENABLE_ADVANCED_GESTURES_NAME,
+    IDS_FLAGS_ENABLE_ADVANCED_GESTURES_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(ash::switches::kAshEnableAdvancedGestures),
+  },
+#endif
+#if defined(OS_CHROMEOS)
+  {
+    "enable-carrier-switching",
+    IDS_FLAGS_ENABLE_CARRIER_SWITCHING,
+    IDS_FLAGS_ENABLE_CARRIER_SWITCHING_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnableCarrierSwitching)
+  },
+  {
+    "enable-request-tablet-site",
+    IDS_FLAGS_ENABLE_REQUEST_TABLET_SITE_NAME,
+    IDS_FLAGS_ENABLE_REQUEST_TABLET_SITE_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnableRequestTabletSite)
+  },
+#endif
 };
 
 const Experiment* experiments = kExperiments;

@@ -24,17 +24,11 @@ class TestBarView : public AccessiblePaneView,
   virtual ~TestBarView();
 
   virtual void ButtonPressed(Button* sender,
-                             const views::Event& event) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
   TextButton* child_button() const { return child_button_.get(); }
   TextButton* second_child_button() const { return second_child_button_.get(); }
   TextButton* third_child_button() const { return third_child_button_.get(); }
   TextButton* not_child_button() const { return not_child_button_.get(); }
-
-  const ui::Accelerator& home_key() const { return home_key_; }
-  const ui::Accelerator& end_key() const { return end_key_; }
-  const ui::Accelerator& escape_key() const { return escape_key_; }
-  const ui::Accelerator& left_key() const { return left_key_; }
-  const ui::Accelerator& right_key() const { return right_key_; }
 
   virtual View* GetDefaultFocusableChild() OVERRIDE;
 
@@ -55,8 +49,8 @@ TestBarView::TestBarView() {
 
 TestBarView::~TestBarView() {}
 
-void TestBarView::ButtonPressed(views::Button* sender,
-                                const views::Event& event) {}
+void TestBarView::ButtonPressed(views::Button* sender, const ui::Event& event) {
+}
 
 void TestBarView::Init() {
   SetLayoutManager(new views::FillLayout());

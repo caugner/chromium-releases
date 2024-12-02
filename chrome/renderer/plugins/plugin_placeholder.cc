@@ -157,9 +157,7 @@ PluginPlaceholder* PluginPlaceholder::CreateBlockedPlugin(
     const std::string& identifier,
     const string16& name,
     int template_id,
-    int message_id) {
-  string16 message = l10n_util::GetStringFUTF16(message_id, name);
-
+    const string16& message) {
   DictionaryValue values;
   values.SetString("message", message);
   values.SetString("name", name);
@@ -190,7 +188,7 @@ PluginPlaceholder* PluginPlaceholder::CreateMobileYoutubePlugin(
     const WebPluginParams& params) {
   const base::StringPiece template_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_YOUTUBE_PLUGIN_HTML, ui::SCALE_FACTOR_NONE));
+          IDR_MOBILE_YOUTUBE_PLUGIN_HTML, ui::SCALE_FACTOR_NONE));
 
   DictionaryValue values;
   values.SetString("video_id", GetYoutubeVideoId(params));
@@ -316,12 +314,22 @@ void PluginPlaceholder::ReplacePlugin(WebPlugin* new_plugin) {
     return;
   }
 
-  // Set the new plug-in on the container before initializing it.
   WebPluginContainer* container = plugin_->container();
+  // Set the new plug-in on the container before initializing it.
   container->setPlugin(new_plugin);
+  // Save the element in case the plug-in is removed from the page during
+  // initialization.
+  WebElement element = container->element();
   if (!new_plugin->initialize(container)) {
     // We couldn't initialize the new plug-in. Restore the old one and abort.
     container->setPlugin(plugin_);
+    return;
+  }
+
+  // The plug-in has been removed from the page. Destroy the old plug-in
+  // (which will destroy us).
+  if (element.parentNode().isNull()) {
+    plugin_->destroy();
     return;
   }
 

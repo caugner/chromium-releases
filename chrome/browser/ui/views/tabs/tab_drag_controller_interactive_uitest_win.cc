@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/property_bag.h"
 #include "base/string_number_conversions.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -64,6 +63,9 @@ IN_PROC_BROWSER_TEST_F(TabDragControllerTest, DragInSameWindow) {
 // Creates two browsers, drags from first into second.
 IN_PROC_BROWSER_TEST_F(TabDragControllerTest, DragToSeparateWindow) {
   TabStrip* tab_strip = GetTabStripForBrowser(browser());
+
+  // Add another tab to browser().
+  AddTabAndResetBrowser(browser());
 
   // Create another browser.
   Browser* browser2 = CreateAnotherWindowBrowserAndRelayout();
@@ -262,6 +264,9 @@ IN_PROC_BROWSER_TEST_F(TabDragControllerTest, DeleteSourceDetached) {
 IN_PROC_BROWSER_TEST_F(TabDragControllerTest, DragAllToSeparateWindow) {
   TabStrip* tab_strip = GetTabStripForBrowser(browser());
 
+  // Add another tab to browser().
+  AddTabAndResetBrowser(browser());
+
   // Create another browser.
   Browser* browser2 = CreateAnotherWindowBrowserAndRelayout();
   TabStrip* tab_strip2 = GetTabStripForBrowser(browser2);
@@ -307,6 +312,9 @@ IN_PROC_BROWSER_TEST_F(TabDragControllerTest, DragAllToSeparateWindow) {
 IN_PROC_BROWSER_TEST_F(TabDragControllerTest,
                        DragAllToSeparateWindowAndCancel) {
   TabStrip* tab_strip = GetTabStripForBrowser(browser());
+
+  // Add another tab to browser().
+  AddTabAndResetBrowser(browser());
 
   // Create another browser.
   Browser* browser2 = CreateAnotherWindowBrowserAndRelayout();

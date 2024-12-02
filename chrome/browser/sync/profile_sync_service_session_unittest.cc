@@ -15,6 +15,7 @@
 #include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
 #include "base/time.h"
+#include "chrome/browser/sessions/session_types_test_helper.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/token_service_factory.h"
@@ -28,7 +29,6 @@
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/navigation_entry.h"
@@ -36,6 +36,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_browser_thread.h"
+#include "google_apis/gaia/gaia_constants.h"
 #include "googleurl/src/gurl.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/change_record.h"
@@ -139,9 +140,10 @@ void VerifySyncedSession(
       ASSERT_EQ("app_id", tab->extension_app_id);
       ASSERT_EQ(1U, tab->navigations.size());
       ASSERT_EQ(tab->navigations[0].virtual_url(), GURL("http://foo/1"));
-      ASSERT_EQ(tab->navigations[0].referrer().url, GURL("referrer"));
+      ASSERT_EQ(SessionTypesTestHelper::GetReferrer(tab->navigations[0]).url,
+                GURL("referrer"));
       ASSERT_EQ(tab->navigations[0].title(), string16(ASCIIToUTF16("title")));
-      ASSERT_EQ(tab->navigations[0].transition(),
+      ASSERT_EQ(SessionTypesTestHelper::GetTransitionType(tab->navigations[0]),
                 content::PAGE_TRANSITION_TYPED);
     }
   }
@@ -248,7 +250,7 @@ class ProfileSyncServiceSessionTest
     EXPECT_CALL(*factory, CreateSessionSyncComponents(_, _)).
         WillOnce(Return(ProfileSyncComponentsFactory::SyncComponents(
             model_associator_, change_processor_)));
-    EXPECT_CALL(*factory, CreateDataTypeManager(_, _)).
+    EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _)).
         WillOnce(ReturnNewDataTypeManager());
 
     TokenServiceFactory::GetForProfile(profile())->IssueAuthTokenForTest(

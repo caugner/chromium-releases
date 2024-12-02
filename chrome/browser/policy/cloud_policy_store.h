@@ -12,6 +12,8 @@
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
 
+class Profile;
+
 namespace policy {
 
 // Defines the low-level interface used by the cloud policy code to:
@@ -34,6 +36,8 @@ class CloudPolicyStore {
     STATUS_SERIALIZE_ERROR,
     // Validation error.
     STATUS_VALIDATION_ERROR,
+    // Store cannot accept policy (e.g. non-enterprise device).
+    STATUS_BAD_STATE,
   };
 
   // Callbacks for policy store events. Most importantly, policy updates.
@@ -71,19 +75,23 @@ class CloudPolicyStore {
     return validation_status_;
   }
 
-  // Store a new policy blob. Pending store operations will be canceled. The
-  // store operation may proceed asynchronously and observers are notified once
-  // the operation finishes. If successful, OnStoreLoaded() will be invoked on
-  // the observers and the updated policy can be read through policy(). Errors
-  // generate OnStoreError() notifications.
+  // Store a new policy blob. Pending load/store operations will be canceled.
+  // The store operation may proceed asynchronously and observers are notified
+  // once the operation finishes. If successful, OnStoreLoaded() will be invoked
+  // on the observers and the updated policy can be read through policy().
+  // Errors generate OnStoreError() notifications.
   virtual void Store(
       const enterprise_management::PolicyFetchResponse& policy) = 0;
 
-  // Load the current policy blob from persistent storage. This may trigger
-  // asynchronous operations. Upon success, OnStoreLoaded() will be called on
-  // the registered observers. Otherwise, OnStoreError() reports the reason for
-  // failure.
+  // Load the current policy blob from persistent storage. Pending load/store
+  // operations will be canceled. This may trigger asynchronous operations.
+  // Upon success, OnStoreLoaded() will be called on the registered observers.
+  // Otherwise, OnStoreError() reports the reason for failure.
   virtual void Load() = 0;
+
+  // Deletes any existing policy blob and notifies observers via OnStoreLoaded()
+  // that the blob has changed. Virtual for mocks.
+  virtual void Clear();
 
   // Registers an observer to be notified when policy changes.
   void AddObserver(Observer* observer);
@@ -91,10 +99,19 @@ class CloudPolicyStore {
   // Removes the specified observer.
   void RemoveObserver(Observer* observer);
 
+  // Factory method to create a CloudPolicyStore appropriate for the current
+  // platform, for storing user policy for the user associated with the passed
+  // |profile|. Implementation is defined in the individual platform store
+  // files.
+  static scoped_ptr<CloudPolicyStore> CreateUserPolicyStore(Profile* profile);
+
  protected:
   // Invokes the corresponding callback on all registered observers.
   void NotifyStoreLoaded();
   void NotifyStoreError();
+
+  // Invoked by Clear() to remove stored policy.
+  virtual void RemoveStoredPolicy() = 0;
 
   // Decoded version of the currently effective policy.
   PolicyMap policy_map_;

@@ -19,12 +19,17 @@
 
 class ChromeRenderProcessObserver;
 class ContentSettingsObserver;
-class ExtensionDispatcher;
 class ExternalHostBindings;
 class SkBitmap;
 class TranslateHelper;
 struct ThumbnailScore;
 class WebViewColorOverlay;
+class WebViewAnimatingOverlay;
+
+namespace extensions {
+class Dispatcher;
+class Extension;
+}
 
 namespace WebKit {
 class WebView;
@@ -48,7 +53,7 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
       content::RenderView* render_view,
       ContentSettingsObserver* content_settings,
       ChromeRenderProcessObserver* chrome_render_process_observer,
-      ExtensionDispatcher* extension_dispatcher,
+      extensions::Dispatcher* extension_dispatcher,
       TranslateHelper* translate_helper);
   virtual ~ChromeRenderViewObserver();
 
@@ -107,6 +112,8 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   virtual bool allowWebComponents(const WebKit::WebDocument&, bool) OVERRIDE;
   virtual bool allowHTMLNotifications(
       const WebKit::WebDocument& document) OVERRIDE;
+  virtual bool allowMutationEvents(const WebKit::WebDocument&,
+                                   bool default_value) OVERRIDE;
   virtual void didNotAllowPlugins(WebKit::WebFrame* frame) OVERRIDE;
   virtual void didNotAllowScript(WebKit::WebFrame* frame) OVERRIDE;
   virtual bool allowDisplayingInsecureContent(
@@ -187,17 +194,17 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   // Determines if a host is in the strict security host set.
   bool IsStrictSecurityHost(const std::string& host);
 
-  // Checks if |origin| correponds to an installed extension that has been
-  // granted the |permission|.
-  bool HasExtensionPermission(const WebKit::WebSecurityOrigin& origin,
-                              extensions::APIPermission::ID permission) const;
+  // If |origin| corresponds to an installed extension, returns that extension.
+  // Otherwise returns NULL.
+  const extensions::Extension* GetExtension(
+      const WebKit::WebSecurityOrigin& origin) const;
 
   // Save the JavaScript to preload if a ViewMsg_WebUIJavaScript is received.
   scoped_ptr<WebUIJavaScript> webui_javascript_;
 
   // Owned by ChromeContentRendererClient and outlive us.
   ChromeRenderProcessObserver* chrome_render_process_observer_;
-  ExtensionDispatcher* extension_dispatcher_;
+  extensions::Dispatcher* extension_dispatcher_;
 
   // Have the same lifetime as us.
   ContentSettingsObserver* content_settings_;
@@ -229,6 +236,9 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
 
   // A color page overlay when visually de-emaphasized.
   scoped_ptr<WebViewColorOverlay> dimmed_color_overlay_;
+
+  // A animating page overlay when visually de-emaphasized.
+  scoped_ptr<WebViewAnimatingOverlay> dimmed_animating_overlay_;
 
   // Used to delay calling CapturePageInfo.
   base::Timer capture_timer_;

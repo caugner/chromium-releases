@@ -6,6 +6,9 @@
   'includes': [
     '../../build/win_precompile.gypi',
   ],
+  'variables': {
+    'enabled_libjingle_device_manager%': 0,
+  },
   'target_defaults': {
     'defines': [
       'EXPAT_RELATIVE_PATH',
@@ -19,7 +22,6 @@
       'NO_MAIN_THREAD_WRAPPING',
       'NO_SOUND_SYSTEM',
       'SRTP_RELATIVE_PATH',
-      'WEBRTC_RELATIVE_PATH',
       '_USE_32BIT_TIME_T',
     ],
     'configurations': {
@@ -36,6 +38,7 @@
       './source',
       '../../testing/gtest/include',
       '../../third_party/libyuv/include',
+      '../../third_party/webrtc',
     ],
     'dependencies': [
       '<(DEPTH)/base/base.gyp:base',
@@ -50,6 +53,7 @@
         './overrides',
         './source',
         '../../testing/gtest/include',
+        '../../third_party/webrtc',
       ],
       'defines': [
         'FEATURE_ENABLE_SSL',
@@ -57,7 +61,6 @@
         'EXPAT_RELATIVE_PATH',
         'GTEST_RELATIVE_PATH',
         'JSONCPP_RELATIVE_PATH',
-        'WEBRTC_RELATIVE_PATH',
         'NO_MAIN_THREAD_WRAPPING',
         'NO_SOUND_SYSTEM',
       ],
@@ -128,6 +131,25 @@
       },
     },
     'conditions': [
+      ['use_openssl!=1', {
+        'defines': [
+          'SSL_USE_NSS',
+        ],
+        'conditions': [
+          ['os_posix == 1 and OS != "mac" and OS != "ios" and '
+           'OS != "android"', {
+            'dependencies': [
+              '<(DEPTH)/build/linux/system.gyp:ssl',
+            ],
+          }],
+          ['OS == "mac" or OS == "ios" or OS == "win"', {
+            'dependencies': [
+              '<(DEPTH)/third_party/nss/nss.gyp:nspr',
+              '<(DEPTH)/third_party/nss/nss.gyp:nss',
+            ],
+          }],
+        ],
+      }],
       ['OS=="win"', {
         'include_dirs': [
           '../third_party/platformsdk_win7/files/Include',
@@ -396,8 +418,12 @@
           'sources': [
             'source/talk/base/macconversion.cc',
             'source/talk/base/macconversion.h',
+            'source/talk/base/maccocoathreadhelper.h',
+            'source/talk/base/maccocoathreadhelper.mm',
             'source/talk/base/macutils.cc',
             'source/talk/base/macutils.h',
+            'source/talk/base/scoped_autorelease_pool.h',
+            'source/talk/base/scoped_autorelease_pool.mm',
           ],
         }],
         ['OS=="android"', {
@@ -475,6 +501,8 @@
         'source/talk/p2p/base/transportchannelimpl.h',
         'source/talk/p2p/base/transportchannelproxy.cc',
         'source/talk/p2p/base/transportchannelproxy.h',
+        'source/talk/p2p/base/transportdescriptionfactory.cc',
+        'source/talk/p2p/base/transportdescriptionfactory.h',
         'source/talk/p2p/base/udpport.cc',
         'source/talk/p2p/base/udpport.h',
         'source/talk/p2p/client/basicportallocator.cc',
@@ -542,13 +570,13 @@
         'source/talk/media/base/constants.cc',
         'source/talk/media/base/constants.h',
         'source/talk/media/base/cryptoparams.h',
-        'source/talk/media/base/dataengine.cc',
-        'source/talk/media/base/dataengine.h',
         'source/talk/media/base/filemediaengine.cc',
         'source/talk/media/base/filemediaengine.h',
         'source/talk/media/base/mediachannel.h',
         'source/talk/media/base/mediaengine.cc',
         'source/talk/media/base/mediaengine.h',
+        'source/talk/media/base/rtpdataengine.cc',
+        'source/talk/media/base/rtpdataengine.h',
         'source/talk/media/base/rtpdump.cc',
         'source/talk/media/base/rtpdump.h',
         'source/talk/media/base/rtputils.cc',
@@ -561,8 +589,6 @@
         'source/talk/media/base/videocommon.h',
         'source/talk/media/base/videoframe.cc',
         'source/talk/media/base/videoframe.h',
-        'source/talk/media/devices/devicemanager.cc',
-        'source/talk/media/devices/devicemanager.h',
         'source/talk/media/devices/dummydevicemanager.cc',
         'source/talk/media/devices/dummydevicemanager.h',
         'source/talk/media/devices/filevideocapturer.cc',
@@ -611,6 +637,61 @@
         'source/talk/session/media/voicechannel.h',
       ],
       'conditions': [
+        ['enabled_libjingle_device_manager==1', {
+          'sources!': [
+            'source/talk/media/devices/dummydevicemanager.cc',
+            'source/talk/media/devices/dummydevicemanager.h',
+          ],
+          'sources': [
+            'source/talk/sound/nullsoundsystem.cc',
+            'source/talk/sound/nullsoundsystem.h',
+            'source/talk/sound/nullsoundsystemfactory.cc',
+            'source/talk/sound/nullsoundsystemfactory.h',
+            'source/talk/sound/platformsoundsystem.cc',
+            'source/talk/sound/platformsoundsystem.h',
+            'source/talk/sound/platformsoundsystemfactory.cc',
+            'source/talk/sound/platformsoundsystemfactory.h',
+            'source/talk/sound/soundsysteminterface.cc',
+            'source/talk/sound/soundsysteminterface.h',
+            'source/talk/sound/soundsystemproxy.cc',
+            'source/talk/sound/soundsystemproxy.h',
+          ],
+          'conditions': [
+            ['OS=="win"', {
+              'sources': [
+                'source/talk/media/devices/win32devicemanager.cc',
+                'source/talk/media/devices/win32devicemanager.h',
+              ],
+            }],
+            ['OS=="linux"', {
+              'sources': [
+                'source/talk/media/devices/libudevsymboltable.cc',
+                'source/talk/media/devices/libudevsymboltable.h',
+                'source/talk/media/devices/linuxdevicemanager.cc',
+                'source/talk/media/devices/linuxdevicemanager.h',
+                'source/talk/media/devices/v4llookup.cc',
+                'source/talk/media/devices/v4llookup.h',
+                'source/talk/sound/alsasoundsystem.cc',
+                'source/talk/sound/alsasoundsystem.h',
+                'source/talk/sound/alsasymboltable.cc',
+                'source/talk/sound/alsasymboltable.h',
+                'source/talk/sound/linuxsoundsystem.cc',
+                'source/talk/sound/linuxsoundsystem.h',
+                'source/talk/sound/pulseaudiosoundsystem.cc',
+                'source/talk/sound/pulseaudiosoundsystem.h',
+                'source/talk/sound/pulseaudiosymboltable.cc',
+                'source/talk/sound/pulseaudiosymboltable.h',
+              ],
+            }],
+            ['OS=="mac"', {
+              'sources': [
+                'source/talk/media/devices/macdevicemanager.cc',
+                'source/talk/media/devices/macdevicemanager.h',
+                'source/talk/media/devices/macdevicemanagermm.mm',
+              ],
+            }],
+          ],
+        }],
         ['OS!="android"', {
           'dependencies': [
             # We won't build with WebRTC on Android.

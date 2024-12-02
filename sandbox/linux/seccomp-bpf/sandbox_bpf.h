@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SANDBOX_BPF_H__
-#define SANDBOX_BPF_H__
+#ifndef SANDBOX_LINUX_SECCOMP_BPF_SANDBOX_BPF_H__
+#define SANDBOX_LINUX_SECCOMP_BPF_SANDBOX_BPF_H__
 
 #include <endian.h>
 #include <errno.h>
@@ -45,6 +45,13 @@
 #include "base/logging.h"
 #endif
 
+#if defined(SECCOMP_BPF_VALGRIND_HACKS)
+#ifndef SECCOMP_BPF_STANDALONE
+#include "base/third_party/valgrind/valgrind.h"
+#endif
+#endif
+
+
 // The Seccomp2 kernel ABI is not part of older versions of glibc.
 // As we can't break compilation with these versions of the library,
 // we explicitly define all missing symbols.
@@ -83,31 +90,71 @@
 #define MIN_SYSCALL  0u
 #define MAX_SYSCALL  1024u
 #define SECCOMP_ARCH AUDIT_ARCH_I386
-#define REG_RESULT   REG_EAX
-#define REG_SYSCALL  REG_EAX
-#define REG_IP       REG_EIP
-#define REG_PARM1    REG_EBX
-#define REG_PARM2    REG_ECX
-#define REG_PARM3    REG_EDX
-#define REG_PARM4    REG_ESI
-#define REG_PARM5    REG_EDI
-#define REG_PARM6    REG_EBP
+
+#define SECCOMP_REG(_ctx, _reg) ((_ctx)->uc_mcontext.gregs[(_reg)])
+#define SECCOMP_RESULT(_ctx)    SECCOMP_REG(_ctx, REG_EAX)
+#define SECCOMP_SYSCALL(_ctx)   SECCOMP_REG(_ctx, REG_EAX)
+#define SECCOMP_IP(_ctx)        SECCOMP_REG(_ctx, REG_EIP)
+#define SECCOMP_PARM1(_ctx)     SECCOMP_REG(_ctx, REG_EBX)
+#define SECCOMP_PARM2(_ctx)     SECCOMP_REG(_ctx, REG_ECX)
+#define SECCOMP_PARM3(_ctx)     SECCOMP_REG(_ctx, REG_EDX)
+#define SECCOMP_PARM4(_ctx)     SECCOMP_REG(_ctx, REG_ESI)
+#define SECCOMP_PARM5(_ctx)     SECCOMP_REG(_ctx, REG_EDI)
+#define SECCOMP_PARM6(_ctx)     SECCOMP_REG(_ctx, REG_EBP)
+
 #elif defined(__x86_64__)
 #define MIN_SYSCALL  0u
 #define MAX_SYSCALL  1024u
 #define SECCOMP_ARCH AUDIT_ARCH_X86_64
-#define REG_RESULT   REG_RAX
-#define REG_SYSCALL  REG_RAX
-#define REG_IP       REG_RIP
-#define REG_PARM1    REG_RDI
-#define REG_PARM2    REG_RSI
-#define REG_PARM3    REG_RDX
-#define REG_PARM4    REG_R10
-#define REG_PARM5    REG_R8
-#define REG_PARM6    REG_R9
+
+#define SECCOMP_REG(_ctx, _reg) ((_ctx)->uc_mcontext.gregs[(_reg)])
+#define SECCOMP_RESULT(_ctx)    SECCOMP_REG(_ctx, REG_RAX)
+#define SECCOMP_SYSCALL(_ctx)   SECCOMP_REG(_ctx, REG_RAX)
+#define SECCOMP_IP(_ctx)        SECCOMP_REG(_ctx, REG_RIP)
+#define SECCOMP_PARM1(_ctx)     SECCOMP_REG(_ctx, REG_RDI)
+#define SECCOMP_PARM2(_ctx)     SECCOMP_REG(_ctx, REG_RSI)
+#define SECCOMP_PARM3(_ctx)     SECCOMP_REG(_ctx, REG_RDX)
+#define SECCOMP_PARM4(_ctx)     SECCOMP_REG(_ctx, REG_R10)
+#define SECCOMP_PARM5(_ctx)     SECCOMP_REG(_ctx, REG_R8)
+#define SECCOMP_PARM6(_ctx)     SECCOMP_REG(_ctx, REG_R9)
+
+#elif defined(__arm__) && (defined(__thumb__) || defined(__ARM_EABI__))
+// ARM EABI includes "ARM private" system calls starting at |__ARM_NR_BASE|,
+// and a "ghost syscall private to the kernel", cmpxchg,
+// at |__ARM_NR_BASE+0x00fff0|.
+// See </arch/arm/include/asm/unistd.h> in the Linux kernel.
+#define MIN_SYSCALL  ((unsigned int)__NR_SYSCALL_BASE)
+#define MAX_SYSCALL  ((unsigned int)__ARM_NR_BASE + 0x00ffffu)
+// <linux/audit.h> includes <linux/elf-em.h>, which does not define EM_ARM.
+// <linux/elf.h> only includes <asm/elf.h> if we're in the kernel.
+# if !defined(EM_ARM)
+# define EM_ARM 40
+# endif
+#define SECCOMP_ARCH AUDIT_ARCH_ARM
+
+// ARM sigcontext_t is different from i386/x86_64.
+// See </arch/arm/include/asm/sigcontext.h> in the Linux kernel.
+#define SECCOMP_REG(_ctx, _reg) ((_ctx)->uc_mcontext.arm_##_reg)
+// ARM EABI syscall convention.
+#define SECCOMP_RESULT(_ctx)     SECCOMP_REG(_ctx, r0)
+#define SECCOMP_SYSCALL(_ctx)    SECCOMP_REG(_ctx, r7)
+#define SECCOMP_IP(_ctx)         SECCOMP_REG(_ctx, pc)
+#define SECCOMP_PARM1(_ctx)      SECCOMP_REG(_ctx, r0)
+#define SECCOMP_PARM2(_ctx)      SECCOMP_REG(_ctx, r1)
+#define SECCOMP_PARM3(_ctx)      SECCOMP_REG(_ctx, r2)
+#define SECCOMP_PARM4(_ctx)      SECCOMP_REG(_ctx, r3)
+#define SECCOMP_PARM5(_ctx)      SECCOMP_REG(_ctx, r4)
+#define SECCOMP_PARM6(_ctx)      SECCOMP_REG(_ctx, r5)
+
 #else
 #error Unsupported target platform
+
 #endif
+
+#include "sandbox/linux/seccomp-bpf/die.h"
+#include "sandbox/linux/seccomp-bpf/errorcode.h"
+
+namespace playground2 {
 
 struct arch_seccomp_data {
   int      nr;
@@ -122,7 +169,7 @@ struct arch_sigsys {
   unsigned int arch;
 };
 
-#ifdef SECCOMP_BPF_STANDALONE
+#if defined(SECCOMP_BPF_STANDALONE)
 #define arraysize(x) sizeof(x)/sizeof(*(x)))
 #define HANDLE_EINTR TEMP_FAILURE_RETRY
 #define DISALLOW_IMPLICIT_CONSTRUCTORS(TypeName) \
@@ -130,9 +177,6 @@ struct arch_sigsys {
   TypeName(const TypeName&);                     \
   void operator=(const TypeName&)
 #endif
-
-
-namespace playground2 {
 
 class Sandbox {
  public:
@@ -144,17 +188,6 @@ class Sandbox {
     STATUS_ENABLED       // The sandbox is now active
   };
 
-  enum {
-    SB_INVALID       = -1,
-    SB_ALLOWED       = 0x0000,
-    SB_INSPECT_ARG_1 = 0x8001,
-    SB_INSPECT_ARG_2 = 0x8002,
-    SB_INSPECT_ARG_3 = 0x8004,
-    SB_INSPECT_ARG_4 = 0x8008,
-    SB_INSPECT_ARG_5 = 0x8010,
-    SB_INSPECT_ARG_6 = 0x8020
-  };
-
   // TrapFnc is a pointer to a function that handles Seccomp traps in
   // user-space. The seccomp policy can request that a trap handler gets
   // installed; it does so by returning a suitable ErrorCode() from the
@@ -164,67 +197,6 @@ class Sandbox {
   // async-signal safe:
   // http://pubs.opengroup.org/onlinepubs/009695399/functions/xsh_chap02_04.html
   typedef intptr_t (*TrapFnc)(const struct arch_seccomp_data& args, void *aux);
-
-  class ErrorCode {
-    friend class Sandbox;
-  public:
-    // We can either wrap a symbolic ErrorCode (i.e. enum values), an errno
-    // value (in the range 1..4095), or a pointer to a TrapFnc callback
-    // handling a SECCOMP_RET_TRAP trap.
-    // All of these different values are stored in the "err_" field. So, code
-    // that is using the ErrorCode class typically operates on a single 32bit
-    // field.
-    // This is not only quiet efficient, it also makes the API really easy to
-    // use.
-    ErrorCode(int err = SB_INVALID)
-        : id_(0),
-          fnc_(NULL),
-          aux_(NULL) {
-      switch (err) {
-      case SB_INVALID:
-        err_ = SECCOMP_RET_INVALID;
-        break;
-      case SB_ALLOWED:
-        err_ = SECCOMP_RET_ALLOW;
-        break;
-      case SB_INSPECT_ARG_1...SB_INSPECT_ARG_6:
-        die("Not implemented");
-        break;
-      case 1 ... 4095:
-        err_ = SECCOMP_RET_ERRNO + err;
-        break;
-      default:
-        die("Invalid use of ErrorCode object");
-      }
-    }
-
-    // If we are wrapping a callback, we must assign a unique id. This id is
-    // how the kernel tells us which one of our different SECCOMP_RET_TRAP
-    // cases has been triggered.
-    // The getTrapId() function assigns one unique id (starting at 1) for
-    // each distinct pair of TrapFnc and auxiliary data.
-    ErrorCode(TrapFnc fnc, const void *aux, int id = 0) :
-      id_(id ? id : getTrapId(fnc, aux)),
-      fnc_(fnc),
-      aux_(const_cast<void *>(aux)),
-      err_(SECCOMP_RET_TRAP + id_) {
-    }
-
-    // Destructor doesn't need to do anything.
-    ~ErrorCode() { }
-
-    // Always return the value that goes into the BPF filter program.
-    operator uint32_t() const { return err_; }
-
-  protected:
-    // Fields needed for SECCOMP_RET_TRAP callbacks
-    int      id_;
-    TrapFnc  fnc_;
-    void     *aux_;
-
-    // 32bit field used for all possible types of ErrorCode values
-    uint32_t err_;
-  };
 
   enum Operation {
     OP_NOP, OP_EQUAL, OP_NOTEQUAL, OP_LESS,
@@ -273,57 +245,25 @@ class Sandbox {
   static void setSandboxPolicy(EvaluateSyscall syscallEvaluator,
                                EvaluateArguments argumentEvaluator);
 
+  // We can use ErrorCode to request calling of a trap handler. This method
+  // performs the required wrapping of the callback function into an
+  // ErrorCode object.
+  static ErrorCode Trap(ErrorCode::TrapFnc fnc, const void *aux);
+
+  // Kill the program and print an error message.
+  static ErrorCode Kill(const char *msg);
+
   // This is the main public entry point. It finds all system calls that
   // need rewriting, sets up the resources needed by the sandbox, and
   // enters Seccomp mode.
-  static void startSandbox();
-
- protected:
-  // Print an error message and terminate the program. Used for fatal errors.
-  static void die(const char *msg) __attribute__((noreturn)) {
-    if (msg) {
-#ifndef SECCOMP_BPF_STANDALONE
-      if (!dryRun_) {
-        // LOG(FATAL) is not neccessarily async-signal safe. It would be
-        // better to always use the code for the SECCOMP_BPF_STANDALONE case.
-        // But that prevents the logging and reporting infrastructure from
-        // picking up sandbox related crashes.
-        // For now, in picking between two evils, we decided in favor of
-        // LOG(FATAL). In the long run, we probably want to rewrite this code
-        // to be async-signal safe.
-        LOG(FATAL) << msg;
-      } else
-#endif
-      {
-        // If there is no logging infrastructure in place, we just write error
-        // messages to stderr.
-        // We also write to stderr, if we are called in a child process from
-        // supportsSeccompSandbox(). This makes sure we can actually do the
-        // correct logging from the parent process, which is more likely to
-        // have access to logging infrastructure.
-        if (HANDLE_EINTR(write(2, msg, strlen(msg)))) { }
-        if (HANDLE_EINTR(write(2, "\n", 1))) { }
-      }
-    }
-    for (;;) {
-      // exit_group() should exit our program. After all, it is defined as a
-      // function that doesn't return. But things can theoretically go wrong.
-      // Especially, since we are dealing with system call filters. Continuing
-      // execution would be very bad in most cases where die() gets called.
-      // So, if there is no way for us to ask for the program to exit, the next
-      // best thing we can do is to loop indefinitely. Maybe, somebody will
-      // notice and file a bug...
-      syscall(__NR_exit_group, 1);
-      _exit(1);
-    }
-  }
-
-  // Get a file descriptor pointing to "/proc", if currently available.
-  static int getProcFd() { return proc_fd_; }
+  static void startSandbox() { startSandboxInternal(false); }
 
  private:
+  friend class ErrorCode;
   friend class Util;
   friend class Verifier;
+
+
   struct Range {
     Range(uint32_t f, uint32_t t, const ErrorCode& e) :
       from(f),
@@ -342,8 +282,12 @@ class Sandbox {
   typedef std::vector<Range> Ranges;
   typedef std::map<uint32_t, std::vector<FixUp> > RetInsns;
   typedef std::vector<struct sock_filter> Program;
+  typedef std::map<uint32_t, ErrorCode> ErrMap;
   typedef std::vector<ErrorCode> Traps;
   typedef std::map<std::pair<TrapFnc, const void *>, int> TrapIds;
+
+  // Get a file descriptor pointing to "/proc", if currently available.
+  static int proc_fd() { return proc_fd_; }
 
   static ErrorCode probeEvaluator(int signo) __attribute__((const));
   static void      probeProcess(void);
@@ -353,11 +297,13 @@ class Sandbox {
   static bool      RunFunctionInPolicy(void (*function)(),
                                        EvaluateSyscall syscallEvaluator,
                                        int proc_fd);
+  static void      startSandboxInternal(bool quiet);
   static bool      isSingleThreaded(int proc_fd);
+  static bool      isDenied(const ErrorCode& code);
   static bool      disableFilesystem();
   static void      policySanityChecks(EvaluateSyscall syscallEvaluator,
                                       EvaluateArguments argumentEvaluator);
-  static void      installFilter();
+  static void      installFilter(bool quiet);
   static void      findRanges(Ranges *ranges);
   static void      emitJumpStatements(Program *program, RetInsns *rets,
                                       Ranges::const_iterator start,
@@ -367,10 +313,10 @@ class Sandbox {
   static intptr_t  bpfFailure(const struct arch_seccomp_data& data, void *aux);
   static int       getTrapId(TrapFnc fnc, const void *aux);
 
-  static bool          dryRun_;
   static SandboxStatus status_;
   static int           proc_fd_;
   static Evaluators    evaluators_;
+  static ErrMap        errMap_;
   static Traps         *traps_;
   static TrapIds       trapIds_;
   static ErrorCode     *trapArray_;
@@ -380,4 +326,4 @@ class Sandbox {
 
 }  // namespace
 
-#endif  // SANDBOX_BPF_H__
+#endif  // SANDBOX_LINUX_SECCOMP_BPF_SANDBOX_BPF_H__

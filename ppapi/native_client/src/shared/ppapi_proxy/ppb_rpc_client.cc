@@ -2182,95 +2182,26 @@ NaClSrpcError PpbNetAddressPrivateRpcClient::PPB_NetAddress_Private_CreateFromIP
   return retval;
 }
 
-NaClSrpcError PpbPdfRpcClient::PPB_PDF_GetLocalizedString(
+NaClSrpcError PpbNetworkListPrivateClient::PPB_NetworkList_Private_IsNetworkList(
     NaClSrpcChannel* channel,
-    PP_Instance instance,
-    int32_t string_id,
-    nacl_abi_size_t* string_bytes, char* string)  {
+    PP_Resource resource,
+    int32_t* out_bool)  {
   VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
          ("%s: PPAPI calls are not supported off the main thread\n",
           __FUNCTION__));
   NaClSrpcError retval;
   retval = NaClSrpcInvokeBySignature(
       channel,
-      "PPB_PDF_GetLocalizedString:ii:C",
-      instance,
-      string_id,
-      string_bytes, string
+      "PPB_NetworkList_Private_IsNetworkList:i:i",
+      resource,
+      out_bool
   );
   return retval;
 }
 
-NaClSrpcError PpbPdfRpcClient::PPB_PDF_GetResourceImage(
+NaClSrpcError PpbNetworkListPrivateClient::PPB_NetworkList_Private_GetCount(
     NaClSrpcChannel* channel,
-    PP_Instance instance,
-    int32_t image_id,
-    PP_Resource* image)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_PDF_GetResourceImage:ii:i",
-      instance,
-      image_id,
-      image
-  );
-  return retval;
-}
-
-NaClSrpcError PpbPdfRpcClient::PPB_PDF_GetFontFileWithFallback(
-    NaClSrpcChannel* channel,
-    PP_Instance instance,
-    nacl_abi_size_t description_bytes, char* description,
-    nacl_abi_size_t face_bytes, char* face,
-    int32_t charset,
-    PP_Resource* font)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_PDF_GetFontFileWithFallback:iCCi:i",
-      instance,
-      description_bytes, description,
-      face_bytes, face,
-      charset,
-      font
-  );
-  return retval;
-}
-
-NaClSrpcError PpbPdfRpcClient::PPB_PDF_GetFontTableForPrivateFontFile(
-    NaClSrpcChannel* channel,
-    PP_Resource font_file,
-    int32_t table,
-    nacl_abi_size_t* output_bytes, char* output,
-    int32_t* success)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_PDF_GetFontTableForPrivateFontFile:ii:Ci",
-      font_file,
-      table,
-      output_bytes, output,
-      success
-  );
-  return retval;
-}
-
-NaClSrpcError PpbPdfRpcClient::PPB_PDF_SearchString(
-    NaClSrpcChannel* channel,
-    PP_Instance instance,
-    nacl_abi_size_t string_bytes, char* string,
-    nacl_abi_size_t term_bytes, char* term,
-    int32_t case_sensitive,
-    nacl_abi_size_t* results_bytes, char* results,
+    PP_Resource resource,
     int32_t* count)  {
   VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
          ("%s: PPAPI calls are not supported off the main thread\n",
@@ -2278,279 +2209,159 @@ NaClSrpcError PpbPdfRpcClient::PPB_PDF_SearchString(
   NaClSrpcError retval;
   retval = NaClSrpcInvokeBySignature(
       channel,
-      "PPB_PDF_SearchString:iCCi:Ci",
-      instance,
-      string_bytes, string,
-      term_bytes, term,
-      case_sensitive,
-      results_bytes, results,
+      "PPB_NetworkList_Private_GetCount:i:i",
+      resource,
       count
   );
   return retval;
 }
 
-NaClSrpcError PpbPdfRpcClient::PPB_PDF_DidStartLoading(
+NaClSrpcError PpbNetworkListPrivateClient::PPB_NetworkList_Private_GetName(
     NaClSrpcChannel* channel,
-    PP_Instance instance)  {
+    PP_Resource resource,
+    int32_t index,
+    nacl_abi_size_t* name_bytes, char* name)  {
   VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
          ("%s: PPAPI calls are not supported off the main thread\n",
           __FUNCTION__));
   NaClSrpcError retval;
   retval = NaClSrpcInvokeBySignature(
       channel,
-      "PPB_PDF_DidStartLoading:i:",
-      instance
+      "PPB_NetworkList_Private_GetName:ii:C",
+      resource,
+      index,
+      name_bytes, name
   );
   return retval;
 }
 
-NaClSrpcError PpbPdfRpcClient::PPB_PDF_DidStopLoading(
+NaClSrpcError PpbNetworkListPrivateClient::PPB_NetworkList_Private_GetType(
     NaClSrpcChannel* channel,
-    PP_Instance instance)  {
+    PP_Resource resource,
+    int32_t index,
+    int32_t* type)  {
   VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
          ("%s: PPAPI calls are not supported off the main thread\n",
           __FUNCTION__));
   NaClSrpcError retval;
   retval = NaClSrpcInvokeBySignature(
       channel,
-      "PPB_PDF_DidStopLoading:i:",
-      instance
+      "PPB_NetworkList_Private_GetType:ii:i",
+      resource,
+      index,
+      type
   );
   return retval;
 }
 
-NaClSrpcError PpbPdfRpcClient::PPB_PDF_SetContentRestriction(
+NaClSrpcError PpbNetworkListPrivateClient::PPB_NetworkList_Private_GetState(
+    NaClSrpcChannel* channel,
+    PP_Resource resource,
+    int32_t index,
+    int32_t* state)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_NetworkList_Private_GetState:ii:i",
+      resource,
+      index,
+      state
+  );
+  return retval;
+}
+
+NaClSrpcError PpbNetworkListPrivateClient::PPB_NetworkList_Private_GetIpAddresses(
+    NaClSrpcChannel* channel,
+    PP_Resource resource,
+    int32_t index,
+    nacl_abi_size_t* addr_bytes, char* addr,
+    int32_t* addresses_count)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_NetworkList_Private_GetIpAddresses:ii:Ci",
+      resource,
+      index,
+      addr_bytes, addr,
+      addresses_count
+  );
+  return retval;
+}
+
+NaClSrpcError PpbNetworkListPrivateClient::PPB_NetworkList_Private_GetDisplayName(
+    NaClSrpcChannel* channel,
+    PP_Resource resource,
+    int32_t index,
+    nacl_abi_size_t* display_name_bytes, char* display_name)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_NetworkList_Private_GetDisplayName:ii:C",
+      resource,
+      index,
+      display_name_bytes, display_name
+  );
+  return retval;
+}
+
+NaClSrpcError PpbNetworkListPrivateClient::PPB_NetworkList_Private_GetMTU(
+    NaClSrpcChannel* channel,
+    PP_Resource resource,
+    int32_t index,
+    int32_t* mtu)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_NetworkList_Private_GetMTU:ii:i",
+      resource,
+      index,
+      mtu
+  );
+  return retval;
+}
+
+NaClSrpcError PpbNetworkMonitorPrivateClient::PPB_NetworkMonitor_Private_Create(
     NaClSrpcChannel* channel,
     PP_Instance instance,
-    int32_t restrictions)  {
+    PP_Resource* out_resource)  {
   VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
          ("%s: PPAPI calls are not supported off the main thread\n",
           __FUNCTION__));
   NaClSrpcError retval;
   retval = NaClSrpcInvokeBySignature(
       channel,
-      "PPB_PDF_SetContentRestriction:ii:",
+      "PPB_NetworkMonitor_Private_Create:i:i",
       instance,
-      restrictions
+      out_resource
   );
   return retval;
 }
 
-NaClSrpcError PpbPdfRpcClient::PPB_PDF_HistogramPDFPageCount(
-    NaClSrpcChannel* channel,
-    int32_t count)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_PDF_HistogramPDFPageCount:i:",
-      count
-  );
-  return retval;
-}
-
-NaClSrpcError PpbPdfRpcClient::PPB_PDF_UserMetricsRecordAction(
-    NaClSrpcChannel* channel,
-    nacl_abi_size_t action_bytes, char* action)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_PDF_UserMetricsRecordAction:C:",
-      action_bytes, action
-  );
-  return retval;
-}
-
-NaClSrpcError PpbPdfRpcClient::PPB_PDF_HasUnsupportedFeature(
-    NaClSrpcChannel* channel,
-    PP_Instance instance)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_PDF_HasUnsupportedFeature:i:",
-      instance
-  );
-  return retval;
-}
-
-NaClSrpcError PpbPdfRpcClient::PPB_PDF_SaveAs(
-    NaClSrpcChannel* channel,
-    PP_Instance instance)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_PDF_SaveAs:i:",
-      instance
-  );
-  return retval;
-}
-
-NaClSrpcError PpbScrollbarRpcClient::PPB_Scrollbar_Create(
-    NaClSrpcChannel* channel,
-    PP_Instance instance,
-    int32_t vertical,
-    PP_Resource* scrollbar)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_Scrollbar_Create:ii:i",
-      instance,
-      vertical,
-      scrollbar
-  );
-  return retval;
-}
-
-NaClSrpcError PpbScrollbarRpcClient::PPB_Scrollbar_IsScrollbar(
+NaClSrpcError PpbNetworkMonitorPrivateClient::PPB_NetworkMonitor_Private_IsNetworkMonitor(
     NaClSrpcChannel* channel,
     PP_Resource resource,
-    int32_t* is_scrollbar)  {
+    int32_t* out_bool)  {
   VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
          ("%s: PPAPI calls are not supported off the main thread\n",
           __FUNCTION__));
   NaClSrpcError retval;
   retval = NaClSrpcInvokeBySignature(
       channel,
-      "PPB_Scrollbar_IsScrollbar:i:i",
+      "PPB_NetworkMonitor_Private_IsNetworkMonitor:i:i",
       resource,
-      is_scrollbar
-  );
-  return retval;
-}
-
-NaClSrpcError PpbScrollbarRpcClient::PPB_Scrollbar_IsOverlay(
-    NaClSrpcChannel* channel,
-    PP_Resource resource,
-    int32_t* is_overlay)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_Scrollbar_IsOverlay:i:i",
-      resource,
-      is_overlay
-  );
-  return retval;
-}
-
-NaClSrpcError PpbScrollbarRpcClient::PPB_Scrollbar_GetThickness(
-    NaClSrpcChannel* channel,
-    PP_Resource resource,
-    int32_t* thickness)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_Scrollbar_GetThickness:i:i",
-      resource,
-      thickness
-  );
-  return retval;
-}
-
-NaClSrpcError PpbScrollbarRpcClient::PPB_Scrollbar_GetValue(
-    NaClSrpcChannel* channel,
-    PP_Resource scrollbar,
-    int32_t* value)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_Scrollbar_GetValue:i:i",
-      scrollbar,
-      value
-  );
-  return retval;
-}
-
-NaClSrpcError PpbScrollbarRpcClient::PPB_Scrollbar_SetValue(
-    NaClSrpcChannel* channel,
-    PP_Resource scrollbar,
-    int32_t value)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_Scrollbar_SetValue:ii:",
-      scrollbar,
-      value
-  );
-  return retval;
-}
-
-NaClSrpcError PpbScrollbarRpcClient::PPB_Scrollbar_SetDocumentSize(
-    NaClSrpcChannel* channel,
-    PP_Resource scrollbar,
-    int32_t size)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_Scrollbar_SetDocumentSize:ii:",
-      scrollbar,
-      size
-  );
-  return retval;
-}
-
-NaClSrpcError PpbScrollbarRpcClient::PPB_Scrollbar_SetTickMarks(
-    NaClSrpcChannel* channel,
-    PP_Resource scrollbar,
-    nacl_abi_size_t tick_marks_bytes, char* tick_marks,
-    int32_t count)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_Scrollbar_SetTickMarks:iCi:",
-      scrollbar,
-      tick_marks_bytes, tick_marks,
-      count
-  );
-  return retval;
-}
-
-NaClSrpcError PpbScrollbarRpcClient::PPB_Scrollbar_ScrollBy(
-    NaClSrpcChannel* channel,
-    PP_Resource scrollbar,
-    int32_t unit,
-    int32_t multiplier)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_Scrollbar_ScrollBy:iii:",
-      scrollbar,
-      unit,
-      multiplier
+      out_bool
   );
   return retval;
 }
@@ -2982,6 +2793,27 @@ NaClSrpcError PpbUDPSocketPrivateRpcClient::PPB_UDPSocket_Private_IsUDPSocket(
       "PPB_UDPSocket_Private_IsUDPSocket:i:i",
       resource_id,
       is_udp_socket_private
+  );
+  return retval;
+}
+
+NaClSrpcError PpbUDPSocketPrivateRpcClient::PPB_UDPSocket_Private_SetSocketFeature(
+    NaClSrpcChannel* channel,
+    PP_Resource udp_socket,
+    int32_t name,
+    nacl_abi_size_t value_bytes, char* value,
+    int32_t* pp_error)  {
+  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
+         ("%s: PPAPI calls are not supported off the main thread\n",
+          __FUNCTION__));
+  NaClSrpcError retval;
+  retval = NaClSrpcInvokeBySignature(
+      channel,
+      "PPB_UDPSocket_Private_SetSocketFeature:iiC:i",
+      udp_socket,
+      name,
+      value_bytes, value,
+      pp_error
   );
   return retval;
 }
@@ -3704,99 +3536,6 @@ NaClSrpcError PpbWebSocketRpcClient::PPB_WebSocket_GetURL(
       "PPB_WebSocket_GetURL:i:C",
       ws,
       url_bytes, url
-  );
-  return retval;
-}
-
-NaClSrpcError PpbWidgetRpcClient::PPB_Widget_IsWidget(
-    NaClSrpcChannel* channel,
-    PP_Resource resource,
-    int32_t* is_widget)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_Widget_IsWidget:i:i",
-      resource,
-      is_widget
-  );
-  return retval;
-}
-
-NaClSrpcError PpbWidgetRpcClient::PPB_Widget_Paint(
-    NaClSrpcChannel* channel,
-    PP_Resource widget,
-    nacl_abi_size_t rect_bytes, char* rect,
-    PP_Resource image,
-    int32_t* success)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_Widget_Paint:iCi:i",
-      widget,
-      rect_bytes, rect,
-      image,
-      success
-  );
-  return retval;
-}
-
-NaClSrpcError PpbWidgetRpcClient::PPB_Widget_HandleEvent(
-    NaClSrpcChannel* channel,
-    PP_Resource widget,
-    PP_Resource event,
-    int32_t* handled)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_Widget_HandleEvent:ii:i",
-      widget,
-      event,
-      handled
-  );
-  return retval;
-}
-
-NaClSrpcError PpbWidgetRpcClient::PPB_Widget_GetLocation(
-    NaClSrpcChannel* channel,
-    PP_Resource widget,
-    nacl_abi_size_t* location_bytes, char* location,
-    int32_t* visible)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_Widget_GetLocation:i:Ci",
-      widget,
-      location_bytes, location,
-      visible
-  );
-  return retval;
-}
-
-NaClSrpcError PpbWidgetRpcClient::PPB_Widget_SetLocation(
-    NaClSrpcChannel* channel,
-    PP_Resource widget,
-    nacl_abi_size_t location_bytes, char* location)  {
-  VCHECK(ppapi_proxy::PPBCoreInterface()->IsMainThread(),
-         ("%s: PPAPI calls are not supported off the main thread\n",
-          __FUNCTION__));
-  NaClSrpcError retval;
-  retval = NaClSrpcInvokeBySignature(
-      channel,
-      "PPB_Widget_SetLocation:iC:",
-      widget,
-      location_bytes, location
   );
   return retval;
 }

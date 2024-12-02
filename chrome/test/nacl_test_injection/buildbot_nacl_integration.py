@@ -12,6 +12,12 @@ def Main(args):
   pwd = os.environ.get('PWD', '')
   is_integration_bot = 'nacl-chrome' in pwd
 
+  # This environment variable check mimics what
+  # buildbot_chrome_nacl_stage.py does.
+  is_win64 = (sys.platform in ('win32', 'cygwin') and
+              ('64' in os.environ.get('PROCESSOR_ARCHITECTURE', '') or
+               '64' in os.environ.get('PROCESSOR_ARCHITEW6432', '')))
+
   # On the main Chrome waterfall, we may need to control where the tests are
   # run.
   # If there is serious skew in the PPAPI interface that causes all of
@@ -60,7 +66,6 @@ def Main(args):
       # See http://crbug.com/132395
       tests_to_disable.append('run_inbrowser_test_runner')
 
-
   if sys.platform in ('win32', 'cygwin'):
     tests_to_disable.append('run_ppapi_ppp_input_event_browser_test')
 
@@ -71,11 +76,6 @@ def Main(args):
   nacl_integration_script = os.path.join(
       src_dir, 'native_client/build/buildbot_chrome_nacl_stage.py')
   cmd = [sys.executable,
-         '/b/build/scripts/slave/runtest.py',
-         '--run-python-script',
-         '--target=',
-         '--build-dir=',
-         '--',
          nacl_integration_script,
          # TODO(ncbray) re-enable.
          # https://code.google.com/p/chromium/issues/detail?id=133568

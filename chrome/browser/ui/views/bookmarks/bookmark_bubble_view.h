@@ -42,9 +42,8 @@ class BookmarkBubbleView : public views::BubbleDelegateView,
 
   virtual ~BookmarkBubbleView();
 
-  // views::BubbleDelegateView methods.
+  // views::BubbleDelegateView method.
   virtual views::View* GetInitiallyFocusedView() OVERRIDE;
-  virtual gfx::Rect GetAnchorRect() OVERRIDE;
 
   // views::WidgetDelegate method.
   virtual void WindowClosing() OVERRIDE;
@@ -74,7 +73,7 @@ class BookmarkBubbleView : public views::BubbleDelegateView,
   // Overridden from views::ButtonListener:
   // Closes the bubble or opens the edit dialog.
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
 
   // Overridden from views::ComboboxListener:
   virtual void OnSelectedIndexChanged(views::Combobox* combobox) OVERRIDE;
@@ -96,10 +95,6 @@ class BookmarkBubbleView : public views::BubbleDelegateView,
 
   // The bookmark URL.
   const GURL url_;
-
-  // Title of the bookmark. This is initially the title supplied to the
-  // constructor, which is typically the title of the page.
-  std::wstring title_;
 
   // If true, the page was just bookmarked.
   const bool newly_bookmarked_;

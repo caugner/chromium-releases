@@ -83,6 +83,10 @@ BrowserNonClientFrameView::TabStripInsets BrowserFrame::GetTabStripInsets(
   return browser_frame_view_->GetTabStripInsets(force_restored);
 }
 
+int BrowserFrame::GetThemeBackgroundXInset() const {
+  return browser_frame_view_->GetThemeBackgroundXInset();
+}
+
 void BrowserFrame::UpdateThrobber(bool running) {
   browser_frame_view_->UpdateThrobber(running);
 }
@@ -148,3 +152,9 @@ void BrowserFrame::OnNativeWidgetActivationChanged(bool active) {
 AvatarMenuButton* BrowserFrame::GetAvatarMenuButton() {
   return browser_frame_view_->avatar_button();
 }
+
+#if !defined(OS_WIN) || defined(USE_AURA)
+bool BrowserFrame::ShouldLeaveOffsetNearTopBorder() {
+  return !IsMaximized();
+}
+#endif  // OS_WIN

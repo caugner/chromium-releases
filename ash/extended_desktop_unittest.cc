@@ -5,6 +5,7 @@
 #include "ash/display/display_controller.h"
 #include "ash/display/multi_display_manager.h"
 #include "ash/shell.h"
+#include "ash/system/tray/system_tray.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/coordinate_conversion.h"
 #include "ash/wm/property_util.h"
@@ -44,6 +45,14 @@ views::Widget* CreateTestWidget(const gfx::Rect& bounds) {
   return CreateTestWidgetWithParent(NULL, bounds, false);
 }
 
+void SetSecondaryDisplayLayout(DisplayLayout::Position position) {
+  DisplayController* display_controller =
+      Shell::GetInstance()->display_controller();
+  DisplayLayout layout = display_controller->default_display_layout();
+  layout.position = position;
+  display_controller->SetDefaultDisplayLayout(layout);
+}
+
 class ModalWidgetDelegate : public views::WidgetDelegateView {
  public:
   ModalWidgetDelegate() {}
@@ -61,32 +70,14 @@ class ModalWidgetDelegate : public views::WidgetDelegateView {
   DISALLOW_COPY_AND_ASSIGN(ModalWidgetDelegate);
 };
 
+internal::MultiDisplayManager* GetDisplayManager() {
+  return static_cast<internal::MultiDisplayManager*>(
+      aura::Env::GetInstance()->display_manager());
+}
+
 }  // namespace
 
-class ExtendedDesktopTest : public test::AshTestBase {
- public:
-  ExtendedDesktopTest() {}
-  virtual ~ExtendedDesktopTest() {}
-
-  virtual void SetUp() OVERRIDE {
-    internal::DisplayController::SetExtendedDesktopEnabled(true);
-    AshTestBase::SetUp();
-  }
-
-  virtual void TearDown() OVERRIDE {
-    AshTestBase::TearDown();
-    internal::DisplayController::SetExtendedDesktopEnabled(false);
-  }
-
- protected:
-  internal::MultiDisplayManager* display_manager() {
-    return static_cast<internal::MultiDisplayManager*>(
-        aura::Env::GetInstance()->display_manager());
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ExtendedDesktopTest);
-};
+typedef test::AshTestBase ExtendedDesktopTest;
 
 // Test conditions that root windows in extended desktop mode
 // must satisfy.
@@ -175,17 +166,17 @@ TEST_F(ExtendedDesktopTest, SystemModal) {
 
 TEST_F(ExtendedDesktopTest, TestCursor) {
   UpdateDisplay("1000x600,600x400");
-  Shell::GetInstance()->ShowCursor(false);
+  Shell::GetInstance()->cursor_manager()->ShowCursor(false);
   Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
   EXPECT_FALSE(root_windows[0]->cursor_shown());
   EXPECT_FALSE(root_windows[1]->cursor_shown());
-  Shell::GetInstance()->ShowCursor(true);
+  Shell::GetInstance()->cursor_manager()->ShowCursor(true);
   EXPECT_TRUE(root_windows[0]->cursor_shown());
   EXPECT_TRUE(root_windows[1]->cursor_shown());
 
   EXPECT_EQ(ui::kCursorPointer, root_windows[0]->last_cursor().native_type());
   EXPECT_EQ(ui::kCursorPointer, root_windows[1]->last_cursor().native_type());
-  Shell::GetInstance()->SetCursor(ui::kCursorCopy);
+  Shell::GetInstance()->cursor_manager()->SetCursor(ui::kCursorCopy);
   EXPECT_EQ(ui::kCursorCopy, root_windows[0]->last_cursor().native_type());
   EXPECT_EQ(ui::kCursorCopy, root_windows[1]->last_cursor().native_type());
 }
@@ -260,8 +251,7 @@ TEST_F(ExtendedDesktopTest, CycleWindows) {
 
 TEST_F(ExtendedDesktopTest, GetRootWindowAt) {
   UpdateDisplay("700x500,500x500");
-  Shell::GetInstance()->display_controller()->SetSecondaryDisplayLayout(
-      internal::DisplayController::LEFT);
+  SetSecondaryDisplayLayout(DisplayLayout::LEFT);
   Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
 
   EXPECT_EQ(root_windows[1], wm::GetRootWindowAt(gfx::Point(-400, 100)));
@@ -279,8 +269,7 @@ TEST_F(ExtendedDesktopTest, GetRootWindowAt) {
 
 TEST_F(ExtendedDesktopTest, GetRootWindowMatching) {
   UpdateDisplay("700x500,500x500");
-  Shell::GetInstance()->display_controller()->SetSecondaryDisplayLayout(
-      internal::DisplayController::LEFT);
+  SetSecondaryDisplayLayout(DisplayLayout::LEFT);
 
   Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
 
@@ -339,8 +328,14 @@ TEST_F(ExtendedDesktopTest, Capture) {
   generator2.ClickLeftButton();
   EXPECT_EQ("0 0 0", r2_d1.GetMouseMotionCountsAndReset());
   EXPECT_EQ("0 0", r2_d1.GetMouseButtonCountsAndReset());
-  // The mouse is outside, so no move event will be sent.
+  // The mouse is outside. On chromeos, the mouse is warped to the
+  // dest root window, but it's not implemented on Win yet, so
+  // no mouse move event on Win.
+#if defined(OS_WIN)
   EXPECT_EQ("1 0 0", r1_d1.GetMouseMotionCountsAndReset());
+#else
+  EXPECT_EQ("1 1 0", r1_d1.GetMouseMotionCountsAndReset());
+#endif
   EXPECT_EQ("1 1", r1_d1.GetMouseButtonCountsAndReset());
   // (15,15) on 1st display is (-985,15) on 2nd display.
   generator2.MoveMouseTo(-985, 15);
@@ -401,6 +396,35 @@ TEST_F(ExtendedDesktopTest, MoveWindow) {
   EXPECT_EQ(root_windows[0], d1->GetNativeView()->GetRootWindow());
 }
 
+TEST_F(ExtendedDesktopTest, MoveWindowToDisplay) {
+  UpdateDisplay("1000x1000,1000x1000");
+  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+
+  gfx::Display display0 =
+      gfx::Screen::GetDisplayMatching(root_windows[0]->GetBoundsInScreen());
+  gfx::Display display1 =
+      gfx::Screen::GetDisplayMatching(root_windows[1]->GetBoundsInScreen());
+  EXPECT_NE(display0.id(), display1.id());
+
+  views::Widget* d1 = CreateTestWidget(gfx::Rect(10, 10, 1000, 100));
+  EXPECT_EQ(root_windows[0], d1->GetNativeView()->GetRootWindow());
+
+  // Move the window where the window spans both root windows. Since the second
+  // parameter is |display1|, the window should be shown on the secondary root.
+  d1->GetNativeWindow()->SetBoundsInScreen(gfx::Rect(500, 10, 1000, 100),
+                                           display1);
+  EXPECT_EQ("500,10 1000x100",
+            d1->GetWindowBoundsInScreen().ToString());
+  EXPECT_EQ(root_windows[1], d1->GetNativeView()->GetRootWindow());
+
+  // Move to the primary root.
+  d1->GetNativeWindow()->SetBoundsInScreen(gfx::Rect(500, 10, 1000, 100),
+                                           display0);
+  EXPECT_EQ("500,10 1000x100",
+            d1->GetWindowBoundsInScreen().ToString());
+  EXPECT_EQ(root_windows[0], d1->GetNativeView()->GetRootWindow());
+}
+
 TEST_F(ExtendedDesktopTest, MoveWindowWithTransient) {
   UpdateDisplay("1000x600,600x400");
   Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
@@ -457,16 +481,16 @@ TEST_F(ExtendedDesktopTest, MoveWindowWithTransient) {
 }
 
 namespace internal {
-// Test if the Window::ConvertPointToWindow works across root windows.
+// Test if the Window::ConvertPointToTarget works across root windows.
 // TODO(oshima): Move multiple display suport and this test to aura.
 TEST_F(ExtendedDesktopTest, ConvertPoint) {
   UpdateDisplay("1000x600,600x400");
   Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
   gfx::Display& display_1 =
-      display_manager()->FindDisplayForRootWindow(root_windows[0]);
+      GetDisplayManager()->FindDisplayForRootWindow(root_windows[0]);
   EXPECT_EQ("0,0", display_1.bounds().origin().ToString());
   gfx::Display& display_2 =
-      display_manager()->FindDisplayForRootWindow(root_windows[1]);
+      GetDisplayManager()->FindDisplayForRootWindow(root_windows[1]);
   EXPECT_EQ("1000,0", display_2.bounds().origin().ToString());
 
   aura::Window* d1 =
@@ -478,42 +502,72 @@ TEST_F(ExtendedDesktopTest, ConvertPoint) {
 
   // Convert point in the Root2's window to the Root1's window Coord.
   gfx::Point p(0, 0);
-  aura::Window::ConvertPointToWindow(root_windows[1], root_windows[0], &p);
+  aura::Window::ConvertPointToTarget(root_windows[1], root_windows[0], &p);
   EXPECT_EQ("1000,0", p.ToString());
   p.SetPoint(0, 0);
-  aura::Window::ConvertPointToWindow(d2, d1, &p);
+  aura::Window::ConvertPointToTarget(d2, d1, &p);
   EXPECT_EQ("1010,10", p.ToString());
 
   // Convert point in the Root1's window to the Root2's window Coord.
   p.SetPoint(0, 0);
-  aura::Window::ConvertPointToWindow(root_windows[0], root_windows[1], &p);
+  aura::Window::ConvertPointToTarget(root_windows[0], root_windows[1], &p);
   EXPECT_EQ("-1000,0", p.ToString());
   p.SetPoint(0, 0);
-  aura::Window::ConvertPointToWindow(d1, d2, &p);
+  aura::Window::ConvertPointToTarget(d1, d2, &p);
   EXPECT_EQ("-1010,-10", p.ToString());
 
   // Move the 2nd display to the bottom and test again.
-  Shell::GetInstance()->display_controller()->SetSecondaryDisplayLayout(
-      internal::DisplayController::BOTTOM);
+  SetSecondaryDisplayLayout(DisplayLayout::BOTTOM);
 
-  display_2 = display_manager()->FindDisplayForRootWindow(root_windows[1]);
+  display_2 = GetDisplayManager()->FindDisplayForRootWindow(root_windows[1]);
   EXPECT_EQ("0,600", display_2.bounds().origin().ToString());
 
   // Convert point in Root2's window to Root1's window Coord.
   p.SetPoint(0, 0);
-  aura::Window::ConvertPointToWindow(root_windows[1], root_windows[0], &p);
+  aura::Window::ConvertPointToTarget(root_windows[1], root_windows[0], &p);
   EXPECT_EQ("0,600", p.ToString());
   p.SetPoint(0, 0);
-  aura::Window::ConvertPointToWindow(d2, d1, &p);
+  aura::Window::ConvertPointToTarget(d2, d1, &p);
   EXPECT_EQ("10,610", p.ToString());
 
   // Convert point in Root1's window to Root2's window Coord.
   p.SetPoint(0, 0);
-  aura::Window::ConvertPointToWindow(root_windows[0], root_windows[1], &p);
+  aura::Window::ConvertPointToTarget(root_windows[0], root_windows[1], &p);
   EXPECT_EQ("0,-600", p.ToString());
   p.SetPoint(0, 0);
-  aura::Window::ConvertPointToWindow(d1, d2, &p);
+  aura::Window::ConvertPointToTarget(d1, d2, &p);
   EXPECT_EQ("-10,-610", p.ToString());
+}
+
+TEST_F(ExtendedDesktopTest, OpenSystemTray) {
+  UpdateDisplay("1000x600,600x400");
+  SystemTray* tray = ash::Shell::GetInstance()->system_tray();
+  ASSERT_FALSE(tray->HasSystemBubble());
+
+  // Opens the tray by a dummy click event and makes sure that adding/removing
+  // displays doesn't break anything.
+  aura::test::EventGenerator event_generator(
+      ash::Shell::GetInstance()->GetPrimaryRootWindow(),
+      tray->GetWidget()->GetNativeWindow());
+  event_generator.ClickLeftButton();
+  EXPECT_TRUE(tray->HasSystemBubble());
+
+  UpdateDisplay("100x600");
+  EXPECT_TRUE(tray->HasSystemBubble());
+  UpdateDisplay("100x600,600x400");
+  EXPECT_TRUE(tray->HasSystemBubble());
+
+  // Closes the tray and again makes sure that adding/removing displays doesn't
+  // break anything.
+  event_generator.ClickLeftButton();
+  RunAllPendingInMessageLoop();
+
+  EXPECT_FALSE(tray->HasSystemBubble());
+
+  UpdateDisplay("100x600");
+  EXPECT_FALSE(tray->HasSystemBubble());
+  UpdateDisplay("100x600,600x400");
+  EXPECT_FALSE(tray->HasSystemBubble());
 }
 
 }  // namespace internal

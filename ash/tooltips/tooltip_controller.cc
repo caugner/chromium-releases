@@ -15,9 +15,9 @@
 #include "base/time.h"
 #include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/env.h"
-#include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
+#include "ui/base/events/event.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/gfx/font.h"
@@ -238,7 +238,7 @@ void TooltipController::SetTooltipsEnabled(bool enable) {
 }
 
 bool TooltipController::PreHandleKeyEvent(aura::Window* target,
-                                          aura::KeyEvent* event) {
+                                          ui::KeyEvent* event) {
   // On key press, we want to hide the tooltip and not show it until change.
   // This is the same behavior as hiding tooltips on timeout. Hence, we can
   // simply simulate a timeout.
@@ -250,7 +250,7 @@ bool TooltipController::PreHandleKeyEvent(aura::Window* target,
 }
 
 bool TooltipController::PreHandleMouseEvent(aura::Window* target,
-                                            aura::MouseEvent* event) {
+                                            ui::MouseEvent* event) {
   switch (event->type()) {
     case ui::ET_MOUSE_MOVED:
     case ui::ET_MOUSE_DRAGGED:
@@ -264,9 +264,7 @@ bool TooltipController::PreHandleMouseEvent(aura::Window* target,
       if (tooltip_timer_.IsRunning())
         tooltip_timer_.Reset();
 
-      // We update the tooltip if it is visible, or if we force-hid it due to a
-      // mouse press.
-      if (GetTooltip()->IsVisible() || tooltip_window_at_mouse_press_)
+      if (GetTooltip()->IsVisible())
         UpdateIfRequired();
       break;
     case ui::ET_MOUSE_PRESSED:
@@ -295,7 +293,7 @@ bool TooltipController::PreHandleMouseEvent(aura::Window* target,
 
 ui::TouchStatus TooltipController::PreHandleTouchEvent(
     aura::Window* target,
-    aura::TouchEvent* event) {
+    ui::TouchEvent* event) {
   // TODO(varunjain): need to properly implement tooltips for
   // touch events.
   // Hide the tooltip for touch events.
@@ -307,10 +305,10 @@ ui::TouchStatus TooltipController::PreHandleTouchEvent(
   return ui::TOUCH_STATUS_UNKNOWN;
 }
 
-ui::GestureStatus TooltipController::PreHandleGestureEvent(
+ui::EventResult TooltipController::PreHandleGestureEvent(
     aura::Window* target,
-    aura::GestureEvent* event) {
-  return ui::GESTURE_STATUS_UNKNOWN;
+    ui::GestureEvent* event) {
+  return ui::ER_UNHANDLED;
 }
 
 void TooltipController::OnWindowDestroyed(aura::Window* window) {

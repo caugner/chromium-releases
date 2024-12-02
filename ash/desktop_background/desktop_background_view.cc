@@ -9,12 +9,12 @@
 #include "ash/ash_export.h"
 #include "ash/desktop_background/desktop_background_controller.h"
 #include "ash/desktop_background/desktop_background_widget_controller.h"
+#include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/wm/window_animations.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
-#include "grit/ui_resources.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/layer.h"
@@ -23,79 +23,52 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/widget/widget.h"
-#include "ui/views/widget/widget_delegate.h"
+#include "ui/views/widget/widget_observer.h"
 
 namespace ash {
 namespace internal {
 namespace {
 
-class DesktopBackgroundViewCleanup : public views::WidgetDelegate {
- public:
-  DesktopBackgroundViewCleanup(views::Widget* widget,
-                               aura::RootWindow* root_window)
-      : widget_(widget),
-        root_window_(root_window) {
-  }
-
-  // Called when the window closes. The delegate MUST NOT delete itself during
-  // this call, since it can be called afterwards. See DeleteDelegate().
-  virtual void WindowClosing() OVERRIDE  {
-    DesktopBackgroundController* controller =
-        ash::Shell::GetInstance()->desktop_background_controller();
-    controller->CleanupView(root_window_);
-  }
-
-  virtual views::Widget* GetWidget() OVERRIDE {
-    return widget_;
-  }
-
-  virtual const views::Widget* GetWidget() const OVERRIDE {
-    return widget_;
-  }
-
-  virtual void DeleteDelegate() OVERRIDE {
-    delete this;
-  }
-
- private:
-  views::Widget* widget_;
-  aura::RootWindow* root_window_;
-
-  DISALLOW_COPY_AND_ASSIGN(DesktopBackgroundViewCleanup);
-};
-
-class ShowWallpaperAnimationObserver : public ui::ImplicitAnimationObserver {
+class ShowWallpaperAnimationObserver : public ui::ImplicitAnimationObserver,
+                                       public views::WidgetObserver {
  public:
   ShowWallpaperAnimationObserver(aura::RootWindow* root_window,
-                                 int container_id,
                                  views::Widget* desktop_widget)
       : root_window_(root_window),
-        container_id_(container_id),
         desktop_widget_(desktop_widget) {
+    DCHECK(desktop_widget_);
+    desktop_widget_->AddObserver(this);
   }
 
   virtual ~ShowWallpaperAnimationObserver() {
+    if (desktop_widget_)
+      desktop_widget_->RemoveObserver(this);
   }
 
  private:
   // Overridden from ui::ImplicitAnimationObserver:
   virtual void OnImplicitAnimationsCompleted() OVERRIDE {
     ash::Shell* shell = ash::Shell::GetInstance();
+    shell->GetPrimaryRootWindowController()->HandleDesktopBackgroundVisible();
     shell->user_wallpaper_delegate()->OnWallpaperAnimationFinished();
     // Only removes old component when wallpaper animation finished. If we
     // remove the old one too early, there will be a white flash during
     // animation.
     if (root_window_->GetProperty(kComponentWrapper)) {
       internal::DesktopBackgroundWidgetController* component =
-          root_window_->GetProperty(kComponentWrapper)->component();
+          root_window_->GetProperty(kComponentWrapper)->GetComponent(true);
       root_window_->SetProperty(kWindowDesktopComponent, component);
     }
+    delete this;
+  }
 
-    MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  // Overridden from views::WidgetObserver.
+  virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE {
+    desktop_widget_->RemoveObserver(this);
+    desktop_widget_ = NULL;
   }
 
   aura::RootWindow* root_window_;
-  int container_id_;
   views::Widget* desktop_widget_;
 
   DISALLOW_COPY_AND_ASSIGN(ShowWallpaperAnimationObserver);
@@ -171,7 +144,7 @@ void DesktopBackgroundView::OnPaint(gfx::Canvas* canvas) {
   }
 }
 
-bool DesktopBackgroundView::OnMousePressed(const views::MouseEvent& event) {
+bool DesktopBackgroundView::OnMousePressed(const ui::MouseEvent& event) {
   return true;
 }
 
@@ -185,18 +158,13 @@ views::Widget* CreateDesktopBackground(aura::RootWindow* root_window,
   DesktopBackgroundController* controller =
       ash::Shell::GetInstance()->desktop_background_controller();
   views::Widget* desktop_widget = new views::Widget;
-  DesktopBackgroundViewCleanup* cleanup =
-      new DesktopBackgroundViewCleanup(desktop_widget, root_window);
   views::Widget::InitParams params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
-  DesktopBackgroundView* view = new DesktopBackgroundView();
-  params.delegate = view;
-  if (controller->GetWallpaper().empty())
+  if (controller->GetWallpaper().isNull())
     params.transparent = true;
-  params.delegate = cleanup;
   params.parent = root_window->GetChildById(container_id);
   desktop_widget->Init(params);
-  desktop_widget->SetContentsView(view);
+  desktop_widget->SetContentsView(new DesktopBackgroundView());
   ash::WindowVisibilityAnimationType animation_type =
       ash::Shell::GetInstance()->user_wallpaper_delegate()->GetAnimationType();
   ash::SetWindowVisibilityAnimationType(desktop_widget->GetNativeView(),
@@ -217,7 +185,6 @@ views::Widget* CreateDesktopBackground(aura::RootWindow* root_window,
       desktop_widget->GetNativeView()->layer()->GetAnimator());
   settings.SetPreemptionStrategy(ui::LayerAnimator::ENQUEUE_NEW_ANIMATION);
   settings.AddObserver(new ShowWallpaperAnimationObserver(root_window,
-                                                          container_id,
                                                           desktop_widget));
   desktop_widget->Show();
   desktop_widget->GetNativeView()->SetName("DesktopBackgroundView");

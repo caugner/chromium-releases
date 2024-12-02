@@ -10,10 +10,12 @@
 #include "base/threading/thread_restrictions.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/images/SkImageEncoder.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFloatPoint.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositor.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/Platform.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebCompositorSupport.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebFloatPoint.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebRect.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebCompositorOutputSurface.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/compositor_switches.h"
 #include "ui/compositor/dip_util.h"
@@ -87,9 +89,8 @@ WebKit::WebGraphicsContext3D* DefaultContextFactory::CreateContext(
   return CreateContextCommon(compositor, false);
 }
 
-WebKit::WebGraphicsContext3D* DefaultContextFactory::CreateOffscreenContext(
-    Compositor* compositor) {
-  return CreateContextCommon(compositor, true);
+WebKit::WebGraphicsContext3D* DefaultContextFactory::CreateOffscreenContext() {
+  return CreateContextCommon(NULL, true);
 }
 
 void DefaultContextFactory::RemoveCompositor(Compositor* compositor) {
@@ -98,7 +99,11 @@ void DefaultContextFactory::RemoveCompositor(Compositor* compositor) {
 WebKit::WebGraphicsContext3D* DefaultContextFactory::CreateContextCommon(
     Compositor* compositor,
     bool offscreen) {
+  DCHECK(offscreen || compositor);
   WebKit::WebGraphicsContext3D::Attributes attrs;
+  attrs.depth = false;
+  attrs.stencil = false;
+  attrs.antialias = false;
   attrs.shareResources = true;
   WebKit::WebGraphicsContext3D* context =
       offscreen ?
@@ -134,12 +139,14 @@ Compositor::Compositor(CompositorDelegate* delegate,
     : delegate_(delegate),
       root_layer_(NULL),
       widget_(widget),
-      root_web_layer_(WebKit::WebLayer::create()),
       swap_posted_(false),
       device_scale_factor_(0.0f),
       last_started_frame_(0),
       last_ended_frame_(0),
       disable_schedule_composite_(false) {
+  WebKit::WebCompositorSupport* compositor_support =
+      WebKit::Platform::current()->compositorSupport();
+  root_web_layer_.reset(compositor_support->createLayer());
   WebKit::WebLayerTreeView::Settings settings;
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   settings.showFPSCounter =
@@ -149,25 +156,15 @@ Compositor::Compositor(CompositorDelegate* delegate,
   settings.refreshRate =
       test_compositor_enabled ? kTestRefreshRate : kDefaultRefreshRate;
 
-#if !defined(WEBCOMPOSITOR_OWNS_SETTINGS)
-  settings.partialSwapEnabled =
-      command_line->HasSwitch(switches::kUIEnablePartialSwap);
-  settings.perTilePainting =
-      command_line->HasSwitch(switches::kUIEnablePerTilePainting);
-#endif
-
-  host_.initialize(this, root_web_layer_, settings);
-  host_.setSurfaceReady();
-  root_web_layer_.setAnchorPoint(WebKit::WebFloatPoint(0.f, 0.f));
+  root_web_layer_->setAnchorPoint(WebKit::WebFloatPoint(0.f, 0.f));
+  host_.reset(compositor_support->createLayerTreeView(this, *root_web_layer_,
+                                                      settings));
+  host_->setSurfaceReady();
 }
 
 Compositor::~Compositor() {
   // Don't call |CompositorDelegate::ScheduleDraw| from this point.
   delegate_ = NULL;
-  // There's a cycle between |root_web_layer_| and |host_|, which results in
-  // leaking and/or crashing. Explicitly set the root layer to NULL so the cycle
-  // is broken.
-  host_.setRootLayer(NULL);
   if (root_layer_)
     root_layer_->SetCompositor(NULL);
 
@@ -180,21 +177,21 @@ Compositor::~Compositor() {
 }
 
 void Compositor::Initialize(bool use_thread) {
-#if defined(WEBCOMPOSITOR_OWNS_SETTINGS)
   CommandLine* command_line = CommandLine::ForCurrentProcess();
+  WebKit::WebCompositorSupport* compositor_support =
+      WebKit::Platform::current()->compositorSupport();
   // These settings must be applied before we initialize the compositor.
-  WebKit::WebCompositor::setPartialSwapEnabled(
+  compositor_support->setPartialSwapEnabled(
       command_line->HasSwitch(switches::kUIEnablePartialSwap));
-  WebKit::WebCompositor::setPerTilePaintingEnabled(
+  compositor_support->setPerTilePaintingEnabled(
       command_line->HasSwitch(switches::kUIEnablePerTilePainting));
-#endif
   if (use_thread)
     g_compositor_thread = new webkit_glue::WebThreadImpl("Browser Compositor");
-  WebKit::WebCompositor::initialize(g_compositor_thread);
+  compositor_support->initialize(g_compositor_thread);
 }
 
 void Compositor::Terminate() {
-  WebKit::WebCompositor::shutdown();
+  WebKit::Platform::current()->compositorSupport()->shutdown();
   if (g_compositor_thread) {
     delete g_compositor_thread;
     g_compositor_thread = NULL;
@@ -206,7 +203,7 @@ void Compositor::ScheduleDraw() {
     // TODO(nduca): Temporary while compositor calls
     // compositeImmediately() directly.
     layout();
-    host_.composite();
+    host_->composite();
   } else if (delegate_) {
     delegate_->ScheduleDraw();
   }
@@ -220,9 +217,9 @@ void Compositor::SetRootLayer(Layer* root_layer) {
   root_layer_ = root_layer;
   if (root_layer_ && !root_layer_->GetCompositor())
     root_layer_->SetCompositor(this);
-  root_web_layer_.removeAllChildren();
+  root_web_layer_->removeAllChildren();
   if (root_layer_)
-    root_web_layer_.addChild(root_layer_->web_layer());
+    root_web_layer_->addChild(root_layer_->web_layer());
 }
 
 void Compositor::Draw(bool force_clear) {
@@ -238,13 +235,13 @@ void Compositor::Draw(bool force_clear) {
   // TODO(nduca): Temporary while compositor calls
   // compositeImmediately() directly.
   layout();
-  host_.composite();
+  host_->composite();
   if (!g_compositor_thread && !swap_posted_)
     NotifyEnd();
 }
 
 void Compositor::ScheduleFullDraw() {
-  host_.setNeedsRedraw();
+  host_->setNeedsRedraw();
 }
 
 bool Compositor::ReadPixels(SkBitmap* bitmap,
@@ -252,22 +249,12 @@ bool Compositor::ReadPixels(SkBitmap* bitmap,
   if (bounds_in_pixel.right() > size().width() ||
       bounds_in_pixel.bottom() > size().height())
     return false;
-  // Convert to OpenGL coordinates.
-  gfx::Point new_origin(
-      bounds_in_pixel.x(),
-      size().height() - bounds_in_pixel.height() - bounds_in_pixel.y());
-
   bitmap->setConfig(SkBitmap::kARGB_8888_Config,
                     bounds_in_pixel.width(), bounds_in_pixel.height());
   bitmap->allocPixels();
   SkAutoLockPixels lock_image(*bitmap);
   unsigned char* pixels = static_cast<unsigned char*>(bitmap->getPixels());
-  if (host_.compositeAndReadback(
-          pixels, gfx::Rect(new_origin, bounds_in_pixel.size()))) {
-    SwizzleRGBAToBGRAAndFlip(pixels, bounds_in_pixel.size());
-    return true;
-  }
-  return false;
+  return host_->compositeAndReadback(pixels, bounds_in_pixel);
 }
 
 void Compositor::SetScaleAndSize(float scale, const gfx::Size& size_in_pixel) {
@@ -275,8 +262,8 @@ void Compositor::SetScaleAndSize(float scale, const gfx::Size& size_in_pixel) {
   if (size_in_pixel.IsEmpty() || scale <= 0)
     return;
   size_ = size_in_pixel;
-  host_.setViewportSize(size_in_pixel);
-  root_web_layer_.setBounds(size_in_pixel);
+  host_->setViewportSize(size_in_pixel);
+  root_web_layer_->setBounds(size_in_pixel);
 
   if (device_scale_factor_ != scale) {
     device_scale_factor_ = scale;
@@ -337,18 +324,61 @@ void Compositor::applyScrollAndScale(const WebKit::WebSize& scrollDelta,
                                      float scaleFactor) {
 }
 
-WebKit::WebGraphicsContext3D* Compositor::createContext3D() {
+// Adapts a pure WebGraphicsContext3D into a WebCompositorOutputSurface.
+class WebGraphicsContextToOutputSurfaceAdapter :
+    public WebKit::WebCompositorOutputSurface {
+public:
+    explicit WebGraphicsContextToOutputSurfaceAdapter(
+        WebKit::WebGraphicsContext3D* context)
+        : m_context3D(context)
+        , m_client(0)
+    {
+    }
+
+    virtual bool bindToClient(
+        WebKit::WebCompositorOutputSurfaceClient* client) OVERRIDE
+    {
+        DCHECK(client);
+        if (!m_context3D->makeContextCurrent())
+            return false;
+        m_client = client;
+        return true;
+    }
+
+    virtual const Capabilities& capabilities() const OVERRIDE
+    {
+        return m_capabilities;
+    }
+
+    virtual WebKit::WebGraphicsContext3D* context3D() const OVERRIDE
+    {
+        return m_context3D.get();
+    }
+
+    virtual void sendFrameToParentCompositor(
+        const WebKit::WebCompositorFrame&) OVERRIDE
+    {
+    }
+
+private:
+    scoped_ptr<WebKit::WebGraphicsContext3D> m_context3D;
+    Capabilities m_capabilities;
+    WebKit::WebCompositorOutputSurfaceClient* m_client;
+};
+
+WebKit::WebCompositorOutputSurface* Compositor::createOutputSurface() {
   if (test_compositor_enabled) {
     ui::TestWebGraphicsContext3D* test_context =
       new ui::TestWebGraphicsContext3D();
     test_context->Initialize();
-    return test_context;
+    return new WebGraphicsContextToOutputSurfaceAdapter(test_context);
   } else {
-    return ContextFactory::GetInstance()->CreateContext(this);
+    return new WebGraphicsContextToOutputSurfaceAdapter(
+        ContextFactory::GetInstance()->CreateContext(this));
   }
 }
 
-void Compositor::didRebindGraphicsContext(bool success) {
+void Compositor::didRecreateOutputSurface(bool success) {
 }
 
 // Called once per draw in single-threaded compositor mode and potentially
@@ -378,29 +408,6 @@ void Compositor::didCompleteSwapBuffers() {
 void Compositor::scheduleComposite() {
   if (!disable_schedule_composite_)
     ScheduleDraw();
-}
-
-void Compositor::SwizzleRGBAToBGRAAndFlip(unsigned char* pixels,
-                                          const gfx::Size& image_size) {
-  // Swizzle from RGBA to BGRA
-  size_t bitmap_size = 4 * image_size.width() * image_size.height();
-  for (size_t i = 0; i < bitmap_size; i += 4)
-    std::swap(pixels[i], pixels[i + 2]);
-
-  // Vertical flip to transform from GL co-ords
-  size_t row_size = 4 * image_size.width();
-  scoped_array<unsigned char> tmp_row(new unsigned char[row_size]);
-  for (int row = 0; row < image_size.height() / 2; row++) {
-    memcpy(tmp_row.get(),
-           &pixels[row * row_size],
-           row_size);
-    memcpy(&pixels[row * row_size],
-           &pixels[bitmap_size - (row + 1) * row_size],
-           row_size);
-    memcpy(&pixels[bitmap_size - (row + 1) * row_size],
-           tmp_row.get(),
-           row_size);
-  }
 }
 
 void Compositor::NotifyEnd() {

@@ -8,8 +8,8 @@
 
 #include "base/metrics/field_trial.h"
 #include "base/string_number_conversions.h"
-#include "chrome/common/metrics/experiments_helper.h"
-#include "chrome/common/metrics/variation_ids.h"
+#include "chrome/common/metrics/variations/variation_ids.h"
+#include "chrome/common/metrics/variations/variations_util.h"
 
 namespace {
 
@@ -21,22 +21,22 @@ static const char kHQPNewScoringFieldTrialName[] = "OmniboxHQPNewScoring";
 
 // Field trial experiment probabilities.
 
-// For inline History Quick Provider field trial, put 10% ( = 10/100 )
+// For inline History Quick Provider field trial, put 0% ( = 0/100 )
 // of the users in the disallow-inline experiment group.
 const base::FieldTrial::Probability kDisallowInlineHQPFieldTrialDivisor = 100;
 const base::FieldTrial::Probability
-    kDisallowInlineHQPFieldTrialExperimentFraction = 10;
+    kDisallowInlineHQPFieldTrialExperimentFraction = 0;
 
 // For the search suggestion field trial, divide the people in the
 // trial into 20 equally-sized buckets.  The suggest provider backend
 // will decide what behavior (if any) to change based on the group.
 const int kSuggestFieldTrialNumberOfGroups = 20;
 
-// For History Quick Provider new scoring field trial, put 25% ( = 25/100 )
+// For History Quick Provider new scoring field trial, put 0% ( = 0/100 )
 // of the users in the new scoring experiment group.
 const base::FieldTrial::Probability kHQPNewScoringFieldTrialDivisor = 100;
 const base::FieldTrial::Probability
-    kHQPNewScoringFieldTrialExperimentFraction = 25;
+    kHQPNewScoringFieldTrialExperimentFraction = 0;
 
 // Field trial IDs.
 // Though they are not literally "const", they are set only once, in
@@ -75,16 +75,16 @@ void AutocompleteFieldTrial::Activate() {
 
   // Create the suggest field trial (regardless of sticky-ness status, but
   // make it sticky if possible).
-  // Make it expire on October 1, 2012.
+  // Make it expire on March 1, 2013.
   scoped_refptr<base::FieldTrial> trial(
       base::FieldTrialList::FactoryGetFieldTrial(
         kSuggestFieldTrialName, kSuggestFieldTrialNumberOfGroups,
-        "0", 2012, 10, 1, NULL));
+        "0", 2013, 3, 1, NULL));
   if (base::FieldTrialList::IsOneTimeRandomizationEnabled())
     trial->UseOneTimeRandomization();
 
   // Mark this group in suggest requests to Google.
-  experiments_helper::AssociateGoogleVariationID(
+  chrome_variations::AssociateGoogleVariationID(
       kSuggestFieldTrialName, "0", chrome_variations::kSuggestIDMin);
   DCHECK_EQ(kSuggestFieldTrialNumberOfGroups,
       chrome_variations::kSuggestIDMax - chrome_variations::kSuggestIDMin + 1);
@@ -95,7 +95,7 @@ void AutocompleteFieldTrial::Activate() {
   for (int i = 1; i < kSuggestFieldTrialNumberOfGroups; i++) {
     const std::string group_name = base::IntToString(i);
     trial->AppendGroup(group_name, 1);
-    experiments_helper::AssociateGoogleVariationID(
+    chrome_variations::AssociateGoogleVariationID(
         kSuggestFieldTrialName, group_name,
         static_cast<chrome_variations::VariationID>(
             chrome_variations::kSuggestIDMin + i));

@@ -24,12 +24,12 @@
 #include "net/base/transport_security_state.h"
 #include "net/url_request/url_request_test_util.h"
 #include "sync/internal_api/public/base/model_type.h"
-#include "sync/internal_api/public/base/model_type_payload_map.h"
+#include "sync/internal_api/public/base/model_type_state_map.h"
 #include "sync/notifier/invalidation_state_tracker.h"
+#include "sync/notifier/invalidation_handler.h"
 #include "sync/notifier/invalidation_util.h"
-#include "sync/notifier/sync_notifier.h"
-#include "sync/notifier/sync_notifier_factory.h"
-#include "sync/notifier/sync_notifier_observer.h"
+#include "sync/notifier/invalidator_factory.h"
+#include "sync/notifier/invalidator.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
@@ -49,32 +49,27 @@ const char kAllowInsecureConnectionSwitch[] = "allow-insecure-connection";
 const char kNotificationMethodSwitch[] = "notification-method";
 
 // Class to print received notifications events.
-class NotificationPrinter : public SyncNotifierObserver {
+class NotificationPrinter : public InvalidationHandler {
  public:
   NotificationPrinter() {}
   virtual ~NotificationPrinter() {}
 
-  virtual void OnNotificationsEnabled() OVERRIDE {
-    LOG(INFO) << "Notifications enabled";
+  virtual void OnInvalidatorStateChange(InvalidatorState state) OVERRIDE {
+    LOG(INFO) << "Invalidator state changed to "
+              << InvalidatorStateToString(state);
   }
 
-  virtual void OnNotificationsDisabled(
-      NotificationsDisabledReason reason) OVERRIDE {
-    LOG(INFO) << "Notifications disabled with reason "
-              << NotificationsDisabledReasonToString(reason);
-  }
-
-  virtual void OnIncomingNotification(
-      const ObjectIdPayloadMap& id_payloads,
-      IncomingNotificationSource source) OVERRIDE {
-    const ModelTypePayloadMap& type_payloads =
-        ObjectIdPayloadMapToModelTypePayloadMap(id_payloads);
-    for (ModelTypePayloadMap::const_iterator it =
-             type_payloads.begin(); it != type_payloads.end(); ++it) {
-      LOG(INFO) << (source == REMOTE_NOTIFICATION ? "Remote" : "Local")
-                << " Notification: type = "
+  virtual void OnIncomingInvalidation(
+      const ObjectIdStateMap& id_state_map,
+      IncomingInvalidationSource source) OVERRIDE {
+    const ModelTypeStateMap& type_state_map =
+        ObjectIdStateMapToModelTypeStateMap(id_state_map);
+    for (ModelTypeStateMap::const_iterator it = type_state_map.begin();
+         it != type_state_map.end(); ++it) {
+      LOG(INFO) << (source == REMOTE_INVALIDATION ? "Remote" : "Local")
+                << " Invalidation: type = "
                 << ModelTypeToString(it->first)
-                << ", payload = " << it->second;
+                << ", payload = " << it->second.payload;
     }
   }
 
@@ -98,6 +93,12 @@ class NullInvalidationStateTracker
       int64 max_invalidation_version) OVERRIDE {
     LOG(INFO) << "Setting max invalidation version for "
               << ObjectIdToString(id) << " to " << max_invalidation_version;
+  }
+
+  virtual void Forget(const ObjectIdSet& ids) OVERRIDE {
+    for (ObjectIdSet::const_iterator it = ids.begin(); it != ids.end(); ++it) {
+      LOG(INFO) << "Forgetting saved state for " << ObjectIdToString(*it);
+    }
   }
 
   virtual std::string GetInvalidationState() const OVERRIDE {
@@ -233,25 +234,25 @@ int SyncListenNotificationsMain(int argc, char* argv[]) {
           new MyTestURLRequestContextGetter(io_thread.message_loop_proxy()));
   const char kClientInfo[] = "sync_listen_notifications";
   NullInvalidationStateTracker null_invalidation_state_tracker;
-  SyncNotifierFactory sync_notifier_factory(
+  InvalidatorFactory invalidator_factory(
       notifier_options, kClientInfo,
       null_invalidation_state_tracker.AsWeakPtr());
-  scoped_ptr<SyncNotifier> sync_notifier(
-      sync_notifier_factory.CreateSyncNotifier());
+  scoped_ptr<Invalidator> invalidator(
+      invalidator_factory.CreateInvalidator());
   NotificationPrinter notification_printer;
 
   const char kUniqueId[] = "fake_unique_id";
-  sync_notifier->SetUniqueId(kUniqueId);
-  sync_notifier->UpdateCredentials(email, token);
+  invalidator->SetUniqueId(kUniqueId);
+  invalidator->UpdateCredentials(email, token);
 
   // Listen for notifications for all known types.
-  sync_notifier->RegisterHandler(&notification_printer);
-  sync_notifier->UpdateRegisteredIds(
+  invalidator->RegisterHandler(&notification_printer);
+  invalidator->UpdateRegisteredIds(
       &notification_printer, ModelTypeSetToObjectIdSet(ModelTypeSet::All()));
 
   ui_loop.Run();
 
-  sync_notifier->UnregisterHandler(&notification_printer);
+  invalidator->UnregisterHandler(&notification_printer);
   io_thread.Stop();
   return 0;
 }

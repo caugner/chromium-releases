@@ -66,6 +66,13 @@ using WebKit::WebMouseEvent;
 using WebKit::WebMouseWheelEvent;
 using WebKit::WebGestureEvent;
 
+// These are not documented, so use only after checking -respondsToSelector:.
+@interface NSApplication (UndocumentedSpeechMethods)
+- (void)speakString:(NSString*)string;
+- (void)stopSpeaking:(id)sender;
+- (BOOL)isSpeaking;
+@end
+
 // Declare things that are part of the 10.7 SDK.
 #if !defined(MAC_OS_X_VERSION_10_7) || \
     MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
@@ -127,6 +134,8 @@ static float ScaleFactor(NSView* view) {
 - (void)windowChangedScreen:(NSNotification*)notification;
 - (void)checkForPluginImeCancellation;
 - (void)updateTabBackingStoreScaleFactor;
+- (NSRect)firstViewRectForCharacterRange:(NSRange)theRange
+                             actualRange:(NSRangePointer)actualRange;
 @end
 
 // NSEvent subtype for scroll gestures events.
@@ -470,6 +479,7 @@ gfx::NativeViewAccessible RenderWidgetHostViewMac::GetNativeViewAccessible() {
 }
 
 void RenderWidgetHostViewMac::MovePluginWindows(
+    const gfx::Point& scroll_offset,
     const std::vector<webkit::npapi::WebPluginGeometry>& moves) {
   TRACE_EVENT0("browser", "RenderWidgetHostViewMac::MovePluginWindows");
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -576,11 +586,11 @@ void RenderWidgetHostViewMac::SetIsLoading(bool is_loading) {
 }
 
 void RenderWidgetHostViewMac::TextInputStateChanged(
-    ui::TextInputType type,
-    bool can_compose_inline) {
-  if (text_input_type_ != type || can_compose_inline_ != can_compose_inline) {
-    text_input_type_ = type;
-    can_compose_inline_ = can_compose_inline;
+    const ViewHostMsg_TextInputState_Params& params) {
+  if (text_input_type_ != params.type
+      || can_compose_inline_ != params.can_compose_inline) {
+    text_input_type_ = params.type;
+    can_compose_inline_ = params.can_compose_inline;
     if (HasFocus()) {
       SetTextInputActive(true);
 
@@ -594,7 +604,9 @@ void RenderWidgetHostViewMac::TextInputStateChanged(
 
 void RenderWidgetHostViewMac::SelectionBoundsChanged(
     const gfx::Rect& start_rect,
-    const gfx::Rect& end_rect) {
+    WebKit::WebTextDirection start_direction,
+    const gfx::Rect& end_rect,
+    WebKit::WebTextDirection end_direction) {
   if (start_rect == end_rect)
     caret_rect_ = start_rect;
 }
@@ -726,6 +738,26 @@ void RenderWidgetHostViewMac::SetTooltipText(const string16& tooltip_text) {
   }
 }
 
+bool RenderWidgetHostViewMac::SupportsSpeech() const {
+  return [NSApp respondsToSelector:@selector(speakString:)] &&
+         [NSApp respondsToSelector:@selector(stopSpeaking:)];
+}
+
+void RenderWidgetHostViewMac::SpeakSelection() {
+  if ([NSApp respondsToSelector:@selector(speakString:)])
+    [NSApp speakString:base::SysUTF8ToNSString(selected_text_)];
+}
+
+bool RenderWidgetHostViewMac::IsSpeaking() const {
+  return [NSApp respondsToSelector:@selector(isSpeaking)] &&
+         [NSApp isSpeaking];
+}
+
+void RenderWidgetHostViewMac::StopSpeaking() {
+  if ([NSApp respondsToSelector:@selector(stopSpeaking:)])
+    [NSApp stopSpeaking:cocoa_view_];
+}
+
 //
 // RenderWidgetHostViewCocoa uses the stored selection text,
 // which implements NSServicesRequests protocol.
@@ -734,7 +766,7 @@ void RenderWidgetHostViewMac::SelectionChanged(const string16& text,
                                                size_t offset,
                                                const ui::Range& range) {
   if (range.is_empty() || text.empty()) {
-      selected_text_.clear();
+    selected_text_.clear();
   } else {
     size_t pos = range.GetMin() - offset;
     size_t n = range.length();
@@ -748,7 +780,7 @@ void RenderWidgetHostViewMac::SelectionChanged(const string16& text,
   }
 
   [cocoa_view_ setSelectedRange:range.ToNSRange()];
-  // Updaes markedRange when there is no marked text so that retrieving
+  // Updates markedRange when there is no marked text so that retrieving
   // markedRange immediately after calling setMarkdText: returns the current
   // caret position.
   if (![cocoa_view_ hasMarkedText]) {
@@ -960,7 +992,8 @@ void RenderWidgetHostViewMac::AcceleratedSurfaceSetTransportDIB(
                                                    transport_dib);
 }
 
-bool RenderWidgetHostViewMac::CompositorSwapBuffers(uint64 surface_handle) {
+bool RenderWidgetHostViewMac::CompositorSwapBuffers(uint64 surface_handle,
+                                                    const gfx::Size& size) {
   if (is_hidden_)
     return true;
 
@@ -970,7 +1003,7 @@ bool RenderWidgetHostViewMac::CompositorSwapBuffers(uint64 surface_handle) {
   if (!compositing_iosurface_.get())
     return true;
 
-  compositing_iosurface_->SetIOSurface(surface_handle);
+  compositing_iosurface_->SetIOSurface(surface_handle, size);
 
   GotAcceleratedFrame();
 
@@ -998,8 +1031,24 @@ void RenderWidgetHostViewMac::AckPendingSwapBuffers() {
           pending_swap_buffers_acks_.front().first,
           pending_swap_buffers_acks_.front().second,
           0);
-      if (render_widget_host_)
+      if (render_widget_host_) {
         render_widget_host_->AcknowledgeSwapBuffersToRenderer();
+
+        // Send VSync parameters to compositor thread.
+        if (compositing_iosurface_.get()) {
+          base::TimeTicks timebase;
+          uint32 numerator = 0, denominator = 0;
+          compositing_iosurface_->GetVSyncParameters(&timebase,
+                                                     &numerator,
+                                                     &denominator);
+          if (numerator > 0 && denominator > 0) {
+            int64 interval_micros =
+                1000000 * static_cast<int64>(numerator) / denominator;
+            render_widget_host_->UpdateVSyncParameters(
+                timebase, base::TimeDelta::FromMicroseconds(interval_micros));
+          }
+        }
+      }
     }
     pending_swap_buffers_acks_.erase(pending_swap_buffers_acks_.begin());
   }
@@ -1112,6 +1161,12 @@ bool RenderWidgetHostViewMac::GetCachedFirstRectForCharacterRange(
   if (request_range_in_composition == ui::Range::InvalidRange())
     return false;
 
+  // If firstRectForCharacterRange in WebFrame is failed in renderer,
+  // ImeCompositionRangeChanged will be sent with empty vector.
+  if (composition_bounds_.empty())
+    return false;
+  DCHECK_EQ(composition_bounds_.size(), composition_range_.length());
+
   ui::Range ui_actual_range;
   *rect = NSRectFromCGRect(GetFirstRectForCompositionRange(
                                request_range_in_composition,
@@ -1138,7 +1193,7 @@ void RenderWidgetHostViewMac::AcceleratedSurfaceBuffersSwapped(
   // TODO(jbates) http://crbug.com/105344 This will be removed when there are no
   // plugin windows.
   if (params.window == gfx::kNullPluginWindow) {
-    if (CompositorSwapBuffers(params.surface_handle))
+    if (CompositorSwapBuffers(params.surface_handle, params.size))
       AckPendingSwapBuffers();
   } else {
     // Deprecated accelerated plugin code path.
@@ -1171,8 +1226,8 @@ void RenderWidgetHostViewMac::AcceleratedSurfacePostSubBuffer(
   // TODO(jbates) http://crbug.com/105344 This will be removed when there are no
   // plugin windows.
   if (params.window == gfx::kNullPluginWindow) {
-    if (CompositorSwapBuffers(params.surface_handle))
-      AckPendingSwapBuffers();
+    NOTIMPLEMENTED();
+    AckPendingSwapBuffers();
   } else {
     // Deprecated accelerated plugin code path.
     AcceleratedPluginView* view = ViewForPluginWindowHandle(params.window);
@@ -1366,6 +1421,42 @@ void RenderWidgetHostViewMac::WindowFrameChanged() {
         render_widget_host_->GetRoutingID(), GetBoundsInRootWindow(),
         GetViewBounds()));
   }
+}
+
+void RenderWidgetHostViewMac::ShowDefinitionForSelection() {
+  // Brings up either Dictionary.app or a light-weight dictionary panel,
+  // depending on system settings.
+  NSRange selection_range = [cocoa_view_ selectedRange];
+  NSAttributedString* attr_string =
+      [cocoa_view_ attributedSubstringForProposedRange:selection_range
+                                           actualRange:nil];
+
+  // The PDF plugin does not support getting the attributed string. Until it
+  // does, use NSPerformService(), which opens Dictionary.app.
+  // http://crbug.com/152438
+  // TODO(asvitkine): This should be removed after the above support is added.
+  if (!attr_string) {
+    if (selected_text_.empty())
+      return;
+    NSString* text = base::SysUTF8ToNSString(selected_text_);
+    NSPasteboard* pasteboard = [NSPasteboard pasteboardWithUniqueName];
+    NSArray* types = [NSArray arrayWithObject:NSStringPboardType];
+    [pasteboard declareTypes:types owner:nil];
+    if ([pasteboard setString:text forType:NSStringPboardType])
+      NSPerformService(@"Look Up in Dictionary", pasteboard);
+    return;
+  }
+
+  NSRect rect = [cocoa_view_ firstViewRectForCharacterRange:selection_range
+                                                actualRange:nil];
+
+  // Set |rect.origin| to the text baseline based on |attr_string|'s font,
+  // since -baselineDeltaForCharacterAtIndex: is currently not implemented.
+  NSDictionary* attrs = [attr_string attributesAtIndex:0 effectiveRange:nil];
+  NSFont* font = [attrs objectForKey:NSFontAttributeName];
+  rect.origin.y += NSHeight(rect) - [font ascender];
+  [cocoa_view_ showDefinitionForAttributedString:attr_string
+                                         atPoint:rect.origin];
 }
 
 void RenderWidgetHostViewMac::SetBackground(const SkBitmap& background) {
@@ -2305,6 +2396,15 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 
   SEL action = [item action];
 
+  if (action == @selector(stopSpeaking:)) {
+    return renderWidgetHostView_->render_widget_host_->IsRenderView() &&
+           renderWidgetHostView_->IsSpeaking();
+  }
+  if (action == @selector(startSpeaking:)) {
+    return renderWidgetHostView_->render_widget_host_->IsRenderView() &&
+           renderWidgetHostView_->SupportsSpeech();
+  }
+
   // For now, these actions are always enabled for render view,
   // this is sub-optimal.
   // TODO(suzhe): Plumb the "can*" methods up from WebCore.
@@ -2762,8 +2862,8 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
   return index;
 }
 
-- (NSRect)firstRectForCharacterRange:(NSRange)theRange
-                         actualRange:(NSRangePointer)actualRange {
+- (NSRect)firstViewRectForCharacterRange:(NSRange)theRange
+                             actualRange:(NSRangePointer)actualRange {
   NSRect rect;
   if (!renderWidgetHostView_->GetCachedFirstRectForCharacterRange(
           theRange,
@@ -2778,10 +2878,18 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
   }
 
   // The returned rectangle is in WebKit coordinates (upper left origin), so
-  // flip the coordinate system and then convert it into screen coordinates for
-  // return.
+  // flip the coordinate system.
   NSRect viewFrame = [self frame];
   rect.origin.y = NSHeight(viewFrame) - NSMaxY(rect);
+  return rect;
+}
+
+- (NSRect)firstRectForCharacterRange:(NSRange)theRange
+                         actualRange:(NSRangePointer)actualRange {
+  NSRect rect = [self firstViewRectForCharacterRange:theRange
+                                         actualRange:actualRange];
+
+  // Convert into screen coordinates for return.
   rect = [self convertRect:rect toView:nil];
   rect.origin = [[self window] convertBaseToScreen:rect.origin];
   return rect;
@@ -2952,8 +3060,6 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
 }
 
 - (void)insertText:(id)string {
-  // This is a method on NSTextInput, not NSTextInputClient. But on 10.5, this
-  // gets called anyway. Forward to the right method. http://crbug.com/47890
   [self insertText:string replacementRange:NSMakeRange(NSNotFound, 0)];
 }
 
@@ -3037,6 +3143,14 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
     static_cast<RenderViewHostImpl*>(
         renderWidgetHostView_->render_widget_host_)->PasteAndMatchStyle();
   }
+}
+
+- (void)startSpeaking:(id)sender {
+  renderWidgetHostView_->SpeakSelection();
+}
+
+- (void)stopSpeaking:(id)sender {
+  renderWidgetHostView_->StopSpeaking();
 }
 
 - (void)cancelComposition {

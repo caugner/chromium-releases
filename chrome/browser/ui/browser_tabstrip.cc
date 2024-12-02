@@ -18,6 +18,14 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 
+// TODO(avi): Kill this when TabContents goes away.
+class BrowserTabstripTabContentsCreator {
+ public:
+  static TabContents* CreateTabContents(content::WebContents* contents) {
+    return TabContents::Factory::CreateTabContents(contents);
+  }
+};
+
 namespace chrome {
 
 int GetIndexOfTab(const Browser* browser,
@@ -91,7 +99,8 @@ void AddWebContents(Browser* browser,
                     content::WebContents* new_contents,
                     WindowOpenDisposition disposition,
                     const gfx::Rect& initial_pos,
-                    bool user_gesture) {
+                    bool user_gesture,
+                    bool* was_blocked) {
   // No code for this yet.
   DCHECK(disposition != SAVE_TO_DISK);
   // Can't create a new contents for the current tab - invalid case.
@@ -100,31 +109,36 @@ void AddWebContents(Browser* browser,
   TabContents* source_tab_contents = NULL;
   BlockedContentTabHelper* source_blocked_content = NULL;
   TabContents* new_tab_contents = TabContents::FromWebContents(new_contents);
-  if (!new_tab_contents)
-    new_tab_contents = new TabContents(new_contents);
+  if (!new_tab_contents) {
+    new_tab_contents =
+        BrowserTabstripTabContentsCreator::CreateTabContents(new_contents);
+  }
   if (source_contents) {
     source_tab_contents = TabContents::FromWebContents(source_contents);
     source_blocked_content = source_tab_contents->blocked_content_tab_helper();
   }
 
   if (source_tab_contents) {
-    // Handle blocking of all contents.
+    // Handle blocking of tabs.
     if (source_blocked_content->all_contents_blocked()) {
-      source_blocked_content->AddTabContents(new_tab_contents,
-                                             disposition,
-                                             initial_pos,
-                                             user_gesture);
+      source_blocked_content->AddTabContents(
+          new_tab_contents, disposition, initial_pos, user_gesture);
+      if (was_blocked)
+        *was_blocked = true;
       return;
     }
 
     // Handle blocking of popups.
-    if ((disposition == NEW_POPUP) && !user_gesture &&
+    if ((disposition == NEW_POPUP || disposition == NEW_FOREGROUND_TAB) &&
+        !user_gesture &&
         !CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kDisablePopupBlocking)) {
       // Unrequested popups from normal pages are constrained unless they're in
       // the white list.  The popup owner will handle checking this.
-      source_tab_contents->blocked_content_tab_helper()->
-          AddPopup(new_tab_contents, initial_pos, user_gesture);
+      source_blocked_content->AddPopup(
+          new_tab_contents, disposition, initial_pos, user_gesture);
+      if (was_blocked)
+        *was_blocked = true;
       return;
     }
 
@@ -160,14 +174,27 @@ TabContents* TabContentsFactory(
     Profile* profile,
     content::SiteInstance* site_instance,
     int routing_id,
-    const content::WebContents* base_web_contents,
-    content::SessionStorageNamespace* session_storage_namespace) {
-  return new TabContents(content::WebContents::Create(
-      profile,
+    const content::WebContents* base_web_contents) {
+  return BrowserTabstripTabContentsCreator::CreateTabContents(
+      content::WebContents::Create(profile,
       site_instance,
       routing_id,
-      base_web_contents,
-      session_storage_namespace));
+      base_web_contents));
+}
+
+TabContents* TabContentsWithSessionStorageFactory(
+    Profile* profile,
+    content::SiteInstance* site_instance,
+    int routing_id,
+    const content::WebContents* base_web_contents,
+    const content::SessionStorageNamespaceMap& session_storage_namespace_map) {
+  return BrowserTabstripTabContentsCreator::CreateTabContents(
+      content::WebContents::CreateWithSessionStorage(
+          profile,
+          site_instance,
+          routing_id,
+          base_web_contents,
+          session_storage_namespace_map));
 }
 
 }  // namespace chrome

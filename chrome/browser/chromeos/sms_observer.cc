@@ -109,8 +109,8 @@ void SmsObserver::OnNewMessage(const std::string& modem_device_path,
   if (message.text.empty())
     return;
 
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          ash::switches::kAshNotify)) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          ash::switches::kAshNotifyDisabled)) {
     SystemNotification note(
         profile_,
         "incoming _sms.chromeos",

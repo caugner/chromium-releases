@@ -26,12 +26,12 @@ Widget* CreateBubbleWidget(BubbleDelegateView* bubble) {
   Widget::InitParams bubble_params(Widget::InitParams::TYPE_BUBBLE);
   bubble_params.delegate = bubble;
   bubble_params.transparent = true;
+  bubble_params.accept_events = bubble->accept_events();
   if (bubble->parent_window())
     bubble_params.parent = bubble->parent_window();
   else
     bubble_params.parent_widget = bubble->anchor_widget();
-  if (bubble->use_focusless())
-    bubble_params.can_activate = false;
+  bubble_params.can_activate = bubble->CanActivate();
 #if defined(OS_WIN) && !defined(USE_AURA)
   bubble_params.type = Widget::InitParams::TYPE_WINDOW_FRAMELESS;
   bubble_params.transparent = false;
@@ -87,7 +87,8 @@ Widget* CreateBorderWidget(BubbleDelegateView* bubble) {
   Widget::InitParams border_params(Widget::InitParams::TYPE_BUBBLE);
   border_params.delegate = new BubbleBorderDelegate(bubble, border_widget);
   border_params.transparent = true;
-  border_params.parent_widget = bubble->anchor_widget();
+  border_params.parent_widget = bubble->GetWidget();
+  border_params.can_activate = bubble->CanActivate();
   border_widget->Init(border_params);
   return border_widget;
 }
@@ -115,6 +116,7 @@ BubbleDelegateView::BubbleDelegateView()
       original_opacity_(255),
       border_widget_(NULL),
       use_focusless_(false),
+      accept_events_(true),
       try_mirroring_arrow_(true),
       parent_window_(NULL) {
   set_background(Background::CreateSolidBackground(color_));
@@ -135,6 +137,7 @@ BubbleDelegateView::BubbleDelegateView(
       original_opacity_(255),
       border_widget_(NULL),
       use_focusless_(false),
+      accept_events_(true),
       try_mirroring_arrow_(true),
       parent_window_(NULL) {
   set_background(Background::CreateSolidBackground(color_));
@@ -178,6 +181,10 @@ BubbleDelegateView* BubbleDelegateView::AsBubbleDelegate() {
   return this;
 }
 
+bool BubbleDelegateView::CanActivate() const {
+  return !use_focusless();
+}
+
 View* BubbleDelegateView::GetContentsView() {
   return this;
 }
@@ -209,9 +216,14 @@ void BubbleDelegateView::OnWidgetVisibilityChanged(Widget* widget,
     return;
 
   if (visible) {
-    if (border_widget_)
-      border_widget_->Show();
-    GetFocusManager()->SetFocusedView(GetInitiallyFocusedView());
+    if (border_widget_) {
+      if (CanActivate())
+        border_widget_->Show();
+      else
+        border_widget_->ShowInactive();
+    }
+    if (CanActivate())
+      GetFocusManager()->SetFocusedView(GetInitiallyFocusedView());
     if (anchor_widget() && anchor_widget()->GetTopLevelWidget())
       anchor_widget()->GetTopLevelWidget()->DisableInactiveRendering();
   } else {
@@ -233,7 +245,7 @@ void BubbleDelegateView::OnWidgetMoved(Widget* widget) {
 
 gfx::Rect BubbleDelegateView::GetAnchorRect() {
   if (!anchor_view())
-    return gfx::Rect();
+    return gfx::Rect(anchor_point_, gfx::Size());
   gfx::Rect anchor_bounds = anchor_view()->GetBoundsInScreen();
   anchor_bounds.Inset(anchor_insets_);
   return anchor_bounds;

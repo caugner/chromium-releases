@@ -8,6 +8,7 @@
 #include "base/string16.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -514,8 +515,6 @@ TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
   back_model.SetMenuModelDelegate(&favicon_delegate);
 
   SkBitmap new_icon_bitmap(CreateBitmap(SK_ColorRED));
-  std::vector<unsigned char> icon_data;
-  gfx::PNGCodec::EncodeBGRASkBitmap(new_icon_bitmap, false, &icon_data);
 
   GURL url1 = GURL("http://www.a.com/1");
   GURL url2 = GURL("http://www.a.com/2");
@@ -529,12 +528,13 @@ TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
   HistoryServiceFactory::GetForProfile(
       profile(), Profile::EXPLICIT_ACCESS)->AddPage(
           url1, history::SOURCE_BROWSED);
-  profile()->GetFaviconService(Profile::EXPLICIT_ACCESS)->SetFavicon(url1,
-      url1_favicon, icon_data, history::FAVICON);
+  FaviconServiceFactory::GetForProfile(
+      profile(), Profile::EXPLICIT_ACCESS)->SetFavicons(
+          url1, url1_favicon, history::FAVICON, gfx::Image(new_icon_bitmap));
 
   // Will return the current icon (default) but start an anync call
   // to retrieve the favicon from the favicon service.
-  gfx::ImageSkia default_icon;
+  gfx::Image default_icon;
   back_model.GetIconAt(0, &default_icon);
 
   // Make the favicon service run GetFavIconForURL,
@@ -545,12 +545,12 @@ TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
   EXPECT_TRUE(favicon_delegate.was_called());
 
   // Verify the bitmaps match.
-  gfx::ImageSkia valid_icon;
+  gfx::Image valid_icon;
   // This time we will get the new favicon returned.
   back_model.GetIconAt(0, &valid_icon);
 
-  SkBitmap default_icon_bitmap = *default_icon.bitmap();
-  SkBitmap valid_icon_bitmap = *valid_icon.bitmap();
+  SkBitmap default_icon_bitmap = *default_icon.ToSkBitmap();
+  SkBitmap valid_icon_bitmap = *valid_icon.ToSkBitmap();
 
   SkAutoLockPixels a(new_icon_bitmap);
   SkAutoLockPixels b(valid_icon_bitmap);

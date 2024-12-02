@@ -228,6 +228,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kRemoteAccessHostTalkGadgetPrefix,
     prefs::kRemoteAccessHostTalkGadgetPrefix,
     Value::TYPE_STRING },
+  { key::kRemoteAccessHostRequireCurtain,
+    prefs::kRemoteAccessHostRequireCurtain,
+    Value::TYPE_BOOLEAN },
   { key::kCloudPrintProxyEnabled,
     prefs::kCloudPrintProxyEnabled,
     Value::TYPE_BOOLEAN },
@@ -316,6 +319,12 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     Value::TYPE_BOOLEAN },
   { key::kExternalStorageDisabled,
     prefs::kExternalStorageDisabled,
+    Value::TYPE_BOOLEAN },
+  { key::kAudioOutputAllowed,
+    prefs::kAudioOutputAllowed,
+    Value::TYPE_BOOLEAN },
+  { key::kAudioCaptureAllowed,
+    prefs::kAudioCaptureAllowed,
     Value::TYPE_BOOLEAN },
 #endif  // defined(OS_CHROMEOS)
 

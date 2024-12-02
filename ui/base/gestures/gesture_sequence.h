@@ -6,7 +6,7 @@
 #define UI_BASE_GESTURES_GESTURE_SEQUENCE_H_
 
 #include "base/timer.h"
-#include "ui/base/events.h"
+#include "ui/base/events/event_constants.h"
 #include "ui/base/gestures/gesture_point.h"
 #include "ui/base/gestures/gesture_recognizer.h"
 #include "ui/gfx/rect.h"
@@ -59,8 +59,6 @@ class UI_EXPORT GestureSequence {
   }
 
  private:
-  void Reset();
-
   // Recreates the axis-aligned bounding box that contains all the touch-points
   // at their most recent position.
   void RecreateBoundingBox();
@@ -88,6 +86,8 @@ class UI_EXPORT GestureSequence {
 
   // Tap gestures.
   void AppendTapDownGestureEvent(const GesturePoint& point, Gestures* gestures);
+  void PrependTapCancelGestureEvent(const GesturePoint& point,
+                                   Gestures* gestures);
   void AppendBeginGestureEvent(const GesturePoint& point, Gestures* gestures);
   void AppendEndGestureEvent(const GesturePoint& point, Gestures* gestures);
   void AppendClickGestureEvent(const GesturePoint& point,
@@ -106,7 +106,7 @@ class UI_EXPORT GestureSequence {
                               Gestures* gestures,
                               float x_velocity,
                               float y_velocity);
-  void AppendScrollGestureUpdate(const GesturePoint& point,
+  void AppendScrollGestureUpdate(GesturePoint& point,
                                  const gfx::Point& location,
                                  Gestures* gestures);
 
@@ -142,11 +142,8 @@ class UI_EXPORT GestureSequence {
                        GesturePoint& point,
                        Gestures* gestures);
   bool ScrollUpdate(const TouchEvent& event,
-                    const GesturePoint& point,
+                    GesturePoint& point,
                     Gestures* gestures);
-  bool NoGesture(const TouchEvent& event,
-                 const GesturePoint& point,
-                 Gestures* gestures);
   bool TouchDown(const TouchEvent& event,
                  const GesturePoint& point,
                  Gestures* gestures);
@@ -166,7 +163,7 @@ class UI_EXPORT GestureSequence {
                   const GesturePoint& point,
                   Gestures* gestures);
   bool PinchUpdate(const TouchEvent& event,
-                   const GesturePoint& point,
+                   GesturePoint& point,
                    Gestures* gestures);
   bool PinchEnd(const TouchEvent& event,
                 const GesturePoint& point,

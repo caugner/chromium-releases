@@ -139,6 +139,7 @@
     'app/policy/policy_templates.gypi',
     'chrome_browser.gypi',
     'chrome_browser_extensions.gypi',
+    'chrome_browser_ui.gypi',
     'chrome_common.gypi',
     'chrome_dll.gypi',
     'chrome_exe.gypi',
@@ -216,7 +217,9 @@
         }],
         ['OS=="android"', {
           'sources!': [
+            'browser/debugger/browser_list_tabcontents_provider.cc',
             'browser/debugger/devtools_window.cc',
+            'browser/debugger/remote_debugging_server.cc',
           ],
         }],
       ],
@@ -279,6 +282,7 @@
         'common',
         'common_net',
         '../base/base.gyp:base',
+        '../google_apis/google_apis.gyp:google_apis',
         '../jingle/jingle.gyp:notifier',
         '../net/net.gyp:net',
         '../printing/printing.gyp:printing',
@@ -420,16 +424,6 @@
             'CHROMIUM_STRIP_SAVE_FILE': 'app/app.saves',
             'INFOPLIST_FILE': 'app/helper-Info.plist',
           },
-          # Turn off -dead_strip in Release mode for the helper app. There's
-          # little here to strip, and doing so preserves symbols from
-          # crt1.10.6.o, which get removed incorrectly. http://crbug.com/139902
-          'configurations': {
-            'Release': {
-              'xcode_settings': {
-                'DEAD_CODE_STRIPPING': 'NO',
-              },
-            },
-          },
           'postbuilds': [
             {
               # The helper doesn't have real localizations, it just has
@@ -464,14 +458,14 @@
             {
               # Modify the Info.plist as needed.  The script explains why this
               # is needed.  This is also done in the chrome and chrome_dll
-              # targets.  In this case, --breakpad=0, --keystone=0, and --svn=0
-              # are used because Breakpad, Keystone, and Subversion keys are
+              # targets.  In this case, --breakpad=0, --keystone=0, and --scm=0
+              # are used because Breakpad, Keystone, and SCM keys are
               # never placed into the helper.
               'postbuild_name': 'Tweak Info.plist',
               'action': ['<(tweak_info_plist_path)',
                          '--breakpad=0',
                          '--keystone=0',
-                         '--svn=0'],
+                         '--scm=0'],
             },
             {
               # Make sure there isn't any Objective-C in the helper app's
@@ -571,14 +565,14 @@
             {
               # Modify the Info.plist as needed.  The script explains why this
               # is needed.  This is also done in the chrome and chrome_dll
-              # targets.  In this case, --breakpad=0, --keystone=0, and --svn=0
-              # are used because Breakpad, Keystone, and Subversion keys are
+              # targets.  In this case, --breakpad=0, --keystone=0, and --scm=0
+              # are used because Breakpad, Keystone, and SCM keys are
               # never placed into the app mode loader.
               'postbuild_name': 'Tweak Info.plist',
               'action': ['<(tweak_info_plist_path)',
                          '--breakpad=0',
                          '--keystone=0',
-                         '--svn=0'],
+                         '--scm=0'],
             },
           ],
         },  # target app_mode_app
@@ -879,6 +873,7 @@
             ],
           },
           'sources': [
+            'app/app_host_exe.ver',
             'app/chrome_exe.ver',
             'app/chrome_dll.ver',
             'app/nacl64_exe.ver',
@@ -1073,6 +1068,9 @@
         },
       ]},  # 'targets'
     ],  # OS=="win"
+    ['chromeos==1', {
+      'includes': [ 'chrome_browser_chromeos.gypi' ],
+    }],  # chromeos==1
     ['OS=="android"',
       {
       'targets': [
@@ -1080,17 +1078,29 @@
           'target_name': 'chrome_java',
           'type': 'none',
           'dependencies': [
-            '../base/base.gyp:base_java',
+            '../base/base.gyp:base',
+            '../chrome/browser/component/components.gyp:web_contents_delegate_android_java',
             '../content/content.gyp:content_java',
-            '../net/net.gyp:net_java',
+            '../ui/ui.gyp:ui_java',
+          ],
+          'export_dependent_settings': [
+            '../base/base.gyp:base',
+            '../chrome/browser/component/components.gyp:web_contents_delegate_android_java',
+            '../content/content.gyp:content_java',
+            '../ui/ui.gyp:ui_java',
           ],
           'variables': {
             'package_name': 'chrome',
             'java_in_dir': '../chrome/android/java',
           },
-          'includes': [ '../build/java.gypi' ],
+          'includes': [
+            '../build/java.gypi',
+          ],
         },
-      ]}, # 'targets'
+      ], # 'targets'
+      'includes': [
+        'chrome_android.gypi',
+      ]}, # 'includes'
     ],  # OS=="android"
   ],  # 'conditions'
 }

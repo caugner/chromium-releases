@@ -10,6 +10,11 @@
 
 namespace gpu {
 
+namespace {
+const int kCommandsPerFlushCheck = 100;
+const double kFlushDelay = 1.0 / (5.0 * 60.0);
+}
+
 CommandBufferHelper::CommandBufferHelper(CommandBuffer* command_buffer)
     : command_buffer_(command_buffer),
       ring_buffer_id_(-1),
@@ -22,7 +27,15 @@ CommandBufferHelper::CommandBufferHelper(CommandBuffer* command_buffer)
       last_put_sent_(0),
       commands_issued_(0),
       usable_(true),
+      context_lost_(false),
       last_flush_time_(0) {
+}
+
+bool CommandBufferHelper::IsContextLost() {
+  if (!context_lost_) {
+    context_lost_ = error::IsError(command_buffer()->GetLastError());
+  }
+  return context_lost_;
 }
 
 bool CommandBufferHelper::AllocateRingBuffer() {
@@ -69,12 +82,16 @@ bool CommandBufferHelper::AllocateRingBuffer() {
   return true;
 }
 
-void CommandBufferHelper::FreeRingBuffer() {
-  GPU_CHECK_EQ(put_, get_offset());
+void CommandBufferHelper::FreeResources() {
   if (HaveRingBuffer()) {
     command_buffer_->DestroyTransferBuffer(ring_buffer_id_);
     ring_buffer_id_ = -1;
   }
+}
+
+void CommandBufferHelper::FreeRingBuffer() {
+  GPU_CHECK_EQ(put_, get_offset());
+  FreeResources();
 }
 
 bool CommandBufferHelper::Initialize(int32 ring_buffer_size) {
@@ -83,6 +100,7 @@ bool CommandBufferHelper::Initialize(int32 ring_buffer_size) {
 }
 
 CommandBufferHelper::~CommandBufferHelper() {
+  FreeResources();
 }
 
 bool CommandBufferHelper::FlushSync() {
@@ -223,6 +241,16 @@ void CommandBufferHelper::WaitForAvailableEntries(int32 count) {
       ((get_offset() == last_put_sent_) ? 16 : 2);
   if (pending > limit) {
     Flush();
+  } else if (commands_issued_ % kCommandsPerFlushCheck == 0) {
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
+    // Allow this command buffer to be pre-empted by another if a "reasonable"
+    // amount of work has been done. On highend machines, this reduces the
+    // latency of GPU commands. However, on Android, this can cause the
+    // kernel to thrash between generating GPU commands and executing them.
+    clock_t current_time = clock();
+    if (current_time - last_flush_time_ > kFlushDelay * CLOCKS_PER_SEC)
+      Flush();
+#endif
   }
 }
 

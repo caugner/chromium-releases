@@ -17,6 +17,7 @@
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
+#include "ui/base/events/event.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
@@ -32,7 +33,6 @@
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/metrics.h"
-#include "ui/views/views_delegate.h"
 #include "ui/views/widget/widget.h"
 
 namespace views {
@@ -83,7 +83,7 @@ NativeTextfieldWin::ScopedSuspendUndo::~ScopedSuspendUndo() {
 ///////////////////////////////////////////////////////////////////////////////
 // NativeTextfieldWin
 
-bool NativeTextfieldWin::did_load_library_ = false;
+HMODULE NativeTextfieldWin::loaded_libarary_module_ = false;
 
 NativeTextfieldWin::NativeTextfieldWin(Textfield* textfield)
     : textfield_(textfield),
@@ -96,8 +96,11 @@ NativeTextfieldWin::NativeTextfieldWin(Textfield* textfield)
       ime_composition_length_(0),
       container_view_(new NativeViewHost),
       bg_color_(0) {
-  if (!did_load_library_)
-    did_load_library_ = !!LoadLibrary(L"riched20.dll");
+  if (!loaded_libarary_module_) {
+    // msftedit.dll is RichEdit ver 4.1.
+    // This version is available from WinXP SP1 and has TSF support.
+    loaded_libarary_module_ = LoadLibrary(L"msftedit.dll");
+  }
 
   DWORD style = kDefaultEditStyle | ES_AUTOHSCROLL;
   if (textfield_->style() & Textfield::STYLE_OBSCURED)
@@ -374,11 +377,11 @@ size_t NativeTextfieldWin::GetCursorPosition() const {
   return 0U;
 }
 
-bool NativeTextfieldWin::HandleKeyPressed(const views::KeyEvent& event) {
+bool NativeTextfieldWin::HandleKeyPressed(const ui::KeyEvent& event) {
   return false;
 }
 
-bool NativeTextfieldWin::HandleKeyReleased(const views::KeyEvent& event) {
+bool NativeTextfieldWin::HandleKeyReleased(const ui::KeyEvent& event) {
   return false;
 }
 
@@ -556,12 +559,21 @@ void NativeTextfieldWin::OnCopy() {
     return;
 
   const string16 text(GetSelectedText());
-  if (!text.empty() && ViewsDelegate::views_delegate) {
+  if (!text.empty()) {
     ui::ScopedClipboardWriter scw(
-        ViewsDelegate::views_delegate->GetClipboard(),
+        ui::Clipboard::GetForCurrentThread(),
         ui::Clipboard::BUFFER_STANDARD);
     scw.WriteText(text);
   }
+}
+
+LRESULT NativeTextfieldWin::OnCreate(const CREATESTRUCTW* /*create_struct*/) {
+  if (base::win::IsTsfAwareRequired()) {
+    // Enable TSF support of RichEdit.
+    SetEditStyle(SES_USECTF, SES_USECTF);
+  }
+  SetMsgHandled(FALSE);
+  return 0;
 }
 
 void NativeTextfieldWin::OnCut() {
@@ -962,10 +974,10 @@ void NativeTextfieldWin::OnNonLButtonDown(UINT keys, const CPoint& point) {
 }
 
 void NativeTextfieldWin::OnPaste() {
-  if (textfield_->read_only() || !ViewsDelegate::views_delegate)
+  if (textfield_->read_only())
     return;
 
-  ui::Clipboard* clipboard = ViewsDelegate::views_delegate->GetClipboard();
+  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
   if (!clipboard->IsFormatAvailable(ui::Clipboard::GetPlainTextWFormatType(),
                                     ui::Clipboard::BUFFER_STANDARD))
     return;
@@ -1015,7 +1027,7 @@ void NativeTextfieldWin::HandleKeystroke() {
   TextfieldController* controller = textfield_->GetController();
   bool handled = false;
   if (controller) {
-    KeyEvent event(*msg);
+    ui::KeyEvent event(*msg, msg->message == WM_CHAR);
     handled = controller->HandleKeyEvent(textfield_, event);
   }
 
@@ -1196,11 +1208,11 @@ void NativeTextfieldWin::BuildContextMenu() {
     return;
   context_menu_contents_.reset(new ui::SimpleMenuModel(this));
   context_menu_contents_->AddItemWithStringId(IDS_APP_UNDO, IDS_APP_UNDO);
-  context_menu_contents_->AddSeparator();
+  context_menu_contents_->AddSeparator(ui::NORMAL_SEPARATOR);
   context_menu_contents_->AddItemWithStringId(IDS_APP_CUT, IDS_APP_CUT);
   context_menu_contents_->AddItemWithStringId(IDS_APP_COPY, IDS_APP_COPY);
   context_menu_contents_->AddItemWithStringId(IDS_APP_PASTE, IDS_APP_PASTE);
-  context_menu_contents_->AddSeparator();
+  context_menu_contents_->AddSeparator(ui::NORMAL_SEPARATOR);
   context_menu_contents_->AddItemWithStringId(IDS_APP_SELECT_ALL,
                                               IDS_APP_SELECT_ALL);
 }

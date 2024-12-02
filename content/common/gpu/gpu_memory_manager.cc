@@ -12,9 +12,11 @@
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/message_loop.h"
+#include "base/process_util.h"
 #include "base/string_number_conversions.h"
 #include "content/common/gpu/gpu_command_buffer_stub.h"
 #include "content/common/gpu/gpu_memory_allocation.h"
+#include "content/common/gpu/gpu_memory_tracking.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 
 namespace {
@@ -75,7 +77,10 @@ GpuMemoryManager::GpuMemoryManager(GpuMemoryManagerClient* client,
           max_surfaces_with_frontbuffer_soft_limit),
       bytes_available_gpu_memory_(0),
       bytes_allocated_current_(0),
-      bytes_allocated_historical_max_(0) {
+      bytes_allocated_historical_max_(0),
+      window_count_has_been_received_(false),
+      window_count_(0)
+{
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kForceGpuMemAvailableMb)) {
     base::StringToSizeT(
@@ -86,12 +91,17 @@ GpuMemoryManager::GpuMemoryManager(GpuMemoryManagerClient* client,
 #if defined(OS_ANDROID)
     bytes_available_gpu_memory_ = 64 * 1024 * 1024;
 #else
+#if defined(OS_CHROMEOS)
+    bytes_available_gpu_memory_ = 1024 * 1024 * 1024;
+#else
     bytes_available_gpu_memory_ = 256 * 1024 * 1024;
+#endif
 #endif
   }
 }
 
 GpuMemoryManager::~GpuMemoryManager() {
+  DCHECK(tracking_groups_.empty());
 }
 
 bool GpuMemoryManager::StubWithSurfaceComparator::operator()(
@@ -129,8 +139,7 @@ void GpuMemoryManager::ScheduleManage(bool immediate) {
 }
 
 void GpuMemoryManager::TrackMemoryAllocatedChange(size_t old_size,
-                                                  size_t new_size)
-{
+                                                  size_t new_size) {
   if (new_size < old_size) {
     size_t delta = old_size - new_size;
     DCHECK(bytes_allocated_current_ >= delta);
@@ -143,11 +152,47 @@ void GpuMemoryManager::TrackMemoryAllocatedChange(size_t old_size,
     }
   }
   if (new_size != old_size) {
-    TRACE_COUNTER_ID1("GpuMemoryManager",
-                      "GpuMemoryUsage",
-                      this,
-                      bytes_allocated_current_);
+    TRACE_COUNTER1("gpu",
+                   "GpuMemoryUsage",
+                   bytes_allocated_current_);
   }
+}
+
+void GpuMemoryManager::AddTrackingGroup(
+    GpuMemoryTrackingGroup* tracking_group) {
+  tracking_groups_.insert(tracking_group);
+}
+
+void GpuMemoryManager::RemoveTrackingGroup(
+    GpuMemoryTrackingGroup* tracking_group) {
+  tracking_groups_.erase(tracking_group);
+}
+
+void GpuMemoryManager::GetVideoMemoryUsageStats(
+    content::GPUVideoMemoryUsageStats& video_memory_usage_stats) const {
+  // For each context group, assign its memory usage to its PID
+  video_memory_usage_stats.process_map.clear();
+  for (std::set<GpuMemoryTrackingGroup*>::const_iterator i =
+       tracking_groups_.begin(); i != tracking_groups_.end(); ++i) {
+    const GpuMemoryTrackingGroup* tracking_group = (*i);
+    video_memory_usage_stats.process_map[
+        tracking_group->GetPid()].video_memory += tracking_group->GetSize();
+  }
+
+  // Assign the total across all processes in the GPU process
+  video_memory_usage_stats.process_map[
+      base::GetCurrentProcId()].video_memory = bytes_allocated_current_;
+  video_memory_usage_stats.process_map[
+      base::GetCurrentProcId()].has_duplicates = true;
+}
+
+void GpuMemoryManager::SetWindowCount(uint32 window_count) {
+  bool should_schedule_manage = !window_count_has_been_received_ ||
+                                (window_count != window_count_);
+  window_count_has_been_received_ = true;
+  window_count_ = window_count;
+  if (should_schedule_manage)
+    ScheduleManage(true);
 }
 
 // The current Manage algorithm simply classifies contexts (stubs) into
@@ -264,12 +309,21 @@ void GpuMemoryManager::Manage() {
 #endif
   size_t stubs_with_surface_foreground_allocation = GetMinimumTabAllocation() +
                                                     bonus_allocation;
+
+  // If we have received a window count message, then override the stub-based
+  // scheme with a per-window scheme
+  if (window_count_has_been_received_) {
+    stubs_with_surface_foreground_allocation = std::max(
+       stubs_with_surface_foreground_allocation,
+       GetAvailableGpuMemory()/std::max(window_count_, 1u));
+  }
+
+  // Limit the memory per stub to its maximum allowed level.
   if (stubs_with_surface_foreground_allocation >= GetMaximumTabAllocation())
     stubs_with_surface_foreground_allocation = GetMaximumTabAllocation();
 
-  stub_memory_stats_for_last_manage_.clear();
-
   // Now give out allocations to everyone.
+  stub_memory_stats_for_last_manage_.clear();
   AssignMemoryAllocations(
       &stub_memory_stats_for_last_manage_,
       stubs_with_surface_foreground,

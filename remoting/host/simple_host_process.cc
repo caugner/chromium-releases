@@ -32,13 +32,17 @@
 #include "crypto/nss_util.h"
 #include "net/base/network_change_notifier.h"
 #include "net/socket/ssl_server_socket.h"
+#include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/base/constants.h"
 #include "remoting/host/audio_capturer.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/chromoting_host.h"
 #include "remoting/host/constants.h"
 #include "remoting/host/desktop_environment.h"
+#include "remoting/host/dns_blackhole_checker.h"
 #include "remoting/host/event_executor.h"
+#include "remoting/host/desktop_environment.h"
+#include "remoting/host/desktop_environment_factory.h"
 #include "remoting/host/heartbeat_sender.h"
 #include "remoting/host/host_key_pair.h"
 #include "remoting/host/host_secret.h"
@@ -92,11 +96,41 @@ const char kVideoSwitchValueVp8[] = "vp8";
 
 namespace remoting {
 
+class FakeDesktopEnvironmentFactory : public DesktopEnvironmentFactory {
+ public:
+  FakeDesktopEnvironmentFactory();
+  virtual ~FakeDesktopEnvironmentFactory();
+
+  virtual scoped_ptr<DesktopEnvironment> Create(
+      ChromotingHostContext* context) OVERRIDE;
+
+  DISALLOW_COPY_AND_ASSIGN(FakeDesktopEnvironmentFactory);
+};
+
+FakeDesktopEnvironmentFactory::FakeDesktopEnvironmentFactory() {
+}
+
+FakeDesktopEnvironmentFactory::~FakeDesktopEnvironmentFactory() {
+}
+
+scoped_ptr<DesktopEnvironment> FakeDesktopEnvironmentFactory::Create(
+    ChromotingHostContext* context) {
+  scoped_ptr<VideoFrameCapturer> capturer(new VideoFrameCapturerFake());
+  scoped_ptr<EventExecutor> event_executor = EventExecutor::Create(
+      context->desktop_task_runner(),
+      context->ui_task_runner());
+  scoped_ptr<AudioCapturer> audio_capturer(NULL);
+  return scoped_ptr<DesktopEnvironment>(new DesktopEnvironment(
+      audio_capturer.Pass(),
+      event_executor.Pass(),
+      capturer.Pass()));
+}
+
 class SimpleHost : public HeartbeatSender::Listener {
  public:
   SimpleHost()
       : message_loop_(MessageLoop::TYPE_UI),
-        context_(message_loop_.message_loop_proxy()),
+        context_(new AutoThreadTaskRunner(message_loop_.message_loop_proxy())),
         fake_(false),
         is_it2me_(false),
         shutting_down_(false),
@@ -220,27 +254,20 @@ class SimpleHost : public HeartbeatSender::Listener {
     signal_strategy_.reset(new XmppSignalStrategy(
         context_.url_request_context_getter(),
         xmpp_login_, xmpp_auth_token_, xmpp_auth_service_));
+    scoped_ptr<DnsBlackholeChecker> dns_blackhole_checker(
+        new DnsBlackholeChecker(&context_, kDefaultHostTalkGadgetPrefix));
     signaling_connector_.reset(new SignalingConnector(
-        signal_strategy_.get(),
+        signal_strategy_.get(), &context_, dns_blackhole_checker.Pass(),
         base::Bind(&SimpleHost::OnAuthFailed, base::Unretained(this))));
 
     if (fake_) {
-      scoped_ptr<VideoFrameCapturer> capturer(new VideoFrameCapturerFake());
-      scoped_ptr<EventExecutor> event_executor = EventExecutor::Create(
-          context_.desktop_task_runner(),
-          context_.ui_task_runner());
-      scoped_ptr<AudioCapturer> audio_capturer(NULL);
-      desktop_environment_ = DesktopEnvironment::CreateFake(
-          &context_,
-          capturer.Pass(),
-          event_executor.Pass(),
-          audio_capturer.Pass());
+      desktop_environment_factory_.reset(new FakeDesktopEnvironmentFactory());
     } else {
-      desktop_environment_ = DesktopEnvironment::Create(&context_);
+      desktop_environment_factory_.reset(new DesktopEnvironmentFactory());
     }
 
     host_ = new ChromotingHost(
-        &context_, signal_strategy_.get(), desktop_environment_.get(),
+        &context_, signal_strategy_.get(), desktop_environment_factory_.get(),
         CreateHostSessionManager(network_settings_,
                                  context_.url_request_context_getter()));
 
@@ -256,7 +283,7 @@ class SimpleHost : public HeartbeatSender::Listener {
     }
 
     if (protocol_config_.get()) {
-      host_->set_protocol_config(protocol_config_.release());
+      host_->set_protocol_config(protocol_config_.Pass());
     }
 
     if (is_it2me_) {
@@ -268,7 +295,7 @@ class SimpleHost : public HeartbeatSender::Listener {
           this, host_id_, signal_strategy_.get(), &key_pair_));
     }
 
-    host_->Start();
+    host_->Start(xmpp_login_);
 
     // Create a Me2Me authenticator factory.
     if (!is_it2me_) {
@@ -304,6 +331,7 @@ class SimpleHost : public HeartbeatSender::Listener {
     log_to_server_.reset();
     heartbeat_sender_.reset();
     signaling_connector_.reset();
+    dns_blackhole_checker_.reset();
     signal_strategy_.reset();
 
     message_loop_.PostTask(FROM_HERE, MessageLoop::QuitClosure());
@@ -326,9 +354,10 @@ class SimpleHost : public HeartbeatSender::Listener {
   std::string xmpp_auth_token_;
   std::string xmpp_auth_service_;
 
+  scoped_ptr<DesktopEnvironmentFactory> desktop_environment_factory_;
   scoped_ptr<XmppSignalStrategy> signal_strategy_;
+  scoped_ptr<DnsBlackholeChecker> dns_blackhole_checker_;
   scoped_ptr<SignalingConnector> signaling_connector_;
-  scoped_ptr<DesktopEnvironment> desktop_environment_;
   scoped_ptr<LogToServer> log_to_server_;
   scoped_ptr<It2MeHostUserInterface> it2me_host_user_interface_;
   scoped_ptr<RegisterSupportHostRequest> register_request_;

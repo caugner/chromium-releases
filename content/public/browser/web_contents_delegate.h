@@ -18,6 +18,7 @@
 #include "content/public/common/window_container_type.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/rect_f.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class FilePath;
@@ -55,6 +56,10 @@ class HistoryAddPageArgs;
 namespace webkit_glue {
 struct WebIntentData;
 struct WebIntentServiceData;
+}
+
+namespace WebKit {
+class WebLayer;
 }
 
 namespace content {
@@ -95,12 +100,14 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Creates a new tab with the already-created WebContents 'new_contents'.
   // The window for the added contents should be reparented correctly when this
   // method returns.  If |disposition| is NEW_POPUP, |pos| should hold the
-  // initial position.
+  // initial position. If |was_blocked| is non-NULL, then |*was_blocked| will
+  // be set to true if the popup gets blocked, and left unchanged otherwise.
   virtual void AddNewContents(WebContents* source,
                               WebContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
-                              bool user_gesture) {}
+                              bool user_gesture,
+                              bool* was_blocked) {}
 
   // Selects the specified contents, bringing its container to the front.
   virtual void ActivateContents(WebContents* contents) {}
@@ -119,7 +126,8 @@ class CONTENT_EXPORT WebContentsDelegate {
   // loaded).
   // Note that to receive this notification, you must have called
   // SetReportLoadProgressEnabled(true) in the render view.
-  virtual void LoadProgressChanged(double progress) {}
+  virtual void LoadProgressChanged(WebContents* source,
+                                   double progress) {}
 
   // Request the delegate to close this web contents, and do whatever cleanup
   // it needs to do.
@@ -206,7 +214,8 @@ class CONTENT_EXPORT WebContentsDelegate {
   // This is called when WebKit tells us that it is done tabbing through
   // controls on the page. Provides a way for WebContentsDelegates to handle
   // this. Returns true if the delegate successfully handled it.
-  virtual bool TakeFocus(bool reverse);
+  virtual bool TakeFocus(WebContents* soruce,
+                         bool reverse);
 
   // Invoked when the page loses mouse capture.
   virtual void LostCapture() {}
@@ -246,12 +255,14 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Returns true if the |event| was handled. Otherwise, if the |event| would be
   // handled in HandleKeyboardEvent() method as a normal keyboard shortcut,
   // |*is_keyboard_shortcut| should be set to true.
-  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+  virtual bool PreHandleKeyboardEvent(WebContents* source,
+                                      const NativeWebKeyboardEvent& event,
                                       bool* is_keyboard_shortcut);
 
   // Allows delegates to handle unhandled keyboard messages coming back from
   // the renderer.
-  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {}
+  virtual void HandleKeyboardEvent(WebContents* source,
+                                   const NativeWebKeyboardEvent& event) {}
 
   virtual void HandleMouseDown() {}
   virtual void HandleMouseUp() {}
@@ -384,6 +395,15 @@ class CONTENT_EXPORT WebContentsDelegate {
                          int active_match_ordinal,
                          bool final_update) {}
 
+#if defined(OS_ANDROID)
+  // Provides the rects of the current find-in-page matches.
+  // Sent as a reply to RequestFindMatchRects.
+  virtual void FindMatchRectsReply(WebContents* web_contents,
+                                   int version,
+                                   const std::vector<gfx::RectF>& rects,
+                                   const gfx::RectF& active_rect) {}
+#endif
+
   // Invoked when the preferred size of the contents has been changed.
   virtual void UpdatePreferredSize(WebContents* web_contents,
                                    const gfx::Size& pref_size) {}
@@ -417,6 +437,22 @@ class CONTENT_EXPORT WebContentsDelegate {
       WebContents* web_contents,
       const MediaStreamRequest* request,
       const MediaResponseCallback& callback) {}
+
+#if defined(OS_ANDROID)
+  // Returns true if the delegate wants to handle the url instead. Default
+  // returns false.
+  virtual bool ShouldOverrideLoading(const GURL& url);
+
+  // Called when a compositing layer becomes available for this web contents
+  // so the delegate can add it to the layer tree.
+  virtual void AttachLayer(WebContents* web_contents,
+                           WebKit::WebLayer* layer) {}
+
+  // Called before a compositing layer becomes invalid so the delegate can
+  // remove it from the layer tree.
+  virtual void RemoveLayer(WebContents* web_contents,
+                           WebKit::WebLayer* layer) {}
+#endif
 
  protected:
   virtual ~WebContentsDelegate();

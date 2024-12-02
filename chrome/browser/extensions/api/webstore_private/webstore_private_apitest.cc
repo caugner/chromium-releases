@@ -17,7 +17,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/api/webstore_private/webstore_private_api.h"
 #include "chrome/browser/extensions/webstore_installer.h"
-#include "chrome/browser/gpu_blacklist.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -28,6 +27,7 @@
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/common/gpu_info.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/base/mock_host_resolver.h"
 #include "ui/gl/gl_switches.h"
@@ -390,17 +390,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, InstallTheme) {
   ASSERT_EQ("iamefpfkojoapidjnbafmgkgncegbkad", listener.id());
 }
 
-// Tests using silentlyInstall to install extensions.
-IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateBundleTest, SilentlyInstall) {
-  WebstorePrivateApi::SetTrustTestIDsForTesting(true);
-
-  PackCRX("bmfoocgfinpmkmlbjhcbofejhkhlbchk", "extension1.json");
-  PackCRX("mpneghmdnmaolkljkipbhaienajcflfe", "extension2.json");
-  PackCRX("begfmnajjkbjdgmffnjaojchoncnmngg", "app2.json");
-
-  ASSERT_TRUE(RunPageTest(GetTestServerURL("silently_install.html").spec()));
-}
-
 // Tests successfully installing a bundle of 2 apps and 2 extensions.
 IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateBundleTest, InstallBundle) {
   extensions::BundleInstaller::SetAutoApproveForTesting(true);
@@ -480,13 +469,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstoreGetWebGLStatusTest, Blocked) {
       "    }\n"
       "  ]\n"
       "}";
-  GpuBlacklist* blacklist = GpuBlacklist::GetInstance();
-
-  ASSERT_TRUE(blacklist->LoadGpuBlacklist(
-      json_blacklist, GpuBlacklist::kAllOs));
-  blacklist->UpdateGpuDataManager();
+  content::GPUInfo gpu_info;
+  content::GpuDataManager::GetInstance()->InitializeForTesting(
+      json_blacklist, gpu_info);
   GpuFeatureType type =
-      content::GpuDataManager::GetInstance()->GetGpuFeatureType();
+      content::GpuDataManager::GetInstance()->GetBlacklistedFeatures();
   EXPECT_EQ((type & content::GPU_FEATURE_TYPE_WEBGL),
             content::GPU_FEATURE_TYPE_WEBGL);
 

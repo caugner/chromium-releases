@@ -7,6 +7,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/logging.h"  // for NOTIMPLEMENTED()
 #include "chrome/browser/chromeos/input_method/input_method_config.h"
@@ -19,6 +20,7 @@ class Accelerator;
 }  // namespace ui
 
 namespace chromeos {
+class InputMethodEngine;
 namespace input_method {
 
 class XKeyboard;
@@ -116,14 +118,22 @@ class InputMethodManager {
                                     const std::string& config_name,
                                     const InputMethodConfigValue& value) = 0;
 
-  // Adds an input method extension.
+  // Adds an input method extension. This function does not takes ownership of
+  // |instance|.
   virtual void AddInputMethodExtension(const std::string& id,
                                        const std::string& name,
                                        const std::vector<std::string>& layouts,
-                                       const std::string& language) = 0;
+                                       const std::string& language,
+                                       InputMethodEngine* instance) = 0;
 
   // Removes an input method extension.
   virtual void RemoveInputMethodExtension(const std::string& id) = 0;
+
+  // Returns a list of descriptors for all Input Method Extensions.
+  virtual void GetInputMethodExtensions(InputMethodDescriptors* result) = 0;
+
+  // Sets the list of extension IME ids which should not be enabled.
+  virtual void SetFilteredExtensionImes(std::vector<std::string>* ids) = 0;
 
   // Gets the descriptor of the input method which is currently selected.
   virtual InputMethodDescriptor GetCurrentInputMethod() const = 0;

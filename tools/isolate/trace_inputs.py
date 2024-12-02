@@ -429,6 +429,19 @@ def fix_python_path(cmd):
   return out
 
 
+def create_thunk():
+  handle, name = tempfile.mkstemp(prefix='trace_inputs_thunk', suffix='.py')
+  os.write(
+      handle,
+      (
+        'import subprocess\n'
+        'import sys\n'
+        'sys.exit(subprocess.call(sys.argv[2:]))\n'
+      ))
+  os.close(handle)
+  return name
+
+
 def strace_process_quoted_arguments(text):
   """Extracts quoted arguments on a string and return the arguments as a list.
 
@@ -554,13 +567,14 @@ def write_json(filepath_or_handle, data, dense):
   """
   if hasattr(filepath_or_handle, 'write'):
     if dense:
-      filepath_or_handle.write(json.dumps(data, separators=(',',':')))
+      filepath_or_handle.write(
+          json.dumps(data, sort_keys=True, separators=(',',':')))
     else:
       filepath_or_handle.write(json.dumps(data, sort_keys=True, indent=2))
   else:
     with open(filepath_or_handle, 'wb') as f:
       if dense:
-        json.dump(data, f, separators=(',',':'))
+        json.dump(data, f, sort_keys=True, separators=(',',':'))
       else:
         json.dump(data, f, sort_keys=True, indent=2)
 
@@ -1032,7 +1046,10 @@ class Strace(ApiBase):
       RE_SIGNAL = re.compile(r'^--- SIG[A-Z]+ .+ ---')
       # A process didn't handle a signal. Ignore any junk appearing before,
       # because the process was forcibly killed so it won't open any new file.
-      RE_KILLED = re.compile(r'^.*\+\+\+ killed by ([A-Z]+) \+\+\+$')
+      RE_KILLED = re.compile(
+          r'^.*\+\+\+ killed by ([A-Z]+)( \(core dumped\))? \+\+\+$')
+      # The process has exited.
+      RE_PROCESS_EXITED = re.compile(r'^\+\+\+ exited with (\d+) \+\+\+')
       # A call was canceled. Ignore any prefix.
       RE_UNAVAILABLE = re.compile(r'^.*\)\s*= \? <unavailable>$')
       # Happens when strace fails to even get the function name.
@@ -1141,7 +1158,13 @@ class Strace(ApiBase):
         try:
           match = self.RE_KILLED.match(line)
           if match:
-            # Converts a '+++ killied by Foo +++' trace into an exit_group().
+            # Converts a '+++ killed by Foo +++' trace into an exit_group().
+            self.handle_exit_group(match.group(1), None)
+            return
+
+          match = self.RE_PROCESS_EXITED.match(line)
+          if match:
+            # Converts a '+++ exited with 1 +++' trace into an exit_group()
             self.handle_exit_group(match.group(1), None)
             return
 
@@ -1237,6 +1260,9 @@ class Strace(ApiBase):
       def handle_close(self, _args, _result):
         pass
 
+      def handle_chmod(self, _args, _result):
+        pass
+
       def handle_creat(self, _args, _result):
         # Ignore files created, since they didn't need to exist.
         pass
@@ -1278,6 +1304,18 @@ class Strace(ApiBase):
           return
         self._handle_file(args[0], False)
 
+      @parse_args(r'^(\d+|AT_FDCWD), \"(.*?)\", ([A-Z\_\|]+)(|, \d+)$', False)
+      def handle_openat(self, args, _result):
+        if 'O_DIRECTORY' in args[2]:
+          return
+        if args[1] == 'AT_FDCWD':
+          self._handle_file(args[1], False)
+        else:
+          # TODO(maruel): Implement relative open if necessary instead of the
+          # AT_FDCWD flag, let's hope not since this means tracking all active
+          # directory handles.
+          raise Exception('Relative open via openat not implemented.')
+
       @parse_args(r'^\"(.+?)\", \".+?\"(\.\.\.)?, \d+$', False)
       def handle_readlink(self, args, _result):
         self._handle_file(args[0], False)
@@ -1288,6 +1326,9 @@ class Strace(ApiBase):
         self._handle_file(args[1], False)
 
       def handle_rmdir(self, _args, _result):
+        pass
+
+      def handle_setxattr(self, _args, _result):
         pass
 
       @parse_args(r'\"(.+?)\", \{.+?, \.\.\.\}', True)
@@ -1506,7 +1547,7 @@ class Dtrace(ApiBase):
       logging.info(
           '%s(%d, %s)' % (self.__class__.__name__, tracer_pid, initial_cwd))
       super(Dtrace.Context, self).__init__(blacklist)
-      # Process ID of the trace_child_process.py wrapper script instance.
+      # Process ID of the temporary script created by create_thunk().
       self._tracer_pid = tracer_pid
       self._initial_cwd = initial_cwd
       self._line_number = 0
@@ -1764,8 +1805,8 @@ class Dtrace(ApiBase):
     # 0 is for untracked processes and is the default value for items not
     #   in the associative array.
     # 1 is for tracked processes.
-    # 2 is for trace_child_process.py only. It is not tracked itself but
-    #   all its decendants are.
+    # 2 is for the script created by create_thunk() only. It is not tracked
+    #   itself but all its decendants are.
     #
     # The script will kill itself only once waiting_to_die == 1 and
     # current_processes == 0, so that both getlogin() was called and that
@@ -2058,7 +2099,7 @@ class Dtrace(ApiBase):
       this needs to wait for dtrace to be "warmed up".
       """
       super(Dtrace.Tracer, self).__init__(logname)
-      self._script = os.path.join(BASE_DIR, 'trace_child_process.py')
+      self._script = create_thunk()
       # This unique dummy temp file is used to signal the dtrace script that it
       # should stop as soon as all the child processes are done. A bit hackish
       # but works fine enough.
@@ -2099,8 +2140,8 @@ class Dtrace(ApiBase):
 
       Injects the cookie in the script so it knows when to stop.
 
-      The script will detect any trace_child_process.py instance and will start
-      tracing it.
+      The script will detect any instance of the script created with
+      create_thunk() and will start tracing it.
       """
       return (
           'inline int PID = %d;\n'
@@ -2118,8 +2159,7 @@ class Dtrace(ApiBase):
 
       This dtruss is broken when it starts the process itself or when tracing
       child processes, this code starts a wrapper process
-      trace_child_process.py, which waits for dtrace to start, then
-      trace_child_process.py starts the executable to trace.
+      generated with create_thunk() which starts the executable to trace.
       """
       logging.info('trace(%s, %s, %s, %s)' % (cmd, cwd, tracename, output))
       assert os.path.isabs(cmd[0]), cmd[0]
@@ -2147,7 +2187,7 @@ class Dtrace(ApiBase):
       # that needs to be traced.
       # Yummy.
       child = subprocess.Popen(
-          child_cmd + cmd,
+          child_cmd + fix_python_path(cmd),
           stdin=subprocess.PIPE,
           stdout=stdout,
           stderr=stderr,
@@ -2202,6 +2242,7 @@ class Dtrace(ApiBase):
       finally:
         os.close(self._dummy_file_id)
         os.remove(self._dummy_file_name)
+        os.remove(self._script)
 
     def post_process_log(self):
       """Sorts the log back in order when each call occured.
@@ -2447,7 +2488,7 @@ class LogmanTrace(ApiBase):
 
     def handle_Process_End(self, line):
       pid = line[self.PID]
-      if pid in self._process_lookup:
+      if self._process_lookup.get(pid):
         logging.info('Terminated: %d' % pid)
         self._process_lookup[pid] = None
       else:
@@ -2482,7 +2523,7 @@ class LogmanTrace(ApiBase):
         proc = self.Process(self.blacklist, pid, None)
         self.root_process = proc
         ppid = None
-      elif ppid in self._process_lookup:
+      elif self._process_lookup.get(ppid):
         proc = self.Process(self.blacklist, pid, None)
         self._process_lookup[ppid].children.append(proc)
       else:
@@ -2607,7 +2648,7 @@ class LogmanTrace(ApiBase):
       "logman query providers | findstr /i file"
       """
       super(LogmanTrace.Tracer, self).__init__(logname)
-      self._script = os.path.join(BASE_DIR, 'trace_child_process.py')
+      self._script = create_thunk()
       cmd_start = [
         'logman.exe',
         'start',
@@ -2659,18 +2700,19 @@ class LogmanTrace(ApiBase):
 
       # Run the child process.
       logging.debug('Running: %s' % cmd)
-      # Use trace_child_process.py so we have a clear pid owner. Since
-      # trace_inputs.py can be used as a library and could trace mulitple
-      # processes simultaneously, it makes it more complex if the executable to
-      # be traced is executed directly here. It also solves issues related to
-      # logman.exe that needs to be executed to control the kernel trace.
+      # Use the temporary script generated with create_thunk() so we have a
+      # clear pid owner. Since trace_inputs.py can be used as a library and
+      # could trace multiple processes simultaneously, it makes it more complex
+      # if the executable to be traced is executed directly here. It also solves
+      # issues related to logman.exe that needs to be executed to control the
+      # kernel trace.
       child_cmd = [
         sys.executable,
         self._script,
         tracename,
       ]
       child = subprocess.Popen(
-          child_cmd + cmd,
+          child_cmd + fix_python_path(cmd),
           cwd=cwd,
           stdin=subprocess.PIPE,
           stdout=stdout,
@@ -2701,6 +2743,7 @@ class LogmanTrace(ApiBase):
           raise TracingFailure(
               'Called Tracer.close() on an unitialized object',
               None, None, None)
+        os.remove(self._script)
         # Save metadata, add 'format' key..
         data = {
           'format': 'csv',
@@ -3084,44 +3127,41 @@ def CMDread(args):
   return 0
 
 
-class OptionParserWithNiceDescription(optparse.OptionParser):
+class OptionParserWithLogging(optparse.OptionParser):
+  """Adds --verbose option."""
+  def __init__(self, verbose=0, **kwargs):
+    optparse.OptionParser.__init__(self, **kwargs)
+    self.add_option(
+        '-v', '--verbose',
+        action='count',
+        default=verbose,
+        help='Use multiple times to increase verbosity')
+
+  def parse_args(self, *args, **kwargs):
+    options, args = optparse.OptionParser.parse_args(self, *args, **kwargs)
+    levels = [logging.ERROR, logging.INFO, logging.DEBUG]
+    logging.basicConfig(
+        level=levels[min(len(levels)-1, options.verbose)],
+        format='%(levelname)5s %(module)15s(%(lineno)3d): %(message)s')
+    return options, args
+
+
+class OptionParserWithNiceDescription(OptionParserWithLogging):
   """Generates the description with the command's docstring."""
-  def __init__(self, *args, **kwargs):
+  def __init__(self, **kwargs):
     """Sets 'description' and 'usage' if not already specified."""
     command = kwargs.pop('command', 'help')
     kwargs.setdefault(
         'description',
         re.sub('[\r\n ]{2,}', ' ', get_command_handler(command).__doc__))
     kwargs.setdefault('usage', '%%prog %s [options]' % command)
-    optparse.OptionParser.__init__(self, *args, **kwargs)
+    OptionParserWithLogging.__init__(self, **kwargs)
 
 
-class OptionParserWithLogging(OptionParserWithNiceDescription):
-  """Adds automatic --verbose handling."""
-  def __init__(self, *args, **kwargs):
-    OptionParserWithNiceDescription.__init__(self, *args, **kwargs)
-    self.add_option(
-        '-v', '--verbose',
-        action='count',
-        default=0,
-        help='Use multiple times to increase verbosity')
-
-  def parse_args(self, *args, **kwargs):
-    options, args = OptionParserWithNiceDescription.parse_args(
-        self, *args, **kwargs)
-    level = [
-      logging.ERROR, logging.INFO, logging.DEBUG,
-    ][min(2, options.verbose)]
-    logging.basicConfig(
-          level=level,
-          format='%(levelname)5s %(module)15s(%(lineno)3d):%(message)s')
-    return options, args
-
-
-class OptionParserTraceInputs(OptionParserWithLogging):
+class OptionParserTraceInputs(OptionParserWithNiceDescription):
   """Adds automatic --log handling."""
-  def __init__(self, *args, **kwargs):
-    OptionParserWithLogging.__init__(self, *args, **kwargs)
+  def __init__(self, **kwargs):
+    OptionParserWithNiceDescription.__init__(self, **kwargs)
     self.add_option(
         '-l', '--log', help='Log file to generate or read, required')
 
@@ -3130,13 +3170,11 @@ class OptionParserTraceInputs(OptionParserWithLogging):
 
     On Windows, / and \ are often mixed together in a path.
     """
-    options, args = OptionParserWithLogging.parse_args(self, *args, **kwargs)
-
+    options, args = OptionParserWithNiceDescription.parse_args(
+        self, *args, **kwargs)
     if not options.log:
       self.error('Must supply a log file with -l')
     options.log = os.path.abspath(options.log)
-
-    # Still returns args to stay consistent even if guaranteed to be empty.
     return options, args
 
 
@@ -3144,7 +3182,7 @@ def extract_documentation():
   """Returns a dict {command: description} for each of documented command."""
   commands = (
       fn[3:]
-      for fn in dir(sys.modules[__name__])
+      for fn in dir(sys.modules['__main__'])
       if fn.startswith('CMD') and get_command_handler(fn[3:]).__doc__)
   return dict((fn, get_command_handler(fn).__doc__) for fn in commands)
 
@@ -3159,7 +3197,7 @@ def CMDhelp(args):
   commands_description = '\n'.join(
        format_str % (cmd, doc[cmd].split('\n')[0]) for cmd in sorted(doc))
 
-  parser = OptionParserWithLogging(
+  parser = OptionParserWithNiceDescription(
       usage='%prog <command> [options]',
       description='Commands are:\n%s\n' % commands_description)
   parser.format_description = lambda _: parser.description
@@ -3180,15 +3218,18 @@ def CMDhelp(args):
 
 def get_command_handler(name):
   """Returns the command handler or CMDhelp if it doesn't exist."""
-  return getattr(sys.modules[__name__], 'CMD%s' % name, None)
+  return getattr(sys.modules['__main__'], 'CMD%s' % name, None)
 
 
-def main(argv):
+def main_impl(argv):
   command = get_command_handler(argv[0] if argv else 'help')
   if not command:
     return CMDhelp(argv)
+  return command(argv[1:])
+
+def main(argv):
   try:
-    return command(argv[1:])
+    main_impl(argv)
   except TracingFailure, e:
     sys.stderr.write('\nError: ')
     sys.stderr.write(str(e))

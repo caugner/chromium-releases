@@ -75,6 +75,7 @@ static int RequestIDForMessage(const IPC::Message& msg) {
     case ResourceMsg_UploadProgress::ID:
     case ResourceMsg_ReceivedResponse::ID:
     case ResourceMsg_ReceivedRedirect::ID:
+    case ResourceMsg_SetDataBuffer::ID:
     case ResourceMsg_DataReceived::ID:
     case ResourceMsg_RequestComplete::ID:
       request_id = IPC::MessageIterator(msg).NextInt();
@@ -182,7 +183,7 @@ class ForwardingFilter : public ResourceMessageFilter {
     : ResourceMessageFilter(
         ChildProcessHostImpl::GenerateChildProcessUniqueId(),
         content::PROCESS_TYPE_RENDERER,
-        resource_context,
+        resource_context, NULL, NULL,
         new MockURLRequestContextSelector(
             resource_context->GetRequestContext())),
       dest_(dest) {
@@ -209,20 +210,27 @@ class ForwardingFilter : public ResourceMessageFilter {
 // not complete start upon entry, only when specifically told to.
 class URLRequestTestDelayedStartJob : public net::URLRequestTestJob {
  public:
-  URLRequestTestDelayedStartJob(net::URLRequest* request)
-      : net::URLRequestTestJob(request) {
-    Init();
-  }
-  URLRequestTestDelayedStartJob(net::URLRequest* request, bool auto_advance)
-      : net::URLRequestTestJob(request, auto_advance) {
+  URLRequestTestDelayedStartJob(net::URLRequest* request,
+                                net::NetworkDelegate* network_delegate)
+      : net::URLRequestTestJob(request, network_delegate) {
     Init();
   }
   URLRequestTestDelayedStartJob(net::URLRequest* request,
+                                net::NetworkDelegate* network_delegate,
+                                bool auto_advance)
+      : net::URLRequestTestJob(request, network_delegate, auto_advance) {
+    Init();
+  }
+  URLRequestTestDelayedStartJob(net::URLRequest* request,
+                                net::NetworkDelegate* network_delegate,
                                 const std::string& response_headers,
                                 const std::string& response_data,
                                 bool auto_advance)
-      : net::URLRequestTestJob(
-          request, response_headers, response_data, auto_advance) {
+      : net::URLRequestTestJob(request,
+                               network_delegate,
+                               response_headers,
+                               response_data,
+                               auto_advance) {
     Init();
   }
 
@@ -286,17 +294,23 @@ URLRequestTestDelayedStartJob::list_head_ = NULL;
 // returns IO_pending errors before every read, not just the first one.
 class URLRequestTestDelayedCompletionJob : public net::URLRequestTestJob {
  public:
-  explicit URLRequestTestDelayedCompletionJob(net::URLRequest* request)
-      : net::URLRequestTestJob(request) {}
   URLRequestTestDelayedCompletionJob(net::URLRequest* request,
+                                     net::NetworkDelegate* network_delegate)
+      : net::URLRequestTestJob(request, network_delegate) {}
+  URLRequestTestDelayedCompletionJob(net::URLRequest* request,
+                                     net::NetworkDelegate* network_delegate,
                                      bool auto_advance)
-      : net::URLRequestTestJob(request, auto_advance) {}
+      : net::URLRequestTestJob(request, network_delegate, auto_advance) {}
   URLRequestTestDelayedCompletionJob(net::URLRequest* request,
+                                     net::NetworkDelegate* network_delegate,
                                      const std::string& response_headers,
                                      const std::string& response_data,
                                      bool auto_advance)
-      : net::URLRequestTestJob(request, response_headers,
-                               response_data, auto_advance) {}
+      : net::URLRequestTestJob(request,
+                               network_delegate,
+                               response_headers,
+                               response_data,
+                               auto_advance) {}
 
  protected:
   ~URLRequestTestDelayedCompletionJob() {}
@@ -307,8 +321,9 @@ class URLRequestTestDelayedCompletionJob : public net::URLRequestTestJob {
 
 class URLRequestBigJob : public net::URLRequestSimpleJob {
  public:
-  URLRequestBigJob(net::URLRequest* request)
-      : net::URLRequestSimpleJob(request) {
+  URLRequestBigJob(net::URLRequest* request,
+                   net::NetworkDelegate* network_delegate)
+      : net::URLRequestSimpleJob(request, network_delegate) {
   }
 
   virtual int GetData(std::string* mime_type,
@@ -451,6 +466,7 @@ class TestResourceDispatcherHostDelegate
   virtual void RequestBeginning(
       net::URLRequest* request,
       content::ResourceContext* resource_context,
+      appcache::AppCacheService* appcache_service,
       ResourceType::Type resource_type,
       int child_id,
       int route_id,
@@ -603,31 +619,35 @@ class ResourceDispatcherHostTest : public testing::Test,
 
   // Our own net::URLRequestJob factory.
   static net::URLRequestJob* Factory(net::URLRequest* request,
+                                     net::NetworkDelegate* network_delegate,
                                      const std::string& scheme) {
     if (test_fixture_->response_headers_.empty()) {
       if (delay_start_) {
-        return new URLRequestTestDelayedStartJob(request);
+        return new URLRequestTestDelayedStartJob(request, network_delegate);
       } else if (delay_complete_) {
-        return new URLRequestTestDelayedCompletionJob(request);
+        return new URLRequestTestDelayedCompletionJob(request,
+                                                      network_delegate);
       } else if (scheme == "big-job") {
-        return new URLRequestBigJob(request);
+        return new URLRequestBigJob(request, network_delegate);
       } else {
-        return new net::URLRequestTestJob(request);
+        return new net::URLRequestTestJob(request, network_delegate);
       }
     } else {
       if (delay_start_) {
         return new URLRequestTestDelayedStartJob(
-            request, test_fixture_->response_headers_,
-            test_fixture_->response_data_, false);
+            request, network_delegate,
+            test_fixture_->response_headers_, test_fixture_->response_data_,
+            false);
       } else if (delay_complete_) {
         return new URLRequestTestDelayedCompletionJob(
-            request, test_fixture_->response_headers_,
-            test_fixture_->response_data_, false);
+            request, network_delegate,
+            test_fixture_->response_headers_, test_fixture_->response_data_,
+            false);
       } else {
-        return new net::URLRequestTestJob(request,
-                                          test_fixture_->response_headers_,
-                                          test_fixture_->response_data_,
-                                          false);
+        return new net::URLRequestTestJob(
+            request, network_delegate,
+            test_fixture_->response_headers_, test_fixture_->response_data_,
+            false);
       }
     }
   }
@@ -717,40 +737,48 @@ void CheckSuccessfulRequest(const std::vector<IPC::Message>& messages,
                             const std::string& reference_data) {
   // A successful request will have received 4 messages:
   //     ReceivedResponse    (indicates headers received)
-  //     DataReceived        (data)
-  //    XXX DataReceived        (0 bytes remaining from a read)
+  //     SetDataBuffer       (contains shared memory handle)
+  //     DataReceived        (data offset and length into shared memory)
   //     RequestComplete     (request is done)
   //
   // This function verifies that we received 4 messages and that they
   // are appropriate.
-  ASSERT_EQ(3U, messages.size());
+  ASSERT_EQ(4U, messages.size());
 
   // The first messages should be received response
   ASSERT_EQ(ResourceMsg_ReceivedResponse::ID, messages[0].type());
 
-  // followed by the data, currently we only do the data in one chunk, but
-  // should probably test multiple chunks later
-  ASSERT_EQ(ResourceMsg_DataReceived::ID, messages[1].type());
+  ASSERT_EQ(ResourceMsg_SetDataBuffer::ID, messages[1].type());
 
   PickleIterator iter(messages[1]);
   int request_id;
   ASSERT_TRUE(IPC::ReadParam(&messages[1], &iter, &request_id));
   base::SharedMemoryHandle shm_handle;
   ASSERT_TRUE(IPC::ReadParam(&messages[1], &iter, &shm_handle));
-  uint32 data_len;
-  ASSERT_TRUE(IPC::ReadParam(&messages[1], &iter, &data_len));
+  int shm_size;
+  ASSERT_TRUE(IPC::ReadParam(&messages[1], &iter, &shm_size));
 
-  ASSERT_EQ(reference_data.size(), data_len);
+  // Followed by the data, currently we only do the data in one chunk, but
+  // should probably test multiple chunks later
+  ASSERT_EQ(ResourceMsg_DataReceived::ID, messages[2].type());
+
+  PickleIterator iter2(messages[2]);
+  ASSERT_TRUE(IPC::ReadParam(&messages[2], &iter2, &request_id));
+  int data_offset;
+  ASSERT_TRUE(IPC::ReadParam(&messages[2], &iter2, &data_offset));
+  int data_length;
+  ASSERT_TRUE(IPC::ReadParam(&messages[2], &iter2, &data_length));
+
+  ASSERT_EQ(reference_data.size(), static_cast<size_t>(data_length));
+  ASSERT_GE(shm_size, data_length);
+
   base::SharedMemory shared_mem(shm_handle, true);  // read only
-  shared_mem.Map(data_len);
-  const char* data = static_cast<char*>(shared_mem.memory());
-  ASSERT_EQ(0, memcmp(reference_data.c_str(), data, data_len));
+  shared_mem.Map(data_length);
+  const char* data = static_cast<char*>(shared_mem.memory()) + data_offset;
+  ASSERT_EQ(0, memcmp(reference_data.c_str(), data, data_length));
 
-  // followed by a 0-byte read
-  //ASSERT_EQ(ResourceMsg_DataReceived::ID, messages[2].type());
-
-  // the last message should be all data received
-  ASSERT_EQ(ResourceMsg_RequestComplete::ID, messages[2].type());
+  // The last message should be all data received.
+  ASSERT_EQ(ResourceMsg_RequestComplete::ID, messages[3].type());
 }
 
 // Tests whether many messages get dispatched properly.
@@ -809,13 +837,13 @@ TEST_F(ResourceDispatcherHostTest, Cancel) {
   ASSERT_EQ(ResourceMsg_RequestComplete::ID, msgs[1][1].type());
 
   int request_id;
-  net::URLRequestStatus status;
+  int error_code;
 
   PickleIterator iter(msgs[1][1]);
   ASSERT_TRUE(IPC::ReadParam(&msgs[1][1], &iter, &request_id));
-  ASSERT_TRUE(IPC::ReadParam(&msgs[1][1], &iter, &status));
+  ASSERT_TRUE(IPC::ReadParam(&msgs[1][1], &iter, &error_code));
 
-  EXPECT_EQ(net::URLRequestStatus::CANCELED, status.status());
+  EXPECT_EQ(net::ERR_ABORTED, error_code);
 }
 
 TEST_F(ResourceDispatcherHostTest, CancelWhileStartIsDeferred) {
@@ -1277,18 +1305,17 @@ TEST_F(ResourceDispatcherHostTest, TooManyOutstandingRequests) {
     EXPECT_EQ(1U, msgs[index].size());
     EXPECT_EQ(ResourceMsg_RequestComplete::ID, msgs[index][0].type());
 
-    // The RequestComplete message should have had status
-    // (CANCELLED, ERR_INSUFFICIENT_RESOURCES).
+    // The RequestComplete message should have the error code of
+    // ERR_INSUFFICIENT_RESOURCES.
     int request_id;
-    net::URLRequestStatus status;
+    int error_code;
 
     PickleIterator iter(msgs[index][0]);
     EXPECT_TRUE(IPC::ReadParam(&msgs[index][0], &iter, &request_id));
-    EXPECT_TRUE(IPC::ReadParam(&msgs[index][0], &iter, &status));
+    EXPECT_TRUE(IPC::ReadParam(&msgs[index][0], &iter, &error_code));
 
     EXPECT_EQ(index + 1, request_id);
-    EXPECT_EQ(net::URLRequestStatus::CANCELED, status.status());
-    EXPECT_EQ(net::ERR_INSUFFICIENT_RESOURCES, status.error());
+    EXPECT_EQ(net::ERR_INSUFFICIENT_RESOURCES, error_code);
   }
 
   // The final 2 requests should have succeeded.
@@ -1451,18 +1478,17 @@ TEST_F(ResourceDispatcherHostTest, ForbiddenDownload) {
   ASSERT_EQ(1U, msgs[0].size());
   EXPECT_EQ(ResourceMsg_RequestComplete::ID, msgs[0][0].type());
 
-  // The RequestComplete message should have had status
-  // (CANCELED, ERR_FILE_NOT_FOUND).
+  // The RequestComplete message should have had the error code of
+  // ERR_FILE_NOT_FOUND.
   int request_id;
-  net::URLRequestStatus status;
+  int error_code;
 
   PickleIterator iter(msgs[0][0]);
   EXPECT_TRUE(IPC::ReadParam(&msgs[0][0], &iter, &request_id));
-  EXPECT_TRUE(IPC::ReadParam(&msgs[0][0], &iter, &status));
+  EXPECT_TRUE(IPC::ReadParam(&msgs[0][0], &iter, &error_code));
 
   EXPECT_EQ(1, request_id);
-  EXPECT_EQ(net::URLRequestStatus::CANCELED, status.status());
-  EXPECT_EQ(net::ERR_FILE_NOT_FOUND, status.error());
+  EXPECT_EQ(net::ERR_FILE_NOT_FOUND, error_code);
 }
 
 // Test for http://crbug.com/76202 .  We don't want to destroy a
@@ -1753,18 +1779,17 @@ TEST_F(ResourceDispatcherHostTest, UnknownURLScheme) {
   ASSERT_EQ(1U, msgs[0].size());
   EXPECT_EQ(ResourceMsg_RequestComplete::ID, msgs[0][0].type());
 
-  // The RequestComplete message should have had status
-  // (FAILED, ERR_UNKNOWN_URL_SCHEME).
+  // The RequestComplete message should have the error code of
+  // ERR_UNKNOWN_URL_SCHEME.
   int request_id;
-  net::URLRequestStatus status;
+  int error_code;
 
   PickleIterator iter(msgs[0][0]);
   EXPECT_TRUE(IPC::ReadParam(&msgs[0][0], &iter, &request_id));
-  EXPECT_TRUE(IPC::ReadParam(&msgs[0][0], &iter, &status));
+  EXPECT_TRUE(IPC::ReadParam(&msgs[0][0], &iter, &error_code));
 
   EXPECT_EQ(1, request_id);
-  EXPECT_EQ(net::URLRequestStatus::FAILED, status.status());
-  EXPECT_EQ(net::ERR_UNKNOWN_URL_SCHEME, status.error());
+  EXPECT_EQ(net::ERR_UNKNOWN_URL_SCHEME, error_code);
 }
 
 TEST_F(ResourceDispatcherHostTest, DataReceivedACKs) {
@@ -1782,7 +1807,8 @@ TEST_F(ResourceDispatcherHostTest, DataReceivedACKs) {
   size_t size = msgs[0].size();
 
   EXPECT_EQ(ResourceMsg_ReceivedResponse::ID, msgs[0][0].type());
-  for (size_t i = 1; i < size - 1; ++i)
+  EXPECT_EQ(ResourceMsg_SetDataBuffer::ID, msgs[0][1].type());
+  for (size_t i = 2; i < size - 1; ++i)
     EXPECT_EQ(ResourceMsg_DataReceived::ID, msgs[0][i].type());
   EXPECT_EQ(ResourceMsg_RequestComplete::ID, msgs[0][size - 1].type());
 }
@@ -1797,15 +1823,17 @@ TEST_F(ResourceDispatcherHostTest, DelayedDataReceivedACKs) {
   ResourceIPCAccumulator::ClassifiedMessages msgs;
   accum_.GetClassifiedMessages(&msgs);
 
-  // We expect 1x ReceivedResponse + Nx ReceivedData messages.
+  // We expect 1x ReceivedResponse, 1x SetDataBuffer, Nx ReceivedData messages.
   EXPECT_EQ(ResourceMsg_ReceivedResponse::ID, msgs[0][0].type());
-  for (size_t i = 1; i < msgs[0].size(); ++i)
+  EXPECT_EQ(ResourceMsg_SetDataBuffer::ID, msgs[0][1].type());
+  for (size_t i = 2; i < msgs[0].size(); ++i)
     EXPECT_EQ(ResourceMsg_DataReceived::ID, msgs[0][i].type());
 
   // NOTE: If we fail the above checks then it means that we probably didn't
   // load a big enough response to trigger the delay mechanism we are trying to
   // test!
 
+  msgs[0].erase(msgs[0].begin());
   msgs[0].erase(msgs[0].begin());
 
   // ACK all DataReceived messages until we find a RequestComplete message.

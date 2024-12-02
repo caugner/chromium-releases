@@ -28,8 +28,11 @@
 #include "skia/ext/image_operations.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/layout.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/screen.h"
+#include "ui/gfx/scrollbar_size.h"
 #include "ui/gfx/skbitmap_operations.h"
 
 #if defined(OS_WIN)
@@ -63,59 +66,147 @@ using content::WebContents;
 
 namespace {
 
+// The thumbnail size in DIP.
 static const int kThumbnailWidth = 212;
 static const int kThumbnailHeight = 132;
 
-// This factor determines the number of pixels to be copied by
-// RenderWidgetHost::CopyFromBackingStore for generating thumbnail.
-// Smaller scale is good for performance, but too small scale causes aliasing
-// because the resampling method is not good enough to retain the image quality.
-// TODO(mazda): the Improve resampling method and use a smaller scale
-// (http://crbug.com/118571).
-static const double kThumbnailCopyScale = 2.0;
-
 static const char kThumbnailHistogramName[] = "Thumbnail.ComputeMS";
 
-// Calculates the size used by RenderWidgetHost::CopyFromBackingStore.
-// The result is computed as the minimum size that satisfies the following
-// conditions.
-//   result.width : result.height == view_size.width : view_size.height
-//   result.width >= kThumbnailCopyScale * desired_size.width
-//   result.height >= kThumbnailCopyScale * desired_size.height
-gfx::Size GetCopySizeForThumbnail(const gfx::Size& view_size,
-                                  const gfx::Size& desired_size) {
-  const double scale = kThumbnailCopyScale *
-      std::max(static_cast<double>(desired_size.width()) / view_size.width(),
-               static_cast<double>(desired_size.height()) / view_size.height());
-  return gfx::Size(static_cast<int>(scale * view_size.width()),
-                   static_cast<int>(scale * view_size.height()));
+// Returns the size used by RenderWidgetHost::CopyFromBackingStore.
+//
+// The size is calculated in such a way that the copied size in pixel becomes
+// equal to (f * kThumbnailWidth, f * kThumbnailHeight), where f is the scale
+// of ui::SCALE_FACTOR_200P. Since RenderWidgetHost::CopyFromBackingStore takes
+// the size in DIP, we need to adjust the size based on |view|'s device scale
+// factor in order to copy the pixels with the size above.
+//
+// The copied size was chosen for the following reasons.
+//
+// 1. When the scale factor of the primary monitor is ui::SCALE_FACTOR_200P, the
+// generated thumbnail size is (f * kThumbnailWidth, f * kThumbnailHeight).
+// In order to avoid degrading the image quality by magnification, the size
+// of the copied pixels should be equal to or larger than this thumbnail size.
+//
+// 2. RenderWidgetHost::CopyFromBackingStore can be costly especially when
+// it is necessary to read back the web contents image data from GPU. As the
+// cost is roughly propotional to the number of the copied pixels, the size of
+// the copied pixels should be as small as possible.
+//
+// When the scale factor of the primary monitor is ui::SCALE_FACTOR_100P,
+// we still copy the pixels with the same size as ui::SCALE_FACTOR_200P because
+// the resampling method used in RenderWidgetHost::CopyFromBackingStore is not
+// good enough for the resampled image to be used directly for the thumbnail
+// (http://crbug.com/141235). We assume this is not an issue in case of
+// ui::SCALE_FACTOR_200P because the high resolution thumbnail on high density
+// display alleviates the aliasing.
+// TODO(mazda): Copy the pixels with the smaller size in the case of
+// ui::SCALE_FACTOR_100P once the resampling method has been improved.
+gfx::Size GetCopySizeForThumbnail(content::RenderWidgetHostView* view) {
+  gfx::Size copy_size(kThumbnailWidth, kThumbnailHeight);
+  ui::ScaleFactor scale_factor =
+      ui::GetScaleFactorForNativeView(view->GetNativeView());
+  switch (scale_factor) {
+    case ui::SCALE_FACTOR_100P:
+      copy_size =
+          copy_size.Scale(ui::GetScaleFactorScale(ui::SCALE_FACTOR_200P));
+      break;
+    case ui::SCALE_FACTOR_200P:
+      // Use the size as-is.
+      break;
+    default:
+      DLOG(WARNING) << "Unsupported scale factor. Use the same copy size as "
+                    << "ui::SCALE_FACTOR_100P";
+      copy_size =
+          copy_size.Scale(ui::GetScaleFactorScale(ui::SCALE_FACTOR_200P));
+      break;
+  }
+  return copy_size;
+}
+
+// Returns the size of the thumbnail stored in the database in pixel.
+gfx::Size GetThumbnailSizeInPixel() {
+  gfx::Size thumbnail_size(kThumbnailWidth, kThumbnailHeight);
+  // Determine the resolution of the thumbnail based on the primary monitor.
+  // TODO(oshima): Use device's default scale factor.
+  gfx::Display primary_display = gfx::Screen::GetPrimaryDisplay();
+  return thumbnail_size.Scale(primary_display.device_scale_factor());
+}
+
+// Returns the clipping rectangle that is used for creating a thumbnail with
+// the size of |desired_size| from the bitmap with the size of |source_size|.
+// The type of clipping that needs to be done is assigned to |clip_result|.
+gfx::Rect GetClippingRect(const gfx::Size& source_size,
+                          const gfx::Size& desired_size,
+                          ThumbnailGenerator::ClipResult* clip_result) {
+  DCHECK(clip_result);
+
+  float desired_aspect =
+      static_cast<float>(desired_size.width()) / desired_size.height();
+
+  // Get the clipping rect so that we can preserve the aspect ratio while
+  // filling the destination.
+  gfx::Rect clipping_rect;
+  if (source_size.width() < desired_size.width() ||
+      source_size.height() < desired_size.height()) {
+    // Source image is smaller: we clip the part of source image within the
+    // dest rect, and then stretch it to fill the dest rect. We don't respect
+    // the aspect ratio in this case.
+    clipping_rect = gfx::Rect(desired_size);
+    *clip_result = ThumbnailGenerator::kSourceIsSmaller;
+  } else {
+    float src_aspect =
+        static_cast<float>(source_size.width()) / source_size.height();
+    if (src_aspect > desired_aspect) {
+      // Wider than tall, clip horizontally: we center the smaller
+      // thumbnail in the wider screen.
+      int new_width = static_cast<int>(source_size.height() * desired_aspect);
+      int x_offset = (source_size.width() - new_width) / 2;
+      clipping_rect.SetRect(x_offset, 0, new_width, source_size.height());
+      *clip_result = (src_aspect >= ThumbnailScore::kTooWideAspectRatio) ?
+          ThumbnailGenerator::kTooWiderThanTall :
+          ThumbnailGenerator::kWiderThanTall;
+    } else if (src_aspect < desired_aspect) {
+      clipping_rect =
+          gfx::Rect(source_size.width(), source_size.width() / desired_aspect);
+      *clip_result = ThumbnailGenerator::kTallerThanWide;
+    } else {
+      clipping_rect = gfx::Rect(source_size);
+      *clip_result = ThumbnailGenerator::kNotClipped;
+    }
+  }
+  return clipping_rect;
 }
 
 // Creates a downsampled thumbnail from the given bitmap.
 // store. The returned bitmap will be isNull if there was an error creating it.
 SkBitmap CreateThumbnail(
-    const SkBitmap& bmp_with_scrollbars,
-    int desired_width,
-    int desired_height,
+    const SkBitmap& bitmap,
+    const gfx::Size& desired_size,
     ThumbnailGenerator::ClipResult* clip_result) {
   base::TimeTicks begin_compute_thumbnail = base::TimeTicks::Now();
 
-  // Clip the edgemost 15 pixels as that will commonly hold a scrollbar, which
-  // looks bad in thumbnails.
-  SkIRect scrollbarless_rect =
-      { 0, 0,
-        std::max(1, bmp_with_scrollbars.width() - 15),
-        std::max(1, bmp_with_scrollbars.height() - 15) };
-  SkBitmap bmp;
-  bmp_with_scrollbars.extractSubset(&bmp, scrollbarless_rect);
+  SkBitmap clipped_bitmap;
+  if (*clip_result == ThumbnailGenerator::kUnprocessed) {
+    // Clip the pixels that will commonly hold a scrollbar, which looks bad in
+    // thumbnails.
+    int scrollbar_size = gfx::scrollbar_size();
+    SkIRect scrollbarless_rect =
+        { 0, 0,
+          std::max(1, bitmap.width() - scrollbar_size),
+          std::max(1, bitmap.height() - scrollbar_size) };
+    SkBitmap bmp;
+    bitmap.extractSubset(&bmp, scrollbarless_rect);
 
-  SkBitmap clipped_bitmap = ThumbnailGenerator::GetClippedBitmap(
-      bmp, desired_width, desired_height, clip_result);
+    clipped_bitmap = ThumbnailGenerator::GetClippedBitmap(
+        bmp, desired_size.width(), desired_size.height(), clip_result);
+  } else {
+    clipped_bitmap = bitmap;
+  }
 
   // Need to resize it to the size we want, so downsample until it's
   // close, and let the caller make it the exact size if desired.
   SkBitmap result = SkBitmapOperations::DownsampleByTwoUntilSize(
-      clipped_bitmap, desired_width, desired_height);
+      clipped_bitmap, desired_size.width(), desired_size.height());
 #if !defined(USE_AURA)
   // This is a bit subtle. SkBitmaps are refcounted, but the magic
   // ones in PlatformCanvas can't be assigned to SkBitmap with proper
@@ -218,8 +309,11 @@ void ThumbnailGenerator::AskForSnapshot(RenderWidgetHost* renderer,
   // this callback for later lookup when the rendering is done.
   static int sequence_num = 0;
   sequence_num++;
+  float scale_factor = ui::GetScaleFactorScale(ui::GetScaleFactorForNativeView(
+      renderer->GetView()->GetNativeView()));
+  gfx::Size desired_size_in_pixel = desired_size.Scale(scale_factor);
   scoped_ptr<TransportDIB> thumbnail_dib(TransportDIB::Create(
-      desired_size.width() * desired_size.height() * 4, sequence_num));
+      desired_size_in_pixel.GetArea() * 4, sequence_num));
 
 #if defined(USE_X11)
   // TODO: IPC a handle to the renderer like Windows.
@@ -376,49 +470,12 @@ SkBitmap ThumbnailGenerator::GetClippedBitmap(const SkBitmap& bitmap,
                                               int desired_width,
                                               int desired_height,
                                               ClipResult* clip_result) {
-  const SkRect dest_rect = { 0, 0,
-                             SkIntToScalar(desired_width),
-                             SkIntToScalar(desired_height) };
-  const float dest_aspect = dest_rect.width() / dest_rect.height();
-
-  // Get the src rect so that we can preserve the aspect ratio while filling
-  // the destination.
-  SkIRect src_rect;
-  if (bitmap.width() < dest_rect.width() ||
-      bitmap.height() < dest_rect.height()) {
-    // Source image is smaller: we clip the part of source image within the
-    // dest rect, and then stretch it to fill the dest rect. We don't respect
-    // the aspect ratio in this case.
-    src_rect.set(0, 0, static_cast<S16CPU>(dest_rect.width()),
-                 static_cast<S16CPU>(dest_rect.height()));
-    if (clip_result)
-      *clip_result = ThumbnailGenerator::kSourceIsSmaller;
-  } else {
-    const float src_aspect =
-        static_cast<float>(bitmap.width()) / bitmap.height();
-    if (src_aspect > dest_aspect) {
-      // Wider than tall, clip horizontally: we center the smaller
-      // thumbnail in the wider screen.
-      S16CPU new_width = static_cast<S16CPU>(bitmap.height() * dest_aspect);
-      S16CPU x_offset = (bitmap.width() - new_width) / 2;
-      src_rect.set(x_offset, 0, new_width + x_offset, bitmap.height());
-      if (clip_result) {
-        *clip_result = (src_aspect >= ThumbnailScore::kTooWideAspectRatio) ?
-            ThumbnailGenerator::kTooWiderThanTall :
-            ThumbnailGenerator::kWiderThanTall;
-      }
-    } else if (src_aspect < dest_aspect) {
-      src_rect.set(0, 0, bitmap.width(),
-                   static_cast<S16CPU>(bitmap.width() / dest_aspect));
-      if (clip_result)
-        *clip_result = ThumbnailGenerator::kTallerThanWide;
-    } else {
-      src_rect.set(0, 0, bitmap.width(), bitmap.height());
-      if (clip_result)
-        *clip_result = ThumbnailGenerator::kNotClipped;
-    }
-  }
-
+  gfx::Rect clipping_rect =
+      GetClippingRect(gfx::Size(bitmap.width(), bitmap.height()),
+                      gfx::Size(desired_width, desired_height),
+                      clip_result);
+  SkIRect src_rect = { clipping_rect.x(), clipping_rect.y(),
+                       clipping_rect.right(), clipping_rect.bottom() };
   SkBitmap clipped_bitmap;
   bitmap.extractSubset(&clipped_bitmap, src_rect);
   return clipped_bitmap;
@@ -426,8 +483,13 @@ SkBitmap ThumbnailGenerator::GetClippedBitmap(const SkBitmap& bitmap,
 
 void ThumbnailGenerator::UpdateThumbnailIfNecessary(
     WebContents* web_contents) {
-  // Skip if a pending entry exists. WidgetHidden can be called while navigaing
-  // pages and this is not a timing when thumbnails should be generated.
+  // Destroying a WebContents may trigger it to be hidden, prompting a snapshot
+  // which would be unwise to attempt <http://crbug.com/130097>. If the
+  // WebContents is in the middle of destruction, do not risk it.
+  if (web_contents->IsBeingDestroyed())
+    return;
+  // Skip if a pending entry exists. WidgetHidden can be called while navigating
+  // pages and this is not a time when thumbnails should be generated.
   if (web_contents->GetController().GetPendingEntry())
     return;
   const GURL& url = web_contents->GetURL();
@@ -443,8 +505,7 @@ void ThumbnailGenerator::UpdateThumbnailIfNecessary(
 
 void ThumbnailGenerator::UpdateThumbnail(
     WebContents* web_contents, const SkBitmap& thumbnail,
-    const ThumbnailGenerator::ClipResult& clip_result) {
-
+    const ClipResult& clip_result) {
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   history::TopSites* top_sites = profile->GetTopSites();
@@ -486,7 +547,8 @@ void ThumbnailGenerator::AsyncUpdateThumbnail(
       AskForSnapshot(render_widget_host,
                      base::Bind(&ThumbnailGenerator::UpdateThumbnailWithBitmap,
                                 weak_factory_.GetWeakPtr(),
-                                web_contents),
+                                web_contents,
+                                ThumbnailGenerator::kUnprocessed),
                      view_size,
                      view_size);
     }
@@ -494,46 +556,53 @@ void ThumbnailGenerator::AsyncUpdateThumbnail(
     return;
   }
 
-  gfx::Size copy_size =
-      GetCopySizeForThumbnail(view->GetViewBounds().size(),
-                              gfx::Size(kThumbnailWidth, kThumbnailHeight));
+  gfx::Rect copy_rect = gfx::Rect(view->GetViewBounds().size());
+  // Clip the pixels that will commonly hold a scrollbar, which looks bad in
+  // thumbnails.
+  int scrollbar_size = gfx::scrollbar_size();
+  copy_rect.Inset(0, 0, scrollbar_size, scrollbar_size);
+  ClipResult clip_result = ThumbnailGenerator::kUnprocessed;
+  copy_rect = GetClippingRect(copy_rect.size(),
+                              gfx::Size(kThumbnailWidth, kThumbnailHeight),
+                              &clip_result);
+  gfx::Size copy_size = GetCopySizeForThumbnail(view);
   skia::PlatformCanvas* temp_canvas = new skia::PlatformCanvas;
   render_widget_host->CopyFromBackingStore(
-      gfx::Rect(),
+      copy_rect,
       copy_size,
       base::Bind(&ThumbnailGenerator::UpdateThumbnailWithCanvas,
                  weak_factory_.GetWeakPtr(),
                  web_contents,
+                 clip_result,
                  base::Owned(temp_canvas)),
       temp_canvas);
 }
 
 void ThumbnailGenerator::UpdateThumbnailWithBitmap(
     WebContents* web_contents,
+    ClipResult clip_result,
     const SkBitmap& bitmap) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   if (bitmap.isNull() || bitmap.empty())
     return;
 
-  ClipResult clip_result;
   SkBitmap thumbnail = CreateThumbnail(bitmap,
-                                       kThumbnailWidth,
-                                       kThumbnailHeight,
+                                       GetThumbnailSizeInPixel(),
                                        &clip_result);
   UpdateThumbnail(web_contents, thumbnail, clip_result);
 }
 
 void ThumbnailGenerator::UpdateThumbnailWithCanvas(
     WebContents* web_contents,
+    ClipResult clip_result,
     skia::PlatformCanvas* temp_canvas,
     bool succeeded) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   if (!succeeded)
     return;
 
-  SkBitmap bmp_with_scrollbars =
-      skia::GetTopDevice(*temp_canvas)->accessBitmap(false);
-  UpdateThumbnailWithBitmap(web_contents, bmp_with_scrollbars);
+  SkBitmap bitmap = skia::GetTopDevice(*temp_canvas)->accessBitmap(false);
+  UpdateThumbnailWithBitmap(web_contents, clip_result, bitmap);
 }
 
 bool ThumbnailGenerator::ShouldUpdateThumbnail(Profile* profile,

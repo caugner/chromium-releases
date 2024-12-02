@@ -201,7 +201,7 @@ class TestGenerator(unittest.TestCase):
                             ],
                      java_class_name=None,
                      type='method',
-                     p0_type='device_orientation::DataFetcherImplAndroid'),
+                     p0_type='content::DataFetcherImplAndroid'),
     ]
     self.assertListEquals(golden_natives, natives)
     h = jni_generator.InlHeaderFileGenerator('', 'org/chromium/TestJni',
@@ -393,7 +393,7 @@ static bool RegisterNativesImpl(JNIEnv* env) {
     { "nativeGetDefaultBookmarkFolder",
 "("
 ")"
-"Lcom/google/android/apps/chrome/ChromeBrowserProvider$BookmarkNode;",
+"Lorg/chromium/chrome/browser/ChromeBrowserProvider$BookmarkNode;",
     reinterpret_cast<void*>(GetDefaultBookmarkFolder) },
     { "nativeQueryBookmarkFromAPI",
 "("

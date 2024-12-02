@@ -48,7 +48,6 @@ class Printing_Dev;
 class Selection_Dev;
 class URLLoader;
 class URLUtil_Dev;
-class WidgetClient_Dev;
 class Zoom_Dev;
 }
 
@@ -319,7 +318,7 @@ class Plugin : public pp::InstancePrivate {
     return main_service_runtime()->exit_status();
   }
 
-  const PPB_NaCl_Private* nacl_interface() { return nacl_interface_; }
+  const PPB_NaCl_Private* nacl_interface() const { return nacl_interface_; }
 
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(Plugin);
@@ -503,7 +502,6 @@ class Plugin : public pp::InstancePrivate {
   nacl::scoped_ptr<pp::MouseLock> mouse_lock_adapter_;
   nacl::scoped_ptr<pp::Printing_Dev> printing_adapter_;
   nacl::scoped_ptr<pp::Selection_Dev> selection_adapter_;
-  nacl::scoped_ptr<pp::WidgetClient_Dev> widget_client_adapter_;
   nacl::scoped_ptr<pp::Zoom_Dev> zoom_adapter_;
 
   // Used for NexeFileDidOpenContinuation
@@ -528,9 +526,6 @@ class Plugin : public pp::InstancePrivate {
   const FileDownloader* FindFileDownloader(PP_Resource url_loader) const;
 
   int64_t time_of_last_progress_event_;
-
-  // Whether we are using IPC-based PPAPI proxy.
-  bool using_ipc_proxy_;
 
   const PPB_NaCl_Private* nacl_interface_;
 };

@@ -180,11 +180,9 @@ GpuProcessHostUIShim::~GpuProcessHostUIShim() {
   DCHECK(CalledOnValidThread());
   g_hosts_by_id.Pointer()->Remove(host_id_);
 
-  DictionaryValue* dict = new DictionaryValue();
-  dict->SetInteger("level", logging::LOG_ERROR);
-  dict->SetString("header", "GpuProcessHostUIShim");
-  dict->SetString("message", "GPU Process Crashed.");
-  GpuDataManagerImpl::GetInstance()->AddLogMessage(dict);
+  GpuDataManagerImpl::GetInstance()->AddLogMessage(
+      logging::LOG_ERROR, "GpuProcessHostUIShim",
+      "GPU Process Crashed.");
 }
 
 bool GpuProcessHostUIShim::OnControlMessageReceived(
@@ -207,7 +205,8 @@ bool GpuProcessHostUIShim::OnControlMessageReceived(
                         OnAcceleratedSurfaceNew)
     IPC_MESSAGE_HANDLER(GpuHostMsg_AcceleratedSurfaceRelease,
                         OnAcceleratedSurfaceRelease)
-
+    IPC_MESSAGE_HANDLER(GpuHostMsg_VideoMemoryUsageStats,
+                        OnVideoMemoryUsageStatsReceived);
 #if defined(TOOLKIT_GTK) || defined(OS_WIN)
     IPC_MESSAGE_HANDLER(GpuHostMsg_ResizeView, OnResizeView)
 #endif
@@ -222,11 +221,8 @@ void GpuProcessHostUIShim::OnLogMessage(
     int level,
     const std::string& header,
     const std::string& message) {
-  DictionaryValue* dict = new DictionaryValue();
-  dict->SetInteger("level", level);
-  dict->SetString("header", header);
-  dict->SetString("message", message);
-  GpuDataManagerImpl::GetInstance()->AddLogMessage(dict);
+  GpuDataManagerImpl::GetInstance()->AddLogMessage(
+      level, header, message);
 }
 
 void GpuProcessHostUIShim::OnGraphicsInfoCollected(
@@ -367,3 +363,10 @@ void GpuProcessHostUIShim::OnAcceleratedSurfaceRelease(
     return;
   view->AcceleratedSurfaceRelease(params.identifier);
 }
+
+void GpuProcessHostUIShim::OnVideoMemoryUsageStatsReceived(
+    const content::GPUVideoMemoryUsageStats& video_memory_usage_stats) {
+  GpuDataManagerImpl::GetInstance()->UpdateVideoMemoryUsageStats(
+      video_memory_usage_stats);
+}
+

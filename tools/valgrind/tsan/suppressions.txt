@@ -405,12 +405,6 @@
 ############################
 # Real races in Chromium
 {
-  bug_23433
-  ThreadSanitizer:Race
-  fun:*logging*SetMinLogLevel*
-}
-
-{
   bug_24419
   ThreadSanitizer:Race
   fun:*BrowserProcessImpl*nspector*iles*
@@ -429,18 +423,6 @@
   ...
   fun:base::LaunchApp*
   fun:ChildProcessLauncher::Context::LaunchInternal*
-}
-
-{
-  bug_46642a
-  ThreadSanitizer:Race
-  fun:*media*Pipeline*InitializeTask*
-}
-
-{
-  bug_46642b
-  ThreadSanitizer:Race
-  fun:*media*Pipeline*GetCurrentTime*
 }
 
 {
@@ -594,6 +576,15 @@
   fun:media::VideoFrame::HashFrameForTesting
   fun:media::PipelineIntegrationTestBase::OnVideoRendererPaint
   fun:base::internal::RunnableAdapter::Run
+}
+{
+  bug_93932_k
+  ThreadSanitizer:Race
+  ...
+  fun:media::FFmpegVideoDecoder::Decode
+  fun:media::FFmpegVideoDecoder::DecodeBuffer
+  fun:media::FFmpegVideoDecoder::DoDecryptOrDecodeBuffer
+  fun:media::FFmpegVideoDecoder::DoDecryptOrDecodeBuffer
 }
 {
   bug_100020
@@ -756,26 +747,6 @@
   fun:tracked_objects::ThreadData::InitializeAndSetTrackingStatus
   fun:ChildThread::OnSetProfilerStatus
   fun:DispatchToMethod
-}
-{
-  bug_107181a
-  ThreadSanitizer:Race
-  ...
-  fun:media::AudioRendererBase::SetPlaybackRate
-  fun:AudioRendererImpl::SetPlaybackRate
-  fun:media::CompositeFilter::SetPlaybackRate
-  fun:media::Pipeline::PlaybackRateChangedTask
-  ...
-  fun:base::internal::RunnableAdapter::Run
-}
-{
-  bug_107181b
-  ThreadSanitizer:Race
-  fun:media::AudioRendererAlgorithmBase::playback_rate
-  fun:media::AudioRendererBase::GetPlaybackRate
-  fun:AudioRendererImpl::Render
-  fun:AudioDevice::FireRenderCallback
-  fun:AudioDevice::Run
 }
 {
    bug_107903_a
@@ -972,20 +943,6 @@
   fun:base::internal::RunnableAdapter::Run
 }
 {
-   bug_132230a
-   ThreadSanitizer:Race
-   ...
-   fun:ProtocolHandlerRegistry::DefaultClientObserver::~DefaultClientObserver
-   fun:::FakeClientObserver::~FakeClientObserver
-   fun:ProtocolHandlerRegistry::Finalize
-}
-{
-   bug_132230b
-   ThreadSanitizer:Race
-   fun:ShellIntegration::DefaultWebClientWorker::ExecuteSetAsDefault
-   fun:base::internal::RunnableAdapter::Run
-}
-{
    bug_137701
    ThreadSanitizer:Race
    ...
@@ -1002,15 +959,7 @@
   bug_137973_b
   ThreadSanitizer:Race
   fun:media::Pipeline::SetState
-  fun:media::Pipeline::TearDownPipeline
   fun:media::Pipeline::StopTask
-  fun:base::internal::RunnableAdapter::Run
-}
-{
-  bug_137973_c
-  ThreadSanitizer:Race
-  fun:media::Pipeline::SetState
-  fun:media::Pipeline::TeardownStateTransitionTask
   fun:base::internal::RunnableAdapter::Run
 }
 {
@@ -1025,4 +974,18 @@
    fun:browser_sync::NonFrontendDataTypeController::StartFailed
    fun:browser_sync::NewNonFrontendDataTypeController::StartAssociationWithSharedChangeProcessor
    fun:base::internal::RunnableAdapter::Run
+}
+{
+  bug_144894
+  ThreadSanitizer:Race
+  fun:av_parser_close
+  fun:avcodec_open2
+  fun:avformat_find_stream_info
+  fun:media::FFmpegConfigHelper::SetupStreamConfigs
+  fun:media::FFmpegConfigHelper::Parse
+  fun:media::WebMStreamParser::ParseInfoAndTracks
+  fun:media::WebMStreamParser::Parse
+  fun:media::ChunkDemuxer::AppendData
+  fun:media::MockMediaSource::AppendAtTime
+  fun:media::PipelineIntegrationTest_MediaSource_ConfigChange_WebM_Test::TestBody
 }

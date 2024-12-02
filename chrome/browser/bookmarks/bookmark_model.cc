@@ -17,17 +17,19 @@
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_storage.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_collator.h"
+#include "ui/gfx/favicon_size.h"
 #include "ui/gfx/image/image_util.h"
 
 using base::Time;
@@ -491,10 +493,10 @@ void BookmarkModel::SortChildren(const BookmarkNode* parent) {
   }
 
   UErrorCode error = U_ZERO_ERROR;
+  const char* application_locale =
+      content::GetContentClient()->browser()->GetApplicationLocale().c_str();
   scoped_ptr<icu::Collator> collator(
-      icu::Collator::createInstance(
-          icu::Locale(g_browser_process->GetApplicationLocale().c_str()),
-          error));
+      icu::Collator::createInstance(icu::Locale(application_locale), error));
   if (U_FAILURE(error))
     collator.reset(NULL);
   BookmarkNode* mutable_parent = AsMutable(parent);
@@ -776,20 +778,16 @@ BookmarkPermanentNode* BookmarkModel::CreatePermanentNode(
 
 void BookmarkModel::OnFaviconDataAvailable(
     FaviconService::Handle handle,
-    history::FaviconData favicon) {
+    const history::FaviconImageResult& image_result) {
   BookmarkNode* node =
       load_consumer_.GetClientData(
-          profile_->GetFaviconService(Profile::EXPLICIT_ACCESS), handle);
+          FaviconServiceFactory::GetForProfile(
+              profile_, Profile::EXPLICIT_ACCESS), handle);
   DCHECK(node);
   node->set_favicon_load_handle(0);
-  if (favicon.is_valid()) {
-    scoped_ptr<gfx::Image> favicon_image(
-        gfx::ImageFromPNGEncodedData(favicon.image_data->front(),
-                                     favicon.image_data->size()));
-    if (favicon_image.get()) {
-      node->set_favicon(*favicon_image.get());
-      FaviconLoaded(node);
-    }
+  if (!image_result.image.IsEmpty()) {
+    node->set_favicon(image_result.image);
+    FaviconLoaded(node);
   }
 }
 
@@ -798,12 +796,13 @@ void BookmarkModel::LoadFavicon(BookmarkNode* node) {
     return;
 
   DCHECK(node->url().is_valid());
-  FaviconService* favicon_service =
-      profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
+  FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
+      profile_, Profile::EXPLICIT_ACCESS);
   if (!favicon_service)
     return;
-  FaviconService::Handle handle = favicon_service->GetFaviconForURL(
-      node->url(), history::FAVICON, &load_consumer_,
+  FaviconService::Handle handle = favicon_service->GetFaviconImageForURL(
+      FaviconService::FaviconForURLParams(profile_, node->url(),
+          history::FAVICON, gfx::kFaviconSize, &load_consumer_),
       base::Bind(&BookmarkModel::OnFaviconDataAvailable,
                  base::Unretained(this)));
   load_consumer_.SetClientData(favicon_service, handle, node);
@@ -817,8 +816,8 @@ void BookmarkModel::FaviconLoaded(const BookmarkNode* node) {
 
 void BookmarkModel::CancelPendingFaviconLoadRequests(BookmarkNode* node) {
   if (node->favicon_load_handle()) {
-    FaviconService* favicon_service =
-        profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
+    FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
+        profile_, Profile::EXPLICIT_ACCESS);
     if (favicon_service)
       favicon_service->CancelRequest(node->favicon_load_handle());
     node->set_favicon_load_handle(0);

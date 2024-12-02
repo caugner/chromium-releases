@@ -93,6 +93,9 @@ class SigninScreenHandlerDelegate {
   // Shows Enterprise Enrollment screen.
   virtual void ShowEnterpriseEnrollmentScreen() = 0;
 
+  // Shows Reset screen.
+  virtual void ShowResetScreen() = 0;
+
   // Let the delegate know about the handler it is supposed to be using.
   virtual void SetWebUIHandler(LoginDisplayWebUIHandler* webui_handler) = 0;
 
@@ -130,6 +133,9 @@ class SigninScreenHandler : public BaseScreenHandler,
   // Shows the sign in screen. |oobe_ui| indicates whether the signin
   // screen is for OOBE or usual sign-in flow.
   void Show(bool oobe_ui);
+
+  // Shows the login spinner UI for retail mode logins.
+  void ShowRetailModeLoginSpinner();
 
   // Sets delegate to be used by the handler. It is guaranteed that valid
   // delegate is set before Show() method will be called.
@@ -189,6 +195,7 @@ class SigninScreenHandler : public BaseScreenHandler,
   // Updates authentication extension. Called when device settings that affect
   // sign-in (allow BWSI and allow whitelist) are changed.
   void UpdateAuthExtension();
+  void UpdateAddButtonStatus();
 
   // WebUI message handlers.
   void HandleCompleteLogin(const base::ListValue* args);
@@ -206,6 +213,7 @@ class SigninScreenHandler : public BaseScreenHandler,
   void HandleRemoveUser(const base::ListValue* args);
   void HandleShowAddUser(const base::ListValue* args);
   void HandleToggleEnrollmentScreen(const base::ListValue* args);
+  void HandleToggleResetScreen(const base::ListValue* args);
   void HandleLaunchHelpApp(const base::ListValue* args);
   void HandleCreateAccount(const base::ListValue* args);
   void HandleAccountPickerReady(const base::ListValue* args);
@@ -234,6 +242,11 @@ class SigninScreenHandler : public BaseScreenHandler,
   // Decides whether an auth extension should be pre-loaded. If it should,
   // pre-loads it.
   void MaybePreloadAuthExtension();
+
+  // Returns true iff
+  // (i)   log in is restricted to some user list,
+  // (ii)  all users in the restricted list are present.
+  bool AllWhitelistedUsersPresent();
 
   // A delegate that glues this handler with backend LoginDisplay.
   SigninScreenHandlerDelegate* delegate_;

@@ -50,6 +50,7 @@
 #include "sync/test/engine/test_syncable_utils.h"
 #include "sync/test/fake_encryptor.h"
 #include "sync/test/fake_extensions_activity_monitor.h"
+#include "sync/test/fake_sync_encryption_handler.h"
 #include "sync/util/cryptographer.h"
 #include "sync/util/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -177,8 +178,8 @@ class SyncerTest : public testing::Test,
     std::vector<ModelSafeWorker*> workers;
     GetModelSafeRoutingInfo(&info);
     GetWorkers(&workers);
-    ModelTypePayloadMap types =
-        ModelSafeRoutingInfoToPayloadMap(info, std::string());
+    ModelTypeStateMap types =
+        ModelSafeRoutingInfoToStateMap(info, std::string());
     return new SyncSession(context_.get(), this,
         sessions::SyncSourceInfo(sync_pb::GetUpdatesCallerInfo::UNKNOWN, types),
         info, workers);
@@ -531,7 +532,7 @@ class SyncerTest : public testing::Test,
     return GetField(metahandle, field, false);
   }
 
-  Cryptographer* cryptographer(syncable::BaseTransaction* trans) {
+  Cryptographer* GetCryptographer(syncable::BaseTransaction* trans) {
     return directory()->GetCryptographer(trans);
   }
 
@@ -722,13 +723,13 @@ TEST_F(SyncerTest, GetCommitIdsFiltersUnreadyEntries) {
     other_cryptographer.AddKey(other_params);
     sync_pb::EntitySpecifics specifics;
     sync_pb::NigoriSpecifics* nigori = specifics.mutable_nigori();
-    other_cryptographer.GetKeys(nigori->mutable_encrypted());
-    nigori->set_encrypt_bookmarks(true);
+    other_cryptographer.GetKeys(nigori->mutable_encryption_keybag());
+    dir_maker_.encryption_handler()->EnableEncryptEverything();
     // Set up with an old passphrase, but have pending keys
-    cryptographer(&wtrans)->AddKey(key_params);
-    cryptographer(&wtrans)->Encrypt(bookmark,
+    GetCryptographer(&wtrans)->AddKey(key_params);
+    GetCryptographer(&wtrans)->Encrypt(bookmark,
                                     encrypted_bookmark.mutable_encrypted());
-    cryptographer(&wtrans)->Update(*nigori);
+    GetCryptographer(&wtrans)->SetPendingKeys(nigori->encryption_keybag());
 
     // In conflict but properly encrypted.
     MutableEntry A(&wtrans, GET_BY_ID, ids_.FromNumber(1));
@@ -766,7 +767,7 @@ TEST_F(SyncerTest, GetCommitIdsFiltersUnreadyEntries) {
     VERIFY_ENTRY(4, false, true, false, 0, 10, 10, ids_, &rtrans);
 
     // Resolve the pending keys.
-    cryptographer(&rtrans)->DecryptPendingKeys(other_params);
+    GetCryptographer(&rtrans)->DecryptPendingKeys(other_params);
   }
   SyncShareNudge();
   {
@@ -835,11 +836,10 @@ TEST_F(SyncerTest, EncryptionAwareConflicts) {
     WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
     sync_pb::EntitySpecifics specifics;
     sync_pb::NigoriSpecifics* nigori = specifics.mutable_nigori();
-    other_cryptographer.GetKeys(nigori->mutable_encrypted());
-    nigori->set_encrypt_bookmarks(true);
-    nigori->set_encrypt_preferences(true);
-    cryptographer(&wtrans)->Update(*nigori);
-    EXPECT_TRUE(cryptographer(&wtrans)->has_pending_keys());
+    other_cryptographer.GetKeys(nigori->mutable_encryption_keybag());
+    dir_maker_.encryption_handler()->EnableEncryptEverything();
+    GetCryptographer(&wtrans)->SetPendingKeys(nigori->encryption_keybag());
+    EXPECT_TRUE(GetCryptographer(&wtrans)->has_pending_keys());
   }
 
   mock_server_->AddUpdateSpecifics(1, 0, "A", 10, 10, true, 0, bookmark);
@@ -953,7 +953,7 @@ TEST_F(SyncerTest, EncryptionAwareConflicts) {
   {
     syncable::ReadTransaction rtrans(FROM_HERE, directory());
     // Resolve the pending keys.
-    cryptographer(&rtrans)->DecryptPendingKeys(key_params);
+    GetCryptographer(&rtrans)->DecryptPendingKeys(key_params);
   }
   // First cycle resolves conflicts, second cycle commits changes.
   SyncShareNudge();
@@ -977,207 +977,6 @@ TEST_F(SyncerTest, EncryptionAwareConflicts) {
 }
 
 #undef VERIFY_ENTRY
-
-// Receive an old nigori with old encryption keys and encrypted types. We should
-// not revert our default key or encrypted types.
-TEST_F(SyncerTest, ReceiveOldNigori) {
-  KeyParams old_key = {"localhost", "dummy", "old"};
-  KeyParams current_key = {"localhost", "dummy", "cur"};
-
-  // Data for testing encryption/decryption.
-  Cryptographer other_cryptographer(&encryptor_);
-  other_cryptographer.AddKey(old_key);
-  sync_pb::EntitySpecifics other_encrypted_specifics;
-  other_encrypted_specifics.mutable_bookmark()->set_title("title");
-  other_cryptographer.Encrypt(
-      other_encrypted_specifics,
-      other_encrypted_specifics.mutable_encrypted());
-  sync_pb::EntitySpecifics our_encrypted_specifics;
-  our_encrypted_specifics.mutable_bookmark()->set_title("title2");
-  ModelTypeSet encrypted_types = ModelTypeSet::All();
-
-
-  // Receive the initial nigori node.
-  sync_pb::EntitySpecifics initial_nigori_specifics;
-  initial_nigori_specifics.mutable_nigori();
-  mock_server_->SetNigori(1, 10, 10, initial_nigori_specifics);
-  SyncShareNudge();
-
-  {
-    // Set up the current nigori node (containing both keys and encrypt
-    // everything).
-    WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
-    sync_pb::EntitySpecifics specifics;
-    sync_pb::NigoriSpecifics* nigori = specifics.mutable_nigori();
-    cryptographer(&wtrans)->AddKey(old_key);
-    cryptographer(&wtrans)->AddKey(current_key);
-    cryptographer(&wtrans)->Encrypt(
-        our_encrypted_specifics,
-        our_encrypted_specifics.mutable_encrypted());
-    cryptographer(&wtrans)->GetKeys(
-        nigori->mutable_encrypted());
-    cryptographer(&wtrans)->set_encrypt_everything();
-    cryptographer(&wtrans)->UpdateNigoriFromEncryptedTypes(nigori);
-    MutableEntry nigori_entry(&wtrans, GET_BY_SERVER_TAG,
-                              ModelTypeToRootTag(NIGORI));
-    ASSERT_TRUE(nigori_entry.good());
-    nigori_entry.Put(SPECIFICS, specifics);
-    nigori_entry.Put(IS_UNSYNCED, true);
-    EXPECT_FALSE(cryptographer(&wtrans)->has_pending_keys());
-    EXPECT_TRUE(encrypted_types.Equals(
-        cryptographer(&wtrans)->GetEncryptedTypes()));
-  }
-
-  SyncShareNudge();  // Commit it.
-
-  // Now set up the old nigori node and add it as a server update.
-  sync_pb::EntitySpecifics old_nigori_specifics;
-  sync_pb::NigoriSpecifics *old_nigori = old_nigori_specifics.mutable_nigori();
-  other_cryptographer.GetKeys(old_nigori->mutable_encrypted());
-  other_cryptographer.UpdateNigoriFromEncryptedTypes(old_nigori);
-  mock_server_->SetNigori(1, 30, 30, old_nigori_specifics);
-
-  SyncShareNudge();  // Download the old nigori and apply it.
-
-  {
-    // Ensure everything is committed and stable now. The cryptographer
-    // should be able to decrypt both sets of keys and still be encrypting with
-    // the newest, and the encrypted types should be the most recent
-    syncable::ReadTransaction trans(FROM_HERE, directory());
-    Entry nigori_entry(&trans, GET_BY_SERVER_TAG,
-                       ModelTypeToRootTag(NIGORI));
-    ASSERT_TRUE(nigori_entry.good());
-    EXPECT_FALSE(nigori_entry.Get(IS_UNAPPLIED_UPDATE));
-    EXPECT_FALSE(nigori_entry.Get(IS_UNSYNCED));
-    const sync_pb::NigoriSpecifics& nigori =
-        nigori_entry.Get(SPECIFICS).nigori();
-    EXPECT_TRUE(cryptographer(&trans)->CanDecryptUsingDefaultKey(
-        our_encrypted_specifics.encrypted()));
-    EXPECT_TRUE(cryptographer(&trans)->CanDecrypt(
-        other_encrypted_specifics.encrypted()));
-    EXPECT_TRUE(cryptographer(&trans)->CanDecrypt(
-        nigori.encrypted()));
-    EXPECT_TRUE(cryptographer(&trans)->encrypt_everything());
-  }
-}
-
-// Resolve a confict between two nigori's with different encrypted types,
-// and encryption keys (remote is explicit). Afterwards, the encrypted types
-// should be unioned and the cryptographer should have both keys and be
-// encrypting with the remote encryption key by default.
-TEST_F(SyncerTest, NigoriConflicts) {
-  KeyParams local_key_params = {"localhost", "dummy", "blargle"};
-  KeyParams other_key_params = {"localhost", "dummy", "foobar"};
-  Cryptographer other_cryptographer(&encryptor_);
-  other_cryptographer.AddKey(other_key_params);
-  ModelTypeSet encrypted_types(PASSWORDS, NIGORI);
-  sync_pb::EntitySpecifics initial_nigori_specifics;
-  initial_nigori_specifics.mutable_nigori();
-  mock_server_->SetNigori(1, 10, 10, initial_nigori_specifics);
-
-  // Data for testing encryption/decryption.
-  sync_pb::EntitySpecifics other_encrypted_specifics;
-  other_encrypted_specifics.mutable_bookmark()->set_title("title");
-  other_cryptographer.Encrypt(
-      other_encrypted_specifics,
-      other_encrypted_specifics.mutable_encrypted());
-  sync_pb::EntitySpecifics our_encrypted_specifics;
-  our_encrypted_specifics.mutable_bookmark()->set_title("title2");
-
-  // Receive the initial nigori node.
-  SyncShareNudge();
-  encrypted_types = ModelTypeSet::All();
-  {
-    // Local changes with different passphrase, different types.
-    WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
-    sync_pb::EntitySpecifics specifics;
-    sync_pb::NigoriSpecifics* nigori = specifics.mutable_nigori();
-    cryptographer(&wtrans)->AddKey(local_key_params);
-    cryptographer(&wtrans)->Encrypt(
-        our_encrypted_specifics,
-        our_encrypted_specifics.mutable_encrypted());
-    cryptographer(&wtrans)->GetKeys(
-        nigori->mutable_encrypted());
-    cryptographer(&wtrans)->UpdateNigoriFromEncryptedTypes(nigori);
-    cryptographer(&wtrans)->set_encrypt_everything();
-    MutableEntry nigori_entry(&wtrans, GET_BY_SERVER_TAG,
-                              ModelTypeToRootTag(NIGORI));
-    ASSERT_TRUE(nigori_entry.good());
-    nigori_entry.Put(SPECIFICS, specifics);
-    nigori_entry.Put(IS_UNSYNCED, true);
-    EXPECT_FALSE(cryptographer(&wtrans)->has_pending_keys());
-    EXPECT_TRUE(encrypted_types.Equals(
-            cryptographer(&wtrans)->GetEncryptedTypes()));
-  }
-  {
-    sync_pb::EntitySpecifics specifics;
-    sync_pb::NigoriSpecifics* nigori = specifics.mutable_nigori();
-    other_cryptographer.GetKeys(nigori->mutable_encrypted());
-    nigori->set_encrypt_bookmarks(true);
-    nigori->set_encrypt_preferences(true);
-    nigori->set_encrypt_everything(false);
-    nigori->set_using_explicit_passphrase(true);
-    mock_server_->SetNigori(1, 20, 20, specifics);
-  }
-
-  // Will result in downloading the server nigori, which puts the local nigori
-  // in a state of conflict. This is resolved by merging the local and server
-  // data (with priority given to the server's encryption keys if they are
-  // undecryptable), which we then commit. The cryptographer should have pending
-  // keys and merge the set of encrypted types.
-  SyncShareNudge();  // Resolve conflict in this cycle.
-  SyncShareNudge();  // Commit local change in this cycle.
-  {
-    // Ensure the nigori data merged (encrypted types).
-    WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
-    MutableEntry nigori_entry(&wtrans, GET_BY_SERVER_TAG,
-                              ModelTypeToRootTag(NIGORI));
-    ASSERT_TRUE(nigori_entry.good());
-    EXPECT_FALSE(nigori_entry.Get(IS_UNAPPLIED_UPDATE));
-    EXPECT_FALSE(nigori_entry.Get(IS_UNSYNCED));
-    sync_pb::EntitySpecifics specifics = nigori_entry.Get(SPECIFICS);
-    EXPECT_TRUE(cryptographer(&wtrans)->has_pending_keys());
-    EXPECT_TRUE(encrypted_types.Equals(
-            cryptographer(&wtrans)->GetEncryptedTypes()));
-    EXPECT_TRUE(cryptographer(&wtrans)->encrypt_everything());
-    EXPECT_TRUE(specifics.nigori().using_explicit_passphrase());
-    // Supply the pending keys. Afterwards, we should be able to decrypt both
-    // our own encrypted data and data encrypted by the other cryptographer,
-    // but the key provided by the other cryptographer should be the default.
-    EXPECT_TRUE(cryptographer(&wtrans)->DecryptPendingKeys(other_key_params));
-    EXPECT_FALSE(cryptographer(&wtrans)->has_pending_keys());
-    sync_pb::NigoriSpecifics* nigori = specifics.mutable_nigori();
-    cryptographer(&wtrans)->GetKeys(nigori->mutable_encrypted());
-    cryptographer(&wtrans)->UpdateNigoriFromEncryptedTypes(nigori);
-    // Normally this would be written as part of SetPassphrase, but we do it
-    // manually for the test.
-    nigori_entry.Put(SPECIFICS, specifics);
-    nigori_entry.Put(IS_UNSYNCED, true);
-  }
-
-  SyncShareNudge();
-  {
-    // Ensure everything is committed and stable now. The cryptographer
-    // should be able to decrypt both sets of keys, and the encrypted types
-    // should have been unioned.
-    WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
-    MutableEntry nigori_entry(&wtrans, GET_BY_SERVER_TAG,
-                              ModelTypeToRootTag(NIGORI));
-    ASSERT_TRUE(nigori_entry.good());
-    EXPECT_FALSE(nigori_entry.Get(IS_UNAPPLIED_UPDATE));
-    EXPECT_FALSE(nigori_entry.Get(IS_UNSYNCED));
-    EXPECT_TRUE(cryptographer(&wtrans)->CanDecrypt(
-        our_encrypted_specifics.encrypted()));
-    EXPECT_FALSE(cryptographer(&wtrans)->
-        CanDecryptUsingDefaultKey(our_encrypted_specifics.encrypted()));
-    EXPECT_TRUE(cryptographer(&wtrans)->CanDecrypt(
-        other_encrypted_specifics.encrypted()));
-    EXPECT_TRUE(cryptographer(&wtrans)->
-        CanDecryptUsingDefaultKey(other_encrypted_specifics.encrypted()));
-    EXPECT_TRUE(nigori_entry.Get(SPECIFICS).nigori().
-        using_explicit_passphrase());
-  }
-}
 
 TEST_F(SyncerTest, TestGetUnsyncedAndSimpleCommit) {
   {
@@ -3419,14 +3218,15 @@ TEST_F(SyncerTest, DirectoryCommitTest) {
   }
 }
 
-TEST_F(SyncerTest, TestClientCommand) {
+TEST_F(SyncerTest, TestClientCommandDuringUpdate) {
   using sync_pb::ClientCommand;
 
-  ClientCommand* command = mock_server_->GetNextClientCommand();
+  ClientCommand* command = new ClientCommand();
   command->set_set_sync_poll_interval(8);
   command->set_set_sync_long_poll_interval(800);
   command->set_sessions_commit_delay_seconds(3141);
   mock_server_->AddUpdateDirectory(1, 0, "in_root", 1, 1);
+  mock_server_->SetGUClientCommand(command);
   SyncShareNudge();
 
   EXPECT_TRUE(TimeDelta::FromSeconds(8) ==
@@ -3436,11 +3236,46 @@ TEST_F(SyncerTest, TestClientCommand) {
   EXPECT_TRUE(TimeDelta::FromSeconds(3141) ==
               last_sessions_commit_delay_seconds_);
 
-  command = mock_server_->GetNextClientCommand();
+  command = new ClientCommand();
   command->set_set_sync_poll_interval(180);
   command->set_set_sync_long_poll_interval(190);
   command->set_sessions_commit_delay_seconds(2718);
   mock_server_->AddUpdateDirectory(1, 0, "in_root", 1, 1);
+  mock_server_->SetGUClientCommand(command);
+  SyncShareNudge();
+
+  EXPECT_TRUE(TimeDelta::FromSeconds(180) ==
+              last_short_poll_interval_received_);
+  EXPECT_TRUE(TimeDelta::FromSeconds(190) ==
+              last_long_poll_interval_received_);
+  EXPECT_TRUE(TimeDelta::FromSeconds(2718) ==
+              last_sessions_commit_delay_seconds_);
+}
+
+TEST_F(SyncerTest, TestClientCommandDuringCommit) {
+  using sync_pb::ClientCommand;
+
+  ClientCommand* command = new ClientCommand();
+  command->set_set_sync_poll_interval(8);
+  command->set_set_sync_long_poll_interval(800);
+  command->set_sessions_commit_delay_seconds(3141);
+  CreateUnsyncedDirectory("X", "id_X");
+  mock_server_->SetCommitClientCommand(command);
+  SyncShareNudge();
+
+  EXPECT_TRUE(TimeDelta::FromSeconds(8) ==
+              last_short_poll_interval_received_);
+  EXPECT_TRUE(TimeDelta::FromSeconds(800) ==
+              last_long_poll_interval_received_);
+  EXPECT_TRUE(TimeDelta::FromSeconds(3141) ==
+              last_sessions_commit_delay_seconds_);
+
+  command = new ClientCommand();
+  command->set_set_sync_poll_interval(180);
+  command->set_set_sync_long_poll_interval(190);
+  command->set_sessions_commit_delay_seconds(2718);
+  CreateUnsyncedDirectory("Y", "id_Y");
+  mock_server_->SetCommitClientCommand(command);
   SyncShareNudge();
 
   EXPECT_TRUE(TimeDelta::FromSeconds(180) ==
@@ -4172,7 +4007,7 @@ TEST_F(SyncerTest, ConfigureFailsDontApplyUpdates) {
 TEST_F(SyncerTest, GetKeySuccess) {
   {
     syncable::ReadTransaction rtrans(FROM_HERE, directory());
-    EXPECT_FALSE(cryptographer(&rtrans)->HasKeystoreKey());
+    EXPECT_TRUE(directory()->GetNigoriHandler()->NeedKeystoreKey(&rtrans));
   }
 
   SyncShareConfigure();
@@ -4180,14 +4015,14 @@ TEST_F(SyncerTest, GetKeySuccess) {
   EXPECT_EQ(session_->status_controller().last_get_key_result(), SYNCER_OK);
   {
     syncable::ReadTransaction rtrans(FROM_HERE, directory());
-    EXPECT_TRUE(cryptographer(&rtrans)->HasKeystoreKey());
+    EXPECT_FALSE(directory()->GetNigoriHandler()->NeedKeystoreKey(&rtrans));
   }
 }
 
 TEST_F(SyncerTest, GetKeyEmpty) {
   {
     syncable::ReadTransaction rtrans(FROM_HERE, directory());
-    EXPECT_FALSE(cryptographer(&rtrans)->HasKeystoreKey());
+    EXPECT_TRUE(directory()->GetNigoriHandler()->NeedKeystoreKey(&rtrans));
   }
 
   mock_server_->SetKeystoreKey("");
@@ -4196,7 +4031,7 @@ TEST_F(SyncerTest, GetKeyEmpty) {
   EXPECT_NE(session_->status_controller().last_get_key_result(), SYNCER_OK);
   {
     syncable::ReadTransaction rtrans(FROM_HERE, directory());
-    EXPECT_FALSE(cryptographer(&rtrans)->HasKeystoreKey());
+    EXPECT_TRUE(directory()->GetNigoriHandler()->NeedKeystoreKey(&rtrans));
   }
 }
 

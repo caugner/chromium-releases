@@ -67,7 +67,7 @@ class FullscreenExitBubbleControllerTest : public CocoaProfileTest {
 
   void AppendTabToStrip() {
     TabContents* tab_contents = chrome::TabContentsFactory(
-        profile(), site_instance_, MSG_ROUTING_NONE, NULL, NULL);
+        profile(), site_instance_, MSG_ROUTING_NONE, NULL);
     browser()->tab_strip_model()->AppendTabContents(
         tab_contents, /*foreground=*/true);
   }
@@ -76,7 +76,8 @@ class FullscreenExitBubbleControllerTest : public CocoaProfileTest {
   scoped_nsobject<FullscreenExitBubbleController> controller_;
 };
 
-TEST_F(FullscreenExitBubbleControllerTest, DenyExitsFullscreen) {
+// http://crbug.com/103912
+TEST_F(FullscreenExitBubbleControllerTest, DISABLED_DenyExitsFullscreen) {
   NSWindow* window = browser()->window()->GetNativeWindow();
   BrowserWindowController* bwc = [BrowserWindowController
       browserWindowControllerForWindow:window];

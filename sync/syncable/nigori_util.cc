@@ -11,6 +11,7 @@
 #include "base/json/json_writer.h"
 #include "sync/syncable/directory.h"
 #include "sync/syncable/entry.h"
+#include "sync/syncable/nigori_handler.h"
 #include "sync/syncable/mutable_entry.h"
 #include "sync/syncable/syncable_util.h"
 #include "sync/syncable/write_transaction.h"
@@ -20,9 +21,12 @@ namespace syncer {
 namespace syncable {
 
 bool ProcessUnsyncedChangesForEncryption(
-    WriteTransaction* const trans,
-    Cryptographer* cryptographer) {
+    WriteTransaction* const trans) {
+  NigoriHandler* nigori_handler = trans->directory()->GetNigoriHandler();
+  ModelTypeSet encrypted_types = nigori_handler->GetEncryptedTypes(trans);
+  Cryptographer* cryptographer = trans->directory()->GetCryptographer(trans);
   DCHECK(cryptographer->is_ready());
+
   // Get list of all datatypes with unsynced changes. It's possible that our
   // local changes need to be encrypted if encryption for that datatype was
   // just turned on (and vice versa).
@@ -36,14 +40,10 @@ bool ProcessUnsyncedChangesForEncryption(
     const sync_pb::EntitySpecifics& specifics = entry.Get(SPECIFICS);
     // Ignore types that don't need encryption or entries that are already
     // encrypted.
-    if (!SpecificsNeedsEncryption(cryptographer->GetEncryptedTypes(),
-                                  specifics)) {
+    if (!SpecificsNeedsEncryption(encrypted_types, specifics))
       continue;
-    }
-    if (!UpdateEntryWithEncryption(cryptographer, specifics, &entry)) {
-      NOTREACHED();
+    if (!UpdateEntryWithEncryption(trans, specifics, &entry))
       return false;
-    }
   }
   return true;
 }
@@ -70,7 +70,7 @@ bool EntryNeedsEncryption(ModelTypeSet encrypted_types,
   if (!entry.Get(UNIQUE_SERVER_TAG).empty())
     return false;  // We don't encrypt unique server nodes.
   ModelType type = entry.GetModelType();
-  if (type == PASSWORDS || type == NIGORI)
+  if (type == PASSWORDS || IsControlType(type))
     return false;
   // Checking NON_UNIQUE_NAME is not necessary for the correctness of encrypting
   // the data, nor for determining if data is encrypted. We simply ensure it has
@@ -83,7 +83,7 @@ bool EntryNeedsEncryption(ModelTypeSet encrypted_types,
 bool SpecificsNeedsEncryption(ModelTypeSet encrypted_types,
                               const sync_pb::EntitySpecifics& specifics) {
   const ModelType type = GetModelTypeFromSpecifics(specifics);
-  if (type == PASSWORDS || type == NIGORI)
+  if (type == PASSWORDS || IsControlType(type))
     return false;  // These types have their own encryption schemes.
   if (!encrypted_types.Has(type))
     return false;  // This type does not require encryption
@@ -93,10 +93,10 @@ bool SpecificsNeedsEncryption(ModelTypeSet encrypted_types,
 // Mainly for testing.
 bool VerifyDataTypeEncryptionForTest(
     BaseTransaction* const trans,
-    Cryptographer* cryptographer,
     ModelType type,
     bool is_encrypted) {
-  if (type == PASSWORDS || type == NIGORI) {
+  Cryptographer* cryptographer = trans->directory()->GetCryptographer(trans);
+  if (type == PASSWORDS || IsControlType(type)) {
     NOTREACHED();
     return true;
   }
@@ -157,13 +157,15 @@ bool VerifyDataTypeEncryptionForTest(
 }
 
 bool UpdateEntryWithEncryption(
-    Cryptographer* cryptographer,
+    BaseTransaction* const trans,
     const sync_pb::EntitySpecifics& new_specifics,
     syncable::MutableEntry* entry) {
+  NigoriHandler* nigori_handler = trans->directory()->GetNigoriHandler();
+  Cryptographer* cryptographer = trans->directory()->GetCryptographer(trans);
   ModelType type = GetModelTypeFromSpecifics(new_specifics);
   DCHECK_GE(type, FIRST_REAL_MODEL_TYPE);
   const sync_pb::EntitySpecifics& old_specifics = entry->Get(SPECIFICS);
-  const ModelTypeSet encrypted_types = cryptographer->GetEncryptedTypes();
+  const ModelTypeSet encrypted_types = nigori_handler->GetEncryptedTypes(trans);
   // It's possible the nigori lost the set of encrypted types. If the current
   // specifics are already encrypted, we want to ensure we continue encrypting.
   bool was_encrypted = old_specifics.has_encrypted();
@@ -244,6 +246,71 @@ bool UpdateEntryWithEncryption(
            << " and marking for syncing.";
   syncable::MarkForSyncing(entry);
   return true;
+}
+
+void UpdateNigoriFromEncryptedTypes(ModelTypeSet encrypted_types,
+                                    bool encrypt_everything,
+                                    sync_pb::NigoriSpecifics* nigori) {
+  nigori->set_encrypt_everything(encrypt_everything);
+  COMPILE_ASSERT(17, MODEL_TYPE_COUNT);
+  nigori->set_encrypt_bookmarks(
+      encrypted_types.Has(BOOKMARKS));
+  nigori->set_encrypt_preferences(
+      encrypted_types.Has(PREFERENCES));
+  nigori->set_encrypt_autofill_profile(
+      encrypted_types.Has(AUTOFILL_PROFILE));
+  nigori->set_encrypt_autofill(encrypted_types.Has(AUTOFILL));
+  nigori->set_encrypt_themes(encrypted_types.Has(THEMES));
+  nigori->set_encrypt_typed_urls(
+      encrypted_types.Has(TYPED_URLS));
+  nigori->set_encrypt_extension_settings(
+      encrypted_types.Has(EXTENSION_SETTINGS));
+  nigori->set_encrypt_extensions(
+      encrypted_types.Has(EXTENSIONS));
+  nigori->set_encrypt_search_engines(
+      encrypted_types.Has(SEARCH_ENGINES));
+  nigori->set_encrypt_sessions(encrypted_types.Has(SESSIONS));
+  nigori->set_encrypt_app_settings(
+      encrypted_types.Has(APP_SETTINGS));
+  nigori->set_encrypt_apps(encrypted_types.Has(APPS));
+  nigori->set_encrypt_app_notifications(
+      encrypted_types.Has(APP_NOTIFICATIONS));
+}
+
+ModelTypeSet GetEncryptedTypesFromNigori(
+    const sync_pb::NigoriSpecifics& nigori) {
+  if (nigori.encrypt_everything())
+    return ModelTypeSet::All();
+
+  ModelTypeSet encrypted_types;
+  COMPILE_ASSERT(17, MODEL_TYPE_COUNT);
+  if (nigori.encrypt_bookmarks())
+    encrypted_types.Put(BOOKMARKS);
+  if (nigori.encrypt_preferences())
+    encrypted_types.Put(PREFERENCES);
+  if (nigori.encrypt_autofill_profile())
+    encrypted_types.Put(AUTOFILL_PROFILE);
+  if (nigori.encrypt_autofill())
+    encrypted_types.Put(AUTOFILL);
+  if (nigori.encrypt_themes())
+    encrypted_types.Put(THEMES);
+  if (nigori.encrypt_typed_urls())
+    encrypted_types.Put(TYPED_URLS);
+  if (nigori.encrypt_extension_settings())
+    encrypted_types.Put(EXTENSION_SETTINGS);
+  if (nigori.encrypt_extensions())
+    encrypted_types.Put(EXTENSIONS);
+  if (nigori.encrypt_search_engines())
+    encrypted_types.Put(SEARCH_ENGINES);
+  if (nigori.encrypt_sessions())
+    encrypted_types.Put(SESSIONS);
+  if (nigori.encrypt_app_settings())
+    encrypted_types.Put(APP_SETTINGS);
+  if (nigori.encrypt_apps())
+    encrypted_types.Put(APPS);
+  if (nigori.encrypt_app_notifications())
+    encrypted_types.Put(APP_NOTIFICATIONS);
+  return encrypted_types;
 }
 
 }  // namespace syncable

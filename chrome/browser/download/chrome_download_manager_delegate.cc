@@ -14,14 +14,15 @@
 #include "base/stringprintf.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_completion_blocker.h"
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_extensions.h"
 #include "chrome/browser/download/download_file_picker.h"
 #include "chrome/browser/download/download_history.h"
-#include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_path_reservation_tracker.h"
+#include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_status_updater.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/download/save_package_file_picker.h"
@@ -29,7 +30,6 @@
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/intents/web_intents_util.h"
-#include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -56,15 +56,11 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/gdata/gdata_download_observer.h"
-#include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/chromeos/gdata/drive_download_observer.h"
+#include "chrome/browser/chromeos/gdata/drive_file_system_util.h"
 #include "chrome/browser/download/download_file_picker_chromeos.h"
 #include "chrome/browser/download/save_package_file_picker_chromeos.h"
 #endif
-
-#if defined(OS_WIN)
-#include "chrome/browser/download/download_completion_observer_win.h"
-#endif  // OS_WIN
 
 using content::BrowserContext;
 using content::BrowserThread;
@@ -157,18 +153,21 @@ ChromeDownloadManagerDelegate::~ChromeDownloadManagerDelegate() {
 void ChromeDownloadManagerDelegate::SetDownloadManager(DownloadManager* dm) {
   download_manager_ = dm;
   download_history_.reset(new DownloadHistory(profile_));
-  download_history_->Load(
-      base::Bind(&DownloadManager::OnPersistentStoreQueryComplete,
-                 base::Unretained(dm)));
+  if (!profile_->IsOffTheRecord()) {
+    // DownloadManager should not be RefCountedThreadSafe.
+    // ChromeDownloadManagerDelegate outlives DownloadManager, and
+    // DownloadHistory uses a scoped canceller to cancel tasks when it is
+    // deleted. Almost all callbacks to DownloadManager should use weak pointers
+    // or bounce off a container object that uses ManagerGoingDown() to simulate
+    // a weak pointer.
+    download_history_->Load(
+        base::Bind(&DownloadManager::OnPersistentStoreQueryComplete,
+                   download_manager_));
+  }
 #if !defined(OS_ANDROID)
   extension_event_router_.reset(new ExtensionDownloadsEventRouter(
       profile_, download_manager_));
 #endif
-
-#if defined(OS_WIN)
-  DownloadCompletionObserver* download_completion =
-      new DownloadCompletionObserver(dm);
-#endif  // OS_WIN
 }
 
 void ChromeDownloadManagerDelegate::Shutdown() {
@@ -282,12 +281,12 @@ bool ChromeDownloadManagerDelegate::ShouldOpenFileBasedOnExtension(
 void ChromeDownloadManagerDelegate::DisableSafeBrowsing(DownloadItem* item) {
 #if defined(ENABLE_SAFE_BROWSING)
   SafeBrowsingState* state = static_cast<SafeBrowsingState*>(
-      item->GetExternalData(&safe_browsing_id));
+      item->GetUserData(&safe_browsing_id));
   DCHECK(!state);
   if (!state)
     state = new SafeBrowsingState();
   state->SetVerdict(DownloadProtectionService::SAFE);
-  item->SetExternalData(&safe_browsing_id, state);
+  item->SetUserData(&safe_browsing_id, state);
 #endif
 }
 
@@ -296,7 +295,7 @@ bool ChromeDownloadManagerDelegate::IsDownloadReadyForCompletion(
     const base::Closure& internal_complete_callback) {
 #if defined(ENABLE_SAFE_BROWSING)
   SafeBrowsingState* state = static_cast<SafeBrowsingState*>(
-      item->GetExternalData(&safe_browsing_id));
+      item->GetUserData(&safe_browsing_id));
   if (!state) {
     // Begin the safe browsing download protection check.
     DownloadProtectionService* service = GetDownloadProtectionService();
@@ -305,7 +304,7 @@ bool ChromeDownloadManagerDelegate::IsDownloadReadyForCompletion(
               << item->DebugString(false);
       state = new SafeBrowsingState();
       state->set_callback(internal_complete_callback);
-      item->SetExternalData(&safe_browsing_id, state);
+      item->SetUserData(&safe_browsing_id, state);
       service->CheckClientDownload(
           DownloadProtectionService::DownloadInfo::FromDownloadItem(*item),
           base::Bind(
@@ -322,9 +321,9 @@ bool ChromeDownloadManagerDelegate::IsDownloadReadyForCompletion(
 #endif
 
 #if defined(OS_CHROMEOS)
-  // If there's a GData upload associated with this download, we wait until that
+  // If there's a Drive upload associated with this download, we wait until that
   // is complete before allowing the download item to complete.
-  if (!gdata::GDataDownloadObserver::IsReadyToComplete(
+  if (!gdata::DriveDownloadObserver::IsReadyToComplete(
         item, internal_complete_callback))
     return false;
 #endif
@@ -403,28 +402,11 @@ bool ChromeDownloadManagerDelegate::ShouldOpenWithWebIntents(
   if (item->GetTargetDisposition() == DownloadItem::TARGET_DISPOSITION_PROMPT)
     return false;
 
+#if !defined(OS_CHROMEOS)
   std::string mime_type = item->GetMimeType();
-  if (mime_type == "application/rss+xml" ||
-      mime_type == "application/atom+xml") {
-    return true;
-  }
 
-#if defined(OS_CHROMEOS)
-  if (mime_type == "application/msword" ||
-      mime_type == "application/vnd.ms-powerpoint" ||
-      mime_type == "application/vnd.ms-excel" ||
-      mime_type == "application/vnd.openxmlformats-officedocument."
-                   "wordprocessingml.document" ||
-      mime_type == "application/vnd.openxmlformats-officedocument."
-                   "presentationml.presentation" ||
-      mime_type == "application/vnd.openxmlformats-officedocument."
-                   "spreadsheetml.sheet") {
-    return true;
-  }
-#endif  // defined(OS_CHROMEOS)
-
-  // If QuickOffice extension is installed, use web intents to handle the
-  // downloaded file.
+  // If QuickOffice extension is installed, and we're not on ChromeOS,use web
+  // intents to handle the downloaded file.
   const char* kQuickOfficeExtensionId = "gbkeegbaiigmenfmjfclcdgdpimamgkj";
   ExtensionServiceInterface* extension_service =
       profile_->GetExtensionService();
@@ -443,6 +425,7 @@ bool ChromeDownloadManagerDelegate::ShouldOpenWithWebIntents(
       return true;
     }
   }
+#endif  // !defined(OS_CHROMEOS)
 
   return false;
 }
@@ -493,9 +476,14 @@ bool ChromeDownloadManagerDelegate::GenerateFileHash() {
 
 void ChromeDownloadManagerDelegate::AddItemToPersistentStore(
     DownloadItem* item) {
+  if (profile_->IsOffTheRecord()) {
+    OnItemAddedToPersistentStore(
+        item->GetId(), download_history_->GetNextFakeDbHandle());
+    return;
+  }
   download_history_->AddEntry(item,
       base::Bind(&ChromeDownloadManagerDelegate::OnItemAddedToPersistentStore,
-                 base::Unretained(this)));
+                 this));
 }
 
 void ChromeDownloadManagerDelegate::UpdateItemInPersistentStore(
@@ -517,15 +505,16 @@ void ChromeDownloadManagerDelegate::RemoveItemFromPersistentStore(
 void ChromeDownloadManagerDelegate::RemoveItemsFromPersistentStoreBetween(
     base::Time remove_begin,
     base::Time remove_end) {
+  if (profile_->IsOffTheRecord())
+    return;
   download_history_->RemoveEntriesBetween(remove_begin, remove_end);
 }
 
-void ChromeDownloadManagerDelegate::GetSaveDir(WebContents* web_contents,
+void ChromeDownloadManagerDelegate::GetSaveDir(BrowserContext* browser_context,
                                                FilePath* website_save_dir,
                                                FilePath* download_save_dir,
                                                bool* skip_dir_check) {
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  Profile* profile = Profile::FromBrowserContext(browser_context);
   PrefService* prefs = profile->GetPrefs();
 
   // Check whether the preference has the preferred directory for saving file.
@@ -547,7 +536,7 @@ void ChromeDownloadManagerDelegate::GetSaveDir(WebContents* web_contents,
 
   *skip_dir_check = false;
 #if defined(OS_CHROMEOS)
-  *skip_dir_check = gdata::util::IsUnderGDataMountPoint(*website_save_dir);
+  *skip_dir_check = gdata::util::IsUnderDriveMountPoint(*website_save_dir);
 #endif
 }
 
@@ -647,7 +636,7 @@ void ChromeDownloadManagerDelegate::CheckDownloadUrlDone(
   download_history_->CheckVisitedReferrerBefore(
       download_id, download->GetReferrerUrl(),
       base::Bind(&ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone,
-                 base::Unretained(this), download_id, callback, danger_type));
+                 this, download_id, callback, danger_type));
 }
 
 void ChromeDownloadManagerDelegate::CheckClientDownloadDone(
@@ -678,7 +667,7 @@ void ChromeDownloadManagerDelegate::CheckClientDownloadDone(
   }
 
   SafeBrowsingState* state = static_cast<SafeBrowsingState*>(
-      item->GetExternalData(&safe_browsing_id));
+      item->GetUserData(&safe_browsing_id));
   state->SetVerdict(result);
 }
 
@@ -698,7 +687,7 @@ void ChromeDownloadManagerDelegate::Observe(
   int download_id = crx_installers_[installer];
   crx_installers_.erase(installer.get());
 
-  DownloadItem* item = download_manager_->GetActiveDownloadItem(download_id);
+  DownloadItem* item = download_manager_->GetDownload(download_id);
   if (item)
     item->DelayedDownloadOpened(installer->did_handle_successfully());
 }
@@ -795,10 +784,10 @@ void ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone(
   }
 
 #if defined (OS_CHROMEOS)
-  gdata::GDataDownloadObserver::SubstituteGDataDownloadPath(
+  gdata::DriveDownloadObserver::SubstituteDriveDownloadPath(
       profile_, suggested_path, download,
       base::Bind(
-          &ChromeDownloadManagerDelegate::SubstituteGDataDownloadPathCallback,
+          &ChromeDownloadManagerDelegate::SubstituteDriveDownloadPathCallback,
           this, download->GetId(), callback, should_prompt, is_forced_path,
           danger_type));
 #else
@@ -813,7 +802,7 @@ void ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone(
 
 #if defined (OS_CHROMEOS)
 // TODO(asanka): Merge this logic with the logic in DownloadFilePickerChromeOS.
-void ChromeDownloadManagerDelegate::SubstituteGDataDownloadPathCallback(
+void ChromeDownloadManagerDelegate::SubstituteDriveDownloadPathCallback(
     int32 download_id,
     const content::DownloadTargetCallback& callback,
     bool should_prompt,
@@ -883,7 +872,7 @@ void ChromeDownloadManagerDelegate::OnTargetPathDetermined(
     // Retain the last directory. Exclude temporary downloads since the path
     // likely points at the location of a temporary file.
     // TODO(asanka): This logic is a hack. DownloadFilePicker should give us a
-    //               directory to persist. Or perhaps, if the GData path
+    //               directory to persist. Or perhaps, if the Drive path
     //               substitution logic is moved here, then we would have a
     //               persistable path after the DownloadFilePicker is done.
     if (disposition == DownloadItem::TARGET_DISPOSITION_PROMPT &&

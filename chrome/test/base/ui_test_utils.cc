@@ -8,13 +8,12 @@
 #include <windows.h>
 #endif
 
-#include <vector>
-
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -23,10 +22,12 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/autocomplete/autocomplete_controller.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_test_util.h"
@@ -41,11 +42,15 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
+#include "chrome/browser/ui/omnibox/location_bar.h"
+#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_action.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/bookmark_load_observer.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/dom_operation_notification_details.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
@@ -60,12 +65,11 @@
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/geoposition.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/download_test_observer.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "net/test/python_utils.h"
-#include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/size.h"
@@ -76,6 +80,7 @@
 #include "ui/aura/root_window.h"
 #endif
 
+using content::BrowserThread;
 using content::DomOperationNotificationDetails;
 using content::NativeWebKeyboardEvent;
 using content::NavigationController;
@@ -105,8 +110,8 @@ class FindInPageNotificationObserver : public content::NotificationObserver {
   }
 
   int active_match_ordinal() const { return active_match_ordinal_; }
-
   int number_of_matches() const { return number_of_matches_; }
+  gfx::Rect selection_rect() const { return selection_rect_; }
 
   virtual void Observe(int type, const content::NotificationSource& source,
                        const content::NotificationDetails& details) {
@@ -115,8 +120,10 @@ class FindInPageNotificationObserver : public content::NotificationObserver {
       if (find_details->request_id() == current_find_request_id_) {
         // We get multiple responses and one of those will contain the ordinal.
         // This message comes to us before the final update is sent.
-        if (find_details->active_match_ordinal() > -1)
+        if (find_details->active_match_ordinal() > -1) {
           active_match_ordinal_ = find_details->active_match_ordinal();
+          selection_rect_ = find_details->selection_rect();
+        }
         if (find_details->final_update()) {
           number_of_matches_ = find_details->number_of_matches();
           message_loop_runner_->Quit();
@@ -136,6 +143,7 @@ class FindInPageNotificationObserver : public content::NotificationObserver {
   // we need to preserve it so we can send it later.
   int active_match_ordinal_;
   int number_of_matches_;
+  gfx::Rect selection_rect_;
   // The id of the current find request, obtained from WebContents. Allows us
   // to monitor when the search completes.
   int current_find_request_id_;
@@ -259,7 +267,8 @@ static void NavigateToURLWithDispositionBlockUntilNavigationsComplete(
     EXPECT_TRUE(web_contents != NULL)
         << " Unable to wait for navigation to \"" << url.spec()
         << "\" because the new tab is not available yet";
-    return;
+    if (!web_contents)
+      return;
   } else if ((disposition == CURRENT_TAB) ||
       (disposition == NEW_FOREGROUND_TAB) ||
       (disposition == SINGLETON_TAB)) {
@@ -315,6 +324,48 @@ GURL GetTestUrl(const FilePath& dir, const FilePath& file) {
   return net::FilePathToFileURL(GetTestFilePath(dir, file));
 }
 
+bool GetRelativeBuildDirectory(FilePath* build_dir) {
+  // This function is used to find the build directory so TestServer can serve
+  // built files (nexes, etc).  TestServer expects a path relative to the source
+  // root.
+  FilePath exe_dir = CommandLine::ForCurrentProcess()->GetProgram().DirName();
+  FilePath src_dir;
+  if (!PathService::Get(base::DIR_SOURCE_ROOT, &src_dir))
+    return false;
+
+  // We must first generate absolute paths to SRC and EXE and from there
+  // generate a relative path.
+  if (!exe_dir.IsAbsolute())
+    file_util::AbsolutePath(&exe_dir);
+  if (!src_dir.IsAbsolute())
+    file_util::AbsolutePath(&src_dir);
+  if (!exe_dir.IsAbsolute())
+    return false;
+  if (!src_dir.IsAbsolute())
+    return false;
+
+  size_t match, exe_size, src_size;
+  std::vector<FilePath::StringType> src_parts, exe_parts;
+
+  // Determine point at which src and exe diverge.
+  exe_dir.GetComponents(&exe_parts);
+  src_dir.GetComponents(&src_parts);
+  exe_size = exe_parts.size();
+  src_size = src_parts.size();
+  for (match = 0; match < exe_size && match < src_size; ++match) {
+    if (exe_parts[match] != src_parts[match])
+      break;
+  }
+
+  // Create a relative path.
+  *build_dir = FilePath();
+  for (size_t tmp_itr = match; tmp_itr < src_size; ++tmp_itr)
+    *build_dir = build_dir->Append(FILE_PATH_LITERAL(".."));
+  for (; match < exe_size; ++match)
+    *build_dir = build_dir->Append(exe_parts[match]);
+  return true;
+}
+
 AppModalDialog* WaitForAppModalDialog() {
   content::WindowedNotificationObserver observer(
       chrome::NOTIFICATION_APP_MODAL_DIALOG_SHOWN,
@@ -324,18 +375,21 @@ AppModalDialog* WaitForAppModalDialog() {
 }
 
 int FindInPage(TabContents* tab_contents, const string16& search_string,
-               bool forward, bool match_case, int* ordinal) {
+               bool forward, bool match_case, int* ordinal,
+               gfx::Rect* selection_rect) {
   tab_contents->
       find_tab_helper()->StartFinding(search_string, forward, match_case);
   FindInPageNotificationObserver observer(tab_contents);
   if (ordinal)
     *ordinal = observer.active_match_ordinal();
+  if (selection_rect)
+    *selection_rect = observer.selection_rect();
   return observer.number_of_matches();
 }
 
 void CloseAllInfoBars(TabContents* tab) {
   InfoBarTabHelper* infobar_helper = tab->infobar_tab_helper();
-  while (infobar_helper->infobar_count() > 0)
+  while (infobar_helper->GetInfoBarCount() > 0)
     infobar_helper->RemoveInfoBar(infobar_helper->GetInfoBarDelegateAt(0));
 }
 
@@ -372,6 +426,37 @@ void WaitForHistoryToLoad(HistoryService* history_service) {
       content::NotificationService::AllSources());
   if (!history_service->BackendLoaded())
     history_loaded_observer.Wait();
+}
+
+void DownloadURL(Browser* browser, const GURL& download_url) {
+  ScopedTempDir downloads_directory;
+  ASSERT_TRUE(downloads_directory.CreateUniqueTempDir());
+  browser->profile()->GetPrefs()->SetFilePath(
+      prefs::kDownloadDefaultDirectory, downloads_directory.path());
+
+  content::DownloadManager* download_manager =
+      content::BrowserContext::GetDownloadManager(browser->profile());
+  scoped_ptr<content::DownloadTestObserver> observer(
+      new content::DownloadTestObserverTerminal(
+          download_manager, 1,
+          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_ACCEPT));
+
+  ui_test_utils::NavigateToURL(browser, download_url);
+  observer->WaitForFinished();
+}
+
+void SendToOmniboxAndSubmit(LocationBar* location_bar,
+                            const std::string& input) {
+  OmniboxView* omnibox = location_bar->GetLocationEntry();
+  omnibox->model()->OnSetFocus(false);
+  omnibox->SetUserText(ASCIIToUTF16(input));
+  location_bar->AcceptInput();
+  while (!omnibox->model()->autocomplete_controller()->done()) {
+    content::WindowedNotificationObserver observer(
+        chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY,
+        content::NotificationService::AllSources());
+    observer.Wait();
+  }
 }
 
 bool GetNativeWindow(const Browser* browser, gfx::NativeWindow* native_window) {
@@ -666,4 +751,31 @@ void ClickTask(ui_controls::MouseButton button,
 }
 
 }  // namespace internal
+
+HistoryEnumerator::HistoryEnumerator(Profile* profile) {
+  scoped_refptr<content::MessageLoopRunner> message_loop_runner =
+      new content::MessageLoopRunner;
+
+  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+      profile, Profile::EXPLICIT_ACCESS);
+  hs->QueryHistory(
+      string16(),
+      history::QueryOptions(),
+      &consumer_,
+      base::Bind(&HistoryEnumerator::HistoryQueryComplete,
+                 base::Unretained(this), message_loop_runner->QuitClosure()));
+  message_loop_runner->Run();
+}
+
+HistoryEnumerator::~HistoryEnumerator() {}
+
+void HistoryEnumerator::HistoryQueryComplete(
+    const base::Closure& quit_task,
+    HistoryService::Handle request_handle,
+    history::QueryResults* results) {
+  for (size_t i = 0; i < results->size(); ++i)
+    urls_.push_back((*results)[i].url());
+  quit_task.Run();
+}
+
 }  // namespace ui_test_utils

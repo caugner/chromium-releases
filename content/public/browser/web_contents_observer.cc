@@ -4,9 +4,9 @@
 
 #include "content/public/browser/web_contents_observer.h"
 
-#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/navigation_details.h"
+#include "content/public/browser/render_view_host.h"
 
 namespace content {
 
@@ -37,25 +37,32 @@ void WebContentsObserver::Observe(WebContents* web_contents) {
   }
 }
 
+bool WebContentsObserver::RequestPpapiBrokerPermission(
+    WebContents* web_contents,
+    const GURL& url,
+    const FilePath& plugin_path,
+    const base::Callback<void(bool)>& callback) {
+  return false;
+}
+
 bool WebContentsObserver::OnMessageReceived(const IPC::Message& message) {
   return false;
 }
 
 bool WebContentsObserver::Send(IPC::Message* message) {
-  if (!web_contents_ || !web_contents_->GetRenderViewHost()) {
+  if (!web_contents_) {
     delete message;
     return false;
   }
 
-  return static_cast<RenderViewHostImpl*>(
-      web_contents_->GetRenderViewHost())->Send(message);
+  return web_contents_->Send(message);
 }
 
 int WebContentsObserver::routing_id() const {
-  if (!web_contents_ || !web_contents_->GetRenderViewHost())
+  if (!web_contents_)
     return MSG_ROUTING_NONE;
 
-  return web_contents_->GetRenderViewHost()->GetRoutingID();
+  return web_contents_->GetRoutingID();
 }
 
 void WebContentsObserver::WebContentsImplDestroyed() {

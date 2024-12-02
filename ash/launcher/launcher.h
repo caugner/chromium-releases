@@ -38,7 +38,7 @@ class LauncherIconObserver;
 class LauncherDelegate;
 class LauncherModel;
 
-class ASH_EXPORT Launcher : public internal::BackgroundAnimatorDelegate {
+class ASH_EXPORT Launcher  {
  public:
   Launcher(aura::Window* window_container,
            internal::ShelfLayoutManager* shelf_layout_manager);
@@ -56,6 +56,13 @@ class ASH_EXPORT Launcher : public internal::BackgroundAnimatorDelegate {
   void SetPaintsBackground(
       bool value,
       internal::BackgroundAnimator::ChangeType change_type);
+  bool paints_background() const {
+    return background_animator_.paints_background();
+  }
+
+  // Causes shelf items to be slightly dimmed.
+  void SetDimsShelf(bool value);
+  bool GetDimsShelf() const;
 
   // Sets the size of the status area.
   void SetStatusSize(const gfx::Size& size);
@@ -84,6 +91,9 @@ class ASH_EXPORT Launcher : public internal::BackgroundAnimatorDelegate {
 
   views::View* GetAppListButtonView() const;
 
+  // Sets the bounds of the launcher widget, and the dimmer if visible.
+  void SetWidgetBounds(const gfx::Rect bounds);
+
   // Only to be called for testing. Retrieves the LauncherView.
   // TODO(sky): remove this!
   internal::LauncherView* GetLauncherViewForTest();
@@ -93,10 +103,9 @@ class ASH_EXPORT Launcher : public internal::BackgroundAnimatorDelegate {
   LauncherModel* model() { return model_.get(); }
   views::Widget* widget() { return widget_.get(); }
 
-  aura::Window* window_container() { return window_container_; }
+  views::Widget* GetDimmerWidgetForTest() { return dimmer_.get(); }
 
-  // BackgroundAnimatorDelegate overrides:
-  virtual void UpdateBackground(int alpha) OVERRIDE;
+  aura::Window* window_container() { return window_container_; }
 
  private:
   class DelegateView;
@@ -105,6 +114,7 @@ class ASH_EXPORT Launcher : public internal::BackgroundAnimatorDelegate {
 
   // Widget hosting the view.
   scoped_ptr<views::Widget> widget_;
+  scoped_ptr<views::Widget> dimmer_;
 
   aura::Window* window_container_;
 

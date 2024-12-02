@@ -7,6 +7,7 @@
 #include <set>
 #include <vector>
 
+#include "base/command_line.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_manager_extension_api.h"
@@ -97,44 +98,58 @@ class ExtensionWebUIImageLoadingTracker : public ImageLoadingTracker::Observer {
   void Init() {
     if (extension_) {
       ExtensionResource icon_resource =
-          extension_->GetIconResource(ExtensionIconSet::EXTENSION_ICON_BITTY,
+          extension_->GetIconResource(extension_misc::EXTENSION_ICON_BITTY,
                                       ExtensionIconSet::MATCH_EXACTLY);
 
       tracker_.LoadImage(extension_, icon_resource,
                          gfx::Size(gfx::kFaviconSize, gfx::kFaviconSize),
                          ImageLoadingTracker::DONT_CACHE);
     } else {
-      ForwardResult(NULL);
+      ForwardResult(gfx::Image());
     }
   }
 
   virtual void OnImageLoaded(const gfx::Image& image,
                              const std::string& extension_id,
                              int index) OVERRIDE {
-    if (!image.IsEmpty()) {
-      std::vector<unsigned char> image_data;
-      if (!gfx::PNGCodec::EncodeBGRASkBitmap(*image.ToSkBitmap(), false,
-                                             &image_data)) {
-        NOTREACHED() << "Could not encode extension favicon";
-      }
-      ForwardResult(base::RefCountedBytes::TakeVector(&image_data));
-    } else {
-      ForwardResult(NULL);
-    }
+    ForwardResult(image);
   }
 
  private:
   ~ExtensionWebUIImageLoadingTracker() {}
 
-  // Forwards the result on the request. If no favicon was available then
-  // |icon_data| may be backed by NULL. Once the result has been forwarded the
-  // instance is deleted.
-  void ForwardResult(scoped_refptr<base::RefCountedMemory> icon_data) {
-    history::FaviconData favicon;
-    favicon.known_icon = icon_data.get() != NULL && icon_data->size() > 0;
-    favicon.image_data = icon_data;
-    favicon.icon_type = history::FAVICON;
-    request_->ForwardResultAsync(request_->handle(), favicon);
+  // Forwards the result of the request. If no favicon was available then
+  // |icon| will be empty. Once the result has been forwarded the instance is
+  // deleted.
+  void ForwardResult(const gfx::Image& icon) {
+    std::vector<history::FaviconBitmapResult> favicon_bitmap_results;
+    history::IconURLSizesMap icon_url_sizes;
+    SkBitmap icon_bitmap = icon.AsBitmap();
+    if (!icon_bitmap.empty()) {
+      scoped_refptr<base::RefCountedBytes> icon_data(
+          new base::RefCountedBytes());
+      if (gfx::PNGCodec::EncodeBGRASkBitmap(icon_bitmap, false,
+                                            &icon_data->data())) {
+        history::FaviconBitmapResult bitmap_result;
+        bitmap_result.bitmap_data = icon_data;
+        bitmap_result.pixel_size = gfx::Size(icon_bitmap.width(),
+                                             icon_bitmap.height());
+        // Leave |bitmap_result|'s icon URL as the default of GURL().
+        bitmap_result.icon_type = history::FAVICON;
+
+        favicon_bitmap_results.push_back(bitmap_result);
+
+        // Build IconURLSizesMap such that the requirement that all the icon
+        // URLs in |favicon_bitmap_results| be present in |icon_url_sizes|
+        // holds. Set the favicon sizes to the pixel size of |icon_bitmap|.
+        icon_url_sizes[GURL()].push_back(bitmap_result.pixel_size);
+      } else {
+        NOTREACHED() << "Could not encode extension favicon";
+      }
+    }
+
+    request_->ForwardResultAsync(request_->handle(), favicon_bitmap_results,
+                                 icon_url_sizes);
     delete this;
   }
 

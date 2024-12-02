@@ -70,14 +70,6 @@
               'shlwapi.lib',
               'setupapi.lib',
             ],
-            'conditions': [
-              ['MSVS_VERSION=="2005e"', {
-                'AdditionalDependencies': [ # Must explicitly link in VC2005E
-                  'advapi32.lib',
-                  'shell32.lib',
-                ],
-              }],
-            ],
           },
           'VCManifestTool': {
             'AdditionalManifestFiles': [
@@ -223,6 +215,9 @@
                   'variables': {
                     'component_build_flag': '',
                   },
+                  'outputs': [
+                    '<(PRODUCT_DIR)/<(RULE_INPUT_NAME).packed.7z',
+                  ],
                 }],
                 ['disable_nacl==1', {
                   'inputs!': [
@@ -246,9 +241,10 @@
                 '<(PRODUCT_DIR)/icudt.dll',
               ],
               'outputs': [
+                # Also note that chrome.packed.7z is defined as an output in a
+                # conditional above.
                 'xxx2.out',
                 '<(PRODUCT_DIR)/<(RULE_INPUT_NAME).7z',
-                '<(PRODUCT_DIR)/<(RULE_INPUT_NAME).packed.7z',
                 '<(PRODUCT_DIR)/setup.ex_',
                 '<(INTERMEDIATE_DIR)/packed_files.rc',
               ],
@@ -275,13 +271,6 @@
           ],
         },
       ],
-    }],
-    [ 'mini_installer_internal_deps == 1 or mini_installer_official_deps == 1', {
-      'target_defaults': {
-        'dependencies': [
-          'mini_installer/support/mini_installer_support.gyp:*',
-        ],
-      },
     }],
     [ 'branding == "Chrome"', {
       'variables': {

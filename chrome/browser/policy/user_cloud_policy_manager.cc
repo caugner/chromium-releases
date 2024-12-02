@@ -4,91 +4,48 @@
 
 #include "chrome/browser/policy/user_cloud_policy_manager.h"
 
-#include <string>
-
-#include "base/command_line.h"
-#include "base/file_path.h"
-#include "base/message_loop.h"
-#include "base/path_service.h"
-#include "chrome/browser/policy/cloud_policy_refresh_scheduler.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "chrome/browser/policy/cloud_policy_service.h"
-#include "chrome/browser/policy/policy_constants.h"
-#include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/browser/policy/policy_types.h"
 #include "chrome/common/pref_names.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/policy/user_cloud_policy_store_chromeos.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/session_manager_client.h"
-#endif
-
 namespace policy {
-
-namespace {
-
-#if defined(OS_CHROMEOS)
-// Paths for the legacy policy caches in the profile directory.
-// TODO(mnissler): Remove once the number of pre-M20 clients becomes negligible.
-
-// Subdirectory in the user's profile for storing user policies.
-const FilePath::CharType kPolicyDir[] = FILE_PATH_LITERAL("Device Management");
-// File in the above directory for stroing user policy dmtokens.
-const FilePath::CharType kTokenCacheFile[] = FILE_PATH_LITERAL("Token");
-// File in the above directory for storing user policy data.
-const FilePath::CharType kPolicyCacheFile[] = FILE_PATH_LITERAL("Policy");
-#endif
-
-}  // namespace
 
 UserCloudPolicyManager::UserCloudPolicyManager(
     scoped_ptr<CloudPolicyStore> store,
     bool wait_for_policy_fetch)
-    : wait_for_policy_fetch_(wait_for_policy_fetch),
-      wait_for_policy_refresh_(false),
-      store_(store.Pass()) {
-  store_->Load();
-  store_->AddObserver(this);
-}
+    : CloudPolicyManager(store.Pass()),
+      wait_for_policy_fetch_(wait_for_policy_fetch) {}
 
 UserCloudPolicyManager::~UserCloudPolicyManager() {
-  Shutdown();
-  store_->RemoveObserver(this);
+  if (cloud_policy_client())
+    cloud_policy_client()->RemoveObserver(this);
 }
 
-#if defined(OS_CHROMEOS)
 // static
 scoped_ptr<UserCloudPolicyManager> UserCloudPolicyManager::Create(
+    Profile* profile,
     bool wait_for_policy_fetch) {
-  FilePath profile_dir;
-  CHECK(PathService::Get(chrome::DIR_USER_DATA, &profile_dir));
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  const FilePath policy_dir =
-      profile_dir
-          .Append(command_line->GetSwitchValuePath(switches::kLoginProfile))
-          .Append(kPolicyDir);
-  const FilePath policy_cache_file = policy_dir.Append(kPolicyCacheFile);
-  const FilePath token_cache_file = policy_dir.Append(kTokenCacheFile);
-
-  scoped_ptr<CloudPolicyStore> store(
-      new UserCloudPolicyStoreChromeOS(
-          chromeos::DBusThreadManager::Get()->GetSessionManagerClient(),
-          token_cache_file, policy_cache_file));
+  scoped_ptr<CloudPolicyStore> store =
+      CloudPolicyStore::CreateUserPolicyStore(profile);
   return scoped_ptr<UserCloudPolicyManager>(
       new UserCloudPolicyManager(store.Pass(), wait_for_policy_fetch));
 }
-#endif
 
-void UserCloudPolicyManager::Initialize(PrefService* prefs,
-                                        DeviceManagementService* service,
-                                        UserAffiliation user_affiliation) {
-  DCHECK(!service_.get());
-  prefs_ = prefs;
+void UserCloudPolicyManager::Initialize(
+    PrefService* local_state,
+    DeviceManagementService* device_management_service,
+    UserAffiliation user_affiliation) {
+  DCHECK(device_management_service);
+  DCHECK(local_state);
+  local_state_ = local_state;
   scoped_ptr<CloudPolicyClient> client(
       new CloudPolicyClient(std::string(), std::string(), user_affiliation,
-                            POLICY_SCOPE_USER, NULL, service));
-  service_.reset(new CloudPolicyService(client.Pass(), store_.get()));
-  service_->client()->AddObserver(this);
+                            POLICY_SCOPE_USER, NULL,
+                            device_management_service));
+  InitializeService(client.Pass());
+  cloud_policy_client()->AddObserver(this);
 
   if (wait_for_policy_fetch_) {
     // If we are supposed to wait for a policy fetch, we trigger an explicit
@@ -96,8 +53,8 @@ void UserCloudPolicyManager::Initialize(PrefService* prefs,
     // done. The refresh scheduler only gets started once that refresh
     // completes. Note that we might have to wait for registration to happen,
     // see OnRegistrationStateChanged() below.
-    if (service_->client()->is_registered()) {
-      service_->RefreshPolicy(
+    if (cloud_policy_client()->is_registered()) {
+      cloud_policy_service()->RefreshPolicy(
           base::Bind(&UserCloudPolicyManager::OnInitialPolicyFetchComplete,
                      base::Unretained(this)));
     }
@@ -106,12 +63,12 @@ void UserCloudPolicyManager::Initialize(PrefService* prefs,
   }
 }
 
-void UserCloudPolicyManager::Shutdown() {
-  refresh_scheduler_.reset();
-  if (service_.get())
-    service_->client()->RemoveObserver(this);
-  service_.reset();
-  prefs_ = NULL;
+void UserCloudPolicyManager::ShutdownAndRemovePolicy() {
+  if (cloud_policy_client())
+    cloud_policy_client()->RemoveObserver(this);
+  ShutdownService();
+  local_state_ = NULL;
+  cloud_policy_store()->Clear();
 }
 
 void UserCloudPolicyManager::CancelWaitForPolicyFetch() {
@@ -120,28 +77,25 @@ void UserCloudPolicyManager::CancelWaitForPolicyFetch() {
 
   // Now that |wait_for_policy_fetch_| is guaranteed to be false, the scheduler
   // can be started.
-  if (service_.get() && !refresh_scheduler_.get() && prefs_) {
-    refresh_scheduler_.reset(
-        new CloudPolicyRefreshScheduler(
-            service_->client(), store_.get(), prefs_,
-            prefs::kUserPolicyRefreshRate,
-            MessageLoop::current()->message_loop_proxy()));
+  if (cloud_policy_service() && local_state_)
+    StartRefreshScheduler(local_state_, prefs::kUserPolicyRefreshRate);
+}
+
+bool UserCloudPolicyManager::IsClientRegistered() const {
+  return cloud_policy_client() && cloud_policy_client()->is_registered();
+}
+
+void UserCloudPolicyManager::RegisterClient(const std::string& access_token) {
+  DCHECK(cloud_policy_client()) << "Callers must invoke Initialize() first";
+  if (!cloud_policy_client()->is_registered()) {
+    DVLOG(1) << "Registering client with access token: " << access_token;
+    cloud_policy_client()->Register(access_token);
   }
 }
 
 bool UserCloudPolicyManager::IsInitializationComplete() const {
-  return store_->is_initialized() && !wait_for_policy_fetch_;
-}
-
-void UserCloudPolicyManager::RefreshPolicies() {
-  if (service_.get()) {
-    wait_for_policy_refresh_ = true;
-    service_->RefreshPolicy(
-        base::Bind(&UserCloudPolicyManager::OnRefreshComplete,
-                   base::Unretained(this)));
-  } else {
-    OnRefreshComplete();
-  }
+  return CloudPolicyManager::IsInitializationComplete() &&
+      !wait_for_policy_fetch_;
 }
 
 void UserCloudPolicyManager::OnPolicyFetched(CloudPolicyClient* client) {
@@ -151,10 +105,11 @@ void UserCloudPolicyManager::OnPolicyFetched(CloudPolicyClient* client) {
 
 void UserCloudPolicyManager::OnRegistrationStateChanged(
     CloudPolicyClient* client) {
+  DCHECK_EQ(cloud_policy_client(), client);
   if (wait_for_policy_fetch_) {
     // If we're blocked on the policy fetch, now is a good time to issue it.
-    if (service_->client()->is_registered()) {
-      service_->RefreshPolicy(
+    if (cloud_policy_client()->is_registered()) {
+      cloud_policy_service()->RefreshPolicy(
           base::Bind(&UserCloudPolicyManager::OnInitialPolicyFetchComplete,
                      base::Unretained(this)));
     } else {
@@ -166,33 +121,12 @@ void UserCloudPolicyManager::OnRegistrationStateChanged(
 }
 
 void UserCloudPolicyManager::OnClientError(CloudPolicyClient* client) {
+  DCHECK_EQ(cloud_policy_client(), client);
   CancelWaitForPolicyFetch();
-}
-
-void UserCloudPolicyManager::CheckAndPublishPolicy() {
-  if (IsInitializationComplete() && !wait_for_policy_refresh_) {
-    scoped_ptr<PolicyBundle> bundle(new PolicyBundle());
-    bundle->Get(POLICY_DOMAIN_CHROME, std::string()).CopyFrom(
-        store_->policy_map());
-    UpdatePolicy(bundle.Pass());
-  }
-}
-
-void UserCloudPolicyManager::OnStoreLoaded(CloudPolicyStore* store) {
-  CheckAndPublishPolicy();
-}
-
-void UserCloudPolicyManager::OnStoreError(CloudPolicyStore* store) {
-  // No action required, the old policy is still valid.
 }
 
 void UserCloudPolicyManager::OnInitialPolicyFetchComplete() {
   CancelWaitForPolicyFetch();
-}
-
-void UserCloudPolicyManager::OnRefreshComplete() {
-  wait_for_policy_refresh_ = false;
-  CheckAndPublishPolicy();
 }
 
 }  // namespace policy

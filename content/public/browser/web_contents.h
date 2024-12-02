@@ -9,16 +9,18 @@
 #include "base/callback_forward.h"
 #include "base/process_util.h"
 #include "base/string16.h"
+#include "base/supports_user_data.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/save_page_type.h"
 #include "content/public/browser/web_ui.h"
+#include "ipc/ipc_sender.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/native_widget_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
 namespace base {
-class PropertyBag;
 class TimeTicks;
 }
 
@@ -35,33 +37,44 @@ namespace content {
 
 class BrowserContext;
 class InterstitialPage;
-class NavigationController;
 class RenderProcessHost;
 class RenderViewHost;
 class RenderWidgetHostView;
-class SessionStorageNamespace;
 class SiteInstance;
 class WebContentsDelegate;
 class WebContentsView;
 struct RendererPreferences;
 
 // Describes what goes in the main content area of a tab.
-class WebContents : public PageNavigator {
+class WebContents : public PageNavigator,
+                    public IPC::Sender,
+                    public base::SupportsUserData {
  public:
   // |base_web_contents| is used if we want to size the new WebContents's view
   // based on the view of an existing WebContents.  This can be NULL if not
   // needed.
-  //
-  // The session storage namespace parameter allows multiple render views and
-  // web contentses to share the same session storage (part of the WebStorage
-  // spec) space. This is useful when restoring tabs, but most callers should
-  // pass in NULL which will cause a new SessionStorageNamespace to be created.
   CONTENT_EXPORT static WebContents* Create(
       BrowserContext* browser_context,
       SiteInstance* site_instance,
       int routing_id,
+      const WebContents* base_web_contents);
+
+  // Similar to Create() above but should be used when you need to prepopulate
+  // the SessionStorageNamespaceMap of the WebContents. This can happen if
+  // you duplicate a WebContents, try to reconstitute it from a saved state,
+  // or when you create a new WebContents based on another one (eg., when
+  // servicing a window.open() call).
+  //
+  // You do not want to call this. If you think you do, make sure you completely
+  // understand when SessionStorageNamespace objects should be cloned, why
+  // they should not be shared by multiple WebContents, and what bad things
+  // can happen if you share the object.
+  CONTENT_EXPORT static WebContents* CreateWithSessionStorage(
+      BrowserContext* browser_context,
+      SiteInstance* site_instance,
+      int routing_id,
       const WebContents* base_web_contents,
-      SessionStorageNamespace* session_storage_namespace);
+      const SessionStorageNamespaceMap& session_storage_namespace_map);
 
   // Returns a WebContents that wraps the RenderViewHost, or NULL if the
   // render view host's delegate isn't a WebContents.
@@ -71,12 +84,6 @@ class WebContents : public PageNavigator {
   virtual ~WebContents() {}
 
   // Intrinsic tab state -------------------------------------------------------
-
-  // Returns the property bag for this WebContents, where callers can add
-  // extra data they may wish to associate with the tab. Returns a pointer
-  // rather than a reference since the PropertyAccessors expect this.
-  virtual const base::PropertyBag* GetPropertyBag() const = 0;
-  virtual base::PropertyBag* GetPropertyBag() = 0;
 
   // Gets/Sets the delegate.
   virtual WebContentsDelegate* GetDelegate() = 0;
@@ -99,6 +106,10 @@ class WebContents : public PageNavigator {
 
   // Gets the current RenderViewHost for this tab.
   virtual RenderViewHost* GetRenderViewHost() const = 0;
+
+  // Gets the current RenderViewHost's routing id. Returns
+  // MSG_ROUTING_NONE when there is no RenderViewHost.
+  virtual int GetRoutingID() const = 0;
 
   // Returns the currently active RenderWidgetHostView. This may change over
   // time and can be NULL (during setup and teardown).
@@ -172,19 +183,17 @@ class WebContents : public PageNavigator {
 
   // This flag indicates whether the WebContents is currently being
   // screenshotted.
-  virtual void SetCapturingContents(bool cap)  = 0;
+  virtual void SetCapturingContents(bool cap) = 0;
 
   // Indicates whether this tab should be considered crashed. The setter will
   // also notify the delegate when the flag is changed.
   virtual bool IsCrashed() const  = 0;
   virtual void SetIsCrashed(base::TerminationStatus status, int error_code) = 0;
 
-  virtual base::TerminationStatus GetCrashedStatus() const  = 0;
+  virtual base::TerminationStatus GetCrashedStatus() const = 0;
 
   // Whether the tab is in the process of being destroyed.
-  // Added as a tentative work-around for focus related bug #4633.  This allows
-  // us not to store focus when a tab is being closed.
-  virtual bool IsBeingDestroyed() const  = 0;
+  virtual bool IsBeingDestroyed() const = 0;
 
   // Convenience method for notifying the delegate of a navigation state
   // change. See InvalidateType enum.
@@ -211,14 +220,6 @@ class WebContents : public PageNavigator {
   // Creates a new WebContents with the same state as this one. The returned
   // heap-allocated pointer is owned by the caller.
   virtual WebContents* Clone() = 0;
-
-  // Window management ---------------------------------------------------------
-
-  // Adds a new tab or window with the given already-created contents.
-  virtual void AddNewContents(WebContents* new_contents,
-                              WindowOpenDisposition disposition,
-                              const gfx::Rect& initial_pos,
-                              bool user_gesture) = 0;
 
   // Views and focus -----------------------------------------------------------
   // TODO(brettw): Most of these should be removed and the caller should call

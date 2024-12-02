@@ -57,10 +57,12 @@ const char kChromeUIKeyboardURL[] = "chrome://keyboard/";
 const char kChromeUIMemoryRedirectURL[] = "chrome://memory-redirect/";
 const char kChromeUIMemoryURL[] = "chrome://memory/";
 const char kChromeUIMetroFlowURL[] = "chrome://make-metro/";
+const char kChromeUINaClURL[] = "chrome://nacl/";
 const char kChromeUINetInternalsURL[] = "chrome://net-internals/";
 const char kChromeUINewProfile[] = "chrome://newprofile/";
 const char kChromeUINewTabURL[] = "chrome://newtab/";
 const char kChromeUIOmniboxURL[] = "chrome://omnibox/";
+const char kChromeUIPerformanceMonitorURL[] = "chrome://performance/";
 const char kChromeUIPluginsURL[] = "chrome://plugins/";
 const char kChromeUIPolicyURL[] = "chrome://policy/";
 const char kChromeUIPrintURL[] = "chrome://print/";
@@ -73,10 +75,15 @@ const char kChromeUISSLClientCertificateSelectorURL[] = "chrome://select-cert/";
 const char kChromeUISyncPromoURL[] = "chrome://signin/";
 const char kChromeUITaskManagerURL[] = "chrome://tasks/";
 const char kChromeUITermsURL[] = "chrome://terms/";
+const char kChromeUIThemeURL[] = "chrome://theme/";
 const char kChromeUIThumbnailURL[] = "chrome://thumb/";
 const char kChromeUIUberURL[] = "chrome://chrome/";
 const char kChromeUIUberFrameURL[] = "chrome://uber-frame/";
 const char kChromeUIVersionURL[] = "chrome://version/";
+
+#if defined(OS_ANDROID)
+const char kChromeUIWelcomeURL[] = "chrome://welcome/";
+#endif
 
 #if defined(OS_CHROMEOS)
 const char kChromeUIActivationMessage[] = "chrome://activationmessage/";
@@ -173,9 +180,11 @@ const char kChromeUIMediaInternalsHost[] = "media-internals";
 const char kChromeUIMemoryHost[] = "memory";
 const char kChromeUIMemoryRedirectHost[] = "memory-redirect";
 const char kChromeUIMetroFlowHost[] = "make-metro";
+const char kChromeUINaClHost[] = "nacl";
 const char kChromeUINetInternalsHost[] = "net-internals";
 const char kChromeUINewTabHost[] = "newtab";
 const char kChromeUIOmniboxHost[] = "omnibox";
+const char kChromeUIPerformanceMonitorHost[] = "performance";
 const char kChromeUIPluginsHost[] = "plugins";
 const char kChromeUIPolicyHost[] = "policy";
 const char kChromeUIPredictorsHost[] = "predictors";
@@ -196,6 +205,7 @@ const char kChromeUISyncPromoHost[] = "signin";
 const char kChromeUISyncResourcesHost[] = "syncresources";
 const char kChromeUITaskManagerHost[] = "tasks";
 const char kChromeUITermsHost[] = "terms";
+const char kChromeUIThemeHost[] = "theme";
 const char kChromeUIThumbnailHost[] = "thumb";
 const char kChromeUITouchIconHost[] = "touch-icon";
 const char kChromeUITracingHost[] = "tracing";
@@ -206,6 +216,10 @@ const char kChromeUIWorkersHost[] = "workers";
 
 const char kChromeUIScreenshotPath[] = "screenshots";
 const char kChromeUIThemePath[] = "theme";
+
+#if defined(OS_ANDROID)
+const char kChromeUIWelcomeHost[] = "welcome";
+#endif
 
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
 const char kChromeUILinuxProxyConfigHost[] = "linux-proxy-config";
@@ -286,7 +300,11 @@ const char kInternetOptionsSubPage[] = "internet";
 const char kBluetoothAddDeviceSubPage[] = "bluetooth";
 #endif
 
-const char kSyncGoogleDashboardURL[] = "https://www.google.com/dashboard/";
+// Extension sub pages.
+const char kExtensionConfigureCommandsSubPage[] = "configureCommands";
+
+const char kSyncGoogleDashboardURL[] =
+    "https://www.google.com/settings/chrome/sync/";
 
 const char kAutoPasswordGenerationLearnMoreURL[] =
     "https://support.google.com/chrome/?p=ui_generate_password";
@@ -395,16 +413,18 @@ const char kKillReasonURL[] =
     "https://support.google.com/chrome/?p=e_deadjim";
 #endif
 
-#if defined(OS_WIN)
-const char kPrivacyWin8DataLearnMoreURL[] =
-    "https://support.google.com/chrome/?p=win8_directories";
-#endif
-
 const char kPrivacyLearnMoreURL[] =
 #if defined(OS_CHROMEOS)
     "https://support.google.com/chromeos/?p=settings_privacy";
 #else
     "https://support.google.com/chrome/?p=settings_privacy";
+#endif
+
+const char kDoNotTrackLearnMoreURL[] =
+#if defined(OS_CHROMEOS)
+    "https://support.google.com/chromeos/?p=settings_do_not_track";
+#else
+    "https://support.google.com/chrome/?p=settings_do_not_track";
 #endif
 
 const char kSessionRestoreLearnMoreURL[] =
@@ -468,11 +488,6 @@ const char kChromeToMobileLearnMoreURL[] =
 #if defined(OS_CHROMEOS)
 const char kNaturalScrollHelpURL[] =
     "https://support.google.com/chromeos/?p=simple_scrolling";
-#endif
-
-#if defined(OS_MACOSX)
-const char kMacLeopardObsoleteURL[] =
-    "https://support.google.com/chrome/?p=ui_mac_leopard_support";
 #endif
 
 const char* const kChromeDebugURLs[] = {

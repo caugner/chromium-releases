@@ -280,6 +280,8 @@ cr.define('login', function() {
         this.loading = true;
         // Now that we're in logged in state header should be hidden.
         Oobe.getInstance().headerHidden = true;
+        // Clear any error messages that were shown before login.
+        Oobe.clearErrors();
       } else if (msg.method == 'loginUILoaded') {
         this.loading = false;
         $('error-message').update();
@@ -291,7 +293,11 @@ cr.define('login', function() {
         }
         this.clearRetry_();
         chrome.send('loginWebuiReady');
-        chrome.send('loginVisible');
+        chrome.send('loginVisible', ['gaia']);
+        // Warm up the user images screen.
+        window.setTimeout(function() {
+            Oobe.getInstance().preloadScreen({id: SCREEN_USER_IMAGE_PICKER});
+        }, 0);
       } else if (msg.method == 'offlineLogin') {
         this.email = msg.email;
         chrome.send('authenticateUser', [msg.email, msg.password]);
@@ -313,9 +319,7 @@ cr.define('login', function() {
           // Show 'Cancel' button to allow user to return to the main screen
           // (e.g. this makes sense when connection is back).
           Oobe.getInstance().headerHidden = false;
-          $('add-user-header-bar-item').hidden = false;
-          $('add-user-button').hidden = true;
-          $('cancel-add-user-button').hidden = false;
+          $('login-header-bar').signinUIActive = true;
           // Do nothing, since offline version is reloaded after an error comes.
         } else {
           Oobe.showSigninUI();

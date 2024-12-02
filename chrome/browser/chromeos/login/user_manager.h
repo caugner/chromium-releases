@@ -11,11 +11,14 @@
 #include "base/memory/singleton.h"
 #include "base/time.h"
 #include "chrome/browser/chromeos/login/user.h"
-#include "chrome/browser/ui/webui/options2/chromeos/set_wallpaper_options_handler.h"
+#include "chrome/browser/ui/webui/options/chromeos/set_wallpaper_options_handler.h"
 
-class SkBitmap;
 class FilePath;
 class PrefService;
+
+namespace gfx {
+class ImageSkia;
+}
 
 namespace chromeos {
 
@@ -230,6 +233,10 @@ class UserManager {
   // or restart after crash.
   virtual bool IsSessionStarted() const = 0;
 
+  // Returns true if the user with the given email address is to be treated as
+  // ephemeral.
+  virtual bool IsEphemeralUser(const std::string& email) const = 0;
+
   virtual void AddObserver(Observer* obs) = 0;
   virtual void RemoveObserver(Observer* obs) = 0;
 
@@ -237,7 +244,7 @@ class UserManager {
 
   // Returns the result of the last successful profile image download, if any.
   // Otherwise, returns an empty bitmap.
-  virtual const SkBitmap& DownloadedProfileImage() const = 0;
+  virtual const gfx::ImageSkia& DownloadedProfileImage() const = 0;
 };
 
 }  // namespace chromeos

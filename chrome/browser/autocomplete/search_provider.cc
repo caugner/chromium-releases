@@ -34,6 +34,7 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/search_engine_type.h"
+#include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/pref_names.h"
@@ -52,6 +53,27 @@ using base::Time;
 using base::TimeDelta;
 
 namespace {
+
+// We keep track in a histogram how many suggest requests we send, how
+// many suggest requests we invalidate (e.g., due to a user typing
+// another character), and how many replies we receive.
+// *** ADD NEW ENUMS AFTER ALL PREVIOUSLY DEFINED ONES! ***
+//     (excluding the end-of-list enum value)
+// We do not want values of existing enums to change or else it screws
+// up the statistics.
+enum SuggestRequestsHistogramValue {
+  REQUEST_SENT = 1,
+  REQUEST_INVALIDATED,
+  REPLY_RECEIVED,
+  MAX_SUGGEST_REQUEST_HISTOGRAM_VALUE
+};
+
+// Increments the appropriate value in the histogram by one.
+void LogOmniboxSuggestRequest(
+    SuggestRequestsHistogramValue request_value) {
+  UMA_HISTOGRAM_ENUMERATION("Omnibox.SuggestRequests", request_value,
+                            MAX_SUGGEST_REQUEST_HISTOGRAM_VALUE);
+}
 
 bool HasMultipleWords(const string16& text) {
   base::i18n::BreakIterator i(text, base::i18n::BreakIterator::BREAK_WORD);
@@ -99,7 +121,8 @@ bool SearchProvider::query_suggest_immediately_ = false;
 
 SearchProvider::SearchProvider(AutocompleteProviderListener* listener,
                                Profile* profile)
-    : AutocompleteProvider(listener, profile, "Search"),
+    : AutocompleteProvider(listener, profile,
+          AutocompleteProvider::TYPE_SEARCH),
       providers_(TemplateURLServiceFactory::GetForProfile(profile)),
       suggest_results_pending_(0),
       suggest_field_trial_group_number_(
@@ -290,18 +313,11 @@ void SearchProvider::Run() {
   DCHECK(!done_);
   suggest_results_pending_ = 0;
   time_suggest_request_sent_ = base::TimeTicks::Now();
-  const TemplateURL* default_url = providers_.GetDefaultProviderURL();
-  if (default_url && !default_url->suggestions_url().empty()) {
-    suggest_results_pending_++;
-    default_fetcher_.reset(CreateSuggestFetcher(kDefaultProviderURLFetcherID,
-        default_url->suggestions_url_ref(), input_.text()));
-  }
-  const TemplateURL* keyword_url = providers_.GetKeywordProviderURL();
-  if (keyword_url && !keyword_url->suggestions_url().empty()) {
-    suggest_results_pending_++;
-    keyword_fetcher_.reset(CreateSuggestFetcher(kKeywordProviderURLFetcherID,
-        keyword_url->suggestions_url_ref(), keyword_input_text_));
-  }
+
+  default_fetcher_.reset(CreateSuggestFetcher(kDefaultProviderURLFetcherID,
+      providers_.GetDefaultProviderURL(), input_.text()));
+  keyword_fetcher_.reset(CreateSuggestFetcher(kKeywordProviderURLFetcherID,
+      providers_.GetKeywordProviderURL(), keyword_input_text_));
 
   // Both the above can fail if the providers have been modified or deleted
   // since the query began.
@@ -332,6 +348,7 @@ void SearchProvider::AddProviderInfo(ProvidersInfo* provider_info) const {
 void SearchProvider::OnURLFetchComplete(const net::URLFetcher* source) {
   DCHECK(!done_);
   suggest_results_pending_--;
+  LogOmniboxSuggestRequest(REPLY_RECEIVED);
   DCHECK_GE(suggest_results_pending_, 0);  // Should never go negative.
   const net::HttpResponseHeaders* const response_headers =
       source->GetResponseHeaders();
@@ -361,7 +378,8 @@ void SearchProvider::OnURLFetchComplete(const net::URLFetcher* source) {
   // non-keyword mode.
   const TemplateURL* default_url = providers_.GetDefaultProviderURL();
   if (!is_keyword && default_url &&
-      (default_url->prepopulate_id() == SEARCH_ENGINE_GOOGLE)) {
+      (TemplateURLPrepopulateData::GetEngineType(default_url->url()) ==
+       SEARCH_ENGINE_GOOGLE)) {
     const TimeDelta elapsed_time =
         base::TimeTicks::Now() - time_suggest_request_sent_;
     if (request_succeeded) {
@@ -480,12 +498,6 @@ void SearchProvider::StartOrStopSuggestQuery(bool minimal_changes) {
   if (input_.matches_requested() != AutocompleteInput::ALL_MATCHES)
     return;
 
-  // We'll have at least one pending fetch. Set it to 1 now, but the value is
-  // correctly set in Run. As Run isn't invoked immediately we need to set this
-  // now, else we won't think we're waiting on results from the server when we
-  // really are.
-  suggest_results_pending_ = 1;
-
   // Kick off a timer that will start the URL fetch if it completes before
   // the user types another character.  Requests may be delayed to avoid
   // flooding the server with requests that are likely to be thrown away later
@@ -549,6 +561,10 @@ bool SearchProvider::IsQuerySuitableForSuggest() const {
 }
 
 void SearchProvider::StopSuggest() {
+  // Increment the appropriate field in the histogram by the number of
+  // pending requests that were invalidated.
+  for (int i = 0; i < suggest_results_pending_; i++)
+    LogOmniboxSuggestRequest(REQUEST_INVALIDATED);
   suggest_results_pending_ = 0;
   timer_.Stop();
   // Stop any in-progress URL fetches.
@@ -617,13 +633,22 @@ void SearchProvider::ApplyCalculatedNavigationRelevance(NavigationResults* list,
 
 net::URLFetcher* SearchProvider::CreateSuggestFetcher(
     int id,
-    const TemplateURLRef& suggestions_url,
+    const TemplateURL* template_url,
     const string16& text) {
-  DCHECK(suggestions_url.SupportsReplacement());
-  net::URLFetcher* fetcher = net::URLFetcher::Create(id,
-      GURL(suggestions_url.ReplaceSearchTerms(
-          TemplateURLRef::SearchTermsArgs(text))),
-      net::URLFetcher::GET, this);
+  if (!template_url || template_url->suggestions_url().empty())
+    return NULL;
+
+  // Bail if the suggestion URL is invalid with the given replacements.
+  GURL suggest_url(template_url->suggestions_url_ref().ReplaceSearchTerms(
+      TemplateURLRef::SearchTermsArgs(text)));
+  if (!suggest_url.is_valid())
+    return NULL;
+
+  suggest_results_pending_++;
+  LogOmniboxSuggestRequest(REQUEST_SENT);
+
+  net::URLFetcher* fetcher =
+      net::URLFetcher::Create(id, suggest_url, net::URLFetcher::GET, this);
   fetcher->SetRequestContext(profile_->GetRequestContext());
   fetcher->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
   fetcher->Start();
@@ -662,7 +687,7 @@ bool SearchProvider::ParseSuggestResults(Value* root_val, bool is_keyword) {
     extras->GetList("google:suggesttype", &types);
 
     // Only accept relevance suggestions if Instant is disabled.
-    if (!is_keyword && !InstantController::IsEnabled(profile_)) {
+    if (!is_keyword && !InstantController::IsSuggestEnabled(profile_)) {
       // Discard this list if its size does not match that of the suggestions.
       if (extras->GetList("google:suggestrelevance", &relevances) &&
           relevances->GetSize() != results->GetSize())
@@ -922,7 +947,7 @@ SearchProvider::SuggestResults SearchProvider::ScoreHistoryResults(
       AutocompleteMatch match;
       classifier->Classify(i->term, string16(), false, false, &match, NULL);
       prevent_inline_autocomplete =
-          match.transition == content::PAGE_TRANSITION_TYPED;
+          !AutocompleteMatch::IsSearchType(match.type);
     }
 
     int relevance = CalculateRelevanceForHistory(i->time, is_keyword,
@@ -1101,21 +1126,16 @@ void SearchProvider::AddMatchToMap(const string16& query_string,
   // When the user forced a query, we need to make sure all the fill_into_edit
   // values preserve that property.  Otherwise, if the user starts editing a
   // suggestion, non-Search results will suddenly appear.
-  size_t search_start = 0;
-  if (input_.type() == AutocompleteInput::FORCED_QUERY) {
+  if (input_.type() == AutocompleteInput::FORCED_QUERY)
     match.fill_into_edit.assign(ASCIIToUTF16("?"));
-    ++search_start;
-  }
-  if (is_keyword) {
+  if (is_keyword)
     match.fill_into_edit.append(match.keyword + char16(' '));
-    search_start += match.keyword.length() + 1;
+  if (!input_.prevent_inline_autocomplete() &&
+      StartsWith(query_string, input_text, false)) {
+    match.inline_autocomplete_offset =
+        match.fill_into_edit.length() + input_text.length();
   }
   match.fill_into_edit.append(query_string);
-  // Not all suggestions start with the original input.
-  if (!input_.prevent_inline_autocomplete() &&
-      !match.fill_into_edit.compare(search_start, input_text.length(),
-                                   input_text))
-    match.inline_autocomplete_offset = search_start + input_text.length();
 
   const TemplateURLRef& search_url = provider_url->url_ref();
   DCHECK(search_url.SupportsReplacement());
@@ -1214,8 +1234,9 @@ AutocompleteMatch SearchProvider::NavigationToMatch(
 }
 
 void SearchProvider::UpdateDone() {
-  // We're done when there are no more suggest queries pending (this is set to 1
-  // when the timer is started) and we're not waiting on instant.
-  done_ = ((suggest_results_pending_ == 0) &&
-           (instant_finalized_ || !InstantController::IsEnabled(profile_)));
+  // We're done when the timer isn't running, there are no suggest queries
+  // pending, and we're not waiting on instant.
+  done_ = (!timer_.IsRunning() && (suggest_results_pending_ == 0) &&
+           (instant_finalized_ ||
+            !InstantController::IsSuggestEnabled(profile_)));
 }

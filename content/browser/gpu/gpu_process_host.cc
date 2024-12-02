@@ -42,7 +42,7 @@
 #include "ui/gfx/gtk_native_view_id_manager.h"
 #endif
 
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
 #include "ui/surface/accelerated_surface_win.h"
 #endif
 
@@ -127,13 +127,16 @@ void AcceleratedSurfaceBuffersSwappedCompletedForGPU(int host_id,
 
 // This sends a ViewMsg_SwapBuffers_ACK directly to the renderer process
 // (RenderWidget). This path is currently not used with the threaded compositor.
-void AcceleratedSurfaceBuffersSwappedCompletedForRenderer(int surface_id) {
+void AcceleratedSurfaceBuffersSwappedCompletedForRenderer(
+    int surface_id,
+    base::TimeTicks timebase,
+    base::TimeDelta interval) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     BrowserThread::PostTask(
         BrowserThread::UI,
         FROM_HERE,
         base::Bind(&AcceleratedSurfaceBuffersSwappedCompletedForRenderer,
-                   surface_id));
+                   surface_id, timebase, interval));
     return;
   }
 
@@ -150,14 +153,19 @@ void AcceleratedSurfaceBuffersSwappedCompletedForRenderer(int surface_id) {
   if (!rwh)
     return;
   RenderWidgetHostImpl::From(rwh)->AcknowledgeSwapBuffersToRenderer();
+  if (interval != base::TimeDelta())
+    RenderWidgetHostImpl::From(rwh)->UpdateVSyncParameters(timebase, interval);
 }
 
 void AcceleratedSurfaceBuffersSwappedCompleted(int host_id,
                                                int route_id,
                                                int surface_id,
-                                               bool alive) {
+                                               bool alive,
+                                               base::TimeTicks timebase,
+                                               base::TimeDelta interval) {
   AcceleratedSurfaceBuffersSwappedCompletedForGPU(host_id, route_id, alive);
-  AcceleratedSurfaceBuffersSwappedCompletedForRenderer(surface_id);
+  AcceleratedSurfaceBuffersSwappedCompletedForRenderer(surface_id, timebase,
+                                                       interval);
 }
 
 }  // anonymous namespace
@@ -259,7 +267,8 @@ GpuProcessHost* GpuProcessHost::Get(GpuProcessKind kind,
   GpuDataManagerImpl* gpu_data_manager = GpuDataManagerImpl::GetInstance();
   if (gpu_data_manager != NULL &&
       (!gpu_data_manager->GpuAccessAllowed() ||
-       gpu_data_manager->GetGpuFeatureType() == content::GPU_FEATURE_TYPE_ALL))
+       gpu_data_manager->GetBlacklistedFeatures() ==
+           content::GPU_FEATURE_TYPE_ALL))
     return NULL;
 
   if (g_gpu_process_hosts[kind] && HostIsValid(g_gpu_process_hosts[kind]))
@@ -287,10 +296,12 @@ GpuProcessHost* GpuProcessHost::Get(GpuProcessKind kind,
 void GpuProcessHost::SendOnIO(GpuProcessKind kind,
                               content::CauseForGpuLaunch cause,
                               IPC::Message* message) {
-  BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        base::Bind(
-            &SendGpuProcessMessage, kind, cause, message));
+  if (!BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
+          base::Bind(
+              &SendGpuProcessMessage, kind, cause, message))) {
+    delete message;
+  }
 }
 
 // static
@@ -433,7 +444,11 @@ bool GpuProcessHost::Init() {
     return false;
   }
 
-  return Send(new GpuMsg_Initialize());
+  if (!Send(new GpuMsg_Initialize()))
+    return false;
+
+  return Send(new GpuMsg_SetVideoMemoryWindowCount(
+      GpuDataManagerImpl::GetInstance()->GetWindowCount()));
 }
 
 void GpuProcessHost::RouteOnUIThread(const IPC::Message& message) {
@@ -459,6 +474,7 @@ bool GpuProcessHost::Send(IPC::Message* msg) {
 bool GpuProcessHost::OnMessageReceived(const IPC::Message& message) {
   DCHECK(CalledOnValidThread());
   IPC_BEGIN_MESSAGE_MAP(GpuProcessHost, message)
+    IPC_MESSAGE_HANDLER(GpuHostMsg_Initialized, OnInitialized)
     IPC_MESSAGE_HANDLER(GpuHostMsg_ChannelEstablished, OnChannelEstablished)
     IPC_MESSAGE_HANDLER(GpuHostMsg_CommandBufferCreated, OnCommandBufferCreated)
     IPC_MESSAGE_HANDLER(GpuHostMsg_DestroyCommandBuffer, OnDestroyCommandBuffer)
@@ -466,7 +482,7 @@ bool GpuProcessHost::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(GpuHostMsg_AcceleratedSurfaceBuffersSwapped,
                         OnAcceleratedSurfaceBuffersSwapped)
 #endif
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
     IPC_MESSAGE_HANDLER(GpuHostMsg_AcceleratedSurfaceBuffersSwapped,
                         OnAcceleratedSurfaceBuffersSwapped)
     IPC_MESSAGE_HANDLER(GpuHostMsg_AcceleratedSurfacePostSubBuffer,
@@ -548,6 +564,10 @@ void GpuProcessHost::CreateViewCommandBuffer(
   } else {
     CreateCommandBufferError(callback, MSG_ROUTING_NONE);
   }
+}
+
+void GpuProcessHost::OnInitialized(bool result) {
+  UMA_HISTOGRAM_BOOLEAN("GPU.GPUProcessInitialized", result);
 }
 
 void GpuProcessHost::OnChannelEstablished(
@@ -641,11 +661,12 @@ void GpuProcessHost::OnAcceleratedSurfaceBuffersSwapped(
       params.surface_id,
       params.surface_handle,
       params.route_id,
+      params.size,
       host_id_));
 }
 #endif  // OS_MACOSX
 
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
 
 void GpuProcessHost::OnAcceleratedSurfaceBuffersSwapped(
     const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params) {
@@ -653,18 +674,24 @@ void GpuProcessHost::OnAcceleratedSurfaceBuffersSwapped(
 
   base::ScopedClosureRunner scoped_completion_runner(
       base::Bind(&AcceleratedSurfaceBuffersSwappedCompleted,
-                 host_id_,
-                 params.route_id,
-                 params.surface_id,
-                 true));
+                 host_id_, params.route_id, params.surface_id,
+                 true, base::TimeTicks(), base::TimeDelta()));
 
   gfx::PluginWindowHandle handle =
       GpuSurfaceTracker::Get()->GetSurfaceWindowHandle(params.surface_id);
+
   if (!handle) {
-    TRACE_EVENT1("gpu", "EarlyOut_SurfaceIDNotFound",
+    TRACE_EVENT1("gpu", "SurfaceIDNotFound_RoutingToUI",
                  "surface_id", params.surface_id);
+#if defined(USE_AURA)
+    // This is a content area swap, send it on to the UI thread.
+    scoped_completion_runner.Release();
+    RouteOnUIThread(GpuHostMsg_AcceleratedSurfaceBuffersSwapped(params));
+#endif
     return;
   }
+
+  // Otherwise it's the UI swap.
 
   scoped_refptr<AcceleratedPresenter> presenter(
       AcceleratedPresenter::GetForWindow(handle));
@@ -695,8 +722,13 @@ void GpuProcessHost::OnAcceleratedSurfaceSuspend(int32 surface_id) {
 
   gfx::PluginWindowHandle handle =
       GpuSurfaceTracker::Get()->GetSurfaceWindowHandle(surface_id);
-  if (!handle)
+
+  if (!handle) {
+#if defined(USE_AURA)
+    RouteOnUIThread(GpuHostMsg_AcceleratedSurfaceSuspend(surface_id));
+#endif
     return;
+  }
 
   scoped_refptr<AcceleratedPresenter> presenter(
       AcceleratedPresenter::GetForWindow(handle));
@@ -712,8 +744,12 @@ void GpuProcessHost::OnAcceleratedSurfaceRelease(
 
   gfx::PluginWindowHandle handle =
       GpuSurfaceTracker::Get()->GetSurfaceWindowHandle(params.surface_id);
-  if (!handle)
+  if (!handle) {
+#if defined(USE_AURA)
+    RouteOnUIThread(GpuHostMsg_AcceleratedSurfaceRelease(params));
     return;
+#endif
+  }
 
   scoped_refptr<AcceleratedPresenter> presenter(
       AcceleratedPresenter::GetForWindow(handle));
@@ -723,7 +759,7 @@ void GpuProcessHost::OnAcceleratedSurfaceRelease(
   presenter->ReleaseSurface();
 }
 
-#endif  // OS_WIN && !USE_AURA
+#endif  // OS_WIN
 
 void GpuProcessHost::OnProcessLaunched() {
   UMA_HISTOGRAM_TIMES("GPU.GPUProcessLaunchTime",

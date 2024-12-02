@@ -6,9 +6,7 @@
 #define MEDIA_BASE_AUDIO_RENDERER_MIXER_H_
 
 #include <set>
-#include <vector>
 
-#include "base/gtest_prod_util.h"
 #include "base/synchronization/lock.h"
 #include "media/base/audio_renderer_mixer_input.h"
 #include "media/base/audio_renderer_sink.h"
@@ -34,28 +32,15 @@ class MEDIA_EXPORT AudioRendererMixer
   void RemoveMixerInput(const scoped_refptr<AudioRendererMixerInput>& input);
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(AudioRendererMixerTest, VectorFMAC);
-  FRIEND_TEST_ALL_PREFIXES(AudioRendererMixerTest, VectorFMACBenchmark);
-
   // AudioRendererSink::RenderCallback implementation.
-  virtual int Render(const std::vector<float*>& audio_data,
-                     int number_of_frames,
+  virtual int Render(AudioBus* audio_bus,
                      int audio_delay_milliseconds) OVERRIDE;
   virtual void OnRenderError() OVERRIDE;
 
-  // Handles mixing and volume adjustment.  Renders |number_of_frames| into
-  // |audio_data|.  When resampling is necessary, ProvideInput() will be called
+  // Handles mixing and volume adjustment.  Fully fills |audio_bus| with mixed
+  // audio data.  When resampling is necessary, ProvideInput() will be called
   // by MultiChannelResampler when more data is necessary.
-  void ProvideInput(const std::vector<float*>& audio_data,
-                    int number_of_frames);
-
-  // Multiply each element of |src| (up to |len|) by |scale| and add to |dest|.
-  static void VectorFMAC(const float src[], float scale, int len, float dest[]);
-  static void VectorFMAC_C(const float src[], float scale, int len,
-                           float dest[]);
-  // SSE optimized VectorFMAC, requires |src|, |dest| to be 16-byte aligned.
-  static void VectorFMAC_SSE(const float src[], float scale, int len,
-                             float dest[]);
+  void ProvideInput(AudioBus* audio_bus);
 
   // Output sink for this mixer.
   scoped_refptr<AudioRendererSink> audio_sink_;
@@ -68,8 +53,7 @@ class MEDIA_EXPORT AudioRendererMixer
   base::Lock mixer_inputs_lock_;
 
   // Vector for rendering audio data from each mixer input.
-  int mixer_input_audio_data_size_;
-  std::vector<float*> mixer_input_audio_data_;
+  scoped_ptr<AudioBus> mixer_input_audio_bus_;
 
   // Handles resampling post-mixing.
   scoped_ptr<MultiChannelResampler> resampler_;

@@ -11,7 +11,7 @@
 #include "base/scoped_temp_dir.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/test/browser_test.h"
-#include "content/test/browser_test_base.h"
+#include "content/public/test/browser_test_base.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_CHROMEOS)
@@ -93,7 +93,7 @@ class RuleBasedHostResolverProc;
 // }
 //
 //  This is recursive, so PRE_PRE_Bar would run before PRE_BAR.
-class InProcessBrowserTest : public BrowserTestBase {
+class InProcessBrowserTest : public content::BrowserTestBase {
  public:
   InProcessBrowserTest();
   virtual ~InProcessBrowserTest();
@@ -158,12 +158,12 @@ class InProcessBrowserTest : public BrowserTestBase {
   void AddBlankTabAndShow(Browser* browser);
 
 #if !defined OS_MACOSX
-  // Return a CommandLine object  that is used to relaunch the browser_test binary
-  // as a browser process. This function is deliberately not defined on the Mac
-  // because re-using an existing browser process when launching from the command
-  // line isn't a concept that we support on the Mac; AppleEvents are the Mac
-  // solution for the same need. Any test based on these functions doesn't apply
-  // to the Mac.
+  // Return a CommandLine object that is used to relaunch the browser_test
+  // binary as a browser process. This function is deliberately not defined on
+  // the Mac because re-using an existing browser process when launching from
+  // the command line isn't a concept that we support on the Mac; AppleEvents
+  // are the Mac solution for the same need. Any test based on these functions
+  // doesn't apply to the Mac.
   CommandLine GetCommandLineForRelaunch();
 #endif
 
@@ -172,14 +172,6 @@ class InProcessBrowserTest : public BrowserTestBase {
   net::RuleBasedHostResolverProc* host_resolver() {
     return host_resolver_.get();
   }
-
-#if defined(OS_POSIX)
-  // This is only needed by a test that raises SIGTERM to ensure that a specific
-  // codepath is taken.
-  void DisableSIGTERMHandling() {
-    handle_sigterm_ = false;
-  }
-#endif
 
 #if defined(OS_MACOSX)
   // Returns the autorelease pool in use inside RunTestOnMainThreadLoop().
@@ -213,10 +205,6 @@ class InProcessBrowserTest : public BrowserTestBase {
   // specified in the command line.
   ScopedTempDir temp_user_data_dir_;
 
-#if defined(OS_POSIX)
-  bool handle_sigterm_;
-#endif
-  
 #if defined(OS_CHROMEOS)
   chromeos::ScopedStubCrosEnabler stub_cros_enabler_;
 #endif  // defined(OS_CHROMEOS)

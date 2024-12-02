@@ -6,6 +6,7 @@
 #define CONTENT_RENDERER_RENDER_WIDGET_H_
 
 #include <deque>
+#include <map>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -21,6 +22,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebTextInputInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWidgetClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -46,6 +48,7 @@ class WebWidget;
 }
 
 namespace content {
+struct GpuRenderingStats;
 class RenderWidgetTest;
 }
 
@@ -159,9 +162,21 @@ class CONTENT_EXPORT RenderWidget
   // as it blocks on the compositor thread.
   void GetRenderingStats(WebKit::WebRenderingStats&) const;
 
+  // Fills in a GpuRenderingStats struct containing information about
+  // GPU rendering, e.g. count of texture uploads performed, time spent
+  // uploading.
+  // This call is relatively expensive as it blocks on the GPU process
+  bool GetGpuRenderingStats(content::GpuRenderingStats*) const;
+
+  // Callback for use with BeginSmoothScroll.
+  typedef base::Callback<void()> SmoothScrollCompletionCallback;
+
   // Directs the host to begin a smooth scroll. This scroll should have the same
-  // performance characteristics as a user-initiated scroll.
-  void BeginSmoothScroll(bool scroll_down, bool scroll_far);
+  // performance characteristics as a user-initiated scroll. Returns an ID of
+  // the scroll gesture.
+  void BeginSmoothScroll(bool scroll_down,
+                         bool scroll_far,
+                         const SmoothScrollCompletionCallback& callback);
 
   // Close the underlying WebWidget.
   virtual void Close();
@@ -185,6 +200,7 @@ class CONTENT_EXPORT RenderWidget
   RenderWidget(WebKit::WebPopupType popup_type,
                const WebKit::WebScreenInfo& screen_info,
                bool swapped_out);
+
   virtual ~RenderWidget();
 
   // Initializes this view with the given opener.  CompleteInit must be called
@@ -264,6 +280,7 @@ class CONTENT_EXPORT RenderWidget
                         const gfx::Size& page_size,
                         const gfx::Size& desired_size);
   void OnMsgRepaint(const gfx::Size& size_to_paint);
+  void OnMsgSmoothScrollCompleted(int gesture_id);
   virtual void OnSetDeviceScaleFactor(float device_scale_factor);
   void OnSetTextDirection(WebKit::WebTextDirection direction);
   void OnGetFPS();
@@ -307,7 +324,8 @@ class CONTENT_EXPORT RenderWidget
       const gfx::Rect& paint_bounds,
       TransportDIB** dib,
       gfx::Rect* location,
-      gfx::Rect* clip);
+      gfx::Rect* clip,
+      float* scale_factor);
 
   // Gets the scroll offset of this widget, if this widget has a notion of
   // scroll offset.
@@ -326,6 +344,10 @@ class CONTENT_EXPORT RenderWidget
   void set_next_paint_is_resize_ack();
   void set_next_paint_is_restore_ack();
   void set_next_paint_is_repaint_ack();
+
+  void set_throttle_input_events(bool throttle_input_events) {
+    throttle_input_events_ = throttle_input_events;
+  }
 
   // Checks if the text input state and compose inline mode have been changed.
   // If they are changed, the new value will be sent to the browser process.
@@ -347,6 +369,8 @@ class CONTENT_EXPORT RenderWidget
   // position.
   virtual ui::TextInputType GetTextInputType();
   virtual void GetSelectionBounds(gfx::Rect* start, gfx::Rect* end);
+  virtual ui::TextInputType WebKitToUiTextInputType(
+      WebKit::WebTextInputType type);
 
   // Override point to obtain that the current composition character bounds.
   // In the case of surrogate pairs, the character is treated as two characters:
@@ -502,6 +526,9 @@ class CONTENT_EXPORT RenderWidget
   // Indicates if an input method is active in the browser process.
   bool input_method_is_active_;
 
+  // Stores information about the current text input.
+  WebKit::WebTextInputInfo text_input_info_;
+
   // Stores the current text input type of |webwidget_|.
   ui::TextInputType text_input_type_;
 
@@ -569,6 +596,15 @@ class CONTENT_EXPORT RenderWidget
   // The device scale factor. This value is computed from the DPI entries in
   // |screen_info_| on some platforms, and defaults to 1 on other platforms.
   float device_scale_factor_;
+
+  // Specifies whether input event throttling is enabled for this widget.
+  bool throttle_input_events_;
+
+  // State associated with the BeginSmoothScroll synthetic scrolling function.
+  int next_smooth_scroll_gesture_id_;
+  typedef std::map<int, SmoothScrollCompletionCallback>
+      PendingSmoothScrollGestureMap;
+  PendingSmoothScrollGestureMap pending_smooth_scroll_gestures_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidget);
 };

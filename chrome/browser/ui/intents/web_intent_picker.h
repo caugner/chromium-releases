@@ -23,6 +23,16 @@ class WebContents;
 // Base class for the web intent picker dialog.
 class WebIntentPicker {
  public:
+  // The width of the window, in view coordinates. The height will be
+  // determined by the content.
+  static const int kWindowWidth = 400;
+
+  // The maximum width in view units of a suggested extension's title link.
+  static const int kTitleLinkMaxWidth = 130;
+
+  // The space in pixels between the top-level groups and the dialog border.
+  static const int kContentAreaBorder = 10;
+
   // Platform specific factory function. This function will automatically show
   // the picker.
   static WebIntentPicker* Create(TabContents* tab_contents,
@@ -37,25 +47,21 @@ class WebIntentPicker {
   virtual void SetActionString(const string16& action) = 0;
 
   // Called when an extension is successfully installed via the picker.
-  virtual void OnExtensionInstallSuccess(const std::string& id) {}
+  virtual void OnExtensionInstallSuccess(const std::string& id) = 0;
 
   // Called when an extension installation started via the picker has failed.
-  virtual void OnExtensionInstallFailure(const std::string& id) {}
+  virtual void OnExtensionInstallFailure(const std::string& id) = 0;
 
   // Called when the inline disposition experiences an auto-resize.
-  virtual void OnInlineDispositionAutoResize(const gfx::Size& size) {}
+  virtual void OnInlineDispositionAutoResize(const gfx::Size& size) = 0;
 
   // Called when the controller has finished all pending asynchronous
   // activities.
-  virtual void OnPendingAsyncCompleted() {}
+  virtual void OnPendingAsyncCompleted() = 0;
 
   // Called when the inline disposition's web contents have been loaded.
   virtual void OnInlineDispositionWebContentsLoaded(
       content::WebContents* web_contents) {}
-
-  // Get the default size of the inline disposition tab container.
-  static gfx::Size GetDefaultInlineDispositionSize(
-      content::WebContents* web_contents);
 
   // Get the minimum size of the inline disposition content container.
   static gfx::Size GetMinInlineDispositionSize();

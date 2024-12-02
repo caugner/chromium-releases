@@ -21,7 +21,7 @@ remoting.HostController = function() {
     if (version == '') {
       console.log('Host not installed.');
     } else {
-      console.log('Host version:', version);
+      console.log('Host version: ' + version);
     }
   };
   try {
@@ -268,7 +268,12 @@ function parseHostConfig_(configStr) {
       typeof config['xmpp_login'] == 'string') {
     return config;
   } else {
-    if (configStr != '{}') {
+    // {} means that host is not configured; '' means that the config file could
+    // not be read.
+    // TODO(jamiewalch): '' is expected if the host isn't installed, but should
+    // be reported as an error otherwise. Fix this once we have an event-based
+    // daemon state mechanism.
+    if (configStr != '{}' && configStr != '') {
       console.error('Invalid getDaemonConfig response.');
     }
   }

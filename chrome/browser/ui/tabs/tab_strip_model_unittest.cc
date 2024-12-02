@@ -11,7 +11,6 @@
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/property_bag.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
@@ -37,7 +36,6 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/test_browser_thread.h"
@@ -48,6 +46,14 @@ using content::NavigationController;
 using content::SiteInstance;
 using content::WebContents;
 using extensions::Extension;
+
+// TODO(avi): Kill this when TabContents goes away.
+class TabStripModelContentsCreator {
+ public:
+  static TabContents* CreateTabContents(content::WebContents* contents) {
+    return TabContents::Factory::CreateTabContents(contents);
+  }
+};
 
 namespace {
 
@@ -117,21 +123,36 @@ class TabStripDummyDelegate : public TestTabStripModelDelegate {
   DISALLOW_COPY_AND_ASSIGN(TabStripDummyDelegate);
 };
 
+namespace {
+
+const char kTabStripModelTestIDUserDataKey[] = "TabStripModelTestIDUserData";
+
+class TabStripModelTestIDUserData : public base::SupportsUserData::Data {
+ public:
+  explicit TabStripModelTestIDUserData(int id) : id_(id) {}
+  virtual ~TabStripModelTestIDUserData() {}
+  int id() { return id_; }
+
+ private:
+  int id_;
+};
+
+}  // namespace
+
 class TabStripModelTest : public ChromeRenderViewHostTestHarness {
  public:
   TabStripModelTest() : browser_thread_(BrowserThread::UI, &message_loop_) {
   }
 
   TabContents* CreateTabContents() {
-    return chrome::TabContentsFactory(
-        profile(), NULL, MSG_ROUTING_NONE, NULL, NULL);
+    return chrome::TabContentsFactory(profile(), NULL, MSG_ROUTING_NONE, NULL);
   }
 
   TabContents* CreateTabContentsWithSharedRPH(
       WebContents* web_contents) {
     TabContents* retval = chrome::TabContentsFactory(profile(),
         web_contents->GetRenderViewHost()->GetSiteInstance(), MSG_ROUTING_NONE,
-        NULL, NULL);
+        NULL);
     EXPECT_EQ(retval->web_contents()->GetRenderProcessHost(),
               web_contents->GetRenderProcessHost());
     return retval;
@@ -158,12 +179,17 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
 
   // Sets the id of the specified contents.
   void SetID(WebContents* contents, int id) {
-    GetIDAccessor()->SetProperty(contents->GetPropertyBag(), id);
+    contents->SetUserData(&kTabStripModelTestIDUserDataKey,
+                          new TabStripModelTestIDUserData(id));
   }
 
   // Returns the id of the specified contents.
   int GetID(WebContents* contents) {
-    return *GetIDAccessor()->GetProperty(contents->GetPropertyBag());
+    TabStripModelTestIDUserData* user_data =
+        static_cast<TabStripModelTestIDUserData*>(
+            contents->GetUserData(&kTabStripModelTestIDUserDataKey));
+
+    return user_data ? user_data->id() : -1;
   }
 
   // Returns the state of the given tab strip as a string. The state consists
@@ -227,11 +253,6 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
   }
 
  private:
-  base::PropertyAccessor<int>* GetIDAccessor() {
-    static base::PropertyAccessor<int> accessor;
-    return &accessor;
-  }
-
   content::TestBrowserThread browser_thread_;
 
   std::wstring test_dir_;
@@ -1451,9 +1472,10 @@ TEST_F(TabStripModelTest, AddTabContents_ForgetOpeners) {
 // Added for http://b/issue?id=958960
 TEST_F(TabStripModelTest, AppendContentsReselectionTest) {
   WebContents* fake_destinations_tab =
-      WebContents::Create(profile(), NULL, MSG_ROUTING_NONE, NULL, NULL);
-  TabContents tab_contents(fake_destinations_tab);
-  TabStripDummyDelegate delegate(&tab_contents);
+      WebContents::Create(profile(), NULL, MSG_ROUTING_NONE, NULL);
+  scoped_ptr<TabContents> tab_contents(
+      TabStripModelContentsCreator::CreateTabContents(fake_destinations_tab));
+  TabStripDummyDelegate delegate(tab_contents.get());
   TabStripModel tabstrip(&delegate, profile());
   EXPECT_TRUE(tabstrip.empty());
 
@@ -1542,7 +1564,8 @@ TEST_F(TabStripModelTest, AddTabContents_NewTabAtEndOfStripInheritsGroup) {
 
   // Open page A
   TabContents* page_a_contents = CreateTabContents();
-  strip.AddTabContents(page_a_contents, -1, content::PAGE_TRANSITION_START_PAGE,
+  strip.AddTabContents(page_a_contents, -1,
+                       content::PAGE_TRANSITION_AUTO_TOPLEVEL,
                        TabStripModel::ADD_ACTIVE);
 
   // Open pages B, C and D in the background from links on page A...
@@ -1619,7 +1642,8 @@ TEST_F(TabStripModelTest, NavigationForgetsOpeners) {
 
   // Open page A
   TabContents* page_a_contents = CreateTabContents();
-  strip.AddTabContents(page_a_contents, -1, content::PAGE_TRANSITION_START_PAGE,
+  strip.AddTabContents(page_a_contents, -1,
+                       content::PAGE_TRANSITION_AUTO_TOPLEVEL,
                        TabStripModel::ADD_ACTIVE);
 
   // Open pages B, C and D in the background from links on page A...
@@ -1635,7 +1659,8 @@ TEST_F(TabStripModelTest, NavigationForgetsOpeners) {
 
   // Open page E in a different opener group from page A.
   TabContents* page_e_contents = CreateTabContents();
-  strip.AddTabContents(page_e_contents, -1, content::PAGE_TRANSITION_START_PAGE,
+  strip.AddTabContents(page_e_contents, -1,
+                       content::PAGE_TRANSITION_AUTO_TOPLEVEL,
                        TabStripModel::ADD_NONE);
 
   // Tell the TabStripModel that we are navigating page D via a link click.
@@ -1668,7 +1693,8 @@ TEST_F(TabStripModelTest, NavigationForgettingDoesntAffectNewTab) {
   // Open a tab and several tabs from it, then select one of the tabs that was
   // opened.
   TabContents* page_a_contents = CreateTabContents();
-  strip.AddTabContents(page_a_contents, -1, content::PAGE_TRANSITION_START_PAGE,
+  strip.AddTabContents(page_a_contents, -1,
+                       content::PAGE_TRANSITION_AUTO_TOPLEVEL,
                        TabStripModel::ADD_ACTIVE);
 
   TabContents* page_b_contents = CreateTabContents();
@@ -1806,9 +1832,11 @@ TEST_F(TabStripModelTest, Apps) {
                         &error));
   extension_app->launch_web_url_ = "http://www.google.com";
   TabContents* contents1 = CreateTabContents();
-  contents1->extension_tab_helper()->SetExtensionApp(extension_app);
+  extensions::TabHelper::FromWebContents(contents1->web_contents())->
+      SetExtensionApp(extension_app);
   TabContents* contents2 = CreateTabContents();
-  contents2->extension_tab_helper()->SetExtensionApp(extension_app);
+  extensions::TabHelper::FromWebContents(contents2->web_contents())->
+      SetExtensionApp(extension_app);
   TabContents* contents3 = CreateTabContents();
 
   SetID(contents1->web_contents(), 1);

@@ -7,8 +7,6 @@
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/run_loop.h"
-#include "base/string16.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/uninstall_browser_prompt.h"
 #include "chrome/common/chrome_result_codes.h"
@@ -30,7 +28,6 @@ UninstallView::UninstallView(int* user_selection,
       delete_profile_(NULL),
       change_default_browser_(NULL),
       browsers_combo_(NULL),
-      browsers_(NULL),
       user_selection_(*user_selection),
       quit_closure_(quit_closure) {
   SetupControls();
@@ -136,7 +133,7 @@ string16 UninstallView::GetDialogButtonLabel(ui::DialogButton button) const {
 }
 
 void UninstallView::ButtonPressed(views::Button* sender,
-                                  const views::Event& event) {
+                                  const ui::Event& event) {
   if (change_default_browser_ == sender) {
     // Disable the browsers combobox if the user unchecks the checkbox.
     DCHECK(browsers_combo_);
@@ -161,7 +158,7 @@ string16 UninstallView::GetItemAt(int index) {
   DCHECK_LT(index, static_cast<int>(browsers_->size()));
   BrowsersMap::const_iterator i = browsers_->begin();
   std::advance(i, index);
-  return WideToUTF16Hack(i->first);
+  return i->first;
 }
 
 namespace chrome {

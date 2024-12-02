@@ -23,12 +23,12 @@
 #include "base/gtest_prod_util.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
+#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
-#include "chrome/common/net/gaia/gaia_auth_consumer.h"
-#include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "google_apis/gaia/gaia_auth_consumer.h"
+#include "google_apis/gaia/google_service_auth_error.h"
 
 class GaiaAuthFetcher;
 class Profile;
@@ -140,6 +140,11 @@ class SigninManager : public GaiaAuthConsumer,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+ protected:
+  // Weak pointer to parent profile (protected so FakeSigninManager can access
+  // it).
+  Profile* profile_;
+
  private:
   enum SigninType {
     SIGNIN_TYPE_NONE,
@@ -172,8 +177,6 @@ class SigninManager : public GaiaAuthConsumer,
   // transient signin data if |clear_transient_data| is true.
   void HandleAuthError(const GoogleServiceAuthError& error,
                        bool clear_transient_data);
-
-  Profile* profile_;
 
   // ClientLogin identity.
   std::string possibly_invalid_username_;

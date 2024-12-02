@@ -1473,8 +1473,8 @@ TEST_F(ProfileSyncServiceBookmarkTestWithData,
   StopSync();
 
   // Nuke the sync DB and reload.
-  test_user_share_.TearDown();
-  test_user_share_.SetUp();
+  TearDown();
+  SetUp();
 
   StartSync();
 

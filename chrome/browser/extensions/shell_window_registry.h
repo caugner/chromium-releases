@@ -21,6 +21,8 @@ namespace content {
 class RenderViewHost;
 }
 
+namespace extensions {
+
 // The ShellWindowRegistry tracks the ShellWindows for all platform apps for a
 // particular profile.
 // This class is planned to evolve into tracking all PlatformApps for a
@@ -48,7 +50,7 @@ class ShellWindowRegistry : public ProfileKeyedService {
   virtual ~ShellWindowRegistry();
 
   // Returns the instance for the given profile, or NULL if none. This is
-  // a convenience wrapper around ShellWindowRegistryFactory::GetForProfile.
+  // a convenience wrapper around ShellWindowRegistry::Factory::GetForProfile.
   static ShellWindowRegistry* Get(Profile* profile);
 
   void AddShellWindow(ShellWindow* shell_window);
@@ -65,6 +67,10 @@ class ShellWindowRegistry : public ProfileKeyedService {
   ShellWindow* GetShellWindowForRenderViewHost(
       content::RenderViewHost* render_view_host) const;
   ShellWindow* GetShellWindowForNativeWindow(gfx::NativeWindow window) const;
+  // Returns an app window for the given app, or NULL if no shell windows are
+  // open. If there is a window for the given app that is active, that one will
+  // be returned, otherwise an arbitrary window will be returned.
+  ShellWindow* GetCurrentShellWindowForApp(const std::string& app_id) const;
 
  private:
   class Factory : public ProfileKeyedServiceFactory {
@@ -81,12 +87,15 @@ class ShellWindowRegistry : public ProfileKeyedService {
     // ProfileKeyedServiceFactory
     virtual ProfileKeyedService* BuildServiceInstanceFor(
         Profile* profile) const OVERRIDE;
-    virtual bool ServiceIsCreatedWithProfile() OVERRIDE;
-    virtual bool ServiceIsNULLWhileTesting() OVERRIDE;
+    virtual bool ServiceHasOwnInstanceInIncognito() const OVERRIDE;
+    virtual bool ServiceIsCreatedWithProfile() const OVERRIDE;
+    virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
   };
 
   ShellWindowSet shell_windows_;
   ObserverList<Observer> observers_;
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_SHELL_WINDOW_REGISTRY_H_

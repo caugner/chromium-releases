@@ -18,17 +18,19 @@
 #include "ipc/ipc_logging.h"
 #include "ipc/ipc_message.h"
 #include "native_client/src/shared/ppapi_proxy/ppruntime.h"
+#include "native_client/src/shared/srpc/nacl_srpc.h"
 #include "native_client/src/untrusted/irt/irt_ppapi.h"
 #include "ppapi/c/ppp.h"
 #include "ppapi/c/ppp_instance.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_globals.h"
+#include "ppapi/proxy/plugin_proxy_delegate.h"
 #include "ppapi/shared_impl/ppb_audio_shared.h"
 
 #if defined(IPC_MESSAGE_LOG_ENABLED)
 #define IPC_MESSAGE_MACROS_LOG_ENABLED
-#include "ppapi/proxy/ppapi_messages.h"
 #endif
+#include "ppapi/proxy/ppapi_messages.h"
 
 // This must match up with NACL_CHROME_INITIAL_IPC_DESC,
 // defined in sel_main_chrome.h
@@ -36,66 +38,179 @@
 
 using ppapi::proxy::PluginDispatcher;
 using ppapi::proxy::PluginGlobals;
+using ppapi::proxy::PluginProxyDelegate;
+using ppapi::proxy::ProxyChannel;
+using ppapi::proxy::SerializedHandle;
 
 namespace {
 
-// Copied from src/content/ppapi_plugin/ppapi_thread. This is a minimal
-// implementation to get us started.
-class PluginDispatcherDelegate : public PluginDispatcher::PluginDelegate {
+// This class manages communication between the plugin and the browser, and
+// manages the PluginDispatcher instances for communication between the plugin
+// and the renderer.
+class PpapiDispatcher : public ProxyChannel,
+                        public PluginDispatcher::PluginDelegate,
+                        public PluginProxyDelegate {
  public:
-  explicit PluginDispatcherDelegate(
-      scoped_refptr<base::MessageLoopProxy> io_loop)
-      : message_loop_(io_loop),
-        shutdown_event_(true, false) {
-  }
+  explicit PpapiDispatcher(scoped_refptr<base::MessageLoopProxy> io_loop);
 
-  virtual base::MessageLoopProxy* GetIPCMessageLoop() OVERRIDE {
-     return message_loop_.get();
-  }
-
-  virtual base::WaitableEvent* GetShutdownEvent() OVERRIDE {
-    return &shutdown_event_;
-  }
-
+  // PluginDispatcher::PluginDelegate implementation.
+  virtual base::MessageLoopProxy* GetIPCMessageLoop() OVERRIDE;
+  virtual base::WaitableEvent* GetShutdownEvent() OVERRIDE;
   virtual IPC::PlatformFileForTransit ShareHandleWithRemote(
       base::PlatformFile handle,
       const IPC::SyncChannel& channel,
-      bool should_close_source) OVERRIDE {
-    return IPC::InvalidPlatformFileForTransit();
-  }
+      bool should_close_source) OVERRIDE;
+  virtual std::set<PP_Instance>* GetGloballySeenInstanceIDSet() OVERRIDE;
+  virtual uint32 Register(PluginDispatcher* plugin_dispatcher) OVERRIDE;
+  virtual void Unregister(uint32 plugin_dispatcher_id) OVERRIDE;
 
-  virtual std::set<PP_Instance>* GetGloballySeenInstanceIDSet() OVERRIDE {
-    return &instances_;
-  }
+  // PluginProxyDelegate implementation.
+  virtual bool SendToBrowser(IPC::Message* msg) OVERRIDE;
+  virtual IPC::Sender* GetBrowserSender() OVERRIDE;
+  virtual std::string GetUILanguage() OVERRIDE;
+  virtual void PreCacheFont(const void* logfontw) OVERRIDE;
+  virtual void SetActiveURL(const std::string& url) OVERRIDE;
 
-  virtual uint32 Register(PluginDispatcher* plugin_dispatcher) OVERRIDE {
-    if (!plugin_dispatcher ||
-        plugin_dispatchers_.size() >= std::numeric_limits<uint32>::max()) {
-      return 0;
-    }
-
-    uint32 id = 0;
-    do {
-      // Although it is unlikely, make sure that we won't cause any trouble when
-      // the counter overflows.
-      id = next_plugin_dispatcher_id_++;
-    } while (id == 0 ||
-             plugin_dispatchers_.find(id) != plugin_dispatchers_.end());
-    plugin_dispatchers_[id] = plugin_dispatcher;
-    return id;
-  }
-
-  virtual void Unregister(uint32 plugin_dispatcher_id) OVERRIDE {
-    plugin_dispatchers_.erase(plugin_dispatcher_id);
-  }
+  // IPC::Listener implementation.
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:
+  void OnMsgCreateNaClChannel(int renderer_id,
+                              bool incognito,
+                              SerializedHandle handle);
+  void OnPluginDispatcherMessageReceived(const IPC::Message& msg);
+
   std::set<PP_Instance> instances_;
   std::map<uint32, PluginDispatcher*> plugin_dispatchers_;
   uint32 next_plugin_dispatcher_id_;
   scoped_refptr<base::MessageLoopProxy> message_loop_;
   base::WaitableEvent shutdown_event_;
 };
+
+PpapiDispatcher::PpapiDispatcher(scoped_refptr<base::MessageLoopProxy> io_loop)
+    : message_loop_(io_loop),
+      shutdown_event_(true, false) {
+  IPC::ChannelHandle channel_handle(
+      "NaCl IPC", base::FileDescriptor(NACL_IPC_FD, false));
+  InitWithChannel(this, channel_handle, false);  // Channel is server.
+}
+
+base::MessageLoopProxy* PpapiDispatcher::GetIPCMessageLoop() {
+  return message_loop_.get();
+}
+
+base::WaitableEvent* PpapiDispatcher::GetShutdownEvent() {
+  return &shutdown_event_;
+}
+
+IPC::PlatformFileForTransit PpapiDispatcher::ShareHandleWithRemote(
+    base::PlatformFile handle,
+    const IPC::SyncChannel& channel,
+    bool should_close_source) {
+  return IPC::InvalidPlatformFileForTransit();
+}
+
+std::set<PP_Instance>* PpapiDispatcher::GetGloballySeenInstanceIDSet() {
+  return &instances_;
+}
+
+uint32 PpapiDispatcher::Register(PluginDispatcher* plugin_dispatcher) {
+  if (!plugin_dispatcher ||
+      plugin_dispatchers_.size() >= std::numeric_limits<uint32>::max()) {
+    return 0;
+  }
+
+  uint32 id = 0;
+  do {
+    // Although it is unlikely, make sure that we won't cause any trouble
+    // when the counter overflows.
+    id = next_plugin_dispatcher_id_++;
+  } while (id == 0 ||
+           plugin_dispatchers_.find(id) != plugin_dispatchers_.end());
+  plugin_dispatchers_[id] = plugin_dispatcher;
+  return id;
+}
+
+void PpapiDispatcher::Unregister(uint32 plugin_dispatcher_id) {
+  plugin_dispatchers_.erase(plugin_dispatcher_id);
+}
+
+bool PpapiDispatcher::SendToBrowser(IPC::Message* msg) {
+  Send(msg);
+}
+
+IPC::Sender* PpapiDispatcher::GetBrowserSender() {
+  return this;
+}
+
+std::string PpapiDispatcher::GetUILanguage() {
+  NOTIMPLEMENTED();
+  return std::string();
+}
+
+void PpapiDispatcher::PreCacheFont(const void* logfontw) {
+  NOTIMPLEMENTED();
+}
+
+void PpapiDispatcher::SetActiveURL(const std::string& url) {
+  NOTIMPLEMENTED();
+}
+
+bool PpapiDispatcher::OnMessageReceived(const IPC::Message& msg) {
+  IPC_BEGIN_MESSAGE_MAP(PpapiDispatcher, msg)
+    IPC_MESSAGE_HANDLER(PpapiMsg_CreateNaClChannel, OnMsgCreateNaClChannel)
+
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPServerSocket_ListenACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPServerSocket_AcceptACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_ConnectACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_SSLHandshakeACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_ReadACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_WriteACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_RecvFromACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_SendToACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_BindACK,
+                                OnPluginDispatcherMessageReceived(msg))
+  IPC_END_MESSAGE_MAP()
+  return true;
+}
+
+void PpapiDispatcher::OnMsgCreateNaClChannel(int renderer_id,
+                                             bool incognito,
+                                             SerializedHandle handle) {
+  PluginDispatcher* dispatcher =
+      new PluginDispatcher(::PPP_GetInterface, incognito);
+  // The channel handle's true name is not revealed here.
+  IPC::ChannelHandle channel_handle("nacl", handle.descriptor());
+  if (!dispatcher->InitPluginWithChannel(this, channel_handle, false)) {
+    delete dispatcher;
+    return;
+  }
+  // From here, the dispatcher will manage its own lifetime according to the
+  // lifetime of the attached channel.
+}
+
+void PpapiDispatcher::OnPluginDispatcherMessageReceived(
+    const IPC::Message& msg) {
+  // The first parameter should be a plugin dispatcher ID.
+  PickleIterator iter(msg);
+  uint32 id = 0;
+  if (!msg.ReadUInt32(&iter, &id)) {
+    NOTREACHED();
+    return;
+  }
+  std::map<uint32, ppapi::proxy::PluginDispatcher*>::iterator dispatcher =
+      plugin_dispatchers_.find(id);
+  if (dispatcher != plugin_dispatchers_.end())
+    dispatcher->second->OnMessageReceived(msg);
+}
 
 }  // namespace
 
@@ -107,6 +222,14 @@ void PpapiPluginRegisterThreadCreator(
 }
 
 int IrtInit() {
+  static int initialized = 0;
+  if (initialized) {
+    return 0;
+  }
+  if (!NaClSrpcModuleInit()) {
+    return 1;
+  }
+  initialized = 1;
   return 0;
 }
 
@@ -120,6 +243,15 @@ int PpapiPluginMain() {
   options.message_loop_type = MessageLoop::TYPE_IO;
   io_thread.StartWithOptions(options);
 
+  // Start up the SRPC server on another thread. Otherwise, when it blocks
+  // on an RPC, the PPAPI proxy will hang. Do this before we initialize the
+  // module and start the PPAPI proxy so that the NaCl plugin can continue
+  // loading the app.
+  static struct NaClSrpcHandlerDesc srpc_methods[] = { { NULL, NULL } };
+  if (!NaClSrpcAcceptClientOnThread(srpc_methods)) {
+    return 1;
+  }
+
   int32_t error = ::PPP_InitializeModule(
       0 /* module */,
       &ppapi::proxy::PluginDispatcher::GetBrowserInterface);
@@ -127,15 +259,12 @@ int PpapiPluginMain() {
   if (error)
     return error;
 
-  PluginDispatcherDelegate delegate(io_thread.message_loop_proxy());
-
-  // TODO(dmichael) Figure out how to determine if we're in incognito
-  PluginDispatcher dispatcher(::PPP_GetInterface, false /* incognito */);
-  IPC::ChannelHandle channel_handle("NaCl IPC",
-                                    base::FileDescriptor(NACL_IPC_FD, false));
-  dispatcher.InitPluginWithChannel(&delegate, channel_handle, false);
+  PpapiDispatcher ppapi_dispatcher(io_thread.message_loop_proxy());
 
   loop.Run();
+
+  NaClSrpcModuleFini();
+
   return 0;
 }
 

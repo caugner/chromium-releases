@@ -8,6 +8,7 @@
 #include "base/metrics/field_trial.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_url_tracker.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
@@ -101,7 +102,7 @@ string16 UIThreadSearchTermsData::GetRlzParameterValue() const {
     // This call will return false the first time(s) it is called until the
     // value has been cached. This normally would mean that at most one omnibox
     // search might not send the RLZ data but this is not really a problem.
-    RLZTracker::GetAccessPointRlz(rlz_lib::CHROME_OMNIBOX, &rlz_string);
+    RLZTracker::GetAccessPointRlz(RLZTracker::CHROME_OMNIBOX, &rlz_string);
   }
   return rlz_string;
 }
@@ -110,7 +111,11 @@ string16 UIThreadSearchTermsData::GetRlzParameterValue() const {
 std::string UIThreadSearchTermsData::InstantEnabledParam() const {
   DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
          BrowserThread::CurrentlyOn(BrowserThread::UI));
-  return InstantController::IsEnabled(profile_) ? "&ion=1" : std::string();
+  if (InstantController::IsExtendedAPIEnabled(profile_))
+    return std::string(google_util::kInstantExtendedAPIParam) + "=1&";
+  if (InstantController::IsInstantEnabled(profile_))
+    return "ion=1&";
+  return std::string();
 }
 
 // static

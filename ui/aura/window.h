@@ -16,7 +16,8 @@
 #include "base/string16.h"
 #include "ui/aura/aura_export.h"
 #include "ui/aura/client/window_types.h"
-#include "ui/base/events.h"
+#include "ui/base/events/event_constants.h"
+#include "ui/base/events/event_target.h"
 #include "ui/base/gestures/gesture_types.h"
 #include "ui/compositor/layer_animator.h"
 #include "ui/compositor/layer_delegate.h"
@@ -27,6 +28,10 @@
 #include "ui/gfx/rect.h"
 
 class SkCanvas;
+
+namespace gfx {
+class Display;
+}
 
 namespace ui {
 class Layer;
@@ -52,6 +57,7 @@ struct WindowProperty;
 // TODO(beng): resolve ownership.
 class AURA_EXPORT Window : public ui::LayerDelegate,
                            public ui::LayerOwner,
+                           public ui::EventTarget,
                            public ui::GestureConsumer {
  public:
   typedef std::vector<Window*> Windows;
@@ -154,7 +160,8 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
 
   // Changes the bounds of the window in the screen coordintates.
   // If present, the window's parent's LayoutManager may adjust the bounds.
-  void SetBoundsInScreen(const gfx::Rect& new_bounds_in_screen_coords);
+  void SetBoundsInScreen(const gfx::Rect& new_bounds_in_screen_coords,
+                         const gfx::Display& dst_display);
 
   // Returns the target bounds of the window. If the window's layer is
   // not animating, it simply returns the current bounds.
@@ -215,7 +222,7 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // Converts |point| from |source|'s coordinates to |target|'s. If |source| is
   // NULL, the function returns without modifying |point|. |target| cannot be
   // NULL.
-  static void ConvertPointToWindow(const Window* source,
+  static void ConvertPointToTarget(const Window* source,
                                    const Window* target,
                                    gfx::Point* point);
 
@@ -236,14 +243,17 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   void set_ignore_events(bool ignore_events) { ignore_events_ = ignore_events; }
 
   // Sets the window to grab hits for an area extending -|insets| pixels outside
-  // its bounds. This can be used to create an invisible non- client area, for
+  // its bounds. This can be used to create an invisible non-client area, for
   // example if your windows have no visible frames but still need to have
-  // resize edges.
-  void set_hit_test_bounds_override_outer(const gfx::Insets& insets) {
-    hit_test_bounds_override_outer_ = insets;
+  // resize edges. It is possible to set a larger hit-region for touch-events.
+  void SetHitTestBoundsOverrideOuter(const gfx::Insets& mouse_insets,
+                                     int touch_scale) {
+    hit_test_bounds_override_outer_mouse_ = mouse_insets;
+    hit_test_bounds_override_outer_touch_ = mouse_insets.Scale(touch_scale);
   }
-  gfx::Insets hit_test_bounds_override_outer() const {
-    return hit_test_bounds_override_outer_;
+
+  gfx::Insets hit_test_bounds_override_outer_mouse() const {
+    return hit_test_bounds_override_outer_mouse_;
   }
 
   // Sets the window to grab hits for an area extending |insets| pixels inside
@@ -343,6 +353,12 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // Overridden from ui::LayerDelegate:
   virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
 
+#ifndef NDEBUG
+  // These methods are useful when debugging.
+  std::string GetDebugInfo() const;
+  void PrintWindowHierarchy(int depth) const;
+#endif
+
  private:
   friend class LayoutManager;
 
@@ -379,6 +395,11 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
                             bool return_tightest,
                             bool for_event_handling);
 
+  // Implementation of RemoveChild(). If |child| is being removed as the result
+  // of an add, |new_parent| is the new parent |child| is going to be parented
+  // to.
+  void RemoveChildImpl(Window* child, Window* new_parent);
+
   // Called when this window's parent has changed.
   void OnParentChanged();
 
@@ -411,17 +432,15 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   virtual void OnPaintLayer(gfx::Canvas* canvas) OVERRIDE;
   virtual base::Closure PrepareForLayerBoundsChange() OVERRIDE;
 
+  // Overridden from ui::EventTarget:
+  virtual bool CanAcceptEvents() OVERRIDE;
+  virtual EventTarget* GetParentTarget() OVERRIDE;
+
   // Updates the layer name with a name based on the window's name and id.
   void UpdateLayerName(const std::string& name);
 
   // Returns true if the mouse is currently within our bounds.
   bool ContainsMouse();
-
-#ifndef NDEBUG
-  // These methods are useful when debugging.
-  std::string GetDebugInfo() const;
-  void PrintWindowHierarchy(int depth) const;
-#endif
 
   client::WindowType type_;
 
@@ -464,7 +483,8 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   bool ignore_events_;
 
   // See set_hit_test_outer_override().
-  gfx::Insets hit_test_bounds_override_outer_;
+  gfx::Insets hit_test_bounds_override_outer_mouse_;
+  gfx::Insets hit_test_bounds_override_outer_touch_;
   gfx::Insets hit_test_bounds_override_inner_;
 
   ObserverList<WindowObserver> observers_;

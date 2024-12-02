@@ -121,13 +121,8 @@ class SK_API PlatformDevice {
   virtual void DrawToNativeContext(PlatformSurface surface, int x, int y,
                                    const PlatformRect* src_rect) = 0;
 
-  // Returns if GDI is allowed to render text to this device.
-  virtual bool IsNativeFontRenderingAllowed();
-
-  // True if AlphaBlend() was called during a
-  // BeginPlatformPaint()/EndPlatformPaint() pair.
-  // Used by the printing subclasses.  See |VectorPlatformDeviceEmf|.
-  virtual bool AlphaBlendUsed() const;
+  // Returns true if GDI operations can be used for drawing into the bitmap.
+  virtual bool SupportsPlatformPaint();
 
 #if defined(OS_WIN)
   // Loads a SkPath into the GDI context. The path can there after be used for

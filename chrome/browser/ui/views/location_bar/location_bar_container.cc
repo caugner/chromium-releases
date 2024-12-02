@@ -6,8 +6,9 @@
 
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/webui/instant_ui.h"
+#include "ui/base/events/event.h"
+#include "ui/views/accessible_pane_view.h"
 #include "ui/views/background.h"
-#include "ui/views/layout/fill_layout.h"
 
 namespace {
 
@@ -16,13 +17,17 @@ const int kAnimationDuration = 180;
 
 }
 
-LocationBarContainer::LocationBarContainer(views::View* parent,
-                                           bool instant_extended_api_enabled)
+LocationBarContainer::LocationBarContainer(
+    views::View* parent,
+    views::AccessiblePaneView* accessible_pane_view,
+    bool instant_extended_api_enabled)
     : animator_(parent),
       view_parent_(NULL),
       location_bar_view_(NULL),
       native_view_host_(NULL),
-      in_toolbar_(true) {
+      in_toolbar_(true),
+      accessible_pane_view_(accessible_pane_view),
+      instant_extended_api_enabled_(instant_extended_api_enabled) {
   parent->AddChildView(this);
   animator_.set_tween_type(ui::Tween::EASE_IN_OUT);
   PlatformInit();
@@ -30,7 +35,6 @@ LocationBarContainer::LocationBarContainer(views::View* parent,
     view_parent_->set_background(
         views::Background::CreateSolidBackground(GetBackgroundColor()));
   }
-  SetLayoutManager(new views::FillLayout);
 }
 
 LocationBarContainer::~LocationBarContainer() {
@@ -65,14 +69,27 @@ gfx::Size LocationBarContainer::GetPreferredSize() {
   return location_bar_view_->GetPreferredSize();
 }
 
+void LocationBarContainer::Layout() {
+  // |location_bar_view_| fills the entire width of the container, but retains
+  // its preferred height, so that it's not resized which, if shrunk, will
+  // squish the placeholder text within a smaller vertical space.
+  location_bar_view_->SetBounds(0, 0, bounds().width(),
+      location_bar_view_->GetPreferredSize().height());
+}
+
 bool LocationBarContainer::SkipDefaultKeyEventProcessing(
-    const views::KeyEvent& event) {
+    const ui::KeyEvent& event) {
   return location_bar_view_->SkipDefaultKeyEventProcessing(event);
 }
 
 void LocationBarContainer::GetAccessibleState(
     ui::AccessibleViewState* state) {
   location_bar_view_->GetAccessibleState(state);
+}
+
+views::FocusTraversable* LocationBarContainer::GetPaneFocusTraversable() {
+  // Use the accessible pane view that this belongs to for focus searching.
+  return accessible_pane_view_->GetPaneFocusTraversable();
 }
 
 void LocationBarContainer::OnBoundsAnimatorDone(

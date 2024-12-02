@@ -44,7 +44,7 @@ class PageActionControllerTest : public TabContentsTestHarness {
 
  protected:
   int tab_id() {
-    return SessionID::IdForTab(tab_contents());
+    return SessionID::IdForTab(web_contents());
   }
 
   ExtensionService* extension_service_;
@@ -73,6 +73,13 @@ TEST_F(PageActionControllerTest, NavigationClearsState) {
   extension->page_action()->SetTitle(tab_id(), "Goodbye");
   extension->page_action()->SetPopupUrl(
       tab_id(), extension->GetResourceURL("popup.html"));
+
+  EXPECT_EQ("Goodbye", extension->page_action()->GetTitle(tab_id()));
+  EXPECT_EQ(extension->GetResourceURL("popup.html"),
+            extension->page_action()->GetPopupUrl(tab_id()));
+
+  // Within-page navigation should keep the settings.
+  NavigateAndCommit(GURL("http://www.google.com/#hash"));
 
   EXPECT_EQ("Goodbye", extension->page_action()->GetTitle(tab_id()));
   EXPECT_EQ(extension->GetResourceURL("popup.html"),

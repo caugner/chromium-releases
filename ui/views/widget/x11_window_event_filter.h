@@ -11,9 +11,8 @@
 
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
-#include "ui/aura/event.h"
 #include "ui/aura/event_filter.h"
-#include "ui/aura/x11_atom_cache.h"
+#include "ui/base/x/x11_atom_cache.h"
 #include "ui/views/views_export.h"
 
 namespace aura {
@@ -30,8 +29,7 @@ class VIEWS_EXPORT X11WindowEventFilter : public aura::EventFilter {
  public:
   explicit X11WindowEventFilter(
       aura::RootWindow* root_window,
-      aura::DesktopActivationClient* activation_client,
-      NativeWidgetAura* widget);
+      aura::DesktopActivationClient* activation_client);
   virtual ~X11WindowEventFilter();
 
   // Changes whether borders are shown on this |root_window|.
@@ -39,14 +37,15 @@ class VIEWS_EXPORT X11WindowEventFilter : public aura::EventFilter {
 
   // Overridden from EventFilter:
   virtual bool PreHandleKeyEvent(aura::Window* target,
-                                 aura::KeyEvent* event) OVERRIDE;
+                                 ui::KeyEvent* event) OVERRIDE;
   virtual bool PreHandleMouseEvent(aura::Window* target,
-                                   aura::MouseEvent* event) OVERRIDE;
-  virtual ui::TouchStatus PreHandleTouchEvent(aura::Window* target,
-                                              aura::TouchEvent* event) OVERRIDE;
-  virtual ui::GestureStatus PreHandleGestureEvent(
+                                   ui::MouseEvent* event) OVERRIDE;
+  virtual ui::TouchStatus PreHandleTouchEvent(
       aura::Window* target,
-      aura::GestureEvent* event) OVERRIDE;
+      ui::TouchEvent* event) OVERRIDE;
+  virtual ui::EventResult PreHandleGestureEvent(
+      aura::Window* target,
+      ui::GestureEvent* event) OVERRIDE;
 
  private:
   // Dispatches a _NET_WM_MOVERESIZE message to the window manager to tell it
@@ -54,7 +53,6 @@ class VIEWS_EXPORT X11WindowEventFilter : public aura::EventFilter {
   bool DispatchHostWindowDragMovement(int hittest,
                                       const gfx::Point& screen_location);
 
-  NativeWidgetAura* widget_;
   aura::DesktopActivationClient* activation_client_;
 
   // The display and the native X window hosting the root window.
@@ -64,7 +62,7 @@ class VIEWS_EXPORT X11WindowEventFilter : public aura::EventFilter {
   // The native root window.
   ::Window x_root_window_;
 
-  aura::X11AtomCache atom_cache_;
+  ui::X11AtomCache atom_cache_;
 
   // True if |xwindow_| is the current _NET_ACTIVE_WINDOW.
   bool is_active_;

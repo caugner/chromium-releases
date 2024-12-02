@@ -131,12 +131,6 @@ class CHROMEOS_EXPORT PowerManagerClient {
   // Requests shutdown of the system.
   virtual void RequestShutdown() = 0;
 
-  // Notifies PowerManager that screen lock has been completed.
-  virtual void NotifyScreenLockCompleted() = 0;
-
-  // Notifies PowerManager that screen is unlocked.
-  virtual void NotifyScreenUnlockCompleted() = 0;
-
   // Idle management functions:
 
   // Calculates idle time asynchronously, after the idle time request has
@@ -156,9 +150,11 @@ class CHROMEOS_EXPORT PowerManagerClient {
   virtual void NotifyUserActivity(
       const base::TimeTicks& last_activity_time) = 0;
 
-  // Notifies the power manager that a video is currently playing.
+  // Notifies the power manager that a video is currently playing. It also
+  // includes whether or not the containing window for the video is fullscreen.
   virtual void NotifyVideoActivity(
-      const base::TimeTicks& last_activity_time) = 0;
+      const base::TimeTicks& last_activity_time,
+      bool is_fullscreen) = 0;
 
   // Override the current power state on the machine. The overrides will be
   // applied to the request ID specified. To specify a new request; use 0 as
@@ -173,6 +169,14 @@ class CHROMEOS_EXPORT PowerManagerClient {
       uint32 duration,
       int overrides,
       const PowerStateRequestIdCallback& callback) = 0;
+
+  // Cancels the power state override request specified by request_id.
+  virtual void CancelPowerStateOverrides(uint32 request_id) = 0;
+
+  // Tells powerd whether or not we are in a projecting mode.  This is used to
+  // adjust idleness thresholds and derived, on this side, from the number of
+  // video outputs attached.
+  virtual void SetIsProjecting(bool is_projecting) = 0;
 
   // Creates the instance.
   static PowerManagerClient* Create(DBusClientImplementationType type,

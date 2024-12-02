@@ -6,17 +6,18 @@
 
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/string_tokenizer.h"
 #include "base/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/sms_watcher.h"
 #include "chromeos/dbus/cashew_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/flimflam_device_client.h"
-#include "chromeos/dbus/flimflam_ipconfig_client.h"
-#include "chromeos/dbus/flimflam_manager_client.h"
-#include "chromeos/dbus/flimflam_network_client.h"
-#include "chromeos/dbus/flimflam_profile_client.h"
-#include "chromeos/dbus/flimflam_service_client.h"
+#include "chromeos/dbus/shill_device_client.h"
+#include "chromeos/dbus/shill_ipconfig_client.h"
+#include "chromeos/dbus/shill_manager_client.h"
+#include "chromeos/dbus/shill_network_client.h"
+#include "chromeos/dbus/shill_profile_client.h"
+#include "chromeos/dbus/shill_service_client.h"
 #include "dbus/object_path.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -29,12 +30,12 @@ class NetworkManagerPropertiesWatcher : public CrosNetworkWatcher {
  public:
   NetworkManagerPropertiesWatcher(
       const NetworkPropertiesWatcherCallback& callback) {
-    DBusThreadManager::Get()->GetFlimflamManagerClient()->
+    DBusThreadManager::Get()->GetShillManagerClient()->
         SetPropertyChangedHandler(base::Bind(callback,
                                              flimflam::kFlimflamServicePath));
   }
   virtual ~NetworkManagerPropertiesWatcher() {
-    DBusThreadManager::Get()->GetFlimflamManagerClient()->
+    DBusThreadManager::Get()->GetShillManagerClient()->
         ResetPropertyChangedHandler();
   }
 };
@@ -45,12 +46,12 @@ class NetworkServicePropertiesWatcher : public CrosNetworkWatcher {
   NetworkServicePropertiesWatcher(
       const NetworkPropertiesWatcherCallback& callback,
       const std::string& service_path) : service_path_(service_path) {
-    DBusThreadManager::Get()->GetFlimflamServiceClient()->
+    DBusThreadManager::Get()->GetShillServiceClient()->
         SetPropertyChangedHandler(dbus::ObjectPath(service_path),
                                   base::Bind(callback, service_path));
   }
   virtual ~NetworkServicePropertiesWatcher() {
-    DBusThreadManager::Get()->GetFlimflamServiceClient()->
+    DBusThreadManager::Get()->GetShillServiceClient()->
         ResetPropertyChangedHandler(dbus::ObjectPath(service_path_));
   }
 
@@ -64,12 +65,12 @@ class NetworkDevicePropertiesWatcher : public CrosNetworkWatcher {
   NetworkDevicePropertiesWatcher(
       const NetworkPropertiesWatcherCallback& callback,
       const std::string& device_path) : device_path_(device_path) {
-    DBusThreadManager::Get()->GetFlimflamDeviceClient()->
+    DBusThreadManager::Get()->GetShillDeviceClient()->
         SetPropertyChangedHandler(dbus::ObjectPath(device_path),
                                   base::Bind(callback, device_path));
   }
   virtual ~NetworkDevicePropertiesWatcher() {
-    DBusThreadManager::Get()->GetFlimflamDeviceClient()->
+    DBusThreadManager::Get()->GetShillDeviceClient()->
         ResetPropertyChangedHandler(dbus::ObjectPath(device_path_));
   }
 
@@ -189,13 +190,13 @@ void RunCallbackWithDictionaryValue(const NetworkPropertiesCallback& callback,
   callback.Run(path, call_status == DBUS_METHOD_CALL_SUCCESS ? &value : NULL);
 }
 
-// Used as a callback for FlimflamManagerClient::GetService
+// Used as a callback for ShillManagerClient::GetService
 void OnGetService(const NetworkPropertiesCallback& callback,
                   DBusMethodCallStatus call_status,
                   const dbus::ObjectPath& service_path) {
   if (call_status == DBUS_METHOD_CALL_SUCCESS) {
     VLOG(1) << "OnGetServiceService: " << service_path.value();
-    DBusThreadManager::Get()->GetFlimflamServiceClient()->GetProperties(
+    DBusThreadManager::Get()->GetShillServiceClient()->GetProperties(
         service_path, base::Bind(&RunCallbackWithDictionaryValue,
                                  callback,
                                  service_path.value()));
@@ -231,26 +232,6 @@ IPConfigType ParseIPConfigType(const std::string& type) {
   return IPCONFIG_TYPE_UNKNOWN;
 }
 
-// Converts a prefix length to a netmask. (for ipv4)
-// e.g. a netmask of 255.255.255.0 has a prefixlen of 24
-std::string PrefixlenToNetmask(int32 prefixlen) {
-  std::string netmask;
-  for (int i = 0; i < 4; i++) {
-    int len = 8;
-    if (prefixlen >= 8) {
-      prefixlen -= 8;
-    } else {
-      len = prefixlen;
-      prefixlen = 0;
-    }
-    if (i > 0)
-      netmask += ".";
-    int num = len == 0 ? 0 : ((2L << (len - 1)) - 1) << (8 - len);
-    netmask += StringPrintf("%d", num);
-  }
-  return netmask;
-}
-
 // Converts a list of name servers to a string.
 std::string ConvertNameSerersListToString(const base::ListValue& name_servers) {
   std::string result;
@@ -274,8 +255,8 @@ std::string ConvertNameSerersListToString(const base::ListValue& name_servers) {
 bool ParseIPConfig(const std::string& device_path,
                    const std::string& ipconfig_path,
                    NetworkIPConfigVector* ipconfig_vector) {
-  FlimflamIPConfigClient* ipconfig_client =
-      DBusThreadManager::Get()->GetFlimflamIPConfigClient();
+  ShillIPConfigClient* ipconfig_client =
+      DBusThreadManager::Get()->GetShillIPConfigClient();
   // TODO(hashimoto): Remove this blocking D-Bus method call. crosbug.com/29902
   scoped_ptr<base::DictionaryValue> properties(
       ipconfig_client->CallGetPropertiesAndBlock(
@@ -305,8 +286,11 @@ bool ParseIPConfig(const std::string& device_path,
     LOG(ERROR) << "Cannot get name servers.";
   }
   ipconfig_vector->push_back(
-      NetworkIPConfig(device_path, ParseIPConfigType(type_string), address,
-                      PrefixlenToNetmask(prefix_len), gateway,
+      NetworkIPConfig(device_path,
+                      ParseIPConfigType(type_string),
+                      address,
+                      CrosPrefixLengthToNetmask(prefix_len),
+                      gateway,
                       name_servers_string));
   return true;
 }
@@ -322,7 +306,7 @@ SMS::~SMS() {}
 
 bool CrosActivateCellularModem(const std::string& service_path,
                                const std::string& carrier) {
-  return DBusThreadManager::Get()->GetFlimflamServiceClient()->
+  return DBusThreadManager::Get()->GetShillServiceClient()->
       CallActivateCellularModemAndBlock(dbus::ObjectPath(service_path),
                                         carrier);
 }
@@ -330,41 +314,41 @@ bool CrosActivateCellularModem(const std::string& service_path,
 void CrosSetNetworkServiceProperty(const std::string& service_path,
                                    const std::string& property,
                                    const base::Value& value) {
-  DBusThreadManager::Get()->GetFlimflamServiceClient()->SetProperty(
+  DBusThreadManager::Get()->GetShillServiceClient()->SetProperty(
       dbus::ObjectPath(service_path), property, value,
       base::Bind(&DoNothing));
 }
 
 void CrosClearNetworkServiceProperty(const std::string& service_path,
                                      const std::string& property) {
-  DBusThreadManager::Get()->GetFlimflamServiceClient()->ClearProperty(
+  DBusThreadManager::Get()->GetShillServiceClient()->ClearProperty(
       dbus::ObjectPath(service_path), property, base::Bind(&DoNothing));
 }
 
 void CrosSetNetworkDeviceProperty(const std::string& device_path,
                                   const std::string& property,
                                   const base::Value& value) {
-  DBusThreadManager::Get()->GetFlimflamDeviceClient()->SetProperty(
+  DBusThreadManager::Get()->GetShillDeviceClient()->SetProperty(
       dbus::ObjectPath(device_path), property, value, base::Bind(&DoNothing));
 }
 
 void CrosSetNetworkIPConfigProperty(const std::string& ipconfig_path,
                                     const std::string& property,
                                     const base::Value& value) {
-  DBusThreadManager::Get()->GetFlimflamIPConfigClient()->SetProperty(
+  DBusThreadManager::Get()->GetShillIPConfigClient()->SetProperty(
       dbus::ObjectPath(ipconfig_path), property, value,
       base::Bind(&DoNothing));
 }
 
 void CrosSetNetworkManagerProperty(const std::string& property,
                                    const base::Value& value) {
-  DBusThreadManager::Get()->GetFlimflamManagerClient()->SetProperty(
+  DBusThreadManager::Get()->GetShillManagerClient()->SetProperty(
       property, value, base::Bind(&DoNothing));
 }
 
 void CrosDeleteServiceFromProfile(const std::string& profile_path,
                                   const std::string& service_path) {
-  DBusThreadManager::Get()->GetFlimflamProfileClient()->DeleteEntry(
+  DBusThreadManager::Get()->GetShillProfileClient()->DeleteEntry(
       dbus::ObjectPath(profile_path), service_path, base::Bind(&DoNothing));
 }
 
@@ -403,7 +387,7 @@ CrosNetworkWatcher* CrosMonitorSMS(const std::string& modem_device_path,
 void CrosRequestNetworkServiceConnect(
     const std::string& service_path,
     const NetworkOperationCallback& callback) {
-  DBusThreadManager::Get()->GetFlimflamServiceClient()->Connect(
+  DBusThreadManager::Get()->GetShillServiceClient()->Connect(
       dbus::ObjectPath(service_path),
       base::Bind(callback, service_path, NETWORK_METHOD_ERROR_NONE,
                  std::string()),
@@ -412,7 +396,7 @@ void CrosRequestNetworkServiceConnect(
 
 void CrosRequestNetworkManagerProperties(
     const NetworkPropertiesCallback& callback) {
-  DBusThreadManager::Get()->GetFlimflamManagerClient()->GetProperties(
+  DBusThreadManager::Get()->GetShillManagerClient()->GetProperties(
       base::Bind(&RunCallbackWithDictionaryValue,
                  callback,
                  flimflam::kFlimflamServicePath));
@@ -421,7 +405,7 @@ void CrosRequestNetworkManagerProperties(
 void CrosRequestNetworkServiceProperties(
     const std::string& service_path,
     const NetworkPropertiesCallback& callback) {
-  DBusThreadManager::Get()->GetFlimflamServiceClient()->GetProperties(
+  DBusThreadManager::Get()->GetShillServiceClient()->GetProperties(
       dbus::ObjectPath(service_path),
       base::Bind(&RunCallbackWithDictionaryValue, callback, service_path));
 }
@@ -429,7 +413,7 @@ void CrosRequestNetworkServiceProperties(
 void CrosRequestNetworkDeviceProperties(
     const std::string& device_path,
     const NetworkPropertiesCallback& callback) {
-  DBusThreadManager::Get()->GetFlimflamDeviceClient()->GetProperties(
+  DBusThreadManager::Get()->GetShillDeviceClient()->GetProperties(
       dbus::ObjectPath(device_path),
       base::Bind(&RunCallbackWithDictionaryValue, callback, device_path));
 }
@@ -437,7 +421,7 @@ void CrosRequestNetworkDeviceProperties(
 void CrosRequestNetworkProfileProperties(
     const std::string& profile_path,
     const NetworkPropertiesCallback& callback) {
-  DBusThreadManager::Get()->GetFlimflamProfileClient()->GetProperties(
+  DBusThreadManager::Get()->GetShillProfileClient()->GetProperties(
       dbus::ObjectPath(profile_path),
       base::Bind(&RunCallbackWithDictionaryValue, callback, profile_path));
 }
@@ -446,7 +430,7 @@ void CrosRequestNetworkProfileEntryProperties(
     const std::string& profile_path,
     const std::string& profile_entry_path,
     const NetworkPropertiesCallback& callback) {
-  DBusThreadManager::Get()->GetFlimflamProfileClient()->GetEntry(
+  DBusThreadManager::Get()->GetShillProfileClient()->GetEntry(
       dbus::ObjectPath(profile_path),
       profile_entry_path,
       base::Bind(&RunCallbackWithDictionaryValue,
@@ -471,10 +455,10 @@ void CrosRequestHiddenWifiNetworkProperties(
   properties.SetWithoutPathExpansion(
       flimflam::kSecurityProperty,
       base::Value::CreateStringValue(security));
-  // flimflam.Manger.GetService() will apply the property changes in
+  // shill.Manger.GetService() will apply the property changes in
   // |properties| and return a new or existing service to OnGetService().
   // OnGetService will then call GetProperties which will then call callback.
-  DBusThreadManager::Get()->GetFlimflamManagerClient()->GetService(
+  DBusThreadManager::Get()->GetShillManagerClient()->GetService(
       properties, base::Bind(&OnGetService, callback));
 }
 
@@ -501,35 +485,35 @@ void CrosRequestVirtualNetworkProperties(
       flimflam::kVPNDomainProperty,
       base::Value::CreateStringValue(service_name));
 
-  // flimflam.Manger.GetService() will apply the property changes in
+  // shill.Manger.GetService() will apply the property changes in
   // |properties| and pass a new or existing service to OnGetService().
   // OnGetService will then call GetProperties which will then call callback.
-  DBusThreadManager::Get()->GetFlimflamManagerClient()->GetService(
+  DBusThreadManager::Get()->GetShillManagerClient()->GetService(
       properties, base::Bind(&OnGetService, callback));
 }
 
 void CrosRequestNetworkServiceDisconnect(const std::string& service_path) {
-  DBusThreadManager::Get()->GetFlimflamServiceClient()->Disconnect(
+  DBusThreadManager::Get()->GetShillServiceClient()->Disconnect(
       dbus::ObjectPath(service_path), base::Bind(&DoNothing));
 }
 
 void CrosRequestRemoveNetworkService(const std::string& service_path) {
-  DBusThreadManager::Get()->GetFlimflamServiceClient()->Remove(
+  DBusThreadManager::Get()->GetShillServiceClient()->Remove(
       dbus::ObjectPath(service_path), base::Bind(&DoNothing));
 }
 
 void CrosRequestNetworkScan(const std::string& network_type) {
-  DBusThreadManager::Get()->GetFlimflamManagerClient()->RequestScan(
+  DBusThreadManager::Get()->GetShillManagerClient()->RequestScan(
       network_type, base::Bind(&DoNothing));
 }
 
 void CrosRequestNetworkDeviceEnable(const std::string& network_type,
                                     bool enable) {
   if (enable) {
-    DBusThreadManager::Get()->GetFlimflamManagerClient()->EnableTechnology(
+    DBusThreadManager::Get()->GetShillManagerClient()->EnableTechnology(
         network_type, base::Bind(&DoNothing));
   } else {
-    DBusThreadManager::Get()->GetFlimflamManagerClient()->DisableTechnology(
+    DBusThreadManager::Get()->GetShillManagerClient()->DisableTechnology(
         network_type, base::Bind(&DoNothing));
   }
 }
@@ -538,7 +522,7 @@ void CrosRequestRequirePin(const std::string& device_path,
                            const std::string& pin,
                            bool enable,
                            const NetworkOperationCallback& callback) {
-  DBusThreadManager::Get()->GetFlimflamDeviceClient()->RequirePin(
+  DBusThreadManager::Get()->GetShillDeviceClient()->RequirePin(
       dbus::ObjectPath(device_path), pin, enable,
       base::Bind(callback, device_path, NETWORK_METHOD_ERROR_NONE,
                  std::string()),
@@ -548,7 +532,7 @@ void CrosRequestRequirePin(const std::string& device_path,
 void CrosRequestEnterPin(const std::string& device_path,
                          const std::string& pin,
                          const NetworkOperationCallback& callback) {
-  DBusThreadManager::Get()->GetFlimflamDeviceClient()->EnterPin(
+  DBusThreadManager::Get()->GetShillDeviceClient()->EnterPin(
       dbus::ObjectPath(device_path), pin,
       base::Bind(callback, device_path, NETWORK_METHOD_ERROR_NONE,
                  std::string()),
@@ -559,7 +543,7 @@ void CrosRequestUnblockPin(const std::string& device_path,
                            const std::string& unblock_code,
                            const std::string& pin,
                            const NetworkOperationCallback& callback) {
-  DBusThreadManager::Get()->GetFlimflamDeviceClient()->UnblockPin(
+  DBusThreadManager::Get()->GetShillDeviceClient()->UnblockPin(
       dbus::ObjectPath(device_path), unblock_code, pin,
       base::Bind(callback, device_path, NETWORK_METHOD_ERROR_NONE,
                  std::string()),
@@ -570,7 +554,7 @@ void CrosRequestChangePin(const std::string& device_path,
                           const std::string& old_pin,
                           const std::string& new_pin,
                           const NetworkOperationCallback& callback) {
-  DBusThreadManager::Get()->GetFlimflamDeviceClient()->ChangePin(
+  DBusThreadManager::Get()->GetShillDeviceClient()->ChangePin(
       dbus::ObjectPath(device_path), old_pin, new_pin,
       base::Bind(callback, device_path, NETWORK_METHOD_ERROR_NONE,
                  std::string()),
@@ -578,14 +562,14 @@ void CrosRequestChangePin(const std::string& device_path,
 }
 
 void CrosProposeScan(const std::string& device_path) {
-  DBusThreadManager::Get()->GetFlimflamDeviceClient()->ProposeScan(
+  DBusThreadManager::Get()->GetShillDeviceClient()->ProposeScan(
       dbus::ObjectPath(device_path), base::Bind(&DoNothing));
 }
 
 void CrosRequestCellularRegister(const std::string& device_path,
                                  const std::string& network_id,
                                  const NetworkOperationCallback& callback) {
-  DBusThreadManager::Get()->GetFlimflamDeviceClient()->Register(
+  DBusThreadManager::Get()->GetShillDeviceClient()->Register(
       dbus::ObjectPath(device_path), network_id,
       base::Bind(callback, device_path, NETWORK_METHOD_ERROR_NONE,
                  std::string()),
@@ -594,7 +578,7 @@ void CrosRequestCellularRegister(const std::string& device_path,
 
 bool CrosSetOfflineMode(bool offline) {
   base::FundamentalValue value(offline);
-  DBusThreadManager::Get()->GetFlimflamManagerClient()->SetProperty(
+  DBusThreadManager::Get()->GetShillManagerClient()->SetProperty(
       flimflam::kOfflineModeProperty, value, base::Bind(&DoNothing));
   return true;
 }
@@ -606,8 +590,8 @@ bool CrosListIPConfigs(const std::string& device_path,
   if (hardware_address)
     hardware_address->clear();
   const dbus::ObjectPath device_object_path(device_path);
-  FlimflamDeviceClient* device_client =
-      DBusThreadManager::Get()->GetFlimflamDeviceClient();
+  ShillDeviceClient* device_client =
+      DBusThreadManager::Get()->GetShillDeviceClient();
   // TODO(hashimoto): Remove this blocking D-Bus method call.
   // crosbug.com/29902
   scoped_ptr<base::DictionaryValue> properties(
@@ -665,7 +649,7 @@ bool CrosAddIPConfig(const std::string& device_path, IPConfigType type) {
       return false;
   };
   const dbus::ObjectPath result =
-      DBusThreadManager::Get()->GetFlimflamDeviceClient()->
+      DBusThreadManager::Get()->GetShillDeviceClient()->
       CallAddIPConfigAndBlock(dbus::ObjectPath(device_path), type_str);
   if (result.value().empty()) {
     LOG(ERROR) << "Add IPConfig failed for device path " << device_path
@@ -676,13 +660,19 @@ bool CrosAddIPConfig(const std::string& device_path, IPConfigType type) {
 }
 
 bool CrosRemoveIPConfig(const std::string& ipconfig_path) {
-  return DBusThreadManager::Get()->GetFlimflamIPConfigClient()->
+  return DBusThreadManager::Get()->GetShillIPConfigClient()->
       CallRemoveAndBlock(dbus::ObjectPath(ipconfig_path));
+}
+
+void CrosRequestIPConfigRefresh(const std::string& ipconfig_path) {
+  DBusThreadManager::Get()->GetShillIPConfigClient()->Refresh(
+      dbus::ObjectPath(ipconfig_path),
+      base::Bind(&DoNothing));
 }
 
 bool CrosGetWifiAccessPoints(WifiAccessPointVector* result) {
   scoped_ptr<base::DictionaryValue> manager_properties(
-      DBusThreadManager::Get()->GetFlimflamManagerClient()->
+      DBusThreadManager::Get()->GetShillManagerClient()->
       CallGetPropertiesAndBlock());
   if (!manager_properties.get()) {
     LOG(WARNING) << "Couldn't read managers's properties";
@@ -705,7 +695,7 @@ bool CrosGetWifiAccessPoints(WifiAccessPointVector* result) {
       continue;
     }
     scoped_ptr<base::DictionaryValue> device_properties(
-        DBusThreadManager::Get()->GetFlimflamDeviceClient()->
+        DBusThreadManager::Get()->GetShillDeviceClient()->
         CallGetPropertiesAndBlock(dbus::ObjectPath(device_path)));
     if (!device_properties.get()) {
       LOG(WARNING) << "Couldn't read device's properties " << device_path;
@@ -738,7 +728,7 @@ bool CrosGetWifiAccessPoints(WifiAccessPointVector* result) {
       }
 
       scoped_ptr<base::DictionaryValue> network_properties(
-          DBusThreadManager::Get()->GetFlimflamNetworkClient()->
+          DBusThreadManager::Get()->GetShillNetworkClient()->
           CallGetPropertiesAndBlock(dbus::ObjectPath(network_path)));
       if (!network_properties.get()) {
         LOG(WARNING) << "Couldn't read network's properties " << network_path;
@@ -767,8 +757,85 @@ bool CrosGetWifiAccessPoints(WifiAccessPointVector* result) {
 }
 
 void CrosConfigureService(const base::DictionaryValue& properties) {
-  DBusThreadManager::Get()->GetFlimflamManagerClient()->ConfigureService(
+  DBusThreadManager::Get()->GetShillManagerClient()->ConfigureService(
       properties, base::Bind(&DoNothing));
+}
+
+std::string CrosPrefixLengthToNetmask(int32 prefix_length) {
+  std::string netmask;
+  // Return the empty string for invalid inputs.
+  if (prefix_length < 0 || prefix_length > 32)
+    return netmask;
+  for (int i = 0; i < 4; i++) {
+    int remainder = 8;
+    if (prefix_length >= 8) {
+      prefix_length -= 8;
+    } else {
+      remainder = prefix_length;
+      prefix_length = 0;
+    }
+    if (i > 0)
+      netmask += ".";
+    int value = remainder == 0 ? 0 :
+        ((2L << (remainder - 1)) - 1) << (8 - remainder);
+    netmask += StringPrintf("%d", value);
+  }
+  return netmask;
+}
+
+int32 CrosNetmaskToPrefixLength(const std::string& netmask) {
+  int count = 0;
+  int prefix_length = 0;
+  StringTokenizer t(netmask, ".");
+  while (t.GetNext()) {
+    // If there are more than 4 numbers, then it's invalid.
+    if (count == 4)
+      return -1;
+
+    std::string token = t.token();
+    // If we already found the last mask and the current one is not
+    // "0" then the netmask is invalid. For example, 255.224.255.0
+    if (prefix_length / 8 != count) {
+      if (token != "0")
+        return -1;
+    } else if (token == "255") {
+      prefix_length += 8;
+    } else if (token == "254") {
+      prefix_length += 7;
+    } else if (token == "252") {
+      prefix_length += 6;
+    } else if (token == "248") {
+      prefix_length += 5;
+    } else if (token == "240") {
+      prefix_length += 4;
+    } else if (token == "224") {
+      prefix_length += 3;
+    } else if (token == "192") {
+      prefix_length += 2;
+    } else if (token == "128") {
+      prefix_length += 1;
+    } else if (token == "0") {
+      prefix_length += 0;
+    } else {
+      // mask is not a valid number.
+      return -1;
+    }
+    count++;
+  }
+  if (count < 4)
+    return -1;
+  return prefix_length;
+}
+
+// Changes the active cellular carrier.
+void CrosSetCarrier(const std::string& device_path,
+                    const std::string& carrier,
+                    const NetworkOperationCallback& callback) {
+  DBusThreadManager::Get()->GetShillDeviceClient()->SetCarrier(
+      dbus::ObjectPath(device_path), carrier,
+      base::Bind(callback, device_path, NETWORK_METHOD_ERROR_NONE,
+                 std::string()),
+      base::Bind(&OnNetworkActionError, callback, device_path));
 }
 
 }  // namespace chromeos

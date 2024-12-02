@@ -10,6 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/string_util.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -18,6 +19,7 @@
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_disabled_ui.h"
+#include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -37,6 +39,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/pref_names.h"
@@ -115,7 +118,7 @@ DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
 
   GURL icon =
       ExtensionIconSource::GetIconURL(extension,
-                                      ExtensionIconSet::EXTENSION_ICON_MEDIUM,
+                                      extension_misc::EXTENSION_ICON_MEDIUM,
                                       ExtensionIconSet::MATCH_BIGGER,
                                       !enabled, NULL);
   if (extension->location() == Extension::LOAD)
@@ -224,16 +227,17 @@ void ExtensionSettingsHandler::GetLocalizedValues(
   localized_strings->SetString("extensionSettingsSuggestGallery",
       l10n_util::GetStringFUTF16(IDS_EXTENSIONS_NONE_INSTALLED_SUGGEST_GALLERY,
           ASCIIToUTF16(google_util::AppendGoogleLocaleParam(
-              GURL(extension_urls::GetWebstoreLaunchURL())).spec())));
+              GURL(extension_urls::GetExtensionGalleryURL())).spec())));
+  // TODO(aa): Is this even used anymore?.
   localized_strings->SetString("extensionSettingsGetMoreExtensionsDeprecated",
       l10n_util::GetStringFUTF16(IDS_GET_MORE_EXTENSIONS_DEPRECATED,
           ASCIIToUTF16(google_util::AppendGoogleLocaleParam(
-              GURL(extension_urls::GetWebstoreLaunchURL())).spec())));
+              GURL(extension_urls::GetExtensionGalleryURL())).spec())));
   localized_strings->SetString("extensionSettingsGetMoreExtensions",
       l10n_util::GetStringUTF16(IDS_GET_MORE_EXTENSIONS));
   localized_strings->SetString("extensionSettingsGetMoreExtensionsUrl",
       ASCIIToUTF16(google_util::AppendGoogleLocaleParam(
-          GURL(extension_urls::GetWebstoreLaunchURL())).spec()));
+          GURL(extension_urls::GetExtensionGalleryURL())).spec()));
   localized_strings->SetString("extensionSettingsExtensionId",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_ID));
   localized_strings->SetString("extensionSettingsExtensionPath",
@@ -623,6 +627,18 @@ void ExtensionSettingsHandler::HandleEnableMessage(const ListValue* args) {
           web_ui()->GetWebContents());
       extensions::ShowExtensionDisabledDialog(
           extension_service_, browser, extension);
+    } else if ((prefs->GetDisableReasons(extension_id) &
+                   Extension::DISABLE_UNSUPPORTED_REQUIREMENT) &&
+               !requirements_checker_.get()) {
+      // Recheck the requirements.
+      scoped_refptr<const Extension> extension =
+          extension_service_->GetExtensionById(extension_id,
+                                               true /* include disabled */);
+      requirements_checker_.reset(new extensions::RequirementsChecker());
+      requirements_checker_->Check(
+          extension,
+          base::Bind(&ExtensionSettingsHandler::OnRequirementsChecked,
+                     AsWeakPtr(), extension_id));
     } else {
       extension_service_->EnableExtension(extension_id);
     }
@@ -885,4 +901,17 @@ void ExtensionSettingsHandler::InspectExtensionHost(
     extensions::ExtensionHost* host) {
   if (host)
     DevToolsWindow::OpenDevToolsWindow(host->render_view_host());
+}
+
+void ExtensionSettingsHandler::OnRequirementsChecked(
+    std::string extension_id,
+    std::vector<std::string> requirement_errors) {
+  if (requirement_errors.empty()) {
+    extension_service_->EnableExtension(extension_id);
+  } else {
+    ExtensionErrorReporter::GetInstance()->ReportError(
+        UTF8ToUTF16(JoinString(requirement_errors, ' ')),
+        true /* be noisy */);
+  }
+  requirements_checker_.reset();
 }

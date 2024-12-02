@@ -26,10 +26,16 @@ OpenSLESOutputStream::OpenSLESOutputStream(AudioManagerAndroid* manager,
   format_.samplesPerSec = static_cast<SLuint32>(params.sample_rate() * 1000);
   format_.bitsPerSample = params.bits_per_sample();
   format_.containerSize = params.bits_per_sample();
-  format_.channelMask = SL_SPEAKER_FRONT_CENTER;
   format_.endianness = SL_BYTEORDER_LITTLEENDIAN;
+  if (format_.numChannels == 1)
+    format_.channelMask = SL_SPEAKER_FRONT_CENTER;
+  else if (format_.numChannels == 2)
+    format_.channelMask = SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT;
+  else
+    NOTREACHED() << "Unsupported number of channels: " << format_.numChannels;
 
   buffer_size_bytes_ = params.GetBytesPerBuffer();
+  audio_bus_ = AudioBus::Create(params);
 
   memset(&audio_data_, 0, sizeof(audio_data_));
 }
@@ -252,17 +258,21 @@ void OpenSLESOutputStream::FillBufferQueue() {
   // Read data from the registered client source.
   // TODO(xians): Get an accurate delay estimation.
   uint32 hardware_delay = buffer_size_bytes_;
-  size_t num_filled_bytes = callback_->OnMoreData(
-      audio_data_[active_queue_],
-      buffer_size_bytes_,
-      AudioBuffersState(0, hardware_delay));
-  DCHECK(num_filled_bytes <= buffer_size_bytes_);
+  int frames_filled = callback_->OnMoreData(
+      audio_bus_.get(), AudioBuffersState(0, hardware_delay));
+  int num_filled_bytes =
+      frames_filled * audio_bus_->channels() * format_.bitsPerSample / 8;
+  DCHECK_LE(static_cast<size_t>(num_filled_bytes), buffer_size_bytes_);
+  // Note: If this ever changes to output raw float the data must be clipped and
+  // sanitized since it may come from an untrusted source such as NaCl.
+  audio_bus_->ToInterleaved(
+      frames_filled, format_.bitsPerSample / 8, audio_data_[active_queue_]);
 
   // Perform in-place, software-volume adjustments.
   media::AdjustVolume(audio_data_[active_queue_],
                       num_filled_bytes,
                       format_.numChannels,
-                      format_.containerSize >> 3,
+                      format_.bitsPerSample / 8,
                       volume_);
 
   // Enqueue the buffer for playback.

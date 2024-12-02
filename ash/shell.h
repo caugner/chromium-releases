@@ -59,7 +59,9 @@ class Widget;
 namespace ash {
 
 class AcceleratorController;
+class CapsLockDelegate;
 class DesktopBackgroundController;
+class DisplayController;
 class HighContrastController;
 class Launcher;
 class NestedDispatcherController;
@@ -79,7 +81,6 @@ class AcceleratorFilter;
 class ActivationController;
 class AppListController;
 class CaptureController;
-class DisplayController;
 class DragDropController;
 class EventRewriterEventFilter;
 class FocusCycler;
@@ -152,8 +153,7 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
   // Returns the root window controller for the primary root window.
   static internal::RootWindowController* GetPrimaryRootWindowController();
 
-  // Returns all root window controllers. In non extended desktop
-  // mode, this return a RootWindowController for the primary root window only.
+  // Returns all root window controllers.
   static RootWindowControllerList GetAllRootWindowControllers();
 
   // Returns the primary RootWindow. The primary RootWindow is the one
@@ -166,8 +166,7 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
   // until the another window who has a different root window becomes active.
   static aura::RootWindow* GetActiveRootWindow();
 
-  // Returns all root windows. In non extended desktop mode, this
-  // returns the primary root window only.
+  // Returns all root windows.
   static RootWindowList GetAllRootWindows();
 
   static aura::Window* GetContainer(aura::RootWindow* root_window,
@@ -275,8 +274,11 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
   internal::FocusCycler* focus_cycler() {
     return focus_cycler_.get();
   }
-  internal::DisplayController* display_controller() {
+  DisplayController* display_controller() {
     return display_controller_.get();
+  }
+  internal::MouseCursorEventFilter* mouse_cursor_filter() {
+    return mouse_cursor_filter_.get();
   }
   CursorManager* cursor_manager() { return &cursor_manager_; }
 
@@ -284,6 +286,10 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
 
   UserWallpaperDelegate* user_wallpaper_delegate() {
     return user_wallpaper_delegate_.get();
+  }
+
+  CapsLockDelegate* caps_lock_delegate() {
+    return caps_lock_delegate_.get();
   }
 
   HighContrastController* high_contrast_controller() {
@@ -322,9 +328,6 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
   SystemTrayDelegate* tray_delegate();
   SystemTray* system_tray();
 
-  // Returns the size of the grid.
-  int GetGridSize() const;
-
   static void set_initially_hide_cursor(bool hide) {
     initially_hide_cursor_ = hide;
   }
@@ -345,6 +348,9 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
 
   // Initializes the root window to be used for a secondary display.
   void InitRootWindowForSecondaryDisplay(aura::RootWindow* root);
+
+  // Starts the animation that occurs on first login.
+  void DoInitialWorkspaceAnimation();
 
 #if defined(OS_CHROMEOS)
   chromeos::OutputConfigurator* output_configurator() {
@@ -377,9 +383,6 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
   void InitLayoutManagersForPrimaryDisplay(
       internal::RootWindowController* root_window_controller);
 
-  // Disables the workspace grid layout.
-  void DisableWorkspaceGridLayout();
-
   // aura::CursorManager::Delegate overrides:
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
   virtual void ShowCursor(bool visible) OVERRIDE;
@@ -408,6 +411,7 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
 
   scoped_ptr<ShellDelegate> delegate_;
   scoped_ptr<UserWallpaperDelegate> user_wallpaper_delegate_;
+  scoped_ptr<CapsLockDelegate> caps_lock_delegate_;
 
   scoped_ptr<Launcher> launcher_;
 
@@ -429,7 +433,7 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
   scoped_ptr<VideoDetector> video_detector_;
   scoped_ptr<WindowCycleController> window_cycle_controller_;
   scoped_ptr<internal::FocusCycler> focus_cycler_;
-  scoped_ptr<internal::DisplayController> display_controller_;
+  scoped_ptr<DisplayController> display_controller_;
   scoped_ptr<HighContrastController> high_contrast_controller_;
   scoped_ptr<internal::MagnificationController> magnification_controller_;
   scoped_ptr<aura::FocusManager> focus_manager_;

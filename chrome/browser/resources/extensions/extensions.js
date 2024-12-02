@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-<include src="../shared/js/cr/ui/drag_wrapper.js"></include>
 <include src="../uber/uber_utils.js"></include>
 <include src="extension_commands_overlay.js"></include>
 <include src="extension_focus_manager.js"></include>
@@ -116,6 +115,16 @@ cr.define('extensions', function() {
       cr.ui.overlay.setupOverlay($('dropTargetOverlay'));
 
       extensions.ExtensionFocusManager.getInstance().initialize();
+
+      var path = document.location.pathname;
+      if (path.length > 1) {
+        // Skip starting slash and remove trailing slash (if any).
+        var overlayName = path.slice(1).replace(/\/$/, '');
+        if (overlayName == 'configureCommands')
+          this.showExtensionCommandsConfigUi_();
+      }
+
+      preventDefaultOnPoundLinkClicks();  // From shared/js/util.js.
     },
 
     /**
@@ -143,15 +152,23 @@ cr.define('extensions', function() {
     },
 
     /**
+     * Shows the Extension Commands configuration UI.
+     * @param {Event} e Change event.
+     * @private
+     */
+    showExtensionCommandsConfigUi_: function(e) {
+      ExtensionSettings.showOverlay($('extensionCommandsOverlay'));
+      chrome.send('coreOptionsUserMetricsAction',
+                  ['Options_ExtensionCommands']);
+    },
+
+    /**
      * Handles the Configure (Extension) Commands link.
      * @param {Event} e Change event.
      * @private
      */
     handleExtensionCommandsConfig_: function(e) {
-      ExtensionSettings.showOverlay($('extensionCommandsOverlay'));
-      chrome.send('coreOptionsUserMetricsAction',
-                  ['Options_ExtensionCommands']);
-      e.preventDefault();
+      this.showExtensionCommandsConfigUi_();
     },
 
     /**

@@ -74,12 +74,11 @@ void ForeignSessionHandler::RegisterMessages() {
 }
 
 void ForeignSessionHandler::Init() {
-  // TODO(dubroy): Change this to only observe this notification on the current
-  // profile, rather than all sources (crbug.com/124717).
-  registrar_.Add(this, chrome::NOTIFICATION_SYNC_CONFIGURE_DONE,
-                 content::NotificationService::AllSources());
-
   Profile* profile = Profile::FromWebUI(web_ui());
+  ProfileSyncService* service =
+      ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
+  registrar_.Add(this, chrome::NOTIFICATION_SYNC_CONFIGURE_DONE,
+                 content::Source<ProfileSyncService>(service));
   registrar_.Add(this, chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED,
                  content::Source<Profile>(profile));
   registrar_.Add(this, chrome::NOTIFICATION_FOREIGN_SESSION_DISABLED,
@@ -239,6 +238,10 @@ void ForeignSessionHandler::HandleOpenForeignSession(const ListValue* args) {
       LOG(ERROR) << "Failed to load foreign tab.";
       return;
     }
+    if (tab->navigations.size() == 0) {
+      LOG(ERROR) << "Foreign tab no longer has valid navigations.";
+      return;
+    }
     WindowOpenDisposition disposition =
         web_ui_util::GetDispositionFromClick(args, 3);
     SessionRestore::RestoreForeignSessionTab(
@@ -307,7 +310,7 @@ bool ForeignSessionHandler::SessionTabToValue(
   GURL tab_url = current_navigation.virtual_url();
   if (tab_url == GURL(chrome::kChromeUINewTabURL))
     return false;
-  NewTabUI::SetURLTitleAndDirection(dictionary, current_navigation.title(),
+  NewTabUI::SetUrlTitleAndDirection(dictionary, current_navigation.title(),
                                     tab_url);
   dictionary->SetString("type", "tab");
   dictionary->SetDouble("timestamp",

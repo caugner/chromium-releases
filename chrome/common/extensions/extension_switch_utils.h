@@ -13,6 +13,8 @@ bool IsEasyOffStoreInstallEnabled();
 
 bool IsActionBoxEnabled();
 
+bool IsExtensionsInActionBoxEnabled();
+
 bool AreScriptBadgesEnabled();
 
 }  // switch_utils

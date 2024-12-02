@@ -4,21 +4,30 @@
 
 #include "ash/wm/system_gesture_event_filter.h"
 
-#include "base/timer.h"
 #include "ash/accelerators/accelerator_controller.h"
+#include "ash/ash_switches.h"
+#include "ash/display/multi_display_manager.h"
 #include "ash/launcher/launcher.h"
 #include "ash/launcher/launcher_model.h"
 #include "ash/shell.h"
 #include "ash/system/brightness/brightness_control_delegate.h"
+#include "ash/system/tray/system_tray_delegate.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/test_launcher_delegate.h"
 #include "ash/volume_control_delegate.h"
+#include "ash/wm/gestures/long_press_affordance_handler.h"
 #include "ash/wm/window_util.h"
+#include "base/command_line.h"
 #include "base/time.h"
-#include "ui/aura/event.h"
+#include "base/timer.h"
+#include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
+#include "ui/aura/test/event_generator.h"
 #include "ui/aura/test/test_windows.h"
+#include "ui/base/events/event.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/gfx/screen.h"
+#include "ui/views/widget/widget_delegate.h"
 
 namespace ash {
 namespace test {
@@ -67,6 +76,17 @@ class DummyVolumeControlDelegate : public VolumeControlDelegate,
   virtual void SetVolumePercent(double percent) OVERRIDE {
     SetPercent(percent);
   }
+  virtual bool IsAudioMuted() const OVERRIDE {
+    return false;
+  }
+  virtual void SetAudioMuted(bool muted) OVERRIDE {
+  }
+  virtual float GetVolumeLevel() const OVERRIDE {
+    return 0.0;
+  }
+  virtual void SetVolumeLevel(float level) OVERRIDE {
+  }
+
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DummyVolumeControlDelegate);
@@ -94,6 +114,18 @@ class DummyBrightnessControlDelegate : public BrightnessControlDelegate,
   DISALLOW_COPY_AND_ASSIGN(DummyBrightnessControlDelegate);
 };
 
+class ResizableWidgetDelegate : public views::WidgetDelegateView {
+ public:
+  ResizableWidgetDelegate() {}
+  virtual ~ResizableWidgetDelegate() {}
+
+ private:
+  virtual bool CanResize() const OVERRIDE { return true; }
+  virtual void DeleteDelegate() OVERRIDE { delete this; }
+
+  DISALLOW_COPY_AND_ASSIGN(ResizableWidgetDelegate);
+};
+
 } // namespace
 
 class SystemGestureEventFilterTest : public AshTestBase {
@@ -101,19 +133,19 @@ class SystemGestureEventFilterTest : public AshTestBase {
   SystemGestureEventFilterTest() : AshTestBase() {}
   virtual ~SystemGestureEventFilterTest() {}
 
-  internal::LongPressAffordanceAnimation* GetLongPressAffordance() {
+  internal::LongPressAffordanceHandler* GetLongPressAffordance() {
     Shell::TestApi shell_test(Shell::GetInstance());
     return shell_test.system_gesture_event_filter()->
         long_press_affordance_.get();
   }
 
-  base::OneShotTimer<internal::LongPressAffordanceAnimation>*
+  base::OneShotTimer<internal::LongPressAffordanceHandler>*
       GetLongPressAffordanceTimer() {
     return &GetLongPressAffordance()->timer_;
   }
 
-  aura::Window* GetLongPressAffordanceTarget() {
-    return GetLongPressAffordance()->tap_down_target_;
+  int GetLongPressAffordanceTouchId() {
+    return GetLongPressAffordance()->tap_down_touch_id_;
   }
 
   views::View* GetLongPressAffordanceView() {
@@ -121,17 +153,31 @@ class SystemGestureEventFilterTest : public AshTestBase {
         GetLongPressAffordance()->view_.get());
   }
 
+  // Overridden from AshTestBase:
+  virtual void SetUp() OVERRIDE {
+    CommandLine::ForCurrentProcess()->AppendSwitch(
+        ash::switches::kAshEnableAdvancedGestures);
+    CommandLine::ForCurrentProcess()->AppendSwitch(
+        ::switches::kEnableBezelTouch);
+    test::AshTestBase::SetUp();
+    // Enable brightness key.
+    static_cast<internal::MultiDisplayManager*>(
+        aura::Env::GetInstance()->display_manager())->
+        EnableInternalDisplayForTest();
+  }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(SystemGestureEventFilterTest);
 };
 
-aura::GestureEvent* CreateGesture(ui::EventType type,
-                                  int x,
-                                  int y,
-                                  float delta_x,
-                                  float delta_y,
-                                  int touch_id) {
-  return new aura::GestureEvent(type, x, y, 0, base::Time::Now(),
+ui::GestureEvent* CreateGesture(ui::EventType type,
+                                    int x,
+                                    int y,
+                                    float delta_x,
+                                    float delta_y,
+                                    int touch_id) {
+  return new ui::GestureEvent(type, x, y, 0,
+      base::TimeDelta::FromMilliseconds(base::Time::Now().ToDoubleT() * 1000),
       ui::GestureEventDetails(type, delta_x, delta_y), 1 << touch_id);
 }
 
@@ -145,13 +191,13 @@ TEST_F(SystemGestureEventFilterTest, TapOutsideRootWindow) {
   const int kTouchId = 5;
 
   // A touch outside the root window will be associated with the root window
-  aura::TouchEvent press(ui::ET_TOUCH_PRESSED, gfx::Point(-10, -10), kTouchId,
+  ui::TouchEvent press(ui::ET_TOUCH_PRESSED, gfx::Point(-10, -10), kTouchId,
       base::Time::NowFromSystemTime() - base::Time());
   root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
 
-  aura::GestureEvent* event = CreateGesture(
-      ui::ET_GESTURE_TAP, 0, 0, 0, 0, kTouchId);
-  bool consumed = root_window->DispatchGestureEvent(event);
+  scoped_ptr<ui::GestureEvent> event(CreateGesture(
+      ui::ET_GESTURE_TAP, 0, 0, 0, 0, kTouchId));
+  bool consumed = root_window->DispatchGestureEvent(event.get());
 
   EXPECT_TRUE(consumed);
 
@@ -160,12 +206,66 @@ TEST_F(SystemGestureEventFilterTest, TapOutsideRootWindow) {
   Shell::GetInstance()->RemoveEnvEventFilter(
       shell_test.system_gesture_event_filter());
 
-  aura::GestureEvent* event2 = CreateGesture(
-      ui::ET_GESTURE_TAP, 0, 0, 0, 0, kTouchId);
-  consumed = root_window->DispatchGestureEvent(event2);
+  scoped_ptr<ui::GestureEvent> event2(CreateGesture(
+      ui::ET_GESTURE_TAP, 0, 0, 0, 0, kTouchId));
+  consumed = root_window->DispatchGestureEvent(event2.get());
 
   // The event filter doesn't exist, so the touch won't be consumed.
   EXPECT_FALSE(consumed);
+}
+
+void MoveToDeviceControlBezelStartPosition(
+    aura::RootWindow* root_window,
+    DelegatePercentTracker* delegate,
+    double expected_value,
+    int xpos,
+    int ypos,
+    int ypos_half,
+    int touch_id) {
+  // Get a target for kTouchId
+  ui::TouchEvent press1(ui::ET_TOUCH_PRESSED,
+                        gfx::Point(-10, ypos + ypos_half),
+                        touch_id,
+                        base::Time::NowFromSystemTime() - base::Time());
+  root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&press1);
+
+  // There is a noise filter which will require several calls before it
+  // allows the touch event through.
+  int initial_count = delegate->handle_percent_count();
+
+  // Position the initial touch down slightly underneath the position of
+  // interest to avoid a conflict with the noise filter.
+  scoped_ptr<ui::GestureEvent> event1(CreateGesture(
+      ui::ET_GESTURE_SCROLL_BEGIN, xpos, ypos + ypos_half - 10,
+      0, 0, touch_id));
+  bool consumed = root_window->DispatchGestureEvent(event1.get());
+
+  EXPECT_TRUE(consumed);
+  EXPECT_EQ(initial_count, delegate->handle_percent_count());
+
+  // No move at the beginning will produce no events.
+  scoped_ptr<ui::GestureEvent> event2(CreateGesture(
+      ui::ET_GESTURE_SCROLL_UPDATE,
+      xpos, ypos + ypos_half - 10, 0, 0, touch_id));
+  consumed = root_window->DispatchGestureEvent(event2.get());
+
+  EXPECT_TRUE(consumed);
+  EXPECT_EQ(initial_count, delegate->handle_percent_count());
+
+  // A move to a new Y location will produce an event.
+  scoped_ptr<ui::GestureEvent> event3(CreateGesture(
+      ui::ET_GESTURE_SCROLL_UPDATE, xpos, ypos + ypos_half,
+      0, 10, touch_id));
+
+  int count = initial_count;
+  int loop_counter = 0;
+  while (count == initial_count && loop_counter++ < 100) {
+    EXPECT_TRUE(root_window->DispatchGestureEvent(event3.get()));
+    count = delegate->handle_percent_count();
+  }
+  EXPECT_TRUE(loop_counter && loop_counter < 100);
+  EXPECT_EQ(initial_count + 1, count);
+  EXPECT_EQ(expected_value, delegate->handle_percent());
 }
 
 // Ensure that the device control operation gets properly handled.
@@ -185,7 +285,7 @@ TEST_F(SystemGestureEventFilterTest, DeviceControl) {
 
   DummyVolumeControlDelegate* delegateVolume =
       new DummyVolumeControlDelegate();
-  accelerator->SetVolumeControlDelegate(
+  ash::Shell::GetInstance()->tray_delegate()->SetVolumeControlDelegate(
       scoped_ptr<VolumeControlDelegate>(delegateVolume).Pass());
 
   const int kTouchId = 5;
@@ -194,87 +294,81 @@ TEST_F(SystemGestureEventFilterTest, DeviceControl) {
     DelegatePercentTracker* delegate =
         static_cast<DelegatePercentTracker*>(delegateBrightness);
     int xpos = screen.x() - 10;
+    int invalid_xpos_direction = 1;
     int ypos = screen.y();
+    // The expected (middle) value. Note that brightness (first pass) is
+    // slightly higher then 50% since its slider range is 4%..100%.
+    double value = 52.0;
     if (pass) {
       // On the second pass the volume will be tested.
       delegate = static_cast<DelegatePercentTracker*>(delegateVolume);
-      xpos = screen.right() + 40;  // Make sure it is out of the screen.
+      xpos = screen.right() + 10;  // Make sure it is out of the screen.
+      invalid_xpos_direction = -1;
+      value = 50.0;
     }
-    // Get a target for kTouchId
-    aura::TouchEvent press1(ui::ET_TOUCH_PRESSED,
-                            gfx::Point(-10, ypos + ypos_half),
-                            kTouchId,
-                            base::Time::NowFromSystemTime() - base::Time());
-    root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&press1);
+    MoveToDeviceControlBezelStartPosition(
+        root_window, delegate, value, xpos, ypos, ypos_half, kTouchId);
 
-    aura::GestureEvent* event1 = CreateGesture(
-        ui::ET_GESTURE_SCROLL_BEGIN, xpos, ypos,
-        0, 0, kTouchId);
-    bool consumed = root_window->DispatchGestureEvent(event1);
-
-    EXPECT_TRUE(consumed);
-    EXPECT_EQ(0, delegate->handle_percent_count());
-
-    // No move at the beginning will produce no events.
-    aura::GestureEvent* event2 = CreateGesture(
+    // A move towards the screen is fine as long as we do not go inside it.
+    scoped_ptr<ui::GestureEvent> event4(CreateGesture(
         ui::ET_GESTURE_SCROLL_UPDATE,
-        xpos, ypos, 0, 0, kTouchId);
-    consumed = root_window->DispatchGestureEvent(event2);
-
-    EXPECT_TRUE(consumed);
-    EXPECT_EQ(0, delegate->handle_percent_count());
-
-    // A move to a new Y location will produce an event.
-    aura::GestureEvent* event3 = CreateGesture(
-        ui::ET_GESTURE_SCROLL_UPDATE, xpos, ypos + ypos_half,
-        0, ypos_half, kTouchId);
-    consumed = root_window->DispatchGestureEvent(event3);
-
-    EXPECT_TRUE(consumed);
-    EXPECT_EQ(1, delegate->handle_percent_count());
-    EXPECT_EQ(50.0, delegate->handle_percent());
-
-    // A move to an illegal Y location will produce legal results.
-    aura::GestureEvent* event4 = CreateGesture(
-        ui::ET_GESTURE_SCROLL_UPDATE, xpos, ypos - 100,
-        0, -ypos_half - 100, kTouchId);
-    consumed = root_window->DispatchGestureEvent(event4);
+        xpos + invalid_xpos_direction,
+        ypos + ypos_half,
+        invalid_xpos_direction, 0, kTouchId));
+    bool consumed = root_window->DispatchGestureEvent(event4.get());
 
     EXPECT_TRUE(consumed);
     EXPECT_EQ(2, delegate->handle_percent_count());
-    EXPECT_EQ(100.0, delegate->handle_percent());
 
-    aura::GestureEvent* event5 = CreateGesture(
-        ui::ET_GESTURE_SCROLL_UPDATE, xpos, ypos + 2 * screen.height(),
-        0, 2 * screen.height() + 100, kTouchId);
-    consumed = root_window->DispatchGestureEvent(event5);
+    // A move into the screen will cancel the gesture.
+    scoped_ptr<ui::GestureEvent> event5(CreateGesture(
+        ui::ET_GESTURE_SCROLL_UPDATE,
+        xpos + 20 * invalid_xpos_direction,
+        ypos + ypos_half,
+        20 * invalid_xpos_direction, 0, kTouchId));
+    consumed = root_window->DispatchGestureEvent(event5.get());
 
     EXPECT_TRUE(consumed);
-    EXPECT_EQ(3, delegate->handle_percent_count());
-    EXPECT_EQ(0.0, delegate->handle_percent());
+    EXPECT_EQ(2, delegate->handle_percent_count());
 
     // Finishing the gesture should not change anything.
-    aura::GestureEvent* event7 = CreateGesture(
+    scoped_ptr<ui::GestureEvent> event6(CreateGesture(
         ui::ET_GESTURE_SCROLL_END, xpos, ypos + ypos_half,
-        0, 0, kTouchId);
-    consumed = root_window->DispatchGestureEvent(event7);
+        0, 0, kTouchId));
+    consumed = root_window->DispatchGestureEvent(event6.get());
 
     EXPECT_TRUE(consumed);
-    EXPECT_EQ(3, delegate->handle_percent_count());
+    EXPECT_EQ(2, delegate->handle_percent_count());
 
     // Another event after this one should get ignored.
-    aura::GestureEvent* event8 = CreateGesture(
+    scoped_ptr<ui::GestureEvent> event7(CreateGesture(
         ui::ET_GESTURE_SCROLL_UPDATE, xpos, ypos_half,
-        0, 0, kTouchId);
-    consumed = root_window->DispatchGestureEvent(event8);
+        0, 0, kTouchId));
+    consumed = root_window->DispatchGestureEvent(event7.get());
+
+    EXPECT_TRUE(consumed);
+    EXPECT_EQ(2, delegate->handle_percent_count());
+
+    ui::TouchEvent release(
+        ui::ET_TOUCH_RELEASED, gfx::Point(2 * xpos, ypos + ypos_half), kTouchId,
+        base::Time::NowFromSystemTime() - base::Time());
+    root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&release);
+
+    // Check that huge changes will be interpreted as noise as well.
+    MoveToDeviceControlBezelStartPosition(
+        root_window, delegate, value, xpos, ypos, ypos_half, kTouchId);
+    // Note: The counter is with this call at 3.
+
+    scoped_ptr<ui::GestureEvent> event8(CreateGesture(
+        ui::ET_GESTURE_SCROLL_UPDATE, xpos, ypos / 10,
+        0, ypos / 10 - ypos, kTouchId));
+    consumed = root_window->DispatchGestureEvent(event8.get());
 
     EXPECT_TRUE(consumed);
     EXPECT_EQ(3, delegate->handle_percent_count());
 
-    aura::TouchEvent release1(ui::ET_TOUCH_RELEASED,
-                              gfx::Point(2 * xpos, ypos + ypos_half), kTouchId,
-                              base::Time::NowFromSystemTime() - base::Time());
-    root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&release1);
+    // Release the system.
+    root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&release);
   }
 }
 
@@ -317,60 +411,60 @@ TEST_F(SystemGestureEventFilterTest, ApplicationControl) {
     aura::Window* active_window = ash::wm::GetActiveWindow();
 
     // Get a target for kTouchId
-    aura::TouchEvent press(ui::ET_TOUCH_PRESSED,
-                           gfx::Point(-10, ypos + ypos_half),
-                           kTouchId,
-                           base::Time::NowFromSystemTime() - base::Time());
+    ui::TouchEvent press(ui::ET_TOUCH_PRESSED,
+                             gfx::Point(-10, ypos + ypos_half),
+                             kTouchId,
+                             base::Time::NowFromSystemTime() - base::Time());
     root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
 
-    aura::GestureEvent* event1 = CreateGesture(
+    scoped_ptr<ui::GestureEvent> event1(CreateGesture(
         ui::ET_GESTURE_SCROLL_BEGIN, xpos, ypos,
-        0, 0, kTouchId);
-    bool consumed = root_window->DispatchGestureEvent(event1);
+        0, 0, kTouchId));
+    bool consumed = root_window->DispatchGestureEvent(event1.get());
 
     EXPECT_TRUE(consumed);
     EXPECT_EQ(ash::wm::GetActiveWindow(), active_window);
 
     // No move at the beginning will produce no events.
-    aura::GestureEvent* event2 = CreateGesture(
+    scoped_ptr<ui::GestureEvent> event2(CreateGesture(
         ui::ET_GESTURE_SCROLL_UPDATE,
-        xpos, ypos, 0, 0, kTouchId);
-    consumed = root_window->DispatchGestureEvent(event2);
+        xpos, ypos, 0, 0, kTouchId));
+    consumed = root_window->DispatchGestureEvent(event2.get());
 
     EXPECT_TRUE(consumed);
     EXPECT_EQ(ash::wm::GetActiveWindow(), active_window);
 
     // A move further to the outside will not trigger an action.
-    aura::GestureEvent* event3 = CreateGesture(
+    scoped_ptr<ui::GestureEvent> event3(CreateGesture(
         ui::ET_GESTURE_SCROLL_UPDATE, xpos - delta_x, ypos,
-        -delta_x, 0, kTouchId);
-    consumed = root_window->DispatchGestureEvent(event3);
+        -delta_x, 0, kTouchId));
+    consumed = root_window->DispatchGestureEvent(event3.get());
 
     EXPECT_TRUE(consumed);
     EXPECT_EQ(ash::wm::GetActiveWindow(), active_window);
 
     // A move to the proper side will trigger an action.
-    aura::GestureEvent* event4 = CreateGesture(
+    scoped_ptr<ui::GestureEvent> event4(CreateGesture(
         ui::ET_GESTURE_SCROLL_UPDATE, xpos + delta_x, ypos,
-        2 * delta_x, 0, kTouchId);
-    consumed = root_window->DispatchGestureEvent(event4);
+        2 * delta_x, 0, kTouchId));
+    consumed = root_window->DispatchGestureEvent(event4.get());
 
     EXPECT_TRUE(consumed);
     EXPECT_NE(ash::wm::GetActiveWindow(), active_window);
     active_window = ash::wm::GetActiveWindow();
 
     // A second move to the proper side will not trigger an action.
-    aura::GestureEvent* event5 = CreateGesture(
+    scoped_ptr<ui::GestureEvent>  event5(CreateGesture(
         ui::ET_GESTURE_SCROLL_UPDATE, xpos + 2 * delta_x, ypos,
-        delta_x, 0, kTouchId);
-    consumed = root_window->DispatchGestureEvent(event5);
+        delta_x, 0, kTouchId));
+    consumed = root_window->DispatchGestureEvent(event5.get());
 
     EXPECT_TRUE(consumed);
     EXPECT_EQ(ash::wm::GetActiveWindow(), active_window);
 
-    aura::TouchEvent release(ui::ET_TOUCH_RELEASED,
-                             gfx::Point(2 * xpos, ypos + ypos_half), kTouchId,
-                             base::Time::NowFromSystemTime() - base::Time());
+    ui::TouchEvent release(
+        ui::ET_TOUCH_RELEASED, gfx::Point(2 * xpos, ypos + ypos_half), kTouchId,
+        base::Time::NowFromSystemTime() - base::Time());
     root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&release);
 
     // Remove the launcher items again.
@@ -400,15 +494,15 @@ TEST_F(SystemGestureEventFilterTest, LongPressAffordanceStateOnCaptureLoss) {
   EXPECT_TRUE(window1->HasCapture());
 
   // Send touch event to first window.
-  aura::TouchEvent press(ui::ET_TOUCH_PRESSED, gfx::Point(10, 10), kTouchId,
+  ui::TouchEvent press(ui::ET_TOUCH_PRESSED, gfx::Point(10, 10), kTouchId,
       base::Time::NowFromSystemTime() - base::Time());
   root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
   EXPECT_TRUE(window1->HasCapture());
 
-  base::OneShotTimer<internal::LongPressAffordanceAnimation>* timer =
+  base::OneShotTimer<internal::LongPressAffordanceHandler>* timer =
       GetLongPressAffordanceTimer();
   EXPECT_TRUE(timer->IsRunning());
-  EXPECT_EQ(window1.get(), GetLongPressAffordanceTarget());
+  EXPECT_EQ(kTouchId, GetLongPressAffordanceTouchId());
 
   // Force timeout so that the affordance animation can start.
   timer->user_task().Run();
@@ -420,14 +514,131 @@ TEST_F(SystemGestureEventFilterTest, LongPressAffordanceStateOnCaptureLoss) {
   EXPECT_TRUE(window2->HasCapture());
 
   EXPECT_TRUE(GetLongPressAffordance()->is_animating());
-  EXPECT_EQ(window1.get(), GetLongPressAffordanceTarget());
+  EXPECT_EQ(kTouchId, GetLongPressAffordanceTouchId());
 
   // Animate to completion.
-  GetLongPressAffordance()->End();
+  GetLongPressAffordance()->End();  // end grow animation.
+  // Force timeout to start shrink animation.
+  EXPECT_TRUE(timer->IsRunning());
+  timer->user_task().Run();
+  timer->Stop();
+  EXPECT_TRUE(GetLongPressAffordance()->is_animating());
+  GetLongPressAffordance()->End();  // end shrink animation.
 
   // Check if state has reset.
-  EXPECT_EQ(NULL, GetLongPressAffordanceTarget());
+  EXPECT_EQ(-1, GetLongPressAffordanceTouchId());
   EXPECT_EQ(NULL, GetLongPressAffordanceView());
+}
+
+TEST_F(SystemGestureEventFilterTest, MultiFingerSwipeGestures) {
+  aura::RootWindow* root_window = Shell::GetPrimaryRootWindow();
+  views::Widget* toplevel = views::Widget::CreateWindowWithBounds(
+      new ResizableWidgetDelegate, gfx::Rect(0, 0, 100, 100));
+  toplevel->Show();
+
+  const int kSteps = 15;
+  const int kTouchPoints = 4;
+  gfx::Point points[kTouchPoints] = {
+    gfx::Point(10, 30),
+    gfx::Point(30, 20),
+    gfx::Point(50, 30),
+    gfx::Point(80, 50)
+  };
+
+  aura::test::EventGenerator generator(root_window,
+                                       toplevel->GetNativeWindow());
+
+  // Swipe down to minimize.
+  generator.GestureMultiFingerScroll(kTouchPoints, points, 15, kSteps, 0, 150);
+  EXPECT_TRUE(wm::IsWindowMinimized(toplevel->GetNativeWindow()));
+
+  toplevel->Restore();
+
+  // Swipe up to maximize.
+  generator.GestureMultiFingerScroll(kTouchPoints, points, 15, kSteps, 0, -150);
+  EXPECT_TRUE(wm::IsWindowMaximized(toplevel->GetNativeWindow()));
+
+  toplevel->Restore();
+
+  // Swipe right to snap.
+  gfx::Rect normal_bounds = toplevel->GetWindowBoundsInScreen();
+  generator.GestureMultiFingerScroll(kTouchPoints, points, 15, kSteps, 150, 0);
+  gfx::Rect right_tile_bounds = toplevel->GetWindowBoundsInScreen();
+  EXPECT_NE(normal_bounds.ToString(), right_tile_bounds.ToString());
+
+  // Swipe left to snap.
+  gfx::Point left_points[kTouchPoints];
+  for (int i = 0; i < kTouchPoints; ++i) {
+    left_points[i] = points[i];
+    left_points[i].Offset(right_tile_bounds.x(), right_tile_bounds.y());
+  }
+  generator.GestureMultiFingerScroll(kTouchPoints, left_points, 15, kSteps,
+      -150, 0);
+  gfx::Rect left_tile_bounds = toplevel->GetWindowBoundsInScreen();
+  EXPECT_NE(normal_bounds.ToString(), left_tile_bounds.ToString());
+  EXPECT_NE(right_tile_bounds.ToString(), left_tile_bounds.ToString());
+
+  // Swipe right again.
+  generator.GestureMultiFingerScroll(kTouchPoints, points, 15, kSteps, 150, 0);
+  gfx::Rect current_bounds = toplevel->GetWindowBoundsInScreen();
+  EXPECT_NE(current_bounds.ToString(), left_tile_bounds.ToString());
+  EXPECT_EQ(current_bounds.ToString(), right_tile_bounds.ToString());
+}
+
+TEST_F(SystemGestureEventFilterTest, TwoFingerDrag) {
+  gfx::Rect bounds(0, 0, 100, 100);
+  aura::RootWindow* root_window = Shell::GetPrimaryRootWindow();
+  views::Widget* toplevel = views::Widget::CreateWindowWithBounds(
+      new ResizableWidgetDelegate, bounds);
+  toplevel->Show();
+
+  const int kSteps = 15;
+  const int kTouchPoints = 2;
+  gfx::Point points[kTouchPoints] = {
+    gfx::Point(10, 30),
+    gfx::Point(30, 20),
+  };
+
+  aura::test::EventGenerator generator(root_window,
+                                       toplevel->GetNativeWindow());
+
+  // Swipe down to minimize.
+  generator.GestureMultiFingerScroll(kTouchPoints, points, 15, kSteps, 0, 150);
+  EXPECT_TRUE(wm::IsWindowMinimized(toplevel->GetNativeWindow()));
+
+  toplevel->Restore();
+  toplevel->GetNativeWindow()->SetBounds(bounds);
+
+  // Swipe up to maximize.
+  generator.GestureMultiFingerScroll(kTouchPoints, points, 15, kSteps, 0, -150);
+  EXPECT_TRUE(wm::IsWindowMaximized(toplevel->GetNativeWindow()));
+
+  toplevel->Restore();
+  toplevel->GetNativeWindow()->SetBounds(bounds);
+
+  // Swipe right to snap.
+  gfx::Rect normal_bounds = toplevel->GetWindowBoundsInScreen();
+  generator.GestureMultiFingerScroll(kTouchPoints, points, 15, kSteps, 150, 0);
+  gfx::Rect right_tile_bounds = toplevel->GetWindowBoundsInScreen();
+  EXPECT_NE(normal_bounds.ToString(), right_tile_bounds.ToString());
+
+  // Swipe left to snap.
+  gfx::Point left_points[kTouchPoints];
+  for (int i = 0; i < kTouchPoints; ++i) {
+    left_points[i] = points[i];
+    left_points[i].Offset(right_tile_bounds.x(), right_tile_bounds.y());
+  }
+  generator.GestureMultiFingerScroll(kTouchPoints, left_points, 15, kSteps,
+      -150, 0);
+  gfx::Rect left_tile_bounds = toplevel->GetWindowBoundsInScreen();
+  EXPECT_NE(normal_bounds.ToString(), left_tile_bounds.ToString());
+  EXPECT_NE(right_tile_bounds.ToString(), left_tile_bounds.ToString());
+
+  // Swipe right again.
+  generator.GestureMultiFingerScroll(kTouchPoints, points, 15, kSteps, 150, 0);
+  gfx::Rect current_bounds = toplevel->GetWindowBoundsInScreen();
+  EXPECT_NE(current_bounds.ToString(), left_tile_bounds.ToString());
+  EXPECT_EQ(current_bounds.ToString(), right_tile_bounds.ToString());
 }
 
 }  // namespace test

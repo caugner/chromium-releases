@@ -23,6 +23,7 @@ class HostResource;
 
 namespace proxy {
 
+struct Connection;
 class Dispatcher;
 
 class ResourceCreationProxy : public InterfaceProxy,
@@ -105,6 +106,24 @@ class ResourceCreationProxy : public InterfaceProxy,
   virtual PP_Resource CreateGraphics2D(PP_Instance pp_instance,
                                        const PP_Size& size,
                                        PP_Bool is_always_opaque) OVERRIDE;
+  virtual PP_Resource CreateGraphics3D(PP_Instance instance,
+                                       PP_Resource share_context,
+                                       const int32_t* attrib_list) OVERRIDE;
+  virtual PP_Resource CreateGraphics3DRaw(
+      PP_Instance instance,
+      PP_Resource share_context,
+      const int32_t* attrib_list) OVERRIDE;
+  virtual PP_Resource CreateHostResolverPrivate(PP_Instance instance) OVERRIDE;
+  virtual PP_Resource CreateNetworkMonitor(
+      PP_Instance instance,
+      PPB_NetworkMonitor_Callback callback,
+      void* user_data) OVERRIDE;
+  virtual PP_Resource CreateTCPServerSocketPrivate(
+      PP_Instance instance) OVERRIDE;
+  virtual PP_Resource CreateTCPSocketPrivate(PP_Instance instance) OVERRIDE;
+  virtual PP_Resource CreateUDPSocketPrivate(PP_Instance instance) OVERRIDE;
+  virtual PP_Resource CreateX509CertificatePrivate(
+      PP_Instance instance) OVERRIDE;
 #if !defined(OS_NACL)
   virtual PP_Resource CreateAudioInput0_1(
       PP_Instance instance,
@@ -127,25 +146,10 @@ class ResourceCreationProxy : public InterfaceProxy,
   virtual PP_Resource CreateFlashMenu(PP_Instance instance,
                                       const PP_Flash_Menu* menu_data) OVERRIDE;
   virtual PP_Resource CreateFlashMessageLoop(PP_Instance instance) OVERRIDE;
-  virtual PP_Resource CreateGraphics3D(PP_Instance instance,
-                                       PP_Resource share_context,
-                                       const int32_t* attrib_list) OVERRIDE;
-  virtual PP_Resource CreateGraphics3DRaw(
-      PP_Instance instance,
-      PP_Resource share_context,
-      const int32_t* attrib_list) OVERRIDE;
-  virtual PP_Resource CreateHostResolverPrivate(PP_Instance instance) OVERRIDE;
-  virtual PP_Resource CreateNetworkMonitor(
-      PP_Instance instance,
-      PPB_NetworkMonitor_Callback callback,
-      void* user_data) OVERRIDE;
+  virtual PP_Resource CreatePrinting(PP_Instance) OVERRIDE;
   virtual PP_Resource CreateScrollbar(PP_Instance instance,
                                       PP_Bool vertical) OVERRIDE;
   virtual PP_Resource CreateTalk(PP_Instance instance) OVERRIDE;
-  virtual PP_Resource CreateTCPServerSocketPrivate(
-      PP_Instance instance) OVERRIDE;
-  virtual PP_Resource CreateTCPSocketPrivate(PP_Instance instance) OVERRIDE;
-  virtual PP_Resource CreateUDPSocketPrivate(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateVideoCapture(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateVideoDecoder(
       PP_Instance instance,
@@ -154,14 +158,13 @@ class ResourceCreationProxy : public InterfaceProxy,
   virtual PP_Resource CreateVideoLayer(PP_Instance instance,
                                        PP_VideoLayerMode_Dev mode) OVERRIDE;
   virtual PP_Resource CreateWebSocket(PP_Instance instance) OVERRIDE;
-  virtual PP_Resource CreateX509CertificatePrivate(
-      PP_Instance instance) OVERRIDE;
 #endif  // !defined(OS_NACL)
 
   virtual bool Send(IPC::Message* msg) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
 
  private:
+  Connection GetConnection();
   DISALLOW_COPY_AND_ASSIGN(ResourceCreationProxy);
 };
 

@@ -11,9 +11,9 @@ namespace em = enterprise_management;
 
 namespace policy {
 
-CloudPolicyService::CloudPolicyService(scoped_ptr<CloudPolicyClient> client,
+CloudPolicyService::CloudPolicyService(CloudPolicyClient* client,
                                        CloudPolicyStore* store)
-    : client_(client.Pass()),
+    : client_(client),
       store_(store),
       refresh_state_(REFRESH_NONE) {
   client_->AddObserver(this);
@@ -105,6 +105,8 @@ void CloudPolicyService::OnStoreLoaded(CloudPolicyStore* store) {
   // Finally, set up registration if necessary.
   if (policy && policy->has_request_token() && policy->has_device_id() &&
       !client_->is_registered()) {
+    DVLOG(1) << "Setting up registration with request token: "
+             << policy->request_token();
     client_->SetupRegistration(policy->request_token(),
                                policy->device_id());
   }

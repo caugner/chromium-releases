@@ -4,8 +4,11 @@
 
 #include "chromeos/dbus/bluetooth_manager_client.h"
 
+#include <vector>
+
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "chromeos/dbus/bluetooth_property.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
@@ -15,8 +18,9 @@
 
 namespace chromeos {
 
-BluetoothManagerClient::Properties::Properties(dbus::ObjectProxy* object_proxy,
-                                               PropertyChangedCallback callback)
+BluetoothManagerClient::Properties::Properties(
+    dbus::ObjectProxy* object_proxy,
+    const PropertyChangedCallback& callback)
     : BluetoothPropertySet(object_proxy,
                            bluetooth_manager::kBluetoothManagerInterface,
                            callback) {
@@ -31,8 +35,8 @@ BluetoothManagerClient::Properties::~Properties() {
 class BluetoothManagerClientImpl : public BluetoothManagerClient {
  public:
   explicit BluetoothManagerClientImpl(dbus::Bus* bus)
-      : weak_ptr_factory_(this),
-        object_proxy_(NULL) {
+      : object_proxy_(NULL),
+        weak_ptr_factory_(this) {
     DVLOG(1) << "Creating BluetoothManagerClientImpl";
 
     // Create the object proxy.
@@ -113,7 +117,7 @@ class BluetoothManagerClientImpl : public BluetoothManagerClient {
 
   // BluetoothManagerClient override.
   virtual void FindAdapter(const std::string& address,
-                           const AdapterCallback& callback) {
+                           const AdapterCallback& callback) OVERRIDE {
     dbus::MethodCall method_call(
       bluetooth_manager::kBluetoothManagerInterface,
       bluetooth_manager::kFindAdapter);
@@ -250,10 +254,6 @@ class BluetoothManagerClientImpl : public BluetoothManagerClient {
     callback.Run(object_path, success);
   }
 
-  // Weak pointer factory for generating 'this' pointers that might live longer
-  // than we do.
-  base::WeakPtrFactory<BluetoothManagerClientImpl> weak_ptr_factory_;
-
   // D-Bus proxy for BlueZ Manager interface.
   dbus::ObjectProxy* object_proxy_;
 
@@ -263,6 +263,12 @@ class BluetoothManagerClientImpl : public BluetoothManagerClient {
   // List of observers interested in event notifications from us.
   ObserverList<Observer> observers_;
 
+  // Weak pointer factory for generating 'this' pointers that might live longer
+  // than we do.
+  // Note: This should remain the last member so it'll be destroyed and
+  // invalidate its weak pointers before any other members are destroyed.
+  base::WeakPtrFactory<BluetoothManagerClientImpl> weak_ptr_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(BluetoothManagerClientImpl);
 };
 
@@ -270,32 +276,84 @@ class BluetoothManagerClientImpl : public BluetoothManagerClient {
 // nothing.
 class BluetoothManagerClientStubImpl : public BluetoothManagerClient {
  public:
+  struct Properties : public BluetoothManagerClient::Properties {
+    explicit Properties(const PropertyChangedCallback& callback)
+        : BluetoothManagerClient::Properties(NULL, callback) {
+    }
+
+    virtual ~Properties() {
+    }
+
+    virtual void Get(dbus::PropertyBase* property,
+                     dbus::PropertySet::GetCallback callback) OVERRIDE {
+      VLOG(1) << "Get " << property->name();
+      callback.Run(false);
+    }
+
+    virtual void GetAll() OVERRIDE {
+      VLOG(1) << "GetAll";
+    }
+
+    virtual void Set(dbus::PropertyBase* property,
+                     dbus::PropertySet::SetCallback callback) OVERRIDE {
+      VLOG(1) << "Set " << property->name();
+      callback.Run(false);
+    }
+  };
+
+  BluetoothManagerClientStubImpl() {
+    properties_.reset(new Properties(base::Bind(
+        &BluetoothManagerClientStubImpl::OnPropertyChanged,
+        base::Unretained(this))));
+
+    std::vector<dbus::ObjectPath> adapters;
+    adapters.push_back(dbus::ObjectPath("/fake/hci0"));
+    properties_->adapters.ReplaceValue(adapters);
+  }
+
   // BluetoothManagerClient override.
   virtual void AddObserver(Observer* observer) OVERRIDE {
+    observers_.AddObserver(observer);
   }
 
   // BluetoothManagerClient override.
   virtual void RemoveObserver(Observer* observer) OVERRIDE {
+    observers_.RemoveObserver(observer);
   }
 
   // BluetoothManagerClient override.
   virtual Properties* GetProperties() OVERRIDE {
     VLOG(1) << "GetProperties";
-    return NULL;
+    return properties_.get();
   }
 
   // BluetoothManagerClient override.
   virtual void DefaultAdapter(const AdapterCallback& callback) OVERRIDE {
     VLOG(1) << "DefaultAdapter.";
-    callback.Run(dbus::ObjectPath(), false);
+    callback.Run(dbus::ObjectPath("/fake/hci0"), true);
   }
 
   // BluetoothManagerClient override.
   virtual void FindAdapter(const std::string& address,
-                           const AdapterCallback& callback) {
+                           const AdapterCallback& callback) OVERRIDE {
     VLOG(1) << "FindAdapter: " << address;
-    callback.Run(dbus::ObjectPath(), false);
+    if (address == "hci0")
+      callback.Run(dbus::ObjectPath("/fake/hci0"), true);
+    else
+      callback.Run(dbus::ObjectPath(), false);
   }
+
+ private:
+  void OnPropertyChanged(const std::string& property_name) {
+    FOR_EACH_OBSERVER(BluetoothManagerClient::Observer, observers_,
+                      ManagerPropertyChanged(property_name));
+  }
+
+  // List of observers interested in event notifications from us.
+  ObserverList<Observer> observers_;
+
+  // Static properties we return.
+  scoped_ptr<Properties> properties_;
 };
 
 BluetoothManagerClient::BluetoothManagerClient() {

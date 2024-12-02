@@ -35,6 +35,9 @@ class MEDIA_EXPORT SincResampler {
   // single call to |read_cb_| for more data.
   int ChunkSize();
 
+  // Flush all buffered data and reset internal indices.
+  void Flush();
+
  private:
   FRIEND_TEST_ALL_PREFIXES(SincResamplerTest, Convolve);
   FRIEND_TEST_ALL_PREFIXES(SincResamplerTest, ConvolveBenchmark);
@@ -81,6 +84,8 @@ class MEDIA_EXPORT SincResampler {
   float* const r3_;
   float* const r4_;
   float* const r5_;
+
+  DISALLOW_COPY_AND_ASSIGN(SincResampler);
 };
 
 }  // namespace media

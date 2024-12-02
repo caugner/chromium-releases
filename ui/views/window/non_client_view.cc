@@ -59,13 +59,14 @@ void NonClientView::WindowClosing() {
   client_view_->WidgetClosing();
 }
 
-void NonClientView::UpdateFrame() {
+void NonClientView::UpdateFrame(bool layout) {
   Widget* widget = GetWidget();
   SetFrameView(widget->CreateNonClientFrameView());
   widget->ThemeChanged();
-  Layout();
-  SchedulePaint();
-  widget->UpdateFrameAfterFrameChange();
+  if (layout) {
+    Layout();
+    SchedulePaint();
+  }
 }
 
 void NonClientView::SetInactiveRenderingDisabled(bool disable) {
@@ -177,8 +178,8 @@ views::View* NonClientView::GetEventHandlerForPoint(const gfx::Point& point) {
     // after it's been removed from the view hierarchy but before it's been
     // removed from the NonClientView.
     gfx::Point point_in_child_coords(point);
-    View::ConvertPointToView(this, frame_view_.get(), &point_in_child_coords);
-    if (frame_view_->HitTest(point_in_child_coords))
+    View::ConvertPointToTarget(this, frame_view_.get(), &point_in_child_coords);
+    if (frame_view_->HitTestPoint(point_in_child_coords))
       return frame_view_->GetEventHandlerForPoint(point_in_child_coords);
   }
 
@@ -247,10 +248,10 @@ int NonClientFrameView::GetHTComponentForFrame(const gfx::Point& point,
 ////////////////////////////////////////////////////////////////////////////////
 // NonClientFrameView, View overrides:
 
-bool NonClientFrameView::HitTest(const gfx::Point& l) const {
+bool NonClientFrameView::HitTestRect(const gfx::Rect& rect) const {
   // For the default case, we assume the non-client frame view never overlaps
   // the client view.
-  return !GetWidget()->client_view()->bounds().Contains(l);
+  return !GetWidget()->client_view()->bounds().Intersects(rect);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

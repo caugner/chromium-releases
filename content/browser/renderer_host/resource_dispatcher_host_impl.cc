@@ -21,7 +21,6 @@
 #include "base/shared_memory.h"
 #include "base/stl_util.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
-#include "base/threading/thread_restrictions.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/cert_store_impl.h"
 #include "content/browser/child_process_security_policy_impl.h"
@@ -39,10 +38,10 @@
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/resource_message_filter.h"
-#include "content/browser/renderer_host/transfer_navigation_resource_throttle.h"
 #include "content/browser/renderer_host/resource_request_info_impl.h"
 #include "content/browser/renderer_host/sync_resource_handler.h"
 #include "content/browser/renderer_host/throttling_resource_handler.h"
+#include "content/browser/renderer_host/transfer_navigation_resource_throttle.h"
 #include "content/browser/resource_context_impl.h"
 #include "content/browser/worker_host/worker_service_impl.h"
 #include "content/common/resource_messages.h"
@@ -81,12 +80,14 @@
 #include "webkit/appcache/appcache_interfaces.h"
 #include "webkit/blob/blob_storage_controller.h"
 #include "webkit/blob/shareable_file_reference.h"
+#include "webkit/glue/resource_request_body.h"
 #include "webkit/glue/webkit_glue.h"
 
 using base::Time;
 using base::TimeDelta;
 using base::TimeTicks;
 using webkit_blob::ShareableFileReference;
+using webkit_glue::ResourceRequestBody;
 
 // ----------------------------------------------------------------------------
 
@@ -125,11 +126,9 @@ void AbortRequestBeforeItStarts(ResourceMessageFilter* filter,
                                 IPC::Message* sync_result,
                                 int route_id,
                                 int request_id) {
-  net::URLRequestStatus status(net::URLRequestStatus::FAILED,
-                               net::ERR_ABORTED);
   if (sync_result) {
     SyncLoadResult result;
-    result.status = status;
+    result.error_code = net::ERR_ABORTED;
     ResourceHostMsg_SyncLoad::WriteReplyParams(sync_result, result);
     filter->Send(sync_result);
   } else {
@@ -137,7 +136,8 @@ void AbortRequestBeforeItStarts(ResourceMessageFilter* filter,
     filter->Send(new ResourceMsg_RequestComplete(
         route_id,
         request_id,
-        status,
+        net::ERR_ABORTED,
+        false,
         std::string(),   // No security info needed, connection not established.
         base::TimeTicks()));
   }
@@ -170,15 +170,15 @@ bool ShouldServiceRequest(ProcessType process_type,
   }
 
   // Check if the renderer is permitted to upload the requested files.
-  if (request_data.upload_data) {
-    const std::vector<net::UploadData::Element>* uploads =
-        request_data.upload_data->elements();
-    std::vector<net::UploadData::Element>::const_iterator iter;
+  if (request_data.request_body) {
+    const std::vector<ResourceRequestBody::Element>* uploads =
+        request_data.request_body->elements();
+    std::vector<ResourceRequestBody::Element>::const_iterator iter;
     for (iter = uploads->begin(); iter != uploads->end(); ++iter) {
-      if (iter->type() == net::UploadData::TYPE_FILE &&
-          !policy->CanReadFile(child_id, iter->file_path())) {
+      if (iter->type() == ResourceRequestBody::Element::TYPE_FILE &&
+          !policy->CanReadFile(child_id, iter->path())) {
         NOTREACHED() << "Denied unauthorized upload of "
-                     << iter->file_path().value();
+                     << iter->path().value();
         return false;
       }
     }
@@ -379,7 +379,6 @@ ResourceDispatcherHostImpl::ResourceDispatcherHostImpl()
 ResourceDispatcherHostImpl::~ResourceDispatcherHostImpl() {
   DCHECK(g_resource_dispatcher_host);
   g_resource_dispatcher_host = NULL;
-  AsyncResourceHandler::GlobalCleanup();
 }
 
 // static
@@ -897,12 +896,6 @@ void ResourceDispatcherHostImpl::BeginRequest(
   // http://crbug.com/90971
   CHECK(ContainsKey(active_resource_contexts_, resource_context));
 
-  // Might need to resolve the blob references in the upload data.
-  if (request_data.upload_data) {
-    GetBlobStorageControllerForResourceContext(resource_context)->
-        ResolveBlobReferencesInUploadData(request_data.upload_data.get());
-  }
-
   if (is_shutdown_ ||
       !ShouldServiceRequest(process_type, child_id, request_data)) {
     AbortRequestBeforeItStarts(filter_, sync_result, route_id, request_id);
@@ -937,10 +930,9 @@ void ResourceDispatcherHostImpl::BeginRequest(
     // chance to reset some state before we complete the transfer.
     deferred_loader->WillCompleteTransfer();
   } else {
-    new_request.reset(new net::URLRequest(
-        request_data.url,
-        NULL,
-        filter_->GetURLRequestContext(request_data.resource_type)));
+    net::URLRequestContext* context =
+        filter_->GetURLRequestContext(request_data.resource_type);
+    new_request.reset(context->CreateRequest(request_data.url, NULL));
     request = new_request.get();
 
     request->set_method(request_data.method);
@@ -960,13 +952,11 @@ void ResourceDispatcherHostImpl::BeginRequest(
 
   request->set_priority(DetermineRequestPriority(request_data.resource_type));
 
-  // Set upload data.
-  uint64 upload_size = 0;
-  if (request_data.upload_data) {
-    request->set_upload(request_data.upload_data);
-    // This results in performing file IO. crbug.com/112607.
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
-    upload_size = request_data.upload_data->GetContentLengthSync();
+  // Resolve elements from request_body and prepare upload data.
+  if (request_data.request_body) {
+    request->set_upload(
+        request_data.request_body->ResolveElementsAndCreateUploadData(
+            filter_->blob_storage_context()->controller()));
   }
 
   bool allow_download = request_data.allow_download &&
@@ -986,7 +976,6 @@ void ResourceDispatcherHostImpl::BeginRequest(
           request_data.parent_frame_id,
           request_data.resource_type,
           request_data.transition_type,
-          upload_size,
           false,  // is download
           allow_download,
           request_data.has_user_gesture,
@@ -997,15 +986,14 @@ void ResourceDispatcherHostImpl::BeginRequest(
   if (request->url().SchemeIs(chrome::kBlobScheme)) {
     // Hang on to a reference to ensure the blob is not released prior
     // to the job being started.
-    webkit_blob::BlobStorageController* controller =
-        GetBlobStorageControllerForResourceContext(resource_context);
     extra_info->set_requested_blob_data(
-        controller->GetBlobDataFromUrl(request->url()));
+        filter_->blob_storage_context()->controller()->
+            GetBlobDataFromUrl(request->url()));
   }
 
   // Have the appcache associate its extra info with the request.
   appcache::AppCacheInterceptor::SetExtraRequestInfo(
-      request, ResourceContext::GetAppCacheService(resource_context), child_id,
+      request, filter_->appcache_service(), child_id,
       request_data.appcache_host_id, request_data.resource_type);
 
   // Construct the IPC resource handler.
@@ -1049,6 +1037,7 @@ void ResourceDispatcherHostImpl::BeginRequest(
 
     delegate_->RequestBeginning(request,
                                 resource_context,
+                                filter_->appcache_service(),
                                 request_data.resource_type,
                                 child_id,
                                 route_id,
@@ -1176,7 +1165,6 @@ ResourceRequestInfoImpl* ResourceDispatcherHostImpl::CreateRequestInfo(
       -1,        // parent_frame_id
       ResourceType::SUB_RESOURCE,
       PAGE_TRANSITION_LINK,
-      0,         // upload_size
       download,  // is_download
       download,  // allow_download
       false,     // has_user_gesture
@@ -1254,7 +1242,7 @@ void ResourceDispatcherHostImpl::BeginSaveFile(
   }
 
   scoped_ptr<net::URLRequest> request(
-      new net::URLRequest(url, NULL, request_context));
+      request_context->CreateRequest(url, NULL));
   request->set_method("GET");
   request->set_referrer(MaybeStripReferrer(referrer.url).spec());
   webkit_glue::ConfigureURLRequestForReferrerPolicy(request.get(),
@@ -1583,7 +1571,7 @@ void ResourceDispatcherHostImpl::UpdateLoadStates() {
   for (i = pending_loaders_.begin(); i != pending_loaders_.end(); ++i) {
     net::URLRequest* request = i->second->request();
     ResourceRequestInfoImpl* info = i->second->GetRequestInfo();
-    uint64 upload_size = info->GetUploadSize();
+    uint64 upload_size = request->GetUploadProgress().size();
     if (request->GetLoadState().state != net::LOAD_STATE_SENDING_REQUEST)
       upload_size = 0;
     std::pair<int, int> key(info->GetChildID(), info->GetRouteID());
@@ -1595,6 +1583,7 @@ void ResourceDispatcherHostImpl::UpdateLoadStates() {
     net::URLRequest* request = i->second->request();
     ResourceRequestInfoImpl* info = i->second->GetRequestInfo();
     net::LoadStateWithParam load_state = request->GetLoadState();
+    net::UploadProgress progress = request->GetUploadProgress();
 
     // We also poll for upload progress on this timer and send upload
     // progress ipc messages to the plugin process.
@@ -1605,7 +1594,7 @@ void ResourceDispatcherHostImpl::UpdateLoadStates() {
     // If a request is uploading data, ignore all other requests so that the
     // upload progress takes priority for being shown in the status bar.
     if (largest_upload_size.find(key) != largest_upload_size.end() &&
-        info->GetUploadSize() < largest_upload_size[key])
+        progress.size() < largest_upload_size[key])
       continue;
 
     net::LoadStateWithParam to_insert = load_state;
@@ -1619,8 +1608,8 @@ void ResourceDispatcherHostImpl::UpdateLoadStates() {
     LoadInfo& load_info = info_map[key];
     load_info.url = request->url();
     load_info.load_state = to_insert;
-    load_info.upload_size = info->GetUploadSize();
-    load_info.upload_position = request->GetUploadProgress();
+    load_info.upload_size = progress.size();
+    load_info.upload_position = progress.position();
   }
 
   if (info_map.empty())

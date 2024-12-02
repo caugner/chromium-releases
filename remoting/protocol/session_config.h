@@ -22,6 +22,7 @@ extern const int kDefaultStreamVersion;
 struct ChannelConfig {
   enum TransportType {
     TRANSPORT_STREAM,
+    TRANSPORT_MUX_STREAM,
     TRANSPORT_DATAGRAM,
     TRANSPORT_NONE,
   };
@@ -31,17 +32,23 @@ struct ChannelConfig {
     CODEC_VERBATIM,
     CODEC_ZIP,
     CODEC_VP8,
-    CODEC_VORBIS,
+    CODEC_OPUS,
+    CODEC_SPEEX,
   };
 
+  // Creates a config with transport field set to TRANSPORT_NONE which indicates
+  // that corresponding channel is disabled.
+  static ChannelConfig None();
+
+  // Default constructor. Equivalent to None().
   ChannelConfig();
+
+  // Creates a channel config with the specified parameters.
   ChannelConfig(TransportType transport, int version, Codec codec);
 
   // operator== is overloaded so that std::find() works with
   // std::vector<ChannelConfig>.
   bool operator==(const ChannelConfig& b) const;
-
-  void Reset();
 
   TransportType transport;
   int version;
@@ -145,6 +152,9 @@ class CandidateSessionConfig {
   static scoped_ptr<CandidateSessionConfig> CreateFrom(
       const SessionConfig& config);
   static scoped_ptr<CandidateSessionConfig> CreateDefault();
+
+  // Helper method that modifies |config| to disable audio support.
+  static void DisableAudioChannel(CandidateSessionConfig* config);
 
  private:
   CandidateSessionConfig();

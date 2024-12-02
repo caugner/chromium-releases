@@ -150,9 +150,8 @@ void SimpleWebViewDialog::StartLoad(const GURL& url) {
       WebContents::Create(ProfileManager::GetDefaultProfile(),
                           NULL,
                           MSG_ROUTING_NONE,
-                          NULL,
                           NULL);
-  tab_contents_.reset(new TabContents(web_contents));
+  tab_contents_.reset(TabContents::Factory::CreateTabContents(web_contents));
   web_view_->SetWebContents(web_contents);
   web_contents->SetDelegate(this);
   web_view_->LoadInitialURL(url);
@@ -183,7 +182,8 @@ void SimpleWebViewDialog::Init() {
   toolbar_model_.reset(new ToolbarModel(this));
 
   // Location bar.
-  location_bar_ = new LocationBarView(profile_,
+  location_bar_ = new LocationBarView(NULL,
+                                      profile_,
                                       command_updater_.get(),
                                       toolbar_model_.get(),
                                       this,
@@ -244,7 +244,7 @@ views::View* SimpleWebViewDialog::GetInitiallyFocusedView() {
 }
 
 void SimpleWebViewDialog::ButtonPressed(views::Button* sender,
-                                        const views::Event& event) {
+                                        const ui::Event& event) {
   command_updater_->ExecuteCommand(sender->tag());
 }
 

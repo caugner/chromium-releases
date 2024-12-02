@@ -12,8 +12,10 @@
 #include "base/basictypes.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "chrome/common/extensions/extension_icon_set.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/animation/linear_animation.h"
 
@@ -24,7 +26,9 @@ class SkDevice;
 namespace gfx {
 class Canvas;
 class Image;
+class ImageSkia;
 class Rect;
+class Size;
 }
 
 // ExtensionAction encapsulates the state of a browser action, page action, or
@@ -55,13 +59,12 @@ class ExtensionAction {
   };
 
   // A fade-in animation.
-  class IconAnimation : public ui::LinearAnimation,
-                        public base::SupportsWeakPtr<IconAnimation> {
+  class IconAnimation : public ui::LinearAnimation {
    public:
     // Observes changes to icon animation state.
     class Observer {
      public:
-      virtual void OnIconChanged(const IconAnimation& animation) = 0;
+      virtual void OnIconChanged() = 0;
 
      protected:
       virtual ~Observer() {}
@@ -98,7 +101,9 @@ class ExtensionAction {
    private:
     // Construct using ExtensionAction::RunIconAnimation().
     friend class ExtensionAction;
-    explicit IconAnimation(ui::AnimationDelegate* delegate);
+    IconAnimation();
+
+    base::WeakPtr<IconAnimation> AsWeakPtr();
 
     // ui::LinearAnimation implementation.
     virtual void AnimateToState(double state) OVERRIDE;
@@ -107,6 +112,8 @@ class ExtensionAction {
     mutable scoped_ptr<SkDevice> device_;
 
     ObserverList<Observer> observers_;
+
+    base::WeakPtrFactory<IconAnimation> weak_ptr_factory_;
 
     DISALLOW_COPY_AND_ASSIGN(IconAnimation);
   };
@@ -118,6 +125,11 @@ class ExtensionAction {
   // It doesn't make sense to copy of an ExtensionAction except in tests.
   scoped_ptr<ExtensionAction> CopyForTest() const;
 
+  // Given the extension action type, returns the size the extension action icon
+  // should have. The icon should be square, so only one dimension is
+  // returned.
+  static int GetIconSizeForType(Type type);
+
   // extension id
   const std::string& extension_id() const { return extension_id_; }
 
@@ -128,9 +140,8 @@ class ExtensionAction {
   std::string id() const { return id_; }
   void set_id(const std::string& id) { id_ = id; }
 
-  // static icon paths from manifest -- only used with legacy page actions API.
-  std::vector<std::string>* icon_paths() { return &icon_paths_; }
-  const std::vector<std::string>* icon_paths() const { return &icon_paths_; }
+  bool has_changed() const { return has_changed_; }
+  void set_has_changed(bool value) { has_changed_ = value; }
 
   // Set the url which the popup will load when the user clicks this action's
   // icon.  Setting an empty URL will disable the popup for a given tab.
@@ -154,42 +165,28 @@ class ExtensionAction {
   // Icons are a bit different because the default value can be set to either a
   // bitmap or a path. However, conceptually, there is only one default icon.
   // Setting the default icon using a path clears the bitmap and vice-versa.
-
-  // Since ExtensionAction, living in common/, can't interact with the browser
-  // to load images, the UI code needs to load the images for each path.  For
-  // each path in default_icon_path() and icon_paths(), load the image there
-  // using an ImageLoadingTracker and call CacheIcon(path, image) with the
-  // result.
-  //
-  // If an image is cached redundantly, the first load will be used.
-  void CacheIcon(const std::string& path, const gfx::Image& icon);
+  // To retrieve the icon for the extension action, use
+  // ExtensionActionIconFactory.
 
   // Set this action's icon bitmap on a specific tab.
   void SetIcon(int tab_id, const gfx::Image& image);
 
-  // Get the icon for a tab, or the default if no icon was set for this tab,
-  // retrieving icons that have been specified by path from the previous
-  // arguments to CacheIcon().  If the default icon isn't found in the cache,
-  // returns the puzzle piece icon.
-  gfx::Image GetIcon(int tab_id) const;
+  // Applies the attention and animation image transformations registered for
+  // the tab on the provided icon.
+  gfx::Image ApplyAttentionAndAnimation(const gfx::ImageSkia& icon,
+                                        int tab_id) const;
 
-  // Set this action's icon index for a specific tab.  For use with
-  // icon_paths(), only used in page actions.
-  void SetIconIndex(int tab_id, int index);
-
-  // Get this action's icon index for a tab, or the default if no icon index
-  // was set.
-  int GetIconIndex(int tab_id) const {
-    return GetValue(&icon_index_, tab_id);
-  }
+  // Gets the icon that has been set using |SetIcon| for the tab.
+  gfx::ImageSkia GetExplicitlySetIcon(int tab_id) const;
 
   // Non-tab-specific icon path. This is used to support the default_icon key of
   // page and browser actions.
-  void set_default_icon_path(const std::string& path) {
-    default_icon_path_ = path;
+  void set_default_icon(scoped_ptr<ExtensionIconSet> icon_set) {
+     default_icon_ = icon_set.Pass();
   }
-  const std::string& default_icon_path() const {
-    return default_icon_path_;
+
+  const ExtensionIconSet* default_icon() const {
+    return default_icon_.get();
   }
 
   // Set this action's badge text on a specific tab.
@@ -237,24 +234,38 @@ class ExtensionAction {
   // If the specified tab has a badge, paint it into the provided bounds.
   void PaintBadge(gfx::Canvas* canvas, const gfx::Rect& bounds, int tab_id);
 
+  // Returns icon image with badge for specified tab.
+  gfx::ImageSkia GetIconWithBadge(const gfx::ImageSkia& icon,
+                                  int tab_id,
+                                  const gfx::Size& spacing) const;
+
   // Gets a weak reference to the icon animation for a tab, if any. The
   // reference will only have a value while the animation is running.
   base::WeakPtr<IconAnimation> GetIconAnimation(int tab_id) const;
 
  private:
+  class IconWithBadgeImageSource;
+
   // Runs an animation on a tab.
   void RunIconAnimation(int tab_id);
 
-  class IconAnimationWrapper;
-
-  // Finds the icon animation wrapper for a tab, if any.  If the animation for
-  // this tab has recently completed, also removes up any other dead wrappers
-  // from the map.
-  IconAnimationWrapper* GetIconAnimationWrapper(int tab_id) const;
-
   // If the icon animation is running on tab |tab_id|, applies it to
   // |orig| and returns the result. Otherwise, just returns |orig|.
-  gfx::Image ApplyIconAnimation(int tab_id, const gfx::Image& orig) const;
+  gfx::ImageSkia ApplyIconAnimation(int tab_id,
+                                    const gfx::ImageSkia& orig) const;
+
+  // Returns width of the current icon for tab_id.
+  // TODO(tbarzic): The icon selection is done in ExtensionActionIconFactory.
+  // We should probably move this there too.
+  int GetIconWidth(int tab_id) const;
+
+  // Paints badge with specified parameters to |canvas|.
+  static void DoPaintBadge(gfx::Canvas* canvas,
+                           const gfx::Rect& bounds,
+                           const std::string& text,
+                           const SkColor& text_color_in,
+                           const SkColor& background_color_in,
+                           int icon_width);
 
   template <class T>
   struct ValueTraits {
@@ -289,33 +300,30 @@ class ExtensionAction {
   // kDefaultTabId), or tab-specific state (stored with the tab_id as the key).
   std::map<int, GURL> popup_url_;
   std::map<int, std::string> title_;
-  std::map<int, gfx::Image> icon_;
-  std::map<int, int> icon_index_;  // index into icon_paths_
+  std::map<int, gfx::ImageSkia> icon_;
   std::map<int, std::string> badge_text_;
   std::map<int, SkColor> badge_background_color_;
   std::map<int, SkColor> badge_text_color_;
   std::map<int, Appearance> appearance_;
 
-  // IconAnimationWrappers own themselves so that even if the Extension and
-  // ExtensionAction are destroyed on a non-UI thread, the animation will still
-  // only be touched from the UI thread.  When an animation finishes, it deletes
-  // itself, which causes the WeakPtr in this map to become NULL.
-  // GetIconAnimationWrapper() removes NULLs to prevent the map from growing
-  // without bound.
-  mutable std::map<int, base::WeakPtr<IconAnimationWrapper> > icon_animation_;
+  // IconAnimations are destroyed by a delayed task on the UI message loop so
+  // that even if the Extension and ExtensionAction are destroyed on a non-UI
+  // thread, the animation will still only be touched from the UI thread.  This
+  // causes the WeakPtr in this map to become NULL.  GetIconAnimation() removes
+  // NULLs to prevent the map from growing without bound.
+  mutable std::map<int, base::WeakPtr<IconAnimation> > icon_animation_;
 
-  std::string default_icon_path_;
+  // ExtensionIconSet containing paths to bitmaps from which default icon's
+  // image representations will be selected.
+  scoped_ptr<const ExtensionIconSet> default_icon_;
 
   // The id for the ExtensionAction, for example: "RssPageAction". This is
   // needed for compat with an older version of the page actions API.
   std::string id_;
 
-  // A list of paths to icons this action might show. This is needed to support
-  // the legacy setIcon({iconIndex:...} method of the page actions API.
-  std::vector<std::string> icon_paths_;
-
-  // Saves the arguments from CacheIcon() calls.
-  std::map<std::string, gfx::Image> path_to_icon_cache_;
+  // True if the ExtensionAction's settings have changed from what was
+  // specified in the manifest.
+  bool has_changed_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionAction);
 };

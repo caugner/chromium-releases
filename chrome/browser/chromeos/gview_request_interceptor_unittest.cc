@@ -13,6 +13,7 @@
 #include "chrome/browser/plugin_prefs_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/test/mock_resource_context.h"
@@ -21,6 +22,7 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_job_factory.h"
+#include "net/url_request/url_request_job_factory_impl.h"
 #include "net/url_request/url_request_test_job.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -43,10 +45,16 @@ const char kPdfUrlIntercepted[] =
 const char kPptUrlIntercepted[] =
     "http://docs.google.com/gview?url=http%3A//foo.com/file.ppt";
 
+void AssertPluginEnabled(bool did_enable) {
+  ASSERT_TRUE(did_enable);
+  MessageLoop::current()->QuitWhenIdle();
+}
+
 class GViewURLRequestTestJob : public net::URLRequestTestJob {
  public:
-  explicit GViewURLRequestTestJob(net::URLRequest* request)
-      : net::URLRequestTestJob(request, true) {
+  GViewURLRequestTestJob(net::URLRequest* request,
+                         net::NetworkDelegate* network_delegate)
+      : net::URLRequestTestJob(request, network_delegate, true) {
   }
 
   virtual bool GetMimeType(std::string* mime_type) const {
@@ -79,8 +87,9 @@ class GViewRequestProtocolFactory
   GViewRequestProtocolFactory() {}
   virtual ~GViewRequestProtocolFactory() {}
 
-  virtual net::URLRequestJob* MaybeCreateJob(net::URLRequest* request) const {
-    return new GViewURLRequestTestJob(request);
+  virtual net::URLRequestJob* MaybeCreateJob(
+      net::URLRequest* request, net::NetworkDelegate* network_delegate) const {
+    return new GViewURLRequestTestJob(request, network_delegate);
   }
 };
 
@@ -99,9 +108,8 @@ class GViewRequestInterceptorTest : public testing::Test {
     job_factory_.SetProtocolHandler("http", new GViewRequestProtocolFactory);
     job_factory_.AddInterceptor(new GViewRequestInterceptor);
     request_context->set_job_factory(&job_factory_);
-    PluginPrefsFactory::GetInstance()->ForceRegisterPrefsForTest(&prefs_);
-    plugin_prefs_ = new PluginPrefs();
-    plugin_prefs_->SetPrefs(&prefs_);
+    plugin_prefs_ = PluginPrefs::GetForTestingProfile(&profile_);
+    PluginPrefsFactory::GetInstance()->RegisterUserPrefsOnProfile(&profile_);
     ChromePluginServiceFilter* filter =
         ChromePluginServiceFilter::GetInstance();
     filter->RegisterResourceContext(plugin_prefs_, &resource_context_);
@@ -171,9 +179,9 @@ class GViewRequestInterceptorTest : public testing::Test {
   content::TestBrowserThread file_thread_;
   content::TestBrowserThread io_thread_;
   webkit::npapi::MockPluginList plugin_list_;
-  TestingPrefService prefs_;
+  TestingProfile profile_;
   scoped_refptr<PluginPrefs> plugin_prefs_;
-  net::URLRequestJobFactory job_factory_;
+  net::URLRequestJobFactoryImpl job_factory_;
   const net::URLRequestJobFactory* old_factory_;
   TestDelegate test_delegate_;
   FilePath pdf_path_;
@@ -203,7 +211,8 @@ TEST_F(GViewRequestInterceptorTest, DoNotInterceptDownload) {
 
 TEST_F(GViewRequestInterceptorTest, DoNotInterceptPdfWhenEnabled) {
   ASSERT_NO_FATAL_FAILURE(SetPDFPluginLoadedState(true));
-  plugin_prefs_->EnablePlugin(true, pdf_path_, MessageLoop::QuitClosure());
+  plugin_prefs_->EnablePlugin(true, pdf_path_,
+                              base::Bind(&AssertPluginEnabled));
   MessageLoop::current()->Run();
 
   net::URLRequest request(
@@ -217,7 +226,8 @@ TEST_F(GViewRequestInterceptorTest, DoNotInterceptPdfWhenEnabled) {
 
 TEST_F(GViewRequestInterceptorTest, InterceptPdfWhenDisabled) {
   ASSERT_NO_FATAL_FAILURE(SetPDFPluginLoadedState(true));
-  plugin_prefs_->EnablePlugin(false, pdf_path_, MessageLoop::QuitClosure());
+  plugin_prefs_->EnablePlugin(false, pdf_path_,
+                              base::Bind(&AssertPluginEnabled));
   MessageLoop::current()->Run();
 
   net::URLRequest request(

@@ -4,9 +4,11 @@
 
 #include "ash/system/tray/tray_bubble_view.h"
 
+#include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/system/tray/tray_constants.h"
+#include "ash/wm/property_util.h"
 #include "ash/wm/shelf_layout_manager.h"
 #include "ash/wm/window_animations.h"
 #include "grit/ash_strings.h"
@@ -15,9 +17,9 @@
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/effects/SkBlurImageFilter.h"
-#include "ui/aura/event.h"
 #include "ui/aura/window.h"
 #include "ui/base/accessibility/accessible_view_state.h"
+#include "ui/base/events/event.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/insets.h"
@@ -233,6 +235,62 @@ class TrayBubbleBorder : public views::BubbleBorder {
   DISALLOW_COPY_AND_ASSIGN(TrayBubbleBorder);
 };
 
+// Custom frame-view for the bubble. It overrides the following behaviour of the
+// standard BubbleFrameView:
+//   - Sets the minimum size to an empty box.
+class TrayBubbleFrameView : public views::BubbleFrameView {
+ public:
+  TrayBubbleFrameView(const gfx::Insets& margins, TrayBubbleBorder* border)
+      : views::BubbleFrameView(margins, border) {
+  }
+
+  virtual ~TrayBubbleFrameView() {}
+
+  virtual gfx::Size GetMinimumSize() OVERRIDE {
+    return gfx::Size();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TrayBubbleFrameView);
+};
+
+// Custom layout for the bubble-view. Does the default box-layout if there is
+// enough height. Otherwise, makes sure the bottom rows are visible.
+class BottomAlignedBoxLayout : public views::BoxLayout {
+ public:
+  explicit BottomAlignedBoxLayout(internal::TrayBubbleView* bubble_view)
+      : views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 0),
+        bubble_view_(bubble_view) {
+  }
+
+  virtual ~BottomAlignedBoxLayout() {}
+
+ private:
+  virtual void Layout(views::View* host) OVERRIDE {
+    if (host->height() >= host->GetPreferredSize().height() ||
+        !bubble_view_->is_gesture_dragging()) {
+      views::BoxLayout::Layout(host);
+      return;
+    }
+
+    int consumed_height = 0;
+    for (int i = host->child_count() - 1;
+        i >= 0 && consumed_height < host->height(); --i) {
+      views::View* child = host->child_at(i);
+      if (!child->visible())
+        continue;
+      gfx::Size size = child->GetPreferredSize();
+      child->SetBounds(0, host->height() - consumed_height - size.height(),
+          host->width(), size.height());
+      consumed_height += size.height();
+    }
+  }
+
+  internal::TrayBubbleView* bubble_view_;
+
+  DISALLOW_COPY_AND_ASSIGN(BottomAlignedBoxLayout);
+};
+
 }  // namespace
 
 namespace internal {
@@ -281,7 +339,8 @@ TrayBubbleView::TrayBubbleView(
     Host* host)
     : views::BubbleDelegateView(anchor, arrow_location),
       params_(init_params),
-      host_(host) {
+      host_(host),
+      is_gesture_dragging_(false) {
   set_margins(gfx::Insets());
   set_parent_window(Shell::GetContainer(
       anchor->GetWidget()->GetNativeWindow()->GetRootWindow(),
@@ -310,8 +369,7 @@ void TrayBubbleView::SetMaxHeight(int height) {
 }
 
 void TrayBubbleView::Init() {
-  views::BoxLayout* layout =
-      new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 0);
+  views::BoxLayout* layout = new BottomAlignedBoxLayout(this);
   layout->set_spread_blank_space(true);
   SetLayoutManager(layout);
   set_background(NULL);
@@ -320,7 +378,7 @@ void TrayBubbleView::Init() {
 gfx::Rect TrayBubbleView::GetAnchorRect() {
   gfx::Rect rect;
 
-  if (anchor_widget()->IsVisible()) {
+  if (anchor_widget() && anchor_widget()->IsVisible()) {
     rect = anchor_widget()->GetWindowBoundsInScreen();
     if (params_.anchor_type == ANCHOR_TYPE_TRAY) {
       if (params_.shelf_alignment == SHELF_ALIGNMENT_BOTTOM) {
@@ -363,8 +421,9 @@ gfx::Rect TrayBubbleView::GetAnchorRect() {
 
 gfx::Rect TrayBubbleView::GetBubbleBounds() {
   // Same as BubbleDelegateView implementation, but don't try mirroring.
+  gfx::Size use_size = is_gesture_dragging_ ? size() : GetPreferredSize();
   return GetBubbleFrameView()->GetUpdatedWindowBounds(
-      GetAnchorRect(), GetPreferredSize(), false /*try_mirroring_arrow*/);
+      GetAnchorRect(), use_size, false /*try_mirroring_arrow*/);
 }
 
 bool TrayBubbleView::CanActivate() const {
@@ -378,7 +437,7 @@ views::NonClientFrameView* TrayBubbleView::CreateNonClientFrameView(
   TrayBubbleBorder* bubble_border = new TrayBubbleBorder(
       this, anchor_view(),
       arrow_location(), params_.arrow_offset, params_.arrow_color);
-  return new views::BubbleFrameView(margins(), bubble_border);
+  return new TrayBubbleFrameView(margins(), bubble_border);
 }
 
 gfx::Size TrayBubbleView::GetPreferredSize() {
@@ -389,12 +448,12 @@ gfx::Size TrayBubbleView::GetPreferredSize() {
   return gfx::Size(params_.bubble_width, height);
 }
 
-void TrayBubbleView::OnMouseEntered(const views::MouseEvent& event) {
+void TrayBubbleView::OnMouseEntered(const ui::MouseEvent& event) {
   if (host_)
     host_->OnMouseEnteredView();
 }
 
-void TrayBubbleView::OnMouseExited(const views::MouseEvent& event) {
+void TrayBubbleView::OnMouseExited(const ui::MouseEvent& event) {
   if (host_)
     host_->OnMouseExitedView();
 }
@@ -402,8 +461,7 @@ void TrayBubbleView::OnMouseExited(const views::MouseEvent& event) {
 void TrayBubbleView::GetAccessibleState(ui::AccessibleViewState* state) {
   if (params_.can_activate) {
     state->role = ui::AccessibilityTypes::ROLE_WINDOW;
-    state->name = l10n_util::GetStringUTF16(
-        IDS_ASH_STATUS_TRAY_ACCESSIBLE_NAME);
+    state->name = host_->GetAccessibleName();
   }
 }
 
@@ -456,33 +514,42 @@ void TrayBubbleView::Host::InitializeAndShowBubble(views::Widget* widget,
 }
 
 bool TrayBubbleView::Host::PreHandleKeyEvent(aura::Window* target,
-                                             aura::KeyEvent* event) {
+                                             ui::KeyEvent* event) {
   return false;
 }
 
 bool TrayBubbleView::Host::PreHandleMouseEvent(aura::Window* target,
-                                               aura::MouseEvent* event) {
+                                               ui::MouseEvent* event) {
   if (event->type() == ui::ET_MOUSE_PRESSED)
-    ProcessLocatedEvent(*event);
+    ProcessLocatedEvent(target, *event);
   return false;
 }
 
 ui::TouchStatus TrayBubbleView::Host::PreHandleTouchEvent(
     aura::Window* target,
-    aura::TouchEvent* event) {
+    ui::TouchEvent* event) {
   if (event->type() == ui::ET_TOUCH_PRESSED)
-    ProcessLocatedEvent(*event);
+    ProcessLocatedEvent(target, *event);
   return ui::TOUCH_STATUS_UNKNOWN;
 }
 
-ui::GestureStatus TrayBubbleView::Host::PreHandleGestureEvent(
+ui::EventResult TrayBubbleView::Host::PreHandleGestureEvent(
     aura::Window* target,
-    aura::GestureEvent* event) {
-  return ui::GESTURE_STATUS_UNKNOWN;
+    ui::GestureEvent* event) {
+  return ui::ER_UNHANDLED;
 }
 
 void TrayBubbleView::Host::ProcessLocatedEvent(
-    const aura::LocatedEvent& event) {
+    aura::Window* target, const ui::LocatedEvent& event) {
+  if (target) {
+    // Don't process events that occurred inside an embedded menu.
+    RootWindowController* root_controller =
+        GetRootWindowController(target->GetRootWindow());
+    if (root_controller && root_controller->GetContainer(
+            ash::internal::kShellWindowId_MenuContainer)->Contains(target)) {
+      return;
+    }
+  }
   if (!widget_)
     return;
   gfx::Rect bounds = widget_->GetNativeWindow()->GetBoundsInRootWindow();

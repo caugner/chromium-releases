@@ -38,6 +38,7 @@ class BrowserNonClientFrameViewAsh
   // BrowserNonClientFrameView overrides:
   virtual gfx::Rect GetBoundsForTabStrip(views::View* tabstrip) const OVERRIDE;
   virtual TabStripInsets GetTabStripInsets(bool force_restored) const OVERRIDE;
+  virtual int GetThemeBackgroundXInset() const OVERRIDE;
   virtual void UpdateThrobber(bool running) OVERRIDE;
 
   // views::NonClientFrameView overrides:
@@ -54,13 +55,13 @@ class BrowserNonClientFrameViewAsh
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual std::string GetClassName() const OVERRIDE;
-  virtual bool HitTest(const gfx::Point& l) const OVERRIDE;
+  virtual bool HitTestRect(const gfx::Rect& rect) const OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual gfx::Size GetMinimumSize() OVERRIDE;
 
   // views::ButtonListener overrides:
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
 
   // Overridden from chrome::TabIconViewModel:
   virtual bool ShouldTabIconViewAnimate() const OVERRIDE;
@@ -70,6 +71,7 @@ class BrowserNonClientFrameViewAsh
   virtual void OnToolbarBackgroundAnimatorProgressed() OVERRIDE;
   virtual void OnToolbarBackgroundAnimatorCanceled(
       TabContents* tab_contents) OVERRIDE;
+  virtual void OnToolbarSeparatorChanged() OVERRIDE;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest, UseShortHeader);

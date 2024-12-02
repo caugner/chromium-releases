@@ -13,24 +13,23 @@
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/url_constants.h"
-
-const char kWallpaperManagerID[] = "obklkkbkpaoaejdabbfldmcfplpdgolj";
 
 namespace wallpaper_manager_util {
 
 void OpenWallpaperManager() {
   Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
   // Hides the new UI container behind a flag.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kExperimentalWallpaperUI)) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableNewWallpaperUI)) {
     std::string url = chrome::kChromeUIWallpaperURL;
     ExtensionService* service = profile->GetExtensionService();
     if (!service)
       return;
 
     const extensions::Extension* extension =
-        service->GetExtensionById(kWallpaperManagerID, false);
+        service->GetExtensionById(extension_misc::kWallpaperManagerId, false);
     if (!extension)
       return;
 

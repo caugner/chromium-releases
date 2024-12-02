@@ -4,7 +4,9 @@
 
 #include "chrome/browser/ui/cocoa/constrained_window_mac.h"
 
-#import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "content/public/browser/web_contents.h"
@@ -105,12 +107,26 @@ void ConstrainedWindowMac::ShowConstrainedWindow() {
   // The WebContents only has a native window if it is currently visible. In
   // this case, open the sheet now. Else, Realize() will be called later, when
   // our tab becomes visible.
-  NSWindow* browserWindow =
+  NSWindow* window =
       tab_contents_->web_contents()->GetView()->GetTopLevelNativeWindow();
-  BrowserWindowController* browser_controller =
-      [BrowserWindowController browserWindowControllerForWindow:browserWindow];
-  if ([browser_controller canAttachConstrainedWindow])
-    Realize(browser_controller);
+  NSWindowController<ConstrainedWindowSupport>* window_controller = nil;
+  while (window) {
+    if ([[window windowController] conformsToProtocol:
+            @protocol(ConstrainedWindowSupport)]) {
+      window_controller = [window windowController];
+      break;
+    }
+    window = [window parentWindow];
+  }
+
+  // It's valid for the window to be nil. For example, background tabs don't
+  // have a window set. However, if a window exists then there should always
+  // be a window controller that implements the ConstrainedWindowSupport
+  // protocol.
+  DCHECK(!window || window_controller);
+
+  if (window_controller)
+    Realize(window_controller);
 }
 
 void ConstrainedWindowMac::CloseConstrainedWindow() {
@@ -122,16 +138,22 @@ void ConstrainedWindowMac::CloseConstrainedWindow() {
 
   closing_ = true;
 
-  // Note: controller_ can be `nil` here if the sheet was never realized. That's
-  // ok.
-  [controller_ removeConstrainedWindow:this];
   delegate_->DeleteDelegate();
   tab_contents_->constrained_window_tab_helper()->WillClose(this);
 
   delete this;
 }
 
-void ConstrainedWindowMac::Realize(BrowserWindowController* controller) {
+bool ConstrainedWindowMac::CanShowConstrainedWindow() {
+  Browser* browser =
+      browser::FindBrowserWithWebContents(tab_contents_->web_contents());
+  if (!browser)
+    return true;
+  return !browser->window()->IsInstantTabShowing();
+}
+
+void ConstrainedWindowMac::Realize(
+    NSWindowController<ConstrainedWindowSupport>* controller) {
   if (!should_be_visible_)
     return;
 
@@ -144,6 +166,7 @@ void ConstrainedWindowMac::Realize(BrowserWindowController* controller) {
   // Remember the controller we're adding ourselves to, so that we can later
   // remove us from it.
   controller_ = controller;
-  [controller_ attachConstrainedWindow:this];
+  delegate_->RunSheet([controller_ sheetController],
+                      GetSheetParentViewForTabContents(tab_contents_));
   delegate_->set_sheet_open(true);
 }

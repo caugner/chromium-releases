@@ -30,6 +30,8 @@ class CONTENT_EXPORT PeerConnectionHandlerBase
   virtual ~PeerConnectionHandlerBase();
 
   void AddStream(const WebKit::WebMediaStreamDescriptor& stream);
+  bool AddStream(const WebKit::WebMediaStreamDescriptor& stream,
+                 const webrtc::MediaConstraintsInterface* constraints);
   void RemoveStream(const WebKit::WebMediaStreamDescriptor& stream);
   WebKit::WebMediaStreamDescriptor CreateWebKitStreamDescriptor(
       webrtc::MediaStreamInterface* stream);
@@ -40,8 +42,7 @@ class CONTENT_EXPORT PeerConnectionHandlerBase
 
   // native_peer_connection_ is the native PeerConnection object,
   // it handles the ICE processing and media engine.
-  talk_base::scoped_refptr<webrtc::PeerConnectionInterface>
-      native_peer_connection_;
+  scoped_refptr<webrtc::PeerConnectionInterface> native_peer_connection_;
 
   typedef std::map<webrtc::MediaStreamInterface*,
                    WebKit::WebMediaStreamDescriptor> RemoteStreamMap;

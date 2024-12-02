@@ -11,8 +11,8 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/font.h"
+#include "ui/gfx/image/image.h"
 
 using content::WebContents;
 
@@ -20,10 +20,8 @@ namespace {
 
 class TestingOmniboxView : public OmniboxView {
  public:
-  TestingOmniboxView() {}
+  TestingOmniboxView() : OmniboxView(NULL, NULL, NULL, NULL) {}
 
-  virtual OmniboxEditModel* model() OVERRIDE { return NULL; }
-  virtual const OmniboxEditModel* model() const OVERRIDE { return NULL; }
   virtual void SaveStateToTab(WebContents* tab) OVERRIDE {}
   virtual void Update(const WebContents* tab_for_state_restoring) OVERRIDE {}
   virtual void OpenMatch(const AutocompleteMatch& match,
@@ -31,9 +29,6 @@ class TestingOmniboxView : public OmniboxView {
                          const GURL& alternate_nav_url,
                          size_t selected_line) OVERRIDE {}
   virtual string16 GetText() const OVERRIDE { return string16(); }
-  virtual bool IsEditingOrEmpty() const OVERRIDE { return true; }
-  virtual int GetIcon() const OVERRIDE { return 0; }
-  virtual void SetUserText(const string16& text) OVERRIDE {}
   virtual void SetUserText(const string16& text,
                            const string16& display_text,
                            bool update_popup) OVERRIDE {}
@@ -48,7 +43,6 @@ class TestingOmniboxView : public OmniboxView {
   virtual void SelectAll(bool reversed) OVERRIDE {}
   virtual void RevertAll() OVERRIDE {}
   virtual void UpdatePopup() OVERRIDE {}
-  virtual void ClosePopup() OVERRIDE {}
   virtual void SetFocus() OVERRIDE {}
   virtual void OnTemporaryTextMaybeChanged(
       const string16& display_text,
@@ -64,7 +58,6 @@ class TestingOmniboxView : public OmniboxView {
   virtual gfx::NativeView GetRelativeWindowForPopup() const OVERRIDE {
     return NULL;
   }
-  virtual CommandUpdater* GetCommandUpdater() OVERRIDE { return NULL; }
   virtual void SetInstantSuggestion(const string16& input,
                                     bool animate_to_complete) OVERRIDE {}
   virtual string16 GetInstantSuggestion() const OVERRIDE { return string16(); }
@@ -76,12 +69,15 @@ class TestingOmniboxView : public OmniboxView {
     return entry_width;
   }
   virtual views::View* AddToView(views::View* parent) OVERRIDE { return NULL; }
-  virtual int OnPerformDrop(const views::DropTargetEvent& event) OVERRIDE {
+  virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE {
     return 0;
   }
   virtual gfx::Font GetFont() { return gfx::Font(); }
   virtual int WidthOfTextAfterCursor() { return 0; }
 #endif
+
+  virtual int GetOmniboxTextLength() const OVERRIDE { return 0; }
+  virtual void EmphasizeURLComponents() OVERRIDE { }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestingOmniboxView);
@@ -99,7 +95,7 @@ class TestingOmniboxEditController : public OmniboxEditController {
   virtual void OnInputInProgress(bool in_progress) OVERRIDE {}
   virtual void OnKillFocus() OVERRIDE {}
   virtual void OnSetFocus() OVERRIDE {}
-  virtual SkBitmap GetFavicon() const OVERRIDE { return SkBitmap(); }
+  virtual gfx::Image GetFavicon() const OVERRIDE { return gfx::Image(); }
   virtual string16 GetTitle() const OVERRIDE { return string16(); }
   virtual InstantController* GetInstant() OVERRIDE { return NULL; }
   virtual TabContents* GetTabContents() const OVERRIDE {

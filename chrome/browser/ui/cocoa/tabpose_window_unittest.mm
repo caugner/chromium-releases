@@ -4,6 +4,7 @@
 
 #import "chrome/browser/ui/cocoa/tabpose_window.h"
 
+#include "base/mac/mac_util.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
@@ -26,7 +27,7 @@ class TabposeWindowTest : public CocoaProfileTest {
 
   void AppendTabToStrip() {
     TabContents* tab_contents = chrome::TabContentsFactory(
-        profile(), site_instance_, MSG_ROUTING_NONE, NULL, NULL);
+        profile(), site_instance_, MSG_ROUTING_NONE, NULL);
     browser()->tab_strip_model()->AppendTabContents(
         tab_contents, /*foreground=*/true);
   }
@@ -34,8 +35,13 @@ class TabposeWindowTest : public CocoaProfileTest {
   scoped_refptr<SiteInstance> site_instance_;
 };
 
-// Check that this doesn't leak.
 TEST_F(TabposeWindowTest, TestShow) {
+  // Skip this test on 10.7
+  // http://code.google.com/p/chromium/issues/detail?id=127845
+  if (base::mac::IsOSLionOrLater()) {
+    return;
+  }
+
   NSWindow* parent = browser()->window()->GetNativeWindow();
 
   [parent orderFront:nil];
@@ -57,6 +63,12 @@ TEST_F(TabposeWindowTest, TestShow) {
 }
 
 TEST_F(TabposeWindowTest, TestModelObserver) {
+  // Skip this test on 10.7
+  // http://code.google.com/p/chromium/issues/detail?id=127845
+  if (base::mac::IsOSLionOrLater()) {
+    return;
+  }
+
   NSWindow* parent = browser()->window()->GetNativeWindow();
   [parent orderFront:nil];
 

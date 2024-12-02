@@ -10,10 +10,6 @@
 #include "ash/ash_export.h"
 #include "ui/gfx/image/image_skia.h"
 
-namespace aura {
-class Window;
-}
-
 namespace ash {
 
 typedef int LauncherID;
@@ -21,6 +17,9 @@ typedef int LauncherID;
 // Height of the Launcher. Hard coded to avoid resizing as items are
 // added/removed.
 ASH_EXPORT extern const int kLauncherPreferredSize;
+
+// Max alpha of the launcher background.
+ASH_EXPORT extern const int kLauncherBackgroundAlpha;
 
 // Type the LauncherItem represents.
 enum LauncherItemType {
@@ -53,11 +52,6 @@ enum LauncherItemStatus {
   STATUS_ACTIVE,
   // A LauncherItem that needs user's attention.
   STATUS_ATTENTION,
-  // A LauncherItem that has pending operations.
-  //   e.g. A TYEE_APP_SHORTCUT item whose application is
-  //        being installed/upgraded.
-  // Note STATUS_PENDING is a macro in WinNT.h on Windows.
-  STATUS_IS_PENDING,
 };
 
 struct ASH_EXPORT LauncherItem {

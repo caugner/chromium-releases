@@ -83,6 +83,9 @@ class ASH_EXPORT FramePainter : public aura::WindowObserver,
   // Returns the inset from the right edge.
   int GetRightInset() const;
 
+  // Returns the amount that the theme background should be inset.
+  int GetThemeBackgroundXInset() const;
+
   // Paints the frame header.
   void PaintHeader(views::NonClientFrameView* view,
                    gfx::Canvas* canvas,
@@ -105,8 +108,9 @@ class ASH_EXPORT FramePainter : public aura::WindowObserver,
                      const gfx::Font& title_font);
 
   // Performs layout for the header based on whether we want the shorter
-  // |maximized_layout| appearance.
-  void LayoutHeader(views::NonClientFrameView* view, bool maximized_layout);
+  // appearance. |shorter_layout| is typically used for maximized windows, but
+  // not always.
+  void LayoutHeader(views::NonClientFrameView* view, bool shorter_layout);
 
   // aura::WindowObserver overrides:
   virtual void OnWindowPropertyChanged(aura::Window* window,
@@ -115,6 +119,9 @@ class ASH_EXPORT FramePainter : public aura::WindowObserver,
   virtual void OnWindowVisibilityChanged(aura::Window* window,
                                          bool visible) OVERRIDE;
   virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
+  virtual void OnWindowBoundsChanged(aura::Window* window,
+                                     const gfx::Rect& old_bounds,
+                                     const gfx::Rect& new_bounds) OVERRIDE;
 
   // Overridden from ui::AnimationDelegate
   virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
@@ -138,6 +145,9 @@ class ASH_EXPORT FramePainter : public aura::WindowObserver,
                        int theme_frame_id,
                        const gfx::ImageSkia* theme_frame_overlay);
 
+  // Adjust frame operations for left / right maximized modes.
+  int AdjustFrameHitCodeForMaximizedModes(int hit_code);
+
   // Returns true if there is exactly one visible, normal-type window using
   // a header painted by this class, in which case we should paint a transparent
   // window header.
@@ -147,6 +157,10 @@ class ASH_EXPORT FramePainter : public aura::WindowObserver,
   // when another window is hidden or destroyed to force the transparency of
   // the now-solo window to update.
   static void SchedulePaintForSoloWindow();
+
+  // Schedules a paint for the header. Used when transitioning from no header to
+  // a header (or other way around).
+  void SchedulePaintForHeader();
 
   static std::set<FramePainter*>* instances_;
 

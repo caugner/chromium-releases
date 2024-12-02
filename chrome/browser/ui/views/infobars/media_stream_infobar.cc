@@ -14,9 +14,9 @@
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/label.h"
 
-InfoBar* MediaStreamInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
+InfoBar* MediaStreamInfoBarDelegate::CreateInfoBar(InfoBarService* owner) {
   DCHECK(owner);
-  return new MediaStreamInfoBar(owner, this);
+  return new MediaStreamInfoBar(static_cast<InfoBarTabHelper*>(owner), this);
 }
 
 MediaStreamInfoBar::MediaStreamInfoBar(
@@ -70,7 +70,7 @@ void MediaStreamInfoBar::ViewHierarchyChanged(bool is_add,
       message_id = IDS_MEDIA_CAPTURE_AUDIO_ONLY;
 
     label_ = CreateLabel(l10n_util::GetStringFUTF16(message_id,
-        UTF8ToUTF16(GetDelegate()->GetSecurityOrigin().spec())));
+        UTF8ToUTF16(GetDelegate()->GetSecurityOriginSpec())));
     AddChildView(label_);
 
     allow_button_ = CreateTextButton(this,
@@ -92,17 +92,11 @@ void MediaStreamInfoBar::ViewHierarchyChanged(bool is_add,
 }
 
 void MediaStreamInfoBar::ButtonPressed(views::Button* sender,
-                                       const views::Event& event) {
+                                       const ui::Event& event) {
   if (!owned())
     return;  // We're closing; don't call anything, it might access the owner.
   if (sender == allow_button_) {
-    std::string audio_id, video_id;
-    devices_menu_model_.GetSelectedDeviceId(
-        content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE, &audio_id);
-    devices_menu_model_.GetSelectedDeviceId(
-        content::MEDIA_STREAM_DEVICE_TYPE_VIDEO_CAPTURE, &video_id);
-    bool always_allow = devices_menu_model_.always_allow();
-    GetDelegate()->Accept(audio_id, video_id, always_allow);
+    GetDelegate()->Accept();
     RemoveSelf();
   } else if (sender == deny_button_) {
     GetDelegate()->Deny();

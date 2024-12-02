@@ -46,9 +46,7 @@
 #include "ppapi/c/dev/ppb_console_dev.h"
 #include "ppapi/c/dev/ppp_find_dev.h"
 #include "ppapi/c/dev/ppp_printing_dev.h"
-#include "ppapi/c/dev/ppp_scrollbar_dev.h"
 #include "ppapi/c/dev/ppp_selection_dev.h"
-#include "ppapi/c/dev/ppp_widget_dev.h"
 #include "ppapi/c/dev/ppp_zoom_dev.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppb_var.h"
@@ -59,11 +57,9 @@
 #include "ppapi/c/private/ppb_uma_private.h"
 #include "ppapi/cpp/dev/find_dev.h"
 #include "ppapi/cpp/dev/printing_dev.h"
-#include "ppapi/cpp/dev/scrollbar_dev.h"
 #include "ppapi/cpp/dev/selection_dev.h"
 #include "ppapi/cpp/dev/text_input_dev.h"
 #include "ppapi/cpp/dev/url_util_dev.h"
-#include "ppapi/cpp/dev/widget_client_dev.h"
 #include "ppapi/cpp/dev/zoom_dev.h"
 #include "ppapi/cpp/image_data.h"
 #include "ppapi/cpp/input_event.h"
@@ -403,54 +399,6 @@ class SelectionAdapter : public pp::Selection_Dev {
 };
 
 
-// Derive a class from pp::WidgetClient_Dev to forward PPP_Widget_Dev
-// and PPP_Scrollbar_Dev calls to the plugin.
-class WidgetClientAdapter : public pp::WidgetClient_Dev {
- public:
-  explicit WidgetClientAdapter(Plugin* plugin)
-    : pp::WidgetClient_Dev(plugin),
-      plugin_(plugin) {
-    BrowserPpp* proxy = plugin_->ppapi_proxy();
-    CHECK(proxy != NULL);
-    ppp_widget_ = static_cast<const PPP_Widget_Dev*>(
-        proxy->GetPluginInterface(PPP_WIDGET_DEV_INTERFACE));
-    ppp_scrollbar_ = static_cast<const PPP_Scrollbar_Dev*>(
-        proxy->GetPluginInterface(PPP_SCROLLBAR_DEV_INTERFACE));
-  }
-
-  void InvalidateWidget(pp::Widget_Dev widget, const pp::Rect& dirty_rect) {
-    if (ppp_widget_ != NULL) {
-      ppp_widget_->Invalidate(plugin_->pp_instance(),
-                              widget.pp_resource(),
-                              &dirty_rect.pp_rect());
-    }
-  }
-
-  void ScrollbarValueChanged(pp::Scrollbar_Dev scrollbar, uint32_t value) {
-    if (ppp_scrollbar_ != NULL) {
-      ppp_scrollbar_->ValueChanged(plugin_->pp_instance(),
-                                   scrollbar.pp_resource(),
-                                   value);
-    }
-  }
-
-  void ScrollbarOverlayChanged(pp::Scrollbar_Dev scrollbar, bool overlay) {
-    if (ppp_scrollbar_ != NULL) {
-      ppp_scrollbar_->OverlayChanged(plugin_->pp_instance(),
-                                     scrollbar.pp_resource(),
-                                     PP_FromBool(overlay));
-    }
-  }
-
- private:
-  Plugin* plugin_;
-  const PPP_Widget_Dev* ppp_widget_;
-  const PPP_Scrollbar_Dev* ppp_scrollbar_;
-
-  NACL_DISALLOW_COPY_AND_ASSIGN(WidgetClientAdapter);
-};
-
-
 // Derive a class from pp::Zoom_Dev to forward PPP_Zoom_Dev calls to
 // the plugin.
 class ZoomAdapter : public pp::Zoom_Dev {
@@ -621,16 +569,6 @@ bool Plugin::LoadNaClModuleCommon(nacl::DescWrapper* wrapper,
   if (!service_runtime_started) {
     return false;
   }
-
-  // Try to start the Chrome IPC-based proxy.
-  if (nacl_interface_->StartPpapiProxy(pp_instance())) {
-    using_ipc_proxy_ = true;
-    // We need to explicitly schedule this here. It is normally called in
-    // response to starting the SRPC proxy.
-    CHECK(init_done_cb.pp_completion_callback().func != NULL);
-    PLUGIN_PRINTF(("Plugin::LoadNaClModuleCommon, started ipc proxy.\n"));
-    pp::Module::Get()->core()->CallOnMainThread(0, init_done_cb, PP_OK);
-  }
   return true;
 }
 
@@ -653,18 +591,16 @@ bool Plugin::LoadNaClModule(nacl::DescWrapper* wrapper,
 }
 
 bool Plugin::LoadNaClModuleContinuationIntern(ErrorInfo* error_info) {
-  // If we are using the IPC proxy, StartSrpcServices and StartJSObjectProxy
-  // don't makes sense. Return 'true' so that the plugin continues loading.
-  if (using_ipc_proxy_)
-    return true;
-
   if (!main_subprocess_.StartSrpcServices()) {
     error_info->SetReport(ERROR_SRPC_CONNECTION_FAIL,
                           "SRPC connection failure for " +
                           main_subprocess_.description());
     return false;
   }
-  if (!main_subprocess_.StartJSObjectProxy(this, error_info)) {
+  // Try to start the Chrome IPC-based proxy first. If that fails, we
+  // must be using the SRPC proxy.
+  if (!nacl_interface_->StartPpapiProxy(pp_instance()) &&
+      !main_subprocess_.StartJSObjectProxy(this, error_info)) {
     return false;
   }
   PLUGIN_PRINTF(("Plugin::LoadNaClModule (%s)\n",
@@ -890,7 +826,6 @@ Plugin::Plugin(PP_Instance pp_instance)
       ready_time_(0),
       nexe_size_(0),
       time_of_last_progress_event_(0),
-      using_ipc_proxy_(false),
       nacl_interface_(NULL) {
   PLUGIN_PRINTF(("Plugin::Plugin (this=%p, pp_instance=%"
                  NACL_PRId32")\n", static_cast<void*>(this), pp_instance));
@@ -1326,7 +1261,6 @@ bool Plugin::StartProxiedExecution(NaClSrpcChannel* srpc_channel,
   mouse_lock_adapter_.reset(new MouseLockAdapter(this));
   printing_adapter_.reset(new PrintingAdapter(this));
   selection_adapter_.reset(new SelectionAdapter(this));
-  widget_client_adapter_.reset(new WidgetClientAdapter(this));
   zoom_adapter_.reset(new ZoomAdapter(this));
 
   // Replay missed events.

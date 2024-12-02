@@ -14,10 +14,13 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
 import android.webkit.DownloadListener;
 import android.widget.FrameLayout;
 
 import org.chromium.content.browser.ContentViewCore;
+import org.chromium.ui.gfx.NativeWindow;
 
 /**
  * The containing view for {@link ContentViewCore} that exists in the Android UI hierarchy and
@@ -34,16 +37,6 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
     public static final int PAGE_TRANSITION_TYPED = 1;
     public static final int PAGE_TRANSITION_AUTO_BOOKMARK = 2;
     public static final int PAGE_TRANSITION_START_PAGE = 6;
-
-    /** Translate the find selection into a normal selection. */
-    public static final int FIND_SELECTION_ACTION_KEEP_SELECTION =
-            ContentViewCore.FIND_SELECTION_ACTION_KEEP_SELECTION;
-    /** Clear the find selection. */
-    public static final int FIND_SELECTION_ACTION_CLEAR_SELECTION =
-            ContentViewCore.FIND_SELECTION_ACTION_CLEAR_SELECTION;
-    /** Focus and click the selected node (for links). */
-    public static final int FIND_SELECTION_ACTION_ACTIVATE_SELECTION =
-            ContentViewCore.FIND_SELECTION_ACTION_ACTIVATE_SELECTION;
 
     // Used when ContentView implements a standalone View.
     public static final int PERSONALITY_VIEW = ContentViewCore.PERSONALITY_VIEW;
@@ -104,12 +97,14 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
      * @param context The Context the view is running in, through which it can
      *                access the current theme, resources, etc.
      * @param nativeWebContents A pointer to the native web contents.
+     * @param nativeWindow An instance of the NativeWindow.
      * @param personality One of {@link #PERSONALITY_CHROME} or {@link #PERSONALITY_VIEW}.
      * @return A ContentView instance.
      */
-    public static ContentView newInstance(Context context, int nativeWebContents, int personality) {
-        return newInstance(context, nativeWebContents, null, android.R.attr.webViewStyle,
-                personality);
+    public static ContentView newInstance(Context context, int nativeWebContents,
+            NativeWindow nativeWindow, int personality) {
+        return newInstance(context, nativeWebContents, nativeWindow, null,
+                android.R.attr.webViewStyle, personality);
     }
 
     /**
@@ -117,14 +112,16 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
      * @param context The Context the view is running in, through which it can
      *                access the current theme, resources, etc.
      * @param nativeWebContents A pointer to the native web contents.
+     * @param nativeWindow An instance of the NativeWindow.
      * @param attrs The attributes of the XML tag that is inflating the view.
      * @return A ContentView instance.
      */
     public static ContentView newInstance(Context context, int nativeWebContents,
-            AttributeSet attrs) {
+            NativeWindow nativeWindow, AttributeSet attrs) {
         // TODO(klobag): use the WebViewStyle as the default style for now. It enables scrollbar.
         // When ContentView is moved to framework, we can define its own style in the res.
-        return newInstance(context, nativeWebContents, attrs, android.R.attr.webViewStyle);
+        return newInstance(context, nativeWebContents, nativeWindow, attrs,
+                android.R.attr.webViewStyle);
     }
 
     /**
@@ -132,26 +129,34 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
      * @param context The Context the view is running in, through which it can
      *                access the current theme, resources, etc.
      * @param nativeWebContents A pointer to the native web contents.
+     * @param nativeWindow An instance of the NativeWindow.
      * @param attrs The attributes of the XML tag that is inflating the view.
      * @param defStyle The default style to apply to this view.
      * @return A ContentView instance.
      */
     public static ContentView newInstance(Context context, int nativeWebContents,
-            AttributeSet attrs, int defStyle) {
-        return newInstance(context, nativeWebContents, attrs, defStyle, PERSONALITY_VIEW);
+            NativeWindow nativeWindow, AttributeSet attrs, int defStyle) {
+        return newInstance(context, nativeWebContents, nativeWindow, attrs, defStyle,
+                PERSONALITY_VIEW);
     }
 
     private static ContentView newInstance(Context context, int nativeWebContents,
-            AttributeSet attrs, int defStyle, int personality) {
-        // TODO(dtrainor): Upstream JellyBean version of AccessibilityInjector when SDK is 16.
-        return new ContentView(context, nativeWebContents, attrs, defStyle, personality);
+            NativeWindow nativeWindow, AttributeSet attrs, int defStyle, int personality) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) {
+            return new ContentView(context, nativeWebContents, nativeWindow, attrs, defStyle,
+                    personality);
+        } else {
+            return new JellyBeanContentView(context, nativeWebContents, nativeWindow, attrs,
+                    defStyle, personality);
+        }
     }
 
-    protected ContentView(Context context, int nativeWebContents, AttributeSet attrs, int defStyle,
-            int personality) {
+    protected ContentView(Context context, int nativeWebContents, NativeWindow nativeWindow,
+            AttributeSet attrs, int defStyle, int personality) {
         super(context, attrs, defStyle);
 
-        mContentViewCore = new ContentViewCore(context, this, this, nativeWebContents, personality);
+        mContentViewCore = new ContentViewCore(context, personality);
+        mContentViewCore.initialize(this, this, true, nativeWebContents, nativeWindow, false);
     }
 
     /**
@@ -208,24 +213,10 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
      * ensuring the URL passed in is properly formatted (i.e. the scheme has been added if left
      * off during user input).
      *
-     * @param url The url to load.
+     * @param pararms Parameters for this load.
      */
-    public void loadUrlWithoutUrlSanitization(String url) {
-        loadUrlWithoutUrlSanitization(url, PAGE_TRANSITION_TYPED);
-    }
-
-    /**
-     * Load url without fixing up the url string. Consumers of ContentView are responsible for
-     * ensuring the URL passed in is properly formatted (i.e. the scheme has been added if left
-     * off during user input).
-     *
-     * @param url The url to load.
-     * @param pageTransition Page transition id that describes the action that led to this
-     *                       navigation. It is important for ranking URLs in the history so the
-     *                       omnibox can report suggestions correctly.
-     */
-    public void loadUrlWithoutUrlSanitization(String url, int pageTransition) {
-        mContentViewCore.loadUrlWithoutUrlSanitization(url, pageTransition);
+    public void loadUrl(LoadUrlParams params) {
+        mContentViewCore.loadUrl(params);
     }
 
     void setAllUserAgentOverridesInHistory() {
@@ -255,13 +246,6 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
      */
     public String getTitle() {
         return mContentViewCore.getTitle();
-    }
-
-    /**
-     * @return The load progress of current web contents (range is 0 - 100).
-     */
-    public int getProgress() {
-        return mContentViewCore.getProgress();
     }
 
     /**
@@ -415,9 +399,25 @@ public class ContentView extends FrameLayout implements ContentViewCore.Internal
     }
 
     @Override
+    public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
+        return mContentViewCore.onCreateInputConnection(outAttrs);
+    }
+
+    @Override
+    public boolean onCheckIsTextEditor() {
+        return mContentViewCore.onCheckIsTextEditor();
+    }
+
+    @Override
     public boolean onTouchEvent(MotionEvent event) {
         return mContentViewCore.onTouchEvent(event);
     }
+
+    @Override
+    protected void onConfigurationChanged(Configuration newConfig) {
+        mContentViewCore.onConfigurationChanged(newConfig);
+    }
+
     // End FrameLayout overrides.
 
     @Override

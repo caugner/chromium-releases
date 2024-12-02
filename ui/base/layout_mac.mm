@@ -6,6 +6,9 @@
 
 #include <Cocoa/Cocoa.h>
 
+#if !defined(MAC_OS_X_VERSION_10_7) || \
+    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
+
 @interface NSScreen (LionAPI)
 - (CGFloat)backingScaleFactor;
 @end
@@ -14,17 +17,9 @@
 - (CGFloat)backingScaleFactor;
 @end
 
-namespace {
+#endif  // 10.7
 
-std::vector<ui::ScaleFactor>& GetSupportedScaleFactorsInternal() {
-  static std::vector<ui::ScaleFactor>* supported_scale_factors =
-      new std::vector<ui::ScaleFactor>();
-  if (supported_scale_factors->empty()) {
-    supported_scale_factors->push_back(ui::SCALE_FACTOR_100P);
-    supported_scale_factors->push_back(ui::SCALE_FACTOR_200P);
-  }
-  return *supported_scale_factors;
-}
+namespace {
 
 float GetScaleFactorScaleForNativeView(gfx::NativeView view) {
   if (NSWindow* window = [view window]) {
@@ -50,20 +45,5 @@ namespace ui {
 ScaleFactor GetScaleFactorForNativeView(gfx::NativeView view) {
   return GetScaleFactorFromScale(GetScaleFactorScaleForNativeView(view));
 }
-
-std::vector<ScaleFactor> GetSupportedScaleFactors() {
-  return GetSupportedScaleFactorsInternal();
-}
-
-namespace test {
-
-void SetSupportedScaleFactors(
-    const std::vector<ui::ScaleFactor>& scale_factors) {
-  std::vector<ui::ScaleFactor>& supported_scale_factors =
-      GetSupportedScaleFactorsInternal();
-  supported_scale_factors = scale_factors;
-}
-
-}  // namespace test
 
 }  // namespace ui

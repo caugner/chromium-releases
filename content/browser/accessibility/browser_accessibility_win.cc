@@ -2571,6 +2571,11 @@ STDMETHODIMP BrowserAccessibilityWin::GetPatternProvider(
            << id;
   if (id == UIA_ValuePatternId || id == UIA_TextPatternId) {
     if (IsEditableText()) {
+      // The BrowserAccessibilityManager keeps track of instances when
+      // we don't want to show the on-screen keyboard.
+      if (!manager_->IsOSKAllowed(GetGlobalBoundsRect()))
+        return E_NOTIMPL;
+
       DVLOG(1) << "Returning UIA text provider";
       base::win::UIATextProvider::CreateTextProvider(true, provider);
       return S_OK;
@@ -3136,6 +3141,13 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       if (is_mixed)
         ia_state_ |= STATE_SYSTEM_MIXED;
       break;
+    case AccessibilityNodeData::ROLE_CANVAS:
+      ia_role_ = ROLE_SYSTEM_GRAPHIC;
+      break;
+    case AccessibilityNodeData::ROLE_CANVAS_WITH_FALLBACK_CONTENT:
+      role_name_ = L"canvas";
+      ia2_role_ = IA2_ROLE_CANVAS;
+      break;
     case AccessibilityNodeData::ROLE_CELL:
       ia_role_ = ROLE_SYSTEM_CELL;
       break;
@@ -3156,6 +3168,10 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       break;
     case AccessibilityNodeData::ROLE_COMBO_BOX:
       ia_role_ = ROLE_SYSTEM_COMBOBOX;
+      break;
+    case AccessibilityNodeData::ROLE_DIV:
+      role_name_ = L"div";
+      ia2_role_ = IA2_ROLE_SECTION;
       break;
     case AccessibilityNodeData::ROLE_DEFINITION_LIST_DEFINITION:
       role_name_ = html_tag;
@@ -3186,6 +3202,10 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       ia2_state_ |= IA2_STATE_SINGLE_LINE;
       ia2_state_ |= IA2_STATE_EDITABLE;
       break;
+    case AccessibilityNodeData::ROLE_FORM:
+      role_name_ = L"form";
+      ia2_role_ = IA2_ROLE_FORM;
+      break;
     case AccessibilityNodeData::ROLE_FOOTER:
       ia_role_ = IA2_ROLE_FOOTER;
       ia_state_ |= STATE_SYSTEM_READONLY;
@@ -3201,12 +3221,6 @@ void BrowserAccessibilityWin::InitRoleAndState() {
         ia_role_ = ROLE_SYSTEM_GROUPING;
       } else if (html_tag == L"li") {
         ia_role_ = ROLE_SYSTEM_LISTITEM;
-      } else if (html_tag == L"form") {
-        role_name_ = html_tag;
-        ia2_role_ = IA2_ROLE_FORM;
-      } else if (html_tag == L"p") {
-        role_name_ = html_tag;
-        ia2_role_ = IA2_ROLE_PARAGRAPH;
       } else {
         if (html_tag.empty())
           role_name_ = L"div";
@@ -3226,6 +3240,9 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       ia2_role_ = IA2_ROLE_HEADING;
       ia_state_ |= STATE_SYSTEM_READONLY;
       break;
+    case AccessibilityNodeData::ROLE_HORIZONTAL_RULE:
+      ia_role_ = ROLE_SYSTEM_SEPARATOR;
+      break;
     case AccessibilityNodeData::ROLE_IMAGE:
       ia_role_ = ROLE_SYSTEM_GRAPHIC;
       ia_state_ |= STATE_SYSTEM_READONLY;
@@ -3239,6 +3256,10 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       ia_role_ = ROLE_SYSTEM_LINK;
       ia_state_ |= STATE_SYSTEM_LINKED;
       ia_state_ |= STATE_SYSTEM_READONLY;
+      break;
+    case AccessibilityNodeData::ROLE_LABEL:
+      ia_role_ = ROLE_SYSTEM_TEXT;
+      ia2_role_ = IA2_ROLE_LABEL;
       break;
     case AccessibilityNodeData::ROLE_LANDMARK_APPLICATION:
     case AccessibilityNodeData::ROLE_LANDMARK_BANNER:
@@ -3313,6 +3334,10 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       ia_role_ = ROLE_SYSTEM_OUTLINE;
       ia_state_ |= STATE_SYSTEM_READONLY;
       break;
+    case AccessibilityNodeData::ROLE_PARAGRAPH:
+      role_name_ = L"P";
+      ia2_role_ = IA2_ROLE_PARAGRAPH;
+      break;
     case AccessibilityNodeData::ROLE_POPUP_BUTTON:
       if (html_tag == L"select") {
         ia_role_ = ROLE_SYSTEM_COMBOBOX;
@@ -3360,6 +3385,12 @@ void BrowserAccessibilityWin::InitRoleAndState() {
     case AccessibilityNodeData::ROLE_SLIDER:
       ia_role_ = ROLE_SYSTEM_SLIDER;
       break;
+    case AccessibilityNodeData::ROLE_SPIN_BUTTON:
+      ia_role_ = ROLE_SYSTEM_SPINBUTTON;
+      break;
+    case AccessibilityNodeData::ROLE_SPIN_BUTTON_PART:
+      ia_role_ = ROLE_SYSTEM_PUSHBUTTON;
+      break;
     case AccessibilityNodeData::ROLE_SPLIT_GROUP:
       ia_role_ = ROLE_SYSTEM_CLIENT;
       ia2_role_ = IA2_ROLE_SPLIT_PANE;
@@ -3398,6 +3429,10 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       break;
     case AccessibilityNodeData::ROLE_TAB_PANEL:
       ia_role_ = ROLE_SYSTEM_PROPERTYPAGE;
+      break;
+    case AccessibilityNodeData::ROLE_TOGGLE_BUTTON:
+      ia_role_ = ROLE_SYSTEM_PUSHBUTTON;
+      ia2_role_ = IA2_ROLE_TOGGLE_BUTTON;
       break;
     case AccessibilityNodeData::ROLE_TEXTAREA:
       ia_role_ = ROLE_SYSTEM_TEXT;
@@ -3449,6 +3484,7 @@ void BrowserAccessibilityWin::InitRoleAndState() {
     case AccessibilityNodeData::ROLE_LOG:
     case AccessibilityNodeData::ROLE_MARQUEE:
     case AccessibilityNodeData::ROLE_MATTE:
+    case AccessibilityNodeData::ROLE_PRESENTATIONAL:
     case AccessibilityNodeData::ROLE_RULER_MARKER:
     case AccessibilityNodeData::ROLE_SHEET:
     case AccessibilityNodeData::ROLE_SLIDER_THUMB:

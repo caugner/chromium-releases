@@ -46,7 +46,7 @@ class PluginPlaceholder : public content::RenderViewObserver,
       const std::string& identifier,
       const string16& name,
       int resource_id,
-      int message_id);
+      const string16& message);
 
 #if defined(ENABLE_MOBILE_YOUTUBE_PLUGIN)
   // Placeholder for old style embedded youtube video on mobile device. For old
@@ -147,7 +147,8 @@ class PluginPlaceholder : public content::RenderViewObserver,
   static bool IsValidYouTubeVideo(const std::string& path);
 
   // Opens a youtube app in the current tab.
-  void OpenYoutubeUrlCallback(const CppArgumentList& args, CppVariant* result);
+  void OpenYoutubeUrlCallback(const webkit_glue::CppArgumentList& args,
+                              webkit_glue::CppVariant* result);
 #endif
 
   void SetMessage(const string16& message);

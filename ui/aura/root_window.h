@@ -17,7 +17,8 @@
 #include "ui/aura/root_window_host_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/base/cursor/cursor.h"
-#include "ui/base/events.h"
+#include "ui/base/events/event_constants.h"
+#include "ui/base/events/event_dispatcher.h"
 #include "ui/base/gestures/gesture_recognizer.h"
 #include "ui/base/gestures/gesture_types.h"
 #include "ui/compositor/compositor.h"
@@ -31,22 +32,22 @@ class Size;
 }
 
 namespace ui {
+class GestureEvent;
 class GestureRecognizer;
+class KeyEvent;
 class LayerAnimationSequence;
+class MouseEvent;
+class ScrollEvent;
+class TouchEvent;
 class Transform;
 }
 
 namespace aura {
 
 class FocusManager;
-class GestureEvent;
-class KeyEvent;
-class MouseEvent;
 class RootWindow;
 class RootWindowHost;
 class RootWindowObserver;
-class ScrollEvent;
-class TouchEvent;
 
 // This class represents a lock on the compositor, that can be used to prevent a
 // compositing pass from happening while we're waiting for an asynchronous
@@ -77,22 +78,28 @@ class AURA_EXPORT CompositorLock
 class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
                                public ui::CompositorObserver,
                                public Window,
+                               public ui::EventDispatcher,
                                public ui::GestureEventHelper,
                                public ui::LayerAnimationObserver,
                                public aura::client::CaptureDelegate,
                                public aura::RootWindowHostDelegate {
  public:
-  explicit RootWindow(const gfx::Rect& initial_bounds);
+  struct AURA_EXPORT CreateParams {
+    // CreateParams with initial_bounds and default host.
+    CreateParams(const gfx::Rect& initial_bounds);
+    ~CreateParams() {}
+
+    gfx::Rect initial_bounds;
+
+    // A host to use in place of the default one that RootWindow will create.
+    // NULL by default.
+    RootWindowHost* host;
+  };
+
+  explicit RootWindow(const CreateParams& params);
   virtual ~RootWindow();
 
   static RootWindow* GetForAcceleratedWidget(gfx::AcceleratedWidget widget);
-
-  static void set_hide_host_cursor(bool hide) {
-    hide_host_cursor_ = hide;
-  }
-  static bool hide_host_cursor() {
-    return hide_host_cursor_;
-  }
 
   ui::Compositor* compositor() { return compositor_.get(); }
   gfx::NativeCursor last_cursor() const { return last_cursor_; }
@@ -108,6 +115,12 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
 
   // Shows the root window host.
   void ShowRootWindow();
+
+  // Hides the root window host.
+  void HideRootWindow();
+
+  // Stop listening events in preparation for shutdown.
+  void PrepareForShutdown();
 
   RootWindowHostDelegate* AsRootWindowHostDelegate();
 
@@ -145,7 +158,7 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // Handles a gesture event. Returns true if handled. Unlike the other
   // event-dispatching function (e.g. for touch/mouse/keyboard events), gesture
   // events are dispatched from GestureRecognizer instead of RootWindowHost.
-  bool DispatchGestureEvent(GestureEvent* event);
+  bool DispatchGestureEvent(ui::GestureEvent* event);
 
   // Invoked when |window| is being destroyed.
   void OnWindowDestroying(Window* window);
@@ -167,7 +180,7 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   void OnKeyboardMappingChanged();
 
   // The system windowing system has sent a request that we close our window.
-  void OnRootWindowHostClosed();
+  void OnRootWindowHostCloseRequested();
 
   // Add/remove observer. There is no need to remove the observer if
   // the root window is being deleted. In particular, you SHOULD NOT remove
@@ -182,6 +195,9 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // Converts |point| from the root window's coordinate system to native
   // screen's.
   void ConvertPointToNativeScreen(gfx::Point* point) const;
+
+  // Converts |point| from native screen coordinate system to the root window's.
+  void ConvertPointFromNativeScreen(gfx::Point* point) const;
 
   // Gesture Recognition -------------------------------------------------------
 
@@ -267,12 +283,13 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
 
   // Called whenever the mouse moves, tracks the current |mouse_moved_handler_|,
   // sending exited and entered events as its value changes.
-  void HandleMouseMoved(const MouseEvent& event, Window* target);
+  void HandleMouseMoved(const ui::MouseEvent& event, Window* target);
 
-  bool ProcessMouseEvent(Window* target, MouseEvent* event);
-  bool ProcessKeyEvent(Window* target, KeyEvent* event);
-  ui::TouchStatus ProcessTouchEvent(Window* target, TouchEvent* event);
-  ui::GestureStatus ProcessGestureEvent(Window* target, GestureEvent* event);
+  bool ProcessMouseEvent(Window* target, ui::MouseEvent* event);
+  bool ProcessKeyEvent(Window* target, ui::KeyEvent* event);
+  ui::TouchStatus ProcessTouchEvent(Window* target, ui::TouchEvent* event);
+  ui::EventResult ProcessGestureEvent(Window* target,
+                                      ui::GestureEvent* event);
   bool ProcessGestures(ui::GestureRecognizer::Gestures* gestures);
 
   // Called when a Window is attached or detached from the RootWindow.
@@ -284,20 +301,16 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // |destroyed| is set to true when the window is being destroyed.
   void OnWindowHidden(Window* invisible, bool destroyed);
 
+  // Cleans up the gesture recognizer for all windows in |window| (including
+  // |window| itself).
+  void CleanupGestureRecognizerState(Window* window);
+
+  // Overridden from ui::EventDispatcher.
+  virtual bool CanDispatchToTarget(EventTarget* target) OVERRIDE;
+  virtual void ProcessPreTargetList(ui::EventHandlerList* list) OVERRIDE;
+  virtual void ProcessPostTargetList(ui::EventHandlerList* list) OVERRIDE;
+
   // Overridden from ui::GestureEventHelper.
-  virtual ui::GestureEvent* CreateGestureEvent(
-      const ui::GestureEventDetails& details,
-      const gfx::Point& location,
-      int flags,
-      base::Time time,
-      unsigned int touch_id_bitfield) OVERRIDE;
-
-  virtual ui::TouchEvent* CreateTouchEvent(
-      ui::EventType type,
-      const gfx::Point& location,
-      int touch_id,
-      base::TimeDelta time_stamp) OVERRIDE;
-
   virtual bool DispatchLongPressGestureEvent(ui::GestureEvent* event) OVERRIDE;
   virtual bool DispatchCancelTouchEvent(ui::TouchEvent* event) OVERRIDE;
 
@@ -310,12 +323,13 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
       ui::LayerAnimationSequence* animation) OVERRIDE;
 
   // Overridden from aura::RootWindowHostDelegate:
-  virtual bool OnHostKeyEvent(KeyEvent* event) OVERRIDE;
-  virtual bool OnHostMouseEvent(MouseEvent* event) OVERRIDE;
-  virtual bool OnHostScrollEvent(ScrollEvent* event) OVERRIDE;
-  virtual bool OnHostTouchEvent(TouchEvent* event) OVERRIDE;
+  virtual bool OnHostKeyEvent(ui::KeyEvent* event) OVERRIDE;
+  virtual bool OnHostMouseEvent(ui::MouseEvent* event) OVERRIDE;
+  virtual bool OnHostScrollEvent(ui::ScrollEvent* event) OVERRIDE;
+  virtual bool OnHostTouchEvent(ui::TouchEvent* event) OVERRIDE;
   virtual void OnHostLostCapture() OVERRIDE;
   virtual void OnHostPaint() OVERRIDE;
+  virtual void OnHostMoved(const gfx::Point& origin) OVERRIDE;
   virtual void OnHostResized(const gfx::Size& size) OVERRIDE;
   virtual float GetDeviceScaleFactor() OVERRIDE;
   virtual RootWindow* AsRootWindow() OVERRIDE;
@@ -326,8 +340,8 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // drag needs dispatching or a matching ReleaseMouseMoves() is called.
   // NOTE: because these methods dispatch events from RootWindowHost the
   // coordinates are in terms of the root.
-  bool DispatchMouseEventImpl(MouseEvent* event);
-  bool DispatchMouseEventToTarget(MouseEvent* event, Window* target);
+  bool DispatchMouseEventImpl(ui::MouseEvent* event);
+  bool DispatchMouseEventToTarget(ui::MouseEvent* event, Window* target);
   void DispatchHeldMouseMove();
 
   // Parses the switch describing the initial size for the host window and
@@ -348,11 +362,6 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   scoped_ptr<ui::Compositor> compositor_;
 
   scoped_ptr<RootWindowHost> host_;
-
-  // If set before the RootWindow is created, the cursor will be drawn within
-  // the Aura root window but hidden outside of it, and it'll remain hidden
-  // after the Aura window is closed.
-  static bool hide_host_cursor_;
 
   // Used to schedule painting.
   base::WeakPtrFactory<RootWindow> schedule_paint_factory_;
@@ -377,6 +386,7 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   Window* mouse_pressed_handler_;
   Window* mouse_moved_handler_;
   Window* mouse_event_dispatch_target_;
+  Window* event_dispatch_target_;
   FocusManager* focus_manager_;
 
   // The gesture_recognizer_ for this.
@@ -391,7 +401,7 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // How many holds are outstanding. We try to defer dispatching mouse moves
   // while the count is > 0.
   int mouse_move_hold_count_;
-  scoped_ptr<MouseEvent> held_mouse_move_;
+  scoped_ptr<ui::MouseEvent> held_mouse_move_;
   // Used to schedule DispatchHeldMouseMove() when |mouse_move_hold_count_| goes
   // to 0.
   base::WeakPtrFactory<RootWindow> held_mouse_event_factory_;

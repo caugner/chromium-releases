@@ -36,6 +36,7 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
   void InitAsBubble(gfx::NativeView parent,
                     PaginationModel* pagination_model,
                     views::View* anchor,
+                    const gfx::Point& anchor_point,
                     views::BubbleBorder::ArrowLocation arrow_location);
 
   void SetBubbleArrowLocation(
@@ -51,15 +52,16 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
 
   // Overridden from views::WidgetDelegateView:
   virtual views::View* GetInitiallyFocusedView() OVERRIDE;
+  virtual gfx::ImageSkia GetWindowAppIcon() OVERRIDE;
   virtual bool HasHitTestMask() const OVERRIDE;
   virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE;
 
   // Overridden from views::View:
-  virtual bool OnKeyPressed(const views::KeyEvent& event) OVERRIDE;
+  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
 
   // Overridden from views::BubbleDelegate:
   virtual gfx::Rect GetBubbleBounds() OVERRIDE;
@@ -70,6 +72,9 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
   // Overridden from SearchResultListViewDelegate:
   virtual void OpenResult(const SearchResult& result,
                           int event_flags) OVERRIDE;
+  virtual void InvokeResultAction(const SearchResult& result,
+                                  int action_index,
+                                  int event_flags) OVERRIDE;
 
   scoped_ptr<AppListModel> model_;
   scoped_ptr<AppListViewDelegate> delegate_;

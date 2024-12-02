@@ -13,11 +13,13 @@
 /** @const */ var SCREEN_OOBE_ENROLLMENT = 'oauth-enrollment';
 /** @const */ var SCREEN_GAIA_SIGNIN = 'gaia-signin';
 /** @const */ var SCREEN_ACCOUNT_PICKER = 'account-picker';
+/** @const */ var SCREEN_USER_IMAGE_PICKER = 'user-image';
 
 /* Accelerator identifiers. Must be kept in sync with webui_login_view.cc. */
 /** @const */ var ACCELERATOR_CANCEL = 'cancel';
 /** @const */ var ACCELERATOR_ENROLLMENT = 'enrollment';
 /** @const */ var ACCELERATOR_VERSION = 'version';
+/** @const */ var ACCELERATOR_RESET = 'reset';
 
 /* Help topic identifiers. */
 /** @const */ var HELP_TOPIC_ENTERPRISE_REPORTING = 2535613;
@@ -115,6 +117,12 @@ cr.define('cr.ui.login', function() {
       } else if (name == ACCELERATOR_VERSION) {
         if (this.allowToggleVersion_)
           $('version-labels').hidden = !$('version-labels').hidden;
+      } else if (name == ACCELERATOR_RESET) {
+        var currentStepId = this.screens_[this.currentStep_];
+        if (currentStepId == SCREEN_GAIA_SIGNIN ||
+            currentStepId == SCREEN_ACCOUNT_PICKER) {
+          chrome.send('toggleResetScreen');
+        }
       }
     },
 
@@ -242,7 +250,7 @@ cr.define('cr.ui.login', function() {
               'webkitTransitionEnd', function f(e) {
                 innerContainer.removeEventListener('webkitTransitionEnd', f);
                 $('progress-dots').classList.remove('down');
-                chrome.send('loginVisible');
+                chrome.send('loginVisible', ['oobe']);
               });
         }
         newHeader.classList.remove('right');  // Old OOBE.
@@ -254,11 +262,28 @@ cr.define('cr.ui.login', function() {
     },
 
     /**
+     * Make sure that screen is initialized and decorated.
+     * @param {Object} screen Screen params dict, e.g. {id: screenId, data: {}}.
+     */
+    preloadScreen: function(screen) {
+      var screenEl = $(screen.id);
+      if (screenEl.deferredDecorate !== undefined) {
+        screenEl.deferredDecorate();
+        delete screenEl.deferredDecorate;
+      }
+    },
+
+    /**
      * Show screen of given screen id.
-     * @param {Object} screen Screen params dict,
-     *     e.g. {id: screenId, data: data}.
+     * @param {Object} screen Screen params dict, e.g. {id: screenId, data: {}}.
      */
     showScreen: function(screen) {
+      // Make sure the screen is decorated.
+      this.preloadScreen(screen);
+
+      if (screen.data !== undefined && screen.data.disableAddUser)
+        DisplayManager.updateAddUserButtonStatus(true);
+
       var screenId = screen.id;
 
       // Show sign-in screen instead of account picker if pod row is empty.
@@ -471,8 +496,7 @@ cr.define('cr.ui.login', function() {
    * @param {string} opt_email An optional email for signin UI.
    */
   DisplayManager.showSigninUI = function(opt_email) {
-    $('add-user-button').hidden = true;
-    $('cancel-add-user-button').hidden = false;
+    $('login-header-bar').signinUIActive = true;
     chrome.send('showAddUser', [opt_email]);
   };
 
@@ -558,6 +582,17 @@ cr.define('cr.ui.login', function() {
       }
     }
   };
+
+  /**
+   * Disable Add users button if said.
+   * @param {boolean} disable true to disable
+   */
+  DisplayManager.updateAddUserButtonStatus = function(disable) {
+    $('add-user-button').disabled = disable;
+    $('add-user-button').classList.add('button-restricted');
+    $('add-user-button').title = disable ?
+        localStrings.getString('disabledAddUserTooltip') : '';
+  }
 
   // Export
   return {

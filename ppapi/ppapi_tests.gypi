@@ -133,6 +133,7 @@
         '../gpu/gpu.gyp:gpu_ipc',
         '../ipc/ipc.gyp:ipc',
         '../ipc/ipc.gyp:test_support_ipc',
+        '../media/media.gyp:shared_memory_support',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         '../ui/surface/surface.gyp:surface',
@@ -150,6 +151,7 @@
         'proxy/ppp_instance_private_proxy_unittest.cc',
         'proxy/ppp_instance_proxy_unittest.cc',
         'proxy/ppp_messaging_proxy_unittest.cc',
+        'proxy/printing_resource_unittest.cc',
         'proxy/serialized_var_unittest.cc',
         'shared_impl/resource_tracker_unittest.cc',
         'shared_impl/tracked_callback_unittest.cc',
@@ -298,6 +300,16 @@
       ],
       'sources': [
         'examples/2d/paint_manager_example.cc',
+      ],
+    },
+    {
+      'target_name': 'ppapi_example_input',
+      'dependencies': [
+        'ppapi_example_skeleton',
+        'ppapi.gyp:ppapi_cpp',
+      ],
+      'sources': [
+        'examples/input/pointer_event_input.cc',
       ],
     },
     {

@@ -32,6 +32,7 @@ class DevToolsAgentFilter;
 class DomStorageDispatcher;
 class GpuChannelHost;
 class IndexedDBDispatcher;
+class MediaStreamDependencyFactory;
 class RendererWebKitPlatformSupportImpl;
 class SkBitmap;
 class VideoCaptureImplManager;
@@ -52,12 +53,21 @@ class ScopedCOMInitializer;
 }
 }
 
+namespace IPC {
+class ForwardingMessageFilter;
+}
+
 namespace content {
 class AudioRendererMixerManager;
+class MediaStreamCenter;
+class P2PSocketDispatcher;
+class RenderProcessObserver;
+
+namespace old {
 class BrowserPluginChannelManager;
 class BrowserPluginRegistry;
-class MediaStreamCenter;
-class RenderProcessObserver;
+}
+
 }
 
 namespace v8 {
@@ -115,8 +125,6 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   virtual base::SharedMemoryHandle HostAllocateSharedMemoryBuffer(
       uint32 buffer_size) OVERRIDE;
   virtual void RegisterExtension(v8::Extension* extension) OVERRIDE;
-  virtual bool IsRegisteredExtension(
-      const std::string& v8_extension_name) const OVERRIDE;
   virtual void ScheduleIdleHandler(int64 initial_delay_ms) OVERRIDE;
   virtual void IdleHandler() OVERRIDE;
   virtual int64 GetIdleNotificationDelayInMs() const OVERRIDE;
@@ -160,16 +168,21 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   void DoNotSuspendWebKitSharedTimer();
   void DoNotNotifyWebKitOfModalLoop();
 
+  IPC::ForwardingMessageFilter* compositor_output_surface_filter() const {
+    return compositor_output_surface_filter_.get();
+  }
+
   // Will be NULL if threaded compositing has not been enabled.
   CompositorThread* compositor_thread() const {
     return compositor_thread_.get();
   }
 
-  content::BrowserPluginRegistry* browser_plugin_registry() const {
+  content::old::BrowserPluginRegistry* browser_plugin_registry() const {
     return browser_plugin_registry_.get();
   }
 
-  content::BrowserPluginChannelManager* browser_plugin_channel_manager() const {
+  content::old::BrowserPluginChannelManager*
+      browser_plugin_channel_manager() const {
     return browser_plugin_channel_manager_.get();
   }
 
@@ -189,10 +202,20 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
     return audio_message_filter_.get();
   }
 
+
+
   // Creates the embedder implementation of WebMediaStreamCenter.
   // The resulting object is owned by WebKit and deleted by WebKit at tear-down.
   WebKit::WebMediaStreamCenter* CreateMediaStreamCenter(
       WebKit::WebMediaStreamCenterClient* client);
+
+  // Returns a factory used for creating RTC PeerConnection objects.
+  MediaStreamDependencyFactory* GetMediaStreamDependencyFactory();
+
+  // Current P2PSocketDispatcher. Set to NULL if P2P API is disabled.
+  content::P2PSocketDispatcher* p2p_socket_dispatcher() {
+    return p2p_socket_dispatcher_.get();
+  }
 
   VideoCaptureImplManager* video_capture_impl_manager() const {
     return vc_manager_.get();
@@ -227,6 +250,52 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   // first call.
   content::AudioRendererMixerManager* GetAudioRendererMixerManager();
 
+  // For producing custom V8 histograms. Custom histograms are produced if all
+  // RenderViews share the same host, and the host is in the pre-specified set
+  // of hosts we want to produce custom diagrams for. The name for a custom
+  // diagram is the name of the corresponding generic diagram plus a
+  // host-specific suffix.
+  class CONTENT_EXPORT HistogramCustomizer {
+   public:
+    HistogramCustomizer();
+    ~HistogramCustomizer();
+
+    // Called when a top frame of a RenderView navigates. This function updates
+    // RenderThreadImpl's information about whether all RenderViews are
+    // displaying a page from the same host. |host| is the host where a
+    // RenderView navigated, and |view_count| is the number of RenderViews in
+    // this process.
+    void RenderViewNavigatedToHost(const std::string& host, size_t view_count);
+
+    // Used for customizing some histograms if all RenderViews share the same
+    // host. Returns the current custom histogram name to use for
+    // |histogram_name|, or |histogram_name| if it shouldn't be customized.
+    std::string ConvertToCustomHistogramName(const char* histogram_name) const;
+
+   private:
+    friend class RenderThreadImplUnittest;
+
+    // Used for updating the information on which is the common host which all
+    // RenderView's share (if any). If there is no common host, this function is
+    // called with an empty string.
+    void SetCommonHost(const std::string& host);
+
+    // The current common host of the RenderViews; empty string if there is no
+    // common host.
+    std::string common_host_;
+    // The corresponding suffix.
+    std::string common_host_histogram_suffix_;
+    // Set of histograms for which we want to produce a custom histogram if
+    // possible.
+    std::set<std::string> custom_histograms_;
+
+    DISALLOW_COPY_AND_ASSIGN(HistogramCustomizer);
+  };
+
+  HistogramCustomizer* histogram_customizer() {
+    return &histogram_customizer_;
+  }
+
  private:
   virtual bool OnControlMessageReceived(const IPC::Message& msg) OVERRIDE;
 
@@ -248,7 +317,7 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   scoped_ptr<DomStorageDispatcher> dom_storage_dispatcher_;
   scoped_ptr<IndexedDBDispatcher> main_thread_indexed_db_dispatcher_;
   scoped_ptr<RendererWebKitPlatformSupportImpl> webkit_platform_support_;
-  scoped_ptr<content::BrowserPluginChannelManager>
+  scoped_ptr<content::old::BrowserPluginChannelManager>
       browser_plugin_channel_manager_;
 
   // Used on the render thread and deleted by WebKit at shutdown.
@@ -259,6 +328,11 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   scoped_refptr<AudioInputMessageFilter> audio_input_message_filter_;
   scoped_refptr<AudioMessageFilter> audio_message_filter_;
   scoped_refptr<DevToolsAgentFilter> devtools_agent_message_filter_;
+
+  scoped_ptr<MediaStreamDependencyFactory> media_stream_factory_;
+
+  // Dispatches all P2P sockets.
+  scoped_refptr<content::P2PSocketDispatcher> p2p_socket_dispatcher_;
 
   // Used on multiple threads.
   scoped_refptr<VideoCaptureImplManager> vc_manager_;
@@ -293,12 +367,11 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   // A lazily initiated thread on which file operations are run.
   scoped_ptr<base::Thread> file_thread_;
 
-  // Map of registered v8 extensions. The key is the extension name.
-  std::set<std::string> v8_extensions_;
-
   bool compositor_initialized_;
   scoped_ptr<CompositorThread> compositor_thread_;
-  scoped_ptr<content::BrowserPluginRegistry> browser_plugin_registry_;
+  scoped_refptr<IPC::ForwardingMessageFilter> compositor_output_surface_filter_;
+
+  scoped_ptr<content::old::BrowserPluginRegistry> browser_plugin_registry_;
 
   ObserverList<content::RenderProcessObserver> observers_;
 
@@ -307,6 +380,8 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   scoped_ptr<WebGraphicsContext3DCommandBufferImpl> gpu_vda_context3d_;
 
   scoped_ptr<content::AudioRendererMixerManager> audio_renderer_mixer_manager_;
+
+  HistogramCustomizer histogram_customizer_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderThreadImpl);
 };

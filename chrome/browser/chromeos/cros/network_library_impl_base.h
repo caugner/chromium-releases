@@ -195,6 +195,7 @@ class NetworkLibraryImplBase : public NetworkLibrary {
   // virtual RequestCellularScan implemented in derived classes.
   // virtual RequestCellularRegister implemented in derived classes.
   // virtual SetCellularDataRoamingAllowed implemented in derived classes.
+  // virtual SetCarrier implemented in derived classes.
   // virtual IsCellularAlwaysInRoaming implemented in derived classes.
   // virtual RequestNetworkScan implemented in derived classes.
   // virtual GetWifiAccessPoints implemented in derived classes.
@@ -241,6 +242,7 @@ class NetworkLibraryImplBase : public NetworkLibrary {
   virtual bool LoadOncNetworks(const std::string& onc_blob,
                                const std::string& passphrase,
                                NetworkUIData::ONCSource source,
+                               bool allow_web_trust_from_policy,
                                std::string* error) OVERRIDE;
   virtual bool SetActiveNetwork(ConnectionType type,
                                 const std::string& service_path) OVERRIDE;
@@ -262,9 +264,8 @@ class NetworkLibraryImplBase : public NetworkLibrary {
                    std::set<std::string> > NetworkSourceMap;
 
   struct NetworkProfile {
-    NetworkProfile(const std::string& p, NetworkProfileType t)
-        : path(p), type(t) {}
-    ~NetworkProfile() {}
+    NetworkProfile(const std::string& p, NetworkProfileType t);
+    ~NetworkProfile();
     std::string path;
     NetworkProfileType type;
     typedef std::set<std::string> ServiceList;
@@ -273,14 +274,8 @@ class NetworkLibraryImplBase : public NetworkLibrary {
   typedef std::list<NetworkProfile> NetworkProfileList;
 
   struct ConnectData {
-    ConnectData() :
-        security(SECURITY_NONE),
-        eap_method(EAP_METHOD_UNKNOWN),
-        eap_auth(EAP_PHASE_2_AUTH_AUTO),
-        eap_use_system_cas(false),
-        save_credentials(false),
-        profile_type(PROFILE_NONE) {}
-    ~ConnectData() {}
+    ConnectData();
+    ~ConnectData();
     ConnectionSecurity security;
     std::string service_name;  // For example, SSID.
     std::string username;
@@ -344,7 +339,7 @@ class NetworkLibraryImplBase : public NetworkLibrary {
                           bool if_found);
 
   // Checks whether |network| has meanwhile been pruned by ONC policy. If so,
-  // instructs flimflam to remove the network, deletes |network| and returns
+  // instructs shill to remove the network, deletes |network| and returns
   // false.
   bool ValidateRememberedNetwork(Network* network);
 
@@ -489,7 +484,7 @@ class NetworkLibraryImplBase : public NetworkLibrary {
   // True if access network library is locked.
   bool is_locked_;
 
-  // TPM module user slot and PIN, needed by flimflam to access certificates.
+  // TPM module user slot and PIN, needed by shill to access certificates.
   std::string tpm_slot_;
   std::string tpm_pin_;
 
@@ -513,7 +508,7 @@ class NetworkLibraryImplBase : public NetworkLibrary {
   NetworkOncMap network_onc_map_;
 
   // Keeps track of what networks ONC has configured. This is used to weed out
-  // stray networks that flimflam still has on file, but are not known on the
+  // stray networks that shill still has on file, but are not known on the
   // Chrome side.
   NetworkSourceMap network_source_map_;
 

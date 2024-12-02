@@ -29,7 +29,9 @@ enum {
   DIR_INSPECTOR,                // Directory where web inspector is located.
   DIR_APP_DICTIONARIES,         // Directory where the global dictionaries are.
   DIR_USER_DOCUMENTS,           // Directory for a user's "My Documents".
+  DIR_USER_MUSIC,               // Directory for a user's music.
   DIR_USER_PICTURES,            // Directory for a user's pictures.
+  DIR_USER_VIDEOS,              // Directory for a user's videos.
   DIR_DEFAULT_DOWNLOADS_SAFE,   // Directory for a user's
                                 // "My Documents/Downloads", (Windows) or
                                 // "Downloads". (Linux)
@@ -59,7 +61,7 @@ enum {
                                  // Getting this path does not create it.
 #endif
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#if defined(OS_LINUX)
   DIR_STANDALONE_EXTERNAL_EXTENSIONS,  // Directory for 'per-extension'
                                        // definition manifest files that
                                        // describe extensions which are to be
@@ -69,8 +71,11 @@ enum {
 
   DIR_DEFAULT_APPS,             // Directory where installer places .crx files
                                 // to be installed when chrome is first run.
-  DIR_PEPPER_FLASH_PLUGIN,      // Directory to the Pepper Flash plugin,
+  DIR_PEPPER_FLASH_PLUGIN,      // Directory to the bundled Pepper Flash plugin,
                                 // containing the plugin and the manifest.
+  DIR_COMPONENT_UPDATED_PEPPER_FLASH_PLUGIN,  // Base directory of the Pepper
+                                              // Flash plugins downloaded by the
+                                              // component updater.
   FILE_RESOURCE_MODULE,         // Full path and filename of the module that
                                 // contains embedded resources (version,
                                 // strings, images, etc.).
@@ -85,7 +90,8 @@ enum {
   FILE_FLASH_PLUGIN_EXISTING,   // Full path to the internal Flash plugin file.
                                 // Querying this path will fail if the file
                                 // doesn't exist.
-  FILE_PEPPER_FLASH_PLUGIN,     // Full path to the Pepper Flash plugin file.
+  FILE_PEPPER_FLASH_PLUGIN,     // Full path to the bundled Pepper Flash plugin
+                                // file.
   FILE_PDF_PLUGIN,              // Full path to the internal PDF plugin file.
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -110,6 +116,8 @@ enum {
 #if defined(OS_CHROMEOS)
   DIR_CHROMEOS_WALLPAPERS,      // Directory where downloaded chromeos
                                 // wallpapers reside.
+  FILE_DEFAULT_APP_ORDER,       // Full path to the json file that defines the
+                                // default app order.
 #endif
 
   // Valid only in development environment; TODO(darin): move these

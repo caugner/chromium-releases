@@ -13,8 +13,9 @@
 
 namespace extensions {
 
-UDPSocket::UDPSocket(ApiResourceEventNotifier* event_notifier)
-    : Socket(event_notifier),
+UDPSocket::UDPSocket(const std::string& owner_extension_id,
+                     ApiResourceEventNotifier* event_notifier)
+    : Socket(owner_extension_id, event_notifier),
       socket_(net::DatagramSocket::DEFAULT_BIND,
               net::RandIntCallback(),
               NULL,
@@ -109,7 +110,7 @@ void UDPSocket::RecvFrom(int count,
   DCHECK(!callback.is_null());
 
   if (!recv_from_callback_.is_null()) {
-    callback.Run(net::ERR_IO_PENDING, NULL, NULL, 0);
+    callback.Run(net::ERR_IO_PENDING, NULL, "", 0);
     return;
   } else {
     recv_from_callback_ = callback;
@@ -185,16 +186,16 @@ void UDPSocket::SendTo(scoped_refptr<net::IOBuffer> io_buffer,
     OnSendToComplete(result);
 }
 
-bool UDPSocket::IsTCPSocket() {
-  return false;
-}
-
 bool UDPSocket::GetPeerAddress(net::IPEndPoint* address) {
   return !socket_.GetPeerAddress(address);
 }
 
 bool UDPSocket::GetLocalAddress(net::IPEndPoint* address) {
   return !socket_.GetLocalAddress(address);
+}
+
+Socket::SocketType UDPSocket::GetSocketType() const {
+  return Socket::TYPE_UDP;
 }
 
 void UDPSocket::OnReadComplete(scoped_refptr<net::IOBuffer> io_buffer,

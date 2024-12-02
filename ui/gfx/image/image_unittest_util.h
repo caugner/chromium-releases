@@ -14,7 +14,9 @@
 namespace gfx {
 namespace test {
 
-#if defined(OS_MACOSX)
+#if defined(OS_IOS)
+typedef UIImage* PlatformImage;
+#elif defined(OS_MACOSX)
 typedef NSImage* PlatformImage;
 #elif defined(TOOLKIT_GTK)
 typedef GdkPixbuf* PlatformImage;
@@ -22,9 +24,7 @@ typedef GdkPixbuf* PlatformImage;
 typedef const SkBitmap PlatformImage;
 #endif
 
-#if defined(OS_MACOSX)
 void SetSupportedScaleFactorsTo1xAnd2x();
-#endif
 
 const SkBitmap CreateBitmap(int width, int height);
 

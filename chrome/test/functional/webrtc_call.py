@@ -10,11 +10,8 @@ import pyauto_functional
 import pyauto
 import webrtc_test_base
 
-class MissingRequiredBinaryException(Exception):
-  pass
 
-
-class WebRTCCallTest(webrtc_test_base.WebrtcTestBase):
+class WebrtcCallTest(webrtc_test_base.WebrtcTestBase):
   """Test we can set up a WebRTC call and disconnect it.
 
   Prerequisites: This test case must run on a machine with a webcam, either
@@ -28,34 +25,17 @@ class WebRTCCallTest(webrtc_test_base.WebrtcTestBase):
   trunk/talk/examples/peerconnection/server).
   """
 
-  def ExtraChromeFlags(self):
-    """Adds flags to the Chrome command line."""
-    extra_flags = ['--enable-media-stream', '--enable-peer-connection']
-    return pyauto.PyUITest.ExtraChromeFlags(self) + extra_flags
-
   def setUp(self):
     pyauto.PyUITest.setUp(self)
-
-    # Start the peerconnection_server. This must be built before running the
-    # test, and we assume the binary ends up next to the Chrome binary.
-    binary_path = os.path.join(self.BrowserPath(), 'peerconnection_server')
-    if self.IsWin():
-      binary_path += '.exe'
-    if not os.path.exists(binary_path):
-      raise MissingRequiredBinaryException(
-        'Could not locate peerconnection_server. Have you built the '
-        'peerconnection_server target? We expect to have a '
-        'peerconnection_server binary next to the chrome binary.')
-
-    self._server_process = subprocess.Popen(binary_path)
+    self.StartPeerConnectionServer()
 
   def tearDown(self):
-    self._server_process.kill()
+    self.StopPeerConnectionServer()
 
     pyauto.PyUITest.tearDown(self)
     self.assertEquals('', self.CheckErrorsAndCrashes())
 
-  def _SimpleWebRtcCall(self, test_page):
+  def _SimpleWebrtcCall(self, test_page):
     """Tests we can call and hang up with WebRTC.
 
     This test exercises pretty much the whole happy-case for the WebRTC
@@ -81,44 +61,49 @@ class WebRTCCallTest(webrtc_test_base.WebrtcTestBase):
     self.NavigateToURL(url)
     self.AppendTab(pyauto.GURL(url))
 
-    self.assertEquals('ok-got-stream', self._GetUserMedia(tab_index=0))
-    self.assertEquals('ok-got-stream', self._GetUserMedia(tab_index=1))
-    self._Connect('user_1', tab_index=0)
-    self._Connect('user_2', tab_index=1)
+    self.assertEquals('ok-got-stream', self.GetUserMedia(tab_index=0))
+    self.assertEquals('ok-got-stream', self.GetUserMedia(tab_index=1))
+    self.Connect('user_1', tab_index=0)
+    self.Connect('user_2', tab_index=1)
 
-    self._EstablishCall(from_tab_with_index=0)
+    self.EstablishCall(from_tab_with_index=0)
 
-    self._StartDetectingVideo(tab_index=0, video_element='remote_view')
+    self._StartDetectingVideo(tab_index=0, video_element='remote-view')
 
     self._WaitForVideoToPlay()
 
     # The hang-up will automatically propagate to the second tab.
-    self._HangUp(from_tab_with_index=0)
-    self._VerifyHungUp(tab_index=1)
+    self.HangUp(from_tab_with_index=0)
+    self.WaitUntilHangUpVerified(tab_index=1)
 
-    self._Disconnect(tab_index=0)
-    self._Disconnect(tab_index=1)
+    self.Disconnect(tab_index=0)
+    self.Disconnect(tab_index=1)
 
     # Ensure we didn't miss any errors.
-    self._AssertNoFailures(tab_index=0)
-    self._AssertNoFailures(tab_index=1)
+    self.AssertNoFailures(tab_index=0)
+    self.AssertNoFailures(tab_index=1)
 
-  def testSimpleWebRtcJsepCall(self):
-    self._SimpleWebRtcCall('webrtc_jsep_test.html')
+  def testSimpleWebrtcJsepCall(self):
+    """Uses a draft of the PeerConnection API, using JSEP00."""
+    self._SimpleWebrtcCall('webrtc_jsep_test.html')
+
+  def testSimpleWebrtcJsep01Call(self):
+    """Uses a draft of the PeerConnection API, using JSEP01."""
+    self._SimpleWebrtcCall('webrtc_jsep01_test.html')
 
   def testLocalPreview(self):
     """Brings up a local preview and ensures video is playing.
 
     This test will launch a window with a single tab and run a getUserMedia call
     which will give us access to the webcam and microphone. Then the javascript
-    code will hook up the webcam data to the local_view video tag. We will
+    code will hook up the webcam data to the local-view video tag. We will
     detect video in that tag using the video detector, and if we see video
     moving the test passes.
     """
     url = self.GetFileURLForDataPath('webrtc', 'webrtc_jsep_test.html')
     self.NavigateToURL(url)
-    self.assertEquals('ok-got-stream', self._GetUserMedia(tab_index=0))
-    self._StartDetectingVideo(tab_index=0, video_element='local_view')
+    self.assertEquals('ok-got-stream', self.GetUserMedia(tab_index=0))
+    self._StartDetectingVideo(tab_index=0, video_element='local-view')
 
     self._WaitForVideoToPlay()
 
@@ -128,63 +113,21 @@ class WebRTCCallTest(webrtc_test_base.WebrtcTestBase):
     self.NavigateToURL(url)
     self.AppendTab(pyauto.GURL(url))
 
-    self._GetUserMedia(tab_index=0)
-    self._GetUserMedia(tab_index=1)
-    self._Connect("user_1", tab_index=0)
-    self._Connect("user_2", tab_index=1)
+    self.GetUserMedia(tab_index=0)
+    self.GetUserMedia(tab_index=1)
+    self.Connect("user_1", tab_index=0)
+    self.Connect("user_2", tab_index=1)
 
-    self._EstablishCall(from_tab_with_index=0)
+    self.EstablishCall(from_tab_with_index=0)
 
     self.assertEquals('failed-with-error-1',
-                      self._GetUserMedia(tab_index=0, action='deny'))
+                      self.GetUserMedia(tab_index=0, action='deny'))
     self.assertEquals('failed-with-error-1',
-                      self._GetUserMedia(tab_index=0, action='dismiss'))
-
-  def _GetUserMedia(self, tab_index, action='allow'):
-    """Acquires webcam or mic for one tab and returns the result."""
-    self.assertEquals('ok-requested', self.ExecuteJavascript(
-        'getUserMedia(true, true)', tab_index=tab_index))
-
-    self.WaitForInfobarCount(1, tab_index=tab_index)
-    self.PerformActionOnInfobar(action, infobar_index=0, tab_index=tab_index)
-    self.WaitForGetUserMediaResult(tab_index=0)
-
-    result = self.GetUserMediaResult(tab_index=0)
-    self._AssertNoFailures(tab_index)
-    return result
-
-  def _Connect(self, user_name, tab_index):
-    self.assertEquals('ok-connected', self.ExecuteJavascript(
-        'connect("http://localhost:8888", "%s")' % user_name,
-        tab_index=tab_index))
-    self._AssertNoFailures(tab_index)
-
-  def _EstablishCall(self, from_tab_with_index):
-    self.assertEquals('ok-call-established', self.ExecuteJavascript(
-        'call()', tab_index=from_tab_with_index))
-    self._AssertNoFailures(from_tab_with_index)
-
-    # Double-check the call reached the other side.
-    self.assertEquals('yes', self.ExecuteJavascript(
-        'is_call_active()', tab_index=from_tab_with_index))
-
-  def _HangUp(self, from_tab_with_index):
-    self.assertEquals('ok-call-hung-up', self.ExecuteJavascript(
-        'hangUp()', tab_index=from_tab_with_index))
-    self._VerifyHungUp(from_tab_with_index)
-    self._AssertNoFailures(from_tab_with_index)
-
-  def _VerifyHungUp(self, tab_index):
-    self.assertEquals('no', self.ExecuteJavascript(
-        'is_call_active()', tab_index=tab_index))
-
-  def _Disconnect(self, tab_index):
-    self.assertEquals('ok-disconnected', self.ExecuteJavascript(
-        'disconnect()', tab_index=tab_index))
+                      self.GetUserMedia(tab_index=0, action='dismiss'))
 
   def _StartDetectingVideo(self, tab_index, video_element):
     self.assertEquals('ok-started', self.ExecuteJavascript(
-        'startDetection("%s", "frame_buffer", 320, 240)' % video_element,
+        'startDetection("%s", "frame-buffer", 320, 240)' % video_element,
         tab_index=tab_index));
 
   def _WaitForVideoToPlay(self):
@@ -193,10 +136,6 @@ class WebRTCCallTest(webrtc_test_base.WebrtcTestBase):
         expect_retval='video-playing')
     self.assertTrue(video_playing,
                     msg='Timed out while trying to detect video.')
-
-  def _AssertNoFailures(self, tab_index):
-    self.assertEquals('ok-no-errors', self.ExecuteJavascript(
-        'getAnyTestFailures()', tab_index=tab_index))
 
 
 if __name__ == '__main__':

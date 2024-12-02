@@ -16,11 +16,13 @@
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/intents/cws_intents_registry.h"
 #include "chrome/browser/intents/web_intents_registry.h"
+#include "chrome/browser/intents/web_intents_reporting.h"
 #include "chrome/browser/ui/intents/web_intent_picker_delegate.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "webkit/glue/web_intent_data.h"
 #include "webkit/glue/web_intent_reply_data.h"
+#include "webkit/glue/web_intent_service_data.h"
 
 class Browser;
 struct DefaultWebIntentService;
@@ -45,6 +47,25 @@ class WebIntentPickerController
       public WebIntentPickerDelegate,
       public extensions::WebstoreInstaller::Delegate {
  public:
+
+  // The various states that the UI may be in. Public for testing.
+  enum WebIntentPickerState {
+    kPickerHidden,  // Picker not displayed at all.
+    kPickerSetup,  // Initial setup. Acquires data, keeps picker hidden.
+    kPickerWaiting, // Displaying "waiting for CWS".
+    kPickerWaitLong,  // "waiting" has displayed for longer than min. time.
+    kPickerMain,  // Displaying main picker dialog.
+    kPickerInline, // Displaying inline intent handler.
+  };
+
+  // Events that happen during picker life time. Drive state machine.
+  enum WebIntentPickerEvent {
+    kPickerEventHiddenSetupTimeout,  // Time for hidden setup exired.
+    kPickerEventMaxWaitTimeExceeded,  // Exceeded max wait time for CWS results.
+    kPickerEventRegistryDataComplete,  // Data from the registry has arrived.
+    kPickerEventAsyncDataComplete,  // Data from registry and CWS has arrived.
+  };
+
   explicit WebIntentPickerController(TabContents* tab_contents);
   virtual ~WebIntentPickerController();
 
@@ -57,10 +78,13 @@ class WebIntentPickerController
   void ShowDialog(const string16& action,
                   const string16& type);
 
-  // Called by the location bar to see whether the web intents picker affordance
-  // should be shown. TODO(gbillock): refactor this into a
-  // LocationBarPageToolModel.
+  // Called by the location bar to see whether the web intents picker button
+  // should be shown.
   bool ShowLocationBarPickerTool();
+
+  // Called by the location bar to notify picker that the button was clicked.
+  // Called in the controller of the tab which is displaying the service.
+  void LocationBarPickerToolClicked();
 
   // Called to notify a controller for a page hosting a web intents service
   // that the source WebContents has been destroyed.
@@ -73,14 +97,18 @@ class WebIntentPickerController
                        const content::NotificationDetails& details) OVERRIDE;
 
   // WebIntentPickerDelegate implementation.
-  virtual void OnServiceChosen(const GURL& url,
-                               Disposition disposition) OVERRIDE;
+  virtual void OnServiceChosen(
+      const GURL& url,
+      webkit_glue::WebIntentServiceData::Disposition disposition) OVERRIDE;
   virtual void OnInlineDispositionWebContentsCreated(
       content::WebContents* web_contents) OVERRIDE;
   virtual void OnExtensionInstallRequested(const std::string& id) OVERRIDE;
-  virtual void OnExtensionLinkClicked(const std::string& id) OVERRIDE;
-  virtual void OnSuggestionsLinkClicked() OVERRIDE;
-  virtual void OnPickerClosed() OVERRIDE;
+  virtual void OnExtensionLinkClicked(
+      const std::string& id,
+      WindowOpenDisposition disposition) OVERRIDE;
+  virtual void OnSuggestionsLinkClicked(
+      WindowOpenDisposition disposition) OVERRIDE;
+  virtual void OnUserCancelledPickerDialog() OVERRIDE;
   virtual void OnChooseAnotherService() OVERRIDE;
   virtual void OnClosing() OVERRIDE;
 
@@ -93,9 +121,23 @@ class WebIntentPickerController
   friend class WebIntentPickerControllerTest;
   friend class WebIntentPickerControllerBrowserTest;
   friend class WebIntentPickerControllerIncognitoBrowserTest;
+  friend class WebIntentsButtonDecorationTest;
+
+  // Forward declaraton of the internal implementation class.
+  class UMAReporter;
+
+  // Dispatches intent to a just-installed extension with ID |extension_id|.
+  void DispatchToInstalledExtension(const std::string& extension_id);
 
   // Adds a service to the data model.
   void AddServiceToModel(const webkit_glue::WebIntentServiceData& service);
+
+  // Register the user-selected service (indicated by the passed |url|) as
+  // the default for the combination of action/type/options in the picker.
+  void SetDefaultServiceForSelection(const GURL& url);
+
+  // Calculate a digest value for the services in the picker.
+  int64 DigestServices();
 
   // Gets a notification when the return message is sent to the source tab,
   // so we can close the picker dialog or service tab.
@@ -138,12 +180,13 @@ class WebIntentPickerController
   // when dispatching explicit intents. Gets |services|
   // from the WebIntentsRegistry to check for known urls/extensions and find
   // disposition data.
-  void WebIntentServicesForExplicitIntent(
+  void OnWebIntentServicesAvailableForExplicitIntent(
       const std::vector<webkit_glue::WebIntentServiceData>& services);
 
-  // Called when FaviconData is returned from the FaviconService.
-  void OnFaviconDataAvailable(FaviconService::Handle handle,
-                              history::FaviconData favicon_data);
+  // Called when a favicon is returned from the FaviconService.
+  void OnFaviconDataAvailable(
+      FaviconService::Handle handle,
+      const history::FaviconImageResult& image_result);
 
   // Called when IntentExtensionInfo is returned from the CWSIntentsRegistry.
   void OnCWSIntentServicesAvailable(
@@ -152,6 +195,12 @@ class WebIntentPickerController
   // Called when a suggested extension's icon is fetched.
   void OnExtensionIconURLFetchComplete(const string16& extension_id,
                                        const net::URLFetcher* source);
+
+  // Called whenever intent data (both from registry and CWS) arrives.
+  void OnIntentDataArrived();
+
+  // Reset internal state to default values.
+  void Reset();
 
   typedef base::Callback<void(const gfx::Image&)>
       ExtensionIconAvailableCallback;
@@ -168,21 +217,34 @@ class WebIntentPickerController
   // Called when an extension's icon failed to be decoded or resized.
   void OnExtensionIconUnavailable(const string16& extension_id);
 
-  // When an extension is installed, all that is known is the extension id.
-  // This callback receives the intent service data for that extension.
-  // |services| must be a non-empty list.
-  void OnExtensionInstallServiceAvailable(
-      const std::vector<webkit_glue::WebIntentServiceData>& services);
+  // Signals that a picker event has occurred.
+  void OnPickerEvent(WebIntentPickerEvent event);
 
   // Decrements the |pending_async_count_| and notifies the picker if it
   // reaches zero.
   void AsyncOperationFinished();
+
+  // Invoke the specified service at |service_url| with chosen |disposition|.
+  void InvokeService(const WebIntentPickerModel::InstalledService& service);
+
+  // Sets current dialog state.
+  void SetDialogState(WebIntentPickerState state);
 
   // Helper to create picker dialog UI.
   void CreatePicker();
 
   // Closes the currently active picker.
   void ClosePicker();
+
+  // Re-starts the process of showing the dialog, suppressing any default
+  // queries. Called on the user clicking Use-Another-Service.
+  void ReshowDialog();
+
+  // Delegate for ShowDialog and ReshowDialog. Starts all the data queries for
+  // loading the picker model and showing the dialog.
+  void ShowDialog(bool suppress_defaults);
+
+  WebIntentPickerState dialog_state_;  // Current state of the dialog.
 
   // A weak pointer to the tab contents that the picker is displayed on.
   TabContents* tab_contents_;
@@ -198,16 +260,31 @@ class WebIntentPickerController
   // while this controller exists, even if the picker is not shown.
   scoped_ptr<WebIntentPickerModel> picker_model_;
 
+  // UMA reporting manager.
+  scoped_ptr<UMAReporter> uma_reporter_;
+
   // A count of the outstanding asynchronous calls.
   int pending_async_count_;
 
   // A count of outstanding WebIntentsRegistry calls.
   int pending_registry_calls_count_;
 
+  // Indicator that there is a pending request for cws data.
+  bool pending_cws_request_;
+
   // Is true if the picker is currently visible.
   // This bool is not equivalent to picker != NULL in a unit test. In that
   // case, a picker may be non-NULL before it is shown.
   bool picker_shown_;
+
+#if defined(TOOLKIT_VIEWS)
+  // Set to true if user cancelled the picker dialog. Set to false if the picker
+  // dialog is closing for any other reason.
+  // TODO(rouslan): We need to fix DialogDelegate in Views to notify us when the
+  // user closes the picker dialog. This boolean is a mediocre workaround for
+  // lack of that information.
+  bool cancelled_;
+#endif
 
   // Weak pointer to the source WebContents for the intent if the TabContents
   // with which this controller is associated is hosting a web intents window
@@ -230,7 +307,25 @@ class WebIntentPickerController
   // Request consumer used when asynchronously loading favicons.
   CancelableRequestConsumerTSimple<size_t> favicon_consumer_;
 
+  // Factory for weak pointers used in callbacks for async calls to load the
+  // picker model.
   base::WeakPtrFactory<WebIntentPickerController> weak_ptr_factory_;
+
+  // Timer factory for minimum display time of "waiting" dialog.
+  base::WeakPtrFactory<WebIntentPickerController> timer_factory_;
+
+  // Weak pointers for the dispatcher OnSendReturnMessage will not be
+  // cancelled on picker close.
+  base::WeakPtrFactory<WebIntentPickerController> dispatcher_factory_;
+
+  // Bucket identifier for UMA reporting. Saved off in a field
+  // to avoid repeated calculation of the bucket across
+  // multiple UMA calls. Should be recalculated each time
+  // |intents_dispatcher_| is set.
+  web_intents::UMABucket uma_bucket_;
+
+  // Manager for a pending extension download and installation.
+  scoped_refptr<extensions::WebstoreInstaller> webstore_installer_;
 
   DISALLOW_COPY_AND_ASSIGN(WebIntentPickerController);
 };

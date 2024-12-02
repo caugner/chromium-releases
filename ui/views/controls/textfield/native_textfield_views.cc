@@ -18,6 +18,7 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/events/event.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/range/range.h"
 #include "ui/compositor/layer.h"
@@ -34,10 +35,8 @@
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/controls/textfield/textfield_views_model.h"
-#include "ui/views/events/event.h"
 #include "ui/views/ime/input_method.h"
 #include "ui/views/metrics.h"
-#include "ui/views/views_delegate.h"
 #include "ui/views/widget/widget.h"
 #include "unicode/uchar.h"
 
@@ -74,8 +73,6 @@ NativeTextfieldViews::NativeTextfieldViews(Textfield* parent)
       initiating_drag_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(cursor_timer_(this)),
       aggregated_clicks_(0),
-      last_click_time_(),
-      last_click_location_(),
       ALLOW_THIS_IN_INITIALIZER_LIST(touch_selection_controller_(
           TouchSelectionController::create(this))) {
   set_border(text_border_);
@@ -84,7 +81,7 @@ NativeTextfieldViews::NativeTextfieldViews(Textfield* parent)
   GetRenderText()->SetFontList(gfx::FontList(l10n_util::GetStringUTF8(
       IDS_UI_FONT_FAMILY_CROS)));
 #else
-  GetRenderText()->SetFontList(gfx::FontList(textfield_->font()));
+  GetRenderText()->SetFont(textfield_->font());
 #endif
   // Set the default text style.
   gfx::StyleRange default_style;
@@ -102,7 +99,7 @@ NativeTextfieldViews::~NativeTextfieldViews() {
 ////////////////////////////////////////////////////////////////////////////////
 // NativeTextfieldViews, View overrides:
 
-bool NativeTextfieldViews::OnMousePressed(const MouseEvent& event) {
+bool NativeTextfieldViews::OnMousePressed(const ui::MouseEvent& event) {
   OnBeforeUserAction();
   TrackMouseClicks(event);
   // TODO: Remove once NativeTextfield implementations are consolidated to
@@ -114,12 +111,12 @@ bool NativeTextfieldViews::OnMousePressed(const MouseEvent& event) {
 }
 
 bool NativeTextfieldViews::ExceededDragThresholdFromLastClickLocation(
-    const MouseEvent& event) {
+    const ui::MouseEvent& event) {
   gfx::Point location_delta = event.location().Subtract(last_click_location_);
   return ExceededDragThreshold(location_delta.x(), location_delta.y());
 }
 
-bool NativeTextfieldViews::OnMouseDragged(const MouseEvent& event) {
+bool NativeTextfieldViews::OnMouseDragged(const ui::MouseEvent& event) {
   // Don't adjust the cursor on a potential drag and drop, or if the mouse
   // movement from the last mouse click does not exceed the drag threshold.
   if (initiating_drag_ || !ExceededDragThresholdFromLastClickLocation(event))
@@ -136,7 +133,7 @@ bool NativeTextfieldViews::OnMouseDragged(const MouseEvent& event) {
   return true;
 }
 
-void NativeTextfieldViews::OnMouseReleased(const MouseEvent& event) {
+void NativeTextfieldViews::OnMouseReleased(const ui::MouseEvent& event) {
   OnBeforeUserAction();
   // TODO: Remove once NativeTextfield implementations are consolidated to
   // Textfield.
@@ -148,10 +145,10 @@ void NativeTextfieldViews::OnMouseReleased(const MouseEvent& event) {
   OnAfterUserAction();
 }
 
-ui::GestureStatus NativeTextfieldViews::OnGestureEvent(
-    const GestureEvent& event) {
-  ui::GestureStatus status = textfield_->OnGestureEvent(event);
-  if (status != ui::GESTURE_STATUS_UNKNOWN)
+ui::EventResult NativeTextfieldViews::OnGestureEvent(
+    const ui::GestureEvent& event) {
+  ui::EventResult status = textfield_->OnGestureEvent(event);
+  if (status != ui::ER_UNHANDLED)
     return status;
 
   switch (event.type()) {
@@ -164,30 +161,30 @@ ui::GestureStatus NativeTextfieldViews::OnGestureEvent(
           MoveCursorTo(event.location(), false))
         SchedulePaint();
       OnAfterUserAction();
-      return ui::GESTURE_STATUS_CONSUMED;
+      return ui::ER_CONSUMED;
     case ui::ET_GESTURE_DOUBLE_TAP:
       SelectAll(false);
-      return ui::GESTURE_STATUS_CONSUMED;
+      return ui::ER_CONSUMED;
     case ui::ET_GESTURE_SCROLL_UPDATE:
       OnBeforeUserAction();
       if (MoveCursorTo(event.location(), true))
         SchedulePaint();
       OnAfterUserAction();
-      return ui::GESTURE_STATUS_CONSUMED;
+      return ui::ER_CONSUMED;
     default:
       break;
   }
   return TouchSelectionClientView::OnGestureEvent(event);
 }
 
-bool NativeTextfieldViews::OnKeyPressed(const KeyEvent& event) {
+bool NativeTextfieldViews::OnKeyPressed(const ui::KeyEvent& event) {
   // OnKeyPressed/OnKeyReleased/OnFocus/OnBlur will never be invoked on
   // NativeTextfieldViews as it will never gain focus.
   NOTREACHED();
   return false;
 }
 
-bool NativeTextfieldViews::OnKeyReleased(const KeyEvent& event) {
+bool NativeTextfieldViews::OnKeyReleased(const ui::KeyEvent& event) {
   NOTREACHED();
   return false;
 }
@@ -206,7 +203,7 @@ bool NativeTextfieldViews::CanDrop(const OSExchangeData& data) {
   return textfield_->enabled() && !textfield_->read_only() && data.HasString();
 }
 
-int NativeTextfieldViews::OnDragUpdated(const DropTargetEvent& event) {
+int NativeTextfieldViews::OnDragUpdated(const ui::DropTargetEvent& event) {
   DCHECK(CanDrop(event.data()));
   bool in_selection = GetRenderText()->IsPointInSelection(event.location());
   is_drop_cursor_visible_ = !in_selection;
@@ -223,7 +220,7 @@ int NativeTextfieldViews::OnDragUpdated(const DropTargetEvent& event) {
   return ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_MOVE;
 }
 
-int NativeTextfieldViews::OnPerformDrop(const DropTargetEvent& event) {
+int NativeTextfieldViews::OnPerformDrop(const ui::DropTargetEvent& event) {
   DCHECK(CanDrop(event.data()));
   DCHECK(!initiating_drag_ ||
          !GetRenderText()->IsPointInSelection(event.location()));
@@ -297,7 +294,7 @@ void NativeTextfieldViews::SelectRect(const gfx::Point& start,
   OnAfterUserAction();
 }
 
-gfx::NativeCursor NativeTextfieldViews::GetCursor(const MouseEvent& event) {
+gfx::NativeCursor NativeTextfieldViews::GetCursor(const ui::MouseEvent& event) {
   bool in_selection = GetRenderText()->IsPointInSelection(event.location());
   bool drag_event = event.type() == ui::ET_MOUSE_DRAGGED;
   bool text_cursor = !initiating_drag_ && (drag_event || !in_selection);
@@ -317,7 +314,8 @@ void NativeTextfieldViews::ShowContextMenuForView(View* source,
   UpdateContextMenu();
   if (context_menu_runner_->RunMenuAt(GetWidget(), NULL,
           gfx::Rect(point, gfx::Size()), views::MenuItemView::TOPLEFT,
-          MenuRunner::HAS_MNEMONICS) == MenuRunner::MENU_DELETED)
+          MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU) ==
+      MenuRunner::MENU_DELETED)
     return;
 }
 
@@ -437,7 +435,7 @@ void NativeTextfieldViews::UpdateFont() {
   // only changes the font size, not the font family names.
   GetRenderText()->SetFontSize(textfield_->font().GetFontSize());
 #else
-  GetRenderText()->SetFontList(gfx::FontList(textfield_->font()));
+  GetRenderText()->SetFont(textfield_->font());
 #endif
   OnCaretBoundsChanged();
 }
@@ -522,7 +520,7 @@ size_t NativeTextfieldViews::GetCursorPosition() const {
   return model_->GetCursorPosition();
 }
 
-bool NativeTextfieldViews::HandleKeyPressed(const KeyEvent& e) {
+bool NativeTextfieldViews::HandleKeyPressed(const ui::KeyEvent& e) {
   TextfieldController* controller = textfield_->GetController();
   bool handled = false;
   if (controller)
@@ -530,7 +528,7 @@ bool NativeTextfieldViews::HandleKeyPressed(const KeyEvent& e) {
   return handled || HandleKeyEvent(e);
 }
 
-bool NativeTextfieldViews::HandleKeyReleased(const KeyEvent& e) {
+bool NativeTextfieldViews::HandleKeyReleased(const ui::KeyEvent& e) {
   return false;  // crbug.com/127520
 }
 
@@ -588,8 +586,8 @@ bool NativeTextfieldViews::IsCommandIdEnabled(int command_id) const {
     case IDS_APP_COPY:
       return model_->HasSelection() && !textfield_->IsObscured();
     case IDS_APP_PASTE:
-      ViewsDelegate::views_delegate->GetClipboard()
-          ->ReadText(ui::Clipboard::BUFFER_STANDARD, &result);
+      ui::Clipboard::GetForCurrentThread()->ReadText(
+          ui::Clipboard::BUFFER_STANDARD, &result);
       return editable && !result.empty();
     case IDS_APP_DELETE:
       return editable && model_->HasSelection();
@@ -856,6 +854,14 @@ bool NativeTextfieldViews::ChangeTextDirectionAndLayoutAlignment(
   return false;
 }
 
+void NativeTextfieldViews::ExtendSelectionAndDelete(
+    size_t before,
+    size_t after) {
+  // TODO(horo): implement this method if it is required.
+  // http://crbug.com/149155
+  NOTIMPLEMENTED();
+}
+
 void NativeTextfieldViews::OnCompositionTextConfirmedOrCleared() {
   if (skip_input_method_cancel_composition_)
     return;
@@ -916,7 +922,7 @@ void NativeTextfieldViews::PaintTextAndCursor(gfx::Canvas* canvas) {
   canvas->Restore();
 }
 
-bool NativeTextfieldViews::HandleKeyEvent(const KeyEvent& key_event) {
+bool NativeTextfieldViews::HandleKeyEvent(const ui::KeyEvent& key_event) {
   // TODO(oshima): Refactor and consolidate with ExecuteCommand.
   if (key_event.type() == ui::ET_KEY_PRESSED) {
     ui::KeyboardCode key_code = key_event.key_code();
@@ -1071,7 +1077,7 @@ void NativeTextfieldViews::UpdateContextMenu() {
     context_menu_contents_->AddItemWithStringId(IDS_APP_COPY, IDS_APP_COPY);
     context_menu_contents_->AddItemWithStringId(IDS_APP_PASTE, IDS_APP_PASTE);
     context_menu_contents_->AddItemWithStringId(IDS_APP_DELETE, IDS_APP_DELETE);
-    context_menu_contents_->AddSeparator();
+    context_menu_contents_->AddSeparator(ui::NORMAL_SEPARATOR);
     context_menu_contents_->AddItemWithStringId(IDS_APP_SELECT_ALL,
                                                 IDS_APP_SELECT_ALL);
     TextfieldController* controller = textfield_->GetController();
@@ -1166,7 +1172,7 @@ bool NativeTextfieldViews::Paste() {
   return success;
 }
 
-void NativeTextfieldViews::TrackMouseClicks(const MouseEvent& event) {
+void NativeTextfieldViews::TrackMouseClicks(const ui::MouseEvent& event) {
   if (event.IsOnlyLeftMouseButton()) {
     base::TimeDelta time_delta = event.time_stamp() - last_click_time_;
     if (time_delta.InMilliseconds() <= GetDoubleClickInterval() &&
@@ -1180,7 +1186,7 @@ void NativeTextfieldViews::TrackMouseClicks(const MouseEvent& event) {
   }
 }
 
-void NativeTextfieldViews::HandleMousePressEvent(const MouseEvent& event) {
+void NativeTextfieldViews::HandleMousePressEvent(const ui::MouseEvent& event) {
   if (event.IsOnlyLeftMouseButton()) {
     textfield_->RequestFocus();
 

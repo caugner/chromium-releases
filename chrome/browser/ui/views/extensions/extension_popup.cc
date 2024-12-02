@@ -65,11 +65,12 @@ ExtensionPopup::ExtensionPopup(
     Browser* browser,
     extensions::ExtensionHost* host,
     views::View* anchor_view,
-    views::BubbleBorder::ArrowLocation arrow_location)
+    views::BubbleBorder::ArrowLocation arrow_location,
+    ShowAction show_action)
     : BubbleDelegateView(anchor_view, arrow_location),
       extension_host_(host),
-      inspect_with_devtools_(false),
       close_bubble_factory_(this) {
+  inspect_with_devtools_ = show_action == SHOW_AND_INSPECT;
   // Adjust the margin so that contents fit better.
   const int margin = views::BubbleBorder::GetCornerRadius() / 2;
   set_margins(gfx::Insets(margin, margin, margin, margin));
@@ -91,12 +92,12 @@ ExtensionPopup::ExtensionPopup(
 
   // Listen for the dev tools opening on this popup, so we can stop it going
   // away when the dev tools get focus.
-  registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_OPENING,
+  registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_AGENT_ATTACHED,
                  content::Source<Profile>(host->profile()));
 
   // Listen for the dev tools closing, so we can close this window if it is
   // being inspected and the inspector is closed.
-  registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
+  registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_AGENT_DETACHED,
       content::Source<content::BrowserContext>(host->profile()));
 }
 
@@ -118,7 +119,7 @@ void ExtensionPopup::Observe(int type,
       if (content::Details<extensions::ExtensionHost>(host()) == details)
         GetWidget()->Close();
       break;
-    case content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING:
+    case content::NOTIFICATION_DEVTOOLS_AGENT_DETACHED:
       // Make sure it's the devtools window that inspecting our popup.
       // Widget::Close posts a task, which should give the devtools window a
       // chance to finish detaching from the inspected RenderViewHost.
@@ -127,7 +128,7 @@ void ExtensionPopup::Observe(int type,
         GetWidget()->Close();
       }
       break;
-    case content::NOTIFICATION_DEVTOOLS_WINDOW_OPENING:
+    case content::NOTIFICATION_DEVTOOLS_AGENT_ATTACHED:
       // First check that the devtools are being opened on this popup.
       if (content::Details<RenderViewHost>(host()->render_view_host()) ==
           details) {
@@ -141,7 +142,7 @@ void ExtensionPopup::Observe(int type,
   }
 }
 
-void ExtensionPopup::OnExtensionSizeChanged(ExtensionView* view) {
+void ExtensionPopup::OnExtensionSizeChanged(ExtensionViewViews* view) {
   SizeToContents();
 }
 
@@ -176,12 +177,13 @@ ExtensionPopup* ExtensionPopup::ShowPopup(
     const GURL& url,
     Browser* browser,
     views::View* anchor_view,
-    views::BubbleBorder::ArrowLocation arrow_location) {
+    views::BubbleBorder::ArrowLocation arrow_location,
+    ShowAction show_action) {
   ExtensionProcessManager* manager =
       browser->profile()->GetExtensionProcessManager();
   extensions::ExtensionHost* host = manager->CreatePopupHost(url, browser);
   ExtensionPopup* popup = new ExtensionPopup(browser, host, anchor_view,
-      arrow_location);
+      arrow_location, show_action);
   views::BubbleDelegateView::CreateBubble(popup);
 
 #if defined(USE_ASH)
@@ -213,6 +215,7 @@ void ExtensionPopup::ShowBubble() {
 
   if (inspect_with_devtools_) {
     DevToolsWindow::ToggleDevToolsWindow(host()->render_view_host(),
+        true,
         DEVTOOLS_TOGGLE_ACTION_SHOW_CONSOLE);
   }
 }

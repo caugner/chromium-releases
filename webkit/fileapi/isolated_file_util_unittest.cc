@@ -20,6 +20,7 @@
 #include "webkit/fileapi/file_util_helper.h"
 #include "webkit/fileapi/isolated_context.h"
 #include "webkit/fileapi/isolated_file_util.h"
+#include "webkit/fileapi/local_file_system_operation.h"
 #include "webkit/fileapi/local_file_system_test_helper.h"
 #include "webkit/fileapi/local_file_util.h"
 #include "webkit/fileapi/mock_file_system_options.h"
@@ -299,13 +300,15 @@ TEST_F(IsolatedFileUtilTest, UnregisteredPathsTest) {
     const test::TestCaseRecord& test_case = kUnregisteredCases[i];
     FileSystemURL url = GetFileSystemURL(FilePath(test_case.path));
 
-    // This should fail as the paths in kUnregisteredCases are not included
-    // in the dropped files (i.e. the regular test cases).
-    base::PlatformFileInfo info;
-    FilePath platform_path;
-    FileSystemOperationContext context(file_system_context());
-    ASSERT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND,
-              file_util()->GetFileInfo(&context, url, &info, &platform_path));
+    // We should not be able to get the valid URL for unregistered files.
+    ASSERT_FALSE(url.is_valid());
+
+    // We should not be able to create a new operation for an invalid URL.
+    base::PlatformFileError error_code;
+    FileSystemOperation* operation =
+        file_system_context()->CreateFileSystemOperation(url, &error_code);
+    ASSERT_EQ(NULL, operation);
+    ASSERT_EQ(base::PLATFORM_FILE_ERROR_INVALID_URL, error_code);
   }
 }
 
@@ -323,10 +326,8 @@ TEST_F(IsolatedFileUtilTest, ReadDirectoryTest) {
     EntryMap expected_entry_map;
 
     FileEnumerator file_enum(
-        GetTestCasePlatformPath(test_case.path),
-        false /* recursive */,
-        static_cast<file_util::FileEnumerator::FileType>(
-            FileEnumerator::FILES | FileEnumerator::DIRECTORIES));
+        GetTestCasePlatformPath(test_case.path), false /* not recursive */,
+        FileEnumerator::FILES | FileEnumerator::DIRECTORIES);
     FilePath current;
     while (!(current = file_enum.Next()).empty()) {
       FileEnumerator::FindInfo file_info;

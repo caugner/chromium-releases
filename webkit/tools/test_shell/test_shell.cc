@@ -22,6 +22,7 @@
 #include "grit/webkit_strings.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
+#include "net/url_request/url_request.h"
 #include "net/url_request/url_request_file_job.h"
 #include "net/url_request/url_request_filter.h"
 #include "skia/ext/bitmap_platform_device.h"
@@ -43,7 +44,6 @@
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/size.h"
 #include "webkit/glue/glue_serialize.h"
-#include "webkit/glue/user_agent.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/tools/test_shell/notification_presenter.h"
@@ -54,6 +54,8 @@
 #include "webkit/tools/test_shell/test_shell_request_context.h"
 #include "webkit/tools/test_shell/test_shell_switches.h"
 #include "webkit/tools/test_shell/test_webview_delegate.h"
+#include "webkit/user_agent/user_agent.h"
+#include "webkit/user_agent/user_agent_util.h"
 
 using WebKit::WebCanvas;
 using WebKit::WebFrame;
@@ -82,19 +84,23 @@ const int kSVGTestWindowHeight = 360;
 // URLRequestTestShellFileJob is used to serve the inspector
 class URLRequestTestShellFileJob : public net::URLRequestFileJob {
  public:
-  static net::URLRequestJob* InspectorFactory(net::URLRequest* request,
-                                              const std::string& scheme) {
+  static net::URLRequestJob* InspectorFactory(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate,
+      const std::string& scheme) {
     FilePath path;
     PathService::Get(base::DIR_EXE, &path);
     path = path.AppendASCII("resources");
     path = path.AppendASCII("inspector");
     path = path.AppendASCII(request->url().path().substr(1));
-    return new URLRequestTestShellFileJob(request, path);
+    return new URLRequestTestShellFileJob(request, network_delegate, path);
   }
 
  private:
-  URLRequestTestShellFileJob(net::URLRequest* request, const FilePath& path)
-      : net::URLRequestFileJob(request, path) {
+  URLRequestTestShellFileJob(net::URLRequest* request,
+                             net::NetworkDelegate* network_delegate,
+                             const FilePath& path)
+      : net::URLRequestFileJob(request, network_delegate, path) {
   }
   virtual ~URLRequestTestShellFileJob() { }
 
@@ -117,6 +123,11 @@ int TestShell::load_count_ = 1;
 std::vector<std::string> TestShell::js_flags_;
 bool TestShell::accelerated_2d_canvas_enabled_ = false;
 bool TestShell::accelerated_compositing_enabled_ = false;
+
+TestShell::TestParams::TestParams()
+    : dump_tree(true),
+      dump_pixels(false) {
+}
 
 TestShell::TestShell()
     : m_mainWnd(NULL),
@@ -433,7 +444,7 @@ void TestShell::CallJSGC() {
 
 WebView* TestShell::CreateWebView() {
   // If we're running layout tests, only open a new window if the test has
-  // called layoutTestController.setCanOpenWindows()
+  // called testRunner.setCanOpenWindows()
   if (layout_test_mode_)
     return NULL;
 

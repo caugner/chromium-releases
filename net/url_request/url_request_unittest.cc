@@ -56,7 +56,7 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_file_dir_job.h"
 #include "net/url_request/url_request_http_job.h"
-#include "net/url_request/url_request_job_factory.h"
+#include "net/url_request/url_request_job_factory_impl.h"
 #include "net/url_request/url_request_redirect_job.h"
 #include "net/url_request/url_request_test_job.h"
 #include "net/url_request/url_request_test_util.h"
@@ -72,21 +72,6 @@ using base::Time;
 namespace net {
 
 namespace {
-
-// A subclass of TestServer that uses a statically-configured hostname. This is
-// to work around mysterious failures in chrome_frame_net_tests. See:
-// http://crbug.com/114369
-class LocalHttpTestServer : public TestServer {
- public:
-  explicit LocalHttpTestServer(const FilePath& document_root)
-      : TestServer(TestServer::TYPE_HTTP,
-                   ScopedCustomUrlRequestTestHttpHost::value(),
-                   document_root) {}
-  LocalHttpTestServer()
-      : TestServer(TestServer::TYPE_HTTP,
-                   ScopedCustomUrlRequestTestHttpHost::value(),
-                   FilePath()) {}
-};
 
 const string16 kChrome(ASCIIToUTF16("chrome"));
 const string16 kSecret(ASCIIToUTF16("secret"));
@@ -147,7 +132,7 @@ void CheckSSLInfo(const SSLInfo& ssl_info) {
   EXPECT_NE(0, cipher_suite);
 }
 
-bool FingerprintsEqual(const FingerprintVector& a, const FingerprintVector& b) {
+bool FingerprintsEqual(const HashValueVector& a, const HashValueVector& b) {
   size_t size = a.size();
 
   if (size != b.size())
@@ -370,38 +355,6 @@ class BlockingNetworkDelegateWithManualCallback : public TestNetworkDelegate {
   AuthCallback auth_callback_;
 };
 
-
-// A simple Interceptor that returns a pre-built URLRequestJob one time.
-class TestJobInterceptor : public URLRequestJobFactory::Interceptor {
- public:
-  TestJobInterceptor()
-      : main_intercept_job_(NULL) {
-  }
-
-  virtual URLRequestJob* MaybeIntercept(URLRequest* request) const OVERRIDE {
-    URLRequestJob* job = main_intercept_job_;
-    main_intercept_job_ = NULL;
-    return job;
-  }
-
-  virtual URLRequestJob* MaybeInterceptRedirect(
-      const GURL& location, URLRequest* request) const OVERRIDE {
-    return NULL;
-  }
-
-  virtual URLRequestJob* MaybeInterceptResponse(
-      URLRequest* request) const OVERRIDE {
-    return NULL;
-  }
-
-  void set_main_intercept_job(URLRequestJob* job) {
-    main_intercept_job_ = job;
-  }
-
- private:
-  mutable URLRequestJob* main_intercept_job_;
-};
-
 class TestURLRequestContextWithProxy : public TestURLRequestContext {
  public:
   // Does not own |delegate|.
@@ -435,9 +388,1324 @@ class URLRequestTest : public PlatformTest {
 
  protected:
   TestNetworkDelegate default_network_delegate_;  // must outlive URLRequest
-  URLRequestJobFactory job_factory_;
+  URLRequestJobFactoryImpl job_factory_;
   TestURLRequestContext default_context_;
 };
+
+TEST_F(URLRequestTest, AboutBlankTest) {
+  TestDelegate d;
+  {
+    URLRequest r(GURL("about:blank"), &d, &default_context_);
+
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    EXPECT_TRUE(!r.is_pending());
+    EXPECT_FALSE(d.received_data_before_response());
+    EXPECT_EQ(d.bytes_received(), 0);
+    EXPECT_EQ("", r.GetSocketAddress().host());
+    EXPECT_EQ(0, r.GetSocketAddress().port());
+  }
+}
+
+TEST_F(URLRequestTest, DataURLImageTest) {
+  TestDelegate d;
+  {
+    // Use our nice little Chrome logo.
+    URLRequest r(GURL(
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAADVklEQVQ4jX2TfUwUBBjG3"
+        "w1y+HGcd9dxhXR8T4awOccJGgOSWclHImznLkTlSw0DDQXkrmgYgbUYnlQTqQxIEVxitD"
+        "5UMCATRA1CEEg+Qjw3bWDxIauJv/5oumqs39/P827vnucRmYN0gyF01GI5MpCVdW0gO7t"
+        "vNC+vqSEtbZefk5NuLv1jdJ46p/zw0HeH4+PHr3h7c1mjoV2t5rKzMx1+fg9bAgK6zHq9"
+        "cU5z+LpA3xOtx34+vTeT21onRuzssC3zxbbSwC13d/pFuC7CkIMDxQpF7r/MWq12UctI1"
+        "dWWm99ypqSYmRUBdKem8MkrO/kgaTt1O7YzlpzE5GIVd0WYUqt57yWf2McHTObYPbVD+Z"
+        "wbtlLTVMZ3BW+TnLyXLaWtmEq6WJVbT3HBh3Svj2HQQcm43XwmtoYM6vVKleh0uoWvnzW"
+        "3v3MpidruPTQPf0bia7sJOtBM0ufTWNvus/nkDFHF9ZS+uYVjRUasMeHUmyLYtcklTvzW"
+        "GFZnNOXczThvpKIzjcahSqIzkvDLayDq6D3eOjtBbNUEIZYyqsvj4V4wY92eNJ4IoyhTb"
+        "xXX1T5xsV9tm9r4TQwHLiZw/pdDZJea8TKmsmR/K0uLh/GwnCHghTja6lPhphezPfO5/5"
+        "MrVvMzNaI3+ERHfrFzPKQukrQGI4d/3EFD/3E2mVNYvi4at7CXWREaxZGD+3hg28zD3gV"
+        "Md6q5c8GdosynKmSeRuGzpjyl1/9UDGtPR5HeaKT8Wjo17WXk579BXVUhN64ehF9fhRtq"
+        "/uxxZKzNiZFGD0wRC3NFROZ5mwIPL/96K/rKMMLrIzF9uhHr+/sYH7DAbwlgC4J+R2Z7F"
+        "Ux1qLnV7MGF40smVSoJ/jvHRfYhQeUJd/SnYtGWhPHR0Sz+GE2F2yth0B36Vcz2KpnufB"
+        "JbsysjjW4kblBUiIjiURUWqJY65zxbnTy57GQyH58zgy0QBtTQv5gH15XMdKkYu+TGaJM"
+        "nlm2O34uI4b9tflqp1+QEFGzoW/ulmcofcpkZCYJhDfSpme7QcrHa+Xfji8paEQkTkSfm"
+        "moRWRNZr/F1KfVMjW+IKEnv2FwZfKdzt0BQR6lClcZR0EfEXEfv/G6W9iLiIyCoReV5En"
+        "hORIBHx+ufPj/gLB/zGI/G4Bk0AAAAASUVORK5CYII="),
+        &d,
+        &default_context_);
+
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    EXPECT_TRUE(!r.is_pending());
+    EXPECT_FALSE(d.received_data_before_response());
+    EXPECT_EQ(d.bytes_received(), 911);
+    EXPECT_EQ("", r.GetSocketAddress().host());
+    EXPECT_EQ(0, r.GetSocketAddress().port());
+  }
+}
+
+TEST_F(URLRequestTest, FileTest) {
+  FilePath app_path;
+  PathService::Get(base::FILE_EXE, &app_path);
+  GURL app_url = FilePathToFileURL(app_path);
+
+  TestDelegate d;
+  {
+    URLRequest r(app_url, &d, &default_context_);
+
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    int64 file_size = -1;
+    EXPECT_TRUE(file_util::GetFileSize(app_path, &file_size));
+
+    EXPECT_TRUE(!r.is_pending());
+    EXPECT_EQ(1, d.response_started_count());
+    EXPECT_FALSE(d.received_data_before_response());
+    EXPECT_EQ(d.bytes_received(), static_cast<int>(file_size));
+    EXPECT_EQ("", r.GetSocketAddress().host());
+    EXPECT_EQ(0, r.GetSocketAddress().port());
+  }
+}
+
+TEST_F(URLRequestTest, FileTestFullSpecifiedRange) {
+  const size_t buffer_size = 4000;
+  scoped_array<char> buffer(new char[buffer_size]);
+  FillBuffer(buffer.get(), buffer_size);
+
+  FilePath temp_path;
+  EXPECT_TRUE(file_util::CreateTemporaryFile(&temp_path));
+  GURL temp_url = FilePathToFileURL(temp_path);
+  EXPECT_TRUE(file_util::WriteFile(temp_path, buffer.get(), buffer_size));
+
+  int64 file_size;
+  EXPECT_TRUE(file_util::GetFileSize(temp_path, &file_size));
+
+  const size_t first_byte_position = 500;
+  const size_t last_byte_position = buffer_size - first_byte_position;
+  const size_t content_length = last_byte_position - first_byte_position + 1;
+  std::string partial_buffer_string(buffer.get() + first_byte_position,
+                                    buffer.get() + last_byte_position + 1);
+
+  TestDelegate d;
+  {
+    URLRequest r(temp_url, &d, &default_context_);
+
+    HttpRequestHeaders headers;
+    headers.SetHeader(HttpRequestHeaders::kRange,
+                      base::StringPrintf(
+                           "bytes=%" PRIuS "-%" PRIuS,
+                           first_byte_position, last_byte_position));
+    r.SetExtraRequestHeaders(headers);
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+    EXPECT_TRUE(!r.is_pending());
+    EXPECT_EQ(1, d.response_started_count());
+    EXPECT_FALSE(d.received_data_before_response());
+    EXPECT_EQ(static_cast<int>(content_length), d.bytes_received());
+    // Don't use EXPECT_EQ, it will print out a lot of garbage if check failed.
+    EXPECT_TRUE(partial_buffer_string == d.data_received());
+  }
+
+  EXPECT_TRUE(file_util::Delete(temp_path, false));
+}
+
+TEST_F(URLRequestTest, FileTestHalfSpecifiedRange) {
+  const size_t buffer_size = 4000;
+  scoped_array<char> buffer(new char[buffer_size]);
+  FillBuffer(buffer.get(), buffer_size);
+
+  FilePath temp_path;
+  EXPECT_TRUE(file_util::CreateTemporaryFile(&temp_path));
+  GURL temp_url = FilePathToFileURL(temp_path);
+  EXPECT_TRUE(file_util::WriteFile(temp_path, buffer.get(), buffer_size));
+
+  int64 file_size;
+  EXPECT_TRUE(file_util::GetFileSize(temp_path, &file_size));
+
+  const size_t first_byte_position = 500;
+  const size_t last_byte_position = buffer_size - 1;
+  const size_t content_length = last_byte_position - first_byte_position + 1;
+  std::string partial_buffer_string(buffer.get() + first_byte_position,
+                                    buffer.get() + last_byte_position + 1);
+
+  TestDelegate d;
+  {
+    URLRequest r(temp_url, &d, &default_context_);
+
+    HttpRequestHeaders headers;
+    headers.SetHeader(HttpRequestHeaders::kRange,
+                      base::StringPrintf("bytes=%" PRIuS "-",
+                                         first_byte_position));
+    r.SetExtraRequestHeaders(headers);
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+    EXPECT_TRUE(!r.is_pending());
+    EXPECT_EQ(1, d.response_started_count());
+    EXPECT_FALSE(d.received_data_before_response());
+    EXPECT_EQ(static_cast<int>(content_length), d.bytes_received());
+    // Don't use EXPECT_EQ, it will print out a lot of garbage if check failed.
+    EXPECT_TRUE(partial_buffer_string == d.data_received());
+  }
+
+  EXPECT_TRUE(file_util::Delete(temp_path, false));
+}
+
+TEST_F(URLRequestTest, FileTestMultipleRanges) {
+  const size_t buffer_size = 400000;
+  scoped_array<char> buffer(new char[buffer_size]);
+  FillBuffer(buffer.get(), buffer_size);
+
+  FilePath temp_path;
+  EXPECT_TRUE(file_util::CreateTemporaryFile(&temp_path));
+  GURL temp_url = FilePathToFileURL(temp_path);
+  EXPECT_TRUE(file_util::WriteFile(temp_path, buffer.get(), buffer_size));
+
+  int64 file_size;
+  EXPECT_TRUE(file_util::GetFileSize(temp_path, &file_size));
+
+  TestDelegate d;
+  {
+    URLRequest r(temp_url, &d, &default_context_);
+
+    HttpRequestHeaders headers;
+    headers.SetHeader(HttpRequestHeaders::kRange,
+                      "bytes=0-0,10-200,200-300");
+    r.SetExtraRequestHeaders(headers);
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+    EXPECT_TRUE(d.request_failed());
+  }
+
+  EXPECT_TRUE(file_util::Delete(temp_path, false));
+}
+
+TEST_F(URLRequestTest, InvalidUrlTest) {
+  TestDelegate d;
+  {
+    URLRequest r(GURL("invalid url"), &d, &default_context_);
+
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+    EXPECT_TRUE(d.request_failed());
+  }
+}
+
+#if defined(OS_WIN)
+TEST_F(URLRequestTest, ResolveShortcutTest) {
+  FilePath app_path;
+  PathService::Get(base::DIR_SOURCE_ROOT, &app_path);
+  app_path = app_path.AppendASCII("net");
+  app_path = app_path.AppendASCII("data");
+  app_path = app_path.AppendASCII("url_request_unittest");
+  app_path = app_path.AppendASCII("with-headers.html");
+
+  std::wstring lnk_path = app_path.value() + L".lnk";
+
+  HRESULT result;
+  IShellLink* shell = NULL;
+  IPersistFile* persist = NULL;
+
+  CoInitialize(NULL);
+  // Temporarily create a shortcut for test
+  result = CoCreateInstance(CLSID_ShellLink, NULL,
+                            CLSCTX_INPROC_SERVER, IID_IShellLink,
+                            reinterpret_cast<LPVOID*>(&shell));
+  ASSERT_TRUE(SUCCEEDED(result));
+  result = shell->QueryInterface(IID_IPersistFile,
+                                reinterpret_cast<LPVOID*>(&persist));
+  ASSERT_TRUE(SUCCEEDED(result));
+  result = shell->SetPath(app_path.value().c_str());
+  EXPECT_TRUE(SUCCEEDED(result));
+  result = shell->SetDescription(L"ResolveShortcutTest");
+  EXPECT_TRUE(SUCCEEDED(result));
+  result = persist->Save(lnk_path.c_str(), TRUE);
+  EXPECT_TRUE(SUCCEEDED(result));
+  if (persist)
+    persist->Release();
+  if (shell)
+    shell->Release();
+
+  TestDelegate d;
+  {
+    URLRequest r(FilePathToFileURL(FilePath(lnk_path)), &d, &default_context_);
+
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    GetFileAttributesEx(app_path.value().c_str(),
+                        GetFileExInfoStandard, &data);
+    HANDLE file = CreateFile(app_path.value().c_str(), GENERIC_READ,
+                             FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                             FILE_ATTRIBUTE_NORMAL, NULL);
+    EXPECT_NE(INVALID_HANDLE_VALUE, file);
+    scoped_array<char> buffer(new char[data.nFileSizeLow]);
+    DWORD read_size;
+    BOOL result;
+    result = ReadFile(file, buffer.get(), data.nFileSizeLow,
+                      &read_size, NULL);
+    std::string content(buffer.get(), read_size);
+    CloseHandle(file);
+
+    EXPECT_TRUE(!r.is_pending());
+    EXPECT_EQ(1, d.received_redirect_count());
+    EXPECT_EQ(content, d.data_received());
+  }
+
+  // Clean the shortcut
+  DeleteFile(lnk_path.c_str());
+  CoUninitialize();
+}
+#endif  // defined(OS_WIN)
+
+TEST_F(URLRequestTest, FileDirCancelTest) {
+  // Put in mock resource provider.
+  NetModule::SetResourceProvider(TestNetResourceProvider);
+
+  TestDelegate d;
+  {
+    FilePath file_path;
+    PathService::Get(base::DIR_SOURCE_ROOT, &file_path);
+    file_path = file_path.Append(FILE_PATH_LITERAL("net"));
+    file_path = file_path.Append(FILE_PATH_LITERAL("data"));
+
+    URLRequest req(FilePathToFileURL(file_path), &d, &default_context_);
+    req.Start();
+    EXPECT_TRUE(req.is_pending());
+
+    d.set_cancel_in_received_data_pending(true);
+
+    MessageLoop::current()->Run();
+  }
+
+  // Take out mock resource provider.
+  NetModule::SetResourceProvider(NULL);
+}
+
+TEST_F(URLRequestTest, FileDirRedirectNoCrash) {
+  // There is an implicit redirect when loading a file path that matches a
+  // directory and does not end with a slash.  Ensure that following such
+  // redirects does not crash.  See http://crbug.com/18686.
+
+  FilePath path;
+  PathService::Get(base::DIR_SOURCE_ROOT, &path);
+  path = path.Append(FILE_PATH_LITERAL("net"));
+  path = path.Append(FILE_PATH_LITERAL("data"));
+  path = path.Append(FILE_PATH_LITERAL("url_request_unittest"));
+
+  TestDelegate d;
+  URLRequest req(FilePathToFileURL(path), &d, &default_context_);
+  req.Start();
+  MessageLoop::current()->Run();
+
+  ASSERT_EQ(1, d.received_redirect_count());
+  ASSERT_LT(0, d.bytes_received());
+  ASSERT_FALSE(d.request_failed());
+  ASSERT_TRUE(req.status().is_success());
+}
+
+#if defined(OS_WIN)
+// Don't accept the url "file:///" on windows. See http://crbug.com/1474.
+TEST_F(URLRequestTest, FileDirRedirectSingleSlash) {
+  TestDelegate d;
+  URLRequest req(GURL("file:///"), &d, &default_context_);
+  req.Start();
+  MessageLoop::current()->Run();
+
+  ASSERT_EQ(1, d.received_redirect_count());
+  ASSERT_FALSE(req.status().is_success());
+}
+#endif
+
+// Custom URLRequestJobs for use with interceptor tests
+class RestartTestJob : public URLRequestTestJob {
+ public:
+  RestartTestJob(URLRequest* request, NetworkDelegate* network_delegate)
+    : URLRequestTestJob(request, network_delegate, true) {}
+ protected:
+  virtual void StartAsync() {
+    this->NotifyRestartRequired();
+  }
+ private:
+  ~RestartTestJob() {}
+};
+
+class CancelTestJob : public URLRequestTestJob {
+ public:
+  explicit CancelTestJob(URLRequest* request, NetworkDelegate* network_delegate)
+    : URLRequestTestJob(request, network_delegate, true) {}
+ protected:
+  virtual void StartAsync() {
+    request_->Cancel();
+  }
+ private:
+  ~CancelTestJob() {}
+};
+
+class CancelThenRestartTestJob : public URLRequestTestJob {
+ public:
+  explicit CancelThenRestartTestJob(URLRequest* request,
+                                    NetworkDelegate* network_delegate)
+      : URLRequestTestJob(request, network_delegate, true) {
+  }
+ protected:
+  virtual void StartAsync() {
+    request_->Cancel();
+    this->NotifyRestartRequired();
+  }
+ private:
+  ~CancelThenRestartTestJob() {}
+};
+
+// An Interceptor for use with interceptor tests
+class TestInterceptor : URLRequest::Interceptor {
+ public:
+  TestInterceptor()
+      : intercept_main_request_(false), restart_main_request_(false),
+        cancel_main_request_(false), cancel_then_restart_main_request_(false),
+        simulate_main_network_error_(false),
+        intercept_redirect_(false), cancel_redirect_request_(false),
+        intercept_final_response_(false), cancel_final_request_(false),
+        did_intercept_main_(false), did_restart_main_(false),
+        did_cancel_main_(false), did_cancel_then_restart_main_(false),
+        did_simulate_error_main_(false),
+        did_intercept_redirect_(false), did_cancel_redirect_(false),
+        did_intercept_final_(false), did_cancel_final_(false) {
+    URLRequest::Deprecated::RegisterRequestInterceptor(this);
+  }
+
+  ~TestInterceptor() {
+    URLRequest::Deprecated::UnregisterRequestInterceptor(this);
+  }
+
+  virtual URLRequestJob* MaybeIntercept(URLRequest* request,
+                                        NetworkDelegate* network_delegate) {
+    if (restart_main_request_) {
+      restart_main_request_ = false;
+      did_restart_main_ = true;
+      return new RestartTestJob(request, network_delegate);
+    }
+    if (cancel_main_request_) {
+      cancel_main_request_ = false;
+      did_cancel_main_ = true;
+      return new CancelTestJob(request, network_delegate);
+    }
+    if (cancel_then_restart_main_request_) {
+      cancel_then_restart_main_request_ = false;
+      did_cancel_then_restart_main_ = true;
+      return new CancelThenRestartTestJob(request, network_delegate);
+    }
+    if (simulate_main_network_error_) {
+      simulate_main_network_error_ = false;
+      did_simulate_error_main_ = true;
+      // will error since the requeted url is not one of its canned urls
+      return new URLRequestTestJob(request, network_delegate, true);
+    }
+    if (!intercept_main_request_)
+      return NULL;
+    intercept_main_request_ = false;
+    did_intercept_main_ = true;
+    return new URLRequestTestJob(request,
+                                 network_delegate,
+                                 main_headers_,
+                                 main_data_,
+                                 true);
+  }
+
+  virtual URLRequestJob* MaybeInterceptRedirect(
+      URLRequest* request,
+      NetworkDelegate* network_delegate,
+      const GURL& location) {
+    if (cancel_redirect_request_) {
+      cancel_redirect_request_ = false;
+      did_cancel_redirect_ = true;
+      return new CancelTestJob(request, network_delegate);
+    }
+    if (!intercept_redirect_)
+      return NULL;
+    intercept_redirect_ = false;
+    did_intercept_redirect_ = true;
+    return new URLRequestTestJob(request,
+                                 network_delegate,
+                                 redirect_headers_,
+                                 redirect_data_,
+                                 true);
+  }
+
+  virtual URLRequestJob* MaybeInterceptResponse(
+      URLRequest* request, NetworkDelegate* network_delegate) {
+    if (cancel_final_request_) {
+      cancel_final_request_ = false;
+      did_cancel_final_ = true;
+      return new CancelTestJob(request, network_delegate);
+    }
+    if (!intercept_final_response_)
+      return NULL;
+    intercept_final_response_ = false;
+    did_intercept_final_ = true;
+    return new URLRequestTestJob(request,
+                                 network_delegate,
+                                 final_headers_,
+                                 final_data_,
+                                 true);
+  }
+
+  // Whether to intercept the main request, and if so the response to return.
+  bool intercept_main_request_;
+  std::string main_headers_;
+  std::string main_data_;
+
+  // Other actions we take at MaybeIntercept time
+  bool restart_main_request_;
+  bool cancel_main_request_;
+  bool cancel_then_restart_main_request_;
+  bool simulate_main_network_error_;
+
+  // Whether to intercept redirects, and if so the response to return.
+  bool intercept_redirect_;
+  std::string redirect_headers_;
+  std::string redirect_data_;
+
+  // Other actions we can take at MaybeInterceptRedirect time
+  bool cancel_redirect_request_;
+
+  // Whether to intercept final response, and if so the response to return.
+  bool intercept_final_response_;
+  std::string final_headers_;
+  std::string final_data_;
+
+  // Other actions we can take at MaybeInterceptResponse time
+  bool cancel_final_request_;
+
+  // If we did something or not
+  bool did_intercept_main_;
+  bool did_restart_main_;
+  bool did_cancel_main_;
+  bool did_cancel_then_restart_main_;
+  bool did_simulate_error_main_;
+  bool did_intercept_redirect_;
+  bool did_cancel_redirect_;
+  bool did_intercept_final_;
+  bool did_cancel_final_;
+
+  // Static getters for canned response header and data strings
+
+  static std::string ok_data() {
+    return URLRequestTestJob::test_data_1();
+  }
+
+  static std::string ok_headers() {
+    return URLRequestTestJob::test_headers();
+  }
+
+  static std::string redirect_data() {
+    return std::string();
+  }
+
+  static std::string redirect_headers() {
+    return URLRequestTestJob::test_redirect_headers();
+  }
+
+  static std::string error_data() {
+    return std::string("ohhh nooooo mr. bill!");
+  }
+
+  static std::string error_headers() {
+    return URLRequestTestJob::test_error_headers();
+  }
+};
+
+TEST_F(URLRequestTest, Intercept) {
+  TestInterceptor interceptor;
+
+  // intercept the main request and respond with a simple response
+  interceptor.intercept_main_request_ = true;
+  interceptor.main_headers_ = TestInterceptor::ok_headers();
+  interceptor.main_data_ = TestInterceptor::ok_data();
+
+  TestDelegate d;
+  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
+  base::SupportsUserData::Data* user_data0 = new base::SupportsUserData::Data();
+  base::SupportsUserData::Data* user_data1 = new base::SupportsUserData::Data();
+  base::SupportsUserData::Data* user_data2 = new base::SupportsUserData::Data();
+  req.SetUserData(NULL, user_data0);
+  req.SetUserData(&user_data1, user_data1);
+  req.SetUserData(&user_data2, user_data2);
+  req.set_method("GET");
+  req.Start();
+  MessageLoop::current()->Run();
+
+  // Make sure we can retrieve our specific user data
+  EXPECT_EQ(user_data0, req.GetUserData(NULL));
+  EXPECT_EQ(user_data1, req.GetUserData(&user_data1));
+  EXPECT_EQ(user_data2, req.GetUserData(&user_data2));
+
+  // Check the interceptor got called as expected
+  EXPECT_TRUE(interceptor.did_intercept_main_);
+
+  // Check we got one good response
+  EXPECT_TRUE(req.status().is_success());
+  EXPECT_EQ(200, req.response_headers()->response_code());
+  EXPECT_EQ(TestInterceptor::ok_data(), d.data_received());
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_EQ(0, d.received_redirect_count());
+}
+
+TEST_F(URLRequestTest, InterceptRedirect) {
+  TestInterceptor interceptor;
+
+  // intercept the main request and respond with a redirect
+  interceptor.intercept_main_request_ = true;
+  interceptor.main_headers_ = TestInterceptor::redirect_headers();
+  interceptor.main_data_ = TestInterceptor::redirect_data();
+
+  // intercept that redirect and respond a final OK response
+  interceptor.intercept_redirect_ = true;
+  interceptor.redirect_headers_ =  TestInterceptor::ok_headers();
+  interceptor.redirect_data_ = TestInterceptor::ok_data();
+
+  TestDelegate d;
+  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
+  req.set_method("GET");
+  req.Start();
+  MessageLoop::current()->Run();
+
+  // Check the interceptor got called as expected
+  EXPECT_TRUE(interceptor.did_intercept_main_);
+  EXPECT_TRUE(interceptor.did_intercept_redirect_);
+
+  // Check we got one good response
+  EXPECT_TRUE(req.status().is_success());
+  if (req.status().is_success()) {
+    EXPECT_EQ(200, req.response_headers()->response_code());
+  }
+  EXPECT_EQ(TestInterceptor::ok_data(), d.data_received());
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_EQ(0, d.received_redirect_count());
+}
+
+TEST_F(URLRequestTest, InterceptServerError) {
+  TestInterceptor interceptor;
+
+  // intercept the main request to generate a server error response
+  interceptor.intercept_main_request_ = true;
+  interceptor.main_headers_ = TestInterceptor::error_headers();
+  interceptor.main_data_ = TestInterceptor::error_data();
+
+  // intercept that error and respond with an OK response
+  interceptor.intercept_final_response_ = true;
+  interceptor.final_headers_ = TestInterceptor::ok_headers();
+  interceptor.final_data_ = TestInterceptor::ok_data();
+
+  TestDelegate d;
+  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
+  req.set_method("GET");
+  req.Start();
+  MessageLoop::current()->Run();
+
+  // Check the interceptor got called as expected
+  EXPECT_TRUE(interceptor.did_intercept_main_);
+  EXPECT_TRUE(interceptor.did_intercept_final_);
+
+  // Check we got one good response
+  EXPECT_TRUE(req.status().is_success());
+  EXPECT_EQ(200, req.response_headers()->response_code());
+  EXPECT_EQ(TestInterceptor::ok_data(), d.data_received());
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_EQ(0, d.received_redirect_count());
+}
+
+TEST_F(URLRequestTest, InterceptNetworkError) {
+  TestInterceptor interceptor;
+
+  // intercept the main request to simulate a network error
+  interceptor.simulate_main_network_error_ = true;
+
+  // intercept that error and respond with an OK response
+  interceptor.intercept_final_response_ = true;
+  interceptor.final_headers_ = TestInterceptor::ok_headers();
+  interceptor.final_data_ = TestInterceptor::ok_data();
+
+  TestDelegate d;
+  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
+  req.set_method("GET");
+  req.Start();
+  MessageLoop::current()->Run();
+
+  // Check the interceptor got called as expected
+  EXPECT_TRUE(interceptor.did_simulate_error_main_);
+  EXPECT_TRUE(interceptor.did_intercept_final_);
+
+  // Check we received one good response
+  EXPECT_TRUE(req.status().is_success());
+  EXPECT_EQ(200, req.response_headers()->response_code());
+  EXPECT_EQ(TestInterceptor::ok_data(), d.data_received());
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_EQ(0, d.received_redirect_count());
+}
+
+TEST_F(URLRequestTest, InterceptRestartRequired) {
+  TestInterceptor interceptor;
+
+  // restart the main request
+  interceptor.restart_main_request_ = true;
+
+  // then intercept the new main request and respond with an OK response
+  interceptor.intercept_main_request_ = true;
+  interceptor.main_headers_ = TestInterceptor::ok_headers();
+  interceptor.main_data_ = TestInterceptor::ok_data();
+
+  TestDelegate d;
+  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
+  req.set_method("GET");
+  req.Start();
+  MessageLoop::current()->Run();
+
+  // Check the interceptor got called as expected
+  EXPECT_TRUE(interceptor.did_restart_main_);
+  EXPECT_TRUE(interceptor.did_intercept_main_);
+
+  // Check we received one good response
+  EXPECT_TRUE(req.status().is_success());
+  if (req.status().is_success()) {
+    EXPECT_EQ(200, req.response_headers()->response_code());
+  }
+  EXPECT_EQ(TestInterceptor::ok_data(), d.data_received());
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_EQ(0, d.received_redirect_count());
+}
+
+TEST_F(URLRequestTest, InterceptRespectsCancelMain) {
+  TestInterceptor interceptor;
+
+  // intercept the main request and cancel from within the restarted job
+  interceptor.cancel_main_request_ = true;
+
+  // setup to intercept final response and override it with an OK response
+  interceptor.intercept_final_response_ = true;
+  interceptor.final_headers_ = TestInterceptor::ok_headers();
+  interceptor.final_data_ = TestInterceptor::ok_data();
+
+  TestDelegate d;
+  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
+  req.set_method("GET");
+  req.Start();
+  MessageLoop::current()->Run();
+
+  // Check the interceptor got called as expected
+  EXPECT_TRUE(interceptor.did_cancel_main_);
+  EXPECT_FALSE(interceptor.did_intercept_final_);
+
+  // Check we see a canceled request
+  EXPECT_FALSE(req.status().is_success());
+  EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
+}
+
+TEST_F(URLRequestTest, InterceptRespectsCancelRedirect) {
+  TestInterceptor interceptor;
+
+  // intercept the main request and respond with a redirect
+  interceptor.intercept_main_request_ = true;
+  interceptor.main_headers_ = TestInterceptor::redirect_headers();
+  interceptor.main_data_ = TestInterceptor::redirect_data();
+
+  // intercept the redirect and cancel from within that job
+  interceptor.cancel_redirect_request_ = true;
+
+  // setup to intercept final response and override it with an OK response
+  interceptor.intercept_final_response_ = true;
+  interceptor.final_headers_ = TestInterceptor::ok_headers();
+  interceptor.final_data_ = TestInterceptor::ok_data();
+
+  TestDelegate d;
+  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
+  req.set_method("GET");
+  req.Start();
+  MessageLoop::current()->Run();
+
+  // Check the interceptor got called as expected
+  EXPECT_TRUE(interceptor.did_intercept_main_);
+  EXPECT_TRUE(interceptor.did_cancel_redirect_);
+  EXPECT_FALSE(interceptor.did_intercept_final_);
+
+  // Check we see a canceled request
+  EXPECT_FALSE(req.status().is_success());
+  EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
+}
+
+TEST_F(URLRequestTest, InterceptRespectsCancelFinal) {
+  TestInterceptor interceptor;
+
+  // intercept the main request to simulate a network error
+  interceptor.simulate_main_network_error_ = true;
+
+  // setup to intercept final response and cancel from within that job
+  interceptor.cancel_final_request_ = true;
+
+  TestDelegate d;
+  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
+  req.set_method("GET");
+  req.Start();
+  MessageLoop::current()->Run();
+
+  // Check the interceptor got called as expected
+  EXPECT_TRUE(interceptor.did_simulate_error_main_);
+  EXPECT_TRUE(interceptor.did_cancel_final_);
+
+  // Check we see a canceled request
+  EXPECT_FALSE(req.status().is_success());
+  EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
+}
+
+TEST_F(URLRequestTest, InterceptRespectsCancelInRestart) {
+  TestInterceptor interceptor;
+
+  // intercept the main request and cancel then restart from within that job
+  interceptor.cancel_then_restart_main_request_ = true;
+
+  // setup to intercept final response and override it with an OK response
+  interceptor.intercept_final_response_ = true;
+  interceptor.final_headers_ = TestInterceptor::ok_headers();
+  interceptor.final_data_ = TestInterceptor::ok_data();
+
+  TestDelegate d;
+  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
+  req.set_method("GET");
+  req.Start();
+  MessageLoop::current()->Run();
+
+  // Check the interceptor got called as expected
+  EXPECT_TRUE(interceptor.did_cancel_then_restart_main_);
+  EXPECT_FALSE(interceptor.did_intercept_final_);
+
+  // Check we see a canceled request
+  EXPECT_FALSE(req.status().is_success());
+  EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
+}
+
+// Check that two different URL requests have different identifiers.
+TEST_F(URLRequestTest, Identifiers) {
+  TestDelegate d;
+  TestURLRequestContext context;
+  TestURLRequest req(GURL("http://example.com"), &d, &context);
+  TestURLRequest other_req(GURL("http://example.com"), &d, &context);
+
+  ASSERT_NE(req.identifier(), other_req.identifier());
+}
+
+// Check that a failure to connect to the proxy is reported to the network
+// delegate.
+TEST_F(URLRequestTest, NetworkDelegateProxyError) {
+  MockHostResolver host_resolver;
+  host_resolver.rules()->AddSimulatedFailure("*");
+
+  TestNetworkDelegate network_delegate;  // must outlive URLRequests
+  TestURLRequestContextWithProxy context("myproxy:70", &network_delegate);
+
+  TestDelegate d;
+  URLRequest req(GURL("http://example.com"), &d, &context);
+  req.set_method("GET");
+
+  req.Start();
+  MessageLoop::current()->Run();
+
+  // Check we see a failed request.
+  EXPECT_FALSE(req.status().is_success());
+  EXPECT_EQ(URLRequestStatus::FAILED, req.status().status());
+  EXPECT_EQ(ERR_PROXY_CONNECTION_FAILED, req.status().error());
+
+  EXPECT_EQ(1, network_delegate.error_count());
+  EXPECT_EQ(ERR_PROXY_CONNECTION_FAILED, network_delegate.last_error());
+  EXPECT_EQ(1, network_delegate.completed_requests());
+}
+
+// Make sure that net::NetworkDelegate::NotifyCompleted is called if
+// content is empty.
+TEST_F(URLRequestTest, RequestCompletionForEmptyResponse) {
+  TestDelegate d;
+  URLRequest req(GURL("data:,"), &d, &default_context_);
+  req.Start();
+  MessageLoop::current()->Run();
+  EXPECT_EQ("", d.data_received());
+  EXPECT_EQ(1, default_network_delegate_.completed_requests());
+}
+
+// TODO(droger): Support TestServer on iOS (see http://crbug.com/148666).
+#if !defined(OS_IOS)
+// A subclass of TestServer that uses a statically-configured hostname. This is
+// to work around mysterious failures in chrome_frame_net_tests. See:
+// http://crbug.com/114369
+class LocalHttpTestServer : public TestServer {
+ public:
+  explicit LocalHttpTestServer(const FilePath& document_root)
+      : TestServer(TestServer::TYPE_HTTP,
+                   ScopedCustomUrlRequestTestHttpHost::value(),
+                   document_root) {}
+  LocalHttpTestServer()
+      : TestServer(TestServer::TYPE_HTTP,
+                   ScopedCustomUrlRequestTestHttpHost::value(),
+                   FilePath()) {}
+};
+
+TEST_F(URLRequestTest, DelayedCookieCallback) {
+  LocalHttpTestServer test_server;
+  ASSERT_TRUE(test_server.Start());
+
+  TestURLRequestContext context;
+  scoped_refptr<DelayedCookieMonster> delayed_cm =
+      new DelayedCookieMonster();
+  scoped_refptr<CookieStore> cookie_store = delayed_cm;
+  context.set_cookie_store(delayed_cm);
+
+  // Set up a cookie.
+  {
+    TestNetworkDelegate network_delegate;
+    context.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(
+        test_server.GetURL("set-cookie?CookieToNotSend=1"), &d, &context);
+    req.Start();
+    MessageLoop::current()->Run();
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+    EXPECT_EQ(1, network_delegate.set_cookie_count());
+  }
+
+  // Verify that the cookie is set.
+  {
+    TestNetworkDelegate network_delegate;
+    context.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(test_server.GetURL("echoheader?Cookie"), &d, &context);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_TRUE(d.data_received().find("CookieToNotSend=1")
+                != std::string::npos);
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+  }
+}
+
+TEST_F(URLRequestTest, DoNotSendCookies) {
+  LocalHttpTestServer test_server;
+  ASSERT_TRUE(test_server.Start());
+
+  // Set up a cookie.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(test_server.GetURL("set-cookie?CookieToNotSend=1"),
+                   &d,
+                   &default_context_);
+    req.Start();
+    MessageLoop::current()->Run();
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+  }
+
+  // Verify that the cookie is set.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(
+        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_TRUE(d.data_received().find("CookieToNotSend=1")
+                != std::string::npos);
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+  }
+
+  // Verify that the cookie isn't sent when LOAD_DO_NOT_SEND_COOKIES is set.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(
+        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
+    req.set_load_flags(LOAD_DO_NOT_SEND_COOKIES);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_TRUE(d.data_received().find("Cookie: CookieToNotSend=1")
+                == std::string::npos);
+
+    // LOAD_DO_NOT_SEND_COOKIES does not trigger OnGetCookies.
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+  }
+}
+
+TEST_F(URLRequestTest, DoNotSaveCookies) {
+  LocalHttpTestServer test_server;
+  ASSERT_TRUE(test_server.Start());
+
+  // Set up a cookie.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(test_server.GetURL("set-cookie?CookieToNotUpdate=2"),
+                   &d,
+                   &default_context_);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+    EXPECT_EQ(1, network_delegate.set_cookie_count());
+  }
+
+  // Try to set-up another cookie and update the previous cookie.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(
+        test_server.GetURL("set-cookie?CookieToNotSave=1&CookieToNotUpdate=1"),
+        &d,
+        &default_context_);
+    req.set_load_flags(LOAD_DO_NOT_SAVE_COOKIES);
+    req.Start();
+
+    MessageLoop::current()->Run();
+
+    // LOAD_DO_NOT_SAVE_COOKIES does not trigger OnSetCookie.
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.set_cookie_count());
+  }
+
+  // Verify the cookies weren't saved or updated.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(
+        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_TRUE(d.data_received().find("CookieToNotSave=1")
+                == std::string::npos);
+    EXPECT_TRUE(d.data_received().find("CookieToNotUpdate=2")
+                != std::string::npos);
+
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.set_cookie_count());
+  }
+}
+
+TEST_F(URLRequestTest, DoNotSendCookies_ViaPolicy) {
+  LocalHttpTestServer test_server;
+  ASSERT_TRUE(test_server.Start());
+
+  // Set up a cookie.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(test_server.GetURL("set-cookie?CookieToNotSend=1"),
+                   &d,
+                   &default_context_);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+  }
+
+  // Verify that the cookie is set.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(
+        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_TRUE(d.data_received().find("CookieToNotSend=1")
+                != std::string::npos);
+
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+  }
+
+  // Verify that the cookie isn't sent.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    network_delegate.set_cookie_options(TestNetworkDelegate::NO_GET_COOKIES);
+    URLRequest req(
+        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_TRUE(d.data_received().find("Cookie: CookieToNotSend=1")
+                == std::string::npos);
+
+    EXPECT_EQ(1, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+  }
+}
+
+TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy) {
+  LocalHttpTestServer test_server;
+  ASSERT_TRUE(test_server.Start());
+
+  // Set up a cookie.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(test_server.GetURL("set-cookie?CookieToNotUpdate=2"),
+                   &d,
+                   &default_context_);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+  }
+
+  // Try to set-up another cookie and update the previous cookie.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    network_delegate.set_cookie_options(TestNetworkDelegate::NO_SET_COOKIE);
+    URLRequest req(
+        test_server.GetURL("set-cookie?CookieToNotSave=1&CookieToNotUpdate=1"),
+        &d,
+        &default_context_);
+    req.Start();
+
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(2, network_delegate.blocked_set_cookie_count());
+  }
+
+  // Verify the cookies weren't saved or updated.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(
+        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_TRUE(d.data_received().find("CookieToNotSave=1")
+                == std::string::npos);
+    EXPECT_TRUE(d.data_received().find("CookieToNotUpdate=2")
+                != std::string::npos);
+
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+  }
+}
+
+TEST_F(URLRequestTest, DoNotSaveEmptyCookies) {
+  LocalHttpTestServer test_server;
+  ASSERT_TRUE(test_server.Start());
+
+  // Set up an empty cookie.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(test_server.GetURL("set-cookie"), &d, &default_context_);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+    EXPECT_EQ(0, network_delegate.set_cookie_count());
+  }
+}
+
+TEST_F(URLRequestTest, DoNotSendCookies_ViaPolicy_Async) {
+  LocalHttpTestServer test_server;
+  ASSERT_TRUE(test_server.Start());
+
+  // Set up a cookie.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(test_server.GetURL("set-cookie?CookieToNotSend=1"),
+                   &d,
+                   &default_context_);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+  }
+
+  // Verify that the cookie is set.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(
+        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_TRUE(d.data_received().find("CookieToNotSend=1")
+                != std::string::npos);
+
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+  }
+
+  // Verify that the cookie isn't sent.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    network_delegate.set_cookie_options(TestNetworkDelegate::NO_GET_COOKIES);
+    URLRequest req(
+        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_TRUE(d.data_received().find("Cookie: CookieToNotSend=1")
+                == std::string::npos);
+
+    EXPECT_EQ(1, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+  }
+}
+
+TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy_Async) {
+  LocalHttpTestServer test_server;
+  ASSERT_TRUE(test_server.Start());
+
+  // Set up a cookie.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(test_server.GetURL("set-cookie?CookieToNotUpdate=2"),
+                   &d,
+                   &default_context_);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+  }
+
+  // Try to set-up another cookie and update the previous cookie.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    network_delegate.set_cookie_options(TestNetworkDelegate::NO_SET_COOKIE);
+    URLRequest req(
+        test_server.GetURL("set-cookie?CookieToNotSave=1&CookieToNotUpdate=1"),
+        &d,
+        &default_context_);
+    req.Start();
+
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(2, network_delegate.blocked_set_cookie_count());
+  }
+
+  // Verify the cookies weren't saved or updated.
+  {
+    TestNetworkDelegate network_delegate;
+    default_context_.set_network_delegate(&network_delegate);
+    TestDelegate d;
+    URLRequest req(
+        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_TRUE(d.data_received().find("CookieToNotSave=1")
+                == std::string::npos);
+    EXPECT_TRUE(d.data_received().find("CookieToNotUpdate=2")
+                != std::string::npos);
+
+    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
+    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
+  }
+}
+
+// Check that it is impossible to change the referrer in the extra headers of
+// an URLRequest.
+TEST_F(URLRequestTest, DoNotOverrideReferrer) {
+  LocalHttpTestServer test_server;
+  ASSERT_TRUE(test_server.Start());
+
+  // If extra headers contain referer and the request contains a referer,
+  // only the latter shall be respected.
+  {
+    TestDelegate d;
+    URLRequest req(
+        test_server.GetURL("echoheader?Referer"), &d, &default_context_);
+    req.set_referrer("http://foo.com/");
+
+    HttpRequestHeaders headers;
+    headers.SetHeader(HttpRequestHeaders::kReferer, "http://bar.com/");
+    req.SetExtraRequestHeaders(headers);
+
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ("http://foo.com/", d.data_received());
+  }
+
+  // If extra headers contain a referer but the request does not, no referer
+  // shall be sent in the header.
+  {
+    TestDelegate d;
+    URLRequest req(
+        test_server.GetURL("echoheader?Referer"), &d, &default_context_);
+
+    HttpRequestHeaders headers;
+    headers.SetHeader(HttpRequestHeaders::kReferer, "http://bar.com/");
+    req.SetExtraRequestHeaders(headers);
+    req.set_load_flags(LOAD_VALIDATE_CACHE);
+
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ("None", d.data_received());
+  }
+}
 
 class URLRequestTestHTTP : public URLRequestTest {
  public:
@@ -550,7 +1818,7 @@ class URLRequestTestHTTP : public URLRequestTest {
                         strlen(expected_data)));
   }
 
-  bool DoManyCookiesRequest(int num_cookies){
+  bool DoManyCookiesRequest(int num_cookies) {
     TestDelegate d;
     URLRequest r(test_server_.GetURL("set-many-cookies?" +
                                      base::IntToString(num_cookies)),
@@ -564,7 +1832,7 @@ class URLRequestTestHTTP : public URLRequestTest {
 
     bool is_success = r.status().is_success();
 
-    if (!is_success){
+    if (!is_success) {
       // Requests handled by ChromeFrame send a less precise error message,
       // ERR_CONNECTION_ABORTED.
       EXPECT_TRUE(r.status().error() == ERR_RESPONSE_HEADERS_TOO_BIG ||
@@ -1343,826 +2611,6 @@ TEST_F(URLRequestTestHTTP, MultipleRedirectTest) {
   EXPECT_EQ(destination_url, req.url_chain()[2]);
 }
 
-class HTTPSRequestTest : public testing::Test {
- public:
-  HTTPSRequestTest() : default_context_(true) {
-    default_context_.set_network_delegate(&default_network_delegate_);
-    default_context_.Init();
-  }
-  virtual ~HTTPSRequestTest() {}
-
- protected:
-  TestNetworkDelegate default_network_delegate_;  // must outlive URLRequest
-  TestURLRequestContext default_context_;
-};
-
-// This test was disabled because it made chrome_frame_net_tests hang
-// (see bug 102991).
-TEST_F(HTTPSRequestTest, DISABLED_HTTPSGetTest) {
-  TestServer test_server(TestServer::TYPE_HTTPS,
-                         TestServer::kLocalhost,
-                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
-  ASSERT_TRUE(test_server.Start());
-
-  TestDelegate d;
-  {
-    URLRequest r(test_server.GetURL(""), &d, &default_context_);
-    r.Start();
-    EXPECT_TRUE(r.is_pending());
-
-    MessageLoop::current()->Run();
-
-    EXPECT_EQ(1, d.response_started_count());
-    EXPECT_FALSE(d.received_data_before_response());
-    EXPECT_NE(0, d.bytes_received());
-    CheckSSLInfo(r.ssl_info());
-    EXPECT_EQ(test_server.host_port_pair().host(),
-              r.GetSocketAddress().host());
-    EXPECT_EQ(test_server.host_port_pair().port(),
-              r.GetSocketAddress().port());
-  }
-}
-
-TEST_F(HTTPSRequestTest, HTTPSMismatchedTest) {
-  TestServer::HTTPSOptions https_options(
-      TestServer::HTTPSOptions::CERT_MISMATCHED_NAME);
-  TestServer test_server(https_options,
-                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
-  ASSERT_TRUE(test_server.Start());
-
-  bool err_allowed = true;
-  for (int i = 0; i < 2 ; i++, err_allowed = !err_allowed) {
-    TestDelegate d;
-    {
-      d.set_allow_certificate_errors(err_allowed);
-      URLRequest r(test_server.GetURL(""), &d, &default_context_);
-
-      r.Start();
-      EXPECT_TRUE(r.is_pending());
-
-      MessageLoop::current()->Run();
-
-      EXPECT_EQ(1, d.response_started_count());
-      EXPECT_FALSE(d.received_data_before_response());
-      EXPECT_TRUE(d.have_certificate_errors());
-      if (err_allowed) {
-        EXPECT_NE(0, d.bytes_received());
-        CheckSSLInfo(r.ssl_info());
-      } else {
-        EXPECT_EQ(0, d.bytes_received());
-      }
-    }
-  }
-}
-
-TEST_F(HTTPSRequestTest, HTTPSExpiredTest) {
-  TestServer::HTTPSOptions https_options(
-      TestServer::HTTPSOptions::CERT_EXPIRED);
-  TestServer test_server(https_options,
-                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
-  ASSERT_TRUE(test_server.Start());
-
-  // Iterate from false to true, just so that we do the opposite of the
-  // previous test in order to increase test coverage.
-  bool err_allowed = false;
-  for (int i = 0; i < 2 ; i++, err_allowed = !err_allowed) {
-    TestDelegate d;
-    {
-      d.set_allow_certificate_errors(err_allowed);
-      URLRequest r(test_server.GetURL(""), &d, &default_context_);
-
-      r.Start();
-      EXPECT_TRUE(r.is_pending());
-
-      MessageLoop::current()->Run();
-
-      EXPECT_EQ(1, d.response_started_count());
-      EXPECT_FALSE(d.received_data_before_response());
-      EXPECT_TRUE(d.have_certificate_errors());
-      if (err_allowed) {
-        EXPECT_NE(0, d.bytes_received());
-        CheckSSLInfo(r.ssl_info());
-      } else {
-        EXPECT_EQ(0, d.bytes_received());
-      }
-    }
-  }
-}
-
-class TestSSLConfigService : public SSLConfigService {
- public:
-  TestSSLConfigService(bool ev_enabled, bool online_rev_checking)
-      : ev_enabled_(ev_enabled),
-        online_rev_checking_(online_rev_checking) {
-  }
-
-  // SSLConfigService:
-  virtual void GetSSLConfig(SSLConfig* config) OVERRIDE {
-    *config = SSLConfig();
-    config->rev_checking_enabled = online_rev_checking_;
-    config->verify_ev_cert = ev_enabled_;
-  }
-
- protected:
-  virtual ~TestSSLConfigService() {}
-
- private:
-  const bool ev_enabled_;
-  const bool online_rev_checking_;
-};
-
-// This the fingerprint of the "Testing CA" certificate used by the testserver.
-// See net/data/ssl/certificates/ocsp-test-root.pem.
-static const SHA1Fingerprint kOCSPTestCertFingerprint =
-  { { 0xf1, 0xad, 0xf6, 0xce, 0x42, 0xac, 0xe7, 0xb4, 0xf4, 0x24,
-      0xdb, 0x1a, 0xf7, 0xa0, 0x9f, 0x09, 0xa1, 0xea, 0xf1, 0x5c } };
-
-// This is the policy OID contained in the certificates that testserver
-// generates.
-static const char kOCSPTestCertPolicy[] = "1.3.6.1.4.1.11129.2.4.1";
-
-class HTTPSOCSPTest : public HTTPSRequestTest {
- public:
-  HTTPSOCSPTest()
-      : context_(true),
-        ev_test_policy_(
-            new ScopedTestEVPolicy(EVRootCAMetadata::GetInstance(),
-                                   kOCSPTestCertFingerprint,
-                                   kOCSPTestCertPolicy)) {
-  }
-
-  virtual void SetUp() OVERRIDE {
-    SetupContext(&context_);
-    context_.Init();
-
-    scoped_refptr<net::X509Certificate> root_cert =
-      ImportCertFromFile(GetTestCertsDirectory(), "ocsp-test-root.pem");
-    CHECK_NE(static_cast<X509Certificate*>(NULL), root_cert);
-    test_root_.reset(new ScopedTestRoot(root_cert));
-
-#if defined(USE_NSS)
-    SetURLRequestContextForNSSHttpIO(&context_);
-    EnsureNSSHttpIOInit();
-#endif
-  }
-
-  void DoConnection(const TestServer::HTTPSOptions& https_options,
-                    CertStatus* out_cert_status) {
-    TestServer test_server(https_options,
-                           FilePath(FILE_PATH_LITERAL("net/data/ssl")));
-    ASSERT_TRUE(test_server.Start());
-
-    TestDelegate d;
-    d.set_allow_certificate_errors(true);
-    URLRequest r(test_server.GetURL(""), &d, &context_);
-    r.Start();
-
-    MessageLoop::current()->Run();
-
-    EXPECT_EQ(1, d.response_started_count());
-    *out_cert_status = r.ssl_info().cert_status;
-  }
-
-  ~HTTPSOCSPTest() {
-#if defined(USE_NSS)
-    ShutdownNSSHttpIO();
-#endif
-  }
-
- protected:
-  // SetupContext configures the URLRequestContext that will be used for making
-  // connetions to testserver. This can be overridden in test subclasses for
-  // different behaviour.
-  virtual void SetupContext(URLRequestContext* context) {
-    context->set_ssl_config_service(
-        new TestSSLConfigService(true /* check for EV */,
-                                 true /* online revocation checking */));
-  }
-
-  scoped_ptr<ScopedTestRoot> test_root_;
-  TestURLRequestContext context_;
-  scoped_ptr<ScopedTestEVPolicy> ev_test_policy_;
-};
-
-static CertStatus ExpectedCertStatusForFailedOnlineRevocationCheck() {
-#if defined(OS_WIN)
-  // Windows can return CERT_STATUS_UNABLE_TO_CHECK_REVOCATION but we don't
-  // have that ability on other platforms.
-  return CERT_STATUS_UNABLE_TO_CHECK_REVOCATION;
-#else
-  return 0;
-#endif
-}
-
-// SystemUsesChromiumEVMetadata returns true iff the current operating system
-// uses Chromium's EV metadata (i.e. EVRootCAMetadata). If it does not, then
-// several tests are effected because our testing EV certificate won't be
-// recognised as EV.
-static bool SystemUsesChromiumEVMetadata() {
-#if defined(USE_OPENSSL)
-  // http://crbug.com/117478 - OpenSSL does not support EV validation.
-  return false;
-#elif defined(OS_MACOSX)
-  // On OS X, we use the system to tell us whether a certificate is EV or not
-  // and the system won't recognise our testing root.
-  return false;
-#else
-  return true;
-#endif
-}
-
-static bool SystemSupportsOCSP() {
-#if defined(USE_OPENSSL)
-  // http://crbug.com/117478 - OpenSSL does not support OCSP.
-  return false;
-#elif defined(OS_WIN)
-  return base::win::GetVersion() >= base::win::VERSION_VISTA;
-#elif defined(OS_ANDROID)
-  // TODO(jnd): http://crbug.com/117478 - EV verification is not yet supported.
-  return false;
-#else
-  return true;
-#endif
-}
-
-TEST_F(HTTPSOCSPTest, Valid) {
-  if (!SystemSupportsOCSP()) {
-    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
-    return;
-  }
-
-  TestServer::HTTPSOptions https_options(TestServer::HTTPSOptions::CERT_AUTO);
-  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_OK;
-
-  CertStatus cert_status = 0;
-  DoConnection(https_options, &cert_status);
-
-  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
-
-  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
-}
-
-TEST_F(HTTPSOCSPTest, Revoked) {
-  if (!SystemSupportsOCSP()) {
-    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
-    return;
-  }
-
-  TestServer::HTTPSOptions https_options(
-      TestServer::HTTPSOptions::CERT_AUTO);
-  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_REVOKED;
-
-  CertStatus cert_status;
-  DoConnection(https_options, &cert_status);
-
-#if !defined(OS_MACOSX)
-  // Doesn't pass on OS X yet for reasons that need to be investigated.
-  EXPECT_EQ(CERT_STATUS_REVOKED, cert_status & CERT_STATUS_ALL_ERRORS);
-#endif
-  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
-  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
-}
-
-TEST_F(HTTPSOCSPTest, Invalid) {
-  if (!SystemSupportsOCSP()) {
-    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
-    return;
-  }
-
-  TestServer::HTTPSOptions https_options(
-      TestServer::HTTPSOptions::CERT_AUTO);
-  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_INVALID;
-
-  CertStatus cert_status = 0;
-  DoConnection(https_options, &cert_status);
-
-  EXPECT_EQ(ExpectedCertStatusForFailedOnlineRevocationCheck(),
-            cert_status & CERT_STATUS_ALL_ERRORS);
-
-  // Without a positive OCSP response, we shouldn't show the EV status.
-  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
-  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
-}
-
-class HTTPSEVCRLSetTest : public HTTPSOCSPTest {
- protected:
-  virtual void SetupContext(URLRequestContext* context) OVERRIDE {
-    context->set_ssl_config_service(
-        new TestSSLConfigService(true /* check for EV */,
-                                 false /* online revocation checking */));
-  }
-};
-
-TEST_F(HTTPSEVCRLSetTest, MissingCRLSetAndInvalidOCSP) {
-  if (!SystemSupportsOCSP()) {
-    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
-    return;
-  }
-
-  TestServer::HTTPSOptions https_options(
-      TestServer::HTTPSOptions::CERT_AUTO);
-  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_INVALID;
-  SSLConfigService::SetCRLSet(scoped_refptr<CRLSet>());
-
-  CertStatus cert_status = 0;
-  DoConnection(https_options, &cert_status);
-
-  EXPECT_EQ(ExpectedCertStatusForFailedOnlineRevocationCheck(),
-            cert_status & CERT_STATUS_ALL_ERRORS);
-
-  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_REV_CHECKING_ENABLED));
-}
-
-TEST_F(HTTPSEVCRLSetTest, MissingCRLSetAndGoodOCSP) {
-  if (!SystemSupportsOCSP()) {
-    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
-    return;
-  }
-
-  TestServer::HTTPSOptions https_options(
-      TestServer::HTTPSOptions::CERT_AUTO);
-  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_OK;
-  SSLConfigService::SetCRLSet(scoped_refptr<CRLSet>());
-
-  CertStatus cert_status;
-  DoConnection(https_options, &cert_status);
-
-  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_REV_CHECKING_ENABLED));
-}
-
-TEST_F(HTTPSEVCRLSetTest, ExpiredCRLSet) {
-  if (!SystemSupportsOCSP()) {
-    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
-    return;
-  }
-
-  TestServer::HTTPSOptions https_options(
-      TestServer::HTTPSOptions::CERT_AUTO);
-  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_INVALID;
-  SSLConfigService::SetCRLSet(
-      scoped_refptr<CRLSet>(CRLSet::ExpiredCRLSetForTesting()));
-
-  CertStatus cert_status;
-  DoConnection(https_options, &cert_status);
-
-  EXPECT_EQ(ExpectedCertStatusForFailedOnlineRevocationCheck(),
-            cert_status & CERT_STATUS_ALL_ERRORS);
-
-  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_REV_CHECKING_ENABLED));
-}
-
-TEST_F(HTTPSEVCRLSetTest, FreshCRLSet) {
-  TestServer::HTTPSOptions https_options(
-      TestServer::HTTPSOptions::CERT_AUTO);
-  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_INVALID;
-  SSLConfigService::SetCRLSet(
-      scoped_refptr<CRLSet>(CRLSet::EmptyCRLSetForTesting()));
-
-  CertStatus cert_status = 0;
-  DoConnection(https_options, &cert_status);
-
-  // With a valid, fresh CRLSet the bad OCSP response shouldn't matter because
-  // we wont check it.
-  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
-
-  EXPECT_FALSE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
-}
-
-TEST_F(HTTPSEVCRLSetTest, ExpiredCRLSetAndRevokedNonEVCert) {
-  // Test that when EV verification is requested, but online revocation
-  // checking is disabled, and the leaf certificate is not in fact EV, that
-  // no revocation checking actually happens.
-  if (!SystemSupportsOCSP()) {
-    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
-    return;
-  }
-
-  // Unmark the certificate's OID as EV, which should disable revocation
-  // checking (as per the user preference)
-  ev_test_policy_.reset();
-
-  TestServer::HTTPSOptions https_options(
-      TestServer::HTTPSOptions::CERT_AUTO);
-  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_REVOKED;
-  SSLConfigService::SetCRLSet(
-      scoped_refptr<CRLSet>(CRLSet::ExpiredCRLSetForTesting()));
-
-  CertStatus cert_status;
-  DoConnection(https_options, &cert_status);
-
-  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-
-  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
-  EXPECT_FALSE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
-}
-
-class HTTPSCRLSetTest : public HTTPSOCSPTest {
- protected:
-  virtual void SetupContext(URLRequestContext* context) OVERRIDE {
-    context->set_ssl_config_service(
-        new TestSSLConfigService(false /* check for EV */,
-                                 false /* online revocation checking */));
-  }
-};
-
-TEST_F(HTTPSCRLSetTest, ExpiredCRLSet) {
-  TestServer::HTTPSOptions https_options(
-      TestServer::HTTPSOptions::CERT_AUTO);
-  https_options.ocsp_status = TestServer::HTTPSOptions::OCSP_INVALID;
-  SSLConfigService::SetCRLSet(
-      scoped_refptr<CRLSet>(CRLSet::ExpiredCRLSetForTesting()));
-
-  CertStatus cert_status = 0;
-  DoConnection(https_options, &cert_status);
-
-  // If we're not trying EV verification then, even if the CRLSet has expired,
-  // we don't fall back to online revocation checks.
-  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
-  EXPECT_FALSE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
-}
-
-TEST_F(HTTPSRequestTest, SSLv3Fallback) {
-  TestServer::HTTPSOptions https_options(
-      TestServer::HTTPSOptions::CERT_OK);
-  https_options.tls_intolerant = TestServer::HTTPSOptions::TLS_INTOLERANT_ALL;
-  TestServer test_server(https_options,
-                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
-  ASSERT_TRUE(test_server.Start());
-
-  TestDelegate d;
-  TestURLRequestContext context(true);
-  context.Init();
-  d.set_allow_certificate_errors(true);
-  URLRequest r(test_server.GetURL(""), &d, &context);
-  r.Start();
-
-  MessageLoop::current()->Run();
-
-  EXPECT_EQ(1, d.response_started_count());
-  EXPECT_NE(0, d.bytes_received());
-  EXPECT_EQ(static_cast<int>(SSL_CONNECTION_VERSION_SSL3),
-            SSLConnectionStatusToVersion(r.ssl_info().connection_status));
-  EXPECT_TRUE(r.ssl_info().connection_status & SSL_CONNECTION_VERSION_FALLBACK);
-}
-
-// Tests TLSv1.1 -> TLSv1 fallback. Verifies that we don't fall back more
-// than necessary.
-TEST_F(HTTPSRequestTest, TLSv1Fallback) {
-  uint16 default_version_max = SSLConfigService::default_version_max();
-  // The OpenSSL library in use may not support TLS 1.1.
-#if !defined(USE_OPENSSL)
-  EXPECT_GT(default_version_max, SSL_PROTOCOL_VERSION_TLS1);
-#endif
-  if (default_version_max <= SSL_PROTOCOL_VERSION_TLS1)
-    return;
-
-  TestServer::HTTPSOptions https_options(
-      TestServer::HTTPSOptions::CERT_OK);
-  https_options.tls_intolerant =
-      TestServer::HTTPSOptions::TLS_INTOLERANT_TLS1_1;
-  TestServer test_server(https_options,
-                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
-  ASSERT_TRUE(test_server.Start());
-
-  TestDelegate d;
-  TestURLRequestContext context(true);
-  context.Init();
-  d.set_allow_certificate_errors(true);
-  URLRequest r(test_server.GetURL(""), &d, &context);
-  r.Start();
-
-  MessageLoop::current()->Run();
-
-  EXPECT_EQ(1, d.response_started_count());
-  EXPECT_NE(0, d.bytes_received());
-  EXPECT_EQ(static_cast<int>(SSL_CONNECTION_VERSION_TLS1),
-            SSLConnectionStatusToVersion(r.ssl_info().connection_status));
-  EXPECT_TRUE(r.ssl_info().connection_status & SSL_CONNECTION_VERSION_FALLBACK);
-}
-
-// This tests that a load of www.google.com with a certificate error sets
-// the |certificate_errors_are_fatal| flag correctly. This flag will cause
-// the interstitial to be fatal.
-TEST_F(HTTPSRequestTest, HTTPSPreloadedHSTSTest) {
-  TestServer::HTTPSOptions https_options(
-      TestServer::HTTPSOptions::CERT_MISMATCHED_NAME);
-  TestServer test_server(https_options,
-                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
-  ASSERT_TRUE(test_server.Start());
-
-  // We require that the URL be www.google.com in order to pick up the
-  // preloaded HSTS entries in the TransportSecurityState. This means that we
-  // have to use a MockHostResolver in order to direct www.google.com to the
-  // testserver.
-
-  MockHostResolver host_resolver;
-  host_resolver.rules()->AddRule("www.google.com", "127.0.0.1");
-  TestNetworkDelegate network_delegate;  // must outlive URLRequest
-  TestURLRequestContext context(true);
-  context.set_network_delegate(&network_delegate);
-  context.set_host_resolver(&host_resolver);
-  TransportSecurityState transport_security_state;
-  context.set_transport_security_state(&transport_security_state);
-  context.Init();
-
-  TestDelegate d;
-  URLRequest r(GURL(StringPrintf("https://www.google.com:%d",
-                                 test_server.host_port_pair().port())),
-               &d,
-               &context);
-
-  r.Start();
-  EXPECT_TRUE(r.is_pending());
-
-  MessageLoop::current()->Run();
-
-  EXPECT_EQ(1, d.response_started_count());
-  EXPECT_FALSE(d.received_data_before_response());
-  EXPECT_TRUE(d.have_certificate_errors());
-  EXPECT_TRUE(d.certificate_errors_are_fatal());
-}
-
-// This tests that cached HTTPS page loads do not cause any updates to the
-// TransportSecurityState.
-TEST_F(HTTPSRequestTest, HTTPSErrorsNoClobberTSSTest) {
-  // The actual problem -- CERT_MISMATCHED_NAME in this case -- doesn't
-  // matter. It just has to be any error.
-  TestServer::HTTPSOptions https_options(
-      TestServer::HTTPSOptions::CERT_MISMATCHED_NAME);
-  TestServer test_server(https_options,
-                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
-  ASSERT_TRUE(test_server.Start());
-
-  // We require that the URL be www.google.com in order to pick up the
-  // preloaded and dynamic HSTS and public key pin entries in the
-  // TransportSecurityState. This means that we have to use a
-  // MockHostResolver in order to direct www.google.com to the testserver.
-
-  MockHostResolver host_resolver;
-  host_resolver.rules()->AddRule("www.google.com", "127.0.0.1");
-  TestNetworkDelegate network_delegate;  // must outlive URLRequest
-  TestURLRequestContext context(true);
-  context.set_network_delegate(&network_delegate);
-  context.set_host_resolver(&host_resolver);
-  TransportSecurityState transport_security_state;
-  TransportSecurityState::DomainState domain_state;
-  EXPECT_TRUE(transport_security_state.GetDomainState("www.google.com", true,
-                                                      &domain_state));
-  context.set_transport_security_state(&transport_security_state);
-  context.Init();
-
-  TestDelegate d;
-  URLRequest r(GURL(StringPrintf("https://www.google.com:%d",
-                                 test_server.host_port_pair().port())),
-               &d,
-               &context);
-
-  r.Start();
-  EXPECT_TRUE(r.is_pending());
-
-  MessageLoop::current()->Run();
-
-  EXPECT_EQ(1, d.response_started_count());
-  EXPECT_FALSE(d.received_data_before_response());
-  EXPECT_TRUE(d.have_certificate_errors());
-  EXPECT_TRUE(d.certificate_errors_are_fatal());
-
-  // Get a fresh copy of the state, and check that it hasn't been updated.
-  TransportSecurityState::DomainState new_domain_state;
-  EXPECT_TRUE(transport_security_state.GetDomainState("www.google.com", true,
-                                                      &new_domain_state));
-  EXPECT_EQ(new_domain_state.upgrade_mode, domain_state.upgrade_mode);
-  EXPECT_EQ(new_domain_state.include_subdomains,
-            domain_state.include_subdomains);
-  EXPECT_TRUE(FingerprintsEqual(new_domain_state.static_spki_hashes,
-                                domain_state.static_spki_hashes));
-  EXPECT_TRUE(FingerprintsEqual(new_domain_state.dynamic_spki_hashes,
-                                domain_state.dynamic_spki_hashes));
-  EXPECT_TRUE(FingerprintsEqual(new_domain_state.bad_static_spki_hashes,
-                                domain_state.bad_static_spki_hashes));
-}
-
-namespace {
-
-class SSLClientAuthTestDelegate : public TestDelegate {
- public:
-  SSLClientAuthTestDelegate() : on_certificate_requested_count_(0) {
-  }
-  virtual void OnCertificateRequested(
-      URLRequest* request,
-      SSLCertRequestInfo* cert_request_info) {
-    on_certificate_requested_count_++;
-    MessageLoop::current()->Quit();
-  }
-  int on_certificate_requested_count() {
-    return on_certificate_requested_count_;
-  }
- private:
-  int on_certificate_requested_count_;
-};
-
-}  // namespace
-
-// TODO(davidben): Test the rest of the code. Specifically,
-// - Filtering which certificates to select.
-// - Sending a certificate back.
-// - Getting a certificate request in an SSL renegotiation sending the
-//   HTTP request.
-TEST_F(HTTPSRequestTest, ClientAuthTest) {
-  TestServer::HTTPSOptions https_options;
-  https_options.request_client_certificate = true;
-  TestServer test_server(https_options,
-                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
-  ASSERT_TRUE(test_server.Start());
-
-  SSLClientAuthTestDelegate d;
-  {
-    URLRequest r(test_server.GetURL(""), &d, &default_context_);
-
-    r.Start();
-    EXPECT_TRUE(r.is_pending());
-
-    MessageLoop::current()->Run();
-
-    EXPECT_EQ(1, d.on_certificate_requested_count());
-    EXPECT_FALSE(d.received_data_before_response());
-    EXPECT_EQ(0, d.bytes_received());
-
-    // Send no certificate.
-    // TODO(davidben): Get temporary client cert import (with keys) working on
-    // all platforms so we can test sending a cert as well.
-    r.ContinueWithCertificate(NULL);
-
-    MessageLoop::current()->Run();
-
-    EXPECT_EQ(1, d.response_started_count());
-    EXPECT_FALSE(d.received_data_before_response());
-    EXPECT_NE(0, d.bytes_received());
-  }
-}
-
-TEST_F(HTTPSRequestTest, ResumeTest) {
-  // Test that we attempt a session resume when making two connections to the
-  // same host.
-  TestServer::HTTPSOptions https_options;
-  https_options.record_resume = true;
-  TestServer test_server(https_options,
-                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
-  ASSERT_TRUE(test_server.Start());
-
-  SSLClientSocket::ClearSessionCache();
-
-  {
-    TestDelegate d;
-    URLRequest r(
-        test_server.GetURL("ssl-session-cache"), &d, &default_context_);
-
-    r.Start();
-    EXPECT_TRUE(r.is_pending());
-
-    MessageLoop::current()->Run();
-
-    EXPECT_EQ(1, d.response_started_count());
-  }
-
-  reinterpret_cast<HttpCache*>(default_context_.http_transaction_factory())->
-    CloseAllConnections();
-
-  {
-    TestDelegate d;
-    URLRequest r(
-        test_server.GetURL("ssl-session-cache"), &d, &default_context_);
-
-    r.Start();
-    EXPECT_TRUE(r.is_pending());
-
-    MessageLoop::current()->Run();
-
-    // The response will look like;
-    //   insert abc
-    //   lookup abc
-    //   insert xyz
-    //
-    // With a newline at the end which makes the split think that there are
-    // four lines.
-
-    EXPECT_EQ(1, d.response_started_count());
-    std::vector<std::string> lines;
-    base::SplitString(d.data_received(), '\n', &lines);
-    ASSERT_EQ(4u, lines.size()) << d.data_received();
-
-    std::string session_id;
-
-    for (size_t i = 0; i < 2; i++) {
-      std::vector<std::string> parts;
-      base::SplitString(lines[i], '\t', &parts);
-      ASSERT_EQ(2u, parts.size());
-      if (i == 0) {
-        EXPECT_EQ("insert", parts[0]);
-        session_id = parts[1];
-      } else {
-        EXPECT_EQ("lookup", parts[0]);
-        EXPECT_EQ(session_id, parts[1]);
-      }
-    }
-  }
-}
-
-TEST_F(HTTPSRequestTest, SSLSessionCacheShardTest) {
-  // Test that sessions aren't resumed when the value of ssl_session_cache_shard
-  // differs.
-  TestServer::HTTPSOptions https_options;
-  https_options.record_resume = true;
-  TestServer test_server(https_options,
-                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
-  ASSERT_TRUE(test_server.Start());
-
-  SSLClientSocket::ClearSessionCache();
-
-  {
-    TestDelegate d;
-    URLRequest r(
-        test_server.GetURL("ssl-session-cache"), &d, &default_context_);
-
-    r.Start();
-    EXPECT_TRUE(r.is_pending());
-
-    MessageLoop::current()->Run();
-
-    EXPECT_EQ(1, d.response_started_count());
-  }
-
-  // Now create a new HttpCache with a different ssl_session_cache_shard value.
-  HttpNetworkSession::Params params;
-  params.host_resolver = default_context_.host_resolver();
-  params.cert_verifier = default_context_.cert_verifier();
-  params.proxy_service = default_context_.proxy_service();
-  params.ssl_config_service = default_context_.ssl_config_service();
-  params.http_auth_handler_factory =
-      default_context_.http_auth_handler_factory();
-  params.network_delegate = default_context_.network_delegate();
-  params.http_server_properties = default_context_.http_server_properties();
-  params.ssl_session_cache_shard = "alternate";
-
-  scoped_ptr<net::HttpCache> cache(new net::HttpCache(
-      new net::HttpNetworkSession(params),
-      net::HttpCache::DefaultBackend::InMemory(0)));
-
-  default_context_.set_http_transaction_factory(cache.get());
-
-  {
-    TestDelegate d;
-    URLRequest r(
-        test_server.GetURL("ssl-session-cache"), &d, &default_context_);
-
-    r.Start();
-    EXPECT_TRUE(r.is_pending());
-
-    MessageLoop::current()->Run();
-
-    // The response will look like;
-    //   insert abc
-    //   insert xyz
-    //
-    // With a newline at the end which makes the split think that there are
-    // three lines.
-
-    EXPECT_EQ(1, d.response_started_count());
-    std::vector<std::string> lines;
-    base::SplitString(d.data_received(), '\n', &lines);
-    ASSERT_EQ(3u, lines.size());
-
-    std::string session_id;
-    for (size_t i = 0; i < 2; i++) {
-      std::vector<std::string> parts;
-      base::SplitString(lines[i], '\t', &parts);
-      ASSERT_EQ(2u, parts.size());
-      EXPECT_EQ("insert", parts[0]);
-      if (i == 0) {
-        session_id = parts[1];
-      } else {
-        EXPECT_NE(session_id, parts[1]);
-      }
-    }
-  }
-}
-
 TEST_F(URLRequestTestHTTP, CancelTest) {
   TestDelegate d;
   {
@@ -2401,221 +2849,6 @@ TEST_F(URLRequestTestHTTP, TestPostChunkedDataAfterStart) {
   }
 }
 
-TEST_F(URLRequestTest, AboutBlankTest) {
-  TestDelegate d;
-  {
-    URLRequest r(GURL("about:blank"), &d, &default_context_);
-
-    r.Start();
-    EXPECT_TRUE(r.is_pending());
-
-    MessageLoop::current()->Run();
-
-    EXPECT_TRUE(!r.is_pending());
-    EXPECT_FALSE(d.received_data_before_response());
-    EXPECT_EQ(d.bytes_received(), 0);
-    EXPECT_EQ("", r.GetSocketAddress().host());
-    EXPECT_EQ(0, r.GetSocketAddress().port());
-  }
-}
-
-TEST_F(URLRequestTest, DataURLImageTest) {
-  TestDelegate d;
-  {
-    // Use our nice little Chrome logo.
-    URLRequest r(GURL(
-        "data:image/png;base64,"
-        "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAADVklEQVQ4jX2TfUwUBBjG3"
-        "w1y+HGcd9dxhXR8T4awOccJGgOSWclHImznLkTlSw0DDQXkrmgYgbUYnlQTqQxIEVxitD"
-        "5UMCATRA1CEEg+Qjw3bWDxIauJv/5oumqs39/P827vnucRmYN0gyF01GI5MpCVdW0gO7t"
-        "vNC+vqSEtbZefk5NuLv1jdJ46p/zw0HeH4+PHr3h7c1mjoV2t5rKzMx1+fg9bAgK6zHq9"
-        "cU5z+LpA3xOtx34+vTeT21onRuzssC3zxbbSwC13d/pFuC7CkIMDxQpF7r/MWq12UctI1"
-        "dWWm99ypqSYmRUBdKem8MkrO/kgaTt1O7YzlpzE5GIVd0WYUqt57yWf2McHTObYPbVD+Z"
-        "wbtlLTVMZ3BW+TnLyXLaWtmEq6WJVbT3HBh3Svj2HQQcm43XwmtoYM6vVKleh0uoWvnzW"
-        "3v3MpidruPTQPf0bia7sJOtBM0ufTWNvus/nkDFHF9ZS+uYVjRUasMeHUmyLYtcklTvzW"
-        "GFZnNOXczThvpKIzjcahSqIzkvDLayDq6D3eOjtBbNUEIZYyqsvj4V4wY92eNJ4IoyhTb"
-        "xXX1T5xsV9tm9r4TQwHLiZw/pdDZJea8TKmsmR/K0uLh/GwnCHghTja6lPhphezPfO5/5"
-        "MrVvMzNaI3+ERHfrFzPKQukrQGI4d/3EFD/3E2mVNYvi4at7CXWREaxZGD+3hg28zD3gV"
-        "Md6q5c8GdosynKmSeRuGzpjyl1/9UDGtPR5HeaKT8Wjo17WXk579BXVUhN64ehF9fhRtq"
-        "/uxxZKzNiZFGD0wRC3NFROZ5mwIPL/96K/rKMMLrIzF9uhHr+/sYH7DAbwlgC4J+R2Z7F"
-        "Ux1qLnV7MGF40smVSoJ/jvHRfYhQeUJd/SnYtGWhPHR0Sz+GE2F2yth0B36Vcz2KpnufB"
-        "JbsysjjW4kblBUiIjiURUWqJY65zxbnTy57GQyH58zgy0QBtTQv5gH15XMdKkYu+TGaJM"
-        "nlm2O34uI4b9tflqp1+QEFGzoW/ulmcofcpkZCYJhDfSpme7QcrHa+Xfji8paEQkTkSfm"
-        "moRWRNZr/F1KfVMjW+IKEnv2FwZfKdzt0BQR6lClcZR0EfEXEfv/G6W9iLiIyCoReV5En"
-        "hORIBHx+ufPj/gLB/zGI/G4Bk0AAAAASUVORK5CYII="),
-        &d,
-        &default_context_);
-
-    r.Start();
-    EXPECT_TRUE(r.is_pending());
-
-    MessageLoop::current()->Run();
-
-    EXPECT_TRUE(!r.is_pending());
-    EXPECT_FALSE(d.received_data_before_response());
-    EXPECT_EQ(d.bytes_received(), 911);
-    EXPECT_EQ("", r.GetSocketAddress().host());
-    EXPECT_EQ(0, r.GetSocketAddress().port());
-  }
-}
-
-TEST_F(URLRequestTest, FileTest) {
-  FilePath app_path;
-  PathService::Get(base::FILE_EXE, &app_path);
-  GURL app_url = FilePathToFileURL(app_path);
-
-  TestDelegate d;
-  {
-    URLRequest r(app_url, &d, &default_context_);
-
-    r.Start();
-    EXPECT_TRUE(r.is_pending());
-
-    MessageLoop::current()->Run();
-
-    int64 file_size = -1;
-    EXPECT_TRUE(file_util::GetFileSize(app_path, &file_size));
-
-    EXPECT_TRUE(!r.is_pending());
-    EXPECT_EQ(1, d.response_started_count());
-    EXPECT_FALSE(d.received_data_before_response());
-    EXPECT_EQ(d.bytes_received(), static_cast<int>(file_size));
-    EXPECT_EQ("", r.GetSocketAddress().host());
-    EXPECT_EQ(0, r.GetSocketAddress().port());
-  }
-}
-
-TEST_F(URLRequestTest, FileTestFullSpecifiedRange) {
-  const size_t buffer_size = 4000;
-  scoped_array<char> buffer(new char[buffer_size]);
-  FillBuffer(buffer.get(), buffer_size);
-
-  FilePath temp_path;
-  EXPECT_TRUE(file_util::CreateTemporaryFile(&temp_path));
-  GURL temp_url = FilePathToFileURL(temp_path);
-  EXPECT_TRUE(file_util::WriteFile(temp_path, buffer.get(), buffer_size));
-
-  int64 file_size;
-  EXPECT_TRUE(file_util::GetFileSize(temp_path, &file_size));
-
-  const size_t first_byte_position = 500;
-  const size_t last_byte_position = buffer_size - first_byte_position;
-  const size_t content_length = last_byte_position - first_byte_position + 1;
-  std::string partial_buffer_string(buffer.get() + first_byte_position,
-                                    buffer.get() + last_byte_position + 1);
-
-  TestDelegate d;
-  {
-    URLRequest r(temp_url, &d, &default_context_);
-
-    HttpRequestHeaders headers;
-    headers.SetHeader(HttpRequestHeaders::kRange,
-                      base::StringPrintf(
-                           "bytes=%" PRIuS "-%" PRIuS,
-                           first_byte_position, last_byte_position));
-    r.SetExtraRequestHeaders(headers);
-    r.Start();
-    EXPECT_TRUE(r.is_pending());
-
-    MessageLoop::current()->Run();
-    EXPECT_TRUE(!r.is_pending());
-    EXPECT_EQ(1, d.response_started_count());
-    EXPECT_FALSE(d.received_data_before_response());
-    EXPECT_EQ(static_cast<int>(content_length), d.bytes_received());
-    // Don't use EXPECT_EQ, it will print out a lot of garbage if check failed.
-    EXPECT_TRUE(partial_buffer_string == d.data_received());
-  }
-
-  EXPECT_TRUE(file_util::Delete(temp_path, false));
-}
-
-TEST_F(URLRequestTest, FileTestHalfSpecifiedRange) {
-  const size_t buffer_size = 4000;
-  scoped_array<char> buffer(new char[buffer_size]);
-  FillBuffer(buffer.get(), buffer_size);
-
-  FilePath temp_path;
-  EXPECT_TRUE(file_util::CreateTemporaryFile(&temp_path));
-  GURL temp_url = FilePathToFileURL(temp_path);
-  EXPECT_TRUE(file_util::WriteFile(temp_path, buffer.get(), buffer_size));
-
-  int64 file_size;
-  EXPECT_TRUE(file_util::GetFileSize(temp_path, &file_size));
-
-  const size_t first_byte_position = 500;
-  const size_t last_byte_position = buffer_size - 1;
-  const size_t content_length = last_byte_position - first_byte_position + 1;
-  std::string partial_buffer_string(buffer.get() + first_byte_position,
-                                    buffer.get() + last_byte_position + 1);
-
-  TestDelegate d;
-  {
-    URLRequest r(temp_url, &d, &default_context_);
-
-    HttpRequestHeaders headers;
-    headers.SetHeader(HttpRequestHeaders::kRange,
-                      base::StringPrintf("bytes=%" PRIuS "-",
-                                         first_byte_position));
-    r.SetExtraRequestHeaders(headers);
-    r.Start();
-    EXPECT_TRUE(r.is_pending());
-
-    MessageLoop::current()->Run();
-    EXPECT_TRUE(!r.is_pending());
-    EXPECT_EQ(1, d.response_started_count());
-    EXPECT_FALSE(d.received_data_before_response());
-    EXPECT_EQ(static_cast<int>(content_length), d.bytes_received());
-    // Don't use EXPECT_EQ, it will print out a lot of garbage if check failed.
-    EXPECT_TRUE(partial_buffer_string == d.data_received());
-  }
-
-  EXPECT_TRUE(file_util::Delete(temp_path, false));
-}
-
-TEST_F(URLRequestTest, FileTestMultipleRanges) {
-  const size_t buffer_size = 400000;
-  scoped_array<char> buffer(new char[buffer_size]);
-  FillBuffer(buffer.get(), buffer_size);
-
-  FilePath temp_path;
-  EXPECT_TRUE(file_util::CreateTemporaryFile(&temp_path));
-  GURL temp_url = FilePathToFileURL(temp_path);
-  EXPECT_TRUE(file_util::WriteFile(temp_path, buffer.get(), buffer_size));
-
-  int64 file_size;
-  EXPECT_TRUE(file_util::GetFileSize(temp_path, &file_size));
-
-  TestDelegate d;
-  {
-    URLRequest r(temp_url, &d, &default_context_);
-
-    HttpRequestHeaders headers;
-    headers.SetHeader(HttpRequestHeaders::kRange,
-                      "bytes=0-0,10-200,200-300");
-    r.SetExtraRequestHeaders(headers);
-    r.Start();
-    EXPECT_TRUE(r.is_pending());
-
-    MessageLoop::current()->Run();
-    EXPECT_TRUE(d.request_failed());
-  }
-
-  EXPECT_TRUE(file_util::Delete(temp_path, false));
-}
-
-TEST_F(URLRequestTest, InvalidUrlTest) {
-  TestDelegate d;
-  {
-    URLRequest r(GURL("invalid url"), &d, &default_context_);
-
-    r.Start();
-    EXPECT_TRUE(r.is_pending());
-
-    MessageLoop::current()->Run();
-    EXPECT_TRUE(d.request_failed());
-  }
-}
-
 TEST_F(URLRequestTestHTTP, ResponseHeadersTest) {
   ASSERT_TRUE(test_server_.Start());
 
@@ -2645,76 +2878,6 @@ TEST_F(URLRequestTestHTTP, ResponseHeadersTest) {
   EXPECT_EQ("a, b", header);
 }
 
-#if defined(OS_WIN)
-TEST_F(URLRequestTest, ResolveShortcutTest) {
-  FilePath app_path;
-  PathService::Get(base::DIR_SOURCE_ROOT, &app_path);
-  app_path = app_path.AppendASCII("net");
-  app_path = app_path.AppendASCII("data");
-  app_path = app_path.AppendASCII("url_request_unittest");
-  app_path = app_path.AppendASCII("with-headers.html");
-
-  std::wstring lnk_path = app_path.value() + L".lnk";
-
-  HRESULT result;
-  IShellLink* shell = NULL;
-  IPersistFile* persist = NULL;
-
-  CoInitialize(NULL);
-  // Temporarily create a shortcut for test
-  result = CoCreateInstance(CLSID_ShellLink, NULL,
-                            CLSCTX_INPROC_SERVER, IID_IShellLink,
-                            reinterpret_cast<LPVOID*>(&shell));
-  ASSERT_TRUE(SUCCEEDED(result));
-  result = shell->QueryInterface(IID_IPersistFile,
-                                reinterpret_cast<LPVOID*>(&persist));
-  ASSERT_TRUE(SUCCEEDED(result));
-  result = shell->SetPath(app_path.value().c_str());
-  EXPECT_TRUE(SUCCEEDED(result));
-  result = shell->SetDescription(L"ResolveShortcutTest");
-  EXPECT_TRUE(SUCCEEDED(result));
-  result = persist->Save(lnk_path.c_str(), TRUE);
-  EXPECT_TRUE(SUCCEEDED(result));
-  if (persist)
-    persist->Release();
-  if (shell)
-    shell->Release();
-
-  TestDelegate d;
-  {
-    URLRequest r(FilePathToFileURL(FilePath(lnk_path)), &d, &default_context_);
-
-    r.Start();
-    EXPECT_TRUE(r.is_pending());
-
-    MessageLoop::current()->Run();
-
-    WIN32_FILE_ATTRIBUTE_DATA data;
-    GetFileAttributesEx(app_path.value().c_str(),
-                        GetFileExInfoStandard, &data);
-    HANDLE file = CreateFile(app_path.value().c_str(), GENERIC_READ,
-                             FILE_SHARE_READ, NULL, OPEN_EXISTING,
-                             FILE_ATTRIBUTE_NORMAL, NULL);
-    EXPECT_NE(INVALID_HANDLE_VALUE, file);
-    scoped_array<char> buffer(new char[data.nFileSizeLow]);
-    DWORD read_size;
-    BOOL result;
-    result = ReadFile(file, buffer.get(), data.nFileSizeLow,
-                      &read_size, NULL);
-    std::string content(buffer.get(), read_size);
-    CloseHandle(file);
-
-    EXPECT_TRUE(!r.is_pending());
-    EXPECT_EQ(1, d.received_redirect_count());
-    EXPECT_EQ(content, d.data_received());
-  }
-
-  // Clean the shortcut
-  DeleteFile(lnk_path.c_str());
-  CoUninitialize();
-}
-#endif  // defined(OS_WIN)
-
 TEST_F(URLRequestTestHTTP, ContentTypeNormalizationTest) {
   ASSERT_TRUE(test_server_.Start());
 
@@ -2733,65 +2896,6 @@ TEST_F(URLRequestTestHTTP, ContentTypeNormalizationTest) {
   EXPECT_EQ("utf-8", charset);
   req.Cancel();
 }
-
-TEST_F(URLRequestTest, FileDirCancelTest) {
-  // Put in mock resource provider.
-  NetModule::SetResourceProvider(TestNetResourceProvider);
-
-  TestDelegate d;
-  {
-    FilePath file_path;
-    PathService::Get(base::DIR_SOURCE_ROOT, &file_path);
-    file_path = file_path.Append(FILE_PATH_LITERAL("net"));
-    file_path = file_path.Append(FILE_PATH_LITERAL("data"));
-
-    URLRequest req(FilePathToFileURL(file_path), &d, &default_context_);
-    req.Start();
-    EXPECT_TRUE(req.is_pending());
-
-    d.set_cancel_in_received_data_pending(true);
-
-    MessageLoop::current()->Run();
-  }
-
-  // Take out mock resource provider.
-  NetModule::SetResourceProvider(NULL);
-}
-
-TEST_F(URLRequestTest, FileDirRedirectNoCrash) {
-  // There is an implicit redirect when loading a file path that matches a
-  // directory and does not end with a slash.  Ensure that following such
-  // redirects does not crash.  See http://crbug.com/18686.
-
-  FilePath path;
-  PathService::Get(base::DIR_SOURCE_ROOT, &path);
-  path = path.Append(FILE_PATH_LITERAL("net"));
-  path = path.Append(FILE_PATH_LITERAL("data"));
-  path = path.Append(FILE_PATH_LITERAL("url_request_unittest"));
-
-  TestDelegate d;
-  URLRequest req(FilePathToFileURL(path), &d, &default_context_);
-  req.Start();
-  MessageLoop::current()->Run();
-
-  ASSERT_EQ(1, d.received_redirect_count());
-  ASSERT_LT(0, d.bytes_received());
-  ASSERT_FALSE(d.request_failed());
-  ASSERT_TRUE(req.status().is_success());
-}
-
-#if defined(OS_WIN)
-// Don't accept the url "file:///" on windows. See http://crbug.com/1474.
-TEST_F(URLRequestTest, FileDirRedirectSingleSlash) {
-  TestDelegate d;
-  URLRequest req(GURL("file:///"), &d, &default_context_);
-  req.Start();
-  MessageLoop::current()->Run();
-
-  ASSERT_EQ(1, d.received_redirect_count());
-  ASSERT_FALSE(req.status().is_success());
-}
-#endif
 
 TEST_F(URLRequestTestHTTP, RestrictRedirects) {
   ASSERT_TRUE(test_server_.Start());
@@ -3047,404 +3151,6 @@ TEST_F(URLRequestTestHTTP, BasicAuthWithCookies) {
   }
 }
 
-TEST_F(URLRequestTest, DelayedCookieCallback) {
-  LocalHttpTestServer test_server;
-  ASSERT_TRUE(test_server.Start());
-
-  TestURLRequestContext context;
-  scoped_refptr<DelayedCookieMonster> delayed_cm =
-      new DelayedCookieMonster();
-  scoped_refptr<CookieStore> cookie_store = delayed_cm;
-  context.set_cookie_store(delayed_cm);
-
-  // Set up a cookie.
-  {
-    TestNetworkDelegate network_delegate;
-    context.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(
-        test_server.GetURL("set-cookie?CookieToNotSend=1"), &d, &context);
-    req.Start();
-    MessageLoop::current()->Run();
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-    EXPECT_EQ(1, network_delegate.set_cookie_count());
-  }
-
-  // Verify that the cookie is set.
-  {
-    TestNetworkDelegate network_delegate;
-    context.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(test_server.GetURL("echoheader?Cookie"), &d, &context);
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_TRUE(d.data_received().find("CookieToNotSend=1")
-                != std::string::npos);
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-  }
-}
-
-TEST_F(URLRequestTest, DoNotSendCookies) {
-  LocalHttpTestServer test_server;
-  ASSERT_TRUE(test_server.Start());
-
-  // Set up a cookie.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(test_server.GetURL("set-cookie?CookieToNotSend=1"),
-                   &d,
-                   &default_context_);
-    req.Start();
-    MessageLoop::current()->Run();
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-  }
-
-  // Verify that the cookie is set.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(
-        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_TRUE(d.data_received().find("CookieToNotSend=1")
-                != std::string::npos);
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-  }
-
-  // Verify that the cookie isn't sent when LOAD_DO_NOT_SEND_COOKIES is set.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(
-        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
-    req.set_load_flags(LOAD_DO_NOT_SEND_COOKIES);
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_TRUE(d.data_received().find("Cookie: CookieToNotSend=1")
-                == std::string::npos);
-
-    // LOAD_DO_NOT_SEND_COOKIES does not trigger OnGetCookies.
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-  }
-}
-
-TEST_F(URLRequestTest, DoNotSaveCookies) {
-  LocalHttpTestServer test_server;
-  ASSERT_TRUE(test_server.Start());
-
-  // Set up a cookie.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(test_server.GetURL("set-cookie?CookieToNotUpdate=2"),
-                   &d,
-                   &default_context_);
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-    EXPECT_EQ(1, network_delegate.set_cookie_count());
-  }
-
-  // Try to set-up another cookie and update the previous cookie.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(
-        test_server.GetURL("set-cookie?CookieToNotSave=1&CookieToNotUpdate=1"),
-        &d,
-        &default_context_);
-    req.set_load_flags(LOAD_DO_NOT_SAVE_COOKIES);
-    req.Start();
-
-    MessageLoop::current()->Run();
-
-    // LOAD_DO_NOT_SAVE_COOKIES does not trigger OnSetCookie.
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-    EXPECT_EQ(0, network_delegate.set_cookie_count());
-  }
-
-  // Verify the cookies weren't saved or updated.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(
-        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_TRUE(d.data_received().find("CookieToNotSave=1")
-                == std::string::npos);
-    EXPECT_TRUE(d.data_received().find("CookieToNotUpdate=2")
-                != std::string::npos);
-
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-    EXPECT_EQ(0, network_delegate.set_cookie_count());
-  }
-}
-
-TEST_F(URLRequestTest, DoNotSendCookies_ViaPolicy) {
-  LocalHttpTestServer test_server;
-  ASSERT_TRUE(test_server.Start());
-
-  // Set up a cookie.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(test_server.GetURL("set-cookie?CookieToNotSend=1"),
-                   &d,
-                   &default_context_);
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-  }
-
-  // Verify that the cookie is set.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(
-        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_TRUE(d.data_received().find("CookieToNotSend=1")
-                != std::string::npos);
-
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-  }
-
-  // Verify that the cookie isn't sent.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    network_delegate.set_cookie_options(TestNetworkDelegate::NO_GET_COOKIES);
-    URLRequest req(
-        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_TRUE(d.data_received().find("Cookie: CookieToNotSend=1")
-                == std::string::npos);
-
-    EXPECT_EQ(1, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-  }
-}
-
-TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy) {
-  LocalHttpTestServer test_server;
-  ASSERT_TRUE(test_server.Start());
-
-  // Set up a cookie.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(test_server.GetURL("set-cookie?CookieToNotUpdate=2"),
-                   &d,
-                   &default_context_);
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-  }
-
-  // Try to set-up another cookie and update the previous cookie.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    network_delegate.set_cookie_options(TestNetworkDelegate::NO_SET_COOKIE);
-    URLRequest req(
-        test_server.GetURL("set-cookie?CookieToNotSave=1&CookieToNotUpdate=1"),
-        &d,
-        &default_context_);
-    req.Start();
-
-    MessageLoop::current()->Run();
-
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(2, network_delegate.blocked_set_cookie_count());
-  }
-
-  // Verify the cookies weren't saved or updated.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(
-        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_TRUE(d.data_received().find("CookieToNotSave=1")
-                == std::string::npos);
-    EXPECT_TRUE(d.data_received().find("CookieToNotUpdate=2")
-                != std::string::npos);
-
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-  }
-}
-
-TEST_F(URLRequestTest, DoNotSaveEmptyCookies) {
-  LocalHttpTestServer test_server;
-  ASSERT_TRUE(test_server.Start());
-
-  // Set up an empty cookie.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(test_server.GetURL("set-cookie"), &d, &default_context_);
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-    EXPECT_EQ(0, network_delegate.set_cookie_count());
-  }
-}
-
-TEST_F(URLRequestTest, DoNotSendCookies_ViaPolicy_Async) {
-  LocalHttpTestServer test_server;
-  ASSERT_TRUE(test_server.Start());
-
-  // Set up a cookie.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(test_server.GetURL("set-cookie?CookieToNotSend=1"),
-                   &d,
-                   &default_context_);
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-  }
-
-  // Verify that the cookie is set.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(
-        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_TRUE(d.data_received().find("CookieToNotSend=1")
-                != std::string::npos);
-
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-  }
-
-  // Verify that the cookie isn't sent.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    network_delegate.set_cookie_options(TestNetworkDelegate::NO_GET_COOKIES);
-    URLRequest req(
-        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_TRUE(d.data_received().find("Cookie: CookieToNotSend=1")
-                == std::string::npos);
-
-    EXPECT_EQ(1, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-  }
-}
-
-TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy_Async) {
-  LocalHttpTestServer test_server;
-  ASSERT_TRUE(test_server.Start());
-
-  // Set up a cookie.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(test_server.GetURL("set-cookie?CookieToNotUpdate=2"),
-                   &d,
-                   &default_context_);
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-  }
-
-  // Try to set-up another cookie and update the previous cookie.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    network_delegate.set_cookie_options(TestNetworkDelegate::NO_SET_COOKIE);
-    URLRequest req(
-        test_server.GetURL("set-cookie?CookieToNotSave=1&CookieToNotUpdate=1"),
-        &d,
-        &default_context_);
-    req.Start();
-
-    MessageLoop::current()->Run();
-
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(2, network_delegate.blocked_set_cookie_count());
-  }
-
-  // Verify the cookies weren't saved or updated.
-  {
-    TestNetworkDelegate network_delegate;
-    default_context_.set_network_delegate(&network_delegate);
-    TestDelegate d;
-    URLRequest req(
-        test_server.GetURL("echoheader?Cookie"), &d, &default_context_);
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_TRUE(d.data_received().find("CookieToNotSave=1")
-                == std::string::npos);
-    EXPECT_TRUE(d.data_received().find("CookieToNotUpdate=2")
-                != std::string::npos);
-
-    EXPECT_EQ(0, network_delegate.blocked_get_cookies_count());
-    EXPECT_EQ(0, network_delegate.blocked_set_cookie_count());
-  }
-}
-
 // In this test, we do a POST which the server will 302 redirect.
 // The subsequent transaction should use GET, and should not send the
 // Content-Type header.
@@ -3550,8 +3256,8 @@ TEST_F(URLRequestTestHTTP, InterceptPost302RedirectGet) {
                     base::UintToString(arraysize(kData) - 1));
   req.SetExtraRequestHeaders(headers);
 
-  URLRequestRedirectJob* job =
-      new URLRequestRedirectJob(&req, test_server_.GetURL("echo"));
+  URLRequestRedirectJob* job = new URLRequestRedirectJob(
+      &req, default_context_.network_delegate(), test_server_.GetURL("echo"));
   AddTestInterceptor()->set_main_intercept_job(job);
 
   req.Start();
@@ -3573,8 +3279,8 @@ TEST_F(URLRequestTestHTTP, InterceptPost307RedirectPost) {
                     base::UintToString(arraysize(kData) - 1));
   req.SetExtraRequestHeaders(headers);
 
-  URLRequestRedirectJob* job =
-      new URLRequestRedirectJob(&req, test_server_.GetURL("echo"));
+  URLRequestRedirectJob* job = new URLRequestRedirectJob(
+      &req, default_context_.network_delegate(), test_server_.GetURL("echo"));
   job->set_redirect_code(
       URLRequestRedirectJob::REDIRECT_307_TEMPORARY_REDIRECT);
   AddTestInterceptor()->set_main_intercept_job(job);
@@ -3585,554 +3291,1016 @@ TEST_F(URLRequestTestHTTP, InterceptPost307RedirectPost) {
   EXPECT_EQ(kData, d.data_received());
 }
 
-// Custom URLRequestJobs for use with interceptor tests
-class RestartTestJob : public URLRequestTestJob {
- public:
-  explicit RestartTestJob(URLRequest* request)
-    : URLRequestTestJob(request, true) {}
- protected:
-  virtual void StartAsync() {
-    this->NotifyRestartRequired();
-  }
- private:
-  ~RestartTestJob() {}
-};
-
-class CancelTestJob : public URLRequestTestJob {
- public:
-  explicit CancelTestJob(URLRequest* request)
-    : URLRequestTestJob(request, true) {}
- protected:
-  virtual void StartAsync() {
-    request_->Cancel();
-  }
- private:
-  ~CancelTestJob() {}
-};
-
-class CancelThenRestartTestJob : public URLRequestTestJob {
- public:
-  explicit CancelThenRestartTestJob(URLRequest* request)
-      : URLRequestTestJob(request, true) {
-  }
- protected:
-  virtual void StartAsync() {
-    request_->Cancel();
-    this->NotifyRestartRequired();
-  }
- private:
-  ~CancelThenRestartTestJob() {}
-};
-
-// An Interceptor for use with interceptor tests
-class TestInterceptor : URLRequest::Interceptor {
- public:
-  TestInterceptor()
-      : intercept_main_request_(false), restart_main_request_(false),
-        cancel_main_request_(false), cancel_then_restart_main_request_(false),
-        simulate_main_network_error_(false),
-        intercept_redirect_(false), cancel_redirect_request_(false),
-        intercept_final_response_(false), cancel_final_request_(false),
-        did_intercept_main_(false), did_restart_main_(false),
-        did_cancel_main_(false), did_cancel_then_restart_main_(false),
-        did_simulate_error_main_(false),
-        did_intercept_redirect_(false), did_cancel_redirect_(false),
-        did_intercept_final_(false), did_cancel_final_(false) {
-    URLRequest::Deprecated::RegisterRequestInterceptor(this);
-  }
-
-  ~TestInterceptor() {
-    URLRequest::Deprecated::UnregisterRequestInterceptor(this);
-  }
-
-  virtual URLRequestJob* MaybeIntercept(URLRequest* request) {
-    if (restart_main_request_) {
-      restart_main_request_ = false;
-      did_restart_main_ = true;
-      return new RestartTestJob(request);
-    }
-    if (cancel_main_request_) {
-      cancel_main_request_ = false;
-      did_cancel_main_ = true;
-      return new CancelTestJob(request);
-    }
-    if (cancel_then_restart_main_request_) {
-      cancel_then_restart_main_request_ = false;
-      did_cancel_then_restart_main_ = true;
-      return new CancelThenRestartTestJob(request);
-    }
-    if (simulate_main_network_error_) {
-      simulate_main_network_error_ = false;
-      did_simulate_error_main_ = true;
-      // will error since the requeted url is not one of its canned urls
-      return new URLRequestTestJob(request, true);
-    }
-    if (!intercept_main_request_)
-      return NULL;
-    intercept_main_request_ = false;
-    did_intercept_main_ = true;
-    return new URLRequestTestJob(request,
-                                      main_headers_,
-                                      main_data_,
-                                      true);
-  }
-
-  virtual URLRequestJob* MaybeInterceptRedirect(URLRequest* request,
-                                                     const GURL& location) {
-    if (cancel_redirect_request_) {
-      cancel_redirect_request_ = false;
-      did_cancel_redirect_ = true;
-      return new CancelTestJob(request);
-    }
-    if (!intercept_redirect_)
-      return NULL;
-    intercept_redirect_ = false;
-    did_intercept_redirect_ = true;
-    return new URLRequestTestJob(request,
-                                      redirect_headers_,
-                                      redirect_data_,
-                                      true);
-  }
-
-  virtual URLRequestJob* MaybeInterceptResponse(URLRequest* request) {
-    if (cancel_final_request_) {
-      cancel_final_request_ = false;
-      did_cancel_final_ = true;
-      return new CancelTestJob(request);
-    }
-    if (!intercept_final_response_)
-      return NULL;
-    intercept_final_response_ = false;
-    did_intercept_final_ = true;
-    return new URLRequestTestJob(request,
-                                      final_headers_,
-                                      final_data_,
-                                      true);
-  }
-
-  // Whether to intercept the main request, and if so the response to return.
-  bool intercept_main_request_;
-  std::string main_headers_;
-  std::string main_data_;
-
-  // Other actions we take at MaybeIntercept time
-  bool restart_main_request_;
-  bool cancel_main_request_;
-  bool cancel_then_restart_main_request_;
-  bool simulate_main_network_error_;
-
-  // Whether to intercept redirects, and if so the response to return.
-  bool intercept_redirect_;
-  std::string redirect_headers_;
-  std::string redirect_data_;
-
-  // Other actions we can take at MaybeInterceptRedirect time
-  bool cancel_redirect_request_;
-
-  // Whether to intercept final response, and if so the response to return.
-  bool intercept_final_response_;
-  std::string final_headers_;
-  std::string final_data_;
-
-  // Other actions we can take at MaybeInterceptResponse time
-  bool cancel_final_request_;
-
-  // If we did something or not
-  bool did_intercept_main_;
-  bool did_restart_main_;
-  bool did_cancel_main_;
-  bool did_cancel_then_restart_main_;
-  bool did_simulate_error_main_;
-  bool did_intercept_redirect_;
-  bool did_cancel_redirect_;
-  bool did_intercept_final_;
-  bool did_cancel_final_;
-
-  // Static getters for canned response header and data strings
-
-  static std::string ok_data() {
-    return URLRequestTestJob::test_data_1();
-  }
-
-  static std::string ok_headers() {
-    return URLRequestTestJob::test_headers();
-  }
-
-  static std::string redirect_data() {
-    return std::string();
-  }
-
-  static std::string redirect_headers() {
-    return URLRequestTestJob::test_redirect_headers();
-  }
-
-  static std::string error_data() {
-    return std::string("ohhh nooooo mr. bill!");
-  }
-
-  static std::string error_headers() {
-    return URLRequestTestJob::test_error_headers();
-  }
-};
-
-TEST_F(URLRequestTest, Intercept) {
-  TestInterceptor interceptor;
-
-  // intercept the main request and respond with a simple response
-  interceptor.intercept_main_request_ = true;
-  interceptor.main_headers_ = TestInterceptor::ok_headers();
-  interceptor.main_data_ = TestInterceptor::ok_data();
-
-  TestDelegate d;
-  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
-  base::SupportsUserData::Data* user_data0 = new base::SupportsUserData::Data();
-  base::SupportsUserData::Data* user_data1 = new base::SupportsUserData::Data();
-  base::SupportsUserData::Data* user_data2 = new base::SupportsUserData::Data();
-  req.SetUserData(NULL, user_data0);
-  req.SetUserData(&user_data1, user_data1);
-  req.SetUserData(&user_data2, user_data2);
-  req.set_method("GET");
-  req.Start();
-  MessageLoop::current()->Run();
-
-  // Make sure we can retrieve our specific user data
-  EXPECT_EQ(user_data0, req.GetUserData(NULL));
-  EXPECT_EQ(user_data1, req.GetUserData(&user_data1));
-  EXPECT_EQ(user_data2, req.GetUserData(&user_data2));
-
-  // Check the interceptor got called as expected
-  EXPECT_TRUE(interceptor.did_intercept_main_);
-
-  // Check we got one good response
-  EXPECT_TRUE(req.status().is_success());
-  EXPECT_EQ(200, req.response_headers()->response_code());
-  EXPECT_EQ(TestInterceptor::ok_data(), d.data_received());
-  EXPECT_EQ(1, d.response_started_count());
-  EXPECT_EQ(0, d.received_redirect_count());
-}
-
-TEST_F(URLRequestTest, InterceptRedirect) {
-  TestInterceptor interceptor;
-
-  // intercept the main request and respond with a redirect
-  interceptor.intercept_main_request_ = true;
-  interceptor.main_headers_ = TestInterceptor::redirect_headers();
-  interceptor.main_data_ = TestInterceptor::redirect_data();
-
-  // intercept that redirect and respond a final OK response
-  interceptor.intercept_redirect_ = true;
-  interceptor.redirect_headers_ =  TestInterceptor::ok_headers();
-  interceptor.redirect_data_ = TestInterceptor::ok_data();
-
-  TestDelegate d;
-  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
-  req.set_method("GET");
-  req.Start();
-  MessageLoop::current()->Run();
-
-  // Check the interceptor got called as expected
-  EXPECT_TRUE(interceptor.did_intercept_main_);
-  EXPECT_TRUE(interceptor.did_intercept_redirect_);
-
-  // Check we got one good response
-  EXPECT_TRUE(req.status().is_success());
-  if (req.status().is_success()) {
-    EXPECT_EQ(200, req.response_headers()->response_code());
-  }
-  EXPECT_EQ(TestInterceptor::ok_data(), d.data_received());
-  EXPECT_EQ(1, d.response_started_count());
-  EXPECT_EQ(0, d.received_redirect_count());
-}
-
-TEST_F(URLRequestTest, InterceptServerError) {
-  TestInterceptor interceptor;
-
-  // intercept the main request to generate a server error response
-  interceptor.intercept_main_request_ = true;
-  interceptor.main_headers_ = TestInterceptor::error_headers();
-  interceptor.main_data_ = TestInterceptor::error_data();
-
-  // intercept that error and respond with an OK response
-  interceptor.intercept_final_response_ = true;
-  interceptor.final_headers_ = TestInterceptor::ok_headers();
-  interceptor.final_data_ = TestInterceptor::ok_data();
-
-  TestDelegate d;
-  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
-  req.set_method("GET");
-  req.Start();
-  MessageLoop::current()->Run();
-
-  // Check the interceptor got called as expected
-  EXPECT_TRUE(interceptor.did_intercept_main_);
-  EXPECT_TRUE(interceptor.did_intercept_final_);
-
-  // Check we got one good response
-  EXPECT_TRUE(req.status().is_success());
-  EXPECT_EQ(200, req.response_headers()->response_code());
-  EXPECT_EQ(TestInterceptor::ok_data(), d.data_received());
-  EXPECT_EQ(1, d.response_started_count());
-  EXPECT_EQ(0, d.received_redirect_count());
-}
-
-TEST_F(URLRequestTest, InterceptNetworkError) {
-  TestInterceptor interceptor;
-
-  // intercept the main request to simulate a network error
-  interceptor.simulate_main_network_error_ = true;
-
-  // intercept that error and respond with an OK response
-  interceptor.intercept_final_response_ = true;
-  interceptor.final_headers_ = TestInterceptor::ok_headers();
-  interceptor.final_data_ = TestInterceptor::ok_data();
-
-  TestDelegate d;
-  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
-  req.set_method("GET");
-  req.Start();
-  MessageLoop::current()->Run();
-
-  // Check the interceptor got called as expected
-  EXPECT_TRUE(interceptor.did_simulate_error_main_);
-  EXPECT_TRUE(interceptor.did_intercept_final_);
-
-  // Check we received one good response
-  EXPECT_TRUE(req.status().is_success());
-  EXPECT_EQ(200, req.response_headers()->response_code());
-  EXPECT_EQ(TestInterceptor::ok_data(), d.data_received());
-  EXPECT_EQ(1, d.response_started_count());
-  EXPECT_EQ(0, d.received_redirect_count());
-}
-
-TEST_F(URLRequestTest, InterceptRestartRequired) {
-  TestInterceptor interceptor;
-
-  // restart the main request
-  interceptor.restart_main_request_ = true;
-
-  // then intercept the new main request and respond with an OK response
-  interceptor.intercept_main_request_ = true;
-  interceptor.main_headers_ = TestInterceptor::ok_headers();
-  interceptor.main_data_ = TestInterceptor::ok_data();
-
-  TestDelegate d;
-  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
-  req.set_method("GET");
-  req.Start();
-  MessageLoop::current()->Run();
-
-  // Check the interceptor got called as expected
-  EXPECT_TRUE(interceptor.did_restart_main_);
-  EXPECT_TRUE(interceptor.did_intercept_main_);
-
-  // Check we received one good response
-  EXPECT_TRUE(req.status().is_success());
-  if (req.status().is_success()) {
-    EXPECT_EQ(200, req.response_headers()->response_code());
-  }
-  EXPECT_EQ(TestInterceptor::ok_data(), d.data_received());
-  EXPECT_EQ(1, d.response_started_count());
-  EXPECT_EQ(0, d.received_redirect_count());
-}
-
-TEST_F(URLRequestTest, InterceptRespectsCancelMain) {
-  TestInterceptor interceptor;
-
-  // intercept the main request and cancel from within the restarted job
-  interceptor.cancel_main_request_ = true;
-
-  // setup to intercept final response and override it with an OK response
-  interceptor.intercept_final_response_ = true;
-  interceptor.final_headers_ = TestInterceptor::ok_headers();
-  interceptor.final_data_ = TestInterceptor::ok_data();
-
-  TestDelegate d;
-  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
-  req.set_method("GET");
-  req.Start();
-  MessageLoop::current()->Run();
-
-  // Check the interceptor got called as expected
-  EXPECT_TRUE(interceptor.did_cancel_main_);
-  EXPECT_FALSE(interceptor.did_intercept_final_);
-
-  // Check we see a canceled request
-  EXPECT_FALSE(req.status().is_success());
-  EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
-}
-
-TEST_F(URLRequestTest, InterceptRespectsCancelRedirect) {
-  TestInterceptor interceptor;
-
-  // intercept the main request and respond with a redirect
-  interceptor.intercept_main_request_ = true;
-  interceptor.main_headers_ = TestInterceptor::redirect_headers();
-  interceptor.main_data_ = TestInterceptor::redirect_data();
-
-  // intercept the redirect and cancel from within that job
-  interceptor.cancel_redirect_request_ = true;
-
-  // setup to intercept final response and override it with an OK response
-  interceptor.intercept_final_response_ = true;
-  interceptor.final_headers_ = TestInterceptor::ok_headers();
-  interceptor.final_data_ = TestInterceptor::ok_data();
-
-  TestDelegate d;
-  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
-  req.set_method("GET");
-  req.Start();
-  MessageLoop::current()->Run();
-
-  // Check the interceptor got called as expected
-  EXPECT_TRUE(interceptor.did_intercept_main_);
-  EXPECT_TRUE(interceptor.did_cancel_redirect_);
-  EXPECT_FALSE(interceptor.did_intercept_final_);
-
-  // Check we see a canceled request
-  EXPECT_FALSE(req.status().is_success());
-  EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
-}
-
-TEST_F(URLRequestTest, InterceptRespectsCancelFinal) {
-  TestInterceptor interceptor;
-
-  // intercept the main request to simulate a network error
-  interceptor.simulate_main_network_error_ = true;
-
-  // setup to intercept final response and cancel from within that job
-  interceptor.cancel_final_request_ = true;
-
-  TestDelegate d;
-  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
-  req.set_method("GET");
-  req.Start();
-  MessageLoop::current()->Run();
-
-  // Check the interceptor got called as expected
-  EXPECT_TRUE(interceptor.did_simulate_error_main_);
-  EXPECT_TRUE(interceptor.did_cancel_final_);
-
-  // Check we see a canceled request
-  EXPECT_FALSE(req.status().is_success());
-  EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
-}
-
-TEST_F(URLRequestTest, InterceptRespectsCancelInRestart) {
-  TestInterceptor interceptor;
-
-  // intercept the main request and cancel then restart from within that job
-  interceptor.cancel_then_restart_main_request_ = true;
-
-  // setup to intercept final response and override it with an OK response
-  interceptor.intercept_final_response_ = true;
-  interceptor.final_headers_ = TestInterceptor::ok_headers();
-  interceptor.final_data_ = TestInterceptor::ok_data();
-
-  TestDelegate d;
-  URLRequest req(GURL("http://test_intercept/foo"), &d, &default_context_);
-  req.set_method("GET");
-  req.Start();
-  MessageLoop::current()->Run();
-
-  // Check the interceptor got called as expected
-  EXPECT_TRUE(interceptor.did_cancel_then_restart_main_);
-  EXPECT_FALSE(interceptor.did_intercept_final_);
-
-  // Check we see a canceled request
-  EXPECT_FALSE(req.status().is_success());
-  EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
-}
-
-// Check that two different URL requests have different identifiers.
-TEST_F(URLRequestTest, Identifiers) {
-  TestDelegate d;
-  TestURLRequestContext context;
-  TestURLRequest req(GURL("http://example.com"), &d, &context);
-  TestURLRequest other_req(GURL("http://example.com"), &d, &context);
-
-  ASSERT_NE(req.identifier(), other_req.identifier());
-}
-
-// Check that a failure to connect to the proxy is reported to the network
-// delegate.
-TEST_F(URLRequestTest, NetworkDelegateProxyError) {
-  MockHostResolver host_resolver;
-  host_resolver.rules()->AddSimulatedFailure("*");
+// Check that default A-L header is sent.
+TEST_F(URLRequestTestHTTP, DefaultAcceptLanguage) {
+  ASSERT_TRUE(test_server_.Start());
 
   TestNetworkDelegate network_delegate;  // must outlive URLRequests
-  TestURLRequestContextWithProxy context("myproxy:70", &network_delegate);
+  TestURLRequestContext context(true);
+  context.set_network_delegate(&network_delegate);
+  context.set_accept_language("en");
+  context.Init();
 
   TestDelegate d;
-  URLRequest req(GURL("http://example.com"), &d, &context);
-  req.set_method("GET");
-
+  URLRequest req(
+      test_server_.GetURL("echoheader?Accept-Language"), &d, &context);
   req.Start();
   MessageLoop::current()->Run();
-
-  // Check we see a failed request.
-  EXPECT_FALSE(req.status().is_success());
-  EXPECT_EQ(URLRequestStatus::FAILED, req.status().status());
-  EXPECT_EQ(ERR_PROXY_CONNECTION_FAILED, req.status().error());
-
-  EXPECT_EQ(1, network_delegate.error_count());
-  EXPECT_EQ(ERR_PROXY_CONNECTION_FAILED, network_delegate.last_error());
-  EXPECT_EQ(1, network_delegate.completed_requests());
+  EXPECT_EQ("en", d.data_received());
 }
 
-// Check that it is impossible to change the referrer in the extra headers of
-// an URLRequest.
-TEST_F(URLRequestTest, DoNotOverrideReferrer) {
-  LocalHttpTestServer test_server;
+// Check that an empty A-L header is not sent. http://crbug.com/77365.
+TEST_F(URLRequestTestHTTP, EmptyAcceptLanguage) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestNetworkDelegate network_delegate;  // must outlive URLRequests
+  TestURLRequestContext context(true);
+  context.set_network_delegate(&network_delegate);
+  context.Init();
+  // We override the language after initialization because empty entries
+  // get overridden by Init().
+  context.set_accept_language("");
+
+  TestDelegate d;
+  URLRequest req(
+      test_server_.GetURL("echoheader?Accept-Language"), &d, &context);
+  req.Start();
+  MessageLoop::current()->Run();
+  EXPECT_EQ("None", d.data_received());
+}
+
+// Check that if request overrides the A-L header, the default is not appended.
+// See http://crbug.com/20894
+TEST_F(URLRequestTestHTTP, OverrideAcceptLanguage) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestDelegate d;
+  URLRequest req(test_server_.GetURL("echoheader?Accept-Language"),
+                 &d,
+                 &default_context_);
+  HttpRequestHeaders headers;
+  headers.SetHeader(HttpRequestHeaders::kAcceptLanguage, "ru");
+  req.SetExtraRequestHeaders(headers);
+  req.Start();
+  MessageLoop::current()->Run();
+  EXPECT_EQ(std::string("ru"), d.data_received());
+}
+
+// Check that default A-E header is sent.
+TEST_F(URLRequestTestHTTP, DefaultAcceptEncoding) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestDelegate d;
+  URLRequest req(test_server_.GetURL("echoheader?Accept-Encoding"),
+                 &d,
+                 &default_context_);
+  HttpRequestHeaders headers;
+  req.SetExtraRequestHeaders(headers);
+  req.Start();
+  MessageLoop::current()->Run();
+  EXPECT_TRUE(ContainsString(d.data_received(), "gzip"));
+}
+
+// Check that if request overrides the A-E header, the default is not appended.
+// See http://crbug.com/47381
+TEST_F(URLRequestTestHTTP, OverrideAcceptEncoding) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestDelegate d;
+  URLRequest req(test_server_.GetURL("echoheader?Accept-Encoding"),
+                 &d,
+                 &default_context_);
+  HttpRequestHeaders headers;
+  headers.SetHeader(HttpRequestHeaders::kAcceptEncoding, "identity");
+  req.SetExtraRequestHeaders(headers);
+  req.Start();
+  MessageLoop::current()->Run();
+  EXPECT_FALSE(ContainsString(d.data_received(), "gzip"));
+  EXPECT_TRUE(ContainsString(d.data_received(), "identity"));
+}
+
+// Check that default A-C header is sent.
+TEST_F(URLRequestTestHTTP, DefaultAcceptCharset) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestNetworkDelegate network_delegate;  // must outlive URLRequests
+  TestURLRequestContext context(true);
+  context.set_network_delegate(&network_delegate);
+  context.set_accept_charset("en");
+  context.Init();
+
+  TestDelegate d;
+  URLRequest req(test_server_.GetURL("echoheader?Accept-Charset"),
+                 &d,
+                 &context);
+  req.Start();
+  MessageLoop::current()->Run();
+  EXPECT_EQ("en", d.data_received());
+}
+
+// Check that an empty A-C header is not sent. http://crbug.com/77365.
+TEST_F(URLRequestTestHTTP, EmptyAcceptCharset) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestNetworkDelegate network_delegate;  // must outlive URLRequests
+  TestURLRequestContext context(true);
+  context.set_network_delegate(&network_delegate);
+  context.Init();
+  // We override the accepted charset after initialization because empty
+  // entries get overridden otherwise.
+  context.set_accept_charset("");
+
+  TestDelegate d;
+  URLRequest req(test_server_.GetURL("echoheader?Accept-Charset"),
+                 &d,
+                 &context);
+  req.Start();
+  MessageLoop::current()->Run();
+  EXPECT_EQ("None", d.data_received());
+}
+
+// Check that if request overrides the A-C header, the default is not appended.
+// See http://crbug.com/20894
+TEST_F(URLRequestTestHTTP, OverrideAcceptCharset) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestDelegate d;
+  URLRequest req(test_server_.GetURL("echoheader?Accept-Charset"),
+                 &d,
+                 &default_context_);
+  HttpRequestHeaders headers;
+  headers.SetHeader(HttpRequestHeaders::kAcceptCharset, "koi-8r");
+  req.SetExtraRequestHeaders(headers);
+  req.Start();
+  MessageLoop::current()->Run();
+  EXPECT_EQ(std::string("koi-8r"), d.data_received());
+}
+
+// Check that default User-Agent header is sent.
+TEST_F(URLRequestTestHTTP, DefaultUserAgent) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestDelegate d;
+  URLRequest req(test_server_.GetURL("echoheader?User-Agent"),
+                 &d,
+                 &default_context_);
+  req.Start();
+  MessageLoop::current()->Run();
+  EXPECT_EQ(req.context()->GetUserAgent(req.url()), d.data_received());
+}
+
+// Check that if request overrides the User-Agent header,
+// the default is not appended.
+TEST_F(URLRequestTestHTTP, OverrideUserAgent) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestDelegate d;
+  URLRequest req(test_server_.GetURL("echoheader?User-Agent"),
+                 &d,
+                 &default_context_);
+  HttpRequestHeaders headers;
+  headers.SetHeader(HttpRequestHeaders::kUserAgent, "Lynx (textmode)");
+  req.SetExtraRequestHeaders(headers);
+  req.Start();
+  MessageLoop::current()->Run();
+  // If the net tests are being run with ChromeFrame then we need to allow for
+  // the 'chromeframe' suffix which is added to the user agent before the
+  // closing parentheses.
+  EXPECT_TRUE(StartsWithASCII(d.data_received(), "Lynx (textmode", true));
+}
+
+class HTTPSRequestTest : public testing::Test {
+ public:
+  HTTPSRequestTest() : default_context_(true) {
+    default_context_.set_network_delegate(&default_network_delegate_);
+    default_context_.Init();
+  }
+  virtual ~HTTPSRequestTest() {}
+
+ protected:
+  TestNetworkDelegate default_network_delegate_;  // must outlive URLRequest
+  TestURLRequestContext default_context_;
+};
+
+// This test was disabled because it made chrome_frame_net_tests hang
+// (see bug 102991).
+TEST_F(HTTPSRequestTest, DISABLED_HTTPSGetTest) {
+  TestServer test_server(TestServer::TYPE_HTTPS,
+                         TestServer::kLocalhost,
+                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
   ASSERT_TRUE(test_server.Start());
 
-  // If extra headers contain referer and the request contains a referer,
-  // only the latter shall be respected.
-  {
-    TestDelegate d;
-    URLRequest req(
-        test_server.GetURL("echoheader?Referer"), &d, &default_context_);
-    req.set_referrer("http://foo.com/");
-
-    HttpRequestHeaders headers;
-    headers.SetHeader(HttpRequestHeaders::kReferer, "http://bar.com/");
-    req.SetExtraRequestHeaders(headers);
-
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_EQ("http://foo.com/", d.data_received());
-  }
-
-  // If extra headers contain a referer but the request does not, no referer
-  // shall be sent in the header.
-  {
-    TestDelegate d;
-    URLRequest req(
-        test_server.GetURL("echoheader?Referer"), &d, &default_context_);
-
-    HttpRequestHeaders headers;
-    headers.SetHeader(HttpRequestHeaders::kReferer, "http://bar.com/");
-    req.SetExtraRequestHeaders(headers);
-    req.set_load_flags(LOAD_VALIDATE_CACHE);
-
-    req.Start();
-    MessageLoop::current()->Run();
-
-    EXPECT_EQ("None", d.data_received());
-  }
-}
-
-// Make sure that net::NetworkDelegate::NotifyCompleted is called if
-// content is empty.
-TEST_F(URLRequestTest, RequestCompletionForEmptyResponse) {
   TestDelegate d;
-  URLRequest req(GURL("data:,"), &d, &default_context_);
-  req.Start();
-  MessageLoop::current()->Run();
-  EXPECT_EQ("", d.data_received());
-  EXPECT_EQ(1, default_network_delegate_.completed_requests());
+  {
+    URLRequest r(test_server.GetURL(""), &d, &default_context_);
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(1, d.response_started_count());
+    EXPECT_FALSE(d.received_data_before_response());
+    EXPECT_NE(0, d.bytes_received());
+    CheckSSLInfo(r.ssl_info());
+    EXPECT_EQ(test_server.host_port_pair().host(),
+              r.GetSocketAddress().host());
+    EXPECT_EQ(test_server.host_port_pair().port(),
+              r.GetSocketAddress().port());
+  }
 }
 
+TEST_F(HTTPSRequestTest, HTTPSMismatchedTest) {
+  TestServer::SSLOptions ssl_options(
+      TestServer::SSLOptions::CERT_MISMATCHED_NAME);
+  TestServer test_server(TestServer::TYPE_HTTPS,
+                         ssl_options,
+                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
+  ASSERT_TRUE(test_server.Start());
+
+  bool err_allowed = true;
+  for (int i = 0; i < 2 ; i++, err_allowed = !err_allowed) {
+    TestDelegate d;
+    {
+      d.set_allow_certificate_errors(err_allowed);
+      URLRequest r(test_server.GetURL(""), &d, &default_context_);
+
+      r.Start();
+      EXPECT_TRUE(r.is_pending());
+
+      MessageLoop::current()->Run();
+
+      EXPECT_EQ(1, d.response_started_count());
+      EXPECT_FALSE(d.received_data_before_response());
+      EXPECT_TRUE(d.have_certificate_errors());
+      if (err_allowed) {
+        EXPECT_NE(0, d.bytes_received());
+        CheckSSLInfo(r.ssl_info());
+      } else {
+        EXPECT_EQ(0, d.bytes_received());
+      }
+    }
+  }
+}
+
+TEST_F(HTTPSRequestTest, HTTPSExpiredTest) {
+  TestServer::SSLOptions ssl_options(
+      TestServer::SSLOptions::CERT_EXPIRED);
+  TestServer test_server(TestServer::TYPE_HTTPS,
+                         ssl_options,
+                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
+  ASSERT_TRUE(test_server.Start());
+
+  // Iterate from false to true, just so that we do the opposite of the
+  // previous test in order to increase test coverage.
+  bool err_allowed = false;
+  for (int i = 0; i < 2 ; i++, err_allowed = !err_allowed) {
+    TestDelegate d;
+    {
+      d.set_allow_certificate_errors(err_allowed);
+      URLRequest r(test_server.GetURL(""), &d, &default_context_);
+
+      r.Start();
+      EXPECT_TRUE(r.is_pending());
+
+      MessageLoop::current()->Run();
+
+      EXPECT_EQ(1, d.response_started_count());
+      EXPECT_FALSE(d.received_data_before_response());
+      EXPECT_TRUE(d.have_certificate_errors());
+      if (err_allowed) {
+        EXPECT_NE(0, d.bytes_received());
+        CheckSSLInfo(r.ssl_info());
+      } else {
+        EXPECT_EQ(0, d.bytes_received());
+      }
+    }
+  }
+}
+
+// Tests TLSv1.1 -> TLSv1 fallback. Verifies that we don't fall back more
+// than necessary.
+TEST_F(HTTPSRequestTest, TLSv1Fallback) {
+  uint16 default_version_max = SSLConfigService::default_version_max();
+  // The OpenSSL library in use may not support TLS 1.1.
+#if !defined(USE_OPENSSL)
+  EXPECT_GT(default_version_max, SSL_PROTOCOL_VERSION_TLS1);
+#endif
+  if (default_version_max <= SSL_PROTOCOL_VERSION_TLS1)
+    return;
+
+  TestServer::SSLOptions ssl_options(
+      TestServer::SSLOptions::CERT_OK);
+  ssl_options.tls_intolerant =
+      TestServer::SSLOptions::TLS_INTOLERANT_TLS1_1;
+  TestServer test_server(TestServer::TYPE_HTTPS,
+                         ssl_options,
+                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
+  ASSERT_TRUE(test_server.Start());
+
+  TestDelegate d;
+  TestURLRequestContext context(true);
+  context.Init();
+  d.set_allow_certificate_errors(true);
+  URLRequest r(test_server.GetURL(""), &d, &context);
+  r.Start();
+
+  MessageLoop::current()->Run();
+
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_NE(0, d.bytes_received());
+  EXPECT_EQ(static_cast<int>(SSL_CONNECTION_VERSION_TLS1),
+            SSLConnectionStatusToVersion(r.ssl_info().connection_status));
+  EXPECT_TRUE(r.ssl_info().connection_status & SSL_CONNECTION_VERSION_FALLBACK);
+}
+
+// This tests that a load of www.google.com with a certificate error sets
+// the |certificate_errors_are_fatal| flag correctly. This flag will cause
+// the interstitial to be fatal.
+TEST_F(HTTPSRequestTest, HTTPSPreloadedHSTSTest) {
+  TestServer::SSLOptions ssl_options(
+      TestServer::SSLOptions::CERT_MISMATCHED_NAME);
+  TestServer test_server(TestServer::TYPE_HTTPS,
+                         ssl_options,
+                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
+  ASSERT_TRUE(test_server.Start());
+
+  // We require that the URL be www.google.com in order to pick up the
+  // preloaded HSTS entries in the TransportSecurityState. This means that we
+  // have to use a MockHostResolver in order to direct www.google.com to the
+  // testserver.
+
+  MockHostResolver host_resolver;
+  host_resolver.rules()->AddRule("www.google.com", "127.0.0.1");
+  TestNetworkDelegate network_delegate;  // must outlive URLRequest
+  TestURLRequestContext context(true);
+  context.set_network_delegate(&network_delegate);
+  context.set_host_resolver(&host_resolver);
+  TransportSecurityState transport_security_state;
+  context.set_transport_security_state(&transport_security_state);
+  context.Init();
+
+  TestDelegate d;
+  URLRequest r(GURL(StringPrintf("https://www.google.com:%d",
+                                 test_server.host_port_pair().port())),
+               &d,
+               &context);
+
+  r.Start();
+  EXPECT_TRUE(r.is_pending());
+
+  MessageLoop::current()->Run();
+
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_FALSE(d.received_data_before_response());
+  EXPECT_TRUE(d.have_certificate_errors());
+  EXPECT_TRUE(d.certificate_errors_are_fatal());
+}
+
+// This tests that cached HTTPS page loads do not cause any updates to the
+// TransportSecurityState.
+TEST_F(HTTPSRequestTest, HTTPSErrorsNoClobberTSSTest) {
+  // The actual problem -- CERT_MISMATCHED_NAME in this case -- doesn't
+  // matter. It just has to be any error.
+  TestServer::SSLOptions ssl_options(
+      TestServer::SSLOptions::CERT_MISMATCHED_NAME);
+  TestServer test_server(TestServer::TYPE_HTTPS,
+                         ssl_options,
+                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
+  ASSERT_TRUE(test_server.Start());
+
+  // We require that the URL be www.google.com in order to pick up the
+  // preloaded and dynamic HSTS and public key pin entries in the
+  // TransportSecurityState. This means that we have to use a
+  // MockHostResolver in order to direct www.google.com to the testserver.
+
+  MockHostResolver host_resolver;
+  host_resolver.rules()->AddRule("www.google.com", "127.0.0.1");
+  TestNetworkDelegate network_delegate;  // must outlive URLRequest
+  TestURLRequestContext context(true);
+  context.set_network_delegate(&network_delegate);
+  context.set_host_resolver(&host_resolver);
+  TransportSecurityState transport_security_state;
+  TransportSecurityState::DomainState domain_state;
+  EXPECT_TRUE(transport_security_state.GetDomainState("www.google.com", true,
+                                                      &domain_state));
+  context.set_transport_security_state(&transport_security_state);
+  context.Init();
+
+  TestDelegate d;
+  URLRequest r(GURL(StringPrintf("https://www.google.com:%d",
+                                 test_server.host_port_pair().port())),
+               &d,
+               &context);
+
+  r.Start();
+  EXPECT_TRUE(r.is_pending());
+
+  MessageLoop::current()->Run();
+
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_FALSE(d.received_data_before_response());
+  EXPECT_TRUE(d.have_certificate_errors());
+  EXPECT_TRUE(d.certificate_errors_are_fatal());
+
+  // Get a fresh copy of the state, and check that it hasn't been updated.
+  TransportSecurityState::DomainState new_domain_state;
+  EXPECT_TRUE(transport_security_state.GetDomainState("www.google.com", true,
+                                                      &new_domain_state));
+  EXPECT_EQ(new_domain_state.upgrade_mode, domain_state.upgrade_mode);
+  EXPECT_EQ(new_domain_state.include_subdomains,
+            domain_state.include_subdomains);
+  EXPECT_TRUE(FingerprintsEqual(new_domain_state.static_spki_hashes,
+                                domain_state.static_spki_hashes));
+  EXPECT_TRUE(FingerprintsEqual(new_domain_state.dynamic_spki_hashes,
+                                domain_state.dynamic_spki_hashes));
+  EXPECT_TRUE(FingerprintsEqual(new_domain_state.bad_static_spki_hashes,
+                                domain_state.bad_static_spki_hashes));
+}
+
+TEST_F(HTTPSRequestTest, SSLv3Fallback) {
+  TestServer::SSLOptions ssl_options(
+      TestServer::SSLOptions::CERT_OK);
+  ssl_options.tls_intolerant = TestServer::SSLOptions::TLS_INTOLERANT_ALL;
+  TestServer test_server(TestServer::TYPE_HTTPS,
+                         ssl_options,
+                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
+  ASSERT_TRUE(test_server.Start());
+
+  TestDelegate d;
+  TestURLRequestContext context(true);
+  context.Init();
+  d.set_allow_certificate_errors(true);
+  URLRequest r(test_server.GetURL(""), &d, &context);
+  r.Start();
+
+  MessageLoop::current()->Run();
+
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_NE(0, d.bytes_received());
+  EXPECT_EQ(static_cast<int>(SSL_CONNECTION_VERSION_SSL3),
+            SSLConnectionStatusToVersion(r.ssl_info().connection_status));
+  EXPECT_TRUE(r.ssl_info().connection_status & SSL_CONNECTION_VERSION_FALLBACK);
+}
+
+namespace {
+
+class SSLClientAuthTestDelegate : public TestDelegate {
+ public:
+  SSLClientAuthTestDelegate() : on_certificate_requested_count_(0) {
+  }
+  virtual void OnCertificateRequested(
+      URLRequest* request,
+      SSLCertRequestInfo* cert_request_info) {
+    on_certificate_requested_count_++;
+    MessageLoop::current()->Quit();
+  }
+  int on_certificate_requested_count() {
+    return on_certificate_requested_count_;
+  }
+ private:
+  int on_certificate_requested_count_;
+};
+
+}  // namespace
+
+// TODO(davidben): Test the rest of the code. Specifically,
+// - Filtering which certificates to select.
+// - Sending a certificate back.
+// - Getting a certificate request in an SSL renegotiation sending the
+//   HTTP request.
+TEST_F(HTTPSRequestTest, ClientAuthTest) {
+  TestServer::SSLOptions ssl_options;
+  ssl_options.request_client_certificate = true;
+  TestServer test_server(TestServer::TYPE_HTTPS,
+                         ssl_options,
+                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
+  ASSERT_TRUE(test_server.Start());
+
+  SSLClientAuthTestDelegate d;
+  {
+    URLRequest r(test_server.GetURL(""), &d, &default_context_);
+
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(1, d.on_certificate_requested_count());
+    EXPECT_FALSE(d.received_data_before_response());
+    EXPECT_EQ(0, d.bytes_received());
+
+    // Send no certificate.
+    // TODO(davidben): Get temporary client cert import (with keys) working on
+    // all platforms so we can test sending a cert as well.
+    r.ContinueWithCertificate(NULL);
+
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(1, d.response_started_count());
+    EXPECT_FALSE(d.received_data_before_response());
+    EXPECT_NE(0, d.bytes_received());
+  }
+}
+
+TEST_F(HTTPSRequestTest, ResumeTest) {
+  // Test that we attempt a session resume when making two connections to the
+  // same host.
+  TestServer::SSLOptions ssl_options;
+  ssl_options.record_resume = true;
+  TestServer test_server(TestServer::TYPE_HTTPS,
+                         ssl_options,
+                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
+  ASSERT_TRUE(test_server.Start());
+
+  SSLClientSocket::ClearSessionCache();
+
+  {
+    TestDelegate d;
+    URLRequest r(
+        test_server.GetURL("ssl-session-cache"), &d, &default_context_);
+
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(1, d.response_started_count());
+  }
+
+  reinterpret_cast<HttpCache*>(default_context_.http_transaction_factory())->
+    CloseAllConnections();
+
+  {
+    TestDelegate d;
+    URLRequest r(
+        test_server.GetURL("ssl-session-cache"), &d, &default_context_);
+
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    // The response will look like;
+    //   insert abc
+    //   lookup abc
+    //   insert xyz
+    //
+    // With a newline at the end which makes the split think that there are
+    // four lines.
+
+    EXPECT_EQ(1, d.response_started_count());
+    std::vector<std::string> lines;
+    base::SplitString(d.data_received(), '\n', &lines);
+    ASSERT_EQ(4u, lines.size()) << d.data_received();
+
+    std::string session_id;
+
+    for (size_t i = 0; i < 2; i++) {
+      std::vector<std::string> parts;
+      base::SplitString(lines[i], '\t', &parts);
+      ASSERT_EQ(2u, parts.size());
+      if (i == 0) {
+        EXPECT_EQ("insert", parts[0]);
+        session_id = parts[1];
+      } else {
+        EXPECT_EQ("lookup", parts[0]);
+        EXPECT_EQ(session_id, parts[1]);
+      }
+    }
+  }
+}
+
+TEST_F(HTTPSRequestTest, SSLSessionCacheShardTest) {
+  // Test that sessions aren't resumed when the value of ssl_session_cache_shard
+  // differs.
+  TestServer::SSLOptions ssl_options;
+  ssl_options.record_resume = true;
+  TestServer test_server(TestServer::TYPE_HTTPS,
+                         ssl_options,
+                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
+  ASSERT_TRUE(test_server.Start());
+
+  SSLClientSocket::ClearSessionCache();
+
+  {
+    TestDelegate d;
+    URLRequest r(
+        test_server.GetURL("ssl-session-cache"), &d, &default_context_);
+
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(1, d.response_started_count());
+  }
+
+  // Now create a new HttpCache with a different ssl_session_cache_shard value.
+  HttpNetworkSession::Params params;
+  params.host_resolver = default_context_.host_resolver();
+  params.cert_verifier = default_context_.cert_verifier();
+  params.proxy_service = default_context_.proxy_service();
+  params.ssl_config_service = default_context_.ssl_config_service();
+  params.http_auth_handler_factory =
+      default_context_.http_auth_handler_factory();
+  params.network_delegate = default_context_.network_delegate();
+  params.http_server_properties = default_context_.http_server_properties();
+  params.ssl_session_cache_shard = "alternate";
+
+  scoped_ptr<net::HttpCache> cache(new net::HttpCache(
+      new net::HttpNetworkSession(params),
+      net::HttpCache::DefaultBackend::InMemory(0)));
+
+  default_context_.set_http_transaction_factory(cache.get());
+
+  {
+    TestDelegate d;
+    URLRequest r(
+        test_server.GetURL("ssl-session-cache"), &d, &default_context_);
+
+    r.Start();
+    EXPECT_TRUE(r.is_pending());
+
+    MessageLoop::current()->Run();
+
+    // The response will look like;
+    //   insert abc
+    //   insert xyz
+    //
+    // With a newline at the end which makes the split think that there are
+    // three lines.
+
+    EXPECT_EQ(1, d.response_started_count());
+    std::vector<std::string> lines;
+    base::SplitString(d.data_received(), '\n', &lines);
+    ASSERT_EQ(3u, lines.size());
+
+    std::string session_id;
+    for (size_t i = 0; i < 2; i++) {
+      std::vector<std::string> parts;
+      base::SplitString(lines[i], '\t', &parts);
+      ASSERT_EQ(2u, parts.size());
+      EXPECT_EQ("insert", parts[0]);
+      if (i == 0) {
+        session_id = parts[1];
+      } else {
+        EXPECT_NE(session_id, parts[1]);
+      }
+    }
+  }
+}
+
+class TestSSLConfigService : public SSLConfigService {
+ public:
+  TestSSLConfigService(bool ev_enabled, bool online_rev_checking)
+      : ev_enabled_(ev_enabled),
+        online_rev_checking_(online_rev_checking) {
+  }
+
+  // SSLConfigService:
+  virtual void GetSSLConfig(SSLConfig* config) OVERRIDE {
+    *config = SSLConfig();
+    config->rev_checking_enabled = online_rev_checking_;
+    config->verify_ev_cert = ev_enabled_;
+  }
+
+ protected:
+  virtual ~TestSSLConfigService() {}
+
+ private:
+  const bool ev_enabled_;
+  const bool online_rev_checking_;
+};
+
+// This the fingerprint of the "Testing CA" certificate used by the testserver.
+// See net/data/ssl/certificates/ocsp-test-root.pem.
+static const SHA1HashValue kOCSPTestCertFingerprint =
+  { { 0xf1, 0xad, 0xf6, 0xce, 0x42, 0xac, 0xe7, 0xb4, 0xf4, 0x24,
+      0xdb, 0x1a, 0xf7, 0xa0, 0x9f, 0x09, 0xa1, 0xea, 0xf1, 0x5c } };
+
+// This is the policy OID contained in the certificates that testserver
+// generates.
+static const char kOCSPTestCertPolicy[] = "1.3.6.1.4.1.11129.2.4.1";
+
+class HTTPSOCSPTest : public HTTPSRequestTest {
+ public:
+  HTTPSOCSPTest()
+      : context_(true),
+        ev_test_policy_(
+            new ScopedTestEVPolicy(EVRootCAMetadata::GetInstance(),
+                                   kOCSPTestCertFingerprint,
+                                   kOCSPTestCertPolicy)) {
+  }
+
+  virtual void SetUp() OVERRIDE {
+    SetupContext(&context_);
+    context_.Init();
+
+    scoped_refptr<net::X509Certificate> root_cert =
+      ImportCertFromFile(GetTestCertsDirectory(), "ocsp-test-root.pem");
+    CHECK_NE(static_cast<X509Certificate*>(NULL), root_cert);
+    test_root_.reset(new ScopedTestRoot(root_cert));
+
+#if defined(USE_NSS)
+    SetURLRequestContextForNSSHttpIO(&context_);
+    EnsureNSSHttpIOInit();
+#endif
+  }
+
+  void DoConnection(const TestServer::SSLOptions& ssl_options,
+                    CertStatus* out_cert_status) {
+    TestServer test_server(TestServer::TYPE_HTTPS,
+                           ssl_options,
+                           FilePath(FILE_PATH_LITERAL("net/data/ssl")));
+    ASSERT_TRUE(test_server.Start());
+
+    TestDelegate d;
+    d.set_allow_certificate_errors(true);
+    URLRequest r(test_server.GetURL(""), &d, &context_);
+    r.Start();
+
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(1, d.response_started_count());
+    *out_cert_status = r.ssl_info().cert_status;
+  }
+
+  ~HTTPSOCSPTest() {
+#if defined(USE_NSS)
+    ShutdownNSSHttpIO();
+#endif
+  }
+
+ protected:
+  // SetupContext configures the URLRequestContext that will be used for making
+  // connetions to testserver. This can be overridden in test subclasses for
+  // different behaviour.
+  virtual void SetupContext(URLRequestContext* context) {
+    context->set_ssl_config_service(
+        new TestSSLConfigService(true /* check for EV */,
+                                 true /* online revocation checking */));
+  }
+
+  scoped_ptr<ScopedTestRoot> test_root_;
+  TestURLRequestContext context_;
+  scoped_ptr<ScopedTestEVPolicy> ev_test_policy_;
+};
+
+static CertStatus ExpectedCertStatusForFailedOnlineRevocationCheck() {
+#if defined(OS_WIN)
+  // Windows can return CERT_STATUS_UNABLE_TO_CHECK_REVOCATION but we don't
+  // have that ability on other platforms.
+  return CERT_STATUS_UNABLE_TO_CHECK_REVOCATION;
+#else
+  return 0;
+#endif
+}
+
+// SystemUsesChromiumEVMetadata returns true iff the current operating system
+// uses Chromium's EV metadata (i.e. EVRootCAMetadata). If it does not, then
+// several tests are effected because our testing EV certificate won't be
+// recognised as EV.
+static bool SystemUsesChromiumEVMetadata() {
+#if defined(USE_OPENSSL)
+  // http://crbug.com/117478 - OpenSSL does not support EV validation.
+  return false;
+#elif defined(OS_MACOSX)
+  // On OS X, we use the system to tell us whether a certificate is EV or not
+  // and the system won't recognise our testing root.
+  return false;
+#else
+  return true;
+#endif
+}
+
+static bool SystemSupportsOCSP() {
+#if defined(USE_OPENSSL)
+  // http://crbug.com/117478 - OpenSSL does not support OCSP.
+  return false;
+#elif defined(OS_WIN)
+  return base::win::GetVersion() >= base::win::VERSION_VISTA;
+#elif defined(OS_ANDROID)
+  // TODO(jnd): http://crbug.com/117478 - EV verification is not yet supported.
+  return false;
+#else
+  return true;
+#endif
+}
+
+TEST_F(HTTPSOCSPTest, Valid) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  TestServer::SSLOptions ssl_options(TestServer::SSLOptions::CERT_AUTO);
+  ssl_options.ocsp_status = TestServer::SSLOptions::OCSP_OK;
+
+  CertStatus cert_status = 0;
+  DoConnection(ssl_options, &cert_status);
+
+  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
+
+  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
+            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
+
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+TEST_F(HTTPSOCSPTest, Revoked) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  TestServer::SSLOptions ssl_options(
+      TestServer::SSLOptions::CERT_AUTO);
+  ssl_options.ocsp_status = TestServer::SSLOptions::OCSP_REVOKED;
+
+  CertStatus cert_status;
+  DoConnection(ssl_options, &cert_status);
+
+#if !defined(OS_MACOSX)
+  // Doesn't pass on OS X yet for reasons that need to be investigated.
+  EXPECT_EQ(CERT_STATUS_REVOKED, cert_status & CERT_STATUS_ALL_ERRORS);
+#endif
+  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+TEST_F(HTTPSOCSPTest, Invalid) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  TestServer::SSLOptions ssl_options(
+      TestServer::SSLOptions::CERT_AUTO);
+  ssl_options.ocsp_status = TestServer::SSLOptions::OCSP_INVALID;
+
+  CertStatus cert_status = 0;
+  DoConnection(ssl_options, &cert_status);
+
+  EXPECT_EQ(ExpectedCertStatusForFailedOnlineRevocationCheck(),
+            cert_status & CERT_STATUS_ALL_ERRORS);
+
+  // Without a positive OCSP response, we shouldn't show the EV status.
+  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+class HTTPSEVCRLSetTest : public HTTPSOCSPTest {
+ protected:
+  virtual void SetupContext(URLRequestContext* context) OVERRIDE {
+    context->set_ssl_config_service(
+        new TestSSLConfigService(true /* check for EV */,
+                                 false /* online revocation checking */));
+  }
+};
+
+TEST_F(HTTPSEVCRLSetTest, MissingCRLSetAndInvalidOCSP) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  TestServer::SSLOptions ssl_options(
+      TestServer::SSLOptions::CERT_AUTO);
+  ssl_options.ocsp_status = TestServer::SSLOptions::OCSP_INVALID;
+  SSLConfigService::SetCRLSet(scoped_refptr<CRLSet>());
+
+  CertStatus cert_status = 0;
+  DoConnection(ssl_options, &cert_status);
+
+  EXPECT_EQ(ExpectedCertStatusForFailedOnlineRevocationCheck(),
+            cert_status & CERT_STATUS_ALL_ERRORS);
+
+  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
+  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
+            static_cast<bool>(cert_status & CERT_STATUS_REV_CHECKING_ENABLED));
+}
+
+TEST_F(HTTPSEVCRLSetTest, MissingCRLSetAndGoodOCSP) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  TestServer::SSLOptions ssl_options(
+      TestServer::SSLOptions::CERT_AUTO);
+  ssl_options.ocsp_status = TestServer::SSLOptions::OCSP_OK;
+  SSLConfigService::SetCRLSet(scoped_refptr<CRLSet>());
+
+  CertStatus cert_status;
+  DoConnection(ssl_options, &cert_status);
+
+  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
+
+  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
+            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
+  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
+            static_cast<bool>(cert_status & CERT_STATUS_REV_CHECKING_ENABLED));
+}
+
+TEST_F(HTTPSEVCRLSetTest, ExpiredCRLSet) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  TestServer::SSLOptions ssl_options(
+      TestServer::SSLOptions::CERT_AUTO);
+  ssl_options.ocsp_status = TestServer::SSLOptions::OCSP_INVALID;
+  SSLConfigService::SetCRLSet(
+      scoped_refptr<CRLSet>(CRLSet::ExpiredCRLSetForTesting()));
+
+  CertStatus cert_status;
+  DoConnection(ssl_options, &cert_status);
+
+  EXPECT_EQ(ExpectedCertStatusForFailedOnlineRevocationCheck(),
+            cert_status & CERT_STATUS_ALL_ERRORS);
+
+  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
+  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
+            static_cast<bool>(cert_status & CERT_STATUS_REV_CHECKING_ENABLED));
+}
+
+TEST_F(HTTPSEVCRLSetTest, FreshCRLSet) {
+  TestServer::SSLOptions ssl_options(
+      TestServer::SSLOptions::CERT_AUTO);
+  ssl_options.ocsp_status = TestServer::SSLOptions::OCSP_INVALID;
+  SSLConfigService::SetCRLSet(
+      scoped_refptr<CRLSet>(CRLSet::EmptyCRLSetForTesting()));
+
+  CertStatus cert_status = 0;
+  DoConnection(ssl_options, &cert_status);
+
+  // With a valid, fresh CRLSet the bad OCSP response shouldn't matter because
+  // we wont check it.
+  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
+
+  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
+            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
+
+  EXPECT_FALSE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+TEST_F(HTTPSEVCRLSetTest, ExpiredCRLSetAndRevokedNonEVCert) {
+  // Test that when EV verification is requested, but online revocation
+  // checking is disabled, and the leaf certificate is not in fact EV, that
+  // no revocation checking actually happens.
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  // Unmark the certificate's OID as EV, which should disable revocation
+  // checking (as per the user preference)
+  ev_test_policy_.reset();
+
+  TestServer::SSLOptions ssl_options(
+      TestServer::SSLOptions::CERT_AUTO);
+  ssl_options.ocsp_status = TestServer::SSLOptions::OCSP_REVOKED;
+  SSLConfigService::SetCRLSet(
+      scoped_refptr<CRLSet>(CRLSet::ExpiredCRLSetForTesting()));
+
+  CertStatus cert_status;
+  DoConnection(ssl_options, &cert_status);
+
+  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
+
+  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
+  EXPECT_FALSE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+class HTTPSCRLSetTest : public HTTPSOCSPTest {
+ protected:
+  virtual void SetupContext(URLRequestContext* context) OVERRIDE {
+    context->set_ssl_config_service(
+        new TestSSLConfigService(false /* check for EV */,
+                                 false /* online revocation checking */));
+  }
+};
+
+TEST_F(HTTPSCRLSetTest, ExpiredCRLSet) {
+  TestServer::SSLOptions ssl_options(
+      TestServer::SSLOptions::CERT_AUTO);
+  ssl_options.ocsp_status = TestServer::SSLOptions::OCSP_INVALID;
+  SSLConfigService::SetCRLSet(
+      scoped_refptr<CRLSet>(CRLSet::ExpiredCRLSetForTesting()));
+
+  CertStatus cert_status = 0;
+  DoConnection(ssl_options, &cert_status);
+
+  // If we're not trying EV verification then, even if the CRLSet has expired,
+  // we don't fall back to online revocation checks.
+  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
+  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
+  EXPECT_FALSE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+#endif  // !defined(OS_IOS)
+
+#if !defined(DISABLE_FTP_SUPPORT)
 class URLRequestTestFTP : public URLRequestTest {
  public:
   URLRequestTestFTP()
@@ -4147,17 +4315,15 @@ class URLRequestTestFTP : public URLRequestTest {
 TEST_F(URLRequestTestFTP, UnsafePort) {
   ASSERT_TRUE(test_server_.Start());
 
-  URLRequestJobFactory job_factory;
+  URLRequestJobFactoryImpl job_factory;
 
   GURL url("ftp://127.0.0.1:7");
   FtpProtocolHandler ftp_protocol_handler(
-      default_context_.network_delegate(),
       default_context_.ftp_transaction_factory(),
       default_context_.ftp_auth_cache());
   job_factory.SetProtocolHandler(
       "ftp",
-      new FtpProtocolHandler(default_context_.network_delegate(),
-                             default_context_.ftp_transaction_factory(),
+      new FtpProtocolHandler(default_context_.ftp_transaction_factory(),
                              default_context_.ftp_auth_cache()));
   default_context_.set_job_factory(&job_factory);
 
@@ -4489,183 +4655,6 @@ TEST_F(URLRequestTestFTP, DISABLED_FTPCacheLoginBoxCredentials) {
     EXPECT_EQ(d->bytes_received(), static_cast<int>(file_size));
   }
 }
-
-// Check that default A-L header is sent.
-TEST_F(URLRequestTestHTTP, DefaultAcceptLanguage) {
-  ASSERT_TRUE(test_server_.Start());
-
-  TestNetworkDelegate network_delegate;  // must outlive URLRequests
-  TestURLRequestContext context(true);
-  context.set_network_delegate(&network_delegate);
-  context.set_accept_language("en");
-  context.Init();
-
-  TestDelegate d;
-  URLRequest req(
-      test_server_.GetURL("echoheader?Accept-Language"), &d, &context);
-  req.Start();
-  MessageLoop::current()->Run();
-  EXPECT_EQ("en", d.data_received());
-}
-
-// Check that an empty A-L header is not sent. http://crbug.com/77365.
-TEST_F(URLRequestTestHTTP, EmptyAcceptLanguage) {
-  ASSERT_TRUE(test_server_.Start());
-
-  TestNetworkDelegate network_delegate;  // must outlive URLRequests
-  TestURLRequestContext context(true);
-  context.set_network_delegate(&network_delegate);
-  context.Init();
-  // We override the language after initialization because empty entries
-  // get overridden by Init().
-  context.set_accept_language("");
-
-  TestDelegate d;
-  URLRequest req(
-      test_server_.GetURL("echoheader?Accept-Language"), &d, &context);
-  req.Start();
-  MessageLoop::current()->Run();
-  EXPECT_EQ("None", d.data_received());
-}
-
-// Check that if request overrides the A-L header, the default is not appended.
-// See http://crbug.com/20894
-TEST_F(URLRequestTestHTTP, OverrideAcceptLanguage) {
-  ASSERT_TRUE(test_server_.Start());
-
-  TestDelegate d;
-  URLRequest req(test_server_.GetURL("echoheader?Accept-Language"),
-                 &d,
-                 &default_context_);
-  HttpRequestHeaders headers;
-  headers.SetHeader(HttpRequestHeaders::kAcceptLanguage, "ru");
-  req.SetExtraRequestHeaders(headers);
-  req.Start();
-  MessageLoop::current()->Run();
-  EXPECT_EQ(std::string("ru"), d.data_received());
-}
-
-// Check that default A-E header is sent.
-TEST_F(URLRequestTestHTTP, DefaultAcceptEncoding) {
-  ASSERT_TRUE(test_server_.Start());
-
-  TestDelegate d;
-  URLRequest req(test_server_.GetURL("echoheader?Accept-Encoding"),
-                 &d,
-                 &default_context_);
-  HttpRequestHeaders headers;
-  req.SetExtraRequestHeaders(headers);
-  req.Start();
-  MessageLoop::current()->Run();
-  EXPECT_TRUE(ContainsString(d.data_received(), "gzip"));
-}
-
-// Check that if request overrides the A-E header, the default is not appended.
-// See http://crbug.com/47381
-TEST_F(URLRequestTestHTTP, OverrideAcceptEncoding) {
-  ASSERT_TRUE(test_server_.Start());
-
-  TestDelegate d;
-  URLRequest req(test_server_.GetURL("echoheader?Accept-Encoding"),
-                 &d,
-                 &default_context_);
-  HttpRequestHeaders headers;
-  headers.SetHeader(HttpRequestHeaders::kAcceptEncoding, "identity");
-  req.SetExtraRequestHeaders(headers);
-  req.Start();
-  MessageLoop::current()->Run();
-  EXPECT_FALSE(ContainsString(d.data_received(), "gzip"));
-  EXPECT_TRUE(ContainsString(d.data_received(), "identity"));
-}
-
-// Check that default A-C header is sent.
-TEST_F(URLRequestTestHTTP, DefaultAcceptCharset) {
-  ASSERT_TRUE(test_server_.Start());
-
-  TestNetworkDelegate network_delegate;  // must outlive URLRequests
-  TestURLRequestContext context(true);
-  context.set_network_delegate(&network_delegate);
-  context.set_accept_charset("en");
-  context.Init();
-
-  TestDelegate d;
-  URLRequest req(test_server_.GetURL("echoheader?Accept-Charset"),
-                 &d,
-                 &context);
-  req.Start();
-  MessageLoop::current()->Run();
-  EXPECT_EQ("en", d.data_received());
-}
-
-// Check that an empty A-C header is not sent. http://crbug.com/77365.
-TEST_F(URLRequestTestHTTP, EmptyAcceptCharset) {
-  ASSERT_TRUE(test_server_.Start());
-
-  TestNetworkDelegate network_delegate;  // must outlive URLRequests
-  TestURLRequestContext context(true);
-  context.set_network_delegate(&network_delegate);
-  context.Init();
-  // We override the accepted charset after initialization because empty
-  // entries get overridden otherwise.
-  context.set_accept_charset("");
-
-  TestDelegate d;
-  URLRequest req(test_server_.GetURL("echoheader?Accept-Charset"),
-                 &d,
-                 &context);
-  req.Start();
-  MessageLoop::current()->Run();
-  EXPECT_EQ("None", d.data_received());
-}
-
-// Check that if request overrides the A-C header, the default is not appended.
-// See http://crbug.com/20894
-TEST_F(URLRequestTestHTTP, OverrideAcceptCharset) {
-  ASSERT_TRUE(test_server_.Start());
-
-  TestDelegate d;
-  URLRequest req(test_server_.GetURL("echoheader?Accept-Charset"),
-                 &d,
-                 &default_context_);
-  HttpRequestHeaders headers;
-  headers.SetHeader(HttpRequestHeaders::kAcceptCharset, "koi-8r");
-  req.SetExtraRequestHeaders(headers);
-  req.Start();
-  MessageLoop::current()->Run();
-  EXPECT_EQ(std::string("koi-8r"), d.data_received());
-}
-
-// Check that default User-Agent header is sent.
-TEST_F(URLRequestTestHTTP, DefaultUserAgent) {
-  ASSERT_TRUE(test_server_.Start());
-
-  TestDelegate d;
-  URLRequest req(test_server_.GetURL("echoheader?User-Agent"),
-                 &d,
-                 &default_context_);
-  req.Start();
-  MessageLoop::current()->Run();
-  EXPECT_EQ(req.context()->GetUserAgent(req.url()), d.data_received());
-}
-
-// Check that if request overrides the User-Agent header,
-// the default is not appended.
-TEST_F(URLRequestTestHTTP, OverrideUserAgent) {
-  ASSERT_TRUE(test_server_.Start());
-
-  TestDelegate d;
-  URLRequest req(test_server_.GetURL("echoheader?User-Agent"),
-                 &d,
-                 &default_context_);
-  HttpRequestHeaders headers;
-  headers.SetHeader(HttpRequestHeaders::kUserAgent, "Lynx (textmode)");
-  req.SetExtraRequestHeaders(headers);
-  req.Start();
-  MessageLoop::current()->Run();
-  // If the net tests are being run with ChromeFrame then we need to allow for
-  // the 'chromeframe' suffix which is added to the user agent before the
-  // closing parentheses.
-  EXPECT_TRUE(StartsWithASCII(d.data_received(), "Lynx (textmode", true));
-}
+#endif  // !defined(DISABLE_FTP_SUPPORT)
 
 }  // namespace net

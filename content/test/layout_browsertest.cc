@@ -4,6 +4,7 @@
 
 #include "content/test/layout_browsertest.h"
 
+#include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
@@ -16,6 +17,7 @@
 #include "content/public/common/content_paths.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/shell/shell.h"
+#include "content/shell/shell_switches.h"
 #include "content/test/content_browser_test_utils.h"
 #include "content/test/layout_test_http_server.h"
 #include "net/base/net_util.h"
@@ -67,7 +69,7 @@ void ScrapeResultFromBrowser(content::Shell* window, std::string* actual_text) {
 
 static const std::string preamble =
       "\n<script>\n"
-      "function LayoutTestController() {\n"
+      "function TestRunner() {\n"
       "  this.wait_until_done_ = false;\n"
       "  this.dumpAsText = function () {};\n"
       "  this.waitUntilDone = function () {\n"
@@ -78,14 +80,13 @@ static const std::string preamble =
       "  }\n"
       "  this.overridePreference = function () {}\n"
       "  this.OnEvent = function () {\n"
-      "    if (!layoutTestController.wait_until_done_)\n"
-      "      layoutTestController.notifyDone();\n"
+      "    if (!testRunner.wait_until_done_)\n"
+      "      testRunner.notifyDone();\n"
       "  }\n"
       "  this.workerThreadCount = 0; \n"
       "}\n"
-      "window.layoutTestController = new LayoutTestController();\n"
-      "window.testRunner = window.layoutTestController;\n"
-      "window.addEventListener('load', layoutTestController.OnEvent, false);\n"
+      "window.testRunner = new TestRunner();\n"
+      "window.addEventListener('load', testRunner.OnEvent, false);\n"
       "</script>";
 
 }
@@ -216,7 +217,13 @@ void InProcessBrowserLayoutTest::RunLayoutTestInternal(
   ReplaceSubstringsAfterOffset(&expected_text, 0, "\r", "");
   TrimString(expected_text, "\n", &expected_text);
 
-  EXPECT_EQ(expected_text, actual_text);
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kOutputLayoutTestDifferences)) {
+    EXPECT_EQ(expected_text, actual_text) <<
+        SaveResults(expected_text, actual_text);
+  } else {
+    EXPECT_EQ(expected_text, actual_text);
+  }
 }
 
 void InProcessBrowserLayoutTest::AddResourceForLayoutTest(
@@ -256,4 +263,21 @@ void InProcessBrowserLayoutTest::WriteModifiedFile(
   ASSERT_TRUE(file_util::WriteFile(*test_path,
                                    &test_html.at(0),
                                    static_cast<int>(test_html.size())));
+}
+
+std::string InProcessBrowserLayoutTest::SaveResults(const std::string& expected,
+                                                    const std::string& actual) {
+  FilePath cwd;
+  EXPECT_TRUE(file_util::CreateNewTempDirectory(FILE_PATH_LITERAL(""), &cwd));
+  FilePath expected_filename = cwd.Append(FILE_PATH_LITERAL("expected.txt"));
+  FilePath actual_filename = cwd.Append(FILE_PATH_LITERAL("actual.txt"));
+  EXPECT_NE(-1, file_util::WriteFile(expected_filename,
+                                     expected.c_str(),
+                                     expected.size()));
+  EXPECT_NE(-1, file_util::WriteFile(actual_filename,
+                                     actual.c_str(),
+                                     actual.size()));
+  return StringPrintf("Wrote %"PRFilePath" %"PRFilePath,
+                      expected_filename.value().c_str(),
+                      actual_filename.value().c_str());
 }

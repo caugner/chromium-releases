@@ -32,11 +32,12 @@
         '../ipc/ipc.gyp:ipc',
         '../media/media.gyp:media',
         '../net/net.gyp:net',
+        '../net/net.gyp:net_resources',
         '../skia/skia.gyp:skia',
-        '<(webkit_src_dir)/Source/WebKit/chromium/WebKit.gyp:webkit',
         '../ui/ui.gyp:ui',
         '../v8/tools/gyp/v8.gyp:v8',
         '../webkit/support/webkit_support.gyp:webkit_support',
+        '<(webkit_src_dir)/Source/WebKit/chromium/WebKit.gyp:webkit',
       ],
       'include_dirs': [
         '..',
@@ -44,12 +45,6 @@
       'sources': [
         'shell/geolocation/shell_access_token_store.cc',
         'shell/geolocation/shell_access_token_store.h',
-        'shell/layout_test_controller.cc',
-        'shell/layout_test_controller.h',
-        'shell/layout_test_controller_bindings.cc',
-        'shell/layout_test_controller_bindings.h',
-        'shell/layout_test_controller_host.cc',
-        'shell/layout_test_controller_host.h',
         'shell/paths_mac.h',
         'shell/paths_mac.mm',
         'shell/shell.cc',
@@ -75,6 +70,7 @@
         'shell/shell_content_renderer_client.cc',
         'shell/shell_content_renderer_client.h',
         'shell/shell_devtools_delegate.cc',
+        'shell/shell_devtools_delegate_android.cc',
         'shell/shell_devtools_delegate.h',
         'shell/shell_download_manager_delegate.cc',
         'shell/shell_download_manager_delegate.h',
@@ -104,6 +100,17 @@
         'shell/shell_switches.h',
         'shell/shell_url_request_context_getter.cc',
         'shell/shell_url_request_context_getter.h',
+        'shell/shell_web_contents_view_delegate_creator.h',
+        'shell/shell_web_contents_view_delegate_gtk.cc',
+        'shell/shell_web_contents_view_delegate_mac.mm',
+        'shell/shell_web_contents_view_delegate_win.cc',
+        'shell/shell_web_contents_view_delegate.h',
+        'shell/webkit_test_runner.cc',
+        'shell/webkit_test_runner.h',
+        'shell/webkit_test_runner_bindings.cc',
+        'shell/webkit_test_runner_bindings.h',
+        'shell/webkit_test_runner_host.cc',
+        'shell/webkit_test_runner_host.h',
       ],
       'msvs_settings': {
         'VCLinkerTool': {
@@ -134,18 +141,21 @@
             },
           },
         }],  # OS=="win"
-        ['OS!="android"', {
-          'dependencies': [
-            # This dependency is for running DRT against the content shell, and
-            # this combination is not yet supported on Android.
-            '../webkit/support/webkit_support.gyp:webkit_support',
-          ],
-        }, {  # else: OS=="android"
+        ['OS=="android"', {
           'dependencies': [
             'content_shell_jni_headers',
           ],
           'include_dirs': [
             '<(SHARED_INTERMEDIATE_DIR)/content/shell',
+          ],
+          'sources!': [
+            'shell/shell_devtools_delegate.cc',
+          ],
+        }, {  # else: OS!="android"
+          'dependencies': [
+            # This dependency is for running DRT against the content shell, and
+            # this combination is not yet supported on Android.
+            '../webkit/support/webkit_support.gyp:webkit_support',
           ],
         }],  # OS=="android"
         ['os_posix==1 and use_aura==1 and linux_use_tcmalloc==1', {
@@ -158,7 +168,9 @@
           'dependencies': [
             '../ui/aura/aura.gyp:aura',
             '../ui/base/strings/ui_strings.gyp:ui_strings',
+            '../ui/views/controls/webview/webview.gyp:webview',
             '../ui/views/views.gyp:views',
+            '../ui/views/views.gyp:test_support_views',
             '../ui/ui.gyp:ui_resources',
           ],
           'sources/': [
@@ -235,7 +247,6 @@
       'dependencies': [
         'browser/debugger/devtools_resources.gyp:devtools_resources',
         'content_shell_resources',
-        '<(DEPTH)/net/net.gyp:net_resources',
         '<(DEPTH)/ui/ui.gyp:ui_resources',
       ],
       'variables': {
@@ -254,7 +265,7 @@
               '<(SHARED_INTERMEDIATE_DIR)/ui/ui_strings/ui_strings_en-US.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/devtools_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.pak',
-              '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources_100_percent.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_strings_en-US.pak',
             ],
           },
@@ -385,7 +396,7 @@
               # Modify the Info.plist as needed.
               'postbuild_name': 'Tweak Info.plist',
               'action': ['../build/mac/tweak_info_plist.py',
-                         '--svn=1'],
+                         '--scm=1'],
             },
             {
               # This postbuid step is responsible for creating the following
@@ -413,6 +424,14 @@
             },
           ],
         }],  # OS=="mac"
+      ],
+    },
+    {
+      'target_name': 'content_shell_builder',
+      'type': 'none',
+      'dependencies': [
+        'content_shell',
+        '<(webkit_src_dir)/Tools/DumpRenderTree/DumpRenderTree.gyp/DumpRenderTree.gyp:DumpRenderTree',
       ],
     },
   ],
@@ -495,14 +514,14 @@
             {
               # Modify the Info.plist as needed.  The script explains why this
               # is needed.  This is also done in the chrome and chrome_dll
-              # targets.  In this case, --breakpad=0, --keystone=0, and --svn=0
-              # are used because Breakpad, Keystone, and Subversion keys are
+              # targets.  In this case, --breakpad=0, --keystone=0, and --scm=0
+              # are used because Breakpad, Keystone, and SCM keys are
               # never placed into the helper.
               'postbuild_name': 'Tweak Info.plist',
               'action': ['../build/mac/tweak_info_plist.py',
                          '--breakpad=0',
                          '--keystone=0',
-                         '--svn=0'],
+                         '--scm=0'],
             },
             {
               # Make sure there isn't any Objective-C in the helper app's
@@ -559,8 +578,6 @@
             '<(SHARED_INTERMEDIATE_DIR)/content/shell',
           ],
           'sources': [
-            'shell/android/draw_context.cc',
-            'shell/android/draw_context.h',
             'shell/android/shell_library_loader.cc',
             'shell/android/shell_library_loader.h',
             'shell/android/shell_manager.cc',
@@ -581,86 +598,38 @@
         {
           'target_name': 'content_shell_apk',
           'type': 'none',
+          'dependencies': [
+            'content_java',
+            '../base/base.gyp:base_java',
+            '../media/media.gyp:media_java',
+            '../net/net.gyp:net_java',
+            '../ui/ui.gyp:ui_java',
+          ],
+          'variables': {
+            'package_name': 'content_shell',
+            'apk_name': 'ContentShell',
+            'java_in_dir': 'shell/android/java',
+            # TODO(cjhopman): The resource directory of all apks should be in
+            # <java_in_dir>/res.
+            'resource_dir': '../res',
+            'native_libs_paths': ['<(PRODUCT_DIR)/content_shell/libs/<(android_app_abi)/libcontent_shell_content_view.so'],
+            'additional_input_paths': ['<(PRODUCT_DIR)/content_shell/assets/content_shell.pak'],
+          },
           'actions': [
-            {
-              'action_name': 'copy_base_jar',
-              'inputs': ['<(PRODUCT_DIR)/lib.java/chromium_base.jar'],
-              'outputs': ['<(PRODUCT_DIR)/content_shell/java/libs/chromium_base.jar'],
-              'action': ['cp', '<@(_inputs)', '<@(_outputs)'],
-            },
-            {
-              'action_name': 'copy_net_jar',
-              'inputs': ['<(PRODUCT_DIR)/lib.java/chromium_net.jar'],
-              'outputs': ['<(PRODUCT_DIR)/content_shell/java/libs/chromium_net.jar'],
-              'action': ['cp', '<@(_inputs)', '<@(_outputs)'],
-            },
-            {
-              'action_name': 'copy_media_jar',
-              'inputs': ['<(PRODUCT_DIR)/lib.java/chromium_media.jar'],
-              'outputs': ['<(PRODUCT_DIR)/content_shell/java/libs/chromium_media.jar'],
-              'action': ['cp', '<@(_inputs)', '<@(_outputs)'],
-            },
-            {
-              'action_name': 'copy_content_jar',
-              'inputs': ['<(PRODUCT_DIR)/lib.java/chromium_content.jar'],
-              'outputs': ['<(PRODUCT_DIR)/content_shell/java/libs/chromium_content.jar'],
-              'action': ['cp', '<@(_inputs)', '<@(_outputs)'],
-            },
             {
               'action_name': 'copy_and_strip_so',
               'inputs': ['<(SHARED_LIB_DIR)/libcontent_shell_content_view.so'],
               'outputs': ['<(PRODUCT_DIR)/content_shell/libs/<(android_app_abi)/libcontent_shell_content_view.so'],
               'action': [
-                '<!(/bin/echo -n $STRIP)',
+                '<(android_strip)',
                 '--strip-unneeded',  # All symbols not needed for relocation.
                 '<@(_inputs)',
                 '-o',
                 '<@(_outputs)',
               ],
             },
-            {
-              'action_name': 'content_shell_apk',
-              'inputs': [
-                'shell/android/java/content_shell_apk.xml',
-                'shell/android/java/AndroidManifest.xml',
-                '<!@(find shell/android/java -name "*.java")',
-                '<!@(find shell/android/res -name "*")',
-                '<(PRODUCT_DIR)/content_shell/java/libs/chromium_base.jar',
-                '<(PRODUCT_DIR)/content_shell/java/libs/chromium_net.jar',
-                '<(PRODUCT_DIR)/content_shell/java/libs/chromium_media.jar',
-                '<(PRODUCT_DIR)/content_shell/java/libs/chromium_content.jar',
-                '<(PRODUCT_DIR)/content_shell/assets/content_shell.pak',
-                '<(PRODUCT_DIR)/content_shell/libs/<(android_app_abi)/libcontent_shell_content_view.so',
-              ],
-              'outputs': [
-                # Awkwardly, we build a Debug APK even when gyp is in
-                # Release mode.  I don't think it matters (e.g. we're
-                # probably happy to not codesign) but naming should be
-                # fixed.
-                '<(PRODUCT_DIR)/content_shell/ContentShell-debug.apk',
-              ],
-              'action': [
-                # Pass the build type to ant. Currently it only assumes
-                # debug mode in java. Release mode will break the current
-                # workflow.
-                # 'shell/content_shell_ant_helper.sh',
-                'ant',
-                '-DPRODUCT_DIR=<(ant_build_out)',
-                '-DAPP_ABI=<(android_app_abi)',
-                '-DANDROID_SDK=<(android_sdk)',
-                '-DANDROID_SDK_ROOT=<(android_sdk_root)',
-                '-DANDROID_SDK_TOOLS=<(android_sdk_tools)',
-                '-DANDROID_SDK_VERSION=<(android_sdk_version)',
-                '-DANDROID_TOOLCHAIN=<(android_toolchain)',
-                '-buildfile',
-                'shell/android/java/content_shell_apk.xml',
-                # '<(CONFIGURATION_NAME)',
-              ],
-              'dependencies': [
-                'content_java',
-              ],
-            }
           ],
+          'includes': [ '../build/java_apk.gypi' ],
         },
       ],
     }],  # OS=="android"

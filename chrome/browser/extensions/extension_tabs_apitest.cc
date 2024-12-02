@@ -32,18 +32,26 @@
 #define MAYBE_UpdateWindowShowState DISABLED_UpdateWindowShowState
 #else
 
-#if defined(USE_AURA)
+#if defined(USE_AURA) || defined(OS_MACOSX)
 // Maximizing/fullscreen popup window doesn't work on aura's managed mode.
 // See bug crbug.com/116305.
+// Mac: http://crbug.com/103912
 #define MAYBE_UpdateWindowShowState DISABLED_UpdateWindowShowState
 #else
 #define MAYBE_UpdateWindowShowState UpdateWindowShowState
-#endif  // defined(USE_AURA)
+#endif  // defined(USE_AURA) || defined(OS_MACOSX)
 
 #define MAYBE_FocusWindowDoesNotExitFullscreen FocusWindowDoesNotExitFullscreen
 #define MAYBE_UpdateWindowSizeExitsFullscreen UpdateWindowSizeExitsFullscreen
 #define MAYBE_UpdateWindowResize UpdateWindowResize
 #endif  // defined(OS_LINUX) && !defined(USE_AURA)
+
+// http://crbug.com/145639
+#if defined(OS_CHROMEOS)
+#define MAYBE_TabEvents DISABLED_TabEvents
+#else
+#define MAYBE_TabEvents TabEvents
+#endif  // defined(OS_CHROMEOS)
 
 class ExtensionApiNewTabTest : public ExtensionApiTest {
  public:
@@ -71,6 +79,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Tabs2) {
   ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "crud2.html")) << message_;
 }
 
+// crbug.com/149924
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FLAKY_TabDuplicate) {
+  ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "duplicate.html")) << message_;
+}
+
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabUpdate) {
   ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "update.html")) << message_;
 }
@@ -83,7 +96,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabMove) {
   ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "move.html")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabEvents) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_TabEvents) {
   ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "events.html")) << message_;
 }
 
@@ -164,6 +177,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, CaptureVisibleNoFile) {
       ExtensionApiTest::kFlagNone)) << message_;
 }
 
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, CaptureVisibleDisabled) {
+  browser()->profile()->GetPrefs()->SetBoolean(prefs::kDisableScreenshots,
+                                               true);
+  ASSERT_TRUE(RunExtensionSubtest("tabs/capture_visible_tab",
+                                  "test_disabled.html")) << message_;
+}
+
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabsOnUpdated) {
   ASSERT_TRUE(RunExtensionTest("tabs/on_updated")) << message_;
 }
@@ -222,6 +242,5 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_GetViewsOfCreatedWindow) {
 }
 
 // Adding a new test? Awesome. But API tests are the old hotness. The
-// new hotness is extension_test_utils. See extension_tabs_test.cc for
-// an example. We are trying to phase out many uses of API tests as
-// they tend to be flaky.
+// new hotness is extension_test_utils. See tabs_test.cc for an example.
+// We are trying to phase out many uses of API tests as they tend to be flaky.

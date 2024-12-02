@@ -32,7 +32,7 @@ class MEDIA_EXPORT Decryptor {
     kDomainError
   };
 
-  enum DecryptStatus {
+  enum Status {
     kSuccess,  // Decryption successfully completed. Decrypted buffer ready.
     kNoKey,  // No key is available to decrypt.
     kError  // Key is available but an error occurred during decryption.
@@ -42,7 +42,10 @@ class MEDIA_EXPORT Decryptor {
   virtual ~Decryptor() {}
 
   // Generates a key request for the |key_system| with |init_data| provided.
-  virtual void GenerateKeyRequest(const std::string& key_system,
+  // Returns true if generating key request succeeded, false otherwise.
+  // Note: AddKey() and CancelKeyRequest() should only be called after
+  // GenerateKeyRequest() returns true.
+  virtual bool GenerateKeyRequest(const std::string& key_system,
                                   const uint8* init_data,
                                   int init_data_length) = 0;
 
@@ -73,7 +76,7 @@ class MEDIA_EXPORT Decryptor {
   // |encrypted| buffer. In this case the decrypted buffer must be NULL.
   // If the returned status is kError, unexpected error has occurred. In this
   // case the decrypted buffer must be NULL.
-  typedef base::Callback<void(DecryptStatus,
+  typedef base::Callback<void(Status,
                               const scoped_refptr<DecoderBuffer>&)> DecryptCB;
   virtual void Decrypt(const scoped_refptr<DecoderBuffer>& encrypted,
                        const DecryptCB& decrypt_cb) = 0;

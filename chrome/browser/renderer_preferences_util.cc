@@ -75,6 +75,8 @@ void UpdateFromSystemSettings(
     content::RendererPreferences* prefs, Profile* profile) {
   const PrefService* pref_service = profile->GetPrefs();
   prefs->enable_referrers = pref_service->GetBoolean(prefs::kEnableReferrers);
+  prefs->enable_do_not_track =
+      pref_service->GetBoolean(prefs::kEnableDoNotTrack);
   prefs->default_zoom_level = pref_service->GetDouble(prefs::kDefaultZoomLevel);
 
 #if defined(TOOLKIT_GTK)
@@ -106,7 +108,7 @@ void UpdateFromSystemSettings(
 #endif
 
 #if defined(OS_LINUX) || defined(OS_ANDROID)
-  const gfx::FontRenderParams& params = gfx::GetDefaultFontRenderParams();
+  const gfx::FontRenderParams& params = gfx::GetDefaultWebKitFontRenderParams();
   prefs->should_antialias_text = params.antialiasing;
   prefs->use_subpixel_positioning = params.subpixel_positioning;
   prefs->hinting = GetRendererPreferencesHintingEnum(params.hinting);

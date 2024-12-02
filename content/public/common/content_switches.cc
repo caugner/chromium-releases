@@ -77,6 +77,9 @@ const char kDisableDatabases[]              = "disable-databases";
 // Disables data transfer items.
 const char kDisableDataTransferItems[]      = "disable-data-transfer-items";
 
+// Disable deferred 2d canvas rendering.
+const char kDisableDeferred2dCanvas[]        = "disable-deferred-2d-canvas";
+
 // Disables desktop notifications (default enabled on windows).
 const char kDisableDesktopNotifications[]   = "disable-desktop-notifications";
 
@@ -165,9 +168,6 @@ const char kDisableLogging[]                = "disable-logging";
 // Prevent plugins from running.
 const char kDisablePlugins[]                = "disable-plugins";
 
-// Disable the JavaScript Pointer Lock API.
-const char kDisablePointerLock[]            = "disable-pointer-lock";
-
 // Disables remote web font support. SVG font should always work whether this
 // option is specified or not.
 const char kDisableRemoteFonts[]            = "disable-remote-fonts";
@@ -201,10 +201,6 @@ const char kDisableSpeechInput[]            = "disable-speech-input";
 
 // Enables scripted speech api.
 const char kEnableScriptedSpeech[]          = "enable-scripted-speech";
-
-// TODO(primiano): Remove the two switches below when the URL becomes public.
-// Specifies the webservice URL for continuous speech recognition.
-const char kSpeechRecognitionWebserviceURL[] = "speech-service";
 
 // Specifies the request key for the continuous speech recognition webservice.
 const char kSpeechRecognitionWebserviceKey[] = "speech-service-key";
@@ -255,17 +251,8 @@ const char kEnableAccessibilityLogging[]    = "enable-accessibility-logging";
 const char kEnableCompositingForFixedPosition[] =
      "enable-fixed-position-compositing";
 
-// Enables CSS3 regions
-const char kEnableCssRegions[]              = "enable-css-regions";
-
 // Enables CSS3 custom filters
 const char kEnableCssShaders[]              = "enable-css-shaders";
-
-// Enables CSS variables
-const char kEnableCssVariables[]            = "enable-css-variables";
-
-// Enable deferred 2d canvas rendering.
-const char kEnableDeferred2dCanvas[]        = "enable-deferred-2d-canvas";
 
 // Enables device motion events.
 const char kEnableDeviceMotion[]            = "enable-device-motion";
@@ -273,6 +260,10 @@ const char kEnableDeviceMotion[]            = "enable-device-motion";
 // Enables support for encrypted media. Current implementation is
 // incomplete and this flag is used for development and testing.
 const char kEnableEncryptedMedia[]          = "enable-encrypted-media";
+
+// Enables WebKit features that are in development.
+const char kEnableExperimentalWebKitFeatures[] =
+    "enable-experimental-webkit-features";
 
 // Enables the fastback page cache.
 const char kEnableFastback[]                = "enable-fastback";
@@ -285,8 +276,12 @@ const char kEnableFixedLayout[]             = "enable-fixed-layout";
 // Enable the JavaScript Full Screen API.
 const char kDisableFullScreen[]             = "disable-fullscreen";
 
-// Enable the JavaScript Pointer Lock API.
-const char kEnablePointerLock[]             = "enable-pointer-lock";
+// Enable Text Service Framework(TSF) for text inputting instead of IMM32. This
+// flag is ignored on Metro environment.
+const char kEnableTextServicesFramework[] = "enable-text-services-framework";
+
+// Enable Gesture Tap Highlight
+const char kEnableGestureTapHighlight[]    = "enable-gesture-tap-highlight";
 
 // Enables the GPU benchmarking extension
 const char kEnableGpuBenchmarking[]         = "enable-gpu-benchmarking";
@@ -295,12 +290,12 @@ const char kEnableGpuBenchmarking[]         = "enable-gpu-benchmarking";
 // builds.
 const char kEnableLogging[]                 = "enable-logging";
 
-// Enables Media Source API on <audio>/<video> elements.
-const char kEnableMediaSource[]             = "enable-media-source";
+// Disable Media Source API on <audio>/<video> elements.
+const char kDisableMediaSource[]             = "disable-media-source";
 
-// Enable media stream in WebKit.
-// http://www.whatwg.org/specs/web-apps/current-work/multipage/dnd.html#mediastream
-const char kEnablePeerConnection[]          = "enable-peer-connection";
+// Enables the deprecated PeerConnection functionality.
+const char kEnableDeprecatedPeerConnection[] =
+    "enable-deprecated-peer-connection";
 
 // On Windows, converts the page to the currently-installed monitor profile.
 // This does NOT enable color management for images. The source is still
@@ -342,12 +337,6 @@ const char kEnableSandboxLogging[]          = "enable-sandbox-logging";
 // Enable the seccomp sandbox (Linux only)
 const char kEnableSeccompSandbox[]          = "enable-seccomp-sandbox";
 
-// Enable shadow DOM API
-const char kEnableShadowDOM[]          = "enable-shadow-dom";
-
-// Enable <style scoped>
-const char kEnableStyleScoped[]             = "enable-style-scoped";
-
 // On platforms that support it, enables smooth scroll animation.
 const char kEnableSmoothScrolling[]         = "enable-smooth-scrolling";
 
@@ -377,10 +366,6 @@ const char kEnableTcpFastOpen[]             = "enable-tcp-fastopen";
 // Disables hardware acceleration of video decode, where available.
 const char kDisableAcceleratedVideoDecode[] =
     "disable-accelerated-video-decode";
-
-// Enables support for video tracks. Current implementation is
-// incomplete and this flag is used for development and testing.
-const char kEnableVideoTrack[]              = "enable-video-track";
 
 // Enables the use of the viewport meta tag, which allows
 // pages to control aspects of their own layout. This also turns on touch-screen
@@ -446,6 +431,9 @@ const char kGpuVendorID[]                   = "gpu-vendor-id";
 // to run as a guest renderer instead of a regular renderer.
 const char kGuestRenderer[]                 = "guest-renderer";
 
+// Ignores GPU blacklist.
+const char kIgnoreGpuBlacklist[]            = "ignore-gpu-blacklist";
+
 // Run the GPU process as a thread in the browser process.
 const char kInProcessGPU[]                  = "in-process-gpu";
 
@@ -507,7 +495,8 @@ const char kPpapiPluginLauncher[]           = "ppapi-plugin-launcher";
 // Argument to the process type that indicates a PPAPI plugin process type.
 const char kPpapiPluginProcess[]            = "ppapi";
 
-// Causes the PPAPI sub process to display a dialog on launch.
+// Causes the PPAPI sub process to display a dialog on launch. Be sure to use
+// --no-sandbox as well or the sandbox won't allow the dialog to display.
 const char kPpapiStartupDialog[]            = "ppapi-startup-dialog";
 
 // Runs a single process for each site (i.e., group of pages from the same
@@ -564,6 +553,11 @@ const char kShowCompositedLayerTree[]       = "show-composited-layer-tree";
 // Draws a FPS indicator
 const char kShowFPSCounter[]                = "show-fps-counter";
 
+// Enables accelerated compositing for overflow scroll. Promotes eligible
+// overflow:scroll elements to layers to enable accelerated scrolling for them.
+const char kEnableAcceleratedCompositingForOverflowScroll[] =
+    "enable-accelerated-compositing-for-overflow-scroll";
+
 // Visibly render a border around paint rects in the web page to help debug
 // and study painting behavior.
 const char kShowPaintRects[]                = "show-paint-rects";
@@ -581,6 +575,10 @@ const char kSingleProcess[]                 = "single-process";
 // Therefore, all GPU features are available, and about:gpu page shows empty
 // content. The switch is intended only for tests.
 const char kSkipGpuDataLoading[]            = "skip-gpu-data-loading";
+
+// GestureTapDown events are deferred by this many miillseconds before
+// sending them to the renderer.
+const char kTapDownDeferralTimeMs[]         = "tap-down-deferral-time";
 
 // Runs the security test for the renderer sandbox.
 const char kTestSandbox[]                   = "test-sandbox";
@@ -636,13 +634,6 @@ const char kWaitForDebuggerChildren[]       = "wait-for-debugger-children";
 // Logging.cpp in WebKit's WebCore for a list of available channels.
 const char kWebCoreLogChannels[]            = "webcore-log-channels";
 
-// Causes the worker process allocation to use as many processes as cores.
-const char kWebWorkerProcessPerCore[]       = "web-worker-process-per-core";
-
-// Causes workers to run together in one process, depending on their domains.
-// Note this is duplicated in webworkerclient_impl.cc
-const char kWebWorkerShareProcesses[]       = "web-worker-share-processes";
-
 // Causes the process to run as a worker subprocess.
 const char kWorkerProcess[]                 = "worker";
 
@@ -664,6 +655,9 @@ const char kUseMobileUserAgent[] = "use-mobile-user-agent";
 const char kGraphicsMode[]                  = "graphics-mode";
 const char kGraphicsModeValueBasic[]        = "basic";
 const char kGraphicsModeValueCompositor[]   = "compositor";
+
+// The telephony region (ISO country code) to use in phone number detection.
+const char kNetworkCountryIso[] = "network-country-iso";
 #endif
 
 #if defined(OS_POSIX)

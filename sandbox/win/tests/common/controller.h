@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SANDBOX_TESTS_COMMON_CONTROLLER_H_
-#define SANDBOX_TESTS_COMMON_CONTROLLER_H__
+#ifndef SANDBOX_WIN_TESTS_COMMON_CONTROLLER_H_
+#define SANDBOX_WIN_TESTS_COMMON_CONTROLLER_H_
 
 #include <windows.h>
 #include <string>
@@ -29,6 +29,12 @@ enum SboxTestResult {
   SBOX_TEST_DENIED,     // Access was denied.
   SBOX_TEST_NOT_FOUND,  // The resource was not found.
   SBOX_TEST_FIRST_ERROR = SBOX_TEST_FIRST_RESULT | SEVERITY_ERROR_FLAGS,
+  SBOX_TEST_SECOND_ERROR,
+  SBOX_TEST_THIRD_ERROR,
+  SBOX_TEST_FOURTH_ERROR,
+  SBOX_TEST_FIFTH_ERROR,
+  SBOX_TEST_SIXTH_ERROR,
+  SBOX_TEST_SEVENTH_ERROR,
   SBOX_TEST_INVALID_PARAMETER,
   SBOX_TEST_FAILED_TO_RUN_TEST,
   SBOX_TEST_FAILED_TO_EXECUTE_COMMAND,
@@ -105,10 +111,12 @@ class TestRunner {
   // the policy manually.
   TargetPolicy* GetPolicy();
 
-  // Return the process handle for an asynchronous test.
+  BrokerServices* broker() { return broker_; }
+
+  // Returns the process handle for an asynchronous test.
   HANDLE process() { return target_process_; }
 
-  // Return the process ID for an asynchronous test.
+  // Returns the process ID for an asynchronous test.
   DWORD process_id() { return target_process_id_; }
 
  private:
@@ -142,4 +150,4 @@ int DispatchCall(int argc, wchar_t **argv);
 
 }  // namespace sandbox
 
-#endif  // SANDBOX_TESTS_COMMON_CONTROLLER_H_
+#endif  // SANDBOX_WIN_TESTS_COMMON_CONTROLLER_H_

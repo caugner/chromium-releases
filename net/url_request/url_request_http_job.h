@@ -31,10 +31,11 @@ class URLRequestContext;
 class URLRequestHttpJob : public URLRequestJob {
  public:
   static URLRequestJob* Factory(URLRequest* request,
+                                NetworkDelegate* network_delegate,
                                 const std::string& scheme);
 
  protected:
-  explicit URLRequestHttpJob(URLRequest* request);
+  URLRequestHttpJob(URLRequest* request, NetworkDelegate* network_delegate);
 
   // Shadows URLRequestJob's version of this method so we can grab cookies.
   void NotifyHeadersComplete();
@@ -71,7 +72,7 @@ class URLRequestHttpJob : public URLRequestJob {
   virtual void Start() OVERRIDE;
   virtual void Kill() OVERRIDE;
   virtual LoadState GetLoadState() const OVERRIDE;
-  virtual uint64 GetUploadProgress() const OVERRIDE;
+  virtual UploadProgress GetUploadProgress() const OVERRIDE;
   virtual bool GetMimeType(std::string* mime_type) const OVERRIDE;
   virtual bool GetCharset(std::string* charset) OVERRIDE;
   virtual void GetResponseInfo(HttpResponseInfo* info) OVERRIDE;

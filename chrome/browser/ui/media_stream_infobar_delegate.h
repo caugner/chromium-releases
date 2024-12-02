@@ -8,8 +8,11 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/infobars/infobar_delegate.h"
+#include "chrome/browser/api/infobars/infobar_delegate.h"
 #include "chrome/browser/media/media_stream_devices_controller.h"
+
+class InfoBarTabHelper;
+class InfoBarService;
 
 // This class configures an infobar shown when a page requests access to a
 // user's microphone and/or video camera.  The user is shown a message asking
@@ -36,22 +39,36 @@ class MediaStreamInfoBarDelegate : public InfoBarDelegate {
 
   // Returns the security origin (e.g. "www.html5rocks.com") at the origin
   // of this request.
-  const GURL& GetSecurityOrigin() const;
+  const std::string& GetSecurityOriginSpec() const;
 
+  void set_selected_audio_device(const std::string& device_id) {
+    selected_audio_device_ = device_id;
+  }
+  void set_selected_video_device(const std::string& device_id) {
+    selected_video_device_ = device_id;
+  }
+  void toggle_always_allow() { always_allow_ = !always_allow_; }
 
-  // Callbacks to handle accepting devices or denying the request. |audio_id|
-  // and |video_id| are the device IDs of the accepted audio and video devices.
-  // |always_allow| is true if the "always allow" option is checked.
-  // The |audio_id| or |video_id| values are ignored if the request did not ask
-  // for audio or video devices respectively.
-  void Accept(const std::string& audio_id,
-              const std::string& video_id,
-              bool always_allow);
+  const std::string& selected_audio_device() const {
+    return selected_audio_device_;
+  }
+  const std::string& selected_video_device() const {
+    return selected_video_device_;
+  }
+  bool always_allow() const { return always_allow_; }
+
+  // These determine whether all audio (or video) devices can be auto-accepted
+  // in the future should the user accept them this time.
+  bool IsSafeToAlwaysAllowAudio() const;
+  bool IsSafeToAlwaysAllowVideo() const;
+
+  // Callbacks to handle accepting devices or denying the request.
+  void Accept();
   void Deny();
 
  private:
   // InfoBarDelegate:
-  virtual InfoBar* CreateInfoBar(InfoBarTabHelper* owner) OVERRIDE;
+  virtual InfoBar* CreateInfoBar(InfoBarService* owner) OVERRIDE;
   virtual void InfoBarDismissed() OVERRIDE;
   virtual gfx::Image* GetIcon() const OVERRIDE;
   virtual Type GetInfoBarType() const OVERRIDE;
@@ -60,6 +77,10 @@ class MediaStreamInfoBarDelegate : public InfoBarDelegate {
 
  private:
   scoped_ptr<MediaStreamDevicesController> controller_;
+
+  std::string selected_audio_device_;
+  std::string selected_video_device_;
+  bool always_allow_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaStreamInfoBarDelegate);
 };

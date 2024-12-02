@@ -75,6 +75,7 @@ class WebFrame;
 
 namespace media {
 class AudioRendererSink;
+class ChunkDemuxer;
 class MediaLog;
 }
 
@@ -198,7 +199,10 @@ class WebMediaPlayerImpl
                             const unsigned char* data,
                             unsigned length);
   virtual bool sourceAbort(const WebKit::WebString& id);
+  virtual void sourceSetDuration(double new_duration);
   virtual void sourceEndOfStream(EndOfStreamStatus status);
+  virtual bool sourceSetTimestampOffset(const WebKit::WebString& id,
+                                        double offset);
 
   virtual MediaKeyException generateKeyRequest(
       const WebKit::WebString& key_system,
@@ -224,10 +228,11 @@ class WebMediaPlayerImpl
 
   void Repaint();
 
-  void OnPipelineInitialize(media::PipelineStatus status);
   void OnPipelineSeek(media::PipelineStatus status);
   void OnPipelineEnded(media::PipelineStatus status);
   void OnPipelineError(media::PipelineStatus error);
+  void OnPipelineBufferingState(
+      media::Pipeline::BufferingState buffering_state);
   void OnDemuxerOpened();
   void OnKeyAdded(const std::string& key_system, const std::string& session_id);
   void OnKeyError(const std::string& key_system,
@@ -282,16 +287,8 @@ class WebMediaPlayerImpl
   // for DCHECKs so methods calls won't execute in the wrong thread.
   MessageLoop* main_loop_;
 
-  // A collection of filters.
   scoped_ptr<media::FilterCollection> filter_collection_;
-
-  // The media pipeline and a bool tracking whether we have started it yet.
-  //
-  // TODO(scherkus): replace |started_| with a pointer check for |pipeline_| and
-  // have WebMediaPlayerImpl return the default values to WebKit instead of
-  // relying on Pipeline to take care of default values.
   scoped_refptr<media::Pipeline> pipeline_;
-  bool started_;
 
   // The currently selected key system. Empty string means that no key system
   // has been selected.
@@ -342,9 +339,14 @@ class WebMediaPlayerImpl
   scoped_refptr<media::AudioRendererSink> audio_renderer_sink_;
 
   bool is_local_source_;
+  bool supports_save_;
 
   // The decryptor that manages decryption keys and decrypts encrypted frames.
   ProxyDecryptor decryptor_;
+
+  bool starting_;
+
+  scoped_refptr<media::ChunkDemuxer> chunk_demuxer_;
 
   DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerImpl);
 };

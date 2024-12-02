@@ -6,9 +6,11 @@
 
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_item_view.h"
+#include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
 #include "grit/ui_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
+#include "ui/base/events/event.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
@@ -26,6 +28,7 @@ namespace internal {
 
 namespace {
 const int kIconPaddingLeft = 5;
+const int kPopupDetailLabelExtraLeftMargin = 8;
 const int kPaddingAroundButtons = 5;
 
 const int kBarImagesActive[] = {
@@ -115,7 +118,7 @@ void ActionableView::DrawBorder(gfx::Canvas* canvas, const gfx::Rect& bounds) {
   canvas->DrawRect(rect, kFocusBorderColor);
 }
 
-bool ActionableView::OnKeyPressed(const views::KeyEvent& event) {
+bool ActionableView::OnKeyPressed(const ui::KeyEvent& event) {
   if (event.key_code() == ui::VKEY_SPACE ||
       event.key_code() == ui::VKEY_RETURN) {
     return PerformAction(event);
@@ -123,13 +126,13 @@ bool ActionableView::OnKeyPressed(const views::KeyEvent& event) {
   return false;
 }
 
-bool ActionableView::OnMousePressed(const views::MouseEvent& event) {
+bool ActionableView::OnMousePressed(const ui::MouseEvent& event) {
   // Return true so that this view starts capturing the events.
   has_capture_ = true;
   return true;
 }
 
-void ActionableView::OnMouseReleased(const views::MouseEvent& event) {
+void ActionableView::OnMouseReleased(const ui::MouseEvent& event) {
   if (has_capture_ && GetLocalBounds().Contains(event.location()))
     PerformAction(event);
 }
@@ -147,13 +150,13 @@ void ActionableView::OnPaintFocusBorder(gfx::Canvas* canvas) {
     DrawBorder(canvas, GetLocalBounds());
 }
 
-ui::GestureStatus ActionableView::OnGestureEvent(
-    const views::GestureEvent& event) {
+ui::EventResult ActionableView::OnGestureEvent(
+    const ui::GestureEvent& event) {
   if (event.type() == ui::ET_GESTURE_TAP) {
-    return PerformAction(event) ? ui::GESTURE_STATUS_CONSUMED :
-                                  ui::GESTURE_STATUS_UNKNOWN;
+    return PerformAction(event) ? ui::ER_CONSUMED :
+                                  ui::ER_UNHANDLED;
   }
-  return ui::GESTURE_STATUS_UNKNOWN;
+  return ui::ER_UNHANDLED;
 }
 
 void ActionableView::GetAccessibleState(ui::AccessibleViewState* state) {
@@ -183,7 +186,7 @@ void HoverHighlightView::AddIconAndLabel(const gfx::ImageSkia& image,
                                          const string16& text,
                                          gfx::Font::FontStyle style) {
   SetLayoutManager(new views::BoxLayout(
-      views::BoxLayout::kHorizontal, 0, 3, kIconPaddingLeft));
+      views::BoxLayout::kHorizontal, 0, 3, kTrayPopupPaddingBetweenItems));
   views::ImageView* image_view =
       new FixedSizedImageView(kTrayPopupDetailsIconWidth, 0);
   image_view->SetImage(image);
@@ -203,7 +206,7 @@ void HoverHighlightView::AddLabel(const string16& text,
   SetLayoutManager(new views::FillLayout());
   text_label_ = new views::Label(text);
   text_label_->set_border(views::Border::CreateEmptyBorder(
-      5, kTrayPopupDetailsIconWidth + kIconPaddingLeft, 5, 0));
+      5, kTrayPopupPaddingHorizontal + kPopupDetailLabelExtraLeftMargin, 5, 0));
   text_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   text_label_->SetFont(text_label_->font().DeriveFont(0, style));
   text_label_->SetDisabledColor(SkColorSetARGB(127, 0, 0, 0));
@@ -214,7 +217,7 @@ void HoverHighlightView::AddLabel(const string16& text,
   SetAccessibleName(text);
 }
 
-bool HoverHighlightView::PerformAction(const views::Event& event) {
+bool HoverHighlightView::PerformAction(const ui::Event& event) {
   if (!listener_)
     return false;
   listener_->ClickedOn(this);
@@ -228,14 +231,14 @@ gfx::Size HoverHighlightView::GetPreferredSize() {
   return size;
 }
 
-void HoverHighlightView::OnMouseEntered(const views::MouseEvent& event) {
+void HoverHighlightView::OnMouseEntered(const ui::MouseEvent& event) {
   hover_ = true;
   if (text_highlight_color_ && text_label_)
     text_label_->SetEnabledColor(text_highlight_color_);
   SchedulePaint();
 }
 
-void HoverHighlightView::OnMouseExited(const views::MouseEvent& event) {
+void HoverHighlightView::OnMouseExited(const ui::MouseEvent& event) {
   hover_ = false;
   if (text_default_color_ && text_label_)
     text_label_->SetEnabledColor(text_default_color_);
@@ -271,7 +274,7 @@ void FixedSizedScrollView::SetContentsView(View* view) {
   view->SetBoundsRect(gfx::Rect(view->GetPreferredSize()));
 }
 
-void FixedSizedScrollView::SetFixedSize(gfx::Size size) {
+void FixedSizedScrollView::SetFixedSize(const gfx::Size& size) {
   if (fixed_size_ == size)
     return;
   fixed_size_ = size;
@@ -307,7 +310,7 @@ void FixedSizedScrollView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
   contents->SetBoundsRect(bounds);
 }
 
-void FixedSizedScrollView::OnMouseEntered(const views::MouseEvent& event) {
+void FixedSizedScrollView::OnMouseEntered(const ui::MouseEvent& event) {
   // TODO(sad): This is done to make sure that the scroll view scrolls on
   // mouse-wheel events. This is ugly, and Ben thinks this is weird. There
   // should be a better fix for this.
@@ -342,12 +345,12 @@ gfx::Size TrayPopupTextButton::GetPreferredSize() {
   return size;
 }
 
-void TrayPopupTextButton::OnMouseEntered(const views::MouseEvent& event) {
+void TrayPopupTextButton::OnMouseEntered(const ui::MouseEvent& event) {
   hover_ = true;
   SchedulePaint();
 }
 
-void TrayPopupTextButton::OnMouseExited(const views::MouseEvent& event) {
+void TrayPopupTextButton::OnMouseExited(const ui::MouseEvent& event) {
   hover_ = false;
   SchedulePaint();
 }
@@ -360,10 +363,21 @@ void TrayPopupTextButton::OnPaintBackground(gfx::Canvas* canvas) {
 }
 
 void TrayPopupTextButton::OnPaintBorder(gfx::Canvas* canvas) {
-  if (hover_)
+  if (hover_) {
     hover_border_->Paint(*this, canvas);
-  else
-    views::TextButton::OnPaintBorder(canvas);
+  } else {
+    // Do not draw button border if it is the left most visible button
+    // in parent view.
+    for (int i = 0; i < parent()->child_count(); ++i) {
+      views::View* child = parent()->child_at(i);
+      if (child->visible()) {
+        if (child != this)
+          views::TextButton::OnPaintBorder(canvas);
+        return;
+      }
+    }
+    NOTREACHED();
+  }
 }
 
 void TrayPopupTextButton::OnPaintFocusBorder(gfx::Canvas* canvas) {
@@ -486,13 +500,16 @@ TrayBarButtonWithTitle::TrayBarButtonWithTitle(views::ButtonListener* listener,
                                                int width)
     : views::CustomButton(listener),
       image_(new TrayBarButton(kBarImagesActive, kBarImagesDisabled)),
-      title_(new views::Label),
+      title_(NULL),
       width_(width) {
   AddChildView(image_);
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  string16 text = rb.GetLocalizedString(title_id);
-  title_->SetText(text);
-  AddChildView(title_);
+  if (title_id != -1) {
+    title_ = new views::Label;
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+    string16 text = rb.GetLocalizedString(title_id);
+    title_->SetText(text);
+    AddChildView(title_);
+  }
 
   image_height_ = ui::ResourceBundle::GetSharedInstance().GetImageNamed(
       kBarImagesActive[0]).ToImageSkia()->height();
@@ -505,7 +522,6 @@ gfx::Size TrayBarButtonWithTitle::GetPreferredSize() {
 }
 
 void TrayBarButtonWithTitle::Layout() {
-  gfx::Size title_size = title_->GetPreferredSize();
   gfx::Rect rect(GetContentsBounds());
   int bar_image_y = rect.height() / 2 - image_height_ / 2;
   gfx::Rect bar_image_rect(rect.x(),
@@ -513,12 +529,15 @@ void TrayBarButtonWithTitle::Layout() {
                            rect.width(),
                            image_height_);
   image_->SetBoundsRect(bar_image_rect);
-  // The image_ has some empty space below the bar image, move the title
-  // a little bit up to look closer to the bar.
-  title_->SetBounds(rect.x(),
-                    bar_image_y + image_height_ - 3,
-                    rect.width(),
-                    title_size.height());
+  if (title_) {
+    // The image_ has some empty space below the bar image, move the title
+    // a little bit up to look closer to the bar.
+    gfx::Size title_size = title_->GetPreferredSize();
+    title_->SetBounds(rect.x(),
+                      bar_image_y + image_height_ - 3,
+                      rect.width(),
+                      title_size.height());
+  }
 }
 
 void TrayBarButtonWithTitle::UpdateButton(bool control_on) {
@@ -560,6 +579,9 @@ void SpecialPopupRow::SetTextLabel(int string_id, ViewClickListener* listener) {
       *rb.GetImageNamed(IDR_AURA_UBER_TRAY_LESS).ToImageSkia(),
       rb.GetLocalizedString(string_id),
       gfx::Font::BOLD);
+
+  container->set_border(views::Border::CreateEmptyBorder(0,
+      kTrayPopupPaddingHorizontal, 0, 0));
 
   container->SetAccessibleName(
       rb.GetLocalizedString(IDS_ASH_STATUS_TRAY_PREVIOUS_MENU));

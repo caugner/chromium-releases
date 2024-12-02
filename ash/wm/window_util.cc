@@ -4,6 +4,8 @@
 
 #include "ash/wm/window_util.h"
 
+#include <vector>
+
 #include "ash/shell.h"
 #include "ash/wm/activation_controller.h"
 #include "ash/wm/window_properties.h"
@@ -11,7 +13,7 @@
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/base/ui_base_types.h"
+#include "ui/compositor/layer.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
 
@@ -59,11 +61,16 @@ bool CanActivateWindow(aura::Window* window) {
   return client && client->CanActivateWindow(window);
 }
 
+bool CanMaximizeWindow(aura::Window* window) {
+  return window->GetProperty(aura::client::kCanMaximizeKey);
+}
+
 bool IsWindowNormal(aura::Window* window) {
-  return window->GetProperty(aura::client::kShowStateKey) ==
-          ui::SHOW_STATE_NORMAL ||
-      window->GetProperty(aura::client::kShowStateKey) ==
-          ui::SHOW_STATE_DEFAULT;
+  return IsWindowStateNormal(window->GetProperty(aura::client::kShowStateKey));
+}
+
+bool IsWindowStateNormal(ui::WindowShowState state) {
+  return state == ui::SHOW_STATE_NORMAL || state == ui::SHOW_STATE_DEFAULT;
 }
 
 bool IsWindowMaximized(aura::Window* window) {
@@ -93,10 +100,43 @@ void RestoreWindow(aura::Window* window) {
   window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
 }
 
+void ToggleMaximizedWindow(aura::Window* window) {
+  if (ash::wm::IsWindowMaximized(window))
+    ash::wm::RestoreWindow(window);
+  else if (ash::wm::CanMaximizeWindow(window))
+    ash::wm::MaximizeWindow(window);
+}
+
 void CenterWindow(aura::Window* window) {
   const gfx::Display display = gfx::Screen::GetDisplayNearestWindow(window);
   gfx::Rect center = display.work_area().Center(window->bounds().size());
   window->SetBounds(center);
+}
+
+ui::Layer* RecreateWindowLayers(aura::Window* window, bool set_bounds) {
+  const gfx::Rect bounds = window->bounds();
+  ui::Layer* old_layer = window->RecreateLayer();
+  DCHECK(old_layer);
+  for (aura::Window::Windows::const_iterator it = window->children().begin();
+       it != window->children().end();
+       ++it) {
+    // Maintain the hierarchy of the detached layers.
+    old_layer->Add(RecreateWindowLayers(*it, set_bounds));
+  }
+  if (set_bounds)
+    window->SetBounds(bounds);
+  return old_layer;
+}
+
+void DeepDeleteLayers(ui::Layer* layer) {
+  std::vector<ui::Layer*> children = layer->children();
+  for (std::vector<ui::Layer*>::const_iterator it = children.begin();
+       it != children.end();
+       ++it) {
+    ui::Layer* child = *it;
+    DeepDeleteLayers(child);
+  }
+  delete layer;
 }
 
 }  // namespace wm

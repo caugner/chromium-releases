@@ -15,8 +15,8 @@
 #include "content/public/common/url_constants.h"
 #include "content/public/test/render_view_test.h"
 #include "content/renderer/render_view_impl.h"
-#include "content/shell/shell_content_client.h"
 #include "content/shell/shell_content_browser_client.h"
+#include "content/shell/shell_content_client.h"
 #include "content/shell/shell_main_delegate.h"
 #include "content/test/mock_keyboard.h"
 #include "net/base/net_errors.h"
@@ -40,12 +40,12 @@
 #endif
 
 #if defined(USE_AURA)
-#include "ui/aura/event.h"
+#include "ui/base/events/event.h"
 #endif
 
 #if defined(USE_AURA) && defined(USE_X11)
 #include <X11/Xlib.h>
-#include "ui/base/events.h"
+#include "ui/base/events/event_constants.h"
 #include "ui/base/keycodes/keyboard_code_conversion.h"
 #include "ui/base/x/x11_util.h"
 #endif
@@ -176,7 +176,7 @@ class RenderViewImplTest : public content::RenderViewTest {
     // WM_CHAR sends a composed Unicode character.
     MSG msg1 = { NULL, WM_KEYDOWN, key_code, 0 };
 #if defined(USE_AURA)
-    aura::KeyEvent evt1(msg1, false);
+    ui::KeyEvent evt1(msg1, false);
     NativeWebKeyboardEvent keydown_event(&evt1);
 #else
     NativeWebKeyboardEvent keydown_event(msg1);
@@ -185,7 +185,7 @@ class RenderViewImplTest : public content::RenderViewTest {
 
     MSG msg2 = { NULL, WM_CHAR, (*output)[0], 0 };
 #if defined(USE_AURA)
-    aura::KeyEvent evt2(msg2, true);
+    ui::KeyEvent evt2(msg2, true);
     NativeWebKeyboardEvent char_event(&evt2);
 #else
     NativeWebKeyboardEvent char_event(msg2);
@@ -194,7 +194,7 @@ class RenderViewImplTest : public content::RenderViewTest {
 
     MSG msg3 = { NULL, WM_KEYUP, key_code, 0 };
 #if defined(USE_AURA)
-    aura::KeyEvent evt3(msg3, false);
+    ui::KeyEvent evt3(msg3, false);
     NativeWebKeyboardEvent keyup_event(&evt3);
 #else
     NativeWebKeyboardEvent keyup_event(msg3);
@@ -213,7 +213,7 @@ class RenderViewImplTest : public content::RenderViewTest {
                             static_cast<ui::KeyboardCode>(key_code),
                             flags,
                             &xevent1);
-    aura::KeyEvent event1(&xevent1, false);
+    ui::KeyEvent event1(&xevent1, false);
     NativeWebKeyboardEvent keydown_event(&event1);
     SendNativeKeyEvent(keydown_event);
 
@@ -222,7 +222,7 @@ class RenderViewImplTest : public content::RenderViewTest {
                             static_cast<ui::KeyboardCode>(key_code),
                             flags,
                             &xevent2);
-    aura::KeyEvent event2(&xevent2, true);
+    ui::KeyEvent event2(&xevent2, true);
     NativeWebKeyboardEvent char_event(&event2);
     SendNativeKeyEvent(char_event);
 
@@ -231,7 +231,7 @@ class RenderViewImplTest : public content::RenderViewTest {
                             static_cast<ui::KeyboardCode>(key_code),
                             flags,
                             &xevent3);
-    aura::KeyEvent event3(&xevent3, false);
+    ui::KeyEvent event3(&xevent3, false);
     NativeWebKeyboardEvent keyup_event(&event3);
     SendNativeKeyEvent(keyup_event);
 
@@ -747,7 +747,7 @@ TEST_F(RenderViewImplTest, OnImeStateChanged) {
            "<head>"
            "</head>"
            "<body>"
-           "<input id=\"test1\" type=\"text\"></input>"
+           "<input id=\"test1\" type=\"text\" value=\"some text\"></input>"
            "<input id=\"test2\" type=\"password\"></input>"
            "</body>"
            "</html>");
@@ -769,8 +769,13 @@ TEST_F(RenderViewImplTest, OnImeStateChanged) {
     EXPECT_EQ(ViewHostMsg_TextInputStateChanged::ID, msg->type());
     ViewHostMsg_TextInputStateChanged::Param params;
     ViewHostMsg_TextInputStateChanged::Read(msg, &params);
-    EXPECT_EQ(params.a, ui::TEXT_INPUT_TYPE_TEXT);
-    EXPECT_EQ(params.b, true);
+    EXPECT_EQ(ui::TEXT_INPUT_TYPE_TEXT, params.a.type);
+    EXPECT_EQ(true, params.a.can_compose_inline);
+    EXPECT_EQ("some text", params.a.value);
+    EXPECT_EQ(0, params.a.selection_start);
+    EXPECT_EQ(9, params.a.selection_end);
+    EXPECT_EQ(-1, params.a.composition_start);
+    EXPECT_EQ(-1, params.a.composition_end);
 
     // Move the input focus to the second <input> element, where we should
     // de-activate IMEs.
@@ -785,7 +790,7 @@ TEST_F(RenderViewImplTest, OnImeStateChanged) {
     EXPECT_TRUE(msg != NULL);
     EXPECT_EQ(ViewHostMsg_TextInputStateChanged::ID, msg->type());
     ViewHostMsg_TextInputStateChanged::Read(msg, &params);
-    EXPECT_EQ(params.a, ui::TEXT_INPUT_TYPE_PASSWORD);
+    EXPECT_EQ(ui::TEXT_INPUT_TYPE_PASSWORD, params.a.type);
   }
 }
 
@@ -1727,4 +1732,67 @@ TEST_F(RenderViewImplTest, ZoomLimit) {
   view()->OnNavigate(params);
   ProcessPendingMessages();
   EXPECT_DOUBLE_EQ(kMaxZoomLevel, view()->GetWebView()->zoomLevel());
+}
+
+TEST_F(RenderViewImplTest, SetEditableSelectionAndComposition) {
+  // Load an HTML page consisting of an input field.
+  LoadHTML("<html>"
+           "<head>"
+           "</head>"
+           "<body>"
+           "<input id=\"test1\" value=\"some test text hello\"></input>"
+           "</body>"
+           "</html>");
+  ExecuteJavaScript("document.getElementById('test1').focus();");
+  view()->OnSetEditableSelectionOffsets(4, 8);
+  const std::vector<WebKit::WebCompositionUnderline> empty_underline;
+  view()->OnSetCompositionFromExistingText(7,10, empty_underline);
+  WebKit::WebTextInputInfo info = view()->webview()->textInputInfo();
+  EXPECT_EQ(4, info.selectionStart);
+  EXPECT_EQ(8, info.selectionEnd);
+  EXPECT_EQ(7, info.compositionStart);
+  EXPECT_EQ(10, info.compositionEnd);
+  view()->OnUnselect();
+  info = view()->webview()->textInputInfo();
+  EXPECT_EQ(0, info.selectionStart);
+  EXPECT_EQ(0, info.selectionEnd);
+}
+
+TEST_F(RenderViewImplTest, OnReplaceAll) {
+  // Load an HTML page consisting of an input field.
+  LoadHTML("<html>"
+           "<head>"
+           "</head>"
+           "<body>"
+           "<input id=\"test1\" value=\"some test text hello\"></input>"
+           "</body>"
+           "</html>");
+  ExecuteJavaScript("document.getElementById('test1').focus();");
+  view()->OnReplaceAll(UTF8ToUTF16("replacement words"));
+  WebKit::WebTextInputInfo info = view()->webview()->textInputInfo();
+  EXPECT_EQ("replacement words", info.value);
+}
+
+TEST_F(RenderViewImplTest, OnExtendSelectionAndDelete) {
+  // Load an HTML page consisting of an input field.
+  LoadHTML("<html>"
+           "<head>"
+           "</head>"
+           "<body>"
+           "<input id=\"test1\" value=\"abcdefghijklmnopqrstuvwxyz\"></input>"
+           "</body>"
+           "</html>");
+  ExecuteJavaScript("document.getElementById('test1').focus();");
+  view()->OnSetEditableSelectionOffsets(10, 10);
+  view()->OnExtendSelectionAndDelete(3, 4);
+  WebKit::WebTextInputInfo info = view()->webview()->textInputInfo();
+  EXPECT_EQ("abcdefgopqrstuvwxyz", info.value);
+  EXPECT_EQ(7, info.selectionStart);
+  EXPECT_EQ(7, info.selectionEnd);
+  view()->OnSetEditableSelectionOffsets(4, 8);
+  view()->OnExtendSelectionAndDelete(2, 5);
+  info = view()->webview()->textInputInfo();
+  EXPECT_EQ("abuvwxyz", info.value);
+  EXPECT_EQ(2, info.selectionStart);
+  EXPECT_EQ(2, info.selectionEnd);
 }

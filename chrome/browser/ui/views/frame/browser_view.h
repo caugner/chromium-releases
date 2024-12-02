@@ -176,11 +176,6 @@ class BrowserView : public BrowserWindow,
   // otherwise.
   bool GetAccelerator(int cmd_id, ui::Accelerator* accelerator);
 
-  // Shows the next app-modal dialog box, if there is one to be shown, or moves
-  // an existing showing one to the front. Returns true if one was shown or
-  // activated, false if none was shown.
-  bool ActivateAppModalDialog() const;
-
   // Returns the selected WebContents/TabContents. Used by our
   // NonClientView's TabIconView::TabContentsProvider implementations.
   // TODO(beng): exposing this here is a bit bogus, since it's only used to
@@ -231,8 +226,16 @@ class BrowserView : public BrowserWindow,
   gfx::ImageSkia* GetToolbarBackgroundImage(chrome::search::Mode::Type mode);
 
 #if defined(USE_ASH)
+  // Test support.
   BrowserLauncherItemController* launcher_item_controller() const {
     return launcher_item_controller_.get();
+  }
+#endif
+
+#if defined(USE_AURA)
+  // Test support.
+  SearchViewController* search_view_controller() const {
+    return search_view_controller_.get();
   }
 #endif
 
@@ -256,10 +259,7 @@ class BrowserView : public BrowserWindow,
   virtual void SetDevToolsDockSide(DevToolsDockSide side) OVERRIDE;
   virtual void UpdateLoadingAnimations(bool should_animate) OVERRIDE;
   virtual void SetStarredState(bool is_starred) OVERRIDE;
-  virtual void SetZoomIconState(
-      ZoomController::ZoomIconState zoom_icon_state) OVERRIDE;
-  virtual void SetZoomIconTooltipPercent(int zoom_percent) OVERRIDE;
-  virtual void ShowZoomBubble(int zoom_percent) OVERRIDE;
+  virtual void ZoomChangedForActiveTab(bool can_show_bubble) OVERRIDE;
   virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual bool IsMaximized() const OVERRIDE;
@@ -339,6 +339,7 @@ class BrowserView : public BrowserWindow,
   virtual void ShowInstant(TabContents* preview) OVERRIDE;
   virtual void HideInstant() OVERRIDE;
   virtual gfx::Rect GetInstantBounds() OVERRIDE;
+  virtual bool IsInstantTabShowing() OVERRIDE;
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) OVERRIDE;
   virtual FindBar* CreateFindBar() OVERRIDE;
@@ -347,8 +348,8 @@ class BrowserView : public BrowserWindow,
   virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE;
   virtual void ShowPasswordGenerationBubble(
       const gfx::Rect& rect,
-      autofill::PasswordGenerator* password_generator,
-      const webkit::forms::PasswordForm& form) OVERRIDE;
+      const webkit::forms::PasswordForm& form,
+      autofill::PasswordGenerator* password_generator) OVERRIDE;
 
   // Overridden from BrowserWindowTesting:
   virtual BookmarkBarView* GetBookmarkBarView() const OVERRIDE;
@@ -566,6 +567,10 @@ class BrowserView : public BrowserWindow,
   // and returns true if the focus is currently on a WebContent.
   bool DoCutCopyPaste(void (content::RenderWidgetHost::*method)());
 
+  // Shows the next app-modal dialog box, if there is one to be shown, or moves
+  // an existing showing one to the front.
+  void ActivateAppModalDialog() const;
+
   // Last focused view that issued a tab traversal.
   int last_focused_view_storage_id_;
 
@@ -718,6 +723,8 @@ class BrowserView : public BrowserWindow,
 #if defined(USE_AURA)
   scoped_ptr<SearchViewController> search_view_controller_;
 #endif
+
+  mutable base::WeakPtrFactory<BrowserView> activate_modal_dialog_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserView);
 };

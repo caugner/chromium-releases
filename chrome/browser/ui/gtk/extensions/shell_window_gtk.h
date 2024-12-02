@@ -7,26 +7,29 @@
 
 #include <gtk/gtk.h>
 
+#include "base/timer.h"
+#include "chrome/browser/ui/extensions/native_shell_window.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/gtk/extensions/extension_view_gtk.h"
+#include "third_party/skia/include/core/SkRegion.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/x/active_window_watcher_x_observer.h"
 #include "ui/gfx/rect.h"
 
+class ExtensionKeybindingRegistryGtk;
 class Profile;
 
 namespace extensions {
 class Extension;
+struct DraggableRegion;
 }
 
-class ShellWindowGtk : public ShellWindow,
+class ShellWindowGtk : public NativeShellWindow,
                        public ExtensionViewGtk::Container,
                        public ui::ActiveWindowWatcherXObserver {
  public:
-  ShellWindowGtk(Profile* profile,
-                 const extensions::Extension* extension,
-                 const GURL& url,
-                 const CreateParams& params);
+  ShellWindowGtk(ShellWindow* shell_window,
+                 const ShellWindow::CreateParams& params);
 
   // BaseWindow implementation.
   virtual bool IsActive() const OVERRIDE;
@@ -45,7 +48,6 @@ class ShellWindowGtk : public ShellWindow,
   virtual void Minimize() OVERRIDE;
   virtual void Restore() OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
-  virtual void SetDraggableRegion(SkRegion* region) OVERRIDE;
   virtual void FlashFrame(bool flash) OVERRIDE;
   virtual bool IsAlwaysOnTop() const OVERRIDE;
 
@@ -53,9 +55,22 @@ class ShellWindowGtk : public ShellWindow,
   virtual void ActiveWindowChanged(GdkWindow* active_window) OVERRIDE;
 
  private:
-  // ShellWindow implementation.
+  // NativeShellWindow implementation.
   virtual void SetFullscreen(bool fullscreen) OVERRIDE;
   virtual bool IsFullscreenOrPending() const OVERRIDE;
+  virtual void UpdateWindowIcon() OVERRIDE;
+  virtual void UpdateWindowTitle() OVERRIDE;
+  virtual void HandleKeyboardEvent(
+      const content::NativeWebKeyboardEvent& event) OVERRIDE;
+
+  content::WebContents* web_contents() const {
+    return shell_window_->web_contents();
+  }
+  const extensions::Extension* extension() const {
+    return shell_window_->extension();
+  }
+  virtual void UpdateDraggableRegions(
+      const std::vector<extensions::DraggableRegion>& regions) OVERRIDE;
 
   virtual ~ShellWindowGtk();
 
@@ -65,6 +80,12 @@ class ShellWindowGtk : public ShellWindow,
                        GdkEventConfigure*);
   CHROMEGTK_CALLBACK_1(ShellWindowGtk, gboolean, OnWindowState,
                        GdkEventWindowState*);
+  CHROMEGTK_CALLBACK_1(ShellWindowGtk, gboolean, OnButtonPress,
+                       GdkEventButton*);
+
+  void OnDebouncedBoundsChanged();
+
+  ShellWindow* shell_window_;  // weak - ShellWindow owns NativeShellWindow.
 
   GtkWindow* window_;
   GdkWindowState state_;
@@ -83,6 +104,25 @@ class ShellWindowGtk : public ShellWindow,
   // True if the RVH is in fullscreen mode. The window may not actually be in
   // fullscreen, however: some WMs don't support fullscreen.
   bool content_thinks_its_fullscreen_;
+
+  // The region is treated as title bar, can be dragged to move
+  // and double clicked to maximize.
+  SkRegion draggable_region_;
+
+  // If true, don't call gdk_window_raise() when we get a click in the title
+  // bar or window border.  This is to work around a compiz bug.
+  bool suppress_window_raise_;
+
+  // True if the window shows without frame.
+  bool frameless_;
+
+  // The timer used to save the window position for session restore.
+  base::OneShotTimer<ShellWindowGtk> window_configure_debounce_timer_;
+
+  // The Extension Keybinding Registry responsible for registering listeners for
+  // accelerators that are sent to the window, that are destined to be turned
+  // into events and sent to the extension.
+  scoped_ptr<ExtensionKeybindingRegistryGtk> extension_keybinding_registry_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellWindowGtk);
 };

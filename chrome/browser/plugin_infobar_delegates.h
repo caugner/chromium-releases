@@ -6,20 +6,21 @@
 #define CHROME_BROWSER_PLUGIN_INFOBAR_DELEGATES_H_
 
 #include "base/callback.h"
-#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
+#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "googleurl/src/gurl.h"
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
 #include "chrome/browser/plugin_installer_observer.h"
 #endif  // defined(ENABLE_PLUGIN_INSTALLATION)
 
+class InfoBarService;
 class HostContentSettingsMap;
 class PluginObserver;
 
 // Base class for blocked plug-in infobars.
 class PluginInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  PluginInfoBarDelegate(InfoBarTabHelper* infobar_helper,
+  PluginInfoBarDelegate(InfoBarService* infobar_service,
                         const string16& name,
                         const std::string& identifier);
 
@@ -48,7 +49,7 @@ class PluginInfoBarDelegate : public ConfirmInfoBarDelegate {
 // Infobar that's shown when a plug-in requires user authorization to run.
 class UnauthorizedPluginInfoBarDelegate : public PluginInfoBarDelegate {
  public:
-  UnauthorizedPluginInfoBarDelegate(InfoBarTabHelper* infobar_helper,
+  UnauthorizedPluginInfoBarDelegate(InfoBarService* infobar_service,
                                     HostContentSettingsMap* content_settings,
                                     const string16& name,
                                     const std::string& identifier);
@@ -107,7 +108,7 @@ class OutdatedPluginInfoBarDelegate : public PluginInfoBarDelegate,
   void ReplaceWithInfoBar(const string16& message);
 
   // Has the same lifetime as TabContents, which owns us
-  // (transitively via InfoBarTabHelper).
+  // (transitively via InfoBarService).
   PluginObserver* observer_;
 
   string16 message_;
@@ -124,14 +125,14 @@ class PluginInstallerInfoBarDelegate : public ConfirmInfoBarDelegate,
   // |installer|. When the user accepts, |callback| is called.
   // During installation of the plug-in, the infobar will change to reflect the
   // installation state.
-  static InfoBarDelegate* Create(InfoBarTabHelper* infobar_helper,
+  static InfoBarDelegate* Create(InfoBarService* infobar_service,
                                  PluginInstaller* installer,
                                  const base::Closure& callback);
 
  private:
   friend class OutdatedPluginInfoBarDelegate;
 
-  PluginInstallerInfoBarDelegate(InfoBarTabHelper* infobar_helper,
+  PluginInstallerInfoBarDelegate(InfoBarService* infobar_service,
                                  PluginInstaller* installer,
                                  const base::Closure& callback,
                                  bool new_install,
@@ -176,10 +177,10 @@ class PluginMetroModeInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
   // Shows an infobar asking the user to switch to desktop chrome if they
   // want to use the plugin.
-  static InfoBarDelegate* Create(InfoBarTabHelper* infobar_helper,
+  static InfoBarDelegate* Create(InfoBarService* infobar_service,
                                  const string16& plugin_name);
  private:
-  PluginMetroModeInfoBarDelegate(InfoBarTabHelper* infobar_helper,
+  PluginMetroModeInfoBarDelegate(InfoBarService* infobar_service,
                                  const string16& message);
   virtual ~PluginMetroModeInfoBarDelegate();
 

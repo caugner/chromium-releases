@@ -16,6 +16,7 @@
 #include "chrome/browser/extensions/bundle_installer.h"
 #include "chrome/browser/extensions/extension_install_dialog.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/signin/token_service_factory.h"
@@ -24,12 +25,14 @@
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/extension_switch_utils.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/url_pattern.h"
+#include "chrome/common/pref_names.h"
 #include "content/public/browser/page_navigator.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -78,20 +81,54 @@ static const int kPermissionsHeaderIds[
   IDS_EXTENSION_PROMPT_WILL_NOW_HAVE_ACCESS_TO,
   IDS_EXTENSION_PROMPT_WANTS_ACCESS_TO,
 };
+static const int kOAuthHeaderIds[
+    ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
+  IDS_EXTENSION_PROMPT_OAUTH_HEADER,
+  0,  // Inline installs don't show OAuth permissions.
+  0,  // Bundle installs don't show OAuth permissions.
+  IDS_EXTENSION_PROMPT_OAUTH_REENABLE_HEADER,
+  IDS_EXTENSION_PROMPT_OAUTH_PERMISSIONS_HEADER,
+};
 
 namespace {
 
 // Size of extension icon in top left of dialog.
 const int kIconSize = 69;
 
+// Returns pixel size under maximal scale factor for the icon whose device
+// independent size is |size_in_dip|
+int GetSizeForMaxScaleFactor(int size_in_dip) {
+  std::vector<ui::ScaleFactor> supported_scale_factors =
+      ui::GetSupportedScaleFactors();
+  // Scale factors are in ascending order, so the last one is the one we need.
+  ui::ScaleFactor max_scale_factor = supported_scale_factors.back();
+  float max_scale_factor_scale = ui::GetScaleFactorScale(max_scale_factor);
+
+  return static_cast<int>(size_in_dip * max_scale_factor_scale);
+}
+
+// Returns bitmap for the default icon with size equal to the default icon's
+// pixel size under maximal supported scale factor.
+SkBitmap GetDefaultIconBitmapForMaxScaleFactor(bool is_app) {
+  std::vector<ui::ScaleFactor> supported_scale_factors =
+      ui::GetSupportedScaleFactors();
+  // Scale factors are in ascending order, so the last one is the one we need.
+  ui::ScaleFactor max_scale_factor =
+      supported_scale_factors[supported_scale_factors.size() - 1];
+
+  return Extension::GetDefaultIcon(is_app).
+      GetRepresentation(max_scale_factor).sk_bitmap();
+}
+
 }  // namespace
 
-ExtensionInstallPrompt::Prompt::Prompt(PromptType type)
+ExtensionInstallPrompt::Prompt::Prompt(Profile* profile, PromptType type)
     : type_(type),
       extension_(NULL),
       bundle_(NULL),
       average_rating_(0.0),
-      rating_count_(0) {
+      rating_count_(0),
+      profile_(profile) {
 }
 
 ExtensionInstallPrompt::Prompt::~Prompt() {
@@ -118,7 +155,6 @@ void ExtensionInstallPrompt::Prompt::SetInlineInstallWebstoreData(
 }
 
 string16 ExtensionInstallPrompt::Prompt::GetDialogTitle() const {
-
   int resource_id = kTitleIds[type_];
 
   if (type_ == INSTALL_PROMPT) {
@@ -162,8 +198,14 @@ string16 ExtensionInstallPrompt::Prompt::GetPermissionsHeading() const {
 }
 
 string16 ExtensionInstallPrompt::Prompt::GetOAuthHeading() const {
-  // TODO(estade): this should change based on type_.
-  return l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_SCOPES_HEADING);
+  string16 username(ASCIIToUTF16("username@example.com"));
+  // |profile_| can be NULL in unit tests.
+  if (profile_) {
+    username = UTF8ToUTF16(profile_->GetPrefs()->GetString(
+        prefs::kGoogleServicesUsername));
+  }
+  int resource_id = kOAuthHeaderIds[type_];
+  return l10n_util::GetStringFUTF16(resource_id, username);
 }
 
 void ExtensionInstallPrompt::Prompt::AppendRatingStars(
@@ -215,8 +257,7 @@ size_t ExtensionInstallPrompt::Prompt::GetPermissionCount() const {
 
 string16 ExtensionInstallPrompt::Prompt::GetPermission(size_t index) const {
   CHECK_LT(index, permissions_.size());
-  return l10n_util::GetStringFUTF16(
-      IDS_EXTENSION_PERMISSION_LINE, permissions_[index]);
+  return permissions_[index];
 }
 
 size_t ExtensionInstallPrompt::Prompt::GetOAuthIssueCount() const {
@@ -264,14 +305,14 @@ ExtensionInstallPrompt::ExtensionInstallPrompt(
     gfx::NativeWindow parent,
     content::PageNavigator* navigator,
     Profile* profile)
-    : record_oauth2_grant_(ShouldAutomaticallyApproveScopes()),
+    : record_oauth2_grant_(false),
       parent_(parent),
       navigator_(navigator),
       ui_loop_(MessageLoop::current()),
       extension_(NULL),
       install_ui_(ExtensionInstallUI::Create(profile)),
       delegate_(NULL),
-      prompt_(UNSET_PROMPT_TYPE),
+      prompt_(profile, UNSET_PROMPT_TYPE),
       prompt_type_(UNSET_PROMPT_TYPE),
       ALLOW_THIS_IN_INITIALIZER_LIST(tracker_(this)) {
 }
@@ -400,8 +441,12 @@ void ExtensionInstallPrompt::SetIcon(const SkBitmap* image) {
     icon_ = *image;
   else
     icon_ = SkBitmap();
-  if (icon_.empty())
-    icon_ = Extension::GetDefaultIcon(extension_->is_app());
+  if (icon_.empty()) {
+    // Let's set default icon bitmap whose size is equal to the default icon's
+    // pixel size under maximal supported scale factor. If the bitmap is larger
+    // than the one we need, it will be scaled down by the ui code.
+    icon_ = GetDefaultIconBitmapForMaxScaleFactor(extension_->is_app());
+  }
 }
 
 void ExtensionInstallPrompt::OnImageLoaded(const gfx::Image& image,
@@ -420,21 +465,31 @@ void ExtensionInstallPrompt::LoadImageIfNeeded() {
 
   // Load the image asynchronously. For the response, check OnImageLoaded.
   ExtensionResource image =
-      extension_->GetIconResource(ExtensionIconSet::EXTENSION_ICON_LARGE,
+      extension_->GetIconResource(extension_misc::EXTENSION_ICON_LARGE,
                                   ExtensionIconSet::MATCH_BIGGER);
+  // Load the icon whose pixel size is large enough to be displayed under
+  // maximal supported scale factor. UI code will scale the icon down if needed.
+  // TODO(tbarzic): We should use IconImage here and load the required bitmap
+  //     lazily.
+  int pixel_size = GetSizeForMaxScaleFactor(kIconSize);
   tracker_.LoadImage(extension_, image,
-                     gfx::Size(kIconSize, kIconSize),
+                     gfx::Size(pixel_size, pixel_size),
                      ImageLoadingTracker::DONT_CACHE);
 }
 
 void ExtensionInstallPrompt::FetchOAuthIssueAdviceIfNeeded() {
-  const Extension::OAuth2Info& oauth2_info = extension_->oauth2_info();
-  if (ShouldAutomaticallyApproveScopes() ||
-      prompt_.GetOAuthIssueCount() != 0U ||
-      oauth2_info.client_id.empty() ||
-      oauth2_info.scopes.empty() ||
+  // |extension_| may be NULL, e.g. in the bundle install case.
+  if (!extension_ ||
       prompt_type_ == BUNDLE_INSTALL_PROMPT ||
-      prompt_type_ == INLINE_INSTALL_PROMPT) {
+      prompt_type_ == INLINE_INSTALL_PROMPT ||
+      prompt_.GetOAuthIssueCount() != 0U) {
+    ShowConfirmation();
+    return;
+  }
+
+  const Extension::OAuth2Info& oauth2_info = extension_->oauth2_info();
+  if (oauth2_info.client_id.empty() ||
+      oauth2_info.scopes.empty()) {
     ShowConfirmation();
     return;
   }
@@ -494,12 +549,6 @@ void ExtensionInstallPrompt::ShowConfirmation() {
       NOTREACHED() << "Unknown message";
       break;
   }
-}
-
-// static
-bool ExtensionInstallPrompt::ShouldAutomaticallyApproveScopes() {
-  return !CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDemandUserScopeApproval);
 }
 
 namespace chrome {

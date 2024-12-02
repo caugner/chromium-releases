@@ -696,9 +696,9 @@ TEST_F(LayerWithNullDelegateTest, Visibility) {
   EXPECT_TRUE(l1->IsDrawn());
   EXPECT_TRUE(l2->IsDrawn());
   EXPECT_TRUE(l3->IsDrawn());
-  EXPECT_EQ(1.f, l1->web_layer().opacity());
-  EXPECT_EQ(1.f, l2->web_layer().opacity());
-  EXPECT_EQ(1.f, l3->web_layer().opacity());
+  EXPECT_EQ(1.f, l1->web_layer()->opacity());
+  EXPECT_EQ(1.f, l2->web_layer()->opacity());
+  EXPECT_EQ(1.f, l3->web_layer()->opacity());
 
   compositor()->SetRootLayer(l1.get());
 
@@ -708,19 +708,19 @@ TEST_F(LayerWithNullDelegateTest, Visibility) {
   EXPECT_FALSE(l1->IsDrawn());
   EXPECT_FALSE(l2->IsDrawn());
   EXPECT_FALSE(l3->IsDrawn());
-  EXPECT_EQ(0.f, l1->web_layer().opacity());
+  EXPECT_EQ(0.f, l1->web_layer()->opacity());
 
   l3->SetVisible(false);
   EXPECT_FALSE(l1->IsDrawn());
   EXPECT_FALSE(l2->IsDrawn());
   EXPECT_FALSE(l3->IsDrawn());
-  EXPECT_EQ(0.f, l3->web_layer().opacity());
+  EXPECT_EQ(0.f, l3->web_layer()->opacity());
 
   l1->SetVisible(true);
   EXPECT_TRUE(l1->IsDrawn());
   EXPECT_TRUE(l2->IsDrawn());
   EXPECT_FALSE(l3->IsDrawn());
-  EXPECT_EQ(1.f, l1->web_layer().opacity());
+  EXPECT_EQ(1.f, l1->web_layer()->opacity());
 }
 
 // Checks that stacking-related methods behave as advertised.
@@ -803,6 +803,7 @@ TEST_F(LayerWithNullDelegateTest, SetBoundsSchedulesPaint) {
 }
 
 // Checks that pixels are actually drawn to the screen with a read back.
+// Currently disabled on all platforms, see http://crbug.com/148709.
 TEST_F(LayerWithRealCompositorTest, MAYBE_DrawPixels) {
   scoped_ptr<Layer> layer(CreateColorLayer(SK_ColorRED,
                                            gfx::Rect(0, 0, 500, 500)));
@@ -1128,9 +1129,9 @@ TEST_F(LayerWithRealCompositorTest, MAYBE_ScaleUpDown) {
 
   EXPECT_EQ("10,20 200x220", root->bounds().ToString());
   EXPECT_EQ("10,20 140x180", l1->bounds().ToString());
-  gfx::Size size_in_pixel = root->web_layer().bounds();
+  gfx::Size size_in_pixel = root->web_layer()->bounds();
   EXPECT_EQ("200x220", size_in_pixel.ToString());
-  size_in_pixel = l1->web_layer().bounds();
+  size_in_pixel = l1->web_layer()->bounds();
   EXPECT_EQ("140x180", size_in_pixel.ToString());
   // No scale change, so no scale notification.
   EXPECT_EQ(0.0f, root_delegate.device_scale_factor());
@@ -1145,9 +1146,9 @@ TEST_F(LayerWithRealCompositorTest, MAYBE_ScaleUpDown) {
   EXPECT_EQ("10,20 200x220", root->bounds().ToString());
   EXPECT_EQ("10,20 140x180", l1->bounds().ToString());
   // Pixel size must have been scaled up.
-  size_in_pixel = root->web_layer().bounds();
+  size_in_pixel = root->web_layer()->bounds();
   EXPECT_EQ("400x440", size_in_pixel.ToString());
-  size_in_pixel = l1->web_layer().bounds();
+  size_in_pixel = l1->web_layer()->bounds();
   EXPECT_EQ("280x360", size_in_pixel.ToString());
   // New scale factor must have been notified.
   EXPECT_EQ(2.0f, root_delegate.device_scale_factor());
@@ -1165,9 +1166,9 @@ TEST_F(LayerWithRealCompositorTest, MAYBE_ScaleUpDown) {
   EXPECT_EQ("10,20 200x220", root->bounds().ToString());
   EXPECT_EQ("10,20 140x180", l1->bounds().ToString());
   // Pixel size must have been scaled down.
-  size_in_pixel = root->web_layer().bounds();
+  size_in_pixel = root->web_layer()->bounds();
   EXPECT_EQ("200x220", size_in_pixel.ToString());
-  size_in_pixel = l1->web_layer().bounds();
+  size_in_pixel = l1->web_layer()->bounds();
   EXPECT_EQ("140x180", size_in_pixel.ToString());
   // New scale factor must have been notified.
   EXPECT_EQ(1.0f, root_delegate.device_scale_factor());
@@ -1210,7 +1211,7 @@ TEST_F(LayerWithRealCompositorTest, MAYBE_ScaleReparent) {
 
   root->Add(l1.get());
   EXPECT_EQ("10,20 140x180", l1->bounds().ToString());
-  gfx::Size size_in_pixel = l1->web_layer().bounds();
+  gfx::Size size_in_pixel = l1->web_layer()->bounds();
   EXPECT_EQ("140x180", size_in_pixel.ToString());
   EXPECT_EQ(0.0f, l1_delegate.device_scale_factor());
 
@@ -1225,13 +1226,13 @@ TEST_F(LayerWithRealCompositorTest, MAYBE_ScaleReparent) {
   GetCompositor()->SetScaleAndSize(2.0f, gfx::Size(500, 500));
   // Sanity check on root and l1.
   EXPECT_EQ("10,20 200x220", root->bounds().ToString());
-  size_in_pixel = l1->web_layer().bounds();
+  size_in_pixel = l1->web_layer()->bounds();
   EXPECT_EQ("140x180", size_in_pixel.ToString());
 
 
   root->Add(l1.get());
   EXPECT_EQ("10,20 140x180", l1->bounds().ToString());
-  size_in_pixel = l1->web_layer().bounds();
+  size_in_pixel = l1->web_layer()->bounds();
   EXPECT_EQ("280x360", size_in_pixel.ToString());
   EXPECT_EQ(2.0f, l1_delegate.device_scale_factor());
   RunPendingMessages();

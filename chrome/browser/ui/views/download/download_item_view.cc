@@ -28,6 +28,7 @@
 #include "grit/theme_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/slide_animation.h"
+#include "ui/base/events/event.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
@@ -196,7 +197,7 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
   if (download_util::kSmallProgressIconSize > box_height_)
     box_y_ = (download_util::kSmallProgressIconSize - box_height_) / 2;
   else
-    box_y_ = kVerticalPadding;
+    box_y_ = 0;
 
   body_hover_animation_.reset(new ui::SlideAnimation(this));
   drop_hover_animation_.reset(new ui::SlideAnimation(this));
@@ -297,9 +298,6 @@ void DownloadItemView::OnDownloadUpdated(DownloadItem* download) {
         StopDownloadProgress();
         LoadIcon();
         break;
-      case DownloadItem::REMOVING:
-        parent_->RemoveDownloadView(this);  // This will delete us!
-        return;
       default:
         NOTREACHED();
     }
@@ -318,6 +316,10 @@ void DownloadItemView::OnDownloadUpdated(DownloadItem* download) {
   // are spaces between each DownloadItemView that the parent is responsible
   // for painting.
   parent()->SchedulePaint();
+}
+
+void DownloadItemView::OnDownloadDestroyed(DownloadItem* download) {
+  parent_->RemoveDownloadView(this);  // This will delete us!
 }
 
 void DownloadItemView::OnDownloadOpened(DownloadItem* download) {
@@ -341,9 +343,6 @@ void DownloadItemView::Layout() {
     BodyImageSet* body_image_set =
         (mode_ == DANGEROUS_MODE) ? &dangerous_mode_body_image_set_ :
             &malicious_mode_body_image_set_;
-    dangerous_download_label_->SetEnabledColor(
-      GetThemeProvider()->GetColor(ThemeService::COLOR_BOOKMARK_TEXT));
-
     int x = kLeftPadding + body_image_set->top_left->width() +
         warning_icon_->width() + kLabelPadding;
     int y = (height() - dangerous_download_label_->height()) / 2;
@@ -358,6 +357,7 @@ void DownloadItemView::Layout() {
       x += button_size.width() + kButtonPadding;
     }
     discard_button_->SetBounds(x, y, button_size.width(), button_size.height());
+    UpdateColorsFromTheme();
   }
 }
 
@@ -400,13 +400,13 @@ gfx::Size DownloadItemView::GetPreferredSize() {
 
 // Handle a mouse click and open the context menu if the mouse is
 // over the drop-down region.
-bool DownloadItemView::OnMousePressed(const views::MouseEvent& event) {
+bool DownloadItemView::OnMousePressed(const ui::MouseEvent& event) {
   HandlePressEvent(event, event.IsOnlyLeftMouseButton());
   return true;
 }
 
 // Handle drag (file copy) operations.
-bool DownloadItemView::OnMouseDragged(const views::MouseEvent& event) {
+bool DownloadItemView::OnMouseDragged(const ui::MouseEvent& event) {
   // Mouse should not activate us in dangerous mode.
   if (IsShowingWarningDialog())
     return true;
@@ -434,7 +434,7 @@ bool DownloadItemView::OnMouseDragged(const views::MouseEvent& event) {
   return true;
 }
 
-void DownloadItemView::OnMouseReleased(const views::MouseEvent& event) {
+void DownloadItemView::OnMouseReleased(const ui::MouseEvent& event) {
   HandleClickEvent(event, event.IsOnlyLeftMouseButton());
 }
 
@@ -452,7 +452,7 @@ void DownloadItemView::OnMouseCaptureLost() {
   }
 }
 
-void DownloadItemView::OnMouseMoved(const views::MouseEvent& event) {
+void DownloadItemView::OnMouseMoved(const ui::MouseEvent& event) {
   // Mouse should not activate us in dangerous mode.
   if (mode_ == DANGEROUS_MODE)
     return;
@@ -470,7 +470,7 @@ void DownloadItemView::OnMouseMoved(const views::MouseEvent& event) {
   }
 }
 
-void DownloadItemView::OnMouseExited(const views::MouseEvent& event) {
+void DownloadItemView::OnMouseExited(const ui::MouseEvent& event) {
   // Mouse should not activate us in dangerous mode.
   if (mode_ == DANGEROUS_MODE)
     return;
@@ -481,7 +481,7 @@ void DownloadItemView::OnMouseExited(const views::MouseEvent& event) {
   drop_hover_animation_->Hide();
 }
 
-bool DownloadItemView::OnKeyPressed(const views::KeyEvent& event) {
+bool DownloadItemView::OnKeyPressed(const ui::KeyEvent& event) {
   // Key press should not activate us in dangerous mode.
   if (IsShowingWarningDialog())
     return true;
@@ -494,16 +494,16 @@ bool DownloadItemView::OnKeyPressed(const views::KeyEvent& event) {
   return false;
 }
 
-ui::GestureStatus DownloadItemView::OnGestureEvent(
-    const views::GestureEvent& event) {
+ui::EventResult DownloadItemView::OnGestureEvent(
+    const ui::GestureEvent& event) {
   if (event.type() == ui::ET_GESTURE_TAP_DOWN) {
     HandlePressEvent(event, true);
-    return ui::GESTURE_STATUS_CONSUMED;
+    return ui::ER_CONSUMED;
   }
 
   if (event.type() == ui::ET_GESTURE_TAP) {
     HandleClickEvent(event, true);
-    return ui::GESTURE_STATUS_CONSUMED;
+    return ui::ER_CONSUMED;
   }
 
   SetState(NORMAL, NORMAL);
@@ -532,6 +532,10 @@ void DownloadItemView::GetAccessibleState(ui::AccessibleViewState* state) {
   }
 }
 
+void DownloadItemView::OnThemeChanged() {
+  UpdateColorsFromTheme();
+}
+
 void DownloadItemView::ShowContextMenuForView(View* source,
                                               const gfx::Point& point) {
   // |point| is in screen coordinates. So convert it to local coordinates first.
@@ -541,7 +545,7 @@ void DownloadItemView::ShowContextMenuForView(View* source,
 }
 
 void DownloadItemView::ButtonPressed(
-    views::Button* sender, const views::Event& event) {
+    views::Button* sender, const ui::Event& event) {
   if (sender == discard_button_) {
     UMA_HISTOGRAM_LONG_TIMES("clickjacking.discard_download",
                              base::Time::Now() - creation_time_);
@@ -881,6 +885,13 @@ void DownloadItemView::LoadIconIfItemPathChanged() {
   LoadIcon();
 }
 
+void DownloadItemView::UpdateColorsFromTheme() {
+  if (dangerous_download_label_ && GetThemeProvider()) {
+    dangerous_download_label_->SetEnabledColor(
+        GetThemeProvider()->GetColor(ThemeService::COLOR_BOOKMARK_TEXT));
+  }
+}
+
 void DownloadItemView::ShowContextMenuImpl(const gfx::Point& p,
                                            bool is_mouse_gesture) {
   gfx::Point point = p;
@@ -924,7 +935,7 @@ void DownloadItemView::ShowContextMenuImpl(const gfx::Point& p,
   // We could be deleted now.
 }
 
-void DownloadItemView::HandlePressEvent(const views::LocatedEvent& event,
+void DownloadItemView::HandlePressEvent(const ui::LocatedEvent& event,
                                         bool active_event) {
   // The event should not activate us in dangerous mode.
   if (mode_ == DANGEROUS_MODE)
@@ -951,7 +962,7 @@ void DownloadItemView::HandlePressEvent(const views::LocatedEvent& event,
   }
 }
 
-void DownloadItemView::HandleClickEvent(const views::LocatedEvent& event,
+void DownloadItemView::HandleClickEvent(const ui::LocatedEvent& event,
                                         bool active_event) {
   // Mouse should not activate us in dangerous mode.
   if (mode_ == DANGEROUS_MODE)

@@ -12,9 +12,11 @@
 #include "native_client/src/include/nacl_scoped_ptr.h"
 #include "native_client/src/include/portability.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_globals.h"
+#include "native_client/src/shared/ppapi_proxy/plugin_ppb_audio_config.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_resource.h"
 #include "native_client/src/shared/ppapi_proxy/utility.h"
 #include "native_client/src/shared/srpc/nacl_srpc.h"
+#include "media/audio/shared_memory_util.h"
 #include "ppapi/c/ppb_audio.h"
 #include "ppapi/c/ppb_audio_config.h"
 #include "ppapi/cpp/module_impl.h"
@@ -29,18 +31,9 @@ size_t ceil64k(size_t n) {
   return (n + 0xFFFF) & (~0xFFFF);
 }
 
-// The following function SetAudioActualDataSizeInBytes, is copied & similar
-// to the one in audio_util.cc.
-void SetAudioActualDataSizeInBytes(void* audio_buffer,
-                                   uint32_t buffer_size_in_bytes,
-                                   uint32_t actual_size_in_bytes) {
-  char* end = static_cast<char*>(audio_buffer) + buffer_size_in_bytes;
-  DCHECK(0 == (reinterpret_cast<size_t>(end) & 3));
-  volatile uint32_t* end32 = reinterpret_cast<volatile uint32_t*>(end);
-  // Set actual data size at the end of the buffer.
-  __sync_synchronize();
-  *end32 = actual_size_in_bytes;
-}
+// Hard coded values from PepperPlatformAudioOutputImpl.
+// TODO(dalecurtis): PPAPI shouldn't hard code these values for all clients.
+enum { kChannels = 2, kBytesPerSample = 2 };
 
 }  // namespace
 
@@ -54,7 +47,8 @@ PluginAudio::PluginAudio() :
     thread_id_(),
     thread_active_(false),
     user_callback_(NULL),
-    user_data_(NULL) {
+    user_data_(NULL),
+    client_buffer_size_bytes_(0) {
   DebugPrintf("PluginAudio::PluginAudio\n");
 }
 
@@ -65,9 +59,13 @@ PluginAudio::~PluginAudio() {
     GetInterface()->StopPlayback(resource_);
   // Unmap the shared memory buffer, if present.
   if (shm_buffer_) {
-    munmap(shm_buffer_, ceil64k(TotalAudioSharedMemorySizeInBytes(shm_size_)));
+    audio_bus_.reset();
+    client_buffer_.reset();
+    munmap(shm_buffer_,
+           ceil64k(media::TotalSharedMemorySizeInBytes(shm_size_)));
     shm_buffer_ = NULL;
     shm_size_ = 0;
+    client_buffer_size_bytes_ = 0;
   }
   // Close the handles.
   if (shm_ != -1) {
@@ -90,6 +88,8 @@ bool PluginAudio::InitFromBrowserResource(PP_Resource resource) {
 void PluginAudio::AudioThread(void* self) {
   PluginAudio* audio = static_cast<PluginAudio*>(self);
   DebugPrintf("PluginAudio::AudioThread: self=%p\n", self);
+  const int bytes_per_frame =
+      sizeof(*(audio->audio_bus_->channel(0))) * audio->audio_bus_->channels();
   while (true) {
     int32_t sync_value;
     // Block on socket read.
@@ -98,14 +98,24 @@ void PluginAudio::AudioThread(void* self) {
     if ((sizeof(sync_value) != r) || (-1 == sync_value))
       break;
     // Invoke user callback, get next buffer of audio data.
-    audio->user_callback_(audio->shm_buffer_,
-                          audio->shm_size_,
+    audio->user_callback_(audio->client_buffer_.get(),
+                          audio->client_buffer_size_bytes_,
                           audio->user_data_);
+
+    // Deinterleave the audio data into the shared memory as float.
+    audio->audio_bus_->FromInterleaved(
+        audio->client_buffer_.get(), audio->audio_bus_->frames(),
+        kBytesPerSample);
+
     // Signal audio backend by writing buffer length at end of buffer.
     // (Note: NaCl applications will always write the entire buffer.)
-    SetAudioActualDataSizeInBytes(audio->shm_buffer_,
-                                  audio->shm_size_,
-                                  audio->shm_size_);
+    // TODO(dalecurtis): Technically this is not the exact size.  Due to channel
+    // padding for alignment, there may be more data available than this.  We're
+    // relying on AudioSyncReader::Read() to parse this with that in mind.
+    // Rename these methods to Set/GetActualFrameCount().
+    media::SetActualDataSizeInBytes(
+        audio->shm_buffer_, audio->shm_size_,
+        audio->audio_bus_->frames() * bytes_per_frame);
   }
 }
 
@@ -117,12 +127,21 @@ void PluginAudio::StreamCreated(NaClSrpcImcDescType socket,
   shm_ = shm;
   shm_size_ = shm_size;
   shm_buffer_ = mmap(NULL,
-                     ceil64k(TotalAudioSharedMemorySizeInBytes(shm_size)),
+                     ceil64k(media::TotalSharedMemorySizeInBytes(shm_size)),
                      PROT_READ | PROT_WRITE,
                      MAP_SHARED,
                      shm,
                      0);
   if (MAP_FAILED != shm_buffer_) {
+    PP_Resource ac = GetInterface()->GetCurrentConfig(resource_);
+    int frames = PluginAudioConfig::GetInterface()->GetSampleFrameCount(ac);
+
+    audio_bus_ = media::AudioBus::WrapMemory(kChannels, frames, shm_buffer_);
+    // Setup integer audio buffer for user audio data.
+    client_buffer_size_bytes_ =
+        audio_bus_->frames() * audio_bus_->channels() * kBytesPerSample;
+    client_buffer_.reset(new uint8_t[client_buffer_size_bytes_]);
+
     if (state() == AUDIO_PENDING) {
       StartAudioThread();
     } else {
@@ -137,6 +156,7 @@ bool PluginAudio::StartAudioThread() {
   // clear contents of shm buffer before spinning up audio thread
   DebugPrintf("PluginAudio::StartAudioThread\n");
   memset(shm_buffer_, 0, shm_size_);
+  memset(client_buffer_.get(), 0, client_buffer_size_bytes_);
   const struct PP_ThreadFunctions* thread_funcs = GetThreadCreator();
   if (NULL == thread_funcs->thread_create ||
       NULL == thread_funcs->thread_join) {

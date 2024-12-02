@@ -29,8 +29,8 @@
 #include "content/public/browser/save_page_type.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/gdata/gdata_system_service.h"
-#include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/chromeos/gdata/drive_file_system_util.h"
+#include "chrome/browser/chromeos/gdata/drive_system_service.h"
 #endif
 
 using content::BrowserContext;
@@ -67,26 +67,26 @@ DownloadPrefs::~DownloadPrefs() {
 }
 
 // static
-void DownloadPrefs::RegisterUserPrefs(PrefService* prefs) {
+void DownloadPrefs::RegisterUserPrefs(PrefServiceBase* prefs) {
   prefs->RegisterBooleanPref(prefs::kPromptForDownload,
                              false,
-                             PrefService::SYNCABLE_PREF);
+                             PrefServiceBase::SYNCABLE_PREF);
   prefs->RegisterStringPref(prefs::kDownloadExtensionsToOpen,
                             "",
-                            PrefService::UNSYNCABLE_PREF);
+                            PrefServiceBase::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kDownloadDirUpgraded,
                              false,
-                             PrefService::UNSYNCABLE_PREF);
+                             PrefServiceBase::UNSYNCABLE_PREF);
   prefs->RegisterIntegerPref(prefs::kSaveFileType,
                              content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML,
-                             PrefService::UNSYNCABLE_PREF);
+                             PrefServiceBase::UNSYNCABLE_PREF);
 
   // The default download path is userprofile\download.
   const FilePath& default_download_path =
       download_util::GetDefaultDownloadDirectory();
   prefs->RegisterFilePathPref(prefs::kDownloadDefaultDirectory,
                               default_download_path,
-                              PrefService::UNSYNCABLE_PREF);
+                              PrefServiceBase::UNSYNCABLE_PREF);
 
 #if defined(OS_CHROMEOS)
   // Ensure that the download directory specified in the preferences exists.
@@ -127,11 +127,11 @@ DownloadPrefs* DownloadPrefs::FromBrowserContext(
 
 FilePath DownloadPrefs::DownloadPath() const {
 #if defined(OS_CHROMEOS)
-  // If the download path is under /drive, and GDataSystemService isn't
+  // If the download path is under /drive, and DriveSystemService isn't
   // available (which it isn't for incognito mode, for instance), use the
   // default download directory (/Downloads).
-  if (gdata::util::IsUnderGDataMountPoint(*download_path_) &&
-      !gdata::GDataSystemServiceFactory::GetForProfile(profile_))
+  if (gdata::util::IsUnderDriveMountPoint(*download_path_) &&
+      !gdata::DriveSystemServiceFactory::GetForProfile(profile_))
     return download_util::GetDefaultDownloadDirectory();
 #endif
   return *download_path_;

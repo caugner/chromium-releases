@@ -6,6 +6,7 @@
 #define ASH_WM_WORKSPACE_FRAME_MAXIMIZE_BUTTON_H_
 
 #include "ash/ash_export.h"
+#include "ash/wm/workspace/maximize_bubble_frame_state.h"
 #include "ash/wm/workspace/snap_types.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
@@ -51,31 +52,45 @@ class ASH_EXPORT FrameMaximizeButton : public views::ImageButton,
   virtual void OnWindowBoundsChanged(aura::Window* window,
                                      const gfx::Rect& old_bounds,
                                      const gfx::Rect& new_bounds) OVERRIDE;
+  virtual void OnWindowPropertyChanged(aura::Window* window,
+                                       const void* key,
+                                       intptr_t old) OVERRIDE;
   virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
 
   // ImageButton overrides:
-  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseDragged(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const views::MouseEvent& event) OVERRIDE;
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
-  virtual ui::GestureStatus OnGestureEvent(
-      const views::GestureEvent& event) OVERRIDE;
+  virtual ui::EventResult OnGestureEvent(
+      const ui::GestureEvent& event) OVERRIDE;
+
+  // Unit test overwrite: Change the UI delay used for the bubble show up.
+  void set_bubble_appearance_delay_ms(int bubble_appearance_delay_ms) {
+    bubble_appearance_delay_ms_ = bubble_appearance_delay_ms;
+  }
+
+  // Unit test accessor for the maximize bubble.
+  MaximizeBubbleController* maximizer() { return maximizer_.get(); }
+
+  // Unit test to see if phantom window is open.
+  bool phantom_window_open() { return phantom_window_.get() != NULL; }
 
  private:
   class EscapeEventFilter;
 
   // Initializes the snap-gesture based on the event. This should only be called
   // when the event is confirmed to have started a snap gesture.
-  void ProcessStartEvent(const views::LocatedEvent& event);
+  void ProcessStartEvent(const ui::LocatedEvent& event);
 
   // Updates the snap-state based on the current event. This should only be
   // called after the snap gesture has already started.
-  void ProcessUpdateEvent(const views::LocatedEvent& event);
+  void ProcessUpdateEvent(const ui::LocatedEvent& event);
 
   // Returns true if the window was snapped. Returns false otherwise.
-  bool ProcessEndEvent(const views::LocatedEvent& event);
+  bool ProcessEndEvent(const ui::LocatedEvent& event);
 
   // Cancels snap behavior. If |keep_menu_open| is set, a possibly opened
   // bubble help will remain open.
@@ -89,8 +104,9 @@ class ASH_EXPORT FrameMaximizeButton : public views::ImageButton,
   // |update_timer_|.
   void UpdateSnapFromEventLocation();
 
-  // Updates |snap_type_| based on a mouse drag.
-  void UpdateSnap(const gfx::Point& location);
+  // Updates |snap_type_| based on a mouse drag. If |select_default| is set,
+  // the single button click default setting of the snap sizer should be used.
+  void UpdateSnap(const gfx::Point& location, bool select_default);
 
   // Returns the type of snap based on the specified location.
   SnapType SnapTypeForLocation(const gfx::Point& location) const;
@@ -105,6 +121,9 @@ class ASH_EXPORT FrameMaximizeButton : public views::ImageButton,
 
   // Snaps the window to the current snap position.
   void Snap(const internal::SnapSizer& snap_sizer);
+
+  // Determine the maximize type of this window.
+  MaximizeBubbleFrameState GetMaximizeBubbleFrameState() const;
 
   // Frame that the maximize button acts on.
   views::NonClientFrameView* frame_;
@@ -135,6 +154,9 @@ class ASH_EXPORT FrameMaximizeButton : public views::ImageButton,
   base::OneShotTimer<FrameMaximizeButton> update_timer_;
 
   scoped_ptr<MaximizeBubbleController> maximizer_;
+
+  // The delay of the bubble appearance.
+  int bubble_appearance_delay_ms_;
 
   DISALLOW_COPY_AND_ASSIGN(FrameMaximizeButton);
 };

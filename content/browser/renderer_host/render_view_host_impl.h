@@ -43,11 +43,6 @@ namespace base {
 class ListValue;
 }
 
-namespace content {
-class TestRenderViewHost;
-class PowerSaveBlocker;
-}
-
 namespace ui {
 class Range;
 struct SelectedFileInfo;
@@ -55,11 +50,13 @@ struct SelectedFileInfo;
 
 namespace content {
 
-class SessionStorageNamespace;
+class PowerSaveBlocker;
 class RenderViewHostObserver;
 class RenderWidgetHostDelegate;
-struct FileChooserParams;
+class SessionStorageNamespace;
+class TestRenderViewHost;
 struct ContextMenuParams;
+struct FileChooserParams;
 struct Referrer;
 struct ShowDesktopNotificationHostMsgParams;
 
@@ -204,8 +201,6 @@ class CONTENT_EXPORT RenderViewHostImpl
       int permissions) OVERRIDE;
   virtual RenderViewHostDelegate* GetDelegate() const OVERRIDE;
   virtual int GetEnabledBindings() const OVERRIDE;
-  virtual SessionStorageNamespace*
-      GetSessionStorageNamespace() OVERRIDE;
   virtual SiteInstance* GetSiteInstance() const OVERRIDE;
   virtual void InsertCSS(const string16& frame_xpath,
                          const std::string& css) OVERRIDE;
@@ -224,6 +219,13 @@ class CONTENT_EXPORT RenderViewHostImpl
   virtual webkit_glue::WebPreferences GetWebkitPreferences() OVERRIDE;
   virtual void UpdateWebkitPreferences(
       const webkit_glue::WebPreferences& prefs) OVERRIDE;
+
+#if defined(OS_ANDROID)
+  virtual void ActivateNearestFindResult(int request_id,
+                                         float x,
+                                         float y) OVERRIDE;
+  virtual void RequestFindMatchRects(int current_version) OVERRIDE;
+#endif
 
   void set_delegate(RenderViewHostDelegate* d) {
     CHECK(d);  // http://crbug.com/82827
@@ -368,8 +370,13 @@ class CONTENT_EXPORT RenderViewHostImpl
       const WebKit::WebMouseEvent& mouse_event) OVERRIDE;
   virtual void OnPointerEventActivate() OVERRIDE;
   virtual void ForwardKeyboardEvent(
-      const content::NativeWebKeyboardEvent& key_event) OVERRIDE;
+      const NativeWebKeyboardEvent& key_event) OVERRIDE;
   virtual gfx::Rect GetRootWindowResizerRect() const OVERRIDE;
+
+#if defined(OS_ANDROID)
+  virtual void AttachLayer(WebKit::WebLayer* layer) OVERRIDE;
+  virtual void RemoveLayer(WebKit::WebLayer* layer) OVERRIDE;
+#endif
 
   // Creates a new RenderView with the given route id.
   void CreateNewWindow(
@@ -398,12 +405,19 @@ class CONTENT_EXPORT RenderViewHostImpl
   // User rotated the screen. Calls the "onorientationchange" Javascript hook.
   void SendOrientationChangeEvent(int orientation);
 
-  void set_save_accessibility_tree_for_testing(bool save) {
-    save_accessibility_tree_for_testing_ = save;
+  const std::string& frame_tree() const {
+    return frame_tree_;
   }
 
-  void set_send_accessibility_updated_notifications(bool send) {
-    send_accessibility_updated_notifications_ = send;
+  // Updates the frame tree for this RVH and sends an IPC down to the renderer
+  // process to keep them in sync. For more details, see the comments on
+  // ViewHostMsg_FrameTreeUpdated.
+  void UpdateFrameTree(int process_id,
+                       int route_id,
+                       const std::string& frame_tree);
+
+  void set_save_accessibility_tree_for_testing(bool save) {
+    save_accessibility_tree_for_testing_ = save;
   }
 
   const AccessibilityNodeData& accessibility_tree_for_testing() {
@@ -497,14 +511,16 @@ class CONTENT_EXPORT RenderViewHostImpl
                              size_t offset,
                              const ui::Range& range);
   void OnMsgSelectionBoundsChanged(const gfx::Rect& start_rect,
-                                   const gfx::Rect& end_rect);
+                                   WebKit::WebTextDirection start_direction,
+                                   const gfx::Rect& end_rect,
+                                   WebKit::WebTextDirection end_direction);
   void OnMsgPasteFromSelectionClipboard();
   void OnMsgRouteCloseEvent();
   void OnMsgRouteMessageEvent(const ViewMsg_PostMessage_Params& params);
   void OnMsgRunJavaScriptMessage(const string16& message,
                                  const string16& default_prompt,
                                  const GURL& frame_url,
-                                 content::JavaScriptMessageType type,
+                                 JavaScriptMessageType type,
                                  IPC::Message* reply_msg);
   void OnMsgRunBeforeUnloadConfirm(const GURL& frame_url,
                                    const string16& message,
@@ -545,6 +561,7 @@ class CONTENT_EXPORT RenderViewHostImpl
   void OnRunFileChooser(const FileChooserParams& params);
   void OnDomOperationResponse(const std::string& json_string,
                               int automation_id);
+  void OnFrameTreeUpdated(const std::string& frame_tree);
 
 #if defined(OS_MACOSX) || defined(OS_ANDROID)
   void OnMsgShowPopup(const ViewHostMsg_ShowPopup_Params& params);
@@ -636,9 +653,10 @@ class CONTENT_EXPORT RenderViewHostImpl
   // Whether the accessibility tree should be saved, for unit testing.
   bool save_accessibility_tree_for_testing_;
 
-  // Whether accessibility notifications are sent for all WebKit notifications
-  // for unit testing.
-  bool send_accessibility_updated_notifications_;
+  // A JSON serialized representation of the frame tree for the current document
+  // in the render view. For more details, see the comments on
+  // ViewHostMsg_FrameTreeUpdated.
+  std::string frame_tree_;
 
   // The most recently received accessibility tree - for unit testing only.
   AccessibilityNodeData accessibility_tree_;
@@ -648,7 +666,7 @@ class CONTENT_EXPORT RenderViewHostImpl
 
   // Holds PowerSaveBlockers for the media players in use. Key is the
   // player_cookie passed to OnMediaNotification, value is the PowerSaveBlocker.
-  typedef std::map<int64, content::PowerSaveBlocker*> PowerSaveBlockerMap;
+  typedef std::map<int64, PowerSaveBlocker*> PowerSaveBlockerMap;
   PowerSaveBlockerMap power_save_blockers_;
 
   // A list of observers that filter messages.  Weak references.

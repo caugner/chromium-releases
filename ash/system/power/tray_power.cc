@@ -17,13 +17,14 @@
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
+#include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/size.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/text_button.h"
@@ -62,7 +63,7 @@ namespace tray {
 // This view is used only for the tray.
 class PowerTrayView : public views::ImageView {
  public:
-  PowerTrayView() {
+  PowerTrayView() : battery_icon_index_(-1) {
     UpdateImage();
   }
 
@@ -81,10 +82,18 @@ class PowerTrayView : public views::ImageView {
 
  private:
   void UpdateImage() {
-    SetImage(TrayPower::GetBatteryImage(supply_status_, ICON_LIGHT));
+    int index = TrayPower::GetBatteryImageIndex(supply_status_);
+    if (battery_icon_index_ != index) {
+      battery_icon_index_ = index;
+      if (battery_icon_index_ != -1)
+        SetImage(TrayPower::GetBatteryImage(battery_icon_index_, ICON_LIGHT));
+    }
   }
 
   PowerSupplyStatus supply_status_;
+
+  // Index of the current icon in the icon array image, or -1 if unknown.
+  int battery_icon_index_;
 
   DISALLOW_COPY_AND_ASSIGN(PowerTrayView);
 };
@@ -92,19 +101,30 @@ class PowerTrayView : public views::ImageView {
 class PowerNotificationView : public TrayNotificationView {
  public:
   explicit PowerNotificationView(TrayPower* tray)
-      : TrayNotificationView(tray, 0) {
+      : TrayNotificationView(tray, 0),
+        battery_icon_index_(-1) {
     power_status_view_ =
-        new PowerStatusView(PowerStatusView::VIEW_NOTIFICATION);
+        new PowerStatusView(PowerStatusView::VIEW_NOTIFICATION, true);
     InitView(power_status_view_);
   }
 
   void UpdatePowerStatus(const PowerSupplyStatus& status) {
-    SetIconImage(TrayPower::GetBatteryImage(status, ICON_DARK));
+    int index = TrayPower::GetBatteryImageIndex(status);
+    if (battery_icon_index_ != index) {
+      battery_icon_index_ = index;
+      if (battery_icon_index_ != -1) {
+        SetIconImage(TrayPower::GetBatteryImage(battery_icon_index_,
+                                                ICON_DARK));
+      }
+    }
     power_status_view_->UpdatePowerStatus(status);
   }
 
  private:
   PowerStatusView* power_status_view_;
+
+  // Index of the current icon in the icon array image, or -1 if unknown.
+  int battery_icon_index_;
 
   DISALLOW_COPY_AND_ASSIGN(PowerNotificationView);
 };
@@ -123,34 +143,33 @@ TrayPower::~TrayPower() {
 }
 
 // static
-gfx::ImageSkia TrayPower::GetBatteryImage(
-    const PowerSupplyStatus& supply_status,
-    IconSet icon_set) {
-  gfx::ImageSkia image;
-  gfx::Image all = ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-      icon_set == ICON_DARK ?
-      IDR_AURA_UBER_TRAY_POWER_SMALL_DARK : IDR_AURA_UBER_TRAY_POWER_SMALL);
-
+int TrayPower::GetBatteryImageIndex(const PowerSupplyStatus& supply_status) {
   int image_index = 0;
   if (supply_status.battery_percentage >= 100) {
     image_index = kNumPowerImages - 1;
   } else if (!supply_status.battery_is_present) {
     image_index = kNumPowerImages;
   } else {
-    double percentage = supply_status.is_calculating_battery_time ? 100.0 :
-        supply_status.battery_percentage;
-    image_index = static_cast<int>(percentage / 100.0 * (kNumPowerImages - 1));
+    image_index = static_cast<int>(supply_status.battery_percentage /
+                  100.0 * (kNumPowerImages - 1));
     image_index = std::max(std::min(image_index, kNumPowerImages - 2), 0);
   }
+  return (image_index << 1) | (supply_status.line_power_on ? 1 : 0);
+}
+
+// static
+gfx::ImageSkia TrayPower::GetBatteryImage(int image_index, IconSet icon_set) {
+  gfx::Image all = ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+      icon_set == ICON_DARK ?
+      IDR_AURA_UBER_TRAY_POWER_SMALL_DARK : IDR_AURA_UBER_TRAY_POWER_SMALL);
 
   // TODO(mbolohan): Remove the 2px offset when the assets are centered. See
   // crbug.com/119832.
-  SkIRect region = SkIRect::MakeXYWH(
-      (supply_status.line_power_on ? kBatteryImageWidth : 0) + 2,
-      image_index * kBatteryImageHeight,
+  gfx::Rect region(
+      ((image_index & 0x1) ? kBatteryImageWidth : 0) + 2,
+      (image_index >> 1) * kBatteryImageHeight,
       kBatteryImageWidth - 2, kBatteryImageHeight);
-  all.ToImageSkia()->extractSubset(&image, region);
-  return image;
+  return gfx::ImageSkiaOperations::ExtractSubset(*all.ToImageSkia(), region);
 }
 
 views::View* TrayPower::CreateTrayView(user::LoginStatus status) {
@@ -208,7 +227,8 @@ void TrayPower::OnPowerStatusChanged(const PowerSupplyStatus& status) {
   if (notification_view_)
     notification_view_->UpdatePowerStatus(status);
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshNotify)) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshNotifyDisabled)) {
     if (UpdateNotificationState(status))
       ShowNotificationView();
     else if (notification_state_ == NOTIFICATION_NONE)

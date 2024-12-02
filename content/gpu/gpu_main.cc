@@ -158,7 +158,7 @@ int GpuMain(const content::MainFunctionParams& parameters) {
 #endif
 
     if (do_init_sandbox) {
-      content::InitializeSandbox();
+      gpu_info.sandboxed = content::InitializeSandbox();
     }
   }
 #endif
@@ -171,8 +171,10 @@ int GpuMain(const content::MainFunctionParams& parameters) {
     // content.
     sandbox::TargetServices* target_services =
         parameters.sandbox_info->target_services;
-    if (target_services)
+    if (target_services) {
       target_services->LowerToken();
+      gpu_info.sandboxed = true;
+    }
   }
 #endif
 
@@ -265,9 +267,11 @@ void WarmUpSandbox(const content::GPUInfo& gpu_info,
 #endif
 
 #if defined(OS_LINUX)
-  if (gpu_info.gpu.vendor_id == 0x10de &&  // NVIDIA
-      gpu_info.driver_vendor == "NVIDIA" &&
-      should_initialize_gl_context) {
+  // We special case Optimus since the vendor_id we see may not be Nvidia.
+  bool uses_nvidia_driver = (gpu_info.gpu.vendor_id == 0x10de &&  // NVIDIA.
+                             gpu_info.driver_vendor == "NVIDIA") ||
+                            gpu_info.optimus;
+  if (uses_nvidia_driver && should_initialize_gl_context) {
     // We need this on Nvidia to pre-open /dev/nvidiactl and /dev/nvidia0.
     CreateDummyGlContext();
   }
