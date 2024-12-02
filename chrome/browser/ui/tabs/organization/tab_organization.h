@@ -5,13 +5,13 @@
 #ifndef CHROME_BROWSER_UI_TABS_ORGANIZATION_TAB_ORGANIZATION_H_
 #define CHROME_BROWSER_UI_TABS_ORGANIZATION_TAB_ORGANIZATION_H_
 
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/tabs/organization/tab_data.h"
 #include "components/optimization_guide/core/optimization_guide_model_executor.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/abseil-cpp/absl/types/variant.h"
 
 class TabOrganization : public TabData::Observer {
@@ -56,7 +56,9 @@ class TabOrganization : public TabData::Observer {
   optimization_guide::proto::UserFeedback feedback() const { return feedback_; }
   ID organization_id() const { return organization_id_; }
   const std::u16string GetDisplayName() const;
-  int GetTabRemovedCount() const { return user_removed_tab_ids_.size(); }
+  const std::vector<TabData::TabID>& user_removed_tab_ids() const {
+    return user_removed_tab_ids_;
+  }
 
   bool IsValidForOrganizing() const;
 
