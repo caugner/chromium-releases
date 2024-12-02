@@ -1,6 +1,8 @@
 Longhands for font: 12px monospace
 font-style: normal
-font-variant: normal
+font-variant-caps: normal
+font-variant-ligatures: normal
+font-variant-numeric: normal
 font-weight: normal
 font-stretch: normal
 font-size: 12px
@@ -9,7 +11,9 @@ font-family: monospace
 
 Longhands for font: 12px/24px serif
 font-style: normal
-font-variant: normal
+font-variant-caps: normal
+font-variant-ligatures: normal
+font-variant-numeric: normal
 font-weight: normal
 font-stretch: normal
 font-size: 12px
@@ -18,7 +22,9 @@ font-family: serif
 
 Longhands for font: normal 12px serif
 font-style: normal
-font-variant: normal
+font-variant-caps: normal
+font-variant-ligatures: normal
+font-variant-numeric: normal
 font-weight: normal
 font-stretch: normal
 font-size: 12px
@@ -27,7 +33,9 @@ font-family: serif
 
 Longhands for font: normal normal 12px serif
 font-style: normal
-font-variant: normal
+font-variant-caps: normal
+font-variant-ligatures: normal
+font-variant-numeric: normal
 font-weight: normal
 font-stretch: normal
 font-size: 12px
@@ -36,7 +44,9 @@ font-family: serif
 
 Longhands for font: normal normal normal 12px serif
 font-style: normal
-font-variant: normal
+font-variant-caps: normal
+font-variant-ligatures: normal
+font-variant-numeric: normal
 font-weight: normal
 font-stretch: normal
 font-size: 12px
@@ -45,7 +55,9 @@ font-family: serif
 
 Longhands for font: italic small-caps 12px/24px serif
 font-style: italic
-font-variant: small-caps
+font-variant-caps: small-caps
+font-variant-ligatures: normal
+font-variant-numeric: normal
 font-weight: normal
 font-stretch: normal
 font-size: 12px
@@ -54,7 +66,9 @@ font-family: serif
 
 Longhands for font: italic bold 12px/24px serif
 font-style: italic
-font-variant: normal
+font-variant-caps: normal
+font-variant-ligatures: normal
+font-variant-numeric: normal
 font-weight: bold
 font-stretch: normal
 font-size: 12px
@@ -63,7 +77,9 @@ font-family: serif
 
 Longhands for font: small-caps bold 14px/28px Arial, sans-serif
 font-style: normal
-font-variant: small-caps
+font-variant-caps: small-caps
+font-variant-ligatures: normal
+font-variant-numeric: normal
 font-weight: bold
 font-stretch: normal
 font-size: 14px
@@ -72,7 +88,9 @@ font-family: Arial, sans-serif
 
 Longhands for font: italic small-caps bold 14px/28px Arial, sans-serif
 font-style: italic
-font-variant: small-caps
+font-variant-caps: small-caps
+font-variant-ligatures: normal
+font-variant-numeric: normal
 font-weight: bold
 font-stretch: normal
 font-size: 14px
@@ -85,7 +103,9 @@ font-weight
 font-size
 font-family
 font-stretch
-font-variant
+font-variant-caps
+font-variant-ligatures
+font-variant-numeric
 line-height
 
 Longhands for font: icon
@@ -94,7 +114,9 @@ font-weight
 font-size
 font-family
 font-stretch
-font-variant
+font-variant-caps
+font-variant-ligatures
+font-variant-numeric
 line-height
 
 Longhands for font: menu
@@ -103,7 +125,9 @@ font-weight
 font-size
 font-family
 font-stretch
-font-variant
+font-variant-caps
+font-variant-ligatures
+font-variant-numeric
 line-height
 
 Longhands for font: message-box
@@ -112,7 +136,9 @@ font-weight
 font-size
 font-family
 font-stretch
-font-variant
+font-variant-caps
+font-variant-ligatures
+font-variant-numeric
 line-height
 
 Longhands for font: small-caption
@@ -121,7 +147,9 @@ font-weight
 font-size
 font-family
 font-stretch
-font-variant
+font-variant-caps
+font-variant-ligatures
+font-variant-numeric
 line-height
 
 Longhands for font: status-bar
@@ -130,7 +158,9 @@ font-weight
 font-size
 font-family
 font-stretch
-font-variant
+font-variant-caps
+font-variant-ligatures
+font-variant-numeric
 line-height
 
 Longhands for font: -webkit-mini-control
@@ -139,7 +169,9 @@ font-weight
 font-size
 font-family
 font-stretch
-font-variant
+font-variant-caps
+font-variant-ligatures
+font-variant-numeric
 line-height
 
 Longhands for font: -webkit-small-control
@@ -148,7 +180,9 @@ font-weight
 font-size
 font-family
 font-stretch
-font-variant
+font-variant-caps
+font-variant-ligatures
+font-variant-numeric
 line-height
 
 Longhands for font: -webkit-control
@@ -157,7 +191,9 @@ font-weight
 font-size
 font-family
 font-stretch
-font-variant
+font-variant-caps
+font-variant-ligatures
+font-variant-numeric
 line-height
 
 Longhands for font: italic small-caps bold 12px/24px

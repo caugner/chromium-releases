@@ -5,12 +5,16 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [8, 18, 199, 18]
-      ],
-      "paintInvalidationClients": [
-        "LayoutText #text",
-        "InlineTextBox 'Should have green background'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutText #text",
+          "rect": [8, 18, 199, 18],
+          "reason": "selection"
+        },
+        {
+          "object": "InlineTextBox 'Should have green background'",
+          "reason": "selection"
+        }
       ]
     }
   ]

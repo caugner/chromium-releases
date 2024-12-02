@@ -9,7 +9,7 @@ function initialize_extensionsSidebarTest()
     InspectorTest.dumpSidebarContent = function(panelName, callback)
     {
         var sidebar = InspectorTest._extensionSidebar(panelName);
-        InspectorTest.runAfterPendingDispatches(function() {
+        InspectorTest.deprecatedRunAfterPendingDispatches(function() {
             InspectorTest.addResult(panelName + " sidebar content: " + InspectorTest.textContentWithoutStyles(sidebar.element));
             callback();
         });
@@ -18,7 +18,7 @@ function initialize_extensionsSidebarTest()
     InspectorTest.expandSidebar = function(panelName, callback)
     {
         var sidebar = InspectorTest._extensionSidebar(panelName);
-        InspectorTest.runAfterPendingDispatches(function() {
+        InspectorTest.deprecatedRunAfterPendingDispatches(function() {
             sidebar.expand();
             callback();
         });
@@ -44,7 +44,9 @@ function extension_sidebarSetPage(panelName, nextTest)
         dumpObject(sidebar);
         function onShown(win)
         {
-            output("sidebar height " + win.document.documentElement.getBoundingClientRect().height);
+            var sidebarHeight = win.document.documentElement.getBoundingClientRect().height;
+            if (win.innerHeight !== sidebarHeight)
+                output("sidebar height mismatch, expected: " + win.innerHeight + ", actual:" + sidebarHeight);
             sidebar.onShown.removeListener(onShown);
             nextTest();
         }

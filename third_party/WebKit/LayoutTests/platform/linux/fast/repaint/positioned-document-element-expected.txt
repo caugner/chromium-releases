@@ -6,27 +6,68 @@
       "contentsOpaque": true,
       "drawsContent": true,
       "backgroundColor": "#008000",
-      "repaintRects": [
-        [108, 116, 402, 20],
-        [108, 116, 402, 20],
-        [108, 116, 402, 19],
-        [100, 100, 418, 52],
-        [8, 16, 784, 20],
-        [8, 16, 784, 20],
-        [8, 16, 402, 19],
-        [0, 0, 800, 600],
-        [0, 0, 800, 52]
-      ],
-      "paintInvalidationClients": [
-        "RootInlineBox",
-        "InlineTextBox 'Tests that the entire viewport is painted with a floated html element.'",
-        "LayoutView #document",
-        "LayoutBlockFlow (positioned) HTML class='changed'",
-        "LayoutBlockFlow BODY",
-        "LayoutBlockFlow P",
-        "RootInlineBox",
-        "LayoutText #text",
-        "InlineTextBox 'Tests that the entire viewport is painted with a floated html element.'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutView #document",
+          "rect": [0, 0, 800, 600],
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutBlockFlow (positioned) HTML class='changed'",
+          "rect": [0, 0, 800, 52],
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutBlockFlow BODY",
+          "rect": [8, 16, 784, 20],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutBlockFlow P",
+          "rect": [8, 16, 784, 20],
+          "reason": "forced by layout"
+        },
+        {
+          "object": "LayoutBlockFlow (positioned) HTML class='changed'",
+          "rect": [100, 100, 418, 52],
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutBlockFlow BODY",
+          "rect": [108, 116, 402, 20],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutBlockFlow P",
+          "rect": [108, 116, 402, 20],
+          "reason": "forced by layout"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [108, 116, 402, 19],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [8, 16, 402, 19],
+          "reason": "bounds change"
+        },
+        {
+          "object": "InlineTextBox 'Tests that the entire viewport is painted with a floated html element.'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Tests that the entire viewport is painted with a floated html element.'",
+          "reason": "bounds change"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        }
       ]
     }
   ]

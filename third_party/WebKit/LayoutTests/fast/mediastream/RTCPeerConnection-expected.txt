@@ -1,6 +1,6 @@
-CONSOLE WARNING: Unknown constraint named invalid rejected
-CONSOLE WARNING: Unknown constraint named valid_but_unsupported_1 rejected
-CONSOLE WARNING: Unknown constraint named valid_but_unsupported_1 rejected
+CONSOLE WARNING: line 1: Unknown constraint named invalid rejected
+CONSOLE WARNING: line 1: Unknown constraint named valid_but_unsupported_1 rejected
+CONSOLE WARNING: line 1: Unknown constraint named valid_but_unsupported_1 rejected
 Tests the RTCPeerConnection constructor.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -54,6 +54,8 @@ PASS new webkitRTCPeerConnection({iceServers:[], certificates:[null]}); threw ex
 PASS new webkitRTCPeerConnection({iceServers:[], certificates:[1337]}); threw exception TypeError: Failed to construct 'RTCPeerConnection': Malformed sequence<RTCCertificate>.
 PASS new webkitRTCPeerConnection({iceServers:[], certificates:[certRSA]}, null); did not throw exception.
 PASS new webkitRTCPeerConnection({iceServers:[], certificates:[certECDSA]}, null); did not throw exception.
+PASS certExpired.expires <= new Date().getTime() is true
+PASS new webkitRTCPeerConnection({iceServers:[], certificates:[certExpired]}, null); threw exception InvalidStateError: Failed to construct 'RTCPeerConnection': Expired certificate(s)..
 PASS successfullyParsed is true
 
 TEST COMPLETE

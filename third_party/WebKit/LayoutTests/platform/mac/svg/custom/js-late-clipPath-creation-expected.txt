@@ -5,25 +5,52 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [334, 39, 466, 174],
-        [334, 39, 466, 174],
-        [334, 39, 466, 174],
-        [16, 39, 784, 174],
-        [16, 39, 318, 174],
-        [0, 0, 334, 500]
-      ],
-      "paintInvalidationClients": [
-        "RootInlineBox",
-        "InlineTextBox 'Clipped. INVISIBLE.'",
-        "LayoutSVGRoot svg id='svg-root'",
-        "LayoutSVGContainer g id='content'",
-        "LayoutSVGText text",
-        "RootInlineBox",
-        "LayoutSVGInlineText #text",
-        "InlineTextBox 'Clipped. INVISIBLE.'",
-        "LayoutSVGResourceClipper clipPath id='dynClip'",
-        "LayoutSVGPath path"
+      "paintInvalidations": [
+        {
+          "object": "LayoutSVGText text",
+          "rect": [16, 39, 784, 174],
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutSVGContainer g id='content'",
+          "rect": [334, 39, 466, 174],
+          "reason": "incremental"
+        },
+        {
+          "object": "LayoutSVGInlineText #text",
+          "rect": [334, 39, 466, 174],
+          "reason": "incremental"
+        },
+        {
+          "object": "LayoutSVGRoot svg id='svg-root'",
+          "rect": [334, 39, 466, 174],
+          "reason": "incremental"
+        },
+        {
+          "object": "LayoutSVGPath path",
+          "rect": [0, 0, 334, 500],
+          "reason": "layoutObject insertion"
+        },
+        {
+          "object": "InlineTextBox 'Clipped. INVISIBLE.'",
+          "reason": "incremental"
+        },
+        {
+          "object": "InlineTextBox 'Clipped. INVISIBLE.'",
+          "reason": "full"
+        },
+        {
+          "object": "LayoutSVGResourceClipper clipPath id='dynClip'",
+          "reason": "layoutObject insertion"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        }
       ]
     }
   ]

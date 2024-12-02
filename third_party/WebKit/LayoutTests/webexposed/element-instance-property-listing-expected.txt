@@ -1,4 +1,4 @@
-CONSOLE WARNING: The <keygen> element is deprecated and will be removed in M54, around October 2016. See https://www.chromestatus.com/features/5716060992962560 for more details.
+CONSOLE WARNING: line 18: The <keygen> element is deprecated and will be removed in M54, around October 2016. See https://www.chromestatus.com/features/5716060992962560 for more details.
 This test documents all properties on all element instances.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -27,12 +27,15 @@ namespace http://www.w3.org/1999/xhtml
     property TEXT_NODE
     property accessKey
     property addEventListener
+    property after
     property animate
+    property append
     property appendChild
     property assignedSlot
     property attachShadow
     property attributes
     property baseURI
+    property before
     property blur
     property childElementCount
     property childNodes
@@ -108,8 +111,6 @@ namespace http://www.w3.org/1999/xhtml
     property offsetTop
     property offsetWidth
     property onabort
-    property onautocomplete
-    property onautocompleteerror
     property onbeforecopy
     property onbeforecut
     property onbeforepaste
@@ -189,6 +190,7 @@ namespace http://www.w3.org/1999/xhtml
     property parentElement
     property parentNode
     property prefix
+    property prepend
     property previousElementSibling
     property previousSibling
     property querySelector
@@ -200,6 +202,7 @@ namespace http://www.w3.org/1999/xhtml
     property removeChild
     property removeEventListener
     property replaceChild
+    property replaceWith
     property requestFullscreen
     property requestPointerLock
     property rootNode
@@ -220,10 +223,12 @@ namespace http://www.w3.org/1999/xhtml
     property slot
     property spellcheck
     property style
+    property styleMap
     property tabIndex
     property tagName
     property textContent
     property title
+    property toString
     property translate
     property webkitMatchesSelector
     property webkitRequestFullScreen
@@ -245,7 +250,7 @@ html element a
     property ping
     property port
     property protocol
-    property referrerpolicy
+    property referrerPolicy
     property rel
     property rev
     property search
@@ -272,7 +277,7 @@ html element area
     property ping
     property port
     property protocol
-    property referrerpolicy
+    property referrerPolicy
     property search
     property shape
     property target
@@ -325,6 +330,7 @@ html element audio
     property setSinkId
     property sinkId
     property src
+    property srcObject
     property textTracks
     property videoTracks
     property volume
@@ -476,7 +482,6 @@ html element form
     property name
     property noValidate
     property reportValidity
-    property requestAutocomplete
     property reset
     property submit
     property target
@@ -543,7 +548,7 @@ html element iframe
     property marginHeight
     property marginWidth
     property name
-    property referrerpolicy
+    property referrerPolicy
     property sandbox
     property scrolling
     property src
@@ -565,7 +570,7 @@ html element img
     property name
     property naturalHeight
     property naturalWidth
-    property referrerpolicy
+    property referrerPolicy
     property sizes
     property src
     property srcset
@@ -1071,6 +1076,7 @@ html element video
     property setSinkId
     property sinkId
     property src
+    property srcObject
     property textTracks
     property videoHeight
     property videoTracks
@@ -1113,12 +1119,15 @@ namespace http://www.w3.org/2000/svg
     property TEXT_NODE
     property accessKey
     property addEventListener
+    property after
     property animate
+    property append
     property appendChild
     property assignedSlot
     property attachShadow
     property attributes
     property baseURI
+    property before
     property blur
     property childElementCount
     property childNodes
@@ -1194,8 +1203,6 @@ namespace http://www.w3.org/2000/svg
     property offsetTop
     property offsetWidth
     property onabort
-    property onautocomplete
-    property onautocompleteerror
     property onbeforecopy
     property onbeforecut
     property onbeforepaste
@@ -1275,6 +1282,7 @@ namespace http://www.w3.org/2000/svg
     property parentElement
     property parentNode
     property prefix
+    property prepend
     property previousElementSibling
     property previousSibling
     property querySelector
@@ -1286,6 +1294,7 @@ namespace http://www.w3.org/2000/svg
     property removeChild
     property removeEventListener
     property replaceChild
+    property replaceWith
     property requestFullscreen
     property requestPointerLock
     property rootNode
@@ -1306,10 +1315,12 @@ namespace http://www.w3.org/2000/svg
     property slot
     property spellcheck
     property style
+    property styleMap
     property tabIndex
     property tagName
     property textContent
     property title
+    property toString
     property translate
     property webkitMatchesSelector
     property webkitRequestFullScreen
@@ -1331,7 +1342,7 @@ svg element a
     property ping
     property port
     property protocol
-    property referrerpolicy
+    property referrerPolicy
     property rel
     property rev
     property search

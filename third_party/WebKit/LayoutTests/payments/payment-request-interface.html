@@ -13,7 +13,7 @@ function substitute(originalObject, substituteKeyValuePair) {
 }
 
 function buildItem(optionalSubstituteKeyValuePair) {
-    var item = {'id': 'item_id', 'label': 'Item Description', 'amount': {'currencyCode': 'USD', 'value': '10.00'}};
+    var item = {'id': 'item_id', 'label': 'Item Description', 'amount': {'currency': 'USD', 'value': '10.00'}};
 
     if (optionalSubstituteKeyValuePair) {
         substitute(item, optionalSubstituteKeyValuePair);
@@ -90,16 +90,26 @@ test(function() {
 
 test(function() {
     var request = new PaymentRequest(['foo'], buildDetails('shippingOptions', {'id': 'standard'}));
+    assert_equals(null, request.shippingOption);
+}, 'Shipping option identifier should be null if shipping request is omitted.');
+
+test(function() {
+    var request = new PaymentRequest(['foo'], buildDetails('shippingOptions', {'id': 'standard'}), {'requestShipping': false});
+    assert_equals(null, request.shippingOption);
+}, 'Shipping option identifier should be null if shipping is explicitly not requested.');
+
+test(function() {
+    var request = new PaymentRequest(['foo'], buildDetails('shippingOptions', {'id': 'standard'}), {'requestShipping': true});
     assert_equals('standard', request.shippingOption);
 }, 'Shipping option identifier should default to the single provided option.');
 
 test(function() {
-    var request = new PaymentRequest(['foo'], {"items": [buildItem()]});
+    var request = new PaymentRequest(['foo'], {"items": [buildItem()]}, {'requestShipping': true});
     assert_equals(null, request.shippingOption);
 }, 'Shipping option identifier should be null when no shipping options are provided.');
 
 test(function() {
-    var request = new PaymentRequest(['foo'], {'items': [buildItem()], 'shippingOptions': [buildItem({'id': 'standard'}), buildItem({'id': 'express'})]});
+    var request = new PaymentRequest(['foo'], {'items': [buildItem()], 'shippingOptions': [buildItem({'id': 'standard'}), buildItem({'id': 'express'})]}, {'requestShipping': true});
     assert_equals(null, request.shippingOption);
 }, 'Shipping option identifier should be null at first when multiple shipping options are provided.');
 
@@ -163,25 +173,25 @@ for (var i in detailNames) {
     generate_tests(assert_throws, [
         // Invalid currency code formats.
         ['Invalid currency code US1 should throw', null, function() {
-            new PaymentRequest(['foo'], buildDetails(detailNames[i], {'currencyCode': 'US1'}))
+            new PaymentRequest(['foo'], buildDetails(detailNames[i], {'currency': 'US1'}))
         }],
         ['Invalid currency code US should throw', null, function() {
-            new PaymentRequest(['foo'], buildDetails(detailNames[i], {'currencyCode': 'US'}))
+            new PaymentRequest(['foo'], buildDetails(detailNames[i], {'currency': 'US'}))
         }],
         ['Invalid currency code USDO should throw', null, function() {
-            new PaymentRequest(['foo'], buildDetails(detailNames[i], {'currencyCode': 'USDO'}))
+            new PaymentRequest(['foo'], buildDetails(detailNames[i], {'currency': 'USDO'}))
         }],
         ['Invalid currency code usd should throw', null, function() {
-            new PaymentRequest(['foo'], buildDetails(detailNames[i], {'currencyCode': 'usd'}))
+            new PaymentRequest(['foo'], buildDetails(detailNames[i], {'currency': 'usd'}))
         }],
         ['Empty currency code should throw', null, function() {
-            new PaymentRequest(['foo'], buildDetails(detailNames[i], {'currencyCode': ''}))
+            new PaymentRequest(['foo'], buildDetails(detailNames[i], {'currency': ''}))
         }],
         ['Null currency code should throw', null, function() {
-            new PaymentRequest(['foo'], buildDetails(detailNames[i], {'currencyCode': null}))
+            new PaymentRequest(['foo'], buildDetails(detailNames[i], {'currency': null}))
         }],
         ['Undefined currency code should throw', null, function() {
-            new PaymentRequest(['foo'], buildDetails(detailNames[i], {'currencyCode': undefined}))
+            new PaymentRequest(['foo'], buildDetails(detailNames[i], {'currency': undefined}))
         }],
 
         // Invalid amount formats.

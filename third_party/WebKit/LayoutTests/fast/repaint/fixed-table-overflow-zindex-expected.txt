@@ -5,23 +5,32 @@
       "bounds": [800, 2016],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [100, 100, 100, 100],
-        [0, 100, 100, 100],
-        [0, 100, 100, 100],
-        [0, 0, 200, 200],
-        [0, 0, 200, 200]
-      ],
-      "paintInvalidationClients": [
-        "LayoutTableCell TD id='moveMe' class='fixed'",
-        "LayoutTable (positioned) TABLE",
-        "LayoutTableCell TD",
-        "LayoutTableCell TD",
-        "LayoutTableCell (anonymous)",
-        "LayoutTableCell TD class='red'",
-        "LayoutTableSection TBODY",
-        "LayoutTableCell (anonymous)",
-        "LayoutBlockFlow (positioned) TD id='moveMe' class='fixed'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutTable (positioned) TABLE",
+          "rect": [0, 0, 200, 200],
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutTableSection TBODY",
+          "rect": [0, 0, 200, 200],
+          "reason": "forced by layout"
+        },
+        {
+          "object": "LayoutBlockFlow (positioned) TD id='moveMe' class='fixed'",
+          "rect": [100, 100, 100, 100],
+          "reason": "layoutObject insertion"
+        },
+        {
+          "object": "LayoutTableCell (anonymous)",
+          "rect": [0, 100, 100, 100],
+          "reason": "layoutObject insertion"
+        },
+        {
+          "object": "LayoutTableCell TD id='moveMe' class='fixed'",
+          "rect": [0, 100, 100, 100],
+          "reason": "layoutObject removal"
+        }
       ]
     }
   ]

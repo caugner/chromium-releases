@@ -5,13 +5,20 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [0, 0, 100, 100]
-      ],
-      "paintInvalidationClients": [
-        "LayoutSVGResourceLinearGradient linearGradient id='test'",
-        "LayoutSVGGradientStop stop",
-        "LayoutSVGRect rect"
+      "paintInvalidations": [
+        {
+          "object": "LayoutSVGRect rect",
+          "rect": [0, 0, 100, 100],
+          "reason": "SVG resource change"
+        },
+        {
+          "object": "LayoutSVGGradientStop stop",
+          "reason": "layoutObject insertion"
+        },
+        {
+          "object": "LayoutSVGResourceLinearGradient linearGradient id='test'",
+          "reason": "full"
+        }
       ]
     }
   ]

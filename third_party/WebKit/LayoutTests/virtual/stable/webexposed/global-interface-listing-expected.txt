@@ -1,16 +1,16 @@
-CONSOLE WARNING: 'webkitOfflineAudioContext' is deprecated. Please use 'OfflineAudioContext' instead.
-CONSOLE WARNING: 'webkitAudioContext' is deprecated. Please use 'AudioContext' instead.
-CONSOLE WARNING: 'window.webkitStorageInfo' is deprecated. Please use 'navigator.webkitTemporaryStorage' or 'navigator.webkitPersistentStorage' instead.
-CONSOLE WARNING: 'webkitIDBTransaction' is deprecated. Please use 'IDBTransaction' instead.
-CONSOLE WARNING: 'webkitIDBRequest' is deprecated. Please use 'IDBRequest' instead.
-CONSOLE WARNING: 'webkitIDBObjectStore' is deprecated. Please use 'IDBObjectStore' instead.
-CONSOLE WARNING: 'webkitIDBKeyRange' is deprecated. Please use 'IDBKeyRange' instead.
-CONSOLE WARNING: 'webkitIDBIndex' is deprecated. Please use 'IDBIndex' instead.
-CONSOLE WARNING: 'webkitIDBFactory' is deprecated. Please use 'IDBFactory' instead.
-CONSOLE WARNING: 'webkitIDBDatabase' is deprecated. Please use 'IDBDatabase' instead.
-CONSOLE WARNING: 'webkitIDBCursor' is deprecated. Please use 'IDBCursor' instead.
-CONSOLE WARNING: 'webkitIndexedDB' is deprecated. Please use 'indexedDB' instead.
-CONSOLE WARNING: 'webkitURL' is deprecated. Please use 'URL' instead.
+CONSOLE WARNING: line 94: 'webkitOfflineAudioContext' is deprecated. Please use 'OfflineAudioContext' instead.
+CONSOLE WARNING: line 94: 'webkitAudioContext' is deprecated. Please use 'AudioContext' instead.
+CONSOLE WARNING: line 94: 'window.webkitStorageInfo' is deprecated. Please use 'navigator.webkitTemporaryStorage' or 'navigator.webkitPersistentStorage' instead.
+CONSOLE WARNING: line 94: 'webkitIDBTransaction' is deprecated. Please use 'IDBTransaction' instead.
+CONSOLE WARNING: line 94: 'webkitIDBRequest' is deprecated. Please use 'IDBRequest' instead.
+CONSOLE WARNING: line 94: 'webkitIDBObjectStore' is deprecated. Please use 'IDBObjectStore' instead.
+CONSOLE WARNING: line 94: 'webkitIDBKeyRange' is deprecated. Please use 'IDBKeyRange' instead.
+CONSOLE WARNING: line 94: 'webkitIDBIndex' is deprecated. Please use 'IDBIndex' instead.
+CONSOLE WARNING: line 94: 'webkitIDBFactory' is deprecated. Please use 'IDBFactory' instead.
+CONSOLE WARNING: line 94: 'webkitIDBDatabase' is deprecated. Please use 'IDBDatabase' instead.
+CONSOLE WARNING: line 94: 'webkitIDBCursor' is deprecated. Please use 'IDBCursor' instead.
+CONSOLE WARNING: line 94: 'webkitIndexedDB' is deprecated. Please use 'indexedDB' instead.
+CONSOLE WARNING: line 94: 'webkitURL' is deprecated. Please use 'URL' instead.
 This test documents all interface attributes and methods on the global window object and element instances.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -164,7 +164,16 @@ interface AudioDestinationNode : AudioNode
 interface AudioListener
     attribute @@toStringTag
     getter dopplerFactor
+    getter forwardX
+    getter forwardY
+    getter forwardZ
+    getter positionX
+    getter positionY
+    getter positionZ
     getter speedOfSound
+    getter upX
+    getter upY
+    getter upZ
     method constructor
     method setOrientation
     method setPosition
@@ -188,6 +197,8 @@ interface AudioNode : EventTarget
 interface AudioParam
     attribute @@toStringTag
     getter defaultValue
+    getter maxValue
+    getter minValue
     getter value
     method cancelScheduledValues
     method constructor
@@ -202,10 +213,6 @@ interface AudioProcessingEvent : Event
     getter inputBuffer
     getter outputBuffer
     getter playbackTime
-    method constructor
-interface AutocompleteErrorEvent : Event
-    attribute @@toStringTag
-    getter reason
     method constructor
 interface BarProp
     attribute @@toStringTag
@@ -257,6 +264,9 @@ interface BlobEvent : Event
     attribute @@toStringTag
     getter data
     method constructor
+interface ByteLengthQueuingStrategy
+    method constructor
+    method size
 interface CDATASection : Text
     attribute @@toStringTag
     method constructor
@@ -414,6 +424,7 @@ interface CanvasRenderingContext2D
     attribute @@toStringTag
     getter canvas
     getter fillStyle
+    getter filter
     getter font
     getter globalAlpha
     getter globalCompositeOperation
@@ -473,6 +484,7 @@ interface CanvasRenderingContext2D
     method transform
     method translate
     setter fillStyle
+    setter filter
     setter font
     setter globalAlpha
     setter globalCompositeOperation
@@ -498,6 +510,7 @@ interface ChannelSplitterNode : AudioNode
     method constructor
 interface CharacterData : Node
     attribute @@toStringTag
+    attribute @@unscopables
     getter data
     getter length
     getter nextElementSibling
@@ -550,11 +563,12 @@ interface ConvolverNode : AudioNode
     method constructor
     setter buffer
     setter normalize
+interface CountQueuingStrategy
+    method constructor
+    method size
 interface Credential
     attribute @@toStringTag
-    getter iconURL
     getter id
-    getter name
     getter type
     method constructor
 interface CredentialsContainer
@@ -730,6 +744,7 @@ interface DeviceOrientationEvent : Event
     method initDeviceOrientationEvent
 interface Document : Node
     attribute @@toStringTag
+    attribute @@unscopables
     getter URL
     getter activeElement
     getter anchors
@@ -998,6 +1013,7 @@ interface Document : Node
     setter xmlVersion
 interface DocumentFragment : Node
     attribute @@toStringTag
+    attribute @@unscopables
     getter childElementCount
     getter children
     getter firstElementChild
@@ -1008,6 +1024,7 @@ interface DocumentFragment : Node
     method querySelectorAll
 interface DocumentType : Node
     attribute @@toStringTag
+    attribute @@unscopables
     getter name
     getter publicId
     getter systemId
@@ -1028,6 +1045,7 @@ interface DynamicsCompressorNode : AudioNode
     method constructor
 interface Element : Node
     attribute @@toStringTag
+    attribute @@unscopables
     getter attributes
     getter childElementCount
     getter children
@@ -1190,7 +1208,7 @@ interface EventTarget
     method constructor
     method dispatchEvent
     method removeEventListener
-interface FederatedCredential : Credential
+interface FederatedCredential : SiteBoundCredential
     attribute @@toStringTag
     getter protocol
     getter provider
@@ -1335,7 +1353,7 @@ interface HTMLAnchorElement : HTMLElement
     getter ping
     getter port
     getter protocol
-    getter referrerpolicy
+    getter referrerPolicy
     getter rel
     getter rev
     getter search
@@ -1360,7 +1378,7 @@ interface HTMLAnchorElement : HTMLElement
     setter ping
     setter port
     setter protocol
-    setter referrerpolicy
+    setter referrerPolicy
     setter rel
     setter rev
     setter search
@@ -1384,7 +1402,7 @@ interface HTMLAreaElement : HTMLElement
     getter ping
     getter port
     getter protocol
-    getter referrerpolicy
+    getter referrerPolicy
     getter search
     getter shape
     getter target
@@ -1403,7 +1421,7 @@ interface HTMLAreaElement : HTMLElement
     setter ping
     setter port
     setter protocol
-    setter referrerpolicy
+    setter referrerPolicy
     setter search
     setter shape
     setter target
@@ -1927,7 +1945,7 @@ interface HTMLIFrameElement : HTMLElement
     getter marginHeight
     getter marginWidth
     getter name
-    getter referrerpolicy
+    getter referrerPolicy
     getter sandbox
     getter scrolling
     getter src
@@ -1943,7 +1961,7 @@ interface HTMLIFrameElement : HTMLElement
     setter marginHeight
     setter marginWidth
     setter name
-    setter referrerpolicy
+    setter referrerPolicy
     setter sandbox
     setter scrolling
     setter src
@@ -1965,7 +1983,7 @@ interface HTMLImageElement : HTMLElement
     getter name
     getter naturalHeight
     getter naturalWidth
-    getter referrerpolicy
+    getter referrerPolicy
     getter sizes
     getter src
     getter srcset
@@ -1985,7 +2003,7 @@ interface HTMLImageElement : HTMLElement
     setter longDesc
     setter lowsrc
     setter name
-    setter referrerpolicy
+    setter referrerPolicy
     setter sizes
     setter src
     setter srcset
@@ -2241,6 +2259,7 @@ interface HTMLMediaElement : HTMLElement
     getter seeking
     getter sinkId
     getter src
+    getter srcObject
     getter textTracks
     getter volume
     getter webkitAudioDecodedByteCount
@@ -2266,6 +2285,7 @@ interface HTMLMediaElement : HTMLElement
     setter playbackRate
     setter preload
     setter src
+    setter srcObject
     setter volume
 interface HTMLMenuElement : HTMLElement
     attribute @@toStringTag
@@ -2872,6 +2892,7 @@ interface IDBKeyRange
     getter upper
     getter upperOpen
     method constructor
+    method includes
 interface IDBObjectStore
     attribute @@toStringTag
     getter autoIncrement
@@ -2949,6 +2970,7 @@ interface ImageBitmap
     attribute @@toStringTag
     getter height
     getter width
+    method close
     method constructor
 interface ImageData
     attribute @@toStringTag
@@ -2963,6 +2985,7 @@ interface IntersectionObserver
     attribute @@toStringTag
     getter root
     getter rootMargin
+    getter thresholds
     method constructor
     method disconnect
     method observe
@@ -3063,7 +3086,7 @@ interface MIDIPort : EventTarget
     method constructor
     method open
     setter onstatechange
-interface MediaDevices
+interface MediaDevices : EventTarget
     attribute @@toStringTag
     method constructor
     method enumerateDevices
@@ -3514,7 +3537,7 @@ interface PageTransitionEvent : Event
     attribute @@toStringTag
     getter persisted
     method constructor
-interface PasswordCredential : Credential
+interface PasswordCredential : SiteBoundCredential
     attribute @@toStringTag
     getter additionalData
     getter idName
@@ -3580,6 +3603,17 @@ interface PerformanceNavigation
     getter redirectCount
     getter type
     method constructor
+interface PerformanceObserver
+    attribute @@toStringTag
+    method constructor
+    method disconnect
+    method observe
+interface PerformanceObserverEntryList
+    attribute @@toStringTag
+    method constructor
+    method getEntries
+    method getEntriesByName
+    method getEntriesByType
 interface PerformanceResourceTiming : PerformanceEntry
     attribute @@toStringTag
     getter connectEnd
@@ -3796,15 +3830,12 @@ interface Range
     method setStartBefore
     method surroundContents
     method toString
-interface ReadableByteStream
-    attribute @@toStringTag
-    method cancel
-    method constructor
-    method getReader
 interface ReadableStream
+    getter locked
     method cancel
     method constructor
     method getReader
+    method tee
 interface Request
     attribute @@toStringTag
     getter bodyUsed
@@ -3815,6 +3846,7 @@ interface Request
     getter mode
     getter redirect
     getter referrer
+    getter referrerPolicy
     getter url
     method arrayBuffer
     method blob
@@ -5066,6 +5098,11 @@ interface SharedWorker : EventTarget
     getter workerStart
     method constructor
     setter onerror
+interface SiteBoundCredential : Credential
+    attribute @@toStringTag
+    getter iconURL
+    getter name
+    method constructor
 interface SourceBuffer : EventTarget
     attribute @@toStringTag
     getter appendWindowEnd
@@ -6206,6 +6243,7 @@ interface webkitIDBKeyRange
     getter upper
     getter upperOpen
     method constructor
+    method includes
 interface webkitIDBObjectStore
     attribute @@toStringTag
     getter autoIncrement

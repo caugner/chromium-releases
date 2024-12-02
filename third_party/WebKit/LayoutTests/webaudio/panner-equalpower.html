@@ -31,7 +31,9 @@
           // Create offline audio context.
           context = new OfflineAudioContext(2, sampleRate * renderLengthSeconds, sampleRate);
 
-          createTestAndRun(context, nodesToCreate, 1);
+          createTestAndRun(context, nodesToCreate, 1, function (panner, x, y, z) {
+            panner.setPosition(x, y, z);
+          });
       }
 
       runTest();

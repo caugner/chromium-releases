@@ -5,123 +5,443 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [45, 182, 3, 20],
-        [8, 166, 92, 35],
-        [8, 166, 90, 35],
-        [5, 163, 103, 41],
-        [5, 163, 98, 41],
-        [5, 163, 96, 41]
-      ],
-      "paintInvalidationClients": [
-        "InlineTextBox 'Lorem ipsum'",
-        "InlineTextBox ' '",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox ''",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "LayoutText #text",
-        "InlineTextBox 'Lorem ipsum'",
-        "InlineTextBox ' '",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'dolor sit amet'",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'Lorem ipsum'",
-        "InlineTextBox ' '",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox ''",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'Lorem ipsum'",
-        "InlineTextBox ' '",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox ''",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'Lorem ipsum'",
-        "InlineTextBox ' '",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox ''",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'Lorem ipsum'",
-        "InlineTextBox ' '",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox ''",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'Lorem ipsum'",
-        "InlineTextBox ' '",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'dolor sit'",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'Lorem ipsum'",
-        "InlineTextBox ' '",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'dolor sit'",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'Lorem ipsum'",
-        "InlineTextBox ' '",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox ''",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'Lorem ipsum'",
-        "InlineTextBox ' '",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox ''",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'Lorem ipsum'",
-        "InlineTextBox ' '",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox ''",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'Lorem ipsum'",
-        "InlineTextBox ' '",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox ''",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'Lorem ipsum'",
-        "InlineTextBox ' '",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'dolor'",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'Lorem ipsum'",
-        "InlineTextBox ' '",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "InlineTextBox 'dolor'",
-        "InlineFlowBox",
-        "RootInlineBox",
-        "LayoutBlockFlow DIV",
-        "LayoutInline SPAN id='test'",
-        "InlineFlowBox",
-        "InlineFlowBox",
-        "LayoutText #text",
-        "InlineTextBox 'Lorem ipsum'",
-        "InlineTextBox ' '",
-        "InlineTextBox 'dolor\u00A0'",
-        "LayoutBlockFlow DIV"
+      "paintInvalidations": [
+        {
+          "object": "LayoutBlockFlow DIV",
+          "rect": [5, 163, 103, 41],
+          "reason": "invalidate paint rectangle"
+        },
+        {
+          "object": "LayoutInline SPAN id='test'",
+          "rect": [5, 163, 98, 41],
+          "reason": "outline"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [8, 166, 92, 35],
+          "reason": "full"
+        },
+        {
+          "object": "LayoutBlockFlow DIV",
+          "rect": [45, 182, 3, 20],
+          "reason": "invalidate paint rectangle"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "outline"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "outline"
+        },
+        {
+          "object": "InlineTextBox ' '",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ' '",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ' '",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ' '",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ' '",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ' '",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ' '",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ' '",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ' '",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ' '",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ' '",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ' '",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ' '",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ' '",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ' '",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ''",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ''",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ''",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ''",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ''",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ''",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ''",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ''",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ''",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Lorem ipsum'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Lorem ipsum'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Lorem ipsum'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Lorem ipsum'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Lorem ipsum'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Lorem ipsum'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Lorem ipsum'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Lorem ipsum'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Lorem ipsum'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Lorem ipsum'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Lorem ipsum'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Lorem ipsum'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Lorem ipsum'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Lorem ipsum'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Lorem ipsum'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'dolor sit amet'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'dolor sit'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'dolor sit'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'dolor'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'dolor'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'dolor\u00A0'",
+          "reason": "full"
+        },
+        {
+          "object": "LayoutText #text",
+          "reason": "layoutObject removal"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        }
       ]
     }
   ]

@@ -5,21 +5,52 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [8, 8, 300, 100]
-      ],
-      "paintInvalidationClients": [
-        "LayoutSVGResourcePattern pattern id='pat'",
-        "LayoutSVGText text",
-        "RootInlineBox",
-        "LayoutSVGInlineText #text",
-        "InlineTextBox 'X'",
-        "LayoutSVGTSpan tspan",
-        "InlineFlowBox",
-        "LayoutSVGInlineText #text",
-        "InlineTextBox 'Y'",
-        "LayoutSVGInlineText #text",
-        "InlineTextBox 'Z'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutSVGText text",
+          "rect": [8, 8, 300, 100],
+          "reason": "SVG resource change"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "none"
+        },
+        {
+          "object": "InlineTextBox 'X'",
+          "reason": "none"
+        },
+        {
+          "object": "InlineTextBox 'Y'",
+          "reason": "none"
+        },
+        {
+          "object": "InlineTextBox 'Z'",
+          "reason": "none"
+        },
+        {
+          "object": "LayoutSVGInlineText #text",
+          "reason": "none"
+        },
+        {
+          "object": "LayoutSVGInlineText #text",
+          "reason": "none"
+        },
+        {
+          "object": "LayoutSVGInlineText #text",
+          "reason": "none"
+        },
+        {
+          "object": "LayoutSVGResourcePattern pattern id='pat'",
+          "reason": "full"
+        },
+        {
+          "object": "LayoutSVGTSpan tspan",
+          "reason": "none"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        }
       ]
     }
   ]

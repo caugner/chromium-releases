@@ -5,45 +5,117 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [115, 114, 37, 18],
-        [115, 84, 37, 48],
-        [37, 132, 37, 18],
-        [37, 132, 37, 18],
-        [8, 132, 192, 71],
-        [8, 78, 200, 200],
-        [8, 16, 784, 262],
-        [7, 114, 201, 89],
-        [7, 78, 201, 200],
-        [7, 16, 785, 262]
-      ],
-      "paintInvalidationClients": [
-        "InlineTextBox 'convallis,\n'",
-        "InlineTextBox 'augue'",
-        "RootInlineBox",
-        "InlineTextBox 'purus'",
-        "InlineFlowBox",
-        "InlineTextBox ' eleifend lacus,'",
-        "RootInlineBox",
-        "InlineTextBox 'at sagittis eros leo pulvinar'",
-        "RootInlineBox",
-        "InlineTextBox 'velit. Integer sollicitudin nisi'",
-        "RootInlineBox",
-        "InlineTextBox 'ut urna blandit convallis.'",
-        "RootInlineBox",
-        "LayoutBlockFlow BODY",
-        "LayoutBlockFlow DIV",
-        "RootInlineBox",
-        "LayoutInline SPAN id='t'",
-        "InlineFlowBox",
-        "LayoutText #text",
-        "InlineTextBox 'purus'",
-        "LayoutText #text",
-        "InlineTextBox ' eleifend'",
-        "InlineTextBox 'lacus, at sagittis eros leo'",
-        "InlineTextBox 'pulvinar velit. Integer'",
-        "InlineTextBox 'sollicitudin nisi ut urna blandit'",
-        "InlineTextBox 'convallis.'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutBlockFlow DIV",
+          "rect": [7, 84, 201, 119],
+          "reason": "invalidate paint rectangle"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [7, 114, 201, 89],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutInline SPAN id='t'",
+          "rect": [115, 84, 37, 48],
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [115, 114, 37, 18],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutInline SPAN id='t'",
+          "rect": [37, 132, 37, 18],
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [37, 132, 37, 18],
+          "reason": "bounds change"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "full"
+        },
+        {
+          "object": "InlineFlowBox",
+          "reason": "style change"
+        },
+        {
+          "object": "InlineTextBox ' eleifend lacus,'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox ' eleifend'",
+          "reason": "bounds change"
+        },
+        {
+          "object": "InlineTextBox 'at sagittis eros leo pulvinar'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'augue'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'convallis,\n'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'convallis.'",
+          "reason": "bounds change"
+        },
+        {
+          "object": "InlineTextBox 'lacus, at sagittis eros leo'",
+          "reason": "bounds change"
+        },
+        {
+          "object": "InlineTextBox 'pulvinar velit. Integer'",
+          "reason": "bounds change"
+        },
+        {
+          "object": "InlineTextBox 'purus'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'purus'",
+          "reason": "bounds change"
+        },
+        {
+          "object": "InlineTextBox 'sollicitudin nisi ut urna blandit'",
+          "reason": "bounds change"
+        },
+        {
+          "object": "InlineTextBox 'ut urna blandit convallis.'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'velit. Integer sollicitudin nisi'",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        }
       ]
     }
   ]

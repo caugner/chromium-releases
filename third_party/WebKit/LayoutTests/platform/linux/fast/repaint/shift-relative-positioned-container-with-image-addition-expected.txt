@@ -5,37 +5,88 @@
       "bounds": [785, 836],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [58, 236, 489, 537],
-        [58, 142, 489, 537],
-        [18, 102, 712, 74],
-        [10, 94, 728, 90],
-        [10, 94, 728, 90],
-        [10, 94, 728, 90],
-        [8, 186, 769, 642],
-        [8, 186, 769, 642],
-        [8, 92, 769, 642],
-        [8, 92, 769, 642],
-        [8, 92, 732, 94],
-        [0, 742, 785, 94],
-        [0, 0, 785, 836],
-        [0, 0, 785, 742]
-      ],
-      "paintInvalidationClients": [
-        "VerticalScrollbar",
-        "LayoutView #document",
-        "LayoutBlockFlow HTML",
-        "LayoutIFrame IFRAME id='iframe'",
-        "LayoutView #document",
-        "LayoutView #document",
-        "LayoutBlockFlow HTML",
-        "LayoutBlockFlow BODY",
-        "LayoutView #document",
-        "LayoutBlockFlow (relative positioned) DIV class='relative'",
-        "LayoutBlockFlow (relative positioned) DIV class='relative paddingTop'",
-        "RootInlineBox",
-        "LayoutImage IMG",
-        "LayoutText #text"
+      "paintInvalidations": [
+        {
+          "object": "LayoutBlockFlow HTML",
+          "rect": [0, 0, 785, 836],
+          "reason": "forced by layout"
+        },
+        {
+          "object": "LayoutView #document",
+          "rect": [0, 742, 785, 94],
+          "reason": "incremental"
+        },
+        {
+          "object": "LayoutBlockFlow (relative positioned) DIV class='relative paddingTop'",
+          "rect": [8, 186, 769, 642],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutBlockFlow (relative positioned) DIV class='relative'",
+          "rect": [8, 186, 769, 642],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutBlockFlow (relative positioned) DIV class='relative paddingTop'",
+          "rect": [8, 92, 769, 642],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutBlockFlow (relative positioned) DIV class='relative'",
+          "rect": [8, 92, 769, 642],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutIFrame IFRAME id='iframe'",
+          "rect": [8, 92, 732, 94],
+          "reason": "layoutObject insertion"
+        },
+        {
+          "object": "LayoutBlockFlow HTML",
+          "rect": [10, 94, 728, 90],
+          "reason": "forced by layout"
+        },
+        {
+          "object": "LayoutView #document",
+          "rect": [10, 94, 728, 90],
+          "reason": "full"
+        },
+        {
+          "object": "LayoutView #document",
+          "rect": [10, 94, 728, 90],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutBlockFlow BODY",
+          "rect": [18, 102, 712, 74],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutImage IMG",
+          "rect": [58, 236, 489, 537],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutImage IMG",
+          "rect": [58, 142, 489, 537],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutText #text",
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutView #document",
+          "reason": "scroll"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "VerticalScrollbar",
+          "reason": "full"
+        }
       ]
     }
   ]
