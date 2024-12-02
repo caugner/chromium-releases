@@ -27,6 +27,26 @@ function waitFor(condition, error_message = 'Reaches the maximum frames.') {
   });
 }
 
+// Returns a promise that resolves when the given condition holds for 100
+// animation frames or rejects if the condition changes to false within 100
+// animation frames.
+function conditionHolds(condition, error_message = 'Condition is not true anymore.') {
+  const MAX_FRAME = 100;
+  return new Promise((resolve, reject) => {
+    function tick(frames) {
+      // We requestAnimationFrame either for 100 frames or until condition is
+      // violated.
+      if (frames >= MAX_FRAME)
+        resolve();
+      else if (!condition())
+        reject(error_message);
+      else
+        requestAnimationFrame(tick.bind(this, frames + 1));
+    }
+    tick(0);
+  });
+}
+
 function waitForAnimationEnd(getValue, max_frame, max_unchanged_frame) {
   const MAX_FRAME = max_frame;
   const MAX_UNCHANGED_FRAME = max_unchanged_frame;
@@ -57,6 +77,7 @@ const GestureSourceType = {
   DEFAULT_INPUT: 0,
   TOUCH_INPUT: 1,
   MOUSE_INPUT: 2,
+  TOUCHPAD_INPUT:2,
   PEN_INPUT: 3
 };
 
@@ -68,7 +89,7 @@ const GestureSourceType = {
 // the synthetic gesture code modified to guarantee the single update behavior.
 const SPEED_INSTANT = 200000;
 
-function smoothScroll(pixels_to_scroll, start_x, start_y, gesture_source_type, direction, speed_in_pixels_s) {
+function smoothScroll(pixels_to_scroll, start_x, start_y, gesture_source_type, direction, speed_in_pixels_s, precise_scrolling_deltas, scroll_by_page) {
   return new Promise((resolve, reject) => {
     if (chrome && chrome.gpuBenchmarking) {
       chrome.gpuBenchmarking.smoothScrollBy(pixels_to_scroll,
@@ -77,7 +98,9 @@ function smoothScroll(pixels_to_scroll, start_x, start_y, gesture_source_type, d
                                             start_y,
                                             gesture_source_type,
                                             direction,
-                                            speed_in_pixels_s);
+                                            speed_in_pixels_s,
+                                            precise_scrolling_deltas,
+                                            scroll_by_page);
     } else {
       reject('This test requires chrome.gpuBenchmarking');
     }
@@ -103,7 +126,7 @@ function pixelsPerTick() {
   return 53;
 }
 
-function swipe(pixels_to_scroll, start_x, start_y, direction, speed_in_pixels_s) {
+function swipe(pixels_to_scroll, start_x, start_y, direction, speed_in_pixels_s, fling_velocity, gesture_source_type) {
   return new Promise((resolve, reject) => {
     if (chrome && chrome.gpuBenchmarking) {
       chrome.gpuBenchmarking.swipe(direction,
@@ -111,7 +134,9 @@ function swipe(pixels_to_scroll, start_x, start_y, direction, speed_in_pixels_s)
                                    resolve,
                                    start_x,
                                    start_y,
-                                   speed_in_pixels_s);
+                                   speed_in_pixels_s,
+                                   fling_velocity,
+                                   gesture_source_type);
     } else {
       reject('This test requires chrome.gpuBenchmarking');
     }
@@ -177,15 +202,15 @@ function mouseUpAt(xPosition, yPosition) {
 }
 
 // Simulate a mouse click on point.
-function mouseClickOn(x, y) {
+function mouseClickOn(x, y, button = 'left') {
   return new Promise((resolve, reject) => {
     if (chrome && chrome.gpuBenchmarking) {
       let pointerActions = [{
         source: 'mouse',
         actions: [
           { 'name': 'pointerMove', 'x': x, 'y': y },
-          { 'name': 'pointerDown', 'x': x, 'y': y },
-          { 'name': 'pointerUp' },
+          { 'name': 'pointerDown', 'x': x, 'y': y, 'button': button },
+          { 'name': 'pointerUp', 'button': button },
         ]
       }];
       chrome.gpuBenchmarking.pointerActionSequence(pointerActions, resolve);
@@ -233,6 +258,78 @@ function mouseDragAndDrop(start_x, start_y, end_x, end_y, button = 'left') {
     } else {
       reject('This test requires chrome.gpuBenchmarking');
     }
+  });
+}
+
+// Helper functions used in some of the gesture scroll layouttests.
+function recordScroll() {
+  scrollEventsOccurred++;
+}
+function notScrolled() {
+  return scrolledElement.scrollTop == 0 && scrolledElement.scrollLeft == 0;
+}
+function checkScrollOffset() {
+  // To avoid flakiness up to two pixels off per gesture is allowed.
+  var pixels = 2 * (gesturesOccurred + 1);
+  var result = approx_equals(scrolledElement.scrollTop, scrollAmountY[gesturesOccurred], pixels) &&
+      approx_equals(scrolledElement.scrollLeft, scrollAmountX[gesturesOccurred], pixels);
+  if (result)
+    gesturesOccurred++;
+
+  return result;
+}
+
+// This promise gets resolved in iframe onload.
+var iframeLoadResolve;
+iframeOnLoadPromise = new Promise(function(resolve) {
+  iframeLoadResolve = resolve;
+});
+
+// Include run-after-layout-and-paint.js to use this promise.
+function WaitForlayoutAndPaint() {
+  return new Promise((resolve, reject) => {
+    if (typeof runAfterLayoutAndPaint !== 'undefined')
+      runAfterLayoutAndPaint(resolve);
+    else
+      reject('This test requires run-after-layout-and-paint.js');
+  });
+}
+
+function touchTapOn(xPosition, yPosition) {
+  return new Promise(function(resolve, reject) {
+    if (window.chrome && chrome.gpuBenchmarking) {
+      chrome.gpuBenchmarking.pointerActionSequence( [
+        {source: 'touch',
+         actions: [
+            { name: 'pointerDown', x: xPosition, y: yPosition },
+            { name: 'pointerUp' }
+        ]}], resolve);
+    } else {
+      reject();
+    }
+  });
+}
+
+function doubleTapAt(xPosition, yPosition) {
+  // This comes from config constants in gesture_detector.cc.
+  const DOUBLE_TAP_MINIMUM_DURATION_S = 0.04;
+
+  return new Promise(function(resolve, reject) {
+    if (!window.chrome || !chrome.gpuBenchmarking) {
+      reject("chrome.gpuBenchmarking not found.");
+      return;
+    }
+
+    chrome.gpuBenchmarking.pointerActionSequence( [{
+      source: 'touch',
+      actions: [
+        { name: 'pointerDown', x: xPosition, y: yPosition },
+        { name: 'pointerUp' },
+        { name: 'pause', duration: DOUBLE_TAP_MINIMUM_DURATION_S },
+        { name: 'pointerDown', x: xPosition, y: yPosition },
+        { name: 'pointerUp' }
+      ]
+    }], resolve);
   });
 }
 

@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/chrome_content_browser_client_chromeos_part.h"
 
+#include "base/feature_list.h"
+#include "chrome/browser/browser_features.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/ash/tablet_mode_client.h"
@@ -62,6 +64,12 @@ void ChromeContentBrowserClientChromeOsPart::OverrideWebkitPrefs(
   // apps.
   content::WebContents* contents =
       content::WebContents::FromRenderViewHost(rvh);
+
+  // A webcontents may not be the delegate of the render view host such as in
+  // the case of interstitial pages.
+  if (!contents)
+    return;
+
   auto* browser = chrome::FindBrowserWithWebContents(contents);
   if (!browser || browser->is_app())
     return;
@@ -70,7 +78,8 @@ void ChromeContentBrowserClientChromeOsPart::OverrideWebkitPrefs(
   if (ShouldExcludePage(contents))
     return;
 
-  web_prefs->double_tap_to_zoom_enabled = true;
+  web_prefs->double_tap_to_zoom_enabled =
+      base::FeatureList::IsEnabled(features::kDoubleTapToZoomInTabletMode);
   web_prefs->text_autosizing_enabled = true;
   web_prefs->shrinks_viewport_contents_to_fit = true;
   web_prefs->main_frame_resizes_are_orientation_changes = true;

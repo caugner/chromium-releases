@@ -134,6 +134,7 @@ namespace http://www.w3.org/1999/xhtml
     property insertAdjacentHTML
     property insertAdjacentText
     property insertBefore
+    property invisible
     property isConnected
     property isContentEditable
     property isDefaultNamespace
@@ -160,6 +161,7 @@ namespace http://www.w3.org/1999/xhtml
     property offsetTop
     property offsetWidth
     property onabort
+    property onactivateinvisible
     property onauxclick
     property onbeforecopy
     property onbeforecut
@@ -221,6 +223,7 @@ namespace http://www.w3.org/1999/xhtml
     property onpointermove
     property onpointerout
     property onpointerover
+    property onpointerrawmove
     property onpointerup
     property onprogress
     property onratechange
@@ -305,6 +308,7 @@ html element a
     property host
     property hostname
     property href
+    property hrefTranslate
     property hreflang
     property name
     property origin
@@ -326,7 +330,6 @@ html element a
 html element abbr
 html element acronym
 html element address
-html element applet
 html element area
     property alt
     property coords
@@ -412,7 +415,6 @@ html element base
 html element basefont
 html element bdi
 html element bdo
-html element bgsound
 html element big
 html element blockquote
     property cite
@@ -488,7 +490,6 @@ html element colgroup
     property span
     property vAlign
     property width
-html element command
 html element content
     property getDistributedNodes
     property select
@@ -636,7 +637,6 @@ html element iframe
     property src
     property srcdoc
     property width
-html element image
 html element img
     property align
     property alt
@@ -649,6 +649,7 @@ html element img
     property height
     property hspace
     property importance
+    property intrinsicSize
     property isMap
     property longDesc
     property lowsrc
@@ -726,7 +727,6 @@ html element ins
     property cite
     property dateTime
 html element kbd
-html element keygen
 html element label
     property control
     property form
@@ -866,6 +866,8 @@ html element param
     property valueType
 html element picture
 html element plaintext
+html element portal
+    property src
 html element pre
     property width
 html element progress
@@ -891,6 +893,7 @@ html element script
     property htmlFor
     property integrity
     property noModule
+    property referrerPolicy
     property src
     property text
     property type
@@ -923,6 +926,7 @@ html element select
 html element shadow
     property getDistributedNodes
 html element slot
+    property assign
     property assignedElements
     property assignedNodes
     property name
@@ -1121,6 +1125,7 @@ html element video
     property error
     property getVideoPlaybackQuality
     property height
+    property intrinsicSize
     property load
     property loop
     property mediaKeys
@@ -1144,6 +1149,7 @@ html element video
     property seekable
     property seeking
     property setMediaKeys
+    property setPictureInPictureControls
     property setSinkId
     property sinkId
     property src
@@ -1288,6 +1294,7 @@ namespace http://www.w3.org/2000/svg
     property insertAdjacentHTML
     property insertAdjacentText
     property insertBefore
+    property invisible
     property isConnected
     property isDefaultNamespace
     property isEqualNode
@@ -1307,6 +1314,7 @@ namespace http://www.w3.org/2000/svg
     property nonce
     property normalize
     property onabort
+    property onactivateinvisible
     property onauxclick
     property onbeforecopy
     property onbeforecut
@@ -1368,6 +1376,7 @@ namespace http://www.w3.org/2000/svg
     property onpointermove
     property onpointerout
     property onpointerover
+    property onpointerrawmove
     property onpointerup
     property onprogress
     property onratechange

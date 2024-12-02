@@ -19,14 +19,14 @@ const kTexts = [
   { text: "傳統是假的", rtl: false },
   { text: "フェミニズム", rtl: false },
   { text: "ليس", rtl: true },
+  { text: "ليس في اسمنا", rtl: true },
   { text: "\u202EHello", rtl: true },
-  // TODO(davidqu): Fix the following edge cases:
-  //{ text: "الله‎", rtl: true }, // Special ligatures.
-  //{ text: "ليس في اسمنا", rtl: true }, // RTL only works for single "words".
-  //{ text: "\u202EHello World", rtl: true },
-  //{ text: "🏁", rtl: false }, // One glyph with two "characters".
-  //{ text: "एक आम भाषा", rtl: false }, // Special post-modifying characters.
-  //{ text: "a\u0301", rtl: true }, // Combining diacritical marks
+  { text: "\u202EHello World", rtl: true },
+  { text: "الله", rtl: true }, // Special ligatures.
+  { text: "اين المكتبة؟", rtl: true }, // Special ligatures.
+  { text: "🏁🎶🏁", rtl: false }, // One glyph with two "characters".
+  { text: "एक आम भाषा", rtl: false }, // Special post-modifying characters.
+  { text: "a\u0301", rtl: false }, // Combining diacritical marks
 ]
 
 function forEachExample(fn) {
@@ -35,6 +35,15 @@ function forEachExample(fn) {
       fn(ex, align);
     }
   }
+}
+
+function isNonIncreasing(array) {
+  for (var i = 1; i < array.length; i++) {
+    if (array[i] > array[i-1]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function isNonDecreasing(array) {
@@ -66,11 +75,23 @@ function testAllPositive(ctx) {
   });
 }
 
-function testNonDecreasing(ctx) {
+function testNonIncreasingForRtl(ctx) {
   forEachExample((ex, align) => {
-      const tm = getTextMetrics(ctx, ex.text, align, ex.rtl ? "rtl" : "ltr");
-      assert_true(isNonDecreasing(tm.advances),
-       "Advances must be non-decreasing (" + ex.text + ")");
+      if (ex.rtl) {
+        const tm = getTextMetrics(ctx, ex.text, align, ex.rtl ? "rtl" : "ltr");
+        assert_true(isNonIncreasing(tm.advances),
+         "RTL advances must be non-increasing (" + ex.text + ")");
+      }
+  });
+}
+
+function testNonDecreasingForLtr(ctx) {
+  forEachExample((ex, align) => {
+      if (! ex.rtl) {
+        const tm = getTextMetrics(ctx, ex.text, align, ex.rtl ? "rtl" : "ltr");
+        assert_true(isNonDecreasing(tm.advances),
+         "LTR advances must be non-decreasing (" + ex.text + ")");
+      }
   });
 }
 
@@ -85,7 +106,8 @@ function testLastAdvanceLessThanWith(ctx) {
 function testAdvances(ctx) {
   testEmptyStringReturnsEmptyAdvances(ctx);
   testAllPositive(ctx);
-  testNonDecreasing(ctx);
+  testNonIncreasingForRtl(ctx);
+  testNonDecreasingForLtr(ctx);
   testLastAdvanceLessThanWith(ctx);
 }
 
