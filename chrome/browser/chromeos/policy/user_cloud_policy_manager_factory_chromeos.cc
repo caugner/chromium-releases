@@ -15,12 +15,12 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/user_cloud_external_data_manager.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_store_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/policy/schema_registry_service.h"
 #include "chrome/browser/policy/schema_registry_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -125,19 +125,19 @@ scoped_ptr<UserCloudPolicyManagerChromeOS>
   // |user| should never be NULL except for the signin profile. This object is
   // created as part of the Profile creation, which happens right after
   // sign-in. The just-signed-in User is the active user during that time.
-  user_manager::User* user =
+  const user_manager::User* user =
       chromeos::ProfileHelper::Get()->GetUserByProfile(profile);
   CHECK(user);
 
-  // Only users with gaia accounts have user cloud policy.
-  // USER_TYPE_RETAIL_MODE, USER_TYPE_KIOSK_APP, USER_TYPE_GUEST
-  // and USER_TYPE_SUPERVISED are not signed in and can't authenticate the
-  // policy registration.
-  // USER_TYPE_PUBLIC_ACCOUNT gets its policy from the
-  // DeviceLocalAccountPolicyService.
-  // Non-managed domains will be skipped by the below check
+  // User policy exists for enterprise accounts only:
+  // - For regular enterprise users (those who have a GAIA account), a
+  //   |UserCloudPolicyManagerChromeOS| is created here.
+  // - For device-local accounts, policy is provided by
+  //   |DeviceLocalAccountPolicyService|.
+  // All other user types do not have user policy.
   const std::string& username = user->email();
   if (!user->HasGaiaAccount() ||
+      user->IsSupervised() ||
       BrowserPolicyConnector::IsNonEnterpriseUser(username)) {
     return scoped_ptr<UserCloudPolicyManagerChromeOS>();
   }
@@ -212,9 +212,8 @@ scoped_ptr<UserCloudPolicyManagerChromeOS>
 
   bool wildcard_match = false;
   if (connector->IsEnterpriseManaged() &&
-      chromeos::LoginUtils::IsWhitelisted(username, &wildcard_match) &&
-      wildcard_match &&
-      !connector->IsNonEnterpriseUser(username)) {
+      chromeos::CrosSettings::IsWhitelisted(username, &wildcard_match) &&
+      wildcard_match && !connector->IsNonEnterpriseUser(username)) {
     manager->EnableWildcardLoginCheck(username);
   }
 

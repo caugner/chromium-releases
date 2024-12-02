@@ -9,6 +9,7 @@
 #include "cc/debug/lap_timer.h"
 #include "cc/output/context_provider.h"
 #include "cc/resources/bitmap_tile_task_worker_pool.h"
+#include "cc/resources/gpu_rasterizer.h"
 #include "cc/resources/gpu_tile_task_worker_pool.h"
 #include "cc/resources/one_copy_tile_task_worker_pool.h"
 #include "cc/resources/pixel_buffer_tile_task_worker_pool.h"
@@ -89,6 +90,8 @@ class PerfContextProvider : public ContextProvider {
         reinterpret_cast<GrBackendContext>(null_interface.get())));
     return gr_context_.get();
   }
+  void SetupLock() override {}
+  base::Lock* GetLock() override { return &context_lock_; }
   bool IsContextLost() override { return false; }
   void VerifyContexts() override {}
   void DeleteCachedResources() override {}
@@ -103,6 +106,7 @@ class PerfContextProvider : public ContextProvider {
   scoped_ptr<PerfGLES2Interface> context_gl_;
   skia::RefPtr<class GrContext> gr_context_;
   TestContextSupport support_;
+  base::Lock context_lock_;
 };
 
 enum TileTaskWorkerPoolType {
@@ -202,7 +206,7 @@ class TileTaskWorkerPoolPerfTestBase {
     for (unsigned i = 0; i < num_raster_tasks; ++i) {
       scoped_ptr<ScopedResource> resource(
           ScopedResource::Create(resource_provider_.get()));
-      resource->Allocate(size, ResourceProvider::TextureHintImmutable,
+      resource->Allocate(size, ResourceProvider::TEXTURE_HINT_IMMUTABLE,
                          RGBA_8888);
 
       ImageDecodeTask::Vector dependencies = image_decode_tasks;
@@ -228,6 +232,7 @@ class TileTaskWorkerPoolPerfTestBase {
   FakeOutputSurfaceClient output_surface_client_;
   scoped_ptr<FakeOutputSurface> output_surface_;
   scoped_ptr<ResourceProvider> resource_provider_;
+  scoped_ptr<Rasterizer> rasterizer_;
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
   scoped_ptr<TaskGraphRunner> task_graph_runner_;
   LapTimer timer_;
@@ -257,7 +262,7 @@ class TileTaskWorkerPoolPerfTest
       case TILE_TASK_WORKER_POOL_TYPE_ONE_COPY:
         Create3dOutputSurfaceAndResourceProvider();
         staging_resource_pool_ = ResourcePool::Create(resource_provider_.get(),
-                                                      GL_TEXTURE_2D, RGBA_8888);
+                                                      GL_TEXTURE_2D);
         tile_task_worker_pool_ = OneCopyTileTaskWorkerPool::Create(
             task_runner_.get(), task_graph_runner_.get(),
             context_provider_.get(), resource_provider_.get(),
@@ -265,8 +270,11 @@ class TileTaskWorkerPoolPerfTest
         break;
       case TILE_TASK_WORKER_POOL_TYPE_GPU:
         Create3dOutputSurfaceAndResourceProvider();
+        rasterizer_ = GpuRasterizer::Create(
+            context_provider_.get(), resource_provider_.get(), false, false, 0);
         tile_task_worker_pool_ = GpuTileTaskWorkerPool::Create(
-            task_runner_.get(), task_graph_runner_.get());
+            task_runner_.get(), task_graph_runner_.get(),
+            static_cast<GpuRasterizer*>(rasterizer_.get()));
         break;
       case TILE_TASK_WORKER_POOL_TYPE_BITMAP:
         CreateSoftwareOutputSurfaceAndResourceProvider();

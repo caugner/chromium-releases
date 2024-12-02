@@ -77,7 +77,6 @@ class MediaCodecBridge {
     private long mLastPresentationTimeUs;
     private String mMime;
     private boolean mAdaptivePlaybackSupported;
-    private int mSampleRate;
 
     private static class DequeueInputResult {
         private final int mStatus;
@@ -449,6 +448,12 @@ class MediaCodecBridge {
     }
 
     @CalledByNative
+    private int getOutputSamplingRate() {
+        MediaFormat format = mMediaCodec.getOutputFormat();
+        return format.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+    }
+
+    @CalledByNative
     private ByteBuffer getInputBuffer(int index) {
         if (Build.VERSION.SDK_INT > Build.VERSION_CODES.KITKAT) {
             return mMediaCodec.getInputBuffer(index);
@@ -569,7 +574,7 @@ class MediaCodecBridge {
                 MediaFormat newFormat = mMediaCodec.getOutputFormat();
                 if (mAudioTrack != null && newFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
                     int newSampleRate = newFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE);
-                    if (newSampleRate != mSampleRate && !reconfigureAudioTrack(newFormat)) {
+                    if (mAudioTrack.setPlaybackRate(newSampleRate) != AudioTrack.SUCCESS) {
                         status = MEDIA_CODEC_ERROR;
                     }
                 }
@@ -651,11 +656,23 @@ class MediaCodecBridge {
 
     @CalledByNative
     private static void setCodecSpecificData(MediaFormat format, int index, byte[] bytes) {
-        String name = null;
-        if (index == 0) {
-            name = "csd-0";
-        } else if (index == 1) {
-            name = "csd-1";
+        // Codec Specific Data is set in the MediaFormat as ByteBuffer entries with keys csd-0,
+        // csd-1, and so on. See: http://developer.android.com/reference/android/media/MediaCodec.html
+        // for details.
+        String name;
+        switch (index) {
+            case 0:
+                name = "csd-0";
+                break;
+            case 1:
+                name = "csd-1";
+                break;
+            case 2:
+                name = "csd-2";
+                break;
+            default:
+                name = null;
+                break;
         }
         if (name != null) {
             format.setByteBuffer(name, ByteBuffer.wrap(bytes));
@@ -672,43 +689,26 @@ class MediaCodecBridge {
             boolean playAudio) {
         try {
             mMediaCodec.configure(format, null, crypto, flags);
-            if (playAudio && !reconfigureAudioTrack(format)) {
-                return false;
+            if (playAudio) {
+                int sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+                int channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+                int channelConfig = getAudioFormat(channelCount);
+                // Using 16bit PCM for output. Keep this value in sync with
+                // kBytesPerAudioOutputSample in media_codec_bridge.cc.
+                int minBufferSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig,
+                        AudioFormat.ENCODING_PCM_16BIT);
+                mAudioTrack = new AudioTrack(AudioManager.STREAM_MUSIC, sampleRate, channelConfig,
+                        AudioFormat.ENCODING_PCM_16BIT, minBufferSize, AudioTrack.MODE_STREAM);
+                if (mAudioTrack.getState() == AudioTrack.STATE_UNINITIALIZED) {
+                    mAudioTrack = null;
+                    return false;
+                }
             }
             return true;
         } catch (IllegalStateException e) {
             Log.e(TAG, "Cannot configure the audio codec", e);
         }
         return false;
-    }
-
-    /**
-     * Resets the AudioTrack instance, configured according to the given format.
-     * If a previous AudioTrack instance already exists, release it.
-     *
-     * @param format The format from which to get sample rate and channel count.
-     * @return Whether or not creating the AudioTrack succeeded.
-     */
-    private boolean reconfigureAudioTrack(MediaFormat format) {
-        if (mAudioTrack != null) {
-            mAudioTrack.release();
-        }
-
-        mSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE);
-        int channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
-        int channelConfig = getAudioFormat(channelCount);
-        // Using 16bit PCM for output. Keep this value in sync with
-        // kBytesPerAudioOutputSample in media_codec_bridge.cc.
-        int minBufferSize = AudioTrack.getMinBufferSize(mSampleRate, channelConfig,
-                AudioFormat.ENCODING_PCM_16BIT);
-        mAudioTrack = new AudioTrack(AudioManager.STREAM_MUSIC, mSampleRate, channelConfig,
-                AudioFormat.ENCODING_PCM_16BIT, minBufferSize, AudioTrack.MODE_STREAM);
-        if (mAudioTrack.getState() == AudioTrack.STATE_UNINITIALIZED) {
-            mAudioTrack = null;
-            Log.e(TAG, "Failed to initialize AudioTrack");
-            return false;
-        }
-        return true;
     }
 
     /**

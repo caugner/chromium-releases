@@ -8,9 +8,9 @@
 #include <iterator>
 
 #include "base/base64.h"
-#include "base/debug/trace_event.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "sync/internal_api/public/base/attachment_id_proto.h"
 #include "sync/internal_api/public/base/unique_position.h"
 #include "sync/internal_api/public/util/unrecoverable_error_handler.h"
@@ -925,6 +925,11 @@ void Directory::SetDownloadProgress(
   kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
 }
 
+bool Directory::HasEmptyDownloadProgress(ModelType type) const {
+  ScopedKernelLock lock(this);
+  return kernel_->persisted_info.HasEmptyDownloadProgress(type);
+}
+
 int64 Directory::GetTransactionVersion(ModelType type) const {
   kernel_->transaction_mutex.AssertAcquired();
   return kernel_->persisted_info.transaction_version[type];
@@ -951,6 +956,7 @@ void Directory::SetDataTypeContext(
   kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
 }
 
+// TODO(stanisc): crbug.com/438313: change these to not rely on the folders.
 ModelTypeSet Directory::InitialSyncEndedTypes() {
   syncable::ReadTransaction trans(FROM_HERE, this);
   ModelTypeSet protocol_types = ProtocolTypes();
@@ -1175,8 +1181,7 @@ bool Directory::CheckTreeInvariants(syncable::BaseTransaction* trans,
                       "Entry should be root",
                       trans))
          return false;
-      if (!SyncAssert(!e.GetIsUnsynced(), FROM_HERE,
-                      "Entry should be sycned",
+      if (!SyncAssert(!e.GetIsUnsynced(), FROM_HERE, "Entry should be synced",
                       trans))
          return false;
       continue;
@@ -1191,47 +1196,46 @@ bool Directory::CheckTreeInvariants(syncable::BaseTransaction* trans,
                       "Non unique name should not be empty.",
                       trans))
         return false;
-      int safety_count = handles.size() + 1;
-      // TODO(stanisc): handle items with Null parentid
-      while (!parentid.IsRoot()) {
-        Entry parent(trans, GET_BY_ID, parentid);
-        if (!SyncAssert(parent.good(), FROM_HERE,
-                        "Parent entry is not valid.",
-                        trans))
-          return false;
-        if (handles.end() == handles.find(parent.GetMetahandle()))
-            break; // Skip further checking if parent was unmodified.
-        if (!SyncAssert(parent.GetIsDir(), FROM_HERE,
-                        "Parent should be a directory",
-                        trans))
-          return false;
-        if (!SyncAssert(!parent.GetIsDel(), FROM_HERE,
-                        "Parent should not have been marked for deletion.",
-                        trans))
-          return false;
-        if (!SyncAssert(handles.end() != handles.find(parent.GetMetahandle()),
-                        FROM_HERE,
-                        "Parent should be in the index.",
-                        trans))
-          return false;
-        parentid = parent.GetParentId();
-        if (!SyncAssert(--safety_count > 0, FROM_HERE,
-                        "Count should be greater than zero.",
-                        trans))
-          return false;
+
+      if (!parentid.IsNull()) {
+        int safety_count = handles.size() + 1;
+        while (!parentid.IsRoot()) {
+          Entry parent(trans, GET_BY_ID, parentid);
+          if (!SyncAssert(parent.good(), FROM_HERE,
+                          "Parent entry is not valid.", trans))
+            return false;
+          if (handles.end() == handles.find(parent.GetMetahandle()))
+            break;  // Skip further checking if parent was unmodified.
+          if (!SyncAssert(parent.GetIsDir(), FROM_HERE,
+                          "Parent should be a directory", trans))
+            return false;
+          if (!SyncAssert(!parent.GetIsDel(), FROM_HERE,
+                          "Parent should not have been marked for deletion.",
+                          trans))
+            return false;
+          if (!SyncAssert(handles.end() != handles.find(parent.GetMetahandle()),
+                          FROM_HERE, "Parent should be in the index.", trans))
+            return false;
+          parentid = parent.GetParentId();
+          if (!SyncAssert(--safety_count > 0, FROM_HERE,
+                          "Count should be greater than zero.", trans))
+            return false;
+        }
       }
     }
     int64 base_version = e.GetBaseVersion();
     int64 server_version = e.GetServerVersion();
     bool using_unique_client_tag = !e.GetUniqueClientTag().empty();
+    bool is_type_root_folder =
+        parentid.IsRoot() &&
+        e.GetUniqueServerTag() == ModelTypeToRootTag(e.GetModelType());
     if (CHANGES_VERSION == base_version || 0 == base_version) {
       if (e.GetIsUnappliedUpdate()) {
         // Must be a new item, or a de-duplicated unique client tag
         // that was created both locally and remotely.
-        if (!using_unique_client_tag) {
+        if (!(using_unique_client_tag || is_type_root_folder)) {
           if (!SyncAssert(e.GetIsDel(), FROM_HERE,
-                          "The entry should not have been deleted.",
-                          trans))
+                          "The entry should have been deleted.", trans))
             return false;
         }
         // It came from the server, so it must have a server ID.
@@ -1248,12 +1252,26 @@ bool Directory::CheckTreeInvariants(syncable::BaseTransaction* trans,
                           trans))
             return false;
         }
-        // Should be an uncomitted item, or a successfully deleted one.
-        if (!e.GetIsDel()) {
-          if (!SyncAssert(e.GetIsUnsynced(), FROM_HERE,
-                          "The item should be unsynced.",
-                          trans))
+        if (is_type_root_folder) {
+          // This must be a locally created type root folder
+          if (!SyncAssert(
+                  !e.GetIsUnsynced(), FROM_HERE,
+                  "Locally created type root folders should not be unsynced.",
+                  trans))
             return false;
+
+          if (!SyncAssert(
+                  !e.GetIsDel(), FROM_HERE,
+                  "Locally created type root folders should not be deleted.",
+                  trans))
+            return false;
+        } else {
+          // Should be an uncomitted item, or a successfully deleted one.
+          if (!e.GetIsDel()) {
+            if (!SyncAssert(e.GetIsUnsynced(), FROM_HERE,
+                            "The item should be unsynced.", trans))
+              return false;
+          }
         }
         // If the next check failed, it would imply that an item exists
         // on the server, isn't waiting for application locally, but either
@@ -1465,7 +1483,6 @@ void Directory::AppendChildHandles(const ScopedKernelLock& lock,
 
   for (OrderedChildSet::const_iterator i = children->begin();
        i != children->end(); ++i) {
-    DCHECK_EQ(parent_id, (*i)->ref(PARENT_ID));
     result->push_back((*i)->ref(META_HANDLE));
   }
 }

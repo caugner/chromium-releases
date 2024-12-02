@@ -12,7 +12,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
-#include "chrome/browser/memory_details.h"
+#include "chrome/browser/metrics/metrics_memory_details.h"
 #include "chrome/browser/metrics/network_stats_uploader.h"
 #include "components/metrics/metrics_service_client.h"
 #include "components/metrics/profiler/tracking_synchronizer_observer.h"
@@ -57,6 +57,7 @@ class ChromeMetricsServiceClient
 
   // metrics::MetricsServiceClient:
   void SetMetricsClientId(const std::string& client_id) override;
+  void OnRecordingDisabled() override;
   bool IsOffTheRecordSessionActive() override;
   int32 GetProduct() override;
   std::string GetApplicationLocale() override;
@@ -67,8 +68,6 @@ class ChromeMetricsServiceClient
   void StartGatheringMetrics(const base::Closure& done_callback) override;
   void CollectFinalMetrics(const base::Closure& done_callback) override;
   scoped_ptr<metrics::MetricsLogUploader> CreateUploader(
-      const std::string& server_url,
-      const std::string& mime_type,
       const base::Callback<void(int)>& on_upload_complete) override;
   base::string16 GetRegistryBackupKey() override;
 

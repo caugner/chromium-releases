@@ -29,6 +29,7 @@
 #include "chromeos/dbus/gsm_sms_client.h"
 #include "chromeos/dbus/image_burner_client.h"
 #include "chromeos/dbus/introspectable_client.h"
+#include "chromeos/dbus/leadership_daemon_manager_client.h"
 #include "chromeos/dbus/lorgnette_manager_client.h"
 #include "chromeos/dbus/modem_messaging_client.h"
 #include "chromeos/dbus/nfc_adapter_client.h"
@@ -39,7 +40,6 @@
 #include "chromeos/dbus/peer_daemon_manager_client.h"
 #include "chromeos/dbus/permission_broker_client.h"
 #include "chromeos/dbus/power_manager_client.h"
-#include "chromeos/dbus/privet_daemon_client.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/dbus/shill_device_client.h"
 #include "chromeos/dbus/shill_ipconfig_client.h"
@@ -50,7 +50,6 @@
 #include "chromeos/dbus/sms_client.h"
 #include "chromeos/dbus/system_clock_client.h"
 #include "chromeos/dbus/update_engine_client.h"
-#include "chromeos/device_event_log.h"
 #include "dbus/bus.h"
 #include "dbus/dbus_statistics.h"
 
@@ -61,7 +60,6 @@ static bool g_using_dbus_thread_manager_for_testing = false;
 
 DBusThreadManager::DBusThreadManager(scoped_ptr<DBusClientBundle> client_bundle)
     : client_bundle_(client_bundle.Pass()) {
-  device_event_log::Initialize(0 /* default max entries */);
   dbus::statistics::Initialize();
 
   if (client_bundle_->IsUsingAnyRealClient()) {
@@ -95,7 +93,6 @@ DBusThreadManager::~DBusThreadManager() {
     dbus_thread_->Stop();
 
   dbus::statistics::Shutdown();
-  device_event_log::Shutdown();
 
   if (!g_dbus_thread_manager)
     return;  // Called form Shutdown() or local test instance.
@@ -185,6 +182,12 @@ DebugDaemonClient* DBusThreadManager::GetDebugDaemonClient() {
 EasyUnlockClient* DBusThreadManager::GetEasyUnlockClient() {
   return client_bundle_->easy_unlock_client();
 }
+
+LeadershipDaemonManagerClient*
+DBusThreadManager::GetLeadershipDaemonManagerClient() {
+  return client_bundle_->leadership_daemon_manager_client();
+}
+
 LorgnetteManagerClient*
 DBusThreadManager::GetLorgnetteManagerClient() {
   return client_bundle_->lorgnette_manager_client();
@@ -268,10 +271,6 @@ PowerManagerClient* DBusThreadManager::GetPowerManagerClient() {
   return client_bundle_->power_manager_client();
 }
 
-PrivetDaemonClient* DBusThreadManager::GetPrivetDaemonClient() {
-  return client_bundle_->privet_daemon_client();
-}
-
 SessionManagerClient* DBusThreadManager::GetSessionManagerClient() {
   return client_bundle_->session_manager_client();
 }
@@ -308,11 +307,12 @@ void DBusThreadManager::InitializeClients() {
   GetGsmSMSClient()->Init(GetSystemBus());
   GetImageBurnerClient()->Init(GetSystemBus());
   GetIntrospectableClient()->Init(GetSystemBus());
+  GetLeadershipDaemonManagerClient()->Init(GetSystemBus());
   GetLorgnetteManagerClient()->Init(GetSystemBus());
   GetModemMessagingClient()->Init(GetSystemBus());
   GetPermissionBrokerClient()->Init(GetSystemBus());
+  GetPeerDaemonManagerClient()->Init(GetSystemBus());
   GetPowerManagerClient()->Init(GetSystemBus());
-  GetPrivetDaemonClient()->Init(GetSystemBus());
   GetSessionManagerClient()->Init(GetSystemBus());
   GetShillDeviceClient()->Init(GetSystemBus());
   GetShillIPConfigClient()->Init(GetSystemBus());
@@ -535,6 +535,12 @@ void DBusThreadManagerSetter::SetEasyUnlockClient(
   DBusThreadManager::Get()->client_bundle_->easy_unlock_client_ = client.Pass();
 }
 
+void DBusThreadManagerSetter::SetLeadershipDaemonManagerClient(
+    scoped_ptr<LeadershipDaemonManagerClient> client) {
+  DBusThreadManager::Get()->client_bundle_->leadership_daemon_manager_client_ =
+      client.Pass();
+}
+
 void DBusThreadManagerSetter::SetLorgnetteManagerClient(
     scoped_ptr<LorgnetteManagerClient> client) {
   DBusThreadManager::Get()->client_bundle_->lorgnette_manager_client_ =
@@ -634,12 +640,6 @@ void DBusThreadManagerSetter::SetPermissionBrokerClient(
 void DBusThreadManagerSetter::SetPowerManagerClient(
     scoped_ptr<PowerManagerClient> client) {
   DBusThreadManager::Get()->client_bundle_->power_manager_client_ =
-      client.Pass();
-}
-
-void DBusThreadManagerSetter::SetPrivetDaemonClient(
-    scoped_ptr<PrivetDaemonClient> client) {
-  DBusThreadManager::Get()->client_bundle_->privet_daemon_client_ =
       client.Pass();
 }
 

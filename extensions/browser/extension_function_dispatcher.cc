@@ -11,6 +11,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/process/process.h"
+#include "base/profiler/scoped_profile.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_thread.h"
@@ -23,10 +24,10 @@
 #include "content/public/common/result_codes.h"
 #include "extensions/browser/api_activity_monitor.h"
 #include "extensions/browser/extension_function_registry.h"
-#include "extensions/browser/extension_message_filter.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extensions_browser_client.h"
+#include "extensions/browser/io_thread_extension_message_filter.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/process_map.h"
 #include "extensions/browser/quota_service.h"
@@ -119,7 +120,7 @@ void CommonResponseCallback(IPC::Sender* ipc_sender,
 }
 
 void IOThreadResponseCallback(
-    const base::WeakPtr<ExtensionMessageFilter>& ipc_sender,
+    const base::WeakPtr<IOThreadExtensionMessageFilter>& ipc_sender,
     int routing_id,
     int request_id,
     ExtensionFunction::ResponseType type,
@@ -224,7 +225,7 @@ void ExtensionFunctionDispatcher::DispatchOnIOThread(
     InfoMap* extension_info_map,
     void* profile_id,
     int render_process_id,
-    base::WeakPtr<ExtensionMessageFilter> ipc_sender,
+    base::WeakPtr<IOThreadExtensionMessageFilter> ipc_sender,
     int routing_id,
     const ExtensionHostMsg_Request_Params& params) {
   const Extension* extension =
@@ -281,6 +282,9 @@ void ExtensionFunctionDispatcher::DispatchOnIOThread(
                             static_cast<content::BrowserContext*>(profile_id));
     UMA_HISTOGRAM_SPARSE_SLOWLY("Extensions.FunctionCalls",
                                 function->histogram_value());
+    tracked_objects::ScopedProfile scoped_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(function->name()),
+        tracked_objects::ScopedProfile::ENABLED);
     function->Run()->Execute();
   } else {
     function->OnQuotaExceeded(violation_error);
@@ -397,6 +401,9 @@ void ExtensionFunctionDispatcher::DispatchWithCallbackInternal(
         extension->id(), params.name, args.Pass(), browser_context_);
     UMA_HISTOGRAM_SPARSE_SLOWLY("Extensions.FunctionCalls",
                                 function->histogram_value());
+    tracked_objects::ScopedProfile scoped_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(function->name()),
+        tracked_objects::ScopedProfile::ENABLED);
     function->Run()->Execute();
   } else {
     function->OnQuotaExceeded(violation_error);

@@ -24,7 +24,7 @@
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/crash/app/breakpad_mac.h"
+#include "components/crash/app/crashpad_mac.h"
 #include "components/metrics/metrics_service.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/common/result_codes.h"
@@ -259,7 +259,14 @@ void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
       // in the window server, which is the default when not not using the
       // 10.9 SDK.
       // TODO: Remove this when we build with the 10.9 SDK.
-      @"NSWindowHostsLayersInWindowServer": @(base::mac::IsOSMavericksOrLater())
+      @"NSWindowHostsLayersInWindowServer":
+          @(base::mac::IsOSMavericksOrLater()),
+      // This setting prevents views from ditching their layers when the view
+      // gets removed from the view hierarchy. It defaults to YES for
+      // applications linked against an OSX 10.8+ SDK. In Yosemite, failing to
+      // set this to YES causes an AppKit crash. http://crbug.com/428977
+      // TODO(erikchen): Remove this when we build with an OSX 10.8+ SDK.
+      @"NSViewKeepLayersAround": @(YES)
   }];
 }
 
@@ -273,18 +280,21 @@ void ChromeBrowserMainPartsMac::PreProfileInit() {
   MacStartupProfiler::GetInstance()->Profile(
       MacStartupProfiler::PRE_PROFILE_INIT);
   ChromeBrowserMainPartsPosix::PreProfileInit();
+
   // This is called here so that the app shim socket is only created after
   // taking the singleton lock.
   g_browser_process->platform_part()->app_shim_host_manager()->Init();
-  AppListService::InitAll(NULL);
+  AppListService::InitAll(NULL,
+      GetStartupProfilePath(user_data_dir(), parsed_command_line()));
 }
 
 void ChromeBrowserMainPartsMac::PostProfileInit() {
   MacStartupProfiler::GetInstance()->Profile(
       MacStartupProfiler::POST_PROFILE_INIT);
   ChromeBrowserMainPartsPosix::PostProfileInit();
+
   g_browser_process->metrics_service()->RecordBreakpadRegistration(
-      breakpad::IsCrashReporterEnabled());
+      crash_reporter::GetUploadsEnabled());
 }
 
 void ChromeBrowserMainPartsMac::DidEndMainMessageLoop() {

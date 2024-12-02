@@ -23,7 +23,7 @@ remoting.HostDaemonFacade = function() {
   this.nextId_ = 0;
 
   /**
-   * @type {Object.<number, remoting.HostDaemonFacade.PendingReply>}
+   * @type {Object<number, remoting.HostDaemonFacade.PendingReply>}
    * @private
    */
   this.pendingReplies_ = {};
@@ -34,10 +34,10 @@ remoting.HostDaemonFacade = function() {
   /** @type {string} @private */
   this.version_ = '';
 
-  /** @type {Array.<remoting.HostController.Feature>} @private */
+  /** @type {Array<remoting.HostController.Feature>} @private */
   this.supportedFeatures_ = [];
 
-  /** @type {Array.<function(boolean):void>} @private */
+  /** @type {Array<function(boolean):void>} @private */
   this.afterInitializationTasks_ = [];
 
   /**
@@ -91,26 +91,25 @@ remoting.HostDaemonFacade.prototype.initialize_ = function() {
  * @private
  */
 remoting.HostDaemonFacade.prototype.connectNative_ = function() {
-  return new Promise(
-    /**
-     * @param {function(*=):void} resolve
-     * @param {function(*=):void} reject
-     * @this {remoting.HostDaemonFacade}
-     */
-    function(resolve, reject) {
-      try {
-        this.port_ = chrome.runtime.connectNative(
-            'com.google.chrome.remote_desktop');
-        this.port_.onMessage.addListener(this.onIncomingMessageCallback_);
-        this.port_.onDisconnect.addListener(this.onDisconnectCallback_);
-        this.postMessageInternal_({type: 'hello'}, resolve, reject);
-      } catch (err) {
-        console.log('Native Messaging initialization failed: ',
-                    /** @type {*} */ (err));
-        reject();
-      }
-    }.bind(this)
-  );
+  /**
+   * @this {remoting.HostDaemonFacade}
+   * @param {function(?):void} resolve
+   * @param {function(*):void} reject
+   */
+  var connect = function(resolve, reject) {
+    try {
+      this.port_ = chrome.runtime.connectNative(
+          'com.google.chrome.remote_desktop');
+      this.port_.onMessage.addListener(this.onIncomingMessageCallback_);
+      this.port_.onDisconnect.addListener(this.onDisconnectCallback_);
+      this.postMessageInternal_({type: 'hello'}, resolve, reject);
+    } catch (/** @type {*} */ err) {
+      console.log('Native Messaging initialization failed: ', err);
+      reject(false);
+    }
+  };
+
+  return new Promise(connect.bind(this));
 };
 
 /**
@@ -213,9 +212,8 @@ remoting.HostDaemonFacade.prototype.onIncomingMessage_ = function(message) {
     }
 
     this.handleIncomingMessage_(message, reply.onDone);
-  } catch (e) {
-    console.error('Error while processing native message' +
-                  /** @type {*} */ (e));
+  } catch (/** @type {*} */ e) {
+    console.error('Error while processing native message' + e);
     reply.onError(remoting.Error.UNEXPECTED);
   }
 }
@@ -340,7 +338,8 @@ remoting.HostDaemonFacade.prototype.onDisconnect_ = function() {
   var pendingReplies = this.pendingReplies_;
   this.pendingReplies_ = {};
   for (var id in pendingReplies) {
-    pendingReplies[/** @type {number} */(id)].onError(this.error_);
+    var num_id = parseInt(id, 10);
+    pendingReplies[num_id].onError(this.error_);
   }
 }
 
@@ -505,7 +504,7 @@ remoting.HostDaemonFacade.prototype.getDaemonState =
 /**
  * Retrieves the list of paired clients.
  *
- * @param {function(Array.<remoting.PairedClient>):void} onDone Callback to
+ * @param {function(Array<remoting.PairedClient>):void} onDone Callback to
  *     return result.
  * @param {function(remoting.Error):void} onError Callback to call on error.
  */

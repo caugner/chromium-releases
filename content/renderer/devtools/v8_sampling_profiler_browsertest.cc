@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
 #include "content/renderer/devtools/v8_sampling_profiler.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::debug::CategoryFilter;
-using base::debug::TraceLog;
-using base::debug::TraceOptions;
+using base::trace_event::CategoryFilter;
+using base::trace_event::TraceLog;
+using base::trace_event::TraceOptions;
 
 namespace content {
 

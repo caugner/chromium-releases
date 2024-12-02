@@ -34,6 +34,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using bookmarks::BookmarkModel;
 using browser_sync::BookmarkDataTypeController;
 using sync_driver::ChangeProcessorMock;
 using sync_driver::DataTypeController;
@@ -50,12 +51,11 @@ namespace {
 
 class HistoryMock : public HistoryService {
  public:
-  explicit HistoryMock(history::HistoryClient* client, Profile* profile)
-      : HistoryService(client, profile) {}
+  HistoryMock() : HistoryService() {}
   MOCK_METHOD0(BackendLoaded, bool(void));
 
  protected:
-  virtual ~HistoryMock() {}
+  ~HistoryMock() override {}
 };
 
 KeyedService* BuildChromeBookmarkClient(content::BrowserContext* context) {
@@ -86,7 +86,7 @@ KeyedService* BuildBookmarkModel(content::BrowserContext* context) {
 }
 
 KeyedService* BuildHistoryService(content::BrowserContext* profile) {
-  return new HistoryMock(NULL, static_cast<Profile*>(profile));
+  return new HistoryMock;
 }
 
 }  // namespace

@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_HISTORY_HISTORY_SERVICE_H_
 
 #include <set>
+#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -24,15 +25,10 @@
 #include "base/time/time.h"
 #include "chrome/browser/history/delete_directive_handler.h"
 #include "chrome/browser/history/typed_url_syncable_service.h"
-#include "chrome/common/ref_counted_util.h"
 #include "components/favicon_base/favicon_callback.h"
-#include "components/history/core/browser/history_client.h"
+#include "components/favicon_base/favicon_usage_data.h"
 #include "components/history/core/browser/keyword_id.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "components/visitedlink/browser/visitedlink_delegate.h"
-#include "content/public/browser/download_manager_delegate.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "sql/init_status.h"
 #include "sync/api/syncable_service.h"
 #include "ui/base/page_transition_types.h"
@@ -42,10 +38,7 @@ class AndroidHistoryProviderService;
 #endif
 
 class GURL;
-class PageUsageData;
 class PageUsageRequest;
-class Profile;
-struct ImportedFaviconUsage;
 class SkBitmap;
 
 namespace base {
@@ -53,28 +46,27 @@ class FilePath;
 class Thread;
 }
 
-namespace visitedlink {
-class VisitedLinkMaster;
-}
-
 namespace history {
 
+struct DownloadRow;
+struct HistoryAddPageArgs;
 class HistoryBackend;
 class HistoryClient;
-class HistoryDatabase;
 class HistoryDBTask;
+class HistoryDatabase;
+struct HistoryDatabaseParams;
 class HistoryQueryTest;
 class HistoryServiceObserver;
 class HistoryTest;
 class InMemoryHistoryBackend;
 class InMemoryURLIndex;
 class InMemoryURLIndexTest;
-class URLDatabase;
-class VisitFilter;
-struct DownloadRow;
-struct HistoryAddPageArgs;
-struct HistoryDetails;
 struct KeywordSearchTermVisit;
+class PageUsageData;
+class URLDatabase;
+class VisitDelegate;
+class VisitFilter;
+class WebHistoryService;
 
 }  // namespace history
 
@@ -83,27 +75,27 @@ struct KeywordSearchTermVisit;
 //
 // This service is thread safe. Each request callback is invoked in the
 // thread that made the request.
-class HistoryService : public content::NotificationObserver,
-                       public syncer::SyncableService,
-                       public KeyedService,
-                       public visitedlink::VisitedLinkDelegate {
+class HistoryService : public syncer::SyncableService, public KeyedService {
  public:
   // Miscellaneous commonly-used types.
-  typedef std::vector<PageUsageData*> PageUsageDataList;
+  typedef std::vector<history::PageUsageData*> PageUsageDataList;
 
-  // Must call Init after construction. The |history::HistoryClient| object
-  // must be valid for the whole lifetime of |HistoryService|.
-  explicit HistoryService(history::HistoryClient* client, Profile* profile);
-  // The empty constructor is provided only for testing.
+  // Must call Init after construction. The empty constructor provided only for
+  // unit tests. When using the full constructor, |history_client| and |profile|
+  // should only be null during testing, while |visit_delegate| may be null if
+  // the embedder use another way to track visited links.
   HistoryService();
-
+  HistoryService(history::HistoryClient* history_client,
+                 scoped_ptr<history::VisitDelegate> visit_delegate);
   ~HistoryService() override;
 
   // Initializes the history service, returning true on success. On false, do
   // not call any other functions. The given directory will be used for storing
-  // the history files.
-  bool Init(const base::FilePath& history_dir) {
-    return Init(history_dir, false);
+  // the history files. |languages| is a comma-separated list of languages to
+  // use when interpreting URLs, it must not be empty (except during testing).
+  bool Init(const std::string& languages,
+            const history::HistoryDatabaseParams& history_database_params) {
+    return Init(false, languages, history_database_params);
   }
 
   // Triggers the backend to load if it hasn't already, and then returns whether
@@ -120,7 +112,7 @@ class HistoryService : public content::NotificationObserver,
   void ClearCachedDataForContextID(history::ContextID context_id);
 
   // Triggers the backend to load if it hasn't already, and then returns the
-  // in-memory URL database. The returned pointer MAY BE NULL if the in-memory
+  // in-memory URL database. The returned pointer may be null if the in-memory
   // database has not been loaded yet. This pointer is owned by the history
   // system. Callers should not store or cache this value.
   //
@@ -162,7 +154,7 @@ class HistoryService : public content::NotificationObserver,
   // are only unique inside a given context, so we need that to differentiate
   // them.
   //
-  // The context/page ids can be NULL if there is no meaningful tracking
+  // The context/page ids can be null if there is no meaningful tracking
   // information that can be performed on the given URL. The 'nav_entry_id'
   // should be the unique ID of the current navigation entry in the given
   // process.
@@ -356,11 +348,13 @@ class HistoryService : public content::NotificationObserver,
   // Removes all visits to the given URLs in the specified time range. Calls
   // ExpireHistoryBetween() to delete local visits, and handles deletion of
   // synced visits if appropriate.
-  void ExpireLocalAndRemoteHistoryBetween(const std::set<GURL>& restrict_urls,
-                                          base::Time begin_time,
-                                          base::Time end_time,
-                                          const base::Closure& callback,
-                                          base::CancelableTaskTracker* tracker);
+  void ExpireLocalAndRemoteHistoryBetween(
+      history::WebHistoryService* web_history,
+      const std::set<GURL>& restrict_urls,
+      base::Time begin_time,
+      base::Time end_time,
+      const base::Closure& callback,
+      base::CancelableTaskTracker* tracker);
 
   // Processes the given |delete_directive| and sends it to the
   // SyncChangeProcessor (if it exists).  Returns any error resulting
@@ -382,15 +376,18 @@ class HistoryService : public content::NotificationObserver,
       const history::DownloadRow& info,
       const DownloadCreateCallback& callback);
 
+  // Implemented by the caller of 'GetNextDownloadId' below, and is called with
+  // the maximum id of all downloads records in the database plus 1.
+  typedef base::Callback<void(uint32)> DownloadIdCallback;
+
   // Responds on the calling thread with the maximum id of all downloads records
   // in the database plus 1.
-  void GetNextDownloadId(const content::DownloadIdCallback& callback);
+  void GetNextDownloadId(const DownloadIdCallback& callback);
 
   // Implemented by the caller of 'QueryDownloads' below, and is called when the
   // history service has retrieved a list of all download state. The call
-  typedef base::Callback<void(
-      scoped_ptr<std::vector<history::DownloadRow> >)>
-          DownloadQueryCallback;
+  typedef base::Callback<void(scoped_ptr<std::vector<history::DownloadRow>>)>
+      DownloadQueryCallback;
 
   // Begins a history request to retrieve the state of all downloads in the
   // history db. 'callback' runs when the history service request is complete,
@@ -441,8 +438,9 @@ class HistoryService : public content::NotificationObserver,
 
   // Schedules a HistoryDBTask for running on the history backend thread. See
   // HistoryDBTask for details on what this does. Takes ownership of |task|.
-  virtual void ScheduleDBTask(scoped_ptr<history::HistoryDBTask> task,
-                              base::CancelableTaskTracker* tracker);
+  virtual base::CancelableTaskTracker::TaskId ScheduleDBTask(
+      scoped_ptr<history::HistoryDBTask> task,
+      base::CancelableTaskTracker* tracker);
 
   // This callback is invoked when favicon change for urls.
   typedef base::Callback<void(const std::set<GURL>&)> OnFaviconChangedCallback;
@@ -497,9 +495,6 @@ class HistoryService : public content::NotificationObserver,
   // history. We filter out some URLs such as JavaScript.
   static bool CanAddURL(const GURL& url);
 
-  // Returns the HistoryClient.
-  history::HistoryClient* history_client() { return history_client_; }
-
   base::WeakPtr<HistoryService> AsWeakPtr();
 
   // syncer::SyncableService implementation.
@@ -525,9 +520,6 @@ class HistoryService : public content::NotificationObserver,
 
  private:
   class BackendDelegate;
-#if defined(OS_ANDROID)
-  friend class AndroidHistoryProviderService;
-#endif
   friend class base::RefCountedThreadSafe<HistoryService>;
   friend class BackendDelegate;
   friend class FaviconService;
@@ -548,7 +540,7 @@ class HistoryService : public content::NotificationObserver,
   // Called on shutdown, this will tell the history backend to complete and
   // will release pointers to it. No other functions should be called once
   // cleanup has happened that may dispatch to the history thread (because it
-  // will be NULL).
+  // will be null).
   //
   // In practice, this will be called by the service manager (BrowserProcess)
   // when it is being destroyed. Because that reference is being destroyed, it
@@ -556,29 +548,17 @@ class HistoryService : public content::NotificationObserver,
   // still in memory (pending requests may be holding a reference to us).
   void Cleanup();
 
-  // Implementation of content::NotificationObserver.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
-
-  // Implementation of visitedlink::VisitedLinkDelegate.
-  void RebuildTable(const scoped_refptr<URLEnumerator>& enumerator) override;
-
   // Low-level Init().  Same as the public version, but adds a |no_db| parameter
   // that is only set by unittests which causes the backend to not init its DB.
-  bool Init(const base::FilePath& history_dir, bool no_db);
+  bool Init(bool no_db,
+            const std::string& languages,
+            const history::HistoryDatabaseParams& history_database_params);
 
   // Called by the HistoryURLProvider class to schedule an autocomplete, it
   // will be called back on the internal history thread with the history
   // database so it can query. See history_autocomplete.cc for a diagram.
   void ScheduleAutocomplete(const base::Callback<
       void(history::HistoryBackend*, history::URLDatabase*)>& callback);
-
-  // Broadcasts the given notification. This is called by the backend so that
-  // the notification will be broadcast on the main thread.
-  void BroadcastNotificationsHelper(
-      int type,
-      scoped_ptr<history::HistoryDetails> details);
 
   // Notification from the backend that it has finished loading. Sends
   // notification (NOTIFY_HISTORY_LOADED) and sets backend_loaded_ to true.
@@ -609,12 +589,36 @@ class HistoryService : public content::NotificationObserver,
   // modified. |changed_urls| contains the list of affects URLs.
   void NotifyURLsModified(const history::URLRows& changed_urls);
 
+  // Notify all HistoryServiceObservers registered that URLs have been deleted.
+  // |all_history| is set to true, if all the URLs are deleted.
+  //               When set to true, |deleted_rows| and |favicon_urls| are
+  //               undefined.
+  // |expired| is set to true, if the URL deletion is due to expiration.
+  // |deleted_rows| list of the deleted URLs.
+  // |favicon_urls| list of favicon URLs that correspond to the deleted URLs.
+  void NotifyURLsDeleted(bool all_history,
+                         bool expired,
+                         const history::URLRows& deleted_rows,
+                         const std::set<GURL>& favicon_urls);
+
   // Notify all HistoryServiceObservers registered that the
   // HistoryService has finished loading.
   void NotifyHistoryServiceLoaded();
 
-  // HistoryService is being deleted.
+  // Notify all HistoryServiceObservers registered that HistoryService is being
+  // deleted.
   void NotifyHistoryServiceBeingDeleted();
+
+  // Notify all HistoryServiceObservers registered that a keyword search term
+  // has been updated. |row| contains the URL information for search |term|.
+  // |keyword_id| associated with a URL and search term.
+  void NotifyKeywordSearchTermUpdated(const history::URLRow& row,
+                                      history::KeywordID keyword_id,
+                                      const base::string16& term);
+
+  // Notify all HistoryServiceObservers registered that keyword search term is
+  // deleted. |url_id| is the id of the url row.
+  void NotifyKeywordSearchTermDeleted(history::URLID url_id);
 
   // Favicon -------------------------------------------------------------------
 
@@ -758,7 +762,7 @@ class HistoryService : public content::NotificationObserver,
   // once. The pages must exist, any favicon sets for unknown pages will be
   // discarded. Existing favicons will not be overwritten.
   void SetImportedFavicons(
-      const std::vector<ImportedFaviconUsage>& favicon_usage);
+      const favicon_base::FaviconUsageDataList& favicon_usage);
 
   // Sets the in-memory URL database. This is called by the backend once the
   // database is loaded to make it available.
@@ -775,88 +779,7 @@ class HistoryService : public content::NotificationObserver,
   // Invokes all callback registered by AddFaviconChangedCallback.
   void NotifyFaviconChanged(const std::set<GURL>& changed_favicons);
 
-  // ScheduleAndForget ---------------------------------------------------------
-  //
-  // Functions for scheduling operations on the history thread that do not need
-  // any callbacks and are not cancelable.
-
-  template<typename BackendFunc>
-  void ScheduleAndForget(SchedulePriority priority,
-                         BackendFunc func) {  // Function to call on backend.
-    DCHECK(thread_) << "History service being called after cleanup";
-    DCHECK(thread_checker_.CalledOnValidThread());
-    ScheduleTask(priority, base::Bind(func, history_backend_.get()));
-  }
-
-  template<typename BackendFunc, typename ArgA>
-  void ScheduleAndForget(SchedulePriority priority,
-                         BackendFunc func,  // Function to call on backend.
-                         const ArgA& a) {
-    DCHECK(thread_) << "History service being called after cleanup";
-    DCHECK(thread_checker_.CalledOnValidThread());
-    ScheduleTask(priority, base::Bind(func, history_backend_.get(), a));
-  }
-
-  template<typename BackendFunc, typename ArgA, typename ArgB>
-  void ScheduleAndForget(SchedulePriority priority,
-                         BackendFunc func,  // Function to call on backend.
-                         const ArgA& a,
-                         const ArgB& b) {
-    DCHECK(thread_) << "History service being called after cleanup";
-    DCHECK(thread_checker_.CalledOnValidThread());
-    ScheduleTask(priority, base::Bind(func, history_backend_.get(), a, b));
-  }
-
-  template<typename BackendFunc, typename ArgA, typename ArgB, typename ArgC>
-  void ScheduleAndForget(SchedulePriority priority,
-                         BackendFunc func,  // Function to call on backend.
-                         const ArgA& a,
-                         const ArgB& b,
-                         const ArgC& c) {
-    DCHECK(thread_) << "History service being called after cleanup";
-    DCHECK(thread_checker_.CalledOnValidThread());
-    ScheduleTask(priority, base::Bind(func, history_backend_.get(), a, b, c));
-  }
-
-  template<typename BackendFunc,
-           typename ArgA,
-           typename ArgB,
-           typename ArgC,
-           typename ArgD>
-  void ScheduleAndForget(SchedulePriority priority,
-                         BackendFunc func,  // Function to call on backend.
-                         const ArgA& a,
-                         const ArgB& b,
-                         const ArgC& c,
-                         const ArgD& d) {
-    DCHECK(thread_) << "History service being called after cleanup";
-    DCHECK(thread_checker_.CalledOnValidThread());
-    ScheduleTask(priority, base::Bind(func, history_backend_.get(),
-                                      a, b, c, d));
-  }
-
-  template<typename BackendFunc,
-           typename ArgA,
-           typename ArgB,
-           typename ArgC,
-           typename ArgD,
-           typename ArgE>
-  void ScheduleAndForget(SchedulePriority priority,
-                         BackendFunc func,  // Function to call on backend.
-                         const ArgA& a,
-                         const ArgB& b,
-                         const ArgC& c,
-                         const ArgD& d,
-                         const ArgE& e) {
-    DCHECK(thread_) << "History service being called after cleanup";
-    DCHECK(thread_checker_.CalledOnValidThread());
-    ScheduleTask(priority, base::Bind(func, history_backend_.get(),
-                                      a, b, c, d, e));
-  }
-
   base::ThreadChecker thread_checker_;
-
-  content::NotificationRegistrar registrar_;
 
   // The thread used by the history service to run complicated operations.
   // |thread_| is NULL once |Cleanup| is NULL.
@@ -876,16 +799,13 @@ class HistoryService : public content::NotificationObserver,
   // TODO(mrossetti): Consider changing ownership. See http://crbug.com/138321
   scoped_ptr<history::InMemoryHistoryBackend> in_memory_backend_;
 
+  // The history service will inform its VisitDelegate of URLs recorded and
+  // removed from the history database. This may be null during testing.
+  scoped_ptr<history::VisitDelegate> visit_delegate_;
+
   // The history client, may be null when testing. The object should otherwise
   // outlive |HistoryService|.
   history::HistoryClient* history_client_;
-
-  // The profile, may be null when testing.
-  Profile* profile_;
-
-  // Used for propagating link highlighting data across renderers. May be null
-  // in tests.
-  scoped_ptr<visitedlink::VisitedLinkMaster> visitedlink_master_;
 
   // Has the backend finished loading? The backend is loaded once Init has
   // completed.

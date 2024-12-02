@@ -12,6 +12,8 @@
           '--test-launcher-bot-mode',
           '--asan=<(asan)',
           '--lsan=<(lsan)',
+          '--msan=<(msan)',
+          '--tsan=<(tsan)',
         ],
         'files': [
           '../testing/xvfb.py',
@@ -107,7 +109,7 @@
       },
     }],
     [('disable_nacl==0 and OS=="linux" and '
-      '(target_arch=="ia32" or target_arch=="arm")'), {
+      '(target_arch=="ia32" or target_arch=="x64" or target_arch=="arm")'), {
       'variables': {
         'files': [
           '<(PRODUCT_DIR)/ppapi_nacl_tests_pnacl_nonsfi.nmf',
@@ -145,6 +147,14 @@
         ],
       },
     }],
+    ['disable_nacl==0 and OS=="linux" and '
+         '(target_arch=="x64" or target_arch=="ia32")', {
+      'variables': {
+        'files': [
+          '<(PRODUCT_DIR)/ppapi_nacl_tests_pnacl_newlib_x32_nonsfi.nexe',
+        ],
+      },
+    }],
     ['OS=="mac"', {
       'variables': {
         'files': [
@@ -166,6 +176,8 @@
           '--test-launcher-bot-mode',
           '--asan=<(asan)',
           '--lsan=<(lsan)',
+          '--msan=<(msan)',
+          '--tsan=<(tsan)',
         ],
       },
     }],
@@ -196,10 +208,10 @@
         ],
       },
     }],
-    ['OS=="win" and libpeer_target_type=="loadable_module"', {
+    ['OS=="mac" and asan==1 and fastbuild==0', {
       'variables': {
         'files': [
-          '<(PRODUCT_DIR)/libpeerconnection.dll',
+          '<(PRODUCT_DIR)/browser_tests.dSYM/',
         ],
       },
     }],
@@ -212,6 +224,7 @@
           '../ui/file_manager/image_loader/',
           '../ui/file_manager/integration_tests/',
           '../ui/webui/resources/js/',
+          '../third_party/analytics/',
           '../chrome/browser/resources/chromeos/wallpaper_manager/',
           '<(PRODUCT_DIR)/chromevox_test_data/',
           '<(PRODUCT_DIR)/content_shell.pak',

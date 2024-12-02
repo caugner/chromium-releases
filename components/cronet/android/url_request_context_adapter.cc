@@ -30,16 +30,10 @@
 
 namespace {
 
-// MessageLoop on the main thread, which is where objects that receive Java
-// notifications generally live.
-base::MessageLoop* g_main_message_loop = nullptr;
-
-net::NetworkChangeNotifier* g_network_change_notifier = nullptr;
-
 class BasicNetworkDelegate : public net::NetworkDelegateImpl {
  public:
   BasicNetworkDelegate() {}
-  virtual ~BasicNetworkDelegate() {}
+  ~BasicNetworkDelegate() override {}
 
  private:
   // net::NetworkDelegate implementation.
@@ -120,7 +114,9 @@ namespace cronet {
 
 URLRequestContextAdapter::URLRequestContextAdapter(
     URLRequestContextAdapterDelegate* delegate,
-    std::string user_agent) {
+    std::string user_agent)
+    : load_disable_cache_(true),
+      is_context_initialized_(false) {
   delegate_ = delegate;
   user_agent_ = user_agent;
 }
@@ -135,17 +131,6 @@ void URLRequestContextAdapter::Initialize(
 }
 
 void URLRequestContextAdapter::InitRequestContextOnMainThread() {
-  if (!base::MessageLoop::current()) {
-    DCHECK(!g_main_message_loop);
-    g_main_message_loop = new base::MessageLoopForUI();
-    base::MessageLoopForUI::current()->Start();
-  }
-  DCHECK_EQ(g_main_message_loop, base::MessageLoop::current());
-  if (!g_network_change_notifier) {
-    net::NetworkChangeNotifier::SetFactory(
-        new net::NetworkChangeNotifierFactoryAndroid());
-    g_network_change_notifier = net::NetworkChangeNotifier::Create();
-  }
   proxy_config_service_.reset(net::ProxyService::CreateSystemProxyConfigService(
       GetNetworkTaskRunner(), NULL));
   GetNetworkTaskRunner()->PostTask(
@@ -208,6 +193,7 @@ void URLRequestContextAdapter::InitRequestContextOnNetworkThread() {
           1.0f);
     }
   }
+  load_disable_cache_ = config_->load_disable_cache;
   config_.reset(NULL);
 
   if (VLOG_IS_ON(2)) {

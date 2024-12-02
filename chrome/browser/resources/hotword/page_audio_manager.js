@@ -23,7 +23,7 @@ cr.define('hotword', function() {
     /**
      * Mapping between tab ID and port that is connected from the injected
      * content script.
-     * @private {!Object.<number, Port>}
+     * @private {!Object<number, Port>}
      */
     this.portMap_ = {};
 
@@ -87,10 +87,21 @@ cr.define('hotword', function() {
       ];
       // TODO(amistry): Get this list from a file in the shared module instead.
       var tlds = [
+        'at',
+        'ca',
         'com',
+        'com.au',
+        'com.mx',
+        'com.br',
+        'co.jp',
+        'co.kr',
+        'co.nz',
         'co.uk',
+        'co.za',
         'de',
+        'es',
         'fr',
+        'it',
         'ru'
       ];
 

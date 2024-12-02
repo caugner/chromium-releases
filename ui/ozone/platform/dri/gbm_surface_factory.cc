@@ -12,14 +12,16 @@
 #include "ui/ozone/common/egl_util.h"
 #include "ui/ozone/platform/dri/dri_window_delegate_impl.h"
 #include "ui/ozone/platform/dri/dri_window_delegate_manager.h"
-#include "ui/ozone/platform/dri/dri_wrapper.h"
+#include "ui/ozone/platform/dri/drm_device_manager.h"
 #include "ui/ozone/platform/dri/gbm_buffer.h"
 #include "ui/ozone/platform/dri/gbm_surface.h"
 #include "ui/ozone/platform/dri/gbm_surfaceless.h"
-#include "ui/ozone/platform/dri/screen_manager.h"
+#include "ui/ozone/platform/dri/gbm_wrapper.h"
+#include "ui/ozone/platform/dri/hardware_display_controller.h"
 #include "ui/ozone/public/native_pixmap.h"
 #include "ui/ozone/public/overlay_candidates_ozone.h"
 #include "ui/ozone/public/ozone_switches.h"
+#include "ui/ozone/public/surface_ozone_canvas.h"
 #include "ui/ozone/public/surface_ozone_egl.h"
 
 namespace ui {
@@ -68,31 +70,32 @@ class SingleOverlay : public OverlayCandidatesOzone {
 }  // namespace
 
 GbmSurfaceFactory::GbmSurfaceFactory(bool allow_surfaceless)
-    : DriSurfaceFactory(NULL, NULL),
-      device_(NULL),
-      allow_surfaceless_(allow_surfaceless) {
+    : DriSurfaceFactory(NULL), allow_surfaceless_(allow_surfaceless) {
 }
 
 GbmSurfaceFactory::~GbmSurfaceFactory() {}
 
 void GbmSurfaceFactory::InitializeGpu(
-    DriWrapper* dri,
-    gbm_device* device,
-    ScreenManager* screen_manager,
+    const scoped_refptr<GbmWrapper>& gbm,
+    DrmDeviceManager* drm_device_manager,
     DriWindowDelegateManager* window_manager) {
-  drm_ = dri;
-  device_ = device;
-  screen_manager_ = screen_manager;
+  gbm_ = gbm;
+  drm_device_manager_ = drm_device_manager;
   window_manager_ = window_manager;
 }
 
 intptr_t GbmSurfaceFactory::GetNativeDisplay() {
-  return reinterpret_cast<intptr_t>(device_);
+#if defined(USE_MESA_PLATFORM_NULL)
+  return EGL_DEFAULT_DISPLAY;
+#else
+  DCHECK(gbm_);
+  return reinterpret_cast<intptr_t>(gbm_->device());
+#endif
 }
 
 int GbmSurfaceFactory::GetDrmFd() {
-  DCHECK(drm_);
-  return drm_->get_fd();
+  DCHECK(gbm_);
+  return gbm_->get_fd();
 }
 
 const int32* GbmSurfaceFactory::GetEGLSurfaceProperties(
@@ -117,11 +120,19 @@ bool GbmSurfaceFactory::LoadEGLGLES2Bindings(
   return LoadDefaultEGLGLES2Bindings(add_gl_library, set_gl_get_proc_address);
 }
 
+scoped_ptr<SurfaceOzoneCanvas> GbmSurfaceFactory::CreateCanvasForWidget(
+    gfx::AcceleratedWidget widget) {
+  LOG(FATAL) << "Software rendering mode is not supported with GBM platform";
+  return nullptr;
+}
+
 scoped_ptr<SurfaceOzoneEGL> GbmSurfaceFactory::CreateEGLSurfaceForWidget(
     gfx::AcceleratedWidget widget) {
-  DriWindowDelegate* delegate = GetOrCreateWindowDelegate(widget);
+  scoped_refptr<GbmWrapper> gbm = GetGbmDevice(widget);
+  DCHECK(gbm);
 
-  scoped_ptr<GbmSurface> surface(new GbmSurface(delegate, device_, drm_));
+  scoped_ptr<GbmSurface> surface(
+      new GbmSurface(window_manager_->GetWindowDelegate(widget), gbm));
   if (!surface->Initialize())
     return nullptr;
 
@@ -132,10 +143,10 @@ scoped_ptr<SurfaceOzoneEGL>
 GbmSurfaceFactory::CreateSurfacelessEGLSurfaceForWidget(
     gfx::AcceleratedWidget widget) {
   if (!allow_surfaceless_)
-    return scoped_ptr<SurfaceOzoneEGL>();
+    return nullptr;
 
-  DriWindowDelegate* delegate = GetOrCreateWindowDelegate(widget);
-  return scoped_ptr<SurfaceOzoneEGL>(new GbmSurfaceless(delegate));
+  return make_scoped_ptr(new GbmSurfaceless(
+      window_manager_->GetWindowDelegate(widget), drm_device_manager_));
 }
 
 scoped_refptr<ui::NativePixmap> GbmSurfaceFactory::CreateNativePixmap(
@@ -144,16 +155,19 @@ scoped_refptr<ui::NativePixmap> GbmSurfaceFactory::CreateNativePixmap(
     BufferFormat format,
     BufferUsage usage) {
   if (usage == MAP)
-    return NULL;
+    return nullptr;
+
+  scoped_refptr<GbmWrapper> gbm = GetGbmDevice(widget);
+  DCHECK(gbm);
 
   scoped_refptr<GbmBuffer> buffer =
-      GbmBuffer::CreateBuffer(drm_, device_, format, size, true);
+      GbmBuffer::CreateBuffer(gbm, format, size, true);
   if (!buffer.get())
-    return NULL;
+    return nullptr;
 
   scoped_refptr<GbmPixmap> pixmap(new GbmPixmap(buffer));
-  if (!pixmap->Initialize(drm_))
-    return NULL;
+  if (!pixmap->Initialize())
+    return nullptr;
 
   return pixmap;
 }
@@ -206,16 +220,10 @@ bool GbmSurfaceFactory::CanCreateNativePixmap(BufferUsage usage) {
   return false;
 }
 
-DriWindowDelegate* GbmSurfaceFactory::GetOrCreateWindowDelegate(
+scoped_refptr<GbmWrapper> GbmSurfaceFactory::GetGbmDevice(
     gfx::AcceleratedWidget widget) {
-  if (!window_manager_->HasWindowDelegate(widget)) {
-    scoped_ptr<DriWindowDelegate> delegate(new DriWindowDelegateImpl(
-        widget, drm_, window_manager_, screen_manager_));
-    delegate->Initialize();
-    window_manager_->AddWindowDelegate(widget, delegate.Pass());
-  }
-
-  return window_manager_->GetWindowDelegate(widget);
+  return static_cast<GbmWrapper*>(
+      drm_device_manager_->GetDrmDevice(widget).get());
 }
 
 }  // namespace ui

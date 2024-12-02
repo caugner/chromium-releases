@@ -46,6 +46,9 @@ static_library("browser") {
     "autocomplete_history_manager.cc",
     "autocomplete_history_manager.h",
     "autofill-inl.h",
+    "autofill_cc_infobar_delegate.cc",
+    "autofill_cc_infobar_delegate.h",
+    "autofill_client.h",
     "autofill_country.cc",
     "autofill_country.h",
     "autofill_data_model.cc",
@@ -61,7 +64,6 @@ static_library("browser") {
     "autofill_ie_toolbar_import_win.h",
     "autofill_manager.cc",
     "autofill_manager.h",
-    "autofill_client.h",
     "autofill_manager_test_delegate.h",
     "autofill_metrics.cc",
     "autofill_metrics.h",
@@ -81,6 +83,8 @@ static_library("browser") {
     "autofill_type.h",
     "autofill_xml_parser.cc",
     "autofill_xml_parser.h",
+    "card_unmask_delegate.cc",
+    "card_unmask_delegate.h",
     "contact_info.cc",
     "contact_info.h",
     "credit_card.cc",
@@ -117,6 +121,8 @@ static_library("browser") {
     "suggestion.h",
     "validation.cc",
     "validation.h",
+    "wallet/real_pan_wallet_client.cc",
+    "wallet/real_pan_wallet_client.h",
     "webdata/autocomplete_syncable_service.cc",
     "webdata/autocomplete_syncable_service.h",
     "webdata/autofill_change.cc",
@@ -127,6 +133,8 @@ static_library("browser") {
     "webdata/autofill_profile_syncable_service.h",
     "webdata/autofill_table.cc",
     "webdata/autofill_table.h",
+    "webdata/autofill_wallet_syncable_service.cc",
+    "webdata/autofill_wallet_syncable_service.h",
     "webdata/autofill_webdata.h",
     "webdata/autofill_webdata_backend.h",
     "webdata/autofill_webdata_backend_impl.cc",
@@ -145,6 +153,7 @@ static_library("browser") {
     "//base:i18n",
     "//base:prefs",
     "//components/autofill/core/common",
+    "//components/infobars/core",
     "//components/keyed_service/core",
     "//components/os_crypt",
     "//components/pref_registry",
@@ -166,6 +175,7 @@ static_library("browser") {
     "//url",
   ]
 
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
   public_configs = [ ":autofill_browser_config" ]
 
   if (autofill_enable_sync) {
@@ -176,12 +186,9 @@ static_library("browser") {
       "webdata/autocomplete_syncable_service.h",
       "webdata/autofill_profile_syncable_service.cc",
       "webdata/autofill_profile_syncable_service.h",
+      "webdata/autofill_wallet_syncable_service.cc",
+      "webdata/autofill_wallet_syncable_service.h",
     ]
-  }
-
-  if (is_win) {
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    cflags = [ "/wd4267" ]
   }
 }
 

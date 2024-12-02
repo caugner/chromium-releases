@@ -30,6 +30,7 @@
 #include "ui/gfx/favicon_size.h"
 
 using bookmarks::BookmarkCodec;
+using bookmarks::BookmarkNode;
 using content::BrowserThread;
 
 namespace {
@@ -458,7 +459,7 @@ bool BookmarkFaviconFetcher::FetchNextFavicon() {
     URLFaviconMap::const_iterator iter = favicons_map_->find(url);
     if (favicons_map_->end() == iter) {
       FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
-          profile_, Profile::EXPLICIT_ACCESS);
+          profile_, ServiceAccessType::EXPLICIT_ACCESS);
       favicon_service->GetRawFaviconForPageURL(
           GURL(url),
           favicon_base::FAVICON,

@@ -415,9 +415,9 @@ class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
     set_exit_when_last_browser_closes(false);
   }
 
-  virtual ~DeviceLocalAccountTest() {}
+  ~DeviceLocalAccountTest() override {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     // Configure and start the test server.
     scoped_ptr<crypto::RSAPrivateKey> signing_key(
         PolicyBuilder::CreateTestSigningKey());
@@ -433,7 +433,7 @@ class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
     DevicePolicyCrosBrowserTest::SetUp();
   }
 
-  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     DevicePolicyCrosBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(chromeos::switches::kLoginManager);
     command_line->AppendSwitch(chromeos::switches::kForceLoginManagerInTests);
@@ -442,7 +442,7 @@ class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
                                     test_server_.GetServiceURL().spec());
   }
 
-  virtual void SetUpInProcessBrowserTestFixture() override {
+  void SetUpInProcessBrowserTestFixture() override {
     DevicePolicyCrosBrowserTest::SetUpInProcessBrowserTestFixture();
 
     // Clear command-line arguments (but keep command-line switches) so the
@@ -459,7 +459,7 @@ class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
     InitializePolicy();
   }
 
-  virtual void SetUpOnMainThread() override {
+  void SetUpOnMainThread() override {
     DevicePolicyCrosBrowserTest::SetUpOnMainThread();
 
     initial_locale_ = g_browser_process->GetApplicationLocale();
@@ -515,7 +515,7 @@ class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
     wizard_controller->SkipToLoginForTesting(LoginScreenContext());
   }
 
-  virtual void TearDownOnMainThread() override {
+  void TearDownOnMainThread() override {
     BrowserList::RemoveObserver(this);
 
     // This shuts down the login UI.
@@ -524,23 +524,22 @@ class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
     base::RunLoop().RunUntilIdle();
   }
 
-  virtual void LocalStateChanged(
-      user_manager::UserManager* user_manager) override {
+  void LocalStateChanged(user_manager::UserManager* user_manager) override {
     if (run_loop_)
       run_loop_->Quit();
   }
 
-  virtual void OnBrowserRemoved(Browser* browser) override {
+  void OnBrowserRemoved(Browser* browser) override {
     if (run_loop_)
       run_loop_->Quit();
   }
 
-  virtual void OnAppWindowAdded(extensions::AppWindow* app_window) override {
+  void OnAppWindowAdded(extensions::AppWindow* app_window) override {
     if (run_loop_)
       run_loop_->Quit();
   }
 
-  virtual void OnAppWindowRemoved(extensions::AppWindow* app_window) override {
+  void OnAppWindowRemoved(extensions::AppWindow* app_window) override {
     if (run_loop_)
       run_loop_->Quit();
   }
@@ -960,7 +959,14 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, MAYBE_StartSession) {
       SigninManagerFactory::GetForProfile(profile)->IsAuthenticated());
 }
 
-IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, FullscreenDisallowed) {
+// Test fails under MSan, http://crbug.com/446950
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_FullscreenDisallowed DISABLED_FullscreenDisallowed
+#else
+#define MAYBE_FullscreenDisallowed FullscreenDisallowed
+#endif
+
+IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, MAYBE_FullscreenDisallowed) {
   UploadAndInstallDeviceLocalAccountPolicy();
   AddPublicSessionToDevicePolicy(kAccountId1);
 
@@ -983,7 +989,14 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, FullscreenDisallowed) {
   EXPECT_FALSE(browser_window->IsFullscreen());
 }
 
-IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExtensionsUncached) {
+// Test fails under MSan, http://crbug.com/446950
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_ExtensionsUncached DISABLED_ExtensionsUncached
+#else
+#define MAYBE_ExtensionsUncached ExtensionsUncached
+#endif
+
+IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, MAYBE_ExtensionsUncached) {
   // Make it possible to force-install a hosted app and an extension.
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
   TestingUpdateManifestProvider testing_update_manifest_provider(
@@ -1062,7 +1075,14 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExtensionsUncached) {
   EXPECT_FALSE(cache->GetExtension(kGoodExtensionID, NULL, NULL));
 }
 
-IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExtensionsCached) {
+// Test fails under MSan, http://crbug.com/446950
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_ExtensionsCached DISABLED_ExtensionsCached
+#else
+#define MAYBE_ExtensionsCached ExtensionsCached
+#endif
+
+IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, MAYBE_ExtensionsCached) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // Pre-populate the device local account's extension cache with a hosted app
@@ -1156,7 +1176,14 @@ static void CreateFile(const base::FilePath& file,
   EXPECT_TRUE(base::TouchFile(file, timestamp, timestamp));
 }
 
-IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExtensionCacheImplTest) {
+// Test fails under MSan, http://crbug.com/446950
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_ExtensionCacheImplTest DISABLED_ExtensionCacheImplTest
+#else
+#define MAYBE_ExtensionCacheImplTest ExtensionCacheImplTest
+#endif
+
+IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, MAYBE_ExtensionCacheImplTest) {
   // Make it possible to force-install a hosted app and an extension.
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
   TestingUpdateManifestProvider testing_update_manifest_provider(
@@ -1248,7 +1275,14 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExtensionCacheImplTest) {
   EXPECT_TRUE(PathExists(local_file));
 }
 
-IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExternalData) {
+// Test fails under MSan, http://crbug.com/446950
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_ExternalData DISABLED_ExternalData
+#else
+#define MAYBE_ExternalData ExternalData
+#endif
+
+IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, MAYBE_ExternalData) {
   // user_manager::UserManager requests an external data fetch whenever
   // the key::kUserAvatarImage policy is set. Since this test wants to
   // verify that the underlying policy subsystem will start a fetch
@@ -1323,7 +1357,7 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExternalData) {
   // Verify that the external data reference has propagated to the device-local
   // account's ProfilePolicyConnector.
   ProfilePolicyConnector* policy_connector =
-      ProfilePolicyConnectorFactory::GetForProfile(GetProfileForTest());
+      ProfilePolicyConnectorFactory::GetForBrowserContext(GetProfileForTest());
   ASSERT_TRUE(policy_connector);
   const PolicyMap& policies = policy_connector->policy_service()->GetPolicies(
       PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()));
@@ -1422,7 +1456,16 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, UserAvatarImage) {
   EXPECT_EQ(policy_image->height(), saved_image->height());
 }
 
-IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, LastWindowClosedLogoutReminder) {
+// Test fails under MSan, http://crbug.com/446950
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_LastWindowClosedLogoutReminder \
+  DISABLED_LastWindowClosedLogoutReminder
+#else
+#define MAYBE_LastWindowClosedLogoutReminder LastWindowClosedLogoutReminder
+#endif
+
+IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest,
+                       MAYBE_LastWindowClosedLogoutReminder) {
   UploadAndInstallDeviceLocalAccountPolicy();
   AddPublicSessionToDevicePolicy(kAccountId1);
 
@@ -2106,7 +2149,14 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, TermsOfServiceWithLocaleSwitch) {
                 .id());
 }
 
-IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, PolicyForExtensions) {
+// Test fails under MSan, http://crbug.com/446950
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_PolicyForExtensions DISABLED_PolicyForExtensions
+#else
+#define MAYBE_PolicyForExtensions PolicyForExtensions
+#endif
+
+IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, MAYBE_PolicyForExtensions) {
   // Set up a test update server for the Show Managed Storage app.
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
   TestingUpdateManifestProvider testing_update_manifest_provider(
@@ -2164,7 +2214,7 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, PolicyForExtensions) {
 
   // Wait for the app policy if it hasn't been fetched yet.
   ProfilePolicyConnector* connector =
-      ProfilePolicyConnectorFactory::GetForProfile(profile);
+      ProfilePolicyConnectorFactory::GetForBrowserContext(profile);
   ASSERT_TRUE(connector);
   PolicyService* policy_service = connector->policy_service();
   ASSERT_TRUE(policy_service);

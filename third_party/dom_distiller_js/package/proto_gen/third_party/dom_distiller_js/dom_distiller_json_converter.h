@@ -153,10 +153,12 @@ namespace dom_distiller {
           if (message.has_section()) {
             dict->SetString("4", message.section());
           }
-          base::ListValue* field_list = new base::ListValue();
-          dict->Set("5", field_list);
-          for (int i = 0; i < message.authors_size(); ++i) {
-            field_list->AppendString(message.authors(i));
+          {
+            base::ListValue* field_list = new base::ListValue();
+            dict->Set("5", field_list);
+            for (int i = 0; i < message.authors_size(); ++i) {
+              field_list->AppendString(message.authors(i));
+            }
           }
           return dict.Pass();
         }
@@ -351,12 +353,14 @@ namespace dom_distiller {
                 dom_distiller::proto::json::MarkupArticle::WriteToValue(message.article());
             dict->Set("8", inner_message_value.release());
           }
-          base::ListValue* field_list = new base::ListValue();
-          dict->Set("9", field_list);
-          for (int i = 0; i < message.images_size(); ++i) {
-            scoped_ptr<base::Value> inner_message_value =
-                dom_distiller::proto::json::MarkupImage::WriteToValue(message.images(i));
-            field_list->Append(inner_message_value.release());
+          {
+            base::ListValue* field_list = new base::ListValue();
+            dict->Set("9", field_list);
+            for (int i = 0; i < message.images_size(); ++i) {
+              scoped_ptr<base::Value> inner_message_value =
+                  dom_distiller::proto::json::MarkupImage::WriteToValue(message.images(i));
+              field_list->Append(inner_message_value.release());
+            }
           }
           return dict.Pass();
         }
@@ -477,12 +481,14 @@ namespace dom_distiller {
           if (message.has_total_time()) {
             dict->SetDouble("5", message.total_time());
           }
-          base::ListValue* field_list = new base::ListValue();
-          dict->Set("6", field_list);
-          for (int i = 0; i < message.other_times_size(); ++i) {
-            scoped_ptr<base::Value> inner_message_value =
-                dom_distiller::proto::json::TimingEntry::WriteToValue(message.other_times(i));
-            field_list->Append(inner_message_value.release());
+          {
+            base::ListValue* field_list = new base::ListValue();
+            dict->Set("6", field_list);
+            for (int i = 0; i < message.other_times_size(); ++i) {
+              scoped_ptr<base::Value> inner_message_value =
+                  dom_distiller::proto::json::TimingEntry::WriteToValue(message.other_times(i));
+              field_list->Append(inner_message_value.release());
+            }
           }
           return dict.Pass();
         }
@@ -701,12 +707,14 @@ namespace dom_distiller {
           if (message.has_text_direction()) {
             dict->SetString("9", message.text_direction());
           }
-          base::ListValue* field_list = new base::ListValue();
-          dict->Set("10", field_list);
-          for (int i = 0; i < message.content_images_size(); ++i) {
-            scoped_ptr<base::Value> inner_message_value =
-                dom_distiller::proto::json::DomDistillerResult::ContentImage::WriteToValue(message.content_images(i));
-            field_list->Append(inner_message_value.release());
+          {
+            base::ListValue* field_list = new base::ListValue();
+            dict->Set("10", field_list);
+            for (int i = 0; i < message.content_images_size(); ++i) {
+              scoped_ptr<base::Value> inner_message_value =
+                  dom_distiller::proto::json::DomDistillerResult::ContentImage::WriteToValue(message.content_images(i));
+              field_list->Append(inner_message_value.release());
+            }
           }
           return dict.Pass();
         }
@@ -736,7 +744,7 @@ namespace dom_distiller {
             if (!dict->GetString("3", &field_value)) {
               goto error;
             }
-            message->set_original_domain(field_value);
+            message->set_original_url(field_value);
           }
           return true;
 
@@ -752,8 +760,8 @@ namespace dom_distiller {
           if (message.has_debug_level()) {
             dict->SetInteger("2", message.debug_level());
           }
-          if (message.has_original_domain()) {
-            dict->SetString("3", message.original_domain());
+          if (message.has_original_url()) {
+            dict->SetString("3", message.original_url());
           }
           return dict.Pass();
         }

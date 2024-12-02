@@ -124,8 +124,8 @@ class BrowserOptionsHandler
 
 #if defined(OS_CHROMEOS)
   // PointerDeviceObserver::Observer implementation.
-  virtual void TouchpadExists(bool exists) override;
-  virtual void MouseExists(bool exists) override;
+  void TouchpadExists(bool exists) override;
+  void MouseExists(bool exists) override;
 
   // Will be called when the policy::key::kUserAvatarImage policy changes.
   void OnUserImagePolicyChanged(const base::Value* previous_policy,
@@ -139,7 +139,7 @@ class BrowserOptionsHandler
   void OnPowerwashDialogShow(const base::ListValue* args);
 
   // ConsumerManagementService::Observer:
-  virtual void OnConsumerManagementStatusChanged() override;
+  void OnConsumerManagementStatusChanged() override;
 #endif
 
   void UpdateSyncState();
@@ -226,6 +226,11 @@ class BrowserOptionsHandler
   // |false| and preventing the user from changing the wallpaper if |managed| is
   // |true|.
   void OnWallpaperManagedChanged(bool managed);
+
+  // Updates the UI, allowing the user to change the system time zone if
+  // kSystemTimezonePolicy is set, and preventing the user from changing the
+  // system time zone if kSystemTimezonePolicy is not set.
+  void OnSystemTimezonePolicyChanged();
 #endif
 
   // Callback for the "selectDownloadLocation" message. This will prompt the
@@ -297,6 +302,9 @@ class BrowserOptionsHandler
 
   // Callback for "launchHotwordAudioVerificationApp" message.
   void HandleLaunchHotwordAudioVerificationApp(const base::ListValue* args);
+
+  // Callback for "requestGoogleNowAvailable" message.
+  void HandleRequestGoogleNowAvailable(const base::ListValue* args);
 
   // Callback for "launchEasyUnlockSetup" message.
   void HandleLaunchEasyUnlockSetup(const base::ListValue* args);

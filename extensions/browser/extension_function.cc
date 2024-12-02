@@ -60,6 +60,25 @@ class ArgumentListResponseValue
   const char* title_;
 };
 
+class ErrorWithArgumentsResponseValue : public ArgumentListResponseValue {
+ public:
+  ErrorWithArgumentsResponseValue(const std::string& function_name,
+                                  const char* title,
+                                  ExtensionFunction* function,
+                                  scoped_ptr<base::ListValue> result,
+                                  const std::string& error)
+      : ArgumentListResponseValue(function_name,
+                                  title,
+                                  function,
+                                  result.Pass()) {
+    function->SetError(error);
+  }
+
+  ~ErrorWithArgumentsResponseValue() override {}
+
+  bool Apply() override { return false; }
+};
+
 class ErrorResponseValue : public ExtensionFunction::ResponseValueObject {
  public:
   ErrorResponseValue(ExtensionFunction* function, const std::string& error) {
@@ -211,6 +230,7 @@ class UIThreadExtensionFunction::RenderHostTracker
 ExtensionFunction::ExtensionFunction()
     : request_id_(-1),
       profile_id_(NULL),
+      name_(""),
       has_callback_(false),
       include_incognito_(false),
       user_gesture_(false),
@@ -329,6 +349,13 @@ ExtensionFunction::ResponseValue ExtensionFunction::Error(
     const std::string& s3) {
   return ResponseValue(new ErrorResponseValue(
       this, ErrorUtils::FormatErrorMessage(format, s1, s2, s3)));
+}
+
+ExtensionFunction::ResponseValue ExtensionFunction::ErrorWithArguments(
+    scoped_ptr<base::ListValue> args,
+    const std::string& error) {
+  return ResponseValue(new ErrorWithArgumentsResponseValue(
+      name(), "ErrorWithArguments", this, args.Pass(), error));
 }
 
 ExtensionFunction::ResponseValue ExtensionFunction::BadMessage() {

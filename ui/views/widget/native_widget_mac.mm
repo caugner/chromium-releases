@@ -387,29 +387,7 @@ void NativeWidgetMac::Deactivate() {
 }
 
 bool NativeWidgetMac::IsActive() const {
-  // To behave like ::GetActiveWindow on Windows, IsActive() must return the
-  // "active" window attached to the calling application. NSWindow provides
-  // -isKeyWindow and -isMainWindow, but these are system-wide and update
-  // asynchronously. A window can not be main or key on Mac without the
-  // application being active.
-  // Here, define the active window as the frontmost visible window in the
-  // application.
-  // Note that this might not be the keyWindow, even when Chrome is active.
-  // Also note that -[NSApplication orderedWindows] excludes panels and other
-  // "unscriptable" windows, but includes invisible windows.
-  if (!IsVisible())
-    return false;
-
-  NSWindow* window = GetNativeWindow();
-  for (NSWindow* other_window in [NSApp orderedWindows]) {
-    if ([window isEqual:other_window])
-      return true;
-
-    if ([other_window isVisible])
-      return false;
-  }
-
-  return false;
+  return [GetNativeWindow() isKeyWindow];
 }
 
 void NativeWidgetMac::SetAlwaysOnTop(bool always_on_top) {
@@ -493,7 +471,8 @@ void NativeWidgetMac::SchedulePaintInRect(const gfx::Rect& rect) {
 }
 
 void NativeWidgetMac::SetCursor(gfx::NativeCursor cursor) {
-  NOTIMPLEMENTED();
+  if (bridge_)
+    bridge_->SetCursor(cursor);
 }
 
 bool NativeWidgetMac::IsMouseEventsEnabled() const {
@@ -502,7 +481,10 @@ bool NativeWidgetMac::IsMouseEventsEnabled() const {
 }
 
 void NativeWidgetMac::ClearNativeFocus() {
-  NOTIMPLEMENTED();
+  // To quote DesktopWindowTreeHostX11, "This method is weird and misnamed."
+  // The goal is to set focus to the content window, thereby removing focus from
+  // any NSView in the window that doesn't belong to toolkit-views.
+  [GetNativeWindow() makeFirstResponder:GetNativeView()];
 }
 
 gfx::Rect NativeWidgetMac::GetWorkAreaBoundsInScreen() const {
@@ -615,6 +597,15 @@ void NativeWidgetPrivate::GetAllChildWidgets(gfx::NativeView native_view,
   BridgedNativeWidget* bridge =
       NativeWidgetMac::GetBridgeForNativeWindow([native_view window]);
   if (!bridge)
+    return;
+
+  // If |native_view| is a subview of the contentView, it will share an
+  // NSWindow, but will itself be a native child of the Widget. That is, adding
+  // bridge->..->GetWidget() to |children| would be adding the _parent_ of
+  // |native_view|, not the Widget for |native_view|. |native_view| doesn't have
+  // a corresponding Widget of its own in this case (and so can't have Widget
+  // children of its own on Mac).
+  if (bridge->ns_view() != native_view)
     return;
 
   // Code expects widget for |native_view| to be added to |children|.

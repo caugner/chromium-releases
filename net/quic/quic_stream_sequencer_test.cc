@@ -226,6 +226,7 @@ TEST_F(QuicStreamSequencerTest, NextxFrameNotConsumed) {
   EXPECT_EQ(1u, buffered_frames_->size());
   EXPECT_EQ(0u, sequencer_->num_bytes_consumed());
   EXPECT_EQ("abc", buffered_frames_->find(0)->second);
+  EXPECT_EQ(0, sequencer_->num_early_frames_received());
 }
 
 TEST_F(QuicStreamSequencerTest, FutureFrameNotProcessed) {
@@ -233,6 +234,7 @@ TEST_F(QuicStreamSequencerTest, FutureFrameNotProcessed) {
   EXPECT_EQ(1u, buffered_frames_->size());
   EXPECT_EQ(0u, sequencer_->num_bytes_consumed());
   EXPECT_EQ("abc", buffered_frames_->find(3)->second);
+  EXPECT_EQ(1, sequencer_->num_early_frames_received());
 }
 
 TEST_F(QuicStreamSequencerTest, OutOfOrderFrameProcessed) {
@@ -336,7 +338,7 @@ class QuicSequencerRandomTest : public QuicStreamSequencerTest {
     while (remaining_payload != 0) {
       int size = min(OneToN(6), remaining_payload);
       int index = payload_size - remaining_payload;
-      list_.push_back(make_pair(index, string(kPayload + index, size)));
+      list_.push_back(std::make_pair(index, string(kPayload + index, size)));
       remaining_payload -= size;
     }
   }
@@ -400,7 +402,7 @@ TEST_F(QuicStreamSequencerTest, FrameOverlapsBufferedData) {
 
   // Add a buffered frame.
   buffered_frames->insert(
-      make_pair(kBufferedOffset, string(kBufferedDataLength, '.')));
+      std::make_pair(kBufferedOffset, string(kBufferedDataLength, '.')));
 
   // New byte range partially overlaps with buffered frame, start offset
   // preceeding buffered frame.

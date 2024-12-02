@@ -30,6 +30,7 @@ assert(is_android)
 #     jni_package = "foo"
 #   }
 template("generate_jni") {
+  set_sources_assignment_filter([])
   if (defined(invoker.testonly)) {
     testonly = invoker.testonly
   }
@@ -66,6 +67,7 @@ template("generate_jni") {
       rebase_path(jni_output_dir, root_build_dir),
       "--includes",
       rebase_path(jni_generator_include, "//"),
+      "--native_exports_optional",
     ]
     if (defined(invoker.jni_generator_jarjar_file)) {
       args += [
@@ -128,6 +130,7 @@ template("generate_jni") {
 #     jni_package = "foo"
 #   }
 template("generate_jar_jni") {
+  set_sources_assignment_filter([])
   if (defined(invoker.testonly)) {
     testonly = invoker.testonly
   }
@@ -181,6 +184,7 @@ template("generate_jar_jni") {
         rebase_path(jni_output_dir, root_build_dir),
         "--includes",
         rebase_path(jni_generator_include, root_build_dir),
+        "--native_exports_optional",
       ]
     }
   }
@@ -237,6 +241,7 @@ template("generate_jar_jni") {
 #     include_path = "android/java/templates"
 #   }
 template("java_cpp_template") {
+  set_sources_assignment_filter([])
   if (defined(invoker.testonly)) {
     testonly = invoker.testonly
   }
@@ -333,6 +338,7 @@ template("java_cpp_template") {
 #     ]
 #   }
 template("java_cpp_enum") {
+  set_sources_assignment_filter([])
   if (defined(invoker.testonly)) {
     testonly = invoker.testonly
   }
@@ -341,6 +347,9 @@ template("java_cpp_enum") {
   assert(defined(invoker.outputs))
 
   action("${target_name}__generate_enum") {
+    # The sources aren't compiled so don't check their dependencies.
+    check_includes = false
+
     sources = invoker.sources
     script = "//build/android/gyp/java_cpp_enum.py"
     gen_dir = "${target_gen_dir}/${target_name}/enums"
@@ -392,6 +401,7 @@ template("java_cpp_enum") {
 #     output = "$target_gen_dir/AndroidManifest.xml"
 #   }
 template("jinja_template") {
+  set_sources_assignment_filter([])
   if (defined(invoker.testonly)) {
     testonly = invoker.testonly
   }
@@ -448,6 +458,7 @@ template("jinja_template") {
 #     variables = ["color=red"]
 #   }
 template("jinja_template_resources") {
+  set_sources_assignment_filter([])
   if (defined(invoker.testonly)) {
     testonly = invoker.testonly
   }
@@ -530,6 +541,7 @@ template("jinja_template_resources") {
 #     custom_package = "org.chromium.foo"
 #   }
 template("android_resources") {
+  set_sources_assignment_filter([])
   if (defined(invoker.testonly)) {
     testonly = invoker.testonly
   }
@@ -600,6 +612,7 @@ template("android_resources") {
 #    grd_file = "foo_strings.grd"
 #  }
 template("java_strings_grd") {
+  set_sources_assignment_filter([])
   if (defined(invoker.testonly)) {
     testonly = invoker.testonly
   }
@@ -666,6 +679,7 @@ template("java_strings_grd") {
 #    ]
 #  }
 template("java_strings_grd_prebuilt") {
+  set_sources_assignment_filter([])
   if (defined(invoker.testonly)) {
     testonly = invoker.testonly
   }
@@ -725,6 +739,8 @@ template("java_strings_grd_prebuilt") {
 #     main_class = "org.chromium.foo.FooMain"
 #   }
 template("java_binary") {
+  set_sources_assignment_filter([])
+
   # TODO(cjhopman): This should not act like a java_library for dependents (i.e.
   # dependents shouldn't get the jar in their classpath, etc.).
   java_library_impl(target_name) {
@@ -810,6 +826,7 @@ template("java_binary") {
 #     ]
 #   }
 template("java_library") {
+  set_sources_assignment_filter([])
   java_library_impl(target_name) {
     if (defined(invoker.DEPRECATED_java_in_dir)) {
       DEPRECATED_java_in_dir = invoker.DEPRECATED_java_in_dir
@@ -876,6 +893,7 @@ template("java_library") {
 #     ]
 #   }
 template("java_prebuilt") {
+  set_sources_assignment_filter([])
   java_prebuilt_impl(target_name) {
     jar_path = invoker.jar_path
     if (defined(invoker.testonly)) {
@@ -942,6 +960,7 @@ template("java_prebuilt") {
 #     ]
 #   }
 template("android_library") {
+  set_sources_assignment_filter([])
   assert(!defined(invoker.jar_path),
          "android_library does not support a custom jar path")
   java_library_impl(target_name) {
@@ -984,6 +1003,9 @@ template("android_library") {
     if (defined(invoker.dex_path)) {
       dex_path = invoker.dex_path
     }
+    if (defined(invoker.manifest_entries)) {
+      manifest_entries = invoker.manifest_entries
+    }
 
     supports_android = true
     requires_android = true
@@ -1008,6 +1030,7 @@ template("android_library") {
 #     will be packaged into the resulting .dex.jar file.
 #   dex_path: location at which the output file will be put
 template("android_standalone_library") {
+  set_sources_assignment_filter([])
   deps_dex(target_name) {
     deps = invoker.deps
     dex_path = invoker.dex_path
@@ -1037,6 +1060,7 @@ template("android_standalone_library") {
 #     ]
 #   }
 template("android_java_prebuilt") {
+  set_sources_assignment_filter([])
   java_prebuilt_impl(target_name) {
     jar_path = invoker.jar_path
     supports_android = true
@@ -1105,6 +1129,7 @@ template("android_java_prebuilt") {
 #     ]
 #   }
 template("android_apk") {
+  set_sources_assignment_filter([])
   if (defined(invoker.testonly)) {
     testonly = invoker.testonly
   }
@@ -1324,9 +1349,7 @@ template("android_apk") {
       outputs = [
         depfile,
       ]
-      inputs = [
-        _build_config,
-      ]
+      inputs = [ _build_config ] + _native_libs
       deps = []
       skip_packing_list = [
         "gdbserver",
@@ -1437,6 +1460,7 @@ template("android_apk") {
 #     unittests_dep = ":foo_unittests"
 #   }
 template("unittest_apk") {
+  set_sources_assignment_filter([])
   testonly = true
 
   assert(defined(invoker.unittests_dep), "Need unittests_dep for $target_name")
@@ -1474,6 +1498,7 @@ template("unittest_apk") {
     deps = [
       "//base:base_java",
       "//build/android/pylib/remote/device/dummy:remote_device_dummy_apk",
+      "//net/android:net_java_test_support",
     ]
     if (defined(invoker.deps)) {
       deps += invoker.deps
@@ -1508,6 +1533,7 @@ template("unittest_apk") {
 #     ]
 #   }
 template("android_aidl") {
+  set_sources_assignment_filter([])
   if (defined(invoker.testonly)) {
     testonly = invoker.testonly
   }
@@ -1583,6 +1609,7 @@ template("android_aidl") {
 #     binary = "$root_build_dir/exe.stripped/foo"
 #   }
 template("create_native_executable_dist") {
+  set_sources_assignment_filter([])
   if (defined(invoker.testonly)) {
     testonly = invoker.testonly
   }
@@ -1663,6 +1690,7 @@ template("create_native_executable_dist") {
 #    sources = [ "$proto_path/foo.proto" ]
 #  }
 template("proto_java_library") {
+  set_sources_assignment_filter([])
   _protoc_dep = "//third_party/android_protobuf:android_protoc($host_toolchain)"
   _protoc_out_dir = get_label_info(_protoc_dep, "root_out_dir")
   _protoc_bin = "$_protoc_out_dir/android_protoc"
@@ -1705,6 +1733,7 @@ template("proto_java_library") {
 
 # TODO(GYP): implement this.
 template("uiautomator_test") {
+  set_sources_assignment_filter([])
   if (defined(invoker.testonly)) {
     testonly = invoker.testonly
   }

@@ -5,7 +5,6 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/debug/trace_event.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
@@ -14,6 +13,7 @@
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/layers/delegated_frame_provider.h"
 #include "cc/layers/delegated_frame_resource_collection.h"
 #include "cc/layers/layer.h"
@@ -125,7 +125,7 @@ class LayerWithRealCompositorTest : public testing::Test {
   void DrawTree(Layer* root) {
     GetCompositor()->SetRootLayer(root);
     GetCompositor()->ScheduleDraw();
-    WaitForDraw();
+    WaitForSwap();
   }
 
   void ReadPixels(SkBitmap* bitmap) {
@@ -145,7 +145,7 @@ class LayerWithRealCompositorTest : public testing::Test {
     // be in the middle of a draw right now, and the commit with the
     // copy output request may not be done on the first draw.
     for (int i = 0; i < 2; i++) {
-      GetCompositor()->ScheduleDraw();
+      GetCompositor()->ScheduleFullRedraw();
       WaitForDraw();
     }
 
@@ -155,7 +155,13 @@ class LayerWithRealCompositorTest : public testing::Test {
     *bitmap = holder->result();
   }
 
-  void WaitForDraw() { ui::DrawWaiterForTest::Wait(GetCompositor()); }
+  void WaitForDraw() {
+    ui::DrawWaiterForTest::WaitForCompositingStarted(GetCompositor());
+  }
+
+  void WaitForSwap() {
+    DrawWaiterForTest::WaitForCompositingEnded(GetCompositor());
+  }
 
   void WaitForCommit() {
     ui::DrawWaiterForTest::WaitForCommit(GetCompositor());
@@ -344,6 +350,8 @@ class TestCompositorObserver : public CompositorObserver {
 
   void OnCompositingLockStateChanged(Compositor* compositor) override {}
 
+  void OnCompositingShuttingDown(Compositor* compositor) override {}
+
   bool committed_;
   bool started_;
   bool ended_;
@@ -440,7 +448,9 @@ class LayerWithDelegateTest : public testing::Test {
     WaitForDraw();
   }
 
-  void WaitForDraw() { DrawWaiterForTest::Wait(compositor()); }
+  void WaitForDraw() {
+    DrawWaiterForTest::WaitForCompositingStarted(compositor());
+  }
 
   void WaitForCommit() {
     DrawWaiterForTest::WaitForCommit(compositor());
@@ -636,7 +646,7 @@ TEST_F(LayerWithNullDelegateTest, EscapedDebugNames) {
   scoped_ptr<Layer> layer(CreateLayer(LAYER_NOT_DRAWN));
   std::string name = "\"\'\\/\b\f\n\r\t\n";
   layer->set_name(name);
-  scoped_refptr<base::debug::ConvertableToTraceFormat> debug_info =
+  scoped_refptr<base::trace_event::ConvertableToTraceFormat> debug_info =
     layer->TakeDebugInfo();
   EXPECT_TRUE(!!debug_info.get());
   std::string json;
@@ -661,21 +671,22 @@ TEST_F(LayerWithNullDelegateTest, SwitchLayerPreservesCCLayerState) {
   l1->SetFillsBoundsOpaquely(true);
   l1->SetForceRenderSurface(true);
   l1->SetVisible(false);
+  l1->SetBounds(gfx::Rect(4, 5));
 
   EXPECT_EQ(gfx::Point3F(), l1->cc_layer()->transform_origin());
   EXPECT_TRUE(l1->cc_layer()->DrawsContent());
   EXPECT_TRUE(l1->cc_layer()->contents_opaque());
   EXPECT_TRUE(l1->cc_layer()->force_render_surface());
   EXPECT_TRUE(l1->cc_layer()->hide_layer_and_subtree());
+  EXPECT_EQ(gfx::Size(4, 5), l1->cc_layer()->bounds());
 
   cc::Layer* before_layer = l1->cc_layer();
 
   bool callback1_run = false;
   cc::TextureMailbox mailbox(gpu::Mailbox::Generate(), 0, 0);
-  l1->SetTextureMailbox(mailbox,
-                        cc::SingleReleaseCallback::Create(
-                            base::Bind(ReturnMailbox, &callback1_run)),
-                        gfx::Size(1, 1));
+  l1->SetTextureMailbox(mailbox, cc::SingleReleaseCallback::Create(
+                                     base::Bind(ReturnMailbox, &callback1_run)),
+                        gfx::Size(10, 10));
 
   EXPECT_NE(before_layer, l1->cc_layer());
 
@@ -684,24 +695,48 @@ TEST_F(LayerWithNullDelegateTest, SwitchLayerPreservesCCLayerState) {
   EXPECT_TRUE(l1->cc_layer()->contents_opaque());
   EXPECT_TRUE(l1->cc_layer()->force_render_surface());
   EXPECT_TRUE(l1->cc_layer()->hide_layer_and_subtree());
+  EXPECT_EQ(gfx::Size(4, 5), l1->cc_layer()->bounds());
   EXPECT_FALSE(callback1_run);
 
   bool callback2_run = false;
   mailbox = cc::TextureMailbox(gpu::Mailbox::Generate(), 0, 0);
-  l1->SetTextureMailbox(mailbox,
-                        cc::SingleReleaseCallback::Create(
-                            base::Bind(ReturnMailbox, &callback2_run)),
-                        gfx::Size(1, 1));
+  l1->SetTextureMailbox(mailbox, cc::SingleReleaseCallback::Create(
+                                     base::Bind(ReturnMailbox, &callback2_run)),
+                        gfx::Size(10, 10));
   EXPECT_TRUE(callback1_run);
   EXPECT_FALSE(callback2_run);
 
+  // Show solid color instead.
   l1->SetShowSolidColorContent();
   EXPECT_EQ(gfx::Point3F(), l1->cc_layer()->transform_origin());
   EXPECT_TRUE(l1->cc_layer()->DrawsContent());
   EXPECT_TRUE(l1->cc_layer()->contents_opaque());
   EXPECT_TRUE(l1->cc_layer()->force_render_surface());
   EXPECT_TRUE(l1->cc_layer()->hide_layer_and_subtree());
+  EXPECT_EQ(gfx::Size(4, 5), l1->cc_layer()->bounds());
   EXPECT_TRUE(callback2_run);
+
+  before_layer = l1->cc_layer();
+
+  // Back to a texture, without changing the bounds of the layer or the texture.
+  bool callback3_run = false;
+  mailbox = cc::TextureMailbox(gpu::Mailbox::Generate(), 0, 0);
+  l1->SetTextureMailbox(mailbox, cc::SingleReleaseCallback::Create(
+                                     base::Bind(ReturnMailbox, &callback3_run)),
+                        gfx::Size(10, 10));
+
+  EXPECT_NE(before_layer, l1->cc_layer());
+
+  EXPECT_EQ(gfx::Point3F(), l1->cc_layer()->transform_origin());
+  EXPECT_TRUE(l1->cc_layer()->DrawsContent());
+  EXPECT_TRUE(l1->cc_layer()->contents_opaque());
+  EXPECT_TRUE(l1->cc_layer()->force_render_surface());
+  EXPECT_TRUE(l1->cc_layer()->hide_layer_and_subtree());
+  EXPECT_EQ(gfx::Size(4, 5), l1->cc_layer()->bounds());
+  EXPECT_FALSE(callback3_run);
+
+  // Release the on |l1| mailbox to clean up the test.
+  l1->SetShowSolidColorContent();
 }
 
 // Various visibile/drawn assertions.
@@ -1016,25 +1051,25 @@ TEST_F(LayerWithRealCompositorTest, CompositorObservers) {
   // Moving, but not resizing, a layer should alert the observers.
   observer.Reset();
   l2->SetBounds(gfx::Rect(0, 0, 350, 350));
-  WaitForDraw();
+  WaitForSwap();
   EXPECT_TRUE(observer.notified());
 
   // So should resizing a layer.
   observer.Reset();
   l2->SetBounds(gfx::Rect(0, 0, 400, 400));
-  WaitForDraw();
+  WaitForSwap();
   EXPECT_TRUE(observer.notified());
 
   // Opacity changes should alert the observers.
   observer.Reset();
   l2->SetOpacity(0.5f);
-  WaitForDraw();
+  WaitForSwap();
   EXPECT_TRUE(observer.notified());
 
   // So should setting the opacity back.
   observer.Reset();
   l2->SetOpacity(1.0f);
-  WaitForDraw();
+  WaitForSwap();
   EXPECT_TRUE(observer.notified());
 
   // Setting the transform of a layer should alert the observers.
@@ -1044,7 +1079,7 @@ TEST_F(LayerWithRealCompositorTest, CompositorObservers) {
   transform.Rotate(90.0);
   transform.Translate(-200.0, -200.0);
   l2->SetTransform(transform);
-  WaitForDraw();
+  WaitForSwap();
   EXPECT_TRUE(observer.notified());
 
   // A change resulting in an aborted swap buffer should alert the observer
@@ -1052,7 +1087,7 @@ TEST_F(LayerWithRealCompositorTest, CompositorObservers) {
   observer.Reset();
   l2->SetOpacity(0.1f);
   GetCompositor()->DidAbortSwapBuffers();
-  WaitForDraw();
+  WaitForSwap();
   EXPECT_TRUE(observer.notified());
   EXPECT_TRUE(observer.aborted());
 
@@ -1061,7 +1096,7 @@ TEST_F(LayerWithRealCompositorTest, CompositorObservers) {
   // Opacity changes should no longer alert the removed observer.
   observer.Reset();
   l2->SetOpacity(0.5f);
-  WaitForDraw();
+  WaitForSwap();
 
   EXPECT_FALSE(observer.notified());
 }

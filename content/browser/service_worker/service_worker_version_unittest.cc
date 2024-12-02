@@ -130,6 +130,17 @@ class ServiceWorkerVersionTest : public testing::Test {
         1L,
         helper_->context()->AsWeakPtr());
 
+    // Make the registration findable via storage functions.
+    helper_->context()->storage()->LazyInitialize(base::Bind(&base::DoNothing));
+    base::RunLoop().RunUntilIdle();
+    ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_FAILED;
+    helper_->context()->storage()->StoreRegistration(
+        registration_.get(),
+        version_.get(),
+        CreateReceiverOnCurrentThread(&status));
+    base::RunLoop().RunUntilIdle();
+    ASSERT_EQ(SERVICE_WORKER_OK, status);
+
     // Simulate adding one process to the pattern.
     helper_->SimulateAddProcessToPattern(pattern_, kRenderProcessId);
     ASSERT_TRUE(helper_->context()->process_manager()
@@ -281,6 +292,14 @@ TEST_F(ServiceWorkerVersionTest, SendMessage) {
 }
 
 TEST_F(ServiceWorkerVersionTest, ReceiveMessageFromWorker) {
+  // Start worker.
+  ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_FAILED;
+  version_->StartWorker(CreateReceiverOnCurrentThread(&status));
+  EXPECT_EQ(ServiceWorkerVersion::STARTING, version_->running_status());
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(SERVICE_WORKER_OK, status);
+  EXPECT_EQ(ServiceWorkerVersion::RUNNING, version_->running_status());
+
   MessageReceiverFromWorker receiver(version_->embedded_worker());
 
   // Simulate sending some dummy values from the worker.
@@ -386,6 +405,7 @@ TEST_F(ServiceWorkerVersionTest, ScheduleStopWorker) {
       new ServiceWorkerProviderHost(33 /* dummy render process id */,
                                     MSG_ROUTING_NONE /* render_frame_id */,
                                     1 /* dummy provider_id */,
+                                    SERVICE_WORKER_PROVIDER_FOR_CONTROLLEE,
                                     helper_->context()->AsWeakPtr(),
                                     NULL));
   version_->AddControllee(host.get());

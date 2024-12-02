@@ -8,7 +8,7 @@
 var remoting = remoting || {};
 
 /**
- * @param {Array.<remoting.HostSetupFlow.State>} sequence Sequence of
+ * @param {Array<remoting.HostSetupFlow.State>} sequence Sequence of
  *     steps for the flow.
  * @constructor
  */
@@ -143,7 +143,7 @@ remoting.HostSetupDialog = function(hostController) {
 
   this.usageStats_ = document.getElementById('usagestats-consent');
   this.usageStatsCheckbox_ = /** @type {HTMLInputElement} */
-      document.getElementById('usagestats-consent-checkbox');
+      (document.getElementById('usagestats-consent-checkbox'));
 };
 
 /**
@@ -190,9 +190,21 @@ remoting.HostSetupDialog.prototype.showForStartWithToken_ =
    *     by policy.
    */
   function onGetConsent(supported, allowed, set_by_policy) {
-    that.usageStats_.hidden = !supported;
+    // Hide the usage stats check box if it is not supported or the policy
+    // doesn't allow usage stats collection.
+    var checkBoxLabel = that.usageStats_.querySelector('.checkbox-label');
+    that.usageStats_.hidden = !supported || (set_by_policy && !allowed);
     that.usageStatsCheckbox_.checked = allowed;
+
     that.usageStatsCheckbox_.disabled = set_by_policy;
+    checkBoxLabel.classList.toggle('disabled', set_by_policy);
+
+    if (set_by_policy) {
+      that.usageStats_.title = l10n.getTranslationOrError(
+          /*i18n-content*/ 'SETTING_MANAGED_BY_POLICY');
+    } else {
+      that.usageStats_.title = '';
+    }
   }
 
   /** @param {remoting.Error} error */
@@ -200,7 +212,7 @@ remoting.HostSetupDialog.prototype.showForStartWithToken_ =
     console.error('Error getting consent status: ' + error);
   }
 
-  this.usageStats_.hidden = false;
+  this.usageStats_.hidden = true;
   this.usageStatsCheckbox_.checked = false;
 
   // Prevent user from ticking the box until the current consent status is
@@ -217,7 +229,7 @@ remoting.HostSetupDialog.prototype.showForStartWithToken_ =
 
   var installed =
       state != remoting.HostController.State.NOT_INSTALLED &&
-      state != remoting.HostController.State.INSTALLING;
+      state != remoting.HostController.State.UNKNOWN;
 
   // Skip the installation step when the host is already installed.
   if (installed) {
@@ -261,7 +273,7 @@ remoting.HostSetupDialog.prototype.hide = function() {
 
 /**
  * Starts new flow with the specified sequence of steps.
- * @param {Array.<remoting.HostSetupFlow.State>} sequence Sequence of steps.
+ * @param {Array<remoting.HostSetupFlow.State>} sequence Sequence of steps.
  * @private
  */
 remoting.HostSetupDialog.prototype.startNewFlow_ = function(sequence) {
@@ -361,7 +373,7 @@ remoting.HostSetupDialog.prototype.installHost_ = function() {
   var onHostState = function(state) {
     var installed =
         state != remoting.HostController.State.NOT_INSTALLED &&
-        state != remoting.HostController.State.INSTALLING;
+        state != remoting.HostController.State.UNKNOWN;
 
     if (installed) {
       that.flow_.switchToNextStep();

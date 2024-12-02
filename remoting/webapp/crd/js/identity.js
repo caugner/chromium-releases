@@ -16,26 +16,39 @@ var remoting = remoting || {};
  * TODO(jamiewalch): Remove remoting.OAuth2 from this type annotation when
  * the Apps v2 work is complete.
  *
- * @type {remoting.Identity|remoting.OAuth2}
+ * @type {remoting.Identity}
  */
 remoting.identity = null;
 
 /**
- * @param {function(function():void):void} consentCallback Callback invoked if
- *     user consent is required. The callback is passed a continuation function
- *     which must be called from an interactive event handler (e.g. "click").
+ * @param {remoting.Identity.ConsentDialog=} opt_consentDialog
  * @constructor
  */
-remoting.Identity = function(consentCallback) {
+remoting.Identity = function(opt_consentDialog) {
   /** @private */
-  this.consentCallback_ = consentCallback;
-  /** @type {?string} @private */
-  this.email_ = null;
-  /** @type {?string} @private */
-  this.fullName_ = null;
-  /** @type {Array.<remoting.Identity.Callbacks>} */
+  this.consentDialog_ = opt_consentDialog;
+  /** @type {string} @private */
+  this.email_ = '';
+  /** @type {string} @private */
+  this.fullName_ = '';
+  /** @type {Array<remoting.Identity.Callbacks>} */
   this.pendingCallbacks_ = [];
 };
+
+/**
+ * chrome.identity.getAuthToken should be initiated from user interactions if
+ * called with interactive equals true.  This interface prompts a dialog for
+ * the user's consent.
+ *
+ * @interface
+ */
+remoting.Identity.ConsentDialog = function() {};
+
+/**
+ * @return {Promise} A Promise that resolves when permission to start an
+ *   interactive flow is granted.
+ */
+remoting.Identity.ConsentDialog.prototype.show = function() {};
 
 /**
  * Call a function with an access token.
@@ -75,7 +88,7 @@ remoting.Identity.prototype.callWithNewToken = function(onOk, onError) {
     chrome.identity.removeCachedAuthToken(
         {'token': token },
         that.callWithToken.bind(that, onOk, onError));
-  };
+  }
 
   this.callWithToken(revokeToken, onError);
 };
@@ -83,19 +96,21 @@ remoting.Identity.prototype.callWithNewToken = function(onOk, onError) {
 /**
  * Remove the cached auth token, if any.
  *
- * @param {function():void} onDone Completion callback.
+ * @param {function():void=} opt_onDone Completion callback.
  * @return {void} Nothing.
  */
-remoting.Identity.prototype.removeCachedAuthToken = function(onDone) {
+remoting.Identity.prototype.removeCachedAuthToken = function(opt_onDone) {
+  var onDone = (opt_onDone) ? opt_onDone : base.doNothing;
+
   /** @param {string} token */
   var onToken = function(token) {
     if (token) {
-      chrome.identity.removeCachedAuthToken({ 'token': token }, onDone);
+      chrome.identity.removeCachedAuthToken({'token': token}, onDone);
     } else {
       onDone();
     }
   };
-  chrome.identity.getAuthToken({ 'interactive': false }, onToken);
+  chrome.identity.getAuthToken({'interactive': false}, onToken);
 };
 
 /**
@@ -110,8 +125,14 @@ remoting.Identity.prototype.removeCachedAuthToken = function(onDone) {
  * @return {void} Nothing.
  */
 remoting.Identity.prototype.getUserInfo = function(onOk, onError) {
+  if (this.isAuthenticated()) {
+    onOk(this.email_, this.fullName_);
+    return;
+  }
+
   /** @type {remoting.Identity} */
   var that = this;
+
   /**
    * @param {string} email
    * @param {string} name
@@ -126,6 +147,21 @@ remoting.Identity.prototype.getUserInfo = function(onOk, onError) {
       remoting.oauth2Api.getUserInfo.bind(
           remoting.oauth2Api, onResponse, onError),
       onError);
+};
+
+/**
+ * Get the user's email address.
+ *
+ * @param {function(string):void} onOk Callback invoked when the email
+ *     address is available.
+ * @param {function(remoting.Error):void} onError Callback invoked if an
+ *     error occurs.
+ * @return {void} Nothing.
+ */
+remoting.Identity.prototype.getEmail = function(onOk, onError) {
+  this.getUserInfo(function(email, name) {
+    onOk(email);
+  }, onError);
 };
 
 /**
@@ -163,7 +199,7 @@ remoting.Identity.prototype.onAuthComplete_ = function(interactive, token) {
   if (token) {
     while (this.pendingCallbacks_.length > 0) {
       var callback = /** @type {remoting.Identity.Callbacks} */
-          this.pendingCallbacks_.shift();
+          (this.pendingCallbacks_.shift());
       callback.onOk(token);
     }
     return;
@@ -178,26 +214,21 @@ remoting.Identity.prototype.onAuthComplete_ = function(interactive, token) {
     console.error(error_message);
     while (this.pendingCallbacks_.length > 0) {
       var callback = /** @type {remoting.Identity.Callbacks} */
-          this.pendingCallbacks_.shift();
+          (this.pendingCallbacks_.shift());
       callback.onError(remoting.Error.NOT_AUTHENTICATED);
     }
     return;
   }
 
   // If there's no token, but we haven't yet prompted for permission, do so
-  // now. The consent callback is responsible for continuing the auth flow.
-  this.consentCallback_(this.onAuthContinue_.bind(this));
-};
-
-/**
- * Called in response to the user signing in to the web-app.
- *
- * @private
- */
-remoting.Identity.prototype.onAuthContinue_ = function() {
-  chrome.identity.getAuthToken(
-      { 'interactive': true },
-      this.onAuthComplete_.bind(this, true));
+  // now.
+  var that = this;
+  var showConsentDialog =
+      (this.consentDialog_) ? this.consentDialog_.show() : Promise.resolve();
+  showConsentDialog.then(function() {
+    chrome.identity.getAuthToken({'interactive': true},
+                                 that.onAuthComplete_.bind(that, true));
+  });
 };
 
 /**
@@ -221,5 +252,5 @@ remoting.Identity.Callbacks = function(onOk, onError) {
  * @return {boolean}
  */
 remoting.Identity.prototype.isAuthenticated = function() {
-  return remoting.identity.email_ != null;
+  return remoting.identity.email_ !== '';
 };

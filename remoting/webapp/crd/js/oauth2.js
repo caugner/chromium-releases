@@ -82,15 +82,19 @@ remoting.OAuth2.prototype.isAuthenticated = function() {
 };
 
 /**
- * Removes all storage, and effectively unauthenticates the user.
+ * Remove the cached auth token, if any.
  *
+ * @param {function():void=} opt_onDone Completion callback.
  * @return {void} Nothing.
  */
-remoting.OAuth2.prototype.clear = function() {
+remoting.OAuth2.prototype.removeCachedAuthToken = function(opt_onDone) {
   window.localStorage.removeItem(this.KEY_EMAIL_);
   window.localStorage.removeItem(this.KEY_FULLNAME_);
   this.clearAccessToken_();
   this.clearRefreshToken_();
+  if (opt_onDone) {
+   opt_onDone();
+  }
 };
 
 /**
@@ -156,7 +160,7 @@ remoting.OAuth2.prototype.setAccessToken_ = function(token, expiration) {
  *
  * @private
  * @return {{token: string, expiration: number}} The current access token, or
- * an invalid token if not authenticated.
+ *     an invalid token if not authenticated.
  */
 remoting.OAuth2.prototype.getAccessTokenInternal_ = function() {
   if (!window.localStorage.getItem(this.KEY_ACCESS_TOKEN_)) {
@@ -167,7 +171,7 @@ remoting.OAuth2.prototype.getAccessTokenInternal_ = function() {
   if (typeof accessToken == 'string') {
     var result = base.jsonParseSafe(accessToken);
     if (result && 'token' in result && 'expiration' in result) {
-      return /** @type {{token: string, expiration: number}} */ result;
+      return /** @type {{token: string, expiration: number}} */(result);
     }
   }
   console.log('Invalid access token stored.');
@@ -259,7 +263,7 @@ remoting.OAuth2.prototype.getAuthorizationCode = function(onDone) {
   /**
    * Processes the results of the oauth flow.
    *
-   * @param {Object.<string, string>} message Dictionary containing the parsed
+   * @param {Object<string, string>} message Dictionary containing the parsed
    *   OAuth redirect URL parameters.
    * @param {function(*)} sendResponse Function to send response.
    */

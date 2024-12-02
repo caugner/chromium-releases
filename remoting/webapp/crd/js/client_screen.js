@@ -19,13 +19,19 @@ var remoting = remoting || {};
 remoting.clientSession = null;
 
 /**
+ * @type {remoting.DesktopConnectedView} The client session object, set once the
+ *     connector has invoked its onOk callback.
+ */
+remoting.desktopConnectedView = null;
+
+/**
  * Update the remoting client layout in response to a resize event.
  *
  * @return {void} Nothing.
  */
 remoting.onResize = function() {
-  if (remoting.clientSession) {
-    remoting.clientSession.onResize();
+  if (remoting.desktopConnectedView) {
+    remoting.desktopConnectedView.onResize();
   }
 };
 
@@ -35,8 +41,8 @@ remoting.onResize = function() {
  * @return {void} Nothing.
  */
 remoting.onVisibilityChanged = function() {
-  if (remoting.clientSession) {
-    remoting.clientSession.pauseVideo(
+  if (remoting.desktopConnectedView) {
+    remoting.desktopConnectedView.pauseVideo(
       ('hidden' in document) ? document.hidden : document.webkitHidden);
   }
 };
@@ -50,13 +56,7 @@ remoting.disconnect = function() {
   if (!remoting.clientSession) {
     return;
   }
-  if (remoting.clientSession.getMode() == remoting.ClientSession.Mode.IT2ME) {
-    remoting.setMode(remoting.AppMode.CLIENT_SESSION_FINISHED_IT2ME);
-  } else {
-    remoting.setMode(remoting.AppMode.CLIENT_SESSION_FINISHED_ME2ME);
-  }
   remoting.clientSession.disconnect(remoting.Error.NONE);
-  remoting.clientSession = null;
   console.log('Disconnected.');
 };
 
@@ -64,14 +64,14 @@ remoting.disconnect = function() {
  * Callback function called when the state of the client plugin changes. The
  * current and previous states are available via the |state| member variable.
  *
- * @param {remoting.ClientSession.StateEvent} state
+ * @param {remoting.ClientSession.StateEvent=} state
  */
 function onClientStateChange_(state) {
   switch (state.current) {
     case remoting.ClientSession.State.CLOSED:
       console.log('Connection closed by host');
-      if (remoting.clientSession.getMode() ==
-          remoting.ClientSession.Mode.IT2ME) {
+      if (remoting.desktopConnectedView.getMode() ==
+          remoting.DesktopConnectedView.Mode.IT2ME) {
         remoting.setMode(remoting.AppMode.CLIENT_SESSION_FINISHED_IT2ME);
         remoting.hangoutSessionEvents.raiseEvent(
             remoting.hangoutSessionEvents.sessionStateChanged,
@@ -79,6 +79,7 @@ function onClientStateChange_(state) {
       } else {
         remoting.setMode(remoting.AppMode.CLIENT_SESSION_FINISHED_ME2ME);
       }
+      remoting.app.onDisconnected();
       break;
 
     case remoting.ClientSession.State.FAILED:
@@ -102,6 +103,7 @@ function onClientStateChange_(state) {
                                              onClientStateChange_);
   remoting.clientSession.cleanup();
   remoting.clientSession = null;
+  remoting.desktopConnectedView = null;
 }
 
 /**

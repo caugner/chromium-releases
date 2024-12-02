@@ -21,6 +21,8 @@
           '--test-launcher-bot-mode',
           '--asan=<(asan)',
           '--lsan=<(lsan)',
+          '--msan=<(msan)',
+          '--tsan=<(tsan)',
         ],
         'files': [
           '../../testing/xvfb.py',
@@ -35,20 +37,6 @@
         ],
       },
     }],
-    ['OS=="mac"', {
-      'variables': {
-        'files': [
-          '<(PRODUCT_DIR)/osmesa.so',
-        ],
-      },
-    }],
-    ['OS=="win"', {
-      'variables': {
-        'files': [
-          '<(PRODUCT_DIR)/osmesa.dll',
-        ],
-      },
-    }],
     ['OS=="mac" or OS=="win"', {
       'variables': {
         'command': [
@@ -58,6 +46,15 @@
           '--test-launcher-bot-mode',
           '--asan=<(asan)',
           '--lsan=<(lsan)',
+          '--msan=<(msan)',
+          '--tsan=<(tsan)',
+        ],
+      },
+    }],
+    ['OS=="mac" and asan==1 and fastbuild==0', {
+      'variables': {
+        'files': [
+          '<(PRODUCT_DIR)/ui_touch_selection_unittests.dSYM/',
         ],
       },
     }],

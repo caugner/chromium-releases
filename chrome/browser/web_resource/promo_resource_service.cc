@@ -14,9 +14,9 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/web_resource/notification_promo.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/web_resource/web_resource_pref_names.h"
+#include "components/web_resource/web_resource_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "url/gurl.h"
 
@@ -87,13 +87,13 @@ void PromoResourceService::MigrateUserPrefs(PrefService* user_prefs) {
 }
 
 PromoResourceService::PromoResourceService()
-    : WebResourceService(g_browser_process->local_state(),
-                         GetPromoResourceURL(),
-                         true,  // append locale to URL
-                         prefs::kNtpPromoResourceCacheUpdate,
-                         kStartResourceFetchDelay,
-                         GetCacheUpdateDelay()),
-                         weak_ptr_factory_(this) {
+    : ChromeWebResourceService(g_browser_process->local_state(),
+                               GetPromoResourceURL(),
+                               true,  // append locale to URL
+                               prefs::kNtpPromoResourceCacheUpdate,
+                               kStartResourceFetchDelay,
+                               GetCacheUpdateDelay()),
+      weak_ptr_factory_(this) {
   ScheduleNotificationOnInit();
 }
 

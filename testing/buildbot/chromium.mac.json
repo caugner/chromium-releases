@@ -28,9 +28,25 @@
       },
       "cacheinvalidation_unittests",
       "cast_unittests",
-      "cc_unittests",
+      {
+        "test": "cc_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       "chromedriver_unittests",
-      "components_unittests",
+      {
+        "test": "components_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
+      {
+        "test": "components_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       {
         "test": "content_browsertests",
         "swarming": {
@@ -43,7 +59,12 @@
           "can_use_on_swarming_builders": true
         }
       },
-      "crypto_unittests",
+      {
+        "test": "crypto_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       "extensions_unittests",
       "gcm_unit_tests",
       {
@@ -52,7 +73,12 @@
           "can_use_on_swarming_builders": true
         }
       },
-      "gpu_unittests",
+      {
+        "test": "gpu_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       "google_apis_unittests",
       {
         "test": "interactive_ui_tests",
@@ -62,7 +88,12 @@
       },
       "ipc_tests",
       "jingle_unittests",
-      "media_unittests",
+      {
+        "test": "media_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       {
         "test": "message_center_unittests",
         "swarming": {
@@ -75,6 +106,7 @@
       "mojo_public_system_unittests",
       "mojo_public_utility_unittests",
       "mojo_system_unittests",
+      "nacl_loader_unittests",
       {
         "test": "net_unittests",
         "swarming": {
@@ -152,9 +184,19 @@
       },
       "cacheinvalidation_unittests",
       "cast_unittests",
-      "cc_unittests",
+      {
+        "test": "cc_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       "chromedriver_unittests",
-      "components_unittests",
+      {
+        "test": "components_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       {
         "test": "content_browsertests",
         "swarming": {
@@ -167,7 +209,12 @@
           "can_use_on_swarming_builders": true
         }
       },
-      "crypto_unittests",
+      {
+        "test": "crypto_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       "extensions_unittests",
       "gcm_unit_tests",
       {
@@ -176,7 +223,12 @@
           "can_use_on_swarming_builders": true
         }
       },
-      "gpu_unittests",
+      {
+        "test": "gpu_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       "google_apis_unittests",
       {
         "test": "interactive_ui_tests",
@@ -186,7 +238,12 @@
       },
       "ipc_tests",
       "jingle_unittests",
-      "media_unittests",
+      {
+        "test": "media_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       {
         "test": "message_center_unittests",
         "swarming": {
@@ -199,6 +256,7 @@
       "mojo_public_system_unittests",
       "mojo_public_utility_unittests",
       "mojo_system_unittests",
+      "nacl_loader_unittests",
       {
         "test": "net_unittests",
         "swarming": {
@@ -276,9 +334,19 @@
       },
       "cacheinvalidation_unittests",
       "cast_unittests",
-      "cc_unittests",
+      {
+        "test": "cc_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       "chromedriver_unittests",
-      "components_unittests",
+      {
+        "test": "components_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       {
         "test": "content_browsertests",
         "swarming": {
@@ -291,7 +359,12 @@
           "can_use_on_swarming_builders": true
         }
       },
-      "crypto_unittests",
+      {
+        "test": "crypto_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       "extensions_unittests",
       "gcm_unit_tests",
       {
@@ -300,7 +373,12 @@
           "can_use_on_swarming_builders": true
         }
       },
-      "gpu_unittests",
+      {
+        "test": "gpu_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       "google_apis_unittests",
       {
         "test": "interactive_ui_tests",
@@ -310,7 +388,12 @@
       },
       "ipc_tests",
       "jingle_unittests",
-      "media_unittests",
+      {
+        "test": "media_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       {
         "test": "message_center_unittests",
         "swarming": {
@@ -323,6 +406,7 @@
       "mojo_public_system_unittests",
       "mojo_public_utility_unittests",
       "mojo_system_unittests",
+      "nacl_loader_unittests",
       {
         "test": "net_unittests",
         "swarming": {
@@ -400,9 +484,19 @@
       },
       "cacheinvalidation_unittests",
       "cast_unittests",
-      "cc_unittests",
+      {
+        "test": "cc_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       "chromedriver_unittests",
-      "components_unittests",
+      {
+        "test": "components_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       {
         "test": "content_browsertests",
         "swarming": {
@@ -415,7 +509,12 @@
           "can_use_on_swarming_builders": true
         }
       },
-      "crypto_unittests",
+      {
+        "test": "crypto_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       "extensions_unittests",
       "gcm_unit_tests",
       {
@@ -424,7 +523,12 @@
           "can_use_on_swarming_builders": true
         }
       },
-      "gpu_unittests",
+      {
+        "test": "gpu_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       "google_apis_unittests",
       {
         "test": "interactive_ui_tests",
@@ -435,7 +539,12 @@
       },
       "ipc_tests",
       "jingle_unittests",
-      "media_unittests",
+      {
+        "test": "media_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       {
         "test": "message_center_unittests",
         "swarming": {
@@ -448,6 +557,7 @@
       "mojo_public_system_unittests",
       "mojo_public_utility_unittests",
       "mojo_system_unittests",
+      "nacl_loader_unittests",
       {
         "test": "net_unittests",
         "swarming": {

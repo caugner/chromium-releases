@@ -94,8 +94,8 @@ class PasswordAutofillManagerTest : public testing::Test {
   void InitializePasswordAutofillManager(
       TestPasswordManagerClient* client,
       autofill::AutofillClient* autofill_client) {
-    password_autofill_manager_.reset(new PasswordAutofillManager(
-        client, client->mock_driver(), autofill_client));
+    password_autofill_manager_.reset(
+        new PasswordAutofillManager(client->mock_driver(), autofill_client));
     password_autofill_manager_->OnAddPasswordFormMapping(fill_data_id_,
                                                          fill_data_);
   }
@@ -127,8 +127,7 @@ TEST_F(PasswordAutofillManagerTest, FillSuggestion) {
       fill_data_id(), test_username_));
   testing::Mock::VerifyAndClearExpectations(client->mock_driver());
 
-  EXPECT_CALL(*client->mock_driver(),
-              FillSuggestion(_, _)).Times(0);
+  EXPECT_CALL(*client->mock_driver(), FillSuggestion(_, _)).Times(0);
   EXPECT_FALSE(password_autofill_manager_->FillSuggestionForTest(
       fill_data_id(), base::ASCIIToUTF16(kInvalidUsername)));
 

@@ -80,6 +80,11 @@ IN_PROC_BROWSER_TEST_F(FileManagerJsTest, TaskQueueTest) {
       FILE_PATH_LITERAL("background/js/task_queue_unittest.html")));
 }
 
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, DuplicateFinderTest) {
+  RunTest(base::FilePath(
+      FILE_PATH_LITERAL("background/js/duplicate_finder_unittest.html")));
+}
+
 IN_PROC_BROWSER_TEST_F(FileManagerJsTest, ImportControllerTest) {
   RunTest(base::FilePath(
       FILE_PATH_LITERAL("foreground/js/import_controller_unittest.html")));
@@ -90,22 +95,71 @@ IN_PROC_BROWSER_TEST_F(FileManagerJsTest, AsyncUtilTest) {
       FILE_PATH_LITERAL("common/js/async_util_unittest.html")));
 }
 
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, MetricsTest) {
+  RunTest(base::FilePath(FILE_PATH_LITERAL("common/js/metrics_unittest.html")));
+}
+
 IN_PROC_BROWSER_TEST_F(FileManagerJsTest, TaskController) {
   RunTest(base::FilePath(
       FILE_PATH_LITERAL("foreground/js/task_controller_unittest.html")));
 }
 
-IN_PROC_BROWSER_TEST_F(FileManagerJsTest, PreviewPanel) {
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, FileTasks) {
   RunTest(base::FilePath(
-      FILE_PATH_LITERAL("foreground/js/ui/preview_panel_unittest.html")));
-}
-
-IN_PROC_BROWSER_TEST_F(FileManagerJsTest, PreviewPanelModelTest) {
-  RunTest(base::FilePath(
-      FILE_PATH_LITERAL("foreground/js/preview_panel_model_unittest.html")));
+      FILE_PATH_LITERAL("foreground/js/file_tasks_unittest.html")));
 }
 
 IN_PROC_BROWSER_TEST_F(FileManagerJsTest, ThumbnailLoader) {
   RunTest(base::FilePath(
       FILE_PATH_LITERAL("foreground/js/thumbnail_loader_unittest.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, MetadataCacheItem) {
+  RunTest(base::FilePath(FILE_PATH_LITERAL(
+      "foreground/js/metadata/metadata_cache_item_unittest.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, MetadataCacheSet) {
+  RunTest(base::FilePath(FILE_PATH_LITERAL(
+      "foreground/js/metadata/metadata_cache_set_unittest.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, NewMetadataProvider) {
+  RunTest(base::FilePath(FILE_PATH_LITERAL(
+      "foreground/js/metadata/new_metadata_provider_unittest.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, ListThumbnailLoader) {
+  RunTest(base::FilePath(
+      FILE_PATH_LITERAL("foreground/js/list_thumbnail_loader_unittest.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, FileSystemMetadataProvider) {
+  RunTest(base::FilePath(FILE_PATH_LITERAL(
+      "foreground/js/metadata/file_system_metadata_provider_unittest.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, ExternalMetadataProvider) {
+  RunTest(base::FilePath(FILE_PATH_LITERAL(
+      "foreground/js/metadata/external_metadata_provider_unittest.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, ContentMetadataProvider) {
+  RunTest(base::FilePath(FILE_PATH_LITERAL(
+      "foreground/js/metadata/content_metadata_provider_unittest.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, FileSystemMetadata) {
+  RunTest(base::FilePath(FILE_PATH_LITERAL(
+      "foreground/js/metadata/file_system_metadata_unittest.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, ThumbnailModel) {
+  RunTest(base::FilePath(FILE_PATH_LITERAL(
+      "foreground/js/metadata/thumbnail_model_unittest.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, ExifParser) {
+  RunTest(base::FilePath(FILE_PATH_LITERAL(
+      "foreground/js/metadata/exif_parser_unittest.html")));
 }

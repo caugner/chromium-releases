@@ -6,8 +6,10 @@
 
 Eventually, this will be based on adb_wrapper.
 """
-# pylint: disable=W0613
+# pylint: disable=unused-argument
 
+import collections
+import itertools
 import logging
 import multiprocessing
 import os
@@ -24,6 +26,7 @@ from pylib.device import adb_wrapper
 from pylib.device import decorators
 from pylib.device import device_errors
 from pylib.device import intent
+from pylib.device import logcat_monitor
 from pylib.device.commands import install_commands
 from pylib.utils import apk_helper
 from pylib.utils import device_temp_file
@@ -91,9 +94,20 @@ def _GetTimeStamp():
   return time.strftime('%Y%m%dT%H%M%S', time.localtime())
 
 
+def _JoinLines(lines):
+  # makes sure that the last line is also terminated, and is more memory
+  # efficient than first appending an end-line to each line and then joining
+  # all of them together.
+  return ''.join(s for line in lines for s in (line, '\n'))
+
+
 class DeviceUtils(object):
 
+  _MAX_ADB_COMMAND_LENGTH = 512
   _VALID_SHELL_VARIABLE = re.compile('^[a-zA-Z_][a-zA-Z0-9_]*$')
+
+  # Property in /data/local.prop that controls Java assertions.
+  JAVA_ASSERT_PROPERTY = 'dalvik.vm.enableassertions'
 
   def __init__(self, device, default_timeout=_DEFAULT_TIMEOUT,
                default_retries=_DEFAULT_RETRIES):
@@ -342,11 +356,13 @@ class DeviceUtils(object):
   @decorators.WithTimeoutAndRetriesDefaults(
       REBOOT_DEFAULT_TIMEOUT,
       REBOOT_DEFAULT_RETRIES)
-  def Reboot(self, block=True, timeout=None, retries=None):
+  def Reboot(self, block=True, wifi=False, timeout=None, retries=None):
     """Reboot the device.
 
     Args:
       block: A boolean indicating if we should wait for the reboot to complete.
+      wifi: A boolean indicating if we should wait for wifi to be enabled after
+        the reboot. The option has no effect unless |block| is also True.
       timeout: timeout in seconds
       retries: number of retries
 
@@ -361,7 +377,7 @@ class DeviceUtils(object):
     self._cache = {}
     timeout_retry.WaitFor(device_offline, wait_period=1)
     if block:
-      self.WaitUntilFullyBooted()
+      self.WaitUntilFullyBooted(wifi=wifi)
 
   INSTALL_DEFAULT_TIMEOUT = 4 * _DEFAULT_TIMEOUT
   INSTALL_DEFAULT_RETRIES = _DEFAULT_RETRIES
@@ -398,8 +414,8 @@ class DeviceUtils(object):
 
   @decorators.WithTimeoutAndRetriesFromInstance()
   def RunShellCommand(self, cmd, check_return=False, cwd=None, env=None,
-                      as_root=False, single_line=False,
-                      timeout=None, retries=None):
+                      as_root=False, single_line=False, timeout=None,
+                      retries=None):
     """Run an ADB shell command.
 
     The command to run |cmd| should be a sequence of program arguments or else
@@ -454,6 +470,15 @@ class DeviceUtils(object):
       # using double quotes here to allow interpolation of shell variables
       return '%s=%s' % (key, cmd_helper.DoubleQuote(value))
 
+    def do_run(cmd):
+      try:
+        return self.adb.Shell(cmd)
+      except device_errors.AdbCommandFailedError as exc:
+        if check_return:
+          raise
+        else:
+          return exc.output
+
     if not isinstance(cmd, basestring):
       cmd = ' '.join(cmd_helper.SingleQuote(s) for s in cmd)
     if env:
@@ -467,13 +492,14 @@ class DeviceUtils(object):
     if timeout is None:
       timeout = self._default_timeout
 
-    try:
-      output = self.adb.Shell(cmd)
-    except device_errors.AdbCommandFailedError as e:
-      if check_return:
-        raise
-      else:
-        output = e.output
+    if len(cmd) < self._MAX_ADB_COMMAND_LENGTH:
+      output = do_run(cmd)
+    else:
+      with device_temp_file.DeviceTempFile(self.adb, suffix='.sh') as script:
+        self._WriteFileWithPush(script.name, cmd)
+        logging.info('Large shell command will be run from file: %s ...',
+                     cmd[:100])
+        output = do_run('sh %s' % script.name_quoted)
 
     output = output.splitlines()
     if single_line:
@@ -569,7 +595,7 @@ class DeviceUtils(object):
     if raw:
       cmd.append('-r')
     for k, v in extras.iteritems():
-      cmd.extend(['-e', k, v])
+      cmd.extend(['-e', str(k), str(v)])
     cmd.append(component)
     return self.RunShellCommand(cmd, check_return=True)
 
@@ -634,9 +660,12 @@ class DeviceUtils(object):
       CommandTimeoutError on timeout.
       DeviceUnreachableError on missing device.
     """
-    # Check that the package exists before clearing it. Necessary because
-    # calling pm clear on a package that doesn't exist may never return.
-    if self.GetApplicationPath(package):
+    # Check that the package exists before clearing it for android builds below
+    # JB MR2. Necessary because calling pm clear on a package that doesn't exist
+    # may never return.
+    if ((self.build_version_sdk >=
+         constants.ANDROID_SDK_VERSION_CODES.JELLY_BEAN_MR2)
+        or self.GetApplicationPath(package)):
       self.RunShellCommand(['pm', 'clear', package], check_return=True)
 
   @decorators.WithTimeoutAndRetriesFromInstance()
@@ -820,7 +849,7 @@ class DeviceUtils(object):
         self.RunShellCommand(
             ['unzip', zip_on_device],
             as_root=True,
-            env={'PATH': '$PATH:%s' % install_commands.BIN_DIR},
+            env={'PATH': '%s:$PATH' % install_commands.BIN_DIR},
             check_return=True)
       finally:
         if zip_proc.is_alive():
@@ -880,7 +909,8 @@ class DeviceUtils(object):
     self.adb.Pull(device_path, host_path)
 
   @decorators.WithTimeoutAndRetriesFromInstance()
-  def ReadFile(self, device_path, as_root=False, timeout=None, retries=None):
+  def ReadFile(self, device_path, as_root=False,
+               timeout=None, retries=None):
     """Reads the contents of a file from the device.
 
     Args:
@@ -892,22 +922,23 @@ class DeviceUtils(object):
       retries: number of retries
 
     Returns:
-      The contents of the file at |device_path| as a list of lines.
+      The contents of |device_path| as a string. Contents are intepreted using
+      universal newlines, so the caller will see them encoded as '\n'. Also,
+      all lines will be terminated.
 
     Raises:
-      CommandFailedError if the file can't be read.
+      AdbCommandFailedError if the file can't be read.
       CommandTimeoutError on timeout.
       DeviceUnreachableError on missing device.
     """
-    # TODO(jbudorick) Evaluate whether we want to return a list of lines after
-    # the implementation switch, and if file not found should raise exception.
-    if as_root:
-      if not self.old_interface.CanAccessProtectedFileContents():
-        raise device_errors.CommandFailedError(
-          'Cannot read from %s with root privileges.' % device_path)
-      return self.old_interface.GetProtectedFileContents(device_path)
-    else:
-      return self.old_interface.GetFileContents(device_path)
+    return _JoinLines(self.RunShellCommand(
+        ['cat', device_path], as_root=as_root, check_return=True))
+
+  def _WriteFileWithPush(self, device_path, contents):
+    with tempfile.NamedTemporaryFile() as host_temp:
+      host_temp.write(contents)
+      host_temp.flush()
+      self.adb.Push(host_temp.name, device_path)
 
   @decorators.WithTimeoutAndRetriesFromInstance()
   def WriteFile(self, device_path, contents, as_root=False, force_push=False,
@@ -931,24 +962,25 @@ class DeviceUtils(object):
       CommandTimeoutError on timeout.
       DeviceUnreachableError on missing device.
     """
-    if len(contents) < 512 and not force_push:
+    if not force_push and len(contents) < self._MAX_ADB_COMMAND_LENGTH:
+      # If the contents are small, for efficieny we write the contents with
+      # a shell command rather than pushing a file.
       cmd = 'echo -n %s > %s' % (cmd_helper.SingleQuote(contents),
                                  cmd_helper.SingleQuote(device_path))
       self.RunShellCommand(cmd, as_root=as_root, check_return=True)
+    elif as_root and self.NeedsSU():
+      # Adb does not allow to "push with su", so we first push to a temp file
+      # on a safe location, and then copy it to the desired location with su.
+      with device_temp_file.DeviceTempFile(self.adb) as device_temp:
+        self._WriteFileWithPush(device_temp.name, contents)
+        # Here we need 'cp' rather than 'mv' because the temp and
+        # destination files might be on different file systems (e.g.
+        # on internal storage and an external sd card).
+        self.RunShellCommand(['cp', device_temp.name, device_path],
+                             as_root=True, check_return=True)
     else:
-      with tempfile.NamedTemporaryFile() as host_temp:
-        host_temp.write(contents)
-        host_temp.flush()
-        if as_root and self.NeedsSU():
-          with device_temp_file.DeviceTempFile(self.adb) as device_temp:
-            self.adb.Push(host_temp.name, device_temp.name)
-            # Here we need 'cp' rather than 'mv' because the temp and
-            # destination files might be on different file systems (e.g.
-            # on internal storage and an external sd card)
-            self.RunShellCommand(['cp', device_temp.name, device_path],
-                                 as_root=True, check_return=True)
-        else:
-          self.adb.Push(host_temp.name, device_path)
+      # If root is not needed, we can push directly to the desired location.
+      self._WriteFileWithPush(device_path, contents)
 
   @decorators.WithTimeoutAndRetriesFromInstance()
   def Ls(self, device_path, timeout=None, retries=None):
@@ -1014,7 +1046,45 @@ class DeviceUtils(object):
     Raises:
       CommandTimeoutError on timeout.
     """
-    return self.old_interface.SetJavaAssertsEnabled(enabled)
+    def find_property(lines, property_name):
+      for index, line in enumerate(lines):
+        if line.strip() == '':
+          continue
+        key, value = (s.strip() for s in line.split('=', 1))
+        if key == property_name:
+          return index, value
+      return None, ''
+
+    new_value = 'all' if enabled else ''
+
+    # First ensure the desired property is persisted.
+    try:
+      properties = self.ReadFile(
+          constants.DEVICE_LOCAL_PROPERTIES_PATH).splitlines()
+    except device_errors.CommandFailedError:
+      properties = []
+    index, value = find_property(properties, self.JAVA_ASSERT_PROPERTY)
+    if new_value != value:
+      if new_value:
+        new_line = '%s=%s' % (self.JAVA_ASSERT_PROPERTY, new_value)
+        if index is None:
+          properties.append(new_line)
+        else:
+          properties[index] = new_line
+      else:
+        assert index is not None # since new_value == '' and new_value != value
+        properties.pop(index)
+      self.WriteFile(constants.DEVICE_LOCAL_PROPERTIES_PATH,
+                     _JoinLines(properties))
+
+    # Next, check the current runtime value is what we need, and
+    # if not, set it and report that a reboot is required.
+    value = self.GetProp(self.JAVA_ASSERT_PROPERTY)
+    if new_value != value:
+      self.SetProp(self.JAVA_ASSERT_PROPERTY, new_value)
+      return True
+    else:
+      return False
 
 
   @property
@@ -1229,23 +1299,6 @@ class DeviceUtils(object):
     return host_path
 
   @decorators.WithTimeoutAndRetriesFromInstance()
-  def GetIOStats(self, timeout=None, retries=None):
-    """Gets cumulative disk IO stats since boot for all processes.
-
-    Args:
-      timeout: timeout in seconds
-      retries: number of retries
-
-    Returns:
-      A dict containing |num_reads|, |num_writes|, |read_ms|, and |write_ms|.
-
-    Raises:
-      CommandTimeoutError on timeout.
-      DeviceUnreachableError on missing device.
-    """
-    return self.old_interface.GetIoStats()
-
-  @decorators.WithTimeoutAndRetriesFromInstance()
   def GetMemoryUsageForPid(self, pid, timeout=None, retries=None):
     """Gets the memory usage for the given PID.
 
@@ -1255,18 +1308,106 @@ class DeviceUtils(object):
       retries: number of retries
 
     Returns:
-      A 2-tuple containing:
-        - A dict containing the overall memory usage statistics for the PID.
-        - A dict containing memory usage statistics broken down by mapping.
+      A dict containing memory usage statistics for the PID. May include:
+        Size, Rss, Pss, Shared_Clean, Shared_Dirty, Private_Clean,
+        Private_Dirty, VmHWM
 
     Raises:
       CommandTimeoutError on timeout.
     """
-    return self.old_interface.GetMemoryUsageForPid(pid)
+    result = collections.defaultdict(int)
+
+    try:
+      result.update(self._GetMemoryUsageForPidFromSmaps(pid))
+    except device_errors.CommandFailedError:
+      logging.exception('Error getting memory usage from smaps')
+
+    try:
+      result.update(self._GetMemoryUsageForPidFromStatus(pid))
+    except device_errors.CommandFailedError:
+      logging.exception('Error getting memory usage from status')
+
+    return result
+
+  def _GetMemoryUsageForPidFromSmaps(self, pid):
+    SMAPS_COLUMNS = (
+        'Size', 'Rss', 'Pss', 'Shared_Clean', 'Shared_Dirty', 'Private_Clean',
+        'Private_Dirty')
+
+    showmap_out = self.RunShellCommand(
+        ['showmap', str(pid)], as_root=True, check_return=True)
+    if not showmap_out:
+      raise device_errors.CommandFailedError('No output from showmap')
+
+    split_totals = showmap_out[-1].split()
+    if (not split_totals
+        or len(split_totals) != 9
+        or split_totals[-1] != 'TOTAL'):
+      raise device_errors.CommandFailedError(
+          'Invalid output from showmap: %s' % '\n'.join(showmap_out))
+
+    return dict(itertools.izip(SMAPS_COLUMNS, (int(n) for n in split_totals)))
+
+  def _GetMemoryUsageForPidFromStatus(self, pid):
+    for line in self.ReadFile(
+        '/proc/%s/status' % str(pid), as_root=True).splitlines():
+      if line.startswith('VmHWM:'):
+        return {'VmHWM': int(line.split()[1])}
+    else:
+      raise device_errors.CommandFailedError(
+          'Could not find memory peak value for pid %s', str(pid))
+
+  @decorators.WithTimeoutAndRetriesFromInstance()
+  def GetLogcatMonitor(self, timeout=None, retries=None, *args, **kwargs):
+    """Returns a new LogcatMonitor associated with this device.
+
+    Parameters passed to this function are passed directly to
+    |logcat_monitor.LogcatMonitor| and are documented there.
+
+    Args:
+      timeout: timeout in seconds
+      retries: number of retries
+    """
+    return logcat_monitor.LogcatMonitor(self.adb, *args, **kwargs)
 
   def __str__(self):
     """Returns the device serial."""
     return self.adb.GetDeviceSerial()
+
+  @decorators.WithTimeoutAndRetriesFromInstance()
+  def GetDevicePieWrapper(self, timeout=None, retries=None):
+    """Gets the absolute path to the run_pie wrapper on the device.
+
+    We have to build our device executables to be PIE, but they need to be able
+    to run on versions of android that don't support PIE (i.e. ICS and below).
+    To do so, we push a wrapper to the device that lets older android versions
+    run PIE executables. This method pushes that wrapper to the device if
+    necessary and returns the path to it.
+
+    This is exposed publicly to allow clients to write scripts using run_pie
+    (e.g. md5sum.CalculateDeviceMd5Sum).
+
+    Args:
+      timeout: timeout in seconds
+      retries: number of retries
+
+    Returns:
+      The path to the PIE wrapper on the device, or an empty string if the
+      device does not require the wrapper.
+    """
+    if 'run_pie' not in self._cache:
+      pie = ''
+      if (self.build_version_sdk <
+          constants.ANDROID_SDK_VERSION_CODES.JELLY_BEAN):
+        host_pie_path = os.path.join(constants.GetOutDirectory(), 'run_pie')
+        if not os.path.exists(host_pie_path):
+          raise device_errors.CommandFailedError('Please build run_pie')
+        pie = '%s/run_pie' % constants.TEST_EXECUTABLE_DIR
+        self.adb.Push(host_pie_path, pie)
+
+      self._cache['run_pie'] = pie
+
+    return self._cache['run_pie']
 
   @classmethod
   def parallel(cls, devices=None, async=False):
@@ -1287,6 +1428,8 @@ class DeviceUtils(object):
     """
     if not devices:
       devices = adb_wrapper.AdbWrapper.GetDevices()
+      if not devices:
+        raise device_errors.NoDevicesError()
     devices = [d if isinstance(d, cls) else cls(d) for d in devices]
     if async:
       return parallelizer.Parallelizer(devices)

@@ -10,19 +10,20 @@
 #include "base/threading/thread.h"
 #include "gin/public/isolate_holder.h"
 #include "mojo/application/application_runner_chromium.h"
-#include "mojo/public/c/system/main.h"
-#include "mojo/public/cpp/application/application_connection.h"
-#include "mojo/public/cpp/application/application_delegate.h"
-#include "mojo/public/cpp/application/application_impl.h"
-#include "mojo/public/cpp/application/connect.h"
-#include "mojo/public/cpp/application/interface_factory_impl.h"
-#include "mojo/services/content_handler/public/interfaces/content_handler.mojom.h"
 #include "mojo/services/html_viewer/html_document.h"
 #include "mojo/services/html_viewer/mojo_blink_platform_impl.h"
 #include "mojo/services/html_viewer/webmediaplayer_factory.h"
 #include "mojo/services/network/public/interfaces/network_service.mojom.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
+#include "third_party/mojo/src/mojo/public/c/system/main.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/application_connection.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/application_delegate.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/application_impl.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/connect.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/interface_factory_impl.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/strong_binding.h"
+#include "third_party/mojo_services/src/content_handler/public/interfaces/content_handler.mojom.h"
 
 #if !defined(COMPONENT_BUILD)
 #include "base/i18n/icu_util.h"
@@ -33,7 +34,10 @@
 
 using mojo::ApplicationConnection;
 using mojo::Array;
+using mojo::BindToRequest;
 using mojo::ContentHandler;
+using mojo::InterfaceRequest;
+using mojo::ServiceProvider;
 using mojo::ServiceProviderPtr;
 using mojo::ShellPtr;
 using mojo::String;
@@ -49,35 +53,36 @@ namespace html_viewer {
 // media::Renderer implementation.
 const char kEnableMojoMediaRenderer[] = "enable-mojo-media-renderer";
 
-// Enables support for Encrypted Media Extensions (e.g. MediaKeys).
-const char kEnableEncryptedMedia[] = "enable-encrypted-media";
+// Disables support for (unprefixed) Encrypted Media Extensions.
+const char kDisableEncryptedMedia[] = "disable-encrypted-media";
 
 class HTMLViewer;
 
 class HTMLViewerApplication : public mojo::Application {
  public:
-  HTMLViewerApplication(ShellPtr shell,
+  HTMLViewerApplication(InterfaceRequest<Application> request,
                         URLResponsePtr response,
                         scoped_refptr<base::MessageLoopProxy> compositor_thread,
                         WebMediaPlayerFactory* web_media_player_factory)
       : url_(response->url),
-        shell_(shell.Pass()),
+        binding_(this, request.Pass()),
         initial_response_(response.Pass()),
         compositor_thread_(compositor_thread),
-        web_media_player_factory_(web_media_player_factory) {
-    shell_.set_client(this);
+        web_media_player_factory_(web_media_player_factory) {}
+
+  void Initialize(ShellPtr shell, Array<String> args) override {
     ServiceProviderPtr service_provider;
+    shell_ = shell.Pass();
     shell_->ConnectToApplication("mojo:network_service",
-                                 GetProxy(&service_provider));
+                                 GetProxy(&service_provider), nullptr);
     ConnectToService(service_provider.get(), &network_service_);
   }
 
-  void Initialize(Array<String> args) override {}
-
   void AcceptConnection(const String& requestor_url,
-                        ServiceProviderPtr provider) override {
+                        InterfaceRequest<ServiceProvider> services,
+                        ServiceProviderPtr exposed_services) override {
     if (initial_response_) {
-      OnResponseReceived(URLLoaderPtr(), provider.Pass(),
+      OnResponseReceived(URLLoaderPtr(), services.Pass(),
                          initial_response_.Pass());
     } else {
       URLLoaderPtr loader;
@@ -94,19 +99,22 @@ class HTMLViewerApplication : public mojo::Application {
           request.Pass(),
           base::Bind(&HTMLViewerApplication::OnResponseReceived,
                      base::Unretained(this), base::Passed(&loader),
-                     base::Passed(&provider)));
+                     base::Passed(&services)));
     }
   }
 
+  void RequestQuit() override {}
+
  private:
   void OnResponseReceived(URLLoaderPtr loader,
-                          ServiceProviderPtr provider,
+                          InterfaceRequest<ServiceProvider> services,
                           URLResponsePtr response) {
-    new HTMLDocument(provider.Pass(), response.Pass(), shell_.get(),
+    new HTMLDocument(services.Pass(), response.Pass(), shell_.get(),
                      compositor_thread_, web_media_player_factory_);
   }
 
   String url_;
+  mojo::StrongBinding<mojo::Application> binding_;
   ShellPtr shell_;
   mojo::NetworkServicePtr network_service_;
   URLResponsePtr initial_response_;
@@ -124,8 +132,11 @@ class ContentHandlerImpl : public mojo::InterfaceImpl<ContentHandler> {
 
  private:
   // Overridden from ContentHandler:
-  void StartApplication(ShellPtr shell, URLResponsePtr response) override {
-    new HTMLViewerApplication(shell.Pass(), response.Pass(), compositor_thread_,
+  void StartApplication(InterfaceRequest<mojo::Application> request,
+                        URLResponsePtr response) override {
+    new HTMLViewerApplication(request.Pass(),
+                              response.Pass(),
+                              compositor_thread_,
                               web_media_player_factory_);
   }
 
@@ -180,8 +191,8 @@ class HTMLViewer : public mojo::ApplicationDelegate,
     bool enable_mojo_media_renderer =
         command_line->HasSwitch(kEnableMojoMediaRenderer);
 
-    if (command_line->HasSwitch(kEnableEncryptedMedia))
-      blink::WebRuntimeFeatures::enableEncryptedMedia(true);
+    if (command_line->HasSwitch(kDisableEncryptedMedia))
+      blink::WebRuntimeFeatures::enableEncryptedMedia(false);
 
     compositor_thread_.Start();
     web_media_player_factory_.reset(new WebMediaPlayerFactory(

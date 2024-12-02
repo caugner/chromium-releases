@@ -38,27 +38,6 @@ remoting.initElementEventHandlers = function() {
     remoting.setMode(remoting.AppMode.CLIENT_CONNECTING);
     remoting.app.getSessionConnector().reconnect();
   };
-  var doAuthRedirect = function() {
-    if (!base.isAppsV2()) {
-      remoting.oauth2.doAuthRedirect(function() {
-        window.location.reload();
-      });
-    }
-  };
-  var fixAuthError = function() {
-    if (base.isAppsV2()) {
-      var onRefresh = function() {
-        remoting.hostList.display();
-      };
-      var refreshHostList = function() {
-        goHome();
-        remoting.hostList.refresh(onRefresh);
-      };
-      remoting.identity.removeCachedAuthToken(refreshHostList);
-    } else {
-      doAuthRedirect();
-    }
-  };
   /** @param {Event} event The event. */
   var stopDaemon = function(event) {
     remoting.hostSetupDialog.showForStop();
@@ -68,7 +47,7 @@ remoting.initElementEventHandlers = function() {
     remoting.setMode(remoting.AppMode.HOME);
     document.getElementById('access-code-entry').value = '';
   };
-  /** @type {Array.<{event: string, id: string, fn: function(Event):void}>} */
+  /** @type {Array<{event: string, id: string, fn: function(Event):void}>} */
   var it2me_actions = [
       { event: 'click', id: 'access-mode-button', fn: goEnterAccessCode },
       { event: 'submit', id: 'access-code-form', fn: sendAccessCode },
@@ -80,7 +59,7 @@ remoting.initElementEventHandlers = function() {
       { event: 'click', id: 'host-finished-button', fn: goHome },
       { event: 'click', id: 'share-button', fn: remoting.tryShare }
   ];
-  /** @type {Array.<{event: string, id: string, fn: function(Event):void}>} */
+  /** @type {Array<{event: string, id: string, fn: function(Event):void}>} */
   var me2me_actions = [
       { event: 'click', id: 'change-daemon-pin',
         fn: function() { remoting.hostSetupDialog.showForPin(); } },
@@ -93,7 +72,7 @@ remoting.initElementEventHandlers = function() {
         fn: function() { remoting.hostSetupDialog.showForStart(); } },
       { event: 'click', id: 'stop-daemon', fn: stopDaemon }
   ];
-  /** @type {Array.<{event: string, id: string, fn: function(Event):void}>} */
+  /** @type {Array<{event: string, id: string, fn: function(Event):void}>} */
   var host_actions = [
       { event: 'click', id: 'close-paired-client-manager-dialog', fn: goHome },
       { event: 'click', id: 'host-config-done-dismiss', fn: goHome },
@@ -103,13 +82,13 @@ remoting.initElementEventHandlers = function() {
                                   remoting.AppMode.HOME_MANAGE_PAIRINGS) },
       { event: 'click', id: 'stop-sharing-button', fn: remoting.cancelShare }
   ];
-  /** @type {Array.<{event: string, id: string, fn: function(Event):void}>} */
+  /** @type {Array<{event: string, id: string, fn: function(Event):void}>} */
   var auth_actions = [
-      { event: 'click', id: 'auth-button', fn: doAuthRedirect },
       { event: 'click', id: 'cancel-connect-button', fn: goHome },
       { event: 'click', id: 'sign-out', fn:remoting.signOut },
       { event: 'click', id: 'token-refresh-error-ok', fn: goHome },
-      { event: 'click', id: 'token-refresh-error-sign-in', fn: fixAuthError }
+      { event: 'click', id: 'token-refresh-error-sign-in',
+        fn: remoting.handleAuthFailureAndRelaunch }
   ];
   registerEventListeners(it2me_actions);
   registerEventListeners(me2me_actions);

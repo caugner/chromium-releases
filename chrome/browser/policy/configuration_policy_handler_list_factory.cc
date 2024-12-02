@@ -23,6 +23,7 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_pref_names.h"
 #include "components/policy/core/common/schema.h"
+#include "components/rappor/rappor_pref_names.h"
 #include "components/search_engines/default_search_policy_handler.h"
 #include "components/translate/core/common/translate_pref_names.h"
 #include "policy/policy_constants.h"
@@ -118,6 +119,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     base::Value::TYPE_BOOLEAN },
   { key::kMetricsReportingEnabled,
     prefs::kMetricsReportingEnabled,
+    base::Value::TYPE_BOOLEAN },
+  { key::kMetricsReportingEnabled,
+    rappor::prefs::kRapporEnabled,
     base::Value::TYPE_BOOLEAN },
   { key::kApplicationLocaleValue,
     prefs::kApplicationLocale,
@@ -260,33 +264,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kDefaultBrowserSettingEnabled,
     prefs::kDefaultBrowserSettingEnabled,
     base::Value::TYPE_BOOLEAN },
-  { key::kRemoteAccessHostFirewallTraversal,
-    prefs::kRemoteAccessHostFirewallTraversal,
-    base::Value::TYPE_BOOLEAN },
-  { key::kRemoteAccessHostRequireTwoFactor,
-    prefs::kRemoteAccessHostRequireTwoFactor,
-    base::Value::TYPE_BOOLEAN },
-  { key::kRemoteAccessHostDomain,
-    prefs::kRemoteAccessHostDomain,
-    base::Value::TYPE_STRING },
-  { key::kRemoteAccessHostTalkGadgetPrefix,
-    prefs::kRemoteAccessHostTalkGadgetPrefix,
-    base::Value::TYPE_STRING },
-  { key::kRemoteAccessHostRequireCurtain,
-    prefs::kRemoteAccessHostRequireCurtain,
-    base::Value::TYPE_BOOLEAN },
-  { key::kRemoteAccessHostAllowClientPairing,
-    prefs::kRemoteAccessHostAllowClientPairing,
-    base::Value::TYPE_BOOLEAN },
-  { key::kRemoteAccessHostAllowGnubbyAuth,
-    prefs::kRemoteAccessHostAllowGnubbyAuth,
-    base::Value::TYPE_BOOLEAN },
-  { key::kRemoteAccessHostAllowRelayedConnection,
-    prefs::kRemoteAccessHostAllowRelayedConnection,
-    base::Value::TYPE_BOOLEAN },
-  { key::kRemoteAccessHostUdpPortRange,
-    prefs::kRemoteAccessHostUdpPortRange,
-    base::Value::TYPE_STRING },
   { key::kCloudPrintProxyEnabled,
     prefs::kCloudPrintProxyEnabled,
     base::Value::TYPE_BOOLEAN },

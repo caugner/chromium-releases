@@ -3,19 +3,17 @@
 // found in the LICENSE file.
 
 /**
- * TODO(hirono): Remove metadataCache and volumeManager dependencies from the UI
- * class.
+ * TODO(hirono): Remove fileSystemMetadata and volumeManager dependencies from
+ * the UI class.
  * @extends {cr.EventTarget}
  * @param {!Element} breadcrumbs Container element for breadcrumbs.
- * @param {!Element} volumeIcon Volume icon.
- * @param {!MetadataCache} metadataCache To retrieve metadata.
+ * @param {!FileSystemMetadata} fileSystemMetadata To retrieve metadata.
  * @param {!VolumeManagerWrapper} volumeManager Volume manager.
  * @constructor
  */
-function LocationLine(breadcrumbs, volumeIcon, metadataCache, volumeManager) {
+function LocationLine(breadcrumbs, fileSystemMetadata, volumeManager) {
   this.breadcrumbs_ = breadcrumbs;
-  this.volumeIcon_ = volumeIcon;
-  this.metadataCache_ = metadataCache;
+  this.fileSystemMetadata_ = fileSystemMetadata;
   this.volumeManager_ = volumeManager;
   this.entry_ = null;
 
@@ -25,9 +23,6 @@ function LocationLine(breadcrumbs, volumeIcon, metadataCache, volumeManager) {
    * @private
    */
   this.showSequence_ = 0;
-
-  // Register events and seql the object.
-  breadcrumbs.addEventListener('click', this.onClick_.bind(this));
 }
 
 /**
@@ -47,31 +42,6 @@ LocationLine.prototype.show = function(entry) {
   this.entry_ = entry;
   this.showSequence_++;
 
-  // Clear the background image for the icon and the sub type (if any).
-  this.volumeIcon_.removeAttribute('style');
-  this.volumeIcon_.removeAttribute('volume-subtype');
-
-  // Updates volume icon.
-  var locationInfo = this.volumeManager_.getLocationInfo(entry);
-  if (locationInfo && locationInfo.rootType && locationInfo.isRootEntry) {
-    if (locationInfo.volumeInfo.volumeType ===
-            VolumeManagerCommon.VolumeType.PROVIDED) {
-      var extensionId = locationInfo.volumeInfo.extensionId;
-      var backgroundImage = '-webkit-image-set(' +
-          'url(chrome://extension-icon/' + extensionId + '/16/1) 1x, ' +
-          'url(chrome://extension-icon/' + extensionId + '/32/1) 2x);';
-      this.volumeIcon_.setAttribute(
-          'style', 'background-image: ' + backgroundImage);
-    }
-    this.volumeIcon_.setAttribute(
-        'volume-type-icon', locationInfo.rootType);
-  } else {
-    this.volumeIcon_.setAttribute(
-        'volume-type-icon', locationInfo.volumeInfo.volumeType);
-    this.volumeIcon_.setAttribute(
-        'volume-subtype', locationInfo.volumeInfo.deviceType || '');
-  }
-
   var queue = new AsyncUtil.Queue();
   var entries = [];
   var error = false;
@@ -88,23 +58,24 @@ LocationLine.prototype.show = function(entry) {
     if (entryLocationInfo.isRootEntry &&
         entryLocationInfo.rootType ===
             VolumeManagerCommon.RootType.DRIVE_OTHER) {
-      this.metadataCache_.getOne(previousEntry, 'external', function(result) {
-        if (result && result.sharedWithMe) {
-          // Adds the shared-with-me entry instead.
-          var driveVolumeInfo = entryLocationInfo.volumeInfo;
-          var sharedWithMeEntry =
-              driveVolumeInfo.fakeEntries[
-                  VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME];
-          if (sharedWithMeEntry)
-            entries.unshift(sharedWithMeEntry);
-          else
-            error = true;
-        } else {
-          entries.unshift(currentEntry);
-        }
-        // Finishes traversal since the current is root.
-        callback();
-      });
+      this.fileSystemMetadata_.get([previousEntry], ['sharedWithMe']).then(
+          function(results) {
+            if (results[0].sharedWithMe) {
+              // Adds the shared-with-me entry instead.
+              var driveVolumeInfo = entryLocationInfo.volumeInfo;
+              var sharedWithMeEntry =
+                  driveVolumeInfo.fakeEntries[
+                      VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME];
+              if (sharedWithMeEntry)
+                entries.unshift(sharedWithMeEntry);
+              else
+                error = true;
+            } else {
+              entries.unshift(currentEntry);
+            }
+            // Finishes traversal since the current is root.
+            callback();
+          });
       return;
     }
 
@@ -168,16 +139,24 @@ LocationLine.prototype.updateInternal_ = function(entries) {
     div.textContent = util.getEntryLabel(
         this.volumeManager_.getLocationInfo(entry), entry);
     div.entry = entry;
+    div.tabIndex = 8;
+    div.addEventListener('click', this.execute_.bind(this, div));
+    div.addEventListener('keydown', function(div, event) {
+      // If the pressed key is either Enter or Space.
+      if (event.keyCode == 13 || event.keyCode == 32)
+        this.execute_(div);
+    }.bind(this, div));
     this.breadcrumbs_.appendChild(div);
 
     // If this is the last component, break here.
     if (i === entries.length - 1) {
       div.classList.add('breadcrumb-last');
+      div.tabIndex = -1;
       break;
     }
 
     // Add a separator.
-    var separator = doc.createElement('div');
+    var separator = doc.createElement('span');
     separator.className = 'separator';
     this.breadcrumbs_.appendChild(separator);
   }
@@ -280,16 +259,16 @@ LocationLine.prototype.hide = function() {
 };
 
 /**
- * Handle a click event on a breadcrumb element.
- * @param {Event} event The click event.
+ * Execute an element.
+ * @param {!Element} element Element to be executed.
  * @private
  */
-LocationLine.prototype.onClick_ = function(event) {
-  if (!event.target.classList.contains('breadcrumb-path') ||
-      event.target.classList.contains('breadcrumb-last'))
+LocationLine.prototype.execute_ = function(element) {
+  if (!element.classList.contains('breadcrumb-path') ||
+      element.classList.contains('breadcrumb-last'))
     return;
 
   var newEvent = new Event('pathclick');
-  newEvent.entry = event.target.entry;
+  newEvent.entry = element.entry;
   this.dispatchEvent(newEvent);
 };

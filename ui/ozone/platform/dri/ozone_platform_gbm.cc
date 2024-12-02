@@ -19,13 +19,17 @@
 #include "ui/ozone/platform/dri/dri_cursor.h"
 #include "ui/ozone/platform/dri/dri_gpu_platform_support.h"
 #include "ui/ozone/platform/dri/dri_gpu_platform_support_host.h"
+#include "ui/ozone/platform/dri/dri_util.h"
 #include "ui/ozone/platform/dri/dri_window.h"
 #include "ui/ozone/platform/dri/dri_window_delegate_manager.h"
 #include "ui/ozone/platform/dri/dri_window_manager.h"
-#include "ui/ozone/platform/dri/dri_wrapper.h"
+#include "ui/ozone/platform/dri/drm_device_generator.h"
+#include "ui/ozone/platform/dri/drm_device_manager.h"
 #include "ui/ozone/platform/dri/gbm_buffer.h"
 #include "ui/ozone/platform/dri/gbm_surface.h"
 #include "ui/ozone/platform/dri/gbm_surface_factory.h"
+#include "ui/ozone/platform/dri/gbm_wrapper.h"
+#include "ui/ozone/platform/dri/gpu_lock.h"
 #include "ui/ozone/platform/dri/native_display_delegate_dri.h"
 #include "ui/ozone/platform/dri/native_display_delegate_proxy.h"
 #include "ui/ozone/platform/dri/scanout_buffer.h"
@@ -47,39 +51,60 @@ namespace ui {
 
 namespace {
 
-const char kDefaultGraphicsCardPath[] = "/dev/dri/card0";
-
-class GbmBufferGenerator : public ScanoutBufferGenerator {
+class GlApiLoader {
  public:
-  GbmBufferGenerator(DriWrapper* dri)
-      : dri_(dri),
-        glapi_lib_(dlopen("libglapi.so.0", RTLD_LAZY | RTLD_GLOBAL)),
-        device_(gbm_create_device(dri_->get_fd())) {
-    if (!device_)
-      LOG(FATAL) << "Unable to initialize gbm for " << kDefaultGraphicsCardPath;
-  }
-  virtual ~GbmBufferGenerator() {
-    gbm_device_destroy(device_);
+  GlApiLoader()
+      : glapi_lib_(dlopen("libglapi.so.0", RTLD_LAZY | RTLD_GLOBAL)) {}
+
+  ~GlApiLoader() {
     if (glapi_lib_)
       dlclose(glapi_lib_);
   }
 
-  gbm_device* device() const { return device_; }
+ private:
+  // HACK: gbm drivers have broken linkage. The Mesa DRI driver references
+  // symbols in the libglapi library however it does not explicitly link against
+  // it. That caused linkage errors when running an application that does not
+  // explicitly link against libglapi.
+  void* glapi_lib_;
 
-  scoped_refptr<ScanoutBuffer> Create(const gfx::Size& size) override {
-    return GbmBuffer::CreateBuffer(dri_, device_,
-                                   SurfaceFactoryOzone::RGBA_8888, size, true);
+  DISALLOW_COPY_AND_ASSIGN(GlApiLoader);
+};
+
+class GbmBufferGenerator : public ScanoutBufferGenerator {
+ public:
+  GbmBufferGenerator() {}
+  ~GbmBufferGenerator() override {}
+
+  // ScanoutBufferGenerator:
+  scoped_refptr<ScanoutBuffer> Create(const scoped_refptr<DriWrapper>& drm,
+                                      const gfx::Size& size) override {
+    scoped_refptr<GbmWrapper> gbm(static_cast<GbmWrapper*>(drm.get()));
+    return GbmBuffer::CreateBuffer(gbm, SurfaceFactoryOzone::RGBA_8888, size,
+                                   true);
   }
 
  protected:
-  DriWrapper* dri_;  // Not owned.
-
-  // HACK: gbm drivers have broken linkage
-  void* glapi_lib_;
-
-  gbm_device* device_;
-
   DISALLOW_COPY_AND_ASSIGN(GbmBufferGenerator);
+};
+
+class GbmDeviceGenerator : public DrmDeviceGenerator {
+ public:
+  GbmDeviceGenerator() {}
+  ~GbmDeviceGenerator() override {}
+
+  // DrmDeviceGenerator:
+  scoped_refptr<DriWrapper> CreateDevice(const base::FilePath& path,
+                                         base::File file) override {
+    scoped_refptr<DriWrapper> drm = new GbmWrapper(path, file.Pass());
+    if (drm->Initialize())
+      return drm;
+
+    return nullptr;
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(GbmDeviceGenerator);
 };
 
 class OzonePlatformGbm : public OzonePlatform {
@@ -112,13 +137,13 @@ class OzonePlatformGbm : public OzonePlatform {
       const gfx::Rect& bounds) override {
     scoped_ptr<DriWindow> platform_window(
         new DriWindow(delegate, bounds, gpu_platform_support_host_.get(),
-                      event_factory_ozone_.get(), window_manager_.get(),
-                      display_manager_.get()));
+                      event_factory_ozone_.get(), cursor_.get(),
+                      window_manager_.get(), display_manager_.get()));
     platform_window->Initialize();
     return platform_window.Pass();
   }
   scoped_ptr<NativeDisplayDelegate> CreateNativeDisplayDelegate() override {
-    return scoped_ptr<NativeDisplayDelegate>(new NativeDisplayDelegateProxy(
+    return make_scoped_ptr(new NativeDisplayDelegateProxy(
         gpu_platform_support_host_.get(), device_manager_.get(),
         display_manager_.get()));
   }
@@ -129,10 +154,11 @@ class OzonePlatformGbm : public OzonePlatform {
     if (!surface_factory_ozone_)
       surface_factory_ozone_.reset(new GbmSurfaceFactory(use_surfaceless_));
     device_manager_ = CreateDeviceManager();
-    gpu_platform_support_host_.reset(new DriGpuPlatformSupportHost());
+    window_manager_.reset(new DriWindowManager());
+    cursor_.reset(new DriCursor(window_manager_.get()));
+    gpu_platform_support_host_.reset(
+        new DriGpuPlatformSupportHost(cursor_.get()));
     cursor_factory_ozone_.reset(new BitmapCursorFactoryOzone);
-    window_manager_.reset(
-        new DriWindowManager(gpu_platform_support_host_.get()));
 #if defined(USE_XKBCOMMON)
     KeyboardLayoutEngineManager::SetKeyboardLayoutEngine(make_scoped_ptr(
         new XkbKeyboardLayoutEngine(xkb_evdev_code_converter_)));
@@ -141,41 +167,55 @@ class OzonePlatformGbm : public OzonePlatform {
         make_scoped_ptr(new StubKeyboardLayoutEngine()));
 #endif
     event_factory_ozone_.reset(new EventFactoryEvdev(
-        window_manager_->cursor(), device_manager_.get(),
+        cursor_.get(), device_manager_.get(),
         KeyboardLayoutEngineManager::GetKeyboardLayoutEngine()));
   }
 
   void InitializeGPU() override {
+#if defined(OS_CHROMEOS)
+    gpu_lock_.reset(new GpuLock());
+#endif
+    gl_api_loader_.reset(new GlApiLoader());
     // Async page flips are supported only on surfaceless mode.
-    dri_.reset(new DriWrapper(kDefaultGraphicsCardPath, !use_surfaceless_));
-    dri_->Initialize();
-    buffer_generator_.reset(new GbmBufferGenerator(dri_.get()));
-    screen_manager_.reset(
-        new ScreenManager(dri_.get(), buffer_generator_.get()));
+    gbm_ = new GbmWrapper(GetFirstDisplayCardPath());
+    if (!gbm_->Initialize())
+      LOG(FATAL) << "Failed to initialize primary DRM device";
+
+    drm_device_manager_.reset(new DrmDeviceManager(gbm_));
+    buffer_generator_.reset(new GbmBufferGenerator());
+    screen_manager_.reset(new ScreenManager(buffer_generator_.get()));
+    // This makes sure that simple targets that do not handle display
+    // configuration can still use the primary display.
+    ForceInitializationOfPrimaryDisplay(gbm_, screen_manager_.get());
+
     window_delegate_manager_.reset(new DriWindowDelegateManager());
     if (!surface_factory_ozone_)
       surface_factory_ozone_.reset(new GbmSurfaceFactory(use_surfaceless_));
 
-    surface_factory_ozone_->InitializeGpu(
-        dri_.get(), buffer_generator_->device(), screen_manager_.get(),
-        window_delegate_manager_.get());
-    scoped_ptr<NativeDisplayDelegateDri> ndd(
-        new NativeDisplayDelegateDri(dri_.get(), screen_manager_.get()));
-    ndd->Initialize();
-    gpu_platform_support_.reset(
-        new DriGpuPlatformSupport(dri_.get(), window_delegate_manager_.get(),
-                                  screen_manager_.get(), ndd.Pass()));
+    surface_factory_ozone_->InitializeGpu(gbm_, drm_device_manager_.get(),
+                                          window_delegate_manager_.get());
+    scoped_ptr<NativeDisplayDelegateDri> ndd(new NativeDisplayDelegateDri(
+        screen_manager_.get(), gbm_,
+        scoped_ptr<DrmDeviceGenerator>(new GbmDeviceGenerator())));
+    gpu_platform_support_.reset(new DriGpuPlatformSupport(
+        drm_device_manager_.get(), window_delegate_manager_.get(),
+        screen_manager_.get(), ndd.Pass()));
   }
 
  private:
   bool use_surfaceless_;
-  scoped_ptr<DriWrapper> dri_;
+  scoped_ptr<GpuLock> gpu_lock_;
+  scoped_ptr<GlApiLoader> gl_api_loader_;
+  scoped_refptr<GbmWrapper> gbm_;
+  scoped_ptr<DrmDeviceManager> drm_device_manager_;
   scoped_ptr<GbmBufferGenerator> buffer_generator_;
   scoped_ptr<ScreenManager> screen_manager_;
   scoped_ptr<DeviceManager> device_manager_;
 
   scoped_ptr<GbmSurfaceFactory> surface_factory_ozone_;
   scoped_ptr<BitmapCursorFactoryOzone> cursor_factory_ozone_;
+  scoped_ptr<DriWindowManager> window_manager_;
+  scoped_ptr<DriCursor> cursor_;
   scoped_ptr<EventFactoryEvdev> event_factory_ozone_;
 
   scoped_ptr<DriGpuPlatformSupport> gpu_platform_support_;
@@ -183,7 +223,6 @@ class OzonePlatformGbm : public OzonePlatform {
 
   scoped_ptr<DriWindowDelegateManager> window_delegate_manager_;
   // Browser side object only.
-  scoped_ptr<DriWindowManager> window_manager_;
   scoped_ptr<DisplayManager> display_manager_;
 
 #if defined(USE_XKBCOMMON)
@@ -197,6 +236,10 @@ class OzonePlatformGbm : public OzonePlatform {
 
 OzonePlatform* CreateOzonePlatformGbm() {
   base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
+#if defined(USE_MESA_PLATFORM_NULL)
+  // Only works with surfaceless.
+  cmd->AppendSwitch(switches::kOzoneUseSurfaceless);
+#endif
   return new OzonePlatformGbm(cmd->HasSwitch(switches::kOzoneUseSurfaceless));
 }
 

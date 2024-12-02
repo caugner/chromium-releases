@@ -14,6 +14,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -33,7 +34,6 @@
 #include "chromeos/login/login_state.h"
 #include "chromeos/network/device_state.h"
 #include "chromeos/network/managed_network_configuration_handler.h"
-#include "chromeos/network/network_configuration_handler.h"
 #include "chromeos/network/network_connection_handler.h"
 #include "chromeos/network/network_device_handler.h"
 #include "chromeos/network/network_event_log.h"
@@ -73,13 +73,6 @@ const char kNetworkDataKey[] = "networkData";
 const char kNetworkInfoKeyIconURL[] = "iconURL";
 const char kNetworkInfoKeyPolicyManaged[] = "policyManaged";
 
-// These are types of name server selections from the web ui.
-const char kNameServerTypeAutomatic[] = "automatic";
-const char kNameServerTypeGoogle[] = "google";
-
-// Google public name servers (DNS).
-const char kGoogleNameServers[] = "8.8.4.4,8.8.8.8";
-
 // Functions we call in JavaScript.
 const char kRefreshNetworkDataFunction[] =
     "options.network.NetworkList.refreshNetworkData";
@@ -94,9 +87,7 @@ const char kUpdateCarrierFunction[] =
 
 // Setter methods called from JS that still need to be converted to match
 // networkingPrivate methods.
-const char kSetApnMessage[] = "setApn";
 const char kSetCarrierMessage[] = "setCarrier";
-const char kSetIPConfigMessage[] = "setIPConfig";
 const char kShowMorePlanInfoMessage[] = "showMorePlanInfo";
 const char kSimOperationMessage[] = "simOperation";
 
@@ -225,43 +216,6 @@ bool ShowViewAccountButton(const NetworkState* cellular) {
   return true;
 }
 
-// Helper methods for SetIPConfigProperties
-bool AppendPropertyKeyIfPresent(const std::string& key,
-                                const base::DictionaryValue& old_properties,
-                                std::vector<std::string>* property_keys) {
-  if (old_properties.HasKey(key)) {
-    property_keys->push_back(key);
-    return true;
-  }
-  return false;
-}
-
-bool AddStringPropertyIfChanged(const std::string& key,
-                                const std::string& new_value,
-                                const base::DictionaryValue& old_properties,
-                                base::DictionaryValue* new_properties) {
-  std::string old_value;
-  if (!old_properties.GetStringWithoutPathExpansion(key, &old_value) ||
-      new_value != old_value) {
-    new_properties->SetStringWithoutPathExpansion(key, new_value);
-    return true;
-  }
-  return false;
-}
-
-bool AddIntegerPropertyIfChanged(const std::string& key,
-                                 int new_value,
-                                 const base::DictionaryValue& old_properties,
-                                 base::DictionaryValue* new_properties) {
-  int old_value;
-  if (!old_properties.GetIntegerWithoutPathExpansion(key, &old_value) ||
-      new_value != old_value) {
-    new_properties->SetIntegerWithoutPathExpansion(key, new_value);
-    return true;
-  }
-  return false;
-}
-
 }  // namespace
 
 InternetOptionsHandler::InternetOptionsHandler()
@@ -324,14 +278,8 @@ void InternetOptionsHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(kActivateNetworkMessage,
       base::Bind(&InternetOptionsHandler::ActivateNetwork,
                  base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(kSetIPConfigMessage,
-      base::Bind(&InternetOptionsHandler::SetIPConfigCallback,
-                 base::Unretained(this)));
   web_ui()->RegisterMessageCallback(kShowMorePlanInfoMessage,
       base::Bind(&InternetOptionsHandler::ShowMorePlanInfoCallback,
-                 base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(kSetApnMessage,
-      base::Bind(&InternetOptionsHandler::SetApnCallback,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(kSetCarrierMessage,
       base::Bind(&InternetOptionsHandler::SetCarrierCallback,
@@ -374,66 +322,6 @@ void InternetOptionsHandler::ShowMorePlanInfoCallback(
     return;
   }
   ui::NetworkConnect::Get()->ShowMobileSetup(service_path);
-}
-
-void InternetOptionsHandler::SetApnCallback(const base::ListValue* args) {
-  std::string service_path;
-  if (!args->GetString(0, &service_path)) {
-    NOTREACHED();
-    return;
-  }
-  NetworkHandler::Get()->network_configuration_handler()->GetProperties(
-      service_path,
-      base::Bind(&InternetOptionsHandler::SetApnProperties,
-                 weak_factory_.GetWeakPtr(), base::Owned(args->DeepCopy())),
-      base::Bind(&ShillError, "SetApnCallback"));
-}
-
-void InternetOptionsHandler::SetApnProperties(
-    const base::ListValue* args,
-    const std::string& service_path,
-    const base::DictionaryValue& shill_properties) {
-  std::string apn, username, password;
-  if (!args->GetString(1, &apn) ||
-      !args->GetString(2, &username) ||
-      !args->GetString(3, &password)) {
-    NOTREACHED();
-    return;
-  }
-  NET_LOG_EVENT("SetApnCallback", service_path);
-
-  if (apn.empty()) {
-    std::vector<std::string> properties_to_clear;
-    properties_to_clear.push_back(shill::kCellularApnProperty);
-    NetworkHandler::Get()->network_configuration_handler()->ClearProperties(
-      service_path, properties_to_clear,
-      base::Bind(&base::DoNothing),
-      base::Bind(&ShillError, "ClearCellularApnProperties"));
-    return;
-  }
-
-  const base::DictionaryValue* shill_apn_dict = NULL;
-  std::string network_id;
-  if (shill_properties.GetDictionaryWithoutPathExpansion(
-          shill::kCellularApnProperty, &shill_apn_dict)) {
-    shill_apn_dict->GetStringWithoutPathExpansion(
-        shill::kApnNetworkIdProperty, &network_id);
-  }
-  base::DictionaryValue properties;
-  base::DictionaryValue* apn_dict = new base::DictionaryValue;
-  apn_dict->SetStringWithoutPathExpansion(shill::kApnProperty, apn);
-  apn_dict->SetStringWithoutPathExpansion(shill::kApnNetworkIdProperty,
-                                          network_id);
-  apn_dict->SetStringWithoutPathExpansion(shill::kApnUsernameProperty,
-                                          username);
-  apn_dict->SetStringWithoutPathExpansion(shill::kApnPasswordProperty,
-                                          password);
-  properties.SetWithoutPathExpansion(shill::kCellularApnProperty, apn_dict);
-  NetworkHandler::Get()->network_configuration_handler()->SetProperties(
-      service_path, properties,
-      NetworkConfigurationObserver::SOURCE_USER_ACTION,
-      base::Bind(&base::DoNothing),
-      base::Bind(&ShillError, "SetApnProperties"));
 }
 
 void InternetOptionsHandler::CarrierStatusCallback() {
@@ -623,7 +511,7 @@ void InternetOptionsHandler::GetManagedPropertiesResult(
     // out a more robust way to track errors. Service.Error is transient so we
     // use NetworkState.error() which accurately tracks the "last" error.
     dictionary->SetString(kTagErrorMessage,
-                          ui::NetworkConnect::Get()->GetErrorString(
+                          ui::NetworkConnect::Get()->GetShillErrorString(
                               network->error(), service_path));
     // Add additional non-ONC cellular properties to inform the UI.
     if (network->type() == shill::kTypeCellular) {
@@ -694,109 +582,6 @@ void InternetOptionsHandler::SetPropertiesCallback(
       service_path, *properties,
       base::Bind(&base::DoNothing),
       base::Bind(&ShillError, "SetProperties"));
-}
-
-void InternetOptionsHandler::SetIPConfigCallback(const base::ListValue* args) {
-  std::string service_path;
-  if (!args->GetString(0, &service_path)) {
-    NOTREACHED();
-    return;
-  }
-  NetworkHandler::Get()->network_configuration_handler()->GetProperties(
-      service_path,
-      base::Bind(&InternetOptionsHandler::SetIPConfigProperties,
-                 weak_factory_.GetWeakPtr(), base::Owned(args->DeepCopy())),
-      base::Bind(&ShillError, "SetIPConfigCallback"));
-}
-
-void InternetOptionsHandler::SetIPConfigProperties(
-    const base::ListValue* args,
-    const std::string& service_path,
-    const base::DictionaryValue& shill_properties) {
-  std::string address, netmask, gateway, name_server_type, name_servers;
-  bool dhcp_for_ip;
-  if (!args->GetBoolean(1, &dhcp_for_ip) ||
-      !args->GetString(2, &address) ||
-      !args->GetString(3, &netmask) ||
-      !args->GetString(4, &gateway) ||
-      !args->GetString(5, &name_server_type) ||
-      !args->GetString(6, &name_servers)) {
-    NOTREACHED();
-    return;
-  }
-  NET_LOG_USER("SetIPConfigProperties: " + name_server_type, service_path);
-
-  std::vector<std::string> properties_to_clear;
-  base::DictionaryValue properties_to_set;
-
-  if (dhcp_for_ip) {
-    AppendPropertyKeyIfPresent(shill::kStaticIPAddressProperty,
-                               shill_properties,
-                               &properties_to_clear);
-    AppendPropertyKeyIfPresent(shill::kStaticIPPrefixlenProperty,
-                               shill_properties,
-                               &properties_to_clear);
-    AppendPropertyKeyIfPresent(shill::kStaticIPGatewayProperty,
-                               shill_properties,
-                               &properties_to_clear);
-  } else {
-    AddStringPropertyIfChanged(shill::kStaticIPAddressProperty,
-                               address,
-                               shill_properties,
-                               &properties_to_set);
-    int prefixlen = network_util::NetmaskToPrefixLength(netmask);
-    if (prefixlen < 0) {
-      LOG(ERROR) << "Invalid prefix length for: " << service_path
-                 << " with netmask " << netmask;
-      prefixlen = 0;
-    }
-    AddIntegerPropertyIfChanged(shill::kStaticIPPrefixlenProperty,
-                                prefixlen,
-                                shill_properties,
-                                &properties_to_set);
-    AddStringPropertyIfChanged(shill::kStaticIPGatewayProperty,
-                               gateway,
-                               shill_properties,
-                               &properties_to_set);
-  }
-
-  if (name_server_type == kNameServerTypeAutomatic) {
-    AppendPropertyKeyIfPresent(shill::kStaticIPNameServersProperty,
-                               shill_properties,
-                               &properties_to_clear);
-  } else {
-    if (name_server_type == kNameServerTypeGoogle)
-      name_servers = kGoogleNameServers;
-    AddStringPropertyIfChanged(shill::kStaticIPNameServersProperty,
-                               name_servers,
-                               shill_properties,
-                               &properties_to_set);
-  }
-
-  if (!properties_to_clear.empty()) {
-    NetworkHandler::Get()->network_configuration_handler()->ClearProperties(
-        service_path,
-        properties_to_clear,
-        base::Bind(&base::DoNothing),
-        base::Bind(&ShillError, "ClearIPConfigProperties"));
-  }
-  if (!properties_to_set.empty()) {
-    NetworkHandler::Get()->network_configuration_handler()->SetProperties(
-        service_path,
-        properties_to_set,
-        NetworkConfigurationObserver::SOURCE_USER_ACTION,
-        base::Bind(&base::DoNothing),
-        base::Bind(&ShillError, "SetIPConfigProperties"));
-  }
-  std::string device_path;
-  shill_properties.GetStringWithoutPathExpansion(shill::kDeviceProperty,
-                                                 &device_path);
-  if (!device_path.empty()) {
-    NetworkHandler::Get()->network_device_handler()->RequestRefreshIPConfigs(
-        device_path,
-        base::Bind(&base::DoNothing),
-        base::Bind(&ShillError, "RequestRefreshIPConfigs"));
-  }
 }
 
 gfx::NativeWindow InternetOptionsHandler::GetNativeWindow() const {

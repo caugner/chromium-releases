@@ -26,7 +26,9 @@ namespace sandbox {
 class SANDBOX_EXPORT Credentials {
  public:
   // Drop all capabilities in the effective, inheritable and permitted sets for
-  // the current process.
+  // the current process. For security reasons, since capabilities are
+  // per-thread, the caller is responsible for ensuring it is single-threaded
+  // when calling this API.
   static bool DropAllCapabilities() WARN_UNUSED_RESULT;
   // Return true iff there is any capability in any of the capabilities sets
   // of the current process.
@@ -39,9 +41,9 @@ class SANDBOX_EXPORT Credentials {
   // Returns whether the kernel supports CLONE_NEWUSER and whether it would be
   // possible to immediately move to a new user namespace. There is no point
   // in using this method right before calling MoveToNewUserNS(), simply call
-  // MoveToNewUserNS() immediately. This method is only useful to test kernel
-  // support ahead of time.
-  static bool SupportsNewUserNS();
+  // MoveToNewUserNS() immediately. This method is only useful to test the
+  // ability to move to a user namespace ahead of time.
+  static bool CanCreateProcessInNewUserNS();
 
   // Move the current process to a new "user namespace" as supported by Linux
   // 3.8+ (CLONE_NEWUSER).

@@ -12,34 +12,47 @@
 
 namespace password_manager {
 
-CredentialInfo::CredentialInfo() : type(CREDENTIAL_TYPE_EMPTY) {
+CredentialInfo::CredentialInfo() : type(CredentialType::CREDENTIAL_TYPE_EMPTY) {
 }
 
 CredentialInfo::CredentialInfo(const blink::WebCredential& credential)
     : id(credential.id()),
       name(credential.name()),
       avatar(credential.avatarURL()) {
-  type = credential.isLocalCredential() ? CREDENTIAL_TYPE_LOCAL
-                                        : CREDENTIAL_TYPE_FEDERATED;
-  if (type == CREDENTIAL_TYPE_LOCAL) {
+  type = credential.isLocalCredential()
+             ? CredentialType::CREDENTIAL_TYPE_LOCAL
+             : CredentialType::CREDENTIAL_TYPE_FEDERATED;
+  if (type == CredentialType::CREDENTIAL_TYPE_LOCAL) {
     DCHECK(credential.isLocalCredential());
-    password = static_cast<const blink::WebLocalCredential&>(
-        credential).password();
+    password =
+        static_cast<const blink::WebLocalCredential&>(credential).password();
   } else {
     DCHECK(credential.isFederatedCredential());
-    federation = static_cast<const blink::WebFederatedCredential&>(
-        credential).federation();
+    federation = static_cast<const blink::WebFederatedCredential&>(credential)
+                     .federation();
   }
 }
 
-CredentialInfo::CredentialInfo(const autofill::PasswordForm& form)
-    : id(form.username_value),
+CredentialInfo::CredentialInfo(const autofill::PasswordForm& form,
+                               CredentialType form_type)
+    : type(form_type),
+      id(form.username_value),
       name(form.display_name),
       avatar(form.avatar_url),
       password(form.password_value),
       federation(form.federation_url) {
-  DCHECK(!password.empty() || !federation.is_empty());
-  type = password.empty() ? CREDENTIAL_TYPE_FEDERATED : CREDENTIAL_TYPE_LOCAL;
+  switch (form_type) {
+    case CredentialType::CREDENTIAL_TYPE_EMPTY:
+      password = base::string16();
+      federation = GURL();
+      break;
+    case CredentialType::CREDENTIAL_TYPE_LOCAL:
+      federation = GURL();
+      break;
+    case CredentialType::CREDENTIAL_TYPE_FEDERATED:
+      password = base::string16();
+      break;
+  }
 }
 
 CredentialInfo::~CredentialInfo() {
@@ -48,14 +61,23 @@ CredentialInfo::~CredentialInfo() {
 scoped_ptr<autofill::PasswordForm> CreatePasswordFormFromCredentialInfo(
     const CredentialInfo& info,
     const GURL& origin) {
-  scoped_ptr<autofill::PasswordForm> form(new autofill::PasswordForm);
+  scoped_ptr<autofill::PasswordForm> form;
+  if (info.type == CredentialType::CREDENTIAL_TYPE_EMPTY)
+    return form.Pass();
+
+  form.reset(new autofill::PasswordForm);
   form->avatar_url = info.avatar;
   form->display_name = info.name;
   form->federation_url = info.federation;
   form->origin = origin;
   form->password_value = info.password;
+  form->username_value = info.id;
   form->scheme = autofill::PasswordForm::SCHEME_HTML;
-  form->signon_realm = origin.spec();
+
+  form->signon_realm =
+      info.type == CredentialType::CREDENTIAL_TYPE_LOCAL
+          ? origin.spec()
+          : "federation://" + origin.host() + "/" + info.federation.host();
   form->username_value = info.id;
   return form.Pass();
 }

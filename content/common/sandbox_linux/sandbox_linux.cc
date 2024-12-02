@@ -28,11 +28,15 @@
 #include "base/sys_info.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "content/common/sandbox_linux/sandbox_debug_handling_linux.h"
 #include "content/common/sandbox_linux/sandbox_linux.h"
 #include "content/common/sandbox_linux/sandbox_seccomp_bpf_linux.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/sandbox_linux.h"
+#include "sandbox/linux/services/credentials.h"
+#include "sandbox/linux/services/namespace_sandbox.h"
 #include "sandbox/linux/services/proc_util.h"
+#include "sandbox/linux/services/resource_limits.h"
 #include "sandbox/linux/services/thread_helpers.h"
 #include "sandbox/linux/services/yama.h"
 #include "sandbox/linux/suid/client/setuid_sandbox_client.h"
@@ -64,19 +68,6 @@ void LogSandboxStarted(const std::string& sandbox_name) {
   VLOG(1) << activated_sandbox;
 }
 
-bool AddResourceLimit(int resource, rlim_t limit) {
-  struct rlimit old_rlimit;
-  if (getrlimit(resource, &old_rlimit))
-    return false;
-  // Make sure we don't raise the existing limit.
-  const struct rlimit new_rlimit = {
-      std::min(old_rlimit.rlim_cur, limit),
-      std::min(old_rlimit.rlim_max, limit)
-      };
-  int rc = setrlimit(resource, &new_rlimit);
-  return rc == 0;
-}
-
 bool IsRunningTSAN() {
 #if defined(THREAD_SANITIZER)
   return true;
@@ -87,17 +78,18 @@ bool IsRunningTSAN() {
 
 // Try to open /proc/self/task/ with the help of |proc_fd|. |proc_fd| can be
 // -1. Will return -1 on error and set errno like open(2).
+// TODO(jln): get rid of this ugly interface.
 int OpenProcTaskFd(int proc_fd) {
   int proc_self_task = -1;
   if (proc_fd >= 0) {
     // If a handle to /proc is available, use it. This allows to bypass file
     // system restrictions.
-    proc_self_task =
-        openat(proc_fd, "self/task/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    proc_self_task = HANDLE_EINTR(
+        openat(proc_fd, "self/task/", O_RDONLY | O_DIRECTORY | O_CLOEXEC));
   } else {
     // Otherwise, make an attempt to access the file system directly.
-    proc_self_task =
-        open("/proc/self/task/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    proc_self_task = HANDLE_EINTR(openat(AT_FDCWD, "/proc/self/task/",
+                                         O_RDONLY | O_DIRECTORY | O_CLOEXEC));
   }
   return proc_self_task;
 }
@@ -115,8 +107,7 @@ LinuxSandbox::LinuxSandbox()
       seccomp_bpf_with_tsync_supported_(false),
       yama_is_enforcing_(false),
       initialize_sandbox_ran_(false),
-      setuid_sandbox_client_(sandbox::SetuidSandboxClient::Create())
-{
+      setuid_sandbox_client_(sandbox::SetuidSandboxClient::Create()) {
   if (setuid_sandbox_client_ == NULL) {
     LOG(FATAL) << "Failed to instantiate the setuid sandbox client.";
   }
@@ -159,7 +150,7 @@ void LinuxSandbox::PreinitializeSandbox() {
   // not closed.
   // If LinuxSandbox::PreinitializeSandbox() runs, InitializeSandbox() must run
   // as well.
-  proc_fd_ = open("/proc", O_DIRECTORY | O_RDONLY | O_CLOEXEC);
+  proc_fd_ = HANDLE_EINTR(open("/proc", O_DIRECTORY | O_RDONLY | O_CLOEXEC));
   CHECK_GE(proc_fd_, 0);
   // We "pre-warm" the code that detects supports for seccomp BPF.
   if (SandboxSeccompBPF::IsSeccompBPFDesired()) {
@@ -180,6 +171,27 @@ void LinuxSandbox::PreinitializeSandbox() {
   yama_is_enforcing_ = (yama_status & Yama::STATUS_PRESENT) &&
                        (yama_status & Yama::STATUS_ENFORCING);
   pre_initialized_ = true;
+}
+
+void LinuxSandbox::EngageNamespaceSandbox() {
+  CHECK(pre_initialized_);
+  // Check being in a new PID namespace created by the namespace sandbox and
+  // being the init process.
+  CHECK(sandbox::NamespaceSandbox::InNewPidNamespace());
+  const pid_t pid = getpid();
+  CHECK_EQ(1, pid);
+
+  CHECK(sandbox::Credentials::MoveToNewUserNS());
+  // Note: this requires SealSandbox() to be called later in this process to be
+  // safe, as this class is keeping a file descriptor to /proc.
+  CHECK(!HasOpenDirectories());
+  CHECK(sandbox::Credentials::DropFileSystemAccess());
+  CHECK(IsSingleThreaded());
+  CHECK(sandbox::Credentials::DropAllCapabilities());
+
+  // This needs to happen after moving to a new user NS, since doing so involves
+  // writing the UID/GID map.
+  CHECK(SandboxDebugHandling::SetDumpableStatusAndHandlers());
 }
 
 std::vector<int> LinuxSandbox::GetFileDescriptorsToClose() {
@@ -212,6 +224,12 @@ int LinuxSandbox::GetStatus() {
       if (setuid_sandbox_client_->IsInNewPIDNamespace())
         sandbox_status_flags_ |= kSandboxLinuxPIDNS;
       if (setuid_sandbox_client_->IsInNewNETNamespace())
+        sandbox_status_flags_ |= kSandboxLinuxNetNS;
+    } else if (sandbox::NamespaceSandbox::InNewUserNamespace()) {
+      sandbox_status_flags_ |= kSandboxLinuxUserNS;
+      if (sandbox::NamespaceSandbox::InNewPidNamespace())
+        sandbox_status_flags_ |= kSandboxLinuxPIDNS;
+      if (sandbox::NamespaceSandbox::InNewNetNamespace())
         sandbox_status_flags_ |= kSandboxLinuxNetNS;
     }
 
@@ -390,17 +408,16 @@ bool LinuxSandbox::LimitAddressSpace(const std::string& process_type) {
   // allocations that can't be index by an int.
   const rlim_t kNewDataSegmentMaxSize = std::numeric_limits<int>::max();
 
-  bool limited_as = AddResourceLimit(RLIMIT_AS, address_space_limit);
-  bool limited_data = AddResourceLimit(RLIMIT_DATA, kNewDataSegmentMaxSize);
+  bool limited_as =
+      sandbox::ResourceLimits::Lower(RLIMIT_AS, address_space_limit);
+  bool limited_data =
+      sandbox::ResourceLimits::Lower(RLIMIT_DATA, kNewDataSegmentMaxSize);
 
   // Cache the resource limit before turning on the sandbox.
   base::SysInfo::AmountOfVirtualMemory();
 
   return limited_as && limited_data;
 #else
-  // Silence the compiler warning about unused function. This doesn't actually
-  // call AddResourceLimit().
-  ignore_result(AddResourceLimit);
   base::SysInfo::AmountOfVirtualMemory();
   return false;
 #endif  // !defined(ADDRESS_SANITIZER) && !defined(MEMORY_SANITIZER) &&

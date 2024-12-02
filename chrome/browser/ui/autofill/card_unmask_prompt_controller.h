@@ -17,13 +17,18 @@ class CardUnmaskPromptController {
  public:
   // Interaction.
   virtual void OnUnmaskDialogClosed() = 0;
-  virtual void OnUnmaskResponse(const base::string16& cvc) = 0;
+  virtual void OnUnmaskResponse(const base::string16& cvc,
+                                const base::string16& exp_month,
+                                const base::string16& exp_year,
+                                bool should_store_pan) = 0;
 
   // State.
   virtual content::WebContents* GetWebContents() = 0;
   virtual base::string16 GetWindowTitle() const = 0;
   virtual base::string16 GetInstructionsMessage() const = 0;
   virtual int GetCvcImageRid() const = 0;
+  virtual bool ShouldRequestExpirationDate() const = 0;
+  virtual bool GetStoreLocallyStartState() const = 0;
   virtual bool InputTextIsValid(const base::string16& input_text) const = 0;
 };
 

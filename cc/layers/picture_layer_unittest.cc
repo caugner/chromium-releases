@@ -20,13 +20,12 @@ namespace {
 
 class MockContentLayerClient : public ContentLayerClient {
  public:
-  void PaintContents(
-      SkCanvas* canvas,
-      const gfx::Rect& clip,
-      ContentLayerClient::GraphicsContextStatus gc_status) override {}
+  void PaintContents(SkCanvas* canvas,
+                     const gfx::Rect& clip,
+                     PaintingControlSetting picture_control) override {}
   scoped_refptr<DisplayItemList> PaintContentsToDisplayList(
       const gfx::Rect& clip,
-      GraphicsContextStatus gc_status) override {
+      PaintingControlSetting picture_control) override {
     NOTIMPLEMENTED();
     return DisplayItemList::Create();
   }
@@ -106,10 +105,10 @@ TEST(PictureLayerTest, UseTileGridSize) {
   host->SetRootLayer(layer);
 
   // Tile-grid is set according to its setting.
-  SkTileGridFactory::TileGridInfo info =
-      layer->GetRecordingSourceForTesting()->GetTileGridInfoForTesting();
-  EXPECT_EQ(info.fTileInterval.width(), 123 - 2 * info.fMargin.width());
-  EXPECT_EQ(info.fTileInterval.height(), 123 - 2 * info.fMargin.height());
+  gfx::Size size =
+      layer->GetRecordingSourceForTesting()->GetTileGridSizeForTesting();
+  EXPECT_EQ(size.width(), 123);
+  EXPECT_EQ(size.height(), 123);
 }
 
 }  // namespace

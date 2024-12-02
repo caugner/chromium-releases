@@ -9,6 +9,7 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/ozone/ozone_export.h"
 #include "ui/ozone/public/surface_ozone_canvas.h"
 
 class SkSurface;
@@ -17,12 +18,11 @@ namespace ui {
 
 class DriBuffer;
 class DriWindowDelegate;
-class DriWrapper;
 class HardwareDisplayController;
 
-class DriSurface : public SurfaceOzoneCanvas {
+class OZONE_EXPORT DriSurface : public SurfaceOzoneCanvas {
  public:
-  DriSurface(DriWindowDelegate* window_delegate, DriWrapper* dri);
+  DriSurface(DriWindowDelegate* window_delegate);
   ~DriSurface() override;
 
   // SurfaceOzoneCanvas:
@@ -35,10 +35,6 @@ class DriSurface : public SurfaceOzoneCanvas {
   void UpdateNativeSurface(const gfx::Rect& damage);
 
   DriWindowDelegate* window_delegate_;
-
-  // Stores the connection to the graphics card. Pointer not owned by this
-  // class.
-  DriWrapper* dri_;
 
   // The actual buffers used for painting.
   scoped_refptr<DriBuffer> buffers_[2];

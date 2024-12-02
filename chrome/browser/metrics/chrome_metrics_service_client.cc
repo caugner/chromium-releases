@@ -36,6 +36,7 @@
 #include "components/metrics/net/network_metrics_provider.h"
 #include "components/metrics/profiler/profiler_metrics_provider.h"
 #include "components/metrics/profiler/tracking_synchronizer.h"
+#include "components/metrics/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/histogram_fetcher.h"
 #include "content/public/browser/notification_service.h"
@@ -97,29 +98,6 @@ metrics::SystemProfileProto::Channel AsProtobufChannel(
   return metrics::SystemProfileProto::CHANNEL_UNKNOWN;
 }
 
-// Handles asynchronous fetching of memory details.
-// Will run the provided task after finished.
-class MetricsMemoryDetails : public MemoryDetails {
- public:
-  MetricsMemoryDetails(
-      const base::Closure& callback,
-      MemoryGrowthTracker* memory_growth_tracker)
-      : callback_(callback) {
-    SetMemoryGrowthTracker(memory_growth_tracker);
-  }
-
-  void OnDetailsAvailable() override {
-    base::MessageLoop::current()->PostTask(FROM_HERE, callback_);
-  }
-
- private:
-  ~MetricsMemoryDetails() override {}
-
-  base::Closure callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(MetricsMemoryDetails);
-};
-
 }  // namespace
 
 ChromeMetricsServiceClient::ChromeMetricsServiceClient(
@@ -174,7 +152,11 @@ void ChromeMetricsServiceClient::RegisterPrefs(PrefRegistrySimple* registry) {
 
 void ChromeMetricsServiceClient::SetMetricsClientId(
     const std::string& client_id) {
-  crash_keys::SetCrashClientIdFromGUID(client_id);
+  crash_keys::SetMetricsClientIdFromGUID(client_id);
+}
+
+void ChromeMetricsServiceClient::OnRecordingDisabled() {
+  crash_keys::ClearMetricsClientId();
 }
 
 bool ChromeMetricsServiceClient::IsOffTheRecordSessionActive() {
@@ -247,7 +229,7 @@ void ChromeMetricsServiceClient::CollectFinalMetrics(
 
   scoped_refptr<MetricsMemoryDetails> details(
       new MetricsMemoryDetails(callback, &memory_growth_tracker_));
-  details->StartFetch(MemoryDetails::UPDATE_USER_METRICS);
+  details->StartFetch(MemoryDetails::FROM_CHROME_ONLY);
 
   // Collect WebCore cache information to put into a histogram.
   for (content::RenderProcessHost::iterator i(
@@ -259,12 +241,12 @@ void ChromeMetricsServiceClient::CollectFinalMetrics(
 
 scoped_ptr<metrics::MetricsLogUploader>
 ChromeMetricsServiceClient::CreateUploader(
-    const std::string& server_url,
-    const std::string& mime_type,
     const base::Callback<void(int)>& on_upload_complete) {
   return scoped_ptr<metrics::MetricsLogUploader>(
       new metrics::NetMetricsLogUploader(
-          g_browser_process->system_request_context(), server_url, mime_type,
+          g_browser_process->system_request_context(),
+          metrics::kDefaultMetricsServerUrl,
+          metrics::kDefaultMetricsMimeType,
           on_upload_complete));
 }
 

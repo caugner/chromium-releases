@@ -16,6 +16,7 @@
 #include "base/debug/leak_annotations.h"
 #include "base/files/file_path.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/prefs/json_pref_store.h"
 #include "base/prefs/pref_registry_simple.h"
@@ -24,10 +25,12 @@
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/default_tick_clock.h"
+#include "base/trace_event/trace_event.h"
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/component_updater/chrome_component_updater_configurator.h"
+#include "chrome/browser/component_updater/supervised_user_whitelist_installer.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/devtools/remote_debugging_server.h"
 #include "chrome/browser/download/download_request_limiter.h"
@@ -36,7 +39,6 @@
 #include "chrome/browser/gpu/gl_string_manager.h"
 #include "chrome/browser/gpu/gpu_mode_manager.h"
 #include "chrome/browser/icon_manager.h"
-#include "chrome/browser/idle.h"
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -92,6 +94,7 @@
 #include "extensions/common/constants.h"
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "ui/base/idle/idle.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/message_center/message_center.h"
 
@@ -195,7 +198,7 @@ BrowserProcessImpl::BrowserProcessImpl(
       chrome::kChromeSearchScheme);
 
 #if defined(OS_MACOSX)
-  InitIdleMonitor();
+  ui::InitIdleMonitor();
 #endif
 
 #if !defined(OS_ANDROID)
@@ -203,10 +206,8 @@ BrowserProcessImpl::BrowserProcessImpl(
 #endif
 
 #if defined(ENABLE_EXTENSIONS)
-#if !defined(USE_ATHENA)
   // Athena sets its own instance during Athena's init process.
   extensions::AppWindowClient::Set(ChromeAppWindowClient::GetInstance());
-#endif
 
   extension_event_router_forwarder_ = new extensions::EventRouterForwarder;
   ExtensionRendererState::GetInstance()->Init();
@@ -245,11 +246,19 @@ void BrowserProcessImpl::StartTearDown() {
   if (safe_browsing_service_.get())
     safe_browsing_service()->ShutDown();
 #endif
+  promo_resource_service_.reset();
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+  plugins_resource_service_.reset();
+#endif
 
   // Need to clear the desktop notification balloons before the io_thread_ and
   // before the profiles, since if there are any still showing we will access
   // those things during teardown.
   notification_ui_manager_.reset();
+
+  // The SupervisedUserWhitelistInstaller observes the ProfileInfoCache, so it
+  // needs to be shut down before the ProfileManager.
+  supervised_user_whitelist_installer_.reset();
 
   // Need to clear profiles (download managers) before the io_thread_.
   {
@@ -863,19 +872,20 @@ BrowserProcessImpl::component_updater() {
   if (!component_updater_.get()) {
     if (!BrowserThread::CurrentlyOn(BrowserThread::UI))
       return NULL;
-    component_updater::Configurator* configurator =
+    update_client::Configurator* configurator =
         component_updater::MakeChromeComponentUpdaterConfigurator(
             base::CommandLine::ForCurrentProcess(),
             io_thread()->system_url_request_context_getter());
     // Creating the component updater does not do anything, components
     // need to be registered and Start() needs to be called.
-    component_updater_.reset(ComponentUpdateServiceFactory(configurator));
+    component_updater_.reset(
+        component_updater::ComponentUpdateServiceFactory(configurator));
   }
   return component_updater_.get();
 }
 
 CRLSetFetcher* BrowserProcessImpl::crl_set_fetcher() {
-  if (!crl_set_fetcher_.get())
+  if (!crl_set_fetcher_)
     crl_set_fetcher_ = new CRLSetFetcher();
   return crl_set_fetcher_.get();
 }
@@ -883,14 +893,25 @@ CRLSetFetcher* BrowserProcessImpl::crl_set_fetcher() {
 component_updater::PnaclComponentInstaller*
 BrowserProcessImpl::pnacl_component_installer() {
 #if !defined(DISABLE_NACL)
-  if (!pnacl_component_installer_.get()) {
-    pnacl_component_installer_.reset(
-        new component_updater::PnaclComponentInstaller());
+  if (!pnacl_component_installer_) {
+    pnacl_component_installer_ =
+        new component_updater::PnaclComponentInstaller();
   }
   return pnacl_component_installer_.get();
 #else
-  return NULL;
+  return nullptr;
 #endif
+}
+
+component_updater::SupervisedUserWhitelistInstaller*
+BrowserProcessImpl::supervised_user_whitelist_installer() {
+  if (!supervised_user_whitelist_installer_) {
+    supervised_user_whitelist_installer_ =
+        component_updater::SupervisedUserWhitelistInstaller::Create(
+            component_updater(), &profile_manager()->GetProfileInfoCache(),
+            local_state());
+  }
+  return supervised_user_whitelist_installer_.get();
 }
 
 void BrowserProcessImpl::ResourceDispatcherHostCreated() {
@@ -977,6 +998,10 @@ void BrowserProcessImpl::PreCreateThreads() {
 }
 
 void BrowserProcessImpl::PreMainMessageLoopRun() {
+  TRACE_EVENT0("startup", "BrowserProcessImpl::PreMainMessageLoopRun");
+  SCOPED_UMA_HISTOGRAM_TIMER(
+      "Startup.BrowserProcessImpl_PreMainMessageLoopRunTime");
+
 #if defined(ENABLE_CONFIGURATION_POLICY)
   // browser_policy_connector() is created very early because local_state()
   // needs policy to be initialized with the managed preference values.
@@ -1015,7 +1040,7 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   DCHECK(!plugins_resource_service_.get());
-  plugins_resource_service_ = new PluginsResourceService(local_state());
+  plugins_resource_service_.reset(new PluginsResourceService(local_state()));
   plugins_resource_service_->Init();
 #endif
 #endif  // defined(ENABLE_PLUGINS)
@@ -1024,7 +1049,7 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
       *base::CommandLine::ForCurrentProcess();
   if (!command_line.HasSwitch(switches::kDisableWebResources)) {
     DCHECK(!promo_resource_service_.get());
-    promo_resource_service_ = new PromoResourceService;
+    promo_resource_service_.reset(new PromoResourceService);
     promo_resource_service_->StartAfterDelay();
   }
 
@@ -1117,11 +1142,6 @@ void BrowserProcessImpl::CreateGCMDriver() {
       local_state(),
       store_path,
       system_request_context());
-  // Sign-in is not required for device-level GCM usage. So we just call
-  // OnSignedIn to assume always signed-in. Note that GCM will not be started
-  // at this point since no one has asked for it yet.
-  // TODO(jianli): To be removed when sign-in enforcement is dropped.
-  gcm_driver_->OnSignedIn();
 #endif  // defined(OS_ANDROID)
 }
 

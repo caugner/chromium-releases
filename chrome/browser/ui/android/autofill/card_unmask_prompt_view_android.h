@@ -21,7 +21,12 @@ class CardUnmaskPromptViewAndroid : public CardUnmaskPromptView {
   void Show();
 
   bool CheckUserInputValidity(JNIEnv* env, jobject obj, jstring response);
-  void OnUserInput(JNIEnv* env, jobject obj, jstring response);
+  void OnUserInput(JNIEnv* env,
+                   jobject obj,
+                   jstring cvc,
+                   jstring month,
+                   jstring year,
+                   jboolean should_store_locally);
   void PromptDismissed(JNIEnv* env, jobject obj);
 
   // CardUnmaskPromptView implementation.
@@ -32,7 +37,7 @@ class CardUnmaskPromptViewAndroid : public CardUnmaskPromptView {
   static bool Register(JNIEnv* env);
 
  private:
-  virtual ~CardUnmaskPromptViewAndroid();
+  ~CardUnmaskPromptViewAndroid() override;
 
   // The corresponding java object.
   base::android::ScopedJavaGlobalRef<jobject> java_object_;

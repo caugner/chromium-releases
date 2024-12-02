@@ -14,7 +14,6 @@
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
 #include "chrome/browser/domain_reliability/service_factory.h"
 #include "chrome/browser/download/download_service_factory.h"
-#include "chrome/browser/extensions/api/networking_private/networking_private_delegate_factory.h"
 #include "chrome/browser/extensions/api/networking_private/networking_private_verify_delegate_factory_impl.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/geolocation/geolocation_permission_context_factory.h"
@@ -31,6 +30,7 @@
 #include "chrome/browser/predictors/resource_prefetch_predictor_factory.h"
 #include "chrome/browser/prerender/prerender_link_manager_factory.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
+#include "chrome/browser/prerender/prerender_message_filter.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
 #include "chrome/browser/profiles/gaia_info_update_service_factory.h"
 #include "chrome/browser/search/instant_service_factory.h"
@@ -48,10 +48,12 @@
 #include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
 #include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
+#include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/tabs/pinned_tab_service_factory.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
 #include "chrome/browser/undo/bookmark_undo_service_factory.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
+#include "extensions/browser/api/networking_private/networking_private_delegate_factory.h"
 
 #if defined(ENABLE_EXTENSIONS)
 #include "apps/browser_context_keyed_service_factories.h"
@@ -61,6 +63,7 @@
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/search/hotword_service_factory.h"
 #include "chrome/browser/signin/easy_unlock_service_factory.h"
+#include "chrome/browser/ui/bookmarks/enhanced_bookmark_key_service_factory.h"
 #include "extensions/browser/browser_context_keyed_service_factories.h"
 #endif
 
@@ -102,9 +105,11 @@
 #include "chrome/browser/ui/gesture_prefs_observer_factory_aura.h"
 #endif
 
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
 #include "chrome/browser/media/protected_media_identifier_permission_context_factory.h"
-#else
+#endif
+
+#if !defined(OS_ANDROID)
 #include "chrome/browser/profile_resetter/automatic_profile_resetter_factory.h"
 #endif
 
@@ -171,7 +176,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   CaptivePortalServiceFactory::GetInstance();
 #endif
   GeolocationPermissionContextFactory::GetInstance();
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
   ProtectedMediaIdentifierPermissionContextFactory::GetInstance();
 #endif
 #if defined(ENABLE_PRINT_PREVIEW)
@@ -186,6 +191,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   DownloadServiceFactory::GetInstance();
 #if defined(ENABLE_EXTENSIONS)
   EasyUnlockServiceFactory::GetInstance();
+  EnhancedBookmarkKeyServiceFactory::GetInstance();
 #endif
   FaviconServiceFactory::GetInstance();
   FindBarStateFactory::GetInstance();
@@ -231,6 +237,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #if defined(ENABLE_PLUGINS)
   PluginPrefsFactory::GetInstance();
 #endif
+  PrefsTabHelper::GetServiceInstance();
   policy::ProfilePolicyConnectorFactory::GetInstance();
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #if defined(OS_CHROMEOS)
@@ -255,8 +262,9 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   predictors::AutocompleteActionPredictorFactory::GetInstance();
   predictors::PredictorDatabaseFactory::GetInstance();
   predictors::ResourcePrefetchPredictorFactory::GetInstance();
-  prerender::PrerenderManagerFactory::GetInstance();
   prerender::PrerenderLinkManagerFactory::GetInstance();
+  prerender::PrerenderManagerFactory::GetInstance();
+  prerender::PrerenderMessageFilter::EnsureShutdownNotifierFactoryBuilt();
   ProfileSyncServiceFactory::GetInstance();
   ProtocolHandlerRegistryFactory::GetInstance();
 #if defined(ENABLE_SESSION_SERVICE)

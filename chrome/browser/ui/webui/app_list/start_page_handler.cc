@@ -8,13 +8,13 @@
 
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/hotword_service.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
-#include "chrome/browser/ui/app_list/recommended_apps.h"
 #include "chrome/browser/ui/app_list/start_page_service.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
@@ -34,43 +34,37 @@ namespace app_list {
 
 namespace {
 
+const char kAppListDoodleActionHistogram[] = "Apps.AppListDoodleAction";
+
+// Interactions a user has with the app list doodle. This enum must not have its
+// order altered as it is used in histograms.
+enum DoodleAction {
+  DOODLE_SHOWN = 0,
+  DOODLE_CLICKED,
+  // Add values here.
+
+  DOODLE_ACTION_LAST,
+};
+
 #if defined(OS_CHROMEOS)
 const char kOldHotwordExtensionVersionString[] = "0.1.1.5023";
 #endif
 
-scoped_ptr<base::DictionaryValue> CreateAppInfo(
-    const extensions::Extension* app) {
-  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
-  dict->SetString("appId", app->id());
-  dict->SetString("textTitle", app->short_name());
-  dict->SetString("title", app->name());
-
-  const bool grayscale = false;
-  bool icon_exists = true;
-  GURL icon_url = extensions::ExtensionIconSource::GetIconURL(
-      app,
-      extension_misc::EXTENSION_ICON_MEDIUM,
-      ExtensionIconSet::MATCH_BIGGER,
-      grayscale,
-      &icon_exists);
-  dict->SetString("iconUrl", icon_url.spec());
-
-  return dict.Pass();
-}
-
 }  // namespace
 
-StartPageHandler::StartPageHandler()
-    : recommended_apps_(NULL),
-      extension_registry_observer_(this) {
+StartPageHandler::StartPageHandler() : extension_registry_observer_(this) {
 }
 
 StartPageHandler::~StartPageHandler() {
-  if (recommended_apps_)
-    recommended_apps_->RemoveObserver(this);
 }
 
 void StartPageHandler::RegisterMessages() {
+  web_ui()->RegisterMessageCallback(
+      "appListShown", base::Bind(&StartPageHandler::HandleAppListShown,
+                                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "doodleClicked", base::Bind(&StartPageHandler::HandleDoodleClicked,
+                                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "initialize",
       base::Bind(&StartPageHandler::HandleInitialize, base::Unretained(this)));
@@ -114,22 +108,6 @@ void StartPageHandler::OnExtensionUnloaded(
 #endif
 }
 
-void StartPageHandler::OnRecommendedAppsChanged() {
-  SendRecommendedApps();
-}
-
-void StartPageHandler::SendRecommendedApps() {
-  const RecommendedApps::Apps& recommends = recommended_apps_->apps();
-
-  base::ListValue recommended_list;
-  for (size_t i = 0; i < recommends.size(); ++i) {
-    recommended_list.Append(CreateAppInfo(recommends[i].get()).release());
-  }
-
-  web_ui()->CallJavascriptFunction("appList.startPage.setRecommendedApps",
-                                   recommended_list);
-}
-
 #if defined(OS_CHROMEOS)
 void StartPageHandler::OnHotwordEnabledChanged() {
   // If the hotword extension is new enough, we should use the new
@@ -154,6 +132,19 @@ void StartPageHandler::OnHotwordEnabledChanged() {
 }
 #endif
 
+void StartPageHandler::HandleAppListShown(const base::ListValue* args) {
+  bool doodle_shown = false;
+  if (args->GetBoolean(0, &doodle_shown) && doodle_shown) {
+    UMA_HISTOGRAM_ENUMERATION(kAppListDoodleActionHistogram, DOODLE_SHOWN,
+                              DOODLE_ACTION_LAST);
+  }
+}
+
+void StartPageHandler::HandleDoodleClicked(const base::ListValue* args) {
+  UMA_HISTOGRAM_ENUMERATION(kAppListDoodleActionHistogram, DOODLE_CLICKED,
+                            DOODLE_ACTION_LAST);
+}
+
 void StartPageHandler::HandleInitialize(const base::ListValue* args) {
   Profile* profile = Profile::FromWebUI(web_ui());
   StartPageService* service = StartPageService::Get(profile);
@@ -162,21 +153,18 @@ void StartPageHandler::HandleInitialize(const base::ListValue* args) {
 
   service->WebUILoaded();
 
-  recommended_apps_ = service->recommended_apps();
-  recommended_apps_->AddObserver(this);
-
-  SendRecommendedApps();
-
 #if defined(OS_CHROMEOS)
   if (app_list::switches::IsVoiceSearchEnabled() &&
       HotwordService::DoesHotwordSupportLanguage(profile)) {
     OnHotwordEnabledChanged();
     pref_change_registrar_.Init(profile->GetPrefs());
+    pref_change_registrar_.RemoveAll();
     pref_change_registrar_.Add(
         prefs::kHotwordSearchEnabled,
         base::Bind(&StartPageHandler::OnHotwordEnabledChanged,
                    base::Unretained(this)));
 
+    extension_registry_observer_.RemoveAll();
     extension_registry_observer_.Add(
         extensions::ExtensionRegistry::Get(profile));
   }

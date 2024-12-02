@@ -8,16 +8,17 @@
 
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "content/public/common/content_switches.h"
 #include "content/shell/renderer/test_runner/accessibility_controller.h"
 #include "content/shell/renderer/test_runner/event_sender.h"
 #include "content/shell/renderer/test_runner/mock_color_chooser.h"
 #include "content/shell/renderer/test_runner/mock_credential_manager_client.h"
+#include "content/shell/renderer/test_runner/mock_presentation_service.h"
 #include "content/shell/renderer/test_runner/mock_screen_orientation_client.h"
 #include "content/shell/renderer/test_runner/mock_web_speech_recognizer.h"
 #include "content/shell/renderer/test_runner/mock_web_user_media_client.h"
@@ -295,7 +296,7 @@ std::string DumpFramesAsPrintedText(blink::WebFrame* frame, bool recursive) {
 
   std::string result = DumpFrameHeaderIfNeeded(frame);
   result.append(
-      frame->renderTreeAsText(blink::WebFrame::RenderAsTextPrinting).utf8());
+      frame->layoutTreeAsText(blink::WebFrame::LayoutAsTextPrinting).utf8());
   result.append("\n");
 
   if (recursive) {
@@ -375,6 +376,7 @@ blink::WebView* WebTestProxyBase::GetWebView() const {
 }
 
 void WebTestProxyBase::Reset() {
+  drag_image_.reset();
   animate_scheduled_ = false;
   resource_identifier_map_.clear();
   log_console_output_ = true;
@@ -438,13 +440,13 @@ std::string WebTestProxyBase::CaptureTree(bool debug_render_tree) {
   } else {
     bool recursive = test_interfaces_->GetTestRunner()
                          ->shouldDumpChildFrameScrollPositions();
-    blink::WebFrame::RenderAsTextControls render_text_behavior =
-        blink::WebFrame::RenderAsTextNormal;
+    blink::WebFrame::LayoutAsTextControls layout_text_behavior =
+        blink::WebFrame::LayoutAsTextNormal;
     if (should_dump_as_printed)
-      render_text_behavior |= blink::WebFrame::RenderAsTextPrinting;
+      layout_text_behavior |= blink::WebFrame::LayoutAsTextPrinting;
     if (debug_render_tree)
-      render_text_behavior |= blink::WebFrame::RenderAsTextDebug;
-    data_utf8 = frame->renderTreeAsText(render_text_behavior).utf8();
+      layout_text_behavior |= blink::WebFrame::LayoutAsTextDebug;
+    data_utf8 = frame->layoutTreeAsText(layout_text_behavior).utf8();
     data_utf8 += DumpFrameScrollPosition(frame, recursive);
   }
 
@@ -565,6 +567,24 @@ void WebTestProxyBase::CapturePixelsAsync(
   TRACE_EVENT0("shell", "WebTestProxyBase::CapturePixelsAsync");
   DCHECK(!callback.is_null());
 
+  if (test_interfaces_->GetTestRunner()->shouldDumpDragImage()) {
+    if (drag_image_.isNull()) {
+      // This means the test called dumpDragImage but did not initiate a drag.
+      // Return a blank image so that the test fails.
+      SkBitmap bitmap;
+      bitmap.allocN32Pixels(1, 1);
+      {
+        SkAutoLockPixels lock(bitmap);
+        bitmap.eraseColor(0);
+      }
+      callback.Run(bitmap);
+      return;
+    }
+
+    callback.Run(drag_image_.getSkBitmap());
+    return;
+  }
+
   if (test_interfaces_->GetTestRunner()->isPrinting()) {
     base::MessageLoopProxy::current()->PostTask(
         FROM_HERE,
@@ -652,6 +672,12 @@ WebTestProxyBase::GetCredentialManagerClientMock() {
   return credential_manager_client_.get();
 }
 
+MockPresentationService* WebTestProxyBase::GetPresentationServiceMock() {
+  if (!presentation_service_.get())
+    presentation_service_.reset(new MockPresentationService());
+  return presentation_service_.get();
+}
+
 void WebTestProxyBase::ScheduleAnimation() {
   if (!test_interfaces_->GetTestRunner()->TestIsRunning())
     return;
@@ -669,7 +695,7 @@ void WebTestProxyBase::AnimateNow() {
     web_widget_->beginFrame(blink::WebBeginFrameArgs(0.0, 0.0, 0.0));
     web_widget_->layout();
     if (blink::WebPagePopup* popup = web_widget_->pagePopup()) {
-      popup->animate(0.0);
+      popup->beginFrame(blink::WebBeginFrameArgs(0.0, 0.0, 0.0));
       popup->layout();
     }
   }
@@ -806,6 +832,10 @@ void WebTestProxyBase::StartDragging(blink::WebLocalFrame* frame,
                                      blink::WebDragOperationsMask mask,
                                      const blink::WebImage& image,
                                      const blink::WebPoint& point) {
+  if (test_interfaces_->GetTestRunner()->shouldDumpDragImage()) {
+    if (drag_image_.isNull())
+      drag_image_ = image;
+  }
   // When running a test, we need to fake a drag drop operation otherwise
   // Windows waits for real mouse events to know when the drag is over.
   test_interfaces_->GetEventSender()->DoDragDrop(data, mask);

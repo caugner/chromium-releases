@@ -188,11 +188,11 @@
         </div>
         <div class="radio controlled-setting-with-label">
           <label>
-            <input type="radio" name="plugins" value="ask">
+            <input type="radio" name="plugins" value="detect">
             <span>
-              <span i18n-content="pluginsAsk"></span>
+              <span i18n-content="pluginsDetect"></span>
               <span class="controlled-setting-indicator"
-                  content-setting="plugins" value="ask"></span>
+                  content-setting="plugins" value="detect"></span>
             </span>
           </label>
         </div>
@@ -211,7 +211,7 @@
               i18n-content="manageExceptions"></button>
         </div>
         <div id="disable-plugins-container">
-          <a href="chrome://plugins" i18n-content="disableIndividualPlugins"
+          <a href="chrome://plugins" i18n-content="manageIndividualPlugins"
               target="_blank"></a>
         </div>
       </div>
@@ -386,19 +386,31 @@
         <div class="radio">
           <label>
             <input type="radio" name="mouselock" value="allow">
-            <span i18n-content="mouselockAllow"></span>
+            <span>
+              <span i18n-content="mouselockAllow"></span>
+              <span class="controlled-setting-indicator"
+                  content-setting="mouselock" value="allow"></span>
+            </span>
           </label>
         </div>
         <div class="radio">
           <label>
             <input type="radio" name="mouselock" value="ask">
-            <span i18n-content="mouselockAsk"></span>
+            <span>
+              <span i18n-content="mouselockAsk"></span>
+              <span class="controlled-setting-indicator"
+                  content-setting="mouselock" value="ask"></span>
+            </span>
           </label>
         </div>
         <div class="radio">
           <label>
             <input type="radio" name="mouselock" value="block">
-            <span i18n-content="mouselockBlock"></span>
+            <span>
+              <span i18n-content="mouselockBlock"></span>
+              <span class="controlled-setting-indicator"
+                  content-setting="mouselock" value="block"></span>
+            </span>
           </label>
         </div>
         <div class="settings-row">
@@ -499,19 +511,31 @@
         <div class="radio">
           <label>
             <input type="radio" name="ppapi-broker" value="allow">
-            <span i18n-content="ppapiBrokerAllow"></span>
+            <span>
+              <span i18n-content="ppapiBrokerAllow"></span>
+              <span class="controlled-setting-indicator"
+                  content-setting="ppapi-broker" value="allow"></span>
+            </span>
           </label>
         </div>
         <div class="radio">
           <label>
             <input type="radio" name="ppapi-broker" value="ask">
-            <span i18n-content="ppapiBrokerAsk"></span>
+            <span>
+              <span i18n-content="ppapiBrokerAsk"></span>
+              <span class="controlled-setting-indicator"
+                  content-setting="ppapi-broker" value="ask"></span>
+            </span>
           </label>
         </div>
         <div class="radio">
           <label>
             <input type="radio" name="ppapi-broker" value="block">
-            <span i18n-content="ppapiBrokerBlock"></span>
+            <span>
+              <span i18n-content="ppapiBrokerBlock"></span>
+              <span class="controlled-setting-indicator"
+                  content-setting="ppapi-broker" value="block"></span>
+            </span>
           </label>
         </div>
         <div class="settings-row">

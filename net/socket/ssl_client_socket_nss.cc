@@ -107,6 +107,7 @@
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/nss_ssl_util.h"
 #include "net/ssl/ssl_cert_request_info.h"
+#include "net/ssl/ssl_cipher_suite_names.h"
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "net/ssl/ssl_info.h"
 
@@ -1615,6 +1616,16 @@ SECStatus SSLClientSocketNSS::Core::CanFalseStartCallback(
     return SECSuccess;
   }
 
+  SSLChannelInfo channel_info;
+  SECStatus ok =
+      SSL_GetChannelInfo(socket, &channel_info, sizeof(channel_info));
+  if (ok != SECSuccess || channel_info.length != sizeof(channel_info) ||
+      channel_info.protocolVersion < SSL_LIBRARY_VERSION_TLS_1_2 ||
+      !IsFalseStartableTLSCipherSuite(channel_info.cipherSuite)) {
+    *can_false_start = PR_FALSE;
+    return SECSuccess;
+  }
+
   return SSL_RecommendedCanFalseStart(socket, can_false_start);
 }
 
@@ -2288,7 +2299,7 @@ void SSLClientSocketNSS::Core::DoReadCallback(int rv) {
   // TODO(vadimt): Remove ScopedTracker below once crbug.com/418183 is fixed.
   tracked_objects::ScopedTracker tracking_profile1(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "SSLClientSocketNSS::Core::DoReadCallback"));
+          "418183 SSLClientSocketNSS::Core::DoReadCallback"));
   PostOrRunCallback(
       FROM_HERE,
       base::Bind(base::ResetAndReturn(&user_read_callback_), rv));
@@ -2877,6 +2888,7 @@ void SSLClientSocket::ClearSessionCache() {
 
 // static
 uint16 SSLClientSocket::GetMaxSupportedSSLVersion() {
+  crypto::EnsureNSSInit();
   if (PK11_TokenExists(CKM_NSS_TLS_MASTER_KEY_DERIVE_DH_SHA256)) {
     return SSL_PROTOCOL_VERSION_TLS1_2;
   } else {
@@ -3524,15 +3536,6 @@ int SSLClientSocketNSS::DoVerifyCertComplete(int result) {
   // is fixed, we need to  avoid using the NSS database for non-essential
   // purposes.  See https://bugzilla.mozilla.org/show_bug.cgi?id=508081 and
   // http://crbug.com/15630 for more info.
-
-  // TODO(hclam): Skip logging if server cert was expected to be bad because
-  // |server_cert_verify_result_| doesn't contain all the information about
-  // the cert.
-  if (result == OK) {
-    int ssl_version =
-        SSLConnectionStatusToVersion(core_->state().ssl_connection_status);
-    RecordConnectionTypeMetrics(ssl_version);
-  }
 
   const CertStatus cert_status = server_cert_verify_result_.cert_status;
   if (transport_security_state_ &&

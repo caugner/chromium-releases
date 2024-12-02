@@ -25,10 +25,13 @@ namespace shill_property_util {
 CHROMEOS_EXPORT void SetSSID(const std::string ssid,
                              base::DictionaryValue* properties);
 
-// Returns the SSID from |properties| in UTF-8 encoding. If |unknown_encoding|
-// is not NULL, it is set to whether the SSID is of unknown encoding.
+// Returns the SSID from |properties| in UTF-8 encoding. If |verbose_logging| is
+// true, detailed DEBUG log events will be added to the device event log. If
+// |unknown_encoding| != nullptr, it is set to whether the SSID is of unknown
+// encoding.
 CHROMEOS_EXPORT std::string GetSSIDFromProperties(
     const base::DictionaryValue& properties,
+    bool verbose_logging,
     bool* unknown_encoding);
 
 // Returns the GUID (if available), SSID, or Name from |properties|. Only used
@@ -36,7 +39,7 @@ CHROMEOS_EXPORT std::string GetSSIDFromProperties(
 CHROMEOS_EXPORT std::string GetNetworkIdFromProperties(
     const base::DictionaryValue& properties);
 
-  // Returns the name for the network represented by the Shill |properties|. For
+// Returns the name for the network represented by the Shill |properties|. For
 // WiFi it refers to the HexSSID.
 CHROMEOS_EXPORT std::string GetNameFromProperties(
     const std::string& service_path,

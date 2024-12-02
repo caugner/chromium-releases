@@ -18,23 +18,17 @@
 #include "base/observer_list.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task/cancelable_task_tracker.h"
-#include "chrome/browser/history/expire_history_backend.h"
-#include "chrome/browser/history/history_database.h"
+#include "components/favicon_base/favicon_usage_data.h"
+#include "components/history/core/browser/expire_history_backend.h"
 #include "components/history/core/browser/history_backend_notifier.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/keyword_id.h"
 #include "components/history/core/browser/thumbnail_database.h"
 #include "components/history/core/browser/visit_tracker.h"
-#include "components/visitedlink/browser/visitedlink_delegate.h"
 #include "sql/init_status.h"
-
-#if defined(OS_ANDROID)
-#include "components/history/core/android/android_history_types.h"
-#endif
 
 class HistoryURLProvider;
 struct HistoryURLProviderParams;
-struct ImportedFaviconUsage;
 class SkBitmap;
 class TestingProfile;
 struct ThumbnailScore;
@@ -53,6 +47,8 @@ class CommitLaterTask;
 struct DownloadRow;
 class HistoryBackendObserver;
 class HistoryClient;
+class HistoryDatabase;
+struct HistoryDatabaseParams;
 struct HistoryDetails;
 class HistoryDBTask;
 class InMemoryHistoryBackend;
@@ -143,12 +139,25 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
     // be forwarded to the HistoryServiceObservers in the correct thread.
     virtual void NotifyURLsModified(const URLRows& changed_urls) = 0;
 
-    // Broadcasts the specified notification to the notification service.
-    // This is implemented here because notifications must only be sent from
-    // the main thread. This is the only method that doesn't identify the
-    // caller because notifications must always be sent.
-    virtual void BroadcastNotifications(int type,
-                                        scoped_ptr<HistoryDetails> details) = 0;
+    // Notify HistoryService that some or all of the URLs have been deleted.
+    // The event will be forwarded to the HistoryServiceObservers in the correct
+    // thread.
+    virtual void NotifyURLsDeleted(bool all_history,
+                                   bool expired,
+                                   const URLRows& deleted_rows,
+                                   const std::set<GURL>& favicon_urls) = 0;
+
+    // Notify HistoryService that some keyword has been searched using omnibox.
+    // The event will be forwarded to the HistoryServiceObservers in the correct
+    // thread.
+    virtual void NotifyKeywordSearchTermUpdated(const URLRow& row,
+                                                KeywordID keyword_id,
+                                                const base::string16& term) = 0;
+
+    // Notify HistoryService that keyword search term has been deleted.
+    // The event will be forwarded to the HistoryServiceObservers in the correct
+    // thread.
+    virtual void NotifyKeywordSearchTermDeleted(URLID url_id) = 0;
 
     // Invoked when the backend has finished loading the db.
     virtual void DBLoaded() = 0;
@@ -177,7 +186,9 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // |languages| gives a list of language encodings with which the history
   // URLs and omnibox searches are interpreted.
   // |force_fail| can be set during unittests to unconditionally fail to init.
-  void Init(const std::string& languages, bool force_fail);
+  void Init(const std::string& languages,
+            bool force_fail,
+            const HistoryDatabaseParams& history_database_params);
 
   // Notification that the history system is shutting down. This will break
   // the refs owned by the delegate and any pending transaction so it will
@@ -200,15 +211,10 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Querying ------------------------------------------------------------------
 
   // Run the |callback| on the History thread.
-  // history_url_provider.h has the temporal ordering for
-  // the call sequence.
   // |callback| should handle the NULL database case.
   void ScheduleAutocomplete(const base::Callback<
       void(history::HistoryBackend*, history::URLDatabase*)>& callback);
 
-  void IterateURLs(
-      const scoped_refptr<visitedlink::VisitedLinkDelegate::URLEnumerator>&
-          enumerator);
   void QueryURL(const GURL& url,
                 bool want_visits,
                 QueryURLResult* query_url_result);
@@ -295,7 +301,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   void CloneFavicons(const GURL& old_page_url, const GURL& new_page_url);
 
   void SetImportedFavicons(
-      const std::vector<ImportedFaviconUsage>& favicon_usage);
+      const favicon_base::FaviconUsageDataList& favicon_usage);
 
   // Downloads -----------------------------------------------------------------
 
@@ -326,90 +332,11 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 #if defined(OS_ANDROID)
   // Android Provider ---------------------------------------------------------
 
-  // History and bookmarks ----------------------------------------------------
-  // Inserts the given values into history backend.
-  AndroidURLID InsertHistoryAndBookmark(const HistoryAndBookmarkRow& row);
-
-  // Runs the given query on history backend and returns the result.
-  //
-  // |projections| is the vector of the result columns.
-  // |selection| is the SQL WHERE clause without 'WHERE'.
-  // |selection_args| is the arguments for WHERE clause.
-  // |sort_order| is the SQL ORDER clause.
-  history::AndroidStatement* QueryHistoryAndBookmarks(
-      const std::vector<HistoryAndBookmarkRow::ColumnID>& projections,
-      const std::string& selection,
-      const std::vector<base::string16>& selection_args,
-      const std::string& sort_order);
-
-  // Returns the number of row updated by the update query.
-  //
-  // |row| is the value to update.
-  // |selection| is the SQL WHERE clause without 'WHERE'.
-  // |selection_args| is the arguments for the WHERE clause.
-  int UpdateHistoryAndBookmarks(
-      const HistoryAndBookmarkRow& row,
-      const std::string& selection,
-      const std::vector<base::string16>& selection_args);
-
-  // Deletes the specified rows and returns the number of rows deleted.
-  //
-  // |selection| is the SQL WHERE clause without 'WHERE'.
-  // |selection_args| is the arguments for the WHERE clause.
-  //
-  // If |selection| is empty all history and bookmarks are deleted.
-  int DeleteHistoryAndBookmarks(
-      const std::string& selection,
-      const std::vector<base::string16>& selection_args);
-
-  // Deletes the matched history and returns the number of rows deleted.
-  int DeleteHistory(const std::string& selection,
-                    const std::vector<base::string16>& selection_args);
-
-  // Statement ----------------------------------------------------------------
-  // Move the statement's current position.
-  int MoveStatement(history::AndroidStatement* statement,
-                    int current_pos,
-                    int destination);
-
-  // Close the given statement. The ownership is transfered.
-  void CloseStatement(AndroidStatement* statement);
-
-  // Search terms -------------------------------------------------------------
-  // Inserts the given values and returns the SearchTermID of the inserted row.
-  SearchTermID InsertSearchTerm(const SearchRow& row);
-
-  // Returns the number of row updated by the update query.
-  //
-  // |row| is the value to update.
-  // |selection| is the SQL WHERE clause without 'WHERE'.
-  // |selection_args| is the arguments for the WHERE clause.
-  int UpdateSearchTerms(const SearchRow& row,
-                        const std::string& selection,
-                        const std::vector<base::string16> selection_args);
-
-  // Deletes the matched rows and returns the number of deleted rows.
-  //
-  // |selection| is the SQL WHERE clause without 'WHERE'.
-  // |selection_args| is the arguments for WHERE clause.
-  //
-  // If |selection| is empty all search terms will be deleted.
-  int DeleteSearchTerms(const std::string& selection,
-                        const std::vector<base::string16> selection_args);
-
-  // Returns the result of the given query.
-  //
-  // |projections| specifies the result columns.
-  // |selection| is the SQL WHERE clause without 'WHERE'.
-  // |selection_args| is the arguments for WHERE clause.
-  // |sort_order| is the SQL ORDER clause.
-  history::AndroidStatement* QuerySearchTerms(
-      const std::vector<SearchRow::ColumnID>& projections,
-      const std::string& selection,
-      const std::vector<base::string16>& selection_args,
-      const std::string& sort_order);
-
-#endif  // defined(OS_ANDROID)
+  // Returns the android provider backend associated with the HistoryBackend.
+  AndroidProviderBackend* android_provider_backend() {
+    return android_provider_backend_.get();
+  }
+#endif
 
   // Generic operations --------------------------------------------------------
 
@@ -582,7 +509,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, UpdateVisitDuration);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, ExpireHistoryForTimes);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteFTSIndexDatabases);
-
+  FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceTypedUrlTest,
+                           ProcessUserChangeRemove);
   friend class ::TestingProfile;
 
   // Computes the name of the specified database on disk.
@@ -602,7 +530,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   friend class URLQuerier;
 
   // Does the work of Init.
-  void InitImpl(const std::string& languages);
+  void InitImpl(const std::string& languages,
+                const HistoryDatabaseParams& history_database_params);
 
   // Called when the system is under memory pressure.
   void OnMemoryPressure(
@@ -781,11 +710,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Processes the next scheduled HistoryDBTask, scheduling this method
   // to be invoked again if there are more tasks that need to run.
   void ProcessDBTaskImpl();
-
-  // Broadcasts the specified notification to the notification service on both
-  // the main thread and the history thread if a notification service is
-  // running.
-  void BroadcastNotifications(int type, scoped_ptr<HistoryDetails> details);
 
   // HistoryBackendNotifier:
   void NotifyFaviconChanged(const std::set<GURL>& urls) override;

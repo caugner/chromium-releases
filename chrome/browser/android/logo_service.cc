@@ -5,11 +5,10 @@
 #include "chrome/browser/android/logo_service.h"
 
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/google/google_profile_helper.h"
 #include "chrome/browser/image_decoder.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "components/google/core/browser/google_util.h"
+#include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/search_provider_logos/google_logo_api.h"
@@ -23,7 +22,6 @@ using search_provider_logos::LogoTracker;
 
 namespace {
 
-const char kGoogleDoodleURLPath[] = "async/newtab_mobile";
 const char kCachedLogoDirectory[] = "Search Logo";
 const int kDecodeLogoTimeoutSeconds = 30;
 
@@ -31,16 +29,11 @@ const int kDecodeLogoTimeoutSeconds = 30;
 // https://www.google.com/async/newtab_mobile. This depends on the user's
 // Google domain.
 GURL GetGoogleDoodleURL(Profile* profile) {
-  // SetPathStr() requires its argument to stay in scope as long as
-  // |replacements| is, so a std::string is needed, instead of a char*.
-  std::string path = kGoogleDoodleURLPath;
+  GURL google_base_url(UIThreadSearchTermsData(profile).GoogleBaseURLValue());
+  const char kGoogleDoodleURLPath[] = "async/newtab_mobile";
   GURL::Replacements replacements;
-  replacements.SetPathStr(path);
-
-  GURL base_url(google_util::CommandLineGoogleBaseURL());
-  if (!base_url.is_valid())
-    base_url = google_profile_helper::GetGoogleHomePageURL(profile);
-  return base_url.ReplaceComponents(replacements);
+  replacements.SetPathStr(kGoogleDoodleURLPath);
+  return google_base_url.ReplaceComponents(replacements);
 }
 
 class LogoDecoderDelegate : public ImageDecoder::Delegate {
@@ -62,18 +55,16 @@ class LogoDecoderDelegate : public ImageDecoder::Delegate {
         base::TimeDelta::FromSeconds(kDecodeLogoTimeoutSeconds));
   }
 
-  virtual ~LogoDecoderDelegate() {
-    image_decoder_->set_delegate(NULL);
-  }
+  ~LogoDecoderDelegate() override { image_decoder_->set_delegate(NULL); }
 
   // ImageDecoder::Delegate:
-  virtual void OnImageDecoded(const ImageDecoder* decoder,
-                              const SkBitmap& decoded_image) override {
+  void OnImageDecoded(const ImageDecoder* decoder,
+                      const SkBitmap& decoded_image) override {
     image_decoded_callback_.Run(decoded_image);
     delete this;
   }
 
-  virtual void OnDecodeImageFailed(const ImageDecoder* decoder) override {
+  void OnDecodeImageFailed(const ImageDecoder* decoder) override {
     image_decoded_callback_.Run(SkBitmap());
     delete this;
   }
@@ -89,10 +80,10 @@ class LogoDecoderDelegate : public ImageDecoder::Delegate {
 class ChromeLogoDelegate : public search_provider_logos::LogoDelegate {
  public:
   ChromeLogoDelegate() {}
-  virtual ~ChromeLogoDelegate() {}
+  ~ChromeLogoDelegate() override {}
 
   // search_provider_logos::LogoDelegate:
-  virtual void DecodeUntrustedImage(
+  void DecodeUntrustedImage(
       const scoped_refptr<base::RefCountedString>& encoded_image,
       base::Callback<void(const SkBitmap&)> image_decoded_callback) override {
     scoped_refptr<ImageDecoder> image_decoder = new ImageDecoder(

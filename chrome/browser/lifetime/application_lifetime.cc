@@ -7,13 +7,13 @@
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/process/kill.h"
 #include "base/process/process_handle.h"
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
@@ -181,12 +181,12 @@ void StartShutdownTracing() {
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kTraceShutdown)) {
-    base::debug::CategoryFilter category_filter(
+    base::trace_event::CategoryFilter category_filter(
         command_line.GetSwitchValueASCII(switches::kTraceShutdown));
-    base::debug::TraceLog::GetInstance()->SetEnabled(
+    base::trace_event::TraceLog::GetInstance()->SetEnabled(
         category_filter,
-        base::debug::TraceLog::RECORDING_MODE,
-        base::debug::TraceOptions());
+        base::trace_event::TraceLog::RECORDING_MODE,
+        base::trace_event::TraceOptions());
   }
   TRACE_EVENT0("shutdown", "StartShutdownTracing");
 }

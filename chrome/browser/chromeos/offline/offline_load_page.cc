@@ -79,11 +79,11 @@ std::string OfflineLoadPage::GetHTMLContents() {
   DCHECK(profile);
   const extensions::Extension* extension = extensions::ExtensionRegistry::Get(
       profile)->enabled_extensions().GetHostedAppByURL(url_);
+  const std::string& locale = g_browser_process->GetApplicationLocale();
   if (extension && !extension->from_bookmark()) {
-    LocalizedError::GetAppErrorStrings(url_, extension, &error_strings);
+    LocalizedError::GetAppErrorStrings(url_, extension, locale, &error_strings);
     resource_id = IDR_OFFLINE_APP_LOAD_HTML;
   } else {
-    const std::string locale = g_browser_process->GetApplicationLocale();
     const std::string accept_languages =
         profile->GetPrefs()->GetString(prefs::kAcceptLanguages);
     LocalizedError::GetStrings(net::ERR_INTERNET_DISCONNECTED,
@@ -94,9 +94,10 @@ std::string OfflineLoadPage::GetHTMLContents() {
     resource_id = IDR_OFFLINE_NET_LOAD_HTML;
   }
 
-  const base::StringPiece template_html(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
-          resource_id));
+  std::string template_html = ResourceBundle::GetSharedInstance()
+                                  .GetRawDataResource(resource_id)
+                                  .as_string();
+  webui::AppendWebUiCssTextDefaults(&template_html);
   // "t" is the id of the templates root node.
   return webui::GetTemplatesHtml(template_html, &error_strings, "t");
 }

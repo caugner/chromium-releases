@@ -7,10 +7,10 @@
 #include "android_webview/browser/browser_view_renderer_client.h"
 #include "base/auto_reset.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event_argument.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event_argument.h"
 #include "cc/output/compositor_frame.h"
 #include "content/public/common/content_switches.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
@@ -236,8 +236,7 @@ scoped_ptr<cc::CompositorFrame> BrowserViewRenderer::CompositeHw() {
                                 clip,
                                 viewport_rect_for_tile_priority,
                                 transform_for_tile_priority);
-  if (frame.get())
-    DidComposite();
+  DidComposite();
   return frame.Pass();
 }
 
@@ -279,8 +278,8 @@ void BrowserViewRenderer::DidSkipCommitFrame() {
   DidSkipCompositeInDraw();
 }
 
-void BrowserViewRenderer::InvalidateOnFunctorDestroy() {
-  client_->InvalidateOnFunctorDestroy();
+void BrowserViewRenderer::DetachFunctorFromView() {
+  client_->DetachFunctorFromView();
 }
 
 bool BrowserViewRenderer::OnDrawSoftware(SkCanvas* canvas) {
@@ -568,12 +567,12 @@ void BrowserViewRenderer::UpdateRootLayerState(
   SetTotalRootLayerScrollOffset(total_scroll_offset_dip);
 }
 
-scoped_refptr<base::debug::ConvertableToTraceFormat>
+scoped_refptr<base::trace_event::ConvertableToTraceFormat>
 BrowserViewRenderer::RootLayerStateAsValue(
     const gfx::Vector2dF& total_scroll_offset_dip,
     const gfx::SizeF& scrollable_size_dip) {
-  scoped_refptr<base::debug::TracedValue> state =
-      new base::debug::TracedValue();
+  scoped_refptr<base::trace_event::TracedValue> state =
+      new base::trace_event::TracedValue();
 
   state->SetDouble("total_scroll_offset_dip.x", total_scroll_offset_dip.x());
   state->SetDouble("total_scroll_offset_dip.y", total_scroll_offset_dip.y());

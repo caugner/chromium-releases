@@ -13,11 +13,13 @@
 #include "chromecast/renderer/cast_render_process_observer.h"
 #include "chromecast/renderer/key_systems_cast.h"
 #include "chromecast/renderer/media/cma_media_renderer_factory.h"
-#include "components/dns_prefetch/renderer/prescient_networking_dispatcher.h"
+#include "components/network_hints/renderer/prescient_networking_dispatcher.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
+#include "content/public/renderer/render_view_observer.h"
 #include "crypto/nss_util.h"
+#include "ipc/message_filter.h"
 #include "third_party/WebKit/public/platform/WebColor.h"
 #include "third_party/WebKit/public/web/WebSettings.h"
 #include "third_party/WebKit/public/web/WebView.h"
@@ -28,12 +30,11 @@ namespace shell {
 namespace {
 
 #if defined(ARCH_CPU_ARM_FAMILY) && !defined(OS_ANDROID)
-// These memory thresholds are set for Chromecast. See the UMA histogram
+// This memory threshold is set for Chromecast. See the UMA histogram
 // Platform.MeminfoMemFree when tuning.
 // TODO(gunsch): These should be platform/product-dependent. Look into a way
 // to move these to platform-specific repositories.
 const int kCriticalMinFreeMemMB = 24;
-const int kModerateMinFreeMemMB = 48;
 const int kPollingIntervalMS = 5000;
 
 void PlatformPollFreemem(void) {
@@ -45,17 +46,11 @@ void PlatformPollFreemem(void) {
     int free_mem_mb = static_cast<int64_t>(sys.freeram) *
         sys.mem_unit / (1024 * 1024);
 
-    if (free_mem_mb <= kModerateMinFreeMemMB) {
-      if (free_mem_mb <= kCriticalMinFreeMemMB) {
-        // Memory is getting really low, we need to do whatever we can to
-        // prevent deadlocks and interfering with other processes.
-        base::MemoryPressureListener::NotifyMemoryPressure(
-            base::MemoryPressureListener::MEMORY_PRESSURE_CRITICAL);
-      } else {
-        // There is enough memory, but it is starting to get low.
-        base::MemoryPressureListener::NotifyMemoryPressure(
-            base::MemoryPressureListener::MEMORY_PRESSURE_MODERATE);
-      }
+    if (free_mem_mb <= kCriticalMinFreeMemMB) {
+      // Memory is getting really low, we need to do whatever we can to
+      // prevent deadlocks and interfering with other processes.
+      base::MemoryPressureListener::NotifyMemoryPressure(
+          base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL);
     }
   }
 
@@ -70,6 +65,22 @@ void PlatformPollFreemem(void) {
 // Default background color to set for WebViews. WebColor is in ARGB format
 // though the comment of WebColor says it is in RGBA.
 const blink::WebColor kColorBlack = 0xFF000000;
+
+class CastRenderViewObserver : content::RenderViewObserver {
+ public:
+  explicit CastRenderViewObserver(content::RenderView* render_view);
+  ~CastRenderViewObserver() override {}
+
+  void DidClearWindowObject(blink::WebLocalFrame* frame) override;
+};
+
+CastRenderViewObserver::CastRenderViewObserver(content::RenderView* render_view)
+    : content::RenderViewObserver(render_view) {
+}
+
+void CastRenderViewObserver::DidClearWindowObject(blink::WebLocalFrame* frame) {
+  PlatformAddRendererNativeBindings(frame);
+}
 
 }  // namespace
 
@@ -95,10 +106,11 @@ void CastContentRendererClient::RenderThreadStarted() {
   PlatformPollFreemem();
 #endif
 
-  cast_observer_.reset(new CastRenderProcessObserver());
+  cast_observer_.reset(
+      new CastRenderProcessObserver(PlatformGetRendererMessageFilters()));
 
   prescient_networking_dispatcher_.reset(
-      new dns_prefetch::PrescientNetworkingDispatcher());
+      new network_hints::PrescientNetworkingDispatcher());
 }
 
 void CastContentRendererClient::RenderViewCreated(
@@ -116,6 +128,9 @@ void CastContentRendererClient::RenderViewCreated(
     // application running.
     webview->settings()->setOfflineWebApplicationCacheEnabled(false);
   }
+
+  // Note: RenderView will own the lifetime of its observer.
+  new CastRenderViewObserver(render_view);
 }
 
 void CastContentRendererClient::AddKeySystems(
@@ -127,7 +142,8 @@ void CastContentRendererClient::AddKeySystems(
 #if !defined(OS_ANDROID)
 scoped_ptr<::media::RendererFactory>
 CastContentRendererClient::CreateMediaRendererFactory(
-    ::content::RenderFrame* render_frame) {
+    ::content::RenderFrame* render_frame,
+    const scoped_refptr<::media::MediaLog>& media_log) {
   const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
   if (!cmd_line->HasSwitch(switches::kEnableCmaMediaPipeline))
     return nullptr;

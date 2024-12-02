@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//testing/test.gni")
+
 static_library("courgette_lib") {
   sources = [
     "adjustment_method.cc",
@@ -56,7 +58,7 @@ static_library("courgette_lib") {
 }
 
 executable("courgette") {
-  if (is_win && cpu_arch == "x64") {
+  if (is_win && current_cpu == "x64") {
     # The build infrastructure needs courgette to be named courgette64.
     output_name = "courgette64"
   }
@@ -105,10 +107,8 @@ test("courgette_unittests") {
     "third_party/paged_array_unittest.cc",
   ]
 
-  if (is_win) {
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    cflags = [ "/wd4267" ]
-  }
+  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
   deps = [
     ":courgette_lib",

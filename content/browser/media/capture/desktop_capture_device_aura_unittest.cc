@@ -35,21 +35,21 @@ const int kFrameRate = 30;
 
 class MockDeviceClient : public media::VideoCaptureDevice::Client {
  public:
-  MOCK_METHOD2(ReserveOutputBuffer,
-               scoped_refptr<Buffer>(media::VideoFrame::Format format,
-                                     const gfx::Size& dimensions));
-  MOCK_METHOD1(OnError, void(const std::string& reason));
   MOCK_METHOD5(OnIncomingCapturedData,
                void(const uint8* data,
                     int length,
                     const media::VideoCaptureFormat& frame_format,
                     int rotation,
-                    base::TimeTicks timestamp));
+                    const base::TimeTicks& timestamp));
+  MOCK_METHOD2(ReserveOutputBuffer,
+               scoped_refptr<Buffer>(media::VideoFrame::Format format,
+                                     const gfx::Size& dimensions));
   MOCK_METHOD4(OnIncomingCapturedVideoFrame,
                void(const scoped_refptr<Buffer>& buffer,
                     const media::VideoCaptureFormat& buffer_format,
                     const scoped_refptr<media::VideoFrame>& frame,
-                    base::TimeTicks timestamp));
+                    const base::TimeTicks& timestamp));
+  MOCK_METHOD1(OnError, void(const std::string& reason));
 };
 
 // Test harness that sets up a minimal environment with necessary stubs.
@@ -57,10 +57,10 @@ class DesktopCaptureDeviceAuraTest : public testing::Test {
  public:
   DesktopCaptureDeviceAuraTest()
       : browser_thread_for_ui_(BrowserThread::UI, &message_loop_) {}
-  virtual ~DesktopCaptureDeviceAuraTest() {}
+  ~DesktopCaptureDeviceAuraTest() override {}
 
  protected:
-  virtual void SetUp() override {
+  void SetUp() override {
     // The ContextFactory must exist before any Compositors are created.
     bool enable_pixel_output = false;
     ui::ContextFactory* context_factory =
@@ -82,7 +82,7 @@ class DesktopCaptureDeviceAuraTest : public testing::Test {
     desktop_window_->Show();
   }
 
-  virtual void TearDown() override {
+  void TearDown() override {
     helper_->RunAllPendingInMessageLoop();
     root_window()->RemoveChild(desktop_window_.get());
     desktop_window_.reset();

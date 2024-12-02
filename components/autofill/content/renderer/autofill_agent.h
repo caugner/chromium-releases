@@ -14,7 +14,6 @@
 #include "base/time/time.h"
 #include "components/autofill/content/renderer/form_cache.h"
 #include "components/autofill/content/renderer/page_click_listener.h"
-#include "components/autofill/content/renderer/page_click_tracker.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "third_party/WebKit/public/web/WebAutofillClient.h"
@@ -66,8 +65,7 @@ class AutofillAgent : public content::RenderFrameObserver,
    private:
     // content::RenderViewObserver:
     void OnDestruct() override;
-    void FocusedNodeChanged(const blink::WebNode& node) override;
-    void Resized() override;
+    void FocusChangeComplete() override;
 
     AutofillAgent* agent_;
 
@@ -114,11 +112,11 @@ class AutofillAgent : public content::RenderFrameObserver,
   void DidFinishDocumentLoad() override;
   void WillSubmitForm(const blink::WebFormElement& form) override;
   void DidChangeScrollOffset() override;
+  void FocusedNodeChanged(const blink::WebNode& node) override;
 
-  // Pass-throughs from LegacyAutofillAgent. These correlate with
-  // RenderViewObserver methods.
-  void FocusedNodeChanged(const blink::WebNode& node);
-  void Resized();
+  // Pass-through from LegacyAutofillAgent. This correlates with the
+  // RenderViewObserver method.
+  void FocusChangeComplete();
 
   // PageClickListener:
   void FormControlElementClicked(const blink::WebFormControlElement& element,
@@ -221,9 +219,6 @@ class AutofillAgent : public content::RenderFrameObserver,
 
   // Passes through RenderViewObserver methods to |this|.
   LegacyAutofillAgent legacy_;
-
-  // Tracks clicks on the RenderViewHost, informs |this|.
-  PageClickTracker page_click_tracker_;
 
   // The ID of the last request sent for form field Autofill.  Used to ignore
   // out of date responses.

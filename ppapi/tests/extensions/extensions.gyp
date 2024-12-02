@@ -37,9 +37,9 @@
         'build_pnacl_newlib': 0,
         'nexe_destination_dir': 'test_data/ppapi/tests/extensions/media_galleries',
         'sources': [
-          'media_galleries/test_galleries.cc',
           '<(DEPTH)/ppapi/tests/test_utils.cc',
           '<(DEPTH)/ppapi/tests/test_utils.h',
+          'media_galleries/test_galleries.cc',
         ],
         'test_files': [
           'media_galleries/background.js',
@@ -82,7 +82,7 @@
         ],
       },
       'conditions': [
-        ['target_arch=="ia32" and OS=="linux"', {
+        ['(target_arch=="ia32" or target_arch=="x64") and OS=="linux"', {
           # Enable nonsfi testing only on ia32-linux environment.
           # See chrome/test/data/nacl/nacl_test_data.gyp for more info.
           'variables': {

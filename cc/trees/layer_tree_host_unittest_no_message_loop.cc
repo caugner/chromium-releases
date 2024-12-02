@@ -54,12 +54,13 @@ class LayerTreeHostNoMessageLoopTest
   ~LayerTreeHostNoMessageLoopTest() override {}
 
   // LayerTreeHostClient overrides.
-  void WillBeginMainFrame(int frame_id) override {}
+  void WillBeginMainFrame() override {}
   void BeginMainFrame(const BeginFrameArgs& args) override {}
+  void BeginMainFrameNotExpectedSoon() override {}
   void DidBeginMainFrame() override {}
   void Layout() override {}
-  void ApplyViewportDeltas(const gfx::Vector2d& inner_delta,
-                           const gfx::Vector2d& outer_delta,
+  void ApplyViewportDeltas(const gfx::Vector2dF& inner_delta,
+                           const gfx::Vector2dF& outer_delta,
                            const gfx::Vector2dF& elastic_overscroll_delta,
                            float page_scale,
                            float top_controls_delta) override {}
@@ -78,6 +79,7 @@ class LayerTreeHostNoMessageLoopTest
   void DidCommit() override { did_commit_ = true; }
   void DidCommitAndDrawFrame() override { did_commit_and_draw_frame_ = true; }
   void DidCompleteSwapBuffers() override {}
+  void DidCompletePageScaleAnimation() override {}
 
   // LayerTreeHostSingleThreadClient overrides.
   void DidPostSwapBuffers() override {}

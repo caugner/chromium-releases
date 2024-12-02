@@ -42,6 +42,9 @@ using base::android::ToJavaIntArray;
 using bookmarks::android::JavaBookmarkIdCreateBookmarkId;
 using bookmarks::android::JavaBookmarkIdGetId;
 using bookmarks::android::JavaBookmarkIdGetType;
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
+using bookmarks::BookmarkPermanentNode;
 using bookmarks::BookmarkType;
 using content::BrowserThread;
 
@@ -224,6 +227,10 @@ void BookmarksBridge::GetTopLevelFolderIDs(JNIEnv* env,
         client_->managed_node()->child_count() > 0) {
       top_level_folders.push_back(client_->managed_node());
     }
+    if (client_->supervised_node() &&
+        client_->supervised_node()->child_count() > 0) {
+      top_level_folders.push_back(client_->supervised_node());
+    }
     if (partner_bookmarks_shim_->HasPartnerBookmarks()
         && IsReachable(partner_bookmarks_shim_->GetPartnerBookmarksRoot())) {
       top_level_folders.push_back(
@@ -233,7 +240,7 @@ void BookmarksBridge::GetTopLevelFolderIDs(JNIEnv* env,
   std::size_t special_count = top_level_folders.size();
 
   if (get_normal) {
-    DCHECK_EQ(bookmark_model_->root_node()->child_count(), 4);
+    DCHECK_EQ(bookmark_model_->root_node()->child_count(), 5);
 
     const BookmarkNode* mobile_node = bookmark_model_->mobile_node();
     for (int i = 0; i < mobile_node->child_count(); ++i) {
@@ -330,6 +337,15 @@ void BookmarksBridge::GetAllFoldersWithDepths(JNIEnv* env,
       stk.push(std::make_pair(*it, depth + 1));
     }
   }
+}
+
+ScopedJavaLocalRef<jobject> BookmarksBridge::GetRootFolderId(JNIEnv* env,
+                                                             jobject obj) {
+  const BookmarkNode* root_node = bookmark_model_->root_node();
+  ScopedJavaLocalRef<jobject> folder_id_obj =
+      JavaBookmarkIdCreateBookmarkId(
+          env, root_node->id(), GetBookmarkType(root_node));
+  return folder_id_obj;
 }
 
 ScopedJavaLocalRef<jobject> BookmarksBridge::GetMobileFolderId(JNIEnv* env,
@@ -430,8 +446,11 @@ void BookmarksBridge::GetAllBookmarkIDsOrderedByCreationDate(
 
     for (int i = 0; i < (*folder_iter)->child_count(); ++i) {
       const BookmarkNode* child = (*folder_iter)->GetChild(i);
-      if (!IsReachable(child) || client_->IsDescendantOfManagedNode(child))
+      if (!IsReachable(child) ||
+          bookmarks::IsDescendantOf(child, client_->managed_node()) ||
+          bookmarks::IsDescendantOf(child, client_->supervised_node())) {
         continue;
+      }
 
       if (child->is_folder()) {
         insert_iter = folders.insert(insert_iter, child);
@@ -797,7 +816,7 @@ bool BookmarksBridge::IsEditable(const BookmarkNode* node) const {
 }
 
 bool BookmarksBridge::IsManaged(const BookmarkNode* node) const {
-  return client_->IsDescendantOfManagedNode(node);
+  return bookmarks::IsDescendantOf(node, client_->managed_node());
 }
 
 const BookmarkNode* BookmarksBridge::GetParentNode(const BookmarkNode* node) {
@@ -831,6 +850,10 @@ bool BookmarksBridge::IsFolderAvailable(
   // The managed bookmarks folder is not shown if there are no bookmarks
   // configured via policy.
   if (folder == client_->managed_node() && folder->empty())
+    return false;
+  // Similarly, the supervised bookmarks folder is not shown if there are no
+  // bookmarks configured by the custodian.
+  if (folder == client_->supervised_node() && folder->empty())
     return false;
 
   SigninManager* signin = SigninManagerFactory::GetForProfile(

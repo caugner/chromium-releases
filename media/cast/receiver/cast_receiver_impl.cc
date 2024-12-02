@@ -7,9 +7,9 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/trace_event/trace_event.h"
 #include "media/cast/receiver/audio_decoder.h"
 #include "media/cast/receiver/video_decoder.h"
 
@@ -36,7 +36,7 @@ CastReceiverImpl::CastReceiverImpl(
       ssrc_of_audio_sender_(audio_config.incoming_ssrc),
       ssrc_of_video_sender_(video_config.incoming_ssrc),
       num_audio_channels_(audio_config.channels),
-      audio_sampling_rate_(audio_config.frequency),
+      audio_sampling_rate_(audio_config.rtp_timebase),
       audio_codec_(audio_config.codec),
       video_codec_(video_config.codec) {}
 

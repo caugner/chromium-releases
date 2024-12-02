@@ -8,14 +8,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "net/quic/congestion_control/rtt_stats.h"
 #include "net/quic/congestion_control/tcp_cubic_sender.h"
-#include "net/quic/congestion_control/tcp_receiver.h"
 #include "net/quic/crypto/crypto_protocol.h"
+#include "net/quic/quic_protocol.h"
 #include "net/quic/quic_utils.h"
 #include "net/quic/test_tools/mock_clock.h"
 #include "net/quic/test_tools/quic_config_peer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using std::make_pair;
 using std::min;
 
 namespace net {
@@ -65,7 +64,6 @@ class TcpCubicSenderTest : public ::testing::Test {
       : one_ms_(QuicTime::Delta::FromMilliseconds(1)),
         sender_(new TcpCubicSenderPeer(&clock_, true,
                                        kMaxTcpCongestionWindow)),
-        receiver_(new TcpReceiver()),
         sequence_number_(1),
         acked_sequence_number_(0),
         bytes_in_flight_(0) {
@@ -98,7 +96,7 @@ class TcpCubicSenderTest : public ::testing::Test {
     for (int i = 0; i < n; ++i) {
       ++acked_sequence_number_;
       acked_packets.push_back(
-          make_pair(acked_sequence_number_, standard_packet_));
+          std::make_pair(acked_sequence_number_, standard_packet_));
     }
     sender_->OnCongestionEvent(
         true, bytes_in_flight_, acked_packets, lost_packets);
@@ -112,7 +110,7 @@ class TcpCubicSenderTest : public ::testing::Test {
     for (int i = 0; i < n; ++i) {
       ++acked_sequence_number_;
       lost_packets.push_back(
-          make_pair(acked_sequence_number_, standard_packet_));
+          std::make_pair(acked_sequence_number_, standard_packet_));
     }
     sender_->OnCongestionEvent(
         false, bytes_in_flight_, acked_packets, lost_packets);
@@ -123,8 +121,7 @@ class TcpCubicSenderTest : public ::testing::Test {
   void LosePacket(QuicPacketSequenceNumber sequence_number) {
     SendAlgorithmInterface::CongestionVector acked_packets;
     SendAlgorithmInterface::CongestionVector lost_packets;
-    lost_packets.push_back(
-        make_pair(sequence_number, standard_packet_));
+    lost_packets.push_back(std::make_pair(sequence_number, standard_packet_));
     sender_->OnCongestionEvent(
         false, bytes_in_flight_, acked_packets, lost_packets);
     bytes_in_flight_ -= kDefaultTCPMSS;
@@ -133,7 +130,6 @@ class TcpCubicSenderTest : public ::testing::Test {
   const QuicTime::Delta one_ms_;
   MockClock clock_;
   scoped_ptr<TcpCubicSenderPeer> sender_;
-  scoped_ptr<TcpReceiver> receiver_;
   QuicPacketSequenceNumber sequence_number_;
   QuicPacketSequenceNumber acked_sequence_number_;
   QuicByteCount bytes_in_flight_;

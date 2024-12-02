@@ -137,7 +137,9 @@ class RequestContentScript : public ContentAction {
               ApplyInfo* apply_info) const override;
 
  private:
-  void InitScript(const Extension* extension, const ScriptData& script_data);
+  void InitScript(const HostID& host_id,
+                  const Extension* extension,
+                  const ScriptData& script_data);
 
   void AddScript() {
     DCHECK(master_);

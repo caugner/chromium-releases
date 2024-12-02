@@ -5,6 +5,7 @@
 #include "chromecast/browser/cast_browser_main_parts.h"
 
 #include <signal.h>
+#include <sys/prctl.h>
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
@@ -18,17 +19,21 @@
 #include "chromecast/browser/cast_browser_context.h"
 #include "chromecast/browser/cast_browser_process.h"
 #include "chromecast/browser/devtools/remote_debugging_server.h"
+#include "chromecast/browser/media/cast_browser_cdm_factory.h"
 #include "chromecast/browser/metrics/cast_metrics_prefs.h"
 #include "chromecast/browser/metrics/cast_metrics_service_client.h"
 #include "chromecast/browser/pref_service_helper.h"
 #include "chromecast/browser/service/cast_service.h"
 #include "chromecast/browser/url_request_context_factory.h"
 #include "chromecast/common/cast_paths.h"
+#include "chromecast/common/chromecast_switches.h"
 #include "chromecast/common/platform_client_auth.h"
+#include "chromecast/net/connectivity_checker.h"
 #include "chromecast/net/network_change_notifier_cast.h"
 #include "chromecast/net/network_change_notifier_factory_cast.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
+#include "media/base/browser_cdm_factory.h"
 #include "media/base/media_switches.h"
 
 #if defined(OS_ANDROID)
@@ -54,6 +59,8 @@ void RunClosureOnSignal(int signum) {
 
 void RegisterClosureOnSignal(const base::Closure& closure) {
   DCHECK(!g_signal_closure);
+  DCHECK_GT(arraysize(kSignalsToRunClosure), 0U);
+
   // Allow memory leak by intention.
   g_signal_closure = new base::Closure(closure);
 
@@ -71,6 +78,9 @@ void RegisterClosureOnSignal(const base::Closure& closure) {
       DCHECK_EQ(sa_old.sa_handler, SIG_DFL);
     }
   }
+
+  // Get the first signal to exit when the parent process dies.
+  prctl(PR_SET_PDEATHSIG, kSignalsToRunClosure[0]);
 }
 
 }  // namespace
@@ -86,6 +96,10 @@ struct DefaultCommandLineSwitch {
 };
 
 DefaultCommandLineSwitch g_default_switches[] = {
+  // TODO(ddorwin): Develop a permanent solution. See http://crbug.com/394926.
+  // For now, disable unprefixed EME because the video behavior not be
+  // consistent with other clients.
+  { switches::kDisableEncryptedMedia, ""},
 #if defined(OS_ANDROID)
   { switches::kMediaDrmEnableNonCompositing, ""},
   { switches::kEnableOverlayFullscreenVideo, ""},
@@ -93,7 +107,6 @@ DefaultCommandLineSwitch g_default_switches[] = {
   { switches::kDisableGestureRequirementForMediaPlayback, ""},
   { switches::kForceUseOverlayEmbeddedVideo, ""},
 #endif
-  { switches::kDisablePlugins, "" },
   // Always enable HTMLMediaElement logs.
   { switches::kBlinkPlatformLogChannels, "Media"},
 #if defined(DISABLE_DISPLAY)
@@ -166,12 +179,21 @@ void CastBrowserMainParts::PostMainMessageLoopStart() {
 }
 
 int CastBrowserMainParts::PreCreateThreads() {
-#if !defined(OS_ANDROID)
+#if defined(OS_ANDROID)
+  // GPU process is started immediately after threads are created, requiring
+  // CrashDumpManager to be initialized beforehand.
+  base::FilePath crash_dumps_dir;
+  if (!chromecast::CrashHandler::GetCrashDumpLocation(&crash_dumps_dir)) {
+    LOG(ERROR) << "Could not find crash dump location.";
+  }
+  cast_browser_process_->SetCrashDumpManager(
+      make_scoped_ptr(new breakpad::CrashDumpManager(crash_dumps_dir)));
+#else
   base::FilePath home_dir;
   CHECK(PathService::Get(DIR_CAST_HOME, &home_dir));
   if (!base::CreateDirectory(home_dir))
     return 1;
-#endif  // !defined(OS_ANDROID)
+#endif
   return 0;
 }
 
@@ -180,6 +202,17 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
   metrics::RegisterPrefs(pref_registry.get());
   cast_browser_process_->SetPrefService(
       PrefServiceHelper::CreatePrefService(pref_registry.get()));
+
+#if !defined(OS_ANDROID)
+  const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
+  if (cmd_line->HasSwitch(switches::kEnableCmaMediaPipeline))
+    ::media::SetBrowserCdmFactory(new media::CastBrowserCdmFactory);
+#endif  // !defined(OS_ANDROID)
+
+  cast_browser_process_->SetConnectivityChecker(
+      make_scoped_refptr(new ConnectivityChecker(
+          content::BrowserThread::GetMessageLoopProxyForThread(
+              content::BrowserThread::FILE))));
 
   url_request_context_factory_->InitializeOnUIThread();
 
@@ -191,18 +224,8 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
           cast_browser_process_->pref_service(),
           cast_browser_process_->browser_context()->GetRequestContext()));
 
-#if defined(OS_ANDROID)
-  base::FilePath crash_dumps_dir;
-  if (!chromecast::CrashHandler::GetCrashDumpLocation(&crash_dumps_dir)) {
-    LOG(ERROR) << "Could not find crash dump location.";
-  }
-  cast_browser_process_->SetCrashDumpManager(
-      make_scoped_ptr(new breakpad::CrashDumpManager(crash_dumps_dir)));
-#endif
-
-  if (!PlatformClientAuth::Initialize()) {
+  if (!PlatformClientAuth::Initialize())
     LOG(ERROR) << "PlatformClientAuth::Initialize failed.";
-  }
 
   cast_browser_process_->SetRemoteDebuggingServer(
       make_scoped_ptr(new RemoteDebuggingServer()));
@@ -212,14 +235,14 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
       cast_browser_process_->pref_service(),
       cast_browser_process_->metrics_service_client(),
       url_request_context_factory_->GetSystemGetter()));
+  cast_browser_process_->cast_service()->Initialize();
 
+  // Initializing metrics service and network delegates must happen after cast
+  // service is intialized because CastMetricsServiceClient and
+  // CastNetworkDelegate may use components initialized by cast service.
   cast_browser_process_->metrics_service_client()
       ->Initialize(cast_browser_process_->cast_service());
-
-  // Initializing network delegates must happen after Cast service is created.
   url_request_context_factory_->InitializeNetworkDelegates();
-
-  cast_browser_process_->cast_service()->Initialize();
 }
 
 bool CastBrowserMainParts::MainMessageLoopRun(int* result_code) {

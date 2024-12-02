@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <set>
 
+#include "ash/multi_profile_uma.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
@@ -31,11 +32,13 @@
 #include "chrome/browser/chromeos/login/users/avatar/user_image_manager_impl.h"
 #include "chrome/browser/chromeos/login/users/multi_profile_user_controller.h"
 #include "chrome/browser/chromeos/login/users/supervised_user_manager_impl.h"
+#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/profiles/multiprofiles_session_aborted_dialog.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/session_length_limiter.h"
+#include "chrome/browser/chromeos/system/timezone_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/supervised_user/chromeos/manager_password_service_factory.h"
@@ -48,6 +51,7 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/login/user_names.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "chromeos/timezone/timezone_resolver.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/user_manager/remove_user_delegate.h"
 #include "components/user_manager/user_image/user_image.h"
@@ -57,11 +61,6 @@
 #include "policy/policy_constants.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/wm/core/wm_core_switches.h"
-
-#if !defined(USE_ATHENA)
-#include "ash/multi_profile_uma.h"
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
-#endif
 
 using content::BrowserThread;
 
@@ -379,14 +378,21 @@ void ChromeUserManagerImpl::Observe(
           multi_profile_user_controller_->StartObserving(profile);
         }
       }
+      UpdateUserTimeZoneRefresher(profile);
       break;
     }
     case chrome::NOTIFICATION_PROFILE_CREATED: {
       Profile* profile = content::Source<Profile>(source).ptr();
       user_manager::User* user =
           ProfileHelper::Get()->GetUserByProfile(profile);
-      if (user != NULL)
+      if (user != NULL) {
         user->set_profile_is_created();
+
+        if (user->HasGaiaAccount()) {
+          UserImageManager* image_manager = GetUserImageManager(user->email());
+          image_manager->UserProfileCreated();
+        }
+      }
 
       // If there is pending user switch, do it now.
       if (!GetPendingUserSwitchID().empty()) {
@@ -412,10 +418,8 @@ void ChromeUserManagerImpl::OnExternalDataSet(const std::string& policy,
                                               const std::string& user_id) {
   if (policy == policy::key::kUserAvatarImage)
     GetUserImageManager(user_id)->OnExternalDataSet(policy);
-#if !defined(USE_ATHENA)
   else if (policy == policy::key::kWallpaperImage)
     WallpaperManager::Get()->OnPolicySet(policy, user_id);
-#endif
   else
     NOTREACHED();
 }
@@ -424,10 +428,8 @@ void ChromeUserManagerImpl::OnExternalDataCleared(const std::string& policy,
                                                   const std::string& user_id) {
   if (policy == policy::key::kUserAvatarImage)
     GetUserImageManager(user_id)->OnExternalDataCleared(policy);
-#if !defined(USE_ATHENA)
   else if (policy == policy::key::kWallpaperImage)
     WallpaperManager::Get()->OnPolicyCleared(policy, user_id);
-#endif
   else
     NOTREACHED();
 }
@@ -438,10 +440,8 @@ void ChromeUserManagerImpl::OnExternalDataFetched(
     scoped_ptr<std::string> data) {
   if (policy == policy::key::kUserAvatarImage)
     GetUserImageManager(user_id)->OnExternalDataFetched(policy, data.Pass());
-#if !defined(USE_ATHENA)
   else if (policy == policy::key::kWallpaperImage)
     WallpaperManager::Get()->OnPolicyFetched(policy, user_id, data.Pass());
-#endif
   else
     NOTREACHED();
 }
@@ -628,25 +628,19 @@ void ChromeUserManagerImpl::GuestUserLoggedIn() {
       user_manager::User::USER_IMAGE_INVALID,
       false);
 
-#if !defined(USE_ATHENA)
   // Initializes wallpaper after active_user_ is set.
   WallpaperManager::Get()->SetUserWallpaperNow(chromeos::login::kGuestUserName);
-#endif
 }
 
 void ChromeUserManagerImpl::RegularUserLoggedIn(const std::string& user_id) {
   ChromeUserManager::RegularUserLoggedIn(user_id);
 
-#if !defined(USE_ATHENA)
   if (IsCurrentUserNew())
     WallpaperManager::Get()->SetUserWallpaperNow(user_id);
-#endif
 
   GetUserImageManager(user_id)->UserLoggedIn(IsCurrentUserNew(), false);
 
-#if !defined(USE_ATHENA)
   WallpaperManager::Get()->EnsureLoggedInUserWallpaperLoaded();
-#endif
 
   // Make sure that new data is persisted to Local State.
   GetLocalState()->CommitPendingWrite();
@@ -658,9 +652,7 @@ void ChromeUserManagerImpl::RegularUserLoggedInAsEphemeral(
   ChromeUserManager::RegularUserLoggedInAsEphemeral(user_id);
 
   GetUserImageManager(user_id)->UserLoggedIn(IsCurrentUserNew(), false);
-#if !defined(USE_ATHENA)
   WallpaperManager::Get()->SetUserWallpaperNow(user_id);
-#endif
 }
 
 void ChromeUserManagerImpl::SupervisedUserLoggedIn(const std::string& user_id) {
@@ -674,15 +666,11 @@ void ChromeUserManagerImpl::SupervisedUserLoggedIn(const std::string& user_id) {
     SetIsCurrentUserNew(true);
     active_user_ = user_manager::User::CreateSupervisedUser(user_id);
     // Leaving OAuth token status at the default state = unknown.
-#if !defined(USE_ATHENA)
     WallpaperManager::Get()->SetUserWallpaperNow(user_id);
-#endif
   } else {
     if (supervised_user_manager_->CheckForFirstRun(user_id)) {
       SetIsCurrentUserNew(true);
-#if !defined(USE_ATHENA)
       WallpaperManager::Get()->SetUserWallpaperNow(user_id);
-#endif
     } else {
       SetIsCurrentUserNew(false);
     }
@@ -700,9 +688,7 @@ void ChromeUserManagerImpl::SupervisedUserLoggedIn(const std::string& user_id) {
   }
 
   GetUserImageManager(user_id)->UserLoggedIn(IsCurrentUserNew(), true);
-#if !defined(USE_ATHENA)
   WallpaperManager::Get()->EnsureLoggedInUserWallpaperLoaded();
-#endif
 
   // Make sure that new data is persisted to Local State.
   GetLocalState()->CommitPendingWrite();
@@ -717,9 +703,7 @@ void ChromeUserManagerImpl::PublicAccountUserLoggedIn(
   // for the first time. Tell the UserImageManager that this user is not new to
   // prevent the avatar from getting changed.
   GetUserImageManager(user->email())->UserLoggedIn(false, true);
-#if !defined(USE_ATHENA)
   WallpaperManager::Get()->EnsureLoggedInUserWallpaperLoaded();
-#endif
 }
 
 void ChromeUserManagerImpl::KioskAppLoggedIn(const std::string& app_id) {
@@ -737,9 +721,7 @@ void ChromeUserManagerImpl::KioskAppLoggedIn(const std::string& app_id) {
       user_manager::User::USER_IMAGE_INVALID,
       false);
 
-#if !defined(USE_ATHENA)
   WallpaperManager::Get()->SetUserWallpaperNow(app_id);
-#endif
 
   // TODO(bartfab): Add KioskAppUsers to the users_ list and keep metadata like
   // the kiosk_app_id in these objects, removing the need to re-parse the
@@ -783,9 +765,7 @@ void ChromeUserManagerImpl::DemoAccountLoggedIn() {
               IDR_PROFILE_PICTURE_LOADING)),
       user_manager::User::USER_IMAGE_INVALID,
       false);
-#if !defined(USE_ATHENA)
   WallpaperManager::Get()->SetUserWallpaperNow(DemoAppLauncher::kDemoUserName);
-#endif
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   command_line->AppendSwitch(::switches::kForceAppMode);
@@ -827,9 +807,7 @@ void ChromeUserManagerImpl::RemoveNonCryptohomeData(
     const std::string& user_id) {
   ChromeUserManager::RemoveNonCryptohomeData(user_id);
 
-#if !defined(USE_ATHENA)
   WallpaperManager::Get()->RemoveUserWallpaperInfo(user_id);
-#endif
   GetUserImageManager(user_id)->DeleteUserImage();
 
   supervised_user_manager_->RemoveNonCryptohomeData(user_id);
@@ -1063,18 +1041,50 @@ void ChromeUserManagerImpl::OnUserNotAllowed(const std::string& user_email) {
 }
 
 void ChromeUserManagerImpl::UpdateNumberOfUsers() {
-#if !defined(USE_ATHENA)
   size_t users = GetLoggedInUsers().size();
   if (users) {
     // Write the user number as UMA stat when a multi user session is possible.
     if ((users + GetUsersAllowedForMultiProfile().size()) > 1)
       ash::MultiProfileUMA::RecordUserCount(users);
   }
-#endif
 
   base::debug::SetCrashKeyValue(
       crash_keys::kNumberOfUsers,
       base::StringPrintf("%" PRIuS, GetLoggedInUsers().size()));
+}
+
+void ChromeUserManagerImpl::UpdateUserTimeZoneRefresher(Profile* profile) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kDisableTimeZoneTrackingOption)) {
+    return;
+  }
+
+  const user_manager::User* user =
+      ProfileHelper::Get()->GetUserByProfile(profile);
+  if (user == NULL)
+    return;
+
+  // In Multi-Profile mode only primary user settings are in effect.
+  if (user != user_manager::UserManager::Get()->GetPrimaryUser())
+    return;
+
+  if (!IsUserLoggedIn())
+    return;
+
+  // Timezone auto refresh is disabled for Guest, Supervized and OffTheRecord
+  // users, but enabled for Kiosk mode.
+  if (IsLoggedInAsGuest() || IsLoggedInAsSupervisedUser() ||
+      profile->IsOffTheRecord()) {
+    g_browser_process->platform_part()->GetTimezoneResolver()->Stop();
+    return;
+  }
+
+  if (profile->GetPrefs()->GetBoolean(prefs::kResolveTimezoneByGeolocation) &&
+      !system::HasSystemTimezonePolicy()) {
+    g_browser_process->platform_part()->GetTimezoneResolver()->Start();
+  } else {
+    g_browser_process->platform_part()->GetTimezoneResolver()->Stop();
+  }
 }
 
 }  // namespace chromeos

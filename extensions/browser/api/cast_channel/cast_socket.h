@@ -42,6 +42,16 @@ class Logger;
 struct LastErrors;
 class MessageFramer;
 
+// Cast device capabilities.
+enum CastDeviceCapability {
+  NONE = 0,
+  VIDEO_OUT = 1 << 0,
+  VIDEO_IN = 1 << 1,
+  AUDIO_OUT = 1 << 2,
+  AUDIO_IN = 1 << 3,
+  DEV_MODE = 1 << 4
+};
+
 // Public interface of the CastSocket class.
 class CastSocket : public ApiResource {
  public:
@@ -52,7 +62,7 @@ class CastSocket : public ApiResource {
   static const char* service_name() { return "CastSocketImplManager"; }
 
   // Connects the channel to the peer. If successful, the channel will be in
-  // READY_STATE_OPEN.  DO NOT delete the CastSocketImpl object in |callback|.
+  // READY_STATE_OPEN.  DO NOT delete the CastSocket object in |callback|.
   // Instead use Close().
   // |callback| will be invoked with any ChannelError that occurred, or
   // CHANNEL_ERROR_NONE if successful.
@@ -90,6 +100,9 @@ class CastSocket : public ApiResource {
   // CHANNEL_ERROR_NONE if no error has occurred.
   virtual ChannelError error_state() const = 0;
 
+  // True when keep-alive signaling is handled for this socket.
+  virtual bool keep_alive() const = 0;
+
   // Marks a socket as invalid due to an error. Errors close the socket
   // and any further socket operations will return the error code
   // net::SOCKET_NOT_CORRECTED.
@@ -125,7 +138,9 @@ class CastSocketImpl : public CastSocket {
                  ChannelAuthType channel_auth,
                  net::NetLog* net_log,
                  const base::TimeDelta& connect_timeout,
-                 const scoped_refptr<Logger>& logger);
+                 bool keep_alive,
+                 const scoped_refptr<Logger>& logger,
+                 long device_capabilities);
 
   // Ensures that the socket is closed.
   ~CastSocketImpl() override;
@@ -142,6 +157,7 @@ class CastSocketImpl : public CastSocket {
   std::string cast_url() const override;
   ReadyState ready_state() const override;
   ChannelError error_state() const override;
+  bool keep_alive() const override;
 
   // Required by ApiResourceManager.
   static const char* service_name() { return "CastSocketManager"; }
@@ -156,6 +172,7 @@ class CastSocketImpl : public CastSocket {
     void OnError(ChannelError error_state,
                  const LastErrors& last_errors) override;
     void OnMessage(const CastMessage& message) override;
+    void Start() override;
 
    private:
     CastSocketImpl* socket_;
@@ -164,6 +181,11 @@ class CastSocketImpl : public CastSocket {
   // Replaces the internally-constructed transport object with one provided
   // by the caller (e.g. a mock).
   void SetTransportForTesting(scoped_ptr<CastTransport> transport);
+
+  // Verifies whether the socket complies with cast channel policy.
+  // Audio only channel policy mandates that a device declaring a video out
+  // capability must not have a certificate with audio only policy.
+  bool VerifyChannelPolicy(const AuthResult& result);
 
   // Delegate for receiving handshake messages/errors.
   AuthTransportDelegate auth_delegate_;
@@ -255,6 +277,8 @@ class CastSocketImpl : public CastSocket {
   net::NetLog* net_log_;
   // The NetLog source for this service.
   net::NetLog::Source net_log_source_;
+  // True when keep-alive signaling should be handled for this socket.
+  bool keep_alive_;
 
   // Shared logging object, used to log CastSocket events for diagnostics.
   scoped_refptr<Logger> logger_;
@@ -293,6 +317,9 @@ class CastSocketImpl : public CastSocket {
   // Set when a timeout is triggered and the connection process has
   // canceled.
   bool is_canceled_;
+
+  // Capabilities declared by the cast device.
+  long device_capabilities_;
 
   // Connection flow state machine state.
   proto::ConnectionState connect_state_;

@@ -35,6 +35,7 @@
 #include "net/cert/x509_util_openssl.h"
 #include "net/http/transport_security_state.h"
 #include "net/socket/ssl_session_cache_openssl.h"
+#include "net/ssl/scoped_openssl_types.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "net/ssl/ssl_info.h"
@@ -77,9 +78,7 @@ void FreeX509Stack(STACK_OF(X509)* ptr) {
   sk_X509_pop_free(ptr, X509_free);
 }
 
-typedef crypto::ScopedOpenSSL<X509, X509_free>::Type ScopedX509;
-typedef crypto::ScopedOpenSSL<STACK_OF(X509), FreeX509Stack>::Type
-    ScopedX509Stack;
+using ScopedX509Stack = crypto::ScopedOpenSSL<STACK_OF(X509), FreeX509Stack>;
 
 #if OPENSSL_VERSION_NUMBER < 0x1000103fL
 // This method doesn't seem to have made it into the OpenSSL headers.
@@ -191,6 +190,10 @@ class SSLClientSocketOpenSSL::SSLContext {
     SSL_CTX_set_cert_verify_callback(ssl_ctx_.get(), CertVerifyCallback, NULL);
     SSL_CTX_set_cert_cb(ssl_ctx_.get(), ClientCertRequestCallback, NULL);
     SSL_CTX_set_verify(ssl_ctx_.get(), SSL_VERIFY_PEER, NULL);
+    // This stops |SSL_shutdown| from generating the close_notify message, which
+    // is currently not sent on the network.
+    // TODO(haavardm): Remove setting quiet shutdown once 118366 is fixed.
+    SSL_CTX_set_quiet_shutdown(ssl_ctx_.get(), 1);
     // TODO(kristianm): Only select this if ssl_config_.next_proto is not empty.
     // It would be better if the callback were not a global setting,
     // but that is an OpenSSL issue.
@@ -248,7 +251,7 @@ class SSLClientSocketOpenSSL::SSLContext {
   // SSLClientSocketOpenSSL object from an SSL instance.
   int ssl_socket_data_index_;
 
-  crypto::ScopedOpenSSL<SSL_CTX, SSL_CTX_free>::Type ssl_ctx_;
+  ScopedSSL_CTX ssl_ctx_;
   // |session_cache_| must be destroyed before |ssl_ctx_|.
   SSLSessionCacheOpenSSL session_cache_;
 };
@@ -473,6 +476,11 @@ int SSLClientSocketOpenSSL::Connect(const CompletionCallback& callback) {
 
   // Set SSL to client mode. Handshake happens in the loop below.
   SSL_set_connect_state(ssl_);
+
+  // Enable fastradio padding.
+  SSL_enable_fastradio_padding(ssl_,
+                               ssl_config_.fastradio_padding_enabled &&
+                                   ssl_config_.fastradio_padding_eligible);
 
   GotoState(STATE_HANDSHAKE);
   rv = DoHandshakeLoop(OK);
@@ -788,7 +796,7 @@ int SSLClientSocketOpenSSL::Init() {
   mode.ConfigureFlag(SSL_MODE_RELEASE_BUFFERS, true);
   mode.ConfigureFlag(SSL_MODE_CBC_RECORD_SPLITTING, true);
 
-  mode.ConfigureFlag(SSL_MODE_HANDSHAKE_CUTTHROUGH,
+  mode.ConfigureFlag(SSL_MODE_ENABLE_FALSE_START,
                      ssl_config_.false_start_enabled);
 
   SSL_set_mode(ssl_, mode.set_mask);
@@ -1080,6 +1088,7 @@ int SSLClientSocketOpenSSL::DoHandshake() {
 }
 
 int SSLClientSocketOpenSSL::DoChannelIDLookup() {
+  net_log_.AddEvent(NetLog::TYPE_SSL_CHANNEL_ID_REQUESTED);
   GotoState(STATE_CHANNEL_ID_LOOKUP_COMPLETE);
   return channel_id_service_->GetOrCreateChannelID(
       host_and_port_.host(),
@@ -1126,6 +1135,7 @@ int SSLClientSocketOpenSSL::DoChannelIDLookupComplete(int result) {
 
   // Return to the handshake.
   set_channel_id_sent(true);
+  net_log_.AddEvent(NetLog::TYPE_SSL_CHANNEL_ID_PROVIDED);
   GotoState(STATE_HANDSHAKE);
   return OK;
 }
@@ -1200,8 +1210,6 @@ int SSLClientSocketOpenSSL::DoVerifyCertComplete(int result) {
   }
 
   if (result == OK) {
-    RecordConnectionTypeMetrics(GetNetSSLVersion(ssl_));
-
     if (SSL_session_reused(ssl_)) {
       // Record whether or not the server tried to resume a session for a
       // different version. See https://crbug.com/441456.

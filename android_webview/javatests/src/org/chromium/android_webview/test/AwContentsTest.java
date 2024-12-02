@@ -7,6 +7,7 @@ package org.chromium.android_webview.test;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
@@ -24,6 +25,7 @@ import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.test.TestAwContentsClient.OnDownloadStartHelper;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.net.test.util.TestWebServer;
@@ -42,6 +44,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * AwContents tests.
  */
+@MinAndroidSdkLevel(Build.VERSION_CODES.KITKAT)
 public class AwContentsTest extends AwTestBase {
 
     private TestAwContentsClient mContentsClient = new TestAwContentsClient();
@@ -113,7 +116,6 @@ public class AwContentsTest extends AwTestBase {
         awContents.loadUrl(new LoadUrlParams("http://www.google.com"));
         awContents.findAllAsync("search");
         assertNull(awContents.getUrl());
-        assertNull(awContents.getContentSettings());
         assertFalse(awContents.canGoBack());
         awContents.disableJavascriptInterfacesInspection();
         awContents.invokeZoomPicker();
@@ -561,5 +563,22 @@ public class AwContentsTest extends AwTestBase {
         onSslErrorCallCount = onReceivedSslErrorHelper.getCallCount();
         loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
         assertEquals(onSslErrorCallCount + 1, onReceivedSslErrorHelper.getCallCount());
+    }
+
+    /**
+     * Verifies that Web Notifications and the Push API are not exposed in WebView.
+     */
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testPushAndNotificationsDisabled() throws Throwable {
+        AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
+        AwContents awContents = testView.getAwContents();
+
+        String script = "window.Notification || window.PushManager";
+
+        enableJavaScriptOnUiThread(awContents);
+        loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), "about:blank");
+        assertEquals("null", executeJavaScriptAndWaitForResult(awContents, mContentsClient,
+                script));
     }
 }

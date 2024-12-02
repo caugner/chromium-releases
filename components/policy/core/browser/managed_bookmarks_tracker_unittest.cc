@@ -24,6 +24,9 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
+using bookmarks::BookmarkPermanentNode;
 using testing::Mock;
 using testing::_;
 
@@ -36,6 +39,7 @@ class ManagedBookmarksTrackerTest : public testing::Test {
 
   void SetUp() override {
     prefs_.registry()->RegisterListPref(bookmarks::prefs::kManagedBookmarks);
+    prefs_.registry()->RegisterListPref(bookmarks::prefs::kSupervisedBookmarks);
     prefs_.registry()->RegisterListPref(
         bookmarks::prefs::kBookmarkEditorExpandedNodes);
   }
@@ -45,14 +49,17 @@ class ManagedBookmarksTrackerTest : public testing::Test {
       model_->RemoveObserver(&observer_);
   }
 
-  void CreateModel() {
+  void CreateModel(bool is_supervised) {
     // Simulate the creation of the managed node by the BookmarkClient.
     BookmarkPermanentNode* managed_node = new BookmarkPermanentNode(100);
     policy::ManagedBookmarksTracker::LoadInitial(
-        managed_node, prefs_.GetList(bookmarks::prefs::kManagedBookmarks), 101);
+        managed_node,
+        prefs_.GetList(ManagedBookmarksTracker::GetPrefName(is_supervised)),
+        101);
     managed_node->set_visible(!managed_node->empty());
     managed_node->SetTitle(l10n_util::GetStringUTF16(
-        IDS_BOOKMARK_BAR_MANAGED_FOLDER_DEFAULT_NAME));
+        is_supervised ? IDS_BOOKMARK_BAR_SUPERVISED_FOLDER_DEFAULT_NAME
+                      : IDS_BOOKMARK_BAR_MANAGED_FOLDER_DEFAULT_NAME));
 
     bookmarks::BookmarkPermanentNodeList extra_nodes;
     extra_nodes.push_back(managed_node);
@@ -76,6 +83,7 @@ class ManagedBookmarksTrackerTest : public testing::Test {
     managed_bookmarks_tracker_.reset(new ManagedBookmarksTracker(
         model_.get(),
         &prefs_,
+        is_supervised,
         base::Bind(&ManagedBookmarksTrackerTest::GetManagementDomain)));
     managed_bookmarks_tracker_->Init(managed_node_);
   }
@@ -170,7 +178,7 @@ class ManagedBookmarksTrackerTest : public testing::Test {
 };
 
 TEST_F(ManagedBookmarksTrackerTest, Empty) {
-  CreateModel();
+  CreateModel(false /* is_supervised */);
   EXPECT_TRUE(model_->bookmark_bar_node()->empty());
   EXPECT_TRUE(model_->other_node()->empty());
   EXPECT_TRUE(managed_node()->empty());
@@ -180,7 +188,7 @@ TEST_F(ManagedBookmarksTrackerTest, Empty) {
 TEST_F(ManagedBookmarksTrackerTest, LoadInitial) {
   // Set a policy before loading the model.
   prefs_.SetManagedPref(bookmarks::prefs::kManagedBookmarks, CreateTestTree());
-  CreateModel();
+  CreateModel(false /* is_supervised */);
   EXPECT_TRUE(model_->bookmark_bar_node()->empty());
   EXPECT_TRUE(model_->other_node()->empty());
   EXPECT_FALSE(managed_node()->empty());
@@ -190,9 +198,26 @@ TEST_F(ManagedBookmarksTrackerTest, LoadInitial) {
   EXPECT_TRUE(NodeMatchesValue(managed_node(), expected.get()));
 }
 
+TEST_F(ManagedBookmarksTrackerTest, SupervisedTrackerIgnoresManagedPref) {
+  prefs_.SetManagedPref(bookmarks::prefs::kManagedBookmarks, CreateTestTree());
+  CreateModel(true /* is_supervised */);
+  EXPECT_TRUE(managed_node()->empty());
+  EXPECT_FALSE(managed_node()->IsVisible());
+}
+
+TEST_F(ManagedBookmarksTrackerTest, SupervisedTrackerHandlesSupervisedPref) {
+  prefs_.SetManagedPref(bookmarks::prefs::kSupervisedBookmarks,
+                        CreateTestTree());
+  CreateModel(true /* is_supervised */);
+  EXPECT_FALSE(managed_node()->empty());
+  EXPECT_TRUE(managed_node()->IsVisible());
+  // Don't bother checking the actual contents, the non-supervised tests cover
+  // that already.
+}
+
 TEST_F(ManagedBookmarksTrackerTest, SwapNodes) {
   prefs_.SetManagedPref(bookmarks::prefs::kManagedBookmarks, CreateTestTree());
-  CreateModel();
+  CreateModel(false /* is_supervised */);
 
   // Swap the Google bookmark with the Folder.
   scoped_ptr<base::ListValue> updated(CreateTestTree());
@@ -215,7 +240,7 @@ TEST_F(ManagedBookmarksTrackerTest, SwapNodes) {
 
 TEST_F(ManagedBookmarksTrackerTest, RemoveNode) {
   prefs_.SetManagedPref(bookmarks::prefs::kManagedBookmarks, CreateTestTree());
-  CreateModel();
+  CreateModel(false /* is_supervised */);
 
   // Remove the Folder.
   scoped_ptr<base::ListValue> updated(CreateTestTree());
@@ -235,7 +260,7 @@ TEST_F(ManagedBookmarksTrackerTest, RemoveNode) {
 
 TEST_F(ManagedBookmarksTrackerTest, CreateNewNodes) {
   prefs_.SetManagedPref(bookmarks::prefs::kManagedBookmarks, CreateTestTree());
-  CreateModel();
+  CreateModel(false /* is_supervised */);
 
   // Put all the nodes inside another folder.
   scoped_ptr<base::ListValue> updated(new base::ListValue);
@@ -259,7 +284,7 @@ TEST_F(ManagedBookmarksTrackerTest, CreateNewNodes) {
 
 TEST_F(ManagedBookmarksTrackerTest, RemoveAll) {
   prefs_.SetManagedPref(bookmarks::prefs::kManagedBookmarks, CreateTestTree());
-  CreateModel();
+  CreateModel(false /* is_supervised */);
   EXPECT_TRUE(managed_node()->IsVisible());
 
   // Remove the policy.
@@ -275,7 +300,7 @@ TEST_F(ManagedBookmarksTrackerTest, RemoveAll) {
 
 TEST_F(ManagedBookmarksTrackerTest, IsManaged) {
   prefs_.SetManagedPref(bookmarks::prefs::kManagedBookmarks, CreateTestTree());
-  CreateModel();
+  CreateModel(false /* is_supervised */);
 
   EXPECT_FALSE(IsManaged(model_->root_node()));
   EXPECT_FALSE(IsManaged(model_->bookmark_bar_node()));
@@ -296,7 +321,7 @@ TEST_F(ManagedBookmarksTrackerTest, IsManaged) {
 
 TEST_F(ManagedBookmarksTrackerTest, RemoveAllUserBookmarksDoesntRemoveManaged) {
   prefs_.SetManagedPref(bookmarks::prefs::kManagedBookmarks, CreateTestTree());
-  CreateModel();
+  CreateModel(false /* is_supervised */);
   EXPECT_EQ(2, managed_node()->child_count());
 
   EXPECT_CALL(observer_,

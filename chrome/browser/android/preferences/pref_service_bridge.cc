@@ -59,8 +59,9 @@ Profile* GetOriginalProfile() {
   return ProfileManager::GetActiveUserProfile()->GetOriginalProfile();
 }
 
-bool GetBooleanForContentSetting(HostContentSettingsMap* content_settings,
-                                 ContentSettingsType type) {
+bool GetBooleanForContentSetting(ContentSettingsType type) {
+  HostContentSettingsMap* content_settings =
+      GetOriginalProfile()->GetHostContentSettingsMap();
   switch (content_settings->GetDefaultContentSetting(type, NULL)) {
     case CONTENT_SETTING_BLOCK:
       return false;
@@ -93,18 +94,20 @@ std::string GetStringForContentSettingsType(
   }
 }
 
-bool IsContentSettingManaged(HostContentSettingsMap* content_settings,
-                             ContentSettingsType content_settings_type) {
+bool IsContentSettingManaged(ContentSettingsType content_settings_type) {
   std::string source;
+  HostContentSettingsMap* content_settings =
+      GetOriginalProfile()->GetHostContentSettingsMap();
   content_settings->GetDefaultContentSetting(content_settings_type, &source);
   HostContentSettingsMap::ProviderType provider =
       content_settings->GetProviderTypeFromSource(source);
   return provider == HostContentSettingsMap::POLICY_PROVIDER;
 }
 
-bool IsContentSettingUserModifiable(HostContentSettingsMap* content_settings,
-                                    ContentSettingsType content_settings_type) {
+bool IsContentSettingUserModifiable(ContentSettingsType content_settings_type) {
   std::string source;
+  HostContentSettingsMap* content_settings =
+      GetOriginalProfile()->GetHostContentSettingsMap();
   content_settings->GetDefaultContentSetting(content_settings_type, &source);
   HostContentSettingsMap::ProviderType provider =
       content_settings->GetProviderTypeFromSource(source);
@@ -132,57 +135,6 @@ PrefService* GetPrefService() {
   return GetOriginalProfile()->GetPrefs();
 }
 
-static void EnsureConsistentGeolocationPreferences(Profile* profile) {
-  // On Android, we use the kGeolocationEnabled flag to control geolocation on a
-  // global basis, rather than the default geolocation host content setting,
-  // which is only used if no previously stored more specific host exception
-  // cannot be found.
-  //
-  // On Android, there is currently no UI to change this default setting, so it
-  // needs to default to ASK. Additionally, for users that have previously set
-  // the default to BLOCK, we set the preference to disable geolocation
-  // globally.
-
-  ContentSetting defaultSetting = profile->GetHostContentSettingsMap()->
-      GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_GEOLOCATION, NULL);
-
-  if (defaultSetting == CONTENT_SETTING_ASK)
-    return;
-
-  profile->GetHostContentSettingsMap()->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_GEOLOCATION, CONTENT_SETTING_ASK);
-
-  if (defaultSetting == CONTENT_SETTING_BLOCK) {
-    profile->GetPrefs()->SetBoolean(prefs::kGeolocationEnabled, false);
-  }
-}
-
-static void EnsureConsistentProtectedMediaIdentifierPreferences(
-    Profile* profile) {
-  // We use the kProtectedMediaIdentifierEnabled flag to control protected media
-  // identifier on a global basis.
-  //
-  // On Android, there is currently no UI to change this default setting, so it
-  // needs to default to ASK. Additionally, for users that have previously set
-  // the default to BLOCK, we set the preference to disable protected media
-  // identifier globally.
-  ContentSetting defaultSetting =
-      profile->GetHostContentSettingsMap()->
-      GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER,
-                               NULL);
-
-  if (defaultSetting == CONTENT_SETTING_ASK)
-    return;
-
-  profile->GetHostContentSettingsMap()->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER, CONTENT_SETTING_ASK);
-
-  if (defaultSetting == CONTENT_SETTING_BLOCK) {
-    profile->GetPrefs()->SetBoolean(prefs::kProtectedMediaIdentifierEnabled,
-                                    false);
-  }
-}
-
 }  // namespace
 
 // ----------------------------------------------------------------------------
@@ -190,15 +142,11 @@ static void EnsureConsistentProtectedMediaIdentifierPreferences(
 // ----------------------------------------------------------------------------
 
 static jboolean GetAcceptCookiesEnabled(JNIEnv* env, jobject obj) {
-  return GetBooleanForContentSetting(
-      GetOriginalProfile()->GetHostContentSettingsMap(),
-      CONTENT_SETTINGS_TYPE_COOKIES);
+  return GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_COOKIES);
 }
 
 static jboolean GetAcceptCookiesManaged(JNIEnv* env, jobject obj) {
-  return IsContentSettingManaged(
-      GetOriginalProfile()->GetHostContentSettingsMap(),
-      CONTENT_SETTINGS_TYPE_COOKIES);
+  return IsContentSettingManaged(CONTENT_SETTINGS_TYPE_COOKIES);
 }
 
 static jboolean GetBlockThirdPartyCookiesEnabled(JNIEnv* env, jobject obj) {
@@ -261,37 +209,22 @@ static jboolean GetSearchSuggestManaged(JNIEnv* env, jobject obj) {
 }
 
 static jboolean GetProtectedMediaIdentifierEnabled(JNIEnv* env, jobject obj) {
-  Profile* profile = GetOriginalProfile();
-  EnsureConsistentProtectedMediaIdentifierPreferences(profile);
-  HostContentSettingsMap* content_settings =
-      profile->GetHostContentSettingsMap();
   return GetBooleanForContentSetting(
-             content_settings,
              CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER) &&
          GetPrefService()->GetBoolean(prefs::kProtectedMediaIdentifierEnabled);
 }
 
 static jboolean GetPushNotificationsEnabled(JNIEnv* env, jobject obj) {
-  HostContentSettingsMap* content_settings =
-      GetOriginalProfile()->GetHostContentSettingsMap();
-  return GetBooleanForContentSetting(content_settings,
-                                     CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
+  return GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
 }
 
 static jboolean GetAllowLocationEnabled(JNIEnv* env, jobject obj) {
-  Profile* profile = GetOriginalProfile();
-  EnsureConsistentGeolocationPreferences(profile);
-  HostContentSettingsMap* content_settings =
-      profile->GetHostContentSettingsMap();
-  return GetBooleanForContentSetting(content_settings,
-                                     CONTENT_SETTINGS_TYPE_GEOLOCATION) &&
+  return GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_GEOLOCATION) &&
          GetPrefService()->GetBoolean(prefs::kGeolocationEnabled);
 }
 
 static jboolean GetAllowLocationUserModifiable(JNIEnv* env, jobject obj) {
-  return IsContentSettingUserModifiable(
-             GetOriginalProfile()->GetHostContentSettingsMap(),
-             CONTENT_SETTINGS_TYPE_GEOLOCATION) &&
+  return IsContentSettingUserModifiable(CONTENT_SETTINGS_TYPE_GEOLOCATION) &&
          GetPrefService()->IsUserModifiablePreference(
              prefs::kGeolocationEnabled);
 }
@@ -351,7 +284,7 @@ class ClearBrowsingDataObserver : public BrowsingDataRemover::Observer {
       : weak_chrome_native_preferences_(env, obj) {
   }
 
-  virtual void OnBrowsingDataRemoverDone() override {
+  void OnBrowsingDataRemoverDone() override {
     // Just as a BrowsingDataRemover deletes itself when done, we delete ourself
     // when done.  No need to remove ourself as an observer given the lifetime
     // of BrowsingDataRemover.
@@ -476,30 +409,34 @@ static void ResetTranslateDefaults(JNIEnv* env, jobject obj) {
 }
 
 static jboolean GetJavaScriptManaged(JNIEnv* env, jobject obj) {
-  HostContentSettingsMap* content_settings =
-      GetOriginalProfile()->GetHostContentSettingsMap();
-  return IsContentSettingManaged(
-      content_settings, CONTENT_SETTINGS_TYPE_JAVASCRIPT);
+  return IsContentSettingManaged(CONTENT_SETTINGS_TYPE_JAVASCRIPT);
 }
 
 static void SetJavaScriptEnabled(JNIEnv* env, jobject obj, jboolean enabled) {
-  GetPrefService()->SetBoolean(prefs::kWebKitJavascriptEnabled, enabled);
+  HostContentSettingsMap* host_content_settings_map =
+      GetOriginalProfile()->GetHostContentSettingsMap();
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_JAVASCRIPT,
+      enabled ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
 }
 
 static jboolean GetJavaScriptEnabled(JNIEnv* env, jobject obj) {
-  // The user pref for Javascript is stored in kWebKitJavascriptEnabled for
-  // historical reasons, but the content setting is where a possibly managed
-  // value will be enforced.
-  HostContentSettingsMap* content_settings =
-      GetOriginalProfile()->GetHostContentSettingsMap();
+  return GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_JAVASCRIPT);
+}
 
-  jboolean javascript_enabled = GetBooleanForContentSetting(
-      content_settings, CONTENT_SETTINGS_TYPE_JAVASCRIPT);
-  if (!GetJavaScriptManaged(env, obj)) {
-    javascript_enabled &= GetPrefService()->GetBoolean(
-        prefs::kWebKitJavascriptEnabled);
-  }
-  return javascript_enabled;
+static void MigrateJavascriptPreference(JNIEnv* env, jobject obj) {
+  const PrefService::Preference* javascript_pref =
+      GetPrefService()->FindPreference(prefs::kWebKitJavascriptEnabled);
+  DCHECK(javascript_pref);
+
+  if (!javascript_pref->HasUserSetting())
+    return;
+
+  bool javascript_enabled = false;
+  bool retval = javascript_pref->GetValue()->GetAsBoolean(&javascript_enabled);
+  DCHECK(retval);
+  SetJavaScriptEnabled(env, obj, javascript_enabled);
+  GetPrefService()->ClearPref(prefs::kWebKitJavascriptEnabled);
 }
 
 static void SetPasswordEchoEnabled(JNIEnv* env,
@@ -510,17 +447,11 @@ static void SetPasswordEchoEnabled(JNIEnv* env,
 }
 
 static jboolean GetAllowPopupsEnabled(JNIEnv* env, jobject obj) {
-  HostContentSettingsMap* content_settings =
-      GetOriginalProfile()->GetHostContentSettingsMap();
-  return GetBooleanForContentSetting(content_settings,
-      CONTENT_SETTINGS_TYPE_POPUPS);
+  return GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_POPUPS);
 }
 
 static jboolean GetAllowPopupsManaged(JNIEnv* env, jobject obj) {
-  HostContentSettingsMap* content_settings =
-      GetOriginalProfile()->GetHostContentSettingsMap();
-  return IsContentSettingManaged(content_settings,
-                                 CONTENT_SETTINGS_TYPE_POPUPS);
+  return IsContentSettingManaged(CONTENT_SETTINGS_TYPE_POPUPS);
 }
 
 static void SetAllowPopupsEnabled(JNIEnv* env, jobject obj, jboolean allow) {
@@ -532,20 +463,15 @@ static void SetAllowPopupsEnabled(JNIEnv* env, jobject obj, jboolean allow) {
 }
 
 static jboolean GetCameraMicEnabled(JNIEnv* env, jobject obj) {
-  HostContentSettingsMap* content_settings =
-      GetOriginalProfile()->GetHostContentSettingsMap();
   PrefService* prefs = GetPrefService();
-  return GetBooleanForContentSetting(content_settings,
-                                     CONTENT_SETTINGS_TYPE_MEDIASTREAM) &&
+  return GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_MEDIASTREAM) &&
          prefs->GetBoolean(prefs::kAudioCaptureAllowed) &&
          prefs->GetBoolean(prefs::kVideoCaptureAllowed);
 }
 
 static jboolean GetCameraMicUserModifiable(JNIEnv* env, jobject obj) {
   PrefService* prefs = GetPrefService();
-  return IsContentSettingUserModifiable(
-             GetOriginalProfile()->GetHostContentSettingsMap(),
-             CONTENT_SETTINGS_TYPE_MEDIASTREAM) &&
+  return IsContentSettingUserModifiable(CONTENT_SETTINGS_TYPE_MEDIASTREAM) &&
          prefs->IsUserModifiablePreference(prefs::kAudioCaptureAllowed) &&
          prefs->IsUserModifiablePreference(prefs::kVideoCaptureAllowed);
 }

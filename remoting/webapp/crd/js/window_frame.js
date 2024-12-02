@@ -18,10 +18,10 @@ var remoting = remoting || {};
  */
 remoting.WindowFrame = function(titleBar) {
   /**
-   * @type {remoting.ClientSession}
+   * @type {remoting.DesktopConnectedView}
    * @private
    */
-  this.clientSession_ = null;
+  this.desktopConnectedView_ = null;
 
   /**
    * @type {HTMLElement}
@@ -61,7 +61,7 @@ remoting.WindowFrame = function(titleBar) {
   base.debug.assert(this.optionsMenuList_ != null);
 
   /**
-   * @type {Array.<{cls:string, fn: function()}>}
+   * @type {Array<{cls:string, fn: function()}>}
    */
   var handlers = [
     { cls: 'window-disconnect', fn: this.disconnectSession_.bind(this) },
@@ -104,20 +104,20 @@ remoting.WindowFrame.prototype.createOptionsMenu = function() {
 };
 
 /**
- * @param {remoting.ClientSession} clientSession The client session, or null if
- *     there is no connection.
+ * @param {remoting.DesktopConnectedView} desktopConnectedView The view for the
+ *     current session, or null if there is no connection.
  */
-remoting.WindowFrame.prototype.setClientSession = function(clientSession) {
-  this.clientSession_ = clientSession;
+remoting.WindowFrame.prototype.setDesktopConnectedView = function(
+    desktopConnectedView) {
+  this.desktopConnectedView_ = desktopConnectedView;
   var windowTitle = document.head.querySelector('title');
-  if (this.clientSession_) {
-    this.title_.innerText = clientSession.getHostDisplayName();
-    windowTitle.innerText = clientSession.getHostDisplayName() + ' - ' +
-        chrome.i18n.getMessage(/*i18n-content*/'PRODUCT_NAME');
+  if (this.desktopConnectedView_) {
+    this.title_.innerText = desktopConnectedView.getHostDisplayName();
+    windowTitle.innerText = desktopConnectedView.getHostDisplayName() + ' - ' +
+        remoting.app.getApplicationName();
   } else {
     this.title_.innerHTML = '&nbsp;';
-    windowTitle.innerText =
-        chrome.i18n.getMessage(/*i18n-content*/'PRODUCT_NAME');
+    windowTitle.innerText = remoting.app.getApplicationName();
   }
   this.handleWindowStateChange_();
 };

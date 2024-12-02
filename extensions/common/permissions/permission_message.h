@@ -100,12 +100,14 @@ class PermissionMessage {
     kHosts4OrMoreReadOnly,
     kHostsAllReadOnly,
     kInterceptAllKeys,
+    kNetworkingConfig,
+    kPlatformKeys,
     // Last entry: Add new entries above and ensure to update the
     // "ExtensionPermission2" enum in tools/metrics/histograms/histograms.xml.
     kEnumBoundary,
   };
-  COMPILE_ASSERT(PermissionMessage::kNone > PermissionMessage::kUnknown,
-                 kNone_not_greater_than_kUnknown);
+  static_assert(PermissionMessage::kNone > PermissionMessage::kUnknown,
+                "kNone should not greater than kUnknown");
 
   // Creates the corresponding permission message.
   PermissionMessage(ID id, const base::string16& message);

@@ -4,6 +4,9 @@
 
 #include "chrome/browser/chromeos/extensions/wallpaper_api.h"
 
+#include <string>
+#include <vector>
+
 #include "ash/desktop_background/desktop_background_controller.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
@@ -38,7 +41,7 @@ class WallpaperFetcher : public net::URLFetcherDelegate {
  public:
   WallpaperFetcher() {}
 
-  virtual ~WallpaperFetcher() {}
+  ~WallpaperFetcher() override {}
 
   void FetchWallpaper(const GURL& url, FetchCallback callback) {
     CancelPreviousFetch();
@@ -54,7 +57,7 @@ class WallpaperFetcher : public net::URLFetcherDelegate {
 
  private:
   // URLFetcherDelegate overrides:
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) override {
+  void OnURLFetchComplete(const net::URLFetcher* source) override {
     DCHECK(url_fetcher_.get() == source);
 
     bool success = source->GetStatus().is_success() &&
@@ -205,7 +208,8 @@ void WallpaperSetWallpaperFunction::OnWallpaperFetched(
     bool success,
     const std::string& response) {
   if (success) {
-    params_->details.data.reset(new std::string(response));
+    params_->details.data.reset(
+        new std::vector<char>(response.begin(), response.end()));
     StartDecode(*params_->details.data);
   } else {
     SetError(response);

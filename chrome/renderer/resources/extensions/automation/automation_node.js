@@ -352,7 +352,7 @@ var AutomationAttributeTypes = [
 /**
  * Maps an attribute name to another attribute who's value is an id or an array
  * of ids referencing an AutomationNode.
- * @param {!Object.<string, string>}
+ * @param {!Object<string, string>}
  * @const
  */
 var ATTRIBUTE_NAME_TO_ID_ATTRIBUTE = {
@@ -366,7 +366,7 @@ var ATTRIBUTE_NAME_TO_ID_ATTRIBUTE = {
 
 /**
  * A set of attributes ignored in the automation API.
- * @param {!Object.<string, boolean>}
+ * @param {!Object<string, boolean>}
  * @const
  */
 var ATTRIBUTE_BLACKLIST = {'activedescendantId': true,
@@ -728,18 +728,20 @@ AutomationRootNodeImpl.prototype = {
 
     // TODO(dtseng): Make into set listing all hosting node roles.
     if (nodeData.role == schema.RoleType.webView) {
-      if (nodeImpl.pendingChildFrame === undefined)
+      if (nodeImpl.childTreeID !== nodeData.intAttributes.childTreeId)
         nodeImpl.pendingChildFrame = true;
 
       if (nodeImpl.pendingChildFrame) {
         nodeImpl.childTreeID = nodeData.intAttributes.childTreeId;
-        automationInternal.enableFrame(nodeImpl.childTreeID);
         automationUtil.storeTreeCallback(nodeImpl.childTreeID, function(root) {
           nodeImpl.pendingChildFrame = false;
           nodeImpl.childTree = root;
           privates(root).impl.hostTree = node;
+          if (root.attributes.docLoadingProgress == 1)
+            privates(root).impl.dispatchEvent(schema.EventType.loadComplete);
           nodeImpl.dispatchEvent(schema.EventType.childrenChanged);
         });
+        automationInternal.enableFrame(nodeImpl.childTreeID);
       }
     }
     for (var key in AutomationAttributeDefaults) {

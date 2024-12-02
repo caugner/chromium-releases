@@ -308,7 +308,7 @@ void ChromeWebContentsDelegateAndroid::AddNewContents(
     WebContents* source,
     WebContents* new_contents,
     WindowOpenDisposition disposition,
-    const gfx::Rect& initial_pos,
+    const gfx::Rect& initial_rect,
     bool user_gesture,
     bool* was_blocked) {
   // No code for this yet.
@@ -322,11 +322,18 @@ void ChromeWebContentsDelegateAndroid::AddNewContents(
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
   bool handled = false;
   if (!obj.is_null()) {
+    ScopedJavaLocalRef<jobject> jsource;
+    if (source)
+      jsource = source->GetJavaWebContents();
+    ScopedJavaLocalRef<jobject> jnew_contents;
+    if (new_contents)
+      jnew_contents = new_contents->GetJavaWebContents();
+
     handled = Java_ChromeWebContentsDelegateAndroid_addNewContents(
         env,
         obj.obj(),
-        reinterpret_cast<intptr_t>(source),
-        reinterpret_cast<intptr_t>(new_contents),
+        jsource.obj(),
+        jnew_contents.obj(),
         static_cast<jint>(disposition),
         NULL,
         user_gesture);

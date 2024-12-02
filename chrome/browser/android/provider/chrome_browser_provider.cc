@@ -23,23 +23,22 @@
 #include "chrome/browser/bookmarks/chrome_bookmark_client.h"
 #include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/android/sqlite_cursor.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
-#include "components/history/core/android/android_history_types.h"
+#include "components/history/core/browser/android/android_history_types.h"
+#include "components/history/core/browser/top_sites.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_service.h"
 #include "jni/ChromeBrowserProvider_jni.h"
 #include "sql/statement.h"
 #include "ui/base/layout.h"
@@ -58,6 +57,8 @@ using base::android::MethodID;
 using base::android::JavaRef;
 using base::android::ScopedJavaGlobalRef;
 using base::android::ScopedJavaLocalRef;
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 using content::BrowserThread;
 
 // After refactoring the following class hierarchy has been created in order
@@ -248,7 +249,7 @@ class RemoveBookmarkTask : public BookmarkModelObserverTask {
       : BookmarkModelObserverTask(model),
         deleted_(0),
         id_to_delete_(kInvalidBookmarkId) {}
-  virtual ~RemoveBookmarkTask() {}
+  ~RemoveBookmarkTask() override {}
 
   int Run(const int64 id) {
     id_to_delete_ = id;
@@ -267,12 +268,11 @@ class RemoveBookmarkTask : public BookmarkModelObserverTask {
   }
 
   // Verify that the bookmark was actually removed. Called synchronously.
-  virtual void BookmarkNodeRemoved(
-      BookmarkModel* bookmark_model,
-      const BookmarkNode* parent,
-      int old_index,
-      const BookmarkNode* node,
-      const std::set<GURL>& removed_urls) override {
+  void BookmarkNodeRemoved(BookmarkModel* bookmark_model,
+                           const BookmarkNode* parent,
+                           int old_index,
+                           const BookmarkNode* node,
+                           const std::set<GURL>& removed_urls) override {
     if (bookmark_model == model() && node->id() == id_to_delete_)
         ++deleted_;
   }
@@ -290,7 +290,7 @@ class RemoveAllUserBookmarksTask : public BookmarkModelObserverTask {
   explicit RemoveAllUserBookmarksTask(BookmarkModel* model)
       : BookmarkModelObserverTask(model) {}
 
-  virtual ~RemoveAllUserBookmarksTask() {}
+  ~RemoveAllUserBookmarksTask() override {}
 
   void Run() {
     RunOnUIThreadBlocking::Run(
@@ -299,7 +299,9 @@ class RemoveAllUserBookmarksTask : public BookmarkModelObserverTask {
 
   static void RunOnUIThread(BookmarkModel* model) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    LOG(ERROR) << "begin model->RemoveAllUserBookmarks";
     model->RemoveAllUserBookmarks();
+    LOG(ERROR) << "after model->RemoveAllUserBookmarks";
   }
 
  private:
@@ -313,7 +315,7 @@ class UpdateBookmarkTask : public BookmarkModelObserverTask {
       : BookmarkModelObserverTask(model),
         updated_(0),
         id_to_update_(kInvalidBookmarkId){}
-  virtual ~UpdateBookmarkTask() {}
+  ~UpdateBookmarkTask() override {}
 
   int Run(const int64 id,
           const base::string16& title,
@@ -355,8 +357,8 @@ class UpdateBookmarkTask : public BookmarkModelObserverTask {
   }
 
   // Verify that the bookmark was actually updated. Called synchronously.
-  virtual void BookmarkNodeChanged(BookmarkModel* bookmark_model,
-                                   const BookmarkNode* node) override {
+  void BookmarkNodeChanged(BookmarkModel* bookmark_model,
+                           const BookmarkNode* node) override {
     if (bookmark_model == model() && node->id() == id_to_update_)
       ++updated_;
   }
@@ -1166,20 +1168,15 @@ ChromeBrowserProvider::ChromeBrowserProvider(JNIEnv* env, jobject obj)
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   profile_ = g_browser_process->profile_manager()->GetLastUsedProfile();
   bookmark_model_ = BookmarkModelFactory::GetForProfile(profile_);
-  top_sites_ = profile_->GetTopSites();
+  top_sites_ = TopSitesFactory::GetForProfile(profile_);
   favicon_service_ = FaviconServiceFactory::GetForProfile(
-      profile_, Profile::EXPLICIT_ACCESS),
+      profile_, ServiceAccessType::EXPLICIT_ACCESS),
   service_.reset(new AndroidHistoryProviderService(profile_));
 
-  // Registers the notifications we are interested.
+  // Register as observer for service we are interested.
   bookmark_model_->AddObserver(this);
-  history_service_observer_.Add(
-      HistoryServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS));
-  notification_registrar_.Add(this, chrome::NOTIFICATION_HISTORY_URLS_DELETED,
-                              content::NotificationService::AllSources());
-  notification_registrar_.Add(this,
-      chrome::NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_UPDATED,
-      content::NotificationService::AllSources());
+  history_service_observer_.Add(HistoryServiceFactory::GetForProfile(
+      profile_, ServiceAccessType::EXPLICIT_ACCESS));
   TemplateURLService* template_service =
         TemplateURLServiceFactory::GetForProfile(profile_);
   if (!template_service->loaded())
@@ -1191,6 +1188,7 @@ ChromeBrowserProvider::~ChromeBrowserProvider() {
 }
 
 void ChromeBrowserProvider::Destroy(JNIEnv*, jobject) {
+  history_service_observer_.RemoveAll();
   delete this;
 }
 
@@ -1520,8 +1518,10 @@ ScopedJavaLocalRef<jobject> ChromeBrowserProvider::GetEditableBookmarkFolders(
 }
 
 void ChromeBrowserProvider::RemoveAllUserBookmarks(JNIEnv* env, jobject obj) {
+  LOG(ERROR) << "begin ChromeBrowserProvider::RemoveAllUserBookmarks";
   RemoveAllUserBookmarksTask task(bookmark_model_);
   task.Run();
+  LOG(ERROR) << "end ChromeBrowserProvider::RemoveAllUserBookmarks";
 }
 
 ScopedJavaLocalRef<jobject> ChromeBrowserProvider::GetBookmarkNode(
@@ -1627,18 +1627,27 @@ void ChromeBrowserProvider::OnURLVisited(HistoryService* history_service,
   OnHistoryChanged();
 }
 
-void ChromeBrowserProvider::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_HISTORY_URLS_DELETED) {
-    OnHistoryChanged();
-  } else if (type ==
-      chrome::NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_UPDATED) {
-    JNIEnv* env = AttachCurrentThread();
-    ScopedJavaLocalRef<jobject> obj = weak_java_provider_.get(env);
-    if (obj.is_null())
-      return;
-    Java_ChromeBrowserProvider_onSearchTermChanged(env, obj.obj());
-  }
+void ChromeBrowserProvider::OnURLsDeleted(HistoryService* history_service,
+                                          bool all_history,
+                                          bool expired,
+                                          const history::URLRows& deleted_rows,
+                                          const std::set<GURL>& favicon_urls) {
+  OnHistoryChanged();
+}
+
+void ChromeBrowserProvider::OnKeywordSearchTermUpdated(
+    HistoryService* history_service,
+    const history::URLRow& row,
+    history::KeywordID keyword_id,
+    const base::string16& term) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = weak_java_provider_.get(env);
+  if (obj.is_null())
+    return;
+  Java_ChromeBrowserProvider_onSearchTermChanged(env, obj.obj());
+}
+
+void ChromeBrowserProvider::OnKeywordSearchTermDeleted(
+    HistoryService* history_service,
+    history::URLID url_id) {
 }

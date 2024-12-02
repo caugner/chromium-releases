@@ -258,7 +258,8 @@ struct ExtensionMsg_PermissionSetStruct {
 struct ExtensionMsg_Loaded_Params {
   ExtensionMsg_Loaded_Params();
   ~ExtensionMsg_Loaded_Params();
-  explicit ExtensionMsg_Loaded_Params(const extensions::Extension* extension);
+  ExtensionMsg_Loaded_Params(const extensions::Extension* extension,
+                             bool include_tab_permissions);
 
   // Creates a new extension from the data in this object.
   scoped_refptr<extensions::Extension> ConvertToExtension(
@@ -277,6 +278,7 @@ struct ExtensionMsg_Loaded_Params {
   // The extension's active and withheld permissions.
   ExtensionMsg_PermissionSetStruct active_permissions;
   ExtensionMsg_PermissionSetStruct withheld_permissions;
+  std::map<int, ExtensionMsg_PermissionSetStruct> tab_specific_permissions;
 
   // We keep this separate so that it can be used in logging.
   std::string id;
@@ -469,14 +471,18 @@ IPC_MESSAGE_CONTROL1(ExtensionMsg_UpdatePermissions,
                      ExtensionMsg_UpdatePermissions_Params)
 
 // Tell the render view about new tab-specific permissions for an extension.
-IPC_MESSAGE_ROUTED3(ExtensionMsg_UpdateTabSpecificPermissions,
-                    GURL /* url */,
-                    std::string /* extension_id */,
-                    extensions::URLPatternSet /* hosts */)
+IPC_MESSAGE_CONTROL5(ExtensionMsg_UpdateTabSpecificPermissions,
+                     GURL /* url */,
+                     std::string /* extension_id */,
+                     extensions::URLPatternSet /* hosts */,
+                     bool /* update origin whitelist */,
+                     int /* tab_id */)
 
 // Tell the render view to clear tab-specific permissions for some extensions.
-IPC_MESSAGE_ROUTED1(ExtensionMsg_ClearTabSpecificPermissions,
-                    std::vector<std::string> /* extension_ids */)
+IPC_MESSAGE_CONTROL3(ExtensionMsg_ClearTabSpecificPermissions,
+                     std::vector<std::string> /* extension_ids */,
+                     bool /* update origin whitelist */,
+                     int /* tab_id */)
 
 // Tell the renderer which type this view is.
 IPC_MESSAGE_ROUTED1(ExtensionMsg_NotifyRenderViewType,
@@ -553,28 +559,6 @@ IPC_MESSAGE_CONTROL1(ExtensionMsg_WatchPages,
 IPC_MESSAGE_CONTROL1(ExtensionMsg_TransferBlobs,
                      std::vector<std::string> /* blob_uuids */)
 
-// The ACK for ExtensionHostMsg_CreateMimeHandlerViewGuest.
-IPC_MESSAGE_CONTROL1(ExtensionMsg_CreateMimeHandlerViewGuestACK,
-                     int /* element_instance_id */)
-
-// Once a MimeHandlerView guest's JavaScript onload function has been called,
-// this IPC is sent to the container to notify it.
-IPC_MESSAGE_CONTROL1(ExtensionMsg_MimeHandlerViewGuestOnLoadCompleted,
-                     int /* element_instance_id */)
-
-// Once a RenderView proxy has been created for the guest in the embedder render
-// process, this IPC informs the embedder of the proxy's routing ID.
-IPC_MESSAGE_CONTROL2(ExtensionMsg_GuestAttached,
-                     int /* element_instance_id */,
-                     int /* source_routing_id */)
-
-// This IPC tells the browser process to detach the provided
-// |element_instance_id| from a GuestViewBase if it is attached to one.
-// In other words, routing of input and graphics will no longer flow through
-// the container associated with the provided ID.
-IPC_MESSAGE_CONTROL1(ExtensionMsg_GuestDetached,
-                     int /* element_instance_id*/)
-
 // Messages sent from the renderer to the browser.
 
 // A renderer sends this message when an extension process starts an API
@@ -630,7 +614,7 @@ IPC_MESSAGE_CONTROL4(ExtensionHostMsg_RemoveFilteredListener,
                      bool /* lazy */)
 
 // Notify the browser that an event has finished being dispatched.
-IPC_MESSAGE_ROUTED0(ExtensionHostMsg_EventAck)
+IPC_MESSAGE_ROUTED1(ExtensionHostMsg_EventAck, int /* message_id */)
 
 // Open a channel to all listening contexts owned by the extension with
 // the given ID.  This always returns a valid port ID which can be used for
@@ -788,22 +772,6 @@ IPC_MESSAGE_ROUTED4(ExtensionHostMsg_DetailedConsoleMessageAdded,
                     base::string16 /* source */,
                     extensions::StackTrace /* stack trace */,
                     int32 /* severity level */)
-
-// Sent by the renderer to set initialization parameters of a Browser Plugin
-// that is identified by |element_instance_id|.
-IPC_MESSAGE_CONTROL4(ExtensionHostMsg_AttachGuest,
-                     int /* routing_id */,
-                     int /* element_instance_id */,
-                     int /* guest_instance_id */,
-                     base::DictionaryValue /* attach_params */)
-
-// Tells the browser to create a mime handler guest view for a plugin.
-IPC_MESSAGE_CONTROL5(ExtensionHostMsg_CreateMimeHandlerViewGuest,
-                     int /* render_frame_id */,
-                     std::string /* embedder_url */,
-                     std::string /* content_url */,
-                     std::string /* mime_type */,
-                     int /* element_instance_id */)
 
 // Sent when a query selector request is made from the automation API.
 // acc_obj_id is the accessibility tree ID of the starting element.

@@ -499,13 +499,11 @@ class TestAudioObserver : public chromeos::CrasAudioHandler::AudioObserver {
     return output_mute_changed_count_;
   }
 
-  virtual ~TestAudioObserver() {}
+  ~TestAudioObserver() override {}
 
  protected:
   // chromeos::CrasAudioHandler::AudioObserver overrides.
-  virtual void OnOutputMuteChanged() override {
-    ++output_mute_changed_count_;
-  }
+  void OnOutputMuteChanged() override { ++output_mute_changed_count_; }
 
  private:
   int output_mute_changed_count_;
@@ -636,10 +634,8 @@ class PolicyTest : public InProcessBrowserTest {
     base::FilePath root_http;
     PathService::Get(content::DIR_TEST_DATA, &root_http);
     BrowserThread::PostTaskAndReply(
-        BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(URLRequestMockHTTPJob::AddUrlHandler,
-                   root_http,
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(URLRequestMockHTTPJob::AddUrlHandlers, root_http,
                    make_scoped_refptr(BrowserThread::GetBlockingPool())),
         base::MessageLoop::current()->QuitWhenIdleClosure());
     content::RunMessageLoop();
@@ -658,7 +654,7 @@ class PolicyTest : public InProcessBrowserTest {
 #if defined(OS_CHROMEOS)
   class QuitMessageLoopAfterScreenshot : public ui::ScreenshotGrabberObserver {
    public:
-    virtual void OnScreenshotCompleted(
+    void OnScreenshotCompleted(
         ScreenshotGrabberObserver::Result screenshot_result,
         const base::FilePath& screenshot_path) override {
       BrowserThread::PostTaskAndReply(BrowserThread::IO,
@@ -667,7 +663,7 @@ class PolicyTest : public InProcessBrowserTest {
                                       base::MessageLoop::QuitClosure());
     }
 
-    virtual ~QuitMessageLoopAfterScreenshot() {}
+    ~QuitMessageLoopAfterScreenshot() override {}
   };
 
   void TestScreenshotFile(bool enabled) {
@@ -1063,7 +1059,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, PolicyPreprocessing) {
           ->GetPolicies(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()));
   EXPECT_TRUE(expected.Equals(actual_from_browser));
   const PolicyMap& actual_from_profile =
-      ProfilePolicyConnectorFactory::GetForProfile(browser()->profile())
+      ProfilePolicyConnectorFactory::GetForBrowserContext(browser()->profile())
           ->policy_service()
           ->GetPolicies(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()));
   EXPECT_TRUE(expected.Equals(actual_from_profile));
@@ -3068,7 +3064,7 @@ class RestoreOnStartupPolicyTest
   virtual ~RestoreOnStartupPolicyTest() {}
 
 #if defined(OS_CHROMEOS)
-  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     // TODO(nkostylev): Investigate if we can remove this switch.
     command_line->AppendSwitch(switches::kCreateBrowserOnStartupForTests);
     PolicyTest::SetUpCommandLine(command_line);
@@ -3550,7 +3546,7 @@ IN_PROC_BROWSER_TEST_F(PolicyVariationsServiceTest, VariationsURLIsValid) {
 
   const GURL url =
       chrome_variations::VariationsService::GetVariationsServerURL(
-          g_browser_process->local_state());
+          g_browser_process->local_state(), std::string());
   EXPECT_TRUE(StartsWithASCII(url.spec(), default_variations_url, true));
   std::string value;
   EXPECT_TRUE(net::GetValueForKeyInQuery(url, "restrict", &value));

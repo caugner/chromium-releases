@@ -7,6 +7,10 @@
 GEN('#include "chrome/browser/ui/webui/extensions/' +
     'extension_settings_browsertest.h"');
 
+// chrome/test/data/extensions/good.crx's extension ID. good.crx is loaded by
+// ExtensionSettingsUIBrowserTest::InstallGoodExtension() in some of the tests.
+var GOOD_CRX_ID = 'ldnnhddmnhbkjipkidpdiheffobcpfmf';
+
 /**
  * Test C++ fixture for settings WebUI testing.
  * @constructor
@@ -24,19 +28,11 @@ function ExtensionSettingsWebUITest() {}
 ExtensionSettingsWebUITest.prototype = {
   __proto__: testing.Test.prototype,
 
-  accessibilityIssuesAreErrors: true,
+  /** @override */
+  runAccessibilityChecks: true,
 
   /** @override */
-  setUp: function() {
-    // TODO(aboxhall): remove these when crbug.com/267035 is closed.
-    this.accessibilityAuditConfig.ignoreSelectors(
-      'lowContrastElements',
-      '.enable-checkbox input:disabled + .enable-checkbox-text > *');
-    this.accessibilityAuditConfig.ignoreSelectors(
-      'lowContrastElements', '.extension-description > *');
-    this.accessibilityAuditConfig.ignoreSelectors(
-      'lowContrastElements', '.location-text');
-  },
+  accessibilityIssuesAreErrors: true,
 
   /**
    * A URL to load before starting each test.
@@ -60,6 +56,34 @@ TEST_F('ExtensionSettingsWebUITest', 'testChromeSendHandled', function() {
   assertTrue($('pack-extension-overlay').classList.contains('showing'));
 });
 
+function AsyncExtensionSettingsWebUITest() {}
+
+AsyncExtensionSettingsWebUITest.prototype = {
+  __proto__: ExtensionSettingsWebUITest.prototype,
+
+  /** @override */
+  isAsync: true,
+};
+
+TEST_F('AsyncExtensionSettingsWebUITest', 'testDeveloperModeA11y', function() {
+  var devControls = $('dev-controls');
+
+  // Make sure developer controls are hidden before checkbox is clicked.
+  assertEquals(0, devControls.offsetHeight);
+  $('toggle-dev-on').click();
+
+  document.addEventListener('webkitTransitionEnd', function f(e) {
+    if (e.target == devControls) {
+      // Make sure developer controls are not hidden after checkbox is clicked.
+      assertGT(devControls.offsetHeight, 0);
+
+      document.removeEventListener(f, 'webkitTransitionEnd');
+      testDone();
+    }
+  });
+  ensureTransitionEndEvent(devControls, 4000);
+});
+
 /**
  * TestFixture for extension settings WebUI testing (commands config edition).
  * @extends {testing.Test}
@@ -70,6 +94,10 @@ function ExtensionSettingsCommandsConfigWebUITest() {}
 ExtensionSettingsCommandsConfigWebUITest.prototype = {
   __proto__: testing.Test.prototype,
 
+  /** @override */
+  runAccessibilityChecks: true,
+
+  /** @override */
   accessibilityIssuesAreErrors: true,
 
   /**
@@ -87,9 +115,13 @@ TEST_F('ExtensionSettingsCommandsConfigWebUITest', 'testChromeSendHandler',
   assertTrue($('extension-commands-overlay').classList.contains('showing'));
 });
 
-function ExtensionSettingsWebUITestWithExtensionInstalled() {}
+/**
+ * @constructor
+ * @extends {ExtensionSettingsWebUITest}
+ */
+function InstalledExtensionSettingsWebUITest() {}
 
-ExtensionSettingsWebUITestWithExtensionInstalled.prototype = {
+InstalledExtensionSettingsWebUITest.prototype = {
   __proto__: ExtensionSettingsWebUITest.prototype,
 
   /** @override */
@@ -98,11 +130,69 @@ ExtensionSettingsWebUITestWithExtensionInstalled.prototype = {
   /** @override */
   testGenPreamble: function() {
     GEN('  InstallGoodExtension();');
-  }
+  },
 };
 
-TEST_F('ExtensionSettingsWebUITestWithExtensionInstalled',
-       'baseAccessibilityIsOk', function() {
+/** @this {InstalledExtensionSettingsWebUITest} */
+function runAudit() {
   assertEquals(this.browsePreload, document.location.href);
   this.runAccessibilityAudit();
+}
+
+TEST_F('InstalledExtensionSettingsWebUITest', 'baseAccessibilityOk', runAudit);
+
+/**
+ * @constructor
+ * @extends {InstalledExtensionSettingsWebUITest}
+ */
+function AsyncInstalledExtensionSettingsWebUITest() {}
+
+AsyncInstalledExtensionSettingsWebUITest.prototype = {
+  __proto__: InstalledExtensionSettingsWebUITest.prototype,
+
+  /** @override */
+  isAsync: true,
+};
+
+TEST_F('AsyncInstalledExtensionSettingsWebUITest', 'showOptions', function() {
+  var optionsOverlay = extensions.ExtensionOptionsOverlay.getInstance();
+  optionsOverlay.setExtensionAndShowOverlay(GOOD_CRX_ID, 'GOOD!', '', testDone);
+
+  // Preferred size changes don't happen in browser tests. Just fake it.
+  var size = {width: 500, height: 500};
+  document.querySelector('extensionoptions').onpreferredsizechanged(size);
 });
+
+/**
+ * @constructor
+ * @extends {InstalledExtensionSettingsWebUITest}
+ */
+function ManagedExtensionSettingsWebUITest() {}
+
+ManagedExtensionSettingsWebUITest.prototype = {
+  __proto__: InstalledExtensionSettingsWebUITest.prototype,
+
+  /** @override */
+  testGenPreamble: function() {
+    GEN('  AddManagedPolicyProvider();');
+    InstalledExtensionSettingsWebUITest.prototype.testGenPreamble.call(this);
+  },
+};
+
+TEST_F('ManagedExtensionSettingsWebUITest', 'testAccessibility', runAudit);
+
+/**
+ * @constructor
+ * @extends {InstalledExtensionSettingsWebUITest}
+ */
+function ExtensionOptionsDialogWebUITest() {}
+
+ExtensionOptionsDialogWebUITest.prototype = {
+  __proto__: InstalledExtensionSettingsWebUITest.prototype,
+
+  /** @override */
+  browsePreload: ExtensionSettingsWebUITest.prototype.browsePreload +
+      '?options=' + GOOD_CRX_ID,
+};
+
+TEST_F('ExtensionOptionsDialogWebUITest', 'testAccessibility', runAudit);

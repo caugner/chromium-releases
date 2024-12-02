@@ -5,13 +5,29 @@
 #include "mojo/services/network/network_context.h"
 
 #include "base/base_paths.h"
+#include "base/path_service.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_builder.h"
 
 namespace mojo {
 
-NetworkContext::NetworkContext(const base::FilePath& base_path) {
+NetworkContext::NetworkContext(
+    scoped_ptr<net::URLRequestContext> url_request_context)
+    : url_request_context_(url_request_context.Pass()) {
+}
+
+NetworkContext::NetworkContext(const base::FilePath& base_path)
+    : NetworkContext(MakeURLRequestContext(base_path)) {
+}
+
+NetworkContext::~NetworkContext() {
+  // TODO(darin): Be careful about destruction order of member variables?
+}
+
+// static
+scoped_ptr<net::URLRequestContext> NetworkContext::MakeURLRequestContext(
+    const base::FilePath& base_path) {
   net::URLRequestContextBuilder builder;
   builder.set_accept_language("en-us,en");
   // TODO(darin): This is surely the wrong UA string.
@@ -20,20 +36,21 @@ NetworkContext::NetworkContext(const base::FilePath& base_path) {
   builder.set_transport_security_persister_path(base_path);
 
   net::URLRequestContextBuilder::HttpCacheParams cache_params;
+#if defined(OS_ANDROID)
+  // On Android, we store the cache on disk becase we can run only a single
+  // instance of the shell at a time.
+  cache_params.type = net::URLRequestContextBuilder::HttpCacheParams::DISK;
   cache_params.path = base_path.Append(FILE_PATH_LITERAL("Cache"));
-  // TODO(esprehn): For now store the cache in memory so we can run many shells
+#else
+  // On desktop, we store the cache in memory so we can run many shells
   // in parallel when running tests, otherwise the network services in each
   // shell will corrupt the disk cache.
   cache_params.type = net::URLRequestContextBuilder::HttpCacheParams::IN_MEMORY;
+#endif
+
   builder.EnableHttpCache(cache_params);
-
   builder.set_file_enabled(true);
-
-  url_request_context_.reset(builder.Build());
-}
-
-NetworkContext::~NetworkContext() {
-  // TODO(darin): Be careful about destruction order of member variables?
+  return make_scoped_ptr(builder.Build());
 }
 
 }  // namespace mojo

@@ -419,7 +419,7 @@
             <span>
               <span i18n-content="ipAutomaticConfiguration"></span>
               <span class="controlled-setting-indicator"
-                    managed="StaticIPConfig.IPAddress"></span>
+                    managed="IPAddressConfigType"></span>
             </span>
           </label>
         </div>
@@ -448,7 +448,11 @@
           <label>
             <input id="automatic-dns-radio" type="radio" name="dnstype"
                 value="automatic">
-            <span i18n-content="automaticNameServers"></span>
+            <span>
+              <span i18n-content="automaticNameServers"></span>
+              <span class="controlled-setting-indicator"
+                    managed="NameServersConfigType"></span>
+            </span>
           </label>
         </div>
         <div id="automatic-dns-display" class="dns-display"></div>

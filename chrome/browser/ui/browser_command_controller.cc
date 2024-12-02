@@ -66,6 +66,7 @@
 #include "ash/shell.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_context_menu.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
+#include "chrome/browser/ui/browser_commands_chromeos.h"
 #endif
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
@@ -695,6 +696,11 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_TASK_MANAGER:
       OpenTaskManager(browser_);
       break;
+#if defined(OS_CHROMEOS)
+    case IDC_TAKE_SCREENSHOT:
+      TakeScreenshot();
+      break;
+#endif
 #if defined(GOOGLE_CHROME_BUILD)
     case IDC_FEEDBACK:
       OpenFeedbackDialog(browser_);
@@ -760,7 +766,7 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       ShowHelp(browser_, HELP_SOURCE_MENU);
       break;
     case IDC_SHOW_SIGNIN:
-      ShowBrowserSignin(browser_, signin_metrics::SOURCE_MENU);
+      ShowBrowserSigninOrSettings(browser_, signin_metrics::SOURCE_MENU);
       break;
     case IDC_TOGGLE_SPEECH_INPUT:
       ToggleSpeechInput(browser_);
@@ -966,6 +972,7 @@ void BrowserCommandController::InitCommandState() {
                                         !profile()->IsOffTheRecord());
   command_updater_.UpdateCommandEnabled(IDC_CLEAR_BROWSING_DATA, normal_window);
 #if defined(OS_CHROMEOS)
+  command_updater_.UpdateCommandEnabled(IDC_TAKE_SCREENSHOT, true);
   command_updater_.UpdateCommandEnabled(IDC_TOUCH_HUD_PROJECTION_TOGGLE, true);
 #else
   // Chrome OS uses the system tray menu to handle multi-profiles.
@@ -978,8 +985,8 @@ void BrowserCommandController::InitCommandState() {
   // Navigation commands
   command_updater_.UpdateCommandEnabled(
       IDC_HOME,
-      normal_window || (extensions::util::IsStreamlinedHostedAppsEnabled() &&
-                        browser_->is_app()));
+      normal_window ||
+          (extensions::util::IsNewBookmarkAppsEnabled() && browser_->is_app()));
 
   // Window management commands
   command_updater_.UpdateCommandEnabled(IDC_SELECT_NEXT_TAB, normal_window);

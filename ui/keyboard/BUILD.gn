@@ -2,7 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//mojo/public/tools/bindings/mojom.gni")
+import("//testing/test.gni")
+import("//third_party/mojo/src/mojo/public/tools/bindings/mojom.gni")
 import("//third_party/google_input_tools/closure.gni")
 import("//third_party/google_input_tools/inputview.gni")
 import("//tools/grit/grit_rule.gni")
@@ -18,9 +19,9 @@ component("keyboard") {
     "keyboard_controller_observer.h",
     "keyboard_controller_proxy.cc",
     "keyboard_controller_proxy.h",
-    "keyboard_layout_manager.h",
-    "keyboard_layout_manager.cc",
     "keyboard_export.h",
+    "keyboard_layout_manager.cc",
+    "keyboard_layout_manager.h",
     "keyboard_switches.cc",
     "keyboard_switches.h",
     "keyboard_util.cc",
@@ -40,20 +41,22 @@ component("keyboard") {
     "//base/third_party/dynamic_annotations",
     "//content/public/browser",
     "//content/public/common",
-    "//mojo/edk/js",
-    "//mojo/edk/system",
     "//mojo/environment:chromium",
-    "//mojo/public/cpp/bindings",
-    "//mojo/public/cpp/system",
-    "//url",
+    "//skia",
+    "//third_party/mojo/src/mojo/edk/js",
+    "//third_party/mojo/src/mojo/edk/system",
+    "//third_party/mojo/src/mojo/public/cpp/bindings",
+    "//third_party/mojo/src/mojo/public/cpp/system",
     "//ui/aura",
     "//ui/base",
+    "//ui/base/ime",
     "//ui/compositor",
     "//ui/events",
     "//ui/events:dom4_keycode_converter",
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/wm",
+    "//url",
   ]
 }
 
@@ -73,12 +76,12 @@ grit("resources_grit") {
     "keyboard_resources.rc",
   ]
 
-  inputview_dir = "//third_party/google_input_tools/src/chrome/os/inputview"
+  input_tools_root_dir = "//third_party/google_input_tools/src/chrome/os"
   inputview_gen_js = "$root_gen_dir/ui/keyboard/resources/inputview.js"
   keyboard_mojom_gen_js = "$root_gen_dir/ui/keyboard/webui/keyboard.mojom.js"
   grit_flags = [
     "-E",
-    "inputview_dir=" + rebase_path(inputview_dir, "."),
+    "input_tools_root_dir=" + rebase_path(input_tools_root_dir, "."),
     "-E",
     "inputview_gen_js=" + rebase_path(inputview_gen_js, root_build_dir),
     "-E",
@@ -113,29 +116,33 @@ build_closure("inputview") {
   path = rebase_path("//third_party/google_input_tools")
 }
 
-test("keyboard_unittests") {
-  sources = [
-    "test/run_all_unittests.cc",
-    "keyboard_controller_unittest.cc",
-  ]
+if (!is_win || link_chrome_on_windows) {
+  test("keyboard_unittests") {
+    sources = [
+      "keyboard_controller_unittest.cc",
+      "test/run_all_unittests.cc",
+    ]
 
-  deps = [
-    ":keyboard",
-    "//base",
-    "//base/allocator",
-    "//base/test:test_support",
-    "//content",
-    "//skia",
-    "//testing/gtest",
-    "//ui/aura:test_support",
-    "//ui/base:test_support",
-    "//ui/compositor:test_support",
-    "//ui/events:test_support",
-    "//ui/gfx",
-    "//ui/gfx/geometry",
-    "//ui/gl",
-    "//ui/resources:ui_test_pak",
-    "//ui/wm",
-    "//url",
-  ]
+    deps = [
+      ":keyboard",
+      "//base",
+      "//base/allocator",
+      "//base/test:test_support",
+      "//content",
+      "//skia",
+      "//testing/gtest",
+      "//ui/aura:test_support",
+      "//ui/base",
+      "//ui/base/ime",
+      "//ui/base:test_support",
+      "//ui/compositor:test_support",
+      "//ui/events:test_support",
+      "//ui/gfx",
+      "//ui/gfx/geometry",
+      "//ui/gl",
+      "//ui/resources:ui_test_pak",
+      "//ui/wm",
+      "//url",
+    ]
+  }
 }

@@ -75,10 +75,9 @@ def processJinjaTemplate(input_file, include_paths, output_file, context):
   rendered = template.render(context)
   io.open(output_file, 'w', encoding='utf-8').write(rendered)
 
-
 def buildWebApp(buildtype, version, destination, zip_path,
                 manifest_template, webapp_type, app_id, app_name,
-                app_description, files, locales, jinja_paths,
+                app_description, app_capabilities, files, locales, jinja_paths,
                 service_environment):
   """Does the main work of building the webapp directory and zipfile.
 
@@ -95,6 +94,8 @@ def buildWebApp(buildtype, version, destination, zip_path,
              test API server.
     app_name: A string with the name of the application.
     app_description: A string with the description of the application.
+    app_capabilities: A set of strings naming the capabilities that should be
+                      enabled for this application.
     files: An array of strings listing the paths for resources to include
            in this webapp.
     locales: An array of strings listing locales, which are copied, along
@@ -117,29 +118,20 @@ def buildWebApp(buildtype, version, destination, zip_path,
   if buildtype != 'Official' and buildtype != 'Release' and buildtype != 'Dev':
     raise Exception('Unknown buildtype: ' + buildtype)
 
-  # Use symlinks on linux and mac for faster compile/edit cycle.
-  #
-  # On Windows Vista platform.system() can return 'Microsoft' with some
-  # versions of Python, see http://bugs.python.org/issue1082
-  # should_symlink = platform.system() not in ['Windows', 'Microsoft']
-  #
-  # TODO(ajwong): Pending decision on http://crbug.com/27185 we may not be
-  # able to load symlinked resources.
-  should_symlink = False
+  jinja_context = {
+    'webapp_type': webapp_type,
+    'buildtype': buildtype,
+  }
 
   # Copy all the files.
   for current_file in files:
     destination_file = os.path.join(destination, os.path.basename(current_file))
-    destination_dir = os.path.dirname(destination_file)
-    if not os.path.exists(destination_dir):
-      os.makedirs(destination_dir, 0775)
 
-    if should_symlink:
-      # TODO(ajwong): Detect if we're vista or higher.  Then use win32file
-      # to create a symlink in that case.
-      targetname = os.path.relpath(os.path.realpath(current_file),
-                                   os.path.realpath(destination_file))
-      os.symlink(targetname, destination_file)
+    # Process *.jinja2 files as jinja2 templates
+    if current_file.endswith(".jinja2"):
+      destination_file = destination_file[:-len(".jinja2")]
+      processJinjaTemplate(current_file, jinja_paths,
+                           destination_file, jinja_context)
     else:
       shutil.copy2(current_file, destination_file)
 
@@ -316,6 +308,12 @@ def buildWebApp(buildtype, version, destination, zip_path,
   replaceString(destination, 'API_CLIENT_ID', apiClientId)
   replaceString(destination, 'API_CLIENT_SECRET', apiClientSecret)
 
+  # Write the application capabilities.
+  appCapabilities = ','.join(
+      ['remoting.ClientSession.Capability.' + x for x in app_capabilities])
+  findAndReplace(os.path.join(destination, 'app_capabilities.js'),
+                 "'APPLICATION_CAPABILITIES'", appCapabilities)
+
   # Use a consistent extension id for dev builds.
   # AppRemoting builds always use the dev app id - the correct app id gets
   # written into the manifest later.
@@ -342,7 +340,11 @@ def buildWebApp(buildtype, version, destination, zip_path,
         'GOOGLE_API_HOSTS': googleApiHosts,
         'APP_NAME': app_name,
         'APP_DESCRIPTION': app_description,
+        'OAUTH_GDRIVE_SCOPE': '',
     }
+    if 'GOOGLE_DRIVE' in app_capabilities:
+      context['OAUTH_GDRIVE_SCOPE'] = ('https://docs.google.com/feeds/ '
+                                       'https://www.googleapis.com/auth/drive')
     processJinjaTemplate(manifest_template,
                          jinja_paths,
                          os.path.join(destination, 'manifest.json'),
@@ -361,31 +363,35 @@ def main():
            '<webapp_type> <other files...> '
            '--app_name <name> '
            '--app_description <description> '
+           '--app_capabilities <capabilities...> '
            '[--appid <appid>] '
-           '[--locales <locales...>] '
+           '[--locales_listfile <locales-listfile-name>] '
            '[--jinja_paths <paths...>] '
            '[--service_environment <service_environment>]')
     return 1
 
   arg_type = ''
   files = []
-  locales = []
+  locales_listfile = ''
   jinja_paths = []
   app_id = None
   app_name = None
   app_description = None
+  app_capabilities = set([])
   service_environment = ''
 
   for arg in sys.argv[7:]:
-    if arg in ['--locales',
+    if arg in ['--locales_listfile',
                '--jinja_paths',
                '--appid',
                '--app_name',
                '--app_description',
+               '--app_capabilities',
                '--service_environment']:
       arg_type = arg
-    elif arg_type == '--locales':
-      locales.append(arg)
+    elif arg_type == '--locales_listfile':
+      locales_listfile = arg
+      arg_type = ''
     elif arg_type == '--jinja_paths':
       jinja_paths.append(arg)
     elif arg_type == '--appid':
@@ -397,16 +403,26 @@ def main():
     elif arg_type == '--app_description':
       app_description = arg
       arg_type = ''
+    elif arg_type == '--app_capabilities':
+      app_capabilities.add(arg)
     elif arg_type == '--service_environment':
       service_environment = arg
       arg_type = ''
     else:
       files.append(arg)
 
+  # Load the locales files from the locales_listfile.
+  if not locales_listfile:
+    raise Exception('You must specify a locales_listfile')
+  locales = []
+  with open(locales_listfile) as input:
+    for s in input:
+      locales.append(s.rstrip())
+
   return buildWebApp(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4],
                      sys.argv[5], sys.argv[6], app_id, app_name,
-                     app_description, files, locales, jinja_paths,
-                     service_environment)
+                     app_description, app_capabilities, files, locales,
+                     jinja_paths, service_environment)
 
 
 if __name__ == '__main__':

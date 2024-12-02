@@ -31,6 +31,11 @@
 
   'target_defaults': {
     'build_method': 'destdir',
+    # Every package must have --disable-static in configure flags to avoid
+    # building unnecessary static libs. Ideally we should add it here.
+    # Unfortunately, zlib1g doesn't support that flag and for some reason it
+    # can't be removed with a GYP exclusion list. So instead we add that flag
+    # manually to every package but zlib1g.
     'extra_configure_flags': [],
     'jobs': '<(instrumented_libraries_jobs)',
     'package_cflags': [
@@ -126,7 +131,6 @@
         '<(_sanitizer_type)-libgdk-pixbuf2.0-0',
         '<(_sanitizer_type)-libpci3',
         '<(_sanitizer_type)-libdbusmenu-glib4',
-        '<(_sanitizer_type)-overlay-scrollbar',
         '<(_sanitizer_type)-libgconf-2-4',
         '<(_sanitizer_type)-libappindicator1',
         '<(_sanitizer_type)-libdbusmenu',
@@ -142,8 +146,10 @@
           ],
         }, {
           'dependencies': [
+            # Trusty and above.
             '<(_sanitizer_type)-libtasn1-6',
             '<(_sanitizer_type)-harfbuzz',
+            '<(_sanitizer_type)-libsecret',
           ],
         }],
         ['msan==1', {
@@ -178,36 +184,46 @@
     {
       'package_name': 'freetype',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'run_before_build': 'scripts/freetype.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libcairo2',
       'dependencies=': [],
-      'extra_configure_flags': ['--disable-gtk-doc'],
+      'extra_configure_flags': [
+          '--disable-gtk-doc',
+          '--disable-static',
+      ],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libdbus-1-3',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libdbus-glib-1-2',
       'dependencies=': [],
-      # Use system dbus-binding-tool. The just-built one is instrumented but
-      # doesn't have the correct RPATH, and will crash.
-      'extra_configure_flags': ['--with-dbus-binding-tool=dbus-binding-tool'],
+      'extra_configure_flags': [
+          # Use system dbus-binding-tool. The just-built one is instrumented but
+          # doesn't have the correct RPATH, and will crash.
+          '--with-dbus-binding-tool=dbus-binding-tool',
+          '--disable-static',
+      ],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libexpat1',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libffi6',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -216,6 +232,7 @@
       'extra_configure_flags': [
         '--disable-docs',
         '--sysconfdir=/etc/',
+        '--disable-static',
         # From debian/rules.
         '--with-add-fonts=/usr/X11R6/lib/X11/fonts,/usr/local/share/fonts',
       ],
@@ -236,7 +253,7 @@
         # From debian/rules.
         '--enable-noexecstack',
         '--enable-ld-version-script',
-        '--enable-static',
+        '--disable-static',
         # http://crbug.com/344505
         '--disable-asm'
       ],
@@ -249,6 +266,7 @@
         '--disable-gtk-doc',
         '--disable-gtk-doc-html',
         '--disable-gtk-doc-pdf',
+        '--disable-static',
       ],
       'asan_blacklist': 'blacklists/asan/libglib2.0-0.txt',
       'msan_blacklist': 'blacklists/msan/libglib2.0-0.txt',
@@ -258,6 +276,7 @@
     {
       'package_name': 'libgpg-error0',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -265,6 +284,7 @@
       'dependencies=': [],
       'extra_configure_flags': [
         '--enable-64bit',
+        '--disable-static',
         # TSan reports data races on debug variables.
         '--disable-debug',
       ],
@@ -274,6 +294,7 @@
     {
       'package_name': 'libp11-kit0',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       # Required on Trusty due to autoconf version mismatch.
       'run_before_build': 'scripts/autoreconf.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
@@ -284,6 +305,7 @@
       'extra_configure_flags': [
         '--enable-utf8',
         '--enable-unicode-properties',
+        '--disable-static',
       ],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
@@ -291,9 +313,12 @@
       'package_name': 'libpixman-1-0',
       'dependencies=': [],
       'extra_configure_flags': [
+        '--disable-static',
         # From debian/rules.
         '--disable-gtk',
         '--disable-silent-rules',
+        # Avoid a clang issue. http://crbug.com/449183
+        '--disable-mmx',
       ],
       'patch': 'patches/libpixman-1-0.diff',
       'includes': ['standard_instrumented_package_target.gypi'],
@@ -301,12 +326,16 @@
     {
       'package_name': 'libpng12-0',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libx11-6',
       'dependencies=': [],
-      'extra_configure_flags': ['--disable-specs'],
+      'extra_configure_flags': [
+          '--disable-specs',
+          '--disable-static',
+      ],
       'msan_blacklist': 'blacklists/msan/libx11-6.txt',
       # Required on Trusty due to autoconf version mismatch.
       'run_before_build': 'scripts/autoreconf.sh',
@@ -315,12 +344,16 @@
     {
       'package_name': 'libxau6',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libxcb1',
       'dependencies=': [],
-      'extra_configure_flags': ['--disable-build-docs'],
+      'extra_configure_flags': [
+          '--disable-build-docs',
+          '--disable-static',
+      ],
       'conditions': [
         ['"<(_ubuntu_release)"=="precise"', {
           # Backport fix for https://bugs.freedesktop.org/show_bug.cgi?id=54671
@@ -334,33 +367,43 @@
     {
       'package_name': 'libxcomposite1',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libxcursor1',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libxdamage1',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libxdmcp6',
       'dependencies=': [],
-      'extra_configure_flags': ['--disable-docs'],
+      'extra_configure_flags': [
+          '--disable-docs',
+          '--disable-static',
+      ],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libxext6',
       'dependencies=': [],
-      'extra_configure_flags': ['--disable-specs'],
+      'extra_configure_flags': [
+          '--disable-specs',
+          '--disable-static',
+      ],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libxfixes3',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -369,38 +412,47 @@
       'extra_configure_flags': [
         '--disable-specs',
         '--disable-docs',
+        '--disable-static',
       ],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libxinerama1',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libxrandr2',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libxrender1',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libxss1',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libxtst6',
       'dependencies=': [],
-      'extra_configure_flags': ['--disable-specs'],
+      'extra_configure_flags': [
+          '--disable-specs',
+          '--disable-static',
+      ],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'zlib1g',
       'dependencies=': [],
+      # --disable-static is not supported
       'patch': 'patches/zlib1g.diff',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
@@ -427,6 +479,7 @@
         }],
       ],
       'extra_configure_flags': [
+          '--disable-static',
           # From debian/rules.
           '--enable-x11',
           '--disable-hal-compat',
@@ -440,6 +493,7 @@
     {
       'package_name': 'libasound2',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'run_before_build': 'scripts/libasound2.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
@@ -449,6 +503,7 @@
       'patch': 'patches/libcups2.diff',
       'jobs': 1,
       'extra_configure_flags': [
+        '--disable-static',
         # All from debian/rules.
         '--localedir=/usr/share/cups/locale',
         '--enable-slp',
@@ -457,7 +512,6 @@
         '--enable-gnutls',
         '--disable-openssl',
         '--enable-threads',
-        '--enable-static',
         '--enable-debug',
         '--enable-dbus',
         '--with-dbusdir=/etc/dbus-1',
@@ -479,6 +533,7 @@
       'package_name': 'pango1.0',
       'dependencies=': [],
       'extra_configure_flags': [
+        '--disable-static',
         # Avoid https://bugs.gentoo.org/show_bug.cgi?id=425620
         '--enable-introspection=no',
         # Pango is normally used with dynamically loaded modules. However,
@@ -492,6 +547,7 @@
     {
       'package_name': 'libcap2',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'build_method': 'custom_libcap',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
@@ -499,6 +555,7 @@
       'package_name': 'udev',
       'dependencies=': [],
       'extra_configure_flags': [
+          '--disable-static',
           # Without this flag there's a linking step that doesn't honor LDFLAGS
           # and fails.
           # TODO(earthdok): find a better fix.
@@ -511,6 +568,7 @@
       'package_name': 'libtasn1-3',
       'dependencies=': [],
       'extra_configure_flags': [
+          '--disable-static',
           # From debian/rules.
           '--enable-ld-version-script',
       ],
@@ -520,6 +578,7 @@
       'package_name': 'libtasn1-6',
       'dependencies=': [],
       'extra_configure_flags': [
+          '--disable-static',
           # From debian/rules.
           '--enable-ld-version-script',
       ],
@@ -528,8 +587,7 @@
     {
       'package_name': 'libgnome-keyring0',
       'extra_configure_flags': [
-          # Build static libs (from debian/rules).
-          '--enable-static',
+          '--disable-static',
           '--enable-tests=no',
           # Make the build less problematic.
           '--disable-introspection',
@@ -542,6 +600,7 @@
       'package_name': 'libgtk2.0-0',
       'package_cflags': ['-Wno-return-type'],
       'extra_configure_flags': [
+          '--disable-static',
           # From debian/rules.
           '--prefix=/usr',
           '--sysconfdir=/etc',
@@ -563,11 +622,16 @@
     {
       'package_name': 'libgdk-pixbuf2.0-0',
       'extra_configure_flags': [
+          '--disable-static',
           # From debian/rules.
           '--with-libjasper',
           '--with-x11',
           # Make the build less problematic.
           '--disable-introspection',
+          # Do not use loadable modules. Same as with Pango, there's no easy way
+          # to make gdk-pixbuf pick instrumented versions over system-installed
+          # ones.
+          '--disable-modules',
       ],
       'dependencies=': [],
       'run_before_build': 'scripts/libgdk-pixbuf2.0-0.sh',
@@ -576,6 +640,7 @@
     {
       'package_name': 'libpci3',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'build_method': 'custom_libpci3',
       'jobs': 1,
       'includes': ['standard_instrumented_package_target.gypi'],
@@ -583,6 +648,7 @@
     {
       'package_name': 'libdbusmenu-glib4',
       'extra_configure_flags': [
+          '--disable-static',
           # From debian/rules.
           '--disable-scrollkeeper',
           '--enable-gtk-doc',
@@ -597,17 +663,9 @@
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
-      'package_name': 'overlay-scrollbar',
-      'extra_configure_flags': [
-          '--with-gtk=2',
-      ],
-      'dependencies=': [],
-      'run_before_build': 'scripts/autogen.sh',
-      'includes': ['standard_instrumented_package_target.gypi'],
-    },
-    {
       'package_name': 'libgconf-2-4',
       'extra_configure_flags': [
+          '--disable-static',
           # From debian/rules. (Even though --with-gtk=3.0 doesn't make sense.)
           '--with-gtk=3.0',
           '--disable-orbit',
@@ -620,6 +678,7 @@
     {
       'package_name': 'libappindicator1',
       'extra_configure_flags': [
+          '--disable-static',
           # See above.
           '--disable-introspection',
       ],
@@ -631,6 +690,7 @@
     {
       'package_name': 'libdbusmenu',
       'extra_configure_flags': [
+          '--disable-static',
           # From debian/rules.
           '--disable-scrollkeeper',
           '--with-gtk=2',
@@ -645,6 +705,7 @@
     {
       'package_name': 'atk1.0',
       'extra_configure_flags': [
+          '--disable-static',
           # See above.
           '--disable-introspection',
       ],
@@ -654,12 +715,14 @@
     {
       'package_name': 'libunity9',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       'run_before_build': 'scripts/autogen.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'dee',
       'extra_configure_flags': [
+          '--disable-static',
           # See above.
           '--disable-introspection',
       ],
@@ -671,6 +734,7 @@
       'package_name': 'harfbuzz',
       'package_cflags': ['-Wno-c++11-narrowing'],
       'extra_configure_flags': [
+          '--disable-static',
           # From debian/rules.
           '--with-graphite2=yes',
           '--with-gobject',
@@ -683,6 +747,7 @@
     {
       'package_name': 'brltty',
       'extra_configure_flags': [
+          '--disable-static',
           # From debian/rules.
           '--without-viavoice',
           '--without-theta',
@@ -703,10 +768,22 @@
     {
       'package_name': 'libva1',
       'dependencies=': [],
+      'extra_configure_flags': ['--disable-static'],
       # Backport a use-after-free fix:
       # http://cgit.freedesktop.org/libva/diff/va/va.c?h=staging&id=d4988142a3f2256e38c5c5cdcdfc1b4f5f3c1ea9
       'patch': 'patches/libva1.diff',
       'run_before_build': 'scripts/libva1.sh',
+      'includes': ['standard_instrumented_package_target.gypi'],
+    },
+    {
+      'package_name': 'libsecret',
+      'dependencies=': [],
+      'extra_configure_flags': [
+          '--disable-static',
+          # See above.
+          '--disable-introspection',
+      ],
+      'run_before_build': 'scripts/autoreconf.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
   ],

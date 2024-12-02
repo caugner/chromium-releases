@@ -17,6 +17,7 @@ static_library("utility") {
   public_deps = []
   deps = [
     "//base",
+    "//components/search_engines",
     "//components/strings",
     "//components/url_fixer",
     "//content/public/common",
@@ -29,7 +30,12 @@ static_library("utility") {
     "//chrome/common",
   ]
 
-  if (!is_android) {
+  if (is_android) {
+    if (use_seccomp_bpf) {
+      deps += [ "//sandbox/linux:seccomp_bpf" ]
+      defines += [ "USE_SECCOMP_BPF" ]
+    }
+  } else {
     sources +=
         rebase_path(gypi_values.chrome_utility_importer_sources, ".", "..")
   }
@@ -38,8 +44,6 @@ static_library("utility") {
     deps += [
       "//chrome/common/extensions/api",
       "//extensions/utility",
-
-      #"//third_party/libexif",  TODO(GYP)
     ]
 
     public_deps += [ "//chrome/common/extensions/api" ]
@@ -64,6 +68,12 @@ static_library("utility") {
           rebase_path(gypi_values.chrome_utility_mac_media_gallery_sources,
                       ".",
                       "..")
+    }
+
+    # Linux should use system libexif
+    if (!is_linux) {
+      # TODO(thestig): Properly support building on Linux and ChromeOS.
+      deps += [ "//third_party/libexif" ]
     }
   }
 

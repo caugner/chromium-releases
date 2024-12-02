@@ -3,13 +3,22 @@
 // found in the LICENSE file.
 
 function toggleHelpBox() {
-  var helpBoxOuter = document.getElementById('help-box-outer');
+  var helpBoxOuter = document.getElementById('details');
   helpBoxOuter.classList.toggle('hidden');
   var detailsButton = document.getElementById('details-button');
   if (helpBoxOuter.classList.contains('hidden'))
     detailsButton.innerText = detailsButton.detailsText;
   else
     detailsButton.innerText = detailsButton.hideDetailsText;
+
+  // Details appears over the main content on small screens.
+  if (mobileNav) {
+    document.getElementById('main-content').classList.toggle('hidden');
+    var runnerContainer = document.querySelector('.runner-container');
+    if (runnerContainer) {
+      runnerContainer.classList.toggle('hidden');
+    }
+  }
 }
 
 function diagnoseErrors() {
@@ -53,6 +62,8 @@ function updateIconClass(classList, newClass) {
   if (newClass == 'icon-offline') {
     document.body.classList.add('offline');
     new Runner('.interstitial-wrapper');
+  } else {
+    document.body.classList.add('neterror');
   }
 }
 
@@ -131,12 +142,13 @@ function onDocumentLoad() {
     detailsButton.classList.add('singular');
   }
 
+<if expr="not chromeos">
   // Hide the details button if there are no details to show.
   if (loadTimeData.valueExists('summary') &&
           !loadTimeData.getValue('summary').msg) {
     detailsButton.style.display = 'none';
-    document.getElementById('help-box-outer').style.display = 'block';
   }
+</if>
 
   // Show control buttons.
   if (loadTimeData.valueExists('reloadButton') &&
@@ -144,6 +156,13 @@ function onDocumentLoad() {
       loadTimeData.valueExists('staleLoadButton') &&
           loadTimeData.getValue('staleLoadButton').msg) {
     controlButtonDiv.hidden = false;
+
+    // Set the secondary button state in the cases of two call to actions.
+    // Reload is secondary to stale load.
+    if (loadTimeData.valueExists('staleLoadButton') &&
+            loadTimeData.getValue('staleLoadButton').msg) {
+      reloadButton.classList.add('secondary-button');
+    }
   }
 
   // Add a main message paragraph.

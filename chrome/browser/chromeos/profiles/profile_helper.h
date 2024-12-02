@@ -67,7 +67,7 @@ class ProfileHelper
 
   // Returns user_id hash for |profile| instance or empty string if hash
   // could not be extracted from |profile|.
-  static std::string GetUserIdHashFromProfile(Profile* profile);
+  static std::string GetUserIdHashFromProfile(const Profile* profile);
 
   // Returns user profile dir in a format [u-user_id_hash].
   static base::FilePath GetUserProfileDir(const std::string& user_id_hash);
@@ -75,14 +75,14 @@ class ProfileHelper
   // Returns true if |profile| is the signin Profile. This can be used during
   // construction of the signin Profile to determine if that Profile is the
   // signin Profile.
-  static bool IsSigninProfile(Profile* profile);
+  static bool IsSigninProfile(const Profile* profile);
 
   // Returns true when |profile| corresponds to owner's profile.
   static bool IsOwnerProfile(Profile* profile);
 
   // Returns true when |profile| corresponds to the primary user profile
   // of the current session.
-  static bool IsPrimaryProfile(Profile* profile);
+  static bool IsPrimaryProfile(const Profile* profile);
 
   // Initialize a bunch of services that are tied to a browser profile.
   // TODO(dzhioev): Investigate whether or not this method is needed.
@@ -117,16 +117,20 @@ class ProfileHelper
   Profile* GetProfileByUserUnsafe(const user_manager::User* user);
 
   // Returns NULL if User is not created.
-  user_manager::User* GetUserByProfile(Profile* profile);
+  const user_manager::User* GetUserByProfile(const Profile* profile) const;
+  user_manager::User* GetUserByProfile(Profile* profile) const;
 
   static std::string GetUserIdHashByUserIdForTesting(
       const std::string& user_id);
 
  private:
+  // TODO(nkostylev): Create a test API class that will be the only one allowed
+  // to access private test methods.
   friend class CryptohomeAuthenticatorTest;
   friend class DeviceSettingsTestBase;
+  friend class ExistingUserControllerTest;
   friend class extensions::ExtensionGarbageCollectorChromeOSUnitTest;
-  friend class FakeUserManager;
+  friend class FakeChromeUserManager;
   friend class KioskTest;
   friend class MockUserManager;
   friend class MultiProfileUserControllerTest;

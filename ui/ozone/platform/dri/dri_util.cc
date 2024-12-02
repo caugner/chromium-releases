@@ -2,18 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/strings/stringprintf.h"
 #include "ui/ozone/platform/dri/dri_util.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
+#include "ui/ozone/platform/dri/dri_wrapper.h"
+#include "ui/ozone/platform/dri/screen_manager.h"
+
 namespace ui {
 
 namespace {
+
+const char kDefaultGraphicsCardPattern[] = "/dev/dri/card%d";
 
 bool IsCrtcInUse(uint32_t crtc,
                  const ScopedVector<HardwareDisplayControllerInfo>& displays) {
@@ -133,6 +140,52 @@ bool MapDumbBuffer(int fd,
   }
 
   return true;
+}
+
+void ForceInitializationOfPrimaryDisplay(const scoped_refptr<DriWrapper>& drm,
+                                         ScreenManager* screen_manager) {
+  LOG(WARNING) << "Forcing initialization of primary display.";
+  ScopedVector<HardwareDisplayControllerInfo> displays =
+      GetAvailableDisplayControllerInfos(drm->get_fd());
+
+  if (displays.empty())
+    return;
+
+  ScopedDrmPropertyPtr dpms(drm->GetProperty(displays[0]->connector(), "DPMS"));
+
+  screen_manager->AddDisplayController(drm, displays[0]->crtc()->crtc_id,
+                                       displays[0]->connector()->connector_id);
+  if (screen_manager->ConfigureDisplayController(
+          drm, displays[0]->crtc()->crtc_id,
+          displays[0]->connector()->connector_id, gfx::Point(),
+          displays[0]->connector()->modes[0])) {
+    if (dpms)
+      drm->SetProperty(displays[0]->connector()->connector_id, dpms->prop_id,
+                       DRM_MODE_DPMS_ON);
+  }
+}
+
+base::FilePath GetFirstDisplayCardPath() {
+  struct drm_mode_card_res res;
+  for (int i = 0; /* end on first card# that does not exist */; i++) {
+    std::string card_path = base::StringPrintf(kDefaultGraphicsCardPattern, i);
+
+    if (access(card_path.c_str(), F_OK) != 0)
+      break;
+
+    int fd = open(card_path.c_str(), O_RDWR | O_CLOEXEC);
+    if (fd < 0)
+      continue;
+
+    memset(&res, 0, sizeof(struct drm_mode_card_res));
+    int ret = drmIoctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &res);
+    close(fd);
+    if (ret == 0 && res.count_crtcs > 0) {
+      return base::FilePath(card_path);
+    }
+  }
+
+  return base::FilePath();
 }
 
 }  // namespace ui

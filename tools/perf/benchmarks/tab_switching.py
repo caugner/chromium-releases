@@ -9,6 +9,7 @@ import page_sets
 
 
 @benchmark.Enabled('has tabs')
+@benchmark.Disabled('android')  # http://crbug.com/460084
 class TabSwitchingTop10(benchmark.Benchmark):
   """This test records the MPArch.RWH_TabSwitchPaintDuration histogram.
 
@@ -20,8 +21,13 @@ class TabSwitchingTop10(benchmark.Benchmark):
   test = tab_switching.TabSwitching
   page_set = page_sets.Top10PageSet
 
+  @classmethod
+  def Name(cls):
+    return 'tab_switching.top_10'
+
 
 @benchmark.Enabled('has tabs')
+@benchmark.Disabled('android')  # http://crbug.com/460084
 class TabSwitchingTypical25(benchmark.Benchmark):
   """This test records the MPArch.RWH_TabSwitchPaintDuration histogram.
 
@@ -31,9 +37,16 @@ class TabSwitchingTypical25(benchmark.Benchmark):
   metric. The pages were chosen from Alexa top ranking sites.
   """
   test = tab_switching.TabSwitching
-  page_set = page_sets.Typical25PageSet
+
+  def CreatePageSet(self, options):
+    return page_sets.Typical25PageSet(run_no_page_interactions=True)
+
+  @classmethod
+  def Name(cls):
+    return 'tab_switching.typical_25'
 
 
+@benchmark.Disabled('android')  # http://crbug.com/460084
 @benchmark.Enabled('has tabs')
 class TabSwitchingFiveBlankTabs(benchmark.Benchmark):
   """This test records the MPArch.RWH_TabSwitchPaintDuration histogram.
@@ -47,8 +60,13 @@ class TabSwitchingFiveBlankTabs(benchmark.Benchmark):
   page_set = page_sets.FiveBlankPagesPageSet
   options = {'pageset_repeat': 10}
 
+  @classmethod
+  def Name(cls):
+    return 'tab_switching.five_blank_pages'
+
 
 @benchmark.Enabled('has tabs')
+@benchmark.Disabled('android')  # http://crbug.com/460084
 class TabSwitchingToughEnergyCases(benchmark.Benchmark):
   """This test records the MPArch.RWH_TabSwitchPaintDuration histogram.
 
@@ -61,9 +79,17 @@ class TabSwitchingToughEnergyCases(benchmark.Benchmark):
   page_set = page_sets.ToughEnergyCasesPageSet
   options = {'pageset_repeat': 10}
 
+  @classmethod
+  def Name(cls):
+    return 'tab_switching.tough_energy_cases'
+
 
 @benchmark.Disabled  # Just for local testing, not on waterfall.
 class TabSwitchingFlashEnergyCases(benchmark.Benchmark):
   test = tab_switching.TabSwitching
   page_set = page_sets.FlashEnergyCasesPageSet
   options = {'pageset_repeat': 10}
+  @classmethod
+  def Name(cls):
+    return 'tab_switching.flash_energy_cases'
+

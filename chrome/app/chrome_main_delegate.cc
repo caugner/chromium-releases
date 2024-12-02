@@ -12,7 +12,6 @@
 #include "base/lazy_instance.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/statistics_recorder.h"
-#include "base/metrics/stats_counters.h"
 #include "base/path_service.h"
 #include "base/process/memory.h"
 #include "base/process/process_handle.h"
@@ -56,12 +55,11 @@
 
 #if defined(OS_MACOSX)
 #include "base/mac/foundation_util.h"
-#include "base/mac/os_crash_dumps.h"
 #include "chrome/app/chrome_main_mac.h"
 #include "chrome/browser/mac/relauncher.h"
 #include "chrome/common/mac/cfbundle_blocker.h"
 #include "chrome/common/mac/objc_zombie.h"
-#include "components/crash/app/breakpad_mac.h"
+#include "components/crash/app/crashpad_mac.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #endif
 
@@ -112,25 +110,32 @@
 
 #if !defined(DISABLE_NACL)
 #include "components/nacl/common/nacl_switches.h"
-#include "ppapi/native_client/src/trusted/plugin/ppapi_entrypoints.h"
+#include "components/nacl/renderer/plugin/ppapi_entrypoints.h"
 #endif
 
 #if defined(ENABLE_REMOTING)
 #include "remoting/client/plugin/pepper_entrypoints.h"
 #endif
 
-#if !defined(CHROME_MULTIPLE_DLL_CHILD)
-base::LazyInstance<chrome::ChromeContentBrowserClient>
-    g_chrome_content_browser_client = LAZY_INSTANCE_INITIALIZER;
+#if defined(ENABLE_PLUGINS) && (defined(CHROME_MULTIPLE_DLL_CHILD) || \
+    !defined(CHROME_MULTIPLE_DLL_BROWSER))
+#include "pdf/pdf.h"
 #endif
 
 #if !defined(CHROME_MULTIPLE_DLL_BROWSER)
+#include "chrome/child/pdf_child_init.h"
+
 base::LazyInstance<ChromeContentRendererClient>
     g_chrome_content_renderer_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<ChromeContentUtilityClient>
     g_chrome_content_utility_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<chrome::ChromeContentPluginClient>
     g_chrome_content_plugin_client = LAZY_INSTANCE_INITIALIZER;
+#endif
+
+#if !defined(CHROME_MULTIPLE_DLL_CHILD)
+base::LazyInstance<chrome::ChromeContentBrowserClient>
+    g_chrome_content_browser_client = LAZY_INSTANCE_INITIALIZER;
 #endif
 
 #if defined(OS_POSIX)
@@ -338,6 +343,13 @@ void InitializeUserDataDir() {
 #if defined(OS_MACOSX) || defined(OS_WIN)
   policy::path_parser::CheckUserDataDirPolicy(&user_data_dir);
 #endif
+
+  // On Windows, trailing separators leave Chrome in a bad state.
+  // See crbug.com/464616.
+  if (user_data_dir.EndsWithSeparator()) {
+    user_data_dir = user_data_dir.StripTrailingSeparators();
+    command_line->AppendSwitchPath(switches::kUserDataDir, user_data_dir);
+  }
 
   const bool specified_directory_was_invalid = !user_data_dir.empty() &&
       !PathService::OverrideAndCreateIfNeeded(chrome::DIR_USER_DATA,
@@ -552,38 +564,17 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
 void ChromeMainDelegate::InitMacCrashReporter(
     const base::CommandLine& command_line,
     const std::string& process_type) {
-  // TODO(mark): Right now, InitCrashReporter() needs to be called after
-  // CommandLine::Init() and chrome::RegisterPathProvider().  Ideally,
-  // Breakpad initialization could occur sooner, preferably even before the
-  // framework dylib is even loaded, to catch potential early crashes.
-  breakpad::InitCrashReporter(process_type);
+  // TODO(mark): Right now, InitializeCrashpad() needs to be called after
+  // CommandLine::Init() and chrome::RegisterPathProvider().  Ideally, Crashpad
+  // initialization could occur sooner, preferably even before the framework
+  // dylib is even loaded, to catch potential early crashes.
+  crash_reporter::InitializeCrashpad(process_type);
 
-#if defined(NDEBUG)
-  bool is_debug_build = false;
-#else
-  bool is_debug_build = true;
-#endif
-
-  // Details on when we enable Apple's Crash reporter.
-  //
-  // Motivation:
-  //    In debug mode it takes Apple's crash reporter eons to generate a crash
-  // dump.
-  //
-  // What we do:
-  // * We only pass crashes for foreground processes to Apple's Crash
-  //    reporter. At the time of this writing, that means just the Browser
-  //    process.
-  // * If Breakpad is enabled, it will pass browser crashes to Crash Reporter
-  //    itself.
-  // * If Breakpad is disabled, we only turn on Crash Reporter for the
-  //    Browser process in release mode.
-  if (!command_line.HasSwitch(switches::kDisableBreakpad)) {
-    bool disable_apple_crash_reporter = is_debug_build ||
-        base::mac::IsBackgroundOnlyProcess();
-    if (!breakpad::IsCrashReporterEnabled() && disable_apple_crash_reporter) {
-      base::mac::DisableOSCrashDumps();
-    }
+  const bool browser_process = process_type.empty();
+  if (!browser_process) {
+    std::string metrics_client_id =
+        command_line.GetSwitchValueASCII(switches::kMetricsClientID);
+    crash_keys::SetMetricsClientIdFromGUID(metrics_client_id);
   }
 
   // Mac Chrome is packaged with a main app bundle and a helper app bundle.
@@ -639,9 +630,6 @@ void ChromeMainDelegate::InitMacCrashReporter(
           process_type.empty())
         << "Main application forbids --type, saw " << process_type;
   }
-
-  if (breakpad::IsCrashReporterEnabled())
-    breakpad::InitCrashProcessInfo(process_type);
 }
 #endif  // defined(OS_MACOSX)
 
@@ -681,10 +669,6 @@ void ChromeMainDelegate::PreSandboxStartup() {
   // Register component_updater PathProvider after DIR_USER_DATA overidden by
   // command line flags. Maybe move the chrome PathProvider down here also?
   component_updater::RegisterPathProvider(chrome::DIR_USER_DATA);
-
-  stats_counter_timer_.reset(new base::StatsCounterTimer("Chrome.Init"));
-  startup_timer_.reset(new base::StatsScope<base::StatsCounterTimer>
-                       (*stats_counter_timer_));
 
   // Enable Message Loop related state asap.
   if (command_line.HasSwitch(switches::kMessageLoopHistogrammer))
@@ -769,14 +753,16 @@ void ChromeMainDelegate::PreSandboxStartup() {
 #endif
     CHECK(!loaded_locale.empty()) << "Locale could not be found for " <<
         locale;
+  }
 
 #if !defined(CHROME_MULTIPLE_DLL_BROWSER)
-    if (process_type == switches::kUtilityProcess ||
-        process_type == switches::kZygoteProcess) {
-      ChromeContentUtilityClient::PreSandboxStartup();
-    }
-#endif
+  if (process_type == switches::kUtilityProcess ||
+      process_type == switches::kZygoteProcess) {
+    ChromeContentUtilityClient::PreSandboxStartup();
   }
+
+  chrome::InitializePDF();
+#endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   // Zygote needs to call InitCrashReporter() in RunZygote().
@@ -798,8 +784,6 @@ void ChromeMainDelegate::PreSandboxStartup() {
 }
 
 void ChromeMainDelegate::SandboxInitialized(const std::string& process_type) {
-  startup_timer_->Stop();  // End of Startup Time Measurement.
-
   // Note: If you are adding a new process type below, be sure to adjust the
   // AdjustLinuxOOMScore function too.
 #if defined(OS_LINUX)
@@ -821,6 +805,12 @@ void ChromeMainDelegate::SandboxInitialized(const std::string& process_type) {
       nacl_plugin::PPP_GetInterface,
       nacl_plugin::PPP_InitializeModule,
       nacl_plugin::PPP_ShutdownModule);
+#endif
+#if defined(ENABLE_PLUGINS)
+  ChromeContentClient::SetPDFEntryFunctions(
+      chrome_pdf::PPP_GetInterface,
+      chrome_pdf::PPP_InitializeModule,
+      chrome_pdf::PPP_ShutdownModule);
 #endif
 #endif
 }

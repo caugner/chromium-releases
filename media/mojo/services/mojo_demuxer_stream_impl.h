@@ -9,7 +9,7 @@
 #include "base/memory/weak_ptr.h"
 #include "media/base/demuxer_stream.h"
 #include "media/mojo/interfaces/demuxer_stream.mojom.h"
-#include "mojo/public/cpp/bindings/interface_impl.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/interface_impl.h"
 
 namespace media {
 class DemuxerStream;
@@ -28,7 +28,10 @@ class MojoDemuxerStreamImpl : public mojo::InterfaceImpl<mojo::DemuxerStream> {
                                       mojo::MediaDecoderBufferPtr)>& callback)
       override;
 
-  void DidConnect();
+  void Initialize(
+      mojo::DemuxerStreamObserverPtr observer,
+      const mojo::Callback<void(mojo::ScopedDataPipeConsumerHandle)>& callback)
+      override;
 
  private:
   // |callback| is the callback that was passed to the initiating Read()
@@ -39,6 +42,8 @@ class MojoDemuxerStreamImpl : public mojo::InterfaceImpl<mojo::DemuxerStream> {
   void OnBufferReady(const BufferReadyCB& callback,
                      media::DemuxerStream::Status status,
                      const scoped_refptr<media::DecoderBuffer>& buffer);
+
+  mojo::DemuxerStreamObserverPtr observer_;
 
   // See constructor.  We do not own |stream_|.
   media::DemuxerStream* stream_;

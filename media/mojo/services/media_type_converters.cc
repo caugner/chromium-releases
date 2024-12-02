@@ -47,6 +47,7 @@ ASSERT_ENUM_EQ(AudioCodec, kCodec, AUDIO_CODEC_, PCM_S16BE);
 ASSERT_ENUM_EQ(AudioCodec, kCodec, AUDIO_CODEC_, PCM_S24BE);
 ASSERT_ENUM_EQ(AudioCodec, kCodec, AUDIO_CODEC_, Opus);
 ASSERT_ENUM_EQ(AudioCodec, kCodec, AUDIO_CODEC_, PCM_ALAW);
+ASSERT_ENUM_EQ(AudioCodec, kCodec, AUDIO_CODEC_, ALAC);
 ASSERT_ENUM_EQ_RAW(AudioCodec, kAudioCodecMax, AUDIO_CODEC_MAX);
 
 // ChannelLayout.
@@ -143,6 +144,7 @@ ASSERT_ENUM_EQ_RAW(VideoFrame::Format, VideoFrame::YV12J, VIDEO_FORMAT_YV12J);
 ASSERT_ENUM_EQ_RAW(VideoFrame::Format, VideoFrame::NV12, VIDEO_FORMAT_NV12);
 ASSERT_ENUM_EQ_RAW(VideoFrame::Format, VideoFrame::YV24, VIDEO_FORMAT_YV24);
 ASSERT_ENUM_EQ_RAW(VideoFrame::Format, VideoFrame::ARGB, VIDEO_FORMAT_ARGB);
+ASSERT_ENUM_EQ_RAW(VideoFrame::Format, VideoFrame::YV12HD, VIDEO_FORMAT_YV12HD);
 ASSERT_ENUM_EQ_RAW(VideoFrame::Format,
                    VideoFrame::FORMAT_MAX,
                    VIDEO_FORMAT_FORMAT_MAX);

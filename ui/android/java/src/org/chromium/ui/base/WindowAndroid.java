@@ -4,6 +4,8 @@
 
 package org.chromium.ui.base;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.PendingIntent;
@@ -13,6 +15,7 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
 import android.util.SparseArray;
+import android.view.View;
 import android.widget.Toast;
 
 import org.chromium.base.CalledByNative;
@@ -21,6 +24,7 @@ import org.chromium.ui.VSyncMonitor;
 
 import java.lang.ref.WeakReference;
 import java.util.HashMap;
+import java.util.HashSet;
 
 /**
  * The window base class that has the minimum functionality.
@@ -46,6 +50,10 @@ public class WindowAndroid {
     // SparseArray<String> in a bundle during saveInstanceState(). So we use a HashMap and suppress
     // the Android lint warning "UseSparseArrays".
     protected HashMap<Integer, String> mIntentErrors;
+
+    // We track all animations over content and provide a drawing placeholder for them.
+    private HashSet<Animator> mAnimationsOverContent = new HashSet<Animator>();
+    private View mAnimationPlaceholderView;
 
     private final VSyncMonitor.Listener mVSyncListener = new VSyncMonitor.Listener() {
         @Override
@@ -83,10 +91,10 @@ public class WindowAndroid {
      * @param intent   The PendingIntent that needs to be shown.
      * @param callback The object that will receive the results for the intent.
      * @param errorId  The ID of error string to be show if activity is paused before intent
-     *                 results.
+     *                 results, or null if no message is required.
      * @return Whether the intent was shown.
      */
-    public boolean showIntent(PendingIntent intent, IntentCallback callback, int errorId) {
+    public boolean showIntent(PendingIntent intent, IntentCallback callback, Integer errorId) {
         return showCancelableIntent(intent, callback, errorId) >= 0;
     }
 
@@ -95,10 +103,10 @@ public class WindowAndroid {
      * @param intent   The intent that needs to be shown.
      * @param callback The object that will receive the results for the intent.
      * @param errorId  The ID of error string to be show if activity is paused before intent
-     *                 results.
+     *                 results, or null if no message is required.
      * @return Whether the intent was shown.
      */
-    public boolean showIntent(Intent intent, IntentCallback callback, int errorId) {
+    public boolean showIntent(Intent intent, IntentCallback callback, Integer errorId) {
         return showCancelableIntent(intent, callback, errorId) >= 0;
     }
 
@@ -107,11 +115,12 @@ public class WindowAndroid {
      * @param  intent   The PendingIntent that needs to be shown.
      * @param  callback The object that will receive the results for the intent.
      * @param  errorId  The ID of error string to be show if activity is paused before intent
-     *                  results.
+     *                  results, or null if no message is required.
      * @return A non-negative request code that could be used for finishActivity, or
      *         START_INTENT_FAILURE if failed.
      */
-    public int showCancelableIntent(PendingIntent intent, IntentCallback callback, int errorId) {
+    public int showCancelableIntent(
+            PendingIntent intent, IntentCallback callback, Integer errorId) {
         Log.d(TAG, "Can't show intent as context is not an Activity: " + intent);
         return START_INTENT_FAILURE;
     }
@@ -121,11 +130,11 @@ public class WindowAndroid {
      * @param  intent   The intent that needs to be showed.
      * @param  callback The object that will receive the results for the intent.
      * @param  errorId  The ID of error string to be show if activity is paused before intent
-     *                  results.
+     *                  results, or null if no message is required.
      * @return A non-negative request code that could be used for finishActivity, or
      *         START_INTENT_FAILURE if failed.
      */
-    public int showCancelableIntent(Intent intent, IntentCallback callback, int errorId) {
+    public int showCancelableIntent(Intent intent, IntentCallback callback, Integer errorId) {
         Log.d(TAG, "Can't show intent as context is not an Activity: " + intent);
         return START_INTENT_FAILURE;
     }
@@ -287,6 +296,56 @@ public class WindowAndroid {
             mNativeWindowAndroid = nativeInit();
         }
         return mNativeWindowAndroid;
+    }
+
+    /**
+     * Set the animation placeholder view, which we set to 'draw' during animations, such that
+     * animations aren't clipped by the SurfaceView 'hole'. This can be the SurfaceView itself
+     * or a view directly on top of it. This could be extended to many views if we ever need it.
+     */
+    public void setAnimationPlaceholderView(View view) {
+        mAnimationPlaceholderView = view;
+    }
+
+    /**
+     * Start a post-layout animation on top of web content.
+     *
+     * By default, Android optimizes what it shows on top of SurfaceViews (saves power).
+     * Effectively, layouts determine what gets drawn and post-layout animations outside
+     * of this area may be 'clipped'. Using this method to start such animations will
+     * ensure that nothing is clipped during the animation, and restore the optimal
+     * state when the animation ends.
+     */
+    public void startAnimationOverContent(Animator animation) {
+        // We may not need an animation placeholder (eg. Webview doesn't use SurfaceView)
+        if (mAnimationPlaceholderView == null)
+            return;
+        if (animation.isStarted()) throw new IllegalArgumentException("Already started.");
+        boolean added = mAnimationsOverContent.add(animation);
+        if (!added) throw new IllegalArgumentException("Already Added.");
+
+        // We start the animation in this method to help guarantee that we never get stuck in this
+        // state or leak objects into the set. Starting the animation here should guarantee that we
+        // get an onAnimationEnd callback, and remove this animation.
+        animation.start();
+
+        // When the first animation starts, make the placeholder 'draw' itself.
+        if (mAnimationPlaceholderView.willNotDraw()) {
+            mAnimationPlaceholderView.setWillNotDraw(false);
+        }
+
+        // When the last animation ends, remove the placeholder view,
+        // returning to the default optimized state.
+        animation.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                animation.removeListener(this);
+                mAnimationsOverContent.remove(animation);
+                if (mAnimationsOverContent.isEmpty()) {
+                    mAnimationPlaceholderView.setWillNotDraw(true);
+                }
+            }
+        });
     }
 
     private native long nativeInit();

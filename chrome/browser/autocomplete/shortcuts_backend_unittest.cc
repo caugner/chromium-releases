@@ -192,13 +192,11 @@ TEST_F(ShortcutsBackendTest, SanitizeMatchCore) {
       "0,1",     "0,0",      AutocompleteMatchType::SEARCH_HISTORY },
     { "0,1",     "0,0",      AutocompleteMatchType::SEARCH_SUGGEST_ENTITY,
       "",        "",         AutocompleteMatchType::SEARCH_HISTORY },
-    { "0,1",     "0,0",      AutocompleteMatchType::SEARCH_SUGGEST_INFINITE,
+    { "0,1",     "0,0",      AutocompleteMatchType::SEARCH_SUGGEST_TAIL,
       "",        "",         AutocompleteMatchType::SEARCH_HISTORY },
     { "0,1",     "0,0",      AutocompleteMatchType::SEARCH_SUGGEST_PERSONALIZED,
       "",        "",         AutocompleteMatchType::SEARCH_HISTORY },
     { "0,1",     "0,0",      AutocompleteMatchType::SEARCH_SUGGEST_PROFILE,
-      "",        "",         AutocompleteMatchType::SEARCH_HISTORY },
-    { "0,1",     "0,0",      AutocompleteMatchType::SEARCH_SUGGEST_ANSWER,
       "",        "",         AutocompleteMatchType::SEARCH_HISTORY },
   };
 

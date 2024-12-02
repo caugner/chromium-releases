@@ -43,6 +43,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -64,7 +65,6 @@
 #else
 #include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
 #include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
-#include "content/public/browser/web_contents.h"
 #endif
 
 #if defined(ENABLE_EXTENSIONS)
@@ -298,10 +298,10 @@ class DevicePolicyStatusProvider : public CloudPolicyCoreStatusProvider {
  public:
   explicit DevicePolicyStatusProvider(
       policy::BrowserPolicyConnectorChromeOS* connector);
-  virtual ~DevicePolicyStatusProvider();
+  ~DevicePolicyStatusProvider() override;
 
   // CloudPolicyCoreStatusProvider implementation.
-  virtual void GetStatus(base::DictionaryValue* dict) override;
+  void GetStatus(base::DictionaryValue* dict) override;
 
  private:
   std::string domain_;
@@ -322,14 +322,14 @@ class DeviceLocalAccountPolicyStatusProvider
   DeviceLocalAccountPolicyStatusProvider(
       const std::string& user_id,
       policy::DeviceLocalAccountPolicyService* service);
-  virtual ~DeviceLocalAccountPolicyStatusProvider();
+  ~DeviceLocalAccountPolicyStatusProvider() override;
 
   // CloudPolicyStatusProvider implementation.
-  virtual void GetStatus(base::DictionaryValue* dict) override;
+  void GetStatus(base::DictionaryValue* dict) override;
 
   // policy::DeviceLocalAccountPolicyService::Observer implementation.
-  virtual void OnPolicyUpdated(const std::string& user_id) override;
-  virtual void OnDeviceLocalAccountsChanged() override;
+  void OnPolicyUpdated(const std::string& user_id) override;
+  void OnDeviceLocalAccountsChanged() override;
 
  private:
   const std::string user_id_;
@@ -780,8 +780,8 @@ void PolicyUIHandler::OnRefreshPoliciesDone() const {
 }
 
 policy::PolicyService* PolicyUIHandler::GetPolicyService() const {
-  return policy::ProfilePolicyConnectorFactory::GetForProfile(
-      Profile::FromWebUI(web_ui()))->policy_service();
+  return policy::ProfilePolicyConnectorFactory::GetForBrowserContext(
+             web_ui()->GetWebContents()->GetBrowserContext())->policy_service();
 }
 
 PolicyUI::PolicyUI(content::WebUI* web_ui) : WebUIController(web_ui) {

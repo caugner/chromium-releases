@@ -38,23 +38,27 @@ TEST(ParsedCookieTest, TestQuoted) {
   // handle differently.  I've tested Internet Explorer 6, Opera 9.6,
   // Firefox 3, and Safari Windows 3.2.1.  We originally tried to match
   // Firefox closely, however we now match Internet Explorer and Safari.
-  const char* values[] = {
-    // Trailing whitespace after a quoted value.  The whitespace after
-    // the quote is stripped in all browsers.
-    "\"zzz \"  ",              "\"zzz \"",
-    // Handling a quoted value with a ';', like FOO="zz;pp"  ;
-    // IE and Safari: "zz;
-    // Firefox and Opera: "zz;pp"
-    "\"zz;pp\" ;",             "\"zz",
-    // Handling a value with multiple quoted parts, like FOO="zzz "   "ppp" ;
-    // IE and Safari: "zzz "   "ppp";
-    // Firefox: "zzz ";
-    // Opera: <rejects cookie>
-    "\"zzz \"   \"ppp\" ",     "\"zzz \"   \"ppp\"",
-    // A quote in a value that didn't start quoted.  like FOO=A"B ;
-    // IE, Safari, and Firefox: A"B;
-    // Opera: <rejects cookie>
-    "A\"B",                    "A\"B",
+  const char* const values[] = {
+      // Trailing whitespace after a quoted value.  The whitespace after
+      // the quote is stripped in all browsers.
+      "\"zzz \"  ",
+      "\"zzz \"",
+      // Handling a quoted value with a ';', like FOO="zz;pp"  ;
+      // IE and Safari: "zz;
+      // Firefox and Opera: "zz;pp"
+      "\"zz;pp\" ;",
+      "\"zz",
+      // Handling a value with multiple quoted parts, like FOO="zzz "   "ppp" ;
+      // IE and Safari: "zzz "   "ppp";
+      // Firefox: "zzz ";
+      // Opera: <rejects cookie>
+      "\"zzz \"   \"ppp\" ",
+      "\"zzz \"   \"ppp\"",
+      // A quote in a value that didn't start quoted.  like FOO=A"B ;
+      // IE, Safari, and Firefox: A"B;
+      // Opera: <rejects cookie>
+      "A\"B",
+      "A\"B",
   };
 
   for (size_t i = 0; i < arraysize(values); i += 2) {
@@ -169,9 +173,10 @@ TEST(ParsedCookieTest, MultipleEquals) {
 }
 
 TEST(ParsedCookieTest, QuotedTrailingWhitespace) {
-  ParsedCookie pc("ANCUUID=\"zohNumRKgI0oxyhSsV3Z7D\"  ; "
-                      "expires=Sun, 18-Apr-2027 21:06:29 GMT ; "
-                      "path=/  ;  ");
+  ParsedCookie pc(
+      "ANCUUID=\"zohNumRKgI0oxyhSsV3Z7D\"  ; "
+      "expires=Sun, 18-Apr-2027 21:06:29 GMT ; "
+      "path=/  ;  ");
   EXPECT_TRUE(pc.IsValid());
   EXPECT_EQ("ANCUUID", pc.Name());
   // Stripping whitespace after the quotes matches all other major browsers.
@@ -184,9 +189,10 @@ TEST(ParsedCookieTest, QuotedTrailingWhitespace) {
 }
 
 TEST(ParsedCookieTest, TrailingWhitespace) {
-  ParsedCookie pc("ANCUUID=zohNumRKgI0oxyhSsV3Z7D  ; "
-                      "expires=Sun, 18-Apr-2027 21:06:29 GMT ; "
-                      "path=/  ;  ");
+  ParsedCookie pc(
+      "ANCUUID=zohNumRKgI0oxyhSsV3Z7D  ; "
+      "expires=Sun, 18-Apr-2027 21:06:29 GMT ; "
+      "path=/  ;  ");
   EXPECT_TRUE(pc.IsValid());
   EXPECT_EQ("ANCUUID", pc.Name());
   EXPECT_EQ("zohNumRKgI0oxyhSsV3Z7D", pc.Value());
@@ -248,35 +254,30 @@ TEST(ParsedCookieTest, EmbeddedTerminator) {
 }
 
 TEST(ParsedCookieTest, ParseTokensAndValues) {
-  EXPECT_EQ("hello",
-            ParsedCookie::ParseTokenString("hello\nworld"));
-  EXPECT_EQ("fs!!@",
-            ParsedCookie::ParseTokenString("fs!!@;helloworld"));
+  EXPECT_EQ("hello", ParsedCookie::ParseTokenString("hello\nworld"));
+  EXPECT_EQ("fs!!@", ParsedCookie::ParseTokenString("fs!!@;helloworld"));
   EXPECT_EQ("hello world\tgood",
             ParsedCookie::ParseTokenString("hello world\tgood\rbye"));
-  EXPECT_EQ("A",
-            ParsedCookie::ParseTokenString("A=B=C;D=E"));
-  EXPECT_EQ("hello",
-            ParsedCookie::ParseValueString("hello\nworld"));
-  EXPECT_EQ("fs!!@",
-            ParsedCookie::ParseValueString("fs!!@;helloworld"));
+  EXPECT_EQ("A", ParsedCookie::ParseTokenString("A=B=C;D=E"));
+  EXPECT_EQ("hello", ParsedCookie::ParseValueString("hello\nworld"));
+  EXPECT_EQ("fs!!@", ParsedCookie::ParseValueString("fs!!@;helloworld"));
   EXPECT_EQ("hello world\tgood",
             ParsedCookie::ParseValueString("hello world\tgood\rbye"));
-  EXPECT_EQ("A=B=C",
-            ParsedCookie::ParseValueString("A=B=C;D=E"));
+  EXPECT_EQ("A=B=C", ParsedCookie::ParseValueString("A=B=C;D=E"));
 }
 
 TEST(ParsedCookieTest, SerializeCookieLine) {
-  const char input[] = "ANCUUID=zohNumRKgI0oxyhSsV3Z7D  ; "
-                       "expires=Sun, 18-Apr-2027 21:06:29 GMT ; "
-                       "path=/  ;  priority=low  ;  ";
-  const char output[] = "ANCUUID=zohNumRKgI0oxyhSsV3Z7D; "
-                        "expires=Sun, 18-Apr-2027 21:06:29 GMT; "
-                        "path=/; priority=low";
+  const char input[] =
+      "ANCUUID=zohNumRKgI0oxyhSsV3Z7D  ; "
+      "expires=Sun, 18-Apr-2027 21:06:29 GMT ; "
+      "path=/  ;  priority=low  ;  ";
+  const char output[] =
+      "ANCUUID=zohNumRKgI0oxyhSsV3Z7D; "
+      "expires=Sun, 18-Apr-2027 21:06:29 GMT; "
+      "path=/; priority=low";
   ParsedCookie pc(input);
   EXPECT_EQ(output, pc.ToCookieLine());
 }
-
 
 TEST(ParsedCookieTest, SetNameAndValue) {
   ParsedCookie empty((std::string()));
@@ -353,10 +354,11 @@ TEST(ParsedCookieTest, SetAttributes) {
   EXPECT_TRUE(pc.SetIsHttpOnly(true));
   EXPECT_TRUE(pc.SetIsHttpOnly(true));
   EXPECT_TRUE(pc.SetPriority("HIGH"));
-  EXPECT_EQ("name=value; domain=domain.com; path=/; "
-            "expires=Sun, 18-Apr-2027 21:06:29 GMT; max-age=12345; secure; "
-            "httponly; priority=HIGH",
-            pc.ToCookieLine());
+  EXPECT_EQ(
+      "name=value; domain=domain.com; path=/; "
+      "expires=Sun, 18-Apr-2027 21:06:29 GMT; max-age=12345; secure; "
+      "httponly; priority=HIGH",
+      pc.ToCookieLine());
   EXPECT_TRUE(pc.HasDomain());
   EXPECT_TRUE(pc.HasPath());
   EXPECT_TRUE(pc.HasExpires());
@@ -372,17 +374,19 @@ TEST(ParsedCookieTest, SetAttributes) {
   EXPECT_TRUE(pc.HasExpires());
   EXPECT_TRUE(pc.IsSecure());
   EXPECT_TRUE(pc.IsHttpOnly());
-  EXPECT_EQ("name=value; domain=domain.com; path=/foo; "
-            "expires=Sun, 18-Apr-2027 21:06:29 GMT; max-age=12345; secure; "
-            "httponly; priority=HIGH",
-            pc.ToCookieLine());
+  EXPECT_EQ(
+      "name=value; domain=domain.com; path=/foo; "
+      "expires=Sun, 18-Apr-2027 21:06:29 GMT; max-age=12345; secure; "
+      "httponly; priority=HIGH",
+      pc.ToCookieLine());
 
   // Set priority to medium.
   EXPECT_TRUE(pc.SetPriority("medium"));
-  EXPECT_EQ("name=value; domain=domain.com; path=/foo; "
-            "expires=Sun, 18-Apr-2027 21:06:29 GMT; max-age=12345; secure; "
-            "httponly; priority=medium",
-            pc.ToCookieLine());
+  EXPECT_EQ(
+      "name=value; domain=domain.com; path=/foo; "
+      "expires=Sun, 18-Apr-2027 21:06:29 GMT; max-age=12345; secure; "
+      "httponly; priority=medium",
+      pc.ToCookieLine());
 
   // Clear the rest and change the name and value.
   EXPECT_TRUE(pc.SetDomain(std::string()));
@@ -439,20 +443,53 @@ TEST(ParsedCookieTest, SetPriority) {
 
 TEST(ParsedCookieTest, InvalidNonAlphanumericChars) {
   ParsedCookie pc1("name=\x05");
-  ParsedCookie pc2("name=foo" "\x1c" "bar");
-  ParsedCookie pc3("name=foobar" "\x11");
-  ParsedCookie pc4("name=\x02" "foobar");
+  ParsedCookie pc2(
+      "name=foo"
+      "\x1c"
+      "bar");
+  ParsedCookie pc3(
+      "name=foobar"
+      "\x11");
+  ParsedCookie pc4(
+      "name=\x02"
+      "foobar");
 
   ParsedCookie pc5("\x05=value");
-  ParsedCookie pc6("foo" "\x05" "bar=value");
-  ParsedCookie pc7("foobar" "\x05" "=value");
-  ParsedCookie pc8("\x05" "foobar" "=value");
+  ParsedCookie pc6(
+      "foo"
+      "\x05"
+      "bar=value");
+  ParsedCookie pc7(
+      "foobar"
+      "\x05"
+      "=value");
+  ParsedCookie pc8(
+      "\x05"
+      "foobar"
+      "=value");
 
-  ParsedCookie pc9("foo" "\x05" "bar" "=foo" "\x05" "bar");
+  ParsedCookie pc9(
+      "foo"
+      "\x05"
+      "bar"
+      "=foo"
+      "\x05"
+      "bar");
 
-  ParsedCookie pc10("foo=bar;ba" "\x05" "z=boo");
-  ParsedCookie pc11("foo=bar;baz=bo" "\x05" "o");
-  ParsedCookie pc12("foo=bar;ba" "\05" "z=bo" "\x05" "o");
+  ParsedCookie pc10(
+      "foo=bar;ba"
+      "\x05"
+      "z=boo");
+  ParsedCookie pc11(
+      "foo=bar;baz=bo"
+      "\x05"
+      "o");
+  ParsedCookie pc12(
+      "foo=bar;ba"
+      "\05"
+      "z=bo"
+      "\x05"
+      "o");
 
   EXPECT_FALSE(pc1.IsValid());
   EXPECT_FALSE(pc2.IsValid());
@@ -471,14 +508,14 @@ TEST(ParsedCookieTest, InvalidNonAlphanumericChars) {
 TEST(ParsedCookieTest, ValidNonAlphanumericChars) {
   // Note that some of these words are pasted backwords thanks to poor vim bidi
   // support. This should not affect the tests, however.
-  const char* pc1_literal = "name=العربية";
-  const char* pc2_literal = "name=普通話";
-  const char* pc3_literal = "name=ภาษาไทย";
-  const char* pc4_literal = "name=עִבְרִית";
-  const char* pc5_literal = "العربية=value";
-  const char* pc6_literal = "普通話=value";
-  const char* pc7_literal = "ภาษาไทย=value";
-  const char* pc8_literal = "עִבְרִית=value";
+  const char pc1_literal[] = "name=العربية";
+  const char pc2_literal[] = "name=普通話";
+  const char pc3_literal[] = "name=ภาษาไทย";
+  const char pc4_literal[] = "name=עִבְרִית";
+  const char pc5_literal[] = "العربية=value";
+  const char pc6_literal[] = "普通話=value";
+  const char pc7_literal[] = "ภาษาไทย=value";
+  const char pc8_literal[] = "עִבְרִית=value";
   ParsedCookie pc1(pc1_literal);
   ParsedCookie pc2(pc2_literal);
   ParsedCookie pc3(pc3_literal);
@@ -505,5 +542,4 @@ TEST(ParsedCookieTest, ValidNonAlphanumericChars) {
   EXPECT_TRUE(pc8.IsValid());
   EXPECT_EQ(pc8_literal, pc8.ToCookieLine());
 }
-
 }

@@ -6,6 +6,7 @@
 #define GOOGLE_APIS_DRIVE_DRIVE_API_REQUESTS_H_
 
 #include <string>
+#include <vector>
 
 #include "base/callback_forward.h"
 #include "base/location.h"
@@ -22,15 +23,47 @@ namespace google_apis {
 
 // Callback used for requests that the server returns FileList data
 // formatted into JSON value.
-typedef base::Callback<void(GDataErrorCode error,
+typedef base::Callback<void(DriveApiErrorCode error,
                             scoped_ptr<FileList> entry)> FileListCallback;
 
 // Callback used for requests that the server returns ChangeList data
 // formatted into JSON value.
-typedef base::Callback<void(GDataErrorCode error,
+typedef base::Callback<void(DriveApiErrorCode error,
                             scoped_ptr<ChangeList> entry)> ChangeListCallback;
 
 namespace drive {
+
+// Represents a property for a file or a directory.
+// https://developers.google.com/drive/v2/reference/properties
+class Property {
+ public:
+  Property();
+  ~Property();
+
+  // Visibility of the property. Either limited to the same client, or to any.
+  enum Visibility { VISIBILITY_PRIVATE, VISIBILITY_PUBLIC };
+
+  // Whether the property is public or private.
+  Visibility visibility() const { return visibility_; }
+
+  // Name of the property.
+  const std::string& key() const { return key_; }
+
+  // Value of the property.
+  const std::string& value() const { return value_; }
+
+  void set_visibility(Visibility visibility) { visibility_ = visibility; }
+  void set_key(const std::string& key) { key_ = key; }
+  void set_value(const std::string& value) { value_ = value; }
+
+ private:
+  Visibility visibility_;
+  std::string key_;
+  std::string value_;
+};
+
+// List of properties for a single file or a directory.
+typedef std::vector<Property> Properties;
 
 //============================ DriveApiPartialFieldRequest ====================
 
@@ -68,7 +101,7 @@ class DriveApiPartialFieldRequest : public UrlFetchRequestBase {
 template<class DataType>
 class DriveApiDataRequest : public DriveApiPartialFieldRequest {
  public:
-  typedef base::Callback<void(GDataErrorCode error,
+  typedef base::Callback<void(DriveApiErrorCode error,
                               scoped_ptr<DataType> data)> Callback;
 
   // |callback| is called when the request finishes either by success or by
@@ -84,7 +117,7 @@ class DriveApiDataRequest : public DriveApiPartialFieldRequest {
  protected:
   // UrlFetchRequestBase overrides.
   virtual void ProcessURLFetchResults(const net::URLFetcher* source) override {
-    GDataErrorCode error = GetErrorCode();
+    DriveApiErrorCode error = GetErrorCode();
     switch (error) {
       case HTTP_SUCCESS:
       case HTTP_CREATED:
@@ -102,7 +135,7 @@ class DriveApiDataRequest : public DriveApiPartialFieldRequest {
     }
   }
 
-  virtual void RunCallbackOnPrematureFailure(GDataErrorCode error) override {
+  virtual void RunCallbackOnPrematureFailure(DriveApiErrorCode error) override {
     callback_.Run(error, scoped_ptr<DataType>());
   }
 
@@ -114,9 +147,9 @@ class DriveApiDataRequest : public DriveApiPartialFieldRequest {
   }
 
   // Receives the parsed result and invokes the callback.
-  void OnDataParsed(GDataErrorCode error, scoped_ptr<DataType> value) {
+  void OnDataParsed(DriveApiErrorCode error, scoped_ptr<DataType> value) {
     if (!value)
-      error = GDATA_PARSE_ERROR;
+      error = DRIVE_PARSE_ERROR;
     callback_.Run(error, value.Pass());
     OnProcessURLFetchResultsComplete();
   }
@@ -139,6 +172,7 @@ class FilesGetRequest : public DriveApiDataRequest<FileResource> {
  public:
   FilesGetRequest(RequestSender* sender,
                   const DriveApiUrlGenerator& url_generator,
+                  bool use_internal_endpoint,
                   const FileResourceCallback& callback);
   ~FilesGetRequest() override;
 
@@ -146,13 +180,21 @@ class FilesGetRequest : public DriveApiDataRequest<FileResource> {
   const std::string& file_id() const { return file_id_; }
   void set_file_id(const std::string& file_id) { file_id_ = file_id; }
 
+  // Optional parameter.
+  const GURL& embed_origin() const { return embed_origin_; }
+  void set_embed_origin(const GURL& embed_origin) {
+    embed_origin_ = embed_origin;
+  }
+
  protected:
   // Overridden from DriveApiDataRequest.
   GURL GetURLInternal() const override;
 
  private:
   const DriveApiUrlGenerator url_generator_;
+  const bool use_internal_endpoint_;
   std::string file_id_;
+  GURL embed_origin_;
 
   DISALLOW_COPY_AND_ASSIGN(FilesGetRequest);
 };
@@ -297,6 +339,11 @@ class FilesPatchRequest : public DriveApiDataRequest<FileResource> {
   const std::vector<std::string>& parents() const { return parents_; }
   void add_parent(const std::string& parent) { parents_.push_back(parent); }
 
+  const Properties& properties() const { return properties_; }
+  void set_properties(const Properties& properties) {
+    properties_ = properties;
+  }
+
  protected:
   // Overridden from URLFetchRequestBase.
   net::URLFetcher::RequestType GetRequestType() const override;
@@ -318,6 +365,7 @@ class FilesPatchRequest : public DriveApiDataRequest<FileResource> {
   base::Time modified_date_;
   base::Time last_viewed_by_me_date_;
   std::vector<std::string> parents_;
+  Properties properties_;
 
   DISALLOW_COPY_AND_ASSIGN(FilesPatchRequest);
 };
@@ -611,7 +659,7 @@ class AppsListRequest : public DriveApiDataRequest<AppList> {
 
  private:
   const DriveApiUrlGenerator url_generator_;
-  bool use_internal_endpoint_;
+  const bool use_internal_endpoint_;
 
   DISALLOW_COPY_AND_ASSIGN(AppsListRequest);
 };

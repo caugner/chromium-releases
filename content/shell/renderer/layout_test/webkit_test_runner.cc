@@ -35,6 +35,7 @@
 #include "content/shell/renderer/layout_test/gc_controller.h"
 #include "content/shell/renderer/layout_test/layout_test_render_process_observer.h"
 #include "content/shell/renderer/layout_test/leak_detector.h"
+#include "content/shell/renderer/test_runner/mock_presentation_service.h"
 #include "content/shell/renderer/test_runner/mock_screen_orientation_client.h"
 #include "content/shell/renderer/test_runner/web_task.h"
 #include "content/shell/renderer/test_runner/web_test_interfaces.h"
@@ -50,6 +51,7 @@
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebThread.h"
+#include "third_party/WebKit/public/platform/WebTraceLocation.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
@@ -89,6 +91,7 @@ using blink::WebURLError;
 using blink::WebURLRequest;
 using blink::WebScreenOrientationType;
 using blink::WebTestingSupport;
+using blink::WebTraceLocation;
 using blink::WebThread;
 using blink::WebVector;
 using blink::WebView;
@@ -248,17 +251,27 @@ void WebKitTestRunner::DidChangeBatteryStatus(
   MockBatteryStatusChanged(status);
 }
 
+void WebKitTestRunner::SetScreenAvailability(bool available) {
+  proxy()->GetPresentationServiceMock()->SetScreenAvailability(available);
+}
+
+void WebKitTestRunner::ResetPresentationService() {
+  proxy()->GetPresentationServiceMock()->Reset();
+}
+
 void WebKitTestRunner::PrintMessage(const std::string& message) {
   Send(new ShellViewHostMsg_PrintMessage(routing_id(), message));
 }
 
 void WebKitTestRunner::PostTask(WebTask* task) {
   Platform::current()->currentThread()->postTask(
+      WebTraceLocation(__FUNCTION__, __FILE__),
       new InvokeTaskHelper(make_scoped_ptr(task)));
 }
 
 void WebKitTestRunner::PostDelayedTask(WebTask* task, long long ms) {
   Platform::current()->currentThread()->postDelayedTask(
+      WebTraceLocation(__FUNCTION__, __FILE__),
       new InvokeTaskHelper(make_scoped_ptr(task)), ms);
 }
 
@@ -655,7 +668,7 @@ void WebKitTestRunner::Reset() {
   render_view()->ClearEditCommands();
   render_view()->GetWebView()->mainFrame()->setName(WebString());
   render_view()->GetWebView()->mainFrame()->clearOpener();
-  render_view()->GetWebView()->setPageScaleFactorLimits(1, 4);
+  render_view()->GetWebView()->setDefaultPageScaleLimits(1, 4);
   render_view()->GetWebView()->setPageScaleFactor(1, WebPoint(0, 0));
 
   // Resetting the internals object also overrides the WebPreferences, so we

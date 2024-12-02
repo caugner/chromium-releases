@@ -6,13 +6,5 @@
   "mime_types": [
     "text/csv"
   ],
-  "web_accessible_resources": [
-    "test_postmessage.html",
-    "test_postmessage.js",
-    "test.csv"
-  ],
-  "mime_types_handler": "embedded.html",
-  "permissions": [
-    "streamsPrivate"
-  ]
+  "mime_types_handler": "embedded.html"
 }

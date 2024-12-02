@@ -30,14 +30,76 @@
           },
          'includes': [ '../build/repack_action.gypi' ],
         },
-        {
-          'action_name': 'add_en_US_pak_locale',
+      ],
+      'conditions': [
+        ['android_webview_build==0', {
+          'actions': [
+            {
+              'action_name': 'android_webview_locales_rename_paks',
+              'variables': {
+                'rename_locales': 'tools/webview_locales_rename_paks.py',
+              },
+              'inputs': [
+                '<(rename_locales)',
+                '<!@pymod_do_main(webview_locales_rename_paks -i -p <(PRODUCT_DIR) -s <(SHARED_INTERMEDIATE_DIR) <(locales))'
+              ],
+              'outputs': [
+                '<!@pymod_do_main(webview_locales_rename_paks -o -p <(PRODUCT_DIR) -s <(SHARED_INTERMEDIATE_DIR) <(locales))'
+              ],
+              'action': [
+                'python',
+                '<(rename_locales)',
+                '-p', '<(PRODUCT_DIR)',
+                '-s', '<(SHARED_INTERMEDIATE_DIR)',
+                '<@(locales)',
+              ],
+            }
+          ],
+        }],
+        ['v8_use_external_startup_data==1', {
           'variables': {
-            'pak_inputs': ['<(SHARED_INTERMEDIATE_DIR)/content/app/strings/content_strings_en-US.pak'],
-            'pak_output': '<(PRODUCT_DIR)/android_webview_assets/en-US.pak',
+            'conditions': [
+              ['(target_arch=="arm" or target_arch=="ia32" or target_arch=="mipsel")', {
+                'arch_suffix':'32'
+              }],
+              ['(target_arch=="arm64" or target_arch=="x64" or target_arch=="mips64el")', {
+                'arch_suffix':'64'
+              }],
+            ],
           },
-         'includes': [ '../build/repack_action.gypi' ],
-        }
+          'actions': [
+            {
+              'action_name': 'rename_snapshot_blob',
+              'inputs': [
+                '<(PRODUCT_DIR)/snapshot_blob.bin',
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/snapshot_blob_<(arch_suffix).bin',
+              ],
+              'action': [
+                'python',
+                '<(DEPTH)/build/cp.py',
+                '<@(_inputs)',
+                '<@(_outputs)',
+              ],
+            },
+            {
+              'action_name': 'rename_natives_blob',
+              'inputs': [
+                '<(PRODUCT_DIR)/natives_blob.bin',
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/natives_blob_<(arch_suffix).bin',
+              ],
+              'action': [
+                'python',
+                '<(DEPTH)/build/cp.py',
+                '<@(_inputs)',
+                '<@(_outputs)',
+              ],
+            },
+          ],
+        }],
       ],
     },
     {
@@ -103,6 +165,8 @@
         '../components/components.gyp:cdm_renderer',
         '../components/components.gyp:data_reduction_proxy_core_browser',
         '../components/components.gyp:navigation_interception',
+        '../components/components.gyp:printing_common',
+        '../components/components.gyp:printing_renderer',
         '../components/components.gyp:visitedlink_browser',
         '../components/components.gyp:visitedlink_renderer',
         '../components/components.gyp:web_contents_delegate_android',
@@ -120,6 +184,7 @@
         '../third_party/WebKit/public/blink.gyp:blink',
         '../ui/gl/gl.gyp:gl',
         '../ui/shell_dialogs/shell_dialogs.gyp:shell_dialogs',
+        '../v8/tools/gyp/v8.gyp:v8',
         '../webkit/common/gpu/webkit_gpu.gyp:webkit_gpu',
         'android_webview_pak',
         'android_webview_version',
@@ -156,8 +221,13 @@
         'browser/aw_javascript_dialog_manager.h',
         'browser/aw_login_delegate.cc',
         'browser/aw_login_delegate.h',
+        'browser/aw_message_port_message_filter.cc',
+        'browser/aw_message_port_message_filter.h',
+        'browser/aw_message_port_service.h',
         'browser/aw_pref_store.cc',
         'browser/aw_pref_store.h',
+        'browser/aw_printing_message_filter.cc',
+        'browser/aw_printing_message_filter.h',
         'browser/aw_quota_manager_bridge.cc',
         'browser/aw_quota_manager_bridge.h',
         'browser/aw_quota_permission_context.cc',
@@ -224,39 +294,58 @@
         'common/aw_crash_handler.h',
         'common/aw_hit_test_data.cc',
         'common/aw_hit_test_data.h',
+        'common/aw_message_port_messages.h',
         'common/aw_resource.h',
         'common/aw_switches.cc',
         'common/aw_switches.h',
         'common/devtools_instrumentation.h',
-        'common/print_messages.cc',
-        'common/print_messages.h',
         'common/render_view_messages.cc',
         'common/render_view_messages.h',
         'common/url_constants.cc',
         'common/url_constants.h',
+        'crash_reporter/aw_microdump_crash_reporter.h',
         'lib/aw_browser_dependency_factory_impl.cc',
         'lib/aw_browser_dependency_factory_impl.h',
         'lib/main/aw_main_delegate.cc',
         'lib/main/aw_main_delegate.h',
+        'lib/main/webview_jni_onload_delegate.cc',
+        'lib/main/webview_jni_onload_delegate.h',
         'public/browser/draw_gl.h',
         'renderer/aw_content_renderer_client.cc',
         'renderer/aw_content_renderer_client.h',
         'renderer/aw_key_systems.cc',
         'renderer/aw_key_systems.h',
+        'renderer/aw_message_port_client.cc',
+        'renderer/aw_message_port_client.h',
         'renderer/aw_permission_client.cc',
         'renderer/aw_permission_client.h',
+        'renderer/aw_print_web_view_helper_delegate.cc',
+        'renderer/aw_print_web_view_helper_delegate.h',
         'renderer/aw_render_process_observer.cc',
         'renderer/aw_render_process_observer.h',
         'renderer/aw_render_frame_ext.cc',
         'renderer/aw_render_frame_ext.h',
         'renderer/aw_render_view_ext.cc',
         'renderer/aw_render_view_ext.h',
-        'renderer/print_web_view_helper.cc',
-        'renderer/print_web_view_helper.h',
-        'renderer/print_web_view_helper_android.cc',
-        'renderer/print_web_view_helper_linux.cc',
         'renderer/print_render_frame_observer.cc',
         'renderer/print_render_frame_observer.h',
+      ],
+      # TODO(primiano): remove the *_disabled_in_android_builds fallback and
+      # merge this with the target once android_webview_build goes away.
+      'conditions': [
+        ['android_webview_build==0', {
+          'dependencies': [
+            '../components/components.gyp:breakpad_host',
+            '../components/components.gyp:crash_component',
+          ],
+          'sources': [
+            'crash_reporter/aw_microdump_crash_reporter.cc',
+          ],
+        }, {  # android_webview_build==1
+          'sources': [
+            'crash_reporter/aw_microdump_crash_reporter_disabled_in_android_builds.cc',
+          ],
+        }],
       ],
     },
     {

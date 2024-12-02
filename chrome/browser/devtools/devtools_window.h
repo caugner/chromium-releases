@@ -199,7 +199,8 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
   };
 
   DevToolsWindow(Profile* profile,
-                 const GURL& frontend_url,
+                 content::WebContents* main_web_contents,
+                 DevToolsUIBindings* bindings,
                  content::WebContents* inspected_web_contents,
                  bool can_dock);
 
@@ -233,7 +234,7 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
   void AddNewContents(content::WebContents* source,
                       content::WebContents* new_contents,
                       WindowOpenDisposition disposition,
-                      const gfx::Rect& initial_pos,
+                      const gfx::Rect& initial_rect,
                       bool user_gesture,
                       bool* was_blocked) override;
   void WebContentsCreated(content::WebContents* source_contents,

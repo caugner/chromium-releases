@@ -239,8 +239,19 @@ void ToolsMenuModel::Build(Browser* browser) {
     show_create_shortcuts = false;
 #endif
 
-  if (extensions::util::IsStreamlinedHostedAppsEnabled()) {
-    AddItemWithStringId(IDC_CREATE_HOSTED_APP, IDS_CREATE_HOSTED_APP);
+  if (extensions::util::IsNewBookmarkAppsEnabled()) {
+#if defined(OS_MACOSX)
+    int string_id = IDS_ADD_TO_APPLICATIONS;
+#elif defined(OS_WIN)
+    int string_id = IDS_ADD_TO_TASKBAR;
+#else
+    int string_id = IDS_ADD_TO_DESKTOP;
+#endif
+#if defined(USE_ASH)
+    if (browser->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH)
+      string_id = IDS_ADD_TO_SHELF;
+#endif
+    AddItemWithStringId(IDC_CREATE_HOSTED_APP, string_id);
     AddSeparator(ui::NORMAL_SEPARATOR);
   } else if (show_create_shortcuts) {
     AddItemWithStringId(IDC_CREATE_SHORTCUTS, IDS_CREATE_SHORTCUTS);
@@ -253,6 +264,10 @@ void ToolsMenuModel::Build(Browser* browser) {
     AddItemWithStringId(IDC_TASK_MANAGER, IDS_TASK_MANAGER);
 
   AddItemWithStringId(IDC_CLEAR_BROWSING_DATA, IDS_CLEAR_BROWSING_DATA);
+
+#if defined(OS_CHROMEOS)
+  AddItemWithStringId(IDC_TAKE_SCREENSHOT, IDS_TAKE_SCREENSHOT);
+#endif
 
   AddSeparator(ui::NORMAL_SEPARATOR);
 

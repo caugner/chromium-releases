@@ -8,10 +8,12 @@
 #include <set>
 #include <string>
 
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "chrome/browser/signin/easy_unlock_metrics.h"
 #include "chrome/browser/signin/easy_unlock_screenlock_state_handler.h"
 #include "components/keyed_service/core/keyed_service.h"
 
@@ -32,6 +34,7 @@ namespace user_prefs {
 class PrefRegistrySyncable;
 }
 
+class EasyUnlockAppManager;
 class EasyUnlockAuthAttempt;
 class EasyUnlockServiceObserver;
 class Profile;
@@ -50,6 +53,16 @@ class EasyUnlockService : public KeyedService {
     TYPE_SIGNIN
   };
 
+  // Easy Unlock settings that the user can configure.
+  struct UserSettings {
+    UserSettings();
+    ~UserSettings();
+
+    // Whether to require the remote device to be in very close proximity
+    // before allowing unlock (~1 feet).
+    bool require_close_proximity;
+  };
+
   // Gets EasyUnlockService instance.
   static EasyUnlockService* Get(Profile* profile);
 
@@ -66,6 +79,12 @@ class EasyUnlockService : public KeyedService {
   // Removes the hardlock state for the given user.
   static void ResetLocalStateForUser(const std::string& user_id);
 
+  // Returns the user's preferences.
+  static UserSettings GetUserSettings(const std::string& user_id);
+
+  // Returns the identifier for the device.
+  static std::string GetDeviceId();
+
   // Returns true if Easy sign-in is enabled.
   static bool IsSignInEnabled();
 
@@ -75,7 +94,7 @@ class EasyUnlockService : public KeyedService {
   // Returns the user currently associated with the service.
   virtual std::string GetUserEmail() const = 0;
 
-  // Launches Easy Unlock Setup app.
+  // Launches Easy Unlock setup app.
   virtual void LaunchSetup() = 0;
 
   // Gets/Sets/Clears the permit access for the local device.
@@ -113,10 +132,24 @@ class EasyUnlockService : public KeyedService {
   // Records metrics for password based flow for the given user.
   virtual void RecordPasswordLoginEvent(const std::string& user_id) const = 0;
 
+  // Starts auto pairing.
+  typedef base::Callback<void(bool success, const std::string& error)>
+      AutoPairingResultCallback;
+  virtual void StartAutoPairing(const AutoPairingResultCallback& callback) = 0;
+
+  // Sets auto pairing result.
+  virtual void SetAutoPairingResult(bool success, const std::string& error) = 0;
+
+  // Sets the service up and schedules service initialization.
+  void Initialize(scoped_ptr<EasyUnlockAppManager> app_manager);
+
   // Whether easy unlock is allowed to be used. If the controlling preference
   // is set (from policy), this returns the preference value. Otherwise, it is
-  // permitted either the flag is enabled or its field trial is enabled.
-  bool IsAllowed();
+  // permitted if the flag is enabled.
+  bool IsAllowed() const;
+
+  // Whether Easy Unlock is currently enabled for this user.
+  bool IsEnabled() const;
 
   // Sets the hardlock state for the associated user.
   void SetHardlockState(EasyUnlockScreenlockStateHandler::HardlockState state);
@@ -163,6 +196,10 @@ class EasyUnlockService : public KeyedService {
   // trial run initiated by Easy Unlock app.
   void SetTrialRun();
 
+  // Records that the user clicked on the lock icon during the trial run
+  // initiated by the Easy Unlock app.
+  void RecordClickOnLockIcon();
+
   void AddObserver(EasyUnlockServiceObserver* observer);
   void RemoveObserver(EasyUnlockServiceObserver* observer);
 
@@ -179,29 +216,35 @@ class EasyUnlockService : public KeyedService {
   // Service type specific tests for whether the service is allowed. Returns
   // false if service is not allowed. If true is returned, the service may still
   // not be allowed if common tests fail (e.g. if Bluetooth is not available).
-  virtual bool IsAllowedInternal() = 0;
+  virtual bool IsAllowedInternal() const = 0;
+
+  // Called while processing a user gesture to unlock the screen using Easy
+  // Unlock, just before the screen is unlocked.
+  virtual void OnWillFinalizeUnlock(bool success) = 0;
 
   // KeyedService override:
   void Shutdown() override;
 
   // Exposes the profile to which the service is attached to subclasses.
-  Profile* profile() const { return profile_; }
+  const Profile* profile() const { return profile_; }
+  Profile* profile() { return profile_; }
 
-  // Installs the Easy unlock component app if it isn't installed and enables
-  // the app if it is disabled.
-  void LoadApp();
+  // Opens an Easy Unlock Setup app window.
+  void OpenSetupApp();
 
-  // Disables the Easy unlock component app if it's loaded.
-  void DisableAppIfLoaded();
-
-  // Unloads the Easy unlock component app if it's loaded.
-  void UnloadApp();
-
-  // Reloads the Easy unlock component app if it's loaded.
-  void ReloadApp();
+  // Reloads the Easy unlock component app if it's loaded and resets the lock
+  // screen state.
+  void ReloadAppAndLockScreen();
 
   // Checks whether Easy unlock should be running and updates app state.
   void UpdateAppState();
+
+  // Disables easy unlock app without affecting lock screen state.
+  // Used primarily by signin service when user logged in state changes to
+  // logged in but before screen gets unlocked. At this point service shutdown
+  // is imminent and the app can be safely unloaded, but, for esthetic reasons,
+  // the lock screen UI should remain unchanged until the screen unlocks.
+  void DisableAppWithoutResettingScreenlockState();
 
   // Notifies the easy unlock app that the user state has been updated.
   void NotifyUserUpdated();
@@ -226,12 +269,16 @@ class EasyUnlockService : public KeyedService {
       const std::string& user_id,
       EasyUnlockScreenlockStateHandler::HardlockState state);
 
+  // Returns the authentication event for a recent password sign-in or unlock,
+  // according to the current state of the service.
+  EasyUnlockAuthEvent GetPasswordAuthEvent() const;
+
  private:
   // A class to detect whether a bluetooth adapter is present.
   class BluetoothDetector;
 
-  // Initializes the service after ExtensionService is ready.
-  void Initialize();
+  // Initializes the service after EasyUnlockAppManager is ready.
+  void InitializeOnAppManagerReady();
 
   // Gets |screenlock_state_handler_|. Returns NULL if Easy Unlock is not
   // allowed. Otherwise, if |screenlock_state_handler_| is not set, an instance
@@ -257,6 +304,8 @@ class EasyUnlockService : public KeyedService {
   void EnsureTpmKeyPresentIfNeeded();
 
   Profile* profile_;
+
+  scoped_ptr<EasyUnlockAppManager> app_manager_;
 
   // Created lazily in |GetScreenlockStateHandler|.
   scoped_ptr<EasyUnlockScreenlockStateHandler> screenlock_state_handler_;

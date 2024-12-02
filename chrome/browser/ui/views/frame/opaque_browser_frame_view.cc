@@ -327,8 +327,14 @@ void OpaqueBrowserFrameView::ButtonPressed(views::Button* sender,
   } else if (sender == close_button_) {
     frame()->Close();
   } else if (sender == new_avatar_button()) {
+    BrowserWindow::AvatarBubbleMode mode =
+        BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT;
+    if (event.IsMouseEvent() &&
+        static_cast<const ui::MouseEvent&>(event).IsRightMouseButton()) {
+      mode = BrowserWindow::AVATAR_BUBBLE_MODE_FAST_USER_SWITCH;
+    }
     browser_view()->ShowAvatarBubbleFromAvatarButton(
-        BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT,
+        mode,
         signin::ManageAccountsParams());
   }
 }
@@ -588,11 +594,9 @@ gfx::Rect OpaqueBrowserFrameView::IconBounds() const {
 }
 
 bool OpaqueBrowserFrameView::ShouldShowWindowTitleBar() const {
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
   // Do not show the custom title bar if the system title bar option is enabled.
   if (!frame()->UseCustomFrame())
     return false;
-#endif
 
   // Do not show caption buttons if the window manager is forcefully providing a
   // title bar (e.g., in Ubuntu Unity, if the window is maximized).

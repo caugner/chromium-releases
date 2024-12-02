@@ -21,8 +21,8 @@
 #include "media/filters/gpu_video_accelerator_factories.h"
 #include "media/mojo/interfaces/media_renderer.mojom.h"
 #include "media/mojo/services/mojo_renderer_factory.h"
-#include "mojo/public/cpp/application/connect.h"
-#include "mojo/public/interfaces/application/shell.mojom.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/connect.h"
+#include "third_party/mojo/src/mojo/public/interfaces/application/shell.mojom.h"
 
 using mojo::ServiceProviderPtr;
 
@@ -78,6 +78,7 @@ blink::WebMediaPlayer* WebMediaPlayerFactory::CreateMediaPlayer(
     blink::WebLocalFrame* frame,
     const blink::WebURL& url,
     blink::WebMediaPlayerClient* client,
+    media::MediaPermission* media_permission,
     blink::WebContentDecryptionModule* initial_cdm,
     mojo::Shell* shell) {
 #if defined(OS_ANDROID)
@@ -88,8 +89,8 @@ blink::WebMediaPlayer* WebMediaPlayerFactory::CreateMediaPlayer(
 
   if (enable_mojo_media_renderer_) {
     ServiceProviderPtr media_renderer_service_provider;
-    shell->ConnectToApplication("mojo:media",
-                                GetProxy(&media_renderer_service_provider));
+    shell->ConnectToApplication(
+        "mojo:media", GetProxy(&media_renderer_service_provider), nullptr);
     media_renderer_factory.reset(new media::MojoRendererFactory(make_scoped_ptr(
         new RendererServiceProvider(media_renderer_service_provider.Pass()))));
   } else {
@@ -102,7 +103,8 @@ blink::WebMediaPlayer* WebMediaPlayerFactory::CreateMediaPlayer(
   media::WebMediaPlayerParams params(
       media::WebMediaPlayerParams::DeferLoadCB(), CreateAudioRendererSink(),
       media_log, GetMediaThreadTaskRunner(), compositor_task_runner_,
-      media::WebMediaPlayerParams::Context3DCB(), initial_cdm);
+      media::WebMediaPlayerParams::Context3DCB(), media_permission,
+      initial_cdm);
   base::WeakPtr<media::WebMediaPlayerDelegate> delegate;
 
   scoped_ptr<media::CdmFactory> cdm_factory(new media::DefaultCdmFactory());

@@ -362,13 +362,6 @@ class ShelfLayoutManagerTest : public ash::test::AshTestBase {
     return CreateTestWidgetWithParams(params);
   }
 
-  // Overridden from AshTestBase:
-  void SetUp() override {
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        ash::switches::kAshEnableTrayDragging);
-    test::AshTestBase::SetUp();
-  }
-
   void RunGestureDragTests(gfx::Vector2d);
 
   // Turn on the lock screen.
@@ -387,6 +380,7 @@ class ShelfLayoutManagerTest : public ash::test::AshTestBase {
 
   // Open the add user screen if |show| is true, otherwise end it.
   void ShowAddUserScreen(bool show) {
+    SetUserAddingScreenRunning(show);
     ShelfLayoutManager* manager = GetShelfWidget()->shelf_layout_manager();
     manager->SessionStateChanged(
         show ? SessionStateDelegate::SESSION_STATE_LOGIN_SECONDARY :
@@ -784,6 +778,28 @@ TEST_F(ShelfLayoutManagerTest, SideAlignmentInteractionWithAddUserScreen) {
   EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, manager->GetAlignment());
   ShowAddUserScreen(false);
   EXPECT_EQ(SHELF_ALIGNMENT_LEFT, manager->GetAlignment());
+}
+
+// Makes sure shelf alignment is correct for login screen.
+TEST_F(ShelfLayoutManagerTest, SideAlignmentInteractionWithLoginScreen) {
+  ShelfLayoutManager* manager = GetShelfWidget()->shelf_layout_manager();
+  ASSERT_EQ(SHELF_ALIGNMENT_BOTTOM, manager->GetAlignment());
+  SetUserLoggedIn(false);
+  SetSessionStarted(false);
+
+  // The test session state delegate does not fire state changes.
+  SetSessionStarting();
+  manager->SessionStateChanged(
+      Shell::GetInstance()->session_state_delegate()->GetSessionState());
+
+  // Login sets alignment preferences before the session completes startup.
+  manager->SetAlignment(SHELF_ALIGNMENT_LEFT);
+  SetUserLoggedIn(true);
+  SetSessionStarted(true);
+
+  EXPECT_EQ(SHELF_ALIGNMENT_LEFT, manager->GetAlignment());
+  // Ensure that the shelf has been notified.
+  EXPECT_EQ(SHELF_ALIGNMENT_LEFT, GetShelfWidget()->shelf()->alignment());
 }
 
 // Makes sure LayoutShelf invoked while animating cleans things up.
@@ -1472,6 +1488,87 @@ TEST_F(ShelfLayoutManagerTest, OpenAppListWithShelfHiddenState) {
   EXPECT_EQ(SHELF_HIDDEN, shelf->visibility_state());
 }
 
+// Tests the correct behavior of the shelf when there is a system modal window
+// open when we have a single display.
+TEST_F(ShelfLayoutManagerTest, ShelfWithSystemModalWindowSingleDisplay) {
+  Shell* shell = Shell::GetInstance();
+  ShelfLayoutManager* shelf = GetShelfLayoutManager();
+  shelf->LayoutShelf();
+  shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+
+  aura::Window* window = CreateTestWindow();
+  window->SetBounds(gfx::Rect(0, 0, 100, 100));
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
+  window->Show();
+  wm::ActivateWindow(window);
+
+  // Enable system modal dialog, and make sure shelf is still hidden.
+  shell->SimulateModalWindowOpenForTesting(true);
+  EXPECT_TRUE(shell->IsSystemModalWindowOpen());
+  EXPECT_FALSE(wm::CanActivateWindow(window));
+  shell->UpdateShelfVisibility();
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
+}
+
+// Tests the correct behavior of the shelf when there is a system modal window
+// open when we have dual display.
+TEST_F(ShelfLayoutManagerTest, ShelfWithSystemModalWindowDualDisplay) {
+  if (!SupportsMultipleDisplays())
+    return;
+
+  // Create two displays.
+  Shell* shell = Shell::GetInstance();
+  DisplayManager* display_manager = shell->display_manager();
+  UpdateDisplay("200x200,100x100");
+  EXPECT_EQ(2U, display_manager->GetNumDisplays());
+
+  DisplayController* display_controller = shell->display_controller();
+  aura::Window::Windows root_windows = display_controller->GetAllRootWindows();
+  EXPECT_EQ(root_windows.size(), 2U);
+
+  // Get the shelves in both displays and set them to be 'AutoHide'.
+  ShelfLayoutManager* shelf_1 =
+      GetRootWindowController(root_windows[0])->GetShelfLayoutManager();
+  ShelfLayoutManager* shelf_2 =
+      GetRootWindowController(root_windows[1])->GetShelfLayoutManager();
+  EXPECT_NE(shelf_1, shelf_2);
+  EXPECT_NE(shelf_1->shelf_widget()->GetNativeWindow()->GetRootWindow(),
+            shelf_2->shelf_widget()->GetNativeWindow()->GetRootWindow());
+  shelf_1->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  shelf_1->LayoutShelf();
+  shelf_2->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  shelf_2->LayoutShelf();
+
+  // Create a window in each display and show them in maximized state.
+  aura::Window* window_1 = CreateTestWindowInParent(root_windows[0]);
+  window_1->SetBounds(gfx::Rect(0, 0, 100, 100));
+  window_1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
+  window_1->Show();
+  aura::Window* window_2 = CreateTestWindowInParent(root_windows[1]);
+  window_2->SetBounds(gfx::Rect(201, 0, 100, 100));
+  window_2->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
+  window_2->Show();
+
+  EXPECT_EQ(shelf_1->shelf_widget()->GetNativeWindow()->GetRootWindow(),
+            window_1->GetRootWindow());
+  EXPECT_EQ(shelf_2->shelf_widget()->GetNativeWindow()->GetRootWindow(),
+            window_2->GetRootWindow());
+  EXPECT_TRUE(window_1->IsVisible());
+  EXPECT_TRUE(window_2->IsVisible());
+
+  // Enable system modal dialog, and make sure both shelves are still hidden.
+  shell->SimulateModalWindowOpenForTesting(true);
+  EXPECT_TRUE(shell->IsSystemModalWindowOpen());
+  EXPECT_FALSE(wm::CanActivateWindow(window_1));
+  EXPECT_FALSE(wm::CanActivateWindow(window_2));
+  shell->UpdateShelfVisibility();
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf_1->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf_1->auto_hide_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf_2->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf_2->auto_hide_state());
+}
+
 // Tests that the shelf is only hidden for a fullscreen window at the front and
 // toggles visibility when another window is activated.
 TEST_F(ShelfLayoutManagerTest, FullscreenWindowInFrontHidesShelf) {
@@ -1845,54 +1942,6 @@ TEST_F(ShelfLayoutManagerTest, ShelfAnimatesWhenGestureComplete) {
   }
 }
 
-TEST_F(ShelfLayoutManagerTest, GestureRevealsTrayBubble) {
-  if (!SupportsHostWindowResize())
-    return;
-
-  ShelfLayoutManager* shelf = GetShelfLayoutManager();
-  shelf->LayoutShelf();
-
-  // Create a visible window so auto-hide behavior is enforced.
-  CreateTestWidget();
-
-  ui::test::EventGenerator generator(Shell::GetPrimaryRootWindow());
-  SystemTray* tray = GetSystemTray();
-
-  // First, make sure the shelf is visible.
-  shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_NEVER);
-  EXPECT_FALSE(tray->HasSystemBubble());
-
-  // Now, drag up on the tray to show the bubble.
-  gfx::Point start = GetShelfWidget()->status_area_widget()->
-      GetWindowBoundsInScreen().CenterPoint();
-  gfx::Point end(start.x(), start.y() - 100);
-  generator.GestureScrollSequence(start, end,
-      base::TimeDelta::FromMilliseconds(10), 1);
-  EXPECT_TRUE(tray->HasSystemBubble());
-  tray->CloseSystemBubble();
-  RunAllPendingInMessageLoop();
-  EXPECT_FALSE(tray->HasSystemBubble());
-
-  // Drag again, but only a small amount, and slowly. The bubble should not be
-  // visible.
-  end.set_y(start.y() - 30);
-  generator.GestureScrollSequence(start, end,
-      base::TimeDelta::FromMilliseconds(500), 100);
-  EXPECT_FALSE(tray->HasSystemBubble());
-
-  // Now, hide the shelf.
-  shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
-
-  // Start a drag from the bezel, and drag up to show both the shelf and the
-  // tray bubble.
-  start.set_y(start.y() + 100);
-  end.set_y(start.y() - 400);
-  generator.GestureScrollSequence(start, end,
-      base::TimeDelta::FromMilliseconds(10), 1);
-  EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
-  EXPECT_TRUE(tray->HasSystemBubble());
-}
-
 TEST_F(ShelfLayoutManagerTest, ShelfFlickerOnTrayActivation) {
   ShelfLayoutManager* shelf = GetShelfLayoutManager();
 
@@ -2138,6 +2187,31 @@ TEST_F(ShelfLayoutManagerTest,
   shelf_manager->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_NEVER);
   gfx::Rect reshow_target_bounds = status_window->GetTargetBounds();
   EXPECT_EQ(initial_bounds, reshow_target_bounds);
+}
+
+// Tests that during shutdown, that window activation changes are properly
+// handled, and do not crash (crbug.com/458768)
+TEST_F(ShelfLayoutManagerTest, ShutdownHandlesWindowActivation) {
+  ShelfLayoutManager* shelf_manager = GetShelfLayoutManager();
+  ShelfWidget* shelf = GetShelfWidget();
+  shelf_manager->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+
+  aura::Window* window1 = CreateTestWindowInShellWithId(0);
+  window1->SetBounds(gfx::Rect(0, 0, 100, 100));
+  window1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
+  window1->Show();
+  scoped_ptr<aura::Window> window2(CreateTestWindowInShellWithId(0));
+  window2->SetBounds(gfx::Rect(0, 0, 100, 100));
+  window2->Show();
+  wm::ActivateWindow(window1);
+
+  shelf->ShutdownStatusAreaWidget();
+  shelf_manager->PrepareForShutdown();
+
+  // Deleting a focused maximized window will switch focus to |window2|. This
+  // would normally cause the ShelfLayoutManager to update its state. However
+  // during shutdown we want to handle this without crashing.
+  delete window1;
 }
 
 }  // namespace ash

@@ -171,7 +171,7 @@ base::DictionaryValue* ExtensionTabUtil::OpenTab(
 
   GURL url;
   if (params.url.get()) {
-    std::string url_string= *params.url;
+    std::string url_string = *params.url;
     url = ExtensionTabUtil::ResolvePossiblyRelativeURL(url_string,
                                                        function->extension());
     if (!url.is_valid()) {
@@ -528,7 +528,7 @@ bool ExtensionTabUtil::IsCrashURL(const GURL& url) {
 void ExtensionTabUtil::CreateTab(WebContents* web_contents,
                                  const std::string& extension_id,
                                  WindowOpenDisposition disposition,
-                                 const gfx::Rect& initial_pos,
+                                 const gfx::Rect& initial_rect,
                                  bool user_gesture) {
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
@@ -548,7 +548,7 @@ void ExtensionTabUtil::CreateTab(WebContents* web_contents,
     params.extension_app_id = extension_id;
 
   params.disposition = disposition;
-  params.window_bounds = initial_pos;
+  params.window_bounds = initial_rect;
   params.window_action = chrome::NavigateParams::SHOW_WINDOW;
   params.user_gesture = user_gesture;
   chrome::Navigate(&params);
@@ -575,9 +575,10 @@ WindowController* ExtensionTabUtil::GetWindowControllerOfTab(
   return NULL;
 }
 
-void ExtensionTabUtil::OpenOptionsPage(const Extension* extension,
+bool ExtensionTabUtil::OpenOptionsPage(const Extension* extension,
                                        Browser* browser) {
-  DCHECK(OptionsPageInfo::HasOptionsPage(extension));
+  if (!OptionsPageInfo::HasOptionsPage(extension))
+    return false;
 
   // Force the options page to open in non-OTR window, because it won't be
   // able to save settings from OTR.
@@ -617,6 +618,8 @@ void ExtensionTabUtil::OpenOptionsPage(const Extension* extension,
         browser->tab_strip_model()->GetActiveWebContents();
     web_contents->GetDelegate()->ActivateContents(web_contents);
   }
+
+  return true;
 }
 
 }  // namespace extensions

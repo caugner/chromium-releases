@@ -35,8 +35,10 @@ class TestRenderFrameHostCreationObserver : public WebContentsObserver {
 class TestRenderFrameHost : public RenderFrameHostImpl,
                             public RenderFrameHostTester {
  public:
-  TestRenderFrameHost(RenderViewHostImpl* render_view_host,
+  TestRenderFrameHost(SiteInstance* site_instance,
+                      RenderViewHostImpl* render_view_host,
                       RenderFrameHostDelegate* delegate,
+                      RenderWidgetHostDelegate* rwh_delegate,
                       FrameTree* frame_tree,
                       FrameTreeNode* frame_tree_node,
                       int routing_id,
@@ -83,7 +85,7 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
       int response_code,
       const base::FilePath* file_path_for_history_item,
       const std::vector<GURL>& redirects);
-  void SendBeginNavigationWithURL(const GURL& url);
+  void SendBeginNavigationWithURL(const GURL& url, bool has_user_gesture);
 
   void DidDisownOpener();
 

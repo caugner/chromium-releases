@@ -8,21 +8,27 @@
 
 namespace autofill {
 
-TestAutofillClient::TestAutofillClient() {
+TestAutofillClient::TestAutofillClient()
+    : token_service_(new FakeOAuth2TokenService()),
+      identity_provider_(new FakeIdentityProvider(token_service_.get())) {
 }
 TestAutofillClient::~TestAutofillClient() {
 }
 
 PersonalDataManager* TestAutofillClient::GetPersonalDataManager() {
-  return NULL;
+  return nullptr;
 }
 
 scoped_refptr<AutofillWebDataService> TestAutofillClient::GetDatabase() {
-  return scoped_refptr<AutofillWebDataService>(NULL);
+  return scoped_refptr<AutofillWebDataService>(nullptr);
 }
 
 PrefService* TestAutofillClient::GetPrefs() {
   return prefs_.get();
+}
+
+IdentityProvider* TestAutofillClient::GetIdentityProvider() {
+  return identity_provider_.get();
 }
 
 void TestAutofillClient::HideRequestAutocompleteDialog() {
@@ -87,6 +93,10 @@ void TestAutofillClient::DidFillOrPreviewField(
 }
 
 void TestAutofillClient::OnFirstUserGestureObserved() {
+}
+
+void TestAutofillClient::LinkClicked(const GURL& url,
+                                     WindowOpenDisposition disposition) {
 }
 
 }  // namespace autofill

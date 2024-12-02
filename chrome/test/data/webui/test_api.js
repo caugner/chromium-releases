@@ -150,7 +150,12 @@ var testing = {};
      * @return {axs.AuditConfiguration}
      */
     get accessibilityAuditConfig() {
-      if (!this.accessibilityAuditConfig_) {
+      // The axs namespace is not available in chromevox tests.
+      // Further, 'window' is not available in unit tests, but since the
+      // accessibility audit library pulls in the closure library,
+      // 'goog.global' has to be present if axs is, so we use that here.
+      if (!this.accessibilityAuditConfig_ &&
+          goog && goog.global && goog.global.axs) {
         this.accessibilityAuditConfig_ = new axs.AuditConfiguration();
 
         this.accessibilityAuditConfig_.showUnsupportedRulesWarning = false;
@@ -280,7 +285,19 @@ var testing = {};
      * Override this method to perform tasks before running your test.
      * @type {Function}
      */
-    setUp: function() {},
+    setUp: function() {
+      var auditConfig = this.accessibilityAuditConfig;
+      if (auditConfig) {
+        // These should be ignored in many of the web UI tests.
+        // user-image-stream and supervised-user-creation-image-stream are
+        // streaming video elements used for capturing a user image so they
+        // won't have captions and should be ignored everywhere.
+        auditConfig.ignoreSelectors('videoWithoutCaptions',
+                                    '.user-image-stream');
+        auditConfig.ignoreSelectors(
+            'videoWithoutCaptions', '.supervised-user-creation-image-stream');
+      }
+    },
 
     /**
      * Override this method to perform tasks after running your test. If you

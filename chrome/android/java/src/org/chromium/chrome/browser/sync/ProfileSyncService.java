@@ -14,6 +14,7 @@ import org.chromium.base.ApplicationStatus.ActivityStateListener;
 import org.chromium.base.CalledByNative;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.chrome.browser.identity.UniqueIdentificationGenerator;
 import org.chromium.chrome.browser.invalidation.InvalidationServiceFactory;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -74,6 +75,7 @@ public class ProfileSyncService {
      * @param context the ApplicationContext is retrieved from the context used as an argument.
      * @return a singleton instance of the SyncSetupManager
      */
+    @SuppressFBWarnings("LI_LAZY_INIT")
     public static ProfileSyncService get(Context context) {
         ThreadUtils.assertOnUiThread();
         if (sSyncSetupManager == null) {
@@ -326,13 +328,26 @@ public class ProfileSyncService {
     }
 
     /**
-     * Gets the set of data types that are currently enabled to sync.
+     * Gets the set of data types that are currently syncing.
      *
-     * @return Set of enabled types.
+     * This is affected by whether sync is on.
+     *
+     * @return Set of active data types.
+     */
+    public Set<ModelType> getActiveDataTypes() {
+        long modelTypeSelection = nativeGetActiveDataTypes(mNativeProfileSyncServiceAndroid);
+        return modelTypeSelectionToSet(modelTypeSelection);
+    }
+
+    /**
+     * Gets the set of data types that are enabled in sync.
+     *
+     * This is unaffected by whether sync is on.
+     *
+     * @return Set of preferred types.
      */
     public Set<ModelType> getPreferredDataTypes() {
-        long modelTypeSelection =
-                nativeGetEnabledDataTypes(mNativeProfileSyncServiceAndroid);
+        long modelTypeSelection = nativeGetPreferredDataTypes(mNativeProfileSyncServiceAndroid);
         return modelTypeSelectionToSet(modelTypeSelection);
     }
 
@@ -540,6 +555,15 @@ public class ProfileSyncService {
         return sb.toString();
     }
 
+    /**
+     * @return Whether sync is enabled to sync urls or open tabs with a non custom passphrase.
+     */
+    public boolean isSyncingUrlsWithKeystorePassphrase() {
+        return isSyncInitialized()
+            && getPreferredDataTypes().contains(ModelType.TYPED_URL)
+            && getPassphraseType().equals(PassphraseType.KEYSTORE_PASSPHRASE);
+    }
+
     // Native methods
     private native long nativeInit();
     private native void nativeEnableSync(long nativeProfileSyncServiceAndroid);
@@ -577,7 +601,8 @@ public class ProfileSyncService {
     private native String nativeGetSyncEnterCustomPassphraseBodyText(
             long nativeProfileSyncServiceAndroid);
     private native boolean nativeIsSyncKeystoreMigrationDone(long nativeProfileSyncServiceAndroid);
-    private native long nativeGetEnabledDataTypes(long nativeProfileSyncServiceAndroid);
+    private native long nativeGetActiveDataTypes(long nativeProfileSyncServiceAndroid);
+    private native long nativeGetPreferredDataTypes(long nativeProfileSyncServiceAndroid);
     private native void nativeSetPreferredDataTypes(
             long nativeProfileSyncServiceAndroid, boolean syncEverything, long modelTypeSelection);
     private native void nativeSetSetupInProgress(

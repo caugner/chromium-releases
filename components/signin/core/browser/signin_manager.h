@@ -46,7 +46,8 @@ class SigninAccountIdHelper;
 class SigninClient;
 
 class SigninManager : public SigninManagerBase,
-                      public AccountTrackerService::Observer {
+                      public AccountTrackerService::Observer,
+                      public MergeSessionHelper::Observer {
  public:
   // The callback invoked once the OAuth token has been fetched during signin,
   // but before the profile transitions to the "signed-in" state. This allows
@@ -99,6 +100,9 @@ class SigninManager : public SigninManagerBase,
   // initialization and sign the user out.
   void Initialize(PrefService* local_state) override;
   void Shutdown() override;
+
+  // If applicable, merge the signed in account into the cookie jar.
+  void MergeSigninCredentialIntoCookieJar();
 
   // Invoked from an OAuthTokenFetchedCallback to complete user signin.
   virtual void CompletePendingSignin();
@@ -175,6 +179,13 @@ class SigninManager : public SigninManagerBase,
       override;
   void OnAccountUpdateFailed(const std::string& account_id) override;
 
+  // MergeSessionHelper::Observer implementation. SigninManager controls the
+  // lifetime if the MergeSessionHelper, so SigninManager takes responsibility
+  // for propogating these notifications.
+  void MergeSessionCompleted(const std::string& account_id,
+                             const GoogleServiceAuthError& error) override;
+  void GetCheckConnectionInfoCompleted(bool succeeded) override;
+
   // Called when a new request to re-authenticate a user is in progress.
   // Will clear in memory data but leaves the db as such so when the browser
   // restarts we can use the old token(which might throw a password error).
@@ -225,6 +236,9 @@ class SigninManager : public SigninManagerBase,
 
   // Helper to merge signed in account into the content area.
   scoped_ptr<MergeSessionHelper> merge_session_helper_;
+
+  // Observers of the |merge_session_helper_| across reset()s.
+  ObserverList<MergeSessionHelper::Observer, true> merge_session_observer_list_;
 
   // Two gate conditions for when PostSignedIn should be called. Verify
   // that the SigninManager has reached OnSignedIn() and the AccountTracker

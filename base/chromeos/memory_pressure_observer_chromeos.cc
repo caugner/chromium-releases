@@ -5,6 +5,7 @@
 #include "base/chromeos/memory_pressure_observer_chromeos.h"
 
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/process/process_metrics.h"
 #include "base/time/time.h"
 
@@ -24,25 +25,66 @@ const int kModerateMemoryPressureCooldown =
     kModerateMemoryPressureCooldownMs / kMemoryPressureIntervalMs;
 
 // Threshold constants to emit pressure events.
-const int kMemoryPressureModerateThresholdPercent = 70;
-const int kMemoryPressureCriticalThresholdPercent = 90;
+const int kNormalMemoryPressureModerateThresholdPercent = 60;
+const int kNormalMemoryPressureCriticalThresholdPercent = 90;
+const int kAggressiveMemoryPressureModerateThresholdPercent = 35;
+const int kAggressiveMemoryPressureCriticalThresholdPercent = 70;
+
+// The possible state for memory pressure level. The values should be in line
+// with values in MemoryPressureListener::MemoryPressureLevel and should be
+// updated if more memory pressure levels are introduced.
+enum MemoryPressureLevelUMA {
+  MEMORY_PRESSURE_LEVEL_NONE = 0,
+  MEMORY_PRESSURE_LEVEL_MODERATE,
+  MEMORY_PRESSURE_LEVEL_CRITICAL,
+  NUM_MEMORY_PRESSURE_LEVELS
+};
+
+// Converts a |MemoryPressureThreshold| value into a used memory percentage for
+// the moderate pressure event.
+int GetModerateMemoryThresholdInPercent(
+    MemoryPressureObserverChromeOS::MemoryPressureThresholds thresholds) {
+  return thresholds == MemoryPressureObserverChromeOS::
+                           THRESHOLD_AGGRESSIVE_CACHE_DISCARD ||
+         thresholds == MemoryPressureObserverChromeOS::THRESHOLD_AGGRESSIVE
+             ? kAggressiveMemoryPressureModerateThresholdPercent
+             : kNormalMemoryPressureModerateThresholdPercent;
+}
+
+// Converts a |MemoryPressureThreshold| value into a used memory percentage for
+// the critical pressure event.
+int GetCriticalMemoryThresholdInPercent(
+    MemoryPressureObserverChromeOS::MemoryPressureThresholds thresholds) {
+  return thresholds == MemoryPressureObserverChromeOS::
+                           THRESHOLD_AGGRESSIVE_TAB_DISCARD ||
+         thresholds == MemoryPressureObserverChromeOS::THRESHOLD_AGGRESSIVE
+             ? kAggressiveMemoryPressureCriticalThresholdPercent
+             : kNormalMemoryPressureCriticalThresholdPercent;
+}
 
 // Converts free percent of memory into a memory pressure value.
 MemoryPressureListener::MemoryPressureLevel GetMemoryPressureLevelFromFillLevel(
-    int memory_fill_level) {
-  if (memory_fill_level < kMemoryPressureModerateThresholdPercent)
+    int actual_fill_level,
+    int moderate_threshold,
+    int critical_threshold) {
+  if (actual_fill_level < moderate_threshold)
     return MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE;
-  return memory_fill_level < kMemoryPressureCriticalThresholdPercent ?
-      MemoryPressureListener::MEMORY_PRESSURE_LEVEL_MODERATE :
-      MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL;
+  return actual_fill_level < critical_threshold
+             ? MemoryPressureListener::MEMORY_PRESSURE_LEVEL_MODERATE
+             : MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL;
 }
 
 }  // namespace
 
-MemoryPressureObserverChromeOS::MemoryPressureObserverChromeOS()
+MemoryPressureObserverChromeOS::MemoryPressureObserverChromeOS(
+    MemoryPressureThresholds thresholds)
     : current_memory_pressure_level_(
-        MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE),
+          MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE),
       moderate_pressure_repeat_count_(0),
+      moderate_pressure_threshold_percent_(
+          GetModerateMemoryThresholdInPercent(thresholds)),
+      critical_pressure_threshold_percent_(
+          GetCriticalMemoryThresholdInPercent(thresholds)),
       weak_ptr_factory_(this) {
   StartObserving();
 }
@@ -61,7 +103,8 @@ void MemoryPressureObserverChromeOS::ScheduleEarlyCheck() {
 void MemoryPressureObserverChromeOS::StartObserving() {
   timer_.Start(FROM_HERE,
                TimeDelta::FromMilliseconds(kMemoryPressureIntervalMs),
-               Bind(&MemoryPressureObserverChromeOS::CheckMemoryPressure,
+               Bind(&MemoryPressureObserverChromeOS::
+                        CheckMemoryPressureAndRecordStatistics,
                     weak_ptr_factory_.GetWeakPtr()));
 }
 
@@ -70,11 +113,35 @@ void MemoryPressureObserverChromeOS::StopObserving() {
   timer_.Stop();
 }
 
+void MemoryPressureObserverChromeOS::CheckMemoryPressureAndRecordStatistics() {
+  CheckMemoryPressure();
+
+  // Record UMA histogram statistics for the current memory pressure level.
+  MemoryPressureLevelUMA memory_pressure_level_uma(MEMORY_PRESSURE_LEVEL_NONE);
+  switch (current_memory_pressure_level_) {
+    case MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE:
+      memory_pressure_level_uma = MEMORY_PRESSURE_LEVEL_NONE;
+      break;
+    case MemoryPressureListener::MEMORY_PRESSURE_LEVEL_MODERATE:
+      memory_pressure_level_uma = MEMORY_PRESSURE_LEVEL_MODERATE;
+      break;
+    case MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL:
+      memory_pressure_level_uma = MEMORY_PRESSURE_LEVEL_CRITICAL;
+      break;
+  }
+
+  UMA_HISTOGRAM_ENUMERATION("ChromeOS.MemoryPressureLevel",
+                            memory_pressure_level_uma,
+                            NUM_MEMORY_PRESSURE_LEVELS);
+}
+
 void MemoryPressureObserverChromeOS::CheckMemoryPressure() {
   MemoryPressureListener::MemoryPressureLevel old_pressure =
       current_memory_pressure_level_;
   current_memory_pressure_level_ =
-      GetMemoryPressureLevelFromFillLevel(GetUsedMemoryInPercent());
+      GetMemoryPressureLevelFromFillLevel(GetUsedMemoryInPercent(),
+                                          moderate_pressure_threshold_percent_,
+                                          critical_pressure_threshold_percent_);
   // In case there is no memory pressure we do not notify.
   if (current_memory_pressure_level_ ==
       MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE) {

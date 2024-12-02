@@ -5,10 +5,14 @@
 #include "components/password_manager/core/browser/affiliation_utils.h"
 
 #include <algorithm>
+#include <ostream>
 
 #include "base/base64.h"
+#include "base/command_line.h"
+#include "base/metrics/field_trial.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
+#include "components/password_manager/core/common/password_manager_switches.h"
 #include "net/base/escape.h"
 #include "url/third_party/mozilla/url_parse.h"
 #include "url/url_canon_stdstring.h"
@@ -55,8 +59,7 @@ bool CanonicalizeWebFacetURI(const std::string& input_uri,
       &canonical_output, &canonical_parsed);
   canonical_output.Complete();
 
-  if (canonicalization_succeeded &&
-      canonical_parsed.host.is_nonempty() &&
+  if (canonicalization_succeeded && canonical_parsed.host.is_nonempty() &&
       !canonical_parsed.username.is_valid() &&
       !canonical_parsed.password.is_valid() &&
       ComponentString(*canonical_uri, canonical_parsed.path) == "/" &&
@@ -98,8 +101,8 @@ bool CanonicalizeHashComponent(const base::StringPiece& input_hash,
 
   if (!base64_encoded_hash.empty() &&
       CanonicalizeBase64Padding(&base64_encoded_hash) &&
-      ContainsOnlyAlphanumericAnd(
-          base64_encoded_hash, kBase64NonAlphanumericChars)) {
+      ContainsOnlyAlphanumericAnd(base64_encoded_hash,
+                                  kBase64NonAlphanumericChars)) {
     canonical_output->Append(base64_encoded_hash.data(),
                              base64_encoded_hash.size());
     canonical_output->push_back('@');
@@ -122,8 +125,8 @@ bool CanonicalizePackageNameComponent(
 
   // TODO(engedy): We might want to use a regex to check this more throughly.
   if (!package_name.empty() &&
-      ContainsOnlyAlphanumericAnd(
-          package_name, kPackageNameNonAlphanumericChars)) {
+      ContainsOnlyAlphanumericAnd(package_name,
+                                  kPackageNameNonAlphanumericChars)) {
     canonical_output->Append(package_name.data(), package_name.size());
     return true;
   }
@@ -186,6 +189,9 @@ bool ParseAndCanonicalizeFacetURI(const std::string& input_uri,
 }
 
 }  // namespace
+
+
+// FacetURI -------------------------------------------------------------------
 
 FacetURI::FacetURI() : is_valid_(false) {
 }
@@ -254,6 +260,22 @@ FacetURI::FacetURI(const std::string& canonical_spec, bool is_valid)
                         &parsed_);
 }
 
+
+// AffiliatedFacetsWithUpdateTime ---------------------------------------------
+
+AffiliatedFacetsWithUpdateTime::AffiliatedFacetsWithUpdateTime() {
+}
+
+AffiliatedFacetsWithUpdateTime::~AffiliatedFacetsWithUpdateTime() {
+}
+
+
+// Helpers --------------------------------------------------------------------
+
+std::ostream& operator<<(std::ostream& os, const FacetURI& facet_uri) {
+  return os << facet_uri.potentially_invalid_spec();
+}
+
 bool AreEquivalenceClassesEqual(const AffiliatedFacets& a,
                                 const AffiliatedFacets& b) {
   if (a.size() != b.size())
@@ -264,6 +286,19 @@ bool AreEquivalenceClassesEqual(const AffiliatedFacets& a,
   std::sort(a_sorted.begin(), a_sorted.end());
   std::sort(b_sorted.begin(), b_sorted.end());
   return std::equal(a_sorted.begin(), a_sorted.end(), b_sorted.begin());
+}
+
+bool IsAffiliationBasedMatchingEnabled(const base::CommandLine& command_line) {
+  // Note: It is important to always query the field trial state, to ensure that
+  // UMA reports the correct group.
+  const std::string group_name =
+      base::FieldTrialList::FindFullName("AffiliationBasedMatching");
+
+  if (command_line.HasSwitch(switches::kDisableAffiliationBasedMatching))
+    return false;
+  if (command_line.HasSwitch(switches::kEnableAffiliationBasedMatching))
+    return true;
+  return StartsWithASCII(group_name, "Enabled", /*case_sensitive=*/false);
 }
 
 bool IsValidAndroidFacetURI(const std::string& url) {

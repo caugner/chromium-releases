@@ -12,6 +12,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_vector.h"
+#include "ui/ozone/ozone_export.h"
 #include "ui/ozone/platform/dri/hardware_display_plane.h"
 #include "ui/ozone/platform/dri/overlay_plane.h"
 #include "ui/ozone/platform/dri/scoped_drm_types.h"
@@ -27,7 +28,7 @@ class CrtcController;
 
 // This contains the list of planes controlled by one HDC on a given DRM fd.
 // It is owned by the HDC and filled by the CrtcController.
-struct HardwareDisplayPlaneList {
+struct OZONE_EXPORT HardwareDisplayPlaneList {
   HardwareDisplayPlaneList();
   ~HardwareDisplayPlaneList();
 
@@ -64,9 +65,12 @@ struct HardwareDisplayPlaneList {
   // In the case of non-atomic operation, this info will be used for
   // pageflipping.
   std::vector<PageFlipInfo> legacy_page_flips;
+
+  // Set if the last operation on this list was a Commit().
+  bool committed;
 };
 
-class HardwareDisplayPlaneManager {
+class OZONE_EXPORT HardwareDisplayPlaneManager {
  public:
   HardwareDisplayPlaneManager();
   virtual ~HardwareDisplayPlaneManager();
@@ -84,7 +88,7 @@ class HardwareDisplayPlaneManager {
                                    CrtcController* crtc);
 
   // Commit the plane states in |plane_list|.
-  virtual bool Commit(HardwareDisplayPlaneList* plane_list) = 0;
+  virtual bool Commit(HardwareDisplayPlaneList* plane_list, bool is_sync) = 0;
 
   // Set all planes in |plane_list| owned by |crtc_id| to free.
   static void ResetPlanes(HardwareDisplayPlaneList* plane_list,

@@ -30,7 +30,12 @@
           "can_use_on_swarming_builders": true
         }
       },
-      "crypto_unittests",
+      {
+        "test": "crypto_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       "dbus_unittests",
       "display_unittests",
       "extensions_unittests",
@@ -83,10 +88,14 @@
       },
       "sql_unittests",
       "nacl_loader_unittests",
-      "athena_unittests",
-      "app_shell_browsertests",
       "app_shell_unittests",
       "chromevox_tests",
+      {
+        "test": "extensions_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       "skia_unittests"
     ]
   },
@@ -106,7 +115,12 @@
       "cacheinvalidation_unittests",
       "chromeos_unittests",
       "components_unittests",
-      "crypto_unittests",
+      {
+        "test": "crypto_unittests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       "dbus_unittests",
       "extensions_unittests",
       "google_apis_unittests",
@@ -164,7 +178,6 @@
           "shards": 20
         }
       },
-      "app_shell_browsertests",
       "app_shell_unittests",
       {
         "test": "content_browsertests",
@@ -173,7 +186,12 @@
           "shards": 2
         }
       },
-      "athena_unittests",
+      {
+        "test": "extensions_browsertests",
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        }
+      },
       "gcm_unit_tests",
       "skia_unittests",
       {

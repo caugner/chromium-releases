@@ -19,7 +19,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/version.h"
-#include "chrome/browser/accessibility/accessibility_events.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -27,11 +26,11 @@
 #include "chrome/browser/chromeos/customization/customization_document.h"
 #include "chrome/browser/chromeos/login/auth/chrome_login_performer.h"
 #include "chrome/browser/chromeos/login/helper.h"
-#include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/signin_specifics.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
+#include "chrome/browser/chromeos/login/ui/user_adding_screen.h"
 #include "chrome/browser/chromeos/login/user_flow.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
@@ -225,7 +224,7 @@ void ExistingUserController::UpdateLoginDisplay(
         (*it)->GetType() != user_manager::USER_TYPE_SUPERVISED ||
         user_manager::UserManager::Get()->AreSupervisedUsersAllowed();
     bool meets_whitelist_requirements =
-        LoginUtils::IsWhitelisted((*it)->email(), NULL) ||
+        CrosSettings::IsWhitelisted((*it)->email(), NULL) ||
         !(*it)->HasGaiaAccount();
 
     // Public session accounts are always shown on login screen.
@@ -303,7 +302,7 @@ void ExistingUserController::Observe(
 // ExistingUserController, private:
 
 ExistingUserController::~ExistingUserController() {
-  LoginUtils::Get()->DelegateDeleted(this);
+  UserSessionManager::GetInstance()->DelegateDeleted(this);
 
   if (current_controller_ == this) {
     current_controller_ = NULL;
@@ -596,11 +595,14 @@ void ExistingUserController::OnAuthSuccess(const UserContext& user_context) {
   login_performer_->set_delegate(NULL);
   ignore_result(login_performer_.release());
 
-  // Will call OnProfilePrepared() in the end.
-  LoginUtils::Get()->PrepareProfile(user_context,
-                                    has_auth_cookies,
-                                    false,          // Start session for user.
-                                    this);
+  UserSessionManager::StartSessionType start_session_type =
+      UserAddingScreen::Get()->IsRunning()
+          ? UserSessionManager::SECONDARY_USER_SESSION
+          : UserSessionManager::PRIMARY_USER_SESSION;
+  UserSessionManager::GetInstance()->StartSession(
+      user_context, start_session_type, has_auth_cookies,
+      false,  // Start session for user.
+      this);
 
   // Update user's displayed email.
   if (!display_email_.empty()) {
@@ -680,7 +682,13 @@ void ExistingUserController::WhiteListCheckFailed(const std::string& email) {
   PerformLoginFinishedActions(true /* start public session timer */);
   offline_failed_ = false;
 
-  ShowError(IDS_LOGIN_ERROR_WHITELIST, email);
+  if (g_browser_process->platform_part()
+          ->browser_policy_connector_chromeos()
+          ->IsEnterpriseManaged()) {
+    ShowError(IDS_ENTERPRISE_LOGIN_ERROR_WHITELIST, email);
+  } else {
+    ShowError(IDS_LOGIN_ERROR_WHITELIST, email);
+  }
 
   login_display_->ShowSigninUI(email);
 
@@ -714,11 +722,12 @@ void ExistingUserController::OnOnlineChecked(const std::string& username,
 // ExistingUserController, private:
 
 void ExistingUserController::DeviceSettingsChanged() {
-  if (host_ != NULL) {
+  // If login was already completed, we should avoid any signin screen
+  // transitions, see http://crbug.com/461604 for example.
+  if (host_ != NULL && !login_display_->is_signin_completed()) {
     // Signed settings or user list changed. Notify views and update them.
     UpdateLoginDisplay(user_manager::UserManager::Get()->GetUsers());
     ConfigurePublicSessionAutoLogin();
-    return;
   }
 }
 
@@ -746,8 +755,15 @@ void ExistingUserController::LoginAsGuest() {
     // Disallowed. The UI should normally not show the guest pod but if for some
     // reason this has been made available to the user here is the time to tell
     // this nicely.
-    login_display_->ShowError(IDS_LOGIN_ERROR_WHITELIST, 1,
-                              HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT);
+    if (g_browser_process->platform_part()
+            ->browser_policy_connector_chromeos()
+            ->IsEnterpriseManaged()) {
+      login_display_->ShowError(IDS_ENTERPRISE_LOGIN_ERROR_WHITELIST, 1,
+                                HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT);
+    } else {
+      login_display_->ShowError(IDS_LOGIN_ERROR_WHITELIST, 1,
+                                HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT);
+    }
     PerformLoginFinishedActions(true /* start public session timer */);
     display_email_.clear();
     return;
@@ -829,7 +845,8 @@ void ExistingUserController::LoginAsPublicSession(
 
 void ExistingUserController::LoginAsKioskApp(const std::string& app_id,
                                              bool diagnostic_mode) {
-  host_->StartAppLaunch(app_id, diagnostic_mode);
+  const bool auto_start = false;
+  host_->StartAppLaunch(app_id, diagnostic_mode, auto_start);
 }
 
 void ExistingUserController::ConfigurePublicSessionAutoLogin() {
@@ -962,10 +979,6 @@ void ExistingUserController::ShowGaiaPasswordChanged(
 
 void ExistingUserController::SendAccessibilityAlert(
     const std::string& alert_text) {
-  AccessibilityAlertInfo event(ProfileHelper::GetSigninProfile(), alert_text);
-  SendControlAccessibilityNotification(
-      ui::AX_EVENT_VALUE_CHANGED, &event);
-
   AutomationManagerAsh::GetInstance()->HandleAlert(
       ProfileHelper::GetSigninProfile(), alert_text);
 }

@@ -21,6 +21,7 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_contents_view.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/omnibox/suggestion_answer.h"
 #include "grit/components_scaled_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -273,12 +274,12 @@ int OmniboxResultView::DrawRenderText(
   // Infinite suggestions should appear with the leading ellipses vertically
   // stacked.
   if (contents &&
-      (match.type == AutocompleteMatchType::SEARCH_SUGGEST_INFINITE)) {
+      (match.type == AutocompleteMatchType::SEARCH_SUGGEST_TAIL)) {
     // When the directionality of suggestion doesn't match the UI, we try to
     // vertically stack the ellipsis by restricting the end edge (right_x).
     const bool is_ui_rtl = base::i18n::IsRTL();
     const bool is_match_contents_rtl =
-        (render_text->GetTextDirection() == base::i18n::RIGHT_TO_LEFT);
+        (render_text->GetDisplayTextDirection() == base::i18n::RIGHT_TO_LEFT);
     const int offset =
         GetDisplayOffset(match, is_ui_rtl, is_match_contents_rtl);
 
@@ -401,7 +402,7 @@ int OmniboxResultView::GetDisplayOffset(
     const AutocompleteMatch& match,
     bool is_ui_rtl,
     bool is_match_contents_rtl) const {
-  if (match.type != AutocompleteMatchType::SEARCH_SUGGEST_INFINITE)
+  if (match.type != AutocompleteMatchType::SEARCH_SUGGEST_TAIL)
     return 0;
 
   const base::string16& input_text =
@@ -423,6 +424,10 @@ int OmniboxResultView::GetDisplayOffset(
 
 // static
 int OmniboxResultView::default_icon_size_ = 0;
+
+const char* OmniboxResultView::GetClassName() const {
+  return "OmniboxResultView";
+}
 
 gfx::ImageSkia OmniboxResultView::GetIcon() const {
   const gfx::Image image = model_->GetIconIfExtensionMatch(model_index_);
@@ -528,10 +533,17 @@ void OmniboxResultView::OnPaint(gfx::Canvas* canvas) {
     int x = GetMirroredXForRect(text_bounds_);
     mirroring_context_->Initialize(x, text_bounds_.width());
     InitContentsRenderTextIfNecessary();
-    if (!description_rendertext_ && !match_.description.empty()) {
-      description_rendertext_.reset(
-          CreateClassifiedRenderText(
-              match_.description, match_.description_class, true).release());
+
+    if (!description_rendertext_) {
+      if (match_.answer) {
+        base::string16 text;
+        for (const auto& textfield : match_.answer->second_line().text_fields())
+          text += textfield.text();
+        description_rendertext_ = CreateRenderText(text);
+      } else if (!match_.description.empty()) {
+        description_rendertext_ = CreateClassifiedRenderText(
+            match_.description, match_.description_class, true);
+      }
     }
     PaintMatch(match_, contents_rendertext_.get(),
                description_rendertext_.get(), canvas, x);

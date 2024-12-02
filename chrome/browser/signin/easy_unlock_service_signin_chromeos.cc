@@ -13,8 +13,9 @@
 #include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_key_manager.h"
-#include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_metrics.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
+#include "chrome/browser/signin/easy_unlock_app_manager.h"
+#include "chrome/browser/signin/easy_unlock_metrics.h"
 #include "chromeos/login/auth/user_context.h"
 #include "chromeos/tpm/tpm_token_loader.h"
 
@@ -174,85 +175,35 @@ void EasyUnlockServiceSignin::RecordEasySignInOutcome(
     bool success) const {
   DCHECK_EQ(GetUserEmail(), user_id);
 
-  chromeos::RecordEasyUnlockLoginEvent(success
-                                           ? chromeos::EASY_SIGN_IN_SUCCESS
-                                           : chromeos::EASY_SIGN_IN_FAILURE);
+  RecordEasyUnlockSigninEvent(
+      success ? EASY_UNLOCK_SUCCESS : EASY_UNLOCK_FAILURE);
   DVLOG(1) << "Easy sign-in " << (success ? "success" : "failure");
 }
 
 void EasyUnlockServiceSignin::RecordPasswordLoginEvent(
     const std::string& user_id) const {
-  // This happens during tests where user could login without pod focusing.
+  // This happens during tests, where a user could log in without the user pod
+  // being focused.
   if (GetUserEmail() != user_id)
     return;
 
-  chromeos::EasyUnlockLoginEvent event =
-      chromeos::EASY_SIGN_IN_LOGIN_EVENT_COUNT;
-  if (!GetRemoteDevices() ||
-      GetHardlockState() == EasyUnlockScreenlockStateHandler::NO_PAIRING) {
-    event = chromeos::PASSWORD_SIGN_IN_NO_PAIRING;
-  } else if (GetHardlockState() !=
-             EasyUnlockScreenlockStateHandler::NO_HARDLOCK) {
-    switch (GetHardlockState()) {
-      case EasyUnlockScreenlockStateHandler::NO_HARDLOCK:
-      case EasyUnlockScreenlockStateHandler::NO_PAIRING:
-        NOTREACHED();
-        break;
-      case EasyUnlockScreenlockStateHandler::USER_HARDLOCK:
-        event = chromeos::PASSWORD_SIGN_IN_USER_HARDLOCK;
-        break;
-      case EasyUnlockScreenlockStateHandler::PAIRING_CHANGED:
-        event = chromeos::PASSWORD_SIGN_IN_PAIRING_CHANGED;
-        break;
-      case EasyUnlockScreenlockStateHandler::LOGIN_FAILED:
-        event = chromeos::PASSWORD_SIGN_IN_LOGIN_FAILED;
-        break;
-      case EasyUnlockScreenlockStateHandler::PAIRING_ADDED:
-        event = chromeos::PASSWORD_SIGN_IN_PAIRING_ADDED;
-        break;
-    }
-  } else if (!screenlock_state_handler()) {
-    event = chromeos::PASSWORD_SIGN_IN_NO_SCREENLOCK_STATE_HANDLER;
-  } else {
-    switch (screenlock_state_handler()->state()) {
-      case EasyUnlockScreenlockStateHandler::STATE_INACTIVE:
-        event = chromeos::PASSWORD_SIGN_IN_SERVICE_NOT_ACTIVE;
-        break;
-      case EasyUnlockScreenlockStateHandler::STATE_NO_BLUETOOTH:
-        event = chromeos::PASSWORD_SIGN_IN_NO_BLUETOOTH;
-        break;
-      case EasyUnlockScreenlockStateHandler::STATE_BLUETOOTH_CONNECTING:
-        event = chromeos::PASSWORD_SIGN_IN_BLUETOOTH_CONNECTING;
-        break;
-      case EasyUnlockScreenlockStateHandler::STATE_NO_PHONE:
-        event = chromeos::PASSWORD_SIGN_IN_NO_PHONE;
-        break;
-      case EasyUnlockScreenlockStateHandler::STATE_PHONE_NOT_AUTHENTICATED:
-        event = chromeos::PASSWORD_SIGN_IN_PHONE_NOT_AUTHENTICATED;
-        break;
-      case EasyUnlockScreenlockStateHandler::STATE_PHONE_LOCKED:
-        event = chromeos::PASSWORD_SIGN_IN_PHONE_LOCKED;
-        break;
-      case EasyUnlockScreenlockStateHandler::STATE_PHONE_UNLOCKABLE:
-        event = chromeos::PASSWORD_SIGN_IN_PHONE_NOT_LOCKABLE;
-        break;
-      case EasyUnlockScreenlockStateHandler::STATE_PHONE_UNSUPPORTED:
-        event = chromeos::PASSWORD_SIGN_IN_PHONE_UNSUPPORTED;
-        break;
-      case EasyUnlockScreenlockStateHandler::STATE_RSSI_TOO_LOW:
-        event = chromeos::PASSWORD_SIGN_IN_RSSI_TOO_LOW;
-        break;
-      case EasyUnlockScreenlockStateHandler::STATE_TX_POWER_TOO_HIGH:
-        event = chromeos::PASSWORD_SIGN_IN_TX_POWER_TOO_HIGH;
-        break;
-      case EasyUnlockScreenlockStateHandler::STATE_AUTHENTICATED:
-        event = chromeos::PASSWORD_SIGN_IN_WITH_AUTHENTICATED_PHONE;
-        break;
-    }
-  }
+  if (!IsEnabled())
+    return;
 
-  chromeos::RecordEasyUnlockLoginEvent(event);
-  DVLOG(1) << "EasySignIn password login event, event=" << event;
+  EasyUnlockAuthEvent event = GetPasswordAuthEvent();
+  RecordEasyUnlockSigninEvent(event);
+  DVLOG(1) << "Easy Sign-in password login event, event=" << event;
+}
+
+void EasyUnlockServiceSignin::StartAutoPairing(
+    const AutoPairingResultCallback& callback) {
+  NOTREACHED();
+}
+
+void EasyUnlockServiceSignin::SetAutoPairingResult(
+    bool success,
+    const std::string& error) {
+  NOTREACHED();
 }
 
 void EasyUnlockServiceSignin::InitializeInternal() {
@@ -280,18 +231,38 @@ void EasyUnlockServiceSignin::ShutdownInternal() {
   user_data_.clear();
 }
 
-bool EasyUnlockServiceSignin::IsAllowedInternal() {
+bool EasyUnlockServiceSignin::IsAllowedInternal() const {
   return service_active_ &&
          !user_id_.empty() &&
          !chromeos::LoginState::Get()->IsUserLoggedIn();
 }
 
-void EasyUnlockServiceSignin::OnScreenDidLock() {
+void EasyUnlockServiceSignin::OnWillFinalizeUnlock(bool success) {
+  // This code path should only be exercised for the lock screen, not for the
+  // sign-in screen.
+  NOTREACHED();
+}
+
+void EasyUnlockServiceSignin::OnScreenDidLock(
+    ScreenlockBridge::LockHandler::ScreenType screen_type) {
+  // In production code, the screen type should always be the signin screen; but
+  // in tests, the screen type might be different.
+  if (screen_type != ScreenlockBridge::LockHandler::SIGNIN_SCREEN)
+    return;
+
   // Update initial UI is when the account picker on login screen is ready.
   ShowInitialUserState();
 }
 
-void EasyUnlockServiceSignin::OnScreenDidUnlock() {
+void EasyUnlockServiceSignin::OnScreenDidUnlock(
+    ScreenlockBridge::LockHandler::ScreenType screen_type) {
+  // In production code, the screen type should always be the signin screen; but
+  // in tests, the screen type might be different.
+  if (screen_type != ScreenlockBridge::LockHandler::SIGNIN_SCREEN)
+    return;
+
+  DisableAppWithoutResettingScreenlockState();
+
   Shutdown();
 }
 
@@ -329,7 +300,7 @@ void EasyUnlockServiceSignin::OnFocusedUserChanged(const std::string& user_id) {
 void EasyUnlockServiceSignin::LoggedInStateChanged() {
   if (!chromeos::LoginState::Get()->IsUserLoggedIn())
     return;
-  UnloadApp();
+  DisableAppWithoutResettingScreenlockState();
 }
 
 void EasyUnlockServiceSignin::LoadCurrentUserDataIfNeeded() {
@@ -364,7 +335,7 @@ void EasyUnlockServiceSignin::OnUserDataLoaded(
     const chromeos::EasyUnlockDeviceKeyDataList& devices) {
   allow_cryptohome_backoff_ = false;
 
-  UserData* data = user_data_[user_id_];
+  UserData* data = user_data_[user_id];
   data->state = USER_DATA_STATE_LOADED;
   if (success) {
     data->devices = devices;

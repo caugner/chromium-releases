@@ -89,7 +89,7 @@ if (enable_configuration_policy) {
       app_resources_path,
     ]
 
-    if (os != "android") {
+    if (current_os != "android") {
       outputs -= [
         app_restrictions_path,
         app_resources_path,
@@ -111,7 +111,7 @@ if (enable_configuration_policy) {
           rebase_path(app_restrictions_path, root_build_dir),
       "--app-restrictions-resources=" +
           rebase_path(app_resources_path, root_build_dir),
-      os,
+      current_os,
       chromeos_flag,
       rebase_path("resources/policy_templates.json", root_build_dir),
     ]
@@ -188,6 +188,8 @@ if (enable_configuration_policy) {
       "core/common/cloud/policy_builder.h",
       "core/common/configuration_policy_provider_test.cc",
       "core/common/configuration_policy_provider_test.h",
+      "core/common/fake_async_policy_loader.cc",
+      "core/common/fake_async_policy_loader.h",
       "core/common/mock_configuration_policy_provider.cc",
       "core/common/mock_configuration_policy_provider.h",
       "core/common/mock_policy_service.cc",
@@ -196,6 +198,8 @@ if (enable_configuration_policy) {
       "core/common/policy_test_utils.h",
       "core/common/preferences_mock_mac.cc",
       "core/common/preferences_mock_mac.h",
+      "core/common/remote_commands/test_remote_command_job.cc",
+      "core/common/remote_commands/test_remote_command_job.h",
     ]
 
     if (is_chromeos) {

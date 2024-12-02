@@ -8,7 +8,6 @@
 #include "base/command_line.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
-#include "chrome/browser/chrome_page_zoom.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/host_desktop.h"
@@ -18,6 +17,7 @@
 #include "chrome/browser/ui/views/frame/taskbar_decorator.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
+#include "components/ui/zoom/page_zoom.h"
 #include "components/ui/zoom/zoom_controller.h"
 #include "extensions/common/extension.h"
 #include "ui/aura/window.h"
@@ -106,21 +106,28 @@ void AddAcceleratorsFromMapping(const AcceleratorMapping mapping[],
 const std::map<ui::Accelerator, int>& GetAcceleratorTable() {
   typedef std::map<ui::Accelerator, int> AcceleratorMap;
   CR_DEFINE_STATIC_LOCAL(AcceleratorMap, accelerators, ());
-  if (accelerators.empty()) {
+  if (!chrome::IsRunningInForcedAppMode()) {
+    if (accelerators.empty()) {
+      AddAcceleratorsFromMapping(
+          kAppWindowAcceleratorMap,
+          arraysize(kAppWindowAcceleratorMap),
+          &accelerators);
+    }
+    return accelerators;
+  }
+
+  CR_DEFINE_STATIC_LOCAL(AcceleratorMap, app_mode_accelerators, ());
+  if (app_mode_accelerators.empty()) {
     AddAcceleratorsFromMapping(
         kAppWindowAcceleratorMap,
         arraysize(kAppWindowAcceleratorMap),
-        &accelerators);
-
-    // Add accelerators for kiosk mode.
-    if (chrome::IsRunningInForcedAppMode()) {
-      AddAcceleratorsFromMapping(
-          kAppWindowKioskAppModeAcceleratorMap,
-          arraysize(kAppWindowKioskAppModeAcceleratorMap),
-          &accelerators);
-    }
+        &app_mode_accelerators);
+    AddAcceleratorsFromMapping(
+        kAppWindowKioskAppModeAcceleratorMap,
+        arraysize(kAppWindowKioskAppModeAcceleratorMap),
+        &app_mode_accelerators);
   }
-  return accelerators;
+  return app_mode_accelerators;
 }
 
 #if defined(USE_ASH)
@@ -285,16 +292,17 @@ void ChromeNativeAppWindowViews::InitializeDefaultWindow(
   // future proof). This is needed because GetAcceleratorTable() uses a static
   // to store data and only checks kiosk mode once. If a platform app is
   // launched before kiosk mode starts, the kiosk accelerators will not be
-  // registered. This DCHECK catches the case.
-  DCHECK(!is_kiosk_app_mode ||
-         accelerator_table.size() ==
-             arraysize(kAppWindowAcceleratorMap) +
-                 arraysize(kAppWindowKioskAppModeAcceleratorMap));
+  // registered. This CHECK catches the case.
+  CHECK(!is_kiosk_app_mode ||
+        accelerator_table.size() ==
+            arraysize(kAppWindowAcceleratorMap) +
+                arraysize(kAppWindowKioskAppModeAcceleratorMap));
 
   // Ensure there is a ZoomController in kiosk mode, otherwise the processing
-  // of the accelerators will cause a crash.
-  DCHECK(!is_kiosk_app_mode || ui_zoom::ZoomController::FromWebContents(
-                                   web_view()->GetWebContents()));
+  // of the accelerators will cause a crash. Note CHECK here because DCHECK
+  // will not be noticed, as this could only be relevant on real hardware.
+  CHECK(!is_kiosk_app_mode ||
+        ui_zoom::ZoomController::FromWebContents(web_view()->GetWebContents()));
 
   for (std::map<ui::Accelerator, int>::const_iterator iter =
            accelerator_table.begin();
@@ -545,16 +553,16 @@ bool ChromeNativeAppWindowViews::AcceleratorPressed(
       Close();
       return true;
     case IDC_ZOOM_MINUS:
-      chrome_page_zoom::Zoom(web_view()->GetWebContents(),
-                             content::PAGE_ZOOM_OUT);
+      ui_zoom::PageZoom::Zoom(web_view()->GetWebContents(),
+                              content::PAGE_ZOOM_OUT);
       return true;
     case IDC_ZOOM_NORMAL:
-      chrome_page_zoom::Zoom(web_view()->GetWebContents(),
-                             content::PAGE_ZOOM_RESET);
+      ui_zoom::PageZoom::Zoom(web_view()->GetWebContents(),
+                              content::PAGE_ZOOM_RESET);
       return true;
     case IDC_ZOOM_PLUS:
-      chrome_page_zoom::Zoom(web_view()->GetWebContents(),
-                             content::PAGE_ZOOM_IN);
+      ui_zoom::PageZoom::Zoom(web_view()->GetWebContents(),
+                              content::PAGE_ZOOM_IN);
       return true;
     default:
       NOTREACHED() << "Unknown accelerator sent to app window.";
@@ -571,8 +579,7 @@ void ChromeNativeAppWindowViews::SetFullscreen(int fullscreen_types) {
   is_fullscreen_ = (fullscreen_types != AppWindow::FULLSCREEN_TYPE_NONE);
   widget()->SetFullscreen(is_fullscreen_);
 
-  // TODO(oshima): Remove USE_ATHENA once athena has its own NativeAppWindow.
-#if defined(USE_ASH) && !defined(USE_ATHENA)
+#if defined(USE_ASH)
   if (immersive_fullscreen_controller_.get()) {
     // |immersive_fullscreen_controller_| should only be set if immersive
     // fullscreen is the fullscreen type used by the OS.

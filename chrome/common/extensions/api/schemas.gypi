@@ -8,9 +8,10 @@
   ],
   'variables': {
     'main_schema_files': [
+      'accessibility_features.json',
       'accessibility_private.json',
       'activity_log_private.json',
-      'alarms.idl',
+      'audio_modem.idl',
       'automation.idl',
       'automation_internal.idl',
       'autotest_private.idl',
@@ -33,7 +34,6 @@
       'desktop_capture.json',
       'developer_private.idl',
       'dial.idl',
-      'document_scan.idl',
       'downloads.idl',
       'downloads_internal.idl',
       'easy_unlock_private.idl',
@@ -53,7 +53,6 @@
       'i18n.json',
       'identity.idl',
       'identity_private.idl',
-      'idle.json',
       'image_writer_private.idl',
       'inline_install_private.idl',
       'input_ime.json',
@@ -62,16 +61,13 @@
       'manifest_types.json',
       'mdns.idl',
       'media_galleries.idl',
-      'media_galleries_private.idl',
       'metrics_private.json',
-      'networking_private.json',
       'notification_provider.idl',
       'notifications.idl',
       'omnibox.json',
       'page_capture.json',
       'permissions.json',
       'preferences_private.json',
-      'printer_provider.idl',
       'push_messaging.idl',
       'reading_list_private.json',
       'screenlock_private.idl',
@@ -102,7 +98,6 @@
       'chromeos_info_private.json',
       'extension.json',
       'idltest.idl',
-      'infobars.json',
       'media_player_private.json',
       'music_manager_private.idl',
       'principals_private.idl',
@@ -111,8 +106,6 @@
 
     # ChromeOS-specific schemas.
     'chromeos_schema_files': [
-      'accessibility_features.json',
-      'diagnostics.idl',
       'enterprise_platform_keys.idl',
       'enterprise_platform_keys_internal.idl',
       'file_browser_handler_internal.json',
@@ -120,10 +113,8 @@
       'file_system_provider_internal.idl',
       'first_run_private.json',
       'log_private.idl',
-    ],
-
-    # ChromeOS-specific schemas which have not been ported to Athena.
-    'chromeos_non_athena_schema_files': [
+      'platform_keys.idl',
+      'platform_keys_internal.idl',
       'wallpaper.json',
       'wallpaper_private.json',
     ],
@@ -154,13 +145,6 @@
       ['chromeos==1', {
         'schema_files': [
           '<@(chromeos_schema_files)',
-        ],
-        'conditions': [
-          ['use_athena==0', {
-            'schema_files': [
-              '<@(chromeos_non_athena_schema_files)',
-            ],
-          }],
         ],
       }],
       ['enable_webrtc==1', {

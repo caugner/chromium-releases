@@ -132,8 +132,7 @@ class ChromeAppForLinkDelegate : public extensions::AppForLinkDelegate {
     }
 
     bookmark_app_helper_.reset(new extensions::BookmarkAppHelper(
-        extensions::ExtensionSystem::Get(context)->extension_service(), web_app,
-        NULL));
+        Profile::FromBrowserContext(context), web_app, NULL));
     bookmark_app_helper_->Create(
         base::Bind(&extensions::ManagementGenerateAppForLinkFunction::
                        FinishCreateBookmarkApp,
@@ -246,7 +245,7 @@ ChromeManagementAPIDelegate::GenerateAppForLinkFunctionDelegate(
     const std::string& title,
     const GURL& launch_url) const {
   FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
-      Profile::FromBrowserContext(context), Profile::EXPLICIT_ACCESS);
+      Profile::FromBrowserContext(context), ServiceAccessType::EXPLICIT_ACCESS);
   DCHECK(favicon_service);
 
   ChromeAppForLinkDelegate* delegate = new ChromeAppForLinkDelegate;
@@ -264,8 +263,8 @@ ChromeManagementAPIDelegate::GenerateAppForLinkFunctionDelegate(
   return scoped_ptr<extensions::AppForLinkDelegate>(delegate);
 }
 
-bool ChromeManagementAPIDelegate::IsStreamlinedHostedAppsEnabled() const {
-  return extensions::util::IsStreamlinedHostedAppsEnabled();
+bool ChromeManagementAPIDelegate::IsNewBookmarkAppsEnabled() const {
+  return extensions::util::IsNewBookmarkAppsEnabled();
 }
 
 void ChromeManagementAPIDelegate::EnableExtension(
@@ -301,9 +300,7 @@ void ChromeManagementAPIDelegate::SetLaunchType(
     content::BrowserContext* context,
     const std::string& extension_id,
     extensions::LaunchType launch_type) const {
-  extensions::SetLaunchType(
-      extensions::ExtensionSystem::Get(context)->extension_service(),
-      extension_id, launch_type);
+  extensions::SetLaunchType(context, extension_id, launch_type);
 }
 
 GURL ChromeManagementAPIDelegate::GetIconURL(

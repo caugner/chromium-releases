@@ -16,6 +16,8 @@ class SkBitmap;
 
 namespace base {
 class FilePath;
+class SingleThreadTaskRunner;
+struct FileDescriptor;
 }
 
 namespace gfx {
@@ -28,7 +30,7 @@ namespace ui {
 class DriSurfaceFactory;
 class DriWindowDelegate;
 class DriWindowDelegateManager;
-class DriWrapper;
+class DrmDeviceManager;
 class NativeDisplayDelegateDri;
 class ScreenManager;
 
@@ -37,7 +39,7 @@ struct DisplaySnapshot_Params;
 
 class DriGpuPlatformSupport : public GpuPlatformSupport {
  public:
-  DriGpuPlatformSupport(DriWrapper* drm,
+  DriGpuPlatformSupport(DrmDeviceManager* drm_device_manager,
                         DriWindowDelegateManager* window_manager,
                         ScreenManager* screen_manager,
                         scoped_ptr<NativeDisplayDelegateDri> ndd);
@@ -72,11 +74,15 @@ class DriGpuPlatformSupport : public GpuPlatformSupport {
   void OnDisableNativeDisplay(int64_t id);
   void OnTakeDisplayControl();
   void OnRelinquishDisplayControl();
-  void OnAddGraphicsDevice(const base::FilePath& path);
+  void OnAddGraphicsDevice(const base::FilePath& path,
+                           const base::FileDescriptor& fd);
   void OnRemoveGraphicsDevice(const base::FilePath& path);
 
+  void SetIOTaskRunner(
+      const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner);
+
   IPC::Sender* sender_;                       // Not owned.
-  DriWrapper* drm_;                           // Not owned.
+  DrmDeviceManager* drm_device_manager_;      // Not owned.
   DriWindowDelegateManager* window_manager_;  // Not owned.
   ScreenManager* screen_manager_;             // Not owned.
 

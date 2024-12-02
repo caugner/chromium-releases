@@ -12,7 +12,6 @@
 #include "chrome/browser/sync_file_system/drive_backend/callback_helper.h"
 #include "chrome/browser/sync_file_system/drive_backend/drive_service_wrapper.h"
 #include "google_apis/drive/drive_api_parser.h"
-#include "google_apis/drive/gdata_wapi_parser.h"
 
 namespace sync_file_system {
 namespace drive_backend {
@@ -320,6 +319,7 @@ google_apis::CancelCallback DriveServiceOnWorker::UpdateResource(
     const std::string& new_title,
     const base::Time& last_modified,
     const base::Time& last_viewed_by_me,
+    const google_apis::drive::Properties& properties,
     const google_apis::FileResourceCallback& callback) {
   NOTREACHED();
   return google_apis::CancelCallback();

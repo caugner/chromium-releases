@@ -34,7 +34,7 @@ class BrowserPluginDelegate;
 struct WebPluginInfo;
 }
 
-namespace dns_prefetch {
+namespace network_hints {
 class PrescientNetworkingDispatcher;
 }
 
@@ -81,7 +81,6 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   void RenderThreadStarted() override;
   void RenderFrameCreated(content::RenderFrame* render_frame) override;
   void RenderViewCreated(content::RenderView* render_view) override;
-  void SetNumberOfViews(int number_of_views) override;
   SkBitmap* GetSadPluginBitmap() override;
   SkBitmap* GetSadWebViewBitmap() override;
   bool OverrideCreatePlugin(content::RenderFrame* render_frame,
@@ -223,7 +222,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       permissions_policy_delegate_;
 #endif
 
-  scoped_ptr<dns_prefetch::PrescientNetworkingDispatcher>
+  scoped_ptr<network_hints::PrescientNetworkingDispatcher>
       prescient_networking_dispatcher_;
   scoped_ptr<password_manager::CredentialManagerClient>
       credential_manager_client_;

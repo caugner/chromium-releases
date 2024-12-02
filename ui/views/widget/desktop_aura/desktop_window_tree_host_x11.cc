@@ -12,9 +12,9 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/client/focus_client.h"
@@ -49,6 +49,7 @@
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host_observer_x11.h"
 #include "ui/views/widget/desktop_aura/x11_desktop_handler.h"
 #include "ui/views/widget/desktop_aura/x11_desktop_window_move_client.h"
+#include "ui/views/widget/desktop_aura/x11_pointer_grab.h"
 #include "ui/views/widget/desktop_aura/x11_window_event_filter.h"
 #include "ui/wm/core/compound_event_filter.h"
 #include "ui/wm/core/window_util.h"
@@ -288,7 +289,7 @@ void DesktopWindowTreeHostX11::OnNativeWidgetCreated(
 }
 
 scoped_ptr<corewm::Tooltip> DesktopWindowTreeHostX11::CreateTooltip() {
-  return make_scoped_ptr(new corewm::TooltipAura(gfx::SCREEN_TYPE_NATIVE));
+  return make_scoped_ptr(new corewm::TooltipAura);
 }
 
 scoped_ptr<aura::client::DragDropClient>
@@ -953,14 +954,14 @@ void DesktopWindowTreeHostX11::SetCapture() {
   // OR
   // - The topmost window underneath the mouse is managed by Chrome.
   DesktopWindowTreeHostX11* old_capturer = g_current_capture;
+
+  // Update |g_current_capture| prior to calling OnHostLostWindowCapture() to
+  // avoid releasing pointer grab.
   g_current_capture = this;
   if (old_capturer)
     old_capturer->OnHostLostWindowCapture();
 
-  unsigned int event_mask = PointerMotionMask | ButtonReleaseMask |
-                            ButtonPressMask;
-  XGrabPointer(xdisplay_, xwindow_, True, event_mask, GrabModeAsync,
-               GrabModeAsync, None, None, CurrentTime);
+  GrabPointer(xwindow_, true, None);
 }
 
 void DesktopWindowTreeHostX11::ReleaseCapture() {
@@ -969,7 +970,7 @@ void DesktopWindowTreeHostX11::ReleaseCapture() {
     // the topmost window underneath the mouse so the capture release being
     // asynchronous is likely inconsequential.
     g_current_capture = NULL;
-    XUngrabPointer(xdisplay_, CurrentTime);
+    UngrabPointer();
 
     OnHostLostWindowCapture();
   }
@@ -1102,7 +1103,8 @@ void DesktopWindowTreeHostX11::InitX11Window(
   // Likewise, the X server needs to know this window's pid so it knows which
   // program to kill if the window hangs.
   // XChangeProperty() expects "pid" to be long.
-  COMPILE_ASSERT(sizeof(long) >= sizeof(pid_t), pid_t_bigger_than_long);
+  static_assert(sizeof(long) >= sizeof(pid_t),
+                "pid_t should not be larger than long");
   long pid = getpid();
   XChangeProperty(xdisplay_,
                   xwindow_,
@@ -1430,7 +1432,7 @@ void DesktopWindowTreeHostX11::DispatchMouseEvent(ui::MouseEvent* event) {
   } else {
     // Another DesktopWindowTreeHostX11 has installed itself as
     // capture. Translate the event's location and dispatch to the other.
-    event->ConvertLocationToTarget(window(), g_current_capture->window());
+    ConvertEventToDifferentHost(event, g_current_capture);
     g_current_capture->SendEventToProcessor(event);
   }
 }
@@ -1438,11 +1440,27 @@ void DesktopWindowTreeHostX11::DispatchMouseEvent(ui::MouseEvent* event) {
 void DesktopWindowTreeHostX11::DispatchTouchEvent(ui::TouchEvent* event) {
   if (g_current_capture && g_current_capture != this &&
       event->type() == ui::ET_TOUCH_PRESSED) {
-    event->ConvertLocationToTarget(window(), g_current_capture->window());
+    ConvertEventToDifferentHost(event, g_current_capture);
     g_current_capture->SendEventToProcessor(event);
   } else {
     SendEventToProcessor(event);
   }
+}
+
+void DesktopWindowTreeHostX11::ConvertEventToDifferentHost(
+    ui::LocatedEvent* located_event,
+    DesktopWindowTreeHostX11* host) {
+  DCHECK_NE(this, host);
+  const gfx::Display display_src =
+      gfx::Screen::GetNativeScreen()->GetDisplayNearestWindow(window());
+  const gfx::Display display_dest =
+      gfx::Screen::GetNativeScreen()->GetDisplayNearestWindow(host->window());
+  DCHECK_EQ(display_src.device_scale_factor(),
+            display_dest.device_scale_factor());
+  gfx::Vector2d offset = GetLocationOnNativeScreen() -
+                         host->GetLocationOnNativeScreen();
+  gfx::Point location_in_pixel_in_host = located_event->location() + offset;
+  located_event->set_location(location_in_pixel_in_host);
 }
 
 void DesktopWindowTreeHostX11::ResetWindowRegion() {

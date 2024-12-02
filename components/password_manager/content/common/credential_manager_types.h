@@ -26,7 +26,8 @@ namespace password_manager {
 // something reasonably sane.
 const size_t kMaxFederations = 50u;
 
-enum CredentialType {
+// TODO(melandory): Remove unsigned int.
+enum class CredentialType : unsigned int {
   CREDENTIAL_TYPE_EMPTY = 0,
   CREDENTIAL_TYPE_LOCAL,
   CREDENTIAL_TYPE_FEDERATED,
@@ -36,7 +37,8 @@ enum CredentialType {
 struct CredentialInfo {
   CredentialInfo();
   explicit CredentialInfo(const blink::WebCredential& credential);
-  explicit CredentialInfo(const autofill::PasswordForm& form);
+  explicit CredentialInfo(const autofill::PasswordForm& form,
+                          CredentialType form_type);
   ~CredentialInfo();
 
   CredentialType type;
@@ -62,7 +64,7 @@ struct CredentialInfo {
 };
 
 // Create a new autofill::PasswordForm object based on |info|, valid in the
-// context of |origin|.
+// context of |origin|. Returns an empty scoped_ptr for CREDENTIAL_TYPE_EMPTY.
 scoped_ptr<autofill::PasswordForm> CreatePasswordFormFromCredentialInfo(
     const CredentialInfo& info,
     const GURL& origin);

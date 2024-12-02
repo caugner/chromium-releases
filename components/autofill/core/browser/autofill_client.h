@@ -11,6 +11,9 @@
 #include "base/i18n/rtl.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
+#include "ui/base/window_open_disposition.h"
+
+class IdentityProvider;
 
 namespace content {
 class RenderFrameHost;
@@ -70,6 +73,9 @@ class AutofillClient {
 
   // Gets the preferences associated with the client.
   virtual PrefService* GetPrefs() = 0;
+
+  // Gets the IdentityProvider associated with the client (for OAuth2).
+  virtual IdentityProvider* GetIdentityProvider() = 0;
 
   // Hides the associated request autocomplete dialog (if it exists).
   virtual void HideRequestAutocompleteDialog() = 0;
@@ -136,6 +142,10 @@ class AutofillClient {
 
   // Informs the client that a user gesture has been observed.
   virtual void OnFirstUserGestureObserved() = 0;
+
+  // Opens |url| with the supplied |disposition|.
+  virtual void LinkClicked(const GURL& url,
+                           WindowOpenDisposition disposition) = 0;
 };
 
 }  // namespace autofill

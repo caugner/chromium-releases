@@ -166,17 +166,6 @@ void SpellingRequest::OnRemoteCheckCompleted(
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   remote_success_ = success;
   remote_results_ = results;
-
-  SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForRenderProcessId(render_process_id_);
-  if (spellcheck_service) {
-    spellcheck_service->GetFeedbackSender()->OnSpellcheckResults(
-        render_process_id_,
-        text,
-        markers_,
-        &remote_results_);
-  }
-
   completion_barrier_.Run();
 }
 
@@ -276,6 +265,13 @@ void SpellCheckMessageFilterMac::OnRequestTextCheck(
     std::vector<SpellCheckMarker> markers) {
   DCHECK(!text.empty());
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+
+  // Initialize the spellcheck service if needed. The service will send the
+  // language code for text breaking to the renderer. (Text breaking is required
+  // for the context menu to show spelling suggestions.) Initialization must
+  // happen on UI thread.
+  SpellcheckServiceFactory::GetForRenderProcessId(render_process_id_);
+
   // Erase invalid markers (with offsets out of boundaries of text length).
   markers.erase(
       std::remove_if(
