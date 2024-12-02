@@ -60,6 +60,7 @@ import androidx.browser.customtabs.CustomTabsIntent;
 import androidx.browser.customtabs.CustomTabsService;
 import androidx.browser.customtabs.CustomTabsSession;
 import androidx.browser.customtabs.CustomTabsSessionToken;
+import androidx.test.filters.LargeTest;
 import androidx.test.filters.MediumTest;
 import androidx.test.filters.SmallTest;
 
@@ -138,7 +139,6 @@ import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.browser.Features;
-import org.chromium.chrome.test.util.browser.Features.EnableFeatures;
 import org.chromium.chrome.test.util.browser.contextmenu.ContextMenuUtils;
 import org.chromium.components.browser_ui.widget.CoordinatorLayoutForPointer;
 import org.chromium.components.content_settings.CookieControlsMode;
@@ -972,7 +972,6 @@ public class CustomTabActivityTest {
      */
     @Test
     @SmallTest
-    @EnableFeatures({ChromeFeatureList.ELIDE_PRIORITIZATION_OF_PRE_NATIVE_BOOTSTRAP_TASKS})
     public void testNavigationHistogramsRecorded() throws Exception {
         String startHistogramPrefix = "CustomTabs.IntentToFirstNavigationStartTime";
         String commitHistogramPrefix = "CustomTabs.IntentToFirstCommitNavigationTime3";
@@ -1804,15 +1803,6 @@ public class CustomTabActivityTest {
 
     @Test
     @SmallTest
-    @Features.EnableFeatures({ChromeFeatureList.CCT_RESIZABLE_FOR_THIRD_PARTIES})
-    @Features.DisableFeatures({ChromeFeatureList.CCT_RESIZABLE_WINDOW_ABOVE_NAVBAR})
-    public void testLaunchPartialCustomTabActivity_fixedWindow() throws Exception {
-        testLaunchPartialCustomTabActivity();
-        assertOverlayPanelCanHideAndroidBrowserControls(false);
-    }
-
-    @Test
-    @SmallTest
     public void testCanHideBrowserControls_notPartial() throws Exception {
         CustomTabsSessionToken session = warmUpAndLaunchUrlWithSession();
         assertEquals(getActivity().getIntentDataProvider().getSession(), session);
@@ -1822,11 +1812,7 @@ public class CustomTabActivityTest {
     @Test
     @SmallTest
     @Features.EnableFeatures({ChromeFeatureList.CCT_RESIZABLE_FOR_THIRD_PARTIES})
-    public void testLaunchPartialCustomTabActivity_dynamicWindow() throws Exception {
-        testLaunchPartialCustomTabActivity();
-    }
-
-    private void testLaunchPartialCustomTabActivity() throws Exception {
+    public void testLaunchPartialCustomTabActivity() throws Exception {
         Intent intent = createMinimalCustomTabIntent();
         CustomTabsSessionToken token = CustomTabsSessionToken.getSessionTokenFromIntent(intent);
         CustomTabsConnection connection = CustomTabsConnection.getInstance();
@@ -1835,13 +1821,10 @@ public class CustomTabActivityTest {
         intent.putExtra(CustomTabIntentDataProvider.EXTRA_INITIAL_ACTIVITY_HEIGHT_PX, 50);
         mCustomTabActivityTestRule.startCustomTabActivityWithIntent(intent);
 
-        if (ChromeFeatureList.sCctResizableWindowAboveNavbar.isEnabled()) {
-            // A Normal CCT height is set to MATCH_PARENT while Partial CCT has non-zero value.
-            int fullHeight = ViewGroup.LayoutParams.MATCH_PARENT;
-            WindowManager.LayoutParams attrs = getActivity().getWindow().getAttributes();
-            assertNotEquals("The window should have non-full height", fullHeight, attrs.height);
-            return;
-        }
+        // A Normal CCT height is set to MATCH_PARENT while Partial CCT has non-zero value.
+        int fullHeight = ViewGroup.LayoutParams.MATCH_PARENT;
+        WindowManager.LayoutParams attrs = getActivity().getWindow().getAttributes();
+        assertNotEquals("The window should have non-full height", fullHeight, attrs.height);
 
         // Verify the hierarchy of the enclosing layouts that PCCT relies on for its operation.
         CallbackHelper eventHelper = new CallbackHelper();
@@ -1853,12 +1836,67 @@ public class CustomTabActivityTest {
                         cvh.getParent() instanceof CoordinatorLayoutForPointer);
                 assertTrue("ContentFrameLayout should be the parent of CoodinatorLayoutForPointer",
                         cvh.getParent().getParent() instanceof ContentFrameLayout);
-                WindowManager.LayoutParams attrs = getActivity().getWindow().getAttributes();
                 assertNotEquals("The window should have non-zero y", 0, attrs.y);
                 eventHelper.notifyCalled();
             });
         });
         eventHelper.waitForCallback(0);
+    }
+
+    private void doOpaqueOriginTest(boolean enabled, boolean prefetch) throws Exception {
+        TestWebServer webServer = createTestWebServer();
+        String url = webServer.setResponse("/ok.html", "<html>ok</html>", null);
+        CustomTabsConnection connection = CustomTabsTestUtils.warmUpAndWait();
+        Context context = InstrumentationRegistry.getInstrumentation()
+                                  .getTargetContext()
+                                  .getApplicationContext();
+        Intent intent = CustomTabsIntentTestUtils.createMinimalCustomTabIntent(context, url);
+        CustomTabsSessionToken token = CustomTabsSessionToken.getSessionTokenFromIntent(intent);
+        connection.newSession(token);
+
+        if (prefetch) {
+            setCanUseHiddenTabForSession(connection, token, true);
+            Assert.assertTrue(connection.mayLaunchUrl(token, Uri.parse(url), null, null));
+            CriteriaHelper.pollUiThread(() -> {
+                Criteria.checkThat(connection.getHiddenTab(), Matchers.notNullValue());
+            });
+            Tab hiddenTab = TestThreadUtils.runOnUiThreadBlocking(
+                    () -> { return connection.getHiddenTab(); });
+            ChromeTabUtils.waitForTabPageLoaded(hiddenTab, url);
+        } else {
+            mCustomTabActivityTestRule.startCustomTabActivityWithIntent(intent);
+        }
+        String actualHeader = webServer.getLastRequest("/ok.html").headerValue("Sec-Fetch-Site");
+        assertEquals(enabled ? "cross-site" : "none", actualHeader);
+        webServer.shutdown();
+    }
+
+    @Test
+    @LargeTest
+    @Features.EnableFeatures(ChromeFeatureList.OPAQUE_ORIGIN_FOR_INCOMING_INTENTS)
+    public void testOpaqueOriginFromPrefetch_Enabled() throws Exception {
+        doOpaqueOriginTest(true, true);
+    }
+
+    @Test
+    @LargeTest
+    @Features.DisableFeatures(ChromeFeatureList.OPAQUE_ORIGIN_FOR_INCOMING_INTENTS)
+    public void testOpaqueOriginFromPrefetch_Disabled() throws Exception {
+        doOpaqueOriginTest(false, true);
+    }
+
+    @Test
+    @LargeTest
+    @Features.EnableFeatures(ChromeFeatureList.OPAQUE_ORIGIN_FOR_INCOMING_INTENTS)
+    public void testOpaqueOriginFromIntent_Enabled() throws Exception {
+        doOpaqueOriginTest(true, false);
+    }
+
+    @Test
+    @LargeTest
+    @Features.DisableFeatures(ChromeFeatureList.OPAQUE_ORIGIN_FOR_INCOMING_INTENTS)
+    public void testOpaqueOriginFromIntent_Disabled() throws Exception {
+        doOpaqueOriginTest(false, false);
     }
 
     /** Asserts that the Overlay Panel is set to allow or not allow ever hiding the Toolbar. */
@@ -2114,7 +2152,7 @@ public class CustomTabActivityTest {
     private void assertLastLaunchedClientAppRecorded(String histogramSuffix, String clientPackage,
             String url, int taskId, boolean umaRecorded) {
         SharedPreferencesManager pref = SharedPreferencesManager.getInstance();
-        String histogramName = "CustomTabs.RetainableSessions.TimeBetweenLaunch" + histogramSuffix;
+        String histogramName = "CustomTabs.RetainableSessionsV2.TimeBetweenLaunch" + histogramSuffix;
 
         Assert.assertEquals("Client package name in shared pref is different.", clientPackage,
                 pref.readString(ChromePreferenceKeys.CUSTOM_TABS_LAST_CLIENT_PACKAGE, ""));

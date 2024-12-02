@@ -26,6 +26,7 @@
 #include "build/build_config.h"
 #include "components/services/storage/public/cpp/buckets/bucket_id.h"
 #include "components/services/storage/public/cpp/buckets/bucket_locator.h"
+#include "content/browser/file_system_access/features.h"
 #include "content/browser/file_system_access/file_system_access.pb.h"
 #include "content/browser/file_system_access/file_system_access_access_handle_host_impl.h"
 #include "content/browser/file_system_access/file_system_access_data_transfer_token_impl.h"
@@ -675,7 +676,9 @@ void FileSystemAccessManagerImpl::ResolveDataTransferTokenWithFileType(
     HandleType file_type) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  if (!permission_context_) {
+  if (!permission_context_ ||
+      !base::FeatureList::IsEnabled(
+          features::kFileSystemAccessDragAndDropCheckBlocklist)) {
     DidVerifySensitiveDirectoryAccessForDataTransfer(
         binding_context, file_path, url, file_type,
         std::move(token_resolved_callback), SensitiveEntryResult::kAllowed);
@@ -1641,9 +1644,11 @@ void FileSystemAccessManagerImpl::CleanupAccessHandleCapacityAllocationImpl(
   DCHECK_GE(overallocation, 0)
       << "An Access Handle should not use more capacity than allocated.";
 
-  context_->quota_manager_proxy()->NotifyStorageModified(
-      storage::QuotaClientType::kFileSystem, url.storage_key(),
-      storage::FileSystemTypeToQuotaStorageType(url.type()), -overallocation,
+  DCHECK(url.bucket().has_value())
+      << "Capacity allocation is only relevant for sandboxed file systems, "
+         "which should have an associated bucket.";
+  context_->quota_manager_proxy()->NotifyBucketModified(
+      storage::QuotaClientType::kFileSystem, url.bucket()->id, -overallocation,
       base::Time::Now(),
       /*callback_task_runner=*/base::SequencedTaskRunnerHandle::Get(),
       std::move(callback));
