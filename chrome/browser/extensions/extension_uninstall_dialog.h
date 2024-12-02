@@ -6,11 +6,11 @@
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_UNINSTALL_DIALOG_H_
 
 #include <memory>
+#include <string>
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
-#include "base/strings/string16.h"
 #include "base/threading/thread_checker.h"
 #include "chrome/browser/extensions/chrome_app_icon.h"
 #include "chrome/browser/extensions/chrome_app_icon_delegate.h"
@@ -55,7 +55,7 @@ class ExtensionUninstallDialog
     // |did_start_uninstall| indicates whether the uninstall process for the
     // extension started. If this is false, |error| will contain the reason.
     virtual void OnExtensionUninstallDialogClosed(bool did_start_uninstall,
-                                                  const base::string16& error) {
+                                                  const std::u16string& error) {
     }
 
    protected:
@@ -100,7 +100,7 @@ class ExtensionUninstallDialog
 
   // Returns the string to be displayed with the checkbox. Must not be called if
   // ShouldShowCheckbox() returns false.
-  base::string16 GetCheckboxLabel() const;
+  std::u16string GetCheckboxLabel() const;
 
   // Called when the dialog is closing to do any book-keeping.
   void OnDialogClosed(CloseAction action);
@@ -126,7 +126,7 @@ class ExtensionUninstallDialog
  private:
   // Uninstalls the extension. Returns true on success, and populates |error| on
   // failure.
-  bool Uninstall(base::string16* error);
+  bool Uninstall(std::u16string* error);
 
   // Handles the "report abuse" checkbox being checked at the close of the
   // dialog.
@@ -146,6 +146,9 @@ class ExtensionUninstallDialog
   // Displays the prompt. This should only be called after loading the icon.
   // The implementations of this method are platform-specific.
   virtual void Show() = 0;
+
+  // Forcefully closes the dialog view.
+  virtual void Close() = 0;
 
   // Resets to nullptr when the Profile is deleted.
   Profile* profile_;
@@ -176,6 +179,10 @@ class ExtensionUninstallDialog
 
   // True if a checkbox for removing associated data is shown.
   bool show_remove_data_checkbox_ = false;
+
+  // Whether the extension was uninstalled before the user closed the dialog
+  // (e.g. by another source).
+  bool extension_uninstalled_early_ = false;
 
   UninstallReason uninstall_reason_ = UNINSTALL_REASON_FOR_TESTING;
 

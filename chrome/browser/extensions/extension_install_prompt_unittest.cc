@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -44,7 +45,7 @@ namespace {
 void VerifyPromptIconCallback(
     base::OnceClosure quit_closure,
     const SkBitmap& expected_bitmap,
-    ExtensionInstallPromptShowParams* params,
+    std::unique_ptr<ExtensionInstallPromptShowParams> params,
     ExtensionInstallPrompt::DoneCallback done_callback,
     std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt) {
   EXPECT_TRUE(gfx::BitmapsAreEqual(prompt->icon().AsBitmap(), expected_bitmap));
@@ -54,7 +55,7 @@ void VerifyPromptIconCallback(
 void VerifyPromptPermissionsCallback(
     base::OnceClosure quit_closure,
     size_t regular_permissions_count,
-    ExtensionInstallPromptShowParams* params,
+    std::unique_ptr<ExtensionInstallPromptShowParams> params,
     ExtensionInstallPrompt::DoneCallback done_callback,
     std::unique_ptr<ExtensionInstallPrompt::Prompt> install_prompt) {
   ASSERT_TRUE(install_prompt.get());
@@ -65,7 +66,7 @@ void VerifyPromptPermissionsCallback(
 void VerifyPromptWithholdingUICallback(
     base::OnceClosure quit_closure,
     const bool should_display,
-    ExtensionInstallPromptShowParams* params,
+    std::unique_ptr<ExtensionInstallPromptShowParams> params,
     ExtensionInstallPrompt::DoneCallback done_callback,
     std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt) {
   EXPECT_EQ(should_display, prompt->ShouldDisplayWithholdingUI());
@@ -85,9 +86,7 @@ class ExtensionInstallPromptUnitTest : public testing::Test {
   ~ExtensionInstallPromptUnitTest() override {}
 
   // testing::Test:
-  void SetUp() override {
-    profile_.reset(new TestingProfile());
-  }
+  void SetUp() override { profile_ = std::make_unique<TestingProfile>(); }
   void TearDown() override {
     profile_.reset();
   }
@@ -105,7 +104,7 @@ class ExtensionInstallPromptUnitTest : public testing::Test {
 
 TEST_F(ExtensionInstallPromptUnitTest, PromptShowsPermissionWarnings) {
   APIPermissionSet api_permissions;
-  api_permissions.insert(APIPermission::kTab);
+  api_permissions.insert(extensions::mojom::APIPermissionID::kTab);
   std::unique_ptr<const PermissionSet> permission_set(
       new PermissionSet(std::move(api_permissions), ManifestPermissionSet(),
                         URLPatternSet(), URLPatternSet()));
@@ -263,7 +262,7 @@ TEST_F(ExtensionInstallPromptTestWithholdingAllowed,
   scoped_refptr<const Extension> extension =
       ExtensionBuilder("all_hosts")
           .AddPermission("<all_urls>")
-          .SetLocation(Manifest::EXTERNAL_POLICY)
+          .SetLocation(mojom::ManifestLocation::kExternalPolicy)
           .Build();
   content::TestWebContentsFactory factory;
   ExtensionInstallPrompt prompt(factory.CreateWebContents(profile()));

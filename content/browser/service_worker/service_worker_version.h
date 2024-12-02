@@ -119,7 +119,7 @@ class ServiceWorkerMainResourceLoaderTest;
 // one of them is activated. This class connects the actual script with a
 // running worker.
 //
-// Unless otherwise noted, all methods of this class run on the IO thread.
+// Unless otherwise noted, all methods of this class run on the UI thread.
 class CONTENT_EXPORT ServiceWorkerVersion
     : public blink::mojom::ServiceWorkerHost,
       public base::RefCounted<ServiceWorkerVersion>,
@@ -171,7 +171,7 @@ class CONTENT_EXPORT ServiceWorkerVersion
     virtual void OnVersionStateChanged(ServiceWorkerVersion* version) {}
     virtual void OnDevToolsRoutingIdChanged(ServiceWorkerVersion* version) {}
     virtual void OnErrorReported(ServiceWorkerVersion* version,
-                                 const base::string16& error_message,
+                                 const std::u16string& error_message,
                                  int line_number,
                                  int column_number,
                                  const GURL& source_url) {}
@@ -179,7 +179,7 @@ class CONTENT_EXPORT ServiceWorkerVersion
         ServiceWorkerVersion* version,
         blink::mojom::ConsoleMessageSource source,
         blink::mojom::ConsoleMessageLevel message_level,
-        const base::string16& message,
+        const std::u16string& message,
         int line_number,
         const GURL& source_url) {}
     virtual void OnCachedMetadataUpdated(ServiceWorkerVersion* version,
@@ -394,9 +394,12 @@ class CONTENT_EXPORT ServiceWorkerVersion
   void RestoreControlleeFromBackForwardCacheMap(const std::string& client_uuid);
   // Called when a back-forward cached controllee is evicted or destroyed.
   void RemoveControlleeFromBackForwardCacheMap(const std::string& client_uuid);
-  // Called when a controllee is destroyed. Remove controllee from whichever
-  // map it belongs to, or do nothing when it is already removed.
-  void OnControlleeDestroyed(const std::string& client_uuid);
+  // Called when this version should no longer be the controller of this client.
+  // Called when the controllee is destroyed or it changes controller. Removes
+  // controllee from whichever map it belongs to, or do nothing when it is
+  // already removed. This function is different from RemoveController(), which
+  // can only be called if the controllee is not in the back-forward cache map.
+  void Uncontrol(const std::string& client_uuid);
 
   // Returns true if this version has a controllee.
   // Note regarding BackForwardCache:
@@ -756,13 +759,13 @@ class CONTENT_EXPORT ServiceWorkerVersion
   void OnStopped(EmbeddedWorkerStatus old_status) override;
   void OnDetached(EmbeddedWorkerStatus old_status) override;
   void OnRegisteredToDevToolsManager() override;
-  void OnReportException(const base::string16& error_message,
+  void OnReportException(const std::u16string& error_message,
                          int line_number,
                          int column_number,
                          const GURL& source_url) override;
   void OnReportConsoleMessage(blink::mojom::ConsoleMessageSource source,
                               blink::mojom::ConsoleMessageLevel message_level,
-                              const base::string16& message,
+                              const std::u16string& message,
                               int line_number,
                               const GURL& source_url) override;
 
