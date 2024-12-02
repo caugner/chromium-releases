@@ -47,13 +47,11 @@ class BoundsAnimator : public AnimationDelegate,
   explicit BoundsAnimator(View* view);
   ~BoundsAnimator();
 
-  // Starts animating |view| from its current bounds to |target|. If
-  // |delete_when_done| is true the view is deleted when the animation
-  // completes. If there is already an animation running for the view it's
-  // stopped and a new one started.
-  void AnimateViewTo(View* view,
-                     const gfx::Rect& target,
-                     bool delete_when_done);
+  // Starts animating |view| from its current bounds to |target|. If there is
+  // already an animation running for the view it's stopped and a new one
+  // started. If an AnimationDelegate has been set for |view| it is removed
+  // (after being notified that the animation was canceled).
+  void AnimateViewTo(View* view, const gfx::Rect& target);
 
   // Sets the animation for the specified view. BoundsAnimator takes ownership
   // of the specified animation.
@@ -64,7 +62,7 @@ class BoundsAnimator : public AnimationDelegate,
   const SlideAnimation* GetAnimationForView(View* view);
 
   // Stops animating the specified view. If the view was scheduled for deletion
-  // it is deleted.
+  // it is deleted. This does nothing if |view| is not currently animating.
   void StopAnimatingView(View* view);
 
   // Sets the delegate for the animation created for the specified view. If
@@ -88,17 +86,17 @@ class BoundsAnimator : public AnimationDelegate,
     observer_ = observer;
   }
 
+ protected:
+  // Creates the animation to use for animating views.
+  virtual SlideAnimation* CreateAnimation();
+
  private:
   // Tracks data about the view being animated.
   struct Data {
     Data()
-        : delete_when_done(false),
-          delete_delegate_when_done(false),
+        : delete_delegate_when_done(false),
           animation(NULL),
           delegate(NULL) {}
-
-    // Should the view be deleted when done?
-    bool delete_when_done;
 
     // If true the delegate is deleted when done.
     bool delete_delegate_when_done;
@@ -116,24 +114,32 @@ class BoundsAnimator : public AnimationDelegate,
     AnimationDelegate* delegate;
   };
 
+  // Used by AnimationEndedOrCanceled.
+  enum AnimationEndType {
+    ANIMATION_ENDED,
+    ANIMATION_CANCELED
+  };
+
   typedef std::map<View*, Data> ViewToDataMap;
 
   typedef std::map<const Animation*, View*> AnimationToViewMap;
 
-  // Creates the animation to use for animating views.
-  SlideAnimation* CreateAnimation();
+  // Removes references to |view| and its animation. This does NOT delete the
+  // animation or delegate.
+  void RemoveFromMaps(View* view);
 
-  // Removes references to |view| and its animation as well as deleting |view|
-  // (if necessary). This does NOT delete the animation or delegate.
-  void RemoveFromMapsAndDelete(View* view);
-
-  // Does the necessary cleanup for |data|.
-  void CleanupData(Data* data);
+  // Does the necessary cleanup for |data|. If |send_cancel| is true and a
+  // delegate has been installed on |data| AnimationCanceled is invoked on it.
+  void CleanupData(bool send_cancel, Data* data, View* view);
 
   // Used when changing the animation for a view. This resets the maps for
   // the animation used by view and returns the current animation. Ownership
   // of the returned animation passes to the caller.
   Animation* ResetAnimationForView(View* view);
+
+  // Invoked from AnimationEnded and AnimationCanceled.
+  void AnimationEndedOrCanceled(const Animation* animation,
+                                AnimationEndType type);
 
   // AnimationDelegate overrides.
   virtual void AnimationProgressed(const Animation* animation);

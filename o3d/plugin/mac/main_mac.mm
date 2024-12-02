@@ -48,6 +48,7 @@
 
 #include "core/cross/event.h"
 #include "statsreport/metrics.h"
+#include "plugin/cross/config.h"
 #include "plugin/cross/plugin_logging.h"
 #include "plugin/cross/plugin_metrics.h"
 #include "plugin/cross/o3d_glue.h"
@@ -55,6 +56,9 @@
 #include "plugin/cross/whitelist.h"
 #include "plugin/mac/plugin_mac.h"
 #include "plugin/mac/graphics_utils_mac.h"
+#include "plugin/mac/fullscreen_window_mac.h"
+#import "plugin/mac/o3d_layer.h"
+
 
 #if !defined(O3D_INTERNAL_PLUGIN)
 o3d::PluginLogging* g_logger = NULL;
@@ -66,6 +70,7 @@ using glue::StreamManager;
 using o3d::Bitmap;
 using o3d::DisplayWindowMac;
 using o3d::Event;
+using o3d::FullscreenWindowMac;
 using o3d::Renderer;
 
 namespace {
@@ -79,6 +84,15 @@ base::AtExitManager g_at_exit_manager;
 
 #define CFTIMER
 // #define DEFERRED_DRAW_ON_NULLEVENTS
+
+  
+// Helper that extracts the O3DLayer obj c object from the PluginObject
+// and coerces it to the right type.  The code can't live in the PluginObject
+// since it's c++ code and doesn't know about objective c types, and it saves
+// lots of casts elsewhere in the code.
+static O3DLayer* ObjO3DLayer(PluginObject* obj) {
+  return static_cast<O3DLayer*>(obj ? obj->gl_layer_ : nil);
+}
 
 void DrawPlugin(PluginObject* obj, bool send_callback, CGContextRef context) {
   obj->client()->RenderClient(send_callback);
@@ -293,9 +307,8 @@ void HandleMouseEvent(PluginObject* obj,
   int x, y;
   // now make x and y plugin relative coords
   if (obj->GetFullscreenMacWindow()) {
-    Rect  wBounds;
-    GetWindowBounds(obj->GetFullscreenMacWindow(), kWindowGlobalPortRgn,
-                    &wBounds);
+    Rect wBounds = o3d::CGRect2Rect(
+        obj->GetFullscreenMacWindow()->GetWindowBounds());
     x = screen_x - wBounds.left;
     y = screen_y - wBounds.top;
     in_plugin = true;
@@ -450,101 +463,6 @@ EventModifiers CocoaToEventRecordModifiers(NSUInteger inMods) {
   return outMods;
 }
 
-// Handle an NPCocoaEvent style event. The Cocoa event interface is
-// a recent addition to the NAPI spec.
-// See https://wiki.mozilla.org/Mac:NPAPI_Event_Models for further details.
-// The principle advantages are that we can get scrollwheel messages,
-// mouse-moved messages, and can tell which mouse button was pressed.
-// This API will also be required for a carbon-free 64 bit version for 10.6.
-bool HandleCocoaEvent(NPP instance, NPCocoaEvent* the_event) {
-  PluginObject* obj = static_cast<PluginObject*>(instance->pdata);
-  WindowRef fullscreen_window = obj->GetFullscreenMacWindow();
-  bool handled = false;
-
-  if (g_logger) g_logger->UpdateLogging();
-
-  obj->MacEventReceived();
-  switch (the_event->type) {
-    case NPCocoaEventDrawRect:
-      // We need to call the render callback from here if we are rendering
-      // off-screen because it doesn't get called anywhere else.
-      DrawPlugin(obj,
-                 obj->IsOffscreenRenderingEnabled(),
-                 the_event->data.draw.context);
-      handled = true;
-      break;
-    case NPCocoaEventMouseDown:
-    case NPCocoaEventMouseUp:
-    case NPCocoaEventMouseMoved:
-    case NPCocoaEventMouseDragged:
-    case NPCocoaEventMouseEntered:
-    case NPCocoaEventMouseExited:
-    case NPCocoaEventScrollWheel:
-      HandleCocoaMouseEvent(obj, the_event);
-      break;
-    case NPCocoaEventKeyDown:
-      // Hard-coded trapdoor to get out of fullscreen mode if user hits escape.
-      if (fullscreen_window) {
-        NSString *chars =
-            (NSString*) the_event->data.key.charactersIgnoringModifiers;
-
-        if (chars == NULL || [chars length] == 0) {
-          break;
-        }
-
-        if ([chars characterAtIndex:0] == '\e') {
-          obj->CancelFullscreenDisplay();
-          break;
-        }
-      }  // otherwise fall through
-    case NPCocoaEventKeyUp: {
-      EventKind eventKind = (the_event->type == NPCocoaEventKeyUp) ? keyUp :
-                            (the_event->data.key.isARepeat) ? autoKey : keyDown;
-
-      EventModifiers modifiers =
-          CocoaToEventRecordModifiers(the_event->data.key.modifierFlags);
-
-      NSString *chars =
-          (NSString*) the_event->data.key.charactersIgnoringModifiers;
-
-      if (chars == NULL || [chars length] == 0) {
-        break;
-      }
-
-      DispatchKeyboardEvent(obj,
-                            eventKind,
-                            [chars characterAtIndex:0],
-                            the_event->data.key.keyCode,
-                            modifiers);
-      break;
-    }
-    case NPCocoaEventFlagsChanged:
-    case NPCocoaEventFocusChanged:
-    case NPCocoaEventWindowFocusChanged:
-      // Safari tab switching recovery code.
-      if (obj->mac_surface_hidden_) {
-        obj->mac_surface_hidden_ = false;
-        NPN_ForceRedraw(instance);  // invalidate to cause a redraw
-      }
-
-      // Auto-recovery for any situation where another window comes in front
-      // of the fullscreen window and we need to exit fullscreen mode.
-      // This can happen because another browser window has come forward, or
-      // because another app has been called to the front.
-      // TODO: We'll have problems with this when dealing with e.g.
-      // Japanese text input IME windows.
-      if (fullscreen_window && fullscreen_window != ActiveNonFloatingWindow()) {
-        obj->CancelFullscreenDisplay();
-      }
-
-      break;
-    case NPCocoaEventTextInput:
-      break;
-  }
-
-  return handled;
-}
-
 // List of message types from mozilla's nsplugindefs.h, which is more
 // complete than the list in NPAPI.h.
 enum nsPluginEventType {
@@ -584,21 +502,35 @@ NPError InitializePlugin() {
   return NPERR_NO_ERROR;
 }
 
-// Negotiates the best plugin event model, sets the browser to use that,
-// and updates the PluginObject so we can remember which one we chose.
-// We favor the newer Cocoa-based model, but can cope with browsers that
-// only support the original event model, or indeed can't even understand
-// what we are asking for.
-// However, right at the minute, we shun the Cocoa event model because its
-// NPP_SetWindow messages don't contain a WindowRef or NSWindow so we would
-// not get enough info to create our AGL context. We'll go back to
-// preferring Cocoa once we have worked out how to deal with that.
-// Cannot actually fail -
-void Mac_SetBestEventModel(NPP instance, PluginObject* obj) {
+// When to prefer Core Animation. Safari's support in 10.5 was too
+// buggy to attempt to use.
+static bool PreferCoreAnimation() {
+  bool isSafari = o3d::metric_browser_type.value() == o3d::BROWSER_NAME_SAFARI;
+  return (!isSafari || o3d::IsMacOSTenSixOrHigher());
+}
+  
+// Negotiates the best plugin drawing and event model, sets the
+// browser to use that, and updates the PluginObject so we can
+// remember which one we chose. We prefer these combinations in the
+// given order:
+//  - Core Animation drawing model, Cocoa event model
+//  - QuickDraw drawing model, Carbon event model
+//  - Core Graphics drawing model, Cocoa event model
+// If the browser doesn't even understand the question, we use the
+// QuickDraw drawing model and Carbon event model for best backward
+// compatibility.
+//
+// This ordering provides the best forward-looking behavior while
+// still providing compatibility with older browsers.
+//
+// Returns NPERR_NO_ERROR (0) if successful, otherwise an NPError code.
+NPError Mac_SetBestEventAndDrawingModel(NPP instance, PluginObject* obj) {
   NPError err = NPERR_NO_ERROR;
-  NPEventModel model_to_use = NPEventModelCarbon;
   NPBool supportsCocoaEventModel = FALSE;
   NPBool supportsCarbonEventModel = FALSE;
+  NPBool supportsCoreGraphics = FALSE;
+  NPBool supportsQuickDraw = FALSE;
+  NPBool supportsCoreAnimation = FALSE;
 
   // See if browser supports Cocoa event model.
   err = NPN_GetValue(instance,
@@ -618,96 +550,77 @@ void Mac_SetBestEventModel(NPP instance, PluginObject* obj) {
     err = NPERR_NO_ERROR;
   }
 
-  // Now we've collected our data, the decision phase begins.
-
-  // If we didn't successfully get TRUE for either question, the browser
-  // just does not know about the new switchable event models, so must only
-  // support the old Carbon event model.
-  if (!(supportsCocoaEventModel || supportsCarbonEventModel)) {
-    supportsCarbonEventModel = TRUE;
-    obj->event_model_ = NPEventModelCarbon;
-  }
-
-  // Default to Carbon event model, because the new version of the
-  // Cocoa event model spec does not supply sufficient window
-  // information in its Cocoa NPP_SetWindow calls for us to bind an
-  // AGL context to the browser window.
-  model_to_use =
-      (supportsCarbonEventModel) ? NPEventModelCarbon : NPEventModelCocoa;
-  if (o3d::gIsChrome) {
-    if (supportsCocoaEventModel) {
-      model_to_use = NPEventModelCocoa;
-    }
-  }
-  NPN_SetValue(instance, NPPVpluginEventModel,
-               reinterpret_cast<void*>(model_to_use));
-  obj->event_model_ = model_to_use;
-}
-
-
-// Negotiates the best plugin drawing model, sets the browser to use that,
-// and updates the PluginObject so we can remember which one we chose.
-// Returns NPERR_NO_ERROR (0) if successful, otherwise an NPError code.
-NPError Mac_SetBestDrawingModel(NPP instance, PluginObject* obj) {
-  NPError err = NPERR_NO_ERROR;
-  NPBool supportsCoreGraphics = FALSE;
-  NPBool supportsOpenGL = FALSE;
-  NPBool supportsQuickDraw = FALSE;
-  NPDrawingModel drawing_model = NPDrawingModelQuickDraw;
-
-  // test for direct OpenGL support
-  err = NPN_GetValue(instance,
-                     NPNVsupportsOpenGLBool,
-                     &supportsOpenGL);
-  if (err != NPERR_NO_ERROR)
-    supportsOpenGL = FALSE;
-
-  // test for QuickDraw support
+  // Test for QuickDraw support.
   err = NPN_GetValue(instance,
                      NPNVsupportsQuickDrawBool,
                      &supportsQuickDraw);
   if (err != NPERR_NO_ERROR)
     supportsQuickDraw = FALSE;
 
-  // Test for Core Graphics support
+  // Test for Core Graphics support.
   err = NPN_GetValue(instance,
                      NPNVsupportsCoreGraphicsBool,
                      &supportsCoreGraphics);
   if (err != NPERR_NO_ERROR)
     supportsCoreGraphics = FALSE;
 
-  // In the Chrome browser we currently want to prefer the CoreGraphics
-  // drawing model, read back the frame buffer into system memory and draw
-  // the results to the screen using CG.
-  //
-  // TODO(maf): Once support for the CoreAnimation drawing model is
-  // integrated into O3D, we will want to revisit this logic.
-  if (o3d::gIsChrome && supportsCoreGraphics) {
-    drawing_model = NPDrawingModelCoreGraphics;
-  } else {
-    // In order of preference. Preference is now determined by compatibility,
-    // not by modernity, and so is the opposite of the order I first used.
-    if (supportsQuickDraw && !(obj->event_model_ == NPEventModelCocoa)) {
-      drawing_model = NPDrawingModelQuickDraw;
-    } else if (supportsCoreGraphics) {
-      drawing_model = NPDrawingModelCoreGraphics;
-    } else if (supportsOpenGL) {
-      drawing_model = NPDrawingModelOpenGL;
-    } else {
-      // This case is for browsers that didn't even understand the question
-      // eg FF2, so drawing models are not supported, just assume QuickDraw.
-      obj->drawing_model_ = NPDrawingModelQuickDraw;
-      return NPERR_NO_ERROR;
-    }
-  }      
+  // Test for Core Animation support.
+  err = NPN_GetValue(instance,
+                     NPNVsupportsCoreAnimationBool,
+                     &supportsCoreAnimation);
+  if (err != NPERR_NO_ERROR)
+    supportsCoreAnimation = FALSE;
 
+  // Fix up values for older browsers which don't even understand
+  // these questions.
+  if (!supportsCarbonEventModel && !supportsCocoaEventModel) {
+    supportsCarbonEventModel = TRUE;
+  }
+
+  if (!supportsQuickDraw && !supportsCoreGraphics && !supportsCoreAnimation) {
+    // Must be a very old browser such as FF2. Avoid calling
+    // NPN_SetValue for the event or drawing models at all.
+    obj->drawing_model_ = NPDrawingModelQuickDraw;
+    obj->event_model_ = NPEventModelCarbon;
+    return NPERR_NO_ERROR;
+  }
+
+  // Now that we have our information, decide on the appropriate combination.
+  NPDrawingModel drawing_model = NPDrawingModelQuickDraw;
+  NPEventModel event_model = NPEventModelCarbon;
+
+  if (supportsCoreAnimation && supportsCocoaEventModel &&
+      PreferCoreAnimation()) {
+    drawing_model = NPDrawingModelCoreAnimation;
+    event_model = NPEventModelCocoa;
+    DLOG(INFO) << "Core Animation drawing model";
+  } else if (supportsQuickDraw && supportsCarbonEventModel) {
+    drawing_model = NPDrawingModelQuickDraw;
+    event_model = NPEventModelCarbon;
+    DLOG(INFO) << "QuickDraw drawing model";
+  } else if (supportsCoreGraphics && supportsCocoaEventModel) {
+    drawing_model = NPDrawingModelCoreGraphics;
+    event_model = NPEventModelCocoa;
+    DLOG(INFO) << "Core Graphics drawing model";
+  } else {
+    // If all of the above tests failed, we are running on a browser
+    // which we don't know how to handle.
+    return NPERR_GENERIC_ERROR;
+  }
+
+  // Earlier versions of this code did not check the return value of
+  // the call to set the event model.
+  NPN_SetValue(instance, NPPVpluginEventModel,
+               reinterpret_cast<void*>(event_model));
   err = NPN_SetValue(instance, NPPVpluginDrawingModel,
                      reinterpret_cast<void*>(drawing_model));
-  if (err != NPERR_NO_ERROR)
+
+  if (err != NPERR_NO_ERROR) {
     return err;
+  }
 
   obj->drawing_model_ = drawing_model;
-
+  obj->event_model_ = event_model;
   return NPERR_NO_ERROR;
 }
 }  // end anonymous namespace
@@ -779,16 +692,39 @@ NPError OSCALL NP_Shutdown(void) {
 }  // namespace o3d / extern "C"
 
 
+
 namespace o3d {
 
 NPError PlatformNPPGetValue(NPP instance, NPPVariable variable, void *value) {
+  PluginObject* obj = static_cast<PluginObject*>(instance->pdata);
+
+  switch (variable) {
+    case NPPVpluginCoreAnimationLayer:
+      if (!ObjO3DLayer(obj)) {
+        // Setup layer
+        O3DLayer* gl_layer = [[[O3DLayer alloc] init] retain];
+
+        gl_layer.autoresizingMask =
+            kCALayerWidthSizable + kCALayerHeightSizable;
+        obj->gl_layer_ = gl_layer;
+
+        [gl_layer setPluginObject:obj];
+      }
+      // Make sure to return a retained layer
+      *(CALayer**)value = ObjO3DLayer(obj);
+      return NPERR_NO_ERROR;
+      break;
+    default:
+      return NPERR_INVALID_PARAM;
+  }
+
   return NPERR_INVALID_PARAM;
 }
 
 bool HandleMacEvent(EventRecord* the_event, NPP instance) {
   PluginObject* obj = static_cast<PluginObject*>(instance->pdata);
   bool handled = false;
-  WindowRef fullscreen_window = obj->GetFullscreenMacWindow();
+  FullscreenWindowMac* fullscreen_window = obj->GetFullscreenMacWindow();
 
   if (g_logger) g_logger->UpdateLogging();
 
@@ -819,7 +755,7 @@ bool HandleMacEvent(EventRecord* the_event, NPP instance) {
       // of the fullscreen window and we need to exit fullscreen mode.
       // This can happen because another browser window has come forward, or
       // because another app has been called to the front.
-      if (fullscreen_window && fullscreen_window != ActiveNonFloatingWindow()) {
+      if (fullscreen_window && !fullscreen_window->IsActive()) {
         obj->CancelFullscreenDisplay();
       }
 
@@ -875,6 +811,129 @@ bool HandleMacEvent(EventRecord* the_event, NPP instance) {
   return handled;
 }
 
+// Handle an NPCocoaEvent style event. The Cocoa event interface is
+// a recent addition to the NAPI spec.
+// See https://wiki.mozilla.org/Mac:NPAPI_Event_Models for further details.
+// The principle advantages are that we can get scrollwheel messages,
+// mouse-moved messages, and can tell which mouse button was pressed.
+// This API will also be required for a carbon-free 64 bit version for 10.6.
+bool HandleCocoaEvent(NPP instance, NPCocoaEvent* the_event,
+                      bool initiated_from_browser) {
+  PluginObject* obj = static_cast<PluginObject*>(instance->pdata);
+  FullscreenWindowMac* fullscreen_window = obj->GetFullscreenMacWindow();
+  bool handled = false;
+
+  if (g_logger) g_logger->UpdateLogging();
+
+  obj->MacEventReceived();
+  switch (the_event->type) {
+    case NPCocoaEventDrawRect:
+      // We need to call the render callback from here if we are rendering
+      // off-screen because it doesn't get called anywhere else.
+      if (obj->drawing_model_ == NPDrawingModelCoreAnimation) {
+        O3DLayer* layer = ObjO3DLayer(obj);
+        if (layer) {
+          [layer setNeedsDisplay];
+        }
+      } else {
+        DrawPlugin(obj,
+                   obj->IsOffscreenRenderingEnabled(),
+                   the_event->data.draw.context);
+      }
+      handled = true;
+      break;
+    case NPCocoaEventMouseDown:
+    case NPCocoaEventMouseUp:
+    case NPCocoaEventMouseMoved:
+    case NPCocoaEventMouseDragged:
+    case NPCocoaEventMouseEntered:
+    case NPCocoaEventMouseExited:
+    case NPCocoaEventScrollWheel:
+      if (the_event->type == NPCocoaEventMouseUp &&
+          initiated_from_browser && fullscreen_window) {
+        // The mouse-up event associated with the mouse-down that caused
+        // the app to go full-screen is dispatched against the browser
+        // window rather than the full-screen window. Apps that have an
+        // icon which toggles full-screen and windowed mode therefore come
+        // out of full-screen immediately when the icon is clicked, since
+        // the mouse-up occurs at the same location as the mouse-down. Work
+        // around this by squelching this mouse up event. This seems to
+        // work acceptably for known apps. We could do better by
+        // redispatching all mouse events through the full-screen window
+        // until the first mouse up.
+        break;
+      }
+
+      HandleCocoaMouseEvent(obj, the_event);
+      break;
+    case NPCocoaEventKeyDown:
+      // Hard-coded trapdoor to get out of fullscreen mode if user hits escape.
+      if (fullscreen_window) {
+        NSString *chars =
+            (NSString*) the_event->data.key.charactersIgnoringModifiers;
+
+        if (chars == NULL || [chars length] == 0) {
+          break;
+        }
+
+        if ([chars characterAtIndex:0] == '\e') {
+          obj->CancelFullscreenDisplay();
+          break;
+        }
+      }  // otherwise fall through
+    case NPCocoaEventKeyUp: {
+      EventKind eventKind = (the_event->type == NPCocoaEventKeyUp) ? keyUp :
+                            (the_event->data.key.isARepeat) ? autoKey : keyDown;
+
+      EventModifiers modifiers =
+          CocoaToEventRecordModifiers(the_event->data.key.modifierFlags);
+
+      NSString *chars =
+          (NSString*) the_event->data.key.charactersIgnoringModifiers;
+
+      if (chars == NULL || [chars length] == 0) {
+        break;
+      }
+
+      DispatchKeyboardEvent(obj,
+                            eventKind,
+                            [chars characterAtIndex:0],
+                            the_event->data.key.keyCode,
+                            modifiers);
+      break;
+    }
+    case NPCocoaEventFlagsChanged:
+    case NPCocoaEventFocusChanged:
+    case NPCocoaEventWindowFocusChanged:
+      // Safari tab switching recovery code.
+      if (obj->mac_surface_hidden_) {
+        obj->mac_surface_hidden_ = false;
+        NPN_ForceRedraw(instance);  // invalidate to cause a redraw
+      }
+
+      // Auto-recovery for any situation where another window comes in front
+      // of the fullscreen window and we need to exit fullscreen mode.
+      // This can happen because another browser window has come forward, or
+      // because another app has been called to the front.
+      // TODO: We'll have problems with this when dealing with e.g.
+      // Japanese text input IME windows.
+      // Note that we ignore focus transfer events coming from the
+      // browser while in full-screen mode, because otherwise we
+      // frequently disable full-screen mode almost immediately after
+      // entering it.
+      if (fullscreen_window && !fullscreen_window->IsActive() &&
+          !initiated_from_browser) {
+        obj->CancelFullscreenDisplay();
+      }
+
+      break;
+    case NPCocoaEventTextInput:
+      break;
+  }
+
+  return handled;
+}
+
 NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode, int16 argc,
                 char* argn[], char* argv[], NPSavedData* saved) {
   HANDLE_CRASHES;
@@ -883,7 +942,7 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode, int16 argc,
 
 #if !defined(O3D_INTERNAL_PLUGIN)
   if (!g_logging_initialized) {
-    GetUserAgentMetrics(instance);
+    o3d::GetUserAgentMetrics(instance);
     GetUserConfigMetrics();
     // Create usage stats logs object
     g_logger = o3d::PluginLogging::InitializeUsageStatsLogging();
@@ -901,13 +960,16 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode, int16 argc,
   glue::_o3d::InitializeGlue(instance);
   pluginObject->Init(argc, argn, argv);
 
-  Mac_SetBestEventModel(instance,
-                        static_cast<PluginObject*>(instance->pdata));
-
-  err = Mac_SetBestDrawingModel(
-      instance, static_cast<PluginObject*>(instance->pdata));
+  err = Mac_SetBestEventAndDrawingModel(instance,
+                                        static_cast<PluginObject*>(
+                                            instance->pdata));
   if (err != NPERR_NO_ERROR)
     return err;
+#ifdef CFTIMER
+  if (pluginObject->drawing_model_ == NPDrawingModelCoreAnimation) {
+    o3d::gRenderTimer.AddInstance(instance);
+  }
+#endif
   return NPERR_NO_ERROR;
 }
 
@@ -918,6 +980,16 @@ NPError NPP_Destroy(NPP instance, NPSavedData** save) {
 #if defined(CFTIMER)
     o3d::gRenderTimer.RemoveInstance(instance);
 #endif
+
+    // TODO(maf) / TODO(kbr): are we leaking AGL / CGL contexts?
+
+    if (obj->drawing_model_ == NPDrawingModelCoreAnimation) {
+      O3DLayer* layer = ObjO3DLayer(obj);
+      if (layer) {
+        // Prevent the layer from rendering any more.
+        [layer setPluginObject:NULL];
+      }
+    }
 
     obj->TearDown();
     NPN_ReleaseObject(obj);
@@ -939,24 +1011,19 @@ NPError NPP_SetWindow(NPP instance, NPWindow* window) {
   assert(window != NULL);
 
   if (window->window == NULL &&
-      obj->drawing_model_ != NPDrawingModelCoreGraphics)
+      obj->drawing_model_ != NPDrawingModelCoreGraphics &&
+      obj->drawing_model_!= NPDrawingModelCoreAnimation) {
     return NPERR_NO_ERROR;
+  }
 
   obj->last_plugin_loc_.h = window->x;
   obj->last_plugin_loc_.v = window->y;
 
   switch (obj->drawing_model_) {
-    case NPDrawingModelOpenGL: {
-      NP_GLContext* np_gl = reinterpret_cast<NP_GLContext*>(window->window);
-      if (obj->event_model_ == NPEventModelCocoa) {
-        NSWindow * ns_window = reinterpret_cast<NSWindow*>(np_gl->window);
-        new_window = reinterpret_cast<WindowRef>([ns_window windowRef]);
-      } else {
-        new_window = np_gl->window;
-      }
-      obj->mac_2d_context_ = NULL;
-      obj->mac_cgl_context_ = np_gl->context;
-      break;
+    case NPDrawingModelCoreAnimation: {
+      O3DLayer* o3dLayer = ObjO3DLayer(obj);
+      [o3dLayer setWidth: window->width height: window->height];
+      return NPERR_NO_ERROR;
     }
     case NPDrawingModelCoreGraphics: {
       // Safari 4 sets window->window to NULL when in Cocoa event mode.
@@ -1001,56 +1068,44 @@ NPError NPP_SetWindow(NPP instance, NPWindow* window) {
 
   obj->mac_window_ = new_window;
 
-  if (obj->drawing_model_ == NPDrawingModelOpenGL) {
-    CGLSetCurrentContext(obj->mac_cgl_context_);
-  } else if (obj->drawing_model_ == NPDrawingModelCoreGraphics &&
-             o3d::gIsChrome &&
-             obj->mac_cgl_pbuffer_ == NULL) {
-    // This code path is only taken for Chrome. We initialize things with a
-    // CGL context rendering to a 1x1 pbuffer. Later we use the O3D
-    // RenderSurface APIs to set up the framebuffer object which is used
-    // for rendering.
-    static const CGLPixelFormatAttribute attribs[] = {
-      (CGLPixelFormatAttribute) kCGLPFAPBuffer,
-      (CGLPixelFormatAttribute) 0
-    };
-    CGLPixelFormatObj pixelFormat;
-    GLint numPixelFormats;
-    if (CGLChoosePixelFormat(attribs,
-                             &pixelFormat,
-                             &numPixelFormats) != kCGLNoError) {
-      DLOG(ERROR) << "Error choosing pixel format.";
-      return NPERR_GENERIC_ERROR;
+  if (obj->drawing_model_ == NPDrawingModelCoreAnimation) {
+    if (obj->mac_cgl_context_) {
+      CGLSetCurrentContext(obj->mac_cgl_context_);
     }
-    if (!pixelFormat) {
-      DLOG(ERROR) << "Unable to find pbuffer compatible pixel format.";
-      return NPERR_GENERIC_ERROR;
+  } else if (obj->drawing_model_ == NPDrawingModelCoreGraphics) {
+    if (obj->mac_cgl_pbuffer_ == NULL) {
+      // We initialize things with a CGL context rendering to a 1x1
+      // pbuffer. Later we use the O3D RenderSurface APIs to set up the
+      // framebuffer object which is used for rendering.
+      CGLContextObj share_context = obj->GetFullscreenShareContext();
+      CGLPixelFormatObj pixel_format = obj->GetFullscreenCGLPixelFormatObj();
+      DCHECK(share_context);
+      CGLError result;
+      CGLContextObj context;
+      result = CGLCreateContext(pixel_format, share_context, &context);
+      if (result != kCGLNoError) {
+        DLOG(ERROR) << "Error " << result << " creating context.";
+        return NPERR_GENERIC_ERROR;
+      }
+      CGLPBufferObj pbuffer;
+      if ((result = CGLCreatePBuffer(1, 1,
+                                     GL_TEXTURE_2D, GL_RGBA,
+                                     0, &pbuffer)) != kCGLNoError) {
+        CGLDestroyContext(context);
+        DLOG(ERROR) << "Error " << result << " creating pbuffer.";
+        return NPERR_GENERIC_ERROR;
+      }
+      if ((result = CGLSetPBuffer(context, pbuffer, 0, 0, 0)) != kCGLNoError) {
+        CGLDestroyContext(context);
+        CGLDestroyPBuffer(pbuffer);
+        DLOG(ERROR) << "Error " << result << " attaching pbuffer to context.";
+        return NPERR_GENERIC_ERROR;
+      }
+      // Must make the context current for renderer creation to succeed
+      CGLSetCurrentContext(context);
+      obj->mac_cgl_context_ = context;
+      obj->mac_cgl_pbuffer_ = pbuffer;
     }
-    CGLContextObj context;
-    CGLError res = CGLCreateContext(pixelFormat, 0, &context);
-    CGLDestroyPixelFormat(pixelFormat);
-    if (res != kCGLNoError) {
-      DLOG(ERROR) << "Error creating context.";
-      return NPERR_GENERIC_ERROR;
-    }
-    CGLPBufferObj pbuffer;
-    if (CGLCreatePBuffer(1, 1,
-                         GL_TEXTURE_2D, GL_RGBA,
-                         0, &pbuffer) != kCGLNoError) {
-      CGLDestroyContext(context);
-      DLOG(ERROR) << "Error creating pbuffer.";
-      return NPERR_GENERIC_ERROR;
-    }
-    if (CGLSetPBuffer(context, pbuffer, 0, 0, 0) != kCGLNoError) {
-      CGLDestroyContext(context);
-      CGLDestroyPBuffer(pbuffer);
-      DLOG(ERROR) << "Error attaching pbuffer to context.";
-      return NPERR_GENERIC_ERROR;
-    }
-    // Must make the context current for renderer creation to succeed
-    CGLSetCurrentContext(context);
-    obj->mac_cgl_context_ = context;
-    obj->mac_cgl_pbuffer_ = pbuffer;
   } else if (!had_a_window && obj->mac_agl_context_ == NULL) {
     // setup AGL context
     AGLPixelFormat myAGLPixelFormat = NULL;
@@ -1239,6 +1294,9 @@ NPError NPP_SetWindow(NPP instance, NPWindow* window) {
     return NPERR_NO_ERROR;
   }
 
+  if (obj->renderer())
+    return NPERR_NO_ERROR;
+
   // Create and assign the graphics context.
   o3d::DisplayWindowMac default_display;
   default_display.set_agl_context(obj->mac_agl_context_);
@@ -1302,7 +1360,7 @@ int16 NPP_HandleEvent(NPP instance, void* event) {
     EventRecord* theEvent = static_cast<EventRecord*>(event);
     return HandleMacEvent(theEvent, instance) ? 1 : 0;
   } else if (obj->event_model_ == NPEventModelCocoa){
-    return HandleCocoaEvent(instance, (NPCocoaEvent*)event) ? 1 : 0;
+    return HandleCocoaEvent(instance, (NPCocoaEvent*)event, true) ? 1 : 0;
   }
   return 0;
 }

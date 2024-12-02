@@ -5,22 +5,120 @@
 #include "net/socket/socket_test_util.h"
 
 #include <algorithm>
+#include <vector>
+
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/time.h"
 #include "net/base/address_family.h"
+#include "net/base/auth.h"
 #include "net/base/host_resolver_proc.h"
 #include "net/base/ssl_info.h"
+#include "net/http/http_network_session.h"
+#include "net/http/http_request_headers.h"
+#include "net/http/http_response_headers.h"
+#include "net/socket/client_socket_pool_histograms.h"
 #include "net/socket/socket.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#define NET_TRACE(level, s)   DLOG(level) << s << __FUNCTION__ << "() "
+
 namespace net {
 
-MockClientSocket::MockClientSocket()
+namespace {
+
+inline char AsciifyHigh(char x) {
+  char nybble = static_cast<char>((x >> 4) & 0x0F);
+  return nybble + ((nybble < 0x0A) ? '0' : 'A' - 10);
+}
+
+inline char AsciifyLow(char x) {
+  char nybble = static_cast<char>((x >> 0) & 0x0F);
+  return nybble + ((nybble < 0x0A) ? '0' : 'A' - 10);
+}
+
+inline char Asciify(char x) {
+  if ((x < 0) || !isprint(x))
+    return '.';
+  return x;
+}
+
+void DumpData(const char* data, int data_len) {
+  if (logging::LOG_INFO < logging::GetMinLogLevel())
+    return;
+  DLOG(INFO) << "Length:  " << data_len;
+  const char* pfx = "Data:    ";
+  if (!data || (data_len <= 0)) {
+    DLOG(INFO) << pfx << "<None>";
+  } else {
+    int i;
+    for (i = 0; i <= (data_len - 4); i += 4) {
+      DLOG(INFO) << pfx
+                 << AsciifyHigh(data[i + 0]) << AsciifyLow(data[i + 0])
+                 << AsciifyHigh(data[i + 1]) << AsciifyLow(data[i + 1])
+                 << AsciifyHigh(data[i + 2]) << AsciifyLow(data[i + 2])
+                 << AsciifyHigh(data[i + 3]) << AsciifyLow(data[i + 3])
+                 << "  '"
+                 << Asciify(data[i + 0])
+                 << Asciify(data[i + 1])
+                 << Asciify(data[i + 2])
+                 << Asciify(data[i + 3])
+                 << "'";
+      pfx = "         ";
+    }
+    // Take care of any 'trailing' bytes, if data_len was not a multiple of 4.
+    switch (data_len - i) {
+      case 3:
+        DLOG(INFO) << pfx
+                   << AsciifyHigh(data[i + 0]) << AsciifyLow(data[i + 0])
+                   << AsciifyHigh(data[i + 1]) << AsciifyLow(data[i + 1])
+                   << AsciifyHigh(data[i + 2]) << AsciifyLow(data[i + 2])
+                   << "    '"
+                   << Asciify(data[i + 0])
+                   << Asciify(data[i + 1])
+                   << Asciify(data[i + 2])
+                   << " '";
+        break;
+      case 2:
+        DLOG(INFO) << pfx
+                   << AsciifyHigh(data[i + 0]) << AsciifyLow(data[i + 0])
+                   << AsciifyHigh(data[i + 1]) << AsciifyLow(data[i + 1])
+                   << "      '"
+                   << Asciify(data[i + 0])
+                   << Asciify(data[i + 1])
+                   << "  '";
+        break;
+      case 1:
+        DLOG(INFO) << pfx
+                   << AsciifyHigh(data[i + 0]) << AsciifyLow(data[i + 0])
+                   << "        '"
+                   << Asciify(data[i + 0])
+                   << "   '";
+        break;
+    }
+  }
+}
+
+void DumpMockRead(const MockRead& r) {
+  if (logging::LOG_INFO < logging::GetMinLogLevel())
+    return;
+  DLOG(INFO) << "Async:   " << r.async;
+  DLOG(INFO) << "Result:  " << r.result;
+  DumpData(r.data, r.data_len);
+  const char* stop = (r.sequence_number & MockRead::STOPLOOP) ? " (STOP)" : "";
+  DLOG(INFO) << "Stage:   " << (r.sequence_number & ~MockRead::STOPLOOP)
+             << stop;
+  DLOG(INFO) << "Time:    " << r.time_stamp.ToInternalValue();
+}
+
+}  // namespace
+
+MockClientSocket::MockClientSocket(net::NetLog* net_log)
     : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
-      connected_(false) {
+      connected_(false),
+      net_log_(NetLog::Source(), net_log) {
 }
 
 void MockClientSocket::GetSSLInfo(net::SSLInfo* ssl_info) {
@@ -52,7 +150,7 @@ bool MockClientSocket::IsConnectedAndIdle() const {
 
 int MockClientSocket::GetPeerAddress(AddressList* address) const {
   return net::SystemHostResolverProc("localhost", ADDRESS_FAMILY_UNSPECIFIED,
-                                     0, address);
+                                     0, address, NULL);
 }
 
 void MockClientSocket::RunCallbackAsync(net::CompletionCallback* callback,
@@ -69,8 +167,10 @@ void MockClientSocket::RunCallback(net::CompletionCallback* callback,
 }
 
 MockTCPClientSocket::MockTCPClientSocket(const net::AddressList& addresses,
+                                         net::NetLog* net_log,
                                          net::SocketDataProvider* data)
-    : addresses_(addresses),
+    : MockClientSocket(net_log),
+      addresses_(addresses),
       data_(data),
       read_offset_(0),
       read_data_(false, net::ERR_UNEXPECTED),
@@ -83,8 +183,7 @@ MockTCPClientSocket::MockTCPClientSocket(const net::AddressList& addresses,
   data_->Reset();
 }
 
-int MockTCPClientSocket::Connect(net::CompletionCallback* callback,
-                                 const BoundNetLog& net_log) {
+int MockTCPClientSocket::Connect(net::CompletionCallback* callback) {
   if (connected_)
     return net::OK;
   connected_ = true;
@@ -93,6 +192,11 @@ int MockTCPClientSocket::Connect(net::CompletionCallback* callback,
     return net::ERR_IO_PENDING;
   }
   return data_->connect_data().result;
+}
+
+void MockTCPClientSocket::Disconnect() {
+  MockClientSocket::Disconnect();
+  pending_callback_ = NULL;
 }
 
 bool MockTCPClientSocket::IsConnected() const {
@@ -235,12 +339,14 @@ class MockSSLClientSocket::ConnectCallback :
 };
 
 MockSSLClientSocket::MockSSLClientSocket(
-    net::ClientSocket* transport_socket,
+    net::ClientSocketHandle* transport_socket,
     const std::string& hostname,
     const net::SSLConfig& ssl_config,
     net::SSLSocketDataProvider* data)
-    : transport_(transport_socket),
-      data_(data) {
+    : MockClientSocket(transport_socket->socket()->NetLog().net_log()),
+      transport_(transport_socket),
+      data_(data),
+      is_npn_state_set_(false) {
   DCHECK(data_);
 }
 
@@ -248,15 +354,10 @@ MockSSLClientSocket::~MockSSLClientSocket() {
   Disconnect();
 }
 
-void MockSSLClientSocket::GetSSLInfo(net::SSLInfo* ssl_info) {
-  ssl_info->Reset();
-}
-
-int MockSSLClientSocket::Connect(net::CompletionCallback* callback,
-                                 const BoundNetLog& net_log) {
+int MockSSLClientSocket::Connect(net::CompletionCallback* callback) {
   ConnectCallback* connect_callback = new ConnectCallback(
       this, callback, data_->connect.result);
-  int rv = transport_->Connect(connect_callback, net_log);
+  int rv = transport_->socket()->Connect(connect_callback);
   if (rv == net::OK) {
     delete connect_callback;
     if (data_->connect.async) {
@@ -272,18 +373,39 @@ int MockSSLClientSocket::Connect(net::CompletionCallback* callback,
 
 void MockSSLClientSocket::Disconnect() {
   MockClientSocket::Disconnect();
-  if (transport_ != NULL)
-    transport_->Disconnect();
+  if (transport_->socket() != NULL)
+    transport_->socket()->Disconnect();
 }
 
 int MockSSLClientSocket::Read(net::IOBuffer* buf, int buf_len,
                               net::CompletionCallback* callback) {
-  return transport_->Read(buf, buf_len, callback);
+  return transport_->socket()->Read(buf, buf_len, callback);
 }
 
 int MockSSLClientSocket::Write(net::IOBuffer* buf, int buf_len,
                                net::CompletionCallback* callback) {
-  return transport_->Write(buf, buf_len, callback);
+  return transport_->socket()->Write(buf, buf_len, callback);
+}
+
+void MockSSLClientSocket::GetSSLInfo(net::SSLInfo* ssl_info) {
+  ssl_info->Reset();
+}
+
+SSLClientSocket::NextProtoStatus MockSSLClientSocket::GetNextProto(
+    std::string* proto) {
+  *proto = data_->next_proto;
+  return data_->next_proto_status;
+}
+
+bool MockSSLClientSocket::wasNpnNegotiated() const {
+  if (is_npn_state_set_)
+    return new_npn_value_;
+  return data_->was_npn_negotiated;
+}
+
+bool MockSSLClientSocket::setWasNpnNegotiated(bool negotiated) {
+  is_npn_state_set_ = true;
+  return new_npn_value_ = negotiated;
 }
 
 MockRead StaticSocketDataProvider::GetNextRead() {
@@ -372,11 +494,153 @@ void DynamicSocketDataProvider::Reset() {
   reads_.clear();
 }
 
-void DynamicSocketDataProvider::SimulateRead(const char* data) {
+void DynamicSocketDataProvider::SimulateRead(const char* data,
+                                             const size_t length) {
   if (!allow_unconsumed_reads_) {
     EXPECT_TRUE(reads_.empty()) << "Unconsumed read: " << reads_.front().data;
   }
-  reads_.push_back(MockRead(data));
+  reads_.push_back(MockRead(true, data, length));
+}
+
+DelayedSocketData::DelayedSocketData(
+    int write_delay, MockRead* reads, size_t reads_count,
+    MockWrite* writes, size_t writes_count)
+    : StaticSocketDataProvider(reads, reads_count, writes, writes_count),
+      write_delay_(write_delay),
+      ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)) {
+  DCHECK_GE(write_delay_, 0);
+}
+
+DelayedSocketData::DelayedSocketData(
+    const MockConnect& connect, int write_delay, MockRead* reads,
+    size_t reads_count, MockWrite* writes, size_t writes_count)
+    : StaticSocketDataProvider(reads, reads_count, writes, writes_count),
+      write_delay_(write_delay),
+      ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)) {
+  DCHECK_GE(write_delay_, 0);
+  set_connect_data(connect);
+}
+
+MockRead DelayedSocketData::GetNextRead() {
+  if (write_delay_)
+    return MockRead(true, ERR_IO_PENDING);
+  return StaticSocketDataProvider::GetNextRead();
+}
+
+MockWriteResult DelayedSocketData::OnWrite(const std::string& data) {
+  MockWriteResult rv = StaticSocketDataProvider::OnWrite(data);
+  // Now that our write has completed, we can allow reads to continue.
+  if (!--write_delay_)
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+      factory_.NewRunnableMethod(&DelayedSocketData::CompleteRead), 100);
+  return rv;
+}
+
+void DelayedSocketData::Reset() {
+  set_socket(NULL);
+  factory_.RevokeAll();
+  StaticSocketDataProvider::Reset();
+}
+
+void DelayedSocketData::CompleteRead() {
+  if (socket())
+    socket()->OnReadComplete(GetNextRead());
+}
+
+OrderedSocketData::OrderedSocketData(
+    MockRead* reads, size_t reads_count, MockWrite* writes, size_t writes_count)
+    : StaticSocketDataProvider(reads, reads_count, writes, writes_count),
+      sequence_number_(0), loop_stop_stage_(0), callback_(NULL),
+      blocked_(false), ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)) {
+}
+
+OrderedSocketData::OrderedSocketData(
+    const MockConnect& connect,
+    MockRead* reads, size_t reads_count,
+    MockWrite* writes, size_t writes_count)
+    : StaticSocketDataProvider(reads, reads_count, writes, writes_count),
+      sequence_number_(0), loop_stop_stage_(0), callback_(NULL),
+      blocked_(false), ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)) {
+  set_connect_data(connect);
+}
+
+MockRead OrderedSocketData::GetNextRead() {
+  factory_.RevokeAll();
+  blocked_ = false;
+  const MockRead& next_read = StaticSocketDataProvider::PeekRead();
+  if (next_read.sequence_number & MockRead::STOPLOOP)
+    EndLoop();
+  if ((next_read.sequence_number & ~MockRead::STOPLOOP) <=
+      sequence_number_++) {
+    NET_TRACE(INFO, "  *** ") << "Stage " << sequence_number_ - 1
+                              << ": Read " << read_index();
+    DumpMockRead(next_read);
+    return StaticSocketDataProvider::GetNextRead();
+  }
+  NET_TRACE(INFO, "  *** ") << "Stage " << sequence_number_ - 1
+                            << ": I/O Pending";
+  MockRead result = MockRead(true, ERR_IO_PENDING);
+  DumpMockRead(result);
+  blocked_ = true;
+  return result;
+}
+
+MockWriteResult OrderedSocketData::OnWrite(const std::string& data) {
+  NET_TRACE(INFO, "  *** ") << "Stage " << sequence_number_
+                            << ": Write " << write_index();
+  DumpMockRead(PeekWrite());
+  ++sequence_number_;
+  if (blocked_) {
+    // TODO(willchan): This 100ms delay seems to work around some weirdness.  We
+    // should probably fix the weirdness.  One example is in SpdyStream,
+    // DoSendRequest() will return ERR_IO_PENDING, and there's a race.  If the
+    // SYN_REPLY causes OnResponseReceived() to get called before
+    // SpdyStream::ReadResponseHeaders() is called, we hit a NOTREACHED().
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        factory_.NewRunnableMethod(&OrderedSocketData::CompleteRead), 100);
+  }
+  return StaticSocketDataProvider::OnWrite(data);
+}
+
+void OrderedSocketData::Reset() {
+  NET_TRACE(INFO, "  *** ") << "Stage "
+                            << sequence_number_ << ": Reset()";
+  sequence_number_ = 0;
+  loop_stop_stage_ = 0;
+  set_socket(NULL);
+  factory_.RevokeAll();
+  StaticSocketDataProvider::Reset();
+}
+
+void OrderedSocketData::EndLoop() {
+  // If we've already stopped the loop, don't do it again until we've advanced
+  // to the next sequence_number.
+  NET_TRACE(INFO, "  *** ") << "Stage " << sequence_number_ << ": EndLoop()";
+  if (loop_stop_stage_ > 0) {
+    const MockRead& next_read = StaticSocketDataProvider::PeekRead();
+    if ((next_read.sequence_number & ~MockRead::STOPLOOP) >
+        loop_stop_stage_) {
+      NET_TRACE(INFO, "  *** ") << "Stage " << sequence_number_
+                                << ": Clearing stop index";
+      loop_stop_stage_ = 0;
+    } else {
+      return;
+    }
+  }
+  // Record the sequence_number at which we stopped the loop.
+  NET_TRACE(INFO, "  *** ") << "Stage " << sequence_number_
+                            << ": Posting Quit at read " << read_index();
+  loop_stop_stage_ = sequence_number_;
+  if (callback_)
+    callback_->RunWithParams(Tuple1<int>(ERR_IO_PENDING));
+}
+
+void OrderedSocketData::CompleteRead() {
+  if (socket()) {
+    NET_TRACE(INFO, "  *** ") << "Stage " << sequence_number_;
+    socket()->OnReadComplete(GetNextRead());
+  }
 }
 
 void MockClientSocketFactory::AddSocketDataProvider(
@@ -407,17 +671,17 @@ MockSSLClientSocket* MockClientSocketFactory::GetMockSSLClientSocket(
 }
 
 ClientSocket* MockClientSocketFactory::CreateTCPClientSocket(
-    const AddressList& addresses) {
+    const AddressList& addresses, net::NetLog* net_log) {
   SocketDataProvider* data_provider = mock_data_.GetNext();
   MockTCPClientSocket* socket =
-      new MockTCPClientSocket(addresses, data_provider);
+      new MockTCPClientSocket(addresses, net_log, data_provider);
   data_provider->set_socket(socket);
   tcp_client_sockets_.push_back(socket);
   return socket;
 }
 
 SSLClientSocket* MockClientSocketFactory::CreateSSLClientSocket(
-    ClientSocket* transport_socket,
+    ClientSocketHandle* transport_socket,
     const std::string& hostname,
     const SSLConfig& ssl_config) {
   MockSSLClientSocket* socket =
@@ -493,6 +757,180 @@ void ClientSocketPoolTest::ReleaseAllConnections(KeepAlive keep_alive) {
   do {
     released_one = ReleaseOneConnection(keep_alive);
   } while (released_one);
+}
+
+MockTCPClientSocketPool::MockConnectJob::MockConnectJob(
+    ClientSocket* socket,
+    ClientSocketHandle* handle,
+    CompletionCallback* callback)
+    : socket_(socket),
+      handle_(handle),
+      user_callback_(callback),
+      ALLOW_THIS_IN_INITIALIZER_LIST(
+          connect_callback_(this, &MockConnectJob::OnConnect)) {
+}
+
+int MockTCPClientSocketPool::MockConnectJob::Connect() {
+  int rv = socket_->Connect(&connect_callback_);
+  if (rv == OK) {
+    user_callback_ = NULL;
+    OnConnect(OK);
+  }
+  return rv;
+}
+
+bool MockTCPClientSocketPool::MockConnectJob::CancelHandle(
+    const ClientSocketHandle* handle) {
+  if (handle != handle_)
+    return false;
+  socket_.reset();
+  handle_ = NULL;
+  user_callback_ = NULL;
+  return true;
+}
+
+void MockTCPClientSocketPool::MockConnectJob::OnConnect(int rv) {
+  if (!socket_.get())
+    return;
+  if (rv == OK) {
+    handle_->set_socket(socket_.release());
+  } else {
+    socket_.reset();
+  }
+
+  handle_ = NULL;
+
+  if (user_callback_) {
+    CompletionCallback* callback = user_callback_;
+    user_callback_ = NULL;
+    callback->Run(rv);
+  }
+}
+
+MockTCPClientSocketPool::MockTCPClientSocketPool(
+    int max_sockets,
+    int max_sockets_per_group,
+    const scoped_refptr<ClientSocketPoolHistograms>& histograms,
+    ClientSocketFactory* socket_factory)
+    : TCPClientSocketPool(max_sockets, max_sockets_per_group, histograms,
+                          NULL, NULL, NULL),
+      client_socket_factory_(socket_factory),
+      release_count_(0),
+      cancel_count_(0) {
+}
+
+int MockTCPClientSocketPool::RequestSocket(const std::string& group_name,
+                                           const void* socket_params,
+                                           RequestPriority priority,
+                                           ClientSocketHandle* handle,
+                                           CompletionCallback* callback,
+                                           const BoundNetLog& net_log) {
+  ClientSocket* socket = client_socket_factory_->CreateTCPClientSocket(
+      AddressList(), net_log.net_log());
+  MockConnectJob* job = new MockConnectJob(socket, handle, callback);
+  job_list_.push_back(job);
+  handle->set_pool_id(1);
+  return job->Connect();
+}
+
+void MockTCPClientSocketPool::CancelRequest(const std::string& group_name,
+                                            ClientSocketHandle* handle) {
+  std::vector<MockConnectJob*>::iterator i;
+  for (i = job_list_.begin(); i != job_list_.end(); ++i) {
+    if ((*i)->CancelHandle(handle)) {
+      cancel_count_++;
+      break;
+    }
+  }
+}
+
+void MockTCPClientSocketPool::ReleaseSocket(const std::string& group_name,
+                                            ClientSocket* socket, int id) {
+  EXPECT_EQ(1, id);
+  release_count_++;
+  delete socket;
+}
+
+MockTCPClientSocketPool::~MockTCPClientSocketPool() {}
+
+MockSOCKSClientSocketPool::MockSOCKSClientSocketPool(
+    int max_sockets,
+    int max_sockets_per_group,
+    const scoped_refptr<ClientSocketPoolHistograms>& histograms,
+    const scoped_refptr<TCPClientSocketPool>& tcp_pool)
+    : SOCKSClientSocketPool(max_sockets, max_sockets_per_group, histograms,
+                            NULL, tcp_pool, NULL),
+      tcp_pool_(tcp_pool) {
+}
+
+int MockSOCKSClientSocketPool::RequestSocket(const std::string& group_name,
+                                             const void* socket_params,
+                                             RequestPriority priority,
+                                             ClientSocketHandle* handle,
+                                             CompletionCallback* callback,
+                                             const BoundNetLog& net_log) {
+  return tcp_pool_->RequestSocket(group_name, socket_params, priority, handle,
+                                  callback, net_log);
+}
+
+void MockSOCKSClientSocketPool::CancelRequest(
+    const std::string& group_name,
+    ClientSocketHandle* handle) {
+  return tcp_pool_->CancelRequest(group_name, handle);
+}
+
+void MockSOCKSClientSocketPool::ReleaseSocket(const std::string& group_name,
+                                              ClientSocket* socket, int id) {
+  return tcp_pool_->ReleaseSocket(group_name, socket, id);
+}
+
+MockSOCKSClientSocketPool::~MockSOCKSClientSocketPool() {}
+
+MockHttpAuthController::MockHttpAuthController()
+    : HttpAuthController(HttpAuth::AUTH_PROXY, GURL(),
+                         scoped_refptr<HttpNetworkSession>(NULL)),
+      data_(NULL),
+      data_index_(0),
+      data_count_(0) {
+}
+
+void MockHttpAuthController::SetMockAuthControllerData(
+    struct MockHttpAuthControllerData* data, size_t count) {
+  data_ = data;
+  data_count_ = count;
+}
+
+int MockHttpAuthController::MaybeGenerateAuthToken(
+    const HttpRequestInfo* request,
+    CompletionCallback* callback,
+    const BoundNetLog& net_log) {
+  return OK;
+}
+
+void MockHttpAuthController::AddAuthorizationHeader(
+    HttpRequestHeaders* authorization_headers) {
+  authorization_headers->AddHeadersFromString(CurrentData().auth_header);
+}
+
+int MockHttpAuthController::HandleAuthChallenge(
+    scoped_refptr<HttpResponseHeaders> headers,
+    bool do_not_send_server_auth,
+    bool establishing_tunnel,
+    const BoundNetLog& net_log) {
+  return OK;
+}
+
+void MockHttpAuthController::ResetAuth(const std::wstring& username,
+                                       const std::wstring& password) {
+  data_index_++;
+}
+
+bool MockHttpAuthController::HaveAuth() const {
+  return CurrentData().auth_header.size() != 0;
+}
+
+bool MockHttpAuthController::HaveAuthHandler() const {
+  return HaveAuth();
 }
 
 const char kSOCKS5GreetRequest[] = { 0x05, 0x01, 0x00 };

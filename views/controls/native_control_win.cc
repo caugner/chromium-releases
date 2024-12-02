@@ -73,16 +73,20 @@ void NativeControlWin::ViewHierarchyChanged(bool is_add, View* parent,
 }
 
 void NativeControlWin::VisibilityChanged(View* starting_from, bool is_visible) {
-  if (!is_visible) {
+  // We might get called due to visibility changes at any point in the
+  // hierarchy, lets check whether we are really visible or not.
+  bool visible = IsVisibleInRootView();
+  if (!visible && native_view()) {
     // We destroy the child control HWND when we become invisible because of the
     // performance cost of maintaining many HWNDs.
     HWND hwnd = native_view();
     Detach();
     DestroyWindow(hwnd);
-  } else if (!native_view()) {
+  } else if (visible && !native_view()) {
     if (GetWidget())
       CreateNativeControl();
-  } else {
+  }
+  if (visible) {
     // The view becomes visible after native control is created.
     // Layout now.
     Layout();
@@ -92,6 +96,17 @@ void NativeControlWin::VisibilityChanged(View* starting_from, bool is_visible) {
 void NativeControlWin::Focus() {
   DCHECK(native_view());
   SetFocus(native_view());
+
+  // Since we are being wrapped by a view, accessibility should receive
+  // the super class as the focused view.
+  View* parent_view = GetParent();
+
+  // Due to some controls not behaving as expected without having
+  // a native win32 control, we exclude the following from sending
+  // their IAccessible as focus events.
+  if (parent_view->GetClassName() != views::Combobox::kViewClassName &&
+      parent_view->HasFocus())
+    parent_view->NotifyAccessibilityEvent(AccessibilityTypes::EVENT_FOCUS);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -134,7 +149,7 @@ DWORD NativeControlWin::GetAdditionalExStyle() const {
   // extended window style for a right-to-left layout so the subclass creates
   // a mirrored HWND for the underlying control.
   DWORD ex_style = 0;
-  if (UILayoutIsRightToLeft())
+  if (base::i18n::IsRTL())
     ex_style |= l10n_util::GetExtendedStyles();
 
   return ex_style;
@@ -145,7 +160,7 @@ DWORD NativeControlWin::GetAdditionalRTLStyle() const {
   // extended window style for a right-to-left layout so the subclass creates
   // a mirrored HWND for the underlying control.
   DWORD ex_style = 0;
-  if (UILayoutIsRightToLeft())
+  if (base::i18n::IsRTL())
     ex_style |= l10n_util::GetExtendedTooltipStyles();
 
   return ex_style;

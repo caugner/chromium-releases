@@ -12,12 +12,12 @@
 #include "base/path_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/net/url_request_context_getter.h"
 #include "chrome/browser/pref_member.h"
 #include "chrome/browser/spellcheck_host_observer.h"
 #include "chrome/browser/spellchecker_platform_engine.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/spellcheck_common.h"
@@ -110,8 +110,7 @@ int SpellCheckHost::GetSpellCheckLanguages(
                              NULL);
   dictionary_language_pref.Init(prefs::kSpellCheckDictionary,
                                 profile->GetPrefs(), NULL);
-  std::string dictionary_language =
-      WideToASCII(dictionary_language_pref.GetValue());
+  std::string dictionary_language = dictionary_language_pref.GetValue();
 
   // The current dictionary language should be there.
   languages->push_back(dictionary_language);
@@ -120,12 +119,11 @@ int SpellCheckHost::GetSpellCheckLanguages(
   // from this list to the existing list of spell check languages.
   std::vector<std::string> accept_languages;
 
-  if (SpellCheckerPlatform::SpellCheckerAvailable()) {
+  if (SpellCheckerPlatform::SpellCheckerAvailable())
     SpellCheckerPlatform::GetAvailableLanguages(&accept_languages);
-  } else {
-    SplitString(WideToASCII(accept_languages_pref.GetValue()), ',',
-                &accept_languages);
-  }
+  else
+    SplitString(accept_languages_pref.GetValue(), ',', &accept_languages);
+
   for (std::vector<std::string>::const_iterator i = accept_languages.begin();
        i != accept_languages.end(); ++i) {
     std::string language =

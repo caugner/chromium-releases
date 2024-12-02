@@ -31,6 +31,7 @@
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
 #include "base/time.h"
+#include "base/scoped_ptr.h"
 #include "media/base/media_format.h"
 
 namespace media {
@@ -52,12 +53,6 @@ enum FilterType {
   FILTER_VIDEO_DECODER,
   FILTER_AUDIO_RENDERER,
   FILTER_VIDEO_RENDERER
-};
-
-// A filter can broadcast messages to all other filters.  This identifies
-// the type of message to be broadcasted.
-enum FilterMessage {
-  kMsgDisableAudio,
 };
 
 // Used for completing asynchronous methods.
@@ -97,7 +92,9 @@ class MediaFilter : public base::RefCountedThreadSafe<MediaFilter> {
 
   // The pipeline has resumed playback.  Filters can continue requesting reads.
   // Filters may implement this method if they need to respond to this call.
+  // TODO(boliu): Check that callback is not NULL in sublcasses.
   virtual void Play(FilterCallback* callback) {
+    DCHECK(callback);
     if (callback) {
       callback->Run();
       delete callback;
@@ -107,7 +104,9 @@ class MediaFilter : public base::RefCountedThreadSafe<MediaFilter> {
   // The pipeline has paused playback.  Filters should fulfill any existing read
   // requests and then idle.  Filters may implement this method if they need to
   // respond to this call.
+  // TODO(boliu): Check that callback is not NULL in sublcasses.
   virtual void Pause(FilterCallback* callback) {
+    DCHECK(callback);
     if (callback) {
       callback->Run();
       delete callback;
@@ -116,7 +115,14 @@ class MediaFilter : public base::RefCountedThreadSafe<MediaFilter> {
 
   // The pipeline is being stopped either as a result of an error or because
   // the client called Stop().
-  virtual void Stop() = 0;
+  // TODO(boliu): Check that callback is not NULL in sublcasses.
+  virtual void Stop(FilterCallback* callback) {
+    DCHECK(callback);
+    if (callback) {
+      callback->Run();
+      delete callback;
+    }
+  }
 
   // The pipeline playback rate has been changed.  Filters may implement this
   // method if they need to respond to this call.
@@ -131,10 +137,10 @@ class MediaFilter : public base::RefCountedThreadSafe<MediaFilter> {
     }
   }
 
-  // This method is called from the pipeline when a message of type |message|
-  // is broadcasted from |source|. Filters can ignore the message if they do
-  // not need to react to events raised from another filter.
-  virtual void OnReceivedMessage(FilterMessage message) {
+  // This method is called from the pipeline when the audio renderer
+  // is disabled. Filters can ignore the notification if they do not
+  // need to react to this event.
+  virtual void OnAudioRendererDisabled() {
   }
 
  protected:
@@ -271,10 +277,24 @@ class VideoDecoder : public MediaFilter {
   // Returns the MediaFormat for this filter.
   virtual const MediaFormat& media_format() = 0;
 
-  // Schedules a read.  Decoder takes ownership of the callback.
-  //
-  // TODO(scherkus): switch Read() callback to scoped_refptr<>.
-  virtual void Read(Callback1<VideoFrame*>::Type* read_callback) = 0;
+  // |set_fill_buffer_done_callback| install permanent callback from downstream
+  // filter (i.e. Renderer). The callback is used to deliver video frames at
+  // runtime to downstream filter
+  typedef Callback1<scoped_refptr<VideoFrame> >::Type FillBufferDoneCallback;
+  void set_fill_buffer_done_callback(FillBufferDoneCallback* callback) {
+    fill_buffer_done_callback_.reset(callback);
+  }
+  FillBufferDoneCallback* fill_buffer_done_callback() {
+    return fill_buffer_done_callback_.get();
+  }
+
+  // Render provides an output buffer for Decoder to write to. These buffers
+  // will be recycled to renderer by fill_buffer_done_callback_;
+  // We could also pass empty pointer here to let decoder provide buffers pool.
+  virtual void FillThisBuffer(scoped_refptr<VideoFrame> frame) = 0;
+
+ private:
+  scoped_ptr<FillBufferDoneCallback> fill_buffer_done_callback_;
 };
 
 
@@ -295,10 +315,24 @@ class AudioDecoder : public MediaFilter {
   // Returns the MediaFormat for this filter.
   virtual const MediaFormat& media_format() = 0;
 
-  // Schedules a read.  Decoder takes ownership of the callback.
-  //
-  // TODO(scherkus): switch Read() callback to scoped_refptr<>.
-  virtual void Read(Callback1<Buffer*>::Type* read_callback) = 0;
+  // |set_fill_buffer_done_callback| install permanent callback from downstream
+  // filter (i.e. Renderer). The callback is used to deliver buffers at
+  // runtime to downstream filter.
+  typedef Callback1<scoped_refptr<Buffer> >::Type FillBufferDoneCallback;
+  void set_fill_buffer_done_callback(FillBufferDoneCallback* callback) {
+    fill_buffer_done_callback_.reset(callback);
+  }
+  FillBufferDoneCallback* fill_buffer_done_callback() {
+     return fill_buffer_done_callback_.get();
+   }
+
+  // Render provides an output buffer for Decoder to write to. These buffers
+  // will be recycled to renderer by fill_buffer_done_callback_;
+  // We could also pass empty pointer here to let decoder provide buffers pool.
+  virtual void FillThisBuffer(scoped_refptr<Buffer> buffer) = 0;
+
+ private:
+  scoped_ptr<FillBufferDoneCallback> fill_buffer_done_callback_;
 };
 
 

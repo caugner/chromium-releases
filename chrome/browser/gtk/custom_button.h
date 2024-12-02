@@ -15,10 +15,11 @@
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/owned_widget_gtk.h"
 #include "gfx/rect.h"
-#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkColor.h"
 
 class CairoCachedSurface;
 class GtkThemeProvider;
+class SkBitmap;
 
 // These classes implement two kinds of custom-drawn buttons.  They're
 // used on the toolbar and the bookmarks bar.
@@ -38,6 +39,10 @@ class CustomDrawButtonBase : public NotificationObserver {
                        int background_id);
 
   ~CustomDrawButtonBase();
+
+  // Flip the image horizontally. Not to be used for RTL/LTR reasons. (In RTL
+  // mode, this will unflip the image.)
+  void set_flipped(bool flipped) { flipped_ = flipped; }
 
   // Returns the dimensions of the first surface.
   int Width() const;
@@ -78,6 +83,11 @@ class CustomDrawButtonBase : public NotificationObserver {
   int depressed_id_;
   int button_background_id_;
   GtkThemeProvider* theme_provider_;
+
+  // Whether the button is flipped horizontally. Not used for RTL (we get
+  // flipped versions from the theme provider). Used for the flipped window
+  // buttons.
+  bool flipped_;
 
   // Used to listen for theme change notifications.
   NotificationRegistrar registrar_;
@@ -139,6 +149,10 @@ class CustomDrawButton : public NotificationObserver {
   ~CustomDrawButton();
 
   void Init();
+
+  // Flip the image horizontally. Not to be used for RTL/LTR reasons. (In RTL
+  // mode, this will unflip the image.)
+  void set_flipped(bool flipped) { button_base_.set_flipped(flipped); }
 
   GtkWidget* widget() const { return widget_.get(); }
 

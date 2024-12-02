@@ -7,15 +7,21 @@
 #include "app/clipboard/clipboard.h"
 #include "base/callback.h"
 #include "base/command_line.h"
+#if defined(OS_POSIX)
+#include "base/file_descriptor_posix.h"
+#endif
 #include "base/file_util.h"
 #include "base/histogram.h"
 #include "base/process_util.h"
 #include "base/thread.h"
+#include "base/utf_string_conversions.h"
+#include "base/worker_pool.h"
 #include "chrome/browser/appcache/appcache_dispatcher_host.h"
 #include "chrome/browser/browser_about_handler.h"
 #include "chrome/browser/child_process_security_policy.h"
 #include "chrome/browser/chrome_plugin_browsing_context.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/clipboard_dispatcher.h"
 #include "chrome/browser/download/download_file.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/geolocation/geolocation_permission_context.h"
@@ -23,18 +29,17 @@
 #include "chrome/browser/gpu_process_host.h"
 #include "chrome/browser/host_zoom_map.h"
 #include "chrome/browser/in_process_webkit/dom_storage_dispatcher_host.h"
+#include "chrome/browser/in_process_webkit/indexed_db_dispatcher_host.h"
 #include "chrome/browser/metrics/histogram_synchronizer.h"
 #include "chrome/browser/nacl_host/nacl_process_host.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "chrome/browser/net/dns_global.h"
+#include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notifications_prefs_cache.h"
 #include "chrome/browser/plugin_service.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/printing/printer_query.h"
-#include "chrome/browser/privacy_blacklist/blacklist.h"
-#include "chrome/browser/privacy_blacklist/blacklist_ui.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/audio_renderer_host.h"
 #include "chrome/browser/renderer_host/browser_render_process_host.h"
@@ -45,12 +50,17 @@
 #include "chrome/browser/task_manager.h"
 #include "chrome/browser/worker_host/message_port_dispatcher.h"
 #include "chrome/browser/worker_host/worker_service.h"
+#include "chrome/common/child_process_host.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/chrome_plugin_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_message_bundle.h"
+#if defined(OS_MACOSX)
+#include "chrome/common/font_descriptor_mac.h"
+#include "chrome/common/font_loader_mac.h"
+#endif
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
@@ -58,10 +68,12 @@
 #include "chrome/common/worker_messages.h"
 #include "gfx/native_widget_types.h"
 #include "net/base/cookie_monster.h"
+#include "net/base/file_stream.h"
 #include "net/base/keygen_handler.h"
 #include "net/base/load_flags.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
+#include "net/disk_cache/disk_cache.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/url_request/url_request_context.h"
@@ -126,9 +138,12 @@ void RenderParamsFromPrintSettings(const printing::PrintSettings& settings,
                                    ViewMsg_Print_Params* params) {
   DCHECK(params);
 #if defined(OS_WIN) || defined(OS_MACOSX)
+  params->page_size = settings.page_setup_device_units().physical_size();
   params->printable_size.SetSize(
-      settings.page_setup_pixels().content_area().width(),
-      settings.page_setup_pixels().content_area().height());
+      settings.page_setup_device_units().content_area().width(),
+      settings.page_setup_device_units().content_area().height());
+  params->margin_top = settings.page_setup_device_units().content_area().x();
+  params->margin_left = settings.page_setup_device_units().content_area().y();
   params->dpi = settings.dpi();
   // Currently hardcoded at 1.25. See PrintSettings' constructor.
   params->min_shrink = settings.min_shrink;
@@ -142,15 +157,6 @@ void RenderParamsFromPrintSettings(const printing::PrintSettings& settings,
 #else
   NOTIMPLEMENTED();
 #endif
-}
-
-Blacklist::Match* GetPrivacyBlacklistMatchForURL(
-    const GURL& url, ChromeURLRequestContext* context) {
-  const Blacklist* blacklist = context->GetPrivacyBlacklist();
-  // TODO(phajdan.jr): DCHECK(blacklist_manager) when blacklists are stable.
-  if (!blacklist)
-    return NULL;
-  return blacklist->FindMatch(url);
 }
 
 class SetCookieCompletion : public net::CompletionCallback {
@@ -169,20 +175,21 @@ class SetCookieCompletion : public net::CompletionCallback {
 
   virtual void RunWithParams(const Tuple1<int>& params) {
     int result = params.a;
+    bool blocked_by_policy = true;
     if (result == net::OK ||
         result == net::OK_FOR_SESSION_ONLY) {
+      blocked_by_policy = false;
       net::CookieOptions options;
       if (result == net::OK_FOR_SESSION_ONLY)
         options.set_force_session();
       context_->cookie_store()->SetCookieWithOptions(url_, cookie_line_,
                                                      options);
-    } else {
-      if (!context_->IsExternal()) {
-        CallRenderViewHostResourceDelegate(
-            render_process_id_, render_view_id_,
-            &RenderViewHostDelegate::Resource::OnContentBlocked,
-            CONTENT_SETTINGS_TYPE_COOKIES);
-      }
+    }
+    if (!context_->IsExternal()) {
+      CallRenderViewHostContentSettingsDelegate(
+          render_process_id_, render_view_id_,
+          &RenderViewHostDelegate::ContentSettings::OnCookieAccessed,
+          url_, cookie_line_, blocked_by_policy);
     }
     delete this;
   }
@@ -266,6 +273,25 @@ class GetRawCookiesCompletion : public net::CompletionCallback {
   scoped_refptr<URLRequestContext> context_;
 };
 
+class ClearCacheCompletion : public net::CompletionCallback {
+ public:
+  ClearCacheCompletion(IPC::Message* reply_msg,
+                       ResourceMessageFilter* filter)
+      : reply_msg_(reply_msg),
+        filter_(filter) {
+  }
+
+  virtual void RunWithParams(const Tuple1<int>& params) {
+    ViewHostMsg_ClearCache::WriteReplyParams(reply_msg_, params.a);
+    filter_->Send(reply_msg_);
+    delete this;
+  }
+
+ private:
+  IPC::Message* reply_msg_;
+  scoped_refptr<ResourceMessageFilter> filter_;
+};
+
 void WriteFileSize(IPC::Message* reply_msg,
                    const file_util::FileInfo& file_info) {
   ViewHostMsg_GetFileSize::WriteReplyParams(reply_msg, file_info.size);
@@ -304,8 +330,9 @@ ResourceMessageFilter::ResourceMessageFilter(
       appcache_dispatcher_host_(
           new AppCacheDispatcherHost(profile->GetRequestContext())),
       ALLOW_THIS_IN_INITIALIZER_LIST(dom_storage_dispatcher_host_(
-          new DOMStorageDispatcherHost(this, profile->GetWebKitContext(),
-              resource_dispatcher_host->webkit_thread()))),
+          new DOMStorageDispatcherHost(this, profile->GetWebKitContext()))),
+      ALLOW_THIS_IN_INITIALIZER_LIST(indexed_db_dispatcher_host_(
+          new IndexedDBDispatcherHost(this, profile->GetWebKitContext()))),
       ALLOW_THIS_IN_INITIALIZER_LIST(db_dispatcher_host_(
           new DatabaseDispatcherHost(profile->GetDatabaseTracker(), this,
               profile->GetHostContentSettingsMap()))),
@@ -316,8 +343,8 @@ ResourceMessageFilter::ResourceMessageFilter(
       next_route_id_callback_(NewCallbackWithReturnValue(
           render_widget_helper, &RenderWidgetHelper::GetNextRoutingID)),
       ALLOW_THIS_IN_INITIALIZER_LIST(geolocation_dispatcher_host_(
-          new GeolocationDispatcherHost(
-              this->id(), new GeolocationPermissionContext(profile)))) {
+          GeolocationDispatcherHost::New(
+              this->id(), profile->GetGeolocationPermissionContext()))) {
   DCHECK(request_context_);
   DCHECK(media_request_context_);
   DCHECK(audio_renderer_host_.get());
@@ -325,6 +352,12 @@ ResourceMessageFilter::ResourceMessageFilter(
   DCHECK(dom_storage_dispatcher_host_.get());
 
   render_widget_helper_->Init(id(), resource_dispatcher_host_);
+#if defined(OS_CHROMEOS)
+  cloud_print_enabled_ = true;
+#else
+  cloud_print_enabled_ = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableCloudPrint);
+#endif
 }
 
 ResourceMessageFilter::~ResourceMessageFilter() {
@@ -333,6 +366,9 @@ ResourceMessageFilter::~ResourceMessageFilter() {
 
   // Tell the DOM Storage dispatcher host to stop sending messages via us.
   dom_storage_dispatcher_host_->Shutdown();
+
+  // Tell the Indexed DB dispatcher host to stop sending messages via us.
+  indexed_db_dispatcher_host_->Shutdown();
 
   // Shut down the database dispatcher host.
   db_dispatcher_host_->Shutdown();
@@ -350,10 +386,6 @@ ResourceMessageFilter::~ResourceMessageFilter() {
 // Called on the IPC thread:
 void ResourceMessageFilter::OnFilterAdded(IPC::Channel* channel) {
   channel_ = channel;
-
-  // Add the observers to intercept.
-  registrar_.Add(this, NotificationType::BLACKLIST_NONVISUAL_RESOURCE_BLOCKED,
-                 NotificationService::AllSources());
 }
 
 // Called on the IPC thread:
@@ -372,8 +404,9 @@ void ResourceMessageFilter::OnChannelConnected(int32 peer_pid) {
   audio_renderer_host_->IPCChannelConnected(id(), handle(), this);
 
   WorkerService::GetInstance()->Initialize(resource_dispatcher_host_);
-  appcache_dispatcher_host_->Initialize(this, id(), handle());
+  appcache_dispatcher_host_->Initialize(this);
   dom_storage_dispatcher_host_->Init(id(), handle());
+  indexed_db_dispatcher_host_->Init(id(), handle());
   db_dispatcher_host_->Init(handle());
 }
 
@@ -404,6 +437,7 @@ bool ResourceMessageFilter::OnMessageReceived(const IPC::Message& msg) {
       resource_dispatcher_host_->OnMessageReceived(msg, this, &msg_is_ok) ||
       appcache_dispatcher_host_->OnMessageReceived(msg, &msg_is_ok) ||
       dom_storage_dispatcher_host_->OnMessageReceived(msg, &msg_is_ok) ||
+      indexed_db_dispatcher_host_->OnMessageReceived(msg) ||
       audio_renderer_host_->OnMessageReceived(msg, &msg_is_ok) ||
       db_dispatcher_host_->OnMessageReceived(msg, &msg_is_ok) ||
       mp_dispatcher->OnMessageReceived(
@@ -432,11 +466,15 @@ bool ResourceMessageFilter::OnMessageReceived(const IPC::Message& msg) {
       IPC_MESSAGE_HANDLER(ViewHostMsg_CreateWidget, OnMsgCreateWidget)
       IPC_MESSAGE_HANDLER(ViewHostMsg_SetCookie, OnSetCookie)
       IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetCookies, OnGetCookies)
-      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetRawCookies, OnGetRawCookies)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetRawCookies,
+                                      OnGetRawCookies)
       IPC_MESSAGE_HANDLER(ViewHostMsg_DeleteCookie, OnDeleteCookie)
       IPC_MESSAGE_HANDLER(ViewHostMsg_GetCookiesEnabled, OnGetCookiesEnabled)
-#if defined(OS_WIN)  // This hack is Windows-specific.
+#if defined(OS_MACOSX)
       IPC_MESSAGE_HANDLER(ViewHostMsg_LoadFont, OnLoadFont)
+#endif
+#if defined(OS_WIN)  // This hack is Windows-specific.
+      IPC_MESSAGE_HANDLER(ViewHostMsg_PreCacheFont, OnPreCacheFont)
 #endif
       IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetPlugins, OnGetPlugins)
       IPC_MESSAGE_HANDLER(ViewHostMsg_GetPluginPath, OnGetPluginPath)
@@ -485,6 +523,12 @@ bool ResourceMessageFilter::OnMessageReceived(const IPC::Message& msg) {
       IPC_MESSAGE_HANDLER(ViewHostMsg_ClipboardFindPboardWriteStringAsync,
                           OnClipboardFindPboardWriteString)
 #endif
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_ClipboardReadAvailableTypes,
+                                      OnClipboardReadAvailableTypes)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_ClipboardReadData,
+                                      OnClipboardReadData)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_ClipboardReadFilenames,
+                                      OnClipboardReadFilenames)
       IPC_MESSAGE_HANDLER(ViewHostMsg_CheckNotificationPermission,
                           OnCheckNotificationPermission)
       IPC_MESSAGE_HANDLER(ViewHostMsg_GetMimeTypeFromExtension,
@@ -514,7 +558,7 @@ bool ResourceMessageFilter::OnMessageReceived(const IPC::Message& msg) {
 #endif
       IPC_MESSAGE_HANDLER(ViewHostMsg_ResourceTypeStats, OnResourceTypeStats)
       IPC_MESSAGE_HANDLER(ViewHostMsg_V8HeapStats, OnV8HeapStats)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_DidZoomHost, OnDidZoomHost)
+      IPC_MESSAGE_HANDLER(ViewHostMsg_DidZoomURL, OnDidZoomURL)
       IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_ResolveProxy, OnResolveProxy)
       IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetDefaultPrintSettings,
                                       OnGetDefaultPrintSettings)
@@ -534,10 +578,14 @@ bool ResourceMessageFilter::OnMessageReceived(const IPC::Message& msg) {
       IPC_MESSAGE_HANDLER(ViewHostMsg_CloseCurrentConnections,
                           OnCloseCurrentConnections)
       IPC_MESSAGE_HANDLER(ViewHostMsg_SetCacheMode, OnSetCacheMode)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_ClearCache, OnClearCache)
+      IPC_MESSAGE_HANDLER(ViewHostMsg_DidGenerateCacheableMetadata,
+                          OnCacheableMetadataAvailable)
       IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetFileSize, OnGetFileSize)
       IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetFileModificationTime,
                                       OnGetFileModificationTime)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_Keygen, OnKeygen)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_OpenFile, OnOpenFile)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_Keygen, OnKeygen)
       IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetExtensionMessageBundle,
                                       OnGetExtensionMessageBundle)
 #if defined(USE_TCMALLOC)
@@ -598,12 +646,14 @@ URLRequestContext* ResourceMessageFilter::GetRequestContext(
 }
 
 void ResourceMessageFilter::OnMsgCreateWindow(
-    int opener_id, bool user_gesture, int64 session_storage_namespace_id,
+    const ViewHostMsg_CreateWindow_Params& params,
     int* route_id, int64* cloned_session_storage_namespace_id) {
   *cloned_session_storage_namespace_id = dom_storage_dispatcher_host_->
-      CloneSessionStorage(session_storage_namespace_id);
-  render_widget_helper_->CreateNewWindow(opener_id,
-                                         user_gesture,
+      CloneSessionStorage(params.session_storage_namespace_id);
+  render_widget_helper_->CreateNewWindow(params.opener_id,
+                                         params.user_gesture,
+                                         params.window_container_type,
+                                         params.frame_name,
                                          handle(),
                                          route_id);
 }
@@ -619,11 +669,6 @@ void ResourceMessageFilter::OnSetCookie(const IPC::Message& message,
                                         const GURL& first_party_for_cookies,
                                         const std::string& cookie) {
   ChromeURLRequestContext* context = GetRequestContextForURL(url);
-
-  scoped_ptr<Blacklist::Match> match(
-      GetPrivacyBlacklistMatchForURL(url, context));
-  if (match.get() && (match->attributes() & Blacklist::kBlockCookies))
-    return;
 
   SetCookieCompletion* callback =
       new SetCookieCompletion(id(), message.routing_id(), url, cookie, context);
@@ -709,49 +754,32 @@ void ResourceMessageFilter::OnGetCookiesEnabled(
   *enabled = GetRequestContextForURL(url)->AreCookiesEnabled();
 }
 
-#if defined(OS_WIN)  // This hack is Windows-specific.
-void ResourceMessageFilter::OnLoadFont(LOGFONT font) {
-  // If renderer is running in a sandbox, GetTextMetrics
-  // can sometimes fail. If a font has not been loaded
-  // previously, GetTextMetrics will try to load the font
-  // from the font file. However, the sandboxed renderer does
-  // not have permissions to access any font files and
-  // the call fails. So we make the browser pre-load the
-  // font for us by using a dummy call to GetTextMetrics of
-  // the same font.
-
-  // Maintain a circular queue for the fonts and DCs to be cached.
-  // font_index maintains next available location in the queue.
-  static const int kFontCacheSize = 32;
-  static HFONT fonts[kFontCacheSize] = {0};
-  static HDC hdcs[kFontCacheSize] = {0};
-  static size_t font_index = 0;
-
-  UMA_HISTOGRAM_COUNTS_100("Memory.CachedFontAndDC",
-      fonts[kFontCacheSize-1] ? kFontCacheSize : static_cast<int>(font_index));
-
-  HDC hdc = GetDC(NULL);
-  HFONT font_handle = CreateFontIndirect(&font);
-  DCHECK(NULL != font_handle);
-
-  HGDIOBJ old_font = SelectObject(hdc, font_handle);
-  DCHECK(NULL != old_font);
-
-  TEXTMETRIC tm;
-  BOOL ret = GetTextMetrics(hdc, &tm);
-  DCHECK(ret);
-
-  if (fonts[font_index] || hdcs[font_index]) {
-    // We already have too many fonts, we will delete one and take it's place.
-    DeleteObject(fonts[font_index]);
-    ReleaseDC(NULL, hdcs[font_index]);
+#if defined(OS_MACOSX)
+void ResourceMessageFilter::OnLoadFont(const FontDescriptor& font,
+                                       uint32* handle_size,
+                                       base::SharedMemoryHandle* handle) {
+  base::SharedMemory font_data;
+  uint32 font_data_size = 0;
+  bool ok = FontLoader::LoadFontIntoBuffer(font.nsFont(), &font_data,
+                &font_data_size);
+  if (!ok || font_data_size == 0) {
+    LOG(ERROR) << "Couldn't load font data for " << font.font_name <<
+        " ok=" << ok << " font_data_size=" << font_data_size;
+    *handle_size = 0;
+    *handle = base::SharedMemory::NULLHandle();
+    return;
   }
 
-  fonts[font_index] = font_handle;
-  hdcs[font_index] = hdc;
-  font_index = (font_index + 1) % kFontCacheSize;
+  *handle_size = font_data_size;
+  font_data.GiveToProcess(base::GetCurrentProcessHandle(), handle);
 }
-#endif
+#endif  // OS_MACOSX
+
+#if defined(OS_WIN)  // This hack is Windows-specific.
+void ResourceMessageFilter::OnPreCacheFont(LOGFONT font) {
+  ChildProcessHost::PreCacheFont(font);
+}
+#endif  // OS_WIN
 
 void ResourceMessageFilter::OnGetPlugins(bool refresh,
                                          IPC::Message* reply_msg) {
@@ -800,11 +828,20 @@ void ResourceMessageFilter::OnCreateWorker(
     const ViewHostMsg_CreateWorker_Params& params, int* route_id) {
   *route_id = params.route_id != MSG_ROUTING_NONE ?
       params.route_id : render_widget_helper_->GetNextRoutingID();
-  WorkerService::GetInstance()->CreateWorker(
-      params.url, params.is_shared, off_the_record(), params.name,
-      params.document_id, id(), params.render_view_route_id, this, *route_id,
-      db_dispatcher_host_->database_tracker(),
-      GetRequestContextForURL(params.url)->host_content_settings_map());
+  if (params.is_shared)
+    WorkerService::GetInstance()->CreateSharedWorker(
+        params.url, off_the_record(), params.name,
+        params.document_id, id(), params.render_view_route_id, this, *route_id,
+        params.script_resource_appcache_id,
+        static_cast<ChromeURLRequestContext*>(
+            request_context_->GetURLRequestContext()));
+  else
+    WorkerService::GetInstance()->CreateDedicatedWorker(
+        params.url, off_the_record(),
+        params.document_id, id(), params.render_view_route_id, this, *route_id,
+        id(), params.parent_appcache_host_id,
+        static_cast<ChromeURLRequestContext*>(
+            request_context_->GetURLRequestContext()));
 }
 
 void ResourceMessageFilter::OnLookupSharedWorker(
@@ -834,9 +871,13 @@ void ResourceMessageFilter::OnDownloadUrl(const IPC::Message& message,
                                           const GURL& url,
                                           const GURL& referrer) {
   URLRequestContext* context = request_context_->GetURLRequestContext();
+
+  // Don't show "Save As" UI.
+  bool prompt_for_save_location = false;
   resource_dispatcher_host_->BeginDownload(url,
                                            referrer,
                                            DownloadSaveInfo(),
+                                           prompt_for_save_location,
                                            id(),
                                            message.routing_id(),
                                            context);
@@ -924,6 +965,36 @@ void ResourceMessageFilter::OnClipboardReadHTML(Clipboard::Buffer buffer,
   const GURL src_url = GURL(src_url_str);
 
   ViewHostMsg_ClipboardReadHTML::WriteReplyParams(reply, markup, src_url);
+  Send(reply);
+}
+
+void ResourceMessageFilter::OnClipboardReadAvailableTypes(
+    Clipboard::Buffer buffer, IPC::Message* reply) {
+  std::vector<string16> types;
+  bool contains_filenames = false;
+  bool result = ClipboardDispatcher::ReadAvailableTypes(
+      buffer, &types, &contains_filenames);
+  ViewHostMsg_ClipboardReadAvailableTypes::WriteReplyParams(
+      reply, result, types, contains_filenames);
+  Send(reply);
+}
+
+void ResourceMessageFilter::OnClipboardReadData(
+    Clipboard::Buffer buffer, const string16& type, IPC::Message* reply) {
+  string16 data;
+  string16 metadata;
+  bool result = ClipboardDispatcher::ReadData(buffer, type, &data, &metadata);
+  ViewHostMsg_ClipboardReadData::WriteReplyParams(
+      reply, result, data, metadata);
+  Send(reply);
+}
+
+void ResourceMessageFilter::OnClipboardReadFilenames(
+    Clipboard::Buffer buffer, IPC::Message* reply) {
+  std::vector<string16> filenames;
+  bool result = ClipboardDispatcher::ReadFilenames(buffer, &filenames);
+  ViewHostMsg_ClipboardReadFilenames::WriteReplyParams(
+      reply, result, filenames);
   Send(reply);
 }
 
@@ -1043,19 +1114,19 @@ void ResourceMessageFilter::OnV8HeapStatsOnUIThread(
       static_cast<size_t>(v8_memory_used));
 }
 
-void ResourceMessageFilter::OnDidZoomHost(const std::string& host,
-                                          int zoom_level) {
+void ResourceMessageFilter::OnDidZoomURL(const GURL& url,
+                                         int zoom_level) {
   ChromeThread::PostTask(ChromeThread::UI, FROM_HERE,
       NewRunnableMethod(this,
                         &ResourceMessageFilter::UpdateHostZoomLevelsOnUIThread,
-                        host, zoom_level));
+                        url, zoom_level));
 }
 
 void ResourceMessageFilter::UpdateHostZoomLevelsOnUIThread(
-    const std::string& host,
+    const GURL& url,
     int zoom_level) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
-  host_zoom_map_->SetZoomLevel(host, zoom_level);
+  host_zoom_map_->SetZoomLevel(url, zoom_level);
 
   // Notify renderers from this profile.
   for (RenderProcessHost::iterator i(RenderProcessHost::AllHostsIterator());
@@ -1063,7 +1134,7 @@ void ResourceMessageFilter::UpdateHostZoomLevelsOnUIThread(
     RenderProcessHost* render_process_host = i.GetCurrentValue();
     if (render_process_host->profile() == profile_) {
       render_process_host->Send(
-          new ViewMsg_SetZoomLevelForCurrentHost(host, zoom_level));
+          new ViewMsg_SetZoomLevelForCurrentURL(url, zoom_level));
     }
   }
 }
@@ -1128,12 +1199,8 @@ void ResourceMessageFilter::OnGetDefaultPrintSettingsReply(
 void ResourceMessageFilter::OnScriptedPrint(
     const ViewHostMsg_ScriptedPrint_Params& params,
     IPC::Message* reply_msg) {
-#if defined(OS_WIN)
-  HWND host_window = gfx::NativeViewFromId(params.host_window_id);
-#elif defined(OS_MACOSX)
-  gfx::NativeWindow host_window = NULL;
-  // TODO: Get an actual window ref here, to allow a sheet-based print dialog.
-#endif
+  gfx::NativeView host_view =
+      gfx::NativeViewFromIdInBrowser(params.host_window_id);
 
   scoped_refptr<printing::PrinterQuery> printer_query;
   print_job_manager_->PopPrinterQuery(params.cookie, &printer_query);
@@ -1147,20 +1214,9 @@ void ResourceMessageFilter::OnScriptedPrint(
       printer_query,
       params.routing_id,
       reply_msg);
-#if defined(OS_WIN)
-  // Shows the Print... dialog box. This is asynchronous, only the IPC message
-  // sender will hang until the Print dialog is dismissed.
-  if (!host_window || !IsWindow(host_window)) {
-    // TODO(maruel):  bug 1214347 Get the right browser window instead.
-    host_window = GetDesktopWindow();
-  } else {
-    host_window = GetAncestor(host_window, GA_ROOTOWNER);
-  }
-  DCHECK(host_window);
-#endif
 
   printer_query->GetSettings(printing::PrinterQuery::ASK_USER,
-                             host_window,
+                             host_view,
                              params.expected_pages_count,
                              params.has_selection,
                              params.use_overlays,
@@ -1243,15 +1299,6 @@ void ResourceMessageFilter::OnUpdateSpellingPanelWithMisspelledWord(
   SpellCheckerPlatform::UpdateSpellingPanelWithMisspelledWord(word);
 }
 
-void ResourceMessageFilter::Observe(NotificationType type,
-                                    const NotificationSource &source,
-                                    const NotificationDetails &details) {
-  if (type == NotificationType::BLACKLIST_NONVISUAL_RESOURCE_BLOCKED) {
-    BlacklistUI::OnNonvisualContentBlocked(
-        Details<const URLRequest>(details).ptr());
-  }
-}
-
 void ResourceMessageFilter::OnDnsPrefetch(
     const std::vector<std::string>& hostnames) {
   chrome_browser_net::DnsPrefetchList(hostnames);
@@ -1299,7 +1346,7 @@ void ResourceMessageFilter::OnOpenChannelToTab(
   }
 }
 
-bool ResourceMessageFilter::CheckBenchmarkingEnabled() {
+bool ResourceMessageFilter::CheckBenchmarkingEnabled() const {
   static bool checked = false;
   static bool result = false;
   if (!checked) {
@@ -1327,8 +1374,60 @@ void ResourceMessageFilter::OnSetCacheMode(bool enabled) {
 
   net::HttpCache::Mode mode = enabled ?
       net::HttpCache::NORMAL : net::HttpCache::DISABLE;
-  request_context_->GetURLRequestContext()->
-      http_transaction_factory()->GetCache()->set_mode(mode);
+  net::HttpCache* http_cache = request_context_->GetURLRequestContext()->
+      http_transaction_factory()->GetCache();
+  http_cache->set_mode(mode);
+}
+
+void ResourceMessageFilter::OnClearCache(IPC::Message* reply_msg) {
+  // This function is disabled unless the user has enabled
+  // benchmarking extensions.
+  int rv = -1;
+  if (CheckBenchmarkingEnabled()) {
+    disk_cache::Backend* backend = request_context_->GetURLRequestContext()->
+        http_transaction_factory()->GetCache()->GetCurrentBackend();
+    if (backend) {
+      ClearCacheCompletion* callback =
+          new ClearCacheCompletion(reply_msg, this);
+      rv = backend->DoomAllEntries(callback);
+      if (rv == net::ERR_IO_PENDING) {
+        // The callback will send the reply.
+        return;
+      }
+      // Completed synchronously, no need for the callback.
+      delete callback;
+    }
+  }
+  ViewHostMsg_ClearCache::WriteReplyParams(reply_msg, rv);
+  Send(reply_msg);
+}
+
+bool ResourceMessageFilter::CheckPreparsedJsCachingEnabled() const {
+  static bool checked = false;
+  static bool result = false;
+  if (!checked) {
+    const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+    result = command_line.HasSwitch(switches::kEnablePreparsedJsCaching);
+    checked = true;
+  }
+  return result;
+}
+
+void ResourceMessageFilter::OnCacheableMetadataAvailable(
+    const GURL& url,
+    double expected_response_time,
+    const std::vector<char>& data) {
+  if (!CheckPreparsedJsCachingEnabled())
+    return;
+
+  net::HttpCache* cache = request_context_->GetURLRequestContext()->
+      http_transaction_factory()->GetCache();
+  DCHECK(cache);
+
+  scoped_refptr<net::IOBuffer> buf = new net::IOBuffer(data.size());
+  memcpy(buf->data(), &data.front(), data.size());
+  cache->WriteMetadata(
+      url, base::Time::FromDoubleT(expected_response_time), buf, data.size());
 }
 
 void ResourceMessageFilter::OnGetFileSize(const FilePath& path,
@@ -1388,10 +1487,77 @@ void ResourceMessageFilter::OnGetFileInfoOnFileThread(
       NewRunnableMethod(this, &ResourceMessageFilter::Send, reply_msg));
 }
 
+void ResourceMessageFilter::OnOpenFile(const FilePath& path,
+                                       int mode,
+                                       IPC::Message* reply_msg) {
+  // Open the file only when the child process has been granted permission to
+  // upload the file.
+  // TODO(jianli): Do we need separate permission to control opening the file?
+  if (!ChildProcessSecurityPolicy::GetInstance()->CanUploadFile(id(), path)) {
+    ViewHostMsg_OpenFile::WriteReplyParams(
+        reply_msg,
+#if defined(OS_WIN)
+        base::kInvalidPlatformFileValue
+#elif defined(OS_POSIX)
+        base::FileDescriptor(base::kInvalidPlatformFileValue, true)
+#endif
+        );
+    Send(reply_msg);
+    return;
+  }
+
+  // Opening the file could take a long time if it lives on a network share,
+  // so run it on the FILE thread.
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
+      NewRunnableMethod(
+          this, &ResourceMessageFilter::OnOpenFileOnFileThread,
+          path, mode, reply_msg));
+}
+
+void ResourceMessageFilter::OnOpenFileOnFileThread(const FilePath& path,
+                                                   int mode,
+                                                   IPC::Message* reply_msg) {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
+
+  base::PlatformFile file_handle = base::CreatePlatformFile(
+      path,
+      (mode == 0) ? (base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ)
+                  : (base::PLATFORM_FILE_CREATE_ALWAYS |
+                        base::PLATFORM_FILE_WRITE),
+      NULL);
+
+  base::PlatformFile target_file_handle;
+#if defined(OS_WIN)
+  // Duplicate the file handle so that the renderer process can access the file.
+  if (!DuplicateHandle(GetCurrentProcess(), file_handle,
+                       handle(), &target_file_handle, 0, false,
+                       DUPLICATE_CLOSE_SOURCE | DUPLICATE_SAME_ACCESS)) {
+    // file_handle is closed whether or not DuplicateHandle succeeds.
+    target_file_handle = INVALID_HANDLE_VALUE;
+  }
+#else
+  target_file_handle = file_handle;
+#endif
+
+  ViewHostMsg_OpenFile::WriteReplyParams(
+      reply_msg,
+#if defined(OS_WIN)
+      target_file_handle
+#elif defined(OS_POSIX)
+      base::FileDescriptor(target_file_handle, true)
+#endif
+      );
+
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(this, &ResourceMessageFilter::Send, reply_msg));
+}
+
 void ResourceMessageFilter::OnKeygen(uint32 key_size_index,
                                      const std::string& challenge_string,
                                      const GURL& url,
-                                     std::string* signed_public_key) {
+                                     IPC::Message* reply_msg) {
   // Map displayed strings indicating level of keysecurity in the <keygen>
   // menu to the key size in bits. (See SSLKeyGeneratorChromium.cpp in WebCore.)
   int key_size_in_bits;
@@ -1404,11 +1570,44 @@ void ResourceMessageFilter::OnKeygen(uint32 key_size_index,
       break;
     default:
       DCHECK(false) << "Illegal key_size_index " << key_size_index;
-      *signed_public_key = std::string();
+      ViewHostMsg_Keygen::WriteReplyParams(reply_msg, std::string());
+      Send(reply_msg);
       return;
   }
+
+  LOG(INFO) << "Dispatching keygen task to worker pool.";
+  // Dispatch to worker pool, so we do not block the IO thread.
+  if (!WorkerPool::PostTask(
+           FROM_HERE,
+           NewRunnableMethod(
+               this, &ResourceMessageFilter::OnKeygenOnWorkerThread,
+               key_size_in_bits, challenge_string, reply_msg),
+           true)) {
+    NOTREACHED() << "Failed to dispatch keygen task to worker pool";
+    ViewHostMsg_Keygen::WriteReplyParams(reply_msg, std::string());
+    Send(reply_msg);
+    return;
+  }
+}
+
+void ResourceMessageFilter::OnKeygenOnWorkerThread(
+    int key_size_in_bits,
+    const std::string& challenge_string,
+    IPC::Message* reply_msg) {
+  DCHECK(reply_msg);
+  // Verify we are on a worker thread.
+  DCHECK(!MessageLoop::current());
+
+  // Generate a signed public key and challenge, then send it back.
   net::KeygenHandler keygen_handler(key_size_in_bits, challenge_string);
-  *signed_public_key = keygen_handler.GenKeyAndSignChallenge();
+
+  ViewHostMsg_Keygen::WriteReplyParams(
+      reply_msg,
+      keygen_handler.GenKeyAndSignChallenge());
+
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(this, &ResourceMessageFilter::Send, reply_msg));
 }
 
 #if defined(USE_TCMALLOC)

@@ -173,24 +173,20 @@ class AutocompleteInput {
     FORCED_QUERY,   // Input forced to be a query by an initial '?'
   };
 
-  AutocompleteInput()
-      : type_(INVALID),
-        prevent_inline_autocomplete_(false),
-        prefer_keyword_(false),
-        synchronous_only_(false) {
-  }
-
+  AutocompleteInput();
   AutocompleteInput(const std::wstring& text,
                     const std::wstring& desired_tld,
                     bool prevent_inline_autocomplete,
                     bool prefer_keyword,
                     bool synchronous_only);
+  ~AutocompleteInput();
 
   // Converts |type| to a string representation.  Used in logging.
   static std::string TypeToString(Type type);
 
   // Parses |text| and returns the type of input this will be interpreted as.
-  // The components of the input are stored in the output parameter |parts|.
+  // The components of the input are stored in the output parameter |parts|, if
+  // it is non-NULL.
   static Type Parse(const std::wstring& text,
                     const std::wstring& desired_tld,
                     url_parse::Parsed* parts,
@@ -204,6 +200,16 @@ class AutocompleteInput {
                                           const std::wstring& desired_tld,
                                           url_parse::Component* scheme,
                                           url_parse::Component* host);
+
+  // Code that wants to format URLs with a format flag including
+  // net::kFormatUrlOmitTrailingSlashOnBareHostname risk changing the meaning if
+  // the result is then parsed as AutocompleteInput.  Such code can call this
+  // function with the URL and its formatted string, and it will return a
+  // formatted string with the same meaning as the original URL (i.e. it will
+  // re-append a slash if necessary).
+  static std::wstring FormattedStringWithEquivalentMeaning(
+      const GURL& url,
+      const std::wstring& formatted_url);
 
   // User-provided text to be completed.
   const std::wstring& text() const { return text_; }
@@ -314,29 +320,36 @@ struct AutocompleteMatch {
 
   // The type of this match.
   enum Type {
-    URL_WHAT_YOU_TYPED,     // The input as a URL.
-    HISTORY_URL,            // A past page whose URL contains the input.
-    HISTORY_TITLE,          // A past page whose title contains the input.
-    HISTORY_BODY,           // A past page whose body contains the input.
-    HISTORY_KEYWORD,        // A past page whose keyword contains the input.
-    NAVSUGGEST,             // A suggested URL.
-    SEARCH_WHAT_YOU_TYPED,  // The input as a search query (with the default
-                            // engine).
-    SEARCH_HISTORY,         // A past search (with the default engine)
-                            // containing the input.
-    SEARCH_SUGGEST,         // A suggested search (with the default engine).
-    SEARCH_OTHER_ENGINE,    // A search with a non-default engine.
-    OPEN_HISTORY_PAGE,      // A synthetic result that opens the history page to
-                            // search for the input.
+    URL_WHAT_YOU_TYPED = 0,  // The input as a URL.
+    HISTORY_URL,             // A past page whose URL contains the input.
+    HISTORY_TITLE,           // A past page whose title contains the input.
+    HISTORY_BODY,            // A past page whose body contains the input.
+    HISTORY_KEYWORD,         // A past page whose keyword contains the input.
+    NAVSUGGEST,              // A suggested URL.
+    SEARCH_WHAT_YOU_TYPED,   // The input as a search query (with the default
+                             // engine).
+    SEARCH_HISTORY,          // A past search (with the default engine)
+                             // containing the input.
+    SEARCH_SUGGEST,          // A suggested search (with the default engine).
+    SEARCH_OTHER_ENGINE,     // A search with a non-default engine.
+    OPEN_HISTORY_PAGE,       // A synthetic result that opens the history page
+                             // to search for the input.
+    NUM_TYPES,
   };
 
+  AutocompleteMatch();
   AutocompleteMatch(AutocompleteProvider* provider,
                     int relevance,
                     bool deletable,
                     Type type);
+  ~AutocompleteMatch();
 
   // Converts |type| to a string representation.  Used in logging.
   static std::string TypeToString(Type type);
+
+  // Converts |type| to a resource identifier for the appropriate icon for this
+  // type.
+  static int TypeToIcon(Type type);
 
   // Comparison function for determining when one match is better than another.
   static bool MoreRelevant(const AutocompleteMatch& elem1,
@@ -474,17 +487,12 @@ class AutocompleteProvider
     virtual void OnProviderUpdate(bool updated_matches) = 0;
 
    protected:
-    virtual ~ACProviderListener() {}
+    virtual ~ACProviderListener();
   };
 
   AutocompleteProvider(ACProviderListener* listener,
                        Profile* profile,
-                       const char* name)
-      : profile_(profile),
-        listener_(listener),
-        done_(true),
-        name_(name) {
-  }
+                       const char* name);
 
   // Invoked when the profile changes.
   // NOTE: Do not access any previous Profile* at this point as it may have
@@ -511,10 +519,9 @@ class AutocompleteProvider
                      bool minimal_changes) = 0;
 
   // Called when a provider must not make any more callbacks for the current
-  // query.
-  virtual void Stop() {
-    done_ = true;
-  }
+  // query. This will be called regardless of whether the provider is already
+  // done.
+  virtual void Stop();
 
   // Returns the set of matches for the current query.
   const ACMatches& matches() const { return matches_; }
@@ -530,22 +537,21 @@ class AutocompleteProvider
   // called for matches the provider marks as deletable.  This should only be
   // called when no query is running.
   // NOTE: Remember to call OnProviderUpdate() if matches_ is updated.
-  virtual void DeleteMatch(const AutocompleteMatch& match) {}
+  virtual void DeleteMatch(const AutocompleteMatch& match);
 
-  static void set_max_matches(size_t max_matches) {
-    max_matches_ = max_matches;
-  }
-
-  static size_t max_matches() { return max_matches_; }
+  // A suggested upper bound for how many matches a provider should return.
+  // TODO(pkasting): http://b/1111299 , http://b/933133 This should go away once
+  // we have good relevance heuristics; the controller should handle all
+  // culling.
+  static const size_t kMaxMatches;
 
  protected:
   friend class base::RefCountedThreadSafe<AutocompleteProvider>;
 
   virtual ~AutocompleteProvider();
 
-  // Trims "http:" and up to two subsequent slashes from |url|.  Returns the
-  // number of characters that were trimmed.
-  static size_t TrimHttpPrefix(std::wstring* url);
+  // Returns whether |input| begins "http:" or "view-source:http:".
+  static bool HasHTTPScheme(const std::wstring& input);
 
   // Updates the starred state of each of the matches in matches_ from the
   // profile's bookmark bar model.
@@ -555,7 +561,8 @@ class AutocompleteProvider
   // "Accept Languages" when check_accept_lang is true.  Otherwise, it's called
   // with an empty list.
   std::wstring StringForURLDisplay(const GURL& url,
-                                   bool check_accept_lang) const;
+                                   bool check_accept_lang,
+                                   bool trim_http) const;
 
   // The profile associated with the AutocompleteProvider.  Reference is not
   // owned by us.
@@ -569,13 +576,7 @@ class AutocompleteProvider
   const char* name_;
 
  private:
-  // A suggested upper bound for how many matches a provider should return.
-  // TODO(pkasting): http://b/1111299 , http://b/933133 This should go away once
-  // we have good relevance heuristics; the controller should handle all
-  // culling.
-  static size_t max_matches_;
-
-  DISALLOW_EVIL_CONSTRUCTORS(AutocompleteProvider);
+  DISALLOW_COPY_AND_ASSIGN(AutocompleteProvider);
 };
 
 typedef AutocompleteProvider::ACProviderListener ACProviderListener;
@@ -620,11 +621,6 @@ class AutocompleteResult {
     // choosing the new "what you typed" entry and ignoring |destination_url|.
     bool is_history_what_you_typed_match;
   };
-
-  static void set_max_matches(size_t max_matches) {
-    max_matches_ = max_matches;
-  }
-  static size_t max_matches() { return max_matches_; }
 
   AutocompleteResult();
 
@@ -675,12 +671,12 @@ class AutocompleteResult {
   void Validate() const;
 #endif
 
- private:
   // Max number of matches we'll show from the various providers. We may end
   // up showing an additional shortcut for Destinations->History, see
   // AddHistoryContentsShortcut.
-  static size_t max_matches_;
+  static const size_t kMaxMatches;
 
+ private:
   ACMatches matches_;
 
   const_iterator default_match_;
@@ -694,7 +690,7 @@ class AutocompleteResult {
   // 'foo'" result, and this will contain "http://foo/".
   GURL alternate_nav_url_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(AutocompleteResult);
+  DISALLOW_COPY_AND_ASSIGN(AutocompleteResult);
 };
 
 // AutocompleteController -----------------------------------------------------
@@ -776,7 +772,7 @@ class AutocompleteController : public ACProviderListener {
   const AutocompleteInput& input() const { return input_; }
   const AutocompleteResult& result() const { return result_; }
   // This next is temporary and should go away when
-  // AutocompletePopup::URLsForCurrentSelection() moves to the controller.
+  // AutocompletePopup::InfoForCurrentSelection() moves to the controller.
   const AutocompleteResult& latest_result() const { return latest_result_; }
   bool done() const { return done_ && !update_delay_timer_.IsRunning(); }
 
@@ -858,7 +854,7 @@ class AutocompleteController : public ACProviderListener {
   // fast or continuously the user is typing.
   base::RepeatingTimer<AutocompleteController> update_delay_timer_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(AutocompleteController);
+  DISALLOW_COPY_AND_ASSIGN(AutocompleteController);
 };
 
 // AutocompleteLog ------------------------------------------------------------

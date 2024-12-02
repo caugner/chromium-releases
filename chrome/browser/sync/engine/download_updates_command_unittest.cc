@@ -88,7 +88,7 @@ TEST_F(DownloadUpdatesCommandTest, SetRequestedTypes) {
 }
 
 TEST_F(DownloadUpdatesCommandTest, OldestTimestampPicked) {
-  syncable::ScopedDirLookup dir(syncdb().manager(), syncdb().name());
+  syncable::ScopedDirLookup dir(syncdb()->manager(), syncdb()->name());
   ASSERT_TRUE(dir.good());
 
   // i,j,k range over every possible model type.  j and k are enabled and at
@@ -111,6 +111,8 @@ TEST_F(DownloadUpdatesCommandTest, OldestTimestampPicked) {
         dir->set_last_download_timestamp(type_k, 1000 + i);
 
         ConfigureMockServerConnection();
+        dir->set_store_birthday(mock_server()->store_birthday());
+
         syncable::ModelTypeBitSet expected_request_types;
         expected_request_types[j] = true;
         expected_request_types[k] = true;

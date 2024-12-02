@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 
 #include "base/basictypes.h"
 #include "base/stack_container.h"
+#include "base/string16.h"
 #include "base/time.h"
 #include "chrome/browser/history/snippet.h"
 #include "chrome/common/page_transition_types.h"
@@ -58,19 +59,30 @@ class URLRow {
   URLRow() {
     Initialize();
   }
+
   explicit URLRow(const GURL& url) : url_(url) {
     // Initialize will not set the URL, so our initialization above will stay.
     Initialize();
   }
+
+  // We need to be able to set the id of a URLRow that's being passed through
+  // an IPC message.  This constructor should probably not be used otherwise.
+  URLRow(const GURL& url, URLID id) : url_(url) {
+    // Initialize will not set the URL, so our initialization above will stay.
+    Initialize();
+    // Initialize will zero the id_, so set it here.
+    id_ = id;
+  }
+
   virtual ~URLRow() {}
 
   URLID id() const { return id_; }
   const GURL& url() const { return url_; }
 
-  const std::wstring& title() const {
+  const string16& title() const {
     return title_;
   }
-  void set_title(const std::wstring& title) {
+  void set_title(const string16& title) {
     // The title is frequently set to the same thing, so we don't bother
     // updating unless the string has changed.
     if (title != title_) {
@@ -138,7 +150,7 @@ class URLRow {
   // the constructor to make a new one.
   GURL url_;
 
-  std::wstring title_;
+  string16 title_;
 
   // Total number of times this URL has been visited.
   int visit_count_;
@@ -272,7 +284,7 @@ struct StarredEntry {
   StarID id;
 
   // Title.
-  std::wstring title;
+  string16 title;
 
   // When this was added.
   base::Time date_added;
@@ -451,7 +463,7 @@ class QueryResults {
   // Maps URLs to entries in results_.
   URLToResultIndices url_to_results_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(QueryResults);
+  DISALLOW_COPY_AND_ASSIGN(QueryResults);
 };
 
 // QueryOptions ----------------------------------------------------------------
@@ -495,7 +507,7 @@ struct KeywordSearchTermVisit {
   base::Time time;
 
   // The search term that was used.
-  std::wstring term;
+  string16 term;
 };
 
 // MostVisitedURL --------------------------------------------------------------
@@ -504,10 +516,16 @@ struct KeywordSearchTermVisit {
 struct MostVisitedURL {
   GURL url;
   GURL favicon_url;
-  std::wstring title;
+  string16 title;
 
   RedirectList redirects;
+
+  bool operator==(const MostVisitedURL& other) {
+    return url == other.url;
+  }
 };
+
+typedef std::vector<MostVisitedURL> MostVisitedURLList;
 
 }  // history
 

@@ -8,19 +8,16 @@
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_theme_provider.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/theme_util.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/protocol/theme_specifics.pb.h"
-#include "chrome/browser/sync/unrecoverable_error_handler.h"
 
 namespace browser_sync {
 
 namespace {
-
-static const char kThemesTag[] = "google_chrome_themes";
-static const char kCurrentThemeNodeTitle[] = "Current Theme";
 
 static const char kNoThemesFolderError[] =
     "Server did not create the top-level themes node. We "
@@ -29,12 +26,9 @@ static const char kNoThemesFolderError[] =
 }  // namespace
 
 ThemeModelAssociator::ThemeModelAssociator(
-    ProfileSyncService* sync_service,
-    UnrecoverableErrorHandler* error_handler)
-    : sync_service_(sync_service),
-      error_handler_(error_handler) {
+    ProfileSyncService* sync_service)
+    : sync_service_(sync_service) {
   DCHECK(sync_service_);
-  DCHECK(error_handler_);
 }
 
 ThemeModelAssociator::~ThemeModelAssociator() {}
@@ -60,8 +54,10 @@ bool ThemeModelAssociator::AssociateModels() {
     // sync data.
     SetCurrentThemeFromThemeSpecificsIfNecessary(
         node.GetThemeSpecifics(), profile);
-  } else {
-    // Set the sync data from the current theme.
+  } else if (profile->GetTheme() || (UseSystemTheme(profile) &&
+                                     IsSystemThemeDistinctFromDefaultTheme())) {
+    // Set the sync data from the current theme, iff the current theme isn't the
+    // default.
     sync_api::WriteNode node(&trans);
     if (!node.InitUniqueByCreation(syncable::THEMES, root,
                                    kCurrentThemeClientTag)) {
@@ -95,13 +91,6 @@ bool ThemeModelAssociator::SyncModelHasUserCreatedNodes(bool* has_nodes) {
   // The sync model has user created nodes iff the themes folder has
   // any children.
   *has_nodes = root.GetFirstChildId() != sync_api::kInvalidId;
-  return true;
-}
-
-bool ThemeModelAssociator::ChromeModelHasUserCreatedNodes(bool* has_nodes) {
-  DCHECK(has_nodes);
-  // Assume the themes model always has user-created nodes.
-  *has_nodes = true;
   return true;
 }
 

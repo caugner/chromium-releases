@@ -1,4 +1,4 @@
-// Copyright (c) 2008-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,7 +26,7 @@ namespace media {
 class FilterHost {
  public:
   // Stops execution of the pipeline due to a fatal error.  Do not call this
-  // method with PIPELINE_OK or PIPELINE_STOPPING (used internally by pipeline).
+  // method with PIPELINE_OK.
   virtual void SetError(PipelineError error) = 0;
 
   // Gets the current time in microseconds.
@@ -70,8 +70,15 @@ class FilterHost {
   // Sets the flag to indicate current network activity.
   virtual void SetNetworkActivity(bool network_activity) = 0;
 
-  // Broadcast a message of type |message| to all filters.
-  virtual void BroadcastMessage(FilterMessage message) = 0;
+  // Disable audio renderer by calling OnAudioRendererDisabled() on all
+  // filters.
+  virtual void DisableAudioRenderer() = 0;
+
+  // Sets the byte offset at which the client is requesting the video.
+  virtual void SetCurrentReadPosition(int64 offset) = 0;
+
+  // Gets the byte offset at which the client is requesting the video.
+  virtual int64 GetCurrentReadPosition() = 0;
 
  protected:
   virtual ~FilterHost() {}

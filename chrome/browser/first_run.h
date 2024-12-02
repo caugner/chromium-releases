@@ -27,7 +27,7 @@ class ProcessSingleton;
 // desktop shortcut.
 //
 // The way we detect first-run is by looking at a 'sentinel' file.
-// If it does not exists we understand that we need to do the first time
+// If it does not exist we understand that we need to do the first time
 // install work for this user. After that the sentinel file is created.
 class FirstRun {
  public:
@@ -44,6 +44,7 @@ class FirstRun {
     int do_import_items;
     int dont_import_items;
     bool run_search_engine_experiment;
+    bool randomize_search_engine_experiment;
     std::vector<GURL> new_tabs;
     std::vector<GURL> bookmarks;
   };
@@ -64,15 +65,23 @@ class FirstRun {
   // cmdline parameters.
   static int ImportNow(Profile* profile, const CommandLine& cmdline);
 
+  // Automatically import history and home page (and search engine, if
+  // nonorganic).
+  static void AutoImport(Profile* profile,
+      bool homepage_defined,
+      int import_items,
+      int dont_import_items,
+      bool search_engine_experiment,
+      bool randomize_search_engine_experiment,
+      ProcessSingleton* process_singleton);
+
   // The master preferences is a JSON file with the same entries as the
-  // 'Default\Preferences' file. This function locates this file from
-  // master_pref_path or if that path is empty from the default location
-  // which is '<path to chrome.exe>\master_preferences', and process it
-  // so it becomes the default preferences in profile pointed by user_data_dir.
-  // After processing the file, the function returns true if showing the
-  // first run dialog is needed, and returns false if skipping first run
-  // dialogs. The detailed settings in the preference file is reported via
-  // preference_details.
+  // 'Default\Preferences' file. This function locates this file from a standard
+  // location and processes it so it becomes the default preferences in the
+  // profile pointed to by |user_data_dir|. After processing the file, the
+  // function returns true if and only if showing the first run dialog is
+  // needed. The detailed settings in the preference file are reported via
+  // |preference_details|.
   //
   // This function destroys any existing prefs file and it is meant to be
   // invoked only on first run.
@@ -80,7 +89,6 @@ class FirstRun {
   // See chrome/installer/util/master_preferences.h for a description of
   // 'master_preferences' file.
   static bool ProcessMasterPreferences(const FilePath& user_data_dir,
-                                       const FilePath& master_prefs_path,
                                        MasterPrefs* out_prefs);
 
   // Returns true if this is the first time chrome is run for this user.
@@ -97,9 +105,11 @@ class FirstRun {
                              gfx::NativeView parent_window);
 
   // Sets the kShouldShowFirstRunBubble local state pref so that the browser
-  // shows the bubble once the main message loop gets going. Returns false if
-  // the pref could not be set.
-  static bool SetShowFirstRunBubblePref();
+  // shows the bubble once the main message loop gets going (or refrains from
+  // showing the bubble, if |show_bubble| is false). Returns false if the pref
+  // could not be set. This function can be called multiple times, but only the
+  // initial call will actually set the preference.
+  static bool SetShowFirstRunBubblePref(bool show_bubble);
 
   // Sets the kShouldUseOEMFirstRunBubble local state pref so that the
   // browser shows the OEM first run bubble once the main message loop
@@ -117,6 +127,8 @@ class FirstRun {
   static bool SetShowWelcomePagePref();
 
  private:
+  friend class FirstRunTest;
+
 #if defined(OS_WIN)
   // Imports settings in a separate process. It is the implementation of the
   // public version.
@@ -127,20 +139,28 @@ class FirstRun {
   // Import browser items in this process. The browser and the items to
   // import are encoded int the command line.
   static int ImportFromBrowser(Profile* profile, const CommandLine& cmdline);
-#endif  // OS_WIN
+#elif defined(OS_LINUX)
+  static bool ImportBookmarks(const std::wstring& import_bookmarks_path);
+#endif
+
   // Import bookmarks from an html file. The path to the file is provided in
   // the command line.
   static int ImportFromFile(Profile* profile, const CommandLine& cmdline);
+
+  // Gives the full path to the sentinel file. The file might not exist.
+  static bool GetFirstRunSentinelFilePath(FilePath* path);
+
   // This class is for scoping purposes.
   DISALLOW_IMPLICIT_CONSTRUCTORS(FirstRun);
 };
 
-#if defined(OS_WIN)
+#if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
 // This class contains the actions that need to be performed when an upgrade
 // is required. This involves mainly swapping the chrome exe and relaunching
 // the new browser.
 class Upgrade {
  public:
+#if defined(OS_WIN)
   // Possible results of ShowTryChromeDialog().
   enum TryResult {
     TD_TRY_CHROME,          // Launch chrome right now.
@@ -157,31 +177,57 @@ class Upgrade {
   // handle to the event.
   static bool IsBrowserAlreadyRunning();
 
-  // Launches chrome again simulating a 'user' launch. If chrome could not
-  // be launched the return is false.
-  static bool RelaunchChromeBrowser(const CommandLine& command_line);
-
   // If the new_chrome.exe exists (placed by the installer then is swapped
   // to chrome.exe and the old chrome is renamed to old_chrome.exe. If there
   // is no new_chrome.exe or the swap fails the return is false;
   static bool SwapNewChromeExeIfPresent();
 
-  // Combines the two methods above to perform the rename and relaunch of
+  // Combines the two methods, RelaunchChromeBrowser and
+  // SwapNewChromeExeIfPresent, to perform the rename and relaunch of
   // the browser. Note that relaunch does NOT exit the existing browser process.
   // If this is called before message loop is executed, simply exit the main
   // function. If browser is already running, you will need to exit it.
   static bool DoUpgradeTasks(const CommandLine& command_line);
-
-  // Checks if chrome_new.exe is present in the current instance's install.
-  static bool IsUpdatePendingRestart();
 
   // Shows a modal dialog asking the user to give chrome another try. See
   // above for the possible outcomes of the function. This is an experimental,
   // non-localized dialog.
   // |version| can be 0, 1 or 2 and selects what strings to present.
   static TryResult ShowTryChromeDialog(size_t version);
-};
+#endif  // OS_WIN
+
+  // Launches chrome again simulating a 'user' launch. If chrome could not
+  // be launched the return is false.
+  static bool RelaunchChromeBrowser(const CommandLine& command_line);
+
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+  static void SaveLastModifiedTimeOfExe();
 #endif
+
+  static void SetNewCommandLine(CommandLine* new_command_line) {
+    // Takes ownership of the pointer.
+    new_command_line_ = new_command_line;
+  }
+
+  // Launches a new instance of the browser if the current instance in
+  // persistent mode an upgrade is detected.
+  static void RelaunchChromeBrowserWithNewCommandLineIfNeeded();
+
+  // Windows:
+  //  Checks if chrome_new.exe is present in the current instance's install.
+  // Linux:
+  //  Checks if the last modified time of chrome is newer than that of the
+  //  current running instance.
+  static bool IsUpdatePendingRestart();
+
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+ private:
+  static double GetLastModifiedTimeOfExe();
+  static double saved_last_modified_time_of_exe_;
+#endif
+  static CommandLine* new_command_line_;
+};
+#endif  // (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
 
 // A subclass of BrowserProcessImpl that does not have a GoogleURLTracker or
 // IntranetRedirectDetector so we don't do any URL fetches (as we have no IO
@@ -236,6 +282,8 @@ class FirstRunImportObserver : public ImportObserver {
 // preferences and will override default behavior of importer.
 // |search_engine_experiment| indicates whether the experimental search engine
 // window should be shown.
+// |randomize_search_engine_experiment| is true if the logos in the search
+// engine window should be shown in randomized order.
 // Returns true if the user clicked "Start", false if the user pressed "Cancel"
 // or closed the dialog.
 bool OpenFirstRunDialog(Profile* profile,
@@ -243,6 +291,7 @@ bool OpenFirstRunDialog(Profile* profile,
                         int import_items,
                         int dont_import_items,
                         bool search_engine_experiment,
+                        bool randomize_search_engine_experiment,
                         ProcessSingleton* process_singleton);
 
 #endif  // CHROME_BROWSER_FIRST_RUN_H_

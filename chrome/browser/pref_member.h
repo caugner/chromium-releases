@@ -1,9 +1,9 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// A helper class that stays in sync with a preference (bool, int, real, or
-// string).  For example:
+// A helper class that stays in sync with a preference (bool, int, real,
+// string or filepath).  For example:
 //
 // class MyClass {
 //  public:
@@ -27,6 +27,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "chrome/common/notification_observer.h"
 
 class PrefService;
@@ -41,6 +42,9 @@ class PrefMemberBase : public NotificationObserver {
   // See PrefMember<> for description.
   void Init(const wchar_t* pref_name, PrefService* prefs,
             NotificationObserver* observer);
+
+  // See PrefMember<> for description.
+  bool IsManaged();
 
   // NotificationObserver
   virtual void Observe(NotificationType type,
@@ -84,6 +88,13 @@ class PrefMember : public subtle::PrefMemberBase {
     subtle::PrefMemberBase::Init(pref_name, prefs, observer);
   }
 
+  // Check whether the pref is managed, i.e. controlled externally through
+  // enterprise configuration management (e.g. windows group policy). Returns
+  // false for unknown prefs.
+  bool IsManaged() {
+    return subtle::PrefMemberBase::IsManaged();
+  }
+
   // Retrieve the value of the member variable.
   ValueType GetValue() {
     VerifyValuePrefName();
@@ -109,6 +120,13 @@ class PrefMember : public subtle::PrefMemberBase {
     setting_value_ = false;
   }
 
+  // Set the value of the member variable if it is not managed.
+  void SetValueIfNotManaged(const ValueType& value) {
+    if (!IsManaged()) {
+      SetValue(value);
+    }
+  }
+
  protected:
   // This methods is used to do the actual sync with pref of the specified type.
   virtual void UpdatePref(const ValueType& value) = 0;
@@ -123,8 +141,8 @@ class PrefMember : public subtle::PrefMemberBase {
 
 class BooleanPrefMember : public PrefMember<bool> {
  public:
-  BooleanPrefMember() : PrefMember<bool>() { }
-  virtual ~BooleanPrefMember() { }
+  BooleanPrefMember();
+  virtual ~BooleanPrefMember();
 
  protected:
   virtual void UpdateValueFromPref();
@@ -136,8 +154,8 @@ class BooleanPrefMember : public PrefMember<bool> {
 
 class IntegerPrefMember : public PrefMember<int> {
  public:
-  IntegerPrefMember() : PrefMember<int>() { }
-  virtual ~IntegerPrefMember() { }
+  IntegerPrefMember();
+  virtual ~IntegerPrefMember();
 
  protected:
   virtual void UpdateValueFromPref();
@@ -149,8 +167,8 @@ class IntegerPrefMember : public PrefMember<int> {
 
 class RealPrefMember : public PrefMember<double> {
  public:
-  RealPrefMember() : PrefMember<double>() { }
-  virtual ~RealPrefMember() { }
+  RealPrefMember();
+  virtual ~RealPrefMember();
 
  protected:
   virtual void UpdateValueFromPref();
@@ -160,17 +178,30 @@ class RealPrefMember : public PrefMember<double> {
   DISALLOW_COPY_AND_ASSIGN(RealPrefMember);
 };
 
-class StringPrefMember : public PrefMember<std::wstring> {
+class StringPrefMember : public PrefMember<std::string> {
  public:
-  StringPrefMember() : PrefMember<std::wstring>() { }
-  virtual ~StringPrefMember() { }
+  StringPrefMember();
+  virtual ~StringPrefMember();
 
  protected:
   virtual void UpdateValueFromPref();
-  virtual void UpdatePref(const std::wstring& value);
+  virtual void UpdatePref(const std::string& value);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(StringPrefMember);
+};
+
+class FilePathPrefMember : public PrefMember<FilePath> {
+ public:
+  FilePathPrefMember();
+  virtual ~FilePathPrefMember();
+
+ protected:
+  virtual void UpdateValueFromPref();
+  virtual void UpdatePref(const FilePath& value);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(FilePathPrefMember);
 };
 
 #endif  // CHROME_BROWSER_PREF_MEMBER_H_

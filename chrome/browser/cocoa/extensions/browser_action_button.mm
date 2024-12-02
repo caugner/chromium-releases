@@ -7,26 +7,30 @@
 #include <algorithm>
 #include <cmath>
 
+#include "base/logging.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/cocoa/extensions/extension_action_context_menu.h"
+#import "chrome/browser/cocoa/image_utils.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_action.h"
+#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
-#include "gfx/canvas_paint.h"
+#include "gfx/canvas_skia_paint.h"
 #include "gfx/rect.h"
 #include "gfx/size.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 
-extern const NSString* kBrowserActionButtonUpdatedNotification =
+NSString* const kBrowserActionButtonUpdatedNotification =
     @"BrowserActionButtonUpdatedNotification";
 
-extern const NSString* kBrowserActionButtonDraggingNotification =
+NSString* const kBrowserActionButtonDraggingNotification =
     @"BrowserActionButtonDraggingNotification";
-extern const NSString* kBrowserActionButtonDragEndNotification =
+NSString* const kBrowserActionButtonDragEndNotification =
     @"BrowserActionButtonDragEndNotification";
 
 static const CGFloat kBrowserActionBadgeOriginYOffset = 5;
@@ -34,11 +38,11 @@ static const CGFloat kBrowserActionBadgeOriginYOffset = 5;
 // Since the container is the maximum height of the toolbar, we have to move the
 // buttons up by this amount in order to have them look vertically centered
 // within the toolbar.
-static const CGFloat kBrowserActionOriginYOffset = 5;
+static const CGFloat kBrowserActionOriginYOffset = 6.0;
 
 // The size of each button on the toolbar.
 static const CGFloat kBrowserActionHeight = 27;
-extern const CGFloat kBrowserActionWidth = 29;
+const CGFloat kBrowserActionWidth = 29;
 
 namespace {
 const CGFloat kAnimationDuration = 0.2;
@@ -177,8 +181,6 @@ class ExtensionImageTrackerBridge : public NotificationObserver,
     [[self superview] addSubview:self positioned:NSWindowAbove relativeTo:nil];
   }
   isBeingDragged_ = YES;
-  NSPoint location = [self convertPoint:[theEvent locationInWindow]
-                               fromView:nil];
   NSRect buttonFrame = [self frame];
   // TODO(andybons): Constrain the buttons to be within the container.
   // Clamp the button to be within its superview along the X-axis.
@@ -279,47 +281,31 @@ class ExtensionImageTrackerBridge : public NotificationObserver,
 
 - (NSImage*)compositedImage {
   NSRect bounds = NSMakeRect(0, 0, kBrowserActionWidth, kBrowserActionHeight);
-  NSBitmapImageRep* bitmap = [[NSBitmapImageRep alloc]
-      initWithBitmapDataPlanes:NULL
-                    pixelsWide:NSWidth(bounds)
-                    pixelsHigh:NSHeight(bounds)
-                 bitsPerSample:8
-               samplesPerPixel:4
-                      hasAlpha:YES
-                      isPlanar:NO
-                colorSpaceName:NSCalibratedRGBColorSpace
-                  bitmapFormat:0
-                   bytesPerRow:0
-                  bitsPerPixel:0];
+  NSImage* image = [[[NSImage alloc] initWithSize:bounds.size] autorelease];
+  [image lockFocus];
 
-  [NSGraphicsContext saveGraphicsState];
-  [NSGraphicsContext setCurrentContext:
-      [NSGraphicsContext graphicsContextWithBitmapImageRep:bitmap]];
   [[NSColor clearColor] set];
   NSRectFill(bounds);
   [[self cell] setIconShadow];
 
   NSImage* actionImage = [self image];
-  // Never draw within a flipped coordinate system.
-  // TODO(andybons): Figure out why |flipped| can be yes in certain cases.
-  // http://crbug.com/38943
-  [actionImage setFlipped:NO];
-  CGFloat xPos = std::floor((NSWidth(bounds) - [actionImage size].width) / 2);
-  CGFloat yPos = std::floor((NSHeight(bounds) - [actionImage size].height) / 2);
-  [actionImage drawAtPoint:NSMakePoint(xPos, yPos)
-                  fromRect:NSZeroRect
-                 operation:NSCompositeSourceOver
-                  fraction:1.0];
+  const NSSize imageSize = [actionImage size];
+  const NSRect imageRect =
+      NSMakeRect(std::floor((NSWidth(bounds) - imageSize.width) / 2.0),
+                 std::floor((NSHeight(bounds) - imageSize.height) / 2.0),
+                 imageSize.width, imageSize.height);
+  [actionImage drawInRect:imageRect
+                 fromRect:NSZeroRect
+                operation:NSCompositeSourceOver
+                 fraction:1.0
+             neverFlipped:YES];
 
   bounds.origin.y += kShadowOffset - kBrowserActionBadgeOriginYOffset;
   bounds.origin.x -= kShadowOffset;
   [[self cell] drawBadgeWithinFrame:bounds];
 
-  [NSGraphicsContext restoreGraphicsState];
-  NSImage* compositeImage =
-      [[[NSImage alloc] initWithSize:[bitmap size]] autorelease];
-  [compositeImage addRepresentation:bitmap];
-  return compositeImage;
+  [image unlockFocus];
+  return image;
 }
 
 @end
@@ -340,7 +326,7 @@ class ExtensionImageTrackerBridge : public NotificationObserver,
 }
 
 - (void)drawBadgeWithinFrame:(NSRect)frame {
-  gfx::CanvasPaint canvas(frame, false);
+  gfx::CanvasSkiaPaint canvas(frame, false);
   canvas.set_composite_alpha(true);
   gfx::Rect boundingRect(NSRectToCGRect(frame));
   extensionAction_->PaintBadge(&canvas, boundingRect, tabId_);

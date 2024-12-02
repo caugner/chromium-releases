@@ -25,7 +25,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/gears_integration.h"
-#include "chrome/browser/net/dns_global.h"
+#include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/options_util.h"
 #include "chrome/browser/pref_member.h"
 #include "chrome/browser/pref_service.h"
@@ -40,7 +40,7 @@
 #include "chrome/browser/views/options/fonts_languages_window_view.h"
 #include "chrome/browser/views/restart_message_box.h"
 #include "chrome/common/pref_names.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/native_theme_win.h"
 #include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
@@ -107,7 +107,7 @@ class FileDisplayArea : public views::View {
   static void InitClass();
   static SkBitmap default_folder_icon_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(FileDisplayArea);
+  DISALLOW_COPY_AND_ASSIGN(FileDisplayArea);
 };
 
 // static
@@ -135,12 +135,12 @@ void FileDisplayArea::SetFile(const FilePath& file_path) {
 }
 
 void FileDisplayArea::Paint(gfx::Canvas* canvas) {
-  HDC dc = canvas->beginPlatformPaint();
+  HDC dc = canvas->BeginPlatformPaint();
   RECT rect = { 0, 0, width(), height() };
   gfx::NativeTheme::instance()->PaintTextField(
       dc, EP_EDITTEXT, ETS_READONLY, 0, &rect,
       skia::SkColorToCOLORREF(text_field_background_color_), true, true);
-  canvas->endPlatformPaint();
+  canvas->EndPlatformPaint();
   // Mirror left point for icon_bounds_ to draw icon in RTL locales correctly.
   canvas->DrawBitmapInt(default_folder_icon_,
                         MirroredLeftPointForRect(icon_bounds_),
@@ -186,7 +186,7 @@ void FileDisplayArea::Init() {
 void FileDisplayArea::InitClass() {
   static bool initialized = false;
   if (!initialized) {
-    // We'd prefer to use UILayoutIsRightToLeft() to perform the RTL
+    // We'd prefer to use base::i18n::IsRTL() to perform the RTL
     // environment check, but it's nonstatic, so, instead, we check whether the
     // locale is RTL.
     bool ui_is_rtl = base::i18n::IsRTL();
@@ -287,7 +287,6 @@ AdvancedSection::AdvancedSection(Profile* profile,
 void AdvancedSection::DidChangeBounds(const gfx::Rect& previous,
                                       const gfx::Rect& current) {
   Layout();
-  contents_->Layout();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -434,9 +433,6 @@ class PrivacySection : public AdvancedSection,
   // Overridden from views::LinkController:
   virtual void LinkActivated(views::Link* source, int event_flags);
 
-  // Overridden from views::View:
-  virtual void Layout();
-
  protected:
   // OptionsPageView overrides:
   virtual void InitControlLayout();
@@ -503,7 +499,7 @@ void PrivacySection::ButtonPressed(
                                 "Options_DnsPrefetchCheckbox_Disable"),
                             profile()->GetPrefs());
     dns_prefetch_enabled_.SetValue(enabled);
-    chrome_browser_net::EnableDnsPrefetch(enabled);
+    chrome_browser_net::EnablePredictor(enabled);
   } else if (sender == enable_safe_browsing_checkbox_) {
     bool enabled = enable_safe_browsing_checkbox_->checked();
     UserMetricsRecordAction(UserMetricsAction(enabled ?
@@ -547,22 +543,6 @@ void PrivacySection::LinkActivated(views::Link* source, int event_flags) {
     browser->OpenURL(GURL(l10n_util::GetString(IDS_LEARN_MORE_PRIVACY_URL)),
                      GURL(), NEW_WINDOW, PageTransition::LINK);
   }
-}
-
-void PrivacySection::Layout() {
-  if (reporting_enabled_checkbox_) {
-    // We override this to try and set the width of the enable logging checkbox
-    // to the width of the parent less some fudging since the checkbox's
-    // preferred size calculation code is dependent on its width, and if we
-    // don't do this then it will return 0 as a preferred width when GridLayout
-    // (called from View::Layout) tries to access it.
-    views::View* parent = GetParent();
-    if (parent && parent->width()) {
-      const int parent_width = parent->width();
-      reporting_enabled_checkbox_->SetBounds(0, 0, parent_width - 20, 0);
-    }
-  }
-  View::Layout();
 }
 
 void PrivacySection::InitControlLayout() {
@@ -636,8 +616,8 @@ void PrivacySection::InitControlLayout() {
                          reporting_enabled_checkbox_ != NULL);
   // The "Help make Google Chrome better" checkbox.
   if (reporting_enabled_checkbox_) {
-    AddLeadingControl(layout, reporting_enabled_checkbox_, indented_view_set_id,
-                      false);
+    AddWrappingCheckboxRow(layout, reporting_enabled_checkbox_,
+                           indented_view_set_id, false);
   }
 
   // Init member prefs so we can update the controls if prefs change.
@@ -650,6 +630,17 @@ void PrivacySection::InitControlLayout() {
   safe_browsing_.Init(prefs::kSafeBrowsingEnabled, profile()->GetPrefs(), this);
   enable_metrics_recording_.Init(prefs::kMetricsReportingEnabled,
                                  g_browser_process->local_state(), this);
+
+
+  enable_link_doctor_checkbox_->SetEnabled(!alternate_error_pages_.IsManaged());
+  enable_suggest_checkbox_->SetEnabled(!use_suggest_.IsManaged());
+  enable_dns_prefetching_checkbox_->SetEnabled(
+      !dns_prefetch_enabled_.IsManaged());
+  enable_safe_browsing_checkbox_->SetEnabled(!safe_browsing_.IsManaged());
+#if defined(GOOGLE_CHROME_BUILD)
+  reporting_enabled_checkbox_->SetEnabled(
+      !enable_metrics_recording_.IsManaged());
+#endif
 }
 
 void PrivacySection::NotifyPrefChanged(const std::wstring* pref_name) {
@@ -663,7 +654,7 @@ void PrivacySection::NotifyPrefChanged(const std::wstring* pref_name) {
   if (!pref_name || *pref_name == prefs::kDnsPrefetchingEnabled) {
     bool enabled = dns_prefetch_enabled_.GetValue();
     enable_dns_prefetching_checkbox_->SetChecked(enabled);
-    chrome_browser_net::EnableDnsPrefetch(enabled);
+    chrome_browser_net::EnablePredictor(enabled);
   }
   if (!pref_name || *pref_name == prefs::kSafeBrowsingEnabled)
     enable_safe_browsing_checkbox_->SetChecked(safe_browsing_.GetValue());
@@ -1051,7 +1042,7 @@ class DownloadSection : public AdvancedSection,
   views::NativeButton* reset_file_handlers_button_;
 
   // Pref members.
-  StringPrefMember default_download_location_;
+  FilePathPrefMember default_download_location_;
   BooleanPrefMember ask_for_save_location_;
 
   // Updates the directory displayed in the default download location view with
@@ -1083,9 +1074,8 @@ void DownloadSection::ButtonPressed(
        l10n_util::GetString(IDS_OPTIONS_DOWNLOADLOCATION_BROWSE_TITLE);
     select_file_dialog_->SelectFile(SelectFileDialog::SELECT_FOLDER,
                                     dialog_title,
-                                    FilePath::FromWStringHack(
-                                        profile()->GetPrefs()->GetString(
-                                        prefs::kDownloadDefaultDirectory)),
+                                    profile()->GetPrefs()->GetFilePath(
+                                        prefs::kDownloadDefaultDirectory),
                                     NULL, 0, std::wstring(),
                                     GetWindow()->GetNativeWindow(),
                                     NULL);
@@ -1112,7 +1102,7 @@ void DownloadSection::FileSelected(const FilePath& path,
                                    int index, void* params) {
   UserMetricsRecordAction(UserMetricsAction("Options_SetDownloadDirectory"),
                           profile()->GetPrefs());
-  default_download_location_.SetValue(path.ToWStringHack());
+  default_download_location_.SetValue(path);
   // We need to call this manually here since because we're setting the value
   // through the pref member which avoids notifying the listener that set the
   // value.
@@ -1207,7 +1197,7 @@ void DownloadSection::NotifyPrefChanged(const std::wstring* pref_name) {
 
 void DownloadSection::UpdateDownloadDirectoryDisplay() {
   download_default_download_location_display_->SetFile(
-      FilePath::FromWStringHack(default_download_location_.GetValue()));
+      default_download_location_.GetValue());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1411,5 +1401,4 @@ void AdvancedScrollViewContainer::Layout() {
       gfx::NativeTheme::LIST);
   lb.Inset(border.width(), border.height());
   scroll_view_->SetBounds(lb);
-  scroll_view_->Layout();
 }

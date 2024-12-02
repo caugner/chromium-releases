@@ -5,10 +5,10 @@
 #ifndef VIEWS_CONTROLS_LABEL_H_
 #define VIEWS_CONTROLS_LABEL_H_
 
+#include "base/gtest_prod_util.h"
 #include "gfx/font.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 #include "views/view.h"
 
 namespace views {
@@ -45,12 +45,15 @@ class Label : public View {
   // The view class name.
   static const char kViewClassName[];
 
+  // The padding for the focus border when rendering focused text.
+  static const int kFocusBorderPadding;
+
   Label();
   explicit Label(const std::wstring& text);
   Label(const std::wstring& text, const gfx::Font& font);
   virtual ~Label();
 
-  // Overridden to compute the size required to display this label
+  // Overridden to compute the size required to display this label.
   virtual gfx::Size GetPreferredSize();
 
   // Overriden to return the baseline of the label.
@@ -58,7 +61,7 @@ class Label : public View {
 
   // Return the height necessary to display this label with the provided width.
   // This method is used to layout multi-line labels. It is equivalent to
-  // GetPreferredSize().height() if the receiver is not multi-line
+  // GetPreferredSize().height() if the receiver is not multi-line.
   virtual int GetHeightForWidth(int w);
 
   // Overriden to dirty our text bounds if we're multi-line.
@@ -72,7 +75,7 @@ class Label : public View {
   virtual void Paint(gfx::Canvas* canvas);
 
   // If the mouse is over the label, and a mouse over background has been
-  // specified, its used. Otherwise super's implementation is invoked
+  // specified, its used. Otherwise super's implementation is invoked.
   virtual void PaintBackground(gfx::Canvas* canvas);
 
   // Set the font.
@@ -96,7 +99,7 @@ class Label : public View {
   // Set the color
   virtual void SetColor(const SkColor& color) { color_ = color; }
 
-  // Return a reference to the currently used color
+  // Return a reference to the currently used color.
   virtual SkColor GetColor() const { return color_; }
 
   // Set horizontal alignment. If the locale is RTL, and the RTL alignment
@@ -107,7 +110,7 @@ class Label : public View {
   // is set. Otherwise, the label's alignment specified as a parameter will be
   // flipped in RTL locales. Please see the comments in SetRTLAlignmentMode for
   // more information.
-  void SetHorizontalAlignment(Alignment a);
+  void SetHorizontalAlignment(Alignment alignment);
 
   Alignment horizontal_alignment() const { return horiz_alignment_; }
 
@@ -125,14 +128,19 @@ class Label : public View {
 
   // Set whether the label text can wrap on multiple lines.
   // Default is false.
-  void SetMultiLine(bool f);
+  void SetMultiLine(bool multi_line);
 
   // Return whether the label text can wrap on multiple lines.
   bool is_multi_line() const { return is_multi_line_; }
 
   // Set whether the label text can be split on words.
   // Default is false. This only works when is_multi_line is true.
-  void SetAllowCharacterBreak(bool f);
+  void SetAllowCharacterBreak(bool allow_character_break);
+
+  // Set whether the label text should be elided in the middle (if necessary).
+  // The default is to elide at the end.
+  // NOTE: This is not supported for multi-line strings.
+  void SetElideInMiddle(bool elide_in_middle);
 
   // Sets the tooltip text.  Default behavior for a label (single-line) is to
   // show the full text if it is wider than its bounds.  Calling this overrides
@@ -181,28 +189,36 @@ class Label : public View {
   void set_collapse_when_hidden(bool value) { collapse_when_hidden_ = value; }
   bool collapse_when_hidden() const { return collapse_when_hidden_; }
 
+  // Gets/set whether or not this label is to be painted as a focused element.
   void set_paint_as_focused(bool paint_as_focused) {
     paint_as_focused_ = paint_as_focused;
   }
+  bool paint_as_focused() const { return paint_as_focused_; }
 
   void SetHasFocusBorder(bool has_focus_border);
 
+ protected:
+  // Called by Paint to paint the text.  Override this to change how
+  // text is painted.
+  virtual void PaintText(gfx::Canvas* canvas,
+                         const std::wstring& text,
+                         const gfx::Rect& text_bounds,
+                         int flags);
+
+  void invalidate_text_size() { text_size_valid_ = false; }
+
+  virtual gfx::Size GetTextSize() const;
  private:
   // These tests call CalculateDrawStringParams in order to verify the
   // calculations done for drawing text.
-  FRIEND_TEST(LabelTest, DrawSingleLineString);
-  FRIEND_TEST(LabelTest, DrawMultiLineString);
-  FRIEND_TEST(LabelTest, DrawSingleLineStringInRTL);
-  FRIEND_TEST(LabelTest, DrawMultiLineStringInRTL);
+  FRIEND_TEST_ALL_PREFIXES(LabelTest, DrawSingleLineString);
+  FRIEND_TEST_ALL_PREFIXES(LabelTest, DrawMultiLineString);
+  FRIEND_TEST_ALL_PREFIXES(LabelTest, DrawSingleLineStringInRTL);
+  FRIEND_TEST_ALL_PREFIXES(LabelTest, DrawMultiLineStringInRTL);
 
   static gfx::Font GetDefaultFont();
 
   void Init(const std::wstring& text, const gfx::Font& font);
-
-  // Returns parameters to be used for the DrawString call.
-  void CalculateDrawStringParams(std::wstring* paint_text,
-                                 gfx::Rect* text_bounds,
-                                 int* flags) const;
 
   // If the mouse is over the text, SetContainsMouse(true) is invoked, otherwise
   // SetContainsMouse(false) is invoked.
@@ -216,11 +232,14 @@ class Label : public View {
   // Returns where the text is drawn, in the receivers coordinate system.
   gfx::Rect GetTextBounds() const;
 
-  gfx::Size GetTextSize() const;
-
   int ComputeMultiLineFlags() const;
 
   gfx::Rect GetAvailableRect() const;
+
+  // Returns parameters to be used for the DrawString call.
+  void CalculateDrawStringParams(std::wstring* paint_text,
+                                 gfx::Rect* text_bounds,
+                                 int* flags) const;
 
   // The colors to use for enabled and disabled labels.
   static SkColor kEnabledColor, kDisabledColor;
@@ -233,6 +252,7 @@ class Label : public View {
   mutable bool text_size_valid_;
   bool is_multi_line_;
   bool allow_character_break_;
+  bool elide_in_middle_;
   bool url_set_;
   Alignment horiz_alignment_;
   std::wstring tooltip_text_;

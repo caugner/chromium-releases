@@ -12,11 +12,11 @@
 #include "gfx/size.h"
 #include "gpu/command_buffer/service/common_decoder.h"
 
+namespace gfx {
+class GLContext;
+}
 
 namespace gpu {
-// Forward-declared instead of including gl_context.h, because including glx.h
-// causes havok.
-class GLContext;
 
 namespace gles2 {
 
@@ -44,6 +44,7 @@ class GLES2Decoder : public CommonDecoder {
 
   // Initializes the graphics context. Can create an offscreen
   // decoder with a frame buffer that can be referenced from the parent.
+  // Takes ownership of GLContext.
   // Parameters:
   //  context: the GL context to render to.
   //  size: the size if the GL context is offscreen.
@@ -53,7 +54,7 @@ class GLES2Decoder : public CommonDecoder {
   //                            parent's namespace.
   // Returns:
   //   true if successful.
-  virtual bool Initialize(GLContext* context,
+  virtual bool Initialize(gfx::GLContext* context,
                           const gfx::Size& size,
                           GLES2Decoder* parent,
                           uint32 parent_client_texture_id) = 0;
@@ -64,17 +65,19 @@ class GLES2Decoder : public CommonDecoder {
   // Resize an offscreen frame buffer.
   virtual void ResizeOffscreenFrameBuffer(const gfx::Size& size) = 0;
 
+  // Force the offscreen frame buffer's size to be updated. This
+  // usually occurs lazily, during SwapBuffers, but on some platforms
+  // (Mac OS X in particular) it must be done immediately.
+  virtual bool UpdateOffscreenFrameBufferSize() = 0;
+
   // Make this decoder's GL context current.
   virtual bool MakeCurrent() = 0;
-
-  // Gets a service id by client id.
-  virtual uint32 GetServiceIdForTesting(uint32 client_id) = 0;
 
   // Gets the GLES2 Util which holds info.
   virtual GLES2Util* GetGLES2Util() = 0;
 
   // Gets the associated GLContext.
-  virtual GLContext* GetGLContext() = 0;
+  virtual gfx::GLContext* GetGLContext() = 0;
 
   // Sets a callback which is called when a SwapBuffers command is processed.
   virtual void SetSwapBuffersCallback(Callback0::Type* callback) = 0;

@@ -10,13 +10,14 @@
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
+#include "base/gtest_prod_util.h"
+#include "base/string16.h"
 #include "base/task.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/text_database.h"
 #include "chrome/browser/history/query_parser.h"
 #include "chrome/browser/history/url_database.h"
 #include "chrome/common/mru_cache.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 
 struct sqlite3;
 
@@ -82,6 +83,9 @@ class TextDatabaseManager {
   // functions should be called.
   bool Init(const HistoryPublisher* history_publisher);
 
+  // Returns the directory that holds the full text database files.
+  const FilePath& GetDir() { return dir_; }
+
   // Allows scoping updates. This also allows things to go faster since every
   // page add doesn't need to be committed to disk (slow). Note that files will
   // still get created during a transaction.
@@ -100,8 +104,8 @@ class TextDatabaseManager {
   // should be the time corresponding to that visit in the database.
   void AddPageURL(const GURL& url, URLID url_id, VisitID visit_id,
                   base::Time visit_time);
-  void AddPageTitle(const GURL& url, const std::wstring& title);
-  void AddPageContents(const GURL& url, const std::wstring& body);
+  void AddPageTitle(const GURL& url, const string16& title);
+  void AddPageContents(const GURL& url, const string16& body);
 
   // Adds the given data to the appropriate database file, returning true on
   // success. The visit database row identified by |visit_id| will be updated
@@ -111,8 +115,8 @@ class TextDatabaseManager {
                    URLID url_id,
                    VisitID visit_id,
                    base::Time visit_time,
-                   const std::wstring& title,
-                   const std::wstring& body);
+                   const string16& title,
+                   const string16& body);
 
   // Deletes the instance of indexed data identified by the given time and URL.
   // Any changes will be tracked in the optional change set for use when calling
@@ -149,18 +153,19 @@ class TextDatabaseManager {
   //
   // This function will return more than one match per URL if there is more than
   // one entry for that URL in the database.
-  void GetTextMatches(const std::wstring& query,
+  void GetTextMatches(const string16& query,
                       const QueryOptions& options,
                       std::vector<TextDatabase::Match>* results,
                       base::Time* first_time_searched);
 
  private:
   // These tests call ExpireRecentChangesForTime to force expiration.
-  FRIEND_TEST(TextDatabaseManagerTest, InsertPartial);
-  FRIEND_TEST(TextDatabaseManagerTest, PartialComplete);
-  FRIEND_TEST(ExpireHistoryTest, DISABLED_DeleteURLAndFavicon);
-  FRIEND_TEST(ExpireHistoryTest, FlushRecentURLsUnstarred);
-  FRIEND_TEST(ExpireHistoryTest, FlushRecentURLsUnstarredRestricted);
+  FRIEND_TEST_ALL_PREFIXES(TextDatabaseManagerTest, InsertPartial);
+  FRIEND_TEST_ALL_PREFIXES(TextDatabaseManagerTest, PartialComplete);
+  FRIEND_TEST_ALL_PREFIXES(ExpireHistoryTest, DeleteURLAndFavicon);
+  FRIEND_TEST_ALL_PREFIXES(ExpireHistoryTest, FlushRecentURLsUnstarred);
+  FRIEND_TEST_ALL_PREFIXES(ExpireHistoryTest,
+                           FlushRecentURLsUnstarredRestricted);
 
   // Stores "recent stuff" that has happened with the page, since the page
   // visit, title, and body all come in at different times.
@@ -172,12 +177,12 @@ class TextDatabaseManager {
     URLID url_id() const { return url_id_; }
     VisitID visit_id() const { return visit_id_; }
     base::Time visit_time() const { return visit_time_; }
-    const std::wstring& title() const { return title_; }
-    const std::wstring& body() const { return body_; }
+    const string16& title() const { return title_; }
+    const string16& body() const { return body_; }
 
     // Setters, we can only update the title and body.
-    void set_title(const std::wstring& ttl);
-    void set_body(const std::wstring& bdy);
+    void set_title(const string16& ttl);
+    void set_body(const string16& bdy);
 
     // Returns true if both the title or body of the entry has been set. Since
     // both the title and body setters will "fix" empty strings to be a space,
@@ -203,8 +208,8 @@ class TextDatabaseManager {
     base::TimeTicks added_time_;
 
     // Will be the string " " when they are set to distinguish set and unset.
-    std::wstring title_;
-    std::wstring body_;
+    string16 title_;
+    string16 body_;
   };
 
   // Converts the given time to a database identifier or vice-versa.

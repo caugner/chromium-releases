@@ -19,7 +19,6 @@ using WebKit::WebString;
 
 namespace webkit_glue {
 
-
 // A proxy interface to a WebInputElement for inline autocomplete. The proxy
 // is overridden by webpasswordautocompletelistener_unittest.
 class WebInputElementDelegate {
@@ -29,12 +28,12 @@ class WebInputElementDelegate {
   virtual ~WebInputElementDelegate();
 
   // These are virtual to support unit testing.
+  virtual bool IsEditable() const;
   virtual void SetValue(const string16& value);
+  virtual bool IsAutofilled() const;
+  virtual void SetAutofilled(bool autofilled);
   virtual void SetSelectionRange(size_t start, size_t end);
-  virtual void OnFinishedAutocompleting();
-  virtual void RefreshAutofillPopup(
-      const std::vector<string16>& suggestions,
-      int default_suggestion_index);
+  virtual void RefreshAutofillPopup(const std::vector<string16>& suggestions);
 
  private:
   // The underlying DOM element we're wrapping.
@@ -49,7 +48,7 @@ class WebPasswordAutocompleteListenerImpl :
   WebPasswordAutocompleteListenerImpl(
       WebInputElementDelegate* username_element,
       WebInputElementDelegate* password_element,
-      const PasswordFormDomManager::FillData& data);
+      const PasswordFormFillData& data);
   ~WebPasswordAutocompleteListenerImpl() {
   }
 
@@ -58,6 +57,7 @@ class WebPasswordAutocompleteListenerImpl :
   virtual void performInlineAutocomplete(const WebString& user_input,
                                          bool backspace_or_delete_pressed,
                                          bool show_suggestions);
+  virtual bool showSuggestionPopup(const WebString& value);
 
  private:
   // Check if the input string resembles a potential matching login
@@ -76,7 +76,7 @@ class WebPasswordAutocompleteListenerImpl :
   scoped_ptr<WebInputElementDelegate> username_delegate_;
 
   // Contains the extra logins for matching on delta/blur.
-  PasswordFormDomManager::FillData data_;
+  PasswordFormFillData data_;
 
   DISALLOW_COPY_AND_ASSIGN(WebPasswordAutocompleteListenerImpl);
 };

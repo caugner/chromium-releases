@@ -9,7 +9,7 @@
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
 #include "chrome/browser/geolocation/device_data_provider.h"
-#include "chrome/browser/net/url_fetcher.h"
+#include "chrome/common/net/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 
 class URLRequestContextGetter;
@@ -76,7 +76,7 @@ class NetworkLocationRequest : private URLFetcher::Delegate {
   WifiData wifi_data_;
   base::Time timestamp_;  // Timestamp of the above data, not of the request.
 
-  DISALLOW_EVIL_CONSTRUCTORS(NetworkLocationRequest);
+  DISALLOW_COPY_AND_ASSIGN(NetworkLocationRequest);
 };
 
 #endif  // CHROME_BROWSER_GEOLOCATION_NETWORK_LOCATION_REQUEST_H_

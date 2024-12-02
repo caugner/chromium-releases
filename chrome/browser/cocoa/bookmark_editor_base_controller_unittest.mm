@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,8 +67,7 @@ class BookmarkEditorBaseControllerTest : public CocoaTest {
                          nibName:@"BookmarkAllTabs"
                          profile:browser_helper_.profile()
                           parent:group_b_0_
-                   configuration:BookmarkEditor::SHOW_TREE
-                         handler:nil];
+                   configuration:BookmarkEditor::SHOW_TREE];
   }
 
   virtual void SetUp() {
@@ -159,6 +158,20 @@ TEST_F(BookmarkEditorBaseControllerTest, CreateFolder) {
   [controller_ createNewFolders];
   // Verify that the tab folder was added to the new folder.
   EXPECT_EQ(3, group_b_3_->GetChildCount());
+  [controller_ cancel:nil];
+}
+
+TEST_F(BookmarkEditorBaseControllerTest, CreateTwoFolders) {
+  BookmarkModel* model = browser_helper_.profile()->GetBookmarkModel();
+  const BookmarkNode* bar = model->GetBookmarkBarNode();
+  // Create 2 folders which are children of the bar.
+  [controller_ selectTestNodeInBrowser:bar];
+  [controller_ newFolder:nil];
+  [controller_ selectTestNodeInBrowser:bar];
+  [controller_ newFolder:nil];
+  // If we do NOT crash on createNewFolders, success!
+  // (e.g. http://crbug.com/47877 is fixed).
+  [controller_ createNewFolders];
   [controller_ cancel:nil];
 }
 

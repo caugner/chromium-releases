@@ -11,7 +11,6 @@
 #include "webkit/glue/form_data.h"
 
 using webkit_glue::FormData;
-using WebKit::WebCompositionCommand;
 using WebKit::WebFrame;
 using WebKit::WebString;
 using WebKit::WebTextDirection;
@@ -94,15 +93,15 @@ TEST_F(FormAutocompleteTest, AutoCompleteOffInputSubmit) {
 // Tests that submitting a form that has been dynamically set as autocomplete
 // off does not generate a FormSubmitted message.
 // http://crbug.com/36520
-// TODO(jcampan): reenable when WebKit bug 35823 is fixed.
-TEST_F(FormAutocompleteTest, DISABLED_DynamicAutoCompleteOffFormSubmit) {
+// TODO(jcampan): Waiting on WebKit bug 35823.
+TEST_F(FormAutocompleteTest, FAILS_DynamicAutoCompleteOffFormSubmit) {
   LoadHTML("<html><form id='myForm'><input name='fname' value='Rick'/>"
            "<input name='lname' value='Deckard'/></form></html>");
 
   WebKit::WebElement element =
       GetMainFrame()->document().getElementById(WebKit::WebString("myForm"));
   ASSERT_FALSE(element.isNull());
-  WebKit::WebFormElement form = element.toElement<WebKit::WebFormElement>();
+  WebKit::WebFormElement form = element.to<WebKit::WebFormElement>();
   EXPECT_TRUE(form.autoComplete());
 
   // Dynamically mark the form as autocomplete off.

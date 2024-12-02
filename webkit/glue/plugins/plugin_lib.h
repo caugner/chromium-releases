@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef WEBKIT_GLUE_PLUGIN_PLUGIN_LIB_H_
-#define WEBKIT_GLUE_PLUGIN_PLUGIN_LIB_H_
+#ifndef WEBKIT_GLUE_PLUGINS_PLUGIN_LIB_H_
+#define WEBKIT_GLUE_PLUGINS_PLUGIN_LIB_H_
 
 #include <string>
 #include <vector>
@@ -78,7 +78,8 @@ class PluginLib : public base::RefCounted<PluginLib> {
   // some plugins crash if unloaded).
   void PreventLibraryUnload();
 
- private:
+  // protected for testability.
+ protected:
   friend class base::RefCounted<PluginLib>;
 
   // Creates a new PluginLib.
@@ -116,4 +117,4 @@ class PluginLib : public base::RefCounted<PluginLib> {
 
 }  // namespace NPAPI
 
-#endif  // WEBKIT_GLUE_PLUGIN_PLUGIN_LIB_H_
+#endif  // WEBKIT_GLUE_PLUGINS_PLUGIN_LIB_H_

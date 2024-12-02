@@ -10,6 +10,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/pref_service.h"
+#include "chrome/browser/profile.h"
 #include "grit/generated_resources.h"
 #include "unicode/uloc.h"
 
@@ -165,8 +166,7 @@ int LanguageComboboxModel::GetSelectedLanguageIndex(const std::wstring& prefs) {
     local_state = profile_->GetPrefs();
 
   DCHECK(local_state);
-  const std::string& current_locale =
-      WideToASCII(local_state->GetString(prefs.c_str()));
+  const std::string& current_locale = local_state->GetString(prefs.c_str());
 
   return GetIndexFromLocale(current_locale);
 }

@@ -14,11 +14,11 @@
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
-#include "chrome/browser/sync/engine/net/http_return.h"
 #include "chrome/browser/sync/syncable/syncable_id.h"
-#include "chrome/browser/sync/util/event_sys.h"
-#include "chrome/browser/sync/util/signin.h"
 #include "chrome/browser/sync/util/sync_types.h"
+#include "chrome/common/deprecated/event_sys.h"
+#include "chrome/common/deprecated/event_sys-inl.h"
+#include "chrome/common/net/http_return.h"
 
 namespace syncable {
 class WriteTransaction;
@@ -38,6 +38,10 @@ class ClientToServerMessage;
 // How many connection errors are accepted before network handles are closed
 // and reopened.
 static const int32 kMaxConnectionErrorsBeforeReset = 10;
+
+static const int32 kUnsetResponseCode = -1;
+static const int32 kUnsetContentLength = -1;
+static const int32 kUnsetPayloadLength = -1;
 
 // HttpResponse gathers the relevant output properties of an HTTP request.
 // Depending on the value of the server_status code, response_code, and
@@ -94,6 +98,12 @@ struct HttpResponse {
 
   // Identifies the type of failure, if any.
   ServerConnectionCode server_status;
+
+  HttpResponse()
+      : response_code(kUnsetResponseCode),
+        content_length(kUnsetContentLength),
+        payload_length(kUnsetPayloadLength),
+        server_status(NONE) {}
 };
 
 inline bool IsGoodReplyFromServer(HttpResponse::ServerConnectionCode code) {
@@ -239,10 +249,6 @@ class ServerConnectionManager {
   // Updates status and broadcasts events on change.
   bool CheckServerReachable();
 
-  // Updates server status to "unreachable" and broadcasts events if
-  // necessary.
-  void SetServerUnreachable();
-
   // Signal the shutdown event to notify listeners.
   virtual void kill();
 
@@ -257,8 +263,6 @@ class ServerConnectionManager {
   inline bool server_reachable() const { return server_reachable_; }
 
   const std::string client_id() const { return client_id_; }
-
-  void SetDomainFromSignIn(SignIn signin_type, const std::string& signin);
 
   // This changes the server info used by the connection manager. This allows
   // a single client instance to talk to different backing servers. This is

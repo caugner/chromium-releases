@@ -26,6 +26,10 @@
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/network_state_notifier.h"
+#endif
+
 // Are we in the process of restoring?
 static bool restoring = false;
 
@@ -33,13 +37,17 @@ namespace {
 
 // TabLoader ------------------------------------------------------------------
 
-// TabLoader is responsible for ensuring after session restore we have
-// at least SessionRestore::num_tabs_to_load_ loading. As tabs finish loading
-// new tabs are loaded. When all tabs are loading TabLoader deletes itself.
+// Initial delay (see class decription for details).
+static const int kInitialDelayTimerMS = 100;
+
+// TabLoader is responsible for loading tabs after session restore creates
+// tabs. New tabs are loaded after the current tab finishes loading, or a delay
+// is reached (initially kInitialDelayTimerMS). If the delay is reached before
+// a tab finishes loading a new tab is loaded and the time of the delay
+// doubled. When all tabs are loading TabLoader deletes itself.
 //
 // This is not part of SessionRestoreImpl so that synchronous destruction
 // of SessionRestoreImpl doesn't have timing problems.
-
 class TabLoader : public NotificationObserver {
  public:
   typedef std::list<NavigationController*> TabsToLoad;
@@ -47,18 +55,20 @@ class TabLoader : public NotificationObserver {
   TabLoader();
   ~TabLoader();
 
-  // Adds a tab to load.
-  void AddTab(NavigationController* controller);
+  // Schedules a tab for loading.
+  void ScheduleLoad(NavigationController* controller);
 
-  // Loads the next batch of tabs until SessionRestore::num_tabs_to_load_ tabs
-  // are loading, or all tabs are loading. If there are no more tabs to load,
-  // this deletes the TabLoader.
+  // Invokes |LoadNextTab| to load a tab.
   //
   // This must be invoked once to start loading.
-  void LoadTabs();
+  void StartLoading();
 
  private:
   typedef std::set<NavigationController*> TabsLoading;
+
+  // Loads the next tab. If there are no more tabs to load this deletes itself,
+  // otherwise |force_load_timer_| is restarted.
+  void LoadNextTab();
 
   // NotificationObserver method. Removes the specified tab and loads the next
   // tab.
@@ -71,7 +81,15 @@ class TabLoader : public NotificationObserver {
   // from.
   void RemoveTab(NavigationController* tab);
 
+  // Invoked from |force_load_timer_|. Doubles |force_load_delay_| and invokes
+  // |LoadNextTab| to load the next tab
+  void ForceLoadTimerFired();
+
   NotificationRegistrar registrar_;
+
+  // Current delay before a new tab is loaded. See class description for
+  // details.
+  int64 force_load_delay_;
 
   // Has Load been invoked?
   bool loading_;
@@ -82,17 +100,22 @@ class TabLoader : public NotificationObserver {
 
   // The tabs we need to load.
   TabsToLoad tabs_to_load_;
+
+  base::OneShotTimer<TabLoader> force_load_timer_;
+
+  DISALLOW_COPY_AND_ASSIGN(TabLoader);
 };
 
 TabLoader::TabLoader()
-    : loading_(false) {
+    : force_load_delay_(kInitialDelayTimerMS),
+      loading_(false) {
 }
 
 TabLoader::~TabLoader() {
   DCHECK(tabs_to_load_.empty() && tabs_loading_.empty());
 }
 
-void TabLoader::AddTab(NavigationController* controller) {
+void TabLoader::ScheduleLoad(NavigationController* controller) {
   if (controller) {
     DCHECK(find(tabs_to_load_.begin(), tabs_to_load_.end(), controller) ==
            tabs_to_load_.end());
@@ -107,16 +130,30 @@ void TabLoader::AddTab(NavigationController* controller) {
   }
 }
 
-void TabLoader::LoadTabs() {
+void TabLoader::StartLoading() {
+#if defined(OS_CHROMEOS)
+  if (chromeos::NetworkStateNotifier::is_connected()) {
+    loading_ = true;
+    LoadNextTab();
+  } else {
+    // Start listening to network state notification now.
+    registrar_.Add(this, NotificationType::NETWORK_STATE_CHANGED,
+                   NotificationService::AllSources());
+  }
+#else
   loading_ = true;
-  while (!tabs_to_load_.empty() &&
-         (SessionRestore::num_tabs_to_load_ == 0 ||
-          tabs_loading_.size() < SessionRestore::num_tabs_to_load_)) {
+  LoadNextTab();
+#endif
+}
+
+void TabLoader::LoadNextTab() {
+  if (!tabs_to_load_.empty()) {
     NavigationController* tab = tabs_to_load_.front();
+    DCHECK(tab);
     tabs_loading_.insert(tab);
     tabs_to_load_.pop_front();
     tab->LoadIfNecessary();
-    if (tab && tab->tab_contents()) {
+    if (tab->tab_contents()) {
       int tab_index;
       Browser* browser = Browser::GetBrowserForController(tab, &tab_index);
       if (browser && browser->selected_index() != tab_index) {
@@ -135,19 +172,63 @@ void TabLoader::LoadTabs() {
   if (tabs_to_load_.empty()) {
     tabs_loading_.clear();
     delete this;
+    return;
   }
+
+  if (force_load_timer_.IsRunning())
+    force_load_timer_.Stop();
+  force_load_timer_.Start(
+      base::TimeDelta::FromMilliseconds(force_load_delay_),
+      this, &TabLoader::ForceLoadTimerFired);
 }
 
 void TabLoader::Observe(NotificationType type,
                         const NotificationSource& source,
                         const NotificationDetails& details) {
-  DCHECK(type == NotificationType::TAB_CLOSED ||
-         type == NotificationType::LOAD_STOP);
-  NavigationController* tab = Source<NavigationController>(source).ptr();
-  RemoveTab(tab);
-  if (loading_) {
-    LoadTabs();
-    // WARNING: if there are no more tabs to load, we have been deleted.
+  switch (type.value) {
+#if defined(OS_CHROMEOS)
+    case NotificationType::NETWORK_STATE_CHANGED: {
+      chromeos::NetworkStateDetails* state_details =
+          Details<chromeos::NetworkStateDetails>(details).ptr();
+      switch (state_details->state()) {
+        case chromeos::NetworkStateDetails::CONNECTED:
+          if (!loading_) {
+            loading_ = true;
+            LoadNextTab();
+          }
+          // start loading
+          break;
+        case chromeos::NetworkStateDetails::CONNECTING:
+          // keep it going
+          break;
+        case chromeos::NetworkStateDetails::DISCONNECTED:
+          // disconnected while loading. set loaing_ false so
+          // that it stops trying to load next tab.
+          loading_ = false;
+          break;
+        default:
+          NOTREACHED() << "Unknown nework state notification:"
+                       << state_details->state();
+      }
+      break;
+    }
+#endif
+    case NotificationType::TAB_CLOSED:
+    case NotificationType::LOAD_STOP: {
+      NavigationController* tab = Source<NavigationController>(source).ptr();
+      RemoveTab(tab);
+      if (loading_) {
+        LoadNextTab();
+        // WARNING: if there are no more tabs to load, we have been deleted.
+      } else if (tabs_to_load_.empty()) {
+        tabs_loading_.clear();
+        delete this;
+        return;
+      }
+      break;
+    }
+    default:
+      NOTREACHED() << "Unknown notification received:" << type.value;
   }
 }
 
@@ -165,6 +246,11 @@ void TabLoader::RemoveTab(NavigationController* tab) {
       find(tabs_to_load_.begin(), tabs_to_load_.end(), tab);
   if (j != tabs_to_load_.end())
     tabs_to_load_.erase(j);
+}
+
+void TabLoader::ForceLoadTimerFired() {
+  force_load_delay_ *= 2;
+  LoadNextTab();
 }
 
 // SessionRestoreImpl ---------------------------------------------------------
@@ -268,7 +354,7 @@ class SessionRestoreImpl : public NotificationObserver {
     if (succeeded) {
       DCHECK(tab_loader_.get());
       // TabLoader delets itself when done loading.
-      tab_loader_.release()->LoadTabs();
+      tab_loader_.release()->StartLoading();
     }
 
     if (!synchronous_) {
@@ -282,7 +368,7 @@ class SessionRestoreImpl : public NotificationObserver {
 
   void OnGotSession(SessionService::Handle handle,
                     std::vector<SessionWindow*>* windows) {
-    if (HasAppExtensions(*windows) && profile_->GetExtensionsService() &&
+    if (HasExtensionApps(*windows) && profile_->GetExtensionsService() &&
         !profile_->GetExtensionsService()->is_ready()) {
       // At least one tab is an app tab and the extension service hasn't
       // finished loading. Wait to continue processing until the extensions
@@ -305,10 +391,10 @@ class SessionRestoreImpl : public NotificationObserver {
   }
 
   // Returns true if any tab in |windows| has an application extension id.
-  bool HasAppExtensions(const std::vector<SessionWindow*>& windows) {
+  bool HasExtensionApps(const std::vector<SessionWindow*>& windows) {
     for (std::vector<SessionWindow*>::const_iterator i = windows.begin();
          i != windows.end(); ++i) {
-      if (HasAppExtensions((*i)->tabs))
+      if (HasExtensionApps((*i)->tabs))
         return true;
     }
 
@@ -316,10 +402,10 @@ class SessionRestoreImpl : public NotificationObserver {
   }
 
   // Returns true if any tab in |tabs| has an application extension id.
-  bool HasAppExtensions(const std::vector<SessionTab*>& tabs) {
+  bool HasExtensionApps(const std::vector<SessionTab*>& tabs) {
     for (std::vector<SessionTab*>::const_iterator i = tabs.begin();
          i != tabs.end(); ++i) {
-      if (!(*i)->app_extension_id.empty())
+      if (!(*i)->extension_app_id.empty())
         return true;
     }
 
@@ -357,7 +443,7 @@ class SessionRestoreImpl : public NotificationObserver {
         }
       }
       if (!browser) {
-        browser = new Browser((*i)->type, profile_);
+        browser = new Browser(static_cast<Browser::Type>((*i)->type), profile_);
         browser->set_override_bounds((*i)->bounds);
         browser->set_maximized_state((*i)->is_maximized ?
             Browser::MAXIMIZED_STATE_MAXIMIZED :
@@ -398,11 +484,11 @@ class SessionRestoreImpl : public NotificationObserver {
           0,
           std::min(selected_index,
                    static_cast<int>(tab.navigations.size() - 1)));
-      tab_loader_->AddTab(
+      tab_loader_->ScheduleLoad(
           &browser->AddRestoredTab(tab.navigations,
                                    static_cast<int>(i - window.tabs.begin()),
                                    selected_index,
-                                   tab.app_extension_id,
+                                   tab.extension_app_id,
                                    false,
                                    tab.pinned,
                                    true)->controller());
@@ -432,8 +518,12 @@ class SessionRestoreImpl : public NotificationObserver {
   void AppendURLsToBrowser(Browser* browser,
                            const std::vector<GURL>& urls) {
     for (size_t i = 0; i < urls.size(); ++i) {
-      browser->AddTabWithURL(urls[i], GURL(), PageTransition::START_PAGE,
-                            (i == 0), -1, false, NULL);
+      int add_types = TabStripModel::ADD_FORCE_INDEX;
+      if (i == 0)
+        add_types |= TabStripModel::ADD_SELECTED;
+      int index = browser->GetIndexForInsertionDuringRestore(i);
+      browser->AddTabWithURL(urls[i], GURL(), PageTransition::START_PAGE, index,
+                             add_types, NULL, std::string());
     }
   }
 
@@ -488,9 +578,6 @@ class SessionRestoreImpl : public NotificationObserver {
 }  // namespace
 
 // SessionRestore -------------------------------------------------------------
-
-// static
-size_t SessionRestore::num_tabs_to_load_ = 0;
 
 static void Restore(Profile* profile,
                     Browser* browser,

@@ -17,7 +17,7 @@
 UtilityProcessHost::UtilityProcessHost(ResourceDispatcherHost* rdh,
                                        Client* client,
                                        ChromeThread::ID client_thread_id)
-    : ChildProcessHost(UTILITY_PROCESS, rdh),
+    : BrowserChildProcessHost(UTILITY_PROCESS, rdh),
       client_(client),
       client_thread_id_(client_thread_id) {
 }
@@ -48,6 +48,15 @@ bool UtilityProcessHost::StartUpdateManifestParse(const std::string& xml) {
     return false;
 
   Send(new UtilityMsg_ParseUpdateManifest(xml));
+  return true;
+}
+
+bool UtilityProcessHost::StartImageDecoding(
+    const std::vector<unsigned char>& encoded_data) {
+  if (!StartProcess(FilePath()))
+    return false;
+
+  Send(new UtilityMsg_DecodeImage(encoded_data));
   return true;
 }
 
@@ -83,13 +92,16 @@ bool UtilityProcessHost::StartProcess(const FilePath& exposed_dir) {
   if (browser_command_line.HasSwitch(switches::kChromeFrame))
     cmd_line->AppendSwitch(switches::kChromeFrame);
 
-  if (browser_command_line.HasSwitch(switches::kEnableExtensionApps))
-    cmd_line->AppendSwitch(switches::kEnableExtensionApps);
+  if (browser_command_line.HasSwitch(switches::kEnableApps))
+    cmd_line->AppendSwitch(switches::kEnableApps);
 
   if (browser_command_line.HasSwitch(
       switches::kEnableExperimentalExtensionApis)) {
     cmd_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
   }
+
+  if (browser_command_line.HasSwitch(switches::kIssue35198ExtraLogging))
+    cmd_line->AppendSwitch(switches::kIssue35198ExtraLogging);
 
 #if defined(OS_POSIX)
   // TODO(port): Sandbox this on Linux.  Also, zygote this to work with
@@ -146,5 +158,9 @@ void UtilityProcessHost::Client::OnMessageReceived(
                         Client::OnParseUpdateManifestSucceeded)
     IPC_MESSAGE_HANDLER(UtilityHostMsg_ParseUpdateManifest_Failed,
                         Client::OnParseUpdateManifestFailed)
+    IPC_MESSAGE_HANDLER(UtilityHostMsg_DecodeImage_Succeeded,
+                        Client::OnDecodeImageSucceeded)
+    IPC_MESSAGE_HANDLER(UtilityHostMsg_DecodeImage_Failed,
+                        Client::OnDecodeImageFailed)
   IPC_END_MESSAGE_MAP_EX()
 }

@@ -14,34 +14,17 @@
 #include "chrome/browser/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/pref_service.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/views/cookie_prompt_view.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/pref_names.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 
-namespace {
-
-void OnExpanderActivate(GtkExpander* expander) {
-  g_browser_process->local_state()->
-      SetBoolean(prefs::kCookiePromptExpanded,
-                 gtk_expander_get_expanded(GTK_EXPANDER(expander)));
-}
-
-}  // namespace
-
 void CookiePromptModalDialog::CreateAndShowDialog() {
   dialog_ = CreateNativeDialog();
-  gtk_widget_show_all(GTK_WIDGET(dialog_));
-
-  // Suggest a minimum size.
-  gint width;
-  GtkRequisition req;
-  gtk_widget_size_request(dialog_, &req);
-  gtk_util::GetWidgetSizeFromResources(dialog_, IDS_ALERT_DIALOG_WIDTH_CHARS, 0,
-                                       &width, NULL);
-  if (width > req.width)
-    gtk_widget_set_size_request(dialog_, width, -1);
+  gtk_util::ShowModalDialogWithMinLocalizedWidth(GTK_WIDGET(dialog_),
+      IDS_ALERT_DIALOG_WIDTH_CHARS);
 }
 
 void CookiePromptModalDialog::AcceptWindow() {
@@ -53,6 +36,8 @@ void CookiePromptModalDialog::CancelWindow() {
 }
 
 NativeDialog CookiePromptModalDialog::CreateNativeDialog() {
+  gtk_util::MakeAppModalWindowGroup();
+
   gfx::NativeWindow window = tab_contents_->GetMessageBoxRootWindow();
   CookiePromptModalDialog::DialogType type = dialog_type();
   NativeDialog dialog = gtk_dialog_new_with_buttons(
@@ -82,20 +67,15 @@ NativeDialog CookiePromptModalDialog::CreateNativeDialog() {
 
   // Create a vbox for all the radio buttons so they aren't too far away from
   // each other.
-  bool remember_enabled = DecisionPersistable();
   GtkWidget* radio_box = gtk_vbox_new(FALSE, gtk_util::kControlSpacing);
   remember_radio_ = gtk_radio_button_new_with_label(NULL,
       l10n_util::GetStringFUTF8(IDS_COOKIE_ALERT_REMEMBER_RADIO,
                                 display_host).c_str());
-  gtk_widget_set_sensitive(GTK_WIDGET(remember_radio_), remember_enabled);
   gtk_box_pack_start(GTK_BOX(radio_box), remember_radio_, FALSE, FALSE, 0);
 
   GtkWidget* ask_radio = gtk_radio_button_new_with_label_from_widget(
       GTK_RADIO_BUTTON(remember_radio_),
       l10n_util::GetStringUTF8(IDS_COOKIE_ALERT_ASK_RADIO).c_str());
-  gtk_widget_set_sensitive(GTK_WIDGET(ask_radio), remember_enabled);
-  if (!remember_enabled)
-      gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ask_radio), true);
   gtk_box_pack_start(GTK_BOX(radio_box), ask_radio, FALSE, FALSE, 0);
 
   gtk_box_pack_start(GTK_BOX(content_area), radio_box, FALSE, FALSE, 0);
@@ -103,11 +83,10 @@ NativeDialog CookiePromptModalDialog::CreateNativeDialog() {
   GtkWidget* expander = gtk_expander_new(
       l10n_util::GetStringUTF8(IDS_COOKIE_SHOW_DETAILS_LABEL).c_str());
   gtk_expander_set_expanded(GTK_EXPANDER(expander),
-                            g_browser_process->local_state()->
+                            tab_contents_->profile()->GetPrefs()->
                             GetBoolean(prefs::kCookiePromptExpanded));
   g_signal_connect(expander, "notify::expanded",
-                   G_CALLBACK(OnExpanderActivate), NULL);
-
+                   G_CALLBACK(OnExpanderActivateThunk), this);
   cookie_view_ = gtk_chrome_cookie_view_new(TRUE);
   gtk_chrome_cookie_view_clear(GTK_CHROME_COOKIE_VIEW(cookie_view_));
   if (type == CookiePromptModalDialog::DIALOG_TYPE_COOKIE) {
@@ -144,8 +123,6 @@ NativeDialog CookiePromptModalDialog::CreateNativeDialog() {
                    G_CALLBACK(AppModalDialog::OnDialogResponse),
                    reinterpret_cast<AppModalDialog*>(this));
 
-  gtk_util::MakeAppModalWindowGroup();
-
   return dialog;
 }
 
@@ -168,4 +145,11 @@ void CookiePromptModalDialog::HandleDialogResponse(GtkDialog* dialog,
 
   gtk_util::AppModalDismissedUngroupWindows();
   delete this;
+}
+
+void CookiePromptModalDialog::OnExpanderActivate(GtkWidget* expander,
+                                                 GParamSpec* property) {
+  tab_contents_->profile()->GetPrefs()->
+      SetBoolean(prefs::kCookiePromptExpanded,
+                 gtk_expander_get_expanded(GTK_EXPANDER(expander)));
 }

@@ -48,7 +48,7 @@ class TabRestoreService : public BaseSessionService {
   // Interface used to allow the test to provide a custom time.
   class TimeFactory {
    public:
-    virtual ~TimeFactory() {}
+    virtual ~TimeFactory();
     virtual base::Time TimeNow() = 0;
   };
 
@@ -61,7 +61,7 @@ class TabRestoreService : public BaseSessionService {
   struct Entry {
     Entry();
     explicit Entry(Type type);
-    virtual ~Entry() {}
+    virtual ~Entry();
 
     // Unique id for this entry. The id is guaranteed to be unique for a
     // session.
@@ -82,6 +82,7 @@ class TabRestoreService : public BaseSessionService {
   // Represents a previously open tab.
   struct Tab : public Entry {
     Tab();
+    virtual ~Tab();
 
     bool has_browser() const { return browser_id > 0; }
 
@@ -102,12 +103,13 @@ class TabRestoreService : public BaseSessionService {
     bool pinned;
 
     // If non-empty gives the id of the extension for the tab.
-    std::string app_extension_id;
+    std::string extension_app_id;
   };
 
   // Represents a previously open window.
   struct Window : public Entry {
     Window();
+    virtual ~Window();
 
     // The tabs that comprised the window, in order.
     std::vector<Tab> tabs;
@@ -147,7 +149,7 @@ class TabRestoreService : public BaseSessionService {
 
   // Returns the entries, ordered with most recently closed entries at the
   // front.
-  const Entries& entries() const { return entries_; }
+  virtual const Entries& entries() const;
 
   // Restores the most recently closed entry. Does nothing if there are no
   // entries to restore. If the most recently restored entry is a tab, it is
@@ -172,6 +174,8 @@ class TabRestoreService : public BaseSessionService {
  protected:
   virtual void Save();
 
+  virtual ~TabRestoreService();
+
  private:
   // Used to indicate what has loaded.
   enum LoadState {
@@ -191,8 +195,6 @@ class TabRestoreService : public BaseSessionService {
     LOADED_LAST_SESSION  = 1 << 4
   };
 
-  virtual ~TabRestoreService();
-
   // Populates the tab's navigations from the NavigationController, and its
   // browser_id and tabstrip_index from the browser.
   void PopulateTab(Tab* tab,
@@ -211,7 +213,10 @@ class TabRestoreService : public BaseSessionService {
   // Prunes entries_ to contain only kMaxEntries and invokes NotifyTabsChanged.
   void PruneAndNotify();
 
-  // Returns an iterator into entries_ whose id matches |id|.
+  // Returns an iterator into entries_ whose id matches |id|. If |id| identifies
+  // a Window, then its iterator position will be returned. If it identifies a
+  // tab, then the iterator position of the Window in which the Tab resides is
+  // returned.
   Entries::iterator GetEntryIteratorById(SessionID::id_type id);
 
   // Schedules the commands for a window close.
@@ -253,6 +258,14 @@ class TabRestoreService : public BaseSessionService {
   void CreateEntriesFromCommands(
       scoped_refptr<InternalGetCommandsRequest> request,
       std::vector<Entry*>* loaded_entries);
+
+  // This is a helper function for RestoreEntryById() for restoring a single
+  // tab. If |replace_existing_tab| is true, the newly created tab replaces the
+  // selected tab in |browser|. If |browser| is NULL, this creates a new window
+  // for the entry. This returns the Browser into which the tab was restored.
+  Browser* RestoreTab(const Tab& tab,
+                      Browser* browser,
+                      bool replace_existing_tab);
 
   // Returns true if |tab| has more than one navigation. If |tab| has more
   // than one navigation |tab->current_navigation_index| is constrained based

@@ -16,7 +16,7 @@
 
 class ProfileSyncServiceMock : public ProfileSyncService {
  public:
-  ProfileSyncServiceMock() : ProfileSyncService(NULL, NULL, false) {}
+  ProfileSyncServiceMock() {}
   virtual ~ProfileSyncServiceMock() {}
 
   MOCK_METHOD0(EnableForUser, void());
@@ -28,10 +28,11 @@ class ProfileSyncServiceMock : public ProfileSyncService {
                void(const std::string& username,
                     const std::string& password,
                     const std::string& captcha));
-  MOCK_METHOD0(OnUserAcceptedMergeAndSync, void());
   MOCK_METHOD0(OnUserCancelledDialog, void());
   MOCK_CONST_METHOD0(GetAuthenticatedUsername, string16());
-  MOCK_METHOD0(OnUnrecoverableError, void());
+  MOCK_METHOD2(OnUnrecoverableError,
+               void(const tracked_objects::Location& location,
+               const std::string& message));
   MOCK_METHOD2(ActivateDataType,
                void(browser_sync::DataTypeController* data_type_controller,
                     browser_sync::ChangeProcessor* change_processor));

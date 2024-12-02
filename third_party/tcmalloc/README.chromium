@@ -1,10 +1,9 @@
+Name: tcmalloc
+URL: http://google-perftools.googlecode.com/
+
 This contains Chromium's locally patched copy of tcmalloc.
 
 Contents:
-
-  README.chromium
-
-    This file you're looking at right now.
 
   chromium/
 
@@ -23,10 +22,10 @@ Contents:
 
     The current revision is:
 
-      Last Changed Rev: 77
-      Last Changed Date: 2009-10-27 10:30:52 -0700 (Tue, 27 Oct 2009)
+      Last Changed Rev: 93
+      Last Changed Date: 2010-04-22 21:29:02 +0400 (Thu, 22 Apr 2010)
 
-    
+
 
 HOWTOs:
 
@@ -52,7 +51,7 @@ HOWTOs:
         "diff -q -r" output from above)
 
     5)  Create the CL, upload, check it in:
-    
+
         $ gcl change CL
         $ gcl upload CL
         $ gcl commit CL
@@ -69,7 +68,7 @@ HOWTOs:
     2)  Resolve any conflicts
 
     3)  Create the CL, upload, check in:
-    
+
         $ gcl change CL
         $ gcl upload CL
         $ gcl commit CL

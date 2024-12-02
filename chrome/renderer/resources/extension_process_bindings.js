@@ -18,11 +18,22 @@ var chrome = chrome || {};
   native function GetPopupParentWindow();
   native function GetPopupView();
   native function SetExtensionActionIcon();
+  native function IsExtensionProcess();
+
+  var chromeHidden = GetChromeHidden();
+
+  // These bindings are for the extension process only. Since a chrome-extension
+  // URL can be loaded in an iframe of a regular renderer, we check here to
+  // ensure we don't expose the APIs in that case.
+  if (!IsExtensionProcess()) {
+    chromeHidden.onLoad.addListener(function (extensionId) {
+      chrome.initExtension(extensionId, false);
+    });
+    return;
+  }
 
   if (!chrome)
     chrome = {};
-
-  var chromeHidden = GetChromeHidden();
 
   // Validate arguments.
   chromeHidden.validationTypes = [];
@@ -148,16 +159,9 @@ var chrome = chrome || {};
       --argCount;
     }
 
-    // Calls with one argument expect singular argument. Calls with multiple
-    // expect a list.
-    if (argCount == 1) {
-      request.args = args[0];
-    }
-    if (argCount > 1) {
-      request.args = [];
-      for (var k = 0; k < argCount; k++) {
-        request.args[k] = args[k];
-      }
+    request.args = [];
+    for (var k = 0; k < argCount; k++) {
+      request.args[k] = args[k];
     }
 
     return request;
@@ -201,32 +205,23 @@ var chrome = chrome || {};
   // Returns the absolute position of the given element relative to the hosting
   // browser frame.
   function findAbsolutePosition(domElement) {
-    var curleft = curtop = 0;
-    var parentNode = domElement.parentNode
+    var left = domElement.offsetLeft;
+    var top = domElement.offsetTop;
 
     // Ascend through the parent hierarchy, taking into account object nesting
     // and scoll positions.
-    if (domElement.offsetParent) {
-      do {
-        if (domElement.offsetLeft) curleft += domElement.offsetLeft;
-        if (domElement.offsetTop) curtop += domElement.offsetTop;
+    for (var parentElement = domElement.offsetParent; parentElement;
+         parentElement = parentElement.offsetParent) {
+      left += parentElement.offsetLeft;
+      top += parentElement.offsetTop;
 
-        if (domElement.scrollLeft) curleft -= domElement.scrollLeft;
-        if (domElement.scrollTop) curtop -= domElement.scrollTop;
-
-        if (parentNode != domElement.offsetParent) {
-          while(parentNode != null && parentNode != domElement.offsetParent) {
-            if (parentNode.scrollLeft) curleft -= parentNode.scrollLeft;
-            if (parentNode.scrollTop) curtop -= parentNode.scrollTop;
-            parentNode = parentNode.parentNode;
-          }
-        }
-      } while ((domElement = domElement.offsetParent) != null);
+      left -= parentElement.scrollLeft;
+      top -= parentElement.scrollTop;
     }
 
     return {
-      top: curtop,
-      left: curleft
+      top: top,
+      left: left
     };
   }
 
@@ -251,18 +246,6 @@ var chrome = chrome || {};
       // Setup events for each extension_id/page_action_id string we find.
       chrome.pageActions[pageActions[i]] = new chrome.Event(oldStyleEventName);
     }
-
-    // Note this is singular.
-    var eventName = "pageAction/" + extensionId;
-    chrome.pageAction = chrome.pageAction || {};
-    chrome.pageAction.onClicked = new chrome.Event(eventName);
-  }
-
-  // Browser action events send {windowpId}.
-  function setupBrowserActionEvent(extensionId) {
-    var eventName = "browserAction/" + extensionId;
-    chrome.browserAction = chrome.browserAction || {};
-    chrome.browserAction.onClicked = new chrome.Event(eventName);
   }
 
   function setupToolstripEvents(renderViewId) {
@@ -280,22 +263,36 @@ var chrome = chrome || {};
   }
 
   function setupHiddenContextMenuEvent(extensionId) {
-    var eventName = "contextMenu/" + extensionId;
-    chromeHidden.contextMenuEvent = new chrome.Event(eventName);
-    chromeHidden.contextMenuHandlers = {};
-    chromeHidden.contextMenuEvent.addListener(function() {
-      var menuItemId = arguments[0].menuItemId;
-      var onclick = chromeHidden.contextMenuHandlers[menuItemId];
-      if (onclick) {
-        onclick.apply(onclick, arguments);
+    chromeHidden.contextMenus = {};
+    chromeHidden.contextMenus.nextId = 1;
+    chromeHidden.contextMenus.handlers = {};
+    var eventName = "contextMenus/" + extensionId;
+    chromeHidden.contextMenus.event = new chrome.Event(eventName);
+    chromeHidden.contextMenus.ensureListenerSetup = function() {
+      if (chromeHidden.contextMenus.listening) {
+        return;
       }
+      chromeHidden.contextMenus.listening = true;
+      chromeHidden.contextMenus.event.addListener(function() {
+        // An extension context menu item has been clicked on - fire the onclick
+        // if there is one.
+        var id = arguments[0].menuItemId;
+        var onclick = chromeHidden.contextMenus.handlers[id];
+        if (onclick) {
+          onclick.apply(null, arguments);
+        }
+      });
+    };
+  }
 
-      var parentMenuItemId = arguments[0].parentMenuItemId;
-      var parentOnclick = chromeHidden.contextMenuHandlers[parentMenuItemId];
-      if (parentOnclick) {
-        parentOnclick.apply(parentOnclick, arguments);
+  function setupOmniboxEvents(extensionId) {
+    chrome.experimental.omnibox.onInputChanged.dispatch =
+        function(text, requestId) {
+      var suggestCallback = function(suggestions) {
+        chrome.experimental.omnibox.sendSuggestions(requestId, suggestions);
       }
-    });
+      chrome.Event.prototype.dispatch.apply(this, [text, suggestCallback]);
+    };
   }
 
   chromeHidden.onLoad.addListener(function (extensionId) {
@@ -384,11 +381,35 @@ var chrome = chrome || {};
             return;
 
           var eventName = apiDef.namespace + "." + eventDef.name;
+          if (eventDef.perExtensionEvent)
+            eventName = eventName + "/" + extensionId;
           module[eventDef.name] = new chrome.Event(eventName,
               eventDef.parameters);
         });
       }
 
+
+      // Parse any values defined for properties.
+      if (apiDef.properties) {
+        for (var prop in apiDef.properties) {
+          if (!apiDef.properties.hasOwnProperty(prop))
+            continue;
+
+          var property = apiDef.properties[prop];
+          if (property.value) {
+            var value = property.value;
+            if (property.type === 'integer') {
+              value = parseInt(value);
+            } else if (property.type === 'boolean') {
+              value = value === "true";
+            } else if (property.type !== 'string') {
+              throw "NOT IMPLEMENTED (extension_api.json error): Cannot " +
+                  "parse values for type \"" + property.type + "\"";
+            }
+            module[prop] = value;
+          }
+        }
+      }
 
       // getTabContentses is retained for backwards compatibility
       // See http://crbug.com/21433
@@ -560,7 +581,8 @@ var chrome = chrome || {};
           delete details.path;
           details.imageData = canvas_context.getImageData(0, 0, canvas.width,
                                                           canvas.height);
-          sendCustomRequest(SetExtensionActionIcon, name, [details], parameters);
+          sendCustomRequest(SetExtensionActionIcon, name, [details],
+                            parameters);
         }
         img.src = details.path;
       } else {
@@ -579,26 +601,58 @@ var chrome = chrome || {};
           details, this.name, this.definition.parameters, "page action");
     };
 
-    apiFunctions["experimental.contextMenu.create"].customCallback =
+    apiFunctions["contextMenus.create"].handleRequest =
+        function() {
+      var args = arguments;
+      var id = chromeHidden.contextMenus.nextId++;
+      args[0].generatedId = id;
+      sendRequest(this.name, args, this.definition.parameters,
+                  this.customCallback);
+      return id;
+    };
+
+    apiFunctions["contextMenus.create"].customCallback =
         function(name, request, response) {
-      if (chrome.extension.lastError || !response) {
+      if (chrome.extension.lastError) {
         return;
       }
 
+      var id = request.args[0].generatedId;
+
       // Set up the onclick handler if we were passed one in the request.
-      if (request.args.onclick) {
-        var menuItemId = chromeHidden.JSON.parse(response);
-        chromeHidden.contextMenuHandlers[menuItemId] = request.args.onclick;
+      var onclick = request.args.length ? request.args[0].onclick : null;
+      if (onclick) {
+        chromeHidden.contextMenus.ensureListenerSetup();
+        chromeHidden.contextMenus.handlers[id] = onclick;
       }
     };
 
-    apiFunctions["experimental.contextMenu.remove"].customCallback =
+    apiFunctions["contextMenus.remove"].customCallback =
         function(name, request, response) {
-      // Remove any onclick handler we had registered for this menu item.
-      if (request.args.length > 0) {
-        var menuItemId = request.args[0];
-        delete chromeHidden.contextMenuHandlers[menuItemId];
+      if (chrome.extension.lastError) {
+        return;
       }
+      var id = request.args[0];
+      delete chromeHidden.contextMenus.handlers[id];
+    };
+
+    apiFunctions["contextMenus.update"].customCallback =
+        function(name, request, response) {
+      if (chrome.extension.lastError) {
+        return;
+      }
+      var id = request.args[0];
+      if (request.args[1].onclick) {
+        chromeHidden.contextMenus.handlers[id] = request.args[1].onclick;
+      }
+    };
+
+    apiFunctions["contextMenus.removeAll"].customCallback =
+        function(name, request, response) {
+      if (chrome.extension.lastError) {
+        return;
+      }
+      chromeHidden.contextMenus.handlers = {};
     };
 
     apiFunctions["tabs.captureVisibleTab"].updateArguments = function() {
@@ -620,15 +674,32 @@ var chrome = chrome || {};
       return newArgs;
     };
 
+    apiFunctions["experimental.omnibox.styleNone"].handleRequest =
+        function(offset) {
+      return {type: "none", offset: offset};
+    }
+    apiFunctions["experimental.omnibox.styleUrl"].handleRequest =
+        function(offset) {
+      return {type: "url", offset: offset};
+    }
+    apiFunctions["experimental.omnibox.styleMatch"].handleRequest =
+        function(offset) {
+      return {type: "match", offset: offset};
+    }
+    apiFunctions["experimental.omnibox.styleDim"].handleRequest =
+        function(offset) {
+      return {type: "dim", offset: offset};
+    }
+
     if (chrome.test) {
       chrome.test.getApiDefinitions = GetExtensionAPIDefinition;
     }
 
-    setupBrowserActionEvent(extensionId);
     setupPageActionEvents(extensionId);
     setupToolstripEvents(GetRenderViewId());
     setupPopupEvents(GetRenderViewId());
     setupHiddenContextMenuEvent(extensionId);
+    setupOmniboxEvents(extensionId);
   });
 
   if (!chrome.experimental)

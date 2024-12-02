@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "app/theme_provider.h"
 #include "base/callback.h"
 #include "base/file_path.h"
+#include "base/histogram.h"
 #include "base/i18n/rtl.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
@@ -20,7 +21,7 @@
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/views/download_shelf_view.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/color_utils.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -211,6 +212,7 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
   dangerous_mode_body_image_set_ = dangerous_mode_body_image_set;
 
   LoadIcon();
+  tooltip_text_ = download_->GetFileName().ToWStringHack();
 
   font_ = ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::BaseFont);
   box_height_ = std::max<int>(2 * kVerticalPadding + font_.height() +
@@ -225,7 +227,7 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
     box_y_ = kVerticalPadding;
 
   gfx::Size size = GetPreferredSize();
-  if (UILayoutIsRightToLeft()) {
+  if (base::i18n::IsRTL()) {
     // Drop down button is glued to the left of the download shelf.
     drop_down_x_left_ = 0;
     drop_down_x_right_ = normal_drop_down_image_set_.top->width();
@@ -240,6 +242,7 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
   drop_hover_animation_.reset(new SlideAnimation(this));
 
   if (download->safety_state() == DownloadItem::DANGEROUS) {
+    tooltip_text_.clear();
     body_state_ = DANGEROUS;
     drop_down_state_ = DANGEROUS;
 
@@ -286,8 +289,7 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
     } else {
       ElideString(rootname, kFileNameMaxLength - extension.length(), &rootname);
       std::wstring filename = rootname + L"." + extension;
-      if (base::i18n::IsRTL())
-        base::i18n::WrapStringWithLTRFormatting(&filename);
+      base::i18n::GetDisplayStringInLTRDirectionality(&filename);
       dangerous_download_label_ = new views::Label(
           l10n_util::GetStringF(IDS_PROMPT_DANGEROUS_DOWNLOAD, filename));
     }
@@ -358,7 +360,7 @@ void DownloadItemView::OnDownloadUpdated(DownloadItem* download) {
       StopDownloadProgress();
       complete_animation_.reset(new SlideAnimation(this));
       complete_animation_->SetSlideDuration(kCompleteAnimationDurationMs);
-      complete_animation_->SetTweenType(SlideAnimation::NONE);
+      complete_animation_->SetTweenType(Tween::LINEAR);
       complete_animation_->Show();
       if (status_text.empty())
         show_status_text_ = false;
@@ -507,14 +509,14 @@ void DownloadItemView::Paint(gfx::Canvas* canvas) {
 
   // Paint the background images.
   int x = kLeftPadding;
-  bool rtl_ui = UILayoutIsRightToLeft();
+  bool rtl_ui = base::i18n::IsRTL();
   if (rtl_ui) {
     // Since we do not have the mirrored images for
     // (hot_)body_image_set->top_left, (hot_)body_image_set->left,
     // (hot_)body_image_set->bottom_left, and drop_down_image_set,
     // for RTL UI, we flip the canvas to draw those images mirrored.
     // Consequently, we do not need to mirror the x-axis of those images.
-    canvas->save();
+    canvas->Save();
     canvas->TranslateInt(width(), 0);
     canvas->ScaleInt(-1, 1);
   }
@@ -535,10 +537,9 @@ void DownloadItemView::Paint(gfx::Canvas* canvas) {
 
   // Overlay our body hot state.
   if (body_hover_animation_->GetCurrentValue() > 0) {
-    canvas->saveLayerAlpha(NULL,
-        static_cast<int>(body_hover_animation_->GetCurrentValue() * 255),
-        SkCanvas::kARGB_NoClipLayer_SaveFlag);
-    canvas->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
+    canvas->SaveLayerAlpha(
+        static_cast<int>(body_hover_animation_->GetCurrentValue() * 255));
+    canvas->AsCanvasSkia()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
 
     int x = kLeftPadding;
     PaintBitmaps(canvas,
@@ -556,10 +557,10 @@ void DownloadItemView::Paint(gfx::Canvas* canvas) {
                  hot_body_image_set_.bottom_right,
                  x, box_y_, box_height_,
                  hot_body_image_set_.top_right->width());
-    canvas->restore();
+    canvas->Restore();
     if (rtl_ui) {
-      canvas->restore();
-      canvas->save();
+      canvas->Restore();
+      canvas->Save();
       // Flip it for drawing drop-down images for RTL locales.
       canvas->TranslateInt(width(), 0);
       canvas->ScaleInt(-1, 1);
@@ -577,17 +578,17 @@ void DownloadItemView::Paint(gfx::Canvas* canvas) {
 
     // Overlay our drop-down hot state.
     if (drop_hover_animation_->GetCurrentValue() > 0) {
-      canvas->saveLayerAlpha(NULL,
-          static_cast<int>(drop_hover_animation_->GetCurrentValue() * 255),
-          SkCanvas::kARGB_NoClipLayer_SaveFlag);
-      canvas->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
+      canvas->SaveLayerAlpha(
+          static_cast<int>(drop_hover_animation_->GetCurrentValue() * 255));
+      canvas->AsCanvasSkia()->drawARGB(0, 255, 255, 255,
+                                       SkXfermode::kClear_Mode);
 
       PaintBitmaps(canvas,
                    drop_down_image_set->top, drop_down_image_set->center,
                    drop_down_image_set->bottom,
                    x, box_y_, box_height_, drop_down_image_set->top->width());
 
-      canvas->restore();
+      canvas->Restore();
     }
   }
 
@@ -595,7 +596,7 @@ void DownloadItemView::Paint(gfx::Canvas* canvas) {
     // Restore the canvas to avoid file name etc. text are drawn flipped.
     // Consequently, the x-axis of following canvas->DrawXXX() method should be
     // mirrored so the text and images are down in the right positions.
-    canvas->restore();
+    canvas->Restore();
   }
 
   // Print the text, left aligned and always print the file extension.
@@ -654,7 +655,7 @@ void DownloadItemView::Paint(gfx::Canvas* canvas) {
                                              download_util::SMALL);
       } else if (download_->state() == DownloadItem::COMPLETE &&
                  complete_animation_.get() &&
-                 complete_animation_->IsAnimating()) {
+                 complete_animation_->is_animating()) {
         download_util::PaintDownloadComplete(canvas, this, 0, 0,
             complete_animation_->GetCurrentValue(),
             download_util::SMALL);
@@ -728,6 +729,7 @@ void DownloadItemView::ClearDangerousMode() {
 
   // We need to load the icon now that the download_ has the real path.
   LoadIcon();
+  tooltip_text_ = download_->GetFileName().ToWStringHack();
 
   // Force the shelf to layout again as our size has changed.
   parent_->Layout();
@@ -781,7 +783,7 @@ bool DownloadItemView::OnMousePressed(const views::MouseEvent& event) {
     return true;
 
   // Stop any completion animation.
-  if (complete_animation_.get() && complete_animation_->IsAnimating())
+  if (complete_animation_.get() && complete_animation_->is_animating())
     complete_animation_->End();
 
   if (event.IsOnlyLeftMouseButton()) {
@@ -808,7 +810,7 @@ bool DownloadItemView::OnMousePressed(const views::MouseEvent& event) {
     // DownloadShelfContextMenu will take care of setting the right anchor for
     // the menu depending on the locale.
     point.set_y(height());
-    if (UILayoutIsRightToLeft())
+    if (base::i18n::IsRTL())
       point.set_x(drop_down_x_right_);
     else
       point.set_x(drop_down_x_left_);
@@ -922,6 +924,15 @@ void DownloadItemView::LoadIcon() {
   IconManager* im = g_browser_process->icon_manager();
   im->LoadIcon(download_->full_path(), IconLoader::SMALL, &icon_consumer_,
                NewCallback(this, &DownloadItemView::OnExtractIconComplete));
+}
+
+bool DownloadItemView::GetTooltipText(const gfx::Point& p,
+                                      std::wstring* tooltip) {
+  if (tooltip_text_.empty())
+    return false;
+
+  tooltip->assign(tooltip_text_);
+  return true;
 }
 
 gfx::Size DownloadItemView::GetButtonSize() {

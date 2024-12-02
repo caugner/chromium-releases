@@ -5,20 +5,25 @@
 #include "chrome/browser/views/info_bubble.h"
 
 #include "base/keyboard_codes.h"
-#include "chrome/browser/views/bubble_border.h"
 #include "chrome/browser/window_sizer.h"
 #include "chrome/common/notification_service.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/color_utils.h"
 #include "gfx/path.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "views/fill_layout.h"
 #include "views/widget/root_view.h"
+#include "views/widget/widget.h"
+#include "views/window/client_view.h"
 #include "views/window/window.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/wm_ipc.h"
+#include "third_party/cros/chromeos_wm_ipc_enums.h"
 #endif
+
+// How long the fade should last for.
+static const int kHideFadeDurationMS = 200;
 
 // Background color of the bubble.
 #if defined(OS_WIN)
@@ -29,105 +34,75 @@ const SkColor InfoBubble::kBackgroundColor =
 const SkColor InfoBubble::kBackgroundColor = SK_ColorWHITE;
 #endif
 
-// BorderContents -------------------------------------------------------------
+void BorderContents::Init() {
+  // Default arrow location.
+  BubbleBorder::ArrowLocation arrow_location = BubbleBorder::TOP_LEFT;
+  if (base::i18n::IsRTL())
+    arrow_location = BubbleBorder::horizontal_mirror(arrow_location);
+  DCHECK(!bubble_border_);
+  bubble_border_ = new BubbleBorder(arrow_location);
+  set_border(bubble_border_);
+  bubble_border_->set_background_color(InfoBubble::kBackgroundColor);
+}
 
-// This is used to paint the border of the InfoBubble.  Windows uses this via
-// BorderWidget (see below), while others can use it directly in the bubble.
-class BorderContents : public views::View {
- public:
-  BorderContents() { }
-
-  // Given the size of the contents and the rect to point at, initializes the
-  // bubble and returns the bounds of both the border
-  // and the contents inside the bubble.
-  // |prefer_arrow_on_right| specifies the preferred location for the arrow
-  // anchor. If the bubble does not fit on the monitor, the arrow location may
-  // changed so it can.
-  //
-  // TODO(pkasting): Maybe this should use mirroring transformations instead,
-  // which would hopefully simplify this code.
-  void InitAndGetBounds(
-      const gfx::Rect& position_relative_to,  // In screen coordinates
-      const gfx::Size& contents_size,
-      bool prefer_arrow_on_right,
-      gfx::Rect* contents_bounds,             // Returned in window coordinates
-      gfx::Rect* window_bounds);              // Returned in screen coordinates
-
- private:
-  virtual ~BorderContents() { }
-
-  // Overridden from View:
-  virtual void Paint(gfx::Canvas* canvas);
-
-  DISALLOW_COPY_AND_ASSIGN(BorderContents);
-};
-
-void BorderContents::InitAndGetBounds(
+void BorderContents::SizeAndGetBounds(
     const gfx::Rect& position_relative_to,
+    BubbleBorder::ArrowLocation arrow_location,
+    bool allow_bubble_offscreen,
     const gfx::Size& contents_size,
-    bool prefer_arrow_on_right,
     gfx::Rect* contents_bounds,
     gfx::Rect* window_bounds) {
-  // Margins between the contents and the inside of the border, in pixels.
-  const int kLeftMargin = 6;
-  const int kTopMargin = 6;
-  const int kRightMargin = 6;
-  const int kBottomMargin = 9;
-
+  if (base::i18n::IsRTL())
+    arrow_location = BubbleBorder::horizontal_mirror(arrow_location);
+  bubble_border_->set_arrow_location(arrow_location);
   // Set the border.
-  BubbleBorder* bubble_border = new BubbleBorder;
-  set_border(bubble_border);
-  bubble_border->set_background_color(InfoBubble::kBackgroundColor);
+  set_border(bubble_border_);
+  bubble_border_->set_background_color(InfoBubble::kBackgroundColor);
 
   // Give the contents a margin.
   gfx::Size local_contents_size(contents_size);
   local_contents_size.Enlarge(kLeftMargin + kRightMargin,
                               kTopMargin + kBottomMargin);
 
-  // Try putting the arrow in its initial location, and calculating the
-  // bounds.
-  BubbleBorder::ArrowLocation arrow_location(prefer_arrow_on_right ?
-      BubbleBorder::TOP_RIGHT : BubbleBorder::TOP_LEFT);
-  bubble_border->set_arrow_location(arrow_location);
+  // Try putting the arrow in its initial location, and calculating the bounds.
   *window_bounds =
-      bubble_border->GetBounds(position_relative_to, local_contents_size);
-
-  // See if those bounds will fit on the monitor.
-  scoped_ptr<WindowSizer::MonitorInfoProvider> monitor_provider(
-      WindowSizer::CreateDefaultMonitorInfoProvider());
-  gfx::Rect monitor_bounds(
-      monitor_provider->GetMonitorWorkAreaMatching(position_relative_to));
-  if (!monitor_bounds.IsEmpty() && !monitor_bounds.Contains(*window_bounds)) {
-    // The bounds don't fit.  Move the arrow to try and improve things.
-    bool arrow_on_left = prefer_arrow_on_right ?
-        (window_bounds->x() < monitor_bounds.x()) :
-        (window_bounds->right() <= monitor_bounds.right());
-    if (window_bounds->bottom() > monitor_bounds.bottom()) {
-      arrow_location = arrow_on_left ?
-          BubbleBorder::BOTTOM_LEFT : BubbleBorder::BOTTOM_RIGHT;
-    } else {
-      arrow_location = arrow_on_left ?
-          BubbleBorder::TOP_LEFT : BubbleBorder::TOP_RIGHT;
+      bubble_border_->GetBounds(position_relative_to, local_contents_size);
+  if (!allow_bubble_offscreen) {
+    gfx::Rect monitor_bounds = GetMonitorBounds(position_relative_to);
+    if (!monitor_bounds.IsEmpty()) {
+      // Try to resize vertically if this does not fit on the screen.
+      MirrorArrowIfOffScreen(true,  // |vertical|.
+                             position_relative_to, monitor_bounds,
+                             local_contents_size, &arrow_location,
+                             window_bounds);
+      // Then try to resize horizontally if it still does not fit on the screen.
+      MirrorArrowIfOffScreen(false,  // |vertical|.
+                             position_relative_to, monitor_bounds,
+                             local_contents_size, &arrow_location,
+                             window_bounds);
     }
-    bubble_border->set_arrow_location(arrow_location);
-
-    // Now get the recalculated bounds.
-    *window_bounds = bubble_border->GetBounds(position_relative_to,
-                                              local_contents_size);
   }
 
   // Calculate the bounds of the contained contents (in window coordinates) by
   // subtracting the border dimensions and margin amounts.
   *contents_bounds = gfx::Rect(gfx::Point(), window_bounds->size());
   gfx::Insets insets;
-  bubble_border->GetInsets(&insets);
+  bubble_border_->GetInsets(&insets);
   contents_bounds->Inset(insets.left() + kLeftMargin, insets.top() + kTopMargin,
       insets.right() + kRightMargin, insets.bottom() + kBottomMargin);
+}
+
+gfx::Rect BorderContents::GetMonitorBounds(const gfx::Rect& rect) {
+  scoped_ptr<WindowSizer::MonitorInfoProvider> monitor_provider(
+      WindowSizer::CreateDefaultMonitorInfoProvider());
+  return monitor_provider->GetMonitorWorkAreaMatching(rect);
 }
 
 void BorderContents::Paint(gfx::Canvas* canvas) {
   // The border of this view creates an anti-aliased round-rect region for the
   // contents, which we need to fill with the background color.
+  // NOTE: This doesn't handle an arrow location of "NONE", which has square top
+  // corners.
   SkPaint paint;
   paint.setAntiAlias(true);
   paint.setStyle(SkPaint::kFill_Style);
@@ -139,7 +114,7 @@ void BorderContents::Paint(gfx::Canvas* canvas) {
            SkIntToScalar(bounds.right()), SkIntToScalar(bounds.bottom()));
   SkScalar radius = SkIntToScalar(BubbleBorder::GetCornerRadius());
   path.addRoundRect(rect, radius, radius);
-  canvas->drawPath(path, paint);
+  canvas->AsCanvasSkia()->drawPath(path, paint);
 
   // Now we paint the border, so it will be alpha-blended atop the contents.
   // This looks slightly better in the corners than drawing the contents atop
@@ -147,43 +122,104 @@ void BorderContents::Paint(gfx::Canvas* canvas) {
   PaintBorder(canvas);
 }
 
+void BorderContents::MirrorArrowIfOffScreen(
+    bool vertical,
+    const gfx::Rect& position_relative_to,
+    const gfx::Rect& monitor_bounds,
+    const gfx::Size& local_contents_size,
+    BubbleBorder::ArrowLocation* arrow_location,
+    gfx::Rect* window_bounds) {
+  // If the bounds don't fit, move the arrow to its mirrored position to see if
+  // it improves things.
+  gfx::Insets offscreen_insets;
+  if (ComputeOffScreenInsets(monitor_bounds, *window_bounds,
+                             &offscreen_insets) &&
+      GetInsetsLength(offscreen_insets, vertical) > 0) {
+    BubbleBorder::ArrowLocation original_arrow_location = *arrow_location;
+    *arrow_location =
+        vertical ? BubbleBorder::vertical_mirror(*arrow_location) :
+                   BubbleBorder::horizontal_mirror(*arrow_location);
+
+    // Change the arrow and get the new bounds.
+    bubble_border_->set_arrow_location(*arrow_location);
+    *window_bounds = bubble_border_->GetBounds(position_relative_to,
+                                               local_contents_size);
+    gfx::Insets new_offscreen_insets;
+    // If there is more of the window offscreen, we'll keep the old arrow.
+    if (ComputeOffScreenInsets(monitor_bounds, *window_bounds,
+                               &new_offscreen_insets) &&
+        GetInsetsLength(new_offscreen_insets, vertical) >=
+            GetInsetsLength(offscreen_insets, vertical)) {
+      *arrow_location = original_arrow_location;
+      bubble_border_->set_arrow_location(*arrow_location);
+      *window_bounds = bubble_border_->GetBounds(position_relative_to,
+                                                 local_contents_size);
+    }
+  }
+}
+
+// static
+bool BorderContents::ComputeOffScreenInsets(const gfx::Rect& monitor_bounds,
+                                            const gfx::Rect& window_bounds,
+                                            gfx::Insets* offscreen_insets) {
+  if (monitor_bounds.Contains(window_bounds))
+    return false;
+
+  if (!offscreen_insets)
+    return true;
+
+  int top = 0;
+  int left = 0;
+  int bottom = 0;
+  int right = 0;
+
+  if (window_bounds.y() < monitor_bounds.y())
+    top = monitor_bounds.y() - window_bounds.y();
+  if (window_bounds.x() < monitor_bounds.x())
+    left = monitor_bounds.x() - window_bounds.x();
+  if (window_bounds.bottom() > monitor_bounds.bottom())
+    bottom = window_bounds.bottom() - monitor_bounds.bottom();
+  if (window_bounds.right() > monitor_bounds.right())
+    right = window_bounds.right() - monitor_bounds.right();
+
+  offscreen_insets->Set(top, left, bottom, right);
+  return true;
+}
+
+// static
+int BorderContents::GetInsetsLength(const gfx::Insets& insets, bool vertical) {
+  return vertical ? insets.height() : insets.width();
+}
+
 #if defined(OS_WIN)
 // BorderWidget ---------------------------------------------------------------
 
-BorderWidget::BorderWidget() {
-  set_delete_on_destroy(false);  // Our owner will free us manually.
+BorderWidget::BorderWidget() : border_contents_(NULL) {
   set_window_style(WS_POPUP);
   set_window_ex_style(WS_EX_TOOLWINDOW | WS_EX_LAYERED);
 }
 
-gfx::Rect BorderWidget::InitAndGetBounds(
-    HWND owner,
-    const gfx::Rect& position_relative_to,
-    const gfx::Size& contents_size,
-    bool prefer_arrow_on_right) {
-  // Set up the border view and ask it to calculate our bounds (and our
-  // contents').
-  BorderContents* border_contents = new BorderContents;
-  gfx::Rect contents_bounds, window_bounds;
-  border_contents->InitAndGetBounds(position_relative_to, contents_size,
-                                    prefer_arrow_on_right, &contents_bounds,
-                                    &window_bounds);
-
-  // Initialize ourselves.
-  WidgetWin::Init(GetAncestor(owner, GA_ROOT), window_bounds);
-  SetContentsView(border_contents);
+void BorderWidget::Init(BorderContents* border_contents, HWND owner) {
+  DCHECK(!border_contents_);
+  border_contents_ = border_contents;
+  border_contents_->Init();
+  WidgetWin::Init(owner, gfx::Rect());
+  SetContentsView(border_contents_);
   SetWindowPos(owner, 0, 0, 0, 0,
                SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOREDRAW);
+}
 
-  // Chop a hole out of our region to show the contents through.
-  // CreateRectRgn() expects (left, top, right, bottom) in window coordinates.
-  HRGN contents_region = CreateRectRgn(contents_bounds.x(), contents_bounds.y(),
-      contents_bounds.right(), contents_bounds.bottom());
-  HRGN window_region = CreateRectRgn(0, 0, window_bounds.width(),
-                                     window_bounds.height());
-  CombineRgn(window_region, window_region, contents_region, RGN_XOR);
-  DeleteObject(contents_region);
-  SetWindowRgn(window_region, true);
+gfx::Rect BorderWidget::SizeAndGetBounds(
+    const gfx::Rect& position_relative_to,
+    BubbleBorder::ArrowLocation arrow_location,
+    const gfx::Size& contents_size) {
+  // Ask the border view to calculate our bounds (and our contents').
+  gfx::Rect contents_bounds;
+  gfx::Rect window_bounds;
+  border_contents_->SizeAndGetBounds(position_relative_to, arrow_location,
+                                     false, contents_size, &contents_bounds,
+                                     &window_bounds);
+  SetBounds(window_bounds);
 
   // Return |contents_bounds| in screen coordinates.
   contents_bounds.Offset(window_bounds.origin());
@@ -201,50 +237,144 @@ LRESULT BorderWidget::OnMouseActivate(HWND window,
 // InfoBubble -----------------------------------------------------------------
 
 // static
-InfoBubble* InfoBubble::Show(views::Window* parent,
+InfoBubble* InfoBubble::Show(views::Widget* parent,
                              const gfx::Rect& position_relative_to,
+                             BubbleBorder::ArrowLocation arrow_location,
                              views::View* contents,
                              InfoBubbleDelegate* delegate) {
   InfoBubble* window = new InfoBubble;
-  window->Init(parent, position_relative_to, contents, delegate);
+  window->Init(parent, position_relative_to, arrow_location,
+               contents, delegate);
   return window;
 }
 
+#if defined(OS_CHROMEOS)
+// static
+InfoBubble* InfoBubble::ShowFocusless(
+    views::Widget* parent,
+    const gfx::Rect& position_relative_to,
+    BubbleBorder::ArrowLocation arrow_location,
+    views::View* contents,
+    InfoBubbleDelegate* delegate) {
+  InfoBubble* window = new InfoBubble(views::WidgetGtk::TYPE_POPUP);
+  window->Init(parent, position_relative_to, arrow_location,
+               contents, delegate);
+  return window;
+}
+#endif
+
 void InfoBubble::Close() {
-  Close(false);
+  if (show_status_ != kOpen)
+    return;
+
+  show_status_ = kClosing;
+
+  if (fade_away_on_close_)
+    FadeOut();
+  else
+    DoClose(false);
+}
+
+void InfoBubble::AnimationEnded(const Animation* animation) {
+  if (static_cast<int>(animation_->GetCurrentValue()) == 0) {
+    // When fading out we just need to close the bubble at the end
+    DoClose(false);
+  } else {
+#if defined(OS_WIN)
+    // When fading in we need to remove the layered window style flag, since
+    // that style prevents some bubble content from working properly.
+    SetWindowLong(GWL_EXSTYLE, GetWindowLong(GWL_EXSTYLE) & ~WS_EX_LAYERED);
+#endif
+  }
+}
+
+void InfoBubble::AnimationProgressed(const Animation* animation) {
+#if defined(OS_WIN)
+  // Set the opacity for the main contents window.
+  unsigned char opacity = static_cast<unsigned char>(
+      animation_->GetCurrentValue() * 255);
+  SetLayeredWindowAttributes(GetNativeView(), 0,
+      static_cast<byte>(opacity), LWA_ALPHA);
+  contents_->SchedulePaint();
+
+  // Also fade in/out the bubble border window.
+  border_->SetOpacity(opacity);
+  border_->border_contents()->SchedulePaint();
+#else
+  NOTIMPLEMENTED();
+#endif
 }
 
 InfoBubble::InfoBubble()
     :
 #if defined(OS_LINUX)
       WidgetGtk(TYPE_WINDOW),
+      border_contents_(NULL),
+#elif defined(OS_WIN)
+      border_(NULL),
 #endif
       delegate_(NULL),
-      parent_(NULL),
-      closed_(false) {
+      show_status_(kOpen),
+      fade_away_on_close_(false) {
 }
 
-void InfoBubble::Init(views::Window* parent,
+#if defined(OS_CHROMEOS)
+InfoBubble::InfoBubble(views::WidgetGtk::Type type)
+    : WidgetGtk(type),
+      border_contents_(NULL),
+      delegate_(NULL),
+      show_status_(kOpen),
+      fade_away_on_close_(false) {
+}
+#endif
+
+void InfoBubble::Init(views::Widget* parent,
                       const gfx::Rect& position_relative_to,
+                      BubbleBorder::ArrowLocation arrow_location,
                       views::View* contents,
                       InfoBubbleDelegate* delegate) {
-  parent_ = parent;
   delegate_ = delegate;
+  position_relative_to_ = position_relative_to;
+  arrow_location_ = arrow_location;
+  contents_ = contents;
 
   // Create the main window.
 #if defined(OS_WIN)
-  parent_->DisableInactiveRendering();
+  views::Window* parent_window = parent->GetWindow();
+  if (parent_window)
+    parent_window->DisableInactiveRendering();
   set_window_style(WS_POPUP | WS_CLIPCHILDREN);
-  set_window_ex_style(WS_EX_TOOLWINDOW);
-  WidgetWin::Init(parent->GetNativeWindow(), gfx::Rect());
+  int extended_style = WS_EX_TOOLWINDOW;
+  // During FadeIn we need to turn on the layered window style to deal with
+  // transparency. This flag needs to be reset after fading in is complete.
+  bool fade_in = delegate_ && delegate_->FadeInOnShow();
+  if (fade_in)
+    extended_style |= WS_EX_LAYERED;
+  set_window_ex_style(extended_style);
+
+  DCHECK(!border_);
+  border_ = new BorderWidget();
+
+  if (fade_in) {
+    border_->SetOpacity(0);
+    SetOpacity(0);
+  }
+
+  border_->Init(CreateBorderContents(), parent->GetNativeView());
+
+  // We make the BorderWidget the owner of the InfoBubble HWND, so that the
+  // latter is displayed on top of the former.
+  WidgetWin::Init(border_->GetNativeView(), gfx::Rect());
+
+  SetWindowText(GetNativeView(), delegate_->accessible_name().c_str());
 #elif defined(OS_LINUX)
   MakeTransparent();
   make_transient_to_parent();
-  WidgetGtk::Init(GTK_WIDGET(parent->GetNativeWindow()), gfx::Rect());
+  WidgetGtk::InitWithWidget(parent, gfx::Rect());
 #if defined(OS_CHROMEOS)
   chromeos::WmIpc::instance()->SetWindowType(
       GetNativeView(),
-      chromeos::WmIpc::WINDOW_TYPE_CHROME_INFO_BUBBLE,
+      chromeos::WM_IPC_WINDOW_CHROME_INFO_BUBBLE,
       NULL);
 #endif
 #endif
@@ -264,15 +394,11 @@ void InfoBubble::Init(views::Window* parent,
   // Calculate and set the bounds for all windows and views.
   gfx::Rect window_bounds;
 
-  bool prefer_arrow_on_right = delegate &&
-      (contents->UILayoutIsRightToLeft() == delegate->PreferOriginSideAnchor());
-
 #if defined(OS_WIN)
-  border_.reset(new BorderWidget);
   // Initialize and position the border window.
-  window_bounds = border_->InitAndGetBounds(GetNativeView(),
-      position_relative_to, contents->GetPreferredSize(),
-      prefer_arrow_on_right);
+  window_bounds = border_->SizeAndGetBounds(position_relative_to,
+                                            arrow_location,
+                                            contents->GetPreferredSize());
 
   // Make |contents| take up the entire contents view.
   contents_view->SetLayoutManager(new views::FillLayout);
@@ -282,17 +408,18 @@ void InfoBubble::Init(views::Window* parent,
       views::Background::CreateSolidBackground(kBackgroundColor));
 #else
   // Create a view to paint the border and background.
-  BorderContents* border_contents = new BorderContents;
+  border_contents_ = CreateBorderContents();
+  border_contents_->Init();
   gfx::Rect contents_bounds;
-  border_contents->InitAndGetBounds(position_relative_to,
-      contents->GetPreferredSize(), prefer_arrow_on_right,
+  border_contents_->SizeAndGetBounds(position_relative_to,
+      arrow_location, false, contents->GetPreferredSize(),
       &contents_bounds, &window_bounds);
   // This new view must be added before |contents| so it will paint under it.
-  contents_view->AddChildView(0, border_contents);
+  contents_view->AddChildView(0, border_contents_);
 
   // |contents_view| has no layout manager, so we have to explicitly position
   // its children.
-  border_contents->SetBounds(gfx::Rect(gfx::Point(), window_bounds.size()));
+  border_contents_->SetBounds(gfx::Rect(gfx::Point(), window_bounds.size()));
   contents->SetBounds(contents_bounds);
 #endif
   SetBounds(window_bounds);
@@ -310,18 +437,45 @@ void InfoBubble::Init(views::Window* parent,
 #if defined(OS_WIN)
   border_->ShowWindow(SW_SHOW);
   ShowWindow(SW_SHOW);
+  if (fade_in)
+    FadeIn();
 #elif defined(OS_LINUX)
   views::WidgetGtk::Show();
 #endif
 }
 
+BorderContents* InfoBubble::CreateBorderContents() {
+  return new BorderContents();
+}
+
+void InfoBubble::SizeToContents() {
+  gfx::Rect window_bounds;
+
+#if defined(OS_WIN)
+  // Initialize and position the border window.
+  window_bounds = border_->SizeAndGetBounds(position_relative_to_,
+                                            arrow_location_,
+                                            contents_->GetPreferredSize());
+#else
+  gfx::Rect contents_bounds;
+  border_contents_->SizeAndGetBounds(position_relative_to_,
+      arrow_location_, false, contents_->GetPreferredSize(),
+      &contents_bounds, &window_bounds);
+  // |contents_view| has no layout manager, so we have to explicitly position
+  // its children.
+  border_contents_->SetBounds(gfx::Rect(gfx::Point(), window_bounds.size()));
+  contents_->SetBounds(contents_bounds);
+#endif
+  SetBounds(window_bounds);
+}
+
 #if defined(OS_WIN)
 void InfoBubble::OnActivate(UINT action, BOOL minimized, HWND window) {
   // The popup should close when it is deactivated.
-  if (action == WA_INACTIVE && !closed_) {
+  if (action == WA_INACTIVE) {
     Close();
   } else if (action == WA_ACTIVE) {
-    DCHECK(GetRootView()->GetChildViewCount() > 0);
+    DCHECK_GT(GetRootView()->GetChildViewCount(), 0);
     GetRootView()->GetChildViewAt(0)->RequestFocus();
   }
 }
@@ -332,13 +486,15 @@ void InfoBubble::IsActiveChanged() {
 }
 #endif
 
-void InfoBubble::Close(bool closed_by_escape) {
-  if (closed_)
+void InfoBubble::DoClose(bool closed_by_escape) {
+  if (show_status_ == kClosed)
     return;
 
+  GetFocusManager()->UnregisterAccelerator(
+      views::Accelerator(base::VKEY_ESCAPE, false, false, false), this);
   if (delegate_)
     delegate_->InfoBubbleClosing(this, closed_by_escape);
-  closed_ = true;
+  show_status_ = kClosed;
 #if defined(OS_WIN)
   border_->Close();
   WidgetWin::Close();
@@ -347,9 +503,39 @@ void InfoBubble::Close(bool closed_by_escape) {
 #endif
 }
 
+void InfoBubble::FadeIn() {
+  Fade(true);  // |fade_in|.
+}
+
+void InfoBubble::FadeOut() {
+#if defined(OS_WIN)
+  // The contents window cannot have the layered flag on by default, since its
+  // content doesn't always work inside a layered window, but when animating it
+  // is ok to set that style on the window for the purpose of fading it out.
+  SetWindowLong(GWL_EXSTYLE, GetWindowLong(GWL_EXSTYLE) | WS_EX_LAYERED);
+  // This must be the very next call, otherwise we can get flicker on close.
+  SetLayeredWindowAttributes(GetNativeView(), 0,
+      static_cast<byte>(255), LWA_ALPHA);
+#endif
+
+  Fade(false);  // |fade_in|.
+}
+
+void InfoBubble::Fade(bool fade_in) {
+  animation_.reset(new SlideAnimation(this));
+  animation_->SetSlideDuration(kHideFadeDurationMS);
+  animation_->SetTweenType(Tween::LINEAR);
+
+  animation_->Reset(fade_in ? 0.0 : 1.0);
+  if (fade_in)
+    animation_->Show();
+  else
+    animation_->Hide();
+}
+
 bool InfoBubble::AcceleratorPressed(const views::Accelerator& accelerator) {
   if (!delegate_ || delegate_->CloseOnEscape()) {
-    Close(true);
+    DoClose(true);
     return true;
   }
   return false;

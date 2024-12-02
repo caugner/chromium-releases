@@ -10,8 +10,8 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/net/url_fetcher.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/url_fetcher.h"
 #include "chrome/common/pref_names.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_flags.h"
@@ -50,7 +50,7 @@ class WebResourceService::WebResourceFetcher
       web_resource_service_->in_fetch_ = true;
 
     url_fetcher_.reset(new URLFetcher(GURL(
-        WideToUTF8(web_resource_service_->web_resource_server_)),
+        web_resource_service_->web_resource_server_),
         URLFetcher::GET, this));
     // Do not let url fetcher affect existing state in profile (by setting
     // cookies, for example.
@@ -179,13 +179,13 @@ class WebResourceService::UnpackerClient
 };
 
 // TODO(mirandac): replace these servers tomorrow!
-const wchar_t* WebResourceService::kDefaultResourceServer =
+const char* WebResourceService::kDefaultResourceServer =
 #if defined(OS_MACOSX)
-  L"https://clients2.google.com/tools/service/npredir?r=chrometips_mac&hl=";
+  "https://clients2.google.com/tools/service/npredir?r=chrometips_mac&hl=";
 #elif defined(OS_LINUX)
-  L"https://clients2.google.com/tools/service/npredir?r=chrometips_linux&hl=";
+  "https://clients2.google.com/tools/service/npredir?r=chrometips_linux&hl=";
 #else
-  L"https://clients2.google.com/tools/service/npredir?r=chrometips_win&hl=";
+  "https://clients2.google.com/tools/service/npredir?r=chrometips_win&hl=";
 #endif
 
 const char* WebResourceService::kResourceDirectoryName =
@@ -203,8 +203,8 @@ WebResourceService::~WebResourceService() { }
 void WebResourceService::Init() {
   resource_dispatcher_host_ = g_browser_process->resource_dispatcher_host();
   web_resource_fetcher_ = new WebResourceFetcher(this);
-  prefs_->RegisterStringPref(prefs::kNTPTipsCacheUpdate, L"0");
-  std::wstring locale = ASCIIToWide(g_browser_process->GetApplicationLocale());
+  prefs_->RegisterStringPref(prefs::kNTPTipsCacheUpdate, "0");
+  std::string locale = g_browser_process->GetApplicationLocale();
 
   if (prefs_->HasPrefPath(prefs::kNTPTipsServer)) {
      web_resource_server_ = prefs_->GetString(prefs::kNTPTipsServer);
@@ -217,7 +217,7 @@ void WebResourceService::Init() {
   // locale, reset the server and force an immediate update of tips.
   web_resource_server_ = kDefaultResourceServer;
   web_resource_server_.append(locale);
-  prefs_->SetString(prefs::kNTPTipsCacheUpdate, L"");
+  prefs_->SetString(prefs::kNTPTipsCacheUpdate, "");
 }
 
 void WebResourceService::EndFetch() {
@@ -269,12 +269,12 @@ void WebResourceService::StartAfterDelay() {
   // Check whether we have ever put a value in the web resource cache;
   // if so, pull it out and see if it's time to update again.
   if (prefs_->HasPrefPath(prefs::kNTPTipsCacheUpdate)) {
-    std::wstring last_update_pref =
+    std::string last_update_pref =
       prefs_->GetString(prefs::kNTPTipsCacheUpdate);
     if (!last_update_pref.empty()) {
       int ms_until_update = kCacheUpdateDelay -
           static_cast<int>((base::Time::Now() - base::Time::FromDoubleT(
-          StringToDouble(WideToASCII(last_update_pref)))).InMilliseconds());
+          StringToDouble(last_update_pref))).InMilliseconds());
 
       delay = ms_until_update > kCacheUpdateDelay ?
               kCacheUpdateDelay : (ms_until_update < kStartResourceFetchDelay ?
@@ -292,6 +292,6 @@ void WebResourceService::UpdateResourceCache(const std::string& json_data) {
 
   // Update resource server and cache update time in preferences.
   prefs_->SetString(prefs::kNTPTipsCacheUpdate,
-      DoubleToWString(base::Time::Now().ToDoubleT()));
+      DoubleToString(base::Time::Now().ToDoubleT()));
   prefs_->SetString(prefs::kNTPTipsServer, web_resource_server_);
 }

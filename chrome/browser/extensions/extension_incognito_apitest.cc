@@ -16,16 +16,9 @@
 #include "chrome/test/ui_test_utils.h"
 #include "net/base/mock_host_resolver.h"
 
-// http://crbug.com/40002
-#if defined(OS_MACOSX)
-#define MAYBE_IncognitoPopup DISABLED_IncognitoPopup
-#else
-#define MAYBE_IncognitoPopup IncognitoPopup
-#endif
-
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, IncognitoNoScript) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  StartHTTPServer();
+  ASSERT_TRUE(StartHTTPServer());
 
   // Loads a simple extension which attempts to change the title of every page
   // that loads to "modified".
@@ -51,7 +44,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, IncognitoNoScript) {
 
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, IncognitoYesScript) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  StartHTTPServer();
+  ASSERT_TRUE(StartHTTPServer());
 
   // Load a dummy extension. This just tests that we don't regress a
   // crash fix when multiple incognito- and non-incognito-enabled extensions
@@ -86,9 +79,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, IncognitoYesScript) {
 }
 
 // Tests that the APIs in an incognito-enabled extension work properly.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Incognito) {
+// Flaky, http://crbug.com/42844.
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FLAKY_Incognito) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  StartHTTPServer();
+  ASSERT_TRUE(StartHTTPServer());
 
   ResultCatcher catcher;
 
@@ -106,7 +100,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Incognito) {
 // events or callbacks.
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoDisabled) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  StartHTTPServer();
+  ASSERT_TRUE(StartHTTPServer());
 
   ResultCatcher catcher;
 
@@ -121,9 +115,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoDisabled) {
 }
 
 // Test that opening a popup from an incognito browser window works properly.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_IncognitoPopup) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoPopup) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  StartHTTPServer();
+  ASSERT_TRUE(StartHTTPServer());
 
   ResultCatcher catcher;
 

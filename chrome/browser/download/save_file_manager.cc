@@ -15,12 +15,12 @@
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/download/save_file.h"
 #include "chrome/browser/download/save_package.h"
-#include "chrome/browser/net/url_request_context_getter.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/platform_util.h"
+#include "chrome/common/net/url_request_context_getter.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "net/base/io_buffer.h"
@@ -473,7 +473,8 @@ void SaveFileManager::RenameAllFiles(
     const FinalNameList& final_names,
     const FilePath& resource_dir,
     int render_process_id,
-    int render_view_id) {
+    int render_view_id,
+    int save_package_id) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
 
   if (!resource_dir.empty() && !file_util::PathExists(resource_dir))
@@ -495,20 +496,19 @@ void SaveFileManager::RenameAllFiles(
       ChromeThread::UI, FROM_HERE,
       NewRunnableMethod(
           this, &SaveFileManager::OnFinishSavePageJob, render_process_id,
-          render_view_id));
+          render_view_id, save_package_id));
 }
 
 void SaveFileManager::OnFinishSavePageJob(int render_process_id,
-                                          int render_view_id) {
+                                          int render_view_id,
+                                          int save_package_id) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
 
   SavePackage* save_package =
       GetSavePackageFromRenderIds(render_process_id, render_view_id);
 
-  if (save_package) {
-    // save_package is null if save was canceled.
+  if (save_package && save_package->id() == save_package_id)
     save_package->Finish();
-  }
 }
 
 void SaveFileManager::RemoveSavedFileFromFileMap(

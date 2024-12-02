@@ -15,7 +15,8 @@
     </script>
     <script type="text/javascript" src="js/api_page_generator.js"></script>
     <script type="text/javascript" src="js/bootstrap.js"></script>
-  <title>Browser Actions - Google Chrome Extensions - Google Code</title></head><body>  <div id="gc-container" class="labs">
+  <title>Browser Actions - Google Chrome Extensions - Google Code</title></head>
+  <body>  <div id="gc-container" class="labs">
       <div id="devModeWarning">
         You are viewing extension docs in chrome via the 'file:' scheme: are you expecting to see local changes when you refresh? You'll need run chrome with --allow-file-access-from-files.
       </div>
@@ -35,6 +36,7 @@
                 <div style="display:inline">
                   (
                     <span class="optional">optional</span>
+                    <span class="enum">enumerated</span>
                     <span id="typeTemplate">
                       <span>
                         <a> Type</a>
@@ -44,6 +46,7 @@
                           array of <span><span></span></span>
                         </span>
                         <span>paramType</span>
+                        <span></span>
                       </span>
                     </span>
                   )
@@ -56,6 +59,15 @@
           </dd>
           <dd>
             Description of this parameter from the json schema.
+          </dd>
+          <dd>
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
           </dd>
 
           <!-- OBJECT PROPERTIES -->
@@ -135,6 +147,7 @@
               <li>Browser UI
                 <ul>
                   <li class="leftNavSelected">Browser Actions</li>
+                  <li><a href="contextMenus.html">Context Menus</a></li>
                   <li><a href="notifications.html">Desktop Notifications</a></li>
                   <li><a href="options.html">Options Pages</a></li>
                   <li><a href="override.html">Override Pages</a></li>
@@ -145,6 +158,7 @@
               <li>Browser Interaction
                 <ul>
                   <li><a href="bookmarks.html">Bookmarks</a></li>
+                  <li><a href="cookies.html">Cookies</a></li>
                   <li><a href="events.html">Events</a></li>
                   <li><a href="history.html">History</a></li>
                   <li><a href="tabs.html">Tabs</a></li>
@@ -157,6 +171,7 @@
                   <li><a href="background_pages.html">Background Pages</a></li>
                   <li><a href="content_scripts.html">Content Scripts</a></li>
                   <li><a href="xhr.html">Cross-Origin XHR</a></li>
+                  <li><a href="idle.html">Idle</a></li>
                   <li><a href="i18n.html">Internationalization</a></li>
                   <li><a href="messaging.html">Message Passing</a></li>
                   <li><a href="npapi.html">NPAPI Plugins</a></li>
@@ -516,6 +531,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
                         <a> Type</a>
@@ -525,6 +541,7 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>object</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -537,6 +554,15 @@ For other examples and for help in viewing the source code, see
           </dd>
           <dd style="display: none; ">
             Description of this parameter from the json schema.
+          </dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
           </dd>
 
           <!-- OBJECT PROPERTIES -->
@@ -552,6 +578,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
                         <a> Type</a>
@@ -567,10 +594,12 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>integer</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span></span>
                         </span>
                         <span style="display: none; ">paramType</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -582,6 +611,15 @@ For other examples and for help in viewing the source code, see
             Undocumented.
           </dd>
           <dd>An array of four integers in the range [0,255] that make up the RGBA color of the badge. For example, opaque red is <code>[255, 0, 0, 255]</code>.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
 
           <!-- OBJECT PROPERTIES -->
           <dd style="display: none; ">
@@ -603,6 +641,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
                         <a> Type</a>
@@ -612,6 +651,7 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>integer</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -623,6 +663,15 @@ For other examples and for help in viewing the source code, see
             Undocumented.
           </dd>
           <dd>Limits the change to when a particular tab is selected. Automatically resets when the tab is closed.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
 
           <!-- OBJECT PROPERTIES -->
           <dd style="display: none; ">
@@ -674,6 +723,13 @@ For other examples and for help in viewing the source code, see
                   </div>
                 </div>
 
+                <!-- MIN_VERSION -->
+                <p style="display: none; ">
+                  This function was added in version <b><span></span></b>.
+                  If you require this function, the manifest key
+                  <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+                  can ensure that your extension won't be run in an earlier browser version.
+                </p>
               </div> <!-- /description -->
 
             </div><div class="apiItem">
@@ -702,6 +758,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
                         <a> Type</a>
@@ -711,6 +768,7 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>object</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -723,6 +781,15 @@ For other examples and for help in viewing the source code, see
           </dd>
           <dd style="display: none; ">
             Description of this parameter from the json schema.
+          </dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
           </dd>
 
           <!-- OBJECT PROPERTIES -->
@@ -738,6 +805,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
                         <a> Type</a>
@@ -747,6 +815,7 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>string</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -758,6 +827,15 @@ For other examples and for help in viewing the source code, see
             Undocumented.
           </dd>
           <dd>Any number of characters can be passed, but only about four can fit in the space.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
 
           <!-- OBJECT PROPERTIES -->
           <dd style="display: none; ">
@@ -779,6 +857,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
                         <a> Type</a>
@@ -788,6 +867,7 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>integer</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -799,6 +879,15 @@ For other examples and for help in viewing the source code, see
             Undocumented.
           </dd>
           <dd>Limits the change to when a particular tab is selected. Automatically resets when the tab is closed.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
 
           <!-- OBJECT PROPERTIES -->
           <dd style="display: none; ">
@@ -850,6 +939,13 @@ For other examples and for help in viewing the source code, see
                   </div>
                 </div>
 
+                <!-- MIN_VERSION -->
+                <p style="display: none; ">
+                  This function was added in version <b><span></span></b>.
+                  If you require this function, the manifest key
+                  <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+                  can ensure that your extension won't be run in an earlier browser version.
+                </p>
               </div> <!-- /description -->
 
             </div><div class="apiItem">
@@ -878,6 +974,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
                         <a> Type</a>
@@ -887,6 +984,7 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>object</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -899,6 +997,15 @@ For other examples and for help in viewing the source code, see
           </dd>
           <dd style="display: none; ">
             Description of this parameter from the json schema.
+          </dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
           </dd>
 
           <!-- OBJECT PROPERTIES -->
@@ -914,6 +1021,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
                         <a> Type</a>
@@ -923,6 +1031,7 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>ImageData</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -934,6 +1043,15 @@ For other examples and for help in viewing the source code, see
             Undocumented.
           </dd>
           <dd>Pixel data for an image. Must be an ImageData object (for example, from a <code>canvas</code> element).</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
 
           <!-- OBJECT PROPERTIES -->
           <dd>
@@ -955,6 +1073,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
                         <a> Type</a>
@@ -964,6 +1083,7 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>string</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -975,6 +1095,15 @@ For other examples and for help in viewing the source code, see
             Undocumented.
           </dd>
           <dd>Relative path to an image in the extension to show in the browser action.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
 
           <!-- OBJECT PROPERTIES -->
           <dd style="display: none; ">
@@ -996,6 +1125,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
                         <a> Type</a>
@@ -1005,6 +1135,7 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>integer</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -1016,6 +1147,15 @@ For other examples and for help in viewing the source code, see
             Undocumented.
           </dd>
           <dd>Limits the change to when a particular tab is selected. Automatically resets when the tab is closed.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
 
           <!-- OBJECT PROPERTIES -->
           <dd style="display: none; ">
@@ -1067,6 +1207,13 @@ For other examples and for help in viewing the source code, see
                   </div>
                 </div>
 
+                <!-- MIN_VERSION -->
+                <p style="display: none; ">
+                  This function was added in version <b><span></span></b>.
+                  If you require this function, the manifest key
+                  <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+                  can ensure that your extension won't be run in an earlier browser version.
+                </p>
               </div> <!-- /description -->
 
             </div><div class="apiItem">
@@ -1095,6 +1242,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
                         <a> Type</a>
@@ -1104,6 +1252,7 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>object</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -1116,6 +1265,15 @@ For other examples and for help in viewing the source code, see
           </dd>
           <dd style="display: none; ">
             Description of this parameter from the json schema.
+          </dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
           </dd>
 
           <!-- OBJECT PROPERTIES -->
@@ -1131,6 +1289,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
                         <a> Type</a>
@@ -1140,6 +1299,7 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>integer</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -1151,6 +1311,15 @@ For other examples and for help in viewing the source code, see
             Undocumented.
           </dd>
           <dd>Limits the change to when a particular tab is selected. Automatically resets when the tab is closed.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
 
           <!-- OBJECT PROPERTIES -->
           <dd style="display: none; ">
@@ -1172,6 +1341,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
                         <a> Type</a>
@@ -1181,6 +1351,7 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>string</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -1192,6 +1363,15 @@ For other examples and for help in viewing the source code, see
             Undocumented.
           </dd>
           <dd>The html file to show in a popup.  If set to the empty string (''), no popup is shown.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
 
           <!-- OBJECT PROPERTIES -->
           <dd style="display: none; ">
@@ -1243,6 +1423,13 @@ For other examples and for help in viewing the source code, see
                   </div>
                 </div>
 
+                <!-- MIN_VERSION -->
+                <p>
+                  This function was added in version <b><span>5.0.316.0</span></b>.
+                  If you require this function, the manifest key
+                  <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+                  can ensure that your extension won't be run in an earlier browser version.
+                </p>
               </div> <!-- /description -->
 
             </div><div class="apiItem">
@@ -1271,6 +1458,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
                         <a> Type</a>
@@ -1280,6 +1468,7 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>object</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -1292,6 +1481,15 @@ For other examples and for help in viewing the source code, see
           </dd>
           <dd style="display: none; ">
             Description of this parameter from the json schema.
+          </dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
           </dd>
 
           <!-- OBJECT PROPERTIES -->
@@ -1307,6 +1505,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
                         <a> Type</a>
@@ -1316,6 +1515,7 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>string</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -1327,6 +1527,15 @@ For other examples and for help in viewing the source code, see
             Undocumented.
           </dd>
           <dd>The string the browser action should display when moused over.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
 
           <!-- OBJECT PROPERTIES -->
           <dd style="display: none; ">
@@ -1348,6 +1557,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
                         <a> Type</a>
@@ -1357,6 +1567,7 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>integer</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -1368,6 +1579,15 @@ For other examples and for help in viewing the source code, see
             Undocumented.
           </dd>
           <dd>Limits the change to when a particular tab is selected. Automatically resets when the tab is closed.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
 
           <!-- OBJECT PROPERTIES -->
           <dd style="display: none; ">
@@ -1419,6 +1639,13 @@ For other examples and for help in viewing the source code, see
                   </div>
                 </div>
 
+                <!-- MIN_VERSION -->
+                <p style="display: none; ">
+                  This function was added in version <b><span></span></b>.
+                  If you require this function, the manifest key
+                  <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+                  can ensure that your extension won't be run in an earlier browser version.
+                </p>
               </div> <!-- /description -->
 
             </div>  <!-- /apiItem -->
@@ -1457,6 +1684,7 @@ For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span>
                         <a href="tabs.html#type-Tab">Tab</a>
@@ -1466,6 +1694,7 @@ For other examples and for help in viewing the source code, see
                           array of <span><span></span></span>
                         </span>
                         <span>paramType</span>
+                        <span></span>
                       </span>
                     </span>
                   )
@@ -1478,6 +1707,15 @@ For other examples and for help in viewing the source code, see
           </dd>
           <dd style="display: none; ">
             Description of this parameter from the json schema.
+          </dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
           </dd>
 
           <!-- OBJECT PROPERTIES -->
@@ -1501,7 +1739,7 @@ For other examples and for help in viewing the source code, see
 
           <!-- TYPES -->
           <div class="apiGroup" style="display: none; ">
-            <a name="types.sort(sortByName)"></a>
+            <a name="types"></a>
             <h3 id="types">Types</h3>
 
             <!-- iterates over all types -->

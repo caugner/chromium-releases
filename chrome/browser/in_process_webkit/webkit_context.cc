@@ -5,12 +5,14 @@
 #include "chrome/browser/in_process_webkit/webkit_context.h"
 
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/profile.h"
 
-WebKitContext::WebKitContext(const FilePath& data_path, bool is_incognito)
-    : data_path_(data_path),
-      is_incognito_(is_incognito),
+WebKitContext::WebKitContext(Profile* profile)
+    : data_path_(profile->IsOffTheRecord() ? FilePath() : profile->GetPath()),
+      is_incognito_(profile->IsOffTheRecord()),
       ALLOW_THIS_IN_INITIALIZER_LIST(
-          dom_storage_context_(new DOMStorageContext(this))) {
+          dom_storage_context_(new DOMStorageContext(this))),
+      indexed_db_context_(new IndexedDBContext()) {
 }
 
 WebKitContext::~WebKitContext() {
@@ -23,6 +25,12 @@ WebKitContext::~WebKitContext() {
     // The WebKit thread wasn't created, and the task got deleted without
     // freeing the DOMStorageContext, so delete it manually.
     delete dom_storage_context;
+  }
+
+  IndexedDBContext* indexed_db_context = indexed_db_context_.release();
+  if (!ChromeThread::DeleteSoon(
+          ChromeThread::WEBKIT, FROM_HERE, indexed_db_context)) {
+    delete indexed_db_context;
   }
 }
 

@@ -1,4 +1,4 @@
-# Copyright (c) 2009 The Chromium Authors. All rights reserved.
+# Copyright (c) 2010 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 {
@@ -35,6 +35,7 @@
                   'urlmon.dll',
                   'imm32.dll',
                   'iphlpapi.dll',
+                  'prntvpt.dll',
                 ],
                 # Set /SUBSYSTEM:WINDOWS for chrome.dll (for consistency).
                 'SubSystem': '2',
@@ -78,14 +79,14 @@
                 # up actual Chromium functionality into this .dll.
                 'chrome_dll_version',
                 'chrome_resources',
-                'installer/installer.gyp:installer_util_strings',
+                'installer_util_strings',
                 'worker',
                 '../printing/printing.gyp:printing',
                 '../net/net.gyp:net_resources',
                 '../build/util/support/support.gyp:*',
                 '../third_party/cld/cld.gyp:cld',
                 '../views/views.gyp:views',
-                '../webkit/webkit.gyp:webkit_resources',
+                '../webkit/support/webkit_support.gyp:webkit_resources',
                 '../gears/gears.gyp:gears',
               ],
               'sources': [
@@ -169,6 +170,7 @@
                 'ORDER_FILE': 'app/framework.order',
               },
               'sources': [
+                'app/chrome_dll_app_mode_mac.mm',
                 'app/chrome_dll_main.cc',
                 'app/chrome_dll_resource.h',
               ],
@@ -191,18 +193,18 @@
                 'app/framework-Info.plist',
                 'app/nibs/About.xib',
                 'app/nibs/AboutIPC.xib',
-                'app/nibs/AutoFillAddressFormView.xib',
-                'app/nibs/AutoFillCreditCardFormView.xib',
+                'app/nibs/AutoFillAddressSheet.xib',
+                'app/nibs/AutoFillCreditCardSheet.xib',
                 'app/nibs/AutoFillDialog.xib',
                 'app/nibs/BookmarkAllTabs.xib',
                 'app/nibs/BookmarkBar.xib',
                 'app/nibs/BookmarkBarFolderWindow.xib',
                 'app/nibs/BookmarkBubble.xib',
                 'app/nibs/BookmarkEditor.xib',
-                'app/nibs/BookmarkManager.xib',
                 'app/nibs/BookmarkNameFolder.xib',
                 'app/nibs/BrowserWindow.xib',
                 'app/nibs/ClearBrowsingData.xib',
+                'app/nibs/CollectedCookies.xib',
                 'app/nibs/Cookies.xib',
                 'app/nibs/CookieDetailsView.xib',
                 'app/nibs/CookiePrompt.xib',
@@ -221,9 +223,9 @@
                 'app/nibs/ExtensionInstallPrompt.xib',
                 'app/nibs/ExtensionInstallPromptNoWarnings.xib',
                 'app/nibs/FindBar.xib',
+                'app/nibs/FirstRunBubble.xib',
                 'app/nibs/FirstRunDialog.xib',
                 'app/nibs/FontLanguageSettings.xib',
-                'app/nibs/GeolocationExceptionsWindow.xib',
                 'app/nibs/HungRendererDialog.xib',
                 'app/nibs/HttpAuthLoginSheet.xib',
                 'app/nibs/ImportSettingsDialog.xib',
@@ -232,42 +234,41 @@
                 'app/nibs/ImportProgressDialog.xib',
                 'app/nibs/KeywordEditor.xib',
                 'app/nibs/MainMenu.xib',
-                'app/nibs/PageInfo.xib',
+                'app/nibs/Notification.xib',
                 'app/nibs/Preferences.xib',
                 'app/nibs/ReportBug.xib',
                 'app/nibs/SaveAccessoryView.xib',
                 'app/nibs/SadTab.xib',
-                'app/nibs/SyncCustomize.xib',
+                'app/nibs/SimpleContentExceptionsWindow.xib',
                 'app/nibs/TabContents.xib',
                 'app/nibs/TabView.xib',
                 'app/nibs/TaskManager.xib',
                 'app/nibs/Toolbar.xib',
                 'app/theme/back_Template.pdf',
-                'app/theme/chevron.png',  # TODO(jrg): get and use a pdf version
-                'app/theme/close_bar.pdf',
-                'app/theme/close_bar_h.pdf',
-                'app/theme/close_bar_p.pdf',
-                'app/theme/find_next_Template.pdf',
-                'app/theme/find_prev_Template.pdf',
+                'app/theme/chevron.pdf',
                 'app/theme/forward_Template.pdf',
-                'app/theme/go_Template.pdf',
                 'app/theme/home_Template.pdf',
-                'app/theme/menu_chrome_rtl_Template.pdf',
-                'app/theme/menu_chrome_Template.pdf',
-		'app/theme/menu_hierarchy_arrow.pdf',
-		'app/theme/menu_overflow_down.pdf',
-		'app/theme/menu_overflow_up.pdf',
-                'app/theme/menu_page_rtl_Template.pdf',
-                'app/theme/menu_page_Template.pdf',
+                'app/theme/menu_hierarchy_arrow.pdf',
+                'app/theme/menu_overflow_down.pdf',
+                'app/theme/menu_overflow_up.pdf',
                 'app/theme/nav.pdf',
                 'app/theme/newtab.pdf',
                 'app/theme/newtab_h.pdf',
                 'app/theme/newtab_p.pdf',
+                'app/theme/omnibox_history.pdf',
+                'app/theme/omnibox_http.pdf',
+                'app/theme/omnibox_https_invalid.pdf',
+                'app/theme/omnibox_https_valid.pdf',
+                'app/theme/omnibox_https_warning.pdf',
+                'app/theme/omnibox_more.pdf',
+                'app/theme/omnibox_search.pdf',
+                'app/theme/omnibox_star.pdf',
+                'app/theme/omnibox_star_lit.pdf',
                 'app/theme/otr_icon.pdf',
+                'app/theme/popup_window_animation.pdf',
                 'app/theme/reload_Template.pdf',
-                'app/theme/star_Template.pdf',
-                'app/theme/starred.pdf',
                 'app/theme/stop_Template.pdf',
+                'app/theme/tools_Template.pdf',
                 'browser/cocoa/install.sh',
               ],
               'mac_bundle_resources!': [
@@ -277,6 +278,10 @@
                 # Bring in pdfsqueeze and run it on all pdfs
                 '../build/temp_gyp/pdfsqueeze.gyp:pdfsqueeze',
                 '../build/util/support/support.gyp:*',
+                # On Mac, Flash gets put into the framework, so we need this
+                # dependency here. flash_player.gyp will copy the Flash bundle
+                # into PRODUCT_DIR.
+                '../third_party/adobe/flash/flash_player.gyp:flash_player',
               ],
               'rules': [
                 {
@@ -312,6 +317,7 @@
                     'pak_inputs': [
                       '<(grit_out_dir)/browser_resources.pak',
                       '<(grit_out_dir)/common_resources.pak',
+                      '<(grit_out_dir)/default_plugin_resources/default_plugin_resources.pak',
                       '<(grit_out_dir)/renderer_resources.pak',
                       '<(grit_out_dir)/theme_resources.pak',
                       '<(SHARED_INTERMEDIATE_DIR)/app/app_resources/app_resources.pak',
@@ -364,6 +370,26 @@
                     '<@(locales)',
                   ],
                 },
+                {
+                  'action_name': 'repack_resources',
+                  'variables': {
+                    'pak_inputs': [
+                      '<(grit_out_dir)/bookmark_manager_resources.pak',
+                      '<(grit_out_dir)/net_internals_resources.pak',
+                      '<(grit_out_dir)/shared_resources.pak',
+                    ],
+                  },
+                  'inputs': [
+                    '<(repack_path)',
+                    '<@(pak_inputs)',
+                  ],
+                  'outputs': [
+                    '<(INTERMEDIATE_DIR)/repack/resources.pak',
+                  ],
+                  'action': ['python', '<(repack_path)', '<@(_outputs)',
+                             '<@(pak_inputs)'],
+                  'process_outputs_as_mac_bundle_resources': 1,
+                },
               ],
               'postbuilds': [
                 {
@@ -383,14 +409,15 @@
                 {
                   # Modify the Info.plist as needed.  The script explains why
                   # this is needed.  This is also done in the chrome target.
-                  # The framework needs the Breakpad and Keystone keys if
-                  # those features are enabled.  It doesn't currently use the
-                  # Subversion keys for anything, but this seems like a really
-                  # good place to store them.
+                  # The framework needs the Breakpad keys if this feature is
+                  # enabled.  It does not need the Keystone keys; these always
+                  # come from the outer application bundle.  The framework
+                  # doesn't currently use the Subversion keys for anything,
+                  # but this seems like a really good place to store them.
                   'postbuild_name': 'Tweak Info.plist',
                   'action': ['<(tweak_info_plist_path)',
                              '-b<(mac_breakpad)',
-                             '-k<(mac_keystone)',
+                             '-k0',
                              '-s1',
                              '<(branding)',
                              '<(mac_bundle_id)'],
@@ -410,8 +437,9 @@
                   'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Resources',
                   'files': [
                     '<(PRODUCT_DIR)/resources/inspector/',
-                    '<(PRODUCT_DIR)/resources/bookmark_manager/',
-                    '<(PRODUCT_DIR)/resources/net_internals/'
+                    '<(PRODUCT_DIR)/resources/gmail_app/',
+                    '<(PRODUCT_DIR)/resources/calendar_app/',
+                    '<(PRODUCT_DIR)/resources/docs_app/',
                   ],
                   'conditions': [
                     ['mac_breakpad==1', {
@@ -429,6 +457,29 @@
                     # TODO(ajwong): Find a way to share this path with
                     # ffmpeg.gyp so they don't diverge. (BUG=23602)
                     '<(PRODUCT_DIR)/libffmpegsumo.dylib',
+                  ],
+                },
+                {
+                  'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Internet Plug-Ins',
+                  'files': [],
+                  'conditions': [
+                    [ 'branding == "Chrome"', {
+                      'files': [
+                        '<(PRODUCT_DIR)/Flash Player Plugin for Chrome.plugin',
+                        '<(PRODUCT_DIR)/plugin.vch',
+                      ],
+                    }],
+                    ['internal_pdf', {
+                      'files': [
+                        '<(PRODUCT_DIR)/PDF.plugin',
+                      ],
+                    }],
+                  ],
+                },
+                {
+                  'destination': '<(PRODUCT_DIR)',
+                  'files': [
+                      '<(INTERMEDIATE_DIR)/repack/resources.pak'
                   ],
                 },
               ],
@@ -477,6 +528,11 @@
                     },
                   ],
                 }],  # mac_keystone
+                ['internal_pdf', {
+                  'dependencies': [
+                    '../pdf/pdf.gyp:pdf',
+                  ],
+                }],
               ],  # conditions
             }],  # OS=="mac"
           ],  # conditions

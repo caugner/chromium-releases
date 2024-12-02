@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,8 @@
 #include <unistd.h>
 #endif
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(USE_X11)
+#include <dbus/dbus-glib.h>
 #include <gdk/gdk.h>
 #include <glib.h>
 #include <gtk/gtk.h>
@@ -37,6 +38,7 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/debug_util.h"
+#include "base/file_version_info.h"
 #include "base/i18n/icu_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -45,8 +47,11 @@
 #include "base/stats_counters.h"
 #include "base/stats_table.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/app/chrome_version_info.h"
 #include "chrome/browser/diagnostics/diagnostics_main.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_counters.h"
 #include "chrome/common/chrome_descriptors.h"
@@ -60,6 +65,10 @@
 
 #if defined(USE_NSS)
 #include "base/nss_util.h"
+#endif
+
+#if defined(USE_X11)
+#include "app/x11_util.h"
 #endif
 
 #if defined(OS_LINUX)
@@ -90,6 +99,10 @@
 #include "third_party/tcmalloc/chromium/src/google/malloc_extension.h"
 #endif
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/boot_times_loader.h"
+#endif
+
 extern int BrowserMain(const MainFunctionParams&);
 extern int RendererMain(const MainFunctionParams&);
 extern int GpuMain(const MainFunctionParams&);
@@ -102,6 +115,7 @@ extern int ZygoteMain(const MainFunctionParams&);
 #if defined(_WIN64)
 extern int NaClBrokerMain(const MainFunctionParams&);
 #endif
+extern int ServiceProcessMain(const MainFunctionParams&);
 
 #if defined(OS_WIN)
 // TODO(erikkay): isn't this already defined somewhere?
@@ -147,12 +161,12 @@ void PureCall() {
   __debugbreak();
 }
 
-#pragma warning( push )
+#pragma warning(push)
 // Disables warning 4748 which is: "/GS can not protect parameters and local
 // variables from local buffer overrun because optimizations are disabled in
 // function."  GetStats() will not overflow the passed-in buffer and this
 // function never returns.
-#pragma warning( disable : 4748 )
+#pragma warning(disable : 4748)
 void OnNoMemory() {
 #if defined(USE_TCMALLOC)
   // Try to get some information on the stack to make the crash easier to
@@ -167,7 +181,7 @@ void OnNoMemory() {
   // address 0 for an attacker to utilize.
   __debugbreak();
 }
-#pragma warning( pop )
+#pragma warning(pop)
 
 // Handlers to silently dump the current process when there is an assert in
 // chrome.
@@ -195,9 +209,9 @@ bool HasDeprecatedArguments(const std::wstring& command_line) {
   return (pos != std::wstring::npos);
 }
 
-#endif  // OS_WIN
+#endif  // defined(OS_WIN)
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(USE_X11)
 static void GLibLogHandler(const gchar* log_domain,
                            GLogLevelFlags log_level,
                            const gchar* message,
@@ -252,7 +266,9 @@ static void SetUpGLibLogHandler() {
                       NULL);
   }
 }
+#endif  // defined(USE_X11)
 
+#if defined(OS_LINUX)
 static void AdjustLinuxOOMScore(const std::string& process_type) {
   const int kMiscScore = 7;
   const int kPluginScore = 10;
@@ -262,7 +278,8 @@ static void AdjustLinuxOOMScore(const std::string& process_type) {
     score = kPluginScore;
   } else if (process_type == switches::kUtilityProcess ||
              process_type == switches::kWorkerProcess ||
-             process_type == switches::kGpuProcess) {
+             process_type == switches::kGpuProcess ||
+             process_type == switches::kServiceProcess) {
     score = kMiscScore;
   } else if (process_type == switches::kProfileImportProcess) {
     NOTIMPLEMENTED();
@@ -285,7 +302,7 @@ static void AdjustLinuxOOMScore(const std::string& process_type) {
   if (score > -1)
     base::AdjustOOMScore(base::GetCurrentProcId(), score);
 }
-#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
+#endif  // defined(OS_LINUX)
 
 // Register the invalid param handler and pure call handler to be able to
 // notify breakpad when it happens.
@@ -366,6 +383,14 @@ bool SubprocessNeedsResourceBundle(const std::string& process_type) {
       process_type == switches::kUtilityProcess;
 }
 
+// Returns true if this process is a child of the browser process.
+bool SubprocessIsBrowserChild(const std::string& process_type) {
+  if (process_type.empty() || process_type == switches::kServiceProcess) {
+    return false;
+  }
+  return true;
+}
+
 #if defined(OS_MACOSX)
 // Update the name shown in Activity Monitor so users are less likely to ask
 // why Chrome has so many processes.
@@ -388,6 +413,26 @@ void SetMacProcessName(const std::string& process_type) {
 }
 #endif  // defined(OS_MACOSX)
 
+void InitializeStatsTable(base::ProcessId browser_pid,
+                          const CommandLine & parsed_command_line) {
+  // Initialize the Stats Counters table.  With this initialized,
+  // the StatsViewer can be utilized to read counters outside of
+  // Chrome.  These lines can be commented out to effectively turn
+  // counters 'off'.  The table is created and exists for the life
+  // of the process.  It is not cleaned up.
+  if (parsed_command_line.HasSwitch(switches::kEnableStatsTable) ||
+      parsed_command_line.HasSwitch(switches::kEnableBenchmarking)) {
+    // NOTIMPLEMENTED: we probably need to shut this down correctly to avoid
+    // leaking shared memory regions on posix platforms.
+    std::string statsfile =
+        StringPrintf("%s-%u", chrome::kStatsFilename,
+                     static_cast<unsigned int>(browser_pid));
+    StatsTable *stats_table = new StatsTable(statsfile,
+        chrome::kStatsMaxThreads, chrome::kStatsMaxCounters);
+    StatsTable::set_current(stats_table);
+  }
+}
+
 }  // namespace
 
 #if defined(OS_WIN)
@@ -397,7 +442,9 @@ DLLEXPORT int __cdecl ChromeMain(HINSTANCE instance,
 #elif defined(OS_POSIX)
 int ChromeMain(int argc, char** argv) {
 #endif
-
+#if defined(OS_CHROMEOS)
+  chromeos::BootTimesLoader::SaveChromeMainStats();
+#endif
 #if defined(OS_MACOSX)
   // TODO(mark): Some of these things ought to be handled in chrome_exe_main.mm.
   // Under the current architecture, nothing in chrome_exe_main can rely
@@ -459,18 +506,38 @@ int ChromeMain(int argc, char** argv) {
 #endif
 
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+  if (parsed_command_line.HasSwitch(switches::kProductVersion)) {
+    scoped_ptr<FileVersionInfo> version(chrome_app::GetChromeVersionInfo());
+    printf("%s\n", WideToASCII(version->product_version()).c_str());
+    return 0;
+  }
+#endif
+
+#if defined(OS_POSIX)
+  if (parsed_command_line.HasSwitch(switches::kVersion)) {
+    scoped_ptr<FileVersionInfo> version(chrome_app::GetChromeVersionInfo());
+    printf("%s %s %s\n",
+           WideToUTF8(version->product_name()).c_str(),
+           WideToASCII(version->product_version()).c_str(),
+           UTF16ToUTF8(platform_util::GetVersionStringModifier()).c_str());
+    return 0;
+  }
+#endif
+
   std::string process_type =
       parsed_command_line.GetSwitchValueASCII(switches::kProcessType);
+
+#if defined(OS_MACOSX)
+  mac_util::SetOverrideAppBundlePath(chrome::GetFrameworkBundlePath());
+#endif  // OS_MACOSX
 
   // If we are in diagnostics mode this is the end of the line. After the
   // diagnostics are run the process will invariably exit.
   if (parsed_command_line.HasSwitch(switches::kDiagnostics)) {
     return DiagnosticsMain(parsed_command_line);
   }
-
-#if defined(OS_MACOSX)
-  mac_util::SetOverrideAppBundlePath(chrome::GetFrameworkBundlePath());
-#endif  // OS_MACOSX
 
 #if defined(OS_WIN)
   // Must do this before any other usage of command line!
@@ -480,8 +547,8 @@ int ChromeMain(int argc, char** argv) {
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
   // Show the man page on --help or -h.
-  if (parsed_command_line.HasSwitch("help") ||
-      parsed_command_line.HasSwitch("h")) {
+  if (parsed_command_line.HasSwitch(switches::kHelp) ||
+      parsed_command_line.HasSwitch(switches::kHelpShort)) {
     FilePath binary(parsed_command_line.argv()[0]);
     execlp("man", "man", binary.BaseName().value().c_str(), NULL);
     PLOG(FATAL) << "execlp failed";
@@ -500,19 +567,20 @@ int ChromeMain(int argc, char** argv) {
     singleton_command_line->AppendSwitch(switches::kEnableGPUPlugin);
   }
 
-  base::ProcessId browser_pid;
-  if (process_type.empty()) {
-    browser_pid = base::GetCurrentProcId();
-  } else {
+  base::ProcessId browser_pid = base::GetCurrentProcId();
+  if (SubprocessIsBrowserChild(process_type)) {
 #if defined(OS_WIN)
     std::wstring channel_name =
       parsed_command_line.GetSwitchValue(switches::kProcessChannelID);
 
     browser_pid =
         static_cast<base::ProcessId>(StringToInt(WideToASCII(channel_name)));
-    DCHECK_NE(browser_pid, 0);
-#else
+    DCHECK_NE(browser_pid, 0u);
+#elif defined(OS_MACOSX)
     browser_pid = base::GetCurrentProcId();
+#elif defined(OS_POSIX)
+    // On linux, we're in the zygote here; so we need the parent process' id.
+    browser_pid = base::GetParentProcessId(base::GetCurrentProcId());
 #endif
 
 #if defined(OS_POSIX)
@@ -573,22 +641,7 @@ int ChromeMain(int argc, char** argv) {
     InitCrashProcessInfo();
 #endif  // OS_MACOSX
 
-  // Initialize the Stats Counters table.  With this initialized,
-  // the StatsViewer can be utilized to read counters outside of
-  // Chrome.  These lines can be commented out to effectively turn
-  // counters 'off'.  The table is created and exists for the life
-  // of the process.  It is not cleaned up.
-  // TODO(port): we probably need to shut this down correctly to avoid
-  // leaking shared memory regions on posix platforms.
-  if (parsed_command_line.HasSwitch(switches::kEnableStatsTable) ||
-      parsed_command_line.HasSwitch(switches::kEnableBenchmarking)) {
-    std::string statsfile =
-        StringPrintf("%s-%u", chrome::kStatsFilename,
-                     static_cast<unsigned int>(browser_pid));
-    StatsTable *stats_table = new StatsTable(statsfile,
-        chrome::kStatsMaxThreads, chrome::kStatsMaxCounters);
-    StatsTable::set_current(stats_table);
-  }
+  InitializeStatsTable(browser_pid, parsed_command_line);
 
   StatsScope<StatsCounterTimer>
       startup_timer(chrome::Counters::chrome_main());
@@ -673,14 +726,20 @@ int ChromeMain(int argc, char** argv) {
     // browser process as a command line flag.
     DCHECK(parsed_command_line.HasSwitch(switches::kLang) ||
            process_type == switches::kZygoteProcess);
-    ResourceBundle::InitSharedInstance(std::wstring());
+
+    // TODO(markusheintz): The command line flag --lang is actually processed
+    // by the CommandLinePrefStore, and made available through the PrefService
+    // via the preference prefs::kApplicationLocale. The browser process uses
+    // the --lang flag to passe the value of the PrefService in here. Maybe this
+    // value could be passed in a different way.
+    ResourceBundle::InitSharedInstance(
+        parsed_command_line.GetSwitchValue(switches::kLang));
 
 #if defined(OS_MACOSX)
     // Update the process name (need resources to get the strings, so
     // only do this when ResourcesBundle has been initialized).
     SetMacProcessName(process_type);
-#endif // defined(OS_MACOSX)
-
+#endif  // defined(OS_MACOSX)
   }
 
   if (!process_type.empty())
@@ -688,9 +747,11 @@ int ChromeMain(int argc, char** argv) {
 
 #if defined(OS_MACOSX)
   // On OS X the renderer sandbox needs to be initialized later in the startup
-  // sequence in RendererMainPlatformDelegate::PlatformInitialize().
+  // sequence in RendererMainPlatformDelegate::EnableSandbox().
+  // Same goes for NaClLoader, in NaClMainPlatformDelegate::EnableSandbox().
   if (process_type != switches::kRendererProcess &&
-      process_type != switches::kExtensionProcess) {
+      process_type != switches::kExtensionProcess &&
+      process_type != switches::kNaClLoaderProcess) {
     bool sandbox_initialized_ok =
         sandbox_wrapper.InitializeSandbox(parsed_command_line, process_type);
     // Die if the sandbox can't be enabled.
@@ -750,6 +811,12 @@ int ChromeMain(int argc, char** argv) {
       // line so update it here with the new version.
       const CommandLine& parsed_command_line =
         *CommandLine::ForCurrentProcess();
+
+      // The StatsTable must be initialized in each process; we already
+      // initialized for the browser process, now we need to initialize
+      // within the new processes as well.
+      InitializeStatsTable(browser_pid, parsed_command_line);
+
       MainFunctionParams main_params(parsed_command_line, sandbox_wrapper,
                                      &autorelease_pool);
       std::string process_type =
@@ -770,6 +837,8 @@ int ChromeMain(int argc, char** argv) {
 #else
     NOTIMPLEMENTED();
 #endif
+  } else if (process_type == switches::kServiceProcess) {
+    rv = ServiceProcessMain(main_params);
   } else if (process_type.empty()) {
 #if defined(OS_LINUX)
     const char* sandbox_binary = NULL;
@@ -806,9 +875,15 @@ int ChromeMain(int argc, char** argv) {
     // definitely harmless, so retained as a reminder of this
     // requirement for gconf.
     g_type_init();
+    // We use glib-dbus for geolocation and it's possible other libraries
+    // (e.g. gnome-keyring) will use it, so initialize its threading here
+    // as well.
+    dbus_g_thread_init();
     // gtk_init() can change |argc| and |argv|.
     gtk_init(&argc, &argv);
     SetUpGLibLogHandler();
+
+    x11_util::SetX11ErrorHandlers();
 #endif  // defined(OS_LINUX)
 
     rv = BrowserMain(main_params);

@@ -8,7 +8,9 @@
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/dom_ui/mediaplayer_ui.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
@@ -58,29 +60,36 @@ class MediaPlayerBrowserTest : public InProcessBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(MediaPlayerBrowserTest, Popup) {
-  StartHTTPServer();
+  ASSERT_TRUE(StartHTTPServer());
   // Doing this so we have a valid profile.
   ui_test_utils::NavigateToURL(browser(),
                                GURL("chrome://downloads"));
+
+  PrefService* pref_service = browser()->profile()->GetPrefs();
+  pref_service->SetBoolean(prefs::kLabsMediaplayerEnabled, true);
+
   MediaPlayer* player = MediaPlayer::Get();
-  player->set_profile(browser()->profile());
   // Check that its not currently visible
   ASSERT_FALSE(IsPlayerVisible());
 
-  player->EnqueueMediaURL(GetMusicTestURL());
+  player->EnqueueMediaURL(GetMusicTestURL(), NULL);
 
   ASSERT_TRUE(IsPlayerVisible());
 }
 
 IN_PROC_BROWSER_TEST_F(MediaPlayerBrowserTest, PopupPlaylist) {
-  StartHTTPServer();
+  ASSERT_TRUE(StartHTTPServer());
   // Doing this so we have a valid profile.
   ui_test_utils::NavigateToURL(browser(),
                                GURL("chrome://downloads"));
-  MediaPlayer* player = MediaPlayer::Get();
-  player->set_profile(browser()->profile());
 
-  player->EnqueueMediaURL(GetMusicTestURL());
+
+  PrefService* pref_service = browser()->profile()->GetPrefs();
+  pref_service->SetBoolean(prefs::kLabsMediaplayerEnabled, true);
+
+  MediaPlayer* player = MediaPlayer::Get();
+
+  player->EnqueueMediaURL(GetMusicTestURL(), NULL);
 
   EXPECT_FALSE(IsPlaylistVisible());
 

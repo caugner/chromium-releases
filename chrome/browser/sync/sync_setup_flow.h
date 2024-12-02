@@ -9,20 +9,13 @@
 #include <vector>
 
 #include "app/l10n_util.h"
+#include "base/gtest_prod_util.h"
 #include "base/time.h"
 #include "chrome/browser/dom_ui/html_dialog_ui.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_setup_wizard.h"
-#if defined(OS_WIN)
-#include "chrome/browser/views/options/customize_sync_window_view.h"
-#elif defined(OS_LINUX)
-#include "chrome/browser/gtk/options/customize_sync_window_gtk.h"
-#elif defined(OS_MACOSX)
-#include "chrome/browser/cocoa/sync_customize_controller_cppsafe.h"
-#endif
 #include "gfx/native_widget_types.h"
 #include "grit/generated_resources.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class FlowHandler;
 class SyncSetupFlowContainer;
@@ -40,15 +33,25 @@ class SyncSetupFlow : public HtmlDialogUIDelegate {
   static SyncSetupFlow* Run(ProfileSyncService* service,
                             SyncSetupFlowContainer* container,
                             SyncSetupWizard::State start,
-                            SyncSetupWizard::State end);
+                            SyncSetupWizard::State end,
+                            gfx::NativeWindow parent_window);
 
   // Fills |args| with "user" and "error" arguments by querying |service|.
   static void GetArgsForGaiaLogin(
       const ProfileSyncService* service,
       DictionaryValue* args);
 
+  // Fills |args| with "user" and "error" arguments by querying |service|.
+  static void GetArgsForChooseDataTypes(
+      ProfileSyncService* service,
+      DictionaryValue* args);
+
   // Triggers a state machine transition to advance_state.
   void Advance(SyncSetupWizard::State advance_state);
+
+  // Focuses the dialog.  This is useful in cases where the dialog has been
+  // obscured by a browser window.
+  void Focus();
 
   // HtmlDialogUIDelegate implementation.
   // Get the HTML file path for the content to load in the dialog.
@@ -75,6 +78,9 @@ class SyncSetupFlow : public HtmlDialogUIDelegate {
   virtual void OnDialogClosed(const std::string& json_retval);
 
   // HtmlDialogUIDelegate implementation.
+  virtual void OnCloseContents(TabContents* source, bool* out_close_dialog) { }
+
+  // HtmlDialogUIDelegate implementation.
   virtual std::wstring GetDialogTitle() const {
     return l10n_util::GetString(IDS_SYNC_MY_BOOKMARKS_LABEL);
   }
@@ -84,49 +90,28 @@ class SyncSetupFlow : public HtmlDialogUIDelegate {
     return false;
   }
 
-  void OnUserClickedCustomize() {
-#if defined(OS_WIN)
-    CustomizeSyncWindowView::Show(NULL, service_->profile());
-#elif defined(OS_LINUX)
-    ShowCustomizeSyncWindow(service_->profile());
-#elif defined(OS_MACOSX)
-    DCHECK(html_dialog_window_);
-    ShowSyncCustomizeDialog(html_dialog_window_, service_);
-#endif
-  }
-
-  bool ClickCustomizeOk() {
-#if defined(OS_WIN)
-    return CustomizeSyncWindowView::ClickOk();
-#elif defined(OS_LINUX)
-    return CustomizeSyncWindowOk();
-#else
-    return true;
-#endif
-  }
-
-  void ClickCustomizeCancel() {
-#if defined(OS_WIN)
-    CustomizeSyncWindowView::ClickCancel();
-#elif defined(OS_LINUX)
-    CustomizeSyncWindowCancel();
-#endif
-  }
-
-
   void OnUserSubmittedAuth(const std::string& username,
                            const std::string& password,
                            const std::string& captcha) {
     service_->OnUserSubmittedAuth(username, password, captcha);
   }
 
+  void OnUserChoseDataTypes(bool sync_everything,
+      syncable::ModelTypeSet& chosen_types) {
+    service_->OnUserChoseDatatypes(sync_everything, chosen_types);
+  }
+
  private:
-  FRIEND_TEST(SyncSetupWizardTest, InitialStepLogin);
-  FRIEND_TEST(SyncSetupWizardTest, InitialStepMergeAndSync);
-  FRIEND_TEST(SyncSetupWizardTest, DialogCancelled);
-  FRIEND_TEST(SyncSetupWizardTest, InvalidTransitions);
-  FRIEND_TEST(SyncSetupWizardTest, FullSuccessfulRunSetsPref);
-  FRIEND_TEST(SyncSetupWizardTest, DiscreteRun);
+  FRIEND_TEST_ALL_PREFIXES(SyncSetupWizardTest, InitialStepLogin);
+  FRIEND_TEST_ALL_PREFIXES(SyncSetupWizardTest, ChooseDataTypesSetsPrefs);
+  FRIEND_TEST_ALL_PREFIXES(SyncSetupWizardTest, DialogCancelled);
+  FRIEND_TEST_ALL_PREFIXES(SyncSetupWizardTest, InvalidTransitions);
+  FRIEND_TEST_ALL_PREFIXES(SyncSetupWizardTest, FullSuccessfulRunSetsPref);
+  FRIEND_TEST_ALL_PREFIXES(SyncSetupWizardTest, AbortedByPendingClear);
+  FRIEND_TEST_ALL_PREFIXES(SyncSetupWizardTest, DiscreteRunGaiaLogin);
+  FRIEND_TEST_ALL_PREFIXES(SyncSetupWizardTest, DiscreteRunChooseDataTypes);
+  FRIEND_TEST_ALL_PREFIXES(SyncSetupWizardTest,
+                           DiscreteRunChooseDataTypesAbortedByPendingClear);
 
   // Use static Run method to get an instance.
   SyncSetupFlow(SyncSetupWizard::State start_state,
@@ -193,16 +178,14 @@ class FlowHandler : public DOMMessageHandler {
   virtual void RegisterMessages();
 
   // Callbacks from the page.
-  void HandleUserClickedCustomize(const Value* value);
-  void ClickCustomizeOk(const Value* value);
-  void ClickCustomizeCancel(const Value* value);
   void HandleSubmitAuth(const Value* value);
-  void HandleSubmitMergeAndSync(const Value* value);
+  void HandleChooseDataTypes(const Value* value);
 
   // These functions control which part of the HTML is visible.
   void ShowGaiaLogin(const DictionaryValue& args);
   void ShowGaiaSuccessAndClose();
   void ShowGaiaSuccessAndSettingUp();
+  void ShowChooseDataTypes(const DictionaryValue& args);
   void ShowSetupDone(const std::wstring& user);
   void ShowFirstTimeDone(const std::wstring& user);
 

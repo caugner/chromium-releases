@@ -12,55 +12,26 @@
 #include "chrome/browser/browser_window.h"
 #import "chrome/browser/cocoa/content_exceptions_window_controller.h"
 #import "chrome/browser/cocoa/cookies_window_controller.h"
-#import "chrome/browser/cocoa/geolocation_exceptions_window_controller.h"
+#import "chrome/browser/cocoa/simple_content_exceptions_window_controller.h"
 #import "chrome/browser/cocoa/l10n_util.h"
+#import "chrome/browser/cocoa/tab_view_picker_table.h"
 #import "chrome/browser/geolocation/geolocation_content_settings_map.h"
+#import "chrome/browser/geolocation/geolocation_exceptions_table_model.h"
 #import "chrome/browser/host_content_settings_map.h"
+#import "chrome/browser/notifications/desktop_notification_service.h"
+#import "chrome/browser/notifications/notification_exceptions_table_model.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "grit/locale_settings.h"
+#include "grit/generated_resources.h"
 
 namespace {
 
-// Index of the "enabled" and "disabled" radio group settings in all tabs except
-// for the cookies tab.
-const NSInteger kEnabledIndex = 0;
-const NSInteger kDisabledIndex = 1;
-
-// Indices of the various cookie settings in the cookie radio group.
-const NSInteger kCookieEnabledIndex = 0;
-const NSInteger kCookieAskIndex = 1;
-const NSInteger kCookieDisabledIndex = 2;
-
 // Stores the currently visible content settings dialog, if any.
 ContentSettingsDialogController* g_instance = nil;
-
-// Indices of the various geolocation settings in the geolocation radio group.
-const NSInteger kGeolocationEnabledIndex = 0;
-const NSInteger kGeolocationAskIndex = 1;
-const NSInteger kGeolocationDisabledIndex = 2;
-
-// Walks views in top-down order, wraps each to their current width, and moves
-// the latter ones down to prevernt overlaps.
-CGFloat VerticallyReflowGroup(NSArray* views) {
-  views = [views sortedArrayUsingFunction:cocoa_l10n_util::CompareFrameY
-                                  context:NULL];
-  CGFloat localVerticalShift = 0;
-  for (NSInteger index = [views count] - 1; index >= 0; --index) {
-    NSView* view = [views objectAtIndex:index];
-    NSSize delta = cocoa_l10n_util::WrapOrSizeToFit(view);
-    localVerticalShift += delta.height;
-    if (localVerticalShift) {
-      NSPoint origin = [view frame].origin;
-      origin.y -= localVerticalShift;
-      [view setFrameOrigin:origin];
-    }
-  }
-  return localVerticalShift;
-}
 
 }  // namespace
 
@@ -70,15 +41,9 @@ CGFloat VerticallyReflowGroup(NSArray* views) {
 - (void)selectTab:(ContentSettingsType)settingsType;
 - (void)showExceptionsForType:(ContentSettingsType)settingsType;
 
-// Properties that the radio groups and checkboxes are bound to.
-@property(assign, nonatomic) NSInteger cookieSettingIndex;
-@property(assign, nonatomic) BOOL blockThirdPartyCookies;
-@property(assign, nonatomic) BOOL clearSiteDataOnExit;
-@property(assign, nonatomic) NSInteger imagesEnabledIndex;
-@property(assign, nonatomic) NSInteger javaScriptEnabledIndex;
-@property(assign, nonatomic) NSInteger popupsEnabledIndex;
-@property(assign, nonatomic) NSInteger pluginsEnabledIndex;
-@property(assign, nonatomic) NSInteger geolocationSettingIndex;
+// Callback when preferences are changed. |prefName| is the name of the
+// pref that has changed.
+- (void)prefChanged:(std::wstring*)prefName;
 
 @end
 
@@ -88,32 +53,49 @@ namespace ContentSettingsDialogControllerInternal {
 class PrefObserverBridge : public NotificationObserver {
  public:
   PrefObserverBridge(ContentSettingsDialogController* controller)
-      : controller_(controller) {}
+      : controller_(controller), disabled_(false) {}
 
   virtual ~PrefObserverBridge() {}
 
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
-    if (type == NotificationType::PREF_CHANGED) {
-      std::wstring* pref_name = Details<std::wstring>(details).ptr();
-      if (*pref_name == prefs::kClearSiteDataOnExit) {
-        // Update UI.
-        [controller_ setClearSiteDataOnExit:[controller_ clearSiteDataOnExit]];
-      }
+    if (!disabled_ && type == NotificationType::PREF_CHANGED) {
+      [controller_ prefChanged:Details<std::wstring>(details).ptr()];
     }
+  }
+
+  void SetDisabled(bool disabled) {
+    disabled_ = disabled;
   }
 
  private:
   ContentSettingsDialogController* controller_;  // weak, owns us
+  bool disabled_;  // true if notifications should be ignored.
+};
+
+// A C++ utility class to disable notifications for PrefsObserverBridge.
+// The intended usage is to create on the stack.
+class PrefObserverDisabler {
+ public:
+  PrefObserverDisabler(PrefObserverBridge *bridge) : bridge_(bridge) {
+    bridge_->SetDisabled(true);
+  }
+
+  ~PrefObserverDisabler() {
+    bridge_->SetDisabled(false);
+  }
+
+ private:
+  PrefObserverBridge *bridge_;
 };
 
 }  // ContentSettingsDialogControllerInternal
 
 @implementation ContentSettingsDialogController
 
-+(id)showContentSettingsForType:(ContentSettingsType)settingsType
-                        profile:(Profile*)profile {
++ (id)showContentSettingsForType:(ContentSettingsType)settingsType
+                         profile:(Profile*)profile {
   profile = profile->GetOriginalProfile();
   if (!g_instance)
     g_instance = [[self alloc] initWithProfile:profile];
@@ -135,6 +117,7 @@ class PrefObserverBridge : public NotificationObserver {
 
   [g_instance selectTab:settingsType];
   [g_instance showWindow:nil];
+  [g_instance closeExceptionsSheet];
   return g_instance;
 }
 
@@ -149,25 +132,68 @@ class PrefObserverBridge : public NotificationObserver {
     observer_.reset(
         new ContentSettingsDialogControllerInternal::PrefObserverBridge(self));
     clearSiteDataOnExit_.Init(prefs::kClearSiteDataOnExit,
-                              profile->GetPrefs(), observer_.get());
+                              profile_->GetPrefs(), observer_.get());
+
+    // Manually observe notifications for preferences that are grouped in
+    // the HostContentSettingsMap or GeolocationContentSettingsMap.
+    PrefService* prefs = profile_->GetPrefs();
+    prefs->AddPrefObserver(prefs::kBlockThirdPartyCookies, observer_.get());
+    prefs->AddPrefObserver(prefs::kDefaultContentSettings, observer_.get());
+    prefs->AddPrefObserver(prefs::kGeolocationDefaultContentSetting,
+                           observer_.get());
 
     // We don't need to observe changes in this value.
     lastSelectedTab_.Init(prefs::kContentSettingsWindowLastTabIndex,
-                          profile->GetPrefs(), NULL);
+                          profile_->GetPrefs(), NULL);
   }
   return self;
 }
 
+- (void)dealloc {
+  if (profile_) {
+    PrefService* prefs = profile_->GetPrefs();
+    prefs->RemovePrefObserver(prefs::kBlockThirdPartyCookies, observer_.get());
+    prefs->RemovePrefObserver(prefs::kDefaultContentSettings, observer_.get());
+    prefs->RemovePrefObserver(prefs::kGeolocationDefaultContentSetting,
+                              observer_.get());
+  }
+
+  [super dealloc];
+}
+
+- (void)closeExceptionsSheet {
+  NSWindow* attachedSheet = [[self window] attachedSheet];
+  if (attachedSheet) {
+    [NSApp endSheet:attachedSheet];
+  }
+}
+
 - (void)awakeFromNib {
   DCHECK([self window]);
+  DCHECK(tabView_);
+  DCHECK(tabViewPicker_);
   DCHECK_EQ(self, [[self window] delegate]);
 
   // Adapt views to potentially long localized strings.
   CGFloat windowDelta = 0;
   for (NSTabViewItem* tab in [tabView_ tabViewItems]) {
+    NSArray* subviews = [[tab view] subviews];
     windowDelta = MAX(windowDelta,
-                      VerticallyReflowGroup([[tab view] subviews]));
+                      cocoa_l10n_util::VerticallyReflowGroup(subviews));
+
+    for (NSView* view in subviews) {
+      // Since the tab pane is in a horizontal resizer in IB, it's convenient
+      // to give all the subviews flexible width so that their sizes are
+      // autoupdated in IB. However, in chrome, the subviews shouldn't have
+      // flexible widths as this looks weird.
+      [view setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
+    }
   }
+
+  NSString* label =
+      l10n_util::GetNSStringWithFixup(IDS_CONTENT_SETTINGS_FEATURES_LABEL);
+  label = [label stringByReplacingOccurrencesOfString:@":" withString:@""];
+  [tabViewPicker_ setHeading:label];
 
   NSRect frame = [[self window] frame];
   frame.origin.y -= windowDelta;
@@ -208,11 +234,12 @@ class PrefObserverBridge : public NotificationObserver {
   ContentSetting setting = CONTENT_SETTING_DEFAULT;
   switch (value) {
     case kCookieEnabledIndex:  setting = CONTENT_SETTING_ALLOW; break;
-    case kCookieAskIndex:      setting = CONTENT_SETTING_ASK;   break;
     case kCookieDisabledIndex: setting = CONTENT_SETTING_BLOCK; break;
     default:
       NOTREACHED();
   }
+  ContentSettingsDialogControllerInternal::PrefObserverDisabler
+      disabler(observer_.get());
   profile_->GetHostContentSettingsMap()->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_COOKIES,
       setting);
@@ -221,9 +248,8 @@ class PrefObserverBridge : public NotificationObserver {
 - (NSInteger)cookieSettingIndex {
   switch (profile_->GetHostContentSettingsMap()->GetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_COOKIES)) {
-    case CONTENT_SETTING_ALLOW: return kCookieEnabledIndex;
-    case CONTENT_SETTING_ASK:   return kCookieAskIndex;
-    case CONTENT_SETTING_BLOCK: return kCookieDisabledIndex;
+    case CONTENT_SETTING_ALLOW:        return kCookieEnabledIndex;
+    case CONTENT_SETTING_BLOCK:        return kCookieDisabledIndex;
     default:
       NOTREACHED();
       return kCookieEnabledIndex;
@@ -237,6 +263,8 @@ class PrefObserverBridge : public NotificationObserver {
 
 - (void)setBlockThirdPartyCookies:(BOOL)value {
   HostContentSettingsMap* settingsMap = profile_->GetHostContentSettingsMap();
+  ContentSettingsDialogControllerInternal::PrefObserverDisabler
+      disabler(observer_.get());
   settingsMap->SetBlockThirdPartyCookies(value);
 }
 
@@ -245,7 +273,9 @@ class PrefObserverBridge : public NotificationObserver {
 }
 
 - (void)setClearSiteDataOnExit:(BOOL)value {
-  return clearSiteDataOnExit_.SetValue(value);
+  ContentSettingsDialogControllerInternal::PrefObserverDisabler
+      disabler(observer_.get());
+  clearSiteDataOnExit_.SetValue(value);
 }
 
 // Shows the cookies controller.
@@ -304,18 +334,38 @@ class PrefObserverBridge : public NotificationObserver {
 - (IBAction)showGeolocationExceptions:(id)sender {
   GeolocationContentSettingsMap* settingsMap =
       profile_->GetGeolocationContentSettingsMap();
-  [GeolocationExceptionsWindowController showWindowWithSettingsMap:settingsMap];
+  GeolocationExceptionsTableModel* model =  // Freed by window controller.
+      new GeolocationExceptionsTableModel(settingsMap);
+  [[SimpleContentExceptionsWindowController controllerWithTableModel:model]
+      attachSheetTo:[self window]];
+}
+
+- (IBAction)showNotificationsExceptions:(id)sender {
+  DesktopNotificationService* service =
+      profile_->GetDesktopNotificationService();
+  NotificationExceptionsTableModel* model =  // Freed by window controller.
+      new NotificationExceptionsTableModel(service);
+  [[SimpleContentExceptionsWindowController controllerWithTableModel:model]
+      attachSheetTo:[self window]];
 }
 
 - (void)showExceptionsForType:(ContentSettingsType)settingsType {
   HostContentSettingsMap* settingsMap = profile_->GetHostContentSettingsMap();
-  [ContentExceptionsWindowController showForType:settingsType
-                                     settingsMap:settingsMap];
+  HostContentSettingsMap* offTheRecordSettingsMap =
+      profile_->HasOffTheRecordProfile() ?
+          profile_->GetOffTheRecordProfile()->GetHostContentSettingsMap() :
+          NULL;
+  [[ContentExceptionsWindowController controllerForType:settingsType
+                                            settingsMap:settingsMap
+                                         otrSettingsMap:offTheRecordSettingsMap]
+      attachSheetTo:[self window]];
 }
 
 - (void)setImagesEnabledIndex:(NSInteger)value {
-  ContentSetting setting = value == kEnabledIndex ?
+  ContentSetting setting = value == kContentSettingsEnabledIndex ?
       CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK;
+  ContentSettingsDialogControllerInternal::PrefObserverDisabler
+      disabler(observer_.get());
   profile_->GetHostContentSettingsMap()->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_IMAGES, setting);
 }
@@ -325,12 +375,14 @@ class PrefObserverBridge : public NotificationObserver {
   bool enabled =
       settingsMap->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_IMAGES) ==
       CONTENT_SETTING_ALLOW;
-  return enabled ? kEnabledIndex : kDisabledIndex;
+  return enabled ? kContentSettingsEnabledIndex : kContentSettingsDisabledIndex;
 }
 
 - (void)setJavaScriptEnabledIndex:(NSInteger)value {
-  ContentSetting setting = value == kEnabledIndex ?
+  ContentSetting setting = value == kContentSettingsEnabledIndex ?
       CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK;
+  ContentSettingsDialogControllerInternal::PrefObserverDisabler
+      disabler(observer_.get());
   profile_->GetHostContentSettingsMap()->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_JAVASCRIPT, setting);
 }
@@ -340,12 +392,14 @@ class PrefObserverBridge : public NotificationObserver {
   bool enabled =
       settingsMap->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_JAVASCRIPT) ==
       CONTENT_SETTING_ALLOW;
-  return enabled ? kEnabledIndex : kDisabledIndex;
+  return enabled ? kContentSettingsEnabledIndex : kContentSettingsDisabledIndex;
 }
 
 - (void)setPluginsEnabledIndex:(NSInteger)value {
-  ContentSetting setting = value == kEnabledIndex ?
+  ContentSetting setting = value == kContentSettingsEnabledIndex ?
       CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK;
+  ContentSettingsDialogControllerInternal::PrefObserverDisabler
+      disabler(observer_.get());
   profile_->GetHostContentSettingsMap()->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_PLUGINS, setting);
 }
@@ -355,12 +409,14 @@ class PrefObserverBridge : public NotificationObserver {
   bool enabled =
       settingsMap->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS) ==
       CONTENT_SETTING_ALLOW;
-  return enabled ? kEnabledIndex : kDisabledIndex;
+  return enabled ? kContentSettingsEnabledIndex : kContentSettingsDisabledIndex;
 }
 
 - (void)setPopupsEnabledIndex:(NSInteger)value {
-  ContentSetting setting = value == kEnabledIndex ?
+  ContentSetting setting = value == kContentSettingsEnabledIndex ?
       CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK;
+  ContentSettingsDialogControllerInternal::PrefObserverDisabler
+      disabler(observer_.get());
   profile_->GetHostContentSettingsMap()->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_POPUPS, setting);
 }
@@ -370,7 +426,7 @@ class PrefObserverBridge : public NotificationObserver {
   bool enabled =
       settingsMap->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_POPUPS) ==
       CONTENT_SETTING_ALLOW;
-  return enabled ? kEnabledIndex : kDisabledIndex;
+  return enabled ? kContentSettingsEnabledIndex : kContentSettingsDisabledIndex;
 }
 
 - (void)setGeolocationSettingIndex:(NSInteger)value {
@@ -382,6 +438,8 @@ class PrefObserverBridge : public NotificationObserver {
     default:
       NOTREACHED();
   }
+  ContentSettingsDialogControllerInternal::PrefObserverDisabler
+      disabler(observer_.get());
   profile_->GetGeolocationContentSettingsMap()->SetDefaultContentSetting(
       setting);
 }
@@ -396,6 +454,72 @@ class PrefObserverBridge : public NotificationObserver {
     default:
       NOTREACHED();
       return kGeolocationAskIndex;
+  }
+}
+
+- (void)setNotificationsSettingIndex:(NSInteger)value {
+  ContentSetting setting = CONTENT_SETTING_DEFAULT;
+  switch (value) {
+    case kNotificationsEnabledIndex:  setting = CONTENT_SETTING_ALLOW; break;
+    case kNotificationsAskIndex:      setting = CONTENT_SETTING_ASK;   break;
+    case kNotificationsDisabledIndex: setting = CONTENT_SETTING_BLOCK; break;
+    default:
+      NOTREACHED();
+  }
+  ContentSettingsDialogControllerInternal::PrefObserverDisabler
+      disabler(observer_.get());
+  profile_->GetDesktopNotificationService()->SetDefaultContentSetting(
+      setting);
+}
+
+- (NSInteger)notificationsSettingIndex {
+  ContentSetting setting =
+      profile_->GetDesktopNotificationService()->GetDefaultContentSetting();
+  switch (setting) {
+    case CONTENT_SETTING_ALLOW: return kNotificationsEnabledIndex;
+    case CONTENT_SETTING_ASK:   return kNotificationsAskIndex;
+    case CONTENT_SETTING_BLOCK: return kNotificationsDisabledIndex;
+    default:
+      NOTREACHED();
+      return kGeolocationAskIndex;
+  }
+}
+
+// Callback when preferences are changed. |prefName| is the name of the
+// pref that has changed and should not be NULL.
+- (void)prefChanged:(std::wstring*)prefName {
+  DCHECK(prefName);
+  if (!prefName) return;
+  if (*prefName == prefs::kClearSiteDataOnExit) {
+    [self willChangeValueForKey:@"clearSiteDataOnExit"];
+    [self didChangeValueForKey:@"clearSiteDataOnExit"];
+  }
+  if (*prefName == prefs::kBlockThirdPartyCookies) {
+    [self willChangeValueForKey:@"blockThirdPartyCookies"];
+    [self didChangeValueForKey:@"blockThirdPartyCookies"];
+  }
+  if (*prefName == prefs::kDefaultContentSettings) {
+    // We don't know exactly which setting has changed, so we'll tickle all
+    // of the properties that apply to kDefaultContentSettings.  This will
+    // keep the UI up-to-date.
+    [self willChangeValueForKey:@"cookieSettingIndex"];
+    [self didChangeValueForKey:@"cookieSettingIndex"];
+    [self willChangeValueForKey:@"imagesEnabledIndex"];
+    [self didChangeValueForKey:@"imagesEnabledIndex"];
+    [self willChangeValueForKey:@"javaScriptEnabledIndex"];
+    [self didChangeValueForKey:@"javaScriptEnabledIndex"];
+    [self willChangeValueForKey:@"pluginsEnabledIndex"];
+    [self didChangeValueForKey:@"pluginsEnabledIndex"];
+    [self willChangeValueForKey:@"popupsEnabledIndex"];
+    [self didChangeValueForKey:@"popupsEnabledIndex"];
+  }
+  if (*prefName == prefs::kGeolocationDefaultContentSetting) {
+    [self willChangeValueForKey:@"geolocationSettingIndex"];
+    [self didChangeValueForKey:@"geolocationSettingIndex"];
+  }
+  if (*prefName == prefs::kDesktopNotificationDefaultContentSetting) {
+    [self willChangeValueForKey:@"notificationsSettingIndex"];
+    [self didChangeValueForKey:@"notificationsSettingIndex"];
   }
 }
 

@@ -1,50 +1,41 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/tabs/dragged_tab_view.h"
 
-#include "base/callback.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/views/tabs/native_view_photobooth.h"
-#include "chrome/browser/views/tabs/tab_renderer.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "third_party/skia/include/core/SkShader.h"
 #include "views/widget/widget.h"
+
 #if defined(OS_WIN)
 #include "views/widget/widget_win.h"
 #elif defined(OS_LINUX)
 #include "views/widget/widget_gtk.h"
 #endif
 
-const int kTransparentAlpha = 200;
-const int kOpaqueAlpha = 255;
-const int kDragFrameBorderSize = 2;
-const int kTwiceDragFrameBorderSize = 2 * kDragFrameBorderSize;
-const float kScalingFactor = 0.5;
-const int kAnimateToBoundsDurationMs = 150;
+static const int kTransparentAlpha = 200;
+static const int kOpaqueAlpha = 255;
+static const int kDragFrameBorderSize = 2;
+static const int kTwiceDragFrameBorderSize = 2 * kDragFrameBorderSize;
+static const float kScalingFactor = 0.5;
 static const SkColor kDraggedTabBorderColor = SkColorSetRGB(103, 129, 162);
 
 ////////////////////////////////////////////////////////////////////////////////
 // DraggedTabView, public:
 
-DraggedTabView::DraggedTabView(TabContents* datasource,
+DraggedTabView::DraggedTabView(views::View* renderer,
                                const gfx::Point& mouse_tab_offset,
                                const gfx::Size& contents_size,
-                               bool mini)
-    : renderer_(new TabRenderer),
-      attached_(false),
+                               const gfx::Size& min_size)
+    : renderer_(renderer),
       show_contents_on_drag_(true),
       mouse_tab_offset_(mouse_tab_offset),
-      attached_tab_size_(TabRenderer::GetMinimumSelectedSize()),
+      tab_size_(min_size),
       photobooth_(NULL),
-      contents_size_(contents_size),
-      close_animation_(this) {
+      contents_size_(contents_size) {
   set_parent_owned(false);
-
-  renderer_->UpdateData(datasource, false, false);
-  renderer_->set_mini(mini);
 
 #if defined(OS_WIN)
   container_.reset(new views::WidgetWin);
@@ -71,15 +62,13 @@ DraggedTabView::DraggedTabView(TabContents* datasource,
 }
 
 DraggedTabView::~DraggedTabView() {
-  if (close_animation_.IsAnimating())
-    close_animation_.Stop();
   GetParent()->RemoveChildView(this);
   container_->CloseNow();
 }
 
 void DraggedTabView::MoveTo(const gfx::Point& screen_point) {
   int x;
-  if (UILayoutIsRightToLeft() && !attached_) {
+  if (base::i18n::IsRTL()) {
     // On RTL locales, a dragged tab (when it is not attached to a tab strip)
     // is rendered using a right-to-left orientation so we should calculate the
     // window position differently.
@@ -108,23 +97,9 @@ void DraggedTabView::MoveTo(const gfx::Point& screen_point) {
 #endif
 }
 
-void DraggedTabView::Attach(int selected_width) {
-  attached_ = true;
-  photobooth_ = NULL;
-#if defined(OS_WIN)
-  container_->SetOpacity(kOpaqueAlpha);
-#endif
-  Resize(selected_width);
-}
-
-void DraggedTabView::Resize(int width) {
-  attached_tab_size_.set_width(width);
-  ResizeContainer();
-  Update();
-}
-
-void DraggedTabView::Detach(NativeViewPhotobooth* photobooth) {
-  attached_ = false;
+void DraggedTabView::SetTabWidthAndUpdate(int width,
+                                          NativeViewPhotobooth* photobooth) {
+  tab_size_.set_width(width);
   photobooth_ = photobooth;
 #if defined(OS_WIN)
   container_->SetOpacity(kTransparentAlpha);
@@ -144,86 +119,30 @@ void DraggedTabView::Update() {
 #endif
 }
 
-void DraggedTabView::AnimateToBounds(const gfx::Rect& bounds,
-                                     Callback0::Type* callback) {
-  animation_callback_.reset(callback);
-
-  gfx::Rect initial_bounds;
-  GetWidget()->GetBounds(&initial_bounds, true);
-  animation_start_bounds_ = initial_bounds;
-  animation_end_bounds_ = bounds;
-
-  close_animation_.SetSlideDuration(kAnimateToBoundsDurationMs);
-  close_animation_.SetTweenType(SlideAnimation::EASE_OUT);
-  if (!close_animation_.IsShowing()) {
-    close_animation_.Reset();
-    close_animation_.Show();
-  }
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// DraggedTabView, AnimationDelegate implementation:
-
-void DraggedTabView::AnimationProgressed(const Animation* animation) {
-  int delta_x = (animation_end_bounds_.x() - animation_start_bounds_.x());
-  int x = animation_start_bounds_.x() +
-      static_cast<int>(delta_x * animation->GetCurrentValue());
-  int y = animation_end_bounds_.y();
-#if defined(OS_WIN)
-  container_->SetWindowPos(NULL, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
-#else
-  gfx::Rect bounds;
-  container_->GetBounds(&bounds, true);
-  container_->SetBounds(gfx::Rect(x, y, bounds.width(), bounds.height()));
-#endif
-}
-
-void DraggedTabView::AnimationEnded(const Animation* animation) {
-  animation_callback_->Run();
-}
-
-void DraggedTabView::AnimationCanceled(const Animation* animation) {
-  AnimationEnded(animation);
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // DraggedTabView, views::View overrides:
 
 void DraggedTabView::Paint(gfx::Canvas* canvas) {
-  if (attached_) {
-    PaintAttachedTab(canvas);
-  } else {
-    if (show_contents_on_drag_) {
-      PaintDetachedView(canvas);
-    } else {
-      PaintFocusRect(canvas);
-    }
-  }
+  if (show_contents_on_drag_)
+    PaintDetachedView(canvas);
+  else
+    PaintFocusRect(canvas);
 }
 
 void DraggedTabView::Layout() {
-  if (attached_) {
-    gfx::Size prefsize = GetPreferredSize();
-    renderer_->SetBounds(0, 0, prefsize.width(), prefsize.height());
-  } else {
-    int left = 0;
-    if (UILayoutIsRightToLeft())
-      left = GetPreferredSize().width() - attached_tab_size_.width();
-    // The renderer_'s width should be attached_tab_size_.width() in both LTR
-    // and RTL locales. Wrong width will cause the wrong positioning of the tab
-    // view in dragging. Please refer to http://crbug.com/6223 for details.
-    renderer_->SetBounds(left, 0, attached_tab_size_.width(),
-                         attached_tab_size_.height());
-  }
+  int left = 0;
+  if (base::i18n::IsRTL())
+    left = GetPreferredSize().width() - tab_size_.width();
+  // The renderer_'s width should be tab_size_.width() in both LTR and RTL
+  // locales. Wrong width will cause the wrong positioning of the tab view in
+  // dragging. Please refer to http://crbug.com/6223 for details.
+  renderer_->SetBounds(left, 0, tab_size_.width(), tab_size_.height());
 }
 
 gfx::Size DraggedTabView::GetPreferredSize() {
-  if (attached_)
-    return attached_tab_size_;
-
-  int width = std::max(attached_tab_size_.width(), contents_size_.width()) +
+  int width = std::max(tab_size_.width(), contents_size_.width()) +
       kTwiceDragFrameBorderSize;
-  int height = attached_tab_size_.height() + kDragFrameBorderSize +
+  int height = tab_size_.height() + kDragFrameBorderSize +
       contents_size_.height();
   return gfx::Size(width, height);
 }
@@ -231,25 +150,21 @@ gfx::Size DraggedTabView::GetPreferredSize() {
 ////////////////////////////////////////////////////////////////////////////////
 // DraggedTabView, private:
 
-void DraggedTabView::PaintAttachedTab(gfx::Canvas* canvas) {
-  renderer_->ProcessPaint(canvas);
-}
-
 void DraggedTabView::PaintDetachedView(gfx::Canvas* canvas) {
   gfx::Size ps = GetPreferredSize();
-  gfx::Canvas scale_canvas(ps.width(), ps.height(), false);
+  gfx::CanvasSkia scale_canvas(ps.width(), ps.height(), false);
   SkBitmap& bitmap_device = const_cast<SkBitmap&>(
       scale_canvas.getTopPlatformDevice().accessBitmap(true));
   bitmap_device.eraseARGB(0, 0, 0, 0);
 
   scale_canvas.FillRectInt(kDraggedTabBorderColor, 0,
-      attached_tab_size_.height() - kDragFrameBorderSize,
-      ps.width(), ps.height() - attached_tab_size_.height());
+      tab_size_.height() - kDragFrameBorderSize,
+      ps.width(), ps.height() - tab_size_.height());
   int image_x = kDragFrameBorderSize;
-  int image_y = attached_tab_size_.height();
+  int image_y = tab_size_.height();
   int image_w = ps.width() - kTwiceDragFrameBorderSize;
   int image_h =
-      ps.height() - kTwiceDragFrameBorderSize - attached_tab_size_.height();
+      ps.height() - kTwiceDragFrameBorderSize - tab_size_.height();
   scale_canvas.FillRectInt(SK_ColorBLACK, image_x, image_y, image_w, image_h);
   photobooth_->PaintScreenshotIntoCanvas(
       &scale_canvas,
@@ -279,7 +194,7 @@ void DraggedTabView::PaintDetachedView(gfx::Canvas* canvas) {
   rc.fTop = 0;
   rc.fRight = SkIntToScalar(ps.width());
   rc.fBottom = SkIntToScalar(ps.height());
-  canvas->drawRect(rc, paint);
+  canvas->AsCanvasSkia()->drawRect(rc, paint);
 }
 
 void DraggedTabView::PaintFocusRect(gfx::Canvas* canvas) {
@@ -304,5 +219,5 @@ void DraggedTabView::ResizeContainer() {
 }
 
 int DraggedTabView::ScaleValue(int value) {
-  return attached_ ? value : static_cast<int>(value * kScalingFactor);
+  return static_cast<int>(value * kScalingFactor);
 }

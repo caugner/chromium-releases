@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 namespace views {
 
 class WidgetWin;
+class TabLayout;
 
 class NativeTabbedPaneWin : public NativeControlWin,
                             public NativeTabbedPaneWrapper {
@@ -33,6 +34,7 @@ class NativeTabbedPaneWin : public NativeControlWin,
   virtual View* GetSelectedTab();
   virtual View* GetView();
   virtual void SetFocus();
+  virtual gfx::Size GetPreferredSize();
   virtual gfx::NativeView GetTestingHandle() const;
 
   // NativeControlWin overrides.
@@ -47,13 +49,17 @@ class NativeTabbedPaneWin : public NativeControlWin,
   virtual FocusTraversable* GetFocusTraversable();
   virtual void ViewHierarchyChanged(bool is_add, View *parent, View *child);
 
+  virtual Widget* child_widget() {
+    return reinterpret_cast<Widget*>(content_window_);
+  }
+
  private:
   // Called upon creation of native control to initialize tabs that are added
   // before the native control is created.
   void InitializeTabs();
 
   // Adds a tab with the given content to native control at the given index.
-  void AddNativeTab(int index, const std::wstring& title, View* contents);
+  void AddNativeTab(int index, const std::wstring& title);
 
   // Changes the contents view to the view associated with the tab at |index|.
   // |invoke_listener| controls if this methold should invoke the
@@ -65,6 +71,9 @@ class NativeTabbedPaneWin : public NativeControlWin,
 
   // The tabbed-pane we are bound to.
   TabbedPane* tabbed_pane_;
+
+  // The layout manager we use for managing our tabs.
+  TabLayout* tab_layout_manager_;
 
   // The views associated with the different tabs.
   std::vector<View*> tab_views_;

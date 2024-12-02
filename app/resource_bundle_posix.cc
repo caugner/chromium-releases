@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,9 @@
 
 #include "app/l10n_util.h"
 #include "base/data_pack.h"
+#include "base/lock.h"
 #include "base/logging.h"
+#include "base/stl_util-inl.h"
 #include "base/string16.h"
 #include "base/string_piece.h"
 #include "gfx/font.h"
@@ -30,10 +32,16 @@ ResourceBundle::~ResourceBundle() {
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   FreeGdkPixBufs();
 #endif
-  delete locale_resources_data_;
-  locale_resources_data_ = NULL;
+  UnloadLocaleResources();
+  STLDeleteContainerPointers(data_packs_.begin(),
+                             data_packs_.end());
   delete resources_data_;
   resources_data_ = NULL;
+}
+
+void ResourceBundle::UnloadLocaleResources() {
+  delete locale_resources_data_;
+  locale_resources_data_ = NULL;
 }
 
 // static
@@ -43,11 +51,16 @@ RefCountedStaticMemory* ResourceBundle::LoadResourceBytes(
   return module->GetStaticMemory(resource_id);
 }
 
-base::StringPiece ResourceBundle::GetRawDataResource(int resource_id) {
+base::StringPiece ResourceBundle::GetRawDataResource(int resource_id) const {
   DCHECK(resources_data_);
   base::StringPiece data;
   if (!resources_data_->GetStringPiece(resource_id, &data)) {
     if (!locale_resources_data_->GetStringPiece(resource_id, &data)) {
+      for (size_t i = 0; i < data_packs_.size(); ++i) {
+        if (data_packs_[i]->GetStringPiece(resource_id, &data))
+          return data;
+      }
+
       return base::StringPiece();
     }
   }
@@ -80,13 +93,16 @@ string16 ResourceBundle::GetLocalizedString(int message_id) {
   return msg;
 }
 
-std::string ResourceBundle::LoadResources(const std::wstring& pref_locale) {
+void ResourceBundle::LoadCommonResources() {
   DCHECK(!resources_data_) << "chrome.pak already loaded";
   FilePath resources_file_path = GetResourcesFilePath();
   CHECK(!resources_file_path.empty()) << "chrome.pak not found";
   resources_data_ = LoadResourcesDataPak(resources_file_path);
   CHECK(resources_data_) << "failed to load chrome.pak";
+}
 
+std::string ResourceBundle::LoadLocaleResources(
+    const std::wstring& pref_locale) {
   DCHECK(!locale_resources_data_) << "locale.pak already loaded";
   std::string app_locale = l10n_util::GetApplicationLocale(pref_locale);
   FilePath locale_file_path = GetLocaleFilePath(app_locale);

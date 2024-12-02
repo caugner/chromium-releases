@@ -8,6 +8,7 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/debugger/devtools_manager.h"
+#include "chrome/browser/debugger/devtools_toggle_action.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/profile.h"
@@ -28,6 +29,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/wm_ipc.h"
+#include "third_party/cros/chromeos_wm_ipc_enums.h"
 #endif
 
 using views::Widget;
@@ -40,10 +42,14 @@ const int ExtensionPopup::kMinHeight = 25;
 const int ExtensionPopup::kMaxWidth = 800;
 const int ExtensionPopup::kMaxHeight = 600;
 
+namespace {
+
 // The width, in pixels, of the black-border on a popup.
 const int kPopupBorderWidth = 1;
 
 const int kPopupBubbleCornerRadius = BubbleBorder::GetCornerRadius() / 2;
+
+}  // namespace
 
 ExtensionPopup::ExtensionPopup(ExtensionHost* host,
                                views::Widget* frame,
@@ -71,7 +77,8 @@ ExtensionPopup::ExtensionPopup(ExtensionHost* host,
       border_view_(NULL),
       popup_chrome_(chrome),
       observer_(observer),
-      anchor_position_(arrow_location) {
+      anchor_position_(arrow_location),
+      instance_lifetime_(new InternalRefCounter()){
   AddRef();  // Balanced in Close();
   set_delegate(this);
   host->view()->SetContainer(this);
@@ -111,12 +118,10 @@ ExtensionPopup::ExtensionPopup(ExtensionHost* host,
 #if defined(OS_CHROMEOS)
     chromeos::WmIpc::instance()->SetWindowType(
         border_widget_->GetNativeView(),
-        chromeos::WmIpc::WINDOW_TYPE_CHROME_INFO_BUBBLE,
+        chromeos::WM_IPC_WINDOW_CHROME_INFO_BUBBLE,
         NULL);
 #endif
-    border_ = new BubbleBorder;
-    border_->set_arrow_location(arrow_location);
-
+    border_ = new BubbleBorder(arrow_location);
     border_view_ = new views::View;
     border_view_->set_background(new BubbleBackground(border_));
 
@@ -138,6 +143,16 @@ ExtensionPopup::~ExtensionPopup() {
   // The widget is set to delete on destroy, so no leak here.
   if (border_widget_)
     border_widget_->Close();
+}
+
+void ExtensionPopup::SetArrowPosition(
+    BubbleBorder::ArrowLocation arrow_location) {
+  DCHECK_NE(BubbleBorder::NONE, arrow_location) <<
+    "Extension popups must be positioned relative to an arrow.";
+
+  anchor_position_ = arrow_location;
+  if (border_)
+    border_->set_arrow_location(anchor_position_);
 }
 
 void ExtensionPopup::Hide() {
@@ -164,19 +179,14 @@ void ExtensionPopup::Show(bool activate) {
 }
 
 void ExtensionPopup::ResizeToView() {
-  // We'll be sizing ourselves to this size shortly, but wait until we
-  // know our position to do it.
-  gfx::Size new_size = view()->size();
+  if (observer_)
+    observer_->ExtensionPopupResized(this);
 
-  // Convert rect to screen coordinates.
-  gfx::Rect rect = relative_to_;
+  gfx::Rect rect = GetOuterBounds();
+
   gfx::Point origin = rect.origin();
-  views::View::ConvertPointToScreen(frame_->GetRootView(), &origin);
-  rect.set_origin(origin);
-
-  rect = GetOuterBounds(rect, new_size);
-  origin = rect.origin();
   views::View::ConvertPointToView(NULL, frame_->GetRootView(), &origin);
+
   if (border_widget_) {
     // Set the bubble-chrome widget according to the outer bounds of the entire
     // popup.
@@ -191,6 +201,7 @@ void ExtensionPopup::ResizeToView() {
     origin.set_x(origin.x() + border_insets.left() + kPopupBubbleCornerRadius);
     origin.set_y(origin.y() + border_insets.top() + kPopupBubbleCornerRadius);
 
+    gfx::Size new_size = view()->size();
     SetBounds(origin.x(), origin.y(), new_size.width(), new_size.height());
   } else {
     SetBounds(origin.x(), origin.y(), rect.width(), rect.height());
@@ -245,7 +256,8 @@ void ExtensionPopup::Observe(NotificationType type,
           registrar_.Add(this, NotificationType::DEVTOOLS_WINDOW_CLOSING,
               Source<Profile>(extension_host_->profile()));
           DevToolsManager::GetInstance()->ToggleDevToolsWindow(
-              extension_host_->render_view_host(), true);
+              extension_host_->render_view_host(),
+              DEVTOOLS_TOGGLE_ACTION_SHOW_CONSOLE);
         }
       }
       break;
@@ -281,12 +293,31 @@ void ExtensionPopup::OnExtensionPreferredSizeChanged(ExtensionView* view) {
       std::max(kMinWidth, std::min(kMaxWidth, sz.width())),
       std::max(kMinHeight, std::min(kMaxHeight, sz.height())));
 
+  // If popup_chrome_ == RECTANGLE_CHROME, the border is drawn in the client
+  // area of the ExtensionView, rather than in a window which sits behind it.
+  // In this case, the actual size of the view must be enlarged so that the
+  // web contents portion of the view gets its full PreferredSize area.
+  if (view->border()) {
+    gfx::Insets border_insets;
+    view->border()->GetInsets(&border_insets);
+
+    gfx::Rect bounds(view->bounds());
+    gfx::Size size(bounds.size());
+    size.Enlarge(border_insets.width(), border_insets.height());
+    view->SetBounds(bounds.x(), bounds.y(), size.width(), size.height());
+  }
+
   ResizeToView();
 }
 
-gfx::Rect ExtensionPopup::GetOuterBounds(const gfx::Rect& position_relative_to,
-                                         const gfx::Size& contents_size) const {
-  gfx::Size adjusted_size = contents_size;
+gfx::Rect ExtensionPopup::GetOuterBounds() const {
+  gfx::Rect relative_rect = relative_to_;
+  gfx::Point origin = relative_rect.origin();
+  views::View::ConvertPointToScreen(frame_->GetRootView(), &origin);
+  relative_rect.set_origin(origin);
+
+  gfx::Size contents_size = view()->size();
+
   // If the popup has a bubble-chrome, then let the BubbleBorder compute
   // the bounds.
   if (BUBBLE_CHROME == popup_chrome_) {
@@ -294,27 +325,25 @@ gfx::Rect ExtensionPopup::GetOuterBounds(const gfx::Rect& position_relative_to,
     // claim. Since we can't clip the ExtensionView's corners, we need to
     // increase the inset by half the corner radius as well as lying about the
     // size of the contents size to compensate.
-    adjusted_size.Enlarge(2 * kPopupBubbleCornerRadius,
+    contents_size.Enlarge(2 * kPopupBubbleCornerRadius,
                           2 * kPopupBubbleCornerRadius);
-    return border_->GetBounds(position_relative_to, adjusted_size);
+    return border_->GetBounds(relative_rect, contents_size);
   }
-
-  // Otherwise, enlarge the bounds by the size of the local border.
-  gfx::Insets border_insets;
-  view()->border()->GetInsets(&border_insets);
-  adjusted_size.Enlarge(border_insets.width(), border_insets.height());
 
   // Position the bounds according to the location of the |anchor_position_|.
   int y;
-  if ((anchor_position_ == BubbleBorder::TOP_LEFT) ||
-      (anchor_position_ == BubbleBorder::TOP_RIGHT)) {
-    y = position_relative_to.bottom();
-  } else {
-    y = position_relative_to.y() - adjusted_size.height();
-  }
+  if (BubbleBorder::is_arrow_on_top(anchor_position_))
+    y = relative_rect.bottom();
+  else
+    y = relative_rect.y() - contents_size.height();
 
-  return gfx::Rect(position_relative_to.x(), y, adjusted_size.width(),
-                   adjusted_size.height());
+  int x;
+  if (BubbleBorder::is_arrow_on_left(anchor_position_))
+    x = relative_rect.x();
+  else
+    x = relative_rect.x() - contents_size.width();
+
+  return gfx::Rect(x, y, contents_size.width(), contents_size.height());
 }
 
 // static
@@ -368,7 +397,22 @@ void ExtensionPopup::Close() {
     return;
   closing_ = true;
   DetachFromBrowser();
+
   if (observer_)
-    observer_->ExtensionPopupClosed(this);
+    observer_->ExtensionPopupIsClosing(this);
+
   Release();  // Balanced in ctor.
+}
+
+void ExtensionPopup::Release() {
+  bool final_release = instance_lifetime_->HasOneRef();
+  instance_lifetime_->Release();
+  if (final_release) {
+    DCHECK(closing_) << "ExtensionPopup to be destroyed before being closed.";
+    ExtensionPopup::Observer* observer = observer_;
+    delete this;
+
+    if (observer)
+      observer->ExtensionPopupClosed(this);
+  }
 }

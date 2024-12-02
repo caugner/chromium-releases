@@ -13,6 +13,9 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebWorkerClient.h"
 
 namespace WebKit {
+class WebApplicationCacheHost;
+class WebApplicationCacheHostClient;
+class WebFrame;
 class WebWorker;
 }
 
@@ -36,8 +39,19 @@ class WebWorkerClientProxy : public WebKit::WebWorkerClient {
       const WebKit::WebString& error_message,
       int line_number,
       const WebKit::WebString& source_url);
+  // TODO(caseq): The overload before is obsolete and is preserved for
+  // WebKit/chromium compatibility only (pure virtual is base class).
+  // Should be removed once WebKit part is updated.
   virtual void postConsoleMessageToWorkerObject(
       int destination,
+      int source,
+      int type,
+      int level,
+      const WebKit::WebString& message,
+      int line_number,
+      const WebKit::WebString& source_url) {
+  }
+  virtual void postConsoleMessageToWorkerObject(
       int source,
       int type,
       int level,
@@ -57,12 +71,25 @@ class WebWorkerClientProxy : public WebKit::WebWorkerClient {
     return NULL;
   }
 
+  virtual WebKit::WebApplicationCacheHost* createApplicationCacheHost(
+      WebKit::WebApplicationCacheHostClient* client);
+
+  virtual bool allowDatabase(WebKit::WebFrame* frame,
+                             const WebKit::WebString& name,
+                             const WebKit::WebString& display_name,
+                             unsigned long estimated_size) {
+    // TODO(jochen): Check content settings whether access to web databases is
+    // allowed.
+    return true;
+  }
+
   void EnsureWorkerContextTerminates();
 
  private:
   bool Send(IPC::Message* message);
 
   int route_id_;
+  int appcache_host_id_;
   WebWorkerStubBase* stub_;
   ScopedRunnableMethodFactory<WebWorkerClientProxy> kill_process_factory_;
 

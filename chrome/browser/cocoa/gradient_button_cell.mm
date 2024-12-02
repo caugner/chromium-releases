@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,13 @@
 #include "base/logging.h"
 #import "base/scoped_nsobject.h"
 #import "chrome/browser/browser_theme_provider.h"
+#import "chrome/browser/cocoa/image_utils.h"
 #import "chrome/browser/cocoa/themed_window.h"
 #include "grit/theme_resources.h"
 #import "third_party/GTM/AppKit/GTMNSColor+Luminance.h"
 
 @interface GradientButtonCell (Private)
 - (void)sharedInit;
-- (void)drawUnderlayImageWithFrame:(NSRect)cellFrame
-                            inView:(NSView*)controlView;
 
 // Get drawing parameters for a given cell frame in a given view. The inner
 // frame is the one required by |-drawInteriorWithFrame:inView:|. The inner and
@@ -89,6 +88,14 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
   return self;
 }
 
+- (void)dealloc {
+  if (trackingArea_) {
+    [[self controlView] removeTrackingArea:trackingArea_];
+    trackingArea_.reset();
+  }
+  [super dealloc];
+}
+
 - (NSGradient*)gradientForHoverAlpha:(CGFloat)hoverAlpha
                             isThemed:(BOOL)themed {
   CGFloat startAlpha = 0.6 + 0.3 * hoverAlpha;
@@ -121,13 +128,12 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
   shouldTheme_ = shouldTheme;
 }
 
-- (NSImage*)underlayImage {
-  return underlayImage_;
+- (NSImage*)overlayImage {
+  return overlayImage_.get();
 }
 
-- (void)setUnderlayImage:(NSImage*)image {
-  underlayImage_.reset([image retain]);
-
+- (void)setOverlayImage:(NSImage*)image {
+  overlayImage_.reset([image retain]);
   [[self controlView] setNeedsDisplay:YES];
 }
 
@@ -157,6 +163,7 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
   if (showOnly) {
     if (trackingArea_.get()) {
       [self setShowsBorderOnlyWhileMouseInside:NO];
+      [[self controlView] removeTrackingArea:trackingArea_];
     }
     trackingArea_.reset([[NSTrackingArea alloc]
                           initWithRect:[[self controlView]
@@ -228,8 +235,9 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
     [innerPath fill];
   } else {
     if (showClickedGradient) {
-      NSGradient* clickedGradient;
-      if (isFlatButton) {
+      NSGradient* clickedGradient = nil;
+      if (isFlatButton &&
+          [self tag] == kStandardButtonTypeWithLimitedClickFeedback) {
         clickedGradient = gradient;
       } else {
         clickedGradient = themeProvider ? themeProvider->GetNSGradient(
@@ -267,6 +275,10 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
 
     [NSGraphicsContext restoreGraphicsState];
   }
+
+  // Don't draw anything else for disabled flat buttons.
+  if (isFlatButton && ![self isEnabled])
+    return;
 
   // Draw the outer stroke.
   NSColor* strokeColor = nil;
@@ -401,54 +413,43 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
 
     if (isTemplate) {
       scoped_nsobject<NSShadow> shadow([[NSShadow alloc] init]);
-      NSColor* shadowColor = [color gtm_legibleTextColor];
-      shadowColor = [shadowColor colorWithAlphaComponent:0.25];
-      [shadow.get() setShadowColor:shadowColor];
-      [shadow.get() setShadowOffset:NSMakeSize(0, -1.0)];
+      [shadow setShadowColor:[NSColor colorWithCalibratedWhite:0.96 alpha:1.0]];
+      [shadow setShadowOffset:NSMakeSize(0.0, -1.0)];
       [shadow setShadowBlurRadius:1.0];
       [shadow set];
     }
-
-    [self drawUnderlayImageWithFrame:cellFrame inView:controlView];
 
     CGContextBeginTransparencyLayer(context, 0);
     NSRect imageRect = NSZeroRect;
     imageRect.size = [[self image] size];
     NSRect drawRect = [self imageRectForBounds:cellFrame];
-    [[self image] setFlipped:[controlView isFlipped]];
     [[self image] drawInRect:drawRect
                     fromRect:imageRect
                    operation:NSCompositeSourceOver
-                    fraction:[self isEnabled] ? 1.0 : 0.5];
-    if (isTemplate) {
-      if (color) {
-        [color set];
-        NSRectFillUsingOperation(cellFrame, NSCompositeSourceAtop);
-      }
+                    fraction:[self isEnabled] ? 1.0 : 0.5
+                neverFlipped:YES];
+    if (isTemplate && color) {
+      [color set];
+      NSRectFillUsingOperation(cellFrame, NSCompositeSourceAtop);
     }
-
     CGContextEndTransparencyLayer(context);
+
     [NSGraphicsContext restoreGraphicsState];
   } else {
-    [self drawUnderlayImageWithFrame:cellFrame inView:controlView];
-
-    // NSCell draws these uncentered for some reason, probably because of the
-    // of control in the xib
+    // NSCell draws these off-center for some reason, probably because of the
+    // positioning of the control in the xib.
     [super drawInteriorWithFrame:NSOffsetRect(cellFrame, 0, 1)
                           inView:controlView];
   }
-}
 
-- (void)drawUnderlayImageWithFrame:(NSRect)cellFrame
-                            inView:(NSView*)controlView {
-  if (underlayImage_) {
+  if (overlayImage_) {
     NSRect imageRect = NSZeroRect;
-    imageRect.size = [underlayImage_ size];
-    [underlayImage_ setFlipped:[controlView isFlipped]];
-    [underlayImage_ drawInRect:[self imageRectForBounds:cellFrame]
-                      fromRect:imageRect
-                     operation:NSCompositeSourceOver
-                      fraction:[self isEnabled] ? 1.0 : 0.5];
+    imageRect.size = [overlayImage_ size];
+    [overlayImage_ drawInRect:[self imageRectForBounds:cellFrame]
+                     fromRect:imageRect
+                    operation:NSCompositeSourceOver
+                     fraction:[self isEnabled] ? 1.0 : 0.5
+                 neverFlipped:YES];
   }
 }
 

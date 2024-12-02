@@ -13,25 +13,21 @@
 #include "base/atomicops.h"
 #include "base/lock.h"
 #include "base/scoped_ptr.h"
-#include "chrome/browser/sync/util/event_sys.h"
+#include "chrome/browser/sync/util/channel.h"
+#include "chrome/common/deprecated/event_sys.h"
 
 namespace browser_sync {
 
-class AuthWatcher;
-class GaiaAuthenticator;
 class ScopedStatusLockWithNotify;
 class ServerConnectionManager;
 class Syncer;
 class SyncerThread;
-class TalkMediator;
 struct AllStatusEvent;
 struct AuthWatcherEvent;
-struct GaiaAuthEvent;
 struct ServerConnectionEvent;
 struct SyncerEvent;
-struct TalkMediatorEvent;
 
-class AllStatus {
+class AllStatus : public ChannelEventHandler<SyncerEvent> {
   friend class ScopedStatusLockWithNotify;
  public:
   typedef EventChannel<AllStatusEvent, Lock> Channel;
@@ -99,23 +95,10 @@ class AllStatus {
   void WatchConnectionManager(ServerConnectionManager* conn_mgr);
   void HandleServerConnectionEvent(const ServerConnectionEvent& event);
 
-  // Both WatchAuthenticator/HandleGaiaAuthEvent and WatchAuthWatcher/
-  // HandleAuthWatcherEventachieve have the same goal; use only one of the
-  // following two. (The AuthWatcher is watched under Windows; the
-  // GaiaAuthenticator is watched under Mac/Linux.)
-  void WatchAuthenticator(GaiaAuthenticator* gaia);
-  void HandleGaiaAuthEvent(const GaiaAuthEvent& event);
-
-  void WatchAuthWatcher(AuthWatcher* auth_watcher);
   void HandleAuthWatcherEvent(const AuthWatcherEvent& event);
 
   void WatchSyncerThread(SyncerThread* syncer_thread);
-  void HandleSyncerEvent(const SyncerEvent& event);
-
-  void WatchTalkMediator(
-      const browser_sync::TalkMediator* talk_mediator);
-  void HandleTalkMediatorEvent(
-      const browser_sync::TalkMediatorEvent& event);
+  void HandleChannelEvent(const SyncerEvent& event);
 
   // Returns a string description of the SyncStatus (currently just the ascii
   // version of the enum). Will LOG(FATAL) if the status us out of range.
@@ -130,6 +113,12 @@ class AllStatus {
 
   // This uses AllStatus' max_consecutive_errors as the error count
   int GetRecommendedDelay(int base_delay) const;
+
+  void SetNotificationsEnabled(bool notifications_enabled);
+
+  void IncrementNotificationsSent();
+
+  void IncrementNotificationsReceived();
 
  protected:
   typedef std::map<Syncer*, EventListenerHookup*> Syncers;
@@ -146,9 +135,7 @@ class AllStatus {
   Status status_;
   Channel* const channel_;
   scoped_ptr<EventListenerHookup> conn_mgr_hookup_;
-  scoped_ptr<EventListenerHookup> gaia_hookup_;
-  scoped_ptr<EventListenerHookup> authwatcher_hookup_;
-  scoped_ptr<EventListenerHookup> syncer_thread_hookup_;
+  scoped_ptr<ChannelHookup<SyncerEvent> > syncer_thread_hookup_;
   scoped_ptr<EventListenerHookup> diskfull_hookup_;
   scoped_ptr<EventListenerHookup> talk_mediator_hookup_;
 

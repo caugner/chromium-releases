@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -74,33 +74,6 @@ void InsertBeforeExtension(FilePath* path, const FilePath::StringType& suffix) {
   }
 
   value.insert(last_dot, suffix);
-}
-
-void ReplaceExtension(FilePath* path, const FilePath::StringType& extension) {
-  FilePath::StringType clean_extension;
-  // If the new extension is "" or ".", then we will just remove the current
-  // extension.
-  if (!extension.empty() &&
-      extension != FilePath::StringType(&kExtensionSeparator, 1)) {
-    if (extension[0] != kExtensionSeparator)
-      clean_extension.append(&kExtensionSeparator, 1);
-    clean_extension.append(extension);
-  }
-
-  FilePath::StringType& value =
-      const_cast<FilePath::StringType&>(path->value());
-  const FilePath::StringType::size_type last_dot =
-      value.rfind(kExtensionSeparator);
-  const FilePath::StringType::size_type last_separator =
-      value.find_last_of(FilePath::StringType(FilePath::kSeparators));
-
-  // Erase the current extension, if any.
-  if ((last_dot > last_separator ||
-      last_separator == FilePath::StringType::npos) &&
-      last_dot != FilePath::StringType::npos)
-    value.erase(last_dot);
-
-  value.append(clean_extension);
 }
 
 bool ContentsEqual(const FilePath& filename1, const FilePath& filename2) {
@@ -186,17 +159,27 @@ bool ReadFileToString(const FilePath& path, std::string* contents) {
   char buf[1 << 16];
   size_t len;
   while ((len = fread(buf, 1, sizeof(buf), file)) > 0) {
-    contents->append(buf, len);
+    if (contents)
+      contents->append(buf, len);
   }
   CloseFile(file);
 
   return true;
 }
 
+bool IsDirectoryEmpty(const FilePath& dir_path) {
+  FileEnumerator files(dir_path, false,
+      static_cast<FileEnumerator::FILE_TYPE>(
+          FileEnumerator::FILES | FileEnumerator::DIRECTORIES));
+  if (files.Next().value().empty())
+    return true;
+  return false;
+}
+
 FILE* CreateAndOpenTemporaryFile(FilePath* path) {
   FilePath directory;
   if (!GetTempDir(&directory))
-    return false;
+    return NULL;
 
   return CreateAndOpenTemporaryFileInDir(directory, path);
 }
@@ -285,6 +268,24 @@ int64 ComputeDirectorySize(const FilePath& root_path) {
   return running_size;
 }
 
+int64 ComputeFilesSize(const FilePath& directory,
+                       const FilePath::StringType& pattern) {
+  int64 running_size = 0;
+  FileEnumerator file_iter(directory, false, FileEnumerator::FILES, pattern);
+  for (FilePath current = file_iter.Next(); !current.empty();
+       current = file_iter.Next()) {
+    FileEnumerator::FindInfo info;
+    file_iter.GetFindInfo(&info);
+#if defined(OS_WIN)
+    LARGE_INTEGER li = { info.nFileSizeLow, info.nFileSizeHigh };
+    running_size += li.QuadPart;
+#else
+    running_size += info.stat.st_size;
+#endif
+  }
+  return running_size;
+}
+
 ///////////////////////////////////////////////
 // MemoryMappedFile
 
@@ -357,7 +358,7 @@ void AppendToPath(std::wstring* path, const std::wstring& new_ending) {
     return;  // Don't crash in this function in release builds.
   }
 
-  if (!EndsWithSeparator(*path))
+  if (!EndsWithSeparator(FilePath(*path)))
     path->push_back(FilePath::kSeparators[0]);
   path->append(new_ending);
 }
@@ -372,16 +373,6 @@ bool CopyDirectory(const std::wstring& from_path, const std::wstring& to_path,
 bool Delete(const std::wstring& path, bool recursive) {
   return Delete(FilePath::FromWStringHack(path), recursive);
 }
-bool EndsWithSeparator(const std::wstring& path) {
-  return EndsWithSeparator(FilePath::FromWStringHack(path));
-}
-bool GetCurrentDirectory(std::wstring* path_str) {
-  FilePath path;
-  if (!GetCurrentDirectory(&path))
-    return false;
-  *path_str = path.ToWStringHack();
-  return true;
-}
 std::wstring GetFileExtensionFromPath(const std::wstring& path) {
   FilePath::StringType extension =
       GetFileExtensionFromPath(FilePath::FromWStringHack(path));
@@ -391,24 +382,11 @@ std::wstring GetFileExtensionFromPath(const std::wstring& path) {
   return UTF8ToWide(extension);
 #endif
 }
-bool GetFileInfo(const std::wstring& file_path, FileInfo* results) {
-  return GetFileInfo(FilePath::FromWStringHack(file_path), results);
-}
 std::wstring GetFilenameFromPath(const std::wstring& path) {
-  if (path.empty() || EndsWithSeparator(path))
+  if (path.empty() || EndsWithSeparator(FilePath::FromWStringHack(path)))
     return std::wstring();
 
   return FilePath::FromWStringHack(path).BaseName().ToWStringHack();
-}
-bool GetFileSize(const std::wstring& file_path, int64* file_size) {
-  return GetFileSize(FilePath::FromWStringHack(file_path), file_size);
-}
-bool GetTempDir(std::wstring* path_str) {
-  FilePath path;
-  if (!GetTempDir(&path))
-    return false;
-  *path_str = path.ToWStringHack();
-  return true;
 }
 FILE* OpenFile(const std::wstring& filename, const char* mode) {
   return OpenFile(FilePath::FromWStringHack(filename), mode);
@@ -422,16 +400,6 @@ void UpOneDirectory(std::wstring* dir) {
   // If there is no separator, we will get back kCurrentDirectory.
   // In this case don't change |dir|.
   if (directory.value() != FilePath::kCurrentDirectory)
-    *dir = directory.ToWStringHack();
-}
-void UpOneDirectoryOrEmpty(std::wstring* dir) {
-  FilePath path = FilePath::FromWStringHack(*dir);
-  FilePath directory = path.DirName();
-  // If there is no separator, we will get back kCurrentDirectory.
-  // In this case, clear dir.
-  if (directory == path || directory.value() == FilePath::kCurrentDirectory)
-    dir->clear();
-  else
     *dir = directory.ToWStringHack();
 }
 int WriteFile(const std::wstring& filename, const char* data, int size) {

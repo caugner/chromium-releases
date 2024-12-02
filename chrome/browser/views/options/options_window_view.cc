@@ -53,6 +53,7 @@ class OptionsWindowView : public views::View,
   virtual void TabSelectedAt(int index);
 
   // views::View overrides:
+  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
   virtual void Layout();
   virtual gfx::Size GetPreferredSize();
 
@@ -77,7 +78,7 @@ class OptionsWindowView : public views::View,
   // The last page the user was on when they opened the Options window.
   IntegerPrefMember last_selected_page_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(OptionsWindowView);
+  DISALLOW_COPY_AND_ASSIGN(OptionsWindowView);
 };
 
 // static
@@ -170,6 +171,11 @@ void OptionsWindowView::TabSelectedAt(int index) {
 ///////////////////////////////////////////////////////////////////////////////
 // OptionsWindowView, views::View overrides:
 
+bool OptionsWindowView::GetAccessibleRole(AccessibilityTypes::Role* role) {
+  *role = AccessibilityTypes::ROLE_CLIENT;
+  return true;
+}
+
 void OptionsWindowView::Layout() {
   tabs_->SetBounds(kDialogPadding, kDialogPadding,
                    width() - (2 * kDialogPadding),
@@ -177,9 +183,9 @@ void OptionsWindowView::Layout() {
 }
 
 gfx::Size OptionsWindowView::GetPreferredSize() {
-  return gfx::Size(views::Window::GetLocalizedContentsSize(
-      IDS_OPTIONS_DIALOG_WIDTH_CHARS,
-      IDS_OPTIONS_DIALOG_HEIGHT_LINES));
+  gfx::Size size(tabs_->GetPreferredSize());
+  size.Enlarge(2 * kDialogPadding, 2 * kDialogPadding);
+  return size;
 }
 
 void OptionsWindowView::ViewHierarchyChanged(bool is_add,
@@ -196,6 +202,8 @@ void OptionsWindowView::ViewHierarchyChanged(bool is_add,
 
 void OptionsWindowView::Init() {
   tabs_ = new views::TabbedPane;
+  tabs_->SetAccessibleName(l10n_util::GetStringF(IDS_OPTIONS_DIALOG_TITLE,
+                           l10n_util::GetString(IDS_PRODUCT_NAME)));
   tabs_->SetListener(this);
   AddChildView(tabs_);
 

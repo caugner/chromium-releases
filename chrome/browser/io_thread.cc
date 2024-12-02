@@ -10,27 +10,42 @@
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/gpu_process_host.h"
 #include "chrome/browser/net/chrome_net_log.h"
-#include "chrome/browser/net/dns_global.h"
+#include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/passive_log_collector.h"
-#include "chrome/browser/net/url_fetcher.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/url_fetcher.h"
 #include "net/base/mapped_host_resolver.h"
 #include "net/base/host_cache.h"
 #include "net/base/host_resolver.h"
 #include "net/base/host_resolver_impl.h"
 #include "net/base/net_util.h"
-#include "net/base/network_change_notifier.h"
 #include "net/http/http_auth_filter.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_auth_handler_negotiate.h"
 
 namespace {
 
-net::HostResolver* CreateGlobalHostResolver(
-    net::NetworkChangeNotifier* network_change_notifier) {
+net::HostResolver* CreateGlobalHostResolver() {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+
+  size_t parallelism = net::HostResolver::kDefaultParallelism;
+
+  // Use the concurrency override from the command-line, if any.
+  if (command_line.HasSwitch(switches::kHostResolverParallelism)) {
+    std::string s =
+        command_line.GetSwitchValueASCII(switches::kHostResolverParallelism);
+
+    // Parse the switch (it should be a positive integer formatted as decimal).
+    int n;
+    if (StringToInt(s, &n) && n > 0) {
+      parallelism = static_cast<size_t>(n);
+    } else {
+      LOG(ERROR) << "Invalid switch for host resolver parallelism: " << s;
+    }
+  }
+
   net::HostResolver* global_host_resolver =
-      net::CreateSystemHostResolver(network_change_notifier);
+      net::CreateSystemHostResolver(parallelism);
 
   // Determine if we should disable IPv6 support.
   if (!command_line.HasSwitch(switches::kEnableIPv6)) {
@@ -77,21 +92,54 @@ net::HostResolver* CreateGlobalHostResolver(
   return remapped_resolver;
 }
 
+class LoggingNetworkChangeObserver
+    : public net::NetworkChangeNotifier::Observer {
+ public:
+  // |net_log| must remain valid throughout our lifetime.
+  explicit LoggingNetworkChangeObserver(net::NetLog* net_log)
+      : net_log_(net_log) {
+    net::NetworkChangeNotifier::AddObserver(this);
+  }
+
+  ~LoggingNetworkChangeObserver() {
+    net::NetworkChangeNotifier::RemoveObserver(this);
+  }
+
+  virtual void OnIPAddressChanged() {
+    LOG(INFO) << "Observed a change to the network IP addresses";
+
+    net::NetLog::Source global_source;
+
+    // TODO(eroman): We shouldn't need to assign an ID to this source, since
+    //               conceptually it is the "global event stream". However
+    //               currently the javascript does a grouping on source id, so
+    //               the display will look weird if we don't give it one.
+    global_source.id = net_log_->NextID();
+
+    net_log_->AddEntry(net::NetLog::TYPE_NETWORK_IP_ADDRESSSES_CHANGED,
+                       base::TimeTicks::Now(),
+                       global_source,
+                       net::NetLog::PHASE_NONE,
+                       NULL);
+  }
+
+ private:
+  net::NetLog* net_log_;
+  DISALLOW_COPY_AND_ASSIGN(LoggingNetworkChangeObserver);
+};
+
 }  // namespace
 
 // The IOThread object must outlive any tasks posted to the IO thread before the
 // Quit task.
-template <>
-struct RunnableMethodTraits<IOThread> {
-  void RetainCallee(IOThread* /* io_thread */) {}
-  void ReleaseCallee(IOThread* /* io_thread */) {}
-};
+DISABLE_RUNNABLE_METHOD_REFCOUNT(IOThread);
 
 IOThread::IOThread()
     : BrowserProcessSubThread(ChromeThread::IO),
       globals_(NULL),
+      speculative_interceptor_(NULL),
       prefetch_observer_(NULL),
-      dns_master_(NULL) {}
+      predictor_(NULL) {}
 
 IOThread::~IOThread() {
   // We cannot rely on our base class to stop the thread since we want our
@@ -105,20 +153,21 @@ IOThread::Globals* IOThread::globals() {
   return globals_;
 }
 
-void IOThread::InitDnsMaster(
+void IOThread::InitNetworkPredictor(
     bool prefetching_enabled,
-    base::TimeDelta max_queue_delay,
+    base::TimeDelta max_dns_queue_delay,
     size_t max_concurrent,
-    const chrome_common_net::NameList& hostnames_to_prefetch,
-    ListValue* referral_list) {
+    const chrome_common_net::UrlList& startup_urls,
+    ListValue* referral_list,
+    bool preconnect_enabled) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   message_loop()->PostTask(
       FROM_HERE,
       NewRunnableMethod(
           this,
-          &IOThread::InitDnsMasterOnIOThread,
-          prefetching_enabled, max_queue_delay, max_concurrent,
-          hostnames_to_prefetch, referral_list));
+          &IOThread::InitNetworkPredictorOnIOThread,
+          prefetching_enabled, max_dns_queue_delay, max_concurrent,
+          startup_urls, referral_list, preconnect_enabled));
 }
 
 void IOThread::ChangedToOnTheRecord() {
@@ -137,26 +186,41 @@ void IOThread::Init() {
   globals_ = new Globals;
 
   globals_->net_log.reset(new ChromeNetLog());
-  globals_->network_change_notifier.reset(
-      net::NetworkChangeNotifier::CreateDefaultNetworkChangeNotifier());
-  globals_->host_resolver =
-      CreateGlobalHostResolver(globals_->network_change_notifier.get());
-  globals_->http_auth_handler_factory.reset(CreateDefaultAuthHandlerFactory());
+
+  // Add an observer that will emit network change events to the ChromeNetLog.
+  // Assuming NetworkChangeNotifier dispatches in FIFO order, we should be
+  // logging the network change before other IO thread consumers respond to it.
+  network_change_observer_.reset(
+      new LoggingNetworkChangeObserver(globals_->net_log.get()));
+
+  globals_->host_resolver = CreateGlobalHostResolver();
+  globals_->http_auth_handler_factory.reset(CreateDefaultAuthHandlerFactory(
+      globals_->host_resolver));
 }
 
 void IOThread::CleanUp() {
+  // This must be reset before the ChromeNetLog is destroyed.
+  network_change_observer_.reset();
+
+  // If any child processes are still running, terminate them and
+  // and delete the BrowserChildProcessHost instances to release whatever
+  // IO thread only resources they are referencing.
+  BrowserChildProcessHost::TerminateAll();
+
   // Not initialized in Init().  May not be initialized.
-  if (dns_master_) {
-    DCHECK(prefetch_observer_);
+  if (predictor_) {
+    predictor_->Shutdown();
 
-    dns_master_->Shutdown();
-
-    // TODO(willchan): Stop reference counting DnsMaster.  It's owned by
+    // TODO(willchan): Stop reference counting Predictor.  It's owned by
     // IOThread now.
-    dns_master_->Release();
-    dns_master_ = NULL;
-    chrome_browser_net::FreeDnsPrefetchResources();
+    predictor_->Release();
+    predictor_ = NULL;
+    chrome_browser_net::FreePredictorResources();
   }
+
+  // Deletion will unregister this interceptor.
+  delete speculative_interceptor_;
+  speculative_interceptor_ = NULL;
 
   // Not initialized in Init().  May not be initialized.
   if (prefetch_observer_) {
@@ -177,17 +241,7 @@ void IOThread::CleanUp() {
   delete globals_;
   globals_ = NULL;
 
-  // URLFetcher and URLRequest instances must NOT outlive the IO thread.
-  //
-  // Strictly speaking, URLFetcher's CheckForLeaks() should be done on the
-  // UI thread. However, since there _shouldn't_ be any instances left
-  // at this point, it shouldn't be a race.
-  //
-  // We check URLFetcher first, since if it has leaked then an associated
-  // URLRequest will also have leaked. However it is more useful to
-  // crash showing the callstack of URLFetcher's allocation than its
-  // URLRequest member.
-  base::LeakTracker<URLFetcher>::CheckForLeaks();
+  // URLRequest instances must NOT outlive the IO thread.
   base::LeakTracker<URLRequest>::CheckForLeaks();
 
   BrowserProcessSubThread::CleanUp();
@@ -202,7 +256,8 @@ void IOThread::CleanUpAfterMessageLoopDestruction() {
   BrowserProcessSubThread::CleanUpAfterMessageLoopDestruction();
 }
 
-net::HttpAuthHandlerFactory* IOThread::CreateDefaultAuthHandlerFactory() {
+net::HttpAuthHandlerFactory* IOThread::CreateDefaultAuthHandlerFactory(
+    net::HostResolver* resolver) {
   net::HttpAuthFilterWhitelist* auth_filter = NULL;
 
   // Get the whitelist information from the command line, create an
@@ -218,6 +273,19 @@ net::HttpAuthHandlerFactory* IOThread::CreateDefaultAuthHandlerFactory() {
     auth_filter->SetWhitelist(auth_server_whitelist);
   }
 
+  // Set the flag that enables or disables the Negotiate auth handler.
+  static const bool kNegotiateAuthEnabledDefault = true;
+
+  bool negotiate_auth_enabled = kNegotiateAuthEnabledDefault;
+  if (command_line.HasSwitch(switches::kExperimentalEnableNegotiateAuth)) {
+    std::string enable_negotiate_auth = command_line.GetSwitchValueASCII(
+        switches::kExperimentalEnableNegotiateAuth);
+    // Enabled if no value, or value is 'true'.  Disabled otherwise.
+    negotiate_auth_enabled =
+        enable_negotiate_auth.empty() ||
+        (StringToLowerASCII(enable_negotiate_auth) == "true");
+  }
+
   net::HttpAuthHandlerRegistryFactory* registry_factory =
       net::HttpAuthHandlerFactory::CreateDefault();
 
@@ -229,51 +297,67 @@ net::HttpAuthHandlerFactory* IOThread::CreateDefaultAuthHandlerFactory() {
                                           globals_->url_security_manager.get());
   registry_factory->SetURLSecurityManager("negotiate",
                                           globals_->url_security_manager.get());
-
-  // Configure the Negotiate settings for the Kerberos SPN.
-  // TODO(cbentzel): Read the related IE registry settings on Windows builds.
-  // TODO(cbentzel): Ugly use of static_cast here.
-  net::HttpAuthHandlerNegotiate::Factory* negotiate_factory =
-      static_cast<net::HttpAuthHandlerNegotiate::Factory*>(
-          registry_factory->GetSchemeFactory("negotiate"));
-  DCHECK(negotiate_factory);
-  if (command_line.HasSwitch(switches::kDisableAuthNegotiateCnameLookup))
-    negotiate_factory->set_disable_cname_lookup(true);
-  if (command_line.HasSwitch(switches::kEnableAuthNegotiatePort))
-    negotiate_factory->set_use_port(true);
-
+  if (negotiate_auth_enabled) {
+    // Configure the Negotiate settings for the Kerberos SPN.
+    // TODO(cbentzel): Read the related IE registry settings on Windows builds.
+    // TODO(cbentzel): Ugly use of static_cast here.
+    net::HttpAuthHandlerNegotiate::Factory* negotiate_factory =
+        static_cast<net::HttpAuthHandlerNegotiate::Factory*>(
+            registry_factory->GetSchemeFactory("negotiate"));
+    DCHECK(negotiate_factory);
+    negotiate_factory->set_host_resolver(resolver);
+    if (command_line.HasSwitch(switches::kDisableAuthNegotiateCnameLookup))
+      negotiate_factory->set_disable_cname_lookup(true);
+    if (command_line.HasSwitch(switches::kEnableAuthNegotiatePort))
+      negotiate_factory->set_use_port(true);
+  } else {
+    // Disable the Negotiate authentication handler.
+    registry_factory->RegisterSchemeFactory("negotiate", NULL);
+  }
   return registry_factory;
 }
 
-void IOThread::InitDnsMasterOnIOThread(
+void IOThread::InitNetworkPredictorOnIOThread(
     bool prefetching_enabled,
-    base::TimeDelta max_queue_delay,
+    base::TimeDelta max_dns_queue_delay,
     size_t max_concurrent,
-    chrome_common_net::NameList hostnames_to_prefetch,
-    ListValue* referral_list) {
+    const chrome_common_net::UrlList& startup_urls,
+    ListValue* referral_list,
+    bool preconnect_enabled) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
-  CHECK(!dns_master_);
+  CHECK(!predictor_);
 
-  chrome_browser_net::EnableDnsPrefetch(prefetching_enabled);
+  chrome_browser_net::EnablePredictor(prefetching_enabled);
 
-  dns_master_ = new chrome_browser_net::DnsMaster(
-      globals_->host_resolver, max_queue_delay, max_concurrent);
-  dns_master_->AddRef();
+  predictor_ = new chrome_browser_net::Predictor(
+      globals_->host_resolver,
+      max_dns_queue_delay,
+      max_concurrent,
+      preconnect_enabled);
+  predictor_->AddRef();
 
-  DCHECK(!prefetch_observer_);
-  prefetch_observer_ = chrome_browser_net::CreatePrefetchObserver();
-  globals_->host_resolver->AddObserver(prefetch_observer_);
+  // TODO(jar): Until connection notification and DNS observation handling are
+  // properly combined into a learning model, we'll only use one observation
+  // mechanism or the other.
+  if (preconnect_enabled) {
+    DCHECK(!speculative_interceptor_);
+    speculative_interceptor_ = new chrome_browser_net::ConnectInterceptor;
+  } else {
+    DCHECK(!prefetch_observer_);
+    prefetch_observer_ = chrome_browser_net::CreateResolverObserver();
+    globals_->host_resolver->AddObserver(prefetch_observer_);
+  }
 
-  FinalizeDnsPrefetchInitialization(
-      dns_master_, prefetch_observer_, hostnames_to_prefetch, referral_list);
+  FinalizePredictorInitialization(
+      predictor_, prefetch_observer_, startup_urls, referral_list);
 }
 
 void IOThread::ChangedToOnTheRecordOnIOThread() {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
-  if (dns_master_) {
+  if (predictor_) {
     // Destroy all evidence of our OTR session.
-    dns_master_->DnsMaster::DiscardAllResults();
+    predictor_->Predictor::DiscardAllResults();
   }
 
   // Clear the host cache to avoid showing entries from the OTR session

@@ -33,6 +33,10 @@ class AutocompleteResultViewModel {
 
   // Returns true if the index is hovered.
   virtual bool IsHoveredIndex(size_t index) const = 0;
+
+  // Returns the special-case icon we should use for the given index, or NULL
+  // if we should use the default icon.
+  virtual const SkBitmap* GetSpecialIcon(size_t index) const = 0;
 };
 
 // A view representing the contents of the autocomplete popup.
@@ -45,7 +49,7 @@ class AutocompletePopupContentsView : public views::View,
                                 AutocompleteEditView* edit_view,
                                 AutocompleteEditModel* edit_model,
                                 Profile* profile,
-                                const BubblePositioner* bubble_positioner);
+                                const views::View* location_bar);
   virtual ~AutocompletePopupContentsView();
 
   // Returns the bounds the popup should be shown at. This is the display bounds
@@ -63,6 +67,7 @@ class AutocompletePopupContentsView : public views::View,
   // Overridden from AutocompleteResultViewModel:
   virtual bool IsSelectedIndex(size_t index) const;
   virtual bool IsHoveredIndex(size_t index) const;
+  virtual const SkBitmap* GetSpecialIcon(size_t index) const;
 
   // Overridden from AnimationDelegate:
   virtual void AnimationProgressed(const Animation* animation);
@@ -125,8 +130,8 @@ class AutocompletePopupContentsView : public views::View,
   // The edit view that invokes us.
   AutocompleteEditView* edit_view_;
 
-  // An object that tells the popup how to position itself.
-  const BubblePositioner* bubble_positioner_;
+  // An object that the popup positions itself against.
+  const views::View* location_bar_;
 
   // Our border, which can compute our desired bounds.
   const BubbleBorder* bubble_border_;

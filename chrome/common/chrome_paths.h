@@ -22,15 +22,25 @@ enum {
   DIR_USER_DESKTOP,             // Directory that correspond to the desktop.
   DIR_RESOURCES,                // Directory containing separate file resources
                                 // used by Chrome at runtime.
-  DIR_BOOKMARK_MANAGER,         // Directory containing the bookmark manager.
+  DIR_SHARED_RESOURCES,         // Directory containing js and css files used
+                                // by DOMUI and component extensions.
   DIR_INSPECTOR,                // Directory where web inspector is located.
-  DIR_NET_INTERNALS,            // Directory where net internals is located.
   DIR_APP_DICTIONARIES,         // Directory where the global dictionaries are.
   DIR_USER_DOCUMENTS,           // Directory for a user's "My Documents".
   DIR_DEFAULT_DOWNLOADS_SAFE,   // Directory for a user's
                                 // "My Documents/Downloads".
   DIR_DEFAULT_DOWNLOADS,        // Directory for a user's downloads.
+  DIR_USER_DATA_TEMP,           // A temp directory within DIR_USER_DATA.  Use
+                                // this when a temporary file or directory will
+                                // be moved into the profile, to avoid issues
+                                // moving across volumes.  See crbug.com/13044 .
   DIR_INTERNAL_PLUGINS,         // Directory where internal plugins reside.
+#if !defined(OS_MACOSX) && defined(OS_POSIX)
+  DIR_POLICY_FILES,             // Directory for system-wide read-only
+                                // policy files that allow sys-admins
+                                // to set policies for chrome. This directory
+                                // contains subdirectories.
+#endif
   FILE_RESOURCE_MODULE,         // Full path and filename of the module that
                                 // contains embedded resources (version,
                                 // strings, images, etc.).
@@ -47,6 +57,9 @@ enum {
   FILE_LIBAVFORMAT,             // Full path to libavformat media parsing
                                 // library.
   FILE_LIBAVUTIL,               // Full path to libavutil media utility library.
+  FILE_RESOURCES_PACK,          // Full path to the .pak file containing
+                                // binary data (e.g., html files and images
+                                // used by interal pages).
 #if defined(OS_CHROMEOS)
   FILE_CHROMEOS_API,            // Full path to chrome os api shared object.
 #endif

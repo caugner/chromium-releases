@@ -6,9 +6,12 @@
 
 #include "app/l10n_util.h"
 #include "chrome/browser/geolocation/geolocation_content_settings_map.h"
+#include "chrome/browser/geolocation/geolocation_exceptions_table_model.h"
+#include "chrome/browser/notifications/desktop_notification_service.h"
+#include "chrome/browser/notifications/notification_exceptions_table_model.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/views/options/exceptions_view.h"
-#include "chrome/browser/views/options/geolocation_exceptions_view.h"
+#include "chrome/browser/views/options/simple_content_exceptions_view.h"
 #include "grit/generated_resources.h"
 #include "views/controls/button/radio_button.h"
 #include "views/grid_layout.h"
@@ -35,7 +38,6 @@ void ContentFilterPageView::InitControlLayout() {
   using views::GridLayout;
 
   GridLayout* layout = new GridLayout(this);
-  layout->SetInsets(5, 5, 5, 5);
   SetLayoutManager(layout);
 
   const int single_column_set_id = 0;
@@ -52,6 +54,7 @@ void ContentFilterPageView::InitControlLayout() {
     IDS_PLUGIN_SETTING_LABEL,
     IDS_POPUP_SETTING_LABEL,
     IDS_GEOLOCATION_SETTING_LABEL,
+    IDS_NOTIFICATIONS_SETTING_LABEL,
   };
   COMPILE_ASSERT(arraysize(kTitleIDs) == CONTENT_SETTINGS_NUM_TYPES,
                  Need_a_setting_for_every_content_settings_type);
@@ -71,6 +74,7 @@ void ContentFilterPageView::InitControlLayout() {
     IDS_PLUGIN_LOAD_RADIO,
     IDS_POPUP_ALLOW_RADIO,
     IDS_GEOLOCATION_ALLOW_RADIO,
+    IDS_NOTIFICATIONS_ALLOW_RADIO,
   };
   COMPILE_ASSERT(arraysize(kAllowIDs) == CONTENT_SETTINGS_NUM_TYPES,
                  Need_a_setting_for_every_content_settings_type);
@@ -84,12 +88,13 @@ void ContentFilterPageView::InitControlLayout() {
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
 
   static const int kAskIDs[] = {
-    IDS_COOKIES_ASK_EVERY_TIME_RADIO,
+    0,
     0,
     0,
     0,
     0,
     IDS_GEOLOCATION_ASK_RADIO,
+    IDS_NOTIFICATIONS_ASK_RADIO,
   };
   COMPILE_ASSERT(arraysize(kAskIDs) == CONTENT_SETTINGS_NUM_TYPES,
                  Need_a_setting_for_every_content_settings_type);
@@ -112,6 +117,7 @@ void ContentFilterPageView::InitControlLayout() {
     IDS_PLUGIN_NOLOAD_RADIO,
     IDS_POPUP_BLOCK_RADIO,
     IDS_GEOLOCATION_BLOCK_RADIO,
+    IDS_NOTIFICATIONS_BLOCK_RADIO,
   };
   COMPILE_ASSERT(arraysize(kBlockIDs) == CONTENT_SETTINGS_NUM_TYPES,
                  Need_a_setting_for_every_content_settings_type);
@@ -123,12 +129,17 @@ void ContentFilterPageView::InitControlLayout() {
   layout->AddView(block_radio_);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
 
-  ContentSetting default_setting =
-      (content_type_ == CONTENT_SETTINGS_TYPE_GEOLOCATION) ?
-      profile()->GetGeolocationContentSettingsMap()->
-          GetDefaultContentSetting() :
-      profile()->GetHostContentSettingsMap()->
-          GetDefaultContentSetting(content_type_);
+  ContentSetting default_setting;
+  if (content_type_ == CONTENT_SETTINGS_TYPE_GEOLOCATION) {
+    default_setting = profile()->GetGeolocationContentSettingsMap()->
+        GetDefaultContentSetting();
+  } else if (content_type_ == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
+    default_setting = profile()->GetDesktopNotificationService()->
+        GetDefaultContentSetting();
+  } else {
+    default_setting = profile()->GetHostContentSettingsMap()->
+        GetDefaultContentSetting(content_type_);
+  }
   // Now that these have been added to the view hierarchy, it's safe to call
   // SetChecked() on them.
   if (default_setting == CONTENT_SETTING_ALLOW) {
@@ -156,12 +167,24 @@ void ContentFilterPageView::ButtonPressed(views::Button* sender,
                                           const views::Event& event) {
   if (sender == exceptions_button_) {
     if (content_type_ == CONTENT_SETTINGS_TYPE_GEOLOCATION) {
-      GeolocationExceptionsView::ShowExceptionsWindow(
+      SimpleContentExceptionsView::ShowExceptionsWindow(
           GetWindow()->GetNativeWindow(),
-          profile()->GetGeolocationContentSettingsMap());
+          new GeolocationExceptionsTableModel(
+              profile()->GetGeolocationContentSettingsMap()),
+          IDS_GEOLOCATION_EXCEPTION_TITLE);
+    } else if (content_type_ == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
+      SimpleContentExceptionsView::ShowExceptionsWindow(
+          GetWindow()->GetNativeWindow(),
+          new NotificationExceptionsTableModel(
+              profile()->GetDesktopNotificationService()),
+          IDS_NOTIFICATIONS_EXCEPTION_TITLE);
     } else {
       ExceptionsView::ShowExceptionsWindow(GetWindow()->GetNativeWindow(),
-          profile()->GetHostContentSettingsMap(), content_type_);
+          profile()->GetHostContentSettingsMap(),
+          profile()->HasOffTheRecordProfile() ?
+              profile()->GetOffTheRecordProfile()->GetHostContentSettingsMap() :
+              NULL,
+          content_type_);
     }
     return;
   }
@@ -173,6 +196,9 @@ void ContentFilterPageView::ButtonPressed(views::Button* sender,
       (block_radio_->checked() ? CONTENT_SETTING_BLOCK : CONTENT_SETTING_ASK);
   if (content_type_ == CONTENT_SETTINGS_TYPE_GEOLOCATION) {
     profile()->GetGeolocationContentSettingsMap()->SetDefaultContentSetting(
+        default_setting);
+  } else if (content_type_ == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
+    profile()->GetDesktopNotificationService()->SetDefaultContentSetting(
         default_setting);
   } else {
     profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(

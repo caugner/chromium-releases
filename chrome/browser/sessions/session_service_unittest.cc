@@ -16,13 +16,18 @@
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
+#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_type.h"
 #include "chrome/test/browser_with_test_window_test.h"
 #include "chrome/test/file_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-class SessionServiceTest : public BrowserWithTestWindowTest {
+class SessionServiceTest : public BrowserWithTestWindowTest,
+                           public NotificationObserver {
  public:
-  SessionServiceTest() : window_bounds(0, 1, 2, 3) {}
+  SessionServiceTest() : window_bounds(0, 1, 2, 3), sync_save_count_(0){}
 
  protected:
   virtual void SetUp() {
@@ -42,6 +47,14 @@ class SessionServiceTest : public BrowserWithTestWindowTest {
     service()->SetWindowBounds(window_id, window_bounds, false);
   }
 
+  // Upon notification, increment the sync_save_count variable
+  void Observe(NotificationType type,
+               const NotificationSource& source,
+               const NotificationDetails& details) {
+    ASSERT_EQ(type.value, NotificationType::SESSION_SERVICE_SAVED);
+    sync_save_count_++;
+  }
+
   virtual void TearDown() {
     helper_.set_service(NULL);
     path_deleter_.reset();
@@ -53,7 +66,7 @@ class SessionServiceTest : public BrowserWithTestWindowTest {
                         int index,
                         bool select) {
     NavigationEntry entry;
-    entry.set_url(navigation.url());
+    entry.set_url(navigation.virtual_url());
     entry.set_referrer(navigation.referrer());
     entry.set_title(navigation.title());
     entry.set_content_state(navigation.state());
@@ -80,7 +93,6 @@ class SessionServiceTest : public BrowserWithTestWindowTest {
   // and the pinned state of the read back tab is returned.
   bool CreateAndWriteSessionWithOneTab(bool pinned_state, bool write_always) {
     SessionID tab_id;
-
     TabNavigation nav1(0, GURL("http://google.com"),
                        GURL("http://www.referrer.com"),
                        ASCIIToUTF16("abc"), "def",
@@ -115,6 +127,8 @@ class SessionServiceTest : public BrowserWithTestWindowTest {
   const gfx::Rect window_bounds;
 
   SessionID window_id;
+
+  int sync_save_count_;
 
   // Path used in testing.
   FilePath path_;
@@ -187,7 +201,7 @@ TEST_F(SessionServiceTest, ClosingTabStaysClosed) {
 
   helper_.PrepareTabInWindow(window_id, tab2_id, 1, false);
   UpdateNavigation(window_id, tab2_id, nav2, 0, true);
-  service()->TabClosed(window_id, tab2_id);
+  service()->TabClosed(window_id, tab2_id, false);
 
   ScopedVector<SessionWindow> windows;
   ReadWindows(&(windows.get()));
@@ -382,7 +396,7 @@ TEST_F(SessionServiceTest, WindowCloseCommittedAfterNavigate) {
   UpdateNavigation(window2_id, tab2_id, nav2, 0, true);
 
   service()->WindowClosing(window2_id);
-  service()->TabClosed(window2_id, tab2_id);
+  service()->TabClosed(window2_id, tab2_id, false);
   service()->WindowClosed(window2_id);
 
   ScopedVector<SessionWindow> windows;
@@ -514,15 +528,18 @@ TEST_F(SessionServiceTest, PruneFromFront) {
   ASSERT_EQ(1U, windows[0]->tabs.size());
 
   // There shouldn't be an app id.
-  EXPECT_TRUE(windows[0]->tabs[0]->app_extension_id.empty());
+  EXPECT_TRUE(windows[0]->tabs[0]->extension_app_id.empty());
 
   // We should be left with three navigations, the 2nd selected.
   SessionTab* tab = windows[0]->tabs[0];
   ASSERT_EQ(1, tab->current_navigation_index);
   EXPECT_EQ(3U, tab->navigations.size());
-  EXPECT_TRUE(GURL(base_url + IntToString(2)) == tab->navigations[0].url());
-  EXPECT_TRUE(GURL(base_url + IntToString(3)) == tab->navigations[1].url());
-  EXPECT_TRUE(GURL(base_url + IntToString(4)) == tab->navigations[2].url());
+  EXPECT_TRUE(GURL(base_url + IntToString(2)) ==
+              tab->navigations[0].virtual_url());
+  EXPECT_TRUE(GURL(base_url + IntToString(3)) ==
+              tab->navigations[1].virtual_url());
+  EXPECT_TRUE(GURL(base_url + IntToString(4)) ==
+              tab->navigations[2].virtual_url());
 }
 
 // Prunes from front so that we have no entries.
@@ -571,13 +588,13 @@ TEST_F(SessionServiceTest, PersistApplicationExtensionID) {
 
   helper_.PrepareTabInWindow(window_id, tab_id, 0, true);
   UpdateNavigation(window_id, tab_id, nav1, 0, true);
-  helper_.SetTabAppExtensionID(window_id, tab_id, app_id);
+  helper_.SetTabExtensionAppID(window_id, tab_id, app_id);
 
   ScopedVector<SessionWindow> windows;
   ReadWindows(&(windows.get()));
 
   helper_.AssertSingleWindowWithSingleTab(windows.get(), 1);
-  EXPECT_TRUE(app_id == windows[0]->tabs[0]->app_extension_id);
+  EXPECT_TRUE(app_id == windows[0]->tabs[0]->extension_app_id);
 }
 
 // Explicitly set the pinned state to true and make sure we get back true.
@@ -592,14 +609,14 @@ class GetCurrentSessionCallbackHandler {
     EXPECT_EQ(2U, (*windows)[0]->tabs.size());
     EXPECT_EQ(2U, (*windows)[0]->tabs[0]->navigations.size());
     EXPECT_EQ(GURL("http://bar/1"),
-              (*windows)[0]->tabs[0]->navigations[0].url());
+              (*windows)[0]->tabs[0]->navigations[0].virtual_url());
     EXPECT_EQ(GURL("http://bar/2"),
-              (*windows)[0]->tabs[0]->navigations[1].url());
+              (*windows)[0]->tabs[0]->navigations[1].virtual_url());
     EXPECT_EQ(2U, (*windows)[0]->tabs[1]->navigations.size());
     EXPECT_EQ(GURL("http://foo/1"),
-              (*windows)[0]->tabs[1]->navigations[0].url());
+              (*windows)[0]->tabs[1]->navigations[0].virtual_url());
     EXPECT_EQ(GURL("http://foo/2"),
-              (*windows)[0]->tabs[1]->navigations[1].url());
+              (*windows)[0]->tabs[1]->navigations[1].virtual_url());
   }
 };
 
@@ -613,4 +630,33 @@ TEST_F(SessionServiceTest, GetCurrentSession) {
   GetCurrentSessionCallbackHandler handler;
   service()->GetCurrentSession(&consumer,
       NewCallback(&handler, &GetCurrentSessionCallbackHandler::OnGotSession));
+}
+
+// Test that the notification for SESSION_SERVICE_SAVED is working properly.
+TEST_F(SessionServiceTest, SavedSessionNotification) {
+  NotificationRegistrar registrar_;
+  registrar_.Add(this, NotificationType::SESSION_SERVICE_SAVED,
+                 NotificationService::AllSources());
+  service()->Save();
+  EXPECT_EQ(sync_save_count_, 1);
+}
+
+// Makes sure a tab closed by a user gesture is not restored.
+TEST_F(SessionServiceTest, CloseTabUserGesture) {
+  SessionID tab_id;
+  ASSERT_NE(window_id.id(), tab_id.id());
+
+  TabNavigation nav1(0, GURL("http://google.com"),
+                     GURL("http://www.referrer.com"),
+                     ASCIIToUTF16("abc"), "def",
+                     PageTransition::QUALIFIER_MASK);
+
+  helper_.PrepareTabInWindow(window_id, tab_id, 0, true);
+  UpdateNavigation(window_id, tab_id, nav1, 0, true);
+  service()->TabClosed(window_id, tab_id, true);
+
+  ScopedVector<SessionWindow> windows;
+  ReadWindows(&(windows.get()));
+
+  ASSERT_TRUE(windows->empty());
 }

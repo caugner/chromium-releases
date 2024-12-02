@@ -24,12 +24,12 @@
 #include "gfx/codec/png_codec.h"
 #include "webkit/glue/password_form.h"
 
-// Encryptor is the *wrong* way of doing things; we need to turn it into a
-// bottleneck to use the platform methods (e.g. Keychain on the Mac, Gnome
-// Keyring / KWallet on Linux). That's going to take a massive change in its
-// API... see:
-//   http://code.google.com/p/chromium/issues/detail?id=25404 (Linux)
-// but the (possibly-now-unused) Mac encryptor stub code needs to die too.
+// Encryptor is now in place for Windows and Mac.  The Linux implementation
+// currently obfuscates only.  Mac Encryptor implementation can block the
+// active thread while presenting UI to the user.  See |encryptor_mac.mm| for
+// details.
+// For details on the Linux work see:
+//   http://crbug.com/25404
 #include "chrome/browser/password_manager/encryptor.h"
 
 using webkit_glue::FormField;
@@ -122,12 +122,21 @@ using webkit_glue::PasswordForm;
 //   unique_id          The unique ID of this credit card.
 //   name_on_card
 //   type
-//   card_number
+//   card_number        Before version 23 stores credit card number, 23 and
+//                      after stores empty string.
 //   expiration_month
 //   expiration_year
-//   verification_code  The CVC/CVV/CVV2 card security code.
+//   verification_code  Before version 23 stores the CVC/CVV/CVV2 card security
+//                      code. After that stores the empty string.
 //   billing_address    A foreign key into the autofill_profiles table.
 //   shipping_address   A foreign key into the autofill_profiles table.
+//     For the following two fields encryption is used. Currently it uses
+//     Encryptor, that does encryption on windows only. As on the other
+//     systems this file is readable by owner only, it is good for now.
+//     For potentially going over the wire other encryption is used, see
+//     chrome/browser/sync/protocol/autofill_specifics.proto
+//   card_number_encrypted Stores encrypted credit card number.
+//   verification_code_encrypted  The CVC/CVV/CVV2 card security code.
 //
 // web_app_icons
 //   url         URL of the web app.
@@ -144,7 +153,7 @@ using webkit_glue::PasswordForm;
 using base::Time;
 
 // Current version number.
-static const int kCurrentVersionNumber = 22;
+static const int kCurrentVersionNumber = 24;
 static const int kCompatibleVersionNumber = 21;
 
 // Keys used in the meta table.
@@ -481,7 +490,9 @@ bool WebDatabase::InitCreditCardsTable() {
                      "expiration_year INTEGER, "
                      "verification_code VARCHAR, "
                      "billing_address VARCHAR, "
-                     "shipping_address VARCHAR)")) {
+                     "shipping_address VARCHAR, "
+                     "card_number_encrypted BLOB, "
+                     "verification_code_encrypted BLOB)")) {
       NOTREACHED();
       return false;
     }
@@ -535,7 +546,7 @@ static void BindURLToStatement(const TemplateURL& url, sql::Statement* s) {
                        url.GetFavIconURL()));
   }
   if (url.url())
-    s->BindString(3, WideToUTF8(url.url()->url()));
+    s->BindString(3, url.url()->url());
   else
     s->BindString(3, std::string());
   s->BindInt(4, url.safe_for_autoreplace() ? 1 : 0);
@@ -550,7 +561,7 @@ static void BindURLToStatement(const TemplateURL& url, sql::Statement* s) {
   s->BindString(8, JoinStrings(";", url.input_encodings()));
   s->BindInt(9, url.show_in_default_list() ? 1 : 0);
   if (url.suggestions_url())
-    s->BindString(10, WideToUTF8(url.suggestions_url()->url()));
+    s->BindString(10, url.suggestions_url()->url());
   else
     s->BindString(10, std::string());
   s->BindInt(11, url.prepopulate_id());
@@ -618,7 +629,7 @@ bool WebDatabase::GetKeywords(std::vector<TemplateURL*>* urls) {
       template_url->SetFavIconURL(GURL(tmp));
 
     tmp = s.ColumnString(4);
-    template_url->SetURL(UTF8ToWide(tmp), 0, 0);
+    template_url->SetURL(tmp, 0, 0);
 
     template_url->set_safe_for_autoreplace(s.ColumnInt(5) == 1);
 
@@ -637,7 +648,7 @@ bool WebDatabase::GetKeywords(std::vector<TemplateURL*>* urls) {
     template_url->set_show_in_default_list(s.ColumnInt(10) == 1);
 
     tmp = s.ColumnString(11);
-    template_url->SetSuggestionsURL(UTF8ToWide(tmp), 0, 0);
+    template_url->SetSuggestionsURL(tmp, 0, 0);
 
     template_url->set_prepopulate_id(s.ColumnInt(12));
 
@@ -703,13 +714,13 @@ bool WebDatabase::AddLogin(const PasswordForm& form) {
   std::string encrypted_password;
   s.BindString(0, form.origin.spec());
   s.BindString(1, form.action.spec());
-  s.BindString(2, UTF16ToUTF8(form.username_element));
-  s.BindString(3, UTF16ToUTF8(form.username_value));
-  s.BindString(4, UTF16ToUTF8(form.password_element));
+  s.BindString16(2, form.username_element);
+  s.BindString16(3, form.username_value);
+  s.BindString16(4, form.password_element);
   Encryptor::EncryptString16(form.password_value, &encrypted_password);
   s.BindBlob(5, encrypted_password.data(),
              static_cast<int>(encrypted_password.length()));
-  s.BindString(6, UTF16ToUTF8(form.submit_element));
+  s.BindString16(6, form.submit_element);
   s.BindString(7, form.signon_realm);
   s.BindInt(8, form.ssl_valid);
   s.BindInt(9, form.preferred);
@@ -748,9 +759,9 @@ bool WebDatabase::UpdateLogin(const PasswordForm& form) {
   s.BindInt(2, form.ssl_valid);
   s.BindInt(3, form.preferred);
   s.BindString(4, form.origin.spec());
-  s.BindString(5, UTF16ToUTF8(form.username_element));
-  s.BindString(6, UTF16ToUTF8(form.username_value));
-  s.BindString(7, UTF16ToUTF8(form.password_element));
+  s.BindString16(5, form.username_element);
+  s.BindString16(6, form.username_value);
+  s.BindString16(7, form.password_element);
   s.BindString(8, form.signon_realm);
 
   if (!s.Run()) {
@@ -775,10 +786,10 @@ bool WebDatabase::RemoveLogin(const PasswordForm& form) {
     return false;
   }
   s.BindString(0, form.origin.spec());
-  s.BindString(1, UTF16ToUTF8(form.username_element));
-  s.BindString(2, UTF16ToUTF8(form.username_value));
-  s.BindString(3, UTF16ToUTF8(form.password_element));
-  s.BindString(4, UTF16ToUTF8(form.submit_element));
+  s.BindString16(1, form.username_element);
+  s.BindString16(2, form.username_value);
+  s.BindString16(3, form.password_element);
+  s.BindString16(4, form.submit_element);
   s.BindString(5, form.signon_realm);
 
   if (!s.Run()) {
@@ -830,9 +841,9 @@ static void InitPasswordFormFromStatement(PasswordForm* form,
   form->origin = GURL(tmp);
   tmp = s->ColumnString(1);
   form->action = GURL(tmp);
-  form->username_element = UTF8ToUTF16(s->ColumnString(2));
-  form->username_value = UTF8ToUTF16(s->ColumnString(3));
-  form->password_element = UTF8ToUTF16(s->ColumnString(4));
+  form->username_element = s->ColumnString16(2);
+  form->username_value = s->ColumnString16(3);
+  form->password_element = s->ColumnString16(4);
 
   int encrypted_password_len = s->ColumnByteLength(5);
   std::string encrypted_password;
@@ -843,7 +854,7 @@ static void InitPasswordFormFromStatement(PasswordForm* form,
   }
 
   form->password_value = decrypted_password;
-  form->submit_element = UTF8ToUTF16(s->ColumnString(6));
+  form->submit_element = s->ColumnString16(6);
   tmp = s->ColumnString(7);
   form->signon_realm = tmp;
   form->ssl_valid = (s->ColumnInt(8) > 0);
@@ -961,8 +972,8 @@ bool WebDatabase::GetIDAndCountOfFormElement(
     return false;
   }
 
-  s.BindString(0, UTF16ToUTF8(element.name()));
-  s.BindString(1, UTF16ToUTF8(element.value()));
+  s.BindString16(0, element.name());
+  s.BindString16(1, element.value());
 
   *count = 0;
 
@@ -1008,8 +1019,8 @@ bool WebDatabase::GetAllAutofillEntries(std::vector<AutofillEntry>* entries) {
   string16 name, value;
   base::Time time;
   while (s.Step()) {
-    name = UTF8ToUTF16(s.ColumnString(0));
-    value = UTF8ToUTF16(s.ColumnString(1));
+    name = s.ColumnString16(0);
+    value = s.ColumnString16(1);
     time = Time::FromTimeT(s.ColumnInt64(2));
 
     if (first_entry) {
@@ -1061,8 +1072,8 @@ bool WebDatabase::GetAutofillTimestamps(const string16& name,
     return false;
   }
 
-  s.BindString(0, UTF16ToUTF8(name));
-  s.BindString(1, UTF16ToUTF8(value));
+  s.BindString16(0, name);
+  s.BindString16(1, value);
   while (s.Step()) {
     timestamps->push_back(Time::FromTimeT(s.ColumnInt64(0)));
   }
@@ -1085,8 +1096,8 @@ bool WebDatabase::UpdateAutofillEntries(
       return false;
     }
 
-    s.BindString(0, UTF16ToUTF8(entries[i].key().name()));
-    s.BindString(1, UTF16ToUTF8(entries[i].key().value()));
+    s.BindString16(0, entries[i].key().name());
+    s.BindString16(1, entries[i].key().value());
     if (s.Step()) {
       if (!RemoveFormElementForID(s.ColumnInt64(0)))
         return false;
@@ -1111,9 +1122,9 @@ bool WebDatabase::InsertAutofillEntry(const AutofillEntry& entry) {
     return false;
   }
 
-  s.BindString(0, UTF16ToUTF8(entry.key().name()));
-  s.BindString(1, UTF16ToUTF8(entry.key().value()));
-  s.BindString(2, UTF16ToUTF8(l10n_util::ToLower(entry.key().value())));
+  s.BindString16(0, entry.key().name());
+  s.BindString16(1, entry.key().value());
+  s.BindString16(2, l10n_util::ToLower(entry.key().value()));
   s.BindInt(3, entry.timestamps().size());
 
   if (!s.Run()) {
@@ -1139,9 +1150,9 @@ bool WebDatabase::InsertFormElement(const FormField& element,
     return false;
   }
 
-  s.BindString(0, UTF16ToUTF8(element.name()));
-  s.BindString(1, UTF16ToUTF8(element.value()));
-  s.BindString(2, UTF16ToUTF8(l10n_util::ToLower(element.value())));
+  s.BindString16(0, element.name());
+  s.BindString16(1, element.value());
+  s.BindString16(2, l10n_util::ToLower(element.value()));
 
   if (!s.Run()) {
     NOTREACHED();
@@ -1240,7 +1251,7 @@ bool WebDatabase::GetFormValuesForElementName(const string16& name,
       return false;
     }
 
-    s.BindString(0, UTF16ToUTF8(name));
+    s.BindString16(0, name);
     s.BindInt(1, limit);
   } else {
     string16 prefix_lower = l10n_util::ToLower(prefix);
@@ -1259,15 +1270,15 @@ bool WebDatabase::GetFormValuesForElementName(const string16& name,
       return false;
     }
 
-    s.BindString(0, UTF16ToUTF8(name));
-    s.BindString(1, UTF16ToUTF8(prefix_lower));
-    s.BindString(2, UTF16ToUTF8(next_prefix));
+    s.BindString16(0, name);
+    s.BindString16(1, prefix_lower);
+    s.BindString16(2, next_prefix);
     s.BindInt(3, limit);
   }
 
   values->clear();
   while (s.Step())
-    values->push_back(UTF8ToUTF16(s.ColumnString(0)));
+    values->push_back(s.ColumnString16(0));
   return s.Succeeded();
 }
 
@@ -1293,10 +1304,11 @@ bool WebDatabase::RemoveFormElementsAddedBetween(
                   delete_end.ToTimeT());
 
   AutofillElementList elements;
-  while (s.Step())
+  while (s.Step()) {
     elements.push_back(MakeTuple(s.ColumnInt64(0),
-                                 UTF8ToUTF16(s.ColumnString(1)),
-                                 UTF8ToUTF16(s.ColumnString(2))));
+                                 s.ColumnString16(1),
+                                 s.ColumnString16(2)));
+  }
 
   if (!s.Succeeded()) {
     NOTREACHED();
@@ -1304,8 +1316,7 @@ bool WebDatabase::RemoveFormElementsAddedBetween(
   }
 
   for (AutofillElementList::iterator itr = elements.begin();
-       itr != elements.end();
-       itr++) {
+       itr != elements.end(); itr++) {
     int how_many = 0;
     if (!RemoveFormElementForTimeRange(itr->a, delete_begin, delete_end,
                                        &how_many)) {
@@ -1355,8 +1366,8 @@ bool WebDatabase::RemoveFormElement(const string16& name,
     NOTREACHED() << "Statement 1 prepare failed";
     return false;
   }
-  s.BindString(0, UTF16ToUTF8(name));
-  s.BindString(1, UTF16ToUTF8(value));
+  s.BindString16(0, name);
+  s.BindString16(1, value);
 
   if (s.Step())
     return RemoveFormElementForID(s.ColumnInt64(0));
@@ -1365,35 +1376,35 @@ bool WebDatabase::RemoveFormElement(const string16& name,
 
 static void BindAutoFillProfileToStatement(const AutoFillProfile& profile,
                                            sql::Statement* s) {
-  s->BindString(0, UTF16ToUTF8(profile.Label()));
+  s->BindString16(0, profile.Label());
   s->BindInt(1, profile.unique_id());
 
   string16 text = profile.GetFieldText(AutoFillType(NAME_FIRST));
-  s->BindString(2, UTF16ToUTF8(text));
+  s->BindString16(2, text);
   text = profile.GetFieldText(AutoFillType(NAME_MIDDLE));
-  s->BindString(3, UTF16ToUTF8(text));
+  s->BindString16(3, text);
   text = profile.GetFieldText(AutoFillType(NAME_LAST));
-  s->BindString(4, UTF16ToUTF8(text));
+  s->BindString16(4, text);
   text = profile.GetFieldText(AutoFillType(EMAIL_ADDRESS));
-  s->BindString(5, UTF16ToUTF8(text));
+  s->BindString16(5, text);
   text = profile.GetFieldText(AutoFillType(COMPANY_NAME));
-  s->BindString(6, UTF16ToUTF8(text));
+  s->BindString16(6, text);
   text = profile.GetFieldText(AutoFillType(ADDRESS_HOME_LINE1));
-  s->BindString(7, UTF16ToUTF8(text));
+  s->BindString16(7, text);
   text = profile.GetFieldText(AutoFillType(ADDRESS_HOME_LINE2));
-  s->BindString(8, UTF16ToUTF8(text));
+  s->BindString16(8, text);
   text = profile.GetFieldText(AutoFillType(ADDRESS_HOME_CITY));
-  s->BindString(9, UTF16ToUTF8(text));
+  s->BindString16(9, text);
   text = profile.GetFieldText(AutoFillType(ADDRESS_HOME_STATE));
-  s->BindString(10, UTF16ToUTF8(text));
+  s->BindString16(10, text);
   text = profile.GetFieldText(AutoFillType(ADDRESS_HOME_ZIP));
-  s->BindString(11, UTF16ToUTF8(text));
+  s->BindString16(11, text);
   text = profile.GetFieldText(AutoFillType(ADDRESS_HOME_COUNTRY));
-  s->BindString(12, UTF16ToUTF8(text));
+  s->BindString16(12, text);
   text = profile.GetFieldText(AutoFillType(PHONE_HOME_WHOLE_NUMBER));
-  s->BindString(13, UTF16ToUTF8(text));
+  s->BindString16(13, text);
   text = profile.GetFieldText(AutoFillType(PHONE_FAX_WHOLE_NUMBER));
-  s->BindString(14, UTF16ToUTF8(text));
+  s->BindString16(14, text);
 }
 
 bool WebDatabase::AddAutoFillProfile(const AutoFillProfile& profile) {
@@ -1420,33 +1431,33 @@ bool WebDatabase::AddAutoFillProfile(const AutoFillProfile& profile) {
 
 static AutoFillProfile* AutoFillProfileFromStatement(const sql::Statement& s) {
   AutoFillProfile* profile = new AutoFillProfile(
-      UTF8ToUTF16(s.ColumnString(0)), s.ColumnInt(1));
+      s.ColumnString16(0), s.ColumnInt(1));
   profile->SetInfo(AutoFillType(NAME_FIRST),
-                   UTF8ToUTF16(s.ColumnString(2)));
+                   s.ColumnString16(2));
   profile->SetInfo(AutoFillType(NAME_MIDDLE),
-                   UTF8ToUTF16(s.ColumnString(3)));
+                   s.ColumnString16(3));
   profile->SetInfo(AutoFillType(NAME_LAST),
-                   UTF8ToUTF16(s.ColumnString(4)));
+                   s.ColumnString16(4));
   profile->SetInfo(AutoFillType(EMAIL_ADDRESS),
-                   UTF8ToUTF16(s.ColumnString(5)));
+                   s.ColumnString16(5));
   profile->SetInfo(AutoFillType(COMPANY_NAME),
-                   UTF8ToUTF16(s.ColumnString(6)));
+                   s.ColumnString16(6));
   profile->SetInfo(AutoFillType(ADDRESS_HOME_LINE1),
-                   UTF8ToUTF16(s.ColumnString(7)));
+                   s.ColumnString16(7));
   profile->SetInfo(AutoFillType(ADDRESS_HOME_LINE2),
-                   UTF8ToUTF16(s.ColumnString(8)));
+                   s.ColumnString16(8));
   profile->SetInfo(AutoFillType(ADDRESS_HOME_CITY),
-                   UTF8ToUTF16(s.ColumnString(9)));
+                   s.ColumnString16(9));
   profile->SetInfo(AutoFillType(ADDRESS_HOME_STATE),
-                   UTF8ToUTF16(s.ColumnString(10)));
+                   s.ColumnString16(10));
   profile->SetInfo(AutoFillType(ADDRESS_HOME_ZIP),
-                   UTF8ToUTF16(s.ColumnString(11)));
+                   s.ColumnString16(11));
   profile->SetInfo(AutoFillType(ADDRESS_HOME_COUNTRY),
-                   UTF8ToUTF16(s.ColumnString(12)));
+                   s.ColumnString16(12));
   profile->SetInfo(AutoFillType(PHONE_HOME_WHOLE_NUMBER),
-                   UTF8ToUTF16(s.ColumnString(13)));
+                   s.ColumnString16(13));
   profile->SetInfo(AutoFillType(PHONE_FAX_WHOLE_NUMBER),
-                   UTF8ToUTF16(s.ColumnString(14)));
+                   s.ColumnString16(14));
 
   return profile;
 }
@@ -1462,7 +1473,7 @@ bool WebDatabase::GetAutoFillProfileForLabel(const string16& label,
     return false;
   }
 
-  s.BindString(0, UTF16ToUTF8(label));
+  s.BindString16(0, label);
   if (!s.Step())
     return false;
 
@@ -1503,7 +1514,9 @@ bool WebDatabase::UpdateAutoFillProfile(const AutoFillProfile& profile) {
 
   BindAutoFillProfileToStatement(profile, &s);
   s.BindInt(15, profile.unique_id());
-  return s.Run();
+  bool result = s.Run();
+  DCHECK_GT(db_.GetLastChangeCount(), 0);
+  return result;
 }
 
 bool WebDatabase::RemoveAutoFillProfile(int profile_id) {
@@ -1536,72 +1549,98 @@ bool WebDatabase::GetAutoFillProfileForID(int profile_id,
   return s.Succeeded();
 }
 
-static void BindCreditCardToStatement(const CreditCard& creditcard,
+static void BindCreditCardToStatement(const CreditCard& credit_card,
                                       sql::Statement* s) {
-  s->BindString(0, UTF16ToUTF8(creditcard.Label()));
-  s->BindInt(1, creditcard.unique_id());
+  s->BindString16(0, credit_card.Label());
+  s->BindInt(1, credit_card.unique_id());
 
-  string16 text = creditcard.GetFieldText(AutoFillType(CREDIT_CARD_NAME));
-  s->BindString(2, UTF16ToUTF8(text));
-  text = creditcard.GetFieldText(AutoFillType(CREDIT_CARD_TYPE));
-  s->BindString(3, UTF16ToUTF8(text));
-  text = creditcard.GetFieldText(AutoFillType(CREDIT_CARD_NUMBER));
-  s->BindString(4, UTF16ToUTF8(text));
-  text = creditcard.GetFieldText(AutoFillType(CREDIT_CARD_EXP_MONTH));
-  s->BindString(5, UTF16ToUTF8(text));
-  text = creditcard.GetFieldText(AutoFillType(CREDIT_CARD_EXP_4_DIGIT_YEAR));
-  s->BindString(6, UTF16ToUTF8(text));
-  text = creditcard.GetFieldText(AutoFillType(CREDIT_CARD_VERIFICATION_CODE));
-  s->BindString(7, UTF16ToUTF8(text));
-  s->BindString(8, UTF16ToUTF8(creditcard.billing_address()));
-  s->BindString(9, UTF16ToUTF8(creditcard.shipping_address()));
+  string16 text = credit_card.GetFieldText(AutoFillType(CREDIT_CARD_NAME));
+  s->BindString16(2, text);
+  text = credit_card.GetFieldText(AutoFillType(CREDIT_CARD_TYPE));
+  s->BindString16(3, text);
+  text.clear();  // No unencrypted cc info.
+  s->BindString16(4, text);
+  text = credit_card.GetFieldText(AutoFillType(CREDIT_CARD_EXP_MONTH));
+  s->BindString16(5, text);
+  text = credit_card.GetFieldText(AutoFillType(CREDIT_CARD_EXP_4_DIGIT_YEAR));
+  s->BindString16(6, text);
+  text.clear();
+  s->BindString16(7, text);
+  s->BindString16(8, credit_card.billing_address());
+  // We don't store the shipping address anymore.
+  text.clear();
+  s->BindString16(9, text);
+  text = credit_card.GetFieldText(AutoFillType(CREDIT_CARD_NUMBER));
+  std::string encrypted_data;
+  Encryptor::EncryptString16(text, &encrypted_data);
+  s->BindBlob(10, encrypted_data.data(),
+              static_cast<int>(encrypted_data.length()));
+  // We don't store the CVV anymore.
+  text.clear();
+  s->BindBlob(11, text.data(), static_cast<int>(text.length()));
 }
 
-bool WebDatabase::AddCreditCard(const CreditCard& creditcard) {
+bool WebDatabase::AddCreditCard(const CreditCard& credit_card) {
   sql::Statement s(db_.GetUniqueStatement(
       "INSERT INTO credit_cards"
-      "(label, unique_id, name_on_card, type, card_number, expiration_month,"
-      " expiration_year, verification_code, billing_address, shipping_address)"
-      "VALUES (?,?,?,?,?,?,?,?,?,?)"));
+      "(label, unique_id, name_on_card, type, card_number,"
+      " expiration_month, expiration_year, verification_code, billing_address,"
+      " shipping_address, card_number_encrypted, verification_code_encrypted)"
+      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"));
   if (!s) {
     NOTREACHED() << "Statement prepare failed";
     return false;
   }
 
-  BindCreditCardToStatement(creditcard, &s);
+  BindCreditCardToStatement(credit_card, &s);
 
   if (!s.Run()) {
     NOTREACHED();
     return false;
   }
 
+  DCHECK_GT(db_.GetLastChangeCount(), 0);
   return s.Succeeded();
 }
 
 static CreditCard* CreditCardFromStatement(const sql::Statement& s) {
-  CreditCard* creditcard = new CreditCard(
-      UTF8ToUTF16(s.ColumnString(0)), s.ColumnInt(1));
-  creditcard->SetInfo(AutoFillType(CREDIT_CARD_NAME),
-                   UTF8ToUTF16(s.ColumnString(2)));
-  creditcard->SetInfo(AutoFillType(CREDIT_CARD_TYPE),
-                   UTF8ToUTF16(s.ColumnString(3)));
-  creditcard->SetInfo(AutoFillType(CREDIT_CARD_NUMBER),
-                   UTF8ToUTF16(s.ColumnString(4)));
-  creditcard->SetInfo(AutoFillType(CREDIT_CARD_EXP_MONTH),
-                   UTF8ToUTF16(s.ColumnString(5)));
-  creditcard->SetInfo(AutoFillType(CREDIT_CARD_EXP_4_DIGIT_YEAR),
-                   UTF8ToUTF16(s.ColumnString(6)));
-  creditcard->SetInfo(AutoFillType(CREDIT_CARD_VERIFICATION_CODE),
-                   UTF8ToUTF16(s.ColumnString(7)));
-  creditcard->set_billing_address(UTF8ToUTF16(s.ColumnString(8)));
-  creditcard->set_shipping_address(UTF8ToUTF16(s.ColumnString(9)));
+  CreditCard* credit_card = new CreditCard(
+      s.ColumnString16(0), s.ColumnInt(1));
+  credit_card->SetInfo(AutoFillType(CREDIT_CARD_NAME),
+                       s.ColumnString16(2));
+  credit_card->SetInfo(AutoFillType(CREDIT_CARD_TYPE),
+                       s.ColumnString16(3));
+  string16 credit_card_number = s.ColumnString16(4);
+  // It could be non-empty prior to version 23. After that it encrypted in
+  // the column 10.
+  if (credit_card_number.empty()) {
+    int encrypted_cc_len = s.ColumnByteLength(10);
+    std::string encrypted_cc;
+    if (encrypted_cc_len) {
+      encrypted_cc.resize(encrypted_cc_len);
+      memcpy(&encrypted_cc[0], s.ColumnBlob(10), encrypted_cc_len);
+      Encryptor::DecryptString16(encrypted_cc, &credit_card_number);
+    }
+  }
+  credit_card->SetInfo(AutoFillType(CREDIT_CARD_NUMBER), credit_card_number);
+  credit_card->SetInfo(AutoFillType(CREDIT_CARD_EXP_MONTH),
+                       s.ColumnString16(5));
+  credit_card->SetInfo(AutoFillType(CREDIT_CARD_EXP_4_DIGIT_YEAR),
+                       s.ColumnString16(6));
 
-  return creditcard;
+  string16 credit_card_verification_code = s.ColumnString16(7);
+  // We don't store the CVV anymore.
+  credit_card->set_billing_address(s.ColumnString16(8));
+  // We don't store the shipping address anymore.
+  // Column 10 is processed above.
+  // Column 11 is processed above.
+
+  return credit_card;
 }
 
 bool WebDatabase::GetCreditCardForLabel(const string16& label,
-                                        CreditCard** creditcard) {
-  DCHECK(creditcard);
+                                        CreditCard** credit_card) {
+  DCHECK(credit_card);
   sql::Statement s(db_.GetUniqueStatement(
       "SELECT * FROM credit_cards "
       "WHERE label = ?"));
@@ -1610,16 +1649,17 @@ bool WebDatabase::GetCreditCardForLabel(const string16& label,
     return false;
   }
 
-  s.BindString(0, UTF16ToUTF8(label));
+  s.BindString16(0, label);
   if (!s.Step())
     return false;
 
-  *creditcard = CreditCardFromStatement(s);
+  *credit_card = CreditCardFromStatement(s);
 
   return s.Succeeded();
 }
 
-bool WebDatabase::GetCreditCardForID(int card_id, CreditCard** card) {
+bool WebDatabase::GetCreditCardForID(int credit_card_id,
+                                     CreditCard** credit_card) {
   sql::Statement s(db_.GetUniqueStatement(
       "SELECT * FROM credit_cards "
       "WHERE unique_id = ?"));
@@ -1628,19 +1668,19 @@ bool WebDatabase::GetCreditCardForID(int card_id, CreditCard** card) {
     return false;
   }
 
-  s.BindInt(0, card_id);
+  s.BindInt(0, credit_card_id);
   if (!s.Step())
     return false;
 
-  *card = CreditCardFromStatement(s);
+  *credit_card = CreditCardFromStatement(s);
 
   return s.Succeeded();
 }
 
 bool WebDatabase::GetCreditCards(
-    std::vector<CreditCard*>* creditcards) {
-  DCHECK(creditcards);
-  creditcards->clear();
+    std::vector<CreditCard*>* credit_cards) {
+  DCHECK(credit_cards);
+  credit_cards->clear();
 
   sql::Statement s(db_.GetUniqueStatement("SELECT * FROM credit_cards"));
   if (!s) {
@@ -1649,31 +1689,34 @@ bool WebDatabase::GetCreditCards(
   }
 
   while (s.Step())
-    creditcards->push_back(CreditCardFromStatement(s));
+    credit_cards->push_back(CreditCardFromStatement(s));
 
   return s.Succeeded();
 }
 
-bool WebDatabase::UpdateCreditCard(const CreditCard& creditcard) {
-  DCHECK(creditcard.unique_id());
+bool WebDatabase::UpdateCreditCard(const CreditCard& credit_card) {
+  DCHECK(credit_card.unique_id());
   sql::Statement s(db_.GetUniqueStatement(
       "UPDATE credit_cards "
       "SET label=?, unique_id=?, name_on_card=?, type=?, card_number=?, "
       "    expiration_month=?, expiration_year=?, verification_code=?, "
-      "    billing_address=?, shipping_address=? "
+      "    billing_address=?, shipping_address=?, card_number_encrypted=?, "
+      "    verification_code_encrypted=? "
       "WHERE unique_id=?"));
   if (!s) {
     NOTREACHED() << "Statement prepare failed";
     return false;
   }
 
-  BindCreditCardToStatement(creditcard, &s);
-  s.BindInt(10, creditcard.unique_id());
-  return s.Run();
+  BindCreditCardToStatement(credit_card, &s);
+  s.BindInt(12, credit_card.unique_id());
+  bool result = s.Run();
+  DCHECK_GT(db_.GetLastChangeCount(), 0);
+  return result;
 }
 
-bool WebDatabase::RemoveCreditCard(int creditcard_id) {
-  DCHECK_NE(0, creditcard_id);
+bool WebDatabase::RemoveCreditCard(int credit_card_id) {
+  DCHECK_NE(0, credit_card_id);
   sql::Statement s(db_.GetUniqueStatement(
       "DELETE FROM credit_cards WHERE unique_id = ?"));
   if (!s) {
@@ -1681,7 +1724,7 @@ bool WebDatabase::RemoveCreditCard(int creditcard_id) {
     return false;
   }
 
-  s.BindInt(0, creditcard_id);
+  s.BindInt(0, credit_card_id);
   return s.Run();
 }
 
@@ -1756,6 +1799,82 @@ void WebDatabase::MigrateOldVersionsAsNeeded() {
       // No change in the compatibility version number.
 
       // FALL THROUGH
+
+    case 22:
+      // Add the card_number_encrypted column.
+      if (!db_.Execute("ALTER TABLE credit_cards ADD COLUMN "
+                       "card_number_encrypted BLOB DEFAULT NULL")) {
+          NOTREACHED();
+          LOG(WARNING) << "Unable to update web database to version 23.";
+          return;
+      }
+      if (!db_.Execute("ALTER TABLE credit_cards ADD COLUMN "
+                       "verification_code_encrypted BLOB DEFAULT NULL")) {
+          NOTREACHED();
+          LOG(WARNING) << "Unable to update web database to version 23.";
+          return;
+      }
+      meta_table_.SetVersionNumber(23);
+
+      // FALL THROUGH
+
+    case 23: {
+      // One-time cleanup for Chromium bug 38364.  In the presence of
+      // multi-byte UTF-8 characters, that bug could cause AutoFill strings
+      // to grow larger and more corrupt with each save.  The cleanup removes
+      // any row with a string field larger than a reasonable size.  The string
+      // fields examined here are precisely the ones that were subject to
+      // corruption by the original bug.
+      const std::string autofill_is_too_big =
+          "max(length(name), length(value)) > 500";
+
+      const std::string credit_cards_is_too_big =
+          "max(length(label), length(name_on_card), length(type), "
+          "    length(expiration_month), length(expiration_year), "
+          "    length(billing_address), length(shipping_address) "
+          ") > 500";
+
+      const std::string autofill_profiles_is_too_big =
+          "max(length(label), length(first_name), "
+          "    length(middle_name), length(last_name), length(email), "
+          "    length(company_name), length(address_line_1), "
+          "    length(address_line_2), length(city), length(state), "
+          "    length(zipcode), length(country), length(phone), "
+          "    length(fax)) > 500";
+
+      std::string query = "DELETE FROM autofill_dates WHERE pair_id IN ("
+          "SELECT pair_id FROM autofill WHERE " + autofill_is_too_big + ")";
+      if (!db_.Execute(query.c_str())) {
+        NOTREACHED();
+        LOG(WARNING) << "Unable to update web database to version 24.";
+        return;
+      }
+      query = "DELETE FROM autofill WHERE " + autofill_is_too_big;
+      if (!db_.Execute(query.c_str())) {
+        NOTREACHED();
+        LOG(WARNING) << "Unable to update web database to version 24.";
+        return;
+      }
+      query = "DELETE FROM credit_cards WHERE (" + credit_cards_is_too_big +
+          ") OR label IN (SELECT label FROM autofill_profiles WHERE " +
+          autofill_profiles_is_too_big + ")";
+      if (!db_.Execute(query.c_str())) {
+        NOTREACHED();
+        LOG(WARNING) << "Unable to update web database to version 24.";
+        return;
+      }
+      query = "DELETE FROM autofill_profiles WHERE " +
+          autofill_profiles_is_too_big;
+      if (!db_.Execute(query.c_str())) {
+        NOTREACHED();
+        LOG(WARNING) << "Unable to update web database to version 24.";
+        return;
+      }
+
+      meta_table_.SetVersionNumber(24);
+
+      // FALL THROUGH
+    }
 
     // Add successive versions here.  Each should set the version number and
     // compatible version number as appropriate, then fall through to the next

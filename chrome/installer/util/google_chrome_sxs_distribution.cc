@@ -11,6 +11,9 @@
 namespace {
 
 const wchar_t kChromeSxSGuid[] = L"{4ea16ac7-fd5a-47c3-875b-dbf4a2008c20}";
+const wchar_t kChannelName[] = L"canary build";
+const wchar_t kBrowserAppId[] = L"ChromeCanary";
+const int kSxSIconIndex = 4;
 
 }  // namespace
 
@@ -24,6 +27,10 @@ std::wstring GoogleChromeSxSDistribution::GetAppShortCutName() {
   return shortcut_name;
 }
 
+std::wstring GoogleChromeSxSDistribution::GetBrowserAppId() {
+  return kBrowserAppId;
+}
+
 std::wstring GoogleChromeSxSDistribution::GetInstallSubDir() {
   return GoogleChromeDistribution::GetInstallSubDir().append(
       installer_util::kSxSSuffix);
@@ -34,6 +41,23 @@ std::wstring GoogleChromeSxSDistribution::GetUninstallRegPath() {
       installer_util::kSxSSuffix);
 }
 
+std::wstring GoogleChromeSxSDistribution::GetEnvVersionKey() {
+  return L"CHROME_SXS_VERSION";
+}
+
 bool GoogleChromeSxSDistribution::CanSetAsDefault() {
   return false;
+}
+
+int GoogleChromeSxSDistribution::GetIconIndex() {
+  return kSxSIconIndex;
+}
+
+bool GoogleChromeSxSDistribution::GetChromeChannel(std::wstring* channel) {
+  *channel = kChannelName;
+  return true;
+}
+
+std::wstring GoogleChromeSxSDistribution::ChannelName() {
+  return kChannelName;
 }

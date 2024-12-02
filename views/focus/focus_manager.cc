@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "views/accelerator.h"
+#include "views/focus/focus_search.h"
 #include "views/focus/view_storage.h"
 #include "views/view.h"
 #include "views/widget/root_view.h"
@@ -66,7 +67,8 @@ void FocusManager::WidgetFocusManager::OnWidgetFocusEvent(
 
 FocusManager::FocusManager(Widget* widget)
     : widget_(widget),
-      focused_view_(NULL) {
+      focused_view_(NULL),
+      focus_change_reason_(kReasonDirectFocusChange) {
   DCHECK(widget_);
   stored_focused_view_storage_id_ =
       ViewStorage::GetSharedInstance()->CreateStorageID();
@@ -122,7 +124,7 @@ bool FocusManager::OnKeyEvent(const KeyEvent& event) {
     } else if (index >= static_cast<int>(views.size())) {
       index = 0;
     }
-    views[index]->RequestFocus();
+    SetFocusedViewWithReason(views[index], kReasonFocusTraversal);
     return false;
   }
 
@@ -183,7 +185,7 @@ void FocusManager::AdvanceFocus(bool reverse) {
   // first element on the page.
   if (v) {
     v->AboutToRequestFocusFromTabTraversal(reverse);
-    v->RequestFocus();
+    SetFocusedViewWithReason(v, kReasonFocusTraversal);
   }
 }
 
@@ -197,21 +199,36 @@ View* FocusManager::GetNextFocusableView(View* original_starting_view,
 
   View* starting_view = NULL;
   if (original_starting_view) {
-    if (!reverse) {
-      // If the starting view has a focus traversable, use it.
-      // This is the case with WidgetWins for example.
-      focus_traversable = original_starting_view->GetFocusTraversable();
+    // Search up the containment hierarchy to see if a view is acting as
+    // a pane, and wants to implement its own focus traversable to keep
+    // the focus trapped within that pane.
+    View* pane_search = original_starting_view;
+    while (pane_search) {
+      focus_traversable = pane_search->GetPaneFocusTraversable();
+      if (focus_traversable) {
+        starting_view = original_starting_view;
+        break;
+      }
+      pane_search = pane_search->GetParent();
+    }
 
-      // Otherwise default to the root view.
-      if (!focus_traversable) {
+    if (!focus_traversable) {
+      if (!reverse) {
+        // If the starting view has a focus traversable, use it.
+        // This is the case with WidgetWins for example.
+        focus_traversable = original_starting_view->GetFocusTraversable();
+
+        // Otherwise default to the root view.
+        if (!focus_traversable) {
+          focus_traversable = original_starting_view->GetRootView();
+          starting_view = original_starting_view;
+        }
+      } else {
+        // When you are going back, starting view's FocusTraversable
+        // should not be used.
         focus_traversable = original_starting_view->GetRootView();
         starting_view = original_starting_view;
       }
-    } else {
-      // When you are going back, starting view's FocusTraversable should not be
-      // used.
-      focus_traversable = original_starting_view->GetRootView();
-      starting_view = original_starting_view;
     }
   } else {
     focus_traversable = widget_->GetRootView();
@@ -231,8 +248,8 @@ View* FocusManager::GetNextFocusableView(View* original_starting_view,
       View* new_starting_view = NULL;
       // When we are going backward, the parent view might gain the next focus.
       bool check_starting_view = reverse;
-      v = parent_focus_traversable->FindNextFocusableView(
-          starting_view, reverse, FocusTraversable::UP,
+      v = parent_focus_traversable->GetFocusSearch()->FindNextFocusableView(
+          starting_view, reverse, FocusSearch::UP,
           check_starting_view, &new_focus_traversable, &new_starting_view);
 
       if (new_focus_traversable) {
@@ -263,7 +280,10 @@ View* FocusManager::GetNextFocusableView(View* original_starting_view,
   return NULL;
 }
 
-void FocusManager::SetFocusedView(View* view) {
+void FocusManager::SetFocusedViewWithReason(
+    View* view, FocusChangeReason reason) {
+  focus_change_reason_ = reason;
+
   if (focused_view_ == view)
     return;
 
@@ -341,8 +361,10 @@ void FocusManager::RestoreFocusedView() {
 
   View* view = view_storage->RetrieveView(stored_focused_view_storage_id_);
   if (view) {
-    if (ContainsView(view))
-      view->RequestFocus();
+    if (ContainsView(view) && (view->IsFocusableInRootView() ||
+                               view->IsAccessibilityFocusableInRootView())) {
+      SetFocusedViewWithReason(view, kReasonFocusRestore);
+    }
   } else {
     // Clearing the focus will focus the root window, so we still get key
     // events.
@@ -368,12 +390,13 @@ View* FocusManager::FindFocusableView(FocusTraversable* focus_traversable,
                                       bool reverse) {
   FocusTraversable* new_focus_traversable = NULL;
   View* new_starting_view = NULL;
-  View* v = focus_traversable->FindNextFocusableView(starting_view,
-                                                     reverse,
-                                                     FocusTraversable::DOWN,
-                                                     false,
-                                                     &new_focus_traversable,
-                                                     &new_starting_view);
+  View* v = focus_traversable->GetFocusSearch()->FindNextFocusableView(
+      starting_view,
+      reverse,
+      FocusSearch::DOWN,
+      false,
+      &new_focus_traversable,
+      &new_starting_view);
 
   // Let's go down the FocusTraversable tree as much as we can.
   while (new_focus_traversable) {
@@ -382,12 +405,13 @@ View* FocusManager::FindFocusableView(FocusTraversable* focus_traversable,
     starting_view = new_starting_view;
     new_focus_traversable = NULL;
     starting_view = NULL;
-    v = focus_traversable->FindNextFocusableView(starting_view,
-                                                 reverse,
-                                                 FocusTraversable::DOWN,
-                                                 false,
-                                                 &new_focus_traversable,
-                                                 &new_starting_view);
+    v = focus_traversable->GetFocusSearch()->FindNextFocusableView(
+        starting_view,
+        reverse,
+        FocusSearch::DOWN,
+        false,
+        &new_focus_traversable,
+        &new_starting_view);
   }
   return v;
 }

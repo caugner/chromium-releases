@@ -17,6 +17,12 @@
 class Profile;
 class Task;
 
+namespace browser_sync {
+class PasswordDataTypeController;
+class PasswordModelAssociator;
+class PasswordModelWorker;
+};
+
 class PasswordStoreConsumer {
  public:
   virtual ~PasswordStoreConsumer() {}
@@ -35,21 +41,18 @@ class PasswordStore : public base::RefCountedThreadSafe<PasswordStore> {
   // Reimplement this to add custom initialization. Always call this too.
   virtual bool Init();
 
-  // TODO(stuartmorgan): These are only virtual to support the shim version of
-  // password_store_default; once that is fixed, they can become non-virtual.
-
   // Adds the given PasswordForm to the secure password store asynchronously.
   virtual void AddLogin(const webkit_glue::PasswordForm& form);
 
   // Updates the matching PasswordForm in the secure password store (async).
-  virtual void UpdateLogin(const webkit_glue::PasswordForm& form);
+  void UpdateLogin(const webkit_glue::PasswordForm& form);
 
   // Removes the matching PasswordForm from the secure password store (async).
-  virtual void RemoveLogin(const webkit_glue::PasswordForm& form);
+  void RemoveLogin(const webkit_glue::PasswordForm& form);
 
   // Removes all logins created in the given date range.
-  virtual void RemoveLoginsCreatedBetween(const base::Time& delete_begin,
-                                          const base::Time& delete_end);
+  void RemoveLoginsCreatedBetween(const base::Time& delete_begin,
+                                  const base::Time& delete_end);
 
   // Searches for a matching PasswordForm and returns a handle so the async
   // request can be tracked. Implement the PasswordStoreConsumer interface to
@@ -61,18 +64,24 @@ class PasswordStore : public base::RefCountedThreadSafe<PasswordStore> {
   // are thus auto-fillable--and returns a handle so the async request can be
   // tracked. Implement the PasswordStoreConsumer interface to be notified
   // on completion.
-  virtual int GetAutofillableLogins(PasswordStoreConsumer* consumer);
+  int GetAutofillableLogins(PasswordStoreConsumer* consumer);
 
   // Gets the complete list of PasswordForms that are blacklist entries, and
   // returns a handle so the async request can be tracked. Implement the
   // PasswordStoreConsumer interface to be notified on completion.
-  virtual int GetBlacklistLogins(PasswordStoreConsumer* consumer);
+  int GetBlacklistLogins(PasswordStoreConsumer* consumer);
 
   // Cancels a previous Get*Logins query (async)
-  virtual void CancelLoginsQuery(int handle);
+  void CancelLoginsQuery(int handle);
+
+  // Reports usage metrics for the database.
+  virtual void ReportMetrics();
 
  protected:
   friend class base::RefCountedThreadSafe<PasswordStore>;
+  friend class browser_sync::PasswordDataTypeController;
+  friend class browser_sync::PasswordModelAssociator;
+  friend class browser_sync::PasswordModelWorker;
 
   virtual ~PasswordStore() {}
 
@@ -95,20 +104,23 @@ class PasswordStore : public base::RefCountedThreadSafe<PasswordStore> {
   };
 
   // Schedule the given task to be run in the PasswordStore's own thread.
-  void ScheduleTask(Task* task);
+  virtual void ScheduleTask(Task* task);
 
   // These will be run in PasswordStore's own thread.
+  // Synchronous implementation that reports usage metrics.
+  virtual void ReportMetricsImpl() = 0;
   // Synchronous implementation to add the given login.
   virtual void AddLoginImpl(const webkit_glue::PasswordForm& form) = 0;
   // Synchronous implementation to update the given login.
   virtual void UpdateLoginImpl(const webkit_glue::PasswordForm& form) = 0;
   // Synchronous implementation to remove the given login.
   virtual void RemoveLoginImpl(const webkit_glue::PasswordForm& form) = 0;
+  // Synchronous implementation to remove the given logins.
+  virtual void RemoveLoginsCreatedBetweenImpl(const base::Time& delete_begin,
+                                              const base::Time& delete_end) = 0;
   // Should find all PasswordForms with the same signon_realm. The results
   // will then be scored by the PasswordFormManager. Once they are found
   // (or not), the consumer should be notified.
-  virtual void RemoveLoginsCreatedBetweenImpl(const base::Time& delete_begin,
-                                              const base::Time& delete_end) = 0;
   virtual void GetLoginsImpl(GetLoginsRequest* request,
                              const webkit_glue::PasswordForm& form) = 0;
   // Finds all non-blacklist PasswordForms, and notifies the consumer.
@@ -116,12 +128,17 @@ class PasswordStore : public base::RefCountedThreadSafe<PasswordStore> {
   // Finds all blacklist PasswordForms, and notifies the consumer.
   virtual void GetBlacklistLoginsImpl(GetLoginsRequest* request) = 0;
 
-  // Notifies the consumer that a Get*Logins() request is complete.
-  void NotifyConsumer(GetLoginsRequest* request,
-                      const std::vector<webkit_glue::PasswordForm*> forms);
+  // Finds all non-blacklist PasswordForms, and fills the vector.
+  virtual bool FillAutofillableLogins(
+      std::vector<webkit_glue::PasswordForm*>* forms) = 0;
+  // Finds all blacklist PasswordForms, and fills the vector.
+  virtual bool FillBlacklistLogins(
+      std::vector<webkit_glue::PasswordForm*>* forms) = 0;
 
-  // Thread that the synchronous methods are run in.
-  scoped_ptr<base::Thread> thread_;
+  // Notifies the consumer that a Get*Logins() request is complete.
+  virtual void NotifyConsumer(
+      GetLoginsRequest* request,
+      const std::vector<webkit_glue::PasswordForm*> forms);
 
  private:
   // Called by NotifyConsumer, but runs in the consumer's thread.  Will not

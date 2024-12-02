@@ -233,8 +233,8 @@ TEST_F(DomCheckerTest, File) {
   PrintResults(new_passes, new_failures);
 }
 
-// TODO(arv): http://code.google.com/p/chromium/issues/detail?id=21321
-TEST_F(DomCheckerTest, DISABLED_Http) {
+// TODO(arv): http://crbug.com/21321
+TEST_F(DomCheckerTest, FLAKY_Http) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(kRunDomCheckerTest))
     return;
 

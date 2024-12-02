@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,9 @@
 #include "net/base/net_log.h"
 #include "net/base/net_errors.h"
 #include "net/base/ssl_cert_request_info.h"
+#include "net/base/ssl_connection_status_flags.h"
 #include "net/base/ssl_info.h"
+#include "net/socket/client_socket_handle.h"
 
 #pragma comment(lib, "secur32.lib")
 
@@ -292,7 +294,7 @@ class ClientCertStore {
 //   64: >= SSL record trailer (16 or 20 have been observed)
 static const int kRecvBufferSize = (5 + 16*1024 + 64);
 
-SSLClientSocketWin::SSLClientSocketWin(ClientSocket* transport_socket,
+SSLClientSocketWin::SSLClientSocketWin(ClientSocketHandle* transport_socket,
                                        const std::string& hostname,
                                        const SSLConfig& ssl_config)
     : ALLOW_THIS_IN_INITIALIZER_LIST(
@@ -322,7 +324,8 @@ SSLClientSocketWin::SSLClientSocketWin(ClientSocket* transport_socket,
       writing_first_token_(false),
       ignore_ok_result_(false),
       renegotiating_(false),
-      need_more_data_(false) {
+      need_more_data_(false),
+      net_log_(transport_socket->socket()->NetLog()) {
   memset(&stream_sizes_, 0, sizeof(stream_sizes_));
   memset(in_buffers_, 0, sizeof(in_buffers_));
   memset(&send_buffer_, 0, sizeof(send_buffer_));
@@ -334,6 +337,8 @@ SSLClientSocketWin::~SSLClientSocketWin() {
 }
 
 void SSLClientSocketWin::GetSSLInfo(SSLInfo* ssl_info) {
+  ssl_info->Reset();
+
   if (!server_cert_)
     return;
 
@@ -348,6 +353,9 @@ void SSLClientSocketWin::GetSSLInfo(SSLInfo* ssl_info) {
     // normalized.
     ssl_info->security_bits = connection_info.dwCipherStrength;
   }
+
+  if (ssl_config_.ssl3_fallback)
+    ssl_info->connection_status |= SSL_CONNECTION_SSL3_FALLBACK;
 }
 
 void SSLClientSocketWin::GetSSLCertRequestInfo(
@@ -414,8 +422,9 @@ void SSLClientSocketWin::GetSSLCertRequestInfo(
     }
     scoped_refptr<X509Certificate> cert = X509Certificate::CreateFromHandle(
         cert_context2, X509Certificate::SOURCE_LONE_CERT_IMPORT,
-        net::X509Certificate::OSCertHandles());
+        X509Certificate::OSCertHandles());
     cert_request_info->client_certs.push_back(cert);
+    CertFreeCertificateContext(cert_context2);
   }
 
   FreeContextBuffer(issuer_list.aIssuers);
@@ -430,17 +439,16 @@ SSLClientSocketWin::GetNextProto(std::string* proto) {
   return kNextProtoUnsupported;
 }
 
-int SSLClientSocketWin::Connect(CompletionCallback* callback,
-                                const BoundNetLog& net_log) {
+int SSLClientSocketWin::Connect(CompletionCallback* callback) {
   DCHECK(transport_.get());
   DCHECK(next_state_ == STATE_NONE);
   DCHECK(!user_connect_callback_);
 
-  net_log.BeginEvent(NetLog::TYPE_SSL_CONNECT);
+  net_log_.BeginEvent(NetLog::TYPE_SSL_CONNECT, NULL);
 
   int rv = InitializeSSLContext();
   if (rv != OK) {
-    net_log.EndEvent(NetLog::TYPE_SSL_CONNECT);
+    net_log_.EndEvent(NetLog::TYPE_SSL_CONNECT, NULL);
     return rv;
   }
 
@@ -449,9 +457,8 @@ int SSLClientSocketWin::Connect(CompletionCallback* callback,
   rv = DoLoop(OK);
   if (rv == ERR_IO_PENDING) {
     user_connect_callback_ = callback;
-    net_log_ = net_log;
   } else {
-    net_log.EndEvent(NetLog::TYPE_SSL_CONNECT);
+    net_log_.EndEvent(NetLog::TYPE_SSL_CONNECT, NULL);
   }
   return rv;
 }
@@ -523,7 +530,7 @@ void SSLClientSocketWin::Disconnect() {
 
   // Shut down anything that may call us back.
   verifier_.reset();
-  transport_->Disconnect();
+  transport_->socket()->Disconnect();
 
   if (send_buffer_.pvBuffer)
     FreeSendBuffer();
@@ -549,7 +556,7 @@ bool SSLClientSocketWin::IsConnected() const {
   // layer (HttpNetworkTransaction) needs to handle a persistent connection
   // closed by the server when we send a request anyway, a false positive in
   // exchange for simpler code is a good trade-off.
-  return completed_handshake() && transport_->IsConnected();
+  return completed_handshake() && transport_->socket()->IsConnected();
 }
 
 bool SSLClientSocketWin::IsConnectedAndIdle() const {
@@ -558,13 +565,14 @@ bool SSLClientSocketWin::IsConnectedAndIdle() const {
   // Strictly speaking, we should check if we have received the close_notify
   // alert message from the server, and return false in that case.  Although
   // the close_notify alert message means EOF in the SSL layer, it is just
-  // bytes to the transport layer below, so transport_->IsConnectedAndIdle()
-  // returns the desired false when we receive close_notify.
-  return completed_handshake() && transport_->IsConnectedAndIdle();
+  // bytes to the transport layer below, so
+  // transport_->socket()->IsConnectedAndIdle() returns the desired false
+  // when we receive close_notify.
+  return completed_handshake() && transport_->socket()->IsConnectedAndIdle();
 }
 
 int SSLClientSocketWin::GetPeerAddress(AddressList* address) const {
-  return transport_->GetPeerAddress(address);
+  return transport_->socket()->GetPeerAddress(address);
 }
 
 int SSLClientSocketWin::Read(IOBuffer* buf, int buf_len,
@@ -631,11 +639,11 @@ int SSLClientSocketWin::Write(IOBuffer* buf, int buf_len,
 }
 
 bool SSLClientSocketWin::SetReceiveBufferSize(int32 size) {
-  return transport_->SetReceiveBufferSize(size);
+  return transport_->socket()->SetReceiveBufferSize(size);
 }
 
 bool SSLClientSocketWin::SetSendBufferSize(int32 size) {
-  return transport_->SetSendBufferSize(size);
+  return transport_->socket()->SetSendBufferSize(size);
 }
 
 void SSLClientSocketWin::OnHandshakeIOComplete(int result) {
@@ -655,8 +663,7 @@ void SSLClientSocketWin::OnHandshakeIOComplete(int result) {
       c->Run(rv);
       return;
     }
-    net_log_.EndEvent(NetLog::TYPE_SSL_CONNECT);
-    net_log_ = BoundNetLog();
+    net_log_.EndEvent(NetLog::TYPE_SSL_CONNECT, NULL);
     CompletionCallback* c = user_connect_callback_;
     user_connect_callback_ = NULL;
     c->Run(rv);
@@ -751,8 +758,8 @@ int SSLClientSocketWin::DoHandshakeRead() {
   DCHECK(!transport_read_buf_);
   transport_read_buf_ = new IOBuffer(buf_len);
 
-  return transport_->Read(transport_read_buf_, buf_len,
-                          &handshake_io_callback_);
+  return transport_->socket()->Read(transport_read_buf_, buf_len,
+                                    &handshake_io_callback_);
 }
 
 int SSLClientSocketWin::DoHandshakeReadComplete(int result) {
@@ -826,6 +833,12 @@ int SSLClientSocketWin::DoHandshakeReadComplete(int result) {
       &out_buffer_desc,
       &out_flags,
       &expiry);
+
+  if (isc_status_ == SEC_E_INVALID_TOKEN) {
+    // Peer sent us an SSL record type that's invalid during SSL handshake.
+    // TODO(wtc): move this to MapSecurityError after sufficient testing.
+    return ERR_SSL_PROTOCOL_ERROR;
+  }
 
   if (send_buffer_.cbBuffer != 0 &&
       (isc_status_ == SEC_E_OK ||
@@ -912,8 +925,8 @@ int SSLClientSocketWin::DoHandshakeWrite() {
   transport_write_buf_ = new IOBuffer(buf_len);
   memcpy(transport_write_buf_->data(), buf, buf_len);
 
-  return transport_->Write(transport_write_buf_, buf_len,
-                           &handshake_io_callback_);
+  return transport_->socket()->Write(transport_write_buf_, buf_len,
+                                     &handshake_io_callback_);
 }
 
 int SSLClientSocketWin::DoHandshakeWriteComplete(int result) {
@@ -1007,7 +1020,8 @@ int SSLClientSocketWin::DoPayloadRead() {
     DCHECK(!transport_read_buf_);
     transport_read_buf_ = new IOBuffer(buf_len);
 
-    rv = transport_->Read(transport_read_buf_, buf_len, &read_callback_);
+    rv = transport_->socket()->Read(transport_read_buf_, buf_len,
+                                    &read_callback_);
     if (rv != ERR_IO_PENDING)
       rv = DoPayloadReadComplete(rv);
     if (rv <= 0)
@@ -1242,7 +1256,8 @@ int SSLClientSocketWin::DoPayloadWrite() {
   transport_write_buf_ = new IOBuffer(buf_len);
   memcpy(transport_write_buf_->data(), buf, buf_len);
 
-  int rv = transport_->Write(transport_write_buf_, buf_len, &write_callback_);
+  int rv = transport_->socket()->Write(transport_write_buf_, buf_len,
+                                       &write_callback_);
   if (rv != ERR_IO_PENDING)
     rv = DoPayloadWriteComplete(rv);
   return rv;
@@ -1303,15 +1318,15 @@ int SSLClientSocketWin::DidCompleteHandshake() {
                                     server_cert_handle)) {
     // We already verified the server certificate.  Either it is good or the
     // user has accepted the certificate error.
-    CertFreeCertificateContext(server_cert_handle);
     DidCompleteRenegotiation();
   } else {
     server_cert_ = X509Certificate::CreateFromHandle(
         server_cert_handle, X509Certificate::SOURCE_FROM_NETWORK,
-        net::X509Certificate::OSCertHandles());
+        X509Certificate::OSCertHandles());
 
     next_state_ = STATE_VERIFY_CERT;
   }
+  CertFreeCertificateContext(server_cert_handle);
   return OK;
 }
 

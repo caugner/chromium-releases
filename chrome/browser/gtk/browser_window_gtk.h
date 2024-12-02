@@ -10,6 +10,7 @@
 #include <map>
 
 #include "app/active_window_watcher_x.h"
+#include "app/gtk_signal.h"
 #include "app/x11_util.h"
 #include "base/scoped_ptr.h"
 #include "base/timer.h"
@@ -61,7 +62,6 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void UpdateTitleBar();
   virtual void ShelfVisibilityChanged();
   virtual void UpdateDevTools();
-  virtual void FocusDevTools();
   virtual void UpdateLoadingAnimations(bool should_animate);
   virtual void SetStarredState(bool is_starred);
   virtual gfx::Rect GetRestoredBounds() const;
@@ -71,11 +71,14 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual bool IsFullscreenBubbleVisible() const;
   virtual LocationBar* GetLocationBar() const;
   virtual void SetFocusToLocationBar(bool select_all);
-  virtual void UpdateStopGoState(bool is_loading, bool force);
+  virtual void UpdateReloadStopState(bool is_loading, bool force);
   virtual void UpdateToolbar(TabContents* contents,
                              bool should_restore_state);
   virtual void FocusToolbar();
-  virtual void FocusPageAndAppMenus();
+  virtual void FocusAppMenu();
+  virtual void FocusBookmarksToolbar();
+  virtual void FocusChromeOSStatus();
+  virtual void RotatePaneFocus(bool forwards);
   virtual bool IsBookmarkBarVisible() const;
   virtual bool IsBookmarkBarAnimating() const;
   virtual bool IsToolbarVisible() const;
@@ -84,9 +87,9 @@ class BrowserWindowGtk : public BrowserWindow,
                                         Profile* profile);
   virtual void ToggleBookmarkBar();
   virtual void ToggleExtensionShelf();
-  virtual void ShowAboutChromeDialog();
+  virtual views::Window* ShowAboutChromeDialog();
+  virtual void ShowUpdateChromeDialog();
   virtual void ShowTaskManager();
-  virtual void ShowBookmarkManager();
   virtual void ShowBookmarkBubble(const GURL& url, bool already_bookmarked);
   virtual bool IsDownloadShelfVisible() const;
   virtual DownloadShelf* GetDownloadShelf();
@@ -95,11 +98,10 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void ShowImportDialog();
   virtual void ShowSearchEnginesDialog();
   virtual void ShowPasswordManager();
-  virtual void ShowSelectProfileDialog();
-  virtual void ShowNewProfileDialog();
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents);
   virtual void ShowContentSettingsWindow(ContentSettingsType content_type,
                                          Profile* profile);
+  virtual void ShowCollectedCookiesDialog(TabContents* tab_contents);
   virtual void ShowProfileErrorDialog(int message_id);
   virtual void ShowThemeInstallBubble();
   virtual void ConfirmBrowserCloseWithPendingDownloads();
@@ -112,7 +114,6 @@ class BrowserWindowGtk : public BrowserWindow,
                             const GURL& url,
                             const NavigationEntry::SSLStatus& ssl,
                             bool show_history);
-  virtual void ShowPageMenu();
   virtual void ShowAppMenu();
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                       bool* is_keyboard_shortcut);
@@ -121,6 +122,8 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void Cut();
   virtual void Copy();
   virtual void Paste();
+  virtual void ToggleTabStripMode() {}
+  virtual void SetToolbarCollapsedMode(bool val) {}
 
   // Overridden from NotificationObserver:
   virtual void Observe(NotificationType type,
@@ -187,6 +190,16 @@ class BrowserWindowGtk : public BrowserWindow,
   void BookmarkBarIsFloating(bool is_floating);
 
   static void RegisterUserPrefs(PrefService* prefs);
+
+  // Returns whether to draw the content drop shadow on the sides and bottom
+  // of the browser window. When false, we still draw a shadow on the top of
+  // the toolbar (under the tab strip), but do not round the top corners.
+  bool ShouldDrawContentDropShadow();
+
+  // Tells GTK that the toolbar area is invalidated and needs redrawing. We
+  // have this method as a hack because GTK doesn't queue the toolbar area for
+  // redraw when it should.
+  void QueueToolbarRedraw();
 
  protected:
   virtual void DestroyBrowser();
@@ -256,11 +269,22 @@ class BrowserWindowGtk : public BrowserWindow,
 
   // Callback for when the custom frame alignment needs to be redrawn.
   // The content area includes the toolbar and web page but not the tab strip.
-  static gboolean OnCustomFrameExpose(GtkWidget* widget, GdkEventExpose* event,
-                                      BrowserWindowGtk* window);
+  CHROMEGTK_CALLBACK_1(BrowserWindowGtk, gboolean, OnCustomFrameExpose,
+                       GdkEventExpose*);
+
   // A helper method that draws the shadow above the toolbar and in the frame
   // border during an expose.
-  static void DrawContentShadow(cairo_t* cr, BrowserWindowGtk* window);
+  void DrawContentShadow(cairo_t* cr);
+
+  // Draws the tab image as the frame so we can write legible text.
+  void DrawPopupFrame(cairo_t* cr, GtkWidget* widget, GdkEventExpose* event);
+
+  // Draws the normal custom frame using theme_frame.
+  void DrawCustomFrame(cairo_t* cr, GtkWidget* widget, GdkEventExpose* event);
+
+  // Returns which frame image we should use based on the window's current
+  // activation state / incognito state.
+  int GetThemeFrameResource();
 
   // Callback for accelerator activation. |user_data| stores the command id
   // of the matched accelerator.
@@ -271,29 +295,23 @@ class BrowserWindowGtk : public BrowserWindow,
                                    void* user_data);
 
   // Key press event callback.
-  static gboolean OnKeyPress(GtkWidget* widget,
-                             GdkEventKey* event,
-                             BrowserWindowGtk* window);
+  CHROMEGTK_CALLBACK_1(BrowserWindowGtk, gboolean, OnKeyPress, GdkEventKey*);
 
   // Mouse move and mouse button press callbacks.
-  static gboolean OnMouseMoveEvent(GtkWidget* widget,
-                                   GdkEventMotion* event,
-                                   BrowserWindowGtk* window);
-  static gboolean OnButtonPressEvent(GtkWidget* widget,
-                                     GdkEventButton* event,
-                                     BrowserWindowGtk* window);
+  CHROMEGTK_CALLBACK_1(BrowserWindowGtk, gboolean, OnMouseMoveEvent,
+                       GdkEventMotion*);
+  CHROMEGTK_CALLBACK_1(BrowserWindowGtk, gboolean, OnButtonPressEvent,
+                       GdkEventButton*);
 
   // Maps and Unmaps the xid of |widget| to |window|.
-  static void MainWindowMapped(GtkWidget* widget, BrowserWindowGtk* window);
-  static void MainWindowUnMapped(GtkWidget* widget, BrowserWindowGtk* window);
+  static void MainWindowMapped(GtkWidget* widget);
+  static void MainWindowUnMapped(GtkWidget* widget);
 
   // Tracks focus state of browser.
-  static gboolean OnFocusIn(GtkWidget* widget,
-                            GdkEventFocus* event,
-                            BrowserWindowGtk* window);
-  static gboolean OnFocusOut(GtkWidget* widget,
-                             GdkEventFocus* event,
-                             BrowserWindowGtk* window);
+  CHROMEGTK_CALLBACK_1(BrowserWindowGtk, gboolean, OnFocusIn,
+                       GdkEventFocus*);
+  CHROMEGTK_CALLBACK_1(BrowserWindowGtk, gboolean, OnFocusOut,
+                       GdkEventFocus*);
 
   // A small shim for browser_->ExecuteCommand.
   // Returns true if the command was executed.
@@ -313,6 +331,10 @@ class BrowserWindowGtk : public BrowserWindow,
   bool IsTabStripSupported() const;
   bool IsToolbarSupported() const;
   bool IsBookmarkBarSupported() const;
+
+  // Whether we should draw the tab background instead of the theme_frame
+  // background because this window is a popup.
+  bool UsingCustomPopupFrame() const;
 
   // Checks to see if the mouse pointer at |x|, |y| is over the border of the
   // custom frame (a spot that should trigger a window resize). Returns true if
@@ -401,6 +423,10 @@ class BrowserWindowGtk : public BrowserWindow,
   // If true, maximize the window after we call BrowserWindow::Show for the
   // first time.  This is to work around a compiz bug.
   bool maximize_after_show_;
+
+  // If true, don't call gdk_window_raise() when we get a click in the title
+  // bar or window border.  This is to work around a compiz bug.
+  bool suppress_window_raise_;
 
   // The accelerator group used to handle accelerators, owned by this object.
   GtkAccelGroup* accel_group_;

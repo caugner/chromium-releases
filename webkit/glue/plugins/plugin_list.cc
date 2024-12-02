@@ -6,17 +6,18 @@
 
 #include <algorithm>
 
+#include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/time.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/mime_util.h"
-#include "webkit/default_plugin/plugin_main.h"
 #include "webkit/glue/plugins/plugin_constants_win.h"
 #include "webkit/glue/plugins/plugin_lib.h"
+#include "webkit/glue/plugins/plugin_switches.h"
 #include "webkit/glue/webkit_glue.h"
-#include "googleurl/src/gurl.h"
 
 namespace NPAPI {
 
@@ -25,6 +26,12 @@ base::LazyInstance<PluginList> g_singleton(base::LINKER_INITIALIZED);
 // static
 PluginList* PluginList::Singleton() {
   return g_singleton.Pointer();
+}
+
+// static
+bool PluginList::DebugPluginLoading() {
+  return CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDebugPluginLoading);
 }
 
 bool PluginList::PluginsLoaded() {
@@ -94,19 +101,19 @@ bool PluginList::ReadPluginInfo(const FilePath& filename,
 bool PluginList::CreateWebPluginInfo(const PluginVersionInfo& pvi,
                                      WebPluginInfo* info) {
   std::vector<std::string> mime_types, file_extensions;
-  std::vector<std::wstring> descriptions;
+  std::vector<string16> descriptions;
   SplitString(WideToUTF8(pvi.mime_types), '|', &mime_types);
   SplitString(WideToUTF8(pvi.file_extensions), '|', &file_extensions);
-  SplitString(pvi.type_descriptions, '|', &descriptions);
+  SplitString(WideToUTF16(pvi.type_descriptions), '|', &descriptions);
 
   info->mime_types.clear();
 
   if (mime_types.empty())
     return false;
 
-  info->name = pvi.product_name;
-  info->desc = pvi.file_description;
-  info->version = pvi.file_version;
+  info->name = WideToUTF16(pvi.product_name);
+  info->desc = WideToUTF16(pvi.file_description);
+  info->version = WideToUTF16(pvi.file_version);
   info->path = pvi.path;
   info->enabled = true;
 
@@ -122,8 +129,8 @@ bool PluginList::CreateWebPluginInfo(const PluginVersionInfo& pvi,
       // On Windows, the description likely has a list of file extensions
       // embedded in it (e.g. "SurfWriter file (*.swr)"). Remove an extension
       // list from the description if it is present.
-      size_t ext = mime_type.description.find(L"(*");
-      if (ext != std::wstring::npos) {
+      size_t ext = mime_type.description.find(ASCIIToUTF16("(*"));
+      if (ext != string16::npos) {
         if (ext > 1 && mime_type.description[ext -1] == ' ')
           ext--;
 
@@ -140,25 +147,6 @@ bool PluginList::CreateWebPluginInfo(const PluginVersionInfo& pvi,
 PluginList::PluginList()
     : plugins_loaded_(false), plugins_need_refresh_(false) {
   PlatformInit();
-
-#if defined(OS_WIN)
-  const PluginVersionInfo default_plugin = {
-    FilePath(kDefaultPluginLibraryName),
-    L"Default Plug-in",
-    L"Provides functionality for installing third-party plug-ins",
-    L"1",
-    L"*",
-    L"",
-    L"",
-    {
-      default_plugin::NP_GetEntryPoints,
-      default_plugin::NP_Initialize,
-      default_plugin::NP_Shutdown
-    }
-  };
-
-  internal_plugins_.push_back(default_plugin);
-#endif
 }
 
 void PluginList::LoadPlugins(bool refresh) {
@@ -393,12 +381,9 @@ bool PluginList::GetPluginInfo(const GURL& url,
                                std::string* actual_mime_type) {
   bool found = FindPlugin(mime_type, allow_wildcard, info);
   if (!found || (info->path.value() == kDefaultPluginLibraryName)) {
-    WebPluginInfo info2;
-    if (FindPlugin(url, actual_mime_type, &info2)) {
+    if (FindPlugin(url, actual_mime_type, info) ||
+        FindDisabledPlugin(mime_type, allow_wildcard, info)) {
       found = true;
-      *info = info2;
-    } else if (FindDisabledPlugin(mime_type, allow_wildcard, &info2)) {
-      found = false;
     }
   }
 

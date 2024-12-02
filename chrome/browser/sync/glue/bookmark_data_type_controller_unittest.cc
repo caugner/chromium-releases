@@ -28,7 +28,7 @@ using browser_sync::DataTypeController;
 using browser_sync::ModelAssociatorMock;
 using testing::_;
 using testing::DoAll;
-using testing::Invoke;
+using testing::InvokeWithoutArgs;
 using testing::Return;
 using testing::SetArgumentPointee;
 
@@ -69,8 +69,6 @@ class BookmarkDataTypeControllerTest : public testing::Test {
 
   void SetAssociateExpectations() {
     EXPECT_CALL(*profile_sync_factory_, CreateBookmarkSyncComponents(_, _));
-    EXPECT_CALL(*model_associator_, ChromeModelHasUserCreatedNodes(_)).
-        WillRepeatedly(DoAll(SetArgumentPointee<0>(false), Return(true)));
     EXPECT_CALL(*model_associator_, SyncModelHasUserCreatedNodes(_)).
         WillRepeatedly(DoAll(SetArgumentPointee<0>(true), Return(true)));
     EXPECT_CALL(*model_associator_, AssociateModels()).
@@ -144,8 +142,6 @@ TEST_F(BookmarkDataTypeControllerTest, StartBusy) {
 TEST_F(BookmarkDataTypeControllerTest, StartOk) {
   SetStartExpectations();
   SetAssociateExpectations();
-  EXPECT_CALL(*model_associator_, ChromeModelHasUserCreatedNodes(_)).
-      WillRepeatedly(DoAll(SetArgumentPointee<0>(true), Return(true)));
   EXPECT_CALL(*model_associator_, SyncModelHasUserCreatedNodes(_)).
       WillRepeatedly(DoAll(SetArgumentPointee<0>(true), Return(true)));
 
@@ -157,8 +153,6 @@ TEST_F(BookmarkDataTypeControllerTest, StartAssociationFailed) {
   SetStartExpectations();
   // Set up association to fail.
   EXPECT_CALL(*profile_sync_factory_, CreateBookmarkSyncComponents(_, _));
-  EXPECT_CALL(*model_associator_, ChromeModelHasUserCreatedNodes(_)).
-      WillRepeatedly(DoAll(SetArgumentPointee<0>(false), Return(true)));
   EXPECT_CALL(*model_associator_, SyncModelHasUserCreatedNodes(_)).
       WillRepeatedly(DoAll(SetArgumentPointee<0>(true), Return(true)));
   EXPECT_CALL(*model_associator_, AssociateModels()).
@@ -174,8 +168,6 @@ TEST_F(BookmarkDataTypeControllerTest,
   SetStartExpectations();
   // Set up association to fail with an unrecoverable error.
   EXPECT_CALL(*profile_sync_factory_, CreateBookmarkSyncComponents(_, _));
-  EXPECT_CALL(*model_associator_, ChromeModelHasUserCreatedNodes(_)).
-      WillRepeatedly(DoAll(SetArgumentPointee<0>(false), Return(true)));
   EXPECT_CALL(*model_associator_, SyncModelHasUserCreatedNodes(_)).
       WillRepeatedly(DoAll(SetArgumentPointee<0>(false), Return(false)));
   EXPECT_CALL(start_callback_, Run(DataTypeController::UNRECOVERABLE_ERROR));
@@ -210,17 +202,15 @@ TEST_F(BookmarkDataTypeControllerTest, Stop) {
 TEST_F(BookmarkDataTypeControllerTest, OnUnrecoverableError) {
   SetStartExpectations();
   SetAssociateExpectations();
-  EXPECT_CALL(*model_associator_, ChromeModelHasUserCreatedNodes(_)).
-      WillRepeatedly(DoAll(SetArgumentPointee<0>(true), Return(true)));
   EXPECT_CALL(*model_associator_, SyncModelHasUserCreatedNodes(_)).
       WillRepeatedly(DoAll(SetArgumentPointee<0>(true), Return(true)));
-  EXPECT_CALL(service_, OnUnrecoverableError()).
-      WillOnce(Invoke(bookmark_dtc_.get(),
-                      &BookmarkDataTypeController::Stop));
+  EXPECT_CALL(service_, OnUnrecoverableError(_,_)).
+      WillOnce(InvokeWithoutArgs(bookmark_dtc_.get(),
+                                 &BookmarkDataTypeController::Stop));
   SetStopExpectations();
 
   EXPECT_CALL(start_callback_, Run(DataTypeController::OK));
   bookmark_dtc_->Start(NewCallback(&start_callback_, &StartCallback::Run));
   // This should cause bookmark_dtc_->Stop() to be called.
-  bookmark_dtc_->OnUnrecoverableError();
+  bookmark_dtc_->OnUnrecoverableError(FROM_HERE, "Test");
 }

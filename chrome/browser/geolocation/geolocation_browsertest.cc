@@ -2,18 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/compiler_specific.h"
 #include "base/string_util.h"
 #include "base/waitable_event.h"
 #include "chrome/browser/app_modal_dialog.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/geolocation/geolocation_content_settings_map.h"
+#include "chrome/browser/geolocation/geolocation_settings_state.h"
 #include "chrome/browser/geolocation/location_arbitrator.h"
 #include "chrome/browser/geolocation/location_provider.h"
 #include "chrome/browser/geolocation/mock_location_provider.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -198,11 +202,15 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
     INITIALIZATION_IFRAMES,
   };
 
-  void Initialize(InitializationOptions options) {
+  bool Initialize(InitializationOptions options) WARN_UNUSED_RESULT {
     GeolocationArbitrator::SetProviderFactoryForTest(
         &NewAutoSuccessMockNetworkLocationProvider);
-    if (!server_.get())
+    if (!server_.get()) {
       server_ = StartHTTPServer();
+      EXPECT_TRUE(server_.get());
+      if (!server_.get())
+        return false;
+    }
 
     current_url_ = server_->TestServerPage(html_for_tests_);
     LOG(WARNING) << "before navigate";
@@ -227,8 +235,13 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
       current_browser_ = browser();
       ui_test_utils::NavigateToURL(current_browser_, current_url_);
     }
-    EXPECT_TRUE(current_browser_);
     LOG(WARNING) << "after navigate";
+
+    EXPECT_TRUE(current_browser_);
+    if (!current_browser_)
+      return false;
+
+    return true;
   }
 
   void AddGeolocationWatch(bool wait_for_infobar) {
@@ -266,9 +279,11 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
 
   void SetInfobarResponse(const GURL& requesting_url, bool allowed) {
     TabContents* tab_contents = current_browser_->GetSelectedTabContents();
-    TabContents::GeolocationContentSettings content_settings =
-        tab_contents->geolocation_content_settings();
-    size_t settings_size = content_settings.size();
+    TabSpecificContentSettings* content_settings =
+        tab_contents->GetTabSpecificContentSettings();
+    const GeolocationSettingsState& settings_state =
+        content_settings->geolocation_settings_state();
+    size_t state_map_size = settings_state.state_map().size();
     ASSERT_TRUE(infobar_);
     LOG(WARNING) << "will set infobar response";
     if (allowed)
@@ -279,33 +294,40 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
     tab_contents->RemoveInfoBar(infobar_);
     LOG(WARNING) << "infobar response set";
     infobar_ = NULL;
-    content_settings = tab_contents->geolocation_content_settings();
-    EXPECT_GT(content_settings.size(), settings_size);
-    EXPECT_EQ(1U, content_settings.count(requesting_url));
+    EXPECT_GT(settings_state.state_map().size(), state_map_size);
+    GURL requesting_origin = requesting_url.GetOrigin();
+    EXPECT_EQ(1U, settings_state.state_map().count(requesting_origin));
     ContentSetting expected_setting =
           allowed ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK;
-    EXPECT_EQ(expected_setting, content_settings[requesting_url]);
+    EXPECT_EQ(expected_setting,
+              settings_state.state_map().find(requesting_origin)->second);
   }
 
   void WaitForJSPrompt() {
     LOG(WARNING) << "will block for JS prompt";
     AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
-    LOG(WARNING) << "JS prompt received";
     ASSERT_TRUE(alert);
-    LOG(WARNING) << "will close JS prompt";
+    LOG(WARNING) << "JS prompt received, will close";
     alert->CloseModalDialog();
     LOG(WARNING) << "closed JS prompt";
   }
 
-  void CheckStringValueFromJavascript(
-      const std::string& expected, const std::string& function) {
+  void CheckStringValueFromJavascriptForTab(
+      const std::string& expected, const std::string& function,
+      TabContents* tab_contents) {
     std::string script = StringPrintf(
         "window.domAutomationController.send(%s)", function.c_str());
     std::string result;
     ui_test_utils::ExecuteJavaScriptAndExtractString(
-        current_browser_->GetSelectedTabContents()->render_view_host(),
+        tab_contents->render_view_host(),
         iframe_xpath_, UTF8ToWide(script), &result);
-    EXPECT_EQ(expected.c_str(), result);
+    EXPECT_EQ(expected, result);
+  }
+
+  void CheckStringValueFromJavascript(
+      const std::string& expected, const std::string& function) {
+    CheckStringValueFromJavascriptForTab(
+        expected, function, current_browser_->GetSelectedTabContents());
   }
 
   scoped_refptr<HTTPTestServer> server_;
@@ -324,102 +346,63 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
   GURL iframe1_url_;
 };
 
-#if defined(OS_MACOSX)
-// TODO(bulach): investigate why this fails on mac. It may be related to:
-// http://crbug.com/29424
-#define MAYBE_DisplaysPermissionBar DISABLED_DisplaysPermissionBar
-#else
-#define MAYBE_DisplaysPermissionBar DisplaysPermissionBar
-#endif
-
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, MAYBE_DisplaysPermissionBar) {
-  Initialize(INITIALIZATION_NONE);
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, DisplaysPermissionBar) {
+  ASSERT_TRUE(Initialize(INITIALIZATION_NONE));
   AddGeolocationWatch(true);
 }
 
-#if defined(OS_MACOSX)
-// TODO(bulach): investigate why this fails on mac. It may be related to:
-// http://crbug.com/29424
-#define MAYBE_Geoposition DISABLED_Geoposition
-#else
-#define MAYBE_Geoposition Geoposition
-#endif
-
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, MAYBE_Geoposition) {
-  Initialize(INITIALIZATION_NONE);
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, Geoposition) {
+  ASSERT_TRUE(Initialize(INITIALIZATION_NONE));
   AddGeolocationWatch(true);
   SetInfobarResponse(current_url_, true);
   CheckGeoposition(MockLocationProvider::instance_->position_);
 }
 
-#if defined(OS_MACOSX)
-// TODO(bulach): investigate why this fails on mac. It may be related to:
-// http://crbug.com/29424
-#define MAYBE_ErrorOnPermissionDenied DISABLED_ErrorOnPermissionDenied
-#else
-#define MAYBE_ErrorOnPermissionDenied ErrorOnPermissionDenied
-#endif
-
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, MAYBE_ErrorOnPermissionDenied) {
-  Initialize(INITIALIZATION_NONE);
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, ErrorOnPermissionDenied) {
+  ASSERT_TRUE(Initialize(INITIALIZATION_NONE));
   AddGeolocationWatch(true);
   // Infobar was displayed, deny access and check for error code.
   SetInfobarResponse(current_url_, false);
   CheckStringValueFromJavascript("1", "geoGetLastError()");
 }
 
-#if defined(OS_MACOSX)
 // TODO(bulach): investigate why this fails on mac. It may be related to:
-// http://crbug.com/29424
-#define MAYBE_NoInfobarForSecondTab DISABLED_NoInfobarForSecondTab
-#else
-#define MAYBE_NoInfobarForSecondTab NoInfobarForSecondTab
-#endif
-
-// TODO(joth): Fix test. http://crbug.com/40099
+// http://crbug.com/29424. This also fails on Vista: http://crbug.com/44589
 IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, DISABLED_NoInfobarForSecondTab) {
-  Initialize(INITIALIZATION_NONE);
+  ASSERT_TRUE(Initialize(INITIALIZATION_NONE));
   AddGeolocationWatch(true);
   SetInfobarResponse(current_url_, true);
+  // Disables further prompts from this tab.
+  CheckStringValueFromJavascript("0", "geoSetMaxAlertCount(0)");
 
   // Checks infobar will not be created a second tab.
-  Initialize(INITIALIZATION_NEWTAB);
+  ASSERT_TRUE(Initialize(INITIALIZATION_NEWTAB));
   AddGeolocationWatch(false);
   CheckGeoposition(MockLocationProvider::instance_->position_);
 }
 
 #if defined(OS_MACOSX)
-// TODO(bulach): investigate why this fails on mac. It may be related to:
-// http://crbug.com/29424
-#define MAYBE_NoInfobarForDeniedOrigin DISABLED_NoInfobarForDeniedOrigin
+// Fails sometimes on mac: http://crbug.com/47053
+#define MAYBE_NoInfobarForDeniedOrigin FLAKY_NoInfobarForDeniedOrigin
 #else
 #define MAYBE_NoInfobarForDeniedOrigin NoInfobarForDeniedOrigin
 #endif
 
 IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, MAYBE_NoInfobarForDeniedOrigin) {
-  Initialize(INITIALIZATION_NONE);
+  ASSERT_TRUE(Initialize(INITIALIZATION_NONE));
   current_browser_->profile()->GetGeolocationContentSettingsMap()->
       SetContentSetting(current_url_, current_url_, CONTENT_SETTING_BLOCK);
   AddGeolocationWatch(false);
   // Checks we have an error for this denied origin.
   CheckStringValueFromJavascript("1", "geoGetLastError()");
   // Checks infobar will not be created a second tab.
-  Initialize(INITIALIZATION_NEWTAB);
+  ASSERT_TRUE(Initialize(INITIALIZATION_NEWTAB));
   AddGeolocationWatch(false);
   CheckStringValueFromJavascript("1", "geoGetLastError()");
 }
 
-#if defined(OS_MACOSX)
-// TODO(bulach): investigate why this fails on mac. It may be related to:
-// http://crbug.com/29424
-#define MAYBE_NoInfobarForAllowedOrigin DISABLED_NoInfobarForAllowedOrigin
-#else
-#define MAYBE_NoInfobarForAllowedOrigin NoInfobarForAllowedOrigin
-#endif
-
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
-                       MAYBE_NoInfobarForAllowedOrigin) {
-  Initialize(INITIALIZATION_NONE);
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, NoInfobarForAllowedOrigin) {
+  ASSERT_TRUE(Initialize(INITIALIZATION_NONE));
   current_browser_->profile()->GetGeolocationContentSettingsMap()->
       SetContentSetting(current_url_, current_url_, CONTENT_SETTING_ALLOW);
   // Checks no infobar will be created and there's no error callback.
@@ -427,43 +410,24 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
   CheckGeoposition(MockLocationProvider::instance_->position_);
 }
 
-#if defined(OS_MACOSX)
-// TODO(bulach): investigate why this fails on mac. It may be related to:
-// http://crbug.com/29424
-#define MAYBE_NoInfobarForOffTheRecord DISABLED_NoInfobarForOffTheRecord
-#else
-#define MAYBE_NoInfobarForOffTheRecord NoInfobarForOffTheRecord
-#endif
-
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, MAYBE_NoInfobarForOffTheRecord) {
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, FLAKY_NoInfobarForOffTheRecord) {
   // First, check infobar will be created for regular profile
-  Initialize(INITIALIZATION_NONE);
+  ASSERT_TRUE(Initialize(INITIALIZATION_NONE));
   AddGeolocationWatch(true);
   // Response will be persisted
   SetInfobarResponse(current_url_, true);
   CheckGeoposition(MockLocationProvider::instance_->position_);
   // Disables further prompts from this tab.
-  CheckStringValueFromJavascript("false", "geoEnableAlerts(false)");
+  CheckStringValueFromJavascript("0", "geoSetMaxAlertCount(0)");
   // Go off the record, and checks no infobar will be created.
-  Initialize(INITIALIZATION_OFFTHERECORD);
+  ASSERT_TRUE(Initialize(INITIALIZATION_OFFTHERECORD));
   AddGeolocationWatch(false);
   CheckGeoposition(MockLocationProvider::instance_->position_);
 }
 
-#if defined(OS_MACOSX)
-// TODO(bulach): investigate why this fails on mac. It may be related to:
-// http://crbug.com/29424
-#define MAYBE_IFramesWithFreshPosition DISABLED_IFramesWithFreshPosition
-#else
-// TODO(bulach): investigate this failure.
-// http://build.chromium.org/buildbot/waterfall/builders/XP%20Tests/builds/18549/steps/browser_tests/logs/stdio
-#define MAYBE_IFramesWithFreshPosition FLAKY_IFramesWithFreshPosition
-#endif
-
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
-                       MAYBE_IFramesWithFreshPosition) {
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, IFramesWithFreshPosition) {
   html_for_tests_ = "files/geolocation/iframes_different_origin.html";
-  Initialize(INITIALIZATION_IFRAMES);
+  ASSERT_TRUE(Initialize(INITIALIZATION_IFRAMES));
   LOG(WARNING) << "frames loaded";
 
   iframe_xpath_ = L"//iframe[@id='iframe_0']";
@@ -471,7 +435,7 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
   SetInfobarResponse(iframe0_url_, true);
   CheckGeoposition(MockLocationProvider::instance_->position_);
   // Disables further prompts from this iframe.
-  CheckStringValueFromJavascript("false", "geoEnableAlerts(false)");
+  CheckStringValueFromJavascript("0", "geoSetMaxAlertCount(0)");
 
   // Test second iframe from a different origin with a cached geoposition will
   // create the infobar.
@@ -480,7 +444,7 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
 
   // Back to the first frame, enable alert and refresh geoposition.
   iframe_xpath_ = L"//iframe[@id='iframe_0']";
-  CheckStringValueFromJavascript("true", "geoEnableAlerts(true)");
+  CheckStringValueFromJavascript("1", "geoSetMaxAlertCount(1)");
   // MockLocationProvider must have been created.
   ASSERT_TRUE(MockLocationProvider::instance_);
   Geoposition fresh_position = GeopositionFromLatLong(3.17, 4.23);
@@ -490,7 +454,7 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
   CheckGeoposition(fresh_position);
 
   // Disable alert for this frame.
-  CheckStringValueFromJavascript("false", "geoEnableAlerts(false)");
+  CheckStringValueFromJavascript("0", "geoSetMaxAlertCount(0)");
 
   // Now go ahead an authorize the second frame.
   iframe_xpath_ = L"//iframe[@id='iframe_1']";
@@ -500,20 +464,9 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
 }
 
 
-#if defined(OS_MACOSX)
-// TODO(bulach): investigate why this fails on mac. It may be related to:
-// http://crbug.com/29424
-#define MAYBE_IFramesWithCachedPosition DISABLED_IFramesWithCachedPosition
-#else
-// TODO(bulach): enable this test when we roll to
-// https://bugs.webkit.org/show_bug.cgi?id=36315
-#define MAYBE_IFramesWithCachedPosition DISABLED_IFramesWithCachedPosition
-#endif
-
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
-                       MAYBE_IFramesWithCachedPosition) {
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, IFramesWithCachedPosition) {
   html_for_tests_ = "files/geolocation/iframes_different_origin.html";
-  Initialize(INITIALIZATION_IFRAMES);
+  ASSERT_TRUE(Initialize(INITIALIZATION_IFRAMES));
 
   iframe_xpath_ = L"//iframe[@id='iframe_0']";
   AddGeolocationWatch(true);
@@ -524,35 +477,29 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
   // so that it'll fetch from cache.
   // MockLocationProvider must have been created.
   ASSERT_TRUE(MockLocationProvider::instance_);
-  Geoposition cached_position = GeopositionFromLatLong(3.17, 4.23);
+  Geoposition cached_position = GeopositionFromLatLong(5.67, 8.09);
   ChromeThread::PostTask(ChromeThread::IO, FROM_HERE, NewRunnableFunction(
       &NotifyGeopositionOnIOThread, cached_position));
   WaitForJSPrompt();
   CheckGeoposition(cached_position);
 
   // Disable alert for this frame.
-  CheckStringValueFromJavascript("false", "geoEnableAlerts(false)");
+  CheckStringValueFromJavascript("0", "geoSetMaxAlertCount(0)");
 
   // Now go ahead an authorize the second frame.
   iframe_xpath_ = L"//iframe[@id='iframe_1']";
   AddGeolocationWatch(true);
+  // WebKit will use its cache, but we also broadcast a position shortly
+  // afterwards. We're only interested in the first alert for the success
+  // callback from the cached position.
+  CheckStringValueFromJavascript("1", "geoSetMaxAlertCount(1)");
   SetInfobarResponse(iframe1_url_, true);
   CheckGeoposition(cached_position);
 }
 
-
-#if defined(OS_MACOSX)
-// TODO(bulach): investigate why this fails on mac. It may be related to:
-// http://crbug.com/29424
-#define MAYBE_CancelPermissionForFrame DISABLED_CancelPermissionForFrame
-#else
-#define MAYBE_CancelPermissionForFrame CancelPermissionForFrame
-#endif
-
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
-                       MAYBE_CancelPermissionForFrame) {
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, CancelPermissionForFrame) {
   html_for_tests_ = "files/geolocation/iframes_different_origin.html";
-  Initialize(INITIALIZATION_IFRAMES);
+  ASSERT_TRUE(Initialize(INITIALIZATION_IFRAMES));
   LOG(WARNING) << "frames loaded";
 
   iframe_xpath_ = L"//iframe[@id='iframe_0']";
@@ -560,7 +507,7 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
   SetInfobarResponse(iframe0_url_, true);
   CheckGeoposition(MockLocationProvider::instance_->position_);
   // Disables further prompts from this iframe.
-  CheckStringValueFromJavascript("false", "geoEnableAlerts(false)");
+  CheckStringValueFromJavascript("0", "geoSetMaxAlertCount(0)");
 
   // Test second iframe from a different origin with a cached geoposition will
   // create the infobar.
@@ -574,4 +521,65 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
   int num_infobars_after_cancel =
       current_browser_->GetSelectedTabContents()->infobar_delegate_count();
   EXPECT_EQ(num_infobars_before_cancel, num_infobars_after_cancel + 1);
+}
+
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, InvalidUrlRequest) {
+  // Tests that an invalid URL (e.g. from a popup window) is rejected
+  // correctly. Also acts as a regression test for http://crbug.com/40478
+  html_for_tests_ = "files/geolocation/invalid_request_url.html";
+  ASSERT_TRUE(Initialize(INITIALIZATION_NONE));
+  TabContents* original_tab = current_browser_->GetSelectedTabContents();
+  CheckStringValueFromJavascript("1", "requestGeolocationFromInvalidUrl()");
+  CheckStringValueFromJavascriptForTab("1", "isAlive()", original_tab);
+}
+
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, NoInfoBarBeforeStart) {
+  // See http://crbug.com/42789
+  html_for_tests_ = "files/geolocation/iframes_different_origin.html";
+  ASSERT_TRUE(Initialize(INITIALIZATION_IFRAMES));
+  LOG(WARNING) << "frames loaded";
+
+  // Access navigator.geolocation, but ensure it won't request permission.
+  iframe_xpath_ = L"//iframe[@id='iframe_1']";
+  CheckStringValueFromJavascript("object", "geoAccessNavigatorGeolocation()");
+
+  iframe_xpath_ = L"//iframe[@id='iframe_0']";
+  AddGeolocationWatch(true);
+  SetInfobarResponse(iframe0_url_, true);
+  CheckGeoposition(MockLocationProvider::instance_->position_);
+  CheckStringValueFromJavascript("0", "geoSetMaxAlertCount(0)");
+
+  // Permission should be requested after adding a watch.
+  iframe_xpath_ = L"//iframe[@id='iframe_1']";
+  AddGeolocationWatch(true);
+  SetInfobarResponse(iframe1_url_, true);
+  CheckGeoposition(MockLocationProvider::instance_->position_);
+}
+
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, TwoWatchesInOneFrame) {
+  html_for_tests_ = "files/geolocation/two_watches.html";
+  ASSERT_TRUE(Initialize(INITIALIZATION_NONE));
+  // First, set the JavaScript to popup an alert when it receives
+  // |final_position|.
+  const Geoposition final_position = GeopositionFromLatLong(3.17, 4.23);
+  std::string script = StringPrintf(
+      "window.domAutomationController.send(geoSetFinalPosition(%f, %f))",
+      final_position.latitude, final_position.longitude);
+  std::string js_result;
+  EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
+      current_browser_->GetSelectedTabContents()->render_view_host(),
+      L"", UTF8ToWide(script), &js_result));
+  EXPECT_EQ(js_result, "ok");
+
+  // Send a position which both geolocation watches will receive.
+  AddGeolocationWatch(true);
+  SetInfobarResponse(current_url_, true);
+  CheckGeoposition(MockLocationProvider::instance_->position_);
+
+  // The second watch will now have cancelled. Ensure an update still makes
+  // its way through to the first watcher.
+  ChromeThread::PostTask(ChromeThread::IO, FROM_HERE, NewRunnableFunction(
+      &NotifyGeopositionOnIOThread, final_position));
+  WaitForJSPrompt();
+  CheckGeoposition(final_position);
 }

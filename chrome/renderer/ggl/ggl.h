@@ -70,10 +70,13 @@ Context* GetCurrentContext();
 // last call. For an offscreen context, resolve everything that has been
 // rendered since the last call to a copy that can be accessed by the parent
 // context.
-bool SwapBuffers();
+bool SwapBuffers(Context* context);
 
 // Destroy the given GGL context.
 bool DestroyContext(Context* context);
+
+// TODO(gman): Remove this
+void DisableShaderTranslation(Context* context);
 
 // Return the current GGL error.
 Error GetError();

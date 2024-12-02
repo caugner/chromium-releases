@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/logging.h"
+#include "base/stl_util-inl.h"
 #include "gfx/insets.h"
 #include "views/standard_layout.h"
 #include "views/view.h"
@@ -379,10 +380,7 @@ ColumnSet::ColumnSet(int id) : id_(id) {
 }
 
 ColumnSet::~ColumnSet() {
-  for (std::vector<Column*>::iterator i = columns_.begin();
-       i != columns_.end(); ++i) {
-    delete *i;
-  }
+  STLDeleteElements(&columns_);
 }
 
 void ColumnSet::AddPaddingColumn(float resize_percent, int width) {
@@ -673,18 +671,9 @@ GridLayout::GridLayout(View* host)
 }
 
 GridLayout::~GridLayout() {
-  for (std::vector<ColumnSet*>::iterator i = column_sets_.begin();
-       i != column_sets_.end(); ++i) {
-    delete *i;
-  }
-  for (std::vector<ViewState*>::iterator i = view_states_.begin();
-       i != view_states_.end(); ++i) {
-    delete *i;
-  }
-  for (std::vector<Row*>::iterator i = rows_.begin();
-       i != rows_.end(); ++i) {
-    delete *i;
-  }
+  STLDeleteElements(&column_sets_);
+  STLDeleteElements(&view_states_);
+  STLDeleteElements(&rows_);
 }
 
 void GridLayout::SetInsets(int top, int left, int bottom, int right) {
@@ -855,21 +844,25 @@ void GridLayout::SizeRowsAndColumns(bool layout, int width, int height,
   if (rows_.empty())
     return;
 
-  // Calculate the size of each of the columns. Some views preferred heights are
-  // derived from their width, as such we need to calculate the size of the
-  // columns first.
+  // Calculate the preferred width of each of the columns. Some views'
+  // preferred heights are derived from their width, as such we need to
+  // calculate the size of the columns first.
   for (std::vector<ColumnSet*>::iterator i = column_sets_.begin();
        i != column_sets_.end(); ++i) {
     (*i)->CalculateSize();
-    if (layout || width > 0) {
-      // We're doing a layout, divy up any extra space.
-      (*i)->Resize(width - (*i)->LayoutWidth() - left_inset_ - right_inset_);
-      // And reset the x coordinates.
-      (*i)->ResetColumnXCoordinates();
-    }
     pref->set_width(std::max(pref->width(), (*i)->LayoutWidth()));
   }
   pref->set_width(pref->width() + left_inset_ + right_inset_);
+
+  // Go over the columns again and set them all to the size we settled for.
+  width = width ? width : pref->width();
+  for (std::vector<ColumnSet*>::iterator i = column_sets_.begin();
+       i != column_sets_.end(); ++i) {
+    // We're doing a layout, divy up any extra space.
+    (*i)->Resize(width - (*i)->LayoutWidth() - left_inset_ - right_inset_);
+    // And reset the x coordinates.
+    (*i)->ResetColumnXCoordinates();
+  }
 
   // Reset the height of each row.
   LayoutElement::ResetSizes(&rows_);
@@ -1074,4 +1067,3 @@ views::GridLayout* CreatePanelGridLayout(views::View* host) {
                     kPanelVertMargin, kPanelHorizMargin);
   return layout;
 }
-

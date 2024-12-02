@@ -6,6 +6,7 @@
 
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/test/test_render_view_host.h"
+#include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/common/notification_service.h"
 
 TestTabContents::TestTabContents(Profile* profile, SiteInstance* instance)
@@ -49,7 +50,8 @@ TestRenderViewHost* TestTabContents::pending_rvh() {
 bool TestTabContents::CreateRenderViewForRenderManager(
     RenderViewHost* render_view_host) {
   // This will go to a TestRenderViewHost.
-  render_view_host->CreateRenderView(profile()->GetRequestContext());
+  render_view_host->CreateRenderView(profile()->GetRequestContext(),
+                                     string16());
   return true;
 }
 

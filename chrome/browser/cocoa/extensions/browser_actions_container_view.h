@@ -8,13 +8,13 @@
 #import <Cocoa/Cocoa.h>
 
 // Sent when a user-initiated drag to resize the container is initiated.
-extern const NSString* kBrowserActionGrippyDragStartedNotification;
+extern NSString* const kBrowserActionGrippyDragStartedNotification;
 
 // Sent when a user-initiated drag is resizing the container.
-extern const NSString* kBrowserActionGrippyDraggingNotification;
+extern NSString* const kBrowserActionGrippyDraggingNotification;
 
 // Sent when a user-initiated drag to resize the container has finished.
-extern const NSString* kBrowserActionGrippyDragFinishedNotification;
+extern NSString* const kBrowserActionGrippyDragFinishedNotification;
 
 // The view that encompasses the Browser Action buttons in the toolbar and
 // provides mechanisms for resizing.
@@ -37,15 +37,12 @@ extern const NSString* kBrowserActionGrippyDragFinishedNotification;
   // The maximum width of the container.
   CGFloat maxWidth_;
 
-  // Whether there is a border to the right of the last Browser Action.
-  BOOL rightBorderShown_;
-
   // Whether the container is currently being resized by the user.
   BOOL userIsResizing_;
 
-  // Whether the user can resize this at all.  Resizing is disabled in incognito
+  // Whether the user can resize this at all. Resizing is disabled in incognito
   // mode since any changes done in incognito mode are not saved anyway, and
-  // also to avoid a crash (http://crbug.com/42848).
+  // also to avoid a crash. http://crbug.com/42848
   BOOL resizable_;
 
   // Whether the user is allowed to drag the grippy to the left. NO if all
@@ -80,7 +77,6 @@ extern const NSString* kBrowserActionGrippyDragFinishedNotification;
 @property(nonatomic,getter=isResizable) BOOL resizable;
 @property(nonatomic) CGFloat maxWidth;
 @property(readonly, nonatomic) BOOL userIsResizing;
-@property(nonatomic) BOOL rightBorderShown;
 
 @end
 

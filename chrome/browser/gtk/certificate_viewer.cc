@@ -13,19 +13,20 @@
 #include <vector>
 
 #include "app/l10n_util.h"
+#include "base/gtk_util.h"
 #include "base/i18n/time_formatting.h"
 #include "base/nss_util.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/cert_store.h"
 #include "chrome/browser/gtk/certificate_dialogs.h"
 #include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/third_party/mozilla_security_manager/nsNSSCertHelper.h"
 #include "chrome/third_party/mozilla_security_manager/nsNSSCertificate.h"
 #include "chrome/third_party/mozilla_security_manager/nsUsageArrayHelper.h"
 #include "grit/generated_resources.h"
+#include "net/base/x509_certificate.h"
 
 // PSM = Mozilla's Personal Security Manager.
 namespace psm = mozilla_security_manager;
@@ -284,7 +285,7 @@ void CertificateViewer::InitGeneralPage() {
            l10n_util::GetStringUTF8(IDS_CERT_INFO_SUBJECT_GROUP));
   AddKeyValue(table, row++,
               l10n_util::GetStringUTF8(IDS_CERT_INFO_COMMON_NAME_LABEL),
-              Stringize(CERT_GetCommonName(&cert->subject)));
+              psm::ProcessIDN(Stringize(CERT_GetCommonName(&cert->subject))));
   AddKeyValue(table, row++,
               l10n_util::GetStringUTF8(IDS_CERT_INFO_ORGANIZATION_LABEL),
               Stringize(CERT_GetOrgName(&cert->subject)));
@@ -301,7 +302,7 @@ void CertificateViewer::InitGeneralPage() {
            l10n_util::GetStringUTF8(IDS_CERT_INFO_ISSUER_GROUP));
   AddKeyValue(table, row++,
               l10n_util::GetStringUTF8(IDS_CERT_INFO_COMMON_NAME_LABEL),
-              Stringize(CERT_GetCommonName(&cert->issuer)));
+              psm::ProcessIDN(Stringize(CERT_GetCommonName(&cert->issuer))));
   AddKeyValue(table, row++,
               l10n_util::GetStringUTF8(IDS_CERT_INFO_ORGANIZATION_LABEL),
               Stringize(CERT_GetOrgName(&cert->issuer)));
@@ -719,7 +720,7 @@ void CertificateViewer::OnExportClicked(GtkButton *button,
 }
 
 void CertificateViewer::Show() {
-  gtk_widget_show_all(dialog_);
+  gtk_util::ShowDialog(dialog_);
 }
 
 } // namespace
@@ -731,13 +732,7 @@ void ShowCertificateViewer(gfx::NativeWindow parent, CERTCertificate* cert) {
   (new CertificateViewer(parent, cert_chain))->Show();
 }
 
-void ShowCertificateViewer(gfx::NativeWindow parent, int cert_id) {
-  scoped_refptr<net::X509Certificate> cert;
-  CertStore::GetSharedInstance()->RetrieveCert(cert_id, &cert);
-  if (!cert.get()) {
-    // The certificate was not found. Could be that the renderer crashed before
-    // we displayed the page info.
-    return;
-  }
+void ShowCertificateViewer(gfx::NativeWindow parent,
+                           net::X509Certificate* cert) {
   ShowCertificateViewer(parent, cert->os_cert_handle());
 }

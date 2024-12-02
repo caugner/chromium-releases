@@ -33,7 +33,9 @@
 #include "base/time.h"
 
 #if defined(OS_POSIX)
+#include "base/eintr_wrapper.h"
 #include "base/file_descriptor_posix.h"
+#include "base/logging.h"
 #endif
 
 namespace base {
@@ -80,6 +82,15 @@ int CountFilesCreatedAfter(const FilePath& path,
 // This function is implemented using the FileEnumerator class so it is not
 // particularly speedy in any platform.
 int64 ComputeDirectorySize(const FilePath& root_path);
+
+// Returns the total number of bytes used by all files matching the provided
+// |pattern|, on this |directory| (without recursion). If the path does not
+// exist the function returns 0.
+//
+// This function is implemented using the FileEnumerator class so it is not
+// particularly speedy in any platform.
+int64 ComputeFilesSize(const FilePath& directory,
+                       const FilePath::StringType& pattern);
 
 // Deletes the given path, whether it's a file or a directory.
 // If it's a directory, it's perfectly happy to delete all of the
@@ -158,6 +169,8 @@ bool ContentsEqual(const FilePath& filename1,
 bool TextContentsEqual(const FilePath& filename1, const FilePath& filename2);
 
 // Read the file at |path| into |contents|, returning true on success.
+// |contents| may be NULL, in which case this function is useful for its
+// side effect of priming the disk cache.
 // Useful for unit tests.
 bool ReadFileToString(const FilePath& path, std::string* contents);
 
@@ -209,16 +222,16 @@ bool TaskbarPinShortcutLink(const wchar_t* shortcut);
 // already be pinned to the taskbar.
 bool TaskbarUnpinShortcutLink(const wchar_t* shortcut);
 
-// Return true if the given directory is empty
-bool IsDirectoryEmpty(const std::wstring& dir_path);
-
 // Copy from_path to to_path recursively and then delete from_path recursively.
 // Returns true if all operations succeed.
 // This function simulates Move(), but unlike Move() it works across volumes.
 // This fuction is not transactional.
 bool CopyAndDeleteDirectory(const FilePath& from_path,
                             const FilePath& to_path);
-#endif
+#endif  // defined(OS_WIN)
+
+// Return true if the given directory is empty
+bool IsDirectoryEmpty(const FilePath& dir_path);
 
 // Get the temporary directory provided by the system.
 bool GetTempDir(FilePath* path);
@@ -226,14 +239,18 @@ bool GetTempDir(FilePath* path);
 // Only useful on POSIX; redirects to GetTempDir() on Windows.
 bool GetShmemTempDir(FilePath* path);
 
+// Get the home directory.  This is more complicated than just getenv("HOME")
+// as it knows to fall back on getpwent() etc.
+FilePath GetHomeDir();
+
 // Creates a temporary file. The full path is placed in |path|, and the
 // function returns true if was successful in creating the file. The file will
 // be empty and all handles closed after this function returns.
 bool CreateTemporaryFile(FilePath* path);
 
 // Create and open a temporary file.  File is opened for read/write.
-// The full path is placed in |path|, and the function returns true if
-// was successful in creating and opening the file.
+// The full path is placed in |path|.
+// Returns a handle to the opened file or NULL if an error occured.
 FILE* CreateAndOpenTemporaryFile(FilePath* path);
 // Like above but for shmem files.  Only useful for POSIX.
 FILE* CreateAndOpenTemporaryShmemFile(FilePath* path);
@@ -244,6 +261,18 @@ FILE* CreateAndOpenTemporaryFileInDir(const FilePath& dir, FilePath* path);
 // Same as CreateTemporaryFile but the file is created in |dir|.
 bool CreateTemporaryFileInDir(const FilePath& dir,
                               FilePath* temp_file);
+
+// Create a directory within another directory.
+// Extra characters will be appended to |name_tmpl| to ensure that the
+// new directory does not have the same name as an existing directory.
+// If |loosen_permissions| is true, the new directory will be readable
+// and writable to all users on windows.  It is ignored on other platforms.
+// |loosen_permissions| exists to allow debugging of crbug/35198, and will
+// be removed when the issue is understood.
+bool CreateTemporaryDirInDir(const FilePath& base_dir,
+                             const FilePath::StringType& prefix,
+                             bool loosen_permissions,
+                             FilePath* new_dir);
 
 // Create a new directory under TempPath. If prefix is provided, the new
 // directory name is in the format of prefixyyyy.
@@ -258,6 +287,14 @@ bool CreateNewTempDirectory(const FilePath::StringType& prefix,
 // already exists.  The directory is only readable by the current user.
 bool CreateDirectory(const FilePath& full_path);
 
+#if defined(OS_WIN)
+// Added for debugging an issue where CreateDirectory() fails.  LOG(*) does
+// not work, because the failure happens in a sandboxed process.
+// TODO(skerner): Remove once crbug/35198 is resolved.
+bool CreateDirectoryExtraLogging(const FilePath& full_path,
+                                 std::ostream& error);
+#endif  // defined (OS_WIN)
+
 // Returns the file size. Returns true on success.
 bool GetFileSize(const FilePath& file_path, int64* file_size);
 
@@ -266,6 +303,14 @@ bool IsDot(const FilePath& path);
 
 // Returns true if the given path's base name is "..".
 bool IsDotDot(const FilePath& path);
+
+// Sets |real_path| to |path| with symbolic links and junctions expanded.
+// On windows, make sure the path starts with a lettered drive.
+// |path| must reference a file.  Function will fail if |path| points to
+// a directory or to a nonexistent path.  On windows, this function will
+// fail if |path| is a junction or symlink that points to an empty file,
+// or if |real_path| would be longer than MAX_PATH characters.
+bool NormalizeFilePath(const FilePath& path, FilePath* real_path);
 
 // Used to hold information about a given file path.  See GetFileInfo below.
 struct FileInfo {
@@ -337,8 +382,9 @@ typedef scoped_ptr_malloc<FILE, ScopedFILEClose> ScopedFILE;
 class ScopedFDClose {
  public:
   inline void operator()(int* x) const {
-    if (x) {
-      close(*x);
+    if (x && *x >= 0) {
+      if (HANDLE_EINTR(close(*x)) < 0)
+        PLOG(ERROR) << "close";
     }
   }
 };
@@ -519,7 +565,8 @@ inline bool MakeFileUnreadable(const FilePath& path) {
 #elif defined(OS_WIN)
   PACL old_dacl;
   PSECURITY_DESCRIPTOR security_descriptor;
-  if (GetNamedSecurityInfo(path.value().c_str(), SE_FILE_OBJECT,
+  if (GetNamedSecurityInfo(const_cast<wchar_t*>(path.value().c_str()),
+                           SE_FILE_OBJECT,
                            DACL_SECURITY_INFORMATION, NULL, NULL, &old_dacl,
                            NULL, &security_descriptor) != ERROR_SUCCESS)
     return false;
@@ -556,6 +603,15 @@ inline bool MakeFileUnreadable(const FilePath& path) {
 
 #endif  // UNIT_TEST
 
+#if defined(OS_WIN)
+  // Loads the file passed in as an image section and touches pages to avoid
+  // subsequent hard page faults during LoadLibrary. The size to be pre read
+  // is passed in. If it is 0 then the whole file is paged in. The step size
+  // which indicates the number of bytes to skip after every page touched is
+  // also passed in.
+  bool PreReadImage(const wchar_t* file_path, size_t size_to_read,
+                    size_t step_size);
+#endif  // OS_WIN
 }  // namespace file_util
 
 // Deprecated functions have been moved to this separate header file,

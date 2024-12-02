@@ -4,18 +4,28 @@
 
 #include "chrome/common/extensions/extension.h"
 
+#if defined(TOOLKIT_GTK)
+#include <gtk/gtk.h>
+#endif
+
+#include "app/l10n_util.h"
 #include "base/format_macros.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/i18n/rtl.h"
 #include "base/string_util.h"
 #include "base/path_service.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/extension_error_reporter.h"
 #include "chrome/common/extensions/extension_error_utils.h"
+#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/json_value_serializer.h"
 #include "chrome/common/url_constants.h"
+#include "gfx/codec/png_codec.h"
 #include "net/base/mime_sniffer.h"
+#include "skia/ext/image_operations.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace keys = extension_manifest_keys;
@@ -52,7 +62,6 @@ TEST(ExtensionTest, InitFromValueInvalid) {
   Extension extension(path);
   int error_code = 0;
   std::string error;
-  ExtensionErrorReporter::Init(false);
 
   // Start with a valid extension manifest
   FilePath extensions_path;
@@ -87,7 +96,7 @@ TEST(ExtensionTest, InitFromValueInvalid) {
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
   EXPECT_EQ(errors::kInvalidVersion, error);
 
-  // Test missing and invalid names
+  // Test missing and invalid names.
   input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
   input_value->Remove(keys::kName, NULL);
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
@@ -156,6 +165,10 @@ TEST(ExtensionTest, InitFromValueInvalid) {
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
   EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidMatch));
 
+  matches->Set(0, Value::CreateStringValue("chrome://*/*"));
+  EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidMatch));
+
   // Test missing and invalid files array
   input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
   input_value->GetList(keys::kContentScripts, &content_scripts);
@@ -208,7 +221,6 @@ TEST(ExtensionTest, InitFromValueInvalid) {
   permissions = new ListValue;
   input_value->Set(keys::kPermissions, permissions);
   EXPECT_TRUE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_EQ(0u, ExtensionErrorReporter::GetInstance()->GetErrors()->size());
 
   input_value->Set(keys::kPermissions, Value::CreateIntegerValue(9));
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
@@ -223,13 +235,6 @@ TEST(ExtensionTest, InitFromValueInvalid) {
   permissions->Set(0, Value::CreateStringValue("www.google.com"));
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
   EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidPermission));
-
-  // Test permissions scheme.
-  input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
-  input_value->GetList(keys::kPermissions, &permissions);
-  permissions->Set(0, Value::CreateStringValue("file:///C:/foo.txt"));
-  EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidPermissionScheme));
 
   // Multiple page actions are not allowed.
   input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
@@ -308,6 +313,15 @@ TEST(ExtensionTest, InitFromValueValid) {
   EXPECT_EQ(extension.id(), extension.url().host());
   EXPECT_EQ(path.value(), extension.path().value());
 
+  // Test permissions scheme.
+  ListValue* permissions = new ListValue;
+  permissions->Set(0, Value::CreateStringValue("file:///C:/foo.txt"));
+  input_value.Set(keys::kPermissions, permissions);
+  EXPECT_FALSE(extension.InitFromValue(input_value, false, &error));
+  EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidPermission));
+  input_value.Remove(keys::kPermissions, NULL);
+  error.clear();
+
   // Test with an options page.
   input_value.SetString(keys::kOptionsPage, "options.html");
   EXPECT_TRUE(extension.InitFromValue(input_value, false, &error));
@@ -329,6 +343,51 @@ TEST(ExtensionTest, InitFromValueValid) {
   EXPECT_TRUE(extension.InitFromValue(input_value, false, &error));
   EXPECT_EQ("", error);
   // The minimum chrome version is not stored in the Extension object.
+#endif
+}
+
+TEST(ExtensionTest, InitFromValueValidNameInRTL) {
+#if defined(TOOLKIT_GTK)
+  GtkTextDirection gtk_dir = gtk_widget_get_default_direction();
+  gtk_widget_set_default_direction(GTK_TEXT_DIR_RTL);
+#else
+  std::string locale = l10n_util::GetApplicationLocale(std::wstring());
+  base::i18n::SetICUDefaultLocale("he");
+#endif
+
+#if defined(OS_WIN)
+  FilePath path(FILE_PATH_LITERAL("C:\\foo"));
+#elif defined(OS_POSIX)
+  FilePath path(FILE_PATH_LITERAL("/foo"));
+#endif
+  Extension extension(path);
+  std::string error;
+  DictionaryValue input_value;
+
+  input_value.SetString(keys::kVersion, "1.0.0.0");
+  // No strong RTL characters in name.
+  std::wstring name(L"Dictionary (by Google)");
+  input_value.SetString(keys::kName, name);
+  EXPECT_TRUE(extension.InitFromValue(input_value, false, &error));
+  EXPECT_EQ("", error);
+  std::wstring localized_name(name);
+  base::i18n::AdjustStringForLocaleDirection(localized_name, &localized_name);
+  EXPECT_EQ(localized_name, UTF8ToWide(extension.name()));
+
+  // Strong RTL characters in name.
+  name = L"Dictionary (\x05D1\x05D2"L" Google)";
+  input_value.SetString(keys::kName, name);
+  EXPECT_TRUE(extension.InitFromValue(input_value, false, &error));
+  EXPECT_EQ("", error);
+  localized_name = name;
+  base::i18n::AdjustStringForLocaleDirection(localized_name, &localized_name);
+  EXPECT_EQ(localized_name, UTF8ToWide(extension.name()));
+
+  // Reset locale.
+#if defined(TOOLKIT_GTK)
+  gtk_widget_set_default_direction(gtk_dir);
+#else
+  base::i18n::SetICUDefaultLocale(locale);
 #endif
 }
 
@@ -766,14 +825,14 @@ TEST(ExtensionTest, IsPrivilegeIncrease) {
     { "hosts3", false },  // http://a,http://b -> http://a
     { "hosts4", true },  // http://a -> http://a,http://b
     { "permissions1", false },  // tabs -> tabs
-    { "permissions2", false },  // tabs -> tabs,bookmarks
+    { "permissions2", true },  // tabs -> tabs,bookmarks
     { "permissions3", true },  // http://a -> http://a,tabs
     { "permissions4", false },  // plugin -> plugin,tabs
     { "plugin1", false },  // plugin -> plugin
     { "plugin2", false },  // plugin -> none
     { "plugin3", true },  // none -> plugin
     { "storage", false },  // none -> storage
-    { "notifications", false } // none -> notifications
+    { "notifications", false }  // none -> notifications
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTests); ++i) {
@@ -789,4 +848,87 @@ TEST(ExtensionTest, IsPrivilegeIncrease) {
                                              new_extension.get()))
         << kTests[i].base_name;
   }
+}
+
+// Returns a copy of |source| resized to |size| x |size|.
+static SkBitmap ResizedCopy(const SkBitmap& source, int size) {
+  return skia::ImageOperations::Resize(source,
+                                       skia::ImageOperations::RESIZE_LANCZOS3,
+                                       size,
+                                       size);
+}
+
+static bool SizeEquals(const SkBitmap& bitmap, const gfx::Size& size) {
+  return bitmap.width() == size.width() && bitmap.height() == size.height();
+}
+
+TEST(ExtensionTest, ImageCaching) {
+  FilePath path;
+  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &path));
+  path = path.AppendASCII("extensions");
+
+  // Initialize the Extension.
+  std::string errors;
+  scoped_ptr<Extension> extension(new Extension(path));
+  DictionaryValue values;
+  values.SetString(keys::kName, "test");
+  values.SetString(keys::kVersion, "0.1");
+  ASSERT_TRUE(extension->InitFromValue(values, false, &errors));
+
+  // Create an ExtensionResource pointing at an icon.
+  FilePath icon_relative_path(FILE_PATH_LITERAL("icon3.png"));
+  ExtensionResource resource(extension->id(),
+                             extension->path(),
+                             icon_relative_path);
+
+  // Read in the icon file.
+  FilePath icon_absolute_path = extension->path().Append(icon_relative_path);
+  std::string raw_png;
+  ASSERT_TRUE(file_util::ReadFileToString(icon_absolute_path, &raw_png));
+  SkBitmap image;
+  ASSERT_TRUE(gfx::PNGCodec::Decode(
+      reinterpret_cast<const unsigned char*>(raw_png.data()),
+      raw_png.length(),
+      &image));
+
+  // Make sure the icon file is the size we expect.
+  gfx::Size original_size(66, 66);
+  ASSERT_EQ(image.width(), original_size.width());
+  ASSERT_EQ(image.height(), original_size.height());
+
+  // Create two resized versions at size 16x16 and 24x24.
+  SkBitmap image16 = ResizedCopy(image, 16);
+  SkBitmap image24 = ResizedCopy(image, 24);
+
+  gfx::Size size16(16, 16);
+  gfx::Size size24(24, 24);
+
+  // Cache the 16x16 copy.
+  EXPECT_FALSE(extension->HasCachedImage(resource, size16));
+  extension->SetCachedImage(resource, image16, original_size);
+  EXPECT_TRUE(extension->HasCachedImage(resource, size16));
+  EXPECT_TRUE(SizeEquals(extension->GetCachedImage(resource, size16), size16));
+  EXPECT_FALSE(extension->HasCachedImage(resource, size24));
+  EXPECT_FALSE(extension->HasCachedImage(resource, original_size));
+
+  // Cache the 24x24 copy.
+  extension->SetCachedImage(resource, image24, original_size);
+  EXPECT_TRUE(extension->HasCachedImage(resource, size24));
+  EXPECT_TRUE(SizeEquals(extension->GetCachedImage(resource, size24), size24));
+  EXPECT_FALSE(extension->HasCachedImage(resource, original_size));
+
+  // Cache the original, and verify that it gets returned when we ask for a
+  // max_size that is larger than the original.
+  gfx::Size size128(128, 128);
+  EXPECT_TRUE(image.width() < size128.width() &&
+              image.height() < size128.height());
+  extension->SetCachedImage(resource, image, original_size);
+  EXPECT_TRUE(extension->HasCachedImage(resource, original_size));
+  EXPECT_TRUE(extension->HasCachedImage(resource, size128));
+  EXPECT_TRUE(SizeEquals(extension->GetCachedImage(resource, original_size),
+                         original_size));
+  EXPECT_TRUE(SizeEquals(extension->GetCachedImage(resource, size128),
+                         original_size));
+  EXPECT_EQ(extension->GetCachedImage(resource, original_size).getPixels(),
+            extension->GetCachedImage(resource, size128).getPixels());
 }

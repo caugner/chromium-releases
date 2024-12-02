@@ -4,8 +4,10 @@
 
 #include "chrome/browser/host_content_settings_map.h"
 
+#include "chrome/browser/pref_service.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/testing_profile.h"
 #include "googleurl/src/gurl.h"
@@ -134,6 +136,8 @@ TEST_F(HostContentSettingsMapTest, DefaultValues) {
   desired_settings.settings[CONTENT_SETTINGS_TYPE_POPUPS] =
       CONTENT_SETTING_BLOCK;
   desired_settings.settings[CONTENT_SETTINGS_TYPE_GEOLOCATION] =
+      CONTENT_SETTING_ASK;
+  desired_settings.settings[CONTENT_SETTINGS_TYPE_NOTIFICATIONS] =
       CONTENT_SETTING_ASK;
   ContentSettings settings =
       host_content_settings_map->GetContentSettings(host);
@@ -266,6 +270,79 @@ TEST_F(HostContentSettingsMapTest, Observer) {
   EXPECT_EQ(4, observer.counter);
 }
 
+TEST_F(HostContentSettingsMapTest, ObserveDefaultPref) {
+  TestingProfile profile;
+  HostContentSettingsMap* host_content_settings_map =
+      profile.GetHostContentSettingsMap();
+
+  PrefService* prefs = profile.GetPrefs();
+
+  // Make a copy of the default pref value so we can reset it later.
+  scoped_ptr<Value> default_value(prefs->FindPreference(
+      prefs::kDefaultContentSettings)->GetValue()->DeepCopy());
+
+  GURL host("http://example.com");
+
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_COOKIES, CONTENT_SETTING_BLOCK);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_COOKIES));
+
+  // Make a copy of the pref's new value so we can reset it later.
+  scoped_ptr<Value> new_value(prefs->FindPreference(
+      prefs::kDefaultContentSettings)->GetValue()->DeepCopy());
+
+  // Clearing the backing pref should also clear the internal cache.
+  prefs->Set(prefs::kDefaultContentSettings, *default_value);
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_COOKIES));
+
+  // Reseting the pref to its previous value should update the cache.
+  prefs->Set(prefs::kDefaultContentSettings, *new_value);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_COOKIES));
+}
+
+TEST_F(HostContentSettingsMapTest, ObserveExceptionPref) {
+  TestingProfile profile;
+  HostContentSettingsMap* host_content_settings_map =
+      profile.GetHostContentSettingsMap();
+
+  PrefService* prefs = profile.GetPrefs();
+
+  // Make a copy of the default pref value so we can reset it later.
+  scoped_ptr<Value> default_value(prefs->FindPreference(
+      prefs::kContentSettingsPatterns)->GetValue()->DeepCopy());
+
+  HostContentSettingsMap::Pattern pattern("[*.]example.com");
+  GURL host("http://example.com");
+
+  host_content_settings_map->SetContentSetting(pattern,
+      CONTENT_SETTINGS_TYPE_COOKIES, CONTENT_SETTING_BLOCK);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_COOKIES));
+
+  // Make a copy of the pref's new value so we can reset it later.
+  scoped_ptr<Value> new_value(prefs->FindPreference(
+      prefs::kContentSettingsPatterns)->GetValue()->DeepCopy());
+
+  // Clearing the backing pref should also clear the internal cache.
+  prefs->Set(prefs::kContentSettingsPatterns, *default_value);
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_COOKIES));
+
+  // Reseting the pref to its previous value should update the cache.
+  prefs->Set(prefs::kContentSettingsPatterns, *new_value);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_COOKIES));
+}
+
 TEST_F(HostContentSettingsMapTest, HostTrimEndingDotCheck) {
   TestingProfile profile;
   HostContentSettingsMap* host_content_settings_map =
@@ -343,6 +420,99 @@ TEST_F(HostContentSettingsMapTest, HostTrimEndingDotCheck) {
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             host_content_settings_map->GetContentSetting(
                 host_ending_with_dot, CONTENT_SETTINGS_TYPE_POPUPS));
+}
+
+TEST_F(HostContentSettingsMapTest, NestedSettings) {
+  TestingProfile profile;
+  HostContentSettingsMap* host_content_settings_map =
+      profile.GetHostContentSettingsMap();
+
+  GURL host("http://a.b.example.com/");
+  HostContentSettingsMap::Pattern pattern1("[*.]example.com");
+  HostContentSettingsMap::Pattern pattern2("[*.]b.example.com");
+  HostContentSettingsMap::Pattern pattern3("a.b.example.com");
+
+  host_content_settings_map->SetContentSetting(pattern1,
+      CONTENT_SETTINGS_TYPE_IMAGES, CONTENT_SETTING_BLOCK);
+  host_content_settings_map->SetContentSetting(pattern2,
+      CONTENT_SETTINGS_TYPE_COOKIES, CONTENT_SETTING_BLOCK);
+  host_content_settings_map->SetContentSetting(pattern3,
+      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_JAVASCRIPT, CONTENT_SETTING_BLOCK);
+
+  ContentSettings desired_settings;
+  desired_settings.settings[CONTENT_SETTINGS_TYPE_COOKIES] =
+      CONTENT_SETTING_BLOCK;
+  desired_settings.settings[CONTENT_SETTINGS_TYPE_IMAGES] =
+      CONTENT_SETTING_BLOCK;
+  desired_settings.settings[CONTENT_SETTINGS_TYPE_JAVASCRIPT] =
+      CONTENT_SETTING_BLOCK;
+  desired_settings.settings[CONTENT_SETTINGS_TYPE_PLUGINS] =
+      CONTENT_SETTING_BLOCK;
+  desired_settings.settings[CONTENT_SETTINGS_TYPE_POPUPS] =
+      CONTENT_SETTING_BLOCK;
+  desired_settings.settings[CONTENT_SETTINGS_TYPE_GEOLOCATION] =
+      CONTENT_SETTING_ASK;
+  desired_settings.settings[CONTENT_SETTINGS_TYPE_NOTIFICATIONS] =
+      CONTENT_SETTING_ASK;
+  ContentSettings settings =
+      host_content_settings_map->GetContentSettings(host);
+  EXPECT_TRUE(SettingsEqual(desired_settings, settings));
+  EXPECT_EQ(desired_settings.settings[CONTENT_SETTINGS_TYPE_COOKIES],
+            settings.settings[CONTENT_SETTINGS_TYPE_COOKIES]);
+  EXPECT_EQ(desired_settings.settings[CONTENT_SETTINGS_TYPE_IMAGES],
+            settings.settings[CONTENT_SETTINGS_TYPE_IMAGES]);
+  EXPECT_EQ(desired_settings.settings[CONTENT_SETTINGS_TYPE_PLUGINS],
+            settings.settings[CONTENT_SETTINGS_TYPE_PLUGINS]);
+  EXPECT_EQ(desired_settings.settings[CONTENT_SETTINGS_TYPE_POPUPS],
+            settings.settings[CONTENT_SETTINGS_TYPE_POPUPS]);
+  EXPECT_EQ(desired_settings.settings[CONTENT_SETTINGS_TYPE_GEOLOCATION],
+            settings.settings[CONTENT_SETTINGS_TYPE_GEOLOCATION]);
+  EXPECT_EQ(desired_settings.settings[CONTENT_SETTINGS_TYPE_COOKIES],
+            settings.settings[CONTENT_SETTINGS_TYPE_COOKIES]);
+}
+
+TEST_F(HostContentSettingsMapTest, OffTheRecord) {
+  TestingProfile profile;
+  HostContentSettingsMap* host_content_settings_map =
+      profile.GetHostContentSettingsMap();
+  profile.set_off_the_record(true);
+  scoped_refptr<HostContentSettingsMap> otr_map =
+      new HostContentSettingsMap(&profile);
+  profile.set_off_the_record(false);
+
+  GURL host("http://example.com/");
+  HostContentSettingsMap::Pattern pattern("[*.]example.com");
+
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_IMAGES));
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            otr_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_IMAGES));
+
+  // Changing content settings on the main map should also affect the
+  // off-the-record map.
+  host_content_settings_map->SetContentSetting(pattern,
+      CONTENT_SETTINGS_TYPE_IMAGES, CONTENT_SETTING_BLOCK);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_IMAGES));
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            otr_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_IMAGES));
+
+  // Changing content settings on the off-the-record map should NOT affect the
+  // main map.
+  otr_map->SetContentSetting(pattern,
+      CONTENT_SETTINGS_TYPE_IMAGES, CONTENT_SETTING_ALLOW);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_IMAGES));
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            otr_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_IMAGES));
 }
 
 }  // namespace

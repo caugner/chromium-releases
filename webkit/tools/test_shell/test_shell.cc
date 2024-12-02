@@ -46,6 +46,7 @@
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/tools/test_shell/accessibility_controller.h"
+#include "webkit/tools/test_shell/notification_presenter.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
 #include "webkit/tools/test_shell/test_shell_devtools_agent.h"
@@ -104,8 +105,10 @@ class URLRequestTestShellFileJob : public URLRequestFileJob {
 WindowList* TestShell::window_list_;
 WebPreferences* TestShell::web_prefs_ = NULL;
 bool TestShell::developer_extras_enabled_ = false;
+bool TestShell::enable_html5_parser_ = true;
 bool TestShell::inspector_test_mode_ = false;
 bool TestShell::layout_test_mode_ = false;
+bool TestShell::allow_external_pages_ = false;
 int TestShell::file_test_timeout_ms_ = kDefaultFileTestTimeoutMillisecs;
 bool TestShell::test_is_preparing_ = false;
 bool TestShell::test_is_pending_ = false;
@@ -134,6 +137,7 @@ TestShell::TestShell()
     plain_text_controller_.reset(new PlainTextController(this));
     text_input_controller_.reset(new TextInputController(this));
     navigation_controller_.reset(new TestNavigationController(this));
+    notification_presenter_.reset(new TestNotificationPresenter(this));
 
     URLRequestFilter* filter = URLRequestFilter::GetInstance();
     filter->AddHostnameHandler("test-shell-resource", "inspector",
@@ -321,7 +325,7 @@ void TestShell::Dump(TestShell* shell) {
 
 // static
 std::string TestShell::DumpImage(skia::PlatformCanvas* canvas,
-    const std::wstring& file_name, const std::string& pixel_hash) {
+    const FilePath& path, const std::string& pixel_hash) {
   skia::BitmapPlatformDevice& device =
       static_cast<skia::BitmapPlatformDevice&>(canvas->getTopPlatformDevice());
   const SkBitmap& src_bmp = device.accessBitmap(false);
@@ -367,7 +371,7 @@ std::string TestShell::DumpImage(skia::PlatformCanvas* canvas,
         static_cast<int>(src_bmp.rowBytes()), discard_transparency, &png);
 
     // Write to disk.
-    file_util::WriteFile(file_name, reinterpret_cast<const char *>(&png[0]),
+    file_util::WriteFile(path, reinterpret_cast<const char *>(&png[0]),
                          png.size());
   }
 
@@ -482,6 +486,7 @@ void TestShell::ResetWebPreferences() {
         web_prefs_->text_areas_are_resizable = false;
         web_prefs_->java_enabled = false;
         web_prefs_->allow_scripts_to_close_windows = false;
+        web_prefs_->javascript_can_access_clipboard = true;
         web_prefs_->xss_auditor_enabled = false;
         // It's off by default for Chrome, but we don't want to
         // lose the coverage of dynamic font tests in webkit test.
@@ -493,6 +498,8 @@ void TestShell::ResetWebPreferences() {
         // LayoutTests were written with Safari Mac in mind which does not allow
         // tabbing to links by default.
         web_prefs_->tabs_to_links = false;
+
+        web_prefs_->enable_html5_parser = enable_html5_parser_;
 
         // Allow those layout tests running as local files, i.e. under
         // LayoutTests/http/tests/local, to access http server.
@@ -576,11 +583,6 @@ WebView* TestShell::CreateWebView() {
   return new_win->webView();
 }
 
-void TestShell::InitializeDevToolsAgent(WebView* webView) {
-  DCHECK(!dev_tools_agent_.get());
-  dev_tools_agent_.reset(new TestShellDevToolsAgent(webView));
-}
-
 void TestShell::ShowDevTools() {
   if (!devtools_shell_) {
     FilePath dir_exe;
@@ -623,6 +625,7 @@ void TestShell::ResetTestController() {
   accessibility_controller_->Reset();
   layout_test_controller_->Reset();
   event_sending_controller_->Reset();
+  notification_presenter_->Reset();
   delegate_->Reset();
 }
 
@@ -689,7 +692,7 @@ void TestShell::GoBackOrForward(int offset) {
 }
 
 void TestShell::DumpDocumentText() {
-  std::wstring file_path;
+  FilePath file_path;
   if (!PromptForSaveFile(L"Dump document text", &file_path))
       return;
 
@@ -699,7 +702,7 @@ void TestShell::DumpDocumentText() {
 }
 
 void TestShell::DumpRenderTree() {
-  std::wstring file_path;
+  FilePath file_path;
   if (!PromptForSaveFile(L"Dump render tree", &file_path))
     return;
 
@@ -767,16 +770,13 @@ bool GetPluginFinderURL(std::string* plugin_finder_url) {
 }
 
 bool IsDefaultPluginEnabled() {
-#if defined(OS_WIN)
   FilePath exe_path;
 
   if (PathService::Get(base::FILE_EXE, &exe_path)) {
-    std::wstring exe_name = file_util::GetFilenameFromPath(
-        exe_path.ToWStringHack());
+    std::wstring exe_name = exe_path.BaseName().ToWStringHack();
     if (StartsWith(exe_name, L"test_shell_tests", false))
       return true;
   }
-#endif  // OS_WIN
   return false;
 }
 
@@ -800,5 +800,29 @@ void CloseCurrentConnections() {
 void SetCacheMode(bool enabled) {
   // Used in benchmarking,  Ignored for test_shell.
 }
+
+void ClearCache() {
+  // Used in benchmarking,  Ignored for test_shell.
+}
+
+std::string GetProductVersion() {
+  return std::string("Chrome/0.0.0.0");
+}
+
+bool IsSingleProcess() {
+  return true;
+}
+
+#if defined(OS_LINUX)
+int MatchFontWithFallback(const std::string& face, bool bold,
+                          bool italic, int charset) {
+  return -1;
+}
+
+bool GetFontTable(int fd, uint32_t table, uint8_t* output,
+                  size_t* output_length) {
+  return false;
+}
+#endif
 
 }  // namespace webkit_glue

@@ -10,10 +10,10 @@
 #include "app/sql/connection.h"
 #include "app/sql/init_status.h"
 #include "app/sql/meta_table.h"
+#include "base/gtest_prod_util.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 #include "webkit/glue/form_field.h"
 
 class AutofillChange;
@@ -237,24 +237,26 @@ class WebDatabase {
   virtual bool GetAutoFillProfiles(std::vector<AutoFillProfile*>* profiles);
 
   // Records a single credit card in the credit_cards table.
-  bool AddCreditCard(const CreditCard& creditcard);
+  bool AddCreditCard(const CreditCard& credit_card);
 
-  // Updates the database values for the specified profile.
-  bool UpdateCreditCard(const CreditCard& profile);
+  // Updates the database values for the specified credit card.
+  bool UpdateCreditCard(const CreditCard& credit_card);
 
-  // Removes a row from the autofill_profiles table.  |profile_id| is the
-  // unique ID of the profile to remove.
-  bool RemoveCreditCard(int profile_id);
+  // Removes a row from the credit_cards table.  |credit_card_id| is the
+  // unique ID of the credit card to remove.
+  bool RemoveCreditCard(int credit_card_id);
 
-  // Retrieves a profile with label |label|.  The caller owns |profile|.
+  // Retrieves a credit card with label |label|.  The caller owns
+  // |credit_card_id|.
   bool GetCreditCardForLabel(const string16& label,
-                                  CreditCard** profile);
+                                  CreditCard** credit_card);
 
-  // Retrieves credit card for a card with unique id |card_id|.
-  bool GetCreditCardForID(int card_id, CreditCard** card);
+  // Retrieves credit card for a card with unique id |credit_card_id|.
+  bool GetCreditCardForID(int credit_card_id, CreditCard** credit_card);
 
-  // Retrieves all profiles in the database.  Caller owns the returned profiles.
-  virtual bool GetCreditCards(std::vector<CreditCard*>* profiles);
+  // Retrieves all credit cards in the database.  Caller owns the returned
+  // credit cards.
+  virtual bool GetCreditCards(std::vector<CreditCard*>* credit_cards);
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -271,13 +273,16 @@ class WebDatabase {
   bool RemoveWebApp(const GURL& url);
 
  private:
-  FRIEND_TEST(WebDatabaseTest, Autofill);
-  FRIEND_TEST(WebDatabaseTest, Autofill_AddChanges);
-  FRIEND_TEST(WebDatabaseTest, Autofill_RemoveBetweenChanges);
-  FRIEND_TEST(WebDatabaseTest, Autofill_GetAllAutofillEntries_OneResult);
-  FRIEND_TEST(WebDatabaseTest, Autofill_GetAllAutofillEntries_TwoDistinct);
-  FRIEND_TEST(WebDatabaseTest, Autofill_GetAllAutofillEntries_TwoSame);
-  FRIEND_TEST(WebDatabaseTest, Autofill_UpdateDontReplace);
+  FRIEND_TEST_ALL_PREFIXES(WebDatabaseTest, Autofill);
+  FRIEND_TEST_ALL_PREFIXES(WebDatabaseTest, Autofill_AddChanges);
+  FRIEND_TEST_ALL_PREFIXES(WebDatabaseTest, Autofill_RemoveBetweenChanges);
+  FRIEND_TEST_ALL_PREFIXES(WebDatabaseTest,
+                           Autofill_GetAllAutofillEntries_OneResult);
+  FRIEND_TEST_ALL_PREFIXES(WebDatabaseTest,
+                           Autofill_GetAllAutofillEntries_TwoDistinct);
+  FRIEND_TEST_ALL_PREFIXES(WebDatabaseTest,
+                           Autofill_GetAllAutofillEntries_TwoSame);
+  FRIEND_TEST_ALL_PREFIXES(WebDatabaseTest, Autofill_UpdateDontReplace);
   // Methods for adding autofill entries at a specified time.  For
   // testing only.
   bool AddFormFieldValuesTime(

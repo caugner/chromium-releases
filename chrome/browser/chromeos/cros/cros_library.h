@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,13 +12,19 @@
 namespace chromeos {
 
 class CryptohomeLibrary;
-class LanguageLibrary;
+class KeyboardLibrary;
+class InputMethodLibrary;
 class LibraryLoader;
 class LoginLibrary;
 class MountLibrary;
 class NetworkLibrary;
 class PowerLibrary;
+class ScreenLockLibrary;
+class SpeechSynthesisLibrary;
 class SynapticsLibrary;
+class SyslogsLibrary;
+class SystemLibrary;
+class UpdateLibrary;
 
 // This class handles access to sub-parts of ChromeOS library. it provides
 // a level of indirection so individual libraries that it exposes can
@@ -31,22 +37,36 @@ class CrosLibrary {
   // mock objects).
   class TestApi {
    public:
+    // Passing true for own for these setters will cause them to be deleted
+    // when the CrosLibrary is deleted (or other mocks are set).
     // Setter for LibraryLoader.
-    void SetLibraryLoader(LibraryLoader* loader);
+    void SetLibraryLoader(LibraryLoader* loader, bool own);
     // Setter for CryptohomeLibrary.
-    void SetCryptohomeLibrary(CryptohomeLibrary* library);
-    // Setter for LanguageLibrary
-    void SetLanguageLibrary(LanguageLibrary* library);
+    void SetCryptohomeLibrary(CryptohomeLibrary* library, bool own);
+    // Setter for KeyboardLibrary
+    void SetKeyboardLibrary(KeyboardLibrary* library, bool own);
+    // Setter for InputMethodLibrary
+    void SetInputMethodLibrary(InputMethodLibrary* library, bool own);
     // Setter for LoginLibrary.
-    void SetLoginLibrary(LoginLibrary* library);
+    void SetLoginLibrary(LoginLibrary* library, bool own);
     // Setter for MountLibrary.
-    void SetMountLibrary(MountLibrary* library);
+    void SetMountLibrary(MountLibrary* library, bool own);
     // Setter for NetworkLibrary.
-    void SetNetworkLibrary(NetworkLibrary* library);
+    void SetNetworkLibrary(NetworkLibrary* library, bool own);
     // Setter for PowerLibrary.
-    void SetPowerLibrary(PowerLibrary* library);
+    void SetPowerLibrary(PowerLibrary* library, bool own);
+    // Setter for ScreenLockLibrary.
+    void SetScreenLockLibrary(ScreenLockLibrary* library, bool own);
+    // Setter for SpeechSynthesisLibrary.
+    void SetSpeechSynthesisLibrary(SpeechSynthesisLibrary* library, bool own);
     // Setter for SynapticsLibrary.
-    void SetSynapticsLibrary(SynapticsLibrary* library);
+    void SetSynapticsLibrary(SynapticsLibrary* library, bool own);
+    // Setter for SyslogsLibrary.
+    void SetSyslogsLibrary(SyslogsLibrary* library, bool own);
+    // Setter for SystemLibrary.
+    void SetSystemLibrary(SystemLibrary* library, bool own);
+    // Setter for UpdateLibrary.
+    void SetUpdateLibrary(UpdateLibrary* library, bool own);
 
    private:
     friend class CrosLibrary;
@@ -60,8 +80,11 @@ class CrosLibrary {
   // Getter for CryptohomeLibrary.
   CryptohomeLibrary* GetCryptohomeLibrary();
 
-  // // Getter for LanguageLibrary
-  LanguageLibrary* GetLanguageLibrary();
+  // Getter for KeyboardLibrary
+  KeyboardLibrary* GetKeyboardLibrary();
+
+  // Getter for InputMethodLibrary
+  InputMethodLibrary* GetInputMethodLibrary();
 
   // Getter for LoginLibrary.
   LoginLibrary* GetLoginLibrary();
@@ -75,8 +98,23 @@ class CrosLibrary {
   // Getter for PowerLibrary
   PowerLibrary* GetPowerLibrary();
 
+  // Getter for ScreenLockLibrary
+  ScreenLockLibrary* GetScreenLockLibrary();
+
+  // This gets the singleton SpeechSynthesisLibrary.
+  SpeechSynthesisLibrary* GetSpeechSynthesisLibrary();
+
   // This gets the singleton SynapticsLibrary.
   SynapticsLibrary* GetSynapticsLibrary();
+
+  // This gets the singleton SyslogsLibrary.
+  SyslogsLibrary* GetSyslogsLibrary();
+
+  // This gets the singleton SystemLibrary.
+  SystemLibrary* GetSystemLibrary();
+
+  // This gets the singleton UpdateLibrary.
+  UpdateLibrary* GetUpdateLibrary();
 
   // Getter for Test API that gives access to internal members of this class.
   TestApi* GetTestApi();
@@ -99,12 +137,34 @@ class CrosLibrary {
 
   LibraryLoader* library_loader_;
   CryptohomeLibrary* crypto_lib_;
-  LanguageLibrary* language_lib_;
+  KeyboardLibrary* keyboard_lib_;
+  InputMethodLibrary* input_method_lib_;
   LoginLibrary* login_lib_;
   MountLibrary* mount_lib_;
   NetworkLibrary* network_lib_;
   PowerLibrary* power_lib_;
+  ScreenLockLibrary* screen_lock_lib_;
+  SpeechSynthesisLibrary* speech_synthesis_lib_;
   SynapticsLibrary* synaptics_lib_;
+  SyslogsLibrary* syslogs_lib_;
+  SystemLibrary* system_lib_;
+  UpdateLibrary* update_lib_;
+
+  bool own_library_loader_;
+  bool own_cryptohome_lib_;
+  bool own_keyboard_lib_;
+  bool own_input_method_lib_;
+  bool own_login_lib_;
+  bool own_mount_lib_;
+  bool own_network_lib_;
+  bool own_power_lib_;
+  bool own_screen_lock_lib_;
+  bool own_speech_synthesis_lib_;
+  bool own_synaptics_lib_;
+  bool own_syslogs_lib_;
+  bool own_system_lib_;
+  bool own_update_lib_;
+
   // True if libcros was successfully loaded.
   bool loaded_;
   // True if the last load attempt had an error.

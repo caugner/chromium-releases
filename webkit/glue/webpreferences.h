@@ -12,6 +12,7 @@
 #define WEBKIT_GLUE_WEBPREFERENCES_H__
 
 #include <string>
+#include <vector>
 #include "googleurl/src/gurl.h"
 
 namespace WebKit {
@@ -37,7 +38,9 @@ struct WebPreferences {
   bool plugins_enabled;
   bool dom_paste_enabled;
   bool developer_extras_enabled;
-  std::string inspector_settings;
+  typedef std::vector<std::pair<std::string, std::string> >
+      WebInspectorPreferences;
+  WebInspectorPreferences inspector_settings;
   bool site_specific_quirks_enabled;
   bool shrinks_standalone_images_to_fit;
   bool uses_universal_detector;
@@ -46,6 +49,7 @@ struct WebPreferences {
   bool allow_scripts_to_close_windows;
   bool uses_page_cache;
   bool remote_fonts_enabled;
+  bool javascript_can_access_clipboard;
   bool xss_auditor_enabled;
   bool local_storage_enabled;
   bool databases_enabled;
@@ -54,10 +58,14 @@ struct WebPreferences {
 
   bool user_style_sheet_enabled;
   GURL user_style_sheet_location;
+  bool author_and_user_styles_enabled;
   bool allow_universal_access_from_file_urls;
   bool allow_file_access_from_file_urls;
   bool experimental_webgl_enabled;
   bool show_composited_layer_borders;
+  bool accelerated_compositing_enabled;
+  bool enable_html5_parser;
+  bool memory_info_enabled;
 
   // We try to keep the default values the same as the default values in
   // chrome, except for the cases where it would require lots of extra work for
@@ -89,16 +97,21 @@ struct WebPreferences {
         allow_scripts_to_close_windows(false),
         uses_page_cache(false),
         remote_fonts_enabled(true),
+        javascript_can_access_clipboard(false),
         xss_auditor_enabled(false),
         local_storage_enabled(false),
         databases_enabled(false),
         application_cache_enabled(false),
         tabs_to_links(true),
         user_style_sheet_enabled(false),
+        author_and_user_styles_enabled(true),
         allow_universal_access_from_file_urls(false),
         allow_file_access_from_file_urls(false),
         experimental_webgl_enabled(false),
-        show_composited_layer_borders(false) {
+        show_composited_layer_borders(false),
+        accelerated_compositing_enabled(false),
+        enable_html5_parser(true),
+        memory_info_enabled(false) {
   }
 
   void Apply(WebKit::WebView* web_view) const;

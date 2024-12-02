@@ -5,49 +5,17 @@
 #ifndef CHROME_BROWSER_VIEWS_TABS_SIDE_TAB_STRIP_H_
 #define CHROME_BROWSER_VIEWS_TABS_SIDE_TAB_STRIP_H_
 
-#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/views/tabs/base_tab_strip.h"
-#include "chrome/browser/views/tabs/side_tab.h"
 
-class Profile;
-class SideTabStripModel;
+struct TabRendererData;
 
-class SideTabStrip : public BaseTabStrip,
-                     public SideTabModel {
+class SideTabStrip : public BaseTabStrip {
  public:
-  SideTabStrip();
+  // The tabs are inset by this much along all axis.
+  static const int kTabStripInset;
+
+  explicit SideTabStrip(TabStripController* controller);
   virtual ~SideTabStrip();
-
-  // Associate a model with this SideTabStrip. The SideTabStrip owns its model.
-  void SetModel(SideTabStripModel* model);
-
-  // Whether or not the browser has been run with the "enable-vertical-tabs"
-  // command line flag that allows the SideTabStrip to be optionally shown.
-  static bool Available();
-
-  // Whether or not the vertical tabstrip is shown. Only valid if Available()
-  // returns true.
-  static bool Visible(Profile* profile);
-
-  // Notifies the SideTabStrip that a tab was added in the model at |index|.
-  void AddTabAt(int index);
-
-  // Notifies the SideTabStrip that a tab was removed from the model at |index|.
-  void RemoveTabAt(int index);
-
-  // Notifies the SideTabStrip that a tab was selected in the model at |index|.
-  void SelectTabAt(int index);
-
-  // Notifies the SideTabStrip that the tab at |index| needs to be redisplayed
-  // since some of its metadata has changed.
-  void UpdateTabAt(int index);
-
-  // SideTabModel implementation:
-  virtual string16 GetTitle(SideTab* tab) const;
-  virtual SkBitmap GetIcon(SideTab* tab) const;
-  virtual bool IsSelected(SideTab* tab) const;
-  virtual void SelectTab(SideTab* tab);
-  virtual void CloseTab(SideTab* tab);
 
   // BaseTabStrip implementation:
   virtual int GetPreferredHeight();
@@ -55,23 +23,42 @@ class SideTabStrip : public BaseTabStrip,
   virtual bool IsPositionInWindowCaption(const gfx::Point& point);
   virtual void SetDraggedTabBounds(int tab_index,
                                    const gfx::Rect& tab_bounds);
-  virtual bool IsDragSessionActive() const;
-  virtual void UpdateLoadingAnimations();
-  virtual bool IsAnimating() const;
   virtual TabStrip* AsTabStrip();
 
+  virtual void StartHighlight(int model_index);
+  virtual void StopAllHighlighting();
+  virtual BaseTab* CreateTabForDragging();
+  virtual void RemoveTabAt(int model_index);
+  virtual void SelectTabAt(int old_model_index, int new_model_index);
+  virtual void TabTitleChangedNotLoading(int model_index);
+
   // views::View overrides:
-  virtual void Layout();
   virtual gfx::Size GetPreferredSize();
+  virtual void PaintChildren(gfx::Canvas* canvas);
+
+ protected:
+  // BaseTabStrip overrides:
+  virtual BaseTab* CreateTab();
+  virtual void GenerateIdealBounds();
+  virtual void StartInsertTabAnimation(int model_index, bool foreground);
+  virtual void StartMoveTabAnimation();
+  virtual void StopAnimating(bool layout);
+  virtual void AnimateToIdealBounds();
+  virtual void Layout();
 
  private:
-  // Returns the model index of the specified |tab|.
-  int GetIndexOfSideTab(SideTab* tab) const;
+  // The "New Tab" button.
+  views::View* newtab_button_;
 
-  // Returns the SideTab at the specified |index|.
-  SideTab* GetSideTabAt(int index) const;
+  // Ideal bounds of the new tab button.
+  gfx::Rect newtab_button_bounds_;
 
-  scoped_ptr<SideTabStripModel> model_;
+  // Separator between mini-tabs and the new tab button. The separator is
+  // positioned above the visible area if there are no mini-tabs.
+  views::View* separator_;
+
+  // Bounds of the sepatator.
+  gfx::Rect separator_bounds_;
 
   DISALLOW_COPY_AND_ASSIGN(SideTabStrip);
 };

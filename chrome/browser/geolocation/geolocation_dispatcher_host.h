@@ -5,67 +5,29 @@
 #ifndef CHROME_BROWSER_GEOLOCATION_GEOLOCATION_DISPATCHER_HOST_H_
 #define CHROME_BROWSER_GEOLOCATION_GEOLOCATION_DISPATCHER_HOST_H_
 
-#include <set>
-
-#include "base/basictypes.h"
 #include "base/ref_counted.h"
-#include "chrome/browser/geolocation/location_arbitrator.h"
-#include "ipc/ipc_message.h"
 
 class GeolocationPermissionContext;
-class GURL;
-class ResourceMessageFilter;
-class URLRequestContextGetter;
-struct Geoposition;
+namespace IPC { class Message; }
 
 // GeolocationDispatcherHost is a delegate for Geolocation messages used by
 // ResourceMessageFilter.
 // It's the complement of GeolocationDispatcher (owned by RenderView).
 class GeolocationDispatcherHost
-    : public base::RefCountedThreadSafe<GeolocationDispatcherHost>,
-      public GeolocationArbitrator::Delegate {
+    : public base::RefCountedThreadSafe<GeolocationDispatcherHost> {
  public:
-  GeolocationDispatcherHost(
+  static GeolocationDispatcherHost* New(
       int resource_message_filter_process_id,
       GeolocationPermissionContext* geolocation_permission_context);
 
   // Called to possibly handle the incoming IPC message. Returns true if
   // handled. Called in the browser process.
-  bool OnMessageReceived(const IPC::Message& msg, bool* msg_was_ok);
+  virtual bool OnMessageReceived(const IPC::Message& msg, bool* msg_was_ok) = 0;
 
-  // GeolocationArbitrator::Delegate
-  virtual void OnLocationUpdate(const Geoposition& position);
-
- private:
-  struct GeolocationServiceRenderId;
+ protected:
   friend class base::RefCountedThreadSafe<GeolocationDispatcherHost>;
-  virtual ~GeolocationDispatcherHost();
-
-  void OnRegisterDispatcher(int render_view_id);
-  void OnUnregisterDispatcher(int render_view_id);
-  void OnRequestPermission(
-      int render_view_id, int bridge_id, const GURL& requesting_frame);
-  void OnCancelPermissionRequest(
-      int render_view_id, int bridge_id, const GURL& requesting_frame);
-  void OnStartUpdating(
-      int render_view_id, int bridge_id, const GURL& requesting_frame,
-      bool enable_high_accuracy);
-  void OnStopUpdating(int render_view_id, int bridge_id);
-  void OnSuspend(int render_view_id, int bridge_id);
-  void OnResume(int render_view_id, int bridge_id);
-
-  // Registers the bridge created in the renderer side. They'll delegate to the
-  // UI thread if not already in there.
-  void RegisterDispatcher(int process_id, int render_view_id);
-  void UnregisterDispatcher(int process_id, int render_view_id);
-
-  int resource_message_filter_process_id_;
-  scoped_refptr<GeolocationPermissionContext> geolocation_permission_context_;
-
-  // Only used on the IO thread.
-  std::set<GeolocationServiceRenderId> geolocation_renderers_;
-  // Only set whilst we are registered with the arbitrator.
-  scoped_refptr<GeolocationArbitrator> location_arbitrator_;
+  GeolocationDispatcherHost() {}
+  virtual ~GeolocationDispatcherHost() {}
 
   DISALLOW_COPY_AND_ASSIGN(GeolocationDispatcherHost);
 };

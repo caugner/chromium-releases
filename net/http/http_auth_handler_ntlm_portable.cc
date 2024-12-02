@@ -121,13 +121,12 @@ enum {
 
 // We send these flags with our type 1 message.
 enum {
-  NTLM_TYPE1_FLAGS =
-      NTLM_NegotiateUnicode |
-      NTLM_NegotiateOEM |
-      NTLM_RequestTarget |
-      NTLM_NegotiateNTLMKey |
-      NTLM_NegotiateAlwaysSign |
-      NTLM_NegotiateNTLM2Key
+  NTLM_TYPE1_FLAGS = (NTLM_NegotiateUnicode |
+                      NTLM_NegotiateOEM |
+                      NTLM_RequestTarget |
+                      NTLM_NegotiateNTLMKey |
+                      NTLM_NegotiateAlwaysSign |
+                      NTLM_NegotiateNTLM2Key)
 };
 
 static const char NTLM_SIGNATURE[] = "NTLMSSP";
@@ -711,15 +710,6 @@ int HttpAuthHandlerNTLM::InitializeBeforeFirstChallenge() {
   return OK;
 }
 
-int HttpAuthHandlerNTLM::GenerateDefaultAuthToken(
-    const HttpRequestInfo* request,
-    const ProxyInfo* proxy,
-    std::string* auth_token) {
-  NOTREACHED();
-  LOG(ERROR) << ErrorToString(ERR_NOT_IMPLEMENTED);
-  return ERR_NOT_IMPLEMENTED;
-}
-
 HttpAuthHandlerNTLM::Factory::Factory() {
 }
 
@@ -730,13 +720,18 @@ int HttpAuthHandlerNTLM::Factory::CreateAuthHandler(
     HttpAuth::ChallengeTokenizer* challenge,
     HttpAuth::Target target,
     const GURL& origin,
-    scoped_refptr<HttpAuthHandler>* handler) {
+    CreateReason reason,
+    int digest_nonce_count,
+    const BoundNetLog& net_log,
+    scoped_ptr<HttpAuthHandler>* handler) {
+  if (reason == CREATE_PREEMPTIVE)
+    return ERR_UNSUPPORTED_AUTH_SCHEME;
   // TODO(cbentzel): Move towards model of parsing in the factory
   //                 method and only constructing when valid.
   // NOTE: Default credentials are not supported for the portable implementation
   // of NTLM.
-  scoped_refptr<HttpAuthHandler> tmp_handler(new HttpAuthHandlerNTLM);
-  if (!tmp_handler->InitFromChallenge(challenge, target, origin))
+  scoped_ptr<HttpAuthHandler> tmp_handler(new HttpAuthHandlerNTLM);
+  if (!tmp_handler->InitFromChallenge(challenge, target, origin, net_log))
     return ERR_INVALID_RESPONSE;
   handler->swap(tmp_handler);
   return OK;

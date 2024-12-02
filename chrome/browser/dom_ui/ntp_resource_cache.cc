@@ -22,7 +22,6 @@
 #include "chrome/browser/google_util.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/user_data_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -49,36 +48,19 @@
 namespace {
 
 // The URL for the the Learn More page shown on incognito new tab.
-const char* const kLearnMoreIncognitoUrl =
+const char kLearnMoreIncognitoUrl[] =
     "http://www.google.com/support/chrome/bin/answer.py?answer=95464";
 
 // The URL for bookmark sync service help.
-const char* const kSyncServiceHelpUrl =
+const char kSyncServiceHelpUrl[] =
     "http://www.google.com/support/chrome/bin/answer.py?answer=165139";
 
-std::wstring GetUrlWithLang(const char* const url) {
-  return ASCIIToWide(google_util::AppendGoogleLocaleParam(GURL(url)).spec());
-}
+// The URL to be loaded to display Help.
+const char kHelpContentUrl[] =
+    "http://www.google.com/support/chrome/";
 
-// In case a file path to the new tab page was provided this tries to load
-// the file and returns the file content if successful. This returns an
-// empty string in case of failure.
-std::string GetCustomNewTabPageFromCommandLine() {
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  const FilePath file_path = command_line->GetSwitchValuePath(
-      switches::kNewTabPage);
-
-  if (!file_path.empty()) {
-    // Read the file contents in, blocking the UI thread of the browser.
-    // This is for testing purposes only! It is used to test new versions of
-    // the new tab page using a special command line option. Never use this
-    // in a way that will be used by default in product.
-    std::string file_contents;
-    if (file_util::ReadFileToString(FilePath(file_path), &file_contents))
-      return file_contents;
-  }
-
-  return std::string();
+std::wstring GetUrlWithLang(const GURL& url) {
+  return ASCIIToWide(google_util::AppendGoogleLocaleParam(url).spec());
 }
 
 std::string SkColorToRGBAString(SkColor color) {
@@ -149,17 +131,12 @@ NTPResourceCache::NTPResourceCache(Profile* profile) : profile_(profile) {
   PrefService* pref_service = profile_->GetPrefs();
   pref_service->AddPrefObserver(prefs::kShowBookmarkBar, this);
   pref_service->AddPrefObserver(prefs::kNTPShownSections, this);
-
-  // Watch for pref changes that cause us to need to invalidate the CSS cache.
-  pref_service->AddPrefObserver(prefs::kNTPPromoLineRemaining, this);
 }
 
 NTPResourceCache::~NTPResourceCache() {
   PrefService* pref_service = profile_->GetPrefs();
   pref_service->RemovePrefObserver(prefs::kShowBookmarkBar, this);
   pref_service->RemovePrefObserver(prefs::kNTPShownSections, this);
-
-  pref_service->RemovePrefObserver(prefs::kNTPPromoLineRemaining, this);
 }
 
 RefCountedBytes* NTPResourceCache::GetNewTabHTML(bool is_off_the_record) {
@@ -203,9 +180,6 @@ void NTPResourceCache::Observe(NotificationType type,
         *pref_name == prefs::kNTPShownSections) {
       new_tab_incognito_html_ = NULL;
       new_tab_html_ = NULL;
-    } else if (*pref_name == prefs::kNTPPromoLineRemaining) {
-      new_tab_incognito_css_ = NULL;
-      new_tab_css_ = NULL;
     } else {
       NOTREACHED();
     }
@@ -220,7 +194,7 @@ void NTPResourceCache::CreateNewTabIncognitoHTML() {
       l10n_util::GetString(IDS_NEW_TAB_TITLE));
   localized_strings.SetString(L"content",
       l10n_util::GetStringF(IDS_NEW_TAB_OTR_MESSAGE,
-                            GetUrlWithLang(kLearnMoreIncognitoUrl)));
+                            GetUrlWithLang(GURL(kLearnMoreIncognitoUrl))));
   localized_strings.SetString(L"extensionsmessage",
       l10n_util::GetStringF(IDS_NEW_TAB_OTR_EXTENSIONS_MESSAGE,
                             l10n_util::GetString(IDS_PRODUCT_NAME),
@@ -248,21 +222,8 @@ void NTPResourceCache::CreateNewTabIncognitoHTML() {
 void NTPResourceCache::CreateNewTabHTML() {
   // Show the profile name in the title and most visited labels if the current
   // profile is not the default.
-  std::wstring title;
-  std::wstring most_visited;
-  if (UserDataManager::Get()->is_current_profile_default()) {
-    title = l10n_util::GetString(IDS_NEW_TAB_TITLE);
-    most_visited = l10n_util::GetString(IDS_NEW_TAB_MOST_VISITED);
-  } else {
-    // Get the current profile name.
-    std::wstring profile_name =
-      UserDataManager::Get()->current_profile_name();
-    title = l10n_util::GetStringF(IDS_NEW_TAB_TITLE_WITH_PROFILE_NAME,
-                                  profile_name);
-    most_visited = l10n_util::GetStringF(
-        IDS_NEW_TAB_MOST_VISITED_WITH_PROFILE_NAME,
-        profile_name);
-  }
+  std::wstring title = l10n_util::GetString(IDS_NEW_TAB_TITLE);
+  std::wstring most_visited = l10n_util::GetString(IDS_NEW_TAB_MOST_VISITED);
   DictionaryValue localized_strings;
   localized_strings.SetString(L"bookmarkbarattached",
       profile_->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar) ?
@@ -282,8 +243,6 @@ void NTPResourceCache::CreateNewTabHTML() {
       l10n_util::GetString(IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW_MULTIPLE));
   localized_strings.SetString(L"attributionintro",
       l10n_util::GetString(IDS_NEW_TAB_ATTRIBUTION_INTRO));
-  localized_strings.SetString(L"viewfullhistory",
-      l10n_util::GetString(IDS_NEW_TAB_VIEW_FULL_HISTORY));
   localized_strings.SetString(L"thumbnailremovednotification",
       l10n_util::GetString(IDS_NEW_TAB_THUMBNAIL_REMOVED_NOTIFICATION));
   localized_strings.SetString(L"undothumbnailremove",
@@ -306,16 +265,25 @@ void NTPResourceCache::CreateNewTabHTML() {
       l10n_util::GetString(IDS_NEW_TAB_CLOSE_FIRST_RUN_NOTIFICATION));
   localized_strings.SetString(L"tips",
       l10n_util::GetString(IDS_NEW_TAB_TIPS));
-  localized_strings.SetString(L"promonew",
-      l10n_util::GetString(IDS_NTP_PROMOTION_NEW));
-  std::wstring extensionLink = ASCIIToWide(
-      google_util::AppendGoogleLocaleParam(
-          GURL(extension_urls::kGalleryBrowsePrefix)).spec());
-  localized_strings.SetString(L"promomessage",
-      l10n_util::GetStringF(IDS_NTP_PROMO_MESSAGE,
-          l10n_util::GetString(IDS_PRODUCT_NAME), extensionLink));
-  localized_strings.SetString(L"extensionslink", extensionLink);
   localized_strings.SetString(L"close", l10n_util::GetString(IDS_CLOSE));
+  localized_strings.SetString(L"history",
+                              l10n_util::GetString(IDS_NEW_TAB_HISTORY));
+  localized_strings.SetString(L"downloads",
+                              l10n_util::GetString(IDS_NEW_TAB_DOWNLOADS));
+  localized_strings.SetString(L"help",
+                              l10n_util::GetString(IDS_NEW_TAB_HELP));
+  localized_strings.SetString(L"helpurl",
+      GetUrlWithLang(GURL(kHelpContentUrl)));
+  localized_strings.SetString(L"appsettings",
+      l10n_util::GetString(IDS_NEW_TAB_APP_SETTINGS));
+  localized_strings.SetString(L"appuninstall",
+      l10n_util::GetString(IDS_NEW_TAB_APP_UNINSTALL));
+  localized_strings.SetString(L"appoptions",
+      l10n_util::GetString(IDS_NEW_TAB_APP_OPTIONS));
+  localized_strings.SetString(L"web_store_title",
+      l10n_util::GetString(IDS_EXTENSION_WEB_STORE_TITLE));
+  localized_strings.SetString(L"web_store_url",
+      GetUrlWithLang(GURL(Extension::ChromeStoreURL())));
 
   // Don't initiate the sync related message passing with the page if the sync
   // code is not present.
@@ -331,26 +299,18 @@ void NTPResourceCache::CreateNewTabHTML() {
       Animation::ShouldRenderRichAnimation() ? "true" : "false";
   localized_strings.SetString(L"anim", anim);
 
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  bool has_3d =
+      command_line->HasSwitch(switches::kEnableAcceleratedCompositing);
+  localized_strings.SetString(L"has_3d", has_3d ? "true" : "false");
+
   // Pass the shown_sections pref early so that we can prevent flicker.
   const int shown_sections = profile_->GetPrefs()->GetInteger(
       prefs::kNTPShownSections);
   localized_strings.SetInteger(L"shown_sections", shown_sections);
 
-  // In case we have the new new tab page enabled we first try to read the file
-  // provided on the command line. If that fails we just get the resource from
-  // the resource bundle.
-  base::StringPiece new_tab_html;
-  std::string new_tab_html_str;
-  new_tab_html_str = GetCustomNewTabPageFromCommandLine();
-
-  if (!new_tab_html_str.empty()) {
-    new_tab_html = base::StringPiece(new_tab_html_str);
-  }
-
-  if (new_tab_html.empty()) {
-    new_tab_html = ResourceBundle::GetSharedInstance().GetRawDataResource(
-        IDR_NEW_NEW_TAB_HTML);
-  }
+  base::StringPiece new_tab_html(ResourceBundle::GetSharedInstance().
+      GetRawDataResource(IDR_NEW_NEW_TAB_HTML));
 
   // Inject the template data into the HTML so that it is available before any
   // layout is needed.
@@ -372,7 +332,6 @@ void NTPResourceCache::CreateNewTabHTML() {
     NOTREACHED();
     full_html.assign(new_tab_html.data(), new_tab_html.size());
   }
-  jstemplate_builder::AppendI18nTemplateProcessHtml(&full_html);
 
   new_tab_html_ = new RefCountedBytes;
   new_tab_html_->data.resize(full_html.size());
@@ -391,8 +350,8 @@ void NTPResourceCache::CreateNewTabIncognitoCSS() {
   std::vector<std::string> subst;
 
   // Cache-buster for background.
-  subst.push_back(WideToUTF8(
-      profile_->GetPrefs()->GetString(prefs::kCurrentThemeID)));  // $1
+  subst.push_back(
+      profile_->GetPrefs()->GetString(prefs::kCurrentThemeID));  // $1
 
   // Colors.
   subst.push_back(SkColorToRGBAString(color_background));  // $2
@@ -461,8 +420,8 @@ void NTPResourceCache::CreateNewTabCSS() {
   std::vector<std::string> subst2;
 
   // Cache-buster for background.
-  subst.push_back(WideToASCII(
-      profile_->GetPrefs()->GetString(prefs::kCurrentThemeID)));  // $1
+  subst.push_back(
+      profile_->GetPrefs()->GetString(prefs::kCurrentThemeID));  // $1
 
   // Colors.
   subst.push_back(SkColorToRGBAString(color_background));  // $2
@@ -482,17 +441,6 @@ void NTPResourceCache::CreateNewTabCSS() {
       tp->HasCustomImage(IDR_THEME_NTP_ATTRIBUTION) ? "block" : "none");  // $$5
   subst2.push_back(SkColorToRGBAString(color_link_underline));  // $$6
   subst2.push_back(SkColorToRGBAString(color_section_link_underline));  // $$7
-
-  if (profile_->GetPrefs()->GetInteger(prefs::kNTPPromoImageRemaining) > 0) {
-    subst2.push_back("block");  // $$8
-  } else {
-    subst2.push_back("none");  // $$8
-  }
-  if (profile_->GetPrefs()->GetInteger(prefs::kNTPPromoLineRemaining) > 0) {
-    subst2.push_back("inline-block");  // $$9
-  } else {
-    subst2.push_back("none");  // $$9
-  }
 
   // Get our template.
   static const base::StringPiece new_tab_theme_css(

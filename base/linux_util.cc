@@ -6,21 +6,25 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <glib.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <vector>
 
 #include "base/command_line.h"
 #include "base/env_var.h"
+#include "base/file_util.h"
 #include "base/lock.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/singleton.h"
+#include "base/scoped_ptr.h"
 #include "base/string_util.h"
-#include "base/third_party/xdg_user_dirs/xdg_user_dir_lookup.h"
 
 namespace {
 
@@ -123,26 +127,6 @@ bool ProcPathGetInode(ino_t* inode_out, const char* path, bool log = false) {
 
 namespace base {
 
-uint8_t* BGRAToRGBA(const uint8_t* pixels, int width, int height, int stride) {
-  if (stride == 0)
-    stride = width * 4;
-
-  uint8_t* new_pixels = static_cast<uint8_t*>(malloc(height * stride));
-
-  // We have to copy the pixels and swap from BGRA to RGBA.
-  for (int i = 0; i < height; ++i) {
-    for (int j = 0; j < width; ++j) {
-      int idx = i * stride + j * 4;
-      new_pixels[idx] = pixels[idx + 2];
-      new_pixels[idx + 1] = pixels[idx + 1];
-      new_pixels[idx + 2] = pixels[idx];
-      new_pixels[idx + 3] = pixels[idx + 3];
-    }
-  }
-
-  return new_pixels;
-}
-
 // We use this static string to hold the Linux distro info. If we
 // crash, the crash handler code will send this in the crash dump.
 std::string linux_distro =
@@ -151,23 +135,6 @@ std::string linux_distro =
 #else  // if defined(OS_LINUX)
     "Unknown";
 #endif
-
-FilePath GetHomeDir(EnvVarGetter* env) {
-  std::string home_dir;
-  if (env->GetEnv("HOME", &home_dir) && !home_dir.empty())
-    return FilePath(home_dir);
-
-  home_dir = g_get_home_dir();
-  if (!home_dir.empty())
-    return FilePath(home_dir);
-
-  FilePath rv;
-  if (PathService::Get(base::DIR_TEMP, &rv))
-    return rv;
-
-  // Last resort.
-  return FilePath("/tmp");
-}
 
 std::string GetLinuxDistro() {
 #if defined(OS_CHROMEOS)
@@ -205,75 +172,6 @@ std::string GetLinuxDistro() {
 #else
   NOTIMPLEMENTED();
 #endif
-}
-
-FilePath GetXDGDirectory(EnvVarGetter* env, const char* env_name,
-                         const char* fallback_dir) {
-  std::string env_value;
-  if (env->GetEnv(env_name, &env_value) && !env_value.empty())
-    return FilePath(env_value);
-  return GetHomeDir(env).Append(fallback_dir);
-}
-
-FilePath GetXDGUserDirectory(EnvVarGetter* env, const char* dir_name,
-                             const char* fallback_dir) {
-  char* xdg_dir = xdg_user_dir_lookup(dir_name);
-  if (xdg_dir) {
-    FilePath rv(xdg_dir);
-    free(xdg_dir);
-    return rv;
-  }
-  return GetHomeDir(env).Append(fallback_dir);
-}
-
-DesktopEnvironment GetDesktopEnvironment(EnvVarGetter* env) {
-  std::string desktop_session;
-  if (env->GetEnv("DESKTOP_SESSION", &desktop_session)) {
-    if (desktop_session == "gnome")
-      return DESKTOP_ENVIRONMENT_GNOME;
-    else if (desktop_session == "kde4")
-      return DESKTOP_ENVIRONMENT_KDE4;
-    else if (desktop_session == "kde") {
-      // This may mean KDE4 on newer systems, so we have to check.
-      if (env->HasEnv("KDE_SESSION_VERSION"))
-        return DESKTOP_ENVIRONMENT_KDE4;
-      return DESKTOP_ENVIRONMENT_KDE3;
-    }
-    else if (desktop_session == "xfce4")
-      return DESKTOP_ENVIRONMENT_XFCE;
-  }
-
-  // Fall back on some older environment variables.
-  // Useful particularly in the DESKTOP_SESSION=default case.
-  if (env->HasEnv("GNOME_DESKTOP_SESSION_ID")) {
-    return DESKTOP_ENVIRONMENT_GNOME;
-  } else if (env->HasEnv("KDE_FULL_SESSION")) {
-    if (env->HasEnv("KDE_SESSION_VERSION"))
-      return DESKTOP_ENVIRONMENT_KDE4;
-    return DESKTOP_ENVIRONMENT_KDE3;
-  }
-
-  return DESKTOP_ENVIRONMENT_OTHER;
-}
-
-const char* GetDesktopEnvironmentName(DesktopEnvironment env) {
-  switch (env) {
-    case DESKTOP_ENVIRONMENT_OTHER:
-      return NULL;
-    case DESKTOP_ENVIRONMENT_GNOME:
-      return "GNOME";
-    case DESKTOP_ENVIRONMENT_KDE3:
-      return "KDE3";
-    case DESKTOP_ENVIRONMENT_KDE4:
-      return "KDE4";
-    case DESKTOP_ENVIRONMENT_XFCE:
-      return "XFCE";
-  }
-  return NULL;
-}
-
-const char* GetDesktopEnvironmentName(EnvVarGetter* env) {
-  return GetDesktopEnvironmentName(GetDesktopEnvironment(env));
 }
 
 bool FileDescriptorGetInode(ino_t* inode_out, int fd) {
@@ -346,6 +244,48 @@ bool FindProcessHoldingSocket(pid_t* pid_out, ino_t socket_inode) {
   }
 
   return already_found;
+}
+
+pid_t FindThreadIDWithSyscall(pid_t pid, const std::string& expected_data) {
+  char buf[256];
+  snprintf(buf, sizeof(buf), "/proc/%d/task", pid);
+  DIR* task = opendir(buf);
+  if (!task) {
+    LOG(WARNING) << "Cannot open " << buf;
+    return -1;
+  }
+
+  std::vector<pid_t> tids;
+  struct dirent* dent;
+  while ((dent = readdir(task))) {
+    char *endptr;
+    const unsigned long int tid_ul = strtoul(dent->d_name, &endptr, 10);
+    if (tid_ul == ULONG_MAX || *endptr)
+      continue;
+    tids.push_back(tid_ul);
+  }
+  closedir(task);
+
+  scoped_array<char> syscall_data(new char[expected_data.length()]);
+  for (std::vector<pid_t>::const_iterator
+       i = tids.begin(); i != tids.end(); ++i) {
+    const pid_t current_tid = *i;
+    snprintf(buf, sizeof(buf), "/proc/%d/task/%d/syscall", pid, current_tid);
+    int fd = open(buf, O_RDONLY);
+    if (fd < 0)
+      continue;
+    bool read_ret =
+        file_util::ReadFromFD(fd, syscall_data.get(), expected_data.length());
+    close(fd);
+    if (!read_ret)
+      continue;
+
+    if (0 == strncmp(expected_data.c_str(), syscall_data.get(),
+                     expected_data.length())) {
+      return current_tid;
+    }
+  }
+  return -1;
 }
 
 }  // namespace base

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,7 +33,6 @@ class BookmarkModel;
   Profile* profile_;  // weak
   const BookmarkNode* parentNode_;  // weak; owned by the model
   BookmarkEditor::Configuration configuration_;
-  scoped_ptr<BookmarkEditor::Handler> handler_;  // we take ownership
   NSString* initialName_;
   NSString* displayName_;  // Bound to a text field in the dialog.
   BOOL okEnabled_;  // Bound to the OK button.
@@ -47,19 +46,18 @@ class BookmarkModel;
   scoped_ptr<BookmarkEditorBaseControllerBridge> observer_;
 }
 
-@property (copy) NSString* initialName;
-@property (copy) NSString* displayName;
-@property (assign) BOOL okEnabled;
-@property (retain, readonly) NSArray* folderTreeArray;
-@property (copy) NSArray* tableSelectionPaths;
+@property (nonatomic, copy) NSString* initialName;
+@property (nonatomic, copy) NSString* displayName;
+@property (nonatomic, assign) BOOL okEnabled;
+@property (nonatomic, retain, readonly) NSArray* folderTreeArray;
+@property (nonatomic, copy) NSArray* tableSelectionPaths;
 
 // Designated initializer.  Derived classes should call through to this init.
 - (id)initWithParentWindow:(NSWindow*)parentWindow
                    nibName:(NSString*)nibName
                    profile:(Profile*)profile
                     parent:(const BookmarkNode*)parent
-             configuration:(BookmarkEditor::Configuration)configuration
-                   handler:(BookmarkEditor::Handler*)handler;
+             configuration:(BookmarkEditor::Configuration)configuration;
 
 // Run the bookmark editor as a modal sheet.  Does not block.
 - (void)runAsModalSheet;
@@ -98,9 +96,6 @@ class BookmarkModel;
 // node is nil then select the bookmark bar node.  Exposed for unit test.
 - (void)selectNodeInBrowser:(const BookmarkNode*)node;
 
-// Notify the handler, if any, of a node creation.
-- (void)notifyHandlerCreatedNode:(const BookmarkNode*)node;
-
 // Notifications called when the BookmarkModel changes out from under me.
 - (void)nodeRemoved:(const BookmarkNode*)node
          fromParent:(const BookmarkNode*)parent;
@@ -125,10 +120,10 @@ class BookmarkModel;
   BOOL newFolder_;
 }
 
-@property (copy, readwrite) NSString* folderName;
-@property (assign, readwrite) const BookmarkNode* folderNode;
-@property (retain, readwrite) NSMutableArray* children;
-@property (assign, readwrite) BOOL newFolder;
+@property (nonatomic, copy) NSString* folderName;
+@property (nonatomic, assign) const BookmarkNode* folderNode;
+@property (nonatomic, retain) NSMutableArray* children;
+@property (nonatomic, assign) BOOL newFolder;
 
 // Convenience creator for adding a new folder to the editor's bookmark
 // structure.  This folder will be added to the bookmark model when the
@@ -157,7 +152,7 @@ class BookmarkModel;
 
 @interface BookmarkEditorBaseController(TestingAPI)
 
-@property (readonly) BOOL okButtonEnabled;
+@property (nonatomic, readonly) BOOL okButtonEnabled;
 
 // Create any newly added folders.  New folders are nodes in folderTreeArray
 // which are marked as being new (i.e. their kFolderTreeNewFolderKey
@@ -172,4 +167,4 @@ class BookmarkModel;
 
 @end
 
-#endif  /* CHROME_BROWSER_COCOA_BOOKMARK_EDITOR_BASE_CONTROLLER_H_ */
+#endif  // CHROME_BROWSER_COCOA_BOOKMARK_EDITOR_BASE_CONTROLLER_H_

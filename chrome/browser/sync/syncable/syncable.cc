@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,6 +37,7 @@
 #include "chrome/browser/sync/engine/syncer_util.h"
 #include "chrome/browser/sync/protocol/autofill_specifics.pb.h"
 #include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
+#include "chrome/browser/sync/protocol/password_specifics.pb.h"
 #include "chrome/browser/sync/protocol/preference_specifics.pb.h"
 #include "chrome/browser/sync/protocol/service_constants.h"
 #include "chrome/browser/sync/protocol/theme_specifics.pb.h"
@@ -47,8 +48,9 @@
 #include "chrome/browser/sync/syncable/syncable_changes_version.h"
 #include "chrome/browser/sync/syncable/syncable_columns.h"
 #include "chrome/browser/sync/util/crypto_helpers.h"
-#include "chrome/browser/sync/util/event_sys-inl.h"
 #include "chrome/browser/sync/util/fast_dump.h"
+#include "chrome/common/deprecated/event_sys-inl.h"
+#include "net/base/escape.h"
 
 namespace {
 enum InvariantCheckLevel {
@@ -155,6 +157,11 @@ bool LessPathNames::operator() (const string& a, const string& b) const {
 static const DirectoryChangeEvent kShutdownChangesEvent =
     { DirectoryChangeEvent::SHUTDOWN, 0, 0 };
 
+void Directory::init_kernel(const std::string& name) {
+  DCHECK(kernel_ == NULL);
+  kernel_ = new Kernel(FilePath(), name, KernelLoadInfo());
+}
+
 Directory::Kernel::Kernel(const FilePath& db_path,
                           const string& name,
                           const KernelLoadInfo& info)
@@ -165,12 +172,11 @@ Directory::Kernel::Kernel(const FilePath& db_path,
       ids_index(new Directory::IdsIndex),
       parent_id_child_index(new Directory::ParentIdChildIndex),
       client_tag_index(new Directory::ClientTagIndex),
-      extended_attributes(new ExtendedAttributes),
       unapplied_update_metahandles(new MetahandleSet),
       unsynced_metahandles(new MetahandleSet),
       dirty_metahandles(new MetahandleSet),
+      metahandles_to_purge(new MetahandleSet),
       channel(new Directory::Channel(syncable::DIRECTORY_DESTROYED)),
-      changes_channel(new Directory::ChangesChannel(kShutdownChangesEvent)),
       info_status(Directory::KERNEL_SHARE_INFO_VALID),
       persisted_info(info.kernel_info),
       cache_guid(info.cache_guid),
@@ -193,11 +199,11 @@ void Directory::Kernel::Release() {
 Directory::Kernel::~Kernel() {
   CHECK(0 == refcount);
   delete channel;
-  delete changes_channel;
+  changes_channel.Notify(kShutdownChangesEvent);
   delete unsynced_metahandles;
   delete unapplied_update_metahandles;
   delete dirty_metahandles;
-  delete extended_attributes;
+  delete metahandles_to_purge;
   delete parent_id_child_index;
   delete client_tag_index;
   delete ids_index;
@@ -253,14 +259,12 @@ DirOpenResult Directory::OpenImpl(const FilePath& file_path,
   // Temporary indices before kernel_ initialized in case Load fails. We 0(1)
   // swap these later.
   MetahandlesIndex metas_bucket;
-  ExtendedAttributes xattrs_bucket;
-  DirOpenResult result = store_->Load(&metas_bucket, &xattrs_bucket, &info);
+  DirOpenResult result = store_->Load(&metas_bucket, &info);
   if (OPENED != result)
     return result;
 
   kernel_ = new Kernel(db_path, name, info);
   kernel_->metahandles_index->swap(metas_bucket);
-  kernel_->extended_attributes->swap(xattrs_bucket);
   InitializeIndices();
   return OPENED;
 }
@@ -420,6 +424,7 @@ void ZeroFields(EntryKernel* entry, int first_field) {
     entry->put(static_cast<BitField>(i), false);
   if (i < PROTO_FIELDS_END)
     i = PROTO_FIELDS_END;
+  entry->clear_dirty(NULL);
 }
 
 void Directory::InsertEntry(EntryKernel* entry) {
@@ -446,14 +451,14 @@ void Directory::Undelete(EntryKernel* const entry) {
   DCHECK(entry->ref(IS_DEL));
   ScopedKernelLock lock(this);
   entry->put(IS_DEL, false);
-  entry->mark_dirty();
+  entry->mark_dirty(kernel_->dirty_metahandles);
   CHECK(kernel_->parent_id_child_index->insert(entry).second);
 }
 
 void Directory::Delete(EntryKernel* const entry) {
   DCHECK(!entry->ref(IS_DEL));
   entry->put(IS_DEL, true);
-  entry->mark_dirty();
+  entry->mark_dirty(kernel_->dirty_metahandles);
   ScopedKernelLock lock(this);
   CHECK(1 == kernel_->parent_id_child_index->erase(entry));
 }
@@ -486,20 +491,25 @@ void Directory::ReindexParentId(EntryKernel* const entry,
   CHECK(kernel_->parent_id_child_index->insert(entry).second);
 }
 
-void Directory::AddToDirtyMetahandles(int64 handle) {
-  kernel_->transaction_mutex.AssertAcquired();
-  kernel_->dirty_metahandles->insert(handle);
-}
-
 void Directory::ClearDirtyMetahandles() {
   kernel_->transaction_mutex.AssertAcquired();
   kernel_->dirty_metahandles->clear();
 }
 
-// static
-bool Directory::SafeToPurgeFromMemory(const EntryKernel* const entry) {
-  return entry->ref(IS_DEL) && !entry->is_dirty() && !entry->ref(SYNCING) &&
-         !entry->ref(IS_UNAPPLIED_UPDATE) && !entry->ref(IS_UNSYNCED);
+bool Directory::SafeToPurgeFromMemory(const EntryKernel* const entry) const {
+  bool safe = entry->ref(IS_DEL) && !entry->is_dirty() &&
+      !entry->ref(SYNCING) && !entry->ref(IS_UNAPPLIED_UPDATE) &&
+      !entry->ref(IS_UNSYNCED);
+
+  if (safe) {
+    int64 handle = entry->ref(META_HANDLE);
+    CHECK(kernel_->dirty_metahandles->count(handle) == 0);
+    // TODO(tim): Bug 49278.
+    CHECK(!kernel_->unsynced_metahandles->count(handle));
+    CHECK(!kernel_->unapplied_update_metahandles->count(handle));
+  }
+
+  return safe;
 }
 
 void Directory::TakeSnapshotForSaveChanges(SaveChangesSnapshot* snapshot) {
@@ -517,18 +527,16 @@ void Directory::TakeSnapshotForSaveChanges(SaveChangesSnapshot* snapshot) {
     if (!entry->is_dirty())
       continue;
     snapshot->dirty_metas.insert(snapshot->dirty_metas.end(), *entry);
-    entry->clear_dirty();
+    DCHECK_EQ(1U, kernel_->dirty_metahandles->count(*i));
+    // We don't bother removing from the index here as we blow the entire thing
+    // in a moment, and it unnecessarily complicates iteration.
+    entry->clear_dirty(NULL);
   }
   ClearDirtyMetahandles();
 
-  // Do the same for extended attributes.
-  for (ExtendedAttributes::iterator i = kernel_->extended_attributes->begin();
-       i != kernel_->extended_attributes->end(); ++i) {
-    if (!i->second.dirty)
-      continue;
-    snapshot->dirty_xattrs[i->first] = i->second;
-    i->second.dirty = false;
-  }
+  // Set purged handles.
+  DCHECK(snapshot->metahandles_to_purge.empty());
+  snapshot->metahandles_to_purge.swap(*(kernel_->metahandles_to_purge));
 
   // Fill kernel_info_status and kernel_info.
   snapshot->kernel_info = kernel_->persisted_info;
@@ -578,28 +586,72 @@ void Directory::VacuumAfterSaveChanges(const SaveChangesSnapshot& snapshot) {
       // We now drop deleted metahandles that are up to date on both the client
       // and the server.
       size_t num_erased = 0;
-      kernel_->flushed_metahandles.Push(entry->ref(META_HANDLE));
+      int64 handle = entry->ref(META_HANDLE);
+      kernel_->flushed_metahandles.Push(handle);
       num_erased = kernel_->ids_index->erase(entry);
-      DCHECK(1 == num_erased);
+      DCHECK_EQ(1u, num_erased);
       num_erased = kernel_->metahandles_index->erase(entry);
-      DCHECK(1 == num_erased);
+      DCHECK_EQ(1u, num_erased);
 
-      num_erased = kernel_->client_tag_index->erase(entry);  // Might not be in it
-      DCHECK(!entry->ref(UNIQUE_CLIENT_TAG).empty() == num_erased);
+      // Might not be in it
+      num_erased = kernel_->client_tag_index->erase(entry);
+      DCHECK_EQ(entry->ref(UNIQUE_CLIENT_TAG).empty(), !num_erased);
+      CHECK(!kernel_->parent_id_child_index->count(entry));
       delete entry;
     }
   }
+}
 
-  ExtendedAttributes::const_iterator i = snapshot.dirty_xattrs.begin();
-  while (i != snapshot.dirty_xattrs.end()) {
-    ExtendedAttributeKey key(i->first.metahandle, i->first.key);
-    ExtendedAttributes::iterator found =
-        kernel_->extended_attributes->find(key);
-    if (found == kernel_->extended_attributes->end() ||
-        found->second.dirty || !i->second.is_deleted) {
-      ++i;
-    } else {
-      kernel_->extended_attributes->erase(found);
+void Directory::PurgeEntriesWithTypeIn(const std::set<ModelType>& types) {
+  if (types.count(UNSPECIFIED) != 0U || types.count(TOP_LEVEL_FOLDER) != 0U) {
+    NOTREACHED() << "Don't support purging unspecified or top level entries.";
+    return;
+  }
+
+  if (types.empty())
+    return;
+
+  {
+    WriteTransaction trans(this, PURGE_ENTRIES, __FILE__, __LINE__);
+    {
+      ScopedKernelLock lock(this);
+      MetahandlesIndex::iterator it = kernel_->metahandles_index->begin();
+      while (it != kernel_->metahandles_index->end()) {
+        const sync_pb::EntitySpecifics& local_specifics = (*it)->ref(SPECIFICS);
+        const sync_pb::EntitySpecifics& server_specifics =
+            (*it)->ref(SERVER_SPECIFICS);
+        ModelType local_type = GetModelTypeFromSpecifics(local_specifics);
+        ModelType server_type = GetModelTypeFromSpecifics(server_specifics);
+
+        // Note the dance around incrementing |it|, since we sometimes erase().
+        if (types.count(local_type) > 0 || types.count(server_type) > 0) {
+          UnlinkEntryFromOrder(*it, NULL, &lock);
+          int64 handle = (*it)->ref(META_HANDLE);
+          kernel_->metahandles_to_purge->insert(handle);
+
+          size_t num_erased = 0;
+          num_erased = kernel_->ids_index->erase(*it);
+          DCHECK_EQ(1u, num_erased);
+          num_erased = kernel_->client_tag_index->erase(*it);
+          DCHECK_EQ((*it)->ref(UNIQUE_CLIENT_TAG).empty(), !num_erased);
+          num_erased = kernel_->unsynced_metahandles->erase(handle);
+          DCHECK_EQ((*it)->ref(IS_UNSYNCED), num_erased > 0);
+          num_erased = kernel_->unapplied_update_metahandles->erase(handle);
+          DCHECK_EQ((*it)->ref(IS_UNAPPLIED_UPDATE), num_erased > 0);
+          num_erased = kernel_->parent_id_child_index->erase(*it);
+          DCHECK_EQ((*it)->ref(IS_DEL), !num_erased);
+          kernel_->metahandles_index->erase(it++);
+        } else {
+          ++it;
+        }
+      }
+
+      // Ensure meta tracking for these data types reflects the deleted state.
+      for (std::set<ModelType>::const_iterator it = types.begin();
+           it != types.end(); ++it) {
+        set_initial_sync_ended_for_type_unsafe(*it, false);
+        set_last_download_timestamp_unsafe(*it, 0);
+      }
     }
   }
 }
@@ -619,18 +671,12 @@ void Directory::HandleSaveChangesFailure(const SaveChangesSnapshot& snapshot) {
     MetahandlesIndex::iterator found =
         kernel_->metahandles_index->find(&kernel_->needle);
     if (found != kernel_->metahandles_index->end()) {
-      (*found)->mark_dirty();
+      (*found)->mark_dirty(kernel_->dirty_metahandles);
     }
   }
 
-  for (ExtendedAttributes::const_iterator i = snapshot.dirty_xattrs.begin();
-       i != snapshot.dirty_xattrs.end(); ++i) {
-    ExtendedAttributeKey key(i->first.metahandle, i->first.key);
-    ExtendedAttributes::iterator found =
-        kernel_->extended_attributes->find(key);
-    if (found != kernel_->extended_attributes->end())
-      found->second.dirty = true;
-  }
+  kernel_->metahandles_to_purge->insert(snapshot.metahandles_to_purge.begin(),
+                                        snapshot.metahandles_to_purge.end());
 }
 
 int64 Directory::last_download_timestamp(ModelType model_type) const {
@@ -641,10 +687,7 @@ int64 Directory::last_download_timestamp(ModelType model_type) const {
 void Directory::set_last_download_timestamp(ModelType model_type,
     int64 timestamp) {
   ScopedKernelLock lock(this);
-  if (kernel_->persisted_info.last_download_timestamp[model_type] == timestamp)
-    return;
-  kernel_->persisted_info.last_download_timestamp[model_type] = timestamp;
-  kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
+  set_last_download_timestamp_unsafe(model_type, timestamp);
 }
 
 bool Directory::initial_sync_ended_for_type(ModelType type) const {
@@ -654,9 +697,22 @@ bool Directory::initial_sync_ended_for_type(ModelType type) const {
 
 void Directory::set_initial_sync_ended_for_type(ModelType type, bool x) {
   ScopedKernelLock lock(this);
+  set_initial_sync_ended_for_type_unsafe(type, x);
+}
+
+void Directory::set_initial_sync_ended_for_type_unsafe(ModelType type,
+                                                       bool x) {
   if (kernel_->persisted_info.initial_sync_ended[type] == x)
     return;
   kernel_->persisted_info.initial_sync_ended.set(type, x);
+  kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
+}
+
+void Directory::set_last_download_timestamp_unsafe(ModelType model_type,
+                                                   int64 timestamp) {
+  if (kernel_->persisted_info.last_download_timestamp[model_type] == timestamp)
+    return;
+  kernel_->persisted_info.last_download_timestamp[model_type] = timestamp;
   kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
 }
 
@@ -696,46 +752,6 @@ void Directory::GetUnsyncedMetaHandles(BaseTransaction* trans,
   ScopedKernelLock lock(this);
   copy(kernel_->unsynced_metahandles->begin(),
        kernel_->unsynced_metahandles->end(), back_inserter(*result));
-}
-
-void Directory::GetAllExtendedAttributes(BaseTransaction* trans,
-                                         int64 metahandle,
-                                         std::set<ExtendedAttribute>* result) {
-  AttributeKeySet keys;
-  GetExtendedAttributesList(trans, metahandle, &keys);
-  AttributeKeySet::iterator iter;
-  for (iter = keys.begin(); iter != keys.end(); ++iter) {
-      ExtendedAttributeKey key(metahandle, *iter);
-      ExtendedAttribute extended_attribute(trans, GET_BY_HANDLE, key);
-      CHECK(extended_attribute.good());
-      result->insert(extended_attribute);
-  }
-}
-
-void Directory::GetExtendedAttributesList(BaseTransaction* trans,
-    int64 metahandle, AttributeKeySet* result) {
-  ExtendedAttributes::iterator iter;
-  for (iter = kernel_->extended_attributes->begin();
-       iter != kernel_->extended_attributes->end(); ++iter) {
-    if (iter->first.metahandle == metahandle) {
-      if (!iter->second.is_deleted)
-        result->insert(iter->first.key);
-    }
-  }
-}
-
-void Directory::DeleteAllExtendedAttributes(WriteTransaction* trans,
-                                            int64 metahandle) {
-  AttributeKeySet keys;
-  GetExtendedAttributesList(trans, metahandle, &keys);
-  AttributeKeySet::iterator iter;
-  for (iter = keys.begin(); iter != keys.end(); ++iter) {
-    ExtendedAttributeKey key(metahandle, *iter);
-    MutableExtendedAttribute attribute(trans, GET_BY_HANDLE, key);
-    // This flags the attribute for deletion during SaveChanges.  At that time
-    // any deleted attributes are purged from disk and memory.
-    attribute.delete_attribute();
-  }
 }
 
 int64 Directory::unsynced_entity_count() const {
@@ -857,23 +873,38 @@ void Directory::CheckTreeInvariants(syncable::BaseTransaction* trans,
     }
     int64 base_version = e.Get(BASE_VERSION);
     int64 server_version = e.Get(SERVER_VERSION);
+    bool using_unique_client_tag = !e.Get(UNIQUE_CLIENT_TAG).empty();
     if (CHANGES_VERSION == base_version || 0 == base_version) {
       if (e.Get(IS_UNAPPLIED_UPDATE)) {
-        // Unapplied new item.
-        CHECK(e.Get(IS_DEL)) << e;
+        // Must be a new item, or a de-duplicated unique client tag
+        // that was created both locally and remotely.
+        if (!using_unique_client_tag) {
+          CHECK(e.Get(IS_DEL)) << e;
+        }
+        // It came from the server, so it must have a server ID.
         CHECK(id.ServerKnows()) << e;
       } else {
         if (e.Get(IS_DIR)) {
           // TODO(chron): Implement this mode if clients ever need it.
           // For now, you can't combine a client tag and a directory.
-          CHECK(e.Get(UNIQUE_CLIENT_TAG).empty()) << e;
+          CHECK(!using_unique_client_tag) << e;
         }
-        // Uncommitted item.
+        // Should be an uncomitted item, or a successfully deleted one.
         if (!e.Get(IS_DEL)) {
           CHECK(e.Get(IS_UNSYNCED)) << e;
         }
+        // If the next check failed, it would imply that an item exists
+        // on the server, isn't waiting for application locally, but either
+        // is an unsynced create or a sucessful delete in the local copy.
+        // Either way, that's a mismatch.
         CHECK(0 == server_version) << e;
-        CHECK(!id.ServerKnows()) << e;
+        // Items that aren't using the unique client tag should have a zero
+        // base version only if they have a local ID.  Items with unique client
+        // tags are allowed to use the zero base version for undeletion and
+        // de-duplication; the unique client tag trumps the server ID.
+        if (!using_unique_client_tag) {
+          CHECK(!id.ServerKnows()) << e;
+        }
       }
     } else {
       CHECK(id.ServerKnows());
@@ -886,9 +917,11 @@ void Directory::CheckTreeInvariants(syncable::BaseTransaction* trans,
       return;
     }
   }
-  // I did intend to add a check here to ensure no entries had been pulled into
-  // memory by this function, but we can't guard against another ReadTransaction
-  // pulling entries into RAM
+}
+
+browser_sync::ChannelHookup<DirectoryChangeEvent>* Directory::AddChangeObserver(
+    browser_sync::ChannelEventHandler<DirectoryChangeEvent>* observer) {
+  return kernel_->changes_channel.AddObserver(observer);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -927,6 +960,8 @@ BaseTransaction::BaseTransaction(Directory* directory, const char* name,
   Lock();
 }
 
+BaseTransaction::~BaseTransaction() {}
+
 void BaseTransaction::UnlockAndLog(OriginalEntries* originals_arg) {
   dirkernel_->transaction_mutex.AssertAcquired();
 
@@ -947,14 +982,23 @@ void BaseTransaction::UnlockAndLog(OriginalEntries* originals_arg) {
   // Tell listeners to calculate changes while we still have the mutex.
   DirectoryChangeEvent event = { DirectoryChangeEvent::CALCULATE_CHANGES,
                                  originals.get(), this, writer_ };
-  dirkernel_->changes_channel->NotifyListeners(event);
+  dirkernel_->changes_channel.Notify(event);
+
+  // Necessary for reads to be performed prior to transaction mutex release.
+  // Allows the listener to use the current transaction to perform reads.
+  DirectoryChangeEvent ending_event =
+      { DirectoryChangeEvent::TRANSACTION_ENDING,
+        NULL, this, INVALID };
+  dirkernel_->changes_channel.Notify(ending_event);
 
   dirkernel_->transaction_mutex.Release();
 
+  // Directly after transaction mutex release, but lock on changes channel.
+  // You cannot be re-entrant to a transaction in this handler.
   DirectoryChangeEvent complete_event =
       { DirectoryChangeEvent::TRANSACTION_COMPLETE,
         NULL, NULL, INVALID };
-  dirkernel_->changes_channel->NotifyListeners(complete_event);
+  dirkernel_->changes_channel.Notify(complete_event);
 }
 
 ReadTransaction::ReadTransaction(Directory* directory, const char* file,
@@ -1002,10 +1046,6 @@ WriteTransaction::~WriteTransaction() {
       directory()->CheckTreeInvariants(this, originals_);
   }
 
-  for (OriginalEntries::const_iterator i = originals_->begin();
-      i != originals_->end(); ++i) {
-    directory()->AddToDirtyMetahandles(i->ref(META_HANDLE));
-  }
   UnlockAndLog(originals_);
 }
 
@@ -1039,20 +1079,6 @@ Directory* Entry::dir() const {
 const string& Entry::Get(StringField field) const {
   DCHECK(kernel_);
   return kernel_->ref(field);
-}
-
-void Entry::GetAllExtendedAttributes(BaseTransaction* trans,
-    std::set<ExtendedAttribute> *result) {
-  dir()->GetAllExtendedAttributes(trans, kernel_->ref(META_HANDLE), result);
-}
-
-void Entry::GetExtendedAttributesList(BaseTransaction* trans,
-    AttributeKeySet* result) {
-  dir()->GetExtendedAttributesList(trans, kernel_->ref(META_HANDLE), result);
-}
-
-void Entry::DeleteAllExtendedAttributes(WriteTransaction *trans) {
-  dir()->DeleteAllExtendedAttributes(trans, kernel_->ref(META_HANDLE));
 }
 
 syncable::ModelType Entry::GetServerModelType() const {
@@ -1107,9 +1133,9 @@ void MutableEntry::Init(WriteTransaction* trans, const Id& parent_id,
                         const string& name) {
   kernel_ = new EntryKernel;
   ZeroFields(kernel_, BEGIN_FIELDS);
-  kernel_->mark_dirty();
   kernel_->put(ID, trans->directory_->NextId());
   kernel_->put(META_HANDLE, trans->directory_->NextMetahandle());
+  kernel_->mark_dirty(trans->directory_->kernel_->dirty_metahandles);
   kernel_->put(PARENT_ID, parent_id);
   kernel_->put(NON_UNIQUE_NAME, name);
   const int64 now = Now();
@@ -1135,8 +1161,8 @@ MutableEntry::MutableEntry(WriteTransaction* trans, CreateNewUpdateItem,
   kernel_ = new EntryKernel;
   ZeroFields(kernel_, BEGIN_FIELDS);
   kernel_->put(ID, id);
-  kernel_->mark_dirty();
   kernel_->put(META_HANDLE, trans->directory_->NextMetahandle());
+  kernel_->mark_dirty(trans->directory_->kernel_->dirty_metahandles);
   kernel_->put(IS_DEL, true);
   // We match the database defaults here
   kernel_->put(BASE_VERSION, CHANGES_VERSION);
@@ -1161,6 +1187,12 @@ MutableEntry::MutableEntry(WriteTransaction* trans, GetByClientTag,
   trans->SaveOriginal(kernel_);
 }
 
+MutableEntry::MutableEntry(WriteTransaction* trans, GetByServerTag,
+                           const string& tag)
+    : Entry(trans, GET_BY_SERVER_TAG, tag), write_transaction_(trans) {
+  trans->SaveOriginal(kernel_);
+}
+
 bool MutableEntry::PutIsDel(bool is_del) {
   DCHECK(kernel_);
   if (is_del == kernel_->ref(IS_DEL)) {
@@ -1181,7 +1213,7 @@ bool MutableEntry::Put(Int64Field field, const int64& value) {
   DCHECK(kernel_);
   if (kernel_->ref(field) != value) {
     kernel_->put(field, value);
-    kernel_->mark_dirty();
+    kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
   }
   return true;
 }
@@ -1198,27 +1230,43 @@ bool MutableEntry::Put(IdField field, const Id& value) {
     } else {
       kernel_->put(field, value);
     }
-    kernel_->mark_dirty();
+    kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
   }
   return true;
 }
 
 void MutableEntry::PutParentIdPropertyOnly(const Id& parent_id) {
   dir()->ReindexParentId(kernel_, parent_id);
-  kernel_->mark_dirty();
+  kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
 }
 
 bool MutableEntry::Put(BaseVersion field, int64 value) {
   DCHECK(kernel_);
   if (kernel_->ref(field) != value) {
     kernel_->put(field, value);
-    kernel_->mark_dirty();
+    kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
   }
   return true;
 }
 
 bool MutableEntry::Put(StringField field, const string& value) {
   return PutImpl(field, value);
+}
+
+bool MutableEntry::Put(ProtoField field,
+                       const sync_pb::EntitySpecifics& value) {
+  DCHECK(kernel_);
+  // TODO(ncarter): This is unfortunately heavyweight.  Can we do
+  // better?
+  if (kernel_->ref(field).SerializeAsString() != value.SerializeAsString()) {
+    kernel_->put(field, value);
+    kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
+  }
+  return true;
+}
+
+MetahandleSet* MutableEntry::GetDirtyIndexHelper() {
+  return dir()->kernel_->dirty_metahandles;
 }
 
 bool MutableEntry::PutUniqueClientTag(const string& new_tag) {
@@ -1242,14 +1290,14 @@ bool MutableEntry::PutUniqueClientTag(const string& new_tag) {
     // erase the old tag and finish up.
     dir()->kernel_->client_tag_index->erase(kernel_);
     kernel_->put(UNIQUE_CLIENT_TAG, new_tag);
-    kernel_->mark_dirty();
+    kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
     CHECK(dir()->kernel_->client_tag_index->insert(kernel_).second);
   } else {
     // The new tag is empty. Since the old tag is not equal to the new tag,
     // The old tag isn't empty, and thus must exist in the index.
     CHECK(dir()->kernel_->client_tag_index->erase(kernel_));
     kernel_->put(UNIQUE_CLIENT_TAG, new_tag);
-    kernel_->mark_dirty();
+    kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
   }
   return true;
 }
@@ -1262,7 +1310,7 @@ bool MutableEntry::PutImpl(StringField field, const string& value) {
 
   if (kernel_->ref(field) != value) {
     kernel_->put(field, value);
-    kernel_->mark_dirty();
+    kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
   }
   return true;
 }
@@ -1282,38 +1330,50 @@ bool MutableEntry::Put(IndexedBitField field, bool value) {
     else
       CHECK(1 == index->erase(kernel_->ref(META_HANDLE)));
     kernel_->put(field, value);
-    kernel_->mark_dirty();
+    kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
   }
   return true;
 }
 
 void MutableEntry::UnlinkFromOrder() {
-  Id old_previous = Get(PREV_ID);
-  Id old_next = Get(NEXT_ID);
+  ScopedKernelLock lock(dir());
+  dir()->UnlinkEntryFromOrder(kernel_, write_transaction(), &lock);
+}
 
-  // Self-looping signifies that this item is not in the order.  If we were to
-  // set these to 0, we could get into trouble because this node might look
-  // like the first node in the ordering.
-  Put(NEXT_ID, Get(ID));
-  Put(PREV_ID, Get(ID));
+void Directory::UnlinkEntryFromOrder(EntryKernel* entry,
+                                     WriteTransaction* trans,
+                                     ScopedKernelLock* lock) {
+  CHECK(!trans || this == trans->directory());
+  Id old_previous = entry->ref(PREV_ID);
+  Id old_next = entry->ref(NEXT_ID);
+
+  entry->put(NEXT_ID, entry->ref(ID));
+  entry->put(PREV_ID, entry->ref(ID));
+  entry->mark_dirty(kernel_->dirty_metahandles);
 
   if (!old_previous.IsRoot()) {
     if (old_previous == old_next) {
       // Note previous == next doesn't imply previous == next == Get(ID). We
       // could have prev==next=="c-XX" and Get(ID)=="sX..." if an item was added
       // and deleted before receiving the server ID in the commit response.
-      CHECK((old_next == Get(ID)) || !old_next.ServerKnows());
+      CHECK((old_next == entry->ref(ID)) || !old_next.ServerKnows());
       return;  // Done if we were already self-looped (hence unlinked).
     }
-    MutableEntry previous_entry(write_transaction(), GET_BY_ID, old_previous);
-    CHECK(previous_entry.good());
-    previous_entry.Put(NEXT_ID, old_next);
+    EntryKernel* previous_entry = GetEntryById(old_previous, lock);
+    CHECK(previous_entry);
+    if (trans)
+      trans->SaveOriginal(previous_entry);
+    previous_entry->put(NEXT_ID, old_next);
+    previous_entry->mark_dirty(kernel_->dirty_metahandles);
   }
 
   if (!old_next.IsRoot()) {
-    MutableEntry next_entry(write_transaction(), GET_BY_ID, old_next);
-    CHECK(next_entry.good());
-    next_entry.Put(PREV_ID, old_previous);
+    EntryKernel* next_entry = GetEntryById(old_next, lock);
+    CHECK(next_entry);
+    if (trans)
+      trans->SaveOriginal(next_entry);
+    next_entry->put(PREV_ID, old_previous);
+    next_entry->mark_dirty(kernel_->dirty_metahandles);
   }
 }
 
@@ -1415,41 +1475,6 @@ Id Directory::GetLastChildId(BaseTransaction* trans,
   return GetChildWithNullIdField(NEXT_ID, trans, parent_id);
 }
 
-ExtendedAttribute::ExtendedAttribute(BaseTransaction* trans, GetByHandle,
-                                     const ExtendedAttributeKey& key) {
-  Directory::Kernel* const kernel = trans->directory()->kernel_;
-  ScopedKernelLock lock(trans->directory());
-  Init(trans, kernel, &lock, key);
-}
-
-bool ExtendedAttribute::Init(BaseTransaction* trans,
-                             Directory::Kernel* const kernel,
-                             ScopedKernelLock* lock,
-                             const ExtendedAttributeKey& key) {
-  i_ = kernel->extended_attributes->find(key);
-  good_ = kernel->extended_attributes->end() != i_;
-  return good_;
-}
-
-MutableExtendedAttribute::MutableExtendedAttribute(
-    WriteTransaction* trans, GetByHandle,
-    const ExtendedAttributeKey& key) :
-        ExtendedAttribute(trans, GET_BY_HANDLE, key) {
-}
-
-MutableExtendedAttribute::MutableExtendedAttribute(
-    WriteTransaction* trans, Create, const ExtendedAttributeKey& key) {
-  Directory::Kernel* const kernel = trans->directory()->kernel_;
-  ScopedKernelLock lock(trans->directory());
-  if (!Init(trans, kernel, &lock, key)) {
-    ExtendedAttributeValue val;
-    val.is_deleted = false;
-    val.dirty = true;
-    i_ = kernel->extended_attributes->insert(std::make_pair(key, val)).first;
-    good_ = true;
-  }
-}
-
 bool IsLegalNewParent(BaseTransaction* trans, const Id& entry_id,
                       const Id& new_parent_id) {
   if (entry_id.IsRoot())
@@ -1464,15 +1489,6 @@ bool IsLegalNewParent(BaseTransaction* trans, const Id& entry_id,
     ancestor_id = new_parent.Get(PARENT_ID);
   }
   return true;
-}
-
-const Blob* GetExtendedAttributeValue(const Entry& e,
-                                      const string& attribute_name) {
-  ExtendedAttributeKey key(e.Get(META_HANDLE), attribute_name);
-  ExtendedAttribute extended_attribute(e.trans(), GET_BY_HANDLE, key);
-  if (extended_attribute.good() && !extended_attribute.is_deleted())
-    return &extended_attribute.value();
-  return NULL;
 }
 
 // This function sets only the flags needed to get this entry to sync.
@@ -1544,7 +1560,8 @@ std::ostream& operator<<(std::ostream& stream, const syncable::Entry& entry) {
   }
   for ( ; i < PROTO_FIELDS_END; ++i) {
     s << g_metas_columns[i].name << colon
-      << kernel->ref(static_cast<ProtoField>(i)).SerializeAsString()
+      << EscapePath(
+          kernel->ref(static_cast<ProtoField>(i)).SerializeAsString())
       << separator;
   }
   s << "TempFlags: ";

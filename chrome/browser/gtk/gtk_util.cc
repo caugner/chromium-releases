@@ -14,17 +14,26 @@
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "app/x11_util.h"
+#include "base/gtk_util.h"
 #include "base/i18n/rtl.h"
 #include "base/linux_util.h"
 #include "base/logging.h"
+#include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/gtk/cairo_cached_surface.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
 #include "chrome/common/renderer_preferences.h"
+#include "googleurl/src/gurl.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/native_dialog_window.h"
+#include "chrome/browser/chromeos/options/options_window_view.h"
+#include "views/window/window.h"
+#endif  // defined(OS_CHROMEOS)
 
 namespace {
 
@@ -46,7 +55,7 @@ gboolean OnMouseButtonPressed(GtkWidget* widget, GdkEventButton* event,
     }
 
     gint button_mask = GPOINTER_TO_INT(userdata);
-    if (button_mask && (1 << event->button))
+    if (button_mask & (1 << event->button))
       gtk_button_pressed(GTK_BUTTON(widget));
   }
 
@@ -211,16 +220,21 @@ void SetWindowSizeFromResources(GtkWindow* window,
     gtk_window_set_default_size(window, width, height);
   } else {
     // For a non-resizable window, GTK tries to snap the window size
-    // to the minimum size around the content.  We still want to set
-    // the *minimum* window size to allow windows with long titles to
-    // be wide enough to display their titles, but if GTK needs to
-    // make the window *wider* due to very wide controls, we should
-    // allow that too.
-    GdkGeometry geometry;
-    geometry.min_width = width;
-    geometry.min_height = height;
-    gtk_window_set_geometry_hints(window, GTK_WIDGET(window),
-                                  &geometry, GDK_HINT_MIN_SIZE);
+    // to the minimum size around the content.  We use the sizes in
+    // the resources to set *minimum* window size to allow windows
+    // with long titles to be wide enough to display their titles.
+    //
+    // But if GTK wants to make the window *wider* due to very wide
+    // controls, we should allow that too, so be careful to pick the
+    // wider of the resources size and the natural window size.
+
+    gtk_widget_show_all(GTK_BIN(window)->child);
+    GtkRequisition requisition;
+    gtk_widget_size_request(GTK_WIDGET(window), &requisition);
+    gtk_widget_set_size_request(
+        GTK_WIDGET(window),
+        width == -1 ? -1 : std::max(width, requisition.width),
+        height == -1 ? -1 : std::max(height, requisition.height));
   }
   gtk_window_set_resizable(window, resizable ? TRUE : FALSE);
 }
@@ -354,6 +368,10 @@ void ForceFontSizePixels(GtkWidget* widget, double size_pixels) {
   gtk_widget_modify_font(widget, font_desc);
 }
 
+void UndoForceFontSize(GtkWidget* widget) {
+  gtk_widget_modify_font(widget, NULL);
+}
+
 gfx::Point GetWidgetScreenPosition(GtkWidget* widget) {
   if (!widget->window) {
     NOTREACHED() << "Must only be called on realized widgets.";
@@ -430,28 +448,6 @@ GtkWidget* CenterWidgetInHBox(GtkWidget* hbox, GtkWidget* widget,
     gtk_box_pack_start(GTK_BOX(hbox), centering_vbox, FALSE, FALSE, padding);
 
   return centering_vbox;
-}
-
-std::string ConvertAcceleratorsFromWindowsStyle(const std::string& label) {
-  std::string ret;
-  ret.reserve(label.length() * 2);
-  for (size_t i = 0; i < label.length(); ++i) {
-    if ('_' == label[i]) {
-      ret.push_back('_');
-      ret.push_back('_');
-    } else if ('&' == label[i]) {
-      if (i + 1 < label.length() && '&' == label[i + 1]) {
-        ret.push_back(label[i]);
-        ++i;
-      } else {
-        ret.push_back('_');
-      }
-    } else {
-      ret.push_back(label[i]);
-    }
-  }
-
-  return ret;
 }
 
 bool IsScreenComposited() {
@@ -858,5 +854,179 @@ gfx::Rect WidgetBounds(GtkWidget* widget) {
   // So the base is always (0,0).
   return gfx::Rect(0, 0, widget->allocation.width, widget->allocation.height);
 }
+
+void SetWMLastUserActionTime(GtkWindow* window) {
+  gdk_x11_window_set_user_time(GTK_WIDGET(window)->window, XTimeNow());
+}
+
+guint32 XTimeNow() {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+bool URLFromPrimarySelection(Profile* profile, GURL* url) {
+  GtkClipboard* clipboard = gtk_clipboard_get(GDK_SELECTION_PRIMARY);
+  DCHECK(clipboard);
+  gchar* selection_text = gtk_clipboard_wait_for_text(clipboard);
+  if (!selection_text)
+    return false;
+
+  // Use autocomplete to clean up the text, going so far as to turn it into
+  // a search query if necessary.
+  AutocompleteController controller(profile);
+  controller.Start(UTF8ToWide(selection_text),
+                   std::wstring(),  // desired_tld
+                   true,            // prevent_inline_autocomplete
+                   false,           // prefer_keyword
+                   true);           // synchronous_only
+  g_free(selection_text);
+  const AutocompleteResult& result = controller.result();
+  AutocompleteResult::const_iterator it = result.default_match();
+  if (it == result.end())
+    return false;
+
+  if (!it->destination_url.is_valid())
+    return false;
+
+  *url = it->destination_url;
+  return true;
+}
+
+bool AddWindowAlphaChannel(GtkWidget* window) {
+  GdkScreen* screen = gtk_widget_get_screen(window);
+  GdkColormap* rgba = gdk_screen_get_rgba_colormap(screen);
+  if (rgba)
+    gtk_widget_set_colormap(window, rgba);
+
+  return rgba;
+}
+
+#if defined(OS_CHROMEOS)
+
+GtkWindow* GetDialogTransientParent(GtkWindow* dialog) {
+  GtkWindow* parent = gtk_window_get_transient_for(dialog);
+  if (!parent)
+    parent = chromeos::GetOptionsViewParent();
+
+  return parent;
+}
+
+void ShowDialog(GtkWidget* dialog) {
+  // Make sure all controls are visible so that we get correct size.
+  gtk_widget_show_all(GTK_DIALOG(dialog)->vbox);
+
+  // Get dialog window size.
+  gint width = 0;
+  gint height = 0;
+  gtk_window_get_size(GTK_WINDOW(dialog), &width, &height);
+
+  chromeos::ShowNativeDialog(GetDialogTransientParent(GTK_WINDOW(dialog)),
+      dialog,
+      gtk_window_get_resizable(GTK_WINDOW(dialog)) ?
+          chromeos::DIALOG_FLAG_RESIZEABLE :
+          chromeos::DIALOG_FLAG_DEFAULT,
+      gfx::Size(width, height),
+      gfx::Size());
+}
+
+void ShowDialogWithLocalizedSize(GtkWidget* dialog,
+                                 int width_id,
+                                 int height_id,
+                                 bool resizeable) {
+  int width = (width_id == -1) ? 0 :
+      views::Window::GetLocalizedContentsWidth(width_id);
+  int height = (height_id == -1) ? 0 :
+      views::Window::GetLocalizedContentsHeight(height_id);
+
+  chromeos::ShowNativeDialog(GetDialogTransientParent(GTK_WINDOW(dialog)),
+      dialog,
+      resizeable ? chromeos::DIALOG_FLAG_RESIZEABLE :
+                   chromeos::DIALOG_FLAG_DEFAULT,
+      gfx::Size(width, height),
+      gfx::Size());
+}
+
+void ShowModalDialogWithMinLocalizedWidth(GtkWidget* dialog,
+                                          int width_id) {
+  int width = (width_id == -1) ? 0 :
+      views::Window::GetLocalizedContentsWidth(width_id);
+
+  chromeos::ShowNativeDialog(GetDialogTransientParent(GTK_WINDOW(dialog)),
+      dialog,
+      chromeos::DIALOG_FLAG_MODAL,
+      gfx::Size(),
+      gfx::Size(width, 0));
+}
+
+void PresentWindow(GtkWidget* window, int timestamp) {
+  GtkWindow* host_window = chromeos::GetNativeDialogWindow(window);
+  if (!host_window)
+      host_window = GTK_WINDOW(window);
+  if (timestamp)
+    gtk_window_present_with_time(host_window, timestamp);
+  else
+    gtk_window_present(host_window);
+}
+
+GtkWindow* GetDialogWindow(GtkWidget* dialog) {
+  return chromeos::GetNativeDialogWindow(dialog);
+}
+
+gfx::Rect GetDialogBounds(GtkWidget* dialog) {
+  return chromeos::GetNativeDialogContentsBounds(dialog);
+}
+
+#else
+
+void ShowDialog(GtkWidget* dialog) {
+  gtk_widget_show_all(dialog);
+}
+
+void ShowDialogWithLocalizedSize(GtkWidget* dialog,
+                                 int width_id,
+                                 int height_id,
+                                 bool resizeable) {
+  gtk_widget_realize(dialog);
+  SetWindowSizeFromResources(GTK_WINDOW(dialog),
+                             width_id,
+                             height_id,
+                             resizeable);
+  gtk_widget_show_all(dialog);
+}
+
+void ShowModalDialogWithMinLocalizedWidth(GtkWidget* dialog,
+                                          int width_id) {
+  gtk_widget_show_all(dialog);
+
+  // Suggest a minimum size.
+  gint width;
+  GtkRequisition req;
+  gtk_widget_size_request(dialog, &req);
+  gtk_util::GetWidgetSizeFromResources(dialog, width_id, 0, &width, NULL);
+  if (width > req.width)
+    gtk_widget_set_size_request(dialog, width, -1);
+}
+
+void PresentWindow(GtkWidget* window, int timestamp) {
+  if (timestamp)
+    gtk_window_present_with_time(GTK_WINDOW(window), timestamp);
+  else
+    gtk_window_present(GTK_WINDOW(window));
+}
+
+GtkWindow* GetDialogWindow(GtkWidget* dialog) {
+  return GTK_WINDOW(dialog);
+}
+
+gfx::Rect GetDialogBounds(GtkWidget* dialog) {
+  gint x = 0, y = 0, width = 1, height = 1;
+  gtk_window_get_position(GTK_WINDOW(dialog), &x, &y);
+  gtk_window_get_size(GTK_WINDOW(dialog), &width, &height);
+
+  return gfx::Rect(x, y, width, height);
+}
+
+#endif
 
 }  // namespace gtk_util

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,6 +35,9 @@ const wchar_t kPrefVersion[] = L"manifest.version";
 // Indicates if an extension is blacklisted:
 const wchar_t kPrefBlacklist[] = L"blacklist";
 
+// Indicates whether the toolbar should be shown on app tabs.
+const wchar_t kPrefAppTabToolbars[] = L"app_tab_toolbars";
+
 // Indicates whether to show an install warning when the user enables.
 const wchar_t kExtensionDidEscalatePermissions[] = L"install_warning_on_enable";
 
@@ -54,9 +57,20 @@ const wchar_t kLastPingDay[] = L"lastpingday";
 // Path for settings specific to blacklist update.
 const wchar_t kExtensionsBlacklistUpdate[] = L"extensions.blacklistupdate";
 
+// Path and sub-keys for the idle install info dictionary preference.
+const wchar_t kIdleInstallInfo[] = L"idle_install_info";
+const wchar_t kIdleInstallInfoCrxPath[] = L"crx_path";
+const wchar_t kIdleInstallInfoVersion[] = L"version";
+const wchar_t kIdleInstallInfoFetchTime[] = L"fetch_time";
+
+
 // A preference that, if true, will allow this extension to run in incognito
 // mode.
 const wchar_t kPrefIncognitoEnabled[] = L"incognito";
+
+// A preference to control whether an extension is allowed to inject script in
+// pages with file URLs.
+const wchar_t kPrefAllowFileAccess[] = L"allowFileAccess";
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -342,6 +356,17 @@ void ExtensionPrefs::SetIsIncognitoEnabled(const std::string& extension_id,
   prefs_->SavePersistentPrefs();
 }
 
+bool ExtensionPrefs::AllowFileAccess(const std::string& extension_id) {
+  return ReadExtensionPrefBoolean(extension_id, kPrefAllowFileAccess);
+}
+
+void ExtensionPrefs::SetAllowFileAccess(const std::string& extension_id,
+                                        bool allow) {
+  UpdateExtensionPref(extension_id, kPrefAllowFileAccess,
+                      Value::CreateBooleanValue(allow));
+  prefs_->SavePersistentPrefs();
+}
+
 void ExtensionPrefs::GetKilledExtensionIds(std::set<std::string>* killed_ids) {
   const DictionaryValue* dict = prefs_->GetDictionary(kExtensionsPref);
   if (!dict || dict->empty())
@@ -419,13 +444,14 @@ void ExtensionPrefs::SetToolbarOrder(
   prefs_->ScheduleSavePersistentPrefs();
 }
 
-void ExtensionPrefs::OnExtensionInstalled(Extension* extension) {
+void ExtensionPrefs::OnExtensionInstalled(
+    Extension* extension, Extension::State initial_state,
+    bool initial_incognito_enabled) {
   const std::string& id = extension->id();
-  // Make sure we don't enable a disabled extension.
-  if (GetExtensionState(extension->id()) != Extension::DISABLED) {
-    UpdateExtensionPref(id, kPrefState,
-                        Value::CreateIntegerValue(Extension::ENABLED));
-  }
+  UpdateExtensionPref(id, kPrefState,
+                      Value::CreateIntegerValue(initial_state));
+  UpdateExtensionPref(id, kPrefIncognitoEnabled,
+                      Value::CreateBooleanValue(initial_incognito_enabled));
   UpdateExtensionPref(id, kPrefLocation,
                       Value::CreateIntegerValue(extension->location()));
   FilePath::StringType path = MakePathRelative(install_directory_,
@@ -582,8 +608,8 @@ static ExtensionInfo* GetInstalledExtensionInfoImpl(
   }
   int state_value;
   if (!ext->GetInteger(kPrefState, &state_value)) {
-    LOG(WARNING) << "Missing state pref for extension " << *extension_id;
-    NOTREACHED();
+    // This can legitimately happen if we store preferences for component
+    // extensions.
     return NULL;
   }
   if (state_value == Extension::KILLBIT) {
@@ -593,14 +619,10 @@ static ExtensionInfo* GetInstalledExtensionInfoImpl(
   }
   FilePath::StringType path;
   if (!ext->GetString(kPrefPath, &path)) {
-    LOG(WARNING) << "Missing path pref for extension " << *extension_id;
-    NOTREACHED();
     return NULL;
   }
   int location_value;
   if (!ext->GetInteger(kPrefLocation, &location_value)) {
-    LOG(WARNING) << "Missing location pref for extension " << *extension_id;
-    NOTREACHED();
     return NULL;
   }
 
@@ -661,6 +683,129 @@ ExtensionInfo* ExtensionPrefs::GetInstalledExtensionInfo(
 
   return NULL;
 }
+
+void ExtensionPrefs::SetIdleInstallInfo(const std::string& extension_id,
+                                        const FilePath& crx_path,
+                                        const std::string& version,
+                                        const base::Time& fetch_time) {
+  DictionaryValue* extension_prefs = GetExtensionPref(extension_id);
+  if (!extension_prefs) {
+    NOTREACHED();
+    return;
+  }
+  extension_prefs->Remove(kIdleInstallInfo, NULL);
+  DictionaryValue* info = new DictionaryValue();
+  info->SetString(kIdleInstallInfoCrxPath, crx_path.value());
+  info->SetString(kIdleInstallInfoVersion, version);
+  info->SetString(kIdleInstallInfoFetchTime,
+                  Int64ToString(fetch_time.ToInternalValue()));
+  extension_prefs->Set(kIdleInstallInfo, info);
+  prefs_->ScheduleSavePersistentPrefs();
+}
+
+bool ExtensionPrefs::RemoveIdleInstallInfo(const std::string& extension_id) {
+  DictionaryValue* extension_prefs = GetExtensionPref(extension_id);
+  if (!extension_prefs)
+    return false;
+  bool result = extension_prefs->Remove(kIdleInstallInfo, NULL);
+  prefs_->ScheduleSavePersistentPrefs();
+  return result;
+}
+
+bool ExtensionPrefs::GetIdleInstallInfo(const std::string& extension_id,
+                                        FilePath* crx_path,
+                                        std::string* version,
+                                        base::Time* fetch_time) {
+  DictionaryValue* extension_prefs = GetExtensionPref(extension_id);
+  if (!extension_prefs)
+    return false;
+
+  // Do all the reads from the prefs together, and don't do any assignment
+  // to the out parameters unless all the reads succeed.
+  DictionaryValue* info = NULL;
+  if (!extension_prefs->GetDictionary(kIdleInstallInfo, &info))
+    return false;
+
+  FilePath::StringType path_string;
+  if (!info->GetString(kIdleInstallInfoCrxPath, &path_string))
+    return false;
+
+  std::string tmp_version;
+  if (!info->GetString(kIdleInstallInfoVersion, &tmp_version))
+    return false;
+
+  std::string fetch_time_string;
+  if (!info->GetString(kIdleInstallInfoFetchTime, &fetch_time_string))
+    return false;
+
+  int64 fetch_time_value;
+  if (!StringToInt64(fetch_time_string, &fetch_time_value))
+    return false;
+
+  if (crx_path)
+    *crx_path = FilePath(path_string);
+
+  if (version)
+    *version = tmp_version;
+
+  if (fetch_time)
+    *fetch_time = base::Time::FromInternalValue(fetch_time_value);
+
+  return true;
+}
+
+std::set<std::string> ExtensionPrefs::GetIdleInstallInfoIds() {
+  std::set<std::string> result;
+
+  const DictionaryValue* extensions = prefs_->GetDictionary(kExtensionsPref);
+  if (!extensions)
+    return result;
+
+  for (DictionaryValue::key_iterator iter = extensions->begin_keys();
+       iter != extensions->end_keys(); ++iter) {
+    std::string id = WideToASCII(*iter);
+    if (!Extension::IdIsValid(id)) {
+      NOTREACHED();
+      continue;
+    }
+
+    DictionaryValue* extension_prefs = GetExtensionPref(id);
+    if (!extension_prefs)
+      continue;
+
+    DictionaryValue* info = NULL;
+    if (extension_prefs->GetDictionary(kIdleInstallInfo, &info))
+      result.insert(id);
+  }
+  return result;
+}
+
+bool ExtensionPrefs::AreAppTabToolbarsVisible(
+    const std::string& extension_id) {
+  // Default to hiding toolbars.
+  bool show_toolbars = false;
+  DictionaryValue* pref = GetExtensionPref(extension_id);
+  if (!pref)
+    return show_toolbars;
+
+  pref->GetBoolean(
+      ASCIIToWide(extension_id) + L"." + kPrefAppTabToolbars, &show_toolbars);
+  return show_toolbars;
+}
+
+void ExtensionPrefs::SetAppTabToolbarVisibility(
+    const std::string& extension_id, bool value) {
+  DictionaryValue* pref = GetOrCreateExtensionPref(extension_id);
+  std::wstring key = ASCIIToWide(extension_id) + L"." + kPrefAppTabToolbars;
+
+  if (value)
+    pref->SetBoolean(key, true);
+  else
+    pref->Remove(key, NULL);  // False is the default value.
+
+  prefs_->ScheduleSavePersistentPrefs();
+}
+
 
 // static
 void ExtensionPrefs::RegisterUserPrefs(PrefService* prefs) {

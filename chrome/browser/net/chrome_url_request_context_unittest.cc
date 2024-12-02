@@ -6,6 +6,8 @@
 
 #include "base/command_line.h"
 #include "base/format_macros.h"
+#include "chrome/browser/configuration_policy_pref_store.h"
+#include "chrome/browser/pref_value_store.h"
 #include "chrome/common/chrome_switches.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_config_service_common_unittest.h"
@@ -14,7 +16,7 @@
 // Builds an identifier for each test in an array.
 #define TEST_DESC(desc) StringPrintf("at line %d <%s>", __LINE__, desc)
 
-TEST(ChromeUrlRequestContextTest, CreateProxyConfigTest) {
+TEST(ChromeURLRequestContextTest, CreateProxyConfigTest) {
   FilePath unused_path(FILE_PATH_LITERAL("foo.exe"));
   // Build the input command lines here.
   CommandLine empty(unused_path);
@@ -127,8 +129,7 @@ TEST(ChromeUrlRequestContextTest, CreateProxyConfigTest) {
           "httpproxy:8888",  // http
           "",                // https
           "ftpproxy:8889",   // ftp
-          // TODO(eroman): 127.0.0.1/8 is unsupported, so it was dropped
-          "*.google.com,foo.com:99,1.2.3.4:22"),
+          "*.google.com,foo.com:99,1.2.3.4:22,127.0.0.1/8"),
     },
     {
       TEST_DESC("Pac URL with proxy bypass URLs"),
@@ -139,8 +140,7 @@ TEST(ChromeUrlRequestContextTest, CreateProxyConfigTest) {
       false,                                              // auto_detect
       GURL("http://wpad/wpad.dat"),                       // pac_url
       net::ProxyRulesExpectation::EmptyWithBypass(
-          // TODO(eroman): 127.0.0.1/8 is unsupported, so it was dropped
-          "*.google.com,foo.com:99,1.2.3.4:22"),
+          "*.google.com,foo.com:99,1.2.3.4:22,127.0.0.1/8"),
     },
     {
       TEST_DESC("Autodetect"),
@@ -157,8 +157,12 @@ TEST(ChromeUrlRequestContextTest, CreateProxyConfigTest) {
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); i++) {
     SCOPED_TRACE(StringPrintf("Test[%" PRIuS "] %s", i,
                               tests[i].description.c_str()));
-    scoped_ptr<net::ProxyConfig> config(CreateProxyConfig(
-        CommandLine(tests[i].command_line)));
+    CommandLine command_line(tests[i].command_line);
+    PrefService prefs(new PrefValueStore(
+        new ConfigurationPolicyPrefStore(&command_line, NULL),
+        NULL, NULL, NULL, NULL));  // Only configuration-policy prefs.
+    ChromeURLRequestContextGetter::RegisterUserPrefs(&prefs);
+    scoped_ptr<net::ProxyConfig> config(CreateProxyConfig(&prefs));
 
     if (tests[i].is_null) {
       EXPECT_TRUE(config == NULL);
@@ -170,3 +174,4 @@ TEST(ChromeUrlRequestContextTest, CreateProxyConfigTest) {
     }
   }
 }
+

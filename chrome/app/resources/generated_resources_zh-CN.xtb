@@ -139,7 +139,6 @@
 <translation id="1486408090387743835"><ph name="PRODUCT_NAME"/>现已推出<ph name="BEGIN_LINK"/>扩展程序<ph name="END_LINK"/>和<ph name="BEGIN_BUTTON"/>书签同步<ph name="END_BUTTON"/>功能。</translation>
 <translation id="4422347585044846479">修改此页的书签</translation>
 <translation id="8546306075665861288">图片缓存</translation>
-<translation id="3899346049825960202">Linux 代理配置帮助</translation>
 <translation id="1399076603473531278">登录详细信息已过期。</translation>
 <translation id="3391060940042023865">以下插件已崩溃：<ph name="PLUGIN_NAME"/></translation>
 <translation id="5197255632782567636">互联网</translation>
@@ -149,20 +148,6 @@
 <translation id="1556537182262721003">无法将扩展程序目录移动到个人资料中。</translation>
 <translation id="5866557323934807206">清除这些设置以便日后访问</translation>
 <translation id="6370820475163108109"><ph name="ORGANIZATION_NAME"/> (<ph name="DOMAIN_NAME"/>)</translation>
-<translation id="763276826334024854">如在受支持的桌面环境下运行<ph name="PRODUCT_NAME"/>，则会使用系统代理设置。但是，您的系统不受支持，或者在启动您的系统配置时出现了问题。您可使用以下环境变量配置代理：
-        <ph name="BEGIN_LIST"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>auto_proxy<ph name="END_CODE"/><ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST"/>
-            <ph name="BEGIN_LIST_ITEM"/>已定义和空 → 自动检测<ph name="END_LIST_ITEM"/>
-            <ph name="BEGIN_LIST_ITEM"/>非空 → 指定自动配置网址<ph name="END_LIST_ITEM"/>
-          <ph name="END_LIST"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>all_proxy<ph name="END_CODE"/>：可供所有类型使用的代理服务器<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>http_proxy<ph name="END_CODE"/>：HTTP 代理服务器<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>https_proxy<ph name="END_CODE"/>：HTTPS 代理服务器<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>ftp_proxy<ph name="END_CODE"/>：FTP 代理服务器<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>SOCKS_SERVER<ph name="END_CODE"/>：SOCKS 代理服务器（默认使用 SOCKS v4，另外如果指定 SOCKS_VERSION=5，则使用 SOCKS v5）<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>no_proxy<ph name="END_CODE"/>：用于绕过代理的主机或模式的列表，以逗号分隔<ph name="END_LIST_ITEM"/>
-        <ph name="END_LIST"/></translation>
 <translation id="2933933591993394296">已在该计算机上停用了书签同步。您可以在卸载<ph name="NAME_OF_EXTENSION"/>后，通过选择“工具”菜单中的“设置同步...”重新启用书签同步。</translation>
 <translation id="8820817407110198400">书签</translation>
 <translation id="5191625995327478163">语言设置(&amp;L)...</translation>
@@ -170,7 +155,6 @@
 <translation id="5585645215698205895">向下(&amp;D)</translation>
 <translation id="6596816719288285829">IP 地址</translation>
 <translation id="1674989413181946727">计算机总体 SSL 设置：</translation>
-<translation id="1452199478873730826">Flikr</translation>
 <translation id="8703575177326907206">与 <ph name="DOMAIN"/> 的连接未加密。</translation>
 <translation id="4197577448076628265">此扩展程序将有权访问您在 <ph name="HOST"/> 上的浏览历史记录和私人数据。</translation>
 <translation id="1644574205037202324">历史记录</translation>
@@ -340,7 +324,6 @@
 <translation id="348620396154188443">允许所有网站显示桌面通知</translation>
 <translation id="8214489666383623925">打开文件...</translation>
 <translation id="5230160809118287008">Goats Teleported</translation>
-<translation id="5296476177639202243">没有与查询内容“<ph name="SEARCH_TEXT"/>”匹配的书签。</translation>
 <translation id="4495419450179050807">不要在本页上显示</translation>
 <translation id="939736085109172342">新文件夹</translation>
 <translation id="4933484234309072027">嵌入 <ph name="URL"/></translation>
@@ -380,7 +363,6 @@
 <translation id="1684861821302948641">关闭网页</translation>
 <translation id="6802031077390104172"><ph name="USAGE"/> (<ph name="OID"/>)</translation>
 <translation id="857089571609443760">由于向服务器发送了过多请求，同步功能出现了问题。<ph name="NAME_OF_EXTENSION"/>似乎对您的书签进行了过多的更改。</translation>
-<translation id="5965640700983474726">键入内容直接进行搜索</translation>
 <translation id="40334469106837974">更改网页布局</translation>
 <translation id="2142570832281562688">输入配置文件名称</translation>
 <translation id="5904714272463161824">报告错误或损坏的网站(&amp;R)...</translation>
@@ -398,7 +380,6 @@
 <translation id="2620436844016719705">系统</translation>
 <translation id="5362741141255528695">选择私有密钥文件。</translation>
 <translation id="7012108905414904806">但此页中有其他不安全的资源。他人能在传输过程中查看这些资源，攻击者也可以修改这些资源，从而改变网页的外观或行为。</translation>
-<translation id="644318894204114995">确认在隐身模式下运行</translation>
 <translation id="7226140659422399856">浏览器崩溃了...真糟糕！</translation>
 <translation id="4515911410595374805">此页中某些元素的来源未得到验证，因此并未显示这些元素。</translation>
 <translation id="1195447618553298278">未知错误。</translation>
@@ -407,7 +388,6 @@
 <translation id="6610600335992778838">WiFi</translation>
 <translation id="1087119889335281750">无拼写建议(&amp;N)</translation>
 <translation id="5228309736894624122">SSL 协议出错。</translation>
-<translation id="718141787353053227">页面设置...</translation>
 <translation id="5076340679995252485">粘贴(&amp;P)</translation>
 <translation id="5097982659374947325">仅接受我访问过的网站的 Cookie</translation>
 <translation id="14171126816530869">位于<ph name="LOCALITY"/>的<ph name="ORGANIZATION"/>的身份已通过了<ph name="ISSUER"/>的验证。</translation>
@@ -434,7 +414,6 @@
 <translation id="6786747875388722282">扩展程序</translation>
 <translation id="9053965862400494292">尝试设置同步时发生错误。</translation>
 <translation id="4636930964841734540">信息</translation>
-<translation id="2815500128677761940">书签栏</translation>
 <translation id="4571852245489094179">导入书签和设置</translation>
 <translation id="6514771739083339959">主页：</translation>
 <translation id="4421917670248123270">关闭并取消下载</translation>
@@ -497,7 +476,6 @@
 <translation id="8425492902634685834">固定在任务栏上</translation>
 <translation id="3234408098842461169">向下箭头</translation>
 <translation id="825608351287166772">和您拥有的所有身份证件（如护照）类似，证书也有有效期。向您浏览器出示的证书尚未生效。如果证书已过有效期，由于不要求维护有关证书状态的某些信息（证书是否已吊销，因而不应再予以信任），因此不可能验证此证书是否受信任。您应该停止操作。</translation>
-<translation id="8786172108436160456">允许<ph name="EXTENSION_NAME"/>在隐身模式下运行吗？</translation>
 <translation id="5209518306177824490">SHA-1 指纹</translation>
 <translation id="7154150278819212687">此扩展程序将有权访问您的浏览历史记录。</translation>
 <translation id="1553538517812678578">无限制</translation>
@@ -508,13 +486,11 @@
 <translation id="4874539263382920044">标题必须至少包含一个字符</translation>
 <translation id="2963998720451829125"><ph name="NAME_OF_EXTENSION"/>已停用。如果您停止对书签进行同步，则可以通过“工具”菜单访问扩展程序页，在其中重新启用此扩展程序。</translation>
 <translation id="7344633671344536647">浏览数据：</translation>
-<translation id="2332311077028912338">您确定要允许此扩展程序在隐身模式下运行吗？<ph name="PRODUCT_NAME"/>无法阻止此扩展程序记录您的浏览数据。</translation>
 <translation id="4250680216510889253">否</translation>
 <translation id="6291953229176937411">在 Finder 中显示(&amp;S)</translation>
 <translation id="7905536804357499080">使用当前网址</translation>
 <translation id="8933960630081805351">在 Finder 中显示(&amp;S)</translation>
 <translation id="3041612393474885105">证书信息</translation>
-<translation id="7378810950367401542">/</translation>
 <translation id="3733127536501031542">带有递升式验证机制的 SSL 服务器</translation>
 <translation id="954586097957006897">姓氏</translation>
 <translation id="5849941564644911027"><ph name="PRODUCT_NAME"/>现在会从<ph name="DEF_BROWSER"/>导入您的书签和其他设置，并在您的计算机上创建快捷方式。</translation>
@@ -569,7 +545,6 @@
 <translation id="39964277676607559">无法为内容脚本载入 JavaScript“<ph name="RELATIVE_PATH"/>”。</translation>
 <translation id="4378551569595875038">正在连接...</translation>
 <translation id="7029809446516969842">密码</translation>
-<translation id="8211437954284917092">在上面的文本字段中输入查询内容后才能搜索您的书签。</translation>
 <translation id="4528378725264562960">（正在运行）</translation>
 <translation id="5958418293370246440">已保存 <ph name="SAVED_FILES"/> 个文件，共有 <ph name="TOTAL_FILES"/> 个文件</translation>
 <translation id="2350172092385603347">已使用本地化功能，但未在清单中指定 default_locale。</translation>
@@ -628,7 +603,6 @@
 <translation id="149347756975725155">无法载入扩展程序图标“<ph name="ICON"/>”。</translation>
 <translation id="3675321783533846350">设置用于连接网络的代理服务器。</translation>
 <translation id="1572103024875503863"><ph name="NUMBER_MANY"/> days</translation>
-<translation id="181952314179848438">此扩展程序需要获得以下内容的访问权限：</translation>
 <translation id="8453184121293348016">未找到任何吊销机制</translation>
 <translation id="3481915276125965083">已拦截此网页上的下列弹出式窗口：</translation>
 <translation id="3468298837301810372">标签</translation>
@@ -657,7 +631,6 @@
 <translation id="7965010376480416255">共享内存</translation>
 <translation id="6248988683584659830">搜索设置</translation>
 <translation id="7053983685419859001">拦截</translation>
-<translation id="3425080561288944889">您确定要删除“<ph name="BOOKMARK_TITLE"/>”吗？</translation>
 <translation id="2727712005121231835">实际大小</translation>
 <translation id="8887733174653581061">前端显示</translation>
 <translation id="610886263749567451">Javascript 警报</translation>
@@ -670,7 +643,7 @@
 <translation id="9157595877708044936">正在设置...</translation>
 <translation id="1823768272150895732">字体</translation>
 <translation id="4475552974751346499">搜索下载内容</translation>
-<translation id="3021256392995617989">网站尝试跟踪我的地理位置时询问我（推荐）</translation>
+<translation id="3021256392995617989">网站尝试跟踪我的实际位置时询问我（推荐）</translation>
 <translation id="7497564420220535101">保存屏幕截图(&amp;S)...</translation>
 <translation id="918334529602927716">离线工作</translation>
 <translation id="2320435940785160168">此服务器要求提供用于身份验证的证书，且没有接受由
@@ -754,7 +727,6 @@
 <translation id="7629827748548208700">标签页：<ph name="TAB_NAME"/></translation>
 <translation id="8449008133205184768">粘贴并匹配样式</translation>
 <translation id="8028993641010258682">大小</translation>
-<translation id="1383876407941801731">搜索结果</translation>
 <translation id="8398877366907290961">仍然继续</translation>
 <translation id="6974053822202609517">从右向左</translation>
 <translation id="290414493736480793">确认</translation>
@@ -795,7 +767,7 @@
 <translation id="7734729626860583526"><ph name="HOST"/> 的 Cookie</translation>
 <translation id="6584878029876017575">Microsoft 生存时间签名</translation>
 <translation id="1084824384139382525">复制链接地址(&amp;E)</translation>
-<translation id="5042992464904238023">网页内容</translation>
+<translation id="5042992464904238023">网络内容</translation>
 <translation id="6254503684448816922">密钥泄漏</translation>
 <translation id="1181037720776840403">删除</translation>
 <translation id="4006726980536015530">如果现在关闭<ph name="PRODUCT_NAME"/>，将会取消这些下载。</translation>
@@ -821,14 +793,12 @@
 <translation id="5552632479093547648">检测到恶意软件和网络诱骗内容！</translation>
 <translation id="4988273303304146523"><ph name="NUMBER_DEFAULT"/> 天前</translation>
 <translation id="1588343679702972132">此网站已要求您用以下某个证书标识自己：</translation>
-<translation id="7211994749225247711">删除...</translation>
 <translation id="2819994928625218237">无拼写建议(&amp;N)</translation>
 <translation id="4316305410440790958">在新标签页中打开框架(&amp;T)</translation>
 <translation id="9142623379911037913">允许 <ph name="SITE"/> 显示桌面通知吗？</translation>
 <translation id="4196320913210960460">您可以通过点击“工具”菜单中的“扩展程序”，管理已安装的扩展程序。</translation>
 <translation id="9118804773997839291">以下所列为此页面上包含的所有不安全元素。点击“诊断”链接可了解有关特定元素的详情。</translation>
 <translation id="7754704193130578113">下载前询问每个文件的保存位置</translation>
-<translation id="8155199869035534942">删除所选项</translation>
 <translation id="2497284189126895209">所有文件</translation>
 <translation id="5360606537916580043">最近一天</translation>
 <translation id="1682548588986054654">新建隐身窗口</translation>
@@ -981,7 +951,6 @@
 <translation id="7136984461011502314">欢迎使用<ph name="PRODUCT_NAME"/></translation>
 <translation id="1594030484168838125">选择</translation>
 <translation id="204497730941176055">Microsoft 证书模板名称</translation>
-<translation id="4002066346123236978">标题</translation>
 <translation id="4087089424473531098">已创建扩展程序：
 
 <ph name="EXTENSION_FILE"/></translation>
@@ -1064,7 +1033,6 @@
 <translation id="4608500690299898628">查找(&amp;F)...</translation>
 <translation id="3574305903863751447"><ph name="COUNTRY"/><ph name="STATE"/><ph name="CITY"/></translation>
 <translation id="8724859055372736596">在文件夹中显示(&amp;S)</translation>
-<translation id="5446294780224829982">朝鲜文输入法：</translation>
 <translation id="5554489410841842733">如果该扩展程序可以在当前网页上运行，则会显示此图标。</translation>
 <translation id="4862642413395066333">签名 OCSP 响应</translation>
 <translation id="4756388243121344051">历史记录(&amp;H)</translation>
@@ -1086,7 +1054,6 @@
 <translation id="7631887513477658702">总是打开此类文件(&amp;A)</translation>
 <translation id="8627795981664801467">仅限安全连接</translation>
 <translation id="3921544830490870178">插件设置：</translation>
-<translation id="1387703718616631293">运行此扩展程序在隐身模式下运行</translation>
 <translation id="2190355936436201913">（空）</translation>
 <translation id="5868426874618963178">发送当前页的源代码</translation>
 <translation id="5818003990515275822">韩语</translation>
@@ -1118,7 +1085,6 @@
 <translation id="8565745688101278215"><ph name="FIRSTNAME"/><ph name="SEPARATOR"/><ph name="LASTNAME"/></translation>
 <translation id="3927932062596804919">拒绝</translation>
 <translation id="6484929352454160200">新版<ph name="PRODUCT_NAME"/>发布</translation>
-<translation id="7035824132811506448">最近添加的书签</translation>
 <translation id="5827266244928330802">Safari</translation>
 <translation id="778881183694837592">必填字段不得为空</translation>
 <translation id="6820686453637990663">CVC</translation>
@@ -1180,8 +1146,6 @@
 <translation id="2356070529366658676">询问</translation>
 <translation id="5731247495086897348">粘贴并转到(&amp;S)</translation>
 <translation id="3413103074007669042">此网页包含不安全内容</translation>
-<translation id="3866320199958134961">电量剩余时间不足 <ph name="MINUTES"/>。
-        请连接充电器。</translation>
 <translation id="7635741716790924709">地址行 1</translation>
 <translation id="5285267187067365830">安装插件...</translation>
 <translation id="1166212789817575481">关闭右侧标签页</translation>
@@ -1324,7 +1288,6 @@
 <translation id="1474307029659222435">在新窗口中打开框架(&amp;W)</translation>
 <translation id="1522474541175464402">证书授权机构密钥 ID</translation>
 <translation id="5976160379964388480">其他</translation>
-<translation id="3527085408025491307">文件夹</translation>
 <translation id="3413808618118019351">导入书签和设置(&amp;I)...</translation>
 <translation id="2635276683026132559">签名</translation>
 <translation id="4835836146030131423">登录发生错误。</translation>
@@ -1373,7 +1336,6 @@
 <translation id="4701488924964507374"><ph name="SENTENCE1"/><ph name="SENTENCE2"/></translation>
 <translation id="1163931534039071049">查看框架的源代码(&amp;V)</translation>
 <translation id="7564847347806291057">结束进程</translation>
-<translation id="7851589172948533362">已由 <ph name="ISSUER"/> 验证</translation>
 <translation id="7063412606254013905">详细了解网上诱骗的伎俩。</translation>
 <translation id="307767688111441685">网页看起来很奇怪</translation>
 <translation id="5295309862264981122">确认导航</translation>
@@ -1492,7 +1454,6 @@
 <translation id="4910619056351738551">以下是一些建议：</translation>
 <translation id="5489059749897101717">显示拼写面板(&amp;S)</translation>
 <translation id="1232569758102978740">无标题</translation>
-<translation id="1851547963021150172">对所选项执行操作</translation>
 <translation id="4362187533051781987">县/市</translation>
 <translation id="9149866541089851383">修改...</translation>
 <translation id="7000311294523403548">无标题网页</translation>

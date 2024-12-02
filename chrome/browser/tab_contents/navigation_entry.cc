@@ -29,6 +29,7 @@ NavigationEntry::SSLStatus::SSLStatus()
       cert_id_(0),
       cert_status_(0),
       security_bits_(-1),
+      connection_status_(0),
       content_status_(NORMAL_CONTENT) {
 }
 
@@ -90,8 +91,8 @@ const string16& NavigationEntry::GetTitleForDisplay(
   // Use the virtual URL first if any, and fall back on using the real URL.
   std::wstring languages;
   if (navigation_controller) {
-      languages = navigation_controller->profile()->GetPrefs()->GetString(
-          prefs::kAcceptLanguages);
+      languages = UTF8ToWide(navigation_controller->profile()->GetPrefs()->
+          GetString(prefs::kAcceptLanguages));
   }
 
   std::wstring title;

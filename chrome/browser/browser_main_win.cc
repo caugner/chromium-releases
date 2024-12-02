@@ -29,6 +29,7 @@
 #include "chrome/installer/util/shell_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "net/base/winsock_init.h"
 #include "views/focus/accelerator_handler.h"
 #include "views/window/window.h"
 
@@ -48,9 +49,10 @@ void RecordBreakpadStatusUMA(MetricsService* metrics) {
 }
 
 void WarnAboutMinimumSystemRequirements() {
-  if (win_util::GetWinVersion() == win_util::WINVERSION_2000) {
+  if (win_util::GetWinVersion() < win_util::WINVERSION_XP) {
     // Display a warning message if the user is running chrome on Windows 2000.
-    const std::wstring text = l10n_util::GetString(IDS_UNSUPPORTED_OS_WIN2000);
+    const std::wstring text =
+        l10n_util::GetString(IDS_UNSUPPORTED_OS_PRE_WIN_XP);
     const std::wstring caption = l10n_util::GetString(IDS_PRODUCT_NAME);
     win_util::MessageBox(NULL, text, caption,
                          MB_OK | MB_ICONWARNING | MB_TOPMOST);
@@ -200,4 +202,24 @@ bool CheckMachineLevelInstall() {
     }
   }
   return false;
+}
+
+// BrowserMainPartsWin ---------------------------------------------------------
+
+class BrowserMainPartsWin : public BrowserMainParts {
+ public:
+  explicit BrowserMainPartsWin(const MainFunctionParams& parameters)
+      : BrowserMainParts(parameters) {}
+
+ private:
+  virtual void PreEarlyInitialization() {
+    // Initialize Winsock.
+    net::EnsureWinsockInit();
+  }
+};
+
+// static
+BrowserMainParts* BrowserMainParts::CreateBrowserMainParts(
+    const MainFunctionParams& parameters) {
+  return new BrowserMainPartsWin(parameters);
 }

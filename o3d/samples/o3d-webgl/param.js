@@ -90,8 +90,8 @@ o3d.Param.prototype.__defineSetter__('value',
       } else {
         if (this.value_ != undefined && (
            typeof this.value_ != typeof v ||
-          (typeof this.value_ == 'Array' && v == 'Array' &&
-           this.value_.length_ != v.length))) {
+           (this.value_.length_ !== undefined &&
+            (this.value_.length_ != v.length)))) {
           this.gl.client.error_callback('Param type error.');
         }
         this.value_ = v;
@@ -181,6 +181,46 @@ o3d.ParamBoundingBox = function() {
 };
 o3d.inherit('ParamBoundingBox', 'Param');
 
+// ParamBoundingBox requires a specialized setter because it must
+// accept arrays of arrays and convert them into BoundingBoxes. It
+// seems that if we define a setter against this prototype we must
+// also define a getter -- it is not inherited.
+o3d.ParamBoundingBox.prototype.__defineSetter__('value',
+    function(v) {
+      if (this.inputConnection) {
+        throw ('Tried to set bound parameter.');
+      } else {
+        if (!v) {
+          v = new o3d.BoundingBox();
+        } else if (v.length !== undefined) {
+          if (v.length == 0) {
+            v = new o3d.BoundingBox();
+          } else if (v.length == 2) {
+            for (var ii = 0; ii < 2; ++ii) {
+              if (v[ii].length != 3) {
+                throw ('Expected sub-array of length 3 at index ' + ii +
+                       ', got ' + v[ii].length);
+              }
+            }
+            v = new o3d.BoundingBox(v[0], v[1]);
+          } else {
+            throw 'Expected array of length 2';
+          }
+        }
+        this.value_ = v;
+      }
+    }
+);
+
+o3d.ParamBoundingBox.prototype.__defineGetter__('value',
+    function() {
+      if (this.inputConnection) {
+        return this.inputConnection.value;
+      } else {
+        return this.value_;
+      }
+    }
+);
 
 /**
  * @constructor
@@ -297,7 +337,7 @@ o3d.inherit('ParamMatrix4', 'Param');
  */
 o3d.ParamParamArray = function() {
   o3d.Param.call(this);
-  this.value = [];
+  this.value = null;
 };
 o3d.inherit('ParamParamArray', 'Param');
 
@@ -360,6 +400,16 @@ o3d.ParamState = function() {
   this.value = null;
 };
 o3d.inherit('ParamState', 'Param');
+
+
+/**
+ * @constructor
+ */
+o3d.ParamStreamBank = function() {
+  o3d.Param.call(this);
+  this.value = null;
+};
+o3d.inherit('ParamStreamBank', 'Param');
 
 
 /**
@@ -539,7 +589,7 @@ o3d.inherit('ViewInverseTransposeParamMatrix4', 'CompositionParamMatrix4');
  */
 o3d.ViewProjectionParamMatrix4 = function() {
   o3d.CompositionParamMatrix4.call(this);
-  this.matrix_names_ = ['projection', 'view'];
+  this.matrix_names_ = ['viewProjection'];
 };
 o3d.inherit('ViewProjectionParamMatrix4', 'CompositionParamMatrix4');
 
@@ -549,7 +599,7 @@ o3d.inherit('ViewProjectionParamMatrix4', 'CompositionParamMatrix4');
  */
 o3d.ViewProjectionInverseParamMatrix4 = function() {
   o3d.CompositionParamMatrix4.call(this);
-  this.matrix_names_ = ['projection', 'view'];
+  this.matrix_names_ = ['viewProjection'];
   this.inverse_ = true;
 };
 o3d.inherit('ViewProjectionInverseParamMatrix4', 'CompositionParamMatrix4');
@@ -560,7 +610,7 @@ o3d.inherit('ViewProjectionInverseParamMatrix4', 'CompositionParamMatrix4');
  */
 o3d.ViewProjectionTransposeParamMatrix4 = function() {
   o3d.CompositionParamMatrix4.call(this);
-  this.matrix_names_ = ['projection', 'view'];
+  this.matrix_names_ = ['viewProjection'];
   this.transpose_ = true;
 };
 o3d.inherit('ViewProjectionTransposeParamMatrix4', 'CompositionParamMatrix4');
@@ -571,7 +621,7 @@ o3d.inherit('ViewProjectionTransposeParamMatrix4', 'CompositionParamMatrix4');
  */
 o3d.ViewProjectionInverseTransposeParamMatrix4 = function() {
   o3d.CompositionParamMatrix4.call(this);
-  this.matrix_names_ = ['projection', 'view'];
+  this.matrix_names_ = ['viewProjection'];
   this.inverse_ = true;
   this.transpose_ = true;
 };
@@ -675,7 +725,7 @@ o3d.inherit('WorldViewInverseTransposeParamMatrix4',
  */
 o3d.WorldViewProjectionParamMatrix4 = function() {
   o3d.CompositionParamMatrix4.call(this);
-  this.matrix_names_ = ['projection', 'view', 'world'];
+  this.matrix_names_ = ['worldViewProjection'];
 };
 o3d.inherit('WorldViewProjectionParamMatrix4',
     'CompositionParamMatrix4');
@@ -686,7 +736,7 @@ o3d.inherit('WorldViewProjectionParamMatrix4',
  */
 o3d.WorldViewProjectionInverseParamMatrix4 = function() {
   o3d.CompositionParamMatrix4.call(this);
-  this.matrix_names_ = ['projection', 'view', 'world'];
+  this.matrix_names_ = ['worldViewProjection'];
   this.inverse_ = true;
 };
 o3d.inherit('WorldViewProjectionInverseParamMatrix4',
@@ -698,7 +748,7 @@ o3d.inherit('WorldViewProjectionInverseParamMatrix4',
  */
 o3d.WorldViewProjectionTransposeParamMatrix4 = function() {
   o3d.CompositionParamMatrix4.call(this);
-  this.matrix_names_ = ['projection', 'view', 'world'];
+  this.matrix_names_ = ['worldViewProjection'];
   this.transpose_ = true;
 };
 o3d.inherit('WorldViewProjectionTransposeParamMatrix4',
@@ -710,15 +760,36 @@ o3d.inherit('WorldViewProjectionTransposeParamMatrix4',
  */
 o3d.WorldViewProjectionInverseTransposeParamMatrix4 = function() {
   o3d.CompositionParamMatrix4.call(this);
-  this.matrix_names_ = ['projection', 'view', 'world'];
+  this.matrix_names_ = ['worldViewProjection'];
   this.inverse_ = true;
   this.transpose_ = true;
 };
 o3d.inherit('WorldViewProjectionInverseTransposeParamMatrix4',
     'CompositionParamMatrix4');
 
+
 /**
  * Called to specify the value of a uniform variable.
+ * @param {WebGLContext} gl The current context.
+ * @param {WebGLUniformLocation} location The location to which to apply.
+ */
+o3d.ParamInteger.prototype.applyToLocation = function(gl, location) {
+  gl.uniform1i(location, this.value);
+};
+
+/**
+ * Called to specify the value of a uniform variable.
+ * @param {WebGLContext} gl The current context.
+ * @param {WebGLUniformLocation} location The location to which to apply.
+ */
+o3d.ParamBoolean.prototype.applyToLocation = function(gl, location) {
+  gl.uniform1i(location, this.value);
+};
+
+/**
+ * Called to specify the value of a uniform variable.
+ * @param {WebGLContext} gl The current context.
+ * @param {WebGLUniformLocation} location The location to which to apply.
  */
 o3d.ParamFloat.prototype.applyToLocation = function(gl, location) {
   gl.uniform1f(location, this.value);
@@ -726,6 +797,8 @@ o3d.ParamFloat.prototype.applyToLocation = function(gl, location) {
 
 /**
  * Called to specify the value of a uniform variable.
+ * @param {WebGLContext} gl The current context.
+ * @param {WebGLUniformLocation} location The location to which to apply.
  */
 o3d.ParamFloat2.prototype.applyToLocation = function(gl, location) {
   gl.uniform2fv(location, this.value);
@@ -733,6 +806,8 @@ o3d.ParamFloat2.prototype.applyToLocation = function(gl, location) {
 
 /**
  * Called to specify the value of a uniform variable.
+ * @param {WebGLContext} gl The current context.
+ * @param {WebGLUniformLocation} location The location to which to apply.
  */
 o3d.ParamFloat3.prototype.applyToLocation = function(gl, location) {
   gl.uniform3fv(location, this.value);
@@ -740,6 +815,8 @@ o3d.ParamFloat3.prototype.applyToLocation = function(gl, location) {
 
 /**
  * Called to specify the value of a uniform variable.
+ * @param {WebGLContext} gl The current context.
+ * @param {WebGLUniformLocation} location The location to which to apply.
  */
 o3d.ParamFloat4.prototype.applyToLocation = function(gl, location) {
   gl.uniform4fv(location, this.value);
@@ -747,11 +824,30 @@ o3d.ParamFloat4.prototype.applyToLocation = function(gl, location) {
 
 /**
  * Called to specify the value of a uniform variable.
+ * @param {WebGLContext} gl The current context.
+ * @param {WebGLUniformLocation} location The location to which to apply.
  */
 o3d.ParamMatrix4.prototype.applyToLocation = function(gl, location) {
   gl.uniformMatrix4fv(location,
                       false,
                       o3d.Transform.flattenMatrix4(this.value));
+};
+
+/**
+ * Called to specify the values of a uniform array.
+ * @param {WebGLContext} gl The current context.
+ * @param {!Array.<!WebGLUniformLocation>} locationArray An array of locations
+ *    to which to apply the values.
+ */
+o3d.ParamParamArray.prototype.applyToLocations = function(gl, locationArray) {
+  if (locationArray.length != this.value.length) {
+    gl.client.error_callback(
+        'Invalid uniform param array: incorrect number of elements.');
+  }
+  for (var i = 0; i < this.value.length; i++) {
+    // Cannot have a ParamArray of ParamArrays, so safe to call applyToLocation
+    this.value.getParam(i).applyToLocation(gl, locationArray[i]);
+  }
 };
 
 /**
@@ -762,6 +858,8 @@ o3d.Param.texture_index_ = 0;
 
 /**
  * Called to specify the value of a uniform variable.
+ * @param {WebGLContext} gl The current context.
+ * @param {WebGLUniformLocation} location The location to which to apply.
  */
 o3d.ParamSampler.prototype.applyToLocation = function(gl, location) {
   // When before the effect object assigns values to parameters,
@@ -770,16 +868,31 @@ o3d.ParamSampler.prototype.applyToLocation = function(gl, location) {
   gl.activeTexture(gl.TEXTURE0 + i);
 
   var value = null;
+  var target = 0;
+  var sampler = null;
 
-  if (this.value && this.value.texture && this.value.texture.texture_) {
-    value = this.value.texture.texture_;
+  if (this.value) {
+    sampler = this.value;
+  } else {
+    o3d.Sampler.defaultSampler_.gl = gl;
+    sampler = o3d.Sampler.defaultSampler_;
+    if (gl.client.reportErrors_()) {
+      gl.client.error_callback("Missing Sampler for ParamSampler " + this.name);
+    }
   }
 
-  gl.bindTexture(gl.TEXTURE_2D, value);
+  sampler.bindAndSetParameters_();
   gl.uniform1i(location, i);
   o3d.Param.texture_index_++;
 };
 
+/**
+ * A default ParamSampler to be used if client does not assign one.
+ *
+ * @type {!o3d.ParamSampler}
+ * @private
+ */
+o3d.ParamSampler.defaultParamSampler_ = new o3d.ParamSampler();
 
 /**
  * Object to compute all combinations of world/view/projection
@@ -789,57 +902,43 @@ o3d.ParamSampler.prototype.applyToLocation = function(gl, location) {
  */
 o3d.Param.SAS = new o3d.ParamObject;
 
-o3d.Param.SAS.createParam('world',
-    'WorldParamMatrix4');
-o3d.Param.SAS.createParam('view',
-    'ViewParamMatrix4');
-o3d.Param.SAS.createParam('projection',
-    'ProjectionParamMatrix4');
-o3d.Param.SAS.createParam('worldView',
-    'WorldViewParamMatrix4');
-o3d.Param.SAS.createParam('viewProjection',
-    'ViewProjectionParamMatrix4');
-o3d.Param.SAS.createParam('worldViewProjection',
-    'WorldViewProjectionParamMatrix4');
+/**
+ * A map linking the names of SAS parameters to their standard matrix parameter
+ * types.
+ * @private
+ */
+o3d.Param.sasTypes_ = {
+  'world': 'WorldParamMatrix4',
+  'view': 'ViewParamMatrix4',
+  'projection': 'ProjectionParamMatrix4',
+  'worldView': 'WorldViewParamMatrix4',
+  'viewProjection': 'ViewProjectionParamMatrix4',
+  'worldViewProjection': 'WorldViewProjectionParamMatrix4',
+  'worldInverse': 'WorldInverseParamMatrix4',
+  'viewInverse': 'ViewInverseParamMatrix4',
+  'projectionInverse': 'ProjectionInverseParamMatrix4',
+  'worldViewInverse': 'WorldViewInverseParamMatrix4',
+  'viewProjectionInverse': 'ViewProjectionInverseParamMatrix4',
+  'worldViewProjectionInverse': 'WorldViewProjectionInverseParamMatrix4',
+  'worldTranspose': 'WorldTransposeParamMatrix4',
+  'viewTranspose': 'ViewTransposeParamMatrix4',
+  'projectionTranspose': 'ProjectionTransposeParamMatrix4',
+  'worldViewTranspose': 'WorldViewTransposeParamMatrix4',
+  'viewProjectionTranspose': 'ViewProjectionTransposeParamMatrix4',
+  'worldViewProjectionTranspose': 'WorldViewProjectionTransposeParamMatrix4',
+  'worldInverseTranspose': 'WorldInverseTransposeParamMatrix4',
+  'viewInverseTranspose': 'ViewInverseTransposeParamMatrix4',
+  'projectionInverseTranspose': 'ProjectionInverseTransposeParamMatrix4',
+  'worldViewInverseTranspose': 'WorldViewInverseTransposeParamMatrix4',
+  'viewProjectionInverseTranspose':
+      'ViewProjectionInverseTransposeParamMatrix4',
+  'worldViewProjectionInverseTranspose':
+      'WorldViewProjectionInverseTransposeParamMatrix4'
+};
 
-o3d.Param.SAS.createParam('worldInverse',
-    'WorldInverseParamMatrix4');
-o3d.Param.SAS.createParam('viewInverse',
-    'ViewInverseParamMatrix4');
-o3d.Param.SAS.createParam('projectionInverse',
-    'ProjectionInverseParamMatrix4');
-o3d.Param.SAS.createParam('worldViewInverse',
-    'WorldViewInverseParamMatrix4');
-o3d.Param.SAS.createParam('viewProjectionInverse',
-    'ViewProjectionInverseParamMatrix4');
-o3d.Param.SAS.createParam('worldViewProjectionInverse',
-    'WorldViewProjectionInverseParamMatrix4');
-
-o3d.Param.SAS.createParam('worldTranspose',
-    'WorldInverseParamMatrix4');
-o3d.Param.SAS.createParam('viewTranspose',
-    'ViewTransposeParamMatrix4');
-o3d.Param.SAS.createParam('projectionTranspose',
-    'ProjectionTransposeParamMatrix4');
-o3d.Param.SAS.createParam('worldViewTranspose',
-    'WorldViewTransposeParamMatrix4');
-o3d.Param.SAS.createParam('viewProjectionTranspose',
-    'ViewProjectionTransposeParamMatrix4');
-o3d.Param.SAS.createParam('worldViewProjectionTranspose',
-    'WorldViewProjectionTransposeParamMatrix4');
-
-o3d.Param.SAS.createParam('worldInverseTranspose',
-    'WorldInverseTransposeParamMatrix4');
-o3d.Param.SAS.createParam('viewInverseTranspose',
-    'ViewInverseTransposeParamMatrix4');
-o3d.Param.SAS.createParam('projectionInverseTranspose',
-    'ProjectionInverseTransposeParamMatrix4');
-o3d.Param.SAS.createParam('worldViewInverseTranspose',
-    'WorldViewInverseTransposeParamMatrix4');
-o3d.Param.SAS.createParam('viewProjectionInverseTranspose',
-    'ViewProjectionInverseTransposeParamMatrix4');
-o3d.Param.SAS.createParam('worldViewProjectionInverseTranspose',
-    'WorldViewProjectionInverseTransposeParamMatrix4');
+for (name in o3d.Param.sasTypes_) {
+  o3d.Param.SAS.createParam(name, o3d.Param.sasTypes_[name]);
+}
 
 /**
  * Sets the base world matrix that gets use to compute all other products for
@@ -862,11 +961,19 @@ o3d.Param.SAS.setView = function(view) {
  * SAS parameters.
  */
 o3d.Param.SAS.setProjection = function(projection) {
-  var adjustedProjection =
-          [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 2, 0], [0, 0, -1, 1]];
-      o3d.Transform.compose(
-          adjustedProjection, projection, adjustedProjection);
   this['projection'] = projection;
 };
 
+/**
+ * Sets the viewProjection matrix.
+ */
+o3d.Param.SAS.setViewProjection = function(viewProjection) {
+  this['viewProjection'] = viewProjection;
+};
 
+/**
+ * Sets the worldViewProjection matrix.
+ */
+o3d.Param.SAS.setWorldViewProjection = function(worldViewProjection) {
+  this['worldViewProjection'] = worldViewProjection;
+};

@@ -8,6 +8,7 @@
 #define CHROME_BROWSER_SYNC_ENGINE_SYNCPROTO_H_
 
 #include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
+#include "chrome/browser/sync/protocol/password_specifics.pb.h"
 #include "chrome/browser/sync/protocol/preference_specifics.pb.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
 #include "chrome/browser/sync/syncable/model_type.h"
@@ -18,6 +19,9 @@ namespace browser_sync {
 template<class Base>
 class IdWrapper : public Base {
  public:
+  IdWrapper() {}
+  explicit IdWrapper(const Base& other) : Base(other) {
+  }
   syncable::Id id() const {
     return syncable::Id::CreateFromServerId(Base::id_string());
   }
@@ -30,6 +34,11 @@ class IdWrapper : public Base {
 // them directly.
 class SyncEntity : public IdWrapper<sync_pb::SyncEntity> {
  public:
+  SyncEntity() {}
+  explicit SyncEntity(const sync_pb::SyncEntity& other)
+      : IdWrapper<sync_pb::SyncEntity>(other) {
+  }
+
   void set_parent_id(const syncable::Id& id) {
     set_parent_id_string(id.GetServerId());
   }

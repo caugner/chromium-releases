@@ -5,8 +5,16 @@
 #ifndef VIEWS_CONTROLS_MENU_MENU_ITEM_VIEW_H_
 #define VIEWS_CONTROLS_MENU_MENU_ITEM_VIEW_H_
 
+#if defined(OS_WIN)
+#include <windows.h>
+#endif
+
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "views/view.h"
+
+#if defined(OS_WIN)
+#include "gfx/native_theme_win.h"
+#endif
 
 namespace views {
 
@@ -26,8 +34,13 @@ class SubmenuView;
 // of the various AddXXX methods.
 //
 // MenuItemView is itself a View, which means you can add Views to each
-// MenuItemView. This normally NOT want you want, rather add other child Views
-// to the submenu of the MenuItemView.
+// MenuItemView. This is normally NOT want you want, rather add other child
+// Views to the submenu of the MenuItemView. Any child views of the MenuItemView
+// that are focusable can be navigated to by way of the up/down arrow and can be
+// activated by way of space/return keys. Activating a focusable child results
+// in |AcceleratorPressed| being invoked. Note, that as menus try not to steal
+// focus from the hosting window child views do not actually get focus. Instead
+// |SetHotTracked| is used as the user navigates around.
 //
 // There are two ways to show a MenuItemView:
 // 1. Use RunMenuAt. This blocks the caller, executing the selected command
@@ -45,10 +58,6 @@ class MenuItemView : public View {
 
   // ID used to identify empty menu items.
   static const int kEmptyMenuItemViewID;
-
-  // If true SetNestableTasksAllowed(true) is invoked before MessageLoop::Run
-  // is invoked. This is only useful for testing and defaults to false.
-  static bool allow_task_nesting_during_run_;
 
   // Different types of menu items.
   enum Type {
@@ -74,6 +83,7 @@ class MenuItemView : public View {
   // Overridden from View:
   virtual bool GetTooltipText(const gfx::Point& p, std::wstring* tooltip);
   virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+  virtual bool GetAccessibleState(AccessibilityTypes::State* state);
 
   // Returns the preferred height of menu items. This is only valid when the
   // menu is about to be shown.
@@ -109,14 +119,14 @@ class MenuItemView : public View {
   void AppendMenuItem(int item_id,
                       const std::wstring& label,
                       Type type) {
-    AppendMenuItemInternal(item_id, label, SkBitmap(), type);
+    AppendMenuItemImpl(item_id, label, SkBitmap(), type);
   }
 
   // Append a submenu to this menu.
   // The returned pointer is owned by this menu.
   MenuItemView* AppendSubMenu(int item_id,
                               const std::wstring& label) {
-    return AppendMenuItemInternal(item_id, label, SkBitmap(), SUBMENU);
+    return AppendMenuItemImpl(item_id, label, SkBitmap(), SUBMENU);
   }
 
   // Append a submenu with an icon to this menu.
@@ -124,7 +134,7 @@ class MenuItemView : public View {
   MenuItemView* AppendSubMenuWithIcon(int item_id,
                                       const std::wstring& label,
                                       const SkBitmap& icon) {
-    return AppendMenuItemInternal(item_id, label, icon, SUBMENU);
+    return AppendMenuItemImpl(item_id, label, icon, SUBMENU);
   }
 
   // This is a convenience for standard text label menu items where the label
@@ -142,7 +152,7 @@ class MenuItemView : public View {
 
   // Adds a separator to this menu
   void AppendSeparator() {
-    AppendMenuItemInternal(0, std::wstring(), SkBitmap(), SEPARATOR);
+    AppendMenuItemImpl(0, std::wstring(), SkBitmap(), SEPARATOR);
   }
 
   // Appends a menu item with an icon. This is for the menu item which
@@ -151,8 +161,14 @@ class MenuItemView : public View {
   void AppendMenuItemWithIcon(int item_id,
                               const std::wstring& label,
                               const SkBitmap& icon) {
-    AppendMenuItemInternal(item_id, label, icon, NORMAL);
+    AppendMenuItemImpl(item_id, label, icon, NORMAL);
   }
+
+  // All the AppendXXX methods funnel into this.
+  MenuItemView* AppendMenuItemImpl(int item_id,
+                                   const std::wstring& label,
+                                   const SkBitmap& icon,
+                                   Type type);
 
   // Returns the view that contains child menu items. If the submenu has
   // not been creates, this creates it.
@@ -168,12 +184,13 @@ class MenuItemView : public View {
   MenuItemView* GetParentMenuItem() const { return parent_menu_item_; }
 
   // Sets the title
-  void SetTitle(const std::wstring& title) {
-    title_ = title;
-  }
+  void SetTitle(const std::wstring& title);
 
   // Returns the title.
   const std::wstring& GetTitle() const { return title_; }
+
+  // Returns the type of this menu.
+  const Type& GetType() { return type_; }
 
   // Sets whether this item is selected. This is invoked as the user moves
   // the mouse around the menu while open.
@@ -232,6 +249,17 @@ class MenuItemView : public View {
   // recalculates the bounds.
   void ChildrenChanged();
 
+  // Sizes any child views.
+  virtual void Layout();
+
+  // Returns the amount of space needed to accomodate the accelerator. The
+  // space needed for the accelerator is NOT included in the preferred width.
+  int GetAcceleratorTextWidth();
+
+  // Returns true if the menu has mnemonics. This only useful on the root menu
+  // item.
+  bool has_mnemonics() const { return has_mnemonics_; }
+
  protected:
   // Creates a MenuItemView. This is used by the various AddXXX methods.
   MenuItemView(MenuItemView* parent, int command, Type type);
@@ -248,19 +276,13 @@ class MenuItemView : public View {
             MenuItemView::Type type,
             MenuDelegate* delegate);
 
-  // All the AddXXX methods funnel into this.
-  MenuItemView* AppendMenuItemInternal(int item_id,
-                                       const std::wstring& label,
-                                       const SkBitmap& icon,
-                                       Type type);
-
   // Invoked by the MenuController when the menu closes as the result of
   // drag and drop run.
   void DropMenuClosed(bool notify_delegate);
 
   // The RunXXX methods call into this to set up the necessary state before
   // running.
-  void PrepareForRun(bool has_mnemonics);
+  void PrepareForRun(bool has_mnemonics, bool show_mnemonics);
 
   // Returns the flags passed to DrawStringInt.
   int GetDrawStringFlags();
@@ -281,13 +303,32 @@ class MenuItemView : public View {
   // are not rendered.
   void Paint(gfx::Canvas* canvas, bool for_drag);
 
+#if defined(OS_WIN)
+  // Paints the check/radio button indicator. |part_id| is the id passed to the
+  // native theme drawing routines.
+  void PaintCheck(HDC dc,
+                  int part_id,
+                  gfx::NativeTheme::ControlState control_state,
+                  int icon_width,
+                  int icon_height);
+#endif
+
+  // Paints the accelerator.
+  void PaintAccelerator(gfx::Canvas* canvas);
+
   // Destroys the window used to display this menu and recursively destroys
   // the windows used to display all descendants.
   void DestroyAllMenuHosts();
 
+  // Returns the accelerator text.
+  std::wstring GetAcceleratorText();
+
   // Returns the various margins.
   int GetTopMargin();
   int GetBottomMargin();
+
+  // Returns the preferred width (and padding) of any children.
+  int GetChildPreferredWidth();
 
   // The delegate. This is only valid for the root menu item. You shouldn't
   // use this directly, instead use GetDelegate() which walks the tree as
@@ -323,8 +364,12 @@ class MenuItemView : public View {
   // Icon.
   SkBitmap icon_;
 
-  // Does the title have a mnemonic?
+  // Does the title have a mnemonic? Only useful on the root menu item.
   bool has_mnemonics_;
+
+  // Should we show the mnemonic? Mnemonics are shown if this is true or
+  // MenuConfig says mnemonics should be shown. Only used on the root menu item.
+  bool show_mnemonics_;
 
   bool has_icons_;
 

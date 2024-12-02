@@ -17,17 +17,20 @@
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/plugin_process_host.h"
+#include "chrome/browser/plugin_updater.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/default_plugin.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/gpu_plugin.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/notification_service.h"
+#include "chrome/common/pepper_plugin_registry.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
@@ -41,7 +44,7 @@
 static void NotifyPluginsOfActivation() {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
-  for (ChildProcessHost::Iterator iter(ChildProcessInfo::PLUGIN_PROCESS);
+  for (BrowserChildProcessHost::Iterator iter(ChildProcessInfo::PLUGIN_PROCESS);
        !iter.Done(); ++iter) {
     PluginProcessHost* plugin = static_cast<PluginProcessHost*>(*iter);
     plugin->OnAppActivation();
@@ -56,42 +59,8 @@ bool PluginService::enable_chrome_plugins_ = true;
 void PluginService::InitGlobalInstance(Profile* profile) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
 
-  bool update_internal_dir = false;
-  FilePath last_internal_dir =
-      profile->GetPrefs()->GetFilePath(prefs::kPluginsLastInternalDirectory);
-  FilePath cur_internal_dir;
-  if (PathService::Get(chrome::DIR_INTERNAL_PLUGINS, &cur_internal_dir))
-    update_internal_dir = (cur_internal_dir != last_internal_dir);
-
-  // Disable plugins listed as disabled in prefs.
-  if (const ListValue* saved_plugins_list =
-          profile->GetPrefs()->GetList(prefs::kPluginsPluginsList)) {
-    for (ListValue::const_iterator it = saved_plugins_list->begin();
-         it != saved_plugins_list->end();
-         ++it) {
-      if (!(*it)->IsType(Value::TYPE_DICTIONARY)) {
-        LOG(WARNING) << "Invalid entry in " << prefs::kPluginsPluginsList;
-        continue;  // Oops, don't know what to do with this item.
-      }
-
-      DictionaryValue* plugin = static_cast<DictionaryValue*>(*it);
-      FilePath::StringType path;
-      bool enabled = true;
-      plugin->GetBoolean(L"enabled", &enabled);
-      if (!enabled && plugin->GetString(L"path", &path)) {
-        FilePath plugin_path(path);
-        NPAPI::PluginList::Singleton()->DisablePlugin(plugin_path);
-
-        // If the internal plugin directory has changed and if the plugin looks
-        // internal, also disable it in the current internal plugins directory.
-        if (update_internal_dir &&
-            plugin_path.DirName() == last_internal_dir) {
-          NPAPI::PluginList::Singleton()->DisablePlugin(
-              cur_internal_dir.Append(plugin_path.BaseName()));
-        }
-      }
-    }
-  }
+  // We first group the plugins and then figure out which groups to disable.
+  plugin_updater::DisablePluginGroupsFromPrefs(profile);
 
   // Have Chrome plugins write their data to the profile directory.
   GetInstance()->SetChromePluginDataDir(profile->GetPath());
@@ -111,19 +80,27 @@ PluginService::PluginService()
     : main_message_loop_(MessageLoop::current()),
       resource_dispatcher_host_(NULL),
       ui_locale_(ASCIIToWide(g_browser_process->GetApplicationLocale())) {
+  RegisterPepperPlugins();
+
   // Have the NPAPI plugin list search for Chrome plugins as well.
   ChromePluginLib::RegisterPluginsWithNPAPI();
-  // Load the one specified on the command line as well.
+
+  // Load any specified on the command line as well.
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
   FilePath path = command_line->GetSwitchValuePath(switches::kLoadPlugin);
-  if (!path.empty()) {
+  if (!path.empty())
     NPAPI::PluginList::Singleton()->AddExtraPluginPath(path);
-  }
+  path = command_line->GetSwitchValuePath(switches::kExtraPluginDir);
+  if (!path.empty())
+    NPAPI::PluginList::Singleton()->AddExtraPluginDir(path);
 
-  FilePath pdf;
-  if (command_line->HasSwitch(switches::kInternalPDF) &&
-      PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf)) {
-    NPAPI::PluginList::Singleton()->AddExtraPluginPath(pdf);
+  chrome::RegisterInternalDefaultPlugin();
+
+  // Register the internal Flash and PDF, if available.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableInternalFlash) &&
+      PathService::Get(chrome::FILE_FLASH_PLUGIN, &path)) {
+    NPAPI::PluginList::Singleton()->AddExtraPluginPath(path);
   }
 
 #ifndef DISABLE_NACL
@@ -209,7 +186,7 @@ PluginProcessHost* PluginService::FindPluginProcess(
     return NULL;
   }
 
-  for (ChildProcessHost::Iterator iter(ChildProcessInfo::PLUGIN_PROCESS);
+  for (BrowserChildProcessHost::Iterator iter(ChildProcessInfo::PLUGIN_PROCESS);
        !iter.Done(); ++iter) {
     PluginProcessHost* plugin = static_cast<PluginProcessHost*>(*iter);
     if (plugin->info().path == plugin_path)
@@ -272,8 +249,8 @@ FilePath PluginService::GetPluginPath(const GURL& url,
   bool allow_wildcard = true;
   WebPluginInfo info;
   if (NPAPI::PluginList::Singleton()->GetPluginInfo(
-          url, mime_type, allow_wildcard, &info, actual_mime_type) &&
-      PluginAllowedForURL(info.path, policy_url)) {
+        url, mime_type, allow_wildcard, &info, actual_mime_type) &&
+      info.enabled && PluginAllowedForURL(info.path, policy_url)) {
     return info.path;
   }
 
@@ -374,4 +351,27 @@ bool PluginService::PluginAllowedForURL(const FilePath& plugin_path,
   const GURL& required_url = it->second;
   return (url.scheme() == required_url.scheme() &&
           url.host() == required_url.host());
+}
+
+void PluginService::RegisterPepperPlugins() {
+  std::vector<PepperPluginInfo> plugins;
+  PepperPluginRegistry::GetList(&plugins);
+  for (size_t i = 0; i < plugins.size(); ++i) {
+    NPAPI::PluginVersionInfo info;
+    info.path = plugins[i].path;
+    info.product_name = plugins[i].name.empty() ?
+        plugins[i].path.BaseName().ToWStringHack() :
+        ASCIIToWide(plugins[i].name);
+    info.file_description = ASCIIToWide(plugins[i].description);
+    info.file_extensions = ASCIIToWide(plugins[i].file_extensions);
+    info.file_description = ASCIIToWide(plugins[i].type_descriptions);
+    info.mime_types = ASCIIToWide(JoinString(plugins[i].mime_types, '|'));
+
+    // These NPAPI entry points will never be called.  TODO(darin): Come up
+    // with a cleaner way to register pepper plugins with the NPAPI PluginList,
+    // or perhaps refactor the PluginList to be less specific to NPAPI.
+    memset(&info.entry_points, 0, sizeof(info.entry_points));
+
+    NPAPI::PluginList::Singleton()->RegisterInternalPlugin(info);
+  }
 }

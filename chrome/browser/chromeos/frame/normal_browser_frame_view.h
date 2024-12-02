@@ -34,7 +34,6 @@ class NormalBrowserFrameView : public BrowserNonClientFrameView,
   // Overridden from BrowserNonClientFrameView:
   virtual gfx::Rect GetBoundsForTabStrip(BaseTabStrip* tabstrip) const;
   virtual void UpdateThrobber(bool running);
-  virtual void PaintTabStripShadow(gfx::Canvas* canvas);
   virtual gfx::Size GetMinimumSize();
 
  protected:
@@ -85,10 +84,7 @@ class NormalBrowserFrameView : public BrowserNonClientFrameView,
   // The bounds of the ClientView.
   gfx::Rect client_view_bounds_;
 
-  // The accessible name of this view.
-  std::wstring accessible_name_;
-
-  DISALLOW_EVIL_CONSTRUCTORS(NormalBrowserFrameView);
+  DISALLOW_COPY_AND_ASSIGN(NormalBrowserFrameView);
 };
 
 }  // namespace chromeos

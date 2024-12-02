@@ -16,6 +16,11 @@ class GURL;
 
 namespace net {
 
+class DrainableIOBuffer;
+class WebSocketFrameHandler;
+class WebSocketHandshakeRequestHandler;
+class WebSocketHandshakeResponseHandler;
+
 // WebSocket protocol specific job on SocketStream.
 // It captures WebSocket handshake message and handles cookie operations.
 // Chrome security policy doesn't allow renderer process (except dev tools)
@@ -29,7 +34,8 @@ class WebSocketJob : public SocketStreamJob, public SocketStream::Delegate {
     INITIALIZED = -1,
     CONNECTING = 0,
     OPEN = 1,
-    CLOSED = 2,
+    CLOSING = 2,
+    CLOSED = 3,
   };
   static void EnsureInit();
 
@@ -83,24 +89,28 @@ class WebSocketJob : public SocketStreamJob, public SocketStream::Delegate {
   void Wakeup();
   void DoCallback();
 
+  void SendPending();
+
   SocketStream::Delegate* delegate_;
   State state_;
   bool waiting_;
   AddressList addresses_;
   CompletionCallback* callback_;  // for throttling.
 
-  std::string original_handshake_request_;
-  int original_handshake_request_header_length_;
-  std::string handshake_request_;
+  scoped_ptr<WebSocketHandshakeRequestHandler> handshake_request_;
+  scoped_ptr<WebSocketHandshakeResponseHandler> handshake_response_;
+
   size_t handshake_request_sent_;
 
-  std::string handshake_response_;
-  int handshake_response_header_length_;
   std::vector<std::string> response_cookies_;
   size_t response_cookies_save_index_;
 
   CompletionCallbackImpl<WebSocketJob> can_get_cookies_callback_;
   CompletionCallbackImpl<WebSocketJob> can_set_cookie_callback_;
+
+  scoped_ptr<WebSocketFrameHandler> send_frame_handler_;
+  scoped_refptr<DrainableIOBuffer> current_buffer_;
+  scoped_ptr<WebSocketFrameHandler> receive_frame_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(WebSocketJob);
 };

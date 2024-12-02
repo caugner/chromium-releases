@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,48 @@
 #import "chrome/browser/cocoa/browser_window_controller.h"
 #import "chrome/browser/cocoa/info_bubble_view.h"
 #include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
+#include "chrome/common/notification_service.h"
 #include "grit/generated_resources.h"
+
+
+// Simple class to watch for tab creation/destruction and close the bubble.
+// Bridge between Chrome-style notifications and ObjC-style notifications.
+class BookmarkBubbleNotificationBridge : public NotificationObserver {
+ public:
+  BookmarkBubbleNotificationBridge(BookmarkBubbleController* controller,
+                                   SEL selector);
+  virtual ~BookmarkBubbleNotificationBridge() {}
+  void Observe(NotificationType type,
+               const NotificationSource& source,
+               const NotificationDetails& details);
+ private:
+  NotificationRegistrar registrar_;
+  BookmarkBubbleController* controller_;  // weak; owns us.
+  SEL selector_;   // SEL sent to controller_ on notification.
+};
+
+BookmarkBubbleNotificationBridge::BookmarkBubbleNotificationBridge(
+  BookmarkBubbleController* controller, SEL selector)
+    : controller_(controller), selector_(selector) {
+  // registrar_ will automatically RemoveAll() when destroyed so we
+  // don't need to do so explicitly.
+  registrar_.Add(this, NotificationType::TAB_CONTENTS_CONNECTED,
+                 NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::TAB_CLOSED,
+                 NotificationService::AllSources());
+}
+
+// At this time all notifications instigate the same behavior (go
+// away) so we don't bother checking which notification came in.
+void BookmarkBubbleNotificationBridge::Observe(
+  NotificationType type,
+  const NotificationSource& source,
+  const NotificationDetails& details) {
+  [controller_ performSelector:selector_ withObject:controller_];
+}
+
 
 // An object to represent the ChooseAnotherFolder item in the pop up.
 @interface ChooseAnotherFolder : NSObject
@@ -83,7 +124,8 @@
 - (void)windowWillClose:(NSNotification*)notification {
   // We caught a close so we don't need to watch for the parent closing.
   [[NSNotificationCenter defaultCenter] removeObserver:self];
-  observer_.reset(NULL);
+  bookmark_observer_.reset(NULL);
+  chrome_observer_.reset(NULL);
   [self autorelease];
 }
 
@@ -98,10 +140,10 @@
       [BrowserWindowController browserWindowControllerForWindow:parentWindow_];
   [bwc lockBarVisibilityForOwner:self withAnimation:NO delay:NO];
   NSWindow* window = [self window];  // completes nib load
-  [bubble_ setArrowLocation:kTopLeft];
+  [bubble_ setArrowLocation:info_bubble::kTopRight];
   // Insure decent positioning even in the absence of a browser controller,
   // which will occur for some unit tests.
-  NSPoint arrowtip = bwc ? [bwc pointForBubbleArrowTip] :
+  NSPoint arrowtip = bwc ? [bwc bookmarkBubblePoint] :
       NSMakePoint([window frame].size.width, [window frame].size.height);
   NSPoint origin = [parentWindow_ convertBaseToScreen:arrowtip];
   NSPoint bubbleArrowtip = [bubble_ arrowTip];
@@ -124,10 +166,12 @@
   // dialog, the bookmark bubble's cancel: means "don't add this as a
   // bookmark", not "cancel editing".  We must take extra care to not
   // touch the bookmark in this selector.
-  observer_.reset(new BookmarkModelObserverForCocoa(
-                      node_, model_,
-                      self,
-                      @selector(dismissWithoutEditing:)));
+  bookmark_observer_.reset(new BookmarkModelObserverForCocoa(
+                               node_, model_,
+                               self,
+                               @selector(dismissWithoutEditing:)));
+  chrome_observer_.reset(new BookmarkBubbleNotificationBridge(
+                             self, @selector(dismissWithoutEditing:)));
 
   [window makeKeyAndOrderFront:self];
 }

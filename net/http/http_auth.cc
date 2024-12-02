@@ -24,39 +24,43 @@ void HttpAuth::ChooseBestChallenge(
     const HttpResponseHeaders* headers,
     Target target,
     const GURL& origin,
-    scoped_refptr<HttpAuthHandler>* handler) {
+    const std::set<std::string>& disabled_schemes,
+    const BoundNetLog& net_log,
+    scoped_ptr<HttpAuthHandler>* handler) {
   DCHECK(http_auth_handler_factory);
 
   // A connection-based authentication scheme must continue to use the
   // existing handler object in |*handler|.
-  if (*handler && (*handler)->is_connection_based()) {
+  if (handler->get() && (*handler)->is_connection_based()) {
     const std::string header_name = GetChallengeHeaderName(target);
     std::string challenge;
     void* iter = NULL;
     while (headers->EnumerateHeader(&iter, header_name, &challenge)) {
       ChallengeTokenizer props(challenge.begin(), challenge.end());
       if (LowerCaseEqualsASCII(props.scheme(), (*handler)->scheme().c_str()) &&
-          (*handler)->InitFromChallenge(&props, target, origin))
+          (*handler)->InitFromChallenge(&props, target, origin, net_log))
         return;
     }
   }
 
   // Choose the challenge whose authentication handler gives the maximum score.
-  scoped_refptr<HttpAuthHandler> best;
+  scoped_ptr<HttpAuthHandler> best;
   const std::string header_name = GetChallengeHeaderName(target);
   std::string cur_challenge;
   void* iter = NULL;
   while (headers->EnumerateHeader(&iter, header_name, &cur_challenge)) {
-    scoped_refptr<HttpAuthHandler> cur;
+    scoped_ptr<HttpAuthHandler> cur;
     int rv = http_auth_handler_factory->CreateAuthHandlerFromString(
-        cur_challenge, target, origin, &cur);
+        cur_challenge, target, origin, net_log, &cur);
     if (rv != OK) {
       LOG(WARNING) << "Unable to create AuthHandler. Status: "
                    << ErrorToString(rv) << " Challenge: " << cur_challenge;
       continue;
     }
-    if (cur && (!best || best->score() < cur->score()))
-      best.swap(cur);
+    if (cur.get() && (!best.get() || best->score() < cur->score())) {
+      if (disabled_schemes.find(cur->scheme()) == disabled_schemes.end())
+        best.swap(cur);
+    }
   }
   handler->swap(best);
 }
@@ -166,6 +170,12 @@ std::string HttpAuth::GetAuthorizationHeaderName(Target target) {
       NOTREACHED();
       return "";
   }
+}
+
+// static
+std::string HttpAuth::GetAuthTargetString(
+    HttpAuth::Target target) {
+  return target == HttpAuth::AUTH_PROXY ? "proxy" : "server";
 }
 
 }  // namespace net

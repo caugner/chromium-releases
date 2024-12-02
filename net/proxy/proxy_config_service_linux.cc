@@ -17,13 +17,13 @@
 
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/linux_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/task.h"
 #include "base/timer.h"
+#include "base/xdg_util.h"
 #include "googleurl/src/url_canon.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_util.h"
@@ -350,6 +350,15 @@ class GConfSettingGetterImplGConf
     return true;
   }
 
+  virtual bool BypassListIsReversed() {
+    // This is a KDE-specific setting.
+    return false;
+  }
+
+  virtual bool MatchHostsUsingSuffixMatching() {
+    return false;
+  }
+
  private:
   // Logs and frees a glib error. Returns false if there was no error
   // (error is NULL).
@@ -413,15 +422,15 @@ class GConfSettingGetterImplKDE
  public:
   explicit GConfSettingGetterImplKDE(base::EnvVarGetter* env_var_getter)
       : inotify_fd_(-1), notify_delegate_(NULL), indirect_manual_(false),
-        auto_no_pac_(false), reversed_exception_(false), file_loop_(NULL) {
-    // We don't save the env var getter for later use since we don't own it.
-    // Instead we use it here and save the result we actually care about.
+        auto_no_pac_(false), reversed_bypass_list_(false),
+        env_var_getter_(env_var_getter), file_loop_(NULL) {
+    // Derive the location of the kde config dir from the environment.
     std::string home;
-    if (env_var_getter->GetEnv("KDE_HOME", &home) && !home.empty()) {
-      // $KDE_HOME is set. Use it unconditionally.
+    if (env_var_getter->GetEnv("KDEHOME", &home) && !home.empty()) {
+      // $KDEHOME is set. Use it unconditionally.
       kde_config_dir_ = KDEHomeToConfigPath(FilePath(home));
     } else {
-      // $KDE_HOME is unset. Try to figure out what to use. This seems to be
+      // $KDEHOME is unset. Try to figure out what to use. This seems to be
       // the common case on most distributions.
       if (!env_var_getter->GetEnv("HOME", &home))
         // User has no $HOME? Give up. Later we'll report the failure.
@@ -433,21 +442,35 @@ class GConfSettingGetterImplKDE
         kde_config_dir_ = KDEHomeToConfigPath(kde_path);
       } else {
         // Some distributions patch KDE4 to use .kde4 instead of .kde, so that
-        // both can be installed side-by-side. They will probably continue to
-        // use .kde4, even when they no longer provide KDE3, for backwards-
-        // compatibility. So if there is a .kde4 directory, use that instead of
-        // .kde for the proxy config.
+        // both can be installed side-by-side. Sadly they don't all do this, and
+        // they don't always do this: some distributions have started switching
+        // back as well. So if there is a .kde4 directory, check the timestamps
+        // of the config directories within and use the newest one.
         // Note that we should currently be running in the UI thread, because in
         // the gconf version, that is the only thread that can access the proxy
         // settings (a gconf restriction). As noted below, the initial read of
         // the proxy settings will be done in this thread anyway, so we check
         // for .kde4 here in this thread as well.
+        FilePath kde3_path = FilePath(home).Append(".kde");
+        FilePath kde3_config = KDEHomeToConfigPath(kde3_path);
         FilePath kde4_path = FilePath(home).Append(".kde4");
+        FilePath kde4_config = KDEHomeToConfigPath(kde4_path);
+        bool use_kde4 = false;
         if (file_util::DirectoryExists(kde4_path)) {
+          file_util::FileInfo kde3_info;
+          file_util::FileInfo kde4_info;
+          if (file_util::GetFileInfo(kde4_config, &kde4_info)) {
+            if (file_util::GetFileInfo(kde3_config, &kde3_info)) {
+              use_kde4 = kde4_info.last_modified >= kde3_info.last_modified;
+            } else {
+              use_kde4 = true;
+            }
+          }
+        }
+        if (use_kde4) {
           kde_config_dir_ = KDEHomeToConfigPath(kde4_path);
         } else {
-          FilePath kde_path = FilePath(home).Append(".kde");
-          kde_config_dir_ = KDEHomeToConfigPath(kde_path);
+          kde_config_dir_ = KDEHomeToConfigPath(kde3_path);
         }
       }
     }
@@ -555,20 +578,28 @@ class GConfSettingGetterImplKDE
     return true;
   }
 
+  virtual bool BypassListIsReversed() {
+    return reversed_bypass_list_;
+  }
+
+  virtual bool MatchHostsUsingSuffixMatching() {
+    return true;
+  }
+
  private:
   void ResetCachedSettings() {
     string_table_.clear();
     strings_table_.clear();
     indirect_manual_ = false;
     auto_no_pac_ = false;
-    reversed_exception_ = false;
+    reversed_bypass_list_ = false;
   }
 
   FilePath KDEHomeToConfigPath(const FilePath& kde_home) {
     return kde_home.Append("share").Append("config");
   }
 
-  void AddProxy(std::string prefix, std::string value) {
+  void AddProxy(const std::string& prefix, const std::string& value) {
     if (value.empty() || value.substr(0, 3) == "//:")
       // No proxy.
       return;
@@ -576,6 +607,17 @@ class GConfSettingGetterImplKDE
     // would only append it right back again. So we just leave the port
     // number right in the host string.
     string_table_[prefix + "host"] = value;
+  }
+
+  void AddHostList(const std::string& key, const std::string& value) {
+    std::vector<std::string> tokens;
+    StringTokenizer tk(value, ", ");
+    while (tk.GetNext()) {
+      std::string token = tk.token();
+      if (!token.empty())
+        tokens.push_back(token);
+    }
+    strings_table_[key] = tokens;
   }
 
   void AddKDESetting(const std::string& key, const std::string& value) {
@@ -620,16 +662,9 @@ class GConfSettingGetterImplKDE
       // We count "true" or any nonzero number as true, otherwise false.
       // Note that if the value is not actually numeric StringToInt()
       // will return 0, which we count as false.
-      reversed_exception_ = value == "true" || StringToInt(value);
+      reversed_bypass_list_ = (value == "true" || StringToInt(value));
     } else if (key == "NoProxyFor") {
-      std::vector<std::string> exceptions;
-      StringTokenizer tk(value, ",");
-      while (tk.GetNext()) {
-        std::string token = tk.token();
-        if (!token.empty())
-          exceptions.push_back(token);
-      }
-      strings_table_["/system/http_proxy/ignore_hosts"] = exceptions;
+      AddHostList("/system/http_proxy/ignore_hosts", value);
     } else if (key == "AuthMode") {
       // Check for authentication, just so we can warn.
       int mode = StringToInt(value);
@@ -642,16 +677,26 @@ class GConfSettingGetterImplKDE
     }
   }
 
-  void ResolveIndirect(std::string key) {
-    // We can't save the environment variable getter that was passed
-    // when this object was constructed, but this setting is likely
-    // to be pretty unusual and the actual values it would return can
-    // be tested without using it. So we just use getenv() here.
+  void ResolveIndirect(const std::string& key) {
     string_map_type::iterator it = string_table_.find(key);
     if (it != string_table_.end()) {
-      char* value = getenv(it->second.c_str());
-      if (value)
+      std::string value;
+      if (env_var_getter_->GetEnv(it->second.c_str(), &value))
         it->second = value;
+      else
+        string_table_.erase(it);
+    }
+  }
+
+  void ResolveIndirectList(const std::string& key) {
+    strings_map_type::iterator it = strings_table_.find(key);
+    if (it != strings_table_.end()) {
+      std::string value;
+      if (!it->second.empty() &&
+          env_var_getter_->GetEnv(it->second[0].c_str(), &value))
+        AddHostList(key, value);
+      else
+        strings_table_.erase(it);
     }
   }
 
@@ -664,18 +709,11 @@ class GConfSettingGetterImplKDE
       ResolveIndirect("/system/http_proxy/host");
       ResolveIndirect("/system/proxy/secure_host");
       ResolveIndirect("/system/proxy/ftp_host");
+      ResolveIndirectList("/system/http_proxy/ignore_hosts");
     }
     if (auto_no_pac_) {
       // Remove the PAC URL; we're not supposed to use it.
       string_table_.erase("/system/proxy/autoconfig_url");
-    }
-    if (reversed_exception_) {
-      // We don't actually support this setting. (It means to use the proxy
-      // *only* for the exception list, rather than everything but them.)
-      // Nevertheless we can do better than *exactly the opposite* of the
-      // desired behavior by clearing the exception list and warning.
-      strings_table_.erase("/system/http_proxy/ignore_hosts");
-      LOG(WARNING) << "KDE reversed proxy exception list not supported";
     }
   }
 
@@ -830,7 +868,11 @@ class GConfSettingGetterImplKDE
   FilePath kde_config_dir_;
   bool indirect_manual_;
   bool auto_no_pac_;
-  bool reversed_exception_;
+  bool reversed_bypass_list_;
+  // We don't own |env_var_getter_|.  It's safe to hold a pointer to it, since
+  // both it and us are owned by ProxyConfigServiceLinux::Delegate, and have the
+  // same lifetime.
+  base::EnvVarGetter* env_var_getter_;
 
   // We cache these settings whenever we re-read the kioslaverc file.
   string_map_type string_table_;
@@ -979,15 +1021,25 @@ bool ProxyConfigServiceLinux::Delegate::GetConfigFromGConf(
 
   // Now the bypass list.
   std::vector<std::string> ignore_hosts_list;
-  gconf_getter_->GetStringList("/system/http_proxy/ignore_hosts",
-                               &ignore_hosts_list);
-
   config->proxy_rules().bypass_rules.Clear();
-  for (size_t i = 0; i < ignore_hosts_list.size(); ++i)
-    config->proxy_rules().bypass_rules.AddRuleFromString(ignore_hosts_list[i]);
-
+  if (gconf_getter_->GetStringList("/system/http_proxy/ignore_hosts",
+                                   &ignore_hosts_list)) {
+    std::vector<std::string>::const_iterator it(ignore_hosts_list.begin());
+    for (; it != ignore_hosts_list.end(); ++it) {
+      if (gconf_getter_->MatchHostsUsingSuffixMatching()) {
+        config->proxy_rules().bypass_rules.
+            AddRuleFromStringUsingSuffixMatching(*it);
+      } else {
+        config->proxy_rules().bypass_rules.AddRuleFromString(*it);
+      }
+    }
+  }
   // Note that there are no settings with semantics corresponding to
-  // bypass of local names.
+  // bypass of local names in GNOME. In KDE, "<local>" is supported
+  // as a hostname rule.
+
+  // KDE allows one to reverse the bypass rules.
+  config->proxy_rules().reverse_bypass = gconf_getter_->BypassListIsReversed();
 
   return true;
 }

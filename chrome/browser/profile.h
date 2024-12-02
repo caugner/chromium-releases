@@ -12,6 +12,7 @@
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
+#include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/timer.h"
 #include "chrome/browser/spellcheck_host_observer.h"
@@ -20,6 +21,10 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/preferences.h"
 #endif
+
+namespace history {
+class TopSites;
+}
 
 namespace net {
 class TransportSecurityState;
@@ -30,7 +35,8 @@ namespace webkit_database {
 class DatabaseTracker;
 }
 
-class Blacklist;
+class AutocompleteClassifier;
+class BackgroundContentsService;
 class BookmarkModel;
 class BrowserThemeProvider;
 class ChromeURLRequestContextGetter;
@@ -44,6 +50,7 @@ class ExtensionsService;
 class FaviconService;
 class FindBarState;
 class GeolocationContentSettingsMap;
+class GeolocationPermissionContext;
 class HistoryService;
 class HostContentSettingsMap;
 class HostZoomMap;
@@ -55,7 +62,6 @@ class PinnedTabService;
 class PrefService;
 class ProfileSyncService;
 class ProfileSyncFactory;
-class SearchVersusNavigateClassifier;
 class SessionService;
 class SpellCheckHost;
 class SSLConfigServiceManager;
@@ -66,7 +72,7 @@ class TabRestoreService;
 class TemplateURLFetcher;
 class TemplateURLModel;
 class ThemeProvider;
-class ThumbnailStore;
+class TokenService;
 class URLRequestContextGetter;
 class UserScriptMaster;
 class UserStyleSheetWatcher;
@@ -75,6 +81,7 @@ class VisitedLinkEventListener;
 class WebDataService;
 class WebKitContext;
 class WebResourceService;
+class CloudPrintProxyService;
 
 typedef intptr_t ProfileId;
 
@@ -142,12 +149,19 @@ class Profile {
   // Destroys the off the record profile.
   virtual void DestroyOffTheRecordProfile() = 0;
 
+  // True if an off the record profile exists.
+  virtual bool HasOffTheRecordProfile() = 0;
+
   // Return the original "recording" profile. This method returns this if the
   // profile is not off the record.
   virtual Profile* GetOriginalProfile() = 0;
 
   // Returns a pointer to the DatabaseTracker instance for this profile.
   virtual webkit_database::DatabaseTracker* GetDatabaseTracker() = 0;
+
+  // Returns a pointer to the TopSites (thumbnail manager) instance
+  // for this profile.
+  virtual history::TopSites* GetTopSites() = 0;
 
   // Retrieves a pointer to the VisitedLinkMaster associated with this
   // profile.  The VisitedLinkMaster is lazily created the first time
@@ -216,11 +230,10 @@ class Profile {
   // doesn't already exist.
   virtual HistoryService* GetHistoryServiceWithoutCreating() = 0;
 
-  // Retrieves a pointer to the SearchVersusNavigateClassifier associated with
-  // this profile. The SearchVersusNavigateClassifier is lazily created the
-  // first time that this method is called.
-  virtual SearchVersusNavigateClassifier*
-      GetSearchVersusNavigateClassifier() = 0;
+  // Retrieves a pointer to the AutocompleteClassifier associated with this
+  // profile. The AutocompleteClassifier is lazily created the first time that
+  // this method is called.
+  virtual AutocompleteClassifier* GetAutocompleteClassifier() = 0;
 
   // Returns the WebDataService for this profile. This is owned by
   // the Profile. Callers that outlive the life of this profile need to be
@@ -276,8 +289,6 @@ class Profile {
   // Returns or creates the ThemeProvider associated with this profile
   virtual BrowserThemeProvider* GetThemeProvider() = 0;
 
-  virtual ThumbnailStore* GetThumbnailStore() = 0;
-
   // Returns the request context information associated with this profile.  Call
   // this only on the UI thread, since it can send notifications that should
   // happen on the UI thread.
@@ -315,8 +326,8 @@ class Profile {
   // Returns the geolocation settings map for this profile.
   virtual GeolocationContentSettingsMap* GetGeolocationContentSettingsMap() = 0;
 
-  // Returns the Privacy Blacklist for this profile.
-  virtual Blacklist* GetPrivacyBlacklist() = 0;
+  // Returns the geolocation permission context for this profile.
+  virtual GeolocationPermissionContext* GetGeolocationPermissionContext() = 0;
 
   // Returns the user style sheet watcher.
   virtual UserStyleSheetWatcher* GetUserStyleSheetWatcher() = 0;
@@ -349,8 +360,14 @@ class Profile {
   // Returns the BookmarkModel, creating if not yet created.
   virtual BookmarkModel* GetBookmarkModel() = 0;
 
+  // Returns the Gaia Token Service, creating if not yet created.
+  virtual TokenService* GetTokenService() = 0;
+
   // Returns the ProfileSyncService, creating if not yet created.
   virtual ProfileSyncService* GetProfileSyncService() = 0;
+
+  // Returns the CloudPrintProxyService, creating if not yet created.
+  virtual CloudPrintProxyService* GetCloudPrintProxyService() = 0;
 
   // Return whether 2 profiles are the same. 2 profiles are the same if they
   // represent the same profile. This can happen if there is pointer equality
@@ -383,6 +400,9 @@ class Profile {
   // Returns the provider of desktop notifications for this profile.
   virtual DesktopNotificationService* GetDesktopNotificationService() = 0;
 
+  // Returns the service that manages BackgroundContents for this profile.
+  virtual BackgroundContentsService* GetBackgroundContentsService() = 0;
+
   // Marks the profile as cleanly shutdown.
   //
   // NOTE: this is invoked internally on a normal shutdown, but is public so
@@ -396,6 +416,10 @@ class Profile {
 
   // Returns the new tab page resource cache.
   virtual NTPResourceCache* GetNTPResourceCache() = 0;
+
+  // Returns the last directory that was chosen for uploading or opening a file.
+  virtual FilePath last_selected_directory() = 0;
+  virtual void set_last_selected_directory(const FilePath& path) = 0;
 
 #ifdef UNIT_TEST
   // Use with caution.  GetDefaultRequestContext may be called on any thread!
@@ -428,6 +452,10 @@ class Profile {
     return 0 == accessibility_pause_level_;
   }
 
+  // Checks whether sync is configurable by the user. Returns false if sync is
+  // disabled or controlled by configuration management.
+  bool IsSyncAccessible();
+
  protected:
   static URLRequestContextGetter* default_request_context_;
 
@@ -456,8 +484,10 @@ class ProfileImpl : public Profile,
   virtual bool IsOffTheRecord();
   virtual Profile* GetOffTheRecordProfile();
   virtual void DestroyOffTheRecordProfile();
+  virtual bool HasOffTheRecordProfile();
   virtual Profile* GetOriginalProfile();
   virtual webkit_database::DatabaseTracker* GetDatabaseTracker();
+  virtual history::TopSites* GetTopSites();
   virtual VisitedLinkMaster* GetVisitedLinkMaster();
   virtual UserScriptMaster* GetUserScriptMaster();
   virtual SSLHostState* GetSSLHostState();
@@ -469,7 +499,7 @@ class ProfileImpl : public Profile,
   virtual FaviconService* GetFaviconService(ServiceAccessType sat);
   virtual HistoryService* GetHistoryService(ServiceAccessType sat);
   virtual HistoryService* GetHistoryServiceWithoutCreating();
-  virtual SearchVersusNavigateClassifier* GetSearchVersusNavigateClassifier();
+  virtual AutocompleteClassifier* GetAutocompleteClassifier();
   virtual WebDataService* GetWebDataService(ServiceAccessType sat);
   virtual WebDataService* GetWebDataServiceWithoutCreating();
   virtual PasswordStore* GetPasswordStore(ServiceAccessType sat);
@@ -484,7 +514,6 @@ class ProfileImpl : public Profile,
   virtual void ClearTheme();
   virtual Extension* GetTheme();
   virtual BrowserThemeProvider* GetThemeProvider();
-  virtual ThumbnailStore* GetThumbnailStore();
   virtual bool HasCreatedDownloadManager() const;
   virtual URLRequestContextGetter* GetRequestContext();
   virtual URLRequestContextGetter* GetRequestContextForMedia();
@@ -495,7 +524,7 @@ class ProfileImpl : public Profile,
   virtual HostContentSettingsMap* GetHostContentSettingsMap();
   virtual HostZoomMap* GetHostZoomMap();
   virtual GeolocationContentSettingsMap* GetGeolocationContentSettingsMap();
-  virtual Blacklist* GetPrivacyBlacklist();
+  virtual GeolocationPermissionContext* GetGeolocationPermissionContext();
   virtual UserStyleSheetWatcher* GetUserStyleSheetWatcher();
   virtual FindBarState* GetFindBarState();
   virtual SessionService* GetSessionService();
@@ -511,12 +540,18 @@ class ProfileImpl : public Profile,
   virtual void ReinitializeSpellCheckHost(bool force);
   virtual WebKitContext* GetWebKitContext();
   virtual DesktopNotificationService* GetDesktopNotificationService();
+  virtual BackgroundContentsService* GetBackgroundContentsService();
   virtual void MarkAsCleanShutdown();
   virtual void InitExtensions();
   virtual void InitWebResources();
   virtual NTPResourceCache* GetNTPResourceCache();
+  virtual FilePath last_selected_directory();
+  virtual void set_last_selected_directory(const FilePath& path);
   virtual ProfileSyncService* GetProfileSyncService();
+  virtual TokenService* GetTokenService();
   void InitSyncService();
+  virtual CloudPrintProxyService* GetCloudPrintProxyService();
+  void InitCloudPrintProxyService();
 
   // NotificationObserver implementation.
   virtual void Observe(NotificationType type,
@@ -563,15 +598,16 @@ class ProfileImpl : public Profile,
   scoped_refptr<TransportSecurityPersister>
       transport_security_persister_;
   scoped_ptr<PrefService> prefs_;
-  scoped_refptr<ThumbnailStore> thumbnail_store_;
   scoped_ptr<TemplateURLFetcher> template_url_fetcher_;
   scoped_ptr<TemplateURLModel> template_url_model_;
   scoped_ptr<BookmarkModel> bookmark_bar_model_;
   scoped_refptr<WebResourceService> web_resource_service_;
   scoped_ptr<NTPResourceCache> ntp_resource_cache_;
 
+  scoped_ptr<TokenService> token_service_;
   scoped_ptr<ProfileSyncFactory> profile_sync_factory_;
   scoped_ptr<ProfileSyncService> sync_service_;
+  scoped_ptr<CloudPrintProxyService> cloud_print_proxy_service_;
 
   scoped_refptr<ChromeURLRequestContextGetter> request_context_;
 
@@ -585,20 +621,22 @@ class ProfileImpl : public Profile,
   scoped_refptr<HostZoomMap> host_zoom_map_;
   scoped_refptr<GeolocationContentSettingsMap>
       geolocation_content_settings_map_;
-  scoped_refptr<Blacklist> privacy_blacklist_;
+  scoped_refptr<GeolocationPermissionContext>
+      geolocation_permission_context_;
   scoped_refptr<UserStyleSheetWatcher> user_style_sheet_watcher_;
   scoped_ptr<FindBarState> find_bar_state_;
   scoped_refptr<DownloadManager> download_manager_;
   scoped_refptr<HistoryService> history_service_;
   scoped_refptr<FaviconService> favicon_service_;
-  scoped_ptr<SearchVersusNavigateClassifier> search_versus_navigate_classifier_;
+  scoped_ptr<AutocompleteClassifier> autocomplete_classifier_;
   scoped_refptr<WebDataService> web_data_service_;
   scoped_refptr<PasswordStore> password_store_;
   scoped_refptr<SessionService> session_service_;
   scoped_ptr<BrowserThemeProvider> theme_provider_;
   scoped_refptr<WebKitContext> webkit_context_;
   scoped_ptr<DesktopNotificationService> desktop_notification_service_;
-  scoped_ptr<PersonalDataManager> personal_data_manager_;
+  scoped_ptr<BackgroundContentsService> background_contents_service_;
+  scoped_refptr<PersonalDataManager> personal_data_manager_;
   scoped_ptr<PinnedTabService> pinned_tab_service_;
   bool history_service_created_;
   bool favicon_service_created_;
@@ -631,6 +669,8 @@ class ProfileImpl : public Profile,
   // The main database tracker for this profile.
   // Should be used only on the file thread.
   scoped_refptr<webkit_database::DatabaseTracker> db_tracker_;
+
+  scoped_refptr<history::TopSites> top_sites_;  // For history and thumbnails.
 
 #if defined(OS_CHROMEOS)
   chromeos::Preferences chromeos_preferences_;

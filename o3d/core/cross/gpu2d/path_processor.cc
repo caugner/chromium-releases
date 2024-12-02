@@ -89,7 +89,7 @@ T max4(const T& v1, const T& v2, const T& v3, const T& v4) {
 // BBox
 //
 
-// Extremely simple bounding box class for Segments.
+// Extremely simple bounding box class for Segments and Contours.
 class BBox {
  public:
   BBox()
@@ -126,6 +126,22 @@ class BBox {
                triangle->get_vertex(2)->y()));
   }
 
+  // Initializes this bounding box to the contents of the other.
+  void Setup(const BBox& bbox) {
+    min_x_ = bbox.min_x();
+    min_y_ = bbox.min_y();
+    max_x_ = bbox.max_x();
+    max_y_ = bbox.max_y();
+  }
+
+  // Extends this bounding box to surround itself and the other.
+  void Extend(const BBox& other) {
+    Setup(min2(min_x(), other.min_x()),
+          min2(min_y(), other.min_y()),
+          max2(max_x(), other.max_x()),
+          max2(max_y(), other.max_y()));
+  }
+
   float min_x() const { return min_x_; }
   float min_y() const { return min_y_; }
   float max_x() const { return max_x_; }
@@ -138,6 +154,17 @@ class BBox {
   float max_y_;
   DISALLOW_COPY_AND_ASSIGN(BBox);
 };
+
+// Suppport for logging BBoxes.
+std::ostream& operator<<(std::ostream& ostr,  // NOLINT
+                         const BBox& arg) {
+  ostr << "[BBox min_x=" << arg.min_x()
+       << " min_y=" << arg.min_y()
+       << " max_x=" << arg.max_x()
+       << " max_y=" << arg.max_y()
+       << "]";
+  return ostr;
+}
 
 //----------------------------------------------------------------------
 // Segment
@@ -265,13 +292,16 @@ class Segment {
   }
 
   // Computes the number of times a query line starting at the given
-  // point and extending to x=+infinity crosses this segment.
-  int NumCrossingsForXRay(SkPoint pt) const {
+  // point and extending to x=+infinity crosses this segment. Outgoing
+  // "ambiguous" argument indicates whether the query intersected an
+  // endpoint or tangent point of the segment, indicating that another
+  // query point is preferred.
+  int NumCrossingsForXRay(SkPoint pt, bool* ambiguous) const {
     if (kind_ == kCubic) {
       // Should consider caching the monotonic cubics.
-      return SkNumXRayCrossingsForCubic(pt, points_);
+      return SkNumXRayCrossingsForCubic(pt, points_, ambiguous);
     } else {
-      return SkXRayCrossesLine(pt, points_) ? 1 : 0;
+      return SkXRayCrossesLine(pt, points_, ambiguous) ? 1 : 0;
     }
   }
 
@@ -389,6 +419,19 @@ class Segment {
   DISALLOW_COPY_AND_ASSIGN(Segment);
 };
 
+// Suppport for logging Segments.
+std::ostream& operator<<(std::ostream& ostr,  // NOLINT
+                         const Segment& arg) {
+  ostr << "[Segment kind=";
+  if (arg.kind() == Segment::kLine) {
+    ostr << "line";
+  } else {
+    ostr << "cubic";
+  }
+  ostr << " bbox=" << arg.bbox() << "]";
+  return ostr;
+}
+
 //----------------------------------------------------------------------
 // Contour
 //
@@ -401,6 +444,7 @@ class Contour {
     first_->set_next(first_);
     first_->set_prev(first_);
     ccw_ = true;
+    bbox_dirty_ = false;
     fill_right_side_ = true;
   }
 
@@ -423,6 +467,7 @@ class Contour {
       segment->set_next(sentinel);
       sentinel->set_prev(segment);
     }
+    bbox_dirty_ = true;
   }
 
   // Subdivides the given segment at the given parametric value.
@@ -470,6 +515,24 @@ class Contour {
     ccw_ = ccw;
   }
 
+  // Returns the bounding box of this contour.
+  const BBox& bbox() const {
+    if (bbox_dirty_) {
+      bool first = true;
+      for (Segment* cur = begin(); cur != end(); cur = cur->next()) {
+        if (first) {
+          bbox_.Setup(cur->bbox());
+        } else {
+          bbox_.Extend(cur->bbox());
+        }
+        first = false;
+      }
+
+      bbox_dirty_ = false;
+    }
+    return bbox_;
+  }
+
   // Returns whether the right side of this contour is filled.
   bool fill_right_side() const { return fill_right_side_; }
 
@@ -489,6 +552,12 @@ class Contour {
 
   // Whether this contour is oriented counterclockwise.
   bool ccw_;
+
+  // This contour's bounding box.
+  mutable BBox bbox_;
+
+  // Whether this contour's bounding box is dirty.
+  mutable bool bbox_dirty_;
 
   // Whether we should fill the right (or left) side of this contour.
   bool fill_right_side_;
@@ -781,43 +850,93 @@ void PathProcessor::DetermineSidesToFill() {
        iter != contours_.end();
        iter++) {
     Contour* cur = *iter;
-    Segment* seg = cur->begin();
 
+    bool ambiguous = true;
     int num_crossings = 0;
 
-    // We use a zero-sized vertical interval for the query
-    std::vector<IntervalType> overlaps =
-        tree.AllOverlaps(IntervalType(SkScalarToFloat(seg->get_point(0).fY),
-                                      SkScalarToFloat(seg->get_point(0).fY),
-                                      NULL));
+    // For each contour, attempt to find a point on the contour which,
+    // when we cast an XRay, does not intersect the other contours at
+    // an ambiguous point (the junction between two curves or at a
+    // tangent point). Ambiguous points make the determination of
+    // whether this contour is contained within another fragile. Note
+    // that this loop is only an approximation to the selection of a
+    // good casting point. We could as well evaluate a segment to
+    // determine a point upon it.
+    for (Segment* seg = cur->begin();
+         ambiguous && seg != cur->end();
+         seg = seg->next()) {
+      num_crossings = 0;
+      // We use a zero-sized vertical interval for the query.
+      std::vector<IntervalType> overlaps =
+          tree.AllOverlaps(IntervalType(SkScalarToFloat(seg->get_point(0).fY),
+                                        SkScalarToFloat(seg->get_point(0).fY),
+                                        NULL));
 #if !defined(O3D_CORE_CROSS_GPU2D_PATH_PROCESSOR_DEBUG_ORIENTATION)
-    for (std::vector<IntervalType>::iterator iter = overlaps.begin();
-         iter != overlaps.end();
-         iter++) {
-      const IntervalType& interval = *iter;
-      Segment* query_seg = interval.data();
-      // Ignore segments coming from the same contour
-      if (query_seg->contour() != cur) {
-        num_crossings += query_seg->NumCrossingsForXRay(seg->get_point(0));
+      for (std::vector<IntervalType>::iterator iter = overlaps.begin();
+           iter != overlaps.end();
+           iter++) {
+        const IntervalType& interval = *iter;
+        Segment* query_seg = interval.data();
+        // Ignore segments coming from the same contour.
+        if (query_seg->contour() != cur) {
+          // Only perform queries that can affect the computation.
+          const BBox& bbox = query_seg->contour()->bbox();
+          if (seg->get_point(0).fX >= bbox.min_x() &&
+              seg->get_point(0).fX <= bbox.max_x()) {
+            num_crossings += query_seg->NumCrossingsForXRay(seg->get_point(0),
+                                                            &ambiguous);
+            if (ambiguous) {
+              DLOG(INFO) << "Ambiguous intersection query at point ("
+                         << seg->get_point(0).fX << ", "
+                         << seg->get_point(0).fY << ")";
+              DLOG(INFO) << "Query segment: " << *query_seg;
+              break;  // Abort iteration over overlaps.
+            }
+          }
+        }
       }
-    }
 #endif  // !defined(O3D_CORE_CROSS_GPU2D_PATH_PROCESSOR_DEBUG_ORIENTATION)
 
 #ifdef O3D_CORE_CROSS_GPU2D_PATH_PROCESSOR_DEBUG_ORIENTATION
-    // For debugging
-    std::vector<Segment*> slow_overlaps =
-        AllSegmentsOverlappingY(seg->get_point(0).fY);
-    DCHECK(overlaps.size() == slow_overlaps.size());
-    for (std::vector<Segment*>::iterator iter = slow_overlaps.begin();
-         iter != slow_overlaps.end();
-         iter++) {
-      Segment* query_seg = *iter;
-      // Ignore segments coming from the same contour
-      if (query_seg->contour() != cur) {
-        num_crossings += query_seg->NumCrossingsForXRay(seg->get_point(0));
+      // For debugging
+      std::vector<Segment*> slow_overlaps =
+          AllSegmentsOverlappingY(seg->get_point(0).fY);
+      if (overlaps.size() != slow_overlaps.size()) {
+        DLOG(ERROR) << "for query point " << seg->get_point(0).fY << ":";
+        DLOG(ERROR) << " overlaps:";
+        for (size_t i = 0; i < overlaps.size(); i++) {
+          DLOG(ERROR) << "  " << (i+1) << ": " << *overlaps[i].data();
+        }
+        DLOG(ERROR) << " slow_overlaps:";
+        for (size_t i = 0; i < slow_overlaps.size(); i++) {
+          DLOG(ERROR) << "  " << (i+1) << ": " << *slow_overlaps[i];
+        }
       }
-    }
+      DCHECK(overlaps.size() == slow_overlaps.size());
+      for (std::vector<Segment*>::iterator iter = slow_overlaps.begin();
+           iter != slow_overlaps.end();
+           iter++) {
+        Segment* query_seg = *iter;
+        // Ignore segments coming from the same contour.
+        if (query_seg->contour() != cur) {
+          // Only perform queries that can affect the computation.
+          const BBox& bbox = query_seg->contour()->bbox();
+          if (seg->get_point(0).fX >= bbox.min_x() &&
+              seg->get_point(0).fX <= bbox.max_x()) {
+            num_crossings += query_seg->NumCrossingsForXRay(seg->get_point(0),
+                                                            &ambiguous);
+            if (ambiguous) {
+              DLOG(INFO) << "Ambiguous intersection query at point ("
+                         << seg->get_point(0).fX << ", "
+                         << seg->get_point(0).fY << ")";
+              DLOG(INFO) << "Query segment: " << *query_seg;
+              break;  // Abort iteration over overlaps.
+            }
+          }
+        }
+      }
 #endif  // O3D_CORE_CROSS_GPU2D_PATH_PROCESSOR_DEBUG_ORIENTATION
+    }  // for (Segment* seg = cur->begin(); ...
 
     if (cur->ccw()) {
       if (num_crossings & 1) {

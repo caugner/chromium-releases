@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,8 +57,8 @@ TEST_F(NavigationEntryTest, NavigationEntryURLs) {
   // Setting URL affects virtual_url and GetTitleForDisplay
   entry1_.get()->set_url(GURL("http://www.google.com"));
   EXPECT_EQ(GURL("http://www.google.com"), entry1_.get()->url());
-  EXPECT_EQ(GURL("http://www.google.com/"), entry1_.get()->virtual_url());
-  EXPECT_EQ(ASCIIToUTF16("http://www.google.com/"),
+  EXPECT_EQ(GURL("http://www.google.com"), entry1_.get()->virtual_url());
+  EXPECT_EQ(ASCIIToUTF16("www.google.com"),
             entry1_.get()->GetTitleForDisplay(NULL));
 
   // Title affects GetTitleForDisplay
@@ -101,26 +101,27 @@ TEST_F(NavigationEntryTest, NavigationEntrySSLStatus) {
   EXPECT_EQ(0, entry1_.get()->ssl().cert_id());
   EXPECT_EQ(0, entry1_.get()->ssl().cert_status());
   EXPECT_EQ(-1, entry1_.get()->ssl().security_bits());
-  EXPECT_FALSE(entry1_.get()->ssl().has_mixed_content());
-  EXPECT_FALSE(entry1_.get()->ssl().has_unsafe_content());
+  EXPECT_FALSE(entry1_.get()->ssl().displayed_insecure_content());
+  EXPECT_FALSE(entry1_.get()->ssl().ran_insecure_content());
 
   // Change from the defaults
   entry2_.get()->ssl().set_security_style(SECURITY_STYLE_AUTHENTICATED);
   entry2_.get()->ssl().set_cert_id(4);
   entry2_.get()->ssl().set_cert_status(1);
   entry2_.get()->ssl().set_security_bits(0);
-  entry2_.get()->ssl().set_has_unsafe_content();
+  entry2_.get()->ssl().set_displayed_insecure_content();
   EXPECT_EQ(SECURITY_STYLE_AUTHENTICATED,
             entry2_.get()->ssl().security_style());
   EXPECT_EQ(4, entry2_.get()->ssl().cert_id());
   EXPECT_EQ(1, entry2_.get()->ssl().cert_status());
   EXPECT_EQ(0, entry2_.get()->ssl().security_bits());
-  EXPECT_TRUE(entry2_.get()->ssl().has_unsafe_content());
+  EXPECT_TRUE(entry2_.get()->ssl().displayed_insecure_content());
 
-  // Mixed content unaffected by unsafe content
-  EXPECT_FALSE(entry2_.get()->ssl().has_mixed_content());
-  entry2_.get()->ssl().set_has_mixed_content();
-  EXPECT_TRUE(entry2_.get()->ssl().has_mixed_content());
+  entry2_.get()->ssl().set_security_style(SECURITY_STYLE_AUTHENTICATION_BROKEN);
+  entry2_.get()->ssl().set_ran_insecure_content();
+  EXPECT_EQ(SECURITY_STYLE_AUTHENTICATION_BROKEN,
+            entry2_.get()->ssl().security_style());
+  EXPECT_TRUE(entry2_.get()->ssl().ran_insecure_content());
 }
 
 // Test other basic accessors

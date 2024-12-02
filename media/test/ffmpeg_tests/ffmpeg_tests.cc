@@ -30,8 +30,14 @@
 #endif
 
 #if defined(OS_WIN)
+
+// Enable to build with exception handler
+//#define ENABLE_WINDOWS_EXCEPTIONS 1
+
+#ifdef ENABLE_WINDOWS_EXCEPTIONS
 // warning: disable warning about exception handler.
 #pragma warning(disable:4509)
+#endif
 
 // Thread priorities to make benchmark more stable.
 
@@ -64,6 +70,9 @@ int main(int argc, const char** argv) {
   CommandLine::Init(argc, argv);
   const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
 
+  // TODO(evanm): GetLooseValues() should return a
+  // CommandLine::StringType, which can be converted to FilePaths
+  // directly.
   std::vector<std::wstring> filenames(cmd_line->GetLooseValues());
 
   if (filenames.empty()) {
@@ -80,14 +89,15 @@ int main(int argc, const char** argv) {
   }
 
   // Retrieve command line options.
-  std::string in_path(WideToUTF8(filenames[0]));
-  std::string out_path;
+  std::string in_path(WideToASCII(filenames[0]));
+  FilePath out_path;
   if (filenames.size() > 1) {
-    out_path = WideToUTF8(filenames[1]);
+    // See TODO above the declaration of filenames.
+    out_path = FilePath::FromWStringHack(filenames[1]);
   }
 
   // Default flags that match Chrome defaults.
-  int video_threads = 2;
+  int video_threads = 3;
   int verbose_level = AV_LOG_FATAL;
   int max_frames = 0;
   int max_loops = 0;
@@ -101,7 +111,7 @@ int main(int argc, const char** argv) {
   bool hash_md5 = false;
 
   std::ostream* log_out = &std::cout;
-#if defined(OS_WIN)
+#if defined(ENABLE_WINDOWS_EXCEPTIONS)
   // Catch exceptions so this tool can be used in automated testing.
   __try {
 #endif
@@ -131,10 +141,10 @@ int main(int argc, const char** argv) {
   // Open output file.
   FILE *output = NULL;
   if (!out_path.empty()) {
-    output = file_util::OpenFile(out_path.c_str(), "wb");
+    output = file_util::OpenFile(out_path, "wb");
     if (!output) {
       std::cerr << "Error: Could not open output "
-                << out_path << std::endl;
+                << out_path.value() << std::endl;
       return 1;
     }
   }
@@ -215,6 +225,8 @@ int main(int argc, const char** argv) {
   }
 
   codec_context->flags2 |= CODEC_FLAG2_FAST;
+  codec_context->error_concealment = FF_EC_GUESS_MVS | FF_EC_DEBLOCK;
+  codec_context->error_recognition = FF_ER_CAREFUL;
 
   // Initialize threaded decode.
   if (target_codec == CODEC_TYPE_VIDEO && video_threads > 0) {
@@ -473,7 +485,7 @@ int main(int argc, const char** argv) {
              << " " << in_path << std::endl;
   }
 #endif  // SHOW_VERBOSE
-#if defined(OS_WIN)
+#if defined(ENABLE_WINDOWS_EXCEPTIONS)
   } __except(EXCEPTION_EXECUTE_HANDLER) {
     *log_out << "  Exception:" << std::setw(11) << GetExceptionCode()
              << " " << in_path << std::endl;

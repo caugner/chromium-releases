@@ -28,6 +28,13 @@ class ContentSettingGeolocationImageModel : public ContentSettingImageModel {
   virtual void UpdateFromTabContents(const TabContents* tab_contents);
 };
 
+class ContentSettingNotificationsImageModel : public ContentSettingImageModel {
+ public:
+  ContentSettingNotificationsImageModel();
+
+  virtual void UpdateFromTabContents(const TabContents* tab_contents);
+};
+
 const int ContentSettingBlockedImageModel::kBlockedIconIDs[] = {
     IDR_BLOCKED_COOKIES,
     IDR_BLOCKED_IMAGES,
@@ -52,8 +59,10 @@ ContentSettingBlockedImageModel::ContentSettingBlockedImageModel(
 
 void ContentSettingBlockedImageModel::UpdateFromTabContents(
     const TabContents* tab_contents) {
-  if (!tab_contents ||
-      !tab_contents->IsContentBlocked(get_content_settings_type())) {
+  TabSpecificContentSettings* content_settings = tab_contents ?
+      tab_contents->GetTabSpecificContentSettings() : NULL;
+  if (!content_settings ||
+      !content_settings->IsContentBlocked(get_content_settings_type())) {
     set_visible(false);
     return;
   }
@@ -73,25 +82,36 @@ void ContentSettingGeolocationImageModel::UpdateFromTabContents(
     set_visible(false);
     return;
   }
-  const TabContents::GeolocationContentSettings& settings =
-      tab_contents->geolocation_content_settings();
-  if (settings.empty()) {
+  TabSpecificContentSettings* content_settings =
+      tab_contents->GetTabSpecificContentSettings();
+  const GeolocationSettingsState& settings_state =
+      content_settings->geolocation_settings_state();
+  if (settings_state.state_map().empty()) {
     set_visible(false);
     return;
   }
   set_visible(true);
+  unsigned int tab_state_flags = 0;
+  settings_state.GetDetailedInfo(NULL, &tab_state_flags);
   // If any embedded site has access the allowed icon takes priority over the
   // blocked icon.
-  for (TabContents::GeolocationContentSettings::const_iterator it =
-       settings.begin(); it != settings.end(); ++it ) {
-    if (it->second == CONTENT_SETTING_ALLOW) {
-      set_icon(IDR_GEOLOCATION_ALLOWED_LOCATIONBAR_ICON);
-      set_tooltip(l10n_util::GetStringUTF8(IDS_GEOLOCATION_ALLOWED_TOOLTIP));
-      return;
-    }
+  if (tab_state_flags & GeolocationSettingsState::TABSTATE_HAS_ANY_ALLOWED) {
+    set_icon(IDR_GEOLOCATION_ALLOWED_LOCATIONBAR_ICON);
+    set_tooltip(l10n_util::GetStringUTF8(IDS_GEOLOCATION_ALLOWED_TOOLTIP));
+    return;
   }
   set_icon(IDR_GEOLOCATION_DENIED_LOCATIONBAR_ICON);
   set_tooltip(l10n_util::GetStringUTF8(IDS_GEOLOCATION_BLOCKED_TOOLTIP));
+}
+
+ContentSettingNotificationsImageModel::ContentSettingNotificationsImageModel()
+    : ContentSettingImageModel(CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
+}
+
+void ContentSettingNotificationsImageModel::UpdateFromTabContents(
+    const TabContents* tab_contents) {
+  // Notifications do not have a bubble.
+  set_visible(false);
 }
 
 ContentSettingImageModel::ContentSettingImageModel(
@@ -107,5 +127,7 @@ ContentSettingImageModel*
     ContentSettingsType content_settings_type) {
   if (content_settings_type == CONTENT_SETTINGS_TYPE_GEOLOCATION)
     return new ContentSettingGeolocationImageModel();
+  if (content_settings_type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS)
+    return new ContentSettingNotificationsImageModel();
   return new ContentSettingBlockedImageModel(content_settings_type);
 }

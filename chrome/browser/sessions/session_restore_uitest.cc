@@ -31,6 +31,9 @@ class SessionRestoreUITest : public UITest {
   }
 
   virtual void QuitBrowserAndRestore(int expected_tab_count) {
+#if defined(OS_MACOSX)
+    shutdown_type_ = UITestBase::USER_QUIT;
+#endif
     UITest::TearDown();
 
     clear_profile_ = false;
@@ -145,7 +148,7 @@ TEST_F(SessionRestoreUITest, RestoresCrossSiteForwardAndBackwardNavs) {
   scoped_refptr<HTTPTestServer> server =
       HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
-  GURL cross_site_url(server->TestServerPageW(L"files/title2.html"));
+  GURL cross_site_url(server->TestServerPage("files/title2.html"));
 
   // Visit URLs on different sites.
   NavigateToURL(url1_);
@@ -324,11 +327,14 @@ TEST_F(SessionRestoreUITest, NormalAndPopup) {
   }
 }
 
+#if defined(OS_MACOSX)
+// Fails an SQL assertion on Mac: http://crbug.com/45108
+#define DontRestoreWhileIncognito DISABLED_DontRestoreWhileIncognito
+#endif
 // Creates a browser, goes incognito, closes browser, launches and make sure
 // we don't restore.
 //
-// Flaky, http://crbug.com/39490.
-TEST_F(SessionRestoreUITest, FLAKY_DontRestoreWhileIncognito) {
+TEST_F(SessionRestoreUITest, DontRestoreWhileIncognito) {
   NavigateToURL(url1_);
 
   // Make sure we have one window.
@@ -352,10 +358,9 @@ TEST_F(SessionRestoreUITest, FLAKY_DontRestoreWhileIncognito) {
   // Launch the browser again. Note, this doesn't spawn a new process, instead
   // it attaches to the current process.
   include_testing_id_ = false;
-  use_existing_browser_ = true;
   clear_profile_ = false;
   launch_arguments_.AppendSwitch(switches::kRestoreLastSession);
-  LaunchBrowser(launch_arguments_, false);
+  LaunchAnotherBrowserBlockUntilClosed(launch_arguments_);
 
   // A new window should appear;
   ASSERT_TRUE(automation()->WaitForWindowCountToBecome(2));
@@ -372,8 +377,7 @@ TEST_F(SessionRestoreUITest, FLAKY_DontRestoreWhileIncognito) {
 }
 
 // Creates two windows, closes one, restores, make sure only one window open.
-// http://crbug.com/39905
-TEST_F(SessionRestoreUITest, FLAKY_TwoWindowsCloseOneRestoreOnlyOne) {
+TEST_F(SessionRestoreUITest, TwoWindowsCloseOneRestoreOnlyOne) {
   NavigateToURL(url1_);
 
   // Make sure we have one window.
@@ -399,12 +403,11 @@ TEST_F(SessionRestoreUITest, FLAKY_TwoWindowsCloseOneRestoreOnlyOne) {
   ASSERT_EQ(url1_, GetActiveTabURL());
 }
 
-#if defined(OS_LINUX)
-// Disabled on linux - http://crbug.com/40946.
+#if defined(OS_MACOSX)
+// Fails an SQL assertion on Mac: http://crbug.com/45108
 #define FLAKY_RestoreAfterClosingTabbedBrowserWithAppAndLaunching \
     DISABLED_RestoreAfterClosingTabbedBrowserWithAppAndLaunching
 #endif
-
 // Launches an app window, closes tabbed browser, launches and makes sure
 // we restore the tabbed browser url.
 TEST_F(SessionRestoreUITest,
@@ -414,14 +417,12 @@ TEST_F(SessionRestoreUITest,
   // Launch an app.
 
   bool include_testing_id_orig = include_testing_id_;
-  bool use_existing_browser_orig = use_existing_browser_;
   include_testing_id_ = false;
-  use_existing_browser_ = true;
   clear_profile_ = false;
   CommandLine app_launch_arguments = launch_arguments_;
   app_launch_arguments.AppendSwitchWithValue(switches::kApp,
                                              UTF8ToWide(url2_.spec()));
-  LaunchBrowser(app_launch_arguments, false);
+  LaunchAnotherBrowserBlockUntilClosed(app_launch_arguments);
   ASSERT_TRUE(automation()->WaitForWindowCountToBecome(2));
 
   // Close the first window. The only window left is the App window.
@@ -430,7 +431,6 @@ TEST_F(SessionRestoreUITest,
   // Restore the session, which should bring back the first window with url1_.
   // First restore the settings so we can connect to the browser.
   include_testing_id_ = include_testing_id_orig;
-  use_existing_browser_ = use_existing_browser_orig;
   // Restore the session with 1 tab.
   QuitBrowserAndRestore(1);
 
@@ -445,8 +445,7 @@ TEST_F(SessionRestoreUITest,
 // process-per-site and process-per-site-instance, because we treat the new tab
 // as a special case in process-per-site-instance so that it only ever uses one
 // process.)
-// This is flaky on Vista dbg.  http://crbug.com/40181
-TEST_F(SessionRestoreUITest, FLAKY_ShareProcessesOnRestore) {
+TEST_F(SessionRestoreUITest, ShareProcessesOnRestore) {
   if (in_process_renderer()) {
     // No point in running this test in single process mode.
     return;

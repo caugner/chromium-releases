@@ -16,10 +16,10 @@
 #include "base/basictypes.h"
 #include "base/env_var.h"
 #include "base/file_util.h"
-#include "base/linux_util.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/string_tokenizer.h"
+#include "base/xdg_util.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_manager.h"
@@ -30,7 +30,7 @@
 #include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/options/content_settings_window_gtk.h"
 #include "chrome/browser/gtk/options/options_layout_gtk.h"
-#include "chrome/browser/net/dns_global.h"
+#include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/options_page_base.h"
 #include "chrome/browser/options_util.h"
 #include "chrome/browser/pref_member.h"
@@ -64,7 +64,13 @@ const char kLinuxProxyConfigUrl[] = "about:linux-proxy-config";
 
 // The pixel width we wrap labels at.
 // TODO(evanm): make the labels wrap at the appropriate width.
+#if defined(OS_CHROMEOS)
+// ChromeOS uses IDS_OPTIONS_DIALOG_WIDTH_CHARS for options dialog width, which
+// is slightly smaller than the Gtk options dialog's 500px.
+const int kWrapWidth = 445;
+#else
 const int kWrapWidth = 475;
+#endif
 
 GtkWidget* CreateWrappedLabel(int string_id) {
   GtkWidget* label = gtk_label_new(
@@ -166,7 +172,7 @@ class DownloadSection : public OptionsPageBase {
   GtkWidget* page_;
 
   // Pref members.
-  StringPrefMember default_download_location_;
+  FilePathPrefMember default_download_location_;
   BooleanPrefMember ask_for_save_location_;
   StringPrefMember auto_open_files_;
 
@@ -266,8 +272,7 @@ void DownloadSection::NotifyPrefChanged(const std::wstring* pref_name) {
   if (!pref_name || *pref_name == prefs::kDownloadDefaultDirectory) {
     gtk_file_chooser_set_current_folder(
         GTK_FILE_CHOOSER(download_location_button_),
-        FilePath::FromWStringHack(
-            default_download_location_.GetValue()).value().c_str());
+            default_download_location_.GetValue().value().c_str());
   }
 
   if (!pref_name || *pref_name == prefs::kPromptForDownload) {
@@ -296,8 +301,8 @@ void DownloadSection::OnDownloadLocationChanged(GtkFileChooser* widget,
   g_free(folder);
   // Gtk seems to call this signal multiple times, so we only set the pref and
   // metric if something actually changed.
-  if (path.ToWStringHack() != section->default_download_location_.GetValue()) {
-    section->default_download_location_.SetValue(path.ToWStringHack());
+  if (path != section->default_download_location_.GetValue()) {
+    section->default_download_location_.SetValue(path);
     section->UserMetricsRecordAction(
         UserMetricsAction("Options_SetDownloadDirectory"),
         section->profile()->GetPrefs());
@@ -735,6 +740,19 @@ PrivacySection::PrivacySection(Profile* profile)
   enable_metrics_recording_.Init(prefs::kMetricsReportingEnabled,
                                  g_browser_process->local_state(), this);
 
+  gtk_widget_set_sensitive(enable_link_doctor_checkbox_,
+                           !alternate_error_pages_.IsManaged());
+  gtk_widget_set_sensitive(enable_suggest_checkbox_,
+                           !use_suggest_.IsManaged());
+  gtk_widget_set_sensitive(enable_dns_prefetching_checkbox_,
+                           !dns_prefetch_enabled_.IsManaged());
+  gtk_widget_set_sensitive(enable_safe_browsing_checkbox_,
+                           !safe_browsing_.IsManaged());
+#if defined(GOOGLE_CHROME_BUILD)
+  gtk_widget_set_sensitive(reporting_enabled_checkbox_,
+                           !enable_metrics_recording_.IsManaged());
+#endif
+
   NotifyPrefChanged(NULL);
 }
 
@@ -803,7 +821,7 @@ void PrivacySection::OnDNSPrefetchingChange(GtkWidget* widget,
           UserMetricsAction("Options_DnsPrefetchCheckbox_Disable"),
       privacy_section->profile()->GetPrefs());
   privacy_section->dns_prefetch_enabled_.SetValue(enabled);
-  chrome_browser_net::EnableDnsPrefetch(enabled);
+  chrome_browser_net::EnablePredictor(enabled);
 }
 
 // static
@@ -864,7 +882,7 @@ void PrivacySection::NotifyPrefChanged(const std::wstring* pref_name) {
     bool enabled = dns_prefetch_enabled_.GetValue();
     gtk_toggle_button_set_active(
         GTK_TOGGLE_BUTTON(enable_dns_prefetching_checkbox_), enabled);
-    chrome_browser_net::EnableDnsPrefetch(enabled);
+    chrome_browser_net::EnablePredictor(enabled);
   }
   if (!pref_name || *pref_name == prefs::kSafeBrowsingEnabled) {
     gtk_toggle_button_set_active(
@@ -874,7 +892,7 @@ void PrivacySection::NotifyPrefChanged(const std::wstring* pref_name) {
 #if defined(GOOGLE_CHROME_BUILD)
   if (!pref_name || *pref_name == prefs::kMetricsReportingEnabled) {
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(reporting_enabled_checkbox_),
-                                 enable_metrics_recording_.GetValue());
+        enable_metrics_recording_.GetValue());
     ResolveMetricsReportingEnabled();
   }
 #endif
@@ -906,7 +924,7 @@ void PrivacySection::ShowRestartMessageBox() const {
       l10n_util::GetStringUTF8(IDS_PRODUCT_NAME).c_str());
   g_signal_connect_swapped(dialog, "response", G_CALLBACK(gtk_widget_destroy),
                            dialog);
-  gtk_widget_show_all(dialog);
+  gtk_util::ShowDialog(dialog);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1188,37 +1206,38 @@ AdvancedContentsGtk::~AdvancedContentsGtk() {
 }
 
 void AdvancedContentsGtk::Init() {
-  OptionsLayoutBuilderGtk options_builder;
+  scoped_ptr<OptionsLayoutBuilderGtk>
+    options_builder(OptionsLayoutBuilderGtk::Create());
 
   privacy_section_.reset(new PrivacySection(profile_));
-  options_builder.AddOptionGroup(
+  options_builder->AddOptionGroup(
       l10n_util::GetStringUTF8(IDS_OPTIONS_ADVANCED_SECTION_TITLE_PRIVACY),
       privacy_section_->get_page_widget(), false);
 
   network_section_.reset(new NetworkSection(profile_));
-  options_builder.AddOptionGroup(
+  options_builder->AddOptionGroup(
       l10n_util::GetStringUTF8(IDS_OPTIONS_ADVANCED_SECTION_TITLE_NETWORK),
       network_section_->get_page_widget(), false);
 
   translate_section_.reset(new TranslateSection(profile_));
-  options_builder.AddOptionGroup(
+  options_builder->AddOptionGroup(
       l10n_util::GetStringUTF8(IDS_OPTIONS_ADVANCED_SECTION_TITLE_TRANSLATE),
       translate_section_->get_page_widget(), false);
 
   download_section_.reset(new DownloadSection(profile_));
-  options_builder.AddOptionGroup(
+  options_builder->AddOptionGroup(
       l10n_util::GetStringUTF8(IDS_OPTIONS_DOWNLOADLOCATION_GROUP_NAME),
       download_section_->get_page_widget(), false);
 
   web_content_section_.reset(new WebContentSection(profile_));
-  options_builder.AddOptionGroup(
+  options_builder->AddOptionGroup(
       l10n_util::GetStringUTF8(IDS_OPTIONS_ADVANCED_SECTION_TITLE_CONTENT),
       web_content_section_->get_page_widget(), false);
 
   security_section_.reset(new SecuritySection(profile_));
-  options_builder.AddOptionGroup(
+  options_builder->AddOptionGroup(
       l10n_util::GetStringUTF8(IDS_OPTIONS_ADVANCED_SECTION_TITLE_SECURITY),
       security_section_->get_page_widget(), false);
 
-  page_ = options_builder.get_page_widget();
+  page_ = options_builder->get_page_widget();
 }

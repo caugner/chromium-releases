@@ -263,7 +263,7 @@ int PluginInstance::NPP_WriteReady(NPStream *stream) {
   if (npp_functions_->writeready != 0) {
     return npp_functions_->writeready(npp_, stream);
   }
-  return NULL;
+  return 0;
 }
 
 int PluginInstance::NPP_Write(NPStream *stream,
@@ -275,7 +275,7 @@ int PluginInstance::NPP_Write(NPStream *stream,
   if (npp_functions_->write != 0) {
     return npp_functions_->write(npp_, stream, offset, len, buffer);
   }
-  return NULL;
+  return 0;
 }
 
 void PluginInstance::NPP_StreamAsFile(NPStream *stream, const char *fname) {
@@ -420,7 +420,7 @@ uint32 PluginInstance::ScheduleTimer(uint32 interval,
   // Record timer interval and repeat.
   TimerInfo info;
   info.interval = interval;
-  info.repeat = repeat;
+  info.repeat = repeat ? true : false;
   timers_[timer_id] = info;
 
   // Schedule the callback.

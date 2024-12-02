@@ -36,7 +36,11 @@ class CommandBufferHelper {
   explicit CommandBufferHelper(CommandBuffer* command_buffer);
   virtual ~CommandBufferHelper();
 
-  bool Initialize();
+  // Initializes the CommandBufferHelper.
+  // Parameters:
+  //   ring_buffer_size: The size of the ring buffer portion of the command
+  //       buffer.
+  bool Initialize(int32 ring_buffer_size);
 
   // Flushes the commands, setting the put pointer to let the buffer interface
   // know that new commands have been added. After a flush returns, the command
@@ -103,6 +107,10 @@ class CommandBufferHelper {
     uint32 space_needed = ComputeNumEntries(total_space);
     void* data = GetSpace(space_needed);
     return *reinterpret_cast<T*>(data);
+  }
+
+  int32 last_token_read() const {
+    return last_token_read_;
   }
 
   error::Error GetError();
@@ -192,13 +200,17 @@ class CommandBufferHelper {
              shared_memory_offset);
   }
 
+  CommandBuffer* command_buffer() const {
+    return command_buffer_;
+  }
+
  private:
   // Waits until get changes, updating the value of get_.
   void WaitForGetChange();
 
   // Returns the number of available entries (they may not be contiguous).
   int32 AvailableEntries() {
-    return (get_ - put_ - 1 + entry_count_) % entry_count_;
+    return (get_ - put_ - 1 + usable_entry_count_) % usable_entry_count_;
   }
 
   // Synchronize with current service state.
@@ -207,7 +219,8 @@ class CommandBufferHelper {
   CommandBuffer* command_buffer_;
   Buffer ring_buffer_;
   CommandBufferEntry *entries_;
-  int32 entry_count_;
+  int32 total_entry_count_;  // the total number of entries
+  int32 usable_entry_count_;  // the usable number (ie, minus space for jump)
   int32 token_;
   int32 last_token_read_;
   int32 get_;

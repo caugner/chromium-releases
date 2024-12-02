@@ -6,7 +6,12 @@
 
 #include "base/callback.h"
 #include "base/waitable_event.h"
+#include "media/base/callback.h"
+#include "media/base/factory.h"
+#include "media/base/filter_host.h"
+#include "media/base/limits.h"
 #include "media/ffmpeg/ffmpeg_common.h"
+#include "media/filters/ffmpeg_interfaces.h"
 #include "media/filters/omx_video_decode_engine.h"
 
 namespace media {
@@ -37,24 +42,146 @@ bool OmxVideoDecoder::IsMediaFormatSupported(const MediaFormat& format) {
 }
 
 OmxVideoDecoder::OmxVideoDecoder(OmxVideoDecodeEngine* engine)
-    : VideoDecoderImpl(engine),
-      omx_engine_(engine) {
+    : omx_engine_(engine) {
+#if defined(ENABLE_EGLIMAGE)
+  supports_egl_image_ = true;
+#else
+  supports_egl_image_ = false;
+#endif
+  DCHECK(omx_engine_.get());
 }
 
 OmxVideoDecoder::~OmxVideoDecoder() {
+  // TODO(hclam): Make sure OmxVideoDecodeEngine is stopped.
 }
 
-void OmxVideoDecoder::set_message_loop(MessageLoop* message_loop) {
-  // TODO(ajwong): Is there a way around needing to propogate the message loop?
-  VideoDecoderImpl::set_message_loop(message_loop);
-  omx_engine_->set_message_loop(message_loop);
+void OmxVideoDecoder::Initialize(DemuxerStream* stream,
+                                 FilterCallback* callback) {
+  message_loop()->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(this,
+                        &OmxVideoDecoder::DoInitialize,
+                        stream,
+                        callback));
 }
 
-void OmxVideoDecoder::Stop() {
-  // TODO(ajwong): This is a total hack. Make async.
-  base::WaitableEvent event(false, false);
-  omx_engine_->Stop(NewCallback(&event, &base::WaitableEvent::Signal));
-  event.Wait();
+void OmxVideoDecoder::FillThisBuffer(scoped_refptr<VideoFrame> frame) {
+  DCHECK(omx_engine_.get());
+  message_loop()->PostTask(
+     FROM_HERE,
+     NewRunnableMethod(omx_engine_.get(),
+                       &OmxVideoDecodeEngine::FillThisBuffer, frame));
+}
+
+void OmxVideoDecoder::Stop(FilterCallback* callback) {
+  omx_engine_->Stop(
+     NewRunnableMethod(this,
+                       &OmxVideoDecoder::StopCompleteTask, callback));
+}
+
+void OmxVideoDecoder::StopCompleteTask(FilterCallback* callback) {
+  AutoCallbackRunner done_runner(callback);
+}
+
+void OmxVideoDecoder::Pause(FilterCallback* callback) {
+  omx_engine_->Pause(
+       NewRunnableMethod(this,
+                         &OmxVideoDecoder::PauseCompleteTask, callback));
+}
+
+void OmxVideoDecoder::PauseCompleteTask(FilterCallback* callback) {
+  AutoCallbackRunner done_runner(callback);
+}
+
+void OmxVideoDecoder::Seek(base::TimeDelta time,
+                           FilterCallback* callback) {
+  omx_engine_->Flush(
+     NewRunnableMethod(this,
+                       &OmxVideoDecoder::SeekCompleteTask, callback));
+}
+
+void OmxVideoDecoder::SeekCompleteTask(FilterCallback* callback) {
+  AutoCallbackRunner done_runner(callback);
+}
+
+void OmxVideoDecoder::DoInitialize(DemuxerStream* demuxer_stream,
+                                   FilterCallback* callback) {
+  DCHECK_EQ(message_loop(), MessageLoop::current());
+
+  // Get the AVStream by querying for the provider interface.
+  AVStreamProvider* av_stream_provider;
+  if (!demuxer_stream->QueryInterface(&av_stream_provider)) {
+    return;
+  }
+  AVStream* av_stream = av_stream_provider->GetAVStream();
+
+  width_ = av_stream->codec->width;
+  height_ = av_stream->codec->height;
+  if (width_ > Limits::kMaxDimension ||
+      height_ > Limits::kMaxDimension ||
+      (width_ * height_) > Limits::kMaxCanvas) {
+    return;
+  }
+
+  // Savs the demuxer stream.
+  demuxer_stream_ = demuxer_stream;
+
+  // Initialize the decode engine.
+  omx_engine_->Initialize(
+      message_loop(),
+      av_stream,
+      NewCallback(this, &OmxVideoDecoder::EmptyBufferCallback),
+      NewCallback(this, &OmxVideoDecoder::FillBufferCallback),
+      NewRunnableMethod(this, &OmxVideoDecoder::InitCompleteTask, callback));
+}
+
+void OmxVideoDecoder::FillBufferCallback(scoped_refptr<VideoFrame> frame) {
+  DCHECK_EQ(message_loop(), MessageLoop::current());
+
+  // Invoke the FillBufferDoneCallback with the frame.
+  DCHECK(fill_buffer_done_callback());
+  fill_buffer_done_callback()->Run(frame);
+}
+
+void OmxVideoDecoder::EmptyBufferCallback(scoped_refptr<Buffer> buffer) {
+  DCHECK_EQ(message_loop(), MessageLoop::current());
+
+  // Issue more demux.
+  demuxer_stream_->Read(NewCallback(this, &OmxVideoDecoder::DemuxCompleteTask));
+}
+
+void OmxVideoDecoder::InitCompleteTask(FilterCallback* callback) {
+  DCHECK_EQ(message_loop(), MessageLoop::current());
+
+  // Check the status of the decode engine.
+  if (omx_engine_->state() == VideoDecodeEngine::kError) {
+    host()->SetError(PIPELINE_ERROR_DECODE);
+  } else {
+    media_format_.SetAsString(MediaFormat::kMimeType,
+                              mime_type::kUncompressedVideo);
+    // TODO(jiesun): recycle OmxHeadType instead of copy back.
+    media_format_.SetAsInteger(MediaFormat::kSurfaceType,
+        supports_egl_image_ ? VideoFrame::TYPE_EGL_IMAGE
+                            : VideoFrame::TYPE_SYSTEM_MEMORY);
+    media_format_.SetAsInteger(MediaFormat::kWidth, width_);
+    media_format_.SetAsInteger(MediaFormat::kHeight, height_);
+    VideoFrame::Format format = omx_engine_->GetSurfaceFormat();
+    media_format_.SetAsInteger(MediaFormat::kSurfaceFormat,
+                               static_cast<int>(format));
+  }
+
+  callback->Run();
+  delete callback;
+}
+
+void OmxVideoDecoder::DemuxCompleteTask(Buffer* buffer) {
+  // We simply delicate the buffer to the right message loop.
+  scoped_refptr<Buffer> ref_buffer = buffer;
+  DCHECK(omx_engine_.get());
+  message_loop()->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(omx_engine_.get(),
+                        &OmxVideoDecodeEngine::EmptyThisBuffer, ref_buffer));
 }
 
 }  // namespace media

@@ -77,10 +77,24 @@ o3djs.webgl.makeClients = function(callback,
       }
     }
     var objElem = o3djs.webgl.createClient(element, features, opt_debug);
-    clientElements.push(objElem);
+    if (objElem) {
+      clientElements.push(objElem);
+    }
   }
 
-  callback(clientElements);
+  // Wait for the client elements to be fully initialized. This
+  // involves waiting for the page to fully layout and the initial
+  // resize event to be processed.
+  var clearId = window.setInterval(function() {
+    for (var cc = 0; cc < clientElements.length; ++cc) {
+      var element = clientElements[cc];
+      if (!element.sizeInitialized_) {
+        return;
+      }
+    }
+    window.clearInterval(clearId);
+    callback(clientElements);
+  });
 };
 
 
@@ -126,13 +140,44 @@ o3djs.webgl.addDebuggingWrapper = function(context) {
 
 
 /**
+ * Inserts text indicating that a WebGL context could not be created under
+ * the given node and links to the site about WebGL capable browsers.
+ */
+o3djs.webgl.webGlCanvasError = function(parentNode, unavailableElement) {
+  var background = document.createElement('div');
+  background.style.backgroundColor='#ccffff';
+  background.style.textAlign='center';
+  background.style.margin='10px';
+
+  var message = document.createElement('p');
+  var messageText = document.createTextNode(
+      unavailableElement + ' unavailable.  ' +
+      'Make sure you are using a WebGL capable browser ' +
+      'and WebGL is enabled.  Click here for more information:');
+  message.appendChild(messageText);
+
+  var url = 'http://www.khronos.org/webgl/wiki/Getting_a_WebGL_Implementation';
+  var link = document.createElement('a');
+  link.appendChild(document.createTextNode(url));
+  link.href = url;
+
+  background.appendChild(message);
+  background.appendChild(link);
+  background.appendChild(document.createElement('br'));
+
+  parentNode.appendChild(background);
+};
+
+
+/**
  * Creates a canvas under the given parent element and an o3d.Client
  * under that.
- * 
- * @ param {!Element} element The element under which to insert the client.
- * @ param {string} opt_features Features to turn on.
- * @ param {boolean} opt_debug Whether gl debugging features should be
+ *
+ * @param {!Element} element The element under which to insert the client.
+ * @param {string} opt_features Features to turn on.
+ * @param {boolean} opt_debug Whether gl debugging features should be
  *     enabled.
+ * @return {HTMLCanvas} The canvas element, or null if initializaton failed.
  */
 o3djs.webgl.createClient = function(element, opt_features, opt_debug) {
   opt_features = opt_features || '';
@@ -143,13 +188,36 @@ o3djs.webgl.createClient = function(element, opt_features, opt_debug) {
   // we set the shader language to glsl.
   o3djs.effect.setLanguage('glsl');
 
+  // Make the canvas automatically resize to fill the containing
+  // element (div), and initialize its size correctly.
   var canvas;
   canvas = document.createElement('canvas');
-  canvas.setAttribute('width', element.getAttribute('width'));
-  canvas.setAttribute('height', element.getAttribute('height'));
+  canvas.style.width = "100%";
+  canvas.style.height = "100%";
+
+  if (!canvas) {
+    o3djs.webgl.webGlCanvasError(element, 'HTMLCanvas');
+    return null;
+  }
 
   var client = new o3d.Client;
-  client.initWithCanvas(canvas);
+
+  var resizeHandler = function() {
+    var width = Math.max(1, canvas.clientWidth);
+    var height = Math.max(1, canvas.clientHeight);
+    canvas.width = width;
+    canvas.height = height;
+    canvas.sizeInitialized_ = true;
+    client.gl.displayInfo = {width: canvas.width, height: canvas.height};
+  };
+  window.addEventListener('resize', resizeHandler, false);
+  setTimeout(resizeHandler, 0);
+
+  if (!client.initWithCanvas(canvas)) {
+    o3djs.webgl.webGlCanvasError(element, 'WebGL context');
+    return null;
+  }
+
   canvas.client = client;
   canvas.o3d = o3d;
 

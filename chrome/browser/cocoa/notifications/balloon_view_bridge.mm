@@ -31,9 +31,14 @@ void BalloonViewBridge::RepositionToBalloon() {
 
 void BalloonViewBridge::Show(Balloon* balloon) {
   controller_ = [[BalloonController alloc] initWithBalloon:balloon];
+  [controller_ repositionToBalloon];
   [controller_ showWindow:nil];
 }
 
 BalloonHost* BalloonViewBridge::GetHost() const {
   return [controller_ getHost];
+}
+
+void BalloonViewBridge::Update() {
+  [controller_ updateContents];
 }

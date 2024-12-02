@@ -102,7 +102,7 @@ KeywordEditorView::~KeywordEditorView() {
 void KeywordEditorView::OnEditedKeyword(const TemplateURL* template_url,
                                         const std::wstring& title,
                                         const std::wstring& keyword,
-                                        const std::wstring& url) {
+                                        const std::string& url) {
   if (template_url) {
     controller_->ModifyTemplateURL(template_url, title, keyword, url);
 
@@ -137,17 +137,11 @@ int KeywordEditorView::GetDialogButtons() const {
 }
 
 bool KeywordEditorView::Accept() {
-  if (observer_)
-      observer_->SearchEngineChosen(
-          profile_->GetTemplateURLModel()->GetDefaultSearchProvider());
   open_window = NULL;
   return true;
 }
 
 bool KeywordEditorView::Cancel() {
-  if (observer_)
-      observer_->SearchEngineChosen(
-          profile_->GetTemplateURLModel()->GetDefaultSearchProvider());
   open_window = NULL;
   return true;
 }
@@ -278,13 +272,13 @@ void KeywordEditorView::ButtonPressed(
     int last_view_row = -1;
     for (views::TableView::iterator i = table_view_->SelectionBegin();
          i != table_view_->SelectionEnd(); ++i) {
-      last_view_row = table_view_->model_to_view(*i);
+      last_view_row = table_view_->ModelToView(*i);
       controller_->RemoveTemplateURL(*i);
     }
     if (last_view_row >= controller_->table_model()->RowCount())
       last_view_row = controller_->table_model()->RowCount() - 1;
     if (last_view_row >= 0)
-      table_view_->Select(table_view_->view_to_model(last_view_row));
+      table_view_->Select(table_view_->ViewToModel(last_view_row));
   } else if (sender == edit_button_) {
     const int selected_row = table_view_->FirstSelectedRow();
     const TemplateURL* template_url =

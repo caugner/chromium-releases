@@ -7,7 +7,7 @@
 
 #include "base/scoped_ptr.h"
 #include "base/timer.h"
-#include "chrome/browser/pref_member.h"
+#include "chrome/browser/chromeos/cros/system_library.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_service.h"
 #include "unicode/calendar.h"
@@ -24,10 +24,10 @@ class StatusAreaHost;
 class ClockMenuButton : public views::MenuButton,
                         public views::ViewMenuDelegate,
                         public menus::MenuModel,
-                        public NotificationObserver {
+                        public SystemLibrary::Observer {
  public:
   explicit ClockMenuButton(StatusAreaHost* host);
-  virtual ~ClockMenuButton() {}
+  virtual ~ClockMenuButton();
 
   // menus::MenuModel implementation.
   virtual bool HasIcons() const  { return false; }
@@ -41,18 +41,17 @@ class ClockMenuButton : public views::MenuButton,
   virtual bool IsItemCheckedAt(int index) const { return false; }
   virtual int GetGroupIdAt(int index) const { return 0; }
   virtual bool GetIconAt(int index, SkBitmap* icon) const { return false; }
+  virtual menus::ButtonMenuItemModel* GetButtonMenuItemAt(int index) const {
+    return NULL;
+  }
   virtual bool IsEnabledAt(int index) const;
   virtual menus::MenuModel* GetSubmenuModelAt(int index) const { return NULL; }
   virtual void HighlightChangedTo(int index) {}
   virtual void ActivatedAt(int index);
   virtual void MenuWillShow() {}
 
-  // Overridden from NotificationObserver:
-  virtual void Observe(NotificationType type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
-
-  const icu::Calendar* calendar() const { return cal_.get(); }
+  // Overridden from SystemLibrary::Observer:
+  virtual void TimezoneChanged(const icu::TimeZone& timezone);
 
   // Updates the time on the menu button. Can be called by host if timezone
   // changes.
@@ -66,7 +65,6 @@ class ClockMenuButton : public views::MenuButton,
   void UpdateTextAndSetNextTimer();
 
   base::OneShotTimer<ClockMenuButton> timer_;
-  scoped_ptr<icu::Calendar> cal_;
 
   // The clock menu.
   // NOTE: we use a scoped_ptr here as menu calls into 'this' from the
@@ -74,14 +72,6 @@ class ClockMenuButton : public views::MenuButton,
   scoped_ptr<views::Menu2> clock_menu_;
 
   StatusAreaHost* host_;
-
-  // Variables to keep track of the max width of this view when there is 1 or 2
-  // digits in the hour time.
-  int max_width_one_digit;
-  int max_width_two_digit;
-
-  // Preferences for this section:
-  StringPrefMember timezone_;
 
   DISALLOW_COPY_AND_ASSIGN(ClockMenuButton);
 };

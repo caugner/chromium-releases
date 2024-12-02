@@ -1,10 +1,11 @@
-// Copyright (c) 2008 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "webkit/glue/webcursor.h"
 
 #include <gdk/gdk.h>
+#include <gtk/gtk.h>
 
 #include "base/logging.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebCursorInfo.h"
@@ -37,6 +38,21 @@ GdkCursor* GetInlineCustomCursor(CustomCursorType type) {
   }
   return cursor;
 }
+
+// For GTK 2.16 and beyond, GDK_BLANK_CURSOR is available. Before, we have to
+// use a custom cursor.
+#if !GTK_CHECK_VERSION(2, 16, 0)
+// Get/create a custom cursor which is invisible.
+GdkCursor* GetInvisibleCustomCursor() {
+  const char bits[] = { 0 };
+  const GdkColor color = { 0, 0, 0, 0 };
+  GdkPixmap* bitmap = gdk_bitmap_create_from_data(NULL, bits, 1, 1);
+  GdkCursor* cursor =
+      gdk_cursor_new_from_pixmap(bitmap, bitmap, &color, &color, 0, 0);
+  g_object_unref(bitmap);
+  return cursor;
+}
+#endif
 
 }  // end anonymous namespace
 
@@ -86,23 +102,23 @@ int WebCursor::GetCursorType() const {
     case WebCursorInfo::TypeRowResize:
       return GDK_SB_V_DOUBLE_ARROW;  // TODO(evanm): is this correct?
     case WebCursorInfo::TypeMiddlePanning:
-      NOTIMPLEMENTED(); return GDK_LAST_CURSOR;
+      return GDK_FLEUR;
     case WebCursorInfo::TypeEastPanning:
-      NOTIMPLEMENTED(); return GDK_LAST_CURSOR;
+      return GDK_SB_RIGHT_ARROW;
     case WebCursorInfo::TypeNorthPanning:
-      NOTIMPLEMENTED(); return GDK_LAST_CURSOR;
+      return GDK_SB_UP_ARROW;
     case WebCursorInfo::TypeNorthEastPanning:
-      NOTIMPLEMENTED(); return GDK_LAST_CURSOR;
+      return GDK_TOP_RIGHT_CORNER;
     case WebCursorInfo::TypeNorthWestPanning:
-      NOTIMPLEMENTED(); return GDK_LAST_CURSOR;
+      return GDK_TOP_LEFT_CORNER;
     case WebCursorInfo::TypeSouthPanning:
-      NOTIMPLEMENTED(); return GDK_LAST_CURSOR;
+      return GDK_SB_DOWN_ARROW;
     case WebCursorInfo::TypeSouthEastPanning:
-      NOTIMPLEMENTED(); return GDK_LAST_CURSOR;
+      return GDK_BOTTOM_RIGHT_CORNER;
     case WebCursorInfo::TypeSouthWestPanning:
-      NOTIMPLEMENTED(); return GDK_LAST_CURSOR;
+      return GDK_BOTTOM_LEFT_CORNER;
     case WebCursorInfo::TypeWestPanning:
-      NOTIMPLEMENTED(); return GDK_LAST_CURSOR;
+      return GDK_SB_LEFT_ARROW;
     case WebCursorInfo::TypeMove:
       return GDK_FLEUR;
     case WebCursorInfo::TypeVerticalText:
@@ -120,7 +136,12 @@ int WebCursor::GetCursorType() const {
     case WebCursorInfo::TypeCopy:
       NOTIMPLEMENTED(); return GDK_LAST_CURSOR;
     case WebCursorInfo::TypeNone:
-      NOTIMPLEMENTED(); return GDK_LAST_CURSOR;
+// See comment above |GetInvisibleCustomCursor()|.
+#if !GTK_CHECK_VERSION(2, 16, 0)
+      return GDK_CURSOR_IS_PIXMAP;
+#else
+      return GDK_BLANK_CURSOR;
+#endif
     case WebCursorInfo::TypeNotAllowed:
       NOTIMPLEMENTED(); return GDK_LAST_CURSOR;
     case WebCursorInfo::TypeZoomIn:
@@ -134,6 +155,11 @@ int WebCursor::GetCursorType() const {
 
 GdkCursor* WebCursor::GetCustomCursor() const {
   switch (type_) {
+// See comment above |GetInvisibleCustomCursor()|.
+#if !GTK_CHECK_VERSION(2, 16, 0)
+    case WebCursorInfo::TypeNone:
+      return GetInvisibleCustomCursor();
+#endif
     case WebCursorInfo::TypeZoomIn:
       return GetInlineCustomCursor(CustomCursorZoomIn);
     case WebCursorInfo::TypeZoomOut:

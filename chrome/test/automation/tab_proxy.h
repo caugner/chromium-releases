@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,8 @@
 #include "chrome/browser/tab_contents/security_style.h"
 #include "chrome/test/automation/automation_constants.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
+#include "chrome/test/automation/dom_element_proxy.h"
+#include "chrome/test/automation/javascript_execution_controller.h"
 
 class GURL;
 class Value;
@@ -40,7 +42,8 @@ enum AutomationPageFontSize {
   LARGEST_FONT = 36
 };
 
-class TabProxy : public AutomationResourceProxy {
+class TabProxy : public AutomationResourceProxy,
+                 public JavaScriptExecutionController {
  public:
   class TabProxyDelegate {
    public:
@@ -75,6 +78,8 @@ class TabProxy : public AutomationResourceProxy {
   // will result in value = "string"
   // jscript = "window.domAutomationController.send(24);"
   // will result in value = 24
+  // NOTE: If this is called from a ui test, |dom_automation_enabled_| must be
+  // set to true for these functions to work.
   bool ExecuteAndExtractString(const std::wstring& frame_xpath,
                                const std::wstring& jscript,
                                std::wstring* value) WARN_UNUSED_RESULT;
@@ -87,6 +92,10 @@ class TabProxy : public AutomationResourceProxy {
   bool ExecuteAndExtractValue(const std::wstring& frame_xpath,
                               const std::wstring& jscript,
                               Value** value) WARN_UNUSED_RESULT;
+
+  // Returns a DOMElementProxyRef to the tab's current DOM document.
+  // This proxy is invalidated when the document changes.
+  DOMElementProxyRef GetDOMDocument();
 
   // Configure extension automation mode. When extension automation
   // mode is turned on, the automation host can overtake extension API calls
@@ -125,15 +134,6 @@ class TabProxy : public AutomationResourceProxy {
       NavigateToURLBlockUntilNavigationsComplete(
           const GURL& url, int number_of_navigations) WARN_UNUSED_RESULT;
 
-  // Navigates to a url in an externally hosted tab.
-  // This method accepts the same kinds of URL input that
-  // can be passed to Chrome on the command line. This is a synchronous call and
-  // hence blocks until the navigation completes.
-  AutomationMsg_NavigationResponseValues NavigateInExternalTab(
-      const GURL& url, const GURL& referrer) WARN_UNUSED_RESULT;
-
-  AutomationMsg_NavigationResponseValues NavigateExternalTabAtIndex(
-      int index) WARN_UNUSED_RESULT;
 
   // Navigates to a url. This is an asynchronous version of NavigateToURL.
   // The function returns immediately after sending the LoadURL notification
@@ -142,6 +142,12 @@ class TabProxy : public AutomationResourceProxy {
   // TODO(mpcomplete): If the navigation results in an auth challenge, the
   // TabProxy we attach won't know about it.  See bug 666730.
   bool NavigateToURLAsync(const GURL& url) WARN_UNUSED_RESULT;
+
+  // Asynchronously navigates to a url using a non-default disposition.
+  // This can be used for example to open a URL in a new tab.
+  bool NavigateToURLAsyncWithDisposition(
+      const GURL& url,
+      WindowOpenDisposition disposition) WARN_UNUSED_RESULT;
 
   // Replaces a vector contents with the redirect chain out of the given URL.
   // Returns true on success. Failure may be due to being unable to send the
@@ -238,6 +244,12 @@ class TabProxy : public AutomationResourceProxy {
                        const std::string& name,
                        std::string* cookies) WARN_UNUSED_RESULT;
   bool SetCookie(const GURL& url, const std::string& value) WARN_UNUSED_RESULT;
+  bool DeleteCookie(const GURL& url,
+                    const std::string& name) WARN_UNUSED_RESULT;
+
+  // Opens the collected cookies dialog for the current tab. This function can
+  // be invoked on any valid tab.
+  bool ShowCollectedCookiesDialog() WARN_UNUSED_RESULT;
 
   // Sends a InspectElement message for the current tab. |x| and |y| are the
   // coordinates that we want to simulate that the user is trying to inspect.
@@ -270,19 +282,35 @@ class TabProxy : public AutomationResourceProxy {
   bool HideInterstitialPage() WARN_UNUSED_RESULT;
 
 #if defined(OS_WIN)
-  // TODO(port): Use something portable.
+  // The functions in this block are for external tabs, hence Windows only.
 
   // The container of an externally hosted tab calls this to reflect any
   // accelerator keys that it did not process. This gives the tab a chance
   // to handle the keys
   bool ProcessUnhandledAccelerator(const MSG& msg) WARN_UNUSED_RESULT;
-#endif  // defined(OS_WIN)
 
   // Ask the tab to set focus to either the first or last element on the page.
   // When the restore_focus_to_view parameter is true, the render view
   // associated with the current tab is informed that it is receiving focus.
+  // For external tabs only.
   bool SetInitialFocus(bool reverse, bool restore_focus_to_view)
       WARN_UNUSED_RESULT;
+
+  // Navigates to a url in an externally hosted tab.
+  // This method accepts the same kinds of URL input that
+  // can be passed to Chrome on the command line. This is a synchronous call and
+  // hence blocks until the navigation completes.
+  AutomationMsg_NavigationResponseValues NavigateInExternalTab(
+      const GURL& url, const GURL& referrer) WARN_UNUSED_RESULT;
+
+  AutomationMsg_NavigationResponseValues NavigateExternalTabAtIndex(
+      int index) WARN_UNUSED_RESULT;
+
+  // Posts a message to the external tab.
+  void HandleMessageFromExternalHost(const std::string& message,
+                                     const std::string& origin,
+                                     const std::string& target);
+#endif  // defined(OS_WIN)
 
   // Waits for the tab to finish being restored. Returns true on success.
   // timeout_ms gives the max amount of time to wait for restore to complete.
@@ -291,7 +319,7 @@ class TabProxy : public AutomationResourceProxy {
   // Retrieves the different security states for the current tab.
   bool GetSecurityState(SecurityStyle* security_style,
                         int* ssl_cert_status,
-                        int* mixed_content_state) WARN_UNUSED_RESULT;
+                        int* insecure_content_status) WARN_UNUSED_RESULT;
 
   // Returns the type of the page currently showing (normal, interstitial,
   // error).
@@ -313,11 +341,6 @@ class TabProxy : public AutomationResourceProxy {
   // which type we're saving as: HTML only or the complete web page.
   bool SavePage(const FilePath& file_name, const FilePath& dir_path,
                 SavePackage::SavePackageType type) WARN_UNUSED_RESULT;
-
-  // Posts a message to the external tab.
-  void HandleMessageFromExternalHost(const std::string& message,
-                                     const std::string& origin,
-                                     const std::string& target);
 
   // Retrieves the number of info-bars currently showing in |count|.
   bool GetInfoBarCount(int* count) WARN_UNUSED_RESULT;
@@ -388,6 +411,20 @@ class TabProxy : public AutomationResourceProxy {
   void OnChannelError();
  protected:
   virtual ~TabProxy() {}
+
+  // Override JavaScriptExecutionController methods.
+  // Executes |script| and gets the response JSON. Returns true on success.
+  bool ExecuteJavaScriptAndGetJSON(const std::string& script,
+                                   std::string* json) WARN_UNUSED_RESULT;
+
+  // Called when tracking the first object. Used for reference counting
+  // purposes.
+  void FirstObjectAdded();
+
+  // Called when no longer tracking any objects. Used for reference counting
+  // purposes.
+  void LastObjectRemoved();
+
  private:
   Lock list_lock_;  // Protects the observers_list_.
   ObserverList<TabProxyDelegate> observers_list_;

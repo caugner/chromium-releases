@@ -96,6 +96,7 @@ const wchar_t kWebKitTextAreasAreResizable[] =
     L"webkit.webprefs.text_areas_are_resizable";
 const wchar_t kWebKitJavaEnabled[] =
     L"webkit.webprefs.java_enabled";
+const wchar_t kWebkitTabsToLinks[] = L"webkit.webprefs.tabs_to_links";
 
 // Boolean which specifies whether the bookmark bar is visible on all tabs.
 const wchar_t kShowBookmarkBar[] = L"bookmark_bar.show_on_all_tabs";
@@ -104,7 +105,7 @@ const wchar_t kShowBookmarkBar[] = L"bookmark_bar.show_on_all_tabs";
 // passwords and fill in known passwords).
 const wchar_t kPasswordManagerEnabled[] = L"profile.password_manager_enabled";
 
-// OBSOLETE.  Boolean that is true if the form autofill is on (will record
+// OBSOLETE.  Boolean that is true if the form AutoFill is on (will record
 // values entered in text inputs in forms and shows them in a popup when user
 // type in a text input with the same name later on).  This has been superseded
 // by kAutoFillEnabled.
@@ -123,11 +124,6 @@ const wchar_t kSearchSuggestEnabled[] = L"search.suggest_enabled";
 // 1 - block third-party cookies
 // 2 - block all cookies
 const wchar_t kCookieBehavior[] = L"security.cookie_behavior";
-
-// Boolean that is true if mixed content should be filtered.
-// TODO(jcampan): http://b/1084034: at some point this will become an enum
-//                 (int): don't filter, filter everything, filter images only.
-const wchar_t kMixedContentFiltering[] = L"security.mixed_content_filtering";
 
 // The URL (as understood by TemplateURLRef) the default search provider uses
 // for searches.
@@ -149,6 +145,15 @@ const wchar_t kDefaultSearchProviderID[] = L"default_search_provider.id";
 const wchar_t kDefaultSearchProviderPrepopulateID[] =
     L"default_search_provider.prepopulate_id";
 
+// The dictionary key used when the default search providers are given
+// in the preferences file. Normally they are copied from the master
+// preferences file.
+const wchar_t kSearchProviderOverrides[] =
+    L"search_provider_overrides";
+// The format version for the dictionary above.
+const wchar_t kSearchProviderOverridesVersion[] =
+    L"search_provider_overrides_version";
+
 // Boolean which specifies whether we should ask the user if we should download
 // a file (true) or just download it automatically.
 const wchar_t kPromptForDownload[] = L"download.prompt_for_download";
@@ -164,8 +169,8 @@ const wchar_t kDnsPrefetchingEnabled[] = L"dns_prefetching.enabled";
 const wchar_t kDnsStartupPrefetchList[] = L"StartupDNSPrefetchList";
 
 // A list of host names used to fetch web pages, and their commonly used
-// sub-resource hostnames (and expected latency benefits from pre-resolving such
-// sub-resource hostnames).
+// sub-resource hostnames (and expected latency benefits from pre-resolving, or
+// preconnecting to, such sub-resource hostnames).
 // This list is adaptively grown and pruned.
 const wchar_t kDnsHostReferralList[] = L"HostReferralList";
 
@@ -182,9 +187,6 @@ const wchar_t kTLS1Enabled[] = L"ssl.tls1.enabled";
 #endif
 
 #if defined(OS_CHROMEOS)
-// A string pref set to the timezone.
-const wchar_t kTimeZone[] = L"settings.datetime.timezone";
-
 // A boolean pref set to true if TapToClick is being done in browser.
 const wchar_t kTapToClickEnabled[] = L"settings.touchpad.enable_tap_to_click";
 
@@ -198,24 +200,150 @@ const wchar_t kTouchpadSpeedFactor[] = L"settings.touchpad.speed_factor";
 // A integer pref for the touchpad sensitivity.
 const wchar_t kTouchpadSensitivity[] = L"settings.touchpad.sensitivity";
 
-// Boolean that is true when one IME status can be shared by all input contexts
-// in all Chrome processes.
-const wchar_t kLanguageUseGlobalEngine[] =
-    L"settings.language.use_global_engine";
+// A string pref set to the current input method.
+const wchar_t kLanguageCurrentInputMethod[] =
+    L"settings.language.current_input_method";
 
-// A string pref (comma-separated list) set to the "next engine" hot-key lists.
-const wchar_t kLanguageHotkeyNextEngine[] =
-    L"settings.language.hotkey_next_engine";
+// A string pref set to the previous input method.
+const wchar_t kLanguagePreviousInputMethod[] =
+    L"settings.language.previous_input_method";
 
-// A string pref (comma-separated list) set to the "trigger" hot-key lists.
-const wchar_t kLanguageHotkeyTrigger[] = L"settings.language.hotkey_trigger";
+// A string pref (comma-separated list) set to the "next engine in menu"
+// hot-key lists.
+const wchar_t kLanguageHotkeyNextEngineInMenu[] =
+    L"settings.language.hotkey_next_engine_in_menu";
 
-// A string pref (comma-separated list) set to the preloaded (active) IME IDs.
+// A string pref (comma-separated list) set to the "previous engine"
+// hot-key lists.
+const wchar_t kLanguageHotkeyPreviousEngine[] =
+    L"settings.language.hotkey_previous_engine";
+
+// A string pref (comma-separated list) set to the preloaded (active) input
+// method IDs.
 const wchar_t kLanguagePreloadEngines[] = L"settings.language.preload_engines";
 
-// A string pref which determines the keyboard layout for Hangul IME.
+// Boolean prefs for ibus-chewing Chinese input method.
+const wchar_t kLanguageChewingAutoShiftCur[] =
+    L"settings.language.chewing_auto_shift_cur";
+const wchar_t kLanguageChewingAddPhraseDirection[] =
+    L"settings.language.chewing_add_phrase_direction";
+const wchar_t kLanguageChewingEasySymbolInput[] =
+    L"settings.language.chewing_easy_symbol_input";
+const wchar_t kLanguageChewingEscCleanAllBuf[] =
+    L"settings.language.chewing_esc_clean_all_buf";
+const wchar_t kLanguageChewingForceLowercaseEnglish[] =
+    L"settings.language.chewing_force_lowercase_english";
+const wchar_t kLanguageChewingPlainZhuyin[] =
+    L"settings.language.chewing_plain_zhuyin";
+const wchar_t kLanguageChewingPhraseChoiceRearward[] =
+    L"settings.language.chewing_phrase_choice_rearward";
+const wchar_t kLanguageChewingSpaceAsSelection[] =
+    L"settings.language.chewing_space_as_selection";
+
+// Integer prefs for ibus-chewing Chinese input method.
+const wchar_t kLanguageChewingMaxChiSymbolLen[] =
+    L"settings.language.chewing_max_chi_symbol_len";
+const wchar_t kLanguageChewingCandPerPage[] =
+    L"settings.language.chewing_cand_per_page";
+
+// String prefs for ibus-chewing Chinese input method.
+const wchar_t kLanguageChewingKeyboardType[] =
+    L"settings.language.chewing_keyboard_type";
+const wchar_t kLanguageChewingSelKeys[] =
+    L"settings.language.chewing_sel_keys";
+
+const wchar_t kLanguageChewingHsuSelKeyType[] =
+    L"settings.language.chewing_hsu_sel_key_type";
+
+// A string pref which determines the keyboard layout for Hangul input method.
 const wchar_t kLanguageHangulKeyboard[] = L"settings.language.hangul_keyboard";
-#endif
+const wchar_t kLanguageHangulHanjaKeys[] =
+    L"settings.language.hangul_hanja_keys";
+
+// A boolean prefs for ibus-pinyin Chinese input method.
+const wchar_t kLanguagePinyinCorrectPinyin[] =
+    L"settings.language.pinyin_correct_pinyin";
+const wchar_t kLanguagePinyinFuzzyPinyin[] =
+    L"settings.language.pinyin_fuzzy_pinyin";
+const wchar_t kLanguagePinyinShiftSelectCandidate[] =
+    L"settings.language.pinyin_shift_select_candidate";
+const wchar_t kLanguagePinyinMinusEqualPage[] =
+    L"settings.language.pinyin_minus_equal_page";
+const wchar_t kLanguagePinyinCommaPeriodPage[] =
+    L"settings.language.pinyin_comma_period_page";
+const wchar_t kLanguagePinyinAutoCommit[] =
+    L"settings.language.pinyin_auto_commit";
+const wchar_t kLanguagePinyinDoublePinyin[] =
+    L"settings.language.pinyin_double_pinyin";
+const wchar_t kLanguagePinyinInitChinese[] =
+    L"settings.language.pinyin_init_chinese";
+const wchar_t kLanguagePinyinInitFull[] =
+    L"settings.language.pinyin_init_full";
+const wchar_t kLanguagePinyinInitFullPunct[] =
+    L"settings.language.pinyin_init_full_punct";
+const wchar_t kLanguagePinyinInitSimplifiedChinese[] =
+    L"settings.language.pinyin_init_simplified_chinese";
+const wchar_t kLanguagePinyinTradCandidate[] =
+    L"settings.language.pinyin_trad_candidate";
+
+// A integer prefs for ibus-pinyin Chinese input method.
+const wchar_t kLanguagePinyinDoublePinyinSchema[] =
+    L"settings.language.pinyin_double_pinyin_schema";
+const wchar_t kLanguagePinyinLookupTablePageSize[] =
+    L"settings.language.pinyin_lookup_table_page_size";
+
+// A string prefs for ibus-mozc Japanese input method.
+// ibus-mozc converts the string values to protobuf enum values defined in
+// third_party/ibus-mozc/files/src/session/config.proto.
+const wchar_t kLanguageMozcPreeditMethod[] =
+    L"settings.language.mozc_preedit_method";
+const wchar_t kLanguageMozcSessionKeymap[] =
+    L"settings.language.mozc_sessoin_keymap";
+const wchar_t kLanguageMozcPunctuationMethod[] =
+    L"settings.language.mozc_punctuation_method";
+const wchar_t kLanguageMozcSymbolMethod[] =
+    L"settings.language.mozc_symbol_method";
+const wchar_t kLanguageMozcSpaceCharacterForm[] =
+    L"settings.language.mozc_space_character_form";
+const wchar_t kLanguageMozcHistoryLearningLevel[] =
+    L"settings.language.mozc_history_learning_level";
+const wchar_t kLanguageMozcSelectionShortcut[] =
+    L"settings.language.mozc_selection_shortcut";
+const wchar_t kLanguageMozcShiftKeyModeSwitch[] =
+    L"settings.language.mozc_shift_key_mode_switch";
+const wchar_t kLanguageMozcNumpadCharacterForm[] =
+    L"settings.language.mozc_numpad_character_form";
+const wchar_t kLanguageMozcIncognitoMode[] =
+    L"settings.language.mozc_incognito_mode";
+const wchar_t kLanguageMozcUseAutoImeTurnOff[] =
+    L"settings.language.mozc_use_auto_ime_turn_off";
+const wchar_t kLanguageMozcUseDateConversion[] =
+    L"settings.language.mozc_use_date_conversion";
+const wchar_t kLanguageMozcUseSingleKanjiConversion[] =
+    L"settings.language.mozc_use_single_kanji_conversion";
+const wchar_t kLanguageMozcUseSymbolConversion[] =
+    L"settings.language.mozc_use_symbol_conversion";
+const wchar_t kLanguageMozcUseNumberConversion[] =
+    L"settings.language.mozc_use_number_conversion";
+const wchar_t kLanguageMozcUseHistorySuggest[] =
+    L"settings.language.mozc_use_history_suggest";
+const wchar_t kLanguageMozcUseDictionarySuggest[] =
+    L"settings.language.mozc_use_dictionary_suggest";
+const wchar_t kLanguageMozcSuggestionsSize[] =
+    L"settings.language.mozc_suggestions_size";
+
+// A boolean pref which determines whether accessibility is enabled.
+const wchar_t kAccessibilityEnabled[] = L"settings.accessibility";
+
+// A boolean pref which turns on Advanced Filesystem
+// (USB support, SD card, etc).
+const wchar_t kLabsAdvancedFilesystemEnabled[] =
+    L"settings.labs.advanced_filesystem";
+
+// A boolean pref which turns on the mediaplayer.
+const wchar_t kLabsMediaplayerEnabled[] = L"settings.labs.mediaplayer";
+
+#endif  // defined(OS_CHROMEOS)
 
 // The disabled messages in IPC logging.
 const wchar_t kIpcDisabledMessages[] = L"ipc_log_disabled_messages";
@@ -243,22 +371,6 @@ const wchar_t kDeleteCookies[] = L"browser.clear_data.cookies";
 const wchar_t kDeletePasswords[] = L"browser.clear_data.passwords";
 const wchar_t kDeleteFormData[] = L"browser.clear_data.form_data";
 const wchar_t kDeleteTimePeriod[] = L"browser.clear_data.time_period";
-
-// Integer prefs giving the widths of the columns in the bookmark table. Two
-// configurations are saved, one with the path column and one without.
-const wchar_t kBookmarkTableNameWidth1[] = L"bookmark_table.name_width_1";
-const wchar_t kBookmarkTableURLWidth1[] = L"bookmark_table.url_width_1";
-const wchar_t kBookmarkTableNameWidth2[] = L"bookmark_table.name_width_2";
-const wchar_t kBookmarkTableURLWidth2[] = L"bookmark_table.url_width_2";
-const wchar_t kBookmarkTablePathWidth[] = L"bookmark_table.path_width";
-
-// Bounds of the bookmark manager.
-const wchar_t kBookmarkManagerPlacement[] =
-    L"bookmark_manager.window_placement";
-
-// Integer location of the split bar in the bookmark manager.
-const wchar_t kBookmarkManagerSplitLocation[] =
-    L"bookmark_manager.split_location";
 
 // Boolean pref to define the default values for using spellchecker.
 const wchar_t kEnableSpellCheck[] = L"browser.enable_spellchecking";
@@ -301,6 +413,13 @@ const wchar_t kPluginsLastInternalDirectory[] =
 // List pref containing information (dictionaries) on plugins.
 const wchar_t kPluginsPluginsList[] = L"plugins.plugins_list";
 
+// List pref containing names of plugins that are disabled by policy.
+const wchar_t kPluginsPluginsBlacklist[] = L"plugins.plugins_blacklist";
+
+// When first shipped, the pdf plugin will be disabled by default.  When we
+// enable it by default, we'll want to do so only once.
+const wchar_t kPluginsEnabledInternalPDF[] = L"plugins.enabled_internal_pdf";
+
 // Boolean that indicates whether we should check if we are the default browser
 // on start-up.
 const wchar_t kCheckDefaultBrowser[] = L"browser.check_default_browser";
@@ -321,14 +440,14 @@ const wchar_t kUseCustomChromeFrame[] = L"browser.custom_chrome_frame";
 // done directly from the omnibox should be shown.
 const wchar_t kShowOmniboxSearchHint[] = L"browser.show_omnibox_search_hint";
 
-// Integer that counts the number of times the promo on the NTP has left to be
-// shown; this decrements each time the NTP is shown for the first time
-// in a session. The message line can be closed separately from the promo
-// image, so we store two separate values for number of remaining views.
-const wchar_t kNTPPromoLineRemaining[] = L"browser.ntp.promo_line_remaining";
-const wchar_t kNTPPromoImageRemaining[] = L"browser.ntp.promo_image_remaining";
+// Int which specifies how many times left to show a promotional message on the
+// NTP.  This value decrements each time the NTP is shown for the first time
+// in a session.
+const wchar_t kNTPPromoViewsRemaining[] = L"browser.ntp.promo_remaining";
 
 // The list of origins which are allowed|denied to show desktop notifications.
+const wchar_t kDesktopNotificationDefaultContentSetting[] =
+    L"profile.notifications_default_content_setting";
 const wchar_t kDesktopNotificationAllowedOrigins[] =
     L"profile.notification_allowed_sites";
 const wchar_t kDesktopNotificationDeniedOrigins[] =
@@ -364,34 +483,22 @@ const wchar_t kClearSiteDataOnExit[] = L"profile.clear_site_data_on_exit";
 // be displayed at the default zoom level.
 const wchar_t kPerHostZoomLevels[] = L"profile.per_host_zoom_levels";
 
-// Boolean that is true if the autofill infobar has been shown to the user.
-const wchar_t kAutoFillInfoBarShown[] = L"autofill.infobar_shown";
-
-// Boolean that is true if autofill is enabled and allowed to save profile data.
+// Boolean that is true if AutoFill is enabled and allowed to save profile data.
 const wchar_t kAutoFillEnabled[] = L"autofill.enabled";
 
-// Boolean that is true when auxiliary autofill profiles are enabled.
+// Boolean that is true when auxiliary AutoFill profiles are enabled.
 // Currently applies to Address Book "me" card on Mac.  False on Win and Linux.
 const wchar_t kAutoFillAuxiliaryProfilesEnabled[] =
     L"autofill.auxiliary_profiles_enabled";
 
-// Position and size of the autofill dialog.
+// Position and size of the AutoFill dialog.
 const wchar_t kAutoFillDialogPlacement[] = L"autofill.dialog_placement";
-
-// The label of the default AutoFill profile.
-const wchar_t kAutoFillDefaultProfile[] = L"autofill.default_profile";
-
-// The label of the default AutoFill credit card.
-const wchar_t kAutoFillDefaultCreditCard[] = L"autofill.default_creditcard";
 
 // Double that indicates positive (for matched forms) upload rate.
 const wchar_t kAutoFillPositiveUploadRate[] = L"autofill.positive_upload_rate";
 
 // Double that indicates negative (for not matched forms) upload rate.
 const wchar_t kAutoFillNegativeUploadRate[] = L"autofill.negative_upload_rate";
-
-// Dictionary that maps providers to lists of filter rules.
-const wchar_t kPrivacyFilterRules[] = L"profile.privacy_filter_rules";
 
 // Boolean that is true when the tabstrip is to be laid out vertically down the
 // side of the browser window.
@@ -568,6 +675,10 @@ const wchar_t kPageInfoWindowPlacement[] = L"page_info.window_placement";
 const wchar_t kKeywordEditorWindowPlacement[] =
     L"keyword_editor.window_placement";
 
+// A collection of position, size, and other data relating to the preferences
+// window to restore on startup.
+const wchar_t kPreferencesWindowPlacement[] = L"preferences.window_placement";
+
 // An integer specifying the total number of bytes to be used by the
 // renderer's in-memory cache of objects.
 const wchar_t kMemoryCacheSize[] = L"renderer.memory_cache.size";
@@ -581,6 +692,10 @@ const wchar_t kDownloadDirUpgraded[] = L"download.directory_upgrade";
 
 // String which specifies where to save html files to by default.
 const wchar_t kSaveFileDefaultDirectory[] = L"savefile.default_directory";
+
+// String which specifies the last directory that was chosen for uploading
+// or opening a file.
+extern const wchar_t kSelectFileLastDirectory[] = L"selectfile.last_directory";
 
 // Extensions which should be opened upon completion.
 const wchar_t kDownloadExtensionsToOpen[] = L"download.extensions_to_open";
@@ -614,6 +729,11 @@ const wchar_t kOptionsWindowLastTabIndex[] = L"options_window.last_tab_index";
 // last visited the content settings window.
 const wchar_t kContentSettingsWindowLastTabIndex[] =
     L"content_settings_window.last_tab_index";
+
+// Integer that specifies the index of the tab the user was on when they
+// last visited the Certificate Manager window.
+const wchar_t kCertificateManagerWindowLastTabIndex[] =
+    L"certificate_manager_window.last_tab_index";
 
 // The mere fact that this pref is registered signals that we should show the
 // First Run Search Information bubble when the first browser window appears.
@@ -662,6 +782,11 @@ const wchar_t kShutdownNumProcesses[] = L"shutdown.num_processes";
 // Number of processes that were shut down using the slow path.
 const wchar_t kShutdownNumProcessesSlow[] = L"shutdown.num_processes_slow";
 
+// Whether to restart the current Chrome session automatically as the last thing
+// before shutting everything down.
+const wchar_t kRestartLastSessionOnShutdown[] =
+    L"restart.last.session.on.shutdown";
+
 // Number of bookmarks/folders on the bookmark bar/other bookmark folder.
 const wchar_t kNumBookmarksOnBookmarkBar[] =
     L"user_experience_metrics.num_bookmarks_on_bookmark_bar";
@@ -674,6 +799,10 @@ const wchar_t kNumFoldersInOtherBookmarkFolder[] =
 
 // Number of keywords.
 const wchar_t kNumKeywords[] = L"user_experience_metrics.num_keywords";
+
+// Placeholder preference for disabling voice / video chat if it is ever added.
+// Currently, this does not change any behavior.
+const wchar_t kDisableVideoAndChat[] = L"disable_video_chat";
 
 // Whether Extensions are enabled.
 const wchar_t kDisableExtensions[] = L"extensions.disabled";
@@ -735,16 +864,24 @@ const wchar_t kSyncLastSyncedTime[] = L"sync.last_synced_time";
 // Boolean specifying whether the user finished setting up sync.
 const wchar_t kSyncHasSetupCompleted[] = L"sync.has_setup_completed";
 
+// Boolean specifying whether to automatically sync all data types (including
+// future ones, as they're added).  If this is true, the following preferences
+// (kSyncBookmarks, kSyncPasswords, etc.) can all be ignored.
+const wchar_t kKeepEverythingSynced[] = L"sync.keep_everything_synced";
+
 // Booleans specifying whether the user has selected to sync the following
 // datatypes.
 const wchar_t kSyncBookmarks[] = L"sync.bookmarks";
+const wchar_t kSyncPasswords[] = L"sync.passwords";
 const wchar_t kSyncPreferences[] = L"sync.preferences";
 const wchar_t kSyncAutofill[] = L"sync.autofill";
 const wchar_t kSyncThemes[] = L"sync.themes";
 const wchar_t kSyncTypedUrls[] = L"sync.typed_urls";
+const wchar_t kSyncExtensions[] = L"sync.extensions";
 
-// Whether sync auth was bootstrapped for Chrome OS.
-const wchar_t kSyncBootstrappedAuth[] = L"sync.bootstrapped_auth";
+// Boolean used by enterprise configuration management in order to lock down
+// sync.
+const wchar_t kSyncManaged[] = L"sync.managed";
 
 // Create web application shortcut dialog preferences.
 const wchar_t kWebAppCreateOnDesktop[] = L"browser.web_app.create_on_desktop";
@@ -756,5 +893,48 @@ const wchar_t kWebAppCreateInQuickLaunchBar[] =
 // Dictionary that maps Geolocation network provider server URLs to
 // corresponding access token.
 const wchar_t kGeolocationAccessToken[] = L"geolocation.access_token";
+
+// Whether PasswordForms have been migrated from the WedDataService to the
+// LoginDatabase.
+const wchar_t kLoginDatabaseMigrated[] = L"login_database.migrated";
+
+// The root URL of the cloud print service.
+const wchar_t kCloudPrintServiceURL[] = L"cloud_print.service_url";
+
+// The list of BackgroundContents that should be loaded when the browser
+// launches.
+const wchar_t kRegisteredBackgroundContents[] =
+    L"background_contents.registered";
+
+// *************** SERVICE PREFS ***************
+// These are attached to the service process.
+
+// The unique id for this instance of the cloud print proxy.
+const wchar_t kCloudPrintProxyId[] = L"cloud_print.proxy_id";
+// The GAIA auth token for Cloud Print
+const wchar_t kCloudPrintAuthToken[] = L"cloud_print.auth_token";
+// The GAIA auth token used by Cloud Print to authenticate with the XMPP server
+// This should eventually go away because the above token should work for both.
+const wchar_t kCloudPrintXMPPAuthToken[] = L"cloud_print.xmpp_auth_token";
+// The email address of the account used to authenticate with the Cloud Print
+// server.
+extern const wchar_t kCloudPrintEmail[] = L"cloud_print.email";
+// Settings specific to underlying print system.
+extern const wchar_t kCloudPrintPrintSystemSettings[] =
+    L"cloud_print.print_system_settings";
+
+// Boolean to disable proxy altogether. If true, other proxy
+// preferences are ignored.
+const wchar_t kNoProxyServer[] = L"proxy.disabled";
+// Boolean specifying if proxy should be auto-detected.
+const wchar_t kProxyAutoDetect[] = L"proxy.auto_detect";
+// String specifying the proxy server. For a specification of the expected
+// syntax see net::ProxyConfig::ProxyRules::ParseFromString().
+const wchar_t kProxyServer[] = L"proxy.server";
+// URL to the proxy .pac file.
+const wchar_t kProxyPacUrl[] = L"proxy.pac_url";
+// String containing proxy bypass rules. For a specification of the
+// expected syntax see net::ProxyBypassRules::ParseFromString().
+const wchar_t kProxyBypassList[] = L"proxy.bypass_list";
 
 }  // namespace prefs

@@ -15,8 +15,13 @@ class FindInPageControllerTest : public UITest {
   }
 };
 
-const std::wstring kSimplePage = L"404_is_enough_for_us.html";
+const std::string kSimplePage = "404_is_enough_for_us.html";
 
+#if !defined(OS_WIN)
+// Has never been enabled on other platforms http://crbug.com/45753
+#define FindMovesOnTabClose_Issue1343052 \
+    DISABLED_FindMovesOnTabClose_Issue1343052
+#endif
 // The find window should not change its location just because we open and close
 // a new tab.
 TEST_F(FindInPageControllerTest, FindMovesOnTabClose_Issue1343052) {
@@ -24,7 +29,7 @@ TEST_F(FindInPageControllerTest, FindMovesOnTabClose_Issue1343052) {
       HTTPTestServer::CreateServer(L"chrome/test/data", NULL);
   ASSERT_TRUE(NULL != server.get());
 
-  GURL url = server->TestServerPageW(kSimplePage);
+  GURL url = server->TestServerPage(kSimplePage);
   scoped_refptr<TabProxy> tabA(GetActiveTab());
   ASSERT_TRUE(tabA.get());
   ASSERT_TRUE(tabA->NavigateToURL(url));
@@ -34,7 +39,7 @@ TEST_F(FindInPageControllerTest, FindMovesOnTabClose_Issue1343052) {
   ASSERT_TRUE(browser.get() != NULL);
 
   // Toggle the bookmark bar state.
-  browser->ApplyAccelerator(IDC_SHOW_BOOKMARK_BAR);
+  EXPECT_TRUE(browser->ApplyAccelerator(IDC_SHOW_BOOKMARK_BAR));
   EXPECT_TRUE(WaitForBookmarkBarVisibilityChange(browser.get(), true));
 
   // Open the Find window and wait for it to animate.
@@ -61,7 +66,7 @@ TEST_F(FindInPageControllerTest, FindMovesOnTabClose_Issue1343052) {
   EXPECT_EQ(y, new_y);
 
   // Now reset the bookmark bar state and try the same again.
-  browser->ApplyAccelerator(IDC_SHOW_BOOKMARK_BAR);
+  EXPECT_TRUE(browser->ApplyAccelerator(IDC_SHOW_BOOKMARK_BAR));
   EXPECT_TRUE(WaitForBookmarkBarVisibilityChange(browser.get(), false));
 
   // Bookmark bar has moved, reset our coordinates.

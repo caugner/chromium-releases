@@ -1,11 +1,17 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef WEBKIT_GLUE_WEBACCESSIBILITY_H_
 #define WEBKIT_GLUE_WEBACCESSIBILITY_H_
 
+#include <map>
+#include <vector>
+
 #include "base/string16.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityObject.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityRole.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
 
 namespace WebKit {
 class WebAccessibilityCache;
@@ -13,100 +19,118 @@ class WebAccessibilityCache;
 
 namespace webkit_glue {
 
-class WebAccessibility {
+// A compact representation of the accessibility information for a
+// single web object, in a form that can be serialized and sent from
+// the renderer process to the browser process.
+struct WebAccessibility {
  public:
-  // This defines an enumeration of IDs that can uniquely identify a call to a
-  // specific accessibility information function. Should match the support
-  // implemented in WebKit and GlueAccessibilityObject (functions marked with
-  // return value E_NOTIMPL in WebKit are also excluded).
-  enum Function {
-    FUNCTION_NONE = 0,
-
-    // Supported accessibility information retrieval functions.
-    FUNCTION_DODEFAULTACTION,
-    FUNCTION_HITTEST,
-    FUNCTION_LOCATION,
-    FUNCTION_NAVIGATE,
-    FUNCTION_GETCHILD,
-    FUNCTION_CHILDCOUNT,
-    FUNCTION_DEFAULTACTION,
-    FUNCTION_DESCRIPTION,
-    FUNCTION_GETFOCUSEDCHILD,
-    FUNCTION_HELPTEXT,
-    FUNCTION_KEYBOARDSHORTCUT,
-    FUNCTION_NAME,
-    FUNCTION_GETPARENT,
-    FUNCTION_ROLE,
-    FUNCTION_STATE,
-    FUNCTION_VALUE
-
-    // The deprecated put_accName and put_accValue (IAccessible) are not
-    // supported here, nor is accSelect, get_accHelpTopic and get_accSelection
-    // (matching WebKit's support for IAccessible).
-  };
-
-  // This defines an enumeration of navigation directions based on (but
-  // independent of) the MSAA Navigation Constants. However, to avoid the use of
-  // COM in our Glue layer, we use this as a substitute with a one-to-one
-  // conversion between Browser side (has COM) and Glue.
-  enum Direction {
-    DIRECTION_NONE = 0,
-
-    // Valid directions.
-    DIRECTION_UP,
-    DIRECTION_DOWN,
-    DIRECTION_LEFT,
-    DIRECTION_RIGHT,
-    DIRECTION_NEXT,
-    DIRECTION_PREVIOUS,
-    DIRECTION_FIRSTCHILD,
-    DIRECTION_LASTCHILD
-  };
-
-  // This defines an enumeration (in alphabetical order) of the supported
-  // accessibility roles in our Glue layer (used in
-  // GlueAccessibilityObject::Role). Any interface using roles must provide a
-  // conversion to its own roles (see e.g. BrowserAccessibility::get_accRole and
-  // BrowserAccessibility::MSAARole).
+  // An alphabetical enumeration of accessibility roles.
   enum Role {
+    ROLE_NONE = 0,
+
+    ROLE_UNKNOWN,
+
+    ROLE_ALERT,
+    ROLE_ALERT_DIALOG,
+    ROLE_ANNOTATION,
     ROLE_APPLICATION,
+    ROLE_ARTICLE,
+    ROLE_BROWSER,
+    ROLE_BUSY_INDICATOR,
+    ROLE_BUTTON,
     ROLE_CELL,
-    ROLE_CHECKBUTTON,
-    ROLE_CLIENT,
+    ROLE_CHECKBOX,
+    ROLE_COLOR_WELL,
     ROLE_COLUMN,
-    ROLE_COLUMNHEADER,
+    ROLE_COLUMN_HEADER,
+    ROLE_COMBO_BOX,
+    ROLE_DEFINITION_LIST_DEFINITION,
+    ROLE_DEFINITION_LIST_TERM,
+    ROLE_DIALOG,
+    ROLE_DIRECTORY,
+    ROLE_DISCLOSURE_TRIANGLE,
     ROLE_DOCUMENT,
-    ROLE_GRAPHIC,
-    ROLE_GROUPING,
+    ROLE_DRAWER,
+    ROLE_EDITABLE_TEXT,
+    ROLE_GRID,
+    ROLE_GROUP,
+    ROLE_GROW_AREA,
+    ROLE_HEADING,
+    ROLE_HELP_TAG,
+    ROLE_IGNORED,
+    ROLE_IMAGE,
+    ROLE_IMAGE_MAP,
+    ROLE_IMAGE_MAP_LINK,
+    ROLE_INCREMENTOR,
+    ROLE_LANDMARK_APPLICATION,
+    ROLE_LANDMARK_BANNER,
+    ROLE_LANDMARK_COMPLEMENTARY,
+    ROLE_LANDMARK_CONTENTINFO,
+    ROLE_LANDMARK_MAIN,
+    ROLE_LANDMARK_NAVIGATION,
+    ROLE_LANDMARK_SEARCH,
     ROLE_LINK,
     ROLE_LIST,
     ROLE_LISTBOX,
-    ROLE_LISTITEM,
-    ROLE_MENUBAR,
-    ROLE_MENUITEM,
-    ROLE_MENUPOPUP,
+    ROLE_LISTBOX_OPTION,
+    ROLE_LIST_ITEM,
+    ROLE_LIST_MARKER,
+    ROLE_LOG,
+    ROLE_MARQUEE,
+    ROLE_MATH,
+    ROLE_MATTE,
+    ROLE_MENU,
+    ROLE_MENU_BAR,
+    ROLE_MENU_ITEM,
+    ROLE_MENU_BUTTON,
+    ROLE_MENU_LIST_OPTION,
+    ROLE_MENU_LIST_POPUP,
+    ROLE_NOTE,
     ROLE_OUTLINE,
-    ROLE_PAGETABLIST,
-    ROLE_PROGRESSBAR,
-    ROLE_PUSHBUTTON,
-    ROLE_RADIOBUTTON,
+    ROLE_POPUP_BUTTON,
+    ROLE_PROGRESS_INDICATOR,
+    ROLE_RADIO_BUTTON,
+    ROLE_RADIO_GROUP,
+    ROLE_REGION,
     ROLE_ROW,
-    ROLE_ROWHEADER,
-    ROLE_SEPARATOR,
+    ROLE_ROW_HEADER,
+    ROLE_RULER,
+    ROLE_RULER_MARKER,
+    ROLE_SCROLLAREA,
+    ROLE_SCROLLBAR,
+    ROLE_SHEET,
     ROLE_SLIDER,
-    ROLE_STATICTEXT,
-    ROLE_STATUSBAR,
+    ROLE_SLIDER_THUMB,
+    ROLE_SPLITTER,
+    ROLE_SPLIT_GROUP,
+    ROLE_STATIC_TEXT,
+    ROLE_STATUS,
+    ROLE_SYSTEM_WIDE,
+    ROLE_TAB,
     ROLE_TABLE,
-    ROLE_TEXT,
+    ROLE_TABLE_HEADER_CONTAINER,
+    ROLE_TAB_GROUP,
+    ROLE_TAB_LIST,
+    ROLE_TAB_PANEL,
+    ROLE_TEXTAREA,
+    ROLE_TEXT_FIELD,
+    ROLE_TIMER,
     ROLE_TOOLBAR,
-    ROLE_TOOLTIP
+    ROLE_TOOLTIP,
+    ROLE_TREE,
+    ROLE_TREE_GRID,
+    ROLE_TREE_ITEM,
+    ROLE_VALUE_INDICATOR,
+    ROLE_WEBCORE_LINK,
+    ROLE_WEB_AREA,
+    ROLE_WINDOW,
+    NUM_ROLES
   };
 
-  // This defines an enumeration (in alphabetical order) of the supported
-  // accessibility states in our Glue layer (used in
-  // GlueAccessibilityObject::State). Any interface using states must provide a
-  // conversion to its own states (see e.g. BrowserAccessibility::get_accState
-  // and BrowserAccessibility::MSAAState).
+  // An alphabetical enumeration of accessibility states.
+  // A state bitmask is formed by shifting 1 to the left by each state,
+  // for example:
+  //   int mask = (1 << STATE_CHECKED) | (1 << STATE_FOCUSED);
   enum State {
     STATE_CHECKED,
     STATE_FOCUSABLE,
@@ -123,58 +147,39 @@ class WebAccessibility {
     STATE_UNAVAILABLE
   };
 
-  enum ReturnCode {
-    RETURNCODE_TRUE,    // MSAA S_OK
-    RETURNCODE_FALSE,   // MSAA S_FALSE
-    RETURNCODE_FAIL     // E_FAIL
+  enum Attribute {
+    ATTR_ACTION,
+    ATTR_DESCRIPTION,
+    ATTR_HELP,
+    ATTR_HTML_TAG,
+    ATTR_LINK_TARGET,
+    ATTR_SHORTCUT,
+    NUM_ATTRIBUTES
   };
 
-  // Parameters structure to hold a union of the possible accessibility function
-  // INPUT variables, with the unused fields always set to default value. Used
-  // in ViewMsg_GetAccessibilityInfo, as only parameter.
-  struct InParams {
-    // Identifier to uniquely distinguish which instance of accessibility
-    // information is being called upon on the renderer side.
-    int object_id;
+  // Empty constructor, for serialization.
+  WebAccessibility();
 
-    // Identifier to resolve which accessibility information retrieval function
-    // is being called.
-    int function_id;
+  // Construct from a WebAccessibilityObject. Recursively creates child
+  // nodes as needed to complete the tree. Adds |src| to |cache| and
+  // stores its cache ID.
+  WebAccessibility(const WebKit::WebAccessibilityObject& src,
+                   WebKit::WebAccessibilityCache* cache);
 
-    // Id of accessible child, whose information is being requested.
-    int child_id;
+  // Initialize an already-created struct, same as the constructor a
+  void Init(const WebKit::WebAccessibilityObject& src,
+            WebKit::WebAccessibilityCache* cache);
 
-    // LONG input parameters, used differently depending on the function called.
-    long input_long1;
-    long input_long2;
-  };
-
-  // Parameters structure to hold a union of the possible accessibility function
-  // OUTPUT variables, with the unused fields always set to default value. Used
-  // in ViewHostMsg_GetAccessibilityInfoResponse, as only parameter.
-  struct OutParams {
-    // Identifier to uniquely distinguish which instance of accessibility
-    // information is being called upon on the renderer side.
-    int object_id;
-
-    // LONG output parameters, used differently depending on the function
-    // called. [output_long1] can in some cases be set to -1 to indicate that
-    // the child object found by the called IAccessible function is not a simple
-    // object.
-    long output_long1;
-    long output_long2;
-    long output_long3;
-    long output_long4;
-
-    // String output parameter.
-    string16 output_string;
-
-    // Return code of the accessibility function call.
-    int32 return_code;
-  };
-
-  static int32 GetAccObjInfo(WebKit::WebAccessibilityCache* cache,
-      const InParams& in_params, OutParams* out_params);
+  // This is a simple serializable struct. All member variables should be
+  // copyable.
+  int32 id;
+  string16 name;
+  string16 value;
+  Role role;
+  uint32 state;
+  WebKit::WebRect location;
+  std::map<int32, string16> attributes;
+  std::vector<WebAccessibility> children;
 };
 
 }  // namespace webkit_glue

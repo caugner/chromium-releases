@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
 #include "base/values.h"
+#include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/automation/automation_autocomplete_edit_tracker.h"
 #include "chrome/browser/automation/automation_browser_tracker.h"
 #include "chrome/browser/automation/automation_resource_message_filter.h"
@@ -43,13 +44,16 @@ struct Reposition_Params;
 struct ExternalTabSettings;
 }
 
+class AutoFillProfile;
 class AutomationExtensionTracker;
+class CreditCard;
 class Extension;
 class ExtensionPortContainer;
 class ExtensionTestResultNotificationObserver;
 class ExternalTabContainer;
 class LoginHandler;
 class MetricEventDurationObserver;
+class InitialLoadObserver;
 class NavigationControllerRestoredObserver;
 struct AutocompleteMatchData;
 
@@ -138,8 +142,10 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   // the handle is simply returned.
   int AddExtension(Extension* extension);
 
+#if defined(OS_WIN)
   // Adds the external tab passed in to the tab tracker.
   bool AddExternalTab(ExternalTabContainer* external_tab);
+#endif
 
  protected:
   friend class base::RefCounted<AutomationProvider>;
@@ -162,6 +168,9 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
                  const std::string value,
                  int handle,
                  int* response_value);
+  void DeleteCookie(const GURL& url, const std::string& cookie_name,
+                    int handle, bool* success);
+  void ShowCollectedCookiesDialog(int handle, bool* success);
   void GetBrowserWindowCount(int* window_count);
   void GetBrowserLocale(string16* locale);
   void GetNormalBrowserWindowCount(int* window_count);
@@ -220,6 +229,10 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
                                                   int number_of_navigations,
                                                   IPC::Message* reply_message);
   void NavigationAsync(int handle, const GURL& url, bool* status);
+  void NavigationAsyncWithDisposition(int handle,
+                                      const GURL& url,
+                                      WindowOpenDisposition disposition,
+                                      bool* status);
   void GoBack(int handle, IPC::Message* reply_message);
   void GoForward(int handle, IPC::Message* reply_message);
   void Reload(int handle, IPC::Message* reply_message);
@@ -241,21 +254,11 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   void SetProxyConfig(const std::string& new_proxy_config);
   void IsFullscreen(int handle, bool* is_fullscreen);
   void GetFullscreenBubbleVisibility(int handle, bool* is_visible);
-#if defined(OS_WIN)
-  void OnBrowserMoved(int handle);
-#endif
   void SetContentSetting(int handle,
                          const std::string& host,
                          ContentSettingsType content_type,
                          ContentSetting setting,
                          bool* success);
-
-#if defined(OS_WIN)
-  void ScheduleMouseEvent(views::View* view,
-                          views::Event::EventType type,
-                          const gfx::Point& point,
-                          int flags);
-#endif  // defined(OS_WIN)
 
   void GetFocusedViewID(int handle, int* view_id);
 
@@ -328,15 +331,196 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
                       int64 id,
                       bool* success);
 
+  // Set window dimensions.
+  // Uses the JSON interface for input/output.
+  void SetWindowDimensions(Browser* browser,
+                           DictionaryValue* args,
+                           IPC::Message* reply_message);
+
+  // Get info about the chromium/chrome in use.
+  // This includes things like version, executable name, executable path.
+  // Uses the JSON interface for input/output.
+  void GetBrowserInfo(Browser* browser,
+                      DictionaryValue* args,
+                      IPC::Message* reply_message);
+
+  // Get info about downloads. This includes only ones that have been
+  // registered by the history system.
+  // Uses the JSON interface for input/output.
+  void GetDownloadsInfo(Browser* browser,
+                        DictionaryValue* args,
+                        IPC::Message* reply_message);
+
   // Wait for all downloads to complete.
-  void WaitForDownloadsToComplete(
-      DictionaryValue* args,
-      IPC::Message* reply_message);
+  // Uses the JSON interface for input/output.
+  void WaitForDownloadsToComplete(Browser* browser,
+                                  DictionaryValue* args,
+                                  IPC::Message* reply_message);
+
+  // Get info about history.
+  // Uses the JSON interface for input/output.
+  void GetHistoryInfo(Browser* browser,
+                      DictionaryValue* args,
+                      IPC::Message* reply_message);
+
+  // Add an item to the history service.
+  // Uses the JSON interface for input/output.
+  void AddHistoryItem(Browser* browser,
+                      DictionaryValue* args,
+                      IPC::Message* reply_message);
+
+  // Get info about preferences.
+  // Uses the JSON interface for input/output.
+  void GetPrefsInfo(Browser* browser,
+                    DictionaryValue* args,
+                    IPC::Message* reply_message);
+
+  // Set prefs.
+  // Uses the JSON interface for input/output.
+  void SetPrefs(Browser* browser,
+                DictionaryValue* args,
+                IPC::Message* reply_message);
+
+  // Return load times of initial tabs.
+  // Uses the JSON interface for input/output.
+  // Only includes tabs from command line arguments or session restore.
+  // See declaration of InitialLoadObserver in automation_provider_observers.h
+  // for example response.
+  void GetInitialLoadTimes(Browser* browser,
+                           DictionaryValue* args,
+                           IPC::Message* reply_message);
+
+  // Get info about plugins.
+  // Uses the JSON interface for input/output.
+  void GetPluginsInfo(Browser* browser,
+                      DictionaryValue* args,
+                      IPC::Message* reply_message);
+
+  // Enable a plugin.
+  // Uses the JSON interface for input/output.
+  void EnablePlugin(Browser* browser,
+                    DictionaryValue* args,
+                    IPC::Message* reply_message);
+
+  // Disable a plugin.
+  // Uses the JSON interface for input/output.
+  void DisablePlugin(Browser* browser,
+                     DictionaryValue* args,
+                     IPC::Message* reply_message);
+
+  // Get info about omnibox.
+  // Contains data about the matches (url, content, description)
+  // in the omnibox popup, the text in the omnibox.
+  // Uses the JSON interface for input/output.
+  void GetOmniboxInfo(Browser* browser,
+                      DictionaryValue* args,
+                      IPC::Message* reply_message);
+
+  // Set text in the omnibox. This sets focus to the omnibox.
+  // Uses the JSON interface for input/output.
+  void SetOmniboxText(Browser* browser,
+                      DictionaryValue* args,
+                      IPC::Message* reply_message);
+
+  // Move omnibox popup selection up or down.
+  // Uses the JSON interface for input/output.
+  void OmniboxMovePopupSelection(Browser* browser,
+                                 DictionaryValue* args,
+                                 IPC::Message* reply_message);
+
+  // Accept the current string of text in the omnibox.
+  // This is equivalent to clicking or hiting enter on a popup selection.
+  // Blocks until the page loads.
+  // Uses the JSON interface for input/output.
+  void OmniboxAcceptInput(Browser* browser,
+                          DictionaryValue* args,
+                          IPC::Message* reply_message);
+
+  // Save the contents of a tab into a file.
+  // Uses the JSON interface for input/output.
+  void SaveTabContents(Browser* browser,
+                       DictionaryValue* args,
+                       IPC::Message* reply_message);
+
+  // Import the given settings from the given browser.
+  // Uses the JSON interface for input/output.
+  void ImportSettings(Browser* browser,
+                      DictionaryValue* args,
+                      IPC::Message* reply_message);
+
+  // Add a new username-password combination to the saved passwords.
+  // Uses the JSON interface for input/output.
+  void AddSavedPassword(Browser* browser,
+                        DictionaryValue* args,
+                        IPC::Message* reply_message);
+
+  // Return the saved username/password combinations.
+  // Uses the JSON interface for input/output.
+  void GetSavedPasswords(Browser* browser,
+                         DictionaryValue* args,
+                         IPC::Message* reply_message);
+
+  // Clear the specified browsing data. This call provides similar
+  // functionality to RemoveBrowsingData but is synchronous.
+  // Uses the JSON interface for input/output.
+  void ClearBrowsingData(Browser* browser,
+                         DictionaryValue* args,
+                         IPC::Message* reply_message);
+
+  // Get info about theme.
+  // Uses the JSON interface for input/output.
+  void GetThemeInfo(Browser* browser,
+                    DictionaryValue* args,
+                    IPC::Message* reply_message);
+
+  // Get the profiles that are currently saved to the DB.
+  // Uses the JSON interface for input/output.
+  void GetAutoFillProfile(Browser* browser,
+                          DictionaryValue* args,
+                          IPC::Message* reply_message);
+
+  // Fill in an AutoFillProfile with the given profile information.
+  // Uses the JSON interface for input/output.
+  void FillAutoFillProfile(Browser* browser,
+                           DictionaryValue* args,
+                           IPC::Message* reply_message);
+
+  // Translate DictionaryValues of autofill profiles and credit cards to the
+  // data structure used in the browser.
+  // Args:
+  //   profiles/cards: the ListValue of profiles/credit cards to translate.
+  //   error_message: a pointer to the return string in case of error.
+  static std::vector<AutoFillProfile> GetAutoFillProfilesFromList(
+      const ListValue& profiles, std::string* error_message);
+  static std::vector<CreditCard> GetCreditCardsFromList(
+      const ListValue& cards, std::string* error_message);
+
+  // The opposite of the above: translates from the internal data structure
+  // for profiles and credit cards to a ListValue of DictionaryValues. The
+  // caller owns the returned object.
+  static ListValue* GetListFromAutoFillProfiles(
+      std::vector<AutoFillProfile*> autofill_profiles);
+  static ListValue* GetListFromCreditCards(
+      std::vector<CreditCard*> credit_cards);
+
+  // Return the map from the internal data representation to the string value
+  // of auto fill fields and credit card fields.
+  static std::map<AutoFillFieldType, std::wstring>
+      GetAutoFillFieldToStringMap();
+  static std::map<AutoFillFieldType, std::wstring>
+      GetCreditCardFieldToStringMap();
 
   // Generic pattern for pyautolib
+  // Uses the JSON interface for input/output.
   void SendJSONRequest(int handle,
                        std::string json_request,
                        IPC::Message* reply_message);
+
+  // Method ptr for json handlers.
+  // Uses the JSON interface for input/output.
+  typedef void (AutomationProvider::*JsonHandler)(Browser* browser,
+                                                  DictionaryValue*,
+                                                  IPC::Message*);
 
   // Responds to InspectElement request
   void HandleInspectElementRequest(int handle,
@@ -365,17 +549,6 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
                             IPC::Message* reply_message);
   void HideInterstitialPage(int tab_handle, bool* success);
 
-  void CreateExternalTab(const IPC::ExternalTabSettings& settings,
-                         gfx::NativeWindow* tab_container_window,
-                         gfx::NativeWindow* tab_window,
-                         int* tab_handle);
-
-  void ConnectExternalTab(uint64 cookie,
-                          bool allow,
-                          gfx::NativeWindow* tab_container_window,
-                          gfx::NativeWindow* tab_window,
-                          int* tab_handle);
-
   void OnSetPageFontSize(int tab_handle, int font_size);
 
   // See browsing_data_remover.h for explanation of bitmap fields.
@@ -392,6 +565,7 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   void WaitForExtensionTestResult(IPC::Message* reply_message);
 
   void InstallExtensionAndGetHandle(const FilePath& crx_path,
+                                    bool with_ui,
                                     IPC::Message* reply_message);
 
   void UninstallExtension(int extension_handle,
@@ -418,38 +592,14 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
                             bool* success,
                             std::string* value);
 
-  void NavigateInExternalTab(
-      int handle, const GURL& url, const GURL& referrer,
-      AutomationMsg_NavigationResponseValues* status);
-  void NavigateExternalTabAtIndex(
-      int handle, int index, AutomationMsg_NavigationResponseValues* status);
-
-// TODO(port): remove windowisms.
-#if defined(OS_WIN)
-  // The container of an externally hosted tab calls this to reflect any
-  // accelerator keys that it did not process. This gives the tab a chance
-  // to handle the keys
-  void ProcessUnhandledAccelerator(const IPC::Message& message, int handle,
-                                   const MSG& msg);
-#endif
-
-  void SetInitialFocus(const IPC::Message& message, int handle, bool reverse,
-                       bool restore_focus_to_view);
 
   // See comment in AutomationMsg_WaitForTabToBeRestored.
   void WaitForTabToBeRestored(int tab_handle, IPC::Message* reply_message);
 
-// TODO(port): remove windowisms.
-#if defined(OS_WIN)
-  void OnTabReposition(int tab_handle,
-                       const IPC::Reposition_Params& params);
-  void OnForwardContextMenuCommandToChrome(int tab_handle, int command);
-#endif  // defined(OS_WIN)
-
   // Gets the security state for the tab associated to the specified |handle|.
   void GetSecurityState(int handle, bool* success,
                         SecurityStyle* security_style, int* ssl_cert_status,
-                        int* mixed_content_status);
+                        int* insecure_content_status);
 
   // Gets the page type for the tab associated to the specified |handle|.
   void GetPageType(int handle, bool* success,
@@ -471,9 +621,9 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   void BringBrowserToFront(int browser_handle, bool* success);
 
   // Checks to see if a command on the browser's CommandController is enabled.
-  void IsPageMenuCommandEnabled(int browser_handle,
-                                int message_num,
-                                bool* menu_item_enabled);
+  void IsMenuCommandEnabled(int browser_handle,
+                            int message_num,
+                            bool* menu_item_enabled);
 
   // Prints the current tab immediately.
   void PrintNow(int tab_handle, IPC::Message* reply_message);
@@ -507,10 +657,6 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
                                   bool* success,
                                   std::vector<AutocompleteMatchData>* matches);
 
-  // Handler for a message sent by the automation client.
-  void OnMessageFromExternalHost(int handle, const std::string& message,
-                                 const std::string& origin,
-                                 const std::string& target);
 
   // Retrieves the number of info-bars currently showing in |count|.
   void GetInfoBarCount(int handle, int* count);
@@ -540,7 +686,7 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   // Sets the string value for preference with name |name|.
   void SetStringPreference(int handle,
                            const std::wstring& name,
-                           const std::wstring& value,
+                           const std::string& value,
                            bool* success);
 
   // Gets the bool value for preference with name |name|.
@@ -554,6 +700,9 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
                             const std::wstring& name,
                             bool value,
                             bool* success);
+
+  // Resets to the default theme.
+  void ResetToDefaultTheme();
 
   // Gets the current used encoding name of the page in the specified tab.
   void GetPageCurrentEncoding(int tab_handle, std::string* current_encoding);
@@ -606,8 +755,6 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   // is not of the TabContents type.
   TabContents* GetTabContentsForHandle(int handle, NavigationController** tab);
 
-  ExternalTabContainer* GetExternalTabForHandle(int handle);
-
 #if defined(OS_CHROMEOS)
   // Logs in through the Chrome OS Login Wizard with given |username| and
   // password.  Returns true via |reply_message| on success.
@@ -622,12 +769,6 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
       GURL from_url,
       bool success,
       history::RedirectList* redirects);
-
-  // Determine if the message from the external host represents a browser
-  // event, and if so dispatch it.
-  bool InterceptBrowserEventMessageFromExternalHost(const std::string& message,
-                                                    const std::string& origin,
-                                                    const std::string& target);
 
   // Returns the associated view for the tab handle passed in.
   // Returns NULL on failure.
@@ -661,12 +802,67 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   // Method called by the popup menu tracker when a popup menu is opened.
   void NotifyPopupMenuOpened();
 
+#if defined(OS_WIN)
+  // The functions in this block are for use with external tabs, so they are
+  // Windows only.
+
+  // The container of an externally hosted tab calls this to reflect any
+  // accelerator keys that it did not process. This gives the tab a chance
+  // to handle the keys
+  void ProcessUnhandledAccelerator(const IPC::Message& message, int handle,
+                                   const MSG& msg);
+
+  void SetInitialFocus(const IPC::Message& message, int handle, bool reverse,
+                       bool restore_focus_to_view);
+
+  void OnTabReposition(int tab_handle,
+                       const IPC::Reposition_Params& params);
+
+  void OnForwardContextMenuCommandToChrome(int tab_handle, int command);
+
+  void CreateExternalTab(const IPC::ExternalTabSettings& settings,
+                         gfx::NativeWindow* tab_container_window,
+                         gfx::NativeWindow* tab_window,
+                         int* tab_handle);
+
+  void ConnectExternalTab(uint64 cookie,
+                          bool allow,
+                          gfx::NativeWindow parent_window,
+                          gfx::NativeWindow* tab_container_window,
+                          gfx::NativeWindow* tab_window,
+                          int* tab_handle);
+
+  void NavigateInExternalTab(
+      int handle, const GURL& url, const GURL& referrer,
+      AutomationMsg_NavigationResponseValues* status);
+  void NavigateExternalTabAtIndex(
+      int handle, int index, AutomationMsg_NavigationResponseValues* status);
+
+  // Handler for a message sent by the automation client.
+  void OnMessageFromExternalHost(int handle, const std::string& message,
+                                 const std::string& origin,
+                                 const std::string& target);
+
+  // Determine if the message from the external host represents a browser
+  // event, and if so dispatch it.
+  bool InterceptBrowserEventMessageFromExternalHost(const std::string& message,
+                                                    const std::string& origin,
+                                                    const std::string& target);
+
+  void OnBrowserMoved(int handle);
+
+  void OnRunUnloadHandlers(int handle, gfx::NativeWindow notification_window,
+                           int notification_message);
+
+  ExternalTabContainer* GetExternalTabForHandle(int handle);
+#endif  // defined(OS_WIN)
+
   typedef ObserverList<NotificationObserver> NotificationObserverList;
   typedef std::map<NavigationController*, LoginHandler*> LoginHandlerMap;
   typedef std::map<int, ExtensionPortContainer*> PortContainerMap;
 
   scoped_ptr<IPC::ChannelProxy> channel_;
-  scoped_ptr<NotificationObserver> initial_load_observer_;
+  scoped_ptr<InitialLoadObserver> initial_load_observer_;
   scoped_ptr<NotificationObserver> new_tab_ui_load_observer_;
   scoped_ptr<NotificationObserver> find_in_page_observer_;
   scoped_ptr<NotificationObserver> dom_operation_observer_;

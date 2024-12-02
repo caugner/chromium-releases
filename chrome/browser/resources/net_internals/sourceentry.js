@@ -151,20 +151,41 @@ SourceEntry.prototype.createRow_ = function() {
   changeClassName(this.row_, "source_" + sourceTypeString, true);
 };
 
+/**
+ * Returns a description for this source log stream, which will be displayed
+ * in the list view. Most often this is a URL that identifies the request,
+ * or a hostname for a connect job, etc...
+ */
 SourceEntry.prototype.getDescription = function() {
   var e = this.getStartEntry_();
-  if (!e || e.extra_parameters == undefined)
+  if (!e)
     return '';
-  return e.extra_parameters;  // The URL / hostname / whatever.
+
+  if (e.source.type == LogSourceType.NONE) {
+    // NONE is what we use for global events that aren't actually grouped
+    // by a "source ID", so we will just stringize the event's type.
+    return getKeyWithValue(LogEventType, e.type);
+  }
+
+  if (e.params == undefined)
+    return '';
+
+  switch (e.source.type) {
+    case LogSourceType.URL_REQUEST:
+    case LogSourceType.SOCKET_STREAM:
+      return e.params.url;
+    case LogSourceType.CONNECT_JOB:
+      return e.params.group_name;
+  }
+
+  return '';
 };
 
 /**
  * Returns the starting entry for this source. Conceptually this is the
  * first entry that was logged to this source. However, we skip over the
- * TYPE_REQUEST_ALIVE entries which wrap TYPE_URL_REQUEST_START /
+ * TYPE_REQUEST_ALIVE entries which wrap TYPE_URL_REQUEST_START_JOB /
  * TYPE_SOCKET_STREAM_CONNECT.
- *
- * TODO(eroman): Get rid of TYPE_REQUEST_ALIVE so this isn't necessary.
  */
 SourceEntry.prototype.getStartEntry_ = function() {
   if (this.entries_.length < 1)

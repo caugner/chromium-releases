@@ -13,6 +13,7 @@
 #include "chrome/renderer/ggl/ggl.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 
 #if !defined(OS_MACOSX)
 #define FLIP_FRAMEBUFFER_VERTICALLY
@@ -38,7 +39,9 @@ class WebGraphicsContext3DCommandBufferImpl
 
   //----------------------------------------------------------------------
   // WebGraphicsContext3D methods
-  virtual bool initialize(WebGraphicsContext3D::Attributes attributes);
+  virtual bool initialize(WebGraphicsContext3D::Attributes attributes,
+                          WebKit::WebView*);
+
   virtual bool makeContextCurrent();
 
   virtual int width();
@@ -46,9 +49,14 @@ class WebGraphicsContext3DCommandBufferImpl
 
   virtual int sizeInBytes(int type);
 
+  virtual bool isGLES2Compliant();
+
   virtual void reshape(int width, int height);
 
   virtual bool readBackFramebuffer(unsigned char* pixels, size_t buffer_size);
+
+  virtual unsigned int getPlatformTextureId();
+  virtual void prepareTexture();
 
   virtual void activeTexture(unsigned long texture);
   virtual void attachShader(WebGLId program, WebGLId shader);
@@ -134,6 +142,11 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual bool getActiveUniform(WebGLId program,
                                 unsigned long index,
                                 ActiveInfo&);
+
+  virtual void getAttachedShaders(WebGLId program,
+                                  int maxCount,
+                                  int* count,
+                                  unsigned int* shaders);
 
   virtual int  getAttribLocation(WebGLId program, const char* name);
 
@@ -328,9 +341,6 @@ class WebGraphicsContext3DCommandBufferImpl
   ggl::Context* context_;
 
   WebKit::WebGraphicsContext3D::Attributes attributes_;
-  unsigned int texture_;
-  unsigned int fbo_;
-  unsigned int depth_buffer_;
   int cached_width_, cached_height_;
 
   // For tracking which FBO is bound.

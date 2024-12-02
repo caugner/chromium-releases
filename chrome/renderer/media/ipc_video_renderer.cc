@@ -37,21 +37,14 @@ media::FilterFactory* IPCVideoRenderer::CreateFactory(
 // static
 bool IPCVideoRenderer::IsMediaFormatSupported(
     const media::MediaFormat& media_format) {
-  int width = 0;
-  int height = 0;
-  return ParseMediaFormat(media_format, &width, &height);
+  return ParseMediaFormat(media_format, NULL, NULL, NULL, NULL);
 }
 
 bool IPCVideoRenderer::OnInitialize(media::VideoDecoder* decoder) {
-  int width = 0;
-  int height = 0;
-  if (!ParseMediaFormat(decoder->media_format(), &width, &height))
-    return false;
-
-  video_size_.SetSize(width, height);
+  video_size_.SetSize(width(), height());
 
   // TODO(scherkus): we're assuming YV12 here.
-  size_t size = (width * height) + ((width * height) >> 1);
+  size_t size = (width() * height()) + ((width() * height()) >> 1);
   uint32 epoch = static_cast<uint32>(reinterpret_cast<size_t>(this));
   transport_dib_.reset(TransportDIB::Create(size, epoch));
   CHECK(transport_dib_.get());
@@ -59,11 +52,11 @@ bool IPCVideoRenderer::OnInitialize(media::VideoDecoder* decoder) {
   return true;
 }
 
-void IPCVideoRenderer::OnStop() {
+void IPCVideoRenderer::OnStop(media::FilterCallback* callback) {
   stopped_.Signal();
 
   proxy_->message_loop()->PostTask(FROM_HERE,
-      NewRunnableMethod(this, &IPCVideoRenderer::DoDestroyVideo));
+      NewRunnableMethod(this, &IPCVideoRenderer::DoDestroyVideo, callback));
 }
 
 void IPCVideoRenderer::OnFrameAvailable() {
@@ -120,6 +113,7 @@ void IPCVideoRenderer::DoUpdateVideo() {
   scoped_refptr<media::VideoFrame> frame;
   GetCurrentFrame(&frame);
   if (!frame) {
+    PutCurrentFrame(frame);
     return;
   }
 
@@ -157,6 +151,8 @@ void IPCVideoRenderer::DoUpdateVideo() {
     src += stride;
   }
 
+  PutCurrentFrame(frame);
+
   // Sanity check!
   uint8* expected = reinterpret_cast<uint8*>(transport_dib_->memory()) +
       transport_dib_->size();
@@ -167,7 +163,7 @@ void IPCVideoRenderer::DoUpdateVideo() {
                                    video_rect_));
 }
 
-void IPCVideoRenderer::DoDestroyVideo() {
+void IPCVideoRenderer::DoDestroyVideo(media::FilterCallback* callback) {
   DCHECK(MessageLoop::current() == proxy_->message_loop());
 
   // We shouldn't receive any more messages after the browser receives this.
@@ -176,4 +172,8 @@ void IPCVideoRenderer::DoDestroyVideo() {
   // Detach ourselves from the proxy.
   proxy_->SetVideoRenderer(NULL);
   proxy_ = NULL;
+  if (callback) {
+    callback->Run();
+    delete callback;
+  }
 }

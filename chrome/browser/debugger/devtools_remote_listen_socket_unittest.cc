@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,7 +48,7 @@ static const char* kSemaphoreName = "chromium.listen_socket";
 
 
 ListenSocket* DevToolsRemoteListenSocketTester::DoListen() {
-  return DevToolsRemoteListenSocket::Listen(kLoopback, kTestPort, this, this);
+  return DevToolsRemoteListenSocket::Listen(kLoopback, kTestPort, this);
 }
 
 void DevToolsRemoteListenSocketTester::SetUp() {
@@ -79,7 +79,7 @@ void DevToolsRemoteListenSocketTester::SetUp() {
 
   // verify the connect/accept and setup test_socket_
   test_socket_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  ASSERT_NE(-1, test_socket_);
+  ASSERT_NE(INVALID_SOCKET, test_socket_);
   struct sockaddr_in client;
   client.sin_family = AF_INET;
   client.sin_addr.s_addr = inet_addr(kLoopback);
@@ -99,7 +99,8 @@ void DevToolsRemoteListenSocketTester::TearDown() {
 #if defined(OS_WIN)
   closesocket(test_socket_);
 #elif defined(OS_POSIX)
-  HANDLE_EINTR(close(test_socket_));
+  int ret = HANDLE_EINTR(close(test_socket_));
+  ASSERT_EQ(ret, 0);
 #endif
   ASSERT_TRUE(NextAction(kDefaultTimeoutMs));
   ASSERT_EQ(ACTION_CLOSE, last_action_.type());
@@ -210,8 +211,6 @@ int DevToolsRemoteListenSocketTester::ClearTestSocket() {
 }
 
 void DevToolsRemoteListenSocketTester::Shutdown() {
-  connection_->Release();
-  connection_ = NULL;
   server_->Release();
   server_ = NULL;
   ReportAction(ListenSocketTestAction(ACTION_SHUTDOWN));
@@ -219,10 +218,8 @@ void DevToolsRemoteListenSocketTester::Shutdown() {
 
 void DevToolsRemoteListenSocketTester::Listen() {
   server_ = DoListen();
-  if (server_) {
-    server_->AddRef();
-    ReportAction(ListenSocketTestAction(ACTION_LISTEN));
-  }
+  server_->AddRef();
+  ReportAction(ListenSocketTestAction(ACTION_LISTEN));
 }
 
 void DevToolsRemoteListenSocketTester::SendFromTester() {
@@ -230,19 +227,14 @@ void DevToolsRemoteListenSocketTester::SendFromTester() {
   ReportAction(ListenSocketTestAction(ACTION_SEND));
 }
 
-void DevToolsRemoteListenSocketTester::DidAccept(ListenSocket *server,
-                                                 ListenSocket *connection) {
+void DevToolsRemoteListenSocketTester::OnAcceptConnection(
+    ListenSocket* connection) {
   connection_ = connection;
-  connection_->AddRef();
   ReportAction(ListenSocketTestAction(ACTION_ACCEPT));
 }
 
-void DevToolsRemoteListenSocketTester::DidRead(ListenSocket *connection,
-                                 const std::string& data) {
-  ReportAction(ListenSocketTestAction(ACTION_READ, data));
-}
-
-void DevToolsRemoteListenSocketTester::DidClose(ListenSocket *sock) {
+void DevToolsRemoteListenSocketTester::OnConnectionLost() {
+  connection_ = NULL;
   ReportAction(ListenSocketTestAction(ACTION_CLOSE));
 }
 
@@ -351,7 +343,9 @@ class DevToolsRemoteListenSocketTest: public PlatformTest {
   scoped_refptr<DevToolsRemoteListenSocketTester> tester_;
 };
 
-TEST_F(DevToolsRemoteListenSocketTest, ServerSend) {
+// This test is flaky; see comment in ::TestServerSend.
+// http://code.google.com/p/chromium/issues/detail?id=48562
+TEST_F(DevToolsRemoteListenSocketTest, FLAKY_ServerSend) {
   tester_->TestServerSend();
 }
 

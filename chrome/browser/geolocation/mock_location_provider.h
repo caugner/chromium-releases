@@ -6,25 +6,29 @@
 #define CHROME_BROWSER_GEOLOCATION_MOCK_LOCATION_PROVIDER_H_
 
 #include "chrome/browser/geolocation/location_provider.h"
+#include "chrome/common/geoposition.h"
 #include "googleurl/src/gurl.h"
 
 // Mock implementation of a location provider for testing.
 class MockLocationProvider : public LocationProviderBase {
  public:
-  MockLocationProvider();
-  virtual ~MockLocationProvider();
+  // Will update |*self_ref| to point to |this| on construction, and to NULL
+  // on destruction.
+  explicit MockLocationProvider(MockLocationProvider** self_ref);
+  ~MockLocationProvider();
 
   using LocationProviderBase::UpdateListeners;
-  using LocationProviderBase::InformListenersOfMovement;
 
   // LocationProviderBase implementation.
-  virtual bool StartProvider();
+  virtual bool StartProvider(bool high_accuracy);
+  virtual void StopProvider();
   virtual void GetPosition(Geoposition* position);
   virtual void OnPermissionGranted(const GURL& requesting_frame);
 
   Geoposition position_;
-  int started_count_;
+  enum { STOPPED, LOW_ACCURACY, HIGH_ACCURACY } state_;
   GURL permission_granted_url_;
+  MockLocationProvider** self_ref_;
 
   // Set when an instance of the mock is created via a factory function.
   static MockLocationProvider* instance_;
@@ -35,7 +39,7 @@ class MockLocationProvider : public LocationProviderBase {
 // Factory functions for the various sorts of mock location providers,
 // for use with GeolocationArbitrator::SetProviderFactoryForTest (i.e.
 // not intended for test code to use to get access to the mock, you can use
-// MockLocationProvider::instance_ for this, or make a custom facotry method).
+// MockLocationProvider::instance_ for this, or make a custom factory method).
 
 // Creates a mock location provider with no default behavior.
 LocationProviderBase* NewMockLocationProvider();

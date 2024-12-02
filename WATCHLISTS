@@ -125,6 +125,21 @@
       'filepath': 'chrome/browser/views/options/content_page_view.h|'\
         'chrome/browser/views/options/general_page_view.h',
     },
+    'chromeos': {
+      'filepath': 'chrome/browser/chromeos/.*',
+    },
+    'npapi_headers': {
+      'filepath': 'third_party/npapi/bindings/.*',
+    },
+    'remoting': {
+      'filepath': 'remoting/.*',
+    },
+    'domui_options' : {
+      'filepath': 'chrome/browser/resources/options/.*|'\
+        'chrome/browser/resources/options.html|'\
+        'chrome/browser/dom_ui/options_ui.cc|'\
+        'chrome/browser/dom_ui/core_options_handler.cc',
+    },
   },
 
   'WATCHLISTS': {
@@ -142,8 +157,7 @@
     'download': ['paul@chromium.org'],
     'history': ['brettw-cc@chromium.org'],
     'renderer': ['darin-cc@chromium.org',
-                 'brettw-cc@chromium.org',
-                 'jam+cc@chromium.org'],
+                 'brettw-cc@chromium.org'],
     'safe_browsing': ['paul@chromium.org'],
     'tab_contents': ['brettw-cc@chromium.org'],
     'webkit': ['darin-cc@chromium.org'],
@@ -152,7 +166,7 @@
     'extension': ['aa@chromium.org',
                   'erikkay@chromium.org',
                   'pam+watch@chromium.org'],
-    'net': ['darin-cc@chromium.org'],
+    'net': ['darin-cc@chromium.org', 'cbentzel+watch@chromium.org'],
     'ftp': ['phajdan.jr@chromium.org'],
     'installer': ['kuchhal@chromium.org'],
     'importer': ['kuchhal@chromium.org'],
@@ -161,7 +175,7 @@
     'ipc': ['jam@chromium.org', 'darin-cc@chromium.org'],
     'linux-sandboxing': ['agl@chromium.org'],
     'sync': ['tim@chromium.org', 'nick@chromium.org',
-             'idana@chromium.org'],
+             'idana@chromium.org', 'rsimha@chromium.org'],
     'layout_tests': ['pam+watch@chromium.org', 'dpranke+watch@chromium.org'],
     'tools': ['pam+watch@chromium.org'],
     'tests': ['phajdan.jr@chromium.org'],
@@ -172,5 +186,11 @@
     'gpu': ['apatrick@chromium.org'],
     'locale_settings': ['finnur+watch@chromium.org'],
     'options_dialog_content': ['finnur+watch@chromium.org'],
+    'chromeos': ['davemoore+watch@chromium.org'],
+    'npapi_headers': ['stuartmorgan@chromium.org'],
+    'remoting': ['ajwong@chromium.org', 'sergeyu@chromium.org',
+              	'hclam@chromium.org', 'dmaclach@chromium.org',
+	 	'garykac@chromium.org'],
+    'domui_options': ['dhg@chromium.org'],
   },
 }

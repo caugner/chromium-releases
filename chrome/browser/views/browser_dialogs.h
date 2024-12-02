@@ -29,6 +29,7 @@ class TemplateURL;
 
 namespace gfx {
 class Rect;
+class Size;
 }  // namespace gfx
 
 namespace views {
@@ -46,9 +47,6 @@ void ShowBugReportView(views::Window* parent,
 // Shows the "Clear browsing data" dialog box. See ClearBrowsingDataView.
 void ShowClearBrowsingDataView(gfx::NativeWindow parent,
                                Profile* profile);
-
-// Shows the "Select profile" dialog. See SelectProfileDialog.
-void ShowSelectProfileDialog();
 
 // Shows the "Importer" dialog. See ImporterView.
 void ShowImporterView(views::Widget* parent,
@@ -68,11 +66,11 @@ bool IsBookmarkBubbleViewShowing();
 void ShowBookmarkManagerView(Profile* profile);
 
 // Shows the about dialog. See AboutChromeView.
-void ShowAboutChromeView(gfx::NativeWindow parent,
-                         Profile* profile);
+views::Window* ShowAboutChromeView(gfx::NativeWindow parent,
+                                   Profile* profile);
 
 // Shows an HTML dialog. See HtmlDialogView.
-void ShowHtmlDialogView(gfx::NativeWindow parent, Browser* browser,
+void ShowHtmlDialogView(gfx::NativeWindow parent, Profile* profile,
                         HtmlDialogUIDelegate* delegate);
 
 // Creates and returns a find bar for the given browser window. See FindBarWin.
@@ -114,6 +112,10 @@ void ShowRepostFormWarningDialog(gfx::NativeWindow parent_window,
 void ShowContentSettingsWindow(gfx::NativeWindow parent_window,
                                ContentSettingsType content_type,
                                Profile* profile);
+
+// Shows the collected cookies dialog box.
+void ShowCollectedCookiesDialog(gfx::NativeWindow parent_window,
+                                TabContents* tab_contents);
 
 // Shows the create web app shortcut dialog box.
 void ShowCreateShortcutsDialog(gfx::NativeWindow parent_window,

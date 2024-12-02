@@ -176,7 +176,7 @@ Chrome supports. -->
         Google Chrome
       </message>
       <message name="IDS_SXS_SHORTCUT_NAME" desc="The Chrome short cut name for SxS channel">
-        Google Chrome Exp
+        Google Chrome Canary Build
       </message>
       <message name="IDS_PRODUCT_DESCRIPTION" desc="Browser description">
         Google Chrome is a web browser that runs web pages and applications with lightning speed. It's fast, stable, and easy to use. Browse the web more safely with malware and phishing protection built into Google Chrome.
@@ -321,8 +321,8 @@ Chrome supports. -->
         </message>
       </if>
       <!-- Strings used to warn that an OS is not supported -->
-      <message name="IDS_UNSUPPORTED_OS_WIN2000" desc="The text used to warn the user that Windows 2000 is not supported">
-        Google Chrome does not support Windows 2000. Some features may not work.
+      <message name="IDS_UNSUPPORTED_OS_PRE_WIN_XP" desc="The text used to warn the user that Windows pre-XP is not supported">
+        Google Chrome requires Windows XP or later. Some features may not work.
       </message>
       <message name="IDS_UNSUPPORTED_OS" desc="The text used to warn the user that current OS is not supported">
         Google Chrome does not support <ph name="OS_NAME">$1<ex>Windows 2000</ex></ph>.
@@ -333,9 +333,16 @@ Chrome supports. -->
       <message name="IDS_OPTIONS_CHROME_UI_LANGUAGE" desc="The documentation string of the 'Chrome UI language' preference">
         Google Chrome language:
       </message>
-      <message name="IDS_OPTIONS_RESTART_REQUIRED" desc="The message displayed for an option that requires a restart to take effect. This appears in a message box if an option is changed that requires a restart.">
-        Please close all Google Chrome windows and restart it for this change to take effect.
-      </message>
+      <if expr="not pp_ifdef('chromeos')">
+        <message name="IDS_OPTIONS_RESTART_REQUIRED" desc="The message displayed for an option that requires a restart to take effect. This appears in a message box if an option is changed that requires a restart.">
+          Please close all Google Chrome windows and restart it for this change to take effect.
+        </message>
+      </if>
+      <if expr="pp_ifdef('chromeos')">
+        <message name="IDS_OPTIONS_RESTART_REQUIRED" desc="The message displayed for an option that requires a restart to take effect. This appears in a message box if an option is changed that requires a restart.">
+          Please sign out of Google Chrome OS and sign in again for this change to take effect.
+        </message>
+      </if>
       <message name="IDS_OPTIONS_RESET_MESSAGE" desc="The message shown when the user presses the 'Reset Chrome options' button">
         When you reset Google Chrome options any changes you've made will be reverted to the default settings. Do you want to reset Chrome options?
       </message>
@@ -344,6 +351,10 @@ Chrome supports. -->
       </message>
       <message name="IDS_OPTIONS_ENABLE_LOGGING" desc="The label of the checkbox to enable/disable crash and user metrics logging">
         Help make Google Chrome better by automatically sending usage statistics and crash reports to Google
+      </message>
+      <message name="IDS_EULA_CHECKBOX_ENABLE_LOGGING" desc="The label of the checkbox to enable/disable crash and user metrics logging">
+	<!--We use /n here to separate lines manually because NativeCheckboxGtk currently does not support multi-line. -->
+        Optional: Help make Google Chrome better by automatically sending usage statistics and crash\nreports to Google
       </message>
       <message name="IDS_PROFILE_TOO_NEW_ERROR" desc="Error displayed on startup when the profile is from a newer version of the product and can not be read">
         Your profile can not be used because it is from a newer version of Google Chrome.\n\nSome features may be unavailable. Please specify a different profile directory or use a newer version of Chrome.
@@ -431,9 +442,6 @@ Chrome supports. -->
       <message name="IDS_IMPORT_BOOKMARKS" desc="Explanatory text for the importing progress dialog when importing a bookmarks.html file from the bookmark manager">
         Google Chrome is now importing Favorites/Bookmarks.
       </message>
-      <message name="IDS_START_IN_PROFILE_SHORTCUT_NAME" desc="Name of the desktop shortcut to start the application in a specific profile.">
-        Google Chrome for <ph name="profile_name">$1</ph>
-      </message>
       <message name="IDS_OEM_MAIN_SHORTCUT_NAME" desc="Name of the desktop shortcut to start the application for OEM pre-installations.">
         Internet Browser
       </message>
@@ -451,9 +459,6 @@ Chrome supports. -->
       </message>
       <message name="IDS_DEFAULT_BROWSER_INFOBAR_SHORT_TEXT" desc="More compact text to show in the default browser query infobar.">
         Google Chrome isn't your default browser.
-      </message>
-      <message name="IDS_AUTOFILL_INFOBAR_TEXT" desc="Text to show in the autofill request infobar.">
-        Google Chrome will store this information to make filling out forms easier.
       </message>
       <!-- Try Chrome Toast Dialog -->
       <message name="IDS_TRY_TOAST_HEADING" desc="Top line of the try-chrome-again dialog">

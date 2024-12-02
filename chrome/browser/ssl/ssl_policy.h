@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <string>
 
 #include "chrome/browser/ssl/ssl_blocking_page.h"
-#include "chrome/common/filter_policy.h"
 #include "webkit/glue/resource_type.h"
 
 class NavigationEntry;
@@ -29,7 +28,6 @@ class SSLPolicy : public SSLBlockingPage::Delegate {
   // An error occurred with the certificate in an SSL connection.
   void OnCertError(SSLCertErrorHandler* handler);
 
-  void DidDisplayInsecureContent(NavigationEntry* entry);
   void DidRunInsecureContent(NavigationEntry* entry,
                              const std::string& security_origin);
 
@@ -37,7 +35,8 @@ class SSLPolicy : public SSLBlockingPage::Delegate {
   void OnRequestStarted(SSLRequestInfo* info);
 
   // Update the SSL information in |entry| to match the current state.
-  void UpdateEntry(NavigationEntry* entry);
+  // |tab_contents| is the TabContents associated with this entry.
+  void UpdateEntry(NavigationEntry* entry, TabContents* tab_contents);
 
   SSLPolicyBackend* backend() const { return backend_; }
 
@@ -48,26 +47,19 @@ class SSLPolicy : public SSLBlockingPage::Delegate {
 
  private:
   // Helper method for derived classes handling certificate errors.
-  // If the error can be overridden by the user, pass overriable=true, which
-  // shows a blocking page and lets the user continue or cancel the request.
-  // For fatal certificate errors, pass overridable=false, which show an error
-  // page.
-  void OnCertErrorInternal(SSLCertErrorHandler* handler, bool overridable);
+  // If the error can be overridden by the user, show a blocking page that
+  // lets the user continue or cancel the request.
+  // For fatal certificate errors, show a blocking page that only lets the
+  // user cancel the request.
+  void OnCertErrorInternal(SSLCertErrorHandler* handler,
+                           SSLBlockingPage::ErrorLevel error_level);
 
   // If the security style of |entry| has not been initialized, then initialize
   // it with the default style for its URL.
   void InitializeEntryIfNeeded(NavigationEntry* entry);
 
-  // Mark |origin| as containing insecure content in the process with ID |pid|.
-  void MarkOriginAsBroken(const std::string& origin, int pid);
-
-  // Called after we've decided that |info| represents a request for mixed
-  // content.  Updates our internal state to reflect that we've loaded |info|.
-  void UpdateStateForMixedContent(SSLRequestInfo* info);
-
-  // Called after we've decided that |info| represents a request for unsafe
-  // content.  Updates our internal state to reflect that we've loaded |info|.
-  void UpdateStateForUnsafeContent(SSLRequestInfo* info);
+  // Mark |origin| as having run insecure content in the process with ID |pid|.
+  void OriginRanInsecureContent(const std::string& origin, int pid);
 
   // The backend we use to enact our decisions.
   SSLPolicyBackend* backend_;

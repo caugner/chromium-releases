@@ -14,6 +14,7 @@
 #include "base/win_util.h"
 #include "chrome/browser/browser_init.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
@@ -143,8 +144,7 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
   if (visible_window) {
     std::wstring text = l10n_util::GetString(IDS_BROWSER_HUNGBROWSER_MESSAGE);
     std::wstring caption = l10n_util::GetString(IDS_PRODUCT_NAME);
-    if (IDYES != win_util::MessageBox(NULL, text, caption,
-                                      MB_YESNO | MB_ICONSTOP | MB_TOPMOST)) {
+    if (!platform_util::SimpleYesNoBox(NULL, caption, text)) {
       // The user denied. Quit silently.
       return PROCESS_NOTIFIED;
     }
@@ -154,6 +154,13 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
   base::KillProcessById(process_id, ResultCodes::HUNG, true);
   remote_window_ = NULL;
   return PROCESS_NONE;
+}
+
+ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcessOrCreate() {
+  NotifyResult result = NotifyOtherProcess();
+  if (result != PROCESS_NONE)
+    return result;
+  return Create() ? PROCESS_NONE : PROFILE_IN_USE;
 }
 
 // For windows, there is no need to call Create() since the call is made in
@@ -193,9 +200,7 @@ void ProcessSingleton::Cleanup() {
 
 LRESULT ProcessSingleton::OnCopyData(HWND hwnd, const COPYDATASTRUCT* cds) {
   // If locked, it means we are not ready to process this message because
-  // we are probably in a first run critical phase. We must do this before
-  // doing the IsShuttingDown() check since that returns true during first run
-  // (since g_browser_process hasn't been AddRefModule()d yet).
+  // we are probably in a first run critical phase.
   if (locked_) {
     // Attempt to place ourselves in the foreground / flash the task bar.
     if (IsWindow(foreground_window_))

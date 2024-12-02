@@ -13,6 +13,9 @@ bool AppCacheDispatcher::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(AppCacheMsg_CacheSelected, OnCacheSelected)
     IPC_MESSAGE_HANDLER(AppCacheMsg_StatusChanged, OnStatusChanged)
     IPC_MESSAGE_HANDLER(AppCacheMsg_EventRaised, OnEventRaised)
+    IPC_MESSAGE_HANDLER(AppCacheMsg_ProgressEventRaised, OnProgressEventRaised)
+    IPC_MESSAGE_HANDLER(AppCacheMsg_ErrorEventRaised, OnErrorEventRaised)
+    IPC_MESSAGE_HANDLER(AppCacheMsg_LogMessage, OnLogMessage)
     IPC_MESSAGE_HANDLER(AppCacheMsg_ContentBlocked, OnContentBlocked)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -34,6 +37,25 @@ void AppCacheDispatcher::OnEventRaised(const std::vector<int>& host_ids,
   frontend_impl_.OnEventRaised(host_ids, event_id);
 }
 
-void AppCacheDispatcher::OnContentBlocked(int host_id) {
-  frontend_impl_.OnContentBlocked(host_id);
+void AppCacheDispatcher::OnProgressEventRaised(
+    const std::vector<int>& host_ids,
+    const GURL& url, int num_total, int num_complete) {
+  frontend_impl_.OnProgressEventRaised(host_ids, url, num_total, num_complete);
+}
+
+void AppCacheDispatcher::OnErrorEventRaised(
+    const std::vector<int>& host_ids,
+    const std::string& message) {
+  frontend_impl_.OnErrorEventRaised(host_ids, message);
+}
+
+void AppCacheDispatcher::OnLogMessage(
+    int host_id, int log_level, const std::string& message) {
+  frontend_impl_.OnLogMessage(
+      host_id, static_cast<appcache::LogLevel>(log_level), message);
+}
+
+void AppCacheDispatcher::OnContentBlocked(int host_id,
+                                          const GURL& manifest_url) {
+  frontend_impl_.OnContentBlocked(host_id, manifest_url);
 }

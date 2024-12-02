@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,9 +43,8 @@ class ToolbarControllerTest : public CocoaTest {
   // Indexes that match the ordering returned by the private ToolbarController
   // |-toolbarViews| method.
   enum {
-    kBackIndex, kForwardIndex, kReloadIndex, kHomeIndex, kStarIndex, kGoIndex,
-    kPageIndex, kWrenchIndex, kLocationIndex,
-    kBrowserActionContainerViewIndex
+    kBackIndex, kForwardIndex, kReloadIndex, kHomeIndex,
+    kWrenchIndex, kLocationIndex, kBrowserActionContainerViewIndex
   };
 
   ToolbarControllerTest() {
@@ -78,8 +77,6 @@ class ToolbarControllerTest : public CocoaTest {
               [[views objectAtIndex:kReloadIndex] isEnabled] ? true : false);
     EXPECT_EQ(updater->IsCommandEnabled(IDC_HOME),
               [[views objectAtIndex:kHomeIndex] isEnabled] ? true : false);
-    EXPECT_EQ(updater->IsCommandEnabled(IDC_BOOKMARK_PAGE),
-              [[views objectAtIndex:kStarIndex] isEnabled] ? true : false);
   }
 
   BrowserTestHelper helper_;
@@ -102,11 +99,9 @@ TEST_F(ToolbarControllerTest, TitlebarOnly) {
   [bar_ setHasToolbar:NO hasLocationBar:YES];
   EXPECT_NE(view, [bar_ view]);
 
-  // Simulate a popup going fullscreen and back.
+  // Simulate a popup going fullscreen and back by performing the reparenting
+  // that happens during fullscreen transitions
   NSView* superview = [view superview];
-  // TODO(jrg): find a way to add an [NSAutoreleasePool drain] in
-  // here.  I don't have access to the current
-  // scoped_nsautorelease_pool to do it properly :-(
   [view removeFromSuperview];
   [superview addSubview:view];
 
@@ -117,7 +112,20 @@ TEST_F(ToolbarControllerTest, TitlebarOnly) {
   [bar_ setHasToolbar:NO hasLocationBar:YES];
 }
 
-// TODO(viettrungluu): make a version of above without location bar.
+// Make sure it works in the completely undecorated case.
+TEST_F(ToolbarControllerTest, NoLocationBar) {
+  NSView* view = [bar_ view];
+
+  [bar_ setHasToolbar:NO hasLocationBar:NO];
+  EXPECT_NE(view, [bar_ view]);
+  EXPECT_TRUE([[bar_ view] isHidden]);
+
+  // Simulate a popup going fullscreen and back by performing the reparenting
+  // that happens during fullscreen transitions
+  NSView* superview = [view superview];
+  [view removeFromSuperview];
+  [superview addSubview:view];
+}
 
 // Make some changes to the enabled state of a few of the buttons and ensure
 // that we're still in sync.
@@ -142,14 +150,14 @@ TEST_F(ToolbarControllerTest, FocusLocation) {
 }
 
 TEST_F(ToolbarControllerTest, LoadingState) {
-  // In its initial state, the go button has a tag of IDC_GO. When loading,
-  // it should be IDC_STOP.
-  NSButton* go = [[bar_ toolbarViews] objectAtIndex:kGoIndex];
-  EXPECT_EQ([go tag], IDC_GO);
-  [bar_ setIsLoading:YES];
-  EXPECT_EQ([go tag], IDC_STOP);
-  [bar_ setIsLoading:NO];
-  EXPECT_EQ([go tag], IDC_GO);
+  // In its initial state, the reload button has a tag of
+  // IDC_RELOAD. When loading, it should be IDC_STOP.
+  NSButton* reload = [[bar_ toolbarViews] objectAtIndex:kReloadIndex];
+  EXPECT_EQ([reload tag], IDC_RELOAD);
+  [bar_ setIsLoading:YES force:YES];
+  EXPECT_EQ([reload tag], IDC_STOP);
+  [bar_ setIsLoading:NO force:YES];
+  EXPECT_EQ([reload tag], IDC_RELOAD);
 }
 
 // Check that toggling the state of the home button changes the visible
@@ -160,39 +168,17 @@ TEST_F(ToolbarControllerTest, ToggleHome) {
   NSView* homeButton = [[bar_ toolbarViews] objectAtIndex:kHomeIndex];
   EXPECT_EQ(showHome, ![homeButton isHidden]);
 
-  NSView* starButton = [[bar_ toolbarViews] objectAtIndex:kStarIndex];
+  NSView* reloadButton = [[bar_ toolbarViews] objectAtIndex:kReloadIndex];
   NSView* locationBar = [[bar_ toolbarViews] objectAtIndex:kLocationIndex];
-  NSRect originalStarFrame = [starButton frame];
+  NSRect originalReloadFrame = [reloadButton frame];
   NSRect originalLocationBarFrame = [locationBar frame];
 
   // Toggle the pref and make sure the button changed state and the other
   // views moved.
   prefs->SetBoolean(prefs::kShowHomeButton, !showHome);
   EXPECT_EQ(showHome, [homeButton isHidden]);
-  EXPECT_NE(NSMinX(originalStarFrame), NSMinX([starButton frame]));
+  EXPECT_NE(NSMinX(originalReloadFrame), NSMinX([reloadButton frame]));
   EXPECT_NE(NSMinX(originalLocationBarFrame), NSMinX([locationBar frame]));
-  EXPECT_NE(NSWidth(originalLocationBarFrame), NSWidth([locationBar frame]));
-}
-
-TEST_F(ToolbarControllerTest, TogglePageWrench) {
-  PrefService* prefs = helper_.profile()->GetPrefs();
-  bool showButtons = prefs->GetBoolean(prefs::kShowPageOptionsButtons);
-  NSView* pageButton = [[bar_ toolbarViews] objectAtIndex:kPageIndex];
-  NSView* wrenchButton = [[bar_ toolbarViews] objectAtIndex:kWrenchIndex];
-  EXPECT_EQ(showButtons, ![pageButton isHidden]);
-  EXPECT_EQ(showButtons, ![wrenchButton isHidden]);
-
-  NSView* goButton = [[bar_ toolbarViews] objectAtIndex:kGoIndex];
-  NSView* locationBar = [[bar_ toolbarViews] objectAtIndex:kLocationIndex];
-  NSRect originalGoFrame = [goButton frame];
-  NSRect originalLocationBarFrame = [locationBar frame];
-
-  // Toggle the pref and make sure the buttons changed state and the other
-  // views moved (or in the case of the location bar, it changed width).
-  prefs->SetBoolean(prefs::kShowPageOptionsButtons, !showButtons);
-  EXPECT_EQ(showButtons, [pageButton isHidden]);
-  EXPECT_EQ(showButtons, [wrenchButton isHidden]);
-  EXPECT_NE(NSMinX(originalGoFrame), NSMinX([goButton frame]));
   EXPECT_NE(NSWidth(originalLocationBarFrame), NSWidth([locationBar frame]));
 }
 
@@ -202,48 +188,24 @@ TEST_F(ToolbarControllerTest, TogglePageWrench) {
 TEST_F(ToolbarControllerTest, DontToggleWhenNoToolbar) {
   [bar_ setHasToolbar:NO hasLocationBar:YES];
   NSView* homeButton = [[bar_ toolbarViews] objectAtIndex:kHomeIndex];
-  NSView* pageButton = [[bar_ toolbarViews] objectAtIndex:kPageIndex];
-  NSView* wrenchButton = [[bar_ toolbarViews] objectAtIndex:kWrenchIndex];
   NSView* locationBar = [[bar_ toolbarViews] objectAtIndex:kLocationIndex];
   NSRect locationBarFrame = [locationBar frame];
   EXPECT_EQ([homeButton isHidden], YES);
-  EXPECT_EQ([pageButton isHidden], YES);
-  EXPECT_EQ([wrenchButton isHidden], YES);
   [bar_ showOptionalHomeButton];
   EXPECT_EQ([homeButton isHidden], YES);
   NSRect newLocationBarFrame = [locationBar frame];
   EXPECT_TRUE(NSEqualRects(locationBarFrame, newLocationBarFrame));
-  [bar_ showOptionalPageWrenchButtons];
-  EXPECT_EQ([pageButton isHidden], YES);
-  EXPECT_EQ([wrenchButton isHidden], YES);
   newLocationBarFrame = [locationBar frame];
   EXPECT_TRUE(NSEqualRects(locationBarFrame, newLocationBarFrame));
 }
 
-TEST_F(ToolbarControllerTest, StarButtonInWindowCoordinates) {
-  NSRect star = [bar_ starButtonInWindowCoordinates];
-  NSRect all = [[[bar_ view] window] frame];
+TEST_F(ToolbarControllerTest, BookmarkBubblePoint) {
+  const NSPoint starPoint = [bar_ bookmarkBubblePoint];
+  const NSRect barFrame =
+      [[bar_ view] convertRect:[[bar_ view] bounds] toView:nil];
 
-  // Make sure the star is completely inside the window rect
-  EXPECT_TRUE(NSContainsRect(all, star));
-}
-
-TEST_F(ToolbarControllerTest, BubblePosition) {
-  NSView* locationBar = [[bar_ toolbarViews] objectAtIndex:kLocationIndex];
-
-  // The window frame (in window base coordinates).
-  NSRect all = [[[bar_ view] window] frame];
-  // The frame of the location bar in window base coordinates.
-  NSRect locationFrame =
-      [locationBar convertRect:[locationBar bounds] toView:nil];
-  // The frame of the location stack in window base coordinates.  The horizontal
-  // coordinates here are used for the omnibox dropdown.
-  gfx::Rect locationStackFrame = [bar_ locationStackBounds];
-
-  // Make sure the location stack starts to the left of and ends to the right of
-  // the location bar.
-  EXPECT_LT(locationStackFrame.x(), NSMinX(locationFrame));
-  EXPECT_GT(locationStackFrame.right(), NSMaxX(locationFrame));
+  // Make sure the star is completely inside the location bar.
+  EXPECT_TRUE(NSPointInRect(starPoint, barFrame));
 }
 
 TEST_F(ToolbarControllerTest, HoverButtonForEvent) {

@@ -12,7 +12,8 @@
 #include "chrome/browser/views/browser_actions_container.h"
 #include "chrome/browser/views/extensions/browser_action_drag_data.h"
 #include "chrome/common/extensions/extension.h"
-#include "gfx/canvas.h"
+#include "chrome/common/extensions/extension_action.h"
+#include "gfx/canvas_skia.h"
 #include "views/controls/menu/menu_item_view.h"
 #include "views/controls/menu/menu_2.h"
 
@@ -37,7 +38,7 @@ BrowserActionOverflowMenuController::BrowserActionOverflowMenuController(
     menu_->AppendMenuItemWithIcon(
         command_id,
         UTF8ToWide(view->button()->extension()->name()),
-        canvas->ExtractBitmap());
+        canvas->AsCanvasSkia()->ExtractBitmap());
 
     // Set the tooltip for this item.
     std::wstring tooltip = UTF8ToWide(
@@ -65,9 +66,8 @@ bool BrowserActionOverflowMenuController::RunMenu(gfx::NativeWindow window,
   bounds.set_x(screen_loc.x());
   bounds.set_y(screen_loc.y());
 
-  views::MenuItemView::AnchorPosition anchor =
-      menu_button_->UILayoutIsRightToLeft() ? views::MenuItemView::TOPLEFT :
-                                              views::MenuItemView::TOPRIGHT;
+  views::MenuItemView::AnchorPosition anchor = base::i18n::IsRTL() ?
+      views::MenuItemView::TOPLEFT : views::MenuItemView::TOPRIGHT;
   if (for_drop) {
     menu_->RunMenuForDropAt(window, bounds, anchor);
   } else {

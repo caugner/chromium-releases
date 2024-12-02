@@ -18,8 +18,6 @@
 #include "base/stats_counters.h"
 #include "base/string_util.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
-#include "webkit/default_plugin/plugin_impl.h"
-#include "webkit/glue/plugins/coregraphics_private_symbols_mac.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 #include "webkit/glue/plugins/plugin_lib.h"
 #include "webkit/glue/plugins/plugin_list.h"
@@ -32,12 +30,8 @@
 #include "webkit/glue/plugins/carbon_plugin_window_tracker_mac.h"
 #endif
 
-// If we're compiling support for the QuickDraw drawing model, turn off GCC
-// warnings about deprecated functions (since QuickDraw is a deprecated API).
-// According to the GCC documentation, this can only be done per file, not
-// pushed and popped like some options can be.
 #ifndef NP_NO_QUICKDRAW
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#include "webkit/glue/plugins/quickdraw_drawing_manager_mac.h"
 #endif
 
 using webkit_glue::WebPlugin;
@@ -49,7 +43,7 @@ using WebKit::WebInputEvent;
 using WebKit::WebMouseEvent;
 using WebKit::WebMouseWheelEvent;
 
-const int kCoreAnimationRedrawPeriodMs = 20;  // 50fps
+const int kCoreAnimationRedrawPeriodMs = 10;  // 100 Hz
 
 // Important implementation notes: The Mac definition of NPAPI, particularly
 // the distinction between windowed and windowless modes, differs from the
@@ -57,9 +51,6 @@ const int kCoreAnimationRedrawPeriodMs = 20;  // 50fps
 // accomodated by the WebPluginDelegate class.
 
 namespace {
-
-base::LazyInstance<std::set<WebPluginDelegateImpl*> > g_active_delegates(
-    base::LINKER_INITIALIZED);
 
 WebPluginDelegateImpl* g_active_delegate;
 
@@ -171,36 +162,112 @@ class CarbonIdleEventSource {
 
 }  // namespace
 
+// Helper to build and maintain a model of a drag entering the plugin but not
+// starting there. See explanation in PlatformHandleInputEvent.
+class ExternalDragTracker {
+ public:
+  ExternalDragTracker() : pressed_buttons_(0) {}
+
+  // Returns true if an external drag is in progress.
+  bool IsDragInProgress() { return pressed_buttons_ != 0; };
+
+  // Returns true if the given event appears to be related to an external drag.
+  bool EventIsRelatedToDrag(const WebInputEvent& event);
+
+  // Updates the tracking of whether an external drag is in progress--and if
+  // so what buttons it involves--based on the given event.
+  void UpdateDragStateFromEvent(const WebInputEvent& event);
+
+ private:
+  // Returns the mask for just the button state in a WebInputEvent's modifiers.
+  static int WebEventButtonModifierMask();
+
+  // The WebInputEvent modifier flags for any buttons that were down when an
+  // external drag entered the plugin, and which and are still down now.
+  int pressed_buttons_;
+
+  DISALLOW_COPY_AND_ASSIGN(ExternalDragTracker);
+};
+
+void ExternalDragTracker::UpdateDragStateFromEvent(const WebInputEvent& event) {
+  switch (event.type) {
+    case WebInputEvent::MouseEnter:
+      pressed_buttons_ = event.modifiers & WebEventButtonModifierMask();
+      break;
+    case WebInputEvent::MouseUp: {
+      const WebMouseEvent* mouse_event =
+          static_cast<const WebMouseEvent*>(&event);
+      if (mouse_event->button == WebMouseEvent::ButtonLeft)
+        pressed_buttons_ &= ~WebInputEvent::LeftButtonDown;
+      if (mouse_event->button == WebMouseEvent::ButtonMiddle)
+        pressed_buttons_ &= ~WebInputEvent::MiddleButtonDown;
+      if (mouse_event->button == WebMouseEvent::ButtonRight)
+        pressed_buttons_ &= ~WebInputEvent::RightButtonDown;
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+bool ExternalDragTracker::EventIsRelatedToDrag(const WebInputEvent& event) {
+  const WebMouseEvent* mouse_event = static_cast<const WebMouseEvent*>(&event);
+  switch (event.type) {
+    case WebInputEvent::MouseUp:
+      // We only care about release of buttons that were part of the drag.
+      return ((mouse_event->button == WebMouseEvent::ButtonLeft &&
+               (pressed_buttons_ & WebInputEvent::LeftButtonDown)) ||
+              (mouse_event->button == WebMouseEvent::ButtonMiddle &&
+               (pressed_buttons_ & WebInputEvent::MiddleButtonDown)) ||
+              (mouse_event->button == WebMouseEvent::ButtonRight &&
+               (pressed_buttons_ & WebInputEvent::RightButtonDown)));
+    case WebInputEvent::MouseEnter:
+      return (event.modifiers & WebEventButtonModifierMask()) != 0;
+    case WebInputEvent::MouseLeave:
+    case WebInputEvent::MouseMove: {
+      int event_buttons = (event.modifiers & WebEventButtonModifierMask());
+      return (pressed_buttons_ &&
+              pressed_buttons_ == event_buttons);
+    }
+    default:
+      return false;
+  }
+  return false;
+}
+
+int ExternalDragTracker::WebEventButtonModifierMask() {
+  return WebInputEvent::LeftButtonDown |
+         WebInputEvent::RightButtonDown |
+         WebInputEvent::MiddleButtonDown;
+}
+
 #pragma mark -
+#pragma mark Core WebPluginDelegate implementation
 
 WebPluginDelegateImpl::WebPluginDelegateImpl(
     gfx::PluginWindowHandle containing_view,
     NPAPI::PluginInstance *instance)
     : windowed_handle_(NULL),
-      windowless_needs_set_window_(true),
       // all Mac plugins are "windowless" in the Windows/X11 sense
       windowless_(true),
       plugin_(NULL),
       instance_(instance),
       parent_(containing_view),
+      quirks_(0),
       buffer_context_(NULL),
-#ifndef NP_NO_QUICKDRAW
-      qd_buffer_world_(NULL),
-      qd_plugin_world_(NULL),
-      qd_fast_path_enabled_(false),
-#endif
       layer_(nil),
       surface_(NULL),
       renderer_(nil),
-      quirks_(0),
-      have_focus_(false),
-      external_drag_buttons_(0),
-      focus_notifier_(NULL),
+      plugin_has_focus_(false),
+      has_webkit_focus_(false),
+      containing_view_has_focus_(false),
       containing_window_has_focus_(false),
       initial_window_focus_(false),
       container_is_visible_(false),
       have_called_set_window_(false),
-      handle_event_depth_(0) {
+      external_drag_tracker_(new ExternalDragTracker()),
+      handle_event_depth_(0),
+      first_set_window_call_(true) {
   memset(&window_, 0, sizeof(window_));
 #ifndef NP_NO_CARBON
   memset(&np_cg_context_, 0, sizeof(np_cg_context_));
@@ -209,15 +276,9 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
   memset(&qd_port_, 0, sizeof(qd_port_));
 #endif
   instance->set_windowless(true);
-
-  std::set<WebPluginDelegateImpl*>* delegates = g_active_delegates.Pointer();
-  delegates->insert(this);
 }
 
 WebPluginDelegateImpl::~WebPluginDelegateImpl() {
-  std::set<WebPluginDelegateImpl*>* delegates = g_active_delegates.Pointer();
-  delegates->erase(this);
-
   DestroyInstance();
 
 #ifndef NP_NO_CARBON
@@ -225,10 +286,6 @@ WebPluginDelegateImpl::~WebPluginDelegateImpl() {
     CarbonPluginWindowTracker::SharedInstance()->DestroyDummyWindowForDelegate(
         this, reinterpret_cast<WindowRef>(np_cg_context_.window));
   }
-#ifndef NP_NO_QUICKDRAW
-  if (quirks_ & PLUGIN_QUIRK_ALLOW_FASTER_QUICKDRAW_PATH)
-    UpdateGWorlds(NULL);
-#endif
 #endif
 }
 
@@ -259,7 +316,7 @@ bool WebPluginDelegateImpl::PlatformInitialize() {
     // TODO(stuartmorgan): Test other QuickDraw plugins that we support and
     // see if any others can use the fast path.
     const WebPluginInfo& plugin_info = instance_->plugin_lib()->plugin_info();
-    if (plugin_info.name.find(L"QuickTime") != std::wstring::npos)
+    if (plugin_info.name.find(ASCIIToUTF16("QuickTime")) != string16::npos)
       quirks_ |= PLUGIN_QUIRK_ALLOW_FASTER_QUICKDRAW_PATH;
   }
 #endif
@@ -273,18 +330,19 @@ bool WebPluginDelegateImpl::PlatformInitialize() {
     np_cg_context_.window = window_tracker->CreateDummyWindowForDelegate(this);
     np_cg_context_.context = NULL;
     UpdateDummyWindowBounds(gfx::Point(0, 0));
-#ifndef NP_NO_QUICKDRAW
-    qd_port_.port =
-        GetWindowPort(reinterpret_cast<WindowRef>(np_cg_context_.window));
-#endif
   }
 #endif
 
-  switch (instance()->drawing_model()) {
+  NPDrawingModel drawing_model = instance()->drawing_model();
+  switch (drawing_model) {
 #ifndef NP_NO_QUICKDRAW
     case NPDrawingModelQuickDraw:
       if (instance()->event_model() != NPEventModelCarbon)
         return false;
+      qd_manager_.reset(new QuickDrawDrawingManager());
+      qd_manager_->SetPluginWindow(
+          reinterpret_cast<WindowRef>(np_cg_context_.window));
+      qd_port_.port = qd_manager_->port();
       window_.window = &qd_port_;
       window_.type = NPWindowTypeDrawable;
       break;
@@ -296,7 +354,8 @@ bool WebPluginDelegateImpl::PlatformInitialize() {
 #endif
       window_.type = NPWindowTypeDrawable;
       break;
-    case NPDrawingModelCoreAnimation: {
+    case NPDrawingModelCoreAnimation:
+    case NPDrawingModelInvalidatingCoreAnimation: {
       if (instance()->event_model() != NPEventModelCocoa)
         return false;
       window_.type = NPWindowTypeDrawable;
@@ -307,17 +366,17 @@ bool WebPluginDelegateImpl::PlatformInitialize() {
       NPError err = instance()->NPP_GetValue(NPPVpluginCoreAnimationLayer,
                                              reinterpret_cast<void*>(&layer));
       if (!err) {
+        if (drawing_model == NPDrawingModelCoreAnimation) {
+          // Create the timer; it will be started when we get a window handle.
+          redraw_timer_.reset(new base::RepeatingTimer<WebPluginDelegateImpl>);
+        }
         layer_ = layer;
-        plugin_->BindFakePluginWindowHandle();
         surface_ = new AcceleratedSurface;
-        surface_->Initialize();
+        surface_->Initialize(NULL, true);
         renderer_ = [[CARenderer rendererWithCGLContext:surface_->context()
                                                 options:NULL] retain];
         [renderer_ setLayer:layer_];
-        UpdateAcceleratedSurface();
-        redraw_timer_.reset(new base::RepeatingTimer<WebPluginDelegateImpl>);
-        // This will start the timer, but only if we are visible.
-        PluginVisibilityChanged();
+        plugin_->BindFakePluginWindowHandle(false);
       }
       break;
     }
@@ -335,7 +394,7 @@ bool WebPluginDelegateImpl::PlatformInitialize() {
   // Let the WebPlugin know that we are windowless (unless this is a
   // Core Animation plugin, in which case BindFakePluginWindowHandle will take
   // care of setting up the appropriate window handle).
-  if (instance()->drawing_model() != NPDrawingModelCoreAnimation)
+  if (!layer_)
     plugin_->SetWindow(NULL);
 
 #ifndef NP_NO_CARBON
@@ -350,8 +409,8 @@ bool WebPluginDelegateImpl::PlatformInitialize() {
 #ifndef NP_NO_QUICKDRAW
   if (instance()->drawing_model() == NPDrawingModelQuickDraw) {
     const WebPluginInfo& plugin_info = instance_->plugin_lib()->plugin_info();
-    if (plugin_info.name.find(L"QuickTime") != std::wstring::npos)
-      WindowlessSetWindow(true);
+    if (plugin_info.name.find(ASCIIToUTF16("QuickTime")) != string16::npos)
+      WindowlessSetWindow();
   }
 #endif
 
@@ -390,6 +449,10 @@ void WebPluginDelegateImpl::UpdateGeometryAndContext(
     np_cg_context_.context = context;
   }
 #endif
+#ifndef NP_NO_QUICKDRAW
+  if (instance()->drawing_model() == NPDrawingModelQuickDraw)
+    qd_manager_->SetTargetContext(context, window_rect.size());
+#endif
   UpdateGeometry(window_rect, clip_rect);
 }
 
@@ -397,610 +460,25 @@ void WebPluginDelegateImpl::Paint(CGContextRef context, const gfx::Rect& rect) {
   WindowlessPaint(context, rect);
 
 #ifndef NP_NO_QUICKDRAW
-  // Paint events are our cue to scrape the dummy window into the real context
-  // (slow path) or copy the offscreen GWorld bits into the context (fast path)
-  // if we are dealing with a QuickDraw plugin.
-  // Note that we use buffer_context_ rather than |context| because the buffer
-  // might have changed during the NPP_HandleEvent call in WindowlessPaint.
+  // Paint events are our cue to dump the current plugin bits into the buffer
+  // context if we are dealing with a QuickDraw plugin.
   if (instance()->drawing_model() == NPDrawingModelQuickDraw) {
-    if (qd_fast_path_enabled_)
-      CopyGWorldBits(qd_plugin_world_, qd_buffer_world_);
-    else
-      ScrapeDummyWindowIntoContext(buffer_context_);
+    qd_manager_->UpdateContext();
   }
 #endif
 }
 
 void WebPluginDelegateImpl::Print(CGContextRef context) {
-  // Disabling the call to NPP_Print as it causes a crash in
-  // flash in some cases. In any case this does not work as expected
-  // as the EMF meta file dc passed in needs to be created with the
-  // the plugin window dc as its sibling dc and the window rect
-  // in .01 mm units.
-}
-
-void WebPluginDelegateImpl::InstallMissingPlugin() {
   NOTIMPLEMENTED();
 }
 
-bool WebPluginDelegateImpl::WindowedCreatePlugin() {
-  NOTREACHED();
-  return false;
-}
-
-void WebPluginDelegateImpl::WindowedDestroyWindow() {
-  NOTREACHED();
-}
-
-bool WebPluginDelegateImpl::WindowedReposition(const gfx::Rect& window_rect,
-                                               const gfx::Rect& clip_rect) {
-  NOTREACHED();
-  return false;
-}
-
-void WebPluginDelegateImpl::WindowedSetWindow() {
-  NOTREACHED();
-}
-
-void WebPluginDelegateImpl::WindowlessUpdateGeometry(
-    const gfx::Rect& window_rect,
-    const gfx::Rect& clip_rect) {
-  bool old_clip_was_empty = clip_rect_.IsEmpty();
-  cached_clip_rect_ = clip_rect;
-  if (container_is_visible_)  // Remove check when cached_clip_rect_ is removed.
-    clip_rect_ = clip_rect;
-  bool new_clip_is_empty = clip_rect_.IsEmpty();
-
-  bool window_rect_changed = (window_rect != window_rect_);
-
-  // Only resend to the instance if the geometry has changed (see note in
-  // WindowlessSetWindow for why we only care about the clip rect switching
-  // empty state).
-  if (!window_rect_changed && old_clip_was_empty == new_clip_is_empty)
-    return;
-
-  if (old_clip_was_empty != new_clip_is_empty) {
-    PluginVisibilityChanged();
-  }
-
-  SetPluginRect(window_rect);
-
-#ifndef NP_NO_QUICKDRAW
-  if (window_rect_changed && qd_fast_path_enabled_) {
-    // Pitch the old GWorlds, since they are the wrong size now; they will be
-    // re-created on demand.
-    UpdateGWorlds(NULL);
-    // If the window size has changed, we need to turn off the fast path so that
-    // the full redraw goes to the window and we get a correct baseline paint.
-    SetQuickDrawFastPathEnabled(false);
-    return;  // SetQuickDrawFastPathEnabled will call SetWindow for us.
-  }
-#endif
-
-  WindowlessSetWindow(true);
-}
-
-void WebPluginDelegateImpl::DrawLayerInSurface() {
-  surface_->MakeCurrent();
-
-  surface_->Clear(window_rect_);
-
-  [renderer_ beginFrameAtTime:CACurrentMediaTime() timeStamp:NULL];
-  CGRect layerRect = [layer_ bounds];
-  [renderer_ addUpdateRect:layerRect];
-  [renderer_ render];
-  [renderer_ endFrame];
-
-  surface_->SwapBuffers();
-  plugin_->AcceleratedFrameBuffersDidSwap(windowed_handle());
-}
-
-void WebPluginDelegateImpl::WindowlessPaint(gfx::NativeDrawingContext context,
-                                            const gfx::Rect& damage_rect) {
-  // If we get a paint event before we are completely set up (e.g., a nested
-  // call while the plugin is still in NPP_SetWindow), bail.
-  if (!have_called_set_window_ || !buffer_context_)
-    return;
-  DCHECK(buffer_context_ == context);
-
-  static StatsRate plugin_paint("Plugin.Paint");
-  StatsScope<StatsRate> scope(plugin_paint);
-
-  // Plugin invalidates trigger asynchronous paints with the original
-  // invalidation rect; the plugin may be resized before the paint is handled,
-  // so we need to ensure that the damage rect is still sane.
-  const gfx::Rect paint_rect(damage_rect.Intersect(
-      gfx::Rect(0, 0, window_rect_.width(), window_rect_.height())));
-
-  ScopedActiveDelegate active_delegate(this);
-
-#ifndef NP_NO_QUICKDRAW
-  if (instance()->drawing_model() == NPDrawingModelQuickDraw) {
-    if (qd_fast_path_enabled_)
-      SetGWorld(qd_port_.port, NULL);
-    else
-      SetPort(qd_port_.port);
-  }
-#endif
-
-  CGContextSaveGState(context);
-
-  switch (instance()->event_model()) {
-#ifndef NP_NO_CARBON
-    case NPEventModelCarbon: {
-      NPEvent paint_event = { 0 };
-      paint_event.what = updateEvt;
-      paint_event.message = reinterpret_cast<uint32>(np_cg_context_.window);
-      paint_event.when = TickCount();
-      instance()->NPP_HandleEvent(&paint_event);
-      break;
-    }
-#endif
-    case NPEventModelCocoa: {
-      NPCocoaEvent paint_event;
-      memset(&paint_event, 0, sizeof(NPCocoaEvent));
-      paint_event.type = NPCocoaEventDrawRect;
-      paint_event.data.draw.context = context;
-      paint_event.data.draw.x = paint_rect.x();
-      paint_event.data.draw.y = paint_rect.y();
-      paint_event.data.draw.width = paint_rect.width();
-      paint_event.data.draw.height = paint_rect.height();
-      instance()->NPP_HandleEvent(&paint_event);
-      break;
-    }
-  }
-
-  // The backing buffer can change during the call to NPP_HandleEvent, in which
-  // case the old context is (or is about to be) invalid.
-  if (context == buffer_context_)
-    CGContextRestoreGState(context);
-}
-
-void WebPluginDelegateImpl::WindowlessSetWindow(bool force_set_window) {
-  if (!instance())
-    return;
-
-  window_.x = 0;
-  window_.y = 0;
-  window_.height = window_rect_.height();
-  window_.width = window_rect_.width();
-  window_.clipRect.left = window_.x;
-  window_.clipRect.top = window_.y;
-  window_.clipRect.right = window_.clipRect.left;
-  window_.clipRect.bottom = window_.clipRect.top;
-  if (container_is_visible_ && !clip_rect_.IsEmpty()) {
-    // We never tell plugins that they are only partially visible; because the
-    // drawing target doesn't change size, the positioning of what plugins drew
-    // would be wrong, as would any transforms they did on the context.
-    window_.clipRect.right += window_.width;
-    window_.clipRect.bottom += window_.height;
-  }
-
-  NPError err = instance()->NPP_SetWindow(&window_);
-
-  // Send an appropriate window focus event after the first SetWindow.
-  if (!have_called_set_window_) {
-    have_called_set_window_ = true;
-    SetWindowHasFocus(initial_window_focus_);
-  }
-
-#ifndef NP_NO_QUICKDRAW
-  if ((quirks_ & PLUGIN_QUIRK_ALLOW_FASTER_QUICKDRAW_PATH) &&
-      !qd_fast_path_enabled_ && clip_rect_.IsEmpty()) {
-    // Give the plugin a few seconds to stabilize so we get a good initial paint
-    // to use as a baseline, then switch to the fast path.
-    fast_path_enable_tick_ = base::TimeTicks::Now() +
-        base::TimeDelta::FromSeconds(3);
-  }
-#endif
-
-  DCHECK(err == NPERR_NO_ERROR);
-}
-
-WebPluginDelegateImpl* WebPluginDelegateImpl::GetActiveDelegate() {
-  return g_active_delegate;
-}
-
-std::set<WebPluginDelegateImpl*> WebPluginDelegateImpl::GetActiveDelegates() {
-  std::set<WebPluginDelegateImpl*>* delegates = g_active_delegates.Pointer();
-  return *delegates;
-}
-
-void WebPluginDelegateImpl::FocusChanged(bool has_focus) {
-  if (!have_called_set_window_)
-    return;
-
-  if (has_focus == have_focus_)
-    return;
-  have_focus_ = has_focus;
-
-  ScopedActiveDelegate active_delegate(this);
-
-  switch (instance()->event_model()) {
-#ifndef NP_NO_CARBON
-    case NPEventModelCarbon: {
-      NPEvent focus_event = { 0 };
-      if (have_focus_)
-        focus_event.what = NPEventType_GetFocusEvent;
-      else
-        focus_event.what = NPEventType_LoseFocusEvent;
-      focus_event.when = TickCount();
-      instance()->NPP_HandleEvent(&focus_event);
-      break;
-    }
-#endif
-    case NPEventModelCocoa: {
-      NPCocoaEvent focus_event;
-      memset(&focus_event, 0, sizeof(focus_event));
-      focus_event.type = NPCocoaEventFocusChanged;
-      focus_event.data.focus.hasFocus = have_focus_;
-      instance()->NPP_HandleEvent(&focus_event);
-      break;
-    }
-  }
-}
-
-void WebPluginDelegateImpl::SetFocus() {
-  if (focus_notifier_)
-    focus_notifier_(this);
-  else
-    FocusChanged(true);
-}
-
-void WebPluginDelegateImpl::SetWindowHasFocus(bool has_focus) {
-  // If we get a window focus event before calling SetWindow, just remember the
-  // states (WindowlessSetWindow will then send it on the first call).
-  if (!have_called_set_window_) {
-    initial_window_focus_ = has_focus;
-    return;
-  }
-
-  if (has_focus == containing_window_has_focus_)
-    return;
-  containing_window_has_focus_ = has_focus;
-
-#ifndef NP_NO_QUICKDRAW
-  // Make sure controls repaint with the correct look.
-  if (qd_fast_path_enabled_)
-    SetQuickDrawFastPathEnabled(false);
-#endif
-
-  ScopedActiveDelegate active_delegate(this);
-  switch (instance()->event_model()) {
-#ifndef NP_NO_CARBON
-    case NPEventModelCarbon: {
-      NPEvent focus_event = { 0 };
-      focus_event.what = activateEvt;
-      if (has_focus)
-        focus_event.modifiers |= activeFlag;
-      focus_event.message =
-          reinterpret_cast<unsigned long>(np_cg_context_.window);
-      focus_event.when = TickCount();
-      instance()->NPP_HandleEvent(&focus_event);
-      break;
-    }
-#endif
-    case NPEventModelCocoa: {
-      NPCocoaEvent focus_event;
-      memset(&focus_event, 0, sizeof(focus_event));
-      focus_event.type = NPCocoaEventWindowFocusChanged;
-      focus_event.data.focus.hasFocus = has_focus;
-      instance()->NPP_HandleEvent(&focus_event);
-      break;
-    }
-  }
-}
-
-void WebPluginDelegateImpl::SetContainerVisibility(bool is_visible) {
-  if (is_visible == container_is_visible_)
-    return;
-  container_is_visible_ = is_visible;
-
-  // TODO(stuartmorgan): This is a temporary workarond for
-  // <http://crbug.com/34266>. When that is fixed, the cached_clip_rect_ code
-  // should all be removed.
-  if (is_visible) {
-    clip_rect_ = cached_clip_rect_;
-  } else {
-    clip_rect_.set_width(0);
-    clip_rect_.set_height(0);
-  }
-
-  // TODO(stuartmorgan): We may need to remember whether we had focus, and
-  // restore it ourselves when we become visible again. Revisit once SetFocus
-  // is actually being called in all the cases it should be, at which point
-  // we'll know whether or not that's handled for us by WebKit.
-  if (!is_visible)
-    FocusChanged(false);
-
-  // If the plugin is changing visibility, let the plugin know. If it's scrolled
-  // off screen (i.e., cached_clip_rect_ is empty), then container visibility
-  // doesn't change anything.
-  if (!cached_clip_rect_.IsEmpty()) {
-    PluginVisibilityChanged();
-    WindowlessSetWindow(true);
-  }
-}
-
-// Update the size of the IOSurface to match the current size of the plug-in,
-// then tell the browser host view so it can adjust its bookkeeping and CALayer
-// appropriately.
-void WebPluginDelegateImpl::UpdateAcceleratedSurface() {
-  // Will only have a window handle when using the CoreAnimation drawing model.
-  if (!windowed_handle() ||
-      instance()->drawing_model() != NPDrawingModelCoreAnimation)
-    return;
-
-  [layer_ setFrame:CGRectMake(0, 0,
-                              window_rect_.width(), window_rect_.height())];
-  [renderer_ setBounds:[layer_ bounds]];
-
-  uint64 io_surface_id = surface_->SetSurfaceSize(window_rect_.size());
-  if (io_surface_id) {
-    plugin_->SetAcceleratedSurface(windowed_handle(),
-                                   window_rect_.width(),
-                                   window_rect_.height(),
-                                   io_surface_id);
-  }
-}
-
-void WebPluginDelegateImpl::WindowFrameChanged(gfx::Rect window_frame,
-                                               gfx::Rect view_frame) {
-  instance()->set_window_frame(window_frame);
-  SetContentAreaOrigin(gfx::Point(view_frame.x(), view_frame.y()));
-}
-
-void WebPluginDelegateImpl::SetThemeCursor(ThemeCursor cursor) {
-  current_windowless_cursor_.InitFromThemeCursor(cursor);
-}
-
-void WebPluginDelegateImpl::SetCursor(const Cursor* cursor) {
-  current_windowless_cursor_.InitFromCursor(cursor);
-}
-
-void WebPluginDelegateImpl::SetNSCursor(NSCursor* cursor) {
-  current_windowless_cursor_.InitFromNSCursor(cursor);
-}
-
-void WebPluginDelegateImpl::SetPluginRect(const gfx::Rect& rect) {
-  bool plugin_size_changed = rect.width() != window_rect_.width() ||
-                             rect.height() != window_rect_.height();
-  window_rect_ = rect;
-  PluginScreenLocationChanged();
-  if (plugin_size_changed)
-    UpdateAcceleratedSurface();
-}
-
-void WebPluginDelegateImpl::SetContentAreaOrigin(const gfx::Point& origin) {
-  content_area_origin_ = origin;
-  PluginScreenLocationChanged();
-}
-
-void WebPluginDelegateImpl::PluginScreenLocationChanged() {
-  gfx::Point plugin_origin(content_area_origin_.x() + window_rect_.x(),
-                           content_area_origin_.y() + window_rect_.y());
-  instance()->set_plugin_origin(plugin_origin);
-
-#ifndef NP_NO_CARBON
-  if (instance()->event_model() == NPEventModelCarbon) {
-    UpdateDummyWindowBounds(plugin_origin);
-  }
-#endif
-}
-
-void WebPluginDelegateImpl::PluginVisibilityChanged() {
-#ifndef NP_NO_CARBON
-  if (instance()->event_model() == NPEventModelCarbon)
-    UpdateIdleEventRate();
-#endif
-  if (instance()->drawing_model() == NPDrawingModelCoreAnimation) {
-    bool plugin_visible = container_is_visible_ && !clip_rect_.IsEmpty();
-    if (plugin_visible && !redraw_timer_->IsRunning()) {
-      redraw_timer_->Start(
-          base::TimeDelta::FromMilliseconds(kCoreAnimationRedrawPeriodMs),
-          this, &WebPluginDelegateImpl::DrawLayerInSurface);
-    } else if (!plugin_visible) {
-      redraw_timer_->Stop();
-    }
-  }
-}
-
-#ifndef NP_NO_CARBON
-void WebPluginDelegateImpl::UpdateDummyWindowBounds(
-    const gfx::Point& plugin_origin) {
-  WindowRef window = reinterpret_cast<WindowRef>(np_cg_context_.window);
-  Rect current_bounds;
-  GetWindowBounds(window, kWindowContentRgn, &current_bounds);
-
-  Rect new_bounds;
-  // We never want to resize the window to 0x0, so if the plugin is 0x0 just
-  // move the window without resizing it.
-  if (window_rect_.width() > 0 && window_rect_.height() > 0) {
-    SetRect(&new_bounds, 0, 0, window_rect_.width(), window_rect_.height());
-    OffsetRect(&new_bounds, plugin_origin.x(), plugin_origin.y());
-  } else {
-    new_bounds = current_bounds;
-    OffsetRect(&new_bounds, plugin_origin.x() - current_bounds.left,
-               plugin_origin.y() - current_bounds.top);
-  }
-
-  if (new_bounds.left != current_bounds.left ||
-      new_bounds.top != current_bounds.top ||
-      new_bounds.right != current_bounds.right ||
-      new_bounds.bottom != current_bounds.bottom)
-    SetWindowBounds(window, kWindowContentRgn, &new_bounds);
-}
-
-#ifndef NP_NO_QUICKDRAW
-void WebPluginDelegateImpl::ScrapeDummyWindowIntoContext(CGContextRef context) {
-  if (!context)
-    return;
-
-  CGRect window_bounds = CGRectMake(0, 0,
-                                    window_rect_.width(),
-                                    window_rect_.height());
-  CGWindowID window_id = HIWindowGetCGWindowID(
-      reinterpret_cast<WindowRef>(np_cg_context_.window));
-  CGContextSaveGState(context);
-  CGContextTranslateCTM(context, 0, window_rect_.height());
-  CGContextScaleCTM(context, 1.0, -1.0);
-  CGContextCopyWindowCaptureContentsToRect(context, window_bounds,
-                                           _CGSDefaultConnection(),
-                                           window_id, 0);
-  CGContextRestoreGState(context);
-}
-
-void WebPluginDelegateImpl::CopyGWorldBits(GWorldPtr source, GWorldPtr dest) {
-  if (!(source && dest))
-    return;
-
-  Rect window_bounds = { 0, 0, window_rect_.height(), window_rect_.width() };
-  PixMapHandle source_pixmap = GetGWorldPixMap(source);
-  if (LockPixels(source_pixmap)) {
-    PixMapHandle dest_pixmap = GetGWorldPixMap(dest);
-    if (LockPixels(dest_pixmap)) {
-      SetGWorld(qd_buffer_world_, NULL);
-      // Set foreground and background colors to avoid "colorizing" the image.
-      ForeColor(blackColor);
-      BackColor(whiteColor);
-      CopyBits(reinterpret_cast<BitMap*>(*source_pixmap),
-               reinterpret_cast<BitMap*>(*dest_pixmap),
-               &window_bounds, &window_bounds, srcCopy, NULL);
-      UnlockPixels(dest_pixmap);
-    }
-    UnlockPixels(source_pixmap);
-  }
-}
-
-void WebPluginDelegateImpl::UpdateGWorlds(CGContextRef context) {
-  if (qd_plugin_world_) {
-    DisposeGWorld(qd_plugin_world_);
-    qd_plugin_world_ = NULL;
-  }
-  if (qd_buffer_world_) {
-    DisposeGWorld(qd_buffer_world_);
-    qd_buffer_world_ = NULL;
-  }
-  if (!context)
-    return;
-
-  gfx::Size dimensions = window_rect_.size();
-  Rect window_bounds = {
-    0, 0, dimensions.height(), dimensions.width()
-  };
-  // Create a GWorld pointing at the same bits as our buffer context.
-  if (context) {
-    NewGWorldFromPtr(
-        &qd_buffer_world_, k32BGRAPixelFormat, &window_bounds,
-        NULL, NULL, 0, static_cast<Ptr>(CGBitmapContextGetData(context)),
-        static_cast<SInt32>(CGBitmapContextGetBytesPerRow(context)));
-  }
-  // Create a GWorld for the plugin to paint into whenever it wants.
-  NewGWorld(&qd_plugin_world_, k32ARGBPixelFormat, &window_bounds,
-            NULL, NULL, kNativeEndianPixMap);
-  if (qd_fast_path_enabled_)
-    qd_port_.port = qd_plugin_world_;
-}
-
-void WebPluginDelegateImpl::SetQuickDrawFastPathEnabled(bool enabled) {
-  if (!enabled) {
-    // Wait a couple of seconds, then turn the fast path back on. If we're
-    // turning it off for event handling, that ensures that the common case of
-    // move-mouse-then-click works (as well as making it likely that a second
-    // click attempt will work if the first one fails). If we're turning it
-    // off to force a new baseline image, this leaves plenty of time for the
-    // plugin to draw.
-    fast_path_enable_tick_ = base::TimeTicks::Now() +
-        base::TimeDelta::FromSeconds(2);
-  }
-
-  if (enabled == qd_fast_path_enabled_)
-    return;
-  if (enabled && clip_rect_.IsEmpty()) {
-    // Don't switch to the fast path while the plugin is completely clipped;
-    // we can only switch when the window has an up-to-date image for us to
-    // scrape. We'll automatically switch after we become visible again.
-    return;
-  }
-
-  qd_fast_path_enabled_ = enabled;
-  if (enabled) {
-    if (!qd_plugin_world_)
-      UpdateGWorlds(buffer_context_);
-    qd_port_.port = qd_plugin_world_;
-    // Copy our last window snapshot into our new source, since the plugin
-    // may not repaint everything.
-    CopyGWorldBits(qd_buffer_world_, qd_plugin_world_);
-  } else {
-    qd_port_.port =
-        GetWindowPort(reinterpret_cast<WindowRef>(np_cg_context_.window));
-  }
-  WindowlessSetWindow(true);
-  // Send a paint event so that the new buffer gets updated immediately.
-  WindowlessPaint(buffer_context_, clip_rect_);
-}
-#endif  // !NP_NO_QUICKDRAW
-
-void WebPluginDelegateImpl::UpdateIdleEventRate() {
-  bool plugin_visible = container_is_visible_ && !clip_rect_.IsEmpty();
-  CarbonIdleEventSource::SharedInstance()->RegisterDelegate(this,
-                                                            plugin_visible);
-}
-#endif  // !NP_NO_CARBON
-
-// Returns the mask for just the button state in a WebInputEvent's modifiers.
-static int WebEventButtonModifierMask() {
-  return WebInputEvent::LeftButtonDown |
-         WebInputEvent::RightButtonDown |
-         WebInputEvent::MiddleButtonDown;
-}
-
-// Returns a new drag button state from applying |event| to the previous state.
-static int UpdatedDragStateFromEvent(int drag_buttons,
-                                     const WebInputEvent& event) {
-  switch (event.type) {
-    case WebInputEvent::MouseEnter:
-      return event.modifiers & WebEventButtonModifierMask();
-    case WebInputEvent::MouseUp: {
-      const WebMouseEvent* mouse_event =
-          static_cast<const WebMouseEvent*>(&event);
-      int new_buttons = drag_buttons;
-      if (mouse_event->button == WebMouseEvent::ButtonLeft)
-        new_buttons &= ~WebInputEvent::LeftButtonDown;
-      if (mouse_event->button == WebMouseEvent::ButtonMiddle)
-        new_buttons &= ~WebInputEvent::MiddleButtonDown;
-      if (mouse_event->button == WebMouseEvent::ButtonRight)
-        new_buttons &= ~WebInputEvent::RightButtonDown;
-      return new_buttons;
-    }
-    default:
-      return drag_buttons;
-  }
-}
-
-// Returns true if this is an event that looks like part of a drag with the
-// given button state.
-static bool EventIsRelatedToDrag(const WebInputEvent& event, int drag_buttons) {
-  const WebMouseEvent* mouse_event = static_cast<const WebMouseEvent*>(&event);
-  switch (event.type) {
-    case WebInputEvent::MouseUp:
-      // We only care about release of buttons that were part of the drag.
-      return ((mouse_event->button == WebMouseEvent::ButtonLeft &&
-               (drag_buttons & WebInputEvent::LeftButtonDown)) ||
-              (mouse_event->button == WebMouseEvent::ButtonMiddle &&
-               (drag_buttons & WebInputEvent::MiddleButtonDown)) ||
-              (mouse_event->button == WebMouseEvent::ButtonRight &&
-               (drag_buttons & WebInputEvent::RightButtonDown)));
-    case WebInputEvent::MouseEnter:
-      return (event.modifiers & WebEventButtonModifierMask()) != 0;
-    case WebInputEvent::MouseLeave:
-    case WebInputEvent::MouseMove:
-      return (drag_buttons &&
-              drag_buttons == (event.modifiers & WebEventButtonModifierMask()));
-    default:
-      return false;
-  }
-  return false;
+void WebPluginDelegateImpl::SetFocus(bool focused) {
+  // This is called when internal WebKit focus (the focused element on the page)
+  // changes, but plugins need to know about actual first responder status, so
+  // we have an extra layer of focus tracking.
+  has_webkit_focus_ = focused;
+  if (containing_view_has_focus_)
+    SetPluginHasFocus(focused);
 }
 
 bool WebPluginDelegateImpl::PlatformHandleInputEvent(
@@ -1069,10 +547,7 @@ bool WebPluginDelegateImpl::PlatformHandleInputEvent(
         }
       }
 
-      if (qd_fast_path_enabled_)
-        SetGWorld(qd_port_.port, NULL);
-      else
-        SetPort(qd_port_.port);
+      qd_manager_->MakePortCurrent();
     }
 #endif
 
@@ -1081,17 +556,6 @@ bool WebPluginDelegateImpl::PlatformHandleInputEvent(
     }
   }
 #endif
-
-  // if we do not currently have focus and this is a mouseDown, trigger a
-  // notification that we are taking the keyboard focus.  We can't just key
-  // off of incoming calls to SetFocus, since WebKit may already think we
-  // have it if we were the most recently focused element on our parent tab.
-  if (event.type == WebInputEvent::MouseDown && !have_focus_) {
-    SetFocus();
-    // Make sure that the plugin is still there after handling the focus event.
-    if (!instance())
-      return false;
-  }
 
   ScopedActiveDelegate active_delegate(this);
 
@@ -1114,11 +578,11 @@ bool WebPluginDelegateImpl::PlatformHandleInputEvent(
     // filter them out.
     // If we add a page capture mode at the WebKit layer (like the plugin
     // capture mode that handles drags starting inside) this can be removed.
-    bool drag_related = EventIsRelatedToDrag(event, external_drag_buttons_);
-    external_drag_buttons_ = UpdatedDragStateFromEvent(external_drag_buttons_,
-                                                       event);
+    bool drag_related = external_drag_tracker_->EventIsRelatedToDrag(event);
+    external_drag_tracker_->UpdateDragStateFromEvent(event);
     if (drag_related) {
-      if (event.type == WebInputEvent::MouseUp && !external_drag_buttons_) {
+      if (event.type == WebInputEvent::MouseUp &&
+          !external_drag_tracker_->IsDragInProgress()) {
         // When an external drag ends, we need to synthesize a MouseEntered.
         NPCocoaEvent enter_event = *(static_cast<NPCocoaEvent*>(plugin_event));
         enter_event.type = NPCocoaEventMouseEntered;
@@ -1156,18 +620,466 @@ bool WebPluginDelegateImpl::PlatformHandleInputEvent(
   }
   bool handled = instance()->NPP_HandleEvent(plugin_event) != 0;
 
+  // Plugins don't give accurate information about whether or not they handled
+  // events, so browsers on the Mac ignore the return value.
+  // Scroll events are the exception, since the Cocoa spec defines a meaning
+  // for the return value.
   if (WebInputEvent::isMouseEventType(event.type)) {
-    // Plugins are not good about giving accurate information about whether or
-    // not they handled events, and other browsers on the Mac generally ignore
-    // the return value. We may need to expand this to other input types, but
-    // we'll need to be careful about things like Command-keys.
     handled = true;
+  } else if (WebInputEvent::isKeyboardEventType(event.type)) {
+    // For Command-key events, trust the return value since eating all menu
+    // shortcuts is not ideal.
+    // TODO(stuartmorgan): Implement the advanced key handling spec, and trust
+    // trust the key event return value from plugins that implement it.
+    if (!(event.modifiers & WebInputEvent::MetaKey))
+      handled = true;
   }
 
   return handled;
 }
 
+void WebPluginDelegateImpl::InstallMissingPlugin() {
+  NOTIMPLEMENTED();
+}
+
+#pragma mark -
+
+void WebPluginDelegateImpl::WindowlessUpdateGeometry(
+    const gfx::Rect& window_rect,
+    const gfx::Rect& clip_rect) {
+  gfx::Rect old_clip_rect = clip_rect_;
+  cached_clip_rect_ = clip_rect;
+  if (container_is_visible_)  // Remove check when cached_clip_rect_ is removed.
+    clip_rect_ = clip_rect;
+  bool clip_rect_changed = (clip_rect_ != old_clip_rect);
+  bool window_size_changed = (window_rect.size() != window_rect_.size());
+
+  bool force_set_window = false;
+#ifndef NP_NO_QUICKDRAW
+  // In a QuickDraw plugin, a geometry update might have caused a port change;
+  // if so, we need to call SetWindow even if nothing else changed.
+  if (qd_manager_.get() && (qd_port_.port != qd_manager_->port())) {
+    qd_port_.port = qd_manager_->port();
+    force_set_window = true;
+  }
+#endif
+
+  if (window_rect == window_rect_ && !clip_rect_changed && !force_set_window)
+    return;
+
+  if (old_clip_rect.IsEmpty() != clip_rect_.IsEmpty()) {
+    PluginVisibilityChanged();
+  }
+
+  SetPluginRect(window_rect);
+
+#ifndef NP_NO_QUICKDRAW
+  if (window_size_changed && qd_manager_.get() &&
+      qd_manager_->IsFastPathEnabled()) {
+    // If the window size has changed, we need to turn off the fast path so that
+    // the full redraw goes to the window and we get a correct baseline paint.
+    SetQuickDrawFastPathEnabled(false);
+    return;  // SetQuickDrawFastPathEnabled will call SetWindow for us.
+  }
+#endif
+
+  if (window_size_changed || clip_rect_changed || force_set_window)
+    WindowlessSetWindow();
+}
+
+void WebPluginDelegateImpl::WindowlessPaint(gfx::NativeDrawingContext context,
+                                            const gfx::Rect& damage_rect) {
+  // If we get a paint event before we are completely set up (e.g., a nested
+  // call while the plugin is still in NPP_SetWindow), bail.
+  if (!have_called_set_window_ || !buffer_context_)
+    return;
+  DCHECK(buffer_context_ == context);
+
+  static StatsRate plugin_paint("Plugin.Paint");
+  StatsScope<StatsRate> scope(plugin_paint);
+
+  // Plugin invalidates trigger asynchronous paints with the original
+  // invalidation rect; the plugin may be resized before the paint is handled,
+  // so we need to ensure that the damage rect is still sane.
+  const gfx::Rect paint_rect(damage_rect.Intersect(
+      gfx::Rect(0, 0, window_rect_.width(), window_rect_.height())));
+
+  ScopedActiveDelegate active_delegate(this);
+
+#ifndef NP_NO_QUICKDRAW
+  if (instance()->drawing_model() == NPDrawingModelQuickDraw)
+    qd_manager_->MakePortCurrent();
+#endif
+
+  CGContextSaveGState(context);
+
+  switch (instance()->event_model()) {
 #ifndef NP_NO_CARBON
+    case NPEventModelCarbon: {
+      NPEvent paint_event = { 0 };
+      paint_event.what = updateEvt;
+      paint_event.message = reinterpret_cast<uint32>(np_cg_context_.window);
+      paint_event.when = TickCount();
+      instance()->NPP_HandleEvent(&paint_event);
+      break;
+    }
+#endif
+    case NPEventModelCocoa: {
+      NPCocoaEvent paint_event;
+      memset(&paint_event, 0, sizeof(NPCocoaEvent));
+      paint_event.type = NPCocoaEventDrawRect;
+      paint_event.data.draw.context = context;
+      paint_event.data.draw.x = paint_rect.x();
+      paint_event.data.draw.y = paint_rect.y();
+      paint_event.data.draw.width = paint_rect.width();
+      paint_event.data.draw.height = paint_rect.height();
+      instance()->NPP_HandleEvent(&paint_event);
+      break;
+    }
+  }
+
+  // The backing buffer can change during the call to NPP_HandleEvent, in which
+  // case the old context is (or is about to be) invalid.
+  if (context == buffer_context_)
+    CGContextRestoreGState(context);
+}
+
+void WebPluginDelegateImpl::WindowlessSetWindow() {
+  if (!instance())
+    return;
+
+  window_.x = 0;
+  window_.y = 0;
+  window_.height = window_rect_.height();
+  window_.width = window_rect_.width();
+  window_.clipRect.left = clip_rect_.x();
+  window_.clipRect.top = clip_rect_.y();
+  window_.clipRect.right = clip_rect_.x() + clip_rect_.width();
+  window_.clipRect.bottom = clip_rect_.y() + clip_rect_.height();
+
+  NPError err = instance()->NPP_SetWindow(&window_);
+
+  // Send an appropriate window focus event after the first SetWindow.
+  if (!have_called_set_window_) {
+    have_called_set_window_ = true;
+    SetWindowHasFocus(initial_window_focus_);
+  }
+
+#ifndef NP_NO_QUICKDRAW
+  if ((quirks_ & PLUGIN_QUIRK_ALLOW_FASTER_QUICKDRAW_PATH) &&
+      !qd_manager_->IsFastPathEnabled() && !clip_rect_.IsEmpty()) {
+    // Give the plugin a few seconds to stabilize so we get a good initial paint
+    // to use as a baseline, then switch to the fast path.
+    fast_path_enable_tick_ = base::TimeTicks::Now() +
+        base::TimeDelta::FromSeconds(3);
+  }
+#endif
+
+  DCHECK(err == NPERR_NO_ERROR);
+}
+
+#pragma mark -
+
+bool WebPluginDelegateImpl::WindowedCreatePlugin() {
+  NOTREACHED();
+  return false;
+}
+
+void WebPluginDelegateImpl::WindowedDestroyWindow() {
+  NOTREACHED();
+}
+
+bool WebPluginDelegateImpl::WindowedReposition(const gfx::Rect& window_rect,
+                                               const gfx::Rect& clip_rect) {
+  NOTREACHED();
+  return false;
+}
+
+void WebPluginDelegateImpl::WindowedSetWindow() {
+  NOTREACHED();
+}
+
+#pragma mark -
+#pragma mark Mac Extensions
+
+void WebPluginDelegateImpl::PluginDidInvalidate() {
+  if (instance()->drawing_model() == NPDrawingModelInvalidatingCoreAnimation)
+    DrawLayerInSurface();
+}
+
+WebPluginDelegateImpl* WebPluginDelegateImpl::GetActiveDelegate() {
+  return g_active_delegate;
+}
+
+void WebPluginDelegateImpl::SetWindowHasFocus(bool has_focus) {
+  // If we get a window focus event before calling SetWindow, just remember the
+  // states (WindowlessSetWindow will then send it on the first call).
+  if (!have_called_set_window_) {
+    initial_window_focus_ = has_focus;
+    return;
+  }
+
+  if (has_focus == containing_window_has_focus_)
+    return;
+  containing_window_has_focus_ = has_focus;
+
+#ifndef NP_NO_QUICKDRAW
+  // Make sure controls repaint with the correct look.
+  if (quirks_ & PLUGIN_QUIRK_ALLOW_FASTER_QUICKDRAW_PATH)
+    SetQuickDrawFastPathEnabled(false);
+#endif
+
+  ScopedActiveDelegate active_delegate(this);
+  switch (instance()->event_model()) {
+#ifndef NP_NO_CARBON
+    case NPEventModelCarbon: {
+      NPEvent focus_event = { 0 };
+      focus_event.what = activateEvt;
+      if (has_focus)
+        focus_event.modifiers |= activeFlag;
+      focus_event.message =
+          reinterpret_cast<unsigned long>(np_cg_context_.window);
+      focus_event.when = TickCount();
+      instance()->NPP_HandleEvent(&focus_event);
+      break;
+    }
+#endif
+    case NPEventModelCocoa: {
+      NPCocoaEvent focus_event;
+      memset(&focus_event, 0, sizeof(focus_event));
+      focus_event.type = NPCocoaEventWindowFocusChanged;
+      focus_event.data.focus.hasFocus = has_focus;
+      instance()->NPP_HandleEvent(&focus_event);
+      break;
+    }
+  }
+}
+
+void WebPluginDelegateImpl::SetPluginHasFocus(bool has_focus) {
+  if (!have_called_set_window_)
+    return;
+
+  if (has_focus == plugin_has_focus_)
+    return;
+  plugin_has_focus_ = has_focus;
+
+  ScopedActiveDelegate active_delegate(this);
+
+  switch (instance()->event_model()) {
+#ifndef NP_NO_CARBON
+    case NPEventModelCarbon: {
+      NPEvent focus_event = { 0 };
+      if (plugin_has_focus_)
+        focus_event.what = NPEventType_GetFocusEvent;
+      else
+        focus_event.what = NPEventType_LoseFocusEvent;
+      focus_event.when = TickCount();
+      instance()->NPP_HandleEvent(&focus_event);
+      break;
+    }
+#endif
+    case NPEventModelCocoa: {
+      NPCocoaEvent focus_event;
+      memset(&focus_event, 0, sizeof(focus_event));
+      focus_event.type = NPCocoaEventFocusChanged;
+      focus_event.data.focus.hasFocus = plugin_has_focus_;
+      instance()->NPP_HandleEvent(&focus_event);
+      break;
+    }
+  }
+}
+
+void WebPluginDelegateImpl::SetContentAreaHasFocus(bool has_focus) {
+  containing_view_has_focus_ = has_focus;
+  SetPluginHasFocus(containing_view_has_focus_ && has_webkit_focus_);
+}
+
+void WebPluginDelegateImpl::SetContainerVisibility(bool is_visible) {
+  if (is_visible == container_is_visible_)
+    return;
+  container_is_visible_ = is_visible;
+
+  // TODO(stuartmorgan): This is a temporary workarond for
+  // <http://crbug.com/34266>. When that is fixed, the cached_clip_rect_ code
+  // should all be removed.
+  if (is_visible) {
+    clip_rect_ = cached_clip_rect_;
+  } else {
+    clip_rect_.set_width(0);
+    clip_rect_.set_height(0);
+  }
+
+  // If the plugin is changing visibility, let the plugin know. If it's scrolled
+  // off screen (i.e., cached_clip_rect_ is empty), then container visibility
+  // doesn't change anything.
+  if (!cached_clip_rect_.IsEmpty()) {
+    PluginVisibilityChanged();
+    WindowlessSetWindow();
+  }
+
+  // When the plugin become visible, send an empty invalidate. If there were any
+  // pending invalidations this will trigger a paint event for the damaged
+  // region, and if not it's a no-op. This is necessary since higher levels
+  // that would normally do this weren't responsible for the clip_rect_ change).
+  if (!clip_rect_.IsEmpty())
+    instance()->webplugin()->InvalidateRect(gfx::Rect());
+}
+
+void WebPluginDelegateImpl::WindowFrameChanged(gfx::Rect window_frame,
+                                               gfx::Rect view_frame) {
+  instance()->set_window_frame(window_frame);
+  SetContentAreaOrigin(gfx::Point(view_frame.x(), view_frame.y()));
+}
+
+void WebPluginDelegateImpl::SetThemeCursor(ThemeCursor cursor) {
+  current_windowless_cursor_.InitFromThemeCursor(cursor);
+}
+
+void WebPluginDelegateImpl::SetCursor(const Cursor* cursor) {
+  current_windowless_cursor_.InitFromCursor(cursor);
+}
+
+void WebPluginDelegateImpl::SetNSCursor(NSCursor* cursor) {
+  current_windowless_cursor_.InitFromNSCursor(cursor);
+}
+
+#pragma mark -
+#pragma mark Internal Tracking
+
+void WebPluginDelegateImpl::SetPluginRect(const gfx::Rect& rect) {
+  bool plugin_size_changed = rect.width() != window_rect_.width() ||
+                             rect.height() != window_rect_.height();
+  window_rect_ = rect;
+  PluginScreenLocationChanged();
+  if (plugin_size_changed)
+    UpdateAcceleratedSurface();
+}
+
+void WebPluginDelegateImpl::SetContentAreaOrigin(const gfx::Point& origin) {
+  content_area_origin_ = origin;
+  PluginScreenLocationChanged();
+}
+
+void WebPluginDelegateImpl::PluginScreenLocationChanged() {
+  gfx::Point plugin_origin(content_area_origin_.x() + window_rect_.x(),
+                           content_area_origin_.y() + window_rect_.y());
+  instance()->set_plugin_origin(plugin_origin);
+
+#ifndef NP_NO_CARBON
+  if (instance()->event_model() == NPEventModelCarbon) {
+    UpdateDummyWindowBounds(plugin_origin);
+  }
+#endif
+}
+
+void WebPluginDelegateImpl::PluginVisibilityChanged() {
+#ifndef NP_NO_CARBON
+  if (instance()->event_model() == NPEventModelCarbon)
+    UpdateIdleEventRate();
+#endif
+  if (instance()->drawing_model() == NPDrawingModelCoreAnimation) {
+    bool plugin_visible = container_is_visible_ && !clip_rect_.IsEmpty();
+    if (plugin_visible && !redraw_timer_->IsRunning() && windowed_handle()) {
+      redraw_timer_->Start(
+          base::TimeDelta::FromMilliseconds(kCoreAnimationRedrawPeriodMs),
+          this, &WebPluginDelegateImpl::DrawLayerInSurface);
+    } else if (!plugin_visible) {
+      redraw_timer_->Stop();
+    }
+  }
+}
+
+#pragma mark -
+#pragma mark Core Animation Support
+
+void WebPluginDelegateImpl::DrawLayerInSurface() {
+  // If we haven't plumbed up the surface yet, don't try to draw.
+  if (!windowed_handle())
+    return;
+
+  surface_->MakeCurrent();
+
+  surface_->Clear(window_rect_);
+
+  [renderer_ beginFrameAtTime:CACurrentMediaTime() timeStamp:NULL];
+  if (CGRectIsEmpty([renderer_ updateBounds])) {
+    // If nothing has changed, we are done.
+    [renderer_ endFrame];
+    return;
+  }
+  CGRect layerRect = [layer_ bounds];
+  [renderer_ addUpdateRect:layerRect];
+  [renderer_ render];
+  [renderer_ endFrame];
+
+  surface_->SwapBuffers();
+  plugin_->AcceleratedFrameBuffersDidSwap(windowed_handle());
+}
+
+// Update the size of the IOSurface to match the current size of the plug-in,
+// then tell the browser host view so it can adjust its bookkeeping and CALayer
+// appropriately.
+void WebPluginDelegateImpl::UpdateAcceleratedSurface() {
+  // Will only have a window handle when using a Core Animation drawing model.
+  if (!windowed_handle() || !layer_)
+    return;
+
+  [layer_ setFrame:CGRectMake(0, 0,
+                              window_rect_.width(), window_rect_.height())];
+  [renderer_ setBounds:[layer_ bounds]];
+
+  uint64 io_surface_id = surface_->SetSurfaceSize(window_rect_.size());
+  if (io_surface_id) {
+    plugin_->SetAcceleratedSurface(windowed_handle(),
+                                   window_rect_.width(),
+                                   window_rect_.height(),
+                                   io_surface_id);
+  }
+}
+
+void WebPluginDelegateImpl::set_windowed_handle(
+    gfx::PluginWindowHandle handle) {
+  windowed_handle_ = handle;
+  UpdateAcceleratedSurface();
+  // Kick off the drawing timer, if necessary.
+  PluginVisibilityChanged();
+}
+
+#pragma mark -
+#pragma mark Carbon Event support
+
+#ifndef NP_NO_CARBON
+void WebPluginDelegateImpl::UpdateDummyWindowBounds(
+    const gfx::Point& plugin_origin) {
+  WindowRef window = reinterpret_cast<WindowRef>(np_cg_context_.window);
+  Rect current_bounds;
+  GetWindowBounds(window, kWindowContentRgn, &current_bounds);
+
+  Rect new_bounds;
+  // We never want to resize the window to 0x0, so if the plugin is 0x0 just
+  // move the window without resizing it.
+  if (window_rect_.width() > 0 && window_rect_.height() > 0) {
+    SetRect(&new_bounds, 0, 0, window_rect_.width(), window_rect_.height());
+    OffsetRect(&new_bounds, plugin_origin.x(), plugin_origin.y());
+  } else {
+    new_bounds = current_bounds;
+    OffsetRect(&new_bounds, plugin_origin.x() - current_bounds.left,
+               plugin_origin.y() - current_bounds.top);
+  }
+
+  if (new_bounds.left != current_bounds.left ||
+      new_bounds.top != current_bounds.top ||
+      new_bounds.right != current_bounds.right ||
+      new_bounds.bottom != current_bounds.bottom)
+    SetWindowBounds(window, kWindowContentRgn, &new_bounds);
+}
+
+void WebPluginDelegateImpl::UpdateIdleEventRate() {
+  bool plugin_visible = container_is_visible_ && !clip_rect_.IsEmpty();
+  CarbonIdleEventSource::SharedInstance()->RegisterDelegate(this,
+                                                            plugin_visible);
+}
+
 void WebPluginDelegateImpl::FireIdleEvent() {
   // Avoid a race condition between IO and UI threads during plugin shutdown
   if (!instance())
@@ -1188,12 +1100,8 @@ void WebPluginDelegateImpl::FireIdleEvent() {
   ScopedActiveDelegate active_delegate(this);
 
 #ifndef NP_NO_QUICKDRAW
-  if (instance()->drawing_model() == NPDrawingModelQuickDraw) {
-    if (qd_fast_path_enabled_)
-      SetGWorld(qd_port_.port, NULL);
-    else
-      SetPort(qd_port_.port);
-  }
+  if (instance()->drawing_model() == NPDrawingModelQuickDraw)
+    qd_manager_->MakePortCurrent();
 #endif
 
   // Send an idle event so that the plugin can do background work
@@ -1212,10 +1120,41 @@ void WebPluginDelegateImpl::FireIdleEvent() {
 #ifndef NP_NO_QUICKDRAW
   // Quickdraw-based plugins can draw at any time, so tell the renderer to
   // repaint.
-  // TODO: only do this if the contents of the offscreen window/buffer have
-  // changed, so as not to spam the renderer with an unchanging image.
   if (instance() && instance()->drawing_model() == NPDrawingModelQuickDraw)
     instance()->webplugin()->Invalidate();
 #endif
 }
 #endif  // !NP_NO_CARBON
+
+#pragma mark -
+#pragma mark QuickDraw Support
+
+#ifndef NP_NO_QUICKDRAW
+void WebPluginDelegateImpl::SetQuickDrawFastPathEnabled(bool enabled) {
+  if (!enabled) {
+    // Wait a couple of seconds, then turn the fast path back on. If we're
+    // turning it off for event handling, that ensures that the common case of
+    // move-mouse-then-click works (as well as making it likely that a second
+    // click attempt will work if the first one fails). If we're turning it
+    // off to force a new baseline image, this leaves plenty of time for the
+    // plugin to draw.
+    fast_path_enable_tick_ = base::TimeTicks::Now() +
+        base::TimeDelta::FromSeconds(2);
+  }
+
+  if (enabled == qd_manager_->IsFastPathEnabled())
+    return;
+  if (enabled && clip_rect_.IsEmpty()) {
+    // Don't switch to the fast path while the plugin is completely clipped;
+    // we can only switch when the window has an up-to-date image for us to
+    // scrape. We'll automatically switch after we become visible again.
+    return;
+  }
+
+  qd_manager_->SetFastPathEnabled(enabled);
+  qd_port_.port = qd_manager_->port();
+  WindowlessSetWindow();
+  // Send a paint event so that the new buffer gets updated immediately.
+  WindowlessPaint(buffer_context_, clip_rect_);
+}
+#endif  // !NP_NO_QUICKDRAW

@@ -4,15 +4,21 @@
 
 #include "chrome/browser/gpu_process_host.h"
 
+#include "app/app_switches.h"
 #include "base/command_line.h"
 #include "base/thread.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/gpu_process_host_ui_shim.h"
+#include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/gpu_messages.h"
 #include "chrome/common/render_messages.h"
 #include "ipc/ipc_switches.h"
+
+#if defined(OS_LINUX)
+#include "gfx/gtk_native_view_id_manager.h"
+#endif
 
 namespace {
 
@@ -42,7 +48,7 @@ static GpuProcessHost* sole_instance_ = NULL;
 }  // anonymous namespace
 
 GpuProcessHost::GpuProcessHost()
-    : ChildProcessHost(GPU_PROCESS, NULL),
+    : BrowserChildProcessHost(GPU_PROCESS, NULL),
       initialized_(false),
       initialized_successfully_(false) {
   DCHECK_EQ(sole_instance_, static_cast<GpuProcessHost*>(NULL));
@@ -83,6 +89,18 @@ bool GpuProcessHost::Init() {
   cmd_line->AppendSwitchWithValue(switches::kProcessChannelID,
                                   ASCIIToWide(channel_id()));
 
+  // Propagate relevant command line switches.
+  static const char* const switch_names[] = {
+    switches::kUseGL,
+  };
+
+  for (size_t i = 0; i < arraysize(switch_names); ++i) {
+    if (browser_command_line.HasSwitch(switch_names[i])) {
+      cmd_line->AppendSwitchWithValue(switch_names[i],
+          browser_command_line.GetSwitchValueASCII(switch_names[i]));
+    }
+  }
+
   const CommandLine& browser_cmd_line = *CommandLine::ForCurrentProcess();
   PropagateBrowserCommandLineToGpu(browser_cmd_line, cmd_line);
 
@@ -93,7 +111,7 @@ bool GpuProcessHost::Init() {
   Launch(
 #if defined(OS_WIN)
       FilePath(),
-#elif defined(POSIX)
+#elif defined(OS_POSIX)
       false,  // Never use the zygote (GPU plugin can't be sandboxed).
       base::environment_vector(),
 #endif
@@ -113,7 +131,7 @@ bool GpuProcessHost::Send(IPC::Message* msg) {
   if (!EnsureInitialized())
     return false;
 
-  return ChildProcessHost::Send(msg);
+  return BrowserChildProcessHost::Send(msg);
 }
 
 void GpuProcessHost::OnMessageReceived(const IPC::Message& message) {
@@ -143,19 +161,29 @@ void GpuProcessHost::Synchronize(IPC::Message* reply,
   Send(new GpuMsg_Synchronize());
 }
 
+GPUInfo GpuProcessHost::gpu_info() const {
+  return gpu_info_;
+}
+
 void GpuProcessHost::OnControlMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(GpuProcessHost, message)
     IPC_MESSAGE_HANDLER(GpuHostMsg_ChannelEstablished, OnChannelEstablished)
     IPC_MESSAGE_HANDLER(GpuHostMsg_SynchronizeReply, OnSynchronizeReply)
+#if defined(OS_LINUX)
+    IPC_MESSAGE_HANDLER(GpuHostMsg_GetViewXID, OnGetViewXID)
+#endif
     IPC_MESSAGE_UNHANDLED_ERROR()
   IPC_END_MESSAGE_MAP()
 }
 
 void GpuProcessHost::OnChannelEstablished(
-    const IPC::ChannelHandle& channel_handle) {
+    const IPC::ChannelHandle& channel_handle,
+    const GPUInfo& gpu_info) {
   const ChannelRequest& request = sent_requests_.front();
   ReplyToRenderer(channel_handle, request.filter);
   sent_requests_.pop();
+  gpu_info_ = gpu_info;
+  child_process_logging::SetGpuInfo(gpu_info);
 }
 
 void GpuProcessHost::OnSynchronizeReply() {
@@ -164,6 +192,16 @@ void GpuProcessHost::OnSynchronizeReply() {
   request.filter->Send(request.reply);
   queued_synchronization_replies_.pop();
 }
+
+#if defined(OS_LINUX)
+void GpuProcessHost::OnGetViewXID(gfx::NativeViewId id, unsigned long* xid) {
+  GtkNativeViewManager* manager = Singleton<GtkNativeViewManager>::get();
+  if (!manager->GetXIDForId(xid, id)) {
+    DLOG(ERROR) << "Can't find XID for view id " << id;
+    *xid = 0;
+  }
+}
+#endif
 
 void GpuProcessHost::ReplyToRenderer(
     const IPC::ChannelHandle& channel,
@@ -206,4 +244,3 @@ URLRequestContext* GpuProcessHost::GetRequestContext(
 bool GpuProcessHost::CanShutdown() {
   return true;
 }
-

@@ -5,8 +5,6 @@
 #ifndef NET_PROXY_PROXY_RESOLVER_V8_H_
 #define NET_PROXY_PROXY_RESOLVER_V8_H_
 
-#include <string>
-
 #include "base/scoped_ptr.h"
 #include "net/proxy/proxy_resolver.h"
 
@@ -52,6 +50,7 @@ class ProxyResolverV8 : public ProxyResolver {
                              const BoundNetLog& net_log);
   virtual void CancelRequest(RequestHandle request);
   virtual void PurgeMemory();
+  virtual void Shutdown();
 
   ProxyResolverJSBindings* js_bindings() const { return js_bindings_.get(); }
 
@@ -63,7 +62,7 @@ class ProxyResolverV8 : public ProxyResolver {
 
   // ProxyResolver implementation:
   virtual int SetPacScript(const GURL& /*pac_url*/,
-                           const std::string& bytes_utf8,
+                           const string16& pac_script,
                            CompletionCallback* /*callback*/);
   scoped_ptr<Context> context_;
 

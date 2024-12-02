@@ -6,9 +6,11 @@
 #define CHROME_RENDERER_RENDERER_WEBKITCLIENT_IMPL_H_
 
 #include "base/platform_file.h"
+#include "base/scoped_ptr.h"
 #include "chrome/renderer/websharedworkerrepository_impl.h"
 #include "webkit/glue/simple_webmimeregistry_impl.h"
 #include "webkit/glue/webclipboard_impl.h"
+#include "webkit/glue/webfilesystem_impl.h"
 #include "webkit/glue/webkitclient_impl.h"
 
 #if defined(OS_WIN)
@@ -18,6 +20,8 @@
 #include <map>
 #include "base/lock.h"
 #include "third_party/WebKit/WebKit/chromium/public/linux/WebSandboxSupport.h"
+#elif defined(OS_MACOSX)
+#include "third_party/WebKit/WebKit/chromium/public/mac/WebSandboxSupport.h"
 #endif
 
 namespace IPC {
@@ -26,22 +30,23 @@ class SyncMessage;
 
 class RendererWebKitClientImpl : public webkit_glue::WebKitClientImpl {
  public:
-  RendererWebKitClientImpl() : sudden_termination_disables_(0) {}
+  RendererWebKitClientImpl();
+  virtual ~RendererWebKitClientImpl();
 
   // WebKitClient methods:
   virtual WebKit::WebClipboard* clipboard();
   virtual WebKit::WebMimeRegistry* mimeRegistry();
+  virtual WebKit::WebFileSystem* fileSystem();
   virtual WebKit::WebSandboxSupport* sandboxSupport();
   virtual WebKit::WebCookieJar* cookieJar();
   virtual bool sandboxEnabled();
-  virtual bool getFileSize(const WebKit::WebString& path, long long& result);
-  virtual bool getFileModificationTime(const WebKit::WebString& path,
-                                       double& result);
   virtual unsigned long long visitedLinkHash(
       const char* canonicalURL, size_t length);
   virtual bool isLinkVisited(unsigned long long linkHash);
   virtual WebKit::WebMessagePortChannel* createMessagePortChannel();
   virtual void prefetchHostName(const WebKit::WebString&);
+  virtual void cacheMetadata(
+      const WebKit::WebURL&, double, const char*, size_t);
   virtual WebKit::WebString defaultLocale();
   virtual void suddenTerminationChanged(bool enabled);
   virtual WebKit::WebStorageNamespace* createLocalStorageNamespace(
@@ -52,8 +57,7 @@ class RendererWebKitClientImpl : public webkit_glue::WebKitClientImpl {
       const WebKit::WebURL& url, bool is_local_storage);
 
   virtual WebKit::WebKitClient::FileHandle databaseOpenFile(
-      const WebKit::WebString& vfs_file_name, int desired_flags,
-      WebKit::WebKitClient::FileHandle* dir_handle);
+      const WebKit::WebString& vfs_file_name, int desired_flags);
   virtual int databaseDeleteFile(const WebKit::WebString& vfs_file_name,
                                  bool sync_dir);
   virtual long databaseGetFileAttributes(
@@ -64,8 +68,11 @@ class RendererWebKitClientImpl : public webkit_glue::WebKitClientImpl {
       unsigned key_size_index,
       const WebKit::WebString& challenge,
       const WebKit::WebURL& url);
+  virtual WebKit::WebIndexedDatabase* indexedDatabase();
+
   virtual WebKit::WebSharedWorkerRepository* sharedWorkerRepository();
   virtual WebKit::WebGraphicsContext3D* createGraphicsContext3D();
+  virtual WebKit::WebGLES2Context* createGLES2Context();
 
  private:
   class MimeRegistry : public webkit_glue::SimpleWebMimeRegistryImpl {
@@ -75,6 +82,17 @@ class RendererWebKitClientImpl : public webkit_glue::WebKitClientImpl {
     virtual WebKit::WebString preferredExtensionForMIMEType(
         const WebKit::WebString&);
   };
+
+  class FileSystem : public webkit_glue::WebFileSystemImpl {
+   public:
+    virtual bool getFileSize(const WebKit::WebString& path, long long& result);
+    virtual bool getFileModificationTime(const WebKit::WebString& path,
+                                         double& result);
+    virtual base::PlatformFile openFile(const WebKit::WebString& path,
+                                        int mode);
+  };
+
+  bool CheckPreparsedJsCachingEnabled() const;
 
 #if defined(OS_WIN)
   class SandboxSupport : public WebKit::WebSandboxSupport {
@@ -97,14 +115,23 @@ class RendererWebKitClientImpl : public webkit_glue::WebKitClientImpl {
     Lock unicode_font_families_mutex_;
     std::map<std::string, std::string> unicode_font_families_;
   };
+#elif defined(OS_MACOSX)
+  class SandboxSupport : public WebKit::WebSandboxSupport {
+   public:
+    virtual bool loadFont(NSFont* srcFont, ATSFontContainerRef* out);
+  };
 #endif
+
+  // Helper function to send synchronous message from any thread.
+  static bool SendSyncMessageFromAnyThread(IPC::SyncMessage* msg);
 
   webkit_glue::WebClipboardImpl clipboard_;
 
+  FileSystem file_system_;
+
   MimeRegistry mime_registry_;
-#if defined(OS_WIN) || defined(OS_LINUX)
+
   SandboxSupport sandbox_support_;
-#endif
 
   // This counter keeps track of the number of times sudden termination is
   // enabled or disabled. It starts at 0 (enabled) and for every disable
@@ -116,6 +143,7 @@ class RendererWebKitClientImpl : public webkit_glue::WebKitClientImpl {
   // to WorkerService on the browser thread.
   WebSharedWorkerRepositoryImpl shared_worker_repository_;
 
+  scoped_ptr<WebKit::WebIndexedDatabase> web_indexed_database_;
 };
 
 #endif  // CHROME_RENDERER_RENDERER_WEBKITCLIENT_IMPL_H_

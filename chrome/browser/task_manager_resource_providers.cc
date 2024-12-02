@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,9 @@
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "chrome/app/chrome_dll_resource.h"
+#include "chrome/browser/browser_child_process_host.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_list.h"
-#include "chrome/browser/child_process_host.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
@@ -42,7 +42,7 @@
 #include "skia/ext/skia_utils_mac.h"
 #endif
 #if defined(OS_WIN)
-#include <atlbase.h>
+#include "chrome/browser/app_icon_win.h"
 #include "gfx/icon_util.h"
 #endif  // defined(OS_WIN)
 
@@ -77,8 +77,7 @@ std::wstring TaskManagerTabContentsResource::GetTitle() const {
   if (tab_title.empty()) {
     tab_title = UTF8ToWide(tab_contents_->GetURL().spec());
     // Force URL to be LTR.
-    if (base::i18n::IsRTL())
-      base::i18n::WrapStringWithLTRFormatting(&tab_title);
+    base::i18n::GetDisplayStringInLTRDirectionality(&tab_title);
   } else {
     // Since the tab_title will be concatenated with
     // IDS_TASK_MANAGER_TAB_PREFIX, we need to explicitly set the tab_title to
@@ -489,7 +488,7 @@ void TaskManagerChildProcessResourceProvider::AddToTaskManager(
 
 // The ChildProcessInfo::Iterator has to be used from the IO thread.
 void TaskManagerChildProcessResourceProvider::RetrieveChildProcessInfo() {
-  for (ChildProcessHost::Iterator iter; !iter.Done(); ++iter) {
+  for (BrowserChildProcessHost::Iterator iter; !iter.Done(); ++iter) {
     // Only add processes which are already started, since we need their handle.
     if ((*iter)->handle() != base::kNullProcessHandle)
       existing_child_process_info_.push_back(**iter);
@@ -529,14 +528,6 @@ TaskManagerExtensionProcessResource::TaskManagerExtensionProcessResource(
   pid_ = base::GetProcId(process_handle_);
   std::wstring extension_name(UTF8ToWide(GetExtension()->name()));
   DCHECK(!extension_name.empty());
-  // Since the extension_name will be concatenated with a prefix, we need
-  // to explicitly set the extension_name to be LTR format if there is no
-  // strong RTL charater in it. Otherwise, if the prefix is an RTL word,
-  // the concatenated result might be wrong. For extension named
-  // "Great Extension!" the concatenated result would be something like
-  // "!Great Extension :NOISNETXE", in which capital letters "NOISNETXE"
-  // stand for the Hebrew word for "extension".
-  base::i18n::AdjustStringForLocaleDirection(extension_name, &extension_name);
   title_ = l10n_util::GetStringF(IDS_TASK_MANAGER_EXTENSION_PREFIX,
                                  extension_name);
 }
@@ -596,6 +587,8 @@ void TaskManagerExtensionProcessResourceProvider::StartUpdating() {
        it != profile_manager->end(); ++it) {
       ExtensionProcessManager* process_manager =
           (*it)->GetExtensionProcessManager();
+      if (!process_manager)
+        continue;
       ExtensionProcessManager::const_iterator jt;
       for (jt = process_manager->begin(); jt != process_manager->end(); ++jt)
         AddToTaskManager(*jt);
@@ -834,8 +827,7 @@ TaskManagerBrowserProcessResource::TaskManagerBrowserProcessResource()
   DCHECK(success);
 #if defined(OS_WIN)
   if (!default_icon_) {
-    HICON icon = LoadIcon(_AtlBaseModule.GetResourceInstance(),
-                          MAKEINTRESOURCE(IDR_MAINFRAME));
+    HICON icon = GetAppIcon();
     if (icon) {
       ICONINFO icon_info = {0};
       BITMAP bitmap_info = {0};

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,33 +7,34 @@
 
 #include "base/basictypes.h"
 #include "base/message_loop.h"
-#include "base/observer_list.h"
+#include "base/scoped_ptr.h"
 #include "net/base/network_change_notifier.h"
+
+namespace base {
+class Thread;
+}
 
 namespace net {
 
-class NetworkChangeNotifierLinux
-    : public NetworkChangeNotifier, public MessageLoopForIO::Watcher {
+class NetworkChangeNotifierLinux : public MessageLoop::DestructionObserver,
+                                   public MessageLoopForIO::Watcher,
+                                   public NetworkChangeNotifier {
  public:
   NetworkChangeNotifierLinux();
 
-  // NetworkChangeNotifier methods:
+ private:
+  virtual ~NetworkChangeNotifierLinux();
 
-  virtual void AddObserver(Observer* observer) {
-    observers_.AddObserver(observer);
-  }
+  // MessageLoop::DestructionObserver:
+  virtual void WillDestroyCurrentMessageLoop();
 
-  virtual void RemoveObserver(Observer* observer) {
-    observers_.RemoveObserver(observer);
-  }
-
-  // MessageLoopForIO::Watcher methods:
-
+  // MessageLoopForIO::Watcher:
   virtual void OnFileCanReadWithoutBlocking(int fd);
   virtual void OnFileCanWriteWithoutBlocking(int /* fd */);
 
- private:
-  virtual ~NetworkChangeNotifierLinux();
+  // Called on the notifier thread to initialize the notification
+  // implementation.
+  void Init();
 
   // Starts listening for netlink messages.  Also handles the messages if there
   // are any available on the netlink socket.
@@ -44,10 +45,14 @@ class NetworkChangeNotifierLinux
   // recv() would block.  Otherwise, it returns a net error code.
   int ReadNotificationMessage(char* buf, size_t len);
 
-  ObserverList<Observer, true> observers_;
+  // The thread used to listen for notifications.  This relays the notification
+  // to the registered observers without posting back to the thread the object
+  // was created on.
+  scoped_ptr<base::Thread> notifier_thread_;
 
-  int netlink_fd_;  // This is the netlink socket descriptor.
-  MessageLoopForIO* const loop_;
+  // The netlink socket descriptor.
+  int netlink_fd_;
+
   MessageLoopForIO::FileDescriptorWatcher netlink_watcher_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkChangeNotifierLinux);

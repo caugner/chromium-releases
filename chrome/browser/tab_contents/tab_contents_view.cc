@@ -7,13 +7,13 @@
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
+#include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 
 TabContentsView::TabContentsView(TabContents* tab_contents)
-    : tab_contents_(tab_contents),
-      preferred_width_(0) {
+    : tab_contents_(tab_contents) {
 }
 
 void TabContentsView::RenderWidgetHostDestroyed(RenderWidgetHost* host) {
@@ -26,16 +26,20 @@ void TabContentsView::RenderViewCreated(RenderViewHost* host) {
   // Default implementation does nothing. Platforms may override.
 }
 
-void TabContentsView::UpdatePreferredSize(const gfx::Size& pref_size) {
-  preferred_width_ = pref_size.width();
-}
-
-void TabContentsView::CreateNewWindow(int route_id) {
+void TabContentsView::CreateNewWindow(
+    int route_id,
+    WindowContainerType window_container_type,
+    const string16& frame_name) {
   TabContents* new_contents = delegate_view_helper_.CreateNewWindow(
-      route_id, tab_contents_->profile(), tab_contents_->GetSiteInstance(),
-      DOMUIFactory::GetDOMUIType(tab_contents_->GetURL()), tab_contents_);
+      route_id,
+      tab_contents_->profile(),
+      tab_contents_->GetSiteInstance(),
+      DOMUIFactory::GetDOMUIType(tab_contents_->GetURL()),
+      tab_contents_,
+      window_container_type,
+      frame_name);
 
-  if (tab_contents_->delegate())
+  if (new_contents && tab_contents_->delegate())
     tab_contents_->delegate()->TabContentsCreated(new_contents);
 }
 
@@ -67,6 +71,11 @@ bool TabContentsView::PreHandleKeyboardEvent(
   return tab_contents_->delegate() &&
     tab_contents_->delegate()->PreHandleKeyboardEvent(
         event, is_keyboard_shortcut);
+}
+
+void TabContentsView::UpdatePreferredSize(const gfx::Size& pref_size) {
+  if (tab_contents_->delegate())
+    tab_contents_->delegate()->UpdatePreferredSize(pref_size);
 }
 
 void TabContentsView::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {

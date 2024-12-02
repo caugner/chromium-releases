@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,6 +38,35 @@ class URLRequest;
 
 class SSLManager : public NotificationObserver {
  public:
+  // Entry point for SSLCertificateErrors.  This function begins the process
+  // of resolving a certificate error during an SSL connection.  SSLManager
+  // will adjust the security UI and either call |Cancel| or
+  // |ContinueDespiteLastError| on the URLRequest.
+  //
+  // Called on the IO thread.
+  static void OnSSLCertificateError(ResourceDispatcherHost* resource_dispatcher,
+                                    URLRequest* request,
+                                    int cert_error,
+                                    net::X509Certificate* cert);
+
+  // Called when SSL state for a host or tab changes.  Broadcasts the
+  // SSL_INTERNAL_STATE_CHANGED notification.
+  static void NotifySSLInternalStateChanged();
+
+  // Convenience methods for serializing/deserializing the security info.
+  static std::string SerializeSecurityInfo(int cert_id,
+                                           int cert_status,
+                                           int security_bits,
+                                           int connection_status);
+  static bool DeserializeSecurityInfo(const std::string& state,
+                                      int* cert_id,
+                                      int* cert_status,
+                                      int* security_bits,
+                                      int* connection_status);
+
+  // Returns "<organization_name> [<country>]".
+  static std::wstring GetEVCertName(const net::X509Certificate& cert);
+
   // Construct an SSLManager for the specified tab.
   // If |delegate| is NULL, SSLPolicy::GetDefaultPolicy() is used.
   explicit SSLManager(NavigationController* controller);
@@ -50,22 +79,16 @@ class SSLManager : public NotificationObserver {
   // NavigationController is guaranteed to outlive the SSLManager.
   NavigationController* controller() { return controller_; }
 
-  static void RegisterUserPrefs(PrefService* prefs);
+  // This entry point is called directly (instead of via the notification
+  // service) because we need more precise control of the order in which folks
+  // are notified of this event.
+  void DidCommitProvisionalLoad(const NotificationDetails& details);
 
-  // Entry point for SSLCertificateErrors.  This function begins the process
-  // of resolving a certificate error during an SSL connection.  SSLManager
-  // will adjust the security UI and either call |Cancel| or
-  // |ContinueDespiteLastError| on the URLRequest.
-  //
-  // Called on the IO thread.
-  static void OnSSLCertificateError(ResourceDispatcherHost* resource_dispatcher,
-                                    URLRequest* request,
-                                    int cert_error,
-                                    net::X509Certificate* cert);
-
-  // Mixed content entry points.
-  void DidDisplayInsecureContent();
+  // Insecure content entry point.
   void DidRunInsecureContent(const std::string& security_origin);
+
+  // Called to determine if there were any processed SSL errors from request.
+  bool ProcessedSSLErrorFromRequest() const;
 
   // Entry point for navigation.  This function begins the process of updating
   // the security UI when the main frame navigates to a new URL.
@@ -74,30 +97,6 @@ class SSLManager : public NotificationObserver {
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
-
-  // This entry point is called directly (instead of via the notification
-  // service) because we need more precise control of the order in which folks
-  // are notified of this event.
-  void DidCommitProvisionalLoad(const NotificationDetails& details);
-
-  // Called to determine if there were any processed SSL errors from request.
-  bool ProcessedSSLErrorFromRequest() const;
-
-  // Convenience methods for serializing/deserializing the security info.
-  static std::string SerializeSecurityInfo(int cert_id,
-                                           int cert_status,
-                                           int security_bits);
-  static bool DeserializeSecurityInfo(const std::string& state,
-                                      int* cert_id,
-                                      int* cert_status,
-                                      int* security_bits);
-
-  // Sets |short_name| to <organization_name> [<country>] and |ca_name|
-  // to something like:
-  // "Verified by <issuer_organization_name>"
-  static bool GetEVCertNames(const net::X509Certificate& cert,
-                             std::wstring* short_name,
-                             std::wstring* ca_name);
 
  private:
   // SSLMessageInfo contains the information necessary for displaying a message
@@ -133,9 +132,6 @@ class SSLManager : public NotificationObserver {
   void DidStartResourceResponse(ResourceRequestDetails* details);
   void DidReceiveResourceRedirect(ResourceRedirectDetails* details);
   void DidChangeSSLInternalState();
-
-  // Dispatch NotificationType::SSL_VISIBLE_STATE_CHANGED notification.
-  void DispatchSSLVisibleStateChanged();
 
   // Update the NavigationEntry with our current state.
   void UpdateEntry(NavigationEntry* entry);

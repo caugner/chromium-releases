@@ -35,9 +35,8 @@ int svsInit ( ESContext *esContext )
       "   gl_Position = u_mvpMatrix * a_position;  \n"
       "}                                           \n";
    
-   // TODO(alokp): Shaders containing "precision" do not compile.
    GLbyte fShaderStr[] =  
-      "//precision mediump float;                            \n"
+      "precision mediump float;                            \n"
       "void main()                                         \n"
       "{                                                   \n"
       "  gl_FragColor = vec4( 1.0, 0.0, 0.0, 1.0 );        \n"
@@ -60,7 +59,7 @@ int svsInit ( ESContext *esContext )
    glBufferData ( GL_ARRAY_BUFFER, 3 * numVertices * sizeof(GLfloat),
                   vertices, GL_STATIC_DRAW );
    glBindBuffer ( GL_ELEMENT_ARRAY_BUFFER, userData->vboIds[1] );
-   glBufferData ( GL_ELEMENT_ARRAY_BUFFER, userData->numIndices * sizeof(GL_UNSIGNED_SHORT),
+   glBufferData ( GL_ELEMENT_ARRAY_BUFFER, userData->numIndices * sizeof(GLushort),
                   indices, GL_STATIC_DRAW );
    if ( vertices != NULL ) free ( vertices );
    if ( indices != NULL ) free ( indices );

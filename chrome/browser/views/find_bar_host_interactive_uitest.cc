@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@ namespace {
 // The delay waited after sending an OS simulated event.
 static const int kActionDelayMs = 500;
 static const wchar_t kDocRoot[] = L"chrome/test/data";
-static const wchar_t kSimplePage[] = L"404_is_enough_for_us.html";
+static const char kSimplePage[] = "files/find_in_page/simple.html";
 
 class FindInPageTest : public InProcessBrowserTest {
  public:
@@ -76,6 +76,12 @@ class FindInPageTest : public InProcessBrowserTest {
     return -1;
 #endif
   }
+
+  string16 GetFindBarText() {
+    FindBarTesting* find_bar =
+        browser()->GetFindBarController()->find_bar()->GetFindBarTesting();
+    return find_bar->GetFindText();
+  }
 };
 
 }  // namespace
@@ -86,14 +92,14 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, CrashEscHandlers) {
   ASSERT_TRUE(NULL != server.get());
 
   // First we navigate to our test page (tab A).
-  GURL url = server->TestServerPageW(kSimplePage);
+  GURL url = server->TestServerPage(kSimplePage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   browser()->Find();
 
   // Open another tab (tab B).
-  browser()->AddTabWithURL(url, GURL(), PageTransition::TYPED, true, -1,
-                           false, NULL);
+  browser()->AddTabWithURL(url, GURL(), PageTransition::TYPED, -1,
+                           TabStripModel::ADD_SELECTED, NULL, std::string());
 
   browser()->Find();
   EXPECT_EQ(VIEW_ID_FIND_IN_PAGE_TEXT_FIELD, GetFocusedViewID());
@@ -114,7 +120,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, CrashEscHandlers) {
   // This used to crash until bug 1303709 was fixed.
   ui_controls::SendKeyPressNotifyWhenDone(
       browser()->window()->GetNativeHandle(), base::VKEY_ESCAPE,
-      false, false, false, new MessageLoop::QuitTask());
+      false, false, false, false, new MessageLoop::QuitTask());
   ui_test_utils::RunMessageLoop();
 }
 
@@ -123,7 +129,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestore) {
       HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
 
-  GURL url = server->TestServerPageW(L"title1.html");
+  GURL url = server->TestServerPage("title1.html");
   ui_test_utils::NavigateToURL(browser(), url);
 
   // Focus the location bar, open and close the find-in-page, focus should
@@ -158,4 +164,73 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestore) {
   browser()->GetFindBarController()->EndFindSession(
       FindBarController::kKeepSelection);
   EXPECT_EQ(VIEW_ID_LOCATION_BAR, GetFocusedViewID());
+}
+
+// This tests that whenever you clear values from the Find box and close it that
+// it respects that and doesn't show you the last search, as reported in bug:
+// http://crbug.com/40121.
+IN_PROC_BROWSER_TEST_F(FindInPageTest, PrepopulateRespectBlank) {
+#if defined(OS_MACOSX)
+  // FindInPage on Mac doesn't use prepopulated values. Search there is global.
+  return;
+#endif
+
+  HTTPTestServer* server = StartHTTPServer();
+  ASSERT_TRUE(server);
+
+  // First we navigate to any page.
+  GURL url = server->TestServerPage(kSimplePage);
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  gfx::NativeWindow window = browser()->window()->GetNativeHandle();
+
+  // Show the Find bar.
+  browser()->GetFindBarController()->Show();
+
+  // Search for "a".
+  ui_controls::SendKeyPressNotifyWhenDone(window, base::VKEY_A,
+      false, false, false, false,  // No modifiers.
+      new MessageLoop::QuitTask());
+  ui_test_utils::RunMessageLoop();
+
+  // We should find "a" here.
+  EXPECT_EQ(ASCIIToUTF16("a"), GetFindBarText());
+
+  // Delete "a".
+  ui_controls::SendKeyPressNotifyWhenDone(window, base::VKEY_BACK,
+      false, false, false, false,  // No modifiers.
+      new MessageLoop::QuitTask());
+  ui_test_utils::RunMessageLoop();
+
+  // Validate we have cleared the text.
+  EXPECT_EQ(string16(), GetFindBarText());
+
+  // Close the Find box.
+  ui_controls::SendKeyPressNotifyWhenDone(window, base::VKEY_ESCAPE,
+      false, false, false, false,  // No modifiers.
+      new MessageLoop::QuitTask());
+  ui_test_utils::RunMessageLoop();
+
+  // Show the Find bar.
+  browser()->GetFindBarController()->Show();
+
+  // After the Find box has been reopened, it should not have been prepopulated
+  // with "a" again.
+  EXPECT_EQ(string16(), GetFindBarText());
+
+  // Close the Find box.
+  ui_controls::SendKeyPressNotifyWhenDone(window, base::VKEY_ESCAPE,
+      false, false, false, false,  // No modifiers.
+      new MessageLoop::QuitTask());
+  ui_test_utils::RunMessageLoop();
+
+  // Press F3 to trigger FindNext.
+  ui_controls::SendKeyPressNotifyWhenDone(window, base::VKEY_F3,
+      false, false, false, false,  // No modifiers.
+      new MessageLoop::QuitTask());
+  ui_test_utils::RunMessageLoop();
+
+  // After the Find box has been reopened, it should still have no prepopulate
+  // value.
+  EXPECT_EQ(string16(), GetFindBarText());
 }

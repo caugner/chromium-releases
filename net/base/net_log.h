@@ -10,9 +10,12 @@
 
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
-#include "base/time.h"
-#include "net/base/net_log.h"
+
+class Value;
+
+namespace base {
+class TimeTicks;
+}
 
 namespace net {
 
@@ -30,19 +33,9 @@ namespace net {
 // ******** The NetLog (and associated logging) is a work in progress ********
 //
 // TODO(eroman): Remove the 'const' qualitifer from the BoundNetLog methods.
-// TODO(eroman): Remove the AddString() and AddStringLiteral() methods.
-//               These are a carry-over from old approach. Really, consumers
-//               should be calling AddEventWithParameters(), and passing a
-//               custom EventParameters* object that encapsulates all of the
-//               interesting state.
-// TODO(eroman): Remove NetLogUtil. Pretty printing should only be done from
-//               javascript, and should be very context-aware.
-// TODO(eroman): Move Capturing*NetLog to its own file. (And eventually remove
-//               all the consumers of it).
-// TODO(eroman): Make the DNS jobs emit directly into the NetLog.
+// TODO(eroman): Make the DNS jobs emit into the NetLog.
 // TODO(eroman): Start a new Source each time URLRequest redirects
 //               (simpler to reason about each as a separate entity).
-// TODO(eroman): Add the URLRequest load flags to the start entry.
 
 class NetLog {
  public:
@@ -62,22 +55,23 @@ class NetLog {
 
   // The "source" identifies the entity that generated the log message.
   enum SourceType {
-    SOURCE_NONE,
-    SOURCE_URL_REQUEST,
-    SOURCE_SOCKET_STREAM,
-    SOURCE_INIT_PROXY_RESOLVER,
-    SOURCE_CONNECT_JOB,
+#define SOURCE_TYPE(label, value) SOURCE_ ## label = value,
+#include "net/base/net_log_source_type_list.h"
+#undef SOURCE_TYPE
   };
 
   // Identifies the entity that generated this log. The |id| field should
   // uniquely identify the source, and is used by log observers to infer
   // message groupings. Can use NetLog::NextID() to create unique IDs.
   struct Source {
-    Source() : type(SOURCE_NONE), id(-1) {}
-    Source(SourceType type, int id) : type(type), id(id) {}
+    static const uint32 kInvalidId = 0;
+
+    Source() : type(SOURCE_NONE), id(kInvalidId) {}
+    Source(SourceType type, uint32 id) : type(type), id(id) {}
+    bool is_valid() { return id != kInvalidId; }
 
     SourceType type;
-    int id;
+    uint32 id;
   };
 
   // Base class for associating additional parameters with an event. Log
@@ -88,9 +82,10 @@ class NetLog {
     EventParameters() {}
     virtual ~EventParameters() {}
 
-    // Serializes the parameters to a string representation (this should be a
-    // lossless conversion).
-    virtual std::string ToString() const = 0;
+    // Serializes the parameters to a Value tree. This is intended to be a
+    // lossless conversion, which is used to serialize the parameters to JSON.
+    // The caller takes ownership of the returned Value*.
+    virtual Value* ToValue() const = 0;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(EventParameters);
@@ -105,21 +100,20 @@ class NetLog {
   //  |source| - The source that generated the event.
   //  |phase| - An optional parameter indicating whether this is the start/end
   //            of an action.
-  //  |extra_parameters| - Optional (may be NULL) parameters for this event.
-  //                       The specific subclass of EventParameters is defined
-  //                       by the contract for events of this |type|.
+  //  |params| - Optional (may be NULL) parameters for this event.
+  //             The specific subclass of EventParameters is defined
+  //             by the contract for events of this |type|.
+  //             TODO(eroman): Take a scoped_refptr<> instead.
   virtual void AddEntry(EventType type,
                         const base::TimeTicks& time,
                         const Source& source,
                         EventPhase phase,
-                        EventParameters* extra_parameters) = 0;
+                        EventParameters* params) = 0;
 
   // Returns a unique ID which can be used as a source ID.
-  virtual int NextID() = 0;
+  virtual uint32 NextID() = 0;
 
   // Returns true if more complicated messages should be sent to the log.
-  // TODO(eroman): This is a carry-over from refactoring; figure out
-  //               something better.
   virtual bool HasListener() const = 0;
 
   // Returns a C-String symbolic name for |event_type|.
@@ -138,45 +132,33 @@ class BoundNetLog {
  public:
   BoundNetLog() : net_log_(NULL) {}
 
-  // TODO(eroman): This is a complete hack to allow passing in NULL in
-  // place of a BoundNetLog. I added this while refactoring to simplify the
-  // task of updating all the callers.
-  BoundNetLog(int) : net_log_(NULL) {}
-
   BoundNetLog(const NetLog::Source& source, NetLog* net_log)
       : source_(source), net_log_(net_log) {
   }
 
-  void AddEntry(NetLog::EventType type,
-                NetLog::EventPhase phase,
-                NetLog::EventParameters* extra_parameters) const;
-
-  void AddEntryWithTime(NetLog::EventType type,
-                        const base::TimeTicks& time,
-                        NetLog::EventPhase phase,
-                        NetLog::EventParameters* extra_parameters) const;
-
   // Convenience methods that call through to the NetLog, passing in the
   // currently bound source.
-  void AddEvent(NetLog::EventType event_type) const;
-  void AddEventWithParameters(NetLog::EventType event_type,
-                              NetLog::EventParameters* params) const;
-  bool HasListener() const;
-  void BeginEvent(NetLog::EventType event_type) const;
-  void BeginEventWithParameters(NetLog::EventType event_type,
-                                NetLog::EventParameters* params) const;
-  void BeginEventWithString(NetLog::EventType event_type,
-                            const std::string& string) const;
-  void AddEventWithInteger(NetLog::EventType event_type, int integer) const;
-  void EndEvent(NetLog::EventType event_type) const;
-  void EndEventWithParameters(NetLog::EventType event_type,
-                              NetLog::EventParameters* params) const;
-  void EndEventWithInteger(NetLog::EventType event_type, int integer) const;
+  void AddEntry(NetLog::EventType type,
+                NetLog::EventPhase phase,
+                const scoped_refptr<NetLog::EventParameters>& params) const;
 
-  // Deprecated: Don't add new dependencies that use these methods. Instead, use
-  // AddEventWithParameters().
-  void AddString(const std::string& string) const;
-  void AddStringLiteral(const char* literal) const;
+  void AddEntryWithTime(
+      NetLog::EventType type,
+      const base::TimeTicks& time,
+      NetLog::EventPhase phase,
+      const scoped_refptr<NetLog::EventParameters>& params) const;
+
+  // Convenience methods that call through to the NetLog, passing in the
+  // currently bound source, current time, and a fixed "capture phase"
+  // (begin, end, or none).
+  void AddEvent(NetLog::EventType event_type,
+                const scoped_refptr<NetLog::EventParameters>& params) const;
+  void BeginEvent(NetLog::EventType event_type,
+                  const scoped_refptr<NetLog::EventParameters>& params) const;
+  void EndEvent(NetLog::EventType event_type,
+                const scoped_refptr<NetLog::EventParameters>& params) const;
+
+  bool HasListener() const;
 
   // Helper to create a BoundNetLog given a NetLog and a SourceType. Takes care
   // of creating a unique source ID, and handles the case of NULL net_log.
@@ -194,141 +176,56 @@ class BoundNetLog {
 // single std::string parameter.
 class NetLogStringParameter : public NetLog::EventParameters {
  public:
-  explicit NetLogStringParameter(const std::string& value);
+  // |name| must be a string literal.
+  NetLogStringParameter(const char* name, const std::string& value);
 
   const std::string& value() const {
     return value_;
   }
 
-  virtual std::string ToString() const {
-    return value_;
-  }
+  virtual Value* ToValue() const;
 
  private:
-  std::string value_;
+  const char* const name_;
+  const std::string value_;
 };
 
 // NetLogIntegerParameter is a subclass of EventParameters that encapsulates a
 // single integer parameter.
 class NetLogIntegerParameter : public NetLog::EventParameters {
  public:
-  explicit NetLogIntegerParameter(int value) : value_(value) {}
+  // |name| must be a string literal.
+  NetLogIntegerParameter(const char* name, int value)
+      : name_(name), value_(value) {}
 
   int value() const {
     return value_;
   }
 
-  virtual std::string ToString() const;
+  virtual Value* ToValue() const;
 
  private:
+  const char* name_;
   const int value_;
 };
 
-// NetLogStringLiteralParameter is a subclass of EventParameters that
-// encapsulates a single string literal parameter.
-class NetLogStringLiteralParameter : public NetLog::EventParameters {
+// NetLogSourceParameter is a subclass of EventParameters that encapsulates a
+// single NetLog::Source parameter.
+class NetLogSourceParameter : public NetLog::EventParameters {
  public:
-  explicit NetLogStringLiteralParameter(const char* value) : value_(value) {}
+  // |name| must be a string literal.
+  NetLogSourceParameter(const char* name, const NetLog::Source& value)
+      : name_(name), value_(value) {}
 
-  const char* const value() const {
+  const NetLog::Source& value() const {
     return value_;
   }
 
-  virtual std::string ToString() const;
+  virtual Value* ToValue() const;
 
  private:
-  const char* const value_;
-};
-
-
-// CapturingNetLog is an implementation of NetLog that saves messages to a
-// bounded buffer.
-class CapturingNetLog : public NetLog {
- public:
-  struct Entry {
-    Entry(EventType type,
-          const base::TimeTicks& time,
-          Source source,
-          EventPhase phase,
-          EventParameters* extra_parameters)
-        : type(type), time(time), source(source), phase(phase),
-          extra_parameters(extra_parameters) {
-    }
-
-    EventType type;
-    base::TimeTicks time;
-    Source source;
-    EventPhase phase;
-    scoped_refptr<EventParameters> extra_parameters;
-  };
-
-  // Ordered set of entries that were logged.
-  typedef std::vector<Entry> EntryList;
-
-  enum { kUnbounded = -1 };
-
-  // Creates a CapturingNetLog that logs a maximum of |max_num_entries|
-  // messages.
-  explicit CapturingNetLog(size_t max_num_entries)
-      : next_id_(0), max_num_entries_(max_num_entries) {}
-
-  // NetLog implementation:
-  virtual void AddEntry(EventType type,
-                        const base::TimeTicks& time,
-                        const Source& source,
-                        EventPhase phase,
-                        EventParameters* extra_parameters);
-  virtual int NextID();
-  virtual bool HasListener() const { return true; }
-
-  // Returns the list of all entries in the log.
-  const EntryList& entries() const { return entries_; }
-
-  void Clear();
-
- private:
-  int next_id_;
-  size_t max_num_entries_;
-  EntryList entries_;
-
-  DISALLOW_COPY_AND_ASSIGN(CapturingNetLog);
-};
-
-// Helper class that exposes a similar API as BoundNetLog, but uses a
-// CapturingNetLog rather than the more generic NetLog.
-//
-// CapturingBoundNetLog can easily be converted to a BoundNetLog using the
-// bound() method.
-class CapturingBoundNetLog {
- public:
-  CapturingBoundNetLog(const NetLog::Source& source, CapturingNetLog* net_log)
-      : source_(source), capturing_net_log_(net_log) {
-  }
-
-  explicit CapturingBoundNetLog(size_t max_num_entries)
-      : capturing_net_log_(new CapturingNetLog(max_num_entries)) {}
-
-  // The returned BoundNetLog is only valid while |this| is alive.
-  BoundNetLog bound() const {
-    return BoundNetLog(source_, capturing_net_log_.get());
-  }
-
-  // Returns the list of all entries in the log.
-  const CapturingNetLog::EntryList& entries() const {
-    return capturing_net_log_->entries();
-  }
-
-  void Clear();
-
-  // Sends all of captured messages to |net_log|, using the same source ID
-  // as |net_log|.
-  void AppendTo(const BoundNetLog& net_log) const;
-
- private:
-  NetLog::Source source_;
-  scoped_ptr<CapturingNetLog> capturing_net_log_;
-
-  DISALLOW_COPY_AND_ASSIGN(CapturingBoundNetLog);
+  const char* name_;
+  const NetLog::Source value_;
 };
 
 }  // namespace net

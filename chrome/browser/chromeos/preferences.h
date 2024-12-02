@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/pref_member.h"
 #include "chrome/common/notification_observer.h"
 
@@ -17,7 +18,7 @@ namespace chromeos {
 
 // The Preferences class handles Chrome OS preferences. When the class
 // is first initialized, it will initialize the OS settings to what's stored in
-// the preferences. These include timezones, touchpad settings, etc.
+// the preferences. These include touchpad settings, etc.
 // When the preferences change, we change the settings to reflect the new value.
 class Preferences : public NotificationObserver {
  public:
@@ -42,48 +43,61 @@ class Preferences : public NotificationObserver {
   virtual void NotifyPrefChanged(const std::wstring* pref_name);
 
  private:
-  void SetTimeZone(const std::wstring& id);
-
-  // Writes boolean |value| to the IME (IBus) configuration daemon. |section|
-  // (e.g. "general") and |name| (e.g. "use_global_engine") should not be NULL.
+  // Writes boolean |value| to the input method (IBus) configuration daemon.
+  // |section| (e.g. "general") and |name| (e.g. "use_global_engine") should
+  // not be NULL.
   void SetLanguageConfigBoolean(const char* section,
                                 const char* name,
                                 bool value);
 
-  // Writes string |value| to the IME (IBus) configuration daemon. |section|
-  // and |name| should not be NULL.
+  // Writes integer |value| to the input method (IBus) configuration daemon.
+  // |section| and |name| should not be NULL.
+  void SetLanguageConfigInteger(const char* section,
+                                const char* name,
+                                int value);
+
+  // Writes string |value| to the input method (IBus) configuration daemon.
+  // |section| and |name| should not be NULL.
   void SetLanguageConfigString(const char* section,
                                const char* name,
-                               const std::wstring& value);
+                               const std::string& value);
 
-  // Writes a string list to the IME (IBus) configuration daemon. |section|
-  // and |name| should not be NULL.
+  // Writes a string list to the input method (IBus) configuration daemon.
+  // |section| and |name| should not be NULL.
   void SetLanguageConfigStringList(const char* section,
                                    const char* name,
-                                   const std::vector<std::wstring>& values);
+                                   const std::vector<std::string>& values);
 
-  // Set input method hot-keys specified by |name| to |value|.
-  // Examples of |name|: "trigger", "next_engine"
-  // Examples of |value|: "" (no hot-keys), "Control+space,Hiragana"
-  void SetHotkeys(const char* name, const std::wstring& value);
+  // A variant of SetLanguageConfigStringList. You can pass comma-separated
+  // values. Examples of |value|: "", "Control+space,Hiragana"
+  void SetLanguageConfigStringListAsCSV(const char* section,
+                                        const char* name,
+                                        const std::string& value);
 
-  // Activates IMEs that are on |value|, which is a comma separated list of IME
-  // IDs (e.g. "xkb:en,pinyin,hangul,m17n:ar:kbd"), and deactivates all other
-  // IMEs that are currently active. |value| could be empty. In that case, this
-  // function deactivates all active IMEs.
-  void SetPreloadEngines(const std::wstring& value);
-
-  StringPrefMember timezone_;
   BooleanPrefMember tap_to_click_enabled_;
   BooleanPrefMember vert_edge_scroll_enabled_;
+  BooleanPrefMember accessibility_enabled_;
   IntegerPrefMember speed_factor_;
   IntegerPrefMember sensitivity_;
-  // Language (IME) preferences.
-  BooleanPrefMember language_use_global_engine_;
-  StringPrefMember language_hotkey_next_engine_;
-  StringPrefMember language_hotkey_trigger_;
+
+  // Input method preferences.
+  StringPrefMember language_hotkey_next_engine_in_menu_;
+  StringPrefMember language_hotkey_previous_engine_;
   StringPrefMember language_preload_engines_;
+  BooleanPrefMember language_chewing_boolean_prefs_[kNumChewingBooleanPrefs];
+  StringPrefMember language_chewing_multiple_choice_prefs_[
+      kNumChewingMultipleChoicePrefs];
+  IntegerPrefMember language_chewing_hsu_sel_key_type_;
+  IntegerPrefMember language_chewing_integer_prefs_[kNumChewingIntegerPrefs];
   StringPrefMember language_hangul_keyboard_;
+  StringPrefMember language_hangul_hanja_keys_;
+  BooleanPrefMember language_pinyin_boolean_prefs_[kNumPinyinBooleanPrefs];
+  IntegerPrefMember language_pinyin_int_prefs_[kNumPinyinIntegerPrefs];
+  IntegerPrefMember language_pinyin_double_pinyin_schema_;
+  BooleanPrefMember language_mozc_boolean_prefs_[kNumMozcBooleanPrefs];
+  StringPrefMember language_mozc_multiple_choice_prefs_[
+      kNumMozcMultipleChoicePrefs];
+  IntegerPrefMember language_mozc_integer_prefs_[kNumMozcIntegerPrefs];
 
   DISALLOW_COPY_AND_ASSIGN(Preferences);
 };

@@ -39,7 +39,10 @@
 #include "plugin/cross/o3d_glue.h"
 #include "plugin/cross/main.h"
 #include "core/mac/display_window_mac.h"
+#include "core/cross/gl/renderer_gl.h"
 #include "plugin/mac/graphics_utils_mac.h"
+#import "plugin/mac/o3d_layer.h"
+
 
 #if !defined(O3D_INTERNAL_PLUGIN)
 BreakpadRef gBreakpadRef =  NULL;
@@ -53,8 +56,6 @@ using o3d::DisplayWindowMac;
 @end
 
 namespace o3d {
-
-bool gIsChrome = false;
 
 // Returns the version number of the running Mac browser, as parsed from
 // the short version string in the plist of the app's bundle.
@@ -236,16 +237,35 @@ void RenderTimer::TimerCallback(CFRunLoopTimerRef timer, void* info) {
     NPP instance = instances_[i];
     PluginObject* obj = static_cast<PluginObject*>(instance->pdata);
 
-    ManageSafariTabSwitching(obj);
-    obj->client()->Tick();
+    // RenderClient() and Tick() may cause events to be processed,
+    // leading to reentrant calling of this code. Detect and avoid
+    // this case.
+    if (obj->client()->IsRendering() || obj->client()->IsTicking()) {
+      continue;
+    }
 
     bool in_fullscreen = obj->GetFullscreenMacWindow();
 
-#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
-    if (in_fullscreen) {
-      obj->FullscreenIdle();
+    if (obj->drawing_model_ == NPDrawingModelCoreAnimation &&
+        !in_fullscreen) {
+      O3DLayer* o3dLayer = static_cast<O3DLayer*>(obj->gl_layer_);
+      if (o3dLayer) {
+        obj->client()->Tick();
+        [o3dLayer setNeedsDisplay];
+      }
+      continue;
     }
-#endif
+
+    ManageSafariTabSwitching(obj);
+    obj->client()->Tick();
+
+    // It's possible that event processing may have torn down the
+    // full-screen window in the call above.
+    in_fullscreen = obj->GetFullscreenMacWindow();
+
+    if (in_fullscreen) {
+      obj->GetFullscreenMacWindow()->IdleCallback();
+    }
 
     // We're visible if (a) we are in fullscreen mode, (b) our cliprect
     // height and width are both a sensible size, ie > 1 pixel, or (c) if
@@ -260,7 +280,7 @@ void RenderTimer::TimerCallback(CFRunLoopTimerRef timer, void* info) {
         obj->IsOffscreenRenderingEnabled();
 
     if (plugin_visible && obj->renderer()) {
-      if (obj->client()->render_mode() == o3d::Client::RENDERMODE_CONTINUOUS ||
+      if (obj->client()->NeedsContinuousRender() ||
           obj->renderer()->need_to_render()) {
         // Force a sync to the VBL (once per timer callback)
         // to avoid tearing
@@ -277,7 +297,13 @@ void RenderTimer::TimerCallback(CFRunLoopTimerRef timer, void* info) {
           rect.right = obj->width();
           NPN_InvalidateRect(instance, &rect);
         } else {
+          if (in_fullscreen) {
+            obj->GetFullscreenMacWindow()->PrepareToRender();
+          }
           obj->client()->RenderClient(true);
+          if (in_fullscreen) {
+            obj->GetFullscreenMacWindow()->FinishRendering();
+          }
         }
       }
     }
@@ -359,458 +385,6 @@ char* CreatePosixFilePathFromHFSFilePath(const char* hfsPath) {
 
 
 
-// Convenience function for fetching SInt32 parameters from Carbon EventRefs.
-static SInt32 GetIntEventParam(EventRef inEvent, EventParamName    inName) {
-  SInt32    value = 0;
-  return (GetEventParameter(inEvent, inName, typeSInt32, NULL, sizeof(value),
-                            NULL, &value) == noErr) ? value : 0;
-}
-
-
-#pragma mark ____OVERLAY_WINDOW
-
-#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
-
-// A little wrapper for ATSUSetAttributes to make calling it with one attribute
-// less annoying.
-static void MySetAttribute(ATSUStyle style,
-                           ATSUAttributeTag tag,
-                           ByteCount size,
-                           ATSUAttributeValuePtr value) {
-
-  ATSUAttributeTag      tags[2]   = {tag, 0};
-  ByteCount             sizes[2]  = {size, 0};
-  ATSUAttributeValuePtr values[2] = {value, 0};
-
-  ATSUSetAttributes(style, 1, tags, sizes, values);
-}
-
-// A little wrapper for ATSUSetLayoutControls to make calling it with one
-// attribute less annoying.
-static void MySetLayoutControl(ATSUTextLayout layout,
-                               ATSUAttributeTag tag,
-                               ByteCount size,
-                               ATSUAttributeValuePtr value) {
-
-  ATSUAttributeTag      tags[2]   = {tag, 0};
-  ByteCount             sizes[2]  = {size, 0};
-  ATSUAttributeValuePtr values[2] = {value, 0};
-
-  ATSUSetLayoutControls(layout, 1, tags, sizes, values);
-}
-
-// Returns the unicode 16 chars that we need to display as the fullscreen
-// message. Should be disposed with free() after use.
-static UniChar * GetFullscreenDisplayText(int *returned_length) {
-  // TODO this will need to be a localized string.
-  NSString* ns_display_text = @"Press ESC to exit fullscreen";
-  int count = [ns_display_text length];
-  UniChar* display_text_16 = (UniChar*) calloc(count, sizeof(UniChar));
-
-  [ns_display_text getCharacters:display_text_16];
-  *returned_length = count;
-  return display_text_16;
-}
-
-
-static void DrawToOverlayWindow(WindowRef overlayWindow) {
-  CGContextRef overlayContext = NULL;
-  CGFloat kWhiteOpaque[]  = {1.0, 1.0, 1.0, 1.0};
-  CGFloat kBlackNotOpaque[]  = {0.0, 0.0, 0.0, 0.5};
-  Rect bounds = {0, 0, 0, 0};
-  const char* kOverlayWindowFontName = "Arial";
-  const int kPointSize  = 22;
-  const float kShadowRadius = 5.0;
-  const float kRoundRectRadius = 9.0;
-  const float kTextLeftMargin = 15.0;
-  const float kTextBottomMargin = 22.0;
-
-  QDBeginCGContext(GetWindowPort(overlayWindow), &overlayContext);
-  GetWindowBounds(overlayWindow, kWindowContentRgn, &bounds);
-
-  // Make the global rect local.
-  bounds.right -= bounds.left;
-  bounds.left = 0;
-  bounds.bottom -= bounds.top;
-  bounds.top = 0;
-
-  CGRect cgTotalRect = Rect2CGRect(bounds);
-  CGContextSetShouldSmoothFonts(overlayContext, true);
-  CGContextClearRect(overlayContext, cgTotalRect);
-
-  CGColorSpaceRef myColorSpace = CGColorSpaceCreateDeviceRGB();
-  CGColorRef shadow = CGColorCreate(myColorSpace, kBlackNotOpaque);
-  CGColorRef roundRectBackColor = CGColorCreate(myColorSpace, kBlackNotOpaque);
-  CGSize shadowOffset = {0.0,0.0};
-
-  CGContextSetFillColor(overlayContext, kWhiteOpaque);
-  CGContextSetStrokeColor(overlayContext, kWhiteOpaque);
-
-    // Draw the round rect background.
-  CGContextSaveGState(overlayContext);
-  CGContextSetFillColorWithColor(overlayContext, roundRectBackColor);
-  CGRect cg_rounded_area =
-      CGRectMake(// Offset from left and bottom to give shadow its space.
-                 kShadowRadius, kShadowRadius,
-                 // Increase width and height so rounded corners
-                 // will be clipped out, except at bottom left.
-                 (bounds.right - bounds.left) + 30,
-                 (bounds.bottom - bounds.top) + 30);
-  // Save state before applying shadow.
-  CGContextSetShadowWithColor(overlayContext, shadowOffset,
-                              kShadowRadius, shadow);
-  PaintRoundedCGRect(overlayContext, cg_rounded_area, kRoundRectRadius, true);
-  // Restore graphics state to remove shadow.
-  CGContextRestoreGState(overlayContext);
-
-  // Draw the text.
-  int text_length = 0;
-  UniChar* display_text = GetFullscreenDisplayText(&text_length);
-
-  if ((text_length > 0) && (display_text != NULL)) {
-    ATSUStyle         style;
-    ATSUTextLayout    layout;
-    ATSUFontID        font;
-    Fixed             pointSize = Long2Fix(kPointSize);
-    Boolean           is_bold = true;
-
-    ATSUCreateStyle(&style);
-    ATSUFindFontFromName(kOverlayWindowFontName, strlen(kOverlayWindowFontName),
-                         kFontFullName, kFontNoPlatformCode, kFontNoScriptCode,
-                         kFontNoLanguageCode, &font);
-
-    MySetAttribute(style, kATSUFontTag, sizeof(font), &font);
-    MySetAttribute(style, kATSUSizeTag, sizeof(pointSize), &pointSize);
-    MySetAttribute(style, kATSUQDBoldfaceTag, sizeof(Boolean), &is_bold);
-
-
-    ATSUCreateTextLayout(&layout);
-    ATSUSetTextPointerLocation(layout, display_text,
-                               kATSUFromTextBeginning, kATSUToTextEnd,
-                               text_length);
-    ATSUSetRunStyle(layout, style, kATSUFromTextBeginning, kATSUToTextEnd);
-
-    MySetLayoutControl(layout, kATSUCGContextTag,
-                       sizeof(CGContextRef),  &overlayContext);
-
-    // Need to enable this for languages like Japanese to draw as something
-    // other than a series of squares.
-    ATSUSetTransientFontMatching(layout, true);
-
-
-    CGContextSetFillColor(overlayContext, kWhiteOpaque);
-    ATSUDrawText(layout, kATSUFromTextBeginning, kATSUToTextEnd,
-                 X2Fix(kShadowRadius + kTextLeftMargin),
-                 X2Fix(kShadowRadius + kTextBottomMargin));
-    ATSUDisposeStyle(style);
-    ATSUDisposeTextLayout(layout);
-    free(display_text);
-  }
-
-  CGColorRelease(roundRectBackColor);
-  CGColorRelease(shadow);
-  CGColorSpaceRelease (myColorSpace);
-
-  QDEndCGContext(GetWindowPort(overlayWindow), &overlayContext);
-}
-
-static OSStatus HandleOverlayWindow(EventHandlerCallRef inHandlerCallRef,
-                                    EventRef inEvent,
-                                    void *inUserData) {
-  OSType event_class = GetEventClass(inEvent);
-  OSType event_kind = GetEventKind(inEvent);
-
-  if (event_class == kEventClassWindow &&
-      event_kind == kEventWindowPaint) {
-      WindowRef theWindow = NULL;
-    GetEventParameter(inEvent, kEventParamDirectObject,
-                      typeWindowRef, NULL,
-                      sizeof(theWindow), NULL,
-                      &theWindow);
-    if (theWindow) {
-      CallNextEventHandler(inHandlerCallRef, inEvent);
-      DrawToOverlayWindow(theWindow);
-    }
-  }
-
-  return noErr;
-}
-
-
-
-static Rect GetOverlayWindowRect(bool visible) {
-#define kOverlayHeight 60
-#define kOverlayWidth 340
-  Rect screen_bounds = CGRect2Rect(CGDisplayBounds(CGMainDisplayID()));
-  Rect hidden_window_bounds = {screen_bounds.top - kOverlayHeight,
-                               screen_bounds.right - kOverlayWidth,
-                               screen_bounds.top,
-                               screen_bounds.right};
-  Rect visible_window_bounds = {screen_bounds.top,
-                                screen_bounds.right - kOverlayWidth,
-                                screen_bounds.top + kOverlayHeight,
-                                screen_bounds.right};
-
-  return (visible) ? visible_window_bounds : hidden_window_bounds;
-}
-
-
-static WindowRef CreateOverlayWindow(void) {
-  Rect        window_bounds = GetOverlayWindowRect(false);
-  WindowClass wClass = kOverlayWindowClass;
-  WindowRef   window = NULL;
-  OSStatus    err = noErr;
-  WindowAttributes  overlayAttributes = kWindowNoShadowAttribute |
-                                        kWindowIgnoreClicksAttribute |
-                                        kWindowNoActivatesAttribute |
-                                        kWindowStandardHandlerAttribute;
-  EventTypeSpec  eventTypes[] = {
-    {kEventClassWindow, kEventWindowPaint},
-    {kEventClassWindow, kEventWindowShown}
-  };
-
-  err = CreateNewWindow(wClass,
-                        overlayAttributes,
-                        &window_bounds,
-                        &window);
-  if (err)
-    return NULL;
-
-  SetWindowLevel(window, CGShieldingWindowLevel() + 1);
-  InstallEventHandler(GetWindowEventTarget(window), HandleOverlayWindow,
-                      sizeof(eventTypes)/sizeof(eventTypes[0]), eventTypes,
-                      NULL, NULL);
-  ShowWindow(window);
-
-  return window;
-}
-
-#endif  // O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
-
-
-// Maps the MacOS button numbers to the constants used by our
-// event mechanism.  Not quite as obvious as you might think, as the Mac
-// thinks the numbering should go left, right, middle and our W3C-influenced
-// system goes left, middle, right.
-// Defaults to left-button if passed a strange value.  Pass Cocoa mouse button
-// codes as-is (they start at 0), pass Carbon button codes - 1.
-o3d::Event::Button MacOSMouseButtonNumberToO3DButton(int inButton) {
-
-  switch(inButton) {
-    case 0:
-      return o3d::Event::BUTTON_LEFT;
-    case 1:
-      return o3d::Event::BUTTON_RIGHT;
-    case 2:
-      return o3d::Event::BUTTON_MIDDLE;
-    case 3:
-      return o3d::Event::BUTTON_4;
-    case 4:
-      return o3d::Event::BUTTON_5;
-  }
-
-  return o3d::Event::BUTTON_LEFT;
-}
-
-
-#pragma mark ____FULLSCREEN_WINDOW
-
-
-// Handles the CarbonEvents that we get sent for the fullscreen mode window.
-// Most of these can be converted to EventRecord events and handled by the
-// HandleMacEvent() function in main_mac.mm, but some have no equivalent in
-// that space, scroll-wheel events for example, and so must be handled here.
-static OSStatus HandleFullscreenWindow(EventHandlerCallRef inHandlerCallRef,
-                                       EventRef inEvent,
-                                       void *inUserData) {
-  OSType event_class = GetEventClass(inEvent);
-  OSType event_kind = GetEventKind(inEvent);
-  NPP instance = (NPP)inUserData;
-  PluginObject* obj = (PluginObject*)(instance->pdata);
-  HIPoint mouse_loc = { 0.0, 0.0 };
-  bool is_scroll_event = event_class == kEventClassMouse &&
-                         (event_kind == kEventMouseScroll ||
-                          event_kind == kEventMouseWheelMoved);
-
-  // If it's any kind of mouse event, get the global mouse loc.
-  if (event_class == kEventClassMouse) {
-    GetEventParameter(inEvent, kEventParamMouseLocation,
-                      typeHIPoint, NULL,
-                      sizeof(mouse_loc), NULL,
-                      &mouse_loc);
-  }
-
-  // Handle the two kinds of scroll message we understand.
-  if (is_scroll_event) {
-    SInt32 x_scroll = 0;
-    SInt32 y_scroll = 0;
-    EventMouseWheelAxis axis = kEventMouseWheelAxisY;
-
-    switch (event_kind) {
-      // The newer kind of scroll event, as sent when two-finger
-      // dragging on a touchpad.
-      case kEventMouseScroll:
-        x_scroll = GetIntEventParam(inEvent,
-                                    kEventParamMouseWheelSmoothHorizontalDelta);
-        y_scroll = GetIntEventParam(inEvent,
-                                    kEventParamMouseWheelSmoothVerticalDelta);
-
-        // only pass x or y value - pass whichever is larger
-        if (x_scroll && y_scroll) {
-          if (abs(x_scroll) > abs(y_scroll))
-            y_scroll = 0;
-          else
-            x_scroll = 0;
-        }
-        break;
-        // The older kind of scroll event, as sent when using the wheel on
-        // a third-party mouse.
-      case kEventMouseWheelMoved:
-        GetEventParameter(inEvent,  kEventParamMouseWheelAxis,
-                          typeMouseWheelAxis, NULL,
-                          sizeof(axis), NULL,
-                          &axis);
-
-        if (axis == kEventMouseWheelAxisY) {
-          y_scroll = GetIntEventParam(inEvent,
-                                      kEventParamMouseWheelDelta);
-        } else {
-          x_scroll = GetIntEventParam(inEvent,
-                                      kEventParamMouseWheelDelta);
-        }
-        break;
-    }
-
-    // Dispatch the event now that we have all the data.
-    if (x_scroll || y_scroll) {
-      o3d::Event event(o3d::Event::TYPE_WHEEL);
-      event.set_delta(x_scroll, y_scroll);
-      // Global and local locs are the same, in this case,
-      // as we have a fullscreen window at 0,0.
-      event.set_position(mouse_loc.x, mouse_loc.y,
-                         mouse_loc.x, mouse_loc.y, true);
-      obj->client()->AddEventToQueue(event);
-    }
-    return noErr;
-  } else if (event_class == kEventClassMouse &&
-             (event_kind == kEventMouseDown || event_kind == kEventMouseUp)) {
-
-    o3d::Event::Type type = (event_kind == kEventMouseDown) ?
-                            o3d::Event::TYPE_MOUSEDOWN :
-                            o3d::Event::TYPE_MOUSEUP;
-    o3d::Event event(type);
-    event.set_position(mouse_loc.x, mouse_loc.y,
-                       mouse_loc.x, mouse_loc.y, true);
-
-    EventMouseButton button = 0;
-    GetEventParameter(inEvent,  kEventParamMouseButton,
-                      typeMouseButton, NULL,
-                      sizeof(button), NULL,
-                      &button);
-    // Carbon mouse button numbers start at 1, so subtract 1 here -
-    // Cocoa mouse buttons, by contrast,  start at 0).
-    event.set_button(MacOSMouseButtonNumberToO3DButton(button - 1));
-
-    // add the modifiers to the event, if any
-    UInt32 carbonMods = GetIntEventParam(inEvent,
-                                         kEventParamKeyModifiers);
-    if (carbonMods) {
-      int modifier_state = 0;
-      if (carbonMods & controlKey) {
-        modifier_state |= o3d::Event::MODIFIER_CTRL;
-      }
-      if (carbonMods & shiftKey) {
-        modifier_state |= o3d::Event::MODIFIER_SHIFT;
-      }
-      if (carbonMods & optionKey) {
-        modifier_state |= o3d::Event::MODIFIER_ALT;
-      }
-      if (carbonMods & cmdKey) {
-        modifier_state |= o3d::Event::MODIFIER_META;
-      }
-
-      event.set_modifier_state(modifier_state);
-    }
-
-    obj->client()->AddEventToQueue(event);
-  } else {  // not a scroll event or a click
-
-    // All other events are currently handled by being converted to an
-    // old-style EventRecord as passed by the classic NPAPI interface
-    // and dispatched through our common routine.
-    EventRecord eventRecord;
-
-    if (ConvertEventRefToEventRecord(inEvent, &eventRecord)) {
-      HandleMacEvent(&eventRecord, (NPP)inUserData);
-      return noErr;
-    } else {
-      return eventNotHandledErr;
-    }
-  }
-  return noErr;
-}
-
-
-static WindowRef CreateFullscreenWindow(WindowRef window,
-                                        PluginObject *obj,
-                                        int mode_id) {
-  Rect        bounds = CGRect2Rect(CGDisplayBounds(CGMainDisplayID()));
-  OSStatus    err = noErr;
-  EventTypeSpec  eventTypes[] = {
-    {kEventClassKeyboard, kEventRawKeyDown},
-    {kEventClassKeyboard, kEventRawKeyRepeat},
-    {kEventClassKeyboard, kEventRawKeyUp},
-    {kEventClassMouse,    kEventMouseDown},
-    {kEventClassMouse,    kEventMouseUp},
-    {kEventClassMouse,    kEventMouseMoved},
-    {kEventClassMouse,    kEventMouseDragged},
-    {kEventClassMouse,    kEventMouseScroll},
-    {kEventClassMouse,    kEventMouseWheelMoved}
-  };
-
-  if (window == NULL)
-    err = CreateNewWindow(kSimpleWindowClass,
-                          kWindowStandardHandlerAttribute,
-                          &bounds,
-                          &window);
-  if (err)
-    return NULL;
-
-  SetWindowLevel(window, CGShieldingWindowLevel() + 1);
-
-  InstallEventHandler(GetWindowEventTarget(window), HandleFullscreenWindow,
-                      sizeof(eventTypes)/sizeof(eventTypes[0]), eventTypes,
-                      obj->npp(), NULL);
-  ShowWindow(window);
-  return window;
-}
-
-void CleanupFullscreenWindow(PluginObject *obj) {
-  WindowRef fs_window = obj->GetFullscreenMacWindow();
-#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
-  WindowRef fs_o_window = obj->GetFullscreenOverlayMacWindow();
-#endif
-
-  obj->SetFullscreenMacWindow(NULL);
-#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
-  obj->SetFullscreenOverlayMacWindow(NULL);
-#endif
-
-  if (fs_window) {
-    HideWindow(fs_window);
-    ReleaseWindowGroup(GetWindowGroup(fs_window));
-    DisposeWindow(fs_window);
-  }
-
-#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
-  if(fs_o_window) {
-    HideWindow(fs_o_window);
-    ReleaseWindowGroup(GetWindowGroup(fs_o_window));
-    DisposeWindow(fs_o_window);
-  }
-#endif
-}
-
 #pragma mark ____SCREEN_RESOLUTION_MANAGEMENT
 
 
@@ -878,7 +452,7 @@ static int GetCGDisplayModeID(NSDictionary* mode_dict) {
 }
 
 // Returns DisplayMode data for the current state of the main display.
-static void GetCurrentDisplayMode(o3d::DisplayMode *mode) {
+void GetCurrentDisplayMode(o3d::DisplayMode *mode) {
   int width = 0;
   int height = 0;
   int refresh_rate = 0;
@@ -951,8 +525,6 @@ void PluginObject::GetDisplayModes(std::vector<o3d::DisplayMode> *modes) {
 
 #pragma mark ____FULLSCREEN_SWITCHING
 
-#define kTransitionTime 1.0
-
 namespace glue {
 namespace _o3d {
 
@@ -973,82 +545,45 @@ bool PluginObject::RequestFullscreenDisplay() {
     }
   }
 
-  // check which mode we are in now
-  o3d::DisplayMode current_mode;
-  GetCurrentDisplayMode(&current_mode);
-
-  WindowRef fullscreen_window = NULL;
-
-  // Determine if screen mode switching is actually required.
-  if (target_width != 0 &&
-      target_height != 0 &&
-      target_width != current_mode.width() &&
-      target_height != current_mode.height()) {
-    short short_target_width = target_width;
-    short short_target_height = target_height;
-    BeginFullScreen(&mac_fullscreen_state_,
-                    nil,  // Value of nil selects the main screen.
-                    &short_target_width,
-                    &short_target_height,
-                    &fullscreen_window,
-                    NULL,
-                    fullScreenCaptureAllDisplays);
-  } else {
-    SetSystemUIMode(kUIModeAllSuppressed, kUIOptionAutoShowMenuBar);
-    mac_fullscreen_state_ = NULL;
+  was_offscreen_ = IsOffscreenRenderingEnabled();
+  if (was_offscreen_) {
+    DisableOffscreenRendering();
   }
 
-  SetFullscreenMacWindow(o3d::CreateFullscreenWindow(
-      NULL,
-      this,
-      fullscreen_region_mode_id_));
-  Rect bounds = {0,0,0,0};
-  GetWindowBounds(GetFullscreenMacWindow(), kWindowContentRgn, &bounds);
+  FullscreenWindowMac* fullscreen_window =
+      FullscreenWindowMac::Create(this, target_width, target_height);
+  SetFullscreenMacWindow(fullscreen_window);
+  Rect bounds = o3d::CGRect2Rect(fullscreen_window->GetWindowBounds());
 
-  o3d::SetWindowForAGLContext(mac_agl_context_, GetFullscreenMacWindow());
-  aglDisable(mac_agl_context_, AGL_BUFFER_RECT);
   renderer()->SetClientOriginOffset(0, 0);
   renderer_->Resize(bounds.right - bounds.left, bounds.bottom - bounds.top);
 
   fullscreen_ = true;
   client()->SendResizeEvent(renderer_->width(), renderer_->height(), true);
 
-#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
-  SetFullscreenOverlayMacWindow(o3d::CreateOverlayWindow());
-  ShowWindow(mac_fullscreen_overlay_window_);
-  o3d::SlideWindowToRect(mac_fullscreen_overlay_window_,
-                         o3d::Rect2CGRect(o3d::GetOverlayWindowRect(true)),
-                         kTransitionTime);
-
-  // Hide the overlay text 4 seconds from now.
-  time_to_hide_overlay_ = [NSDate timeIntervalSinceReferenceDate] + 4.0;
-#endif
-
   return true;
 }
 
 void PluginObject::CancelFullscreenDisplay() {
+  FullscreenWindowMac* window = GetFullscreenMacWindow();
+
   // if not in fullscreen mode, do nothing
-  if (!GetFullscreenMacWindow())
+  if (!window)
     return;
 
-  o3d::SetWindowForAGLContext(mac_agl_context_, mac_window_);
-
-  o3d::CleanupFullscreenWindow(this);
-
+  // The focus change during closing of the fullscreen window may
+  // cause the plugin to become reentrant. Store the full-screen
+  // window on the stack to prevent attempting to shut down twice.
+  SetFullscreenMacWindow(NULL);
+  window->Shutdown(last_buffer_rect_);
+  delete window;
   renderer_->Resize(prev_width_, prev_height_);
-  aglSetInteger(mac_agl_context_, AGL_BUFFER_RECT, last_buffer_rect_);
-  aglEnable(mac_agl_context_, AGL_BUFFER_RECT);
-
-  if (mac_fullscreen_state_) {
-    EndFullScreen(mac_fullscreen_state_, 0);
-    mac_fullscreen_state_ = NULL;
-  } else {
-    SetSystemUIMode(kUIModeNormal, 0);
-  }
   fullscreen_ = false;
   client()->SendResizeEvent(prev_width_, prev_height_, false);
 
+  if (was_offscreen_) {
+    EnableOffscreenRendering();
+  }
 
   // Somehow the browser window does not automatically activate again
   // when we close the fullscreen window, so explicitly reactivate it.
@@ -1060,18 +595,101 @@ void PluginObject::CancelFullscreenDisplay() {
   }
 }
 
-#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
-void PluginObject::FullscreenIdle() {
-  if ((mac_fullscreen_overlay_window_ != NULL) &&
-      (time_to_hide_overlay_ != 0.0) &&
-      (time_to_hide_overlay_ < [NSDate timeIntervalSinceReferenceDate])) {
-    time_to_hide_overlay_ = 0.0;
-    o3d::SlideWindowToRect(mac_fullscreen_overlay_window_,
-                           o3d::Rect2CGRect(o3d::GetOverlayWindowRect(false)),
-                           kTransitionTime);
+#define PFA(number) static_cast<NSOpenGLPixelFormatAttribute>(number)
+
+#define O3D_NSO_COLOR_AND_DEPTH_SETTINGS NSOpenGLPFAClosestPolicy, \
+                                     NSOpenGLPFAColorSize, PFA(24), \
+                                     NSOpenGLPFAAlphaSize, PFA(8),  \
+                                     NSOpenGLPFADepthSize, PFA(24), \
+                                     NSOpenGLPFADoubleBuffer,
+// The Core Animation code path on 10.6 core dumps if the
+// NSOpenGLPFAPixelBuffer and NSOpenGLPFAWindow attributes are
+// specified. It seems risky for the 10.5 code path if they aren't,
+// since this actual CGLPixelFormatObj is used to create the pbuffer's
+// context, but no ill effects have been seen there so leaving them
+// out for now.
+#define O3D_NSO_PBUFFER_SETTINGS
+#define O3D_NSO_STENCIL_SETTINGS NSOpenGLPFAStencilSize, PFA(8),
+#define O3D_NSO_HARDWARE_RENDERER \
+            NSOpenGLPFAAccelerated, NSOpenGLPFANoRecovery,
+#define O3D_NSO_MULTISAMPLE \
+            NSOpenGLPFAMultisample, NSOpenGLPFASamples, PFA(4),
+#define O3D_NSO_END PFA(0)
+
+CGLContextObj PluginObject::GetFullscreenShareContext() {
+  if (mac_fullscreen_nsopenglcontext_ == NULL) {
+    static const NSOpenGLPixelFormatAttribute attributes[] = {
+      O3D_NSO_COLOR_AND_DEPTH_SETTINGS
+      O3D_NSO_PBUFFER_SETTINGS
+      O3D_NSO_STENCIL_SETTINGS
+      O3D_NSO_HARDWARE_RENDERER
+      O3D_NSO_MULTISAMPLE
+      O3D_NSO_END
+    };
+    NSOpenGLPixelFormat* pixel_format =
+        [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
+    if (!pixel_format) {
+      // Try a less capable set.
+      static const NSOpenGLPixelFormatAttribute low_end_attributes[] = {
+        O3D_NSO_COLOR_AND_DEPTH_SETTINGS
+        O3D_NSO_PBUFFER_SETTINGS
+        O3D_NSO_STENCIL_SETTINGS
+        O3D_NSO_HARDWARE_RENDERER
+        O3D_NSO_END
+      };
+      pixel_format =
+          [[NSOpenGLPixelFormat alloc] initWithAttributes:low_end_attributes];
+    }
+    if (pixel_format) {
+      mac_fullscreen_nsopenglpixelformat_ = pixel_format;
+
+      NSOpenGLContext* context =
+          [[NSOpenGLContext alloc] initWithFormat:pixel_format
+                                     shareContext:nil];
+      mac_fullscreen_nsopenglcontext_ = context;
+    } else {
+      DLOG(ERROR) << "Error choosing NSOpenGLPixelFormat.";
+    }
+  }
+
+  NSOpenGLContext* context = (NSOpenGLContext*) mac_fullscreen_nsopenglcontext_;
+  return (CGLContextObj) [context CGLContextObj];
+}
+
+void* PluginObject::GetFullscreenNSOpenGLContext() {
+  return mac_fullscreen_nsopenglcontext_;
+}
+
+CGLPixelFormatObj PluginObject::GetFullscreenCGLPixelFormatObj() {
+  NSOpenGLPixelFormat* pixel_format =
+      (NSOpenGLPixelFormat*) mac_fullscreen_nsopenglpixelformat_;
+  if (pixel_format == nil) {
+    return NULL;
+  }
+  return (CGLPixelFormatObj) [pixel_format CGLPixelFormatObj];
+}
+
+void PluginObject::CleanupFullscreenOpenGLContext() {
+  NSOpenGLContext* context =
+      (NSOpenGLContext*) mac_fullscreen_nsopenglcontext_;
+  mac_fullscreen_nsopenglcontext_ = NULL;
+  if (context) {
+    [context release];
+  }
+  NSOpenGLPixelFormat* format =
+      (NSOpenGLPixelFormat*) mac_fullscreen_nsopenglpixelformat_;
+  mac_fullscreen_nsopenglpixelformat_ = NULL;
+  if (format) {
+    [format release];
   }
 }
-#endif
+
+void PluginObject::SetMacCGLContext(CGLContextObj context) {
+  mac_cgl_context_ = context;
+  if (renderer_) {
+    ((o3d::RendererGL*) renderer_)->set_mac_cgl_context(context);
+  }
+}
 
 }  // namespace glue
 }  // namespace o3d

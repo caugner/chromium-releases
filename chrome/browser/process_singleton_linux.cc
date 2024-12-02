@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -280,8 +280,31 @@ void DisplayProfileInUseError(const std::string& lock_path,
 #endif
 }
 
+bool IsChromeProcess(pid_t pid) {
+  FilePath other_chrome_path(base::GetProcessExecutablePath(pid));
+  return (!other_chrome_path.empty() &&
+          other_chrome_path.BaseName() ==
+          FilePath::FromWStringHack(chrome::kBrowserProcessExecutableName));
+}
+
+// Return true if the given pid is one of our child processes.
+// Assumes that the current pid is the root of all pids of the current instance.
+bool IsSameChromeInstance(pid_t pid) {
+  pid_t cur_pid = base::GetCurrentProcId();
+  while (pid != cur_pid) {
+    pid = base::GetParentProcessId(pid);
+    if (pid < 0)
+      return false;
+    if (!IsChromeProcess(pid))
+      return false;
+  }
+  return true;
+}
+
 // Extract the process's pid from a symbol link path and if it is on
 // the same host, kill the process, unlink the lock file and return true.
+// If the process is part of the same chrome instance, unlink the lock file and
+// return true without killing it.
 // If the process is on a different host, return false.
 bool KillProcessByLockPath(const std::string& path) {
   std::string hostname;
@@ -294,10 +317,16 @@ bool KillProcessByLockPath(const std::string& path) {
   }
   UnlinkPath(path);
 
-  if (pid >= 0) {
+  if (IsSameChromeInstance(pid))
+    return true;
+
+  if (pid > 0) {
     // TODO(james.su@gmail.com): Is SIGKILL ok?
     int rv = kill(static_cast<base::ProcessHandle>(pid), SIGKILL);
-    DCHECK_EQ(0, rv) << "Error killing process: " << safe_strerror(errno);
+    // ESRCH = No Such Process (can happen if the other process is already in
+    // progress of shutting down and finishes before we try to kill it).
+    DCHECK(rv == 0 || errno == ESRCH) << "Error killing process: "
+                                      << safe_strerror(errno);
     return true;
   }
 
@@ -505,12 +534,22 @@ void ProcessSingleton::LinuxWatcher::HandleMessage(
     return;
   }
 
-  // Run the browser startup sequence again, with the command line of the
-  // signalling process.
-  FilePath current_dir_file_path(current_dir);
-  BrowserInit::ProcessCommandLine(parsed_command_line,
-                                  current_dir_file_path.ToWStringHack(),
-                                  false, profile, NULL);
+  // Ignore the request if the process was passed the --product-version flag.
+  // Normally we wouldn't get here if that flag had been passed, but it can
+  // happen if it is passed to an older version of chrome. Since newer versions
+  // of chrome do this in the background, we want to avoid spawning extra
+  // windows.
+  if (parsed_command_line.HasSwitch(switches::kProductVersion)) {
+    DLOG(WARNING) << "Remote process was passed product version flag, "
+                  << "but ignored it. Doing nothing.";
+  } else {
+    // Run the browser startup sequence again, with the command line of the
+    // signalling process.
+    FilePath current_dir_file_path(current_dir);
+    BrowserInit::ProcessCommandLine(parsed_command_line,
+                                    current_dir_file_path.ToWStringHack(),
+                                    false, profile, NULL);
+  }
 
   // Send back "ACK" message to prevent the client process from starting up.
   reader->FinishWithACK(kACKToken, arraysize(kACKToken) - 1);
@@ -620,12 +659,14 @@ ProcessSingleton::~ProcessSingleton() {
 
 ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
   return NotifyOtherProcessWithTimeout(*CommandLine::ForCurrentProcess(),
-                                       kTimeoutInSeconds);
+                                       kTimeoutInSeconds,
+                                       true);
 }
 
 ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcessWithTimeout(
     const CommandLine& cmd_line,
-    int timeout_seconds) {
+    int timeout_seconds,
+    bool kill_unresponsive) {
   DCHECK_GE(timeout_seconds, 0);
 
   int socket;
@@ -667,18 +708,22 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcessWithTimeout(
       return PROFILE_IN_USE;
     }
 
-    FilePath other_chrome_path(base::GetProcessExecutablePath(pid));
-    if (other_chrome_path.empty() ||
-        other_chrome_path.BaseName() !=
-        FilePath::FromWStringHack(chrome::kBrowserProcessExecutableName)) {
+    if (!IsChromeProcess(pid)) {
       // Orphaned lockfile (no process with pid, or non-chrome process.)
+      UnlinkPath(lock_path_.value());
+      return PROCESS_NONE;
+    }
+
+    if (IsSameChromeInstance(pid)) {
+      // Orphaned lockfile (pid is part of same chrome instance we are, even
+      // though we haven't tried to create a lockfile yet).
       UnlinkPath(lock_path_.value());
       return PROCESS_NONE;
     }
 
     if (retries == timeout_seconds) {
       // Retries failed.  Kill the unresponsive chrome process and continue.
-      if (!KillProcessByLockPath(lock_path_.value()))
+      if (!kill_unresponsive || !KillProcessByLockPath(lock_path_.value()))
         return PROFILE_IN_USE;
       return PROCESS_NONE;
     }
@@ -709,7 +754,7 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcessWithTimeout(
   // Send the message
   if (!WriteToSocket(socket, to_send.data(), to_send.length())) {
     // Try to kill the other process, because it might have been dead.
-    if (!KillProcessByLockPath(lock_path_.value()))
+    if (!kill_unresponsive || !KillProcessByLockPath(lock_path_.value()))
       return PROFILE_IN_USE;
     return PROCESS_NONE;
   }
@@ -725,7 +770,7 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcessWithTimeout(
 
   // Failed to read ACK, the other process might have been frozen.
   if (len <= 0) {
-    if (!KillProcessByLockPath(lock_path_.value()))
+    if (!kill_unresponsive || !KillProcessByLockPath(lock_path_.value()))
       return PROFILE_IN_USE;
     return PROCESS_NONE;
   }
@@ -741,6 +786,34 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcessWithTimeout(
 
   NOTREACHED() << "The other process returned unknown message: " << buf;
   return PROCESS_NOTIFIED;
+}
+
+ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcessOrCreate() {
+  return NotifyOtherProcessWithTimeoutOrCreate(
+      *CommandLine::ForCurrentProcess(),
+      kTimeoutInSeconds);
+}
+
+ProcessSingleton::NotifyResult
+ProcessSingleton::NotifyOtherProcessWithTimeoutOrCreate(
+    const CommandLine& command_line,
+    int timeout_seconds) {
+  NotifyResult result = NotifyOtherProcessWithTimeout(command_line,
+                                                      timeout_seconds, true);
+  if (result != PROCESS_NONE)
+    return result;
+  if (Create())
+    return PROCESS_NONE;
+  // If the Create() failed, try again to notify. (It could be that another
+  // instance was starting at the same time and managed to grab the lock before
+  // we did.)
+  // This time, we don't want to kill anything if we aren't successful, since we
+  // aren't going to try to take over the lock ourselves.
+  result = NotifyOtherProcessWithTimeout(command_line, timeout_seconds, false);
+  if (result != PROCESS_NONE)
+    return result;
+
+  return LOCK_ERROR;
 }
 
 bool ProcessSingleton::Create() {
@@ -764,8 +837,6 @@ bool ProcessSingleton::Create() {
     if (ReadLink(lock_path_.value()) != symlink_content) {
       // If we failed to create the lock, most likely another instance won the
       // startup race.
-      // TODO(mattm): If the other instance is on the same host, we could try
-      // to notify it rather than just failing.
       errno = saved_errno;
       PLOG(ERROR) << "Failed to create " << lock_path_.value();
       return false;

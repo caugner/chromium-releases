@@ -7,6 +7,7 @@
 
 #include "base/atomic_sequence_num.h"
 #include "base/singleton.h"
+#include "base/time.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_source.h"
@@ -26,6 +27,10 @@ class InitialTabNotificationObserver : public NotificationObserver {
     return Singleton<InitialTabNotificationObserver>::get();
   }
 
+  void SetLoginSuccessTime() {
+    login_success_time_ = base::Time::NowFromSystemTime();
+  }
+
   // NotificationObserver implementation.
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
@@ -34,8 +39,30 @@ class InitialTabNotificationObserver : public NotificationObserver {
  private:
   NotificationRegistrar registrar_;
   base::AtomicSequenceNumber num_tabs_;
+  base::Time login_success_time_;
 
   DISALLOW_COPY_AND_ASSIGN(InitialTabNotificationObserver);
+};
+
+// Collects LOGIN_AUTHENTICATION notifications and logs uptime
+// when login was successful.
+class LogLoginSuccessObserver : public NotificationObserver {
+ public:
+   LogLoginSuccessObserver();
+   virtual ~LogLoginSuccessObserver();
+
+   static LogLoginSuccessObserver* Get() {
+     return Singleton<LogLoginSuccessObserver>::get();
+   }
+
+  // NotificationObserver interface.
+  virtual void Observe(NotificationType type, const NotificationSource& source,
+                       const NotificationDetails& details);
+
+ private:
+  NotificationRegistrar registrar_;
+
+  DISALLOW_COPY_AND_ASSIGN(LogLoginSuccessObserver);
 };
 
 }  // namespace chromeos

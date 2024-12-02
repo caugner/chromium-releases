@@ -30,7 +30,7 @@
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
 #include "gfx/blit.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/native_widget_types.h"
 #include "gfx/size.h"
 #include "grit/generated_resources.h"
@@ -188,15 +188,12 @@ WebPluginDelegateProxy::~WebPluginDelegateProxy() {
   for (OldTransportDIBMap::iterator iterator = old_transport_dibs_.begin();
        iterator != old_transport_dibs_.end();
        ++iterator) {
-    ReleaseTransportDIB(iterator->second.backing_store.get());
-    ReleaseTransportDIB(iterator->second.transport_store.get());
-    ReleaseTransportDIB(iterator->second.background_store.get());
+    ReleaseTransportDIB(iterator->second.get());
   }
 
-  // Ask the browser to release the "live" TransportDIB objects.
-  ReleaseTransportDIB(backing_store_.get());
+  // Ask the browser to release the "live" TransportDIB object.
   ReleaseTransportDIB(transport_store_.get());
-  ReleaseTransportDIB(background_store_.get());
+  DCHECK(!background_store_.get());
 #endif
 }
 
@@ -314,7 +311,7 @@ bool WebPluginDelegateProxy::Initialize(const GURL& url,
   channel_host_ = channel_host;
   instance_id_ = instance_id;
 
-  channel_host_->AddRoute(instance_id_, this, false);
+  channel_host_->AddRoute(instance_id_, this, NULL);
 
   // Now tell the PluginInstance in the plugin process to initialize.
   PluginMsg_Init_Params params;
@@ -345,8 +342,8 @@ bool WebPluginDelegateProxy::Initialize(const GURL& url,
   // expensive extra copy for us).
   if (!transparent_ && mime_type_ == "application/x-shockwave-flash") {
     bool force_opaque_mode = false;
-    if (StartsWith(info_.version, L"10.0", false) ||
-        StartsWith(info_.version, L"9.", false)) {
+    if (StartsWith(info_.version, ASCIIToUTF16("10.0"), false) ||
+        StartsWith(info_.version, ASCIIToUTF16("9."), false)) {
       // Older versions of Flash don't support CA (and they assume QuickDraw
       // support, so we can't rely on negotiation to do the right thing).
       force_opaque_mode = true;
@@ -556,14 +553,14 @@ void WebPluginDelegateProxy::UpdateGeometry(const gfx::Rect& window_rect,
       // preserves transparency information (and does the compositing itself)
       // so plugins don't need access to the page background.
       needs_background_store = false;
-      if (backing_store_.get()) {
+      if (transport_store_.get()) {
         // ResetWindowlessBitmaps inserts the old TransportDIBs into
-        // old_transport_dibs_ using the backing store's file descriptor as
+        // old_transport_dibs_ using the transport store's file descriptor as
         // the key.  The constraints on the keys are that -1 is reserved
         // to mean "no ACK required," and in-flight keys must be unique.
         // File descriptors will never be -1, and because they won't be closed
         // until receipt of the ACK, they're unique.
-        param.ack_key = backing_store_->handle().fd;
+        param.ack_key = transport_store_->handle().fd;
       }
 #endif
 
@@ -571,10 +568,15 @@ void WebPluginDelegateProxy::UpdateGeometry(const gfx::Rect& window_rect,
       // asynchronously.
       ResetWindowlessBitmaps();
       if (!window_rect.IsEmpty()) {
-        if (!CreateBitmap(&backing_store_, &backing_store_canvas_) ||
-            !CreateBitmap(&transport_store_, &transport_store_canvas_) ||
+        if (!CreateSharedBitmap(&transport_store_, &transport_store_canvas_) ||
+#if defined(OS_WIN)
+            !CreateSharedBitmap(&backing_store_, &backing_store_canvas_) ||
+#else
+            !CreateLocalBitmap(&backing_store_, &backing_store_canvas_) ||
+#endif
             (needs_background_store &&
-             !CreateBitmap(&background_store_, &background_store_canvas_))) {
+             !CreateSharedBitmap(&background_store_,
+                                 &background_store_canvas_))) {
           DCHECK(false);
           ResetWindowlessBitmaps();
           return;
@@ -619,48 +621,66 @@ void WebPluginDelegateProxy::UpdateGeometry(const gfx::Rect& window_rect,
 
 void WebPluginDelegateProxy::ResetWindowlessBitmaps() {
 #if defined(OS_MACOSX)
-  if (backing_store_.get()) {
-    int ack_key = backing_store_->handle().fd;
+  DCHECK(!background_store_.get());
+  // The Mac TransportDIB implementation uses base::SharedMemory, which
+  // cannot be disposed of if an in-flight UpdateGeometry message refers to
+  // the shared memory file descriptor.  The old_transport_dibs_ map holds
+  // old TransportDIBs waiting to die, keyed by the |ack_key| values used in
+  // UpdateGeometry messages.  When an UpdateGeometry_ACK message arrives,
+  // the associated TransportDIB can be released.
+  if (transport_store_.get()) {
+    int ack_key = transport_store_->handle().fd;
 
     DCHECK_NE(ack_key, -1);
 
     // DCHECK_EQ does not work with base::hash_map.
     DCHECK(old_transport_dibs_.find(ack_key) == old_transport_dibs_.end());
 
-    // Stash the old TransportDIBs in the map.  They'll be released when an
+    // Stash the old TransportDIB in the map.  It'll be released when an
     // ACK message comes in.
-    RelatedTransportDIBs old_dibs;
-    old_dibs.backing_store =
-        linked_ptr<TransportDIB>(backing_store_.release());
-    old_dibs.transport_store =
+    old_transport_dibs_[ack_key] =
         linked_ptr<TransportDIB>(transport_store_.release());
-    old_dibs.background_store =
-        linked_ptr<TransportDIB>(background_store_.release());
-
-    old_transport_dibs_[ack_key] = old_dibs;
-  } else {
-    DCHECK(!transport_store_.get());
-    DCHECK(!background_store_.get());
   }
 #else
-  backing_store_.reset();
   transport_store_.reset();
   background_store_.reset();
+#endif
+#if defined(OS_WIN)
+  backing_store_.reset();
+#else
+  backing_store_.resize(0);
 #endif
 
   backing_store_canvas_.reset();
   transport_store_canvas_.reset();
-  background_store_canvas_.release();
+  background_store_canvas_.reset();
   backing_store_painted_ = gfx::Rect();
 }
 
-bool WebPluginDelegateProxy::CreateBitmap(
+static size_t BitmapSizeForPluginRect(const gfx::Rect& plugin_rect) {
+  const size_t stride =
+      skia::PlatformCanvas::StrideForWidth(plugin_rect.width());
+  return stride * plugin_rect.height();
+}
+
+#if !defined(OS_WIN)
+bool WebPluginDelegateProxy::CreateLocalBitmap(
+    std::vector<uint8>* memory,
+    scoped_ptr<skia::PlatformCanvas>* canvas) {
+  const size_t size = BitmapSizeForPluginRect(plugin_rect_);
+  memory->resize(size);
+  if (memory->size() != size)
+    return false;
+  canvas->reset(new skia::PlatformCanvas(
+      plugin_rect_.width(), plugin_rect_.height(), true, &((*memory)[0])));
+  return true;
+}
+#endif
+
+bool WebPluginDelegateProxy::CreateSharedBitmap(
     scoped_ptr<TransportDIB>* memory,
     scoped_ptr<skia::PlatformCanvas>* canvas) {
-  int width = plugin_rect_.width();
-  int height = plugin_rect_.height();
-  const size_t stride = skia::PlatformCanvas::StrideForWidth(width);
-  const size_t size = stride * height;
+  const size_t size = BitmapSizeForPluginRect(plugin_rect_);
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   memory->reset(TransportDIB::Create(size, 0));
   if (!memory->get())
@@ -678,8 +698,9 @@ bool WebPluginDelegateProxy::CreateBitmap(
   static uint32 sequence_number = 0;
   memory->reset(TransportDIB::Create(size, sequence_number++));
 #endif
-  canvas->reset((*memory)->GetPlatformCanvas(width, height));
-  return true;
+  canvas->reset((*memory)->GetPlatformCanvas(plugin_rect_.width(),
+                                             plugin_rect_.height()));
+  return !!canvas->get();
 }
 
 #if defined(OS_MACOSX)
@@ -848,6 +869,7 @@ bool WebPluginDelegateProxy::BackgroundChanged(
 
   int bytes_per_pixel = CGBitmapContextGetBitsPerPixel(context) / 8;
 #else
+  cairo_surface_flush(page_surface);
   const unsigned char* page_bytes = cairo_image_surface_get_data(page_surface);
   int page_stride = cairo_image_surface_get_stride(page_surface);
   int page_start_x = static_cast<int>(page_x_double);
@@ -858,6 +880,7 @@ bool WebPluginDelegateProxy::BackgroundChanged(
   cairo_surface_t* bg_surface = cairo_get_target(device.beginPlatformPaint());
   DCHECK_EQ(cairo_surface_get_type(bg_surface), CAIRO_SURFACE_TYPE_IMAGE);
   DCHECK_EQ(cairo_image_surface_get_format(bg_surface), CAIRO_FORMAT_ARGB32);
+  cairo_surface_flush(bg_surface);
   const unsigned char* bg_bytes = cairo_image_surface_get_data(bg_surface);
   int full_bg_width = cairo_image_surface_get_width(bg_surface);
   int full_bg_height = cairo_image_surface_get_height(bg_surface);
@@ -943,8 +966,8 @@ void WebPluginDelegateProxy::DidFinishLoadWithReason(
       instance_id_, url, reason, notify_id));
 }
 
-void WebPluginDelegateProxy::SetFocus() {
-  Send(new PluginMsg_SetFocus(instance_id_));
+void WebPluginDelegateProxy::SetFocus(bool focused) {
+  Send(new PluginMsg_SetFocus(instance_id_, focused));
 }
 
 bool WebPluginDelegateProxy::HandleInputEvent(
@@ -972,7 +995,16 @@ int WebPluginDelegateProxy::GetProcessId() {
 void WebPluginDelegateProxy::SetWindowFocus(bool window_has_focus) {
   IPC::Message* msg = new PluginMsg_SetWindowFocus(instance_id_,
                                                    window_has_focus);
-  // Make sure visibility events are delivered in the right order relative to
+  // Make sure focus events are delivered in the right order relative to
+  // sync messages they might interact with (Paint, HandleEvent, etc.).
+  msg->set_unblock(true);
+  Send(msg);
+}
+
+void WebPluginDelegateProxy::SetContentAreaFocus(bool has_focus) {
+  IPC::Message* msg = new PluginMsg_SetContentAreaFocus(instance_id_,
+                                                        has_focus);
+  // Make sure focus events are delivered in the right order relative to
   // sync messages they might interact with (Paint, HandleEvent, etc.).
   msg->set_unblock(true);
   Send(msg);
@@ -1054,8 +1086,7 @@ void WebPluginDelegateProxy::OnInvalidateRect(const gfx::Rect& rect) {
 
   // Clip the invalidation rect to the plugin bounds; the plugin may have been
   // resized since the invalidate message was sent.
-  const gfx::Rect clipped_rect(rect.Intersect(
-      gfx::Rect(0, 0, plugin_rect_.width(), plugin_rect_.height())));
+  const gfx::Rect clipped_rect(rect.Intersect(gfx::Rect(plugin_rect_.size())));
 
   invalidate_pending_ = true;
   CopyFromTransportToBacking(clipped_rect);
@@ -1253,7 +1284,7 @@ void WebPluginDelegateProxy::PaintSadPlugin(WebKit::WebCanvas* native_context,
   // Make a temporary canvas for the background image.
   const int width = plugin_rect_.width();
   const int height = plugin_rect_.height();
-  gfx::Canvas canvas(width, height, false);
+  gfx::CanvasSkia canvas(width, height, false);
 #if defined(OS_MACOSX)
   // Flip the canvas, since the context expects flipped data.
   canvas.translate(0, height);
@@ -1294,12 +1325,13 @@ void WebPluginDelegateProxy::CopyFromTransportToBacking(const gfx::Rect& rect) {
   const size_t stride =
       skia::PlatformCanvas::StrideForWidth(plugin_rect_.width());
   const size_t chunk_size = 4 * rect.width();
-  char* source_data = static_cast<char*>(transport_store_->memory()) +
-      rect.y() * stride + 4 * rect.x();
+  uint8* source_data = static_cast<uint8*>(transport_store_->memory()) +
+                       rect.y() * stride + 4 * rect.x();
   // The two bitmaps are flipped relative to each other.
   int dest_starting_row = plugin_rect_.height() - rect.y() - 1;
-  char* target_data = static_cast<char*>(backing_store_->memory()) +
-      dest_starting_row * stride + 4 * rect.x();
+  DCHECK(backing_store_.size() > 0);
+  uint8* target_data = &(backing_store_[0]) + dest_starting_row * stride +
+                       4 * rect.x();
   for (int row = 0; row < rect.height(); ++row) {
     memcpy(target_data, source_data, chunk_size);
     source_data += stride;
@@ -1353,8 +1385,8 @@ WebPluginDelegateProxy::CreateSeekableResourceClient(
 }
 
 #if defined(OS_MACOSX)
-void WebPluginDelegateProxy::OnBindFakePluginWindowHandle() {
-  BindFakePluginWindowHandle();
+void WebPluginDelegateProxy::OnBindFakePluginWindowHandle(bool opaque) {
+  BindFakePluginWindowHandle(opaque);
 }
 
 // Synthesize a fake window handle for the plug-in to identify the instance
@@ -1362,10 +1394,10 @@ void WebPluginDelegateProxy::OnBindFakePluginWindowHandle() {
 // of plug-in content. The browser generates the handle which is then set on
 // the plug-in. Returns true if it successfully sets the window handle on the
 // plug-in.
-bool WebPluginDelegateProxy::BindFakePluginWindowHandle() {
+bool WebPluginDelegateProxy::BindFakePluginWindowHandle(bool opaque) {
   gfx::PluginWindowHandle fake_window = NULL;
   if (render_view_)
-    fake_window = render_view_->AllocateFakePluginWindowHandle();
+    fake_window = render_view_->AllocateFakePluginWindowHandle(opaque);
   // If we aren't running on 10.6, this allocation will fail.
   if (!fake_window)
     return false;
@@ -1381,7 +1413,7 @@ bool WebPluginDelegateProxy::BindFakePluginWindowHandle() {
   webkit_glue::WebPluginGeometry geom;
   geom.window = fake_window;
   geom.window_rect = plugin_rect_;
-  geom.clip_rect = gfx::Rect(0, 0, plugin_rect_.width(), plugin_rect_.height());
+  geom.clip_rect = gfx::Rect(plugin_rect_.size());
   geom.rects_valid = true;
   geom.visible = true;
   render_view_->DidMovePlugin(geom);
@@ -1399,7 +1431,7 @@ bool WebPluginDelegateProxy::BindFakePluginWindowHandle() {
 CommandBufferProxy* WebPluginDelegateProxy::CreateCommandBuffer() {
 #if defined(ENABLE_GPU)
 #if defined(OS_MACOSX)
-  if (!BindFakePluginWindowHandle())
+  if (!BindFakePluginWindowHandle(true))
     return NULL;
 #endif
   int command_buffer_id;
@@ -1457,13 +1489,10 @@ void WebPluginDelegateProxy::OnUpdateGeometry_ACK(int ack_key) {
   // DCHECK_NE does not work with base::hash_map.
   DCHECK(iterator != old_transport_dibs_.end());
 
-  // Now that the ACK has been received, the TransportDIBs that were used
-  // prior to the UpdateGeometry message now being acknowledged are known to
-  // be no longer needed.  Release them, and take the stale entry out of the
-  // map.
-  ReleaseTransportDIB(iterator->second.backing_store.get());
-  ReleaseTransportDIB(iterator->second.transport_store.get());
-  ReleaseTransportDIB(iterator->second.background_store.get());
+  // Now that the ACK has been received, the TransportDIB that was used
+  // prior to the UpdateGeometry message now being acknowledged is known to
+  // be no longer needed.  Release it, and take the stale entry out of the map.
+  ReleaseTransportDIB(iterator->second.get());
 
   old_transport_dibs_.erase(iterator);
 }
@@ -1515,7 +1544,7 @@ bool WebPluginDelegateProxy::UseSynchronousGeometryUpdates() {
   // Need to update geometry synchronously with WMP, otherwise if a site
   // scripts the plugin to start playing while it's in the middle of handling
   // an update geometry message, videos don't play.  See urls in bug 20260.
-  if (info_.name.find(L"Windows Media Player") != std::wstring::npos)
+  if (info_.name.find(ASCIIToUTF16("Windows Media Player")) != string16::npos)
     return true;
 
   // The move networks plugin needs to be informed of geometry updates

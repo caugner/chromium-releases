@@ -8,6 +8,7 @@
 #import <AppKit/AppKit.h>
 
 #include "base/logging.h"
+#include "base/sys_string_conversions.h"
 
 namespace printing {
 
@@ -28,7 +29,7 @@ PrintingContext::~PrintingContext() {
 
 
 PrintingContext::Result PrintingContext::AskUserForSettings(
-    gfx::NativeWindow window, int max_pages, bool has_selection) {
+    gfx::NativeView parent_view, int max_pages, bool has_selection) {
   DCHECK([NSThread isMainThread]);
 
   // We deliberately don't feed max_pages into the dialog, because setting
@@ -39,10 +40,27 @@ PrintingContext::Result PrintingContext::AskUserForSettings(
   // adding a new custom view to the panel on 10.5; 10.6 has
   // NSPrintPanelShowsPrintSelection).
   NSPrintPanel* panel = [NSPrintPanel printPanel];
+  NSPrintInfo* printInfo = [NSPrintInfo sharedPrintInfo];
+
+  NSPrintPanelOptions options = [panel options];
+  options |= NSPrintPanelShowsPaperSize;
+  options |= NSPrintPanelShowsOrientation;
+  options |= NSPrintPanelShowsScaling;
+  [panel setOptions:options];
+
+  if (parent_view) {
+    NSString* job_title = [[parent_view window] title];
+    if (job_title) {
+      PMPrintSettings printSettings =
+          (PMPrintSettings)[printInfo PMPrintSettings];
+      PMPrintSettingsSetJobName(printSettings, (CFStringRef)job_title);
+      [printInfo updateFromPMPrintSettings];
+    }
+  }
+
   // TODO(stuartmorgan): We really want a tab sheet here, not a modal window.
   // Will require restructuring the PrintingContext API to use a callback.
-  NSInteger selection =
-      [panel runModalWithPrintInfo:[NSPrintInfo sharedPrintInfo]];
+  NSInteger selection = [panel runModalWithPrintInfo:printInfo];
   if (selection != NSOKButton) {
     return CANCEL;
   }
@@ -115,6 +133,11 @@ PrintingContext::Result PrintingContext::NewDocument(
       static_cast<PMPrintSettings>([print_info_ PMPrintSettings]);
   PMPageFormat page_format =
       static_cast<PMPageFormat>([print_info_ PMPageFormat]);
+
+  scoped_cftyperef<CFStringRef> job_title(
+      base::SysWideToCFStringRef(document_name));
+  PMPrintSettingsSetJobName(print_settings, job_title.get());
+
   OSStatus status = PMSessionBeginCGDocumentNoDialog(print_session,
                                                      print_settings,
                                                      page_format);

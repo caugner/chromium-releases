@@ -1,16 +1,16 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync/glue/ui_model_worker.h"
 
-#include "base/dynamic_annotations.h"
 #include "base/message_loop.h"
+#include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "base/waitable_event.h"
 
 namespace browser_sync {
 
-void UIModelWorker::DoWorkAndWaitUntilDone(Closure* work) {
+void UIModelWorker::DoWorkAndWaitUntilDone(Callback0::Type* work) {
   // In most cases, this method is called in WORKING state. It is possible this
   // gets called when we are in the RUNNING_MANUAL_SHUTDOWN_PUMP state, because
   // the UI loop has initiated shutdown but the syncer hasn't got the memo yet.

@@ -46,8 +46,44 @@ void WorkerService::Initialize(ResourceDispatcherHost* rdh) {
 WorkerService::~WorkerService() {
 }
 
+bool WorkerService::CreateDedicatedWorker(
+    const GURL& url,
+    bool is_off_the_record,
+    unsigned long long document_id,
+    int renderer_pid,
+    int render_view_route_id,
+    IPC::Message::Sender* sender,
+    int sender_route_id,
+    int parent_process_id,
+    int parent_appcache_host_id,
+    ChromeURLRequestContext* request_context) {
+  return CreateWorker(url, false, is_off_the_record, string16(),
+                      document_id, renderer_pid, render_view_route_id,
+                      sender, sender_route_id,
+                      parent_process_id, parent_appcache_host_id, 0,
+                      request_context);
+}
+
+bool WorkerService::CreateSharedWorker(
+    const GURL& url,
+    bool is_off_the_record,
+    const string16& name,
+    unsigned long long document_id,
+    int renderer_pid,
+    int render_view_route_id,
+    IPC::Message::Sender* sender,
+    int sender_route_id,
+    int64 main_resource_appcache_id,
+    ChromeURLRequestContext* request_context) {
+  return CreateWorker(url, true, is_off_the_record, name,
+                      document_id, renderer_pid, render_view_route_id,
+                      sender, sender_route_id,
+                      0, 0, main_resource_appcache_id,
+                      request_context);
+}
+
 bool WorkerService::CreateWorker(
-    const GURL &url,
+    const GURL& url,
     bool is_shared,
     bool off_the_record,
     const string16& name,
@@ -56,8 +92,10 @@ bool WorkerService::CreateWorker(
     int render_view_route_id,
     IPC::Message::Sender* sender,
     int sender_route_id,
-    webkit_database::DatabaseTracker* db_tracker,
-    HostContentSettingsMap* host_content_settings_map) {
+    int parent_process_id,
+    int parent_appcache_host_id,
+    int64 main_resource_appcache_id,
+    ChromeURLRequestContext* request_context) {
   // Generate a unique route id for the browser-worker communication that's
   // unique among all worker processes.  That way when the worker process sends
   // a wrapped IPC message through us, we know which WorkerProcessHost to give
@@ -66,20 +104,25 @@ bool WorkerService::CreateWorker(
                                              is_shared,
                                              off_the_record,
                                              name,
-                                             next_worker_route_id());
+                                             next_worker_route_id(),
+                                             parent_process_id,
+                                             parent_appcache_host_id,
+                                             main_resource_appcache_id,
+                                             request_context);
   instance.AddSender(sender, sender_route_id);
   instance.worker_document_set()->Add(
       sender, document_id, renderer_id, render_view_route_id);
 
-  return CreateWorkerFromInstance(instance, db_tracker,
-                                  host_content_settings_map);
+  return CreateWorkerFromInstance(instance);
 }
 
 bool WorkerService::CreateWorkerFromInstance(
-    WorkerProcessHost::WorkerInstance instance,
-    webkit_database::DatabaseTracker* db_tracker,
-    HostContentSettingsMap* host_content_settings_map) {
+    WorkerProcessHost::WorkerInstance instance) {
 
+  // TODO(michaeln): We need to ensure that a process is working
+  // on behalf of a single profile. The process sharing logic below
+  // does not ensure that. Consider making WorkerService a per profile
+  // object to help with this.
   WorkerProcessHost* worker = NULL;
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kWebWorkerProcessPerCore)) {
@@ -159,27 +202,32 @@ bool WorkerService::CreateWorkerFromInstance(
   }
 
   if (!worker) {
-    worker = new WorkerProcessHost(resource_dispatcher_host_, db_tracker,
-                                   host_content_settings_map);
+    worker = new WorkerProcessHost(resource_dispatcher_host_,
+                                   instance.request_context());
     if (!worker->Init()) {
       delete worker;
       return false;
     }
   }
 
+  // TODO(michaeln): As written, test can fail per my earlier comment in
+  // this method, but that's a bug.
+  // DCHECK(worker->request_context() == instance.request_context());
+
   worker->CreateWorker(instance);
   return true;
 }
 
-bool WorkerService::LookupSharedWorker(const GURL &url,
-                                       const string16& name,
-                                       bool off_the_record,
-                                       unsigned long long document_id,
-                                       int renderer_id,
-                                       int render_view_route_id,
-                                       IPC::Message::Sender* sender,
-                                       int sender_route_id,
-                                       bool* url_mismatch) {
+bool WorkerService::LookupSharedWorker(
+    const GURL &url,
+    const string16& name,
+    bool off_the_record,
+    unsigned long long document_id,
+    int renderer_id,
+    int render_view_route_id,
+    IPC::Message::Sender* sender,
+    int sender_route_id,
+    bool* url_mismatch) {
   bool found_instance = true;
   WorkerProcessHost::WorkerInstance* instance =
       FindSharedWorkerInstance(url, name, off_the_record);
@@ -214,7 +262,7 @@ bool WorkerService::LookupSharedWorker(const GURL &url,
 
 void WorkerService::DocumentDetached(IPC::Message::Sender* sender,
                                      unsigned long long document_id) {
-  for (ChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
+  for (BrowserChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
        !iter.Done(); ++iter) {
     WorkerProcessHost* worker = static_cast<WorkerProcessHost*>(*iter);
     worker->DocumentDetached(sender, document_id);
@@ -261,7 +309,7 @@ void WorkerService::CancelCreateDedicatedWorker(IPC::Message::Sender* sender,
   // There could be a race condition where the WebWorkerProxy told us to cancel
   // the worker right as we sent it a message say it's been created.  Look at
   // the running workers.
-  for (ChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
+  for (BrowserChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
        !iter.Done(); ++iter) {
     WorkerProcessHost* worker = static_cast<WorkerProcessHost*>(*iter);
     for (WorkerProcessHost::Instances::const_iterator instance =
@@ -282,7 +330,7 @@ void WorkerService::CancelCreateDedicatedWorker(IPC::Message::Sender* sender,
 
 void WorkerService::ForwardMessage(const IPC::Message& message,
                                    IPC::Message::Sender* sender) {
-  for (ChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
+  for (BrowserChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
        !iter.Done(); ++iter) {
     WorkerProcessHost* worker = static_cast<WorkerProcessHost*>(*iter);
     if (worker->FilterMessage(message, sender))
@@ -296,7 +344,7 @@ WorkerProcessHost* WorkerService::GetProcessForDomain(const GURL& url) {
   int num_processes = 0;
   std::string domain =
       net::RegistryControlledDomainService::GetDomainAndRegistry(url);
-  for (ChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
+  for (BrowserChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
        !iter.Done(); ++iter) {
     num_processes++;
     WorkerProcessHost* worker = static_cast<WorkerProcessHost*>(*iter);
@@ -318,7 +366,7 @@ WorkerProcessHost* WorkerService::GetProcessForDomain(const GURL& url) {
 
 WorkerProcessHost* WorkerService::GetProcessToFillUpCores() {
   int num_processes = 0;
-  ChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
+  BrowserChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
   for (; !iter.Done(); ++iter)
     num_processes++;
 
@@ -330,7 +378,7 @@ WorkerProcessHost* WorkerService::GetProcessToFillUpCores() {
 
 WorkerProcessHost* WorkerService::GetLeastLoadedWorker() {
   WorkerProcessHost* smallest = NULL;
-  for (ChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
+  for (BrowserChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
        !iter.Done(); ++iter) {
     WorkerProcessHost* worker = static_cast<WorkerProcessHost*>(*iter);
     if (!smallest || worker->instances().size() < smallest->instances().size())
@@ -371,7 +419,7 @@ bool WorkerService::TabCanCreateWorkerProcess(int renderer_id,
   int total_workers = 0;
   int workers_per_tab = 0;
   *hit_total_worker_limit = false;
-  for (ChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
+  for (BrowserChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
        !iter.Done(); ++iter) {
     WorkerProcessHost* worker = static_cast<WorkerProcessHost*>(*iter);
     for (WorkerProcessHost::Instances::const_iterator cur_instance =
@@ -409,7 +457,7 @@ void WorkerService::Observe(NotificationType type,
 }
 
 void WorkerService::SenderShutdown(IPC::Message::Sender* sender) {
-  for (ChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
+  for (BrowserChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
        !iter.Done(); ++iter) {
     WorkerProcessHost* worker = static_cast<WorkerProcessHost*>(*iter);
     worker->SenderShutdown(sender);
@@ -448,8 +496,7 @@ void WorkerService::WorkerProcessDestroyed(WorkerProcessHost* process) {
     if (CanCreateWorkerProcess(*i)) {
       WorkerProcessHost::WorkerInstance instance = *i;
       queued_workers_.erase(i);
-      CreateWorkerFromInstance(instance, process->database_tracker(),
-                               process->GetHostContentSettingsMap());
+      CreateWorkerFromInstance(instance);
 
       // CreateWorkerFromInstance can modify the queued_workers_ list when it
       // coalesces queued instances after starting a shared worker, so we
@@ -465,7 +512,7 @@ void WorkerService::WorkerProcessDestroyed(WorkerProcessHost* process) {
 
 const WorkerProcessHost::WorkerInstance* WorkerService::FindWorkerInstance(
       int worker_process_id) {
-  for (ChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
+  for (BrowserChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
        !iter.Done(); ++iter) {
     if (iter->id() != worker_process_id)
         continue;
@@ -481,7 +528,7 @@ const WorkerProcessHost::WorkerInstance* WorkerService::FindWorkerInstance(
 WorkerProcessHost::WorkerInstance*
 WorkerService::FindSharedWorkerInstance(const GURL& url, const string16& name,
                                         bool off_the_record) {
-  for (ChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
+  for (BrowserChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
        !iter.Done(); ++iter) {
     WorkerProcessHost* worker = static_cast<WorkerProcessHost*>(*iter);
     for (WorkerProcessHost::Instances::iterator instance_iter =
@@ -530,7 +577,7 @@ WorkerProcessHost::WorkerInstance*
 WorkerService::CreatePendingInstance(const GURL& url,
                                      const string16& name,
                                      bool off_the_record) {
-  // Look for an existing pending worker.
+  // Look for an existing pending shared worker.
   WorkerProcessHost::WorkerInstance* instance =
       FindPendingInstance(url, name, off_the_record);
   if (instance)
@@ -538,7 +585,7 @@ WorkerService::CreatePendingInstance(const GURL& url,
 
   // No existing pending worker - create a new one.
   WorkerProcessHost::WorkerInstance pending(
-      url, true, off_the_record, name, MSG_ROUTING_NONE);
+      url, true, off_the_record, name, MSG_ROUTING_NONE, 0, 0, 0, NULL);
   pending_shared_workers_.push_back(pending);
   return &pending_shared_workers_.back();
 }

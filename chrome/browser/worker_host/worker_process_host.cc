@@ -12,8 +12,11 @@
 #include "base/debug_util.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
+#include "chrome/browser/appcache/appcache_dispatcher_host.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/child_process_security_policy.h"
+#include "chrome/browser/net/chrome_url_request_context.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/database_dispatcher_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
@@ -52,17 +55,19 @@ class WorkerCrashTask : public Task {
   int render_view_id_;
 };
 
-
 WorkerProcessHost::WorkerProcessHost(
     ResourceDispatcherHost* resource_dispatcher_host,
-    webkit_database::DatabaseTracker *db_tracker,
-    HostContentSettingsMap *host_content_settings_map)
-    : ChildProcessHost(WORKER_PROCESS, resource_dispatcher_host),
-      host_content_settings_map_(host_content_settings_map) {
+    ChromeURLRequestContext *request_context)
+    : BrowserChildProcessHost(WORKER_PROCESS, resource_dispatcher_host),
+      request_context_(request_context),
+      appcache_dispatcher_host_(
+          new AppCacheDispatcherHost(request_context)) {
   next_route_id_callback_.reset(NewCallbackWithReturnValue(
       WorkerService::GetInstance(), &WorkerService::next_worker_route_id));
-  db_dispatcher_host_ =
-      new DatabaseDispatcherHost(db_tracker, this, host_content_settings_map);
+  db_dispatcher_host_ = new DatabaseDispatcherHost(
+      request_context->database_tracker(), this,
+      request_context_->host_content_settings_map());
+  appcache_dispatcher_host_->Initialize(this);
 }
 
 WorkerProcessHost::~WorkerProcessHost() {
@@ -114,6 +119,11 @@ bool WorkerProcessHost::Init() {
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kWebWorkerShareProcesses)) {
     cmd_line->AppendSwitch(switches::kWebWorkerShareProcesses);
+  }
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableApplicationCache)) {
+    cmd_line->AppendSwitch(switches::kDisableApplicationCache);
   }
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(
@@ -196,10 +206,16 @@ void WorkerProcessHost::CreateWorker(const WorkerInstance& instance) {
       id(), instance.url());
 
   instances_.push_back(instance);
-  Send(new WorkerProcessMsg_CreateWorker(instance.url(),
-                                         instance.shared(),
-                                         instance.name(),
-                                         instance.worker_route_id()));
+
+  WorkerProcessMsg_CreateWorker_Params params;
+  params.url = instance.url();
+  params.is_shared = instance.shared();
+  params.name = instance.name();
+  params.route_id = instance.worker_route_id();
+  params.creator_process_id = instance.parent_process_id();
+  params.creator_appcache_host_id = instance.parent_appcache_host_id();
+  params.shared_worker_appcache_id = instance.main_resource_appcache_id();
+  Send(new WorkerProcessMsg_CreateWorker(params));
 
   UpdateTitle();
 
@@ -229,7 +245,7 @@ bool WorkerProcessHost::FilterMessage(const IPC::Message& message,
 URLRequestContext* WorkerProcessHost::GetRequestContext(
     uint32 request_id,
     const ViewHostMsg_Resource_Request& request_data) {
-  return NULL;
+  return request_context_;
 }
 
 // Sent to notify the browser process when a worker context invokes close(), so
@@ -248,7 +264,9 @@ void WorkerProcessHost::OnWorkerContextClosed(int worker_route_id) {
 
 void WorkerProcessHost::OnMessageReceived(const IPC::Message& message) {
   bool msg_is_ok = true;
-  bool handled = db_dispatcher_host_->OnMessageReceived(message, &msg_is_ok) ||
+  bool handled =
+      appcache_dispatcher_host_->OnMessageReceived(message, &msg_is_ok) ||
+      db_dispatcher_host_->OnMessageReceived(message, &msg_is_ok) ||
       MessagePortDispatcher::GetInstance()->OnMessageReceived(
           message, this, next_route_id_callback_.get(), &msg_is_ok);
 
@@ -304,7 +322,7 @@ CallbackWithReturnValue<int>::Type* WorkerProcessHost::GetNextRouteIdCallback(
   // We don't keep callbacks for senders associated with workers, so figure out
   // what kind of sender this is, and cast it to the correct class to get the
   // callback.
-  for (ChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
+  for (BrowserChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
        !iter.Done(); ++iter) {
     WorkerProcessHost* worker = static_cast<WorkerProcessHost*>(*iter);
     if (static_cast<IPC::Message::Sender*>(worker) == sender)
@@ -406,6 +424,17 @@ void WorkerProcessHost::UpdateTitle() {
     // Use the host name if the domain is empty, i.e. localhost or IP address.
     if (title.empty())
       title = i->url().host();
+
+    // Check if it's an extension-created worker, in which case we want to use
+    // the name of the extension.
+    std::string extension_name = static_cast<ChromeURLRequestContext*>(
+        Profile::GetDefaultRequestContext()->GetURLRequestContext())->
+        GetNameForExtension(title);
+    if (!extension_name.empty()) {
+      titles.insert(extension_name);
+      continue;
+    }
+
     // If the host name is empty, i.e. file url, use the path.
     if (title.empty())
       title = i->url().path();
@@ -452,11 +481,19 @@ void WorkerProcessHost::OnCreateWorker(
       instances_.front().worker_document_set()->documents().begin();
   *route_id = params.route_id == MSG_ROUTING_NONE ?
       WorkerService::GetInstance()->next_worker_route_id() : params.route_id;
-  WorkerService::GetInstance()->CreateWorker(
-      params.url, params.is_shared, instances_.front().off_the_record(),
-      params.name, params.document_id, first_parent->renderer_id(),
-      first_parent->render_view_route_id(), this, *route_id,
-      database_tracker(), host_content_settings_map_);
+
+  if (params.is_shared)
+    WorkerService::GetInstance()->CreateSharedWorker(
+        params.url, instances_.front().off_the_record(),
+        params.name, params.document_id, first_parent->renderer_id(),
+        first_parent->render_view_route_id(), this, *route_id,
+        params.script_resource_appcache_id, request_context_);
+  else
+    WorkerService::GetInstance()->CreateDedicatedWorker(
+        params.url, instances_.front().off_the_record(),
+        params.document_id, first_parent->renderer_id(),
+        first_parent->render_view_route_id(), this, *route_id,
+        id(), params.parent_appcache_host_id, request_context_);
 }
 
 void WorkerProcessHost::OnCancelCreateDedicatedWorker(int route_id) {
@@ -487,23 +524,29 @@ void WorkerProcessHost::DocumentDetached(IPC::Message::Sender* parent,
   }
 }
 
-webkit_database::DatabaseTracker*
-    WorkerProcessHost::database_tracker() const {
-  return db_dispatcher_host_->database_tracker();
-}
-
-WorkerProcessHost::WorkerInstance::WorkerInstance(const GURL& url,
-                                                  bool shared,
-                                                  bool off_the_record,
-                                                  const string16& name,
-                                                  int worker_route_id)
+WorkerProcessHost::WorkerInstance::WorkerInstance(
+    const GURL& url,
+    bool shared,
+    bool off_the_record,
+    const string16& name,
+    int worker_route_id,
+    int parent_process_id,
+    int parent_appcache_host_id,
+    int64 main_resource_appcache_id,
+    ChromeURLRequestContext* request_context)
     : url_(url),
       shared_(shared),
       off_the_record_(off_the_record),
       closed_(false),
       name_(name),
       worker_route_id_(worker_route_id),
+      parent_process_id_(parent_process_id),
+      parent_appcache_host_id_(parent_appcache_host_id),
+      main_resource_appcache_id_(main_resource_appcache_id),
+      request_context_(request_context),
       worker_document_set_(new WorkerDocumentSet()) {
+  DCHECK(!request_context ||
+         (off_the_record == request_context->is_off_the_record()));
 }
 
 // Compares an instance based on the algorithm in the WebWorkers spec - an

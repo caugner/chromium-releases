@@ -19,9 +19,23 @@ int HttpAuthHandlerFactory::CreateAuthHandlerFromString(
     const std::string& challenge,
     HttpAuth::Target target,
     const GURL& origin,
-    scoped_refptr<HttpAuthHandler>* handler) {
+    const BoundNetLog& net_log,
+    scoped_ptr<HttpAuthHandler>* handler) {
   HttpAuth::ChallengeTokenizer props(challenge.begin(), challenge.end());
-  return CreateAuthHandler(&props, target, origin, handler);
+  return CreateAuthHandler(&props, target, origin, CREATE_CHALLENGE, 1,
+                           net_log, handler);
+}
+
+int HttpAuthHandlerFactory::CreatePreemptiveAuthHandlerFromString(
+    const std::string& challenge,
+    HttpAuth::Target target,
+    const GURL& origin,
+    int digest_nonce_count,
+    const BoundNetLog& net_log,
+    scoped_ptr<HttpAuthHandler>* handler) {
+  HttpAuth::ChallengeTokenizer props(challenge.begin(), challenge.end());
+  return CreateAuthHandler(&props, target, origin, CREATE_PREEMPTIVE,
+                           digest_nonce_count, net_log, handler);
 }
 
 // static
@@ -49,7 +63,7 @@ HttpAuthHandlerRegistryFactory::~HttpAuthHandlerRegistryFactory() {
 
 void HttpAuthHandlerRegistryFactory::SetURLSecurityManager(
     const std::string& scheme,
-    const URLSecurityManager* security_manager) {
+    URLSecurityManager* security_manager) {
   HttpAuthHandlerFactory* factory = GetSchemeFactory(scheme);
   if (factory)
     factory->set_url_security_manager(security_manager);
@@ -73,19 +87,23 @@ int HttpAuthHandlerRegistryFactory::CreateAuthHandler(
     HttpAuth::ChallengeTokenizer* challenge,
     HttpAuth::Target target,
     const GURL& origin,
-    scoped_refptr<HttpAuthHandler>* handler) {
+    CreateReason reason,
+    int digest_nonce_count,
+    const BoundNetLog& net_log,
+    scoped_ptr<HttpAuthHandler>* handler) {
   if (!challenge->valid()) {
-    *handler = NULL;
+    handler->reset();
     return ERR_INVALID_RESPONSE;
   }
   std::string lower_scheme = StringToLowerASCII(challenge->scheme());
   FactoryMap::iterator it = factory_map_.find(lower_scheme);
   if (it == factory_map_.end()) {
-    *handler = NULL;
+    handler->reset();
     return ERR_UNSUPPORTED_AUTH_SCHEME;
   }
   DCHECK(it->second);
-  return it->second->CreateAuthHandler(challenge, target, origin, handler);
+  return it->second->CreateAuthHandler(challenge, target, origin, reason,
+                                       digest_nonce_count, net_log, handler);
 }
 
 HttpAuthHandlerFactory* HttpAuthHandlerRegistryFactory::GetSchemeFactory(

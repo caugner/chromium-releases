@@ -138,7 +138,6 @@
 <translation id="1486408090387743835"><ph name="PRODUCT_NAME"/> má nyní <ph name="BEGIN_LINK"/>rozšíření<ph name="END_LINK"/> a <ph name="BEGIN_BUTTON"/>synchronizaci záložek<ph name="END_BUTTON"/>.</translation>
 <translation id="4422347585044846479">Upravit záložku pro tuto stránku</translation>
 <translation id="8546306075665861288">Mezipaměť obrázků</translation>
-<translation id="3899346049825960202">Nápověda ke konfiguraci serveru proxy v systému Linux</translation>
 <translation id="1399076603473531278">Přihlašovací údaje jsou zastaralé.</translation>
 <translation id="3391060940042023865">Následující plugin selhal: <ph name="PLUGIN_NAME"/></translation>
 <translation id="5197255632782567636">Internet</translation>
@@ -148,20 +147,6 @@
 <translation id="1556537182262721003">Adresář rozšíření nelze přesunout do profilu.</translation>
 <translation id="5866557323934807206">Vymazat tato nastavení pro příští návštěvy</translation>
 <translation id="6370820475163108109"><ph name="ORGANIZATION_NAME"/> (<ph name="DOMAIN_NAME"/>)</translation>
-<translation id="763276826334024854">Při spouštění aplikace <ph name="PRODUCT_NAME"/> v podporovaném uživatelském prostředí se použijí systémová nastavení serveru proxy. Váš systém však není podporován nebo došlo k problémům se spuštěním vaší systémové konfigurace. Ke konfiguraci serveru proxy můžete použít tyto proměnné prostředí:
-        <ph name="BEGIN_LIST"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>auto_proxy<ph name="END_CODE"/><ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST"/>
-            <ph name="BEGIN_LIST_ITEM"/>Definovaná a prázdná → automatické rozpoznávání￼<ph name="END_LIST_ITEM"/>
-            <ph name="BEGIN_LIST_ITEM"/>Neprázdná → udává adresu URL pro automatickou konfiguraci <ph name="END_LIST_ITEM"/>
-          <ph name="END_LIST"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>all_proxy<ph name="END_CODE"/>: server proxy, který se použije pro všechny typy<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>http_proxy<ph name="END_CODE"/>: server proxy protokolu HTTP<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>https_proxy<ph name="END_CODE"/>: server proxy protokolu HTTPS<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>ftp_proxy<ph name="END_CODE"/>: server proxy protokolu FTP<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>SOCKS_SERVER<ph name="END_CODE"/>: server proxy protokolu SOCKS (výchozí je SOCKS v4, chcete-li použít protokol SOCKS v5, zadejte SOCKS_VERSION=5)<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>no_proxy<ph name="END_CODE"/>: seznam hostitelů nebo vzorů oddělených čárkou, které nevyužívají server proxy<ph name="END_LIST_ITEM"/>
-        <ph name="END_LIST"/></translation>
 <translation id="2933933591993394296">Synchronizace záložek byla v tomto počítači deaktivována. Pokud odinstalujete rozšíření <ph name="NAME_OF_EXTENSION"/>, můžete synchronizaci záložek povolit tím, že v nabídce Nástroje zvolíte možnost Nastavit synchronizaci...</translation>
 <translation id="8820817407110198400">Záložky</translation>
 <translation id="5191625995327478163">&amp;Jazyková nastavení...</translation>
@@ -169,7 +154,6 @@
 <translation id="5585645215698205895">&amp;Dolů</translation>
 <translation id="6596816719288285829">Adresa IP</translation>
 <translation id="1674989413181946727">Nastavení SSL v počítači:</translation>
-<translation id="1452199478873730826">Flikr</translation>
 <translation id="8703575177326907206">Vaše spojení se serverem <ph name="DOMAIN"/> není šifrované.</translation>
 <translation id="4197577448076628265">Toto rozšíření bude mít přístup k vaší historii prohlížení a soukromým datům na webu <ph name="HOST"/>.</translation>
 <translation id="1644574205037202324">Historie</translation>
@@ -339,7 +323,6 @@
 <translation id="348620396154188443">Povolit všem webům zobrazovat oznámení na ploše</translation>
 <translation id="8214489666383623925">Otevřít soubor...</translation>
 <translation id="5230160809118287008">Teleportované ovce</translation>
-<translation id="5296476177639202243">Dotazu <ph name="SEARCH_TEXT"/> neodpovídají žádné záložky.</translation>
 <translation id="4495419450179050807">Nezobrazovat na této stránce</translation>
 <translation id="939736085109172342">Nová složka</translation>
 <translation id="4933484234309072027">vloženo do <ph name="URL"/></translation>
@@ -379,7 +362,6 @@
 <translation id="1684861821302948641">Ukončit stránky</translation>
 <translation id="6802031077390104172"><ph name="USAGE"/> (<ph name="OID"/>)</translation>
 <translation id="857089571609443760">Synchronizace nepracuje správně, protože na server bylo odesláno příliš mnoho požadavků. Rozšíření <ph name="NAME_OF_EXTENSION"/> zřejmě provádí příliš mnoho změn vašich záložek.</translation>
-<translation id="5965640700983474726">Napište, co hledáte</translation>
 <translation id="40334469106837974">Změnit rozvržení stránky</translation>
 <translation id="2142570832281562688">Zadejte název profilu</translation>
 <translation id="5904714272463161824">Oznámit chybu či vadné stránky...</translation>
@@ -397,7 +379,6 @@
 <translation id="2620436844016719705">Systém</translation>
 <translation id="5362741141255528695">Vyberte soubor soukromého klíče.</translation>
 <translation id="7012108905414904806">Tato stránka však obsahuje jiné zdroje, které nejsou zabezpečené. Tyto zdroje mohou jiné osoby vidět během přenosu a je možné, aby útočník změnil podobnu nebo chování stránky.</translation>
-<translation id="644318894204114995">Potvrdit spuštění v anonymním režimu</translation>
 <translation id="7226140659422399856">Došlo k selhání prohlížeče... Katastrofa!</translation>
 <translation id="4515911410595374805">Některé prvky na této stránce pocházejí z neověřených zdrojů, a proto se nezobrazují.</translation>
 <translation id="1195447618553298278">Neznámá chyba.</translation>
@@ -406,7 +387,6 @@
 <translation id="6610600335992778838">Wifi</translation>
 <translation id="1087119889335281750">Bez automatických &amp;návrhů při psaní</translation>
 <translation id="5228309736894624122">Chyba protokolu SSL.</translation>
-<translation id="718141787353053227">Nastavení stránky...</translation>
 <translation id="5076340679995252485">Vložit</translation>
 <translation id="5097982659374947325">Přijímat soubory cookie pouze z webů, které navštívím</translation>
 <translation id="14171126816530869">Identitu <ph name="ORGANIZATION"/>v <ph name="LOCALITY"/> ověřil/a <ph name="ISSUER"/>.</translation>
@@ -433,7 +413,6 @@
 <translation id="6786747875388722282">Rozšíření</translation>
 <translation id="9053965862400494292">Při nastavování synchronizace došlo k chybě.</translation>
 <translation id="4636930964841734540">Informace</translation>
-<translation id="2815500128677761940">Lišta záložek</translation>
 <translation id="4571852245489094179">Importovat záložky a nastavení</translation>
 <translation id="6514771739083339959">Domovská stránka:</translation>
 <translation id="4421917670248123270">Ukončit a zrušit stahování</translation>
@@ -496,7 +475,6 @@
 <translation id="8425492902634685834">Připnout na hlavní panel</translation>
 <translation id="3234408098842461169">Klávesa šipka dolů</translation>
 <translation id="825608351287166772">Certifikáty mají stanovené období platnosti, podobně jako jakýkoli průkaz totožnosti (například cestovní pas), který máte. Certifikát předložený vašemu prohlížeči není dosud platný. Když je certifikát mimo období své platnosti, není nutné udržovat určité informace o stavu certifikátu (zda byl zamítnut a nemělo by se mu nadále důvěřovat). Proto není možné ověřit, že je takový certifikát důvěryhodný. Neměli byste postupovat dále.</translation>
-<translation id="8786172108436160456">Povolit rozšíření <ph name="EXTENSION_NAME"/> spuštění v anonymním režimu?</translation>
 <translation id="5209518306177824490">Digitální otisk SHA-1</translation>
 <translation id="7154150278819212687">Toto rozšíření bude mít přístup k vaší historii prohlížení.</translation>
 <translation id="1553538517812678578">neomezené</translation>
@@ -507,13 +485,11 @@
 <translation id="4874539263382920044">Název musí obsahovat nejméně jeden znak</translation>
 <translation id="2963998720451829125">Rozšíření <ph name="NAME_OF_EXTENSION"/> bylo deaktivováno. Pokud zastavíte synchronizaci záložek, budete moci toto rozšíření znovu aktivovat na stránce rozšíření. Tato stránka je dostupná prostřednictvím nabídky Nástroje.</translation>
 <translation id="7344633671344536647">Data procházení:</translation>
-<translation id="2332311077028912338">Opravdu chcete toto rozšíření spustit v anonymním režimu? Aplikace <ph name="PRODUCT_NAME"/> mu nemůže zabránit v zaznamenávání údajů o vašem prohlížení.</translation>
 <translation id="4250680216510889253">Ne</translation>
 <translation id="6291953229176937411">Zobrazit ve &amp;službě Finder</translation>
 <translation id="7905536804357499080">Použít současný</translation>
 <translation id="8933960630081805351">Zobrazit ve &amp;službě Finder</translation>
 <translation id="3041612393474885105">Informace o certifikátu</translation>
-<translation id="7378810950367401542">/</translation>
 <translation id="3733127536501031542">Server SSL s technologií Step-up</translation>
 <translation id="954586097957006897">Příjmení</translation>
 <translation id="5849941564644911027">Aplikace <ph name="PRODUCT_NAME"/> nyní importuje záložky a další nastavení z aplikace <ph name="DEF_BROWSER"/> a vytvoří ve vašem počítači zástupce.</translation>
@@ -568,7 +544,6 @@
 <translation id="39964277676607559">Pro skript obsahu nelze načíst soubor JavaScriptu „<ph name="RELATIVE_PATH"/>“.</translation>
 <translation id="4378551569595875038">Připojování...</translation>
 <translation id="7029809446516969842">Hesla</translation>
-<translation id="8211437954284917092">Chcete-li vyhledávat v záložkách, zadejte dotaz do pole výše.</translation>
 <translation id="4528378725264562960">(Spuštěný)</translation>
 <translation id="5958418293370246440"><ph name="SAVED_FILES"/> / <ph name="TOTAL_FILES"/> souborů</translation>
 <translation id="2350172092385603347">Byla použita lokalizace, ale v manifestu nebyl zadán parametr default_locale.</translation>
@@ -617,7 +592,6 @@
 <translation id="149347756975725155">Nelze načíst ikonu rozšíření <ph name="ICON"/>.</translation>
 <translation id="3675321783533846350">Nastavit proxy pro připojení k síti.</translation>
 <translation id="1572103024875503863"><ph name="NUMBER_MANY"/> dnů</translation>
-<translation id="181952314179848438">Toto rozšíření potřebuje přístup k:</translation>
 <translation id="8453184121293348016">Nebyl nalezen žádný mechanismus zamítnutí</translation>
 <translation id="3481915276125965083">Na této stránce byla zablokována následující vyskakovací okna:</translation>
 <translation id="3468298837301810372">Štítek</translation>
@@ -646,7 +620,6 @@
 <translation id="7965010376480416255">Sdílená paměť</translation>
 <translation id="6248988683584659830">Nastavení vyhledávání</translation>
 <translation id="7053983685419859001">Blokovat</translation>
-<translation id="3425080561288944889">Opravdu chcete záložku <ph name="BOOKMARK_TITLE"/> odebrat?</translation>
 <translation id="2727712005121231835">Skutečná velikost</translation>
 <translation id="8887733174653581061">Vždy navrchu</translation>
 <translation id="610886263749567451">JavaScript - výstraha</translation>
@@ -737,7 +710,6 @@
 <translation id="7629827748548208700">Karta: <ph name="TAB_NAME"/></translation>
 <translation id="8449008133205184768">Vložit a použít odpovídající styl</translation>
 <translation id="8028993641010258682">Velikost</translation>
-<translation id="1383876407941801731">Vyhledávání</translation>
 <translation id="8398877366907290961">Přesto pokračovat</translation>
 <translation id="6974053822202609517">Zprava doleva</translation>
 <translation id="290414493736480793">Potvrzení</translation>
@@ -766,7 +738,7 @@
 <translation id="4474155171896946103">Přidat do záložek všechny karty...</translation>
 <translation id="5895187275912066135">Datum vydání</translation>
 <translation id="1190844492833803334">Při zavření prohlížeče</translation>
-<translation id="5646376287012673985">Poloha</translation>
+<translation id="5646376287012673985">Místo</translation>
 <translation id="1110155001042129815">Počkat</translation>
 <translation id="2607101320794533334">Informace o veřejném klíči subjektu</translation>
 <translation id="7071586181848220801">Neznámý plugin</translation>
@@ -804,14 +776,12 @@
 <translation id="5552632479093547648">Zjištěn malware a phishing!</translation>
 <translation id="4988273303304146523">Před <ph name="NUMBER_DEFAULT"/> dny</translation>
 <translation id="1588343679702972132">Tento web požaduje, abyste se prokázali certifikátem:</translation>
-<translation id="7211994749225247711">Smazat...</translation>
 <translation id="2819994928625218237">Bez &amp;návrhů při psaní</translation>
 <translation id="4316305410440790958">Otevří&amp;t rámec v nové kartě</translation>
 <translation id="9142623379911037913">Chcete povolit, aby webové stránky <ph name="SITE"/> zobrazovaly oznámení na ploše?</translation>
 <translation id="4196320913210960460">Chcete-li spravovat nainstalovaná rozšíření, v nabídce Nástroje klikněte na příkaz Rozšíření.</translation>
 <translation id="9118804773997839291">Níže je uveden seznam nebezpečných prvků stránky. Po kliknutí na odkaz Diagnostika se zobrazí další informace související s jednotlivými prvky.</translation>
 <translation id="7754704193130578113">Před stažením se vždy zeptat na místo uložení každého souboru</translation>
-<translation id="8155199869035534942">Smazat vybranou položku</translation>
 <translation id="2497284189126895209">Všechny soubory</translation>
 <translation id="5360606537916580043">Předcházející den</translation>
 <translation id="1682548588986054654">Nové anonymní okno</translation>
@@ -964,7 +934,6 @@
 <translation id="7136984461011502314">Vítá vás <ph name="PRODUCT_NAME"/></translation>
 <translation id="1594030484168838125">Zvolit</translation>
 <translation id="204497730941176055">Název šablony certifikátu Microsoft</translation>
-<translation id="4002066346123236978">Název</translation>
 <translation id="4087089424473531098">Bylo vytvořeno rozšíření:
 
 <ph name="EXTENSION_FILE"/></translation>
@@ -1047,7 +1016,6 @@
 <translation id="4608500690299898628">&amp;Najít...</translation>
 <translation id="3574305903863751447"><ph name="CITY"/>, <ph name="STATE"/> <ph name="COUNTRY"/></translation>
 <translation id="8724859055372736596">Zobrazit ve &amp;složce</translation>
-<translation id="5446294780224829982">IME pro Hangŭl:</translation>
 <translation id="5554489410841842733">Tato ikona se zobrazí, když bude rozšíření moci provádět akce na aktuální stránce.</translation>
 <translation id="4862642413395066333">Podepisování odpovědí OCSP</translation>
 <translation id="4756388243121344051">Historie</translation>
@@ -1069,7 +1037,6 @@
 <translation id="7631887513477658702">Vždy otevír&amp;at soubory tohoto typu</translation>
 <translation id="8627795981664801467">Pouze zabezpečená spojení</translation>
 <translation id="3921544830490870178">Nastavení pluginů:</translation>
-<translation id="1387703718616631293">Povolit tomuto rozšíření spuštění v anonymním režimu</translation>
 <translation id="2190355936436201913">(prázdné)</translation>
 <translation id="5868426874618963178">Odeslat zdrojový kód aktuální stránky</translation>
 <translation id="5818003990515275822">Korejština</translation>
@@ -1101,7 +1068,6 @@
 <translation id="8565745688101278215"><ph name="FIRSTNAME"/><ph name="SEPARATOR"/><ph name="LASTNAME"/></translation>
 <translation id="3927932062596804919">Odmítnout</translation>
 <translation id="6484929352454160200">K dispozici je nová verze <ph name="PRODUCT_NAME"/></translation>
-<translation id="7035824132811506448">Nedávno přidané</translation>
 <translation id="5827266244928330802">Safari</translation>
 <translation id="778881183694837592">Povinné pole nesmí být prázdné.</translation>
 <translation id="6820686453637990663">Bezpečnostní kód platební karty (CVC)</translation>
@@ -1163,8 +1129,6 @@
 <translation id="2356070529366658676">Zeptat se</translation>
 <translation id="5731247495086897348">&amp;Vložit a přejít</translation>
 <translation id="3413103074007669042">Tato stránka obsahuje nějaký nezabezpečený obsah.</translation>
-<translation id="3866320199958134961"><ph name="MINUTES"/> nebo méně.
-        Připojte nabíječku.</translation>
 <translation id="7635741716790924709">1. řádek adresy</translation>
 <translation id="5285267187067365830">Instalovat plugin...</translation>
 <translation id="1166212789817575481">Zavřít karty napravo</translation>
@@ -1307,7 +1271,6 @@
 <translation id="1474307029659222435">&amp;Otevřít rámec v novém okně</translation>
 <translation id="1522474541175464402">ID klíče certifikační autority</translation>
 <translation id="5976160379964388480">Ostatní</translation>
-<translation id="3527085408025491307">Složka</translation>
 <translation id="3413808618118019351">&amp;Importovat záložky a nastavení...</translation>
 <translation id="2635276683026132559">Podepisování</translation>
 <translation id="4835836146030131423">Chyba přihlašování.</translation>
@@ -1356,7 +1319,6 @@
 <translation id="4701488924964507374"><ph name="SENTENCE1"/> <ph name="SENTENCE2"/></translation>
 <translation id="1163931534039071049">Zobrazit zdrojový kód rámce</translation>
 <translation id="7564847347806291057">Ukončit proces</translation>
-<translation id="7851589172948533362">Ověřil: <ph name="ISSUER"/></translation>
 <translation id="7063412606254013905">Více informací o phishingových podvodech.</translation>
 <translation id="307767688111441685">Stránka vypadá neobvykle</translation>
 <translation id="5295309862264981122">Potvrdit navigaci</translation>
@@ -1475,7 +1437,6 @@
 <translation id="4910619056351738551">Zde je pár návrhů:</translation>
 <translation id="5489059749897101717">Zobrazit panel pravopi&amp;su</translation>
 <translation id="1232569758102978740">Bez názvu</translation>
-<translation id="1851547963021150172">Provést akci s vybranou položkou</translation>
 <translation id="4362187533051781987">Město</translation>
 <translation id="9149866541089851383">Upravit...</translation>
 <translation id="7000311294523403548">Webová stránka bez názvu</translation>
@@ -1715,7 +1676,7 @@
 <translation id="2301382460326681002">Kořenový adresář rozšíření je neplatný.</translation>
 <translation id="7839192898639727867">ID klíče subjektu certifikátu</translation>
 <translation id="4759238208242260848">Stahování</translation>
-<translation id="1178581264944972037">Pozastavit</translation>
+<translation id="1178581264944972037">Pauza</translation>
 <translation id="6314919950468685344">Písmo s pevnou šířkou:</translation>
 <translation id="6492313032770352219">Velikost na disku:</translation>
 <translation id="5233231016133573565">ID procesu</translation>

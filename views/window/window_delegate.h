@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/scoped_ptr.h"
+#include "views/accessibility/accessibility_types.h"
 
 class SkBitmap;
 
@@ -54,6 +55,14 @@ class WindowDelegate {
     return false;
   }
 
+  virtual AccessibilityTypes::Role accessible_role() const {
+    return AccessibilityTypes::ROLE_WINDOW;
+  }
+
+  virtual AccessibilityTypes::State accessible_state() const {
+    return 0;
+  }
+
   // Returns the text to be displayed in the window title.
   virtual std::wstring GetWindowTitle() const {
     return L"";
@@ -65,6 +74,11 @@ class WindowDelegate {
 
   // Returns true if the window should show a title in the title bar.
   virtual bool ShouldShowWindowTitle() const {
+    return true;
+  }
+
+  // Returns true if the window's client view wants a client edge.
+  virtual bool ShouldShowClientEdge() const {
     return true;
   }
 
@@ -117,24 +131,13 @@ class WindowDelegate {
   // of the window.
   virtual ClientView* CreateClientView(Window* window);
 
-  // An accessor to the Window this delegate is bound to.
-  Window* window() const { return window_.get(); }
-
- protected:
-  // Releases the Window* we maintain. This should be done by a delegate in its
-  // WindowClosing handler if it intends to be re-cycled to be used on a
-  // different Window.
-  void ReleaseWindow();
+  Window* window() const { return window_; }
 
  private:
   friend class WindowGtk;
   friend class WindowWin;
-  // This is a little unusual. We use a scoped_ptr here because it's
-  // initialized to NULL automatically. We do this because we want to allow
-  // people using this helper to not have to call a ctor on this object.
-  // Instead we just release the owning ref this pointer has when we are
-  // destroyed.
-  scoped_ptr<Window> window_;
+  // The Window this delegate is bound to. Weak reference.
+  Window* window_;
 };
 
 }  // namespace views

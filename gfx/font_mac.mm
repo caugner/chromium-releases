@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
+#include "gfx/canvas_skia.h"
 
 namespace gfx {
 
@@ -58,12 +59,10 @@ int Font::ave_char_width() const {
 }
 
 int Font::GetStringWidth(const std::wstring& text) const {
-  NSFont* font = nativeFont();
-  NSString* ns_string = base::SysWideToNSString(text);
-  NSDictionary* attributes =
-      [NSDictionary dictionaryWithObject:font forKey:NSFontAttributeName];
-  NSSize string_size = [ns_string sizeWithAttributes:attributes];
-  return string_size.width;
+  int width = 0, height = 0;
+  CanvasSkia::SizeStringInt(text, *this, &width, &height,
+                            gfx::Canvas::NO_ELLIPSIS);
+  return width;
 }
 
 int Font::GetExpectedTextWidth(int length) const {

@@ -138,7 +138,6 @@
 <translation id="1486408090387743835">В <ph name="PRODUCT_NAME"/> установлены <ph name="BEGIN_LINK"/>расширения<ph name="END_LINK"/>. Также выполнена <ph name="BEGIN_BUTTON"/>синхронизация закладок<ph name="END_BUTTON"/>.</translation>
 <translation id="4422347585044846479">Изменить закладку для этой страницы</translation>
 <translation id="8546306075665861288">Кэш изображений</translation>
-<translation id="3899346049825960202">Справка по конфигурации прокси-сервера Linux</translation>
 <translation id="1399076603473531278">Регистрационные данные устарели.</translation>
 <translation id="3391060940042023865">Произошел сбой следующего подключаемого модуля: <ph name="PLUGIN_NAME"/></translation>
 <translation id="5197255632782567636">Интернет</translation>
@@ -148,20 +147,6 @@
 <translation id="1556537182262721003">Не удалось переместить каталог расширений в профиль.</translation>
 <translation id="5866557323934807206">Очистить эти настройки для последующих посещений</translation>
 <translation id="6370820475163108109"><ph name="ORGANIZATION_NAME"/> (<ph name="DOMAIN_NAME"/>)</translation>
-<translation id="763276826334024854">При работе <ph name="PRODUCT_NAME"/> в поддерживаемой среде на компьютере используются системные настройки прокси-сервера. Однако или ваша система не поддерживается, или возникли проблемы с запуском системной конфигурации. Вы можете использовать следующие переменные среды для настройки прокси-сервера:
-        <ph name="BEGIN_LIST"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>auto_proxy<ph name="END_CODE"/><ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST"/>
-            <ph name="BEGIN_LIST_ITEM"/>определена и не заполнена → автоматическое определение<ph name="END_LIST_ITEM"/>
-            <ph name="BEGIN_LIST_ITEM"/>заполнена → URL автоконфигурации<ph name="END_LIST_ITEM"/>
-          <ph name="END_LIST"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>all_proxy<ph name="END_CODE"/>: прокси-сервер, используемый для всех типов<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>http_proxy<ph name="END_CODE"/>: прокси-сервер HTTP<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>https_proxy<ph name="END_CODE"/>: прокси-сервер HTTPS<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>ftp_proxy<ph name="END_CODE"/>: прокси-сервер FTP<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>SOCKS_SERVER<ph name="END_CODE"/>: прокси-сервер SOCKS (по умолчанию SOCKS версии 4, также можно указать SOCKS_VERSION=5 для использования SOCKS версии 5)<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>no_proxy<ph name="END_CODE"/>: список хостов или последовательностей для обхода прокси-серверов (значения разделяются запятыми)<ph name="END_LIST_ITEM"/>
-        <ph name="END_LIST"/></translation>
 <translation id="2933933591993394296">Синхронизация закладок была отключена на этом компьютере. Если вы удалите <ph name="NAME_OF_EXTENSION"/>, вы сможете повторно включить синхронизацию закладок, выбрав пункт &quot;Настроить синхронизацию...&quot; в меню &quot;Инструменты&quot;.</translation>
 <translation id="8820817407110198400">Закладки</translation>
 <translation id="5191625995327478163">Настройки языка...</translation>
@@ -169,7 +154,6 @@
 <translation id="5585645215698205895">&amp;Вниз</translation>
 <translation id="6596816719288285829">IP-адрес</translation>
 <translation id="1674989413181946727">Настройки SSL компьютера:</translation>
-<translation id="1452199478873730826">Flikr</translation>
 <translation id="8703575177326907206">Соединение с <ph name="DOMAIN"/> не зашифровано.</translation>
 <translation id="4197577448076628265">Это расширение будет иметь доступ к вашей истории просмотра и личным данным на <ph name="HOST"/>.</translation>
 <translation id="1644574205037202324">История</translation>
@@ -339,7 +323,6 @@
 <translation id="348620396154188443">Разрешить всем сайтам отображать оповещения</translation>
 <translation id="8214489666383623925">Открыть файл...</translation>
 <translation id="5230160809118287008">Телепортировано коз</translation>
-<translation id="5296476177639202243">Ни одна закладка не соответствует запросу &quot;<ph name="SEARCH_TEXT"/>&quot;.</translation>
 <translation id="4495419450179050807">Не показывать на этой странице</translation>
 <translation id="939736085109172342">Новая папка</translation>
 <translation id="4933484234309072027">встроен в <ph name="URL"/></translation>
@@ -379,7 +362,6 @@
 <translation id="1684861821302948641">Закрыть страницы</translation>
 <translation id="6802031077390104172"><ph name="USAGE"/> (<ph name="OID"/>)</translation>
 <translation id="857089571609443760">Синхронизация закладок работает некорректно из-за слишком большого числа запросов к серверу. Вероятно, расширение <ph name="NAME_OF_EXTENSION"/> вносит слишком много изменений в ваши закладки.</translation>
-<translation id="5965640700983474726">Наберите текст для поиска</translation>
 <translation id="40334469106837974">Изменить внешний вид страницы</translation>
 <translation id="2142570832281562688">Введите название профиля</translation>
 <translation id="5904714272463161824">&amp;Сообщить о неполадке на сайте</translation>
@@ -397,7 +379,6 @@
 <translation id="2620436844016719705">Система</translation>
 <translation id="5362741141255528695">Выберите файл закрытого ключа.</translation>
 <translation id="7012108905414904806">Однако на этой странице имеется небезопасное содержание. Эти ресурсы могут просматриваться при передаче и изменяться злоумышлениками с целью изменения внешнего вида страниц и выполняемых на них действий.</translation>
-<translation id="644318894204114995">Подтверждение работы в анонимном режиме</translation>
 <translation id="7226140659422399856">Неустранимый сбой браузера</translation>
 <translation id="4515911410595374805">Некоторые элементы на этой странице получены из непроверенного источника и не показаны.</translation>
 <translation id="1195447618553298278">Неизвестная ошибка.</translation>
@@ -406,7 +387,6 @@
 <translation id="6610600335992778838">WiFi</translation>
 <translation id="1087119889335281750">&amp;Нет предложений правильного написания</translation>
 <translation id="5228309736894624122">Ошибка протокола SSL.</translation>
-<translation id="718141787353053227">Настройка страницы...</translation>
 <translation id="5076340679995252485">&amp;Вставить</translation>
 <translation id="5097982659374947325">Принимать файлы cookie от посещаемых сайтов</translation>
 <translation id="14171126816530869">Идентификационные данные <ph name="ORGANIZATION"/> в <ph name="LOCALITY"/> проверены <ph name="ISSUER"/>.</translation>
@@ -433,7 +413,6 @@
 <translation id="6786747875388722282">Расширения</translation>
 <translation id="9053965862400494292">Произошел сбой во время синхронизации.</translation>
 <translation id="4636930964841734540">Информация</translation>
-<translation id="2815500128677761940">Панель закладок</translation>
 <translation id="4571852245489094179">Импорт закладок и настроек</translation>
 <translation id="6514771739083339959">Главная страница:</translation>
 <translation id="4421917670248123270">Закрыть и отменить загрузки</translation>
@@ -496,7 +475,6 @@
 <translation id="8425492902634685834">Закрепить на панели задач</translation>
 <translation id="3234408098842461169">Стрелка вниз</translation>
 <translation id="825608351287166772">У сертификатов есть период действия так же, как у любого удостоверения личности (например, у паспорта). Представленный для браузера сертификат еще не действителен. Если срок действия сертификата еще не наступил или уже истек, его издатель не обязан предоставлять определенную информацию о статуса сертификата (о том, был ли он отозван и более не может являться довереным). Поэтому проверить, является ли сертификат надежным, невозможно. Мы не рекомендуем продолжать далее.</translation>
-<translation id="8786172108436160456">Разрешить <ph name="EXTENSION_NAME"/> работать в режиме анонимности?</translation>
 <translation id="5209518306177824490">Отпечаток SHA-1</translation>
 <translation id="7154150278819212687">Это расширение получит доступ к истории просмотра.</translation>
 <translation id="1553538517812678578">неограниченно</translation>
@@ -507,13 +485,11 @@
 <translation id="4874539263382920044">Заголовок должен содержать не менее одного символа</translation>
 <translation id="2963998720451829125">Расширение <ph name="NAME_OF_EXTENSION"/> было отключено. Если вы отключите синхронизацию закладок, вы сможете повторно включить это расширение на странице расширений в меню &quot;Инструменты&quot;.</translation>
 <translation id="7344633671344536647">Данные о работе в браузере:</translation>
-<translation id="2332311077028912338">Разрешить этому расширению выполняться в анонимном окне? <ph name="PRODUCT_NAME"/> не может запретить этому расширению регистрировать данные о вашей работе в браузере.</translation>
 <translation id="4250680216510889253">Нет</translation>
 <translation id="6291953229176937411">Показать в Finder</translation>
 <translation id="7905536804357499080">Использовать текущую</translation>
 <translation id="8933960630081805351">Показать в Finder</translation>
 <translation id="3041612393474885105">Информация сертификата</translation>
-<translation id="7378810950367401542">/</translation>
 <translation id="3733127536501031542">SSL-сервер с повышением</translation>
 <translation id="954586097957006897">Фамилия</translation>
 <translation id="5849941564644911027"><ph name="PRODUCT_NAME"/> импортирует закладки и другие настройки из <ph name="DEF_BROWSER"/> и создаст ярлыки на вашем компьютере.</translation>
@@ -568,7 +544,6 @@
 <translation id="39964277676607559">Не удается загрузить javascript &quot;<ph name="RELATIVE_PATH"/>&quot; для скрипта содержимого.</translation>
 <translation id="4378551569595875038">Соединение...</translation>
 <translation id="7029809446516969842">Пароли</translation>
-<translation id="8211437954284917092">Чтобы выполнить поиск по закладкам, введите запрос в текстовом поле выше.</translation>
 <translation id="4528378725264562960">(Работает)</translation>
 <translation id="5958418293370246440"><ph name="SAVED_FILES"/> / <ph name="TOTAL_FILES"/> файла(ов)</translation>
 <translation id="2350172092385603347">Локализация используется, однако в манифесте не указан атрибут default_locale.</translation>
@@ -617,7 +592,6 @@
 <translation id="149347756975725155">Не удается загрузить значок расширения &quot;<ph name="ICON"/>&quot;.</translation>
 <translation id="3675321783533846350">Настроить прокси-сервер для подключения к сети</translation>
 <translation id="1572103024875503863"><ph name="NUMBER_MANY"/> дн.</translation>
-<translation id="181952314179848438">Для этого расширения необходим доступ к:</translation>
 <translation id="8453184121293348016">Не обнаружен механизм отзыва</translation>
 <translation id="3481915276125965083">Заблокированы следующие всплывающие окна:</translation>
 <translation id="3468298837301810372">Ярлык:</translation>
@@ -646,7 +620,6 @@
 <translation id="7965010376480416255">Общая память</translation>
 <translation id="6248988683584659830">Поиск настроек</translation>
 <translation id="7053983685419859001">Блокировать</translation>
-<translation id="3425080561288944889">Вы действительно хотите удалить &quot;<ph name="BOOKMARK_TITLE"/>&quot;?</translation>
 <translation id="2727712005121231835">Фактический размер</translation>
 <translation id="8887733174653581061">Всегда наверху</translation>
 <translation id="610886263749567451">Оповещение JavaScript</translation>
@@ -738,7 +711,6 @@
 <translation id="7629827748548208700">Вкладка: <ph name="TAB_NAME"/></translation>
 <translation id="8449008133205184768">Вставить с соблюдением стиля</translation>
 <translation id="8028993641010258682">Размер</translation>
-<translation id="1383876407941801731">Поиск</translation>
 <translation id="8398877366907290961">Продолжить все равно</translation>
 <translation id="6974053822202609517">Справа налево</translation>
 <translation id="290414493736480793">Уведомления</translation>
@@ -805,14 +777,12 @@
 <translation id="5552632479093547648">Обнаружено вредоносное ПО или фишинг!</translation>
 <translation id="4988273303304146523"><ph name="NUMBER_DEFAULT"/> дн. назад</translation>
 <translation id="1588343679702972132">Этот сайт потребовал идентификации с помощью сертификата:</translation>
-<translation id="7211994749225247711">Удалить...</translation>
 <translation id="2819994928625218237">Не предлагать правильное написание</translation>
 <translation id="4316305410440790958">Открыть фрейм в новой вкладке</translation>
 <translation id="9142623379911037913">Разрешить <ph name="SITE"/> показывать уведомления?</translation>
 <translation id="4196320913210960460">Управлять установленными расширениями можно на вкладке &quot;Расширения&quot; в меню &quot;Инструменты&quot;.</translation>
 <translation id="9118804773997839291">Представляющие опасность элементы с этой страницы приведены ниже. Чтобы получить более подробную информацию о каждом элементе, нажмите на ссылку &quot;Диагностика&quot;.</translation>
 <translation id="7754704193130578113">Запрашивать место для сохранения каждого файла перед загрузкой</translation>
-<translation id="8155199869035534942">Удалить выбранный элемент</translation>
 <translation id="2497284189126895209">Все файлы</translation>
 <translation id="5360606537916580043">Последний день</translation>
 <translation id="1682548588986054654">Новое окно в режиме инкогнито</translation>
@@ -965,7 +935,6 @@
 <translation id="7136984461011502314">Добро пожаловать в <ph name="PRODUCT_NAME"/></translation>
 <translation id="1594030484168838125">Выбрать</translation>
 <translation id="204497730941176055">Название шаблона сертификата Microsoft</translation>
-<translation id="4002066346123236978">Заголовок</translation>
 <translation id="4087089424473531098">Создано расширение:
 
 <ph name="EXTENSION_FILE"/></translation>
@@ -1048,7 +1017,6 @@
 <translation id="4608500690299898628">&amp;Найти...</translation>
 <translation id="3574305903863751447"><ph name="CITY"/>, <ph name="STATE"/> <ph name="COUNTRY"/></translation>
 <translation id="8724859055372736596">Показать в папке</translation>
-<translation id="5446294780224829982">IME хангыля:</translation>
 <translation id="5554489410841842733">Значок будет видимым, если расширение может работать на текущей странице.</translation>
 <translation id="4862642413395066333">Подпись ответов OCSP</translation>
 <translation id="4756388243121344051">&amp;История</translation>
@@ -1070,7 +1038,6 @@
 <translation id="7631887513477658702">Всегда открывать файлы этого типа</translation>
 <translation id="8627795981664801467">Только защищенные соединения</translation>
 <translation id="3921544830490870178">Настройки подключаемых модулей</translation>
-<translation id="1387703718616631293">Разрешить этому расширению работать в анонимном режиме</translation>
 <translation id="2190355936436201913">(пусто)</translation>
 <translation id="5868426874618963178">Отправить исходный код открытой страницы</translation>
 <translation id="5818003990515275822">Корейская</translation>
@@ -1102,7 +1069,6 @@
 <translation id="8565745688101278215"><ph name="FIRSTNAME"/><ph name="SEPARATOR"/><ph name="LASTNAME"/></translation>
 <translation id="3927932062596804919">Запретить</translation>
 <translation id="6484929352454160200">Доступна новая версия <ph name="PRODUCT_NAME"/></translation>
-<translation id="7035824132811506448">Недавно добавлено</translation>
 <translation id="5827266244928330802">Safari</translation>
 <translation id="778881183694837592">Обязательное поле не должно быть пустым.</translation>
 <translation id="6820686453637990663">Код CVC</translation>
@@ -1164,8 +1130,6 @@
 <translation id="2356070529366658676">Спросить</translation>
 <translation id="5731247495086897348">Вс&amp;тавить из буфера и перейти</translation>
 <translation id="3413103074007669042">Эта страница содержит небезопасные элементы.</translation>
-<translation id="3866320199958134961">Менее <ph name="MINUTES"/>.
-Подключите источник питания.</translation>
 <translation id="7635741716790924709">Строка адреса 1</translation>
 <translation id="5285267187067365830">Установить плагин...</translation>
 <translation id="1166212789817575481">Закрыть вкладки справа</translation>
@@ -1308,7 +1272,6 @@
 <translation id="1474307029659222435">Открыть фрейм в новом &amp;окне</translation>
 <translation id="1522474541175464402">Идентификатор ключа ЦС</translation>
 <translation id="5976160379964388480">Другое</translation>
-<translation id="3527085408025491307">Папка</translation>
 <translation id="3413808618118019351">Импорт закладок и настроек...</translation>
 <translation id="2635276683026132559">Подпись</translation>
 <translation id="4835836146030131423">Ошибка при входе.</translation>
@@ -1357,7 +1320,6 @@
 <translation id="4701488924964507374"><ph name="SENTENCE1"/> <ph name="SENTENCE2"/></translation>
 <translation id="1163931534039071049">&amp;Просмотр кода фрейма</translation>
 <translation id="7564847347806291057">Завершить процесс</translation>
-<translation id="7851589172948533362">Проверен издателем (<ph name="ISSUER"/>)</translation>
 <translation id="7063412606254013905">Подробнее о схемах фишинга.</translation>
 <translation id="307767688111441685">Страница выглядит подозрительно</translation>
 <translation id="5295309862264981122">Подтвердите переход</translation>
@@ -1476,7 +1438,6 @@
 <translation id="4910619056351738551">Вот несколько советов и рекомендаций:</translation>
 <translation id="5489059749897101717">Показать панель правописания</translation>
 <translation id="1232569758102978740">Без имени</translation>
-<translation id="1851547963021150172">Выполнить действие с выбранным элементом</translation>
 <translation id="4362187533051781987">Город</translation>
 <translation id="9149866541089851383">Изменить...</translation>
 <translation id="7000311294523403548">Веб-страница без имени</translation>

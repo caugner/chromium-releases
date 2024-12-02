@@ -7,7 +7,7 @@
 #include <string>
 
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "chrome/browser/net/url_fetcher.h"
+#include "chrome/common/net/url_fetcher.h"
 #include "net/base/load_flags.h"
 
 namespace chromeos {
@@ -22,7 +22,7 @@ bool IssueResponseHandler::CanHandle(const GURL& url) {
 URLFetcher* IssueResponseHandler::Handle(
     const std::string& to_process,
     URLFetcher::Delegate* catcher) {
-  LOG(INFO) << "IssueAuthToken successful!";
+  LOG(INFO) << "Handling IssueAuthToken response";
   token_url_.assign(StringPrintf("%s%s",
                                  AuthResponseHandler::kTokenAuthUrl,
                                  to_process.c_str()));
@@ -30,7 +30,7 @@ URLFetcher* IssueResponseHandler::Handle(
       new URLFetcher(GURL(token_url_), URLFetcher::GET, catcher);
   fetcher->set_load_flags(net::LOAD_DO_NOT_SEND_COOKIES);
   if (getter_) {
-    LOG(INFO) << "Fetching";
+    LOG(INFO) << "Fetching " << AuthResponseHandler::kTokenAuthUrl;
     fetcher->set_request_context(getter_);
     fetcher->Start();
   }

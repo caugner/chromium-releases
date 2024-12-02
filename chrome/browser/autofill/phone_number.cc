@@ -55,6 +55,25 @@ void PhoneNumber::GetPossibleFieldTypes(const string16& text,
     possible_types->insert(GetWholeNumberType());
 }
 
+void PhoneNumber::GetAvailableFieldTypes(FieldTypeSet* available_types) const {
+  DCHECK(available_types);
+
+  if (!number().empty())
+    available_types->insert(GetNumberType());
+
+  if (!city_code().empty())
+    available_types->insert(GetCityCodeType());
+
+  if (!country_code().empty())
+    available_types->insert(GetCountryCodeType());
+
+  if (!CityAndNumber().empty())
+    available_types->insert(GetCityAndNumberType());
+
+  if (!WholeNumber().empty())
+    available_types->insert(GetWholeNumberType());
+}
+
 string16 PhoneNumber::GetFieldText(const AutoFillType& type) const {
   AutoFillFieldType field_type = type.field_type();
   if (field_type == GetNumberType())
@@ -72,7 +91,7 @@ string16 PhoneNumber::GetFieldText(const AutoFillType& type) const {
   if (field_type == GetWholeNumberType())
     return WholeNumber();
 
-  return EmptyString16();
+  return string16();
 }
 
 void PhoneNumber::FindInfoMatches(const AutoFillType& type,
@@ -113,17 +132,15 @@ void PhoneNumber::SetInfo(const AutoFillType& type, const string16& value) {
     set_city_code(number);
   else if (subgroup == AutoFillType::PHONE_COUNTRY_CODE)
     set_country_code(number);
-  else if (subgroup == AutoFillType::PHONE_WHOLE_NUMBER)
+  else if (subgroup == AutoFillType::PHONE_CITY_AND_NUMBER ||
+           subgroup == AutoFillType::PHONE_WHOLE_NUMBER)
     set_whole_number(number);
   else
     NOTREACHED();
-  // TODO(jhawkins): Add extension support.
-  // else if (subgroup == AutoFillType::PHONE_EXTENSION)
-  //   set_extension(number);
 }
 
 // Static.
-void PhoneNumber::ParsePhoneNumber(const string16& value,
+bool PhoneNumber::ParsePhoneNumber(const string16& value,
                                    string16* number,
                                    string16* city_code,
                                    string16* country_code) {
@@ -142,24 +159,25 @@ void PhoneNumber::ParsePhoneNumber(const string16& value,
   StripPunctuation(&working);
 
   if (working.size() < kPhoneNumberLength)
-    return;
+    return false;
 
   // Treat the last 7 digits as the number.
   *number = working.substr(working.size() - kPhoneNumberLength,
                            kPhoneNumberLength);
   working.resize(working.size() - kPhoneNumberLength);
   if (working.size() < kPhoneCityCodeLength)
-    return;
+    return true;
 
   // Treat the next three digits as the city code.
   *city_code = working.substr(working.size() - kPhoneCityCodeLength,
                               kPhoneCityCodeLength);
   working.resize(working.size() - kPhoneCityCodeLength);
   if (working.empty())
-    return;
+    return true;
 
   // Treat any remaining digits as the country code.
   *country_code = working;
+  return true;
 }
 
 string16 PhoneNumber::WholeNumber() const {
@@ -228,21 +246,21 @@ bool PhoneNumber::FindInfoMatchesHelper(const FieldTypeSubGroup& subgroup,
 }
 
 bool PhoneNumber::IsNumber(const string16& text) const {
-  if (text.length() <= number_.length())
+  if (text.length() > number_.length())
     return false;
 
   return StartsWith(number_, text, false);
 }
 
 bool PhoneNumber::IsCityCode(const string16& text) const {
-  if (text.length() <= city_code_.length())
+  if (text.length() > city_code_.length())
     return false;
 
   return StartsWith(city_code_, text, false);
 }
 
 bool PhoneNumber::IsCountryCode(const string16& text) const {
-  if (text.length() <= country_code_.length())
+  if (text.length() > country_code_.length())
     return false;
 
   return StartsWith(country_code_, text, false);

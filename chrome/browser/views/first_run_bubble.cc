@@ -8,14 +8,14 @@
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "app/win_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/win_util.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/first_run.h"
 #include "chrome/browser/options_window.h"
-#include "chrome/browser/profile.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/util.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -46,22 +46,6 @@ const int kStringSeparationPadding = 2;
 // Margin around close button.
 const int kMarginRightOfCloseButton = 7;
 
-std::wstring GetDefaultSearchEngineName(Profile* profile) {
-  if (!profile) {
-    NOTREACHED();
-    return std::wstring();
-  }
-  const TemplateURL* const default_provider =
-      profile->GetTemplateURLModel()->GetDefaultSearchProvider();
-  if (!default_provider) {
-    // TODO(cpu): bug 1187517. It is possible to have no default provider.
-    // returning an empty string is a stopgap measure for the crash
-    // http://code.google.com/p/chromium/issues/detail?id=2573
-    return std::wstring();
-  }
-  return default_provider->short_name();
-}
-
 }  // namespace
 
 // Base class for implementations of the client view which appears inside the
@@ -85,7 +69,7 @@ class FirstRunBubbleView : public FirstRunBubbleViewBase {
   virtual ~FirstRunBubbleView() {}
 
   // FirstRunBubbleViewBase:
-  void BubbleShown();
+  virtual void BubbleShown();
 
   // Overridden from View:
   virtual void ButtonPressed(views::Button* sender, const views::Event& event);
@@ -133,7 +117,7 @@ FirstRunBubbleView::FirstRunBubbleView(FirstRunBubble* bubble_window,
   AddChildView(label2_);
 
   std::wstring question_str = l10n_util::GetStringF(IDS_FR_BUBBLE_QUESTION,
-      GetDefaultSearchEngineName(profile));
+      UTF16ToWideHack(GetDefaultSearchEngineName(profile)));
   label3_ = new views::Label(question_str);
   label3_->SetMultiLine(true);
   label3_->SetFont(font);
@@ -142,7 +126,7 @@ FirstRunBubbleView::FirstRunBubbleView(FirstRunBubble* bubble_window,
   AddChildView(label3_);
 
   std::wstring keep_str = l10n_util::GetStringF(IDS_FR_BUBBLE_OK,
-      GetDefaultSearchEngineName(profile));
+      UTF16ToWideHack(GetDefaultSearchEngineName(profile)));
   keep_button_ = new views::NativeButton(this, keep_str);
   keep_button_->SetIsDefault(true);
   AddChildView(keep_button_);
@@ -160,6 +144,7 @@ void FirstRunBubbleView::ButtonPressed(views::Button* sender,
                                        const views::Event& event) {
   UserMetrics::RecordAction(UserMetricsAction("FirstRunBubbleView_Clicked"),
                             profile_);
+  bubble_window_->set_fade_away_on_close(true);
   bubble_window_->Close();
   if (change_button_ == sender) {
     UserMetrics::RecordAction(
@@ -245,7 +230,7 @@ class FirstRunOEMBubbleView : public FirstRunBubbleViewBase {
   virtual ~FirstRunOEMBubbleView() { }
 
   // FirstRunBubbleViewBase:
-  void BubbleShown();
+  virtual void BubbleShown();
 
   // Overridden from View:
   virtual void ButtonPressed(views::Button* sender, const views::Event& event);
@@ -316,6 +301,7 @@ void FirstRunOEMBubbleView::ButtonPressed(views::Button* sender,
                                           const views::Event& event) {
   UserMetrics::RecordAction(UserMetricsAction("FirstRunOEMBubbleView_Clicked"),
                             profile_);
+  bubble_window_->set_fade_away_on_close(true);
   bubble_window_->Close();
 }
 
@@ -383,13 +369,13 @@ void FirstRunOEMBubbleView::FocusWillChange(View* focused_before,
 
 class FirstRunMinimalBubbleView : public FirstRunBubbleViewBase {
  public:
-  explicit FirstRunMinimalBubbleView(FirstRunBubble* bubble_window);
+  FirstRunMinimalBubbleView(FirstRunBubble* bubble_window, Profile* profile);
 
  private:
-   virtual ~FirstRunMinimalBubbleView() { }
+  virtual ~FirstRunMinimalBubbleView() { }
 
   // FirstRunBubbleViewBase:
-  void BubbleShown();
+  virtual void BubbleShown();
 
   // Overridden from View:
   virtual void ButtonPressed(views::Button* sender,
@@ -401,6 +387,7 @@ class FirstRunMinimalBubbleView : public FirstRunBubbleViewBase {
   virtual void FocusWillChange(View* focused_before, View* focused_now);
 
   FirstRunBubble* bubble_window_;
+  Profile* profile_;
   views::Label* label1_;
   views::Label* label2_;
 
@@ -408,14 +395,17 @@ class FirstRunMinimalBubbleView : public FirstRunBubbleViewBase {
 };
 
 FirstRunMinimalBubbleView::FirstRunMinimalBubbleView(
-    FirstRunBubble* bubble_window)
+    FirstRunBubble* bubble_window,
+    Profile* profile)
     : bubble_window_(bubble_window),
+      profile_(profile),
       label1_(NULL),
       label2_(NULL) {
   const gfx::Font& font =
       ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::MediumFont);
 
-  label1_ = new views::Label(l10n_util::GetString(IDS_FR_BUBBLE_TITLE));
+  label1_ = new views::Label(l10n_util::GetStringF(IDS_FR_SE_BUBBLE_TITLE,
+      UTF16ToWideHack(GetDefaultSearchEngineName(profile_))));
   label1_->SetFont(font.DeriveFont(3, gfx::Font::BOLD));
   label1_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   AddChildView(label1_);
@@ -471,8 +461,9 @@ void FirstRunMinimalBubbleView::FocusWillChange(View* focused_before,
 
 // static
 FirstRunBubble* FirstRunBubble::Show(Profile* profile,
-                                     views::Window* parent,
+                                     views::Widget* parent,
                                      const gfx::Rect& position_relative_to,
+                                     BubbleBorder::ArrowLocation arrow_location,
                                      FirstRun::BubbleType bubble_type) {
   FirstRunBubble* window = new FirstRunBubble();
   FirstRunBubbleViewBase* view = NULL;
@@ -485,13 +476,13 @@ FirstRunBubble* FirstRunBubble::Show(Profile* profile,
       view = new FirstRunBubbleView(window, profile);
       break;
     case FirstRun::MINIMALBUBBLE:
-      view = new FirstRunMinimalBubbleView(window);
+      view = new FirstRunMinimalBubbleView(window, profile);
       break;
     default:
       NOTREACHED();
   }
   window->set_view(view);
-  window->Init(parent, position_relative_to, view, window);
+  window->Init(parent, position_relative_to, arrow_location, view, window);
   window->GetFocusManager()->AddFocusChangeListener(view);
   view->BubbleShown();
   return window;

@@ -6,6 +6,7 @@
 
 #include "chrome/browser/browsing_instance.h"
 #include "chrome/browser/dom_ui/dom_ui_factory.h"
+#include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/renderer_host/browser_render_process_host.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/notification_service.h"
@@ -42,7 +43,18 @@ SiteInstance::~SiteInstance() {
     browsing_instance_->UnregisterSiteInstance(this);
 }
 
+bool SiteInstance::HasProcess() const {
+  return (process_ != NULL);
+}
+
 RenderProcessHost* SiteInstance::GetProcess() {
+  // TODO(erikkay) It would be nice to ensure that the renderer type had been
+  // properly set before we get here.  The default tab creation case winds up
+  // with no site set at this point, so it will default to TYPE_NORMAL.  This
+  // may not be correct, so we'll wind up potentially creating a process that
+  // we then throw away, or worse sharing a process with the wrong process type.
+  // See crbug.com/43448.
+
   // Create a new process if ours went away or was reused.
   if (!process_) {
     // See if we should reuse an old process
@@ -79,7 +91,7 @@ void SiteInstance::SetSite(const GURL& url) {
   // Remember that this SiteInstance has been used to load a URL, even if the
   // URL is invalid.
   has_site_ = true;
-  site_ = GetSiteForURL(url);
+  site_ = GetSiteForURL(browsing_instance_->profile(), url);
 
   // Now that we have a site, register it with the BrowsingInstance.  This
   // ensures that we won't create another SiteInstance for this site within
@@ -111,7 +123,9 @@ SiteInstance* SiteInstance::CreateSiteInstanceForURL(Profile* profile,
 }
 
 /*static*/
-GURL SiteInstance::GetSiteForURL(const GURL& url) {
+GURL SiteInstance::GetSiteForURL(Profile* profile, const GURL& real_url) {
+  GURL url = GetEffectiveURL(profile, real_url);
+
   // URLs with no host should have an empty site.
   GURL site;
 
@@ -144,7 +158,11 @@ GURL SiteInstance::GetSiteForURL(const GURL& url) {
 }
 
 /*static*/
-bool SiteInstance::IsSameWebSite(const GURL& url1, const GURL& url2) {
+bool SiteInstance::IsSameWebSite(Profile* profile,
+                                 const GURL& real_url1, const GURL& real_url2) {
+  GURL url1 = GetEffectiveURL(profile, real_url1);
+  GURL url2 = GetEffectiveURL(profile, real_url2);
+
   // We infer web site boundaries based on the registered domain name of the
   // top-level page and the scheme.  We do not pay attention to the port if
   // one is present, because pages served from different ports can still
@@ -167,19 +185,44 @@ bool SiteInstance::IsSameWebSite(const GURL& url1, const GURL& url2) {
   return net::RegistryControlledDomainService::SameDomainOrHost(url1, url2);
 }
 
-RenderProcessHost::Type SiteInstance::GetRendererType() {
-  // We may not have a site at this point, which generally means this is a
-  // normal navigation.
-  if (!has_site_ || !site_.is_valid())
+/*static*/
+GURL SiteInstance::GetEffectiveURL(Profile* profile, const GURL& url) {
+  if (!profile || !profile->GetExtensionsService())
+    return url;
+
+  Extension* extension =
+      profile->GetExtensionsService()->GetExtensionByWebExtent(url);
+  if (extension) {
+    // If the URL is part of an extension's web extent, convert it to an
+    // extension URL.
+    return extension->GetResourceURL(url.path());
+  } else {
+    return url;
+  }
+}
+
+/*static*/
+RenderProcessHost::Type SiteInstance::RendererTypeForURL(const GURL& url) {
+  if (!url.is_valid())
     return RenderProcessHost::TYPE_NORMAL;
 
-  if (site_.SchemeIs(chrome::kExtensionScheme))
+  if (url.SchemeIs(chrome::kExtensionScheme))
     return RenderProcessHost::TYPE_EXTENSION;
 
-  if (DOMUIFactory::HasDOMUIScheme(site_))
+  // TODO(erikkay) creis recommends using UseDOMUIForURL instead.
+  if (DOMUIFactory::HasDOMUIScheme(url))
     return RenderProcessHost::TYPE_DOMUI;
 
   return RenderProcessHost::TYPE_NORMAL;
+}
+
+RenderProcessHost::Type SiteInstance::GetRendererType() {
+  // We may not have a site at this point, which generally means this is a
+  // normal navigation.
+  if (!has_site_)
+    return RenderProcessHost::TYPE_NORMAL;
+
+  return RendererTypeForURL(site_);
 }
 
 void SiteInstance::Observe(NotificationType type,

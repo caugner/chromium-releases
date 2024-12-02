@@ -28,20 +28,43 @@ class ShaderManager {
    public:
     typedef scoped_refptr<ShaderInfo> Ref;
 
-    explicit ShaderInfo(GLuint shader_id)
-        : shader_id_(shader_id) {
+    explicit ShaderInfo(GLuint service_id, GLenum shader_type)
+        : service_id_(service_id),
+          shader_type_(shader_type),
+          valid_(false) {
     }
 
     void Update(const std::string& source) {
       source_ = source;
     }
 
-    const std::string& source() {
+    GLuint service_id() const {
+      return service_id_;
+    }
+
+    GLenum shader_type() const {
+      return shader_type_;
+    }
+
+    const std::string& source() const {
       return source_;
     }
 
-    bool IsDeleted() {
-      return shader_id_ == 0;
+    void SetStatus(bool valid, const std::string& log) {
+      valid_ = valid;
+      log_info_ = log;
+    }
+
+    const std::string& log_info() const {
+      return log_info_;
+    }
+
+    bool IsValid() const {
+      return valid_;
+    }
+
+    bool IsDeleted() const {
+      return service_id_ == 0;
     }
 
    private:
@@ -50,28 +73,44 @@ class ShaderManager {
     ~ShaderInfo() { }
 
     void MarkAsDeleted() {
-      shader_id_ = 0;
+      service_id_ = 0;
     }
 
     // The shader this ShaderInfo is tracking.
-    GLuint shader_id_;
+    GLuint service_id_;
+    // Type of shader - GL_VERTEX_SHADER or GL_FRAGMENT_SHADER.
+    GLenum shader_type_;
+
+    // True if compilation succeeded.
+    bool valid_;
 
     // The shader source as passed to glShaderSource.
     std::string source_;
+
+    // The shader translation log.
+    std::string log_info_;
   };
 
-  ShaderManager() {
-  }
+  ShaderManager() { }
+  ~ShaderManager();
+
+  // Must call before destruction.
+  void Destroy(bool have_context);
 
   // Creates a shader info for the given shader ID.
-  void CreateShaderInfo(GLuint shader_id);
+  void CreateShaderInfo(GLuint client_id,
+                        GLuint service_id,
+                        GLenum shader_type);
 
   // Gets an existing shader info for the given shader ID. Returns NULL if none
   // exists.
-  ShaderInfo* GetShaderInfo(GLuint shader_id);
+  ShaderInfo* GetShaderInfo(GLuint client_id);
 
   // Deletes the shader info for the given shader.
-  void RemoveShaderInfo(GLuint shader_id);
+  void RemoveShaderInfo(GLuint client_id);
+
+  // Gets a client id for a given service id.
+  bool GetClientId(GLuint service_id, GLuint* client_id) const;
 
  private:
   // Info for each shader by service side shader Id.

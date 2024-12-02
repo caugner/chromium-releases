@@ -22,16 +22,19 @@
 
 #include <fontconfig/fontconfig.h>
 
+#include "third_party/icu/public/common/unicode/utf16.h"
+
 namespace {
 
-// Equivalence classes, used to match the Liberation fonts with their
-// metric-compatible replacements.  See the discussion in
+// Equivalence classes, used to match the Liberation and Ascender fonts
+// with their metric-compatible replacements.  See the discussion in
 // GetFontEquivClass().
 enum FontEquivClass
 {
     OTHER,
     SANS,
-    SERIF
+    SERIF,
+    MONO
 };
 
 // Match the font name against a whilelist of fonts, returning the equivalence
@@ -48,12 +51,23 @@ FontEquivClass GetFontEquivClass(const char* fontname)
     //   /etc/fonts/conf.d/30-metric-aliases.conf
     // from my Ubuntu system, but we're better off being very conservative.
 
+    // "Ascender Sans", "Ascender Serif" and "Ascender Sans Mono" are the
+    // tentative names of another set of fonts metric-compatible with
+    // Arial, Times New Roman and Courier New  with a character repertoire
+    // much larger than Liberation. Note that Ascender Sans Mono
+    // is metrically compatible with Courier New, but the former
+    // is sans-serif while ther latter is serif.
     if (strcasecmp(fontname, "Arial") == 0 ||
-        strcasecmp(fontname, "Liberation Sans") == 0) {
+        strcasecmp(fontname, "Liberation Sans") == 0 ||
+        strcasecmp(fontname, "Ascender Sans") == 0) {
         return SANS;
     } else if (strcasecmp(fontname, "Times New Roman") == 0 ||
-               strcasecmp(fontname, "Liberation Serif") == 0) {
+               strcasecmp(fontname, "Liberation Serif") == 0 ||
+               strcasecmp(fontname, "Ascender Serif") == 0) {
         return SERIF;
+    } else if (strcasecmp(fontname, "Courier New") == 0 ||
+               strcasecmp(fontname, "Ascender Sans Mono") == 0) {
+        return MONO;
     }
     return OTHER;
 }
@@ -77,15 +91,16 @@ FontConfigDirect::FontConfigDirect()
 }
 
 // -----------------------------------------------------------------------------
-// Normally we only return exactly the font asked for. In last-resort cases,
-// the request is for one of the basic font names "Sans", "Serif" or
-// "Monospace". This function tells you whether a given request is for such a
-// fallback.
+// Normally we only return exactly the font asked for. In last-resort
+// cases, the request either doesn't specify a font or is one of the
+// basic font names like "Sans", "Serif" or "Monospace". This function
+// tells you whether a given request is for such a fallback.
 // -----------------------------------------------------------------------------
 static bool IsFallbackFontAllowed(const std::string& family)
 {
     const char* family_cstr = family.c_str();
-    return strcasecmp(family_cstr, "sans") == 0 ||
+    return family.empty() ||
+           strcasecmp(family_cstr, "sans") == 0 ||
            strcasecmp(family_cstr, "serif") == 0 ||
            strcasecmp(family_cstr, "monospace") == 0;
 }
@@ -93,8 +108,9 @@ static bool IsFallbackFontAllowed(const std::string& family)
 bool FontConfigDirect::Match(std::string* result_family,
                              unsigned* result_fileid,
                              bool fileid_valid, unsigned fileid,
-                             const std::string& family, bool* is_bold,
-                             bool* is_italic) {
+                             const std::string& family,
+                             const void* data, size_t characters_bytes,
+                             bool* is_bold, bool* is_italic) {
     if (family.length() > kMaxFontFamilyLength)
         return false;
 
@@ -113,6 +129,26 @@ bool FontConfigDirect::Match(std::string* result_family,
     }
     if (!family.empty()) {
         FcPatternAddString(pattern, FC_FAMILY, (FcChar8*) family.c_str());
+    }
+
+    FcCharSet* charset = NULL;
+    if (data) {
+        charset = FcCharSetCreate();
+        const uint16_t* chars = (const uint16_t*) data;
+        size_t num_chars = characters_bytes / 2;
+        for (size_t i = 0; i < num_chars; ++i) {
+            if (U16_IS_SURROGATE(chars[i])
+                && U16_IS_SURROGATE_LEAD(chars[i])
+                && i != num_chars - 1
+                && U16_IS_TRAIL(chars[i + 1])) {
+                FcCharSetAddChar(charset, U16_GET_SUPPLEMENTARY(chars[i], chars[i+1]));
+                i++;
+            } else {
+                FcCharSetAddChar(charset, chars[i]);
+            }
+        }
+        FcPatternAddCharSet(pattern, FC_CHARSET, charset);
+        FcCharSetDestroy(charset);  // pattern now owns it.
     }
 
     FcPatternAddInteger(pattern, FC_WEIGHT,
@@ -203,8 +239,6 @@ bool FontConfigDirect::Match(std::string* result_family,
             FcResultMatch)
           break;
         acceptable_substitute =
-          family.empty() ?
-          true :
           (strcasecmp((char *)post_config_family,
                       (char *)post_match_family) == 0 ||
            // Workaround for Issue 12530:

@@ -9,7 +9,7 @@
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/bookmarks/bookmark_index.h"
-#include "chrome/browser/important_file_writer.h"
+#include "chrome/common/important_file_writer.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 
@@ -40,15 +40,14 @@ class BookmarkLoadDetails {
         ids_reassigned_(false) {
   }
 
-  void release() {
-    bb_node_.release();
-    other_folder_node_.release();
-    index_.release();
-  }
-
   BookmarkNode* bb_node() { return bb_node_.get(); }
+  BookmarkNode* release_bb_node() { return bb_node_.release(); }
   BookmarkNode* other_folder_node() { return other_folder_node_.get(); }
+  BookmarkNode* release_other_folder_node() {
+    return other_folder_node_.release();
+  }
   BookmarkIndex* index() { return index_.get(); }
+  BookmarkIndex* release_index() { return index_.release(); }
 
   // Max id of the nodes.
   void set_max_id(int64 max_id) { max_id_ = max_id; }

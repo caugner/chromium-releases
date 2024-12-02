@@ -23,8 +23,10 @@
 #include "ipc/ipc_message.h"
 
 class CommandLine;
+class DebuggerWrapper;
 class FilePath;
 class NotificationService;
+class TabCloseableStateWatcher;
 
 // Real implementation of BrowserProcess that creates and returns the services.
 class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
@@ -76,6 +78,13 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
     return process_launcher_thread_.get();
   }
 
+  virtual base::Thread* cache_thread() {
+    DCHECK(CalledOnValidThread());
+    if (!created_cache_thread_)
+      CreateCacheThread();
+    return cache_thread_.get();
+  }
+
 #if defined(USE_X11)
   virtual base::Thread* background_x11_thread() {
     DCHECK(CalledOnValidThread());
@@ -98,13 +107,6 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
     if (!created_local_state_)
       CreateLocalState();
     return local_state_.get();
-  }
-
-  virtual DebuggerWrapper* debugger_wrapper() {
-    DCHECK(CalledOnValidThread());
-    if (!created_debugger_wrapper_)
-      return NULL;
-    return debugger_wrapper_.get();
   }
 
   virtual DevToolsManager* devtools_manager() {
@@ -152,10 +154,10 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
     return automation_provider_list_.get();
   }
 
-  virtual void InitDebuggerWrapper(int port) {
+  virtual void InitDebuggerWrapper(int port, bool useHttp) {
     DCHECK(CalledOnValidThread());
     if (!created_debugger_wrapper_)
-      CreateDebuggerWrapper(port);
+      CreateDebuggerWrapper(port, useHttp);
   }
 
   virtual unsigned int AddRefModule();
@@ -164,7 +166,7 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
 
   virtual bool IsShuttingDown() {
     DCHECK(CalledOnValidThread());
-    return 0 == module_ref_count_;
+    return did_start_ && 0 == module_ref_count_;
   }
 
   virtual printing::PrintJobManager* print_job_manager();
@@ -193,11 +195,18 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
     return shutdown_event_.get();
   }
 
+  virtual TabCloseableStateWatcher* tab_closeable_state_watcher() {
+    DCHECK(CalledOnValidThread());
+    if (!tab_closeable_state_watcher_.get())
+      CreateTabCloseableStateWatcher();
+    return tab_closeable_state_watcher_.get();
+  }
+
   virtual void CheckForInspectorFiles();
 
-#if defined(OS_WIN)
+#if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   void StartAutoupdateTimer();
-#endif  // OS_WIN
+#endif
 
   virtual bool have_inspector_files() const {
     return have_inspector_files_;
@@ -221,18 +230,20 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   void CreateFileThread();
   void CreateDBThread();
   void CreateProcessLauncherThread();
+  void CreateCacheThread();
   void CreateTemplateURLModel();
   void CreateProfileManager();
   void CreateWebDataService();
   void CreateLocalState();
   void CreateViewedPageTracker();
   void CreateIconManager();
-  void CreateDebuggerWrapper(int port);
+  void CreateDebuggerWrapper(int port, bool useHttp);
   void CreateDevToolsManager();
   void CreateGoogleURLTracker();
   void CreateIntranetRedirectDetector();
   void CreateNotificationUIManager();
   void CreateStatusTrayManager();
+  void CreateTabCloseableStateWatcher();
 
 #if defined(IPC_MESSAGE_LOG_ENABLED)
   void SetIPCLoggingEnabledForChildProcesses(bool enabled);
@@ -259,6 +270,9 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
 
   bool created_process_launcher_thread_;
   scoped_ptr<base::Thread> process_launcher_thread_;
+
+  bool created_cache_thread_;
+  scoped_ptr<base::Thread> cache_thread_;
 
   bool created_profile_manager_;
   scoped_ptr<ProfileManager> profile_manager_;
@@ -291,7 +305,10 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
 
   scoped_ptr<NotificationService> main_notification_service_;
 
+  scoped_ptr<TabCloseableStateWatcher> tab_closeable_state_watcher_;
+
   unsigned int module_ref_count_;
+  bool did_start_;
 
   // Ensures that all the print jobs are finished before closing the browser.
   scoped_ptr<printing::PrintJobManager> print_job_manager_;
@@ -314,7 +331,7 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   // Our best estimate about the existence of the inspector directory.
   bool have_inspector_files_;
 
-#if defined(OS_WIN)
+#if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   base::RepeatingTimer<BrowserProcessImpl> autoupdate_timer_;
 
   // Gets called by autoupdate timer to see if browser needs restart and can be
@@ -322,7 +339,7 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   void OnAutoupdateTimer();
   bool CanAutorestartForUpdate() const;
   void RestartPersistentInstance();
-#endif  // OS_WIN
+#endif  // defined(OS_WIN) || defined(OS_LINUX)
 
   DISALLOW_COPY_AND_ASSIGN(BrowserProcessImpl);
 };

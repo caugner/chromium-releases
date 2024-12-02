@@ -44,7 +44,10 @@ class HttpAuthHandlerNTLM : public HttpAuthHandler {
     virtual int CreateAuthHandler(HttpAuth::ChallengeTokenizer* challenge,
                                   HttpAuth::Target target,
                                   const GURL& origin,
-                                  scoped_refptr<HttpAuthHandler>* handler);
+                                  CreateReason reason,
+                                  int digest_nonce_count,
+                                  const BoundNetLog& net_log,
+                                  scoped_ptr<HttpAuthHandler>* handler);
 #if defined(NTLM_SSPI)
     // Set the SSPILibrary to use. Typically the only callers which need to
     // use this are unit tests which pass in a mocked-out version of the
@@ -99,7 +102,7 @@ class HttpAuthHandlerNTLM : public HttpAuthHandler {
 #endif
 #if defined(NTLM_SSPI)
   HttpAuthHandlerNTLM(SSPILibrary* sspi_library, ULONG max_token_length,
-                      const URLSecurityManager* url_security_manager);
+                      URLSecurityManager* url_security_manager);
 #endif
 
   virtual bool NeedsIdentity();
@@ -108,20 +111,16 @@ class HttpAuthHandlerNTLM : public HttpAuthHandler {
 
   virtual bool AllowsDefaultCredentials();
 
-  virtual int GenerateAuthToken(const std::wstring& username,
-                                const std::wstring& password,
-                                const HttpRequestInfo* request,
-                                const ProxyInfo* proxy,
-                                std::string* auth_token);
-
-  virtual int GenerateDefaultAuthToken(const HttpRequestInfo* request,
-                                       const ProxyInfo* proxy,
-                                       std::string* auth_token);
-
  protected:
   virtual bool Init(HttpAuth::ChallengeTokenizer* tok) {
     return ParseChallenge(tok);
   }
+
+  virtual int GenerateAuthTokenImpl(const std::wstring* username,
+                                    const std::wstring* password,
+                                    const HttpRequestInfo* request,
+                                    CompletionCallback* callback,
+                                    std::string* auth_token);
 
   // This function acquires a credentials handle in the SSPI implementation.
   // It does nothing in the portable implementation.
@@ -169,7 +168,7 @@ class HttpAuthHandlerNTLM : public HttpAuthHandler {
   std::string auth_data_;
 
 #if defined(NTLM_SSPI)
-  const URLSecurityManager* url_security_manager_;
+  URLSecurityManager* url_security_manager_;
 #endif
 };
 

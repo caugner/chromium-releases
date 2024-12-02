@@ -152,7 +152,7 @@ void AddKeyedCookieToList(
 
   scoped_ptr<net::CookieMonster::CanonicalCookie> cookie(
       new net::CookieMonster::CanonicalCookie(
-          pc.Name(), pc.Value(), cookie_path,
+          pc.Name(), pc.Value(), key, cookie_path,
           pc.IsSecure(), pc.IsHttpOnly(),
           creation_time, creation_time,
           !cookie_expires.is_null(),
@@ -161,6 +161,91 @@ void AddKeyedCookieToList(
   out_list->push_back(
       net::CookieMonster::KeyedCanonicalCookie(
           key, cookie.release()));
+}
+
+// Helper for DeleteAllForHost test; repopulates CM with same layout
+// each time.
+const char* kTopLevelDomainPlus1 = "http://www.harvard.edu";
+const char* kTopLevelDomainPlus2 = "http://www.math.harvard.edu";
+const char* kTopLevelDomainPlus2Secure = "https://www.math.harvard.edu";
+const char* kTopLevelDomainPlus3 =
+    "http://www.bourbaki.math.harvard.edu";
+const char* kOtherDomain = "http://www.mit.edu";
+
+void PopulateCmForDeleteAllForHost(scoped_refptr<net::CookieMonster> cm) {
+  GURL url_top_level_domain_plus_1(kTopLevelDomainPlus1);
+  GURL url_top_level_domain_plus_2(kTopLevelDomainPlus2);
+  GURL url_top_level_domain_plus_2_secure(kTopLevelDomainPlus2Secure);
+  GURL url_top_level_domain_plus_3(kTopLevelDomainPlus3);
+  GURL url_other(kOtherDomain);
+
+  cm->DeleteAll(true);
+
+  // Static population for probe:
+  //    * Three levels of domain cookie (.b.a, .c.b.a, .d.c.b.a)
+  //    * Three levels of host cookie (w.b.a, w.c.b.a, w.d.c.b.a)
+  //    * http_only cookie (w.c.b.a)
+  //    * Two secure cookies (.c.b.a, w.c.b.a)
+  //    * Two domain path cookies (.c.b.a/dir1, .c.b.a/dir1/dir2)
+  //    * Two host path cookies (w.c.b.a/dir1, w.c.b.a/dir1/dir2)
+
+  // Domain cookies
+  EXPECT_TRUE(cm->SetCookieWithDetails(url_top_level_domain_plus_1,
+                                       "dom_1", "X", ".harvard.edu", "/",
+                                       base::Time(), false, false));
+  EXPECT_TRUE(cm->SetCookieWithDetails(url_top_level_domain_plus_2,
+                                       "dom_2", "X", ".math.harvard.edu", "/",
+                                       base::Time(), false, false));
+  EXPECT_TRUE(cm->SetCookieWithDetails(url_top_level_domain_plus_3,
+                                       "dom_3", "X",
+                                       ".bourbaki.math.harvard.edu", "/",
+                                       base::Time(), false, false));
+
+  // Host cookies
+  EXPECT_TRUE(cm->SetCookieWithDetails(url_top_level_domain_plus_1,
+                                       "host_1", "X", "", "/",
+                                       base::Time(), false, false));
+  EXPECT_TRUE(cm->SetCookieWithDetails(url_top_level_domain_plus_2,
+                                       "host_2", "X", "", "/",
+                                       base::Time(), false, false));
+  EXPECT_TRUE(cm->SetCookieWithDetails(url_top_level_domain_plus_3,
+                                       "host_3", "X", "", "/",
+                                       base::Time(), false, false));
+
+  // Http_only cookie
+  EXPECT_TRUE(cm->SetCookieWithDetails(url_top_level_domain_plus_2,
+                                       "httpo_check", "X", "", "/",
+                                       base::Time(), false, true));
+
+  // Secure cookies
+  EXPECT_TRUE(cm->SetCookieWithDetails(url_top_level_domain_plus_2_secure,
+                                       "sec_dom", "X", ".math.harvard.edu",
+                                       "/", base::Time(), true, false));
+  EXPECT_TRUE(cm->SetCookieWithDetails(url_top_level_domain_plus_2_secure,
+                                       "sec_host", "X", "", "/",
+                                       base::Time(), true, false));
+
+  // Domain path cookies
+  EXPECT_TRUE(cm->SetCookieWithDetails(url_top_level_domain_plus_2,
+                                       "dom_path_1", "X",
+                                       ".math.harvard.edu", "/dir1",
+                                       base::Time(), false, false));
+  EXPECT_TRUE(cm->SetCookieWithDetails(url_top_level_domain_plus_2,
+                                       "dom_path_2", "X",
+                                       ".math.harvard.edu", "/dir1/dir2",
+                                       base::Time(), false, false));
+
+  // Host path cookies
+  EXPECT_TRUE(cm->SetCookieWithDetails(url_top_level_domain_plus_2,
+                                       "host_path_1", "X",
+                                       "", "/dir1",
+                                       base::Time(), false, false));
+  EXPECT_TRUE(cm->SetCookieWithDetails(url_top_level_domain_plus_2,
+                                       "host_path_2", "X",
+                                       "", "/dir1/dir2",
+                                       base::Time(), false, false));
+
+  EXPECT_EQ(13U, cm->GetAllCookies().size());
 }
 
 }  // namespace
@@ -377,6 +462,33 @@ TEST(ParsedCookieTest, EmbeddedTerminator) {
   EXPECT_TRUE(pc3.IsValid());
   EXPECT_EQ("AAA", pc3.Name());
   EXPECT_EQ("BB", pc3.Value());
+}
+
+TEST(ParsedCookieTest, ParseTokensAndValues) {
+  EXPECT_EQ("hello",
+            net::CookieMonster::ParsedCookie::ParseTokenString(
+                "hello\nworld"));
+  EXPECT_EQ("fs!!@",
+            net::CookieMonster::ParsedCookie::ParseTokenString(
+                "fs!!@;helloworld"));
+  EXPECT_EQ("hello world\tgood",
+            net::CookieMonster::ParsedCookie::ParseTokenString(
+                "hello world\tgood\rbye"));
+  EXPECT_EQ("A",
+            net::CookieMonster::ParsedCookie::ParseTokenString(
+                "A=B=C;D=E"));
+  EXPECT_EQ("hello",
+            net::CookieMonster::ParsedCookie::ParseValueString(
+                "hello\nworld"));
+  EXPECT_EQ("fs!!@",
+            net::CookieMonster::ParsedCookie::ParseValueString(
+                "fs!!@;helloworld"));
+  EXPECT_EQ("hello world\tgood",
+            net::CookieMonster::ParsedCookie::ParseValueString(
+                "hello world\tgood\rbye"));
+  EXPECT_EQ("A=B=C",
+            net::CookieMonster::ParsedCookie::ParseValueString(
+                "A=B=C;D=E"));
 }
 
 static const char kUrlGoogle[] = "http://www.google.izzle";
@@ -725,6 +837,11 @@ struct CookieDateParsingCase {
   const time_t epoch;
 };
 
+struct DomainIsHostOnlyCase {
+  const char* str;
+  const bool is_host_only;
+};
+
 }  // namespace
 
 TEST(CookieMonsterTest, TestCookieDateParsing) {
@@ -808,6 +925,19 @@ TEST(CookieMonsterTest, TestCookieDateParsing) {
     }
     EXPECT_TRUE(!parsed_time.is_null()) << tests[i].str;
     EXPECT_EQ(tests[i].epoch, parsed_time.ToTimeT()) << tests[i].str;
+  }
+}
+
+TEST(CookieMonsterTest, TestDomainIsHostOnly) {
+  const DomainIsHostOnlyCase tests[] = {
+    { "",               true },
+    { "www.google.com", true },
+    { ".google.com",    false }
+  };
+
+  for (size_t i = 0; i < arraysize(tests); ++i) {
+    EXPECT_EQ(tests[i].is_host_only,
+              net::CookieMonster::DomainIsHostOnly(tests[i].str));
   }
 }
 
@@ -1157,7 +1287,6 @@ TEST(CookieMonsterTest, SetCookieableSchemes) {
 }
 
 TEST(CookieMonsterTest, GetAllCookiesForURL) {
-
   GURL url_google(kUrlGoogle);
   GURL url_google_secure(kUrlGoogleSecure);
 
@@ -1214,7 +1343,7 @@ TEST(CookieMonsterTest, GetAllCookiesForURL) {
   ASSERT_TRUE(++it == cookies.end());
 
   // Reading after a short wait should not update the access date.
-  EXPECT_TRUE (last_access_date == GetFirstCookieAccessDate(cm));
+  EXPECT_TRUE(last_access_date == GetFirstCookieAccessDate(cm));
 }
 
 TEST(CookieMonsterTest, GetAllCookiesForURLPathMatching) {
@@ -1261,7 +1390,6 @@ TEST(CookieMonsterTest, GetAllCookiesForURLPathMatching) {
   EXPECT_EQ("/", it->second.Path());
 
   ASSERT_TRUE(++it == cookies.end());
-
 }
 
 TEST(CookieMonsterTest, DeleteCookieByName) {
@@ -1511,4 +1639,148 @@ TEST(CookieMonsterTest, Delegate) {
   EXPECT_EQ("a", delegate->changes()[1].first.second.Name());
   EXPECT_EQ("val2", delegate->changes()[1].first.second.Value());
   delegate->reset();
+}
+
+TEST(CookieMonsterTest, SetCookieWithDetails) {
+  GURL url_google(kUrlGoogle);
+  GURL url_google_foo("http://www.google.izzle/foo");
+  GURL url_google_bar("http://www.google.izzle/bar");
+  GURL url_google_secure(kUrlGoogleSecure);
+
+  scoped_refptr<net::CookieMonster> cm(new net::CookieMonster(NULL, NULL));
+
+  EXPECT_TRUE(cm->SetCookieWithDetails(
+      url_google_foo, "A", "B", std::string(), "/foo", base::Time(),
+      false, false));
+  EXPECT_TRUE(cm->SetCookieWithDetails(
+      url_google_bar, "C", "D", "google.izzle", "/bar", base::Time(),
+      false, true));
+  EXPECT_TRUE(cm->SetCookieWithDetails(
+      url_google, "E", "F", std::string(), std::string(), base::Time(),
+      true, false));
+
+  // Test that malformed attributes fail to set the cookie.
+  EXPECT_FALSE(cm->SetCookieWithDetails(
+      url_google_foo, " A", "B", std::string(), "/foo", base::Time(),
+      false, false));
+  EXPECT_FALSE(cm->SetCookieWithDetails(
+      url_google_foo, "A;", "B", std::string(), "/foo", base::Time(),
+      false, false));
+  EXPECT_FALSE(cm->SetCookieWithDetails(
+      url_google_foo, "A=", "B", std::string(), "/foo", base::Time(),
+      false, false));
+  EXPECT_FALSE(cm->SetCookieWithDetails(
+      url_google_foo, "A", "B", "google.ozzzzzzle", "foo", base::Time(),
+      false, false));
+  EXPECT_FALSE(cm->SetCookieWithDetails(
+      url_google_foo, "A=", "B", std::string(), "foo", base::Time(),
+      false, false));
+
+  net::CookieMonster::CookieList cookies =
+      cm->GetAllCookiesForURL(url_google_foo);
+  net::CookieMonster::CookieList::iterator it = cookies.begin();
+
+  ASSERT_TRUE(it != cookies.end());
+  EXPECT_EQ("A", it->second.Name());
+  EXPECT_EQ("B", it->second.Value());
+  EXPECT_EQ("www.google.izzle", it->first);
+  EXPECT_EQ("www.google.izzle", it->second.Domain());
+  EXPECT_EQ("/foo", it->second.Path());
+  EXPECT_FALSE(it->second.DoesExpire());
+  EXPECT_FALSE(it->second.IsSecure());
+  EXPECT_FALSE(it->second.IsHttpOnly());
+
+  ASSERT_TRUE(++it == cookies.end());
+
+  cookies = cm->GetAllCookiesForURL(url_google_bar);
+  it = cookies.begin();
+
+  ASSERT_TRUE(it != cookies.end());
+  EXPECT_EQ("C", it->second.Name());
+  EXPECT_EQ("D", it->second.Value());
+  EXPECT_EQ(".google.izzle", it->first);
+  EXPECT_EQ(".google.izzle", it->second.Domain());
+  EXPECT_EQ("/bar", it->second.Path());
+  EXPECT_FALSE(it->second.IsSecure());
+  EXPECT_TRUE(it->second.IsHttpOnly());
+
+  ASSERT_TRUE(++it == cookies.end());
+
+  cookies = cm->GetAllCookiesForURL(url_google_secure);
+  it = cookies.begin();
+
+  ASSERT_TRUE(it != cookies.end());
+  EXPECT_EQ("E", it->second.Name());
+  EXPECT_EQ("F", it->second.Value());
+  EXPECT_EQ("/", it->second.Path());
+  EXPECT_EQ("www.google.izzle", it->second.Domain());
+  EXPECT_TRUE(it->second.IsSecure());
+  EXPECT_FALSE(it->second.IsHttpOnly());
+
+  ASSERT_TRUE(++it == cookies.end());
+}
+
+
+
+TEST(CookieMonsterTest, DeleteAllForHost) {
+  scoped_refptr<net::CookieMonster> cm(new net::CookieMonster(NULL, NULL));
+
+  // Test probes:
+  //    * Non-secure URL, mid-level (http://w.c.b.a)
+  //    * Secure URL, mid-level (https://w.c.b.a)
+  //    * URL with path, mid-level (https:/w.c.b.a/dir1/xx)
+  // All three tests should nuke only the midlevel host cookie,
+  // the http_only cookie, the host secure cookie, and the two host
+  // path cookies.  http_only, secure, and paths are ignored by
+  // this call, and domain cookies arent touched.
+  PopulateCmForDeleteAllForHost(cm);
+  EXPECT_EQ("dom_1=X; dom_2=X; dom_3=X; host_3=X",
+            cm->GetCookies(GURL(kTopLevelDomainPlus3)));
+  EXPECT_EQ("dom_1=X; dom_2=X; host_2=X; sec_dom=X; sec_host=X",
+            cm->GetCookies(GURL(kTopLevelDomainPlus2Secure)));
+  EXPECT_EQ("dom_1=X; host_1=X", cm->GetCookies(GURL(kTopLevelDomainPlus1)));
+  EXPECT_EQ("dom_path_2=X; host_path_2=X; dom_path_1=X; host_path_1=X; "
+            "dom_1=X; dom_2=X; host_2=X; sec_dom=X; sec_host=X",
+            cm->GetCookies(GURL(kTopLevelDomainPlus2Secure +
+                                std::string("/dir1/dir2/xxx"))));
+
+  EXPECT_EQ(5, cm->DeleteAllForHost(GURL(kTopLevelDomainPlus2)));
+  EXPECT_EQ(8U, cm->GetAllCookies().size());
+
+  EXPECT_EQ("dom_1=X; dom_2=X; dom_3=X; host_3=X",
+            cm->GetCookies(GURL(kTopLevelDomainPlus3)));
+  EXPECT_EQ("dom_1=X; dom_2=X; sec_dom=X",
+            cm->GetCookies(GURL(kTopLevelDomainPlus2Secure)));
+  EXPECT_EQ("dom_1=X; host_1=X", cm->GetCookies(GURL(kTopLevelDomainPlus1)));
+  EXPECT_EQ("dom_path_2=X; dom_path_1=X; dom_1=X; dom_2=X; sec_dom=X",
+            cm->GetCookies(GURL(kTopLevelDomainPlus2Secure +
+                                std::string("/dir1/dir2/xxx"))));
+
+  PopulateCmForDeleteAllForHost(cm);
+  EXPECT_EQ(5, cm->DeleteAllForHost(GURL(kTopLevelDomainPlus2Secure)));
+  EXPECT_EQ(8U, cm->GetAllCookies().size());
+
+  EXPECT_EQ("dom_1=X; dom_2=X; dom_3=X; host_3=X",
+            cm->GetCookies(GURL(kTopLevelDomainPlus3)));
+  EXPECT_EQ("dom_1=X; dom_2=X; sec_dom=X",
+            cm->GetCookies(GURL(kTopLevelDomainPlus2Secure)));
+  EXPECT_EQ("dom_1=X; host_1=X", cm->GetCookies(GURL(kTopLevelDomainPlus1)));
+  EXPECT_EQ("dom_path_2=X; dom_path_1=X; dom_1=X; dom_2=X; sec_dom=X",
+            cm->GetCookies(GURL(kTopLevelDomainPlus2Secure +
+                                std::string("/dir1/dir2/xxx"))));
+
+  PopulateCmForDeleteAllForHost(cm);
+  EXPECT_EQ(5, cm->DeleteAllForHost(GURL(kTopLevelDomainPlus2Secure +
+                                         std::string("/dir1/xxx"))));
+  EXPECT_EQ(8U, cm->GetAllCookies().size());
+
+  EXPECT_EQ("dom_1=X; dom_2=X; dom_3=X; host_3=X",
+            cm->GetCookies(GURL(kTopLevelDomainPlus3)));
+  EXPECT_EQ("dom_1=X; dom_2=X; sec_dom=X",
+            cm->GetCookies(GURL(kTopLevelDomainPlus2Secure)));
+  EXPECT_EQ("dom_1=X; host_1=X", cm->GetCookies(GURL(kTopLevelDomainPlus1)));
+  EXPECT_EQ("dom_path_2=X; dom_path_1=X; dom_1=X; dom_2=X; sec_dom=X",
+            cm->GetCookies(GURL(kTopLevelDomainPlus2Secure +
+                                std::string("/dir1/dir2/xxx"))));
+
 }

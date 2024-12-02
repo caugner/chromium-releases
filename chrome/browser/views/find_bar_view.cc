@@ -11,6 +11,8 @@
 #include "base/string_util.h"
 #include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/find_bar_controller.h"
+#include "chrome/browser/find_bar_state.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/views/find_bar_host.h"
 #include "chrome/browser/view_ids.h"
@@ -78,6 +80,9 @@ static const int kDefaultCharWidth = 43;
 
 FindBarView::FindBarView(FindBarHost* host)
     : DropdownBarView(host),
+#if defined(OS_LINUX)
+      ignore_contents_changed_(false),
+#endif
       find_text_(NULL),
       match_count_text_(NULL),
       focus_forwarder_view_(NULL),
@@ -156,10 +161,8 @@ FindBarView::FindBarView(FindBarHost* host)
 
     // Background images for the Find edit box.
     kBackground = rb.GetBitmapNamed(IDR_FIND_BOX_BACKGROUND);
-    if (UILayoutIsRightToLeft())
-      kBackground_left = rb.GetBitmapNamed(IDR_FIND_BOX_BACKGROUND_LEFT_RTL);
-    else
-      kBackground_left = rb.GetBitmapNamed(IDR_FIND_BOX_BACKGROUND_LEFT);
+    kBackground_left = rb.GetBitmapNamed(base::i18n::IsRTL() ?
+        IDR_FIND_BOX_BACKGROUND_LEFT_RTL : IDR_FIND_BOX_BACKGROUND_LEFT);
   }
 }
 
@@ -167,7 +170,13 @@ FindBarView::~FindBarView() {
 }
 
 void FindBarView::SetFindText(const string16& find_text) {
+#if defined(OS_LINUX)
+  ignore_contents_changed_ = true;
+#endif
   find_text_->SetText(find_text);
+#if defined(OS_LINUX)
+  ignore_contents_changed_ = false;
+#endif
 }
 
 string16 FindBarView::GetFindText() const {
@@ -256,7 +265,7 @@ void FindBarView::Paint(gfx::Canvas* canvas) {
   gfx::Rect back_button_rect;
   int x = 0;   // x coordinate of the curved edge background image.
   int w = 0;   // width of the background image for the text field.
-  if (UILayoutIsRightToLeft()) {
+  if (base::i18n::IsRTL()) {
     find_text_rect = find_text_->GetBounds(APPLY_MIRRORING_TRANSFORMATION);
     back_button_rect =
         find_previous_button_->GetBounds(APPLY_MIRRORING_TRANSFORMATION);
@@ -281,7 +290,7 @@ void FindBarView::Paint(gfx::Canvas* canvas) {
   // find_text_ edit box and the match_count_text_ label).
   int background_height = kBackground->height();
   canvas->TileImageInt(*kBackground,
-                       UILayoutIsRightToLeft() ?
+                       base::i18n::IsRTL() ?
                            back_button_rect.right() : find_text_rect.x(),
                        back_button_rect.y(),
                        w,
@@ -432,6 +441,12 @@ void FindBarView::ButtonPressed(
 
 void FindBarView::ContentsChanged(views::Textfield* sender,
                                   const string16& new_contents) {
+#if defined(OS_LINUX)
+  // On gtk setting the text in the find view causes a notification.
+  if (ignore_contents_changed_)
+    return;
+#endif
+
   FindBarController* controller = find_bar_host()->GetFindBarController();
   DCHECK(controller);
   // We must guard against a NULL tab_contents, which can happen if the text
@@ -449,6 +464,15 @@ void FindBarView::ContentsChanged(views::Textfield* sender,
   } else {
     controller->tab_contents()->StopFinding(FindBarController::kClearSelection);
     UpdateForResult(controller->tab_contents()->find_result(), string16());
+
+    // Clearing the text box should clear the prepopulate state so that when
+    // we close and reopen the Find box it doesn't show the search we just
+    // deleted. We can't do this on ChromeOS yet because we get ContentsChanged
+    // sent for a lot more things than just the user nulling out the search
+    // terms. See http://crbug.com/45372.
+    FindBarState* find_bar_state =
+        controller->tab_contents()->profile()->GetFindBarState();
+    find_bar_state->set_last_prepopulate_text(string16());
   }
 }
 

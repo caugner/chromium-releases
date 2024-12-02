@@ -29,7 +29,6 @@ std::string GetDisplayURL(const TemplateURL& turl) {
   return turl.url() ? WideToUTF8(turl.url()->DisplayURL()) : std::string();
 }
 
-
 // Forces text to lowercase when connected to an editable's "insert-text"
 // signal.  (Like views Textfield::STYLE_LOWERCASE.)
 void LowercaseInsertTextHandler(GtkEditable *editable, const gchar *text,
@@ -48,6 +47,22 @@ void LowercaseInsertTextHandler(GtkEditable *editable, const gchar *text,
     // inserting the original.
     g_signal_stop_emission_by_name(G_OBJECT(editable), "insert_text");
   }
+}
+
+void SetWidgetStyle(GtkWidget* entry, GtkStyle* label_style,
+                    GtkStyle* dialog_style) {
+  gtk_widget_modify_fg(entry, GTK_STATE_NORMAL,
+                       &label_style->fg[GTK_STATE_NORMAL]);
+  gtk_widget_modify_fg(entry, GTK_STATE_INSENSITIVE,
+                       &label_style->fg[GTK_STATE_INSENSITIVE]);
+  // GTK_NO_WINDOW widgets like GtkLabel don't draw their own background, so we
+  // combine the normal or insensitive foreground of the label style with the
+  // normal background of the window style to achieve the "normal label" and
+  // "insensitive label" colors.
+  gtk_widget_modify_base(entry, GTK_STATE_NORMAL,
+                         &dialog_style->bg[GTK_STATE_NORMAL]);
+  gtk_widget_modify_base(entry, GTK_STATE_INSENSITIVE,
+                         &dialog_style->bg[GTK_STATE_NORMAL]);
 }
 
 }  // namespace
@@ -111,7 +126,7 @@ void EditSearchEngineDialog::Init(GtkWindow* parent_window, Profile* profile) {
   title_entry_ = gtk_entry_new();
   gtk_entry_set_activates_default(GTK_ENTRY(title_entry_), TRUE);
   g_signal_connect(title_entry_, "changed",
-                   G_CALLBACK(OnEntryChanged), this);
+                   G_CALLBACK(OnEntryChangedThunk), this);
   accessible_widget_helper_->SetWidgetName(
       title_entry_,
       IDS_SEARCH_ENGINES_EDITOR_DESCRIPTION_LABEL);
@@ -119,7 +134,7 @@ void EditSearchEngineDialog::Init(GtkWindow* parent_window, Profile* profile) {
   keyword_entry_ = gtk_entry_new();
   gtk_entry_set_activates_default(GTK_ENTRY(keyword_entry_), TRUE);
   g_signal_connect(keyword_entry_, "changed",
-                   G_CALLBACK(OnEntryChanged), this);
+                   G_CALLBACK(OnEntryChangedThunk), this);
   g_signal_connect(keyword_entry_, "insert-text",
                    G_CALLBACK(LowercaseInsertTextHandler), NULL);
   accessible_widget_helper_->SetWidgetName(
@@ -129,7 +144,7 @@ void EditSearchEngineDialog::Init(GtkWindow* parent_window, Profile* profile) {
   url_entry_ = gtk_entry_new();
   gtk_entry_set_activates_default(GTK_ENTRY(url_entry_), TRUE);
   g_signal_connect(url_entry_, "changed",
-                   G_CALLBACK(OnEntryChanged), this);
+                   G_CALLBACK(OnEntryChangedThunk), this);
   accessible_widget_helper_->SetWidgetName(
       url_entry_,
       IDS_SEARCH_ENGINES_EDITOR_URL_LABEL);
@@ -152,6 +167,16 @@ void EditSearchEngineDialog::Init(GtkWindow* parent_window, Profile* profile) {
     gtk_editable_set_editable(
         GTK_EDITABLE(url_entry_),
         controller_->template_url()->prepopulate_id() == 0);
+
+    if (controller_->template_url()->prepopulate_id() != 0) {
+      GtkWidget* fake_label = gtk_label_new("Fake label");
+      gtk_widget_set_sensitive(fake_label,
+          controller_->template_url()->prepopulate_id() == 0);
+      GtkStyle* label_style = gtk_widget_get_style(fake_label);
+      GtkStyle* dialog_style = gtk_widget_get_style(dialog_);
+      SetWidgetStyle(url_entry_, label_style, dialog_style);
+      gtk_widget_destroy(fake_label);
+    }
   }
 
   GtkWidget* controls = gtk_util::CreateLabeledControlsGroup(NULL,
@@ -196,10 +221,10 @@ void EditSearchEngineDialog::Init(GtkWindow* parent_window, Profile* profile) {
 
   EnableControls();
 
-  gtk_widget_show_all(dialog_);
+  gtk_util::ShowDialog(dialog_);
 
-  g_signal_connect(dialog_, "response", G_CALLBACK(OnResponse), this);
-  g_signal_connect(dialog_, "destroy", G_CALLBACK(OnWindowDestroy), this);
+  g_signal_connect(dialog_, "response", G_CALLBACK(OnResponseThunk), this);
+  g_signal_connect(dialog_, "destroy", G_CALLBACK(OnWindowDestroyThunk), this);
 }
 
 std::wstring EditSearchEngineDialog::GetTitleInput() const {
@@ -210,8 +235,8 @@ std::wstring EditSearchEngineDialog::GetKeywordInput() const {
   return UTF8ToWide(gtk_entry_get_text(GTK_ENTRY(keyword_entry_)));
 }
 
-std::wstring EditSearchEngineDialog::GetURLInput() const {
-  return UTF8ToWide(gtk_entry_get_text(GTK_ENTRY(url_entry_)));
+std::string EditSearchEngineDialog::GetURLInput() const {
+  return gtk_entry_get_text(GTK_ENTRY(url_entry_));
 }
 
 void EditSearchEngineDialog::EnableControls() {
@@ -244,27 +269,21 @@ void EditSearchEngineDialog::UpdateImage(GtkWidget* image,
   }
 }
 
-// static
-void EditSearchEngineDialog::OnEntryChanged(
-    GtkEditable* editable, EditSearchEngineDialog* window) {
-  window->EnableControls();
+void EditSearchEngineDialog::OnEntryChanged(GtkEditable* editable) {
+  EnableControls();
 }
 
-// static
-void EditSearchEngineDialog::OnResponse(GtkDialog* dialog, int response_id,
-                                        EditSearchEngineDialog* window) {
+void EditSearchEngineDialog::OnResponse(GtkDialog* dialog, int response_id) {
   if (response_id == GTK_RESPONSE_OK) {
-    window->controller_->AcceptAddOrEdit(window->GetTitleInput(),
-                                         window->GetKeywordInput(),
-                                         window->GetURLInput());
+    controller_->AcceptAddOrEdit(GetTitleInput(),
+                                 GetKeywordInput(),
+                                 GetURLInput());
   } else {
-    window->controller_->CleanUpCancelledAdd();
+    controller_->CleanUpCancelledAdd();
   }
-  gtk_widget_destroy(window->dialog_);
+  gtk_widget_destroy(dialog_);
 }
 
-// static
-void EditSearchEngineDialog::OnWindowDestroy(
-    GtkWidget* widget, EditSearchEngineDialog* window) {
-  MessageLoop::current()->DeleteSoon(FROM_HERE, window);
+void EditSearchEngineDialog::OnWindowDestroy(GtkWidget* widget) {
+  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }

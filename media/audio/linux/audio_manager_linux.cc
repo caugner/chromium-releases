@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "media/audio/fake_audio_input_stream.h"
 #include "media/audio/fake_audio_output_stream.h"
 #include "media/audio/linux/alsa_output.h"
 #include "media/audio/linux/alsa_wrapper.h"
@@ -19,15 +20,36 @@ AudioManagerLinux* g_audio_manager = NULL;
 }  // namespace
 
 // Implementation of AudioManager.
-bool AudioManagerLinux::HasAudioDevices() {
+bool AudioManagerLinux::HasAudioOutputDevices() {
   // TODO(ajwong): Make this actually query audio devices.
   return true;
 }
 
-AudioOutputStream* AudioManagerLinux::MakeAudioStream(Format format,
-                                                      int channels,
-                                                      int sample_rate,
-                                                      char bits_per_sample) {
+bool AudioManagerLinux::HasAudioInputDevices() {
+  // TODO(satish): implement.
+  return false;
+}
+
+AudioInputStream* AudioManagerLinux::MakeAudioInputStream(
+    Format format,
+    int channels,
+    int sample_rate,
+    char bits_per_sample,
+    uint32 samples_per_packet) {
+  if (format == AUDIO_MOCK) {
+    return FakeAudioInputStream::MakeFakeStream(channels, bits_per_sample,
+                                                sample_rate,
+                                                samples_per_packet);
+  }
+  // TODO(satish): implement.
+  return NULL;
+}
+
+AudioOutputStream* AudioManagerLinux::MakeAudioOutputStream(
+    Format format,
+    int channels,
+    int sample_rate,
+    char bits_per_sample) {
   // Early return for testing hook.  Do this before checking for
   // |initialized_|.
   if (format == AudioManager::AUDIO_MOCK) {
@@ -59,6 +81,12 @@ AudioManagerLinux::AudioManagerLinux()
 }
 
 AudioManagerLinux::~AudioManagerLinux() {
+  // Make sure we stop the thread first. If we let the default destructor to
+  // destruct the members, we may destroy audio streams before stopping the
+  // thread, resulting an unexpected behavior.
+  // This way we make sure activities of the audio streams are all stopped
+  // before we destroy them.
+  audio_thread_.Stop();
   active_streams_.clear();
 }
 
@@ -75,7 +103,7 @@ void AudioManagerLinux::UnMuteAll() {
   NOTIMPLEMENTED();
 }
 
-void AudioManagerLinux::ReleaseStream(AlsaPcmOutputStream* stream) {
+void AudioManagerLinux::ReleaseOutputStream(AlsaPcmOutputStream* stream) {
   if (stream) {
     AutoLock l(lock_);
     active_streams_.erase(stream);

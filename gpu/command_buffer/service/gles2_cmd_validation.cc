@@ -4,11 +4,10 @@
 
 // Contains various validation functions for the GLES2 service.
 
-// NOTE: We explicitly do NOT include gles2_cmd_validation.h because the
-//     gl2.h included in here must NOT be the native one. This is because
-//     some of the GLenum definitions exist only in GLES2 and not in Desktop
-//     GL.
-#include <GLES2/gl2types.h>
+#include "base/basictypes.h"
+#define GLES2_GPU_SERVICE 1
+#include "gpu/command_buffer/service/gles2_cmd_validation.h"
+#include "gpu/command_buffer/service/gl_utils.h"
 
 namespace gpu {
 namespace gles2 {

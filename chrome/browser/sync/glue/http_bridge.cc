@@ -5,6 +5,7 @@
 #include "chrome/browser/sync/glue/http_bridge.h"
 
 #include "base/message_loop.h"
+#include "base/message_loop_proxy.h"
 #include "base/string_util.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/profile.h"
@@ -40,6 +41,11 @@ URLRequestContext* HttpBridge::RequestContextGetter::GetURLRequestContext() {
     context_->set_user_agent(user_agent_);
 
   return context_;
+}
+
+scoped_refptr<base::MessageLoopProxy>
+HttpBridge::RequestContextGetter::GetIOMessageLoopProxy() {
+  return ChromeThread::GetMessageLoopProxyForThread(ChromeThread::IO);
 }
 
 HttpBridgeFactory::HttpBridgeFactory(
@@ -95,9 +101,12 @@ HttpBridge::RequestContext::RequestContext(URLRequestContext* baseline_context)
   // We default to the browser's user agent. This can (and should) be overridden
   // with set_user_agent.
   user_agent_ = webkit_glue::GetUserAgent(GURL());
+
+  net_log_ = baseline_context->net_log();
 }
 
 HttpBridge::RequestContext::~RequestContext() {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   delete http_transaction_factory_;
 }
 

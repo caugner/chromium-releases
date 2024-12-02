@@ -14,6 +14,7 @@
 #include <fcntl.h>
 
 #include "base/compiler_specific.h"
+#include "base/eintr_wrapper.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "media/ffmpeg/ffmpeg_common.h"
@@ -47,23 +48,28 @@ int OpenContext(URLContext* h, const char* filename, int flags) {
 }
 
 int ReadContext(URLContext* h, unsigned char* buf, int size) {
-  return read(GetHandle(h), buf, size);
+  return HANDLE_EINTR(read(GetHandle(h), buf, size));
 }
 
-int WriteContext(URLContext* h, unsigned char* buf, int size) {
-  return write(GetHandle(h), buf, size);
-}
-
-offset_t SeekContext(URLContext* h, offset_t offset, int whence) {
-#if defined(OS_WIN)
-  return lseek(GetHandle(h), static_cast<long>(offset), whence);
+#if LIBAVFORMAT_VERSION_INT >= AV_VERSION_INT(52, 68, 0)
+int WriteContext(URLContext* h, const unsigned char* buf, int size) {
 #else
-  return lseek(GetHandle(h), offset, whence);
+int WriteContext(URLContext* h, unsigned char* buf, int size) {
+#endif
+  return HANDLE_EINTR(write(GetHandle(h), buf, size));
+}
+
+int64 SeekContext(URLContext* h, int64 offset, int whence) {
+#if defined(OS_WIN)
+  return _lseeki64(GetHandle(h), static_cast<__int64>(offset), whence);
+#else
+  COMPILE_ASSERT(sizeof(off_t) == 8, off_t_not_64_bit);
+  return lseek(GetHandle(h), static_cast<off_t>(offset), whence);
 #endif
 }
 
 int CloseContext(URLContext* h) {
-  return close(GetHandle(h));
+  return HANDLE_EINTR(close(GetHandle(h)));
 }
 
 }  // namespace

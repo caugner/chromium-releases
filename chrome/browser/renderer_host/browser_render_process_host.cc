@@ -22,8 +22,8 @@
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/thread.h"
+#include "chrome/browser/browser_child_process_host.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/child_process_host.h"
 #include "chrome/browser/child_process_security_policy.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_message_service.h"
@@ -32,7 +32,6 @@
 #include "chrome/browser/gpu_process_host.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/io_thread.h"
-#include "chrome/browser/net/url_request_context_getter.h"
 #include "chrome/browser/plugin_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/audio_renderer_host.h"
@@ -48,6 +47,7 @@
 #include "chrome/common/child_process_info.h"
 #include "chrome/common/gpu_messages.h"
 #include "chrome/common/logging_chrome.h"
+#include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/process_watcher.h"
@@ -61,6 +61,7 @@
 #include "ipc/ipc_platform_file.h"
 #include "ipc/ipc_switches.h"
 #include "media/base/media_switches.h"
+#include "webkit/glue/plugins/plugin_switches.h"
 
 #if defined(OS_WIN)
 #include "app/win_util.h"
@@ -200,7 +201,11 @@ BrowserRenderProcessHost::BrowserRenderProcessHost(Profile* profile)
   widget_helper_ = new RenderWidgetHelper();
 
   registrar_.Add(this, NotificationType::USER_SCRIPTS_UPDATED,
-                 Source<Profile>(profile));
+                 Source<Profile>(profile->GetOriginalProfile()));
+  registrar_.Add(this, NotificationType::EXTENSION_LOADED,
+                 Source<Profile>(profile->GetOriginalProfile()));
+  registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
+                 Source<Profile>(profile->GetOriginalProfile()));
   registrar_.Add(this, NotificationType::SPELLCHECK_HOST_REINITIALIZED,
                  NotificationService::AllSources());
   registrar_.Add(this, NotificationType::SPELLCHECK_WORD_ADDED,
@@ -246,16 +251,12 @@ bool BrowserRenderProcessHost::Init(bool is_extensions_process,
                                     URLRequestContextGetter* request_context) {
   // calling Init() more than once does nothing, this makes it more convenient
   // for the view host which may not be sure in some cases
-  if (channel_.get()) {
-    // Ensure that |is_extensions_process| doesn't change across multiple calls
-    // to Init().
-    if (!run_renderer_in_process()) {
-      DCHECK_EQ(extension_process_, is_extensions_process);
-    }
+  if (channel_.get())
     return true;
-  }
 
-  extension_process_ = is_extensions_process;
+  // It is possible for an extension process to be reused for non-extension
+  // content, e.g. if an extension calls window.open.
+  extension_process_ = extension_process_ || is_extensions_process;
 
   // run the IPC channel on the shared IO thread.
   base::Thread* io_thread = g_browser_process->io_thread();
@@ -470,7 +471,7 @@ void BrowserRenderProcessHost::AppendRendererCommandLine(
         field_trial_states);
   }
 
-  ChildProcessHost::SetCrashReporterCommandLine(command_line);
+  BrowserChildProcessHost::SetCrashReporterCommandLine(command_line);
 
   FilePath user_data_dir =
       browser_command_line.GetSwitchValuePath(switches::kUserDataDir);
@@ -510,6 +511,7 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     // for official Google Chrome builds.
     switches::kInProcessPlugins,
 #endif  // GOOGLE_CHROME_BUILD
+    switches::kAllowScriptingGallery,
     switches::kDomAutomationController,
     switches::kUserAgent,
     switches::kNoReferrers,
@@ -530,14 +532,15 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     switches::kEnableDCHECK,
     switches::kSilentDumpOnDCHECK,
     switches::kUseLowFragHeapCrt,
+    switches::kEnableSearchProviderApiV2,
     switches::kEnableStatsTable,
     switches::kExperimentalSpellcheckerFeatures,
     switches::kDisableAudio,
     switches::kSimpleDataSource,
     switches::kEnableBenchmarking,
     switches::kInternalNaCl,
-    switches::kInternalPDF,
     switches::kInternalPepper,
+    switches::kRegisterPepperPlugins,
     switches::kDisableByteRangeSupport,
     switches::kDisableDatabases,
     switches::kDisableDesktopNotifications,
@@ -550,8 +553,11 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     switches::kDisableGeolocation,
     switches::kShowPaintRects,
     switches::kEnableOpenMax,
+    switches::kVideoThreads,
+    switches::kEnableVideoFullscreen,
     switches::kEnableVideoLayering,
     switches::kEnableVideoLogging,
+    switches::kEnableTouch,
     // We propagate the Chrome Frame command line here as well in case the
     // renderer is not run in the sandbox.
     switches::kChromeFrame,
@@ -560,11 +566,17 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     // information is needed very early during bringup. We prefer to
     // use the WebPreferences to set this flag on a page-by-page basis.
     switches::kEnableExperimentalWebGL,
+    switches::kEnableGLSLTranslator,
+    switches::kInProcessWebGL,
 #if defined(OS_MACOSX)
     // Allow this to be set when invoking the browser and relayed along.
     switches::kEnableSandboxLogging,
     switches::kEnableFlashCoreAnimation,
 #endif
+    switches::kRemoteShellPort,
+    switches::kEnablePepperTesting,
+    switches::kEnableChromoting,
+    switches::kPrelaunchGpuProcess,
   };
 
   for (size_t i = 0; i < arraysize(switch_names); ++i) {
@@ -641,6 +653,32 @@ void BrowserRenderProcessHost::SendUserScriptsUpdate(
   if (base::SharedMemory::IsHandleValid(handle_for_process)) {
     Send(new ViewMsg_UserScripts_UpdatedScripts(handle_for_process));
   }
+}
+
+void BrowserRenderProcessHost::SendExtensionExtentsUpdate() {
+  // Check if the process is still starting and we don't have a handle for it
+  // yet, in which case this will happen later when InitVisitedLinks is called.
+  if (!run_renderer_in_process() &&
+      (!child_process_.get() || child_process_->IsStarting())) {
+    return;
+  }
+
+  ExtensionsService* service = profile()->GetExtensionsService();
+  if (!service)
+    return;
+  ViewMsg_ExtensionExtentsUpdated_Params params;
+  for (size_t i = 0; i < service->extensions()->size(); ++i) {
+    Extension* extension = service->extensions()->at(i);
+    if (!extension->web_extent().is_empty()) {
+      ViewMsg_ExtensionExtentInfo info;
+      info.extension_id = extension->id();
+      info.web_extent = extension->web_extent();
+      info.browse_extent = extension->browse_extent();
+      params.extension_apps.push_back(info);
+    }
+  }
+
+  Send(new ViewMsg_ExtensionExtentsUpdated(params));
 }
 
 bool BrowserRenderProcessHost::FastShutdownIfPossible() {
@@ -908,6 +946,13 @@ void BrowserRenderProcessHost::Observe(NotificationType type,
       }
       break;
     }
+    case NotificationType::EXTENSION_LOADED:
+    case NotificationType::EXTENSION_UNLOADED: {
+      Extension* extension = Details<Extension>(details).ptr();
+      if (!extension->web_extent().is_empty())
+        SendExtensionExtentsUpdate();
+      break;
+    }
     case NotificationType::SPELLCHECK_HOST_REINITIALIZED: {
       InitSpellChecker();
       break;
@@ -940,6 +985,7 @@ void BrowserRenderProcessHost::OnProcessLaunched() {
   InitVisitedLinks();
   InitUserScripts();
   InitExtensions();
+  SendExtensionExtentsUpdate();
   // We don't want to initialize the spellchecker unless SpellCheckHost has been
   // created. In InitSpellChecker(), we know if GetSpellCheckHost() is NULL
   // then the spellchecker has been turned off, but here, we don't know if

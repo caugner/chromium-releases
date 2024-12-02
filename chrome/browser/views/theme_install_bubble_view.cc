@@ -7,6 +7,7 @@
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "gfx/canvas_skia.h"
 #include "grit/generated_resources.h"
 #include "views/widget/widget.h"
 
@@ -100,7 +101,7 @@ void ThemeInstallBubbleView::Reposition() {
   int mid_x = tab_contents_bounds_.x() +
       (tab_contents_bounds_.right() - tab_contents_bounds_.x()) / 2;
 
-  int x = UILayoutIsRightToLeft() ?
+  int x = base::i18n::IsRTL() ?
       mid_x + size.width() / 2 : mid_x - size.width() / 2;
   int y = static_cast<int>(tab_contents_bounds_.y() +
       (tab_contents_bounds_.bottom() - tab_contents_bounds_.y()) / 2 -
@@ -125,7 +126,7 @@ void ThemeInstallBubbleView::Paint(gfx::Canvas* canvas) {
            SkIntToScalar(height()));
   SkPath path;
   path.addRoundRect(rect, rad, SkPath::kCW_Direction);
-  canvas->drawPath(path, paint);
+  canvas->AsCanvasSkia()->drawPath(path, paint);
 
   int text_width = views::Label::font().GetStringWidth(text_);
   gfx::Rect body_bounds(kTextHorizPadding / 2, 0, text_width, height());

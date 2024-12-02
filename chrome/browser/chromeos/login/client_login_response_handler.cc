@@ -9,7 +9,7 @@
 
 #include "chrome/browser/chromeos/login/google_authenticator.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "chrome/browser/net/url_fetcher.h"
+#include "chrome/common/net/url_fetcher.h"
 #include "net/base/load_flags.h"
 
 namespace chromeos {
@@ -27,7 +27,7 @@ bool ClientLoginResponseHandler::CanHandle(const GURL& url) {
 URLFetcher* ClientLoginResponseHandler::Handle(
     const std::string& to_process,
     URLFetcher::Delegate* catcher) {
-  LOG(INFO) << "ClientLogin successful!";
+  LOG(INFO) << "Handling ClientLogin response!";
   payload_.assign(to_process);
   std::replace(payload_.begin(), payload_.end(), '\n', '&');
   payload_.append(kService);
@@ -39,7 +39,7 @@ URLFetcher* ClientLoginResponseHandler::Handle(
   fetcher->set_load_flags(net::LOAD_DO_NOT_SEND_COOKIES);
   fetcher->set_upload_data("application/x-www-form-urlencoded", payload_);
   if (getter_) {
-    LOG(INFO) << "Fetching";
+    LOG(INFO) << "Fetching " << AuthResponseHandler::kIssueAuthTokenUrl;
     fetcher->set_request_context(getter_);
     fetcher->Start();
   }

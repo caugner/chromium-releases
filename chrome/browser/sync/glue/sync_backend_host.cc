@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,16 @@
 #include "base/file_version_info.h"
 #include "base/task.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/app/chrome_version_info.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/database_model_worker.h"
 #include "chrome/browser/sync/glue/history_model_worker.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/http_bridge.h"
+#include "chrome/browser/sync/glue/password_model_worker.h"
 #include "chrome/browser/sync/sessions/session_state.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
@@ -69,6 +72,7 @@ void SyncBackendHost::Initialize(
     bool delete_sync_data_folder,
     bool invalidate_sync_login,
     bool invalidate_sync_xmpp_login,
+    bool use_chrome_async_socket,
     NotificationMethod notification_method) {
   if (!core_thread_.Start())
     return;
@@ -81,29 +85,33 @@ void SyncBackendHost::Initialize(
   // need to update routing_info_.
   registrar_.workers[GROUP_DB] = new DatabaseModelWorker();
   registrar_.workers[GROUP_HISTORY] =
-    new HistoryModelWorker(
-        profile_->GetHistoryService(Profile::IMPLICIT_ACCESS));
+      new HistoryModelWorker(
+          profile_->GetHistoryService(Profile::IMPLICIT_ACCESS));
   registrar_.workers[GROUP_UI] = new UIModelWorker(frontend_loop_);
   registrar_.workers[GROUP_PASSIVE] = new ModelSafeWorker();
+  registrar_.workers[GROUP_PASSWORD] =
+      new PasswordModelWorker(
+          profile_->GetPasswordStore(Profile::IMPLICIT_ACCESS));
 
   // Any datatypes that we want the syncer to pull down must
   // be in the routing_info map.  We set them to group passive, meaning that
   // updates will be applied, but not dispatched to the UI thread yet.
   for (syncable::ModelTypeSet::const_iterator it = types.begin();
-       it != types.end(); ++it) {
+      it != types.end(); ++it) {
     registrar_.routing_info[(*it)] = GROUP_PASSIVE;
   }
 
   core_thread_.message_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(core_.get(), &SyncBackendHost::Core::DoInitialize,
                         Core::DoInitializeOptions(
-                            sync_service_url, true,
+                            sync_service_url, lsid.empty(),
                             new HttpBridgeFactory(baseline_context_getter),
                             new HttpBridgeFactory(baseline_context_getter),
                             lsid,
                             delete_sync_data_folder,
                             invalidate_sync_login,
                             invalidate_sync_xmpp_login,
+                            use_chrome_async_socket,
                             notification_method)));
 }
 
@@ -115,15 +123,28 @@ void SyncBackendHost::Authenticate(const std::string& username,
                         username, password, captcha));
 }
 
+void SyncBackendHost::StartSyncingWithServer() {
+  core_thread_.message_loop()->PostTask(FROM_HERE,
+      NewRunnableMethod(core_.get(), &SyncBackendHost::Core::DoStartSyncing));
+}
+
+void SyncBackendHost::SetPassphrase(const std::string& passphrase) {
+  core_thread_.message_loop()->PostTask(FROM_HERE,
+      NewRunnableMethod(core_.get(), &SyncBackendHost::Core::DoSetPassphrase,
+                        passphrase));
+}
+
 void SyncBackendHost::Shutdown(bool sync_disabled) {
   // Thread shutdown should occur in the following order:
   // - SyncerThread
   // - CoreThread
   // - UI Thread (stops some time after we return from this call).
-  core_thread_.message_loop()->PostTask(FROM_HERE,
-      NewRunnableMethod(core_.get(),
-                        &SyncBackendHost::Core::DoShutdown,
-                        sync_disabled));
+  if (core_thread_.IsRunning()) {  // Not running in tests.
+    core_thread_.message_loop()->PostTask(FROM_HERE,
+        NewRunnableMethod(core_.get(),
+                          &SyncBackendHost::Core::DoShutdown,
+                          sync_disabled));
+  }
 
   // Before joining the core_thread_, we wait for the UIModelWorker to
   // give us the green light that it is not depending on the frontend_loop_ to
@@ -149,10 +170,12 @@ void SyncBackendHost::Shutdown(bool sync_disabled) {
   registrar_.workers[GROUP_HISTORY] = NULL;
   registrar_.workers[GROUP_UI] = NULL;
   registrar_.workers[GROUP_PASSIVE] = NULL;
+  registrar_.workers[GROUP_PASSWORD] = NULL;
   registrar_.workers.erase(GROUP_DB);
   registrar_.workers.erase(GROUP_HISTORY);
   registrar_.workers.erase(GROUP_UI);
   registrar_.workers.erase(GROUP_PASSIVE);
+  registrar_.workers.erase(GROUP_PASSWORD);
   frontend_ = NULL;
   core_ = NULL;  // Releases reference to core_.
 }
@@ -202,14 +225,15 @@ void SyncBackendHost::ConfigureDataTypes(const syncable::ModelTypeSet& types,
   // downloading updates for newly added data types.  Once this is
   // complete, the configure_ready_task_ is run via an
   // OnInitializationComplete notification.
-  core_->syncapi()->RequestNudge();
+  core_thread_.message_loop()->PostTask(FROM_HERE,
+      NewRunnableMethod(core_.get(), &SyncBackendHost::Core::DoRequestNudge));
 }
 
 void SyncBackendHost::ActivateDataType(
     DataTypeController* data_type_controller,
     ChangeProcessor* change_processor) {
-  // TODO(skrul): Add some kind of lock here that prevents concurrent
-  // calls.
+  AutoLock lock(registrar_lock_);
+
   // Ensure that the given data type is in the PASSIVE group.
   browser_sync::ModelSafeRoutingInfo::iterator i =
       registrar_.routing_info.find(data_type_controller->type());
@@ -228,6 +252,7 @@ void SyncBackendHost::ActivateDataType(
 void SyncBackendHost::DeactivateDataType(
     DataTypeController* data_type_controller,
     ChangeProcessor* change_processor) {
+  AutoLock lock(registrar_lock_);
   registrar_.routing_info.erase(data_type_controller->type());
 
   std::map<syncable::ModelType, ChangeProcessor*>::size_type erased =
@@ -239,11 +264,15 @@ void SyncBackendHost::DeactivateDataType(
 }
 
 bool SyncBackendHost::RequestPause() {
-  return core_->syncapi()->RequestPause();
+  core_thread_.message_loop()->PostTask(FROM_HERE,
+     NewRunnableMethod(core_.get(), &SyncBackendHost::Core::DoRequestPause));
+  return true;
 }
 
 bool SyncBackendHost::RequestResume() {
-  return core_->syncapi()->RequestResume();
+  core_thread_.message_loop()->PostTask(FROM_HERE,
+     NewRunnableMethod(core_.get(), &SyncBackendHost::Core::DoRequestResume));
+  return true;
 }
 
 void SyncBackendHost::Core::NotifyPaused() {
@@ -256,6 +285,20 @@ void SyncBackendHost::Core::NotifyResumed() {
   NotificationService::current()->Notify(NotificationType::SYNC_RESUMED,
                                          NotificationService::AllSources(),
                                          NotificationService::NoDetails());
+}
+
+void SyncBackendHost::Core::NotifyPassphraseRequired() {
+  NotificationService::current()->Notify(
+      NotificationType::SYNC_PASSPHRASE_REQUIRED,
+      NotificationService::AllSources(),
+      NotificationService::NoDetails());
+}
+
+void SyncBackendHost::Core::NotifyPassphraseAccepted() {
+  NotificationService::current()->Notify(
+      NotificationType::SYNC_PASSPHRASE_ACCEPTED,
+      NotificationService::AllSources(),
+      NotificationService::NoDetails());
 }
 
 SyncBackendHost::UserShareHandle SyncBackendHost::GetUserShareHandle() const {
@@ -320,7 +363,7 @@ std::string MakeUserAgentForSyncapi() {
   user_agent += "MAC ";
 #endif
   scoped_ptr<FileVersionInfo> version_info(
-      FileVersionInfo::CreateFileVersionInfoForCurrentModule());
+      chrome_app::GetChromeVersionInfo());
   if (version_info == NULL) {
     DLOG(ERROR) << "Unable to create FileVersionInfo object";
     return user_agent;
@@ -362,6 +405,7 @@ void SyncBackendHost::Core::DoInitialize(const DoInitializeOptions& options) {
       options.invalidate_sync_xmpp_login,
       MakeUserAgentForSyncapi().c_str(),
       options.lsid.c_str(),
+      options.use_chrome_async_socket,
       options.notification_method);
   DCHECK(success) << "Syncapi initialization failed!";
 }
@@ -371,6 +415,16 @@ void SyncBackendHost::Core::DoAuthenticate(const std::string& username,
                                            const std::string& captcha) {
   DCHECK(MessageLoop::current() == host_->core_thread_.message_loop());
   syncapi_->Authenticate(username.c_str(), password.c_str(), captcha.c_str());
+}
+
+void SyncBackendHost::Core::DoStartSyncing() {
+  DCHECK(MessageLoop::current() == host_->core_thread_.message_loop());
+  syncapi_->StartSyncing();
+}
+
+void SyncBackendHost::Core::DoSetPassphrase(const std::string& passphrase) {
+  DCHECK(MessageLoop::current() == host_->core_thread_.message_loop());
+  syncapi_->SetPassphrase(passphrase);
 }
 
 UIModelWorker* SyncBackendHost::ui_worker() {
@@ -487,9 +541,16 @@ void SyncBackendHost::Core::OnInitializationComplete() {
 }
 
 void SyncBackendHost::Core::HandleInitalizationCompletedOnFrontendLoop() {
-  host_->frontend_->OnBackendInitialized();
+  if (!host_)
+    return;
+  host_->HandleInitializationCompletedOnFrontendLoop();
 }
 
+void SyncBackendHost::HandleInitializationCompletedOnFrontendLoop() {
+  if (!frontend_)
+    return;
+  frontend_->OnBackendInitialized();
+}
 
 bool SyncBackendHost::Core::IsCurrentThreadSafeForModel(
     syncable::ModelType model_type) {
@@ -516,6 +577,16 @@ void SyncBackendHost::Core::OnAuthError(const AuthError& auth_error) {
       auth_error));
 }
 
+void SyncBackendHost::Core::OnPassphraseRequired() {
+  host_->frontend_loop_->PostTask(FROM_HERE,
+      NewRunnableMethod(this, &Core::NotifyPassphraseRequired));
+}
+
+void SyncBackendHost::Core::OnPassphraseAccepted() {
+  host_->frontend_loop_->PostTask(FROM_HERE,
+      NewRunnableMethod(this, &Core::NotifyPassphraseAccepted));
+}
+
 void SyncBackendHost::Core::OnPaused() {
   host_->frontend_loop_->PostTask(
       FROM_HERE,
@@ -526,6 +597,17 @@ void SyncBackendHost::Core::OnResumed() {
   host_->frontend_loop_->PostTask(
       FROM_HERE,
       NewRunnableMethod(this, &Core::NotifyResumed));
+}
+
+void SyncBackendHost::Core::OnStopSyncingPermanently() {
+  host_->frontend_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
+      &Core::HandleStopSyncingPermanentlyOnFrontendLoop));
+}
+
+void SyncBackendHost::Core::HandleStopSyncingPermanentlyOnFrontendLoop() {
+  if (!host_ || !host_->frontend_)
+    return;
+  host_->frontend_->OnStopSyncingPermanently();
 }
 
 void SyncBackendHost::Core::HandleAuthErrorEventOnFrontendLoop(
@@ -543,6 +625,18 @@ void SyncBackendHost::Core::StartSavingChanges() {
   save_changes_timer_.Start(
       base::TimeDelta::FromSeconds(kSaveChangesIntervalSeconds),
       this, &Core::SaveChanges);
+}
+
+void SyncBackendHost::Core::DoRequestNudge() {
+  syncapi_->RequestNudge();
+}
+
+void SyncBackendHost::Core::DoRequestResume() {
+  syncapi_->RequestResume();
+}
+
+void SyncBackendHost::Core::DoRequestPause() {
+  syncapi()->RequestPause();
 }
 
 void SyncBackendHost::Core::SaveChanges() {

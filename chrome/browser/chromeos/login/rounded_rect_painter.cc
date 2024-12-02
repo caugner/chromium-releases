@@ -6,7 +6,7 @@
 
 #include "app/resource_bundle.h"
 #include "base/logging.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "third_party/skia/include/effects/SkBlurMaskFilter.h"
 #include "views/border.h"
@@ -16,13 +16,12 @@ namespace chromeos {
 
 namespace {
 
-const int kBackgroundPadding = 10;
-const int kCornerRadius = 12;
-const int kScreenShadow = 10;
+const int kCornerRadius = 5;
+const SkColor kScreenTopColor = SkColorSetRGB(250, 251, 251);
+const SkColor kScreenBottomColor = SkColorSetRGB(204, 209, 212);
 const SkColor kScreenShadowColor = SkColorSetARGB(64, 34, 54, 115);
-const SkColor kBackgroundTopColor = SkColorSetRGB(82, 139, 224);
-const SkColor kBackgroundBottomColor = SkColorSetRGB(50, 102, 204);
-const SkColor kShadowStrokeColor = SkColorSetRGB(40, 90, 177);
+const SkColor kShadowStrokeColor = 0;
+const int kScreenShadow = 10;
 
 static void DrawRoundedRect(
       gfx::Canvas* canvas,
@@ -55,7 +54,7 @@ static void DrawRoundedRect(
   } else {
     paint.setColor(top_color);
   }
-  canvas->drawPath(path, paint);
+  canvas->AsCanvasSkia()->drawPath(path, paint);
 
   if (stroke_color != 0) {
     // Expand rect by 0.5px so resulting stroke will take the whole pixel.
@@ -68,7 +67,7 @@ static void DrawRoundedRect(
     paint.setStyle(SkPaint::kStroke_Style);
     paint.setStrokeWidth(SkIntToScalar(SK_Scalar1));
     paint.setColor(stroke_color);
-    canvas->drawRoundRect(
+    canvas->AsCanvasSkia()->drawRoundRect(
       rect,
       SkIntToScalar(corner_radius), SkIntToScalar(corner_radius),
       paint);
@@ -93,7 +92,7 @@ static void DrawRoundedRectShadow(
   rect.set(
       SkIntToScalar(x + shadow / 2), SkIntToScalar(y + shadow / 2),
       SkIntToScalar(x + w - shadow / 2), SkIntToScalar(y + h - shadow / 2));
-  canvas->drawRoundRect(
+  canvas->AsCanvasSkia()->drawRoundRect(
       rect,
       SkIntToScalar(corner_radius), SkIntToScalar(corner_radius),
       paint);
@@ -114,8 +113,9 @@ static void DrawRectWithBorder(int w,
   if (padding > 0) {
     SkPaint paint;
     paint.setColor(padding_color);
-    canvas->drawRectCoords(SkIntToScalar(0), SkIntToScalar(0),
-                           SkIntToScalar(w), SkIntToScalar(h), paint);
+    canvas->AsCanvasSkia()->drawRectCoords(
+        SkIntToScalar(0), SkIntToScalar(0), SkIntToScalar(w), SkIntToScalar(h),
+        paint);
   }
   if (border->shadow > 0) {
     DrawRoundedRectShadow(
@@ -173,26 +173,7 @@ class RoundedRectBorder : public views::Border {
 
 void RoundedRectBorder::Paint(const views::View& view,
                               gfx::Canvas* canvas) const {
-  gfx::Rect clip_rect;
-  if (!canvas->GetClipRect(&clip_rect))
-    return;  // Empty clip rectangle, nothing to paint.
-
-  int w = view.width();
-  int h = view.height();
-
-  gfx::Insets insets;
-  GetInsets(&insets);
-  SkRect remove;
-  remove.set(SkIntToScalar(insets.left()),
-             SkIntToScalar(insets.top()),
-             SkIntToScalar(w - insets.right()),
-             SkIntToScalar(h - insets.bottom()));
-  canvas->clipRect(remove, SkRegion::kDifference_Op);
-
-  if (canvas->IntersectsClipRectInt(0, 0, w, h)) {
-    DrawRectWithBorder(w, h, border_, canvas);
-  }
-  canvas->clipRect(remove, SkRegion::kIntersect_Op);
+  // Don't paint anything. RoundedRectBorder is used to provide insets only.
 }
 
 void RoundedRectBorder::GetInsets(gfx::Insets* insets) const {
@@ -205,23 +186,14 @@ void RoundedRectBorder::GetInsets(gfx::Insets* insets) const {
 }  //  namespace
 
 // static
-const BorderDefinition BorderDefinition::kWizardBorder = {
-  kBackgroundPadding,
-  SK_ColorBLACK,
-  0,
-  SK_ColorBLACK,
-  kCornerRadius,
-  kBackgroundTopColor,
-  kBackgroundBottomColor
-};
 const BorderDefinition BorderDefinition::kScreenBorder = {
   0,
   SK_ColorBLACK,
   kScreenShadow,
   kScreenShadowColor,
   kCornerRadius,
-  SK_ColorWHITE,
-  SK_ColorWHITE
+  kScreenTopColor,
+  kScreenBottomColor
 };
 
 views::Painter* CreateWizardPainter(const BorderDefinition* const border) {

@@ -21,7 +21,6 @@ class AddressList;
 class BoundNetLog;
 class HostCache;
 class HostResolverImpl;
-class NetworkChangeNotifier;
 
 // This class represents the task of resolving hostnames (or IP address
 // literal) to an AddressList object.
@@ -32,7 +31,7 @@ class NetworkChangeNotifier;
 // request at a time is to create a SingleRequestHostResolver wrapper around
 // HostResolver (which will automatically cancel the single request when it
 // goes out of scope).
-class HostResolver : public base::RefCountedThreadSafe<HostResolver> {
+class HostResolver : public base::RefCounted<HostResolver> {
  public:
   // The parameters for doing a Resolve(). |hostname| and |port| are required,
   // the rest are optional (and have reasonable defaults).
@@ -132,6 +131,11 @@ class HostResolver : public base::RefCountedThreadSafe<HostResolver> {
   // Opaque type used to cancel a request.
   typedef void* RequestHandle;
 
+  // This value can be passed into CreateSystemHostResolver as the
+  // |max_concurrent_resolves| parameter. It will select a default level of
+  // concurrency.
+  static const size_t kDefaultParallelism = 0;
+
   // Resolves the given hostname (or IP address literal), filling out the
   // |addresses| object upon success.  The |info.port| parameter will be set as
   // the sin(6)_port field of the sockaddr_in{6} struct.  Returns OK if
@@ -178,8 +182,11 @@ class HostResolver : public base::RefCountedThreadSafe<HostResolver> {
   // additional functionality on the about:net-internals page.
   virtual HostResolverImpl* GetAsHostResolverImpl() { return NULL; }
 
+  // Does additional cleanup prior to destruction.
+  virtual void Shutdown() {}
+
  protected:
-  friend class base::RefCountedThreadSafe<HostResolver>;
+  friend class base::RefCounted<HostResolver>;
 
   HostResolver() { }
 
@@ -236,10 +243,10 @@ class SingleRequestHostResolver {
 // Creates a HostResolver implementation that queries the underlying system.
 // (Except if a unit-test has changed the global HostResolverProc using
 // ScopedHostResolverProc to intercept requests to the system).
-// |network_change_notifier| must outlive HostResolver.  It can optionally be
-// NULL, in which case HostResolver will not respond to network changes.
-HostResolver* CreateSystemHostResolver(
-    NetworkChangeNotifier* network_change_notifier);
+// |max_concurrent_resolves| is how many resolve requests will be allowed to
+// run in parallel. Pass HostResolver::kDefaultParallelism to choose a
+// default value.
+HostResolver* CreateSystemHostResolver(size_t max_concurrent_resolves);
 
 }  // namespace net
 

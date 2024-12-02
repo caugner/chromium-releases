@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,9 @@
 #include "base/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/options_util.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/views/options/advanced_contents_view.h"
+#include "chrome/browser/views/options/managed_prefs_banner_view.h"
 #include "chrome/common/chrome_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -78,7 +80,7 @@ class ResetDefaultsConfirmBox : public views::DialogDelegate {
   MessageBoxView* message_box_view_;
   AdvancedPageView* advanced_page_view_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ResetDefaultsConfirmBox);
+  DISALLOW_COPY_AND_ASSIGN(ResetDefaultsConfirmBox);
 };
 
 }  // namespace
@@ -130,6 +132,10 @@ void AdvancedPageView::InitControlLayout() {
   ColumnSet* column_set = layout->AddColumnSet(single_column_view_set_id);
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::USE_PREF, 0, 0);
+  layout->StartRow(0, single_column_view_set_id);
+  layout->AddView(
+      new ManagedPrefsBannerView(profile()->GetPrefs(), OPTIONS_PAGE_ADVANCED));
+
   layout->StartRow(1, single_column_view_set_id);
   layout->AddView(advanced_scroll_view_);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);

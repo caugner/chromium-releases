@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,6 +54,9 @@ static void Lowercase(std::string* parameter) {
             tolower);
 }
 #endif
+
+CommandLine::~CommandLine() {
+}
 
 #if defined(OS_WIN)
 CommandLine::CommandLine(ArgumentsOnly args_only) {
@@ -303,6 +306,11 @@ std::wstring CommandLine::program() const {
 }
 #endif
 
+#if defined(OS_POSIX)
+std::string CommandLine::command_line_string() const {
+  return JoinString(argv_, ' ');
+}
+#endif
 
 // static
 std::wstring CommandLine::PrefixedSwitchString(
@@ -374,7 +382,7 @@ void CommandLine::AppendArguments(const CommandLine& other,
                                   bool include_program) {
   // Verify include_program is used correctly.
   // Logic could be shorter but this is clearer.
-  DCHECK(include_program ? !other.program().empty() : other.program().empty());
+  DCHECK_EQ(include_program, !other.GetProgram().empty());
   command_line_string_ += L" " + other.command_line_string_;
   std::map<std::string, StringType>::const_iterator i;
   for (i = other.switches_.begin(); i != other.switches_.end(); ++i)
@@ -413,8 +421,7 @@ void CommandLine::AppendArguments(const CommandLine& other,
                                   bool include_program) {
   // Verify include_program is used correctly.
   // Logic could be shorter but this is clearer.
-  DCHECK(include_program ? !other.program().empty() : other.program().empty());
-
+  DCHECK_EQ(include_program, !other.GetProgram().empty());
   size_t first_arg = include_program ? 0 : 1;
   for (size_t i = first_arg; i < other.argv_.size(); ++i)
     argv_.push_back(other.argv_[i]);
@@ -433,3 +440,7 @@ void CommandLine::PrependWrapper(const std::wstring& wrapper_wide) {
 }
 
 #endif
+
+// private
+CommandLine::CommandLine() {
+}

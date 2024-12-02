@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "app/gtk_signal.h"
 #include "app/l10n_util.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
@@ -16,6 +17,7 @@
 #include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/language_combobox_model.h"
 #include "chrome/browser/language_order_table_model.h"
+#include "chrome/browser/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/spellcheck_common.h"
@@ -42,11 +44,10 @@ class AddLanguageDialog {
   AddLanguageDialog(Profile* profile, LanguagesPageGtk* delegate);
  private:
   // Callback for dialog buttons.
-  static void OnResponse(GtkDialog* dialog, int response_id,
-                         AddLanguageDialog* window);
+  CHROMEGTK_CALLBACK_1(AddLanguageDialog, void, OnResponse, int);
 
   // Callback for window destruction.
-  static void OnWindowDestroy(GtkWidget* widget, AddLanguageDialog* window);
+  CHROMEGTK_CALLBACK_0(AddLanguageDialog, void, OnWindowDestroy);
 
   // The dialog window.
   GtkWidget* dialog_;
@@ -90,28 +91,23 @@ AddLanguageDialog::AddLanguageDialog(Profile* profile,
   gtk_combo_box_set_active(GTK_COMBO_BOX(combobox_), 0);
   gtk_container_add(GTK_CONTAINER(GTK_DIALOG(dialog_)->vbox), combobox_);
 
-  g_signal_connect(dialog_, "response", G_CALLBACK(OnResponse), this);
-  g_signal_connect(dialog_, "destroy", G_CALLBACK(OnWindowDestroy), this);
+  g_signal_connect(dialog_, "response", G_CALLBACK(OnResponseThunk), this);
+  g_signal_connect(dialog_, "destroy", G_CALLBACK(OnWindowDestroyThunk), this);
 
-  gtk_widget_show_all(dialog_);
+  gtk_util::ShowDialog(dialog_);
 }
 
-// static
-void AddLanguageDialog::OnResponse(GtkDialog* dialog,
-                                   int response_id,
-                                   AddLanguageDialog* window) {
+void AddLanguageDialog::OnResponse(GtkWidget* dialog, int response_id) {
   if (response_id == GTK_RESPONSE_OK) {
-    int selected = gtk_combo_box_get_active(GTK_COMBO_BOX(window->combobox_));
-    window->language_delegate_->OnAddLanguage(
-        window->accept_language_combobox_model_->GetLocaleFromIndex(selected));
+    int selected = gtk_combo_box_get_active(GTK_COMBO_BOX(combobox_));
+    language_delegate_->OnAddLanguage(
+        accept_language_combobox_model_->GetLocaleFromIndex(selected));
   }
-  gtk_widget_destroy(window->dialog_);
+  gtk_widget_destroy(dialog_);
 }
 
-// static
-void AddLanguageDialog::OnWindowDestroy(GtkWidget* widget,
-                                        AddLanguageDialog* window) {
-  MessageLoop::current()->DeleteSoon(FROM_HERE, window);
+void AddLanguageDialog::OnWindowDestroy(GtkWidget* widget) {
+  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
 }  // namespace
@@ -171,7 +167,7 @@ void LanguagesPageGtk::Init() {
   gtk_tree_selection_set_mode(language_order_selection_,
                               GTK_SELECTION_MULTIPLE);
   g_signal_connect(language_order_selection_, "changed",
-                   G_CALLBACK(OnSelectionChanged), this);
+                   G_CALLBACK(OnSelectionChangedThunk), this);
   GtkWidget* scroll_window = gtk_scrolled_window_new(NULL, NULL);
   gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll_window),
                                  GTK_POLICY_AUTOMATIC,
@@ -285,10 +281,8 @@ void LanguagesPageGtk::SetColumnValues(int row, GtkTreeIter* iter) {
 }
 
 void LanguagesPageGtk::OnAnyModelUpdate() {
-  if (!initializing_) {
-    accept_languages_.SetValue(ASCIIToWide(
-        language_order_table_model_->GetLanguageList()));
-  }
+  if (!initializing_)
+    accept_languages_.SetValue(language_order_table_model_->GetLanguageList());
   EnableControls();
 }
 
@@ -321,7 +315,7 @@ void LanguagesPageGtk::NotifyPrefChanged(const std::wstring* pref_name) {
   initializing_ = true;
   if (!pref_name || *pref_name == prefs::kAcceptLanguages) {
     language_order_table_model_->SetAcceptLanguagesString(
-        WideToASCII(accept_languages_.GetValue()));
+        accept_languages_.GetValue());
   }
   if (!pref_name || *pref_name == prefs::kSpellCheckDictionary) {
     int index = dictionary_language_model_->GetSelectedLanguageIndex(
@@ -329,10 +323,9 @@ void LanguagesPageGtk::NotifyPrefChanged(const std::wstring* pref_name) {
 
     // If not found, fall back from "language-region" to "language".
     if (index < 0) {
-      const std::string& lang_region = WideToASCII(
-          dictionary_language_.GetValue());
-      dictionary_language_.SetValue(ASCIIToWide(
-          SpellCheckCommon::GetLanguageFromLanguageRegion(lang_region)));
+      const std::string& lang_region = dictionary_language_.GetValue();
+      dictionary_language_.SetValue(
+          SpellCheckCommon::GetLanguageFromLanguageRegion(lang_region));
       index = dictionary_language_model_->GetSelectedLanguageIndex(
           prefs::kSpellCheckDictionary);
     }
@@ -361,10 +354,8 @@ void LanguagesPageGtk::OnAddLanguage(const std::string& new_language) {
                                    GTK_TREE_VIEW(language_order_tree_));
 }
 
-// static
-void LanguagesPageGtk::OnSelectionChanged(GtkTreeSelection *selection,
-                                          LanguagesPageGtk* languages_page) {
-  languages_page->EnableControls();
+void LanguagesPageGtk::OnSelectionChanged(GtkTreeSelection* selection) {
+  EnableControls();
 }
 
 void LanguagesPageGtk::OnAddButtonClicked(GtkWidget* button) {
@@ -373,8 +364,8 @@ void LanguagesPageGtk::OnAddButtonClicked(GtkWidget* button) {
 
 void LanguagesPageGtk::OnRemoveButtonClicked(GtkWidget* button) {
   std::set<int> selected_rows;
-  gtk_tree::GetSelectedIndicies(language_order_selection_,
-                                &selected_rows);
+  gtk_tree::GetSelectedIndices(language_order_selection_,
+                               &selected_rows);
 
   int selected_row = 0;
   for (std::set<int>::reverse_iterator selected = selected_rows.rbegin();
@@ -455,5 +446,5 @@ void LanguagesPageGtk::OnDictionaryLanguageChanged(GtkWidget* widget) {
 
   UserMetricsRecordAction(UserMetricsAction("Options_DictionaryLanguage"),
                           profile()->GetPrefs());
-  dictionary_language_.SetValue(ASCIIToWide(language));
+  dictionary_language_.SetValue(language);
 }

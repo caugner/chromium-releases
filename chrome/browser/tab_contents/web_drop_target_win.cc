@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,7 +67,7 @@ class InterstitialDropTarget {
     if (ClipboardUtil::HasUrl(data_object)) {
       std::wstring url;
       std::wstring title;
-      ClipboardUtil::GetUrl(data_object, &url, &title);
+      ClipboardUtil::GetUrl(data_object, &url, &title, true);
       tab_contents_->OpenURL(GURL(url), GURL(), CURRENT_TAB,
                              PageTransition::AUTO_BOOKMARK);
       return GetPreferredDropEffect(effect);
@@ -78,7 +78,7 @@ class InterstitialDropTarget {
  private:
   TabContents* tab_contents_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(InterstitialDropTarget);
+  DISALLOW_COPY_AND_ASSIGN(InterstitialDropTarget);
 };
 
 ///////////////////////////////////////////////////////////////////////////////

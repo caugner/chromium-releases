@@ -195,13 +195,15 @@ void TestShell::PlatformShutdown() {
 }
 
 // static
-void TestShell::InitializeTestShell(bool layout_test_mode) {
+void TestShell::InitializeTestShell(bool layout_test_mode, 
+                                    bool allow_external_pages) {
   // This should move to a per-process platform-specific initialization function
   // when one exists.
 
   window_list_ = new WindowList;
   layout_test_mode_ = layout_test_mode;
-
+  allow_external_pages_ = allow_external_pages;
+  
   web_prefs_ = new WebPreferences;
 
   // mmap the data pack which holds strings used by WebCore. This is only
@@ -285,6 +287,7 @@ bool TestShell::Initialize(const GURL& starting_url) {
   m_webViewHost.reset(
       WebViewHost::Create([m_mainWnd contentView],
                           delegate_.get(),
+                          0,
                           *TestShell::web_prefs_));
   delegate_->RegisterDragDrop();
   TestShellWebView* web_view =
@@ -590,7 +593,7 @@ void TestShell::LoadURLForFrame(const GURL& url,
 }
 
 bool TestShell::PromptForSaveFile(const wchar_t* prompt_title,
-                                  std::wstring* result)
+                                  FilePath* result)
 {
   NSSavePanel* save_panel = [NSSavePanel savePanel];
 
@@ -602,7 +605,7 @@ bool TestShell::PromptForSaveFile(const wchar_t* prompt_title,
   /* display the NSSavePanel */
   if ([save_panel runModalForDirectory:NSHomeDirectory() file:@""] ==
       NSOKButton) {
-    result->assign(UTF8ToWide([[save_panel filename] UTF8String]));
+    *result = FilePath([[save_panel filename] fileSystemRepresentation]);
     return true;
   }
   return false;
@@ -669,28 +672,20 @@ base::StringPiece GetDataResource(int resource_id) {
       // use a PNG. The GIF doesn't have the color range needed to correctly
       // match the TIFF they use in Safari.
       path = path.AppendASCII("missingImage.png");
-      bool success = file_util::ReadFileToString(path.ToWStringHack(),
-                                                 &broken_image_data);
+      bool success = file_util::ReadFileToString(path, &broken_image_data);
       if (!success) {
         LOG(FATAL) << "Failed reading: " << path.value();
       }
     }
     return broken_image_data;
   }
-  case IDR_FEED_PREVIEW:
-    // It is necessary to return a feed preview template that contains
-    // a {{URL}} substring where the feed URL should go; see the code
-    // that computes feed previews in feed_preview.cc:MakeFeedPreview.
-    // This fixes issue #932714.
-    return "Feed preview for {{URL}}";
   case IDR_TEXTAREA_RESIZER: {
     // Use webkit's text area resizer image.
     static std::string resize_corner_data;
     if (resize_corner_data.empty()) {
       FilePath path = GetResourcesFilePath();
       path = path.AppendASCII("textAreaResizeCorner.png");
-      bool success = file_util::ReadFileToString(path.ToWStringHack(),
-                                                 &resize_corner_data);
+      bool success = file_util::ReadFileToString(path, &resize_corner_data);
       if (!success) {
         LOG(FATAL) << "Failed reading: " << path.value();
       }

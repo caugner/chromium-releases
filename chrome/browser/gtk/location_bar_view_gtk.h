@@ -10,6 +10,7 @@
 #include <map>
 #include <string>
 
+#include "app/gtk_signal.h"
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
 #include "base/scoped_vector.h"
@@ -30,7 +31,6 @@
 #include "webkit/glue/window_open_disposition.h"
 
 class AutocompleteEditViewGtk;
-class BubblePositioner;
 class Browser;
 class CommandUpdater;
 class ContentSettingImageModel;
@@ -47,8 +47,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
                            public LocationBarTesting,
                            public NotificationObserver {
  public:
-  LocationBarViewGtk(const BubblePositioner* bubble_positioner,
-                     Browser* browser_);
+  explicit LocationBarViewGtk(Browser* browser);
   virtual ~LocationBarViewGtk();
 
   void Init(bool popup_window_mode);
@@ -78,6 +77,12 @@ class LocationBarViewGtk : public AutocompleteEditController,
   // restore saved state that the tab holds.
   void Update(const TabContents* tab_for_state_restoring);
 
+  // Show the bookmark bubble.
+  void ShowStarBubble(const GURL& url, bool newly_boomkarked);
+
+  // Set the starred state of the bookmark star.
+  void SetStarred(bool starred);
+
   // Implement the AutocompleteEditController interface.
   virtual void OnAutocompleteAccept(const GURL& url,
       WindowOpenDisposition disposition,
@@ -96,7 +101,6 @@ class LocationBarViewGtk : public AutocompleteEditController,
   virtual WindowOpenDisposition GetWindowOpenDisposition() const;
   virtual PageTransition::Type GetPageTransition() const;
   virtual void AcceptInput();
-  virtual void AcceptInputWithDisposition(WindowOpenDisposition);
   virtual void FocusLocation(bool select_all);
   virtual void FocusSearch();
   virtual void UpdateContentSettingsIcons();
@@ -104,9 +108,14 @@ class LocationBarViewGtk : public AutocompleteEditController,
   virtual void InvalidatePageActions();
   virtual void SaveStateToContents(TabContents* contents);
   virtual void Revert();
+  virtual const AutocompleteEditView* location_entry() const {
+    return location_entry_.get();
+  }
   virtual AutocompleteEditView* location_entry() {
     return location_entry_.get();
   }
+  virtual void PushForceHidden() {}
+  virtual void PopForceHidden() {}
   virtual LocationBarTesting* GetLocationBarForTesting() { return this; }
 
   // Implement the LocationBarTesting interface.
@@ -121,9 +130,8 @@ class LocationBarViewGtk : public AutocompleteEditController,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // Translation between a security level and the background color.  Both the
-  // location bar and edit have to manage and match the background color.
-  static const GdkColor kBackgroundColorByLevel[3];
+  // Edit background color.
+  static const GdkColor kBackgroundColor;
 
  private:
   class ContentSettingImageViewGtk : public InfoBubbleGtkDelegate {
@@ -141,12 +149,8 @@ class LocationBarViewGtk : public AutocompleteEditController,
     void UpdateFromTabContents(const TabContents* tab_contents);
 
    private:
-    static gboolean OnButtonPressedThunk(GtkWidget* sender,
-                                         GdkEvent* event,
-                                         ContentSettingImageViewGtk* view) {
-      return view->OnButtonPressed(sender, event);
-    }
-    gboolean OnButtonPressed(GtkWidget* sender, GdkEvent* event);
+    CHROMEGTK_CALLBACK_1(ContentSettingImageViewGtk, gboolean, OnButtonPressed,
+                         GdkEvent*);
 
     // InfoBubbleDelegate overrides:
     virtual void InfoBubbleClosing(InfoBubbleGtk* info_bubble,
@@ -208,19 +212,10 @@ class LocationBarViewGtk : public AutocompleteEditController,
     // with a debugger window attached. Returns true if a popup was shown.
     bool ShowPopup(bool devtools);
 
-    static gboolean OnButtonPressedThunk(GtkWidget* sender,
-                                         GdkEvent* event,
-                                         PageActionViewGtk* page_action_view) {
-      return page_action_view->OnButtonPressed(sender, event);
-    }
-    gboolean OnButtonPressed(GtkWidget* sender, GdkEvent* event);
-
-    static gboolean OnExposeEventThunk(GtkWidget* widget,
-                                       GdkEventExpose* event,
-                                       PageActionViewGtk* page_action_view) {
-      return page_action_view->OnExposeEvent(widget, event);
-    }
-    gboolean OnExposeEvent(GtkWidget* widget, GdkEventExpose* event);
+    CHROMEGTK_CALLBACK_1(PageActionViewGtk, gboolean, OnButtonPressed,
+                         GdkEvent*);
+    CHROMEGTK_CALLBACK_1(PageActionViewGtk, gboolean, OnExposeEvent,
+                         GdkEventExpose*);
 
     // The location bar view that owns us.
     LocationBarViewGtk* owner_;
@@ -268,20 +263,39 @@ class LocationBarViewGtk : public AutocompleteEditController,
   };
   friend class PageActionViewGtk;
 
-  static gboolean HandleExposeThunk(GtkWidget* widget, GdkEventExpose* event,
-                                    gpointer userdata) {
-    return reinterpret_cast<LocationBarViewGtk*>(userdata)->
-        HandleExpose(widget, event);
-  }
+  // Creates, initializes, and packs the location icon, EV certificate name,
+  // and optional border.
+  void BuildSiteTypeArea();
 
-  gboolean HandleExpose(GtkWidget* widget, GdkEventExpose* event);
+  // Enable or disable the location icon/EV certificate as a drag source for
+  // the URL.
+  void SetSiteTypeDragSource();
 
-  static gboolean OnSecurityIconPressed(GtkWidget* sender,
-                                        GdkEventButton* event,
-                                        LocationBarViewGtk* location_bar);
+  GtkWidget* site_type_area() { return site_type_alignment_; }
 
-  // Set the SSL icon we should be showing.
-  void SetSecurityIcon(ToolbarModel::Icon icon);
+  CHROMEGTK_CALLBACK_1(LocationBarViewGtk, gboolean, HandleExpose,
+                       GdkEventExpose*);
+  CHROMEGTK_CALLBACK_1(LocationBarViewGtk, gboolean, OnIconReleased,
+                       GdkEventButton*);
+  CHROMEGTK_CALLBACK_4(LocationBarViewGtk, void, OnIconDragData,
+                       GdkDragContext*, GtkSelectionData*, guint, guint);
+  CHROMEGTK_CALLBACK_1(LocationBarViewGtk, void, OnIconDragBegin,
+                       GdkDragContext*);
+  CHROMEGTK_CALLBACK_1(LocationBarViewGtk, void, OnIconDragEnd,
+                       GdkDragContext*);
+  CHROMEGTK_CALLBACK_1(LocationBarViewGtk, void, OnHboxSizeAllocate,
+                       GtkAllocation*);
+  CHROMEGTK_CALLBACK_1(LocationBarViewGtk, void, OnEntryBoxSizeAllocate,
+                       GtkAllocation*);
+  CHROMEGTK_CALLBACK_1(LocationBarViewGtk, gboolean, OnStarButtonPress,
+                       GdkEventButton*);
+
+  // Updates the site type area: changes the icon and shows/hides the EV
+  // certificate information.
+  void UpdateSiteTypeArea();
+
+  // Updates the maximum size of the EV certificate label.
+  void UpdateEVCertificateLabelSize();
 
   // Sets the text that should be displayed in the info label and its associated
   // tooltip text.  Call with an empty string if the info label should be
@@ -296,29 +310,44 @@ class LocationBarViewGtk : public AutocompleteEditController,
 
   void ShowFirstRunBubbleInternal(FirstRun::BubbleType bubble_type);
 
-  static void OnEntryBoxSizeAllocateThunk(GtkWidget* widget,
-                                          GtkAllocation* allocation,
-                                          gpointer userdata) {
-    reinterpret_cast<LocationBarViewGtk*>(userdata)->
-        OnEntryBoxSizeAllocate(allocation);
-  }
-  void OnEntryBoxSizeAllocate(GtkAllocation* allocation);
-
-  // Show or hide |tab_to_search_box_|, |tab_to_search_hint_| and
-  // |type_to_search_hint_| according to the value of |show_selected_keyword_|,
-  // |show_keyword_hint_|, |show_search_hint_| and the available horizontal
-  // space in the location bar.
+  // Show or hide |tab_to_search_box_| and |tab_to_search_hint_| according to
+  // the value of |show_selected_keyword_|, |show_keyword_hint_|, and the
+  // available horizontal space in the location bar.
   void AdjustChildrenVisibility();
+
+  // Build the star icon.
+  void CreateStarButton();
+
+  // Update the star icon after it is toggled or the theme changes.
+  void UpdateStarIcon();
+
+  // Returns true if we should only show the URL and none of the extras like
+  // the star button or page actions.
+  bool ShouldOnlyShowLocation();
 
   // The outermost widget we want to be hosted.
   OwnedWidgetGtk hbox_;
 
-  // SSL icons.
+  // Star button.
+  OwnedWidgetGtk star_;
+  GtkWidget* star_image_;
+  bool starred_;
+
+  // SSL state.
   GtkWidget* security_icon_event_box_;
-  GtkWidget* security_lock_icon_image_;
+  GtkWidget* ev_secure_icon_image_;
+  GtkWidget* secure_icon_image_;
   GtkWidget* security_warning_icon_image_;
-  // Toolbar info text (EV cert info).
-  GtkWidget* info_label_;
+  GtkWidget* security_error_icon_image_;
+  // An icon to the left of the address bar.
+  GtkWidget* site_type_alignment_;
+  GtkWidget* site_type_event_box_;
+  GtkWidget* location_icon_image_;
+  GtkWidget* drag_icon_;
+  bool enable_location_drag_;
+  // TODO(pkasting): Split this label off and move the rest of the items to the
+  // left of the address bar.
+  GtkWidget* security_info_label_;
 
   // Content setting icons.
   OwnedWidgetGtk content_setting_hbox_;
@@ -328,8 +357,12 @@ class LocationBarViewGtk : public AutocompleteEditController,
   OwnedWidgetGtk page_action_hbox_;
   ScopedVector<PageActionViewGtk> page_action_views_;
 
+  // The widget that contains our tab hints and the location bar.
+  GtkWidget* entry_box_;
+
   // Area on the left shown when in tab to search mode.
   GtkWidget* tab_to_search_box_;
+  GtkWidget* tab_to_search_magnifier_;
   GtkWidget* tab_to_search_full_label_;
   GtkWidget* tab_to_search_partial_label_;
 
@@ -339,18 +372,15 @@ class LocationBarViewGtk : public AutocompleteEditController,
   GtkWidget* tab_to_search_hint_icon_;
   GtkWidget* tab_to_search_hint_trailing_label_;
 
-  // Hint to user that the inputted text is not a keyword or url.
-  GtkWidget* type_to_search_hint_;
-
   scoped_ptr<AutocompleteEditViewGtk> location_entry_;
+
+  // Alignment used to wrap |location_entry_|.
+  GtkWidget* location_entry_alignment_;
 
   Profile* profile_;
   CommandUpdater* command_updater_;
   ToolbarModel* toolbar_model_;
   Browser* browser_;
-
-  // We need to hold on to this just to it pass to the edit.
-  const BubblePositioner* bubble_positioner_;
 
   // When we get an OnAutocompleteAccept notification from the autocomplete
   // edit, we save the input string so we can give it back to the browser on
@@ -363,7 +393,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
   // The transition type to use for the navigation.
   PageTransition::Type transition_;
 
-  // Used schedule a task for the first run info bubble.
+  // Used to schedule a task for the first run info bubble.
   ScopedRunnableMethodFactory<LocationBarViewGtk> first_run_bubble_;
 
   // When true, the location bar view is read only and also is has a slightly
@@ -375,6 +405,9 @@ class LocationBarViewGtk : public AutocompleteEditController,
 
   NotificationRegistrar registrar_;
 
+  // Width of the main |hbox_|. Used to properly elide the EV certificate.
+  int hbox_width_;
+
   // Width of the hbox that holds |tab_to_search_box_|, |location_entry_| and
   // |tab_to_search_hint_|.
   int entry_box_width_;
@@ -385,8 +418,8 @@ class LocationBarViewGtk : public AutocompleteEditController,
   // Indicate if |tab_to_search_hint_| should be shown.
   bool show_keyword_hint_;
 
-  // Indicate if |type_to_search_hint_| should be shown.
-  bool show_search_hint_;
+  // The last search keyword that was shown via the |tab_to_search_box_|.
+  std::wstring last_keyword_;
 
   DISALLOW_COPY_AND_ASSIGN(LocationBarViewGtk);
 };

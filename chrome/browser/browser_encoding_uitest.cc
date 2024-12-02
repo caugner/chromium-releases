@@ -109,11 +109,8 @@ TEST_F(BrowserEncodingTest, TestEncodingAliasMapping) {
   }
 }
 
-#if defined(OS_WIN)
-// We are disabling this test on MacOS and Linux because on those platforms
-// AutomationProvider::OverrideEncoding is not implemented yet.
-// TODO(port): Enable when encoding-related parts of Browser are ported.
-TEST_F(BrowserEncodingTest, TestOverrideEncoding) {
+// Marked as flaky: see  http://crbug.com/44668
+TEST_F(BrowserEncodingTest, FLAKY_TestOverrideEncoding) {
   const char* const kTestFileName = "gb18030_with_iso88591_meta.html";
   const char* const kExpectedFileName =
       "expected_gb18030_saved_from_iso88591_meta.html";
@@ -157,7 +154,6 @@ TEST_F(BrowserEncodingTest, TestOverrideEncoding) {
   expected_file_name = expected_file_name.AppendASCII(kExpectedFileName);
   CheckFile(full_file_name, expected_file_name, true);
 }
-#endif  // defined(OS_WIN)
 
 // The following encodings are excluded from the auto-detection test because
 // it's a known issue that the current encoding detector does not detect them:
@@ -173,7 +169,8 @@ TEST_F(BrowserEncodingTest, TestOverrideEncoding) {
 
 // For Hebrew, the expected encoding value is ISO-8859-8-I. See
 // http://crbug.com/2927 for more details.
-TEST_F(BrowserEncodingTest, TestEncodingAutoDetect) {
+// FLAKY: see http://crbug.com/44666
+TEST_F(BrowserEncodingTest, FLAKY_TestEncodingAutoDetect) {
   struct EncodingAutoDetectTestData {
     const char* test_file_name;   // File name of test data.
     const char* expected_result;  // File name of expected results.
@@ -241,7 +238,7 @@ TEST_F(BrowserEncodingTest, TestEncodingAutoDetect) {
   // auto-detector (Please refer to the above comments) to make sure we
   // incorrectly decode the page. Now we use ISO-8859-4.
   ASSERT_TRUE(browser->SetStringPreference(prefs::kDefaultCharset,
-                                           L"ISO-8859-4"));
+                                           "ISO-8859-4"));
   scoped_refptr<TabProxy> tab(GetActiveTab());
   ASSERT_TRUE(tab.get());
 

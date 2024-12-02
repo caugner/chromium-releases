@@ -20,13 +20,6 @@
 
 namespace {
 
-// Portion of the screen allotted for notifications. When notification balloons
-// extend over this, no new notifications are shown until some are closed.
-const double kPercentBalloonFillFactor = 0.7;
-
-// Allow at least this number of balloons on the screen.
-const int kMinAllowedBalloonCount = 2;
-
 // Margin from the edge of the work area
 const int kVerticalEdgeMargin = 5;
 const int kHorizontalEdgeMargin = 5;
@@ -35,7 +28,7 @@ class NotificationMatcher {
  public:
   explicit NotificationMatcher(const Notification& notification)
       : notification_(notification) {}
-  bool operator()(const Balloon* b) {
+  bool operator()(const Balloon* b) const {
     return notification_.IsSame(b->notification());
   }
  private:
@@ -45,9 +38,6 @@ class NotificationMatcher {
 }  // namespace
 
 namespace chromeos {
-
-const int BalloonCollectionImpl::kBalloonWidth = 300;
-const int BalloonCollectionImpl::kBalloonMinHeight = 24;
 
 BalloonCollectionImpl::BalloonCollectionImpl()
     : notification_ui_(new NotificationPanel()) {
@@ -93,13 +83,25 @@ void BalloonCollectionImpl::AddSystemNotification(
 bool BalloonCollectionImpl::UpdateNotification(
     const Notification& notification) {
   Balloons::iterator iter = FindBalloon(notification);
-  if (iter != balloons_.end()) {
-    Balloon* balloon = *iter;
-    balloon->Update(notification);
-    notification_ui_->Update(balloon);
-    return true;
-  }
-  return false;
+  if (iter == balloons_.end())
+    return false;
+  Balloon* balloon = *iter;
+  balloon->Update(notification);
+  notification_ui_->Update(balloon);
+  return true;
+}
+
+bool BalloonCollectionImpl::UpdateAndShowNotification(
+    const Notification& notification) {
+  Balloons::iterator iter = FindBalloon(notification);
+  if (iter == balloons_.end())
+    return false;
+  Balloon* balloon = *iter;
+  balloon->Update(notification);
+  bool updated = notification_ui_->Update(balloon);
+  DCHECK(updated);
+  notification_ui_->Show(balloon);
+  return true;
 }
 
 bool BalloonCollectionImpl::Remove(const Notification& notification) {
@@ -141,19 +143,20 @@ void BalloonCollectionImpl::Observe(NotificationType type,
                                     const NotificationSource& source,
                                     const NotificationDetails& details) {
   DCHECK(type == NotificationType::BROWSER_CLOSED);
-  if (BrowserList::GetLastActive() == NULL) {
-    // When exitting, we need to shutdown all renderers in
-    // BalloonViewImpl before IO thread gets deleted in the
-    // BrowserProcessImpl's destructor.  See http://crbug.com/40810
-    // for details.
+  bool app_closing = *Details<bool>(details).ptr();
+  // When exitting, we need to shutdown all renderers in
+  // BalloonViewImpl before IO thread gets deleted in the
+  // BrowserProcessImpl's destructor.  See http://crbug.com/40810
+  // for details.
+  if(app_closing)
     Shutdown();
-  }
 }
 
 void BalloonCollectionImpl::Shutdown() {
   // We need to remove the panel first because deleting
   // views that are not owned by parent will not remove
   // themselves from the parent.
+  DLOG(INFO) << "Shutting down notification UI";
   notification_ui_.reset();
   STLDeleteElements(&balloons_);
 }
@@ -162,7 +165,6 @@ Balloon* BalloonCollectionImpl::MakeBalloon(const Notification& notification,
                                             Profile* profile) {
   Balloon* new_balloon = new Balloon(notification, profile, this);
   new_balloon->set_view(new chromeos::BalloonViewImpl(false, true));
-  new_balloon->set_content_size(gfx::Size(kBalloonWidth, kBalloonMinHeight));
   return new_balloon;
 }
 

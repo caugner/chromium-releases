@@ -11,9 +11,9 @@
 #include "chrome/browser/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/importer/importer_data_types.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/common/platform_util.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -39,7 +39,7 @@ bool FirstRunDialog::Show(Profile* profile,
   // http://code.google.com/p/chromium/issues/detail?id=12552
   // Instead, run a loop and extract the response manually.
   g_signal_connect(first_run->dialog_, "response",
-                   G_CALLBACK(HandleOnResponseDialog), first_run);
+                   G_CALLBACK(OnResponseDialogThunk), first_run);
   gtk_widget_show_all(first_run->dialog_);
   MessageLoop::current()->Run();
 
@@ -95,7 +95,7 @@ FirstRunDialog::FirstRunDialog(Profile* profile, int& response)
                      gtk_util::IndentWidget(learn_more_link),
                      FALSE, FALSE, 0);
   g_signal_connect(learn_more_link, "clicked",
-                   G_CALLBACK(OnLearnMoreLinkClicked), this);
+                   G_CALLBACK(OnLearnMoreLinkClickedThunk), this);
 
   report_crashes_ = gtk_check_button_new();
   gtk_container_add(GTK_CONTAINER(report_crashes_), check_label);
@@ -140,7 +140,7 @@ FirstRunDialog::FirstRunDialog(Profile* profile, int& response)
   gtk_box_pack_start(GTK_BOX(content_area), vbox, FALSE, FALSE, 0);
 }
 
-void FirstRunDialog::OnDialogResponse(GtkWidget* widget, int response) {
+void FirstRunDialog::OnResponseDialog(GtkWidget* widget, int response) {
   bool import_started = false;
   gtk_widget_hide_all(dialog_);
   response_ = response;
@@ -183,16 +183,14 @@ void FirstRunDialog::OnDialogResponse(GtkWidget* widget, int response) {
     FirstRunDone();
 }
 
-// static
-void FirstRunDialog::OnLearnMoreLinkClicked(GtkButton *button,
-                                            FirstRunDialog* first_run) {
+void FirstRunDialog::OnLearnMoreLinkClicked(GtkButton* button) {
   platform_util::OpenExternal(GURL(
       l10n_util::GetStringUTF8(IDS_LEARN_MORE_REPORTING_URL)));
 }
 
 void FirstRunDialog::FirstRunDone() {
   // Set preference to show first run bubble and welcome page.
-  FirstRun::SetShowFirstRunBubblePref();
+  FirstRun::SetShowFirstRunBubblePref(true);
   FirstRun::SetShowWelcomePagePref();
 
   gtk_widget_destroy(dialog_);

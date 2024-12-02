@@ -8,9 +8,8 @@
 
 namespace browser_sync {
 
-// TODO(akalin): Eventually change this to NOTIFICATION_NEW.
 const NotificationMethod kDefaultNotificationMethod =
-    NOTIFICATION_TRANSITIONAL;
+    NOTIFICATION_SERVER;
 
 std::string NotificationMethodToString(
     NotificationMethod notification_method) {
@@ -23,6 +22,9 @@ std::string NotificationMethodToString(
       break;
     case NOTIFICATION_NEW:
       return "NOTIFICATION_NEW";
+      break;
+    case NOTIFICATION_SERVER:
+      return "NOTIFICATION_SERVER";
       break;
     default:
       LOG(WARNING) << "Unknown value for notification method: "
@@ -39,6 +41,8 @@ NotificationMethod StringToNotificationMethod(const std::string& str) {
     return NOTIFICATION_TRANSITIONAL;
   } else if (str == "new") {
     return NOTIFICATION_NEW;
+  } else if (str == "server") {
+    return NOTIFICATION_SERVER;
   }
   LOG(WARNING) << "Unknown notification method \"" << str
                << "\"; using method "

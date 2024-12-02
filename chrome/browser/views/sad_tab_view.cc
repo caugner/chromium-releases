@@ -8,6 +8,7 @@
 #include "app/resource_bundle.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/size.h"
 #include "gfx/skia_util.h"
 #include "grit/generated_resources.h"
@@ -56,9 +57,8 @@ void SadTabView::Paint(gfx::Canvas* canvas) {
                                             kBackgroundColor,
                                             kBackgroundEndColor))->safeUnref();
   paint.setStyle(SkPaint::kFill_Style);
-  canvas->drawRectCoords(0, 0,
-                         SkIntToScalar(width()), SkIntToScalar(height()),
-                         paint);
+  canvas->AsCanvasSkia()->drawRectCoords(
+      0, 0, SkIntToScalar(width()), SkIntToScalar(height()), paint);
 
   canvas->DrawBitmapInt(*sad_tab_bitmap_, icon_bounds_.x(), icon_bounds_.y());
 
@@ -89,7 +89,7 @@ void SadTabView::Layout() {
   int title_height = title_font_->height();
   title_bounds_.SetRect(title_x, title_y, title_width_, title_height);
 
-  gfx::Canvas cc(0, 0, true);
+  gfx::CanvasSkia cc(0, 0, true);
   int message_width = static_cast<int>(width() * kMessageSize);
   int message_height = 0;
   cc.SizeStringInt(message_, *message_font_, &message_width, &message_height,

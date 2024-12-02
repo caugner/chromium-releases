@@ -14,8 +14,8 @@ TEST(WinUtils, IsReparsePoint) {
   // Create a temp file because we need write access to it.
   wchar_t temp_directory[MAX_PATH];
   wchar_t my_folder[MAX_PATH];
-  ASSERT_NE(::GetTempPath(MAX_PATH, temp_directory), 0);
-  ASSERT_NE(::GetTempFileName(temp_directory, L"test", 0, my_folder), 0);
+  ASSERT_NE(::GetTempPath(MAX_PATH, temp_directory), 0u);
+  ASSERT_NE(::GetTempFileName(temp_directory, L"test", 0, my_folder), 0u);
 
   // Delete the file and create a directory instead.
   ASSERT_TRUE(::DeleteFile(my_folder));
@@ -37,7 +37,7 @@ TEST(WinUtils, IsReparsePoint) {
   HANDLE dir = ::CreateFile(my_folder, FILE_ALL_ACCESS,
                             FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
                             OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-  EXPECT_TRUE(INVALID_HANDLE_VALUE != dir);
+  EXPECT_NE(INVALID_HANDLE_VALUE, dir);
 
   std::wstring temp_dir_nt = std::wstring(L"\\??\\") + temp_directory;
   EXPECT_TRUE(SetReparsePoint(dir, temp_dir_nt.c_str()));

@@ -54,7 +54,11 @@ struct Options {
         up_axis(0, 0, 0),
         pretty_print(false),
         keep_filters(false),
-        keep_materials(false) {
+        keep_materials(false),
+        archive(true),
+        convert_dds_to_png(false),
+        convert_cg_to_glsl(false),
+        converter_tool() {
   }
 
   // A list of paths to search for assets..
@@ -87,8 +91,18 @@ struct Options {
   // Use binary formats for buffers, skin, curve.
   bool binary;
 
-  // Don't make a gzipped tar file. Just make json.
-  bool json_only;
+  // True means make a gzipped tar file. False means write individual files.
+  bool archive;
+
+  // True means convert DDS files to PNGs. For cube map textures, this
+  // implies writing six separate PNGs.
+  bool convert_dds_to_png;
+
+  // True means convert CG shaders go GLSL using external cgc tool.
+  bool convert_cg_to_glsl;
+
+  // Path to shader converter tool.
+  FilePath converter_tool;
 };
 
 // Converts the given file for use in O3D.  This is done by

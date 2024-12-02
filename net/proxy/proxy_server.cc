@@ -84,6 +84,13 @@ std::string ProxyServer::host_and_port() const {
   return host_ + ":" + IntToString(port_);
 }
 
+HostPortPair ProxyServer::host_port_pair() const {
+  // Doesn't make sense to call this if the URI scheme doesn't
+  // have concept of a host.
+  DCHECK(is_valid() && !is_direct());
+  return HostPortPair(host_, port_);
+}
+
 // static
 ProxyServer ProxyServer::FromURI(const std::string& uri,
                                  Scheme default_scheme) {
@@ -137,6 +144,7 @@ ProxyServer ProxyServer::FromPacString(const std::string& pac_string) {
   return FromPacString(pac_string.begin(), pac_string.end());
 }
 
+// static
 ProxyServer ProxyServer::FromPacString(std::string::const_iterator begin,
                                        std::string::const_iterator end) {
   // Trim the leading/trailing whitespace.

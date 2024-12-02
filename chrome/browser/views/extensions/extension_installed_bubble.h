@@ -13,6 +13,7 @@
 
 class Browser;
 class Extension;
+class InstalledBubbleContent;
 class SkBitmap;
 
 // Provides feedback to the user upon successful installation of an
@@ -30,10 +31,11 @@ class ExtensionInstalledBubble
       public NotificationObserver,
       public base::RefCountedThreadSafe<ExtensionInstalledBubble> {
  public:
-  // The behavior and content of this InfoBubble comes in three varieties.
+  // The behavior and content of this InfoBubble comes in these varieties:
   enum BubbleType {
     BROWSER_ACTION,
     PAGE_ACTION,
+    EXTENSION_APP,
     GENERIC
   };
 
@@ -64,15 +66,13 @@ class ExtensionInstalledBubble
   virtual void InfoBubbleClosing(InfoBubble* info_bubble,
                                  bool closed_by_escape);
   virtual bool CloseOnEscape() { return true; }
+  virtual bool FadeInOnShow() { return true; }
 
-  // Arrow subjects appear on the right side (for RTL), so do not prefer
-  // origin side anchor.
-  virtual bool PreferOriginSideAnchor() { return false; }
-
-  Extension *extension_;
-  Browser *browser_;
+  Extension* extension_;
+  Browser* browser_;
   SkBitmap icon_;
   NotificationRegistrar registrar_;
+  InstalledBubbleContent* bubble_content_;
   BubbleType type_;
 
   // How many times we've deferred due to animations being in progress.

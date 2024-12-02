@@ -133,7 +133,10 @@ void PrintViewManager::DidPrintPage(
   // Update the rendered document. It will send notifications to the listener.
   document->SetPage(params.page_number,
                     metafile.release(),
-                    params.actual_shrink);
+                    params.actual_shrink,
+                    params.page_size,
+                    params.content_area,
+                    params.has_visible_overlays);
 #endif
   ShouldQuitFromInnerMessageLoop();
 }

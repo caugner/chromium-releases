@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 #define MEDIA_AUDIO_MAC_AUDIO_MANAGER_MAC_H_
 
 #include "base/basictypes.h"
-#include "media/audio/audio_output.h"
+#include "media/audio/audio_io.h"
 
 class PCMQueueOutAudioOutputStream;
 
@@ -18,16 +18,21 @@ class AudioManagerMac : public AudioManager {
   AudioManagerMac() {};
 
   // Implementation of AudioManager.
-  virtual bool HasAudioDevices();
-  virtual AudioOutputStream* MakeAudioStream(Format format, int channels,
-                                             int sample_rate,
-                                             char bits_per_sample);
+  virtual bool HasAudioOutputDevices();
+  virtual bool HasAudioInputDevices();
+  virtual AudioOutputStream* MakeAudioOutputStream(Format format, int channels,
+                                                   int sample_rate,
+                                                   char bits_per_sample);
+  virtual AudioInputStream* MakeAudioInputStream(Format format, int channels,
+                                                 int sample_rate,
+                                                 char bits_per_sample,
+                                                 uint32 samples_per_packet);
   virtual void MuteAll();
   virtual void UnMuteAll();
 
   // Mac-only method to free a stream created in MakeAudioStream.
   // It is called internally by the audio stream when it has been closed.
-  void ReleaseStream(PCMQueueOutAudioOutputStream* stream);
+  void ReleaseOutputStream(PCMQueueOutAudioOutputStream* stream);
 
  private:
   friend void DestroyAudioManagerMac(void*);

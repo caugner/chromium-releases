@@ -15,8 +15,8 @@
 #include "base/sys_string_conversions.h"
 #include "net/base/net_util.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
-#include "webkit/default_plugin/default_plugin_shared.h"
 #include "webkit/glue/webkit_glue.h"
+#include "webkit/glue/plugins/default_plugin_shared.h"
 #include "webkit/glue/plugins/npapi_extension_thunk.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 #include "webkit/glue/plugins/plugin_lib.h"
@@ -278,7 +278,7 @@ bool PluginHost::SetPostData(const char* buf,
 extern "C" {
 
 // Allocates memory from the host's memory space.
-void* NPN_MemAlloc(uint32 size) {
+void* NPN_MemAlloc(uint32_t size) {
   scoped_refptr<NPAPI::PluginHost> host = NPAPI::PluginHost::Singleton();
   if (host != NULL) {
     // Note: We must use the same allocator/deallocator
@@ -300,7 +300,7 @@ void NPN_MemFree(void* ptr) {
 }
 
 // Requests that the host free a specified amount of memory.
-uint32 NPN_MemFlush(uint32 size) {
+uint32_t NPN_MemFlush(uint32_t size) {
   // This is not relevant on Windows; MAC specific
   return size;
 }
@@ -392,7 +392,7 @@ NPError NPN_GetURL(NPP id, const char* url, const char* target) {
 static NPError PostURLNotify(NPP id,
                              const char* url,
                              const char* target,
-                             uint32 len,
+                             uint32_t len,
                              const char* buf,
                              NPBool file,
                              bool notify,
@@ -438,20 +438,19 @@ static NPError PostURLNotify(NPP id,
       return NPERR_FILE_NOT_FOUND;
 
     std::string file_path_ascii(buf);
-    std::wstring file_path;
+    FilePath file_path;
     static const char kFileUrlPrefix[] = "file:";
     if (StartsWithASCII(file_path_ascii, kFileUrlPrefix, false)) {
       GURL file_url(file_path_ascii);
       DCHECK(file_url.SchemeIsFile());
-      FilePath path;
-      net::FileURLToFilePath(file_url, &path);
-      file_path = path.ToWStringHack();
+      net::FileURLToFilePath(file_url, &file_path);
     } else {
-      file_path = base::SysNativeMBToWide(file_path_ascii);
+      file_path = FilePath::FromWStringHack(
+          base::SysNativeMBToWide(file_path_ascii));
     }
 
     file_util::FileInfo post_file_info = {0};
-    if (!file_util::GetFileInfo(file_path.c_str(), &post_file_info) ||
+    if (!file_util::GetFileInfo(file_path, &post_file_info) ||
         post_file_info.is_directory)
       return NPERR_FILE_NOT_FOUND;
 
@@ -479,7 +478,7 @@ static NPError PostURLNotify(NPP id,
 NPError NPN_PostURLNotify(NPP id,
                           const char* url,
                           const char* target,
-                          uint32 len,
+                          uint32_t len,
                           const char* buf,
                           NPBool file,
                           void* notify_data) {
@@ -489,7 +488,7 @@ NPError NPN_PostURLNotify(NPP id,
 NPError NPN_PostURL(NPP id,
                     const char* url,
                     const char* target,
-                    uint32 len,
+                    uint32_t len,
                     const char* buf,
                     NPBool file) {
   // POSTs data to an URL, either from a temp file or a buffer.
@@ -530,7 +529,7 @@ NPError NPN_NewStream(NPP id,
   return NPERR_GENERIC_ERROR;
 }
 
-int32 NPN_Write(NPP id, NPStream* stream, int32 len, void* buffer) {
+int32_t NPN_Write(NPP id, NPStream* stream, int32_t len, void* buffer) {
   // Writes data to an existing Plugin-created stream.
 
   // TODO: implement me
@@ -562,18 +561,32 @@ const char* NPN_UserAgent(NPP id) {
   // Flash passes in a null id during the NP_initialize call.  We need to
   // default to the Mozilla user agent if we don't have an NPP instance or
   // else Flash won't request windowless mode.
+  bool use_mozilla_user_agent = true;
   if (id) {
     scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
     if (plugin.get() && !plugin->use_mozilla_user_agent())
-      return webkit_glue::GetUserAgent(GURL()).c_str();
+      use_mozilla_user_agent = false;
   }
 
-  return "Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.9a1) Gecko/20061103 Firefox/2.0a1";
-#else
-  // TODO(port): For now we always use our real useragent on Mac and Linux.
-  // We might eventually need to spoof for some plugins.
-  return webkit_glue::GetUserAgent(GURL()).c_str();
+  if (use_mozilla_user_agent)
+    return "Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.9a1) "
+        "Gecko/20061103 Firefox/2.0a1";
+#elif defined(OS_MACOSX)
+  // Silverlight 4 doesn't handle events correctly unless we claim to be Safari.
+  scoped_refptr<NPAPI::PluginInstance> plugin;
+  if (id)
+    plugin = FindInstance(id);
+  if (plugin.get()) {
+    WebPluginInfo plugin_info = plugin->plugin_lib()->plugin_info();
+    if (plugin_info.name == ASCIIToUTF16("Silverlight Plug-In") &&
+        StartsWith(plugin_info.version, ASCIIToUTF16("4."), false)) {
+      return "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_4; en-us) "
+          "AppleWebKit/534.1+ (KHTML, like Gecko) Version/5.0 Safari/533.16";
+    }
+  }
 #endif
+
+  return webkit_glue::GetUserAgent(GURL()).c_str();
 }
 
 void NPN_Status(NPP id, const char* message) {
@@ -607,7 +620,7 @@ void NPN_InvalidateRect(NPP id, NPRect *invalidRect) {
         rect.right = invalidRect->right;
         rect.top = invalidRect->top;
         rect.bottom = invalidRect->bottom;
-        ::InvalidateRect(plugin->window_handle(), &rect, FALSE);
+        ::InvalidateRect(plugin->window_handle(), &rect, false);
         return;
       }
 #endif
@@ -657,7 +670,7 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
 
   NPError rv = NPERR_GENERIC_ERROR;
 
-  switch (variable) {
+  switch (static_cast<int>(variable)) {
     case NPNVWindowNPObject: {
       scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
       NPObject *np_object = plugin->webplugin()->GetWindowScriptNPObject();
@@ -693,6 +706,10 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
   #if !defined(OS_MACOSX)  // OS X doesn't have windowed plugins.
     case NPNVnetscapeWindow: {
       scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
+      if (!plugin.get()) {
+        NOTREACHED();
+        return NPERR_GENERIC_ERROR;
+      }
       gfx::PluginWindowHandle handle = plugin->window_handle();
       *((void**)value) = (void*)handle;
       rv = NPERR_NO_ERROR;
@@ -713,13 +730,13 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
       break;
 
     case NPNVSupportsXEmbedBool:
-      *reinterpret_cast<NPBool*>(value) = TRUE;
+      *reinterpret_cast<NPBool*>(value) = true;
       rv = NPERR_NO_ERROR;
       break;
   #endif
     case NPNVSupportsWindowless: {
       NPBool* supports_windowless = reinterpret_cast<NPBool*>(value);
-      *supports_windowless = TRUE;
+      *supports_windowless = true;
       rv = NPERR_NO_ERROR;
       break;
     }
@@ -763,7 +780,7 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
       // only want to use it as a fallback to keep plugins from crashing: if a
       // plugin knows enough to ask, we want them to use CoreGraphics.
       NPBool* supports_qd = reinterpret_cast<NPBool*>(value);
-      *supports_qd = FALSE;
+      *supports_qd = false;
       rv = NPERR_NO_ERROR;
       break;
     }
@@ -775,14 +792,17 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
     case NPNVsupportsCocoaBool: {
       // we do support these drawing and event models.
       NPBool* supports_model = reinterpret_cast<NPBool*>(value);
-      *supports_model = TRUE;
+      *supports_model = true;
       rv = NPERR_NO_ERROR;
       break;
     }
-    case NPNVsupportsCoreAnimationBool: {
+    case NPNVsupportsCoreAnimationBool:
+    case NPNVsupportsInvalidatingCoreAnimationBool: {
       // We only support the Core Animation model on 10.6 and higher
+      // TODO(stuartmorgan): Once existing CA plugins have implemented the
+      // invalidating version, remove support for the other version.
       NPBool* supports_model = reinterpret_cast<NPBool*>(value);
-      *supports_model = SupportsSharingAcceleratedSurfaces() ? TRUE : FALSE;
+      *supports_model = SupportsSharingAcceleratedSurfaces() ? true : false;
       rv = NPERR_NO_ERROR;
       break;
     }
@@ -790,7 +810,7 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
       // This drawing model was never widely supported, and we don't plan to
       // support it.
       NPBool* supports_model = reinterpret_cast<NPBool*>(value);
-      *supports_model = FALSE;
+      *supports_model = false;
       rv = NPERR_NO_ERROR;
       break;
     }
@@ -853,7 +873,8 @@ NPError NPN_SetValue(NPP id, NPPVariable variable, void* value) {
       if (model == NPDrawingModelCoreGraphics) {
         plugin->set_drawing_model(static_cast<NPDrawingModel>(model));
         return NPERR_NO_ERROR;
-      } else if (model == NPDrawingModelCoreAnimation &&
+      } else if ((model == NPDrawingModelCoreAnimation ||
+                  model == NPDrawingModelInvalidatingCoreAnimation) &&
                  SupportsSharingAcceleratedSurfaces()) {
         plugin->set_drawing_model(static_cast<NPDrawingModel>(model));
         return NPERR_NO_ERROR;
@@ -900,7 +921,7 @@ void* NPN_GetJavaPeer(NPP) {
 void NPN_PushPopupsEnabledState(NPP id, NPBool enabled) {
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   if (plugin)
-    plugin->PushPopupsEnabledState(enabled);
+    plugin->PushPopupsEnabledState(enabled ? true : false);
 }
 
 void NPN_PopPopupsEnabledState(NPP id) {
@@ -921,7 +942,7 @@ NPError NPN_GetValueForURL(NPP id,
                            NPNURLVariable variable,
                            const char* url,
                            char** value,
-                           uint32* len) {
+                           uint32_t* len) {
   if (!id)
     return NPERR_INVALID_PARAM;
 
@@ -961,7 +982,7 @@ NPError NPN_GetValueForURL(NPP id,
   // Allocate this using the NPAPI allocator. The plugin will call
   // NPN_Free to free this.
   *value = static_cast<char*>(NPN_MemAlloc(result.length() + 1));
-  strncpy(*value, result.c_str(), result.length() + 1);
+  base::strlcpy(*value, result.c_str(), result.length() + 1);
   *len = result.length();
 
   return NPERR_NO_ERROR;
@@ -971,7 +992,7 @@ NPError NPN_SetValueForURL(NPP id,
                            NPNURLVariable variable,
                            const char* url,
                            const char* value,
-                           uint32 len) {
+                           uint32_t len) {
   if (!id)
     return NPERR_INVALID_PARAM;
 
@@ -1011,9 +1032,9 @@ NPError NPN_GetAuthenticationInfo(NPP id,
                                   const char* scheme,
                                   const char* realm,
                                   char** username,
-                                  uint32* ulen,
+                                  uint32_t* ulen,
                                   char** password,
-                                  uint32* plen) {
+                                  uint32_t* plen) {
   if (!id || !protocol || !host || !scheme || !realm || !username ||
       !ulen || !password || !plen)
     return NPERR_INVALID_PARAM;
@@ -1022,10 +1043,10 @@ NPError NPN_GetAuthenticationInfo(NPP id,
   return NPERR_GENERIC_ERROR;
 }
 
-uint32 NPN_ScheduleTimer(NPP id,
-                         uint32 interval,
-                         NPBool repeat,
-                         void (*func)(NPP id, uint32 timer_id)) {
+uint32_t NPN_ScheduleTimer(NPP id,
+                           uint32_t interval,
+                           NPBool repeat,
+                           void (*func)(NPP id, uint32_t timer_id)) {
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   if (!plugin)
     return 0;
@@ -1033,7 +1054,7 @@ uint32 NPN_ScheduleTimer(NPP id,
   return plugin->ScheduleTimer(interval, repeat, func);
 }
 
-void NPN_UnscheduleTimer(NPP id, uint32 timer_id) {
+void NPN_UnscheduleTimer(NPP id, uint32_t timer_id) {
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   if (plugin)
     plugin->UnscheduleTimer(timer_id);
@@ -1061,7 +1082,7 @@ NPBool NPN_ConvertPoint(NPP id, double sourceX, double sourceY,
                                 destX, destY, destSpace);
   }
   NOTREACHED();
-  return FALSE;
+  return false;
 }
 
 }  // extern "C"

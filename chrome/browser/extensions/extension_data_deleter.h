@@ -10,7 +10,7 @@
 #include "base/ref_counted.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/in_process_webkit/webkit_context.h"
-#include "chrome/browser/net/url_request_context_getter.h"
+#include "chrome/common/net/url_request_context_getter.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/database/database_tracker.h"
 
@@ -33,6 +33,10 @@ class ExtensionDataDeleter
   void StartDeleting();
 
  private:
+  // Deletes the cookies for the extension. May only be called on the io
+  // thread.
+  void DeleteCookiesOnIOThread();
+
   // Deletes the database for the extension. May only be called on the file
   // thread.
   void DeleteDatabaseOnFileThread();

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -79,48 +79,58 @@ class BrowserActivityObserver : public NotificationObserver {
 
 BrowserActivityObserver* activity_observer = NULL;
 
-// Returns true if the specified |browser| has a matching profile and type to
-// those specified. |type| can also be TYPE_ANY, which means only |profile|
-// must be matched. If |match_incognito| is true, we check both the incognito
-// and regular versions of the profile.
-bool BrowserMatchesProfileAndType(Browser* browser,
-                                  Profile* profile,
-                                  Browser::Type type,
-                                  bool match_incognito) {
-  bool profile_match = match_incognito ?
-      browser->profile()->GetOriginalProfile() ==
-          profile->GetOriginalProfile() :
-      browser->profile() == profile;
-  return (type == Browser::TYPE_ANY || browser->type() == type) &&
-      profile_match;
-}
+// Type used to indicate only the type should be matched.
+const int kMatchNothing                 = 0;
 
-// Finds a registered Browser object matching |profile| and |type|. This
-// walks the list of Browsers that have ever been activated from most recently
-// activated to least. If a Browser has never been activated, such as in a test
-// scenario, this function will _not_ find it. Fall back to
-// FindBrowserMatching() in that case.
-Browser* FindInLastActiveMatching(Profile* profile, Browser::Type type,
-                                  bool match_incognito) {
-  for (BrowserList::list_type::const_reverse_iterator i =
-       BrowserList::begin_last_active(); i != BrowserList::end_last_active();
-       ++i) {
-    if (BrowserMatchesProfileAndType(*i, profile, type, match_incognito))
-      return *i;
+// See BrowserMatches for details.
+const int kMatchOriginalProfile         = 1 << 0;
+
+// See BrowserMatches for details.
+const int kMatchCanSupportWindowFeature = 1 << 1;
+
+// Returns true if the specified |browser| matches the specified arguments.
+// |match_types| is a bitmask dictating what parameters to match:
+// . If it contains kMatchOriginalProfile then the original profile of the
+//   browser must match |profile->GetOriginalProfile()|. This is used to match
+//   incognito windows.
+// . If it contains kMatchCanSupportWindowFeature
+//   |CanSupportWindowFeature(window_feature)| must return true.
+bool BrowserMatches(Browser* browser,
+                    Profile* profile,
+                    Browser::Type type,
+                    Browser::WindowFeature window_feature,
+                    uint32 match_types) {
+  if (match_types & kMatchCanSupportWindowFeature &&
+      !browser->CanSupportWindowFeature(window_feature)) {
+    return false;
   }
-  return NULL;
+
+  if (match_types & kMatchOriginalProfile) {
+    if (browser->profile()->GetOriginalProfile() !=
+        profile->GetOriginalProfile())
+      return false;
+  } else if (browser->profile() != profile) {
+    return false;
+  }
+
+  if (type != Browser::TYPE_ANY && browser->type() != type)
+    return false;
+
+  return true;
 }
 
-// Finds a registered Browser object matching |profile| and |type| even if that
-// Browser has never been activated. This is a forward walk, and intended as a
-// last ditch fallback mostly to handle tests run on machines where no window is
-// ever activated. The user experience if this function is relied on is not good
-// since matching browsers will be returned in registration (creation) order.
-Browser* FindBrowserMatching(Profile* profile, Browser::Type type,
-                             bool match_incognito) {
-  for (BrowserList::const_iterator i = BrowserList::begin();
-       i != BrowserList::end(); ++i) {
-    if (BrowserMatchesProfileAndType(*i, profile, type, match_incognito))
+// Returns the first browser in the specified iterator that returns true from
+// |BrowserMatches|, or null if no browsers match the arguments. See
+// |BrowserMatches| for details on the arguments.
+template <class T>
+Browser* FindBrowserMatching(const T& begin,
+                             const T& end,
+                             Profile* profile,
+                             Browser::Type type,
+                             Browser::WindowFeature window_feature,
+                             uint32 match_types) {
+  for (T i = begin; i != end; ++i) {
+    if (BrowserMatches(*i, profile, type, window_feature, match_types))
       return *i;
   }
   return NULL;
@@ -128,8 +138,8 @@ Browser* FindBrowserMatching(Profile* profile, Browser::Type type,
 
 }  // namespace
 
-BrowserList::list_type BrowserList::browsers_;
-std::vector<BrowserList::Observer*> BrowserList::observers_;
+BrowserList::BrowserVector BrowserList::browsers_;
+ObserverList<BrowserList::Observer> BrowserList::observers_;
 
 // static
 void BrowserList::AddBrowser(Browser* browser) {
@@ -149,8 +159,7 @@ void BrowserList::AddBrowser(Browser* browser) {
   // Send out notifications after add has occurred. Do some basic checking to
   // try to catch evil observers that change the list from under us.
   size_t original_count = observers_.size();
-  for (size_t i = 0; i < observers_.size(); ++i)
-    observers_[i]->OnBrowserAdded(browser);
+  FOR_EACH_OBSERVER(Observer, observers_, OnBrowserAdded(browser));
   DCHECK_EQ(original_count, observers_.size())
       << "observer list modified during notification";
 }
@@ -171,8 +180,7 @@ void BrowserList::RemoveBrowser(Browser* browser) {
   // Send out notifications before anything changes. Do some basic checking to
   // try to catch evil observers that change the list from under us.
   size_t original_count = observers_.size();
-  for (size_t i = 0; i < observers_.size(); ++i)
-    observers_[i]->OnBrowserRemoving(browser);
+  FOR_EACH_OBSERVER(Observer, observers_, OnBrowserRemoving(browser));
   DCHECK_EQ(original_count, observers_.size())
       << "observer list modified during notification";
 
@@ -192,20 +200,12 @@ void BrowserList::RemoveBrowser(Browser* browser) {
 
 // static
 void BrowserList::AddObserver(BrowserList::Observer* observer) {
-  DCHECK(std::find(observers_.begin(), observers_.end(), observer)
-         == observers_.end()) << "Adding an observer twice";
-  observers_.push_back(observer);
+  observers_.AddObserver(observer);
 }
 
 // static
 void BrowserList::RemoveObserver(BrowserList::Observer* observer) {
-  std::vector<Observer*>::iterator i =
-      std::find(observers_.begin(), observers_.end(), observer);
-  if (i == observers_.end()) {
-    NOTREACHED() << "Removing an observer that isn't registered.";
-    return;
-  }
-  observers_.erase(i);
+  observers_.RemoveObserver(observer);
 }
 
 // static
@@ -301,12 +301,11 @@ void BrowserList::WindowsSessionEnding() {
 
 // static
 bool BrowserList::HasBrowserWithProfile(Profile* profile) {
-  for (BrowserList::const_iterator i = BrowserList::begin();
-       i != BrowserList::end(); ++i) {
-    if (BrowserMatchesProfileAndType(*i, profile, Browser::TYPE_ANY, false))
-      return true;
-  }
-  return false;
+  return FindBrowserMatching(BrowserList::begin(),
+                             BrowserList::end(),
+                             profile, Browser::TYPE_ANY,
+                             Browser::FEATURE_NONE,
+                             kMatchNothing) != NULL;
 }
 
 // static
@@ -317,17 +316,14 @@ bool BrowserList::IsInPersistentMode() {
 }
 
 // static
-BrowserList::list_type BrowserList::last_active_browsers_;
+BrowserList::BrowserVector BrowserList::last_active_browsers_;
 
 // static
 void BrowserList::SetLastActive(Browser* browser) {
   RemoveBrowserFrom(browser, &last_active_browsers_);
   last_active_browsers_.push_back(browser);
 
-  for (std::vector<Observer*>::const_iterator i = observers_.begin();
-       i != observers_.end(); ++i) {
-    (*i)->OnBrowserSetLastActive(browser);
-  }
+  FOR_EACH_OBSERVER(Observer, observers_, OnBrowserSetLastActive(browser));
 }
 
 // static
@@ -340,17 +336,37 @@ Browser* BrowserList::GetLastActive() {
 
 // static
 Browser* BrowserList::GetLastActiveWithProfile(Profile* p) {
-  // We are only interested in last active browsers, so we don't fall back to all
-  // browsers like FindBrowserWith* do.
-  return FindInLastActiveMatching(p, Browser::TYPE_ANY, false);
+  // We are only interested in last active browsers, so we don't fall back to
+  // all browsers like FindBrowserWith* do.
+  return FindBrowserMatching(
+      BrowserList::begin_last_active(), BrowserList::end_last_active(), p,
+      Browser::TYPE_ANY, Browser::FEATURE_NONE, kMatchNothing);
 }
 
 // static
 Browser* BrowserList::FindBrowserWithType(Profile* p, Browser::Type t,
                                           bool match_incognito) {
-  Browser* browser = FindInLastActiveMatching(p, t, match_incognito);
+  uint32 match_types = match_incognito ? kMatchOriginalProfile : kMatchNothing;
+  Browser* browser = FindBrowserMatching(
+      BrowserList::begin_last_active(), BrowserList::end_last_active(),
+      p, t, Browser::FEATURE_NONE, match_types);
   // Fall back to a forward scan of all Browsers if no active one was found.
-  return browser ? browser : FindBrowserMatching(p, t, match_incognito);
+  return browser ? browser :
+      FindBrowserMatching(BrowserList::begin(), BrowserList::end(), p, t,
+                          Browser::FEATURE_NONE, match_types);
+}
+
+// static
+Browser* BrowserList::FindBrowserWithFeature(Profile* p,
+                                             Browser::WindowFeature feature) {
+  Browser* browser = FindBrowserMatching(
+      BrowserList::begin_last_active(), BrowserList::end_last_active(),
+      p, Browser::TYPE_ANY, feature, kMatchCanSupportWindowFeature);
+  // Fall back to a forward scan of all Browsers if no active one was found.
+  return browser ? browser :
+      FindBrowserMatching(BrowserList::begin(), BrowserList::end(), p,
+                          Browser::TYPE_ANY, feature,
+                          kMatchCanSupportWindowFeature);
 }
 
 // static
@@ -373,7 +389,7 @@ size_t BrowserList::GetBrowserCountForType(Profile* p, Browser::Type type) {
   size_t result = 0;
   for (BrowserList::const_iterator i = BrowserList::begin();
        i != BrowserList::end(); ++i) {
-    if (BrowserMatchesProfileAndType(*i, p, type, false))
+    if (BrowserMatches(*i, p, type, Browser::FEATURE_NONE, kMatchNothing))
       ++result;
   }
   return result;
@@ -384,8 +400,10 @@ size_t BrowserList::GetBrowserCount(Profile* p) {
   size_t result = 0;
   for (BrowserList::const_iterator i = BrowserList::begin();
        i != BrowserList::end(); ++i) {
-    if (BrowserMatchesProfileAndType(*i, p, Browser::TYPE_ANY, false))
+    if (BrowserMatches(*i, p, Browser::TYPE_ANY, Browser::FEATURE_NONE,
+                       kMatchNothing)) {
       result++;
+    }
   }
   return result;
 }
@@ -401,7 +419,8 @@ bool BrowserList::IsOffTheRecordSessionActive() {
 }
 
 // static
-void BrowserList::RemoveBrowserFrom(Browser* browser, list_type* browser_list) {
+void BrowserList::RemoveBrowserFrom(Browser* browser,
+                                    BrowserVector* browser_list) {
   const iterator remove_browser =
       std::find(browser_list->begin(), browser_list->end(), browser);
   if (remove_browser != browser_list->end())

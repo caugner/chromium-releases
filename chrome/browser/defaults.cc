@@ -21,10 +21,11 @@ const bool kShowImportOnBookmarkBar = false;
 const bool kShowExitMenuItem = true;
 const bool kShowAboutMenuItem = true;
 const bool kOSSupportsOtherBrowsers = false;
-const bool kDownloadPageHasShowInFolder = false;
+const bool kDownloadPageHasShowInFolder = true;
 const bool kSizeTabButtonToTopOfTabStrip = true;
 const bool kBootstrapSyncAuthentication = true;
 const bool kShowOtherBrowsersInAboutMemory = false;
+const bool kAlwaysOpenIncognitoWindow = true;
 
 #elif defined(TOOLKIT_USES_GTK)
 
@@ -65,7 +66,7 @@ const bool kOSSupportsOtherBrowsers = true;
 const bool kSizeTabButtonToTopOfTabStrip = false;
 const bool kBootstrapSyncAuthentication = false;
 const bool kShowOtherBrowsersInAboutMemory = true;
-
+const bool kAlwaysOpenIncognitoWindow = false;
 #endif
 
 #if defined(OS_MACOSX)
@@ -73,5 +74,7 @@ const bool kBrowserAliveWithNoWindows = true;
 #else
 const bool kBrowserAliveWithNoWindows = false;
 #endif
+
+const bool kPhantomTabsEnabled = false;
 
 }  // namespace browser_defaults

@@ -44,7 +44,7 @@ void DropdownBarHost::Init(DropdownBarView* view) {
 
   // Initialize the host.
   host_.reset(CreateHost());
-  host_->Init(GetNativeView(browser_view_), gfx::Rect());
+  host_->InitWithWidget(browser_view_->GetWidget(), gfx::Rect());
   host_->SetContentsView(view_);
 
   // Start listening to focus changes, so we can register and unregister our
@@ -92,7 +92,7 @@ void DropdownBarHost::SetFocusAndSelection() {
 }
 
 bool DropdownBarHost::IsAnimating() const {
-  return animation_->IsAnimating();
+  return animation_->is_animating();
 }
 
 void DropdownBarHost::Hide(bool animate) {

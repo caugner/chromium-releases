@@ -12,6 +12,7 @@
 #endif
 
 #include <string>
+#include "net/base/host_port_pair.h"
 
 namespace net {
 
@@ -65,9 +66,14 @@ class ProxyServer {
   int port() const;
 
   // Returns the <host>":"<port> string for the proxy server.
+  // TODO(willchan): Remove in favor of host_port_pair().
   std::string host_and_port() const;
 
-  // Parse from an input with format:
+  // TODO(willchan): Change to const HostPortPair& after refactoring |host_| and
+  // |port_| here.
+  HostPortPair host_port_pair() const;
+
+  // Parses from an input with format:
   //   [<scheme>"://"]<server>[":"<port>]
   //
   // Both <scheme> and <port> are optional. If <scheme> is omitted, it will be
@@ -88,7 +94,7 @@ class ProxyServer {
                              std::string::const_iterator uri_end,
                              Scheme default_scheme);
 
-  // Format as a URI string. This does the reverse of FromURI.
+  // Formats as a URI string. This does the reverse of FromURI.
   std::string ToURI() const;
 
   // Parses from a PAC string result.
@@ -124,8 +130,7 @@ class ProxyServer {
                                     CFStringRef port_key);
 #endif
 
-
-  // Format as a PAC result entry. This does the reverse of FromPacString().
+  // Formats as a PAC result entry. This does the reverse of FromPacString().
   std::string ToPacString() const;
 
   // Returns the default port number for a proxy server with the specified
@@ -139,7 +144,7 @@ class ProxyServer {
   }
 
  private:
-  // Create a ProxyServer given a scheme, and host/port string. If parsing the
+  // Creates a ProxyServer given a scheme, and host/port string. If parsing the
   // host/port string fails, the returned instance will be invalid.
   static ProxyServer FromSchemeHostAndPort(
       Scheme scheme,

@@ -9,15 +9,20 @@
 #include "base/timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/renderer_host/backing_store.h"
+#include "chrome/browser/renderer_host/render_widget_host_painting_observer.h"
 #include "chrome/browser/renderer_host/test/test_render_view_host.h"
 #include "chrome/common/render_messages.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::TimeDelta;
 
 using WebKit::WebInputEvent;
 using WebKit::WebMouseWheelEvent;
+
+namespace gfx {
+class Size;
+}
 
 // RenderWidgetHostProcess -----------------------------------------------------
 
@@ -37,7 +42,7 @@ class RenderWidgetHostProcess : public MockRenderProcessHost {
   ~RenderWidgetHostProcess() {
     // We don't want to actually delete the channel, since it's not a real
     // pointer.
-    channel_.release();
+    ignore_result(channel_.release());
     delete current_update_buf_;
   }
 
@@ -190,6 +195,32 @@ class MockRenderWidgetHost : public RenderWidgetHost {
 
   bool unresponsive_timer_fired_;
 };
+
+// MockPaintingObserver --------------------------------------------------------
+
+class MockPaintingObserver : public RenderWidgetHostPaintingObserver {
+ public:
+  void WidgetWillDestroyBackingStore(RenderWidgetHost* widget,
+                                     BackingStore* backing_store) {}
+  void WidgetDidUpdateBackingStore(RenderWidgetHost* widget) {}
+  void WidgetDidReceivePaintAtSizeAck(RenderWidgetHost* host,
+                                      int tag,
+                                      const gfx::Size& size) {
+    host_ = reinterpret_cast<MockRenderWidgetHost*>(host);
+    tag_ = tag;
+    size_ = size;
+  }
+
+  MockRenderWidgetHost* host() const { return host_; }
+  int tag() const { return tag_; }
+  gfx::Size size() const { return size_; }
+
+ private:
+  MockRenderWidgetHost* host_;
+  int tag_;
+  gfx::Size size_;
+};
+
 
 // RenderWidgetHostTest --------------------------------------------------------
 
@@ -375,7 +406,7 @@ TEST_F(RenderWidgetHostTest, Background) {
   host_->set_view(view.get());
 
   // Create a checkerboard background to test with.
-  gfx::Canvas canvas(4, 4, true);
+  gfx::CanvasSkia canvas(4, 4, true);
   canvas.FillRectInt(SK_ColorBLACK, 0, 0, 2, 2);
   canvas.FillRectInt(SK_ColorWHITE, 2, 0, 2, 2);
   canvas.FillRectInt(SK_ColorWHITE, 0, 2, 2, 2);
@@ -504,6 +535,24 @@ TEST_F(RenderWidgetHostTest, HiddenPaint) {
   EXPECT_TRUE(needs_repaint.a);
 }
 
+TEST_F(RenderWidgetHostTest, PaintAtSize) {
+  const int kPaintAtSizeTag = 42;
+  host_->PaintAtSize(TransportDIB::GetFakeHandleForTest(), kPaintAtSizeTag,
+                     gfx::Size(40, 60), gfx::Size(20, 30));
+  EXPECT_TRUE(
+      process_->sink().GetUniqueMessageMatching(ViewMsg_PaintAtSize::ID));
+
+  MockPaintingObserver observer;
+  host_->set_painting_observer(&observer);
+
+  host_->OnMsgPaintAtSizeAck(kPaintAtSizeTag, gfx::Size(20, 30));
+  EXPECT_EQ(host_.get(), observer.host());
+  EXPECT_EQ(kPaintAtSizeTag, observer.tag());
+  EXPECT_EQ(20, observer.size().width());
+  EXPECT_EQ(30, observer.size().height());
+  host_->set_painting_observer(NULL);
+}
+
 TEST_F(RenderWidgetHostTest, HandleKeyEventsWeSent) {
   // Simulate a keyboard event.
   SimulateKeyboardEvent(WebInputEvent::RawKeyDown);
@@ -598,6 +647,10 @@ TEST_F(RenderWidgetHostTest, CoalescesWheelEvents) {
 
   // Check that the ACK sends the second message.
   SendInputEventACK(WebInputEvent::MouseWheel, true);
+  // The coalesced events can queue up a delayed ack
+  // so that additional input events can be processed before
+  // we turn off coalescing.
+  MessageLoop::current()->RunAllPending();
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(
                   ViewMsg_HandleInputEvent::ID));
@@ -605,6 +658,7 @@ TEST_F(RenderWidgetHostTest, CoalescesWheelEvents) {
 
   // One more time.
   SendInputEventACK(WebInputEvent::MouseWheel, true);
+  MessageLoop::current()->RunAllPending();
   EXPECT_EQ(1U, process_->sink().message_count());
   EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(
                   ViewMsg_HandleInputEvent::ID));
@@ -612,6 +666,7 @@ TEST_F(RenderWidgetHostTest, CoalescesWheelEvents) {
 
   // After the final ack, the queue should be empty.
   SendInputEventACK(WebInputEvent::MouseWheel, true);
+  MessageLoop::current()->RunAllPending();
   EXPECT_EQ(0U, process_->sink().message_count());
 }
 
@@ -649,4 +704,3 @@ TEST_F(RenderWidgetHostTest, StopAndStartHangMonitorTimeout) {
   MessageLoop::current()->Run();
   EXPECT_TRUE(host_->unresponsive_timer_fired());
 }
-

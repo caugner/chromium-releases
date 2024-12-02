@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -18,6 +18,7 @@
 #include "chrome/installer/util/version.h"
 
 class WorkItemList;
+class RegKey;
 
 // This is a utility class that provides common installation related
 // utility methods that can be used by installer and also unit tested
@@ -99,8 +100,16 @@ class InstallUtil {
                                        bool do_register,
                                        WorkItemList* registration_list);
 
+  // Deletes the registry key at path key_path under the key given by root_key.
+  static bool DeleteRegistryKey(RegKey& root_key, const std::wstring& key_path);
+
+  // Deletes the registry value named value_name at path key_path under the key
+  // given by reg_root.
+  static bool DeleteRegistryValue(HKEY reg_root, const std::wstring& key_path,
+                                  const std::wstring& value_name);
+
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(InstallUtil);
+  DISALLOW_COPY_AND_ASSIGN(InstallUtil);
 };
 
 

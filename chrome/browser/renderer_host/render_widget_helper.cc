@@ -199,10 +199,13 @@ void RenderWidgetHelper::OnCrossSiteClosePageACK(
   resource_dispatcher_host_->OnClosePageACK(params);
 }
 
-void RenderWidgetHelper::CreateNewWindow(int opener_id,
-                                         bool user_gesture,
-                                         base::ProcessHandle render_process,
-                                         int* route_id) {
+void RenderWidgetHelper::CreateNewWindow(
+    int opener_id,
+    bool user_gesture,
+    WindowContainerType window_container_type,
+    const string16& frame_name,
+    base::ProcessHandle render_process,
+    int* route_id) {
   *route_id = GetNextRoutingID();
   // Block resource requests until the view is created, since the HWND might be
   // needed if a response ends up creating a plugin.
@@ -212,13 +215,18 @@ void RenderWidgetHelper::CreateNewWindow(int opener_id,
   ChromeThread::PostTask(
       ChromeThread::UI, FROM_HERE,
       NewRunnableMethod(
-          this, &RenderWidgetHelper::OnCreateWindowOnUI, opener_id, *route_id));
+          this, &RenderWidgetHelper::OnCreateWindowOnUI, opener_id, *route_id,
+          window_container_type, frame_name));
 }
 
-void RenderWidgetHelper::OnCreateWindowOnUI(int opener_id, int route_id) {
+void RenderWidgetHelper::OnCreateWindowOnUI(
+    int opener_id,
+    int route_id,
+    WindowContainerType window_container_type,
+    string16 frame_name) {
   RenderViewHost* host = RenderViewHost::FromID(render_process_id_, opener_id);
   if (host)
-    host->CreateNewWindow(route_id);
+    host->CreateNewWindow(route_id, window_container_type, frame_name);
 
   ChromeThread::PostTask(
       ChromeThread::IO, FROM_HERE,
@@ -288,7 +296,8 @@ void RenderWidgetHelper::FreeTransportDIB(TransportDIB::Id dib_id) {
     i = allocated_dibs_.find(dib_id);
 
   if (i != allocated_dibs_.end()) {
-    HANDLE_EINTR(close(i->second));
+    if (HANDLE_EINTR(close(i->second)) < 0)
+      PLOG(ERROR) << "close";
     allocated_dibs_.erase(i);
   } else {
     DLOG(WARNING) << "Renderer asked us to free unknown transport DIB";
@@ -298,7 +307,8 @@ void RenderWidgetHelper::FreeTransportDIB(TransportDIB::Id dib_id) {
 void RenderWidgetHelper::ClearAllocatedDIBs() {
   for (std::map<TransportDIB::Id, int>::iterator
        i = allocated_dibs_.begin(); i != allocated_dibs_.end(); ++i) {
-    HANDLE_EINTR(close(i->second));
+    if (HANDLE_EINTR(close(i->second)) < 0)
+      PLOG(ERROR) << "close: " << i->first;
   }
 
   allocated_dibs_.clear();

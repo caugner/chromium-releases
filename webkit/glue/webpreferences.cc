@@ -50,13 +50,16 @@ void WebPreferences::Apply(WebView* web_view) const {
     settings->setUserStyleSheetLocation(user_style_sheet_location);
   else
     settings->setUserStyleSheetLocation(WebURL());
+  settings->setAuthorAndUserStylesEnabled(author_and_user_styles_enabled);
   settings->setUsesPageCache(uses_page_cache);
   settings->setDownloadableBinaryFontsEnabled(remote_fonts_enabled);
+  settings->setJavaScriptCanAccessClipboard(javascript_can_access_clipboard);
   settings->setXSSAuditorEnabled(xss_auditor_enabled);
   settings->setLocalStorageEnabled(local_storage_enabled);
   WebRuntimeFeatures::enableDatabase(
       WebRuntimeFeatures::isDatabaseEnabled() || databases_enabled);
   settings->setOfflineWebApplicationCacheEnabled(application_cache_enabled);
+  settings->setHTML5ParserEnabled(enable_html5_parser);
 
   // This setting affects the behavior of links in an editable region:
   // clicking the link should select it rather than navigate to it.
@@ -90,8 +93,16 @@ void WebPreferences::Apply(WebView* web_view) const {
   // on command line.
   settings->setShowDebugBorders(show_composited_layer_borders);
 
-  // Web inspector settings need to be passed in differently.
-  web_view->setInspectorSettings(WebString::fromUTF8(inspector_settings));
+  // Enable gpu-accelerated compositing if requested on the command line.
+  settings->setAcceleratedCompositingEnabled(accelerated_compositing_enabled);
+
+  // Enable memory info reporting to page if requested on the command line.
+  settings->setMemoryInfoEnabled(memory_info_enabled);
+
+  for (WebInspectorPreferences::const_iterator it = inspector_settings.begin();
+       it != inspector_settings.end(); ++it)
+    web_view->setInspectorSetting(WebString::fromUTF8(it->first),
+                                  WebString::fromUTF8(it->second));
 
   // Tabs to link is not part of the settings. WebCore calls
   // ChromeClient::tabsToLinks which is part of the glue code.

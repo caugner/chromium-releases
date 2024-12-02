@@ -13,7 +13,7 @@
 #include "base/win_util.h"
 #include "chrome/browser/browser.h"  // TODO(beng): this dependency is awful.
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/download/download_request_manager.h"
+#include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_factory.h"
@@ -23,9 +23,9 @@
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/browser/tab_contents/web_drop_target_win.h"
 #include "chrome/browser/views/sad_tab_view.h"
-#include "chrome/browser/views/tab_contents/render_view_context_menu_win.h"
+#include "chrome/browser/views/tab_contents/render_view_context_menu_views.h"
 #include "chrome/browser/views/tab_contents/tab_contents_drag_win.h"
-#include "gfx/canvas_paint.h"
+#include "gfx/canvas_skia_paint.h"
 #include "views/focus/view_storage.h"
 #include "views/screen.h"
 #include "views/widget/root_view.h"
@@ -129,8 +129,7 @@ void TabContentsViewWin::StartDragging(const WebDropData& drop_data,
                                        const SkBitmap& image,
                                        const gfx::Point& image_offset) {
   drag_handler_ = new TabContentsDragWin(this);
-  // TODO(estade): make use of |image| and |image_offset|.
-  drag_handler_->StartDragging(drop_data, ops);
+  drag_handler_->StartDragging(drop_data, ops, image, image_offset);
 }
 
 void TabContentsViewWin::EndDragging() {
@@ -156,11 +155,6 @@ void TabContentsViewWin::SetPageTitle(const std::wstring& title) {
   if (GetNativeView()) {
     // It's possible to get this after the hwnd has been destroyed.
     ::SetWindowText(GetNativeView(), title.c_str());
-    // TODO(brettw) this call seems messy the way it reaches into the widget
-    // view, and I'm not sure it's necessary. Maybe we should just remove it.
-    ::SetWindowText(
-        tab_contents()->GetRenderWidgetHostView()->GetNativeView(),
-        title.c_str());
   }
 }
 
@@ -175,10 +169,19 @@ void TabContentsViewWin::OnTabCrashed() {
 void TabContentsViewWin::SizeContents(const gfx::Size& size) {
   // TODO(brettw) this is a hack and should be removed. See tab_contents_view.h.
 
-  // Set new window size. It will fire OnWindowPosChanged and we will do
-  // the rest in WasSized.
-  UINT swp_flags = SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE;
-  SetWindowPos(NULL, 0, 0, size.width(), size.height(), swp_flags);
+  gfx::Rect bounds;
+  GetContainerBounds(&bounds);
+  if (bounds.size() != size) {
+    // Our size really needs to change, invoke SetWindowPos so that we do a
+    // layout and all that good stuff. OnWindowPosChanged will invoke WasSized.
+    UINT swp_flags = SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE;
+    SetWindowPos(NULL, 0, 0, size.width(), size.height(), swp_flags);
+  } else {
+    // Our size isn't changing, which means SetWindowPos won't invoke
+    // OnWindowPosChanged. We need to invoke WasSized though as the renderer may
+    // need to be sized.
+    WasSized(bounds.size());
+  }
 }
 
 void TabContentsViewWin::Focus() {
@@ -256,7 +259,7 @@ void TabContentsViewWin::RestoreFocus() {
     // If you hit this DCHECK, please report it to Jay (jcampan).
     DCHECK(focus_manager != NULL) << "No focus manager when restoring focus.";
 
-    if (last_focused_view->IsFocusable() && focus_manager &&
+    if (last_focused_view->IsFocusableInRootView() && focus_manager &&
         focus_manager->ContainsView(last_focused_view)) {
       last_focused_view->RequestFocus();
     } else {
@@ -330,7 +333,7 @@ void TabContentsViewWin::ShowContextMenu(const ContextMenuParams& params) {
   if (tab_contents()->delegate()->HandleContextMenu(params))
     return;
 
-  context_menu_.reset(new RenderViewContextMenuWin(tab_contents(), params));
+  context_menu_.reset(new RenderViewContextMenuViews(tab_contents(), params));
   context_menu_->Init();
 
   POINT screen_pt = { params.x, params.y };
@@ -397,7 +400,7 @@ void TabContentsViewWin::OnPaint(HDC junk_dc) {
     CRect cr;
     GetClientRect(&cr);
     sad_tab_->SetBounds(gfx::Rect(cr));
-    gfx::CanvasPaint canvas(GetNativeView(), true);
+    gfx::CanvasSkiaPaint canvas(GetNativeView(), true);
     sad_tab_->ProcessPaint(&canvas);
     return;
   }

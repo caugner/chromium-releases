@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,11 @@ namespace views {
 // static
 MenuConfig* MenuConfig::Create() {
   MenuConfig* config = new MenuConfig();
+
+  config->text_color = NativeTheme::instance()->GetThemeColorWithDefault(
+      NativeTheme::MENU, MENU_POPUPITEM, MPI_NORMAL, TMT_TEXTCOLOR,
+      COLOR_MENUTEXT);
+
   NONCLIENTMETRICS metrics;
   win_util::GetNonClientMetrics(&metrics);
   l10n_util::AdjustUIFont(&(metrics.lfMenuFont));
@@ -38,6 +43,17 @@ MenuConfig* MenuConfig::Create() {
   } else {
     config->check_width = GetSystemMetrics(SM_CXMENUCHECK);
     config->check_height = GetSystemMetrics(SM_CYMENUCHECK);
+  }
+
+  SIZE radio_size;
+  if (NativeTheme::instance()->GetThemePartSize(
+          NativeTheme::MENU, dc, MENU_POPUPCHECK, MC_BULLETNORMAL, &bounds,
+          TS_TRUE, &radio_size) == S_OK) {
+    config->radio_width = radio_size.cx;
+    config->radio_height = radio_size.cy;
+  } else {
+    config->radio_width = GetSystemMetrics(SM_CXMENUCHECK);
+    config->radio_height = GetSystemMetrics(SM_CYMENUCHECK);
   }
 
   SIZE arrow_size;

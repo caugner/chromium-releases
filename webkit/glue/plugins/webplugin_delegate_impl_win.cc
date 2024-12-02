@@ -4,6 +4,7 @@
 
 #include "webkit/glue/plugins/webplugin_delegate_impl.h"
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -18,7 +19,7 @@
 #include "base/win_util.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
-#include "webkit/default_plugin/plugin_impl.h"
+#include "webkit/glue/plugins/default_plugin_shared.h"
 #include "webkit/glue/plugins/plugin_constants_win.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 #include "webkit/glue/plugins/plugin_lib.h"
@@ -37,7 +38,6 @@ namespace {
 const wchar_t kWebPluginDelegateProperty[] = L"WebPluginDelegateProperty";
 const wchar_t kPluginNameAtomProperty[] = L"PluginNameAtom";
 const wchar_t kDummyActivationWindowName[] = L"DummyWindowForActivation";
-const wchar_t kPluginOrigProc[] = L"OriginalPtr";
 const wchar_t kPluginFlashThrottle[] = L"FlashThrottle";
 
 // The fastest we are willing to process WM_USER+1 events for Flash.
@@ -62,6 +62,9 @@ WebPluginDelegateImpl* g_current_plugin_instance = NULL;
 
 typedef std::deque<MSG> ThrottleQueue;
 base::LazyInstance<ThrottleQueue> g_throttle_queue(base::LINKER_INITIALIZED);
+base::LazyInstance<std::map<HWND, WNDPROC> > g_window_handle_proc_map(
+    base::LINKER_INITIALIZED);
+
 
 // Helper object for patching the TrackPopupMenu API.
 base::LazyInstance<iat_patch::IATPatchFunction> g_iat_patch_track_popup_menu(
@@ -227,6 +230,17 @@ LRESULT CALLBACK WebPluginDelegateImpl::HandleEventMessageFilterHook(
   return CallNextHookEx(NULL, code, wParam, lParam);
 }
 
+LRESULT CALLBACK WebPluginDelegateImpl::MouseHookProc(
+    int code, WPARAM wParam, LPARAM lParam) {
+  if (code == HC_ACTION) {
+    MOUSEHOOKSTRUCT* hook_struct = reinterpret_cast<MOUSEHOOKSTRUCT*>(lParam);
+    if (hook_struct)
+      HandleCaptureForMessage(hook_struct->hwnd, wParam);
+  }
+
+  return CallNextHookEx(NULL, code, wParam, lParam);
+}
+
 WebPluginDelegateImpl::WebPluginDelegateImpl(
     gfx::PluginWindowHandle containing_view,
     NPAPI::PluginInstance *instance)
@@ -237,7 +251,6 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
       windowless_(false),
       windowed_handle_(NULL),
       windowed_did_set_window_(false),
-      windowless_needs_set_window_(true),
       plugin_wnd_proc_(NULL),
       last_message_(0),
       is_calling_wndproc(false),
@@ -249,11 +262,14 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
       user_gesture_message_posted_(false),
 #pragma warning(suppress: 4355)  // can use this
       user_gesture_msg_factory_(this),
-      handle_event_depth_(0) {
+      handle_event_depth_(0),
+      mouse_hook_(NULL),
+      first_set_window_call_(true) {
   memset(&window_, 0, sizeof(window_));
 
   const WebPluginInfo& plugin_info = instance_->plugin_lib()->plugin_info();
-  std::wstring filename = StringToLowerASCII(plugin_info.path.BaseName().value());
+  std::wstring filename =
+      StringToLowerASCII(plugin_info.path.BaseName().value());
 
   if (instance_->mime_type() == "application/x-shockwave-flash" ||
       filename == kFlashPlugin) {
@@ -263,6 +279,7 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
     quirks_ |= PLUGIN_QUIRK_THROTTLE_WM_USER_PLUS_ONE;
     quirks_ |= PLUGIN_QUIRK_PATCH_SETCURSOR;
     quirks_ |= PLUGIN_QUIRK_ALWAYS_NOTIFY_SUCCESS;
+    quirks_ |= PLUGIN_QUIRK_HANDLE_MOUSE_CAPTURE;
   } else if (filename == kAcrobatReaderPlugin) {
     // Check for the version number above or equal 9.
     std::vector<std::wstring> version;
@@ -285,6 +302,11 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
     // Windowless mode doesn't work in the WMP NPAPI plugin.
     quirks_ |= PLUGIN_QUIRK_NO_WINDOWLESS;
 
+    // The media player plugin sets its size on the first NPP_SetWindow call
+    // and never updates its size. We should call the underlying NPP_SetWindow
+    // only when we have the correct size.
+    quirks_ |= PLUGIN_QUIRK_IGNORE_FIRST_SETWINDOW_CALL;
+
     if (filename == kOldWMPPlugin) {
       // Non-admin users on XP couldn't modify the key to force the new UI.
       quirks_ |= PLUGIN_QUIRK_PATCH_REGENUMKEYEXW;
@@ -305,6 +327,12 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
     // Explanation for this quirk can be found in
     // WebPluginDelegateImpl::Initialize.
     quirks_ |= PLUGIN_QUIRK_PATCH_SETCURSOR;
+  } else if (plugin_info.name.find(L"DivX Web Player") !=
+             std::wstring::npos) {
+    // The divx plugin sets its size on the first NPP_SetWindow call and never
+    // updates its size. We should call the underlying NPP_SetWindow only when
+    // we have the correct size.
+    quirks_ |= PLUGIN_QUIRK_IGNORE_FIRST_SETWINDOW_CALL;
   }
 }
 
@@ -359,6 +387,21 @@ bool WebPluginDelegateImpl::PlatformInitialize() {
           GetPluginPath().value().c_str(), "user32.dll", "SetCursor",
           WebPluginDelegateImpl::SetCursorPatch);
     }
+
+    // The windowed flash plugin has a bug which occurs when the plugin enters
+    // fullscreen mode. It basically captures the mouse on WM_LBUTTONDOWN and
+    // does not release capture correctly causing it to stop receiving
+    // subsequent mouse events. This problem is also seen in Safari where there
+    // is code to handle this in the wndproc. However the plugin subclasses the
+    // window again in WM_LBUTTONDOWN before entering full screen. As a result
+    // Safari does not receive the WM_LBUTTONUP message. To workaround this
+    // issue we use a per thread mouse hook. This bug does not occur in Firefox
+    // and opera. Firefox has code similar to Safari. It could well be a bug in
+    // the flash plugin, which only occurs in webkit based browsers.
+    if (quirks_ & PLUGIN_QUIRK_HANDLE_MOUSE_CAPTURE) {
+      mouse_hook_ = SetWindowsHookEx(WH_MOUSE, MouseHookProc, NULL,
+                                     GetCurrentThreadId());
+    }
   }
 
   // On XP, WMP will use its old UI unless a registry key under HKLM has the
@@ -393,6 +436,11 @@ void WebPluginDelegateImpl::PlatformDestroyInstance() {
 
   if (g_iat_patch_reg_enum_key_ex_w.Pointer()->is_patched())
     g_iat_patch_reg_enum_key_ex_w.Pointer()->Unpatch();
+
+  if (mouse_hook_) {
+    UnhookWindowsHookEx(mouse_hook_);
+    mouse_hook_ = NULL;
+  }
 }
 
 void WebPluginDelegateImpl::Paint(skia::PlatformCanvas* canvas,
@@ -421,7 +469,7 @@ void WebPluginDelegateImpl::Print(HDC hdc) {
 
 void WebPluginDelegateImpl::InstallMissingPlugin() {
   NPEvent evt;
-  evt.event = PluginInstallerImpl::kInstallMissingPluginMessage;
+  evt.event = default_plugin::kInstallMissingPluginMessage;
   evt.lParam = 0;
   evt.wParam = 0;
   instance()->NPP_HandleEvent(&evt);
@@ -599,12 +647,16 @@ void WebPluginDelegateImpl::ThrottleMessage(WNDPROC proc, HWND hwnd,
 // static
 LRESULT CALLBACK WebPluginDelegateImpl::FlashWindowlessWndProc(HWND hwnd,
     UINT message, WPARAM wparam, LPARAM lparam) {
-  WNDPROC old_proc = reinterpret_cast<WNDPROC>(GetProp(hwnd, kPluginOrigProc));
+  std::map<HWND, WNDPROC>::iterator index =
+      g_window_handle_proc_map.Get().find(hwnd);
+
+  WNDPROC old_proc = (*index).second;
   DCHECK(old_proc);
 
   switch (message) {
     case WM_NCDESTROY: {
       WebPluginDelegateImpl::ClearThrottleQueueForWindow(hwnd);
+      g_window_handle_proc_map.Get().erase(index);
       break;
     }
     // Flash may flood the message queue with WM_USER+1 message causing 100% CPU
@@ -642,11 +694,7 @@ BOOL CALLBACK EnumFlashWindows(HWND window, LPARAM arg) {
         window, GWLP_WNDPROC,
         reinterpret_cast<LONG>(wnd_proc)));
     DCHECK(old_flash_proc);
-    BOOL result = SetProp(window, kPluginOrigProc, old_flash_proc);
-    if (!result) {
-      LOG(ERROR) << "SetProp failed, last error = " << GetLastError();
-      return FALSE;
-    }
+    g_window_handle_proc_map.Get()[window] = old_flash_proc;
   }
 
   return TRUE;
@@ -898,6 +946,8 @@ LRESULT CALLBACK WebPluginDelegateImpl::NativeWndProc(
           kWindowedPluginPopupTimerMs);
     }
 
+    HandleCaptureForMessage(hwnd, message);
+
     // Maintain a local/global stack for the g_current_plugin_instance variable
     // as this may be a nested invocation.
     WebPluginDelegateImpl* last_plugin_instance = g_current_plugin_instance;
@@ -926,19 +976,17 @@ LRESULT CALLBACK WebPluginDelegateImpl::NativeWndProc(
 void WebPluginDelegateImpl::WindowlessUpdateGeometry(
     const gfx::Rect& window_rect,
     const gfx::Rect& clip_rect) {
+  bool window_rect_changed = (window_rect_ != window_rect);
   // Only resend to the instance if the geometry has changed.
-  if (window_rect == window_rect_ && clip_rect == clip_rect_)
+  if (!window_rect_changed && clip_rect == clip_rect_)
     return;
 
-  // We will inform the instance of this change when we call NPP_SetWindow.
   clip_rect_ = clip_rect;
-  cutout_rects_.clear();
+  window_rect_ = window_rect;
 
-  if (window_rect_ != window_rect) {
-    window_rect_ = window_rect;
+  WindowlessSetWindow();
 
-    WindowlessSetWindow(true);
-
+  if (window_rect_changed) {
     WINDOWPOS win_pos = {0};
     win_pos.x = window_rect_.x();
     win_pos.y = window_rect_.y();
@@ -976,7 +1024,7 @@ void WebPluginDelegateImpl::WindowlessPaint(HDC hdc,
   instance()->NPP_HandleEvent(&paint_event);
 }
 
-void WebPluginDelegateImpl::WindowlessSetWindow(bool force_set_window) {
+void WebPluginDelegateImpl::WindowlessSetWindow() {
   if (!instance())
     return;
 
@@ -1000,11 +1048,11 @@ void WebPluginDelegateImpl::WindowlessSetWindow(bool force_set_window) {
   DCHECK(err == NPERR_NO_ERROR);
 }
 
-void WebPluginDelegateImpl::SetFocus() {
+void WebPluginDelegateImpl::SetFocus(bool focused) {
   DCHECK(instance()->windowless());
 
   NPEvent focus_event;
-  focus_event.event = WM_SETFOCUS;
+  focus_event.event = focused ? WM_SETFOCUS : WM_KILLFOCUS;
   focus_event.wParam = 0;
   focus_event.lParam = 0;
 
@@ -1288,13 +1336,13 @@ HCURSOR WINAPI WebPluginDelegateImpl::SetCursorPatch(HCURSOR cursor) {
   if (!g_current_plugin_instance) {
     HCURSOR current_cursor = GetCursor();
     if (current_cursor != cursor) {
-      SetCursor(cursor);
+      ::SetCursor(cursor);
     }
     return current_cursor;
   }
 
   if (!g_current_plugin_instance->IsWindowless()) {
-    return SetCursor(cursor);
+    return ::SetCursor(cursor);
   }
 
   // It is ok to pass NULL here to GetCursor as we are not looking for cursor
@@ -1323,4 +1371,27 @@ LONG WINAPI WebPluginDelegateImpl::RegEnumKeyExWPatch(
   }
 
   return rv;
+}
+
+void WebPluginDelegateImpl::HandleCaptureForMessage(HWND window,
+                                                    UINT message) {
+  if (!WebPluginDelegateImpl::IsPluginDelegateWindow(window))
+    return;
+
+  switch (message) {
+    case WM_LBUTTONDOWN:
+    case WM_MBUTTONDOWN:
+    case WM_RBUTTONDOWN:
+      ::SetCapture(window);
+      break;
+
+    case WM_LBUTTONUP:
+    case WM_MBUTTONUP:
+    case WM_RBUTTONUP:
+      ::ReleaseCapture();
+      break;
+
+    default:
+      break;
+  }
 }

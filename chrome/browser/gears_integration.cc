@@ -10,6 +10,7 @@
 #include "base/base64.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chrome_plugin_host.h"
 #include "chrome/common/chrome_plugin_util.h"
@@ -228,11 +229,7 @@ class CreateShortcutCommand : public CPCommandInterface {
 
 // Allows InvokeLater without adding refcounting.  The object is only deleted
 // when its last InvokeLater is run anyway.
-template <>
-struct RunnableMethodTraits<CreateShortcutCommand> {
-  void RetainCallee(CreateShortcutCommand* command) {}
-  void ReleaseCallee(CreateShortcutCommand* command) {}
-};
+DISABLE_RUNNABLE_METHOD_REFCOUNT(CreateShortcutCommand);
 
 void GearsCreateShortcut(
     const webkit_glue::WebApplicationInfo& app_info,
@@ -254,7 +251,7 @@ void GearsCreateShortcut(
       new CreateShortcutCommand(name_utf8, orig_name_utf8, url.spec(),
                                 description_utf8,
                                 app_info.icons, fallback_icon, callback);
-  CPHandleCommand(GEARSPLUGINCOMMAND_CREATE_SHORTCUT, command, NULL);
+  CPHandleCommand(GEARSPLUGINCOMMAND_CREATE_SHORTCUT, command, 0);
 }
 
 // This class holds and manages the data passed to the
@@ -308,5 +305,5 @@ struct RunnableMethodTraits<QueryShortcutsCommand> {
 void GearsQueryShortcuts(GearsQueryShortcutsCallback* callback) {
   CPHandleCommand(GEARSPLUGINCOMMAND_GET_SHORTCUT_LIST,
       new QueryShortcutsCommand(callback),
-      NULL);
+      0);
 }

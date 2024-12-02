@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,12 +17,12 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/logging.h"
 #include "base/observer_list.h"
 #include "base/process.h"
 #include "base/timer.h"
 #include "chrome/common/child_process_info.h"
-#include "chrome/browser/privacy_blacklist/blacklist_interceptor.h"
 #include "chrome/browser/renderer_host/resource_queue.h"
 #include "ipc/ipc_message.h"
 #include "net/url_request/url_request.h"
@@ -30,7 +30,7 @@
 
 class CrossSiteResourceHandler;
 class DownloadFileManager;
-class DownloadRequestManager;
+class DownloadRequestLimiter;
 class LoginHandler;
 class PluginService;
 class ResourceDispatcherHostRequestInfo;
@@ -109,6 +109,7 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
   void BeginDownload(const GURL& url,
                      const GURL& referrer,
                      const DownloadSaveInfo& save_info,
+                     bool prompt_for_save_location,
                      int process_unique_id,
                      int route_id,
                      URLRequestContext* request_context);
@@ -172,8 +173,8 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
     return download_file_manager_;
   }
 
-  DownloadRequestManager* download_request_manager() const {
-    return download_request_manager_.get();
+  DownloadRequestLimiter* download_request_limiter() const {
+    return download_request_limiter_.get();
   }
 
   SaveFileManager* save_file_manager() const {
@@ -210,7 +211,9 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
   virtual void OnSSLCertificateError(URLRequest* request,
                                      int cert_error,
                                      net::X509Certificate* cert);
-  virtual void OnSetCookieBlocked(URLRequest* request);
+  virtual void OnSetCookie(URLRequest* request,
+                           const std::string& cookie_line,
+                           bool blocked_by_policy);
   virtual void OnResponseStarted(URLRequest* request);
   virtual void OnReadCompleted(URLRequest* request, int bytes_read);
   void OnResponseCompleted(URLRequest* request);
@@ -269,19 +272,16 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
   }
 
  private:
-  FRIEND_TEST(ResourceDispatcherHostTest, TestBlockedRequestsProcessDies);
-  FRIEND_TEST(ResourceDispatcherHostTest,
-              IncrementOutstandingRequestsMemoryCost);
-  FRIEND_TEST(ResourceDispatcherHostTest,
-              CalculateApproximateMemoryCost);
-  FRIEND_TEST(ApplyExtensionMessageFilterPolicyTest, WrongScheme);
-  FRIEND_TEST(ApplyExtensionMessageFilterPolicyTest, GoodScheme);
-  FRIEND_TEST(ApplyExtensionMessageFilterPolicyTest,
-              GoodSchemeWithSecurityFilter);
-  FRIEND_TEST(ApplyExtensionMessageFilterPolicyTest,
-              GoodSchemeWrongResourceType);
-  FRIEND_TEST(ApplyExtensionMessageFilterPolicyTest,
-              WrongSchemeResourceAndFilter);
+  FRIEND_TEST_ALL_PREFIXES(ResourceDispatcherHostTest,
+                           TestBlockedRequestsProcessDies);
+  FRIEND_TEST_ALL_PREFIXES(ResourceDispatcherHostTest,
+                           IncrementOutstandingRequestsMemoryCost);
+  FRIEND_TEST_ALL_PREFIXES(ResourceDispatcherHostTest,
+                           CalculateApproximateMemoryCost);
+  FRIEND_TEST_ALL_PREFIXES(ApplyExtensionLocalizationFilterTest, WrongScheme);
+  FRIEND_TEST_ALL_PREFIXES(ApplyExtensionLocalizationFilterTest, GoodScheme);
+  FRIEND_TEST_ALL_PREFIXES(ApplyExtensionLocalizationFilterTest,
+                           GoodSchemeWrongResourceType);
 
   class ShutdownTask;
 
@@ -320,6 +320,9 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
 
   // Helper function for regular and download requests.
   void BeginRequestInternal(URLRequest* request);
+
+  // Helper function that cancels |request|.
+  void CancelRequestInternal(URLRequest* request, bool from_renderer);
 
   // Helper function that inserts |request| into the resource queue.
   void InsertIntoResourceQueue(
@@ -399,12 +402,25 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
                         bool has_new_first_party_for_cookies,
                         const GURL& new_first_party_for_cookies);
 
+  ResourceHandler* CreateSafeBrowsingResourceHandler(
+      ResourceHandler* handler, int child_id, int route_id,
+      ResourceType::Type resource_type);
+
+  // Creates ResourceDispatcherHostRequestInfo for a browser-initiated request
+  // (a download or a page save). |download| should be true if the request
+  // is a file download.
+  ResourceDispatcherHostRequestInfo* CreateRequestInfoForBrowserRequest(
+      ResourceHandler* handler, int child_id, int route_id, bool download);
+
+  // Returns true if |request| is in |pending_requests_|.
+  bool IsValidRequest(URLRequest* request);
+
   // Returns true if the message passed in is a resource related message.
   static bool IsResourceDispatcherHostMessage(const IPC::Message&);
 
-  // Applies FilterPolicy::FILTER_EXTENSION_MESSAGES to all text/css requests
-  // that have "chrome-extension://" scheme.
-  static void ApplyExtensionMessageFilterPolicy(
+  // Sets replace_extension_localization_templates on all text/css requests that
+  // have "chrome-extension://" scheme.
+  static void ApplyExtensionLocalizationFilter(
       const GURL& url,
       const ResourceType::Type& resource_type,
       ResourceDispatcherHostRequestInfo* request_info);
@@ -426,13 +442,10 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
   scoped_refptr<DownloadFileManager> download_file_manager_;
 
   // Determines whether a download is allowed.
-  scoped_refptr<DownloadRequestManager> download_request_manager_;
+  scoped_refptr<DownloadRequestLimiter> download_request_limiter_;
 
   // We own the save file manager.
   scoped_refptr<SaveFileManager> save_file_manager_;
-
-  // Handles requests blocked by privacy blacklists.
-  BlacklistInterceptor blacklist_interceptor_;
 
   scoped_refptr<UserScriptListener> user_script_listener_;
 

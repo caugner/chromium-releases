@@ -19,19 +19,32 @@ void AttachShader(GLuint program, GLuint shader) {
 
 void BindAttribLocation(GLuint program, GLuint index, const char* name);
 
-void BindBuffer(GLenum target, GLuint buffer) {
-  helper_->BindBuffer(target, buffer);
-}
-
 void BindFramebuffer(GLenum target, GLuint framebuffer) {
+  if (IsFramebufferReservedId(framebuffer)) {
+    SetGLError(
+        GL_INVALID_OPERATION, "BindFramebuffer: framebuffer reserved id");
+    return;
+  }
+  framebuffer_id_handler_->MarkAsUsedForBind(framebuffer);
   helper_->BindFramebuffer(target, framebuffer);
 }
 
 void BindRenderbuffer(GLenum target, GLuint renderbuffer) {
+  if (IsRenderbufferReservedId(renderbuffer)) {
+    SetGLError(
+        GL_INVALID_OPERATION, "BindRenderbuffer: renderbuffer reserved id");
+    return;
+  }
+  renderbuffer_id_handler_->MarkAsUsedForBind(renderbuffer);
   helper_->BindRenderbuffer(target, renderbuffer);
 }
 
 void BindTexture(GLenum target, GLuint texture) {
+  if (IsTextureReservedId(texture)) {
+    SetGLError(GL_INVALID_OPERATION, "BindTexture: texture reserved id");
+    return;
+  }
+  texture_id_handler_->MarkAsUsedForBind(texture);
   helper_->BindTexture(target, texture);
 }
 
@@ -109,11 +122,11 @@ void CopyTexImage2D(
     GLenum target, GLint level, GLenum internalformat, GLint x, GLint y,
     GLsizei width, GLsizei height, GLint border) {
   if (width < 0) {
-    SetGLError(GL_INVALID_VALUE);
+    SetGLError(GL_INVALID_VALUE, "glCopyTexImage2D: width < 0");
     return;
   }
   if (height < 0) {
-    SetGLError(GL_INVALID_VALUE);
+    SetGLError(GL_INVALID_VALUE, "glCopyTexImage2D: height < 0");
     return;
   }
   helper_->CopyTexImage2D(
@@ -124,11 +137,11 @@ void CopyTexSubImage2D(
     GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y,
     GLsizei width, GLsizei height) {
   if (width < 0) {
-    SetGLError(GL_INVALID_VALUE);
+    SetGLError(GL_INVALID_VALUE, "glCopyTexSubImage2D: width < 0");
     return;
   }
   if (height < 0) {
-    SetGLError(GL_INVALID_VALUE);
+    SetGLError(GL_INVALID_VALUE, "glCopyTexSubImage2D: height < 0");
     return;
   }
   helper_->CopyTexSubImage2D(
@@ -137,14 +150,14 @@ void CopyTexSubImage2D(
 
 GLuint CreateProgram() {
   GLuint client_id;
-  MakeIds(1, &client_id);
+  program_and_shader_id_handler_->MakeIds(0, 1, &client_id);
   helper_->CreateProgram(client_id);
   return client_id;
 }
 
 GLuint CreateShader(GLenum type) {
   GLuint client_id;
-  MakeIds(1, &client_id);
+  program_and_shader_id_handler_->MakeIds(0, 1, &client_id);
   helper_->CreateShader(type, client_id);
   return client_id;
 }
@@ -153,31 +166,40 @@ void CullFace(GLenum mode) {
   helper_->CullFace(mode);
 }
 
-void DeleteBuffers(GLsizei n, const GLuint* buffers) {
-  FreeIds(n, buffers);
-  helper_->DeleteBuffersImmediate(n, buffers);
-}
-
 void DeleteFramebuffers(GLsizei n, const GLuint* framebuffers) {
-  FreeIds(n, framebuffers);
+  if (n < 0) {
+    SetGLError(GL_INVALID_VALUE, "glDeleteFramebuffers: n < 0");
+    return;
+  }
+  framebuffer_id_handler_->FreeIds(n, framebuffers);
   helper_->DeleteFramebuffersImmediate(n, framebuffers);
 }
 
 void DeleteProgram(GLuint program) {
+  program_and_shader_id_handler_->FreeIds(1, &program);
   helper_->DeleteProgram(program);
 }
 
 void DeleteRenderbuffers(GLsizei n, const GLuint* renderbuffers) {
-  FreeIds(n, renderbuffers);
+  if (n < 0) {
+    SetGLError(GL_INVALID_VALUE, "glDeleteRenderbuffers: n < 0");
+    return;
+  }
+  renderbuffer_id_handler_->FreeIds(n, renderbuffers);
   helper_->DeleteRenderbuffersImmediate(n, renderbuffers);
 }
 
 void DeleteShader(GLuint shader) {
+  program_and_shader_id_handler_->FreeIds(1, &shader);
   helper_->DeleteShader(shader);
 }
 
 void DeleteTextures(GLsizei n, const GLuint* textures) {
-  FreeIds(n, textures);
+  if (n < 0) {
+    SetGLError(GL_INVALID_VALUE, "glDeleteTextures: n < 0");
+    return;
+  }
+  texture_id_handler_->FreeIds(n, textures);
   helper_->DeleteTexturesImmediate(n, textures);
 }
 
@@ -201,27 +223,11 @@ void Disable(GLenum cap) {
   helper_->Disable(cap);
 }
 
-void DisableVertexAttribArray(GLuint index) {
-  helper_->DisableVertexAttribArray(index);
-}
-
-void DrawArrays(GLenum mode, GLint first, GLsizei count) {
-  if (count < 0) {
-    SetGLError(GL_INVALID_VALUE);
-    return;
-  }
-  helper_->DrawArrays(mode, first, count);
-}
-
 void DrawElements(
     GLenum mode, GLsizei count, GLenum type, const void* indices);
 
 void Enable(GLenum cap) {
   helper_->Enable(cap);
-}
-
-void EnableVertexAttribArray(GLuint index) {
-  helper_->EnableVertexAttribArray(index);
 }
 
 void Finish();
@@ -246,7 +252,11 @@ void FrontFace(GLenum mode) {
 }
 
 void GenBuffers(GLsizei n, GLuint* buffers) {
-  MakeIds(n, buffers);
+  if (n < 0) {
+    SetGLError(GL_INVALID_VALUE, "glGenBuffers: n < 0");
+    return;
+  }
+  buffer_id_handler_->MakeIds(0, n, buffers);
   helper_->GenBuffersImmediate(n, buffers);
 }
 
@@ -255,17 +265,29 @@ void GenerateMipmap(GLenum target) {
 }
 
 void GenFramebuffers(GLsizei n, GLuint* framebuffers) {
-  MakeIds(n, framebuffers);
+  if (n < 0) {
+    SetGLError(GL_INVALID_VALUE, "glGenFramebuffers: n < 0");
+    return;
+  }
+  framebuffer_id_handler_->MakeIds(0, n, framebuffers);
   helper_->GenFramebuffersImmediate(n, framebuffers);
 }
 
 void GenRenderbuffers(GLsizei n, GLuint* renderbuffers) {
-  MakeIds(n, renderbuffers);
+  if (n < 0) {
+    SetGLError(GL_INVALID_VALUE, "glGenRenderbuffers: n < 0");
+    return;
+  }
+  renderbuffer_id_handler_->MakeIds(0, n, renderbuffers);
   helper_->GenRenderbuffersImmediate(n, renderbuffers);
 }
 
 void GenTextures(GLsizei n, GLuint* textures) {
-  MakeIds(n, textures);
+  if (n < 0) {
+    SetGLError(GL_INVALID_VALUE, "glGenTextures: n < 0");
+    return;
+  }
+  texture_id_handler_->MakeIds(0, n, textures);
   helper_->GenTexturesImmediate(n, textures);
 }
 
@@ -286,7 +308,8 @@ void GetBooleanv(GLenum pname, GLboolean* params) {
   typedef GetBooleanv::Result Result;
   Result* result = GetResultAs<Result*>();
   result->SetNumResults(0);
-  helper_->GetBooleanv(pname, result_shm_id(), result_shm_offset());
+  helper_->GetBooleanv(pname,
+      result_shm_id(), result_shm_offset());
   WaitForCmd();
   result->CopyResult(params);
 }
@@ -294,8 +317,8 @@ void GetBufferParameteriv(GLenum target, GLenum pname, GLint* params) {
   typedef GetBufferParameteriv::Result Result;
   Result* result = GetResultAs<Result*>();
   result->SetNumResults(0);
-  helper_->GetBufferParameteriv(
-      target, pname, result_shm_id(), result_shm_offset());
+  helper_->GetBufferParameteriv(target, pname,
+      result_shm_id(), result_shm_offset());
   WaitForCmd();
   result->CopyResult(params);
 }
@@ -305,7 +328,8 @@ void GetFloatv(GLenum pname, GLfloat* params) {
   typedef GetFloatv::Result Result;
   Result* result = GetResultAs<Result*>();
   result->SetNumResults(0);
-  helper_->GetFloatv(pname, result_shm_id(), result_shm_offset());
+  helper_->GetFloatv(pname,
+      result_shm_id(), result_shm_offset());
   WaitForCmd();
   result->CopyResult(params);
 }
@@ -314,8 +338,8 @@ void GetFramebufferAttachmentParameteriv(
   typedef GetFramebufferAttachmentParameteriv::Result Result;
   Result* result = GetResultAs<Result*>();
   result->SetNumResults(0);
-  helper_->GetFramebufferAttachmentParameteriv(
-      target, attachment, pname, result_shm_id(), result_shm_offset());
+  helper_->GetFramebufferAttachmentParameteriv(target, attachment, pname,
+      result_shm_id(), result_shm_offset());
   WaitForCmd();
   result->CopyResult(params);
 }
@@ -323,7 +347,8 @@ void GetIntegerv(GLenum pname, GLint* params) {
   typedef GetIntegerv::Result Result;
   Result* result = GetResultAs<Result*>();
   result->SetNumResults(0);
-  helper_->GetIntegerv(pname, result_shm_id(), result_shm_offset());
+  helper_->GetIntegerv(pname,
+      result_shm_id(), result_shm_offset());
   WaitForCmd();
   result->CopyResult(params);
 }
@@ -331,7 +356,8 @@ void GetProgramiv(GLuint program, GLenum pname, GLint* params) {
   typedef GetProgramiv::Result Result;
   Result* result = GetResultAs<Result*>();
   result->SetNumResults(0);
-  helper_->GetProgramiv(program, pname, result_shm_id(), result_shm_offset());
+  helper_->GetProgramiv(program, pname,
+      result_shm_id(), result_shm_offset());
   WaitForCmd();
   result->CopyResult(params);
 }
@@ -356,8 +382,8 @@ void GetRenderbufferParameteriv(GLenum target, GLenum pname, GLint* params) {
   typedef GetRenderbufferParameteriv::Result Result;
   Result* result = GetResultAs<Result*>();
   result->SetNumResults(0);
-  helper_->GetRenderbufferParameteriv(
-      target, pname, result_shm_id(), result_shm_offset());
+  helper_->GetRenderbufferParameteriv(target, pname,
+      result_shm_id(), result_shm_offset());
   WaitForCmd();
   result->CopyResult(params);
 }
@@ -365,7 +391,8 @@ void GetShaderiv(GLuint shader, GLenum pname, GLint* params) {
   typedef GetShaderiv::Result Result;
   Result* result = GetResultAs<Result*>();
   result->SetNumResults(0);
-  helper_->GetShaderiv(shader, pname, result_shm_id(), result_shm_offset());
+  helper_->GetShaderiv(shader, pname,
+      result_shm_id(), result_shm_offset());
   WaitForCmd();
   result->CopyResult(params);
 }
@@ -412,8 +439,8 @@ void GetTexParameterfv(GLenum target, GLenum pname, GLfloat* params) {
   typedef GetTexParameterfv::Result Result;
   Result* result = GetResultAs<Result*>();
   result->SetNumResults(0);
-  helper_->GetTexParameterfv(
-      target, pname, result_shm_id(), result_shm_offset());
+  helper_->GetTexParameterfv(target, pname,
+      result_shm_id(), result_shm_offset());
   WaitForCmd();
   result->CopyResult(params);
 }
@@ -421,8 +448,8 @@ void GetTexParameteriv(GLenum target, GLenum pname, GLint* params) {
   typedef GetTexParameteriv::Result Result;
   Result* result = GetResultAs<Result*>();
   result->SetNumResults(0);
-  helper_->GetTexParameteriv(
-      target, pname, result_shm_id(), result_shm_offset());
+  helper_->GetTexParameteriv(target, pname,
+      result_shm_id(), result_shm_offset());
   WaitForCmd();
   result->CopyResult(params);
 }
@@ -432,24 +459,6 @@ void GetUniformiv(GLuint program, GLint location, GLint* params);
 
 GLint GetUniformLocation(GLuint program, const char* name);
 
-void GetVertexAttribfv(GLuint index, GLenum pname, GLfloat* params) {
-  typedef GetVertexAttribfv::Result Result;
-  Result* result = GetResultAs<Result*>();
-  result->SetNumResults(0);
-  helper_->GetVertexAttribfv(
-      index, pname, result_shm_id(), result_shm_offset());
-  WaitForCmd();
-  result->CopyResult(params);
-}
-void GetVertexAttribiv(GLuint index, GLenum pname, GLint* params) {
-  typedef GetVertexAttribiv::Result Result;
-  Result* result = GetResultAs<Result*>();
-  result->SetNumResults(0);
-  helper_->GetVertexAttribiv(
-      index, pname, result_shm_id(), result_shm_offset());
-  WaitForCmd();
-  result->CopyResult(params);
-}
 void GetVertexAttribPointerv(GLuint index, GLenum pname, void** pointer);
 
 void Hint(GLenum target, GLenum mode) {
@@ -537,14 +546,18 @@ void ReadPixels(
     GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type,
     void* pixels);
 
+void ReleaseShaderCompiler() {
+  helper_->ReleaseShaderCompiler();
+}
+
 void RenderbufferStorage(
     GLenum target, GLenum internalformat, GLsizei width, GLsizei height) {
   if (width < 0) {
-    SetGLError(GL_INVALID_VALUE);
+    SetGLError(GL_INVALID_VALUE, "glRenderbufferStorage: width < 0");
     return;
   }
   if (height < 0) {
-    SetGLError(GL_INVALID_VALUE);
+    SetGLError(GL_INVALID_VALUE, "glRenderbufferStorage: height < 0");
     return;
   }
   helper_->RenderbufferStorage(target, internalformat, width, height);
@@ -556,15 +569,19 @@ void SampleCoverage(GLclampf value, GLboolean invert) {
 
 void Scissor(GLint x, GLint y, GLsizei width, GLsizei height) {
   if (width < 0) {
-    SetGLError(GL_INVALID_VALUE);
+    SetGLError(GL_INVALID_VALUE, "glScissor: width < 0");
     return;
   }
   if (height < 0) {
-    SetGLError(GL_INVALID_VALUE);
+    SetGLError(GL_INVALID_VALUE, "glScissor: height < 0");
     return;
   }
   helper_->Scissor(x, y, width, height);
 }
+
+void ShaderBinary(
+    GLsizei n, const GLuint* shaders, GLenum binaryformat, const void* binary,
+    GLsizei length);
 
 void ShaderSource(
     GLuint shader, GLsizei count, const char** str, const GLint* length);
@@ -743,17 +760,48 @@ void VertexAttribPointer(
 
 void Viewport(GLint x, GLint y, GLsizei width, GLsizei height) {
   if (width < 0) {
-    SetGLError(GL_INVALID_VALUE);
+    SetGLError(GL_INVALID_VALUE, "glViewport: width < 0");
     return;
   }
   if (height < 0) {
-    SetGLError(GL_INVALID_VALUE);
+    SetGLError(GL_INVALID_VALUE, "glViewport: height < 0");
     return;
   }
   helper_->Viewport(x, y, width, height);
 }
 
 void SwapBuffers();
+
+GLuint GetMaxValueInBuffer(
+    GLuint buffer_id, GLsizei count, GLenum type, GLuint offset) {
+  typedef GetMaxValueInBuffer::Result Result;
+  Result* result = GetResultAs<Result*>();
+  *result = 0;
+  helper_->GetMaxValueInBuffer(
+      buffer_id, count, type, offset, result_shm_id(), result_shm_offset());
+  WaitForCmd();
+  return *result;
+}
+
+void GenSharedIds(
+    GLuint namespace_id, GLuint id_offset, GLsizei n, GLuint* ids);
+
+void DeleteSharedIds(GLuint namespace_id, GLsizei n, const GLuint* ids);
+
+void RegisterSharedIds(GLuint namespace_id, GLsizei n, const GLuint* ids);
+
+GLboolean CommandBufferEnable(const char* feature);
+
+void* MapBufferSubData(
+    GLuint target, GLintptr offset, GLsizeiptr size, GLenum access);
+
+void UnmapBufferSubData(const void* mem);
+
+void* MapTexSubImage2D(
+    GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width,
+    GLsizei height, GLenum format, GLenum type, GLenum access);
+
+void UnmapTexSubImage2D(const void* mem);
 
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_IMPLEMENTATION_AUTOGEN_H_
 

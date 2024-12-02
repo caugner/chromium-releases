@@ -82,6 +82,14 @@ class ExtensionHost : public RenderViewHostDelegate,
 
   ViewType::Type extension_host_type() const { return extension_host_type_; }
 
+  // ExtensionFunctionDispatcher::Delegate
+  virtual TabContents* associated_tab_contents() {
+    return associated_tab_contents_;
+  }
+  void set_associated_tab_contents(TabContents* associated_tab_contents) {
+    associated_tab_contents_ = associated_tab_contents;
+  }
+
   // Sets the the ViewType of this host (e.g. mole, toolstrip).
   void SetRenderViewType(ViewType::Type type);
 
@@ -117,10 +125,12 @@ class ExtensionHost : public RenderViewHostDelegate,
                            const ViewHostMsg_FrameNavigate_Params& params);
   virtual void DidStopLoading();
   virtual void DocumentAvailableInMainFrame(RenderViewHost* render_view_host);
+  virtual void DocumentOnLoadCompletedInMainFrame(
+      RenderViewHost* render_view_host);
 
   virtual WebPreferences GetWebkitPrefs();
   virtual void ProcessDOMUIMessage(const std::string& message,
-                                   const Value* content,
+                                   const ListValue* content,
                                    const GURL& source_url,
                                    int request_id,
                                    bool has_callback);
@@ -134,7 +144,10 @@ class ExtensionHost : public RenderViewHostDelegate,
   virtual RendererPreferences GetRendererPrefs(Profile* profile) const;
 
   // RenderViewHostDelegate::View
-  virtual void CreateNewWindow(int route_id);
+  virtual void CreateNewWindow(
+      int route_id,
+      WindowContainerType window_container_type,
+      const string16& frame_name);
   virtual void CreateNewWidget(int route_id, WebKit::WebPopupType popup_type);
   virtual void ShowCreatedWindow(int route_id,
                                  WindowOpenDisposition disposition,
@@ -252,6 +265,9 @@ class ExtensionHost : public RenderViewHostDelegate,
   // Only EXTENSION_TOOLSTRIP, EXTENSION_POPUP, and EXTENSION_BACKGROUND_PAGE
   // are used here, others are not hosted by ExtensionHost.
   ViewType::Type extension_host_type_;
+
+  // The relevant TabContents associated with this ExtensionHost, if any.
+  TabContents* associated_tab_contents_;
 
   // Used to measure how long it's been since the host was created.
   PerfTimer since_created_;

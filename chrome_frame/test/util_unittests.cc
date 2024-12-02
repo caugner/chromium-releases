@@ -1,8 +1,9 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/file_version_info.h"
+#include "base/file_version_info_win.h"
 #include "chrome_frame/utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -23,11 +24,13 @@ TEST(UtilTests, GetModuleVersionTest) {
   // Use the method that doesn't go to disk
   uint32 low = 0, high = 0;
   EXPECT_TRUE(GetModuleVersion(mod, &high, &low));
-  EXPECT_NE(high, 0);
-  EXPECT_NE(low, 0);
+  EXPECT_NE(high, 0u);
+  EXPECT_NE(low, 0u);
 
   // Make sure they give the same results.
-  VS_FIXEDFILEINFO* fixed_info = base_info->fixed_file_info();
+  FileVersionInfoWin* base_info_win =
+      static_cast<FileVersionInfoWin*>(base_info.get());
+  VS_FIXEDFILEINFO* fixed_info = base_info_win->fixed_file_info();
   EXPECT_TRUE(fixed_info != NULL);
 
   EXPECT_EQ(fixed_info->dwFileVersionMS, static_cast<DWORD>(high));
@@ -109,3 +112,38 @@ TEST(UtilTests, GetTempInternetFiles) {
   FilePath path = GetIETemporaryFilesFolder();
   EXPECT_FALSE(path.empty());
 }
+
+TEST(UtilTests, ParseAttachTabUrlTest) {
+  std::wstring url = L"attach_external_tab&10&1&0&0&100&100";
+
+  uint64 cookie = 0;
+  gfx::Rect dimensions;
+  int disposition = 0;
+
+  EXPECT_TRUE(ParseAttachExternalTabUrl(url, &cookie, &dimensions,
+                                        &disposition));
+  EXPECT_EQ(10, cookie);
+  EXPECT_EQ(1, disposition);
+  EXPECT_EQ(0, dimensions.x());
+  EXPECT_EQ(0, dimensions.y());
+  EXPECT_EQ(100, dimensions.width());
+  EXPECT_EQ(100, dimensions.height());
+
+  url = L"http://www.foobar.com?&10&1&0&0&100&100";
+  EXPECT_FALSE(ParseAttachExternalTabUrl(url, &cookie, &dimensions,
+                                         &disposition));
+  url = L"attach_external_tab&10&1";
+  EXPECT_FALSE(ParseAttachExternalTabUrl(url, &cookie, &dimensions,
+                                         &disposition));
+}
+
+TEST(UtilTests, ParseVersionTest) {
+  uint32 high = 0, low = 0;
+  EXPECT_FALSE(ParseVersion(L"", &high, &low));
+  EXPECT_TRUE(ParseVersion(L"1", &high, &low) && high == 1 && low == 0);
+  EXPECT_TRUE(ParseVersion(L"1.", &high, &low) && high == 1 && low == 0);
+  EXPECT_TRUE(ParseVersion(L"1.2", &high, &low) && high == 1 && low == 2);
+  EXPECT_TRUE(ParseVersion(L"1.2.3.4", &high, &low) && high == 1 && low == 2);
+  EXPECT_TRUE(ParseVersion(L"10.20", &high, &low) && high == 10 && low == 20);
+}
+

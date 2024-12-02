@@ -18,7 +18,14 @@ class AppCacheFrontendImpl : public AppCacheFrontend {
                                Status status);
   virtual void OnEventRaised(const std::vector<int>& host_ids,
                              EventID event_id);
-  virtual void OnContentBlocked(int host_id);
+  virtual void OnProgressEventRaised(const std::vector<int>& host_ids,
+                                     const GURL& url,
+                                     int num_total, int num_complete);
+  virtual void OnErrorEventRaised(const std::vector<int>& host_ids,
+                                  const std::string& message);
+  virtual void OnLogMessage(int host_id, LogLevel log_level,
+                            const std::string& message);
+  virtual void OnContentBlocked(int host_id, const GURL& manifest_url);
 };
 
 }  // namespace

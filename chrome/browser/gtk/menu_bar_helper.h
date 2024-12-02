@@ -1,10 +1,9 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
 // This class replicates some menubar behaviors that are tricky to get right.
-// It is used to create a more native feel for the bookmark bar and the
-// page/app menus.
+// It is used to create a more native feel for the bookmark bar.
 
 #ifndef CHROME_BROWSER_GTK_MENU_BAR_HELPER_H_
 #define CHROME_BROWSER_GTK_MENU_BAR_HELPER_H_
@@ -12,6 +11,11 @@
 #include <gtk/gtk.h>
 
 #include <vector>
+
+#include "app/gtk_signal.h"
+#include "base/scoped_ptr.h"
+
+class GtkSignalRegistrar;
 
 class MenuBarHelper {
  public:
@@ -43,24 +47,11 @@ class MenuBarHelper {
   void Clear();
 
  private:
-  static gboolean OnMenuMotionNotifyThunk(GtkWidget* menu,
-                                          GdkEventMotion* motion,
-                                          MenuBarHelper* helper) {
-    return helper->OnMenuMotionNotify(menu, motion);
-  }
-  gboolean OnMenuMotionNotify(GtkWidget* menu, GdkEventMotion* motion);
-
-  static void OnMenuHiddenThunk(GtkWidget* menu, MenuBarHelper* helper) {
-    helper->OnMenuHidden(menu);
-  }
-  void OnMenuHidden(GtkWidget* menu);
-
-  static void OnMenuMoveCurrentThunk(GtkWidget* menu,
-                                     GtkMenuDirectionType dir,
-                                     MenuBarHelper* helper) {
-    helper->OnMenuMoveCurrent(menu, dir);
-  }
-  void OnMenuMoveCurrent(GtkWidget* menu, GtkMenuDirectionType dir);
+  CHROMEGTK_CALLBACK_1(MenuBarHelper, gboolean, OnMenuMotionNotify,
+                       GdkEventMotion*);
+  CHROMEGTK_CALLBACK_0(MenuBarHelper, void, OnMenuHidden);
+  CHROMEGTK_CALLBACK_1(MenuBarHelper, void, OnMenuMoveCurrent,
+                       GtkMenuDirectionType);
 
   // The buttons for which we pop up menus. We do not own these, or even add
   // refs to them.
@@ -75,6 +66,10 @@ class MenuBarHelper {
   // All the submenus of |showing_menu_|. We connect to motion events on all
   // of them.
   std::vector<GtkWidget*> submenus_;
+
+  // Signal handlers that are attached only between the "show" and "hide" events
+  // for the menu.
+  scoped_ptr<GtkSignalRegistrar> signal_handlers_;
 
   Delegate* delegate_;
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,9 +62,6 @@ class GeneralPageView : public OptionsPageView,
   virtual void NotifyPrefChanged(const std::wstring* pref_name);
   virtual void HighlightGroup(OptionsGroup highlight_group);
 
-  // views::View overrides:
-  virtual void Layout();
-
  private:
   // ShellIntegration::DefaultBrowserObserver implementation:
   // Updates the UI state to reflect the current default browser state.
@@ -104,11 +101,10 @@ class GeneralPageView : public OptionsPageView,
                            const std::wstring& title,
                            const GURL& url);
 
-  // Sets the home page preferences for kNewTabPageIsHomePage and kHomePage.
-  // If a blank string is passed in we revert to using NewTab page as the Home
-  // page. When setting the Home Page to NewTab page, we preserve the old value
-  // of kHomePage (we don't overwrite it).
-  void SetHomepage(const std::wstring& homepage);
+  // Copies the home page preferences from the gui controls to
+  // kNewTabPageIsHomePage and kHomePage. If an empty or null-host
+  // URL is specified, then we revert to using NewTab page as the Homepage.
+  void UpdateHomepagePrefs();
 
   // Invoked when the selection of the table view changes. Updates the enabled
   // property of the remove button.
@@ -116,6 +112,10 @@ class GeneralPageView : public OptionsPageView,
 
   // Enables or disables the field for entering a custom homepage URL.
   void EnableHomepageURLField(bool enabled);
+
+  // Sets the state and enables/disables the radio buttons that control
+  // if the home page is the new tab page.
+  void UpdateHomepageIsNewTabRadio(bool homepage_is_new_tab, bool enabled);
 
   // Sets the default search provider for the selected item in the combobox.
   void SetDefaultSearchProvider();

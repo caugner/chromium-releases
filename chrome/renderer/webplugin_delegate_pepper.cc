@@ -4,22 +4,23 @@
 
 #define PEPPER_APIS_ENABLED 1
 
-#include "build/build_config.h"
-#if defined(OS_WIN)
-#include <vsstyle.h>
-#endif
-
 #include "chrome/renderer/webplugin_delegate_pepper.h"
 
 #include <string>
 #include <vector>
 
+#if defined(OS_LINUX)
+#include <unistd.h>
+#endif
+
 #include "base/file_util.h"
+#include "base/keyboard_codes.h"
 #if defined(OS_MACOSX)
 #include "base/mac_util.h"
 #endif
 #include "base/md5.h"
 #include "base/message_loop.h"
+#include "base/path_service.h"
 #include "base/process_util.h"
 #if defined(OS_MACOSX)
 #include "base/scoped_cftyperef.h"
@@ -28,26 +29,31 @@
 #include "base/stats_counters.h"
 #include "base/string_util.h"
 #include "base/time.h"
-#if defined(OS_WIN)
-#include "base/win_util.h"
-#endif
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/renderer/pepper_widget.h"
 #include "chrome/renderer/render_thread.h"
+#if defined(OS_LINUX)
+#include "chrome/renderer/renderer_sandbox_support_linux.h"
+#endif
 #include "chrome/renderer/webplugin_delegate_proxy.h"
 #include "gfx/blit.h"
 #if defined(OS_WIN)
 #include "gfx/codec/jpeg_codec.h"
 #include "gfx/gdi_util.h"
-#include "gfx/native_theme_win.h"
+#include "printing/units.h"
 #include "skia/ext/vector_platform_device.h"
 #endif
+#include "printing/native_metafile.h"
 #include "third_party/npapi/bindings/npapi_extensions.h"
 #include "third_party/npapi/bindings/npapi_extensions_private.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCursorInfo.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
 #include "webkit/glue/plugins/plugin_constants_win.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 #include "webkit/glue/plugins/plugin_lib.h"
 #include "webkit/glue/plugins/plugin_list.h"
+#include "webkit/glue/plugins/plugin_host.h"
 #include "webkit/glue/plugins/plugin_stream_url.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -74,58 +80,23 @@ struct Device2DImpl {
 
 struct Device3DImpl {
   gpu::CommandBuffer* command_buffer;
+  bool dynamically_created;
 };
+
+const int32 kDefaultCommandBufferSize = 1024 * 1024;
+
+}  // namespace
+
+static const float kPointsPerInch = 72.0;
 
 #if defined(OS_WIN)
-struct ScrollbarThemeMapping {
-  NPThemeItem item;
-  NPThemeState state;
-  int state_id;  // Used by uxtheme.
-};
-static const ScrollbarThemeMapping scrollbar_mappings[] = {
-  { NPThemeItemScrollbarDownArrow, NPThemeStateDisabled, ABS_DOWNDISABLED},
-  { NPThemeItemScrollbarDownArrow, NPThemeStateHot, ABS_DOWNHOT},
-  { NPThemeItemScrollbarDownArrow, NPThemeStateHover, ABS_DOWNHOVER},
-  { NPThemeItemScrollbarDownArrow, NPThemeStateNormal, ABS_DOWNNORMAL},
-  { NPThemeItemScrollbarDownArrow, NPThemeStatePressed, ABS_DOWNPRESSED},
-  { NPThemeItemScrollbarLeftArrow, NPThemeStateDisabled, ABS_LEFTDISABLED},
-  { NPThemeItemScrollbarLeftArrow, NPThemeStateHot, ABS_LEFTHOT},
-  { NPThemeItemScrollbarLeftArrow, NPThemeStateHover, ABS_LEFTHOVER},
-  { NPThemeItemScrollbarLeftArrow, NPThemeStateNormal, ABS_LEFTNORMAL},
-  { NPThemeItemScrollbarLeftArrow, NPThemeStatePressed, ABS_LEFTPRESSED},
-  { NPThemeItemScrollbarRightArrow, NPThemeStateDisabled, ABS_RIGHTDISABLED},
-  { NPThemeItemScrollbarRightArrow, NPThemeStateHot, ABS_RIGHTHOT},
-  { NPThemeItemScrollbarRightArrow, NPThemeStateHover, ABS_RIGHTHOVER},
-  { NPThemeItemScrollbarRightArrow, NPThemeStateNormal, ABS_RIGHTNORMAL},
-  { NPThemeItemScrollbarRightArrow, NPThemeStatePressed, ABS_RIGHTPRESSED},
-  { NPThemeItemScrollbarUpArrow, NPThemeStateDisabled, ABS_UPDISABLED},
-  { NPThemeItemScrollbarUpArrow, NPThemeStateHot, ABS_UPHOT},
-  { NPThemeItemScrollbarUpArrow, NPThemeStateHover, ABS_UPHOVER},
-  { NPThemeItemScrollbarUpArrow, NPThemeStateNormal, ABS_UPNORMAL},
-  { NPThemeItemScrollbarUpArrow, NPThemeStatePressed, ABS_UPPRESSED},
-};
-
-int GetStateIdFromNPState(int state) {
-  switch (state) {
-    case NPThemeStateDisabled:
-      return SCRBS_DISABLED;
-    case NPThemeStateHot:
-      return SCRBS_HOT;
-    case NPThemeStateHover:
-      return SCRBS_HOVER;
-    case NPThemeStateNormal:
-      return SCRBS_NORMAL;
-    case NPThemeStatePressed:
-      return SCRBS_PRESSED;
-    default:
-      return -1;
-  };
-}
-#else
-  // TODO(port)
-#endif
-
-} // namespace
+// Exported by pdf.dll
+typedef bool (*RenderPDFPageToDCProc)(
+    const unsigned char* pdf_buffer, int buffer_size, int page_number, HDC dc,
+    int dpi_x, int dpi_y, int bounds_origin_x, int bounds_origin_y,
+    int bounds_width, int bounds_height, bool fit_to_bounds,
+    bool stretch_to_bounds, bool keep_aspect_ratio, bool center_in_bounds);
+#endif  // defined(OS_WIN)
 
 WebPluginDelegatePepper* WebPluginDelegatePepper::Create(
     const FilePath& filename,
@@ -350,12 +321,15 @@ WebPluginResourceClient* WebPluginDelegatePepper::CreateSeekableResourceClient(
   return instance()->GetRangeRequest(range_request_id);
 }
 
-void WebPluginDelegatePepper::StartFind(const std::string& search_text,
+bool WebPluginDelegatePepper::StartFind(const string16& search_text,
                                         bool case_sensitive,
                                         int identifier) {
+  if (!GetFindExtensions())
+    return false;
   find_identifier_ = identifier;
   GetFindExtensions()->startFind(
-      instance()->npp(), search_text.c_str(), case_sensitive);
+      instance()->npp(), UTF16ToUTF8(search_text).c_str(), case_sensitive);
+  return true;
 }
 
 void WebPluginDelegatePepper::SelectFindResult(bool forward) {
@@ -382,13 +356,6 @@ void WebPluginDelegatePepper::NumberOfFindResultsChanged(int total,
 void WebPluginDelegatePepper::SelectedFindResultChanged(int index) {
   render_view_->reportFindInPageSelection(
         find_identifier_, index + 1, WebKit::WebRect());
-}
-
-void WebPluginDelegatePepper::Zoom(int factor) {
-  NPPExtensions* extensions = NULL;
-  instance()->NPP_GetValue(NPPVPepperExtensions, &extensions);
-  if (extensions && extensions->zoom)
-    extensions->zoom(instance()->npp(), factor);
 }
 
 bool WebPluginDelegatePepper::ChooseFile(const char* mime_types,
@@ -423,6 +390,156 @@ bool WebPluginDelegatePepper::ChooseFile(const char* mime_types,
   return render_view_->ScheduleFileChooser(ipc_params, this);
 }
 
+NPWidgetExtensions* WebPluginDelegatePepper::GetWidgetExtensions() {
+  return PepperWidget::GetWidgetExtensions();
+}
+
+#define COMPILE_ASSERT_MATCHING_ENUM(webkit_name, np_name) \
+    COMPILE_ASSERT(int(WebCursorInfo::webkit_name) == int(np_name), \
+                   mismatching_enums)
+
+COMPILE_ASSERT_MATCHING_ENUM(TypePointer, NPCursorTypePointer);
+COMPILE_ASSERT_MATCHING_ENUM(TypeCross, NPCursorTypeCross);
+COMPILE_ASSERT_MATCHING_ENUM(TypeHand, NPCursorTypeHand);
+COMPILE_ASSERT_MATCHING_ENUM(TypeIBeam, NPCursorTypeIBeam);
+COMPILE_ASSERT_MATCHING_ENUM(TypeWait, NPCursorTypeWait);
+COMPILE_ASSERT_MATCHING_ENUM(TypeHelp, NPCursorTypeHelp);
+COMPILE_ASSERT_MATCHING_ENUM(TypeEastResize, NPCursorTypeEastResize);
+COMPILE_ASSERT_MATCHING_ENUM(TypeNorthResize, NPCursorTypeNorthResize);
+COMPILE_ASSERT_MATCHING_ENUM(TypeNorthEastResize, NPCursorTypeNorthEastResize);
+COMPILE_ASSERT_MATCHING_ENUM(TypeNorthWestResize, NPCursorTypeNorthWestResize);
+COMPILE_ASSERT_MATCHING_ENUM(TypeSouthResize, NPCursorTypeSouthResize);
+COMPILE_ASSERT_MATCHING_ENUM(TypeSouthEastResize, NPCursorTypeSouthEastResize);
+COMPILE_ASSERT_MATCHING_ENUM(TypeSouthWestResize, NPCursorTypeSouthWestResize);
+COMPILE_ASSERT_MATCHING_ENUM(TypeWestResize, NPCursorTypeWestResize);
+COMPILE_ASSERT_MATCHING_ENUM(TypeNorthSouthResize,
+                             NPCursorTypeNorthSouthResize);
+COMPILE_ASSERT_MATCHING_ENUM(TypeEastWestResize, NPCursorTypeEastWestResize);
+COMPILE_ASSERT_MATCHING_ENUM(TypeNorthEastSouthWestResize,
+                             NPCursorTypeNorthEastSouthWestResize);
+COMPILE_ASSERT_MATCHING_ENUM(TypeNorthWestSouthEastResize,
+                             NPCursorTypeNorthWestSouthEastResize);
+COMPILE_ASSERT_MATCHING_ENUM(TypeColumnResize, NPCursorTypeColumnResize);
+COMPILE_ASSERT_MATCHING_ENUM(TypeRowResize, NPCursorTypeRowResize);
+COMPILE_ASSERT_MATCHING_ENUM(TypeMiddlePanning, NPCursorTypeMiddlePanning);
+COMPILE_ASSERT_MATCHING_ENUM(TypeEastPanning, NPCursorTypeEastPanning);
+COMPILE_ASSERT_MATCHING_ENUM(TypeNorthPanning, NPCursorTypeNorthPanning);
+COMPILE_ASSERT_MATCHING_ENUM(TypeNorthEastPanning,
+                             NPCursorTypeNorthEastPanning);
+COMPILE_ASSERT_MATCHING_ENUM(TypeNorthWestPanning,
+                             NPCursorTypeNorthWestPanning);
+COMPILE_ASSERT_MATCHING_ENUM(TypeSouthPanning, NPCursorTypeSouthPanning);
+COMPILE_ASSERT_MATCHING_ENUM(TypeSouthEastPanning,
+                             NPCursorTypeSouthEastPanning);
+COMPILE_ASSERT_MATCHING_ENUM(TypeSouthWestPanning,
+                             NPCursorTypeSouthWestPanning);
+COMPILE_ASSERT_MATCHING_ENUM(TypeWestPanning, NPCursorTypeWestPanning);
+COMPILE_ASSERT_MATCHING_ENUM(TypeMove, NPCursorTypeMove);
+COMPILE_ASSERT_MATCHING_ENUM(TypeVerticalText, NPCursorTypeVerticalText);
+COMPILE_ASSERT_MATCHING_ENUM(TypeCell, NPCursorTypeCell);
+COMPILE_ASSERT_MATCHING_ENUM(TypeContextMenu, NPCursorTypeContextMenu);
+COMPILE_ASSERT_MATCHING_ENUM(TypeAlias, NPCursorTypeAlias);
+COMPILE_ASSERT_MATCHING_ENUM(TypeProgress, NPCursorTypeProgress);
+COMPILE_ASSERT_MATCHING_ENUM(TypeNoDrop, NPCursorTypeNoDrop);
+COMPILE_ASSERT_MATCHING_ENUM(TypeCopy, NPCursorTypeCopy);
+COMPILE_ASSERT_MATCHING_ENUM(TypeNone, NPCursorTypeNone);
+COMPILE_ASSERT_MATCHING_ENUM(TypeNotAllowed, NPCursorTypeNotAllowed);
+COMPILE_ASSERT_MATCHING_ENUM(TypeZoomIn, NPCursorTypeZoomIn);
+COMPILE_ASSERT_MATCHING_ENUM(TypeZoomOut, NPCursorTypeZoomOut);
+
+bool WebPluginDelegatePepper::SetCursor(NPCursorType type) {
+  cursor_.reset(new WebCursorInfo(static_cast<WebCursorInfo::Type>(type)));
+  return true;
+}
+
+NPError NPMatchFontWithFallback(NPP instance,
+                                const NPFontDescription* description,
+                                NPFontID* id) {
+#if defined(OS_LINUX)
+  int fd = renderer_sandbox_support::MatchFontWithFallback(
+      description->face, description->weight >= 700, description->italic,
+      description->charset);
+  if (fd == -1)
+    return NPERR_GENERIC_ERROR;
+  *id = fd;
+  return NPERR_NO_ERROR;
+#else
+  NOTIMPLEMENTED();
+  return NPERR_GENERIC_ERROR;
+#endif
+}
+
+NPError GetFontTable(NPP instance,
+                     NPFontID id,
+                     uint32_t table,
+                     void* output,
+                     size_t* output_length) {
+#if defined(OS_LINUX)
+  bool rv = renderer_sandbox_support::GetFontTable(
+      id, table, static_cast<uint8_t*>(output), output_length);
+  return rv ? NPERR_NO_ERROR : NPERR_GENERIC_ERROR;
+#else
+  NOTIMPLEMENTED();
+  return NPERR_GENERIC_ERROR;
+#endif
+}
+
+NPError NPDestroyFont(NPP instance, NPFontID id) {
+#if defined(OS_LINUX)
+  close(id);
+  return NPERR_NO_ERROR;
+#else
+  NOTIMPLEMENTED();
+  return NPERR_GENERIC_ERROR;
+#endif
+}
+
+NPFontExtensions g_font_extensions = {
+  NPMatchFontWithFallback,
+  GetFontTable,
+  NPDestroyFont
+};
+
+NPFontExtensions* WebPluginDelegatePepper::GetFontExtensions() {
+  return &g_font_extensions;
+}
+
+void WebPluginDelegatePepper::SetZoomFactor(float scale, bool text_only) {
+  NPPExtensions* extensions = NULL;
+  instance()->NPP_GetValue(NPPVPepperExtensions, &extensions);
+  if (extensions && extensions->zoom)
+    extensions->zoom(instance()->npp(), scale, text_only);
+}
+
+bool WebPluginDelegatePepper::HasSelection() const {
+  return !GetSelectedText(false).empty();
+}
+
+string16 WebPluginDelegatePepper::GetSelectionAsText() const {
+  return GetSelectedText(false);
+}
+
+string16 WebPluginDelegatePepper::GetSelectionAsMarkup() const {
+  return GetSelectedText(true);
+}
+
+string16 WebPluginDelegatePepper::GetSelectedText(bool html) const {
+  NPPExtensions* extensions = NULL;
+  instance_->NPP_GetValue(NPPVPepperExtensions, &extensions);
+  if (!extensions || !extensions->getSelection)
+    return string16();
+
+  void* text;
+  NPSelectionType type = html ? NPSelectionTypeHTML : NPSelectionTypePlainText;
+  NPP npp = instance_->npp();
+  if (extensions->getSelection(npp, &type, &text) != NPERR_NO_ERROR)
+    return string16();
+
+  string16 rv = UTF8ToUTF16(static_cast<char*>(text));
+  NPAPI::PluginHost::Singleton()->host_functions()->memfree(text);
+  return rv;
+}
+
 NPError WebPluginDelegatePepper::Device2DQueryCapability(int32 capability,
                                                          int32* value) {
   return NPERR_GENERIC_ERROR;
@@ -442,10 +559,10 @@ NPError WebPluginDelegatePepper::Device2DInitializeContext(
     return NPERR_GENERIC_ERROR;
   }
 
-  // This is a windowless plugin, so set it to have a NULL handle. Defer this
+  // This is a windowless plugin, so set it to have no handle. Defer this
   // until we know the plugin will use the 2D device. If it uses the 3D device
   // it will have a window handle.
-  plugin_->SetWindow(NULL);
+  plugin_->SetWindow(gfx::kNullPluginWindow);
 
   scoped_ptr<Graphics2DDeviceContext> g2d(new Graphics2DDeviceContext(this));
   NPError status = g2d->Initialize(window_rect_, config, context);
@@ -470,8 +587,7 @@ NPError WebPluginDelegatePepper::Device2DGetStateContext(
   if (state == NPExtensionsReservedStateSharedMemory) {
     if (!context)
       return NPERR_INVALID_PARAM;
-    Graphics2DDeviceContext* ctx = graphic2d_contexts_.Lookup(
-        reinterpret_cast<intptr_t>(context->reserved));
+    Graphics2DDeviceContext* ctx = GetGraphicsContext(context);
     if (!ctx)
       return NPERR_INVALID_PARAM;
     *value = reinterpret_cast<intptr_t>(ctx->transport_dib());
@@ -523,144 +639,10 @@ NPError WebPluginDelegatePepper::Device2DDestroyContext(
   return NPERR_NO_ERROR;
 }
 
-NPError WebPluginDelegatePepper::Device2DThemeGetSize(NPThemeItem item,
-                                                      int* width,
-                                                      int* height) {
-#if defined(OS_WIN)
-  switch (item) {
-    case NPThemeItemScrollbarDownArrow:
-    case NPThemeItemScrollbarUpArrow:
-      *width = GetSystemMetrics(SM_CXVSCROLL);
-      *height = GetSystemMetrics(SM_CYVSCROLL);
-      break;
-    case NPThemeItemScrollbarLeftArrow:
-    case NPThemeItemScrollbarRightArrow:
-      *width = GetSystemMetrics(SM_CXHSCROLL);
-      *height = GetSystemMetrics(SM_CYHSCROLL);
-      break;
-    case NPThemeItemScrollbarHorizontalThumb:
-      *width = GetSystemMetrics(SM_CXHTHUMB);
-      *height = *width;  // Make the min size a square.
-      break;
-    case NPThemeItemScrollbarVerticalThumb:
-      *height = GetSystemMetrics(SM_CYVTHUMB);
-      *width = *height;  // Make the min size a square.
-      break;
-    case NPThemeItemScrollbarHoriztonalTrack:
-      *height = GetSystemMetrics(SM_CYHSCROLL);
-      *width = 0;
-      break;
-    case NPThemeItemScrollbarVerticalTrack:
-      *width = GetSystemMetrics(SM_CXVSCROLL);
-      *height = 0;
-      break;
-    default:
-      return NPERR_GENERIC_ERROR;
-  }
-  return NPERR_NO_ERROR;
-#else
-  NOTIMPLEMENTED();
-  return NPERR_GENERIC_ERROR;
-#endif
-}
-
-NPError WebPluginDelegatePepper::Device2DThemePaint(NPDeviceContext2D* context,
-                                                    NPThemeParams* params) {
-  if (!context)
-    return NPERR_INVALID_PARAM;
-
-  Graphics2DDeviceContext* ctx = graphic2d_contexts_.Lookup(
+Graphics2DDeviceContext* WebPluginDelegatePepper::GetGraphicsContext(
+    NPDeviceContext2D* context) {
+  return graphic2d_contexts_.Lookup(
       reinterpret_cast<intptr_t>(context->reserved));
-  if (!ctx)
-    return NPERR_INVALID_PARAM;
-
-  NPError rv = NPERR_GENERIC_ERROR;
-  gfx::Rect rect(params->location.left,
-                 params->location.top,
-                 params->location.right - params->location.left,
-                 params->location.bottom - params->location.top);
-  skia::PlatformCanvas* canvas = ctx->canvas();
-
-#if defined(OS_WIN)
-  int state = -1;
-  int part = -1;
-  int classic_state = 0;
-  skia::PlatformDevice::PlatformSurface surface = canvas->beginPlatformPaint();
-#endif
-
-  switch (params->item) {
-    case NPThemeItemScrollbarDownArrow:
-    case NPThemeItemScrollbarLeftArrow:
-    case NPThemeItemScrollbarRightArrow:
-    case NPThemeItemScrollbarUpArrow: {
-      int state_to_use = params->state;
-      if (state_to_use == NPThemeStateHover
-#if defined(OS_WIN)
-          && win_util::GetWinVersion() < win_util::WINVERSION_VISTA
-#endif
-          ) {
-        state_to_use = NPThemeStateHover;
-      }
-
-#if defined(OS_WIN)
-      for (size_t i = 0; i < arraysize(scrollbar_mappings); ++i) {
-        if (scrollbar_mappings[i].item == params->item &&
-            scrollbar_mappings[i].state == state_to_use) {
-          state = scrollbar_mappings[i].state_id;
-          gfx::NativeTheme::instance()->PaintScrollbarArrow(
-              surface, state, classic_state, &rect.ToRECT());
-          rv = NPERR_NO_ERROR;
-          break;
-        }
-      }
-#else
-          // TODO(port)
-#endif
-      break;
-    }
-    case NPThemeItemScrollbarHorizontalThumb:
-    case NPThemeItemScrollbarVerticalThumb:
-#if defined(OS_WIN)
-      // First draw the thumb, then the gripper.
-      part = params->item == NPThemeItemScrollbarHorizontalThumb ?
-          SBP_THUMBBTNHORZ : SBP_THUMBBTNVERT;
-      state = GetStateIdFromNPState(params->state);
-      gfx::NativeTheme::instance()->PaintScrollbarThumb(
-          surface, part, state, classic_state, &rect.ToRECT());
-
-      part = params->item == NPThemeItemScrollbarHorizontalThumb ?
-        SBP_GRIPPERHORZ : SBP_GRIPPERVERT;
-      gfx::NativeTheme::instance()->PaintScrollbarThumb(
-          surface, part, state, classic_state, &rect.ToRECT());
-      rv = NPERR_NO_ERROR;
-#else
-          // TODO(port)
-#endif
-      break;
-    case NPThemeItemScrollbarHoriztonalTrack:
-    case NPThemeItemScrollbarVerticalTrack: {
-#if defined(OS_WIN)
-      part = params->item == NPThemeItemScrollbarHoriztonalTrack ?
-          SBP_LOWERTRACKHORZ : SBP_LOWERTRACKVERT;
-      state = GetStateIdFromNPState(params->state);
-      RECT align;
-      align.left = align.right = params->align.x;
-      align.top = align.bottom = params->align.y;
-      gfx::NativeTheme::instance()->PaintScrollbarTrack(
-          surface, part, state, classic_state, &rect.ToRECT(), &align, canvas);
-      rv = NPERR_NO_ERROR;
-#else
-      // TODO(port)
-      NOTIMPLEMENTED();
-#endif
-      break;
-    }
-    default:
-      NOTREACHED();
-  }
-
-  canvas->endPlatformPaint();
-  return rv;
 }
 
 NPError WebPluginDelegatePepper::Device3DQueryCapability(int32 capability,
@@ -698,6 +680,10 @@ NPError WebPluginDelegatePepper::Device3DInitializeContext(
                                    false)) {
     plugin_->SetAcceptsInputEvents(true);
 
+    // Ensure the window has the correct size before initializing the
+    // command buffer.
+    nested_delegate_->UpdateGeometry(window_rect_, clip_rect_);
+
     // Ask the GPU plugin to create a command buffer and return a proxy.
     command_buffer_ = nested_delegate_->CreateCommandBuffer();
     if (command_buffer_) {
@@ -711,14 +697,12 @@ NPError WebPluginDelegatePepper::Device3DInitializeContext(
         context->waitForProgress = true;
         Buffer ring_buffer = command_buffer_->GetRingBuffer();
         context->commandBuffer = ring_buffer.ptr;
-        context->commandBufferSize = state.size;
+        context->commandBufferSize = state.num_entries;
         context->repaintCallback = NULL;
         Synchronize3DContext(context, state);
 
         ScheduleHandleRepaint(instance_->npp(), context);
 
-        // Ensure the service knows the window size before rendering anything.
-        nested_delegate_->UpdateGeometry(window_rect_, clip_rect_);
 #if defined(OS_MACOSX)
         command_buffer_->SetWindowSize(window_rect_.size());
 #endif  // OS_MACOSX
@@ -730,14 +714,15 @@ NPError WebPluginDelegatePepper::Device3DInitializeContext(
         // Save the implementation information (the CommandBuffer).
         Device3DImpl* impl = new Device3DImpl;
         impl->command_buffer = command_buffer_;
+        impl->dynamically_created = false;
         context->reserved = impl;
 
         return NPERR_NO_ERROR;
       }
-    }
 
-    nested_delegate_->DestroyCommandBuffer(command_buffer_);
-    command_buffer_ = NULL;
+      nested_delegate_->DestroyCommandBuffer(command_buffer_);
+      command_buffer_ = NULL;
+    }
   }
 
   nested_delegate_->PluginDestroyed();
@@ -814,8 +799,16 @@ NPError WebPluginDelegatePepper::Device3DDestroyContext(
   // has been destroyed.
   method_factory3d_.RevokeAll();
 
-  delete static_cast<Device3DImpl*>(context->reserved);
+  // TODO(apatrick): this will be much simpler when we switch to the new device
+  // API. There should be no need for the Device3DImpl and the context will
+  // always be destroyed dynamically.
+  Device3DImpl* impl = static_cast<Device3DImpl*>(context->reserved);
+  bool dynamically_created = impl->dynamically_created;
+  delete impl;
   context->reserved = NULL;
+  if (dynamically_created) {
+    delete context;
+  }
 
   if (nested_delegate_) {
     if (command_buffer_) {
@@ -867,12 +860,184 @@ NPError WebPluginDelegatePepper::Device3DMapBuffer(
     return NPERR_GENERIC_ERROR;
 
 #if defined(ENABLE_GPU)
-  Buffer gpu_buffer = command_buffer_->GetTransferBuffer(id);
+  Buffer gpu_buffer;
+  if (id == NP3DCommandBufferId) {
+    gpu_buffer = command_buffer_->GetRingBuffer();
+  } else {
+    gpu_buffer = command_buffer_->GetTransferBuffer(id);
+  }
+
   np_buffer->ptr = gpu_buffer.ptr;
   np_buffer->size = gpu_buffer.size;
   if (!np_buffer->ptr)
     return NPERR_GENERIC_ERROR;
 #endif  // ENABLE_GPU
+
+  return NPERR_NO_ERROR;
+}
+
+NPError WebPluginDelegatePepper::Device3DGetNumConfigs(int32* num_configs) {
+  if (!num_configs)
+    return NPERR_GENERIC_ERROR;
+
+  *num_configs = 1;
+  return NPERR_NO_ERROR;
+}
+
+NPError WebPluginDelegatePepper::Device3DGetConfigAttribs(
+    int32 config,
+    int32* attrib_list) {
+  // Only one config available currently.
+  if (config != 0)
+    return NPERR_GENERIC_ERROR;
+
+  if (attrib_list) {
+    for (int32* attrib_pair = attrib_list; *attrib_pair; attrib_pair += 2) {
+      switch (attrib_pair[0]) {
+        case NP3DAttrib_BufferSize:
+          attrib_pair[1] = 32;
+          break;
+        case NP3DAttrib_AlphaSize:
+        case NP3DAttrib_BlueSize:
+        case NP3DAttrib_GreenSize:
+        case NP3DAttrib_RedSize:
+          attrib_pair[1] = 8;
+          break;
+        case NP3DAttrib_DepthSize:
+          attrib_pair[1] = 24;
+          break;
+        case NP3DAttrib_StencilSize:
+          attrib_pair[1] = 8;
+          break;
+        case NP3DAttrib_SurfaceType:
+          attrib_pair[1] = 0;
+          break;
+        default:
+          return NPERR_GENERIC_ERROR;
+      }
+    }
+  }
+
+  return NPERR_NO_ERROR;
+}
+
+NPError WebPluginDelegatePepper::Device3DCreateContext(
+    int32 config,
+    const int32* attrib_list,
+    NPDeviceContext3D** context) {
+  if (!context)
+    return NPERR_GENERIC_ERROR;
+
+  // Only one config available currently.
+  if (config != 0)
+    return NPERR_GENERIC_ERROR;
+
+  // For now, just use the old API to initialize the context.
+  NPDeviceContext3DConfig old_config;
+  old_config.commandBufferSize = kDefaultCommandBufferSize;
+  if (attrib_list) {
+    for (const int32* attrib_pair = attrib_list; *attrib_pair;
+         attrib_pair += 2) {
+      switch (attrib_pair[0]) {
+        case NP3DAttrib_CommandBufferSize:
+          old_config.commandBufferSize = attrib_pair[1];
+          break;
+        default:
+          return NPERR_GENERIC_ERROR;
+      }
+    }
+  }
+
+  *context = new NPDeviceContext3D;
+  Device3DInitializeContext(&old_config, *context);
+
+  // Flag the context as dynamically created by the browser. TODO(apatrick):
+  // take this out when all contexts are dynamically created.
+  Device3DImpl* impl = static_cast<Device3DImpl*>((*context)->reserved);
+  impl->dynamically_created = true;
+
+  return NPERR_NO_ERROR;
+}
+
+NPError WebPluginDelegatePepper::Device3DRegisterCallback(
+    NPP id,
+    NPDeviceContext3D* context,
+    int32 callback_type,
+    NPDeviceGenericCallbackPtr callback,
+    void* callback_data) {
+  if (!context)
+    return NPERR_GENERIC_ERROR;
+
+  switch (callback_type) {
+    case NP3DCallback_Repaint:
+      context->repaintCallback = reinterpret_cast<NPDeviceContext3DRepaintPtr>(
+          callback);
+      break;
+    default:
+      return NPERR_GENERIC_ERROR;
+  }
+
+  return NPERR_NO_ERROR;
+}
+
+NPError WebPluginDelegatePepper::Device3DSynchronizeContext(
+    NPP id,
+    NPDeviceContext3D* context,
+    NPDeviceSynchronizationMode mode,
+    const int32* input_attrib_list,
+    int32* output_attrib_list,
+    NPDeviceSynchronizeContextCallbackPtr callback,
+    void* callback_data) {
+  if (!context)
+    return NPERR_GENERIC_ERROR;
+
+  // Copy input attributes into context.
+  if (input_attrib_list) {
+    for (const int32* attrib_pair = input_attrib_list;
+         *attrib_pair;
+         attrib_pair += 2) {
+      switch (attrib_pair[0]) {
+        case NP3DAttrib_PutOffset:
+          context->putOffset = attrib_pair[1];
+          break;
+        default:
+          return NPERR_GENERIC_ERROR;
+      }
+    }
+  }
+
+  // Use existing flush mechanism for now.
+  if (mode != NPDeviceSynchronizationMode_Cached) {
+    context->waitForProgress = mode == NPDeviceSynchronizationMode_Flush;
+    Device3DFlushContext(id, context, callback, callback_data);
+  }
+
+  // Copy most recent output attributes from context.
+  // To read output attributes after the completion of an asynchronous flush,
+  // invoke SynchronizeContext again with mode
+  // NPDeviceSynchronizationMode_Cached from the callback function.
+  if (output_attrib_list) {
+    for (int32* attrib_pair = output_attrib_list;
+         *attrib_pair;
+         attrib_pair += 2) {
+      switch (attrib_pair[0]) {
+        case NP3DAttrib_CommandBufferSize:
+          attrib_pair[1] = context->commandBufferSize;
+          break;
+        case NP3DAttrib_GetOffset:
+          attrib_pair[1] = context->getOffset;
+          break;
+        case NP3DAttrib_PutOffset:
+          attrib_pair[1] = context->putOffset;
+          break;
+        case NP3DAttrib_Token:
+          attrib_pair[1] = context->token;
+          break;
+        default:
+          return NPERR_GENERIC_ERROR;
+      }
+    }
+  }
 
   return NPERR_NO_ERROR;
 }
@@ -990,17 +1155,123 @@ int WebPluginDelegatePepper::PrintBegin(const gfx::Rect& printable_area,
                                                        printer_dpi,
                                                        &num_pages)) {
       current_printable_area_ = printable_area;
+      current_printer_dpi_ = printer_dpi;
     }
   }
+#if defined (OS_LINUX)
+  num_pages_ = num_pages;
+  pdf_output_done_ = false;
+#endif  // (OS_LINUX)
   return num_pages;
+}
+
+bool WebPluginDelegatePepper::VectorPrintPage(int page_number,
+                                              WebKit::WebCanvas* canvas) {
+  NPPPrintExtensions* print_extensions = GetPrintExtensions();
+  if (!print_extensions)
+    return false;
+#if defined(OS_WIN)
+  // For Windows, we need the PDF DLL to render the output PDF to a DC.
+  FilePath pdf_path;
+  PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf_path);
+  HMODULE pdf_module = GetModuleHandle(pdf_path.value().c_str());
+  if (!pdf_module)
+    return false;
+  RenderPDFPageToDCProc render_proc =
+      reinterpret_cast<RenderPDFPageToDCProc>(
+          GetProcAddress(pdf_module, "RenderPDFPageToDC"));
+  if (!render_proc)
+    return false;
+#endif  // defined(OS_WIN)
+
+  unsigned char* pdf_output = NULL;
+  int32 output_size = 0;
+  NPPrintPageNumberRange page_range;
+#if defined(OS_LINUX)
+  // On Linux we will try and output all pages as PDF in the first call to
+  // PrintPage. This is a temporary hack.
+  // TODO(sanjeevr): Remove this hack and fix this by changing the print
+  // interfaces for WebFrame and WebPlugin.
+  if (page_number != 0)
+    return pdf_output_done_;
+  page_range.firstPageNumber = 0;
+  page_range.lastPageNumber = num_pages_ - 1;
+#else  // defined(OS_LINUX)
+  page_range.firstPageNumber = page_range.lastPageNumber = page_number;
+#endif  // defined(OS_LINUX)
+  NPError err = print_extensions->printPagesAsPDF(instance()->npp(),
+                                                  &page_range, 1,
+                                                  &pdf_output, &output_size);
+  if (err != NPERR_NO_ERROR)
+    return false;
+
+  bool ret = false;
+#if defined(OS_LINUX)
+  // On Linux we need to get the backing PdfPsMetafile and write the bits
+  // directly.
+  cairo_t* context = canvas->beginPlatformPaint();
+  printing::NativeMetafile* metafile =
+      printing::NativeMetafile::FromCairoContext(context);
+  DCHECK(metafile);
+  if (metafile) {
+    ret = metafile->SetRawData(pdf_output, output_size);
+    if (ret)
+      pdf_output_done_ = true;
+  }
+  canvas->endPlatformPaint();
+#elif defined(OS_MACOSX)
+  printing::NativeMetafile metafile;
+  // Create a PDF metafile and render from there into the passed in context.
+  if (metafile.Init(pdf_output, output_size)) {
+    // Flip the transform.
+    CGContextSaveGState(canvas);
+    CGContextTranslateCTM(canvas, 0, current_printable_area_.height());
+    CGContextScaleCTM(canvas, 1.0, -1.0);
+    ret = metafile.RenderPage(1, canvas, current_printable_area_.ToCGRect(),
+                              true, false, true, true);
+    CGContextRestoreGState(canvas);
+  }
+#elif defined(OS_WIN)
+  // On Windows, we now need to render the PDF to the DC that backs the
+  // supplied canvas.
+  skia::VectorPlatformDevice& device =
+      static_cast<skia::VectorPlatformDevice&>(
+          canvas->getTopPlatformDevice());
+  HDC dc = device.getBitmapDC();
+  gfx::Size size_in_pixels;
+  size_in_pixels.set_width(
+      printing::ConvertUnit(current_printable_area_.width(),
+                            static_cast<int>(kPointsPerInch),
+                            current_printer_dpi_));
+  size_in_pixels.set_height(
+      printing::ConvertUnit(current_printable_area_.height(),
+                            static_cast<int>(kPointsPerInch),
+                            current_printer_dpi_));
+  // We need to render using the actual printer DPI (rendering to a smaller
+  // set of pixels leads to a blurry output). However, we need to counter the
+  // scaling up that will happen in the browser.
+  XFORM xform = {0};
+  xform.eM11 = xform.eM22 = kPointsPerInch / current_printer_dpi_;
+  ModifyWorldTransform(dc, &xform, MWT_LEFTMULTIPLY);
+
+  ret = render_proc(pdf_output, output_size, 0, dc, current_printer_dpi_,
+                    current_printer_dpi_, 0, 0, size_in_pixels.width(),
+                    size_in_pixels.height(), true, false, true, true);
+#endif  // defined(OS_WIN)
+
+  NPAPI::PluginHost::Singleton()->host_functions()->memfree(pdf_output);
+  return ret;
 }
 
 bool WebPluginDelegatePepper::PrintPage(int page_number,
                                         WebKit::WebCanvas* canvas) {
-#if defined(OS_WIN) || defined(OS_LINUX)
   NPPPrintExtensions* print_extensions = GetPrintExtensions();
   if (!print_extensions)
     return false;
+
+  // First try and use vector print.
+  if (VectorPrintPage(page_number, canvas))
+    return true;
 
   DCHECK(!current_printable_area_.IsEmpty());
 
@@ -1022,7 +1293,7 @@ bool WebPluginDelegatePepper::PrintPage(int page_number,
   scoped_ptr<Graphics2DDeviceContext> g2d(new Graphics2DDeviceContext(this));
   NPDeviceContext2DConfig config;
   NPDeviceContext2D context;
-  gfx::Rect surface_rect(gfx::Point(0, 0), size_in_pixels);
+  gfx::Rect surface_rect(size_in_pixels);
   NPError err = g2d->Initialize(surface_rect, &config, &context);
   if (err != NPERR_NO_ERROR) {
     NOTREACHED();
@@ -1066,16 +1337,18 @@ bool WebPluginDelegatePepper::PrintPage(int page_number,
     DrawJPEGToPlatformDC(committed, current_printable_area_, canvas);
     draw_to_canvas = false;
   }
-#endif  // OS_WIN
-
+#endif  // defined(OS_WIN)
+#if defined(OS_MACOSX)
+  draw_to_canvas = false;
+  DrawSkBitmapToCanvas(committed, canvas, current_printable_area_,
+                       current_printable_area_.height());
+  // See comments in the header file.
+  last_printed_page_ = committed;
+#else  // defined(OS_MACOSX)
   if (draw_to_canvas)
     canvas->drawBitmapRect(committed, &src_rect, dest_rect);
-
+#endif  // defined(OS_MACOSX)
   return true;
-#else  // defined(OS_WIN) || defined(OS_LINUX)
-  NOTIMPLEMENTED();
-  return false;
-#endif  // defined(OS_WIN) || defined(OS_LINUX)
 }
 
 void WebPluginDelegatePepper::PrintEnd() {
@@ -1083,12 +1356,14 @@ void WebPluginDelegatePepper::PrintEnd() {
   if (print_extensions)
     print_extensions->printEnd(instance()->npp());
   current_printable_area_ = gfx::Rect();
+  current_printer_dpi_ = -1;
+#if defined(OS_MACOSX)
+  last_printed_page_ = SkBitmap();
+#elif defined(OS_LINUX)
+  num_pages_ = 0;
+  pdf_output_done_ = false;
+#endif  // defined(OS_LINUX)
 }
-
-bool WebPluginDelegatePepper::SupportsFind() {
-  return GetFindExtensions() != NULL;
-}
-
 
 WebPluginDelegatePepper::WebPluginDelegatePepper(
     const base::WeakPtr<RenderView>& render_view,
@@ -1097,6 +1372,11 @@ WebPluginDelegatePepper::WebPluginDelegatePepper(
       plugin_(NULL),
       instance_(instance),
       nested_delegate_(NULL),
+      current_printer_dpi_(-1),
+#if defined (OS_LINUX)
+      num_pages_(0),
+      pdf_output_done_(false),
+#endif  // (OS_LINUX)
 #if defined(ENABLE_GPU)
       command_buffer_(NULL),
 #endif
@@ -1145,35 +1425,8 @@ void WebPluginDelegatePepper::Paint(WebKit::WebCanvas* canvas,
     // Blit from background_context to context.
     if (!committed_bitmap_.isNull()) {
 #if defined(OS_MACOSX)
-      SkAutoLockPixels lock(committed_bitmap_);
-
-      scoped_cftyperef<CGDataProviderRef> data_provider(
-          CGDataProviderCreateWithData(
-              NULL, committed_bitmap_.getAddr32(0, 0),
-              committed_bitmap_.rowBytes() * committed_bitmap_.height(), NULL));
-      scoped_cftyperef<CGImageRef> image(
-          CGImageCreate(
-              committed_bitmap_.width(), committed_bitmap_.height(),
-              8, 32, committed_bitmap_.rowBytes(),
-              mac_util::GetSystemColorSpace(),
-              kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
-              data_provider, NULL, false, kCGRenderingIntentDefault));
-
-      // Flip the transform
-      CGContextSaveGState(canvas);
-      float window_height = static_cast<float>(CGBitmapContextGetHeight(canvas));
-      CGContextTranslateCTM(canvas, 0, window_height);
-      CGContextScaleCTM(canvas, 1.0, -1.0);
-
-      CGRect bounds;
-      bounds.origin.x = window_rect_.origin().x();
-      bounds.origin.y = window_height - window_rect_.origin().y() -
-          committed_bitmap_.height();
-      bounds.size.width = committed_bitmap_.width();
-      bounds.size.height = committed_bitmap_.height();
-
-      CGContextDrawImage(canvas, bounds, image);
-      CGContextRestoreGState(canvas);
+      DrawSkBitmapToCanvas(committed_bitmap_, canvas, window_rect_,
+                           static_cast<int>(CGBitmapContextGetHeight(canvas)));
 #else
       gfx::Point origin(window_rect_.origin().x(), window_rect_.origin().y());
       canvas->drawBitmap(committed_bitmap_,
@@ -1192,7 +1445,10 @@ void WebPluginDelegatePepper::InstallMissingPlugin() {
   NOTIMPLEMENTED();
 }
 
-void WebPluginDelegatePepper::SetFocus() {
+void WebPluginDelegatePepper::SetFocus(bool focused) {
+  if (!focused)
+    return;
+
   NPPepperEvent npevent;
 
   npevent.type = NPEventType_Focus;
@@ -1311,7 +1567,10 @@ bool WebPluginDelegatePepper::HandleInputEvent(const WebInputEvent& event,
       // NOTIMPLEMENTED();
       break;
   }
-  return instance()->NPP_HandleEvent(&npevent) != 0;
+  bool rv = instance()->NPP_HandleEvent(&npevent) != 0;
+  if (cursor_.get())
+    *cursor_info = *cursor_;
+  return rv;
 }
 
 #if defined(ENABLE_GPU)
@@ -1463,3 +1722,37 @@ bool WebPluginDelegatePepper::DrawJPEGToPlatformDC(
 }
 #endif  // OS_WIN
 
+#if defined(OS_MACOSX)
+void WebPluginDelegatePepper::DrawSkBitmapToCanvas(
+    const SkBitmap& bitmap, WebKit::WebCanvas* canvas,
+    const gfx::Rect& dest_rect,
+    int canvas_height) {
+  SkAutoLockPixels lock(bitmap);
+  DCHECK(bitmap.getConfig() == SkBitmap::kARGB_8888_Config);
+  scoped_cftyperef<CGDataProviderRef> data_provider(
+      CGDataProviderCreateWithData(
+          NULL, bitmap.getAddr32(0, 0),
+          bitmap.rowBytes() * bitmap.height(), NULL));
+  scoped_cftyperef<CGImageRef> image(
+      CGImageCreate(
+          bitmap.width(), bitmap.height(),
+          8, 32, bitmap.rowBytes(),
+          mac_util::GetSystemColorSpace(),
+          kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
+          data_provider, NULL, false, kCGRenderingIntentDefault));
+
+  // Flip the transform
+  CGContextSaveGState(canvas);
+  CGContextTranslateCTM(canvas, 0, canvas_height);
+  CGContextScaleCTM(canvas, 1.0, -1.0);
+
+  CGRect bounds;
+  bounds.origin.x = dest_rect.x();
+  bounds.origin.y = canvas_height - dest_rect.y() - dest_rect.height();
+  bounds.size.width = dest_rect.width();
+  bounds.size.height = dest_rect.height();
+
+  CGContextDrawImage(canvas, bounds, image);
+  CGContextRestoreGState(canvas);
+}
+#endif  // defined(OS_MACOSX)

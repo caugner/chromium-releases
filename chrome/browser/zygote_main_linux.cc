@@ -64,11 +64,35 @@ static bool g_suid_sandbox_active = false;
 static int g_proc_fd = -1;
 #endif
 
+#if defined(CHROMIUM_SELINUX)
+static void SELinuxTransitionToTypeOrDie(const char* type) {
+  security_context_t security_context;
+  if (getcon(&security_context))
+    LOG(FATAL) << "Cannot get SELinux context";
+
+  context_t context = context_new(security_context);
+  context_type_set(context, type);
+  const int r = setcon(context_str(context));
+  context_free(context);
+  freecon(security_context);
+
+  if (r) {
+    LOG(FATAL) << "dynamic transition to type '" << type << "' failed. "
+                  "(this binary has been built with SELinux support, but maybe "
+                  "the policies haven't been loaded into the kernel?)";
+  }
+}
+#endif  // CHROMIUM_SELINUX
+
 // This is the object which implements the zygote. The ZygoteMain function,
-// which is called from ChromeMain, at the the bottom and simple constructs one
-// of these objects and runs it.
+// which is called from ChromeMain, simply constructs one of these objects and
+// runs it.
 class Zygote {
  public:
+  explicit Zygote(int sandbox_flags)
+      : sandbox_flags_(sandbox_flags) {
+  }
+
   bool ProcessRequests() {
     // A SOCK_SEQPACKET socket is installed in fd 3. We get commands from the
     // browser on it.
@@ -142,6 +166,9 @@ class Zygote {
             break;
           HandleDidProcessCrash(fd, pickle, iter);
           return false;
+        case ZygoteHost::kCmdGetSandboxStatus:
+          HandleGetSandboxStatus(fd, pickle, iter);
+          return false;
         default:
           NOTREACHED();
           break;
@@ -196,7 +223,10 @@ class Zygote {
     Pickle write_pickle;
     write_pickle.WriteBool(did_crash);
     write_pickle.WriteBool(child_exited);
-    HANDLE_EINTR(write(fd, write_pickle.data(), write_pickle.size()));
+    if (HANDLE_EINTR(write(fd, write_pickle.data(), write_pickle.size())) !=
+        write_pickle.size()) {
+      PLOG(ERROR) << "write";
+    }
   }
 
   // Handle a 'fork' request from the browser: this means that the browser
@@ -264,6 +294,10 @@ class Zygote {
         close(kZygoteIdDescriptor);  // another socket from the browser
       Singleton<base::GlobalDescriptors>()->Reset(mapping);
 
+#if defined(CHROMIUM_SELINUX)
+      SELinuxTransitionToTypeOrDie("chromium_renderer_t");
+#endif
+
       // Reset the process-wide command line to our new command line.
       CommandLine::Reset();
       CommandLine::Init(0, NULL);
@@ -272,7 +306,7 @@ class Zygote {
       // The fork() request is handled further up the call stack.
       return true;
     } else if (child < 0) {
-      LOG(ERROR) << "Zygote could not fork";
+      LOG(ERROR) << "Zygote could not fork: " << errno;
       goto error;
     }
 
@@ -305,7 +339,8 @@ class Zygote {
            i = fds.begin(); i != fds.end(); ++i)
         close(*i);
 
-      HANDLE_EINTR(write(fd, &proc_id, sizeof(proc_id)));
+      if (HANDLE_EINTR(write(fd, &proc_id, sizeof(proc_id))) < 0)
+        PLOG(ERROR) << "write";
       return false;
     }
 
@@ -319,11 +354,22 @@ class Zygote {
     return false;
   }
 
+  bool HandleGetSandboxStatus(int fd, const Pickle& pickle, void* iter) {
+    if (HANDLE_EINTR(write(fd, &sandbox_flags_, sizeof(sandbox_flags_)) !=
+                     sizeof(sandbox_flags_))) {
+      PLOG(ERROR) << "write";
+    }
+
+    return false;
+  }
+
   // In the SUID sandbox, we try to use a new PID namespace. Thus the PIDs
   // fork() returns are not the real PIDs, so we need to map the Real PIDS
   // into the sandbox PID namespace.
   typedef base::hash_map<base::ProcessHandle, base::ProcessHandle> ProcessMap;
   ProcessMap real_pids_to_sandbox_pids;
+
+  const int sandbox_flags_;
 };
 
 // With SELinux we can carve out a precise sandbox, so we don't have to play
@@ -583,26 +629,6 @@ static bool EnterSandbox() {
 static bool EnterSandbox() {
   PreSandboxInit();
   SkiaFontConfigUseIPCImplementation(kMagicSandboxIPCDescriptor);
-
-  security_context_t security_context;
-  if (getcon(&security_context)) {
-    LOG(ERROR) << "Cannot get SELinux context";
-    return false;
-  }
-
-  context_t context = context_new(security_context);
-  context_type_set(context, "chromium_zygote_t");
-  const int r = setcon(context_str(context));
-  context_free(context);
-  freecon(security_context);
-
-  if (r) {
-    LOG(ERROR) << "dynamic transition to type 'chromium_zygote_t' failed. "
-                  "(this binary has been built with SELinux support, but maybe "
-                  "the policies haven't been loaded into the kernel?)";
-    return false;
-  }
-
   return true;
 }
 
@@ -633,6 +659,14 @@ bool ZygoteMain(const MainFunctionParams& params) {
     return false;
   }
 
+  int sandbox_flags = 0;
+  if (getenv("SBX_D"))
+    sandbox_flags |= ZygoteHost::kSandboxSUID;
+  if (getenv("SBX_PID_NS"))
+    sandbox_flags |= ZygoteHost::kSandboxPIDNS;
+  if (getenv("SBX_NET_NS"))
+    sandbox_flags |= ZygoteHost::kSandboxNetNS;
+
 #if defined(SECCOMP_SANDBOX)
   // The seccomp sandbox will be turned on when the renderers start. But we can
   // already check if sufficient support is available so that we only need to
@@ -648,11 +682,12 @@ bool ZygoteMain(const MainFunctionParams& params) {
                     "sandboxing disabled.";
     } else {
       LOG(INFO) << "Enabling experimental Seccomp sandbox.";
+      sandbox_flags |= ZygoteHost::kSandboxSeccomp;
     }
   }
 #endif  // SECCOMP_SANDBOX
 
-  Zygote zygote;
+  Zygote zygote(sandbox_flags);
   // This function call can return multiple times, once per fork().
   return zygote.ProcessRequests();
 }

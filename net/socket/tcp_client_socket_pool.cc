@@ -20,6 +20,23 @@ using base::TimeDelta;
 
 namespace net {
 
+TCPSocketParams::TCPSocketParams(const HostPortPair& host_port_pair,
+                                 RequestPriority priority, const GURL& referrer,
+                                 bool disable_resolver_cache)
+    : destination_(host_port_pair.host, host_port_pair.port) {
+  Initialize(priority, referrer, disable_resolver_cache);
+}
+
+// TODO(willchan): Update all unittests so we don't need this.
+TCPSocketParams::TCPSocketParams(const std::string& host, int port,
+                                 RequestPriority priority, const GURL& referrer,
+                                 bool disable_resolver_cache)
+    : destination_(host, port) {
+  Initialize(priority, referrer, disable_resolver_cache);
+}
+
+TCPSocketParams::~TCPSocketParams() {}
+
 // TCPConnectJobs will time out after this many seconds.  Note this is the total
 // time, including both host resolution and TCP connect() times.
 //
@@ -29,17 +46,18 @@ namespace net {
 // timeout. Even worse, the per-connect timeout threshold varies greatly
 // between systems (anywhere from 20 seconds to 190 seconds).
 // See comment #12 at http://crbug.com/23364 for specifics.
-static const int kTCPConnectJobTimeoutInSeconds = 240; // 4 minutes.
+static const int kTCPConnectJobTimeoutInSeconds = 240;  // 4 minutes.
 
 TCPConnectJob::TCPConnectJob(
     const std::string& group_name,
-    const TCPSocketParams& params,
+    const scoped_refptr<TCPSocketParams>& params,
     base::TimeDelta timeout_duration,
     ClientSocketFactory* client_socket_factory,
     HostResolver* host_resolver,
     Delegate* delegate,
-    const BoundNetLog& net_log)
-    : ConnectJob(group_name, timeout_duration, delegate, net_log),
+    NetLog* net_log)
+    : ConnectJob(group_name, timeout_duration, delegate,
+                 BoundNetLog::Make(net_log, NetLog::SOURCE_CONNECT_JOB)),
       params_(params),
       client_socket_factory_(client_socket_factory),
       ALLOW_THIS_IN_INITIALIZER_LIST(
@@ -112,7 +130,7 @@ int TCPConnectJob::DoLoop(int result) {
 
 int TCPConnectJob::DoResolveHost() {
   next_state_ = kStateResolveHostComplete;
-  return resolver_.Resolve(params_.destination(), &addresses_, &callback_,
+  return resolver_.Resolve(params_->destination(), &addresses_, &callback_,
                            net_log());
 }
 
@@ -124,9 +142,10 @@ int TCPConnectJob::DoResolveHostComplete(int result) {
 
 int TCPConnectJob::DoTCPConnect() {
   next_state_ = kStateTCPConnectComplete;
-  set_socket(client_socket_factory_->CreateTCPClientSocket(addresses_));
+  set_socket(client_socket_factory_->CreateTCPClientSocket(
+        addresses_, net_log().net_log()));
   connect_start_time_ = base::TimeTicks::Now();
-  return socket()->Connect(&callback_, net_log());
+  return socket()->Connect(&callback_);
 }
 
 int TCPConnectJob::DoTCPConnectComplete(int result) {
@@ -159,11 +178,10 @@ int TCPConnectJob::DoTCPConnectComplete(int result) {
 ConnectJob* TCPClientSocketPool::TCPConnectJobFactory::NewConnectJob(
     const std::string& group_name,
     const PoolBase::Request& request,
-    ConnectJob::Delegate* delegate,
-    const BoundNetLog& net_log) const {
+    ConnectJob::Delegate* delegate) const {
   return new TCPConnectJob(group_name, request.params(), ConnectionTimeout(),
                            client_socket_factory_, host_resolver_, delegate,
-                           net_log);
+                           net_log_);
 }
 
 base::TimeDelta
@@ -174,16 +192,17 @@ base::TimeDelta
 TCPClientSocketPool::TCPClientSocketPool(
     int max_sockets,
     int max_sockets_per_group,
-    const std::string& name,
+    const scoped_refptr<ClientSocketPoolHistograms>& histograms,
     HostResolver* host_resolver,
     ClientSocketFactory* client_socket_factory,
-    NetworkChangeNotifier* network_change_notifier)
-    : base_(max_sockets, max_sockets_per_group, name,
-            base::TimeDelta::FromSeconds(kUnusedIdleSocketTimeout),
+    NetLog* net_log)
+    : base_(max_sockets, max_sockets_per_group, histograms,
+            base::TimeDelta::FromSeconds(
+                ClientSocketPool::unused_idle_socket_timeout()),
             base::TimeDelta::FromSeconds(kUsedIdleSocketTimeout),
-            new TCPConnectJobFactory(client_socket_factory, host_resolver),
-            network_change_notifier) {
-  base_.enable_backup_jobs();
+            new TCPConnectJobFactory(client_socket_factory,
+                                     host_resolver, net_log)) {
+  base_.EnableBackupJobs();
 }
 
 TCPClientSocketPool::~TCPClientSocketPool() {}
@@ -195,13 +214,18 @@ int TCPClientSocketPool::RequestSocket(
     ClientSocketHandle* handle,
     CompletionCallback* callback,
     const BoundNetLog& net_log) {
-  const TCPSocketParams* casted_params =
-      static_cast<const TCPSocketParams*>(params);
+  const scoped_refptr<TCPSocketParams>* casted_params =
+      static_cast<const scoped_refptr<TCPSocketParams>*>(params);
 
   if (net_log.HasListener()) {
-    net_log.AddString(StringPrintf("Requested TCP socket to: %s [port %d]",
-                      casted_params->destination().hostname().c_str(),
-                      casted_params->destination().port()));
+    // TODO(eroman): Split out the host and port parameters.
+    net_log.AddEvent(
+        NetLog::TYPE_TCP_CLIENT_SOCKET_POOL_REQUESTED_SOCKET,
+        new NetLogStringParameter(
+            "host_and_port",
+            StringPrintf("%s [port %d]",
+                         casted_params->get()->destination().hostname().c_str(),
+                         casted_params->get()->destination().port())));
   }
 
   return base_.RequestSocket(group_name, *casted_params, priority, handle,
@@ -210,14 +234,19 @@ int TCPClientSocketPool::RequestSocket(
 
 void TCPClientSocketPool::CancelRequest(
     const std::string& group_name,
-    const ClientSocketHandle* handle) {
+    ClientSocketHandle* handle) {
   base_.CancelRequest(group_name, handle);
 }
 
 void TCPClientSocketPool::ReleaseSocket(
     const std::string& group_name,
-    ClientSocket* socket) {
-  base_.ReleaseSocket(group_name, socket);
+    ClientSocket* socket,
+    int id) {
+  base_.ReleaseSocket(group_name, socket, id);
+}
+
+void TCPClientSocketPool::Flush() {
+  base_.Flush();
 }
 
 void TCPClientSocketPool::CloseIdleSockets() {

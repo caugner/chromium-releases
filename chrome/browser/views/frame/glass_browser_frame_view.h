@@ -22,7 +22,6 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView {
   // Overridden from BrowserNonClientFrameView:
   virtual gfx::Rect GetBoundsForTabStrip(BaseTabStrip* tabstrip) const;
   virtual void UpdateThrobber(bool running);
-  virtual void PaintTabStripShadow(gfx::Canvas* canvas);
 
   // Overridden from views::NonClientFrameView:
   virtual gfx::Rect GetBoundsForClientView() const;
@@ -96,7 +95,7 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView {
   static HICON throbber_icons_[kThrobberIconCount];
   static void InitThrobberIcons();
 
-  DISALLOW_EVIL_CONSTRUCTORS(GlassBrowserFrameView);
+  DISALLOW_COPY_AND_ASSIGN(GlassBrowserFrameView);
 };
 
 #endif  // CHROME_BROWSER_VIEWS_FRAME_GLASS_BROWSER_FRAME_VIEW_H_

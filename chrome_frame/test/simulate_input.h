@@ -6,6 +6,7 @@
 #define CHROME_FRAME_TEST_SIMULATE_INPUT_H_
 
 #include <windows.h>
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/process_util.h"
@@ -37,8 +38,11 @@ void SetKeyboardFocusToWindow(HWND window);
 void SendMnemonic(WORD mnemonic_char, Modifier modifiers, bool extended,
                   bool unicode);
 
-// Sends a mouse click to the window passed in.
+// Sends a mouse click to the desktop.
 enum MouseButton { LEFT, RIGHT, MIDDLE, X };
+void SendMouseClick(int x, int y, MouseButton button);
+// Sends a mouse click to the window passed in, after ensuring that the window
+// is in the foreground.
 void SendMouseClick(HWND window, int x, int y, MouseButton button);
 
 // Translates a single char to a virtual key.
@@ -52,8 +56,8 @@ void SendExtendedKey(WORD key, Modifier modifiers);
 
 // Iterates through all the characters in the string and simulates
 // keyboard input.  The input goes to the currently active application.
-void SendStringW(const wchar_t* s);
-void SendStringA(const char* s);
+void SendStringW(const std::wstring& s);
+void SendStringA(const std::string& s);
 
 }  // end namespace simulate_input
 

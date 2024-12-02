@@ -24,6 +24,7 @@
 #include "chrome/installer/setup/setup_util.h"
 #include "chrome/installer/setup/uninstall.h"
 #include "chrome/installer/util/browser_distribution.h"
+#include "chrome/installer/util/delete_after_reboot_helper.h"
 #include "chrome/installer/util/delete_tree_work_item.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/html_dialog.h"
@@ -63,15 +64,8 @@ DWORD UnPackArchive(const std::wstring& archive, bool system_install,
   if (ret != NO_ERROR)
     return ret;
 
-  std::wstring archive_name;
-  if (InstallUtil::IsChromeFrameProcess()) {
-    archive_name = installer::kChromeFrameArchive;
-  } else {
-    archive_name = installer::kChromeArchive;
-  }
-
   std::wstring uncompressed_archive(temp_path);
-  file_util::AppendToPath(&uncompressed_archive, archive_name);
+  file_util::AppendToPath(&uncompressed_archive, installer::kChromeArchive);
 
   // Check if this is differential update and if it is, patch it to the
   // installer archive that should already be on the machine. We assume
@@ -89,7 +83,7 @@ DWORD UnPackArchive(const std::wstring& archive, bool system_install,
     file_util::AppendToPath(&existing_archive,
                             installed_version->GetString());
     file_util::AppendToPath(&existing_archive, installer_util::kInstallerDir);
-    file_util::AppendToPath(&existing_archive, archive_name);
+    file_util::AppendToPath(&existing_archive, installer::kChromeArchive);
     if (int i = setup_util::ApplyDiffPatch(existing_archive, unpacked_file,
                                            uncompressed_archive)) {
       LOG(ERROR) << "Binary patching failed with error " << i;
@@ -231,13 +225,9 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
   // For install the default location for chrome.packed.7z is in current
   // folder, so get that value first.
   std::wstring archive = file_util::GetDirectoryFromPath(cmd_line.program());
-  if (InstallUtil::IsChromeFrameProcess()) {
-    file_util::AppendToPath(&archive,
-        std::wstring(installer::kChromeFrameCompressedArchive));
-  } else {
-    file_util::AppendToPath(&archive,
-                            std::wstring(installer::kChromeCompressedArchive));
-  }
+  file_util::AppendToPath(&archive,
+                          std::wstring(installer::kChromeCompressedArchive));
+
   // If --install-archive is given, get the user specified value
   if (cmd_line.HasSwitch(installer_util::switches::kInstallArchive)) {
     archive = cmd_line.GetSwitchValue(
@@ -295,13 +285,7 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
         // We want to keep uncompressed archive (chrome.7z) that we get after
         // uncompressing and binary patching. Get the location for this file.
         std::wstring archive_to_copy(temp_path.ToWStringHack());
-        std::wstring archive_name;
-        if (InstallUtil::IsChromeFrameProcess()) {
-          archive_name = installer::kChromeFrameArchive;
-        } else {
-          archive_name = installer::kChromeArchive;
-        }
-        file_util::AppendToPath(&archive_to_copy, archive_name);
+        file_util::AppendToPath(&archive_to_copy, installer::kChromeArchive);
         std::wstring prefs_source_path = cmd_line.GetSwitchValue(
             installer_util::switches::kInstallerData);
         install_status = installer::InstallOrUpdateChrome(
@@ -373,7 +357,21 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
         installer_util::switches::kInstallerData);
     cleanup_list->AddDeleteTreeWorkItem(prefs_path, std::wstring());
   }
-  cleanup_list->Do();
+
+  // The above cleanup has been observed to fail on several users machines.
+  // Specifically, it appears that the temp folder may be locked when we try
+  // to delete it. This is Rather Bad in the case where we have failed updates
+  // as we end up filling users' disks with large-ish temp files. To mitigate
+  // this, if we fail to delete the temp folders, then schedule them for
+  // deletion at next reboot.
+  if (!cleanup_list->Do()) {
+    ScheduleDirectoryForDeletion(temp_path.ToWStringHack().c_str());
+    if (cmd_line.HasSwitch(installer_util::switches::kInstallerData)) {
+      std::wstring prefs_path = cmd_line.GetSwitchValue(
+          installer_util::switches::kInstallerData);
+      ScheduleDirectoryForDeletion(prefs_path.c_str());
+    }
+  }
 
   dist->UpdateDiffInstallStatus(system_level, incremental_install,
                                 install_status);
@@ -601,7 +599,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
   // The exit manager is in charge of calling the dtors of singletons.
   base::AtExitManager exit_manager;
   CommandLine::Init(0, NULL);
+  CommandLine* mutable_command_line = CommandLine::ForCurrentProcess();
+
+  if (mutable_command_line->HasSwitch(installer_util::switches::kChromeFrame)) {
+    mutable_command_line->AppendSwitch(
+        WideToASCII(installer_util::switches::kDoNotCreateShortcuts));
+    mutable_command_line->AppendSwitch(
+        WideToASCII(installer_util::switches::kDoNotLaunchChrome));
+    mutable_command_line->AppendSwitch(
+        WideToASCII(installer_util::switches::kDoNotRegisterForUpdateLaunch));
+  }
+
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
+
   installer::InitInstallerLogging(parsed_command_line);
   scoped_ptr<DictionaryValue> prefs(installer_util::GetInstallPreferences(
       parsed_command_line));
@@ -727,7 +737,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
     // Note that we allow the status installer_util::UNINSTALL_REQUIRES_REBOOT
     // to pass through, since this is only returned on uninstall which is never
     // invoked directly by Google Update.
-    dist->GetInstallReturnCode(install_status);
+    return_code = dist->GetInstallReturnCode(install_status);
   }
 
   LOG(INFO) << "Installation complete, returning: " << return_code;

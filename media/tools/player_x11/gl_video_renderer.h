@@ -5,23 +5,24 @@
 #ifndef MEDIA_TOOLS_PLAYER_X11_GL_VIDEO_RENDERER_H_
 #define MEDIA_TOOLS_PLAYER_X11_GL_VIDEO_RENDERER_H_
 
-#include <GL/glew.h>
-#include <GL/glxew.h>
-
+#include "app/gfx/gl/gl_bindings.h"
 #include "base/lock.h"
 #include "base/scoped_ptr.h"
 #include "media/base/factory.h"
+#include "media/base/filters.h"
 #include "media/filters/video_renderer_base.h"
 
 class GlVideoRenderer : public media::VideoRendererBase {
  public:
   static media::FilterFactory* CreateFactory(Display* display,
-                                             Window window) {
-    return new media::FilterFactoryImpl2<
-        GlVideoRenderer, Display*, Window>(display, window);
+                                             Window window,
+                                             MessageLoop* message_loop) {
+    return new media::FilterFactoryImpl3<
+        GlVideoRenderer, Display*, Window, MessageLoop*>(display, window,
+                                                         message_loop);
   }
 
-  GlVideoRenderer(Display* display, Window window);
+  GlVideoRenderer(Display* display, Window window, MessageLoop* message_loop);
 
   // This method is called to paint the current video frame to the assigned
   // window.
@@ -32,10 +33,14 @@ class GlVideoRenderer : public media::VideoRendererBase {
 
   static GlVideoRenderer* instance() { return instance_; }
 
+  MessageLoop* glx_thread_message_loop() {
+    return glx_thread_message_loop_;
+  }
+
  protected:
   // VideoRendererBase implementation.
   virtual bool OnInitialize(media::VideoDecoder* decoder);
-  virtual void OnStop();
+  virtual void OnStop(media::FilterCallback* callback);
   virtual void OnFrameAvailable();
 
  private:
@@ -43,15 +48,8 @@ class GlVideoRenderer : public media::VideoRendererBase {
   friend class scoped_refptr<GlVideoRenderer>;
   virtual ~GlVideoRenderer();
 
-  int width_;
-  int height_;
-
   Display* display_;
   Window window_;
-
-  // Protects |new_frame_|.
-  Lock lock_;
-  bool new_frame_;
 
   // GL context.
   GLXContext gl_context_;
@@ -59,6 +57,7 @@ class GlVideoRenderer : public media::VideoRendererBase {
   // 3 textures, one for each plane.
   GLuint textures_[3];
 
+  MessageLoop* glx_thread_message_loop_;
   static GlVideoRenderer* instance_;
 
   DISALLOW_COPY_AND_ASSIGN(GlVideoRenderer);

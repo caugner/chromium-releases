@@ -65,10 +65,14 @@ TEST(GLES2CommandIdTest, CommandIdsMatch) {
                  GLES2_CompressedTexImage2D_kCmdId_mismatch);
   COMPILE_ASSERT(CompressedTexImage2DImmediate::kCmdId == 281,
                  GLES2_CompressedTexImage2DImmediate_kCmdId_mismatch);
+  COMPILE_ASSERT(CompressedTexImage2DBucket::kCmdId == 443,
+                 GLES2_CompressedTexImage2DBucket_kCmdId_mismatch);
   COMPILE_ASSERT(CompressedTexSubImage2D::kCmdId == 282,
                  GLES2_CompressedTexSubImage2D_kCmdId_mismatch);
   COMPILE_ASSERT(CompressedTexSubImage2DImmediate::kCmdId == 283,
                  GLES2_CompressedTexSubImage2DImmediate_kCmdId_mismatch);
+  COMPILE_ASSERT(CompressedTexSubImage2DBucket::kCmdId == 444,
+                 GLES2_CompressedTexSubImage2DBucket_kCmdId_mismatch);
   COMPILE_ASSERT(CopyTexImage2D::kCmdId == 284,
                  GLES2_CopyTexImage2D_kCmdId_mismatch);
   COMPILE_ASSERT(CopyTexSubImage2D::kCmdId == 285,
@@ -233,12 +237,16 @@ TEST(GLES2CommandIdTest, CommandIdsMatch) {
                  GLES2_PolygonOffset_kCmdId_mismatch);
   COMPILE_ASSERT(ReadPixels::kCmdId == 363,
                  GLES2_ReadPixels_kCmdId_mismatch);
+  COMPILE_ASSERT(ReleaseShaderCompiler::kCmdId == 437,
+                 GLES2_ReleaseShaderCompiler_kCmdId_mismatch);
   COMPILE_ASSERT(RenderbufferStorage::kCmdId == 364,
                  GLES2_RenderbufferStorage_kCmdId_mismatch);
   COMPILE_ASSERT(SampleCoverage::kCmdId == 365,
                  GLES2_SampleCoverage_kCmdId_mismatch);
   COMPILE_ASSERT(Scissor::kCmdId == 366,
                  GLES2_Scissor_kCmdId_mismatch);
+  COMPILE_ASSERT(ShaderBinary::kCmdId == 436,
+                 GLES2_ShaderBinary_kCmdId_mismatch);
   COMPILE_ASSERT(ShaderSource::kCmdId == 367,
                  GLES2_ShaderSource_kCmdId_mismatch);
   COMPILE_ASSERT(ShaderSourceImmediate::kCmdId == 368,
@@ -371,6 +379,16 @@ TEST(GLES2CommandIdTest, CommandIdsMatch) {
                  GLES2_Viewport_kCmdId_mismatch);
   COMPILE_ASSERT(SwapBuffers::kCmdId == 431,
                  GLES2_SwapBuffers_kCmdId_mismatch);
+  COMPILE_ASSERT(GetMaxValueInBuffer::kCmdId == 438,
+                 GLES2_GetMaxValueInBuffer_kCmdId_mismatch);
+  COMPILE_ASSERT(GenSharedIds::kCmdId == 439,
+                 GLES2_GenSharedIds_kCmdId_mismatch);
+  COMPILE_ASSERT(DeleteSharedIds::kCmdId == 440,
+                 GLES2_DeleteSharedIds_kCmdId_mismatch);
+  COMPILE_ASSERT(RegisterSharedIds::kCmdId == 441,
+                 GLES2_RegisterSharedIds_kCmdId_mismatch);
+  COMPILE_ASSERT(CommandBufferEnable::kCmdId == 442,
+                 GLES2_CommandBufferEnable_kCmdId_mismatch);
 }
 
 #endif  // GPU_COMMAND_BUFFER_COMMON_GLES2_CMD_ID_TEST_AUTOGEN_H_

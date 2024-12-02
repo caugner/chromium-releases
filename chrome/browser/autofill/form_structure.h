@@ -48,9 +48,11 @@ class FormStructure {
   static bool EncodeQueryRequest(const ScopedVector<FormStructure>& forms,
                                  std::string* encoded_xml);
 
-  // Runs several heuristics against the form fields to determine their possible
-  // types.
-  void GetHeuristicAutoFillTypes();
+  // Parses the field types from the server query response. |forms| must be the
+  // same as the one passed to EncodeQueryRequest when constructing the query.
+  static void ParseQueryResponse(const std::string& response_xml,
+                                 const std::vector<FormStructure*>& forms,
+                                 UploadRequired* upload_required);
 
   // The unique signature for this form, composed of the target url domain,
   // the form name, and the form field names in a 64-bit hash.
@@ -59,6 +61,27 @@ class FormStructure {
   // Runs a quick heuristic to rule out pages but obviously not auto-fillable,
   // like google/yahoo/msn search, etc.
   bool IsAutoFillable() const;
+
+  // Returns true if at least one of the form fields relevant for AutoFill
+  // is not empty.
+  bool HasAutoFillableValues() const;
+
+  // Returns true if at least one of the form fields is a billing field, which
+  // includes billing address fields and credit card fields.
+  bool HasBillingFields() const;
+
+  // Returns true if at least one of the form fields is a non-billing field,
+  // which includes billing address fields and credit card fields.
+  bool HasNonBillingFields() const;
+
+  // Resets |autofill_count_| and counts the number of auto-fillable fields.
+  // This is used when we receive server data for form fields.  At that time,
+  // we may have more known fields than just the number of fields we matched
+  // heuristically.
+  void UpdateAutoFillCount();
+
+  // Returns true if this form matches the structural requirements for AutoFill.
+  bool ShouldBeParsed() const;
 
   // Sets the possible types for the field at |index|.
   void set_possible_types(int index, const FieldTypeSet& types);
@@ -89,6 +112,10 @@ class FormStructure {
     UPLOAD,
   };
 
+  // Runs several heuristics against the form fields to determine their possible
+  // types.
+  void GetHeuristicAutoFillTypes();
+
   // Associates the field with the heuristic type for each of the field views.
   void GetHeuristicFieldInfo(FieldTypeMap* field_types_map);
 
@@ -98,8 +125,7 @@ class FormStructure {
                          buzz::XmlElement* encompassing_xml_element) const;
 
   // The name of the form.
-  // TODO(jhawkins): string16
-  std::string form_name_;
+  string16 form_name_;
 
   // The source URL.
   GURL source_url_;
@@ -111,7 +137,7 @@ class FormStructure {
   bool has_autofillable_field_;
   bool has_password_fields_;
 
-  // The number of fields able to be autofilled.
+  // The number of fields able to be auto-filled.
   size_t autofill_count_;
 
   // A vector of all the input fields in the form.  The vector is terminated by

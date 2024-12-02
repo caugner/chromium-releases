@@ -41,6 +41,7 @@
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/in_memory_database.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
+#include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/visitedlink_master.h"
 #include "chrome/common/chrome_constants.h"
@@ -101,6 +102,11 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
   virtual void DBLoaded() {
     message_loop_->PostTask(FROM_HERE, NewRunnableMethod(history_service_.get(),
         &HistoryService::OnDBLoaded));
+  }
+
+  virtual void StartTopSitesMigration() {
+    message_loop_->PostTask(FROM_HERE, NewRunnableMethod(history_service_.get(),
+        &HistoryService::StartTopSitesMigration));
   }
 
  private:
@@ -224,7 +230,7 @@ void HistoryService::SetSegmentPresentationIndex(int64 segment_id, int index) {
 
 void HistoryService::SetKeywordSearchTermsForURL(const GURL& url,
                                                  TemplateURL::IDType keyword_id,
-                                                 const std::wstring& term) {
+                                                 const string16& term) {
   ScheduleAndForget(PRIORITY_UI,
                     &HistoryBackend::SetKeywordSearchTermsForURL,
                     url, keyword_id, term);
@@ -239,7 +245,7 @@ void HistoryService::DeleteAllSearchTermsForKeyword(
 
 HistoryService::Handle HistoryService::GetMostRecentKeywordSearchTerms(
     TemplateURL::IDType keyword_id,
-    const std::wstring& prefix,
+    const string16& prefix,
     int max_count,
     CancelableRequestConsumerBase* consumer,
     GetMostRecentKeywordSearchTermsCallback* callback) {
@@ -331,12 +337,12 @@ void HistoryService::AddPage(const GURL& url,
 }
 
 void HistoryService::SetPageTitle(const GURL& url,
-                                  const std::wstring& title) {
+                                  const string16& title) {
   ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::SetPageTitle, url, title);
 }
 
 void HistoryService::AddPageWithDetails(const GURL& url,
-                                        const std::wstring& title,
+                                        const string16& title,
                                         int visit_count,
                                         int typed_count,
                                         Time last_visit,
@@ -385,7 +391,7 @@ void HistoryService::AddPagesWithDetails(
 }
 
 void HistoryService::SetPageContents(const GURL& url,
-                                     const std::wstring& contents) {
+                                     const string16& contents) {
   if (!CanAddURL(url))
     return;
 
@@ -488,6 +494,13 @@ HistoryService::Handle HistoryService::QueryDownloads(
                   new history::DownloadQueryRequest(callback));
 }
 
+// Changes all IN_PROGRESS in the database entries to CANCELED.
+// IN_PROGRESS entries are the corrupted entries, not updated by next function
+// because of the crash or some other extremal exit.
+void HistoryService::CleanUpInProgressEntries() {
+  ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::CleanUpInProgressEntries);
+}
+
 // Handle updates for a particular download. This is a 'fire and forget'
 // operation, so we don't need to be called back.
 void HistoryService::UpdateDownload(int64 received_bytes,
@@ -497,7 +510,7 @@ void HistoryService::UpdateDownload(int64 received_bytes,
                     received_bytes, state, db_handle);
 }
 
-void HistoryService::UpdateDownloadPath(const std::wstring& path,
+void HistoryService::UpdateDownloadPath(const FilePath& path,
                                         int64 db_handle) {
   ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::UpdateDownloadPath,
                     path, db_handle);
@@ -517,7 +530,7 @@ void HistoryService::RemoveDownloadsBetween(Time remove_begin,
 }
 
 HistoryService::Handle HistoryService::SearchDownloads(
-    const std::wstring& search_text,
+    const string16& search_text,
     CancelableRequestConsumerBase* consumer,
     DownloadSearchCallback* callback) {
   return Schedule(PRIORITY_NORMAL, &HistoryBackend::SearchDownloads, consumer,
@@ -525,7 +538,7 @@ HistoryService::Handle HistoryService::SearchDownloads(
 }
 
 HistoryService::Handle HistoryService::QueryHistory(
-    const std::wstring& text_query,
+    const string16& text_query,
     const history::QueryOptions& options,
     CancelableRequestConsumerBase* consumer,
     QueryHistoryCallback* callback) {
@@ -565,6 +578,17 @@ HistoryService::Handle HistoryService::QueryTopURLsAndRedirects(
   return Schedule(PRIORITY_NORMAL, &HistoryBackend::QueryTopURLsAndRedirects,
       consumer, new history::QueryTopURLsAndRedirectsRequest(callback),
       result_count);
+}
+
+HistoryService::Handle HistoryService::QueryMostVisitedURLs(
+    int result_count,
+    int days_back,
+    CancelableRequestConsumerBase* consumer,
+    QueryMostVisitedURLsCallback* callback) {
+  return Schedule(PRIORITY_NORMAL, &HistoryBackend::QueryMostVisitedURLs,
+                  consumer,
+                  new history::QueryMostVisitedURLsRequest(callback),
+                  result_count, days_back);
 }
 
 void HistoryService::Observe(NotificationType type,
@@ -625,7 +649,8 @@ void HistoryService::ScheduleTask(SchedulePriority priority,
   thread_->message_loop()->PostTask(FROM_HERE, task);
 }
 
-bool HistoryService::CanAddURL(const GURL& url) const {
+// static
+bool HistoryService::CanAddURL(const GURL& url) {
   if (!url.is_valid())
     return false;
 
@@ -635,8 +660,7 @@ bool HistoryService::CanAddURL(const GURL& url) const {
   if (url.SchemeIs(chrome::kJavaScriptScheme) ||
       url.SchemeIs(chrome::kChromeUIScheme) ||
       url.SchemeIs(chrome::kViewSourceScheme) ||
-      url.SchemeIs(chrome::kChromeInternalScheme) ||
-      url.SchemeIs(chrome::kPrintScheme))
+      url.SchemeIs(chrome::kChromeInternalScheme))
     return false;
 
   if (url.SchemeIs(chrome::kAboutScheme)) {
@@ -725,4 +749,14 @@ void HistoryService::OnDBLoaded() {
   NotificationService::current()->Notify(NotificationType::HISTORY_LOADED,
                                          Source<Profile>(profile_),
                                          Details<HistoryService>(this));
+}
+
+void HistoryService::StartTopSitesMigration() {
+  history::TopSites* ts = profile_->GetTopSites();
+  ts->StartMigration();
+}
+
+void HistoryService::OnTopSitesReady() {
+  ScheduleAndForget(PRIORITY_NORMAL,
+                    &HistoryBackend::MigrateThumbnailsDatabase);
 }

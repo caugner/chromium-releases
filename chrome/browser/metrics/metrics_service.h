@@ -15,14 +15,15 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/histogram.h"
 #include "base/scoped_ptr.h"
 #include "base/values.h"
 #include "chrome/browser/metrics/metrics_log.h"
-#include "chrome/browser/net/url_fetcher.h"
 #include "chrome/common/child_process_info.h"
+#include "chrome/common/metrics_helpers.h"
+#include "chrome/common/net/url_fetcher.h"
 #include "chrome/common/notification_registrar.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 #include "webkit/glue/plugins/webplugininfo.h"
 
 #if defined(OS_CHROMEOS)
@@ -33,8 +34,13 @@ class BookmarkModel;
 class BookmarkNode;
 class HistogramSynchronizer;
 class PrefService;
-class Profile;
 class TemplateURLModel;
+
+// Forward declaration of the xmlNode to avoid having tons of gyp files
+// needing to depend on the libxml third party lib.
+struct _xmlNode;
+typedef struct _xmlNode xmlNode;
+typedef xmlNode* xmlNodePtr;
 
 // This is used to quickly log stats from child process related notifications in
 // MetricsService::child_stats_buffer_.  The buffer's contents are transferred
@@ -71,8 +77,33 @@ struct ChildProcessStats {
 };
 
 class MetricsService : public NotificationObserver,
-                       public URLFetcher::Delegate {
+                       public URLFetcher::Delegate,
+                       public MetricsServiceBase {
  public:
+  // Used to produce a historgram that keeps track of the status of recalling
+  // persisted per logs.
+  enum LogRecallStatus {
+    RECALL_SUCCESS,         // We were able to correctly recall a persisted log.
+    LIST_EMPTY,             // Attempting to recall from an empty list.
+    LIST_SIZE_MISSING,      // Failed to recover list size using GetAsInteger().
+    LIST_SIZE_TOO_SMALL,    // Too few elements in the list (less than 3).
+    LIST_SIZE_CORRUPTION,   // List size is not as expected.
+    LOG_STRING_CORRUPTION,  // Failed to recover log string using GetAsString().
+    CHECKSUM_CORRUPTION,    // Failed to verify checksum.
+    CHECKSUM_STRING_CORRUPTION,  // Failed to recover checksum string using
+                                 // GetAsString().
+    DECODE_FAIL,            // Failed to decode log.
+    END_RECALL_STATUS       // Number of bins to use to create the histogram.
+  };
+
+  // TODO(ziadh): This is here temporarily for a side experiment. Remove later
+  // on.
+  enum LogStoreStatus {
+    ENCODE_FAIL,      // Failed to encode log.
+    COMPRESS_FAIL,    // Failed to compress log.
+    END_STORE_STATUS  // Number of bins to use to create the histogram.
+  };
+
   MetricsService();
   virtual ~MetricsService();
 
@@ -117,17 +148,22 @@ class MetricsService : public NotificationObserver,
   // This count is eventually send via UMA logs.
   void RecordBreakpadHasDebugger(bool has_debugger);
 
-  // Callback to let us knew that the plugin list is warmed up.
-  void OnGetPluginListTaskComplete(const std::vector<WebPluginInfo>& plugins);
-
   // Save any unsent logs into a persistent store in a pref.  We always do this
   // at shutdown, but we can do it as we reduce the list as well.
   void StoreUnsentLogs();
 
 #if defined(OS_CHROMEOS)
+  // Returns the hardware class of the Chrome OS device (e.g.,
+  // hardware qualification ID), or "unknown" if the hardware class is
+  // not available.  The hardware class identifies the configured
+  // system components such us CPU, WiFi adapter, etc.  Note that this
+  // routine invokes an external utility to determine the hardware
+  // class.
+  static std::string GetHardwareClass();
+
   // Start the external metrics service, which collects metrics from Chrome OS
   // and passes them to UMA.
-  void StartExternalMetrics(Profile* profile);
+  void StartExternalMetrics();
 #endif
 
   bool recording_active() const;
@@ -138,19 +174,21 @@ class MetricsService : public NotificationObserver,
   // See metrics_service.cc for description of this lifecycle.
   enum State {
     INITIALIZED,            // Constructor was called.
-    PLUGIN_LIST_REQUESTED,  // Waiting for plugin list to be loaded.
-    PLUGIN_LIST_ARRIVED,    // Waiting for timer to send initial log.
+    INIT_TASK_SCHEDULED,    // Waiting for deferred init tasks to complete.
+    INIT_TASK_DONE,         // Waiting for timer to send initial log.
     INITIAL_LOG_READY,      // Initial log generated, and waiting for reply.
     SEND_OLD_INITIAL_LOGS,  // Sending unsent logs from previous session.
     SENDING_OLD_LOGS,       // Sending unsent logs from previous session.
     SENDING_CURRENT_LOGS,   // Sending standard current logs as they acrue.
   };
 
-  // Maintain a map of histogram names to the sample stats we've sent.
-  typedef std::map<std::string, Histogram::SampleSet> LoggedSampleMap;
+  class InitTask;
+  class InitTaskComplete;
 
-  class GetPluginListTask;
-  class GetPluginListTaskComplete;
+  // Callback to let us know that the init task is done.
+  void OnInitTaskComplete(
+      const std::string& hardware_class,
+      const std::vector<WebPluginInfo>& plugins);
 
   // When we start a new version of Chromium (different from our last run), we
   // need to discard the old crash stats so that we don't attribute crashes etc.
@@ -209,7 +247,7 @@ class MetricsService : public NotificationObserver,
   // Called to stop recording user experience metrics.  The caller takes
   // ownership of the resulting MetricsLog object via the log parameter,
   // or passes in NULL to indicate that the log should simply be deleted.
-  void StopRecording(MetricsLog** log);
+  void StopRecording(MetricsLogBase** log);
 
   // Deletes pending_log_ and current_log_, and pushes their text into the
   // appropriate unsent_log vectors.  Called when Chrome shuts down.
@@ -241,10 +279,6 @@ class MetricsService : public NotificationObserver,
   // TryToStartTransmission.
   bool TransmissionPermitted() const;
 
-  // Check to see if there is a log that needs to be, or is being, transmitted.
-  bool pending_log() const {
-    return pending_log_ || !pending_log_text_.empty();
-  }
   // Check to see if there are any unsent logs from previous sessions.
   bool unsent_logs() const {
     return !unsent_initial_logs_.empty() || !unsent_ongoing_logs_.empty();
@@ -253,7 +287,16 @@ class MetricsService : public NotificationObserver,
   void PrepareInitialLog();
   // Pull copies of unsent logs from prefs into instance variables.
   void RecallUnsentLogs();
-  // Convert pending_log_ to XML in pending_log_text_ for transmission.
+  // Decode and verify written pref log data.
+  static MetricsService::LogRecallStatus RecallUnsentLogsHelper(
+      const ListValue& list,
+      std::vector<std::string>* local_list);
+  // Encode and write list size and checksum for perf log data.
+  static void StoreUnsentLogsHelper(const std::vector<std::string>& local_list,
+                                    const size_t kMaxLocalListSize,
+                                    ListValue* list);
+  // Convert |pending_log_| to XML in |compressed_log_|, and compress it for
+  // transmission.
   void PreparePendingLogText();
 
   // Convert pending_log_ to XML, compress it, and prepare to pass to server.
@@ -261,11 +304,6 @@ class MetricsService : public NotificationObserver,
   // a compressed copy of the pending log.
   void PrepareFetchWithPendingLog();
 
-  // Discard pending_log_, and clear pending_log_text_. Called after processing
-  // of this log is complete.
-  void DiscardPendingLog();
-  // Compress the report log in input using bzip2, store the result in output.
-  bool Bzip2Compress(const std::string& input, std::string* output);
   // Implementation of URLFetcher::Delegate. Called after transmission
   // completes (either successfully or with failure).
   virtual void OnURLFetchComplete(const URLFetcher* source,
@@ -374,17 +412,6 @@ class MetricsService : public NotificationObserver,
   // buffered plugin stability statistics.
   void RecordCurrentState(PrefService* pref);
 
-  // Requests all renderers to send their histograms back for
-  // collecting stats from renderers.
-  void CollectRendererHistograms();
-
-  // Record complete list of histograms into the current log.
-  // Called when we close a log.
-  void RecordCurrentHistograms();
-
-  // Record a specific histogram .
-  void RecordHistogram(const Histogram& histogram);
-
   // Logs the initiation of a page load
   void LogLoadStarted();
 
@@ -423,22 +450,17 @@ class MetricsService : public NotificationObserver,
   // state.
   State state_;
 
+  // Chrome OS hardware class (e.g., hardware qualification ID). This
+  // class identifies the configured system components such as CPU,
+  // WiFi adapter, etc.  For non Chrome OS hosts, this will be an
+  // empty string.
+  std::string hardware_class_;
+
   // The list of plugins which was retrieved on the file thread.
   std::vector<WebPluginInfo> plugins_;
 
-  // A log that we are currently transmiting, or about to try to transmit.
-  MetricsLog* pending_log_;
-
-  // An alternate form of pending_log_.  We persistently save this text version
-  // into prefs if we can't transmit it.  As a result, sometimes all we have is
-  // the text version (recalled from a previous session).
-  std::string pending_log_text_;
-
   // The outstanding transmission appears as a URL Fetch operation.
   scoped_ptr<URLFetcher> current_fetch_;
-
-  // The log that we are still appending to.
-  MetricsLog* current_log_;
 
   // The URL for the metrics server.
   std::wstring server_url_;
@@ -481,10 +503,6 @@ class MetricsService : public NotificationObserver,
   // at creation time from the prefs.
   scoped_ptr<DictionaryValue> profile_dictionary_;
 
-  // For histograms, record what we've already logged (as a sample for each
-  // histogram) so that we can send only the delta with the next log.
-  MetricsService::LoggedSampleMap logged_samples_;
-
   // The interval between consecutive log transmissions (to avoid hogging the
   // outbound network link).  This is usually also the duration for which we
   // build up a log, but if other unsent-logs from previous sessions exist, we
@@ -496,13 +514,6 @@ class MetricsService : public NotificationObserver,
   // response data.
   int log_event_limit_;
 
-  // The types of data that are to be included in the logs and histograms
-  // according to the UMA response data.
-  std::set<std::string> logs_to_upload_;
-  std::set<std::string> logs_to_omit_;
-  std::set<std::string> histograms_to_upload_;
-  std::set<std::string> histograms_to_omit_;
-
   // Indicate that a timer for sending the next log has already been queued.
   bool timer_pending_;
 
@@ -511,9 +522,17 @@ class MetricsService : public NotificationObserver,
   scoped_refptr<chromeos::ExternalMetrics> external_metrics_;
 #endif
 
-  FRIEND_TEST(MetricsServiceTest, ClientIdGeneratesAllZeroes);
-  FRIEND_TEST(MetricsServiceTest, ClientIdGeneratesCorrectly);
-  FRIEND_TEST(MetricsServiceTest, ClientIdCorrectlyFormatted);
+  FRIEND_TEST(MetricsServiceTest, EmptyLogList);
+  FRIEND_TEST(MetricsServiceTest, SingleElementLogList);
+  FRIEND_TEST(MetricsServiceTest, OverLimitLogList);
+  FRIEND_TEST(MetricsServiceTest, SmallRecoveredListSize);
+  FRIEND_TEST(MetricsServiceTest, RemoveSizeFromLogList);
+  FRIEND_TEST(MetricsServiceTest, CorruptSizeOfLogList);
+  FRIEND_TEST(MetricsServiceTest, CorruptChecksumOfLogList);
+  FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, ClientIdGeneratesAllZeroes);
+  FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, ClientIdGeneratesCorrectly);
+  FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, ClientIdCorrectlyFormatted);
+
   DISALLOW_COPY_AND_ASSIGN(MetricsService);
 };
 

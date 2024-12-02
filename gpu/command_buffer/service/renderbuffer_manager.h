@@ -24,13 +24,14 @@ class RenderbufferManager {
    public:
     typedef scoped_refptr<RenderbufferInfo> Ref;
 
-    explicit RenderbufferInfo(GLuint renderbuffer_id)
-        : renderbuffer_id_(renderbuffer_id),
-          cleared_(false) {
+    explicit RenderbufferInfo(GLuint service_id)
+        : service_id_(service_id),
+          cleared_(false),
+          internal_format_(GL_RGBA4) {
     }
 
-    GLuint renderbuffer_id() const {
-      return renderbuffer_id_;
+    GLuint service_id() const {
+      return service_id_;
     }
 
     bool cleared() const {
@@ -41,8 +42,16 @@ class RenderbufferManager {
       cleared_ = true;
     }
 
+    GLenum internal_format() const {
+      return internal_format_;
+    }
+
+    void set_internal_format(GLenum internalformat) {
+      internal_format_ = internalformat;
+    }
+
     bool IsDeleted() {
-      return renderbuffer_id_ == 0;
+      return service_id_ == 0;
     }
 
    private:
@@ -52,26 +61,36 @@ class RenderbufferManager {
     ~RenderbufferInfo() { }
 
     void MarkAsDeleted() {
-      renderbuffer_id_ = 0;
+      service_id_ = 0;
     }
 
     // Service side renderbuffer id.
-    GLuint renderbuffer_id_;
+    GLuint service_id_;
 
     // Whether this renderbuffer has been cleared
     bool cleared_;
+
+    // Renderbuffer internalformat set through RenderbufferStorage().
+    GLenum internal_format_;
   };
 
   RenderbufferManager() { }
+  ~RenderbufferManager();
+
+  // Must call before destruction.
+  void Destroy(bool have_context);
 
   // Creates a RenderbufferInfo for the given renderbuffer.
-  void CreateRenderbufferInfo(GLuint renderbuffer_id);
+  void CreateRenderbufferInfo(GLuint client_id, GLuint service_id);
 
   // Gets the renderbuffer info for the given renderbuffer.
-  RenderbufferInfo* GetRenderbufferInfo(GLuint renderbuffer_id);
+  RenderbufferInfo* GetRenderbufferInfo(GLuint client_id);
 
   // Removes a renderbuffer info for the given renderbuffer.
-  void RemoveRenderbufferInfo(GLuint renderbuffer_id);
+  void RemoveRenderbufferInfo(GLuint client_id);
+
+  // Gets a client id for a given service id.
+  bool GetClientId(GLuint service_id, GLuint* client_id) const;
 
  private:
   // Info for each renderbuffer in the system.

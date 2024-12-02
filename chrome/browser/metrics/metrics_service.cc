@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,9 +19,8 @@
 // transmission.  Transmission includes submitting a compressed log as data in a
 // URL-post, and retransmitting (or retaining at process termination) if the
 // attempted transmission failed.  Retention across process terminations is done
-// using the the PrefServices facilities.  The format for the retained
-// logs (ones that never got transmitted) is always the uncompressed textual
-// representation.
+// using the the PrefServices facilities. The retained logs (the ones that never
+// got transmitted) are compressed and base64-encoded before being persisted.
 //
 // Logs fall into one of two categories: "initial logs," and "ongoing logs."
 // There is at most one initial log sent for each complete run of the chromium
@@ -82,8 +81,8 @@
 // are:
 //
 //    INITIALIZED,            // Constructor was called.
-//    PLUGIN_LIST_REQUESTED,  // Waiting for plugin list to be loaded.
-//    PLUGIN_LIST_ARRIVED,    // Waiting for timer to send initial log.
+//    INIT_TASK_SCHEDULED,    // Waiting for deferred init tasks to complete.
+//    INIT_TASK_DONE,         // Waiting for timer to send initial log.
 //    INITIAL_LOG_READY,      // Initial log generated, and waiting for reply.
 //    SEND_OLD_INITIAL_LOGS,  // Sending unsent logs from previous session.
 //    SENDING_OLD_LOGS,       // Sending unsent logs from previous session.
@@ -95,15 +94,17 @@
 // The MS has been constructed, but has taken no actions to compose the
 // initial log.
 //
-//    PLUGIN_LIST_REQUESTED,  // Waiting for plugin list to be loaded.
+//    INIT_TASK_SCHEDULED,    // Waiting for deferred init tasks to complete.
 // Typically about 30 seconds after startup, a task is sent to a second thread
-// to get the list of plugins.  That task will (when complete) make an async
-// callback (via a Task) to indicate the completion.
+// (the file thread) to perform deferred (lower priority and slower)
+// initialization steps such as getting the list of plugins.  That task will
+// (when complete) make an async callback (via a Task) to indicate the
+// completion.
 //
-//    PLUGIN_LIST_ARRIVED,    // Waiting for timer to send initial log.
+//    INIT_TASK_DONE,         // Waiting for timer to send initial log.
 // The callback has arrived, and it is now possible for an initial log to be
 // created.  This callback typically arrives back less than one second after
-// the task is dispatched.
+// the deferred init task is dispatched.
 //
 //    INITIAL_LOG_READY,      // Initial log generated, and waiting for reply.
 // This state is entered only after an initial log has been composed, and
@@ -162,12 +163,8 @@
 #include <objbase.h>
 #endif
 
-#if defined(USE_SYSTEM_LIBBZ2)
-#include <bzlib.h>
-#else
-#include "third_party/bzip2/bzlib.h"
-#endif
-
+#include "base/base64.h"
+#include "base/md5.h"
 #include "base/thread.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_list.h"
@@ -185,6 +182,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "webkit/glue/plugins/plugin_list.h"
+#include "libxml/xmlwriter.h"
 
 #if !defined(OS_WIN)
 #include "base/rand_util.h"
@@ -197,7 +195,25 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/external_metrics.h"
+
+static const char kHardwareClassTool[] = "/usr/bin/hardware_class";
+static const char kUnknownHardwareClass[] = "unknown";
 #endif
+
+namespace {
+MetricsService::LogRecallStatus MakeRecallStatusHistogram(
+    MetricsService::LogRecallStatus status) {
+  UMA_HISTOGRAM_ENUMERATION("PrefService.PersistentLogRecall", status,
+                            MetricsService::END_RECALL_STATUS);
+  return status;
+}
+
+// TODO(ziadh): Remove this when done with experiment.
+void MakeStoreStatusHistogram(MetricsService::LogStoreStatus status) {
+  UMA_HISTOGRAM_ENUMERATION("PrefService.PersistentLogStore", status,
+                            MetricsService::END_STORE_STATUS);
+}
+}  // namespace
 
 using base::Time;
 using base::TimeDelta;
@@ -232,8 +248,8 @@ static const int kUnsentLogDelay = 15;  // 15 seconds
 // response, we use this duration to specify how long we should wait before
 // sending the next log.  If the channel is busy, such as when there is a
 // failure during an attempt to transmit a previous log, then a log may wait
-// (and continue to accrue now log entries) for a much greater period of time.
-static const int kMinSecondsPerLog = 20 * 60;  // Twenty minutes.
+// (and continue to accrue new log entries) for a much greater period of time.
+static const int kMinSecondsPerLog = 30 * 60;  // Thirty minutes.
 
 // When we don't succeed at transmitting a log to a server, we progressively
 // wait longer and longer before sending the next log.  This backoff process
@@ -264,6 +280,10 @@ static const size_t kMaxInitialLogsPersisted = 20;
 // ongoing_log_ at startup).
 static const size_t kMaxOngoingLogsPersisted = 8;
 
+// We append (2) more elements to persisted lists: the size of the list and a
+// checksum of the elements.
+static const size_t kChecksumEntryCount = 2;
+
 
 // Handles asynchronous fetching of memory details.
 // Will run the provided task after finished.
@@ -279,32 +299,39 @@ class MetricsMemoryDetails : public MemoryDetails {
   ~MetricsMemoryDetails() {}
 
   Task* completion_;
-  DISALLOW_EVIL_CONSTRUCTORS(MetricsMemoryDetails);
+  DISALLOW_COPY_AND_ASSIGN(MetricsMemoryDetails);
 };
 
-class MetricsService::GetPluginListTaskComplete : public Task {
+class MetricsService::InitTaskComplete : public Task {
  public:
-  explicit GetPluginListTaskComplete(
-      const std::vector<WebPluginInfo>& plugins) : plugins_(plugins) { }
+  explicit InitTaskComplete(const std::string& hardware_class,
+                            const std::vector<WebPluginInfo>& plugins)
+      : hardware_class_(hardware_class), plugins_(plugins) {}
+
   virtual void Run() {
-    g_browser_process->metrics_service()->OnGetPluginListTaskComplete(plugins_);
+    g_browser_process->metrics_service()->OnInitTaskComplete(
+        hardware_class_, plugins_);
   }
 
  private:
+  std::string hardware_class_;
   std::vector<WebPluginInfo> plugins_;
 };
 
-class MetricsService::GetPluginListTask : public Task {
+class MetricsService::InitTask : public Task {
  public:
-  explicit GetPluginListTask(MessageLoop* callback_loop)
+  explicit InitTask(MessageLoop* callback_loop)
       : callback_loop_(callback_loop) {}
 
   virtual void Run() {
     std::vector<WebPluginInfo> plugins;
     NPAPI::PluginList::Singleton()->GetPlugins(false, &plugins);
-
-    callback_loop_->PostTask(
-        FROM_HERE, new GetPluginListTaskComplete(plugins));
+    std::string hardware_class;  // Empty string by default.
+#if defined(OS_CHROMEOS)
+    hardware_class = MetricsService::GetHardwareClass();
+#endif  // OS_CHROMEOS
+    callback_loop_->PostTask(FROM_HERE, new InitTaskComplete(
+        hardware_class, plugins));
   }
 
  private:
@@ -314,11 +341,11 @@ class MetricsService::GetPluginListTask : public Task {
 // static
 void MetricsService::RegisterPrefs(PrefService* local_state) {
   DCHECK(IsSingleThreaded());
-  local_state->RegisterStringPref(prefs::kMetricsClientID, L"");
+  local_state->RegisterStringPref(prefs::kMetricsClientID, "");
   local_state->RegisterInt64Pref(prefs::kMetricsClientIDTimestamp, 0);
   local_state->RegisterInt64Pref(prefs::kStabilityLaunchTimeSec, 0);
   local_state->RegisterInt64Pref(prefs::kStabilityLastTimestampSec, 0);
-  local_state->RegisterStringPref(prefs::kStabilityStatsVersion, L"");
+  local_state->RegisterStringPref(prefs::kStabilityStatsVersion, "");
   local_state->RegisterInt64Pref(prefs::kStabilityStatsBuildTime, 0);
   local_state->RegisterBooleanPref(prefs::kStabilityExitedCleanly, true);
   local_state->RegisterBooleanPref(prefs::kStabilitySessionEndCompleted, true);
@@ -396,15 +423,11 @@ MetricsService::MetricsService()
       user_permits_upload_(false),
       server_permits_upload_(true),
       state_(INITIALIZED),
-      pending_log_(NULL),
-      pending_log_text_(),
       current_fetch_(NULL),
-      current_log_(NULL),
       idle_since_last_transmission_(false),
       next_window_id_(0),
       ALLOW_THIS_IN_INITIALIZER_LIST(log_sender_factory_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(state_saver_factory_(this)),
-      logged_samples_(),
       interlog_duration_(TimeDelta::FromSeconds(kInitialInterlogDuration)),
       log_event_limit_(kInitialEventLimit),
       timer_pending_(false) {
@@ -414,14 +437,6 @@ MetricsService::MetricsService()
 
 MetricsService::~MetricsService() {
   SetRecording(false);
-  if (pending_log_) {
-    delete pending_log_;
-    pending_log_ = NULL;
-  }
-  if (current_log_) {
-    delete current_log_;
-    current_log_ = NULL;
-  }
 }
 
 void MetricsService::SetUserPermitsUpload(bool enabled) {
@@ -454,14 +469,14 @@ void MetricsService::SetRecording(bool enabled) {
     if (client_id_.empty()) {
       PrefService* pref = g_browser_process->local_state();
       DCHECK(pref);
-      client_id_ = WideToUTF8(pref->GetString(prefs::kMetricsClientID));
+      client_id_ = pref->GetString(prefs::kMetricsClientID);
       if (client_id_.empty()) {
         client_id_ = GenerateClientID();
-        pref->SetString(prefs::kMetricsClientID, UTF8ToWide(client_id_));
+        pref->SetString(prefs::kMetricsClientID, client_id_);
 
         // Might as well make a note of how long this ID has existed
         pref->SetString(prefs::kMetricsClientIDTimestamp,
-                        Int64ToWString(Time::Now().ToTimeT()));
+                        Int64ToString(Time::Now().ToTimeT()));
       }
     }
     child_process_logging::SetClientId(client_id_);
@@ -585,10 +600,13 @@ void MetricsService::Observe(NotificationType type,
       LogKeywords(Source<TemplateURLModel>(source).ptr());
       break;
 
-    case NotificationType::OMNIBOX_OPENED_URL:
-      current_log_->RecordOmniboxOpenedURL(
+    case NotificationType::OMNIBOX_OPENED_URL: {
+      MetricsLog* current_log = current_log_->AsMetricsLog();
+      DCHECK(current_log);
+      current_log->RecordOmniboxOpenedURL(
           *Details<AutocompleteLog>(details).ptr());
       break;
+    }
 
     case NotificationType::BOOKMARK_MODEL_LOADED: {
       Profile* p = Source<Profile>(source).ptr();
@@ -597,7 +615,7 @@ void MetricsService::Observe(NotificationType type,
       break;
     }
     default:
-      NOTREACHED();
+      LOG(DFATAL);
       break;
   }
 
@@ -663,13 +681,13 @@ void MetricsService::InitializeMetricsState() {
 
   if ((pref->GetInt64(prefs::kStabilityStatsBuildTime)
        != MetricsLog::GetBuildTime()) ||
-      (WideToUTF8(pref->GetString(prefs::kStabilityStatsVersion))
+      (pref->GetString(prefs::kStabilityStatsVersion)
        != MetricsLog::GetVersionString())) {
     // This is a new version, so we don't want to confuse the stats about the
     // old version with info that we upload.
     DiscardOldStabilityStats(pref);
     pref->SetString(prefs::kStabilityStatsVersion,
-                    UTF8ToWide(MetricsLog::GetVersionString()));
+                    MetricsLog::GetVersionString());
     pref->SetInt64(prefs::kStabilityStatsBuildTime,
                    MetricsLog::GetBuildTime());
   }
@@ -697,7 +715,7 @@ void MetricsService::InitializeMetricsState() {
 
   // Initialize uptime counters.
   int64 startup_uptime = MetricsLog::GetIncrementalUptime(pref);
-  DCHECK(0 == startup_uptime);
+  DCHECK_EQ(0, startup_uptime);
   // For backwards compatibility, leave this intact in case Omaha is checking
   // them.  prefs::kStabilityLastTimestampSec may also be useless now.
   // TODO(jar): Delete these if they have no uses.
@@ -745,12 +763,14 @@ void MetricsService::InitializeMetricsState() {
   ScheduleNextStateSave();
 }
 
-void MetricsService::OnGetPluginListTaskComplete(
+void MetricsService::OnInitTaskComplete(
+    const std::string& hardware_class,
     const std::vector<WebPluginInfo>& plugins) {
-  DCHECK(state_ == PLUGIN_LIST_REQUESTED);
+  DCHECK(state_ == INIT_TASK_SCHEDULED);
+  hardware_class_ = hardware_class;
   plugins_ = plugins;
-  if (state_ == PLUGIN_LIST_REQUESTED)
-    state_ = PLUGIN_LIST_ARRIVED;
+  if (state_ == INIT_TASK_SCHEDULED)
+    state_ = INIT_TASK_DONE;
 }
 
 std::string MetricsService::GenerateClientID() {
@@ -800,7 +820,7 @@ void MetricsService::ScheduleNextStateSave() {
 void MetricsService::SaveLocalState() {
   PrefService* pref = g_browser_process->local_state();
   if (!pref) {
-    NOTREACHED();
+    LOG(DFATAL);
     return;
   }
 
@@ -822,19 +842,25 @@ void MetricsService::StartRecording() {
   current_log_ = new MetricsLog(client_id_, session_id_);
   if (state_ == INITIALIZED) {
     // We only need to schedule that run once.
-    state_ = PLUGIN_LIST_REQUESTED;
+    state_ = INIT_TASK_SCHEDULED;
 
-    // Make sure the plugin list is loaded before the inital log is sent, so
-    // that the main thread isn't blocked generating the list.
+    // Schedules a task on the file thread for execution of slower
+    // initialization steps (such as plugin list generation) necessary
+    // for sending the initial log.  This avoids blocking the main UI
+    // thread.
     g_browser_process->file_thread()->message_loop()->PostDelayedTask(FROM_HERE,
-        new GetPluginListTask(MessageLoop::current()),
+        new InitTask(MessageLoop::current()),
         kInitialInterlogDuration * 1000 / 2);
   }
 }
 
-void MetricsService::StopRecording(MetricsLog** log) {
+void MetricsService::StopRecording(MetricsLogBase** log) {
   if (!current_log_)
     return;
+
+  MetricsLog* current_log = current_log_->AsMetricsLog();
+  DCHECK(current_log);
+  current_log->set_hardware_class(hardware_class_);  // Adds to ongoing logs.
 
   // TODO(jar): Integrate bounds on log recording more consistently, so that we
   // can stop recording logs that are too big much sooner.
@@ -851,13 +877,13 @@ void MetricsService::StopRecording(MetricsLog** log) {
   // end of all log transmissions (initial log handles this separately).
   // Don't bother if we're going to discard current_log_.
   if (log) {
-    current_log_->RecordIncrementalStabilityElements();
+    current_log->RecordIncrementalStabilityElements();
     RecordCurrentHistograms();
   }
 
   current_log_->CloseLog();
   if (log)
-    *log = current_log_;
+    *log = current_log;
   else
     delete current_log_;
   current_log_ = NULL;
@@ -871,7 +897,7 @@ void MetricsService::PushPendingLogsToUnsentLists() {
     PreparePendingLogText();
     if (state_ == INITIAL_LOG_READY) {
       // We may race here, and send second copy of initial log later.
-      unsent_initial_logs_.push_back(pending_log_text_);
+      unsent_initial_logs_.push_back(compressed_log_);
       state_ = SEND_OLD_INITIAL_LOGS;
     } else {
       // TODO(jar): Verify correctness in other states, including sending unsent
@@ -893,14 +919,13 @@ void MetricsService::PushPendingLogTextToUnsentOngoingLogs() {
   // log.  It wasn't supposed to be uploaded anyway.
   if (!server_permits_upload_)
     return;
-
-  if (pending_log_text_.length() >
+  if (compressed_log_.length() >
       static_cast<size_t>(kUploadLogAvoidRetransmitSize)) {
     UMA_HISTOGRAM_COUNTS("UMA.Large Accumulated Log Not Persisted",
-                         static_cast<int>(pending_log_text_.length()));
+                         static_cast<int>(compressed_log_.length()));
     return;
   }
-  unsent_ongoing_logs_.push_back(pending_log_text_);
+  unsent_ongoing_logs_.push_back(compressed_log_);
 }
 
 //------------------------------------------------------------------------------
@@ -1050,23 +1075,23 @@ void MetricsService::MakePendingLog() {
 
   switch (state_) {
     case INITIALIZED:
-    case PLUGIN_LIST_REQUESTED:  // We should be further along by now.
+    case INIT_TASK_SCHEDULED:  // We should be further along by now.
       DCHECK(false);
       return;
 
-    case PLUGIN_LIST_ARRIVED:
+    case INIT_TASK_DONE:
       // We need to wait for the initial log to be ready before sending
       // anything, because the server will tell us whether it wants to hear
       // from us.
       PrepareInitialLog();
-      DCHECK(state_ == PLUGIN_LIST_ARRIVED);
+      DCHECK(state_ == INIT_TASK_DONE);
       RecallUnsentLogs();
       state_ = INITIAL_LOG_READY;
       break;
 
     case SEND_OLD_INITIAL_LOGS:
       if (!unsent_initial_logs_.empty()) {
-        pending_log_text_ = unsent_initial_logs_.back();
+        compressed_log_ = unsent_initial_logs_.back();
         break;
       }
       state_ = SENDING_OLD_LOGS;
@@ -1074,7 +1099,7 @@ void MetricsService::MakePendingLog() {
 
     case SENDING_OLD_LOGS:
       if (!unsent_ongoing_logs_.empty()) {
-        pending_log_text_ = unsent_ongoing_logs_.back();
+        compressed_log_ = unsent_ongoing_logs_.back();
         break;
       }
       state_ = SENDING_CURRENT_LOGS;
@@ -1086,7 +1111,7 @@ void MetricsService::MakePendingLog() {
       break;
 
     default:
-      DCHECK(false);
+      LOG(DFATAL);
       return;
   }
 
@@ -1116,13 +1141,14 @@ bool MetricsService::TransmissionPermitted() const {
 }
 
 void MetricsService::PrepareInitialLog() {
-  DCHECK(state_ == PLUGIN_LIST_ARRIVED);
+  DCHECK(state_ == INIT_TASK_DONE);
 
   MetricsLog* log = new MetricsLog(client_id_, session_id_);
+  log->set_hardware_class(hardware_class_);  // Adds to initial log.
   log->RecordEnvironment(plugins_, profile_dictionary_.get());
 
   // Histograms only get written to current_log_, so setup for the write.
-  MetricsLog* save_log = current_log_;
+  MetricsLogBase* save_log = current_log_;
   current_log_ = log;
   RecordCurrentHistograms();  // Into current_log_... which is really log.
   current_log_ = save_log;
@@ -1132,30 +1158,114 @@ void MetricsService::PrepareInitialLog() {
   pending_log_ = log;
 }
 
-void MetricsService::RecallUnsentLogs() {
-  DCHECK(unsent_initial_logs_.empty());
-  DCHECK(unsent_ongoing_logs_.empty());
+// static
+MetricsService::LogRecallStatus MetricsService::RecallUnsentLogsHelper(
+    const ListValue& list,
+    std::vector<std::string>* local_list) {
+  DCHECK(local_list->empty());
+  if (list.GetSize() == 0)
+    return MakeRecallStatusHistogram(LIST_EMPTY);
+  if (list.GetSize() < 3)
+    return MakeRecallStatusHistogram(LIST_SIZE_TOO_SMALL);
 
+  // The size is stored at the beginning of the list.
+  int size;
+  bool valid = (*list.begin())->GetAsInteger(&size);
+  if (!valid)
+    return MakeRecallStatusHistogram(LIST_SIZE_MISSING);
+
+  // Account for checksum and size included in the list.
+  if (static_cast<unsigned int>(size) !=
+      list.GetSize() - kChecksumEntryCount)
+    return MakeRecallStatusHistogram(LIST_SIZE_CORRUPTION);
+
+  MD5Context ctx;
+  MD5Init(&ctx);
+  std::string encoded_log;
+  std::string decoded_log;
+  for (ListValue::const_iterator it = list.begin() + 1;
+       it != list.end() - 1; ++it) {  // Last element is the checksum.
+    valid = (*it)->GetAsString(&encoded_log);
+    if (!valid) {
+      local_list->clear();
+      return MakeRecallStatusHistogram(LOG_STRING_CORRUPTION);
+    }
+
+    MD5Update(&ctx, encoded_log.data(), encoded_log.length());
+
+    if (!base::Base64Decode(encoded_log, &decoded_log)) {
+      local_list->clear();
+      return MakeRecallStatusHistogram(DECODE_FAIL);
+    }
+    local_list->push_back(decoded_log);
+  }
+
+  // Verify checksum.
+  MD5Digest digest;
+  MD5Final(&digest, &ctx);
+  std::string recovered_md5;
+  // We store the hash at the end of the list.
+  valid = (*(list.end() - 1))->GetAsString(&recovered_md5);
+  if (!valid) {
+    local_list->clear();
+    return MakeRecallStatusHistogram(CHECKSUM_STRING_CORRUPTION);
+  }
+  if (recovered_md5 != MD5DigestToBase16(digest)) {
+    local_list->clear();
+    return MakeRecallStatusHistogram(CHECKSUM_CORRUPTION);
+  }
+  return MakeRecallStatusHistogram(RECALL_SUCCESS);
+}
+void MetricsService::RecallUnsentLogs() {
   PrefService* local_state = g_browser_process->local_state();
   DCHECK(local_state);
 
   ListValue* unsent_initial_logs = local_state->GetMutableList(
       prefs::kMetricsInitialLogs);
-  for (ListValue::iterator it = unsent_initial_logs->begin();
-      it != unsent_initial_logs->end(); ++it) {
-    std::string log;
-    (*it)->GetAsString(&log);
-    unsent_initial_logs_.push_back(log);
-  }
+  RecallUnsentLogsHelper(*unsent_initial_logs, &unsent_initial_logs_);
 
   ListValue* unsent_ongoing_logs = local_state->GetMutableList(
       prefs::kMetricsOngoingLogs);
-  for (ListValue::iterator it = unsent_ongoing_logs->begin();
-      it != unsent_ongoing_logs->end(); ++it) {
-    std::string log;
-    (*it)->GetAsString(&log);
-    unsent_ongoing_logs_.push_back(log);
+  RecallUnsentLogsHelper(*unsent_ongoing_logs, &unsent_ongoing_logs_);
+}
+
+// static
+void MetricsService::StoreUnsentLogsHelper(
+    const std::vector<std::string>& local_list,
+    const size_t kMaxLocalListSize,
+    ListValue* list) {
+  list->Clear();
+  size_t start = 0;
+  if (local_list.size() > kMaxLocalListSize)
+    start = local_list.size() - kMaxLocalListSize;
+  DCHECK(start <= local_list.size());
+  if (local_list.size() == start)
+    return;
+
+  // Store size at the beginning of the list.
+  list->Append(Value::CreateIntegerValue(local_list.size() - start));
+
+  MD5Context ctx;
+  MD5Init(&ctx);
+  std::string encoded_log;
+  for (std::vector<std::string>::const_iterator it = local_list.begin() + start;
+       it != local_list.end(); ++it) {
+    // We encode the compressed log as Value::CreateStringValue() expects to
+    // take a valid UTF8 string.
+    if (!base::Base64Encode(*it, &encoded_log)) {
+      MakeStoreStatusHistogram(ENCODE_FAIL);
+      list->Clear();
+      return;
+    }
+    MD5Update(&ctx, encoded_log.data(), encoded_log.length());
+    list->Append(Value::CreateStringValue(encoded_log));
   }
+
+  // Append hash to the end of the list.
+  MD5Digest digest;
+  MD5Final(&digest, &ctx);
+  list->Append(Value::CreateStringValue(MD5DigestToBase16(digest)));
+  DCHECK(list->GetSize() >= 3);  // Minimum of 3 elements (size, data, hash).
 }
 
 void MetricsService::StoreUnsentLogs() {
@@ -1167,105 +1277,51 @@ void MetricsService::StoreUnsentLogs() {
 
   ListValue* unsent_initial_logs = local_state->GetMutableList(
       prefs::kMetricsInitialLogs);
-  unsent_initial_logs->Clear();
-  size_t start = 0;
-  if (unsent_initial_logs_.size() > kMaxInitialLogsPersisted)
-    start = unsent_initial_logs_.size() - kMaxInitialLogsPersisted;
-  for (size_t i = start; i < unsent_initial_logs_.size(); ++i)
-    unsent_initial_logs->Append(
-        Value::CreateStringValue(unsent_initial_logs_[i]));
+  StoreUnsentLogsHelper(unsent_initial_logs_, kMaxInitialLogsPersisted,
+                        unsent_initial_logs);
 
   ListValue* unsent_ongoing_logs = local_state->GetMutableList(
       prefs::kMetricsOngoingLogs);
-  unsent_ongoing_logs->Clear();
-  start = 0;
-  if (unsent_ongoing_logs_.size() > kMaxOngoingLogsPersisted)
-    start = unsent_ongoing_logs_.size() - kMaxOngoingLogsPersisted;
-  for (size_t i = start; i < unsent_ongoing_logs_.size(); ++i)
-    unsent_ongoing_logs->Append(
-        Value::CreateStringValue(unsent_ongoing_logs_[i]));
+  StoreUnsentLogsHelper(unsent_ongoing_logs_, kMaxOngoingLogsPersisted,
+                        unsent_ongoing_logs);
 }
 
 void MetricsService::PreparePendingLogText() {
   DCHECK(pending_log());
-  if (!pending_log_text_.empty())
+  if (!compressed_log_.empty())
     return;
   int text_size = pending_log_->GetEncodedLogSize();
 
-  // Leave room for the NUL terminator.
-  pending_log_->GetEncodedLog(WriteInto(&pending_log_text_, text_size + 1),
+  std::string pending_log_text;
+  // Leave room for the NULL terminator.
+  pending_log_->GetEncodedLog(WriteInto(&pending_log_text, text_size + 1),
                               text_size);
+
+  if (Bzip2Compress(pending_log_text, &compressed_log_)) {
+    // Allow security conscious users to see all metrics logs that we send.
+    LOG(INFO) << "COMPRESSED FOLLOWING METRICS LOG: " << pending_log_text;
+  } else {
+    LOG(DFATAL) << "Failed to compress log for transmission.";
+    // We can't discard the logs as other caller functions expect that
+    // |compressed_log_| not be empty. We can detect this failure at the server
+    // after we transmit.
+    compressed_log_ = "Unable to compress!";
+    MakeStoreStatusHistogram(COMPRESS_FAIL);
+    return;
+  }
 }
 
 void MetricsService::PrepareFetchWithPendingLog() {
   DCHECK(pending_log());
   DCHECK(!current_fetch_.get());
   PreparePendingLogText();
-  DCHECK(!pending_log_text_.empty());
-
-  // Allow security conscious users to see all metrics logs that we send.
-  LOG(INFO) << "METRICS LOG: " << pending_log_text_;
-
-  std::string compressed_log;
-  if (!Bzip2Compress(pending_log_text_, &compressed_log)) {
-    NOTREACHED() << "Failed to compress log for transmission.";
-    DiscardPendingLog();
-    StartLogTransmissionTimer();  // Maybe we'll do better on next log :-/.
-    return;
-  }
+  DCHECK(!compressed_log_.empty());
 
   current_fetch_.reset(new URLFetcher(GURL(WideToUTF16(server_url_)),
                                       URLFetcher::POST,
                                       this));
   current_fetch_->set_request_context(Profile::GetDefaultRequestContext());
-  current_fetch_->set_upload_data(kMetricsType, compressed_log);
-}
-
-void MetricsService::DiscardPendingLog() {
-  if (pending_log_) {  // Shutdown might have deleted it!
-    delete pending_log_;
-    pending_log_ = NULL;
-  }
-  pending_log_text_.clear();
-}
-
-// This implementation is based on the Firefox MetricsService implementation.
-bool MetricsService::Bzip2Compress(const std::string& input,
-                                   std::string* output) {
-  bz_stream stream = {0};
-  // As long as our input is smaller than the bzip2 block size, we should get
-  // the best compression.  For example, if your input was 250k, using a block
-  // size of 300k or 500k should result in the same compression ratio.  Since
-  // our data should be under 100k, using the minimum block size of 100k should
-  // allocate less temporary memory, but result in the same compression ratio.
-  int result = BZ2_bzCompressInit(&stream,
-                                  1,   // 100k (min) block size
-                                  0,   // quiet
-                                  0);  // default "work factor"
-  if (result != BZ_OK) {  // out of memory?
-    return false;
-  }
-
-  output->clear();
-
-  stream.next_in = const_cast<char*>(input.data());
-  stream.avail_in = static_cast<int>(input.size());
-  // NOTE: we don't need a BZ_RUN phase since our input buffer contains
-  //       the entire input
-  do {
-    output->resize(output->size() + 1024);
-    stream.next_out = &((*output)[stream.total_out_lo32]);
-    stream.avail_out = static_cast<int>(output->size()) - stream.total_out_lo32;
-    result = BZ2_bzCompress(&stream, BZ_FINISH);
-  } while (result == BZ_FINISH_OK);
-  if (result != BZ_STREAM_END)  // unknown failure?
-    return false;
-  result = BZ2_bzCompressEnd(&stream);
-  DCHECK(result == BZ_OK);
-
-  output->resize(stream.total_out_lo32);
-
-  return true;
+  current_fetch_->set_upload_data(kMetricsType, compressed_log_);
 }
 
 static const char* StatusToString(const URLRequestStatus& status) {
@@ -1286,7 +1342,7 @@ static const char* StatusToString(const URLRequestStatus& status) {
       return "FAILED";
 
     default:
-      NOTREACHED();
+      LOG(DFATAL);
       return "Unknown";
   }
 }
@@ -1310,10 +1366,10 @@ void MetricsService::OnURLFetchComplete(const URLFetcher* source,
   bool discard_log = false;
 
   if (response_code != 200 &&
-      pending_log_text_.length() >
-      static_cast<size_t>(kUploadLogAvoidRetransmitSize)) {
+      (compressed_log_.length() >
+          static_cast<size_t>(kUploadLogAvoidRetransmitSize))) {
     UMA_HISTOGRAM_COUNTS("UMA.Large Rejected Log was Discarded",
-                         static_cast<int>(pending_log_text_.length()));
+                         static_cast<int>(compressed_log_.length()));
     discard_log = true;
   } else if (response_code == 400) {
     // Bad syntax.  Retransmission won't work.
@@ -1348,7 +1404,7 @@ void MetricsService::OnURLFetchComplete(const URLFetcher* source,
         break;
 
       default:
-        DCHECK(false);
+        LOG(DFATAL);
         break;
     }
 
@@ -1394,7 +1450,7 @@ void MetricsService::HandleBadResponseCode() {
 
     LOG(INFO) << "METRICS: transmission retry being scheduled in " <<
         interlog_duration_.InSeconds() << " seconds for " <<
-        pending_log_text_;
+        compressed_log_;
   }
 }
 
@@ -1411,7 +1467,6 @@ void MetricsService::GetSettingsFromResponseData(const std::string& data) {
     return;
   }
   xmlDocPtr doc = xmlReadMemory(data.c_str(), data_size, "", NULL, 0);
-  DCHECK(doc);
   // If the document is malformed, we just use the settings that were there.
   if (!doc) {
     LOG(INFO) << "METRICS: reading xml from server response data failed";
@@ -1493,31 +1548,10 @@ void MetricsService::GetSettingsFromUploadNodeRecursive(
     }
 
     server_permits_upload_ = uploadOn;
-  }
-  if (path == "/upload/logs") {
+  } else if (path == "/upload/logs") {
     xmlChar* log_event_limit_val = xmlGetProp(node, BAD_CAST "event_limit");
     if (log_event_limit_val)
       log_event_limit_ = atoi(reinterpret_cast<char*>(log_event_limit_val));
-  }
-  if (name == "histogram") {
-    xmlChar* type_value = xmlGetProp(node, BAD_CAST "type");
-    if (type_value) {
-      std::string type = (reinterpret_cast<char*>(type_value));
-      if (uploadOn)
-        histograms_to_upload_.insert(type);
-      else
-        histograms_to_omit_.insert(type);
-    }
-  }
-  if (name == "log") {
-    xmlChar* type_value = xmlGetProp(node, BAD_CAST "type");
-    if (type_value) {
-      std::string type = (reinterpret_cast<char*>(type_value));
-      if (uploadOn)
-        logs_to_upload_.insert(type);
-      else
-        logs_to_omit_.insert(type);
-    }
   }
 
   // Recursive call.  If the node is a leaf i.e. if it ends in a "/>", then it
@@ -1612,7 +1646,7 @@ void MetricsService::LogWindowChange(NotificationType type,
       break;
 
     default:
-      NOTREACHED();
+      LOG(DFATAL);
       return;
   }
 
@@ -1651,7 +1685,7 @@ void MetricsService::IncrementLongPrefsValue(const wchar_t* path) {
   PrefService* pref = g_browser_process->local_state();
   DCHECK(pref);
   int64 value = pref->GetInt64(path);
-  pref->SetInt64(path, value+1);
+  pref->SetInt64(path, value + 1);
 }
 
 void MetricsService::LogLoadStarted() {
@@ -1706,7 +1740,7 @@ void MetricsService::LogChildProcessChange(
       break;
 
     default:
-      NOTREACHED() << "Unexpected notification type " << type.value;
+      LOG(DFATAL) << "Unexpected notification type " << type.value;
       return;
   }
 }
@@ -1766,7 +1800,7 @@ void MetricsService::RecordPluginChanges(PrefService* pref) {
   for (ListValue::iterator value_iter = plugins->begin();
        value_iter != plugins->end(); ++value_iter) {
     if (!(*value_iter)->IsType(Value::TYPE_DICTIONARY)) {
-      NOTREACHED();
+      LOG(DFATAL);
       continue;
     }
 
@@ -1774,7 +1808,7 @@ void MetricsService::RecordPluginChanges(PrefService* pref) {
     std::wstring plugin_name;
     plugin_dict->GetString(prefs::kStabilityPluginName, &plugin_name);
     if (plugin_name.empty()) {
-      NOTREACHED();
+      LOG(DFATAL);
       continue;
     }
 
@@ -1857,51 +1891,6 @@ void MetricsService::RecordCurrentState(PrefService* pref) {
   RecordPluginChanges(pref);
 }
 
-void MetricsService::RecordCurrentHistograms() {
-  DCHECK(current_log_);
-
-  StatisticsRecorder::Histograms histograms;
-  StatisticsRecorder::GetHistograms(&histograms);
-  for (StatisticsRecorder::Histograms::iterator it = histograms.begin();
-       histograms.end() != it;
-       ++it) {
-         if ((*it)->flags() & Histogram::kUmaTargetedHistogramFlag)
-      // TODO(petersont): Only record historgrams if they are not precluded by
-      // the UMA response data.
-      // Bug http://code.google.com/p/chromium/issues/detail?id=2739.
-      RecordHistogram(**it);
-  }
-}
-
-void MetricsService::RecordHistogram(const Histogram& histogram) {
-  // Get up-to-date snapshot of sample stats.
-  Histogram::SampleSet snapshot;
-  histogram.SnapshotSample(&snapshot);
-
-  const std::string& histogram_name = histogram.histogram_name();
-
-  // Find the already sent stats, or create an empty set.
-  LoggedSampleMap::iterator it = logged_samples_.find(histogram_name);
-  Histogram::SampleSet* already_logged;
-  if (logged_samples_.end() == it) {
-    // Add new entry
-    already_logged = &logged_samples_[histogram.histogram_name()];
-    already_logged->Resize(histogram);  // Complete initialization.
-  } else {
-    already_logged = &(it->second);
-    // Deduct any stats we've already logged from our snapshot.
-    snapshot.Subtract(*already_logged);
-  }
-
-  // snapshot now contains only a delta to what we've already_logged.
-
-  if (snapshot.TotalCount() > 0) {
-    current_log_->RecordHistogramDelta(histogram, snapshot);
-    // Add new data into our running total.
-    already_logged->Add(snapshot);
-  }
-}
-
 static bool IsSingleThreaded() {
   static PlatformThreadId thread_id = 0;
   if (!thread_id)
@@ -1910,8 +1899,22 @@ static bool IsSingleThreaded() {
 }
 
 #if defined(OS_CHROMEOS)
-void MetricsService::StartExternalMetrics(Profile* profile) {
+// static
+std::string MetricsService::GetHardwareClass() {
+  DCHECK(!ChromeThread::CurrentlyOn(ChromeThread::UI));
+  std::string hardware_class;
+  FilePath tool(kHardwareClassTool);
+  CommandLine command(tool);
+  if (base::GetAppOutput(command, &hardware_class)) {
+    TrimWhitespaceASCII(hardware_class, TRIM_ALL, &hardware_class);
+  } else {
+    hardware_class = kUnknownHardwareClass;
+  }
+  return hardware_class;
+}
+
+void MetricsService::StartExternalMetrics() {
   external_metrics_ = new chromeos::ExternalMetrics;
-  external_metrics_->Start(profile);
+  external_metrics_->Start();
 }
 #endif

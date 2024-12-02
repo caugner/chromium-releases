@@ -5,7 +5,7 @@
 #import "chrome/browser/cocoa/url_drop_target.h"
 
 #include "base/logging.h"
-#import "third_party/mozilla/include/NSPasteboard+Utils.h"
+#import "third_party/mozilla/NSPasteboard+Utils.h"
 
 @interface URLDropTargetHandler(Private)
 
@@ -19,7 +19,7 @@
 
 @implementation URLDropTargetHandler
 
-- (id)initWithView:(NSView*)view {
+- (id)initWithView:(NSView<URLDropTarget>*)view {
   if ((self = [super init])) {
     view_ = view;
     [view_ registerForDraggedTypes:
@@ -62,7 +62,7 @@
   if ([pboard containsURLData]) {
     NSArray* urls = nil;
     NSArray* titles;  // discarded
-    [pboard getURLs:&urls andTitles:&titles];
+    [pboard getURLs:&urls andTitles:&titles convertingFilenames:YES];
 
     if ([urls count]) {
       // Tell the window controller about the dropped URL(s).

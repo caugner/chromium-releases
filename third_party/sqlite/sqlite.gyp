@@ -9,8 +9,10 @@
   },
   'target_defaults': {
     'defines': [
+      'SQLITE_CORE',
       'SQLITE_ENABLE_BROKEN_FTS2',
       'SQLITE_ENABLE_FTS2',
+      'SQLITE_ENABLE_FTS3',
       'SQLITE_ENABLE_ICU',
       'SQLITE_ENABLE_MEMORY_MANAGEMENT',
       'SQLITE_SECURE_DELETE',
@@ -29,7 +31,7 @@
             ],
           },
         }],
-        ['OS=="linux" and use_system_sqlite', {
+        ['(OS=="linux" or OS=="freebsd" or OS=="openbsd") and use_system_sqlite', {
           'type': 'settings',
           'direct_dependent_settings': {
             'cflags': [
@@ -190,7 +192,7 @@
             'src/where.c',
           ],
           'sources/': [
-            ['exclude', '^ext/(fts[13]|rtree)/'],
+            ['exclude', '^ext/(fts1|rtree)/'],
             ['exclude', '(symbian|os2|noop)\\.cc?$'],
           ],
           'sources!': [
@@ -226,7 +228,7 @@
     },
   ],
   'conditions': [
-    ['OS=="linux" and not use_system_sqlite', {
+    ['(OS=="linux" or OS=="freebsd" or OS=="openbsd") and not use_system_sqlite', {
       'targets': [
         {
           'target_name': 'sqlite_shell',

@@ -10,11 +10,11 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/task.h"
 #include "base/time.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/history/history_types.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class BookmarkService;
 class GURL;
@@ -101,11 +101,10 @@ class ExpireHistoryBackend {
   }
 
  private:
-  // friend class ExpireHistoryTest_DeleteFaviconsIfPossible_Test;
-  FRIEND_TEST(ExpireHistoryTest, DeleteTextIndexForURL);
-  FRIEND_TEST(ExpireHistoryTest, DeleteFaviconsIfPossible);
-  FRIEND_TEST(ExpireHistoryTest, ArchiveSomeOldHistory);
-  FRIEND_TEST(ExpireHistoryTest, ExpiringVisitsReader);
+  FRIEND_TEST_ALL_PREFIXES(ExpireHistoryTest, DeleteTextIndexForURL);
+  FRIEND_TEST_ALL_PREFIXES(ExpireHistoryTest, DeleteFaviconsIfPossible);
+  FRIEND_TEST_ALL_PREFIXES(ExpireHistoryTest, ArchiveSomeOldHistory);
+  FRIEND_TEST_ALL_PREFIXES(ExpireHistoryTest, ExpiringVisitsReader);
   friend class ::TestingProfile;
 
   struct DeleteDependencies;
@@ -223,6 +222,12 @@ class ExpireHistoryBackend {
   // and deletes items. For example, URLs with no visits.
   void ParanoidExpireHistory();
 
+  // Schedules a call to DoExpireHistoryIndexFiles.
+  void ScheduleExpireHistoryIndexFiles();
+
+  // Deletes old history index files.
+  void DoExpireHistoryIndexFiles();
+
   // Returns the BookmarkService, blocking until it is loaded. This may return
   // NULL.
   BookmarkService* GetBookmarkService();
@@ -277,7 +282,7 @@ class ExpireHistoryBackend {
   // loaded.
   BookmarkService* bookmark_service_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ExpireHistoryBackend);
+  DISALLOW_COPY_AND_ASSIGN(ExpireHistoryBackend);
 };
 
 }  // namespace history

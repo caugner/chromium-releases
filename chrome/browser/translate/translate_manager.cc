@@ -6,7 +6,10 @@
 
 #include "app/resource_bundle.h"
 #include "base/compiler_specific.h"
+#include "base/histogram.h"
 #include "base/string_util.h"
+#include "chrome/browser/browser.h"
+#include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
@@ -18,6 +21,7 @@
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/translate/page_translated_details.h"
+#include "chrome/browser/translate/translate_infobar_delegate.h"
 #include "chrome/browser/translate/translate_prefs.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_service.h"
@@ -26,6 +30,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/translate_errors.h"
 #include "grit/browser_resources.h"
+#include "net/base/escape.h"
 #include "net/url_request/url_request_status.h"
 
 namespace {
@@ -57,8 +62,11 @@ LocaleToCLDLanguage kLocaleToCLDLanguages[] = {
 // te Telugu
 const char* kSupportedLanguages[] = {
     "af",     // Afrikaans
+    "az",     // Azerbaijani
     "sq",     // Albanian
     "ar",     // Arabic
+    "hy",     // Armenian
+    "eu",     // Basque
     "be",     // Belarusian
     "bg",     // Bulgarian
     "ca",     // Catalan
@@ -76,6 +84,7 @@ const char* kSupportedLanguages[] = {
     "gl",     // Galician
     "de",     // German
     "el",     // Greek
+    "ht",     // Haitian Creole
     "he",     // Hebrew
     "hi",     // Hindi
     "hu",     // Hungarian
@@ -84,6 +93,7 @@ const char* kSupportedLanguages[] = {
     "it",     // Italian
     "ga",     // Irish
     "ja",     // Japanese
+    "ka",     // Georgian
     "ko",     // Korean
     "lv",     // Latvian
     "lt",     // Lithuanian
@@ -105,6 +115,7 @@ const char* kSupportedLanguages[] = {
     "th",     // Thai
     "tr",     // Turkish
     "uk",     // Ukrainian
+    "ur",     // Urdu
     "vi",     // Vietnamese
     "cy",     // Welsh
     "yi",     // Yiddish
@@ -115,6 +126,10 @@ const char* const kTranslateScriptURL =
     "cb=cr.googleTranslate.onTranslateElementLoad";
 const char* const kTranslateScriptHeader =
     "Google-Translate-Element-Mode: library";
+const char* const kReportLanguageDetectionErrorURL =
+    "http://translate.google.com/translate_error";
+
+const int kTranslateScriptExpirationDelayMS = 24 * 60 * 60 * 1000;  // 1 day.
 
 }  // namespace
 
@@ -193,13 +208,14 @@ void TranslateManager::Observe(NotificationType type,
     }
     case NotificationType::TAB_LANGUAGE_DETERMINED: {
       TabContents* tab = Source<TabContents>(source).ptr();
-      std::string language = *(Details<std::string>(details).ptr());
       // We may get this notifications multiple times.  Make sure to translate
       // only once.
       LanguageState& language_state = tab->language_state();
-      if (!language_state.translation_pending() &&
+      if (language_state.page_translatable() &&
+          !language_state.translation_pending() &&
           !language_state.translation_declined() &&
           !language_state.IsPageTranslated()) {
+        std::string language = *(Details<std::string>(details).ptr());
         InitiateTranslation(tab, language);
       }
       break;
@@ -211,22 +227,7 @@ void TranslateManager::Observe(NotificationType type,
       TabContents* tab = Source<TabContents>(source).ptr();
       PageTranslatedDetails* page_translated_details =
           Details<PageTranslatedDetails>(details).ptr();
-      TranslateInfoBarDelegate::TranslateState state =
-          (page_translated_details->error_type == TranslateErrors::NONE ?
-           TranslateInfoBarDelegate::kAfterTranslate :
-           TranslateInfoBarDelegate::kTranslateError);
-      TranslateInfoBarDelegate* info_bar = GetTranslateInfoBarDelegate(tab);
-      if (info_bar) {
-        info_bar->UpdateState(state, page_translated_details->error_type);
-      } else {
-        NavigationEntry* entry = tab->controller().GetActiveEntry();
-        if (entry) {
-          AddTranslateInfoBar(tab, state, entry->url(),
-                              page_translated_details->source_language,
-                              page_translated_details->target_language,
-                              page_translated_details->error_type);
-        }
-      }
+      PageTranslated(tab, page_translated_details);
       break;
     }
     case NotificationType::PROFILE_DESTROYED: {
@@ -269,6 +270,12 @@ void TranslateManager::OnURLFetchComplete(const URLFetcher* source,
     DCHECK(translate_script_.empty());
     str.CopyToString(&translate_script_);
     translate_script_ += "\n" + data;
+    // We'll expire the cached script after some time, to make sure long running
+    // browsers still get fixes that might get pushed with newer scripts.
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+        method_factory_.NewRunnableMethod(
+            &TranslateManager::ClearTranslateScript),
+        translate_script_expiration_delay_);
   }
 
   // Process any pending requests.
@@ -289,15 +296,9 @@ void TranslateManager::OnURLFetchComplete(const URLFetcher* source,
     }
 
     if (error) {
-      // TODO(jcivelli): http://crbug.com/40828 The translate infobar delegate
-      //                 should notify the info-bar so it updates it appearance
-      //                 so we don't have to send a notification.
-      PageTranslatedDetails details(request.source_lang, request.target_lang,
-                                    TranslateErrors::NETWORK);
-      NotificationService::current()->Notify(
-          NotificationType::PAGE_TRANSLATED,
-          Source<TabContents>(tab),
-          Details<PageTranslatedDetails>(&details));
+      ShowInfoBar(tab, TranslateInfoBarDelegate::CreateErrorDelegate(
+          TranslateErrors::NETWORK, tab,
+          request.source_lang, request.target_lang));
     } else {
       // Translate the page.
       DoTranslatePage(tab, translate_script_,
@@ -314,6 +315,7 @@ bool TranslateManager::IsShowingTranslateInfobar(TabContents* tab) {
 
 TranslateManager::TranslateManager()
     : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
+      translate_script_expiration_delay_(kTranslateScriptExpirationDelayMS),
       translate_script_request_pending_(false) {
   notification_registrar_.Add(this, NotificationType::NAV_ENTRY_COMMITTED,
                               NotificationService::AllSources());
@@ -334,6 +336,10 @@ void TranslateManager::InitiateTranslation(TabContents* tab,
     // This can happen for popups created with window.open("").
     return;
   }
+
+  // If there is already a translate infobar showing, don't show another one.
+  if (GetTranslateInfoBarDelegate(tab))
+    return;
 
   std::string target_lang = GetTargetLanguage();
   // Nothing to do if either the language Chrome is in or the language of the
@@ -373,14 +379,13 @@ void TranslateManager::InitiateTranslation(TabContents* tab,
   }
 
   // Prompts the user if he/she wants the page translated.
-  AddTranslateInfoBar(tab, TranslateInfoBarDelegate::kBeforeTranslate,
-                      entry->url(), page_lang, target_lang,
-                      TranslateErrors::NONE);
+  tab->AddInfoBar(TranslateInfoBarDelegate::CreateDelegate(
+      TranslateInfoBarDelegate::BEFORE_TRANSLATE, tab,
+      page_lang, target_lang));
 }
 
-void TranslateManager::InitiateTranslationPosted(int process_id,
-                                                 int render_id,
-                                                 const std::string& page_lang) {
+void TranslateManager::InitiateTranslationPosted(
+    int process_id, int render_id, const std::string& page_lang) {
   // The tab might have been closed.
   TabContents* tab = tab_util::GetTabContentsByID(process_id, render_id);
   if (!tab || tab->language_state().translation_pending())
@@ -390,13 +395,25 @@ void TranslateManager::InitiateTranslationPosted(int process_id,
 }
 
 void TranslateManager::TranslatePage(TabContents* tab_contents,
-                                     const std::string& source_lang,
-                                     const std::string& target_lang) {
+                                      const std::string& source_lang,
+                                      const std::string& target_lang) {
   NavigationEntry* entry = tab_contents->controller().GetActiveEntry();
   if (!entry) {
     NOTREACHED();
     return;
   }
+
+  TranslateInfoBarDelegate* infobar = GetTranslateInfoBarDelegate(tab_contents);
+  if (infobar) {
+    // We don't show the translating infobar if no translate infobar is already
+    // showing (that is the case when the translation was triggered by the
+    // "always translate" for example).
+    infobar = TranslateInfoBarDelegate::CreateDelegate(
+        TranslateInfoBarDelegate::TRANSLATING, tab_contents,
+        source_lang, target_lang);
+    ShowInfoBar(tab_contents, infobar);
+  }
+
   if (!translate_script_.empty()) {
     DoTranslatePage(tab_contents, translate_script_, source_lang, target_lang);
     return;
@@ -422,22 +439,69 @@ void TranslateManager::RevertTranslation(TabContents* tab_contents) {
     return;
   }
   tab_contents->render_view_host()->RevertTranslation(entry->page_id());
+  tab_contents->language_state().set_current_language(
+      tab_contents->language_state().original_language());
 }
 
-void TranslateManager::DoTranslatePage(TabContents* tab_contents,
+void TranslateManager::ReportLanguageDetectionError(TabContents* tab_contents) {
+  UMA_HISTOGRAM_COUNTS("Translate.ReportLanguageDetectionError", 1);
+  GURL page_url = tab_contents->controller().GetActiveEntry()->url();
+  std::string report_error_url(kReportLanguageDetectionErrorURL);
+  report_error_url += "?client=cr&action=langidc&u=";
+  report_error_url += EscapeUrlEncodedData(page_url.spec());
+  report_error_url += "&sl=";
+  report_error_url += tab_contents->language_state().original_language();
+  report_error_url += "&hl=";
+  report_error_url +=
+      GetLanguageCode(g_browser_process->GetApplicationLocale());
+  // Open that URL in a new tab so that the user can tell us more.
+  Browser* browser = BrowserList::GetLastActive();
+  if (!browser) {
+    NOTREACHED();
+    return;
+  }
+  browser->AddTabWithURL(GURL(report_error_url), GURL(),
+                         PageTransition::AUTO_BOOKMARK, -1,
+                         TabStripModel::ADD_SELECTED, NULL, std::string());
+}
+
+void TranslateManager::DoTranslatePage(TabContents* tab,
                                        const std::string& translate_script,
                                        const std::string& source_lang,
                                        const std::string& target_lang) {
-  NavigationEntry* entry = tab_contents->controller().GetActiveEntry();
+  NavigationEntry* entry = tab->controller().GetActiveEntry();
   if (!entry) {
     NOTREACHED();
     return;
   }
 
-  tab_contents->language_state().set_translation_pending(true);
-  tab_contents->render_view_host()->TranslatePage(entry->page_id(),
-                                                  translate_script,
-                                                  source_lang, target_lang);
+  tab->language_state().set_translation_pending(true);
+  tab->render_view_host()->TranslatePage(entry->page_id(), translate_script,
+                                         source_lang, target_lang);
+}
+
+void TranslateManager::PageTranslated(TabContents* tab,
+                                      PageTranslatedDetails* details) {
+  // Create the new infobar to display.
+  TranslateInfoBarDelegate* infobar;
+  if (details->error_type != TranslateErrors::NONE) {
+    infobar = TranslateInfoBarDelegate::CreateErrorDelegate(
+        details->error_type, tab,
+        details->source_language, details->target_language);
+  } else if (!IsSupportedLanguage(details->source_language)) {
+    // TODO(jcivelli): http://crbug.com/9390 We should change the "after
+    //                 translate" infobar to support unknown as the original
+    //                 language.
+    UMA_HISTOGRAM_COUNTS("Translate.ServerReportedUnsupportedLanguage", 1);
+    infobar = TranslateInfoBarDelegate::CreateErrorDelegate(
+        TranslateErrors::UNSUPPORTED_LANGUAGE, tab,
+        details->source_language, details->target_language);
+  } else {
+    infobar = TranslateInfoBarDelegate::CreateDelegate(
+        TranslateInfoBarDelegate::AFTER_TRANSLATE, tab,
+        details->source_language, details->target_language);
+  }
+  ShowInfoBar(tab, infobar);
 }
 
 bool TranslateManager::IsAcceptLanguage(TabContents* tab,
@@ -462,10 +526,10 @@ bool TranslateManager::IsAcceptLanguage(TabContents* tab,
 
 void TranslateManager::InitAcceptLanguages(PrefService* prefs) {
   // We have been asked for this profile, build the languages.
-  std::wstring accept_langs_str = prefs->GetString(prefs::kAcceptLanguages);
+  std::string accept_langs_str = prefs->GetString(prefs::kAcceptLanguages);
   std::vector<std::string> accept_langs_list;
   LanguageSet accept_langs_set;
-  SplitString(WideToASCII(accept_langs_str), ',', &accept_langs_list);
+  SplitString(accept_langs_str, ',', &accept_langs_list);
   std::vector<std::string>::const_iterator iter;
   std::string ui_lang =
       GetLanguageCode(g_browser_process->GetApplicationLocale());
@@ -503,23 +567,16 @@ void TranslateManager::RequestTranslateScript() {
   fetcher->Start();
 }
 
-// static
-void TranslateManager::AddTranslateInfoBar(
-    TabContents* tab, TranslateInfoBarDelegate::TranslateState state,
-    const GURL& url,
-    const std::string& original_language, const std::string& target_language,
-    TranslateErrors::Type error_type) {
-  PrefService* prefs = tab->profile()->GetPrefs();
-  TranslateInfoBarDelegate* infobar =
-      TranslateInfoBarDelegate::Create(tab, prefs, state, url,
-                                       original_language, target_language,
-                                       error_type);
-  if (!infobar) {
-    NOTREACHED() << "Failed to create infobar for language " <<
-        original_language << " and " << target_language;
-    return;
+void TranslateManager::ShowInfoBar(TabContents* tab,
+                                   TranslateInfoBarDelegate* infobar) {
+  TranslateInfoBarDelegate* old_infobar = GetTranslateInfoBarDelegate(tab);
+  infobar->UpdateBackgroundAnimation(old_infobar);
+  if (old_infobar) {
+    // There already is a translate infobar, simply replace it.
+    tab->ReplaceInfoBar(old_infobar, infobar);
+  } else {
+    tab->AddInfoBar(infobar);
   }
-  tab->AddInfoBar(infobar);
 }
 
 // static

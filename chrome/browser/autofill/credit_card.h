@@ -22,6 +22,7 @@ class CreditCard : public FormGroup {
   FormGroup* Clone() const;
   virtual void GetPossibleFieldTypes(const string16& text,
                                      FieldTypeSet* possible_types) const;
+  virtual void GetAvailableFieldTypes(FieldTypeSet* available_types) const;
   virtual void FindInfoMatches(const AutoFillType& type,
                                const string16& info,
                                std::vector<string16>* matched_text) const;
@@ -34,19 +35,15 @@ class CreditCard : public FormGroup {
   string16 ObfuscatedNumber() const;
   // Credit card preview summary, for example: ******1234, Exp: 01/2020
   string16 PreviewSummary() const;
+  // The last four digits of the credit card number.
+  string16 LastFourDigits() const;
 
   const string16& billing_address() const { return billing_address_; }
-  const string16& shipping_address() const { return shipping_address_; }
   int unique_id() const { return unique_id_; }
 
-  // The caller should verify that the corresponding AutoFillProfile exists.  If
-  // the shipping address should be the same as the billing address, send in an
-  // empty string to set_shipping_address.
+  // The caller should verify that the corresponding AutoFillProfile exists.
   void set_billing_address(const string16& address) {
     billing_address_ = address;
-  }
-  void set_shipping_address(const string16& address) {
-    shipping_address_ = address;
   }
   void set_unique_id(int id) { unique_id_ = id; }
 
@@ -57,6 +54,10 @@ class CreditCard : public FormGroup {
   bool operator==(const CreditCard& creditcard) const;
   bool operator!=(const CreditCard& creditcard) const;
   void set_label(const string16& label) { label_ = label; }
+
+  // Returns true if |value| is a credit card number.  Uses the Luhn formula to
+  // validate the number.
+  static bool IsCreditCardNumber(const string16& text);
 
  private:
   // The month and year are zero if not present.
@@ -75,7 +76,6 @@ class CreditCard : public FormGroup {
   const string16& number() const { return number_; }
   const string16& name_on_card() const { return name_on_card_; }
   const string16& type() const { return type_; }
-  const string16& verification_code() const { return verification_code_; }
   const string16& last_four_digits() const { return last_four_digits_; }
   int expiration_month() const { return expiration_month_; }
   int expiration_year() const { return expiration_year_; }
@@ -85,9 +85,6 @@ class CreditCard : public FormGroup {
     name_on_card_ = name_on_card;
   }
   void set_type(const string16& type) { type_ = type; }
-  void set_verification_code(const string16& verification_code) {
-    verification_code_ = verification_code;
-  }
   void set_last_four_digits(const string16& last_four_digits) {
     last_four_digits_ = last_four_digits;
   }
@@ -107,15 +104,8 @@ class CreditCard : public FormGroup {
   // case-insensitive.
   bool IsNameOnCard(const string16& text) const;
 
-  // Uses the Luhn formula to validate the credit card number in |text|.
-  static bool IsCreditCardNumber(const string16& text);
-
   // Returns true if |text| matches the expiration month of the card.
   bool IsExpirationMonth(const string16& text) const;
-
-  // Returns true if |text| matches the CVV of the card.  The comparison is
-  // case-insensitive.
-  bool IsVerificationCode(const string16& text) const;
 
   // Returns true if the integer value of |text| matches the 2-digit expiration
   // year.
@@ -133,11 +123,9 @@ class CreditCard : public FormGroup {
   // succeeded.
   bool ConvertDate(const string16& date, int* num) const;
 
-  // The credit card values.
-  string16 number_;  // The encrypted credit card number.
+  string16 number_;  // The credit card number.
   string16 name_on_card_;  // The cardholder's name.
   string16 type_;  // The type of the card.
-  string16 verification_code_;  // The CVV.
 
   // Stores the last four digits of the credit card number.
   string16 last_four_digits_;
@@ -149,12 +137,9 @@ class CreditCard : public FormGroup {
   // This is the display name of the card set by the user, e.g., Amazon Visa.
   string16 label_;
 
-  // The billing and shipping addresses.  The are the labels of
-  // AutoFillProfiles that contain the corresponding address.  If
-  // |shipping_address_| is empty, the billing address is used for the shipping
-  // address.
+  // The billing address. This is the label of the AutoFillProfile that contains
+  // the corresponding billing address.
   string16 billing_address_;
-  string16 shipping_address_;
 
   // The unique ID of this credit card.
   int unique_id_;
