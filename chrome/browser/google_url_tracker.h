@@ -2,8 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/url_fetcher.h"
-#include "chrome/common/notification_service.h"
+#ifndef CHROME_BROWSER_GOOGLE_URL_TRACKER_H_
+#define CHROME_BROWSER_GOOGLE_URL_TRACKER_H_
+
+#include "chrome/browser/net/url_fetcher.h"
+#include "chrome/common/notification_observer.h"
+#include "googleurl/src/gurl.h"
 
 class PrefService;
 
@@ -98,6 +102,7 @@ class GoogleURLTracker : public URLFetcher::Delegate,
                            // default request context created, so we can
                            // actually do the fetch with the right data.
 
-  DISALLOW_EVIL_CONSTRUCTORS(GoogleURLTracker);
+  DISALLOW_COPY_AND_ASSIGN(GoogleURLTracker);
 };
 
+#endif  // CHROME_BROWSER_GOOGLE_URL_TRACKER_H_

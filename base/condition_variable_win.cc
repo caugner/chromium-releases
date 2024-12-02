@@ -8,6 +8,9 @@
 
 #include "base/lock.h"
 #include "base/logging.h"
+#include "base/time.h"
+
+using base::TimeDelta;
 
 ConditionVariable::ConditionVariable(Lock* user_lock)
   : user_lock_(*user_lock),
@@ -441,4 +444,3 @@ put so many assertions (DCHECKs) into the container class that it is trivial to
 code review and validate its correctness.
 
 */
-

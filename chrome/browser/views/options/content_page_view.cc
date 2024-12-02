@@ -11,26 +11,27 @@
 
 #include "base/file_util.h"
 #include "base/gfx/native_theme.h"
-#include "base/gfx/skia_utils.h"
-#include "chrome/app/theme/theme_resources.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/shell_dialogs.h"
 #include "chrome/browser/views/options/fonts_languages_window_view.h"
 #include "chrome/browser/views/options/options_group_view.h"
 #include "chrome/browser/views/password_manager_view.h"
+#include "chrome/browser/views/password_manager_exceptions_view.h"
 #include "chrome/browser/views/standard_layout.h"
 #include "chrome/common/gfx/chrome_canvas.h"
 #include "chrome/common/l10n_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 #include "chrome/common/resource_bundle.h"
-#include "chrome/views/checkbox.h"
+#include "chrome/views/controls/button/checkbox.h"
+#include "chrome/views/controls/button/native_button.h"
+#include "chrome/views/controls/button/radio_button.h"
+#include "chrome/views/controls/text_field.h"
 #include "chrome/views/grid_layout.h"
-#include "chrome/views/native_button.h"
-#include "chrome/views/radio_button.h"
-#include "chrome/views/text_field.h"
-#include "chrome/views/view_container.h"
-#include "generated_resources.h"
+#include "chrome/views/widget/widget.h"
+#include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
+#include "skia/ext/skia_utils_win.h"
 #include "skia/include/SkBitmap.h"
 
 namespace {
@@ -46,28 +47,28 @@ static const int kFileIconTextFieldSpacing = 3;
 ////////////////////////////////////////////////////////////////////////////////
 // FileDisplayArea
 
-class FileDisplayArea : public ChromeViews::View {
+class FileDisplayArea : public views::View {
  public:
   FileDisplayArea();
   virtual ~FileDisplayArea();
 
-  void SetFile(const std::wstring& file_path);
+  void SetFile(const FilePath& file_path);
 
-  // ChromeViews::View overrides:
+  // views::View overrides:
   virtual void Paint(ChromeCanvas* canvas);
   virtual void Layout();
-  virtual void GetPreferredSize(CSize* out);
+  virtual gfx::Size GetPreferredSize();
 
  protected:
-  // ChromeViews::View overrides:
+  // views::View overrides:
   virtual void ViewHierarchyChanged(bool is_add,
-                                    ChromeViews::View* parent,
-                                    ChromeViews::View* child);
+                                    views::View* parent,
+                                    views::View* child);
 
  private:
   void Init();
 
-  ChromeViews::TextField* text_field_;
+  views::TextField* text_field_;
   SkColor text_field_background_color_;
 
   gfx::Rect icon_bounds_;
@@ -84,7 +85,7 @@ class FileDisplayArea : public ChromeViews::View {
 SkBitmap FileDisplayArea::default_folder_icon_;
 
 FileDisplayArea::FileDisplayArea()
-    : text_field_(new ChromeViews::TextField),
+    : text_field_(new views::TextField),
       text_field_background_color_(0),
       initialized_(false) {
   InitClass();
@@ -93,8 +94,15 @@ FileDisplayArea::FileDisplayArea()
 FileDisplayArea::~FileDisplayArea() {
 }
 
-void FileDisplayArea::SetFile(const std::wstring& file_path) {
-  text_field_->SetText(file_path);
+void FileDisplayArea::SetFile(const FilePath& file_path) {
+  // Force file path to have LTR directionality.
+  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) {
+    string16 localized_file_path;
+    l10n_util::WrapPathWithLTRFormatting(file_path, &localized_file_path);
+    text_field_->SetText(UTF16ToWide(localized_file_path));
+  } else {
+    text_field_->SetText(file_path.ToWStringHack());
+  }
 }
 
 void FileDisplayArea::Paint(ChromeCanvas* canvas) {
@@ -102,34 +110,34 @@ void FileDisplayArea::Paint(ChromeCanvas* canvas) {
   RECT rect = { 0, 0, width(), height() };
   gfx::NativeTheme::instance()->PaintTextField(
       dc, EP_EDITTEXT, ETS_READONLY, 0, &rect,
-      gfx::SkColorToCOLORREF(text_field_background_color_), true, true);
+      skia::SkColorToCOLORREF(text_field_background_color_), true, true);
   canvas->endPlatformPaint();
-  canvas->DrawBitmapInt(default_folder_icon_, icon_bounds_.x(),
+  // Mirror left point for icon_bounds_ to draw icon in RTL locales correctly.
+  canvas->DrawBitmapInt(default_folder_icon_,
+                        MirroredLeftPointForRect(icon_bounds_),
                         icon_bounds_.y());
 }
 
 void FileDisplayArea::Layout() {
   icon_bounds_.SetRect(kFileIconHorizontalSpacing, kFileIconVerticalSpacing,
                        kFileIconSize, kFileIconSize);
-  CSize ps;
-  text_field_->GetPreferredSize(&ps);
+  gfx::Size ps = text_field_->GetPreferredSize();
   text_field_->SetBounds(icon_bounds_.right() + kFileIconTextFieldSpacing,
-                         (height() - ps.cy) / 2,
+                         (height() - ps.height()) / 2,
                          width() - icon_bounds_.right() -
                              kFileIconHorizontalSpacing -
-                             kFileIconTextFieldSpacing, ps.cy);
+                             kFileIconTextFieldSpacing, ps.height());
 }
 
-void FileDisplayArea::GetPreferredSize(CSize* out) {
-  DCHECK(out);
-  out->cx = kFileIconSize + 2 * kFileIconVerticalSpacing;
-  out->cy = kFileIconSize + 2 * kFileIconHorizontalSpacing;
+gfx::Size FileDisplayArea::GetPreferredSize() {
+  return gfx::Size(kFileIconSize + 2 * kFileIconVerticalSpacing,
+                   kFileIconSize + 2 * kFileIconHorizontalSpacing);
 }
 
 void FileDisplayArea::ViewHierarchyChanged(bool is_add,
-                                           ChromeViews::View* parent,
-                                           ChromeViews::View* child) {
-  if (!initialized_ && is_add && GetViewContainer())
+                                           views::View* parent,
+                                           views::View* child) {
+  if (!initialized_ && is_add && GetWidget())
     Init();
 }
 
@@ -145,11 +153,18 @@ void FileDisplayArea::Init() {
   text_field_->SetBackgroundColor(text_field_background_color_);
 }
 
+// static
 void FileDisplayArea::InitClass() {
   static bool initialized = false;
   if (!initialized) {
+    // We'd prefer to use UILayoutIsRightToLeft() to perform the RTL
+    // environment check, but it's nonstatic, so, instead, we check whether the
+    // locale is RTL.
+    bool ui_is_rtl = l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT;
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    default_folder_icon_ = *rb.GetBitmapNamed(IDR_FOLDER_CLOSED);
+    default_folder_icon_ = *rb.GetBitmapNamed(ui_is_rtl ?
+                                              IDR_FOLDER_CLOSED_RTL :
+                                              IDR_FOLDER_CLOSED);
     initialized = true;
   }
 }
@@ -163,6 +178,7 @@ ContentPageView::ContentPageView(Profile* profile)
       download_browse_button_(NULL),
       download_ask_for_save_location_checkbox_(NULL),
       select_file_dialog_(SelectFileDialog::Create(this)),
+      passwords_exceptions_button_(NULL),
       passwords_group_(NULL),
       passwords_asktosave_radio_(NULL),
       passwords_neversave_radio_(NULL),
@@ -191,14 +207,19 @@ void ContentPageView::FileSelected(const std::wstring& path, void* params) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// ContentPageView, ChromeViews::NativeButton::Listener implementation:
+// ContentPageView, views::NativeButton::Listener implementation:
 
-void ContentPageView::ButtonPressed(ChromeViews::NativeButton* sender) {
+void ContentPageView::ButtonPressed(views::NativeButton* sender) {
   if (sender == download_browse_button_) {
     const std::wstring dialog_title =
        l10n_util::GetString(IDS_OPTIONS_DOWNLOADLOCATION_BROWSE_TITLE);
     select_file_dialog_->SelectFile(SelectFileDialog::SELECT_FOLDER,
-                                    dialog_title, L"", GetRootWindow(), NULL);
+                                    dialog_title,
+                                    profile()->GetPrefs()->GetString(
+                                        prefs::kDownloadDefaultDirectory),
+                                    std::wstring(), std::wstring(),
+                                    GetRootWindow(),
+                                    NULL);
   } else if (sender == download_ask_for_save_location_checkbox_) {
     bool enabled = download_ask_for_save_location_checkbox_->IsSelected();
     if (enabled) {
@@ -220,11 +241,24 @@ void ContentPageView::ButtonPressed(ChromeViews::NativeButton* sender) {
                               profile()->GetPrefs());
     }
     ask_to_save_passwords_.SetValue(enabled);
-  } else if (sender == passwords_show_passwords_button_) {
+  } else if (sender == passwords_exceptions_button_) {
+    UserMetricsRecordAction(L"Options_ShowPasswordManagerExceptions", NULL);
+    PasswordManagerExceptionsView::Show(profile());
+  }else if (sender == passwords_show_passwords_button_) {
     UserMetricsRecordAction(L"Options_ShowPasswordManager", NULL);
     PasswordManagerView::Show(profile());
+  } else if (sender == form_autofill_checkbox_) {
+    bool enabled = form_autofill_checkbox_->IsSelected();
+    if (enabled) {
+      UserMetricsRecordAction(L"Options_FormAutofill_Enable",
+                              profile()->GetPrefs());
+    } else {
+      UserMetricsRecordAction(L"Options_FormAutofill_Disable",
+                              profile()->GetPrefs());
+    }
+    form_autofill_.SetValue(enabled);
   } else if (sender == change_content_fonts_button_) {
-    ChromeViews::Window::CreateChromeWindow(
+    views::Window::CreateChromeWindow(
         GetRootWindow(),
         gfx::Rect(),
         new FontsLanguagesWindowView(profile()))->Show();
@@ -239,8 +273,8 @@ bool ContentPageView::CanClose() const {
 }
 
 void ContentPageView::InitControlLayout() {
-  using ChromeViews::GridLayout;
-  using ChromeViews::ColumnSet;
+  using views::GridLayout;
+  using views::ColumnSet;
 
   GridLayout* layout = new GridLayout(this);
   layout->SetInsets(5, 5, 5, 5);
@@ -265,6 +299,11 @@ void ContentPageView::InitControlLayout() {
   layout->AddView(fonts_lang_group_);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
 
+  layout->StartRow(0, single_column_view_set_id);
+  InitFormAutofillGroup();
+  layout->AddView(form_autofill_group_);
+  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+
   // Init member prefs so we can update the controls if prefs change.
   default_download_location_.Init(prefs::kDownloadDefaultDirectory,
                                   profile()->GetPrefs(), this);
@@ -272,6 +311,7 @@ void ContentPageView::InitControlLayout() {
                               profile()->GetPrefs(), this);
   ask_to_save_passwords_.Init(prefs::kPasswordManagerEnabled,
                               profile()->GetPrefs(), this);
+  form_autofill_.Init(prefs::kFormAutofillEnabled, profile()->GetPrefs(), this);
 }
 
 void ContentPageView::NotifyPrefChanged(const std::wstring* pref_name) {
@@ -289,10 +329,13 @@ void ContentPageView::NotifyPrefChanged(const std::wstring* pref_name) {
       passwords_neversave_radio_->SetIsSelected(true);
     }
   }
+  if (!pref_name || *pref_name == prefs::kFormAutofillEnabled) {
+    form_autofill_checkbox_->SetIsSelected(form_autofill_.GetValue());
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// ContentsPageView, ChromeViews::View overrides:
+// ContentsPageView, views::View overrides:
 
 void ContentPageView::Layout() {
   // We need to Layout twice - once to get the width of the contents box...
@@ -314,19 +357,19 @@ void ContentPageView::Layout() {
 
 void ContentPageView::InitDownloadLocation() {
   download_default_download_location_display_ = new FileDisplayArea;
-  download_browse_button_ = new ChromeViews::NativeButton(
+  download_browse_button_ = new views::NativeButton(
       l10n_util::GetString(IDS_OPTIONS_DOWNLOADLOCATION_BROWSE_BUTTON));
   download_browse_button_->SetListener(this);
 
-  download_ask_for_save_location_checkbox_ = new ChromeViews::CheckBox(
+  download_ask_for_save_location_checkbox_ = new views::CheckBox(
       l10n_util::GetString(IDS_OPTIONS_DOWNLOADLOCATION_ASKFORSAVELOCATION));
   download_ask_for_save_location_checkbox_->SetListener(this);
   download_ask_for_save_location_checkbox_->SetMultiLine(true);
 
-  using ChromeViews::GridLayout;
-  using ChromeViews::ColumnSet;
+  using views::GridLayout;
+  using views::ColumnSet;
 
-  ChromeViews::View* contents = new ChromeViews::View;
+  views::View* contents = new views::View;
   GridLayout* layout = new GridLayout(contents);
   contents->SetLayoutManager(layout);
 
@@ -361,24 +404,27 @@ void ContentPageView::InitDownloadLocation() {
 }
 
 void ContentPageView::InitPasswordSavingGroup() {
-  passwords_asktosave_radio_ = new ChromeViews::RadioButton(
+  passwords_asktosave_radio_ = new views::RadioButton(
       l10n_util::GetString(IDS_OPTIONS_PASSWORDS_ASKTOSAVE),
       kPasswordSavingRadioGroup);
   passwords_asktosave_radio_->SetListener(this);
   passwords_asktosave_radio_->SetMultiLine(true);
-  passwords_neversave_radio_ = new ChromeViews::RadioButton(
+  passwords_neversave_radio_ = new views::RadioButton(
       l10n_util::GetString(IDS_OPTIONS_PASSWORDS_NEVERSAVE),
       kPasswordSavingRadioGroup);
   passwords_neversave_radio_->SetListener(this);
   passwords_neversave_radio_->SetMultiLine(true);
-  passwords_show_passwords_button_ = new ChromeViews::NativeButton(
+  passwords_show_passwords_button_ = new views::NativeButton(
       l10n_util::GetString(IDS_OPTIONS_PASSWORDS_SHOWPASSWORDS));
   passwords_show_passwords_button_->SetListener(this);
+  passwords_exceptions_button_ = new views::NativeButton(
+      l10n_util::GetString(IDS_OPTIONS_PASSWORDS_EXCEPTIONS));
+  passwords_exceptions_button_->SetListener(this);
 
-  using ChromeViews::GridLayout;
-  using ChromeViews::ColumnSet;
+  using views::GridLayout;
+  using views::ColumnSet;
 
-  ChromeViews::View* contents = new ChromeViews::View;
+  views::View* contents = new views::View;
   GridLayout* layout = new GridLayout(contents);
   contents->SetLayoutManager(layout);
 
@@ -387,34 +433,68 @@ void ContentPageView::InitPasswordSavingGroup() {
   column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 1,
                         GridLayout::USE_PREF, 0, 0);
 
+  const int double_column_view_set_id = 0;
+  column_set = layout->AddColumnSet(double_column_view_set_id);
+  column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
+                        GridLayout::USE_PREF, 0, 0);
+  column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+  column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
+                        GridLayout::USE_PREF, 0, 0);
+
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(passwords_asktosave_radio_);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(passwords_neversave_radio_);
   layout->AddPaddingRow(0, kUnrelatedControlVerticalSpacing);
-  layout->StartRow(0, single_column_view_set_id);
+  layout->StartRow(0, double_column_view_set_id);
   layout->AddView(passwords_show_passwords_button_);
+  layout->AddView(passwords_exceptions_button_);
 
   passwords_group_ = new OptionsGroupView(
       contents, l10n_util::GetString(IDS_OPTIONS_PASSWORDS_GROUP_NAME), L"",
       true);
 }
 
+void ContentPageView::InitFormAutofillGroup() {
+  form_autofill_checkbox_ = new views::CheckBox(
+      l10n_util::GetString(IDS_AUTOFILL_SAVEFORMS));
+  form_autofill_checkbox_->SetListener(this);
+  form_autofill_checkbox_->SetMultiLine(true);
+
+  using views::GridLayout;
+  using views::ColumnSet;
+
+  views::View* contents = new views::View;
+  GridLayout* layout = new GridLayout(contents);
+  contents->SetLayoutManager(layout);
+
+  const int single_column_view_set_id = 1;
+  ColumnSet* column_set = layout->AddColumnSet(single_column_view_set_id);
+  column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
+                        GridLayout::USE_PREF, 0, 0);
+
+  layout->StartRow(0, single_column_view_set_id);
+  layout->AddView(form_autofill_checkbox_);
+
+  form_autofill_group_ = new OptionsGroupView(
+      contents, l10n_util::GetString(IDS_AUTOFILL_SETTING_WINDOWS_GROUP_NAME),
+      L"", false);
+}
+
 void ContentPageView::InitFontsLangGroup() {
-  fonts_and_languages_label_ = new ChromeViews::Label(
+  fonts_and_languages_label_ = new views::Label(
       l10n_util::GetString(IDS_OPTIONS_FONTSETTINGS_INFO));
-  fonts_and_languages_label_->SetHorizontalAlignment(
-      ChromeViews::Label::ALIGN_LEFT);
+  fonts_and_languages_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   fonts_and_languages_label_->SetMultiLine(true);
-  change_content_fonts_button_ = new ChromeViews::NativeButton(
+  change_content_fonts_button_ = new views::NativeButton(
       l10n_util::GetString(IDS_OPTIONS_FONTSETTINGS_CONFIGUREFONTS_BUTTON));
   change_content_fonts_button_->SetListener(this);
 
-  using ChromeViews::GridLayout;
-  using ChromeViews::ColumnSet;
+  using views::GridLayout;
+  using views::ColumnSet;
 
-  ChromeViews::View* contents = new ChromeViews::View;
+  views::View* contents = new views::View;
   GridLayout* layout = new GridLayout(contents);
   contents->SetLayoutManager(layout);
 
@@ -432,11 +512,10 @@ void ContentPageView::InitFontsLangGroup() {
   fonts_lang_group_ = new OptionsGroupView(
       contents,
       l10n_util::GetString(IDS_OPTIONS_FONTSANDLANGUAGES_GROUP_NAME),
-      L"", false);
+      L"", true);
 }
 
 void ContentPageView::UpdateDownloadDirectoryDisplay() {
   download_default_download_location_display_->SetFile(
-      default_download_location_.GetValue());
+      FilePath::FromWStringHack(default_download_location_.GetValue()));
 }
-

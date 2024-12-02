@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_COMMON_WIN_UTIL_H__
-#define CHROME_COMMON_WIN_UTIL_H__
+#ifndef CHROME_COMMON_WIN_UTIL_H_
+#define CHROME_COMMON_WIN_UTIL_H_
 
 #include <objbase.h>
 
@@ -13,6 +13,9 @@
 #include "base/fix_wp64.h"
 #include "base/gfx/rect.h"
 #include "base/scoped_handle.h"
+#include "chrome/common/gfx/chrome_font.h"
+
+class FilePath;
 
 namespace win_util {
 
@@ -51,23 +54,32 @@ class CoMemReleaser {
  private:
   T* mem_ptr_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(CoMemReleaser);
+  DISALLOW_COPY_AND_ASSIGN(CoMemReleaser);
 };
 
-// Initializes COM in the constructor, and uninitializes COM in the
+// Initializes COM in the constructor (STA), and uninitializes COM in the
 // destructor.
 class ScopedCOMInitializer {
  public:
-  ScopedCOMInitializer() {
-    CoInitialize(NULL);
+  ScopedCOMInitializer() : hr_(CoInitialize(NULL)) {
   }
 
-  ~ScopedCOMInitializer() {
-    CoUninitialize();
+  ScopedCOMInitializer::~ScopedCOMInitializer() {
+    if (SUCCEEDED(hr_))
+      CoUninitialize();
   }
+
+  // Returns the error code from CoInitialize(NULL)
+  // (called in constructor)
+  inline HRESULT error_code() const {
+    return hr_;
+  }
+
+ protected:
+  HRESULT hr_;
 
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(ScopedCOMInitializer);
+  DISALLOW_COPY_AND_ASSIGN(ScopedCOMInitializer);
 };
 
 // Creates a string interpretation of the time of day represented by the given
@@ -111,18 +123,27 @@ void ShowItemInFolder(const std::wstring& full_path);
 // ask the user, via the Windows "Open With" dialog, for an application to use
 // if 'ask_for_app' is true.
 // Returns 'true' on successful open, 'false' otherwise.
-bool OpenItemViaShell(const std::wstring& full_path, bool ask_for_app);
+bool OpenItemViaShell(const FilePath& full_path, bool ask_for_app);
 
 // The download manager now writes the alternate data stream with the
 // zone on all downloads. This function is equivalent to OpenItemViaShell
 // without showing the zone warning dialog.
-bool OpenItemViaShellNoZoneCheck(const std::wstring& full_path,
+bool OpenItemViaShellNoZoneCheck(const FilePath& full_path,
                                  bool ask_for_app);
 
 // Ask the user, via the Windows "Open With" dialog, for an application to use
 // to open the file specified by 'full_path'.
 // Returns 'true' on successful open, 'false' otherwise.
 bool OpenItemWithExternalApp(const std::wstring& full_path);
+
+std::wstring GetFileFilterFromPath(const std::wstring& file_name);
+
+// Returns a file filter whose description comes from the OS for the first file
+// extension in |extensions|. |extensions| is a semicolon separated list of
+// extensions. Each extension is specified as '*.foo' where foo is the
+// extension.
+std::wstring GetFileFilterFromExtensions(const std::wstring& extensions,
+                                         bool include_all_files);
 
 // Prompt the user for location to save a file. 'suggested_name' is a full path
 // that gives the dialog box a hint as to how to initialize itself.
@@ -148,15 +169,37 @@ bool SaveFileAs(HWND owner,
 // The parameter |index| indicates the initial index of filter description
 // and filter pattern for the dialog box. If |index| is zero or greater than
 // the number of total filter types, the system uses the first filter in the
-// |filter| buffer. The parameter |final_name| returns the file name which
-// contains the drive designator, path, file name, and extension of the user
-// selected file name.
+// |filter| buffer. |index| is used to specify the initial selected extension,
+// and when done contains the extension the user chose. The parameter
+// |final_name| returns the file name which contains the drive designator,
+// path, file name, and extension of the user selected file name. |def_ext| is
+// the default extension to give to the file if the user did not enter an
+// extension. If |ignore_suggested_ext| is true, any file extension contained in
+// |suggested_name| will not be used to generate the file name. This is useful
+// in the case of saving web pages, where we know the extension type already and
+// where |suggested_name| may contain a '.' character as a valid part of the
+// name, thus confusing our extension detection code.
 bool SaveFileAsWithFilter(HWND owner,
                           const std::wstring& suggested_name,
-                          const wchar_t* filter,
+                          const std::wstring& filter,
                           const std::wstring& def_ext,
+                          bool ignore_suggested_ext,
                           unsigned* index,
                           std::wstring* final_name);
+
+// This function takes the output of a SaveAs dialog: a filename, a filter and
+// the extension originally suggested to the user (shown in the dialog box) and
+// returns back the filename with the appropriate extension tacked on. For
+// example, if you pass in 'foo' as filename with filter '*.jpg' this function
+// will return 'foo.jpg'. It respects MIME types, so if you pass in 'foo.jpeg'
+// with filer '*.jpg' it will return 'foo.jpeg' (will not append .jpg).
+// |filename| should contain the filename selected in the SaveAs dialog box and
+// may include the path, |filter_selected| should be '*.something', for example
+// '*.*' or it can be blank (which is treated as *.*). |suggested_ext| should
+// contain the extension without the dot (.) in front, for example 'jpg'.
+std::wstring AppendExtensionIfNeeded(const std::wstring& filename,
+                                     const std::wstring& filter_selected,
+                                     const std::wstring& suggested_ext);
 
 // If the window does not fit on the default monitor, it is moved and possibly
 // resized appropriately.
@@ -167,6 +210,10 @@ void AdjustWindowToFit(HWND hwnd);
 // window fits on screen.
 void CenterAndSizeWindow(HWND parent, HWND window, const SIZE& pref,
                          bool pref_is_client);
+
+// Returns true if edge |edge| (one of ABE_LEFT, TOP, RIGHT, or BOTTOM) of
+// monitor |monitor| has an auto-hiding taskbar.
+bool EdgeHasAutoHideTaskbar(UINT edge, HMONITOR monitor);
 
 // Duplicates a section handle from another process to the current process.
 // Returns the new valid handle if the function succeed. NULL otherwise.
@@ -197,7 +244,7 @@ void SetChildBounds(HWND child_window, HWND parent_window,
 gfx::Rect GetMonitorBoundsForRect(const gfx::Rect& rect);
 
 // Returns true if the virtual key code is a digit coming from the numeric
-// keypad (with or without Num Lock on).  |extended_key| should be set to the
+// keypad (with or without NumLock on).  |extended_key| should be set to the
 // extended key flag specified in the WM_KEYDOWN/UP where the |key_code|
 // originated.
 bool IsNumPadDigit(int key_code, bool extended_key);
@@ -228,7 +275,12 @@ int MessageBox(HWND hwnd,
                const std::wstring& caption,
                UINT flags);
 
+// Returns the system set window title font.
+ChromeFont GetWindowTitleFont();
+
+// The thickness of an auto-hide taskbar in pixels.
+extern const int kAutoHideTaskbarThicknessPx;
+
 }  // namespace win_util
 
-#endif  // WIN_COMMON_WIN_UTIL_H__
-
+#endif  // CHROME_COMMON_WIN_UTIL_H_

@@ -32,8 +32,10 @@
 // DownloadManager is constructed, we query the history service for the state of
 // all persisted downloads.
 
-#ifndef CHROME_BROWSER_DOWNLOAD_DOWNLOAD_MANAGER_H__
-#define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_MANAGER_H__
+#ifndef CHROME_BROWSER_DOWNLOAD_DOWNLOAD_MANAGER_H_
+#define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_MANAGER_H_
+
+#include "build/build_config.h"
 
 #include <string>
 #include <map>
@@ -41,17 +43,24 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/hash_tables.h"
 #include "base/observer_list.h"
 #include "base/ref_counted.h"
+#include "base/time.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/history/download_types.h"
 #include "chrome/browser/history/history.h"
-#include "chrome/browser/shell_dialogs.h"
 #include "chrome/common/pref_member.h"
 
+#if defined(OS_WIN) || defined(OS_LINUX)
+// TODO(port): port this header.
+#include "chrome/browser/shell_dialogs.h"
+#elif defined(OS_MACOSX)
+#include "chrome/common/temp_scaffolding_stubs.h"
+#endif
+
 class DownloadFileManager;
-class DownloadItem;
 class DownloadItemView;
 class DownloadManager;
 class GURL;
@@ -80,6 +89,12 @@ class DownloadItem {
     REMOVING
   };
 
+  enum SafetyState {
+    SAFE = 0,
+    DANGEROUS,
+    DANGEROUS_BUT_VALIDATED  // Dangerous but the user confirmed the download.
+  };
+
   // Interface that observers of a particular download must implement in order
   // to receive updates to the download's status.
   class Observer {
@@ -92,12 +107,15 @@ class DownloadItem {
 
   // Constructing from user action:
   DownloadItem(int32 download_id,
-               const std::wstring& path,
-               const std::wstring& url,
-               const Time start_time,
+               const FilePath& path,
+               int path_uniquifier,
+               const GURL& url,
+               const FilePath& original_name,
+               const base::Time start_time,
                int64 download_size,
                int render_process_id,
-               int request_id);
+               int request_id,
+               bool is_dangerous);
 
   ~DownloadItem();
 
@@ -125,12 +143,12 @@ class DownloadItem {
   // when resuming a download (assuming the server supports byte ranges).
   void Cancel(bool update_history);
 
-  // Download operation completed
+  // Download operation completed.
   void Finished(int64 size);
 
-  // The user wants to remove the download from the views and history. This
-  // operation does not delete the file on the disk.
-  void Remove();
+  // The user wants to remove the download from the views and history. If
+  // |delete_file| is true, the file is deleted on the disk.
+  void Remove(bool delete_file);
 
   // Start/stop sending periodic updates to our observers
   void StartProgressTimer();
@@ -140,7 +158,7 @@ class DownloadItem {
   // |*remaining| with the amount of time remaining if successful. Fails and
   // returns false if we do not have the number of bytes or the speed so can
   // not estimate.
-  bool TimeRemaining(TimeDelta* remaining) const;
+  bool TimeRemaining(base::TimeDelta* remaining) const;
 
   // Simple speed estimate in bytes/s
   int64 CurrentSpeed() const;
@@ -151,21 +169,25 @@ class DownloadItem {
 
   // Update the download's path, the actual file is renamed on the download
   // thread.
-  void Rename(const std::wstring& full_path);
+  void Rename(const FilePath& full_path);
 
   // Allow the user to temporarily pause a download or resume a paused download.
   void TogglePause();
 
   // Accessors
   DownloadState state() const { return state_; }
-  std::wstring full_path() const { return full_path_; }
-  std::wstring file_name() const { return file_name_; }
-  std::wstring url() const { return url_; }
+  FilePath file_name() const { return file_name_; }
+  void set_file_name(const FilePath& name) { file_name_ = name; }
+  FilePath full_path() const { return full_path_; }
+  void set_full_path(const FilePath& path) { full_path_ = path; }
+  int path_uniquifier() const { return path_uniquifier_; }
+  void set_path_uniquifier(int uniquifier) { path_uniquifier_ = uniquifier; }
+  GURL url() const { return url_; }
   int64 total_bytes() const { return total_bytes_; }
   void set_total_bytes(int64 total_bytes) { total_bytes_ = total_bytes; }
   int64 received_bytes() const { return received_bytes_; }
   int32 id() const { return id_; }
-  Time start_time() const { return start_time_; }
+  base::Time start_time() const { return start_time_; }
   void set_db_handle(int64 handle) { db_handle_ = handle; }
   int64 db_handle() const { return db_handle_; }
   DownloadManager* manager() const { return manager_; }
@@ -176,6 +198,17 @@ class DownloadItem {
   void set_open_when_complete(bool open) { open_when_complete_ = open; }
   int render_process_id() const { return render_process_id_; }
   int request_id() const { return request_id_; }
+  SafetyState safety_state() const { return safety_state_; }
+  void set_safety_state(SafetyState safety_state) {
+    safety_state_ = safety_state;
+  }
+  FilePath original_name() const { return original_name_; }
+  void set_original_name(const FilePath& name) { original_name_ = name; }
+
+  // Returns the file-name that should be reported to the user, which is
+  // file_name_ for safe downloads and original_name_ for dangerous ones with
+  // the uniquifier number.
+  FilePath GetFileName() const;
 
  private:
   // Internal helper for maintaining consistent received and total sizes.
@@ -185,13 +218,17 @@ class DownloadItem {
   int32 id_;
 
   // Full path to the downloaded file
-  std::wstring full_path_;
+  FilePath full_path_;
+
+  // A number that should be appended to the path to make it unique, or 0 if the
+  // path should be used as is.
+  int path_uniquifier_;
 
   // Short display version of the file
-  std::wstring file_name_;
+  FilePath file_name_;
 
-  // The URL from whence we came, for display
-  std::wstring url_;
+  // The URL from whence we came.
+  GURL url_;
 
   // Total bytes expected
   int64 total_bytes_;
@@ -200,7 +237,7 @@ class DownloadItem {
   int64 received_bytes_;
 
   // Start time for calculating remaining time
-  uintptr_t start_tick_;
+  base::TimeTicks start_tick_;
 
   // The current state of this download
   DownloadState state_;
@@ -209,7 +246,7 @@ class DownloadItem {
   ObserverList<Observer> observers_;
 
   // Time the download was started
-  Time start_time_;
+  base::Time start_time_;
 
   // Our persistent store handle
   int64 db_handle_;
@@ -225,6 +262,14 @@ class DownloadItem {
 
   // A flag for indicating if the download should be opened at completion.
   bool open_when_complete_;
+
+  // Whether the download is considered potentially safe or dangerous
+  // (executable files are typically considered dangerous).
+  SafetyState safety_state_;
+
+  // Dangerous download are given temporary names until the user approves them.
+  // This stores their original name.
+  FilePath original_name_;
 
   // For canceling or pausing requests.
   int render_process_id_;
@@ -293,12 +338,13 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
   // Remove downloads after remove_begin (inclusive) and before remove_end
   // (exclusive). You may pass in null Time values to do an unbounded delete
   // in either direction.
-  int RemoveDownloadsBetween(const Time remove_begin, const Time remove_end);
+  int RemoveDownloadsBetween(const base::Time remove_begin,
+                             const base::Time remove_end);
 
   // Remove downloads will delete all downloads that have a timestamp that is
   // the same or more recent than |remove_begin|. The number of downloads
   // deleted is returned back to the caller.
-  int RemoveDownloads(const Time remove_begin);
+  int RemoveDownloads(const base::Time remove_begin);
 
   // Download the object at the URL. Used in cases such as "Save Link As..."
   void DownloadUrl(const GURL& url,
@@ -320,28 +366,34 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
 
   // Show or Open a download via the Windows shell.
   void ShowDownloadInShell(const DownloadItem* download);
-  void OpenDownloadInShell(const DownloadItem* download, HWND parent_window);
+  void OpenDownloadInShell(const DownloadItem* download,
+                           gfx::NativeView parent_window);
 
   // The number of in progress (including paused) downloads.
   int in_progress_count() const {
     return static_cast<int>(in_progress_.size());
   }
 
-  std::wstring download_path() { return *download_path_; }
+  FilePath download_path() {
+    return FilePath::FromWStringHack(*download_path_);
+  }
+
+  // Clears the last download path, used to initialize "save as" dialogs.
+  void ClearLastDownloadPath();
 
   // Registers this file extension for automatic opening upon download
   // completion if 'open' is true, or prevents the extension from automatic
   // opening if 'open' is false.
-  void OpenFilesOfExtension(const std::wstring& extension, bool open);
+  void OpenFilesOfExtension(const FilePath::StringType& extension, bool open);
 
   // Tests if a file type should be opened automatically.
-  bool ShouldOpenFileExtension(const std::wstring& extension);
+  bool ShouldOpenFileExtension(const FilePath::StringType& extension);
 
   // Tests if we think the server means for this mime_type to be executable.
   static bool IsExecutableMimeType(const std::string& mime_type);
 
   // Tests if a file type is considered executable.
-  bool IsExecutable(const std::wstring& extension);
+  bool IsExecutable(const FilePath::StringType& extension);
 
   // Resets the automatic open preference.
   void ResetAutoOpenFiles();
@@ -351,8 +403,21 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
   bool HasAutoOpenFileTypesRegistered() const;
 
   // Overridden from SelectFileDialog::Listener:
+  // TODO(port): convert this to FilePath when SelectFileDialog gets converted.
   virtual void FileSelected(const std::wstring& path, void* params);
   virtual void FileSelectionCanceled(void* params);
+
+  // Deletes the specified path on the file thread.
+  void DeleteDownload(const FilePath& path);
+
+  // Called when the user has validated the donwload of a dangerous file.
+  void DangerousDownloadValidated(DownloadItem* download);
+
+  // Used to make sure we have a safe file extension and filename for a
+  // download.  |file_name| can either be just the file name or it can be a
+  // full path to a file.
+  void GenerateSafeFilename(const std::string& mime_type,
+                            FilePath* file_name);
 
  private:
   // Shutdown the download manager.  This call is needed only after Init.
@@ -371,25 +436,25 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
   // determined, either automatically based on the suggested file name, or by
   // the user in a Save As dialog box.
   void ContinueStartDownload(DownloadCreateInfo* info,
-                             const std::wstring& target_path);
+                             const FilePath& target_path);
 
   // Update the history service for a particular download.
   void UpdateHistoryForDownload(DownloadItem* download);
   void RemoveDownloadFromHistory(DownloadItem* download);
-  void RemoveDownloadsFromHistoryBetween(const Time remove_begin,
-                                         const Time remove_before);
+  void RemoveDownloadsFromHistoryBetween(const base::Time remove_begin,
+                                         const base::Time remove_before);
 
   // Inform the notification service of download starts and stops.
   void NotifyAboutDownloadStart();
   void NotifyAboutDownloadStop();
 
   // Create an extension based on the file name and mime type.
-  void GenerateExtension(const std::wstring& file_name,
+  void GenerateExtension(const FilePath& file_name,
                          const std::string& mime_type,
-                         std::wstring* generated_extension);
+                         FilePath::StringType* generated_extension);
 
   // Create a file name based on the response from the server.
-  void GenerateFilename(DownloadCreateInfo* info, std::wstring* generated_name);
+  void GenerateFilename(DownloadCreateInfo* info, FilePath* generated_name);
 
   // Persist the automatic opening preference.
   void SaveAutoOpens();
@@ -405,6 +470,33 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
                                      int request_id,
                                      bool pause);
 
+  // Performs the last steps required when a download has been completed.
+  // It is necessary to break down the flow when a download is finished as
+  // dangerous downloads are downloaded to temporary files that need to be
+  // renamed on the file thread first.
+  // Invoked on the UI thread.
+  void ContinueDownloadFinished(DownloadItem* download);
+
+  // Renames a finished dangerous download from its temporary file name to its
+  // real file name.
+  // Invoked on the file thread.
+  void ProceedWithFinishedDangerousDownload(int64 download_handle,
+                                            const FilePath& path,
+                                            const FilePath& original_name);
+
+  // Invoked on the UI thread when a dangerous downloaded file has been renamed.
+  void DangerousDownloadRenamed(int64 download_handle,
+                                bool success,
+                                const FilePath& new_path,
+                                int new_path_uniquifier);
+
+  // Checks whether a file represents a risk if downloaded.
+  bool IsDangerous(const FilePath& file_name);
+
+  // Changes the paths and file name of the specified |download|, propagating
+  // the change to the history system.
+  void RenameDownload(DownloadItem* download, const FilePath& new_path);
+
   // 'downloads_' is map of all downloads in this profile. The key is the handle
   // returned by the history system, which is unique across sessions. This map
   // owns all the DownloadItems once they have been created in the history
@@ -414,6 +506,12 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
   // not yet received a valid history handle. The key is the ID assigned by the
   // ResourceDispatcherHost, which is unique for the current session. This map
   // does not own the DownloadItems.
+  //
+  // 'dangerous_finished_' is a map of dangerous download that have finished
+  // but were not yet approved by the user.  Similarly to in_progress_, the key
+  // is the ID assigned by the ResourceDispatcherHost and the map does not own
+  // the DownloadItems.  It is used on shutdown to delete completed downloads
+  // that have not been approved.
   //
   // When a download is created through a user action, the corresponding
   // DownloadItem* is placed in 'in_progress_' and remains there until it has
@@ -426,6 +524,7 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
   typedef base::hash_map<int64, DownloadItem*> DownloadMap;
   DownloadMap downloads_;
   DownloadMap in_progress_;
+  DownloadMap dangerous_finished_;
 
   // True if the download manager has been initialized and requires a shutdown.
   bool shutdown_needed_;
@@ -438,7 +537,7 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
   scoped_refptr<URLRequestContext> request_context_;
 
   // Used for history service request management.
-  CancelableRequestConsumerT<Observer*, 0> cancelable_consumer_;
+  CancelableRequestConsumerTSimple<Observer*> cancelable_consumer_;
 
   // Non-owning pointer for handling file writing on the download_thread_.
   DownloadFileManager* file_manager_;
@@ -456,13 +555,13 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
 
   // The user's last choice for download directory. This is only used when the
   // user wants us to prompt for a save location for each download.
-  std::wstring last_download_path_;
+  FilePath last_download_path_;
 
   // Set of file extensions to open at download completion.
-  std::set<std::wstring> auto_open_;
+  std::set<FilePath::StringType> auto_open_;
 
   // Set of file extensions that are executables and shouldn't be auto opened.
-  std::set<std::wstring> exe_types_;
+  std::set<std::string> exe_types_;
 
   // Keep track of downloads that are completed before the user selects the
   // destination, so that observers are appropriately notified of completion
@@ -476,8 +575,7 @@ class DownloadManager : public base::RefCountedThreadSafe<DownloadManager>,
   // saved.
   scoped_refptr<SelectFileDialog> select_file_dialog_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(DownloadManager);
+  DISALLOW_COPY_AND_ASSIGN(DownloadManager);
 };
 
-
-#endif  // CHROME_BROWSER_DOWNLOAD_DOWNLOAD_MANAGER_H__
+#endif  // CHROME_BROWSER_DOWNLOAD_DOWNLOAD_MANAGER_H_

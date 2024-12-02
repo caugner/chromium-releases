@@ -9,13 +9,16 @@
 
 #include "base/message_loop.h"
 #include "base/string_util.h"
+#include "base/time.h"
 #include "net/base/auth.h"
+#include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_util.h"
 #include "net/base/wininet_util.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_error_job.h"
-#include "net/base/escape.h"
+#include "net/url_request/url_request_new_ftp_job.h"
 
 using std::string;
 
@@ -51,6 +54,10 @@ static bool UnescapeAndValidatePath(const URLRequest* request,
 // static
 URLRequestJob* URLRequestFtpJob::Factory(URLRequest* request,
                                          const std::string &scheme) {
+  // Checking whether we are using new or old FTP implementation.
+  if (request->context() && request->context()->ftp_transaction_factory())
+    return URLRequestNewFtpJob::Factory(request, scheme);
+
   DCHECK(scheme == "ftp");
 
   if (request->url().has_port() &&
@@ -78,7 +85,7 @@ void URLRequestFtpJob::Start() {
   SendRequest();
 }
 
-bool URLRequestFtpJob::GetMimeType(std::string* mime_type) {
+bool URLRequestFtpJob::GetMimeType(std::string* mime_type) const {
   if (!is_directory_)
     return false;
 
@@ -126,7 +133,7 @@ void URLRequestFtpJob::SendRequest() {
     have_auth = true;
     username = WideToUTF8(server_auth_->username);
     password = WideToUTF8(server_auth_->password);
-    request_->context()->ftp_auth_cache()->Add(request_->url().host(),
+    request_->context()->ftp_auth_cache()->Add(request_->url().GetOrigin(),
                                                server_auth_.get());
   } else {
     if (request_->url().has_username()) {
@@ -167,19 +174,31 @@ void URLRequestFtpJob::OnIOComplete(const AsyncResult& result) {
         // fall through
       case ERROR_INTERNET_INCORRECT_USER_NAME:
         // fall through
-      case ERROR_INTERNET_INCORRECT_PASSWORD:
+      case ERROR_INTERNET_INCORRECT_PASSWORD: {
+        GURL origin = request_->url().GetOrigin();
         if (server_auth_ != NULL &&
             server_auth_->state == net::AUTH_STATE_HAVE_AUTH) {
-          request_->context()->ftp_auth_cache()->Remove(request_->url().host());
+          request_->context()->ftp_auth_cache()->Remove(origin);
         } else {
           server_auth_ = new net::AuthData();
         }
-        // Try again, prompting for authentication.
         server_auth_->state = net::AUTH_STATE_NEED_AUTH;
-        // The io completed fine, the error was due to invalid auth.
-        SetStatus(URLRequestStatus());
-        NotifyHeadersComplete();
+
+        scoped_refptr<net::AuthData> cached_auth =
+            request_->context()->ftp_auth_cache()->Lookup(origin);
+
+        if (cached_auth) {
+          // Retry using cached auth data.
+          SetAuth(cached_auth->username, cached_auth->password);
+        } else {
+          // The io completed fine, the error was due to invalid auth.
+          SetStatus(URLRequestStatus());
+
+          // Prompt for a username/password.
+          NotifyHeadersComplete();
+        }
         return;
+      }
       case ERROR_SUCCESS:
         connection_handle_ = (HINTERNET)result.dwResult;
         OnConnect();
@@ -210,12 +229,16 @@ void URLRequestFtpJob::OnIOComplete(const AsyncResult& result) {
   } else if (state_ == SETTING_CUR_DIRECTORY) {
     OnSetCurrentDirectory(result.dwError);
   } else if (state_ == FINDING_FIRST_FILE) {
-    if (result.dwError != ERROR_SUCCESS) {
+    // We don't fail here if result.dwError != ERROR_SUCCESS because
+    // getting an error here doesn't always mean the file is not found.
+    // FindFirstFileA() issue a LIST command and may fail on some
+    // ftp server when the requested object is a file. So ERROR_NO_MORE_FILES
+    // from FindFirstFileA() is not a reliable criteria for valid path
+    // or not, we should proceed optimistically by getting the file handle.
+    if (result.dwError != ERROR_SUCCESS &&
+        result.dwError != ERROR_NO_MORE_FILES) {
       DWORD result_error = result.dwError;
       CleanupConnection();
-      // Fixup the error message from our directory/file guessing.
-      if (!is_directory_ && result_error == ERROR_NO_MORE_FILES)
-        result_error = ERROR_PATH_NOT_FOUND;
       NotifyStartError(URLRequestStatus(URLRequestStatus::FAILED,
                        WinInetUtil::OSErrorToNetError(result_error)));
       return;
@@ -259,13 +282,6 @@ void URLRequestFtpJob::GetAuthChallengeInfo(
   auth_info->scheme = L"";
   auth_info->realm = L"";
   result->swap(auth_info);
-}
-
-void URLRequestFtpJob::GetCachedAuthData(
-    const net::AuthChallengeInfo& auth_info,
-    scoped_refptr<net::AuthData>* auth_data) {
-  *auth_data = request_->context()->ftp_auth_cache()->
-               Lookup(WideToUTF8(auth_info.host));
 }
 
 void URLRequestFtpJob::OnConnect() {
@@ -372,8 +388,8 @@ void URLRequestFtpJob::OnFindFile(DWORD last_error) {
     // We don't know the encoding, and can't assume utf8, so pass the 8bit
     // directly to the browser for it to decide.
     string file_entry = net::GetDirectoryListingEntry(
-        find_data_.cFileName, find_data_.dwFileAttributes, size,
-        &find_data_.ftLastWriteTime);
+        find_data_.cFileName, false, size,
+        base::Time::FromFileTime(find_data_.ftLastWriteTime));
     WriteData(&file_entry, true);
 
     FindNextFile();
@@ -395,7 +411,7 @@ void URLRequestFtpJob::OnStartDirectoryTraversal() {
   // If this isn't top level directory (i.e. the path isn't "/",) add a link to
   // the parent directory.
   if (request_->url().path().length() > 1)
-    html.append(net::GetDirectoryListingEntry("..", 0, 0, NULL));
+    html.append(net::GetDirectoryListingEntry("..", false, 0, base::Time()));
 
   WriteData(&html, true);
 
@@ -519,4 +535,3 @@ bool URLRequestFtpJob::IsRedirectResponse(GURL* location,
 
   return false;
 }
-

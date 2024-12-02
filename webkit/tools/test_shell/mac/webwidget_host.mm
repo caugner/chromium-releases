@@ -14,16 +14,16 @@
 #include "webkit/glue/webwidget.h"
 
 /*static*/
-WebWidgetHost* WebWidgetHost::Create(NSWindow* parent_window,
+WebWidgetHost* WebWidgetHost::Create(NSView* parent_view,
                                      WebWidgetDelegate* delegate) {
   WebWidgetHost* host = new WebWidgetHost();
 
-  NSRect content_rect = [parent_window frame];
+  NSRect content_rect = [parent_view frame];
   content_rect.origin.y += 64;
   content_rect.size.height -= 64;
   host->view_ = [[NSView alloc] initWithFrame:content_rect];
-  [[parent_window contentView] addSubview:host->view_];
-  
+  [parent_view addSubview:host->view_];
+
   // win_util::SetWindowUserData(host->hwnd_, host);
 
   host->webwidget_ = WebWidget::Create(delegate);
@@ -33,13 +33,9 @@ WebWidgetHost* WebWidgetHost::Create(NSWindow* parent_window,
 }
 
 /*static*/
-WebWidgetHost* WebWidgetHost::FromWindow(NSWindow* hwnd) {
-  return NULL;
-}
-
-/*static*/
-void WebWidgetHost::HandleEvent(NSWindow *window, NSEvent *event) {
-  WebWidgetHost* host = FromWindow(window);
+void WebWidgetHost::HandleEvent(NSView* view, NSEvent* event) {
+  /* TODO(port): rig up a way to get to the host */
+  WebWidgetHost* host = NULL;
   if (host) {
     switch ([event type]) {
       case NSLeftMouseDown:
@@ -90,6 +86,8 @@ void WebWidgetHost::DidInvalidateRect(const gfx::Rect& damaged_rect) {
   paint_rect_ = paint_rect_.Union(damaged_rect);
 
   NSRect r = NSRectFromCGRect(damaged_rect.ToCGRect());
+  // flip to cocoa coordinates
+  r.origin.y = [view_ frame].size.height - r.size.height - r.origin.y;
   [view_ setNeedsDisplayInRect:r];
 }
 
@@ -110,6 +108,8 @@ void WebWidgetHost::DidScrollRect(int dx, int dy, const gfx::Rect& clip_rect) {
   scroll_dy_ = dy;
 
   NSRect r = NSRectFromCGRect(clip_rect.ToCGRect());
+  // flip to cocoa coordinates
+  r.origin.y = [view_ frame].size.height - r.size.height - r.origin.y;
   [view_ setNeedsDisplayInRect:r];
 }
 
@@ -136,7 +136,10 @@ WebWidgetHost::~WebWidgetHost() {
   TrackMouseLeave(false);
 
   webwidget_->Close();
-  webwidget_->Release();
+}
+
+void WebWidgetHost::UpdatePaintRect(const gfx::Rect& rect) {
+  paint_rect_ = paint_rect_.Union(rect);
 }
 
 void WebWidgetHost::Paint() {
@@ -149,7 +152,7 @@ void WebWidgetHost::Paint() {
   if (!canvas_.get()) {
     ResetScrollRect();
     paint_rect_ = client_rect;
-    canvas_.reset(new gfx::PlatformCanvas(
+    canvas_.reset(new skia::PlatformCanvas(
         paint_rect_.width(), paint_rect_.height(), true));
   }
 
@@ -159,15 +162,15 @@ void WebWidgetHost::Paint() {
   [NSGraphicsContext setCurrentContext:
       [NSGraphicsContext graphicsContextWithGraphicsPort:bitmap_context
                                                  flipped:NO]];
-  
+
   // This may result in more invalidation
   webwidget_->Layout();
-  
+
   // Scroll the canvas if necessary
   scroll_rect_ = client_rect.Intersect(scroll_rect_);
   if (!scroll_rect_.IsEmpty()) {
     // add to invalidate rect, since there's no equivalent of ScrollDC.
-    paint_rect_.Union(scroll_rect_);
+    paint_rect_ = paint_rect_.Union(scroll_rect_);
   }
   ResetScrollRect();
 
@@ -175,7 +178,7 @@ void WebWidgetHost::Paint() {
   // first time we call it.  This is necessary because some WebCore rendering
   // objects update their layout only when painted.
   for (int i = 0; i < 2; ++i) {
-    paint_rect_ = client_rect;//.Intersect(paint_rect_);
+    paint_rect_ = client_rect.Intersect(paint_rect_);
     if (!paint_rect_.IsEmpty()) {
       gfx::Rect rect(paint_rect_);
       paint_rect_ = gfx::Rect();
@@ -185,7 +188,7 @@ void WebWidgetHost::Paint() {
     }
   }
   DCHECK(paint_rect_.IsEmpty());
-  
+
   // set the context back to our window
   [NSGraphicsContext setCurrentContext: view_context];
 
@@ -198,12 +201,9 @@ void WebWidgetHost::Paint() {
                            { bitmap_width, bitmap_height } };
     canvas_->getTopPlatformDevice().DrawToContext(
         context, 0, client_rect.height() - bitmap_height, &bitmap_rect);
-    
+
     [view_ unlockFocus];
   }
-
-  // Draw children
-  // UpdateWindow(hwnd_);
 }
 
 void WebWidgetHost::Resize(const gfx::Rect& rect) {
@@ -213,24 +213,22 @@ void WebWidgetHost::Resize(const gfx::Rect& rect) {
 }
 
 void WebWidgetHost::MouseEvent(NSEvent *event) {
-  WebMouseEvent web_event(event);
-  switch (event.type) {
+  WebMouseEvent web_event(event, view_);
+  switch (web_event.type) {
     case WebInputEvent::MOUSE_MOVE:
       TrackMouseLeave(true);
       break;
     case WebInputEvent::MOUSE_LEAVE:
       TrackMouseLeave(false);
       break;
-    case WebInputEvent::MOUSE_DOWN:
-      break;
-    case WebInputEvent::MOUSE_UP:
+    default:
       break;
   }
   webwidget_->HandleInputEvent(&web_event);
 }
 
 void WebWidgetHost::WheelEvent(NSEvent *event) {
-  WebMouseWheelEvent web_event(event);
+  WebMouseWheelEvent web_event(event, view_);
   webwidget_->HandleInputEvent(&web_event);
 }
 
@@ -253,7 +251,9 @@ void WebWidgetHost::ResetScrollRect() {
 }
 
 void WebWidgetHost::PaintRect(const gfx::Rect& rect) {
+#ifndef NDEBUG
   DCHECK(!painting_);
+#endif
   DCHECK(canvas_.get());
 
   set_painting(true);

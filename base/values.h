@@ -18,8 +18,8 @@
 // the SetString() method would create the missing elements and attach them
 // to root before attaching the homepage value.
 
-#ifndef CHROME_COMMON_VALUES_H__
-#define CHROME_COMMON_VALUES_H__
+#ifndef BASE_VALUES_H_
+#define BASE_VALUES_H_
 
 #include <iterator>
 #include <map>
@@ -52,6 +52,7 @@ class Value {
   static Value* CreateBooleanValue(bool in_value);
   static Value* CreateIntegerValue(int in_value);
   static Value* CreateRealValue(double in_value);
+  static Value* CreateStringValue(const std::string& in_value);
   static Value* CreateStringValue(const std::wstring& in_value);
 
   // This one can return NULL if the input isn't valid.  If the return value
@@ -86,6 +87,7 @@ class Value {
   virtual bool GetAsBoolean(bool* out_value) const;
   virtual bool GetAsInteger(int* out_value) const;
   virtual bool GetAsReal(double* out_value) const;
+  virtual bool GetAsString(std::string* out_value) const;
   virtual bool GetAsString(std::wstring* out_value) const;
 
   // This creates a deep copy of the entire Value tree, and returns a pointer
@@ -137,11 +139,16 @@ class FundamentalValue : public Value {
 
 class StringValue : public Value {
  public:
-  StringValue(const std::wstring& in_value)
-    : Value(TYPE_STRING), value_(in_value) {}
+  // Initializes a StringValue with a UTF-8 narrow character string.
+  StringValue(const std::string& in_value);
+
+  // Initializes a StringValue with a wide character string.
+  StringValue(const std::wstring& in_value);
+
   ~StringValue();
 
   // Subclassed methods
+  bool GetAsString(std::string* out_value) const;
   bool GetAsString(std::wstring* out_value) const;
   Value* DeepCopy() const;
   virtual bool Equals(const Value* other) const;
@@ -149,7 +156,7 @@ class StringValue : public Value {
  private:
   DISALLOW_EVIL_CONSTRUCTORS(StringValue);
 
-  std::wstring value_;
+  std::string value_;
 };
 
 class BinaryValue: public Value {
@@ -195,7 +202,7 @@ class DictionaryValue : public Value {
   virtual bool Equals(const Value* other) const;
 
   // Returns true if the current dictionary has a value for the given key.
-  bool HasKey(const std::wstring& key);
+  bool HasKey(const std::wstring& key) const;
 
   // Clears any current contents of this dictionary.
   void Clear();
@@ -216,6 +223,7 @@ class DictionaryValue : public Value {
   bool SetBoolean(const std::wstring& path, bool in_value);
   bool SetInteger(const std::wstring& path, int in_value);
   bool SetReal(const std::wstring& path, double in_value);
+  bool SetString(const std::wstring& path, const std::string& in_value);
   bool SetString(const std::wstring& path, const std::wstring& in_value);
 
   // Gets the Value associated with the given path starting from this object.
@@ -233,6 +241,7 @@ class DictionaryValue : public Value {
   bool GetBoolean(const std::wstring& path, bool* out_value) const;
   bool GetInteger(const std::wstring& path, int* out_value) const;
   bool GetReal(const std::wstring& path, double* out_value) const;
+  bool GetString(const std::wstring& path, std::string* out_value) const;
   bool GetString(const std::wstring& path, std::wstring* out_value) const;
   bool GetBinary(const std::wstring& path, BinaryValue** out_value) const;
   bool GetDictionary(const std::wstring& path,
@@ -251,14 +260,14 @@ class DictionaryValue : public Value {
   // It can't be used to modify the dictionary.
   class key_iterator
     : private std::iterator<std::input_iterator_tag, const std::wstring> {
-  public:
+   public:
     key_iterator(ValueMap::const_iterator itr) { itr_ = itr; }
     key_iterator operator++() { ++itr_; return *this; }
     const std::wstring& operator*() { return itr_->first; }
     bool operator!=(const key_iterator& other) { return itr_ != other.itr_; }
     bool operator==(const key_iterator& other) { return itr_ == other.itr_; }
 
-  private:
+   private:
     ValueMap::const_iterator itr_;
   };
 
@@ -277,7 +286,6 @@ class DictionaryValue : public Value {
 };
 
 // This type of Value represents a list of other Value values.
-// TODO(jhughes): Flesh this out.
 class ListValue : public Value {
  public:
   ListValue() : Value(TYPE_LIST) {}
@@ -308,11 +316,17 @@ class ListValue : public Value {
   // Convenience forms of Get().  Modifies value (and returns true) only if
   // the index is valid and the Value at that index can be returned in
   // the specified form.
+  bool GetBoolean(size_t index, bool* out_value) const;
+  bool GetInteger(size_t index, int* out_value) const;
+  bool GetReal(size_t index, double* out_value) const;
+  bool GetString(size_t index, std::string* out_value) const;
+  bool GetBinary(size_t index, BinaryValue** out_value) const;
   bool GetDictionary(size_t index, DictionaryValue** out_value) const;
+  bool GetList(size_t index, ListValue** out_value) const;
 
   // Removes the Value with the specified index from this list.
   // If |out_value| is non-NULL, the removed Value AND ITS OWNERSHIP will be
-  // passed out via out_value.  If |out_value| is NULL, the removed value will
+  // passed out via |out_value|.  If |out_value| is NULL, the removed value will
   // be deleted.  This method returns true if |index| is valid; otherwise
   // it will return false and the ListValue object will be unchanged.
   bool Remove(size_t index, Value** out_value);
@@ -349,12 +363,10 @@ class ValueSerializer {
   virtual bool Serialize(const Value& root) = 0;
 
   // This method deserializes the subclass-specific format into a Value object.
-  // The method should return true if and only if the root parameter is set
-  // to a complete Value representation of the serialized form.  If the
-  // return value is true, the caller takes ownership of the objects pointed
-  // to by root.  If the return value is false, root should be unchanged.
-  virtual bool Deserialize(Value** root) = 0;
+  // If the return value is non-NULL, the caller takes ownership of returned
+  // Value. If the return value is NULL, and if error_message is non-NULL,
+  // error_message should be filled with a message describing the error.
+  virtual Value* Deserialize(std::string* error_message) = 0;
 };
 
-#endif  // CHROME_COMMON_VALUES_H__
-
+#endif  // BASE_VALUES_H_

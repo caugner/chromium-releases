@@ -9,14 +9,11 @@
 
 #include "base/string_util.h"
 #include "base/time_format.h"
-#include "chrome/app/locales/locale_settings.h"
-#include "chrome/app/theme/theme_resources.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/cert_store.h"
 #include "chrome/browser/history/history.h"
-#include "chrome/browser/navigation_entry.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/ssl_manager.h"
+#include "chrome/browser/ssl/ssl_manager.h"
 #include "chrome/browser/views/standard_layout.h"
 #include "chrome/common/l10n_util.h"
 #include "chrome/common/pref_names.h"
@@ -25,23 +22,31 @@
 #include "chrome/common/win_util.h"
 #include "chrome/views/background.h"
 #include "chrome/views/grid_layout.h"
-#include "chrome/views/image_view.h"
-#include "chrome/views/label.h"
-#include "chrome/views/native_button.h"
-#include "chrome/views/separator.h"
+#include "chrome/views/controls/button/native_button.h"
+#include "chrome/views/controls/image_view.h"
+#include "chrome/views/controls/label.h"
+#include "chrome/views/controls/separator.h"
+#include "grit/generated_resources.h"
+#include "grit/locale_settings.h"
+#include "grit/theme_resources.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/x509_certificate.h"
 #include "skia/include/SkColor.h"
-#include "generated_resources.h"
+
+using base::Time;
 
 const int kVerticalPadding = 10;
 const int kHorizontalPadding = 10;
 
 ////////////////////////////////////////////////////////////////////////////////
 // SecurityTabView
-class SecurityTabView : public ChromeViews::View {
+class SecurityTabView : public views::View {
  public:
-  SecurityTabView(Profile* profile, NavigationEntry* navigation_entry);
+  SecurityTabView(Profile* profile,
+                  const GURL& url,
+                  const NavigationEntry::SSLStatus& ssl,
+                  NavigationEntry::PageType page_type,
+                  bool show_history);
   virtual ~SecurityTabView();
 
   virtual void Layout();
@@ -55,7 +60,7 @@ class SecurityTabView : public ChromeViews::View {
  private:
   // A section contains an image that shows a status (good or bad), a title,
   // an optional head-line (in bold) and a description.
-  class Section : public ChromeViews::View {
+  class Section : public views::View {
    public:
     Section(const std::wstring& title,
             bool state,
@@ -82,11 +87,11 @@ class SecurityTabView : public ChromeViews::View {
     static SkBitmap* good_state_icon_;
     static SkBitmap* bad_state_icon_;
 
-    ChromeViews::Label* title_label_;
-    ChromeViews::Separator* separator_;
-    ChromeViews::ImageView* status_image_;
-    ChromeViews::Label* head_line_label_;
-    ChromeViews::Label* description_label_;
+    views::Label* title_label_;
+    views::Separator* separator_;
+    views::ImageView* status_image_;
+    views::Label* head_line_label_;
+    views::Label* description_label_;
 
     DISALLOW_EVIL_CONSTRUCTORS(Section);
   };
@@ -136,26 +141,26 @@ SecurityTabView::Section::Section(const std::wstring& title, bool state,
     good_state_icon_ = rb.GetBitmapNamed(IDR_PAGEINFO_GOOD);
     bad_state_icon_ = rb.GetBitmapNamed(IDR_PAGEINFO_BAD);
   }
-  title_label_ = new ChromeViews::Label(title);
-  title_label_->SetHorizontalAlignment(ChromeViews::Label::ALIGN_LEFT);
+  title_label_ = new views::Label(title);
+  title_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   AddChildView(title_label_);
 
-  separator_ = new ChromeViews::Separator();
+  separator_ = new views::Separator();
   AddChildView(separator_);
 
-  status_image_ = new ChromeViews::ImageView();
+  status_image_ = new views::ImageView();
   status_image_->SetImage(state ? good_state_icon_ : bad_state_icon_);
   AddChildView(status_image_);
 
-  head_line_label_ = new ChromeViews::Label(head_line);
+  head_line_label_ = new views::Label(head_line);
   head_line_label_->SetFont(
       head_line_label_->GetFont().DeriveFont(0, ChromeFont::BOLD));
-  head_line_label_->SetHorizontalAlignment(ChromeViews::Label::ALIGN_LEFT);
+  head_line_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   AddChildView(head_line_label_);
 
-  description_label_ = new ChromeViews::Label(description);
+  description_label_ = new views::Label(description);
   description_label_->SetMultiLine(true);
-  description_label_->SetHorizontalAlignment(ChromeViews::Label::ALIGN_LEFT);
+  description_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   AddChildView(description_label_);
 }
 
@@ -167,24 +172,22 @@ int SecurityTabView::Section::GetHeightForWidth(int width) {
   // (multi-line).  We need to know the width of the description label to know
   // its height.
   int height = 0;
-  CSize size;
-  title_label_->GetPreferredSize(&size);
-  height += size.cy + kVGapTitleToImage;
+  gfx::Size size = title_label_->GetPreferredSize();
+  height += size.height() + kVGapTitleToImage;
 
-  CSize image_size;
-  status_image_->GetPreferredSize(&image_size);
+  gfx::Size image_size = status_image_->GetPreferredSize();
 
   int text_height = 0;
   if (!head_line_label_->GetText().empty()) {
-    head_line_label_->GetPreferredSize(&size);
-    text_height = size.cy + kVGapHeadLineToDescription;
+    size = head_line_label_->GetPreferredSize();
+    text_height = size.height() + kVGapHeadLineToDescription;
   }
 
-  int description_width = width - image_size.cx - kHGapImageToDescription -
-                          kHGapToBorder;
+  int description_width =
+      width - image_size.width() - kHGapImageToDescription - kHGapToBorder;
   text_height += description_label_->GetHeightForWidth(description_width);
 
-  height += std::max(static_cast<int>(image_size.cy), text_height);
+  height += std::max(image_size.height(), text_height);
 
   return height;
 }
@@ -193,24 +196,24 @@ void SecurityTabView::Section::Layout() {
   // First, layout the title and separator.
   int x = 0;
   int y = 0;
-  CSize size;
-  title_label_->GetPreferredSize(&size);
-  title_label_->SetBounds(x, y, size.cx, size.cy);
-  x += size.cx + kHGapTitleToSeparator;
+  gfx::Size size = title_label_->GetPreferredSize();
+  title_label_->SetBounds(x, y, size.width(), size.height());
+  x += size.width() + kHGapTitleToSeparator;
   separator_->SetBounds(x + kHExtraSeparatorPadding, y,
-                        width() - x - 2 * kHExtraSeparatorPadding, size.cy);
+                        width() - x - 2 * kHExtraSeparatorPadding,
+                        size.height());
 
   // Then the image, head-line and description.
   x = kHGapToBorder;
   y += title_label_->height() + kVGapTitleToImage;
-  status_image_->GetPreferredSize(&size);
-  status_image_->SetBounds(x, y, size.cx, size.cy);
-  x += size.cx + kHGapImageToDescription;
+  size = status_image_->GetPreferredSize();
+  status_image_->SetBounds(x, y, size.width(), size.height());
+  x += size.width() + kHGapImageToDescription;
   int w = width() - x;
   if (!head_line_label_->GetText().empty()) {
-    head_line_label_->GetPreferredSize(&size);
-    head_line_label_->SetBounds(x, y, w > 0 ? w : 0, size.cy);
-    y += size.cy + kVGapHeadLineToDescription;
+    size = head_line_label_->GetPreferredSize();
+    head_line_label_->SetBounds(x, y, w > 0 ? w : 0, size.height());
+    y += size.height() + kVGapHeadLineToDescription;
   } else {
     head_line_label_->SetBounds(x, y, 0, 0);
   }
@@ -223,25 +226,26 @@ void SecurityTabView::Section::Layout() {
 }
 
 SecurityTabView::SecurityTabView(Profile* profile,
-                                 NavigationEntry* navigation_entry) {
+                                 const GURL& url,
+                                 const NavigationEntry::SSLStatus& ssl,
+                                 NavigationEntry::PageType page_type,
+                                 bool show_history) {
   bool identity_ok = true;
   bool connection_ok = true;
   std::wstring identity_title;
   std::wstring identity_msg;
   std::wstring connection_msg;
   scoped_refptr<net::X509Certificate> cert;
-  const NavigationEntry::SSLStatus& ssl = navigation_entry->ssl();
 
   // Identity section.
-  std::wstring subject_name(UTF8ToWide(navigation_entry->url().host()));
+  std::wstring subject_name(UTF8ToWide(url.host()));
   bool empty_subject_name = false;
   if (subject_name.empty()) {
     subject_name.assign(
         l10n_util::GetString(IDS_PAGE_INFO_SECURITY_TAB_UNKNOWN_PARTY));
     empty_subject_name = true;
   }
-  if (navigation_entry->page_type() == NavigationEntry::NORMAL_PAGE &&
-      ssl.cert_id() &&
+  if (page_type == NavigationEntry::NORMAL_PAGE && ssl.cert_id() &&
       CertStore::GetSharedInstance()->RetrieveCert(ssl.cert_id(), &cert) &&
       !net::IsCertStatusError(ssl.cert_status())) {
     // OK HTTPS page.
@@ -250,7 +254,7 @@ SecurityTabView::SecurityTabView(Profile* profile,
       identity_title =
           l10n_util::GetStringF(IDS_PAGE_INFO_EV_IDENTITY_TITLE,
               UTF8ToWide(cert->subject().organization_names[0]),
-              UTF8ToWide(navigation_entry->url().host()));
+              UTF8ToWide(url.host()));
       // An EV Cert is required to have a city (localityName) and country but
       // state is "if any".
       DCHECK(!cert->subject().locality_name.empty());
@@ -347,9 +351,9 @@ SecurityTabView::SecurityTabView(Profile* profile,
   // Request the number of visits.
   HistoryService* history = profile->GetHistoryService(
       Profile::EXPLICIT_ACCESS);
-  if (history) {
+  if (show_history && history) {
     history->GetVisitCountToHost(
-        navigation_entry->url(),
+        url,
         &request_consumer_,
         NewCallback(this, &SecurityTabView::OnGotVisitCountToHost));
   }
@@ -428,38 +432,36 @@ void SecurityTabView::OnGotVisitCountToHost(HistoryService::Handle handle,
 
 ////////////////////////////////////////////////////////////////////////////////
 // PageInfoContentView
-class PageInfoContentView : public ChromeViews::View {
+class PageInfoContentView : public views::View {
  public:
   PageInfoContentView() : cert_viewer_button_(NULL) {}
 
-  void set_cert_viewer_button(ChromeViews::NativeButton* cert_viewer_button) {
+  void set_cert_viewer_button(views::NativeButton* cert_viewer_button) {
     cert_viewer_button_ = cert_viewer_button;
   }
 
-  // ChromeViews::View overrides:
-  virtual void GetPreferredSize(CSize *out) {
-    DCHECK(out);
-    *out = ChromeViews::Window::GetLocalizedContentsSize(
+  // views::View overrides:
+  virtual gfx::Size GetPreferredSize() {
+    return gfx::Size(views::Window::GetLocalizedContentsSize(
         IDS_PAGEINFO_DIALOG_WIDTH_CHARS,
-        IDS_PAGEINFO_DIALOG_HEIGHT_LINES).ToSIZE();
+        IDS_PAGEINFO_DIALOG_HEIGHT_LINES));
   }
 
   virtual void Layout() {
     if (cert_viewer_button_) {
-      CSize ps;
-      cert_viewer_button_->GetPreferredSize(&ps);
+      gfx::Size ps = cert_viewer_button_->GetPreferredSize();
 
-      CRect parent_bounds;
-      GetParent()->GetLocalBounds(&parent_bounds, false);
-      int y_buttons = parent_bounds.bottom - ps.cy - kButtonVEdgeMargin;
-      cert_viewer_button_->SetBounds(kPanelHorizMargin, y_buttons, ps.cx,
-                                     ps.cy);
+      gfx::Rect parent_bounds = GetParent()->GetLocalBounds(false);
+      int y_buttons =
+          parent_bounds.bottom() - ps.height() - kButtonVEdgeMargin;
+      cert_viewer_button_->SetBounds(kPanelHorizMargin, y_buttons, ps.width(),
+                                     ps.height());
     }
     View::Layout();
   }
 
  private:
-  ChromeViews::NativeButton* cert_viewer_button_;
+  views::NativeButton* cert_viewer_button_;
 
   DISALLOW_EVIL_CONSTRUCTORS(PageInfoContentView);
 };
@@ -470,12 +472,25 @@ class PageInfoContentView : public ChromeViews::View {
 int PageInfoWindow::opened_window_count_ = 0;
 
 // static
-void PageInfoWindow::Create(Profile* profile,
-                            NavigationEntry* nav_entry,
-                            HWND parent_hwnd,
-                            PageInfoWindow::TabID tab) {
+void PageInfoWindow::CreatePageInfo(Profile* profile,
+                                    NavigationEntry* nav_entry,
+                                    HWND parent_hwnd,
+                                    PageInfoWindow::TabID tab) {
   PageInfoWindow* window = new PageInfoWindow();
-  window->Init(profile, nav_entry, parent_hwnd);
+  window->Init(profile, nav_entry->url(), nav_entry->ssl(),
+               nav_entry->page_type(), true, parent_hwnd);
+  window->Show();
+}
+
+// static
+void PageInfoWindow::CreateFrameInfo(Profile* profile,
+                                     const GURL& url,
+                                     const NavigationEntry::SSLStatus& ssl,
+                                     HWND parent_hwnd,
+                                     TabID tab) {
+  PageInfoWindow* window = new PageInfoWindow();
+  window->Init(profile, url, ssl, NavigationEntry::NORMAL_PAGE,
+               false, parent_hwnd);
   window->Show();
 }
 
@@ -493,11 +508,14 @@ PageInfoWindow::~PageInfoWindow() {
 }
 
 void PageInfoWindow::Init(Profile* profile,
-                          NavigationEntry* navigation_entry,
+                          const GURL& url,
+                          const NavigationEntry::SSLStatus& ssl,
+                          NavigationEntry::PageType page_type,
+                          bool show_history,
                           HWND parent) {
-  cert_id_ = navigation_entry->ssl().cert_id();
+  cert_id_ = ssl.cert_id();
 
-  cert_info_button_ = new ChromeViews::NativeButton(
+  cert_info_button_ = new views::NativeButton(
       l10n_util::GetString(IDS_PAGEINFO_CERT_INFO_BUTTON));
   cert_info_button_->SetListener(this);
 
@@ -505,30 +523,30 @@ void PageInfoWindow::Init(Profile* profile,
   DWORD sys_color = ::GetSysColor(COLOR_3DFACE);
   SkColor color = SkColorSetRGB(GetRValue(sys_color), GetGValue(sys_color),
                                 GetBValue(sys_color));
-  contents_->SetBackground(
-      ChromeViews::Background::CreateSolidBackground(color));
+  contents_->set_background(views::Background::CreateSolidBackground(color));
 
-  ChromeViews::GridLayout* layout = new ChromeViews::GridLayout(contents_);
+  views::GridLayout* layout = new views::GridLayout(contents_);
   contents_->SetLayoutManager(layout);
-  ChromeViews::ColumnSet* columns = layout->AddColumnSet(0);
+  views::ColumnSet* columns = layout->AddColumnSet(0);
   columns->AddPaddingColumn(0, kHorizontalPadding);
-  columns->AddColumn(ChromeViews::GridLayout::FILL,  // Horizontal resize.
-                     ChromeViews::GridLayout::FILL,  // Vertical resize.
+  columns->AddColumn(views::GridLayout::FILL,  // Horizontal resize.
+                     views::GridLayout::FILL,  // Vertical resize.
                      1,  // Resize weight.
-                     ChromeViews::GridLayout::USE_PREF,  // Size type.
+                     views::GridLayout::USE_PREF,  // Size type.
                      0,  // Ignored for USE_PREF.
                      0);  // Minimum size.
-  columns->AddColumn(ChromeViews::GridLayout::FILL,  // Horizontal resize.
-                     ChromeViews::GridLayout::FILL,  // Vertical resize.
+  columns->AddColumn(views::GridLayout::FILL,  // Horizontal resize.
+                     views::GridLayout::FILL,  // Vertical resize.
                      1,  // Resize weight.
-                     ChromeViews::GridLayout::USE_PREF,  // Size type.
+                     views::GridLayout::USE_PREF,  // Size type.
                      0,  // Ignored for USE_PREF.
                      0);  // Minimum size.
   columns->AddPaddingColumn(0, kHorizontalPadding);
 
   layout->AddPaddingRow(0, kHorizontalPadding);
   layout->StartRow(1, 0);
-  layout->AddView(CreateSecurityTabView(profile, navigation_entry), 2, 1);
+  layout->AddView(CreateSecurityTabView(profile, url, ssl, page_type,
+                                        show_history), 2, 1);
 
   layout->AddPaddingRow(0, kHorizontalPadding);
 
@@ -536,17 +554,18 @@ void PageInfoWindow::Init(Profile* profile,
     // There already is a PageInfo window opened.  Let's shift the location of
     // the new PageInfo window so they don't overlap entirely.
     // Window::Init will position the window from the stored location.
-    CRect bounds;
-    bool maximized, always_on_top;
-    if (RestoreWindowPosition(&bounds, &maximized, &always_on_top)) {
-      CalculateWindowBounds(&bounds);
-      SaveWindowPosition(bounds, maximized, always_on_top);
+    gfx::Rect bounds;
+    bool maximized = false;
+    if (GetSavedWindowBounds(&bounds) && GetSavedMaximizedState(&maximized)) {
+      CRect bounds_crect(bounds.ToRECT());
+      CalculateWindowBounds(&bounds_crect);
+      SaveWindowPlacement(gfx::Rect(bounds_crect), maximized, false);
     }
   }
 
-  ChromeViews::Window::CreateChromeWindow(parent, gfx::Rect(), this);
+  views::Window::CreateChromeWindow(parent, gfx::Rect(), this);
   // TODO(beng): (Cleanup) - cert viewer button should use GetExtraView.
-  
+
   if (cert_id_) {
     scoped_refptr<net::X509Certificate> cert;
     CertStore::GetSharedInstance()->RetrieveCert(cert_id_, &cert);
@@ -560,14 +579,17 @@ void PageInfoWindow::Init(Profile* profile,
   }
 }
 
-ChromeViews::View* PageInfoWindow::CreateGeneralTabView() {
-  return new ChromeViews::View();
+views::View* PageInfoWindow::CreateGeneralTabView() {
+  return new views::View();
 }
 
-ChromeViews::View* PageInfoWindow::CreateSecurityTabView(
+views::View* PageInfoWindow::CreateSecurityTabView(
     Profile* profile,
-    NavigationEntry* navigation_entry) {
-  return new SecurityTabView(profile, navigation_entry);
+    const GURL& url,
+    const NavigationEntry::SSLStatus& ssl,
+    NavigationEntry::PageType page_type,
+    bool show_history) {
+  return new SecurityTabView(profile, url, ssl, page_type, show_history);
 }
 
 void PageInfoWindow::Show() {
@@ -583,28 +605,15 @@ std::wstring PageInfoWindow::GetWindowTitle() const {
   return l10n_util::GetString(IDS_PAGEINFO_WINDOW_TITLE);
 }
 
-void PageInfoWindow::SaveWindowPosition(const CRect& bounds,
-                                        bool maximized,
-                                        bool always_on_top) {
-  window()->SaveWindowPositionToPrefService(g_browser_process->local_state(),
-                                            prefs::kPageInfoWindowPlacement,
-                                            bounds, maximized, always_on_top);
+std::wstring PageInfoWindow::GetWindowName() const {
+  return prefs::kPageInfoWindowPlacement;
 }
 
-bool PageInfoWindow::RestoreWindowPosition(CRect* bounds,
-                                           bool* maximized,
-                                           bool* always_on_top) {
-  return window()->RestoreWindowPositionFromPrefService(
-      g_browser_process->local_state(),
-      prefs::kPageInfoWindowPlacement,
-      bounds, maximized, always_on_top);
-}
-
-ChromeViews::View* PageInfoWindow::GetContentsView() {
+views::View* PageInfoWindow::GetContentsView() {
   return contents_;
 }
 
-void PageInfoWindow::ButtonPressed(ChromeViews::NativeButton* sender) {
+void PageInfoWindow::ButtonPressed(views::NativeButton* sender) {
   if (sender == cert_info_button_) {
     DCHECK(cert_id_ != 0);
     ShowCertDialog(cert_id_);
@@ -654,14 +663,14 @@ void PageInfoWindow::ShowCertDialog(int cert_id) {
   if (!cert.get()) {
     // The certificate was not found. Could be that the renderer crashed before
     // we displayed the page info.
-    return; 		
-  } 		
+    return;
+  }
 
-  CRYPTUI_VIEWCERTIFICATE_STRUCT view_info = { 0 }; 		
-  view_info.dwSize = sizeof(view_info); 		
-  // We set our parent to the tab window. This makes the cert dialog created 		
-  // in CryptUIDlgViewCertificate modal to the browser. 		
-  view_info.hwndParent = window()->owning_window();
+  CRYPTUI_VIEWCERTIFICATE_STRUCT view_info = { 0 };
+  view_info.dwSize = sizeof(view_info);
+  // We set our parent to the tab window. This makes the cert dialog created
+  // in CryptUIDlgViewCertificate modal to the browser.
+  view_info.hwndParent = window()->GetNativeWindow();
   view_info.dwFlags = CRYPTUI_DISABLE_EDITPROPERTIES |
                       CRYPTUI_DISABLE_ADDTOSTORE;
   view_info.pCertContext = cert->os_cert_handle();
@@ -675,4 +684,3 @@ void PageInfoWindow::ShowCertDialog(int cert_id) {
   // modal to the browser window.
   BOOL rv = ::CryptUIDlgViewCertificate(&view_info, &properties_changed);
 }
-

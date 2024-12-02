@@ -144,6 +144,20 @@ bool Pickle::ReadSize(void** iter, size_t* result) const {
   return true;
 }
 
+bool Pickle::ReadUInt32(void** iter, uint32* result) const {
+  DCHECK(iter);
+  if (!*iter)
+    *iter = const_cast<char*>(payload());
+
+  if (!IteratorHasRoomFor(*iter, sizeof(*result)))
+    return false;
+
+  memcpy(result, *iter, sizeof(*result));
+
+  UpdateIter(iter, sizeof(*result));
+  return true;
+}
+
 bool Pickle::ReadInt64(void** iter, int64* result) const {
   DCHECK(iter);
   if (!*iter)
@@ -204,6 +218,22 @@ bool Pickle::ReadWString(void** iter, std::wstring* result) const {
   return true;
 }
 
+bool Pickle::ReadString16(void** iter, string16* result) const {
+  DCHECK(iter);
+
+  int len;
+  if (!ReadLength(iter, &len))
+    return false;
+  if (!IteratorHasRoomFor(*iter, len))
+    return false;
+
+  char16* chars = reinterpret_cast<char16*>(*iter);
+  result->assign(chars, len);
+
+  UpdateIter(iter, len * sizeof(char16));
+  return true;
+}
+
 bool Pickle::ReadBytes(void** iter, const char** data, int length) const {
   DCHECK(iter);
   DCHECK(data);
@@ -233,7 +263,8 @@ char* Pickle::BeginWrite(size_t length) {
   size_t offset = AlignInt(header_->payload_size, sizeof(uint32));
 
   size_t new_size = offset + length;
-  if (header_size_ + new_size > capacity_ && !Resize(header_size_ + new_size))
+  size_t needed_size = header_size_ + new_size;
+  if (needed_size > capacity_ && !Resize(std::max(capacity_ * 2, needed_size)))
     return NULL;
 
 #ifdef ARCH_CPU_64_BITS
@@ -276,7 +307,15 @@ bool Pickle::WriteWString(const std::wstring& value) {
     return false;
 
   return WriteBytes(value.data(),
-                    static_cast<int>(value.size() * sizeof(value.data()[0])));
+                    static_cast<int>(value.size() * sizeof(wchar_t)));
+}
+
+bool Pickle::WriteString16(const string16& value) {
+  if (!WriteInt(static_cast<int>(value.size())))
+    return false;
+
+  return WriteBytes(value.data(),
+                    static_cast<int>(value.size()) * sizeof(char16));
 }
 
 bool Pickle::WriteData(const char* data, int length) {
@@ -347,4 +386,3 @@ const char* Pickle::FindNext(size_t header_size,
 
   return (payload_end > end) ? NULL : payload_end;
 }
-

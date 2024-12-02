@@ -12,13 +12,17 @@
 // the autocomplete controller and autocomplete providers work, see
 // chrome/browser/autocomplete.h.
 
-#ifndef CHROME_BROWSER_AUTOCOMPLETE_SEARCH_PROVIDER_H__
-#define CHROME_BROWSER_AUTOCOMPLETE_SEARCH_PROVIDER_H__
+#ifndef CHROME_BROWSER_AUTOCOMPLETE_SEARCH_PROVIDER_H_
+#define CHROME_BROWSER_AUTOCOMPLETE_SEARCH_PROVIDER_H_
+
+#include <map>
+#include <string>
+#include <vector>
 
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/history/history.h"
-#include "chrome/browser/template_url.h"
-#include "chrome/browser/url_fetcher.h"
+#include "chrome/browser/net/url_fetcher.h"
+#include "chrome/browser/search_engines/template_url.h"
 
 class Profile;
 class Value;
@@ -39,17 +43,16 @@ class SearchProvider : public AutocompleteProvider,
   SearchProvider(ACProviderListener* listener, Profile* profile)
       : AutocompleteProvider(listener, profile, "Search"),
         last_default_provider_(NULL),
-        fetcher_(NULL),
-        history_request_pending_(false),
         have_history_results_(false),
+        history_request_pending_(false),
         suggest_results_pending_(false),
+        fetcher_(NULL),
         have_suggest_results_(false) {
   }
 
   // AutocompleteProvider
   virtual void Start(const AutocompleteInput& input,
-                     bool minimal_changes,
-                     bool synchronous_only);
+                     bool minimal_changes);
   virtual void Stop();
 
   // URLFetcher::Delegate
@@ -62,13 +65,13 @@ class SearchProvider : public AutocompleteProvider,
 
  private:
   struct NavigationResult {
-    NavigationResult(const std::wstring& url, const std::wstring& site_name)
+    NavigationResult(const GURL& url, const std::wstring& site_name)
         : url(url),
           site_name(site_name) {
     }
 
     // The URL.
-    std::wstring url;
+    GURL url;
 
     // Name for the site.
     std::wstring site_name;
@@ -85,8 +88,8 @@ class SearchProvider : public AutocompleteProvider,
   // Determines whether an asynchronous subcomponent query should run for the
   // current input.  If so, starts it if necessary; otherwise stops it.
   // NOTE: These functions do not update |done_|.  Callers must do so.
-  void StartOrStopHistoryQuery(bool minimal_changes, bool synchronous_only);
-  void StartOrStopSuggestQuery(bool minimal_changes, bool synchronous_only);
+  void StartOrStopHistoryQuery(bool minimal_changes);
+  void StartOrStopSuggestQuery(bool minimal_changes);
 
   // Returns true when the current query can be sent to the Suggest service.
   // This will be false e.g. when Suggest is disabled, the query contains
@@ -117,7 +120,7 @@ class SearchProvider : public AutocompleteProvider,
   // algorithms for the different types of matches.
   int CalculateRelevanceForWhatYouTyped() const;
   // |time| is the time at which this query was last seen.
-  int CalculateRelevanceForHistory(const Time& time) const;
+  int CalculateRelevanceForHistory(const base::Time& time) const;
   // |suggestion_value| is which suggestion this is in the list returned from
   // the server; the best suggestion is suggestion number 0.
   int CalculateRelevanceForSuggestion(size_t suggestion_value) const;
@@ -129,6 +132,7 @@ class SearchProvider : public AutocompleteProvider,
   // exists, whichever one has lower relevance is eliminated.
   void AddMatchToMap(const std::wstring& query_string,
                      int relevance,
+                     AutocompleteMatch::Type type,
                      int accepted_suggestion,
                      MatchMap* map);
   // Returns an AutocompleteMatch for a navigational suggestion.
@@ -140,21 +144,15 @@ class SearchProvider : public AutocompleteProvider,
   // TODO(kochi): this is duplicate from history_autocomplete
   static size_t TrimHttpPrefix(std::wstring* url);
 
-  // Don't send any queries to the server until some time has elapsed after
-  // the last keypress, to avoid flooding the server with requests we are
-  // likely to end up throwing away anyway.
-  static const int kQueryDelayMs;
-
   // The user's input.
   AutocompleteInput input_;
 
-  TemplateURL default_provider_;  // Cached across the life of a query so we
-                                  // behave consistently even if the user
-                                  // changes their default while the query is
-                                  // running.
+  // Cached across the life of a query so we behave consistently even if the
+  // user changes their default while the query is running.
+  TemplateURL default_provider_;
+
+  // TODO(pkasting): http://b/1162970  We shouldn't need this.
   const TemplateURL* last_default_provider_;
-                                  // TODO(pkasting): http://b/1162970  We
-                                  // shouldn't need this.
 
   // An object we can use to cancel history requests.
   CancelableRequestConsumer history_request_consumer_;
@@ -192,4 +190,4 @@ class SearchProvider : public AutocompleteProvider,
   DISALLOW_EVIL_CONSTRUCTORS(SearchProvider);
 };
 
-#endif  // CHROME_BROWSER_AUTOCOMPLETE_SEARCH_PROVIDER_H__
+#endif  // CHROME_BROWSER_AUTOCOMPLETE_SEARCH_PROVIDER_H_

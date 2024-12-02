@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
@@ -9,6 +10,9 @@
 #include "chrome/common/sqlite_compiled_statement.h"
 #include "chrome/common/sqlite_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using base::Time;
+using base::TimeDelta;
 
 namespace history {
 
@@ -26,6 +30,8 @@ bool IsURLRowEqual(const URLRow& a,
       a.hidden() == b.hidden();
 }
 
+}  // namespace
+
 class URLDatabaseTest : public testing::Test,
                         public URLDatabase {
  public:
@@ -35,11 +41,11 @@ class URLDatabaseTest : public testing::Test,
  private:
   // Test setup.
   void SetUp() {
-    PathService::Get(base::DIR_TEMP, &db_file_);
-    db_file_.push_back(file_util::kPathSeparator);
-    db_file_.append(L"URLTest.db");
+    FilePath temp_dir;
+    PathService::Get(base::DIR_TEMP, &temp_dir);
+    db_file_ = temp_dir.AppendASCII("URLTest.db");
 
-    EXPECT_EQ(SQLITE_OK, sqlite3_open(WideToUTF8(db_file_).c_str(), &db_));
+    EXPECT_EQ(SQLITE_OK, OpenSqliteDb(db_file_, &db_));
     statement_cache_ = new SqliteStatementCache(db_);
 
     // Initialize the tables for this test.
@@ -62,17 +68,15 @@ class URLDatabaseTest : public testing::Test,
     return *statement_cache_;
   }
 
-  std::wstring db_file_;
+  FilePath db_file_;
   sqlite3* db_;
   SqliteStatementCache* statement_cache_;
 };
 
-}  // namespace
-
 // Test add and query for the URL table in the HistoryDatabase
 TEST_F(URLDatabaseTest, AddURL) {
   // first, add two URLs
-  const GURL url1(L"http://www.google.com/");
+  const GURL url1("http://www.google.com/");
   URLRow url_info1(url1);
   url_info1.set_title(L"Google");
   url_info1.set_visit_count(4);
@@ -81,7 +85,7 @@ TEST_F(URLDatabaseTest, AddURL) {
   url_info1.set_hidden(false);
   EXPECT_TRUE(AddURL(url_info1));
 
-  const GURL url2(L"http://mail.google.com/");
+  const GURL url2("http://mail.google.com/");
   URLRow url_info2(url2);
   url_info2.set_title(L"Google Mail");
   url_info2.set_visit_count(3);
@@ -126,7 +130,7 @@ TEST_F(URLDatabaseTest, AddURL) {
 
 // Tests adding, querying and deleting keyword visits.
 TEST_F(URLDatabaseTest, KeywordSearchTermVisit) {
-  const GURL url1(L"http://www.google.com/");
+  const GURL url1("http://www.google.com/");
   URLRow url_info1(url1);
   url_info1.set_title(L"Google");
   url_info1.set_visit_count(4);
@@ -142,7 +146,7 @@ TEST_F(URLDatabaseTest, KeywordSearchTermVisit) {
   // Make sure we get it back.
   std::vector<KeywordSearchTermVisit> matches;
   GetMostRecentKeywordSearchTerms(1, L"visit", 10, &matches);
-  ASSERT_EQ(1, matches.size());
+  ASSERT_EQ(1U, matches.size());
   ASSERT_EQ(L"visit", matches[0].term);
 
   // Delete the keyword visit.
@@ -151,12 +155,12 @@ TEST_F(URLDatabaseTest, KeywordSearchTermVisit) {
   // Make sure we don't get it back when querying.
   matches.clear();
   GetMostRecentKeywordSearchTerms(1, L"visit", 10, &matches);
-  ASSERT_EQ(0, matches.size());
+  ASSERT_EQ(0U, matches.size());
 }
 
 // Make sure deleting a URL also deletes a keyword visit.
 TEST_F(URLDatabaseTest, DeleteURLDeletesKeywordSearchTermVisit) {
-  const GURL url1(L"http://www.google.com/");
+  const GURL url1("http://www.google.com/");
   URLRow url_info1(url1);
   url_info1.set_title(L"Google");
   url_info1.set_visit_count(4);
@@ -175,7 +179,7 @@ TEST_F(URLDatabaseTest, DeleteURLDeletesKeywordSearchTermVisit) {
   // Make sure the keyword visit was deleted.
   std::vector<KeywordSearchTermVisit> matches;
   GetMostRecentKeywordSearchTerms(1, L"visit", 10, &matches);
-  ASSERT_EQ(0, matches.size());
+  ASSERT_EQ(0U, matches.size());
 }
 
 }  // namespace history

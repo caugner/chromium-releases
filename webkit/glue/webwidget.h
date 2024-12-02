@@ -5,8 +5,7 @@
 #ifndef WEBKIT_GLUE_WEBWIDGET_H__
 #define WEBKIT_GLUE_WEBWIDGET_H__
 
-#include "base/gfx/platform_canvas.h"
-#include "base/ref_counted.h"
+#include "skia/ext/platform_canvas.h"
 
 namespace gfx {
 class Rect;
@@ -16,10 +15,9 @@ class Size;
 class WebInputEvent;
 class WebWidgetDelegate;
 
-class WebWidget : public base::RefCounted<WebWidget> {
+class WebWidget {
  public:
   WebWidget() {}
-  virtual ~WebWidget() {}
 
   // This method creates a WebWidget that is initially invisible and positioned
   // according to the given bounds relative to the specified parent window.
@@ -27,7 +25,7 @@ class WebWidget : public base::RefCounted<WebWidget> {
   // GetViewWindow) once it is ready to have the WebWidget appear on the screen.
   static WebWidget* Create(WebWidgetDelegate* delegate);
 
-  // This method closes the WebWidget.
+  // This method closes and deletes the WebWidget.
   virtual void Close() = 0;
 
   // Called to resize the WebWidget.
@@ -45,7 +43,7 @@ class WebWidget : public base::RefCounted<WebWidget> {
   // multiple times once Layout has been called, assuming no other changes are
   // made to the WebWidget (e.g., once events are processed, it should be assumed
   // that another call to Layout is warranted before painting again).
-  virtual void Paint(gfx::PlatformCanvas* canvas, const gfx::Rect& rect) = 0;
+  virtual void Paint(skia::PlatformCanvas* canvas, const gfx::Rect& rect) = 0;
 
   // Called to inform the WebWidget of an input event.
   // Returns true if the event has been processed, false otherwise.
@@ -59,18 +57,18 @@ class WebWidget : public base::RefCounted<WebWidget> {
 
   // Called to inform the webwidget of a composition event from IMM
   // (Input Method Manager).
-  virtual void ImeSetComposition(int string_type, int cursor_position,
+  virtual bool ImeSetComposition(int string_type, int cursor_position,
                                  int target_start, int target_end,
-                                 int string_length,
-                                 const wchar_t *string_data) = 0;
+                                 const std::wstring& ime_string) = 0;
 
   // Retrieve the status of this widget required by IME APIs.
-  virtual bool ImeUpdateStatus(bool* enable_ime, const void** node,
-                               int* x, int* y) = 0;
+  virtual bool ImeUpdateStatus(bool* enable_ime, gfx::Rect* caret_rect) = 0;
+
+ protected:
+  virtual ~WebWidget() {}
 
  private:
   DISALLOW_EVIL_CONSTRUCTORS(WebWidget);
 };
 
 #endif  // #ifndef WEBKIT_GLUE_WEBWIDGET_H__
-

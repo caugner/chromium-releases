@@ -2,13 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_DISK_CACHE_STATS_H__
-#define NET_DISK_CACHE_STATS_H__
+#ifndef NET_DISK_CACHE_STATS_H_
+#define NET_DISK_CACHE_STATS_H_
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/scoped_ptr.h"
+#include "net/disk_cache/stats_histogram.h"
 
 namespace disk_cache {
 
@@ -26,6 +28,7 @@ class Stats {
     OPEN_HIT,
     CREATE_MISS,
     CREATE_HIT,
+    RESURRECT_HIT,
     CREATE_ERROR,
     TRIM_ENTRY,
     DOOM_ENTRY,
@@ -39,6 +42,8 @@ class Stats {
     OPEN_RANKINGS,  // An entry has to be read just to modify rankings.
     GET_RANKINGS,  // We got the ranking info without reading the whole entry.
     FATAL_ERROR,
+    LAST_REPORT,  // Time of the last time we sent a report.
+    LAST_REPORT_TIMER,  // Timer count since last report.
     MAX_COUNTER
   };
 
@@ -56,19 +61,34 @@ class Stats {
   int64 GetCounter(Counters counter) const;
 
   void GetItems(StatsItems* items);
+  int GetHitRatio() const;
+  int GetResurrectRatio() const;
+  void ResetRatios();
+
+  // Returns the lower bound of the space used by entries bigger than 512 KB.
+  int GetLargeEntriesSize();
+
+  // Saves the stats to disk.
+  void Store();
+
+  // Support for StatsHistograms. Together, these methods allow StatsHistograms
+  // to take a snapshot of the data_sizes_ as the histogram data.
+  int GetBucketRange(size_t i) const;
+  void Snapshot(StatsHistogram::StatsSamples* samples) const;
 
  private:
   int GetStatsBucket(int32 size);
+  int GetRatio(Counters hit, Counters miss) const;
 
   BackendImpl* backend_;
   uint32 storage_addr_;
   int data_sizes_[kDataSizesLength];
   int64 counters_[MAX_COUNTER];
+  scoped_ptr<StatsHistogram> size_histogram_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(Stats);
+  DISALLOW_COPY_AND_ASSIGN(Stats);
 };
 
 }  // namespace disk_cache
 
-#endif  // NET_DISK_CACHE_STATS_H__
-
+#endif  // NET_DISK_CACHE_STATS_H_

@@ -5,9 +5,9 @@
 #ifndef NET_PROXY_PROXY_RESOLVER_WINHTTP_H_
 #define NET_PROXY_PROXY_RESOLVER_WINHTTP_H_
 
-#include "net/proxy/proxy_service.h"
+#include "net/proxy/proxy_resolver.h"
 
-typedef LPVOID HINTERNET;  // From winhttp.h
+typedef void* HINTERNET;  // From winhttp.h
 
 namespace net {
 
@@ -19,9 +19,8 @@ class ProxyResolverWinHttp : public ProxyResolver {
   ~ProxyResolverWinHttp();
 
   // ProxyResolver implementation:
-  virtual int GetProxyConfig(ProxyConfig* config);
-  virtual int GetProxyForURL(const std::string& query_url,
-                             const std::string& pac_url,
+  virtual int GetProxyForURL(const GURL& query_url,
+                             const GURL& pac_url,
                              ProxyInfo* results);
 
  private:
@@ -37,4 +36,3 @@ class ProxyResolverWinHttp : public ProxyResolver {
 }  // namespace net
 
 #endif  // NET_PROXY_PROXY_RESOLVER_WINHTTP_H_
-

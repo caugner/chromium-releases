@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <limits>
 
+#include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "chrome/browser/bookmarks/bookmark_service.h"
 #include "chrome/browser/history/archived_database.h"
@@ -14,7 +15,10 @@
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/text_database_manager.h"
 #include "chrome/browser/history/thumbnail_database.h"
-#include "chrome/common/notification_types.h"
+#include "chrome/common/notification_type.h"
+
+using base::Time;
+using base::TimeDelta;
 
 namespace history {
 
@@ -71,8 +75,7 @@ ExpireHistoryBackend::ExpireHistoryBackend(
       archived_db_(NULL),
       thumb_db_(NULL),
       text_db_(NULL),
-#pragma warning(suppress: 4355)  // Okay to pass "this" here.
-      factory_(this),
+      ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)),
       bookmark_service_(bookmark_service) {
 }
 
@@ -199,7 +202,7 @@ void ExpireHistoryBackend::BroadcastDeleteNotifications(
       if (dependencies->deleted_urls[i].typed_count() > 0)
         typed_urls_changed.push_back(dependencies->deleted_urls[i]);
     }
-    delegate_->BroadcastNotifications(NOTIFY_HISTORY_URLS_DELETED,
+    delegate_->BroadcastNotifications(NotificationType::HISTORY_URLS_DELETED,
                                       deleted_details);
 
     // Broadcast the typed URL changed modification (this updates the inline
@@ -212,8 +215,9 @@ void ExpireHistoryBackend::BroadcastDeleteNotifications(
     if (!typed_urls_changed.empty()) {
       URLsModifiedDetails* modified_details = new URLsModifiedDetails;
       modified_details->changed_urls.swap(typed_urls_changed);
-      delegate_->BroadcastNotifications(NOTIFY_HISTORY_TYPED_URLS_MODIFIED,
-                                        modified_details);
+      delegate_->BroadcastNotifications(
+          NotificationType::HISTORY_TYPED_URLS_MODIFIED,
+          modified_details);
     }
   }
 }
@@ -294,16 +298,21 @@ URLID ExpireHistoryBackend::ArchiveOneURL(const URLRow& url_row) {
   return archived_db_->AddURL(url_row);
 }
 
+namespace {
+
+struct ChangedURL {
+  ChangedURL() : visit_count(0), typed_count(0) {}
+  int visit_count;
+  int typed_count;
+};
+
+}  // namespace
+
 void ExpireHistoryBackend::ExpireURLsForVisits(
     const VisitVector& visits,
     DeleteDependencies* dependencies) {
   // First find all unique URLs and the number of visits we're deleting for
   // each one.
-  struct ChangedURL {
-    ChangedURL() : visit_count(0), typed_count(0) {}
-    int visit_count;
-    int typed_count;
-  };
   std::map<URLID, ChangedURL> changed_urls;
   for (size_t i = 0; i < visits.size(); i++) {
     ChangedURL& cur = changed_urls[visits[i].url_id];
@@ -495,4 +504,3 @@ BookmarkService* ExpireHistoryBackend::GetBookmarkService() {
 }
 
 }  // namespace history
-

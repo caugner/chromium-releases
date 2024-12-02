@@ -2,28 +2,27 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <stdio.h>
-
 #include "base/perftimer.h"
 
+#include <stdio.h>
+#include <string>
+
 #include "base/basictypes.h"
+#include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/logging.h"
 
 static FILE* perf_log_file = NULL;
 
-bool InitPerfLog(const char* log_file) {
+bool InitPerfLog(const FilePath& log_file) {
   if (perf_log_file) {
     // trying to initialize twice
     NOTREACHED();
     return false;
   }
 
-#if defined(OS_WIN)
-  return fopen_s(&perf_log_file, log_file, "w") == 0;
-#elif defined(OS_POSIX)
-  perf_log_file = fopen(log_file, "w");
+  perf_log_file = file_util::OpenFile(log_file, "w");
   return perf_log_file != NULL;
-#endif
 }
 
 void FinalizePerfLog() {
@@ -32,7 +31,7 @@ void FinalizePerfLog() {
     NOTREACHED();
     return;
   }
-  fclose(perf_log_file);
+  file_util::CloseFile(perf_log_file);
 }
 
 void LogPerfResult(const char* test_name, double value, const char* units) {

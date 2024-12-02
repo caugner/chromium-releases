@@ -40,16 +40,15 @@ void PageState::InitWithBytes(const std::string& bytes) {
   state_.reset(new DictionaryValue);
 
   JSONStringValueSerializer serializer(bytes);
-  Value* root = NULL;
+  scoped_ptr<Value> root(serializer.Deserialize(NULL));
 
-  if (!serializer.Deserialize(&root))
+  if (!root.get()) {
     NOTREACHED();
-
-  if (root != NULL && root->GetType() == Value::TYPE_DICTIONARY) {
-    state_.reset(static_cast<DictionaryValue*>(root));
-  } else if (root) {
-    delete root;
+    return;
   }
+
+  if (root->GetType() == Value::TYPE_DICTIONARY)
+    state_.reset(static_cast<DictionaryValue*>(root.release()));
 }
 
 void PageState::GetByteRepresentation(std::string* out) const {
@@ -63,7 +62,8 @@ void PageState::SetProperty(const std::wstring& key,
   state_->Set(key, new StringValue(value));
 }
 
-bool PageState::GetProperty(const std::wstring& key, std::wstring* value) const {
+bool PageState::GetProperty(const std::wstring& key,
+                            std::wstring* value) const {
   if (state_->HasKey(key)) {
     Value* v;
     state_->Get(key, &v);
@@ -83,7 +83,7 @@ void PageState::SetInt64Property(const std::wstring& key, int64 value) {
 bool PageState::GetInt64Property(const std::wstring& key, int64* value) const {
   std::wstring v;
   if (GetProperty(key, &v)) {
-    return StringToInt64(v, value);
+    return StringToInt64(WideToUTF16Hack(v), value);
   }
   return false;
 }
@@ -95,7 +95,7 @@ void PageState::SetIntProperty(const std::wstring& key, int value) {
 bool PageState::GetIntProperty(const std::wstring& key, int* value) const {
   std::wstring v;
   if (GetProperty(key, &v)) {
-    return StringToInt(v, value);
+    return StringToInt(WideToUTF16Hack(v), value);
   }
   return false;
 }
@@ -106,4 +106,3 @@ PageState* PageState::Copy() const {
     copy->state_.reset(static_cast<DictionaryValue*>(state_->DeepCopy()));
   return copy;
 }
-

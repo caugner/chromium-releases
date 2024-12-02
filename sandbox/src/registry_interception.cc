@@ -65,6 +65,12 @@ NTSTATUS WINAPI TargetNtCreateKey(NtCreateKeyFunction orig_CreateKey,
       break;
 
     if (!NT_SUCCESS(answer.nt_status))
+        // TODO(nsylvain): We should return answer.nt_status here instead
+        // of status. We can do this only after we checked the policy.
+        // otherwise we will returns ACCESS_DENIED for all paths
+        // that are not specified by a policy, even though your token allows
+        // access to that path, and the original call had a more meaningful
+        // error. Bug 4369
         break;
 
     __try {
@@ -82,14 +88,9 @@ NTSTATUS WINAPI TargetNtCreateKey(NtCreateKeyFunction orig_CreateKey,
   return status;
 }
 
-NTSTATUS WINAPI TargetNtOpenKey(NtOpenKeyFunction orig_OpenKey, PHANDLE key,
+NTSTATUS WINAPI CommonNtOpenKey(NTSTATUS status, PHANDLE key,
                                 ACCESS_MASK desired_access,
                                 POBJECT_ATTRIBUTES object_attributes) {
-  // Check if the process can open it first.
-  NTSTATUS status = orig_OpenKey(key, desired_access, object_attributes);
-  if (NT_SUCCESS(status))
-    return status;
-
   // We don't trust that the IPC can work this early.
   if (!SandboxFactory::GetTargetServices()->GetState()->InitCalled())
     return status;
@@ -121,7 +122,13 @@ NTSTATUS WINAPI TargetNtOpenKey(NtOpenKeyFunction orig_OpenKey, PHANDLE key,
       break;
 
     if (!NT_SUCCESS(answer.nt_status))
-      break;
+        // TODO(nsylvain): We should return answer.nt_status here instead
+        // of status. We can do this only after we checked the policy.
+        // otherwise we will returns ACCESS_DENIED for all paths
+        // that are not specified by a policy, even though your token allows
+        // access to that path, and the original call had a more meaningful
+        // error. Bug 4369
+        break;
 
     __try {
       *key = answer.handle;
@@ -134,5 +141,32 @@ NTSTATUS WINAPI TargetNtOpenKey(NtOpenKeyFunction orig_OpenKey, PHANDLE key,
   return status;
 }
 
-}  // namespace sandbox
+NTSTATUS WINAPI TargetNtOpenKey(NtOpenKeyFunction orig_OpenKey, PHANDLE key,
+                                ACCESS_MASK desired_access,
+                                POBJECT_ATTRIBUTES object_attributes) {
+  // Check if the process can open it first.
+  NTSTATUS status = orig_OpenKey(key, desired_access, object_attributes);
+  if (NT_SUCCESS(status))
+    return status;
 
+  return CommonNtOpenKey(status, key, desired_access, object_attributes);
+}
+
+NTSTATUS WINAPI TargetNtOpenKeyEx(NtOpenKeyExFunction orig_OpenKeyEx,
+                                  PHANDLE key, ACCESS_MASK desired_access,
+                                  POBJECT_ATTRIBUTES object_attributes,
+                                  DWORD unknown) {
+  // Check if the process can open it first.
+  NTSTATUS status = orig_OpenKeyEx(key, desired_access, object_attributes,
+                                   unknown);
+
+  // TODO(nsylvain): We don't know what the last parameter is. If it's not
+  // zero, we don't attempt to proxy the call. We need to find out what it is!
+  // See bug 7611
+  if (NT_SUCCESS(status) || unknown != 0)
+    return status;
+
+  return CommonNtOpenKey(status, key, desired_access, object_attributes);
+}
+
+}  // namespace sandbox

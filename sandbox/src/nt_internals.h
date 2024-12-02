@@ -354,6 +354,12 @@ typedef NTSTATUS (WINAPI *NtOpenKeyFunction)(
   IN ACCESS_MASK DesiredAccess,
   IN POBJECT_ATTRIBUTES ObjectAttributes);
 
+typedef NTSTATUS (WINAPI *NtOpenKeyExFunction)(
+  OUT PHANDLE KeyHandle,
+  IN ACCESS_MASK DesiredAccess,
+  IN POBJECT_ATTRIBUTES ObjectAttributes,
+  IN DWORD unknown);  // TODO(nsylvain): define this. bug 7611
+
 // -----------------------------------------------------------------------
 // Memory
 
@@ -501,5 +507,3 @@ typedef VOID (WINAPI *RtlInitUnicodeStringFunction) (
   IN PCWSTR SourceString);
 
 #endif  // SANDBOX_SRC_NT_INTERNALS_H__
-
-

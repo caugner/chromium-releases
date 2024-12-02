@@ -28,7 +28,7 @@ struct AutomationResourceTraits<T*> {
 class AutomationResourceTrackerImpl {
 public:
   AutomationResourceTrackerImpl(IPC::Message::Sender* sender)
-    :sender_(sender), cleared_mappings_(false) {}
+    : cleared_mappings_(false), sender_(sender) {}
 
   virtual ~AutomationResourceTrackerImpl() {}
 
@@ -153,4 +153,3 @@ class AutomationResourceTracker : public NotificationObserver,
 };
 
 #endif  // CHROME_BROWSER_AUTOMATION_AUTOMATION_RESOURCE_TRACKER_H__
-

@@ -2,18 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_COMMON_CHROME_PLUGIN_UTIL_H__
-#define CHROME_COMMON_CHROME_PLUGIN_UTIL_H__
+#ifndef CHROME_COMMON_CHROME_PLUGIN_UTIL_H_
+#define CHROME_COMMON_CHROME_PLUGIN_UTIL_H_
+
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/non_thread_safe.h"
 #include "base/ref_counted.h"
 #include "chrome/common/chrome_plugin_api.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_observer.h"
 
 class ChromePluginLib;
 class MessageLoop;
-namespace net{
+namespace net {
 class HttpResponseHeaders;
 }
 
@@ -51,7 +53,7 @@ class PluginHelper : public NotificationObserver, public NonThreadSafe {
  protected:
   scoped_refptr<ChromePluginLib> plugin_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(PluginHelper);
+  DISALLOW_COPY_AND_ASSIGN(PluginHelper);
 };
 
 // A class of utility functions for dealing with request responses.
@@ -64,7 +66,7 @@ public:
   // Common implementation of a CPR_GetResponseInfo call.
   static int GetResponseInfo(
       const net::HttpResponseHeaders* response_headers,
-      CPResponseInfoType type, void* buf, uint32 buf_size);
+      CPResponseInfoType type, void* buf, size_t buf_size);
 };
 
 // Helper to allocate a string using the given CPB_Alloc function.
@@ -80,5 +82,4 @@ CPError CPB_GetCommandLineArgumentsCommon(const char* url,
 void* STDCALL CPB_Alloc(uint32 size);
 void STDCALL CPB_Free(void* memory);
 
-#endif  // CHROME_COMMON_CHROME_PLUGIN_UTIL_H__
-
+#endif  // CHROME_COMMON_CHROME_PLUGIN_UTIL_H_

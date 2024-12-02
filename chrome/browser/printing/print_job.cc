@@ -8,21 +8,15 @@
 #include "chrome/browser/printing/print_job_worker.h"
 #include "chrome/browser/printing/printed_document.h"
 #include "chrome/browser/printing/printed_page.h"
+#include "chrome/common/notification_service.h"
 
 #ifdef _MSC_VER
 #pragma warning(disable:4355)  // 'this' : used in base member initializer list
 #endif
 
-namespace printing {
+using base::TimeDelta;
 
-PrintJob::PrintJob(PrintedPagesSource* source)
-    : ui_message_loop_(MessageLoop::current()),
-      worker_(new PrintJobWorker(this)),
-      source_(source),
-      is_job_pending_(false),
-      is_print_dialog_box_shown_(false),
-      is_canceling_(false) {
-}
+namespace printing {
 
 PrintJob::PrintJob()
     : ui_message_loop_(MessageLoop::current()),
@@ -32,14 +26,18 @@ PrintJob::PrintJob()
       is_job_pending_(false),
       is_print_dialog_box_shown_(false),
       is_canceling_(false) {
+  DCHECK(ui_message_loop_);
+  ui_message_loop_->AddDestructionObserver(this);
 }
 
 PrintJob::~PrintJob() {
+  ui_message_loop_->RemoveDestructionObserver(this);
   // The job should be finished (or at least canceled) when it is destroyed.
   DCHECK(!is_job_pending_);
   DCHECK(!is_print_dialog_box_shown_);
   DCHECK(!is_canceling_);
-  DCHECK(worker_->message_loop() == NULL);
+  if (worker_.get())
+    DCHECK(worker_->message_loop() == NULL);
   DCHECK_EQ(ui_message_loop_, MessageLoop::current());
 }
 
@@ -59,15 +57,15 @@ void PrintJob::Initialize(PrintJobWorkerOwner* job,
 
   // Don't forget to register to our own messages.
   NotificationService::current()->AddObserver(
-      this, NOTIFY_PRINT_JOB_EVENT, Source<PrintJob>(this));
+      this, NotificationType::PRINT_JOB_EVENT, Source<PrintJob>(this));
 }
 
 void PrintJob::Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
   DCHECK_EQ(ui_message_loop_, MessageLoop::current());
-  switch (type) {
-    case NOTIFY_PRINTED_DOCUMENT_UPDATED: {
+  switch (type.value) {
+    case NotificationType::PRINTED_DOCUMENT_UPDATED: {
       DCHECK(Source<PrintedDocument>(source).ptr() ==
              document_.get());
 
@@ -82,7 +80,7 @@ void PrintJob::Observe(NotificationType type,
       }
       break;
     }
-    case NOTIFY_PRINT_JOB_EVENT: {
+    case NotificationType::PRINT_JOB_EVENT: {
       OnNotifyPrintJobEvent(*Details<JobEventDetails>(details).ptr());
       break;
     }
@@ -94,38 +92,7 @@ void PrintJob::Observe(NotificationType type,
 
 void PrintJob::GetSettingsDone(const PrintSettings& new_settings,
                                PrintingContext::Result result) {
-  DCHECK(!is_job_pending_);
-
-  if (!source_ || result == PrintingContext::FAILED) {
-    // The source is gone, there's nothing to do.
-    Cancel();
-    return;
-  }
-
-  // Only create a new PrintedDocument if the settings have changed or if
-  // there was no printed document.
-  if (!document_.get() || !new_settings.Equals(settings_)) {
-    UpdatePrintedDocument(new PrintedDocument(new_settings, source_,
-                                              PrintSettings::NewCookie()));
-  }
-
-  JobEventDetails::Type type;
-  if (is_print_dialog_box_shown_) {
-    type = (result == PrintingContext::OK) ?
-               JobEventDetails::USER_INIT_DONE :
-               JobEventDetails::USER_INIT_CANCELED;
-    // Dialog box is not shown anymore.
-    is_print_dialog_box_shown_ = false;
-  } else {
-    DCHECK_EQ(result, PrintingContext::OK);
-    type = JobEventDetails::DEFAULT_INIT_DONE;
-  }
-  scoped_refptr<JobEventDetails> details(
-      new JobEventDetails(type, document_.get(), NULL));
-  NotificationService::current()->Notify(
-      NOTIFY_PRINT_JOB_EVENT,
-      Source<PrintJob>(this),
-      Details<JobEventDetails>(details.get()));
+  NOTREACHED();
 }
 
 PrintJobWorker* PrintJob::DetachWorker(PrintJobWorkerOwner* new_owner) {
@@ -140,35 +107,8 @@ int PrintJob::cookie() const {
   return document_->cookie();
 }
 
-void PrintJob::GetSettings(GetSettingsAskParam ask_user_for_settings,
-                           HWND parent_window) {
-  DCHECK_EQ(ui_message_loop_, MessageLoop::current());
-  DCHECK(!is_job_pending_);
-  DCHECK(!is_print_dialog_box_shown_);
-  // Is not reentrant.
-  if (is_job_pending_)
-    return;
-
-  // Lazy create the worker thread. There is one worker thread per print job.
-  if (!worker_->message_loop()) {
-    if (!worker_->Start())
-      return;
-
-    // Don't re-register if we were already registered.
-    NotificationService::current()->AddObserver(
-        this, NOTIFY_PRINT_JOB_EVENT, Source<PrintJob>(this));
-  }
-
-  int page_count = 0;
-  if (document_.get()) {
-    page_count = document_->page_count();
-  }
-
-  // Real work is done in PrintJobWorker::Init().
-  is_print_dialog_box_shown_ = ask_user_for_settings == ASK_USER;
-  worker_->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-      worker_.get(), &PrintJobWorker::GetSettings, is_print_dialog_box_shown_,
-      parent_window, page_count));
+void PrintJob::WillDestroyCurrentMessageLoop() {
+  NOTREACHED();
 }
 
 void PrintJob::StartPrinting() {
@@ -189,7 +129,7 @@ void PrintJob::StartPrinting() {
   scoped_refptr<JobEventDetails> details(
       new JobEventDetails(JobEventDetails::NEW_DOC, document_.get(), NULL));
   NotificationService::current()->Notify(
-      NOTIFY_PRINT_JOB_EVENT,
+      NotificationType::PRINT_JOB_EVENT,
       Source<PrintJob>(this),
       Details<JobEventDetails>(details.get()));
 }
@@ -213,7 +153,7 @@ void PrintJob::Stop() {
 
     is_job_pending_ = false;
     NotificationService::current()->RemoveObserver(
-      this, NOTIFY_PRINT_JOB_EVENT, Source<PrintJob>(this));
+        this, NotificationType::PRINT_JOB_EVENT, Source<PrintJob>(this));
   }
   // Flush the cached document.
   UpdatePrintedDocument(NULL);
@@ -238,32 +178,14 @@ void PrintJob::Cancel() {
   scoped_refptr<JobEventDetails> details(
       new JobEventDetails(JobEventDetails::FAILED, NULL, NULL));
   NotificationService::current()->Notify(
-      NOTIFY_PRINT_JOB_EVENT,
+      NotificationType::PRINT_JOB_EVENT,
       Source<PrintJob>(this),
       Details<JobEventDetails>(details.get()));
   Stop();
   is_canceling_ = false;
 }
 
-bool PrintJob::RequestMissingPages() {
-  DCHECK_EQ(ui_message_loop_, MessageLoop::current());
-  DCHECK(!is_print_dialog_box_shown_);
-  if (!is_job_pending_ || is_print_dialog_box_shown_)
-    return false;
-
-  MessageLoop* worker_loop = worker_.get() ? worker_->message_loop() : NULL;
-  if (!worker_loop)
-    return false;
-
-  worker_loop->PostTask(FROM_HERE, NewRunnableMethod(
-      worker_.get(), &PrintJobWorker::RequestMissingPages));
-  return true;
-}
-
 bool PrintJob::FlushJob(int timeout_ms) {
-  if (!RequestMissingPages())
-    return false;
-
   // Make sure the object outlive this message loop.
   scoped_refptr<PrintJob> handle(this);
 
@@ -308,19 +230,19 @@ void PrintJob::UpdatePrintedDocument(PrintedDocument* new_document) {
     return;
   // Unregisters.
   if (document_.get()) {
-    NotificationService::current()->
-        RemoveObserver(this,
-                       NOTIFY_PRINTED_DOCUMENT_UPDATED,
-                       Source<PrintedDocument>(document_.get()));
+    NotificationService::current()->RemoveObserver(
+        this,
+        NotificationType::PRINTED_DOCUMENT_UPDATED,
+        Source<PrintedDocument>(document_.get()));
   }
   document_ = new_document;
 
   // Registers.
   if (document_.get()) {
-    NotificationService::current()->
-        AddObserver(this,
-                    NOTIFY_PRINTED_DOCUMENT_UPDATED,
-                    Source<PrintedDocument>(document_.get()));
+    NotificationService::current()->AddObserver(
+        this,
+        NotificationType::PRINTED_DOCUMENT_UPDATED,
+        Source<PrintedDocument>(document_.get()));
     settings_ = document_->settings();
   }
 
@@ -380,7 +302,7 @@ void PrintJob::OnDocumentDone() {
   scoped_refptr<JobEventDetails> details(
       new JobEventDetails(JobEventDetails::JOB_DONE, document_.get(), NULL));
   NotificationService::current()->Notify(
-      NOTIFY_PRINT_JOB_EVENT,
+      NotificationType::PRINT_JOB_EVENT,
       Source<PrintJob>(this),
       Details<JobEventDetails>(details.get()));
 }
@@ -452,4 +374,3 @@ PrintedPage* JobEventDetails::page() const {
 }
 
 }  // namespace printing
-

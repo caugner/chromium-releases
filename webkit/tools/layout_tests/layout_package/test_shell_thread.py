@@ -14,7 +14,9 @@ import copy
 import logging
 import os
 import Queue
+import signal
 import subprocess
+import sys
 import thread
 import threading
 
@@ -27,7 +29,7 @@ import test_failures
 # test_shell.exe.
 DEFAULT_TEST_TIMEOUT_MS = 10 * 1000
 
-def ProcessOutput(proc, filename, test_uri, test_types, test_args):
+def ProcessOutput(proc, filename, test_uri, test_types, test_args, target):
   """Receives the output from a test_shell process, subjects it to a number
   of tests, and returns a list of failure types the test produced.
 
@@ -36,6 +38,7 @@ def ProcessOutput(proc, filename, test_uri, test_types, test_args):
     filename: path of the test file being run
     test_types: list of test types to subject the output to
     test_args: arguments to be passed to each test
+    target: Debug or Release
 
   Returns: a list of failure objects for the test being processed
   """
@@ -56,7 +59,12 @@ def ProcessOutput(proc, filename, test_uri, test_types, test_args):
       # This is hex code 0xc000001d, which is used for abrupt termination.
       # This happens if we hit ctrl+c from the prompt and we happen to
       # be waiting on the test_shell.
-      if -1073741510 == proc.returncode:
+      # sdoyon: Not sure for which OS and in what circumstances the
+      # above code is valid. What works for me under Linux to detect
+      # ctrl+c is for the subprocess returncode to be negative SIGINT. And
+      # that agrees with the subprocess documentation.
+      if (-1073741510 == proc.returncode or
+          -signal.SIGINT == proc.returncode):
         raise KeyboardInterrupt
       crash_or_timeout = True
       break
@@ -82,7 +90,8 @@ def ProcessOutput(proc, filename, test_uri, test_types, test_args):
   for test_type in test_types:
     new_failures = test_type.CompareOutput(filename, proc,
                                            ''.join(outlines),
-                                           local_test_args)
+                                           local_test_args,
+                                           target)
     # Don't add any more failures if we already have a crash or timeout, so
     # we don't double-report those tests.
     if not crash_or_timeout:
@@ -91,9 +100,9 @@ def ProcessOutput(proc, filename, test_uri, test_types, test_args):
   return failures
 
 
-def StartTestShell(binary, args):
+def StartTestShell(command, args):
   """Returns the process for a new test_shell started in layout-tests mode."""
-  cmd = [binary, '--layout-tests'] + args
+  cmd = command + ['--layout-tests'] + args
   return subprocess.Popen(cmd,
                           stdin=subprocess.PIPE,
                           stdout=subprocess.PIPE,
@@ -102,8 +111,8 @@ def StartTestShell(binary, args):
 
 class SingleTestThread(threading.Thread):
   """Thread wrapper for running a single test file."""
-  def __init__(self, test_shell_binary, shell_args, test_uri, filename,
-               test_types, test_args):
+  def __init__(self, test_shell_command, shell_args, test_uri, filename,
+               test_types, test_args, target):
     """
     Args:
       test_uri: full file:// or http:// URI of the test file to be run
@@ -112,21 +121,23 @@ class SingleTestThread(threading.Thread):
     """
 
     threading.Thread.__init__(self)
-    self._binary = test_shell_binary
+    self._command = test_shell_command
     self._shell_args = shell_args
     self._test_uri = test_uri
     self._filename = filename
     self._test_types = test_types
     self._test_args = test_args
+    self._target = target
     self._single_test_failures = []
 
   def run(self):
-    proc = StartTestShell(self._binary, self._shell_args + [self._test_uri])
+    proc = StartTestShell(self._command, self._shell_args + [self._test_uri])
     self._single_test_failures = ProcessOutput(proc,
                                                self._filename,
                                                self._test_uri,
                                                self._test_types,
-                                               self._test_args)
+                                               self._test_args,
+                                               self._target)
 
   def GetFailures(self):
     return self._single_test_failures
@@ -134,14 +145,14 @@ class SingleTestThread(threading.Thread):
 
 class TestShellThread(threading.Thread):
 
-  def __init__(self, filename_queue, test_shell_binary, test_types,
+  def __init__(self, filename_queue, test_shell_command, test_types,
                test_args, shell_args, options):
     """Initialize all the local state for this test shell thread.
 
     Args:
       filename_queue: A thread safe Queue class that contains tuples of
                       (filename, uri) pairs.
-      test_shell_binary: The path to test_shell.exe
+      test_shell_command: A list specifying the command+args for test_shell
       test_types: A list of TestType objects to run the test output against.
       test_args: A TestArguments object to pass to each TestType.
       shell_args: Any extra arguments to be passed to test_shell.exe.
@@ -151,13 +162,15 @@ class TestShellThread(threading.Thread):
     """
     threading.Thread.__init__(self)
     self._filename_queue = filename_queue
-    self._test_shell_binary = test_shell_binary
+    self._test_shell_command = test_shell_command
     self._test_types = test_types
     self._test_args = test_args
     self._test_shell_proc = None
     self._shell_args = shell_args
     self._options = options
     self._failures = {}
+    self._canceled = False
+    self._exception_info = None
 
     if self._options.run_singly:
       # When we're running one test per test_shell process, we can enforce
@@ -176,10 +189,43 @@ class TestShellThread(threading.Thread):
     TestFailures."""
     return self._failures
 
+  def Cancel(self):
+    """Set a flag telling this thread to quit."""
+    self._canceled = True
+
+  def GetExceptionInfo(self):
+    """If run() terminated on an uncaught exception, return it here
+    ((type, value, traceback) tuple).
+    Returns None if run() terminated normally. Meant to be called after
+    joining this thread."""
+    return self._exception_info
+
   def run(self):
-    """Main work entry point of the thread.  Basically we pull urls from the
+    """Delegate main work to a helper method and watch for uncaught
+    exceptions."""
+    try:
+      self._Run()
+    except:
+      # Save the exception for our caller to see.
+      self._exception_info = sys.exc_info()
+      # Re-raise it and die.
+      raise
+
+  def _Run(self):
+    """Main work entry point of the thread. Basically we pull urls from the
     filename queue and run the tests until we run out of urls."""
+    batch_size = 0
+    batch_count = 0
+    if self._options.batch_size:
+      try:
+        batch_size = int(self._options.batch_size)
+      except:
+        logging.info("Ignoring invalid batch size '%s'" %
+                     self._options.batch_size)
     while True:
+      if self._canceled:
+        logging.info('Testing canceled')
+        return
       try:
         filename, test_uri = self._filename_queue.get_nowait()
       except Queue.Empty:
@@ -187,23 +233,30 @@ class TestShellThread(threading.Thread):
         logging.debug("queue empty, quitting test shell thread")
         return
 
-      # we have a url, run tests
+      # We have a url, run tests.
+      batch_count += 1
       if self._options.run_singly:
         failures = self._RunTestSingly(filename, test_uri)
       else:
         failures = self._RunTest(filename, test_uri)
       if failures:
-        # Check and kill test shell if we need to
+        # Check and kill test shell if we need too.
         if len([1 for f in failures if f.ShouldKillTestShell()]):
           self._KillTestShell()
-        # print the error message(s)
+          # Reset the batch count since the shell just bounced.
+          batch_count = 0
+        # Print the error message(s).
         error_str = '\n'.join(['  ' + f.Message() for f in failures])
         logging.error("%s failed:\n%s" %
                       (path_utils.RelativeTestFilename(filename), error_str))
-        # Group the errors for reporting
+        # Group the errors for reporting.
         self._failures[filename] = failures
       else:
         logging.debug(path_utils.RelativeTestFilename(filename) + " passed")
+      if batch_size > 0 and batch_count > batch_size:
+        # Bounce the shell and reset count.
+        self._KillTestShell()
+        batch_count = 0
 
 
   def _RunTestSingly(self, filename, test_uri):
@@ -213,12 +266,13 @@ class TestShellThread(threading.Thread):
     state or progress, we can only run per-test timeouts when running test
     files singly.
     """
-    worker = SingleTestThread(self._test_shell_binary,
+    worker = SingleTestThread(self._test_shell_command,
                               self._shell_args,
                               test_uri,
                               filename,
                               self._test_types,
-                              self._test_args)
+                              self._test_args,
+                              self._options.target)
     worker.start()
     worker.join(self._time_out_sec)
     if worker.isAlive():
@@ -250,11 +304,18 @@ class TestShellThread(threading.Thread):
 
     # Ok, load the test URL...
     self._test_shell_proc.stdin.write(test_uri + "\n")
+    # If the test shell is dead, the above may cause an IOError as we
+    # try to write onto the broken pipe. If this is the first test for
+    # this test shell process, than the test shell did not
+    # successfully start. If this is not the first test, then the
+    # previous tests have caused some kind of delayed crash. We don't
+    # try to recover here.
     self._test_shell_proc.stdin.flush()
 
     # ...and read the response
     return ProcessOutput(self._test_shell_proc, filename, test_uri,
-                         self._test_types, self._test_args)
+                         self._test_types, self._test_args,
+                         self._options.target)
 
 
   def _EnsureTestShellIsRunning(self):
@@ -264,7 +325,7 @@ class TestShellThread(threading.Thread):
     """
     if (not self._test_shell_proc or
         self._test_shell_proc.poll() is not None):
-      self._test_shell_proc = StartTestShell(self._test_shell_binary,
+      self._test_shell_proc = StartTestShell(self._test_shell_command,
                                              self._shell_args)
 
   def _KillTestShell(self):
@@ -275,4 +336,3 @@ class TestShellThread(threading.Thread):
       if self._test_shell_proc.stderr:
         self._test_shell_proc.stderr.close()
       self._test_shell_proc = None
-

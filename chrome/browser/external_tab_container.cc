@@ -8,12 +8,14 @@
 #include "base/win_util.h"
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/tab_contents.h"
+#include "chrome/browser/tab_contents/provisional_load_details.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/views/tab_contents_container_view.h"
-#include "chrome/browser/web_contents.h"
+#include "chrome/browser/tab_contents/web_contents.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/win_util.h"
-#include "chrome/views/hwnd_view_container.h"
+// Included for SetRootViewForHWND.
+#include "chrome/views/widget/widget_win.h"
 #include "chrome/test/automation/automation_messages.h"
 
 static const wchar_t kWindowObjectKey[] = L"ChromeWindowObject";
@@ -28,19 +30,24 @@ ExternalTabContainer::ExternalTabContainer(
       tab_contents_(NULL),
       external_accel_table_(NULL),
       external_accel_entry_count_(0),
-      tab_contents_container_(NULL) {
+      tab_contents_container_(NULL),
+      ignore_next_load_notification_(false) {
 }
 
 ExternalTabContainer::~ExternalTabContainer() {
+  Uninitialize(m_hWnd);
 }
 
-bool ExternalTabContainer::Init(Profile* profile) {
+bool ExternalTabContainer::Init(Profile* profile, HWND parent,
+                                const gfx::Rect& dimensions,
+                                unsigned int style) {
   if (IsWindow()) {
     NOTREACHED();
     return false;
   }
+
   // First create the container window
-  if (!Create(NULL)) {
+  if (!Create(NULL, dimensions.ToRECT())) {
     NOTREACHED();
     return false;
   }
@@ -49,20 +56,21 @@ bool ExternalTabContainer::Init(Profile* profile) {
   // is the same as the lifetime of the window
   SetProp(*this, kWindowObjectKey, this);
 
-  ChromeViews::SetRootViewForHWND(m_hWnd, &root_view_);
+  views::SetRootViewForHWND(m_hWnd, &root_view_);
   // CreateFocusManager will subclass this window and delete the FocusManager
   // instance when this window goes away.
-  ChromeViews::FocusManager* focus_manager =
-      ChromeViews::FocusManager::CreateFocusManager(m_hWnd, GetRootView());
+  views::FocusManager* focus_manager =
+      views::FocusManager::CreateFocusManager(m_hWnd, GetRootView());
+
   DCHECK(focus_manager);
   focus_manager->AddKeystrokeListener(this);
-  tab_contents_ = TabContents::CreateWithType(TAB_CONTENTS_WEB,
-                                              m_hWnd, profile, NULL);
+  tab_contents_ = TabContents::CreateWithType(TAB_CONTENTS_WEB, profile, NULL);
   if (!tab_contents_) {
     NOTREACHED();
     DestroyWindow();
     return false;
   }
+
   tab_contents_->SetupController(profile);
   tab_contents_->set_delegate(this);
 
@@ -72,46 +80,80 @@ bool ExternalTabContainer::Init(Profile* profile) {
 
   // Create a TabContentsContainerView to handle focus cycling using Tab and
   // Shift-Tab.
-  // TODO(sanjeevr): We need to create a dummy FocusTraversable object to
-  // represent the frame of the external host. This will allow Tab and
-  // Shift-Tab to cycle into the external frame.
   tab_contents_container_ = new TabContentsContainerView();
   root_view_.AddChildView(tab_contents_container_);
+  // Note that SetTabContents must be called after AddChildView is called
   tab_contents_container_->SetTabContents(tab_contents_);
+  // Add a dummy view to catch when the user tabs out of the tab
+  // Create a dummy FocusTraversable object to represent the frame of the
+  // external host. This will allow Tab and Shift-Tab to cycle into the
+  // external frame.  When the tab_contents_container_ loses focus,
+  // the focus will be moved to this class (See OnSetFocus in this file).
+  // An alternative to using views::View and catching when the focus manager
+  // shifts the focus to the dummy view could be to implement our own view
+  // and handle AboutToRequestFocusFromTabTraversal.
+  views::View* dummy = new views::View();
+  dummy->SetFocusable(true);
+  DCHECK(dummy->IsFocusable());
+  root_view_.AddChildView(dummy);
 
   NavigationController* controller = tab_contents_->controller();
   DCHECK(controller);
-  NotificationService::current()->
-      Notify(NOTIFY_EXTERNAL_TAB_CREATED,
-              Source<NavigationController>(controller),
-              NotificationService::NoDetails());
-  ::ShowWindow(tab_contents_->GetContainerHWND(), SW_SHOW);
+  registrar_.Add(this, NotificationType::NAV_ENTRY_COMMITTED,
+                 Source<NavigationController>(controller));
+  registrar_.Add(this, NotificationType::FAIL_PROVISIONAL_LOAD_WITH_ERROR,
+                 Source<NavigationController>(controller));
+  NotificationService::current()->Notify(
+      NotificationType::EXTERNAL_TAB_CREATED,
+      Source<NavigationController>(controller),
+      NotificationService::NoDetails());
+
+  // We need WS_POPUP to be on the window during initialization, but
+  // once initialized we apply the requested style which may or may not
+  // include the popup bit.
+  // Note that it's important to do this before we call SetParent since
+  // during the SetParent call we will otherwise get a WA_ACTIVATE call
+  // that causes us to steal the current focus.
+  ModifyStyle(WS_POPUP, style, 0);
+
+  // Now apply the parenting and style
+  if (parent)
+    SetParent(parent);
+
+  ::ShowWindow(tab_contents_->GetNativeView(), SW_SHOWNA);
   return true;
 }
 
-void ExternalTabContainer::OnDestroy() {
-  ChromeViews::FocusManager * focus_manager =
-      ChromeViews::FocusManager::GetFocusManager(GetHWND());
-  if (focus_manager) {
-    focus_manager->RemoveKeystrokeListener(this);
+bool ExternalTabContainer::Uninitialize(HWND window) {
+  if (::IsWindow(window)) {
+    views::FocusManager* focus_manager =
+        views::FocusManager::GetFocusManager(window);
+    if (focus_manager) {
+      focus_manager->RemoveKeystrokeListener(this);
+    }
   }
+
   root_view_.RemoveAllChildViews(true);
   if (tab_contents_) {
     NavigationController* controller = tab_contents_->controller();
     DCHECK(controller);
 
-    NotificationService::current()->
-        Notify(NOTIFY_EXTERNAL_TAB_CLOSED,
-                Source<NavigationController>(controller),
-                Details<ExternalTabContainer>(this));
+    NotificationService::current()->Notify(
+        NotificationType::EXTERNAL_TAB_CLOSED,
+        Source<NavigationController>(controller),
+        Details<ExternalTabContainer>(this));
+
     tab_contents_->set_delegate(NULL);
     tab_contents_->CloseContents();
     // WARNING: tab_contents_ has likely been deleted.
     tab_contents_ = NULL;
   }
+
+  return true;
 }
 
 void ExternalTabContainer::OnFinalMessage(HWND window) {
+  Uninitialize(window);
   delete this;
 }
 
@@ -119,19 +161,32 @@ LRESULT ExternalTabContainer::OnSize(UINT, WPARAM, LPARAM, BOOL& handled) {
   if (tab_contents_) {
     RECT client_rect = {0};
     GetClientRect(&client_rect);
-    ::SetWindowPos(tab_contents_->GetContainerHWND(), NULL, client_rect.left,
+    ::SetWindowPos(tab_contents_->GetNativeView(), NULL, client_rect.left,
                    client_rect.top, client_rect.right - client_rect.left,
                    client_rect.bottom - client_rect.top, SWP_NOZORDER);
   }
   return 0;
 }
 
-// TODO(sanjeevr): The implementation of the TabContentsDelegate interface
-// needs to be fully fleshed out based on the requirements of the
-// "Chrome tab in external browser" feature.
+LRESULT ExternalTabContainer::OnSetFocus(UINT msg, WPARAM wp, LPARAM lp,
+                                         BOOL& handled) {
+  if (automation_) {
+    views::FocusManager* focus_manager =
+        views::FocusManager::GetFocusManager(GetNativeView());
+    DCHECK(focus_manager);
+    if (focus_manager) {
+      focus_manager->ClearFocus();
+      automation_->Send(new AutomationMsg_TabbedOut(0,
+          win_util::IsShiftPressed()));
+    }
+  }
+
+  return 0;
+}
 
 void ExternalTabContainer::OpenURLFromTab(TabContents* source,
                            const GURL& url,
+                           const GURL& referrer,
                            WindowOpenDisposition disposition,
                            PageTransition::Type transition) {
   switch (disposition) {
@@ -149,14 +204,15 @@ void ExternalTabContainer::OpenURLFromTab(TabContents* source,
 }
 
 void ExternalTabContainer::NavigationStateChanged(const TabContents* source,
-                                    unsigned changed_flags) {
+                                                  unsigned changed_flags) {
   if (automation_) {
     automation_->Send(
-        new AutomationMsg_NavigationStateChanged(0,changed_flags));
+        new AutomationMsg_NavigationStateChanged(0, changed_flags));
   }
 }
 
-void ExternalTabContainer::ReplaceContents(TabContents* source, TabContents* new_contents) {
+void ExternalTabContainer::ReplaceContents(TabContents* source,
+                                           TabContents* new_contents) {
 }
 
 void ExternalTabContainer::AddNewContents(TabContents* source,
@@ -164,13 +220,6 @@ void ExternalTabContainer::AddNewContents(TabContents* source,
                             WindowOpenDisposition disposition,
                             const gfx::Rect& initial_pos,
                             bool user_gesture) {
-}
-
-void ExternalTabContainer::StartDraggingDetachedContents(
-    TabContents* source,
-    TabContents* new_contents,
-    const gfx::Rect& contents_bounds,
-    const gfx::Point& mouse_pt) {
 }
 
 void ExternalTabContainer::ActivateContents(TabContents* contents) {
@@ -182,14 +231,16 @@ void ExternalTabContainer::LoadingStateChanged(TabContents* source) {
 void ExternalTabContainer::CloseContents(TabContents* source) {
 }
 
-void ExternalTabContainer::MoveContents(TabContents* source, const gfx::Rect& pos) {
+void ExternalTabContainer::MoveContents(TabContents* source,
+                                        const gfx::Rect& pos) {
 }
 
 bool ExternalTabContainer::IsPopup(TabContents* source) {
   return false;
 }
 
-void ExternalTabContainer::URLStarredChanged(TabContents* source, bool starred) {
+void ExternalTabContainer::URLStarredChanged(TabContents* source,
+                                             bool starred) {
 }
 
 void ExternalTabContainer::UpdateTargetURL(TabContents* source,
@@ -205,50 +256,93 @@ void ExternalTabContainer::ContentsZoomChange(bool zoom_in) {
 }
 
 void ExternalTabContainer::ToolbarSizeChanged(TabContents* source,
-                                            bool finished) {
-}
-
-void ExternalTabContainer::DidNavigate(NavigationType nav_type,
-                                       int relative_navigation_offet) {
-  if (automation_) {
-    automation_->Send(
-        new AutomationMsg_DidNavigate(0, nav_type,
-                                      relative_navigation_offet));
-  }
+                                              bool finished) {
 }
 
 void ExternalTabContainer::ForwardMessageToExternalHost(
-    const std::string& receiver, const std::string& message) {
+    const std::string& message, const std::string& origin,
+    const std::string& target) {
   if(automation_) {
     automation_->Send(
-        new AutomationMsg_ForwardMessageToExternalHost(0, receiver, message));
+        new AutomationMsg_ForwardMessageToExternalHost(0, message, origin,
+                                                       target));
   }
 }
 
 void ExternalTabContainer::Observe(NotificationType type,
                                    const NotificationSource& source,
                                    const NotificationDetails& details) {
+  static const int kHttpClientErrorStart = 400;
+  static const int kHttpServerErrorEnd = 510;
+
+  switch (type.value) {
+    case NotificationType::NAV_ENTRY_COMMITTED:
+      if (ignore_next_load_notification_) {
+        ignore_next_load_notification_ = false;
+        return;
+      }
+
+      if (automation_) {
+        const NavigationController::LoadCommittedDetails* commit =
+            Details<NavigationController::LoadCommittedDetails>(details).ptr();
+
+        if (commit->http_status_code >= kHttpClientErrorStart &&
+            commit->http_status_code <= kHttpServerErrorEnd) {
+          automation_->Send(new AutomationMsg_NavigationFailed(
+              0, commit->http_status_code, commit->entry->url()));
+
+          ignore_next_load_notification_ = true;
+        } else {
+          // When the previous entry index is invalid, it will be -1, which
+          // will still make the computation come out right (navigating to the
+          // 0th entry will be +1).
+          automation_->Send(new AutomationMsg_DidNavigate(
+              0, commit->type,
+              commit->previous_entry_index -
+                  tab_contents_->controller()->GetLastCommittedEntryIndex(),
+              commit->entry->url()));
+        }
+      }
+      break;
+    case NotificationType::FAIL_PROVISIONAL_LOAD_WITH_ERROR: {
+      if (automation_) {
+        const ProvisionalLoadDetails* load_details =
+            Details<ProvisionalLoadDetails>(details).ptr();
+        automation_->Send(new AutomationMsg_NavigationFailed(
+            0, load_details->error_code(), load_details->url()));
+
+        ignore_next_load_notification_ = true;
+      }
+      break;
+    }
+    default:
+      NOTREACHED();
+  }
 }
 
-void ExternalTabContainer::GetBounds(CRect *out, bool including_frame) const {
-  GetWindowRect(out);
+void ExternalTabContainer::GetBounds(gfx::Rect* out,
+                                     bool including_frame) const {
+  CRect crect;
+  GetWindowRect(&crect);
+  *out = gfx::Rect(crect);
 }
 
 void ExternalTabContainer::MoveToFront(bool should_activate) {
 }
 
-HWND ExternalTabContainer::GetHWND() const {
+gfx::NativeView ExternalTabContainer::GetNativeView() const {
   return m_hWnd;
 }
 
-void ExternalTabContainer::PaintNow(const CRect& update_rect) {
-  RedrawWindow(update_rect,
+void ExternalTabContainer::PaintNow(const gfx::Rect& update_rect) {
+  RECT native_update_rect = update_rect.ToRECT();
+  RedrawWindow(&native_update_rect,
                NULL,
                RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_NOERASE);
 }
 
-ChromeViews::RootView* ExternalTabContainer::GetRootView() {
-  return const_cast<ChromeViews::RootView*>(&root_view_);
+views::RootView* ExternalTabContainer::GetRootView() {
+  return const_cast<views::RootView*>(&root_view_);
 }
 
 bool ExternalTabContainer::IsVisible() {
@@ -260,7 +354,7 @@ bool ExternalTabContainer::IsActive() {
 }
 
 bool ExternalTabContainer::ProcessKeyDown(HWND window, UINT message,
-                                            WPARAM wparam, LPARAM lparam) {
+                                          WPARAM wparam, LPARAM lparam) {
   if (!automation_) {
     return false;
   }
@@ -271,6 +365,7 @@ bool ExternalTabContainer::ProcessKeyDown(HWND window, UINT message,
   }
   int flags = HIWORD(lparam);
   if ((flags & KF_EXTENDED) || (flags & KF_ALTDOWN) ||
+      (wparam >= VK_F1 && wparam <= VK_F24) ||
       win_util::IsShiftPressed() || win_util::IsCtrlPressed()) {
     // If this is an extended key or if one or more of Alt, Shift and Control
     // are pressed, this might be an accelerator that the external host wants
@@ -302,6 +397,13 @@ void ExternalTabContainer::ProcessUnhandledAccelerator(const MSG& msg) {
   DispatchMessage(&msg);
 }
 
+void ExternalTabContainer::SetInitialFocus(bool reverse) {
+  DCHECK(tab_contents_);
+  if (tab_contents_) {
+    tab_contents_->SetInitialFocus(reverse);
+  }
+}
+
 // static
 bool ExternalTabContainer::IsExternalTabContainer(HWND window) {
   std::wstring class_name = win_util::GetClassName(window);
@@ -322,4 +424,3 @@ ExternalTabContainer* ExternalTabContainer::GetContainerForTab(
       GetProp(parent_window, kWindowObjectKey));
   return container;
 }
-

@@ -19,6 +19,8 @@
 
 #include "base/base_paths.h"
 
+class FilePath;
+
 // The path service is a global table mapping keys to file system paths.  It is
 // OK to use this service from multiple threads.
 //
@@ -31,6 +33,9 @@ class PathService {
   //
   // Returns true if the directory or file was successfully retrieved. On
   // failure, 'path' will not be changed.
+  static bool Get(int key, FilePath* path);
+  // This version, producing a wstring, is deprecated and only kept around
+  // until we can fix all callers.
   static bool Get(int key, std::wstring* path);
 
   // Overrides the path to a special directory or file.  This cannot be used to
@@ -38,7 +43,8 @@ class PathService {
   // path specifies a directory that does not exist, the directory will be
   // created by this method.  This method returns true if successful.
   //
-  // If the given path is relative, then it will be resolved against DIR_CURRENT.
+  // If the given path is relative, then it will be resolved against
+  // DIR_CURRENT.
   //
   // WARNING: Consumers of PathService::Get may expect paths to be constant
   // over the lifetime of the app, so this method should be used with caution.
@@ -58,7 +64,7 @@ class PathService {
   // WARNING: This function could be called on any thread from which the
   // PathService is used, so a the ProviderFunc MUST BE THREADSAFE.
   //
-  typedef bool (*ProviderFunc)(int, std::wstring*);
+  typedef bool (*ProviderFunc)(int, FilePath*);
 
   // Call to register a path provider.  You must specify the range "[key_start,
   // key_end)" of supported path keys.
@@ -66,10 +72,9 @@ class PathService {
                                int key_start,
                                int key_end);
  private:
-  static bool GetFromCache(int key, std::wstring* path);
-  static void AddToCache(int key, const std::wstring& path);
-  
+  static bool GetFromCache(int key, FilePath* path);
+  static void AddToCache(int key, const FilePath& path);
+
 };
 
 #endif // BASE_PATH_SERVICE_H__
-

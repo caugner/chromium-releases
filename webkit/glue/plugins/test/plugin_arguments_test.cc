@@ -2,8 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#define STRSAFE_NO_DEPRECATE
-#include <strsafe.h>
+#include "base/basictypes.h"
+#include "base/string_util.h"
+
 #include "webkit/glue/plugins/test/plugin_arguments_test.h"
 
 namespace NPAPIClient {
@@ -44,9 +45,9 @@ NPError PluginArgumentsTest::New(uint16 mode, int16 argc,
       int size = atoi(size_string);
 
       for (int index = 1; index <= max_args; index++) {
-        char arg_name[MAX_PATH];  // Use MAX_PATH for Max Name Length
-        StringCchPrintfA(arg_name, sizeof(arg_name), "%s%d", "val", index);
-        const char *val_string = GetArgValue(arg_name, argc, argn, argv);
+        std::string arg_name = StringPrintf("%s%d", "val", index);
+        const char *val_string = GetArgValue(arg_name.c_str(), argc, argn,
+                                             argv);
         ExpectAsciiStringNotEqual(val_string, (const char*)NULL);
         if (val_string != NULL)
           ExpectIntegerEqual((int)strlen(val_string), (index*size));
@@ -65,4 +66,3 @@ NPError PluginArgumentsTest::SetWindow(NPWindow* pNPWindow) {
 }
 
 } // namespace NPAPIClient
-

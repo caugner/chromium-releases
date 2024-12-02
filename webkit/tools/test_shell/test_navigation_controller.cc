@@ -35,7 +35,7 @@ void TestNavigationEntry::SetContentState(const std::string& state) {
 
 WebHistoryItem* TestNavigationEntry::GetHistoryItem() const {
   if (!cached_history_item_) {
-    TestShellExtraRequestData* extra_data = 
+    TestShellExtraRequestData* extra_data =
         new TestShellExtraRequestData(GetPageID());
     cached_history_item_ =
         WebHistoryItem::Create(GetURL(), GetTitle(), GetContentState(),
@@ -226,7 +226,7 @@ int TestNavigationController::GetEntryIndexWithPageID(int32 page_id) const {
 void TestNavigationController::NavigateToPendingEntry(bool reload) {
   // For session history navigations only the pending_entry_index_ is set.
   if (!pending_entry_) {
-    DCHECK(pending_entry_index_ != -1); 
+    DCHECK(pending_entry_index_ != -1);
     pending_entry_ = entries_[pending_entry_index_].get();
   }
 
@@ -244,4 +244,3 @@ void TestNavigationController::UpdateMaxPageID() {
   if (entry)
     max_page_id_ = std::max(max_page_id_, entry->GetPageID());
 }
-

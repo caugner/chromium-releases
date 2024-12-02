@@ -25,7 +25,8 @@
 
 #include <string>
 
-#include "chrome/common/notification_service.h"
+#include "base/basictypes.h"
+#include "chrome/common/notification_observer.h"
 
 class PrefService;
 
@@ -172,4 +173,3 @@ class StringPrefMember : public PrefMember<std::wstring> {
 };
 
 #endif  // CHROME_COMMON_PREF_MEMBER_H_
-

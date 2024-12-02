@@ -134,6 +134,10 @@
 			>
 		</File>
 		<File
+			RelativePath=".\default_plugin_resources.h"
+			>
+		</File>
+		<File
 			RelativePath=".\default_plugin_shared.h"
 			>
 		</File>
@@ -154,11 +158,11 @@
 			>
 		</File>
 		<File
-			RelativePath=".\plugin_impl.cc"
+			RelativePath=".\plugin_impl_win.cc"
 			>
 		</File>
 		<File
-			RelativePath=".\plugin_impl.h"
+			RelativePath=".\plugin_impl_win.h"
 			>
 		</File>
 		<File

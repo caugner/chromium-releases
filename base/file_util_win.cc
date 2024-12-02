@@ -10,14 +10,13 @@
 #include <time.h>
 #include <string>
 
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/scoped_handle.h"
 #include "base/string_util.h"
 #include "base/win_util.h"
 
 namespace file_util {
-
-const wchar_t kPathSeparator = L'\\';
 
 std::wstring GetDirectoryFromPath(const std::wstring& path) {
   wchar_t path_buffer[MAX_PATH];
@@ -32,14 +31,14 @@ std::wstring GetDirectoryFromPath(const std::wstring& path) {
   return directory;
 }
 
-bool AbsolutePath(std::wstring* path) {
+bool AbsolutePath(FilePath* path) {
   wchar_t file_path_buf[MAX_PATH];
-  if (!_wfullpath(file_path_buf, path->c_str(), MAX_PATH))
+  if (!_wfullpath(file_path_buf, path->value().c_str(), MAX_PATH))
     return false;
-  *path = file_path_buf;
+  *path = FilePath(file_path_buf);
   return true;
 }
-  
+
 int CountFilesCreatedAfter(const std::wstring& path,
                            const FILETIME& comparison_time) {
   int file_count = 0;
@@ -66,14 +65,14 @@ int CountFilesCreatedAfter(const std::wstring& path,
   return file_count;
 }
 
-bool Delete(const std::wstring& path, bool recursive) {
-  if (path.length() >= MAX_PATH)
+bool Delete(const FilePath& path, bool recursive) {
+  if (path.value().length() >= MAX_PATH)
     return false;
 
   // If we're not recursing use DeleteFile; it should be faster. DeleteFile
   // fails if passed a directory though, which is why we fall through on
   // failure to the SHFileOperation.
-  if (!recursive && DeleteFile(path.c_str()) != 0)
+  if (!recursive && DeleteFile(path.value().c_str()) != 0)
     return true;
 
   // SHFILEOPSTRUCT wants the path to be terminated with two NULLs,
@@ -81,7 +80,7 @@ bool Delete(const std::wstring& path, bool recursive) {
   // into the rest of the buffer.
   wchar_t double_terminated_path[MAX_PATH + 1] = {0};
 #pragma warning(suppress:4996)  // don't complain about wcscpy deprecation
-  wcscpy(double_terminated_path, path.c_str());
+  wcscpy(double_terminated_path, path.value().c_str());
 
   SHFILEOPSTRUCT file_operation = {0};
   file_operation.wFunc = FO_DELETE;
@@ -89,32 +88,50 @@ bool Delete(const std::wstring& path, bool recursive) {
   file_operation.fFlags = FOF_NOERRORUI | FOF_SILENT | FOF_NOCONFIRMATION;
   if (!recursive)
     file_operation.fFlags |= FOF_NORECURSION | FOF_FILESONLY;
-  return (SHFileOperation(&file_operation) == 0);
+  int err = SHFileOperation(&file_operation);
+  // Some versions of Windows return ERROR_FILE_NOT_FOUND when
+  // deleting an empty directory.
+  return (err == 0 || err == ERROR_FILE_NOT_FOUND);
 }
 
-bool Move(const std::wstring& from_path, const std::wstring& to_path) {
+bool Move(const FilePath& from_path, const FilePath& to_path) {
   // NOTE: I suspect we could support longer paths, but that would involve
   // analyzing all our usage of files.
-  if (from_path.length() >= MAX_PATH || to_path.length() >= MAX_PATH)
+  if (from_path.value().length() >= MAX_PATH ||
+      to_path.value().length() >= MAX_PATH) {
     return false;
-  return (MoveFileEx(from_path.c_str(), to_path.c_str(),
-                     MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING) != 0);
+  }
+  if (MoveFileEx(from_path.value().c_str(), to_path.value().c_str(),
+                 MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING) != 0)
+    return true;
+  if (DirectoryExists(from_path)) {
+    // MoveFileEx fails if moving directory across volumes. We will simulate
+    // the move by using Copy and Delete. Ideally we could check whether
+    // from_path and to_path are indeed in different volumes.
+    return CopyAndDeleteDirectory(from_path, to_path);
+  }
+  return false;
 }
 
-bool CopyFile(const std::wstring& from_path, const std::wstring& to_path) {
+bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
   // NOTE: I suspect we could support longer paths, but that would involve
   // analyzing all our usage of files.
-  if (from_path.length() >= MAX_PATH || to_path.length() >= MAX_PATH)
+  if (from_path.value().length() >= MAX_PATH ||
+      to_path.value().length() >= MAX_PATH) {
     return false;
-  return (::CopyFile(from_path.c_str(), to_path.c_str(), false) != 0);
+  }
+  return (::CopyFile(from_path.value().c_str(), to_path.value().c_str(),
+                     false) != 0);
 }
 
-bool ShellCopy(const std::wstring& from_path, const std::wstring& to_path,
+bool ShellCopy(const FilePath& from_path, const FilePath& to_path,
                bool recursive) {
   // NOTE: I suspect we could support longer paths, but that would involve
   // analyzing all our usage of files.
-  if (from_path.length() >= MAX_PATH || to_path.length() >= MAX_PATH)
+  if (from_path.value().length() >= MAX_PATH ||
+      to_path.value().length() >= MAX_PATH) {
     return false;
+  }
 
   // SHFILEOPSTRUCT wants the path to be terminated with two NULLs,
   // so we have to use wcscpy because wcscpy_s writes non-NULLs
@@ -122,9 +139,9 @@ bool ShellCopy(const std::wstring& from_path, const std::wstring& to_path,
   wchar_t double_terminated_path_from[MAX_PATH + 1] = {0};
   wchar_t double_terminated_path_to[MAX_PATH + 1] = {0};
 #pragma warning(suppress:4996)  // don't complain about wcscpy deprecation
-  wcscpy(double_terminated_path_from, from_path.c_str());
+  wcscpy(double_terminated_path_from, from_path.value().c_str());
 #pragma warning(suppress:4996)  // don't complain about wcscpy deprecation
-  wcscpy(double_terminated_path_to, to_path.c_str());
+  wcscpy(double_terminated_path_to, to_path.value().c_str());
 
   SHFILEOPSTRUCT file_operation = {0};
   file_operation.wFunc = FO_COPY;
@@ -138,7 +155,7 @@ bool ShellCopy(const std::wstring& from_path, const std::wstring& to_path,
   return (SHFileOperation(&file_operation) == 0);
 }
 
-bool CopyDirectory(const std::wstring& from_path, const std::wstring& to_path,
+bool CopyDirectory(const FilePath& from_path, const FilePath& to_path,
                    bool recursive) {
   if (recursive)
     return ShellCopy(from_path, to_path, true);
@@ -154,18 +171,32 @@ bool CopyDirectory(const std::wstring& from_path, const std::wstring& to_path,
       ShellCopy(from_path, to_path, false);
   }
 
-  std::wstring directory(from_path);
-  AppendToPath(&directory, L"*.*");
+  FilePath directory = from_path.Append(L"*.*");
   return ShellCopy(directory, to_path, false);
 }
 
-bool PathExists(const std::wstring& path) {
-  return (GetFileAttributes(path.c_str()) != INVALID_FILE_ATTRIBUTES);
+bool CopyAndDeleteDirectory(const FilePath& from_path,
+                            const FilePath& to_path) {
+  if (CopyDirectory(from_path, to_path, true)) {
+    if (Delete(from_path, true)) {
+      return true;
+    }
+    // Like Move, this function is not transactional, so we just
+    // leave the copied bits behind if deleting from_path fails.
+    // If to_path exists previously then we have already overwritten
+    // it by now, we don't get better off by deleting the new bits.
+  }
+  return false;
 }
 
-bool PathIsWritable(const std::wstring& path) {
+
+bool PathExists(const FilePath& path) {
+  return (GetFileAttributes(path.value().c_str()) != INVALID_FILE_ATTRIBUTES);
+}
+
+bool PathIsWritable(const FilePath& path) {
   HANDLE dir =
-      CreateFile(path.c_str(), FILE_ADD_FILE,
+      CreateFile(path.value().c_str(), FILE_ADD_FILE,
                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                  NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
 
@@ -176,8 +207,8 @@ bool PathIsWritable(const std::wstring& path) {
   return true;
 }
 
-bool DirectoryExists(const std::wstring& path) {
-  DWORD fileattr = GetFileAttributes(path.c_str());
+bool DirectoryExists(const FilePath& path) {
+  DWORD fileattr = GetFileAttributes(path.value().c_str());
   if (fileattr != INVALID_FILE_ATTRIBUTES)
     return (fileattr & FILE_ATTRIBUTE_DIRECTORY) != 0;
   return false;
@@ -365,24 +396,67 @@ bool UpdateShortcutLink(const wchar_t *source, const wchar_t *destination,
   return SUCCEEDED(result);
 }
 
-bool GetTempDir(std::wstring* path) {
+bool IsDirectoryEmpty(const std::wstring& dir_path) {
+  FileEnumerator files(FilePath(dir_path),
+                       false, FileEnumerator::FILES_AND_DIRECTORIES);
+  if (files.Next().value().empty())
+    return true;
+  return false;
+}
+
+bool GetTempDir(FilePath* path) {
   wchar_t temp_path[MAX_PATH + 1];
   DWORD path_len = ::GetTempPath(MAX_PATH, temp_path);
   if (path_len >= MAX_PATH || path_len <= 0)
     return false;
-  path->assign(temp_path);
-  TrimTrailingSeparator(path);
+  // TODO(evanm): the old behavior of this function was to always strip the
+  // trailing slash.  We duplicate this here, but it shouldn't be necessary
+  // when everyone is using the appropriate FilePath APIs.
+  std::wstring path_str(temp_path);
+  TrimTrailingSeparator(&path_str);
+  *path = FilePath(path_str);
   return true;
 }
 
-bool CreateTemporaryFileName(std::wstring* temp_file) {
-  wchar_t temp_name[MAX_PATH + 1];
-  std::wstring temp_path;
+bool GetShmemTempDir(FilePath* path) {
+  return GetTempDir(path);
+}
+
+bool CreateTemporaryFileName(FilePath* path) {
+  std::wstring temp_path, temp_file;
 
   if (!GetTempDir(&temp_path))
     return false;
 
-  if (!GetTempFileName(temp_path.c_str(), L"", 0, temp_name))
+  if (CreateTemporaryFileNameInDir(temp_path, &temp_file)) {
+    *path = FilePath(temp_file);
+    return true;
+  }
+
+  return false;
+}
+
+// On POSIX we have semantics to create and open a temporary file
+// atomically.
+// TODO(jrg): is there equivalent call to use on Windows instead of
+// going 2-step?
+FILE* CreateAndOpenTemporaryFile(FilePath* path) {
+
+  if (!CreateTemporaryFileName(path)) {
+    return NULL;
+  }
+  return OpenFile(*path, "w+");
+}
+
+FILE* CreateAndOpenTemporaryShmemFile(FilePath* path) {
+  return CreateAndOpenTemporaryFile(path);
+}
+
+bool CreateTemporaryFileNameInDir(const std::wstring& dir,
+                                  std::wstring* temp_file) {
+  wchar_t temp_name[MAX_PATH + 1];
+
+  if (!GetTempFileName(dir.c_str(), L"", 0, temp_name))
     return false;  // fail!
 
   DWORD path_len = GetLongPathName(temp_name, temp_name, MAX_PATH);
@@ -393,26 +467,26 @@ bool CreateTemporaryFileName(std::wstring* temp_file) {
   return true;
 }
 
-bool CreateNewTempDirectory(const std::wstring& prefix,
-                            std::wstring* new_temp_path) {
-  std::wstring system_temp_dir;
+bool CreateNewTempDirectory(const FilePath::StringType& prefix,
+                            FilePath* new_temp_path) {
+  FilePath system_temp_dir;
   if (!GetTempDir(&system_temp_dir))
     return false;
 
-  std::wstring path_to_create;
+  FilePath path_to_create;
   srand(static_cast<uint32>(time(NULL)));
 
   int count = 0;
   while (count < 50) {
     // Try create a new temporary directory with random generated name. If
     // the one exists, keep trying another path name until we reach some limit.
-    path_to_create.assign(system_temp_dir);
+    path_to_create = system_temp_dir;
     std::wstring new_dir_name;
     new_dir_name.assign(prefix);
     new_dir_name.append(IntToWString(rand() % kint16max));
-    file_util::AppendToPath(&path_to_create, new_dir_name);
+    path_to_create = path_to_create.Append(new_dir_name);
 
-    if (::CreateDirectory(path_to_create.c_str(), NULL))
+    if (::CreateDirectory(path_to_create.value().c_str(), NULL))
       break;
     count++;
   }
@@ -421,34 +495,53 @@ bool CreateNewTempDirectory(const std::wstring& prefix,
     return false;
   }
 
-  new_temp_path->assign(path_to_create);
+  *new_temp_path = path_to_create;
   return true;
 }
 
-bool CreateDirectory(const std::wstring& full_path) {
+bool CreateDirectory(const FilePath& full_path) {
   if (DirectoryExists(full_path))
     return true;
-  int err = SHCreateDirectoryEx(NULL, full_path.c_str(), NULL);
+  int err = SHCreateDirectoryEx(NULL, full_path.value().c_str(), NULL);
   return err == ERROR_SUCCESS;
 }
 
-bool GetFileSize(const std::wstring& file_path, int64* file_size) {
-  ScopedHandle file_handle(
-      CreateFile(file_path.c_str(), GENERIC_READ,
-                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL));
-
-  LARGE_INTEGER win32_file_size = {0};
-  if (!GetFileSizeEx(file_handle, &win32_file_size)) {
+bool GetFileInfo(const FilePath& file_path, FileInfo* results) {
+  WIN32_FILE_ATTRIBUTE_DATA attr;
+  if (!GetFileAttributesEx(file_path.ToWStringHack().c_str(),
+                           GetFileExInfoStandard, &attr)) {
     return false;
   }
 
-  *file_size = win32_file_size.QuadPart;
+  ULARGE_INTEGER size;
+  size.HighPart = attr.nFileSizeHigh;
+  size.LowPart = attr.nFileSizeLow;
+  results->size = size.QuadPart;
+
+  results->is_directory =
+      (attr.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
   return true;
 }
 
-int ReadFile(const std::wstring& filename, char* data, int size) {
-  ScopedHandle file(CreateFile(filename.c_str(),
+FILE* OpenFile(const FilePath& filename, const char* mode) {
+  std::wstring w_mode = ASCIIToWide(std::string(mode));
+  FILE* file;
+  if (_wfopen_s(&file, filename.value().c_str(), w_mode.c_str()) != 0) {
+    return NULL;
+  }
+  return file;
+}
+
+FILE* OpenFile(const std::string& filename, const char* mode) {
+  FILE* file;
+  if (fopen_s(&file, filename.c_str(), mode) != 0) {
+    return NULL;
+  }
+  return file;
+}
+
+int ReadFile(const FilePath& filename, char* data, int size) {
+  ScopedHandle file(CreateFile(filename.value().c_str(),
                                GENERIC_READ,
                                FILE_SHARE_READ | FILE_SHARE_WRITE,
                                NULL,
@@ -469,8 +562,8 @@ int ReadFile(const std::wstring& filename, char* data, int size) {
   return ret_value;
 }
 
-int WriteFile(const std::wstring& filename, const char* data, int size) {
-  ScopedHandle file(CreateFile(filename.c_str(),
+int WriteFile(const FilePath& filename, const char* data, int size) {
+  ScopedHandle file(CreateFile(filename.value().c_str(),
                                GENERIC_WRITE,
                                0,
                                NULL,
@@ -478,7 +571,7 @@ int WriteFile(const std::wstring& filename, const char* data, int size) {
                                0,
                                NULL));
   if (file == INVALID_HANDLE_VALUE) {
-    LOG(WARNING) << "CreateFile failed for path " << filename <<
+    LOG(WARNING) << "CreateFile failed for path " << filename.value() <<
         " error code=" << GetLastError() <<
         " error text=" << win_util::FormatLastWin32Error();
     return -1;
@@ -491,85 +584,65 @@ int WriteFile(const std::wstring& filename, const char* data, int size) {
 
   if (!result) {
     // WriteFile failed.
-    LOG(WARNING) << "writing file " << filename <<
+    LOG(WARNING) << "writing file " << filename.value() <<
         " failed, error code=" << GetLastError() <<
         " description=" << win_util::FormatLastWin32Error();
   } else {
     // Didn't write all the bytes.
-    LOG(WARNING) << "wrote" << written << " bytes to " << filename <<
-        " expected " << size;
+    LOG(WARNING) << "wrote" << written << " bytes to " <<
+        filename.value() << " expected " << size;
   }
   return -1;
 }
 
-bool RenameFileAndResetSecurityDescriptor(
-    const std::wstring& source_file_path,
-    const std::wstring& target_file_path) {
-  // The MoveFile API does not reset the security descriptor on the target
-  // file. To ensure that the target file gets the correct security descriptor
-  // we create the target file initially in the target path, read its security
-  // descriptor and stamp this descriptor on the target file after the MoveFile
-  // API completes.
-  ScopedHandle temp_file_handle_for_security_desc(
-      CreateFileW(target_file_path.c_str(), GENERIC_READ | GENERIC_WRITE,
-                  FILE_SHARE_READ, NULL, OPEN_ALWAYS,
-                  FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE,
-                  NULL));
-  if (!temp_file_handle_for_security_desc.IsValid())
+bool RenameFileAndResetSecurityDescriptor(const FilePath& source_file_path,
+                                          const FilePath& target_file_path) {
+  // The parameters to SHFileOperation must be terminated with 2 NULL chars.
+  std::wstring source = source_file_path.value();
+  std::wstring target = target_file_path.value();
+
+  source.append(1, L'\0');
+  target.append(1, L'\0');
+
+  SHFILEOPSTRUCT move_info = {0};
+  move_info.wFunc = FO_MOVE;
+  move_info.pFrom = source.c_str();
+  move_info.pTo = target.c_str();
+  move_info.fFlags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI |
+                     FOF_NOCONFIRMMKDIR | FOF_NOCOPYSECURITYATTRIBS;
+
+  if (0 != SHFileOperation(&move_info))
     return false;
 
-  // Check how much we should allocate for the security descriptor.
-  unsigned long security_descriptor_size_in_bytes = 0;
-  GetFileSecurity(target_file_path.c_str(), DACL_SECURITY_INFORMATION, NULL, 0,
-                  &security_descriptor_size_in_bytes);
-  if (ERROR_INSUFFICIENT_BUFFER != GetLastError() ||
-      security_descriptor_size_in_bytes == 0)
-    return false;
-
-  scoped_array<char> security_descriptor(
-      new char[security_descriptor_size_in_bytes]);
-
-  if (!GetFileSecurity(target_file_path.c_str(), DACL_SECURITY_INFORMATION,
-                       security_descriptor.get(),
-                       security_descriptor_size_in_bytes,
-                       &security_descriptor_size_in_bytes)) {
-    return false;
-  }
-
-  temp_file_handle_for_security_desc.Set(INVALID_HANDLE_VALUE);
-
-  if (!MoveFileEx(source_file_path.c_str(), target_file_path.c_str(),
-                  MOVEFILE_COPY_ALLOWED)) {
-    return false;
-  }
-
-  return !!SetFileSecurity(target_file_path.c_str(),
-                           DACL_SECURITY_INFORMATION,
-                           security_descriptor.get());
+  return true;
 }
 
 // Gets the current working directory for the process.
-bool GetCurrentDirectory(std::wstring* dir) {
+bool GetCurrentDirectory(FilePath* dir) {
   wchar_t system_buffer[MAX_PATH];
   system_buffer[0] = 0;
   DWORD len = ::GetCurrentDirectory(MAX_PATH, system_buffer);
   if (len == 0 || len > MAX_PATH)
     return false;
-  *dir = system_buffer;
-  file_util::TrimTrailingSeparator(dir);
+  // TODO(evanm): the old behavior of this function was to always strip the
+  // trailing slash.  We duplicate this here, but it shouldn't be necessary
+  // when everyone is using the appropriate FilePath APIs.
+  std::wstring dir_str(system_buffer);
+  file_util::TrimTrailingSeparator(&dir_str);
+  *dir = FilePath(dir_str);
   return true;
 }
 
 // Sets the current working directory for the process.
-bool SetCurrentDirectory(const std::wstring& current_directory) {
-  BOOL ret = ::SetCurrentDirectory(current_directory.c_str());
-  return (ret ? true : false);
+bool SetCurrentDirectory(const FilePath& directory) {
+  BOOL ret = ::SetCurrentDirectory(directory.value().c_str());
+  return ret != 0;
 }
 
 ///////////////////////////////////////////////
+// FileEnumerator
 
-
-FileEnumerator::FileEnumerator(const std::wstring& root_path,
+FileEnumerator::FileEnumerator(const FilePath& root_path,
                                bool recursive,
                                FileEnumerator::FILE_TYPE file_type)
     : recursive_(recursive),
@@ -579,10 +652,10 @@ FileEnumerator::FileEnumerator(const std::wstring& root_path,
   pending_paths_.push(root_path);
 }
 
-FileEnumerator::FileEnumerator(const std::wstring& root_path,
+FileEnumerator::FileEnumerator(const FilePath& root_path,
                                bool recursive,
                                FileEnumerator::FILE_TYPE file_type,
-                               const std::wstring& pattern)
+                               const FilePath::StringType& pattern)
     : recursive_(recursive),
       file_type_(file_type),
       is_in_find_op_(false),
@@ -596,26 +669,33 @@ FileEnumerator::~FileEnumerator() {
     FindClose(find_handle_);
 }
 
-std::wstring FileEnumerator::Next() {
+void FileEnumerator::GetFindInfo(FindInfo* info) {
+  DCHECK(info);
+
+  if (!is_in_find_op_)
+    return;
+
+  memcpy(info, &find_data_, sizeof(*info));
+}
+
+FilePath FileEnumerator::Next() {
   if (!is_in_find_op_) {
     if (pending_paths_.empty())
-      return std::wstring();
+      return FilePath();
 
     // The last find FindFirstFile operation is done, prepare a new one.
-    // root_path_ must have the trailing directory character.
     root_path_ = pending_paths_.top();
-    file_util::AppendToPath(&root_path_, std::wstring());
     pending_paths_.pop();
 
     // Start a new find operation.
-    std::wstring src(root_path_);
+    FilePath src = root_path_;
 
-    if (pattern_.empty())
-      file_util::AppendToPath(&src, L"*");  // No pattern = match everything.
+    if (pattern_.value().empty())
+      src = src.Append(L"*");  // No pattern = match everything.
     else
-      file_util::AppendToPath(&src, pattern_);
+      src = src.Append(pattern_);
 
-    find_handle_ = FindFirstFile(src.c_str(), &find_data_);
+    find_handle_ = FindFirstFile(src.value().c_str(), &find_data_);
     is_in_find_op_ = true;
 
   } else {
@@ -634,18 +714,18 @@ std::wstring FileEnumerator::Next() {
     // in the root search directory, but for those directories which were
     // matched, we want to enumerate all files inside them. This will happen
     // when the handle is empty.
-    pattern_.clear();
+    pattern_ = FilePath();
 
     return Next();
   }
 
-  std::wstring cur_file(find_data_.cFileName);
+  FilePath cur_file(find_data_.cFileName);
   // Skip over . and ..
-  if (L"." == cur_file || L".." == cur_file)
+  if (L"." == cur_file.value() || L".." == cur_file.value())
     return Next();
 
   // Construct the absolute filename.
-  cur_file.insert(0, root_path_);
+  cur_file = root_path_.Append(cur_file);
 
   if (find_data_.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
     if (recursive_) {
@@ -653,13 +733,71 @@ std::wstring FileEnumerator::Next() {
       // it to pending_paths_ so we scan it after we finish scanning this
       // directory.
       pending_paths_.push(cur_file);
-      return (file_type_ & FileEnumerator::DIRECTORIES) ? cur_file : Next();
     }
-
-    if ((file_type_ & FileEnumerator::DIRECTORIES) == 0)
-      return Next();
+    return (file_type_ & FileEnumerator::DIRECTORIES) ? cur_file : Next();
   }
   return (file_type_ & FileEnumerator::FILES) ? cur_file : Next();
 }
 
+///////////////////////////////////////////////
+// MemoryMappedFile
+
+MemoryMappedFile::MemoryMappedFile()
+    : file_(INVALID_HANDLE_VALUE),
+      file_mapping_(INVALID_HANDLE_VALUE),
+      data_(NULL),
+      length_(INVALID_FILE_SIZE) {
+}
+
+bool MemoryMappedFile::MapFileToMemory(const FilePath& file_name) {
+  file_ = ::CreateFile(file_name.value().c_str(), GENERIC_READ,
+                       FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                       FILE_ATTRIBUTE_NORMAL, NULL);
+  if (file_ == INVALID_HANDLE_VALUE)
+    return false;
+
+  length_ = ::GetFileSize(file_, NULL);
+  if (length_ == INVALID_FILE_SIZE)
+    return false;
+
+  file_mapping_ = ::CreateFileMapping(file_, NULL, PAGE_READONLY,
+                                      0, length_, NULL);
+  if (file_mapping_ == INVALID_HANDLE_VALUE)
+    return false;
+
+  data_ = static_cast<uint8*>(
+      ::MapViewOfFile(file_mapping_, FILE_MAP_READ, 0, 0, length_));
+  return data_ != NULL;
+}
+
+void MemoryMappedFile::CloseHandles() {
+  if (data_)
+    ::UnmapViewOfFile(data_);
+  if (file_mapping_ != INVALID_HANDLE_VALUE)
+    ::CloseHandle(file_mapping_);
+  if (file_ != INVALID_HANDLE_VALUE)
+    ::CloseHandle(file_);
+
+  data_ = NULL;
+  file_mapping_ = file_ = INVALID_HANDLE_VALUE;
+  length_ = INVALID_FILE_SIZE;
+}
+
+// Deprecated functions ----------------------------------------------------
+
+void InsertBeforeExtension(std::wstring* path_str,
+                           const std::wstring& suffix) {
+  FilePath path(*path_str);
+  InsertBeforeExtension(&path, suffix);
+  path_str->assign(path.value());
+}
+void PathComponents(const std::wstring& path,
+                    std::vector<std::wstring>* components) {
+  PathComponents(FilePath(path), components);
+}
+void ReplaceExtension(std::wstring* file_name, const std::wstring& extension) {
+  FilePath path(*file_name);
+  ReplaceExtension(&path, extension);
+  file_name->assign(path.value());
+}
 }  // namespace file_util

@@ -8,6 +8,8 @@
 
 #include "base/string_util.h"
 
+using base::TimeDelta;
+
 namespace tracked_objects {
 
 // A TLS slot to the TrackRegistry for the current thread.
@@ -46,7 +48,7 @@ void DeathData::Write(std::string* output) const {
   if (!count_)
     return;
   if (1 == count_)
-    StringAppendF(output, "(1)Life in %dms ", count_, AverageMsDuration());
+    StringAppendF(output, "(1)Life in %dms ", AverageMsDuration());
   else
     StringAppendF(output, "(%d)Lives %dms/life ", count_, AverageMsDuration());
 }
@@ -79,7 +81,7 @@ Lock ThreadData::list_lock_;
 // static
 ThreadData::Status ThreadData::status_ = ThreadData::UNINITIALIZED;
 
-ThreadData::ThreadData() : message_loop_(MessageLoop::current()) {}
+ThreadData::ThreadData() : next_(NULL), message_loop_(MessageLoop::current()) {}
 
 // static
 ThreadData* ThreadData::current() {
@@ -902,4 +904,3 @@ void Comparator::WriteSnapshot(const Snapshot& sample,
 }
 
 }  // namespace tracked_objects
-

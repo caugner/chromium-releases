@@ -7,9 +7,9 @@
 
 #include "chrome/browser/options_window.h"
 #include "chrome/browser/profile.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/views/link.h"
-#include "chrome/views/native_button.h"
+#include "chrome/common/notification_observer.h"
+#include "chrome/views/controls/link.h"
+#include "chrome/views/controls/button/native_button.h"
 
 class PrefService;
 
@@ -19,7 +19,7 @@ class PrefService;
 //  A base class for Options dialog pages that handles ensuring control
 //  initialization is done just once.
 //
-class OptionsPageView : public ChromeViews::View,
+class OptionsPageView : public views::View,
                         public NotificationObserver {
  public:
   virtual ~OptionsPageView();
@@ -58,10 +58,10 @@ class OptionsPageView : public ChromeViews::View,
   // set.
   virtual void NotifyPrefChanged(const std::wstring* pref_name) { }
 
-  // ChromeViews::View overrides:
+  // views::View overrides:
   virtual void ViewHierarchyChanged(bool is_add,
-                                    ChromeViews::View* parent,
-                                    ChromeViews::View* child);
+                                    views::View* parent,
+                                    views::View* child);
 
   // Returns the HWND on which created windows should be parented.
   HWND GetRootWindow() const;
@@ -77,4 +77,3 @@ class OptionsPageView : public ChromeViews::View,
 };
 
 #endif  // #ifndef CHROME_BROWSER_VIEWS_OPTIONS_OPTIONS_PAGE_VIEW_H__
-

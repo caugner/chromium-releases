@@ -7,7 +7,6 @@
 
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/views/tabs/tab_renderer.h"
-#include "chrome/views/base_button.h"
 
 namespace gfx {
 class Path;
@@ -24,8 +23,7 @@ class Profile;
 //
 ///////////////////////////////////////////////////////////////////////////////
 class Tab : public TabRenderer,
-            public ChromeViews::ContextMenuController,
-            public ChromeViews::BaseButton::ButtonListener {
+            public views::ContextMenuController {
  public:
   static const std::string kTabClassName;
 
@@ -60,15 +58,21 @@ class Tab : public TabRenderer,
     virtual void StopAllHighlighting() = 0;
 
     // Potentially starts a drag for the specified Tab.
-    virtual void MaybeStartDrag(Tab* tab,
-                                const ChromeViews::MouseEvent& event) = 0;
+    virtual void MaybeStartDrag(Tab* tab, const views::MouseEvent& event) = 0;
 
     // Continues dragging a Tab.
-    virtual void ContinueDrag(const ChromeViews::MouseEvent& event) = 0;
+    virtual void ContinueDrag(const views::MouseEvent& event) = 0;
 
     // Ends dragging a Tab. |canceled| is true if the drag was aborted in a way
-    // other than the user releasing the mouse.
-    virtual void EndDrag(bool canceled) = 0;
+    // other than the user releasing the mouse. Returns whether the tab has been
+    // destroyed.
+    virtual bool EndDrag(bool canceled) = 0;
+
+    // Returns true if the associated TabStrip's delegate supports tab moving or
+    // detaching. Used by the Frame to determine if dragging on the Tab
+    // itself should move the window in cases where there's only one
+    // non drag-able Tab.
+    virtual bool HasAvailableDragActions() const = 0;
   };
 
   explicit Tab(TabDelegate* delegate);
@@ -85,12 +89,16 @@ class Tab : public TabRenderer,
   virtual bool IsSelected() const;
 
  private:
-  // ChromeViews::View overrides:
+  class ContextMenuController;
+
+  friend class ContextMenuController;
+
+  // views::View overrides:
   virtual bool HasHitTestMask() const;
   virtual void GetHitTestMask(gfx::Path* mask) const;
-  virtual bool OnMousePressed(const ChromeViews::MouseEvent& event);
-  virtual bool OnMouseDragged(const ChromeViews::MouseEvent& event);
-  virtual void OnMouseReleased(const ChromeViews::MouseEvent& event,
+  virtual bool OnMousePressed(const views::MouseEvent& event);
+  virtual bool OnMouseDragged(const views::MouseEvent& event);
+  virtual void OnMouseReleased(const views::MouseEvent& event,
                                bool canceled);
   virtual bool GetTooltipText(int x, int y, std::wstring* tooltip);
   virtual bool GetTooltipTextOrigin(int x, int y, CPoint* origin);
@@ -98,18 +106,21 @@ class Tab : public TabRenderer,
   virtual bool GetAccessibleRole(VARIANT* role);
   virtual bool GetAccessibleName(std::wstring* name);
 
-  // ChromeViews::ContextMenuController overrides:
-  virtual void ShowContextMenu(ChromeViews::View* source,
+  // views::ContextMenuController overrides:
+  virtual void ShowContextMenu(views::View* source,
                                int x,
                                int y,
                                bool is_mouse_gesture);
 
-  // ChromeViews::BaseButton::ButtonListener overrides:
-  virtual void ButtonPressed(ChromeViews::BaseButton* sender);
+  // views::ButtonListener overrides:
+  virtual void ButtonPressed(views::Button* sender);
 
   // Creates a path that contains the clickable region of the tab's visual
   // representation. Used by GetViewForPoint for hit-testing.
   void MakePathForTab(gfx::Path* path) const;
+
+  // Invoked when the context menu closes.
+  void ContextMenuClosed();
 
   // An instance of a delegate object that can perform various actions based on
   // user gestures.
@@ -118,8 +129,10 @@ class Tab : public TabRenderer,
   // True if the tab is being animated closed.
   bool closing_;
 
+  // If non-null it means we're showing a menu for the tab.
+  ContextMenuController* menu_controller_;
+
   DISALLOW_COPY_AND_ASSIGN(Tab);
 };
 
 #endif  // CHROME_BROWSER_VIEWS_TABS_TAB_H_
-

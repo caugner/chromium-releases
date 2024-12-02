@@ -2,26 +2,30 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/navigation_entry.h"
-#include "chrome/browser/render_view_host.h"
-#include "chrome/browser/web_contents.h"
+#include "base/string16.h"
+#include "chrome/browser/renderer_host/browser_render_process_host.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/tab_contents/navigation_entry.h"
+#include "chrome/browser/tab_contents/web_contents.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/test/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-namespace {
 
 class SiteInstanceTest : public testing::Test {
  private:
   MessageLoopForUI message_loop_;
 };
 
+namespace {
+
 class TestBrowsingInstance : public BrowsingInstance {
  public:
   TestBrowsingInstance(Profile* profile, int* deleteCounter)
       : BrowsingInstance(profile),
-        deleteCounter_(deleteCounter),
-        use_process_per_site(false) {}
+        use_process_per_site(false),
+        deleteCounter_(deleteCounter) {
+  }
+
   ~TestBrowsingInstance() {
     (*deleteCounter_)++;
   }
@@ -75,7 +79,8 @@ TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
   EXPECT_EQ(0, siteDeleteCounter);
 
   NavigationEntry* e1 = new NavigationEntry(TAB_CONTENTS_WEB, instance, 0, url,
-                                            std::wstring(),
+                                            GURL(),
+                                            string16(),
                                             PageTransition::LINK);
 
   // Redundantly setting e1's SiteInstance shouldn't affect the ref count.
@@ -84,7 +89,7 @@ TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
 
   // Add a second reference
   NavigationEntry* e2 = new NavigationEntry(TAB_CONTENTS_WEB, instance, 0, url,
-                                            std::wstring(),
+                                            GURL(), string16(),
                                             PageTransition::LINK);
 
   // Now delete both entries and be sure the SiteInstance goes away.
@@ -135,8 +140,8 @@ TEST_F(SiteInstanceTest, CloneNavigationEntry) {
                                                &browsingDeleteCounter);
 
   NavigationEntry* e1 = new NavigationEntry(TAB_CONTENTS_WEB, instance1, 0,
-                                            url,
-                                            std::wstring(),
+                                            url, GURL(),
+                                            string16(),
                                             PageTransition::LINK);
   // Clone the entry
   NavigationEntry* e2 = new NavigationEntry(*e1);
@@ -172,14 +177,15 @@ TEST_F(SiteInstanceTest, UpdateMaxPageID) {
 
 // Test to ensure GetProcess returns and creates processes correctly.
 TEST_F(SiteInstanceTest, GetProcess) {
-  // Ensure that GetProcess returns the process based on its host id.
+  // Ensure that GetProcess returns a process.
   scoped_ptr<TestingProfile> profile(new TestingProfile());
-  scoped_ptr<RenderProcessHost> host1(new RenderProcessHost(profile.get()));
-  scoped_refptr<SiteInstance> instance(SiteInstance::CreateSiteInstance(profile.get()));
-  instance.get()->set_process_host_id(host1.get()->host_id());
-  EXPECT_EQ(host1.get(), instance.get()->GetProcess());
+  scoped_ptr<RenderProcessHost> host1;
+  scoped_refptr<SiteInstance> instance(
+      SiteInstance::CreateSiteInstance(profile.get()));
+  host1.reset(instance.get()->GetProcess());
+  EXPECT_TRUE(host1.get() != NULL);
 
-  // Ensure that GetProcess creates a new process if no host id is set.
+  // Ensure that GetProcess creates a new process.
   scoped_refptr<SiteInstance> instance2(
       SiteInstance::CreateSiteInstance(profile.get()));
   scoped_ptr<RenderProcessHost> host2(instance2.get()->GetProcess());
@@ -201,13 +207,15 @@ TEST_F(SiteInstanceTest, SetSite) {
 
 // Test to ensure GetSiteForURL properly returns sites for URLs.
 TEST_F(SiteInstanceTest, GetSiteForURL) {
+  // Pages are irrelevant.
   GURL test_url = GURL("http://www.google.com/index.html");
   EXPECT_EQ(GURL("http://google.com"), SiteInstance::GetSiteForURL(test_url));
 
+  // Ports are irrlevant.
   test_url = GURL("https://www.google.com:8080");
-  EXPECT_EQ(GURL("https://google.com:8080"),
-            SiteInstance::GetSiteForURL(test_url));
+  EXPECT_EQ(GURL("https://google.com"), SiteInstance::GetSiteForURL(test_url));
 
+  // Javascript URLs have no site.
   test_url = GURL("javascript:foo();");
   EXPECT_EQ(GURL::EmptyGURL(), SiteInstance::GetSiteForURL(test_url));
 
@@ -237,9 +245,15 @@ TEST_F(SiteInstanceTest, IsSameWebSite) {
   GURL url_hang = GURL("about:hang");
   GURL url_shorthang = GURL("about:shorthang");
 
+  // Same scheme and port -> same site.
   EXPECT_TRUE(SiteInstance::IsSameWebSite(url_foo, url_foo2));
+
+  // Different scheme -> different site.
   EXPECT_FALSE(SiteInstance::IsSameWebSite(url_foo, url_foo_https));
-  EXPECT_FALSE(SiteInstance::IsSameWebSite(url_foo, url_foo_port));
+
+  // Different port -> same site.
+  // (Changes to document.domain make renderer ignore the port.)
+  EXPECT_TRUE(SiteInstance::IsSameWebSite(url_foo, url_foo_port));
 
   // JavaScript links should be considered same site for anything.
   EXPECT_TRUE(SiteInstance::IsSameWebSite(url_javascript, url_foo));
@@ -381,4 +395,3 @@ TEST_F(SiteInstanceTest, OneSiteInstancePerSiteInProfile) {
 
   // browsing_instances will be deleted when their SiteInstances are deleted
 }
-

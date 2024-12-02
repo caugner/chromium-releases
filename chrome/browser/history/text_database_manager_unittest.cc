@@ -2,10 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "chrome/browser/history/text_database_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using base::Time;
+using base::TimeDelta;
+using base::TimeTicks;
 
 namespace history {
 
@@ -31,38 +36,18 @@ const char* kURL5 = "http://www.google.com/uiop";
 const wchar_t* kTitle5 = L"Google cinq";
 const wchar_t* kBody5 = L"FOO page one.";
 
-class TextDatabaseManagerTest : public testing::Test {
+// This provides a simple implementation of a URL+VisitDatabase using an
+// in-memory sqlite connection. The text database manager expects to be able to
+// update the visit database to keep in sync.
+class InMemDB : public URLDatabase, public VisitDatabase {
  public:
-  // Called manually by the test so it can report failure to initialize.
-  bool Init() {
-    return file_util::CreateNewTempDirectory(L"TestSearchTest", &dir_);
-  }
-
- protected:
-  void SetUp() {
-  }
-
-  void TearDown() {
-    file_util::Delete(dir_, true);
-  }
-  
-  MessageLoop message_loop_;
-
-  // Directory containing the databases.
-  std::wstring dir_;
-};
-
-// This provides a simple implementation of a VisitDatabase using an in-memory
-// sqlite connection. The text database manager expects to be able to update
-// the visit database to keep in sync.
-class InMemVisitDB : public VisitDatabase {
- public:
-  InMemVisitDB() {
+  InMemDB() {
     sqlite3_open(":memory:", &db_);
     statement_cache_ = new SqliteStatementCache(db_);
+    CreateURLTable(false);
     InitVisitTable();
   }
-  ~InMemVisitDB() {
+  ~InMemDB() {
     delete statement_cache_;
     sqlite3_close(db_);
   }
@@ -76,7 +61,7 @@ class InMemVisitDB : public VisitDatabase {
   sqlite3* db_;
   SqliteStatementCache* statement_cache_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(InMemVisitDB);
+  DISALLOW_EVIL_CONSTRUCTORS(InMemDB);
 };
 
 // Adds all the pages once, and the first page once more in the next month.
@@ -159,12 +144,34 @@ bool ResultsHaveURL(const std::vector<TextDatabase::Match>& results,
 
 }  // namespace
 
+class TextDatabaseManagerTest : public testing::Test {
+ public:
+  // Called manually by the test so it can report failure to initialize.
+  bool Init() {
+    return file_util::CreateNewTempDirectory(
+        FILE_PATH_LITERAL("TestSearchTest"), &dir_);
+  }
+
+ protected:
+  void SetUp() {
+  }
+
+  void TearDown() {
+    file_util::Delete(dir_, true);
+  }
+
+  MessageLoop message_loop_;
+
+  // Directory containing the databases.
+  FilePath dir_;
+};
+
 // Tests basic querying.
 TEST_F(TextDatabaseManagerTest, InsertQuery) {
   ASSERT_TRUE(Init());
-  InMemVisitDB visit_db;
-  TextDatabaseManager manager(dir_, &visit_db);
-  ASSERT_TRUE(manager.Init());
+  InMemDB visit_db;
+  TextDatabaseManager manager(dir_, &visit_db, &visit_db);
+  ASSERT_TRUE(manager.Init(NULL));
 
   std::vector<Time> times;
   AddAllPages(manager, &visit_db, &times);
@@ -177,7 +184,7 @@ TEST_F(TextDatabaseManagerTest, InsertQuery) {
   manager.GetTextMatches(L"FOO", options, &results, &first_time_searched);
 
   // We should have matched every page.
-  EXPECT_EQ(6, results.size());
+  EXPECT_EQ(6U, results.size());
   EXPECT_TRUE(ResultsHaveURL(results, kURL1));
   EXPECT_TRUE(ResultsHaveURL(results, kURL2));
   EXPECT_TRUE(ResultsHaveURL(results, kURL3));
@@ -194,9 +201,9 @@ TEST_F(TextDatabaseManagerTest, InsertQuery) {
 // tests right now, but we test it anyway.
 TEST_F(TextDatabaseManagerTest, InsertCompleteNoVisit) {
   ASSERT_TRUE(Init());
-  InMemVisitDB visit_db;
-  TextDatabaseManager manager(dir_, &visit_db);
-  ASSERT_TRUE(manager.Init());
+  InMemDB visit_db;
+  TextDatabaseManager manager(dir_, &visit_db, &visit_db);
+  ASSERT_TRUE(manager.Init(NULL));
 
   // First add one without a visit.
   const GURL url(kURL1);
@@ -210,7 +217,7 @@ TEST_F(TextDatabaseManagerTest, InsertCompleteNoVisit) {
   Time first_time_searched;
 
   manager.GetTextMatches(L"FOO", options, &results, &first_time_searched);
-  ASSERT_EQ(1, results.size());
+  ASSERT_EQ(1U, results.size());
   EXPECT_EQ(kTitle1, results[0].title);
 }
 
@@ -218,9 +225,9 @@ TEST_F(TextDatabaseManagerTest, InsertCompleteNoVisit) {
 // visit was updated properly.
 TEST_F(TextDatabaseManagerTest, InsertCompleteVisit) {
   ASSERT_TRUE(Init());
-  InMemVisitDB visit_db;
-  TextDatabaseManager manager(dir_, &visit_db);
-  ASSERT_TRUE(manager.Init());
+  InMemDB visit_db;
+  TextDatabaseManager manager(dir_, &visit_db, &visit_db);
+  ASSERT_TRUE(manager.Init(NULL));
 
   // First add a visit to a page. We can just make up a URL ID since there is
   // not actually any URL database around.
@@ -245,7 +252,7 @@ TEST_F(TextDatabaseManagerTest, InsertCompleteVisit) {
   Time first_time_searched;
 
   manager.GetTextMatches(L"FOO", options, &results, &first_time_searched);
-  ASSERT_EQ(1, results.size());
+  ASSERT_EQ(1U, results.size());
   EXPECT_EQ(kTitle2, results[0].title);
 
   // Check that the visit got updated for its new indexed state.
@@ -257,9 +264,9 @@ TEST_F(TextDatabaseManagerTest, InsertCompleteVisit) {
 // Tests that partial inserts that expire are added to the database.
 TEST_F(TextDatabaseManagerTest, InsertPartial) {
   ASSERT_TRUE(Init());
-  InMemVisitDB visit_db;
-  TextDatabaseManager manager(dir_, &visit_db);
-  ASSERT_TRUE(manager.Init());
+  InMemDB visit_db;
+  TextDatabaseManager manager(dir_, &visit_db, &visit_db);
+  ASSERT_TRUE(manager.Init(NULL));
 
   // Add the first one with just a URL.
   GURL url1(kURL1);
@@ -286,7 +293,7 @@ TEST_F(TextDatabaseManagerTest, InsertPartial) {
   std::vector<TextDatabase::Match> results;
   Time first_time_searched;
   manager.GetTextMatches(L"google", options, &results, &first_time_searched);
-  ASSERT_EQ(0, results.size());
+  ASSERT_EQ(0U, results.size());
 
   // Compute a time threshold that will cause everything to be flushed, and
   // poke at the manager's internals to cause this to happen.
@@ -295,10 +302,61 @@ TEST_F(TextDatabaseManagerTest, InsertPartial) {
 
   // Now we should have all 3 URLs added.
   manager.GetTextMatches(L"google", options, &results, &first_time_searched);
-  ASSERT_EQ(3, results.size());
+  ASSERT_EQ(3U, results.size());
   EXPECT_TRUE(ResultsHaveURL(results, kURL1));
   EXPECT_TRUE(ResultsHaveURL(results, kURL2));
   EXPECT_TRUE(ResultsHaveURL(results, kURL3));
+}
+
+// Tests that partial inserts (due to timeouts) will still get updated if the
+// data comes in later.
+TEST_F(TextDatabaseManagerTest, PartialComplete) {
+  ASSERT_TRUE(Init());
+  InMemDB visit_db;
+  TextDatabaseManager manager(dir_, &visit_db, &visit_db);
+  ASSERT_TRUE(manager.Init(NULL));
+
+  Time added_time = Time::Now();
+  GURL url(kURL1);
+
+  // We have to have the URL in the URL and visit databases for this test to
+  // work.
+  URLRow url_row(url);
+  url_row.set_title(L"chocolate");
+  URLID url_id = visit_db.AddURL(url_row);
+  ASSERT_TRUE(url_id);
+  VisitRow visit_row;
+  visit_row.url_id = url_id;
+  visit_row.visit_time = added_time;
+  visit_db.AddVisit(&visit_row);
+
+  // Add a URL with no title or body, and say that it expired.
+  manager.AddPageURL(url, 0, 0, added_time);
+  TimeTicks expire_time = TimeTicks::Now() + TimeDelta::FromDays(1);
+  manager.FlushOldChangesForTime(expire_time);
+
+  // Add the title. We should be able to query based on that. The title in the
+  // URL row we set above should not come into the picture.
+  manager.AddPageTitle(url, L"Some unique title");
+  Time first_time_searched;
+  QueryOptions options;
+  std::vector<TextDatabase::Match> results;
+  manager.GetTextMatches(L"unique", options, &results, &first_time_searched);
+  EXPECT_EQ(1U, results.size());
+  manager.GetTextMatches(L"chocolate", options, &results, &first_time_searched);
+  EXPECT_EQ(0U, results.size());
+
+  // Now add the body, which should be queryable.
+  manager.AddPageContents(url, L"Very awesome body");
+  manager.GetTextMatches(L"awesome", options, &results, &first_time_searched);
+  EXPECT_EQ(1U, results.size());
+
+  // Adding the body will actually copy the title from the URL table rather
+  // than the previously indexed row (we made them not match above). This isn't
+  // necessarily what we want, but it's how it's implemented, and we don't want
+  // to regress it.
+  manager.GetTextMatches(L"chocolate", options, &results, &first_time_searched);
+  EXPECT_EQ(1U, results.size());
 }
 
 // Tests that changes get properly committed to disk.
@@ -309,30 +367,30 @@ TEST_F(TextDatabaseManagerTest, Writing) {
   std::vector<TextDatabase::Match> results;
   Time first_time_searched;
 
-  InMemVisitDB visit_db;
+  InMemDB visit_db;
 
   // Create the manager and write some stuff to it.
   {
-    TextDatabaseManager manager(dir_, &visit_db);
-    ASSERT_TRUE(manager.Init());
+    TextDatabaseManager manager(dir_, &visit_db, &visit_db);
+    ASSERT_TRUE(manager.Init(NULL));
 
     std::vector<Time> times;
     AddAllPages(manager, &visit_db, &times);
 
     // We should have matched every page.
     manager.GetTextMatches(L"FOO", options, &results, &first_time_searched);
-    EXPECT_EQ(6, results.size());
+    EXPECT_EQ(6U, results.size());
   }
   results.clear();
 
   // Recreate the manager and make sure it finds the written stuff.
   {
-    TextDatabaseManager manager(dir_, &visit_db);
-    ASSERT_TRUE(manager.Init());
+    TextDatabaseManager manager(dir_, &visit_db, &visit_db);
+    ASSERT_TRUE(manager.Init(NULL));
 
     // We should have matched every page again.
     manager.GetTextMatches(L"FOO", options, &results, &first_time_searched);
-    EXPECT_EQ(6, results.size());
+    EXPECT_EQ(6U, results.size());
   }
 }
 
@@ -345,12 +403,12 @@ TEST_F(TextDatabaseManagerTest, WritingTransaction) {
   std::vector<TextDatabase::Match> results;
   Time first_time_searched;
 
-  InMemVisitDB visit_db;
+  InMemDB visit_db;
 
   // Create the manager and write some stuff to it.
   {
-    TextDatabaseManager manager(dir_, &visit_db);
-    ASSERT_TRUE(manager.Init());
+    TextDatabaseManager manager(dir_, &visit_db, &visit_db);
+    ASSERT_TRUE(manager.Init(NULL));
 
     std::vector<Time> times;
     manager.BeginTransaction();
@@ -359,27 +417,27 @@ TEST_F(TextDatabaseManagerTest, WritingTransaction) {
 
     // We should have matched every page.
     manager.GetTextMatches(L"FOO", options, &results, &first_time_searched);
-    EXPECT_EQ(6, results.size());
+    EXPECT_EQ(6U, results.size());
   }
   results.clear();
 
   // Recreate the manager and make sure it finds the written stuff.
   {
-    TextDatabaseManager manager(dir_, &visit_db);
-    ASSERT_TRUE(manager.Init());
+    TextDatabaseManager manager(dir_, &visit_db, &visit_db);
+    ASSERT_TRUE(manager.Init(NULL));
 
     // We should have matched every page again.
     manager.GetTextMatches(L"FOO", options, &results, &first_time_searched);
-    EXPECT_EQ(6, results.size());
+    EXPECT_EQ(6U, results.size());
   }
 }
 
 // Tests querying where the maximum number of items is met.
 TEST_F(TextDatabaseManagerTest, QueryMax) {
   ASSERT_TRUE(Init());
-  InMemVisitDB visit_db;
-  TextDatabaseManager manager(dir_, &visit_db);
-  ASSERT_TRUE(manager.Init());
+  InMemDB visit_db;
+  TextDatabaseManager manager(dir_, &visit_db, &visit_db);
+  ASSERT_TRUE(manager.Init(NULL));
 
   std::vector<Time> times;
   AddAllPages(manager, &visit_db, &times);
@@ -394,7 +452,7 @@ TEST_F(TextDatabaseManagerTest, QueryMax) {
 
   // We should have gotten the last two pages as results (the first page is
   // also the last).
-  EXPECT_EQ(2, results.size());
+  EXPECT_EQ(2U, results.size());
   EXPECT_TRUE(first_time_searched <= times[4]);
   EXPECT_TRUE(ResultsHaveURL(results, kURL5));
   EXPECT_TRUE(ResultsHaveURL(results, kURL1));
@@ -403,7 +461,7 @@ TEST_F(TextDatabaseManagerTest, QueryMax) {
   options.max_count = 4;
   manager.GetTextMatches(L"FOO", options, &results, &first_time_searched);
 
-  EXPECT_EQ(4, results.size());
+  EXPECT_EQ(4U, results.size());
   EXPECT_TRUE(first_time_searched <= times[4]);
   EXPECT_TRUE(ResultsHaveURL(results, kURL3));
   EXPECT_TRUE(ResultsHaveURL(results, kURL4));
@@ -414,9 +472,9 @@ TEST_F(TextDatabaseManagerTest, QueryMax) {
 // Tests querying backwards in time in chunks.
 TEST_F(TextDatabaseManagerTest, QueryBackwards) {
   ASSERT_TRUE(Init());
-  InMemVisitDB visit_db;
-  TextDatabaseManager manager(dir_, &visit_db);
-  ASSERT_TRUE(manager.Init());
+  InMemDB visit_db;
+  TextDatabaseManager manager(dir_, &visit_db, &visit_db);
+  ASSERT_TRUE(manager.Init(NULL));
 
   std::vector<Time> times;
   AddAllPages(manager, &visit_db, &times);
@@ -433,7 +491,7 @@ TEST_F(TextDatabaseManagerTest, QueryBackwards) {
   manager.GetTextMatches(L"FOO", options, &results, &first_time_searched);
 
   // Check that we got the last two results.
-  EXPECT_EQ(2, results.size());
+  EXPECT_EQ(2U, results.size());
   EXPECT_TRUE(first_time_searched <= times[4]);
   EXPECT_TRUE(ResultsHaveURL(results, kURL5));
   EXPECT_TRUE(ResultsHaveURL(results, kURL1));
@@ -441,7 +499,7 @@ TEST_F(TextDatabaseManagerTest, QueryBackwards) {
   // Query the previous two URLs and make sure we got the correct ones.
   options.end_time = first_time_searched;
   manager.GetTextMatches(L"FOO", options, &results, &first_time_searched);
-  EXPECT_EQ(2, results.size());
+  EXPECT_EQ(2U, results.size());
   EXPECT_TRUE(first_time_searched <= times[2]);
   EXPECT_TRUE(ResultsHaveURL(results, kURL3));
   EXPECT_TRUE(ResultsHaveURL(results, kURL4));
@@ -449,7 +507,7 @@ TEST_F(TextDatabaseManagerTest, QueryBackwards) {
   // Query the previous two URLs...
   options.end_time = first_time_searched;
   manager.GetTextMatches(L"FOO", options, &results, &first_time_searched);
-  EXPECT_EQ(2, results.size());
+  EXPECT_EQ(2U, results.size());
   EXPECT_TRUE(first_time_searched <= times[0]);
   EXPECT_TRUE(ResultsHaveURL(results, kURL2));
   EXPECT_TRUE(ResultsHaveURL(results, kURL1));
@@ -457,7 +515,7 @@ TEST_F(TextDatabaseManagerTest, QueryBackwards) {
   // Try to query some more, there should be no results.
   options.end_time = first_time_searched;
   manager.GetTextMatches(L"FOO", options, &results, &first_time_searched);
-  EXPECT_EQ(0, results.size());
+  EXPECT_EQ(0U, results.size());
 }
 
 }  // namespace history

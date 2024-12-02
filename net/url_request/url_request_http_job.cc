@@ -4,20 +4,25 @@
 
 #include "net/url_request/url_request_http_job.h"
 
+#include "base/base_switches.h"
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "net/base/cookie_monster.h"
+#include "net/base/filter.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/base/sdch_manager.h"
+#include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_transaction.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_error_job.h"
 
 // TODO(darin): make sure the port blocking code is not lost
@@ -35,6 +40,13 @@ URLRequestJob* URLRequestHttpJob::Factory(URLRequest* request,
     NOTREACHED() << "requires a valid context";
     return new URLRequestErrorJob(request, net::ERR_INVALID_ARGUMENT);
   }
+
+  // We cache the value of the switch because this code path is hit on every
+  // network request.
+  static const bool kForceHTTPS =
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kForceHTTPS);
+  if (kForceHTTPS && scheme != "https")
+    return new URLRequestErrorJob(request, net::ERR_DISALLOWED_URL_SCHEME);
 
   return new URLRequestHttpJob(request);
 }
@@ -54,23 +66,35 @@ URLRequestHttpJob::URLRequestHttpJob(URLRequest* request)
 }
 
 URLRequestHttpJob::~URLRequestHttpJob() {
-  if (transaction_)
-    DestroyTransaction();
+  if (sdch_dictionary_url_.is_valid()) {
+    // Prior to reaching the destructor, request_ has been set to a NULL
+    // pointer, so request_->url() is no longer valid in the destructor, and we
+    // use an alternate copy |request_info_.url|.
+    SdchManager* manager = SdchManager::Global();
+    // To be extra safe, since this is a "different time" from when we decided
+    // to get the dictionary, we'll validate that an SdchManager is available.
+    // At shutdown time, care is taken to be sure that we don't delete this
+    // globally useful instance "too soon," so this check is just defensive
+    // coding to assure that IF the system is shutting down, we don't have any
+    // problem if the manager was deleted ahead of time.
+    if (manager)  // Defensive programming.
+      manager->FetchDictionary(request_info_.url, sdch_dictionary_url_);
+  }
 }
 
 void URLRequestHttpJob::SetUpload(net::UploadData* upload) {
-  DCHECK(!transaction_) << "cannot change once started";
+  DCHECK(!transaction_.get()) << "cannot change once started";
   request_info_.upload_data = upload;
 }
 
 void URLRequestHttpJob::SetExtraRequestHeaders(
     const std::string& headers) {
-  DCHECK(!transaction_) << "cannot change once started";
+  DCHECK(!transaction_.get()) << "cannot change once started";
   request_info_.extra_headers = headers;
 }
 
 void URLRequestHttpJob::Start() {
-  DCHECK(!transaction_);
+  DCHECK(!transaction_.get());
 
   // TODO(darin): URLRequest::referrer() should return a GURL
   GURL referrer(request_->referrer());
@@ -88,8 +112,10 @@ void URLRequestHttpJob::Start() {
   request_info_.method = request_->method();
   request_info_.load_flags = request_->load_flags();
 
-  if (request_->context())
-    request_info_.user_agent = request_->context()->user_agent();
+  if (request_->context()) {
+    request_info_.user_agent =
+        request_->context()->GetUserAgent(request_->url());
+  }
 
   AddExtraHeaders();
 
@@ -97,7 +123,7 @@ void URLRequestHttpJob::Start() {
 }
 
 void URLRequestHttpJob::Kill() {
-  if (!transaction_)
+  if (!transaction_.get())
     return;
 
   DestroyTransaction();
@@ -105,15 +131,16 @@ void URLRequestHttpJob::Kill() {
 }
 
 net::LoadState URLRequestHttpJob::GetLoadState() const {
-  return transaction_ ? transaction_->GetLoadState() : net::LOAD_STATE_IDLE;
+  return transaction_.get() ?
+      transaction_->GetLoadState() : net::LOAD_STATE_IDLE;
 }
 
 uint64 URLRequestHttpJob::GetUploadProgress() const {
-  return transaction_ ? transaction_->GetUploadProgress() : 0;
+  return transaction_.get() ? transaction_->GetUploadProgress() : 0;
 }
 
-bool URLRequestHttpJob::GetMimeType(std::string* mime_type) {
-  DCHECK(transaction_);
+bool URLRequestHttpJob::GetMimeType(std::string* mime_type) const {
+  DCHECK(transaction_.get());
 
   if (!response_info_)
     return false;
@@ -122,7 +149,7 @@ bool URLRequestHttpJob::GetMimeType(std::string* mime_type) {
 }
 
 bool URLRequestHttpJob::GetCharset(std::string* charset) {
-  DCHECK(transaction_);
+  DCHECK(transaction_.get());
 
   if (!response_info_)
     return false;
@@ -132,7 +159,7 @@ bool URLRequestHttpJob::GetCharset(std::string* charset) {
 
 void URLRequestHttpJob::GetResponseInfo(net::HttpResponseInfo* info) {
   DCHECK(request_);
-  DCHECK(transaction_);
+  DCHECK(transaction_.get());
 
   if (response_info_)
     *info = *response_info_;
@@ -140,7 +167,7 @@ void URLRequestHttpJob::GetResponseInfo(net::HttpResponseInfo* info) {
 
 bool URLRequestHttpJob::GetResponseCookies(
     std::vector<std::string>* cookies) {
-  DCHECK(transaction_);
+  DCHECK(transaction_.get());
 
   if (!response_info_)
     return false;
@@ -154,7 +181,7 @@ bool URLRequestHttpJob::GetResponseCookies(
 }
 
 int URLRequestHttpJob::GetResponseCode() {
-  DCHECK(transaction_);
+  DCHECK(transaction_.get());
 
   if (!response_info_)
     return -1;
@@ -163,19 +190,28 @@ int URLRequestHttpJob::GetResponseCode() {
 }
 
 bool URLRequestHttpJob::GetContentEncodings(
-    std::vector<std::string>* encoding_types) {
-  DCHECK(transaction_);
-
+    std::vector<Filter::FilterType>* encoding_types) {
+  DCHECK(transaction_.get());
   if (!response_info_)
     return false;
+  DCHECK(encoding_types->empty());
 
   std::string encoding_type;
   void* iter = NULL;
   while (response_info_->headers->EnumerateHeader(&iter, "Content-Encoding",
                                                   &encoding_type)) {
-    encoding_types->push_back(encoding_type);
+    encoding_types->push_back(Filter::ConvertEncodingToType(encoding_type));
+  }
+
+  if (!encoding_types->empty()) {
+    Filter::FixupEncodingTypes(*this, encoding_types);
   }
   return !encoding_types->empty();
+}
+
+bool URLRequestHttpJob::IsSdchResponse() const {
+  return response_info_ &&
+      (request_info_.load_flags & net::LOAD_SDCH_DICTIONARY_ADVERTISED);
 }
 
 bool URLRequestHttpJob::IsRedirectResponse(GURL* location,
@@ -238,7 +274,7 @@ bool URLRequestHttpJob::NeedsAuth() {
 
 void URLRequestHttpJob::GetAuthChallengeInfo(
     scoped_refptr<net::AuthChallengeInfo>* result) {
-  DCHECK(transaction_);
+  DCHECK(transaction_.get());
   DCHECK(response_info_);
 
   // sanity checks:
@@ -250,23 +286,9 @@ void URLRequestHttpJob::GetAuthChallengeInfo(
   *result = response_info_->auth_challenge;
 }
 
-void URLRequestHttpJob::GetCachedAuthData(
-    const net::AuthChallengeInfo& auth_info,
-    scoped_refptr<net::AuthData>* auth_data) {
-  net::AuthCache* auth_cache =
-      request_->context()->http_transaction_factory()->GetAuthCache();
-  if (!auth_cache) {
-    *auth_data = NULL;
-    return;
-  }
-  std::string auth_cache_key =
-      net::AuthCache::HttpKey(request_->url(), auth_info);
-  *auth_data = auth_cache->Lookup(auth_cache_key);
-}
-
 void URLRequestHttpJob::SetAuth(const std::wstring& username,
                                 const std::wstring& password) {
-  DCHECK(transaction_);
+  DCHECK(transaction_.get());
 
   // Proxy gets set first, then WWW.
   if (proxy_auth_state_ == net::AUTH_STATE_NEED_AUTH) {
@@ -321,7 +343,10 @@ void URLRequestHttpJob::CancelAuth() {
 }
 
 void URLRequestHttpJob::ContinueDespiteLastError() {
-  DCHECK(transaction_);
+  // If the transaction was destroyed, then the job was cancelled.
+  if (!transaction_.get())
+    return;
+
   DCHECK(!response_info_) << "should not have a response yet";
 
   // No matter what, we want to report our status as IO pending since we will
@@ -339,10 +364,11 @@ void URLRequestHttpJob::ContinueDespiteLastError() {
 }
 
 bool URLRequestHttpJob::GetMoreData() {
-  return transaction_ && !read_in_progress_;
+  return transaction_.get() && !read_in_progress_;
 }
 
-bool URLRequestHttpJob::ReadRawData(char* buf, int buf_size, int *bytes_read) {
+bool URLRequestHttpJob::ReadRawData(net::IOBuffer* buf, int buf_size,
+                                    int *bytes_read) {
   DCHECK_NE(buf_size, 0);
   DCHECK(bytes_read);
   DCHECK(!read_in_progress_);
@@ -370,7 +396,7 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
 
   // If the transaction was destroyed, then the job was cancelled, and
   // we can just ignore this notification.
-  if (!transaction_)
+  if (!transaction_.get())
     return;
 
   // Clear the IO_PENDING status
@@ -378,7 +404,9 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
 
   if (result == net::OK) {
     NotifyHeadersComplete();
-  } else if (net::IsCertificateError(result)) {
+  } else if (net::IsCertificateError(result) &&
+             !CommandLine::ForCurrentProcess()->HasSwitch(
+                 switches::kForceHTTPS)) {
     // We encountered an SSL certificate error.  Ask our delegate to decide
     // what we should do.
     // TODO(wtc): also pass ssl_info.cert_status, or just pass the whole
@@ -417,11 +445,14 @@ void URLRequestHttpJob::NotifyHeadersComplete() {
         ctx->cookie_policy()->CanSetCookie(request_->url(),
                                            request_->policy_url())) {
       FetchResponseCookies();
-      ctx->cookie_store()->SetCookies(request_->url(), response_cookies_);
+      net::CookieMonster::CookieOptions options;
+      options.set_include_httponly();
+      ctx->cookie_store()->SetCookiesWithOptions(request_->url(),
+                                                 response_cookies_,
+                                                 options);
     }
   }
 
-  // Get list of SDCH dictionary requests, and schedule them to be loaded.
   if (SdchManager::Global() &&
       SdchManager::Global()->IsInSupportedDomain(request_->url())) {
     static const std::string name = "Get-Dictionary";
@@ -434,8 +465,11 @@ void URLRequestHttpJob::NotifyHeadersComplete() {
     // Eventually we should wait until a dictionary is requested several times
     // before we even download it (so that we don't waste memory or bandwidth).
     if (response_info_->headers->EnumerateHeader(&iter, name, &url_text)) {
-      GURL dictionary_url = request_->url().Resolve(url_text);
-      SdchManager::Global()->FetchDictionary(request_->url(), dictionary_url);
+      // request_->url() won't be valid in the destructor, so we use an
+      // alternate copy.
+      DCHECK(request_->url() == request_info_.url);
+      // Resolve suggested URL relative to request url.
+      sdch_dictionary_url_ = request_info_.url.Resolve(url_text);
     }
   }
 
@@ -443,10 +477,9 @@ void URLRequestHttpJob::NotifyHeadersComplete() {
 }
 
 void URLRequestHttpJob::DestroyTransaction() {
-  DCHECK(transaction_);
+  DCHECK(transaction_.get());
 
-  transaction_->Destroy();
-  transaction_ = NULL;
+  transaction_.reset();
   response_info_ = NULL;
 }
 
@@ -454,20 +487,20 @@ void URLRequestHttpJob::StartTransaction() {
   // NOTE: This method assumes that request_info_ is already setup properly.
 
   // Create a transaction.
-  DCHECK(!transaction_);
+  DCHECK(!transaction_.get());
 
   DCHECK(request_->context());
   DCHECK(request_->context()->http_transaction_factory());
 
-  transaction_ =
-      request_->context()->http_transaction_factory()->CreateTransaction();
+  transaction_.reset(
+      request_->context()->http_transaction_factory()->CreateTransaction());
 
   // No matter what, we want to report our status as IO pending since we will
   // be notifying our consumer asynchronously via OnStartCompleted.
   SetStatus(URLRequestStatus(URLRequestStatus::IO_PENDING, 0));
 
   int rv;
-  if (transaction_) {
+  if (transaction_.get()) {
     rv = transaction_->Start(&request_info_, &start_callback_);
     if (rv == net::ERR_IO_PENDING)
       return;
@@ -482,15 +515,42 @@ void URLRequestHttpJob::StartTransaction() {
 }
 
 void URLRequestHttpJob::AddExtraHeaders() {
+  // Supply Accept-Encoding headers first so that it is more likely that they
+  // will be in the first transmitted packet.  This can sometimes make it easier
+  // to filter and analyze the streams to assure that a proxy has not damaged
+  // these headers.  Some proxies deliberately corrupt Accept-Encoding headers.
+  if (!SdchManager::Global() ||
+      !SdchManager::Global()->IsInSupportedDomain(request_->url())) {
+    // Tell the server what compression formats we support (other than SDCH).
+    request_info_.extra_headers += "Accept-Encoding: gzip,deflate,bzip2\r\n";
+  } else {
+    // Supply SDCH related headers, as well as accepting that encoding.
+    // Tell the server what compression formats we support.
+    request_info_.extra_headers += "Accept-Encoding: "
+        "gzip,deflate,bzip2,sdch\r\n";
+
+    // TODO(jar): See if it is worth optimizing away these bytes when the URL is
+    // probably an img or such. (and SDCH encoding is not likely).
+    std::string avail_dictionaries;
+    SdchManager::Global()->GetAvailDictionaryList(request_->url(),
+                                                  &avail_dictionaries);
+    if (!avail_dictionaries.empty()) {
+      request_info_.extra_headers += "Avail-Dictionary: "
+          + avail_dictionaries + "\r\n";
+      request_info_.load_flags |= net::LOAD_SDCH_DICTIONARY_ADVERTISED;
+    }
+  }
+
   URLRequestContext* context = request_->context();
   if (context) {
     // Add in the cookie header.  TODO might we need more than one header?
     if (context->cookie_store() &&
         context->cookie_policy()->CanGetCookies(request_->url(),
                                                request_->policy_url())) {
+      net::CookieMonster::CookieOptions options;
+      options.set_include_httponly();
       std::string cookies = request_->context()->cookie_store()->
-          GetCookiesWithOptions(request_->url(),
-                                net::CookieMonster::INCLUDE_HTTPONLY);
+          GetCookiesWithOptions(request_->url(), options);
       if (!cookies.empty())
         request_info_.extra_headers += "Cookie: " + cookies + "\r\n";
     }
@@ -501,34 +561,6 @@ void URLRequestHttpJob::AddExtraHeaders() {
       request_info_.extra_headers += "Accept-Charset: " +
           context->accept_charset() + "\r\n";
   }
-
-  if (!SdchManager::Global() ||
-      !SdchManager::Global()->IsInSupportedDomain(request_->url())) {
-    // Tell the server what compression formats we support (other than SDCH).
-    request_info_.extra_headers += "Accept-Encoding: gzip,deflate,bzip2\r\n";
-    return;
-  }
-
-  // Supply SDCH related headers, as well as accepting that encoding.
-
-  // TODO(jar): See if it is worth optimizing away these bytes when the URL is
-  // probably an img or such. (and SDCH encoding is not likely).
-  std::string avail_dictionaries;
-  SdchManager::Global()->GetAvailDictionaryList(request_->url(),
-                                                &avail_dictionaries);
-  if (!avail_dictionaries.empty())
-    request_info_.extra_headers += "Avail-Dictionary: "
-        + avail_dictionaries + "\r\n";
-
-  scoped_ptr<FileVersionInfo> file_version_info(
-    FileVersionInfo::CreateFileVersionInfoForCurrentModule());
-  request_info_.extra_headers += "X-SDCH: Chrome ";
-  request_info_.extra_headers +=
-      WideToASCII(file_version_info->product_version());
-  request_info_.extra_headers += "\r\n";
-
-  // Tell the server what compression formats we support.
-  request_info_.extra_headers += "Accept-Encoding: gzip,deflate,bzip2,sdch\r\n";
 }
 
 void URLRequestHttpJob::FetchResponseCookies() {
@@ -542,4 +574,3 @@ void URLRequestHttpJob::FetchResponseCookies() {
   while (response_info_->headers->EnumerateHeader(&iter, name, &value))
     response_cookies_.push_back(value);
 }
-

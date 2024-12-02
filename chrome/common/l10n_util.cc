@@ -2,27 +2,36 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <algorithm>
+#include "build/build_config.h"
 
 #include "chrome/common/l10n_util.h"
 
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/logging.h"
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
+#include "base/string16.h"
+#include "base/string_piece.h"
 #include "base/string_util.h"
+#include "base/sys_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/gfx/chrome_canvas.h"
 #include "chrome/common/resource_bundle.h"
-#include "chrome/views/view.h"
-#include "unicode/coll.h"
-#include "unicode/locid.h"
-#include "unicode/rbbi.h"
-#include "unicode/uchar.h"
+
+// TODO(playmobil): remove this undef once SkPostConfig.h is fixed.
+// skia/include/corecg/SkPostConfig.h #defines strcasecmp() so we can't use
+// base::strcasecmp() without #undefing it here.
+#undef strcasecmp
 
 namespace {
+
+#if defined(OS_WIN)
+static const FilePath::CharType kLocaleFileExtension[] = L".dll";
+#elif defined(OS_POSIX)
+static const FilePath::CharType kLocaleFileExtension[] = ".pak";
+#endif
 
 // Added to the end of strings that are too big in TrucateString.
 static const wchar_t* const kElideString = L"\x2026";
@@ -41,7 +50,7 @@ void GetLanguageAndRegionFromOS(std::string* lang, std::string* region) {
   *region = country;
 }
 
-// Convert Chrome locale name (DLL name) to ICU locale name
+// Convert Chrome locale name to ICU locale name
 std::string ICULocaleName(const std::wstring& locale_string) {
   // If not Spanish, just return it.
   if (locale_string.substr(0, 2) != L"es")
@@ -87,31 +96,6 @@ UBool SetICUDefaultLocale(const std::wstring& locale_string) {
   return U_SUCCESS(error_code);
 }
 
-// Compares two wstrings and returns true if the first arg is less than the
-// second arg.  This uses the locale specified in the constructor.
-class StringComparator : public std::binary_function<const std::wstring&,
-                                                     const std::wstring&,
-                                                     bool> {
- public:
-  explicit StringComparator(Collator* collator)
-      : collator_(collator) { }
-
-  // Returns true if lhs preceeds rhs.
-  bool operator() (const std::wstring& lhs, const std::wstring& rhs) {
-    UErrorCode error = U_ZERO_ERROR;
-    UCollationResult result = collator_->compare(
-        static_cast<const UChar*>(lhs.c_str()), static_cast<int>(lhs.length()),
-        static_cast<const UChar*>(rhs.c_str()), static_cast<int>(rhs.length()),
-        error);
-    DCHECK(U_SUCCESS(error));
-
-    return result == UCOL_LESS;
-  }
-
- private:
-  Collator* collator_;
-};
-
 // Returns true if |locale_name| has an alias in the ICU data file.
 bool IsDuplicateName(const std::string& locale_name) {
   static const char* const kDuplicateNames[] = {
@@ -125,10 +109,10 @@ bool IsDuplicateName(const std::string& locale_name) {
   // Skip all 'es_RR'. Currently, we use 'es' for es-ES (Spanish in Spain).
   // 'es-419' (Spanish in Latin America) is not available in ICU so that it
   // has to be added manually in GetAvailableLocales().
-  if (LowerCaseEqualsASCII(locale_name.substr(0,3),  "es_"))
+  if (LowerCaseEqualsASCII(locale_name.substr(0, 3),  "es_"))
     return true;
-  for (int i = 0; i < arraysize(kDuplicateNames); ++i) {
-    if (_stricmp(kDuplicateNames[i], locale_name.c_str()) == 0)
+  for (size_t i = 0; i < arraysize(kDuplicateNames); ++i) {
+    if (base::strcasecmp(kDuplicateNames[i], locale_name.c_str()) == 0)
       return true;
   }
   return false;
@@ -138,13 +122,14 @@ bool IsLocaleAvailable(const std::wstring& locale,
                        const std::wstring& locale_path) {
   std::wstring test_locale = locale;
   // If locale has any illegal characters in it, we don't want to try to
-  // load it because it may be pointing outside the locale dll directory.
+  // load it because it may be pointing outside the locale data file directory.
   file_util::ReplaceIllegalCharacters(&test_locale, ' ');
   if (test_locale != locale)
     return false;
 
-  std::wstring test_path = locale_path;
-  file_util::AppendToPath(&test_path, locale + L".dll");
+  FilePath test_path = FilePath::FromWStringHack(locale_path)
+      .Append(FilePath::FromWStringHack(locale))
+      .ReplaceExtension(kLocaleFileExtension);
   return file_util::PathExists(test_path) && SetICUDefaultLocale(locale);
 }
 
@@ -185,7 +170,7 @@ bool CheckAndResolveLocale(const std::wstring& locale,
   }
 
   // Google updater uses no, iw and en for our nb, he, and en-US.
-  // We need to map them to our codes. 
+  // We need to map them to our codes.
   struct {
     const char* source;
     const wchar_t* dest;} alias_map[] = {
@@ -195,7 +180,7 @@ bool CheckAndResolveLocale(const std::wstring& locale,
       {"en", L"en-US"},
   };
 
-  for (int i = 0; i < arraysize(alias_map); ++i) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(alias_map); ++i) {
     if (LowerCaseEqualsASCII(locale, alias_map[i].source)) {
       std::wstring tmp_locale(alias_map[i].dest);
       if (IsLocaleAvailable(tmp_locale, locale_path)) {
@@ -232,12 +217,20 @@ namespace l10n_util {
 static TextDirection g_text_direction = UNKNOWN_DIRECTION;
 
 std::wstring GetApplicationLocale(const std::wstring& pref_locale) {
+#if defined(OS_MACOSX)
+  // On the mac, we don't want to test preferences or ICU for the language,
+  // we want to use whatever Cocoa is using when it loaded the main nib file.
+  // It handles all the mapping and fallbacks for us, we just need to ask
+  // Cocoa.
+  // TODO(pinkerton): break this out into a .mm and ask Cocoa.
+  return L"en";
+#else
   std::wstring locale_path;
   PathService::Get(chrome::DIR_LOCALES, &locale_path);
   std::wstring resolved_locale;
 
   // First, check to see if there's a --lang flag.
-  CommandLine parsed_command_line;
+  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   const std::wstring& lang_arg =
       parsed_command_line.GetSwitchValue(switches::kLang);
   if (!lang_arg.empty()) {
@@ -261,9 +254,11 @@ std::wstring GetApplicationLocale(const std::wstring& pref_locale) {
   if (IsLocaleAvailable(fallback_locale, locale_path))
     return fallback_locale;
 
-  // No DLL, we shouldn't get here.
+  // No locale data file was found; we shouldn't get here.
   NOTREACHED();
+
   return std::wstring();
+#endif
 }
 
 std::wstring GetLocalName(const std::wstring& locale_code_wstr,
@@ -274,16 +269,24 @@ std::wstring GetLocalName(const std::wstring& locale_code_wstr,
   const char* locale_code = locale_code_str.c_str();
   UErrorCode error = U_ZERO_ERROR;
   const int buffer_size = 1024;
+
+#if defined(WCHAR_T_IS_UTF32)
+  string16 name_local_utf16;
+  int actual_size = uloc_getDisplayName(locale_code, app_locale.c_str(),
+      WriteInto(&name_local_utf16, buffer_size + 1), buffer_size, &error);
+  std::wstring name_local = UTF16ToWide(name_local_utf16);
+#else
   std::wstring name_local;
   int actual_size = uloc_getDisplayName(locale_code, app_locale.c_str(),
       WriteInto(&name_local, buffer_size + 1), buffer_size, &error);
+#endif
   DCHECK(U_SUCCESS(error));
   name_local.resize(actual_size);
   // Add an RTL mark so parentheses are properly placed.
-  if (is_for_ui && GetTextDirection() == RIGHT_TO_LEFT)
-    return name_local + L"\x200f";
-  else
-    return name_local;
+  if (is_for_ui && GetTextDirection() == RIGHT_TO_LEFT) {
+    name_local.push_back(static_cast<wchar_t>(kRightToLeftMark));
+  }
+  return name_local;
 }
 
 std::wstring GetString(int message_id) {
@@ -365,20 +368,26 @@ std::wstring TruncateString(const std::wstring& string, size_t length) {
     return kElideString;
   }
 
+#if defined(WCHAR_T_IS_UTF32)
+  const string16 string_utf16 = WideToUTF16(string);
+#else
+  const std::wstring &string_utf16 = string;
+#endif
   // Use a line iterator to find the first boundary.
   UErrorCode status = U_ZERO_ERROR;
   scoped_ptr<RuleBasedBreakIterator> bi(static_cast<RuleBasedBreakIterator*>(
-      RuleBasedBreakIterator::createLineInstance(Locale::getDefault(), status)));
+      RuleBasedBreakIterator::createLineInstance(Locale::getDefault(),
+                                                 status)));
   if (U_FAILURE(status))
     return string.substr(0, max) + kElideString;
-  bi->setText(string.c_str());
+  bi->setText(string_utf16.c_str());
   int32_t index = bi->preceding(static_cast<int32_t>(max));
   if (index == BreakIterator::DONE) {
     index = static_cast<int32_t>(max);
   } else {
     // Found a valid break (may be the beginning of the string). Now use
     // a character iterator to find the previous non-whitespace character.
-    StringCharacterIterator char_iterator(string.c_str());
+    StringCharacterIterator char_iterator(string_utf16.c_str());
     if (index == 0) {
       // No valid line breaks. Start at the end again. This ensures we break
       // on a valid character boundary.
@@ -407,6 +416,18 @@ std::wstring TruncateString(const std::wstring& string, size_t length) {
   return string.substr(0, index) + kElideString;
 }
 
+#if defined(WCHAR_T_IS_UTF32)
+std::wstring ToLower(const std::wstring& string) {
+  string16 string_utf16 = WideToUTF16(string);
+  UnicodeString lower_u_str(
+      UnicodeString(string_utf16.c_str()).toLower(Locale::getDefault()));
+  string16 result_utf16;
+  lower_u_str.extract(0, lower_u_str.length(),
+                      WriteInto(&result_utf16, lower_u_str.length() + 1));
+  std::wstring result = UTF16ToWide(result_utf16);
+  return result;
+}
+#else
 std::wstring ToLower(const std::wstring& string) {
   UnicodeString lower_u_str(
       UnicodeString(string.c_str()).toLower(Locale::getDefault()));
@@ -415,6 +436,7 @@ std::wstring ToLower(const std::wstring& string) {
                       WriteInto(&result, lower_u_str.length() + 1));
   return result;
 }
+#endif  // defined(WCHAR_T_IS_UTF32)
 
 // Returns the text direction.
 // This function retrieves the language corresponding to the default ICU locale
@@ -443,6 +465,40 @@ TextDirection GetTextDirection() {
   return g_text_direction;
 }
 
+TextDirection GetFirstStrongCharacterDirection(const std::wstring& text) {
+#if defined(WCHAR_T_IS_UTF32)
+  string16 text_utf16 = WideToUTF16(text);
+  const UChar* string = text_utf16.c_str();
+#else
+  const UChar* string = text.c_str();
+#endif
+  size_t length = text.length();
+  size_t position = 0;
+  while (position < length) {
+    UChar32 character;
+    size_t next_position = position;
+    U16_NEXT(string, next_position, length, character);
+
+    // Now that we have the character, we use ICU in order to query for the
+    // appropriate Unicode BiDi character type.
+    int32_t property = u_getIntPropertyValue(character, UCHAR_BIDI_CLASS);
+    if ((property == U_RIGHT_TO_LEFT) ||
+        (property == U_RIGHT_TO_LEFT_ARABIC) ||
+        (property == U_RIGHT_TO_LEFT_EMBEDDING) ||
+        (property == U_RIGHT_TO_LEFT_OVERRIDE)) {
+      return RIGHT_TO_LEFT;
+    } else if ((property == U_LEFT_TO_RIGHT) ||
+               (property == U_LEFT_TO_RIGHT_EMBEDDING) ||
+               (property == U_LEFT_TO_RIGHT_OVERRIDE)) {
+      return LEFT_TO_RIGHT;
+    }
+
+    position = next_position;
+  }
+
+  return LEFT_TO_RIGHT;
+}
+
 bool AdjustStringForLocaleDirection(const std::wstring& text,
                                     std::wstring* localized_text) {
   if (GetTextDirection() == LEFT_TO_RIGHT || text.length() == 0)
@@ -461,12 +517,17 @@ bool AdjustStringForLocaleDirection(const std::wstring& text,
 }
 
 bool StringContainsStrongRTLChars(const std::wstring& text) {
-  const wchar_t* string = text.c_str();
-  int length = static_cast<int>(text.length());
-  int position = 0;
+#if defined(WCHAR_T_IS_UTF32)
+  string16 text_utf16 = WideToUTF16(text);
+  const UChar* string = text_utf16.c_str();
+#else
+  const UChar* string = text.c_str();
+#endif
+  size_t length = text.length();
+  size_t position = 0;
   while (position < length) {
     UChar32 character;
-    int next_position = position;
+    size_t next_position = position;
     U16_NEXT(string, next_position, length, character);
 
     // Now that we have the character, we use ICU in order to query for the
@@ -483,28 +544,60 @@ bool StringContainsStrongRTLChars(const std::wstring& text) {
 
 void WrapStringWithLTRFormatting(std::wstring* text) {
   // Inserting an LRE (Left-To-Right Embedding) mark as the first character.
-  text->insert(0, L"\x202A");
+  text->insert(0, 1, static_cast<wchar_t>(kLeftToRightEmbeddingMark));
 
   // Inserting a PDF (Pop Directional Formatting) mark as the last character.
-  text->append(L"\x202C");
+  text->push_back(static_cast<wchar_t>(kPopDirectionalFormatting));
 }
 
 void WrapStringWithRTLFormatting(std::wstring* text) {
   // Inserting an RLE (Right-To-Left Embedding) mark as the first character.
-  text->insert(0, L"\x202B");
+  text->insert(0, 1, static_cast<wchar_t>(kRightToLeftEmbeddingMark));
 
   // Inserting a PDF (Pop Directional Formatting) mark as the last character.
-  text->append(L"\x202C");
+  text->push_back(static_cast<wchar_t>(kPopDirectionalFormatting));
 }
 
-// Returns locale-dependent externded window styles.
-int GetExtendedStyles() {
-  return GetTextDirection() == LEFT_TO_RIGHT ? 0 :
-      WS_EX_LAYOUTRTL | WS_EX_RTLREADING;
-}
-
-int GetExtendedTooltipStyles() {
-  return GetTextDirection() == LEFT_TO_RIGHT ? 0 : WS_EX_LAYOUTRTL;
+void WrapPathWithLTRFormatting(const FilePath& path,
+                               string16* rtl_safe_path) {
+  // Split the path.
+  std::vector<FilePath::StringType> path_components;
+  file_util::PathComponents(path, &path_components);
+  // Compose the whole path from components with the following 2 additions:
+  // 1. Wrap the overall path with LRE-PDF pair which essentialy marks the
+  // string as a Left-To-Right string. Otherwise, the punctuation (if there is
+  // any) at the end of the path will not be displayed at the correct position.
+  // Inserting an LRE (Left-To-Right Embedding) mark as the first character.
+  rtl_safe_path->push_back(kLeftToRightEmbeddingMark);
+  char16 path_separator = static_cast<char16>(FilePath::kSeparators[0]);
+  for (size_t index = 0; index < path_components.size(); ++index) {
+#if defined(OS_MACOSX)
+    rtl_safe_path->append(UTF8ToUTF16(path_components[index]));
+#elif defined(OS_WIN)
+    rtl_safe_path->append(path_components[index]);
+#else  // defined(OS_LINUX)
+    std::wstring one_component =
+        base::SysNativeMBToWide(path_components[index]);
+    rtl_safe_path->append(WideToUTF16(one_component));
+#endif
+    bool first_component_is_separator =
+        ((index == 0) &&
+         (path_components[0].length() == 1) &&
+         (FilePath::IsSeparator(path_components[0][0])));
+    bool last_component = (index == path_components.size() - 1);
+    // Add separator for components except for the first component if itself is
+    // a separator, and except for the last component.
+    if (!last_component && !first_component_is_separator) {
+      rtl_safe_path->push_back(path_separator);
+      // 2. Add left-to-right mark after path separator to force each subfolder
+      // in the path to have LTR directionality. Otherwise, folder path
+      // "CBA/FED" (in which, "CBA" and "FED" stand for folder names in Hebrew,
+      // and "FED" is a subfolder of "CBA") will be displayed as "FED/CBA".
+      rtl_safe_path->push_back(kLeftToRightMark);
+    }
+  }
+  // Inserting a PDF (Pop Directional Formatting) mark as the last character.
+  rtl_safe_path->push_back(kPopDirectionalFormatting);
 }
 
 int DefaultCanvasTextAlignment() {
@@ -515,33 +608,50 @@ int DefaultCanvasTextAlignment() {
   }
 }
 
-void HWNDSetRTLLayout(HWND hwnd) {
-  DWORD ex_style = ::GetWindowLong(hwnd, GWL_EXSTYLE);
 
-  // We don't have to do anything if the style is already set for the HWND.
-  if (!(ex_style & WS_EX_LAYOUTRTL)) {
-    ex_style |= WS_EX_LAYOUTRTL;
-    ::SetWindowLong(hwnd, GWL_EXSTYLE, ex_style);
+// Compares the character data stored in two different strings by specified
+// Collator instance.
+UCollationResult CompareStringWithCollator(const Collator* collator,
+                                           const std::wstring& lhs,
+                                           const std::wstring& rhs) {
+  DCHECK(collator);
+  UErrorCode error = U_ZERO_ERROR;
+#if defined(WCHAR_T_IS_UTF32)
+  // Need to convert to UTF-16 to be compatible with UnicodeString's
+  // constructor.
+  string16 lhs_utf16 = WideToUTF16(lhs);
+  string16 rhs_utf16 = WideToUTF16(rhs);
 
-    // Right-to-left layout changes are not applied to the window immediately
-    // so we should make sure a WM_PAINT is sent to the window by invalidating
-    // the entire window rect.
-    ::InvalidateRect(hwnd, NULL, true);
-  }
+  UCollationResult result = collator->compare(
+      static_cast<const UChar*>(lhs_utf16.c_str()),
+      static_cast<int>(lhs_utf16.length()),
+      static_cast<const UChar*>(rhs_utf16.c_str()),
+      static_cast<int>(rhs_utf16.length()),
+      error);
+#else
+  UCollationResult result = collator->compare(
+      static_cast<const UChar*>(lhs.c_str()), static_cast<int>(lhs.length()),
+      static_cast<const UChar*>(rhs.c_str()), static_cast<int>(rhs.length()),
+      error);
+#endif
+  DCHECK(U_SUCCESS(error));
+  return result;
 }
+
+// Specialization of operator() method for std::wstring version.
+template <>
+bool StringComparator<std::wstring>::operator()(const std::wstring& lhs,
+                                                const std::wstring& rhs) {
+  // If we can not get collator instance for specified locale, just do simple
+  // string compare.
+  if (!collator_)
+    return lhs < rhs;
+  return CompareStringWithCollator(collator_, lhs, rhs) == UCOL_LESS;
+};
 
 void SortStrings(const std::wstring& locale,
                  std::vector<std::wstring>* strings) {
-  UErrorCode error = U_ZERO_ERROR;
-  Locale loc(WideToUTF8(locale).c_str());
-  scoped_ptr<Collator> collator(Collator::createInstance(loc, error));
-  if (U_FAILURE(error)) {
-    // Just do an string sort.
-    sort(strings->begin(), strings->end());
-    return;
-  }
-  StringComparator c(collator.get());
-  sort(strings->begin(), strings->end(), c);
+  SortVectorWithStringKey(locale, strings, false);
 }
 
 const std::vector<std::wstring>& GetAvailableLocales() {
@@ -553,7 +663,7 @@ const std::vector<std::wstring>& GetAvailableLocales() {
       // Filter out the names that have aliases.
       if (IsDuplicateName(locale_name))
         continue;
-      // Normalize underscores to hyphens because that's what our locale dlls
+      // Normalize underscores to hyphens because that's what our locale files
       // use.
       std::replace(locale_name.begin(), locale_name.end(), '_', '-');
 
@@ -572,5 +682,53 @@ const std::vector<std::wstring>& GetAvailableLocales() {
   return locales;
 }
 
+BiDiLineIterator::~BiDiLineIterator() {
+  if (bidi_) {
+    ubidi_close(bidi_);
+    bidi_ = NULL;
+  }
 }
 
+UBool BiDiLineIterator::Open(const std::wstring& text,
+                             bool right_to_left,
+                             bool url) {
+  DCHECK(bidi_ == NULL);
+  UErrorCode error = U_ZERO_ERROR;
+  bidi_ = ubidi_openSized(static_cast<int>(text.length()), 0, &error);
+  if (U_FAILURE(error))
+    return false;
+  if (right_to_left && url)
+    ubidi_setReorderingMode(bidi_, UBIDI_REORDER_RUNS_ONLY);
+#if defined(WCHAR_T_IS_UTF32)
+  const string16 text_utf16 = WideToUTF16(text);
+#else
+  const std::wstring &text_utf16 = text;
+#endif  // U_SIZEOF_WCHAR_T != 4
+  ubidi_setPara(bidi_, text_utf16.data(), static_cast<int>(text_utf16.length()),
+                right_to_left ? UBIDI_DEFAULT_RTL : UBIDI_DEFAULT_LTR,
+                NULL, &error);
+  return U_SUCCESS(error);
+}
+
+int BiDiLineIterator::CountRuns() {
+  DCHECK(bidi_ != NULL);
+  UErrorCode error = U_ZERO_ERROR;
+  const int runs = ubidi_countRuns(bidi_, &error);
+  return U_SUCCESS(error) ? runs : 0;
+}
+
+UBiDiDirection BiDiLineIterator::GetVisualRun(int index,
+                                              int* start,
+                                              int* length) {
+  DCHECK(bidi_ != NULL);
+  return ubidi_getVisualRun(bidi_, index, start, length);
+}
+
+void BiDiLineIterator::GetLogicalRun(int start,
+                                     int* end,
+                                     UBiDiLevel* level) {
+  DCHECK(bidi_ != NULL);
+  ubidi_getLogicalRun(bidi_, start, end, level);
+}
+
+}

@@ -24,6 +24,7 @@ enum {
   DIR_LOCALES,           // directory where locale resources are stored
   DIR_APP_DICTIONARIES,  // directory where the global dictionaries are
   DIR_USER_DOCUMENTS,    // directory for a user's "My Documents"
+  DIR_DEFAULT_DOWNLOADS, // directory for a user's "My Documents/Downloads"
   FILE_RESOURCE_MODULE,  // full path and filename of the module that contains
                          // embedded resources (version, strings, images, etc.)
   FILE_LOCAL_STATE,      // path and filename to the file in which machine/
@@ -31,6 +32,9 @@ enum {
   FILE_RECORDED_SCRIPT,  // full path to the script.log file that contains
                          // recorded browser events for playback.
   FILE_GEARS_PLUGIN,     // full path to the gears.dll plugin file.
+  FILE_LIBAVCODEC,       // full path to libavcodec media decoding library.
+  FILE_LIBAVFORMAT,      // full path to libavformat media parsing library.
+  FILE_LIBAVUTIL,        // full path to libavutil media utility library.
 
   // Valid only in development environment; TODO(darin): move these
   DIR_TEST_DATA,         // directory where unit test data resides
@@ -47,4 +51,3 @@ void RegisterPathProvider();
 }  // namespace chrome
 
 #endif  // CHROME_COMMON_CHROME_PATHS_H__
-

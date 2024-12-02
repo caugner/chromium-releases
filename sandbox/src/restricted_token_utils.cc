@@ -9,7 +9,7 @@
 #include "sandbox/src/restricted_token_utils.h"
 
 #include "base/logging.h"
-#include "base/scoped_handle.h"
+#include "base/scoped_handle_win.h"
 #include "base/win_util.h"
 #include "sandbox/src/job.h"
 #include "sandbox/src/restricted_token.h"
@@ -343,4 +343,3 @@ DWORD SetProcessIntegrityLevel(IntegrityLevel integrity_level) {
 
 
 }  // namespace sandbox
-

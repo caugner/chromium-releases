@@ -20,6 +20,7 @@ MetaTableHelper::~MetaTableHelper() {
 
 bool MetaTableHelper::Init(const std::string& db_name,
                            int version,
+                           int compatible_version,
                            sqlite3* db) {
   DCHECK(!db_ && db);
   db_ = db;
@@ -42,7 +43,7 @@ bool MetaTableHelper::Init(const std::string& db_name,
     // couple of keys, so it doesn't matter. If we start storing more stuff in
     // there, we should create an index.
     SetVersionNumber(version);
-    SetCompatibleVersionNumber(version);
+    SetCompatibleVersionNumber(compatible_version);
   }
   return true;
 }
@@ -52,7 +53,7 @@ bool MetaTableHelper::SetValue(const std::string& key,
   SQLStatement s;
   if (!PrepareSetStatement(&s, key))
     return false;
-  s.bind_text16(1, value.c_str());
+  s.bind_wstring(1, value);
   return s.step() == SQLITE_DONE;
 }
 
@@ -63,7 +64,7 @@ bool MetaTableHelper::GetValue(const std::string& key,
   if (!PrepareGetStatement(&s, key))
     return false;
 
-  s.column_string16(0, value);
+  s.column_wstring(0, value);
   return true;
 }
 

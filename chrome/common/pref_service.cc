@@ -4,6 +4,7 @@
 
 #include "chrome/common/pref_service.h"
 
+#include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
@@ -14,8 +15,7 @@
 #include "chrome/common/l10n_util.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/stl_util-inl.h"
-
-#include "generated_resources.h"
+#include "grit/generated_resources.h"
 
 namespace {
 
@@ -27,7 +27,7 @@ static const int kCommitIntervalMs = 10000;
 // preferences to be written to disk on a background thread.
 class SaveLaterTask : public Task {
  public:
-  SaveLaterTask(const std::wstring& file_name,
+  SaveLaterTask(const FilePath& file_name,
                 const std::string& data)
       : file_name_(file_name),
         data_(data) {
@@ -36,27 +36,24 @@ class SaveLaterTask : public Task {
   void Run() {
     // Write the data to a temp file then rename to avoid data loss if we crash
     // while writing the file.
-    std::wstring tmp_file_name = file_name_ + L".tmp";
+    FilePath tmp_file_name(file_name_.value() + FILE_PATH_LITERAL(".tmp"));
     int bytes_written = file_util::WriteFile(tmp_file_name, data_.c_str(),
                                              static_cast<int>(data_.length()));
     if (bytes_written != -1) {
-      if (!MoveFileEx(tmp_file_name.c_str(), file_name_.c_str(),
-                      MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING)) {
+      if (!file_util::Move(tmp_file_name, file_name_)) {
         // Rename failed. Try again on the off chance someone has locked either
         // file and hope we're successful the second time through.
-        BOOL move_result =
-            MoveFileEx(tmp_file_name.c_str(), file_name_.c_str(),
-                       MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING);
+        bool move_result = file_util::Move(tmp_file_name, file_name_);
         DCHECK(move_result);
       }
     }
   }
 
  private:
-  std::wstring file_name_;
+  FilePath file_name_;
   std::string data_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(SaveLaterTask);
+  DISALLOW_COPY_AND_ASSIGN(SaveLaterTask);
 };
 
 // A helper function for RegisterLocalized*Pref that creates a Value* based on
@@ -75,23 +72,14 @@ Value* CreateLocaleDefaultValue(Value::ValueType type, int message_id) {
     }
 
     case Value::TYPE_INTEGER: {
-      int num_int = 0;
-      int parsed_values = swscanf_s(resource_string.c_str(), L"%d", &num_int);
-      // This is a trusted value (comes from our locale dll), so it should
-      // successfully parse.
-      DCHECK(parsed_values == 1);
-      return Value::CreateIntegerValue(num_int);
+      return Value::CreateIntegerValue(
+          StringToInt(WideToUTF16Hack(resource_string)));
       break;
     }
 
     case Value::TYPE_REAL: {
-      double num_double = 0.0;
-      int parsed_values = swscanf_s(resource_string.c_str(), L"%lf",
-                                    &num_double);
-      // This is a trusted value (comes from our locale dll), so it should
-      // successfully parse.
-      DCHECK(parsed_values == 1);
-      return Value::CreateRealValue(num_double);
+      return Value::CreateRealValue(
+          StringToDouble(WideToUTF16Hack(resource_string)));
       break;
     }
 
@@ -101,7 +89,7 @@ Value* CreateLocaleDefaultValue(Value::ValueType type, int message_id) {
     }
 
     default: {
-      DCHECK(false) <<
+      NOTREACHED() <<
           "list and dictionary types can not have default locale values";
     }
   }
@@ -117,12 +105,11 @@ PrefService::PrefService()
       save_preferences_factory_(NULL) {
 }
 
-PrefService::PrefService(const std::wstring& pref_filename)
+PrefService::PrefService(const FilePath& pref_filename)
     : persistent_(new DictionaryValue),
       transient_(new DictionaryValue),
       pref_filename_(pref_filename),
-#pragma warning(suppress: 4355)  // Okay to pass "this" here.
-      save_preferences_factory_(this) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(save_preferences_factory_(this)) {
   LoadPersistentPrefs(pref_filename_);
 }
 
@@ -145,43 +132,39 @@ PrefService::~PrefService() {
   pref_observers_.clear();
 }
 
-bool PrefService::LoadPersistentPrefs(const std::wstring& file_path) {
+bool PrefService::LoadPersistentPrefs(const FilePath& file_path) {
   DCHECK(!file_path.empty());
   DCHECK(CalledOnValidThread());
 
-  JSONFileValueSerializer serializer(file_path);
-  Value* root = NULL;
-  if (serializer.Deserialize(&root)) {
-    // Preferences should always have a dictionary root.
-    if (!root->IsType(Value::TYPE_DICTIONARY)) {
-      delete root;
-      return false;
-    }
+  JSONFileValueSerializer serializer(file_path.ToWStringHack());
+  scoped_ptr<Value> root(serializer.Deserialize(NULL));
+  if (!root.get())
+    return false;
 
-    persistent_.reset(static_cast<DictionaryValue*>(root));
-    return true;
-  }
+  // Preferences should always have a dictionary root.
+  if (!root->IsType(Value::TYPE_DICTIONARY))
+    return false;
 
-  return false;
+  persistent_.reset(static_cast<DictionaryValue*>(root.release()));
+  return true;
 }
 
 void PrefService::ReloadPersistentPrefs() {
   DCHECK(CalledOnValidThread());
 
-  JSONFileValueSerializer serializer(pref_filename_);
-  Value* root;
-  if (serializer.Deserialize(&root)) {
-    // Preferences should always have a dictionary root.
-    if (!root->IsType(Value::TYPE_DICTIONARY)) {
-      delete root;
-      return;
-    }
+  JSONFileValueSerializer serializer(pref_filename_.ToWStringHack());
+  scoped_ptr<Value> root(serializer.Deserialize(NULL));
+  if (!root.get())
+    return;
 
-    persistent_.reset(static_cast<DictionaryValue*>(root));
-    for (PreferenceSet::iterator it = prefs_.begin();
-         it != prefs_.end(); ++it) {
-      (*it)->root_pref_ = persistent_.get();
-    }
+  // Preferences should always have a dictionary root.
+  if (!root->IsType(Value::TYPE_DICTIONARY))
+    return;
+
+  persistent_.reset(static_cast<DictionaryValue*>(root.release()));
+  for (PreferenceSet::iterator it = prefs_.begin();
+       it != prefs_.end(); ++it) {
+    (*it)->root_pref_ = persistent_.get();
   }
 }
 
@@ -247,6 +230,13 @@ void PrefService::RegisterStringPref(const wchar_t* path,
   RegisterPreference(pref);
 }
 
+void PrefService::RegisterFilePathPref(const wchar_t* path,
+                                       const FilePath& default_value) {
+  Preference* pref = new Preference(persistent_.get(), path,
+      Value::CreateStringValue(default_value.value()));
+  RegisterPreference(pref);
+}
+
 void PrefService::RegisterListPref(const wchar_t* path) {
   Preference* pref = new Preference(persistent_.get(), path,
       new ListValue);
@@ -302,7 +292,7 @@ bool PrefService::GetBoolean(const wchar_t* path) const {
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
-    DCHECK(false) << "Trying to read an unregistered pref: " << path;
+    NOTREACHED() << "Trying to read an unregistered pref: " << path;
     return result;
   }
   bool rv = pref->GetValue()->GetAsBoolean(&result);
@@ -319,7 +309,7 @@ int PrefService::GetInteger(const wchar_t* path) const {
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
-    DCHECK(false) << "Trying to read an unregistered pref: " << path;
+    NOTREACHED() << "Trying to read an unregistered pref: " << path;
     return result;
   }
   bool rv = pref->GetValue()->GetAsInteger(&result);
@@ -336,7 +326,7 @@ double PrefService::GetReal(const wchar_t* path) const {
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
-    DCHECK(false) << "Trying to read an unregistered pref: " << path;
+    NOTREACHED() << "Trying to read an unregistered pref: " << path;
     return result;
   }
   bool rv = pref->GetValue()->GetAsReal(&result);
@@ -353,12 +343,29 @@ std::wstring PrefService::GetString(const wchar_t* path) const {
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
-    DCHECK(false) << "Trying to read an unregistered pref: " << path;
+    NOTREACHED() << "Trying to read an unregistered pref: " << path;
     return result;
   }
   bool rv = pref->GetValue()->GetAsString(&result);
   DCHECK(rv);
   return result;
+}
+
+FilePath PrefService::GetFilePath(const wchar_t* path) const {
+  DCHECK(CalledOnValidThread());
+
+  FilePath::StringType result;
+  if (transient_->GetString(path, &result))
+    return FilePath(result);
+
+  const Preference* pref = FindPreference(path);
+  if (!pref) {
+    NOTREACHED() << "Trying to read an unregistered pref: " << path;
+    return FilePath(result);
+  }
+  bool rv = pref->GetValue()->GetAsString(&result);
+  DCHECK(rv);
+  return FilePath(result);
 }
 
 bool PrefService::HasPrefPath(const wchar_t* path) const {
@@ -383,7 +390,7 @@ const DictionaryValue* PrefService::GetDictionary(const wchar_t* path) const {
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
-    DCHECK(false) << "Trying to read an unregistered pref: " << path;
+    NOTREACHED() << "Trying to read an unregistered pref: " << path;
     return NULL;
   }
   const Value* value = pref->GetValue();
@@ -401,7 +408,7 @@ const ListValue* PrefService::GetList(const wchar_t* path) const {
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
-    DCHECK(false) << "Trying to read an unregistered pref: " << path;
+    NOTREACHED() << "Trying to read an unregistered pref: " << path;
     return NULL;
   }
   const Value* value = pref->GetValue();
@@ -416,7 +423,7 @@ void PrefService::AddPrefObserver(const wchar_t* path,
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
-    DCHECK(false) << "Trying to add an observer for an unregistered pref: "
+    NOTREACHED() << "Trying to add an observer for an unregistered pref: "
         << path;
     return;
   }
@@ -434,7 +441,7 @@ void PrefService::AddPrefObserver(const wchar_t* path,
   // Verify that this observer doesn't already exist.
   NotificationObserverList::Iterator it(*observer_list);
   NotificationObserver* existing_obs;
-  while (existing_obs = it.GetNext()) {
+  while ((existing_obs = it.GetNext()) != NULL) {
     DCHECK(existing_obs != obs) << path << " observer already registered";
     if (existing_obs == obs)
       return;
@@ -461,7 +468,7 @@ void PrefService::RegisterPreference(Preference* pref) {
   DCHECK(CalledOnValidThread());
 
   if (FindPreference(pref->name().c_str())) {
-    DCHECK(false) << "Tried to register duplicate pref " << pref->name();
+    NOTREACHED() << "Tried to register duplicate pref " << pref->name();
     delete pref;
     return;
   }
@@ -473,7 +480,7 @@ void PrefService::ClearPref(const wchar_t* path) {
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
-    DCHECK(false) << "Trying to clear an unregistered pref: " << path;
+    NOTREACHED() << "Trying to clear an unregistered pref: " << path;
     return;
   }
 
@@ -491,11 +498,11 @@ void PrefService::SetBoolean(const wchar_t* path, bool value) {
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
-    DCHECK(false) << "Trying to write an unregistered pref: " << path;
+    NOTREACHED() << "Trying to write an unregistered pref: " << path;
     return;
   }
   if (pref->type() != Value::TYPE_BOOLEAN) {
-    DCHECK(false) << "Wrong type for SetBoolean: " << path;
+    NOTREACHED() << "Wrong type for SetBoolean: " << path;
     return;
   }
 
@@ -511,11 +518,11 @@ void PrefService::SetInteger(const wchar_t* path, int value) {
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
-    DCHECK(false) << "Trying to write an unregistered pref: " << path;
+    NOTREACHED() << "Trying to write an unregistered pref: " << path;
     return;
   }
   if (pref->type() != Value::TYPE_INTEGER) {
-    DCHECK(false) << "Wrong type for SetInteger: " << path;
+    NOTREACHED() << "Wrong type for SetInteger: " << path;
     return;
   }
 
@@ -531,11 +538,11 @@ void PrefService::SetReal(const wchar_t* path, double value) {
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
-    DCHECK(false) << "Trying to write an unregistered pref: " << path;
+    NOTREACHED() << "Trying to write an unregistered pref: " << path;
     return;
   }
   if (pref->type() != Value::TYPE_REAL) {
-    DCHECK(false) << "Wrong type for SetReal: " << path;
+    NOTREACHED() << "Wrong type for SetReal: " << path;
     return;
   }
 
@@ -551,11 +558,11 @@ void PrefService::SetString(const wchar_t* path, const std::wstring& value) {
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
-    DCHECK(false) << "Trying to write an unregistered pref: " << path;
+    NOTREACHED() << "Trying to write an unregistered pref: " << path;
     return;
   }
   if (pref->type() != Value::TYPE_STRING) {
-    DCHECK(false) << "Wrong type for SetString: " << path;
+    NOTREACHED() << "Wrong type for SetString: " << path;
     return;
   }
 
@@ -566,16 +573,79 @@ void PrefService::SetString(const wchar_t* path, const std::wstring& value) {
   FireObserversIfChanged(path, old_value.get());
 }
 
+void PrefService::SetFilePath(const wchar_t* path, const FilePath& value) {
+  DCHECK(CalledOnValidThread());
+
+  const Preference* pref = FindPreference(path);
+  if (!pref) {
+    NOTREACHED() << "Trying to write an unregistered pref: " << path;
+    return;
+  }
+  if (pref->type() != Value::TYPE_STRING) {
+    NOTREACHED() << "Wrong type for SetFilePath: " << path;
+    return;
+  }
+
+  scoped_ptr<Value> old_value(GetPrefCopy(path));
+  bool rv = persistent_->SetString(path, value.value());
+  DCHECK(rv);
+
+  FireObserversIfChanged(path, old_value.get());
+}
+
+void PrefService::SetInt64(const wchar_t* path, int64 value) {
+  DCHECK(CalledOnValidThread());
+
+  const Preference* pref = FindPreference(path);
+  if (!pref) {
+    NOTREACHED() << "Trying to write an unregistered pref: " << path;
+    return;
+  }
+  if (pref->type() != Value::TYPE_STRING) {
+    NOTREACHED() << "Wrong type for SetInt64: " << path;
+    return;
+  }
+
+  scoped_ptr<Value> old_value(GetPrefCopy(path));
+  bool rv = persistent_->SetString(path, Int64ToWString(value));
+  DCHECK(rv);
+
+  FireObserversIfChanged(path, old_value.get());
+}
+
+int64 PrefService::GetInt64(const wchar_t* path) const {
+  DCHECK(CalledOnValidThread());
+
+  std::wstring result;
+  if (transient_->GetString(path, &result))
+    return StringToInt64(WideToUTF16Hack(result));
+
+  const Preference* pref = FindPreference(path);
+  if (!pref) {
+    NOTREACHED() << "Trying to read an unregistered pref: " << path;
+    return StringToInt64(WideToUTF16Hack(result));
+  }
+  bool rv = pref->GetValue()->GetAsString(&result);
+  DCHECK(rv);
+  return StringToInt64(WideToUTF16Hack(result));
+}
+
+void PrefService::RegisterInt64Pref(const wchar_t* path, int64 default_value) {
+  Preference* pref = new Preference(persistent_.get(), path,
+      Value::CreateStringValue(Int64ToWString(default_value)));
+  RegisterPreference(pref);
+}
+
 DictionaryValue* PrefService::GetMutableDictionary(const wchar_t* path) {
   DCHECK(CalledOnValidThread());
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
-    DCHECK(false) << "Trying to get an unregistered pref: " << path;
+    NOTREACHED() << "Trying to get an unregistered pref: " << path;
     return NULL;
   }
   if (pref->type() != Value::TYPE_DICTIONARY) {
-    DCHECK(false) << "Wrong type for GetMutableDictionary: " << path;
+    NOTREACHED() << "Wrong type for GetMutableDictionary: " << path;
     return NULL;
   }
 
@@ -594,11 +664,11 @@ ListValue* PrefService::GetMutableList(const wchar_t* path) {
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
-    DCHECK(false) << "Trying to get an unregistered pref: " << path;
+    NOTREACHED() << "Trying to get an unregistered pref: " << path;
     return NULL;
   }
   if (pref->type() != Value::TYPE_LIST) {
-    DCHECK(false) << "Wrong type for GetMutableList: " << path;
+    NOTREACHED() << "Wrong type for GetMutableList: " << path;
     return NULL;
   }
 
@@ -640,8 +710,8 @@ void PrefService::FireObservers(const wchar_t* path) {
 
   NotificationObserverList::Iterator it(*(observer_iterator->second));
   NotificationObserver* observer;
-  while (observer = it.GetNext()) {
-    observer->Observe(NOTIFY_PREF_CHANGED,
+  while ((observer = it.GetNext()) != NULL) {
+    observer->Observe(NotificationType::PREF_CHANGED,
                       Source<PrefService>(this),
                       Details<std::wstring>(&path_str));
   }
@@ -653,10 +723,10 @@ void PrefService::FireObservers(const wchar_t* path) {
 PrefService::Preference::Preference(DictionaryValue* root_pref,
                                     const wchar_t* name,
                                     Value* default_value)
-      : root_pref_(root_pref),
+      : type_(Value::TYPE_NULL),
         name_(name),
         default_value_(default_value),
-        type_(Value::TYPE_NULL) {
+        root_pref_(root_pref) {
   DCHECK(name);
 
   if (default_value) {
@@ -689,4 +759,3 @@ bool PrefService::Preference::IsDefaultValue() const {
   DCHECK(default_value_.get());
   return default_value_->Equals(GetValue());
 }
-

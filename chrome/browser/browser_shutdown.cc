@@ -4,26 +4,40 @@
 
 #include "chrome/browser/browser_shutdown.h"
 
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/histogram.h"
 #include "base/path_service.h"
-#include "base/shared_event.h"
 #include "base/string_util.h"
 #include "base/time.h"
+#include "base/waitable_event.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/dom_ui/chrome_url_data_manager.h"
+#include "chrome/browser/first_run.h"
 #include "chrome/browser/jankometer.h"
-#include "chrome/browser/metrics_service.h"
-#include "chrome/browser/plugin_process_host.h"
+#include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/plugin_service.h"
-#include "chrome/browser/render_process_host.h"
-#include "chrome/browser/render_view_host.h"
-#include "chrome/browser/render_widget_host.h"
+#include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/renderer_host/render_widget_host.h"
+#include "chrome/browser/rlz/rlz.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
+#include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/resource_bundle.h"
-#include "chrome/browser/plugin_service.h"
 #include "net/dns_global.h"
+
+// TODO(port): Get rid of this section and finish porting.
+#if defined(OS_WIN)
+#include "chrome/browser/plugin_process_host.h"
+#else
+#include "chrome/common/temp_scaffolding_stubs.h"
+#endif
+
+
+using base::Time;
+using base::TimeDelta;
 
 namespace browser_shutdown {
 
@@ -32,7 +46,9 @@ ShutdownType shutdown_type_ = NOT_VALID;
 int shutdown_num_processes_;
 int shutdown_num_processes_slow_;
 
-const wchar_t* const kShutdownMsFile = L"chrome_shutdown_ms.txt";
+bool delete_resources_on_shutdown = true;
+
+const char* const kShutdownMsFile = "chrome_shutdown_ms.txt";
 
 void RegisterPrefs(PrefService* local_state) {
   local_state->RegisterIntegerPref(prefs::kShutdownType, NOT_VALID);
@@ -69,21 +85,26 @@ void OnShutdownStarting(ShutdownType type) {
   }
 }
 
-std::wstring GetShutdownMsPath() {
-  std::wstring shutdown_ms_file;
+FilePath GetShutdownMsPath() {
+  FilePath shutdown_ms_file;
   PathService::Get(base::DIR_TEMP, &shutdown_ms_file);
-  file_util::AppendToPath(&shutdown_ms_file, kShutdownMsFile);
-  return shutdown_ms_file;
+  return shutdown_ms_file.AppendASCII(kShutdownMsFile);
 }
 
 void Shutdown() {
+  // Unload plugins. This needs to happen on the IO thread.
+  if (g_browser_process->io_thread()) {
+    g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
+        NewRunnableFunction(&ChromePluginLib::UnloadAllPlugins));
+  }
+
   // WARNING: During logoff/shutdown (WM_ENDSESSION) we may not have enough
   // time to get here. If you have something that *must* happen on end session,
   // consider putting it in BrowserProcessImpl::EndSession.
   DCHECK(g_browser_process);
 
   // Notifies we are going away.
-  ::SetEvent(g_browser_process->shutdown_event());
+  g_browser_process->shutdown_event()->Signal();
 
   PluginService* plugin_service = PluginService::GetInstance();
   if (plugin_service) {
@@ -93,6 +114,12 @@ void Shutdown() {
   PrefService* prefs = g_browser_process->local_state();
 
   chrome_browser_net::SaveHostNamesForNextStartup(prefs);
+  // TODO(jar): Trimming should be done more regularly, such as every 48 hours
+  // of physical time, or perhaps after 48 hours of running (excluding time
+  // between sessions possibly).
+  // For now, we'll just trim at shutdown.
+  chrome_browser_net::TrimSubresourceReferrers();
+  chrome_browser_net::SaveSubresourceReferrers(prefs);
 
   MetricsService* metrics = g_browser_process->metrics_service();
   if (metrics) {
@@ -111,6 +138,10 @@ void Shutdown() {
 
   prefs->SavePersistentPrefs(g_browser_process->file_thread());
 
+  // Cleanup any statics created by RLZ. Must be done before NotificationService
+  // is destroyed.
+  RLZTracker::CleanupRlz();
+
   // The jank'o'meter requires that the browser process has been destroyed
   // before calling UninstallJankometer().
   delete g_browser_process;
@@ -119,7 +150,12 @@ void Shutdown() {
   // Uninstall Jank-O-Meter here after the IO thread is no longer running.
   UninstallJankometer();
 
-  ResourceBundle::CleanupSharedInstance();
+  if (delete_resources_on_shutdown)
+    ResourceBundle::CleanupSharedInstance();
+
+  if (!Upgrade::IsBrowserAlreadyRunning()) {
+    Upgrade::SwapNewChromeExeIfPresent();
+  }
 
   if (shutdown_type_ > NOT_VALID && shutdown_num_processes_ > 0) {
     // Measure total shutdown time as late in the process as possible
@@ -128,18 +164,20 @@ void Shutdown() {
     TimeDelta shutdown_delta = Time::Now() - shutdown_started_;
     std::string shutdown_ms = Int64ToString(shutdown_delta.InMilliseconds());
     int len = static_cast<int>(shutdown_ms.length()) + 1;
-    std::wstring shutdown_ms_file = GetShutdownMsPath();
+    FilePath shutdown_ms_file = GetShutdownMsPath();
     file_util::WriteFile(shutdown_ms_file, shutdown_ms.c_str(), len);
   }
+
+  UnregisterURLRequestChromeJob();
 }
 
 void ReadLastShutdownInfo() {
-  std::wstring shutdown_ms_file = GetShutdownMsPath();
+  FilePath shutdown_ms_file = GetShutdownMsPath();
   std::string shutdown_ms_str;
   int64 shutdown_ms = 0;
   if (file_util::ReadFileToString(shutdown_ms_file, &shutdown_ms_str))
     shutdown_ms = StringToInt64(shutdown_ms_str);
-  DeleteFile(shutdown_ms_file.c_str());
+  file_util::Delete(shutdown_ms_file, false);
 
   PrefService* prefs = g_browser_process->local_state();
   ShutdownType type =
@@ -152,19 +190,19 @@ void ReadLastShutdownInfo() {
   prefs->SetInteger(prefs::kShutdownNumProcessesSlow, 0);
 
   if (type > NOT_VALID && shutdown_ms > 0 && num_procs > 0) {
-    const wchar_t *time_fmt = L"Shutdown.%ls.time";
-    const wchar_t *time_per_fmt = L"Shutdown.%ls.time_per_process";
-    std::wstring time;
-    std::wstring time_per;
+    const char *time_fmt = "Shutdown.%s.time";
+    const char *time_per_fmt = "Shutdown.%s.time_per_process";
+    std::string time;
+    std::string time_per;
     if (type == WINDOW_CLOSE) {
-      time = StringPrintf(time_fmt, L"window_close");
-      time_per = StringPrintf(time_per_fmt, L"window_close");
+      time = StringPrintf(time_fmt, "window_close");
+      time_per = StringPrintf(time_per_fmt, "window_close");
     } else if (type == BROWSER_EXIT) {
-      time = StringPrintf(time_fmt, L"browser_exit");
-      time_per = StringPrintf(time_per_fmt, L"browser_exit");
+      time = StringPrintf(time_fmt, "browser_exit");
+      time_per = StringPrintf(time_per_fmt, "browser_exit");
     } else if (type == END_SESSION) {
-      time = StringPrintf(time_fmt, L"end_session");
-      time_per = StringPrintf(time_per_fmt, L"end_session");
+      time = StringPrintf(time_fmt, "end_session");
+      time_per = StringPrintf(time_per_fmt, "end_session");
     } else {
       NOTREACHED();
     }
@@ -174,11 +212,10 @@ void ReadLastShutdownInfo() {
                           TimeDelta::FromMilliseconds(shutdown_ms));
       UMA_HISTOGRAM_TIMES(time_per.c_str(),
                           TimeDelta::FromMilliseconds(shutdown_ms / num_procs));
-      UMA_HISTOGRAM_COUNTS_100(L"Shutdown.renderers.total", num_procs);
-      UMA_HISTOGRAM_COUNTS_100(L"Shutdown.renderers.slow", num_procs_slow);
+      UMA_HISTOGRAM_COUNTS_100("Shutdown.renderers.total", num_procs);
+      UMA_HISTOGRAM_COUNTS_100("Shutdown.renderers.slow", num_procs_slow);
     }
   }
 }
 
 }  // namespace browser_shutdown
-

@@ -5,11 +5,11 @@
 #ifndef CHROME_BROWSER_VIEWS_INPUT_WINDOW_H__
 #define CHROME_BROWSER_VIEWS_INPUT_WINDOW_H__
 
-#include "chrome/views/dialog_delegate.h"
+#include "chrome/views/window/dialog_delegate.h"
 
 // InputWindowDelegate --------------------------------------------------------
 
-class InputWindowDelegate : public ChromeViews::DialogDelegate {
+class InputWindowDelegate : public views::DialogDelegate {
  public:
   // Returns the text displayed on the label preceding the text field.
   virtual std::wstring GetTextFieldLabel() = 0;
@@ -33,12 +33,11 @@ class InputWindowDelegate : public ChromeViews::DialogDelegate {
 };
 
 
-namespace ChromeViews {
+namespace views {
 class Window;
 };
 
-ChromeViews::Window* CreateInputWindow(HWND parent_hwnd,
-                                       InputWindowDelegate* delegate);
+views::Window* CreateInputWindow(HWND parent_hwnd,
+                                 InputWindowDelegate* delegate);
 
 #endif  // CHROME_BROWSER_VIEWS_INPUT_WINDOW_H__
-

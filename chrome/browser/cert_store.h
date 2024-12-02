@@ -9,7 +9,8 @@
 #include <map>
 
 #include "base/lock.h"
-#include "chrome/common/notification_service.h"
+#include "base/singleton.h"
+#include "chrome/common/notification_observer.h"
 #include "net/base/x509_certificate.h"
 
 // The purpose of the cert store is to provide an easy way to store/retrieve
@@ -24,9 +25,6 @@
 
 class CertStore : public NotificationObserver {
  public:
-  // Creates the singleton instance.  Should be called from the UI thread.
-  static void Initialize();
-
   // Returns the singleton instance of the CertStore.
   static CertStore* GetSharedInstance();
 
@@ -48,19 +46,20 @@ class CertStore : public NotificationObserver {
                        const NotificationDetails& details);
 
  private:
+  friend struct DefaultSingletonTraits<CertStore>;
+
   CertStore();
   ~CertStore();
 
   // Remove the specified cert from id_to_cert_ and cert_to_id_.
-  void RemoveCert(int cert_id);
+  // NOTE: the caller (RemoveCertsForRenderProcesHost) must hold cert_lock_.
+  void RemoveCertInternal(int cert_id);
 
   // Removes all the certs associated with the specified process from the store.
   void RemoveCertsForRenderProcesHost(int render_process_host_id);
 
-  static CertStore* instance_;
-
   typedef std::multimap<int, int> IDMap;
-  typedef std::map<int, scoped_refptr<net::X509Certificate>> CertMap;
+  typedef std::map<int, scoped_refptr<net::X509Certificate> > CertMap;
   typedef std::map<net::X509Certificate*, int, net::X509Certificate::LessThan>
       ReverseCertMap;
 
@@ -80,4 +79,3 @@ class CertStore : public NotificationObserver {
 };
 
 #endif  // CHROME_BROWSER_CERT_STORE_H_
-

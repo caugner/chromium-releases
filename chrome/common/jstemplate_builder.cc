@@ -7,11 +7,12 @@
 
 #include "chrome/common/jstemplate_builder.h"
 
-#include "chrome/common/common_resources.h"
-#include "chrome/common/json_value_serializer.h"
 #include "base/logging.h"
-#include "chrome/common/resource_bundle.h"
 #include "base/string_util.h"
+#include "chrome/common/json_value_serializer.h"
+#include "chrome/common/resource_bundle.h"
+
+#include "grit/common_resources.h"
 
 namespace jstemplate_builder {
 
@@ -50,4 +51,3 @@ std::string GetTemplateHtml(const StringPiece& html_template,
 }
 
 }  // namespace jstemplate_builder
-

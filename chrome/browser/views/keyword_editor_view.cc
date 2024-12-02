@@ -8,13 +8,11 @@
 
 #include "base/gfx/png_decoder.h"
 #include "base/string_util.h"
-#include "chrome/app/locales/locale_settings.h"
-#include "chrome/app/theme/theme_resources.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/template_url.h"
-#include "chrome/browser/template_url_model.h"
-#include "chrome/browser/user_metrics.h"
+#include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/views/edit_keyword_controller.h"
 #include "chrome/browser/views/standard_layout.h"
 #include "chrome/common/l10n_util.h"
@@ -23,19 +21,21 @@
 #include "chrome/common/resource_bundle.h"
 #include "chrome/common/stl_util-inl.h"
 #include "chrome/views/background.h"
-#include "chrome/views/checkbox.h"
-#include "chrome/views/dialog_delegate.h"
+#include "chrome/views/controls/button/checkbox.h"
 #include "chrome/views/grid_layout.h"
-#include "chrome/views/text_field.h"
-#include "chrome/views/window.h"
+#include "chrome/views/controls/text_field.h"
+#include "chrome/views/widget/widget.h"
+#include "chrome/views/window/dialog_delegate.h"
+#include "chrome/views/window/window.h"
 #include "googleurl/src/gurl.h"
+#include "grit/generated_resources.h"
+#include "grit/locale_settings.h"
+#include "grit/theme_resources.h"
 #include "skia/include/SkBitmap.h"
 
-#include "generated_resources.h"
-
-using ChromeViews::GridLayout;
-using ChromeViews::NativeButton;
-using ChromeViews::TableColumn;
+using views::GridLayout;
+using views::NativeButton;
+using views::TableColumn;
 
 // Group IDs used by TemplateURLTableModel.
 static const int kMainGroupID = 0;
@@ -191,15 +191,29 @@ std::wstring TemplateURLTableModel::GetText(int row, int col_id) {
   const TemplateURL& url = entries_[row]->template_url();
 
   switch (col_id) {
-    case IDS_SEARCH_ENGINES_EDITOR_DESCRIPTION_COLUMN:
+    case IDS_SEARCH_ENGINES_EDITOR_DESCRIPTION_COLUMN: {
+      std::wstring url_short_name = url.short_name();
+      // TODO(xji): Consider adding a special case if the short name is a URL,
+      // since those should always be displayed LTR. Please refer to
+      // http://crbug.com/6726 for more information.
+      l10n_util::AdjustStringForLocaleDirection(url_short_name,
+                                                &url_short_name);
       return (template_url_model_->GetDefaultSearchProvider() == &url) ?
           l10n_util::GetStringF(IDS_SEARCH_ENGINES_EDITOR_DEFAULT_ENGINE,
-                                url.short_name()) :
-          url.short_name();
+                                url_short_name) : url_short_name;
+    }
 
-    case IDS_SEARCH_ENGINES_EDITOR_KEYWORD_COLUMN:
-      return url.keyword();
+    case IDS_SEARCH_ENGINES_EDITOR_KEYWORD_COLUMN: {
+      const std::wstring& keyword = url.keyword();
+      // Keyword should be domain name. Force it to have LTR directionality.
+      if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) {
+        std::wstring localized_keyword = keyword;
+        l10n_util::WrapStringWithLTRFormatting(&localized_keyword);
+        return localized_keyword;
+      }
+      return keyword;
       break;
+    }
 
     default:
       NOTREACHED();
@@ -212,8 +226,7 @@ SkBitmap TemplateURLTableModel::GetIcon(int row) {
   return entries_[row]->GetIcon();
 }
 
-void TemplateURLTableModel::SetObserver(
-    ChromeViews::TableModelObserver* observer) {
+void TemplateURLTableModel::SetObserver(views::TableModelObserver* observer) {
   observer_ = observer;
 }
 
@@ -315,12 +328,7 @@ void TemplateURLTableModel::FavIconAvailable(ModelEntry* entry) {
 
 // If non-null, there is an open editor and this is the window it is contained
 // in.
-static ChromeViews::Window* open_window = NULL;
-
-// static
-void KeywordEditorView::RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterBooleanPref(prefs::kSearchSuggestEnabled, true);
-}
+static views::Window* open_window = NULL;
 
 // static
 void KeywordEditorView::Show(Profile* profile) {
@@ -336,8 +344,8 @@ void KeywordEditorView::Show(Profile* profile) {
 
   // Initialize the UI. By passing in an empty rect KeywordEditorView is
   // queried for its preferred size.
-  open_window = ChromeViews::Window::CreateChromeWindow(
-      NULL, gfx::Rect(), keyword_editor);
+  open_window = views::Window::CreateChromeWindow(NULL, gfx::Rect(),
+                                                  keyword_editor);
 
   open_window->Show();
 }
@@ -421,33 +429,27 @@ void KeywordEditorView::ModifyTemplateURL(const TemplateURL* template_url,
   UserMetrics::RecordAction(L"KeywordEditor_ModifiedKeyword", profile_);
 }
 
-void KeywordEditorView::DidChangeBounds(const CRect& previous,
-                                        const CRect& current) {
-  Layout();
-}
-
-void KeywordEditorView::GetPreferredSize(CSize* out) {
-  DCHECK(out);
-  *out = ChromeViews::Window::GetLocalizedContentsSize(
+gfx::Size KeywordEditorView::GetPreferredSize() {
+  return gfx::Size(views::Window::GetLocalizedContentsSize(
       IDS_SEARCHENGINES_DIALOG_WIDTH_CHARS,
-      IDS_SEARCHENGINES_DIALOG_HEIGHT_LINES).ToSIZE();
+      IDS_SEARCHENGINES_DIALOG_HEIGHT_LINES));
 }
 
 bool KeywordEditorView::CanResize() const {
   return true;
 }
-	 			
+
 std::wstring KeywordEditorView::GetWindowTitle() const {
   return l10n_util::GetString(IDS_SEARCH_ENGINES_EDITOR_WINDOW_TITLE);
-}			
+}
 
 int KeywordEditorView::GetDialogButtons() const {
   return DIALOGBUTTON_CANCEL;
 }
-	 			
+
 bool KeywordEditorView::Accept() {
   open_window = NULL;
-  return true;			
+  return true;
 }
 
 bool KeywordEditorView::Cancel() {
@@ -455,7 +457,7 @@ bool KeywordEditorView::Cancel() {
   return true;
 }
 
-ChromeViews::View* KeywordEditorView::GetContentsView() {
+views::View* KeywordEditorView::GetContentsView() {
   return this;
 }
 
@@ -471,44 +473,34 @@ void KeywordEditorView::Init() {
   columns.push_back(
       TableColumn(IDS_SEARCH_ENGINES_EDITOR_DESCRIPTION_COLUMN,
                   TableColumn::LEFT, -1, .75));
+  columns.back().sortable = true;
   columns.push_back(
       TableColumn(IDS_SEARCH_ENGINES_EDITOR_KEYWORD_COLUMN,
                   TableColumn::LEFT, -1, .25));
-  table_view_ = new ChromeViews::TableView(table_model_.get(), columns,
-      ChromeViews::ICON_AND_TEXT, false, true, true);
+  columns.back().sortable = true;
+  table_view_ = new views::TableView(table_model_.get(), columns,
+      views::ICON_AND_TEXT, false, true, true);
   table_view_->SetObserver(this);
 
-  add_button_ = new ChromeViews::NativeButton(
+  add_button_ = new views::NativeButton(
       l10n_util::GetString(IDS_SEARCH_ENGINES_EDITOR_NEW_BUTTON));
   add_button_->SetEnabled(url_model_->loaded());
   add_button_->SetListener(this);
 
-  edit_button_ = new ChromeViews::NativeButton(
+  edit_button_ = new views::NativeButton(
       l10n_util::GetString(IDS_SEARCH_ENGINES_EDITOR_EDIT_BUTTON));
   edit_button_->SetEnabled(false);
   edit_button_->SetListener(this);
 
-  remove_button_ = new ChromeViews::NativeButton(
+  remove_button_ = new views::NativeButton(
       l10n_util::GetString(IDS_SEARCH_ENGINES_EDITOR_REMOVE_BUTTON));
   remove_button_->SetEnabled(false);
   remove_button_->SetListener(this);
 
-  make_default_button_ = new ChromeViews::NativeButton(
+  make_default_button_ = new views::NativeButton(
       l10n_util::GetString(IDS_SEARCH_ENGINES_EDITOR_MAKE_DEFAULT_BUTTON));
   make_default_button_->SetEnabled(false);
   make_default_button_->SetListener(this);
-
-  enable_suggest_checkbox_ = new ChromeViews::CheckBox(
-      l10n_util::GetString(IDS_OPTIONS_SUGGEST_PREF));
-  enable_suggest_checkbox_->SetMultiLine(true);
-  // Enable the Suggest checkbox only if the default provider has Suggest
-  // capability.
-  const TemplateURL* default_provider = url_model_->GetDefaultSearchProvider();
-  enable_suggest_checkbox_->SetEnabled(default_provider &&
-      (default_provider->suggestions_url() != NULL));
-  enable_suggest_checkbox_->SetIsSelected(
-      profile_->GetPrefs()->GetBoolean(prefs::kSearchSuggestEnabled));
-  enable_suggest_checkbox_->SetListener(this);
 
   InitLayoutManager();
 }
@@ -522,7 +514,7 @@ void KeywordEditorView::InitLayoutManager() {
   SetLayoutManager(contents_layout);
 
   // For the table and buttons.
-  ChromeViews::ColumnSet* column_set = contents_layout->AddColumnSet(0);
+  views::ColumnSet* column_set = contents_layout->AddColumnSet(0);
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::USE_PREF, 0, 0);
   column_set->AddPaddingColumn(0, related_x);
@@ -547,9 +539,6 @@ void KeywordEditorView::InitLayoutManager() {
   contents_layout->AddView(make_default_button_);
 
   contents_layout->AddPaddingRow(1, 0);
-
-  contents_layout->StartRowWithPadding(0, 0, 0, related_y);
-  contents_layout->AddView(enable_suggest_checkbox_, 3, 1);
 }
 
 void KeywordEditorView::OnSelectionChanged() {
@@ -575,10 +564,10 @@ void KeywordEditorView::OnDoubleClick() {
     ButtonPressed(edit_button_);
 }
 
-void KeywordEditorView::ButtonPressed(ChromeViews::NativeButton* sender) {
+void KeywordEditorView::ButtonPressed(views::NativeButton* sender) {
   if (sender == add_button_) {
-    EditKeywordController* controller =
-        new EditKeywordController(GetViewContainer()->GetHWND(), NULL, this,
+    EditKeywordController* controller = 
+        new EditKeywordController(GetWidget()->GetNativeView(), NULL, this,
                                   profile_);
     controller->Show();
   } else if (sender == remove_button_) {
@@ -586,44 +575,30 @@ void KeywordEditorView::ButtonPressed(ChromeViews::NativeButton* sender) {
     // Remove the observer while we modify the model, that way we don't need to
     // worry about the model calling us back when we mutate it.
     url_model_->RemoveObserver(this);
-    int last_row = -1;
-    for (ChromeViews::TableView::iterator i = table_view_->SelectionBegin();
+    int last_view_row = -1;
+    for (views::TableView::iterator i = table_view_->SelectionBegin();
          i != table_view_->SelectionEnd(); ++i) {
-      last_row = *i;
-      const TemplateURL* template_url = &table_model_->GetTemplateURL(last_row);
+      last_view_row = table_view_->model_to_view(*i);
+      const TemplateURL* template_url = &table_model_->GetTemplateURL(*i);
       // Make sure to remove from the table model first, otherwise the
       // TemplateURL would be freed.
-      table_model_->Remove(last_row);
+      table_model_->Remove(*i);
       url_model_->Remove(template_url);
     }
-    if (last_row >= table_model_->RowCount())
-      last_row = table_model_->RowCount() - 1;
-    if (last_row >= 0)
-      table_view_->Select(last_row);
+    if (last_view_row >= table_model_->RowCount())
+      last_view_row = table_model_->RowCount() - 1;
+    if (last_view_row >= 0)
+      table_view_->Select(table_view_->view_to_model(last_view_row));
     url_model_->AddObserver(this);
-
-    // We may have removed the default provider.  Enable the Suggest checkbox
-    // only if the default provider has Suggest capability.
-    const TemplateURL* default_provider =
-        url_model_->GetDefaultSearchProvider();
-    enable_suggest_checkbox_->SetEnabled(default_provider &&
-        (default_provider->suggestions_url() != NULL));
-    // TODO(pkasting): http://b/1156120 If the template URL model auto-sets a
-    // new default, ensure that the table model is notified of the change on the
-    // relevant row.
-
     UserMetrics::RecordAction(L"KeywordEditor_RemoveKeyword", profile_);
   } else if (sender == edit_button_) {
     const int selected_row = table_view_->FirstSelectedRow();
     const TemplateURL* template_url =
         &table_model_->GetTemplateURL(selected_row);
     EditKeywordController* controller =
-        new EditKeywordController(GetViewContainer()->GetHWND(), template_url,
+        new EditKeywordController(GetWidget()->GetNativeView(), template_url,
                                   this, profile_);
     controller->Show();
-  } else if (sender == enable_suggest_checkbox_) {
-    profile_->GetPrefs()->SetBoolean(prefs::kSearchSuggestEnabled,
-                                     enable_suggest_checkbox_->IsSelected());
   } else if (sender == make_default_button_) {
     MakeDefaultSearchProvider();
   } else {
@@ -634,12 +609,6 @@ void KeywordEditorView::ButtonPressed(ChromeViews::NativeButton* sender) {
 void KeywordEditorView::OnTemplateURLModelChanged() {
   table_model_->Reload();
   add_button_->SetEnabled(url_model_->loaded());
-
-  // Enable the Suggest checkbox only if the default provider has Suggest
-  // capability.
-  const TemplateURL* default_provider = url_model_->GetDefaultSearchProvider();
-  enable_suggest_checkbox_->SetEnabled(default_provider &&
-      (default_provider->suggestions_url() != NULL));
 }
 
 void KeywordEditorView::MakeDefaultSearchProvider() {
@@ -660,9 +629,6 @@ void KeywordEditorView::MakeDefaultSearchProvider(int index) {
   url_model_->SetDefaultSearchProvider(keyword);
   url_model_->AddObserver(this);
 
-  // Enable the Suggest checkbox only if this engine has Suggest capability.
-  enable_suggest_checkbox_->SetEnabled(keyword->suggestions_url() != NULL);
-
   // The formatting of the default engine is different; notify the table that
   // both old and new entries have changed.
   if (current_default != NULL) {
@@ -676,5 +642,5 @@ void KeywordEditorView::MakeDefaultSearchProvider(int index) {
   table_model_->MoveToMainGroup(index);
 
   // And select it.
-  table_view_->Select(new_index);
+  table_view_->Select(table_model_->IndexOfTemplateURL(keyword));
 }

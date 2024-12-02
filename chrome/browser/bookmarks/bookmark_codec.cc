@@ -7,25 +7,24 @@
 #include "base/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/common/l10n_util.h"
 #include "googleurl/src/gurl.h"
+#include "grit/generated_resources.h"
 
-#include "generated_resources.h"
+using base::Time;
 
-// Key names.
-static const wchar_t* kRootsKey = L"roots";
-static const wchar_t* kRootFolderNameKey = L"bookmark_bar";
-static const wchar_t* kOtherBookmarFolderNameKey = L"other";
-static const wchar_t* kVersionKey = L"version";
-static const wchar_t* kTypeKey = L"type";
-static const wchar_t* kNameKey = L"name";
-static const wchar_t* kDateAddedKey = L"date_added";
-static const wchar_t* kURLKey = L"url";
-static const wchar_t* kDateModifiedKey = L"date_modified";
-static const wchar_t* kChildrenKey = L"children";
-
-// Possible values for kTypeKey.
-static const wchar_t* kTypeURL = L"url";
-static const wchar_t* kTypeFolder = L"folder";
+const wchar_t* BookmarkCodec::kRootsKey = L"roots";
+const wchar_t* BookmarkCodec::kRootFolderNameKey = L"bookmark_bar";
+const wchar_t* BookmarkCodec::kOtherBookmarFolderNameKey = L"other";
+const wchar_t* BookmarkCodec::kVersionKey = L"version";
+const wchar_t* BookmarkCodec::kTypeKey = L"type";
+const wchar_t* BookmarkCodec::kNameKey = L"name";
+const wchar_t* BookmarkCodec::kDateAddedKey = L"date_added";
+const wchar_t* BookmarkCodec::kURLKey = L"url";
+const wchar_t* BookmarkCodec::kDateModifiedKey = L"date_modified";
+const wchar_t* BookmarkCodec::kChildrenKey = L"children";
+const wchar_t* BookmarkCodec::kTypeURL = L"url";
+const wchar_t* BookmarkCodec::kTypeFolder = L"folder";
 
 // Current version of the file.
 static const int kCurrentVersion = 1;
@@ -134,7 +133,6 @@ bool BookmarkCodec::DecodeNode(BookmarkModel* model,
                                const DictionaryValue& value,
                                BookmarkNode* parent,
                                BookmarkNode* node) {
-  bool created_node = (node == NULL);
   std::wstring title;
   if (!value.GetString(kNameKey, &title))
     return false;
@@ -158,7 +156,7 @@ bool BookmarkCodec::DecodeNode(BookmarkModel* model,
       return false;
     // TODO(sky): this should ignore the node if not a valid URL.
     if (!node)
-      node = new BookmarkNode(model, GURL(url_string));
+      node = new BookmarkNode(model, GURL(WideToUTF8(url_string)));
     if (parent)
       parent->Add(parent->GetChildCount(), node);
     node->type_ = history::StarredEntry::URL;
@@ -177,8 +175,8 @@ bool BookmarkCodec::DecodeNode(BookmarkModel* model,
     if (!node)
       node = new BookmarkNode(model, GURL());
     node->type_ = history::StarredEntry::USER_GROUP;
-    node->date_group_modified_ =
-        Time::FromInternalValue(StringToInt64(last_modified_date));
+    node->date_group_modified_ = Time::FromInternalValue(
+        StringToInt64(WideToUTF16Hack(last_modified_date)));
 
     if (parent)
       parent->Add(parent->GetChildCount(), node);
@@ -186,10 +184,9 @@ bool BookmarkCodec::DecodeNode(BookmarkModel* model,
     if (!DecodeChildren(model, *static_cast<ListValue*>(child_values), node))
       return false;
   }
-  
+
   node->SetTitle(title);
-  node->date_added_ =
-      Time::FromInternalValue(StringToInt64(date_added_string));
+  node->date_added_ = Time::FromInternalValue(
+      StringToInt64(WideToUTF16Hack(date_added_string)));
   return true;
 }
-

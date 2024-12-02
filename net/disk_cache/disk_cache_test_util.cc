@@ -4,11 +4,15 @@
 
 #include "net/disk_cache/disk_cache_test_util.h"
 
+#include "base/logging.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "net/disk_cache/backend_impl.h"
 #include "net/disk_cache/cache_util.h"
 #include "net/disk_cache/file.h"
+
+using base::Time;
+using base::TimeDelta;
 
 std::string GenerateKey(bool same_length) {
   char key[200];
@@ -47,10 +51,12 @@ std::wstring GetCachePath() {
 
 bool CreateCacheTestFile(const wchar_t* name) {
   using namespace disk_cache;
-  int flags = OS_FILE_CREATE_ALWAYS | OS_FILE_READ | OS_FILE_WRITE |
-              OS_FILE_SHARE_READ | OS_FILE_SHARE_WRITE;
+  int flags = base::PLATFORM_FILE_CREATE_ALWAYS |
+              base::PLATFORM_FILE_READ |
+              base::PLATFORM_FILE_WRITE;
 
-  scoped_refptr<File> file(new File(CreateOSFile(name, flags, NULL)));
+  scoped_refptr<File> file(new File(
+      base::CreatePlatformFile(name, flags, NULL)));
   if (!file->IsValid())
     return false;
 
@@ -70,6 +76,15 @@ bool CheckCacheIntegrity(const std::wstring& path) {
   if (!cache->Init())
     return false;
   return cache->SelfCheck() >= 0;
+}
+
+ScopedTestCache::ScopedTestCache() : path_(GetCachePath()) {
+  bool result = DeleteCache(path_.c_str());
+  DCHECK(result);
+}
+
+ScopedTestCache::~ScopedTestCache() {
+  file_util::Delete(path(), true);
 }
 
 // -----------------------------------------------------------------------

@@ -2,23 +2,28 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_HISTORY_THUMBNAIL_DATABASE_H__
-#define CHROME_BROWSER_HISTORY_THUMBNAIL_DATABASE_H__
+#ifndef CHROME_BROWSER_HISTORY_THUMBNAIL_DATABASE_H_
+#define CHROME_BROWSER_HISTORY_THUMBNAIL_DATABASE_H_
 
 #include <vector>
 
-#include "chrome/browser/history/history_database.h"
+#include "base/file_path.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/url_database.h"  // For DBCloseScoper.
+#include "chrome/browser/meta_table_helper.h"
 #include "chrome/common/sqlite_compiled_statement.h"
+#include "skia/include/SkBitmap.h"
 
 struct sqlite3;
 struct ThumbnailScore;
-class Time;
+namespace base {
+  class Time;
+}
 
 namespace history {
 
 class ExpireHistoryBackend;
+class HistoryPublisher;
 
 // This database interface is owned by the history backend and runs on the
 // history thread. It is a totally separate component from history partially
@@ -34,7 +39,8 @@ class ThumbnailDatabase {
 
   // Must be called after creation but before any other methods are called.
   // When not INIT_OK, no other functions should be called.
-  InitStatus Init(const std::wstring& db_name);
+  InitStatus Init(const FilePath& db_name,
+                  const HistoryPublisher* history_publisher);
 
   // Transactions on the database.
   void BeginTransaction();
@@ -52,9 +58,11 @@ class ThumbnailDatabase {
   // Sets the given data to be the thumbnail for the given URL,
   // overwriting any previous data. If the SkBitmap contains no pixel
   // data, the thumbnail will be deleted.
-  void SetPageThumbnail(URLID id,
+  void SetPageThumbnail(const GURL& url,
+                        URLID id,
                         const SkBitmap& thumbnail,
-                        const ThumbnailScore& score);
+                        const ThumbnailScore& score,
+                        const base::Time& time);
 
   // Retrieves thumbnail data for the given URL, returning true on success,
   // false if there is no such thumbnail or there was some other error.
@@ -79,10 +87,10 @@ class ThumbnailDatabase {
   // should be refreshed.
   bool SetFavIcon(FavIconID icon_id,
                   const std::vector<unsigned char>& icon_data,
-                  Time time);
+                  base::Time time);
 
   // Sets the time the favicon was last updated.
-  bool SetFavIconLastUpdateTime(FavIconID icon_id, const Time& time);
+  bool SetFavIconLastUpdateTime(FavIconID icon_id, const base::Time& time);
 
   // Returns the id of the entry in the favicon database with the specified url.
   // Returns 0 if no entry exists for the specified url.
@@ -91,7 +99,7 @@ class ThumbnailDatabase {
   // Gets the png encoded favicon and last updated time for the specified
   // favicon id.
   bool GetFavIcon(FavIconID icon_id,
-                  Time* last_updated,
+                  base::Time* last_updated,
                   std::vector<unsigned char>* png_icon_data,
                   GURL* icon_url);
 
@@ -138,7 +146,7 @@ class ThumbnailDatabase {
   bool InitFavIconsTable(bool is_temporary);
 
   // Adds support for the new metadata on web page thumbnails.
-  void UpgradeToVersion3();
+  bool UpgradeToVersion3();
 
   // Creates the index over the favicon table. This will be called during
   // initialization after the table is created. This is a separate function
@@ -157,9 +165,14 @@ class ThumbnailDatabase {
   int transaction_nesting_;
 
   MetaTableHelper meta_table_;
+
+  // This object is created and managed by the history backend. We maintain an
+  // opaque pointer to the object for our use.
+  // This can be NULL if there are no indexers registered to receive indexing
+  // data from us.
+  const HistoryPublisher* history_publisher_;
 };
 
 }  // namespace history
 
-#endif  // CHROME_BROWSER_HISTORY_THUMBNAIL_DATABASE_H__
-
+#endif  // CHROME_BROWSER_HISTORY_THUMBNAIL_DATABASE_H_

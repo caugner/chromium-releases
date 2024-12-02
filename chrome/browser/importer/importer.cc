@@ -5,29 +5,42 @@
 #include "chrome/browser/importer/importer.h"
 
 #include <map>
+#include <set>
 
 #include "base/file_util.h"
-#include "base/gfx/image_operations.h"
 #include "base/gfx/png_encoder.h"
 #include "base/string_util.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/browser.h"
+#include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/first_run.h"
 #include "chrome/browser/importer/firefox2_importer.h"
 #include "chrome/browser/importer/firefox3_importer.h"
 #include "chrome/browser/importer/firefox_importer_utils.h"
 #include "chrome/browser/importer/firefox_profile_lock.h"
+#if defined(OS_WIN)
 #include "chrome/browser/importer/ie_importer.h"
-#include "chrome/browser/template_url_model.h"
+#endif
+#include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/browser/tab_contents/site_instance.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/gfx/favicon_size.h"
 #include "chrome/common/l10n_util.h"
+#include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
-#include "chrome/views/window.h"
+#include "grit/generated_resources.h"
+#include "skia/ext/image_operations.h"
 #include "webkit/glue/image_decoder.h"
 
-#include "generated_resources.h"
+// TODO(port): Port these files.
+#if defined(OS_WIN)
+#include "chrome/browser/views/importer_lock_view.h"
+#include "chrome/common/win_util.h"
+#include "chrome/views/window/window.h"
+#endif
 
 // ProfileWriter.
 
@@ -47,7 +60,7 @@ void ProfileWriter::AddTemplateURLModelObserver(
     NotificationObserver* observer) {
   TemplateURLModel* model = profile_->GetTemplateURLModel();
   NotificationService::current()->AddObserver(
-      observer, TEMPLATE_URL_MODEL_LOADED,
+      observer, NotificationType::TEMPLATE_URL_MODEL_LOADED,
       Source<TemplateURLModel>(model));
   model->Load();
 }
@@ -56,9 +69,11 @@ void ProfileWriter::AddPasswordForm(const PasswordForm& form) {
   profile_->GetWebDataService(Profile::EXPLICIT_ACCESS)->AddLogin(form);
 }
 
+#if defined(OS_WIN)
 void ProfileWriter::AddIE7PasswordInfo(const IE7PasswordInfo& info) {
   profile_->GetWebDataService(Profile::EXPLICIT_ACCESS)->AddIE7Login(info);
 }
+#endif
 
 void ProfileWriter::AddHistoryPage(const std::vector<history::URLRow>& page) {
   profile_->GetHistoryService(Profile::EXPLICIT_ACCESS)->
@@ -75,9 +90,15 @@ void ProfileWriter::AddHomepage(const GURL& home_page) {
 }
 
 void ProfileWriter::AddBookmarkEntry(
-    const std::vector<BookmarkEntry>& bookmark) {
+    const std::vector<BookmarkEntry>& bookmark,
+    const std::wstring& first_folder_name,
+    int options) {
   BookmarkModel* model = profile_->GetBookmarkModel();
   DCHECK(model->IsLoaded());
+
+  bool first_run = (options & FIRST_RUN) != 0;
+  std::wstring real_first_folder = first_run ? first_folder_name :
+      GenerateUniqueFolderName(model, first_folder_name);
 
   bool show_bookmark_toolbar = false;
   std::set<BookmarkNode*> groups_added_to;
@@ -86,6 +107,14 @@ void ProfileWriter::AddBookmarkEntry(
     // Don't insert this url if it isn't valid.
     if (!it->url.is_valid())
       continue;
+
+    // We suppose that bookmarks are unique by Title, URL, and Folder.  Since
+    // checking for uniqueness may not be always the user's intention we have
+    // this as an option.
+    if (options & ADD_IF_UNIQUE &&
+        DoesBookmarkExist(model, *it, real_first_folder, first_run)) {
+      continue;
+    }
 
     // Set up groups in BookmarkModel in such a way that path[i] is
     // the subgroup of path[i-1]. Finally they construct a path in the
@@ -96,17 +125,21 @@ void ProfileWriter::AddBookmarkEntry(
     for (std::vector<std::wstring>::const_iterator i = it->path.begin();
          i != it->path.end(); ++i) {
       BookmarkNode* child = NULL;
+      const std::wstring& folder_name =
+          (!first_run && !it->in_toolbar && (i == it->path.begin())) ?
+          real_first_folder : *i;
+
       for (int index = 0; index < parent->GetChildCount(); ++index) {
         BookmarkNode* node = parent->GetChild(index);
         if ((node->GetType() == history::StarredEntry::BOOKMARK_BAR ||
              node->GetType() == history::StarredEntry::USER_GROUP) &&
-            node->GetTitle() == *i) {
+            node->GetTitle() == folder_name) {
           child = node;
           break;
         }
       }
       if (child == NULL)
-        child = model->AddGroup(parent, parent->GetChildCount(), *i);
+        child = model->AddGroup(parent, parent->GetChildCount(), folder_name);
       parent = child;
     }
     groups_added_to.insert(parent);
@@ -139,16 +172,37 @@ void ProfileWriter::AddFavicons(
 
 typedef std::map<std::string, const TemplateURL*> HostPathMap;
 
+// Returns the key for the map built by BuildHostPathMap. If url_string is not
+// a valid URL, an empty string is returned, otherwise host+path is returned.
+static std::string HostPathKeyForURL(const GURL& url) {
+  return url.is_valid() ? url.host() + url.path() : std::string();
+}
+
 // Builds the key to use in HostPathMap for the specified TemplateURL. Returns
 // an empty string if a host+path can't be generated for the TemplateURL.
-// If an empty string is returned, it should not be added to HostPathMap.
-static std::string BuildHostPathKey(const TemplateURL* t_url) {
-  if (t_url->url() && t_url->url()->SupportsReplacement()) {
-    GURL search_url(t_url->url()->ReplaceSearchTerms(
-        *t_url, L"random string", TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
-        std::wstring()));
-    if (search_url.is_valid())
-      return search_url.host() + search_url.path();
+// If an empty string is returned, the TemplateURL should not be added to
+// HostPathMap.
+//
+// If |try_url_if_invalid| is true, and |t_url| isn't valid, a string is built
+// from the raw TemplateURL string. Use a value of true for |try_url_if_invalid|
+// when checking imported URLs as the imported URL may not be valid yet may
+// match the host+path of one of the default URLs. This is used to catch the
+// case of IE using an invalid OSDD URL for Live Search, yet the host+path
+// matches our prepopulate data. IE's URL for Live Search is something like
+// 'http://...{Language}...'. As {Language} is not a valid OSDD parameter value
+// the TemplateURL is invalid.
+static std::string BuildHostPathKey(const TemplateURL* t_url,
+                                    bool try_url_if_invalid) {
+  if (t_url->url()) {
+    if (try_url_if_invalid && !t_url->url()->IsValid())
+      return HostPathKeyForURL(GURL(WideToUTF8(t_url->url()->url())));
+
+    if (t_url->url()->SupportsReplacement()) {
+      return HostPathKeyForURL(
+          t_url->url()->ReplaceSearchTerms(
+              *t_url, L"random string",
+              TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, std::wstring()));
+    }
   }
   return std::string();
 }
@@ -159,7 +213,7 @@ static void BuildHostPathMap(const TemplateURLModel& model,
                              HostPathMap* host_path_map) {
   std::vector<const TemplateURL*> template_urls = model.GetTemplateURLs();
   for (size_t i = 0; i < template_urls.size(); ++i) {
-    const std::string host_path = BuildHostPathKey(template_urls[i]);
+    const std::string host_path = BuildHostPathKey(template_urls[i], false);
     if (!host_path.empty()) {
       const TemplateURL* existing_turl = (*host_path_map)[host_path];
       if (!existing_turl ||
@@ -208,10 +262,11 @@ void ProfileWriter::AddKeywords(const std::vector<TemplateURL*>& template_urls,
     // sure the search engines we provide aren't replaced by those from the
     // imported browser.
     if (unique_on_host_and_path &&
-        host_path_map.find(BuildHostPathKey(t_url)) != host_path_map.end()) {
+        host_path_map.find(
+            BuildHostPathKey(t_url, true)) != host_path_map.end()) {
       if (default_keyword) {
         const TemplateURL* turl_with_host_path =
-            host_path_map[BuildHostPathKey(t_url)];
+            host_path_map[BuildHostPathKey(t_url, true)];
         if (turl_with_host_path)
           model->SetDefaultSearchProvider(turl_with_host_path);
         else
@@ -220,9 +275,15 @@ void ProfileWriter::AddKeywords(const std::vector<TemplateURL*>& template_urls,
       delete t_url;
       continue;
     }
-    model->Add(t_url);
-    if (default_keyword)
-      model->SetDefaultSearchProvider(t_url);
+    if (t_url->url() && t_url->url()->IsValid()) {
+      model->Add(t_url);
+      if (default_keyword && t_url->url() &&
+          t_url->url()->SupportsReplacement())
+        model->SetDefaultSearchProvider(t_url);
+    } else {
+      // Don't add invalid TemplateURLs to the model.
+      delete t_url;
+    }
   }
 }
 
@@ -237,9 +298,82 @@ void ProfileWriter::ShowBookmarkBar() {
     prefs->ScheduleSavePersistentPrefs(g_browser_process->file_thread());
     Source<Profile> source(profile_);
     NotificationService::current()->Notify(
-        NOTIFY_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED, source,
+        NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED, source,
         NotificationService::NoDetails());
   }
+}
+
+std::wstring ProfileWriter::GenerateUniqueFolderName(
+    BookmarkModel* model,
+    const std::wstring& folder_name) {
+  // Build a set containing the folder names of the other folder.
+  std::set<std::wstring> other_folder_names;
+  BookmarkNode* other = model->other_node();
+  for (int i = 0; i < other->GetChildCount(); ++i) {
+    BookmarkNode* node = other->GetChild(i);
+    if (node->is_folder())
+      other_folder_names.insert(node->GetTitle());
+  }
+
+  if (other_folder_names.find(folder_name) == other_folder_names.end())
+    return folder_name;  // Name is unique, use it.
+
+  // Otherwise iterate until we find a unique name.
+  for (int i = 1; i < 100; ++i) {
+    std::wstring name = folder_name + StringPrintf(L" (%d)", i);
+    if (other_folder_names.find(name) == other_folder_names.end())
+      return name;
+  }
+
+  return folder_name;
+}
+
+bool ProfileWriter::DoesBookmarkExist(
+    BookmarkModel* model,
+    const BookmarkEntry& entry,
+    const std::wstring& first_folder_name,
+    bool first_run) {
+  std::vector<BookmarkNode*> nodes_with_same_url;
+  model->GetNodesByURL(entry.url, &nodes_with_same_url);
+  if (nodes_with_same_url.empty())
+    return false;
+
+  for (size_t i = 0; i < nodes_with_same_url.size(); ++i) {
+    BookmarkNode* node = nodes_with_same_url[i];
+    if (entry.title != node->GetTitle())
+      continue;
+
+    // Does the path match?
+    bool found_match = true;
+    BookmarkNode* parent = node->GetParent();
+    for (std::vector<std::wstring>::const_reverse_iterator path_it =
+             entry.path.rbegin();
+         (path_it != entry.path.rend()) && found_match; ++path_it) {
+      const std::wstring& folder_name =
+          (!first_run && path_it + 1 == entry.path.rend()) ?
+          first_folder_name : *path_it;
+      if (NULL == parent || *path_it != folder_name)
+        found_match = false;
+      else
+        parent = parent->GetParent();
+    }
+
+    // We need a post test to differentiate checks such as
+    // /home/hello and /hello. The parent should either by the other folder
+    // node, or the bookmarks bar, depending upon first_run and
+    // entry.in_toolbar.
+    if (found_match &&
+        ((first_run && entry.in_toolbar && parent !=
+          model->GetBookmarkBarNode()) ||
+         ((!first_run || !entry.in_toolbar) &&
+           parent != model->other_node()))) {
+      found_match = false;
+    }
+
+    if (found_match)
+      return true;  // Found a match with the same url path and title.
+  }
+  return false;
 }
 
 // Importer.
@@ -258,16 +392,12 @@ bool Importer::ReencodeFavicon(const unsigned char* src_data, size_t src_len,
     int new_width = decoded.width();
     int new_height = decoded.height();
     calc_favicon_target_size(&new_width, &new_height);
-    decoded = gfx::ImageOperations::Resize(
-        decoded, gfx::ImageOperations::RESIZE_LANCZOS3,
-        gfx::Size(new_width, new_height));
+    decoded = skia::ImageOperations::Resize(
+        decoded, skia::ImageOperations::RESIZE_LANCZOS3, new_width, new_height);
   }
 
   // Encode our bitmap as a PNG.
-  SkAutoLockPixels decoded_lock(decoded);
-  PNGEncoder::Encode(reinterpret_cast<unsigned char*>(decoded.getPixels()),
-                     PNGEncoder::FORMAT_BGRA, decoded.width(),
-                     decoded.height(), decoded.width() * 4, false, png_data);
+  PNGEncoder::EncodeBGRASkBitmap(decoded, false, png_data);
   return true;
 }
 
@@ -280,7 +410,8 @@ ImporterHost::ImporterHost()
       file_loop_(g_browser_process->file_thread()->message_loop()),
       waiting_for_bookmarkbar_model_(false),
       waiting_for_template_url_model_(false),
-      is_source_readable_(true) {
+      is_source_readable_(true),
+      headless_(false) {
   DetectSourceProfiles();
 }
 
@@ -291,12 +422,15 @@ ImporterHost::ImporterHost(MessageLoop* file_loop)
       file_loop_(file_loop),
       waiting_for_bookmarkbar_model_(false),
       waiting_for_template_url_model_(false),
-      is_source_readable_(true) {
+      is_source_readable_(true),
+      headless_(false) {
   DetectSourceProfiles();
 }
 
 ImporterHost::~ImporterHost() {
   STLDeleteContainerPointers(source_profiles_.begin(), source_profiles_.end());
+  if (NULL != importer_)
+    importer_->Release();
 }
 
 void ImporterHost::Loaded(BookmarkModel* model) {
@@ -308,18 +442,27 @@ void ImporterHost::Loaded(BookmarkModel* model) {
 void ImporterHost::Observe(NotificationType type,
                            const NotificationSource& source,
                            const NotificationDetails& details) {
-  DCHECK(type == TEMPLATE_URL_MODEL_LOADED);
+  DCHECK(type == NotificationType::TEMPLATE_URL_MODEL_LOADED);
   TemplateURLModel* model = Source<TemplateURLModel>(source).ptr();
   NotificationService::current()->RemoveObserver(
-      this, TEMPLATE_URL_MODEL_LOADED,
+      this, NotificationType::TEMPLATE_URL_MODEL_LOADED,
       Source<TemplateURLModel>(model));
   waiting_for_template_url_model_ = false;
   InvokeTaskIfDone();
 }
 
 void ImporterHost::ShowWarningDialog() {
-  ChromeViews::Window::CreateChromeWindow(GetActiveWindow(), gfx::Rect(),
-                                          new ImporterLockView(this))->Show();
+  if (headless_) {
+    OnLockViewEnd(false);
+  } else {
+#if defined(OS_WIN)
+    views::Window::CreateChromeWindow(GetActiveWindow(), gfx::Rect(),
+                                      new ImporterLockView(this))->Show();
+#else
+    // TODO(port): Need CreateChromeWindow.
+    NOTIMPLEMENTED();
+#endif
+  }
 }
 
 void ImporterHost::OnLockViewEnd(bool is_continue) {
@@ -353,9 +496,10 @@ void ImporterHost::StartImportSettings(const ProfileInfo& profile_info,
   // will be notified.
   writer_ = writer;
   importer_ = CreateImporterByType(profile_info.browser_type);
+  importer_->AddRef();
   importer_->set_first_run(first_run);
   task_ = NewRunnableMethod(importer_, &Importer::StartImport,
-      profile_info, items, writer_.get(), this);
+      profile_info, items, writer_.get(), file_loop_, this);
 
   // We should lock the Firefox profile directory to prevent corruption.
   if (profile_info.browser_type == FIREFOX2 ||
@@ -430,8 +574,11 @@ void ImporterHost::ImportEnded() {
 
 Importer* ImporterHost::CreateImporterByType(ProfileType type) {
   switch (type) {
+#if defined(OS_WIN)
     case MS_IE:
       return new IEImporter();
+#endif
+    case BOOKMARKS_HTML:
     case FIREFOX2:
       return new Firefox2Importer();
     case FIREFOX3:
@@ -456,6 +603,9 @@ const ProfileInfo& ImporterHost::GetSourceProfileInfoAt(int index) const {
 }
 
 void ImporterHost::DetectSourceProfiles() {
+#if defined(OS_WIN)
+  // The order in which detect is called determines the order
+  // in which the options appear in the dropdown combo-box
   if (ShellIntegration::IsFirefoxDefaultBrowser()) {
     DetectFirefoxProfiles();
     DetectIEProfiles();
@@ -463,8 +613,13 @@ void ImporterHost::DetectSourceProfiles() {
     DetectIEProfiles();
     DetectFirefoxProfiles();
   }
+#else
+  DetectFirefoxProfiles();
+#endif
 }
 
+
+#if defined(OS_WIN)
 void ImporterHost::DetectIEProfiles() {
   // IE always exists and don't have multiple profiles.
   ProfileInfo* ie = new ProfileInfo();
@@ -472,8 +627,11 @@ void ImporterHost::DetectIEProfiles() {
   ie->browser_type = MS_IE;
   ie->source_path.clear();
   ie->app_path.clear();
+  ie->services_supported = HISTORY | FAVORITES | COOKIES | PASSWORDS |
+      SEARCH_ENGINES;
   source_profiles_.push_back(ie);
 }
+#endif
 
 void ImporterHost::DetectFirefoxProfiles() {
   // Detects which version of Firefox is installed.
@@ -488,9 +646,14 @@ void ImporterHost::DetectFirefoxProfiles() {
     return;
   }
 
-  std::wstring ini_file = GetProfilesINI();
   DictionaryValue root;
+#if defined(OS_WIN)
+  std::wstring ini_file = GetProfilesINI();
   ParseProfileINI(ini_file, &root);
+#else
+  // TODO(port): Do we need to concern ourselves with profiles on posix?
+  NOTIMPLEMENTED();
+#endif
 
   std::wstring source_path;
   for (int i = 0; ; ++i) {
@@ -503,8 +666,12 @@ void ImporterHost::DetectFirefoxProfiles() {
     std::wstring is_relative, path, profile_path;
     if (root.GetString(current_profile + L".IsRelative", &is_relative) &&
         root.GetString(current_profile + L".Path", &path)) {
-      ReplaceSubstringsAfterOffset(&path, 0, L"/", L"\\");
+      string16 path16 = WideToUTF16Hack(path);
+      ReplaceSubstringsAfterOffset(
+          &path16, 0, ASCIIToUTF16("/"), ASCIIToUTF16("\\"));
+      path.assign(UTF16ToWideHack(path16));
 
+#if defined(OS_WIN)
       // IsRelative=1 means the folder path would be relative to the
       // path of profiles.ini. IsRelative=0 refers to a custom profile
       // location.
@@ -514,6 +681,7 @@ void ImporterHost::DetectFirefoxProfiles() {
       } else {
         profile_path = path;
       }
+#endif
 
       // We only import the default profile when multiple profiles exist,
       // since the other profiles are used mostly by developers for testing.
@@ -535,7 +703,8 @@ void ImporterHost::DetectFirefoxProfiles() {
     firefox->browser_type = firefox_type;
     firefox->source_path = source_path;
     firefox->app_path = GetFirefoxInstallPath();
+    firefox->services_supported = HISTORY | FAVORITES | COOKIES | PASSWORDS |
+        SEARCH_ENGINES;
     source_profiles_.push_back(firefox);
   }
 }
-

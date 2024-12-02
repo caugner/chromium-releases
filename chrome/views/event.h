@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_VIEWS_EVENT_H__
-#define CHROME_VIEWS_EVENT_H__
+#ifndef CHROME_VIEWS_EVENT_H_
+#define CHROME_VIEWS_EVENT_H_
 
 #include "base/basictypes.h"
 #include "base/gfx/point.h"
@@ -11,7 +11,7 @@
 
 class OSExchangeData;
 
-namespace ChromeViews {
+namespace views {
 
 class View;
 
@@ -80,13 +80,15 @@ class Event {
     return (flags_ & EF_ALT_DOWN) != 0;
   }
 
+#if defined(OS_WIN)
   // Returns the EventFlags in terms of windows flags.
   int GetWindowsFlags() const;
 
-  // Convert windows flags to ChromeViews::Event flags
+  // Convert windows flags to views::Event flags
   static int ConvertWindowsFlags(uint32 win_flags);
+#endif
 
-  // Convert WebInputEvent::Modifiers flags to ChromeViews::Event flags.
+  // Convert WebInputEvent::Modifiers flags to views::Event flags.
   // Note that this only deals with keyboard modifiers.
   static int ConvertWebInputEventFlags(int web_input_event_flags);
 
@@ -111,7 +113,7 @@ class Event {
 //
 // LocatedEvent class
 //
-// A generifc event that is used for any events that is located at a specific
+// A generic event that is used for any events that is located at a specific
 // position in the screen.
 //
 ////////////////////////////////////////////////////////////////////////////////
@@ -231,7 +233,9 @@ class KeyEvent : public Event {
     return character_;
   }
 
+#if defined(OS_WIN)
   bool IsExtendedKey() const;
+#endif
 
   int GetRepeatCount() const {
     return repeat_count_;
@@ -304,7 +308,6 @@ class DropTargetEvent : public LocatedEvent {
   DISALLOW_EVIL_CONSTRUCTORS(DropTargetEvent);
 };
 
-}  // namespace ChromeViews
+}  // namespace views
 
-#endif  // CHROME_VIEWS_EVENT_H__
-
+#endif  // CHROME_VIEWS_EVENT_H_

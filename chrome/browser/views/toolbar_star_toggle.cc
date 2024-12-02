@@ -4,13 +4,15 @@
 
 #include "chrome/browser/views/toolbar_star_toggle.h"
 
-#include "chrome/app/theme/theme_resources.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/views/bookmark_bubble_view.h"
 #include "chrome/browser/views/toolbar_view.h"
 #include "chrome/common/resource_bundle.h"
 #include "googleurl/src/gurl.h"
+#include "grit/theme_resources.h"
+
+using base::TimeTicks;
 
 // The amount of time (in milliseconds) between when the bubble closes and when
 // pressing on the button again does something. Yes, this is a hackish. I tried
@@ -25,62 +27,59 @@
 // with the bubble because it has other native windows.
 static const int64 kDisallowClickMS = 40;
 
-ToolbarStarToggle::ToolbarStarToggle(BrowserToolbarView* host)
-    : host_(host),
-      ignore_click_(false),
-      is_bubble_showing_(false) {
+ToolbarStarToggle::ToolbarStarToggle(views::ButtonListener* listener,
+                                     BrowserToolbarView* host)
+    : ToggleImageButton(listener),
+      host_(host),
+      ignore_click_(false) {
 }
 
 void ToolbarStarToggle::ShowStarBubble(const GURL& url, bool newly_bookmarked) {
-  if (is_bubble_showing_) {
-    // Don't show if we're already showing the bubble.
-    return;
-  }
-
-  CPoint star_location(0, 0);
-  ChromeViews::View::ConvertPointToScreen(this, &star_location);
+  gfx::Point star_location;
+  views::View::ConvertPointToScreen(this, &star_location);
   // Shift the x location by 1 as visually the center of the star appears 1
   // pixel to the right. By doing this bubble arrow points to the center
   // of the star.
-  gfx::Rect star_bounds(star_location.x + 1, star_location.y, width(),
+  gfx::Rect star_bounds(star_location.x() + 1, star_location.y(), width(),
                         height());
-  BookmarkBubbleView::Show(host_->browser()->GetTopLevelHWND(), star_bounds,
-                           this, host_->profile(), url, newly_bookmarked);
-  is_bubble_showing_ = true;
+  HWND parent_hwnd =
+      reinterpret_cast<HWND>(host_->browser()->window()->GetNativeHandle());
+  BookmarkBubbleView::Show(parent_hwnd, star_bounds, this, host_->profile(),
+                           url, newly_bookmarked);
 }
 
-bool ToolbarStarToggle::OnMousePressed(const ChromeViews::MouseEvent& e) {
+bool ToolbarStarToggle::OnMousePressed(const views::MouseEvent& e) {
   ignore_click_ = ((TimeTicks::Now() - bubble_closed_time_).InMilliseconds() <
                    kDisallowClickMS);
-  return ToggleButton::OnMousePressed(e);
+  return ToggleImageButton::OnMousePressed(e);
 }
 
-void ToolbarStarToggle::OnMouseReleased(const ChromeViews::MouseEvent& e,
+void ToolbarStarToggle::OnMouseReleased(const views::MouseEvent& e,
                                         bool canceled) {
-  ToggleButton::OnMouseReleased(e, canceled);
+  ToggleImageButton::OnMouseReleased(e, canceled);
   ignore_click_ = false;
 }
 
 void ToolbarStarToggle::OnDragDone() {
-  ToggleButton::OnDragDone();
+  ToggleImageButton::OnDragDone();
   ignore_click_ = false;
 }
 
 void ToolbarStarToggle::NotifyClick(int mouse_event_flags) {
-  if (!ignore_click_ && !is_bubble_showing_)
-    ToggleButton::NotifyClick(mouse_event_flags);
+  if (!ignore_click_ && !BookmarkBubbleView::IsShowing())
+    ToggleImageButton::NotifyClick(mouse_event_flags);
 }
 
 SkBitmap ToolbarStarToggle::GetImageToPaint() {
-  if (is_bubble_showing_) {
+  if (BookmarkBubbleView::IsShowing()) {
     ResourceBundle &rb = ResourceBundle::GetSharedInstance();
     return *rb.GetBitmapNamed(IDR_STARRED_P);
   }
-  return Button::GetImageToPaint();
+  return ImageButton::GetImageToPaint();
 }
 
-void ToolbarStarToggle::InfoBubbleClosing(InfoBubble* info_bubble) {
-  is_bubble_showing_ = false;
+void ToolbarStarToggle::InfoBubbleClosing(InfoBubble* info_bubble,
+                                          bool closed_by_escape) {
   SchedulePaint();
   bubble_closed_time_ = TimeTicks::Now();
 }
@@ -88,4 +87,3 @@ void ToolbarStarToggle::InfoBubbleClosing(InfoBubble* info_bubble) {
 bool ToolbarStarToggle::CloseOnEscape() {
   return true;
 }
-

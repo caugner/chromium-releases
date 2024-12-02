@@ -4,16 +4,15 @@
 
 #include "chrome/browser/views/importing_progress_view.h"
 
-#include "chrome/app/locales/locale_settings.h"
 #include "chrome/browser/views/standard_layout.h"
 #include "chrome/common/l10n_util.h"
 #include "chrome/views/grid_layout.h"
-#include "chrome/views/label.h"
-#include "chrome/views/throbber.h"
-#include "chrome/views/window.h"
-
-#include "chromium_strings.h"
-#include "generated_resources.h"
+#include "chrome/views/controls/label.h"
+#include "chrome/views/controls/throbber.h"
+#include "chrome/views/window/window.h"
+#include "grit/chromium_strings.h"
+#include "grit/generated_resources.h"
+#include "grit/locale_settings.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // ImportingProgressView, public:
@@ -22,37 +21,41 @@ ImportingProgressView::ImportingProgressView(const std::wstring& source_name,
                                              int16 items,
                                              ImporterHost* coordinator,
                                              ImportObserver* observer,
-                                             HWND parent_window)
-    : state_bookmarks_(new ChromeViews::CheckmarkThrobber),
-      state_searches_(new ChromeViews::CheckmarkThrobber),
-      state_passwords_(new ChromeViews::CheckmarkThrobber),
-      state_history_(new ChromeViews::CheckmarkThrobber),
-      state_cookies_(new ChromeViews::CheckmarkThrobber),
-      label_info_(new ChromeViews::Label(l10n_util::GetStringF(
-          IDS_IMPORT_PROGRESS_INFO, source_name))),
-      label_bookmarks_(new ChromeViews::Label(
+                                             HWND parent_window,
+                                             bool bookmarks_import)
+    : state_bookmarks_(new views::CheckmarkThrobber),
+      state_searches_(new views::CheckmarkThrobber),
+      state_passwords_(new views::CheckmarkThrobber),
+      state_history_(new views::CheckmarkThrobber),
+      state_cookies_(new views::CheckmarkThrobber),
+      label_bookmarks_(new views::Label(
           l10n_util::GetString(IDS_IMPORT_PROGRESS_STATUS_BOOKMARKS))),
-      label_searches_(new ChromeViews::Label(
+      label_searches_(new views::Label(
           l10n_util::GetString(IDS_IMPORT_PROGRESS_STATUS_SEARCH))),
-      label_passwords_(new ChromeViews::Label(
+      label_passwords_(new views::Label(
           l10n_util::GetString(IDS_IMPORT_PROGRESS_STATUS_PASSWORDS))),
-      label_history_(new ChromeViews::Label(
+      label_history_(new views::Label(
           l10n_util::GetString(IDS_IMPORT_PROGRESS_STATUS_HISTORY))),
-      label_cookies_(new ChromeViews::Label(
+      label_cookies_(new views::Label(
           l10n_util::GetString(IDS_IMPORT_PROGRESS_STATUS_COOKIES))),
       parent_window_(parent_window),
       coordinator_(coordinator),
       import_observer_(observer),
       items_(items),
-      importing_(true) {
+      importing_(true),
+      bookmarks_import_(bookmarks_import) {
+  std::wstring info_text = bookmarks_import ?
+      l10n_util::GetString(IDS_IMPORT_BOOKMARKS) :
+      l10n_util::GetStringF(IDS_IMPORT_PROGRESS_INFO, source_name);
+  label_info_ = new views::Label(info_text);
   coordinator_->SetObserver(this);
   label_info_->SetMultiLine(true);
-  label_info_->SetHorizontalAlignment(ChromeViews::Label::ALIGN_LEFT);
-  label_bookmarks_->SetHorizontalAlignment(ChromeViews::Label::ALIGN_LEFT);
-  label_searches_->SetHorizontalAlignment(ChromeViews::Label::ALIGN_LEFT);
-  label_passwords_->SetHorizontalAlignment(ChromeViews::Label::ALIGN_LEFT);
-  label_history_->SetHorizontalAlignment(ChromeViews::Label::ALIGN_LEFT);
-  label_cookies_->SetHorizontalAlignment(ChromeViews::Label::ALIGN_LEFT);
+  label_info_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  label_bookmarks_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  label_searches_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  label_passwords_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  label_history_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  label_cookies_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
 
   // These are scoped pointers, so we don't need the parent to delete them.
   state_bookmarks_->SetParentOwned(false);
@@ -78,6 +81,17 @@ ImportingProgressView::~ImportingProgressView() {
   RemoveChildView(label_passwords_.get());
   RemoveChildView(label_history_.get());
   RemoveChildView(label_cookies_.get());
+
+  if (importing_) {
+    // We're being deleted while importing, clean up state so that the importer
+    // doesn't have a reference to us and cancel the import. We can get here
+    // if our parent window is closed, which closes our window and deletes us.
+    importing_ = false;
+    coordinator_->SetObserver(NULL);
+    coordinator_->Cancel();
+    if (import_observer_)
+      import_observer_->ImportComplete();
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -149,24 +163,23 @@ void ImportingProgressView::ImportEnded() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// ImportingProgressView, ChromeViews::View overrides:
+// ImportingProgressView, views::View overrides:
 
-void ImportingProgressView::GetPreferredSize(CSize* out) {
-  DCHECK(out);
-  *out = ChromeViews::Window::GetLocalizedContentsSize(
+gfx::Size ImportingProgressView::GetPreferredSize() {
+  return gfx::Size(views::Window::GetLocalizedContentsSize(
       IDS_IMPORTPROGRESS_DIALOG_WIDTH_CHARS,
-      IDS_IMPORTPROGRESS_DIALOG_HEIGHT_LINES).ToSIZE();
+      IDS_IMPORTPROGRESS_DIALOG_HEIGHT_LINES));
 }
 
 void ImportingProgressView::ViewHierarchyChanged(bool is_add,
-                                                 ChromeViews::View* parent,
-                                                 ChromeViews::View* child) {
+                                                 views::View* parent,
+                                                 views::View* child) {
   if (is_add && child == this)
     InitControlLayout();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// ImportingProgressView, ChromeViews::DialogDelegate implementation:
+// ImportingProgressView, views::DialogDelegate implementation:
 
 int ImportingProgressView::GetDialogButtons() const {
   return DIALOGBUTTON_CANCEL;
@@ -200,7 +213,7 @@ bool ImportingProgressView::Cancel() {
   return false;
 }
 
-ChromeViews::View* ImportingProgressView::GetContentsView() {
+views::View* ImportingProgressView::GetContentsView() {
   return this;
 }
 
@@ -208,34 +221,40 @@ ChromeViews::View* ImportingProgressView::GetContentsView() {
 // ImportingProgressView, private:
 
 void ImportingProgressView::InitControlLayout() {
-  using ChromeViews::GridLayout;
-  using ChromeViews::ColumnSet;
+  using views::GridLayout;
+  using views::ColumnSet;
 
   GridLayout* layout = CreatePanelGridLayout(this);
   SetLayoutManager(layout);
 
-  CSize ps;
-  state_history_->GetPreferredSize(&ps);
+  gfx::Size ps = state_history_->GetPreferredSize();
 
   const int single_column_view_set_id = 0;
   ColumnSet* column_set = layout->AddColumnSet(single_column_view_set_id);
+  if (bookmarks_import_) {
+    column_set->AddColumn(GridLayout::CENTER, GridLayout::CENTER, 0,
+                          GridLayout::FIXED, ps.width(), 0);
+    column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
+  }
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::USE_PREF, 0, 0);
   const int double_column_view_set_id = 1;
   column_set = layout->AddColumnSet(double_column_view_set_id);
   column_set->AddPaddingColumn(0, kUnrelatedControlLargeHorizontalSpacing);
   column_set->AddColumn(GridLayout::CENTER, GridLayout::CENTER, 0,
-                        GridLayout::FIXED, ps.cx, 0);
+                        GridLayout::FIXED, ps.width(), 0);
   column_set->AddPaddingColumn(0, kRelatedControlHorizontalSpacing);
   column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 1,
                         GridLayout::USE_PREF, 0, 0);
   column_set->AddPaddingColumn(0, kUnrelatedControlLargeHorizontalSpacing);
 
   layout->StartRow(0, single_column_view_set_id);
+  if (bookmarks_import_)
+    layout->AddView(state_bookmarks_.get());
   layout->AddView(label_info_);
   layout->AddPaddingRow(0, kUnrelatedControlVerticalSpacing);
 
-  if (items_ & FAVORITES) {
+  if (items_ & FAVORITES && !bookmarks_import_) {
     layout->StartRow(0, double_column_view_set_id);
     layout->AddView(state_bookmarks_.get());
     layout->AddView(label_bookmarks_.get());
@@ -279,11 +298,17 @@ void StartImportingWithUI(HWND parent_window,
                           bool first_run) {
   DCHECK(items != 0);
   ImportingProgressView* v = new ImportingProgressView(
-      source_profile.description, items, coordinator, observer, parent_window);
-  ChromeViews::Window::CreateChromeWindow(parent_window, gfx::Rect(),
-                                          v)->Show();
+      source_profile.description, items, coordinator, observer, parent_window,
+      source_profile.browser_type == BOOKMARKS_HTML);
+  views::Window* window =
+    views::Window::CreateChromeWindow(parent_window, gfx::Rect(), v);
+
+  // In headless mode it means that we don't show the progress window, but it
+  // still need it to exist. No user interaction will be required.
+  if (!coordinator->is_headless())
+    window->Show();
+
   coordinator->StartImportSettings(source_profile, items,
                                    new ProfileWriter(target_profile),
                                    first_run);
 }
-

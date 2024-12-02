@@ -5,11 +5,17 @@
 // A class that receives IPC messages from an NPObjectProxy and calls the real
 // NPObject.
 
-#ifndef CHROME_PLUGIN_NPOBJECT_STUB_H__
-#define CHROME_PLUGIN_NPOBJECT_STUB_H__
+#ifndef CHROME_PLUGIN_NPOBJECT_STUB_H_
+#define CHROME_PLUGIN_NPOBJECT_STUB_H_
+
+#include <vector>
 
 #include "base/ref_counted.h"
 #include "chrome/common/ipc_channel.h"
+
+namespace base {
+class WaitableEvent;
+}
 
 class PluginChannelBase;
 class WebPluginDelegateProxy;
@@ -23,7 +29,10 @@ struct NPVariant_Param;
 class NPObjectStub : public IPC::Channel::Listener,
                      public IPC::Message::Sender {
  public:
-  NPObjectStub(NPObject* npobject, PluginChannelBase* channel, int route_id);
+  NPObjectStub(NPObject* npobject,
+               PluginChannelBase* channel,
+               int route_id,
+               base::WaitableEvent* modal_dialog_event);
   ~NPObjectStub();
 
   // IPC::Message::Sender implementation:
@@ -63,13 +72,16 @@ class NPObjectStub : public IPC::Channel::Listener,
   void OnInvalidate();
   void OnEnumeration(std::vector<NPIdentifier_Param>* value,
                      bool* result);
-  void OnEvaluate(const std::string& script, IPC::Message* reply_msg);
+  void OnEvaluate(const std::string& script, bool popups_allowed,
+                  IPC::Message* reply_msg);
   void OnSetException(const std::string& message);
 
  private:
   NPObject* npobject_;
   int route_id_;
   scoped_refptr<PluginChannelBase> channel_;
+
+  base::WaitableEvent* modal_dialog_event_;
 
   // These variables are used to ensure that the window script object is not
   // called after the plugin widget has gone away, as the frame manually
@@ -78,5 +90,4 @@ class NPObjectStub : public IPC::Channel::Listener,
   WebPluginDelegateProxy* web_plugin_delegate_proxy_;
 };
 
-#endif  // CHROME_PLUGIN_NPOBJECT_STUB_H__
-
+#endif  // CHROME_PLUGIN_NPOBJECT_STUB_H_

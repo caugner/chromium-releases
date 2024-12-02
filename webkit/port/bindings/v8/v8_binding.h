@@ -5,28 +5,15 @@
 #ifndef V8_BINDING_H__
 #define V8_BINDING_H__
 
-#include "base/compiler_specific.h"
-#include "build/build_config.h"
+#include "config.h"
 
-#include <v8.h>
-#include "PlatformString.h"
+#include "AtomicString.h"
+#include "CString.h"
 #include "MathExtras.h"
+#include "PlatformString.h"
 #include "StringBuffer.h"
 
-// Suppress warnings in CString of converting size_t to unsigned int.
-// TODO(fqian): fix CString.h.
-MSVC_PUSH_WARNING_LEVEL(0);
-#include "CString.h"
-MSVC_POP_WARNING();
-
-#if defined(OS_LINUX)
-// Use the platform.h for linux.
-#include "unicode/plinux.h"
-#elif defined(OS_WIN) || defined(OS_MACOSX)
-// WebKit ships a hacked up version of one of the ICU header files, with all
-// options set for OSX.
-#include "platform.h"
-#endif
+#include <v8.h>
 
 namespace WebCore {
 
@@ -58,9 +45,12 @@ class WebCoreStringResource: public v8::String::ExternalStringResource {
   String external_string_;
 };
 
-// TODO: converting between WebCore::String and V8 string is expensive.
-// Optimize it !!!
+// Convert a v8::String to a WebCore::String. If the V8 string is not already
+// an external string then it is transformed into an external string at this
+// point to avoid repeated conversions.
 inline String ToWebCoreString(v8::Handle<v8::Value> obj) {
+  bool morph = false;
+  bool atomic = false;
   v8::TryCatch block;
   v8::Local<v8::String> v8_str = obj->ToString();
   if (v8_str.IsEmpty())
@@ -73,9 +63,30 @@ inline String ToWebCoreString(v8::Handle<v8::Value> obj) {
   }
 
   int length = v8_str->Length();
+  if (length == 0) {
+    // Avoid trying to morph empty strings, as they do not have enough room to
+    // contain the external reference.
+    return "";
+  }
+
+  // Copy the characters from the v8::String into a WebCore::String and allocate
+  // an external resource which will be attached to the v8::String.
   StringBuffer buf(length);
   v8_str->Write(reinterpret_cast<uint16_t*>(buf.characters()), 0, length);
-  return String::adopt(buf);
+  String result;
+  if (atomic) {
+    result = AtomicString(buf.characters(), length);
+  } else {
+    result = StringImpl::adopt(buf);
+  }
+  if (morph) {
+    WebCoreStringResource* resource = new WebCoreStringResource(result);
+    if (!v8_str->MakeExternal(resource)) {
+      // In case of a failure delete the external resource as it was not used.
+      delete resource;
+    }
+  }
+  return result;
 }
 
 inline String valueToStringWithNullCheck(v8::Handle<v8::Value> value) {
@@ -92,6 +103,7 @@ inline String valueToStringWithNullOrUndefinedCheck(
 // Convert a value to a 32-bit integer.  The conversion fails if the
 // value cannot be converted to an integer or converts to nan or to an
 // infinity.
+// FIXME: Rename to toInt32() once V8 bindings migration is complete.
 inline int ToInt32(v8::Handle<v8::Value> value, bool& ok) {
   ok = true;
 
@@ -126,9 +138,14 @@ inline int ToInt32(v8::Handle<v8::Value> value, bool& ok) {
 }
 
 // Convert a value to a 32-bit integer assuming the conversion cannot fail.
+// FIXME: Rename to toInt32() once V8 bindings migration is complete.
 inline int ToInt32(v8::Handle<v8::Value> value) {
   bool ok;
   return ToInt32(value, ok);
+}
+
+inline String ToString(const String& string) {
+  return string;
 }
 
 // If a WebCore string length is greater than the threshold,
@@ -177,4 +194,3 @@ inline v8::Handle<v8::Value> v8StringOrFalse(const String& str) {
 }  // namespace WebCore
 
 #endif  // V8_BINDING_H__
-

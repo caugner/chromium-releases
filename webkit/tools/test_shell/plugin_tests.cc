@@ -5,9 +5,7 @@
 #include <string>
 
 #include "base/file_util.h"
-#include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/net_util.h"
@@ -52,7 +50,7 @@ class PluginTest : public TestShellTest {
   void WaitForFinish(const std::string &name, const std::string &id) {
     test_shell_->WaitTestFinished();
 
-    std::string cookies = 
+    std::string cookies =
         request_context_->cookie_store()->GetCookies(test_url_);
     EXPECT_FALSE(cookies.empty());
 
@@ -81,11 +79,11 @@ class PluginTest : public TestShellTest {
     std::wstring plugin_src = current_directory + L"\\npapi_test_plugin.dll";
     ASSERT_TRUE(file_util::PathExists(plugin_src));
 
-    plugin_dll_path_ = current_directory + L"\\plugins";
-    ::CreateDirectory(plugin_dll_path_.c_str(), NULL);
+    plugin_file_path_ = current_directory + L"\\plugins";
+    ::CreateDirectory(plugin_file_path_.c_str(), NULL);
 
-    plugin_dll_path_ += L"\\npapi_test_plugin.dll";
-    ASSERT_TRUE(CopyFile(plugin_src.c_str(), plugin_dll_path_.c_str(), FALSE));
+    plugin_file_path_ += L"\\npapi_test_plugin.dll";
+    ASSERT_TRUE(CopyFile(plugin_src.c_str(), plugin_file_path_.c_str(), FALSE));
 
     // The plugin list has to be refreshed to ensure that the npapi_test_plugin
     // is loaded by webkit.
@@ -105,19 +103,18 @@ class PluginTest : public TestShellTest {
 
     // TODO(iyengar) The DeleteFile call fails in some cases as the plugin is
     // still in use. Needs more investigation.
-    ::DeleteFile(plugin_dll_path_.c_str());
+    ::DeleteFile(plugin_file_path_.c_str());
   }
 
   std::wstring plugin_data_dir_;
-  std::wstring plugin_dll_path_;
+  std::wstring plugin_file_path_;
   RequestContext* request_context_;
   GURL test_url_;
 };
 
 TEST_F(PluginTest, DISABLED_VerifyPluginWindowRect) {
-  std::wstring test_url = GetTestURL(plugin_data_dir_, 
+  std::wstring test_url = GetTestURL(plugin_data_dir_,
                                      L"verify_plugin_window_rect.html");
   NavigateToURL(test_url);
   WaitForFinish("checkwindowrect", "1");
 }
-

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/logging.h"
+#include "base/string_util.h"
 #include "base/values.h"
 
 ///////////////////// Value ////////////////////
@@ -31,6 +32,11 @@ Value* Value::CreateRealValue(double in_value) {
 }
 
 // static
+Value* Value::CreateStringValue(const std::string& in_value) {
+  return new StringValue(in_value);
+}
+
+// static
 Value* Value::CreateStringValue(const std::wstring& in_value) {
   return new StringValue(in_value);
 }
@@ -49,6 +55,10 @@ bool Value::GetAsInteger(int* in_value) const {
 }
 
 bool Value::GetAsReal(double* in_value) const {
+  return false;
+}
+
+bool Value::GetAsString(std::string* in_value) const {
   return false;
 }
 
@@ -135,12 +145,29 @@ bool FundamentalValue::Equals(const Value* other) const {
 
 ///////////////////// StringValue ////////////////////
 
+StringValue::StringValue(const std::string& in_value)
+    : Value(TYPE_STRING),
+      value_(in_value) {
+  DCHECK(IsStringUTF8(in_value));
+}
+
+StringValue::StringValue(const std::wstring& in_value)
+    : Value(TYPE_STRING),
+      value_(WideToUTF8(in_value)) {
+}
+
 StringValue::~StringValue() {
+}
+
+bool StringValue::GetAsString(std::string* out_value) const {
+  if (out_value)
+    *out_value = value_;
+  return true;
 }
 
 bool StringValue::GetAsString(std::wstring* out_value) const {
   if (out_value)
-    *out_value = value_;
+    *out_value = UTF8ToWide(value_);
   return true;
 }
 
@@ -151,7 +178,7 @@ Value* StringValue::DeepCopy() const {
 bool StringValue::Equals(const Value* other) const {
   if (other->GetType() != GetType())
     return false;
-  std::wstring lhs, rhs;
+  std::string lhs, rhs;
   return GetAsString(&lhs) && other->GetAsString(&rhs) && lhs == rhs;
 }
 
@@ -218,7 +245,7 @@ void DictionaryValue::Clear() {
   dictionary_.clear();
 }
 
-bool DictionaryValue::HasKey(const std::wstring& key) {
+bool DictionaryValue::HasKey(const std::wstring& key) const {
   ValueMap::const_iterator current_entry = dictionary_.find(key);
   DCHECK((current_entry == dictionary_.end()) || current_entry->second);
   return current_entry != dictionary_.end();
@@ -273,6 +300,11 @@ bool DictionaryValue::SetInteger(const std::wstring& path, int in_value) {
 
 bool DictionaryValue::SetReal(const std::wstring& path, double in_value) {
   return Set(path, CreateRealValue(in_value));
+}
+
+bool DictionaryValue::SetString(const std::wstring& path,
+                                const std::string& in_value) {
+  return Set(path, CreateStringValue(in_value));
 }
 
 bool DictionaryValue::SetString(const std::wstring& path,
@@ -332,6 +364,15 @@ bool DictionaryValue::GetReal(const std::wstring& path,
     return false;
 
   return value->GetAsReal(out_value);
+}
+
+bool DictionaryValue::GetString(const std::wstring& path,
+                                std::string* out_value) const {
+  Value* value;
+  if (!Get(path, &value))
+    return false;
+
+  return value->GetAsString(out_value);
 }
 
 bool DictionaryValue::GetString(const std::wstring& path,
@@ -491,8 +532,51 @@ bool ListValue::Get(size_t index, Value** out_value) const {
   return true;
 }
 
-bool ListValue::GetDictionary(size_t index,
-                              DictionaryValue** out_value) const {
+bool ListValue::GetBoolean(size_t index, bool* bool_value) const {
+  Value* value;
+  if (!Get(index, &value))
+    return false;
+
+  return value->GetAsBoolean(bool_value);
+}
+
+bool ListValue::GetInteger(size_t index, int* out_value) const {
+  Value* value;
+  if (!Get(index, &value))
+    return false;
+
+  return value->GetAsInteger(out_value);
+}
+
+bool ListValue::GetReal(size_t index, double* out_value) const {
+  Value* value;
+  if (!Get(index, &value))
+    return false;
+
+  return value->GetAsReal(out_value);
+}
+
+bool ListValue::GetString(size_t index, std::string* out_value) const {
+  Value* value;
+  if (!Get(index, &value))
+    return false;
+
+  return value->GetAsString(out_value);
+}
+
+bool ListValue::GetBinary(size_t index, BinaryValue** out_value) const {
+  Value* value;
+  bool result = Get(index, &value);
+  if (!result || !value->IsType(TYPE_BINARY))
+    return false;
+
+  if (out_value)
+    *out_value = static_cast<BinaryValue*>(value);
+
+  return true;
+}
+
+bool ListValue::GetDictionary(size_t index, DictionaryValue** out_value) const {
   Value* value;
   bool result = Get(index, &value);
   if (!result || !value->IsType(TYPE_DICTIONARY))
@@ -500,6 +584,18 @@ bool ListValue::GetDictionary(size_t index,
 
   if (out_value)
     *out_value = static_cast<DictionaryValue*>(value);
+
+  return true;
+}
+
+bool ListValue::GetList(size_t index, ListValue** out_value) const {
+  Value* value;
+  bool result = Get(index, &value);
+  if (!result || !value->IsType(TYPE_LIST))
+    return false;
+
+  if (out_value)
+    *out_value = static_cast<ListValue*>(value);
 
   return true;
 }
@@ -555,4 +651,3 @@ bool ListValue::Equals(const Value* other) const {
 
   return true;
 }
-

@@ -38,13 +38,14 @@
 // appropriate DownloadManager. In progress downloads are cancelled for a
 // DownloadManager that exits (such as when closing a profile).
 
-#ifndef CHROME_BROWSER_DOWNLOAD_DOWNLOAD_FILE_H__
-#define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_FILE_H__
+#ifndef CHROME_BROWSER_DOWNLOAD_DOWNLOAD_FILE_H_
+#define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_FILE_H_
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/gfx/native_widget_types.h"
 #include "base/hash_tables.h"
 #include "base/lock.h"
 #include "base/ref_counted.h"
@@ -52,7 +53,11 @@
 #include "base/timer.h"
 #include "chrome/browser/history/download_types.h"
 
+namespace net {
+class IOBuffer;
+}
 class DownloadManager;
+class FilePath;
 class GURL;
 class MessageLoop;
 class ResourceDispatcherHost;
@@ -69,7 +74,7 @@ class URLRequestContext;
 
 struct DownloadBuffer {
   Lock lock;
-  typedef std::pair<char *, int> Contents;
+  typedef std::pair<net::IOBuffer*, int> Contents;
   std::vector<Contents> contents;
 };
 
@@ -93,12 +98,12 @@ class DownloadFile {
   void Cancel();
 
   // Rename the download file. Returns 'true' if the rename was successful.
-  bool Rename(const std::wstring& full_path);
+  bool Rename(const FilePath& full_path);
 
   // Accessors.
   int64 bytes_so_far() const { return bytes_so_far_; }
   int id() const { return id_; }
-  std::wstring full_path() const { return full_path_; }
+  FilePath full_path() const { return full_path_; }
   int render_process_id() const { return render_process_id_; }
   int render_view_id() const { return render_view_id_; }
   int request_id() const { return request_id_; }
@@ -111,7 +116,7 @@ class DownloadFile {
   // based on creation information passed to it, and automatically closed in
   // the destructor.
   void Close();
-  bool Open(const wchar_t* open_mode);
+  bool Open(const char* open_mode);
 
   // OS file handle for writing
   FILE* file_;
@@ -132,7 +137,7 @@ class DownloadFile {
   int64 bytes_so_far_;
 
   // Full path to the downloaded file.
-  std::wstring full_path_;
+  FilePath full_path_;
 
   // Whether the download is still using its initial temporary path.
   bool path_renamed_;
@@ -140,7 +145,7 @@ class DownloadFile {
   // Whether the download is still receiving data.
   bool in_progress_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(DownloadFile);
+  DISALLOW_COPY_AND_ASSIGN(DownloadFile);
 };
 
 
@@ -192,23 +197,23 @@ class DownloadFileManager
   void RemoveDownload(int id, DownloadManager* manager);
 
   // Handler for shell operations sent from the UI to the download thread.
-  void OnShowDownloadInShell(const std::wstring full_path);
+  void OnShowDownloadInShell(const FilePath& full_path);
   // Handler to open or execute a downloaded file.
-  void OnOpenDownloadInShell(const std::wstring full_path,
-                             const std::wstring& url, HWND parent_window);
+  void OnOpenDownloadInShell(const FilePath& full_path,
+                             const GURL& url,
+                             gfx::NativeView parent_window);
 
   // The download manager has provided a final name for a download. Sent from
   // the UI thread and run on the download thread.
-  void OnFinalDownloadName(int id, const std::wstring& full_path);
+  void OnFinalDownloadName(int id, const FilePath& full_path);
 
   // Timer notifications.
   void UpdateInProgressDownloads();
 
   MessageLoop* file_loop() const { return file_loop_; }
 
-  // Called by the download manager at initialization to ensure the default
-  // download directory exists.
-  void CreateDirectory(const std::wstring& directory);
+  // Called by the download manager to delete non validated dangerous downloads.
+  static void DeleteFile(const FilePath& path);
 
  private:
   // Timer helpers for updating the UI about the current progress of a download.
@@ -258,7 +263,7 @@ class DownloadFileManager
   // RequestMap maps a DownloadManager to all in-progress download IDs.
   // Called only on the UI thread.
   typedef base::hash_set<int> DownloadRequests;
-  typedef base::hash_map<DownloadManager*, DownloadRequests> RequestMap;
+  typedef std::map<DownloadManager*, DownloadRequests> RequestMap;
   RequestMap requests_;
 
   // Used for progress updates on the UI thread, mapping download->id() to bytes
@@ -267,7 +272,7 @@ class DownloadFileManager
   ProgressMap ui_progress_;
   Lock progress_lock_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(DownloadFileManager);
+  DISALLOW_COPY_AND_ASSIGN(DownloadFileManager);
 };
 
-#endif  // CHROME_BROWSER_DOWNLOAD_DOWNLOAD_FILE_H__
+#endif  // CHROME_BROWSER_DOWNLOAD_DOWNLOAD_FILE_H_

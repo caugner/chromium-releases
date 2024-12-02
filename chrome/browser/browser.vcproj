@@ -142,6 +142,14 @@
 				>
 			</File>
 			<File
+				RelativePath=".\autocomplete\autocomplete_accessibility.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\autocomplete\autocomplete_accessibility.h"
+				>
+			</File>
+			<File
 				RelativePath=".\autocomplete\autocomplete_edit.cc"
 				>
 			</File>
@@ -150,19 +158,35 @@
 				>
 			</File>
 			<File
-				RelativePath=".\autocomplete\autocomplete_popup.cc"
+				RelativePath=".\autocomplete\autocomplete_edit_view.h"
 				>
 			</File>
 			<File
-				RelativePath=".\autocomplete\autocomplete_popup.h"
+				RelativePath=".\autocomplete\autocomplete_edit_view_win.cc"
 				>
 			</File>
 			<File
-				RelativePath=".\autocomplete\edit_drop_target.cc"
+				RelativePath=".\autocomplete\autocomplete_edit_view_win.h"
 				>
 			</File>
 			<File
-				RelativePath=".\autocomplete\edit_drop_target.h"
+				RelativePath=".\autocomplete\autocomplete_popup_model.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\autocomplete\autocomplete_popup_model.h"
+				>
+			</File>
+			<File
+				RelativePath=".\autocomplete\autocomplete_popup_view.h"
+				>
+			</File>
+			<File
+				RelativePath=".\autocomplete\autocomplete_popup_view_win.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\autocomplete\autocomplete_popup_view_win.h"
 				>
 			</File>
 			<File
@@ -230,6 +254,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\browser_main_win.cc"
+				>
+			</File>
+			<File
 				RelativePath=".\browser_prefs.cc"
 				>
 			</File>
@@ -251,10 +279,6 @@
 			</File>
 			<File
 				RelativePath=".\browser_process_impl.h"
-				>
-			</File>
-			<File
-				RelativePath=".\browser_resources.h"
 				>
 			</File>
 			<File
@@ -287,14 +311,6 @@
 			</File>
 			<File
 				RelativePath=".\browsing_instance.h"
-				>
-			</File>
-			<File
-				RelativePath=".\cache_manager_host.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\cache_manager_host.h"
 				>
 			</File>
 			<File
@@ -410,39 +426,11 @@
 				>
 			</File>
 			<File
-				RelativePath=".\metrics_log.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\metrics_log.h"
-				>
-			</File>
-			<File
-				RelativePath=".\metrics_response.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\metrics_response.h"
-				>
-			</File>
-			<File
-				RelativePath=".\metrics_service.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\metrics_service.h"
-				>
-			</File>
-			<File
 				RelativePath=".\plugin_process_host.cc"
 				>
 			</File>
 			<File
 				RelativePath=".\plugin_process_host.h"
-				>
-			</File>
-			<File
-				RelativePath=".\plugin_process_info.h"
 				>
 			</File>
 			<File
@@ -478,6 +466,14 @@
 				>
 			</File>
 			<File
+				RelativePath=".\process_singleton.h"
+				>
+			</File>
+			<File
+				RelativePath=".\process_singleton_win.cc"
+				>
+			</File>
+			<File
 				RelativePath=".\profile.cc"
 				>
 			</File>
@@ -491,90 +487,6 @@
 			</File>
 			<File
 				RelativePath=".\profile_manager.h"
-				>
-			</File>
-			<File
-				RelativePath=".\render_process_host.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\render_process_host.h"
-				>
-			</File>
-			<File
-				RelativePath=".\render_view_host.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\render_view_host.h"
-				>
-			</File>
-			<File
-				RelativePath=".\render_view_host_delegate.h"
-				>
-			</File>
-			<File
-				RelativePath=".\render_widget_helper.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\render_widget_helper.h"
-				>
-			</File>
-			<File
-				RelativePath=".\render_widget_host.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\render_widget_host.h"
-				>
-			</File>
-			<File
-				RelativePath=".\render_widget_host_hwnd.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\render_widget_host_hwnd.h"
-				>
-			</File>
-			<File
-				RelativePath=".\render_widget_host_view.h"
-				>
-			</File>
-			<File
-				RelativePath=".\resource_dispatcher_host.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\resource_dispatcher_host.h"
-				>
-			</File>
-			<File
-				RelativePath=".\resource_message_filter.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\resource_message_filter.h"
-				>
-			</File>
-			<File
-				RelativePath=".\resource_request_details.h"
-				>
-			</File>
-			<File
-				RelativePath=".\session_crashed_view.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\session_crashed_view.h"
-				>
-			</File>
-			<File
-				RelativePath=".\session_restore.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\session_restore.h"
 				>
 			</File>
 			<File
@@ -598,14 +510,6 @@
 				>
 			</File>
 			<File
-				RelativePath=".\site_instance.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\site_instance.h"
-				>
-			</File>
-			<File
 				RelativePath=".\spellcheck_worditerator.cc"
 				>
 			</File>
@@ -622,75 +526,11 @@
 				>
 			</File>
 			<File
-				RelativePath=".\template_url.cc"
+				RelativePath=".\user_data_manager.cc"
 				>
 			</File>
 			<File
-				RelativePath=".\template_url.h"
-				>
-			</File>
-			<File
-				RelativePath=".\template_url_fetcher.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\template_url_fetcher.h"
-				>
-			</File>
-			<File
-				RelativePath=".\template_url_model.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\template_url_model.h"
-				>
-			</File>
-			<File
-				RelativePath=".\template_url_parser.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\template_url_parser.h"
-				>
-			</File>
-			<File
-				RelativePath=".\template_url_prepopulate_data.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\template_url_prepopulate_data.h"
-				>
-			</File>
-			<File
-				RelativePath=".\url_fetcher.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\url_fetcher.h"
-				>
-			</File>
-			<File
-				RelativePath=".\url_fetcher_protect.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\url_fetcher_protect.h"
-				>
-			</File>
-			<File
-				RelativePath=".\url_fixer_upper.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\url_fixer_upper.h"
-				>
-			</File>
-			<File
-				RelativePath=".\user_metrics.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\user_metrics.h"
+				RelativePath=".\user_data_manager.h"
 				>
 			</File>
 			<File
@@ -701,34 +541,10 @@
 				RelativePath=".\visitedlink_master.h"
 				>
 			</File>
-			<File
-				RelativePath=".\web_app.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\web_app.h"
-				>
-			</File>
-			<File
-				RelativePath=".\web_app_launcher.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\web_app_launcher.h"
-				>
-			</File>
 		</Filter>
 		<Filter
 			Name="Bookmarks"
 			>
-			<File
-				RelativePath=".\bookmark_bar_context_menu_controller.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\bookmark_bar_context_menu_controller.h"
-				>
-			</File>
 			<File
 				RelativePath=".\bookmarks\bookmark_codec.cc"
 				>
@@ -738,11 +554,51 @@
 				>
 			</File>
 			<File
+				RelativePath=".\bookmarks\bookmark_context_menu.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\bookmarks\bookmark_context_menu.h"
+				>
+			</File>
+			<File
 				RelativePath=".\bookmarks\bookmark_drag_data.cc"
 				>
 			</File>
 			<File
 				RelativePath=".\bookmarks\bookmark_drag_data.h"
+				>
+			</File>
+			<File
+				RelativePath=".\bookmarks\bookmark_drop_info.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\bookmarks\bookmark_drop_info.h"
+				>
+			</File>
+			<File
+				RelativePath=".\bookmarks\bookmark_folder_tree_model.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\bookmarks\bookmark_folder_tree_model.h"
+				>
+			</File>
+			<File
+				RelativePath=".\bookmarks\bookmark_html_writer.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\bookmarks\bookmark_html_writer.h"
+				>
+			</File>
+			<File
+				RelativePath=".\bookmarks\bookmark_menu_controller.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\bookmarks\bookmark_menu_controller.h"
 				>
 			</File>
 			<File
@@ -765,132 +621,20 @@
 				RelativePath=".\bookmarks\bookmark_storage.h"
 				>
 			</File>
-		</Filter>
-		<Filter
-			Name="Tab Contents"
-			>
 			<File
-				RelativePath=".\about_internets_status_view.cc"
+				RelativePath=".\bookmarks\bookmark_table_model.cc"
 				>
 			</File>
 			<File
-				RelativePath=".\about_internets_status_view.h"
+				RelativePath=".\bookmarks\bookmark_table_model.h"
 				>
 			</File>
 			<File
-				RelativePath=".\constrained_window.h"
+				RelativePath=".\bookmarks\bookmark_utils.cc"
 				>
 			</File>
 			<File
-				RelativePath=".\ipc_status_view.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\ipc_status_view.h"
-				>
-			</File>
-			<File
-				RelativePath=".\network_status_view.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\network_status_view.h"
-				>
-			</File>
-			<File
-				RelativePath=".\page_navigator.h"
-				>
-			</File>
-			<File
-				RelativePath=".\render_view_context_menu.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\render_view_context_menu.h"
-				>
-			</File>
-			<File
-				RelativePath=".\render_view_context_menu_controller.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\render_view_context_menu_controller.h"
-				>
-			</File>
-			<File
-				RelativePath=".\render_view_host_manager.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\render_view_host_manager.h"
-				>
-			</File>
-			<File
-				RelativePath=".\security_style.h"
-				>
-			</File>
-			<File
-				RelativePath=".\ssl_error_info.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\ssl_error_info.h"
-				>
-			</File>
-			<File
-				RelativePath=".\ssl_manager.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\ssl_manager.h"
-				>
-			</File>
-			<File
-				RelativePath=".\status_view.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\status_view.h"
-				>
-			</File>
-			<File
-				RelativePath=".\tab_contents.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\tab_contents.h"
-				>
-			</File>
-			<File
-				RelativePath=".\tab_contents_delegate.h"
-				>
-			</File>
-			<File
-				RelativePath=".\tab_contents_factory.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\tab_util.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\tab_util.h"
-				>
-			</File>
-			<File
-				RelativePath=".\view_source_contents.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\view_source_contents.h"
-				>
-			</File>
-			<File
-				RelativePath=".\web_contents.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\web_contents.h"
+				RelativePath=".\bookmarks\bookmark_utils.h"
 				>
 			</File>
 		</Filter>
@@ -914,15 +658,19 @@
 				>
 			</File>
 			<File
+				RelativePath=".\back_forward_menu_model_win.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\back_forward_menu_model_win.h"
+				>
+			</File>
+			<File
 				RelativePath=".\browser.cc"
 				>
 			</File>
 			<File
 				RelativePath=".\browser.h"
-				>
-			</File>
-			<File
-				RelativePath=".\browser_commands.cc"
 				>
 			</File>
 			<File
@@ -934,39 +682,35 @@
 				>
 			</File>
 			<File
-				RelativePath=".\browser_type.h"
-				>
-			</File>
-			<File
-				RelativePath=".\browser_window.cc"
-				>
-			</File>
-			<File
 				RelativePath=".\browser_window.h"
 				>
 			</File>
 			<File
-				RelativePath=".\controller.cc"
+				RelativePath=".\command_updater.cc"
 				>
 			</File>
 			<File
-				RelativePath=".\controller.h"
+				RelativePath=".\command_updater.h"
 				>
 			</File>
 			<File
-				RelativePath=".\find_in_page_controller.cc"
+				RelativePath=".\dock_info.cc"
 				>
 			</File>
 			<File
-				RelativePath=".\find_in_page_controller.h"
+				RelativePath=".\dock_info.h"
 				>
 			</File>
 			<File
-				RelativePath=".\find_in_page_view.cc"
+				RelativePath=".\find_bar.h"
 				>
 			</File>
 			<File
-				RelativePath=".\find_in_page_view.h"
+				RelativePath=".\find_bar_controller.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\find_bar_controller.h"
 				>
 			</File>
 			<File
@@ -974,27 +718,27 @@
 				>
 			</File>
 			<File
-				RelativePath=".\frame_util.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\frame_util.h"
-				>
-			</File>
-			<File
-				RelativePath=".\js_before_unload_handler.cc"
-				>
-			</File>
-			<File
 				RelativePath=".\js_before_unload_handler.h"
 				>
 			</File>
 			<File
-				RelativePath=".\jsmessage_box_handler.cc"
+				RelativePath=".\js_before_unload_handler_win.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\js_before_unload_handler_win.h"
 				>
 			</File>
 			<File
 				RelativePath=".\jsmessage_box_handler.h"
+				>
+			</File>
+			<File
+				RelativePath=".\jsmessage_box_handler_win.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\jsmessage_box_handler_win.h"
 				>
 			</File>
 			<File
@@ -1006,6 +750,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\location_bar.h"
+				>
+			</File>
+			<File
 				RelativePath=".\login_prompt.cc"
 				>
 			</File>
@@ -1014,39 +762,11 @@
 				>
 			</File>
 			<File
-				RelativePath=".\navigation_controller.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\navigation_controller.h"
-				>
-			</File>
-			<File
-				RelativePath=".\navigation_entry.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\navigation_entry.h"
-				>
-			</File>
-			<File
 				RelativePath=".\options_window.h"
 				>
 			</File>
 			<File
-				RelativePath=".\provisional_load_details.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\provisional_load_details.h"
-				>
-			</File>
-			<File
-				RelativePath=".\repost_form_warning_dialog.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\repost_form_warning_dialog.h"
+				RelativePath=".\status_bubble.h"
 				>
 			</File>
 			<File
@@ -1066,75 +786,11 @@
 				>
 			</File>
 			<File
-				RelativePath=".\web_app_icon_manager.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\web_app_icon_manager.h"
-				>
-			</File>
-			<File
 				RelativePath=".\window_sizer.cc"
 				>
 			</File>
 			<File
 				RelativePath=".\window_sizer.h"
-				>
-			</File>
-		</Filter>
-		<Filter
-			Name="Policy"
-			>
-			<File
-				RelativePath=".\renderer_security_policy.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\renderer_security_policy.h"
-				>
-			</File>
-			<File
-				RelativePath=".\ssl_policy.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\ssl_policy.h"
-				>
-			</File>
-		</Filter>
-		<Filter
-			Name="Destination"
-			>
-			<File
-				RelativePath=".\base_history_model.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\base_history_model.h"
-				>
-			</File>
-			<File
-				RelativePath=".\views\download_tab_view.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\views\download_tab_view.h"
-				>
-			</File>
-			<File
-				RelativePath=".\history_model.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\history_model.h"
-				>
-			</File>
-			<File
-				RelativePath=".\history_view.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\history_view.h"
 				>
 			</File>
 		</Filter>
@@ -1163,6 +819,10 @@
 			</File>
 			<File
 				RelativePath=".\automation\automation_provider_list.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\automation\automation_provider_list_generic.cc"
 				>
 			</File>
 			<File
@@ -1286,11 +946,27 @@
 				>
 			</File>
 			<File
+				RelativePath=".\history\history_indexer.idl"
+				>
+			</File>
+			<File
 				RelativePath=".\history\history_marshaling.h"
 				>
 			</File>
 			<File
 				RelativePath=".\history\history_notifications.h"
+				>
+			</File>
+			<File
+				RelativePath=".\history\history_publisher.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\history\history_publisher.h"
+				>
+			</File>
+			<File
+				RelativePath=".\history\history_publisher_win.cc"
 				>
 			</File>
 			<File
@@ -1430,45 +1106,73 @@
 			Name="Sessions and Tab Restore"
 			>
 			<File
-				RelativePath=".\session_backend.cc"
+				RelativePath=".\sessions\base_session_service.cc"
 				>
 			</File>
 			<File
-				RelativePath=".\session_backend.h"
+				RelativePath=".\sessions\base_session_service.h"
 				>
 			</File>
 			<File
-				RelativePath=".\session_id.h"
+				RelativePath=".\sessions\session_backend.cc"
 				>
 			</File>
 			<File
-				RelativePath=".\session_service.cc"
+				RelativePath=".\sessions\session_backend.h"
 				>
 			</File>
 			<File
-				RelativePath=".\session_service.h"
+				RelativePath=".\sessions\session_command.cc"
 				>
 			</File>
 			<File
-				RelativePath=".\tab_restore_service.cc"
+				RelativePath=".\sessions\session_command.h"
 				>
 			</File>
 			<File
-				RelativePath=".\tab_restore_service.h"
+				RelativePath=".\sessions\session_id.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\sessions\session_id.h"
+				>
+			</File>
+			<File
+				RelativePath=".\sessions\session_restore.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\sessions\session_restore.h"
+				>
+			</File>
+			<File
+				RelativePath=".\sessions\session_service.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\sessions\session_service.h"
+				>
+			</File>
+			<File
+				RelativePath=".\sessions\session_types.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\sessions\session_types.h"
+				>
+			</File>
+			<File
+				RelativePath=".\sessions\tab_restore_service.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\sessions\tab_restore_service.h"
 				>
 			</File>
 		</Filter>
 		<Filter
 			Name="WebData"
 			>
-			<File
-				RelativePath=".\encryptor.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\encryptor.h"
-				>
-			</File>
 			<File
 				RelativePath=".\webdata\web_data_service.cc"
 				>
@@ -1478,11 +1182,19 @@
 				>
 			</File>
 			<File
+				RelativePath=".\webdata\web_data_service_win.cc"
+				>
+			</File>
+			<File
 				RelativePath=".\webdata\web_database.cc"
 				>
 			</File>
 			<File
 				RelativePath=".\webdata\web_database.h"
+				>
+			</File>
+			<File
+				RelativePath=".\webdata\web_database_win.cc"
 				>
 			</File>
 		</Filter>
@@ -1522,6 +1234,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\importer\firefox_profile_lock_win.cc"
+				>
+			</File>
+			<File
 				RelativePath=".\importer\ie_importer.cc"
 				>
 			</File>
@@ -1555,22 +1271,6 @@
 			</File>
 			<File
 				RelativePath=".\drag_utils.h"
-				>
-			</File>
-			<File
-				RelativePath=".\web_drag_source.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\web_drag_source.h"
-				>
-			</File>
-			<File
-				RelativePath=".\web_drop_target.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\web_drop_target.h"
 				>
 			</File>
 		</Filter>
@@ -1702,14 +1402,6 @@
 				>
 			</File>
 			<File
-				RelativePath=".\printing\units.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\printing\units.h"
-				>
-			</File>
-			<File
 				RelativePath=".\printing\win_printing_context.cc"
 				>
 			</File>
@@ -1734,27 +1426,39 @@
 			Name="Password Manager"
 			>
 			<File
-				RelativePath=".\ie7_password.cc"
+				RelativePath=".\password_manager\encryptor.cc"
 				>
 			</File>
 			<File
-				RelativePath=".\ie7_password.h"
+				RelativePath=".\password_manager\encryptor.h"
 				>
 			</File>
 			<File
-				RelativePath=".\password_form_manager.cc"
+				RelativePath=".\password_manager\ie7_password.cc"
 				>
 			</File>
 			<File
-				RelativePath=".\password_form_manager.h"
+				RelativePath=".\password_manager\ie7_password.h"
 				>
 			</File>
 			<File
-				RelativePath=".\password_manager.cc"
+				RelativePath=".\password_manager\password_form_manager.cc"
 				>
 			</File>
 			<File
-				RelativePath=".\password_manager.h"
+				RelativePath=".\password_manager\password_form_manager.h"
+				>
+			</File>
+			<File
+				RelativePath=".\password_manager\password_form_manager_win.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\password_manager\password_manager.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\password_manager\password_manager.h"
 				>
 			</File>
 		</Filter>
@@ -1782,11 +1486,83 @@
 				>
 			</File>
 			<File
+				RelativePath=".\dom_ui\debugger_ui.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\debugger_ui.h"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\devtools_ui.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\devtools_ui.h"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\dom_ui.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\dom_ui.h"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\dom_ui_factory.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\dom_ui_factory.h"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\dom_ui_favicon_source.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\dom_ui_favicon_source.h"
+				>
+			</File>
+			<File
 				RelativePath=".\dom_ui\dom_ui_host.cc"
 				>
 			</File>
 			<File
 				RelativePath=".\dom_ui\dom_ui_host.h"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\dom_ui_thumbnail_source.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\dom_ui_thumbnail_source.h"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\downloads_ui.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\downloads_ui.h"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\fileicon_source.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\fileicon_source.h"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\history_ui.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\dom_ui\history_ui.h"
 				>
 			</File>
 			<File
@@ -1807,28 +1583,16 @@
 			</File>
 		</Filter>
 		<Filter
-			Name="NativeUI"
-			>
-			<File
-				RelativePath=".\history_tab_ui.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\history_tab_ui.h"
-				>
-			</File>
-			<File
-				RelativePath=".\native_ui_contents.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\native_ui_contents.h"
-				>
-			</File>
-		</Filter>
-		<Filter
 			Name="Net"
 			>
+			<File
+				RelativePath=".\net\chrome_url_request_context.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\net\chrome_url_request_context.h"
+				>
+			</File>
 			<File
 				RelativePath=".\net\dns_global.cc"
 				>
@@ -1854,11 +1618,19 @@
 				>
 			</File>
 			<File
-				RelativePath=".\net\dns_slave.cc"
+				RelativePath=".\net\referrer.cc"
 				>
 			</File>
 			<File
-				RelativePath=".\net\dns_slave.h"
+				RelativePath=".\net\referrer.h"
+				>
+			</File>
+			<File
+				RelativePath=".\net\resolve_proxy_msg_helper.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\net\resolve_proxy_msg_helper.h"
 				>
 			</File>
 			<File
@@ -1867,6 +1639,30 @@
 			</File>
 			<File
 				RelativePath=".\net\sdch_dictionary_fetcher.h"
+				>
+			</File>
+			<File
+				RelativePath=".\net\url_fetcher.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\net\url_fetcher.h"
+				>
+			</File>
+			<File
+				RelativePath=".\net\url_fetcher_protect.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\net\url_fetcher_protect.h"
+				>
+			</File>
+			<File
+				RelativePath=".\net\url_fixer_upper.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\net\url_fixer_upper.h"
 				>
 			</File>
 		</Filter>
@@ -1934,11 +1730,11 @@
 				>
 			</File>
 			<File
-				RelativePath=".\safe_browsing\safe_browsing_database_impl.cc"
+				RelativePath=".\safe_browsing\safe_browsing_database_bloom.cc"
 				>
 			</File>
 			<File
-				RelativePath=".\safe_browsing\safe_browsing_database_impl.h"
+				RelativePath=".\safe_browsing\safe_browsing_database_bloom.h"
 				>
 			</File>
 			<File
@@ -1955,6 +1751,26 @@
 			</File>
 			<File
 				RelativePath=".\safe_browsing\safe_browsing_util.h"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="Accessibility"
+			>
+			<File
+				RelativePath=".\browser_accessibility.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\browser_accessibility.h"
+				>
+			</File>
+			<File
+				RelativePath=".\browser_accessibility_manager.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\browser_accessibility_manager.h"
 				>
 			</File>
 		</Filter>
@@ -1987,6 +1803,34 @@
 			</File>
 			<File
 				RelativePath=".\download\download_manager.h"
+				>
+			</File>
+			<File
+				RelativePath=".\download\download_request_dialog_delegate.h"
+				>
+			</File>
+			<File
+				RelativePath=".\download\download_request_dialog_delegate_win.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\download\download_request_dialog_delegate_win.h"
+				>
+			</File>
+			<File
+				RelativePath=".\download\download_request_manager.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\download\download_request_manager.h"
+				>
+			</File>
+			<File
+				RelativePath=".\download\download_shelf.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\download\download_shelf.h"
 				>
 			</File>
 			<File
@@ -2034,18 +1878,594 @@
 				>
 			</File>
 			<File
-				RelativePath=".\download\save_page_model.cc"
-				>
-			</File>
-			<File
-				RelativePath=".\download\save_page_model.h"
-				>
-			</File>
-			<File
 				RelativePath=".\download\save_types.h"
 				>
 			</File>
 		</Filter>
+		<Filter
+			Name="Autofill"
+			>
+			<File
+				RelativePath=".\autofill_manager.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\autofill_manager.h"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="Extensions"
+			>
+			<File
+				RelativePath=".\extensions\extension.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\extensions\extension.h"
+				>
+			</File>
+			<File
+				RelativePath=".\extensions\extension_error_reporter.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\extensions\extension_error_reporter.h"
+				>
+			</File>
+			<File
+				RelativePath=".\extensions\extension_protocols.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\extensions\extension_protocols.h"
+				>
+			</File>
+			<File
+				RelativePath=".\extensions\extension_view.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\extensions\extension_view.h"
+				>
+			</File>
+			<File
+				RelativePath=".\extensions\extensions_service.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\extensions\extensions_service.h"
+				>
+			</File>
+			<File
+				RelativePath=".\extensions\extensions_ui.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\extensions\extensions_ui.h"
+				>
+			</File>
+			<File
+				RelativePath=".\extensions\user_script_master.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\extensions\user_script_master.h"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="Renderer Host"
+			>
+			<File
+				RelativePath=".\renderer_host\async_resource_handler.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\async_resource_handler.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\audio_renderer_host.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\audio_renderer_host.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\backing_store.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\backing_store.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\backing_store_win.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\browser_render_process_host.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\browser_render_process_host.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\buffered_resource_handler.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\buffered_resource_handler.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\cross_site_resource_handler.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\cross_site_resource_handler.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\download_resource_handler.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\download_resource_handler.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\download_throttling_resource_handler.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\download_throttling_resource_handler.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\media_resource_handler.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\media_resource_handler.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\render_process_host.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\render_process_host.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\render_view_host.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\render_view_host.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\render_view_host_delegate.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\render_widget_helper.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\render_widget_helper.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\render_widget_host.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\render_widget_host.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\render_widget_host_view.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\render_widget_host_view_win.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\render_widget_host_view_win.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\renderer_security_policy.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\renderer_security_policy.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\resource_dispatcher_host.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\resource_dispatcher_host.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\resource_handler.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\resource_message_filter.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\resource_message_filter.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\resource_message_filter_win.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\resource_request_details.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\safe_browsing_resource_handler.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\safe_browsing_resource_handler.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\save_file_resource_handler.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\save_file_resource_handler.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\sync_resource_handler.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\sync_resource_handler.h"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\web_cache_manager.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\renderer_host\web_cache_manager.h"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="Tab Contents"
+			>
+			<File
+				RelativePath=".\tab_contents\constrained_window.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\infobar_delegate.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\infobar_delegate.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\interstitial_page.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\interstitial_page.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\navigation_controller.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\navigation_controller.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\navigation_entry.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\navigation_entry.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\page_navigator.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\provisional_load_details.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\provisional_load_details.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\render_view_context_menu.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\render_view_context_menu.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\render_view_context_menu_win.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\render_view_context_menu_win.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\render_view_host_manager.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\render_view_host_manager.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\repost_form_warning.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\security_style.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\site_instance.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\site_instance.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\tab_contents.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\tab_contents.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\tab_contents_delegate.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\tab_contents_factory.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\tab_contents_factory.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\tab_contents_type.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\tab_util.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\tab_util.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\web_contents.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\web_contents.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\web_contents_view.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\web_contents_view.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\web_contents_view_win.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\web_contents_view_win.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\web_drag_source.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\web_drag_source.h"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\web_drop_target.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\tab_contents\web_drop_target.h"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="Search Engines"
+			>
+			<File
+				RelativePath=".\search_engines\template_url.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\search_engines\template_url.h"
+				>
+			</File>
+			<File
+				RelativePath=".\search_engines\template_url_fetcher.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\search_engines\template_url_fetcher.h"
+				>
+			</File>
+			<File
+				RelativePath=".\search_engines\template_url_model.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\search_engines\template_url_model.h"
+				>
+			</File>
+			<File
+				RelativePath=".\search_engines\template_url_parser.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\search_engines\template_url_parser.h"
+				>
+			</File>
+			<File
+				RelativePath=".\search_engines\template_url_prepopulate_data.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\search_engines\template_url_prepopulate_data.h"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="Metrics"
+			>
+			<File
+				RelativePath=".\metrics\metrics_log.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\metrics\metrics_log.h"
+				>
+			</File>
+			<File
+				RelativePath=".\metrics\metrics_response.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\metrics\metrics_response.h"
+				>
+			</File>
+			<File
+				RelativePath=".\metrics\metrics_service.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\metrics\metrics_service.h"
+				>
+			</File>
+			<File
+				RelativePath=".\metrics\user_metrics.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\metrics\user_metrics.h"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="SSL"
+			>
+			<File
+				RelativePath=".\ssl\ssl_blocking_page.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\ssl\ssl_blocking_page.h"
+				>
+			</File>
+			<File
+				RelativePath=".\ssl\ssl_error_info.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\ssl\ssl_error_info.h"
+				>
+			</File>
+			<File
+				RelativePath=".\ssl\ssl_host_state.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\ssl\ssl_host_state.h"
+				>
+			</File>
+			<File
+				RelativePath=".\ssl\ssl_manager.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\ssl\ssl_manager.h"
+				>
+			</File>
+			<File
+				RelativePath=".\ssl\ssl_policy.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\ssl\ssl_policy.h"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="Worker Host"
+			>
+			<File
+				RelativePath=".\worker_host\worker_process_host.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\worker_host\worker_process_host.h"
+				>
+			</File>
+			<File
+				RelativePath=".\worker_host\worker_service.cc"
+				>
+			</File>
+			<File
+				RelativePath=".\worker_host\worker_service.h"
+				>
+			</File>
+		</Filter>
+		<File
+			RelativePath=".\browser_trial.cc"
+			>
+		</File>
+		<File
+			RelativePath=".\browser_trial.h"
+			>
+		</File>
 		<File
 			RelativePath=".\cert_store.cc"
 			>
@@ -2099,10 +2519,6 @@
 			>
 		</File>
 		<File
-			RelativePath=".\interstitial_page_delegate.h"
-			>
-		</File>
-		<File
 			RelativePath=".\modal_html_dialog_delegate.cc"
 			>
 		</File>
@@ -2124,22 +2540,6 @@
 		</File>
 		<File
 			RelativePath=".\plugin_installer.h"
-			>
-		</File>
-		<File
-			RelativePath=".\ssl_blocking_page.cc"
-			>
-		</File>
-		<File
-			RelativePath=".\ssl_blocking_page.h"
-			>
-		</File>
-		<File
-			RelativePath=".\suspend_controller.cc"
-			>
-		</File>
-		<File
-			RelativePath=".\suspend_controller.h"
 			>
 		</File>
 		<File

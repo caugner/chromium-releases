@@ -5,11 +5,10 @@
 #include "chrome/browser/views/restart_message_box.h"
 
 #include "chrome/common/l10n_util.h"
-#include "chrome/views/message_box_view.h"
-#include "chrome/views/window.h"
-
-#include "chromium_strings.h"
-#include "generated_resources.h"
+#include "chrome/views/controls/message_box_view.h"
+#include "chrome/views/window/window.h"
+#include "grit/chromium_strings.h"
+#include "grit/generated_resources.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // RestartMessageBox, public:
@@ -34,7 +33,7 @@ std::wstring RestartMessageBox::GetWindowTitle() const {
   return l10n_util::GetString(IDS_PRODUCT_NAME);
 }
 
-void RestartMessageBox::WindowClosing() {
+void RestartMessageBox::DeleteDelegate() {
   delete this;
 }
 
@@ -42,7 +41,7 @@ bool RestartMessageBox::IsModal() const {
   return true;
 }
 
-ChromeViews::View* RestartMessageBox::GetContentsView() {
+views::View* RestartMessageBox::GetContentsView() {
   return message_box_view_;
 }
 
@@ -57,10 +56,8 @@ RestartMessageBox::RestartMessageBox(HWND parent_hwnd) {
       l10n_util::GetString(IDS_OPTIONS_RESTART_REQUIRED).c_str(),
       std::wstring(),
       kDialogWidth);
-  ChromeViews::Window::CreateChromeWindow(parent_hwnd, gfx::Rect(),
-                                          this)->Show();
+  views::Window::CreateChromeWindow(parent_hwnd, gfx::Rect(), this)->Show();
 }
 
 RestartMessageBox::~RestartMessageBox() {
 }
-

@@ -21,12 +21,12 @@ class SimplifiedTextDiff(text_diff.TestTextDiff):
     """Removes position and size information from a render tree dump.  This
     also combines contiguous lines of text together so lines that wrap between
     different words match. Returns the simplified text."""
-    
+
     # SVG render paths are a little complicated: we want to strip digits after
     # a decimal point only for strings that begin with "RenderPath.*data".
     def simplify_svg_path(match):
       return match.group(1) + re.sub(r"([0-9]*)\.[0-9]{2}", "\\1", match.group(2))
-      
+
     # Regular expressions to remove or substitue text.
     simplifications = (
       # Ignore TypeError and ReferenceError, V8 has different error text.
@@ -67,13 +67,13 @@ class SimplifiedTextDiff(text_diff.TestTextDiff):
       # Handle RTL "...Browse" text.  The space gets inserted when text lines
       # are merged together in the step above.
       (re.compile(r"... Browse"), "Browse..."),
-      
+
       # Some SVG tests inexplicably emit -0.00 rather than 0.00 in the expected results
       (re.compile(r"-0\.00"), '0.00'),
-      
+
       # Remove size information from SVG text
       (re.compile(r"(chunk.*width )([0-9]+\.[0-9]{2})"), '\\1'),
-      
+
       # Remove decimals from SVG paths
       (re.compile(r"(RenderPath.*data)(.*)"), simplify_svg_path),
     )
@@ -83,7 +83,7 @@ class SimplifiedTextDiff(text_diff.TestTextDiff):
 
     return text
 
-  def CompareOutput(self, filename, proc, output, unused_test_args):
+  def CompareOutput(self, filename, proc, output, test_args, target):
     """Implementation of CompareOutput that removes most numbers before
     computing the diff.
 
@@ -92,9 +92,15 @@ class SimplifiedTextDiff(text_diff.TestTextDiff):
     """
     failures = []
 
+    # If we're generating a new baseline, we pass.
+    if test_args.new_baseline:
+      return failures
+
     # Normalize text to diff
     output = self.GetNormalizedOutputText(output)
-    expected = self.GetNormalizedExpectedText(filename)
+    # The full text diff already gave the result file if requested, so we'll
+    # ignore the |show_sources| option here.
+    expected = self.GetNormalizedExpectedText(filename, show_sources=False)
 
     # Don't bother with the simplified text diff if we match before simplifying
     # the text.

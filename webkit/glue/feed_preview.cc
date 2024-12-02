@@ -3,21 +3,23 @@
 // found in the LICENSE file.
 
 #include "config.h"
+#include "base/compiler_specific.h"
 
 #include "webkit/glue/feed_preview.h"
 
-#pragma warning(push, 0)
+MSVC_PUSH_WARNING_LEVEL(0);
 #include "ResourceRequest.h"
 #include "ResourceResponse.h"
 #include "ResourceHandle.h"
-#pragma warning(pop)
+MSVC_POP_WARNING();
 
 #undef LOG
 
 #include "base/logging.h"
+#include "grit/webkit_resources.h"
+#include "googleurl/src/gurl.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/glue/webkit_resources.h"
 
 namespace WebCore {
 
@@ -78,4 +80,3 @@ void FeedClientProxy::didFail(ResourceHandle* handle,
 }
 
 }  // namespace WebCore
-

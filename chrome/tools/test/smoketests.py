@@ -1,4 +1,4 @@
-#!/bin/env python
+#!/usr/bin/python
 # Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -28,10 +28,14 @@ import subprocess
 import sys
 import time
 
-import google.httpd_utils
-import google.path_utils
-import google.process_utils
-
+try:
+  import google.httpd_utils
+  import google.path_utils
+  import google.process_utils
+except ImportError:
+  print ("\n>> You must have your local path of trunk/src/tools/python added"
+         " to your PYTHONPATH.<<\n")
+  raise
 
 # Keep a global httpd object so it can be killed in the event of errors.
 _httpd = None
@@ -141,7 +145,7 @@ def main(options, args):
         len([x for x in tests if x.startswith('page-cycler')])):
       print 'Skipping page-cycler tests (no data)'
     options.nopage_cycler = True
-  
+
   # Start an httpd if needed.
   http_tests = [x for x in tests if x.endswith('-http')]
   if http_tests and not options.nopage_cycler and not options.nohttp:
@@ -181,8 +185,9 @@ def main(options, args):
     print 'Running %s:' % test,
     try:
       result = google.process_utils.RunCommand(command, options.verbose)
-    except google.process_utils.CommandNotFound:
+    except google.process_utils.CommandNotFound, e:
       print '%s' % e
+      raise
     if options.verbose:
       print test,
     print '(%ds)' % (time.time() - test_start_time),

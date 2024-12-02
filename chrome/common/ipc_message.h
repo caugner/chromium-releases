@@ -9,11 +9,20 @@
 
 #include "base/basictypes.h"
 #include "base/pickle.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 
 #ifndef NDEBUG
 #define IPC_MESSAGE_LOG_ENABLED
 #endif
+
+#if defined(OS_POSIX)
+#include "base/ref_counted.h"
+#endif
+
+namespace base {
+class FileDescriptor;
+}
+
+class FileDescriptorSet;
 
 namespace IPC {
 
@@ -156,6 +165,17 @@ class Message : public Pickle {
     return Pickle::FindNext(sizeof(Header), range_start, range_end);
   }
 
+#if defined(OS_POSIX)
+  // On POSIX, a message supports reading / writing FileDescriptor objects.
+  // This is used to pass a file descriptor to the peer of an IPC channel.
+
+  // Add a descriptor to the end of the set. Returns false iff the set is full.
+  bool WriteFileDescriptor(const base::FileDescriptor& descriptor);
+  // Get a file descriptor from the message. Returns false on error.
+  //   iter: a Pickle iterator to the current location in the message.
+  bool ReadFileDescriptor(void** iter, base::FileDescriptor* descriptor) const;
+#endif
+
 #ifdef IPC_MESSAGE_LOG_ENABLED
   // Adds the outgoing time from Time::Now() at the end of the message and sets
   // a bit to indicate that it's been added.
@@ -198,9 +218,12 @@ class Message : public Pickle {
 
 #pragma pack(push, 2)
   struct Header : Pickle::Header {
-    int32 routing; // ID of the view that this message is destined for
-    uint16 type;   // specifies the user-defined message type
-    uint16 flags;  // specifies control flags for the message
+    int32 routing;  // ID of the view that this message is destined for
+    uint16 type;    // specifies the user-defined message type
+    uint16 flags;   // specifies control flags for the message
+#if defined(OS_POSIX)
+    uint32 num_fds; // the number of descriptors included with this message
+#endif
   };
 #pragma pack(pop)
 
@@ -212,6 +235,22 @@ class Message : public Pickle {
   }
 
   void InitLoggingVariables();
+
+#if defined(OS_POSIX)
+  // The set of file descriptors associated with this message.
+  scoped_refptr<FileDescriptorSet> file_descriptor_set_;
+
+  // Ensure that a FileDescriptorSet is allocated
+  void EnsureFileDescriptorSet();
+
+  FileDescriptorSet* file_descriptor_set() {
+    EnsureFileDescriptorSet();
+    return file_descriptor_set_.get();
+  }
+  const FileDescriptorSet* file_descriptor_set() const {
+    return file_descriptor_set_.get();
+  }
+#endif
 
 #ifdef IPC_MESSAGE_LOG_ENABLED
   // Used for logging.
@@ -238,4 +277,3 @@ enum SpecialRoutingIDs {
 #define IPC_LOGGING_ID 0xFFF1  // Special message id for logging
 
 #endif  // CHROME_COMMON_IPC_MESSAGE_H__
-

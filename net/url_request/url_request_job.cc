@@ -8,21 +8,28 @@
 #include "base/string_util.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/auth.h"
+#include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job_metrics.h"
 #include "net/url_request/url_request_job_tracker.h"
 
+using base::Time;
+using base::TimeTicks;
+
 // Buffer size allocated when de-compressing data.
-static const int kFilterBufSize = 32 * 1024;
+// static
+const int URLRequestJob::kFilterBufSize = 32 * 1024;
 
 URLRequestJob::URLRequestJob(URLRequest* request)
     : request_(request),
       done_(false),
+      filter_needs_more_output_space_(false),
       read_buffer_(NULL),
       read_buffer_len_(0),
       has_handled_response_(false),
-      expected_content_size_(-1) {
+      expected_content_size_(-1),
+      filter_input_byte_count_(0) {
   is_profiling_ = request->enable_profiling();
   if (is_profiling()) {
     metrics_.reset(new URLRequestJobMetrics());
@@ -47,13 +54,9 @@ void URLRequestJob::DetachRequest() {
 }
 
 void URLRequestJob::SetupFilter() {
-  std::vector<std::string> encoding_types;
+  std::vector<Filter::FilterType> encoding_types;
   if (GetContentEncodings(&encoding_types)) {
-    std::string mime_type;
-    GetMimeType(&mime_type);
-    filter_.reset(Filter::Factory(encoding_types, mime_type, kFilterBufSize));
-    if (filter_.get())
-      filter_->SetURL(request_->url());
+    filter_.reset(Filter::Factory(encoding_types, *this));
   }
 }
 
@@ -84,10 +87,33 @@ void URLRequestJob::ContinueDespiteLastError() {
   NOTREACHED();
 }
 
+int64 URLRequestJob::GetByteReadCount() const {
+  return filter_input_byte_count_ ;
+}
+
+bool URLRequestJob::GetURL(GURL* gurl) const {
+  if (!request_)
+    return false;
+  *gurl = request_->url();
+  return true;
+}
+
+base::Time URLRequestJob::GetRequestTime() const {
+  if (!request_)
+    return base::Time();
+  return request_->request_time();
+};
+
+bool URLRequestJob::IsCachedContent() const {
+  if (!request_)
+    return false;
+  return request_->was_cached();
+};
+
 // This function calls ReadData to get stream data. If a filter exists, passes
 // the data to the attached filter. Then returns the output from filter back to
 // the caller.
-bool URLRequestJob::Read(char* buf, int buf_size, int *bytes_read) {
+bool URLRequestJob::Read(net::IOBuffer* buf, int buf_size, int *bytes_read) {
   bool rv = false;
 
   DCHECK_LT(buf_size, 1000000);  // sanity check
@@ -130,7 +156,7 @@ bool URLRequestJob::ReadRawDataForFilter(int *bytes_read) {
   // TODO(mbelshe): is it possible that the filter needs *MORE* data
   //    when there is some data already in the buffer?
   if (!filter_->stream_data_len() && !is_done()) {
-    char* stream_buffer = filter_->stream_buffer();
+    net::IOBuffer* stream_buffer = filter_->stream_buffer();
     int stream_buffer_size = filter_->stream_buffer_size();
     rv = ReadRawData(stream_buffer, stream_buffer_size, bytes_read);
     if (rv && *bytes_read > 0)
@@ -156,14 +182,13 @@ bool URLRequestJob::ReadFilteredData(int *bytes_read) {
   if (is_done())
     return true;
 
-  if (!filter_->stream_data_len()) {
+  if (!filter_needs_more_output_space_ && !filter_->stream_data_len()) {
     // We don't have any raw data to work with, so
     // read from the socket.
-
     int filtered_data_read;
     if (ReadRawDataForFilter(&filtered_data_read)) {
       if (filtered_data_read > 0) {
-        filter_->FlushStreamBuffer(filtered_data_read);
+        filter_->FlushStreamBuffer(filtered_data_read);  // Give data to filter.
       } else {
         return true;  // EOF
       }
@@ -172,18 +197,32 @@ bool URLRequestJob::ReadFilteredData(int *bytes_read) {
     }
   }
 
-  if (filter_->stream_data_len() && !is_done()) {
-    // Get filtered data
+  if ((filter_->stream_data_len() || filter_needs_more_output_space_)
+      && !is_done()) {
+    // Get filtered data.
     int filtered_data_len = read_buffer_len_;
     Filter::FilterStatus status;
-    status = filter_->ReadData(read_buffer_, &filtered_data_len);
+    int output_buffer_size = filtered_data_len;
+    status = filter_->ReadData(read_buffer_->data(), &filtered_data_len);
+
+    if (filter_needs_more_output_space_ && 0 == filtered_data_len) {
+      // filter_needs_more_output_space_ was mistaken... there are no more bytes
+      // and we should have at least tried to fill up the filter's input buffer.
+      // Correct the state, and try again.
+      filter_needs_more_output_space_ = false;
+      return ReadFilteredData(bytes_read);
+    }
+
     switch (status) {
       case Filter::FILTER_DONE: {
+        filter_needs_more_output_space_ = false;
         *bytes_read = filtered_data_len;
         rv = true;
         break;
       }
       case Filter::FILTER_NEED_MORE_DATA: {
+        filter_needs_more_output_space_ =
+            (filtered_data_len == output_buffer_size);
         // We have finished filtering all data currently in the buffer.
         // There might be some space left in the output buffer. One can
         // consider reading more data from the stream to feed the filter
@@ -201,11 +240,14 @@ bool URLRequestJob::ReadFilteredData(int *bytes_read) {
         break;
       }
       case Filter::FILTER_OK: {
+        filter_needs_more_output_space_ =
+            (filtered_data_len == output_buffer_size);
         *bytes_read = filtered_data_len;
         rv = true;
         break;
       }
       case Filter::FILTER_ERROR: {
+        filter_needs_more_output_space_ = false;
         // TODO: Figure out a better error code.
         NotifyDone(URLRequestStatus(URLRequestStatus::FAILED, net::ERR_FAILED));
         rv = false;
@@ -213,6 +255,7 @@ bool URLRequestJob::ReadFilteredData(int *bytes_read) {
       }
       default: {
         NOTREACHED();
+        filter_needs_more_output_space_ = false;
         rv = false;
         break;
       }
@@ -232,7 +275,8 @@ bool URLRequestJob::ReadFilteredData(int *bytes_read) {
   return rv;
 }
 
-bool URLRequestJob::ReadRawData(char* buf, int buf_size, int *bytes_read) {
+bool URLRequestJob::ReadRawData(net::IOBuffer* buf, int buf_size,
+                                int *bytes_read) {
   DCHECK(bytes_read);
   *bytes_read = 0;
   NotifyDone(URLRequestStatus());
@@ -305,12 +349,6 @@ void URLRequestJob::NotifyHeadersComplete() {
     // Need to check for a NULL auth_info because the server may have failed
     // to send a challenge with the 401 response.
     if (auth_info) {
-      scoped_refptr<net::AuthData> auth_data;
-      GetCachedAuthData(*auth_info, &auth_data);
-      if (auth_data) {
-        SetAuth(auth_data->username, auth_data->password);
-        return;
-      }
       request_->delegate()->OnAuthRequired(request_, auth_info);
       // Wait for SetAuth or CancelAuth to be called.
       return;
@@ -404,15 +442,6 @@ void URLRequestJob::NotifyDone(const URLRequestStatus &status) {
   // the response before getting here.
   DCHECK(has_handled_response_ || !status.is_success());
 
-  // In the success case, we cannot send the NotifyDone now.  It can only be
-  // sent after the request is completed, because otherwise we can get the
-  // NotifyDone() called while the delegate is still accessing the request.
-  // In the case of an error, we are fre
-  if (status.is_success()) {
-    // If there is data left in the filter, then something is probably wrong.
-    DCHECK(!FilterHasData());
-  }
-
   // As with NotifyReadComplete, we need to take care to notice if we were
   // destroyed during a delegate callback.
   if (request_) {
@@ -481,6 +510,7 @@ void URLRequestJob::RecordBytesRead(int bytes_read) {
     ++(metrics_->number_of_read_IO_);
     metrics_->total_bytes_read_ += bytes_read;
   }
+  filter_input_byte_count_ += bytes_read;
   g_url_request_job_tracker.OnBytesRead(this, bytes_read);
 }
 
@@ -496,4 +526,3 @@ void URLRequestJob::SetStatus(const URLRequestStatus &status) {
   if (request_)
     request_->set_status(status);
 }
-

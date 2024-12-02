@@ -5,11 +5,11 @@
 #include "base/logging.h"
 #include "chrome/browser/views/user_data_dir_dialog.h"
 #include "chrome/common/l10n_util.h"
-#include "chrome/views/message_box_view.h"
-#include "chrome/views/window.h"
-
-#include "chromium_strings.h"
-#include "generated_resources.h"
+#include "chrome/views/controls/message_box_view.h"
+#include "chrome/views/widget/widget.h"
+#include "chrome/views/window/window.h"
+#include "grit/chromium_strings.h"
+#include "grit/generated_resources.h"
 
 // static
 std::wstring UserDataDirDialog::RunUserDataDirDialog(
@@ -29,7 +29,7 @@ UserDataDirDialog::UserDataDirDialog(const std::wstring& user_data_dir)
   message_box_view_ = new MessageBoxView(MessageBoxView::kIsConfirmMessageBox,
       message_text.c_str(), std::wstring(), kDialogWidth);
 
-  ChromeViews::Window::CreateChromeWindow(NULL, gfx::Rect(), this)->Show();
+  views::Window::CreateChromeWindow(NULL, gfx::Rect(), this)->Show();
 }
 
 UserDataDirDialog::~UserDataDirDialog() {
@@ -61,7 +61,7 @@ std::wstring UserDataDirDialog::GetWindowTitle() const {
   return l10n_util::GetString(IDS_CANT_WRITE_USER_DIRECTORY_TITLE);
 }
 
-void UserDataDirDialog::WindowClosing() {
+void UserDataDirDialog::DeleteDelegate() {
   delete this;
 }
 
@@ -70,10 +70,10 @@ bool UserDataDirDialog::Accept() {
   std::wstring dialog_title = l10n_util::GetString(
       IDS_CANT_WRITE_USER_DIRECTORY_CHOOSE_DIRECTORY_BUTTON);
   HWND owning_hwnd =
-      GetAncestor(message_box_view_->GetViewContainer()->GetHWND(), GA_ROOT);
+      GetAncestor(message_box_view_->GetWidget()->GetNativeView(), GA_ROOT);
   select_file_dialog_->SelectFile(SelectFileDialog::SELECT_FOLDER,
-                                  dialog_title, std::wstring(), owning_hwnd,
-                                  NULL);
+                                  dialog_title, std::wstring(), std::wstring(),
+                                  std::wstring(), owning_hwnd, NULL);
   return false;
 }
 
@@ -82,7 +82,7 @@ bool UserDataDirDialog::Cancel() {
   return true;
 }
 
-ChromeViews::View* UserDataDirDialog::GetContentsView() {
+views::View* UserDataDirDialog::GetContentsView() {
   return message_box_view_;
 }
 
@@ -100,4 +100,3 @@ void UserDataDirDialog::FileSelected(const std::wstring& path, void* params) {
 
 void UserDataDirDialog::FileSelectionCanceled(void* params) {
 }
-

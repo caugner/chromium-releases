@@ -30,11 +30,11 @@ const wchar_t kTestUrlSwitch[] = L"test-url";
 class NodeLeakTest : public TestShellTest {
  public:
   virtual void SetUp() {
-    CommandLine parsed_command_line;
+    const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
 
-    std::wstring js_flags = 
-      parsed_command_line.GetSwitchValue(test_shell::kJavaScriptFlags);
-    CommandLine::AppendSwitch(&js_flags, L"expose-gc");
+    std::wstring js_flags =
+        parsed_command_line.GetSwitchValue(test_shell::kJavaScriptFlags);
+    js_flags += L" --expose-gc";
     webkit_glue::SetJavaScriptFlags(js_flags);
 
     std::wstring cache_path =
@@ -47,7 +47,8 @@ class NodeLeakTest : public TestShellTest {
     if (parsed_command_line.HasSwitch(test_shell::kTestShellTimeOut)) {
       const std::wstring timeout_str = parsed_command_line.GetSwitchValue(
           test_shell::kTestShellTimeOut);
-      int timeout_ms = static_cast<int>(StringToInt64(timeout_str.c_str()));
+      int timeout_ms =
+          static_cast<int>(StringToInt64(WideToUTF16Hack(timeout_str.c_str())));
       if (timeout_ms > 0)
         TestShell::SetFileTestTimeout(timeout_ms);
     }
@@ -57,14 +58,14 @@ class NodeLeakTest : public TestShellTest {
         parsed_command_line.HasSwitch(test_shell::kPlaybackMode) ?
         net::HttpCache::PLAYBACK : net::HttpCache::NORMAL;
     SimpleResourceLoaderBridge::Init(
-        new TestShellRequestContext(cache_path, mode));
+        new TestShellRequestContext(cache_path, mode, false));
 
     TestShellTest::SetUp();
   }
 
   virtual void TearDown() {
     TestShellTest::TearDown();
- 
+
     SimpleResourceLoaderBridge::Shutdown();
   }
 
@@ -77,13 +78,11 @@ class NodeLeakTest : public TestShellTest {
   }
 };
 
-}  // namespace
-
 TEST_F(NodeLeakTest, TestURL) {
-  CommandLine parsed_command_line;
-
+  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   if (parsed_command_line.HasSwitch(kTestUrlSwitch)) {
     NavigateToURL(parsed_command_line.GetSwitchValue(kTestUrlSwitch).c_str());
   }
 }
 
+}  // namespace

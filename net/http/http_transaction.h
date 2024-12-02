@@ -12,16 +12,15 @@ namespace net {
 
 class HttpRequestInfo;
 class HttpResponseInfo;
+class IOBuffer;
 
 // Represents a single HTTP transaction (i.e., a single request/response pair).
 // HTTP redirects are not followed and authentication challenges are not
 // answered.  Cookies are assumed to be managed by the caller.
 class HttpTransaction {
  public:
-  virtual ~HttpTransaction() {}
-
   // Stops any pending IO and destroys the transaction object.
-  virtual void Destroy() = 0;
+  virtual ~HttpTransaction() {}
 
   // Starts the HTTP transaction (i.e., sends the HTTP request).
   //
@@ -68,8 +67,11 @@ class HttpTransaction {
   // could not be read.
   //
   // NOTE: The transaction is not responsible for deleting the callback object.
+  // If the operation is not completed immediately, the transaction must acquire
+  // a reference to the provided buffer.
   //
-  virtual int Read(char* buf, int buf_len, CompletionCallback* callback) = 0;
+  virtual int Read(IOBuffer* buf, int buf_len,
+                   CompletionCallback* callback) = 0;
 
   // Returns the response info for this transaction or NULL if the response
   // info is not available.
@@ -86,4 +88,3 @@ class HttpTransaction {
 }  // namespace net
 
 #endif  // NET_HTTP_HTTP_TRANSACTION_H_
-

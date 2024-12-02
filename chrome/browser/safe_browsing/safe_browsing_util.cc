@@ -25,6 +25,29 @@ static const char kReportParams[] = "?tpl=generic&continue=%s&url=%s";
 
 namespace safe_browsing_util {
 
+const char kMalwareList[] = "goog-malware-shavar";
+const char kPhishingList[] = "goog-phish-shavar";
+
+int GetListId(const std::string& name) {
+  if (name == kMalwareList)
+    return MALWARE;
+  else if (name == kPhishingList)
+    return PHISH;
+
+  return -1;
+}
+
+std::string GetListName(int list_id) {
+  switch (list_id) {
+    case MALWARE:
+      return kMalwareList;
+    case PHISH:
+      return kPhishingList;
+    default:
+      return "";
+  }
+}
+
 void GenerateHostsToCheck(const GURL& url, std::vector<std::string>* hosts) {
   // Per Safe Browsing Protocol 2 spec, first we try the host.  Then we try up
   // to 4 hostnames starting with the last 5 components and successively
@@ -168,8 +191,6 @@ void FreeChunks(std::deque<SBChunk>* chunks) {
   }
 }
 
-#if defined(OS_WIN)
-// TODO(port): remove conditional #ifs when google_util is ported
 GURL GeneratePhishingReportUrl(const std::string& report_page,
                                const std::string& url_to_report) {
   Locale locale = Locale::getDefault();
@@ -185,7 +206,6 @@ GURL GeneratePhishingReportUrl(const std::string& report_page,
                                current_esc.c_str()));
   return google_util::AppendGoogleLocaleParam(report_url);
 }
-#endif
 
 }  // namespace safe_browsing_util
 
@@ -252,6 +272,7 @@ void SBEntry::RemovePrefix(int index) {
       break;
     default:
       NOTREACHED();
+      return;
   }
 
   char* from = reinterpret_cast<char*>(to) + PrefixSize(type());
@@ -474,7 +495,8 @@ void SBHostInfo::RemoveSubEntry(int list_id, int chunk_id) {
 
     SBEntry* new_sub_entry = const_cast<SBEntry*>(entry);
     scoped_array<char> data;
-    if (entry->IsSub() && entry->list_id() == list_id && entry->prefix_count()) {
+    if (entry->IsSub() && entry->list_id() == list_id &&
+        entry->prefix_count()) {
       // Make a copy of the entry so that we can modify it.
       data.reset(new char[entry->Size()]);
       new_sub_entry = reinterpret_cast<SBEntry*>(data.get());

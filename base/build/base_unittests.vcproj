@@ -152,6 +152,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\perf_test_suite.h"
+				>
+			</File>
+			<File
 				RelativePath="..\run_all_unittests.cc"
 				>
 			</File>
@@ -184,11 +188,27 @@
 				>
 			</File>
 			<File
+				RelativePath="..\directory_watcher_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\field_trial_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\file_path_unittest.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\file_util_unittest.cc"
 				>
 			</File>
 			<File
 				RelativePath="..\file_version_info_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\..\net\base\filter_unittest.h"
 				>
 			</File>
 			<File
@@ -232,6 +252,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\observer_list_unittest.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\path_service_unittest.cc"
 				>
 			</File>
@@ -252,6 +276,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\rand_util_unittest.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\gfx\rect_unittest.cc"
 				>
 			</File>
@@ -260,15 +288,23 @@
 				>
 			</File>
 			<File
+				RelativePath="..\scoped_bstr_win_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\scoped_comptr_win_unittest.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\scoped_ptr_unittest.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\sha2_unittest.cc"
+				RelativePath="..\scoped_temp_dir_unittest.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\shared_event_unittest.cc"
+				RelativePath="..\sha2_unittest.cc"
 				>
 			</File>
 			<File
@@ -312,7 +348,15 @@
 				>
 			</File>
 			<File
-				RelativePath="..\sys_string_conversions_win_unittest.cc"
+				RelativePath="..\sys_string_conversions_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\system_monitor_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\thread_collision_warner_unittest.cc"
 				>
 			</File>
 			<File
@@ -332,7 +376,7 @@
 				>
 			</File>
 			<File
-				RelativePath="..\time_unittest_win.cc"
+				RelativePath="..\time_win_unittest.cc"
 				>
 			</File>
 			<File
@@ -349,6 +393,10 @@
 			</File>
 			<File
 				RelativePath="..\values_unittest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\version_unittest.cc"
 				>
 			</File>
 			<File
@@ -376,27 +424,11 @@
 			Name="gfx_tests"
 			>
 			<File
-				RelativePath="..\gfx\convolver_unittest.cc"
-				>
-			</File>
-			<File
-				RelativePath="..\gfx\image_operations_unittest.cc"
-				>
-			</File>
-			<File
-				RelativePath="..\gfx\platform_canvas_unittest.cc"
+				RelativePath="..\gfx\jpeg_codec_unittest.cc"
 				>
 			</File>
 			<File
 				RelativePath="..\gfx\png_codec_unittest.cc"
-				>
-			</File>
-			<File
-				RelativePath="..\gfx\uniscribe_unittest.cc"
-				>
-			</File>
-			<File
-				RelativePath="..\gfx\vector_canvas_unittest.cc"
 				>
 			</File>
 		</Filter>

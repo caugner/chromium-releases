@@ -18,8 +18,8 @@
 // "Sync" messages are just synchronous calls, the Send() call doesn't return
 // until a reply comes back.  Input parameters are first (const TYPE&), and
 // To declare a sync message, use the IPC_SYNC_ macros.  The numbers at the
-// end show how many input/output parameters there are (i.e. 1_2 is 1 in, 2 out).
-// The caller does a Send([route id, ], in1, &out1, &out2).
+// end show how many input/output parameters there are (i.e. 1_2 is 1 in, 2
+// out). The caller does a Send([route id, ], in1, &out1, &out2).
 // The receiver's handler function will be
 //     void OnSyncMessageName(const type1& in1, type2* out1, type3* out2)
 //
@@ -30,7 +30,8 @@
 // type, stash the message, and when it has the data it can Send the message.
 //
 // Use the IPC_MESSAGE_HANDLER_DELAY_REPLY macro instead of IPC_MESSAGE_HANDLER
-//     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_SyncMessageName, OnSyncMessageName)
+//     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_SyncMessageName,
+//                                     OnSyncMessageName)
 //
 // The handler function will look like:
 //     void OnSyncMessageName(const type1& in1, IPC::Message* reply_msg);
@@ -40,6 +41,44 @@
 //     Send(reply_msg);
 
 #include "chrome/common/ipc_message_utils.h"
+
+
+#ifndef MESSAGES_INTERNAL_FILE
+#error This file should only be included by X_messages.h, which needs to define MESSAGES_INTERNAL_FILE first.
+#endif
+
+// Trick scons and xcode into seeing the possible real dependencies since they
+// don't understand #include MESSAGES_INTERNAL_FILE. See http://crbug.com/7828
+#if 0
+#include "chrome/common/ipc_sync_message_unittest.h"
+#include "chrome/common/plugin_messages_internal.h"
+#include "chrome/common/render_messages_internal.h"
+#include "chrome/renderer/devtools_messages_internal.h"
+#include "chrome/test/automation/automation_messages_internal.h"
+#include "chrome/common/worker_messages_internal.h"
+#endif
+
+#ifndef IPC_MESSAGE_MACROS_INCLUDE_BLOCK
+#define IPC_MESSAGE_MACROS_INCLUDE_BLOCK
+
+// Multi-pass include of X_messages_internal.h.  Preprocessor magic allows
+// us to use 1 header to define the enums and classes for our render messages.
+#define IPC_MESSAGE_MACROS_ENUMS
+#include MESSAGES_INTERNAL_FILE
+
+#define IPC_MESSAGE_MACROS_CLASSES
+#include MESSAGES_INTERNAL_FILE
+
+#ifdef IPC_MESSAGE_MACROS_LOG_ENABLED
+#define IPC_MESSAGE_MACROS_LOG
+#include MESSAGES_INTERNAL_FILE
+#endif
+
+#undef MESSAGES_INTERNAL_FILE
+#undef IPC_MESSAGE_MACROS_INCLUDE_BLOCK
+
+#endif
+
 
 // Undefine the macros from the previous pass (if any).
 #undef IPC_BEGIN_MESSAGES
@@ -56,7 +95,7 @@
 #undef IPC_MESSAGE_ROUTED3
 #undef IPC_MESSAGE_ROUTED4
 #undef IPC_MESSAGE_ROUTED5
-#undef IPC_MESSAGE_EMPTY
+#undef IPC_MESSAGE_ROUTED6
 #undef IPC_SYNC_MESSAGE_CONTROL0_0
 #undef IPC_SYNC_MESSAGE_CONTROL0_1
 #undef IPC_SYNC_MESSAGE_CONTROL0_2
@@ -82,6 +121,7 @@
 #undef IPC_SYNC_MESSAGE_ROUTED1_1
 #undef IPC_SYNC_MESSAGE_ROUTED1_2
 #undef IPC_SYNC_MESSAGE_ROUTED1_3
+#undef IPC_SYNC_MESSAGE_ROUTED1_4
 #undef IPC_SYNC_MESSAGE_ROUTED2_0
 #undef IPC_SYNC_MESSAGE_ROUTED2_1
 #undef IPC_SYNC_MESSAGE_ROUTED2_2
@@ -92,6 +132,7 @@
 #undef IPC_SYNC_MESSAGE_ROUTED3_3
 #undef IPC_SYNC_MESSAGE_ROUTED4_0
 #undef IPC_SYNC_MESSAGE_ROUTED4_1
+#undef IPC_SYNC_MESSAGE_ROUTED4_2
 
 #if defined(IPC_MESSAGE_MACROS_ENUMS)
 #undef IPC_MESSAGE_MACROS_ENUMS
@@ -101,10 +142,11 @@
 // 16 channel types (currently using 8) and 4K messages per type.  Should
 // really make type be 32 bits, but then we break automation with older Chrome
 // builds..
-#define IPC_BEGIN_MESSAGES(label, start) \
+// Do label##PreStart so that automation messages keep the same id as before.
+#define IPC_BEGIN_MESSAGES(label) \
   enum label##MsgType { \
-  label##Start = start << 12, \
-  label##PreStart = (start << 12) - 1,  // Do this so that automation messages keep the same id as before
+  label##Start = label##MsgStart << 12, \
+  label##PreStart = (label##MsgStart << 12) - 1,
 
 #define IPC_END_MESSAGES(label) \
   label##End \
@@ -146,7 +188,7 @@
 #define IPC_MESSAGE_ROUTED5(msg_class, type1, type2, type3, type4, type5) \
   msg_class##__ID,
 
-#define IPC_MESSAGE_EMPTY(msg_class) \
+#define IPC_MESSAGE_ROUTED6(msg_class, type1, type2, type3, type4, type5, type6) \
   msg_class##__ID,
 
 #define IPC_SYNC_MESSAGE_CONTROL0_0(msg_class) \
@@ -224,6 +266,9 @@
 #define IPC_SYNC_MESSAGE_ROUTED1_3(msg_class, type1_in, type1_out, type2_out, type3_out) \
   msg_class##__ID,
 
+#define IPC_SYNC_MESSAGE_ROUTED1_4(msg_class, type1_in, type1_out, type2_out, type3_out, type4_out) \
+  msg_class##__ID,
+
 #define IPC_SYNC_MESSAGE_ROUTED2_0(msg_class, type1_in, type2_in) \
   msg_class##__ID,
 
@@ -252,6 +297,9 @@
   msg_class##__ID,
 
 #define IPC_SYNC_MESSAGE_ROUTED4_1(msg_class, type1_in, type2_in, type3_in, type4_in, type1_out) \
+  msg_class##__ID,
+
+#define IPC_SYNC_MESSAGE_ROUTED4_2(msg_class, type1_in, type2_in, type3_in, type4_in, type1_out, type2_out) \
   msg_class##__ID,
 
 // Message crackers and handlers.
@@ -337,7 +385,18 @@ void class_name::OnMessageReceived(const IPC::Message& msg) \
 #elif defined(IPC_MESSAGE_MACROS_LOG)
 #undef IPC_MESSAGE_MACROS_LOG
 
-#define IPC_BEGIN_MESSAGES(label, start) \
+#ifndef IPC_LOG_TABLE_CREATED
+#define IPC_LOG_TABLE_CREATED
+typedef void (*LogFunction)(uint16 type,
+                           std::wstring* name,
+                           const IPC::Message* msg,
+                           std::wstring* params);
+
+LogFunction g_log_function_mapping[LastMsgIndex];
+#endif
+
+
+#define IPC_BEGIN_MESSAGES(label) \
   void label##MsgLog(uint16 type, std::wstring* name, const IPC::Message* msg, std::wstring* params) { \
   switch (type) {
 
@@ -346,7 +405,14 @@ void class_name::OnMessageReceived(const IPC::Message& msg) \
       if (name) \
         *name = L"[UNKNOWN " L ## #label L" MSG"; \
     } \
-  }
+  } \
+  class LoggerRegisterHelper##label { \
+   public: \
+    LoggerRegisterHelper##label() { \
+      g_log_function_mapping[label##MsgStart] = label##MsgLog; \
+    } \
+  }; \
+  LoggerRegisterHelper##label g_LoggerRegisterHelper##label;
 
 #define IPC_MESSAGE_LOG(msg_class) \
      case msg_class##__ID: \
@@ -392,7 +458,7 @@ void class_name::OnMessageReceived(const IPC::Message& msg) \
 #define IPC_MESSAGE_ROUTED5(msg_class, type1, type2, type3, type4, type5) \
   IPC_MESSAGE_LOG(msg_class)
 
-#define IPC_MESSAGE_EMPTY(msg_class) \
+#define IPC_MESSAGE_ROUTED6(msg_class, type1, type2, type3, type4, type5, type6) \
   IPC_MESSAGE_LOG(msg_class)
 
 #define IPC_SYNC_MESSAGE_CONTROL0_0(msg_class) \
@@ -470,6 +536,9 @@ void class_name::OnMessageReceived(const IPC::Message& msg) \
 #define IPC_SYNC_MESSAGE_ROUTED1_3(msg_class, type1_in, type1_out, type2_out, type3_out) \
   IPC_MESSAGE_LOG(msg_class)
 
+#define IPC_SYNC_MESSAGE_ROUTED1_4(msg_class, type1_in, type1_out, type2_out, type3_out, type4_out) \
+  IPC_MESSAGE_LOG(msg_class)
+
 #define IPC_SYNC_MESSAGE_ROUTED2_0(msg_class, type1_in, type2_in) \
   IPC_MESSAGE_LOG(msg_class)
 
@@ -500,10 +569,13 @@ void class_name::OnMessageReceived(const IPC::Message& msg) \
 #define IPC_SYNC_MESSAGE_ROUTED4_1(msg_class, type1_in, type2_in, type3_in, type4_in, type1_out) \
   IPC_MESSAGE_LOG(msg_class)
 
+#define IPC_SYNC_MESSAGE_ROUTED4_2(msg_class, type1_in, type2_in, type3_in, type4_in, type1_out, type2_out) \
+  IPC_MESSAGE_LOG(msg_class)
+
 #elif defined(IPC_MESSAGE_MACROS_CLASSES)
 #undef IPC_MESSAGE_MACROS_CLASSES
 
-#define IPC_BEGIN_MESSAGES(label, start)
+#define IPC_BEGIN_MESSAGES(label)
 #define IPC_END_MESSAGES(label)
 
 #define IPC_MESSAGE_CONTROL0(msg_class) \
@@ -633,12 +705,19 @@ void class_name::OnMessageReceived(const IPC::Message& msg) \
             routing_id, ID, MakeTuple(arg1, arg2, arg3, arg4, arg5)) {} \
   };
 
-// Dummy class for now, just to give us the ID field.
-#define IPC_MESSAGE_EMPTY(msg_class) \
-  class msg_class { \
-   public: \
-    enum { ID = msg_class##__ID }; \
-    static void Log(const IPC::Message* msg, std::wstring* l) {} \
+#define IPC_MESSAGE_ROUTED6(msg_class, type1, type2, type3, type4, type5, \
+                            type6)                                      \
+  class msg_class :                                                     \
+      public IPC::MessageWithTuple< Tuple6<type1, type2, type3, type4, type5, \
+                                           type6> > {                   \
+ public:                                                                \
+    enum { ID = msg_class##__ID };                                      \
+    msg_class(int32 routing_id, const type1& arg1, const type2& arg2,   \
+              const type3& arg3, const type4& arg4, const type5& arg5,  \
+              const type6& arg6)                                        \
+      : IPC::MessageWithTuple< Tuple6<type1, type2, type3, type4, type5, \
+      type6> >(                                                         \
+          routing_id, ID, MakeTuple(arg1, arg2, arg3, arg4, arg5, arg6)) {} \
   };
 
 #define IPC_SYNC_MESSAGE_CONTROL0_0(msg_class) \
@@ -929,6 +1008,18 @@ void class_name::OnMessageReceived(const IPC::Message& msg) \
             arg1, MakeRefTuple(*arg2, *arg3, *arg4)) {} \
   };
 
+#define IPC_SYNC_MESSAGE_ROUTED1_4(msg_class, type1_in, type1_out, type2_out, type3_out, type4_out) \
+  class msg_class : \
+      public IPC::MessageWithReply<type1_in, \
+          Tuple4<type1_out&, type2_out&, type3_out&, type4_out&> >{ \
+   public: \
+   enum { ID = msg_class##__ID }; \
+    msg_class(int routing_id, const type1_in& arg1, type1_out* arg2, type2_out* arg3, type3_out* arg4, type4_out* arg5) \
+        : IPC::MessageWithReply<type1_in, \
+            Tuple4<type1_out&, type2_out&, type3_out&, type4_out&> >(routing_id, ID, \
+            arg1, MakeRefTuple(*arg2, *arg3, *arg4, *arg5)) {} \
+  };
+
 #define IPC_SYNC_MESSAGE_ROUTED2_0(msg_class, type1_in, type2_in) \
   class msg_class : \
       public IPC::MessageWithReply<Tuple2<type1_in, type2_in>, Tuple0 > { \
@@ -1046,5 +1137,16 @@ void class_name::OnMessageReceived(const IPC::Message& msg) \
             MakeTuple(arg1, arg2, arg3, arg4), MakeRefTuple(*arg6)) {} \
   };
 
-#endif  // #if defined()
+#define IPC_SYNC_MESSAGE_ROUTED4_2(msg_class, type1_in, type2_in, type3_in, type4_in, type1_out, type2_out) \
+  class msg_class : \
+      public IPC::MessageWithReply<Tuple4<type1_in, type2_in, type3_in, type4_in>, \
+          Tuple2<type1_out&, type2_out&> > { \
+   public: \
+   enum { ID = msg_class##__ID }; \
+    msg_class(int routing_id, const type1_in& arg1, const type2_in& arg2, const type3_in& arg3, const type4_in& arg4, type1_out* arg5, type2_out* arg6) \
+        : IPC::MessageWithReply<Tuple4<type1_in, type2_in, type3_in, type4_in>, \
+            Tuple2<type1_out&, type2_out&> >(routing_id, ID, \
+            MakeTuple(arg1, arg2, arg3, arg4), MakeRefTuple(*arg5, *arg6)) {} \
+  };
 
+#endif  // #if defined()

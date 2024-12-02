@@ -10,6 +10,7 @@
 
 #include "base/histogram.h"
 #include "base/logging.h"
+#include "base/scoped_handle_win.h"
 #include "base/scoped_ptr.h"
 
 namespace {
@@ -22,7 +23,7 @@ typedef BOOL (WINAPI* HeapSetFn)(HANDLE, HEAP_INFORMATION_CLASS, PVOID, SIZE_T);
 
 }  // namespace
 
-namespace process_util {
+namespace base {
 
 int GetCurrentProcId() {
   return ::GetCurrentProcessId();
@@ -30,6 +31,14 @@ int GetCurrentProcId() {
 
 ProcessHandle GetCurrentProcessHandle() {
   return ::GetCurrentProcess();
+}
+
+ProcessHandle OpenProcessHandle(int pid) {
+  return OpenProcess(PROCESS_DUP_HANDLE | PROCESS_TERMINATE, FALSE, pid);
+}
+
+void CloseProcessHandle(ProcessHandle process) {
+  CloseHandle(process);
 }
 
 // Helper for GetProcId()
@@ -118,10 +127,8 @@ bool LaunchApp(const std::wstring& cmdline,
                bool wait, bool start_hidden, ProcessHandle* process_handle) {
   STARTUPINFO startup_info = {0};
   startup_info.cb = sizeof(startup_info);
-  if (start_hidden) {
-    startup_info.dwFlags = STARTF_USESHOWWINDOW;
-    startup_info.wShowWindow = SW_HIDE;
-  }
+  startup_info.dwFlags = STARTF_USESHOWWINDOW;
+  startup_info.wShowWindow = start_hidden ? SW_HIDE : SW_SHOW;
   PROCESS_INFORMATION process_info;
   if (!CreateProcess(NULL,
                      const_cast<wchar_t*>(cmdline.c_str()), NULL, NULL,
@@ -144,24 +151,35 @@ bool LaunchApp(const std::wstring& cmdline,
   return true;
 }
 
+bool LaunchApp(const CommandLine& cl,
+               bool wait, bool start_hidden, ProcessHandle* process_handle) {
+  return LaunchApp(cl.command_line_string(), wait,
+                   start_hidden, process_handle);
+}
+
 // Attempts to kill the process identified by the given process
 // entry structure, giving it the specified exit code.
 // Returns true if this is successful, false otherwise.
-bool KillProcess(int process_id, int exit_code, bool wait) {
-  bool result = false;
+bool KillProcessById(DWORD process_id, int exit_code, bool wait) {
   HANDLE process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE,
                                FALSE,  // Don't inherit handle
                                process_id);
-  if (process) {
-    result = !!TerminateProcess(process, exit_code);
-    if (result && wait) {
-      // The process may not end immediately due to pending I/O
-      if (WAIT_OBJECT_0 != WaitForSingleObject(process, 60 * 1000))
-        DLOG(ERROR) << "Error waiting for process exit: " << GetLastError();
-    } else {
-      DLOG(ERROR) << "Unable to terminate process: " << GetLastError();
-    }
-    CloseHandle(process);
+  if (!process)
+    return false;
+
+  bool ret = KillProcess(process, exit_code, wait);
+  CloseHandle(process);
+  return ret;
+}
+
+bool KillProcess(ProcessHandle process, int exit_code, bool wait) {
+  bool result = (TerminateProcess(process, exit_code) != FALSE);
+  if (result && wait) {
+    // The process may not end immediately due to pending I/O
+    if (WAIT_OBJECT_0 != WaitForSingleObject(process, 60 * 1000))
+      DLOG(ERROR) << "Error waiting for process exit: " << GetLastError();
+  } else if (!result) {
+    DLOG(ERROR) << "Unable to terminate process: " << GetLastError();
   }
   return result;
 }
@@ -180,11 +198,10 @@ bool DidProcessCrash(ProcessHandle handle) {
 
   // Warning, this is not generic code; it heavily depends on the way
   // the rest of the code kills a process.
-  
-  if (exitcode == 0 ||              // Normal termination.
-      exitcode == 1 ||              // Killed by task manager.
-      exitcode == 14 ||             // Killed because of a bad message.
-      exitcode == 16 ||             // Killed by hung detector (see ResultCodes)
+
+  if (exitcode == PROCESS_END_NORMAL_TERMINATON ||
+      exitcode == PROCESS_END_KILLED_BY_USER ||
+      exitcode == PROCESS_END_PROCESS_WAS_HUNG ||
       exitcode == 0xC0000354 ||     // STATUS_DEBUGGER_INACTIVE.
       exitcode == 0xC000013A ||     // Control-C/end session.
       exitcode == 0x40010004) {     // Debugger terminated process/end session.
@@ -199,14 +216,14 @@ bool DidProcessCrash(ProcessHandle handle) {
   const int kLeastValue = 0;
   const int kMaxValue = 0xFFF;
   const int kBucketCount = kMaxValue - kLeastValue + 1;
-  static LinearHistogram least_significant_histogram(L"ExitCodes.LSNibbles",
+  static LinearHistogram least_significant_histogram("ExitCodes.LSNibbles",
       kLeastValue + 1, kMaxValue, kBucketCount);
   least_significant_histogram.SetFlags(kUmaTargetedHistogramFlag |
                                        LinearHistogram::kHexRangePrintingFlag);
   least_significant_histogram.Add(exitcode & 0xFFF);
 
   // Histogram the high order 3 nibbles
-  static LinearHistogram most_significant_histogram(L"ExitCodes.MSNibbles",
+  static LinearHistogram most_significant_histogram("ExitCodes.MSNibbles",
       kLeastValue + 1, kMaxValue, kBucketCount);
   most_significant_histogram.SetFlags(kUmaTargetedHistogramFlag |
                                       LinearHistogram::kHexRangePrintingFlag);
@@ -214,7 +231,7 @@ bool DidProcessCrash(ProcessHandle handle) {
   most_significant_histogram.Add((exitcode >> 20) & 0xFFF);
 
   // Histogram the middle order 2 nibbles
-  static LinearHistogram mid_significant_histogram(L"ExitCodes.MidNibbles",
+  static LinearHistogram mid_significant_histogram("ExitCodes.MidNibbles",
       1, 0xFF, 0x100);
   mid_significant_histogram.SetFlags(kUmaTargetedHistogramFlag |
                                       LinearHistogram::kHexRangePrintingFlag);
@@ -223,13 +240,26 @@ bool DidProcessCrash(ProcessHandle handle) {
   return true;
 }
 
-NamedProcessIterator::NamedProcessIterator(const std::wstring& executable_name,
-                                           const ProcessFilter* filter) :
-  started_iteration_(false),
-  executable_name_(executable_name),
-  filter_(filter) {
-    snapshot_ = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+bool WaitForExitCode(ProcessHandle handle, int* exit_code) {
+  ScopedHandle closer(handle);  // Ensure that we always close the handle.
+  if (::WaitForSingleObject(handle, INFINITE) != WAIT_OBJECT_0) {
+    NOTREACHED();
+    return false;
   }
+  DWORD temp_code;  // Don't clobber out-parameters in case of failure.
+  if (!::GetExitCodeProcess(handle, &temp_code))
+    return false;
+  *exit_code = temp_code;
+  return true;
+}
+
+NamedProcessIterator::NamedProcessIterator(const std::wstring& executable_name,
+                                           const ProcessFilter* filter)
+    : started_iteration_(false),
+      executable_name_(executable_name),
+      filter_(filter) {
+  snapshot_ = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+}
 
 NamedProcessIterator::~NamedProcessIterator() {
   CloseHandle(snapshot_);
@@ -287,8 +317,10 @@ bool KillProcesses(const std::wstring& executable_name, int exit_code,
   const ProcessEntry* entry;
 
   NamedProcessIterator iter(executable_name, filter);
-  while (entry = iter.NextProcessEntry())
-    result = KillProcess((*entry).th32ProcessID, exit_code, true) && result;
+  while (entry = iter.NextProcessEntry()) {
+    if (!KillProcessById((*entry).th32ProcessID, exit_code, true))
+      result = false;
+  }
 
   return result;
 }
@@ -316,18 +348,27 @@ bool WaitForProcessesToExit(const std::wstring& executable_name,
   return result;
 }
 
+bool WaitForSingleProcess(ProcessHandle handle, int wait_milliseconds) {
+  bool retval = WaitForSingleObject(handle, wait_milliseconds) == WAIT_OBJECT_0;
+  return retval;
+}
+
+bool CrashAwareSleep(ProcessHandle handle, int wait_milliseconds) {
+  bool retval = WaitForSingleObject(handle, wait_milliseconds) == WAIT_TIMEOUT;
+  return retval;
+}
+
 bool CleanupProcesses(const std::wstring& executable_name,
                       int wait_milliseconds,
                       int exit_code,
                       const ProcessFilter* filter) {
-  bool exited_cleanly =
-    process_util::WaitForProcessesToExit(executable_name, wait_milliseconds,
-                                         filter);
+  bool exited_cleanly = WaitForProcessesToExit(executable_name,
+                                               wait_milliseconds,
+                                               filter);
   if (!exited_cleanly)
-    process_util::KillProcesses(executable_name, exit_code, filter);
+    KillProcesses(executable_name, exit_code, filter);
   return exited_cleanly;
 }
-
 
 ///////////////////////////////////////////////////////////////////////////////
 // ProcesMetrics
@@ -598,8 +639,13 @@ bool EnableLowFragmentationHeap() {
   return true;
 }
 
+void EnableTerminationOnHeapCorruption() {
+  // Ignore the result code. Supported on XP SP3 and Vista.
+  HeapSetInformation(NULL, HeapEnableTerminationOnCorruption, NULL, 0);
+}
+
 void RaiseProcessToHighPriority() {
   SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 }
 
-}  // namespace process_util
+}  // namespace base

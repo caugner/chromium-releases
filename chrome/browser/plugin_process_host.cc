@@ -2,92 +2,57 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "build/build_config.h"
+
 #include "chrome/browser/plugin_process_host.h"
 
+#if defined(OS_WIN)
 #include <windows.h>
+#endif
+
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/debug_util.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/file_version_info.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
+#include "base/scoped_ptr.h"
 #include "base/thread.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_plugin_browsing_context.h"
 #include "chrome/browser/chrome_thread.h"
-#include "chrome/browser/plugin_process_info.h"
 #include "chrome/browser/plugin_service.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/render_process_host.h"
-#include "chrome/browser/resource_dispatcher_host.h"
-#include "chrome/browser/sandbox_policy.h"
+#include "chrome/browser/renderer_host/browser_render_process_host.h"
+#include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/debug_flags.h"
-#include "chrome/common/ipc_logging.h"
 #include "chrome/common/logging_chrome.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/plugin_messages.h"
-#include "chrome/common/process_watcher.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/win_util.h"
 #include "net/base/cookie_monster.h"
+#include "net/base/file_stream.h"
+#include "net/base/io_buffer.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
+
+// TODO(port): Port these files.
+#if defined(OS_WIN)
+#include "base/win_util.h"
+#include "chrome/browser/sandbox_policy.h"
+#include "chrome/common/plugin_messages.h"
+#include "chrome/common/win_util.h"
 #include "sandbox/src/sandbox.h"
+#include "webkit/glue/plugins/plugin_constants_win.h"
+#endif
 
 static const char kDefaultPluginFinderURL[] =
-    "http://dl.google.com/chrome/plugins/plugins.xml";
+    "http://dl.google.com/chrome/plugins/plugins2.xml";
 
-// The NotificationTask is used to notify about plugin process connection/
-// disconnection. It is needed because the notifications in the
-// NotificationService must happen in the main thread.
-class PluginNotificationTask : public Task {
- public:
-  PluginNotificationTask(NotificationType notification_type,
-                         std::wstring dll_path,
-                         HANDLE process);
-
-  virtual void Run();
-
- private:
-  NotificationType notification_type_;
-  std::wstring dll_path_;
-  HANDLE process_;
-};
-
-PluginNotificationTask::PluginNotificationTask(
-    NotificationType notification_type,
-    std::wstring dll_path,
-    HANDLE process)
-    : notification_type_(notification_type),
-      process_(process),
-      dll_path_(dll_path) {
-}
-
-void PluginNotificationTask::Run() {
-  // Verify that the notification type is one that makes sense.
-  switch (notification_type_) {
-    case NOTIFY_PLUGIN_PROCESS_HOST_CONNECTED:
-    case NOTIFY_PLUGIN_PROCESS_HOST_DISCONNECTED:
-    case NOTIFY_PLUGIN_PROCESS_CRASHED:
-    case NOTIFY_PLUGIN_INSTANCE_CREATED:
-      break;
-
-    default:
-      NOTREACHED();
-      return;
-  }
-
-  PluginProcessInfo ppi(dll_path_, process_);
-  // As mentioned in the notification_types.h, the PluginProcessInfo details
-  // are only valid for the time of the notification.
-  NotificationService::current()->
-      Notify(notification_type_, NotificationService::AllSources(),
-             Details<PluginProcessInfo>(&ppi));
-}
 
 // The PluginDownloadUrlHelper is used to handle one download URL request
 // from the plugin. Each download request is handled by a new instance
@@ -96,7 +61,7 @@ class PluginDownloadUrlHelper : public URLRequest::Delegate {
   static const int kDownloadFileBufferSize = 32768;
  public:
   PluginDownloadUrlHelper(const std::string& download_url,
-                          int source_pid, HWND caller_window);
+                          int source_pid, gfx::NativeWindow caller_window);
   ~PluginDownloadUrlHelper();
 
   void InitiateDownload();
@@ -120,14 +85,15 @@ class PluginDownloadUrlHelper : public URLRequest::Delegate {
   // The download file request initiated by the plugin.
   URLRequest* download_file_request_;
   // Handle to the downloaded file.
-  HANDLE download_file_;
+  scoped_ptr<net::FileStream> download_file_;
   // The full path of the downloaded file.
-  std::wstring download_file_path_;
+  FilePath download_file_path_;
   // The buffer passed off to URLRequest::Read.
-  char download_file_buffer_[kDownloadFileBufferSize];
+  scoped_refptr<net::IOBuffer> download_file_buffer_;
+  // TODO(port): this comment doesn't describe the situation on Posix.
   // The window handle for sending the WM_COPYDATA notification,
   // indicating that the download completed.
-  HWND download_file_caller_window_;
+  gfx::NativeWindow download_file_caller_window_;
 
   std::string download_url_;
   int download_source_pid_;
@@ -137,25 +103,25 @@ class PluginDownloadUrlHelper : public URLRequest::Delegate {
 
 PluginDownloadUrlHelper::PluginDownloadUrlHelper(
     const std::string& download_url,
-    int source_pid, HWND caller_window)
-    : download_url_(download_url),
+    int source_pid, gfx::NativeWindow caller_window)
+    : download_file_request_(NULL),
+      download_file_buffer_(new net::IOBuffer(kDownloadFileBufferSize)),
       download_file_caller_window_(caller_window),
-      download_source_pid_(source_pid),
-      download_file_request_(NULL),
-      download_file_(INVALID_HANDLE_VALUE) {
+      download_url_(download_url),
+      download_source_pid_(source_pid) {
+#if defined(OS_WIN)
   DCHECK(::IsWindow(caller_window));
-  memset(download_file_buffer_, 0, arraysize(download_file_buffer_));
+#else
+  // TODO(port): Some window verification for mac and linux.
+#endif
+  memset(download_file_buffer_->data(), 0, kDownloadFileBufferSize);
+  download_file_.reset(new net::FileStream());
 }
 
 PluginDownloadUrlHelper::~PluginDownloadUrlHelper() {
   if (download_file_request_) {
     delete download_file_request_;
     download_file_request_ = NULL;
-  }
-
-  if (download_file_ != INVALID_HANDLE_VALUE) {
-    ::CloseHandle(INVALID_HANDLE_VALUE);
-    download_file_ = NULL;
   }
 }
 
@@ -177,26 +143,31 @@ void PluginDownloadUrlHelper::OnAuthRequired(
   DownloadCompletedHelper(false);
 }
 
-void PluginDownloadUrlHelper::OnSSLCertificateError(URLRequest* request,
-                                                    int cert_error,
-                                                    net::X509Certificate* cert) {
+void PluginDownloadUrlHelper::OnSSLCertificateError(
+    URLRequest* request,
+    int cert_error,
+    net::X509Certificate* cert) {
   URLRequest::Delegate::OnSSLCertificateError(request, cert_error, cert);
   DownloadCompletedHelper(false);
 }
 
 void PluginDownloadUrlHelper::OnResponseStarted(URLRequest* request) {
-  if (download_file_ == INVALID_HANDLE_VALUE) {
+  if (!download_file_->IsOpen()) {
     file_util::GetTempDir(&download_file_path_);
-    download_file_path_ += L"\\";
 
     GURL request_url = request->url();
-    download_file_path_ += UTF8ToWide(request_url.ExtractFileName());
+#if defined(OS_WIN)
+    download_file_path_ = download_file_path_.Append(
+        UTF8ToWide(request_url.ExtractFileName()));
+#else
+    download_file_path_ = download_file_path_.Append(
+        request_url.ExtractFileName());
+#endif
 
-    download_file_ = CreateFile(download_file_path_.c_str(),
-                                GENERIC_READ | GENERIC_WRITE,
-                                0, NULL, CREATE_ALWAYS,
-                                FILE_ATTRIBUTE_NORMAL, NULL);
-    if (download_file_ == INVALID_HANDLE_VALUE) {
+    download_file_->Open(download_file_path_,
+                         base::PLATFORM_FILE_CREATE_ALWAYS |
+                         base::PLATFORM_FILE_READ | base::PLATFORM_FILE_WRITE);
+    if (!download_file_->IsOpen()) {
       NOTREACHED();
       OnDownloadCompleted(request);
       return;
@@ -207,7 +178,7 @@ void PluginDownloadUrlHelper::OnResponseStarted(URLRequest* request) {
   } else {
     // Initiate a read.
     int bytes_read = 0;
-    if (!request->Read(download_file_buffer_, arraysize(download_file_buffer_),
+    if (!request->Read(download_file_buffer_, kDownloadFileBufferSize,
                        &bytes_read)) {
       // If the error is not an IO pending, then we're done
       // reading.
@@ -224,7 +195,7 @@ void PluginDownloadUrlHelper::OnResponseStarted(URLRequest* request) {
 
 void PluginDownloadUrlHelper::OnReadCompleted(URLRequest* request,
                                               int bytes_read) {
-  DCHECK(download_file_ != INVALID_HANDLE_VALUE);
+  DCHECK(download_file_->IsOpen());
 
   if (bytes_read == 0) {
     OnDownloadCompleted(request);
@@ -234,19 +205,18 @@ void PluginDownloadUrlHelper::OnReadCompleted(URLRequest* request,
   int request_bytes_read = bytes_read;
 
   while (request->status().is_success()) {
-    unsigned long bytes_written = 0;
-    BOOL write_result = WriteFile(download_file_, download_file_buffer_,
-                                  request_bytes_read, &bytes_written, NULL);
-    DCHECK(!write_result || (bytes_written == request_bytes_read));
+    int bytes_written = download_file_->Write(download_file_buffer_->data(),
+        request_bytes_read, NULL);
+    DCHECK((bytes_written < 0) || (bytes_written == request_bytes_read));
 
-    if (!write_result || (bytes_written != request_bytes_read)) {
+    if ((bytes_written < 0) || (bytes_written != request_bytes_read)) {
       DownloadCompletedHelper(false);
       break;
     }
 
     // Start reading
     request_bytes_read = 0;
-    if (!request->Read(download_file_buffer_, arraysize(download_file_buffer_),
+    if (!request->Read(download_file_buffer_, kDownloadFileBufferSize,
                        &request_bytes_read)) {
       if (!request->status().is_io_pending()) {
         // If the error is not an IO pending, then we're done
@@ -265,7 +235,7 @@ void PluginDownloadUrlHelper::OnDownloadCompleted(URLRequest* request) {
   bool success = true;
   if (!request->status().is_success()) {
     success = false;
-  } else if (download_file_ == INVALID_HANDLE_VALUE) {
+  } else if (!download_file_->IsOpen()) {
     success = false;
   }
 
@@ -273,68 +243,173 @@ void PluginDownloadUrlHelper::OnDownloadCompleted(URLRequest* request) {
 }
 
 void PluginDownloadUrlHelper::DownloadCompletedHelper(bool success) {
-  if (download_file_ != INVALID_HANDLE_VALUE) {
-    ::CloseHandle(download_file_);
-    download_file_ = INVALID_HANDLE_VALUE;
+  if (download_file_->IsOpen()) {
+      download_file_.reset();
   }
 
+#if defined(OS_WIN)
+  std::wstring path = download_file_path_.value();
   COPYDATASTRUCT download_file_data = {0};
   download_file_data.cbData =
-      static_cast<unsigned long>((download_file_path_.length() + 1) *
-                                  sizeof(wchar_t));
-  download_file_data.lpData =
-      const_cast<wchar_t *>(download_file_path_.c_str());
+      static_cast<unsigned long>((path.length() + 1) * sizeof(wchar_t));
+  download_file_data.lpData = const_cast<wchar_t *>(path.c_str());
   download_file_data.dwData = success;
 
   if (::IsWindow(download_file_caller_window_)) {
     ::SendMessage(download_file_caller_window_, WM_COPYDATA, NULL,
                   reinterpret_cast<LPARAM>(&download_file_data));
   }
+#else
+  // TODO(port): Send the file data to the caller.
+  NOTIMPLEMENTED();
+#endif
+
   // Don't access any members after this.
   delete this;
 }
 
-PluginProcessHost::PluginProcessHost(PluginService* plugin_service)
-    : process_(NULL),
-      opening_channel_(false),
-      resource_dispatcher_host_(plugin_service->resource_dispatcher_host()),
-      plugin_service_(plugin_service) {
-  DCHECK(resource_dispatcher_host_);
+#if defined(OS_WIN)
+// Sends the reply to the create window message on the IO thread.
+class SendReplyTask : public Task {
+ public:
+  SendReplyTask(FilePath plugin_path, HWND window, IPC::Message* reply_msg)
+      : plugin_path_(plugin_path),
+        reply_msg_(reply_msg),
+        window_(window){ }
+
+  virtual void Run() {
+    PluginProcessHost* plugin =
+        PluginService::GetInstance()->FindPluginProcess(plugin_path_);
+    if (!plugin)
+      return;
+
+    plugin->AddWindow(window_);
+    plugin->Send(reply_msg_);
+  }
+
+ private:
+  FilePath plugin_path_;
+  IPC::Message* reply_msg_;
+  HWND window_;
+};
+
+// Creates a child window of the given HWND on the UI thread.
+class CreateWindowTask : public Task {
+ public:
+  CreateWindowTask(
+      FilePath plugin_path, HWND parent, IPC::Message* reply_msg)
+      : plugin_path_(plugin_path), parent_(parent), reply_msg_(reply_msg) { }
+
+  virtual void Run() {
+    static ATOM window_class = 0;
+    if (!window_class) {
+      WNDCLASSEX wcex;
+      wcex.cbSize         = sizeof(WNDCLASSEX);
+      wcex.style          = CS_DBLCLKS;
+      wcex.lpfnWndProc    = DefWindowProc;
+      wcex.cbClsExtra     = 0;
+      wcex.cbWndExtra     = 0;
+      wcex.hInstance      = GetModuleHandle(NULL);
+      wcex.hIcon          = 0;
+      wcex.hCursor        = 0;
+      wcex.hbrBackground  = reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);
+      wcex.lpszMenuName   = 0;
+      wcex.lpszClassName  = kWrapperNativeWindowClassName;
+      wcex.hIconSm        = 0;
+      window_class = RegisterClassEx(&wcex);
+    }
+
+    HWND window = CreateWindowEx(
+        WS_EX_LEFT | WS_EX_LTRREADING | WS_EX_RIGHTSCROLLBAR,
+        MAKEINTATOM(window_class), 0,
+        WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+        0, 0, 0, 0, parent_, 0, GetModuleHandle(NULL), 0);
+    TRACK_HWND_CREATION(window);
+
+    PluginProcessHostMsg_CreateWindow::WriteReplyParams(
+        reply_msg_, window);
+
+    g_browser_process->io_thread()->message_loop()->PostTask(
+        FROM_HERE, new SendReplyTask(plugin_path_, window, reply_msg_));
+  }
+
+ private:
+  FilePath plugin_path_;
+  HWND parent_;
+  IPC::Message* reply_msg_;
+};
+
+void PluginProcessHost::OnCreateWindow(HWND parent,
+                                       IPC::Message* reply_msg) {
+  // Need to create this window on the UI thread.
+  PluginService::GetInstance()->main_message_loop()->PostTask(
+      FROM_HERE, new CreateWindowTask(info_.path, parent, reply_msg));
+}
+
+void PluginProcessHost::OnDestroyWindow(HWND window) {
+  std::set<HWND>::iterator window_index =
+      plugin_parent_windows_set_.find(window);
+  if (window_index != plugin_parent_windows_set_.end()) {
+    plugin_parent_windows_set_.erase(window_index);
+  }
+
+  PostMessage(window, WM_CLOSE, 0, 0);
+}
+
+void PluginProcessHost::AddWindow(HWND window) {
+  plugin_parent_windows_set_.insert(window);
+}
+
+#endif  // defined(OS_WIN)
+
+PluginProcessHost::PluginProcessHost()
+    : ChildProcessHost(
+          PLUGIN_PROCESS,
+          PluginService::GetInstance()->resource_dispatcher_host()),
+      ALLOW_THIS_IN_INITIALIZER_LIST(resolve_proxy_msg_helper_(this, NULL)) {
 }
 
 PluginProcessHost::~PluginProcessHost() {
-  if (process_.handle()) {
-    watcher_.StopWatching();
-    ProcessWatcher::EnsureProcessTerminated(process_.handle());
+  // Cancel all requests for plugin process.
+  PluginService::GetInstance()->resource_dispatcher_host()->
+      CancelRequestsForProcess(GetProcessId());
+
+#if defined(OS_WIN)
+  // We erase HWNDs from the plugin_parent_windows_set_ when we receive a
+  // notification that the window is being destroyed. If we don't receive this
+  // notification and the PluginProcessHost instance is being destroyed, it
+  // means that the plugin process crashed. We paint a sad face in this case in
+  // the renderer process. To ensure that the sad face shows up, and we don't
+  // leak HWNDs, we should destroy existing plugin parent windows.
+  std::set<HWND>::iterator window_index;
+  for (window_index = plugin_parent_windows_set_.begin();
+       window_index != plugin_parent_windows_set_.end();
+       window_index++) {
+    PostMessage(*window_index, WM_CLOSE, 0, 0);
   }
+#endif
 }
 
-bool PluginProcessHost::Init(const std::wstring& dll,
+bool PluginProcessHost::Init(const WebPluginInfo& info,
                              const std::string& activex_clsid,
                              const std::wstring& locale) {
-  DCHECK(channel_.get() == NULL);
+  info_ = info;
+  set_name(info_.name);
 
-  dll_path_ = dll;
-  channel_id_ = GenerateRandomChannelID(this);
-  channel_.reset(new IPC::Channel(channel_id_,
-                                  IPC::Channel::MODE_SERVER,
-                                  this));
-  if (!channel_->Connect())
+  if (!CreateChannel())
     return false;
 
-  // build command line for plugin, we have to quote the dll path to deal with
-  // spaces.
-  std::wstring plugin_path;
-  if (!PathService::Get(base::FILE_EXE, &plugin_path))
+  // build command line for plugin, we have to quote the plugin's path to deal
+  // with spaces.
+  std::wstring exe_path;
+  if (!PathService::Get(base::FILE_EXE, &exe_path))
     return false;
 
-  std::wstring cmd_line(L"\"");
-  cmd_line += plugin_path;
-  cmd_line += L"\"";
+  CommandLine cmd_line(exe_path);
   if (logging::DialogsAreSuppressed())
-    CommandLine::AppendSwitch(&cmd_line, switches::kNoErrorDialogs);
+    cmd_line.AppendSwitch(switches::kNoErrorDialogs);
 
-  CommandLine browser_command_line;
+  const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
 
   // propagate the following switches to the plugin command line (along with
   // any associated values) if present in the browser command line
@@ -343,11 +418,13 @@ bool PluginProcessHost::Init(const std::wstring& dll,
     switches::kNoSandbox,
     switches::kSafePlugins,
     switches::kTestSandbox,
+    switches::kUserAgent,
     switches::kDisableBreakpad,
     switches::kFullMemoryCrashReport,
     switches::kEnableLogging,
     switches::kDisableLogging,
     switches::kLoggingLevel,
+    switches::kLogPluginMessages,
     switches::kUserDataDir,
     switches::kAllowAllActiveX,
     switches::kEnableDCHECK,
@@ -356,10 +433,10 @@ bool PluginProcessHost::Init(const std::wstring& dll,
     switches::kUseLowFragHeapCrt,
   };
 
-  for (int i = 0; i < arraysize(switch_names); ++i) {
+  for (size_t i = 0; i < arraysize(switch_names); ++i) {
     if (browser_command_line.HasSwitch(switch_names[i])) {
-      CommandLine::AppendSwitchWithValue(
-          &cmd_line, switch_names[i],
+      cmd_line.AppendSwitchWithValue(
+          switch_names[i],
           browser_command_line.GetSwitchValue(switch_names[i]));
     }
   }
@@ -367,137 +444,61 @@ bool PluginProcessHost::Init(const std::wstring& dll,
   // If specified, prepend a launcher program to the command line.
   std::wstring plugin_launcher =
       browser_command_line.GetSwitchValue(switches::kPluginLauncher);
-  if (!plugin_launcher.empty())
-    cmd_line = plugin_launcher + L" " + cmd_line;
+  if (!plugin_launcher.empty()) {
+    CommandLine new_cmd_line = CommandLine(plugin_launcher);
+    new_cmd_line.AppendArguments(cmd_line, true);
+    cmd_line = new_cmd_line;
+  }
 
   if (!locale.empty()) {
     // Pass on the locale so the null plugin will use the right language in the
     // prompt to install the desired plugin.
-    CommandLine::AppendSwitchWithValue(&cmd_line, switches::kLang, locale);
+    cmd_line.AppendSwitchWithValue(switches::kLang, locale);
   }
 
-  CommandLine::AppendSwitchWithValue(&cmd_line,
-                                     switches::kProcessType,
-                                     switches::kPluginProcess);
+  // Gears requires the data dir to be available on startup.
+  std::wstring data_dir =
+    PluginService::GetInstance()->GetChromePluginDataDir().ToWStringHack();
+  DCHECK(!data_dir.empty());
+  cmd_line.AppendSwitchWithValue(switches::kPluginDataDir, data_dir);
 
-  CommandLine::AppendSwitchWithValue(&cmd_line,
-                                     switches::kProcessChannelID,
-                                     channel_id_);
+  cmd_line.AppendSwitchWithValue(switches::kProcessType,
+                                 switches::kPluginProcess);
 
-  CommandLine::AppendSwitchWithValue(&cmd_line,
-                                     switches::kPluginPath,
-                                     dll);
+  cmd_line.AppendSwitchWithValue(switches::kProcessChannelID, channel_id());
 
-  bool in_sandbox = !browser_command_line.HasSwitch(switches::kNoSandbox) &&
-                    browser_command_line.HasSwitch(switches::kSafePlugins);
+  cmd_line.AppendSwitchWithValue(switches::kPluginPath,
+                                 info.path.ToWStringHack());
 
-  bool child_needs_help =
-      DebugFlags::ProcessDebugFlags(&cmd_line, DebugFlags::PLUGIN, in_sandbox);
+  base::ProcessHandle process = 0;
+#if defined(OS_WIN)
+  process = sandbox::StartProcess(&cmd_line);
+#else
+  // spawn child process
+  base::LaunchApp(cmd_line, false, false, &process);
+#endif
 
-  if (in_sandbox) {
-    // spawn the child process in the sandbox
-    sandbox::BrokerServices* broker_service =
-        g_browser_process->broker_services();
+  if (!process)
+    return false;
+  SetHandle(process);
 
-    sandbox::ResultCode result;
-    PROCESS_INFORMATION target = {0};
-    sandbox::TargetPolicy* policy = broker_service->CreatePolicy();
-
-    std::wstring trusted_plugins =
-        browser_command_line.GetSwitchValue(switches::kTrustedPlugins);
-    if (!AddPolicyForPlugin(dll, activex_clsid, trusted_plugins, policy)) {
-      NOTREACHED();
-      return false;
+  FilePath gears_path;
+  if (PathService::Get(chrome::FILE_GEARS_PLUGIN, &gears_path)) {
+    FilePath::StringType gears_path_lc = StringToLowerASCII(gears_path.value());
+    FilePath::StringType plugin_path_lc =
+        StringToLowerASCII(info.path.value());
+    if (plugin_path_lc == gears_path_lc) {
+      // Give Gears plugins "background" priority.  See
+      // http://b/issue?id=1280317.
+      SetProcessBackgrounded();
     }
-
-    if (!AddGenericPolicy(policy)) {
-      NOTREACHED();
-      return false;
-    }
-
-    result = broker_service->SpawnTarget(plugin_path.c_str(),
-                                         cmd_line.c_str(), policy, &target);
-    policy->Release();
-    if (sandbox::SBOX_ALL_OK != result)
-      return false;
-
-    ResumeThread(target.hThread);
-    CloseHandle(target.hThread);
-    process_.set_handle(target.hProcess);
-
-    // Help the process a little. It can't start the debugger by itself if
-    // the process is in a sandbox.
-    if (child_needs_help)
-      DebugUtil::SpawnDebuggerOnProcess(target.dwProcessId);
-  } else {
-    // spawn child process
-    HANDLE process;
-    if (!process_util::LaunchApp(cmd_line, false, false, &process))
-      return false;
-    process_.set_handle(process);
   }
-
-  watcher_.StartWatching(process_.handle(), this);
-
-  // Give all plugins "background" priority.  See http://b/issue?id=1280317.
-  process_.SetProcessBackgrounded(true);
-
-  opening_channel_ = true;
 
   return true;
 }
 
-bool PluginProcessHost::Send(IPC::Message* msg) {
-  if (!channel_.get()) {
-    delete msg;
-    return false;
-  }
-  return channel_->Send(msg);
-}
-
-// indicates the plugin process has exited
-void PluginProcessHost::OnObjectSignaled(HANDLE object) {
-  DCHECK(process_.handle());
-  DCHECK_EQ(object, process_.handle());
-
-  bool did_crash = process_util::DidProcessCrash(object);
-
-  if (did_crash) {
-    // Report that this plugin crashed.
-    plugin_service_->main_message_loop()->PostTask(FROM_HERE,
-        new PluginNotificationTask(NOTIFY_PLUGIN_PROCESS_CRASHED,
-                                   dll_path(), object));
-  }
-  // Notify in the main loop of the disconnection.
-  plugin_service_->main_message_loop()->PostTask(FROM_HERE,
-      new PluginNotificationTask(NOTIFY_PLUGIN_PROCESS_HOST_DISCONNECTED,
-                                 dll_path(), object));
-
-  // Cancel all requests for plugin processes.
-  // TODO(mpcomplete): use a real process ID when http://b/issue?id=1210062 is
-  // fixed.
-  resource_dispatcher_host_->CancelRequestsForProcess(-1);
-
-  // This next line will delete this. It should be kept at the end of the
-  // method.
-  plugin_service_->OnPluginProcessExited(this);
-}
-
-
 void PluginProcessHost::OnMessageReceived(const IPC::Message& msg) {
-#ifdef IPC_MESSAGE_LOG_ENABLED
-  IPC::Logging* logger = IPC::Logging::current();
-  if (msg.type() == IPC_LOGGING_ID) {
-    logger->OnReceivedLoggingMessage(msg);
-    return;
-  }
-#endif
-
-#ifdef IPC_MESSAGE_LOG_ENABLED
-  if (logger->Enabled())
-    logger->OnPreDispatchMessage(msg);
-#endif
-
+#if defined(OS_WIN)
   IPC_BEGIN_MESSAGE_MAP(PluginProcessHost, msg)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_ChannelCreated, OnChannelCreated)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_DownloadUrl, OnDownloadUrl)
@@ -506,26 +507,21 @@ void PluginProcessHost::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_ShutdownRequest,
                         OnPluginShutdownRequest)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_PluginMessage, OnPluginMessage)
-    IPC_MESSAGE_HANDLER(PluginProcessHostMsg_GetPluginDataDir,
-                        OnGetPluginDataDir)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_RequestResource, OnRequestResource)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_CancelRequest, OnCancelRequest)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_DataReceived_ACK, OnDataReceivedACK)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_UploadProgress_ACK, OnUploadProgressACK)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_SyncLoad, OnSyncLoad)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_GetCookies, OnGetCookies)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(PluginProcessHostMsg_ResolveProxy,
+                                    OnResolveProxy)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(PluginProcessHostMsg_CreateWindow,
+                                    OnCreateWindow)
+    IPC_MESSAGE_HANDLER(PluginProcessHostMsg_DestroyWindow, OnDestroyWindow)
     IPC_MESSAGE_UNHANDLED_ERROR()
   IPC_END_MESSAGE_MAP()
-
-#ifdef IPC_MESSAGE_LOG_ENABLED
-  if (logger->Enabled())
-    logger->OnPostDispatchMessage(msg, channel_id_);
+#else
+  // TODO(port): Port plugin_messages_internal.h.
+  NOTIMPLEMENTED();
 #endif
 }
 
 void PluginProcessHost::OnChannelConnected(int32 peer_pid) {
-  opening_channel_ = false;
-
   for (size_t i = 0; i < pending_requests_.size(); ++i) {
     RequestPluginChannel(pending_requests_[i].renderer_message_filter_.get(),
                          pending_requests_[i].mime_type,
@@ -533,19 +529,13 @@ void PluginProcessHost::OnChannelConnected(int32 peer_pid) {
   }
 
   pending_requests_.clear();
-
-  // Notify in the main loop of the connection.
-  plugin_service_->main_message_loop()->PostTask(FROM_HERE,
-      new PluginNotificationTask(NOTIFY_PLUGIN_PROCESS_HOST_CONNECTED,
-                                 dll_path(), process()));
 }
 
 void PluginProcessHost::OnChannelError() {
-  opening_channel_ = false;
   for (size_t i = 0; i < pending_requests_.size(); ++i) {
     ReplyToRenderer(pending_requests_[i].renderer_message_filter_.get(),
                     std::wstring(),
-                    std::wstring(),
+                    FilePath(),
                     pending_requests_[i].reply_msg);
   }
 
@@ -556,89 +546,15 @@ void PluginProcessHost::OpenChannelToPlugin(
     ResourceMessageFilter* renderer_message_filter,
     const std::string& mime_type,
     IPC::Message* reply_msg) {
-  // Notify in the main loop of the instantiation.
-  plugin_service_->main_message_loop()->PostTask(FROM_HERE,
-      new PluginNotificationTask(NOTIFY_PLUGIN_INSTANCE_CREATED,
-                                 dll_path(), process()));
-
-  if (opening_channel_) {
+  InstanceCreated();
+  if (opening_channel()) {
     pending_requests_.push_back(
         ChannelRequest(renderer_message_filter, mime_type, reply_msg));
     return;
   }
 
-  if (!channel_.get()) {
-    // There was an error opening the channel, tell the renderer.
-    ReplyToRenderer(renderer_message_filter, std::wstring(), std::wstring(),
-                    reply_msg);
-    return;
-  }
-
   // We already have an open channel, send a request right away to plugin.
   RequestPluginChannel(renderer_message_filter, mime_type, reply_msg);
-}
-
-void PluginProcessHost::OnRequestResource(
-    const IPC::Message& message,
-    int request_id,
-    const ViewHostMsg_Resource_Request& request) {
-  // TODO(mpcomplete): we need a "process_id" mostly for a unique identifier.
-  // We should decouple the idea of a render_process_host_id from the unique ID
-  // in ResourceDispatcherHost.
-  int render_process_host_id = -1;
-  URLRequestContext* context = CPBrowsingContextManager::Instance()->
-        ToURLRequestContext(request.request_context);
-  // TODO(mpcomplete): remove fallback case when Gears support is prevalent.
-  if (!context)
-    context = Profile::GetDefaultRequestContext();
-
-  resource_dispatcher_host_->BeginRequest(this,
-                                          process_.handle(),
-                                          render_process_host_id,
-                                          MSG_ROUTING_CONTROL,
-                                          request_id,
-                                          request,
-                                          context,
-                                          NULL);
-}
-
-void PluginProcessHost::OnCancelRequest(int request_id) {
-  int render_process_host_id = -1;
-  resource_dispatcher_host_->CancelRequest(render_process_host_id,
-                                           request_id, true);
-}
-
-void PluginProcessHost::OnDataReceivedACK(int request_id) {
-  int render_process_host_id = -1;
-  resource_dispatcher_host_->OnDataReceivedACK(render_process_host_id,
-                                               request_id);
-}
-
-void PluginProcessHost::OnUploadProgressACK(int request_id) {
-  int render_process_host_id = -1;
-  resource_dispatcher_host_->OnUploadProgressACK(render_process_host_id,
-                                                 request_id);
-}
-
-void PluginProcessHost::OnSyncLoad(
-    int request_id,
-    const ViewHostMsg_Resource_Request& request,
-    IPC::Message* sync_result) {
-  int render_process_host_id = -1;
-  URLRequestContext* context = CPBrowsingContextManager::Instance()->
-        ToURLRequestContext(request.request_context);
-  // TODO(mpcomplete): remove fallback case when Gears support is prevalent.
-  if (!context)
-    context = Profile::GetDefaultRequestContext();
-
-  resource_dispatcher_host_->BeginRequest(this,
-                                          process_.handle(),
-                                          render_process_host_id,
-                                          MSG_ROUTING_CONTROL,
-                                          request_id,
-                                          request,
-                                          context,
-                                          sync_result);
 }
 
 void PluginProcessHost::OnGetCookies(uint32 request_context,
@@ -655,66 +571,74 @@ void PluginProcessHost::OnGetCookies(uint32 request_context,
   *cookies = context->cookie_store()->GetCookies(url);
 }
 
+void PluginProcessHost::OnResolveProxy(const GURL& url,
+                                       IPC::Message* reply_msg) {
+  resolve_proxy_msg_helper_.Start(url, reply_msg);
+}
+
+void PluginProcessHost::OnResolveProxyCompleted(IPC::Message* reply_msg,
+                                                int result,
+                                                const std::string& proxy_list) {
+#if defined(OS_WIN)
+  PluginProcessHostMsg_ResolveProxy::WriteReplyParams(
+      reply_msg, result, proxy_list);
+  Send(reply_msg);
+#else
+  // TODO(port): Port plugin_messages_internal.h.
+  NOTIMPLEMENTED();
+#endif
+}
+
 void PluginProcessHost::ReplyToRenderer(
     ResourceMessageFilter* renderer_message_filter,
-    const std::wstring& channel, const std::wstring& plugin_path,
+    const std::wstring& channel, const FilePath& plugin_path,
     IPC::Message* reply_msg) {
   ViewHostMsg_OpenChannelToPlugin::WriteReplyParams(reply_msg, channel,
                                                     plugin_path);
   renderer_message_filter->Send(reply_msg);
 }
 
+URLRequestContext* PluginProcessHost::GetRequestContext(
+    uint32 request_id,
+    const ViewHostMsg_Resource_Request& request_data) {
+  return CPBrowsingContextManager::Instance()->ToURLRequestContext(request_id);
+}
+
 void PluginProcessHost::RequestPluginChannel(
     ResourceMessageFilter* renderer_message_filter,
     const std::string& mime_type, IPC::Message* reply_msg) {
+#if defined(OS_WIN)
   // We can't send any sync messages from the browser because it might lead to
   // a hang.  However this async messages must be answered right away by the
   // plugin process (i.e. unblocks a Send() call like a sync message) otherwise
   // a deadlock can occur if the plugin creation request from the renderer is
   // a result of a sync message by the plugin process.
-
-  // The plugin process expects to receive a handle to the renderer requesting
-  // the channel. The handle has to be valid in the plugin process.
-  HANDLE renderer_handle = NULL;
-  BOOL result = DuplicateHandle(GetCurrentProcess(),
-                                renderer_message_filter->renderer_handle(),
-                                process(), &renderer_handle, 0, FALSE,
-                                DUPLICATE_SAME_ACCESS);
-  DCHECK(result);
-
-  PluginProcessMsg_CreateChannel* msg =
-      new PluginProcessMsg_CreateChannel(
-          renderer_message_filter->render_process_host_id(), renderer_handle);
+  PluginProcessMsg_CreateChannel* msg = new PluginProcessMsg_CreateChannel();
   msg->set_unblock(true);
   if (Send(msg)) {
-    sent_requests_.push_back(ChannelRequest(renderer_message_filter, mime_type,
-                             reply_msg));
+    sent_requests_.push(ChannelRequest(
+        renderer_message_filter, mime_type, reply_msg));
   } else {
-    ReplyToRenderer(renderer_message_filter, std::wstring(), std::wstring(),
+    ReplyToRenderer(renderer_message_filter, std::wstring(), FilePath(),
                     reply_msg);
   }
+#else
+  // TODO(port): Figure out what the plugin process is expecting in this case.
+  NOTIMPLEMENTED();
+#endif
 }
 
-void PluginProcessHost::OnChannelCreated(int process_id,
-                                         const std::wstring& channel_name) {
-  for (size_t i = 0; i < sent_requests_.size(); ++i) {
-    if (sent_requests_[i].renderer_message_filter_->render_process_host_id()
-        == process_id) {
-      ReplyToRenderer(sent_requests_[i].renderer_message_filter_.get(),
-                      channel_name,
-                      dll_path(),
-                      sent_requests_[i].reply_msg);
-
-      sent_requests_.erase(sent_requests_.begin() + i);
-      return;
-    }
-  }
-
-  NOTREACHED();
+void PluginProcessHost::OnChannelCreated(const std::wstring& channel_name) {
+  ReplyToRenderer(sent_requests_.front().renderer_message_filter_.get(),
+                  channel_name,
+                  info_.path,
+                  sent_requests_.front().reply_msg);
+  sent_requests_.pop();
 }
 
 void PluginProcessHost::OnDownloadUrl(const std::string& url,
-                                      int source_pid, HWND caller_window) {
+                                      int source_pid,
+                                      gfx::NativeWindow caller_window) {
   PluginDownloadUrlHelper* download_url_helper =
       new PluginDownloadUrlHelper(url, source_pid, caller_window);
   download_url_helper->InitiateDownload();
@@ -732,17 +656,18 @@ void PluginProcessHost::OnGetPluginFinderUrl(std::string* plugin_finder_url) {
 }
 
 void PluginProcessHost::OnPluginShutdownRequest() {
+#if defined(OS_WIN)
   DCHECK(MessageLoop::current() ==
          ChromeThread::GetMessageLoop(ChromeThread::IO));
 
   // If we have pending channel open requests from the renderers, then
   // refuse the shutdown request from the plugin process.
   bool ok_to_shutdown = sent_requests_.empty();
-
-  if (ok_to_shutdown)
-    plugin_service_->OnPluginProcessIsShuttingDown(this);
-
   Send(new PluginProcessMsg_ShutdownResponse(ok_to_shutdown));
+#else
+  // TODO(port): Port plugin_messages_internal.h.
+  NOTIMPLEMENTED();
+#endif
 }
 
 void PluginProcessHost::OnPluginMessage(
@@ -750,7 +675,7 @@ void PluginProcessHost::OnPluginMessage(
   DCHECK(MessageLoop::current() ==
          ChromeThread::GetMessageLoop(ChromeThread::IO));
 
-  ChromePluginLib *chrome_plugin = ChromePluginLib::Find(dll_path_);
+  ChromePluginLib *chrome_plugin = ChromePluginLib::Find(info_.path);
   if (chrome_plugin) {
     void *data_ptr = const_cast<void*>(reinterpret_cast<const void*>(&data[0]));
     uint32 data_len = static_cast<uint32>(data.size());
@@ -758,12 +683,11 @@ void PluginProcessHost::OnPluginMessage(
   }
 }
 
-void PluginProcessHost::OnGetPluginDataDir(std::wstring* retval) {
-  *retval = plugin_service_->GetChromePluginDataDir();
-}
-
 void PluginProcessHost::Shutdown() {
-
+#if defined(OS_WIN)
   Send(new PluginProcessMsg_BrowserShutdown);
+#else
+  // TODO(port): Port plugin_messages_internal.h.
+  NOTIMPLEMENTED();
+#endif
 }
-

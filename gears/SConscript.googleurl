@@ -8,38 +8,41 @@ env = env.Clone()
 
 env.Replace(
     GURL_DIR = '$THIRD_PARTY_DIR/googleurl',
+    ICU38_DIR = '$THIRD_PARTY_DIR/icu38',
     CPPPATH = [
         '$GURL_DIR',
         '$GURL_DIR/..',
-#        '#/..',
         '$ICU38_DIR/public/common',
         '$ICU38_DIR/public/i18n',
+        '$VC80_CPPPATH',
     ],
 )
 
 env.Append(
     CPPDEFINES = [
-        'U_STATIC_IMPLEMENTATION',
+#        'U_STATIC_IMPLEMENTATION',
     ],
 )
 
-if env['PLATFORM'] == 'win32':
+if env['OS'] == 'win32':
   env.Append(
       CCFLAGS = [
 #          '/TP',
 #          '/J',
       ],
   )
+elif env['OS'] == 'linux':
+  env.Append(CCFLAGS = '-Wno-char-subscripts') 
 
 input_files = [
     '$GURL_DIR/src/gurl.cc',
     '$GURL_DIR/src/url_canon_etc.cc',
     '$GURL_DIR/src/url_canon_fileurl.cc',
     '$GURL_DIR/src/url_canon_host.cc',
-    '$GURL_DIR/src/url_canon_icu.cc',
+#    '$GURL_DIR/src/url_canon_icu.cc',
     '$GURL_DIR/src/url_canon_internal.cc',
     '$GURL_DIR/src/url_canon_ip.cc',
-#    '$GURL_DIR/src/url_canon_mailtourl.cc',
+    '$GURL_DIR/src/url_canon_mailtourl.cc',
     '$GURL_DIR/src/url_canon_path.cc',
     '$GURL_DIR/src/url_canon_pathurl.cc',
     '$GURL_DIR/src/url_canon_query.cc',
@@ -50,7 +53,12 @@ input_files = [
     '$GURL_DIR/src/url_util.cc',
 ]
 
-env.ChromeStaticLibrary('googleurl-gears', input_files)
+# ICU files needed for Gears.
+input_files += [
+    '$ICU38_DIR/source/common/utf_impl.cc',
+]
+
+env.GearsStaticLibrary('googleurl-gears', input_files)
 
 #env_tests = env.Clone()
 #
@@ -64,7 +72,7 @@ env.ChromeStaticLibrary('googleurl-gears', input_files)
 #    LIBS = [
 #        'googleurl',
 #        'base',
-#        'icuuc',
+#        env_tests['ICU_LIBS'],  # TODO(sgk):  '$ICU_LIBS' when scons is fixed
 #        'gtest',
 #    ]
 #)
@@ -77,7 +85,7 @@ env.ChromeStaticLibrary('googleurl-gears', input_files)
 #
 #   # The version of gtest that googleurl uses provides a main() function; ours
 #   # doesn't so include our own main function.
-#   '#/../base/run_all_unittests.cc'
+#   '$CHROME_SRC_DIR/base/run_all_unittests.cc'
 #]
 #
 #gurl_unittests = env_tests.ChromeTestProgram('googleurl_unittests', test_files)

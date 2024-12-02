@@ -4,23 +4,34 @@
 
 #include "chrome/browser/visitedlink_master.h"
 
+#if defined(OS_WIN)
 #include <windows.h>
+#include <io.h>
 #include <shlobj.h>
+#endif  // defined(OS_WIN)
+#include <stdio.h>
+
 #include <algorithm>
 
+#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/process_util.h"
+#include "base/rand_util.h"
 #include "base/stack_container.h"
 #include "base/string_util.h"
+#include "base/thread.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/profile.h"
+#if defined(OS_WIN)
 #include "chrome/common/win_util.h"
-
-#ifdef _WIN32
-#pragma comment(lib, "rpcrt4.lib") // for UuidCreate().
 #endif
+
+using file_util::ScopedFILE;
+using file_util::OpenFile;
+using file_util::TruncateFile;
 
 const int32 VisitedLinkMaster::kFileHeaderSignatureOffset = 0;
 const int32 VisitedLinkMaster::kFileHeaderVersionOffset = 4;
@@ -39,104 +50,98 @@ const size_t VisitedLinkMaster::kFileHeaderSize =
 // table in NewTableSizeForCount (prime number).
 const unsigned VisitedLinkMaster::kDefaultTableSize = 16381;
 
-const int32 VisitedLinkMaster::kBigDeleteThreshold = 64;
+const size_t VisitedLinkMaster::kBigDeleteThreshold = 64;
 
 namespace {
 
 // Fills the given salt structure with some quasi-random values
-// Fills some salt values into the given buffer, we ask the system to generate
-// a UUID for us, and we use some of the bytes out of that. It is not necessary
-// to generate a cryptographically strong random string, only that it be
-// reasonably different for different users. Here, we use every-other byte of
-// the 16-byte UUID.
+// It is not necessary to generate a cryptographically strong random string,
+// only that it be reasonably different for different users.
 void GenerateSalt(uint8 salt[LINK_SALT_LENGTH]) {
-  UUID uuid;
-  UuidCreate(&uuid);
-
   DCHECK_EQ(LINK_SALT_LENGTH, 8) << "This code assumes the length of the salt";
-  salt[0] = static_cast<uint8>(uuid.Data1 & 0xFF);
-  salt[1] = static_cast<uint8>((uuid.Data1 >> 8) & 0xFF);
-  salt[2] = static_cast<uint8>(uuid.Data2 & 0xFF);
-  salt[3] = static_cast<uint8>(uuid.Data3 & 0xFF);
-  salt[4] = uuid.Data4[0];
-  salt[5] = uuid.Data4[2];
-  salt[6] = uuid.Data4[4];
-  salt[7] = uuid.Data4[6];
+  uint64 randval = base::RandUint64();
+  memcpy(salt, &randval, 8);
 }
+
 // AsyncWriter ----------------------------------------------------------------
 
 // This task executes on a background thread and executes a write. This
 // prevents us from blocking the UI thread doing I/O.
 class AsyncWriter : public Task {
  public:
-  AsyncWriter(HANDLE hfile, int32 offset, const void* data, int32 data_len)
-      : hfile_(hfile),
+  AsyncWriter(FILE* file, int32 offset, const void* data, size_t data_len)
+      : file_(file),
         offset_(offset) {
     data_->resize(data_len);
     memcpy(&*data_->begin(), data, data_len);
   }
 
   virtual void Run() {
-    WriteToFile(hfile_, offset_,
+    WriteToFile(file_, offset_,
                 &*data_->begin(), static_cast<int32>(data_->size()));
   }
 
   // Exposed as a static so it can be called directly from the Master to
   // reduce the number of platform-specific I/O sites we have. Returns true if
   // the write was complete.
-  static bool WriteToFile(HANDLE hfile,
-                          int32 offset,
+  static bool WriteToFile(FILE* file,
+                          off_t offset,
                           const void* data,
-                          int32 data_len) {
-    if (SetFilePointer(hfile, offset, NULL, FILE_BEGIN) ==
-        INVALID_SET_FILE_POINTER)
+                          size_t data_len) {
+    if (fseek(file, offset, SEEK_SET) != 0)
       return false;  // Don't write to an invalid part of the file.
 
-    DWORD num_written;
-    return WriteFile(hfile, data, data_len, &num_written, NULL) &&
-           (num_written == data_len);
+    size_t num_written = fwrite(data, 1, data_len, file);
+
+    // The write may not make it to the kernel (stdlib may buffer the write)
+    // until the next fseek/fclose call.  If we crash, it's easy for our used
+    // item count to be out of sync with the number of hashes we write. 
+    // Protect against this by calling fflush.
+    int ret = fflush(file);
+    DCHECK_EQ(0, ret);
+    return num_written == data_len;
   }
 
  private:
   // The data to write and where to write it.
-  HANDLE hfile_;
+  FILE* file_;
   int32 offset_;  // Offset from the beginning of the file.
 
   // Most writes are just a single fingerprint, so we reserve that much in this
   // object to avoid mallocs in that case.
   StackVector<char, sizeof(VisitedLinkCommon::Fingerprint)> data_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(AsyncWriter);
+  DISALLOW_COPY_AND_ASSIGN(AsyncWriter);
 };
 
 // Used to asynchronously set the end of the file. This must be done on the
 // same thread as the writing to keep things synchronized.
 class AsyncSetEndOfFile : public Task {
  public:
-  explicit AsyncSetEndOfFile(HANDLE hfile) : hfile_(hfile) {}
+  explicit AsyncSetEndOfFile(FILE* file) : file_(file) {}
 
   virtual void Run() {
-    SetEndOfFile(hfile_);
+    TruncateFile(file_);
   }
 
  private:
-  HANDLE hfile_;
-  DISALLOW_EVIL_CONSTRUCTORS(AsyncSetEndOfFile);
+  FILE* file_;
+  DISALLOW_COPY_AND_ASSIGN(AsyncSetEndOfFile);
 };
 
 // Used to asynchronously close a file. This must be done on the same thread as
 // the writing to keep things synchronized.
 class AsyncCloseHandle : public Task {
  public:
-  explicit AsyncCloseHandle(HANDLE hfile) : hfile_(hfile) {}
+  explicit AsyncCloseHandle(FILE* file) : file_(file) {}
 
   virtual void Run() {
-    CloseHandle(hfile_);
+    fclose(file_);
   }
 
  private:
-  HANDLE hfile_;
-  DISALLOW_EVIL_CONSTRUCTORS(AsyncCloseHandle);
+  FILE* file_;
+  DISALLOW_COPY_AND_ASSIGN(AsyncCloseHandle);
 };
 
 }  // namespace
@@ -209,11 +214,11 @@ VisitedLinkMaster::VisitedLinkMaster(base::Thread* file_thread,
                                      PostNewTableEvent* poster,
                                      HistoryService* history_service,
                                      bool suppress_rebuild,
-                                     const std::wstring& filename,
+                                     const FilePath& filename,
                                      int32 default_table_size) {
   InitMembers(file_thread, poster, NULL);
 
-  database_name_override_.assign(filename);
+  database_name_override_ = filename;
   table_size_override_ = default_table_size;
   history_service_override_ = history_service;
   suppress_rebuild_ = suppress_rebuild;
@@ -253,28 +258,14 @@ void VisitedLinkMaster::InitMembers(base::Thread* file_thread,
 #endif
 }
 
-// The shared memory name should be unique on the system and also needs to
-// change when we create a new table. The scheme we use includes the process
-// ID, an increasing serial number, and the profile ID.
-std::wstring VisitedLinkMaster::GetSharedMemoryName() const {
-  // When unit testing, there's no profile, so use an empty ID string.
-  std::wstring profile_id;
-  if (profile_)
-    profile_id = profile_->GetID().c_str();
-
-  return StringPrintf(L"GVisitedLinks_%lu_%lu_%ls",
-                      GetCurrentProcessId(), shared_memory_serial_,
-                      profile_id.c_str());
-}
-
 bool VisitedLinkMaster::Init() {
   if (!InitFromFile())
     return InitFromScratch(suppress_rebuild_);
   return true;
 }
 
-bool VisitedLinkMaster::ShareToProcess(ProcessHandle process,
-                                       SharedMemoryHandle *new_handle) {
+bool VisitedLinkMaster::ShareToProcess(base::ProcessHandle process,
+                                       base::SharedMemoryHandle *new_handle) {
   if (shared_memory_)
     return shared_memory_->ShareToProcess(process, new_handle);
 
@@ -282,7 +273,7 @@ bool VisitedLinkMaster::ShareToProcess(ProcessHandle process,
   return false;
 }
 
-SharedMemoryHandle VisitedLinkMaster::GetSharedMemoryHandle() {
+base::SharedMemoryHandle VisitedLinkMaster::GetSharedMemoryHandle() {
   return shared_memory_->handle();
 }
 
@@ -527,19 +518,14 @@ bool VisitedLinkMaster::WriteFullTable() {
   // We should pick up the most common types of these failures when we notice
   // that the file size is different when we load it back in, and then we will
   // regenerate the table.
-  win_util::ScopedHandle hfile_closer;  // Valid only when not open already.
-  HANDLE hfile;                         // Always valid.
-  if (file_) {
-    hfile = file_;
-  } else {
-    std::wstring filename;
+  if (!file_) {
+    FilePath filename;
     GetDatabaseFileName(&filename);
-    hfile_closer.Set(
-        CreateFile(filename.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL,
-                   CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL));
-    if (!hfile_closer.IsValid())
+    file_ = OpenFile(filename, "wb+");
+    if (!file_) {
+      DLOG(ERROR) << "Failed to open file " << filename.value();
       return false;
-    hfile = hfile_closer;
+    }
   }
 
   // Write the new header.
@@ -548,54 +534,52 @@ bool VisitedLinkMaster::WriteFullTable() {
   header[1] = kFileCurrentVersion;
   header[2] = table_length_;
   header[3] = used_items_;
-  WriteToFile(hfile, 0, header, sizeof(header));
-  WriteToFile(hfile, sizeof(header), salt_, LINK_SALT_LENGTH);
+  WriteToFile(file_, 0, header, sizeof(header));
+  WriteToFile(file_, sizeof(header), salt_, LINK_SALT_LENGTH);
 
   // Write the hash data.
-  WriteToFile(hfile, kFileHeaderSize,
+  WriteToFile(file_, kFileHeaderSize,
               hash_table_, table_length_ * sizeof(Fingerprint));
 
   // The hash table may have shrunk, so make sure this is the end.
   if (file_thread_) {
-    AsyncSetEndOfFile* setter = new AsyncSetEndOfFile(hfile);
+    AsyncSetEndOfFile* setter = new AsyncSetEndOfFile(file_);
     file_thread_->PostTask(FROM_HERE, setter);
   } else {
-    SetEndOfFile(hfile);
+    TruncateFile(file_);
   }
 
-  // Keep the file open so we can dynamically write changes to it. When the
-  // file was alrady open, the hfile_closer is NULL, and file_ is already good.
-  if (hfile_closer.IsValid())
-    file_ = hfile_closer.Take();
   return true;
 }
 
 bool VisitedLinkMaster::InitFromFile() {
   DCHECK(file_ == NULL);
 
-  std::wstring filename;
+  FilePath filename;
   GetDatabaseFileName(&filename);
-  win_util::ScopedHandle hfile(
-      CreateFile(filename.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL,
-                 OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL));
-  if (!hfile.IsValid())
+  ScopedFILE file_closer(OpenFile(filename, "rb+"));
+  if (!file_closer.get())
     return false;
 
   int32 num_entries, used_count;
-  if (!ReadFileHeader(hfile, &num_entries, &used_count, salt_))
+  if (!ReadFileHeader(file_closer.get(), &num_entries, &used_count, salt_))
     return false;  // Header isn't valid.
 
   // Allocate and read the table.
   if (!CreateURLTable(num_entries, false))
     return false;
-  if (!ReadFromFile(hfile, kFileHeaderSize,
+  if (!ReadFromFile(file_closer.get(), kFileHeaderSize,
                     hash_table_, num_entries * sizeof(Fingerprint))) {
     FreeURLTable();
     return false;
   }
   used_items_ = used_count;
 
-  file_ = hfile.Take();
+#ifndef NDEBUG
+  DebugValidate();
+#endif
+
+  file_ = file_closer.release();
   return true;
 }
 
@@ -609,6 +593,10 @@ bool VisitedLinkMaster::InitFromScratch(bool suppress_rebuild) {
   GenerateSalt(salt_);
   if (!CreateURLTable(table_size, true))
     return false;
+
+#ifndef NDEBUG
+  DebugValidate();
+#endif
 
   if (suppress_rebuild) {
     // When we disallow rebuilds (normally just unit tests), just use the
@@ -624,20 +612,27 @@ bool VisitedLinkMaster::InitFromScratch(bool suppress_rebuild) {
   return RebuildTableFromHistory();
 }
 
-bool VisitedLinkMaster::ReadFileHeader(HANDLE hfile,
+bool VisitedLinkMaster::ReadFileHeader(FILE* file,
                                        int32* num_entries,
                                        int32* used_count,
                                        uint8 salt[LINK_SALT_LENGTH]) {
-  int32 file_size = GetFileSize(hfile, NULL);
+  // Get file size.
+  // Note that there is no need to seek back to the original location in the
+  // file since ReadFromFile() [which is the next call accessing the file]
+  // seeks before reading.
+  if (fseek(file, 0, SEEK_END) == -1)
+    return false;
+  size_t file_size = ftell(file);
+
   if (file_size <= kFileHeaderSize)
     return false;
 
   uint8 header[kFileHeaderSize];
-  if (!ReadFromFile(hfile, 0, &header, kFileHeaderSize))
+  if (!ReadFromFile(file, 0, &header, kFileHeaderSize))
     return false;
 
   // Verify the signature.
-  uint32 signature;
+  int32 signature;
   memcpy(&signature, &header[kFileHeaderSignatureOffset], sizeof(signature));
   if (signature != kFileSignature)
     return false;
@@ -667,7 +662,7 @@ bool VisitedLinkMaster::ReadFileHeader(HANDLE hfile,
   return true;
 }
 
-bool VisitedLinkMaster::GetDatabaseFileName(std::wstring* filename) {
+bool VisitedLinkMaster::GetDatabaseFileName(FilePath* filename) {
   if (!database_name_override_.empty()) {
     // use this filename, the directory must exist
     *filename = database_name_override_;
@@ -677,8 +672,8 @@ bool VisitedLinkMaster::GetDatabaseFileName(std::wstring* filename) {
   if (!profile_ || profile_->GetPath().empty())
     return false;
 
-  *filename = profile_->GetPath();
-  filename->append(L"\\Visited Links");
+  FilePath profile_dir = profile_->GetPath();
+  *filename = profile_dir.Append(FILE_PATH_LITERAL("Visited Links"));
   return true;
 }
 
@@ -689,13 +684,15 @@ bool VisitedLinkMaster::CreateURLTable(int32 num_entries, bool init_to_empty) {
   int32 alloc_size = num_entries * sizeof(Fingerprint) + sizeof(SharedHeader);
 
   // Create the shared memory object.
-  shared_memory_ = new SharedMemory();
+  shared_memory_ = new base::SharedMemory();
   if (!shared_memory_)
     return false;
 
-  if (!shared_memory_->Create(GetSharedMemoryName().c_str(),
-      false, false, alloc_size))
+  if (!shared_memory_->Create(std::wstring() /* anonymous */,
+                              false /* read-write */, false /* create */,
+                              alloc_size)) {
     return false;
+  }
 
   // Map into our process.
   if (!shared_memory_->Map(alloc_size)) {
@@ -719,15 +716,11 @@ bool VisitedLinkMaster::CreateURLTable(int32 num_entries, bool init_to_empty) {
   hash_table_ = reinterpret_cast<Fingerprint*>(
       static_cast<char*>(shared_memory_->memory()) + sizeof(SharedHeader));
 
-#ifndef NDEBUG
-  DebugValidate();
-#endif
-
   return true;
 }
 
 bool VisitedLinkMaster::BeginReplaceURLTable(int32 num_entries) {
-  SharedMemory *old_shared_memory = shared_memory_;
+  base::SharedMemory *old_shared_memory = shared_memory_;
   Fingerprint* old_hash_table = hash_table_;
   int32 old_table_length = table_length_;
   if (!CreateURLTable(num_entries, true)) {
@@ -737,6 +730,11 @@ bool VisitedLinkMaster::BeginReplaceURLTable(int32 num_entries) {
     table_length_ = old_table_length;
     return false;
   }
+
+#ifndef NDEBUG
+  DebugValidate();
+#endif
+
   return true;
 }
 
@@ -750,7 +748,7 @@ void VisitedLinkMaster::FreeURLTable() {
       AsyncCloseHandle* closer = new AsyncCloseHandle(file_);
       file_thread_->PostTask(FROM_HERE, closer);
     } else {
-      CloseHandle(file_);
+      fclose(file_);
     }
   }
 }
@@ -767,7 +765,8 @@ bool VisitedLinkMaster::ResizeTableIfNecessary() {
 
   float load = ComputeTableLoad();
   if (load < max_table_load &&
-      (table_length_ <= kDefaultTableSize || load > min_table_load))
+      (table_length_ <= static_cast<float>(kDefaultTableSize) ||
+       load > min_table_load))
     return false;
 
   // Table needs to grow or shrink.
@@ -786,7 +785,7 @@ void VisitedLinkMaster::ResizeTable(int32 new_size) {
   DebugValidate();
 #endif
 
-  SharedMemory* old_shared_memory = shared_memory_;
+  base::SharedMemory* old_shared_memory = shared_memory_;
   Fingerprint* old_hash_table = hash_table_;
   int32 old_table_length = table_length_;
   if (!BeginReplaceURLTable(new_size))
@@ -838,7 +837,7 @@ uint32 VisitedLinkMaster::NewTableSizeForCount(int32 item_count) const {
   int desired = item_count * 3;
 
   // Find the closest prime.
-  for (int i = 0; i < arraysize(table_sizes); i ++) {
+  for (size_t i = 0; i < arraysize(table_sizes); i ++) {
     if (table_sizes[i] > desired)
       return table_sizes[i];
   }
@@ -885,7 +884,7 @@ void VisitedLinkMaster::OnTableRebuildComplete(
 
     // We are responsible for freeing it AFTER it has been replaced if
     // replacement succeeds.
-    SharedMemory* old_shared_memory = shared_memory_;
+    base::SharedMemory* old_shared_memory = shared_memory_;
 
     int new_table_size = NewTableSizeForCount(
         static_cast<int>(fingerprints.size()));
@@ -923,8 +922,8 @@ void VisitedLinkMaster::OnTableRebuildComplete(
   }
 }
 
-void VisitedLinkMaster::WriteToFile(HANDLE hfile,
-                                    int32 offset,
+void VisitedLinkMaster::WriteToFile(FILE* file,
+                                    off_t offset,
                                     void* data,
                                     int32 data_size) {
 #ifndef NDEBUG
@@ -933,20 +932,24 @@ void VisitedLinkMaster::WriteToFile(HANDLE hfile,
 
   if (file_thread_) {
     // Send the write to the other thread for execution to avoid blocking.
-    AsyncWriter* writer = new AsyncWriter(hfile, offset, data, data_size);
+    AsyncWriter* writer = new AsyncWriter(file, offset, data, data_size);
     file_thread_->PostTask(FROM_HERE, writer);
   } else {
     // When there is no I/O thread, we are probably running in unit test mode,
     // just do the write synchronously.
-    AsyncWriter::WriteToFile(hfile, offset, data, data_size);
+    AsyncWriter::WriteToFile(file, offset, data, data_size);
   }
 }
 
 void VisitedLinkMaster::WriteUsedItemCountToFile() {
+  if (!file_)
+    return;  // See comment on the file_ variable for why this might happen.
   WriteToFile(file_, kFileHeaderUsedOffset, &used_items_, sizeof(used_items_));
 }
 
 void VisitedLinkMaster::WriteHashRangeToFile(Hash first_hash, Hash last_hash) {
+  if (!file_)
+    return;  // See comment on the file_ variable for why this might happen.
   if (last_hash < first_hash) {
     // Handle wraparound at 0. This first write is first_hash->EOF
     WriteToFile(file_, first_hash * sizeof(Fingerprint) + kFileHeaderSize,
@@ -964,21 +967,20 @@ void VisitedLinkMaster::WriteHashRangeToFile(Hash first_hash, Hash last_hash) {
   }
 }
 
-bool VisitedLinkMaster::ReadFromFile(HANDLE hfile,
-                                     int32 offset,
+bool VisitedLinkMaster::ReadFromFile(FILE* file,
+                                     off_t offset,
                                      void* data,
-                                     int32 data_size) {
+                                     size_t data_size) {
 #ifndef NDEBUG
   // Since this function is synchronous, we require that no asynchronous
   // operations could possibly be pending.
   DCHECK(!posted_asynchronous_operation_);
 #endif
 
-  SetFilePointer(hfile, offset, NULL, FILE_BEGIN);
+  fseek(file, offset, SEEK_SET);
 
-  DWORD num_read;
-  return ReadFile(hfile, data, data_size, &num_read, NULL) &&
-         num_read == data_size;
+  size_t num_read = fread(data, 1, data_size, file);
+  return num_read == data_size;
 }
 
 // VisitedLinkTableBuilder ----------------------------------------------------
@@ -987,8 +989,8 @@ VisitedLinkMaster::TableBuilder::TableBuilder(
     VisitedLinkMaster* master,
     const uint8 salt[LINK_SALT_LENGTH])
     : master_(master),
-      success_(true),
-      main_message_loop_(MessageLoop::current()) {
+      main_message_loop_(MessageLoop::current()),
+      success_(true) {
   fingerprints_.reserve(4096);
   memcpy(salt_, salt, sizeof(salt));
 }
@@ -1024,4 +1026,3 @@ void VisitedLinkMaster::TableBuilder::OnCompleteMainThread() {
   // VisitedLinkMaster::RebuildTableFromHistory.
   Release();
 }
-

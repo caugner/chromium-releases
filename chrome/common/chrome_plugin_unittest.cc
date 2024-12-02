@@ -8,21 +8,25 @@
 #include "base/string_util.h"
 #include "chrome/browser/chrome_plugin_host.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/url_fetcher.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/test/chrome_plugin/test_chrome_plugin.h"
+#include "net/base/io_buffer.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request_test_job.h"
 #include "net/url_request/url_request_unittest.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
+
 const wchar_t kDocRoot[] = L"chrome/test/data";
-const wchar_t kPluginFilename[] = L"test_chrome_plugin.dll";
+const char kPluginFilename[] = "test_chrome_plugin.dll";
+const int kResponseBufferSize = 4096;
 
 class ChromePluginTest : public testing::Test, public URLRequest::Delegate {
  public:
   ChromePluginTest()
       : request_(NULL),
+        response_buffer_(new net::IOBuffer(kResponseBufferSize)),
         plugin_(NULL),
         expected_payload_(NULL),
         request_context_(new TestURLRequestContext()) {
@@ -74,7 +78,7 @@ class ChromePluginTest : public testing::Test, public URLRequest::Delegate {
   // Note: we use URLRequest (instead of URLFetcher) because this allows the
   // request to be intercepted.
   scoped_ptr<URLRequest> request_;
-  char response_buffer_[4096];
+  scoped_refptr<net::IOBuffer> response_buffer_;
   std::string response_data_;
 
   ChromePluginLib* plugin_;
@@ -117,9 +121,9 @@ static void STDCALL CPT_InvokeLater(TestFuncParams::CallbackFunc callback,
 }
 
 void ChromePluginTest::LoadPlugin() {
-  std::wstring path;
+  FilePath path;
   PathService::Get(base::DIR_EXE, &path);
-  file_util::AppendToPath(&path, kPluginFilename);
+  path = path.AppendASCII(kPluginFilename);
   plugin_ = ChromePluginLib::Create(path, GetCPBrowserFuncsForBrowser());
 
   // Exchange test APIs with the plugin.
@@ -154,7 +158,7 @@ void ChromePluginTest::OnResponseStarted(URLRequest* request) {
 
   int bytes_read = 0;
   if (request_->status().is_success())
-    request_->Read(response_buffer_, sizeof(response_buffer_), &bytes_read);
+    request_->Read(response_buffer_, kResponseBufferSize, &bytes_read);
   OnReadCompleted(request_.get(), bytes_read);
 }
 
@@ -164,9 +168,8 @@ void ChromePluginTest::OnReadCompleted(URLRequest* request, int bytes_read) {
   do {
     if (!request_->status().is_success() || bytes_read <= 0)
       break;
-    response_data_.append(response_buffer_, bytes_read);
-  } while (request_->Read(response_buffer_, sizeof(response_buffer_),
-                          &bytes_read));
+    response_data_.append(response_buffer_->data(), bytes_read);
+  } while (request_->Read(response_buffer_, kResponseBufferSize, &bytes_read));
 
   if (!request_->status().is_io_pending()) {
     OnURLRequestComplete();
@@ -258,8 +261,11 @@ TEST_F(ChromePluginTest, CanMakeGETRequestAsync) {
 
 // Tests that the plugin can issue a POST request.
 TEST_F(ChromePluginTest, CanMakePOSTRequest) {
-  TestServer server(kDocRoot);
-  GURL url = server.TestServerPage("echo");
+  scoped_refptr<HTTPTestServer> server =
+      HTTPTestServer::CreateServer(kDocRoot, NULL);
+  ASSERT_TRUE(NULL != server.get());
+
+  GURL url = server->TestServerPage("echo");
 
   EXPECT_EQ(CPERR_SUCCESS, test_funcs_.test_make_request("POST", url));
 
@@ -279,4 +285,3 @@ TEST_F(ChromePluginTest, DoesNotInterceptOwnRequest) {
 
   MessageLoop::current()->Run();
 }
-

@@ -4,15 +4,19 @@
 
 #include "config.h"
 
-#pragma warning(push, 0)
+#include "base/compiler_specific.h"
+
+MSVC_PUSH_WARNING_LEVEL(0);
 #include "ResourceResponse.h"
-#pragma warning(pop)
+MSVC_POP_WARNING();
 #undef LOG
 
 #include "webkit/glue/alt_error_page_resource_fetcher.h"
 
 #include "webkit/glue/glue_util.h"
+#include "webkit/glue/webdatasource.h"
 #include "webkit/glue/webframe_impl.h"
+#include "webkit/glue/weburlrequest.h"
 #include "webkit/glue/webview_delegate.h"
 #include "webkit/glue/webview.h"
 
@@ -34,6 +38,9 @@ AltErrorPageResourceFetcher::AltErrorPageResourceFetcher(
                                                 kDownloadTimeoutSec, this));
 }
 
+AltErrorPageResourceFetcher::~AltErrorPageResourceFetcher() {
+}
+
 void AltErrorPageResourceFetcher::OnURLFetchComplete(
     const WebCore::ResourceResponse& response,
     const std::string& data) {
@@ -51,4 +58,3 @@ void AltErrorPageResourceFetcher::OnURLFetchComplete(
                                       web_error_, std::string(), true);
   }
 }
-

@@ -2,84 +2,107 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// TODO: Need mechanism to cleanup the static instance
-
 #ifndef WEBKIT_GLUE_PLUGIN_PLUGIN_LIST_H__
 #define WEBKIT_GLUE_PLUGIN_PLUGIN_LIST_H__
 
+#include <set>
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/ref_counted.h"
+#include "base/file_path.h"
 #include "webkit/glue/webplugin.h"
+#include "webkit/glue/plugins/nphostapi.h"
 
 class GURL;
+
+namespace base {
+
+template <typename T>
+struct DefaultLazyInstanceTraits;
+
+}  // namespace base
 
 namespace NPAPI
 {
 
-// Used by plugins_test when testing the older WMP plugin to force the new
-// plugin to not get loaded.
-#define kUseOldWMPPluginSwitch L"use-old-wmp"
-// Used for testing ActiveX shim. By default it's off. If this flag is specified
-// we will use the native ActiveX shim.
-#define kNoNativeActiveXShimSwitch L"no-activex"
-// Internal file name for activex shim, used as a unique identifier.
-#define kActiveXShimFileName L"activex-shim"
+#define kDefaultPluginLibraryName FILE_PATH_LITERAL("default_plugin")
+#define kGearsPluginLibraryName FILE_PATH_LITERAL("gears")
 
-#define kDefaultPluginDllName L"default_plugin"
-
-class PluginLib;
 class PluginInstance;
 
-// The PluginList is responsible for loading our NPAPI based plugins.
-// It loads plugins from a known directory by looking for DLLs
-// which start with "NP", and checking to see if they are valid
-// NPAPI libraries.
-class PluginList : public base::RefCounted<PluginList> {
+// This struct holds entry points into a plugin.  The entry points are
+// slightly different between Linux and other platforms.
+struct PluginEntryPoints {
+#if !defined(OS_LINUX)
+  NP_GetEntryPointsFunc np_getentrypoints;
+#endif
+  NP_InitializeFunc np_initialize;
+  NP_ShutdownFunc np_shutdown;
+};
+
+// This struct fully describes a plugin. For external plugins, it's read in from
+// the version info of the dll; For internal plugins, it's predefined and
+// includes addresses of entry functions. (Yes, it's Win32 NPAPI-centric, but
+// it'll do for holding descriptions of internal plugins cross-platform.)
+struct PluginVersionInfo {
+  FilePath path;
+  // Info about the plugin itself.
+  std::wstring product_name;
+  std::wstring file_description;
+  std::wstring file_version;
+  // Info about the data types that the plugin supports.
+  std::wstring mime_types;
+  std::wstring file_extensions;
+  std::wstring type_descriptions;
+  // Entry points for internal plugins.  Pointers are NULL for external plugins.
+  PluginEntryPoints entry_points;
+};
+
+// The PluginList is responsible for loading our NPAPI based plugins. It does
+// so in whatever manner is appropriate for the platform. On Windows, it loads
+// plugins from a known directory by looking for DLLs which start with "NP",
+// and checking to see if they are valid NPAPI libraries. On the Mac, it walks
+// the machine-wide and user plugin directories and loads anything that has
+// the correct types. On Linux, it walks the plugin directories as well
+// (e.g. /usr/lib/browser-plugins/).
+class PluginList {
  public:
-  // Gets the one instance of the PluginList.
-  //
-  // Accessing the singleton causes the PluginList to look on
-  // disk for existing plugins.  It does not actually load
-  // libraries, that will only happen when you initialize
-  // the plugin for the first time.
+  // Gets the one instance of the PluginList.  Accessing the singleton causes
+  // the PluginList to look on disk for existing plugins.  It does not actually
+  // load libraries, that will only happen when you initialize the plugin for
+  // the first time.
   static PluginList* Singleton();
+
+  // Clear the plugins_loaded_ bit to force a refresh next time we retrieve
+  // plugins.
+  static void ResetPluginsLoaded();
 
   // Add an extra plugin to load when we actually do the loading.  This is
   // static because we want to be able to add to it without searching the disk
   // for plugins.  Must be called before the plugins have been loaded.
-  static void AddExtraPluginPath(const std::wstring& plugin_path);
+  static void AddExtraPluginPath(const FilePath& plugin_path);
 
-  virtual ~PluginList();
+  // Same as above, but specifies a directory in which to search for plugins.
+  static void AddExtraPluginDir(const FilePath& plugin_dir);
 
-  // Find a plugin to by mime type, and clsid.
-  // If clsid is empty, we will just find the plugin that supports mime type.
-  // Otherwise, if mime_type is application/x-oleobject etc that supported by
-  // by our activex shim, we need to check if the specified ActiveX exists. 
-  // If not we will not return the activex shim, instead we will let the
-  // default plugin handle activex installation.
-  // The allow_wildcard parameter controls whether this function returns
-  // plugins which support wildcard mime types (* as the mime type)
-  PluginLib* FindPlugin(const std::string &mime_type, const std::string& clsid,
-                        bool allow_wildcard);
+  // Register an internal plugin with the specified plugin information and
+  // function pointers.  An internal plugin must be registered before it can
+  // be loaded using PluginList::LoadPlugin().
+  static void RegisterInternalPlugin(const PluginVersionInfo& info);
 
-  // Find a plugin to by extension. Returns the corresponding mime type
-  PluginLib* FindPlugin(const GURL &url, std::string* actual_mime_type);
+  // Creates a WebPluginInfo structure given a plugin's path.  On success
+  // returns true, with the information being put into "info".  If it's an
+  // internal plugin, "entry_points" is filled in as well with a
+  // internally-owned PluginEntryPoints pointer.
+  // Returns false if the library couldn't be found, or if it's not a plugin.
+  static bool ReadPluginInfo(const FilePath& filename,
+                             WebPluginInfo* info,
+                             const PluginEntryPoints** entry_points);
 
-  // Check if we have any plugin for a given type.
-  // mime_type must be all lowercase.
-  bool SupportsType(const std::string &mime_type);
-
-  // Returns true if the given WebPluginInfo supports a given file extension.
-  // extension should be all lower case.
-  // If mime_type is not NULL, it will be set to the mime type if found.
-  // The mime type which corresponds to the extension is optionally returned
-  // back.
-  static bool SupportsExtension(const WebPluginInfo& info,
-                                const std::string &extension,
-                                std::string* actual_mime_type);
+  // Populate a WebPluginInfo from a PluginVersionInfo.
+  static bool CreateWebPluginInfo(const PluginVersionInfo& pvi,
+                                  WebPluginInfo* info);
 
   // Shutdown all plugins.  Should be called at process teardown.
   void Shutdown();
@@ -91,7 +114,7 @@ class PluginList : public base::RefCounted<PluginList> {
   // The mime type which corresponds to the URL is optionally returned
   // back.
   // The allow_wildcard parameter controls whether this function returns
-  // plugins which support wildcard mime types (* as the mime type)
+  // plugins which support wildcard mime types (* as the mime type).
   bool GetPluginInfo(const GURL& url,
                      const std::string& mime_type,
                      const std::string& clsid,
@@ -99,10 +122,14 @@ class PluginList : public base::RefCounted<PluginList> {
                      WebPluginInfo* info,
                      std::string* actual_mime_type);
 
-  // Get plugin info by plugin dll path. Returns true if the plugin is found and
-  // WebPluginInfo has been filled in |info|
-  bool GetPluginInfoByDllPath(const std::wstring& dll_path,
-                              WebPluginInfo* info);
+  // Get plugin info by plugin path. Returns true if the plugin is found and
+  // WebPluginInfo has been filled in |info|.
+  bool GetPluginInfoByPath(const FilePath& plugin_path,
+                           WebPluginInfo* info);
+
+  // Load a specific plugin with full path.
+  void LoadPlugin(const FilePath& filename);
+
  private:
   // Constructors are private for singletons
   PluginList();
@@ -111,60 +138,85 @@ class PluginList : public base::RefCounted<PluginList> {
   void LoadPlugins(bool refresh);
 
   // Load all plugins from a specific directory
-  void LoadPlugins(const std::wstring &path);
-
-  // Load a specific plugin with full path.  filename can be mixed case.
-  void LoadPlugin(const std::wstring &filename);
+  void LoadPluginsFromDir(const FilePath& path);
 
   // Returns true if we should load the given plugin, or false otherwise.
-  // filename must be lower case.
-  bool ShouldLoadPlugin(const std::wstring& filename);
+  bool ShouldLoadPlugin(const WebPluginInfo& info);
 
-  // Load internal plugins. Right now there is only one: activex_shim.
+  // Load internal plugins.
   void LoadInternalPlugins();
 
-  // Find a plugin by filename.  Returns -1 if it's not found, otherwise its
-  // index in plugins_.  filename needs to be lower case.
-  int FindPluginFile(const std::wstring& filename);
+  // Find a plugin by mime type, and clsid.
+  // If clsid is empty, we will just find the plugin that supports mime type.
+  // Otherwise, if mime_type is application/x-oleobject etc that's supported by
+  // by our activex shim, we need to check if the specified ActiveX exists.
+  // If not we will not return the activex shim, instead we will let the
+  // default plugin handle activex installation.
+  // The allow_wildcard parameter controls whether this function returns
+  // plugins which support wildcard mime types (* as the mime type)
+  bool FindPlugin(const std::string &mime_type, const std::string& clsid,
+                  bool allow_wildcard, WebPluginInfo* info);
 
-  // The application path where we expect to find plugins.
-  static std::wstring GetPluginAppDirectory();
+  // Find a plugin by extension. Returns the corresponding mime type.
+  bool FindPlugin(const GURL &url, std::string* actual_mime_type,
+                  WebPluginInfo* info);
 
-  // The executable path where we expect to find plugins.
-  static std::wstring GetPluginExeDirectory();
+  // Returns true if the given WebPluginInfo supports "mime-type".
+  // mime_type should be all lower case.
+  static bool SupportsType(const WebPluginInfo& info,
+                           const std::string &mime_type,
+                           bool allow_wildcard);
 
-  // Load plugins from the Firefox install path.  This is kind of
-  // a kludge, but it helps us locate the flash player for users that
-  // already have it for firefox.  Not having to download yet-another-plugin
-  // is a good thing.
-  void LoadFirefoxPlugins();
+  // Returns true if the given WebPluginInfo supports a given file extension.
+  // extension should be all lower case.
+  // If mime_type is not NULL, it will be set to the mime type if found.
+  // The mime type which corresponds to the extension is optionally returned
+  // back.
+  static bool SupportsExtension(const WebPluginInfo& info,
+                                const std::string &extension,
+                                std::string* actual_mime_type);
 
-  // Hardcoded logic to detect and load acrobat plugins
-  void LoadAcrobatPlugins();
+  //
+  // Platform functions
+  //
 
-  // Hardcoded logic to detect and load quicktime plugins
-  void LoadQuicktimePlugins();
+  // Do any initialization.
+  void PlatformInit();
 
-  // Hardcoded logic to detect and load Windows Media Player plugins
-  void LoadWindowsMediaPlugins();
+  // Get the ordered list of directories from which to load plugins
+  void GetPluginDirectories(std::vector<FilePath>* plugin_dirs);
 
-  // Hardcoded logic to detect and load Java plugins
-  void LoadJavaPlugin();
+  //
+  // Command-line switches
+  //
 
 #if defined(OS_WIN)
-  // Search the registry at the given path and load plugins listed there.
-  void LoadPluginsInRegistryFolder(HKEY root_key,
-                                   const std::wstring& registry_folder);
-#endif
-
   // true if we shouldn't load the new WMP plugin.
   bool dont_load_new_wmp_;
 
+  // true if we should use our internal ActiveX shim
   bool use_internal_activex_shim_;
+#endif
 
-  static scoped_refptr<PluginList> singleton_;
+  //
+  // Internals
+  //
+
   bool plugins_loaded_;
-  std::vector<scoped_refptr<PluginLib> > plugins_;
+
+  // Contains information about the available plugins.
+  std::vector<WebPluginInfo> plugins_;
+
+  // Extra plugin paths that we want to search when loading.
+  std::vector<FilePath> extra_plugin_paths_;
+
+  // Extra plugin directories that we want to search when loading.
+  std::vector<FilePath> extra_plugin_dirs_;
+
+  // Holds information about internal plugins.
+  std::vector<PluginVersionInfo> internal_plugins_;
+
+  friend struct base::DefaultLazyInstanceTraits<PluginList>;
 
   DISALLOW_EVIL_CONSTRUCTORS(PluginList);
 };
@@ -172,4 +224,3 @@ class PluginList : public base::RefCounted<PluginList> {
 } // namespace NPAPI
 
 #endif  // WEBKIT_GLUE_PLUGIN_PLUGIN_LIST_H__
-

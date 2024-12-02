@@ -8,14 +8,14 @@
 #ifndef CHROME_BROWSER_VIEWS_DOM_VIEW_H_
 #define CHROME_BROWSER_VIEWS_DOM_VIEW_H_
 
-#include "chrome/views/hwnd_view.h"
+#include "chrome/views/controls/hwnd_view.h"
 #include "googleurl/src/gurl.h"
 
 class DOMUIHost;
 class Profile;
 class SiteInstance;
 
-class DOMView : public ChromeViews::HWNDView {
+class DOMView : public views::HWNDView {
  public:
   // Construct a DOMView to display the given data: URL.
   explicit DOMView(const GURL& contents);
@@ -28,6 +28,8 @@ class DOMView : public ChromeViews::HWNDView {
   bool Init(Profile* profile, SiteInstance* instance);
 
  protected:
+  virtual bool CanProcessTabKeyEvents() { return true; }
+
   DOMUIHost* host_;
 
  private:
@@ -38,4 +40,3 @@ class DOMView : public ChromeViews::HWNDView {
 };
 
 #endif  // CHROME_BROWSER_VIEWS_DOM_VIEW_H_
-

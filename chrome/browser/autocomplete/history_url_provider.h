@@ -2,14 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_AUTOCOMPLETE_HISTORY_URL_PROVIDER_H__
-#define CHROME_BROWSER_AUTOCOMPLETE_HISTORY_URL_PROVIDER_H__
+#ifndef CHROME_BROWSER_AUTOCOMPLETE_HISTORY_URL_PROVIDER_H_
+#define CHROME_BROWSER_AUTOCOMPLETE_HISTORY_URL_PROVIDER_H_
 
 #include <map>
 #include <vector>
 #include <deque>
 
-#include "base/ref_counted.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/history/history_database.h"
 #include "chrome/browser/profile.h"
@@ -39,7 +38,8 @@ class HistoryBackend;
 //         -> DoAutocomplete (for inline autocomplete)
 //           -> URLDatabase::AutocompleteForPrefix (on in-memory DB)
 //         -> HistoryService::ScheduleAutocomplete
-//         (return to controller) \
+//         (return to controller) ----
+//                                   /
 //                              HistoryBackend::ScheduleAutocomplete
 //                                -> HistoryURLProvider::ExecuteWithDB
 //                                  -> DoAutocomplete
@@ -111,7 +111,7 @@ struct HistoryURLProviderParams {
   // to matches_ on the main thread in QueryComplete().
   ACMatches matches;
 
-  // Languages we should pass to gfx::ElideUrl.
+  // Languages we should pass to gfx::GetCleanStringFromUrl.
   std::wstring languages;
 
  private:
@@ -150,8 +150,7 @@ class HistoryURLProvider : public AutocompleteProvider {
 
   // AutocompleteProvider
   virtual void Start(const AutocompleteInput& input,
-                     bool minimal_changes,
-                     bool synchronous_only);
+                     bool minimal_changes);
   virtual void Stop();
   virtual void DeleteMatch(const AutocompleteMatch& match);
 
@@ -313,8 +312,7 @@ class HistoryURLProvider : public AutocompleteProvider {
 
   // Helper function that actually launches the two autocomplete passes.
   void RunAutocompletePasses(const AutocompleteInput& input,
-                             bool fixup_input_and_run_pass_1,
-                             bool run_pass_2);
+                             bool fixup_input_and_run_pass_1);
 
   // Returns the best prefix that begins |text|.  "Best" means "greatest number
   // of components".  This may return NULL if no prefix begins |text|.
@@ -322,7 +320,7 @@ class HistoryURLProvider : public AutocompleteProvider {
   // |prefix_suffix| (which may be empty) is appended to every attempted
   // prefix.  This is useful when you need to figure out the innermost match
   // for some user input in a URL.
-  const Prefix* BestPrefix(const std::wstring& text,
+  const Prefix* BestPrefix(const GURL& text,
                            const std::wstring& prefix_suffix) const;
 
   // Adds the exact input for what the user has typed as input. This is
@@ -391,5 +389,4 @@ class HistoryURLProvider : public AutocompleteProvider {
   HistoryURLProviderParams* params_;
 };
 
-#endif  // CHROME_BROWSER_AUTOCOMPLETE_HISTORY_URL_PROVIDER_H__
-
+#endif  // CHROME_BROWSER_AUTOCOMPLETE_HISTORY_URL_PROVIDER_H_

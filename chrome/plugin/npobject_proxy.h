@@ -5,8 +5,8 @@
 // A proxy for NPObject that sends all calls to the object to an NPObjectStub
 // running in a different process.
 
-#ifndef CHROME_PLUGIN_NPOBJECT_PROXY_H__
-#define CHROME_PLUGIN_NPOBJECT_PROXY_H__
+#ifndef CHROME_PLUGIN_NPOBJECT_PROXY_H_
+#define CHROME_PLUGIN_NPOBJECT_PROXY_H_
 
 #include "base/ref_counted.h"
 #include "chrome/common/ipc_channel.h"
@@ -14,7 +14,10 @@
 
 class PluginChannelBase;
 struct NPObject;
-struct NPVariant_Param;
+
+namespace base {
+class WaitableEvent;
+}
 
 // When running a plugin in a different process from the renderer, we need to
 // proxy calls to NPObjects across process boundaries.  This happens both ways,
@@ -29,10 +32,11 @@ class NPObjectProxy : public IPC::Channel::Listener,
  public:
   ~NPObjectProxy();
 
+  // modal_dialog_event_ is must be valid for the lifetime of the NPObjectProxy.
   static NPObject* Create(PluginChannelBase* channel,
                           int route_id,
                           void* npobject_ptr,
-                          HANDLE modal_dialog_event);
+                          base::WaitableEvent* modal_dialog_event);
 
   // IPC::Message::Sender implementation:
   bool Send(IPC::Message* msg);
@@ -93,7 +97,7 @@ class NPObjectProxy : public IPC::Channel::Listener,
   NPObjectProxy(PluginChannelBase* channel,
                 int route_id,
                 void* npobject_ptr,
-                HANDLE modal_dialog_event);
+                base::WaitableEvent* modal_dialog_event);
 
   // IPC::Channel::Listener implementation:
   void OnMessageReceived(const IPC::Message& msg);
@@ -109,8 +113,7 @@ class NPObjectProxy : public IPC::Channel::Listener,
   int route_id_;
   void* npobject_ptr_;
   scoped_refptr<PluginChannelBase> channel_;
-  HANDLE modal_dialog_event_;
+  base::WaitableEvent* modal_dialog_event_;
 };
 
-#endif  // CHROME_PLUGIN_NPOBJECT_PROXY_H__
-
+#endif  // CHROME_PLUGIN_NPOBJECT_PROXY_H_

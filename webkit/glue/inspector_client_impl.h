@@ -9,17 +9,18 @@
 #include "base/ref_counted.h"
 
 class WebNodeHighlight;
-class WebView;
+class WebViewImpl;
 
 class WebInspectorClient : public WebCore::InspectorClient {
 public:
-  WebInspectorClient(WebView*);
+  WebInspectorClient(WebViewImpl*);
 
   // InspectorClient
   virtual void inspectorDestroyed();
 
   virtual WebCore::Page* createPage();
   virtual WebCore::String localizedStringsURL();
+  virtual WebCore::String hiddenPanels();
   virtual void showWindow();
   virtual void closeWindow();
   virtual bool windowVisible();
@@ -27,20 +28,27 @@ public:
   virtual void attachWindow();
   virtual void detachWindow();
 
+  virtual void setAttachedWindowHeight(unsigned height);
+
   virtual void highlight(WebCore::Node*);
   virtual void hideHighlight();
 
   virtual void inspectedURLChanged(const WebCore::String& newURL);
 
+  virtual void populateSetting(
+      const WebCore::String& key, WebCore::InspectorController::Setting&);
+  virtual void storeSetting(
+      const WebCore::String& key, const WebCore::InspectorController::Setting&);
+  virtual void removeSetting(const WebCore::String& key);
+
 private:
   ~WebInspectorClient();
 
-  // The WebView of the page being inspected; gets passed to the constructor
-  scoped_refptr<WebView> inspected_web_view_;
+  // The WebViewImpl of the page being inspected; gets passed to the constructor
+  scoped_refptr<WebViewImpl> inspected_web_view_;
 
   // The WebView of the Inspector popup window
-  WebView* inspector_web_view_;
+  WebViewImpl* inspector_web_view_;
 };
 
 #endif // WEBKIT_GLUE_INSPECTOR_CLIENT_IMPL_H__
-

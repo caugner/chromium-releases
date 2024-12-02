@@ -32,7 +32,7 @@ class ThrobAnimation : public SlideAnimation {
   virtual void Hide();
 
   // Overriden to continually throb (assuming we're throbbing).
-  virtual void Run();
+  virtual void Step();
 
   // Overridden to maintain the slide duration.
   virtual void SetSlideDuration(int duration) { slide_duration_ = duration; }
@@ -57,4 +57,3 @@ class ThrobAnimation : public SlideAnimation {
 };
 
 #endif  // CHROME_COMMON_THROB_ANIMATION_H_
-

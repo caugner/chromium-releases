@@ -2,15 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/history/download_database.h"
+
 #include <limits>
 #include <vector>
-
-#include "chrome/browser/history/download_database.h"
 
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/history/download_types.h"
 #include "chrome/common/sqlite_utils.h"
 #include "chrome/common/sqlite_compiled_statement.h"
+
+using base::Time;
 
 // Download schema:
 //
@@ -53,7 +55,8 @@ bool DownloadDatabase::DropDownloadTable() {
       SQLITE_OK;
 }
 
-void DownloadDatabase::QueryDownloads(std::vector<DownloadCreateInfo>* results) {
+void DownloadDatabase::QueryDownloads(
+    std::vector<DownloadCreateInfo>* results) {
   results->clear();
 
   SQLITE_UNIQUE_STATEMENT(statement, GetStatementCache(),
@@ -67,8 +70,12 @@ void DownloadDatabase::QueryDownloads(std::vector<DownloadCreateInfo>* results) 
   while (statement->step() == SQLITE_ROW) {
     DownloadCreateInfo info;
     info.db_handle = statement->column_int64(0);
-    statement->column_string16(1, &info.path);
-    statement->column_string16(2, &info.url);
+    std::wstring path_str;
+    statement->column_wstring(1, &path_str);
+    info.path = FilePath::FromWStringHack(path_str);
+    std::wstring url_str;
+    statement->column_wstring(2, &url_str);
+    info.url = GURL(WideToUTF8(url_str));
     info.start_time = Time::FromTimeT(statement->column_int64(3));
     info.received_bytes = statement->column_int64(4);
     info.total_bytes = statement->column_int64(5);
@@ -93,6 +100,20 @@ bool DownloadDatabase::UpdateDownload(int64 received_bytes,
   return statement->step() == SQLITE_DONE;
 }
 
+bool DownloadDatabase::UpdateDownloadPath(const std::wstring& path,
+                                          DownloadID db_handle) {
+  DCHECK(db_handle > 0);
+  SQLITE_UNIQUE_STATEMENT(statement, GetStatementCache(),
+      "UPDATE downloads "
+      "SET full_path=? WHERE id=?");
+  if (!statement.is_valid())
+    return false;
+
+  statement->bind_wstring(0, path);
+  statement->bind_int64(1, db_handle);
+  return statement->step() == SQLITE_DONE;
+}
+
 int64 DownloadDatabase::CreateDownload(const DownloadCreateInfo& info) {
   SQLITE_UNIQUE_STATEMENT(statement, GetStatementCache(),
       "INSERT INTO downloads "
@@ -101,8 +122,8 @@ int64 DownloadDatabase::CreateDownload(const DownloadCreateInfo& info) {
   if (!statement.is_valid())
     return 0;
 
-  statement->bind_wstring(0, info.path);
-  statement->bind_wstring(1, info.url);
+  statement->bind_wstring(0, info.path.ToWStringHack());
+  statement->bind_wstring(1, UTF8ToWide(info.url.spec()));
   statement->bind_int64(2, info.start_time.ToTimeT());
   statement->bind_int64(3, info.received_bytes);
   statement->bind_int64(4, info.total_bytes);
@@ -136,7 +157,9 @@ void DownloadDatabase::RemoveDownloadsBetween(Time delete_begin,
   time_t start_time = delete_begin.ToTimeT();
   time_t end_time = delete_end.ToTimeT();
   statement->bind_int64(0, start_time);
-  statement->bind_int64(1, end_time ? end_time : std::numeric_limits<int64>::max());
+  statement->bind_int64(
+      1,
+      end_time ? end_time : std::numeric_limits<int64>::max());
   statement->bind_int(2, DownloadItem::COMPLETE);
   statement->bind_int(3, DownloadItem::CANCELLED);
   statement->step();
@@ -161,4 +184,3 @@ void DownloadDatabase::SearchDownloads(std::vector<int64>* results,
 }
 
 }  // namespace history
-

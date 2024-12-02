@@ -5,6 +5,8 @@
 #ifndef NET_URL_REQUEST_URL_REQUEST_TEST_JOB_H_
 #define NET_URL_REQUEST_URL_REQUEST_TEST_JOB_H_
 
+#include <string>
+
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
 
@@ -26,7 +28,7 @@
 // end of the queue.
 class URLRequestTestJob : public URLRequestJob {
  public:
-  URLRequestTestJob(URLRequest* request);
+  explicit URLRequestTestJob(URLRequest* request);
   virtual ~URLRequestTestJob() {}
 
   // the three URLs this handler will respond to
@@ -51,9 +53,9 @@ class URLRequestTestJob : public URLRequestJob {
 
   // Job functions
   virtual void Start();
-  virtual bool ReadRawData(char* buf, int buf_size, int *bytes_read);
+  virtual bool ReadRawData(net::IOBuffer* buf, int buf_size, int *bytes_read);
   virtual void Kill();
-  virtual bool GetMimeType(std::string* mime_type);
+  virtual bool GetMimeType(std::string* mime_type) const;
   virtual void GetResponseInfo(net::HttpResponseInfo* info);
 
  protected:
@@ -78,9 +80,8 @@ class URLRequestTestJob : public URLRequestJob {
   int offset_;
 
   // Holds the buffer for an asynchronous ReadRawData call
-  char* async_buf_;
+  net::IOBuffer* async_buf_;
   int async_buf_size_;
 };
 
 #endif  // NET_URL_REQUEST_URL_REQUEST_TEST_JOB_H_
-

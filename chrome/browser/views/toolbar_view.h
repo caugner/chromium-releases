@@ -2,23 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_VIEWS_TOOLBAR_VIEW_H__
-#define CHROME_BROWSER_VIEWS_TOOLBAR_VIEW_H__
+#ifndef CHROME_BROWSER_VIEWS_TOOLBAR_VIEW_H_
+#define CHROME_BROWSER_VIEWS_TOOLBAR_VIEW_H_
 
 #include <vector>
 
+#include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
-#include "chrome/browser/back_forward_menu_model.h"
-#include "chrome/browser/controller.h"
+#include "chrome/browser/back_forward_menu_model_win.h"
+#include "chrome/browser/command_updater.h"
 #include "chrome/browser/encoding_menu_controller_delegate.h"
+#include "chrome/browser/user_data_manager.h"
 #include "chrome/browser/views/dom_view.h"
 #include "chrome/browser/views/go_button.h"
 #include "chrome/browser/views/location_bar_view.h"
 #include "chrome/common/pref_member.h"
-#include "chrome/views/menu.h"
-#include "chrome/views/menu_button.h"
+#include "chrome/views/controls/button/menu_button.h"
+#include "chrome/views/controls/menu/menu.h"
+#include "chrome/views/controls/menu/view_menu_delegate.h"
 #include "chrome/views/view.h"
-#include "chrome/views/view_menu_delegate.h"
 
 class Browser;
 class Profile;
@@ -32,36 +34,42 @@ class ToolbarStarToggle;
 //  rendering the Toolbar used in the Browser Window
 //
 ///////////////////////////////////////////////////////////////////////////////
-class BrowserToolbarView : public ChromeViews::View,
+class BrowserToolbarView : public views::View,
                            public EncodingMenuControllerDelegate,
-                           public ChromeViews::ViewMenuDelegate,
-                           public ChromeViews::DragController,
+                           public views::ViewMenuDelegate,
+                           public views::DragController,
                            public LocationBarView::Delegate,
-                           public NotificationObserver {
+                           public NotificationObserver,
+                           public GetProfilesHelper::Delegate,
+                           public CommandUpdater::CommandObserver,
+                           public views::ButtonListener {
  public:
-  BrowserToolbarView(CommandController* controller, Browser* browser);
+  explicit BrowserToolbarView(Browser* browser);
   virtual ~BrowserToolbarView();
 
   // Create the contents of the Browser Toolbar
   void Init(Profile* profile);
 
-  // ChromeViews::View
+  // views::View
   virtual void Layout();
-  virtual void DidChangeBounds(const CRect& previous, const CRect& current);
+  virtual void Paint(ChromeCanvas* canvas);
   virtual void DidGainFocus();
   virtual void WillLoseFocus();
-  virtual bool OnKeyPressed(const ChromeViews::KeyEvent& e);
-  virtual bool OnKeyReleased(const ChromeViews::KeyEvent& e);
-  virtual void GetPreferredSize(CSize* out);
+  virtual bool OnKeyPressed(const views::KeyEvent& e);
+  virtual bool OnKeyReleased(const views::KeyEvent& e);
+  virtual gfx::Size GetPreferredSize();
 
   // Overridden from EncodingMenuControllerDelegate:
   virtual bool IsItemChecked(int id) const;
 
   // Overridden from Menu::BaseControllerDelegate:
-  virtual bool GetAcceleratorInfo(int id, ChromeViews::Accelerator* accel);
+  virtual bool GetAcceleratorInfo(int id, views::Accelerator* accel);
 
-  // ChromeViews::MenuDelegate
-  virtual void RunMenu(ChromeViews::View* source, const CPoint& pt, HWND hwnd);
+  // views::MenuDelegate
+  virtual void RunMenu(views::View* source, const CPoint& pt, HWND hwnd);
+
+  // GetProfilesHelper::Delegate method.
+  virtual void OnGetProfilesDone(const std::vector<std::wstring>& profiles);
 
   // Sets the profile which is active on the currently-active tab.
   void SetProfile(Profile* profile);
@@ -79,18 +87,20 @@ class BrowserToolbarView : public ChromeViews::View,
   // (such as user editing) as well.
   void Update(TabContents* tab, bool should_restore_state);
 
-  void OnInputInProgress(bool in_progress);
+  virtual void OnInputInProgress(bool in_progress);
+
+  // Returns a brief, identifying string, containing a unique, readable name.
+  virtual bool GetAccessibleName(std::wstring* name);
 
   // Returns the MSAA role of the current view. The role is what assistive
   // technologies (ATs) use to determine what behavior to expect from a given
   // control.
-  bool GetAccessibleRole(VARIANT* role);
-
-  // Returns a brief, identifying string, containing a unique, readable name.
-  bool GetAccessibleName(std::wstring* name);
+  virtual bool GetAccessibleRole(VARIANT* role);
 
   // Assigns an accessible string name.
-  void SetAccessibleName(const std::wstring& name);
+  virtual void SetAccessibleName(const std::wstring& name);
+
+  virtual View* GetAccFocusedChildView() { return acc_focused_view_; }
 
   // Returns the index of the next view of the toolbar, starting from the given
   // view index (skipping the location bar), in the given navigation direction
@@ -98,8 +108,8 @@ class BrowserToolbarView : public ChromeViews::View,
   // first accessible child, based on the above policy.
   int GetNextAccessibleViewIndex(int view_index, bool nav_left);
 
-  ChromeViews::View* GetAccFocusedChildView() {
-    return acc_focused_view_;
+  void set_acc_focused_view(views::View* acc_focused_view) {
+    acc_focused_view_ = acc_focused_view;
   }
 
   // Returns the selected tab.
@@ -107,7 +117,22 @@ class BrowserToolbarView : public ChromeViews::View,
 
   Browser* browser() { return browser_; }
 
+  // Overridden from CommandUpdater::CommandObserver:
+  virtual void EnabledStateChangedForCommand(int id, bool enabled);
+
+  // Overridden from views::BaseButton::ButtonListener:
+  virtual void ButtonPressed(views::Button* sender);
+
  private:
+  // Types of display mode this toolbar can have.
+  enum DisplayMode {
+    DISPLAYMODE_NORMAL,
+    DISPLAYMODE_LOCATION
+  };
+
+  // Returns the number of pixels above the location bar in non-normal display.
+  int PopupTopSpacing();
+
   // NotificationObserver
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
@@ -136,20 +161,17 @@ class BrowserToolbarView : public ChromeViews::View,
   // Show the app menu.
   void RunAppMenu(const CPoint& pt, HWND hwnd);
 
-  // Types of display mode this toolbar can have.
-  enum DisplayMode {
-    DISPLAYMODE_NORMAL,
-    DISPLAYMODE_LOCATION
-  };
+  // Overridden from View, to pass keyboard triggering of the right-click
+  // context menu on to the toolbar child view that currently has the
+  // accessibility focus.
+  virtual void ShowContextMenu(int x, int y, bool is_mouse_gesture);
+
   bool IsDisplayModeNormal() const {
     return display_mode_ == DISPLAYMODE_NORMAL;
   }
 
-  // This View's Command Controller
-  CommandController* controller_;
-
-  scoped_ptr<BackForwardMenuModel> back_menu_model_;
-  scoped_ptr<BackForwardMenuModel> forward_menu_model_;
+  scoped_ptr<BackForwardMenuModelWin> back_menu_model_;
+  scoped_ptr<BackForwardMenuModelWin> forward_menu_model_;
 
   // The model that contains the security level, text, icon to display...
   ToolbarModel* model_;
@@ -158,23 +180,31 @@ class BrowserToolbarView : public ChromeViews::View,
   std::wstring accessible_name_;
   // Child view currently having MSAA focus (location bar excluded from arrow
   // navigation).
-  ChromeViews::View* acc_focused_view_;
+  views::View* acc_focused_view_;
 
   // Controls
-  ChromeViews::Button* back_;
-  ChromeViews::Button* forward_;
-  ChromeViews::Button* reload_;
-  ChromeViews::Button* home_;
+  views::ImageButton* back_;
+  views::ImageButton* forward_;
+  views::ImageButton* reload_;
+  views::ImageButton* home_;
   ToolbarStarToggle* star_;
   LocationBarView* location_bar_;
   GoButton* go_;
-  ChromeViews::MenuButton* page_menu_;
-  ChromeViews::MenuButton* app_menu_;
+  views::MenuButton* page_menu_;
+  views::MenuButton* app_menu_;
+  // The bookmark menu button. This may be null.
+  views::MenuButton* bookmark_menu_;
   Profile* profile_;
   Browser* browser_;
 
   // Current tab we're showing state for.
   TabContents* tab_;
+
+  // Profiles menu to populate with profile names.
+  Menu* profiles_menu_;
+
+  // Helper class to enumerate profiles information on the file thread.
+  scoped_refptr<GetProfilesHelper> profiles_helper_;
 
   // Controls whether or not a home button should be shown on the toolbar.
   BooleanPrefMember show_home_button_;
@@ -183,5 +213,4 @@ class BrowserToolbarView : public ChromeViews::View,
   DisplayMode display_mode_;
 };
 
-#endif  // CHROME_BROWSER_VIEWS_TOOLBAR_VIEW_H__
-
+#endif  // CHROME_BROWSER_VIEWS_TOOLBAR_VIEW_H_

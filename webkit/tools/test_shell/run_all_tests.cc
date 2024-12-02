@@ -5,18 +5,32 @@
 // Run all of our test shell tests.  This is just an entry point
 // to kick off gTest's RUN_ALL_TESTS().
 
+#include "base/basictypes.h"
+
+#if defined(OS_WIN)
 #include <windows.h>
 #include <commctrl.h>
+#endif
 
 #include "base/at_exit.h"
+#include "base/command_line.h"
 #include "base/icu_util.h"
+#if defined(OS_MACOSX)
+#include "base/mac_util.h"
+#include "base/path_service.h"
+#endif
 #include "base/message_loop.h"
+#include "base/process_util.h"
+#include "base/scoped_nsautorelease_pool.h"
+#include "webkit/glue/webkit_glue.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/test_shell.h"
+#include "webkit/tools/test_shell/test_shell_platform_delegate.h"
 #include "webkit/tools/test_shell/test_shell_test.h"
+#include "webkit/tools/test_shell/test_shell_webkit_init.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-const char* TestShellTest::kJavascriptDelayExitScript = 
+const char* TestShellTest::kJavascriptDelayExitScript =
   "<script>"
     "window.layoutTestController.waitUntilDone();"
     "window.addEventListener('load', function() {"
@@ -26,21 +40,41 @@ const char* TestShellTest::kJavascriptDelayExitScript =
   "</script>";
 
 int main(int argc, char* argv[]) {
+  base::ScopedNSAutoreleasePool autorelease_pool;
+  base::EnableTerminationOnHeapCorruption();
   // Some unittests may use base::Singleton<>, thus we need to instanciate
   // the AtExitManager or else we will leak objects.
-  base::AtExitManager at_exit_manager;  
+  base::AtExitManager at_exit_manager;
 
-  TestShell::InitLogging(true);  // suppress error dialogs
+#if defined(OS_MACOSX)
+  FilePath path;
+  PathService::Get(base::DIR_EXE, &path);
+  path = path.AppendASCII("TestShell.app");
+  mac_util::SetOverrideAppBundlePath(path);
+#endif
 
-  // Initialize test shell in non-interactive mode, which will let us load one
-  // request than automatically quit.
-  TestShell::InitializeTestShell(false);
+  TestShellPlatformDelegate::PreflightArgs(&argc, &argv);
+  CommandLine::Init(argc, argv);
+  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
+  TestShellPlatformDelegate platform(parsed_command_line);
 
+  // Suppress error dialogs and do not show GP fault error box on Windows.
+  TestShell::InitLogging(true, false, false);
+
+#if defined(OS_WIN)
   // Some of the individual tests wind up calling TestShell::WaitTestFinished
   // which has a timeout in it.  For these tests, we don't care about a timeout
   // so just set it to be a really large number.  This is necessary because
   // when running under Purify, we were hitting those timeouts.
   TestShell::SetFileTestTimeout(USER_TIMER_MAXIMUM);
+#endif
+
+  // Initialize test shell in layout test mode, which will let us load one
+  // request than automatically quit.
+  TestShell::InitializeTestShell(true);
+
+  // Initialize WebKit for this scope.
+  TestShellWebKitInit test_shell_webkit_init(true);
 
   // Allocate a message loop for this thread.  Although it is not used
   // directly, its constructor sets up some necessary state.
@@ -49,11 +83,8 @@ int main(int argc, char* argv[]) {
   // Load ICU data tables
   icu_util::Initialize();
 
-  INITCOMMONCONTROLSEX InitCtrlEx;
-
-  InitCtrlEx.dwSize = sizeof(INITCOMMONCONTROLSEX);
-  InitCtrlEx.dwICC  = ICC_STANDARD_CLASSES;
-  InitCommonControlsEx(&InitCtrlEx);
+  platform.InitializeGUI();
+  platform.SelectUnifiedTheme();
 
   // Run the actual tests
   testing::InitGoogleTest(&argc, argv);
@@ -61,6 +92,6 @@ int main(int argc, char* argv[]) {
 
   TestShell::ShutdownTestShell();
   TestShell::CleanupLogging();
+
   return result;
 }
-

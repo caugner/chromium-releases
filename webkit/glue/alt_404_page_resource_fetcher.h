@@ -13,9 +13,6 @@
 #include "webkit/glue/resource_fetcher.h"
 
 class WebFrameLoaderClient;
-class WebCore::DocumentLoader;
-class WebCore::Frame;
-class WebCore::ResourceResponse;
 
 // ResourceHandleClient implementation that is used for downloading alternate
 // 404 pages. Once downloading is done (or fails), the WebFrameLoaderClient is
@@ -52,4 +49,3 @@ class Alt404PageResourceFetcher : public ResourceFetcher::Delegate {
 };
 
 #endif  // WEBKIT_GLUE_ALT_404_PAGE_RESOURCE_HANDLE_CLIENT_H__
-

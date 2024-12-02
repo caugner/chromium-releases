@@ -5,8 +5,11 @@
 #include "chrome/test/testing_profile.h"
 
 #include "base/string_util.h"
+#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/common/chrome_constants.h"
+
+using base::Time;
 
 namespace {
 
@@ -33,6 +36,8 @@ class BookmarkLoadObserver : public BookmarkModelObserver {
                                    int index) {}
   virtual void BookmarkNodeChanged(BookmarkModel* model,
                                    BookmarkNode* node) {}
+  virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
+                                             BookmarkNode* node) {}
   virtual void BookmarkNodeFavIconLoaded(BookmarkModel* model,
                                          BookmarkNode* node) {}
 
@@ -43,17 +48,24 @@ class BookmarkLoadObserver : public BookmarkModelObserver {
 }  // namespace
 
 TestingProfile::TestingProfile()
-    : start_time_(Time::Now()), has_history_service_(false) {
+    : start_time_(Time::Now()),
+      has_history_service_(false),
+      off_the_record_(false),
+      last_session_exited_cleanly_(true) {
   PathService::Get(base::DIR_TEMP, &path_);
-  file_util::AppendToPath(&path_, L"TestingProfilePath");
+  path_ = path_.Append(FILE_PATH_LITERAL("TestingProfilePath"));
   file_util::Delete(path_, true);
   file_util::CreateDirectory(path_);
 }
 
 TestingProfile::TestingProfile(int count)
-    : start_time_(Time::Now()), has_history_service_(false) {
+    : start_time_(Time::Now()),
+      has_history_service_(false),
+      off_the_record_(false),
+      last_session_exited_cleanly_(true) {
   PathService::Get(base::DIR_TEMP, &path_);
-  file_util::AppendToPath(&path_, L"TestingProfilePath" + IntToWString(count));
+  path_ = path_.Append(FILE_PATH_LITERAL("TestingProfilePath"));
+  path_ = path_.AppendASCII(IntToString(count));
   file_util::Delete(path_, true);
   file_util::CreateDirectory(path_);
 }
@@ -70,8 +82,8 @@ void TestingProfile::CreateHistoryService(bool delete_file) {
   history_service_ = NULL;
 
   if (delete_file) {
-    std::wstring path = GetPath();
-    file_util::AppendToPath(&path, chrome::kHistoryFilename);
+    FilePath path = GetPath();
+    path = path.Append(chrome::kHistoryFilename);
     file_util::Delete(path, false);
   }
   history_service_ = new HistoryService(this);
@@ -104,8 +116,8 @@ void TestingProfile::CreateBookmarkModel(bool delete_file) {
   bookmark_bar_model_.reset(NULL);
 
   if (delete_file) {
-    std::wstring path = GetPath();
-    file_util::AppendToPath(&path, chrome::kBookmarksFileName);
+    FilePath path = GetPath();
+    path = path.Append(chrome::kBookmarksFileName);
     file_util::Delete(path, false);
   }
   bookmark_bar_model_.reset(new BookmarkModel(this));

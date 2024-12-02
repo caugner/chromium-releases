@@ -2,10 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef WEBKIT_GLUE_WEBRESPONSEIMPL_H__
-#define WEBKIT_GLUE_WEBRESPONSEIMPL_H__
-
-#include <string>
+#ifndef WEBKIT_GLUE_WEBRESPONSEIMPL_H_
+#define WEBKIT_GLUE_WEBRESPONSEIMPL_H_
 
 #include "googleurl/src/gurl.h"
 #include "webkit/glue/glue_util.h"
@@ -18,7 +16,7 @@ class WebResponseImpl : public WebResponse {
    WebResponseImpl() { }
    explicit WebResponseImpl(const WebCore::ResourceResponse& response)
       : response_(response) { }
-   
+
   virtual ~WebResponseImpl() { }
 
   // Get the URL.
@@ -29,6 +27,10 @@ class WebResponseImpl : public WebResponse {
   // Get the http status code.
   virtual int GetHttpStatusCode() const { return response_.httpStatusCode(); }
 
+  virtual std::string GetMimeType() const {
+    return webkit_glue::StringToStdString(response_.mimeType());
+  }
+
   // Get the security info (state of the SSL connection).
   virtual std::string GetSecurityInfo() const {
     return webkit_glue::CStringToStdString(response_.getSecurityInfo());
@@ -38,11 +40,14 @@ class WebResponseImpl : public WebResponse {
     response_ = response;
   }
 
+ virtual bool IsContentFiltered() const {
+   return response_.isContentFiltered();
+ }
+
  private:
   WebCore::ResourceResponse response_;
 
   DISALLOW_EVIL_CONSTRUCTORS(WebResponseImpl);
 };
 
-#endif  // #ifndef WEBKIT_GLUE_WEBRESPONSEIMPL_H__
-
+#endif  // #ifndef WEBKIT_GLUE_WEBRESPONSEIMPL_H_

@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_observer.h"
 
 // Aids in registering for notifications and ensures that all registered
 // notifications are unregistered when the class is destroyed.
@@ -27,26 +27,16 @@ class NotificationRegistrar {
   // Wrappers around NotificationService::[Add|Remove]Observer.
   void Add(NotificationObserver* observer,
            NotificationType type,
-           NotificationSource source);
+           const NotificationSource& source);
   void Remove(NotificationObserver* observer,
               NotificationType type,
-              NotificationSource source);
+              const NotificationSource& source);
 
   // Unregisters all notifications.
   void RemoveAll();
 
  private:
-  struct Record {
-    bool operator==(const Record& other) const {
-      return observer == other.observer &&
-             type == other.type &&
-             source == other.source;
-    }
-
-    NotificationObserver* observer;
-    NotificationType type;
-    NotificationSource source;
-  };
+  struct Record;
 
   // We keep registered notifications in a simple vector. This means we'll do
   // brute-force searches when removing them individually, but individual

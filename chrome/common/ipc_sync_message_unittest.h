@@ -4,7 +4,16 @@
 
 #include "chrome/common/ipc_message_macros.h"
 
-IPC_BEGIN_MESSAGES(TestMsg, 8)
+IPC_BEGIN_MESSAGES(Test)
+  IPC_SYNC_MESSAGE_CONTROL0_0(SyncChannelTestMsg_NoArgs)
+
+  IPC_SYNC_MESSAGE_CONTROL0_1(SyncChannelTestMsg_AnswerToLife,
+                              int /* answer */)
+
+  IPC_SYNC_MESSAGE_CONTROL1_1(SyncChannelTestMsg_Double,
+                              int /* in */,
+                              int /* out */)
+
   // out1 is false
   IPC_SYNC_MESSAGE_CONTROL0_1(Msg_C_0_1, bool)
 
@@ -35,11 +44,14 @@ IPC_BEGIN_MESSAGES(TestMsg, 8)
   // in1 must be 1, in2 must be false, in3 must be "3_1", out1 is true
   IPC_SYNC_MESSAGE_CONTROL3_1(Msg_C_3_1, int, bool, std::string, bool)
 
-  // in1 must be "3_3", in2 must be false, in3 must be 2, out1 is true, out2 is 32
+  // in1 must be "3_3", in2 must be false, in3 must be 2, out1 is true, out2 is
+  // 32
   IPC_SYNC_MESSAGE_CONTROL3_2(Msg_C_3_2, std::string, bool, int, bool, int)
 
-  // in1 must be 3, in2 must be "3_3", in3 must be true, out1 is "3_3", out2 is 33, out3 is false
-  IPC_SYNC_MESSAGE_CONTROL3_3(Msg_C_3_3, int, std::string, bool, std::string, int, bool)
+  // in1 must be 3, in2 must be "3_3", in3 must be true, out1 is "3_3", out2 is
+  // 33, out3 is false
+  IPC_SYNC_MESSAGE_CONTROL3_3(Msg_C_3_3, int, std::string, bool, std::string,
+                              int, bool)
 
 
   // NOTE: routed messages are just a copy of the above...
@@ -74,11 +86,13 @@ IPC_BEGIN_MESSAGES(TestMsg, 8)
   // in1 must be 1, in2 must be false, in3 must be "3_1", out1 is true
   IPC_SYNC_MESSAGE_ROUTED3_1(Msg_R_3_1, int, bool, std::string, bool)
 
-  // in1 must be "3_3", in2 must be false, in3 must be 2, out1 is true, out2 is 32
+  // in1 must be "3_3", in2 must be false, in3 must be 2, out1 is true, out2
+  // is 32
   IPC_SYNC_MESSAGE_ROUTED3_2(Msg_R_3_2, std::string, bool, int, bool, int)
 
-  // in1 must be 3, in2 must be "3_3", in3 must be true, out1 is "3_3", out2 is 33, out3 is false
-  IPC_SYNC_MESSAGE_ROUTED3_3(Msg_R_3_3, int, std::string, bool, std::string, int, bool)
+  // in1 must be 3, in2 must be "3_3", in3 must be true, out1 is "3_3", out2 is
+  // 33, out3 is false
+  IPC_SYNC_MESSAGE_ROUTED3_3(Msg_R_3_3, int, std::string, bool, std::string,
+                             int, bool)
 
 IPC_END_MESSAGES(TestMsg)
-

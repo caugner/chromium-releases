@@ -9,22 +9,35 @@
 
 namespace mini_installer_constants {
 
-extern const wchar_t kAppDir[];
+// Path and process names
+extern const wchar_t kChromeAppDir[];
 extern const wchar_t kChromeSetupExecutable[];
 extern const wchar_t kChromeMiniInstallerExecutable[];
-extern const wchar_t kChromeInstallerType[];
+extern const wchar_t kChromeMetaInstallerExecutable[];
+extern const wchar_t kGoogleUpdateExecutable[];
+extern const wchar_t kIEExecutable[];
 
 // Window names.
 extern const wchar_t kBrowserAppName[];
 extern const wchar_t kBrowserTabName[];
-extern const wchar_t kConfirmDialog[];
+extern const wchar_t kChromeBuildType[];
+extern const wchar_t kChromeFirstRunUI[];
 extern const wchar_t kInstallerWindow[];
-extern const wchar_t kFirstChromeUI[];
-extern const wchar_t kChromeUninstallIETitle[];
 
-// Chrome meta installer location.
-extern const wchar_t kChromeSetupDevExeLocation[];
+// Shortcut names
+extern const wchar_t kChromeLaunchShortcut[];
+extern const wchar_t kChromeUninstallShortcut[];
+
+// Chrome install types
+extern const wchar_t kSystemInstall[];
+extern const wchar_t kStandaloneInstaller[];
+extern const wchar_t kUserInstall[];
+
+// Google Chrome meta installer location.
+extern const wchar_t kChromeApplyTagExe[];
+extern const wchar_t kChromeMetaInstallerExe[];
+extern const wchar_t kChromeStandAloneInstallerLocation[];
+extern const wchar_t kChromeApplyTagParameters[];
 }
 
 #endif  // CHROME_TEST_MINI_INSTALLER_TEST_MINI_INSTALLER_TEST_CONSTANTS_H__
-

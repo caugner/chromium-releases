@@ -35,7 +35,7 @@
 - (void) dealloc {
   [self removeTrackingArea:trackingArea_];
   [trackingArea_ release];
-  
+
   [super dealloc];
 }
 
@@ -43,15 +43,20 @@
   CGContextRef context =
       reinterpret_cast<CGContextRef>([[NSGraphicsContext currentContext]
                                       graphicsPort]);
-  
+
   // start by filling the rect with magenta, so that we can see what's drawn
   CGContextSetRGBFillColor (context, 1, 0, 1, 1);
   CGContextFillRect(context, NSRectToCGRect(rect));
 
-  // uncomment when we stop passing the wrong kinds of GraphicsContext to
-  // WebCore
-  if (shell_ && shell_->webView())
+  if (shell_ && shell_->webView()) {
+    gfx::Rect client_rect(NSRectToCGRect(rect));
+    // flip from cocoa coordinates
+    client_rect.set_y([self frame].size.height -
+                      client_rect.height() - client_rect.y());
+
+    shell_->webViewHost()->UpdatePaintRect(client_rect);
     shell_->webViewHost()->Paint();
+  }
 }
 
 - (IBAction)goBack:(id)sender {
@@ -76,6 +81,12 @@
 
 - (IBAction)takeURLStringValueFrom:(NSTextField *)sender {
   NSString *url = [sender stringValue];
+
+  // if it doesn't already have a prefix, add http. If we can't parse it,
+  // just don't bother rather than making things worse.
+  NSURL* tempUrl = [NSURL URLWithString:url];
+  if (tempUrl && ![tempUrl scheme])
+    url = [@"http://" stringByAppendingString:url];
   shell_->LoadURL(UTF8ToWide([url UTF8String]).c_str());
 }
 
@@ -171,7 +182,7 @@
     shell_->webViewHost()->SetFocus(YES);
     return YES;
   }
-  
+
   return NO;
 }
 
@@ -180,7 +191,7 @@
     shell_->webViewHost()->SetFocus(NO);
     return YES;
   }
-  
+
   return NO;
 }
 

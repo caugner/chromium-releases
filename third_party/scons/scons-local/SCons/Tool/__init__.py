@@ -14,7 +14,7 @@ tool definition.
 """
 
 #
-# Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008 The SCons Foundation
+# Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009 The SCons Foundation
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -36,7 +36,7 @@ tool definition.
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
-__revision__ = "src/engine/SCons/Tool/__init__.py 3424 2008/09/15 11:22:20 scons"
+__revision__ = "src/engine/SCons/Tool/__init__.py 3897 2009/01/13 06:45:54 scons"
 
 import imp
 import sys
@@ -55,6 +55,7 @@ DefaultToolpath=[]
 CScanner = SCons.Scanner.C.CScanner()
 DScanner = SCons.Scanner.D.DScanner()
 LaTeXScanner = SCons.Scanner.LaTeX.LaTeXScanner()
+PDFLaTeXScanner = SCons.Scanner.LaTeX.PDFLaTeXScanner()
 ProgramScanner = SCons.Scanner.Prog.ProgramScanner()
 SourceFileScanner = SCons.Scanner.Base({}, name='SourceFileScanner')
 
@@ -76,8 +77,13 @@ for suffix in CSuffixes:
 for suffix in DSuffixes:
     SourceFileScanner.add_scanner(suffix, DScanner)
 
+# FIXME: what should be done here? Two scanners scan the same extensions,
+# but look for different files, e.g., "picture.eps" vs. "picture.pdf".
+# The builders for DVI and PDF explicitly reference their scanners
+# I think that means this is not needed???
 for suffix in LaTeXSuffixes:
-     SourceFileScanner.add_scanner(suffix, LaTeXScanner)
+    SourceFileScanner.add_scanner(suffix, LaTeXScanner)
+    SourceFileScanner.add_scanner(suffix, PDFLaTeXScanner)
 
 class Tool:
     def __init__(self, name, toolpath=[], **kw):
@@ -136,7 +142,7 @@ class Tool:
                         file.close()
                     return module
                 except ImportError, e:
-                    if e!="No module named %s"%self.name:
+                    if str(e)!="No module named %s"%self.name:
                         raise SCons.Errors.EnvironmentError, e
                     try:
                         import zipimport
@@ -266,7 +272,7 @@ def createLoadableModuleBuilder(env):
         action_list = [ SCons.Defaults.SharedCheck,
                         SCons.Defaults.LdModuleLinkAction ]
         ld_module = SCons.Builder.Builder(action = action_list,
-                                          emitter = "$SHLIBEMITTER",
+                                          emitter = "$LDMODULEEMITTER",
                                           prefix = '$LDMODULEPREFIX',
                                           suffix = '$LDMODULESUFFIX',
                                           target_scanner = ProgramScanner,

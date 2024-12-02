@@ -65,6 +65,23 @@ class HttpUtil {
   static void TrimLWS(std::string::const_iterator* begin,
                       std::string::const_iterator* end);
 
+  // Whether the character is the start of a quotation mark.
+  static bool IsQuote(char c);
+
+  // RFC 2616 Sec 2.2:
+  // quoted-string = ( <"> *(qdtext | quoted-pair ) <"> )
+  // Unquote() strips the surrounding quotemarks off a string, and unescapes
+  // any quoted-pair to obtain the value contained by the quoted-string.
+  // If the input is not quoted, then it works like the identity function.
+  static std::string Unquote(std::string::const_iterator begin,
+                             std::string::const_iterator end);
+
+  // Same as above.
+  static std::string Unquote(const std::string& str);
+
+  // The reverse of Unquote() -- escapes and surrounds with "
+  static std::string Quote(const std::string& str);
+
   // Returns the start of the status line, or -1 if no status line was found.
   // This allows for 4 bytes of junk to precede the status line (which is what
   // mozilla does too).
@@ -84,6 +101,28 @@ class HttpUtil {
   // continuations of the previous line).  |buf_len| indicates the position of
   // the end-of-headers marker as defined by LocateEndOfHeaders.
   static std::string AssembleRawHeaders(const char* buf, int buf_len);
+
+  // Given a comma separated ordered list of language codes, return
+  // the list with a qvalue appended to each language.
+  // The way qvalues are assigned is rather simple. The qvalue
+  // starts with 1.0 and is decremented by 0.2 for each successive entry
+  // in the list until it reaches 0.2. All the entries after that are
+  // assigned the same qvalue of 0.2. Also, note that the 1st language
+  // will not have a qvalue added because the absence of a qvalue implicitly
+  // means q=1.0.
+  //
+  // When making a http request, this should be used to determine what
+  // to put in Accept-Language header. If a comma separated list of language
+  // codes *without* qvalue is sent, web servers regard all
+  // of them as having q=1.0 and pick one of them even though it may not
+  // be at the beginning of the list (see http://crbug.com/5899).
+  static std::string GenerateAcceptLanguageHeader(
+      const std::string& raw_language_list);
+
+  // Given a charset, return the list with a qvalue. If charset is utf-8,
+  // it will return 'utf-8,*;q=0.5'. Otherwise (e.g. 'euc-jp'), it'll return
+  // 'euc-jp,utf-8;q=0.7,*;q=0.3'.
+  static std::string GenerateAcceptCharsetHeader(const std::string& charset);
 
   // Used to iterate over the name/value pairs of HTTP headers.  To iterate
   // over the values in a multi-value header, use ValuesIterator.
@@ -169,4 +208,3 @@ class HttpUtil {
 }  // namespace net
 
 #endif  // NET_HTTP_HTTP_UTIL_H_
-

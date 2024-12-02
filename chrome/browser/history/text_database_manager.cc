@@ -4,12 +4,18 @@
 
 #include "chrome/browser/history/text_database_manager.h"
 
+#include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/histogram.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
+#include "chrome/browser/history/history_publisher.h"
 #include "chrome/common/mru_cache.h"
+
+using base::Time;
+using base::TimeDelta;
+using base::TimeTicks;
 
 namespace history {
 
@@ -61,17 +67,19 @@ bool TextDatabaseManager::PageInfo::Expired(TimeTicks now) const {
 
 // TextDatabaseManager ---------------------------------------------------------
 
-TextDatabaseManager::TextDatabaseManager(const std::wstring& dir,
+TextDatabaseManager::TextDatabaseManager(const FilePath& dir,
+                                         URLDatabase* url_database,
                                          VisitDatabase* visit_database)
     : dir_(dir),
       db_(NULL),
+      url_database_(url_database),
       visit_database_(visit_database),
       recent_changes_(RecentChangeList::NO_AUTO_EVICT),
       transaction_nesting_(0),
       db_cache_(DBCache::NO_AUTO_EVICT),
       present_databases_loaded_(false),
-#pragma warning(suppress: 4355)  // Okay to pass "this" here.
-      factory_(this) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)),
+      history_publisher_(NULL) {
 }
 
 TextDatabaseManager::~TextDatabaseManager() {
@@ -98,7 +106,9 @@ Time TextDatabaseManager::IDToTime(TextDatabase::DBIdent id) {
   return Time::FromUTCExploded(exploded);
 }
 
-bool TextDatabaseManager::Init() {
+bool TextDatabaseManager::Init(const HistoryPublisher* history_publisher) {
+  history_publisher_ = history_publisher;
+
   // Start checking recent changes and committing them.
   ScheduleFlushOldChanges();
   return true;
@@ -137,10 +147,11 @@ void TextDatabaseManager::InitDBList() {
   present_databases_loaded_ = true;
 
   // Find files on disk matching our pattern so we can quickly test for them.
-  file_util::FileEnumerator enumerator(dir_, false,
-      file_util::FileEnumerator::FILES,
-      std::wstring(TextDatabase::file_base()) + L"*");
-  std::wstring cur_file;
+  FilePath::StringType filepattern(TextDatabase::file_base());
+  filepattern.append(FILE_PATH_LITERAL("*"));
+  file_util::FileEnumerator enumerator(
+      dir_, false, file_util::FileEnumerator::FILES, filepattern);
+  FilePath cur_file;
   while (!(cur_file = enumerator.Next()).empty()) {
     // Convert to the number representing this file.
     TextDatabase::DBIdent id = TextDatabase::FileNameToID(cur_file);
@@ -166,8 +177,38 @@ void TextDatabaseManager::AddPageURL(const GURL& url,
 void TextDatabaseManager::AddPageTitle(const GURL& url,
                                        const std::wstring& title) {
   RecentChangeList::iterator found = recent_changes_.Peek(url);
-  if (found == recent_changes_.end())
+  if (found == recent_changes_.end()) {
+    // This page is not in our cache of recent pages. This is very much an edge
+    // case as normally a title will come in <20 seconds after the page commits,
+    // and WebContents will avoid spamming us with >1 title per page. However,
+    // it could come up if your connection is unhappy, and we don't want to
+    // miss anything.
+    //
+    // To solve this problem, we'll just associate the most recent visit with
+    // the new title and index that using the regular code path.
+    URLRow url_row;
+    if (!url_database_->GetRowForURL(url, &url_row))
+      return;  // URL is unknown, give up.
+    VisitRow visit;
+    if (!visit_database_->GetMostRecentVisitForURL(url_row.id(), &visit))
+      return;  // No recent visit, give up.
+
+    if (visit.is_indexed) {
+      // If this page was already indexed, we could have a body that came in
+      // first and we don't want to overwrite it. We could go query for the
+      // current body, or have a special setter for only the title, but this is
+      // not worth it for this edge case.
+      //
+      // It will be almost impossible for the title to take longer than
+      // kExpirationSec yet we got a body in less than that time, since the
+      // title should always come in first.
+      return;
+    }
+
+    AddPageData(url, url_row.id(), visit.visit_id, visit.visit_time,
+                title, std::wstring());
     return;  // We don't know about this page, give up.
+  }
 
   PageInfo& info = found->second;
   if (info.has_body()) {
@@ -184,8 +225,26 @@ void TextDatabaseManager::AddPageTitle(const GURL& url,
 void TextDatabaseManager::AddPageContents(const GURL& url,
                                           const std::wstring& body) {
   RecentChangeList::iterator found = recent_changes_.Peek(url);
-  if (found == recent_changes_.end())
-    return;  // We don't know about this page, give up.
+  if (found == recent_changes_.end()) {
+    // This page is not in our cache of recent pages. This means that the page
+    // took more than kExpirationSec to load. Often, this will be the result of
+    // a very slow iframe or other resource on the page that makes us think its
+    // still loading.
+    //
+    // As a fallback, set the most recent visit's contents using the input, and
+    // use the last set title in the URL table as the title to index.
+    URLRow url_row;
+    if (!url_database_->GetRowForURL(url, &url_row))
+      return;  // URL is unknown, give up.
+    VisitRow visit;
+    if (!visit_database_->GetMostRecentVisitForURL(url_row.id(), &visit))
+      return;  // No recent visit, give up.
+
+    // Use the title from the URL row as the title for the indexing.
+    AddPageData(url, url_row.id(), visit.visit_id, visit.visit_time,
+                url_row.title(), body);
+    return;
+  }
 
   PageInfo& info = found->second;
   if (info.has_title()) {
@@ -250,8 +309,12 @@ bool TextDatabaseManager::AddPageData(const GURL& url,
                                  ConvertStringForIndexer(title),
                                  ConvertStringForIndexer(body));
 
-  HISTOGRAM_TIMES(L"History.AddFTSData",
+  HISTOGRAM_TIMES("History.AddFTSData",
                   TimeTicks::Now() - beginning_time);
+
+  if (history_publisher_)
+    history_publisher_->PublishPageContent(visit_time, url, title, body);
+
   return success;
 }
 
@@ -311,8 +374,7 @@ void TextDatabaseManager::DeleteAll() {
   // Now go through and delete all the files.
   for (DBIdentSet::iterator i = present_databases_.begin();
        i != present_databases_.end(); ++i) {
-    std::wstring file_name(dir_);
-    file_util::AppendToPath(&file_name, TextDatabase::IDToFileName(*i));
+    FilePath file_name = dir_.Append(TextDatabase::IDToFileName(*i));
     file_util::Delete(file_name, false);
   }
 }
@@ -483,4 +545,3 @@ void TextDatabaseManager::FlushOldChangesForTime(TimeTicks now) {
 }
 
 }  // namespace history
-

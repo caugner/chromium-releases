@@ -5,11 +5,14 @@
 #include "config.h"
 #include "webkit/glue/resource_fetcher.h"
 
-#pragma warning(push, 0)
+#include "base/compiler_specific.h"
+
+MSVC_PUSH_WARNING_LEVEL(0);
 #include "FrameLoader.h"
+#include "FrameLoaderClient.h"
 #include "ResourceHandle.h"
 #include "ResourceRequest.h"
-#pragma warning(pop)
+MSVC_POP_WARNING();
 
 #undef LOG
 #include "base/logging.h"
@@ -30,7 +33,7 @@ ResourceFetcher::ResourceFetcher(const GURL& url, WebCore::Frame* frame,
 }
 
 ResourceFetcher::~ResourceFetcher() {
-  if (!completed_)
+  if (!completed_ && loader_.get())
     loader_->cancel();
   loader_ = NULL;
 }
@@ -54,7 +57,8 @@ void ResourceFetcher::Start(WebCore::Frame* frame) {
   }
 
   WebCore::ResourceRequest request(webkit_glue::GURLToKURL(url_));
-  request.setFrame(frame);
+  WebCore::ResourceResponse response;
+  frame_loader->client()->dispatchWillSendRequest(NULL, 0, request, response);
 
   loader_ = ResourceHandle::create(request, this, NULL, false, false);
 }
@@ -91,11 +95,11 @@ void ResourceFetcher::didFinishLoading(ResourceHandle* resource_handle) {
     delegate_->OnURLFetchComplete(response_, data_);
 }
 
-void ResourceFetcher::didFail(ResourceHandle* resource_handle, 
+void ResourceFetcher::didFail(ResourceHandle* resource_handle,
                               const ResourceError& error) {
   ASSERT(!completed_);
   completed_ = true;
-  
+
   // Go ahead and tell our delegate that we're done.  Send an empty
   // ResourceResponse and string.
   if (delegate_)
@@ -119,4 +123,3 @@ void ResourceFetcherWithTimeout::TimeoutFired(FetchTimer* timer) {
     didFail(NULL, ResourceError());
   }
 }
-

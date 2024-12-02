@@ -6,8 +6,6 @@
 
 namespace installer {
 // Elements that makes up install target path.
-const wchar_t kChromeOldExe[] = L"old_chrome.exe";
-const wchar_t kChromeNewExe[] = L"new_chrome.exe";
 const wchar_t kWowHelperExe[] = L"wow_helper.exe";
 const wchar_t kDictionaries[] = L"Dictionaries";
 const wchar_t kChromeArchive[] = L"chrome.7z";
@@ -19,8 +17,6 @@ const wchar_t kChromeCompressedPatchArchivePrefix[] = L"patch";
 const wchar_t kInstallSourceDir[] = L"source";
 const wchar_t kInstallSourceChromeDir[] = L"Chrome-bin";
 
-const wchar_t kInstallerDir[] = L"Installer";
-
-const wchar_t kMediaPlayerRegPath[] = L"Software\\Microsoft\\MediaPlayer\\ShimInclusionList";
+const wchar_t kMediaPlayerRegPath[] =
+    L"Software\\Microsoft\\MediaPlayer\\ShimInclusionList";
 }  // namespace installer
-

@@ -8,7 +8,7 @@
   Bound to a JavaScript window.eventSender object using
   CppBoundClass::BindToJavascript(), this allows layout tests that are run in
   the test_shell to fire DOM events.
-  
+
   The OSX reference file is in
   WebKit/WebKitTools/DumpRenderTree/EventSendingController.m
 */
@@ -18,13 +18,11 @@
 
 #include "build/build_config.h"
 #include "base/gfx/point.h"
+#include "base/task.h"
 #include "webkit/glue/cpp_bound_class.h"
+#include "webkit/glue/webdropdata.h"
 #include "webkit/glue/webinputevent.h"
 
-#if defined(OS_WIN)
-struct IDataObject;
-struct IDropSource;
-#endif
 class TestShell;
 class WebView;
 
@@ -37,10 +35,8 @@ class EventSendingController : public CppBoundClass {
   // Resets some static variable state.
   void Reset();
 
-#if defined(OS_WIN)
-  // Simulate Windows' drag&drop system call.
-  static void DoDragDrop(IDataObject* drag_data);
-#endif
+  // Simulate drag&drop system call.
+  static void DoDragDrop(const WebDropData& drag_data);
 
   // JS callback methods.
   void mouseDown(const CppArgumentList& args, CppVariant* result);
@@ -48,8 +44,11 @@ class EventSendingController : public CppBoundClass {
   void mouseMoveTo(const CppArgumentList& args, CppVariant* result);
   void leapForward(const CppArgumentList& args, CppVariant* result);
   void keyDown(const CppArgumentList& args, CppVariant* result);
+  void dispatchMessage(const CppArgumentList& args, CppVariant* result);
   void textZoomIn(const CppArgumentList& args, CppVariant* result);
   void textZoomOut(const CppArgumentList& args, CppVariant* result);
+  void scheduleAsynchronousClick(const CppArgumentList& args,
+                                 CppVariant* result);
 
   // Unimplemented stubs
   void contextClick(const CppArgumentList& args, CppVariant* result);
@@ -57,6 +56,18 @@ class EventSendingController : public CppBoundClass {
   void fireKeyboardEventsToElement(const CppArgumentList& args, CppVariant* result);
   void clearKillRing(const CppArgumentList& args, CppVariant* result);
   CppVariant dragMode;
+
+  // Properties used in layout tests.
+#if defined(OS_WIN)
+  CppVariant wmKeyDown;
+  CppVariant wmKeyUp;
+  CppVariant wmChar;
+  CppVariant wmDeadChar;
+  CppVariant wmSysKeyDown;
+  CppVariant wmSysKeyUp;
+  CppVariant wmSysChar;
+  CppVariant wmSysDeadChar;
+#endif
 
  private:
   // Returns the test shell's webview.
@@ -71,13 +82,18 @@ class EventSendingController : public CppBoundClass {
   static void DoMouseUp(const WebMouseEvent& e);
   static void ReplaySavedEvents();
 
-  // Helper to extract the optional arg from mouseDown() and mouseUp()
-  static WebMouseEvent::Button GetButtonTypeFromSingleArg(
-      const CppArgumentList& args);
+  // Helper to return the button type given a button code
+  static WebMouseEvent::Button GetButtonTypeFromButtonNumber(int button_code);
+
+  // Helper to extract the button number from the optional argument in
+  // mouseDown and mouseUp
+  static int GetButtonNumberFromSingleArg(const CppArgumentList& args);
 
   // Returns true if the key_code passed in needs a shift key modifier to
   // be passed into the generated event.
-  bool NeedsShiftModifer(wchar_t key_code);
+  bool NeedsShiftModifier(int key_code);
+
+  ScopedRunnableMethodFactory<EventSendingController> method_factory_;
 
   // Non-owning pointer.  The LayoutTestController is owned by the host.
   static TestShell* shell_;
@@ -87,7 +103,11 @@ class EventSendingController : public CppBoundClass {
 
   // Currently pressed mouse button (Left/Right/Middle or None)
   static WebMouseEvent::Button pressed_button_;
+
+  // The last button number passed to mouseDown and mouseUp.
+  // Used to determine whether the click count continues to
+  // increment or not.
+  static int last_button_number_;
 };
 
 #endif  // WEBKIT_TOOLS_TEST_SHELL_EVENT_SENDING_CONTROLLER_H_
-

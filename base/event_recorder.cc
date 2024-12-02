@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/event_recorder.h"
+#include "build/build_config.h"
 
+#include <windows.h>
 #include <mmsystem.h>
 
+#include "base/event_recorder.h"
+#include "base/file_util.h"
 #include "base/logging.h"
-#include "base/time.h"
 
 // A note about time.
 // For perfect playback of events, you'd like a very accurate timer
@@ -40,7 +42,7 @@ EventRecorder::~EventRecorder() {
   DCHECK(!is_recording_ && !is_playing_);
 }
 
-bool EventRecorder::StartRecording(std::wstring& filename) {
+bool EventRecorder::StartRecording(const std::wstring& filename) {
   if (journal_hook_ != NULL)
     return false;
   if (is_recording_ || is_playing_)
@@ -48,7 +50,8 @@ bool EventRecorder::StartRecording(std::wstring& filename) {
 
   // Open the recording file.
   DCHECK(file_ == NULL);
-  if (_wfopen_s(&file_, filename.c_str(), L"wb+") != 0) {
+  file_ = file_util::OpenFile(filename, "wb+");
+  if (!file_) {
     DLOG(ERROR) << "EventRecorder could not open log file";
     return false;
   }
@@ -61,7 +64,7 @@ bool EventRecorder::StartRecording(std::wstring& filename) {
                                      GetModuleHandle(NULL), 0);
   if (!journal_hook_) {
     DLOG(ERROR) << "EventRecorder Record Hook failed";
-    fclose(file_);
+    file_util::CloseFile(file_);
     return false;
   }
 
@@ -82,7 +85,7 @@ void EventRecorder::StopRecording() {
     ::timeEndPeriod(1);
 
     DCHECK(file_ != NULL);
-    fclose(file_);
+    file_util::CloseFile(file_);
     file_ = NULL;
 
     journal_hook_ = NULL;
@@ -90,7 +93,7 @@ void EventRecorder::StopRecording() {
   }
 }
 
-bool EventRecorder::StartPlayback(std::wstring& filename) {
+bool EventRecorder::StartPlayback(const std::wstring& filename) {
   if (journal_hook_ != NULL)
     return false;
   if (is_recording_ || is_playing_)
@@ -98,14 +101,15 @@ bool EventRecorder::StartPlayback(std::wstring& filename) {
 
   // Open the recording file.
   DCHECK(file_ == NULL);
-  if (_wfopen_s(&file_, filename.c_str(), L"rb") != 0) {
+  file_ = file_util::OpenFile(filename, "rb");
+  if (!file_) {
     DLOG(ERROR) << "EventRecorder Playback could not open log file";
     return false;
   }
   // Read the first event from the record.
   if (fread(&playback_msg_, sizeof(EVENTMSG), 1, file_) != 1) {
     DLOG(ERROR) << "EventRecorder Playback has no records!";
-    fclose(file_);
+    file_util::CloseFile(file_);
     return false;
   }
 
@@ -147,7 +151,7 @@ void EventRecorder::StopPlayback() {
     }
 
     DCHECK(file_ != NULL);
-    fclose(file_);
+    file_util::CloseFile(file_);
     file_ = NULL;
 
     ::timeEndPeriod(1);
@@ -160,7 +164,7 @@ void EventRecorder::StopPlayback() {
 // Windows callback hook for the recorder.
 LRESULT EventRecorder::RecordWndProc(int nCode, WPARAM wParam, LPARAM lParam) {
   static bool recording_enabled = true;
-  EVENTMSG *msg_ptr = NULL;
+  EVENTMSG* msg_ptr = NULL;
 
   // The API says we have to do this.
   // See http://msdn2.microsoft.com/en-us/library/ms644983(VS.85).aspx
@@ -175,13 +179,12 @@ LRESULT EventRecorder::RecordWndProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
   // The Journal Recorder must stop recording events when system modal
   // dialogs are present. (see msdn link above)
-  switch(nCode)
-  {
+  switch(nCode) {
     case HC_SYSMODALON:
-	    recording_enabled = false;
+      recording_enabled = false;
       break;
     case HC_SYSMODALOFF:
-	    recording_enabled = true;
+      recording_enabled = true;
       break;
   }
 
@@ -197,41 +200,41 @@ LRESULT EventRecorder::RecordWndProc(int nCode, WPARAM wParam, LPARAM lParam) {
 }
 
 // Windows callback for the playback mode.
-LRESULT EventRecorder::PlaybackWndProc(int nCode, WPARAM wParam, LPARAM lParam)
-{
+LRESULT EventRecorder::PlaybackWndProc(int nCode, WPARAM wParam,
+                                       LPARAM lParam) {
   static bool playback_enabled = true;
   int delay = 0;
 
-  switch(nCode)
-  {
+  switch(nCode) {
     // A system modal dialog box is being displayed.  Stop playing back
     // messages.
     case HC_SYSMODALON:
-	    playback_enabled = false;
-	    break;
+      playback_enabled = false;
+      break;
 
     // A system modal dialog box is destroyed.  We can start playing back
     // messages again.
     case HC_SYSMODALOFF:
-	    playback_enabled = true;
-	    break;
+      playback_enabled = true;
+      break;
 
     // Prepare to copy the next mouse or keyboard event to playback.
     case HC_SKIP:
-	    if (!playback_enabled)
-	      break;
+      if (!playback_enabled)
+        break;
 
       // Read the next event from the record.
       if (fread(&playback_msg_, sizeof(EVENTMSG), 1, file_) != 1)
         this->StopPlayback();
-	    break;
+      break;
 
     // Copy the mouse or keyboard event to the EVENTMSG structure in lParam.
     case HC_GETNEXT:
-	    if (!playback_enabled)
+      if (!playback_enabled)
         break;
 
-      memcpy(reinterpret_cast<void*>(lParam), &playback_msg_, sizeof(playback_msg_));
+      memcpy(reinterpret_cast<void*>(lParam), &playback_msg_,
+             sizeof(playback_msg_));
 
       // The return value is the amount of time (in milliseconds) to wait
       // before playing back the next message in the playback queue.  Each
@@ -254,4 +257,3 @@ LRESULT EventRecorder::PlaybackWndProc(int nCode, WPARAM wParam, LPARAM lParam)
 }
 
 }  // namespace base
-

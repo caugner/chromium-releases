@@ -10,17 +10,26 @@
 #include <unicode/uscript.h>
 #include <unicode/uset.h>
 
-#ifdef OS_WIN
+#include "build/build_config.h"
+
+#if defined(OS_WIN)
 #include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <wspiapi.h>  // Needed for Win2k compat.
+#elif defined(OS_POSIX)
+#include <netdb.h>
+#include <sys/socket.h>
+#include <fcntl.h>
 #endif
 
 #include "net/base/net_util.h"
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/scoped_ptr.h"
 #include "base/string_escape.h"
 #include "base/string_piece.h"
 #include "base/string_tokenizer.h"
@@ -28,19 +37,26 @@
 #include "base/sys_string_conversions.h"
 #include "base/time.h"
 #include "base/time_format.h"
+#include "grit/net_resources.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_canon.h"
 #include "googleurl/src/url_parse.h"
 #include "net/base/escape.h"
 #include "net/base/net_module.h"
-#include "net/base/net_resources.h"
+#if defined(OS_WIN)
+#include "net/base/winsock_init.h"
+#endif
 #include "net/base/base64.h"
 #include "unicode/datefmt.h"
+
+
+using base::Time;
 
 namespace {
 
 // what we prepend to get a file URL
-static const wchar_t kFileURLPrefix[] = L"file:///";
+static const FilePath::CharType kFileURLPrefix[] =
+    FILE_PATH_LITERAL("file:///");
 
 // The general list of blocked ports. Will be blocked unless a specific
 // protocol overrides it. (Ex: ftp can use ports 20 and 21)
@@ -148,7 +164,8 @@ STR GetSpecificHeaderT(const STR& headers, const STR& name) {
 // TODO(jungshik): We have almost identical hex-decoding code else where.
 // Consider refactoring and moving it somewhere(base?). Bug 1224311
 inline bool IsHexDigit(unsigned char c) {
-  return (('0' <= c && c <= '9') || ('A' <= c && c <= 'F') || ('a' <= c && c <= 'f'));
+  return (('0' <= c && c <= '9') || ('A' <= c && c <= 'F') ||
+          ('a' <= c && c <= 'f'));
 }
 
 inline unsigned char HexToInt(unsigned char c) {
@@ -237,7 +254,7 @@ bool DecodeWord(const std::string& encoded_word,
   // UTF-16 assuming it's in the OS default encoding.
   if (!IsStringASCII(encoded_word)) {
     // Try falling back to the NativeMB encoding if the raw input is not UTF-8.
-    if (IsStringUTF8(encoded_word.c_str())) {
+    if (IsStringUTF8(encoded_word)) {
       *output = encoded_word;
     } else {
       *output = WideToUTF8(base::SysNativeMBToWide(encoded_word));
@@ -328,7 +345,7 @@ bool DecodeWord(const std::string& encoded_word,
   // support a rudimentary form of RFC 2231 with charset label, but
   // it'd gain us little in terms of compatibility.
   tmp = UnescapeURLComponent(encoded_word, UnescapeRule::SPACES);
-  if (IsStringUTF8(tmp.c_str())) {
+  if (IsStringUTF8(tmp)) {
     output->swap(tmp);
     return true;
     // We can try either the OS default charset or 'origin charset' here,
@@ -545,7 +562,8 @@ bool IsIDNComponentSafe(const char16* str,
     // rebuilt with the minimal subset of locale data for languages
     // to which Chrome is not localized but which we offer in the list
     // of languages selectable for Accept-Languages. With the rebuilt ICU
-    // data, ulocdata_open never should fall back to the default locale. (issue 2078)
+    // data, ulocdata_open never should fall back to the default locale.
+    // (issue 2078)
     // DCHECK(U_SUCCESS(status) && status != U_USING_DEFAULT_WARNING);
     if (U_SUCCESS(status) && status != U_USING_DEFAULT_WARNING) {
       // Should we use auxiliary set, instead?
@@ -629,12 +647,12 @@ void IDNToUnicodeOneComponent(const char16* comp,
 
 namespace net {
 
-GURL FilePathToFileURL(const std::wstring& file_path) {
+GURL FilePathToFileURL(const FilePath& path) {
   // Produce a URL like "file:///C:/foo" for a regular file, or
   // "file://///server/path" for UNC. The URL canonicalizer will fix up the
   // latter case to be the canonical UNC form: "file://server/path"
-  std::wstring url_str(kFileURLPrefix);
-  url_str.append(file_path);
+  FilePath::StringType url_string(kFileURLPrefix);
+  url_string.append(path.value());
 
   // Now do replacement of some characters. Since we assume the input is a
   // literal filename, anything the URL parser might consider special should
@@ -642,18 +660,21 @@ GURL FilePathToFileURL(const std::wstring& file_path) {
 
   // must be the first substitution since others will introduce percents as the
   // escape character
-  ReplaceSubstringsAfterOffset(&url_str, 0, L"%", L"%25");
+  ReplaceSubstringsAfterOffset(&url_string, 0,
+      FILE_PATH_LITERAL("%"), FILE_PATH_LITERAL("%25"));
 
   // semicolon is supposed to be some kind of separator according to RFC 2396
-  ReplaceSubstringsAfterOffset(&url_str, 0, L";", L"%3B");
+  ReplaceSubstringsAfterOffset(&url_string, 0,
+      FILE_PATH_LITERAL(";"), FILE_PATH_LITERAL("%3B"));
 
-  ReplaceSubstringsAfterOffset(&url_str, 0, L"#", L"%23");
+  ReplaceSubstringsAfterOffset(&url_string, 0,
+      FILE_PATH_LITERAL("#"), FILE_PATH_LITERAL("%23"));
 
-#if defined(WCHAR_T_IS_UTF32)
-  return GURL(WideToUTF8(url_str));
-#else
-  return GURL(url_str);
-#endif
+  return GURL(url_string);
+}
+
+GURL FilePathToFileURL(const std::wstring& path_str) {
+  return FilePathToFileURL(FilePath::FromWStringHack(path_str));
 }
 
 std::wstring GetSpecificHeader(const std::wstring& headers,
@@ -789,13 +810,13 @@ std::string CanonicalizeHost(const std::wstring& host, bool* is_ip_address) {
   WideToUTF8(host.c_str(), host.length(), &converted_host);
   return CanonicalizeHost(converted_host, is_ip_address);
 }
-  
-#ifdef OS_WIN
+
 std::string GetDirectoryListingHeader(const std::string& title) {
-  std::string result = NetModule::GetResource(IDR_DIR_HEADER_HTML);
-  if (result.empty()) {
+  static const StringPiece header(NetModule::GetResource(IDR_DIR_HEADER_HTML));
+  if (header.empty()) {
     NOTREACHED() << "expected resource not found";
   }
+  std::string result(header.data(), header.size());
 
   result.append("<script>start(");
   string_escape::JavascriptDoubleQuote(title, true, &result);
@@ -805,31 +826,31 @@ std::string GetDirectoryListingHeader(const std::string& title) {
 }
 
 std::string GetDirectoryListingEntry(const std::string& name,
-                                     DWORD attrib,
+                                     bool is_dir,
                                      int64 size,
-                                     const FILETIME* modified) {
+                                     const Time& modified) {
   std::string result;
   result.append("<script>addRow(");
   string_escape::JavascriptDoubleQuote(name, true, &result);
   result.append(",");
   string_escape::JavascriptDoubleQuote(
       EscapePath(name), true, &result);
-  if (attrib & FILE_ATTRIBUTE_DIRECTORY) {
+  if (is_dir) {
     result.append(",1,");
   } else {
     result.append(",0,");
   }
 
   string_escape::JavascriptDoubleQuote(
-      FormatBytes(size, GetByteDisplayUnits(size), true), true, &result);
+      WideToUTF16Hack(FormatBytes(size, GetByteDisplayUnits(size), true)), true,
+      &result);
 
   result.append(",");
 
-  std::wstring modified_str;
+  string16 modified_str;
   // |modified| can be NULL in FTP listings.
-  if (modified) {
-    Time time(Time::FromFileTime(*modified));
-    modified_str = base::TimeFormatShortDateAndTime(time);
+  if (!modified.is_null()) {
+    modified_str = WideToUTF16Hack(base::TimeFormatShortDateAndTime(modified));
   }
   string_escape::JavascriptDoubleQuote(modified_str, true, &result);
 
@@ -837,7 +858,6 @@ std::string GetDirectoryListingEntry(const std::string& name,
 
   return result;
 }
-#endif
 
 std::wstring StripWWW(const std::wstring& text) {
   const std::wstring www(L"www.");
@@ -911,6 +931,113 @@ bool IsPortAllowedByFtp(int port) {
   }
   // Port not explicitly allowed by FTP, so return the default restrictions.
   return IsPortAllowedByDefault(port);
+}
+
+int SetNonBlocking(int fd) {
+#if defined(OS_WIN)
+  unsigned long no_block = 1;
+  return ioctlsocket(fd, FIONBIO, &no_block);
+#elif defined(OS_POSIX)
+  int flags = fcntl(fd, F_GETFL, 0);
+  if (-1 == flags)
+    flags = 0;
+  return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+#endif
+}
+
+// Deprecated.
+bool FileURLToFilePath(const GURL& gurl, std::wstring* file_path) {
+  FilePath path;
+  bool rv = FileURLToFilePath(gurl, &path);
+  *file_path = path.ToWStringHack();
+  return rv;
+}
+
+bool GetHostAndPort(std::string::const_iterator host_and_port_begin,
+                    std::string::const_iterator host_and_port_end,
+                    std::string* host,
+                    int* port) {
+  if (host_and_port_begin >= host_and_port_end)
+    return false;
+
+  // When using url_parse, we use char*.
+  const char* auth_begin = &(*host_and_port_begin);
+  int auth_len = host_and_port_end - host_and_port_begin;
+
+  url_parse::Component auth_component(0, auth_len);
+  url_parse::Component username_component;
+  url_parse::Component password_component;
+  url_parse::Component hostname_component;
+  url_parse::Component port_component;
+
+  url_parse::ParseAuthority(auth_begin, auth_component, &username_component,
+      &password_component, &hostname_component, &port_component);
+
+  // There shouldn't be a username/password.
+  if (username_component.is_valid() || password_component.is_valid())
+    return false;
+
+  if (!hostname_component.is_nonempty())
+    return false;  // Failed parsing.
+
+  int parsed_port_number = -1;
+  if (port_component.is_nonempty()) {
+    parsed_port_number = url_parse::ParsePort(auth_begin, port_component);
+
+    // If parsing failed, port_number will be either PORT_INVALID or
+    // PORT_UNSPECIFIED, both of which are negative.
+    if (parsed_port_number < 0)
+      return false;  // Failed parsing the port number.
+  }
+
+  if (port_component.len == 0)
+    return false;  // Reject inputs like "foo:"
+
+  // Pass results back to caller.
+  host->assign(auth_begin + hostname_component.begin, hostname_component.len);
+  *port = parsed_port_number;
+
+  return true;  // Success.
+}
+
+bool GetHostAndPort(const std::string& host_and_port,
+                    std::string* host,
+                    int* port) {
+  return GetHostAndPort(host_and_port.begin(), host_and_port.end(), host, port);
+}
+
+std::string NetAddressToString(const struct addrinfo* net_address) {
+#if defined(OS_WIN)
+  EnsureWinsockInit();
+#endif
+
+  // This buffer is large enough to fit the biggest IPv6 string.
+  char buffer[INET6_ADDRSTRLEN];
+
+  int result = getnameinfo(net_address->ai_addr,
+      net_address->ai_addrlen, buffer, sizeof(buffer), NULL, 0, NI_NUMERICHOST);
+
+  if (result != 0) {
+    DLOG(INFO) << "getnameinfo() failed with " << result;
+    buffer[0] = '\0';
+  }
+  return std::string(buffer);
+}
+
+std::string GetMyHostName() {
+#if defined(OS_WIN)
+  EnsureWinsockInit();
+#endif
+
+  // Maximum size of 256 is somewhat arbitrary. Mozilla uses a size of 100
+  // so this should cover the majority of cases.
+  char buffer[256];
+  int result = gethostname(buffer, sizeof(buffer));
+  if (result != 0) {
+    DLOG(INFO) << "gethostname() failed with " << result;
+    buffer[0] = '\0';
+  }
+  return std::string(buffer);
 }
 
 }  // namespace net

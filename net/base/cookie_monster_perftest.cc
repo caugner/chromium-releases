@@ -14,7 +14,7 @@ namespace {
 }
 
 static const int kNumCookies = 20000;
-static const char kCookieLine[] = "A  = \"b=;\\\"\"  ;secure;;;   httponly";
+static const char kCookieLine[] = "A  = \"b=;\\\"\"  ;secure;;;";
 
 TEST(ParsedCookieTest, TestParseCookies) {
   std::string cookie(kCookieLine);
@@ -93,4 +93,3 @@ TEST(CookieMonsterTest, TestAddCookieOnManyHosts) {
   cm.DeleteAll(false);
   timer3.Done();
 }
-

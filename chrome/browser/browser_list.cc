@@ -2,31 +2,40 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "build/build_config.h"
+
 #include "chrome/browser/browser_list.h"
 
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
-#include "chrome/browser/web_contents.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/views/window.h"
+#include "chrome/common/result_codes.h"
+
+#if defined(OS_WIN)
+// TODO(port): these can probably all go away, even on win
+#include "chrome/browser/profile.h"
+#include "chrome/browser/tab_contents/web_contents.h"
+#endif
+
 
 BrowserList::list_type BrowserList::browsers_;
 std::vector<BrowserList::Observer*> BrowserList::observers_;
-BrowserList::DependentWindowList BrowserList::dependent_windows_;
 
 // static
 void BrowserList::AddBrowser(Browser* browser) {
+  DCHECK(browser);
   browsers_.push_back(browser);
 
   g_browser_process->AddRefModule();
 
   NotificationService::current()->Notify(
-    NOTIFY_BROWSER_OPENED,
-    Source<Browser>(browser), NotificationService::NoDetails());
+      NotificationType::BROWSER_OPENED,
+      Source<Browser>(browser),
+      NotificationService::NoDetails());
 
   // Send out notifications after add has occurred. Do some basic checking to
   // try to catch evil observers that change the list from under us.
@@ -43,7 +52,7 @@ void BrowserList::RemoveBrowser(Browser* browser) {
 
   bool close_app = (browsers_.size() == 1);
   NotificationService::current()->Notify(
-      NOTIFY_BROWSER_CLOSED,
+      NotificationType::BROWSER_CLOSED,
       Source<Browser>(browser), Details<bool>(&close_app));
 
   // Send out notifications before anything changes. Do some basic checking to
@@ -58,27 +67,13 @@ void BrowserList::RemoveBrowser(Browser* browser) {
 
   // If the last Browser object was destroyed, make sure we try to close any
   // remaining dependent windows too.
-  if (browsers_.empty())
-    CloseAllDependentWindows();
+  if (browsers_.empty()) {
+    NotificationService::current()->Notify(
+        NotificationType::ALL_APPWINDOWS_CLOSED,
+        NotificationService::AllSources(),
+        NotificationService::NoDetails());
+  }
 
-  g_browser_process->ReleaseModule();
-}
-
-// static
-void BrowserList::AddDependentWindow(ChromeViews::Window* window) {
-  DependentWindowList::const_iterator existing =
-      find(dependent_windows_.begin(), dependent_windows_.end(), window);
-  DCHECK(existing == dependent_windows_.end());
-  dependent_windows_.push_back(window);
-  g_browser_process->AddRefModule();
-}
-
-// static
-void BrowserList::RemoveDependentWindow(ChromeViews::Window* window) {
-  DependentWindowList::iterator existing =
-      find(dependent_windows_.begin(), dependent_windows_.end(), window);
-  DCHECK(existing != dependent_windows_.end());
-  dependent_windows_.erase(existing);
   g_browser_process->ReleaseModule();
 }
 
@@ -109,7 +104,7 @@ void BrowserList::CloseAllBrowsers(bool use_post) {
   BrowserList::const_iterator iter;
   for (iter = BrowserList::begin(); iter != BrowserList::end();) {
     if (use_post) {
-      ::PostMessage((*iter)->GetTopLevelHWND(), WM_CLOSE, 0, 0);
+      (*iter)->window()->Close();
       ++iter;
     } else {
       // This path is hit during logoff/power-down. In this case we won't get
@@ -134,6 +129,41 @@ void BrowserList::CloseAllBrowsers(bool use_post) {
 }
 
 // static
+void BrowserList::WindowsSessionEnding() {
+  // EndSession is invoked once per frame. Only do something the first time.
+  static bool already_ended = false;
+  if (already_ended)
+    return;
+  already_ended = true;
+
+  browser_shutdown::OnShutdownStarting(browser_shutdown::END_SESSION);
+
+  // Write important data first.
+  g_browser_process->EndSession();
+
+  // Close all the browsers.
+  BrowserList::CloseAllBrowsers(false);
+
+  // Send out notification. This is used during testing so that the test harness
+  // can properly shutdown before we exit.
+  NotificationService::current()->Notify(
+      NotificationType::SESSION_END,
+      NotificationService::AllSources(),
+      NotificationService::NoDetails());
+
+  // And shutdown.
+  browser_shutdown::Shutdown();
+
+#if defined(OS_WIN)
+  // At this point the message loop is still running yet we've shut everything
+  // down. If any messages are processed we'll likely crash. Exit now.
+  ExitProcess(ResultCodes::NORMAL_EXIT);
+#else
+  NOTIMPLEMENTED();
+#endif
+}
+
+// static
 bool BrowserList::HasBrowserWithProfile(Profile* profile) {
   BrowserList::const_iterator iter;
   for (size_t i = 0; i < browsers_.size(); ++i) {
@@ -141,21 +171,6 @@ bool BrowserList::HasBrowserWithProfile(Profile* profile) {
       return true;
   }
   return false;
-}
-
-// static
-bool BrowserList::is_app_modal_ = false;
-
-// static
-void BrowserList::SetIsShowingAppModalDialog(bool is_app_modal) {
-  // If we are already modal, we can't go modal again.
-  DCHECK(!(is_app_modal_ && is_app_modal));
-  is_app_modal_ = is_app_modal;
-}
-
-// static
-bool BrowserList::IsShowingAppModalDialog() {
-  return is_app_modal_;
 }
 
 // static
@@ -176,9 +191,9 @@ Browser* BrowserList::GetLastActive() {
 }
 
 // static
-Browser* BrowserList::FindBrowserWithType(Profile* p, BrowserType::Type t) {
+Browser* BrowserList::FindBrowserWithType(Profile* p, Browser::Type t) {
   Browser* last_active = GetLastActive();
-  if (last_active->profile() == p && last_active->GetType() == t)
+  if (last_active && last_active->profile() == p && last_active->type() == t)
     return last_active;
 
   BrowserList::const_iterator i;
@@ -186,18 +201,18 @@ Browser* BrowserList::FindBrowserWithType(Profile* p, BrowserType::Type t) {
     if (*i == last_active)
       continue;
 
-    if ((*i)->profile() == p && (*i)->GetType() == t)
+    if ((*i)->profile() == p && (*i)->type() == t)
       return *i;
   }
   return NULL;
 }
 
 // static
-size_t BrowserList::GetBrowserCountForType(Profile* p, BrowserType::Type type) {
+size_t BrowserList::GetBrowserCountForType(Profile* p, Browser::Type type) {
   BrowserList::const_iterator i;
   size_t result = 0;
   for (i = BrowserList::begin(); i != BrowserList::end(); ++i) {
-    if ((*i)->profile() == p && (*i)->GetType() == type)
+    if ((*i)->profile() == p && (*i)->type() == type)
       result++;
   }
   return result;
@@ -222,18 +237,6 @@ bool BrowserList::IsOffTheRecordSessionActive() {
       return true;
   }
   return false;
-}
-
-// static
-void BrowserList::CloseAllDependentWindows() {
-  // Note that |dependent_windows_| is guaranteed to be consistent for the
-  // duration of this operation because windows are not actually closed
-  // (destroyed, then deleted, and thus removed from this list) until we return
-  // to the message loop. So this basically just schedules a bunch of close
-  // operations to be performed asynchronously.
-  DependentWindowList::iterator window = dependent_windows_.begin();
-  for (; window != dependent_windows_.end(); ++window)
-    (*window)->Close();
 }
 
 // static
@@ -279,4 +282,3 @@ void WebContentsIterator::Advance() {
     }
   }
 }
-

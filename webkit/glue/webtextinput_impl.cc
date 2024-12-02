@@ -5,10 +5,12 @@
 #include <ctype.h>
 #include "config.h"
 
-#pragma warning(push, 0)
+#include "base/compiler_specific.h"
+
+MSVC_PUSH_WARNING_LEVEL(0);
 #include "Frame.h"
 #include "Editor.h"
-#pragma warning(pop)
+MSVC_POP_WARNING();
 
 #undef LOG
 
@@ -82,7 +84,6 @@ void WebTextInputImpl::SetMarkedText(const std::string& text,
 
   editor->confirmComposition(str);
 
-  WebCore::Frame* frame = GetFrame();
   WTF::Vector<WebCore::CompositionUnderline> decorations;
 
   editor->setComposition(str, decorations, location, length);
@@ -111,18 +112,18 @@ void WebTextInputImpl::MarkedRange(std::string* range_str) {
 
   // Range::toString() returns a string different from what test expects.
   // So we need to construct the string ourselves.
-  SStringPrintf(range_str, "%d,%d", range->startPosition().offset(),
-                range->endPosition().offset());
+  SStringPrintf(range_str, "%d,%d", range->startPosition().m_offset,
+                range->endPosition().m_offset);
 }
 
 void WebTextInputImpl::SelectedRange(std::string* range_str) {
   WTF::RefPtr<WebCore::Range> range
-      = GetFrame()->selectionController()->toRange();
+      = GetFrame()->selection()->toNormalizedRange();
 
   // Range::toString() returns a string different from what test expects.
   // So we need to construct the string ourselves.
-  SStringPrintf(range_str, "%d,%d", range.get()->startPosition().offset(),
-                range.get()->endPosition().offset());
+  SStringPrintf(range_str, "%d,%d", range.get()->startPosition().m_offset,
+                range.get()->endPosition().m_offset);
 }
 
 void WebTextInputImpl::FirstRectForCharacterRange(int32_t location,
@@ -152,4 +153,3 @@ void WebTextInputImpl::DeleteToEndOfParagraph() {
                                 false);
   }
 }
-

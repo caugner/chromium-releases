@@ -12,6 +12,8 @@
 #include "chrome/common/sqlite_utils.h"
 #include "googleurl/src/gurl.h"
 
+using base::Time;
+
 namespace history {
 
 const char URLDatabase::kURLRowFields[] = HISTORY_URL_ROW_FIELDS;
@@ -42,8 +44,8 @@ std::string URLDatabase::GURLToDatabaseURL(const GURL& gurl) {
 void URLDatabase::FillURLRow(SQLStatement& s, history::URLRow* i) {
   DCHECK(i);
   i->id_ = s.column_int64(0);
-  i->url_ = GURL(s.column_text(1));
-  i->title_.assign(s.column_text16(2));
+  i->url_ = GURL(s.column_string(1));
+  i->title_ = s.column_wstring(2);
   i->visit_count_ = s.column_int(3);
   i->typed_count_ = s.column_int(4);
   i->last_visit_ = Time::FromInternalValue(s.column_int64(5));
@@ -111,9 +113,9 @@ URLID URLDatabase::AddURLInternal(const history::URLRow& info,
   // HISTORY_URL_ROW_FIELDS because that specifies the table name which is
   // invalid in the insert syntax.
   #define ADDURL_COMMON_SUFFIX \
-      "(url,title,visit_count,typed_count,"\
-       "last_visit_time,hidden,favicon_id)"\
-      "VALUES(?,?,?,?,?,?,?)"
+      " (url, title, visit_count, typed_count, "\
+      "last_visit_time, hidden, favicon_id) "\
+      "VALUES (?,?,?,?,?,?,?)"
   const char* statement_name;
   const char* statement_sql;
   if (is_temporary) {
@@ -237,12 +239,15 @@ void URLDatabase::AutocompleteForPrefix(const std::wstring& prefix,
     return;
 
   // We will find all strings between "prefix" and this string, which is prefix
-  // followed by the maximum character size.
-  std::wstring end_query(prefix);
-  end_query.push_back(std::numeric_limits<wchar_t>::max());
+  // followed by the maximum character size. Use 8-bit strings for everything
+  // so we can be sure sqlite is comparing everything in 8-bit mode. Otherwise,
+  // it will have to convert strings either to UTF-8 or UTF-16 for comparison.
+  std::string prefix_utf8(WideToUTF8(prefix));
+  std::string end_query(prefix_utf8);
+  end_query.push_back(std::numeric_limits<unsigned char>::max());
 
-  statement->bind_wstring(0, prefix);
-  statement->bind_wstring(1, end_query);
+  statement->bind_string(0, prefix_utf8);
+  statement->bind_string(1, end_query);
   statement->bind_int(2, static_cast<int>(max_results));
 
   while (statement->step() == SQLITE_ROW) {
@@ -395,7 +400,7 @@ void URLDatabase::GetMostRecentKeywordSearchTerms(
 
   KeywordSearchTermVisit visit;
   while (statement->step() == SQLITE_ROW) {
-    visit.term = statement->column_string16(0);
+    visit.term = statement->column_wstring(0);
     visit.time = Time::FromInternalValue(statement->column_int64(1));
     matches->push_back(visit);
   }
@@ -470,9 +475,9 @@ void URLDatabase::CreateMainURLIndex() {
 
 void URLDatabase::CreateSupplimentaryURLIndices() {
   // Add a favicon index.  This is useful when we delete urls.
-  sqlite3_exec(GetDB(), "CREATE INDEX urls_favicon_id_INDEX ON urls (favicon_id)",
+  sqlite3_exec(GetDB(),
+               "CREATE INDEX urls_favicon_id_INDEX ON urls (favicon_id)",
                NULL, NULL, NULL);
 }
 
 }  // namespace history
-

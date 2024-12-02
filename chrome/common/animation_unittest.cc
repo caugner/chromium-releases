@@ -2,18 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/logging.h"
 #include "base/message_loop.h"
 #include "chrome/common/animation.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using namespace std;
 
-namespace {
-  class AnimationTest: public testing::Test {
-   private:
-    MessageLoopForUI message_loop_;
-  };
+class AnimationTest: public testing::Test {
+ private:
+  MessageLoopForUI message_loop_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -103,4 +100,3 @@ TEST_F(AnimationTest, CancelCase) {
   EXPECT_TRUE(ad.finished());
   EXPECT_TRUE(ad.canceled());
 }
-

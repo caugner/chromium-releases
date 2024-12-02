@@ -6,9 +6,9 @@
 
 #include "base/message_loop.h"
 #include "base/object_watcher.h"
-#include "chrome/app/result_codes.h"
-#include "chrome/common/env_util.h"
+#include "base/sys_info.h"
 #include "chrome/common/env_vars.h"
+#include "chrome/common/result_codes.h"
 
 // Maximum amount of time (in milliseconds) to wait for the process to exit.
 static const int kWaitInterval = 2000;
@@ -17,7 +17,7 @@ namespace {
 
 class TimerExpiredTask : public Task, public base::ObjectWatcher::Delegate {
  public:
-  explicit TimerExpiredTask(ProcessHandle process) : process_(process) {
+  explicit TimerExpiredTask(base::ProcessHandle process) : process_(process) {
     watcher_.StartWatching(process_, this);
   }
 
@@ -48,9 +48,9 @@ class TimerExpiredTask : public Task, public base::ObjectWatcher::Delegate {
 
  private:
   void KillProcess() {
-    if (env_util::HasEnvironmentVariable(env_vars::kHeadless)) {
-     // If running the distributed tests, give the renderer a little time to figure out
-     // that the channel is shutdown and unwind.
+    if (base::SysInfo::HasEnvVar(env_vars::kHeadless)) {
+     // If running the distributed tests, give the renderer a little time
+     // to figure out that the channel is shutdown and unwind.
      if (WaitForSingleObject(process_, kWaitInterval) == WAIT_OBJECT_0) {
        OnObjectSignaled(process_);
        return;
@@ -68,7 +68,7 @@ class TimerExpiredTask : public Task, public base::ObjectWatcher::Delegate {
   }
 
   // The process that we are watching.
-  ProcessHandle process_;
+  base::ProcessHandle process_;
 
   base::ObjectWatcher watcher_;
 
@@ -78,7 +78,7 @@ class TimerExpiredTask : public Task, public base::ObjectWatcher::Delegate {
 }  // namespace
 
 // static
-void ProcessWatcher::EnsureProcessTerminated(ProcessHandle process) {
+void ProcessWatcher::EnsureProcessTerminated(base::ProcessHandle process) {
   DCHECK(process != GetCurrentProcess());
 
   // If already signaled, then we are done!
@@ -91,4 +91,3 @@ void ProcessWatcher::EnsureProcessTerminated(ProcessHandle process) {
                                           new TimerExpiredTask(process),
                                           kWaitInterval);
 }
-

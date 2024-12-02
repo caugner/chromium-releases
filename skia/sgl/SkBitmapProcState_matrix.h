@@ -34,7 +34,7 @@ static void TRANSLATE_NOFILTER_NAME(const SkBitmapProcState& s,
 
     *xy++ = (uint32_t)TILEY_TRANS(y, (s.fBitmap->height() - 1));
     
-    int maxX = s.fBitmap->width() - 1;
+    unsigned maxX = s.fBitmap->width() - 1;
     int i;
     uint16_t* xx = (uint16_t*)xy;
     for (i = (count >> 2); i > 0; --i)
@@ -291,9 +291,10 @@ static SkBitmapProcState::MatrixProc MAKENAME(_Procs)[] = {
 #ifdef CHECK_FOR_DECAL
     #undef CHECK_FOR_DECAL
 #endif
+
 #undef TILEX_TRANS
 #undef TILEY_TRANS
- 
+
 #undef TRANSLATE_NOFILTER_NAME
 #undef SCALE_NOFILTER_NAME
 #undef SCALE_FILTER_NAME
@@ -307,6 +308,7 @@ static SkBitmapProcState::MatrixProc MAKENAME(_Procs)[] = {
 #undef PREAMBLE_PARAM_Y
 #undef PREAMBLE_ARG_X
 #undef PREAMBLE_ARG_Y
+
 #undef PREAMBLE_TRANS
 
 #undef TILEX_LOW_BITS

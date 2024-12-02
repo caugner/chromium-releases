@@ -6,13 +6,15 @@
 #define CHROME_BROWSER_VIEWS_BOOKMARK_BAR_VIEW_H_
 
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
+#include "chrome/browser/bookmarks/bookmark_menu_controller.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/common/slide_animation.h"
-#include "chrome/views/label.h"
-#include "chrome/views/menu.h"
-#include "chrome/views/menu_button.h"
+#include "chrome/views/controls/button/menu_button.h"
+#include "chrome/views/controls/label.h"
+#include "chrome/views/controls/menu/menu.h"
+#include "chrome/views/controls/menu/view_menu_delegate.h"
 #include "chrome/views/view.h"
-#include "chrome/views/view_menu_delegate.h"
 
 class Browser;
 class PageNavigator;
@@ -24,7 +26,7 @@ class ButtonSeparatorView;
 struct DropInfo;
 }
 
-namespace ChromeViews {
+namespace views {
 class MenuItemView;
 }
 
@@ -35,16 +37,16 @@ class MenuItemView;
 // BookmarkBarView shows the bookmarks from a specific Profile. BookmarkBarView
 // waits until the HistoryService for the profile has been loaded before
 // creating the BookmarkModel.
-class BookmarkBarView : public ChromeViews::View,
+class BookmarkBarView : public views::View,
                         public BookmarkModelObserver,
-                        public ChromeViews::ViewMenuDelegate,
-                        public ChromeViews::BaseButton::ButtonListener,
+                        public views::ViewMenuDelegate,
+                        public views::ButtonListener,
                         public Menu::Delegate,
                         public NotificationObserver,
-                        public ChromeViews::ContextMenuController,
-                        public ChromeViews::DragController,
-                        public AnimationDelegate {
-  friend class MenuRunner;
+                        public views::ContextMenuController,
+                        public views::DragController,
+                        public AnimationDelegate,
+                        public BookmarkMenuController::Observer {
   friend class ShowFolderMenuTask;
 
  public:
@@ -72,8 +74,6 @@ class BookmarkBarView : public ChromeViews::View,
   explicit BookmarkBarView(Profile* profile, Browser* browser);
   virtual ~BookmarkBarView();
 
-  static void RegisterUserPrefs(PrefService* prefs);
-
   // Resets the profile. This removes any buttons for the current profile and
   // recreates the models.
   void SetProfile(Profile* profile);
@@ -81,22 +81,29 @@ class BookmarkBarView : public ChromeViews::View,
   // Returns the current profile.
   Profile* GetProfile() { return profile_; }
 
+  // Returns the current browser.
+  Browser* browser() const { return browser_; }
+
   // Sets the PageNavigator that is used when the user selects an entry on
   // the bookmark bar.
   void SetPageNavigator(PageNavigator* navigator);
 
   // View methods:
-  virtual void GetPreferredSize(CSize *out);
+  virtual gfx::Size GetPreferredSize();
   virtual void Layout();
-  virtual void DidChangeBounds(const CRect& previous, const CRect& current);
+  virtual void DidChangeBounds(const gfx::Rect& previous,
+                               const gfx::Rect& current);
   virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child);
   virtual void Paint(ChromeCanvas* canvas);
   virtual void PaintChildren(ChromeCanvas* canvas);
   virtual bool CanDrop(const OSExchangeData& data);
-  virtual void OnDragEntered(const ChromeViews::DropTargetEvent& event);
-  virtual int OnDragUpdated(const ChromeViews::DropTargetEvent& event);
+  virtual void OnDragEntered(const views::DropTargetEvent& event);
+  virtual int OnDragUpdated(const views::DropTargetEvent& event);
   virtual void OnDragExited();
-  virtual int OnPerformDrop(const ChromeViews::DropTargetEvent& event);
+  virtual int OnPerformDrop(const views::DropTargetEvent& event);
+
+  // Called when fullscreen mode toggles on or off; this affects our layout.
+  void OnFullscreenToggled(bool fullscreen);
 
   // Sets the model change listener to listener.
   void SetModelChangedListener(ModelChangedListener* listener) {
@@ -121,18 +128,18 @@ class BookmarkBarView : public ChromeViews::View,
   // Returns the model.
   BookmarkModel* GetModel() { return model_; }
 
-  // Toggles whether the bookmark bar is shown only on the new tab page or on
-  // all tabs.
-  void ToggleWhenVisible();
+  // Returns true if the bookmark bar is drawn detached from the toolbar.  This
+  // can only be true when OnNewTabPage() is true (see below).
+  bool IsDetachedStyle();
 
-  // Returns true if the bookmarks bar preference is set to 'always show', we
-  // use this as a shorthand way of knowing what style of bar to draw (if the
-  // pref is set to false but we're painting, then we must be on the new tab
-  // page).
+  // Returns true if the bookmarks bar preference is set to 'always show'.
   bool IsAlwaysShown();
 
-  // True if we're supposed to draw the bookmarks bar in the new tab style.
-  bool IsNewTabPage();
+  // True if we're on a page where the bookmarks bar is always visible.
+  bool OnNewTabPage();
+
+  // How much we want the bookmark bar to overlap the toolbar.
+  int GetToolbarOverlap();
 
   // Whether or not we are animating.
   bool IsAnimating() { return size_animation_->IsAnimating(); }
@@ -141,26 +148,29 @@ class BookmarkBarView : public ChromeViews::View,
   void AnimationProgressed(const Animation* animation);
   void AnimationEnded(const Animation* animation);
 
+  // BookmarkMenuController::Observer
+  virtual void BookmarkMenuDeleted(BookmarkMenuController* controller);
+
   // Returns the button at the specified index.
-  ChromeViews::TextButton* GetBookmarkButton(int index);
+  views::TextButton* GetBookmarkButton(int index);
 
   // Returns the button responsible for showing bookmarks in the other bookmark
   // folder.
-  ChromeViews::TextButton* other_bookmarked_button() const {
+  views::TextButton* other_bookmarked_button() const {
     return other_bookmarked_button_;
   }
 
   // Returns the active MenuItemView, or NULL if a menu isn't showing.
-  ChromeViews::MenuItemView* GetMenu();
+  views::MenuItemView* GetMenu();
 
   // Returns the drop MenuItemView, or NULL if a menu isn't showing.
-  ChromeViews::MenuItemView* GetDropMenu();
+  views::MenuItemView* GetDropMenu();
 
   // Returns the context menu, or null if one isn't showing.
-  ChromeViews::MenuItemView* GetContextMenu();
+  views::MenuItemView* GetContextMenu();
 
   // Returns the button used when not all the items on the bookmark bar fit.
-  ChromeViews::TextButton* overflow_button() const { return overflow_button_; }
+  views::TextButton* overflow_button() const { return overflow_button_; }
 
   // Maximum size of buttons on the bookmark bar.
   static const int kMaxButtonWidth;
@@ -203,10 +213,10 @@ class BookmarkBarView : public ChromeViews::View,
   void Init();
 
   // Creates the button showing the other bookmarked items.
-  ChromeViews::MenuButton* CreateOtherBookmarkedButton();
+  views::MenuButton* CreateOtherBookmarkedButton();
 
   // Creates the button used when not all bookmark buttons fit.
-  ChromeViews::MenuButton* CreateOverflowButton();
+  views::MenuButton* CreateOverflowButton();
 
   // Returns the number of buttons corresponding to starred urls/groups. This
   // is equivalent to the number of children the bookmark bar node from the
@@ -259,6 +269,9 @@ class BookmarkBarView : public ChromeViews::View,
   // appropriately.
   void BookmarkNodeChangedImpl(BookmarkModel* model, BookmarkNode* node);
 
+  virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
+                                             BookmarkNode* node);
+
   // Invoked when the favicon is available. If the node is a child of the
   // root node, the appropriate button is updated. If a menu is showing, the
   // call is forwarded to the menu to allow for it to update the icon.
@@ -267,7 +280,7 @@ class BookmarkBarView : public ChromeViews::View,
 
   // DragController method. Determines the node representing sender and invokes
   // WriteDragData to write the actual data.
-  virtual void WriteDragData(ChromeViews::View* sender,
+  virtual void WriteDragData(views::View* sender,
                              int press_x,
                              int press_y,
                              OSExchangeData* data);
@@ -276,7 +289,7 @@ class BookmarkBarView : public ChromeViews::View,
   void WriteDragData(BookmarkNode* node, OSExchangeData* data);
 
   // Returns the drag operations for the specified button.
-  virtual int GetDragOperations(ChromeViews::View* sender, int x, int y);
+  virtual int GetDragOperations(views::View* sender, int x, int y);
 
   // ViewMenuDelegate method. 3 types of menus may be shown:
   // . the menu allowing the user to choose when the bookmark bar is visible.
@@ -284,25 +297,25 @@ class BookmarkBarView : public ChromeViews::View,
   // . menu for star groups.
   // The latter two are handled by a MenuRunner, which builds the appropriate
   // menu.
-  virtual void RunMenu(ChromeViews::View* view, const CPoint& pt, HWND hwnd);
+  virtual void RunMenu(views::View* view, const CPoint& pt, HWND hwnd);
 
   // Invoked when a star entry corresponding to a URL on the bookmark bar is
   // pressed. Forwards to the PageNavigator to open the URL.
-  virtual void ButtonPressed(ChromeViews::BaseButton* sender);
+  virtual void ButtonPressed(views::Button* sender);
 
   // Invoked for this View, one of the buttons or the 'other' button. Shows the
   // appropriate context menu.
-  virtual void ShowContextMenu(ChromeViews::View* source,
+  virtual void ShowContextMenu(views::View* source,
                                int x,
                                int y,
                                bool is_mouse_gesture);
 
   // Creates the button for rendering the specified bookmark node.
-  ChromeViews::View* CreateBookmarkButton(BookmarkNode* node);
+  views::View* CreateBookmarkButton(BookmarkNode* node);
 
   // COnfigures the button from the specified node. This sets the text,
   // and icon.
-  void ConfigureButton(BookmarkNode* node, ChromeViews::TextButton* button);
+  void ConfigureButton(BookmarkNode* node, views::TextButton* button);
 
   // Used when showing the menu allowing the user to choose when the bar is
   // visible. Return value corresponds to the users preference for when the
@@ -337,38 +350,12 @@ class BookmarkBarView : public ChromeViews::View,
 
   // Returns the drop operation and index for the drop based on the event
   // and data. Returns DragDropTypes::DRAG_NONE if not a valid location.
-  int CalculateDropOperation(const ChromeViews::DropTargetEvent& event,
+  int CalculateDropOperation(const views::DropTargetEvent& event,
                              const BookmarkDragData& data,
                              int* index,
                              bool* drop_on,
                              bool* is_over_overflow,
                              bool* is_over_other);
-
-  // Invokes CanDropAt to determine if this is a valid location for the data,
-  // then returns the appropriate drag operation based on the data.
-  int CalculateDropOperation(const ChromeViews::DropTargetEvent& event,
-                             const BookmarkDragData& data,
-                             BookmarkNode* parent,
-                             int index);
-
-  // Returns true if the specified location is a valid drop location for
-  // the supplied drag data.
-  bool CanDropAt(const BookmarkDragData& data,
-                 BookmarkNode* parent,
-                 int index);
-
-  // Performs a drop of the specified data at the specified location. Returns
-  // the result.
-  int PerformDropImpl(const BookmarkDragData& data,
-                      BookmarkNode* parent_node,
-                      int index);
-
-  // Creates a new group/entry for data, and recursively invokes itself for
-  // all children of data. This is used during drag and drop to clone a
-  // group from another profile.
-  void CloneDragData(const BookmarkDragData& data,
-                     BookmarkNode* parent,
-                     int index_to_add_at);
 
   // Returns the index of the first hidden bookmark button. If all buttons are
   // visible, this returns GetBookmarkButtonCount().
@@ -383,6 +370,11 @@ class BookmarkBarView : public ChromeViews::View,
   // throbs.
   void StopThrobbing(bool immediate);
 
+  // Add any extension toolstrips which may be requested by the given
+  // extensions.  Views for the toolstrips are inserted after the last bookmark
+  // button.  Returns true if there were any new toolstrips added.
+  bool AddExtensionToolstrips(const ExtensionList* extensions);
+
   Profile* profile_;
 
   // Used for opening urls.
@@ -392,17 +384,17 @@ class BookmarkBarView : public ChromeViews::View,
   // shown. This is owned by the Profile.
   BookmarkModel* model_;
 
-  // Used to manage showing a Menu: either for the most recently bookmarked
+  // Used to manage showing a Menu, either for the most recently bookmarked
   // entries, or for the a starred group.
-  scoped_ptr<MenuRunner> menu_runner_;
+  BookmarkMenuController* bookmark_menu_;
 
   // Used when showing a menu for drag and drop. That is, if the user drags
-  // over a group this becomes non-null and is the MenuRunner used to manage
-  // the menu showing the contents of the node.
-  scoped_ptr<MenuRunner> drop_menu_runner_;
+  // over a group this becomes non-null and manages the menu showing the
+  // contents of the node.
+  BookmarkMenuController* bookmark_drop_menu_;
 
   // Shows the other bookmark entries.
-  ChromeViews::MenuButton* other_bookmarked_button_;
+  views::MenuButton* other_bookmarked_button_;
 
   // ModelChangeListener.
   ModelChangedListener* model_changed_listener_;
@@ -414,10 +406,10 @@ class BookmarkBarView : public ChromeViews::View,
   scoped_ptr<DropInfo> drop_info_;
 
   // Visible if not all the bookmark buttons fit.
-  ChromeViews::MenuButton* overflow_button_;
+  views::MenuButton* overflow_button_;
 
   // If no bookmarks are visible, we show some text explaining the bar.
-  ChromeViews::Label* instructions_;
+  views::Label* instructions_;
 
   ButtonSeparatorView* bookmarks_separator_view_;
 
@@ -433,10 +425,12 @@ class BookmarkBarView : public ChromeViews::View,
   // If the bookmark bubble is showing, this is the visible ancestor of the URL.
   // The visible ancestor is either the other_bookmarked_button_,
   // overflow_button_ or a button on the bar.
-  ChromeViews::BaseButton* throbbing_view_;
+  views::CustomButton* throbbing_view_;
+
+  // How many extension toolstrips we have showing in the toolbar.
+  int num_extension_toolstrips_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkBarView);
 };
 
 #endif  // CHROME_BROWSER_VIEWS_BOOKMARK_BAR_VIEW_H_
-

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,36 +6,45 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/message_loop.h"
-#include "base/sys_string_conversions.h"
-#import "chrome/browser/cocoa/find_pasteboard.h"
+namespace {
 
-// The number of utf16 code units that will be written to the find pasteboard,
-// longer texts are silently ignored. This is to prevent that a compromised
-// renderer can write unlimited amounts of data into the find pasteboard.
-static const size_t kMaxFindPboardStringLength = 4096;
+// Adjusts an NSRect in screen coordinates to have an origin in the upper left,
+// and stuffs it into a gfx::Rect. This is likely incorrect for a multiple-
+// monitor setup.
+gfx::Rect NSRectToRect(const NSRect rect, NSScreen* screen) {
+  gfx::Rect new_rect(NSRectToCGRect(rect));
+  new_rect.set_y([screen frame].size.height - new_rect.y() - new_rect.height());
+  return new_rect;
+}
 
-class WriteFindPboardTask : public Task {
- public:
-  explicit WriteFindPboardTask(NSString* text)
-      : text_([text retain]) {}
+}
 
-  void Run() {
-    [[FindPasteboard sharedInstance] setFindText:text_];
+// We get null window_ids passed into the two functions below; please see
+// http://crbug.com/9060 for more details.
+
+void ResourceMessageFilter::OnGetWindowRect(gfx::NativeViewId window_id,
+                                            gfx::Rect* rect) {
+  NSView* view = gfx::NativeViewFromId(window_id);
+  if (!view) {
+    *rect = gfx::Rect();
+    return;
   }
 
- private:
-  scoped_nsobject<NSString> text_;
-};
+  NSRect bounds = [view bounds];
+  bounds = [view convertRect:bounds toView:nil];
+  bounds.origin = [[view window] convertBaseToScreen:bounds.origin];
+  *rect = NSRectToRect(bounds, [[view window] screen]);
+}
 
-// Called on the IO thread.
-void ResourceMessageFilter::OnClipboardFindPboardWriteString(
-    const string16& text) {
-  if (text.length() <= kMaxFindPboardStringLength) {
-    NSString* nsText = base::SysUTF16ToNSString(text);
-    if (nsText) {
-      // FindPasteboard must be used on the UI thread.
-      ui_loop()->PostTask(FROM_HERE, new WriteFindPboardTask(nsText));
-    }
+void ResourceMessageFilter::OnGetRootWindowRect(gfx::NativeViewId window_id,
+                                                gfx::Rect* rect) {
+  NSView* view = gfx::NativeViewFromId(window_id);
+  if (!view) {
+    *rect = gfx::Rect();
+    return;
   }
+
+  NSWindow* window = [view window];
+  NSRect bounds = [window frame];
+  *rect = NSRectToRect(bounds, [window screen]);
 }

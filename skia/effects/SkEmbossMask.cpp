@@ -1,6 +1,6 @@
 /* libs/graphics/effects/SkEmbossMask.cpp
 **
-** Copyright 2006, Google Inc.
+** Copyright 2006, The Android Open Source Project
 **
 ** Licensed under the Apache License, Version 2.0 (the "License"); 
 ** you may not use this file except in compliance with the License. 
@@ -75,7 +75,7 @@ void SkEmbossMask_BuildTable()
             if ((dy & 15) == 0)
                 ::fprintf(file, "\t");
 
-            U16 value = SkToU16((1 << 15) / SkSqrt32(dx * dx + dy * dy + kDelta*kDelta/4));
+            uint16_t value = SkToU16((1 << 15) / SkSqrt32(dx * dx + dy * dy + kDelta*kDelta/4));
 
             ::fprintf(file, "0x%04X", value);
             if (dx * 128 + dy < 128*128-1)

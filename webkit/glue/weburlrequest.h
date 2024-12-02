@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef WEBKIT_GLUE_WEBURLREQUEST_H__
-#define WEBKIT_GLUE_WEBURLREQUEST_H__
+#ifndef WEBKIT_GLUE_WEBURLREQUEST_H_
+#define WEBKIT_GLUE_WEBURLREQUEST_H_
 
+#include <map>
 #include <string>
 
-#include "base/basictypes.h"
 #include "base/ref_counted.h"
 
 enum WebRequestCachePolicy {
@@ -17,10 +17,16 @@ enum WebRequestCachePolicy {
   WebRequestReturnCacheDataDontLoad
 };
 
+namespace net {
+class UploadData;
+}
+
 class GURL;
 
 class WebRequest {
  public:
+  typedef std::map<std::string, std::string> HeaderMap;
+
   // Extra information that is associated with a request. The embedder derives
   // from this REFERENCE COUNTED class to associated data with a request and
   // get it back when the page loads.
@@ -64,12 +70,25 @@ class WebRequest {
   virtual void SetCachePolicy(WebRequestCachePolicy policy) = 0;
 
   // Get/set the HTTP request method.
-  virtual std::wstring GetHttpMethod() const = 0;
-  virtual void SetHttpMethod(const std::wstring& method) = 0;
+  virtual std::string GetHttpMethod() const = 0;
+  virtual void SetHttpMethod(const std::string& method) = 0;
 
   // Returns the string corresponding to a header set in the request. If the
   // given header was not set in the request, the empty string is returned.
-  virtual std::wstring GetHttpHeaderValue(const std::wstring& field) const = 0;
+  virtual std::string GetHttpHeaderValue(const std::string& field) const = 0;
+
+  // Set a value for a header in the request.
+  virtual void SetHttpHeaderValue(const std::string& field,
+      const std::string& value) = 0;
+
+  // Fills a map with all header name/value pairs set in the request.
+  virtual void GetHttpHeaders(HeaderMap* headers) const = 0;
+
+  // Sets the header name/value pairs for the request from a map. Values set
+  // using this method replace any pre-existing values with the same name.
+  // Passing in a blank value will result in a header with a blank value being
+  // sent as part of the request.
+  virtual void SetHttpHeaders(const HeaderMap& headers) = 0;
 
   // Helper function for GetHeaderValue to retrieve the referrer. This
   // referrer is generated automatically by WebKit when navigation events
@@ -79,7 +98,7 @@ class WebRequest {
   // It is preferred to call this instead of GetHttpHeaderValue, because the
   // way referrers are stored may change in the future.
   //
-  virtual std::wstring GetHttpReferrer() const = 0;
+  virtual std::string GetHttpReferrer() const = 0;
 
   // Get/set the opaque history state (used for back/forward navigations).
   virtual std::string GetHistoryState() const = 0;
@@ -94,11 +113,20 @@ class WebRequest {
   virtual std::string GetSecurityInfo() const = 0;
   virtual void SetSecurityInfo(const std::string& info) = 0;
 
-  // Returns true if this request contains history state that has form data.
-  virtual bool HasFormData() const = 0;
+  // Returns true if the request has upload data.
+  virtual bool HasUploadData() const = 0;
+
+  // Returns the request upload data. This object is temporary and should be
+  // deleted after use.
+  virtual void GetUploadData(net::UploadData* data) const = 0;
+
+  // Set the request upload data.
+  virtual void SetUploadData(const net::UploadData& data) = 0;
+
+  // Sets the requestor id.
+  virtual void SetRequestorID(int requestor_id) = 0;
 
   virtual ~WebRequest() { }
 };
 
-#endif  // #ifndef WEBKIT_GLUE_WEBURLREQUEST_H__
-
+#endif  // #ifndef WEBKIT_GLUE_WEBURLREQUEST_H_

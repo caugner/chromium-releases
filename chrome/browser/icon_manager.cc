@@ -70,9 +70,11 @@ bool IconManager::OnSkBitmapLoaded(IconLoader* source, SkBitmap* result) {
     return false;  // Return false to indicate result should be deleted.
   }
 
+  // Cache the bitmap. Watch out: |result| or the cached bitmap may be NULL to
+  // indicate a current or past failure.
   CacheKey key(client_request.file_name, client_request.size);
   IconMap::iterator it = icon_cache_.find(key);
-  if (it != icon_cache_.end()) {
+  if (it != icon_cache_.end() && result && it->second) {
     it->second->swap(*result);
     delete result;
     result = it->second;
@@ -107,5 +109,3 @@ bool IconManager::CacheKey::operator<(const CacheKey &other) const {
     return file_name < other.file_name;
   return size < other.size;
 }
-
-

@@ -4,7 +4,6 @@
 
 #include "sandbox/wow_helper/service64_resolver.h"
 
-#include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "sandbox/wow_helper/target_code.h"
 
@@ -241,7 +240,6 @@ NTSTATUS Service64ResolverThunk::ResolveInterceptor(
 NTSTATUS Service64ResolverThunk::ResolveTarget(const void* module,
                                              const char* function_name,
                                              void** address) {
-  DCHECK(address);
   if (NULL == module)
     return STATUS_UNSUCCESSFUL;
 
@@ -268,9 +266,7 @@ bool Service64ResolverThunk::IsFunctionAService(void* local_thunk) const {
     return false;
 
   if (kMmovR10EcxMovEax != function_code.mov_r10_ecx_mov_eax ||
-      kSyscall != function_code.syscall || kRetNp != function_code.ret ||
-      kPad != function_code.pad || kNop16 != function_code.xchg_ax_ax1 ||
-      kNop16 != function_code.xchg_ax_ax1)
+      kSyscall != function_code.syscall || kRetNp != function_code.ret)
     return false;
 
   // Save the verified code
@@ -344,4 +340,3 @@ NTSTATUS Service64ResolverThunk::PerformPatch(void* local_thunk,
 }
 
 }  // namespace sandbox
-

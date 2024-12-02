@@ -7,7 +7,7 @@
 // Deal with the differences between Microsoft and GNU implemenations
 // of hash_map. Allows all platforms to use |base::hash_map| and
 // |base::hash_set|.
-//  eg: 
+//  eg:
 //   base::hash_map<int> my_map;
 //   base::hash_set<int> my_set;
 //
@@ -77,11 +77,17 @@ struct hash<const std::string> {
   size_t operator()(const std::string& s) const {
     return std::tr1::hash<std::string>()(s);
   }
-};  
+};
+
+template<>
+struct hash<long long> {
+  size_t operator()(long long i) const {
+    return std::tr1::hash<long>()((long) i);
+  }
+};
 
 }
 
 #endif
 
 #endif  // BASE_HASH_TABLES_H__
-

@@ -7,16 +7,17 @@
 #include "base/gfx/png_encoder.h"
 #include "base/gfx/size.h"
 #include "base/string_util.h"
-#include "net/base/net_errors.h"
-#include "net/http/http_response_headers.h"
 #include "chrome/common/l10n_util.h"
 #include "chrome/common/resource_bundle.h"
-#include "chrome/renderer/renderer_resources.h"
-#include "generated_resources.h"
+#include "grit/generated_resources.h"
+#include "grit/renderer_resources.h"
+#include "net/base/net_errors.h"
+#include "net/http/http_response_headers.h"
 #include "skia/include/SkBitmap.h"
 #include "skia/include/SkCanvas.h"
 #include "webkit/glue/webkit_glue.h"
 #include "SkDevice.h"
+
 
 SecurityFilterPeer::SecurityFilterPeer(
     webkit_glue::ResourceLoaderBridge* resource_loader_bridge,
@@ -99,12 +100,17 @@ SecurityFilterPeer* SecurityFilterPeer::CreateSecurityFilterPeerForFrame(
   return new ReplaceContentPeer(NULL, peer, "text/html", html);
 }
 
+void SecurityFilterPeer::OnUploadProgress(uint64 position, uint64 size) {
+  original_peer_->OnUploadProgress(position, size);
+}
+
 void SecurityFilterPeer::OnReceivedRedirect(const GURL& new_url) {
   NOTREACHED();
 }
 
 void SecurityFilterPeer::OnReceivedResponse(
-    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info) {
+    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
+    bool content_filtered) {
   NOTREACHED();
 }
 
@@ -112,7 +118,8 @@ void SecurityFilterPeer::OnReceivedData(const char* data, int len) {
   NOTREACHED();
 }
 
-void SecurityFilterPeer::OnCompletedRequest(const URLRequestStatus& status) {
+void SecurityFilterPeer::OnCompletedRequest(const URLRequestStatus& status,
+                                            const std::string& security_info) {
   NOTREACHED();
 }
 
@@ -164,7 +171,8 @@ BufferedPeer::~BufferedPeer() {
 }
 
 void BufferedPeer::OnReceivedResponse(
-    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info) {
+    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
+    bool response_filtered) {
   ProcessResponseInfo(info, &response_info_, mime_type_);
 }
 
@@ -172,24 +180,25 @@ void BufferedPeer::OnReceivedData(const char* data, int len) {
   data_.append(data, len);
 }
 
-void BufferedPeer::OnCompletedRequest(const URLRequestStatus& status) {
+void BufferedPeer::OnCompletedRequest(const URLRequestStatus& status,
+                                      const std::string& security_info) {
   // Make sure we delete ourselves at the end of this call.
   scoped_ptr<BufferedPeer> this_deleter(this);
 
   // Give sub-classes a chance at altering the data.
   if (status.status() != URLRequestStatus::SUCCESS || !DataReady()) {
     // Pretend we failed to load the resource.
-    original_peer_->OnReceivedResponse(response_info_);
+    original_peer_->OnReceivedResponse(response_info_, true);
     URLRequestStatus status(URLRequestStatus::CANCELED, 0);
-    original_peer_->OnCompletedRequest(status);
+    original_peer_->OnCompletedRequest(status, security_info);
     return;
   }
 
-  original_peer_->OnReceivedResponse(response_info_);
+  original_peer_->OnReceivedResponse(response_info_, true);
   if (!data_.empty())
     original_peer_->OnReceivedData(data_.data(),
                                    static_cast<int>(data_.size()));
-  original_peer_->OnCompletedRequest(status);
+  original_peer_->OnCompletedRequest(status, security_info);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -209,7 +218,8 @@ ReplaceContentPeer::~ReplaceContentPeer() {
 }
 
 void ReplaceContentPeer::OnReceivedResponse(
-    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info) {
+    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
+    bool content_filtered) {
   // Ignore this, we'll serve some alternate content in OnCompletedRequest.
 }
 
@@ -217,15 +227,17 @@ void ReplaceContentPeer::OnReceivedData(const char* data, int len) {
   // Ignore this, we'll serve some alternate content in OnCompletedRequest.
 }
 
-void ReplaceContentPeer::OnCompletedRequest(const URLRequestStatus& status) {
+void ReplaceContentPeer::OnCompletedRequest(const URLRequestStatus& status,
+                                            const std::string& security_info) {
   webkit_glue::ResourceLoaderBridge::ResponseInfo info;
   ProcessResponseInfo(info, &info, mime_type_);
+  info.security_info = security_info;
   info.content_length = static_cast<int>(data_.size());
-  original_peer_->OnReceivedResponse(info);
+  original_peer_->OnReceivedResponse(info, true);
   if (!data_.empty())
     original_peer_->OnReceivedData(data_.data(),
                                    static_cast<int>(data_.size()));
-  original_peer_->OnCompletedRequest(URLRequestStatus());
+  original_peer_->OnCompletedRequest(URLRequestStatus(), security_info);
 
   // The request processing is complete, we must delete ourselves.
   delete this;
@@ -295,13 +307,8 @@ bool ImageFilterPeer::DataReady() {
 
   // Now encode it to a PNG.
   std::vector<unsigned char> output;
-  unsigned char* input =
-      static_cast<unsigned char*>(canvas.getDevice()->accessBitmap(false).
-          getPixels());
-  if (!PNGEncoder::Encode(input,
-                          PNGEncoder::FORMAT_BGRA,
-                          image.width(), image.height(),
-                          image.width() * 4, false, &output)) {
+  if (!PNGEncoder::EncodeBGRASkBitmap(canvas.getDevice()->accessBitmap(false),
+                                      false, &output)) {
     return false;
   }
 
@@ -312,4 +319,3 @@ bool ImageFilterPeer::DataReady() {
 
   return true;
 }
-

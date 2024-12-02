@@ -16,6 +16,7 @@ class IEImporter : public Importer {
   virtual void StartImport(ProfileInfo browser_info,
                            uint16 items,
                            ProfileWriter* writer,
+                           MessageLoop* delagate_loop,
                            ImporterHost* host);
 
  private:
@@ -46,8 +47,6 @@ class IEImporter : public Importer {
   struct FavoritesInfo {
     std::wstring path;
     std::wstring links_folder;
-    // The creation time of the user's profile folder.
-    Time profile_creation_time;
   };
   typedef std::vector<ProfileWriter::BookmarkEntry> BookmarkVector;
 
@@ -86,4 +85,3 @@ class IEImporter : public Importer {
 };
 
 #endif  // CHROME_BROWSER_IMPORTER_IE_IMPORTER_H_
-

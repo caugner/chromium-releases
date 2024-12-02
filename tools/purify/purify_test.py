@@ -6,9 +6,9 @@
 # purify_test.py
 
 '''Runs an exe  through Purify and verifies that Purify was
-able to successfully instrument and run it.  The original purpose was 
-to be able to identify when a change to our code breaks our ability to Purify 
-the app. This can happen with seemingly innocuous changes to code due to bugs 
+able to successfully instrument and run it.  The original purpose was
+to be able to identify when a change to our code breaks our ability to Purify
+the app. This can happen with seemingly innocuous changes to code due to bugs
 in Purify, and is notoriously difficult to track down when it does happen.
 Perhaps more importantly in the long run, this can also automate detection of
 leaks and other memory bugs.  It also may be useful to allow people to run
@@ -59,7 +59,9 @@ class Purify(common.Rational):
                                  "is useful when the exe you want to purify is "
                                  "run by another script or program.")
     self._parser.add_option("", "--data_dir",
-                            help="path to where purify data files live")
+                            help="path where global purify data files live")
+    self._parser.add_option("", "--report_dir",
+                            help="path where report files are saved")
 
   def ParseArgv(self):
     if common.Rational.ParseArgv(self):
@@ -74,9 +76,12 @@ class Purify(common.Rational):
       self._name = self._options.name
       if not self._name:
         self._name = os.path.basename(self._exe)
+      self._report_dir = self._options.report_dir
+      if not self._report_dir:
+        self._report_dir = os.path.join(script_dir, "latest")
       # _out_file can be set in common.Rational.ParseArgv
       if not self._out_file:
-        self._out_file = os.path.join(self._latest_dir, "%s.txt" % self._name)
+        self._out_file = os.path.join(self._report_dir, "%s.txt" % self._name)
       self._source_dir = self._options.source_dir
       self._data_dir = self._options.data_dir
       if not self._data_dir:
@@ -90,19 +95,34 @@ class Purify(common.Rational):
 
   def Setup(self):
     script_dir = google.path_utils.ScriptDir()
-    self._latest_dir = os.path.join(script_dir, "latest")
     if common.Rational.Setup(self):
+      if self._instrument_only:
+        return True
       pft_file = os.path.join(script_dir, "data", "filters.pft")
       shutil.copyfile(pft_file, self._exe.replace(".exe", "_exe.pft"))
       string_list = [
           "[Purify]",
           "option -cache-dir=\"%s\"" % (self._cache_dir),
           "option -save-text-data=\"%s\"" % (common.FixPath(self._out_file)),
+          # Change the recorded stack depth to be much larger than the default.
+          # (webkit/v8 stacks in particular seem to get quite deep)
           "option -alloc-call-stack-length=30",
           "option -error-call-stack-length=30",
           "option -free-call-stack-length=30",
+          # Report leaks.
           "option -leaks-at-exit=yes",
-          "option -in-use-at-exit=no"
+          # Don't report memory in use (that's for memory profiling).
+          "option -in-use-at-exit=no",
+          # The maximum number of subprocesses.  If this is exceeded, Purify
+          # seems to lose its mind, and we have a number of tests that use
+          # much larger than the default of 5.
+          "option -number-of-puts=30",
+          # With our large pdbs, purify's default timeout (30) isn't always
+          # enough.  If this isn't enough, -1 means no timeout.
+          "option -server-comm-timeout=120",
+          # check stack memory loads for UMRs, etc.
+          # currently disabled due to noisiness (see bug 5189)
+          #"option -stack-load-checking=yes",
           ]
       ini_file = self._exe.replace(".exe", "_pure.ini")
       if os.path.isfile(ini_file):
@@ -126,8 +146,11 @@ class Purify(common.Rational):
       logging.error("file doesn't exist " + self._exe)
       return False
     cmd = self._PurifyCommand()
-    # /Run=no means instrument only, /Replace=yes means replace the exe in place
-    cmd.extend(["/Run=no", "/Replace=yes"])
+    # /Run=no means instrument
+    cmd.extend(["/Run=no"])
+    if not self._instrument_only:
+      # /Replace=yes means replace the exe in place
+      cmd.extend(["/Replace=yes"])
     cmd.append(os.path.abspath(self._exe))
     return common.Rational.Instrument(self, cmd)
 
@@ -170,36 +193,38 @@ class Purify(common.Rational):
       return -1
     pa = purify_analyze.PurifyAnalyze(out_files, self._echo_to_stdout,
                                       self._name, self._source_dir,
-                                      self._data_dir)
+                                      self._data_dir, self._report_dir)
     if not pa.ReadFile():
       # even though there was a fatal error during Purify, it's still useful
       # to see the normalized output
-      pa.PrintSummary()
+      pa.Summary()
       if self._baseline:
         logging.warning("baseline not generated due to fatal error")
       else:
         logging.warning("baseline comparison skipped due to fatal error")
       return -1
     if self._baseline:
-      pa.PrintSummary(False)
+      pa.Summary(False)
       if pa.SaveResults():
         return 0
       return -1
     else:
       retcode = pa.CompareResults()
       if retcode != 0:
-        pa.SaveResults(self._latest_dir)
-      pa.PrintSummary()
+        pa.SaveResults(self._report_dir)
+      pa.Summary()
       # with more than one output file, it's also important to emit the bug
       # report which includes info on the arguments that generated each stack
       if len(out_files) > 1:
-        pa.PrintBugReport()
+        pa.BugReport()
       return retcode
 
   def Cleanup(self):
     common.Rational.Cleanup(self);
+    if self._instrument_only:
+      return
     cmd = self._PurifyCommand()
-    # undo the /Replace=yes that was done in Instrument(), which means to 
+    # undo the /Replace=yes that was done in Instrument(), which means to
     # remove the instrumented exe, and then rename exe.Original back to exe.
     cmd.append("/UndoReplace")
     cmd.append(os.path.abspath(self._exe))

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/file_util.h"
 #include "base/string_util.h"
 #include "chrome/tools/convert_dict/hunspell_reader.h"
 
@@ -44,7 +45,7 @@ void CollapseDuplicateSpaces(std::string* str) {
 }  // namespace
 
 AffReader::AffReader(const std::string& filename) {
-  fopen_s(&file_, filename.c_str(), "r");
+  file_ = file_util::OpenFile(filename, "r");
 
   // Default to Latin1 in case the file doesn't specify it.
   encoding_ = "ISO8859-1";
@@ -52,7 +53,7 @@ AffReader::AffReader(const std::string& filename) {
 
 AffReader::~AffReader() {
   if (file_)
-    fclose(file_);
+    file_util::CloseFile(file_);
 }
 
 bool AffReader::Read() {
@@ -90,20 +91,24 @@ bool AffReader::Read() {
       // Affix. The first one is the number of ones following which we don't
       // bother with.
       has_indexed_affixes_ = true;
-      if (got_first_af)
-        AddAffixGroup(&line.substr(3));
-      else
+      if (got_first_af) {
+        std::string group(line.substr(3));
+        AddAffixGroup(&group);
+      } else {
         got_first_af = true;
+      }
     } else if (StringBeginsWith(line, "SFX ") ||
                StringBeginsWith(line, "PFX ")) {
       AddAffix(&line);
     } else if (StringBeginsWith(line, "REP ")) {
       // The first rep line is the number of ones following which we don't
       // bother with.
-      if (got_first_rep)
-        AddReplacement(&line.substr(4));
-      else
+      if (got_first_rep) {
+        std::string replacement(line.substr(4));
+        AddReplacement(&replacement);
+      } else {
         got_first_rep = true;
+      }
     } else if (StringBeginsWith(line, "TRY ") ||
                StringBeginsWith(line, "MAP ")) {
       HandleEncodedCommand(line);
@@ -189,11 +194,20 @@ void AffReader::AddAffix(std::string* rule) {
   // will re-encode the number on the first line, but that will be a NOP. If
   // there are not that many groups, we won't reencode it, but pass it through.
   int found_spaces = 0;
+  std::string token;
   for (size_t i = 0; i < rule->length(); i++) {
     if ((*rule)[i] == ' ') {
       found_spaces++;
       if (found_spaces == 3) {
-        std::string part = rule->substr(i);  // From here to end.
+        size_t part_start = i;
+        std::string part;
+        if (token[0] != 'Y' && token[0] != 'N') {
+          // This token represents a stripping prefix or suffix, which is
+          // either a length or a string to be replaced.
+          // We also reencode them to UTF-8.
+          part_start = i - token.length();
+        }
+        part = rule->substr(part_start);  // From here to end.
 
         size_t slash_index = part.find('/');
         if (slash_index != std::string::npos && !has_indexed_affixes()) {
@@ -232,9 +246,12 @@ void AffReader::AddAffix(std::string* rule) {
         if (!EncodingToUTF8(part, &reencoded))
           break;
 
-        *rule = rule->substr(0, i) + reencoded;
+        *rule = rule->substr(0, part_start) + reencoded;
         break;
       }
+      token.clear();
+    } else {
+      token.push_back((*rule)[i]);
     }
   }
 
@@ -274,4 +291,3 @@ void AffReader::HandleEncodedCommand(const std::string& line) {
 }
 
 }  // namespace convert_dict
-

@@ -13,17 +13,16 @@
 #include "base/string_util.h"
 
 using std::string;
-using std::wstring;
 
 namespace net {
 
 // Singleton utility class for mime types.
 class MimeUtil : public PlatformMimeUtil {
  public:
-  bool GetMimeTypeFromExtension(const std::wstring& ext,
+  bool GetMimeTypeFromExtension(const FilePath::StringType& ext,
                                 std::string* mime_type) const;
 
-  bool GetMimeTypeFromFile(const std::wstring& file_path,
+  bool GetMimeTypeFromFile(const FilePath& file_path,
                            std::string* mime_type) const;
 
   bool IsSupportedImageMimeType(const char* mime_type) const;
@@ -111,7 +110,7 @@ static const char* FindMimeType(const MimeInfo* mappings,
   return NULL;
 }
 
-bool MimeUtil::GetMimeTypeFromExtension(const wstring& ext,
+bool MimeUtil::GetMimeTypeFromExtension(const FilePath::StringType& ext,
                                         string* result) const {
   // We implement the same algorithm as Mozilla for mapping a file extension to
   // a mime type.  That is, we first check a hard-coded list (that cannot be
@@ -119,11 +118,15 @@ bool MimeUtil::GetMimeTypeFromExtension(const wstring& ext,
   // Finally, we scan a secondary hard-coded list to catch types that we can
   // deduce but that we also want to allow the OS to override.
 
-  string ext_utf8 = WideToUTF8(ext);
+#if defined(OS_WIN)
+  string ext_narrow_str = WideToUTF8(ext);
+#elif defined(OS_POSIX)
+  const string& ext_narrow_str = ext;
+#endif
   const char* mime_type;
 
   mime_type = FindMimeType(primary_mappings, arraysize(primary_mappings),
-                           ext_utf8.c_str());
+                           ext_narrow_str.c_str());
   if (mime_type) {
     *result = mime_type;
     return true;
@@ -133,7 +136,7 @@ bool MimeUtil::GetMimeTypeFromExtension(const wstring& ext,
     return true;
 
   mime_type = FindMimeType(secondary_mappings, arraysize(secondary_mappings),
-                           ext_utf8.c_str());
+                           ext_narrow_str.c_str());
   if (mime_type) {
     *result = mime_type;
     return true;
@@ -142,20 +145,19 @@ bool MimeUtil::GetMimeTypeFromExtension(const wstring& ext,
   return false;
 }
 
-bool MimeUtil::GetMimeTypeFromFile(const wstring& file_path,
+bool MimeUtil::GetMimeTypeFromFile(const FilePath& file_path,
                                    string* result) const {
-  // TODO(ericroman): this doesn't work properly with paths like
-  // /home/foo/.ssh/known_hosts
-  wstring::size_type dot = file_path.find_last_of('.');
-  if (dot == wstring::npos)
+  FilePath::StringType file_name_str = file_path.Extension();
+  if (file_name_str.empty())
     return false;
-  return GetMimeTypeFromExtension(file_path.substr(dot + 1), result);
+  return GetMimeTypeFromExtension(file_name_str.substr(1), result);
 }
 
 // From WebKit's WebCore/platform/MIMETypeRegistry.cpp:
 
-static const char* supported_image_types[] = {
+static const char* const supported_image_types[] = {
   "image/jpeg",
+  "image/pjpeg",
   "image/jpg",
   "image/png",
   "image/gif",
@@ -165,7 +167,7 @@ static const char* supported_image_types[] = {
 };
 
 // Note: does not include javascript types list (see supported_javascript_types)
-static const char* supported_non_image_types[] = {
+static const char* const supported_non_image_types[] = {
   "text/html",
   "text/xml",
   "text/xsl",
@@ -180,12 +182,16 @@ static const char* supported_non_image_types[] = {
 };
 
 //  Mozilla 1.8 and WinIE 7 both accept text/javascript and text/ecmascript.
-//  Mozilla 1.8 accepts application/javascript, application/ecmascript, and application/x-javascript, but WinIE 7 doesn't.
-//  WinIE 7 accepts text/javascript1.1 - text/javascript1.3, text/jscript, and text/livescript, but Mozilla 1.8 doesn't.
+//  Mozilla 1.8 accepts application/javascript, application/ecmascript, and
+// application/x-javascript, but WinIE 7 doesn't.
+//  WinIE 7 accepts text/javascript1.1 - text/javascript1.3, text/jscript, and
+// text/livescript, but Mozilla 1.8 doesn't.
 //  Mozilla 1.8 allows leading and trailing whitespace, but WinIE 7 doesn't.
-//  Mozilla 1.8 and WinIE 7 both accept the empty string, but neither accept a whitespace-only string.
-//  We want to accept all the values that either of these browsers accept, but not other values.
-static const char* supported_javascript_types[] = {
+//  Mozilla 1.8 and WinIE 7 both accept the empty string, but neither accept a
+// whitespace-only string.
+//  We want to accept all the values that either of these browsers accept, but
+// not other values.
+static const char* const supported_javascript_types[] = {
   "text/javascript",
   "text/ecmascript",
   "application/javascript",
@@ -198,7 +204,7 @@ static const char* supported_javascript_types[] = {
   "text/livescript"
 };
 
-static const char* view_source_types[] = {
+static const char* const view_source_types[] = {
   "text/xml",
   "text/xsl",
   "application/xml",
@@ -242,12 +248,9 @@ bool MimeUtil::IsViewSourceMimeType(const char* mime_type) const {
 
 // Mirrors WebViewImpl::CanShowMIMEType()
 bool MimeUtil::IsSupportedMimeType(const std::string& mime_type) const {
-  if (mime_type.compare(0, 5, "text/") == 0 ||
-      (mime_type.compare(0, 6, "image/") == 0 &&
-       IsSupportedImageMimeType(mime_type.c_str())) ||
-      IsSupportedNonImageMimeType(mime_type.c_str()))
-    return true;
-  return false;
+  return (mime_type.compare(0, 6, "image/") == 0 &&
+          IsSupportedImageMimeType(mime_type.c_str())) ||
+         IsSupportedNonImageMimeType(mime_type.c_str());
 }
 
 bool MimeUtil::MatchesMimeType(const std::string &mime_type_pattern,
@@ -295,16 +298,17 @@ static MimeUtil* GetMimeUtil() {
   return Singleton<MimeUtil>::get();
 }
 
-bool GetMimeTypeFromExtension(const std::wstring& ext, std::string* mime_type) {
+bool GetMimeTypeFromExtension(const FilePath::StringType& ext,
+                              std::string* mime_type) {
   return GetMimeUtil()->GetMimeTypeFromExtension(ext, mime_type);
 }
 
-bool GetMimeTypeFromFile(const std::wstring& file_path, std::string* mime_type) {
+bool GetMimeTypeFromFile(const FilePath& file_path, std::string* mime_type) {
   return GetMimeUtil()->GetMimeTypeFromFile(file_path, mime_type);
 }
 
 bool GetPreferredExtensionForMimeType(const std::string& mime_type,
-                                      std::wstring* extension) {
+                                      FilePath::StringType* extension) {
   return GetMimeUtil()->GetPreferredExtensionForMimeType(mime_type, extension);
 }
 
@@ -334,4 +338,3 @@ bool MatchesMimeType(const std::string &mime_type_pattern,
 }
 
 }  // namespace net
-
