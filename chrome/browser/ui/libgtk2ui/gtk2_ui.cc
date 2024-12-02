@@ -8,6 +8,7 @@
 #include <set>
 
 #include <pango/pango.h>
+#include <X11/Xlib.h>
 
 #include "base/command_line.h"
 #include "base/debug/leak_annotations.h"
@@ -49,6 +50,7 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/gfx/x/x11_types.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/button/label_button_border.h"
@@ -200,9 +202,6 @@ const int kOtherToolbarButtonIDs[] = {
   IDR_TOOLBAR_BEZEL_HOVER,
   IDR_TOOLBAR_BEZEL_PRESSED,
   IDR_BROWSER_ACTIONS_OVERFLOW,
-  IDR_THROBBER,
-  IDR_THROBBER_WAITING,
-  IDR_THROBBER_LIGHT,
 
   // TODO(erg): The dropdown arrow should be tinted because we're injecting
   // various background GTK colors, but the code that accesses them needs to be
@@ -381,20 +380,27 @@ gfx::FontRenderParams GetGtkFontRenderParams() {
   return params;
 }
 
-double GetDPI() {
+double GetBaseDPI() {
+  XDisplay* xdisplay = gfx::GetXDisplay();
+  int xscreen = DefaultScreen(xdisplay);
+  return (DisplayHeight(xdisplay, xscreen) * 25.4) /
+         DisplayHeightMM(xdisplay, xscreen);
+}
+
+double GetFontDPI() {
   GtkSettings* gtk_settings = gtk_settings_get_default();
   CHECK(gtk_settings);
   gint gtk_dpi = -1;
   g_object_get(gtk_settings, "gtk-xft-dpi", &gtk_dpi, NULL);
 
   // GTK multiplies the DPI by 1024 before storing it.
-  return (gtk_dpi > 0) ? gtk_dpi / 1024.0 : 96.0;
+  return (gtk_dpi > 0) ? gtk_dpi / 1024.0 : GetBaseDPI();
 }
 
 // Queries GTK for its font DPI setting and returns the number of pixels in a
 // point.
 double GetPixelsInPoint(float device_scale_factor) {
-  double dpi = GetDPI();
+  double dpi = GetFontDPI();
 
   // Take device_scale_factor into account — if Chrome already scales the
   // entire UI up by 2x, we should not also scale up.
@@ -689,9 +695,10 @@ void Gtk2UI::SetNonClientMiddleClickAction(NonClientMiddleClickAction action) {
 }
 
 scoped_ptr<ui::LinuxInputMethodContext> Gtk2UI::CreateInputMethodContext(
-    ui::LinuxInputMethodContextDelegate* delegate) const {
+    ui::LinuxInputMethodContextDelegate* delegate,
+    bool is_simple) const {
   return scoped_ptr<ui::LinuxInputMethodContext>(
-      new X11InputMethodContextImplGtk2(delegate));
+      new X11InputMethodContextImplGtk2(delegate, is_simple));
 }
 
 gfx::FontRenderParams Gtk2UI::GetDefaultFontRenderParams() const {
@@ -1380,7 +1387,7 @@ void Gtk2UI::ClearAllThemeData() {
 void Gtk2UI::UpdateDefaultFont(const PangoFontDescription* desc) {
   // Use gfx::FontRenderParams to select a family and determine the rendering
   // settings.
-  gfx::FontRenderParamsQuery query(false /* for_web_contents */);
+  gfx::FontRenderParamsQuery query;
   base::SplitString(pango_font_description_get_family(desc), ',',
                     &query.families);
 
@@ -1426,10 +1433,9 @@ void Gtk2UI::UpdateDeviceScaleFactor(float device_scale_factor) {
 }
 
 float Gtk2UI::GetDeviceScaleFactor() const {
-  const int kCSSDefaultDPI = 96;
-  float scale = GetDPI() / kCSSDefaultDPI;
-  // Round to 2 decimals, e.g. to 1.33.
-  return roundf(scale * 100) / 100;
+  float scale = GetFontDPI() / GetBaseDPI();
+  // Round to 1 decimal, e.g. to 1.4.
+  return roundf(scale * 10) / 10;
 }
 
 }  // namespace libgtk2ui

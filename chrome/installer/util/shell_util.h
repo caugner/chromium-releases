@@ -92,9 +92,8 @@ class ShellUtil {
       PROPERTIES_DUAL_MODE = 1 << 6,
     };
 
-    explicit ShortcutProperties(ShellChange level_in)
-        : level(level_in), icon_index(0), dual_mode(false),
-          pin_to_taskbar(false), options(0U) {}
+    explicit ShortcutProperties(ShellChange level_in);
+    ~ShortcutProperties();
 
     // Sets the target executable to launch from this shortcut.
     // This is mandatory when creating a shortcut.
@@ -411,11 +410,12 @@ class ShellUtil {
   // Windows prior to Windows 8.
   static bool CanMakeChromeDefaultUnattended();
 
-  // Returns the DefaultState of Chrome for HTTP and HTTPS.
+  // Returns the DefaultState of Chrome for HTTP and HTTPS and updates the
+  // default browser beacons as appropriate.
   static DefaultState GetChromeDefaultState();
 
-  // Returns the DefaultState of the Chrome instance with the specified path
-  // for HTTP and HTTPs.
+  // Returns the DefaultState of the Chrome instance with the specified path for
+  // HTTP and HTTPs and updates the default browser beacons as appropriate.
   static DefaultState GetChromeDefaultStateFromPath(
       const base::FilePath& chrome_exe);
 
@@ -446,10 +446,14 @@ class ShellUtil {
                                 const base::FilePath& chrome_exe,
                                 bool elevate_if_not_admin);
 
-  // Shows and waits for the Windows 8 "How do you want to open webpages?"
+  // Windows 8: Shows and waits for the "How do you want to open webpages?"
   // dialog if Chrome is not already the default HTTP/HTTPS handler. Also does
   // XP-era registrations if Chrome is chosen or was already the default. Do
   // not use on pre-Win8 OSes.
+  //
+  // Windows 10: The associations dialog cannot be launched so the settings
+  // dialog focused on default apps is launched. The function does not wait
+  // in this case.
   //
   // |dist| gives the type of browser distribution currently in use.
   // |chrome_exe| The chrome.exe path to register as default browser.

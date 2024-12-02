@@ -128,11 +128,16 @@ void WebViewPlugin::destroy() {
   base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
-NPObject* WebViewPlugin::scriptableObject() { return NULL; }
+v8::Local<v8::Object> WebViewPlugin::v8ScriptableObject(v8::Isolate* isolate) {
+  if (!delegate_)
+    return v8::Local<v8::Object>();
 
-struct _NPP* WebViewPlugin::pluginNPP() { return NULL; }
+  return delegate_->GetV8ScriptableObject(isolate);
+}
 
-bool WebViewPlugin::getFormValue(WebString& value) { return false; }
+void WebViewPlugin::layoutIfNeeded() {
+  web_view_->layout();
+}
 
 void WebViewPlugin::paint(WebCanvas* canvas, const WebRect& rect) {
   gfx::Rect paint_rect = gfx::IntersectRects(rect_, rect);
@@ -150,7 +155,6 @@ void WebViewPlugin::paint(WebCanvas* canvas, const WebRect& rect) {
       SkFloatToScalar(1.0 / container_->deviceScaleFactor());
   canvas->scale(inverse_scale, inverse_scale);
 
-  web_view_->layout();
   web_view_->paint(canvas, paint_rect);
 
   canvas->restore();
@@ -180,6 +184,11 @@ bool WebViewPlugin::handleInputEvent(const WebInputEvent& event,
   // For tap events, don't handle them. They will be converted to
   // mouse events later and passed to here.
   if (event.type == WebInputEvent::GestureTap)
+    return false;
+
+  // For LongPress events we return false, since otherwise the context menu will
+  // be suppressed. https://crbug.com/482842
+  if (event.type == WebInputEvent::GestureLongPress)
     return false;
 
   if (event.type == WebInputEvent::ContextMenu) {
@@ -248,7 +257,7 @@ void WebViewPlugin::didChangeCursor(const WebCursorInfo& cursor) {
 
 void WebViewPlugin::scheduleAnimation() {
   if (container_)
-    container_->invalidate();
+    container_->setNeedsLayout();
 }
 
 void WebViewPlugin::didClearWindowObject(WebLocalFrame* frame) {
