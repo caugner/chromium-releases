@@ -769,6 +769,14 @@
     ]
   },
 
+  "DefaultSearchProviderNewTabURL": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "DefaultSearchProviderSearchURL": "http://www.google.com/?q={searchTerms}", "DefaultSearchProviderNewTabURL": "http://www.google.com/newtab" },
+    "pref_mappings": [
+      { "pref": "default_search_provider.new_tab_url" }
+    ]
+  },
+
   "DefaultSearchProviderIconURL": {
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "DefaultSearchProviderSearchURL": "http://www.google.com/?q={searchTerms}", "DefaultSearchProviderIconURL": "http://www.google.com/favicon.ico" },
@@ -1529,6 +1537,14 @@
     ]
   },
 
+  "DataCompressionProxyEnabled": {
+    "os": ["android"],
+    "test_policy": { "DataCompressionProxyEnabled": false },
+    "pref_mappings": [
+      { "pref": "spdy_proxy.enabled" }
+    ]
+  },
+
   "----- Chrome OS policies ------------------------------------------------": {},
 
   "ChromeOsLockOnIdleSuspend": {
@@ -1900,6 +1916,23 @@
   "ManagedBookmarks": {
   },
 
+  "FullscreenAllowed": {
+    "os": ["win", "linux", "chromeos"],
+    "test_policy": { "FullscreenAllowed": false },
+    "pref_mappings": [
+      { "pref": "fullscreen.allowed" },
+      { "pref": "apps.fullscreen.allowed" }
+    ]
+  },
+
+  "ChromeOsMultiProfileUserBehavior": {
+    "os": ["chromeos"],
+    "test_policy": { "ChromeOsMultiProfileUserBehavior": "unrestricted" },
+    "pref_mappings": [
+      { "pref": "settings.multiprofile_user_behavior" }
+    ]
+  },
+
   "----- Chrome OS device policies ---------------------------------------": {},
 
   "DevicePolicyRefreshRate": {
@@ -1987,6 +2020,9 @@
   "DeviceAutoUpdateDisabled": {
   },
 
+  "DeviceAutoUpdateP2PEnabled": {
+  },
+
   "DeviceTargetVersionPrefix": {
   },
 
@@ -1994,6 +2030,9 @@
   },
 
   "DeviceUpdateAllowedConnectionTypes": {
+  },
+
+  "DeviceUpdateHttpDownloadsEnabled": {
   },
 
   "ReportDeviceLocation": {
@@ -2050,6 +2089,9 @@
   "AttestationEnabledForDevice": {
   },
 
+  "AttestationForContentProtectionEnabled": {
+  },
+
   "SupervisedUsersEnabled": {
   },
 
@@ -2077,5 +2119,8 @@
   },
 
   "SuppressChromeFrameTurndownPrompt": {
+  },
+
+  "SkipMetadataCheck": {
   }
 }

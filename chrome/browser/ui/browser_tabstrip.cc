@@ -6,7 +6,6 @@
 
 #include "base/command_line.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
@@ -55,41 +54,6 @@ void AddWebContents(Browser* browser,
   DCHECK(disposition != SAVE_TO_DISK);
   // Can't create a new contents for the current tab - invalid case.
   DCHECK(disposition != CURRENT_TAB);
-
-  BlockedContentTabHelper* source_blocked_content = NULL;
-  if (source_contents) {
-    source_blocked_content =
-        BlockedContentTabHelper::FromWebContents(source_contents);
-  }
-
-  if (source_blocked_content) {
-    // Handle blocking of tabs.
-    if (source_blocked_content->all_contents_blocked()) {
-      source_blocked_content->AddWebContents(
-          new_contents, disposition, initial_pos, user_gesture);
-      if (was_blocked)
-        *was_blocked = true;
-      return;
-    }
-
-    // Handle blocking of popups.
-    if ((disposition == NEW_POPUP || disposition == NEW_FOREGROUND_TAB ||
-         disposition == NEW_BACKGROUND_TAB) && !user_gesture &&
-        !CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kDisablePopupBlocking) &&
-        CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kDisableBetterPopupBlocking)) {
-      // Unrequested popups from normal pages are constrained unless they're in
-      // the white list.  The popup owner will handle checking this.
-      source_blocked_content->AddPopup(
-          new_contents, disposition, initial_pos, user_gesture);
-      if (was_blocked)
-        *was_blocked = true;
-      return;
-    }
-
-    new_contents->GetRenderViewHost()->DisassociateFromPopupCount();
-  }
 
   NavigateParams params(browser, new_contents);
   params.source_contents = source_contents;

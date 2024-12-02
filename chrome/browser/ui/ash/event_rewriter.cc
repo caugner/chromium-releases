@@ -12,9 +12,9 @@
 #include "base/strings/string_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "ui/aura/root_window.h"
-#include "ui/base/events/event.h"
-#include "ui/base/events/event_utils.h"
-#include "ui/base/keycodes/keyboard_code_conversion.h"
+#include "ui/events/event.h"
+#include "ui/events/event_utils.h"
+#include "ui/events/keycodes/keyboard_code_conversion.h"
 
 #if defined(OS_CHROMEOS)
 #include <X11/extensions/XInput2.h>
@@ -35,8 +35,8 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/ime/input_method_manager.h"
 #include "chromeos/ime/xkeyboard.h"
-#include "ui/base/keycodes/keyboard_code_conversion_x.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/events/keycodes/keyboard_code_conversion_x.h"
 #endif
 
 namespace {
@@ -66,6 +66,8 @@ const struct ModifierRemapping {
     { XK_VoidSymbol, XK_VoidSymbol, XK_VoidSymbol, XK_VoidSymbol }},
   { chromeos::input_method::kCapsLockKey, 0, 0U, ui::VKEY_CAPITAL,
     { XK_Caps_Lock, XK_Caps_Lock, XK_Caps_Lock, XK_Caps_Lock }},
+  { chromeos::input_method::kEscapeKey, 0, 0U, ui::VKEY_ESCAPE,
+    { XK_Escape, XK_Escape, XK_Escape, XK_Escape }},
 };
 
 const ModifierRemapping* kModifierRemappingCtrl = &kModifierRemappings[1];
@@ -235,7 +237,7 @@ void EventRewriter::DeviceAdded(int device_id) {
   }
 
   int ndevices_return = 0;
-  XIDeviceInfo* device_info = XIQueryDevice(ui::GetXDisplay(),
+  XIDeviceInfo* device_info = XIQueryDevice(gfx::GetXDisplay(),
                                             device_id,
                                             &ndevices_return);
 
@@ -280,7 +282,7 @@ KeyCode EventRewriter::NativeKeySymToNativeKeycode(KeySym keysym) {
   if (keysym_to_keycode_map_.count(keysym))
     return keysym_to_keycode_map_[keysym];
 
-  Display* display = ui::GetXDisplay();
+  XDisplay* display = gfx::GetXDisplay();
   KeyCode keycode = XKeysymToKeycode(display, keysym);
   keysym_to_keycode_map_[keysym] = keycode;
   return keycode;

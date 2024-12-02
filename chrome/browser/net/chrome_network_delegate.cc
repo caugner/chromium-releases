@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/base_paths.h"
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
@@ -16,6 +17,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
+#include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -241,6 +243,18 @@ int64 ListPrefInt64Value(const base::ListValue& list_update, size_t index) {
   return value;
 }
 
+// Ensure list has exactly n elements.
+void MaintainContentLengthPrefsWindow(base::ListValue* list, size_t n) {
+  // Remove data for old days from the front.
+  while (list->GetSize() > n)
+    list->Remove(0, NULL);
+  // Newly added lists are empty. Add entries to back to fill the window,
+  // each initialized to zero.
+  while (list->GetSize() < n)
+    list->AppendString(base::Int64ToString(0));
+  DCHECK_EQ(n, list->GetSize());
+}
+
 void RecordDailyContentLengthHistograms(
     int64 original_length,
     int64 received_length,
@@ -310,6 +324,17 @@ void UpdateContentLengthPrefs(int received_content_length,
   prefs->SetInt64(prefs::kHttpOriginalContentLength, total_original);
 
 #if defined(OS_ANDROID) || defined(OS_IOS)
+  // TODO(bengr): Remove this check once the underlying cause of
+  // http://crbug.com/287821 is fixed. For now, only continue if the current
+  // year is reported as being between 1972 and 2970.
+  base::TimeDelta time_since_unix_epoch =
+      base::Time::Now() - base::Time::UnixEpoch();
+  const int kMinDaysSinceUnixEpoch = 365 * 2;  //   2 years.
+  const int kMaxDaysSinceUnixEpoch = 365 * 1000; // 1000 years.
+  if (time_since_unix_epoch.InDays() < kMinDaysSinceUnixEpoch ||
+      time_since_unix_epoch.InDays() > kMaxDaysSinceUnixEpoch)
+    return;
+
   base::Time now = base::Time::Now().LocalMidnight();
   const size_t kNumDaysInHistory = 60;
 
@@ -325,6 +350,15 @@ void UpdateContentLengthPrefs(int received_content_length,
       prefs::kDailyHttpReceivedContentLengthWithDataReductionProxyEnabled);
   ListPrefUpdate via_data_reduction_update(
       prefs, prefs::kDailyHttpReceivedContentLengthViaDataReductionProxy);
+
+  // New empty lists may have been created. Maintain the invariant that
+  // there should be exactly |kNumDaysInHistory| days in the histories.
+  MaintainContentLengthPrefsWindow(original_update.Get(), kNumDaysInHistory);
+  MaintainContentLengthPrefsWindow(received_update.Get(), kNumDaysInHistory);
+  MaintainContentLengthPrefsWindow(
+      data_reduction_enabled_update.Get(), kNumDaysInHistory);
+  MaintainContentLengthPrefsWindow(
+      via_data_reduction_update.Get(), kNumDaysInHistory);
 
   // Determine how many days it has been since the last update.
   int64 then_internal = prefs->GetInt64(
@@ -376,8 +410,9 @@ void UpdateContentLengthPrefs(int received_content_length,
           ListPrefInt64Value(*via_data_reduction_update,
                              via_data_reduction_update->GetSize() - 1));
     }
-
-    // Add entries for days since last update.
+    // Add entries for days since last update event. This will make the
+    // lists longer than kNumDaysInHistory. The additional items will be cut off
+    // from the head of the lists by MaintainContentLengthPrefsWindow, below.
     for (int i = 0;
          i < days_since_last_update && i < static_cast<int>(kNumDaysInHistory);
          ++i) {
@@ -387,22 +422,15 @@ void UpdateContentLengthPrefs(int received_content_length,
       via_data_reduction_update->AppendString(base::Int64ToString(0));
     }
 
-    // Maintain the invariant that there should never be more than
-    // |kNumDaysInHistory| days in the histories.
-    while (original_update->GetSize() > kNumDaysInHistory)
-      original_update->Remove(0, NULL);
-    while (received_update->GetSize() > kNumDaysInHistory)
-      received_update->Remove(0, NULL);
-    while (data_reduction_enabled_update->GetSize() > kNumDaysInHistory)
-      data_reduction_enabled_update->Remove(0, NULL);
-    while (via_data_reduction_update->GetSize() > kNumDaysInHistory)
-      via_data_reduction_update->Remove(0, NULL);
+    // Entries for new days may have been appended. Maintain the invariant that
+    // there should be exactly |kNumDaysInHistory| days in the histories.
+    MaintainContentLengthPrefsWindow(original_update.Get(), kNumDaysInHistory);
+    MaintainContentLengthPrefsWindow(received_update.Get(), kNumDaysInHistory);
+    MaintainContentLengthPrefsWindow(
+        data_reduction_enabled_update.Get(), kNumDaysInHistory);
+    MaintainContentLengthPrefsWindow(
+        via_data_reduction_update.Get(), kNumDaysInHistory);
   }
-
-  DCHECK_EQ(kNumDaysInHistory, original_update->GetSize());
-  DCHECK_EQ(kNumDaysInHistory, received_update->GetSize());
-  DCHECK_EQ(kNumDaysInHistory, data_reduction_enabled_update->GetSize());
-  DCHECK_EQ(kNumDaysInHistory, via_data_reduction_update->GetSize());
 
   // Update the counts for the current day.
   AddInt64ToListPref(kNumDaysInHistory - 1,
@@ -626,6 +654,7 @@ int ChromeNetworkDelegate::OnBeforeSendHeaders(
     net::URLRequest* request,
     const net::CompletionCallback& callback,
     net::HttpRequestHeaders* headers) {
+  TRACE_EVENT_ASYNC_STEP0("net", "URLRequest", request, "SendRequest");
   return ExtensionWebRequestEventRouter::GetInstance()->OnBeforeSendHeaders(
       profile_, extension_info_map_.get(), request, callback, headers);
 }
@@ -655,6 +684,7 @@ void ChromeNetworkDelegate::OnBeforeRedirect(net::URLRequest* request,
 
 
 void ChromeNetworkDelegate::OnResponseStarted(net::URLRequest* request) {
+  TRACE_EVENT_ASYNC_STEP0("net", "URLRequest", request, "ResponseStarted");
   ExtensionWebRequestEventRouter::GetInstance()->OnResponseStarted(
       profile_, extension_info_map_.get(), request);
   ForwardProxyErrors(request, event_router_.get(), profile_);
@@ -662,6 +692,8 @@ void ChromeNetworkDelegate::OnResponseStarted(net::URLRequest* request) {
 
 void ChromeNetworkDelegate::OnRawBytesRead(const net::URLRequest& request,
                                            int bytes_read) {
+  TRACE_EVENT_ASYNC_STEP1("net", "URLRequest", &request, "DidRead",
+                          "bytes_read", bytes_read);
   performance_monitor::PerformanceMonitor::GetInstance()->BytesReadOnIOThread(
       request, bytes_read);
 
@@ -672,6 +704,7 @@ void ChromeNetworkDelegate::OnRawBytesRead(const net::URLRequest& request,
 
 void ChromeNetworkDelegate::OnCompleted(net::URLRequest* request,
                                         bool started) {
+  TRACE_EVENT_ASYNC_END0("net", "URLRequest", request);
   if (request->status().status() == net::URLRequestStatus::SUCCESS) {
     // For better accuracy, we use the actual bytes read instead of the length
     // specified with the Content-Length header, which may be inaccurate,

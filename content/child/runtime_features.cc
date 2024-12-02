@@ -42,6 +42,8 @@ static void SetRuntimeFeatureDefaultsForPlatform() {
   WebRuntimeFeatures::enablePagePopup(false);
   // datalist on Android is not enabled
   WebRuntimeFeatures::enableDataListElement(false);
+  // Android does not yet support the Web Notification API. crbug.com/115320
+  WebRuntimeFeatures::enableNotifications(false);
 #endif  // defined(OS_ANDROID)
 }
 
@@ -81,11 +83,8 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
     WebRuntimeFeatures::enablePeerConnection(false);
   }
 
-  if (!command_line.HasSwitch(switches::kEnableSpeechRecognition) ||
-      !command_line.HasSwitch(
-          switches::kEnableExperimentalWebPlatformFeatures)) {
+  if (!command_line.HasSwitch(switches::kEnableSpeechRecognition))
     WebRuntimeFeatures::enableScriptedSpeech(false);
-  }
 #endif
 
   if (command_line.HasSwitch(switches::kDisableWebAudio))
@@ -109,14 +108,8 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (command_line.HasSwitch(switches::kEnableWebMIDI))
     WebRuntimeFeatures::enableWebMIDI(true);
 
-#if defined(OS_ANDROID)
-  // Enable Device Motion on Android by default.
-  WebRuntimeFeatures::enableDeviceMotion(
-      !command_line.HasSwitch(switches::kDisableDeviceMotion));
-#else
-  if (command_line.HasSwitch(switches::kEnableDeviceMotion))
-      WebRuntimeFeatures::enableDeviceMotion(true);
-#endif
+  if (command_line.HasSwitch(switches::kDisableDeviceMotion))
+    WebRuntimeFeatures::enableDeviceMotion(false);
 
   if (command_line.HasSwitch(switches::kDisableDeviceOrientation))
     WebRuntimeFeatures::enableDeviceOrientation(false);
@@ -139,8 +132,14 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (command_line.HasSwitch(switches::kEnableHTMLImports))
     WebRuntimeFeatures::enableHTMLImports(true);
 
+  if (command_line.HasSwitch(switches::kEnableOverlayFullscreenVideo))
+    WebRuntimeFeatures::enableOverlayFullscreenVideo(true);
+
   if (command_line.HasSwitch(switches::kEnableOverlayScrollbars))
     WebRuntimeFeatures::enableOverlayScrollbars(true);
+
+  if (command_line.HasSwitch(switches::kEnableInputModeAttribute))
+    WebRuntimeFeatures::enableInputModeAttribute(true);
 }
 
 }  // namespace content

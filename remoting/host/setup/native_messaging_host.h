@@ -13,6 +13,7 @@
 #include "remoting/host/setup/daemon_controller.h"
 #include "remoting/host/setup/native_messaging_reader.h"
 #include "remoting/host/setup/native_messaging_writer.h"
+#include "remoting/host/setup/oauth_client.h"
 
 namespace base {
 class DictionaryValue;
@@ -20,6 +21,10 @@ class ListValue;
 class SingleThreadTaskRunner;
 class Value;
 }  // namespace base
+
+namespace gaia {
+class GaiaOAuthClient;
+}  // namespace gaia
 
 namespace remoting {
 
@@ -31,8 +36,9 @@ class PairingRegistry;
 class NativeMessagingHost {
  public:
   NativeMessagingHost(
-      scoped_ptr<DaemonController> daemon_controller,
+      scoped_refptr<DaemonController> daemon_controller,
       scoped_refptr<protocol::PairingRegistry> pairing_registry,
+      scoped_ptr<OAuthClient> oauth_client,
       base::PlatformFile input,
       base::PlatformFile output,
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
@@ -79,6 +85,11 @@ class NativeMessagingHost {
                          scoped_ptr<base::DictionaryValue> response);
   bool ProcessGetDaemonState(const base::DictionaryValue& message,
                              scoped_ptr<base::DictionaryValue> response);
+  bool ProcessGetHostClientId(const base::DictionaryValue& message,
+                             scoped_ptr<base::DictionaryValue> response);
+  bool ProcessGetCredentialsFromAuthCode(
+      const base::DictionaryValue& message,
+      scoped_ptr<base::DictionaryValue> response);
 
   // Sends a response back to the client app. This can be called on either the
   // main message loop or the DaemonController's internal thread, so it
@@ -93,14 +104,16 @@ class NativeMessagingHost {
                           scoped_ptr<base::DictionaryValue> config);
   void SendPairedClientsResponse(scoped_ptr<base::DictionaryValue> response,
                                  scoped_ptr<base::ListValue> pairings);
-  void SendUsageStatsConsentResponse(scoped_ptr<base::DictionaryValue> response,
-                                     bool supported,
-                                     bool allowed,
-                                     bool set_by_policy);
+  void SendUsageStatsConsentResponse(
+      scoped_ptr<base::DictionaryValue> response,
+      const DaemonController::UsageStatsConsent& consent);
   void SendAsyncResult(scoped_ptr<base::DictionaryValue> response,
                        DaemonController::AsyncResult result);
   void SendBooleanResult(scoped_ptr<base::DictionaryValue> response,
                          bool result);
+  void SendCredentialsResponse(scoped_ptr<base::DictionaryValue> response,
+                               const std::string& user_email,
+                               const std::string& refresh_token);
 
   // Callbacks may be invoked by e.g. DaemonController during destruction,
   // which use |weak_ptr_|, so it's important that it be the last member to be
@@ -116,10 +129,20 @@ class NativeMessagingHost {
   // The DaemonController may post tasks to this object during destruction (but
   // not afterwards), so it needs to be destroyed before other members of this
   // class (except for |weak_factory_|).
-  scoped_ptr<remoting::DaemonController> daemon_controller_;
+  scoped_refptr<remoting::DaemonController> daemon_controller_;
 
   // Used to load and update the paired clients for this host.
   scoped_refptr<protocol::PairingRegistry> pairing_registry_;
+
+  // Used to exchange the service account authorization code for credentials.
+  scoped_ptr<OAuthClient> oauth_client_;
+
+  // Keeps track of pending requests. Used to delay shutdown until all responses
+  // have been sent.
+  int pending_requests_;
+
+  // True if Shutdown() has been called.
+  bool shutdown_;
 
   base::WeakPtrFactory<NativeMessagingHost> weak_factory_;
 

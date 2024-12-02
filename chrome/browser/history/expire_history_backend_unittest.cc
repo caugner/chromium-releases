@@ -311,7 +311,7 @@ bool ExpireHistoryTest::HasThumbnail(URLID url_id) {
     return false;
   GURL url = info.url();
   scoped_refptr<base::RefCountedMemory> data;
-  return top_sites_->GetPageThumbnail(url, &data);
+  return top_sites_->GetPageThumbnail(url, false, &data);
 }
 
 void ExpireHistoryTest::EnsureURLInfoGone(const URLRow& row) {
@@ -391,7 +391,7 @@ TEST_F(ExpireHistoryTest, DeleteFaviconsIfPossible) {
 bool ExpireHistoryTest::IsStringInFile(const base::FilePath& filename,
                                        const char* str) {
   std::string contents;
-  EXPECT_TRUE(file_util::ReadFileToString(filename, &contents));
+  EXPECT_TRUE(base::ReadFileToString(filename, &contents));
   return contents.find(str) != std::string::npos;
 }
 

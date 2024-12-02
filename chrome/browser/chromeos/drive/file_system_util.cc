@@ -19,6 +19,7 @@
 #include "base/md5.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop_proxy.h"
+#include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -27,13 +28,15 @@
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
-#include "chrome/browser/chromeos/drive/file_write_helper.h"
 #include "chrome/browser/chromeos/drive/job_list.h"
+#include "chrome/browser/chromeos/drive/write_on_cache_file.h"
+#include "chrome/browser/chromeos/profiles/profile_util.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chromeos/chromeos_constants.h"
 #include "content/public/browser/browser_thread.h"
@@ -65,18 +68,6 @@ const base::FilePath& GetDriveMyDriveMountPointPath() {
   CR_DEFINE_STATIC_LOCAL(base::FilePath, drive_mydrive_mount_path,
       (kDriveMyDriveMountPointPath));
   return drive_mydrive_mount_path;
-}
-
-FileSystemInterface* GetFileSystem(Profile* profile) {
-  DriveIntegrationService* integration_service =
-      DriveIntegrationServiceFactory::GetForProfile(profile);
-  return integration_service ? integration_service->file_system() : NULL;
-}
-
-FileWriteHelper* GetFileWriteHelper(Profile* profile) {
-  DriveIntegrationService* integration_service =
-      DriveIntegrationServiceFactory::GetForProfile(profile);
-  return integration_service ? integration_service->file_write_helper() : NULL;
 }
 
 std::string ReadStringFromGDocFile(const base::FilePath& file_path,
@@ -123,6 +114,16 @@ void MoveAllFilesFromDirectory(const base::FilePath& directory_from,
   }
 }
 
+// Returns DriveIntegrationService instance, if Drive is enabled.
+// Otherwise, NULL.
+DriveIntegrationService* GetIntegrationServiceByProfile(Profile* profile) {
+  DriveIntegrationService* service =
+      DriveIntegrationServiceFactory::FindForProfile(profile);
+  if (!service || !service->IsMounted())
+    return NULL;
+  return service;
+}
+
 }  // namespace
 
 const base::FilePath& GetDriveGrandRootPath() {
@@ -143,6 +144,14 @@ const base::FilePath& GetDriveMountPointPath() {
   return drive_mount_path;
 }
 
+FileSystemInterface* GetFileSystemByProfile(Profile* profile) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  DriveIntegrationService* integration_service =
+      GetIntegrationServiceByProfile(profile);
+  return integration_service ? integration_service->file_system() : NULL;
+}
+
 FileSystemInterface* GetFileSystemByProfileId(void* profile_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -151,7 +160,25 @@ FileSystemInterface* GetFileSystemByProfileId(void* profile_id) {
   Profile* profile = reinterpret_cast<Profile*>(profile_id);
   if (!g_browser_process->profile_manager()->IsValidProfile(profile))
     return NULL;
-  return GetFileSystem(profile);
+  return GetFileSystemByProfile(profile);
+}
+
+DriveAppRegistry* GetDriveAppRegistryByProfile(Profile* profile) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  DriveIntegrationService* integration_service =
+      GetIntegrationServiceByProfile(profile);
+  return integration_service ?
+      integration_service->drive_app_registry() :
+      NULL;
+}
+
+DriveServiceInterface* GetDriveServiceByProfile(Profile* profile) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  DriveIntegrationService* integration_service =
+      GetIntegrationServiceByProfile(profile);
+  return integration_service ? integration_service->drive_service() : NULL;
 }
 
 bool IsSpecialResourceId(const std::string& resource_id) {
@@ -163,18 +190,9 @@ ResourceEntry CreateMyDriveRootEntry(const std::string& root_resource_id) {
   ResourceEntry mydrive_root;
   mydrive_root.mutable_file_info()->set_is_directory(true);
   mydrive_root.set_resource_id(root_resource_id);
-  mydrive_root.set_parent_resource_id(util::kDriveGrandRootSpecialResourceId);
+  mydrive_root.set_parent_local_id(util::kDriveGrandRootSpecialResourceId);
   mydrive_root.set_title(util::kDriveMyDriveRootDirName);
   return mydrive_root;
-}
-
-ResourceEntry CreateOtherDirEntry() {
-  ResourceEntry other_dir;
-  other_dir.mutable_file_info()->set_is_directory(true);
-  other_dir.set_resource_id(util::kDriveOtherDirSpecialResourceId);
-  other_dir.set_parent_resource_id(util::kDriveGrandRootSpecialResourceId);
-  other_dir.set_title(util::kDriveOtherDirName);
-  return other_dir;
 }
 
 const std::string& GetDriveMountPointPathAsString() {
@@ -204,7 +222,7 @@ void MaybeSetDriveURL(Profile* profile, const base::FilePath& path, GURL* url) {
   if (!IsUnderDriveMountPoint(path))
     return;
 
-  FileSystemInterface* file_system = GetFileSystem(profile);
+  FileSystemInterface* file_system = GetFileSystemByProfile(profile);
   if (!file_system)
     return;
 
@@ -306,7 +324,8 @@ std::string NormalizeFileName(const std::string& input) {
 }
 
 void MigrateCacheFilesFromOldDirectories(
-    const base::FilePath& cache_root_directory) {
+    const base::FilePath& cache_root_directory,
+    const base::FilePath::StringType& cache_file_directory_name) {
   const base::FilePath persistent_directory =
       cache_root_directory.AppendASCII("persistent");
   const base::FilePath tmp_directory =
@@ -315,7 +334,7 @@ void MigrateCacheFilesFromOldDirectories(
     return;
 
   const base::FilePath cache_file_directory =
-      cache_root_directory.Append(kCacheFileDirectory);
+      cache_root_directory.Append(cache_file_directory_name);
 
   // Move all files inside "persistent" to "files".
   MoveAllFilesFromDirectory(persistent_directory, cache_file_directory);
@@ -327,19 +346,21 @@ void MigrateCacheFilesFromOldDirectories(
 
 void PrepareWritableFileAndRun(Profile* profile,
                                const base::FilePath& path,
-                               const OpenFileCallback& callback) {
+                               const PrepareWritableFileCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
-  if (IsUnderDriveMountPoint(path)) {
-    FileWriteHelper* file_write_helper = GetFileWriteHelper(profile);
-    if (!file_write_helper)
-      return;
-    base::FilePath remote_path(ExtractDrivePath(path));
-    file_write_helper->PrepareWritableFileAndRun(remote_path, callback);
-  } else {
+
+  FileSystemInterface* file_system = GetFileSystemByProfile(profile);
+  if (!file_system || !IsUnderDriveMountPoint(path)) {
     content::BrowserThread::GetBlockingPool()->PostTask(
-        FROM_HERE, base::Bind(callback, FILE_ERROR_OK, path));
+        FROM_HERE, base::Bind(callback, FILE_ERROR_FAILED, base::FilePath()));
+    return;
   }
+
+  WriteOnCacheFile(file_system,
+                   ExtractDrivePath(path),
+                   std::string(), // mime_type
+                   callback);
 }
 
 void EnsureDirectoryExists(Profile* profile,
@@ -348,7 +369,7 @@ void EnsureDirectoryExists(Profile* profile,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
   if (IsUnderDriveMountPoint(directory)) {
-    FileSystemInterface* file_system = GetFileSystem(profile);
+    FileSystemInterface* file_system = GetFileSystemByProfile(profile);
     DCHECK(file_system);
     file_system->CreateDirectory(
         ExtractDrivePath(directory),
@@ -422,6 +443,20 @@ std::string GetMd5Digest(const base::FilePath& file_path) {
   base::MD5Digest digest;
   base::MD5Final(&digest, &context);
   return MD5DigestToBase16(digest);
+}
+
+bool IsDriveEnabledForProfile(Profile* profile) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (!chromeos::IsProfileAssociatedWithGaiaAccount(profile))
+    return false;
+
+  // Disable Drive if preference is set. This can happen with commandline flag
+  // --disable-drive or enterprise policy, or with user settings.
+  if (profile->GetPrefs()->GetBoolean(prefs::kDisableDrive))
+    return false;
+
+  return true;
 }
 
 }  // namespace util

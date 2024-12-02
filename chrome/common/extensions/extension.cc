@@ -20,8 +20,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/version.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
-#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/manifest_handler.h"
 #include "chrome/common/extensions/permissions/api_permission_set.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
@@ -31,10 +29,13 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/id_util.h"
+#include "extensions/common/manifest.h"
+#include "extensions/common/manifest_constants.h"
 #include "extensions/common/switches.h"
 #include "extensions/common/url_pattern_set.h"
 #include "grit/chromium_strings.h"
 #include "grit/theme_resources.h"
+#include "net/base/net_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "url/url_util.h"
 
@@ -42,11 +43,11 @@
 #include "grit/generated_resources.h"
 #endif
 
-namespace keys = extension_manifest_keys;
-namespace values = extension_manifest_values;
-namespace errors = extension_manifest_errors;
-
 namespace extensions {
+
+namespace keys = manifest_keys;
+namespace values = manifest_values;
+namespace errors = manifest_errors;
 
 namespace {
 
@@ -59,8 +60,6 @@ const char kKeyBeginFooterMarker[] = "-----END";
 const char kKeyInfoEndMarker[] = "KEY-----";
 const char kPublic[] = "PUBLIC";
 const char kPrivate[] = "PRIVATE";
-
-const int kRSAKeySize = 1024;
 
 // A singleton object containing global data needed by the extension objects.
 class ExtensionConfig {
@@ -96,6 +95,17 @@ class ExtensionConfig {
   // added to this list.
   Extension::ScriptingWhitelist scripting_whitelist_;
 };
+
+bool ContainsReservedCharacters(const base::FilePath& path) {
+  // We should disallow backslash '\\' as file path separator even on Windows,
+  // because the backslash is not regarded as file path separator on Linux/Mac.
+  // Extensions are cross-platform.
+  // Since FilePath uses backslash '\\' as file path separator on Windows, so we
+  // need to check manually.
+  if (path.value().find('\\') != path.value().npos)
+    return true;
+  return !net::IsSafePortableRelativePath(path);
+}
 
 }  // namespace
 
@@ -222,6 +232,8 @@ ExtensionResource Extension::GetResource(
   if (!new_path.empty() && new_path.at(0) == '/')
     new_path.erase(0, 1);
   base::FilePath relative_file_path = base::FilePath::FromUTF8Unsafe(new_path);
+  if (ContainsReservedCharacters(relative_file_path))
+    return ExtensionResource();
   ExtensionResource r(id(), path(), relative_file_path);
   if ((creation_flags() & Extension::FOLLOW_SYMLINKS_ANYWHERE)) {
     r.set_follow_symlinks_anywhere();
@@ -231,6 +243,8 @@ ExtensionResource Extension::GetResource(
 
 ExtensionResource Extension::GetResource(
     const base::FilePath& relative_file_path) const {
+  if (ContainsReservedCharacters(relative_file_path))
+    return ExtensionResource();
   ExtensionResource r(id(), path(), relative_file_path);
   if ((creation_flags() & Extension::FOLLOW_SYMLINKS_ANYWHERE)) {
     r.set_follow_symlinks_anywhere();
@@ -736,7 +750,8 @@ bool Extension::LoadExtent(const char* key,
 
 bool Extension::LoadSharedFeatures(string16* error) {
   if (!LoadDescription(error) ||
-      !ManifestHandler::ParseExtension(this, error))
+      !ManifestHandler::ParseExtension(this, error) ||
+      !LoadShortName(error))
     return false;
 
   return true;
@@ -764,16 +779,35 @@ bool Extension::LoadManifestVersion(string16* error) {
   }
 
   manifest_version_ = manifest_->GetManifestVersion();
-  if (creation_flags_ & REQUIRE_MODERN_MANIFEST_VERSION &&
-      manifest_version_ < kModernManifestVersion &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAllowLegacyExtensionManifests)) {
+  if (manifest_version_ < kModernManifestVersion &&
+      ((creation_flags_ & REQUIRE_MODERN_MANIFEST_VERSION &&
+        !CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kAllowLegacyExtensionManifests)) ||
+       GetType() == Manifest::TYPE_PLATFORM_APP)) {
     *error = ErrorUtils::FormatErrorMessageUTF16(
         errors::kInvalidManifestVersionOld,
-        base::IntToString(kModernManifestVersion));
+        base::IntToString(kModernManifestVersion),
+        is_platform_app() ? "apps" : "extensions");
     return false;
   }
 
+  return true;
+}
+
+bool Extension::LoadShortName(string16* error) {
+  if (manifest_->HasKey(keys::kShortName)) {
+    string16 localized_short_name;
+    if (!manifest_->GetString(keys::kShortName, &localized_short_name) ||
+        localized_short_name.empty()) {
+      *error = ASCIIToUTF16(errors::kInvalidShortName);
+      return false;
+    }
+
+    base::i18n::AdjustStringForLocaleDirection(&localized_short_name);
+    short_name_ = UTF16ToUTF8(localized_short_name);
+  } else {
+    short_name_ = name_;
+  }
   return true;
 }
 

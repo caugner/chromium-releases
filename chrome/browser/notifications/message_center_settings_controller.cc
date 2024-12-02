@@ -36,6 +36,7 @@
 #include "ui/message_center/message_center_style.h"
 
 #if defined(OS_CHROMEOS)
+#include "ash/system/system_notifier.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #endif
 
@@ -262,7 +263,7 @@ void MessageCenterSettingsController::GetNotifierList(
 #if defined(OS_CHROMEOS)
   const string16 screenshot_name =
       l10n_util::GetStringUTF16(IDS_MESSAGE_CENTER_NOTIFIER_SCREENSHOT_NAME);
-  NotifierId screenshot_notifier_id(NotifierId::SCREENSHOT);
+  NotifierId screenshot_notifier_id(ash::system_notifier::NOTIFIER_SCREENSHOT);
   Notifier* const screenshot_notifier = new Notifier(
       screenshot_notifier_id,
       screenshot_name,
@@ -381,6 +382,7 @@ void MessageCenterSettingsController::RebuildNotifierGroups() {
             profile_info_cache_->GetPathOfProfileAtIndex(i)));
     if (group->profile() == NULL)
       continue;
+
 #if defined(OS_CHROMEOS)
     // In ChromeOS, the login screen first creates a dummy profile which is not
     // actually used, and then the real profile for the user is created when

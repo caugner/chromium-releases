@@ -5,6 +5,7 @@
 #include "chrome/renderer/chrome_content_renderer_client.h"
 
 #include "base/command_line.h"
+#include "base/debug/crash_logging.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
@@ -12,15 +13,14 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings_pattern.h"
+#include "chrome/common/crash_keys.h"
 #include "chrome/common/extensions/chrome_extensions_client.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_process_policy.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/external_ipc_fuzzer.h"
@@ -40,11 +40,11 @@
 #include "chrome/renderer/extensions/resource_request_policy.h"
 #include "chrome/renderer/external_extension.h"
 #include "chrome/renderer/loadtimes_extension_bindings.h"
+#include "chrome/renderer/media/chrome_key_systems.h"
 #include "chrome/renderer/net/net_error_helper.h"
 #include "chrome/renderer/net/prescient_networking_dispatcher.h"
 #include "chrome/renderer/net/renderer_net_predictor.h"
 #include "chrome/renderer/net_benchmarking_extension.h"
-#include "chrome/renderer/one_click_signin_agent.h"
 #include "chrome/renderer/page_load_histograms.h"
 #include "chrome/renderer/pepper/pepper_helper.h"
 #include "chrome/renderer/pepper/ppb_nacl_private_impl.h"
@@ -72,6 +72,7 @@
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/render_view_visitor.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension_urls.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/renderer_resources.h"
@@ -80,6 +81,9 @@
 #include "ppapi/c/private/ppb_nacl_private.h"
 #include "ppapi/c/private/ppb_pdf.h"
 #include "ppapi/shared_impl/ppapi_switches.h"
+#include "third_party/WebKit/public/platform/WebURL.h"
+#include "third_party/WebKit/public/platform/WebURLError.h"
+#include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/web/WebCache.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
@@ -89,9 +93,6 @@
 #include "third_party/WebKit/public/web/WebPluginParams.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/web/WebSecurityPolicy.h"
-#include "third_party/WebKit/public/platform/WebURL.h"
-#include "third_party/WebKit/public/platform/WebURLError.h"
-#include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -389,14 +390,11 @@ void ChromeContentRendererClient::RenderViewCreated(
 #endif
 
   new NetErrorHelper(render_view);
-
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-  new OneClickSigninAgent(render_view);
-#endif
 }
 
 void ChromeContentRendererClient::SetNumberOfViews(int number_of_views) {
-  child_process_logging::SetNumberOfViews(number_of_views);
+  base::debug::SetCrashKeyValue(crash_keys::kNumberOfViews,
+                                base::IntToString(number_of_views));
 }
 
 SkBitmap* ChromeContentRendererClient::GetSadPluginBitmap() {
@@ -579,12 +577,13 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
       case ChromeViewHostMsg_GetPluginInfo_Status::kAllowed: {
         const char* kPnaclMimeType = "application/x-pnacl";
         if (actual_mime_type == kPnaclMimeType) {
-          if (!CommandLine::ForCurrentProcess()->HasSwitch(
-                  switches::kEnablePnacl)) {
+          if (CommandLine::ForCurrentProcess()->HasSwitch(
+                  switches::kDisablePnacl)) {
             frame->addMessageToConsole(
                 WebConsoleMessage(
                     WebConsoleMessage::LevelError,
-                    "Portable Native Client must be enabled in about:flags."));
+                    "Portable Native Client must not be disabled in"
+                    " about:flags."));
             placeholder = PluginPlaceholder::CreateBlockedPlugin(
                 render_view, frame, params, plugin, identifier, group_name,
                 IDR_BLOCKED_PLUGIN_HTML,
@@ -774,16 +773,24 @@ bool ChromeContentRendererClient::IsNaClAllowed(
     bool is_nacl_unrestricted,
     const Extension* extension,
     WebPluginParams* params) {
-  // Temporarily allow these URLs to run NaCl apps, as long as the manifest is
-  // also whitelisted. We should remove this code when PNaCl ships.
-  bool is_whitelisted_url =
+  // Temporarily allow these whitelisted apps to use NaCl.
+  std::string app_url_host = app_url.host();
+  std::string manifest_url_path = manifest_url.path();
+  bool is_whitelisted_app =
+      // Whitelisted apps must be served over https.
       app_url.SchemeIs("https") &&
-      (app_url.host() == "plus.google.com" ||
-       app_url.host() == "plus.sandbox.google.com") &&
       manifest_url.SchemeIs("https") &&
-      manifest_url.host() == "ssl.gstatic.com" &&
-      ((manifest_url.path().find("s2/oz/nacl/") == 1) ||
-       (manifest_url.path().find("photos/nacl/") == 1));
+      // Photos app.
+      (((EndsWith(app_url_host, "plus.google.com", false) ||
+         EndsWith(app_url_host, "plus.sandbox.google.com", false)) &&
+       manifest_url.DomainIs("ssl.gstatic.com") &&
+      (manifest_url_path.find("s2/oz/nacl/") == 1 ||
+       manifest_url_path.find("photos/nacl/") == 1)) ||
+      // Chat app.
+      ((EndsWith(app_url_host, "talk.google.com", false) ||
+        EndsWith(app_url_host, "talkgadget.google.com", false)) &&
+       manifest_url.DomainIs("ssl.gstatic.com") &&
+       manifest_url_path.find("chat/apps/fx") == 1));
 
   bool is_extension_from_webstore =
       extension && extension->from_webstore();
@@ -810,7 +817,7 @@ bool ChromeContentRendererClient::IsNaClAllowed(
   // scheme. Also allow invocations if they are from whitelisted URLs or
   // if --enable-nacl is set.
   bool is_nacl_allowed = is_nacl_unrestricted ||
-                         is_whitelisted_url ||
+                         is_whitelisted_app ||
                          is_nacl_pdf_viewer ||
                          is_invoked_by_hosted_app ||
                          (is_invoked_by_extension &&
@@ -821,7 +828,7 @@ bool ChromeContentRendererClient::IsNaClAllowed(
     // Make sure that PPAPI 'dev' interfaces aren't available for production
     // apps unless they're whitelisted.
     WebString dev_attribute = WebString::fromUTF8("@dev");
-    if ((!is_whitelisted_url && !is_extension_from_webstore) ||
+    if ((!is_whitelisted_app && !is_extension_from_webstore) ||
         app_can_use_dev_interfaces) {
       // Add the special '@dev' attribute.
       std::vector<string16> param_names;
@@ -1291,12 +1298,13 @@ bool ChromeContentRendererClient::AllowBrowserPlugin(
 bool ChromeContentRendererClient::AllowPepperMediaStreamAPI(
     const GURL& url) {
 #if !defined(OS_ANDROID)
-  std::string host = url.host();
-  // Allow only the Hangouts app to use the MediaStream APIs. It's OK to check
+  // Allow only the Chat app to use the MediaStream APIs. It's OK to check
   // the whitelist in the renderer, since we're only preventing access until
   // these APIs are public and stable.
-  if (url.SchemeIs(extensions::kExtensionScheme) &&
-      !host.compare("hpcogiolnobbkijnnkdahioejpdcdoph")) {
+  std::string url_host = url.host();
+  if (url.SchemeIs("https") &&
+      (EndsWith(url_host, "talk.google.com", false) ||
+       EndsWith(url_host, "talkgadget.google.com", false))) {
     return true;
   }
   // Allow access for tests.
@@ -1308,5 +1316,24 @@ bool ChromeContentRendererClient::AllowPepperMediaStreamAPI(
   return false;
 }
 
+void ChromeContentRendererClient::AddKeySystems(
+    std::vector<content::KeySystemInfo>* key_systems) {
+  AddChromeKeySystems(key_systems);
+}
+
+bool ChromeContentRendererClient::ShouldReportDetailedMessageForSource(
+    const base::string16& source) const {
+  return extensions::IsSourceFromAnExtension(source);
+}
+
+bool ChromeContentRendererClient::ShouldEnableSiteIsolationPolicy() const {
+  // SiteIsolationPolicy is off by default. We would like to activate cross-site
+  // document blocking (for UMA data collection) for normal renderer processes
+  // running a normal web page from the Internet. We only turn on
+  // SiteIsolationPolicy for a renderer process that does not have the extension
+  // flag on.
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  return !command_line->HasSwitch(switches::kExtensionProcess);
+}
 
 }  // namespace chrome

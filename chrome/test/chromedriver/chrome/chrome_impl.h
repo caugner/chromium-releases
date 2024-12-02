@@ -18,7 +18,6 @@ class AutomationExtension;
 class DevToolsEventListener;
 class DevToolsHttpClient;
 class JavaScriptDialogManager;
-class Log;
 class Status;
 class WebView;
 class WebViewImpl;
@@ -30,21 +29,21 @@ class ChromeImpl : public Chrome {
   // Overridden from Chrome:
   virtual std::string GetVersion() OVERRIDE;
   virtual int GetBuildNo() OVERRIDE;
+  virtual bool HasCrashedWebView() OVERRIDE;
   virtual Status GetWebViewIds(std::list<std::string>* web_view_ids) OVERRIDE;
   virtual Status GetWebViewById(const std::string& id,
                                 WebView** web_view) OVERRIDE;
   virtual Status CloseWebView(const std::string& id) OVERRIDE;
+  virtual Status ActivateWebView(const std::string& id) OVERRIDE;
   virtual Status GetAutomationExtension(
       AutomationExtension** extension) OVERRIDE;
 
  protected:
   ChromeImpl(
       scoped_ptr<DevToolsHttpClient> client,
-      ScopedVector<DevToolsEventListener>& devtools_event_listeners,
-      Log* log);
+      ScopedVector<DevToolsEventListener>& devtools_event_listeners);
 
   scoped_ptr<DevToolsHttpClient> devtools_http_client_;
-  Log* log_;
 
  private:
   typedef std::list<linked_ptr<WebViewImpl> > WebViewList;

@@ -126,6 +126,10 @@ bool ShouldHideTopVerbatimMatch();
 // to always show the remote NTP on browser startup.
 bool ShouldPreferRemoteNTPOnStartup();
 
+// Returns true if the cacheable NTP should be shown and false if not.
+// Exposed for testing.
+bool ShouldUseCacheableNTP();
+
 // Returns true if the Instant NTP should be shown and false if not.
 bool ShouldShowInstantNTP();
 
@@ -186,6 +190,9 @@ void SetInstantSupportStateInNavigationEntry(InstantSupportState state,
 InstantSupportState GetInstantSupportStateFromNavigationEntry(
     const content::NavigationEntry& entry);
 
+// Returns true if the field trial flag is enabled to prefetch results on SRP.
+bool ShouldPrefetchSearchResultsOnSRP();
+
 // -----------------------------------------------------
 // The following APIs are exposed for use in tests only.
 // -----------------------------------------------------
@@ -199,16 +206,16 @@ void DisableInstantExtendedAPIForTesting();
 // Type for a collection of experiment configuration parameters.
 typedef std::vector<std::pair<std::string, std::string> > FieldTrialFlags;
 
-// Given a field trial group name, parses out the group number and configuration
-// flags. On success, |flags| will be filled with the field trial flags. |flags|
-// must not be NULL. If not NULL, |group_number| will receive the experiment
-// group number.
-// Returns true iff |group_name| is successfully parsed and not disabled.
+// Finds the active field trial group name and parses out the group number and
+// configuration flags. On success, |flags| will be filled with the field trial
+// flags. |flags| must not be NULL. If not NULL, |group_number| will receive the
+// experiment group number.
+// Returns true iff the active field trial is successfully parsed and not
+// disabled.
 // Note that |flags| may be successfully populated in some cases when false is
 // returned - in these cases it should not be used.
 // Exposed for testing only.
-bool GetFieldTrialInfo(const std::string& group_name,
-                       FieldTrialFlags* flags,
+bool GetFieldTrialInfo(FieldTrialFlags* flags,
                        uint64* group_number);
 
 // Given a FieldTrialFlags object, returns the string value of the provided
@@ -230,6 +237,10 @@ uint64 GetUInt64ValueForFlagWithDefault(const std::string& flag,
 bool GetBoolValueForFlagWithDefault(const std::string& flag,
                                     bool default_value,
                                     const FieldTrialFlags& flags);
+
+// Returns the Cacheable New Tab Page URL for the given |profile|.
+// Exposed for testing only.
+GURL GetNewTabPageURL(Profile* profile);
 
 // Let tests reset the gate that prevents metrics from being sent more than
 // once.

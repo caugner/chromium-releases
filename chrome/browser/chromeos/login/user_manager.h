@@ -21,26 +21,12 @@ class UserImageManager;
 // who have logged into this Chrome OS device before and updating that list.
 class UserManager {
  public:
-  // Status of merge sessions process which is responsible for exchanging
-  // user OAuth2 refresh token for GAIA cookies.
-  enum MergeSessionState {
-    // Session merge hasn't started yet.
-    MERGE_STATUS_NOT_STARTED,
-    // Session merge is in process.
-    MERGE_STATUS_IN_PROCESS,
-    // Session merge is completed.
-    MERGE_STATUS_DONE,
-  };
-
   // Interface that observers of UserManager must implement in order
   // to receive notification when local state preferences is changed
   class Observer {
    public:
     // Called when the local state preferences is changed.
     virtual void LocalStateChanged(UserManager* user_manager);
-
-    // Called when merge session state is changed.
-    virtual void MergeSessionStateChanged(MergeSessionState state);
 
    protected:
     virtual ~Observer();
@@ -107,6 +93,9 @@ class UserManager {
   // Registers user manager preferences.
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
+  // Returns true if multiple profiles support is allowed.
+  static bool IsMultipleProfilesAllowed();
+
   virtual ~UserManager();
 
   virtual UserImageManager* GetUserImageManager() = 0;
@@ -126,6 +115,13 @@ class UserManager {
   // in, the current user will be returned.
   virtual const UserList& GetLRULoggedInUsers() = 0;
 
+  // Returns a list of users who can unlock the device.
+  virtual UserList GetUnlockUsers() const = 0;
+
+  // Returns the email of the owner user. Returns an empty string if there is
+  // no owner for the device.
+  virtual const std::string& GetOwnerEmail() = 0;
+
   // Indicates that a user with the given |email| has just logged in. The
   // persistent list is updated accordingly if the user is not ephemeral.
   // |browser_restart| is true when reloading Chrome after crash to distinguish
@@ -141,7 +137,9 @@ class UserManager {
   // Called when browser session is started i.e. after
   // browser_creator.LaunchBrowser(...) was called after user sign in.
   // When user is at the image screen IsUserLoggedIn() will return true
-  // but SessionStarted() will return false.
+  // but IsSessionStarted() will return false. During the kiosk splash screen,
+  // we perform additional initialization after the user is logged in but
+  // before the session has been started.
   // Fires NOTIFICATION_SESSION_STARTED.
   virtual void SessionStarted() = 0;
 
@@ -201,6 +199,10 @@ class UserManager {
   // we support only one of them being active.
   virtual const User* GetActiveUser() const = 0;
   virtual User* GetActiveUser() = 0;
+
+  // Returns the primary user of the current session. It is recorded for the
+  // first signed-in user and does not change thereafter.
+  virtual const User* GetPrimaryUser() const = 0;
 
   // Saves user's oauth token status in local state preferences.
   virtual void SaveUserOAuthStatus(
@@ -301,12 +303,6 @@ class UserManager {
   // finished restoring user sessions.
   virtual bool UserSessionsRestored() const = 0;
 
-  // Returns merge session status.
-  virtual MergeSessionState GetMergeSessionState() const = 0;
-
-  // Changes merge session status.
-  virtual void SetMergeSessionState(MergeSessionState status) = 0;
-
   // Returns true when the browser has crashed and restarted during the current
   // user's session.
   virtual bool HasBrowserRestarted() const = 0;
@@ -344,11 +340,11 @@ class UserManager {
   // Returned value should not be cached.
   virtual UserFlow* GetUserFlow(const std::string& email) const = 0;
 
-  // Resets user flow fo user idenitified by |email|.
+  // Resets user flow for user identified by |email|.
   virtual void ResetUserFlow(const std::string& email) = 0;
 
   // Gets/sets chrome oauth client id and secret for kiosk app mode. The default
-  // values can be overriden with kiosk auth file.
+  // values can be overridden with kiosk auth file.
   virtual bool GetAppModeChromeClientOAuthInfo(
       std::string* chrome_client_id,
       std::string* chrome_client_secret) = 0;
@@ -366,6 +362,9 @@ class UserManager {
 
   // Returns true if locally managed users allowed.
   virtual bool AreLocallyManagedUsersAllowed() const = 0;
+
+  // Returns profile dir for the user identified by |email|.
+  virtual base::FilePath GetUserProfileDir(const std::string& email) const = 0;
 
  private:
   friend class ScopedUserManagerEnabler;

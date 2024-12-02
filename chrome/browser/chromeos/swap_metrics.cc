@@ -22,7 +22,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/browser_thread.h"
-#include "ui/base/events/event.h"
+#include "ui/events/event.h"
 
 using base::FilePath;
 
@@ -261,7 +261,7 @@ bool SwapMetrics::Backend::GetFieldFromKernelOutput(const std::string& path,
                                                     const std::string& field,
                                                     int64* value) {
   std::string file_content;
-  if (!file_util::ReadFileToString(FilePath(path), &file_content)) {
+  if (!base::ReadFileToString(FilePath(path), &file_content)) {
     LOG(WARNING) << "Cannot read " << path;
     return false;
   }
@@ -296,7 +296,7 @@ bool SwapMetrics::Backend::TokenizeOneLineFile(const std::string& path,
                                                std::vector<std::string>*
                                                tokens) {
   std::string file_content;
-  if (!file_util::ReadFileToString(FilePath(path), &file_content)) {
+  if (!base::ReadFileToString(FilePath(path), &file_content)) {
     LOG(WARNING) << "cannot read " << path;
     return false;
   }

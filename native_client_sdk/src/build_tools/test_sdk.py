@@ -31,6 +31,10 @@ import getos
 
 def StepBuildExamples(pepperdir):
   for config in ('Debug', 'Release'):
+    build_sdk.BuildStepMakeAll(pepperdir, 'getting_started',
+                               'Build Getting Started (%s)' % config,
+                               deps=False, config=config)
+
     build_sdk.BuildStepMakeAll(pepperdir, 'examples',
                                'Build Examples (%s)' % config,
                                deps=False, config=config)
@@ -101,6 +105,7 @@ def StepRunBrowserTests(toolchains, experimental):
   args = [
     sys.executable,
     os.path.join(SCRIPT_DIR, 'test_projects.py'),
+    '--retry-times=3',
   ]
 
   if experimental:

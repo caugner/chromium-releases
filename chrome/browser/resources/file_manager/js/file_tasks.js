@@ -36,8 +36,17 @@ FileTasks.NO_ACTION_FOR_FILE_URL = 'http://support.google.com/chromeos/bin/' +
     'answer.py?answer=1700055&topic=29026&ctx=topic';
 
 /**
+ * Location of the Chrome Web Store.
+ *
+ * @const
+ * @type {string}
+ */
+FileTasks.CHROME_WEB_STORE_URL = 'https://chrome.google.com/webstore';
+
+/**
  * Base URL of apps list in the Chrome Web Store. This constant is used in
  * FileTasks.createWebStoreLink().
+ *
  * @const
  * @type {string}
  */
@@ -53,6 +62,9 @@ FileTasks.WEB_STORE_HANDLER_BASE_URL =
  * @return {string} URL
  */
 FileTasks.createWebStoreLink = function(extension, mimeType) {
+  if (extension == '' || mimeType == '')
+    return FileTasks.CHROME_WEB_STORE_URL;
+
   var url = FileTasks.WEB_STORE_HANDLER_BASE_URL;
   url += '?_fe=' + extension.toLowerCase().replace(/[^\w]/g, '');
   if (mimeType)
@@ -136,6 +148,28 @@ FileTasks.recordViewingFileTypeUMA_ = function(urls) {
 };
 
 /**
+ * Returns true if the taskId is for an internal task.
+ *
+ * @param {string} taskId Task identifier.
+ * @return {boolean} True if the task ID is for an internal task.
+ * @private
+ */
+FileTasks.isInternalTask_ = function(taskId) {
+  var taskParts = taskId.split('|');
+  var appId = taskParts[0];
+  var taskType = taskParts[1];
+  var actionId = taskParts[2];
+  // The action IDs here should match ones used in executeInternalTask_().
+  return (appId == chrome.runtime.id &&
+          taskType == 'file' &&
+          (actionId == 'play' ||
+           actionId == 'watch' ||
+           actionId == 'mount-archive' ||
+           actionId == 'format-device' ||
+           actionId == 'gallery'));
+};
+
+/**
  * Processes internal tasks.
  *
  * @param {Array.<Object>} tasks The tasks.
@@ -155,10 +189,6 @@ FileTasks.prototype.processTasks_ = function(tasks) {
   for (var i = 0; i < tasks.length; i++) {
     var task = tasks[i];
     var taskParts = task.taskId.split('|');
-
-    // Skip Drive App if the file is not on Drive.
-    if (!isOnDrive && task.driveApp)
-      continue;
 
     // Skip internal Files.app's handlers.
     if (taskParts[0] == id && (taskParts[2] == 'auto-open' ||
@@ -238,59 +268,45 @@ FileTasks.prototype.processTasks_ = function(tasks) {
 /**
  * Executes default task.
  *
+ * @param {function(boolean, Array.<string>)=} opt_callback Called wheh the
+ *     default task is executed, or the error is occured.
  * @private
  */
-FileTasks.prototype.executeDefault_ = function() {
+FileTasks.prototype.executeDefault_ = function(opt_callback) {
   var urls = this.urls_;
   FileTasks.recordViewingFileTypeUMA_(urls);
-  this.executeDefaultInternal_(urls);
+  this.executeDefaultInternal_(urls, opt_callback);
 };
 
 /**
  * Executes default task.
  *
  * @param {Array.<string>} urls Urls to execute.
+ * @param {function(boolean, Array.<string>)=} opt_callback Called wheh the
+ *     default task is executed, or the error is occured.
  * @private
  */
-FileTasks.prototype.executeDefaultInternal_ = function(urls) {
+FileTasks.prototype.executeDefaultInternal_ = function(urls, opt_callback) {
+  var callback = opt_callback || function(arg1, arg2) {};
+
   if (this.defaultTask_ != null) {
     this.executeInternal_(this.defaultTask_.taskId, urls);
+    callback(true, urls);
     return;
   }
 
   // We don't have tasks, so try to show a file in a browser tab.
   // We only do that for single selection to avoid confusion.
-  if (urls.length == 1) {
-    var callback = function(success) {
-      if (!success) {
-        var filename = decodeURIComponent(urls[0]);
-        if (filename.indexOf('/') != -1)
-          filename = filename.substr(filename.lastIndexOf('/') + 1);
-        var extension = filename.lastIndexOf('.') != -1 ?
-            filename.substr(filename.lastIndexOf('.') + 1) : '';
+  if (urls.length != 1)
+    return;
 
-        this.fileManager_.metadataCache_.get(urls, 'drive', function(props) {
-          var mimeType;
-          if (props && props[0] && props[0].contentMimeType)
-            mimeType = props[0].contentMimeType;
+  var onViewFiles = function(success) {
+    callback(success, urls);
+  }.bind(this);
 
-          var messageString = extension == 'exe' ? 'NO_ACTION_FOR_EXECUTABLE' :
-                                                   'NO_ACTION_FOR_FILE';
-          var webStoreUrl = FileTasks.createWebStoreLink(extension, mimeType);
-          var text = loadTimeData.getStringF(messageString,
-                                             webStoreUrl,
-                                             FileTasks.NO_ACTION_FOR_FILE_URL);
-          this.fileManager_.alert.showHtml(filename, text, function() {});
-        }.bind(this));
-      }
-    }.bind(this);
-
-    this.checkAvailability_(function() {
-      chrome.fileBrowserPrivate.viewFiles(urls, callback);
-    }.bind(this));
-  }
-
-  // Do nothing for multiple urls.
+  this.checkAvailability_(function() {
+    util.viewFilesInBrowser(urls, onViewFiles);
+  }.bind(this));
 };
 
 /**
@@ -315,11 +331,8 @@ FileTasks.prototype.execute_ = function(taskId, opt_urls) {
  */
 FileTasks.prototype.executeInternal_ = function(taskId, urls) {
   this.checkAvailability_(function() {
-    var taskParts = taskId.split('|');
-    if (taskParts[0] == chrome.runtime.id && taskParts[1] == 'file') {
-      // For internal tasks we do not listen to the event to avoid
-      // handling the same task instance from multiple tabs.
-      // So, we manually execute the task.
+    if (FileTasks.isInternalTask_(taskId)) {
+      var taskParts = taskId.split('|');
       this.executeInternalTask_(taskParts[2], urls);
     } else {
       chrome.fileBrowserPrivate.executeTask(taskId, urls);
@@ -446,13 +459,7 @@ FileTasks.prototype.executeInternalTask_ = function(id, urls) {
     return;
   }
 
-  if (id == 'view-pdf' || id == 'view-swf' || id == 'view-in-browser' ||
-      id == 'install-crx' || id.match(/^open-hosted-/) || id == 'watch') {
-    chrome.fileBrowserPrivate.viewFiles(urls, function(success) {
-      if (!success)
-        console.error('chrome.fileBrowserPrivate.viewFiles failed', urls);
-    });
-  }
+  console.error('Unexpected action ID: ' + id);
 };
 
 /**
@@ -551,14 +558,15 @@ FileTasks.prototype.openGalleryInternal_ = function(urls) {
 
   galleryFrame.onload = function() {
     galleryFrame.contentWindow.ImageUtil.metrics = metrics;
-    window.galleryTestAPI = galleryFrame.contentWindow.galleryTestAPI;
 
     // TODO(haruki): isOnReadonlyDirectory() only checks the permission for the
     // root. We should check more granular permission to know whether the file
     // is writable or not.
     var readonly = fm.isOnReadonlyDirectory();
     var currentDir = fm.directoryModel_.getCurrentDirEntry();
-    var downloadsDir = fm.directoryModel_.getRootsList().item(0);
+    var downloadsVolume =
+        fm.volumeManager_.getVolumeInfo(RootDirectory.DOWNLOADS);
+    var downloadsDir = downloadsVolume && downloadsVolume.root;
     var readonlyDirName = null;
     if (readonly) {
       readonlyDirName = fm.isOnDrive() ?
@@ -580,7 +588,8 @@ FileTasks.prototype.openGalleryInternal_ = function(urls) {
       onMaximize: onMaximize,
       displayStringFunction: strf
     };
-    galleryFrame.contentWindow.Gallery.open(context, allUrls, urls);
+    galleryFrame.contentWindow.Gallery.open(
+        context, fm.volumeManager_, allUrls, urls);
   }.bind(this);
 
   galleryFrame.src = 'gallery.html';

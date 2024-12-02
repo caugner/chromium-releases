@@ -29,8 +29,7 @@ const char kSandboxWalletSecureServiceUrl[] =
 bool IsWalletProductionEnabled() {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   return command_line.HasSwitch(switches::kWalletServiceUseProd) ||
-      base::FieldTrialList::FindFullName("WalletProductionService") == "Yes" ||
-      base::FieldTrialList::FindFullName("Autocheckout") == "Yes";
+      base::FieldTrialList::FindFullName("WalletProductionService") == "Yes";
 }
 
 GURL GetWalletHostUrl() {
@@ -122,6 +121,8 @@ GURL GetSignInUrl() {
   GURL url(GaiaUrls::GetInstance()->service_login_url());
   url = net::AppendQueryParameter(url, "service", "toolbar");
   url = net::AppendQueryParameter(url, "nui", "1");
+  // Prevents promos from showing (see http://crbug.com/235227).
+  url = net::AppendQueryParameter(url, "sarp", "1");
   url = net::AppendQueryParameter(url,
                                   "continue",
                                   GetSignInContinueUrl().spec());

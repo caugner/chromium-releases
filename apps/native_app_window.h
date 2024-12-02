@@ -22,6 +22,10 @@ class NativeAppWindow : public ui::BaseWindow,
   virtual void UpdateDraggableRegions(
       const std::vector<extensions::DraggableRegion>& regions) = 0;
 
+  // Called when the region that accepts input events is changed.
+  // If |region| is NULL, then the entire window will accept input events.
+  virtual void UpdateInputRegion(scoped_ptr<SkRegion> region) = 0;
+
   virtual void SetFullscreen(bool fullscreen) = 0;
   virtual bool IsFullscreenOrPending() const = 0;
 
@@ -46,6 +50,12 @@ class NativeAppWindow : public ui::BaseWindow,
   // Returns the difference between the window bounds (including titlebar and
   // borders) and the content bounds, if any.
   virtual gfx::Insets GetFrameInsets() const = 0;
+
+  // Hide or show this window as part of hiding or showing the app.
+  // This may have different logic to Hide, Show, and ShowInactive as those are
+  // called via the AppWindow javascript API.
+  virtual void ShowWithApp() = 0;
+  virtual void HideWithApp() = 0;
 
   virtual ~NativeAppWindow() {}
 };

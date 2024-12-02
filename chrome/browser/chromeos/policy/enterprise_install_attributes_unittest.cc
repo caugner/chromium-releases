@@ -11,7 +11,8 @@
 #include "base/run_loop.h"
 #include "chrome/browser/policy/proto/chromeos/install_attributes.pb.h"
 #include "chromeos/cryptohome/cryptohome_library.h"
-#include "chromeos/dbus/cryptohome_client.h"
+#include "chromeos/dbus/cryptohome_client_stub.h"
+#include "google_apis/gaia/gaia_auth_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace policy {
@@ -28,6 +29,7 @@ void CopyLockResult(base::RunLoop* loop,
 }  // namespace
 
 static const char kTestUser[] = "test@example.com";
+static const char kTestUserCanonicalize[] = "UPPER.CASE@example.com";
 static const char kTestDomain[] = "example.com";
 static const char kTestDeviceId[] = "133750519";
 
@@ -35,9 +37,10 @@ class EnterpriseInstallAttributesTest : public testing::Test {
  protected:
   EnterpriseInstallAttributesTest()
       : cryptohome_(chromeos::CryptohomeLibrary::GetTestImpl()),
-        stub_cryptohome_client_(chromeos::CryptohomeClient::Create(
-            chromeos::STUB_DBUS_CLIENT_IMPLEMENTATION, NULL)),
-        install_attributes_(cryptohome_.get(), stub_cryptohome_client_.get()) {}
+        stub_cryptohome_client_(new chromeos::CryptohomeClientStubImpl()),
+        install_attributes_(cryptohome_.get(), stub_cryptohome_client_.get()) {
+    stub_cryptohome_client_->Init(NULL /* no dbus::Bus */);
+  }
 
   virtual void SetUp() OVERRIDE {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
@@ -60,7 +63,7 @@ class EnterpriseInstallAttributesTest : public testing::Test {
   base::MessageLoopForUI message_loop_;
   base::ScopedTempDir temp_dir_;
   scoped_ptr<chromeos::CryptohomeLibrary> cryptohome_;
-  scoped_ptr<chromeos::CryptohomeClient> stub_cryptohome_client_;
+  scoped_ptr<chromeos::CryptohomeClientStubImpl> stub_cryptohome_client_;
   EnterpriseInstallAttributes install_attributes_;
 
   EnterpriseInstallAttributes::LockResult LockDeviceAndWaitForResult(
@@ -100,6 +103,16 @@ TEST_F(EnterpriseInstallAttributesTest, Lock) {
                 "test@bluebears.com",
                 DEVICE_MODE_ENTERPRISE,
                 kTestDeviceId));
+}
+
+TEST_F(EnterpriseInstallAttributesTest, LockCanonicalize) {
+  EXPECT_EQ(EnterpriseInstallAttributes::LOCK_SUCCESS,
+            LockDeviceAndWaitForResult(
+                kTestUserCanonicalize,
+                DEVICE_MODE_ENTERPRISE,
+                kTestDeviceId));
+  EXPECT_EQ(gaia::CanonicalizeEmail(kTestUserCanonicalize),
+            install_attributes_.GetRegistrationUser());
 }
 
 TEST_F(EnterpriseInstallAttributesTest, IsEnterpriseDevice) {

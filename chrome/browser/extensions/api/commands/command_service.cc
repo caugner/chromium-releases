@@ -43,7 +43,7 @@ std::string GetPlatformKeybindingKeyForAccelerator(
 void SetInitialBindingsHaveBeenAssigned(
     ExtensionPrefs* prefs, const std::string& extension_id) {
   prefs->UpdateExtensionPref(extension_id, kInitialBindingsHaveBeenAssigned,
-                             base::Value::CreateBooleanValue(true));
+                             new base::FundamentalValue(true));
 }
 
 bool InitialBindingsHaveBeenAssigned(
@@ -216,7 +216,8 @@ void CommandService::UpdateKeybindingPrefs(const std::string& extension_id,
   // shortcut before proceeding.
   RemoveKeybindingPrefs(extension_id, command_name);
 
-  ui::Accelerator accelerator = Command::StringToAccelerator(keystroke);
+  ui::Accelerator accelerator =
+      Command::StringToAccelerator(keystroke, command_name);
   AddKeybindingPref(accelerator, extension_id, command_name, true);
 }
 
@@ -242,7 +243,7 @@ ui::Accelerator CommandService::FindShortcutForCommand(
     if (StartsWithASCII(shortcut, Command::CommandPlatform() + ":", true))
       shortcut = shortcut.substr(Command::CommandPlatform().length() + 1);
 
-    return Command::StringToAccelerator(shortcut);
+    return Command::StringToAccelerator(shortcut, command_name);
   }
 
   return ui::Accelerator();

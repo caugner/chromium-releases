@@ -643,17 +643,19 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kBrowsingData);
   skip.insert(APIPermission::kContextMenus);
   skip.insert(APIPermission::kDiagnostics);
+  skip.insert(APIPermission::kDns);
   skip.insert(APIPermission::kDownloadsShelf);
   skip.insert(APIPermission::kFontSettings);
   skip.insert(APIPermission::kFullscreen);
   skip.insert(APIPermission::kIdle);
+  skip.insert(APIPermission::kIdltest);
   skip.insert(APIPermission::kLogPrivate);
   skip.insert(APIPermission::kNotification);
   skip.insert(APIPermission::kPointerLock);
   skip.insert(APIPermission::kPower);
   skip.insert(APIPermission::kPushMessaging);
   skip.insert(APIPermission::kScreensaver);
-  skip.insert(APIPermission::kSessionRestore);
+  skip.insert(APIPermission::kSessions);
   skip.insert(APIPermission::kStorage);
   skip.insert(APIPermission::kSystemCpu);
   skip.insert(APIPermission::kSystemDisplay);
@@ -674,7 +676,6 @@ TEST(PermissionsTest, PermissionMessages) {
 
   // These are warned as part of host permission checks.
   skip.insert(APIPermission::kDeclarativeContent);
-  skip.insert(APIPermission::kDeclarativeWebRequest);
   skip.insert(APIPermission::kPageCapture);
   skip.insert(APIPermission::kProxy);
   skip.insert(APIPermission::kTabCapture);
@@ -699,6 +700,7 @@ TEST(PermissionsTest, PermissionMessages) {
   // These are private.
   skip.insert(APIPermission::kAutoTestPrivate);
   skip.insert(APIPermission::kBookmarkManagerPrivate);
+  skip.insert(APIPermission::kBrailleDisplayPrivate);
   skip.insert(APIPermission::kChromeosInfoPrivate);
   skip.insert(APIPermission::kCloudPrintPrivate);
   skip.insert(APIPermission::kCommandLinePrivate);
@@ -716,12 +718,15 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kMediaGalleriesPrivate);
   skip.insert(APIPermission::kMediaPlayerPrivate);
   skip.insert(APIPermission::kMetricsPrivate);
+  skip.insert(APIPermission::kMDns);
   skip.insert(APIPermission::kPreferencesPrivate);
-  skip.insert(APIPermission::kRecoveryPrivate);
+  skip.insert(APIPermission::kImageWriterPrivate);
   skip.insert(APIPermission::kRtcPrivate);
   skip.insert(APIPermission::kStreamsPrivate);
   skip.insert(APIPermission::kSystemPrivate);
+  skip.insert(APIPermission::kTabCaptureForTab);
   skip.insert(APIPermission::kTerminalPrivate);
+  skip.insert(APIPermission::kVirtualKeyboardPrivate);
   skip.insert(APIPermission::kWallpaperPrivate);
   skip.insert(APIPermission::kWebRequestInternal);
   skip.insert(APIPermission::kWebstorePrivate);
@@ -734,6 +739,7 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kFileSystem);
   skip.insert(APIPermission::kFileSystemRetainEntries);
   skip.insert(APIPermission::kSocket);
+  skip.insert(APIPermission::kSocketsUdp);
   skip.insert(APIPermission::kUsbDevice);
 
   PermissionsInfo* info = PermissionsInfo::GetInstance();
@@ -757,6 +763,69 @@ TEST(PermissionsTest, PermissionMessages) {
           << "missing message_id for " << permission_info->name();
     }
   }
+}
+
+TEST(PermissionsTest, FileSystemPermissionMessages) {
+  APIPermissionSet api_permissions;
+  api_permissions.insert(APIPermission::kFileSystemWrite);
+  api_permissions.insert(APIPermission::kFileSystemDirectory);
+  scoped_refptr<PermissionSet> permissions(
+      new PermissionSet(api_permissions, URLPatternSet(), URLPatternSet()));
+  PermissionMessages messages =
+      permissions->GetPermissionMessages(Manifest::TYPE_PLATFORM_APP);
+  ASSERT_EQ(2u, messages.size());
+  std::sort(messages.begin(), messages.end());
+  std::set<PermissionMessage::ID> ids;
+  for (PermissionMessages::const_iterator it = messages.begin();
+       it != messages.end(); ++it) {
+    ids.insert(it->id());
+  }
+  EXPECT_TRUE(ContainsKey(ids, PermissionMessage::kFileSystemDirectory));
+  EXPECT_TRUE(ContainsKey(ids, PermissionMessage::kFileSystemWrite));
+}
+
+TEST(PermissionsTest, HiddenFileSystemPermissionMessages) {
+  APIPermissionSet api_permissions;
+  api_permissions.insert(APIPermission::kFileSystemWrite);
+  api_permissions.insert(APIPermission::kFileSystemDirectory);
+  api_permissions.insert(APIPermission::kFileSystemWriteDirectory);
+  scoped_refptr<PermissionSet> permissions(
+      new PermissionSet(api_permissions, URLPatternSet(), URLPatternSet()));
+  PermissionMessages messages =
+      permissions->GetPermissionMessages(Manifest::TYPE_PLATFORM_APP);
+  ASSERT_EQ(1u, messages.size());
+  EXPECT_EQ(PermissionMessage::kFileSystemWriteDirectory, messages[0].id());
+}
+
+TEST(PermissionsTest, MergedFileSystemPermissionComparison) {
+  APIPermissionSet write_api_permissions;
+  write_api_permissions.insert(APIPermission::kFileSystemWrite);
+  scoped_refptr<PermissionSet> write_permissions(new PermissionSet(
+      write_api_permissions, URLPatternSet(), URLPatternSet()));
+
+  APIPermissionSet directory_api_permissions;
+  directory_api_permissions.insert(APIPermission::kFileSystemDirectory);
+  scoped_refptr<PermissionSet> directory_permissions(new PermissionSet(
+      directory_api_permissions, URLPatternSet(), URLPatternSet()));
+
+  APIPermissionSet write_directory_api_permissions;
+  write_directory_api_permissions.insert(
+      APIPermission::kFileSystemWriteDirectory);
+  scoped_refptr<PermissionSet> write_directory_permissions(new PermissionSet(
+      write_directory_api_permissions, URLPatternSet(), URLPatternSet()));
+
+  EXPECT_FALSE(write_directory_permissions->HasLessPrivilegesThan(
+      write_permissions, Manifest::TYPE_PLATFORM_APP));
+  EXPECT_FALSE(write_directory_permissions->HasLessPrivilegesThan(
+      directory_permissions, Manifest::TYPE_PLATFORM_APP));
+  EXPECT_TRUE(write_permissions->HasLessPrivilegesThan(
+      directory_permissions, Manifest::TYPE_PLATFORM_APP));
+  EXPECT_TRUE(write_permissions->HasLessPrivilegesThan(
+      write_directory_permissions, Manifest::TYPE_PLATFORM_APP));
+  EXPECT_TRUE(directory_permissions->HasLessPrivilegesThan(
+      write_permissions, Manifest::TYPE_PLATFORM_APP));
+  EXPECT_TRUE(directory_permissions->HasLessPrivilegesThan(
+      write_directory_permissions, Manifest::TYPE_PLATFORM_APP));
 }
 
 TEST(PermissionsTest, GetWarningMessages_ManyHosts) {
@@ -819,6 +888,36 @@ TEST(PermissionsTest, GetWarningMessages_AudioVideo) {
   EXPECT_FALSE(Contains(warnings, "Use your microphone"));
   EXPECT_FALSE(Contains(warnings, "Use your microphone and camera"));
   EXPECT_TRUE(Contains(warnings, "Use your camera"));
+}
+
+TEST(PermissionsTest, GetWarningMessages_DeclarativeWebRequest) {
+  // Test that if the declarativeWebRequest permission is present
+  // in combination with all hosts permission, then only the warning
+  // for host permissions is shown, because that covers the use of
+  // declarativeWebRequest.
+
+  // Until Declarative Web Request is in stable, let's make sure it is enabled
+  // on the current channel.
+  ScopedCurrentChannel sc(chrome::VersionInfo::CHANNEL_CANARY);
+
+  // First verify that declarativeWebRequest produces a message when host
+  // permissions do not cover all hosts.
+  scoped_refptr<Extension> extension =
+      LoadManifest("permissions", "web_request_com_host_permissions.json");
+  const PermissionSet* set = extension->GetActivePermissions().get();
+  std::vector<string16> warnings =
+      set->GetWarningMessages(extension->GetType());
+  EXPECT_TRUE(Contains(warnings, "Block parts of web pages"));
+  EXPECT_FALSE(Contains(warnings, "Access your data on all websites"));
+
+  // Now verify that declarativeWebRequest does not produce a message when host
+  // permissions do cover all hosts.
+  extension =
+      LoadManifest("permissions", "web_request_all_host_permissions.json");
+  set = extension->GetActivePermissions().get();
+  warnings = set->GetWarningMessages(extension->GetType());
+  EXPECT_FALSE(Contains(warnings, "Block parts of web pages"));
+  EXPECT_TRUE(Contains(warnings, "Access your data on all websites"));
 }
 
 TEST(PermissionsTest, GetWarningMessages_Serial) {
@@ -1332,4 +1431,18 @@ TEST(PermissionsTest, ChromeURLs) {
   permissions->GetPermissionMessages(Manifest::TYPE_EXTENSION);
 }
 
+TEST(PermissionsTest, HasLessPrivilegesThan_DeclarativeWebRequest) {
+  scoped_refptr<Extension> extension(
+      LoadManifest("permissions", "permissions_all_urls.json"));
+  scoped_refptr<const PermissionSet> permissions(
+      extension->GetActivePermissions());
+
+  scoped_refptr<Extension> extension_dwr(
+      LoadManifest("permissions", "web_request_all_host_permissions.json"));
+  scoped_refptr<const PermissionSet> permissions_dwr(
+      extension_dwr->GetActivePermissions());
+
+  EXPECT_FALSE(permissions->HasLessPrivilegesThan(permissions_dwr.get(),
+                                                  extension->GetType()));
+}
 }  // namespace extensions

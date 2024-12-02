@@ -12,13 +12,13 @@
 #include "chromeos/dbus/shill_manager_client.h"
 #include "chromeos/dbus/shill_service_client.h"
 #include "chromeos/network/client_cert_util.h"
-#include "chromeos/network/managed_network_configuration_handler.h"
 #include "chromeos/network/network_configuration_handler.h"
 #include "chromeos/network/network_event_log.h"
 #include "chromeos/network/network_handler_callbacks.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/network_ui_data.h"
+#include "chromeos/network/shill_property_util.h"
 #include "dbus/object_path.h"
 #include "net/cert/x509_certificate.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -45,20 +45,6 @@ bool IsAuthenticationError(const std::string& error) {
           error == shill::kErrorEapLocalTlsFailed ||
           error == shill::kErrorEapRemoteTlsFailed ||
           error == shill::kErrorEapAuthenticationFailed);
-}
-
-void CopyStringFromDictionary(const base::DictionaryValue& source,
-                              const std::string& key,
-                              base::DictionaryValue* dest) {
-  std::string string_value;
-  if (source.GetStringWithoutPathExpansion(key, &string_value))
-    dest->SetStringWithoutPathExpansion(key, string_value);
-}
-
-bool NetworkRequiresActivation(const NetworkState* network) {
-  return (network->type() == flimflam::kTypeCellular &&
-      ((network->activation_state() != flimflam::kActivationStateActivated &&
-        network->activation_state() != flimflam::kActivationStateUnknown)));
 }
 
 bool VPNIsConfigured(const std::string& service_path,
@@ -93,7 +79,7 @@ bool VPNIsConfigured(const std::string& service_path,
     provider_properties.GetBooleanWithoutPathExpansion(
         flimflam::kL2tpIpsecPskRequiredProperty, &passphrase_required);
     if (passphrase_required) {
-      NET_LOG_EVENT("VPN: Passphrase Required", service_path);
+      NET_LOG_EVENT("VPN: PSK Required", service_path);
       return false;
     }
     NET_LOG_EVENT("VPN Is Configured", service_path);
@@ -165,8 +151,7 @@ void NetworkConnectionHandler::Init(
     NetworkConfigurationHandler* network_configuration_handler) {
   if (LoginState::IsInitialized()) {
     LoginState::Get()->AddObserver(this);
-    logged_in_ =
-        LoginState::Get()->GetLoggedInState() == LoginState::LOGGED_IN_ACTIVE;
+    logged_in_ = LoginState::Get()->IsUserLoggedIn();
   }
   if (CertLoader::IsInitialized()) {
     cert_loader_ = CertLoader::Get();
@@ -183,9 +168,8 @@ void NetworkConnectionHandler::Init(
   network_configuration_handler_ = network_configuration_handler;
 }
 
-void NetworkConnectionHandler::LoggedInStateChanged(
-    LoginState::LoggedInState state) {
-  if (state == LoginState::LOGGED_IN_ACTIVE) {
+void NetworkConnectionHandler::LoggedInStateChanged() {
+  if (LoginState::Get()->IsUserLoggedIn()) {
     logged_in_ = true;
     NET_LOG_EVENT("Logged In", "");
   }
@@ -240,7 +224,7 @@ void NetworkConnectionHandler::ConnectToNetwork(
       InvokeErrorCallback(service_path, error_callback, kErrorConnecting);
       return;
     }
-    if (NetworkRequiresActivation(network)) {
+    if (network->RequiresActivation()) {
       InvokeErrorCallback(service_path, error_callback,
                           kErrorActivationRequired);
       return;
@@ -302,24 +286,13 @@ void NetworkConnectionHandler::DisconnectNetwork(
   CallShillDisconnect(service_path, success_callback, error_callback);
 }
 
-void NetworkConnectionHandler::ActivateNetwork(
-    const std::string& service_path,
-    const std::string& carrier,
-    const base::Closure& success_callback,
-    const network_handler::ErrorCallback& error_callback) {
-  NET_LOG_USER("DisconnectNetwork", service_path);
-  const NetworkState* network =
-      network_state_handler_->GetNetworkState(service_path);
-  if (!network) {
-    InvokeErrorCallback(service_path, error_callback, kErrorNotFound);
-    return;
-  }
-  CallShillActivate(service_path, carrier, success_callback, error_callback);
-}
-
 bool NetworkConnectionHandler::HasConnectingNetwork(
     const std::string& service_path) {
   return pending_requests_.count(service_path) != 0;
+}
+
+bool NetworkConnectionHandler::HasPendingConnectRequest() {
+  return pending_requests_.size() > 0;
 }
 
 void NetworkConnectionHandler::NetworkListChanged() {
@@ -422,7 +395,7 @@ void NetworkConnectionHandler::VerifyConfiguredAndConnect(
     // Note: Wifi/VPNConfigView set these properties explicitly, in which case
     //   only the TPM must be configured.
     scoped_ptr<NetworkUIData> ui_data =
-        ManagedNetworkConfigurationHandler::GetUIData(service_properties);
+        shill_property_util::GetUIDataFromProperties(service_properties);
     if (ui_data && ui_data->certificate_type() == CLIENT_CERT_TYPE_PATTERN) {
       // User must be logged in to connect to a network requiring a certificate.
       if (!logged_in_ || !cert_loader_) {
@@ -450,6 +423,12 @@ void NetworkConnectionHandler::VerifyConfiguredAndConnect(
         ErrorCallbackForPendingRequest(service_path, kErrorCertificateRequired);
         return;
       }
+    } else if (check_error_state &&
+               !client_cert::IsCertificateConfigured(client_cert_type,
+                                                     service_properties)) {
+      // Network may not be configured.
+      ErrorCallbackForPendingRequest(service_path, kErrorConfigurationRequired);
+      return;
     }
 
     // The network may not be 'Connectable' because the TPM properties are not
@@ -467,32 +446,16 @@ void NetworkConnectionHandler::VerifyConfiguredAndConnect(
 
   if (!config_properties.empty()) {
     NET_LOG_EVENT("Configuring Network", service_path);
-
-    // Set configuration properties required by Shill to identify the network.
-    config_properties.SetStringWithoutPathExpansion(
-        flimflam::kTypeProperty, type);
-    CopyStringFromDictionary(service_properties, flimflam::kNameProperty,
-                             &config_properties);
-    CopyStringFromDictionary(service_properties, flimflam::kGuidProperty,
-                             &config_properties);
-    if (type == flimflam::kTypeVPN) {
-      config_properties.SetStringWithoutPathExpansion(
-          flimflam::kProviderTypeProperty, vpn_provider_type);
-      config_properties.SetStringWithoutPathExpansion(
-          flimflam::kProviderHostProperty, vpn_provider_host);
-    } else if (type == flimflam::kTypeWifi) {
-      config_properties.SetStringWithoutPathExpansion(
-          flimflam::kSecurityProperty, security);
-    }
-
     network_configuration_handler_->SetProperties(
         service_path,
         config_properties,
         base::Bind(&NetworkConnectionHandler::CallShillConnect,
-                   AsWeakPtr(), service_path),
+                   AsWeakPtr(),
+                   service_path),
         base::Bind(&NetworkConnectionHandler::HandleConfigurationFailure,
-                   AsWeakPtr(), service_path));
-   return;
+                   AsWeakPtr(),
+                   service_path));
+    return;
   }
 
   // Otherwise, we probably still need to configure the network since
@@ -619,7 +582,7 @@ void NetworkConnectionHandler::CheckPendingRequest(
   if (error_callback.is_null())
     return;
   scoped_ptr<base::DictionaryValue> error_data(
-      network_handler::CreateErrorData(service_path, error_name, error_msg));
+      network_handler::CreateErrorData(service_path, error_name, error_detail));
   error_callback.Run(error_name, error_data.Pass());
 }
 
@@ -676,31 +639,6 @@ void NetworkConnectionHandler::HandleShillDisconnectSuccess(
     const std::string& service_path,
     const base::Closure& success_callback) {
   NET_LOG_EVENT("Disconnect Request Sent", service_path);
-  if (!success_callback.is_null())
-    success_callback.Run();
-}
-
-// Activate
-
-void NetworkConnectionHandler::CallShillActivate(
-    const std::string& service_path,
-    const std::string& carrier,
-    const base::Closure& success_callback,
-    const network_handler::ErrorCallback& error_callback) {
-  NET_LOG_USER("Activate Request", service_path + ": '" + carrier + "'");
-  DBusThreadManager::Get()->GetShillServiceClient()->ActivateCellularModem(
-      dbus::ObjectPath(service_path),
-      carrier,
-      base::Bind(&NetworkConnectionHandler::HandleShillActivateSuccess,
-                 AsWeakPtr(), service_path, success_callback),
-      base::Bind(&network_handler::ShillErrorCallbackFunction,
-                 kErrorShillError, service_path, error_callback));
-}
-
-void NetworkConnectionHandler::HandleShillActivateSuccess(
-    const std::string& service_path,
-    const base::Closure& success_callback) {
-  NET_LOG_EVENT("Activate Request Sent", service_path);
   if (!success_callback.is_null())
     success_callback.Run();
 }

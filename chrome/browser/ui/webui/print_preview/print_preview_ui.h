@@ -147,6 +147,16 @@ class PrintPreviewUI : public ConstrainedWebDialogUI {
   // default.
   void OnPrintPreviewScalingDisabled();
 
+  // Creating an instance of this class causes the print preview panel to be
+  // cancelled as soon as it is brought up, with the number of times this
+  // auto-cancel happens recorded. This is used for testing only.
+  class ScopedAutoCancelForTesting {
+   public:
+    ScopedAutoCancelForTesting();
+    ~ScopedAutoCancelForTesting();
+    int GetCountForTesting();
+  };
+
  private:
   friend class PrintPreviewHandlerTest;
   FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, StickyMarginsCustom);

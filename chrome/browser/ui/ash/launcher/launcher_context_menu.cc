@@ -8,9 +8,9 @@
 
 #include "ash/desktop_background/user_wallpaper_delegate.h"
 #include "ash/root_window_controller.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
-#include "ash/wm/property_util.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/prefs/pref_service.h"
@@ -41,7 +41,7 @@ LauncherContextMenu::LauncherContextMenu(ChromeLauncherController* controller,
     : ui::SimpleMenuModel(NULL),
       controller_(controller),
       item_(*item),
-      launcher_alignment_menu_(root),
+      shelf_alignment_menu_(root),
       root_window_(root) {
   DCHECK(item);
   DCHECK(root_window_);
@@ -53,7 +53,7 @@ LauncherContextMenu::LauncherContextMenu(ChromeLauncherController* controller,
     : ui::SimpleMenuModel(NULL),
       controller_(controller),
       item_(ash::LauncherItem()),
-      launcher_alignment_menu_(root),
+      shelf_alignment_menu_(root),
       extension_items_(new extensions::ContextMenuMatcher(
           controller->profile(), this, this,
           base::Bind(MenuItemHasLauncherContext))),
@@ -144,11 +144,10 @@ void LauncherContextMenu::Init() {
     AddCheckItemWithStringId(MENU_AUTO_HIDE,
                              IDS_ASH_SHELF_CONTEXT_MENU_AUTO_HIDE);
   }
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kShowShelfAlignmentMenu)) {
+  if (ash::ShelfWidget::ShelfAlignmentAllowed()) {
     AddSubMenuWithStringId(MENU_ALIGNMENT_MENU,
                            IDS_ASH_SHELF_CONTEXT_MENU_POSITION,
-                           &launcher_alignment_menu_);
+                           &shelf_alignment_menu_);
   }
 #if defined(OS_CHROMEOS)
   AddItem(MENU_CHANGE_WALLPAPER,

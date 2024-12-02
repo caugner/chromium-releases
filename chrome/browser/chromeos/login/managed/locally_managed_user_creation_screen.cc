@@ -198,8 +198,6 @@ void LocallyManagedUserCreationScreen::OnManagerCryptohomeAuthenticated() {
   }
 }
 
-void LocallyManagedUserCreationScreen::OnExit() {}
-
 void LocallyManagedUserCreationScreen::OnActorDestroyed(
     LocallyManagedUserCreationScreenHandler* actor) {
   if (actor_ == actor)
@@ -244,6 +242,13 @@ void LocallyManagedUserCreationScreen::OnCreationTimeout() {
   if (actor_) {
     actor_->ShowStatusMessage(false /* error */, l10n_util::GetStringUTF16(
         IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_CREATION_TIMEOUT_MESSAGE));
+  }
+}
+
+void LocallyManagedUserCreationScreen::OnLongCreationWarning() {
+  if (actor_) {
+    actor_->ShowStatusMessage(true /* progress */, l10n_util::GetStringUTF16(
+        IDS_PROFILES_CREATE_MANAGED_JUST_SIGNED_IN));
   }
 }
 

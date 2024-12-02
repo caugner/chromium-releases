@@ -10,12 +10,12 @@
 #include "cc/animation/layer_animation_controller.h"
 #include "cc/animation/timing_function.h"
 #include "cc/base/switches.h"
+#include "cc/debug/test_context_provider.h"
 #include "cc/input/input_handler.h"
 #include "cc/layers/content_layer.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/test/animation_test_common.h"
-#include "cc/test/fake_context_provider.h"
 #include "cc/test/fake_layer_tree_host_client.h"
 #include "cc/test/fake_output_surface.h"
 #include "cc/test/occlusion_tracker_test_common.h"
@@ -37,12 +37,8 @@ bool TestHooks::PrepareToDrawOnThread(LayerTreeHostImpl* host_impl,
   return true;
 }
 
-bool TestHooks::CanActivatePendingTree(LayerTreeHostImpl* host_impl) {
-  return true;
-}
-
-bool TestHooks::CanActivatePendingTreeIfNeeded(LayerTreeHostImpl* host_impl) {
-  return true;
+base::TimeDelta TestHooks::LowFrequencyAnimationInterval() const {
+  return base::TimeDelta::FromMilliseconds(16);
 }
 
 // Adapts LayerTreeHostImpl for test. Runs real code, then invokes test hooks.
@@ -73,7 +69,14 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
                           host_impl_client,
                           proxy,
                           stats_instrumentation),
-        test_hooks_(test_hooks) {}
+        test_hooks_(test_hooks),
+        block_notify_ready_to_activate_for_testing_(false),
+        notify_ready_to_activate_was_blocked_(false) {}
+
+  virtual void BeginFrame(const BeginFrameArgs& args) OVERRIDE {
+    test_hooks_->WillBeginImplFrameOnThread(this, args);
+    LayerTreeHostImpl::BeginFrame(args);
+  }
 
   virtual void BeginCommit() OVERRIDE {
     LayerTreeHostImpl::BeginCommit();
@@ -109,25 +112,36 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
     return result;
   }
 
-  virtual void OnSwapBuffersComplete(const CompositorFrameAck* ack) OVERRIDE {
-    LayerTreeHostImpl::OnSwapBuffersComplete(ack);
+  virtual void OnSwapBuffersComplete() OVERRIDE {
+    LayerTreeHostImpl::OnSwapBuffersComplete();
     test_hooks_->SwapBuffersCompleteOnThread(this);
   }
 
-  virtual void ActivatePendingTreeIfNeeded() OVERRIDE {
-    if (!pending_tree())
-      return;
+  virtual void ReclaimResources(const CompositorFrameAck* ack) OVERRIDE {
+    LayerTreeHostImpl::ReclaimResources(ack);
+  }
 
-    if (!test_hooks_->CanActivatePendingTreeIfNeeded(this))
-      return;
+  virtual void UpdateVisibleTiles() OVERRIDE {
+    LayerTreeHostImpl::UpdateVisibleTiles();
+    test_hooks_->UpdateVisibleTilesOnThread(this);
+  }
 
-    LayerTreeHostImpl::ActivatePendingTreeIfNeeded();
+  virtual void NotifyReadyToActivate() OVERRIDE {
+    if (block_notify_ready_to_activate_for_testing_)
+      notify_ready_to_activate_was_blocked_ = true;
+    else
+      client_->NotifyReadyToActivate();
+  }
+
+  virtual void BlockNotifyReadyToActivateForTesting(bool block) OVERRIDE {
+    block_notify_ready_to_activate_for_testing_ = block;
+    if (!block && notify_ready_to_activate_was_blocked_) {
+      NotifyReadyToActivate();
+      notify_ready_to_activate_was_blocked_ = false;
+    }
   }
 
   virtual void ActivatePendingTree() OVERRIDE {
-    if (!test_hooks_->CanActivatePendingTree(this))
-      return;
-
     test_hooks_->WillActivateTreeOnThread(this);
     LayerTreeHostImpl::ActivatePendingTree();
     DCHECK(!pending_tree());
@@ -168,11 +182,13 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
   }
 
   virtual base::TimeDelta LowFrequencyAnimationInterval() const OVERRIDE {
-    return base::TimeDelta::FromMilliseconds(16);
+    return test_hooks_->LowFrequencyAnimationInterval();
   }
 
  private:
   TestHooks* test_hooks_;
+  bool block_notify_ready_to_activate_for_testing_;
+  bool notify_ready_to_activate_was_blocked_;
 };
 
 // Adapts LayerTreeHost for test. Injects LayerTreeHostImplForTesting.
@@ -368,6 +384,12 @@ void LayerTreeTest::PostSetNeedsCommitToMainThread() {
                  main_thread_weak_ptr_));
 }
 
+void LayerTreeTest::PostReadbackToMainThread() {
+  proxy()->MainThreadTaskRunner()->PostTask(
+      FROM_HERE,
+      base::Bind(&LayerTreeTest::DispatchReadback, main_thread_weak_ptr_));
+}
+
 void LayerTreeTest::PostAcquireLayerTextures() {
   proxy()->MainThreadTaskRunner()->PostTask(
       FROM_HERE,
@@ -497,6 +519,15 @@ void LayerTreeTest::DispatchSetNeedsCommit() {
     layer_tree_host_->SetNeedsCommit();
 }
 
+void LayerTreeTest::DispatchReadback() {
+  DCHECK(!proxy() || proxy()->IsMainThread());
+
+  if (layer_tree_host_) {
+    char pixels[4];
+    layer_tree_host()->CompositeAndReadback(&pixels, gfx::Rect(0, 0, 1, 1));
+  }
+}
+
 void LayerTreeTest::DispatchAcquireLayerTextures() {
   DCHECK(!proxy() || proxy()->IsMainThread());
 
@@ -558,8 +589,7 @@ void LayerTreeTest::RunTest(bool threaded,
     ASSERT_TRUE(impl_thread_->Start());
   }
 
-  scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_ =
-      base::MessageLoopProxy::current();
+  main_task_runner_ = base::MessageLoopProxy::current();
 
   delegating_renderer_ = delegating_renderer;
 
@@ -615,8 +645,8 @@ scoped_refptr<cc::ContextProvider> LayerTreeTest::
     OffscreenContextProviderForMainThread() {
   if (!main_thread_contexts_.get() ||
       main_thread_contexts_->DestroyedOnMainThread()) {
-    main_thread_contexts_ = FakeContextProvider::Create();
-    if (!main_thread_contexts_->BindToCurrentThread())
+    main_thread_contexts_ = TestContextProvider::Create();
+    if (main_thread_contexts_ && !main_thread_contexts_->BindToCurrentThread())
       main_thread_contexts_ = NULL;
   }
   return main_thread_contexts_;
@@ -626,7 +656,7 @@ scoped_refptr<cc::ContextProvider> LayerTreeTest::
     OffscreenContextProviderForCompositorThread() {
   if (!compositor_thread_contexts_.get() ||
       compositor_thread_contexts_->DestroyedOnMainThread())
-    compositor_thread_contexts_ = FakeContextProvider::Create();
+    compositor_thread_contexts_ = TestContextProvider::Create();
   return compositor_thread_contexts_;
 }
 

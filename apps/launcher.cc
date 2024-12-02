@@ -14,7 +14,6 @@
 #include "chrome/browser/extensions/api/app_runtime/app_runtime_api.h"
 #include "chrome/browser/extensions/api/file_handlers/app_file_handler_util.h"
 #include "chrome/browser/extensions/api/file_system/file_system_api.h"
-#include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_prefs.h"
@@ -23,7 +22,8 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/lazy_background_task_queue.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/extensions/app_metro_infobar_delegate_win.h"
+#include "chrome/browser/ui/apps/app_metro_infobar_delegate_win.h"
+#include "chrome/common/extensions/api/app_runtime.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "content/public/browser/browser_thread.h"
@@ -31,9 +31,9 @@
 #include "content/public/browser/web_contents.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
+#include "url/gurl.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
@@ -43,12 +43,16 @@
 #include "win8/util/win8_util.h"
 #endif
 
+namespace app_runtime = extensions::api::app_runtime;
+
 using content::BrowserThread;
+using extensions::app_file_handler_util::CheckWritableFiles;
 using extensions::app_file_handler_util::FileHandlerForId;
 using extensions::app_file_handler_util::FileHandlerCanHandleFile;
 using extensions::app_file_handler_util::FirstFileHandlerForFile;
 using extensions::app_file_handler_util::CreateFileEntry;
 using extensions::app_file_handler_util::GrantedFileEntry;
+using extensions::app_file_handler_util::HasFileSystemWritePermission;
 using extensions::Extension;
 using extensions::ExtensionHost;
 using extensions::ExtensionSystem;
@@ -123,15 +127,19 @@ class PlatformAppPathLauncher
 
     DCHECK(file_path_.IsAbsolute());
 
-#if defined(OS_CHROMEOS)
-    if (drive::util::IsUnderDriveMountPoint(file_path_)) {
-      GetMimeTypeAndLaunchForDriveFile();
+    if (HasFileSystemWritePermission(extension_)) {
+      std::vector<base::FilePath> paths;
+      paths.push_back(file_path_);
+      CheckWritableFiles(
+          paths,
+          profile_,
+          false,
+          base::Bind(&PlatformAppPathLauncher::OnFileValid, this),
+          base::Bind(&PlatformAppPathLauncher::OnFileInvalid, this));
       return;
     }
-#endif
 
-    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE, base::Bind(
-            &PlatformAppPathLauncher::GetMimeTypeAndLaunch, this));
+    OnFileValid();
   }
 
   void LaunchWithHandler(const std::string& handler_id) {
@@ -143,6 +151,24 @@ class PlatformAppPathLauncher
   friend class base::RefCountedThreadSafe<PlatformAppPathLauncher>;
 
   virtual ~PlatformAppPathLauncher() {}
+
+  void OnFileValid() {
+#if defined(OS_CHROMEOS)
+    if (drive::util::IsUnderDriveMountPoint(file_path_)) {
+      PlatformAppPathLauncher::GetMimeTypeAndLaunchForDriveFile();
+      return;
+    }
+#endif
+
+    BrowserThread::PostTask(
+        BrowserThread::FILE,
+        FROM_HERE,
+        base::Bind(&PlatformAppPathLauncher::GetMimeTypeAndLaunch, this));
+  }
+
+  void OnFileInvalid(const base::FilePath& /* error_path */) {
+    LaunchWithNoLaunchData();
+  }
 
   void GetMimeTypeAndLaunch() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
@@ -168,14 +194,14 @@ class PlatformAppPathLauncher
   void GetMimeTypeAndLaunchForDriveFile() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-    drive::DriveIntegrationService* service =
-        drive::DriveIntegrationServiceFactory::FindForProfile(profile_);
-    if (!service) {
+    drive::FileSystemInterface* file_system =
+        drive::util::GetFileSystemByProfile(profile_);
+    if (!file_system) {
       LaunchWithNoLaunchData();
       return;
     }
 
-    service->file_system()->GetFileByPath(
+    file_system->GetFileByPath(
         drive::util::ExtractDrivePath(file_path_),
         base::Bind(&PlatformAppPathLauncher::OnGotDriveFile, this));
   }
@@ -258,12 +284,12 @@ class PlatformAppPathLauncher
       return;
     }
 
-    GrantedFileEntry file_entry = CreateFileEntry(
-        profile_,
-        extension_->id(),
-        host->render_process_host()->GetID(),
-        file_path_,
-        false);
+    GrantedFileEntry file_entry =
+        CreateFileEntry(profile_,
+                        extension_,
+                        host->render_process_host()->GetID(),
+                        file_path_,
+                        false);
     extensions::AppEventRouter::DispatchOnLaunchedEventWithFileEntry(
         profile_, extension_, handler_id_, mime_type, file_entry);
   }
@@ -342,7 +368,7 @@ void RestartPlatformApp(Profile* profile, const Extension* extension) {
       ExtensionSystem::Get(profile)->event_router();
   bool listening_to_restart = event_router->
       ExtensionHasEventListener(extension->id(),
-                                extensions::event_names::kOnRestarted);
+                                app_runtime::OnRestarted::kEventName);
 
   if (listening_to_restart) {
     extensions::AppEventRouter::DispatchOnRestartedEvent(profile, extension);
@@ -355,10 +381,19 @@ void RestartPlatformApp(Profile* profile, const Extension* extension) {
   extension_prefs->SetIsActive(extension->id(), false);
   bool listening_to_launch = event_router->
       ExtensionHasEventListener(extension->id(),
-                                extensions::event_names::kOnLaunched);
+                                app_runtime::OnLaunched::kEventName);
 
   if (listening_to_launch && had_windows)
     LaunchPlatformAppWithNoData(profile, extension);
+}
+
+void LaunchPlatformAppWithUrl(Profile* profile,
+                              const Extension* extension,
+                              const std::string& handler_id,
+                              const GURL& url,
+                              const GURL& referrer_url) {
+  extensions::AppEventRouter::DispatchOnLaunchedEventWithUrl(
+      profile, extension, handler_id, url, referrer_url);
 }
 
 }  // namespace apps

@@ -5,12 +5,15 @@
 #import "chrome/browser/ui/cocoa/browser/avatar_button_controller.h"
 
 #include "base/mac/scoped_nsobject.h"
+#include "chrome/browser/managed_mode/managed_user_service.h"
+#include "chrome/browser/managed_mode/managed_user_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/browser/avatar_menu_bubble_controller.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #include "chrome/browser/ui/cocoa/info_bubble_window.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/test/base/testing_profile.h"
 
 class AvatarButtonControllerTest : public CocoaProfileTest {
  public:
@@ -85,7 +88,7 @@ TEST_F(AvatarButtonControllerTest, ManagedUserLabel) {
   EXPECT_FALSE([controller() labelButtonView]);
 
   // Transform the first profile to a managed user profile.
-  profile()->GetPrefs()->SetBoolean(prefs::kProfileIsManaged, true);
+  ManagedUserServiceFactory::GetForProfile(profile())->InitForTesting();
 
   // Build a new controller to check if it is initialized correctly for a
   // managed user profile.

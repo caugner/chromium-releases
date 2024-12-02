@@ -66,14 +66,18 @@ class NativeAppWindowGtk : public apps::NativeAppWindow,
   virtual void UpdateWindowTitle() OVERRIDE;
   virtual void HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
+  virtual void UpdateInputRegion(scoped_ptr<SkRegion> region) OVERRIDE;
   virtual void UpdateDraggableRegions(
       const std::vector<extensions::DraggableRegion>& regions) OVERRIDE;
   virtual void RenderViewHostChanged() OVERRIDE;
   virtual gfx::Insets GetFrameInsets() const OVERRIDE;
+  virtual void HideWithApp() OVERRIDE;
+  virtual void ShowWithApp() OVERRIDE;
 
   // web_modal::WebContentsModalDialogHost implementation.
   virtual gfx::NativeView GetHostView() const OVERRIDE;
   virtual gfx::Point GetDialogPosition(const gfx::Size& size) OVERRIDE;
+  virtual gfx::Size GetMaximumDialogSize() OVERRIDE;
   virtual void AddObserver(
       web_modal::WebContentsModalDialogHostObserver* observer) OVERRIDE;
   virtual void RemoveObserver(

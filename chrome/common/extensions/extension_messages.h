@@ -117,6 +117,11 @@ IPC_STRUCT_BEGIN(ExtensionMsg_ExecuteCode_Params)
 
   // Whether the request is coming from a <webview>.
   IPC_STRUCT_MEMBER(bool, is_web_view)
+
+  // Whether the caller is interested in the result value. Manifest-declared
+  // content scripts and executeScript() calls without a response callback
+  // are examples of when this will be false.
+  IPC_STRUCT_MEMBER(bool, wants_result)
 IPC_STRUCT_END()
 
 // Struct containing the data for external connections to extensions. Used to
@@ -620,11 +625,6 @@ IPC_MESSAGE_ROUTED1(ExtensionHostMsg_UpdateDraggableRegions,
 IPC_MESSAGE_CONTROL2(ExtensionHostMsg_AddAPIActionToActivityLog,
                      std::string /* extension_id */,
                      ExtensionHostMsg_APIActionOrEvent_Params)
-
-// Sent by the renderer to log a blocked API action to the activity log.
-IPC_MESSAGE_CONTROL2(ExtensionHostMsg_AddBlockedCallToActivityLog,
-                    std::string /* extension_id */,
-                    std::string /* api call function name */)
 
 // Sent by the renderer to log an event to the extension activity log.
 IPC_MESSAGE_CONTROL2(ExtensionHostMsg_AddEventToActivityLog,

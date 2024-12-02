@@ -18,7 +18,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
-#include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 #include "url/gurl.h"
 
 #if defined(OS_WIN)
@@ -79,12 +79,37 @@ void SimulateMouseEvent(WebContents* web_contents,
                         const gfx::Point& point);
 
 // Sends a key press asynchronously.
+// The native code of the key event will be set to InvalidNativeKeycode().
+// |key_code| alone is good enough for scenarios that only need the char
+// value represented by a key event and not the physical key on the keyboard
+// or the keyboard layout.
+// For scenarios such as chromoting that need the native code,
+// SimulateKeyPressWithCode should be used.
 void SimulateKeyPress(WebContents* web_contents,
-                      ui::KeyboardCode key,
+                      ui::KeyboardCode key_code,
                       bool control,
                       bool shift,
                       bool alt,
                       bool command);
+
+// Sends a key press asynchronously.
+// |code| specifies the UIEvents (aka: DOM4Events) value of the key:
+// https://dvcs.w3.org/hg/d4e/raw-file/tip/source_respec.htm
+// The native code of the key event will be set based on |code|.
+// See ui/base/keycodes/vi usb_keycode_map.h for mappings between |code|
+// and the native code.
+// Examples of the various codes:
+//   key_code: VKEY_A
+//   code: "KeyA"
+//   native key code: 0x001e (for Windows).
+//   native key code: 0x0026 (for Linux).
+void SimulateKeyPressWithCode(WebContents* web_contents,
+                              ui::KeyboardCode key_code,
+                              const char* code,
+                              bool control,
+                              bool shift,
+                              bool alt,
+                              bool command);
 
 // Allow ExecuteScript* methods to target either a WebContents or a
 // RenderViewHost.  Targetting a WebContents means executing script in the
@@ -146,6 +171,13 @@ bool ExecuteScriptAndExtractBool(const internal::ToRenderViewHost& adapter,
 bool ExecuteScriptAndExtractString(const internal::ToRenderViewHost& adapter,
                                    const std::string& script,
                                    std::string* result) WARN_UNUSED_RESULT;
+
+// Executes the WebUI resource test runner injecting each resource ID in
+// |js_resource_ids| prior to executing the tests.
+//
+// Returns true if tests ran successfully, false otherwise.
+bool ExecuteWebUIResourceTest(const internal::ToRenderViewHost& adapter,
+                              const std::vector<int>& js_resource_ids);
 
 // Returns the cookies for the given url.
 std::string GetCookies(BrowserContext* browser_context, const GURL& url);

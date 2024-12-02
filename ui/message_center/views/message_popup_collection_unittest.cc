@@ -10,8 +10,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/events/event.h"
-#include "ui/base/events/event_constants.h"
+#include "ui/events/event.h"
+#include "ui/events/event_constants.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/rect.h"
 #include "ui/message_center/fake_message_center.h"
@@ -90,7 +90,7 @@ class MessagePopupCollectionTest : public views::ViewsTestBase {
                          UTF8ToUTF16("test message"),
                          gfx::Image(),
                          string16() /* display_source */,
-                         "" /* extension_id */,
+                         NotifierId(),
                          message_center::RichNotificationData(),
                          NULL /* delegate */));
     MessageCenter::Get()->AddNotification(notification.Pass());

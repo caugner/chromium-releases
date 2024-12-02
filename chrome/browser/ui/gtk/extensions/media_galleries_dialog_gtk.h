@@ -14,9 +14,7 @@
 #include "chrome/browser/media_galleries/media_galleries_dialog_controller.h"
 #include "chrome/browser/ui/gtk/constrained_window_gtk.h"
 #include "ui/base/gtk/gtk_signal.h"
-#include "ui/base/gtk/scoped_gobject.h"
-
-namespace chrome {
+#include "ui/gfx/scoped_gobject.h"
 
 class MediaGalleriesDialogController;
 class MediaGalleriesDialogTest;
@@ -77,7 +75,5 @@ class MediaGalleriesDialogGtk : public MediaGalleriesDialog {
 
   DISALLOW_COPY_AND_ASSIGN(MediaGalleriesDialogGtk);
 };
-
-}  // namespace chrome
 
 #endif  // CHROME_BROWSER_UI_GTK_EXTENSIONS_MEDIA_GALLERIES_DIALOG_GTK_H_

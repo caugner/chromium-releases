@@ -144,7 +144,6 @@ const OncFieldSignature vpn_fields[] = {
 
 const OncFieldSignature ethernet_fields[] = {
   { kRecommended, &kRecommendedSignature },
-  // Not supported, yet.
   { ethernet::kAuthentication, &kStringSignature },
   { ethernet::kEAP, &kEAPSignature },
   { NULL }
@@ -203,19 +202,37 @@ const OncFieldSignature wifi_with_state_fields[] = {
   { NULL }
 };
 
-const OncFieldSignature cellular_with_state_fields[] = {
+const OncFieldSignature cellular_provider_fields[] = {
+  { cellular_provider::kCode, &kStringSignature },
+  { cellular_provider::kCountry, &kStringSignature },
+  { cellular_provider::kName, &kStringSignature },
+  { NULL }
+};
+
+const OncFieldSignature cellular_apn_fields[] = {
+  { cellular_apn::kName, &kStringSignature },
+  { cellular_apn::kUsername, &kStringSignature },
+  { cellular_apn::kPassword, &kStringSignature },
+  { NULL }
+};
+
+const OncFieldSignature cellular_fields[] = {
   { kRecommended, &kRecommendedSignature },
+  { cellular::kAPN, &kCellularApnSignature },
+  { NULL }
+};
+
+const OncFieldSignature cellular_with_state_fields[] = {
   { cellular::kActivateOverNonCellularNetwork, &kBoolSignature },
   { cellular::kActivationState, &kStringSignature },
   { cellular::kAllowRoaming, &kStringSignature },
-  { cellular::kAPN, &kStringSignature },
   { cellular::kCarrier, &kStringSignature },
   { cellular::kESN, &kStringSignature },
   { cellular::kFamily, &kStringSignature },
   { cellular::kFirmwareRevision, &kStringSignature },
   { cellular::kFoundNetworks, &kStringSignature },
   { cellular::kHardwareRevision, &kStringSignature },
-  { cellular::kHomeProvider, &kStringSignature },
+  { cellular::kHomeProvider, &kCellularProviderSignature },
   { cellular::kICCID, &kStringSignature },
   { cellular::kIMEI, &kStringSignature },
   { cellular::kIMSI, &kStringSignature },
@@ -225,13 +242,11 @@ const OncFieldSignature cellular_with_state_fields[] = {
   { cellular::kMIN, &kStringSignature },
   { cellular::kModelID, &kStringSignature },
   { cellular::kNetworkTechnology, &kStringSignature },
-  { cellular::kOperatorCode, &kStringSignature },
-  { cellular::kOperatorName, &kStringSignature },
   { cellular::kPRLVersion, &kStringSignature },
   { cellular::kProviderRequiresRoaming, &kStringSignature },
   { cellular::kRoamingState, &kStringSignature },
   { cellular::kSelectedNetwork, &kStringSignature },
-  { cellular::kServingOperator, &kStringSignature },
+  { cellular::kServingOperator, &kCellularProviderSignature },
   { cellular::kSIMLockStatus, &kStringSignature },
   { cellular::kSIMPresent, &kStringSignature },
   { cellular::kSupportedCarriers, &kStringSignature },
@@ -255,6 +270,7 @@ const OncFieldSignature network_configuration_fields[] = {
   { network_config::kType, &kStringSignature },
   { network_config::kVPN, &kVPNSignature },
   { network_config::kWiFi, &kWiFiSignature },
+  { network_config::kCellular, &kCellularSignature },
   { NULL }
 };
 
@@ -359,8 +375,17 @@ const OncValueSignature kNetworkWithStateSignature = {
 const OncValueSignature kWiFiWithStateSignature = {
   Value::TYPE_DICTIONARY, wifi_with_state_fields, NULL, &kWiFiSignature
 };
+const OncValueSignature kCellularSignature = {
+  Value::TYPE_DICTIONARY, cellular_fields, NULL
+};
 const OncValueSignature kCellularWithStateSignature = {
-  Value::TYPE_DICTIONARY, cellular_with_state_fields, NULL
+  Value::TYPE_DICTIONARY, cellular_with_state_fields, NULL, &kCellularSignature
+};
+const OncValueSignature kCellularProviderSignature = {
+  Value::TYPE_DICTIONARY, cellular_provider_fields, NULL
+};
+const OncValueSignature kCellularApnSignature = {
+  Value::TYPE_DICTIONARY, cellular_apn_fields, NULL
 };
 
 const OncFieldSignature* GetFieldSignature(const OncValueSignature& signature,
@@ -391,6 +416,7 @@ const CredentialEntry credentials[] = {
   { &kOpenVPNSignature, onc::vpn::kPassword },
   { &kOpenVPNSignature, onc::openvpn::kTLSAuthContents },
   { &kWiFiSignature, onc::wifi::kPassphrase },
+  { &kCellularApnSignature, onc::cellular_apn::kPassword },
   { NULL }
 };
 

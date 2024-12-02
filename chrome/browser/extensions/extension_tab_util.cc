@@ -19,7 +19,6 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/extensions/permissions/api_permission.h"
 #include "chrome/common/extensions/permissions/permissions_data.h"
@@ -28,6 +27,8 @@
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
+#include "extensions/common/manifest_constants.h"
 #include "url/gurl.h"
 
 namespace keys = extensions::tabs_constants;
@@ -144,13 +145,17 @@ DictionaryValue* ExtensionTabUtil::CreateTabValue(
                      tab_strip && tab_strip->IsTabPinned(tab_index));
   result->SetBoolean(keys::kIncognitoKey,
                      contents->GetBrowserContext()->IsOffTheRecord());
+  result->SetInteger(keys::kWidthKey,
+                     contents->GetView()->GetContainerSize().width());
+  result->SetInteger(keys::kHeightKey,
+                     contents->GetView()->GetContainerSize().height());
 
   // Privacy-sensitive fields: these should be stripped off by
   // ScrubTabValueForExtension if the extension should not see them.
   result->SetString(keys::kUrlKey, contents->GetURL().spec());
   result->SetString(keys::kTitleKey, contents->GetTitle());
   if (!is_loading) {
-    NavigationEntry* entry = contents->GetController().GetActiveEntry();
+    NavigationEntry* entry = contents->GetController().GetVisibleEntry();
     if (entry && entry->GetFavicon().valid)
       result->SetString(keys::kFaviconUrlKey, entry->GetFavicon().url.spec());
   }

@@ -9,7 +9,8 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/enrollment_dialog_view.h"
-#include "chrome/browser/chromeos/options/network_connect.h"
+#include "chrome/browser/chromeos/net/onc_utils.h"
+#include "chrome/browser/chromeos/options/passphrase_textfield.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chromeos/login/login_state.h"
 #include "chromeos/network/network_configuration_handler.h"
@@ -24,9 +25,9 @@
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
-#include "ui/base/events/event.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/events/event.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/combobox/combobox.h"
@@ -349,6 +350,8 @@ WifiConfigView::WifiConfigView(NetworkConfigView* parent,
       user_cert_combobox_(NULL),
       server_ca_cert_label_(NULL),
       server_ca_cert_combobox_(NULL),
+      subject_match_label_(NULL),
+      subject_match_textfield_(NULL),
       identity_label_(NULL),
       identity_textfield_(NULL),
       identity_anonymous_label_(NULL),
@@ -399,9 +402,10 @@ bool WifiConfigView::CanLogin() {
     return false;
 
   // If the network requires a passphrase, make sure it is the right length.
-  if (passphrase_textfield_ != NULL
-      && passphrase_textfield_->enabled()
-      && passphrase_textfield_->text().length() < kMinWirelessPasswordLen)
+  if (passphrase_textfield_ != NULL &&
+      passphrase_textfield_->enabled() &&
+      !passphrase_textfield_->show_fake() &&
+      passphrase_textfield_->text().length() < kMinWirelessPasswordLen)
     return false;
 
   // If we're using EAP, we must have a method.
@@ -512,6 +516,15 @@ void WifiConfigView::RefreshEapFields() {
                                        server_ca_cert_ui_data_.IsEditable());
   server_ca_cert_combobox_->ModelChanged();
   server_ca_cert_combobox_->SetSelectedIndex(0);
+
+  // Subject Match
+  bool subject_match_enabled =
+      ca_cert_enabled && eap_method_combobox_ &&
+      eap_method_combobox_->selected_index() == EAP_METHOD_INDEX_TLS;
+  subject_match_label_->SetEnabled(subject_match_enabled);
+  subject_match_textfield_->SetEnabled(subject_match_enabled);
+  if (!subject_match_enabled)
+    subject_match_textfield_->SetText(string16());
 
   // No anonymous identity if no phase 2 auth.
   bool identity_anonymous_enabled = phase_2_auth_enabled;
@@ -792,6 +805,11 @@ bool WifiConfigView::GetEapUseSystemCas() const {
   return server_ca_cert_combobox_->selected_index() == 0;
 }
 
+std::string WifiConfigView::GetEapSubjectMatch() const {
+  DCHECK(subject_match_textfield_);
+  return UTF16ToUTF8(subject_match_textfield_->text());
+}
+
 std::string WifiConfigView::GetEapClientCertPkcs11Id() const {
   DCHECK(user_cert_combobox_);
   if (!HaveUserCerts() || !UserCertActive()) {
@@ -823,6 +841,8 @@ void WifiConfigView::SetEapProperties(base::DictionaryValue* properties) {
       flimflam::kEapPhase2AuthProperty, GetEapPhase2Auth());
   properties->SetStringWithoutPathExpansion(
       flimflam::kEapAnonymousIdentityProperty, GetEapAnonymousIdentity());
+  properties->SetStringWithoutPathExpansion(
+      shill::kEapSubjectMatchProperty, GetEapSubjectMatch());
 
   // shill requires both CertID and KeyID for TLS connections, despite
   // the fact that by convention they are the same ID.
@@ -986,6 +1006,19 @@ void WifiConfigView::Init(bool show_8021x) {
         new ControlledSettingIndicatorView(server_ca_cert_ui_data_));
     layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
+    // Subject Match
+    layout->StartRow(0, column_view_set_id);
+    string16 subject_match_label_text = l10n_util::GetStringUTF16(
+        IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_EAP_SUBJECT_MATCH);
+    subject_match_label_ = new views::Label(subject_match_label_text);
+    layout->AddView(subject_match_label_);
+    subject_match_textfield_ =
+        new views::Textfield(views::Textfield::STYLE_DEFAULT);
+    subject_match_textfield_->SetAccessibleName(subject_match_label_text);
+    subject_match_textfield_->SetController(this);
+    layout->AddView(subject_match_textfield_);
+    layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+
     // User certificate
     layout->StartRow(0, column_view_set_id);
     string16 user_cert_label_text = l10n_util::GetStringUTF16(
@@ -1008,8 +1041,7 @@ void WifiConfigView::Init(bool show_8021x) {
         IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT_IDENTITY);
     identity_label_ = new views::Label(identity_label_text);
     layout->AddView(identity_label_);
-    identity_textfield_ = new views::Textfield(
-        views::Textfield::STYLE_DEFAULT);
+    identity_textfield_ = new views::Textfield(views::Textfield::STYLE_DEFAULT);
     identity_textfield_->SetAccessibleName(identity_label_text);
     identity_textfield_->SetController(this);
     identity_textfield_->SetEnabled(identity_ui_data_.IsEditable());
@@ -1024,11 +1056,10 @@ void WifiConfigView::Init(bool show_8021x) {
   string16 passphrase_label_text = l10n_util::GetStringUTF16(label_text_id);
   passphrase_label_ = new views::Label(passphrase_label_text);
   layout->AddView(passphrase_label_);
-  passphrase_textfield_ = new views::Textfield(
-      views::Textfield::STYLE_OBSCURED);
+  passphrase_textfield_ = new PassphraseTextfield();
   passphrase_textfield_->SetController(this);
   // Disable passphrase input initially for other network.
-  passphrase_label_->SetEnabled(wifi != NULL);
+  passphrase_label_->SetEnabled(wifi);
   passphrase_textfield_->SetEnabled(wifi && passphrase_ui_data_.IsEditable());
   passphrase_textfield_->SetAccessibleName(passphrase_label_text);
   layout->AddView(passphrase_textfield_);
@@ -1142,13 +1173,13 @@ void WifiConfigView::InitFromProperties(
     bool show_8021x,
     const std::string& service_path,
     const base::DictionaryValue& properties) {
-  std::string passphrase;
-  properties.GetStringWithoutPathExpansion(
-      flimflam::kPassphraseProperty, &passphrase);
-  passphrase_textfield_->SetText(UTF8ToUTF16(passphrase));
-
-  if (!show_8021x)
+  if (!show_8021x) {
+    std::string passphrase;
+    properties.GetStringWithoutPathExpansion(
+        flimflam::kPassphraseProperty, &passphrase);
+    passphrase_textfield_->SetText(UTF8ToUTF16(passphrase));
     return;
+  }
 
   // EAP Method
   std::string eap_method;
@@ -1186,6 +1217,12 @@ void WifiConfigView::InitFromProperties(
     identity_anonymous_textfield_->SetText(UTF8ToUTF16(eap_anonymous_identity));
   }
 
+  // Subject match
+  std::string subject_match;
+  properties.GetStringWithoutPathExpansion(
+      shill::kEapSubjectMatchProperty, &subject_match);
+  subject_match_textfield_->SetText(UTF8ToUTF16(subject_match));
+
   // Server CA certificate.
   if (CaCertActive()) {
     std::string eap_ca_cert_pem;
@@ -1212,6 +1249,9 @@ void WifiConfigView::InitFromProperties(
       if (cert_index >= 0) {
         // Skip item for "Default".
         server_ca_cert_combobox_->SetSelectedIndex(1 + cert_index);
+      } else {
+        // "Default"
+        server_ca_cert_combobox_->SetSelectedIndex(0);
       }
     }
   }
@@ -1241,6 +1281,12 @@ void WifiConfigView::InitFromProperties(
     properties.GetStringWithoutPathExpansion(
         flimflam::kEapPasswordProperty, &eap_password);
     passphrase_textfield_->SetText(UTF8ToUTF16(eap_password));
+    // If 'Connectable' is True, show a fake passphrase to indicate that it
+    // has already been set.
+    bool connectable = false;
+    properties.GetBooleanWithoutPathExpansion(
+        flimflam::kConnectableProperty, &connectable);
+    passphrase_textfield_->SetShowFake(connectable);
   }
 
   // Save credentials
@@ -1249,6 +1295,7 @@ void WifiConfigView::InitFromProperties(
       flimflam::kSaveCredentialsProperty, &save_credentials);
   save_credentials_checkbox_->SetChecked(save_credentials);
 
+  UpdateDialogButtons();
   RefreshShareCheckbox();
   UpdateErrorLabel();
 }
@@ -1272,7 +1319,7 @@ void WifiConfigView::ParseWiFiUIProperty(
     const std::string& key) {
   onc::ONCSource onc_source = onc::ONC_SOURCE_NONE;
   const base::DictionaryValue* onc =
-      network_connect::FindPolicyForActiveUser(network, &onc_source);
+      onc::FindPolicyForActiveUser(network->guid(), &onc_source);
 
   property_ui_data->ParseOncProperty(
       onc_source,

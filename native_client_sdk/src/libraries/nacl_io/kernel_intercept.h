@@ -8,6 +8,7 @@
 #include <ppapi/c/ppb.h>
 #include <ppapi/c/pp_instance.h>
 
+#include "nacl_io/ossignal.h"
 #include "nacl_io/ossocket.h"
 #include "nacl_io/osstat.h"
 #include "nacl_io/ostermios.h"
@@ -43,6 +44,7 @@ int ki_mount(const char* source, const char* target, const char* filesystemtype,
              unsigned long mountflags, const void *data);
 int ki_umount(const char* path);
 int ki_open(const char* path, int oflag);
+int ki_pipe(int pipefds[2]);
 ssize_t ki_read(int fd, void* buf, size_t nbyte);
 ssize_t ki_write(int fd, const void* buf, size_t nbyte);
 int ki_fstat(int fd, struct stat *buf);
@@ -61,6 +63,7 @@ void* ki_mmap(void* addr, size_t length, int prot, int flags, int fd,
               off_t offset);
 int ki_munmap(void* addr, size_t length);
 int ki_open_resource(const char* file);
+int ki_fcntl(int d, int request, char* argp);
 int ki_ioctl(int d, int request, char* argp);
 int ki_chown(const char* path, uid_t owner, gid_t group);
 int ki_fchown(int fd, uid_t owner, gid_t group);
@@ -75,6 +78,9 @@ int ki_tcflush(int fd, int queue_selector);
 int ki_tcgetattr(int fd, struct termios* termios_p);
 int ki_tcsetattr(int fd, int optional_actions,
                  const struct termios *termios_p);
+int ki_kill(pid_t pid, int sig);
+sighandler_t ki_signal(int signum, sighandler_t handler);
+sighandler_t ki_sigset(int signum, sighandler_t handler);
 
 #ifdef PROVIDES_SOCKET_API
 // Socket Functions

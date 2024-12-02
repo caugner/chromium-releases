@@ -2,20 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+<include src="extension_error.js"></include>
+
 cr.define('options', function() {
   'use strict';
-
-  /**
-   * A lookup helper function to find the first node that has an id (starting
-   * at |node| and going up the parent chain).
-   * @param {Element} node The node to start looking at.
-   */
-  function findIdNode(node) {
-    while (node && !node.id) {
-      node = node.parentNode;
-    }
-    return node;
-  }
 
   /**
    * Creates a new list of extensions.
@@ -207,13 +197,6 @@ cr.define('options', function() {
             chrome.send('extensionSettingsLaunch', [extension.id]);
           });
           launch.hidden = false;
-
-          // The 'Restart' link.
-          var restart = node.querySelector('.restart-link');
-          restart.addEventListener('click', function(e) {
-            chrome.send('extensionSettingsRestart', [extension.id]);
-          });
-          restart.hidden = false;
         }
       }
 
@@ -287,7 +270,9 @@ cr.define('options', function() {
         var link = activeViews.querySelector('a');
 
         extension.views.forEach(function(view, i) {
-          var label = view.path +
+          var displayName = view.generatedBackgroundPage ?
+              loadTimeData.getString('backgroundPage') : view.path;
+          var label = displayName +
               (view.incognito ?
                   ' ' + loadTimeData.getString('viewIncognito') : '') +
               (view.renderProcessId == -1 ?
@@ -320,14 +305,28 @@ cr.define('options', function() {
         });
       }
 
-      // The install warnings.
+      // If the ErrorConsole is enabled, we should have manifest and/or runtime
+      // errors. Otherwise, we may have install warnings. We should not have
+      // both ErrorConsole errors and install warnings.
+      if (extension.manifestErrors) {
+        var panel = node.querySelector('.manifest-errors');
+        panel.hidden = false;
+        panel.appendChild(new extensions.ExtensionErrorList(
+            extension.manifestErrors, 'extensionErrorsManifestErrors'));
+      }
+      if (extension.runtimeErrors) {
+        var panel = node.querySelector('.runtime-errors');
+        panel.hidden = false;
+        panel.appendChild(new extensions.ExtensionErrorList(
+            extension.runtimeErrors, 'extensionErrorsRuntimeErrors'));
+      }
       if (extension.installWarnings) {
         var panel = node.querySelector('.install-warnings');
         panel.hidden = false;
         var list = panel.querySelector('ul');
         extension.installWarnings.forEach(function(warning) {
           var li = document.createElement('li');
-          li[warning.isHTML ? 'innerHTML' : 'innerText'] = warning.message;
+          li.innerText = warning.message;
           list.appendChild(li);
         });
       }
@@ -342,7 +341,7 @@ cr.define('options', function() {
           topScroll -= pad / 2;
         document.body.scrollTop = topScroll;
       }
-    }
+    },
   };
 
   return {

@@ -13,7 +13,6 @@
 #include "base/cpu.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/perftimer.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/profiler/alternate_timer.h"
@@ -21,6 +20,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
+#include "base/test/perftimer.h"
 #include "base/third_party/nspr/prtime.h"
 #include "base/time/time.h"
 #include "base/tracked_objects.h"
@@ -58,7 +58,6 @@
 
 #if defined(OS_WIN)
 #include "base/win/metro.h"
-#include "ui/base/win/dpi.h"
 
 // http://blogs.msdn.com/oldnewthing/archive/2004/10/25/247180.aspx
 extern "C" IMAGE_DOS_HEADER __ImageBase;
@@ -150,8 +149,8 @@ OmniboxEventProto::PageClassification AsOmniboxEventPageClassification(
       return OmniboxEventProto::NEW_TAB_PAGE;
     case AutocompleteInput::BLANK:
       return OmniboxEventProto::BLANK;
-    case AutocompleteInput::HOMEPAGE:
-      return OmniboxEventProto::HOMEPAGE;
+    case AutocompleteInput::HOME_PAGE:
+      return OmniboxEventProto::HOME_PAGE;
     case AutocompleteInput::OTHER:
       return OmniboxEventProto::OTHER;
     case AutocompleteInput::SEARCH_RESULT_PAGE_DOING_SEARCH_TERM_REPLACEMENT:
@@ -228,6 +227,7 @@ void SetPluginInfo(const content::WebPluginInfo& plugin_info,
   plugin->set_name(UTF16ToUTF8(plugin_info.name));
   plugin->set_filename(plugin_info.path.BaseName().AsUTF8Unsafe());
   plugin->set_version(UTF16ToUTF8(plugin_info.version));
+  plugin->set_is_pepper(plugin_info.is_pepper_plugin());
   if (plugin_prefs)
     plugin->set_is_disabled(!plugin_prefs->IsPluginEnabled(plugin_info));
 }
@@ -304,8 +304,6 @@ BOOL CALLBACK GetMonitorDPICallback(HMONITOR, HDC hdc, LPRECT, LPARAM dwData) {
       GetDeviceCaps(hdc, HORZRES) / (size_x / kMillimetersPerInch) : 0;
   double dpi_y = (size_y > 0) ?
       GetDeviceCaps(hdc, VERTRES) / (size_y / kMillimetersPerInch) : 0;
-  dpi_x *= ui::win::GetUndocumentedDPIScale();
-  dpi_y *= ui::win::GetUndocumentedDPIScale();
   screen_info->max_dpi_x = std::max(dpi_x, screen_info->max_dpi_x);
   screen_info->max_dpi_y = std::max(dpi_y, screen_info->max_dpi_y);
   return TRUE;
@@ -860,13 +858,8 @@ void MetricsLog::RecordOmniboxOpenedURL(const OmniboxLog& log) {
   omnibox_event->set_current_page_classification(
       AsOmniboxEventPageClassification(log.current_page_classification));
   omnibox_event->set_input_type(AsOmniboxEventInputType(log.input_type));
-
-  // The view code to hide the top result is currently only implemented on the
-  // Mac and for views.
-#if defined(OS_MACOSX) || defined(TOOLKIT_VIEWS)
   omnibox_event->set_is_top_result_hidden_in_dropdown(
       log.result.ShouldHideTopMatch());
-#endif  // defined(OS_MACOSX) || defined(TOOLKIT_VIEWS)
 
   for (AutocompleteResult::const_iterator i(log.result.begin());
        i != log.result.end(); ++i) {

@@ -16,12 +16,14 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/devtools/devtools_window.h"
+#include "chrome/browser/devtools/port_forwarding_controller.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/browser_child_process_observer.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/devtools_agent_host.h"
@@ -74,6 +76,7 @@ static const char kAdbTargetType[]  = "adb_page";
 
 static const char kInitUICommand[]  = "init-ui";
 static const char kInspectCommand[]  = "inspect";
+static const char kActivateCommand[]  = "activate";
 static const char kTerminateCommand[]  = "terminate";
 static const char kReloadCommand[]  = "reload";
 static const char kOpenCommand[]  = "open";
@@ -82,6 +85,9 @@ static const char kPortForwardingEnabledCommand[] =
     "set-port-forwarding-enabled";
 static const char kPortForwardingConfigCommand[] = "set-port-forwarding-config";
 
+static const char kPortForwardingDefaultPort[] = "8080";
+static const char kPortForwardingDefaultLocation[] = "localhost:8080";
+
 static const char kTargetTypeField[]  = "type";
 static const char kAttachedField[]  = "attached";
 static const char kProcessIdField[]  = "processId";
@@ -89,15 +95,20 @@ static const char kRouteIdField[]  = "routeId";
 static const char kUrlField[]  = "url";
 static const char kNameField[]  = "name";
 static const char kFaviconUrlField[] = "faviconUrl";
+static const char kDescription[] = "description";
 static const char kPidField[]  = "pid";
 static const char kAdbSerialField[] = "adbSerial";
 static const char kAdbModelField[] = "adbModel";
 static const char kAdbBrowserProductField[] = "adbBrowserProduct";
+static const char kAdbBrowserPackageField[] = "adbBrowserPackage";
 static const char kAdbBrowserVersionField[] = "adbBrowserVersion";
 static const char kAdbGlobalIdField[] = "adbGlobalId";
 static const char kAdbBrowsersField[] = "browsers";
 static const char kAdbPagesField[] = "pages";
 static const char kAdbPortStatus[] = "adbPortStatus";
+static const char kAdbScreenWidthField[] = "adbScreenWidth";
+static const char kAdbScreenHeightField[] = "adbScreenHeight";
+static const char kGuestList[] = "guests";
 
 DictionaryValue* BuildTargetDescriptor(
     const std::string& target_type,
@@ -105,6 +116,7 @@ DictionaryValue* BuildTargetDescriptor(
     const GURL& url,
     const std::string& name,
     const GURL& favicon_url,
+    const std::string& description,
     int process_id,
     int route_id,
     base::ProcessHandle handle = base::kNullProcessHandle) {
@@ -117,6 +129,7 @@ DictionaryValue* BuildTargetDescriptor(
   target_data->SetString(kNameField, net::EscapeForHTML(name));
   target_data->SetInteger(kPidField, base::GetProcId(handle));
   target_data->SetString(kFaviconUrlField, favicon_url.spec());
+  target_data->SetString(kDescription, description);
 
   return target_data;
 }
@@ -127,6 +140,15 @@ bool HasClientHost(RenderViewHost* rvh) {
 
   scoped_refptr<DevToolsAgentHost> agent(
       DevToolsAgentHost::GetOrCreateFor(rvh));
+  return agent->IsAttached();
+}
+
+bool HasClientHost(int process_id, int route_id) {
+  if (!DevToolsAgentHost::HasForWorker(process_id, route_id))
+    return false;
+
+  scoped_refptr<DevToolsAgentHost> agent(
+      DevToolsAgentHost::GetForWorker(process_id, route_id));
   return agent->IsAttached();
 }
 
@@ -167,6 +189,7 @@ DictionaryValue* BuildTargetDescriptor(RenderViewHost* rvh, bool is_tab) {
                                url,
                                title,
                                favicon_url,
+                               "",
                                rvh->GetProcess()->GetID(),
                                rvh->GetRoutingID());
 }
@@ -183,6 +206,7 @@ class InspectMessageHandler : public WebUIMessageHandler {
 
   void HandleInitUICommand(const ListValue* args);
   void HandleInspectCommand(const ListValue* args);
+  void HandleActivateCommand(const ListValue* args);
   void HandleTerminateCommand(const ListValue* args);
   void HandleReloadCommand(const ListValue* args);
   void HandleOpenCommand(const ListValue* args);
@@ -206,6 +230,9 @@ void InspectMessageHandler::RegisterMessages() {
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(kInspectCommand,
       base::Bind(&InspectMessageHandler::HandleInspectCommand,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(kActivateCommand,
+      base::Bind(&InspectMessageHandler::HandleActivateCommand,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(kTerminateCommand,
       base::Bind(&InspectMessageHandler::HandleTerminateCommand,
@@ -258,6 +285,12 @@ void InspectMessageHandler::HandleInspectCommand(const ListValue* args) {
     return;
 
   DevToolsWindow::OpenDevToolsWindowForWorker(profile, agent_host.get());
+}
+
+void InspectMessageHandler::HandleActivateCommand(const ListValue* args) {
+  std::string page_id;
+  if (GetRemotePageId(args, &page_id))
+    inspect_ui_->ActivateRemotePage(page_id);
 }
 
 static void TerminateWorker(int process_id, int route_id) {
@@ -346,6 +379,7 @@ bool InspectMessageHandler::GetRemotePageId(const ListValue* args,
 
 class InspectUI::WorkerCreationDestructionListener
     : public WorkerServiceObserver,
+      public content::BrowserChildProcessObserver,
       public base::RefCountedThreadSafe<WorkerCreationDestructionListener> {
  public:
   WorkerCreationDestructionListener()
@@ -355,6 +389,7 @@ class InspectUI::WorkerCreationDestructionListener
     DCHECK(workers_ui);
     DCHECK(!discovery_ui_);
     discovery_ui_ = workers_ui;
+    BrowserChildProcessObserver::Add(this);
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&WorkerCreationDestructionListener::RegisterObserver,
@@ -364,13 +399,14 @@ class InspectUI::WorkerCreationDestructionListener
   void InspectUIDestroyed() {
     DCHECK(discovery_ui_);
     discovery_ui_ = NULL;
+    BrowserChildProcessObserver::Remove(this);
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&WorkerCreationDestructionListener::UnregisterObserver,
                    this));
   }
 
-  void InitUI() {
+  void UpdateUI() {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&WorkerCreationDestructionListener::CollectWorkersData,
@@ -393,27 +429,24 @@ class InspectUI::WorkerCreationDestructionListener
     CollectWorkersData();
   }
 
+  virtual void BrowserChildProcessHostConnected(
+      const content::ChildProcessData& data) OVERRIDE {
+    if (data.process_type == content::PROCESS_TYPE_WORKER)
+      UpdateUI();
+  }
+
+  virtual void BrowserChildProcessHostDisconnected(
+      const content::ChildProcessData& data) OVERRIDE {
+    if (data.process_type == content::PROCESS_TYPE_WORKER)
+      UpdateUI();
+  }
+
   void CollectWorkersData() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    scoped_ptr<ListValue> target_list(new ListValue());
-    std::vector<WorkerService::WorkerInfo> worker_info =
-        WorkerService::GetInstance()->GetWorkers();
-    for (size_t i = 0; i < worker_info.size(); ++i) {
-      target_list->Append(BuildTargetDescriptor(
-          kWorkerTargetType,
-          false,
-          worker_info[i].url,
-          UTF16ToUTF8(worker_info[i].name),
-          GURL(),
-          worker_info[i].process_id,
-          worker_info[i].route_id,
-          worker_info[i].handle));
-    }
-
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
         base::Bind(&WorkerCreationDestructionListener::PopulateWorkersList,
-                   this, base::Owned(target_list.release())));
+                   this, WorkerService::GetInstance()->GetWorkers()));
   }
 
   void RegisterObserver() {
@@ -424,12 +457,29 @@ class InspectUI::WorkerCreationDestructionListener
     WorkerService::GetInstance()->RemoveObserver(this);
   }
 
-  void PopulateWorkersList(ListValue* target_list) {
+  void PopulateWorkersList(
+      const std::vector<WorkerService::WorkerInfo>& worker_info) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    if (discovery_ui_) {
-      discovery_ui_->web_ui()->CallJavascriptFunction(
-          "populateWorkersList", *target_list);
+    if (!discovery_ui_)
+      return;
+
+    ListValue target_list;
+    for (size_t i = 0; i < worker_info.size(); ++i) {
+      if (!worker_info[i].handle)
+        continue;  // Process is still being created.
+      target_list.Append(BuildTargetDescriptor(
+          kWorkerTargetType,
+          HasClientHost(worker_info[i].process_id, worker_info[i].route_id),
+          worker_info[i].url,
+          UTF16ToUTF8(worker_info[i].name),
+          GURL(),
+          "",
+          worker_info[i].process_id,
+          worker_info[i].route_id,
+          worker_info[i].handle));
     }
+    discovery_ui_->web_ui()->CallJavascriptFunction(
+        "populateWorkersList", target_list);
   }
 
   InspectUI* discovery_ui_;
@@ -451,11 +501,12 @@ InspectUI::~InspectUI() {
 }
 
 void InspectUI::InitUI() {
+  SetPortForwardingDefaults();
   StartListeningNotifications();
   PopulateLists();
   UpdatePortForwardingEnabled();
   UpdatePortForwardingConfig();
-  observer_->InitUI();
+  observer_->UpdateUI();
 }
 
 void InspectUI::InspectRemotePage(const std::string& id) {
@@ -464,6 +515,12 @@ void InspectUI::InspectRemotePage(const std::string& id) {
     Profile* profile = Profile::FromWebUI(web_ui());
     it->second->Inspect(profile);
   }
+}
+
+void InspectUI::ActivateRemotePage(const std::string& id) {
+  RemotePages::iterator it = remote_pages_.find(id);
+  if (it != remote_pages_.end())
+    it->second->Activate();
 }
 
 void InspectUI::ReloadRemotePage(const std::string& id) {
@@ -501,11 +558,43 @@ void InspectUI::PopulateLists() {
   std::vector<RenderViewHost*> rvh_vector =
       DevToolsAgentHost::GetValidRenderViewHosts();
 
+  std::map<WebContents*, DictionaryValue*> description_map;
+  std::vector<WebContents*> guest_contents;
+
   for (std::vector<RenderViewHost*>::iterator it(rvh_vector.begin());
        it != rvh_vector.end(); it++) {
     bool is_tab = tab_rvhs.find(*it) != tab_rvhs.end();
-    target_list->Append(BuildTargetDescriptor(*it, is_tab));
+    RenderViewHost* rvh = (*it);
+    WebContents* web_contents = WebContents::FromRenderViewHost(rvh);
+    if (rvh->GetProcess()->IsGuest()) {
+      if (web_contents)
+        guest_contents.push_back(web_contents);
+    } else {
+      DictionaryValue* dictionary = BuildTargetDescriptor(rvh, is_tab);
+      if (web_contents)
+        description_map[web_contents] = dictionary;
+      target_list->Append(dictionary);
+    }
   }
+
+  // Add the list of guest-views to each of its embedders.
+  for (std::vector<WebContents*>::iterator it(guest_contents.begin());
+       it != guest_contents.end(); ++it) {
+    WebContents* guest = (*it);
+    WebContents* embedder = guest->GetEmbedderWebContents();
+    if (embedder && description_map.count(embedder) > 0) {
+      DictionaryValue* description = description_map[embedder];
+      ListValue* guests = NULL;
+      if (!description->GetList(kGuestList, &guests)) {
+        guests = new ListValue();
+        description->Set(kGuestList, guests);
+      }
+      RenderViewHost* rvh = guest->GetRenderViewHost();
+      if (rvh)
+        guests->Append(BuildTargetDescriptor(rvh, false));
+    }
+  }
+
   web_ui()->CallJavascriptFunction("populateLists", *target_list.get());
 }
 
@@ -576,6 +665,14 @@ content::WebUIDataSource* InspectUI::CreateInspectUIHTMLSource() {
 
 void InspectUI::RemoteDevicesChanged(
     DevToolsAdbBridge::RemoteDevices* devices) {
+  Profile* profile = Profile::FromWebUI(web_ui());
+  PortForwardingController* port_forwarding_controller =
+      PortForwardingController::Factory::GetForProfile(profile);
+  PortForwardingController::DevicesStatus port_forwarding_status;
+  if (port_forwarding_controller)
+    port_forwarding_status =
+        port_forwarding_controller->UpdateDeviceList(*devices);
+
   remote_browsers_.clear();
   remote_pages_.clear();
   ListValue device_list;
@@ -598,6 +695,7 @@ void InspectUI::RemoteDevicesChanged(
       DevToolsAdbBridge::RemoteBrowser* browser = bit->get();
       DictionaryValue* browser_data = new DictionaryValue();
       browser_data->SetString(kAdbBrowserProductField, browser->product());
+      browser_data->SetString(kAdbBrowserPackageField, browser->package());
       browser_data->SetString(kAdbBrowserVersionField, browser->version());
       std::string browser_id = base::StringPrintf(
           "browser:%s:%s:%s",
@@ -616,27 +714,39 @@ void InspectUI::RemoteDevicesChanged(
         DictionaryValue* page_data = BuildTargetDescriptor(
             kAdbTargetType, page->attached(),
             GURL(page->url()), page->title(), GURL(page->favicon_url()),
-            0, 0);
+            page->description(), 0, 0);
         std::string page_id = base::StringPrintf("page:%s:%s:%s",
             device->serial().c_str(),
             browser->socket().c_str(),
             page->id().c_str());
         page_data->SetString(kAdbGlobalIdField, page_id);
+        // Pass the screen size in the page object to make sure that
+        // the caching logic does not prevent the page item from updating
+        // when the screen size changes.
+        gfx::Size screen_size = device->GetScreenSize();
+        page_data->SetInteger(kAdbScreenWidthField, screen_size.width());
+        page_data->SetInteger(kAdbScreenHeightField, screen_size.height());
         remote_pages_[page_id] = page;
         page_list->Append(page_data);
       }
       browser_list->Append(browser_data);
     }
 
-    DictionaryValue* port_status_dict = new DictionaryValue();
-    typedef DevToolsAdbBridge::RemoteDevice::PortStatusMap StatusMap;
-    const StatusMap& port_status = device->port_status();
-    for (StatusMap::const_iterator it = port_status.begin();
-         it != port_status.end(); ++it) {
-      port_status_dict->SetInteger(
-          base::StringPrintf("%d", it->first), it->second);
+    if (port_forwarding_controller) {
+      PortForwardingController::DevicesStatus::iterator sit =
+          port_forwarding_status.find(device->serial());
+      if (sit != port_forwarding_status.end()) {
+        DictionaryValue* port_status_dict = new DictionaryValue();
+        typedef PortForwardingController::PortStatusMap StatusMap;
+        const StatusMap& port_status = sit->second;
+        for (StatusMap::const_iterator it = port_status.begin();
+             it != port_status.end(); ++it) {
+          port_status_dict->SetInteger(
+              base::StringPrintf("%d", it->first), it->second);
+        }
+        device_data->Set(kAdbPortStatus, port_status_dict);
+      }
     }
-    device_data->Set(kAdbPortStatus, port_status_dict);
 
     device_list.Append(device_data);
   }
@@ -644,16 +754,50 @@ void InspectUI::RemoteDevicesChanged(
 }
 
 void InspectUI::UpdatePortForwardingEnabled() {
-  Profile* profile = Profile::FromWebUI(web_ui());
-  const base::Value* value = profile->GetPrefs()->FindPreference(
-      prefs::kDevToolsPortForwardingEnabled)->GetValue();
-  web_ui()->CallJavascriptFunction("updatePortForwardingEnabled", *value);
+  web_ui()->CallJavascriptFunction("updatePortForwardingEnabled",
+      *GetPrefValue(prefs::kDevToolsPortForwardingEnabled));
 
 }
 
 void InspectUI::UpdatePortForwardingConfig() {
+  web_ui()->CallJavascriptFunction("updatePortForwardingConfig",
+      *GetPrefValue(prefs::kDevToolsPortForwardingConfig));
+}
+
+void InspectUI::SetPortForwardingDefaults() {
   Profile* profile = Profile::FromWebUI(web_ui());
-  const base::Value* value = profile->GetPrefs()->FindPreference(
-      prefs::kDevToolsPortForwardingConfig)->GetValue();
-  web_ui()->CallJavascriptFunction("updatePortForwardingConfig", *value);
+  PrefService* prefs = profile->GetPrefs();
+
+  bool default_set;
+  if (!GetPrefValue(prefs::kDevToolsPortForwardingDefaultSet)->
+      GetAsBoolean(&default_set) || default_set) {
+    return;
+  }
+
+  // This is the first chrome://inspect invocation on a fresh profile or after
+  // upgrade from a version that did not have kDevToolsPortForwardingDefaultSet.
+  prefs->SetBoolean(prefs::kDevToolsPortForwardingDefaultSet, true);
+
+  bool enabled;
+  const base::DictionaryValue* config;
+  if (!GetPrefValue(prefs::kDevToolsPortForwardingEnabled)->
+        GetAsBoolean(&enabled) ||
+      !GetPrefValue(prefs::kDevToolsPortForwardingConfig)->
+        GetAsDictionary(&config)) {
+    return;
+  }
+
+  // Do nothing if user already took explicit action.
+  if (enabled || config->size() != 0)
+    return;
+
+  base::DictionaryValue default_config;
+  default_config.SetString(
+      kPortForwardingDefaultPort, kPortForwardingDefaultLocation);
+  prefs->Set(prefs::kDevToolsPortForwardingConfig, default_config);
+}
+
+const base::Value* InspectUI::GetPrefValue(const char* name) {
+  Profile* profile = Profile::FromWebUI(web_ui());
+  return profile->GetPrefs()->FindPreference(name)->GetValue();
 }

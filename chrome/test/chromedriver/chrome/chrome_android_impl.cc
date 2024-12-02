@@ -11,12 +11,15 @@
 ChromeAndroidImpl::ChromeAndroidImpl(
     scoped_ptr<DevToolsHttpClient> client,
     ScopedVector<DevToolsEventListener>& devtools_event_listeners,
-    scoped_ptr<Device> device,
-    Log* log)
-    : ChromeImpl(client.Pass(), devtools_event_listeners, log),
+    scoped_ptr<Device> device)
+    : ChromeImpl(client.Pass(), devtools_event_listeners),
       device_(device.Pass()) {}
 
 ChromeAndroidImpl::~ChromeAndroidImpl() {}
+
+Chrome::Type ChromeAndroidImpl::GetType() {
+  return ANDROID;
+}
 
 std::string ChromeAndroidImpl::GetOperatingSystemName() {
   return "ANDROID";

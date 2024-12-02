@@ -11,7 +11,6 @@
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/invalidation/invalidator_storage.h"
-#include "chrome/browser/signin/oauth2_token_service.h"
 #include "chrome/browser/signin/profile_oauth2_token_service.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/sync/glue/data_type_manager_impl.h"
@@ -19,13 +18,12 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/test/base/profile_mock.h"
+#include "google_apis/gaia/oauth2_token_service.h"
 #include "sync/internal_api/public/test/test_internal_components_factory.h"
 #include "sync/test/engine/test_id_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 class Profile;
-class Task;
-class TestProfileSyncService;
 
 ACTION(ReturnNewDataTypeManager) {
   return new browser_sync::DataTypeManagerImpl(arg0,
@@ -121,6 +119,7 @@ class TestProfileSyncService : public ProfileSyncService {
       ProfileSyncComponentsFactory* factory,
       Profile* profile,
       SigninManagerBase* signin,
+      ProfileOAuth2TokenService* oauth2_token_service,
       ProfileSyncService::StartBehavior behavior,
       bool synchronous_backend_initialization);
 
@@ -199,12 +198,23 @@ class TestProfileSyncService : public ProfileSyncService {
 
 class FakeOAuth2TokenService : public ProfileOAuth2TokenService {
  public:
-  virtual scoped_ptr<OAuth2TokenService::Request> StartRequest(
-      const OAuth2TokenService::ScopeSet& scopes,
-      OAuth2TokenService::Consumer* consumer) OVERRIDE;
-
   static BrowserContextKeyedService* BuildTokenService(
       content::BrowserContext* context);
+
+ protected:
+  virtual void FetchOAuth2Token(
+      OAuth2TokenService::RequestImpl* request,
+      const std::string& account_id,
+      net::URLRequestContextGetter* getter,
+      const std::string& client_id,
+      const std::string& client_secret,
+      const OAuth2TokenService::ScopeSet& scopes) OVERRIDE;
+
+  virtual void PersistCredentials(const std::string& account_id,
+                                  const std::string& refresh_token) OVERRIDE;
+
+  virtual void ClearPersistedCredentials(
+      const std::string& account_id) OVERRIDE;
 };
 
 #endif  // CHROME_BROWSER_SYNC_TEST_PROFILE_SYNC_SERVICE_H_

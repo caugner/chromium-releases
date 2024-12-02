@@ -24,6 +24,9 @@ ShillIPConfigClientStub::ShillIPConfigClientStub() : weak_ptr_factory_(this) {
 ShillIPConfigClientStub::~ShillIPConfigClientStub() {
 }
 
+void ShillIPConfigClientStub::Init(dbus::Bus* bus) {
+}
+
 void ShillIPConfigClientStub::AddPropertyChangedObserver(
     const dbus::ObjectPath& ipconfig_path,
     ShillPropertyChangedObserver* observer) {
@@ -50,11 +53,6 @@ void ShillIPConfigClientStub::GetProperties(
                               weak_ptr_factory_.GetWeakPtr(),
                               dict,
                               callback));
-}
-
-base::DictionaryValue* ShillIPConfigClientStub::CallGetPropertiesAndBlock(
-    const dbus::ObjectPath& ipconfig_path) {
-  return new base::DictionaryValue;
 }
 
 void ShillIPConfigClientStub::SetProperty(

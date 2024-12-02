@@ -18,7 +18,8 @@ class ShillIPConfigClientStub : public ShillIPConfigClient {
   ShillIPConfigClientStub();
   virtual ~ShillIPConfigClientStub();
 
-  // ShillIPConfigClient overrides:
+  // ShillIPConfigClient overrides
+  virtual void Init(dbus::Bus* bus) OVERRIDE;
   virtual void AddPropertyChangedObserver(
       const dbus::ObjectPath& ipconfig_path,
       ShillPropertyChangedObserver* observer) OVERRIDE;
@@ -29,8 +30,6 @@ class ShillIPConfigClientStub : public ShillIPConfigClient {
                        const VoidDBusMethodCallback& callback) OVERRIDE;
   virtual void GetProperties(const dbus::ObjectPath& ipconfig_path,
                              const DictionaryValueCallback& callback) OVERRIDE;
-  virtual base::DictionaryValue* CallGetPropertiesAndBlock(
-      const dbus::ObjectPath& ipconfig_path) OVERRIDE;
   virtual void SetProperty(const dbus::ObjectPath& ipconfig_path,
                            const std::string& name,
                            const base::Value& value,

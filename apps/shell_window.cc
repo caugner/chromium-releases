@@ -37,6 +37,11 @@
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/screen.h"
 
+#if !defined(OS_MACOSX)
+#include "apps/pref_names.h"
+#include "base/prefs/pref_service.h"
+#endif
+
 using content::ConsoleMessageLevel;
 using content::WebContents;
 using extensions::APIPermission;
@@ -91,7 +96,7 @@ void ShellWindow::Init(const GURL& url,
 
   web_contents->SetDelegate(this);
   WebContentsModalDialogManager::FromWebContents(web_contents)->
-      set_delegate(this);
+      SetDelegate(this);
   extensions::SetViewType(web_contents, extensions::VIEW_TYPE_APP_SHELL);
 
   // Initialize the window
@@ -358,10 +363,13 @@ void ShellWindow::SetAppIconUrl(const GURL& url) {
   web_contents()->DownloadImage(
       url,
       true,  // is a favicon
-      delegate_->PreferredIconSize(),
       0,  // no maximum size
       base::Bind(&ShellWindow::DidDownloadFavicon,
                  image_loader_ptr_factory_.GetWeakPtr()));
+}
+
+void ShellWindow::UpdateInputRegion(scoped_ptr<SkRegion> region) {
+  native_app_window_->UpdateInputRegion(region.Pass());
 }
 
 void ShellWindow::UpdateDraggableRegions(
@@ -378,6 +386,11 @@ void ShellWindow::UpdateAppIcon(const gfx::Image& image) {
 }
 
 void ShellWindow::Fullscreen() {
+#if !defined(OS_MACOSX)
+  // Do not enter fullscreen mode if disallowed by pref.
+  if (!profile()->GetPrefs()->GetBoolean(prefs::kAppFullscreenAllowed))
+    return;
+#endif
   fullscreen_for_window_api_ = true;
   GetBaseWindow()->SetFullscreen(true);
 }
@@ -403,11 +416,12 @@ void ShellWindow::Restore() {
 //------------------------------------------------------------------------------
 // Private methods
 
-void ShellWindow::DidDownloadFavicon(int id,
-                                     int http_status_code,
-                                     const GURL& image_url,
-                                     int requested_size,
-                                     const std::vector<SkBitmap>& bitmaps) {
+void ShellWindow::DidDownloadFavicon(
+    int id,
+    int http_status_code,
+    const GURL& image_url,
+    const std::vector<SkBitmap>& bitmaps,
+    const std::vector<gfx::Size>& original_bitmap_sizes) {
   if (image_url != app_icon_url_ || bitmaps.empty())
     return;
 
@@ -490,6 +504,16 @@ void ShellWindow::NavigationStateChanged(
 
 void ShellWindow::ToggleFullscreenModeForTab(content::WebContents* source,
                                              bool enter_fullscreen) {
+#if !defined(OS_MACOSX)
+  // Do not enter fullscreen mode if disallowed by pref.
+  // TODO(bartfab): Add a test once it becomes possible to simulate a user
+  // gesture. http://crbug.com/174178
+  if (enter_fullscreen &&
+      !profile()->GetPrefs()->GetBoolean(prefs::kAppFullscreenAllowed)) {
+    return;
+  }
+#endif
+
   if (!IsExtensionWithPermissionOrSuggestInConsole(
       APIPermission::kFullscreen,
       extension_,

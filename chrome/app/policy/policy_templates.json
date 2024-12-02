@@ -101,9 +101,10 @@
 #   'can_be_recommended' can be set to True to include that policy in the
 #   recommended policies templates. This only affects the template generation;
 #   all policies can be at the recommended level. The default is False.
-#   'max_size' specifies the maximal size of the external data that a policy can
-#   reference, in bytes. This annotation is compulsory for policies of type
-#   'external'. It is ignored for all other policy types.
+#
+#   The 'max_size' key is used to specify the maximal size of the external data
+#   that a policy can reference, in bytes. This annotation is compulsory for
+#   policies of type 'external'. It is ignored for all other policy types.
 #
 #   The 'future' key is used to indicate that a policy isn't yet ready for
 #   usage. It defaults to False, and currently affects the generated policy
@@ -117,7 +118,7 @@
 #   persistent IDs for all fields (but not for groups!) are needed. These are
 #   specified by the 'id' keys of each policy. NEVER CHANGE EXISTING IDs,
 #   because doing so would break the deployed wire format!
-#   For your editing convenience: highest ID currently used: 236
+#   For your editing convenience: highest ID currently used: 244
 #
 # Placeholders:
 #   The following placeholder strings are automatically substituted:
@@ -1888,6 +1889,24 @@
           This policy is only respected if the 'DefaultSearchProviderEnabled' policy is enabled.''',
         },
         {
+          'name': 'DefaultSearchProviderNewTabURL',
+          'type': 'string',
+          'schema': { 'type': 'string' },
+          'supported_on': ['chrome.*:30-', 'chrome_os:0.30-', 'android:30-'],
+          'features': {
+            'dynamic_refresh': True,
+            'per_profile': True,
+          },
+          'example_value': 'http://search.my.company/newtab',
+          'id': 237,
+          'caption': '''Default search provider new tab page URL''',
+          'desc': '''Specifies the URL that a search engine uses to provide a new tab page.
+
+          This policy is optional. If not set, no new tab page will be provided.
+
+          This policy is only respected if the 'DefaultSearchProviderEnabled' policy is enabled.''',
+        },
+        {
           'name': 'DefaultSearchProviderSearchURLPostParams',
           'type': 'string',
           'schema': { 'type': 'string' },
@@ -2657,6 +2676,25 @@
 
           If this policy is not set the default command line will be used.''',
         },
+        {
+          'name': 'SkipMetadataCheck',
+          'type': 'main',
+          'schema': { 'type': 'boolean' },
+          'supported_on': ['chrome_frame:31-'],
+          'features': {
+            'dynamic_refresh': False,
+          },
+          'example_value': False,
+          'id': 238,
+          'caption': '''Skip the meta tag check in <ph name="PRODUCT_FRAME_NAME">$3<ex>Google Chrome Frame</ex></ph>''',
+          'desc': '''Normally pages with X-UA-Compatible set to chrome=1 will be rendered in <ph name="PRODUCT_FRAME_NAME">$3<ex>Google Chrome Frame</ex></ph> regardless of the 'ChromeFrameRendererSettings' policy.
+
+          If you enable this setting, pages will not be scanned for meta tags.
+
+          If you disable this setting, pages will be scanned for meta tags.
+
+          If this policy is not set, pages will be scanned for meta tags.'''
+        },
       ],
     },
     {
@@ -2707,6 +2745,56 @@
       If you enable or disable this setting, users cannot change or override it.
 
       If the policy is left not set the user can choose whether he wants to be asked for password to unlock the device or not.''',
+    },
+    {
+      'name': 'ChromeOsMultiProfileUserBehavior',
+      'type': 'string-enum',
+      'schema': {
+        'type': 'string',
+        'enum': [
+          'unrestricted',
+          'primary-only',
+          'not-allowed',
+        ],
+      },
+      'items': [
+        {
+          'name': 'MultiProfileUserBehaviorUnrestricted',
+          'value': 'unrestricted',
+          'caption': '''Allow enterprise user to be both primary and secondary  (Default behavior)''',
+        },
+        {
+          'name': 'MultiProfileUserBehaviorMustBePrimary',
+          'value': 'primary-only',
+          'caption': '''Allow enterprise user to be primary multiprofile user only''',
+        },
+        {
+          'name': 'MultiProfileUserBehaviorNotAllowed',
+          'value': 'not-allowed',
+          'caption': '''Do not allow enterprise user to be part of multiprofile (primary or secondary)''',
+        },
+      ],
+      'supported_on': ['chrome_os:31-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': 'unrestricted',
+      'id': 244,
+      'caption': '''Control the user behavior in a multiprofile session''',
+      'desc': '''Control the user behavior in a multiprofile session on <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> devices.
+
+      If this policy is set to 'MultiProfileUserBehaviorUnrestricted', the user can be either primary or secondary user in a multiprofile session.
+
+      If this policy is set to 'MultiProfileUserBehaviorMustBePrimary', the user can only be the primary user in a multiprofile session.
+
+      If this policy is set to 'MultiProfileUserBehaviorNotAllowed', the user cannot be part of a multiprofile session.
+
+      If you set this setting, users cannot change or override it.
+
+      If the setting is changed while the user is signed into a multiprofile session, all users in the session will be checked against their cooresponding settings. The session will be closed if any one of the users is no longer allowed to be in the session.
+
+      If the policy is left not set, the default value 'MultiProfileUserBehaviorUnrestricted' will be used.''',
     },
     {
       'name': 'InstantEnabled',
@@ -3630,6 +3718,20 @@
       <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> devices automatically check for updates when this setting is not configured or set to False.''',
     },
     {
+      'name': 'DeviceAutoUpdateP2PEnabled',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome_os:31-'],
+      'device_only': True,
+      'features': {
+        'dynamic_refresh': True,
+      },
+      'example_value': False,
+      'id': 242,
+      'caption': '''Auto update p2p enabled''',
+      'desc': '''Specifies whether p2p is to be used for OS update payloads. If set to True, devices will share and attempt to consume update payloads on the LAN, potentially reducing Internet bandwidth usage and congestion. If the update payload is not available on the LAN, the device will fall back to downloading from an update server. If set to False or not configured, p2p will not be used.''',
+    },
+    {
       'name': 'DeviceTargetVersionPrefix',
       'type': 'string',
       'schema': { 'type': 'string' },
@@ -3682,6 +3784,24 @@
       'desc': ''' The types of connections that are allowed to use for OS updates. OS updates potentially put heavy strain on the connection due to their size and may incur additional cost. Therefore, they are by default not enabled for connection types that are considered expensive, which include WiMax, Bluetooth and Cellular at the moment.
 
       The recognized connection type identifiers are "ethernet", "wifi", "wimax", "bluetooth" and "cellular".''',
+    },
+    {
+      'name': 'DeviceUpdateHttpDownloadsEnabled',
+      'type': 'main',
+      'schema': {
+        'type': 'boolean',
+      },
+      'supported_on': ['chrome_os:29-'],
+      'device_only': True,
+      'features': {
+        'dynamic_refresh': True,
+      },
+      'example_value': True,
+      'id': 243,
+      'caption': '''Allow autoupdate downloads via HTTP''',
+      'desc': '''Auto-update payloads on <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> can be downloaded via HTTP instead of HTTPS. This allowes transparent HTTP caching of HTTP downloads.
+
+      If this policy is set to true, <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> will attempt to download auto-update payloads via HTTP. If the policy is set to false or not set, HTTPS will be used for downloading auto-update payloads.''',
     },
     {
       'name': 'DeviceLocalAccounts',
@@ -4076,7 +4196,13 @@
       'example_value': True,
       'id': 236,
       'caption': '''Use 24 hour clock by default''',
-      'desc': '''Specifies the clock format be used for the device. Users can override clock format for the current session. However, on logout it is set back to the specified value. If an empty string is provided, device owner preference is used.''',
+      'desc': '''Specifies the clock format be used for the device.
+
+      This policy configures the clock format to use on the login screen and as a default for user sessions. Users can still override the clock format for their account.
+
+      If the policy is not set to true, the device will use a 24 hour clock format. If the policy is set to false, the device will use 12 hour clock format.
+
+      If this policy is not set, the device will default to a 24 hour clock format.''',
     },
     {
       'name': 'ShowLogoutButtonInTray',
@@ -4198,6 +4324,28 @@
       If you set this policy, users cannot change or override it.
 
       The policy value should be specified in milliseconds. Values are clamped to a range of 30 seconds to 24 hours.''',
+    },
+    {
+      'name': 'FullscreenAllowed',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.win:31-', 'chrome.linux:31-', 'chrome_os:31-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': True,
+      'id': 240,
+      'caption': '''Allow fullscreen mode''',
+      'desc': '''Allow fullscreen mode.
+
+      This policy controls the availability of fullscreen mode in which all <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> UI is hidden and only web content is visible.
+
+      If this policy is set to true or not not configured, the user, apps and extensions with appropriate permissions can enter fullscreen mode.
+
+      If this policy is set to false, neither the user nor any apps or extensions can enter fullscreen mode.
+
+      On all platforms except <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph>, kiosk mode is unvailable when fullscreen mode is disabled.''',
     },
     {
       'name': 'PowerManagement',
@@ -5270,6 +5418,24 @@
 
           If an extension is not in the list, or the list is not set, the call to the API will fail with an error code.''',
         },
+        {
+          'name': 'AttestationForContentProtectionEnabled',
+          'type': 'main',
+          'schema': { 'type': 'boolean' },
+          'supported_on': ['chrome_os:31-'],
+          'features': {
+            'dynamic_refresh': True,
+          },
+          'device_only': True,
+          'example_value': True,
+          'id': 239,
+          'caption': '''Enable the use of remote attestation for content protection for the device.''',
+          'desc': '''Chrome OS devices can use remote attestation (Verified Access) to get a certificate issued by the Chrome OS CA that asserts the device is eligible to play protected content.  This process involves sending hardware endorsement information to the Chrome OS CA which uniquely identifies the device.
+
+          If this setting is false, the device will not use remote attestation for content protection and the device may be unable to play protected content.
+
+          If this setting is true, or if it is not set, remote attestation may be used for content protection.''',
+        },
       ],
     },
     {
@@ -5294,6 +5460,7 @@
         {
           'name': 'ContentPackDefaultFilteringBehavior',
           'future': True,
+          'deprecated': True,
           'type': 'int-enum',
           'schema': {
             'type': 'integer',
@@ -5331,6 +5498,7 @@
         {
           'name': 'ContentPackManualBehaviorHosts',
           'future': True,
+          'deprecated': True,
           'type': 'dict',
           'schema': {
             'type': 'object',
@@ -5356,6 +5524,7 @@
         {
           'name': 'ContentPackManualBehaviorURLs',
           'future': True,
+          'deprecated': True,
           'type': 'dict',
           'schema': {
             'type': 'object',
@@ -5447,6 +5616,24 @@
       When this policy is set then the Managed bookmarks are the default folder opened when the bookmarks view is opened in Chrome.
 
       Managed bookmarks are not synced to the user account.''',
+    },
+    {
+      'name': 'DataCompressionProxyEnabled',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['android:31-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': True,
+      'id': 241,
+      'caption': '''Enable the data compression proxy feature''',
+      'desc': '''Enable or disable the data compression proxy and prevents users from changing this setting.
+
+      If you enable or disable this setting, users cannot change or override this setting.
+
+      If this policy is left not set, the data compression proxy feature will be available for the user to choose whether to use it or not.''',
     },
   ],
   'messages': {

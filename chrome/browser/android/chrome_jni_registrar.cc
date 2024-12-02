@@ -7,6 +7,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_registrar.h"
 #include "base/debug/trace_event.h"
+#include "chrome/browser/android/bookmarks_bridge.h"
 #include "chrome/browser/android/chrome_web_contents_delegate_android.h"
 #include "chrome/browser/android/content_view_util.h"
 #include "chrome/browser/android/dev_tools_server.h"
@@ -17,10 +18,14 @@
 #include "chrome/browser/android/most_visited_sites.h"
 #include "chrome/browser/android/omnibox/omnibox_prerender.h"
 #include "chrome/browser/android/provider/chrome_browser_provider.h"
+#include "chrome/browser/android/shortcut_helper.h"
 #include "chrome/browser/android/signin/signin_manager_android.h"
 #include "chrome/browser/android/tab_android.h"
+#include "chrome/browser/android/uma_utils.h"
+#include "chrome/browser/android/url_utilities.h"
 #include "chrome/browser/autofill/android/personal_data_manager_android.h"
 #include "chrome/browser/history/android/sqlite_cursor.h"
+#include "chrome/browser/invalidation/invalidation_controller_android.h"
 #include "chrome/browser/lifetime/application_lifetime_android.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/search_engines/template_url_service_android.h"
@@ -31,11 +36,15 @@
 #include "chrome/browser/ui/android/autofill/autofill_dialog_result.h"
 #include "chrome/browser/ui/android/autofill/autofill_popup_view_android.h"
 #include "chrome/browser/ui/android/chrome_http_auth_handler.h"
+#include "chrome/browser/ui/android/infobar/confirm_infobar.h"
+#include "chrome/browser/ui/android/infobar/infobar_android.h"
+#include "chrome/browser/ui/android/infobar/infobar_container_android.h"
 #include "chrome/browser/ui/android/javascript_app_modal_dialog_android.h"
 #include "chrome/browser/ui/android/navigation_popup.h"
 #include "chrome/browser/ui/android/ssl_client_certificate_request.h"
 #include "chrome/browser/ui/android/validation_message_bubble_android.h"
 #include "chrome/browser/ui/android/website_settings_popup_android.h"
+#include "chrome/browser/ui/auto_login_infobar_delegate_android.h"
 #include "components/autofill/core/browser/android/component_jni_registrar.h"
 #include "components/navigation_interception/component_jni_registrar.h"
 #include "components/web_contents_delegate_android/component_jni_registrar.h"
@@ -63,6 +72,8 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
     autofill::AutofillDialogResult::RegisterAutofillDialogResult },
   { "AutofillPopup",
     autofill::AutofillPopupViewAndroid::RegisterAutofillPopupViewAndroid },
+  {"AutoLoginDelegate", AutoLoginInfoBarDelegateAndroid::Register},
+  { "BookmarksBridge", BookmarksBridge::RegisterBookmarksBridge },
   { "CertificateViewer", RegisterCertificateViewer },
   { "ChromeBrowserProvider",
     ChromeBrowserProvider::RegisterChromeBrowserProvider },
@@ -70,16 +81,21 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
     ChromeHttpAuthHandler::RegisterChromeHttpAuthHandler },
   { "ChromeWebContentsDelegateAndroid",
     RegisterChromeWebContentsDelegateAndroid },
+  {"ConfirmInfoBarDelegate", RegisterConfirmInfoBarDelegate},
   { "ContentViewUtil", RegisterContentViewUtil },
   { "DevToolsServer", RegisterDevToolsServer },
+  { "InvalidationController", invalidation::RegisterInvalidationController },
   { "FaviconHelper", FaviconHelper::RegisterFaviconHelper },
   { "FieldTrialHelper", RegisterFieldTrialHelper },
   { "ForeignSessionHelper",
     ForeignSessionHelper::RegisterForeignSessionHelper },
+  {"InfoBarContainer", RegisterInfoBarContainer},
+  { "ShortcutHelper", ShortcutHelper::RegisterShortcutHelper },
   { "IntentHelper", RegisterIntentHelper },
   { "JavascriptAppModalDialog",
     JavascriptAppModalDialogAndroid::RegisterJavascriptAppModalDialog },
   { "MostVisitedSites", RegisterMostVisitedSites },
+  {"NativeInfoBar", RegisterNativeInfoBar},
   { "NavigationPopup", NavigationPopup::RegisterNavigationPopup },
   { "OmniboxPrerender", RegisterOmniboxPrerender },
   { "PersonalDataManagerAndroid",
@@ -89,9 +105,11 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
   { "SigninManager", SigninManagerAndroid::Register },
   { "SqliteCursor", SQLiteCursor::RegisterSqliteCursor },
   { "SSLClientCertificateRequest", RegisterSSLClientCertificateRequestAndroid },
+  { "StartupMetricUtils", RegisterStartupMetricUtils },
   { "TabAndroid", TabAndroid::RegisterTabAndroid },
   { "TemplateUrlServiceAndroid", TemplateUrlServiceAndroid::Register },
   { "TtsPlatformImpl", TtsPlatformImplAndroid::Register },
+  {"UrlUtilities", RegisterUrlUtilities},
   { "ValidationMessageBubbleAndroid",
       ValidationMessageBubbleAndroid::Register },
   { "WebsiteSettingsPopupAndroid",

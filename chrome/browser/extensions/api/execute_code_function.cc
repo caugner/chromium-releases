@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/api/execute_code_function.h"
 
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
+#include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/extensions/script_executor.h"
 #include "chrome/common/extensions/api/i18n/default_locale_handler.h"
 #include "chrome/common/extensions/extension_file_util.h"
@@ -12,6 +13,7 @@
 #include "chrome/common/extensions/message_bundle.h"
 #include "extensions/browser/file_reader.h"
 #include "extensions/common/error_utils.h"
+#include "ui/base/resource/resource_bundle.h"
 
 namespace extensions {
 
@@ -125,7 +127,10 @@ bool ExecuteCodeFunction::Execute(const std::string& code_string) {
       frame_scope,
       run_at,
       ScriptExecutor::ISOLATED_WORLD,
-      IsWebView(),
+      IsWebView() ? ScriptExecutor::WEB_VIEW_PROCESS
+                  : ScriptExecutor::DEFAULT_PROCESS,
+      has_callback() ? ScriptExecutor::JSON_SERIALIZED_RESULT
+                     : ScriptExecutor::NO_RESULT,
       base::Bind(&ExecuteCodeFunction::OnExecuteCodeFinished, this));
   return true;
 }
@@ -161,9 +166,17 @@ bool ExecuteCodeFunction::RunImpl() {
     return false;
   }
 
-  scoped_refptr<FileReader> file_reader(new FileReader(
-      resource_, base::Bind(&ExecuteCodeFunction::DidLoadFile, this)));
-  file_reader->Start();
+  int resource_id;
+  if (ImageLoader::IsComponentExtensionResource(
+          resource_.extension_root(), resource_.relative_path(),
+          &resource_id)) {
+    const ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    DidLoadFile(true, rb.GetRawDataResource(resource_id).as_string());
+  } else {
+    scoped_refptr<FileReader> file_reader(new FileReader(
+        resource_, base::Bind(&ExecuteCodeFunction::DidLoadFile, this)));
+    file_reader->Start();
+  }
 
   return true;
 }

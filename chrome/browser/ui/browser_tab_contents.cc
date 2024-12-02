@@ -17,6 +17,9 @@
 #include "chrome/browser/net/load_time_stats.h"
 #include "chrome/browser/net/net_error_tab_helper.h"
 #include "chrome/browser/net/predictor_tab_helper.h"
+#if !defined(OS_ANDROID)
+#include "chrome/browser/network_time/navigation_time_helper.h"
+#endif
 #include "chrome/browser/password_manager/password_generation_manager.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/password_manager/password_manager_delegate_impl.h"
@@ -31,7 +34,6 @@
 #include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/alternate_error_tab_observer.h"
 #include "chrome/browser/ui/autofill/tab_autofill_manager_delegate.h"
-#include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
 #include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
@@ -116,7 +118,6 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
       TabAutofillManagerDelegate::FromWebContents(web_contents),
       g_browser_process->GetApplicationLocale(),
       AutofillManager::ENABLE_AUTOFILL_DOWNLOAD_MANAGER);
-  BlockedContentTabHelper::CreateForWebContents(web_contents);
   BookmarkTabHelper::CreateForWebContents(web_contents);
   chrome_browser_net::LoadTimeStatsTabHelper::CreateForWebContents(
       web_contents);
@@ -139,12 +140,10 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
       web_contents, PasswordManagerDelegateImpl::FromWebContents(web_contents));
   PDFTabHelper::CreateForWebContents(web_contents);
   PluginObserver::CreateForWebContents(web_contents);
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableBetterPopupBlocking)) {
-    PopupBlockerTabHelper::CreateForWebContents(web_contents);
-  }
+  PopupBlockerTabHelper::CreateForWebContents(web_contents);
   PrefsTabHelper::CreateForWebContents(web_contents);
-  prerender::PrerenderTabHelper::CreateForWebContents(web_contents);
+  prerender::PrerenderTabHelper::CreateForWebContentsWithPasswordManager(
+      web_contents, PasswordManager::FromWebContents(web_contents));
   SadTabHelper::CreateForWebContents(web_contents);
   safe_browsing::SafeBrowsingTabObserver::CreateForWebContents(web_contents);
   SearchEngineTabHelper::CreateForWebContents(web_contents);
@@ -155,6 +154,9 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
   ThumbnailTabHelper::CreateForWebContents(web_contents);
   TranslateTabHelper::CreateForWebContents(web_contents);
   ZoomController::CreateForWebContents(web_contents);
+#if !defined(OS_ANDROID)
+  NavigationTimeHelper::CreateForWebContents(web_contents);
+#endif
 
 #if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
   captive_portal::CaptivePortalTabHelper::CreateForWebContents(web_contents);
@@ -183,7 +185,8 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
                                      OneClickSigninHelper::CAN_OFFER_FOR_ALL,
                                      std::string(),
                                      NULL)) {
-    OneClickSigninHelper::CreateForWebContents(web_contents);
+    OneClickSigninHelper::CreateForWebContentsWithPasswordManager(
+        web_contents, PasswordManager::FromWebContents(web_contents));
   }
 #endif
 

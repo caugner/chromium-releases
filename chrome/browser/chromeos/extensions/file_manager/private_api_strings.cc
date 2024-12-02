@@ -4,22 +4,23 @@
 
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_strings.h"
 
-#include "chrome/browser/chromeos/extensions/file_manager/file_manager_util.h"
+#include "chrome/browser/chromeos/file_manager/open_with_browser.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
+#include "chrome/common/extensions/extension_l10n_util.h"
 #include "grit/app_locale_settings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/webui/web_ui_util.h"
 
-namespace file_manager {
+namespace extensions {
 
-GetStringsFunction::GetStringsFunction() {
+FileBrowserPrivateGetStringsFunction::FileBrowserPrivateGetStringsFunction() {
 }
 
-GetStringsFunction::~GetStringsFunction() {
+FileBrowserPrivateGetStringsFunction::~FileBrowserPrivateGetStringsFunction() {
 }
 
-bool GetStringsFunction::RunImpl() {
+bool FileBrowserPrivateGetStringsFunction::RunImpl() {
   DictionaryValue* dict = new DictionaryValue();
   SetResult(dict);
 
@@ -193,6 +194,12 @@ bool GetStringsFunction::RunImpl() {
   SET_STRING("ACTION_CHOICE_LOADING_SD",
              IDS_FILE_BROWSER_ACTION_CHOICE_LOADING_SD);
 
+  SET_STRING("SUGGEST_DIALOG_TITLE", IDS_FILE_BROWSER_SUGGEST_DIALOG_TITLE);
+  SET_STRING("SUGGEST_DIALOG_LINK_TO_WEBSTORE",
+             IDS_FILE_BROWSER_SUGGEST_DIALOG_LINK_TO_WEBSTORE);
+  SET_STRING("SUGGEST_DIALOG_INSTALLATION_FAILED",
+             IDS_FILE_BROWSER_SUGGEST_DIALOG_INSTALLATION_FAILED);
+
   SET_STRING("PHOTO_IMPORT_TITLE", IDS_FILE_BROWSER_PHOTO_IMPORT_TITLE);
   SET_STRING("PHOTO_IMPORT_IMPORT_BUTTON",
              IDS_FILE_BROWSER_PHOTO_IMPORT_IMPORT_BUTTON);
@@ -252,8 +259,6 @@ bool GetStringsFunction::RunImpl() {
              IDS_FILE_BROWSER_CREATE_FOLDER_SHORTCUT_BUTTON_LABEL);
   SET_STRING("REMOVE_FOLDER_SHORTCUT_BUTTON_LABEL",
              IDS_FILE_BROWSER_REMOVE_FOLDER_SHORTCUT_BUTTON_LABEL);
-  SET_STRING("SHORTCUT_TARGET_UNAVAILABLE",
-             IDS_FILE_BROWSER_SHORTCUT_TARGET_UNAVAILABLE);
   SET_STRING("SHARE_BUTTON_LABEL",
              IDS_FILE_BROWSER_SHARE_BUTTON_LABEL);
 
@@ -503,9 +508,11 @@ bool GetStringsFunction::RunImpl() {
 #undef SET_STRING
 
   dict->SetBoolean("PDF_VIEW_ENABLED",
-                   util::ShouldBeOpenedWithPlugin(profile(), ".pdf"));
+                   file_manager::util::ShouldBeOpenedWithPlugin(profile(),
+                                                  FILE_PATH_LITERAL(".pdf")));
   dict->SetBoolean("SWF_VIEW_ENABLED",
-                   util::ShouldBeOpenedWithPlugin(profile(), ".swf"));
+                   file_manager::util::ShouldBeOpenedWithPlugin(profile(),
+                                                  FILE_PATH_LITERAL(".swf")));
 
   webui::SetFontAndTextDirection(dict);
 
@@ -517,7 +524,10 @@ bool GetStringsFunction::RunImpl() {
     board = "unknown";
   }
   dict->SetString(chromeos::system::kMachineInfoBoard, board);
+
+  dict->SetString("UI_LOCALE", extension_l10n_util::CurrentLocaleOrDefault());
+
   return true;
 }
 
-}  // namespace file_manager
+}  // namespace extensions

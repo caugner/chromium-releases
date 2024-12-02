@@ -12,6 +12,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/scoped_observer.h"
+#include "chrome/browser/extensions/error_console/error_console.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
@@ -52,11 +53,13 @@ struct ExtensionPage {
   ExtensionPage(const GURL& url,
                 int render_process_id,
                 int render_view_id,
-                bool incognito);
+                bool incognito,
+                bool generated_background_page);
   GURL url;
   int render_process_id;
   int render_view_id;
   bool incognito;
+  bool generated_background_page;
 };
 
 // Extension Settings UI handler.
@@ -65,6 +68,7 @@ class ExtensionSettingsHandler
       public content::NotificationObserver,
       public content::WebContentsObserver,
       public ui::SelectFileDialog::Listener,
+      public ErrorConsole::Observer,
       public ExtensionInstallPrompt::Delegate,
       public ExtensionUninstallDialog::Delegate,
       public ExtensionWarningService::Observer,
@@ -110,7 +114,10 @@ class ExtensionSettingsHandler
                             void* params) OVERRIDE;
   virtual void MultiFilesSelected(
       const std::vector<base::FilePath>& files, void* params) OVERRIDE;
-  virtual void FileSelectionCanceled(void* params) OVERRIDE {}
+  virtual void FileSelectionCanceled(void* params) OVERRIDE;
+
+  // ErrorConsole::Observer implementation.
+  virtual void OnErrorAdded(const ExtensionError* error) OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -143,9 +150,6 @@ class ExtensionSettingsHandler
 
   // Callback for "launch" message.
   void HandleLaunchMessage(const ListValue* args);
-
-  // Callback for "restart" message.
-  void HandleRestartMessage(const ListValue* args);
 
   // Callback for "reload" message.
   void HandleReloadMessage(const base::ListValue* args);
@@ -194,6 +198,7 @@ class ExtensionSettingsHandler
   std::vector<ExtensionPage> GetInspectablePagesForExtension(
       const Extension* extension, bool extension_is_enabled);
   void GetInspectablePagesForExtensionProcess(
+      const Extension* extension,
       const std::set<content::RenderViewHost*>& views,
       std::vector<ExtensionPage>* result);
   void GetShellWindowPagesForExtensionProfile(
@@ -262,6 +267,9 @@ class ExtensionSettingsHandler
 
   ScopedObserver<ExtensionWarningService, ExtensionWarningService::Observer>
       warning_service_observer_;
+
+  // An observer to listen for when Extension errors are reported.
+  ScopedObserver<ErrorConsole, ErrorConsole::Observer> error_console_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionSettingsHandler);
 };

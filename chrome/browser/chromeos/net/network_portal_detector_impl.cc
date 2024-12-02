@@ -10,7 +10,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chromeos/dbus/shill_service_client_stub.h"
+#include "chromeos/dbus/shill_stub_helper.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "content/public/browser/notification_service.h"
@@ -206,10 +206,9 @@ void NetworkPortalDetectorImpl::DisableLazyDetection() {
   VLOG(1) << "Lazy detection mode disabled.";
 }
 
-void NetworkPortalDetectorImpl::NetworkManagerChanged() {
+void NetworkPortalDetectorImpl::DefaultNetworkChanged(
+    const NetworkState* default_network) {
   DCHECK(CalledOnValidThread());
-  const NetworkState* default_network =
-      NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
   if (!default_network) {
     default_network_id_.clear();
     return;
@@ -241,11 +240,6 @@ void NetworkPortalDetectorImpl::NetworkManagerChanged() {
       DetectCaptivePortal(base::TimeDelta());
     }
   }
-}
-
-void NetworkPortalDetectorImpl::DefaultNetworkChanged(
-    const NetworkState* network) {
-  NetworkManagerChanged();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -355,8 +349,7 @@ void NetworkPortalDetectorImpl::OnPortalDetectionCompleted(
   captive_portal::Result result = results.result;
   int response_code = results.response_code;
 
-  if (ShillServiceClientStub::IsStubPortalledWifiEnabled(
-          default_service_path_)) {
+  if (shill_stub_helper::IsStubPortalledWifiEnabled(default_service_path_)) {
     result = captive_portal::RESULT_BEHIND_CAPTIVE_PORTAL;
     response_code = 200;
   }

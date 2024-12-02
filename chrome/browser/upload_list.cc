@@ -51,9 +51,10 @@ void UploadList::LoadUploadListAndInformDelegateOfCompletion() {
 void UploadList::LoadUploadList() {
   if (base::PathExists(upload_log_path_)) {
     std::string contents;
-    file_util::ReadFileToString(upload_log_path_, &contents);
+    base::ReadFileToString(upload_log_path_, &contents);
     std::vector<std::string> log_entries;
     base::SplitStringAlongWhitespace(contents, &log_entries);
+    uploads_.clear();
     ParseLogEntries(log_entries);
   }
 }

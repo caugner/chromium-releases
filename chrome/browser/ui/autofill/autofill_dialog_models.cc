@@ -46,21 +46,21 @@ void SuggestionsMenuModel::AddKeyedItemWithIcon(
   SetIcon(items_.size() - 1, icon);
 }
 
-void SuggestionsMenuModel::AddKeyedItemWithSublabel(
+void SuggestionsMenuModel::AddKeyedItemWithMinorText(
     const std::string& key,
     const string16& display_label,
-    const string16& display_sublabel) {
+    const string16& display_minor_text) {
   AddKeyedItem(key, display_label);
-  SetSublabel(items_.size() - 1, display_sublabel);
+  SetMinorText(items_.size() - 1, display_minor_text);
 }
 
-void SuggestionsMenuModel::AddKeyedItemWithSublabelAndIcon(
+void SuggestionsMenuModel::AddKeyedItemWithMinorTextAndIcon(
     const std::string& key,
     const string16& display_label,
-    const string16& display_sublabel,
+    const string16& display_minor_text,
     const gfx::Image& icon) {
   AddKeyedItemWithIcon(key, display_label, icon);
-  SetSublabel(items_.size() - 1, display_sublabel);
+  SetMinorText(items_.size() - 1, display_minor_text);
 }
 
 void SuggestionsMenuModel::Reset() {
@@ -81,23 +81,17 @@ std::string SuggestionsMenuModel::GetItemKeyForCheckedItem() const {
 }
 
 void SuggestionsMenuModel::SetCheckedItem(const std::string& item_key) {
-  SetCheckedItemNthWithKey(item_key, 1);
+  for (size_t i = 0; i < items_.size(); ++i) {
+    if (items_[i].key == item_key) {
+      checked_item_ = i;
+      break;
+    }
+  }
 }
 
 void SuggestionsMenuModel::SetCheckedIndex(size_t index) {
   DCHECK_LT(index, items_.size());
   checked_item_ = index;
-}
-
-void SuggestionsMenuModel::SetCheckedItemNthWithKey(const std::string& item_key,
-                                                    size_t n) {
-  for (size_t i = 0; i < items_.size(); ++i) {
-    if (items_[i].key == item_key) {
-      checked_item_ = i;
-      if (n-- <= 1)
-        return;
-    }
-  }
 }
 
 void SuggestionsMenuModel::SetEnabled(const std::string& item_key,
