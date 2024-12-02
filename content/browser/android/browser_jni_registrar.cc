@@ -6,6 +6,7 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_registrar.h"
+#include "base/macros.h"
 #include "content/browser/android/browser_startup_controller.h"
 #include "content/browser/android/child_process_launcher_android.h"
 #include "content/browser/android/content_video_view.h"
@@ -20,7 +21,6 @@
 #include "content/browser/accessibility/browser_accessibility_manager_android.h"
 #include "content/browser/android/background_sync_network_observer_android.h"
 #include "content/browser/android/composited_touch_handle_drawable.h"
-#include "content/browser/android/content_readback_handler.h"
 #include "content/browser/android/content_view_core_impl.h"
 #include "content/browser/android/content_view_render_view.h"
 #include "content/browser/android/content_view_statics.h"
@@ -66,8 +66,6 @@ base::android::RegistrationMethod kContentRegisteredMethods[] = {
     {"CardboardVRDevice",
      content::CardboardVRDevice::RegisterCardboardVRDevice},
 #endif
-    {"ContentReadbackHandler",
-     content::ContentReadbackHandler::RegisterContentReadbackHandler},
     {"ContentViewCore", content::RegisterContentViewCore},
     {"ContentViewRenderView",
      content::ContentViewRenderView::RegisterContentViewRenderView},

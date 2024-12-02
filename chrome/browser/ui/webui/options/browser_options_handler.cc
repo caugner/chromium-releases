@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/options/browser_options_handler.h"
 
+#include <stddef.h>
+
 #include <set>
 #include <string>
 #include <vector>
@@ -12,6 +14,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/environment.h"
+#include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
@@ -22,6 +25,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/value_conversions.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/custom_home_pages_table_model.h"
@@ -80,6 +84,7 @@
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/signin/core/common/signin_pref_names.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/ui/zoom/page_zoom.h"
 #include "components/user_manager/user_type.h"
 #include "content/public/browser/browser_thread.h"
@@ -137,7 +142,7 @@
 #endif  // defined(OS_WIN)
 
 #if defined(ENABLE_SERVICE_DISCOVERY)
-#include "chrome/browser/local_discovery/privet_notifications.h"
+#include "chrome/browser/printing/cloud_print/privet_notifications.h"
 #endif
 
 #if defined(USE_ASH)
@@ -569,11 +574,9 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
 
   values->SetString("doNotTrackLearnMoreURL", chrome::kDoNotTrackLearnMoreURL);
 
-#if !defined(OS_CHROMEOS)
   values->SetBoolean(
       "metricsReportingEnabledAtStart",
       ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled());
-#endif
 
 #if defined(OS_CHROMEOS)
   // TODO(pastarmovj): replace this with a call to the CrosSettings list
@@ -642,7 +645,7 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
 
 #if defined(ENABLE_SERVICE_DISCOVERY)
   values->SetBoolean("cloudPrintHideNotificationsCheckbox",
-                     !local_discovery::PrivetNotificationService::IsEnabled());
+                     !cloud_print::PrivetNotificationService::IsEnabled());
 #endif
 
   values->SetBoolean("cloudPrintShowMDnsOptions",
@@ -691,6 +694,8 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
   values->SetBoolean("resolveTimezoneByGeolocationInitialValue",
                      Profile::FromWebUI(web_ui())->GetPrefs()->GetBoolean(
                          prefs::kResolveTimezoneByGeolocation));
+  values->SetBoolean("enableLanguageOptionsImeMenu",
+                     chromeos::switches::IsImeMenuEnabled());
 #endif
 }
 
@@ -1029,7 +1034,7 @@ void BrowserOptionsHandler::InitializePage() {
 
   OnWallpaperManagedChanged(
       chromeos::WallpaperManager::Get()->IsPolicyControlled(
-          user_manager::UserManager::Get()->GetActiveUser()->email()));
+          user_manager::UserManager::Get()->GetActiveUser()->GetAccountId()));
 
   policy::ConsumerManagementService* consumer_management =
       g_browser_process->platform_part()->browser_policy_connector_chromeos()->
@@ -1083,8 +1088,10 @@ void BrowserOptionsHandler::BecomeDefaultBrowser(const base::ListValue* args) {
     return;
 
   content::RecordAction(UserMetricsAction("Options_SetAsDefaultBrowser"));
-  default_browser_worker_->StartSetAsDefault();
+  UMA_HISTOGRAM_COUNTS("Settings.StartSetAsDefault", true);
+
   // Callback takes care of updating UI.
+  default_browser_worker_->StartSetAsDefault();
 
   // If the user attempted to make Chrome the default browser, notify
   // them when this changes.
@@ -1316,7 +1323,7 @@ scoped_ptr<base::ListValue> BrowserOptionsHandler::GetProfilesInfoList() {
     profile_info_list->Append(profile_value);
   }
 
-  return profile_info_list.Pass();
+  return profile_info_list;
 }
 
 void BrowserOptionsHandler::SendProfilesInfo() {
@@ -1418,7 +1425,7 @@ BrowserOptionsHandler::GetSyncStateDictionary() {
     // Cannot display signin status when running in guest mode on chromeos
     // because there is no SigninManager.
     sync_status->SetBoolean("signinAllowed", false);
-    return sync_status.Pass();
+    return sync_status;
   }
 
   sync_status->SetBoolean("supervisedUser", profile->IsSupervised());
@@ -1458,7 +1465,7 @@ BrowserOptionsHandler::GetSyncStateDictionary() {
   sync_status->SetBoolean("hasUnrecoverableError",
                           service && service->HasUnrecoverableError());
 
-  return sync_status.Pass();
+  return sync_status;
 }
 
 void BrowserOptionsHandler::HandleSelectDownloadLocation(
@@ -1579,21 +1586,6 @@ void BrowserOptionsHandler::HandleDefaultZoomFactor(
 }
 
 void BrowserOptionsHandler::HandleRestartBrowser(const base::ListValue* args) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // If hardware acceleration is disabled then we need to force restart
-  // browser in desktop mode.
-  // TODO(shrikant): Remove this once we fix start mode logic for browser.
-  // Currently there are issues with determining correct browser mode
-  // at startup.
-  if (chrome::GetActiveDesktop() == chrome::HOST_DESKTOP_TYPE_ASH) {
-    PrefService* pref_service = g_browser_process->local_state();
-    if (!pref_service->GetBoolean(prefs::kHardwareAccelerationModeEnabled)) {
-      chrome::AttemptRestartToDesktopMode();
-      return;
-    }
-  }
-#endif
-
 #if defined(OS_WIN)
   // On Windows Breakpad will upload crash reports if the breakpad pipe name
   // environment variable is defined. So we undefine this environment variable
@@ -2074,14 +2066,18 @@ void BrowserOptionsHandler::SetupExtensionControlledIndicators() {
 }
 
 void BrowserOptionsHandler::SetupMetricsReportingCheckbox() {
-  // This function does not work for ChromeOS and non-official builds.
-#if !defined(OS_CHROMEOS) && defined(GOOGLE_CHROME_BUILD)
+// As the metrics and crash reporting checkbox only exists for official builds
+// it doesn't need to be set up for non-official builds.
+#if defined(GOOGLE_CHROME_BUILD)
   bool checked =
       ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled();
-  bool disabled = !IsMetricsReportingUserChangable();
-
-  SetMetricsReportingCheckbox(checked, disabled);
-#endif
+  bool policy_managed = IsMetricsReportingPolicyManaged();
+  bool owner_managed = false;
+#if defined(OS_CHROMEOS)
+  owner_managed = !IsDeviceOwnerProfile();
+#endif  // defined(OS_CHROMEOS)
+  SetMetricsReportingCheckbox(checked, policy_managed, owner_managed);
+#endif  // defined(GOOGLE_CHROME_BUILD)
 }
 
 void BrowserOptionsHandler::HandleMetricsReportingChange(
@@ -2089,23 +2085,43 @@ void BrowserOptionsHandler::HandleMetricsReportingChange(
   bool enable;
   if (!args->GetBoolean(0, &enable))
     return;
+  // Decline the change if current user shouldn't be able to change metrics
+  // reporting.
+  if (!IsDeviceOwnerProfile() || IsMetricsReportingPolicyManaged()) {
+    NotifyUIOfMetricsReportingChange(
+        ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled());
+    return;
+  }
 
+// For Chrome OS updating device settings will notify an observer to update
+// metrics pref, however we still need to call |InitiateMetricsReportingChange|
+// with a proper callback so that UI gets updated in case of failure to update
+// the metrics pref.
+// TODO(gayane): Don't call |InitiateMetricsReportingChange| twice so that
+// metrics service pref changes only as a result of device settings change for
+// Chrome OS .crbug.com/552550.
+#if defined(OS_CHROMEOS)
+  chromeos::CrosSettings::Get()->SetBoolean(chromeos::kStatsReportingPref,
+                                            enable);
+#endif  // defined(OS_CHROMEOS)
   InitiateMetricsReportingChange(
       enable,
-      base::Bind(&BrowserOptionsHandler::MetricsReportingChangeCallback,
+      base::Bind(&BrowserOptionsHandler::NotifyUIOfMetricsReportingChange,
                  base::Unretained(this)));
 }
 
-void BrowserOptionsHandler::MetricsReportingChangeCallback(bool enabled) {
-  SetMetricsReportingCheckbox(enabled, !IsMetricsReportingUserChangable());
+void BrowserOptionsHandler::NotifyUIOfMetricsReportingChange(bool enabled) {
+  SetMetricsReportingCheckbox(enabled, IsMetricsReportingPolicyManaged(),
+                              !IsDeviceOwnerProfile());
 }
 
 void BrowserOptionsHandler::SetMetricsReportingCheckbox(bool checked,
-                                                        bool disabled) {
+                                                        bool policy_managed,
+                                                        bool owner_managed) {
   web_ui()->CallJavascriptFunction(
       "BrowserOptions.setMetricsReportingCheckboxState",
-      base::FundamentalValue(checked),
-      base::FundamentalValue(disabled));
+      base::FundamentalValue(checked), base::FundamentalValue(policy_managed),
+      base::FundamentalValue(owner_managed));
 }
 
 void BrowserOptionsHandler::OnPolicyUpdated(const policy::PolicyNamespace& ns,
@@ -2115,6 +2131,14 @@ void BrowserOptionsHandler::OnPolicyUpdated(const policy::PolicyNamespace& ns,
   current.GetDifferingKeys(previous, &different_keys);
   if (ContainsKey(different_keys, policy::key::kMetricsReportingEnabled))
     SetupMetricsReportingCheckbox();
+}
+
+bool BrowserOptionsHandler::IsDeviceOwnerProfile() {
+#if defined(OS_CHROMEOS)
+  return chromeos::ProfileHelper::IsOwnerProfile(Profile::FromWebUI(web_ui()));
+#else
+  return true;
+#endif
 }
 
 }  // namespace options

@@ -4,6 +4,8 @@
 
 #include "cc/layers/video_layer_impl.h"
 
+#include <stddef.h>
+
 #include "base/bind.h"
 #include "base/logging.h"
 #include "cc/layers/video_frame_provider_client_impl.h"
@@ -138,7 +140,7 @@ void VideoLayerImpl::AppendQuads(RenderPass* render_pass,
                                  AppendQuadsData* append_quads_data) {
   DCHECK(frame_.get());
 
-  gfx::Transform transform = draw_transform();
+  gfx::Transform transform = DrawTransform();
   gfx::Size rotated_size = bounds();
 
   switch (video_rotation_) {
@@ -275,12 +277,14 @@ void VideoLayerImpl::AppendQuads(RenderPass* render_pass,
       break;
     }
     case VideoFrameExternalResources::RGBA_RESOURCE:
+    case VideoFrameExternalResources::RGBA_PREMULTIPLIED_RESOURCE:
     case VideoFrameExternalResources::RGB_RESOURCE: {
       DCHECK_EQ(frame_resources_.size(), 1u);
       if (frame_resources_.size() < 1u)
         break;
       bool premultiplied_alpha =
-          (frame_resource_type_ == VideoFrameExternalResources::RGBA_RESOURCE);
+          frame_resource_type_ ==
+          VideoFrameExternalResources::RGBA_PREMULTIPLIED_RESOURCE;
       gfx::PointF uv_top_left(0.f, 0.f);
       gfx::PointF uv_bottom_right(tex_width_scale, tex_height_scale);
       float opacity[] = {1.0f, 1.0f, 1.0f, 1.0f};

@@ -44,7 +44,6 @@
 #include "public/platform/WebRTCPeerConnectionHandlerClient.h"
 
 namespace blink {
-
 class ExceptionState;
 class MediaStreamTrack;
 class RTCConfiguration;
@@ -65,17 +64,18 @@ class RTCPeerConnection final
     DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(RTCPeerConnection);
 public:
+    // TODO(hbos): Create with expired RTCCertificate should fail, see crbug.com/565278.
     static RTCPeerConnection* create(ExecutionContext*, const Dictionary&, const Dictionary&, ExceptionState&);
     ~RTCPeerConnection() override;
 
-    void createOffer(RTCSessionDescriptionCallback*, RTCErrorCallback*, const Dictionary&, ExceptionState&);
+    void createOffer(ExecutionContext*, RTCSessionDescriptionCallback*, RTCErrorCallback*, const Dictionary&, ExceptionState&);
 
-    void createAnswer(RTCSessionDescriptionCallback*, RTCErrorCallback*, const Dictionary&, ExceptionState&);
+    void createAnswer(ExecutionContext*, RTCSessionDescriptionCallback*, RTCErrorCallback*, const Dictionary&, ExceptionState&);
 
-    void setLocalDescription(RTCSessionDescription*, VoidCallback*, RTCErrorCallback*, ExceptionState&);
+    void setLocalDescription(ExecutionContext*, RTCSessionDescription*, VoidCallback*, RTCErrorCallback*, ExceptionState&);
     RTCSessionDescription* localDescription();
 
-    void setRemoteDescription(RTCSessionDescription*, VoidCallback*, RTCErrorCallback*, ExceptionState&);
+    void setRemoteDescription(ExecutionContext*, RTCSessionDescription*, VoidCallback*, RTCErrorCallback*, ExceptionState&);
     RTCSessionDescription* remoteDescription();
 
     String signalingState() const;
@@ -105,7 +105,7 @@ public:
 
     void removeStream(MediaStream*, ExceptionState&);
 
-    void getStats(RTCStatsCallback* successCallback, MediaStreamTrack* selector);
+    void getStats(ExecutionContext*, RTCStatsCallback* successCallback, MediaStreamTrack* selector);
 
     RTCDataChannel* createDataChannel(String label, const Dictionary& dataChannelDict, ExceptionState&);
 
@@ -156,17 +156,38 @@ public:
     DECLARE_VIRTUAL_TRACE();
 
 private:
+    typedef Function<bool()> BoolFunction;
+    class EventWrapper : public GarbageCollectedFinalized<EventWrapper> {
+    public:
+        EventWrapper(PassRefPtrWillBeRawPtr<Event>, PassOwnPtr<BoolFunction>);
+        // Returns true if |m_setupFunction| returns true or it is null.
+        // |m_event| will only be fired if setup() returns true;
+        bool setup();
+
+        DECLARE_TRACE();
+
+        RefPtrWillBeMember<Event> m_event;
+
+    private:
+        OwnPtr<BoolFunction> m_setupFunction;
+    };
+
     RTCPeerConnection(ExecutionContext*, RTCConfiguration*, WebMediaConstraints, ExceptionState&);
 
     static RTCConfiguration* parseConfiguration(const Dictionary&, ExceptionState&);
     static RTCOfferOptions* parseOfferOptions(const Dictionary&, ExceptionState&);
 
     void scheduleDispatchEvent(PassRefPtrWillBeRawPtr<Event>);
+    void scheduleDispatchEvent(PassRefPtrWillBeRawPtr<Event>, PassOwnPtr<BoolFunction>);
     void dispatchScheduledEvent();
     bool hasLocalStreamWithTrackId(const String& trackId);
 
     void changeSignalingState(WebRTCPeerConnectionHandlerClient::SignalingState);
     void changeIceGatheringState(WebRTCPeerConnectionHandlerClient::ICEGatheringState);
+    // Changes the state immediately; does not fire an event.
+    // Returns true if the state was changed.
+    bool setIceConnectionState(WebRTCPeerConnectionHandlerClient::ICEConnectionState);
+    // Changes the state asynchronously and fires an event immediately after changing the state.
     void changeIceConnectionState(WebRTCPeerConnectionHandlerClient::ICEConnectionState);
 
     void closeInternal();
@@ -182,8 +203,8 @@ private:
 
     OwnPtr<WebRTCPeerConnectionHandler> m_peerHandler;
 
-    AsyncMethodRunner<RTCPeerConnection> m_dispatchScheduledEventRunner;
-    WillBeHeapVector<RefPtrWillBeMember<Event>> m_scheduledEvents;
+    Member<AsyncMethodRunner<RTCPeerConnection>> m_dispatchScheduledEventRunner;
+    HeapVector<Member<EventWrapper>> m_scheduledEvents;
 
     bool m_stopped;
     bool m_closed;

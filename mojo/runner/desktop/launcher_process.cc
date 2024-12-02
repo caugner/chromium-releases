@@ -11,10 +11,12 @@
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/debug/stack_trace.h"
 #include "base/files/file_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/threading/platform_thread.h"
 #include "mojo/runner/context.h"
 #include "mojo/runner/switches.h"
 #include "mojo/shell/switches.h"
@@ -23,6 +25,9 @@ namespace mojo {
 namespace runner {
 
 int LauncherProcessMain(const GURL& mojo_url, const base::Closure& callback) {
+#if !defined(OFFICIAL_BUILD)
+  base::debug::EnableInProcessStackDumping();
+#endif
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (!command_line->HasSwitch(switches::kMojoSingleProcess) &&
       !command_line->HasSwitch("gtest_list_tests"))
@@ -30,6 +35,8 @@ int LauncherProcessMain(const GURL& mojo_url, const base::Closure& callback) {
   command_line->AppendSwitch("use-new-edk");
   // http://crbug.com/546644
   command_line->AppendSwitch(switches::kMojoNoSandbox);
+
+  base::PlatformThread::SetName("mojo_runner");
 
   // We want the shell::Context to outlive the MessageLoop so that pipes are
   // all gracefully closed / error-out before we try to shut the Context down.

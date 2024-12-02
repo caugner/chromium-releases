@@ -42,7 +42,7 @@ def IsDevToolsAgentAvailable(port, app_backend):
 
   devtools_http_instance = devtools_http.DevToolsHttp(port)
   try:
-    return _IsDevToolsAgentAvailable(devtools_http.DevToolsHttp(port))
+    return _IsDevToolsAgentAvailable(devtools_http_instance)
   finally:
     devtools_http_instance.Disconnect()
 
@@ -122,7 +122,7 @@ class DevToolsClientBackend(object):
 
     self._CreateTracingBackendIfNeeded(is_tracing_running=False)
     self.StartChromeTracing(
-        trace_options=trace_config.tracing_options,
+        trace_config=trace_config,
         custom_categories=trace_config.tracing_category_filter.filter_string)
 
   @property
@@ -164,7 +164,8 @@ class DevToolsClientBackend(object):
 
   def IsAlive(self):
     """Whether the DevTools server is available and connectable."""
-    return _IsDevToolsAgentAvailable(self._devtools_http)
+    return (self._devtools_http and
+        _IsDevToolsAgentAvailable(self._devtools_http))
 
   def Close(self):
     if self._tracing_backend:
@@ -182,6 +183,10 @@ class DevToolsClientBackend(object):
     if self._browser_inspector_websocket:
       self._browser_inspector_websocket.Disconnect()
       self._browser_inspector_websocket = None
+
+    assert self._devtools_http
+    self._devtools_http.Disconnect()
+    self._devtools_http = None
 
 
   @decorators.Cache
@@ -313,20 +318,20 @@ class DevToolsClientBackend(object):
     return self._tracing_backend.IsTracingSupported()
 
   def StartChromeTracing(
-      self, trace_options, custom_categories=None, timeout=10):
+      self, trace_config, custom_categories=None, timeout=10):
     """
     Args:
-        trace_options: An tracing_options.TracingOptions instance.
+        trace_config: An tracing_config.TracingConfig instance.
         custom_categories: An optional string containing a list of
                          comma separated categories that will be traced
                          instead of the default category set.  Example: use
                          "webkit,cc,disabled-by-default-cc.debug" to trace only
                          those three event categories.
     """
-    assert trace_options and trace_options.enable_chrome_trace
+    assert trace_config and trace_config.enable_chrome_trace
     self._CreateTracingBackendIfNeeded()
     return self._tracing_backend.StartTracing(
-        trace_options, custom_categories, timeout)
+        trace_config, custom_categories, timeout)
 
   def StopChromeTracing(self, trace_data_builder, timeout=30):
     assert self.is_tracing_running

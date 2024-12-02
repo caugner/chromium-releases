@@ -276,6 +276,23 @@ public:
     bool recalcChildOverflowAfterStyleChange();
     bool recalcOverflowAfterStyleChange();
 
+    // An example explaining layout tree structure about first-line style:
+    // <style>
+    //   #enclosingFirstLineStyleBlock::first-line { ... }
+    // </style>
+    // <div id="enclosingFirstLineStyleBlock">
+    //   <div>
+    //     <div id="nearestInnerBlockWithFirstLine">
+    //       [<span>]first line text[</span>]
+    //     </div>
+    //   </div>
+    // </div>
+
+    // Returns the nearest enclosing block (including this block) that contributes a first-line style to our first line.
+    LayoutBlock* enclosingFirstLineStyleBlock() const;
+    // Returns this block or the nearest inner block containing the actual first line.
+    LayoutBlockFlow* nearestInnerBlockWithFirstLine() const;
+
 protected:
     void willBeDestroyed() override;
 
@@ -301,8 +318,8 @@ public:
     virtual void paintObject(const PaintInfo&, const LayoutPoint&) const;
     virtual void paintChildren(const PaintInfo&, const LayoutPoint&) const;
 
-    // FIXME-BLOCKFLOW: Remove virtualizaion when all callers have moved to LayoutBlockFlow
-    virtual void paintFloats(const PaintInfo&, const LayoutPoint&, bool) const { }
+    // FIXME-BLOCKFLOW: Remove virtualization when all callers have moved to LayoutBlockFlow
+    virtual void paintFloats(const PaintInfo&, const LayoutPoint&) const { }
     virtual void paintSelection(const PaintInfo&, const LayoutPoint&) const { }
 
 protected:
@@ -355,10 +372,13 @@ protected:
 
     void updateBlockChildDirtyBitsBeforeLayout(bool relayoutChildren, LayoutBox&);
 
-    bool isInlineBlockOrInlineTable() const final { return isInline() && isReplaced(); }
+    // TODO(jchaffraix): We should rename this function as inline-flex and inline-grid as also covered.
+    // Alternatively it should be removed as we clarify the meaning of isAtomicInlineLevel to imply
+    // isInline.
+    bool isInlineBlockOrInlineTable() const final { return isInline() && isAtomicInlineLevel(); }
 
     void invalidatePaintOfSubtreesIfNeeded(PaintInvalidationState& childPaintInvalidationState) override;
-    void invalidateDisplayItemClients(const LayoutBoxModelObject& paintInvalidationContainer, PaintInvalidationReason, const LayoutRect* paintInvalidationRect) const override;
+    void invalidateDisplayItemClients(const LayoutBoxModelObject& paintInvalidationContainer, PaintInvalidationReason) const override;
 
 private:
     LayoutObjectChildList* virtualChildren() final { return children(); }
@@ -388,17 +408,13 @@ private:
 
     bool avoidsFloats() const override { return true; }
 
-    bool hitTestContents(HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction);
+    bool hitTestChildren(HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction);
     // FIXME-BLOCKFLOW: Remove virtualizaion when all callers have moved to LayoutBlockFlow
     virtual bool hitTestFloats(HitTestResult&, const HitTestLocation&, const LayoutPoint&) { return false; }
 
-    virtual bool isPointInOverflowControl(HitTestResult&, const LayoutPoint& locationInContainer, const LayoutPoint& accumulatedOffset) const;
+    bool isPointInOverflowControl(HitTestResult&, const LayoutPoint& locationInContainer, const LayoutPoint& accumulatedOffset) const;
 
     void computeBlockPreferredLogicalWidths(LayoutUnit& minLogicalWidth, LayoutUnit& maxLogicalWidth) const;
-
-    // Obtains the nearest enclosing block (including this block) that contributes a first-line style to our inline
-    // children.
-    LayoutBlock* firstLineBlock() const override;
 
     LayoutObject* hoverAncestor() const final;
     void updateDragState(bool dragOn) final;
@@ -435,6 +451,12 @@ public:
 
     LayoutUnit pageLogicalHeightForOffset(LayoutUnit) const;
     LayoutUnit pageRemainingLogicalHeightForOffset(LayoutUnit, PageBoundaryRule) const;
+
+    // Calculate the strut to insert in order fit content of size |contentLogicalHeight|.
+    // |strutToNextPage| is the strut to add to |offset| to merely get to the top of the next page
+    // or column. This is what will be returned if the content can actually fit there. Otherwise,
+    // return the distance to the next fragmentainer that can fit this piece of content.
+    LayoutUnit calculatePaginationStrutToFitContent(LayoutUnit offset, LayoutUnit strutToNextPage, LayoutUnit contentLogicalHeight) const;
 
 protected:
     bool isPageLogicalHeightKnown(LayoutUnit logicalOffset) const { return pageLogicalHeightForOffset(logicalOffset); }

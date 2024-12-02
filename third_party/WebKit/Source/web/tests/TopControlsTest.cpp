@@ -27,7 +27,6 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "config.h"
 #include "core/frame/TopControls.h"
 
 #include "core/frame/FrameHost.h"
@@ -39,10 +38,10 @@
 #include "public/platform/Platform.h"
 #include "public/platform/WebUnitTestSupport.h"
 #include "public/web/WebSettings.h"
+#include "testing/gmock/include/gmock/gmock.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/tests/FrameTestHelpers.h"
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
 
 namespace blink {
 

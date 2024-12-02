@@ -5,7 +5,7 @@
 #include "components/mus/android_loader.h"
 
 #include "components/mus/mus_app.h"
-#include "mojo/application/public/cpp/application_impl.h"
+#include "mojo/shell/public/cpp/application_impl.h"
 
 namespace mus {
 
@@ -17,7 +17,7 @@ void AndroidLoader::Load(
     mojo::InterfaceRequest<mojo::Application> application_request) {
   DCHECK(application_request.is_pending());
   app_.reset(new mojo::ApplicationImpl(new MandolineUIServicesApp,
-                                       application_request.Pass()));
+                                       std::move(application_request)));
 }
 
 }  // namespace mus

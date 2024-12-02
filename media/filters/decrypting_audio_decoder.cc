@@ -4,6 +4,8 @@
 
 #include "media/filters/decrypting_audio_decoder.h"
 
+#include <stdint.h>
+
 #include <cstdlib>
 
 #include "base/bind.h"
@@ -26,7 +28,7 @@ static inline bool IsOutOfSync(const base::TimeDelta& timestamp_1,
                                const base::TimeDelta& timestamp_2) {
   // Out of sync of 100ms would be pretty noticeable and we should keep any
   // drift below that.
-  const int64 kOutOfSyncThresholdInMilliseconds = 100;
+  const int64_t kOutOfSyncThresholdInMilliseconds = 100;
   return std::abs(timestamp_1.InMilliseconds() - timestamp_2.InMilliseconds()) >
          kOutOfSyncThresholdInMilliseconds;
 }
@@ -34,13 +36,11 @@ static inline bool IsOutOfSync(const base::TimeDelta& timestamp_1,
 DecryptingAudioDecoder::DecryptingAudioDecoder(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
     const scoped_refptr<MediaLog>& media_log,
-    const SetCdmReadyCB& set_cdm_ready_cb,
     const base::Closure& waiting_for_decryption_key_cb)
     : task_runner_(task_runner),
       media_log_(media_log),
       state_(kUninitialized),
       waiting_for_decryption_key_cb_(waiting_for_decryption_key_cb),
-      set_cdm_ready_cb_(set_cdm_ready_cb),
       decryptor_(NULL),
       key_added_while_decode_pending_(false),
       weak_factory_(this) {}
@@ -50,6 +50,7 @@ std::string DecryptingAudioDecoder::GetDisplayName() const {
 }
 
 void DecryptingAudioDecoder::Initialize(const AudioDecoderConfig& config,
+                                        const SetCdmReadyCB& set_cdm_ready_cb,
                                         const InitCB& init_cb,
                                         const OutputCB& output_cb) {
   DVLOG(2) << "Initialize()";
@@ -76,7 +77,9 @@ void DecryptingAudioDecoder::Initialize(const AudioDecoderConfig& config,
   config_ = config;
 
   if (state_ == kUninitialized) {
+    DCHECK(!set_cdm_ready_cb.is_null());
     state_ = kDecryptorRequested;
+    set_cdm_ready_cb_ = set_cdm_ready_cb;
     set_cdm_ready_cb_.Run(BindToCurrentLoop(
         base::Bind(&DecryptingAudioDecoder::SetCdm, weak_this_)));
     return;

@@ -22,9 +22,10 @@ import org.chromium.chrome.browser.ntp.RecentTabsPromoView.SyncPromoModel;
 import org.chromium.chrome.browser.ntp.RecentlyClosedBridge.RecentlyClosedCallback;
 import org.chromium.chrome.browser.ntp.RecentlyClosedBridge.RecentlyClosedTab;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.signin.SigninAccessPoint;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.signin.SigninManager.SignInStateObserver;
-import org.chromium.chrome.browser.sync.SyncController;
+import org.chromium.chrome.browser.sync.ProfileSyncService;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.sync.AndroidSyncSettings;
@@ -452,7 +453,10 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
 
     @Override
     public void enableSync() {
-        SyncController.get(mContext).start();
+        ProfileSyncService syncService = ProfileSyncService.get();
+        if (syncService != null) {
+            syncService.requestStart();
+        }
     }
 
     @Override
@@ -471,5 +475,10 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
             mProfileDataCache = new ProfileDataCache(mContext, Profile.getLastUsedProfile());
         }
         return mProfileDataCache;
+    }
+
+    @Override
+    public int getAccessPoint() {
+        return SigninAccessPoint.RECENT_TABS;
     }
 }

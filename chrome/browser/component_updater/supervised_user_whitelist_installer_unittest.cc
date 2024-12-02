@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/files/file_path.h"
@@ -163,6 +165,7 @@ class WhitelistLoadObserver {
 
  private:
   void OnWhitelistReady(const std::string& crx_id,
+                        const base::string16& title,
                         const base::FilePath& whitelist_path) {
     EXPECT_EQ(base::FilePath::StringType(), whitelist_path_.value());
     whitelist_path_ = whitelist_path;
@@ -208,8 +211,8 @@ class SupervisedUserWhitelistInstallerTest : public testing::Test {
 
     scoped_ptr<base::DictionaryValue> whitelist_dict(
         new base::DictionaryValue);
-    whitelist_dict->SetString("file", kWhitelistFile);
-    manifest_.Set("whitelist", whitelist_dict.release());
+    whitelist_dict->SetString("sites", kWhitelistFile);
+    manifest_.Set("whitelisted_content", whitelist_dict.release());
     manifest_.SetString("version", kVersion);
 
     scoped_ptr<base::DictionaryValue> crx_dict(new base::DictionaryValue);

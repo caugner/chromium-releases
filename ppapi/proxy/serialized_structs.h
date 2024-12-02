@@ -5,6 +5,8 @@
 #ifndef PPAPI_PROXY_SERIALIZED_STRUCTS_H_
 #define PPAPI_PROXY_SERIALIZED_STRUCTS_H_
 
+#include <stdint.h>
+
 #include <string>
 #include <vector>
 
@@ -13,6 +15,7 @@
 #include "build/build_config.h"
 #include "ppapi/c/dev/ppb_truetype_font_dev.h"
 #include "ppapi/c/pp_bool.h"
+#include "ppapi/c/pp_codecs.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_point.h"
 #include "ppapi/c/pp_rect.h"
@@ -119,6 +122,15 @@ struct PPPDecryptor_Buffer {
   ppapi::HostResource resource;
   uint32_t size;
   base::SharedMemoryHandle handle;
+};
+
+struct PPB_AudioEncodeParameters {
+  uint32_t channels;
+  uint32_t input_sample_rate;
+  uint32_t input_sample_size;
+  PP_AudioProfile output_profile;
+  uint32_t initial_bitrate;
+  PP_HardwareAcceleration acceleration;
 };
 
 // TODO(raymes): Make ImageHandle compatible with SerializedHandle.

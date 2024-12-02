@@ -19,7 +19,6 @@
  *
  */
 
-#include "config.h"
 #include "core/layout/LayoutCounter.h"
 
 #include "core/HTMLNames.h"
@@ -271,7 +270,8 @@ static bool findPlaceForCounter(LayoutObject& counterOwner, const AtomicString& 
                         previousSiblingProtector = currentCounter;
                         // We are no longer interested in previous siblings of the currentLayoutObject or their children
                         // as counters they may have attached cannot be the previous sibling of the counter we are placing.
-                        currentLayoutObject = parentElement(*currentLayoutObject)->layoutObject();
+                        Element* parent = parentElement(*currentLayoutObject);
+                        currentLayoutObject = parent ? parent->layoutObject() : nullptr;
                         continue;
                     }
                 } else {
@@ -472,8 +472,10 @@ void LayoutCounter::destroyCounterNode(LayoutObject& owner, const AtomicString& 
 void LayoutCounter::layoutObjectSubtreeWillBeDetached(LayoutObject* layoutObject)
 {
     ASSERT(layoutObject->view());
-    if (!layoutObject->view()->hasLayoutCounters())
+    // View should never be non-zero. crbug.com/546939
+    if (!layoutObject->view() || !layoutObject->view()->hasLayoutCounters())
         return;
+
     LayoutObject* currentLayoutObject = layoutObject->lastLeafChild();
     if (!currentLayoutObject)
         currentLayoutObject = layoutObject;

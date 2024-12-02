@@ -178,7 +178,7 @@ WebInspector.SuggestBox.prototype = {
         if (!this.visible() || !this._selectedElement)
             return false;
 
-        var suggestion = this._selectedElement.textContent;
+        var suggestion = this._selectedElement.__fullValue;
         if (!suggestion)
             return false;
 
@@ -247,10 +247,11 @@ WebInspector.SuggestBox.prototype = {
         element.tabIndex = -1;
         if (prefix && prefix.length && !text.indexOf(prefix)) {
             element.createChild("span", "prefix").textContent = prefix;
-            element.createChild("span", "suffix").textContent = text.substring(prefix.length);
+            element.createChild("span", "suffix").textContent = text.substring(prefix.length).trimEnd(50);
         } else {
-            element.createChild("span", "suffix").textContent = text;
+            element.createChild("span", "suffix").textContent = text.trimEnd(50);
         }
+        element.__fullValue = text;
         element.createChild("span", "spacer");
         element.addEventListener("mousedown", this._onItemMouseDown.bind(this), false);
         return element;
@@ -459,8 +460,7 @@ WebInspector.SuggestBox.prototype = {
 WebInspector.SuggestBox.Overlay = function()
 {
     this.element = createElementWithClass("div", "suggest-box-overlay");
-    var root = WebInspector.createShadowRootWithCoreStyles(this.element);
-    root.appendChild(WebInspector.Widget.createStyleElement("ui/suggestBox.css"));
+    var root = WebInspector.createShadowRootWithCoreStyles(this.element, "ui/suggestBox.css");
     this._leftSpacerElement = root.createChild("div", "suggest-box-left-spacer");
     this._horizontalElement = root.createChild("div", "suggest-box-horizontal");
     this._topSpacerElement = this._horizontalElement.createChild("div", "suggest-box-top-spacer");

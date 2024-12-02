@@ -4,7 +4,10 @@
 
 #include "content/browser/service_worker/embedded_worker_instance.h"
 
+#include <utility>
+
 #include "base/bind_helpers.h"
+#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/trace_event/trace_event.h"
@@ -49,7 +52,7 @@ void RegisterToWorkerDevToolsManagerOnUI(
     int process_id,
     const ServiceWorkerContextCore* service_worker_context,
     const base::WeakPtr<ServiceWorkerContextCore>& service_worker_context_weak,
-    int64 service_worker_version_id,
+    int64_t service_worker_version_id,
     const GURL& url,
     const base::Callback<void(int worker_devtools_agent_route_id,
                               bool wait_for_debugger)>& callback) {
@@ -86,8 +89,8 @@ void SetupMojoOnUIThread(
     return;
   EmbeddedWorkerSetupPtr setup;
   rph->GetServiceRegistry()->ConnectToRemoteService(mojo::GetProxy(&setup));
-  setup->ExchangeServiceProviders(thread_id, services.Pass(),
-                                  mojo::MakeProxy(exposed_services.Pass()));
+  setup->ExchangeServiceProviders(thread_id, std::move(services),
+                                  mojo::MakeProxy(std::move(exposed_services)));
 }
 
 }  // namespace
@@ -322,7 +325,7 @@ EmbeddedWorkerInstance::~EmbeddedWorkerInstance() {
   process_handle_.reset();
 }
 
-void EmbeddedWorkerInstance::Start(int64 service_worker_version_id,
+void EmbeddedWorkerInstance::Start(int64_t service_worker_version_id,
                                    const GURL& scope,
                                    const GURL& script_url,
                                    const StatusCallback& callback) {
@@ -414,15 +417,14 @@ EmbeddedWorkerInstance::EmbeddedWorkerInstance(
       thread_id_(kInvalidEmbeddedWorkerThreadId),
       devtools_attached_(false),
       network_accessed_for_script_(false),
-      weak_factory_(this) {
-}
+      weak_factory_(this) {}
 
 void EmbeddedWorkerInstance::OnProcessAllocated(
     scoped_ptr<WorkerProcessHandle> handle) {
   DCHECK_EQ(STARTING, status_);
   DCHECK(!process_handle_);
 
-  process_handle_ = handle.Pass();
+  process_handle_ = std::move(handle);
   starting_phase_ = REGISTERING_TO_DEVTOOLS;
   FOR_EACH_OBSERVER(Listener, listener_list_, OnProcessAllocated());
 }
@@ -508,7 +510,7 @@ void EmbeddedWorkerInstance::OnThreadStarted(int thread_id) {
       base::Bind(SetupMojoOnUIThread, process_id(), thread_id_,
                  base::Passed(&services_request),
                  base::Passed(exposed_services.PassInterface())));
-  service_registry_->BindRemoteServiceProvider(services.Pass());
+  service_registry_->BindRemoteServiceProvider(std::move(services));
 }
 
 void EmbeddedWorkerInstance::OnScriptLoadFailed() {

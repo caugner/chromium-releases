@@ -104,6 +104,7 @@
     'chrome_browser_ui.gypi',
     'chrome_common.gypi',
     'chrome_installer_util.gypi',
+    'chrome_features.gypi',
   ],
   'conditions': [
     ['OS!="ios"', {
@@ -419,6 +420,7 @@
           ],
         },
         {
+          # GN version: //chrome/tools/crash_service
           'target_name': 'crash_service',
           'type': 'executable',
           'dependencies': [
@@ -460,7 +462,6 @@
       'includes': [
         'chrome_watcher/chrome_watcher.gypi',
         'chrome_process_finder.gypi',
-        'metro_utils.gypi',
       ],
     }],  # OS=="win"
     ['OS=="win" and target_arch=="ia32"',
@@ -487,6 +488,7 @@
           },
         },
         {
+          # GN version: //chrome/tools/crash_service:crash_service_win64
           'target_name': 'crash_service_win64',
           'type': 'executable',
           'product_name': 'crash_service64',
@@ -537,7 +539,6 @@
             'chrome_version_java',
             'content_setting_java',
             'content_settings_type_java',
-            'connection_security_levels_java',
             'connectivity_check_result_java',
             'document_tab_model_info_proto_java',
             'infobar_action_type_java',
@@ -546,6 +547,7 @@
             'profile_account_management_metrics_java',
             'resource_id_java',
             'shortcut_source_java',
+            'signin_metrics_enum_java',
             'tab_load_status_java',
             '../base/base.gyp:base',
             '../build/android/java_google_api_keys.gyp:google_api_keys_java',
@@ -557,13 +559,17 @@
             '../components/components.gyp:gcm_driver_java',
             '../components/components.gyp:invalidation_java',
             '../components/components.gyp:navigation_interception_java',
-            '../components/components.gyp:offline_pages_enums_java',
+            '../components/components.gyp:offline_page_feature_enums_java',
+            '../components/components.gyp:offline_page_model_enums_java',
             '../components/components.gyp:precache_java',
             '../components/components.gyp:safe_json_java',
+            '../components/components.gyp:security_state_enums_java',
             '../components/components.gyp:service_tab_launcher_java',
             '../components/components.gyp:signin_core_browser_java',
             '../components/components.gyp:variations_java',
             '../components/components.gyp:web_contents_delegate_android_java',
+            '../components/components.gyp:web_restriction_java',
+            '../components/components_strings.gyp:components_strings',
             '../content/content.gyp:content_java',
             '../media/media.gyp:media_java',
             '../printing/printing.gyp:printing_java',
@@ -595,6 +601,7 @@
             'res_extra_dirs': [
               '<@(android_branding_res_dirs)',
               '<(SHARED_INTERMEDIATE_DIR)/chrome/java/res',
+              '<(SHARED_INTERMEDIATE_DIR)/components/strings/java/res',
             ],
             'res_extra_files': [
               '<!@(find <(android_branding_res_dirs) -type f)',
@@ -661,6 +668,15 @@
           'type': 'none',
           'variables': {
             'source_file': 'browser/ui/android/website_settings_popup_android.h',
+          },
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
+        },
+        {
+          # GN: //chrome:signin_metrics_enum_javagen
+          'target_name': 'signin_metrics_enum_java',
+          'type': 'none',
+          'variables': {
+            'source_file': '../components/signin/core/browser/signin_metrics.h',
           },
           'includes': [ '../build/android/java_cpp_enum.gypi' ],
         },
@@ -737,8 +753,6 @@
             'service/service_process.h',
             'service/service_process_prefs.cc',
             'service/service_process_prefs.h',
-            'service/service_utility_process_host.cc',
-            'service/service_utility_process_host.h',
           ],
           'include_dirs': [
             '..',
@@ -757,49 +771,18 @@
                 'service/cloud_print/print_system_dummy.cc',
               ],
             }],
-            ['OS!="win"', {
-              'sources!': [
+            ['OS=="win"', {
+              'sources': [
                 'service/service_utility_process_host.cc',
                 'service/service_utility_process_host.h',
               ],
+              'deps': [
+                # TODO(fdoray): Remove this once the PreRead field trial has
+                # expired. crbug.com/577698
+                '../components/components.gyp:startup_metric_utils_common',
+              ],
             }],
           ],
-        },
-      ],
-    }],
-    ['kasko==1', {
-      'variables': {
-        'kasko_exe_dir': '<(DEPTH)/third_party/kasko',
-      },
-      'targets': [
-        {
-          'target_name': 'kasko_dll',
-          'type': 'none',
-          'outputs': [
-            '<(PRODUCT_DIR)/kasko.dll',
-            '<(PRODUCT_DIR)/kasko.dll.pdb',
-          ],
-          'copies': [
-            {
-              'destination': '<(PRODUCT_DIR)',
-              'files': [
-                '<(kasko_exe_dir)/kasko.dll',
-                '<(kasko_exe_dir)/kasko.dll.pdb',
-              ],
-            },
-          ],
-          'direct_dependent_settings': {
-            'msvs_settings': {
-              'VCLinkerTool': {
-                'AdditionalDependencies': [
-                  'kasko.dll.lib',
-                ],
-                'AdditionalLibraryDirectories': [
-                  '<(DEPTH)/third_party/kasko'
-                ],
-              },
-            },
-          },
         },
       ],
     }],

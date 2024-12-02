@@ -5,9 +5,12 @@
 #ifndef CONTENT_RENDERER_MEDIA_RENDERER_GPU_VIDEO_ACCELERATOR_FACTORIES_H_
 #define CONTENT_RENDERER_MEDIA_RENDERER_GPU_VIDEO_ACCELERATOR_FACTORIES_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <vector>
 
-#include "base/basictypes.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/waitable_event.h"
@@ -60,12 +63,12 @@ class CONTENT_EXPORT RendererGpuVideoAcceleratorFactories
       override;
   // Creates textures and produces them into mailboxes. Returns true on success
   // or false on failure.
-  bool CreateTextures(int32 count,
+  bool CreateTextures(int32_t count,
                       const gfx::Size& size,
-                      std::vector<uint32>* texture_ids,
+                      std::vector<uint32_t>* texture_ids,
                       std::vector<gpu::Mailbox>* texture_mailboxes,
-                      uint32 texture_target) override;
-  void DeleteTexture(uint32 texture_id) override;
+                      uint32_t texture_target) override;
+  void DeleteTexture(uint32_t texture_id) override;
   void WaitSyncToken(const gpu::SyncToken& sync_token) override;
 
   scoped_ptr<gfx::GpuMemoryBuffer> AllocateGpuMemoryBuffer(
@@ -78,15 +81,17 @@ class CONTENT_EXPORT RendererGpuVideoAcceleratorFactories
   media::VideoPixelFormat VideoFrameOutputFormat() override;
   scoped_ptr<media::GpuVideoAcceleratorFactories::ScopedGLContextLock>
   GetGLContextLock() override;
+  bool CheckContextLost();
   scoped_ptr<base::SharedMemory> CreateSharedMemory(size_t size) override;
   scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() override;
 
-  std::vector<media::VideoDecodeAccelerator::SupportedProfile>
-      GetVideoDecodeAcceleratorSupportedProfiles() override;
+  media::VideoDecodeAccelerator::Capabilities
+  GetVideoDecodeAcceleratorCapabilities() override;
   std::vector<media::VideoEncodeAccelerator::SupportedProfile>
       GetVideoEncodeAcceleratorSupportedProfiles() override;
 
   void ReleaseContextProvider();
+  scoped_refptr<ContextProviderCommandBuffer> ContextProviderMainThread();
 
   ~RendererGpuVideoAcceleratorFactories() override;
 
@@ -100,8 +105,6 @@ class CONTENT_EXPORT RendererGpuVideoAcceleratorFactories
       bool enable_gpu_memory_buffer_video_frames,
       unsigned image_texture_target,
       bool enable_video_accelerator);
-
-  bool CheckContextLost();
 
   scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;

@@ -618,9 +618,11 @@ source_set("test_support") {
   ]
   deps = [
     "//base",
+    "//base/test:test_config",
     "//skia",
     "//testing/gtest",
     "//ui/events:events_base",
+    "//ui/events:test_support",
     "//ui/gfx",
     "//ui/gfx/geometry",
   ]
@@ -748,6 +750,9 @@ test("ui_base_unittests") {
     if (is_linux && use_aura && !is_chromeos) {
       sources += [ "ime/input_method_auralinux_unittest.cc" ]
     }
+    if (is_mac) {
+      sources += [ "resource/resource_bundle_mac_unittest.mm" ]
+    }
     if (use_x11) {
       sources += [ "ime/composition_text_util_pango_unittest.cc" ]
     }
@@ -812,7 +817,7 @@ test("ui_base_unittests") {
   }
 
   if (is_android) {
-    apk_deps = [
+    deps += [
       "//chrome:resources",
       "//ui/android:ui_java",
     ]

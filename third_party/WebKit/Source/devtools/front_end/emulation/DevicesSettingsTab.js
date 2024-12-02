@@ -55,7 +55,7 @@ WebInspector.DevicesSettingsTab.prototype = {
         this._list.appendSeparator();
 
         devices = WebInspector.emulatedDevicesList.standard().slice();
-        devices.sort(WebInspector.EmulatedDevice.compareByTitle);
+        devices.sort(WebInspector.EmulatedDevice.deviceComparator);
         for (var i = 0; i < devices.length; ++i)
             this._list.appendItem(devices[i], false);
     },
@@ -104,7 +104,6 @@ WebInspector.DevicesSettingsTab.prototype = {
         checkbox.checked = device.show();
         element.createChild("div", "devices-list-title").textContent = device.title;
         element.addEventListener("click", onItemClicked.bind(this), false);
-        element.classList.toggle("device-list-item-show", device.show());
         return element;
 
         /**
@@ -117,7 +116,6 @@ WebInspector.DevicesSettingsTab.prototype = {
             device.setShow(show);
             this._muteAndSaveDeviceList(editable);
             checkbox.checked = show;
-            element.classList.toggle("device-list-item-show", show);
             event.consume();
         }
     },
@@ -149,14 +147,14 @@ WebInspector.DevicesSettingsTab.prototype = {
         device.deviceScaleFactor = editor.control("scale").value ? parseFloat(editor.control("scale").value) : 0;
         device.userAgent = editor.control("user-agent").value;
         device.modes = [];
-        device.modes.push({title: "", orientation: WebInspector.EmulatedDevice.Horizontal, insets: new Insets(0, 0, 0, 0), images: null});
         device.modes.push({title: "", orientation: WebInspector.EmulatedDevice.Vertical, insets: new Insets(0, 0, 0, 0), images: null});
+        device.modes.push({title: "", orientation: WebInspector.EmulatedDevice.Horizontal, insets: new Insets(0, 0, 0, 0), images: null});
 
         if (isNew)
             WebInspector.emulatedDevicesList.addCustomDevice(device);
         else
             WebInspector.emulatedDevicesList.saveCustomDevices();
-        this._addCustomButton.scrollIntoView();
+        this._addCustomButton.scrollIntoViewIfNeeded();
         this._addCustomButton.focus();
     },
 

@@ -14,9 +14,9 @@
 #include "ash/system/user/login_status.h"
 #include "ash/wm/cursor_manager_chromeos.h"
 #include "ash/wm/system_modal_container_event_filter_delegate.h"
-#include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -85,9 +85,9 @@ class AutoclickController;
 class BluetoothNotificationController;
 class CaptureController;
 class DesktopBackgroundController;
+class DisplayAnimator;
 class DisplayChangeObserver;
 class DisplayColorManager;
-class DisplayConfiguratorAnimation;
 class WindowTreeHostManager;
 class DisplayErrorObserver;
 class DisplayManager;
@@ -523,9 +523,7 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   ui::DisplayConfigurator* display_configurator() {
     return display_configurator_.get();
   }
-  DisplayConfiguratorAnimation* display_configurator_animation() {
-    return display_configurator_animation_.get();
-  }
+  DisplayAnimator* display_animator() { return display_animator_.get(); }
   DisplayErrorObserver* display_error_observer() {
     return display_error_observer_.get();
   }
@@ -615,7 +613,6 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   EventTarget* GetParentTarget() override;
   scoped_ptr<ui::EventTargetIterator> GetChildIterator() const override;
   ui::EventTargeter* GetEventTargeter() override;
-  void OnEvent(ui::Event* event) override;
 
   // Overridden from aura::client::ActivationChangeObserver:
   void OnWindowActivated(
@@ -727,7 +724,7 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   // Controls video output device state.
   scoped_ptr<ui::DisplayConfigurator> display_configurator_;
   scoped_ptr<DisplayColorManager> display_color_manager_;
-  scoped_ptr<DisplayConfiguratorAnimation> display_configurator_animation_;
+  scoped_ptr<DisplayAnimator> display_animator_;
   scoped_ptr<DisplayErrorObserver> display_error_observer_;
   scoped_ptr<ProjectingObserver> projecting_observer_;
 

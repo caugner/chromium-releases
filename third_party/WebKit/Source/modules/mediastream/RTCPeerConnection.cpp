@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "modules/mediastream/RTCPeerConnection.h"
 
 #include "bindings/core/v8/ArrayValue.h"
@@ -41,6 +40,7 @@
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/VoidCallback.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
@@ -126,6 +126,27 @@ private:
 };
 
 } // namespace
+
+RTCPeerConnection::EventWrapper::EventWrapper(
+    PassRefPtrWillBeRawPtr<Event> event,
+    PassOwnPtr<BoolFunction> function)
+    : m_event(event)
+    , m_setupFunction(function)
+{
+}
+
+bool RTCPeerConnection::EventWrapper::setup()
+{
+    if (m_setupFunction) {
+        return (*m_setupFunction)();
+    }
+    return true;
+}
+
+DEFINE_TRACE(RTCPeerConnection::EventWrapper)
+{
+    visitor->trace(m_event);
+}
 
 RTCConfiguration* RTCPeerConnection::parseConfiguration(const Dictionary& configuration, ExceptionState& exceptionState)
 {
@@ -300,13 +321,21 @@ RTCOfferOptions* RTCPeerConnection::parseOfferOptions(const Dictionary& options,
 
 RTCPeerConnection* RTCPeerConnection::create(ExecutionContext* context, const Dictionary& rtcConfiguration, const Dictionary& mediaConstraints, ExceptionState& exceptionState)
 {
+    if (mediaConstraints.isObject())
+        UseCounter::count(context, UseCounter::RTCPeerConnectionConstructorConstraints);
+    else
+        UseCounter::count(context, UseCounter::RTCPeerConnectionConstructorCompliant);
+
     RTCConfiguration* configuration = parseConfiguration(rtcConfiguration, exceptionState);
     if (exceptionState.hadException())
         return 0;
 
-    WebMediaConstraints constraints = MediaConstraintsImpl::create(mediaConstraints, exceptionState);
-    if (exceptionState.hadException())
+    MediaErrorState mediaErrorState;
+    WebMediaConstraints constraints = MediaConstraintsImpl::create(mediaConstraints, mediaErrorState);
+    if (mediaErrorState.hadException()) {
+        mediaErrorState.raiseException(exceptionState);
         return 0;
+    }
 
     RTCPeerConnection* peerConnection = new RTCPeerConnection(context, configuration, constraints, exceptionState);
     peerConnection->suspendIfNeeded();
@@ -321,7 +350,7 @@ RTCPeerConnection::RTCPeerConnection(ExecutionContext* context, RTCConfiguration
     , m_signalingState(SignalingStateStable)
     , m_iceGatheringState(ICEGatheringStateNew)
     , m_iceConnectionState(ICEConnectionStateNew)
-    , m_dispatchScheduledEventRunner(this, &RTCPeerConnection::dispatchScheduledEvent)
+    , m_dispatchScheduledEventRunner(AsyncMethodRunner<RTCPeerConnection>::create(this, &RTCPeerConnection::dispatchScheduledEvent))
     , m_stopped(false)
     , m_closed(false)
 {
@@ -361,8 +390,13 @@ RTCPeerConnection::~RTCPeerConnection()
     ASSERT(m_closed || m_stopped);
 }
 
-void RTCPeerConnection::createOffer(RTCSessionDescriptionCallback* successCallback, RTCErrorCallback* errorCallback, const Dictionary& rtcOfferOptions, ExceptionState& exceptionState)
+void RTCPeerConnection::createOffer(ExecutionContext* context, RTCSessionDescriptionCallback* successCallback, RTCErrorCallback* errorCallback, const Dictionary& rtcOfferOptions, ExceptionState& exceptionState)
 {
+    if (errorCallback)
+        UseCounter::count(context, UseCounter::RTCPeerConnectionCreateOfferLegacyFailureCallback);
+    else
+        UseCounter::countDeprecation(context, UseCounter::RTCPeerConnectionCreateOfferLegacyNoFailureCallback);
+
     if (throwExceptionIfSignalingStateClosed(m_signalingState, exceptionState))
         return;
 
@@ -375,40 +409,72 @@ void RTCPeerConnection::createOffer(RTCSessionDescriptionCallback* successCallba
     RTCSessionDescriptionRequest* request = RTCSessionDescriptionRequestImpl::create(executionContext(), this, successCallback, errorCallback);
 
     if (offerOptions) {
+        if (offerOptions->offerToReceiveAudio() != -1 || offerOptions->offerToReceiveVideo() != -1)
+            UseCounter::count(context, UseCounter::RTCPeerConnectionCreateOfferLegacyOfferOptions);
+        else if (errorCallback)
+            UseCounter::count(context, UseCounter::RTCPeerConnectionCreateOfferLegacyCompliant);
+
         m_peerHandler->createOffer(request, offerOptions);
     } else {
-        WebMediaConstraints constraints = MediaConstraintsImpl::create(rtcOfferOptions, exceptionState);
-        if (exceptionState.hadException())
+        MediaErrorState mediaErrorState;
+        WebMediaConstraints constraints = MediaConstraintsImpl::create(rtcOfferOptions, mediaErrorState);
+        if (mediaErrorState.hadException()) {
+            mediaErrorState.raiseException(exceptionState);
             return;
+        }
+
+        if (!constraints.isEmpty())
+            UseCounter::count(context, UseCounter::RTCPeerConnectionCreateOfferLegacyConstraints);
+        else if (errorCallback)
+            UseCounter::count(context, UseCounter::RTCPeerConnectionCreateOfferLegacyCompliant);
 
         m_peerHandler->createOffer(request, constraints);
     }
 }
 
-void RTCPeerConnection::createAnswer(RTCSessionDescriptionCallback* successCallback, RTCErrorCallback* errorCallback, const Dictionary& mediaConstraints, ExceptionState& exceptionState)
+void RTCPeerConnection::createAnswer(ExecutionContext* context, RTCSessionDescriptionCallback* successCallback, RTCErrorCallback* errorCallback, const Dictionary& mediaConstraints, ExceptionState& exceptionState)
 {
+    if (errorCallback)
+        UseCounter::count(context, UseCounter::RTCPeerConnectionCreateAnswerLegacyFailureCallback);
+    else
+        UseCounter::countDeprecation(context, UseCounter::RTCPeerConnectionCreateAnswerLegacyNoFailureCallback);
+
+    if (mediaConstraints.isObject())
+        UseCounter::count(context, UseCounter::RTCPeerConnectionCreateAnswerLegacyConstraints);
+    else if (errorCallback)
+        UseCounter::count(context, UseCounter::RTCPeerConnectionCreateAnswerLegacyCompliant);
+
     if (throwExceptionIfSignalingStateClosed(m_signalingState, exceptionState))
         return;
 
     ASSERT(successCallback);
 
-    WebMediaConstraints constraints = MediaConstraintsImpl::create(mediaConstraints, exceptionState);
-    if (exceptionState.hadException())
+    MediaErrorState mediaErrorState;
+    WebMediaConstraints constraints = MediaConstraintsImpl::create(mediaConstraints, mediaErrorState);
+    if (mediaErrorState.hadException()) {
+        mediaErrorState.raiseException(exceptionState);
         return;
+    }
 
     RTCSessionDescriptionRequest* request = RTCSessionDescriptionRequestImpl::create(executionContext(), this, successCallback, errorCallback);
     m_peerHandler->createAnswer(request, constraints);
 }
 
-void RTCPeerConnection::setLocalDescription(RTCSessionDescription* sessionDescription, VoidCallback* successCallback, RTCErrorCallback* errorCallback, ExceptionState& exceptionState)
+void RTCPeerConnection::setLocalDescription(ExecutionContext* context, RTCSessionDescription* sessionDescription, VoidCallback* successCallback, RTCErrorCallback* errorCallback, ExceptionState& exceptionState)
 {
+    if (successCallback && errorCallback) {
+        UseCounter::count(context, UseCounter::RTCPeerConnectionSetLocalDescriptionLegacyCompliant);
+    } else {
+        if (!successCallback)
+            UseCounter::count(context, UseCounter::RTCPeerConnectionSetLocalDescriptionLegacyNoSuccessCallback);
+        if (!errorCallback)
+            UseCounter::count(context, UseCounter::RTCPeerConnectionSetLocalDescriptionLegacyNoFailureCallback);
+    }
+
     if (throwExceptionIfSignalingStateClosed(m_signalingState, exceptionState))
         return;
 
-    if (!sessionDescription) {
-        exceptionState.throwDOMException(TypeMismatchError, ExceptionMessages::argumentNullOrIncorrectType(1, "RTCSessionDescription"));
-        return;
-    }
+    ASSERT(sessionDescription);
 
     RTCVoidRequest* request = RTCVoidRequestImpl::create(executionContext(), this, successCallback, errorCallback);
     m_peerHandler->setLocalDescription(request, sessionDescription->webSessionDescription());
@@ -423,15 +489,21 @@ RTCSessionDescription* RTCPeerConnection::localDescription()
     return RTCSessionDescription::create(webSessionDescription);
 }
 
-void RTCPeerConnection::setRemoteDescription(RTCSessionDescription* sessionDescription, VoidCallback* successCallback, RTCErrorCallback* errorCallback, ExceptionState& exceptionState)
+void RTCPeerConnection::setRemoteDescription(ExecutionContext* context, RTCSessionDescription* sessionDescription, VoidCallback* successCallback, RTCErrorCallback* errorCallback, ExceptionState& exceptionState)
 {
+    if (successCallback && errorCallback) {
+        UseCounter::count(context, UseCounter::RTCPeerConnectionSetRemoteDescriptionLegacyCompliant);
+    } else {
+        if (!successCallback)
+            UseCounter::count(context, UseCounter::RTCPeerConnectionSetRemoteDescriptionLegacyNoSuccessCallback);
+        if (!errorCallback)
+            UseCounter::count(context, UseCounter::RTCPeerConnectionSetRemoteDescriptionLegacyNoFailureCallback);
+    }
+
     if (throwExceptionIfSignalingStateClosed(m_signalingState, exceptionState))
         return;
 
-    if (!sessionDescription) {
-        exceptionState.throwDOMException(TypeMismatchError, ExceptionMessages::argumentNullOrIncorrectType(1, "RTCSessionDescription"));
-        return;
-    }
+    ASSERT(sessionDescription);
 
     RTCVoidRequest* request = RTCVoidRequestImpl::create(executionContext(), this, successCallback, errorCallback);
     m_peerHandler->setRemoteDescription(request, sessionDescription->webSessionDescription());
@@ -455,9 +527,12 @@ void RTCPeerConnection::updateIce(const Dictionary& rtcConfiguration, const Dict
     if (exceptionState.hadException())
         return;
 
-    WebMediaConstraints constraints = MediaConstraintsImpl::create(mediaConstraints, exceptionState);
-    if (exceptionState.hadException())
+    MediaErrorState mediaErrorState;
+    WebMediaConstraints constraints = MediaConstraintsImpl::create(mediaConstraints, mediaErrorState);
+    if (mediaErrorState.hadException()) {
+        mediaErrorState.raiseException(exceptionState);
         return;
+    }
 
     bool valid = m_peerHandler->updateICE(configuration, constraints);
     if (!valid)
@@ -538,10 +613,7 @@ void RTCPeerConnection::addIceCandidate(RTCIceCandidate* iceCandidate, Exception
     if (throwExceptionIfSignalingStateClosed(m_signalingState, exceptionState))
         return;
 
-    if (!iceCandidate) {
-        exceptionState.throwDOMException(TypeMismatchError, ExceptionMessages::argumentNullOrIncorrectType(1, "RTCIceCandidate"));
-        return;
-    }
+    ASSERT(iceCandidate);
 
     bool valid = m_peerHandler->addICECandidate(iceCandidate->webCandidate());
     if (!valid)
@@ -553,10 +625,7 @@ void RTCPeerConnection::addIceCandidate(RTCIceCandidate* iceCandidate, VoidCallb
     if (throwExceptionIfSignalingStateClosed(m_signalingState, exceptionState))
         return;
 
-    if (!iceCandidate) {
-        exceptionState.throwDOMException(TypeMismatchError, ExceptionMessages::argumentNullOrIncorrectType(1, "RTCIceCandidate"));
-        return;
-    }
+    ASSERT(iceCandidate);
     ASSERT(successCallback);
     ASSERT(errorCallback);
 
@@ -640,9 +709,12 @@ void RTCPeerConnection::addStream(MediaStream* stream, const Dictionary& mediaCo
     if (m_localStreams.contains(stream))
         return;
 
-    WebMediaConstraints constraints = MediaConstraintsImpl::create(mediaConstraints, exceptionState);
-    if (exceptionState.hadException())
+    MediaErrorState mediaErrorState;
+    WebMediaConstraints constraints = MediaConstraintsImpl::create(mediaConstraints, mediaErrorState);
+    if (mediaErrorState.hadException()) {
+        mediaErrorState.raiseException(exceptionState);
         return;
+    }
 
     m_localStreams.append(stream);
 
@@ -695,8 +767,9 @@ MediaStream* RTCPeerConnection::getStreamById(const String& streamId)
     return 0;
 }
 
-void RTCPeerConnection::getStats(RTCStatsCallback* successCallback, MediaStreamTrack* selector)
+void RTCPeerConnection::getStats(ExecutionContext* context, RTCStatsCallback* successCallback, MediaStreamTrack* selector)
 {
+    UseCounter::count(context, UseCounter::RTCPeerConnectionGetStatsLegacyNonCompliant);
     RTCStatsRequest* statsRequest = RTCStatsRequestImpl::create(executionContext(), this, successCallback, selector);
     // FIXME: Add passing selector as part of the statsRequest.
     m_peerHandler->getStats(statsRequest);
@@ -749,10 +822,7 @@ RTCDTMFSender* RTCPeerConnection::createDTMFSender(MediaStreamTrack* track, Exce
     if (throwExceptionIfSignalingStateClosed(m_signalingState, exceptionState))
         return nullptr;
 
-    if (!track) {
-        exceptionState.throwTypeError(ExceptionMessages::argumentNullOrIncorrectType(1, "MediaStreamTrack"));
-        return nullptr;
-    }
+    ASSERT(track);
 
     if (!hasLocalStreamWithTrackId(track->id())) {
         exceptionState.throwDOMException(SyntaxError, "No local stream is available for the track provided.");
@@ -884,12 +954,12 @@ ExecutionContext* RTCPeerConnection::executionContext() const
 
 void RTCPeerConnection::suspend()
 {
-    m_dispatchScheduledEventRunner.suspend();
+    m_dispatchScheduledEventRunner->suspend();
 }
 
 void RTCPeerConnection::resume()
 {
-    m_dispatchScheduledEventRunner.resume();
+    m_dispatchScheduledEventRunner->resume();
 }
 
 void RTCPeerConnection::stop()
@@ -906,7 +976,7 @@ void RTCPeerConnection::stop()
         (*i)->stop();
     m_dataChannels.clear();
 
-    m_dispatchScheduledEventRunner.stop();
+    m_dispatchScheduledEventRunner->stop();
 
     m_peerHandler.clear();
 }
@@ -924,11 +994,20 @@ void RTCPeerConnection::changeIceGatheringState(ICEGatheringState iceGatheringSt
     m_iceGatheringState = iceGatheringState;
 }
 
-void RTCPeerConnection::changeIceConnectionState(ICEConnectionState iceConnectionState)
+bool RTCPeerConnection::setIceConnectionState(ICEConnectionState iceConnectionState)
 {
     if (m_iceConnectionState != ICEConnectionStateClosed && m_iceConnectionState != iceConnectionState) {
         m_iceConnectionState = iceConnectionState;
-        scheduleDispatchEvent(Event::create(EventTypeNames::iceconnectionstatechange));
+        return true;
+    }
+    return false;
+}
+
+void RTCPeerConnection::changeIceConnectionState(ICEConnectionState iceConnectionState)
+{
+    if (m_iceConnectionState != ICEConnectionStateClosed) {
+        scheduleDispatchEvent(Event::create(EventTypeNames::iceconnectionstatechange),
+            WTF::bind(&RTCPeerConnection::setIceConnectionState, this, iceConnectionState));
     }
 }
 
@@ -945,9 +1024,15 @@ void RTCPeerConnection::closeInternal()
 
 void RTCPeerConnection::scheduleDispatchEvent(PassRefPtrWillBeRawPtr<Event> event)
 {
-    m_scheduledEvents.append(event);
+    scheduleDispatchEvent(event, nullptr);
+}
 
-    m_dispatchScheduledEventRunner.runAsync();
+void RTCPeerConnection::scheduleDispatchEvent(PassRefPtrWillBeRawPtr<Event> event,
+    PassOwnPtr<BoolFunction> setupFunction)
+{
+    m_scheduledEvents.append(new EventWrapper(event, setupFunction));
+
+    m_dispatchScheduledEventRunner->runAsync();
 }
 
 void RTCPeerConnection::dispatchScheduledEvent()
@@ -955,12 +1040,15 @@ void RTCPeerConnection::dispatchScheduledEvent()
     if (m_stopped)
         return;
 
-    WillBeHeapVector<RefPtrWillBeMember<Event>> events;
+    HeapVector<Member<EventWrapper>> events;
     events.swap(m_scheduledEvents);
 
-    WillBeHeapVector<RefPtrWillBeMember<Event>>::iterator it = events.begin();
-    for (; it != events.end(); ++it)
-        dispatchEvent((*it).release());
+    HeapVector<Member<EventWrapper>>::iterator it = events.begin();
+    for (; it != events.end(); ++it) {
+        if ((*it)->setup()) {
+            dispatchEvent((*it)->m_event.release());
+        }
+    }
 
     events.clear();
 }
@@ -970,6 +1058,7 @@ DEFINE_TRACE(RTCPeerConnection)
     visitor->trace(m_localStreams);
     visitor->trace(m_remoteStreams);
     visitor->trace(m_dataChannels);
+    visitor->trace(m_dispatchScheduledEventRunner);
     visitor->trace(m_scheduledEvents);
     RefCountedGarbageCollectedEventTargetWithInlineData<RTCPeerConnection>::trace(visitor);
     ActiveDOMObject::trace(visitor);

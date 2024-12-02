@@ -4,6 +4,10 @@
 
 #include "ios/web/navigation/navigation_item_impl.h"
 
+#include <stddef.h>
+
+#include <utility>
+
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "components/url_formatter/url_formatter.h"
@@ -68,7 +72,7 @@ NavigationItemImpl::NavigationItemImpl(const NavigationItemImpl& item)
 
 void NavigationItemImpl::SetFacadeDelegate(
     scoped_ptr<NavigationItemFacadeDelegate> facade_delegate) {
-  facade_delegate_ = facade_delegate.Pass();
+  facade_delegate_ = std::move(facade_delegate);
 }
 
 NavigationItemFacadeDelegate* NavigationItemImpl::GetFacadeDelegate() const {

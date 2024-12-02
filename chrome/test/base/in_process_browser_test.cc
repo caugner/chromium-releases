@@ -6,7 +6,6 @@
 
 #include "ash/ash_switches.h"
 #include "base/auto_reset.h"
-#include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
@@ -14,12 +13,14 @@
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/test_file_util.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/non_thread_safe.h"
+#include "build/build_config.h"
 #include "chrome/browser/after_startup_task_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -59,7 +60,6 @@
 #include "content/public/test/test_launcher.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
-#include "net/test/spawned_test_server/spawned_test_server.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
@@ -82,6 +82,10 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
+#endif
+
+#if defined(USE_ASH)
+#include "chrome/test/base/default_ash_event_generator_delegate.h"
 #endif
 
 namespace {
@@ -187,15 +191,19 @@ InProcessBrowserTest::InProcessBrowserTest()
   CreateTestServer(base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   base::FilePath src_dir;
   CHECK(PathService::Get(base::DIR_SOURCE_ROOT, &src_dir));
-  base::FilePath test_data_dir = src_dir.AppendASCII("chrome/test/data");
 
   // chrome::DIR_TEST_DATA isn't going to be setup until after we call
   // ContentMain. However that is after tests' constructors or SetUp methods,
   // which sometimes need it. So just override it.
-  CHECK(PathService::Override(chrome::DIR_TEST_DATA, test_data_dir));
+  CHECK(PathService::Override(chrome::DIR_TEST_DATA,
+                              src_dir.AppendASCII("chrome/test/data")));
 
 #if defined(OS_MACOSX)
   bundle_swizzler_.reset(new ScopedBundleSwizzlerMac);
+#endif
+
+#if defined(USE_ASH)
+  DefaultAshEventGeneratorDelegate::GetInstance();
 #endif
 }
 
@@ -537,7 +545,7 @@ base::CommandLine InProcessBrowserTest::GetCommandLineForRelaunch() {
 #endif
 
 void InProcessBrowserTest::RunTestOnMainThreadLoop() {
-  AfterStartupTaskUtils::SetBrowserStartupIsComplete();
+  AfterStartupTaskUtils::SetBrowserStartupIsCompleteForTesting();
 
   // Pump startup related events.
   content::RunAllPendingInMessageLoop();

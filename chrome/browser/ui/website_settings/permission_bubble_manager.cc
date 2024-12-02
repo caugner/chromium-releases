@@ -6,11 +6,13 @@
 
 #include "base/command_line.h"
 #include "base/metrics/user_metrics_action.h"
+#include "build/build_config.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_request.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/user_metrics.h"
+#include "url/origin.h"
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/ui/browser_finder.h"
@@ -104,9 +106,13 @@ void PermissionBubbleManager::AddRequest(PermissionBubbleRequest* request) {
   // any request for which GetVisibleURL != GetLastCommittedURL.
   request_url_ = web_contents()->GetLastCommittedURL();
   bool is_main_frame =
-      request->GetRequestingHostname().GetOrigin() == request_url_.GetOrigin();
+      url::Origin(request_url_)
+          .IsSameOriginWith(url::Origin(request->GetRequestingHostname()));
 
   // Don't re-add an existing request or one with a duplicate text request.
+  // TODO(johnme): Instead of dropping duplicate requests, we should queue them
+  // and eventually run their PermissionGranted/PermissionDenied/Cancelled
+  // callback (crbug.com/577313).
   bool same_object = false;
   if (ExistingRequest(request, requests_, &same_object) ||
       ExistingRequest(request, queued_requests_, &same_object) ||

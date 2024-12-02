@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "core/frame/csp/CSPSourceList.h"
 
 #include "core/dom/Document.h"
@@ -11,7 +10,7 @@
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "platform/weborigin/SecurityOrigin.h"
-#include <gtest/gtest.h>
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
 

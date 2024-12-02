@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "core/loader/LinkLoader.h"
 
 #include "core/fetch/ResourceFetcher.h"
@@ -13,9 +12,8 @@
 #include "core/loader/NetworkHintsInterface.h"
 #include "core/testing/DummyPageHolder.h"
 #include "platform/network/ResourceLoadPriority.h"
-
+#include "testing/gtest/include/gtest/gtest.h"
 #include <base/macros.h>
-#include <gtest/gtest.h>
 
 namespace blink {
 
@@ -81,12 +79,22 @@ TEST(LinkLoaderTest, Preload)
         const char* href;
         const char* as;
         const ResourceLoadPriority priority;
+        const WebURLRequest::RequestContext context;
         const bool shouldLoad;
+        const char* accept;
     } cases[] = {
-        {"data://example.test/cat.jpg", "image", ResourceLoadPriorityVeryLow, true},
-        {"data://example.test/cat.js", "script", ResourceLoadPriorityMedium, true},
-        {"data://example.test/cat.css", "stylesheet", ResourceLoadPriorityHigh, true},
-        {"data://example.test/cat.blob", "blabla", ResourceLoadPriorityUnresolved, false},
+        {"data://example.test/cat.jpg", "image", ResourceLoadPriorityVeryLow, WebURLRequest::RequestContextImage, true, "image/webp,image/*,*/*;q=0.8"},
+        {"data://example.test/cat.js", "script", ResourceLoadPriorityMedium, WebURLRequest::RequestContextScript, true, "*/*"},
+        {"data://example.test/cat.css", "style", ResourceLoadPriorityHigh, WebURLRequest::RequestContextStyle, true, "text/css,*/*;q=0.1"},
+        // TODO(yoav): It doesn't seem like the audio context is ever used. That should probably be fixed (or we can consolidate audio and video).
+        {"data://example.test/cat.wav", "audio", ResourceLoadPriorityLow, WebURLRequest::RequestContextVideo, true, ""},
+        {"data://example.test/cat.mp4", "video", ResourceLoadPriorityLow, WebURLRequest::RequestContextVideo, true, ""},
+        {"data://example.test/cat.vtt", "track", ResourceLoadPriorityLow, WebURLRequest::RequestContextTrack, true, ""},
+        {"data://example.test/cat.woff", "font", ResourceLoadPriorityMedium, WebURLRequest::RequestContextFont, true, ""},
+        // TODO(yoav): subresource should be *very* low priority (rather than low).
+        {"data://example.test/cat.empty", "", ResourceLoadPriorityLow, WebURLRequest::RequestContextSubresource, true, ""},
+        {"data://example.test/cat.blob", "blabla", ResourceLoadPriorityLow, WebURLRequest::RequestContextSubresource, true, ""},
+        {"bla://example.test/cat.gif", "image", ResourceLoadPriorityUnresolved, WebURLRequest::RequestContextImage, false, ""},
     };
 
     // Test the cases with a single header
@@ -97,7 +105,7 @@ TEST(LinkLoaderTest, Preload)
         LinkLoader loader(&loaderClient);
         KURL hrefURL = KURL(KURL(), testCase.href);
         loader.loadLink(LinkRelAttribute("preload"),
-            AtomicString(),
+            CrossOriginAttributeNotSet,
             String(),
             testCase.as,
             hrefURL,
@@ -112,8 +120,12 @@ TEST(LinkLoaderTest, Preload)
                 ASSERT_EQ((unsigned)0, preloads->size());
             } else {
                 ASSERT_EQ((unsigned)1, preloads->size());
-                if (preloads->size() > 0)
-                    ASSERT_EQ(testCase.priority, preloads->begin().get()->get()->resourceRequest().priority());
+                if (preloads->size() > 0) {
+                    Resource* resource = preloads->begin().get()->get();
+                    ASSERT_EQ(testCase.priority, resource->resourceRequest().priority());
+                    ASSERT_EQ(testCase.context, resource->resourceRequest().requestContext());
+                    ASSERT_STREQ(testCase.accept, resource->accept().string().ascii().data());
+                }
             }
         }
     }
@@ -141,7 +153,7 @@ TEST(LinkLoaderTest, DNSPrefetch)
         KURL hrefURL = KURL(KURL(ParsedURLStringTag(), String("http://example.com")), testCase.href);
         NetworkHintsMock networkHints;
         loader.loadLink(LinkRelAttribute("dns-prefetch"),
-            AtomicString(),
+            CrossOriginAttributeNotSet,
             String(),
             String(),
             hrefURL,
@@ -156,15 +168,15 @@ TEST(LinkLoaderTest, Preconnect)
 {
     struct {
         const char* href;
-        const char* crossOrigin;
+        CrossOriginAttributeValue crossOrigin;
         const bool shouldLoad;
         const bool isHTTPS;
         const bool isCrossOrigin;
     } cases[] = {
-        {"http://example.com/", nullptr, true, false, false},
-        {"https://example.com/", nullptr, true, true, false},
-        {"http://example.com/", "anonymous", true, false, true},
-        {"//example.com/", nullptr, true, false, false},
+        {"http://example.com/", CrossOriginAttributeNotSet, true, false, false},
+        {"https://example.com/", CrossOriginAttributeNotSet, true, true, false},
+        {"http://example.com/", CrossOriginAttributeAnonymous, true, false, true},
+        {"//example.com/", CrossOriginAttributeNotSet, true, false, false},
     };
 
     // Test the cases with a single header

@@ -2,10 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/lifetime/browser_close_manager.h"
+
+#include <utility>
 #include <vector>
 
 #include "base/command_line.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/macros.h"
+#include "build/build_config.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
@@ -16,7 +21,6 @@
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/lifetime/browser_close_manager.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
@@ -247,7 +251,7 @@ class BrowserCloseManagerBrowserTest
 };
 
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest, TestSingleTabShutdown) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("/beforeunload.html")));
   RepeatedNotificationObserver cancel_observer(
@@ -269,7 +273,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest, TestSingleTabShutdown) {
 
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        TestShutdownMoreThanOnce) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("/beforeunload.html")));
   RepeatedNotificationObserver cancel_observer(
@@ -299,7 +303,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 #endif
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        MAYBE_PRE_TestSessionRestore) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("/beforeunload.html")));
   AddBlankTabAndShow(browser());
@@ -353,7 +357,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 // Test that browser windows are only closed if all browsers are ready to close
 // and that all beforeunload dialogs are shown again after a cancel.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest, TestMultipleWindows) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   browsers_.push_back(CreateBrowser(browser()->profile()));
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload.html")));
@@ -410,7 +414,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest, TestMultipleWindows) {
 #endif
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        MAYBE_TestHangInBeforeUnloadMultipleTabs) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload_hang.html")));
   AddBlankTabAndShow(browsers_[0]);
@@ -443,7 +447,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 // early.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        TestHangInBeforeUnloadMultipleWindows) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   browsers_.push_back(CreateBrowser(browser()->profile()));
   browsers_.push_back(CreateBrowser(browser()->profile()));
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
@@ -476,7 +480,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 // Test that a window created during shutdown is closed.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        TestAddWindowDuringShutdown) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload.html")));
 
@@ -494,7 +498,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 // cancel the shutdown.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        TestAddWindowWithBeforeUnloadDuringShutdown) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload.html")));
 
@@ -526,7 +530,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 // Disabled for being flaky tests: crbug.com/519646
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        DISABLED_TestAddTabDuringShutdown) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   browsers_.push_back(CreateBrowser(browser()->profile()));
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload.html")));
@@ -550,7 +554,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 // Disabled for being flaky tests: crbug.com/519646
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        DISABLED_TestAddTabWithBeforeUnloadDuringShutdown) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   browsers_.push_back(CreateBrowser(browser()->profile()));
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload.html")));
@@ -588,7 +592,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        TestCloseTabDuringShutdown) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload.html")));
   RepeatedNotificationObserver cancel_observer(
@@ -628,7 +632,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 #endif
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        MAYBE_TestOpenAndCloseWindowDuringShutdown) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload.html")));
   RepeatedNotificationObserver cancel_observer(
@@ -660,7 +664,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
                        TestCloseWindowDuringShutdown) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browsers_[0], embedded_test_server()->GetURL("/beforeunload.html")));
   browsers_.push_back(CreateBrowser(browser()->profile()));
@@ -730,7 +734,7 @@ class BrowserCloseManagerWithDownloadsBrowserTest :
 #if defined(OS_MACOSX)
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
                        TestWithDownloads) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   SetDownloadPathForProfile(browser()->profile());
   ASSERT_NO_FATAL_FAILURE(CreateStalledDownload(browser()));
 
@@ -753,14 +757,14 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
 // Test shutdown with a DANGEROUS_URL download undecided.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
     TestWithDangerousUrlDownload) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   SetDownloadPathForProfile(browser()->profile());
 
   // Set up the fake delegate that forces the download to be malicious.
   scoped_ptr<TestDownloadManagerDelegate> test_delegate(
       new TestDownloadManagerDelegate(browser()->profile()));
   DownloadServiceFactory::GetForBrowserContext(browser()->profile())
-      ->SetDownloadManagerDelegateForTesting(test_delegate.Pass());
+      ->SetDownloadManagerDelegateForTesting(std::move(test_delegate));
 
   // Run a dangerous download, but the user doesn't make a decision.
   // This .swf normally would be categorized as DANGEROUS_FILE, but
@@ -797,7 +801,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
 // Test shutdown with a download in progress.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
                        TestWithDownloads) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   SetDownloadPathForProfile(browser()->profile());
   ASSERT_NO_FATAL_FAILURE(CreateStalledDownload(browser()));
   content::TestNavigationObserver navigation_observer(
@@ -826,7 +830,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
 // Test shutdown with a download in progress in an off-the-record profile.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
                        TestWithOffTheRecordDownloads) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   Profile* otr_profile = browser()->profile()->GetOffTheRecordProfile();
   SetDownloadPathForProfile(otr_profile);
   Browser* otr_browser = CreateBrowser(otr_profile);
@@ -871,7 +875,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
   profile_manager->RegisterTestingProfile(other_profile, true, false);
   Browser* other_profile_browser = CreateBrowser(other_profile);
 
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   SetDownloadPathForProfile(browser()->profile());
   SetDownloadPathForProfile(other_profile);
   ASSERT_NO_FATAL_FAILURE(CreateStalledDownload(browser()));
@@ -914,7 +918,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
 // Disabled, see http://crbug.com/315754.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerWithDownloadsBrowserTest,
                        DISABLED_TestBeforeUnloadAndDownloads) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   SetDownloadPathForProfile(browser()->profile());
   ASSERT_NO_FATAL_FAILURE(CreateStalledDownload(browser()));
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(

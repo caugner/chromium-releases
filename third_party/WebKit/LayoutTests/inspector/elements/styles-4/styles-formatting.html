@@ -262,13 +262,14 @@ function test()
 
 <style>
 
-#formatted { 
-    property1: value1;
-    property2: value2;
-    property3: value3
+#formatted {
+    /* leading comment */
+    color: red;   /* comment1 */
+    zoom: 1;/* comment2 */ /* like: property */
+    padding: 0
 }
 
-#unformatted {property1:value1;property2:value2;property3:value3;}
+#unformatted {/*leading comment*/color:red;zoom:1;padding:0;}
 
 </style>
 </head>

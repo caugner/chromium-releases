@@ -4,6 +4,7 @@
 
 #include "chrome/browser/safe_browsing/download_protection_service.h"
 
+#include <stddef.h>
 #include <stdint.h>
 #include <map>
 #include <string>
@@ -15,6 +16,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
@@ -24,18 +26,18 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/safe_browsing/database_manager.h"
 #include "chrome/browser/safe_browsing/download_feedback_service.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident_reporting_service.h"
 #include "chrome/browser/safe_browsing/local_database_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/browser/safe_browsing/test_database_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/safe_browsing/binary_feature_extractor.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/history/core/browser/history_service.h"
+#include "components/safe_browsing_db/database_manager.h"
+#include "components/safe_browsing_db/test_database_manager.h"
 #include "content/public/browser/download_danger_type.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/test/mock_download_item.h"
@@ -1908,7 +1910,7 @@ class DownloadProtectionServiceFlagTest : public DownloadProtectionServiceTest {
       : blacklisted_hash_hex_("1e954d9ce0389e2ba7447216f21761f98d1e6540c2abecdbecff570e36c493db") {}
 
   void SetUp() override {
-    std::vector<uint8> bytes;
+    std::vector<uint8_t> bytes;
     ASSERT_TRUE(base::HexStringToBytes(blacklisted_hash_hex_, &bytes) &&
                 bytes.size() == 32);
     blacklisted_hash_ = std::string(bytes.begin(), bytes.end());

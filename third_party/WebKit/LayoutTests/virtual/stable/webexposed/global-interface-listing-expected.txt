@@ -134,6 +134,7 @@ interface AudioContext : EventTarget
     method createDelay
     method createDynamicsCompressor
     method createGain
+    method createIIRFilter
     method createMediaElementSource
     method createMediaStreamDestination
     method createMediaStreamSource
@@ -231,6 +232,9 @@ interface Blob
     getter type
     method constructor
     method slice
+interface BlobEvent : Event
+    getter data
+    method constructor
 interface CDATASection : Text
     method constructor
 interface CSS
@@ -563,6 +567,7 @@ interface DOMTokenList
     method item
     method keys
     method remove
+    method supports
     method toString
     method toggle
     method values
@@ -1295,9 +1300,11 @@ interface HTMLBodyElement : HTMLElement
     getter onpagehide
     getter onpageshow
     getter onpopstate
+    getter onrejectionhandled
     getter onresize
     getter onscroll
     getter onstorage
+    getter onunhandledrejection
     getter onunload
     getter text
     getter vLink
@@ -1319,9 +1326,11 @@ interface HTMLBodyElement : HTMLElement
     setter onpagehide
     setter onpageshow
     setter onpopstate
+    setter onrejectionhandled
     setter onresize
     setter onscroll
     setter onstorage
+    setter onunhandledrejection
     setter onunload
     setter text
     setter vLink
@@ -1686,9 +1695,11 @@ interface HTMLFrameSetElement : HTMLElement
     getter onpagehide
     getter onpageshow
     getter onpopstate
+    getter onrejectionhandled
     getter onresize
     getter onscroll
     getter onstorage
+    getter onunhandledrejection
     getter onunload
     getter rows
     method constructor
@@ -1706,9 +1717,11 @@ interface HTMLFrameSetElement : HTMLElement
     setter onpagehide
     setter onpageshow
     setter onpopstate
+    setter onrejectionhandled
     setter onresize
     setter onscroll
     setter onstorage
+    setter onunhandledrejection
     setter onunload
     setter rows
 interface HTMLHRElement : HTMLElement
@@ -2022,6 +2035,7 @@ interface HTMLMediaElement : HTMLElement
     getter currentTime
     getter defaultMuted
     getter defaultPlaybackRate
+    getter disableRemotePlayback
     getter duration
     getter ended
     getter error
@@ -2037,6 +2051,7 @@ interface HTMLMediaElement : HTMLElement
     getter readyState
     getter seekable
     getter seeking
+    getter sinkId
     getter src
     getter textTracks
     getter volume
@@ -2049,12 +2064,14 @@ interface HTMLMediaElement : HTMLElement
     method pause
     method play
     method setMediaKeys
+    method setSinkId
     setter autoplay
     setter controls
     setter crossOrigin
     setter currentTime
     setter defaultMuted
     setter defaultPlaybackRate
+    setter disableRemotePlayback
     setter loop
     setter muted
     setter onencrypted
@@ -2677,6 +2694,9 @@ interface IDBVersionChangeEvent : Event
     getter newVersion
     getter oldVersion
     method constructor
+interface IIRFilterNode : AudioNode
+    method constructor
+    method getFrequencyResponse
 interface IdleDeadline
     getter didTimeout
     method constructor
@@ -2838,6 +2858,31 @@ interface MediaQueryListEvent : Event
     getter matches
     getter media
     method constructor
+interface MediaRecorder : EventTarget
+    static method isTypeSupported
+    getter ignoreMutedMedia
+    getter mimeType
+    getter ondataavailable
+    getter onerror
+    getter onpause
+    getter onresume
+    getter onstart
+    getter onstop
+    getter state
+    getter stream
+    method constructor
+    method pause
+    method requestData
+    method resume
+    method start
+    method stop
+    setter ignoreMutedMedia
+    setter ondataavailable
+    setter onerror
+    setter onpause
+    setter onresume
+    setter onstart
+    setter onstop
 interface MediaSource : EventTarget
     static method isTypeSupported
     getter activeSourceBuffers
@@ -2929,8 +2974,6 @@ interface MouseEvent : UIEvent
     getter screenY
     getter shiftKey
     getter toElement
-    getter webkitMovementX
-    getter webkitMovementY
     getter which
     getter x
     getter y
@@ -3003,7 +3046,6 @@ interface Navigator
     method constructor
     method getBattery
     method getGamepads
-    method getStorageUpdates
     method javaEnabled
     method registerProtocolHandler
     method requestMIDIAccess
@@ -3123,7 +3165,9 @@ interface OfflineAudioCompletionEvent : Event
 interface OfflineAudioContext : AudioContext
     getter oncomplete
     method constructor
+    method resume
     method startRendering
+    method suspend
     setter oncomplete
 interface Option
     method constructor
@@ -3273,6 +3317,7 @@ interface PresentationConnection : EventTarget
     getter onmessage
     getter onstatechange
     getter state
+    method close
     method constructor
     method send
     method terminate
@@ -3298,6 +3343,10 @@ interface ProgressEvent : Event
     getter loaded
     getter total
     method constructor
+interface PromiseRejectionEvent : Event
+    getter promise
+    getter reason
+    method constructor
 interface PushManager
     method constructor
     method getSubscription
@@ -3308,6 +3357,9 @@ interface PushSubscription
     method constructor
     method toJSON
     method unsubscribe
+interface RTCCertificate
+    getter expires
+    method constructor
 interface RTCIceCandidate
     getter candidate
     getter sdpMLineIndex
@@ -4495,6 +4547,7 @@ interface ServiceWorkerRegistration : EventTarget
     getter onupdatefound
     getter pushManager
     getter scope
+    getter sync
     method constructor
     method getNotifications
     method showNotification
@@ -4597,6 +4650,10 @@ interface SubtleCrypto
     method unwrapKey
     method verify
     method wrapKey
+interface SyncManager
+    method constructor
+    method getTags
+    method register
 interface Text : CharacterData
     getter wholeText
     method constructor
@@ -4750,6 +4807,19 @@ interface URL
     setter protocol
     setter search
     setter username
+interface URLSearchParams
+    method append
+    method constructor
+    method delete
+    method entries
+    method forEach
+    method get
+    method getAll
+    method has
+    method keys
+    method set
+    method toString
+    method values
 interface VTTCue : TextTrackCue
     getter align
     getter line
@@ -5484,6 +5554,7 @@ interface webkitAudioContext : EventTarget
     method createDelay
     method createDynamicsCompressor
     method createGain
+    method createIIRFilter
     method createMediaElementSource
     method createMediaStreamDestination
     method createMediaStreamSource
@@ -5623,9 +5694,12 @@ interface webkitMediaStream : EventTarget
 interface webkitOfflineAudioContext : AudioContext
     getter oncomplete
     method constructor
+    method resume
     method startRendering
+    method suspend
     setter oncomplete
 interface webkitRTCPeerConnection : EventTarget
+    static method generateCertificate
     getter iceConnectionState
     getter iceGatheringState
     getter localDescription
@@ -5690,7 +5764,6 @@ interface webkitSpeechRecognition : EventTarget
     getter onspeechend
     getter onspeechstart
     getter onstart
-    getter serviceURI
     method abort
     method constructor
     method start
@@ -5711,7 +5784,6 @@ interface webkitSpeechRecognition : EventTarget
     setter onspeechend
     setter onspeechstart
     setter onstart
-    setter serviceURI
 interface webkitSpeechRecognitionError : Event
     getter error
     getter message
@@ -5839,6 +5911,7 @@ interface webkitURL
     attribute onpopstate
     attribute onprogress
     attribute onratechange
+    attribute onrejectionhandled
     attribute onreset
     attribute onresize
     attribute onscroll
@@ -5858,6 +5931,7 @@ interface webkitURL
     attribute ontouchmove
     attribute ontouchstart
     attribute ontransitionend
+    attribute onunhandledrejection
     attribute onunload
     attribute onvolumechange
     attribute onwaiting

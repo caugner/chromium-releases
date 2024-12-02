@@ -4,6 +4,8 @@
 
 #include "components/html_viewer/devtools_agent_impl.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/logging.h"
 #include "third_party/WebKit/public/platform/WebString.h"
@@ -21,7 +23,7 @@ DevToolsAgentImpl::DevToolsAgentImpl(blink::WebLocalFrame* frame,
 
   if (state) {
     cache_until_client_ready_ = true;
-    frame_->devToolsAgent()->reattach(blink::WebString::fromUTF8(id_),
+    frame_->devToolsAgent()->reattach(blink::WebString::fromUTF8(id_), 0,
                                       blink::WebString::fromUTF8(*state));
   }
 }
@@ -33,7 +35,7 @@ DevToolsAgentImpl::~DevToolsAgentImpl() {
 
 void DevToolsAgentImpl::BindToRequest(
     mojo::InterfaceRequest<DevToolsAgent> request) {
-  binding_.Bind(request.Pass());
+  binding_.Bind(std::move(request));
 }
 
 void DevToolsAgentImpl::SetClient(
@@ -41,7 +43,7 @@ void DevToolsAgentImpl::SetClient(
   if (client_)
     frame_->devToolsAgent()->detach();
 
-  client_ = client.Pass();
+  client_ = std::move(client);
   client_.set_connection_error_handler(base::Bind(
       &DevToolsAgentImpl::OnConnectionError, base::Unretained(this)));
 
@@ -52,16 +54,17 @@ void DevToolsAgentImpl::SetClient(
                                        message.state);
     cached_client_messages_.clear();
   } else {
-    frame_->devToolsAgent()->attach(blink::WebString::fromUTF8(id_));
+    frame_->devToolsAgent()->attach(blink::WebString::fromUTF8(id_), 0);
   }
 }
 
 void DevToolsAgentImpl::DispatchProtocolMessage(const mojo::String& message) {
   frame_->devToolsAgent()->dispatchOnInspectorBackend(
-      blink::WebString::fromUTF8(message));
+      0, blink::WebString::fromUTF8(message));
 }
 
-void DevToolsAgentImpl::sendProtocolMessage(int call_id,
+void DevToolsAgentImpl::sendProtocolMessage(int session_id,
+                                            int call_id,
                                             const blink::WebString& response,
                                             const blink::WebString& state) {
   DCHECK(!response.isNull());

@@ -4,6 +4,8 @@
 
 #include "chrome/browser/android/most_visited_sites.h"
 
+#include <utility>
+
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
@@ -82,12 +84,6 @@ enum MostVisitedTileType {
     ICON_COLOR,
     // The item displays a default gray box in place of an icon.
     ICON_DEFAULT,
-    // The item displays a locally-captured thumbnail of the site content.
-    THUMBNAIL_LOCAL,
-    // The item displays a server-provided thumbnail of the site content.
-    THUMBNAIL_SERVER,
-    // The item displays a default graphic in place of a thumbnail.
-    THUMBNAIL_DEFAULT,
     NUM_TILE_TYPES,
 };
 
@@ -99,7 +95,7 @@ scoped_ptr<SkBitmap> MaybeFetchLocalThumbnail(
   scoped_ptr<SkBitmap> bitmap;
   if (top_sites && top_sites->GetPageThumbnail(url, false, &image))
     bitmap.reset(gfx::JPEGCodec::Decode(image->front(), image->size()));
-  return bitmap.Pass();
+  return bitmap;
 }
 
 // Log an event for a given |histogram| at a given element |position|. This
@@ -238,14 +234,15 @@ MostVisitedSites::~MostVisitedSites() {
     profile_sync_service->RemoveObserver(this);
 }
 
-void MostVisitedSites::Destroy(JNIEnv* env, jobject obj) {
+void MostVisitedSites::Destroy(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   delete this;
 }
 
-void MostVisitedSites::SetMostVisitedURLsObserver(JNIEnv* env,
-                                                  jobject obj,
-                                                  jobject j_observer,
-                                                  jint num_sites) {
+void MostVisitedSites::SetMostVisitedURLsObserver(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jobject>& j_observer,
+    jint num_sites) {
   observer_.Reset(env, j_observer);
   num_sites_ = num_sites;
 
@@ -277,10 +274,11 @@ void MostVisitedSites::SetMostVisitedURLsObserver(JNIEnv* env,
   }
 }
 
-void MostVisitedSites::GetURLThumbnail(JNIEnv* env,
-                                       jobject obj,
-                                       jstring j_url,
-                                       jobject j_callback_obj) {
+void MostVisitedSites::GetURLThumbnail(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& j_url,
+    const JavaParamRef<jobject>& j_callback_obj) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   scoped_ptr<ScopedJavaGlobalRef<jobject>> j_callback(
       new ScopedJavaGlobalRef<jobject>());
@@ -335,7 +333,7 @@ void MostVisitedSites::OnLocalThumbnailFetched(
       }
     }
   }
-  OnObtainedThumbnail(true, j_callback.Pass(), url, bitmap.get());
+  OnObtainedThumbnail(true, std::move(j_callback), url, bitmap.get());
 }
 
 void MostVisitedSites::OnObtainedThumbnail(
@@ -353,8 +351,8 @@ void MostVisitedSites::OnObtainedThumbnail(
 }
 
 void MostVisitedSites::BlacklistUrl(JNIEnv* env,
-                                    jobject obj,
-                                    jstring j_url) {
+                                    const JavaParamRef<jobject>& obj,
+                                    const JavaParamRef<jstring>& j_url) {
   GURL url(ConvertJavaStringToUTF8(env, j_url));
 
   // Always blacklist in the local TopSites.
@@ -374,10 +372,10 @@ void MostVisitedSites::BlacklistUrl(JNIEnv* env,
   }
 }
 
-void MostVisitedSites::RecordTileTypeMetrics(JNIEnv* env,
-                                             jobject obj,
-                                             jintArray jtile_types,
-                                             jboolean is_icon_mode) {
+void MostVisitedSites::RecordTileTypeMetrics(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jintArray>& jtile_types) {
   std::vector<int> tile_types;
   base::android::JavaIntArrayToIntVector(env, jtile_types, &tile_types);
   DCHECK_EQ(current_suggestions_.size(), tile_types.size());
@@ -392,27 +390,19 @@ void MostVisitedSites::RecordTileTypeMetrics(JNIEnv* env,
     LogHistogramEvent(histogram, tile_type, NUM_TILE_TYPES);
   }
 
-  if (is_icon_mode) {
-    UMA_HISTOGRAM_SPARSE_SLOWLY("NewTabPage.IconsReal",
-                                counts_per_type[ICON_REAL]);
-    UMA_HISTOGRAM_SPARSE_SLOWLY("NewTabPage.IconsColor",
-                                counts_per_type[ICON_COLOR]);
-    UMA_HISTOGRAM_SPARSE_SLOWLY("NewTabPage.IconsGray",
-                                counts_per_type[ICON_DEFAULT]);
-  } else {
-    UMA_HISTOGRAM_SPARSE_SLOWLY("NewTabPage.NumberOfThumbnailTiles",
-                                counts_per_type[THUMBNAIL_LOCAL]);
-    UMA_HISTOGRAM_SPARSE_SLOWLY("NewTabPage.NumberOfExternalTiles",
-                                counts_per_type[THUMBNAIL_SERVER]);
-    UMA_HISTOGRAM_SPARSE_SLOWLY("NewTabPage.NumberOfGrayTiles",
-                                counts_per_type[THUMBNAIL_DEFAULT]);
-  }
+  UMA_HISTOGRAM_SPARSE_SLOWLY("NewTabPage.IconsReal",
+                              counts_per_type[ICON_REAL]);
+  UMA_HISTOGRAM_SPARSE_SLOWLY("NewTabPage.IconsColor",
+                              counts_per_type[ICON_COLOR]);
+  UMA_HISTOGRAM_SPARSE_SLOWLY("NewTabPage.IconsGray",
+                              counts_per_type[ICON_DEFAULT]);
 }
 
-void MostVisitedSites::RecordOpenedMostVisitedItem(JNIEnv* env,
-                                                   jobject obj,
-                                                   jint index,
-                                                   jint tile_type) {
+void MostVisitedSites::RecordOpenedMostVisitedItem(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jint index,
+    jint tile_type) {
   DCHECK_GE(index, 0);
   DCHECK_LT(index, static_cast<int>(current_suggestions_.size()));
   std::string histogram = base::StringPrintf(
@@ -600,7 +590,7 @@ ScopedVector<MostVisitedSites::Suggestion> MostVisitedSites::MergeSuggestions(
   // Insert leftover popular suggestions.
   InsertAllSuggestions(filled_so_far, new_popular_suggestions,
                        popular_suggestions, &merged_suggestions);
-  return merged_suggestions.Pass();
+  return merged_suggestions;
 }
 
 void MostVisitedSites::GetPreviousNTPSites(

@@ -7,36 +7,50 @@
 
 #include "base/android/jni_android.h"
 #include "base/macros.h"
+#include "blimp/client/session/navigation_feature.h"
 
 class GURL;
 class SkBitmap;
 
 namespace blimp {
+namespace client {
 
 // The native component of org.chromium.blimp.toolbar.Toolbar.  This handles
 // marshalling calls between Java and native.  Specifically, this passes calls
-// between Toolbar.java <=> content_lite's NavigationController layer.
-class Toolbar {
+// between Toolbar.java <=> NavigationFeature.
+class Toolbar : public NavigationFeature::NavigationFeatureDelegate {
  public:
   static bool RegisterJni(JNIEnv* env);
 
-  Toolbar(JNIEnv* env, const base::android::JavaParamRef<jobject>& jobj);
+  Toolbar(JNIEnv* env,
+          const base::android::JavaParamRef<jobject>& jobj,
+          NavigationFeature* navigation_feature);
 
   // Methods called from Java via JNI.
-  void Destroy(JNIEnv* env, jobject jobj);
-  void OnUrlTextEntered(JNIEnv* env, jobject jobj, jstring text);
-  void OnReloadPressed(JNIEnv* env, jobject jobj);
-  jboolean OnBackPressed(JNIEnv* env, jobject jobj);
+  void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& jobj);
+  void OnUrlTextEntered(JNIEnv* env,
+                        const base::android::JavaParamRef<jobject>& jobj,
+                        const base::android::JavaParamRef<jstring>& text);
+  void OnReloadPressed(JNIEnv* env,
+                       const base::android::JavaParamRef<jobject>& jobj);
+  void OnForwardPressed(JNIEnv* env,
+                        const base::android::JavaParamRef<jobject>& jobj);
+  jboolean OnBackPressed(JNIEnv* env,
+                         const base::android::JavaParamRef<jobject>& jobj);
 
-  // TODO(dtrainor): To be called by a the content lite NavigationController.
-  // Should probably be an overridden delegate method so the network code can be
-  // multi platform.
-  void OnNavigationStateChanged(const GURL* url,
-                                const SkBitmap* favicon,
-                                const std::string* title);
+  // NavigationFeatureDelegate implementation.
+  void OnUrlChanged(int tab_id, const GURL& url) override;
+  void OnFaviconChanged(int tab_id, const SkBitmap& favicon) override;
+  void OnTitleChanged(int tab_id, const std::string& title) override;
+  void OnLoadingChanged(int tab_id, bool loading) override;
 
  private:
   virtual ~Toolbar();
+
+  // A bridge to the network layer which does the work of (de)serializing the
+  // outgoing and incoming navigation messages from the engine. Toolbar does not
+  // own this and it is expected to outlive this Toolbar instance.
+  NavigationFeature* navigation_feature_;
 
   // Reference to the Java object which owns this class.
   base::android::ScopedJavaGlobalRef<jobject> java_obj_;
@@ -44,6 +58,7 @@ class Toolbar {
   DISALLOW_COPY_AND_ASSIGN(Toolbar);
 };
 
+}  // namespace client
 }  // namespace blimp
 
 #endif  // BLIMP_CLIENT_ANDROID_TOOLBAR_H_

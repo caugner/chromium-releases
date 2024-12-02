@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_CONTENT_SETTING_IMAGE_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_CONTENT_SETTING_IMAGE_VIEW_H_
 
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/content_settings/content_setting_image_model.h"
 #include "chrome/browser/ui/views/location_bar/icon_label_bubble_view.h"
@@ -39,11 +40,9 @@ class ContentSettingImageView : public IconLabelBubbleView,
                                 public views::WidgetObserver {
  public:
   // ContentSettingImageView takes ownership of its |image_model|.
-  // TODO(estade): remove |text_color| because it isn't necessary for MD.
   ContentSettingImageView(ContentSettingImageModel* image_model,
                           LocationBarView* parent,
                           const gfx::FontList& font_list,
-                          SkColor text_color,
                           SkColor parent_background_color);
   ~ContentSettingImageView() override;
 
@@ -75,11 +74,14 @@ class ContentSettingImageView : public IconLabelBubbleView,
   bool OnMousePressed(const ui::MouseEvent& event) override;
   void OnMouseReleased(const ui::MouseEvent& event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
+  void OnNativeThemeChanged(const ui::NativeTheme* native_theme) override;
 
   // views::WidgetObserver:
   void OnWidgetDestroying(views::Widget* widget) override;
 
   void OnClick();
+
+  void UpdateImage();
 
   LocationBarView* parent_;  // Weak, owns us.
   scoped_ptr<ContentSettingImageModel> content_setting_image_model_;

@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/inspector/InspectorInputAgent.h"
 
 #include "core/frame/FrameView.h"
@@ -101,10 +100,10 @@ public:
     }
 };
 
-void ConvertInspectorPoint(blink::LocalFrame* frame, const blink::IntPoint& point, blink::IntPoint* convertedPoint, blink::IntPoint* globalPoint)
+void ConvertInspectorPoint(blink::LocalFrame* frame, const blink::IntPoint& pointInFrame, blink::IntPoint* convertedPoint, blink::IntPoint* globalPoint)
 {
-    *convertedPoint = frame->view()->convertToContainingWindow(point);
-    *globalPoint = frame->page()->chromeClient().viewportToScreen(blink::IntRect(point, blink::IntSize(0, 0))).location();
+    *convertedPoint = frame->view()->convertToRootFrame(pointInFrame);
+    *globalPoint = frame->page()->chromeClient().viewportToScreen(blink::IntRect(pointInFrame, blink::IntSize(0, 0))).location();
 }
 
 } // namespace
@@ -208,8 +207,8 @@ void InspectorInputAgent::dispatchTouchEvent(ErrorString* error, const String& t
 
 DEFINE_TRACE(InspectorInputAgent)
 {
+    visitor->trace(m_inspectedFrames);
     InspectorBaseAgent::trace(visitor);
 }
 
 } // namespace blink
-

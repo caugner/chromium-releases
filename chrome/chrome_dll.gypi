@@ -116,8 +116,6 @@
             'app/chrome_main_delegate.h',
             'app/chrome_main_mac.h',
             'app/chrome_main_mac.mm',
-            'app/close_handle_hook_win.cc',
-            'app/close_handle_hook_win.h',
             'app/delay_load_hook_win.cc',
             'app/delay_load_hook_win.h',
           ],
@@ -300,6 +298,7 @@
               'dependencies': [
                 '../components/components.gyp:crash_component',
                 '../components/components.gyp:policy',
+                '../third_party/crashpad/crashpad/handler/handler.gyp:crashpad_handler',
               ],
               'sources': [
                 'app/chrome_crash_reporter_client.cc',
@@ -350,7 +349,9 @@
           },
           'dependencies': [
             '<@(chromium_child_dependencies)',
+            '../components/components.gyp:browser_watcher_client',
             '../content/content.gyp:content_app_child',
+            '../third_party/kasko/kasko.gyp:kasko',
             'chrome_version_resources',
             'policy_path_parser',
           ],
@@ -362,10 +363,13 @@
             'app/chrome_main.cc',
             'app/chrome_main_delegate.cc',
             'app/chrome_main_delegate.h',
-            'app/close_handle_hook_win.cc',
-            'app/close_handle_hook_win.h',
           ],
           'conditions': [
+            ['OS=="win" and win_use_allocator_shim==1', {
+              'dependencies': [
+                '<(allocator_target)',
+              ],
+            }],
             ['OS=="win"', {
               'conditions': [
                 ['chrome_pgo_phase==1', {
@@ -386,6 +390,16 @@
                   },
                 }],
               ]
+            }],
+            ['OS=="win" and configuration_policy==1', {
+              'dependencies': [
+                '<(DEPTH)/components/components.gyp:policy',
+              ],
+            }],
+            ['configuration_policy==1', {
+              'dependencies': [
+                'policy_path_parser',
+              ],
             }],
             ['enable_plugins==1', {
               'dependencies': [

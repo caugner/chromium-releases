@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/app_list/app_context_menu.h"
 
 #include "base/bind.h"
+#include "build/build_config.h"
 #include "chrome/browser/extensions/context_menu_matcher.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/menu_manager.h"
@@ -99,7 +100,8 @@ ui::MenuModel* AppContextMenu::GetMenuModel() {
       menu_model_->AddItem(LAUNCH_NEW, base::string16());
 
     // Show Pin/Unpin option if shelf is available.
-    if (controller_->GetPinnable() != AppListControllerDelegate::NO_PIN) {
+    if (controller_->GetPinnable(app_id_) !=
+        AppListControllerDelegate::NO_PIN) {
       menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
       menu_model_->AddItemWithStringId(
           TOGGLE_PIN,
@@ -189,8 +191,13 @@ bool AppContextMenu::IsItemForCommandIdDynamic(int command_id) const {
 
 base::string16 AppContextMenu::GetLabelForCommandId(int command_id) const {
   if (command_id == TOGGLE_PIN) {
-    // Return "{Pin to, Unpin from} shelf". Note this only exists on Ash
-    // desktops.
+    // Return "{Pin to, Unpin from} shelf" or "Pinned by administrator".
+    // Note this only exists on Ash desktops.
+    if (controller_->GetPinnable(app_id_) ==
+        AppListControllerDelegate::PIN_FIXED) {
+      return l10n_util::GetStringUTF16(
+          IDS_APP_LIST_CONTEXT_MENU_PIN_ENFORCED_BY_POLICY);
+    }
     return controller_->IsAppPinned(app_id_) ?
         l10n_util::GetStringUTF16(IDS_APP_LIST_CONTEXT_MENU_UNPIN) :
         l10n_util::GetStringUTF16(IDS_APP_LIST_CONTEXT_MENU_PIN);
@@ -232,8 +239,8 @@ bool AppContextMenu::IsCommandIdChecked(int command_id) const {
 
 bool AppContextMenu::IsCommandIdEnabled(int command_id) const {
   if (command_id == TOGGLE_PIN) {
-    return controller_->GetPinnable() ==
-        AppListControllerDelegate::PIN_EDITABLE;
+    return controller_->GetPinnable(app_id_) ==
+           AppListControllerDelegate::PIN_EDITABLE;
   } else if (command_id == OPTIONS) {
     return controller_->HasOptionsPage(profile_, app_id_);
   } else if (command_id == UNINSTALL) {
@@ -262,8 +269,9 @@ bool AppContextMenu::GetAcceleratorForCommandId(
 void AppContextMenu::ExecuteCommand(int command_id, int event_flags) {
   if (command_id == LAUNCH_NEW) {
     delegate_->ExecuteLaunchCommand(event_flags);
-  } else if (command_id == TOGGLE_PIN && controller_->GetPinnable() ==
-      AppListControllerDelegate::PIN_EDITABLE) {
+  } else if (command_id == TOGGLE_PIN &&
+             controller_->GetPinnable(app_id_) ==
+                 AppListControllerDelegate::PIN_EDITABLE) {
     if (controller_->IsAppPinned(app_id_))
       controller_->UnpinApp(app_id_);
     else

@@ -79,9 +79,8 @@ public:
 #endif
 
     const WillBeHeapVector<RefPtrWillBeMember<StyleSheet>>& styleSheetsForStyleSheetList(TreeScope&);
-    const WillBeHeapVector<RefPtrWillBeMember<CSSStyleSheet>>& activeAuthorStyleSheets() const;
 
-    const WillBeHeapVector<RefPtrWillBeMember<CSSStyleSheet>>& documentAuthorStyleSheets() const { return m_authorStyleSheets; }
+    const WillBeHeapVector<RefPtrWillBeMember<CSSStyleSheet>>& injectedAuthorStyleSheets() const { return m_injectedAuthorStyleSheets; }
 
     const WillBeHeapVector<RefPtrWillBeMember<CSSStyleSheet>> activeStyleSheetsForInspector() const;
 
@@ -91,7 +90,7 @@ public:
     void removeStyleSheetCandidateNode(Node*, TreeScope&);
     void modifiedStyleSheetCandidateNode(Node*);
 
-    void addAuthorSheet(PassRefPtrWillBeRawPtr<StyleSheetContents> authorSheet);
+    void injectAuthorSheet(PassRefPtrWillBeRawPtr<StyleSheetContents> authorSheet);
 
     void clearMediaQueryRuleSetStyleSheets();
     void updateStyleSheetsInImport(DocumentStyleSheetCollector& parentCollector);
@@ -219,6 +218,8 @@ private:
 
     void updateActiveStyleSheetsInShadow(StyleResolverUpdateMode, TreeScope*, UnorderedTreeScopeSet& treeScopesRemoved);
 
+    bool shouldSkipInvalidationFor(const Element&) const;
+
     RawPtrWillBeMember<Document> m_document;
     bool m_isMaster;
 
@@ -228,7 +229,7 @@ private:
     // elements and when it is safe to execute scripts.
     int m_pendingStylesheets;
 
-    WillBeHeapVector<RefPtrWillBeMember<CSSStyleSheet>> m_authorStyleSheets;
+    WillBeHeapVector<RefPtrWillBeMember<CSSStyleSheet>> m_injectedAuthorStyleSheets;
 
     OwnPtrWillBeMember<DocumentStyleSheetCollection> m_documentStyleSheetCollection;
 

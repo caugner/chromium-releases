@@ -7,10 +7,13 @@
 #ifndef CHROME_COMMON_URL_CONSTANTS_H_
 #define CHROME_COMMON_URL_CONSTANTS_H_
 
+#include <stddef.h>
+
 #include <string>
 #include <vector>
 
 #include "build/build_config.h"
+#include "chrome/common/features.h"
 #include "content/public/common/url_constants.h"
 
 namespace chrome {
@@ -83,7 +86,7 @@ extern const char kChromeUIUberFrameURL[];
 extern const char kChromeUIUserActionsURL[];
 extern const char kChromeUIVersionURL[];
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ANDROID_JAVA_UI)
 extern const char kChromeUIContextualSearchPromoURL[];
 extern const char kChromeUINativeScheme[];
 extern const char kChromeUINativeNewTabURL[];
@@ -97,14 +100,12 @@ extern const char kChromeUICertificateManagerDialogURL[];
 extern const char kChromeUIChooseMobileNetworkURL[];
 extern const char kChromeUIDeviceEmulatorURL[];
 extern const char kChromeUIFirstRunURL[];
-extern const char kChromeUIImageBurnerURL[];
 extern const char kChromeUIKeyboardOverlayURL[];
 extern const char kChromeUIMobileSetupURL[];
 extern const char kChromeUINfcDebugURL[];
 extern const char kChromeUIOobeURL[];
 extern const char kChromeUIOSCreditsURL[];
 extern const char kChromeUIProxySettingsURL[];
-extern const char kChromeUISalsaURL[];
 extern const char kChromeUIScreenlockIconURL[];
 extern const char kChromeUISetTimeURL[];
 extern const char kChromeUISimUnlockURL[];
@@ -116,11 +117,6 @@ extern const char kChromeUIUserImageURL[];
 
 #if defined(OS_WIN)
 extern const char kChromeUIMetroFlowURL[];
-#endif
-
-#if defined(USE_AURA)
-extern const char kChromeUIGestureConfigURL[];
-extern const char kChromeUIGestureConfigHost[];
 #endif
 
 #if (defined(OS_LINUX) && defined(TOOLKIT_VIEWS)) || defined(USE_AURA)
@@ -237,7 +233,6 @@ extern const char kChromeUIUberFrameHost[];
 extern const char kChromeUIUberHost[];
 extern const char kChromeUIUserActionsHost[];
 extern const char kChromeUIVersionHost[];
-extern const char kChromeUIWebRTCDeviceProviderHost[];
 extern const char kChromeUIWorkersHost[];
 
 extern const char kChromeUIThemePath[];
@@ -265,7 +260,6 @@ extern const char kChromeUIChooseMobileNetworkHost[];
 extern const char kChromeUICryptohomeHost[];
 extern const char kChromeUIDeviceEmulatorHost[];
 extern const char kChromeUIFirstRunHost[];
-extern const char kChromeUIImageBurnerHost[];
 extern const char kChromeUIKeyboardOverlayHost[];
 extern const char kChromeUILoginContainerHost[];
 extern const char kChromeUILoginHost[];
@@ -277,7 +271,6 @@ extern const char kChromeUIOSCreditsHost[];
 extern const char kChromeUIPowerHost[];
 extern const char kChromeUIProxySettingsHost[];
 extern const char kChromeUIRotateHost[];
-extern const char kChromeUISalsaHost[];
 extern const char kChromeUIScreenlockIconHost[];
 extern const char kChromeUISetTimeHost[];
 extern const char kChromeUISimUnlockHost[];
@@ -324,6 +317,7 @@ extern const char kImportDataSubPage[];
 extern const char kLanguageOptionsSubPage[];
 extern const char kManageProfileSubPage[];
 extern const char kPasswordManagerSubPage[];
+extern const char kPowerOptionsSubPage[];
 extern const char kResetProfileSettingsSubPage[];
 extern const char kSearchEnginesSubPage[];
 extern const char kSearchSubPage[];
@@ -347,7 +341,6 @@ extern const char kSyncGoogleDashboardURL[];
 
 extern const char kPasswordManagerLearnMoreURL[];
 extern const char kUpgradeHelpCenterBaseURL[];
-extern const char kPasswordManagerAccountDashboardURL[];
 extern const char kSmartLockHelpPage[];
 
 // "Learn more" URL for the Settings API, NTP bubble and other settings bubbles

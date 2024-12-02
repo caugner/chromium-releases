@@ -5,6 +5,7 @@
 #include "chrome/browser/metrics/variations/chrome_variations_service_client.h"
 
 #include "base/bind.h"
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/channel_info.h"
 #include "components/version_info/version_info.h"
@@ -17,10 +18,6 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #endif
-
-#if defined(OS_ANDROID)
-#include "components/variations/android/variations_seed_bridge.h"
-#endif  // OS_ANDROID
 
 namespace {
 
@@ -81,15 +78,6 @@ bool ChromeVariationsServiceClient::OverridesRestrictParameter(
 #else
   return false;
 #endif
-}
-
-variations::VariationsFirstRunSeedCallback
-ChromeVariationsServiceClient::GetVariationsFirstRunSeedCallback() {
-#if defined(OS_ANDROID)
-  return base::Bind(&variations::android::GetVariationsFirstRunSeed);
-#else   // OS_ANDROID
-  return variations::VariationsFirstRunSeedCallback();
-#endif  // OS_ANDROID
 }
 
 void ChromeVariationsServiceClient::OnInitialStartup() {

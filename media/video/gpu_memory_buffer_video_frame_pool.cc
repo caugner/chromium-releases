@@ -6,6 +6,8 @@
 
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <algorithm>
 #include <list>
@@ -15,6 +17,7 @@
 #include "base/bind.h"
 #include "base/containers/stack_container.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/memory/linked_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/memory_dump_provider.h"
@@ -81,9 +84,24 @@ class GpuMemoryBufferVideoFramePool::PoolImpl
   // All the resources needed to compose a frame.
   struct FrameResources {
     explicit FrameResources(const gfx::Size& size) : size(size) {}
-    bool in_use = true;
-    gfx::Size size;
+    void SetIsInUse(bool in_use) { in_use_ = in_use; }
+    bool IsInUse() const {
+      if (in_use_)
+        return true;
+      for (const PlaneResource& plane_resource : plane_resources) {
+        if (plane_resource.gpu_memory_buffer &&
+            plane_resource.gpu_memory_buffer->IsInUseByMacOSWindowServer()) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    const gfx::Size size;
     PlaneResource plane_resources[VideoFrame::kMaxPlanes];
+
+   private:
+    bool in_use_ = true;
   };
 
   // Copy |video_frame| data into |frame_resouces|
@@ -225,9 +243,9 @@ int RowsPerCopy(size_t plane, VideoPixelFormat format, int width) {
 void CopyRowsToI420Buffer(int first_row,
                           int rows,
                           int bytes_per_row,
-                          const uint8* source,
+                          const uint8_t* source,
                           int source_stride,
-                          uint8* output,
+                          uint8_t* output,
                           int dest_stride,
                           const base::Closure& done) {
   TRACE_EVENT2("media", "CopyRowsToI420Buffer", "bytes_per_row", bytes_per_row,
@@ -248,9 +266,9 @@ void CopyRowsToNV12Buffer(int first_row,
                           int rows,
                           int bytes_per_row,
                           const scoped_refptr<VideoFrame>& source_frame,
-                          uint8* dest_y,
+                          uint8_t* dest_y,
                           int dest_stride_y,
-                          uint8* dest_uv,
+                          uint8_t* dest_uv,
                           int dest_stride_uv,
                           const base::Closure& done) {
   TRACE_EVENT2("media", "CopyRowsToNV12Buffer", "bytes_per_row", bytes_per_row,
@@ -283,7 +301,7 @@ void CopyRowsToUYVYBuffer(int first_row,
                           int rows,
                           int width,
                           const scoped_refptr<VideoFrame>& source_frame,
-                          uint8* output,
+                          uint8_t* output,
                           int dest_stride,
                           const base::Closure& done) {
   TRACE_EVENT2("media", "CopyRowsToUYVYBuffer", "bytes_per_row", width * 2,
@@ -391,7 +409,7 @@ void GpuMemoryBufferVideoFramePool::PoolImpl::CreateHardwareFrame(
 bool GpuMemoryBufferVideoFramePool::PoolImpl::OnMemoryDump(
     const base::trace_event::MemoryDumpArgs& args,
     base::trace_event::ProcessMemoryDump* pmd) {
-  const uint64 tracing_process_id =
+  const uint64_t tracing_process_id =
       base::trace_event::MemoryDumpManager::GetInstance()
           ->GetTracingProcessId();
   const int kImportance = 2;
@@ -412,7 +430,7 @@ bool GpuMemoryBufferVideoFramePool::PoolImpl::OnMemoryDump(
                         buffer_size_in_bytes);
         dump->AddScalar("free_size",
                         base::trace_event::MemoryAllocatorDump::kUnitsBytes,
-                        frame_resources->in_use ? 0 : buffer_size_in_bytes);
+                        frame_resources->IsInUse() ? 0 : buffer_size_in_bytes);
         base::trace_event::MemoryAllocatorDumpGuid shared_buffer_guid =
             gfx::GetGpuMemoryBufferGUIDForTracing(tracing_process_id,
                                                   buffer_id);
@@ -561,7 +579,11 @@ void GpuMemoryBufferVideoFramePool::PoolImpl::
   // Insert a sync_token, this is needed to make sure that the textures the
   // mailboxes refer to will be used only after all the previous commands posted
   // in the command buffer have been processed.
-  gpu::SyncToken sync_token(gles2->InsertSyncPointCHROMIUM());
+  const GLuint64 fence_sync = gles2->InsertFenceSyncCHROMIUM();
+  gles2->OrderingBarrierCHROMIUM();
+
+  gpu::SyncToken sync_token;
+  gles2->GenUnverifiedSyncTokenCHROMIUM(fence_sync, sync_token.GetData());
   for (size_t i = 0; i < num_planes; i += planes_per_copy)
     mailbox_holders[i].sync_token = sync_token;
 
@@ -580,7 +602,8 @@ void GpuMemoryBufferVideoFramePool::PoolImpl::
           mailbox_holders[VideoFrame::kVPlane], release_mailbox_callback,
           coded_size, gfx::Rect(visible_size), video_frame->natural_size(),
           video_frame->timestamp());
-      if (video_frame->metadata()->IsTrue(VideoFrameMetadata::ALLOW_OVERLAY))
+      if (frame &&
+          video_frame->metadata()->IsTrue(VideoFrameMetadata::ALLOW_OVERLAY))
         frame->metadata()->SetBoolean(VideoFrameMetadata::ALLOW_OVERLAY, true);
       break;
     case PIXEL_FORMAT_NV12:
@@ -589,10 +612,17 @@ void GpuMemoryBufferVideoFramePool::PoolImpl::
           output_format_, mailbox_holders[VideoFrame::kYPlane],
           release_mailbox_callback, coded_size, gfx::Rect(visible_size),
           video_frame->natural_size(), video_frame->timestamp());
-      frame->metadata()->SetBoolean(VideoFrameMetadata::ALLOW_OVERLAY, true);
+      if (frame)
+        frame->metadata()->SetBoolean(VideoFrameMetadata::ALLOW_OVERLAY, true);
       break;
     default:
       NOTREACHED();
+  }
+
+  if (!frame) {
+    release_mailbox_callback.Run(gpu::SyncToken());
+    frame_ready_cb.Run(video_frame);
+    return;
   }
 
   base::TimeTicks render_time;
@@ -627,9 +657,9 @@ GpuMemoryBufferVideoFramePool::PoolImpl::GetOrCreateFrameResources(
   auto it = resources_pool_.begin();
   while (it != resources_pool_.end()) {
     FrameResources* frame_resources = *it;
-    if (!frame_resources->in_use) {
+    if (!frame_resources->IsInUse()) {
       if (AreFrameResourcesCompatible(frame_resources, size)) {
-        frame_resources->in_use = true;
+        frame_resources->SetIsInUse(true);
         return frame_resources;
       } else {
         resources_pool_.erase(it++);
@@ -717,7 +747,7 @@ void GpuMemoryBufferVideoFramePool::PoolImpl::ReturnFrameResources(
   // This minimizes the chances of locking the buffer that might be
   // still needed for drawing.
   std::swap(*it, resources_pool_.back());
-  frame_resources->in_use = false;
+  frame_resources->SetIsInUse(false);
 }
 
 GpuMemoryBufferVideoFramePool::GpuMemoryBufferVideoFramePool() {}

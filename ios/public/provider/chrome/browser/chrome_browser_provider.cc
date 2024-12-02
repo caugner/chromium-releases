@@ -4,8 +4,12 @@
 
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 
+#include <cstddef>
+
 #include "base/logging.h"
-#include "ios/public/provider/chrome/browser/keyed_service_provider.h"
+#include "components/metrics/metrics_provider.h"
+#include "components/sync_sessions/synced_window_delegates_getter.h"
+#include "ios/public/provider/chrome/browser/browser_state/chrome_browser_state_manager.h"
 
 namespace ios {
 
@@ -21,28 +25,16 @@ ChromeBrowserProvider* GetChromeBrowserProvider() {
   return g_chrome_browser_provider;
 }
 
-ChromeBrowserProvider::~ChromeBrowserProvider() {
-}
+ChromeBrowserProvider::~ChromeBrowserProvider() {}
 
 // A dummy implementation of ChromeBrowserProvider.
 
-ChromeBrowserProvider::ChromeBrowserProvider() {
-}
+ChromeBrowserProvider::ChromeBrowserProvider() {}
 
-net::URLRequestContextGetter*
-ChromeBrowserProvider::GetSystemURLRequestContext() {
-  return nullptr;
-}
-
-void ChromeBrowserProvider::AssertBrowserContextKeyedFactoriesBuilt() {
-}
-
-void ChromeBrowserProvider::RegisterLocalState(PrefRegistrySimple* registry) {
-}
+void ChromeBrowserProvider::AssertBrowserContextKeyedFactoriesBuilt() {}
 
 void ChromeBrowserProvider::RegisterProfilePrefs(
-    user_prefs::PrefRegistrySyncable* registry) {
-}
+    user_prefs::PrefRegistrySyncable* registry) {}
 
 ProfileOAuth2TokenServiceIOSProvider*
 ChromeBrowserProvider::GetProfileOAuth2TokenServiceIOSProvider() {
@@ -54,9 +46,9 @@ ChromeBrowserProvider::GetUpdatableResourceProvider() {
   return nullptr;
 }
 
-ChromeBrowserStateManager*
-ChromeBrowserProvider::GetChromeBrowserStateManager() {
-  return nullptr;
+scoped_ptr<ChromeBrowserStateManager>
+ChromeBrowserProvider::CreateChromeBrowserStateManager() {
+  return scoped_ptr<ChromeBrowserStateManager>();
 }
 
 InfoBarViewPlaceholder ChromeBrowserProvider::CreateInfoBarView(
@@ -65,11 +57,11 @@ InfoBarViewPlaceholder ChromeBrowserProvider::CreateInfoBarView(
   return nullptr;
 }
 
-ChromeIdentityService* ChromeBrowserProvider::GetChromeIdentityService() {
+SigninResourcesProvider* ChromeBrowserProvider::GetSigninResourcesProvider() {
   return nullptr;
 }
 
-StringProvider* ChromeBrowserProvider::GetStringProvider() {
+ChromeIdentityService* ChromeBrowserProvider::GetChromeIdentityService() {
   return nullptr;
 }
 
@@ -82,21 +74,16 @@ ChromeBrowserProvider::GetGeolocationUpdaterProvider() {
   return nullptr;
 }
 
+std::string ChromeBrowserProvider::DataReductionProxyAvailability() {
+  return "default";
+}
+
 std::string ChromeBrowserProvider::GetDistributionBrandCode() {
   return std::string();
 }
 
 void ChromeBrowserProvider::SetUIViewAlphaWithAnimation(UIView* view,
-                                                        float alpha) {
-}
-
-metrics::MetricsService* ChromeBrowserProvider::GetMetricsService() {
-  return nullptr;
-}
-
-variations::VariationsService* ChromeBrowserProvider::GetVariationsService() {
-  return nullptr;
-}
+                                                        float alpha) {}
 
 autofill::CardUnmaskPromptView*
 ChromeBrowserProvider::CreateCardUnmaskPromptView(
@@ -106,15 +93,6 @@ ChromeBrowserProvider::CreateCardUnmaskPromptView(
 
 std::string ChromeBrowserProvider::GetRiskData() {
   return std::string();
-}
-
-policy::BrowserPolicyConnector*
-ChromeBrowserProvider::GetBrowserPolicyConnector() {
-  return nullptr;
-}
-
-rappor::RapporService* ChromeBrowserProvider::GetRapporService() {
-  return nullptr;
 }
 
 bool ChromeBrowserProvider::IsOffTheRecordSessionActive() {
@@ -127,12 +105,22 @@ void ChromeBrowserProvider::GetFaviconForURL(
     const std::vector<int>& desired_sizes_in_pixel,
     const favicon_base::FaviconResultsCallback& callback) const {}
 
-
 bool ChromeBrowserProvider::IsSafeBrowsingEnabled(
     const base::Closure& on_update_callback) {
   return false;
 }
 
 void ChromeBrowserProvider::OnMetricsServicesManagerClientDestroyed() {}
+
+scoped_ptr<browser_sync::SyncedWindowDelegatesGetter>
+ChromeBrowserProvider::CreateSyncedWindowDelegatesGetter(
+    ios::ChromeBrowserState* browser_state) {
+  return nullptr;
+}
+
+net::URLRequestContextGetter*
+ChromeBrowserProvider::GetSafeBrowsingURLRequestContext() {
+  return nullptr;
+}
 
 }  // namespace ios

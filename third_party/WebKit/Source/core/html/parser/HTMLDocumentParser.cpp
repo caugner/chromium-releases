@@ -23,7 +23,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/html/parser/HTMLDocumentParser.h"
 
 #include "core/HTMLNames.h"
@@ -207,6 +206,7 @@ HTMLDocumentParser::~HTMLDocumentParser()
 DEFINE_TRACE(HTMLDocumentParser)
 {
     visitor->trace(m_treeBuilder);
+    visitor->trace(m_parserScheduler);
     visitor->trace(m_xssAuditorDelegate);
     visitor->trace(m_scriptRunner);
     visitor->trace(m_preloader);
@@ -583,7 +583,7 @@ void HTMLDocumentParser::pumpPendingSpeculations()
     SpeculationsPumpSession session(m_pumpSpeculationsSessionNestingLevel, contextForParsingSession());
     while (!m_speculations.isEmpty()) {
         ASSERT(!isScheduledForResume());
-        size_t elementTokenCount = processParsedChunkFromBackgroundParser(m_speculations.takeFirst());
+        size_t elementTokenCount = processParsedChunkFromBackgroundParser(m_speculations.takeFirst().release());
         session.addedElementTokens(elementTokenCount);
 
         // Always check isParsing first as m_document may be null.

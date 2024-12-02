@@ -19,17 +19,7 @@ function test()
                 return;
             }
 
-            InspectorTest.dumpUISourceCode(uiSourceCodes[startIndex], dumpCallback.bind(this, uiSourceCodes, startIndex, next));
-            function dumpCallback(uiSourceCodes, startIndex, next)
-            {
-                uiSourceCodes[startIndex].requestMetadata(dumpMetadata.bind(this, uiSourceCodes, startIndex, next));
-            }
-
-            function dumpMetadata(uiSourceCodes, startIndex, next, modificationTime, size)
-            {
-                InspectorTest.addResult("modificationTime=" + modificationTime.getTime() + ", size=" + size);
-                innerDumpUISourceCodes.call(this, uiSourceCodes, startIndex + 1, next);
-            }
+            InspectorTest.dumpUISourceCode(uiSourceCodes[startIndex], innerDumpUISourceCodes.bind(this, uiSourceCodes, startIndex + 1, next));
         }
     }
 
@@ -48,7 +38,7 @@ function test()
         InspectorTest.addResult("Dumping uiSourceCodes origin URLs:");
         var uiSourceCodes = InspectorTest.fileSystemUISourceCodes();
         for (var i = 0; i < uiSourceCodes.length; ++i)
-            InspectorTest.addResult("  - " + uiSourceCodes[i].originURL());
+            InspectorTest.addResult("  - " + uiSourceCodes[i].url());
     }
 
     function createFileSystem(name, callback)
@@ -65,8 +55,8 @@ function test()
         function testFileSystems(next)
         {
             InspectorTest.addResult("Adding first file system.");
-            var fs1 = new InspectorTest.TestFileSystem("/var/www");
-            var fs2 = new InspectorTest.TestFileSystem("/foo/bar");
+            var fs1 = new InspectorTest.TestFileSystem("file:///var/www");
+            var fs2 = new InspectorTest.TestFileSystem("file:///foo/bar");
             InspectorTest.addResult("Adding second file system.");
 
             var uiSourceCodes;
@@ -77,8 +67,8 @@ function test()
             function fileSystemCreated()
             {
                 InspectorTest.addResult("Adding file mappings.");
-                WebInspector.fileSystemMapping.addFileMapping("/var/www", "http://localhost/", "/localhost/");
-                WebInspector.fileSystemMapping.addFileMapping("/foo/bar", "http://www.example.com/", "/");
+                WebInspector.fileSystemMapping.addFileMapping("file:///var/www", "http://localhost/", "/localhost/");
+                WebInspector.fileSystemMapping.addFileMapping("file:///foo/bar", "http://www.example.com/", "/");
 
                 InspectorTest.addResult("Adding files to file systems.");
 
@@ -104,14 +94,14 @@ function test()
                     var url = WebInspector.networkMapping.networkURL(uiSourceCodes[i]);
                     if (!url)
                         continue;
-                    InspectorTest.addResult("    " + uiSourceCodes[i].uri() + " -> " + url);
+                    InspectorTest.addResult("    " + uiSourceCodes[i].url() + " -> " + url);
                 }
                 InspectorTest.addResult("UISourceCode url to uri mappings:");
                 for (var i = 0; i < uiSourceCodes.length; ++i) {
                     var url = WebInspector.networkMapping.networkURL(uiSourceCodes[i]);
                     if (!url)
                         continue;
-                    var uri = WebInspector.networkMapping.uiSourceCodeForURLForAnyTarget(url).uri();
+                    var uri = WebInspector.networkMapping.uiSourceCodeForURLForAnyTarget(url).url();
                     InspectorTest.addResult("    " + url + " -> " + uri);
                 }
                 WebInspector.workspace.addEventListener(WebInspector.Workspace.Events.WorkingCopyCommitted, contentCommitted, this);
@@ -121,31 +111,20 @@ function test()
             function contentCommitted()
             {
                 InspectorTest.addResult("After revision added:");
-                InspectorTest.dumpUISourceCode(uiSourceCodes[0], dumped);
+                InspectorTest.dumpUISourceCode(uiSourceCodes[0], finalize);
+            }
 
-                function dumped()
-                {
-                    uiSourceCodes[0].requestMetadata(dumpModifiedMetadata);
-                }
-
-                function dumpModifiedMetadata(modificationTime, size)
-                {
-                    InspectorTest.addResult("New modificationTime=" + modificationTime.getTime() + ", size=" + size);
-                    var uiSourceCodesCount = InspectorTest.fileSystemUISourceCodes().length;
-                    InspectorTest.addResult("Removing second file system.");
-                    fs1.reportRemoved();
-                    InspectorTest.addResult("    number of uiSourceCodes in workspace after removing second file system: " + InspectorTest.fileSystemUISourceCodes().length);
-                    InspectorTest.addResult("Removing first file system.");
-                    fs2.reportRemoved();
-                    InspectorTest.addResult("    number of uiSourceCodes in workspace after removing first file system: " + InspectorTest.fileSystemUISourceCodes().length);
-                    next();
-                }
+            function finalize()
+            {
+                fs1.reportRemoved();
+                fs2.reportRemoved();
+                next();
             }
         },
 
         function testDefaultExcludes(next)
         {
-            createFileSystem("/var/www", dumpExcludes);
+            createFileSystem("file:///var/www", dumpExcludes);
 
             function dumpExcludes(fs)
             {
@@ -159,8 +138,8 @@ function test()
 
         function testExcludesSettings(next)
         {
-            WebInspector.settings.createLocalSetting("workspaceExcludedFolders", {}).set({"/var/www2":["/html/"]});
-            createFileSystem("/var/www2", dumpExcludes);
+            WebInspector.settings.createLocalSetting("workspaceExcludedFolders", {}).set({"file:///var/www2":["/html/"]});
+            createFileSystem("file:///var/www2", dumpExcludes);
 
             function dumpExcludes(fs)
             {
@@ -174,11 +153,11 @@ function test()
 
         function testExcludesViaDelegate(next)
         {
-            createFileSystem("/var/www3", dumpExcludes);
+            createFileSystem("file:///var/www3", dumpExcludes);
 
             function dumpExcludes(fs)
             {
-                InspectorTest.fileSystemUISourceCodes()[0].project().excludeFolder("/html2/");
+                InspectorTest.fileSystemUISourceCodes()[0].project().excludeFolder("file:///var/www3/html2/");
                 InspectorTest.addResult("");
                 InspectorTest.addResult("-- Excluded /html2/ --");
                 dumpWorkspaceUISourceCodes();
@@ -189,7 +168,7 @@ function test()
 
         function testExcludesViaProject(next)
         {
-            var fs = new InspectorTest.TestFileSystem(name);
+            var fs = new InspectorTest.TestFileSystem("file:///var/www3");
             fs.root.addFile(".devtools", JSON.stringify({excludes:["/html2/"]}));
             fs.root.mkdir("html").addFile("foo.js", "");
             fs.root.mkdir(".git").addFile("foogit.js", "");
@@ -201,6 +180,28 @@ function test()
             {
                 InspectorTest.addResult("");
                 InspectorTest.addResult("-- Excluded /html2/ via .devtools --");
+                dumpWorkspaceUISourceCodes();
+                fs.reportRemoved();
+                next();
+            }
+        },
+
+        function testFileAddedExternally(next)
+        {
+            var fs = new InspectorTest.TestFileSystem("file:///var/www4");
+            var dir = fs.root.mkdir("html");
+            dir.addFile("foo.js", "");
+            fs.reportCreated(dumpFileSystem);
+
+            function dumpFileSystem()
+            {
+                InspectorTest.addResult("-- Original tree --");
+                dumpWorkspaceUISourceCodes();
+
+                dir.addFile("bar.js", "");
+                InspectorFrontendHost.events.dispatchEventToListeners(InspectorFrontendHostAPI.Events.FileSystemFilesChanged, ["/var/www4/html/bar.js"]);
+
+                InspectorTest.addResult("-- File added externally --");
                 dumpWorkspaceUISourceCodes();
                 fs.reportRemoved();
                 next();

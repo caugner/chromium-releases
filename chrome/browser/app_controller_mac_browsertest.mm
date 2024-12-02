@@ -8,6 +8,7 @@
 #import <Foundation/NSAppleEventDescriptor.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
+#include <stddef.h>
 
 #include "base/command_line.h"
 #include "base/mac/foundation_util.h"
@@ -371,7 +372,7 @@ class AppControllerOpenShortcutBrowserTest : public InProcessBrowserTest {
 
     method_exchangeImplementations(original, destination);
 
-    ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+    ASSERT_TRUE(embedded_test_server()->Start());
     g_open_shortcut_url = embedded_test_server()->GetURL("/simple.html");
   }
 
@@ -395,7 +396,7 @@ class AppControllerReplaceNTPBrowserTest : public InProcessBrowserTest {
   AppControllerReplaceNTPBrowserTest() {}
 
   void SetUpInProcessBrowserTestFixture() override {
-    ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+    ASSERT_TRUE(embedded_test_server()->Start());
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -633,7 +634,7 @@ class AppControllerHandoffBrowserTest : public InProcessBrowserTest {
 // switches between browser windows, the correct URL is being passed to the
 // Handoff.
 IN_PROC_BROWSER_TEST_F(AppControllerHandoffBrowserTest, TestHandoffURLs) {
-  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->Start());
   EXPECT_EQ(g_handoff_url, GURL(url::kAboutBlankURL));
 
   // Test that navigating to a URL updates the handoff URL.

@@ -4,6 +4,10 @@
 
 #include "ios/web/app/web_main_loop.h"
 
+#include <stddef.h>
+
+#include <utility>
+
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
@@ -77,7 +81,7 @@ void WebMainLoop::MainMessageLoopStart() {
   // TODO(rohitrao): Do we need PowerMonitor on iOS, or can we get rid of it?
   scoped_ptr<base::PowerMonitorSource> power_monitor_source(
       new base::PowerMonitorDeviceSource());
-  power_monitor_.reset(new base::PowerMonitor(power_monitor_source.Pass()));
+  power_monitor_.reset(new base::PowerMonitor(std::move(power_monitor_source)));
   network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
 
   if (parts_) {

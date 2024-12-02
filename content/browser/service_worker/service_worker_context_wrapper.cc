@@ -7,6 +7,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/barrier_closure.h"
@@ -114,11 +115,8 @@ void ServiceWorkerContextWrapper::Init(
       new ServiceWorkerDatabaseTaskManagerImpl(pool));
   scoped_refptr<base::SingleThreadTaskRunner> disk_cache_thread =
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE);
-  InitInternal(user_data_directory,
-               database_task_manager.Pass(),
-               disk_cache_thread,
-               quota_manager_proxy,
-               special_storage_policy);
+  InitInternal(user_data_directory, std::move(database_task_manager),
+               disk_cache_thread, quota_manager_proxy, special_storage_policy);
 }
 
 void ServiceWorkerContextWrapper::Shutdown() {
@@ -170,7 +168,7 @@ static void FinishRegistrationOnIO(
     const ServiceWorkerContext::ResultCallback& continuation,
     ServiceWorkerStatusCode status,
     const std::string& status_message,
-    int64 registration_id) {
+    int64_t registration_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   BrowserThread::PostTask(
       BrowserThread::UI,
@@ -481,15 +479,19 @@ ServiceWorkerContextWrapper::GetAllLiveVersionInfo() {
   return context_core_->GetAllLiveVersionInfo();
 }
 
-bool ServiceWorkerContextWrapper::HasWindowProviderHost(
-    const GURL& origin) const {
+void ServiceWorkerContextWrapper::HasMainFrameProviderHost(
+    const GURL& origin,
+    const BoolCallback& callback) const {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (!context_core_)
-    return false;
-  return context_core_->HasWindowProviderHost(origin);
+  if (!context_core_) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  base::Bind(callback, false));
+    return;
+  }
+  context_core_->HasMainFrameProviderHost(origin, callback);
 }
 
-void ServiceWorkerContextWrapper::FindRegistrationForDocument(
+void ServiceWorkerContextWrapper::FindReadyRegistrationForDocument(
     const GURL& document_url,
     const FindRegistrationCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
@@ -499,7 +501,9 @@ void ServiceWorkerContextWrapper::FindRegistrationForDocument(
     return;
   }
   context_core_->storage()->FindRegistrationForDocument(
-      net::SimplifyUrlForRequest(document_url), callback);
+      net::SimplifyUrlForRequest(document_url),
+      base::Bind(&ServiceWorkerContextWrapper::DidFindRegistrationForFindReady,
+                 this, callback));
 }
 
 void ServiceWorkerContextWrapper::FindReadyRegistrationForId(
@@ -637,6 +641,14 @@ void ServiceWorkerContextWrapper::RemoveObserver(
   observer_list_->RemoveObserver(observer);
 }
 
+bool ServiceWorkerContextWrapper::OriginHasForeignFetchRegistrations(
+    const GURL& origin) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (!context_core_)
+    return false;
+  return context_core_->storage()->OriginHasForeignFetchRegistrations(origin);
+}
+
 void ServiceWorkerContextWrapper::InitInternal(
     const base::FilePath& user_data_directory,
     scoped_ptr<ServiceWorkerDatabaseTaskManager> database_task_manager,
@@ -664,13 +676,9 @@ void ServiceWorkerContextWrapper::InitInternal(
   if (quota_manager_proxy) {
     quota_manager_proxy->RegisterClient(new ServiceWorkerQuotaClient(this));
   }
-  context_core_.reset(new ServiceWorkerContextCore(user_data_directory,
-                                                   database_task_manager.Pass(),
-                                                   disk_cache_thread,
-                                                   quota_manager_proxy,
-                                                   special_storage_policy,
-                                                   observer_list_.get(),
-                                                   this));
+  context_core_.reset(new ServiceWorkerContextCore(
+      user_data_directory, std::move(database_task_manager), disk_cache_thread,
+      quota_manager_proxy, special_storage_policy, observer_list_.get(), this));
 }
 
 void ServiceWorkerContextWrapper::ShutdownOnIO() {

@@ -5,6 +5,8 @@
 #include "chrome/browser/ui/browser_command_controller.h"
 
 #include "base/command_line.h"
+#include "base/macros.h"
+#include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/command_updater.h"
@@ -98,16 +100,16 @@ TEST_F(BrowserCommandControllerTest, IsReservedCommandOrKey) {
   // USE_AURA is #defined.
   EXPECT_TRUE(browser()->command_controller()->IsReservedCommandOrKey(
       IDC_NEW_WINDOW, content::NativeWebKeyboardEvent(ui::KeyEvent(
-                          ui::ET_KEY_PRESSED, ui::VKEY_N, ui::DomCode::KEY_N,
+                          ui::ET_KEY_PRESSED, ui::VKEY_N, ui::DomCode::US_N,
                           ui::EF_CONTROL_DOWN))));
   EXPECT_TRUE(browser()->command_controller()->IsReservedCommandOrKey(
       IDC_CLOSE_TAB, content::NativeWebKeyboardEvent(ui::KeyEvent(
-                         ui::ET_KEY_PRESSED, ui::VKEY_W, ui::DomCode::KEY_W,
+                         ui::ET_KEY_PRESSED, ui::VKEY_W, ui::DomCode::US_W,
                          ui::EF_CONTROL_DOWN))));
   EXPECT_FALSE(browser()->command_controller()->IsReservedCommandOrKey(
       IDC_FIND, content::NativeWebKeyboardEvent(
                     ui::KeyEvent(ui::ET_KEY_PRESSED, ui::VKEY_F,
-                                 ui::DomCode::KEY_F, ui::EF_CONTROL_DOWN))));
+                                 ui::DomCode::US_F, ui::EF_CONTROL_DOWN))));
 #endif  // USE_AURA
 }
 
@@ -136,16 +138,16 @@ TEST_F(BrowserCommandControllerTest, IsReservedCommandOrKeyIsApp) {
   // USE_AURA is #defined.
   EXPECT_FALSE(browser()->command_controller()->IsReservedCommandOrKey(
       IDC_NEW_WINDOW, content::NativeWebKeyboardEvent(ui::KeyEvent(
-                          ui::ET_KEY_PRESSED, ui::VKEY_N, ui::DomCode::KEY_N,
+                          ui::ET_KEY_PRESSED, ui::VKEY_N, ui::DomCode::US_N,
                           ui::EF_CONTROL_DOWN))));
   EXPECT_FALSE(browser()->command_controller()->IsReservedCommandOrKey(
       IDC_CLOSE_TAB, content::NativeWebKeyboardEvent(ui::KeyEvent(
-                         ui::ET_KEY_PRESSED, ui::VKEY_W, ui::DomCode::KEY_W,
+                         ui::ET_KEY_PRESSED, ui::VKEY_W, ui::DomCode::US_W,
                          ui::EF_CONTROL_DOWN))));
   EXPECT_FALSE(browser()->command_controller()->IsReservedCommandOrKey(
       IDC_FIND, content::NativeWebKeyboardEvent(
                     ui::KeyEvent(ui::ET_KEY_PRESSED, ui::VKEY_F,
-                                 ui::DomCode::KEY_F, ui::EF_CONTROL_DOWN))));
+                                 ui::DomCode::US_F, ui::EF_CONTROL_DOWN))));
 #endif  // USE_AURA
 }
 
@@ -274,6 +276,7 @@ class FullscreenTestBrowserWindow : public TestBrowserWindow,
   void UpdateExclusiveAccessExitBubbleContent(
       const GURL& url,
       ExclusiveAccessBubbleType bubble_type) override {}
+  void OnExclusiveAccessUserInput() override {}
   bool IsFullscreenWithToolbar() const override { return IsFullscreen(); }
 
  private:

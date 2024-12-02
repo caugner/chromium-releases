@@ -82,7 +82,7 @@ public:
     static bool expandHashTableBacking(void*, size_t);
 
     template <typename Return, typename Metadata>
-    static Return malloc(size_t size)
+    static Return malloc(size_t size, const char* typeName)
     {
         return reinterpret_cast<Return>(Heap::allocate<Metadata>(size, IsEagerlyFinalizedType<Metadata>::value));
     }
@@ -229,7 +229,7 @@ public:
         // Consider using a LinkedHashSet instead if this compile-time assert fails:
         static_assert(!WTF::IsWeak<ValueArg>::value, "weak pointers in a ListHashSet will result in null entries in the set");
 
-        return malloc<void*, Node>(sizeof(Node));
+        return malloc<void*, Node>(sizeof(Node), nullptr /* Oilpan does not use the heap profiler at the moment. */);
     }
 
     template<typename VisitorDispatcher>
@@ -250,7 +250,7 @@ void HeapVectorBacking<T, Traits>::finalize(void* pointer)
 {
     static_assert(Traits::needsDestruction, "Only vector buffers with items requiring destruction should be finalized");
     // See the comment in HeapVectorBacking::trace.
-    static_assert(Traits::canClearUnusedSlotsWithMemset || WTF::IsPolymorphic<T>::value, "HeapVectorBacking doesn't support objects that cannot be cleared as unused with memset or don't have a vtable");
+    static_assert(Traits::canClearUnusedSlotsWithMemset || std::is_polymorphic<T>::value, "HeapVectorBacking doesn't support objects that cannot be cleared as unused with memset or don't have a vtable");
 
     ASSERT(!WTF::IsTriviallyDestructible<T>::value);
     HeapObjectHeader* header = HeapObjectHeader::fromPayload(pointer);
@@ -264,7 +264,7 @@ void HeapVectorBacking<T, Traits>::finalize(void* pointer)
     // (which are already zeroed out).
     ANNOTATE_CHANGE_SIZE(buffer, length, 0, length);
 #endif
-    if (WTF::IsPolymorphic<T>::value) {
+    if (std::is_polymorphic<T>::value) {
         for (unsigned i = 0; i < length; ++i) {
             if (blink::vTableInitialized(&buffer[i]))
                 buffer[i].~T();

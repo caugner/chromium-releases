@@ -23,7 +23,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/layout/LayoutState.h"
 
 #include "core/layout/LayoutFlowThread.h"
@@ -52,7 +51,7 @@ LayoutState::LayoutState(LayoutBox& layoutObject, const LayoutSize& offset, Layo
 {
     if (layoutObject.isLayoutFlowThread())
         m_flowThread = toLayoutFlowThread(&layoutObject);
-    else if (!layoutObject.isOutOfFlowPositioned() && !layoutObject.isColumnSpanAll())
+    else if (!layoutObject.isOutOfFlowPositioned())
         m_flowThread = m_next->flowThread();
     else
         m_flowThread = nullptr;

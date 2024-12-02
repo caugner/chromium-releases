@@ -4,6 +4,10 @@
 
 #include "sync/engine/model_type_worker.h"
 
+#include <stddef.h>
+#include <stdint.h>
+#include <utility>
+
 #include "base/strings/stringprintf.h"
 #include "sync/engine/commit_contribution.h"
 #include "sync/internal_api/public/base/model_type.h"
@@ -16,7 +20,6 @@
 #include "sync/test/engine/mock_nudge_handler.h"
 #include "sync/test/engine/single_type_mock_server.h"
 #include "sync/test/fake_encryptor.h"
-
 #include "testing/gtest/include/gtest/gtest.h"
 
 static const syncer::ModelType kModelType = syncer::PREFERENCES;
@@ -100,10 +103,11 @@ class ModelTypeWorkerTest : public ::testing::Test {
 
   // Pretends to receive update messages from the server.
   void TriggerTypeRootUpdateFromServer();
-  void TriggerUpdateFromServer(int64 version_offset,
+  void TriggerUpdateFromServer(int64_t version_offset,
                                const std::string& tag,
                                const std::string& value);
-  void TriggerTombstoneFromServer(int64 version_offset, const std::string& tag);
+  void TriggerTombstoneFromServer(int64_t version_offset,
+                                  const std::string& tag);
 
   // Delivers specified protos as updates.
   //
@@ -279,8 +283,8 @@ void ModelTypeWorkerTest::InitializeWithState(
   }
 
   worker_.reset(new ModelTypeWorker(kModelType, state, initial_pending_updates,
-                                    cryptographer_copy.Pass(),
-                                    &mock_nudge_handler_, proxy.Pass()));
+                                    std::move(cryptographer_copy),
+                                    &mock_nudge_handler_, std::move(proxy)));
 }
 
 void ModelTypeWorkerTest::NewForeignEncryptionKey() {
@@ -379,7 +383,7 @@ void ModelTypeWorkerTest::TriggerTypeRootUpdateFromServer() {
   worker_->ApplyUpdates(&dummy_status);
 }
 
-void ModelTypeWorkerTest::TriggerUpdateFromServer(int64 version_offset,
+void ModelTypeWorkerTest::TriggerUpdateFromServer(int64_t version_offset,
                                                   const std::string& tag,
                                                   const std::string& value) {
   sync_pb::SyncEntity entity = mock_server_.UpdateFromServer(
@@ -409,7 +413,7 @@ void ModelTypeWorkerTest::DeliverRawUpdates(const SyncEntityList& list) {
   worker_->ApplyUpdates(&dummy_status);
 }
 
-void ModelTypeWorkerTest::TriggerTombstoneFromServer(int64 version_offset,
+void ModelTypeWorkerTest::TriggerTombstoneFromServer(int64_t version_offset,
                                                      const std::string& tag) {
   sync_pb::SyncEntity entity =
       mock_server_.TombstoneFromServer(version_offset, GenerateTagHash(tag));
@@ -695,7 +699,7 @@ TEST_F(ModelTypeWorkerTest, SimpleDelete) {
   ASSERT_TRUE(HasCommitResponseOnModelThread("tag1"));
   const CommitResponseData& initial_commit_response =
       GetCommitResponseOnModelThread("tag1");
-  int64 base_version = initial_commit_response.response_version;
+  int64_t base_version = initial_commit_response.response_version;
 
   // Now that we have an entity, we can delete it.
   DeleteRequest("tag1");
@@ -823,16 +827,17 @@ TEST_F(ModelTypeWorkerTest, ReceiveUpdates) {
 
   ASSERT_TRUE(HasUpdateResponseOnModelThread("tag1"));
   UpdateResponseData update = GetUpdateResponseOnModelThread("tag1");
+  const EntityData& entity = update.entity.value();
 
-  EXPECT_FALSE(update.id.empty());
-  EXPECT_EQ(tag_hash, update.client_tag_hash);
+  EXPECT_FALSE(entity.id.empty());
+  EXPECT_EQ(tag_hash, entity.client_tag_hash);
   EXPECT_LT(0, update.response_version);
-  EXPECT_FALSE(update.ctime.is_null());
-  EXPECT_FALSE(update.mtime.is_null());
-  EXPECT_FALSE(update.non_unique_name.empty());
-  EXPECT_FALSE(update.deleted);
-  EXPECT_EQ("tag1", update.specifics.preference().name());
-  EXPECT_EQ("value1", update.specifics.preference().value());
+  EXPECT_FALSE(entity.creation_time.is_null());
+  EXPECT_FALSE(entity.modification_time.is_null());
+  EXPECT_FALSE(entity.non_unique_name.empty());
+  EXPECT_FALSE(entity.is_deleted());
+  EXPECT_EQ("tag1", entity.specifics.preference().name());
+  EXPECT_EQ("value1", entity.specifics.preference().value());
 }
 
 // Test commit of encrypted updates.
@@ -915,8 +920,8 @@ TEST_F(ModelTypeWorkerTest, ReceiveDecryptableEntities) {
   // Test some basic properties regarding the update.
   ASSERT_TRUE(HasUpdateResponseOnModelThread("tag1"));
   UpdateResponseData update1 = GetUpdateResponseOnModelThread("tag1");
-  EXPECT_EQ("tag1", update1.specifics.preference().name());
-  EXPECT_EQ("value1", update1.specifics.preference().value());
+  EXPECT_EQ("tag1", update1.entity->specifics.preference().name());
+  EXPECT_EQ("value1", update1.entity->specifics.preference().value());
   EXPECT_TRUE(update1.encryption_key_name.empty());
 
   // Set received updates to be encrypted using the new nigori.
@@ -928,8 +933,8 @@ TEST_F(ModelTypeWorkerTest, ReceiveDecryptableEntities) {
   // Test its basic features and the value of encryption_key_name.
   ASSERT_TRUE(HasUpdateResponseOnModelThread("tag2"));
   UpdateResponseData update2 = GetUpdateResponseOnModelThread("tag2");
-  EXPECT_EQ("tag2", update2.specifics.preference().name());
-  EXPECT_EQ("value2", update2.specifics.preference().value());
+  EXPECT_EQ("tag2", update2.entity->specifics.preference().name());
+  EXPECT_EQ("value2", update2.entity->specifics.preference().value());
   EXPECT_FALSE(update2.encryption_key_name.empty());
 }
 
@@ -975,8 +980,8 @@ TEST_F(ModelTypeWorkerTest, ReceiveUndecryptableEntries) {
   UpdateLocalCryptographer();
   ASSERT_TRUE(HasUpdateResponseOnModelThread("tag1"));
   UpdateResponseData update = GetUpdateResponseOnModelThread("tag1");
-  EXPECT_EQ("tag1", update.specifics.preference().name());
-  EXPECT_EQ("value1", update.specifics.preference().value());
+  EXPECT_EQ("tag1", update.entity->specifics.preference().name());
+  EXPECT_EQ("value1", update.entity->specifics.preference().value());
   EXPECT_FALSE(update.encryption_key_name.empty());
 }
 
@@ -1006,18 +1011,20 @@ TEST_F(ModelTypeWorkerTest, EncryptedUpdateOverridesPendingCommit) {
 // Test decryption of pending updates saved across a restart.
 TEST_F(ModelTypeWorkerTest, RestorePendingEntries) {
   // Create a fake pending update.
+  EntityData entity;
+  entity.client_tag_hash = GenerateTagHash("tag1");
+  entity.id = "SomeID";
+  entity.creation_time =
+      base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(10);
+  entity.modification_time =
+      base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(11);
+  entity.non_unique_name = "encrypted";
+  entity.specifics = GenerateSpecifics("tag1", "value1");
+  EncryptUpdate(GetNthKeyParams(1), &(entity.specifics));
+
   UpdateResponseData update;
-
-  update.client_tag_hash = GenerateTagHash("tag1");
-  update.id = "SomeID";
+  update.entity = entity.Pass();
   update.response_version = 100;
-  update.ctime = base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(10);
-  update.mtime = base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(11);
-  update.non_unique_name = "encrypted";
-  update.deleted = false;
-
-  update.specifics = GenerateSpecifics("tag1", "value1");
-  EncryptUpdate(GetNthKeyParams(1), &(update.specifics));
 
   // Inject the update during CommitQueue initialization.
   UpdateResponseDataList saved_pending_updates;
@@ -1045,17 +1052,21 @@ TEST_F(ModelTypeWorkerTest, RestoreApplicableEntries) {
   UpdateLocalCryptographer();
 
   // Create a fake pending update.
-  UpdateResponseData update;
-  update.client_tag_hash = GenerateTagHash("tag1");
-  update.id = "SomeID";
-  update.response_version = 100;
-  update.ctime = base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(10);
-  update.mtime = base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(11);
-  update.non_unique_name = "encrypted";
-  update.deleted = false;
+  EntityData entity;
+  entity.client_tag_hash = GenerateTagHash("tag1");
+  entity.id = "SomeID";
+  entity.creation_time =
+      base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(10);
+  entity.modification_time =
+      base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(11);
+  entity.non_unique_name = "encrypted";
 
-  update.specifics = GenerateSpecifics("tag1", "value1");
-  EncryptUpdate(GetNthKeyParams(1), &(update.specifics));
+  entity.specifics = GenerateSpecifics("tag1", "value1");
+  EncryptUpdate(GetNthKeyParams(1), &(entity.specifics));
+
+  UpdateResponseData update;
+  update.entity = entity.Pass();
+  update.response_version = 100;
 
   // Inject the update during CommitQueue initialization.
   UpdateResponseDataList saved_pending_updates;
@@ -1133,4 +1144,4 @@ TEST_F(ModelTypeWorkerTest, ReceiveCorruptEncryption) {
   EXPECT_TRUE(HasUpdateResponseOnModelThread("tag1"));
 }
 
-}  // namespace syncer
+}  // namespace syncer_v2

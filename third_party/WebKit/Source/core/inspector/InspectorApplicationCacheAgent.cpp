@@ -23,7 +23,6 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/inspector/InspectorApplicationCacheAgent.h"
 
 #include "core/frame/LocalFrame.h"
@@ -201,8 +200,8 @@ PassRefPtr<TypeBuilder::ApplicationCache::ApplicationCacheResource> InspectorApp
 
 DEFINE_TRACE(InspectorApplicationCacheAgent)
 {
+    visitor->trace(m_inspectedFrames);
     InspectorBaseAgent::trace(visitor);
 }
 
 } // namespace blink
-

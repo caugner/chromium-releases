@@ -25,7 +25,6 @@
  *
  */
 
-#include "config.h"
 #include "core/html/forms/InputType.h"
 
 #include "bindings/core/v8/ExceptionMessages.h"
@@ -566,7 +565,6 @@ void InputType::dispatchSearchEvent()
 void InputType::setValue(const String& sanitizedValue, bool valueChanged, TextFieldEventBehavior eventBehavior)
 {
     element().setValueInternal(sanitizedValue, eventBehavior);
-    element().setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::ControlValue));
     if (!valueChanged)
         return;
     switch (eventBehavior) {

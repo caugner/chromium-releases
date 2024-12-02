@@ -96,6 +96,8 @@ static_library("gn_lib") {
     "label_pattern.cc",
     "label_pattern.h",
     "label_ptr.h",
+    "lib_file.cc",
+    "lib_file.h",
     "loader.cc",
     "loader.h",
     "location.cc",
@@ -308,15 +310,5 @@ test("gn_unittests") {
     "//base/test:run_all_unittests",
     "//base/test:test_support",
     "//testing/gtest",
-  ]
-}
-
-executable("generate_test_gn_data") {
-  sources = [
-    "generate_test_gn_data.cc",
-  ]
-  deps = [
-    "//base",
-    "//build/config/sanitizers:deps",
   ]
 }

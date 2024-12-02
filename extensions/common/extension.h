@@ -15,6 +15,7 @@
 
 #include "base/containers/hash_tables.h"
 #include "base/files/file_path.h"
+#include "base/macros.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -72,15 +73,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     NUM_STATES
   };
 
-  // Used to record the reason an extension was disabled.
-  enum DeprecatedDisableReason {
-    DEPRECATED_DISABLE_UNKNOWN,
-    DEPRECATED_DISABLE_USER_ACTION,
-    DEPRECATED_DISABLE_PERMISSIONS_INCREASE,
-    DEPRECATED_DISABLE_RELOAD,
-    DEPRECATED_DISABLE_LAST,  // Not used.
-  };
-
   // Reasons an extension may be disabled. These are used in histograms, so do
   // not remove/reorder entries - only add at the end just before
   // DISABLE_REASON_LAST (and update the shift value for it). Also remember to
@@ -102,10 +94,9 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     DISABLE_GREYLIST = 1 << 9,
     DISABLE_CORRUPTED = 1 << 10,
     DISABLE_REMOTE_INSTALL = 1 << 11,
-    DISABLE_INACTIVE_EPHEMERAL_APP = 1 << 12,  // Cached ephemeral apps are
-                                               // disabled to prevent activity.
-    DISABLE_EXTERNAL_EXTENSION = 1 << 13,      // External extensions might be
-                                               // disabled for user prompting.
+    // DISABLE_INACTIVE_EPHEMERAL_APP = 1 << 12,  // Deprecated.
+    DISABLE_EXTERNAL_EXTENSION = 1 << 13,  // External extensions might be
+                                           // disabled for user prompting.
     DISABLE_UPDATE_REQUIRED_BY_POLICY = 1 << 14,  // Doesn't meet minimum
                                                   // version requirement.
     DISABLE_REASON_LAST = 1 << 15,  // This should always be the last value
@@ -554,6 +545,8 @@ struct UnloadedExtensionInfo {
     REASON_BLACKLIST,         // Extension has been blacklisted.
     REASON_PROFILE_SHUTDOWN,  // Profile is being shut down.
     REASON_LOCK_ALL,          // All extensions for the profile are blocked.
+    REASON_MIGRATED_TO_COMPONENT,  // Extension is being migrated to a component
+                                   // action.
   };
 
   Reason reason;

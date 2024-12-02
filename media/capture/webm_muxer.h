@@ -5,7 +5,12 @@
 #ifndef MEDIA_FILTERS_LIBWEBM_MUXER_H_
 #define MEDIA_FILTERS_LIBWEBM_MUXER_H_
 
+#include <stdint.h>
+
+#include <deque>
+
 #include "base/callback.h"
+#include "base/macros.h"
 #include "base/numerics/safe_math.h"
 #include "base/strings/string_piece.h"
 #include "base/threading/thread_checker.h"
@@ -77,6 +82,12 @@ class MEDIA_EXPORT WebmMuxer : public NON_EXPORTED_BASE(mkvmuxer::IMkvWriter) {
   void ElementStartNotify(mkvmuxer::uint64 element_id,
                           mkvmuxer::int64 position) override;
 
+  // Helper to simplify saving frames.
+  void AddFrame(scoped_ptr<std::string> encoded_data,
+                uint8_t track_index,
+                base::TimeTicks timestamp,
+                bool is_key_frame);
+
   // Used to DCHECK that we are called on the correct thread.
   base::ThreadChecker thread_checker_;
 
@@ -105,6 +116,23 @@ class MEDIA_EXPORT WebmMuxer : public NON_EXPORTED_BASE(mkvmuxer::IMkvWriter) {
 
   // The MkvMuxer active element.
   mkvmuxer::Segment segment_;
+
+  // Hold on to all encoded video frames to dump them with and when audio is
+  // received, if expected, since WebM headers can only be written once.
+  struct EncodedVideoFrame {
+    EncodedVideoFrame(scoped_ptr<std::string> data,
+                      base::TimeTicks timestamp,
+                      bool is_keyframe);
+    ~EncodedVideoFrame();
+
+    scoped_ptr<std::string> data;
+    base::TimeTicks timestamp;
+    bool is_keyframe;
+
+   private:
+    DISALLOW_IMPLICIT_CONSTRUCTORS(EncodedVideoFrame);
+  };
+  std::deque<scoped_ptr<EncodedVideoFrame>> encoded_frames_queue_;
 
   DISALLOW_COPY_AND_ASSIGN(WebmMuxer);
 };

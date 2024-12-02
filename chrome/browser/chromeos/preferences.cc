@@ -38,7 +38,9 @@
 #include "components/feedback/tracing_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
+#include "components/user_manager/known_user.h"
 #include "components/user_manager/user.h"
+#include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
@@ -283,6 +285,8 @@ void Preferences::RegisterProfilePrefs(
                                 true);
 
   registry->RegisterBooleanPref(prefs::kForceMaximizeOnFirstRun, false);
+
+  registry->RegisterBooleanPref(prefs::kLangugaeImeMenuActivated, false);
 }
 
 void Preferences::InitUserPrefs(syncable_prefs::PrefServiceSyncable* prefs) {
@@ -315,6 +319,7 @@ void Preferences::InitUserPrefs(syncable_prefs::PrefServiceSyncable* prefs) {
                              prefs, callback);
   previous_input_method_.Init(prefs::kLanguagePreviousInputMethod,
                               prefs, callback);
+  ime_menu_activated_.Init(prefs::kLangugaeImeMenuActivated, prefs, callback);
 
   xkb_auto_repeat_enabled_.Init(
       prefs::kLanguageXkbAutoRepeatEnabled, prefs, callback);
@@ -580,6 +585,16 @@ void Preferences::ApplyPreferences(ApplyReason reason,
     ime_state_->SetEnabledExtensionImes(&split_values);
   }
 
+  if (pref_name == prefs::kLangugaeImeMenuActivated &&
+      (reason == REASON_PREF_CHANGED || reason == REASON_ACTIVE_USER_CHANGED)) {
+    const bool activated = ime_menu_activated_.GetValue();
+    if (activated)
+      DVLOG(1) << "IME menu is activated.";
+    else
+      DVLOG(1) << "IME menu is deactivated.";
+    // TODO(azurewei): Fire inputMethodPrivate API event.
+  }
+
   if (user_is_active) {
     system::InputDeviceSettings::Get()->UpdateTouchpadSettings(
         touchpad_settings);
@@ -625,8 +640,8 @@ void Preferences::ApplyPreferences(ApplyReason reason,
   if (pref_name == prefs::kUse24HourClock ||
       reason != REASON_ACTIVE_USER_CHANGED) {
     const bool value = prefs_->GetBoolean(prefs::kUse24HourClock);
-    user_manager::UserManager::Get()->SetKnownUserBooleanPref(
-        user_->GetAccountId(), prefs::kUse24HourClock, value);
+    user_manager::known_user::SetBooleanPref(user_->GetAccountId(),
+                                             prefs::kUse24HourClock, value);
   }
 }
 

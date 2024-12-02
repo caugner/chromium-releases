@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+
+#include "base/memory/shared_memory_handle.h"
 #include "cc/output/begin_frame_args.h"
 #include "cc/output/compositor_frame.h"
 #include "cc/output/compositor_frame_ack.h"
@@ -25,6 +28,8 @@ struct SyncCompositorCommonBrowserParams {
   size_t bytes_limit;
   cc::CompositorFrameAck ack;
   gfx::ScrollOffset root_scroll_offset;
+  bool update_root_scroll_offset;
+  bool begin_frame_source_paused;
 };
 
 struct SyncCompositorDemandDrawHwParams {
@@ -44,6 +49,22 @@ struct SyncCompositorDemandDrawHwParams {
   gfx::Rect clip;
   gfx::Rect viewport_rect_for_tile_priority;
   gfx::Transform transform_for_tile_priority;
+};
+
+struct SyncCompositorSetSharedMemoryParams {
+  SyncCompositorSetSharedMemoryParams();
+
+  size_t buffer_size;
+  base::SharedMemoryHandle shm_handle;
+};
+
+struct SyncCompositorDemandDrawSwParams {
+  SyncCompositorDemandDrawSwParams();
+  ~SyncCompositorDemandDrawSwParams();
+
+  gfx::Size size;
+  gfx::Rect clip;
+  gfx::Transform transform;
 };
 
 struct SyncCompositorCommonRendererParams {
@@ -77,6 +98,8 @@ IPC_STRUCT_TRAITS_BEGIN(content::SyncCompositorCommonBrowserParams)
   IPC_STRUCT_TRAITS_MEMBER(bytes_limit)
   IPC_STRUCT_TRAITS_MEMBER(ack)
   IPC_STRUCT_TRAITS_MEMBER(root_scroll_offset)
+  IPC_STRUCT_TRAITS_MEMBER(update_root_scroll_offset)
+  IPC_STRUCT_TRAITS_MEMBER(begin_frame_source_paused)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::SyncCompositorDemandDrawHwParams)
@@ -86,6 +109,17 @@ IPC_STRUCT_TRAITS_BEGIN(content::SyncCompositorDemandDrawHwParams)
   IPC_STRUCT_TRAITS_MEMBER(clip)
   IPC_STRUCT_TRAITS_MEMBER(viewport_rect_for_tile_priority)
   IPC_STRUCT_TRAITS_MEMBER(transform_for_tile_priority)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(content::SyncCompositorSetSharedMemoryParams)
+  IPC_STRUCT_TRAITS_MEMBER(buffer_size)
+  IPC_STRUCT_TRAITS_MEMBER(shm_handle)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(content::SyncCompositorDemandDrawSwParams)
+  IPC_STRUCT_TRAITS_MEMBER(size)
+  IPC_STRUCT_TRAITS_MEMBER(clip)
+  IPC_STRUCT_TRAITS_MEMBER(transform)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::SyncCompositorCommonRendererParams)
@@ -101,6 +135,8 @@ IPC_STRUCT_TRAITS_BEGIN(content::SyncCompositorCommonRendererParams)
   IPC_STRUCT_TRAITS_MEMBER(need_begin_frame)
   IPC_STRUCT_TRAITS_MEMBER(did_activate_pending_tree)
 IPC_STRUCT_TRAITS_END()
+
+// Messages sent from the browser to the renderer.
 
 IPC_SYNC_MESSAGE_ROUTED2_2(SyncCompositorMsg_HandleInputEvent,
                            content::SyncCompositorCommonBrowserParams,
@@ -124,8 +160,26 @@ IPC_SYNC_MESSAGE_ROUTED2_2(SyncCompositorMsg_DemandDrawHw,
                            content::SyncCompositorCommonRendererParams,
                            cc::CompositorFrame)
 
+IPC_SYNC_MESSAGE_ROUTED2_2(SyncCompositorMsg_SetSharedMemory,
+                           content::SyncCompositorCommonBrowserParams,
+                           content::SyncCompositorSetSharedMemoryParams,
+                           bool /* success */,
+                           content::SyncCompositorCommonRendererParams);
+
+IPC_MESSAGE_ROUTED0(SyncCompositorMsg_ZeroSharedMemory);
+
+IPC_SYNC_MESSAGE_ROUTED2_3(SyncCompositorMsg_DemandDrawSw,
+                           content::SyncCompositorCommonBrowserParams,
+                           content::SyncCompositorDemandDrawSwParams,
+                           bool /* result */,
+                           content::SyncCompositorCommonRendererParams,
+                           cc::CompositorFrame)
+
 IPC_MESSAGE_ROUTED1(SyncCompositorMsg_UpdateState,
                     content::SyncCompositorCommonBrowserParams)
+
+// -----------------------------------------------------------------------------
+// Messages sent from the renderer to the browser.
 
 IPC_MESSAGE_ROUTED1(SyncCompositorHostMsg_UpdateState,
                     content::SyncCompositorCommonRendererParams)

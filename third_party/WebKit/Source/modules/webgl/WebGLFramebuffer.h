@@ -43,12 +43,14 @@ public:
 
         virtual GLsizei width() const = 0;
         virtual GLsizei height() const = 0;
+        virtual GLsizei depth() const = 0;
         virtual GLenum format() const = 0;
         // For texture attachment, type() returns the type of the attached texture.
         // For renderbuffer attachment, the type of the renderbuffer may vary with GL implementation.
         // To avoid confusion, it would be better to not implement type() for renderbuffer attachment and
         // we should always use the internalformat of the renderbuffer and avoid using type() API.
         virtual GLenum type() const = 0;
+        virtual bool isCubeComplete() const = 0;
         virtual WebGLSharedObject* object() const = 0;
         virtual bool isSharedObject(WebGLSharedObject*) const = 0;
         virtual bool valid() const = 0;

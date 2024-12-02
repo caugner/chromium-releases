@@ -17,7 +17,6 @@ import android.widget.TextView;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.bookmark.BookmarksBridge.BookmarkItem;
-import org.chromium.chrome.browser.enhancedbookmarks.EnhancedBookmarkManager.UIState;
 import org.chromium.chrome.browser.favicon.LargeIconBridge.LargeIconCallback;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.offlinepages.OfflinePageItem;
@@ -60,16 +59,16 @@ public class EnhancedBookmarkBookmarkRow extends EnhancedBookmarkRow implements 
     public void onClick() {
         int launchLocation = -1;
         switch (mDelegate.getCurrentState()) {
-            case UIState.STATE_ALL_BOOKMARKS:
+            case EnhancedBookmarkUIState.STATE_ALL_BOOKMARKS:
                 launchLocation = LaunchLocation.ALL_ITEMS;
                 break;
-            case UIState.STATE_FOLDER:
+            case EnhancedBookmarkUIState.STATE_FOLDER:
                 launchLocation = LaunchLocation.FOLDER;
                 break;
-            case UIState.STATE_FILTER:
+            case EnhancedBookmarkUIState.STATE_FILTER:
                 launchLocation = LaunchLocation.FILTER;
                 break;
-            case UIState.STATE_LOADING:
+            case EnhancedBookmarkUIState.STATE_LOADING:
                 assert false :
                         "The main content shouldn't be inflated if it's still loading";
                 break;
@@ -94,15 +93,23 @@ public class EnhancedBookmarkBookmarkRow extends EnhancedBookmarkRow implements 
     private void updateOfflinePageSize(BookmarkId bookmarkId) {
         OfflinePageItem offlinePage = null;
         OfflinePageBridge bridge = mDelegate.getModel().getOfflinePageBridge();
-        if (mDelegate.getCurrentState() == UIState.STATE_FILTER && bridge != null) {
+        if (mDelegate.getCurrentState() == EnhancedBookmarkUIState.STATE_FILTER && bridge != null) {
             offlinePage = bridge.getPageByBookmarkId(bookmarkId);
         }
         TextView textView = (TextView) findViewById(R.id.offline_page_size);
+        View bookmarkRowView = findViewById(R.id.bookmark_row);
         if (offlinePage != null) {
+            int verticalPadding = textView.getResources().getDimensionPixelSize(
+                    R.dimen.offline_page_item_vertical_spacing);
             textView.setText(Formatter.formatFileSize(getContext(), offlinePage.getFileSize()));
+            // Get the embedded bookmark_row layout, and add padding.  This is because the entries
+            // in filter view are larger (contain more items) than normal bookmark view.
+            bookmarkRowView.setPadding(0, verticalPadding / 2, 0, verticalPadding / 2);
             textView.setVisibility(View.VISIBLE);
         } else {
             textView.setVisibility(View.GONE);
+            // Remove padding when we leave filter view.
+            bookmarkRowView.setPadding(0, 0, 0, 0);
         }
     }
 

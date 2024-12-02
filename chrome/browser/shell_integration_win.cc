@@ -8,11 +8,14 @@
 #include <shlwapi.h>
 #include <shobjidl.h>
 #include <propkey.h>  // Needs to come after shobjidl.h.
+#include <stddef.h>
+#include <stdint.h>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
+#include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
@@ -53,14 +56,12 @@ namespace {
 const wchar_t kAppListAppNameSuffix[] = L"AppList";
 
 const char kAsyncSetAsDefaultExperimentName[] = "AsyncSetAsDefault";
-// A prefix shared by multiple groups that kicks off the generic
-// AsyncSetAsDefault experiment.
-const char kAsyncSetAsDefaultExperimentEnabledGroupPrefix[] = "Enabled";
-// One of the group names for the AsyncSetAsDefault experiment. Unlike other
-// "Enabled" groups, this group doesn't reset the current default browser choice
-// in the registry.
-const char kAsyncSetAsDefaultExperimentEnabledNoRegistryGroupName[] =
-    "EnabledNoRegistry";
+const char kAsyncSetAsDefaultEnabledGroupName[] = "Enabled";
+// For client in the Enabled group of the AsyncSetAsDefault experiment, if the
+// Windows build number of the user is greater or equal than this value, the
+// default browser choice won't be reset.
+const char kAsyncSetAsDefaultEnabledBuildNumberParamName[] =
+    "ResetOlderThanBuildNumber";
 
 const char kEnableAsyncSetAsDefault[] = "enable-async-set-as-default";
 const char kDisableAsyncSetAsDefault[] = "disable-async-set-as-default";
@@ -151,7 +152,7 @@ base::string16 GetExpectedAppId(const base::CommandLine& command_line,
   return ShellIntegration::GetAppModelIdForProfile(app_name, profile_path);
 }
 
-void MigrateChromiumShortcutsCallback() {
+void MigrateTaskbarPinsCallback() {
   // This should run on the file thread.
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
 
@@ -160,41 +161,13 @@ void MigrateChromiumShortcutsCallback() {
   if (!PathService::Get(base::FILE_EXE, &chrome_exe))
     return;
 
-  // Locations to check for shortcuts migration.
-  static const struct {
-    int location_id;
-    const wchar_t* sub_dir;
-  } kLocations[] = {
-    {
-      base::DIR_TASKBAR_PINS,
-      NULL
-    }, {
-      base::DIR_USER_DESKTOP,
-      NULL
-    }, {
-      base::DIR_START_MENU,
-      NULL
-    }, {
-      base::DIR_APP_DATA,
-      L"Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\StartMenu"
-    }
-  };
-
-  for (int i = 0; i < arraysize(kLocations); ++i) {
-    base::FilePath path;
-    if (!PathService::Get(kLocations[i].location_id, &path)) {
-      NOTREACHED();
-      continue;
-    }
-
-    if (kLocations[i].sub_dir)
-      path = path.Append(kLocations[i].sub_dir);
-
-    bool check_dual_mode = kLocations[i].location_id == base::DIR_START_MENU ||
-                           kLocations[i].location_id == base::DIR_TASKBAR_PINS;
-    ShellIntegration::MigrateShortcutsInPathInternal(chrome_exe, path,
-                                                     check_dual_mode);
+  base::FilePath pins_path;
+  if (!PathService::Get(base::DIR_TASKBAR_PINS, &pins_path)) {
+    NOTREACHED();
+    return;
   }
+
+  ShellIntegration::MigrateShortcutsInPathInternal(chrome_exe, pins_path);
 }
 
 // Windows 8 introduced a new protocol->executable binding system which cannot
@@ -291,18 +264,26 @@ bool IsAsyncSetAsDefaultEnabled() {
   if (CommandLine::ForCurrentProcess()->HasSwitch(kEnableAsyncSetAsDefault))
     return true;
 
-  return base::StartsWith(group_name,
-                          kAsyncSetAsDefaultExperimentEnabledGroupPrefix,
+  return base::StartsWith(group_name, kAsyncSetAsDefaultEnabledGroupName,
                           base::CompareCase::SENSITIVE);
 }
 
 // Returns true if the default browser choice should be reset for the current
-// user.
+// user. Determined by an experiment parameter.
 bool ShouldResetDefaultBrowser() {
-  return !base::StartsWith(
-      base::FieldTrialList::FindFullName(kAsyncSetAsDefaultExperimentName),
-      kAsyncSetAsDefaultExperimentEnabledNoRegistryGroupName,
-      base::CompareCase::SENSITIVE);
+  // Get the build number where it is no longer needed to reset the default
+  // browser.
+  std::string build_number_value = variations::GetVariationParamValue(
+      kAsyncSetAsDefaultExperimentName,
+      kAsyncSetAsDefaultEnabledBuildNumberParamName);
+  int build_number = 0;
+  // Don't reset the default browser on empty/invalid values.
+  if (!base::StringToInt(build_number_value, &build_number))
+    return false;
+  DCHECK_NE(0, build_number);
+
+  return base::win::OSInfo::GetInstance()->version_number().build <
+         build_number;
 }
 
 bool RegisterBrowser() {
@@ -505,24 +486,23 @@ base::string16 ShellIntegration::GetAppListAppModelIdForProfile(
   return GetAppModelIdForProfile(GetAppListAppName(), profile_path);
 }
 
-void ShellIntegration::MigrateChromiumShortcuts() {
+void ShellIntegration::MigrateTaskbarPins() {
   if (base::win::GetVersion() < base::win::VERSION_WIN7)
     return;
 
   // This needs to happen eventually (e.g. so that the appid is fixed and the
   // run-time Chrome icon is merged with the taskbar shortcut), but this is not
   // urgent and shouldn't delay Chrome startup.
-  static const int64 kMigrateChromiumShortcutsDelaySeconds = 15;
+  static const int64_t kMigrateTaskbarPinsDelaySeconds = 15;
   BrowserThread::PostDelayedTask(
       BrowserThread::FILE, FROM_HERE,
-      base::Bind(&MigrateChromiumShortcutsCallback),
-      base::TimeDelta::FromSeconds(kMigrateChromiumShortcutsDelaySeconds));
+      base::Bind(&MigrateTaskbarPinsCallback),
+      base::TimeDelta::FromSeconds(kMigrateTaskbarPinsDelaySeconds));
 }
 
 int ShellIntegration::MigrateShortcutsInPathInternal(
     const base::FilePath& chrome_exe,
-    const base::FilePath& path,
-    bool check_dual_mode) {
+    const base::FilePath& path) {
   DCHECK(base::win::GetVersion() >= base::win::VERSION_WIN7);
 
   // Enumerate all pinned shortcuts in the given path directly.
@@ -595,36 +575,23 @@ int ShellIntegration::MigrateShortcutsInPathInternal(
       }
     }
 
-    // Only set dual mode if the expected app id is the default app id.
+    // Clear dual_mode property from any shortcuts that previously had it (it
+    // was only ever installed on shortcuts with the
+    // |default_chromium_model_id|).
     BrowserDistribution* dist = BrowserDistribution::GetDistribution();
     base::string16 default_chromium_model_id(
         ShellUtil::GetBrowserModelId(dist, is_per_user_install));
-    if (check_dual_mode && expected_app_id == default_chromium_model_id) {
-      const bool dual_mode_desired =
-          InstallUtil::ShouldInstallMetroProperties();
+    if (expected_app_id == default_chromium_model_id) {
       propvariant.Reset();
       if (property_store->GetValue(PKEY_AppUserModel_IsDualMode,
                                    propvariant.Receive()) != S_OK) {
         // When in doubt, prefer to not update the shortcut.
         NOTREACHED();
         continue;
-      } else {
-        switch (propvariant.get().vt) {
-          case VT_EMPTY:
-            // If dual_mode is not set at all, make sure it gets set to true if
-            // desired.
-            if (dual_mode_desired)
-              updated_properties.set_dual_mode(true);
-            break;
-          case VT_BOOL:
-            // Make sure dual_mode is set as desired.
-            if ((!!propvariant.get().boolVal) != dual_mode_desired)
-              updated_properties.set_dual_mode(dual_mode_desired);
-            break;
-          default:
-            NOTREACHED();
-            continue;
-        }
+      }
+      if (propvariant.get().vt == VT_BOOL &&
+                 !!propvariant.get().boolVal) {
+        updated_properties.set_dual_mode(false);
       }
     }
 
@@ -670,12 +637,6 @@ base::FilePath ShellIntegration::GetStartMenuShortcut(
   }
 
   return base::FilePath();
-}
-
-// static
-bool ShellIntegration::DefaultWebClientWorker::ShouldReportAttemptResults() {
-  return base::win::GetVersion() >= base::win::VERSION_WIN10 &&
-         IsSetAsDefaultAsynchronous();
 }
 
 bool ShellIntegration::DefaultBrowserWorker::InitializeSetAsDefault() {

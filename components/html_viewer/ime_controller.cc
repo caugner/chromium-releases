@@ -4,9 +4,11 @@
 
 #include "components/html_viewer/ime_controller.h"
 
-#include "components/html_viewer/blink_input_events_type_converters.h"
+#include <utility>
+
 #include "components/html_viewer/blink_text_input_type_converters.h"
 #include "components/mus/public/cpp/window.h"
+#include "mojo/converters/blink/blink_input_events_type_converters.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "third_party/WebKit/public/web/WebWidget.h"
 
@@ -65,9 +67,9 @@ void ImeController::UpdateTextInputState(bool show_ime) {
     state->composition_start = new_info.compositionStart;
     state->composition_end = new_info.compositionEnd;
     if (show_ime)
-      window_->SetImeVisibility(true, state.Pass());
+      window_->SetImeVisibility(true, std::move(state));
     else
-      window_->SetTextInputState(state.Pass());
+      window_->SetTextInputState(std::move(state));
   }
 }
 

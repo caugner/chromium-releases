@@ -4,7 +4,10 @@
 
 #include "chrome/browser/ui/views/toolbar/chevron_menu_button.h"
 
+#include <stddef.h>
+
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/memory/scoped_vector.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
@@ -95,7 +98,6 @@ class ChevronMenuButton::MenuController : public views::MenuDelegate {
                        int id,
                        const gfx::Point& p,
                        ui::MenuSourceType source_type) override;
-  void DropMenuClosed(views::MenuItemView* menu) override;
   // These drag functions offer support for dragging icons into the overflow
   // menu.
   bool GetDropFormats(
@@ -111,6 +113,8 @@ class ChevronMenuButton::MenuController : public views::MenuDelegate {
   int OnPerformDrop(views::MenuItemView* menu,
                     DropPosition position,
                     const ui::DropTargetEvent& event) override;
+  void OnMenuClosed(views::MenuItemView* menu,
+                    views::MenuRunner::RunResult result) override;
   // These three drag functions offer support for dragging icons out of the
   // overflow menu.
   bool CanDrag(views::MenuItemView* menu) override;
@@ -193,22 +197,9 @@ void ChevronMenuButton::MenuController::RunMenu(views::Widget* window) {
   views::View::ConvertPointToScreen(owner_, &screen_loc);
   bounds.set_x(screen_loc.x());
   bounds.set_y(screen_loc.y());
-
-  if (menu_runner_->RunMenuAt(window,
-                              owner_,
-                              bounds,
-                              views::MENU_ANCHOR_TOPRIGHT,
-                              ui::MENU_SOURCE_NONE) ==
-          views::MenuRunner::MENU_DELETED)
-    return;
-
-  if (!for_drop_) {
-    // Give the context menu (if any) a chance to execute the user-selected
-    // command.
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&ChevronMenuButton::MenuDone,
-                              owner_->weak_factory_.GetWeakPtr()));
-  }
+  ignore_result(menu_runner_->RunMenuAt(window, owner_, bounds,
+                                        views::MENU_ANCHOR_TOPRIGHT,
+                                        ui::MENU_SOURCE_NONE));
 }
 
 void ChevronMenuButton::MenuController::CloseMenu() {
@@ -263,11 +254,6 @@ bool ChevronMenuButton::MenuController::ShowContextMenu(
   menu_->Cancel();
 
   return true;
-}
-
-void ChevronMenuButton::MenuController::DropMenuClosed(
-    views::MenuItemView* menu) {
-  owner_->MenuDone();
 }
 
 bool ChevronMenuButton::MenuController::GetDropFormats(
@@ -336,6 +322,19 @@ int ChevronMenuButton::MenuController::OnPerformDrop(
   return ui::DragDropTypes::DRAG_MOVE;
 }
 
+void ChevronMenuButton::MenuController::OnMenuClosed(
+    views::MenuItemView* menu,
+    views::MenuRunner::RunResult result) {
+  if (result == views::MenuRunner::MENU_DELETED)
+    return;
+
+  // Give the context menu (if any) a chance to execute the user-selected
+  // command.
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&ChevronMenuButton::MenuDone,
+                            owner_->weak_factory_.GetWeakPtr()));
+}
+
 bool ChevronMenuButton::MenuController::CanDrag(views::MenuItemView* menu) {
   return true;
 }
@@ -384,7 +383,7 @@ scoped_ptr<views::LabelButtonBorder> ChevronMenuButton::CreateDefaultBorder()
   scoped_ptr<views::LabelButtonBorder> border =
       views::MenuButton::CreateDefaultBorder();
   border->set_insets(gfx::Insets());
-  return border.Pass();
+  return border;
 }
 
 bool ChevronMenuButton::GetDropFormats(

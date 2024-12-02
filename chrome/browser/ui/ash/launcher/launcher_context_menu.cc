@@ -15,6 +15,7 @@
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/prefs/pref_service.h"
+#include "build/build_config.h"
 #include "chrome/browser/extensions/context_menu_matcher.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/fullscreen.h"
@@ -94,11 +95,15 @@ void LauncherContextMenu::Init() {
         AddItem(MENU_OPEN_NEW, base::string16());
         AddSeparator(ui::NORMAL_SEPARATOR);
       }
-      AddItem(
-          MENU_PIN,
-          l10n_util::GetStringUTF16(controller_->IsPinned(item_.id) ?
-                                    IDS_LAUNCHER_CONTEXT_MENU_UNPIN :
-                                    IDS_LAUNCHER_CONTEXT_MENU_PIN));
+      const std::string app_id = controller_->GetAppIDForShelfID(item_.id);
+      int menu_pin_string_id;
+      if (!controller_->CanPin(app_id))
+        menu_pin_string_id = IDS_LAUNCHER_CONTEXT_MENU_PIN_ENFORCED_BY_POLICY;
+      else if (controller_->IsPinned(item_.id))
+        menu_pin_string_id = IDS_LAUNCHER_CONTEXT_MENU_UNPIN;
+      else
+        menu_pin_string_id = IDS_LAUNCHER_CONTEXT_MENU_PIN;
+      AddItem(MENU_PIN, l10n_util::GetStringUTF16(menu_pin_string_id));
       if (controller_->IsOpen(item_.id)) {
         AddItem(MENU_CLOSE,
                 l10n_util::GetStringUTF16(IDS_LAUNCHER_CONTEXT_MENU_CLOSE));

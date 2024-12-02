@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/views/tabs/media_indicator_button.h"
 
+#include "base/macros.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
@@ -155,7 +156,7 @@ bool MediaIndicatorButton::OnMousePressed(const ui::MouseEvent& event) {
   // pressed or when any modifier keys are being held down.  Instead, the Tab
   // should react (e.g., middle-click for close, right-click for context menu).
   if (!event.IsOnlyLeftMouseButton() || IsShiftOrControlDown(event)) {
-    if (state_ != views::CustomButton::STATE_DISABLED)
+    if (state() != views::CustomButton::STATE_DISABLED)
       SetState(views::CustomButton::STATE_NORMAL);  // Turn off hover.
     return false;  // Event to be handled by Tab.
   }
@@ -173,7 +174,7 @@ bool MediaIndicatorButton::OnMouseDragged(const ui::MouseEvent& event) {
 
 void MediaIndicatorButton::OnMouseEntered(const ui::MouseEvent& event) {
   // If any modifier keys are being held down, do not turn on hover.
-  if (state_ != views::CustomButton::STATE_DISABLED &&
+  if (state() != views::CustomButton::STATE_DISABLED &&
       IsShiftOrControlDown(event)) {
     SetState(views::CustomButton::STATE_NORMAL);
     return;
@@ -183,7 +184,7 @@ void MediaIndicatorButton::OnMouseEntered(const ui::MouseEvent& event) {
 
 void MediaIndicatorButton::OnMouseMoved(const ui::MouseEvent& event) {
   // If any modifier keys are being held down, turn off hover.
-  if (state_ != views::CustomButton::STATE_DISABLED &&
+  if (state() != views::CustomButton::STATE_DISABLED &&
       IsShiftOrControlDown(event)) {
     SetState(views::CustomButton::STATE_NORMAL);
     return;

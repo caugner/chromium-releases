@@ -364,6 +364,13 @@ decideLoadPolicyForRejectedTrustResult:(SecTrustResultType)trustResult
   [self verifyCert:cert
                 forHost:host
       completionHandler:^(net::CertVerifyResult certVerifierResult) {
+        if (!net::IsCertStatusError(certVerifierResult.cert_status)) {
+          // |cert_status| must not be no-error if SecTrust API considers the
+          // cert as invalid. Otherwise there will be issues with errors
+          // reporting and recovery.
+          certVerifierResult.cert_status = net::CERT_STATUS_INVALID;
+        }
+
         web::CertAcceptPolicy policy =
             [self loadPolicyForRejectedTrustResult:trustResult
                                 certVerifierResult:certVerifierResult
@@ -426,8 +433,8 @@ decideLoadPolicyForAcceptedTrustResult:(SecTrustResultType)trustResult
       return;
     }
 
-    web::CertVerifierBlockAdapter::Params params(
-        blockCert.Pass(), base::SysNSStringToUTF8(host));
+    web::CertVerifierBlockAdapter::Params params(std::move(blockCert),
+                                                 base::SysNSStringToUTF8(host));
     params.flags = self.certVerifyFlags;
     // OCSP response is not provided by iOS API.
     // CRLSets are not used, as the OS is used to make load/no-load

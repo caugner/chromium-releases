@@ -177,13 +177,6 @@
         },
         {
             "type": "@WebInspector.ActionDelegate",
-            "actionId": "main.inspect-devices",
-            "title": "Inspect devices\u2026",
-            "className": "WebInspector.Main.InspectDevicesActionDelegate",
-            "experiment": "!inspectDevicesDialog"
-        },
-        {
-            "type": "@WebInspector.ActionDelegate",
             "actionId": "main.show-rendering-options",
             "title": "Rendering settings",
             "className": "WebInspector.RenderingOptionsView.ShowActionDelegate"
@@ -228,17 +221,23 @@
         },
         {
             "type": "setting",
-            "settingName": "networkConditions",
-            "settingType": "object",
-            "defaultValue": { "throughput": -1, "latency": 0 }
-        },
-        {
-            "type": "setting",
             "category": "",
             "title": "Disable JavaScript",
             "settingName": "javaScriptDisabled",
             "settingType": "boolean",
             "defaultValue": false
+        },
+        {
+            "type": "setting",
+            "category": "Appearance",
+            "title": "Theme:",
+            "settingName": "uiTheme",
+            "settingType": "enum",
+            "defaultValue": "default",
+            "options": [
+                ["Default", "default"],
+                ["Dark", "dark"]
+            ]
         },
         {
             "type": "setting",
@@ -293,13 +292,6 @@
         },
         {
             "type": "context-menu-item",
-            "location": "mainMenu/tools/open",
-            "order": 50,
-            "actionId": "main.inspect-devices",
-            "experiment": "!inspectDevicesDialog"
-        },
-        {
-            "type": "context-menu-item",
             "location": "mainMenu/navigate",
             "title": "More tools",
             "subMenuId": "mainMenu/tools",
@@ -334,12 +326,14 @@
         "SimpleApp.js",
         "Tests.js",
         "OverlayController.js",
+        "Connections.js",
         "Main.js"
     ],
     "skip_compilation": [
         "Tests.js"
     ],
     "resources": [
+        "errorWarningCounter.css",
         "remoteDebuggingTerminatedScreen.css",
         "renderingOptions.css",
         "targetCrashedScreen.css"

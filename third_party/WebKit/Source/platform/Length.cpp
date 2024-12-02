@@ -22,7 +22,6 @@
  *
  */
 
-#include "config.h"
 #include "platform/Length.h"
 
 #include "platform/CalculationValue.h"
@@ -108,6 +107,7 @@ Vector<Length> parseHTMLAreaElementCoords(const String& string)
 
 class CalculationValueHandleMap {
     USING_FAST_MALLOC(CalculationValueHandleMap);
+    WTF_MAKE_NONCOPYABLE(CalculationValueHandleMap);
 public:
     CalculationValueHandleMap()
         : m_index(1)

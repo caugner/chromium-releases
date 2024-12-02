@@ -2,30 +2,36 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stdint.h>
+
+#include <utility>
+
 #include "base/at_exit.h"
 #include "base/base_paths.h"
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/process/process.h"
 #include "base/thread_task_runner_handle.h"
-#include "mojo/application/public/cpp/application_connection.h"
-#include "mojo/application/public/cpp/application_delegate.h"
-#include "mojo/application/public/cpp/application_impl.h"
-#include "mojo/application/public/cpp/interface_factory.h"
 #include "mojo/common/weak_binding_set.h"
 #include "mojo/converters/network/network_type_converters.h"
+#include "mojo/edk/embedder/embedder.h"
+#include "mojo/edk/embedder/platform_channel_pair.h"
 #include "mojo/runner/child/test_native_main.h"
 #include "mojo/runner/init.h"
-#include "mojo/shell/application_manager.mojom.h"
 #include "mojo/shell/application_manager_apptests.mojom.h"
+#include "mojo/shell/public/cpp/application_connection.h"
+#include "mojo/shell/public/cpp/application_delegate.h"
+#include "mojo/shell/public/cpp/application_impl.h"
+#include "mojo/shell/public/cpp/interface_factory.h"
+#include "mojo/shell/public/interfaces/application_manager.mojom.h"
 #include "third_party/mojo/src/mojo/edk/embedder/embedder.h"
 #include "third_party/mojo/src/mojo/edk/embedder/platform_channel_pair.h"
-#include "third_party/mojo/src/mojo/edk/embedder/process_delegate.h"
 #include "third_party/mojo/src/mojo/edk/embedder/scoped_platform_handle.h"
 
 using mojo::shell::test::mojom::Driver;
@@ -44,8 +50,7 @@ class TargetApplicationDelegate : public mojo::ApplicationDelegate,
   void Initialize(mojo::ApplicationImpl* app) override {
     app_ = app;
     mojo::shell::mojom::ApplicationManagerPtr application_manager;
-    app_->ConnectToService(mojo::URLRequest::From(std::string("mojo:shell")),
-                           &application_manager);
+    app_->ConnectToService("mojo:shell", &application_manager);
 
     base::FilePath target_path;
     CHECK(base::PathService::Get(base::DIR_EXE, &target_path));
@@ -76,15 +81,37 @@ class TargetApplicationDelegate : public mojo::ApplicationDelegate,
         platform_channel_pair.PassServerHandle();
 
     mojo::ScopedMessagePipeHandle handle(mojo::embedder::CreateChannel(
-        platform_channel.Pass(),
+        std::move(platform_channel),
         base::Bind(&TargetApplicationDelegate::DidCreateChannel,
                    weak_factory_.GetWeakPtr()),
         base::ThreadTaskRunnerHandle::Get()));
 
+    // The platform handle used for the new EDK's broker.
+    mojo::edk::PlatformChannelPair broker_channel_pair;
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch("use-new-edk")) {
+      std::string client_handle_as_string =
+          broker_channel_pair.PrepareToPassClientHandleToChildProcessAsString(
+              &handle_passing_info);
+      MojoResult rv = MojoWriteMessage(
+          handle.get().value(), client_handle_as_string.c_str(),
+          static_cast<uint32_t>(client_handle_as_string.size()), nullptr, 0,
+          MOJO_WRITE_MESSAGE_FLAG_NONE);
+      DCHECK_EQ(rv, MOJO_RESULT_OK);
+    }
+
+    mojo::CapabilityFilterPtr filter(mojo::CapabilityFilter::New());
+    mojo::Array<mojo::String> test_interfaces;
+    test_interfaces.push_back(
+        mojo::shell::test::mojom::CreateInstanceForHandleTest::Name_);
+    filter->filter.insert("mojo:mojo_shell_apptests",
+                          std::move(test_interfaces));
+    mojo::shell::mojom::PIDReceiverPtr receiver;
+    mojo::InterfaceRequest<mojo::shell::mojom::PIDReceiver> request =
+        GetProxy(&receiver);
     application_manager->CreateInstanceForHandle(
         mojo::ScopedHandle(mojo::Handle(handle.release().value())),
-        "exe:application_manager_apptest_target",
-        "0");
+        "exe:application_manager_apptest_target", std::move(filter),
+        std::move(request));
     // Put the other end on the command line used to launch the target.
     platform_channel_pair.PrepareToPassClientHandleToChildProcess(
         &child_command_line, &handle_passing_info);
@@ -96,6 +123,18 @@ class TargetApplicationDelegate : public mojo::ApplicationDelegate,
     options.fds_to_remap = &handle_passing_info;
   #endif
     target_ = base::LaunchProcess(child_command_line, options);
+    DCHECK(target_.IsValid());
+    receiver->SetPID(target_.Pid());
+
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch("use-new-edk")) {
+      MojoHandle platform_handle_wrapper;
+      MojoResult rv = mojo::edk::CreatePlatformHandleWrapper(
+          broker_channel_pair.PassServerHandle(), &platform_handle_wrapper);
+      DCHECK_EQ(rv, MOJO_RESULT_OK);
+      application_manager->RegisterProcessWithBroker(
+          target_.Pid(),
+          mojo::ScopedHandle(mojo::Handle(platform_handle_wrapper)));
+    }
   }
   bool ConfigureIncomingConnection(
       mojo::ApplicationConnection* connection) override {
@@ -106,7 +145,7 @@ class TargetApplicationDelegate : public mojo::ApplicationDelegate,
   // mojo::InterfaceFactory<Driver>:
   void Create(mojo::ApplicationConnection* connection,
               mojo::InterfaceRequest<Driver> request) override {
-    bindings_.AddBinding(this, request.Pass());
+    bindings_.AddBinding(this, std::move(request));
   }
 
   // Driver:

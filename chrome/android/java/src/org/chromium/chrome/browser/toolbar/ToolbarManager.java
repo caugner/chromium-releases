@@ -63,6 +63,7 @@ import org.chromium.chrome.browser.tabmodel.TabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
 import org.chromium.chrome.browser.toolbar.ActionModeController.ActionBarDelegate;
+import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.widget.findinpage.FindToolbarManager;
 import org.chromium.chrome.browser.widget.findinpage.FindToolbarObserver;
 import org.chromium.content_public.browser.LoadUrlParams;
@@ -147,6 +148,8 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
     private HomepageStateListener mHomepageStateListener;
 
     private boolean mInitializedWithNative;
+
+    private boolean mShouldUpdateTabCount = true;
 
     /**
      * Creates a ToolbarManager object.
@@ -240,7 +243,6 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
             public void onTabModelSelected(TabModel newModel, TabModel oldModel) {
                 refreshSelectedTab();
                 updateTabCount();
-                mControlContainer.invalidateBitmap();
             }
 
             @Override
@@ -490,6 +492,10 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
             public void onTabSelectionHinted(int tabId) {
                 mPreselectedTabId = tabId;
                 refreshSelectedTab();
+
+                if (mToolbar.setForceTextureCapture(true)) {
+                    mControlContainer.invalidateBitmap();
+                }
             }
 
             @Override
@@ -553,6 +559,7 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
         mToolbar.setOnNewTabClickHandler(newTabClickHandler);
         mToolbar.setBookmarkClickHandler(bookmarkClickHandler);
         mToolbar.setCustomTabCloseClickHandler(customTabsBackClickHandler);
+        mToolbar.setLayoutUpdateHost(layoutDriver);
 
         mToolbarModel.initializeWithNative();
 
@@ -653,7 +660,7 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
      * @return The view that the pop up menu should be anchored to on the UI.
      */
     public View getMenuAnchor() {
-        return mToolbar.shouldShowMenuButton() ? mToolbar.getMenuButton()
+        return mToolbar.shouldShowMenuButton() ? mToolbar.getMenuButtonWrapper()
                 : mToolbar.getLocationBar().getMenuAnchor();
     }
 
@@ -718,6 +725,12 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
     private void onNativeLibraryReady() {
         mNativeLibraryReady = true;
         mToolbar.onNativeLibraryReady();
+
+        if (FeatureUtilities.isTabSwitchingEnabledInDocumentMode(mToolbar.getContext())) {
+            // We want to give a similar look and feel as Android's overview mode button
+            // by not updating tab count and keep the button as a rounded square.
+            mShouldUpdateTabCount = false;
+        }
 
         final TemplateUrlService templateUrlService = TemplateUrlService.getInstance();
         TemplateUrlService.LoadListener mTemplateServiceLoadListener =
@@ -825,7 +838,7 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
     @Override
     public void openHomepage() {
         Tab currentTab = mToolbarModel.getTab();
-        assert currentTab != null;
+        if (currentTab == null) return;
         Context context = mToolbar.getContext();
         String homePageUrl = HomepageManager.getHomepageUri(context);
         if (TextUtils.isEmpty(homePageUrl)) {
@@ -947,7 +960,7 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
      * Updates the current number of Tabs based on the TabModel this Toolbar contains.
      */
     private void updateTabCount() {
-        if (!mTabRestoreCompleted) return;
+        if (!mTabRestoreCompleted || !mShouldUpdateTabCount) return;
         mToolbar.updateTabCountVisuals(mTabModelSelector.getCurrentModel().getCount());
     }
 
@@ -964,7 +977,7 @@ public class ToolbarManager implements ToolbarTabController, UrlFocusChangeListe
         updateReloadState(tabCrashed);
         updateBookmarkButtonStatus();
 
-        mToolbar.getMenuButton().setVisibility(
+        mToolbar.getMenuButtonWrapper().setVisibility(
                 mToolbar.shouldShowMenuButton() ? View.VISIBLE : View.GONE);
     }
 

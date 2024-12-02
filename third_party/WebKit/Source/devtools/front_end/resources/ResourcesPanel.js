@@ -76,8 +76,7 @@ WebInspector.ResourcesPanel = function()
 
     var mainContainer = new WebInspector.VBox();
     this.storageViews = mainContainer.element.createChild("div", "vbox flex-auto");
-    this._storageViewToolbar = new WebInspector.Toolbar(mainContainer.element);
-    this._storageViewToolbar.element.classList.add("resources-toolbar");
+    this._storageViewToolbar = new WebInspector.Toolbar("resources-toolbar", mainContainer.element);
     this.splitWidget().setMainWidget(mainContainer);
 
     /** @type {!Map.<!WebInspector.Database, !Object.<string, !WebInspector.DatabaseTableView>>} */
@@ -473,9 +472,9 @@ WebInspector.ResourcesPanel.prototype = {
 
         switch (resource.resourceType()) {
         case WebInspector.resourceTypes.Image:
-            return new WebInspector.ImageView(resource.url, resource.mimeType, resource);
+            return new WebInspector.ImageView(resource.mimeType, resource);
         case WebInspector.resourceTypes.Font:
-            return new WebInspector.FontView(resource.url, resource.mimeType, resource);
+            return new WebInspector.FontView(resource.mimeType, resource);
         default:
             return new WebInspector.EmptyWidget(resource.url);
         }
@@ -915,15 +914,6 @@ WebInspector.BaseStorageTreeElement.prototype = {
         if (itemURL)
             this._storagePanel._resourcesLastSelectedItemSetting.set(itemURL);
         return false;
-    },
-
-    /**
-     * @override
-     */
-    onreveal: function()
-    {
-        if (this.listItemElement)
-            this.listItemElement.scrollIntoViewIfNeeded(false);
     },
 
     get titleText()

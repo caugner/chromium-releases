@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "public/web/WebNode.h"
 
 #include "bindings/core/v8/ExceptionState.h"
@@ -211,6 +210,11 @@ bool WebNode::isElementNode() const
 bool WebNode::isDocumentNode() const
 {
     return m_private->isDocumentNode();
+}
+
+bool WebNode::isDocumentTypeNode() const
+{
+    return m_private->nodeType() == Node::DOCUMENT_TYPE_NODE;
 }
 
 void WebNode::dispatchEvent(const WebDOMEvent& event)

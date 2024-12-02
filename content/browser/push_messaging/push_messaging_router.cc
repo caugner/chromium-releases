@@ -33,7 +33,7 @@ void RunDeliverCallback(
 void PushMessagingRouter::DeliverMessage(
     BrowserContext* browser_context,
     const GURL& origin,
-    int64 service_worker_registration_id,
+    int64_t service_worker_registration_id,
     const std::string& data,
     const DeliverMessageCallback& deliver_message_callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -43,20 +43,16 @@ void PushMessagingRouter::DeliverMessage(
       static_cast<ServiceWorkerContextWrapper*>(
           partition->GetServiceWorkerContext());
   BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&PushMessagingRouter::FindServiceWorkerRegistration,
-                 origin,
-                 service_worker_registration_id,
-                 data,
-                 deliver_message_callback,
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&PushMessagingRouter::FindServiceWorkerRegistration, origin,
+                 service_worker_registration_id, data, deliver_message_callback,
                  service_worker_context));
 }
 
 // static
 void PushMessagingRouter::FindServiceWorkerRegistration(
     const GURL& origin,
-    int64 service_worker_registration_id,
+    int64_t service_worker_registration_id,
     const std::string& data,
     const DeliverMessageCallback& deliver_message_callback,
     scoped_refptr<ServiceWorkerContextWrapper> service_worker_context) {
@@ -64,11 +60,9 @@ void PushMessagingRouter::FindServiceWorkerRegistration(
   // Try to acquire the registration from storage. If it's already live we'll
   // receive it right away. If not, it will be revived from storage.
   service_worker_context->FindReadyRegistrationForId(
-      service_worker_registration_id,
-      origin,
+      service_worker_registration_id, origin,
       base::Bind(&PushMessagingRouter::FindServiceWorkerRegistrationCallback,
-                 data,
-                 deliver_message_callback));
+                 data, deliver_message_callback));
 }
 
 // static

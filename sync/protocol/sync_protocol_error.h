@@ -10,7 +10,7 @@
 #include "sync/base/sync_export.h"
 #include "sync/internal_api/public/base/model_type.h"
 
-namespace syncer{
+namespace syncer {
 
 enum SyncProtocolErrorType {
   // Success case.
@@ -27,10 +27,6 @@ enum SyncProtocolErrorType {
 
   // Server cannot service the request now.
   TRANSIENT_ERROR,
-
-  // Server does not wish the client to retry any more until the action has
-  // been taken.
-  NON_RETRIABLE_ERROR,
 
   // Indicates the datatypes have been migrated and the client should resync
   // them to get the latest progress markers.

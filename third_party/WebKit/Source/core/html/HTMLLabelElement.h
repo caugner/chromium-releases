@@ -57,7 +57,6 @@ private:
     bool isInteractiveContent() const override;
     void accessKeyAction(bool sendMouseEvents) override;
 
-    void attributeWillChange(const QualifiedName&, const AtomicString& oldValue, const AtomicString& newValue) override;
     InsertionNotificationRequest insertedInto(ContainerNode*) override;
     void removedFrom(ContainerNode*) override;
 
@@ -79,7 +78,7 @@ private:
     void derefFormAssociatedElement() override { deref(); }
 #endif
 
-    void parseAttribute(const QualifiedName&, const AtomicString&) override;
+    void parseAttribute(const QualifiedName&, const AtomicString&, const AtomicString&) override;
 
     void updateLabel(TreeScope&, const AtomicString& oldForAttributeValue, const AtomicString& newForAttributeValue);
 

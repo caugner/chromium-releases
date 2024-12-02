@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "core/editing/FrameSelection.h"
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
@@ -18,11 +17,11 @@
 #include "core/testing/DummyPageHolder.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/graphics/paint/PaintController.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/StdLibExtras.h"
-#include <gtest/gtest.h>
 
 namespace blink {
 
@@ -71,7 +70,7 @@ TEST_F(FrameSelectionTest, SetInvalidSelection)
     // Create a new document without frame by using DOMImplementation.
     DocumentInit dummy;
     RefPtrWillBeRawPtr<Document> documentWithoutFrame = Document::create();
-    RefPtrWillBeRawPtr<Element> body = documentWithoutFrame->createElement(HTMLNames::bodyTag, false);
+    RefPtrWillBeRawPtr<Element> body = HTMLBodyElement::create(*documentWithoutFrame);
     documentWithoutFrame->appendChild(body);
     RefPtrWillBeRawPtr<Text> anotherText = documentWithoutFrame->createTextNode("Hello, another world");
     body->appendChild(anotherText);
@@ -132,7 +131,7 @@ TEST_F(FrameSelectionTest, PaintCaretShouldNotLayout)
     OwnPtr<PaintController> paintController = PaintController::create();
     GraphicsContext context(*paintController);
     DrawingRecorder drawingRecorder(context, *dummyPageHolder().frameView().layoutView(), DisplayItem::Caret, LayoutRect::infiniteIntRect());
-    selection().paintCaret(&context, LayoutPoint());
+    selection().paintCaret(context, LayoutPoint());
     EXPECT_EQ(startCount, layoutCount());
 }
 

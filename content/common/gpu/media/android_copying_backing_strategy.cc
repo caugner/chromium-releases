@@ -17,13 +17,6 @@
 
 namespace content {
 
-// TODO(liberato): It is unclear if we have an issue with deadlock during
-// playback if we lower this.  Previously (crbug.com/176036), a deadlock
-// could occur during preroll.  More recent tests have shown some
-// instability with kNumPictureBuffers==2 with similar symptoms
-// during playback.  crbug.com/:531588 .
-enum { kNumPictureBuffers = media::limits::kMaxVideoFrames + 1 };
-
 const static GLfloat kIdentityMatrix[16] = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
                                             0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
                                             0.0f, 0.0f, 0.0f, 1.0f};
@@ -39,20 +32,17 @@ void AndroidCopyingBackingStrategy::Initialize(
 }
 
 void AndroidCopyingBackingStrategy::Cleanup(
+    bool have_context,
     const AndroidVideoDecodeAccelerator::OutputBufferMap&) {
   DCHECK(state_provider_->ThreadChecker().CalledOnValidThread());
   if (copier_)
     copier_->Destroy();
 
-  if (surface_texture_id_)
+  if (surface_texture_id_ && have_context)
     glDeleteTextures(1, &surface_texture_id_);
 }
 
-uint32 AndroidCopyingBackingStrategy::GetNumPictureBuffers() const {
-  return kNumPictureBuffers;
-}
-
-uint32 AndroidCopyingBackingStrategy::GetTextureTarget() const {
+uint32_t AndroidCopyingBackingStrategy::GetTextureTarget() const {
   return GL_TEXTURE_2D;
 }
 
@@ -75,7 +65,7 @@ AndroidCopyingBackingStrategy::CreateSurfaceTexture() {
 }
 
 void AndroidCopyingBackingStrategy::UseCodecBufferForPictureBuffer(
-    int32 codec_buf_index,
+    int32_t codec_buf_index,
     const media::PictureBuffer& picture_buffer) {
   // Make sure that the decoder is available.
   RETURN_ON_FAILURE(state_provider_, state_provider_->GetGlDecoder().get(),
@@ -112,7 +102,7 @@ void AndroidCopyingBackingStrategy::UseCodecBufferForPictureBuffer(
   float transfrom_matrix[16];
   surface_texture_->GetTransformMatrix(transfrom_matrix);
 
-  uint32 picture_buffer_texture_id = picture_buffer.texture_id();
+  uint32_t picture_buffer_texture_id = picture_buffer.texture_id();
 
   // Defer initializing the CopyTextureCHROMIUMResourceManager until it is
   // needed because it takes 10s of milliseconds to initialize.
@@ -132,7 +122,7 @@ void AndroidCopyingBackingStrategy::UseCodecBufferForPictureBuffer(
   // instead of using default matrix crbug.com/226218.
   copier_->DoCopyTextureWithTransform(
       state_provider_->GetGlDecoder().get(), GL_TEXTURE_EXTERNAL_OES,
-      surface_texture_id_, picture_buffer_texture_id,
+      surface_texture_id_, GL_TEXTURE_2D, picture_buffer_texture_id,
       state_provider_->GetSize().width(), state_provider_->GetSize().height(),
       false, false, false, kIdentityMatrix);
 }
@@ -141,6 +131,13 @@ void AndroidCopyingBackingStrategy::CodecChanged(
     media::VideoCodecBridge* codec,
     const AndroidVideoDecodeAccelerator::OutputBufferMap&) {
   media_codec_ = codec;
+}
+
+void AndroidCopyingBackingStrategy::OnFrameAvailable() {
+  // TODO(liberato): crbug.com/574948 .  The OnFrameAvailable logic can be
+  // moved into AVDA, and we should wait for it before doing the copy.
+  // Because there were some test failures, we don't do this now but
+  // instead preserve the old behavior.
 }
 
 }  // namespace content

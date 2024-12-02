@@ -78,7 +78,8 @@ class AdbDevice(object):
   def NeedsSU(self):
     return self.needs_su
 
-  def RunShellCommand(self, args, **_kwargs):
+  def RunShellCommand(self, args, **kwargs):
+    del kwargs  # unused
     if isinstance(args, basestring):
       args = shlex.split(args)
     handler = self.shell_command_handlers[args[0]]
@@ -87,7 +88,8 @@ class AdbDevice(object):
   def FileExists(self, _):
     return False
 
-  def ReadFile(self, device_path, as_root=False):  # pylint: disable=W0613
+  def ReadFile(self, device_path, as_root=False):
+    del device_path, as_root  # unused
     return self.mock_content
 
   def GetProp(self, property_name):
@@ -487,7 +489,8 @@ class CertUtilsStub(object):
 
 class AdbInstallCertStub(object):
   class AndroidCertInstaller(object):
-    def __init__(self, device_id, _cert_name, _cert_path):
+    def __init__(self, device_id, cert_name, cert_path):
+      del cert_name, cert_path  # unused
       if device_id == 'success':
         pass
       elif device_id == 'failure':

@@ -4,6 +4,11 @@
             "group_name": "Disabled"
         }
     ],
+    "AutodetectEncoding": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
     "AutofillClassifier": [
         {
             "group_name": "Enabled"
@@ -31,15 +36,13 @@
         {
             "group_name": "OptOut",
             "params": {
-                "enabled": "true",
-                "promo_on_limited_taps": "true",
-                "promo_opt_out": "true",
-                "tap_prefetch_limit_for_decided": "50",
-                "tap_prefetch_limit_for_undecided": "20",
-                "tap_resolve_limit_for_decided": "50",
-                "tap_resolve_limit_for_undecided": "20",
-                "tap_triggered_promo_limit": "50"
+                "enabled": "true"
             }
+        }
+    ],
+    "CreditCardScan": [
+        {
+            "group_name": "Enabled"
         }
     ],
     "CustomTabs": [
@@ -83,6 +86,11 @@
             }
         }
     ],
+    "DataReductionProxyFREPromo": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
     "DataReductionProxyUseQuic": [
         {
             "group_name": "Enabled"
@@ -102,6 +110,15 @@
         }
     ],
     "EnhancedBookmarks": [
+        {
+            "group_name": "Launch EnableEnhancedBookmarks",
+            "params": {
+                "id": "Fake_id_to_trigger_experiment_code"
+            }
+        },
+        {
+            "group_name": "Launch Control"
+        },
         {
             "group_name": "EnableEnhancedBookmarks",
             "params": {
@@ -155,6 +172,15 @@
             }
         }
     ],
+    "NTPPopularSites": [
+        {
+            "group_name": "Enabled",
+            "params": {
+                "country": "IN",
+                "version": "4"
+            }
+        }
+    ],
     "NetworkQualityEstimator": [
         {
             "group_name": "Enabled",
@@ -177,6 +203,11 @@
                 "WiFi.DefaultMedianKbps": "2736",
                 "WiFi.DefaultMedianRTTMsec": "168"
             }
+        }
+    ],
+    "PasswordBranding": [
+        {
+            "group_name": "SmartLockBrandingSavePromptOnly"
         }
     ],
     "Precache": [
@@ -265,6 +296,11 @@
             "group_name": "Enabled"
         }
     ],
+    "SpdyEnableDependencies": [
+        {
+            "group_name": "Enable"
+        }
+    ],
     "SpeculativeResourcePrefetching": [
         {
             "group_name": "v=1a:Prefetching=Enabled:Predictor=Url"
@@ -286,6 +322,11 @@
         },
         {
             "group_name": "v=1:Prefetching=Learning"
+        }
+    ],
+    "StrictSecureCookies": [
+        {
+            "group_name": "Enabled"
         }
     ],
     "SyncHttpContentCompression": [
@@ -311,12 +352,61 @@
             }
         }
     ],
+    "UpdateMenuItem": [
+        {
+            "group_name": "Enabled",
+            "params": {
+                "enable_update_menu_item": "true"
+            }
+        },
+        {
+            "group_name": "EnabledWithBadge",
+            "params": {
+                "enable_update_badge": "true",
+                "enable_update_menu_item": "true"
+            }
+        },
+        {
+            "group_name": "EnabledWithSummary",
+            "params": {
+                "enable_update_menu_item": "true",
+                "show_summary": "true"
+            }
+        },
+        {
+            "group_name": "EnabledWithCustomSummary",
+            "params": {
+                "custom_summary": "Custom update summary",
+                "enable_update_menu_item": "true",
+                "show_summary": "true"
+            }
+        },
+        {
+            "group_name": "EnabledWithSummaryAndBadge",
+            "params": {
+                "enable_update_badge": "true",
+                "enable_update_menu_item": "true",
+                "show_summary": "true"
+            }
+        },
+        {
+            "group_name": "Default",
+            "params": {
+                "enable_update_menu_item": "false"
+            }
+        }
+    ],
     "VarationsServiceControl": [
         {
             "group_name": "Interval_30min",
             "params": {
                 "fetch_period_min": "30"
             }
+        }
+    ],
+    "WebFontsIntervention": [
+        {
+            "group_name": "Enabled"
         }
     ],
     "WebRTC-LocalIPPermissionCheck": [

@@ -28,6 +28,10 @@ class BackgroundSyncMetrics {
     REGISTRATION_IS_DUPLICATE
   };
 
+  // Records the start of a sync event.
+  static void RecordEventStarted(SyncPeriodicity periodicity,
+                                 bool startedin_foreground);
+
   // Records the result of a single sync event firing.
   static void RecordEventResult(SyncPeriodicity periodicity,
                                 bool result,
@@ -38,13 +42,17 @@ class BackgroundSyncMetrics {
   static void RecordBatchSyncEventComplete(const base::TimeDelta& time,
                                            int number_of_batched_sync_events);
 
-  // Records the result of trying to register a sync. |could_fire| indicates
-  // whether the conditions were sufficient for the sync to fire immediately at
-  // the time it was registered.
-  static void CountRegister(SyncPeriodicity periodicity,
-                            RegistrationCouldFire could_fire,
-                            RegistrationIsDuplicate registration_is_duplicate,
-                            BackgroundSyncStatus result);
+  // Records the result of successfully registering a sync. |could_fire|
+  // indicates whether the conditions were sufficient for the sync to fire
+  // immediately at the time it was registered.
+  static void CountRegisterSuccess(
+      SyncPeriodicity periodicity,
+      RegistrationCouldFire could_fire,
+      RegistrationIsDuplicate registration_is_duplicate);
+
+  // Records the status of a failed sync registration.
+  static void CountRegisterFailure(SyncPeriodicity periodicity,
+                                   BackgroundSyncStatus status);
 
   // Records the result of trying to unregister a sync.
   static void CountUnregister(SyncPeriodicity periodicity,

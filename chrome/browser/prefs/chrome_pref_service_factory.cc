@@ -4,12 +4,15 @@
 
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
 
+#include <stddef.h>
+
 #include <string>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
+#include "base/macros.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/prefs/default_pref_store.h"
@@ -24,6 +27,7 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/chrome_pref_model_associator_client.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
@@ -166,12 +170,6 @@ const PrefHashFilter::TrackedPreferenceMetadata kTrackedPrefs[] = {
     PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
     PrefHashFilter::VALUE_IMPERSONAL
   },
-  {
-    13, prefs::kProfileResetPromptMementoInProfilePrefs,
-    PrefHashFilter::ENFORCE_ON_LOAD,
-    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
-    PrefHashFilter::VALUE_IMPERSONAL
-  },
 #endif
   {
     14, DefaultSearchManager::kDefaultSearchProviderDataPrefName,
@@ -233,6 +231,12 @@ const PrefHashFilter::TrackedPreferenceMetadata kTrackedPrefs[] = {
 #endif
   {
     23, prefs::kGoogleServicesAccountId,
+    PrefHashFilter::ENFORCE_ON_LOAD,
+    PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
+    PrefHashFilter::VALUE_PERSONAL
+  },
+  {
+    24, prefs::kGoogleServicesLastAccountId,
     PrefHashFilter::ENFORCE_ON_LOAD,
     PrefHashFilter::TRACKING_STRATEGY_ATOMIC,
     PrefHashFilter::VALUE_PERSONAL
@@ -529,7 +533,7 @@ scoped_ptr<syncable_prefs::PrefServiceSyncable> CreateProfilePrefs(
 
   ConfigureDefaultSearchPrefMigrationToDictionaryValue(pref_service.get());
 
-  return pref_service.Pass();
+  return pref_service;
 }
 
 void DisableDomainCheckForTesting() {

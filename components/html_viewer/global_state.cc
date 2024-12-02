@@ -4,19 +4,24 @@
 
 #include "components/html_viewer/global_state.h"
 
+#include <stddef.h>
 #include <string>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "build/build_config.h"
+#include "cc/blink/web_layer_impl.h"
+#include "cc/layers/layer_settings.h"
 #include "components/html_viewer/blink_platform_impl.h"
 #include "components/html_viewer/blink_settings_impl.h"
 #include "components/html_viewer/media_factory.h"
 #include "components/scheduler/renderer/renderer_scheduler.h"
 #include "gin/v8_initializer.h"
-#include "mojo/application/public/cpp/application_impl.h"
 #include "mojo/logging/init_logging.h"
 #include "mojo/services/tracing/public/cpp/tracing_impl.h"
+#include "mojo/shell/public/cpp/application_impl.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -124,11 +129,15 @@ void GlobalState::InitIfNecessary(const gfx::Size& screen_size_in_pixels,
       DisplaysFromSizeAndScale(screen_size_in_pixels_, device_pixel_ratio_)));
   base::DiscardableMemoryAllocator::SetInstance(&discardable_memory_allocator_);
 
-  mojo::URLRequestPtr request(mojo::URLRequest::New());
-  request->url = mojo::String::From("mojo:mus");
-  app_->ConnectToService(request.Pass(), &gpu_service_);
+  app_->ConnectToService("mojo:mus", &gpu_service_);
   gpu_service_->GetGpuInfo(base::Bind(&GlobalState::GetGpuInfoCallback,
                                       base::Unretained(this)));
+
+  // Use new animation system (cc::AnimationHost).
+  cc::LayerSettings layer_settings;
+  layer_settings.use_compositor_animation_timelines = true;
+  cc_blink::WebLayerImpl::SetLayerSettings(layer_settings);
+  blink::WebRuntimeFeatures::enableCompositorAnimationTimelines(true);
 
   renderer_scheduler_ = scheduler::RendererScheduler::Create();
   blink_platform_.reset(
@@ -154,10 +163,10 @@ void GlobalState::InitIfNecessary(const gfx::Size& screen_size_in_pixels,
     ui::RegisterPathProvider();
     base::File pak_file_2 = pak_file.Duplicate();
     ui::ResourceBundle::InitSharedInstanceWithPakFileRegion(
-      pak_file_2.Pass(), base::MemoryMappedFile::Region::kWholeFile);
+        std::move(pak_file_2), base::MemoryMappedFile::Region::kWholeFile);
   }
 
-  mojo::logging::InitLogging();
+  mojo::InitLogging();
 
   if (command_line->HasSwitch(kDisableEncryptedMedia))
     blink::WebRuntimeFeatures::enableEncryptedMedia(false);
@@ -166,7 +175,7 @@ void GlobalState::InitIfNecessary(const gfx::Size& screen_size_in_pixels,
 
   // TODO(sky): why is this always using 100?
   ui::ResourceBundle::GetSharedInstance().AddDataPackFromFile(
-      pak_file.Pass(), ui::SCALE_FACTOR_100P);
+      std::move(pak_file), ui::SCALE_FACTOR_100P);
 
   compositor_thread_.Start();
 
@@ -189,7 +198,7 @@ const mus::mojom::GpuInfo* GlobalState::GetGpuInfo() {
 
 void GlobalState::GetGpuInfoCallback(mus::mojom::GpuInfoPtr gpu_info) {
   CHECK(gpu_info);
-  gpu_info_ = gpu_info.Pass();
+  gpu_info_ = std::move(gpu_info);
   gpu_service_.reset();
 }
 

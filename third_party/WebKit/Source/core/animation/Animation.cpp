@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/animation/Animation.h"
 
 #include "core/animation/AnimationTimeline.h"
@@ -112,6 +111,15 @@ Animation::Animation(ExecutionContext* executionContext, AnimationTimeline& time
 Animation::~Animation()
 {
     destroyCompositorPlayer();
+}
+
+void Animation::dispose()
+{
+    destroyCompositorPlayer();
+    // If the AnimationTimeline and its Animation objects are
+    // finalized by the same GC, we have to eagerly clear out
+    // this Animation object's compositor player registration.
+    ASSERT(!m_compositorPlayer);
 }
 
 double Animation::effectEnd() const
@@ -929,8 +937,8 @@ void Animation::destroyCompositorPlayer()
     if (m_compositorPlayer) {
         detachCompositorTimeline();
         m_compositorPlayer->setAnimationDelegate(nullptr);
+        m_compositorPlayer.clear();
     }
-    m_compositorPlayer.clear();
 }
 
 void Animation::attachCompositorTimeline()

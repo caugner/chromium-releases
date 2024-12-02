@@ -2,8 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+#include <stdint.h>
 #include <algorithm>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ash/display/display_manager.h"
@@ -15,6 +18,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
@@ -29,6 +33,7 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/browser_process.h"
@@ -107,7 +112,9 @@
 #include "components/search/search.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
+#include "components/security_interstitials/core/controller_client.h"
 #include "components/ssl_config/ssl_config_prefs.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/translate/core/browser/translate_infobar_delegate.h"
 #include "components/variations/service/variations_service.h"
@@ -161,7 +168,7 @@
 #include "net/http/http_stream_factory.h"
 #include "net/ssl/ssl_config.h"
 #include "net/ssl/ssl_config_service.h"
-#include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/url_request/url_request_failed_job.h"
 #include "net/test/url_request/url_request_mock_http_job.h"
 #include "net/url_request/url_request.h"
@@ -191,7 +198,6 @@
 #endif
 
 #if !defined(OS_MACOSX)
-#include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
@@ -428,7 +434,8 @@ bool IsJavascriptEnabled(content::WebContents* contents) {
 }
 
 bool IsNetworkPredictionEnabled(PrefService* prefs) {
-  return chrome_browser_net::CanPrefetchAndPrerenderUI(prefs);
+  return chrome_browser_net::CanPrefetchAndPrerenderUI(prefs) ==
+      chrome_browser_net::NetworkPredictionStatus::ENABLED;
 }
 
 void CopyPluginListAndQuit(std::vector<content::WebPluginInfo>* out,
@@ -707,7 +714,7 @@ class PolicyTest : public InProcessBrowserTest {
     // is tied to the test instead.
     chrome_screenshot_grabber->screenshot_grabber()->AddObserver(&observer_);
     ash::Shell::GetInstance()->accelerator_controller()->SetScreenshotDelegate(
-        chrome_screenshot_grabber.Pass());
+        std::move(chrome_screenshot_grabber));
 
     SetScreenshotPolicy(enabled);
     ash::Shell::GetInstance()->accelerator_controller()->PerformActionIfEnabled(
@@ -2915,9 +2922,9 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SessionLengthLimit) {
   Mock::VerifyAndClearExpectations(&observer);
 }
 
-// Disabled, see http://crbug.com/315308.
+// Disabled, see http://crbug.com/554728.
 IN_PROC_BROWSER_TEST_F(PolicyTest,
-                       DISABLED_PRE_WaitForInitialUserActivityUsatisfied) {
+                       DISABLED_PRE_WaitForInitialUserActivityUnsatisfied) {
   // Indicate that the session started 2 hours ago and no user activity has
   // occurred yet.
   g_browser_process->local_state()->SetInt64(
@@ -2926,9 +2933,9 @@ IN_PROC_BROWSER_TEST_F(PolicyTest,
           .ToInternalValue());
 }
 
-// Disabled, see http://crbug.com/315308.
+// Disabled, see http://crbug.com/554728.
 IN_PROC_BROWSER_TEST_F(PolicyTest,
-                       DISABLED_WaitForInitialUserActivityUsatisfied) {
+                       DISABLED_WaitForInitialUserActivityUnsatisfied) {
   content::MockNotificationObserver observer;
   content::NotificationRegistrar registrar;
   registrar.Add(&observer,
@@ -3267,56 +3274,6 @@ class RestoreOnStartupPolicyTest
             RedirectHostsToTestData, kRestoredURLs, arraysize(kRestoredURLs)));
   }
 
-  void HomepageIsNotNTP() {
-    // Verifies that policy can set the startup pages to the homepage, when
-    // the homepage is not the NTP.
-    PolicyMap policies;
-    policies.Set(
-        key::kRestoreOnStartup,
-        POLICY_LEVEL_MANDATORY,
-        POLICY_SCOPE_USER,
-        POLICY_SOURCE_CLOUD,
-        new base::FundamentalValue(SessionStartupPref::kPrefValueHomePage),
-        NULL);
-    policies.Set(key::kHomepageIsNewTabPage,
-                 POLICY_LEVEL_MANDATORY,
-                 POLICY_SCOPE_USER,
-                 POLICY_SOURCE_CLOUD,
-                 new base::FundamentalValue(false),
-                 NULL);
-    policies.Set(key::kHomepageLocation,
-                 POLICY_LEVEL_MANDATORY,
-                 POLICY_SCOPE_USER,
-                 POLICY_SOURCE_CLOUD,
-                 new base::StringValue(kRestoredURLs[1]),
-                 NULL);
-    provider_.UpdateChromePolicy(policies);
-
-    expected_urls_.push_back(GURL(kRestoredURLs[1]));
-  }
-
-  void HomepageIsNTP() {
-    // Verifies that policy can set the startup pages to the homepage, when
-    // the homepage is the NTP.
-    PolicyMap policies;
-    policies.Set(
-        key::kRestoreOnStartup,
-        POLICY_LEVEL_MANDATORY,
-        POLICY_SCOPE_USER,
-        POLICY_SOURCE_CLOUD,
-        new base::FundamentalValue(SessionStartupPref::kPrefValueHomePage),
-        NULL);
-    policies.Set(key::kHomepageIsNewTabPage,
-                 POLICY_LEVEL_MANDATORY,
-                 POLICY_SCOPE_USER,
-                 POLICY_SOURCE_CLOUD,
-                 new base::FundamentalValue(true),
-                 NULL);
-    provider_.UpdateChromePolicy(policies);
-
-    expected_urls_.push_back(GURL(chrome::kChromeUINewTabURL));
-  }
-
   void ListOfURLs() {
     // Verifies that policy can set the startup pages to a list of URLs.
     base::ListValue urls;
@@ -3403,9 +3360,7 @@ IN_PROC_BROWSER_TEST_P(RestoreOnStartupPolicyTest, RunTest) {
 INSTANTIATE_TEST_CASE_P(
     RestoreOnStartupPolicyTestInstance,
     RestoreOnStartupPolicyTest,
-    testing::Values(&RestoreOnStartupPolicyTest::HomepageIsNotNTP,
-                    &RestoreOnStartupPolicyTest::HomepageIsNTP,
-                    &RestoreOnStartupPolicyTest::ListOfURLs,
+    testing::Values(&RestoreOnStartupPolicyTest::ListOfURLs,
                     &RestoreOnStartupPolicyTest::NTP,
                     &RestoreOnStartupPolicyTest::Last));
 
@@ -3703,11 +3658,10 @@ INSTANTIATE_TEST_CASE_P(MediaStreamDevicesControllerBrowserTestInstance,
 // Test that when extended reporting opt-in is disabled by policy, the
 // opt-in checkbox does not appear on SSL blocking pages.
 IN_PROC_BROWSER_TEST_F(PolicyTest, SafeBrowsingExtendedReportingOptInAllowed) {
-  net::SpawnedTestServer https_server_expired(
-      net::SpawnedTestServer::TYPE_HTTPS,
-      net::SpawnedTestServer::SSLOptions(
-          net::SpawnedTestServer::SSLOptions::CERT_EXPIRED),
-      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  net::EmbeddedTestServer https_server_expired(
+      net::EmbeddedTestServer::TYPE_HTTPS);
+  https_server_expired.SetSSLConfig(net::EmbeddedTestServer::CERT_EXPIRED);
+  https_server_expired.ServeFilesFromSourceDirectory("chrome/test/data");
   ASSERT_TRUE(https_server_expired.Start());
 
   // Set the enterprise policy to disallow opt-in.
@@ -3746,21 +3700,20 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SafeBrowsingExtendedReportingOptInAllowed) {
       // by sending false if it's not present.
       "  window.domAutomationController.send(%d);"
       "}",
-      SecurityInterstitialPage::CMD_TEXT_FOUND,
-      SecurityInterstitialPage::CMD_TEXT_NOT_FOUND,
-      SecurityInterstitialPage::CMD_ERROR);
+      security_interstitials::CMD_TEXT_FOUND,
+      security_interstitials::CMD_TEXT_NOT_FOUND,
+      security_interstitials::CMD_ERROR);
   EXPECT_TRUE(content::ExecuteScriptAndExtractInt(rvh, command, &result));
-  EXPECT_EQ(SecurityInterstitialPage::CMD_TEXT_NOT_FOUND, result);
+  EXPECT_EQ(security_interstitials::CMD_TEXT_NOT_FOUND, result);
 }
 
 // Test that when SSL error overriding is allowed by policy (default), the
 // proceed link appears on SSL blocking pages.
 IN_PROC_BROWSER_TEST_F(PolicyTest, SSLErrorOverridingAllowed) {
-  net::SpawnedTestServer https_server_expired(
-      net::SpawnedTestServer::TYPE_HTTPS,
-      net::SpawnedTestServer::SSLOptions(
-          net::SpawnedTestServer::SSLOptions::CERT_EXPIRED),
-      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  net::EmbeddedTestServer https_server_expired(
+      net::EmbeddedTestServer::TYPE_HTTPS);
+  https_server_expired.SetSSLConfig(net::EmbeddedTestServer::CERT_EXPIRED);
+  https_server_expired.ServeFilesFromSourceDirectory("chrome/test/data");
   ASSERT_TRUE(https_server_expired.Start());
 
   const PrefService* const prefs = browser()->profile()->GetPrefs();
@@ -3787,11 +3740,10 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SSLErrorOverridingAllowed) {
 // proceed link does not appear on SSL blocking pages and users should not
 // be able to proceed.
 IN_PROC_BROWSER_TEST_F(PolicyTest, SSLErrorOverridingDisallowed) {
-  net::SpawnedTestServer https_server_expired(
-      net::SpawnedTestServer::TYPE_HTTPS,
-      net::SpawnedTestServer::SSLOptions(
-          net::SpawnedTestServer::SSLOptions::CERT_EXPIRED),
-      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  net::EmbeddedTestServer https_server_expired(
+      net::EmbeddedTestServer::TYPE_HTTPS);
+  https_server_expired.SetSSLConfig(net::EmbeddedTestServer::CERT_EXPIRED);
+  https_server_expired.ServeFilesFromSourceDirectory("chrome/test/data");
   ASSERT_TRUE(https_server_expired.Start());
 
   const PrefService* const prefs = browser()->profile()->GetPrefs();
@@ -3831,7 +3783,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SSLErrorOverridingDisallowed) {
   SSLBlockingPage* ssl_delegate =
       static_cast<SSLBlockingPage*>(interstitial_delegate);
   ssl_delegate->CommandReceived(
-      base::IntToString(SecurityInterstitialPage::CMD_PROCEED));
+      base::IntToString(security_interstitials::CMD_PROCEED));
   EXPECT_TRUE(interstitial);
   EXPECT_TRUE(browser()
                   ->tab_strip_model()

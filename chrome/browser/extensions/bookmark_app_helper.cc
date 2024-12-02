@@ -4,11 +4,15 @@
 
 #include "chrome/browser/extensions/bookmark_app_helper.h"
 
+#include <stddef.h>
+
 #include <cctype>
 #include <string>
 
+#include "base/macros.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher_delegate.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -152,8 +156,11 @@ std::set<int> SizesToGenerate() {
   // Generate container icons from smaller icons.
   const int kIconSizesToGenerate[] = {
       extension_misc::EXTENSION_ICON_SMALL,
+      extension_misc::EXTENSION_ICON_SMALL * 2,
       extension_misc::EXTENSION_ICON_MEDIUM,
+      extension_misc::EXTENSION_ICON_MEDIUM * 2,
       extension_misc::EXTENSION_ICON_LARGE,
+      extension_misc::EXTENSION_ICON_LARGE * 2,
   };
   return std::set<int>(kIconSizesToGenerate,
                        kIconSizesToGenerate + arraysize(kIconSizesToGenerate));
@@ -185,9 +192,6 @@ void GenerateIcons(
        it != generate_sizes.end(); ++it) {
     extensions::BookmarkAppHelper::GenerateIcon(
         bitmap_map, *it, generated_icon_color, icon_letter);
-    // Also generate the 2x resource for this size.
-    extensions::BookmarkAppHelper::GenerateIcon(
-        bitmap_map, *it * 2, generated_icon_color, icon_letter);
   }
 }
 
@@ -373,11 +377,16 @@ BookmarkAppHelper::ConstrainBitmapsToSizes(
     ordered_bitmaps[it->bitmap.width()] = *it;
   }
 
-  for (const auto& size : sizes) {
-    // Find the closest not-smaller bitmap.
-    auto bitmaps_it = ordered_bitmaps.lower_bound(size);
-    if (bitmaps_it != ordered_bitmaps.end()) {
-      output_bitmaps[size] = bitmaps_it->second;
+  if (ordered_bitmaps.size() > 0) {
+    for (const auto& size : sizes) {
+      // Find the closest not-smaller bitmap, or failing that use the largest
+      // icon available.
+      auto bitmaps_it = ordered_bitmaps.lower_bound(size);
+      if (bitmaps_it != ordered_bitmaps.end())
+        output_bitmaps[size] = bitmaps_it->second;
+      else
+        output_bitmaps[size] = ordered_bitmaps.rbegin()->second;
+
       // Resize the bitmap if it does not exactly match the desired size.
       if (output_bitmaps[size].bitmap.width() != size) {
         output_bitmaps[size].bitmap = skia::ImageOperations::Resize(
@@ -435,17 +444,16 @@ BookmarkAppHelper::ResizeIconsAndGenerateMissing(
     std::vector<BookmarkAppHelper::BitmapAndSource> icons,
     std::set<int> sizes_to_generate,
     WebApplicationInfo* web_app_info) {
-  // Add the downloaded icons. Extensions only allow certain icon sizes. First
-  // populate icons that match the allowed sizes exactly and then downscale
-  // remaining icons to the closest allowed size that doesn't yet have an icon.
-  std::set<int> allowed_sizes(extension_misc::kExtensionIconSizes,
-                              extension_misc::kExtensionIconSizes +
-                                  extension_misc::kNumExtensionIconSizes);
-
-  // If there are icons that don't match the accepted icon sizes, find the
-  // closest bigger icon to the accepted sizes and resize the icon to it.
+  // Resize provided icons to make sure we have versions for each size in
+  // |sizes_to_generate|.
   std::map<int, BitmapAndSource> resized_bitmaps(
-      ConstrainBitmapsToSizes(icons, allowed_sizes));
+      ConstrainBitmapsToSizes(icons, sizes_to_generate));
+
+  // Also add all provided icon sizes.
+  for (const BitmapAndSource& icon : icons) {
+    if (resized_bitmaps.find(icon.bitmap.width()) == resized_bitmaps.end())
+      resized_bitmaps.insert(std::make_pair(icon.bitmap.width(), icon));
+  }
 
   // Determine the color that will be used for the icon's background. For this
   // the dominant color of the first icon found is used.
@@ -697,18 +705,14 @@ void BookmarkAppHelper::FinishInstallation(const Extension* extension) {
   chrome::HostDesktopType desktop = browser->host_desktop_type();
   if (desktop != chrome::HOST_DESKTOP_TYPE_ASH) {
     web_app::ShortcutLocations creation_locations;
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_WIN)
     creation_locations.on_desktop = true;
-#elif defined(OS_WIN)
-    // Create the shortcut on the desktop if it's not possible to pin to the
-    // taskbar.
-    creation_locations.on_desktop = !base::win::CanPinShortcutToTaskbar();
 #else
     creation_locations.on_desktop = false;
 #endif
     creation_locations.applications_menu_location =
         web_app::APP_MENU_LOCATION_SUBDIR_CHROMEAPPS;
-    creation_locations.in_quick_launch_bar = true;
+    creation_locations.in_quick_launch_bar = false;
     web_app::CreateShortcuts(web_app::SHORTCUT_CREATION_BY_USER,
                              creation_locations, current_profile, extension);
 #if defined(USE_ASH)
@@ -777,18 +781,15 @@ void GetWebApplicationInfoFromApp(
   web_app_info.title = base::UTF8ToUTF16(extension->non_localized_name());
   web_app_info.description = base::UTF8ToUTF16(extension->description());
 
+  const ExtensionIconSet& icon_set = extensions::IconsInfo::GetIcons(extension);
   std::vector<extensions::ImageLoader::ImageRepresentation> info_list;
-  for (size_t i = 0; i < extension_misc::kNumExtensionIconSizes; ++i) {
-    int size = extension_misc::kExtensionIconSizes[i];
+  for (const auto& iter : icon_set.map()) {
     extensions::ExtensionResource resource =
-        extensions::IconsInfo::GetIconResource(
-            extension, size, ExtensionIconSet::MATCH_EXACTLY);
+        extension->GetResource(iter.second);
     if (!resource.empty()) {
       info_list.push_back(extensions::ImageLoader::ImageRepresentation(
-          resource,
-          extensions::ImageLoader::ImageRepresentation::ALWAYS_RESIZE,
-          gfx::Size(size, size),
-          ui::SCALE_FACTOR_100P));
+          resource, extensions::ImageLoader::ImageRepresentation::ALWAYS_RESIZE,
+          gfx::Size(iter.first, iter.first), ui::SCALE_FACTOR_100P));
     }
   }
 

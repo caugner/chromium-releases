@@ -36,7 +36,6 @@ WebInspector.SettingsScreen = function()
 {
     WebInspector.VBox.call(this, true);
     this.registerRequiredCSS("settings/settingsScreen.css");
-    this.element.id = "settings-screen";
 
     this.contentElement.tabIndex = 0;
     this.contentElement.classList.add("help-window-main");
@@ -349,7 +348,7 @@ WebInspector.WorkspaceSettingsTab.prototype = {
         path.textContent = fileSystemPath;
         path.title = fileSystemPath;
 
-        var toolbar = new WebInspector.Toolbar();
+        var toolbar = new WebInspector.Toolbar("");
         var button = new WebInspector.ToolbarButton(WebInspector.UIString("Remove"), "delete-toolbar-item");
         button.addEventListener("click", this._removeFileSystemClicked.bind(this, fileSystem));
         toolbar.appendToolbarItem(button);
@@ -363,12 +362,12 @@ WebInspector.WorkspaceSettingsTab.prototype = {
      */
     _removeFileSystemClicked: function(fileSystem)
     {
-        WebInspector.isolatedFileSystemManager.removeFileSystem(fileSystem.path());
+        WebInspector.isolatedFileSystemManager.removeFileSystem(fileSystem);
     },
 
     _addFileSystemClicked: function()
     {
-        WebInspector.isolatedFileSystemManager.addFileSystem("");
+        WebInspector.isolatedFileSystemManager.addFileSystem();
     },
 
     _fileSystemAdded: function(event)

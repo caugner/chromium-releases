@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "core/animation/CSSValueInterpolationType.h"
 
 #include "core/animation/InterpolationEnvironment.h"
+#include "core/animation/StringKeyframe.h"
 #include "core/css/resolver/StyleBuilder.h"
 
 namespace blink {

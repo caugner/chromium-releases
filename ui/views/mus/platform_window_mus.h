@@ -5,23 +5,31 @@
 #ifndef UI_VIEWS_MUS_PLATFORM_WINDOW_MUS_H_
 #define UI_VIEWS_MUS_PLATFORM_WINDOW_MUS_H_
 
+#include <stdint.h>
+
 #include <string>
 #include <vector>
 
 #include "base/macros.h"
+#include "components/mus/public/cpp/input_event_handler.h"
 #include "components/mus/public/cpp/window_observer.h"
 #include "ui/platform_window/platform_window.h"
+#include "ui/views/mus/mus_export.h"
 
 namespace views {
 
-class PlatformWindowMus : public ui::PlatformWindow,
-                          public mus::WindowObserver {
+class VIEWS_MUS_EXPORT PlatformWindowMus
+    : public NON_EXPORTED_BASE(ui::PlatformWindow),
+      public mus::WindowObserver,
+      public NON_EXPORTED_BASE(mus::InputEventHandler) {
  public:
   PlatformWindowMus(ui::PlatformWindowDelegate* delegate,
                     mus::Window* mus_window);
   ~PlatformWindowMus() override;
 
   void Activate();
+
+  void SetCursorById(mus::mojom::Cursor cursor);
 
   // ui::PlatformWindow:
   void Show() override;
@@ -51,17 +59,32 @@ class PlatformWindowMus : public ui::PlatformWindow,
                              const gfx::Rect& new_bounds) override;
   void OnWindowFocusChanged(mus::Window* gained_focus,
                             mus::Window* lost_focus) override;
-  void OnWindowInputEvent(mus::Window* view,
-                          const mus::mojom::EventPtr& event) override;
+  void OnWindowPredefinedCursorChanged(mus::Window* window,
+                                       mus::mojom::Cursor cursor) override;
   void OnWindowSharedPropertyChanged(
       mus::Window* window,
       const std::string& name,
       const std::vector<uint8_t>* old_data,
       const std::vector<uint8_t>* new_data) override;
+  void OnRequestClose(mus::Window* window) override;
+
+  // mus::InputEventHandler:
+  void OnWindowInputEvent(mus::Window* view,
+                          mus::mojom::EventPtr event,
+                          scoped_ptr<base::Closure>* ack_callback) override;
 
   ui::PlatformWindowDelegate* delegate_;
   mus::Window* mus_window_;
   mus::mojom::ShowState show_state_;
+  mus::mojom::Cursor last_cursor_;
+  bool has_capture_;
+
+  // True if OnWindowDestroyed() has been received.
+  bool mus_window_destroyed_;
+
+#ifndef NDEBUG
+  scoped_ptr<base::WeakPtrFactory<PlatformWindowMus>> weak_factory_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(PlatformWindowMus);
 };

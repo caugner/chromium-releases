@@ -4,6 +4,8 @@
 
 #include "components/test_runner/test_common.h"
 
+#include <stddef.h>
+
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/rand_util.h"
@@ -30,10 +32,6 @@ class MockBlinkPlatform : NON_EXPORTED_BASE(public blink::Platform) {
     blink::initializeWithoutV8(this);
   }
   ~MockBlinkPlatform() override {}
-  void cryptographicallyRandomValues(unsigned char* buffer,
-                                     size_t length) override {
-    base::RandBytes(buffer, length);
-  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockBlinkPlatform);

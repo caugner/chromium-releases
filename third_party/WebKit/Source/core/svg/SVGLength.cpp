@@ -19,20 +19,14 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "config.h"
-
 #include "core/svg/SVGLength.h"
 
-#include "bindings/core/v8/ExceptionState.h"
 #include "core/SVGNames.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSValue.h"
 #include "core/css/CSSValuePool.h"
 #include "core/css/parser/CSSParser.h"
-#include "core/dom/ExceptionCode.h"
 #include "core/svg/SVGAnimationElement.h"
-#include "core/svg/SVGParserUtilities.h"
-#include "platform/animation/AnimationUtilities.h"
 #include "wtf/MathExtras.h"
 #include "wtf/text/WTFString.h"
 
@@ -67,14 +61,11 @@ PassRefPtrWillBeRawPtr<SVGLength> SVGLength::clone() const
 PassRefPtrWillBeRawPtr<SVGPropertyBase> SVGLength::cloneForAnimation(const String& value) const
 {
     RefPtrWillBeRawPtr<SVGLength> length = create();
-
     length->m_unitMode = m_unitMode;
 
-    TrackExceptionState exceptionState;
-    length->setValueAsString(value, exceptionState);
-    if (exceptionState.hadException()) {
-        length->m_value = CSSPrimitiveValue::create(0, CSSPrimitiveValue::UnitType::UserUnits);
-    }
+    SVGParsingError status = length->setValueAsString(value);
+    if (status != NoError)
+        length->m_value = cssValuePool().createValue(0, CSSPrimitiveValue::UnitType::UserUnits);
 
     return length.release();
 }
@@ -102,7 +93,8 @@ bool isSupportedCSSUnitType(CSSPrimitiveValue::UnitType type)
     return type != CSSPrimitiveValue::UnitType::Unknown
         && (type <= CSSPrimitiveValue::UnitType::UserUnits
             || type == CSSPrimitiveValue::UnitType::Chs
-            || type == CSSPrimitiveValue::UnitType::Rems);
+            || type == CSSPrimitiveValue::UnitType::Rems
+            || (type >= CSSPrimitiveValue::UnitType::ViewportWidth && type <= CSSPrimitiveValue::UnitType::ViewportMax));
 }
 
 void SVGLength::setUnitType(CSSPrimitiveValue::UnitType type)
@@ -141,28 +133,25 @@ float SVGLength::scaleByPercentage(float input) const
     return result;
 }
 
-void SVGLength::setValueAsString(const String& string, ExceptionState& exceptionState)
+SVGParsingError SVGLength::setValueAsString(const String& string)
 {
     if (string.isEmpty()) {
         m_value = cssValuePool().createValue(0, CSSPrimitiveValue::UnitType::UserUnits);
-        return;
+        return NoError;
     }
 
     CSSParserContext svgParserContext(SVGAttributeMode, 0);
     RefPtrWillBeRawPtr<CSSValue> parsed = CSSParser::parseSingleValue(CSSPropertyX, string, svgParserContext);
-    if (!parsed || !parsed->isPrimitiveValue()) {
-        exceptionState.throwDOMException(SyntaxError, "The value provided ('" + string + "') is invalid.");
-        return;
-    }
+    if (!parsed || !parsed->isPrimitiveValue())
+        return ParsingAttributeFailedError;
 
     CSSPrimitiveValue* newValue = toCSSPrimitiveValue(parsed.get());
     // TODO(fs): Enable calc for SVG lengths
-    if (newValue->isCalculated() || !isSupportedCSSUnitType(newValue->typeWithCalcResolved())) {
-        exceptionState.throwDOMException(SyntaxError, "The value provided ('" + string + "') is invalid.");
-        return;
-    }
+    if (newValue->isCalculated() || !isSupportedCSSUnitType(newValue->typeWithCalcResolved()))
+        return ParsingAttributeFailedError;
 
     m_value = newValue;
+    return NoError;
 }
 
 String SVGLength::valueAsString() const
@@ -197,6 +186,7 @@ SVGLengthMode SVGLength::lengthModeForAnimatedLengthAttribute(const QualifiedNam
         s_lengthModeMap.set(SVGNames::cyAttr, SVGLengthMode::Height);
         s_lengthModeMap.set(SVGNames::dxAttr, SVGLengthMode::Width);
         s_lengthModeMap.set(SVGNames::dyAttr, SVGLengthMode::Height);
+        s_lengthModeMap.set(SVGNames::frAttr, SVGLengthMode::Other);
         s_lengthModeMap.set(SVGNames::fxAttr, SVGLengthMode::Width);
         s_lengthModeMap.set(SVGNames::fyAttr, SVGLengthMode::Height);
         s_lengthModeMap.set(SVGNames::rAttr, SVGLengthMode::Other);
@@ -220,6 +210,25 @@ SVGLengthMode SVGLength::lengthModeForAnimatedLengthAttribute(const QualifiedNam
         return s_lengthModeMap.get(attrName);
 
     return SVGLengthMode::Other;
+}
+
+bool SVGLength::negativeValuesForbiddenForAnimatedLengthAttribute(const QualifiedName& attrName)
+{
+    DEFINE_STATIC_LOCAL(HashSet<QualifiedName>, s_noNegativeValuesSet, ());
+
+    if (s_noNegativeValuesSet.isEmpty()) {
+        s_noNegativeValuesSet.add(SVGNames::frAttr);
+        s_noNegativeValuesSet.add(SVGNames::rAttr);
+        s_noNegativeValuesSet.add(SVGNames::rxAttr);
+        s_noNegativeValuesSet.add(SVGNames::ryAttr);
+        s_noNegativeValuesSet.add(SVGNames::widthAttr);
+        s_noNegativeValuesSet.add(SVGNames::heightAttr);
+        s_noNegativeValuesSet.add(SVGNames::markerWidthAttr);
+        s_noNegativeValuesSet.add(SVGNames::markerHeightAttr);
+        s_noNegativeValuesSet.add(SVGNames::textLengthAttr);
+    }
+
+    return s_noNegativeValuesSet.contains(attrName);
 }
 
 void SVGLength::add(PassRefPtrWillBeRawPtr<SVGPropertyBase> other, SVGElement* contextElement)

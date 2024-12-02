@@ -219,7 +219,8 @@ class SysfsPowerMonitorMonitorTest(unittest.TestCase):
     class PlatformStub(object):
       def __init__(self, run_command_return_value):
         self._run_command_return_value = run_command_return_value
-      def RunCommand(self, _cmd):
+      def RunCommand(self, cmd):
+        del cmd  # unused
         return self._run_command_return_value
       def PathExists(self, path):
         return 'cpu0' in path or 'cpu1' in path
@@ -241,7 +242,7 @@ class SysfsPowerMonitorMonitorTest(unittest.TestCase):
 
     sysfsmon = sysfs_power_monitor.SysfsPowerMonitor(
       PlatformStub(cpu_state_from_samsung_note3))
-    # pylint: disable=W0212
+    # pylint: disable=protected-access
     sysfsmon._cpus = cpus
     cstate = sysfsmon.GetCpuState()
     result = android_platform_backend.AndroidPlatformBackend.ParseCStateSample(
@@ -252,9 +253,11 @@ class SysfsPowerMonitorMonitorTest(unittest.TestCase):
     class PlatformStub(object):
       def __init__(self, run_command_return_value):
         self._run_command_return_value = run_command_return_value
-      def RunCommand(self, _cmd):
+      def RunCommand(self, cmd):
+        del cmd  # unused
         return self._run_command_return_value
       def PathExists(self, path):
+        del path  # unused
         return True
 
     cpu_state_from_samsung_note3 = (
@@ -274,7 +277,7 @@ class SysfsPowerMonitorMonitorTest(unittest.TestCase):
 
     sysfsmon = sysfs_power_monitor.SysfsPowerMonitor(
         PlatformStub(cpu_state_from_samsung_note3), standalone=True)
-    # pylint: disable=W0212
+    # pylint: disable=protected-access
     sysfsmon._cpus = cpus
     cstate = sysfsmon.GetCpuState()
     result = android_platform_backend.AndroidPlatformBackend.ParseCStateSample(

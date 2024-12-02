@@ -4,8 +4,11 @@
 
 #include "content/browser/gpu/compositor_util.h"
 
+#include <stddef.h>
+
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_info.h"
@@ -240,9 +243,7 @@ bool IsGpuMemoryBufferCompositorResourcesEnabled() {
     return false;
 
 #if defined(OS_MACOSX)
-  // Disabled due to increased crash rates.
-  // http://crbug.com/554541
-  return false;
+  return true;
 #else
   return false;
 #endif

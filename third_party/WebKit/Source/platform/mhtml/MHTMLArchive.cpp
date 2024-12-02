@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "platform/mhtml/MHTMLArchive.h"
 
 #include "platform/DateComponents.h"
@@ -39,6 +38,7 @@
 #include "platform/mhtml/MHTMLParser.h"
 #include "platform/text/QuotedPrintable.h"
 #include "platform/weborigin/SchemeRegistry.h"
+#include "wtf/Assertions.h"
 #include "wtf/CryptographicallyRandomNumber.h"
 #include "wtf/DateMath.h"
 #include "wtf/text/Base64.h"
@@ -49,26 +49,6 @@ namespace blink {
 const char* const quotedPrintable = "quoted-printable";
 const char* const base64 = "base64";
 const char* const binary = "binary";
-
-String MHTMLArchive::generateMHTMLBoundary()
-{
-    // Trying to generate random boundaries similar to IE/UnMHT
-    // (ex: ----=_NextPart_000_001B_01CC157B.96F808A0).
-    const size_t randomValuesLength = 10;
-    char randomValues[randomValuesLength];
-    cryptographicallyRandomValues(&randomValues, randomValuesLength);
-    StringBuilder stringBuilder;
-    stringBuilder.appendLiteral("----=_NextPart_000_");
-    for (size_t i = 0; i < randomValuesLength; ++i) {
-        if (i == 2)
-            stringBuilder.append('_');
-        else if (i == 6)
-            stringBuilder.append('.');
-        stringBuilder.append(lowerNibbleToASCIIHexDigit(randomValues[i]));
-        stringBuilder.append(upperNibbleToASCIIHexDigit(randomValues[i]));
-    }
-    return stringBuilder.toString();
-}
 
 static String replaceNonPrintableCharacters(const String& text)
 {
@@ -127,6 +107,9 @@ void MHTMLArchive::generateMHTMLHeader(
     const String& boundary, const String& title, const String& mimeType,
     SharedBuffer& outputBuffer)
 {
+    ASSERT(!boundary.isEmpty());
+    ASSERT(!mimeType.isEmpty());
+
     DateComponents now;
     now.setMillisecondsSinceEpochForDateTime(currentTimeMS());
     // TODO(lukasza): Passing individual date/time components seems fragile.
@@ -160,14 +143,26 @@ void MHTMLArchive::generateMHTMLHeader(
 
 void MHTMLArchive::generateMHTMLPart(
     const String& boundary,
+    const String& contentID,
     EncodingPolicy encodingPolicy,
     const SerializedResource& resource,
     SharedBuffer& outputBuffer)
 {
+    ASSERT(!boundary.isEmpty());
+    ASSERT(contentID.isEmpty() || contentID[0] == '<');
+
     StringBuilder stringBuilder;
     stringBuilder.append("--" + boundary + "\r\n");
+
     stringBuilder.appendLiteral("Content-Type: ");
     stringBuilder.append(resource.mimeType);
+    stringBuilder.appendLiteral("\r\n");
+
+    if (!contentID.isEmpty()) {
+        stringBuilder.appendLiteral("Content-ID: ");
+        stringBuilder.append(contentID);
+        stringBuilder.appendLiteral("\r\n");
+    }
 
     const char* contentEncoding = 0;
     if (encodingPolicy == UseBinaryEncoding)
@@ -177,11 +172,17 @@ void MHTMLArchive::generateMHTMLPart(
     else
         contentEncoding = base64;
 
-    stringBuilder.appendLiteral("\r\nContent-Transfer-Encoding: ");
+    stringBuilder.appendLiteral("Content-Transfer-Encoding: ");
     stringBuilder.append(contentEncoding);
-    stringBuilder.appendLiteral("\r\nContent-Location: ");
-    stringBuilder.append(resource.url);
-    stringBuilder.appendLiteral("\r\n\r\n");
+    stringBuilder.appendLiteral("\r\n");
+
+    if (!resource.url.protocolIsAbout()) {
+        stringBuilder.appendLiteral("Content-Location: ");
+        stringBuilder.append(resource.url);
+        stringBuilder.appendLiteral("\r\n");
+    }
+
+    stringBuilder.appendLiteral("\r\n");
 
     CString asciiString = stringBuilder.toString().utf8();
     outputBuffer.append(asciiString.data(), asciiString.length());
@@ -201,7 +202,7 @@ void MHTMLArchive::generateMHTMLPart(
         if (!strcmp(contentEncoding, quotedPrintable)) {
             quotedPrintableEncode(data, dataLength, encodedData);
             outputBuffer.append(encodedData.data(), encodedData.size());
-            outputBuffer.append("\r\n", 2);
+            outputBuffer.append("\r\n", 2u);
         } else {
             ASSERT(!strcmp(contentEncoding, base64));
             // We are not specifying insertLFs = true below as it would cut the lines with LFs and MHTML requires CRLFs.
@@ -212,7 +213,7 @@ void MHTMLArchive::generateMHTMLPart(
             do {
                 size_t lineLength = std::min(encodedDataLength - index, maximumLineLength);
                 outputBuffer.append(encodedData.data() + index, lineLength);
-                outputBuffer.append("\r\n", 2);
+                outputBuffer.append("\r\n", 2u);
                 index += maximumLineLength;
             } while (index < encodedDataLength);
         }
@@ -223,25 +224,9 @@ void MHTMLArchive::generateMHTMLFooter(
     const String& boundary,
     SharedBuffer& outputBuffer)
 {
+    ASSERT(!boundary.isEmpty());
     CString asciiString = String("--" + boundary + "--\r\n").utf8();
     outputBuffer.append(asciiString.data(), asciiString.length());
-}
-
-PassRefPtr<SharedBuffer> MHTMLArchive::generateMHTMLData(
-    const Vector<SerializedResource>& resources,
-    EncodingPolicy encodingPolicy,
-    const String& title, const String& mimeType)
-{
-    String boundary = MHTMLArchive::generateMHTMLBoundary();
-
-    RefPtr<SharedBuffer> mhtmlData = SharedBuffer::create();
-    MHTMLArchive::generateMHTMLHeader(boundary, title, mimeType, *mhtmlData);
-    for (const auto& resource : resources) {
-        MHTMLArchive::generateMHTMLPart(
-            boundary, encodingPolicy, resource, *mhtmlData);
-    }
-    MHTMLArchive::generateMHTMLFooter(boundary, *mhtmlData);
-    return mhtmlData.release();
 }
 
 #if !ENABLE(OILPAN)

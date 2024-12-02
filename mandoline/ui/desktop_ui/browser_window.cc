@@ -4,7 +4,12 @@
 
 #include "mandoline/ui/desktop_ui/browser_window.h"
 
+#include <stdint.h>
+
+#include <utility>
+
 #include "base/command_line.h"
+#include "base/macros.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -109,7 +114,7 @@ BrowserWindow::BrowserWindow(mojo::ApplicationImpl* app,
       web_view_(this) {
   mus::mojom::WindowTreeHostClientPtr host_client;
   host_client_binding_.Bind(GetProxy(&host_client));
-  mus::CreateWindowTreeHost(host_factory, host_client.Pass(), this, &host_,
+  mus::CreateWindowTreeHost(host_factory, std::move(host_client), this, &host_,
                             nullptr, nullptr);
 }
 
@@ -128,7 +133,7 @@ void BrowserWindow::LoadURL(const GURL& url) {
 
   mojo::URLRequestPtr request(mojo::URLRequest::New());
   request->url = url.spec();
-  Embed(request.Pass());
+  Embed(std::move(request));
 }
 
 void BrowserWindow::Close() {
@@ -141,9 +146,7 @@ void BrowserWindow::Close() {
 void BrowserWindow::ShowOmnibox() {
   TRACE_EVENT0("desktop_ui", "BrowserWindow::ShowOmnibox");
   if (!omnibox_.get()) {
-    mojo::URLRequestPtr request(mojo::URLRequest::New());
-    request->url = mojo::String::From("mojo:omnibox");
-    omnibox_connection_ = app_->ConnectToApplication(request.Pass());
+    omnibox_connection_ = app_->ConnectToApplication("mojo:omnibox");
     omnibox_connection_->AddService<ViewEmbedder>(this);
     omnibox_connection_->ConnectToService(&omnibox_);
     omnibox_connection_->SetRemoteServiceProviderConnectionErrorHandler(
@@ -202,6 +205,7 @@ void BrowserWindow::OnEmbed(mus::Window* root) {
   host_->SetSize(mojo::Size::From(gfx::Size(1280, 800)));
 
   root_->AddChild(content_);
+  host_->AddActivationParent(root_->id());
   content_->SetVisible(true);
 
   web_view_.Init(app_, content_);
@@ -209,27 +213,31 @@ void BrowserWindow::OnEmbed(mus::Window* root) {
   host_->AddAccelerator(
       static_cast<uint32_t>(BrowserCommand::CLOSE),
       mus::CreateKeyMatcher(mus::mojom::KEYBOARD_CODE_W,
-                            mus::mojom::EVENT_FLAGS_CONTROL_DOWN));
+                            mus::mojom::EVENT_FLAGS_CONTROL_DOWN),
+      mus::mojom::WindowTreeHost::AddAcceleratorCallback());
   host_->AddAccelerator(
       static_cast<uint32_t>(BrowserCommand::FOCUS_OMNIBOX),
       mus::CreateKeyMatcher(mus::mojom::KEYBOARD_CODE_L,
-                            mus::mojom::EVENT_FLAGS_CONTROL_DOWN));
+                            mus::mojom::EVENT_FLAGS_CONTROL_DOWN),
+      mus::mojom::WindowTreeHost::AddAcceleratorCallback());
   host_->AddAccelerator(
       static_cast<uint32_t>(BrowserCommand::NEW_WINDOW),
       mus::CreateKeyMatcher(mus::mojom::KEYBOARD_CODE_N,
-                            mus::mojom::EVENT_FLAGS_CONTROL_DOWN));
+                            mus::mojom::EVENT_FLAGS_CONTROL_DOWN),
+      mus::mojom::WindowTreeHost::AddAcceleratorCallback());
   host_->AddAccelerator(
       static_cast<uint32_t>(BrowserCommand::SHOW_FIND),
       mus::CreateKeyMatcher(mus::mojom::KEYBOARD_CODE_F,
-                            mus::mojom::EVENT_FLAGS_CONTROL_DOWN));
-  host_->AddAccelerator(
-      static_cast<uint32_t>(BrowserCommand::GO_BACK),
-      mus::CreateKeyMatcher(mus::mojom::KEYBOARD_CODE_LEFT,
-                            mus::mojom::EVENT_FLAGS_ALT_DOWN));
-  host_->AddAccelerator(
-      static_cast<uint32_t>(BrowserCommand::GO_FORWARD),
-      mus::CreateKeyMatcher(mus::mojom::KEYBOARD_CODE_RIGHT,
-                            mus::mojom::EVENT_FLAGS_ALT_DOWN));
+                            mus::mojom::EVENT_FLAGS_CONTROL_DOWN),
+      mus::mojom::WindowTreeHost::AddAcceleratorCallback());
+  host_->AddAccelerator(static_cast<uint32_t>(BrowserCommand::GO_BACK),
+                        mus::CreateKeyMatcher(mus::mojom::KEYBOARD_CODE_LEFT,
+                                              mus::mojom::EVENT_FLAGS_ALT_DOWN),
+                        mus::mojom::WindowTreeHost::AddAcceleratorCallback());
+  host_->AddAccelerator(static_cast<uint32_t>(BrowserCommand::GO_FORWARD),
+                        mus::CreateKeyMatcher(mus::mojom::KEYBOARD_CODE_RIGHT,
+                                              mus::mojom::EVENT_FLAGS_ALT_DOWN),
+                        mus::mojom::WindowTreeHost::AddAcceleratorCallback());
   // Now that we're ready, load the default url.
   LoadURL(default_url_);
 
@@ -242,10 +250,8 @@ void BrowserWindow::OnEmbed(mus::Window* root) {
   if (!recorded_browser_startup_metrics &&
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           tracing::kEnableStatsCollectionBindings)) {
-    mojo::URLRequestPtr request(mojo::URLRequest::New());
-    request->url = mojo::String::From("mojo:tracing");
     tracing::StartupPerformanceDataCollectorPtr collector;
-    app_->ConnectToService(request.Pass(), &collector);
+    app_->ConnectToService("mojo:tracing", &collector);
     collector->SetBrowserWindowDisplayTicks(display_ticks.ToInternalValue());
     collector->SetBrowserOpenTabsTimeDelta(open_tabs_delta.ToInternalValue());
     collector->SetBrowserMessageLoopStartTicks(
@@ -293,7 +299,7 @@ void BrowserWindow::OnAccelerator(uint32_t id, mus::mojom::EventPtr event) {
 
 void BrowserWindow::TopLevelNavigateRequest(mojo::URLRequestPtr request) {
   OnHideFindBar();
-  Embed(request.Pass());
+  Embed(std::move(request));
 }
 
 void BrowserWindow::TopLevelNavigationStarted(const mojo::String& url) {
@@ -347,7 +353,7 @@ void BrowserWindow::Embed(mojo::URLRequestPtr request) {
     EmbedOmnibox();
     return;
   }
-  web_view_.web_view()->LoadRequest(request.Pass());
+  web_view_.web_view()->LoadRequest(std::move(request));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -355,7 +361,7 @@ void BrowserWindow::Embed(mojo::URLRequestPtr request) {
 
 void BrowserWindow::Create(mojo::ApplicationConnection* connection,
                            mojo::InterfaceRequest<ViewEmbedder> request) {
-  view_embedder_bindings_.AddBinding(this, request.Pass());
+  view_embedder_bindings_.AddBinding(this, std::move(request));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -413,7 +419,7 @@ void BrowserWindow::Init(mus::Window* root) {
 void BrowserWindow::EmbedOmnibox() {
   mus::mojom::WindowTreeClientPtr view_tree_client;
   omnibox_->GetWindowTreeClient(GetProxy(&view_tree_client));
-  omnibox_view_->Embed(view_tree_client.Pass());
+  omnibox_view_->Embed(std::move(view_tree_client));
 
   // TODO(beng): This should be handled sufficiently by
   //             OmniboxImpl::ShowWindow() but unfortunately view manager policy

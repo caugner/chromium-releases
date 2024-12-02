@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "base/basictypes.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
@@ -26,6 +26,7 @@
 class DevToolsAndroidBridge;
 class InfoBarService;
 class Profile;
+class PortForwardingStatusSerializer;
 
 namespace content {
 struct FileChooserParams;
@@ -162,6 +163,7 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
   virtual void DevicesUpdated(const std::string& source,
                               const base::ListValue& targets);
 
+  void DocumentAvailableInMainFrame();
   void DocumentOnLoadCompletedInMainFrame();
   void DidNavigateMainFrame();
   void FrontendLoaded();
@@ -170,6 +172,7 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
                     int result,
                     const std::string& message);
   void DevicesDiscoveryConfigUpdated();
+  void SendPortForwardingStatus(const base::Value& status);
 
   // DevToolsFileHelper::Delegate overrides.
   void FileSystemAdded(
@@ -217,7 +220,9 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
 
   bool devices_updates_enabled_;
   bool frontend_loaded_;
+  bool reattaching_;
   scoped_ptr<DevToolsTargetsUIHandler> remote_targets_handler_;
+  scoped_ptr<PortForwardingStatusSerializer> port_status_serializer_;
   PrefChangeRegistrar pref_change_registrar_;
   scoped_ptr<DevToolsEmbedderMessageDispatcher> embedder_message_dispatcher_;
   GURL url_;

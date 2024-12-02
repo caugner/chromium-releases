@@ -4,13 +4,17 @@
 
 #include "components/bookmarks/browser/bookmark_model.h"
 
+#include <stddef.h>
+#include <stdint.h>
 #include <set>
 #include <string>
+#include <utility>
 
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/containers/hash_tables.h"
+#include "base/macros.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -39,6 +43,8 @@ namespace {
 
 // Test cases used to test the removal of extra whitespace when adding
 // a new folder/bookmark or updating a title of a folder/bookmark.
+// Note that whitespace characters are all replaced with spaces, but spaces are
+// not collapsed or trimmed.
 static struct {
   const std::string input_title;
   const std::string expected_title;
@@ -46,24 +52,24 @@ static struct {
   {"foobar", "foobar"},
   // Newlines.
   {"foo\nbar", "foo bar"},
-  {"foo\n\nbar", "foo bar"},
-  {"foo\n\n\nbar", "foo bar"},
-  {"foo\r\nbar", "foo bar"},
-  {"foo\r\n\r\nbar", "foo bar"},
-  {"\nfoo\nbar\n", "foo bar"},
-  // Spaces.
-  {"foo  bar", "foo bar"},
-  {" foo bar ", "foo bar"},
-  {"  foo  bar  ", "foo bar"},
+  {"foo\n\nbar", "foo  bar"},
+  {"foo\n\n\nbar", "foo   bar"},
+  {"foo\r\nbar", "foo  bar"},
+  {"foo\r\n\r\nbar", "foo    bar"},
+  {"\nfoo\nbar\n", " foo bar "},
+  // Spaces should not collapse.
+  {"foo  bar", "foo  bar"},
+  {" foo bar ", " foo bar "},
+  {"  foo  bar  ", "  foo  bar  "},
   // Tabs.
-  {"\tfoo\tbar\t", "foo bar"},
-  {"\tfoo bar\t", "foo bar"},
+  {"\tfoo\tbar\t", " foo bar "},
+  {"\tfoo bar\t", " foo bar "},
   // Mixed cases.
-  {"\tfoo\nbar\t", "foo bar"},
-  {"\tfoo\r\nbar\t", "foo bar"},
-  {"  foo\tbar\n", "foo bar"},
-  {"\t foo \t  bar  \t", "foo bar"},
-  {"\n foo\r\n\tbar\n \t", "foo bar"},
+  {"\tfoo\nbar\t", " foo bar "},
+  {"\tfoo\r\nbar\t", " foo  bar "},
+  {"  foo\tbar\n", "  foo bar "},
+  {"\t foo \t  bar  \t", "  foo    bar   "},
+  {"\n foo\r\n\tbar\n \t", "  foo   bar   "},
 };
 
 // Test cases used to test the removal of extra whitespace when adding
@@ -420,7 +426,7 @@ class BookmarkModelTest : public testing::Test,
     BookmarkPermanentNode* extra_node = new BookmarkPermanentNode(100);
     BookmarkPermanentNodeList extra_nodes;
     extra_nodes.push_back(extra_node);
-    client_.SetExtraNodesToLoad(extra_nodes.Pass());
+    client_.SetExtraNodesToLoad(std::move(extra_nodes));
 
     model_->RemoveObserver(this);
     model_ = client_.CreateModel();

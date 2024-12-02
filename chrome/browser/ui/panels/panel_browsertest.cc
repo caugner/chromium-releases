@@ -2,9 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+
 #include "base/bind.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/devtools/devtools_window.h"
@@ -1699,7 +1702,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_Accelerator) {
       chrome::NOTIFICATION_PANEL_CLOSED,
       content::Source<Panel>(panel));
 
-  ui::KeyEvent ui_event(ui::ET_KEY_PRESSED, ui::VKEY_W, ui::DomCode::KEY_W,
+  ui::KeyEvent ui_event(ui::ET_KEY_PRESSED, ui::VKEY_W, ui::DomCode::US_W,
                         ui::EF_CONTROL_DOWN);
   content::NativeWebKeyboardEvent key_event(ui_event);
   panel->HandleKeyboardEvent(key_event);

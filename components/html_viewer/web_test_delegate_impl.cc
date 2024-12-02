@@ -5,6 +5,7 @@
 #include "components/html_viewer/web_test_delegate_impl.h"
 
 #include <iostream>
+#include <utility>
 
 #include "base/time/time.h"
 #include "cc/layers/texture_layer.h"
@@ -26,7 +27,7 @@ namespace {
 class InvokeTaskHelper : public blink::WebTaskRunner::Task {
  public:
   InvokeTaskHelper(scoped_ptr<test_runner::WebTask> task)
-      : task_(task.Pass()) {}
+      : task_(std::move(task)) {}
 
   // WebThread::Task implementation:
   void run() override { task_->run(); }
@@ -197,6 +198,10 @@ void WebTestDelegateImpl::SetDeviceScaleFactor(float factor) {
   NOTIMPLEMENTED();
 }
 
+void WebTestDelegateImpl::EnableUseZoomForDSF() {
+  NOTIMPLEMENTED();
+}
+
 void WebTestDelegateImpl::SetDeviceColorProfile(const std::string& name) {
   NOTIMPLEMENTED();
 }
@@ -318,7 +323,13 @@ void WebTestDelegateImpl::ResetPermissions() {
   NOTIMPLEMENTED();
 }
 
-bool WebTestDelegateImpl::AddMediaStreamSourceAndTrack(
+bool WebTestDelegateImpl::AddMediaStreamVideoSourceAndTrack(
+    blink::WebMediaStream* stream) {
+  NOTIMPLEMENTED();
+  return false;
+}
+
+bool WebTestDelegateImpl::AddMediaStreamAudioSourceAndTrack(
     blink::WebMediaStream* stream) {
   NOTIMPLEMENTED();
   return false;
@@ -350,6 +361,12 @@ blink::WebPlugin* WebTestDelegateImpl::CreatePluginPlaceholder(
 
 void WebTestDelegateImpl::OnWebTestProxyBaseDestroy(
     test_runner::WebTestProxyBase* base) {
+}
+
+blink::WebPoint WebTestDelegateImpl::ConvertDIPToNative(
+    const blink::WebPoint& point_in_dip) const {
+  NOTIMPLEMENTED();
+  return point_in_dip;
 }
 
 }  // namespace html_viewer

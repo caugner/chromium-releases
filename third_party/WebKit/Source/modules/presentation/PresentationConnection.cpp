@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "modules/presentation/PresentationConnection.h"
 
 #include "bindings/core/v8/ScriptPromiseResolver.h"
@@ -314,6 +313,17 @@ void PresentationConnection::didReceiveBinaryMessage(const uint8_t* data, size_t
     ASSERT_NOT_REACHED();
 }
 
+void PresentationConnection::close()
+{
+    if (m_state != WebPresentationConnectionState::Connected)
+        return;
+    WebPresentationClient* client = presentationClient(executionContext());
+    if (client)
+        client->closeSession(m_url, m_id);
+
+    tearDown();
+}
+
 void PresentationConnection::terminate()
 {
     if (m_state != WebPresentationConnectionState::Connected)
@@ -322,15 +332,7 @@ void PresentationConnection::terminate()
     if (client)
         client->terminateSession(m_url, m_id);
 
-    // Cancel current Blob loading if any.
-    if (m_blobLoader) {
-        m_blobLoader->cancel();
-        m_blobLoader.clear();
-    }
-
-    // Clear message queue.
-    Deque<OwnPtr<Message>> empty;
-    m_messages.swap(empty);
+    tearDown();
 }
 
 bool PresentationConnection::matches(WebPresentationConnectionClient* client) const
@@ -371,9 +373,17 @@ void PresentationConnection::didFailLoadingBlob(FileError::ErrorCode errorCode)
     handleMessageQueue();
 }
 
-bool PresentationConnection::isDisconnected() const
+void PresentationConnection::tearDown()
 {
-    return m_state == WebPresentationConnectionState::Closed || m_state == WebPresentationConnectionState::Terminated;
+    // Cancel current Blob loading if any.
+    if (m_blobLoader) {
+        m_blobLoader->cancel();
+        m_blobLoader.clear();
+    }
+
+    // Clear message queue.
+    Deque<OwnPtr<Message>> empty;
+    m_messages.swap(empty);
 }
 
 } // namespace blink

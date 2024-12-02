@@ -66,6 +66,8 @@ component("aura") {
     "input_state_lookup_win.h",
     "layout_manager.cc",
     "layout_manager.h",
+    "mus/mus_util.cc",
+    "mus/mus_util.h",
     "remote_window_tree_host_win.cc",
     "remote_window_tree_host_win.h",
     "scoped_window_targeter.cc",
@@ -107,6 +109,7 @@ component("aura") {
     "//ui/events/platform",
     "//ui/gfx",
     "//ui/gfx/geometry",
+    "//ui/platform_window",
   ]
 
   if (use_x11) {
@@ -231,8 +234,8 @@ executable("demo") {
     ":aura",
     ":test_support",
     "//base",
-    "//build/config/sanitizers:deps",
     "//base:i18n",
+    "//build/config/sanitizers:deps",
     "//skia",
     "//third_party/icu",
     "//ui/base",
@@ -306,11 +309,11 @@ test("aura_unittests") {
     "//testing/gtest",
     "//ui/base:test_support",
     "//ui/compositor:test_support",
-    "//ui/events:test_support",
     "//ui/events:gesture_detection",
+    "//ui/events:test_support",
     "//ui/gfx",
     "//ui/gfx/geometry",
-    "//ui/gl",
+    "//ui/gl:test_support",
   ]
 
   if (is_linux) {

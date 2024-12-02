@@ -5,7 +5,10 @@
 #ifndef COMPONENTS_WEB_VIEW__TEST_RUNNER_TEST_RUNNER_APPLICATION_DELEGATE_H_
 #define COMPONENTS_WEB_VIEW__TEST_RUNNER_TEST_RUNNER_APPLICATION_DELEGATE_H_
 
+#include <stdint.h>
+
 #include "base/command_line.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "components/mus/public/cpp/window_tree_delegate.h"
 #include "components/mus/public/interfaces/window_tree_host.mojom.h"
@@ -13,9 +16,9 @@
 #include "components/web_view/public/cpp/web_view.h"
 #include "components/web_view/public/interfaces/web_view.mojom.h"
 #include "components/web_view/test_runner/public/interfaces/layout_test_runner.mojom.h"
-#include "mojo/application/public/cpp/application_delegate.h"
-#include "mojo/application/public/cpp/interface_factory.h"
 #include "mojo/common/weak_binding_set.h"
+#include "mojo/shell/public/cpp/application_delegate.h"
+#include "mojo/shell/public/cpp/interface_factory.h"
 
 class GURL;
 

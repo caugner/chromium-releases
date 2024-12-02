@@ -29,25 +29,68 @@ cr.define('extension_test_util', function() {
   };
 
   /**
+   * Returns whether or not the element specified is visible.
+   * @param {!HTMLElement} parentEl
+   * @param {string} selector
+   * @return {boolean}
+   */
+  function isVisible(parentEl, selector) {
+    var element = parentEl.$$(selector);
+    var rect = element ? element.getBoundingClientRect() : null;
+    return !!rect && rect.width * rect.height > 0;
+  }
+
+  /**
    * Tests that the element's visibility matches |expectedVisible| and,
    * optionally, has specific content if it is visible.
    * @param {!HTMLElement} parentEl The parent element to query for the element.
    * @param {string} selector The selector to find the element.
    * @param {boolean} expectedVisible Whether the element should be
    *     visible.
-   * @param {string=} opt_expected The expected textContent value.
+   * @param {string=} opt_expectedText The expected textContent value.
    */
-  function testVisible(parentEl, selector, expectedVisible, opt_expected) {
-    var element = parentEl.$$(selector);
-    var rect = element ? element.getBoundingClientRect() : null;
-    var isVisible = !!rect && rect.width * rect.height > 0;
-    expectEquals(expectedVisible, isVisible, selector);
-    if (expectedVisible && opt_expected && element)
-      expectEquals(opt_expected, element.textContent, selector);
+  function testVisible(parentEl, selector, expectedVisible, opt_expectedText) {
+    var visible = isVisible(parentEl, selector);
+    expectEquals(expectedVisible, visible, selector);
+    if (expectedVisible && visible && opt_expectedText) {
+      var element = parentEl.$$(selector);
+      expectEquals(opt_expectedText, element.textContent.trim(), selector);
+    }
+  }
+
+  /**
+   * Creates an ExtensionInfo object.
+   * @param {Object=} opt_properties A set of properties that will be used on
+   *     the resulting ExtensionInfo (otherwise defaults will be used).
+   * @return {chrome.developerPrivate.ExtensionInfo}
+   */
+  function createExtensionInfo(opt_properties) {
+    var id = opt_properties && opt_properties.hasOwnProperty('id') ?
+        opt_properties[id] : 'a'.repeat(32);
+    var baseUrl = 'chrome-extension://' + id + '/';
+    return Object.assign({
+      description: 'This is an extension',
+      disableReasons: {
+        suspiciousInstall: false,
+        corruptInstall: false,
+        updateRequired: false,
+      },
+      iconUrl: 'chrome://extension-icon/' + id + '/24/0',
+      id: id,
+      incognitoAccess: {isEnabled: true, isActive: false},
+      location: 'FROM_STORE',
+      name: 'Wonderful Extension',
+      state: 'ENABLED',
+      type: 'EXTENSION',
+      version: '2.0',
+      views: [{url: baseUrl + 'foo.html'}, {url: baseUrl + 'bar.html'}],
+    }, opt_properties);
   }
 
   return {
     ClickMock: ClickMock,
+    isVisible: isVisible,
     testVisible: testVisible,
+    createExtensionInfo: createExtensionInfo,
   };
 });

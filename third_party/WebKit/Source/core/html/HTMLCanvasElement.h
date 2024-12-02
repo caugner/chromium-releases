@@ -36,7 +36,9 @@
 #include "core/dom/DocumentVisibilityObserver.h"
 #include "core/fileapi/FileCallback.h"
 #include "core/html/HTMLElement.h"
+#include "core/html/canvas/CanvasDrawListener.h"
 #include "core/html/canvas/CanvasImageSource.h"
+#include "core/imagebitmap/ImageBitmapSource.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/graphics/GraphicsTypes.h"
@@ -60,7 +62,7 @@ class ImageBufferSurface;
 class ImageData;
 class IntSize;
 
-class CORE_EXPORT HTMLCanvasElement final : public HTMLElement, public DocumentVisibilityObserver, public CanvasImageSource, public ImageBufferClient {
+class CORE_EXPORT HTMLCanvasElement final : public HTMLElement, public DocumentVisibilityObserver, public CanvasImageSource, public ImageBufferClient, public ImageBitmapSource {
     DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(HTMLCanvasElement);
 public:
@@ -101,10 +103,14 @@ public:
     void toBlob(FileCallback*, const String& mimeType, const ScriptValue& qualityArgument, ExceptionState&);
     void toBlob(FileCallback* callback, const String& mimeType, ExceptionState& exceptionState) { return toBlob(callback, mimeType, ScriptValue(), exceptionState); }
 
+    // Used for canvas capture.
+    void addListener(CanvasDrawListener*);
+    void removeListener(CanvasDrawListener*);
+
     // Used for rendering
     void didDraw(const FloatRect&);
 
-    void paint(GraphicsContext*, const LayoutRect&);
+    void paint(GraphicsContext&, const LayoutRect&);
 
     SkCanvas* drawingCanvas() const;
     void disableDeferral() const;
@@ -158,6 +164,10 @@ public:
 
     void doDeferredPaintInvalidation();
 
+    // ImageBitmapSource implementation
+    IntSize bitmapSourceSize() const override;
+    ScriptPromise createImageBitmap(ScriptState*, EventTarget&, int sx, int sy, int sw, int sh, ExceptionState&) override;
+
     DECLARE_VIRTUAL_TRACE();
 
     void createImageBufferUsingSurfaceForTesting(PassOwnPtr<ImageBufferSurface>);
@@ -177,7 +187,7 @@ private:
     static ContextFactoryVector& renderingContextFactories();
     static CanvasRenderingContextFactory* getRenderingContextFactory(int);
 
-    void parseAttribute(const QualifiedName&, const AtomicString&) override;
+    void parseAttribute(const QualifiedName&, const AtomicString&, const AtomicString&) override;
     LayoutObject* createLayoutObject(const ComputedStyle&) override;
     void didRecalcStyle(StyleRecalcChange) override;
     bool areAuthorShadowsAllowed() const override { return false; }
@@ -193,8 +203,12 @@ private:
 
     bool paintsIntoCanvasBuffer() const;
 
+    void notifyListenersCanvasChanged();
+
     ImageData* toImageData(SourceDrawingBuffer) const;
     String toDataURLInternal(const String& mimeType, const double& quality, SourceDrawingBuffer) const;
+
+    PersistentHeapHashSetWillBeHeapHashSet<WeakMember<CanvasDrawListener>> m_listeners;
 
     IntSize m_size;
 

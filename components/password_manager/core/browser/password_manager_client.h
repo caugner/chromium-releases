@@ -6,6 +6,7 @@
 #define COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_MANAGER_CLIENT_H_
 
 #include "base/callback.h"
+#include "base/macros.h"
 #include "base/memory/scoped_vector.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/credentials_filter.h"
@@ -20,6 +21,7 @@ class AutofillManager;
 namespace password_manager {
 
 struct CredentialInfo;
+class LogManager;
 class PasswordFormManager;
 class PasswordManager;
 class PasswordManagerDriver;
@@ -75,6 +77,8 @@ class PasswordManagerClient {
   // the stored one. In this case form_to_save.password_overridden() == true
   // and form_to_save.pending_credentials() should correspond to the credential
   // that was overidden.
+  // TODO(crbug.com/576747): Analyze usefulness of the |type| parameter, make a
+  // decision if it should be kept or removed.
   virtual bool PromptUserToSaveOrUpdatePassword(
       scoped_ptr<PasswordFormManager> form_to_save,
       CredentialSourceType type,
@@ -126,19 +130,6 @@ class PasswordManagerClient {
   // TODO(vabr): Factor this out of the client to the sync layer.
   virtual PasswordSyncState GetPasswordSyncState() const;
 
-  // Only for clients which registered with a LogRouter: If called with
-  // |router_can_be_used| set to false, the client may no longer use the
-  // LogRouter. If |router_can_be_used| is true, the LogRouter can be used after
-  // the return from OnLogRouterAvailabilityChanged.
-  virtual void OnLogRouterAvailabilityChanged(bool router_can_be_used);
-
-  // Forward |text| for display to the LogRouter (if registered with one).
-  virtual void LogSavePasswordProgress(const std::string& text) const;
-
-  // Returns true if logs recorded via LogSavePasswordProgress will be
-  // displayed, and false otherwise.
-  virtual bool IsLoggingActive() const;
-
   // Returns true if last navigation page had HTTP error i.e 5XX or 4XX
   virtual bool WasLastNavigationHTTPError() const;
 
@@ -172,6 +163,9 @@ class PasswordManagerClient {
 
   // Use this to filter credentials before handling them in password manager.
   virtual const CredentialsFilter* GetStoreResultFilter() const = 0;
+
+  // Returns a LogManager instance.
+  virtual const LogManager* GetLogManager() const;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerClient);

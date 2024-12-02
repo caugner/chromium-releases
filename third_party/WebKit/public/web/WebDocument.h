@@ -53,7 +53,6 @@ namespace blink {
 class Document;
 class DocumentType;
 class WebAXObject;
-class WebDocumentType;
 class WebElement;
 class WebFormElement;
 class WebElementCollection;
@@ -108,7 +107,6 @@ public:
     BLINK_EXPORT WebURL completeURL(const WebString&) const;
     BLINK_EXPORT WebElement getElementById(const WebString&) const;
     BLINK_EXPORT WebElement focusedElement() const;
-    BLINK_EXPORT WebDocumentType doctype() const;
     BLINK_EXPORT void cancelFullScreen();
     BLINK_EXPORT WebElement fullScreenElement() const;
     BLINK_EXPORT WebReferrerPolicy referrerPolicy() const;
@@ -138,6 +136,9 @@ public:
     BLINK_EXPORT WebURL manifestURL() const;
     BLINK_EXPORT bool manifestUseCredentials() const;
     BLINK_EXPORT WebDistillabilityFeatures distillabilityFeatures();
+
+    BLINK_EXPORT bool attemptedToDetermineEncodingFromContentSniffing() const;
+    BLINK_EXPORT bool encodingWasDetectedFromContentSniffing() const;
 
 #if BLINK_IMPLEMENTATION
     WebDocument(const PassRefPtrWillBeRawPtr<Document>&);

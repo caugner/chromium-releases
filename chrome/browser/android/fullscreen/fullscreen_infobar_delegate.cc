@@ -53,10 +53,16 @@ FullscreenInfoBarDelegate::~FullscreenInfoBarDelegate() {
 }
 
 void FullscreenInfoBarDelegate::CloseFullscreenInfoBar(
-    JNIEnv* env, jobject obj) {
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   j_delegate_.Reset();
   if (infobar() && infobar()->owner())
     infobar()->owner()->RemoveInfoBar(infobar());
+}
+
+infobars::InfoBarDelegate::InfoBarIdentifier
+FullscreenInfoBarDelegate::GetIdentifier() const {
+  return FULLSCREEN_INFOBAR_DELEGATE;
 }
 
 int FullscreenInfoBarDelegate::GetIconId() const {

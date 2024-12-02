@@ -21,8 +21,6 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "config.h"
-
 #include "core/layout/svg/LayoutSVGInlineText.h"
 
 #include "core/css/CSSFontSelector.h"
@@ -179,21 +177,13 @@ PositionWithAffinity LayoutSVGInlineText::positionForPoint(const LayoutPoint& po
     const SVGTextFragment* closestDistanceFragment = nullptr;
     SVGInlineTextBox* closestDistanceBox = nullptr;
 
-    AffineTransform fragmentTransform;
     for (InlineTextBox* box = firstTextBox(); box; box = box->nextTextBox()) {
         if (!box->isSVGInlineTextBox())
             continue;
 
         SVGInlineTextBox* textBox = toSVGInlineTextBox(box);
-        Vector<SVGTextFragment>& fragments = textBox->textFragments();
-
-        unsigned textFragmentsSize = fragments.size();
-        for (unsigned i = 0; i < textFragmentsSize; ++i) {
-            const SVGTextFragment& fragment = fragments.at(i);
-            FloatRect fragmentRect(fragment.x, fragment.y - baseline, fragment.width, fragment.height);
-            fragment.buildFragmentTransform(fragmentTransform);
-            if (!fragmentTransform.isIdentity())
-                fragmentRect = fragmentTransform.mapRect(fragmentRect);
+        for (const SVGTextFragment& fragment : textBox->textFragments()) {
+            FloatRect fragmentRect = fragment.boundingBox(baseline);
 
             float distance = 0;
             if (!fragmentRect.contains(absolutePoint))

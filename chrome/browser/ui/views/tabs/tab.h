@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/gtest_prod_util.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
@@ -51,6 +52,9 @@ class Tab : public gfx::AnimationDelegate,
   // The Tab's class name.
   static const char kViewClassName[];
 
+  // The color of an inactive tab.
+  static const SkColor kInactiveTabColor;
+
   explicit Tab(TabController* controller);
   ~Tab() override;
 
@@ -89,8 +93,7 @@ class Tab : public gfx::AnimationDelegate,
   void SetData(const TabRendererData& data);
   const TabRendererData& data() const { return data_; }
 
-  // Sets the network state. If the network state changes NetworkStateChanged is
-  // invoked.
+  // Sets the network state.
   void UpdateLoadingAnimation(TabRendererData::NetworkState state);
 
   // Starts/Stops a pulse animation.
@@ -122,6 +125,10 @@ class Tab : public gfx::AnimationDelegate,
   // Returns the width of the largest part of the tab that is available for the
   // user to click to select/activate the tab.
   int GetWidthOfLargestSelectableRegion() const;
+
+  // Called when stacked layout changes and the close button may need to
+  // be updated.
+  void HideCloseButtonForInactiveTabsChanged() { Layout(); }
 
   // Returns the inset within the first dragged tab to use when calculating the
   // "drag insertion point".  If we simply used the x-coordinate of the tab,
@@ -159,17 +166,26 @@ class Tab : public gfx::AnimationDelegate,
   // toolbar images with custom themes.
   static int GetYInsetForActiveTabBackground();
 
+  // Returns the inverse of the slope of the diagonal portion of the tab outer
+  // border.  (This is a positive value, so it's specifically for the slope of
+  // the leading edge.)
+  //
+  // This returns the inverse (dx/dy instead of dy/dx) because we use exact
+  // values for the vertical distances between points and then compute the
+  // horizontal deltas from those.
+  static float GetInverseDiagonalSlope();
+
  private:
   friend class TabTest;
-  FRIEND_TEST_ALL_PREFIXES(TabTest, CloseButtonLayout);
-
   friend class TabStripTest;
   FRIEND_TEST_ALL_PREFIXES(TabStripTest, TabHitTestMaskWhenStacked);
   FRIEND_TEST_ALL_PREFIXES(TabStripTest, TabCloseButtonVisibilityWhenStacked);
 
   // The animation object used to swap the favicon with the sad tab icon.
   class FaviconCrashAnimation;
+
   class TabCloseButton;
+  class ThrobberView;
 
   // Contains a cached image and the values used to generate it.
   struct ImageCacheEntry {
@@ -259,8 +275,7 @@ class Tab : public gfx::AnimationDelegate,
   void PaintIcon(gfx::Canvas* canvas);
 
   // Invoked if data_.network_state changes, or the network_state is not none.
-  void AdvanceLoadingAnimation(TabRendererData::NetworkState old_state,
-                               TabRendererData::NetworkState state);
+  void AdvanceLoadingAnimation();
 
   // Returns the number of favicon-size elements that can fit in the tab's
   // current size.
@@ -300,6 +315,16 @@ class Tab : public gfx::AnimationDelegate,
   // Schedules repaint task for icon.
   void ScheduleIconPaint();
 
+  // Computes a path corresponding to the tab's content region inside the outer
+  // stroke.
+  void GetFillPath(float scale, SkPath* path) const;
+
+  // Computes a path corresponding to the tab's outer border for a given |scale|
+  // and stores it in |path|.  If |extend_to_top| is true, the path is extended
+  // vertically to the top of the tab bounds.  The caller uses this for Fitts'
+  // Law purposes in maximized/fullscreen mode.
+  void GetBorderPath(float scale, bool extend_to_top, SkPath* path) const;
+
   // Returns the rectangle for the light bar in immersive mode.
   gfx::Rect GetImmersiveBarRect() const;
 
@@ -338,15 +363,6 @@ class Tab : public gfx::AnimationDelegate,
   // crashes.
   int favicon_hiding_offset_;
 
-  // The point in time when the tab icon was first painted in the waiting state.
-  base::TimeTicks waiting_start_time_;
-
-  // The point in time when the tab icon was first painted in the loading state.
-  base::TimeTicks loading_start_time_;
-
-  // Paint state for the throbber after the most recent waiting paint.
-  gfx::ThrobberWaitingState waiting_state_;
-
   // Step in the immersive loading progress indicator.
   int immersive_loading_step_;
 
@@ -362,6 +378,7 @@ class Tab : public gfx::AnimationDelegate,
 
   scoped_refptr<gfx::AnimationContainer> animation_container_;
 
+  ThrobberView* throbber_;
   MediaIndicatorButton* media_indicator_button_;
   views::ImageButton* close_button_;
   views::Label* title_;

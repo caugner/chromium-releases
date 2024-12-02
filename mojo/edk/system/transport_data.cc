@@ -4,6 +4,11 @@
 
 #include "mojo/edk/system/transport_data.h"
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include <utility>
+
 #include "base/logging.h"
 #include "mojo/edk/system/configuration.h"
 #include "mojo/edk/system/message_in_transit.h"
@@ -18,7 +23,7 @@ namespace edk {
 // |TransportData::kMaxBufferSize|. This value should be a multiple of the
 // alignment in order to simplify calculations, even though the actual amount of
 // space needed need not be a multiple of the alignment.
-const size_t kMaxSizePerPlatformHandle = 16;
+const size_t kMaxSizePerPlatformHandle = 8;
 static_assert(kMaxSizePerPlatformHandle % MessageInTransit::kMessageAlignment ==
                   0,
               "kMaxSizePerPlatformHandle not a multiple of alignment");
@@ -186,10 +191,9 @@ TransportData::TransportData(scoped_ptr<DispatcherVector> dispatchers)
   // |dispatchers_| will be destroyed as it goes out of scope.
 }
 
-TransportData::TransportData(
-    ScopedPlatformHandleVectorPtr platform_handles,
-    size_t serialized_platform_handle_size)
-    : buffer_size_(), platform_handles_(platform_handles.Pass()) {
+TransportData::TransportData(ScopedPlatformHandleVectorPtr platform_handles,
+                             size_t serialized_platform_handle_size)
+    : buffer_size_(), platform_handles_(std::move(platform_handles)) {
   buffer_size_ = MessageInTransit::RoundUpMessageAlignment(
       sizeof(Header) +
       platform_handles_->size() * serialized_platform_handle_size);
@@ -326,7 +330,7 @@ scoped_ptr<DispatcherVector> TransportData::DeserializeDispatchers(
         handle_table[i].type, source, size, platform_handles.get());
   }
 
-  return dispatchers.Pass();
+  return dispatchers;
 }
 
 }  // namespace edk

@@ -6,9 +6,10 @@
  * @constructor
  * @extends {WebInspector.Widget}
  * @implements {WebInspector.TargetManager.Observer}
- * @param {!WebInspector.Setting} widthSetting
+ * @param {function():number} getWidthCallback
+ * @param {function(number)} setWidthCallback
  */
-WebInspector.MediaQueryInspector = function(widthSetting)
+WebInspector.MediaQueryInspector = function(getWidthCallback, setWidthCallback)
 {
     WebInspector.Widget.call(this, true);
     this.registerRequiredCSS("emulation/mediaQueryInspector.css");
@@ -17,7 +18,8 @@ WebInspector.MediaQueryInspector = function(widthSetting)
     this.contentElement.addEventListener("contextmenu", this._onContextMenu.bind(this), false);
     this._mediaThrottler = new WebInspector.Throttler(0);
 
-    this._widthSetting = widthSetting;
+    this._getWidthCallback = getWidthCallback;
+    this._setWidthCallback = setWidthCallback;
     this._offset = 0;
     this._scale = 1;
     this._lastReportedCount = 0;
@@ -37,7 +39,6 @@ WebInspector.MediaQueryInspector.Section = {
 }
 
 WebInspector.MediaQueryInspector.Events = {
-    HeightUpdated: "HeightUpdated",
     CountUpdated: "CountUpdated"
 }
 
@@ -108,18 +109,18 @@ WebInspector.MediaQueryInspector.prototype = {
 
         var model = mediaQueryMarker._model;
         if (model.section() === WebInspector.MediaQueryInspector.Section.Max) {
-            this._widthSetting.set(model.maxWidthExpression().computedLength());
+            this._setWidthCallback(model.maxWidthExpression().computedLength());
             return;
         }
         if (model.section() === WebInspector.MediaQueryInspector.Section.Min) {
-            this._widthSetting.set(model.minWidthExpression().computedLength());
+            this._setWidthCallback(model.minWidthExpression().computedLength());
             return;
         }
-        var currentWidth = this._widthSetting.get();
+        var currentWidth = this._getWidthCallback();
         if (currentWidth !== model.minWidthExpression().computedLength())
-            this._widthSetting.set(model.minWidthExpression().computedLength());
+            this._setWidthCallback(model.minWidthExpression().computedLength());
         else
-            this._widthSetting.set(model.maxWidthExpression().computedLength());
+            this._setWidthCallback(model.maxWidthExpression().computedLength());
     },
 
     /**
@@ -140,7 +141,7 @@ WebInspector.MediaQueryInspector.prototype = {
             var uiLocation = WebInspector.cssWorkspaceBinding.rawLocationToUILocation(locations[i]);
             if (!uiLocation)
                 continue;
-            var descriptor = String.sprintf("%s:%d:%d", uiLocation.uiSourceCode.uri(), uiLocation.lineNumber + 1, uiLocation.columnNumber + 1);
+            var descriptor = String.sprintf("%s:%d:%d", uiLocation.uiSourceCode.url(), uiLocation.lineNumber + 1, uiLocation.columnNumber + 1);
             uiLocations.set(descriptor, uiLocation);
         }
 
@@ -263,7 +264,6 @@ WebInspector.MediaQueryInspector.prototype = {
             return;
 
         var oldChildrenCount = this.contentElement.children.length;
-        var scrollTop = this.contentElement.scrollTop;
         this.contentElement.removeChildren();
 
         var container = null;
@@ -277,10 +277,6 @@ WebInspector.MediaQueryInspector.prototype = {
             bar.classList.toggle("media-inspector-marker-inactive", !marker.active);
             container.appendChild(bar);
         }
-        this.contentElement.scrollTop = scrollTop;
-        this.contentElement.classList.toggle("media-inspector-view-empty", !this.contentElement.children.length);
-        if (this.contentElement.children.length !== oldChildrenCount)
-            this.dispatchEventToListeners(WebInspector.MediaQueryInspector.Events.HeightUpdated);
     },
 
     /**

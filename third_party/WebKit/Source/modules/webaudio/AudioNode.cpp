@@ -22,10 +22,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#if ENABLE(WEB_AUDIO)
 #include "modules/webaudio/AudioNode.h"
-
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/inspector/InstanceCounters.h"
@@ -415,14 +412,15 @@ void AudioHandler::disableOutputsIfNecessary()
         // But internally our outputs should be disabled from the inputs they're connected to.
         // disable() can recursively deref connections (and call disable()) down a whole chain of connected nodes.
 
-        // TODO(rtoy,hongchan): we special case the convolver, delay, and biquad since they have a
-        // significant tail-time and shouldn't be disconnected simply because they no longer have
-        // any input connections. This needs to be handled more generally where AudioNodes have a
-        // tailTime attribute. Then the AudioNode only needs to remain "active" for tailTime seconds
-        // after there are no longer any active connections.
+        // TODO(rtoy,hongchan): we need special cases the convolver, delay, biquad, and IIR since
+        // they have a significant tail-time and shouldn't be disconnected simply because they no
+        // longer have any input connections. This needs to be handled more generally where
+        // AudioNodes have a tailTime attribute. Then the AudioNode only needs to remain "active"
+        // for tailTime seconds after there are no longer any active connections.
         if (nodeType() != NodeTypeConvolver
             && nodeType() != NodeTypeDelay
-            && nodeType() != NodeTypeBiquadFilter) {
+            && nodeType() != NodeTypeBiquadFilter
+            && nodeType() != NodeTypeIIRFilter) {
             m_isDisabled = true;
             clearInternalStateWhenDisabled();
             for (auto& output : m_outputs)
@@ -943,4 +941,3 @@ void AudioNode::didAddOutput(unsigned numberOfOutputs)
 
 } // namespace blink
 
-#endif // ENABLE(WEB_AUDIO)

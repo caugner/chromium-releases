@@ -4,6 +4,8 @@
 
 #import "chrome/browser/ui/cocoa/media_picker/desktop_media_picker_controller.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/command_line.h"
 #import "base/mac/bundle_locations.h"
@@ -13,6 +15,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
+#include "grit/components_strings.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #import "ui/base/cocoa/flipped_view.h"
 #import "ui/base/cocoa/window_size_constants.h"
@@ -74,7 +77,7 @@ const int kExcessButtonPadding = 6;
     [parent addChildWindow:window ordered:NSWindowAbove];
     [window setDelegate:self];
     [self initializeContentsWithAppName:appName targetName:targetName];
-    media_list_ = media_list.Pass();
+    media_list_ = std::move(media_list);
     media_list_->SetViewDialogWindowId(content::DesktopMediaID(
        content::DesktopMediaID::TYPE_WINDOW, [window windowNumber]));
     doneCallback_ = callback;

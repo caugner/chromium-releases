@@ -11,8 +11,10 @@
 #include "base/path_service.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/env_vars.h"
@@ -278,6 +280,11 @@ base::FilePath ChromeCrashReporterClient::GetReporterLogFilename() {
 
 bool ChromeCrashReporterClient::GetCrashDumpLocation(
     base::FilePath* crash_dir) {
+#if defined(OS_WIN)
+  // TODO(scottmg): Consider supporting --user-data-dir. See
+  // https://crbug.com/565446.
+  return chrome::GetDefaultCrashDumpLocation(crash_dir);
+#else
   // By setting the BREAKPAD_DUMP_LOCATION environment variable, an alternate
   // location to write breakpad crash dumps can be set.
   scoped_ptr<base::Environment> env(base::Environment::Create());
@@ -289,20 +296,11 @@ bool ChromeCrashReporterClient::GetCrashDumpLocation(
   }
 
   return PathService::Get(chrome::DIR_CRASH_DUMPS, crash_dir);
+#endif
 }
 
 size_t ChromeCrashReporterClient::RegisterCrashKeys() {
-  // Note: On Windows this only affects the EXE. A separate invocation from
-  // child_process_logging_win.cc registers crash keys for Chrome.dll.
-#if defined(OS_WIN) && defined(COMPONENT_BUILD)
-  // On Windows, this is not called in a component build, as in that case a
-  // single copy of 'base' is shared by the EXE and the various DLLs, and that
-  // copy is configured by child_process_logging_win.cc.
-  NOTREACHED();
-  return 0;
-#else
   return crash_keys::RegisterChromeCrashKeys();
-#endif
 }
 
 bool ChromeCrashReporterClient::IsRunningUnattended() {

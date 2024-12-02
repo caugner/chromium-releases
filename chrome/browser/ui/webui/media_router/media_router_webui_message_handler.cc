@@ -8,9 +8,16 @@
 
 #include "base/bind.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/sparse_histogram.h"
+#include "base/metrics/user_metrics.h"
+#include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
+#include "base/values.h"
 #include "chrome/browser/media/router/issue.h"
+#include "chrome/browser/media/router/media_router_metrics.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/media_router/media_router_ui.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "extensions/common/constants.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -19,16 +26,29 @@ namespace media_router {
 
 namespace {
 
+const char kCastLearnMorePageUrl[] =
+    "https://www.google.com/chrome/devices/chromecast/learn.html";
 const char kHelpPageUrlPrefix[] =
     "https://support.google.com/chromecast/answer/%d";
 
 // Message names.
 const char kRequestInitialData[] = "requestInitialData";
 const char kCreateRoute[] = "requestRoute";
+const char kAcknowledgeFirstRunFlow[] = "acknowledgeFirstRunFlow";
 const char kActOnIssue[] = "actOnIssue";
 const char kCloseRoute[] = "closeRoute";
+const char kJoinRoute[] = "joinRoute";
 const char kCloseDialog[] = "closeDialog";
+const char kReportClickedSinkIndex[] = "reportClickedSinkIndex";
+const char kReportInitialAction[] = "reportInitialAction";
+const char kReportInitialState[] = "reportInitialState";
+const char kReportNavigateToView[] = "reportNavigateToView";
+const char kReportRouteCreation[] = "reportRouteCreation";
+const char kReportSelectedCastMode[] = "reportSelectedCastMode";
 const char kReportSinkCount[] = "reportSinkCount";
+const char kReportTimeToClickSink[] = "reportTimeToClickSink";
+const char kReportTimeToInitialActionClose[] = "reportTimeToInitialActionClose";
+const char kOnInitialDataReceived[] = "onInitialDataReceived";
 
 // JS function names.
 const char kSetInitialData[] = "media_router.ui.setInitialData";
@@ -40,6 +60,7 @@ const char kSetIssue[] = "media_router.ui.setIssue";
 const char kSetSinkList[] = "media_router.ui.setSinkList";
 const char kSetRouteList[] = "media_router.ui.setRouteList";
 const char kSetCastModeList[] = "media_router.ui.setCastModeList";
+const char kUpdateMaxHeight[] = "media_router.ui.updateMaxHeight";
 const char kWindowOpen[] = "window.open";
 
 scoped_ptr<base::ListValue> SinksToValue(
@@ -53,29 +74,32 @@ scoped_ptr<base::ListValue> SinksToValue(
     sink_val->SetString("id", sink.id());
     sink_val->SetString("name", sink.name());
     sink_val->SetInteger("iconType", sink.icon_type());
+    if (!sink.description().empty())
+      sink_val->SetString("description", sink.description());
+    if (!sink.domain().empty())
+      sink_val->SetString("domain", sink.domain());
 
-    scoped_ptr<base::ListValue> cast_modes_val(new base::ListValue);
+    int cast_mode_bits = 0;
     for (MediaCastMode cast_mode : sink_with_cast_modes.cast_modes)
-      cast_modes_val->AppendInteger(cast_mode);
-    sink_val->Set("castModes", cast_modes_val.Pass());
+      cast_mode_bits |= cast_mode;
 
+    sink_val->SetInteger("castModes", cast_mode_bits);
     value->Append(sink_val.release());
   }
 
-  return value.Pass();
+  return value;
 }
 
 scoped_ptr<base::DictionaryValue> RouteToValue(
-    const MediaRoute& route, const std::string& extension_id) {
+    const MediaRoute& route, bool canJoin, const std::string& extension_id) {
   scoped_ptr<base::DictionaryValue> dictionary(new base::DictionaryValue);
-
   dictionary->SetString("id", route.media_route_id());
   dictionary->SetString("sinkId", route.media_sink_id());
   dictionary->SetString("description", route.description());
   dictionary->SetBoolean("isLocal", route.is_local());
+  dictionary->SetBoolean("canJoin", canJoin);
 
   const std::string& custom_path = route.custom_controller_path();
-
   if (!custom_path.empty()) {
     std::string full_custom_controller_path = base::StringPrintf("%s://%s/%s",
         extensions::kExtensionScheme, extension_id.c_str(),
@@ -85,20 +109,23 @@ scoped_ptr<base::DictionaryValue> RouteToValue(
                           full_custom_controller_path);
   }
 
-  return dictionary.Pass();
+  return dictionary;
 }
 
 scoped_ptr<base::ListValue> RoutesToValue(
-    const std::vector<MediaRoute>& routes, const std::string& extension_id) {
+    const std::vector<MediaRoute>& routes,
+    const std::vector<MediaRoute::Id>& joinable_route_ids,
+    const std::string& extension_id) {
   scoped_ptr<base::ListValue> value(new base::ListValue);
 
   for (const MediaRoute& route : routes) {
+    bool canJoin = ContainsValue(joinable_route_ids, route.media_route_id());
     scoped_ptr<base::DictionaryValue> route_val(RouteToValue(route,
-        extension_id));
+        canJoin, extension_id));
     value->Append(route_val.release());
   }
 
-  return value.Pass();
+  return value;
 }
 
 scoped_ptr<base::ListValue> CastModesToValue(const CastModeSet& cast_modes,
@@ -114,7 +141,7 @@ scoped_ptr<base::ListValue> CastModesToValue(const CastModeSet& cast_modes,
     value->Append(cast_mode_val.release());
   }
 
-  return value.Pass();
+  return value;
 }
 
 // Returns an Issue dictionary created from |issue| that can be used in WebUI.
@@ -132,7 +159,7 @@ scoped_ptr<base::DictionaryValue> IssueToValue(const Issue& issue) {
     dictionary->SetString("routeId", issue.route_id());
   dictionary->SetBoolean("isBlocking", issue.is_blocking());
 
-  return dictionary.Pass();
+  return dictionary;
 }
 
 bool IsValidIssueActionTypeNum(int issue_action_type_num) {
@@ -179,9 +206,10 @@ void MediaRouterWebUIMessageHandler::UpdateSinks(
 }
 
 void MediaRouterWebUIMessageHandler::UpdateRoutes(
-    const std::vector<MediaRoute>& routes) {
-  DVLOG(2) << "UpdateRoutes";
+    const std::vector<MediaRoute>& routes,
+    const std::vector<MediaRoute::Id>& joinable_route_ids) {
   scoped_ptr<base::ListValue> routes_val(RoutesToValue(routes,
+      joinable_route_ids,
       media_router_ui_->GetRouteProviderExtensionId()));
   web_ui()->CallJavascriptFunction(kSetRouteList, *routes_val);
 }
@@ -197,28 +225,23 @@ void MediaRouterWebUIMessageHandler::UpdateCastModes(
 
 void MediaRouterWebUIMessageHandler::OnCreateRouteResponseReceived(
     const MediaSink::Id& sink_id,
-    const MediaRoute* route) {
+    const MediaRoute::Id& route_id) {
   DVLOG(2) << "OnCreateRouteResponseReceived";
-  if (route) {
-    scoped_ptr<base::DictionaryValue> route_value(RouteToValue(*route,
-        media_router_ui_->GetRouteProviderExtensionId()));
-    web_ui()->CallJavascriptFunction(kOnCreateRouteResponseReceived,
-                                     base::StringValue(sink_id), *route_value);
-    UMA_HISTOGRAM_BOOLEAN("MediaRouter.Ui.Action.StartLocalSessionSuccessful",
-                          true);
-  } else {
-    web_ui()->CallJavascriptFunction(kOnCreateRouteResponseReceived,
-                                     base::StringValue(sink_id),
-                                     *base::Value::CreateNullValue());
-    UMA_HISTOGRAM_BOOLEAN("MediaRouter.Ui.Action.StartLocalSessionSuccessful",
-                          false);
-  }
+  web_ui()->CallJavascriptFunction(kOnCreateRouteResponseReceived,
+                                   base::StringValue(sink_id),
+                                   base::StringValue(route_id));
 }
 
 void MediaRouterWebUIMessageHandler::UpdateIssue(const Issue* issue) {
   DVLOG(2) << "UpdateIssue";
   web_ui()->CallJavascriptFunction(kSetIssue,
       issue ? *IssueToValue(*issue) : *base::Value::CreateNullValue());
+}
+
+void MediaRouterWebUIMessageHandler::UpdateMaxDialogHeight(int height) {
+  DVLOG(2) << "UpdateMaxDialogHeight";
+  web_ui()->CallJavascriptFunction(kUpdateMaxHeight,
+                                   base::FundamentalValue(height));
 }
 
 void MediaRouterWebUIMessageHandler::NotifyRouteCreationTimeout() {
@@ -236,6 +259,10 @@ void MediaRouterWebUIMessageHandler::RegisterMessages() {
       base::Bind(&MediaRouterWebUIMessageHandler::OnCreateRoute,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
+      kAcknowledgeFirstRunFlow,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnAcknowledgeFirstRunFlow,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
       kActOnIssue,
       base::Bind(&MediaRouterWebUIMessageHandler::OnActOnIssue,
                  base::Unretained(this)));
@@ -244,20 +271,64 @@ void MediaRouterWebUIMessageHandler::RegisterMessages() {
       base::Bind(&MediaRouterWebUIMessageHandler::OnCloseRoute,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
+      kJoinRoute,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnJoinRoute,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
       kCloseDialog,
       base::Bind(&MediaRouterWebUIMessageHandler::OnCloseDialog,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
+      kReportClickedSinkIndex,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnReportClickedSinkIndex,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kReportInitialState,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnReportInitialState,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kReportInitialAction,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnReportInitialAction,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kReportRouteCreation,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnReportRouteCreation,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kReportSelectedCastMode,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnReportSelectedCastMode,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kReportNavigateToView,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnReportNavigateToView,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
       kReportSinkCount,
       base::Bind(&MediaRouterWebUIMessageHandler::OnReportSinkCount,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kReportTimeToClickSink,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnReportTimeToClickSink,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kReportTimeToInitialActionClose,
+      base::Bind(
+          &MediaRouterWebUIMessageHandler::OnReportTimeToInitialActionClose,
+          base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kOnInitialDataReceived,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnInitialDataReceived,
                  base::Unretained(this)));
 }
 
 void MediaRouterWebUIMessageHandler::OnRequestInitialData(
     const base::ListValue* args) {
   DVLOG(1) << "OnRequestInitialData";
+  media_router_ui_->OnUIInitiallyLoaded();
   base::DictionaryValue initial_data;
 
+  // General Chromecast learn more page.
+  initial_data.SetString("firstRunFlowLearnMoreUrl", kCastLearnMorePageUrl);
   // "No Cast devices found?" Chromecast help center page.
   initial_data.SetString("deviceMissingUrl",
       base::StringPrintf(kHelpPageUrlPrefix, 3249268));
@@ -266,6 +337,7 @@ void MediaRouterWebUIMessageHandler::OnRequestInitialData(
   initial_data.Set("sinks", sinks.release());
 
   scoped_ptr<base::ListValue> routes(RoutesToValue(media_router_ui_->routes(),
+      media_router_ui_->joinable_route_ids(),
       media_router_ui_->GetRouteProviderExtensionId()));
   initial_data.Set("routes", routes.release());
 
@@ -274,10 +346,12 @@ void MediaRouterWebUIMessageHandler::OnRequestInitialData(
       CastModesToValue(cast_modes,
                        media_router_ui_->GetPresentationRequestSourceName()));
   initial_data.Set("castModes", cast_modes_list.release());
-  if (!cast_modes.empty()) {
-    initial_data.SetInteger("initialCastModeType",
-                            GetPreferredCastMode(cast_modes));
-  }
+
+  bool first_run_flow_acknowledged =
+      Profile::FromWebUI(web_ui())->GetPrefs()->GetBoolean(
+          prefs::kMediaRouterFirstRunFlowAcknowledged);
+  initial_data.SetBoolean("wasFirstRunFlowAcknowledged",
+                          first_run_flow_acknowledged);
 
   web_ui()->CallJavascriptFunction(kSetInitialData, initial_data);
   media_router_ui_->UIInitialized();
@@ -303,6 +377,7 @@ void MediaRouterWebUIMessageHandler::OnCreateRoute(
   }
 
   if (!IsValidCastModeNum(cast_mode_num)) {
+    // TODO(imcheng): Record error condition with UMA.
     DVLOG(1) << "Invalid cast mode: " << cast_mode_num << ". Aborting.";
     return;
   }
@@ -333,6 +408,13 @@ void MediaRouterWebUIMessageHandler::OnCreateRoute(
   }
 }
 
+void MediaRouterWebUIMessageHandler::OnAcknowledgeFirstRunFlow(
+    const base::ListValue* args) {
+  DVLOG(1) << "OnAcknowledgeFirstRunFlow";
+  Profile::FromWebUI(web_ui())->GetPrefs()->SetBoolean(
+      prefs::kMediaRouterFirstRunFlowAcknowledged, true);
+}
+
 void MediaRouterWebUIMessageHandler::OnActOnIssue(
     const base::ListValue* args) {
   DVLOG(1) << "OnActOnIssue";
@@ -356,17 +438,63 @@ void MediaRouterWebUIMessageHandler::OnActOnIssue(
   media_router_ui_->ClearIssue(issue_id);
 }
 
-void MediaRouterWebUIMessageHandler::OnCloseRoute(
-    const base::ListValue* args) {
-  DVLOG(1) << "OnCloseRoute";
+void MediaRouterWebUIMessageHandler::OnJoinRoute(const base::ListValue* args) {
+  DVLOG(1) << "OnJoinRoute";
   const base::DictionaryValue* args_dict = nullptr;
   std::string route_id;
+  std::string sink_id;
   if (!args->GetDictionary(0, &args_dict) ||
+      !args_dict->GetString("sinkId", &sink_id) ||
       !args_dict->GetString("routeId", &route_id)) {
     DVLOG(1) << "Unable to extract args.";
     return;
   }
+
+  if (sink_id.empty()) {
+    DVLOG(1) << "Media Route UI did not respond with a "
+             << "valid sink ID. Aborting.";
+    return;
+  }
+
+  if (route_id.empty()) {
+    DVLOG(1) << "Media Route UI did not respond with a "
+             << "valid route ID. Aborting.";
+    return;
+  }
+
+  MediaRouterUI* media_router_ui =
+      static_cast<MediaRouterUI*>(web_ui()->GetController());
+  if (media_router_ui->HasPendingRouteRequest()) {
+    DVLOG(1) << "UI already has pending route request. Ignoring.";
+    Issue issue(
+        l10n_util::GetStringUTF8(IDS_MEDIA_ROUTER_ISSUE_PENDING_ROUTE),
+        std::string(), IssueAction(IssueAction::TYPE_DISMISS),
+        std::vector<IssueAction>(), std::string(), Issue::NOTIFICATION,
+        false, std::string());
+    media_router_ui_->AddIssue(issue);
+    return;
+  }
+
+  if (!media_router_ui_->ConnectRoute(sink_id, route_id)) {
+    // TODO(boetger): Need to add an issue if failed to initiate a JoinRoute
+    // request.
+    DVLOG(1) << "Error initiating route join request.";
+  }
+}
+
+void MediaRouterWebUIMessageHandler::OnCloseRoute(const base::ListValue* args) {
+  DVLOG(1) << "OnCloseRoute";
+  const base::DictionaryValue* args_dict = nullptr;
+  std::string route_id;
+  bool is_local = false;
+  if (!args->GetDictionary(0, &args_dict) ||
+      !args_dict->GetString("routeId", &route_id) ||
+      !args_dict->GetBoolean("isLocal", &is_local)) {
+    DVLOG(1) << "Unable to extract args.";
+    return;
+  }
   media_router_ui_->CloseRoute(route_id);
+  UMA_HISTOGRAM_BOOLEAN("MediaRouter.Ui.Action.StopRoute", !is_local);
 }
 
 void MediaRouterWebUIMessageHandler::OnCloseDialog(
@@ -379,6 +507,89 @@ void MediaRouterWebUIMessageHandler::OnCloseDialog(
   media_router_ui_->Close();
 }
 
+void MediaRouterWebUIMessageHandler::OnReportClickedSinkIndex(
+    const base::ListValue* args) {
+  DVLOG(1) << "OnReportClickedSinkIndex";
+  int index;
+  if (!args->GetInteger(0, &index)) {
+    DVLOG(1) << "Unable to extract args.";
+    return;
+  }
+  UMA_HISTOGRAM_SPARSE_SLOWLY("MediaRouter.Ui.Action.StartLocalPosition",
+                              std::min(index, 100));
+}
+
+void MediaRouterWebUIMessageHandler::OnReportInitialAction(
+  const base::ListValue* args) {
+  DVLOG(1) << "OnReportInitialAction";
+  int action;
+  if (!args->GetInteger(0, &action)) {
+    DVLOG(1) << "Unable to extract args.";
+    return;
+  }
+  media_router::MediaRouterMetrics::RecordMediaRouterInitialUserAction(
+      static_cast<MediaRouterUserAction>(action));
+}
+
+void MediaRouterWebUIMessageHandler::OnReportInitialState(
+    const base::ListValue* args) {
+  DVLOG(1) << "OnReportInitialState";
+  std::string initial_view;
+  if (!args->GetString(0, &initial_view)) {
+    DVLOG(1) << "Unable to extract args.";
+    return;
+  }
+  bool sink_list_state = initial_view == "sink-list";
+  DCHECK(sink_list_state || (initial_view == "route-details"));
+  UMA_HISTOGRAM_BOOLEAN("MediaRouter.Ui.InitialState", sink_list_state);
+}
+
+void MediaRouterWebUIMessageHandler::OnReportNavigateToView(
+  const base::ListValue* args) {
+  DVLOG(1) << "OnReportNavigateToView";
+  std::string view;
+  if (!args->GetString(0, &view)) {
+    DVLOG(1) << "Unable to extract args.";
+    return;
+  }
+
+  if (view == "cast-mode-list") {
+    base::RecordAction(base::UserMetricsAction(
+        "MediaRouter_Ui_Navigate_SinkListToSource"));
+  } else if (view == "route-details") {
+    base::RecordAction(base::UserMetricsAction(
+        "MediaRouter_Ui_Navigate_SinkListToRouteDetails"));
+  } else if (view == "sink-list") {
+    base::RecordAction(base::UserMetricsAction(
+        "MediaRouter_Ui_Navigate_RouteDetailsToSinkList"));
+  }
+}
+
+void MediaRouterWebUIMessageHandler::OnReportRouteCreation(
+    const base::ListValue* args) {
+  DVLOG(1) << "OnReportRouteCreation";
+  bool route_created_successfully;
+  if (!args->GetBoolean(0, &route_created_successfully)) {
+    DVLOG(1) << "Unable to extract args.";
+    return;
+  }
+
+  UMA_HISTOGRAM_BOOLEAN("MediaRouter.Ui.Action.StartLocalSessionSuccessful",
+                        route_created_successfully);
+}
+
+void MediaRouterWebUIMessageHandler::OnReportSelectedCastMode(
+    const base::ListValue* args) {
+  DVLOG(1) << "OnReportSelectedCastMode";
+  int cast_mode_type;
+  if (!args->GetInteger(0, &cast_mode_type)) {
+    DVLOG(1) << "Unable to extract args.";
+    return;
+  }
+  UMA_HISTOGRAM_SPARSE_SLOWLY("MediaRouter.Ui.Navigate.SourceSelection",
+                              cast_mode_type);
+}
+
 void MediaRouterWebUIMessageHandler::OnReportSinkCount(
     const base::ListValue* args) {
   DVLOG(1) << "OnReportSinkCount";
@@ -388,6 +599,36 @@ void MediaRouterWebUIMessageHandler::OnReportSinkCount(
     return;
   }
   UMA_HISTOGRAM_COUNTS_100("MediaRouter.Ui.Device.Count", sink_count);
+}
+
+void MediaRouterWebUIMessageHandler::OnReportTimeToClickSink(
+    const base::ListValue* args) {
+  DVLOG(1) << "OnReportTimeToClickSink";
+  double time_to_click;
+  if (!args->GetDouble(0, &time_to_click)) {
+    DVLOG(1) << "Unable to extract args.";
+    return;
+  }
+  UMA_HISTOGRAM_TIMES("MediaRouter.Ui.Action.StartLocal.Latency",
+                      base::TimeDelta::FromMillisecondsD(time_to_click));
+}
+
+void MediaRouterWebUIMessageHandler::OnReportTimeToInitialActionClose(
+    const base::ListValue* args) {
+  DVLOG(1) << "OnReportTimeToInitialActionClose";
+  double time_to_close;
+  if (!args->GetDouble(0, &time_to_close)) {
+    VLOG(0) << "Unable to extract args.";
+    return;
+  }
+  UMA_HISTOGRAM_TIMES("MediaRouter.Ui.Action.CloseLatency",
+                      base::TimeDelta::FromMillisecondsD(time_to_close));
+}
+
+void MediaRouterWebUIMessageHandler::OnInitialDataReceived(
+    const base::ListValue* args) {
+  DVLOG(1) << "OnInitialDataReceived";
+  media_router_ui_->OnUIInitialDataReceived();
 }
 
 bool MediaRouterWebUIMessageHandler::ActOnIssueType(

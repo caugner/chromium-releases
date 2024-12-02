@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "platform/graphics/paint/ClipDisplayItem.h"
 
 #include "platform/geometry/FloatRoundedRect.h"
@@ -15,10 +14,12 @@ namespace blink {
 void ClipDisplayItem::replay(GraphicsContext& context) const
 {
     context.save();
-    context.clipRect(m_clipRect, NotAntiAliased, SkRegion::kIntersect_Op);
+    // TODO(chrishtr): make this AntiAliased. Not anti-aliasing here is a workaround for a PDF rendering issue.
+    // See crbug.com/590971.
+    context.clipRect(m_clipRect, NotAntiAliased);
 
     for (const FloatRoundedRect& roundedRect : m_roundedRectClips)
-        context.clipRoundedRect(roundedRect, SkRegion::kIntersect_Op);
+        context.clipRoundedRect(roundedRect);
 }
 
 void ClipDisplayItem::appendToWebDisplayItemList(const IntRect& visualRect, WebDisplayItemList* list) const

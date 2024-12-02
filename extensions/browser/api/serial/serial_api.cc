@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/values.h"
+#include "build/build_config.h"
 #include "content/public/browser/browser_thread.h"
 #include "device/serial/serial_device_enumerator.h"
 #include "extensions/browser/api/serial/serial_connection.h"
@@ -85,11 +86,14 @@ bool SerialGetDevicesFunction::Prepare() {
 void SerialGetDevicesFunction::Work() {
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
 
+// TODO(moshayedi): crbug.com/549257. Add USB support for Aura on Android.
+#if !defined(OS_ANDROID)
   scoped_ptr<device::SerialDeviceEnumerator> enumerator =
       device::SerialDeviceEnumerator::Create();
   mojo::Array<device::serial::DeviceInfoPtr> devices = enumerator->GetDevices();
   results_ = serial::GetDevices::Results::Create(
       devices.To<std::vector<linked_ptr<serial::DeviceInfo> > >());
+#endif
 }
 
 SerialConnectFunction::SerialConnectFunction() {

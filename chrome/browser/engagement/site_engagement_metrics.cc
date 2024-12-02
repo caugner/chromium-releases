@@ -5,7 +5,6 @@
 #include "chrome/browser/engagement/site_engagement_metrics.h"
 
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 
 const char SiteEngagementMetrics::kTotalEngagementHistogram[] =
     "SiteEngagementService.TotalEngagement";
@@ -33,6 +32,9 @@ const char SiteEngagementMetrics::kPercentOriginsWithMaxEngagementHistogram[] =
 
 const char SiteEngagementMetrics::kEngagementTypeHistogram[] =
     "SiteEngagementService.EngagementType";
+
+const char SiteEngagementMetrics::kDaysSinceLastShortcutLaunchHistogram[] =
+    "SiteEngagementService.DaysSinceLastShortcutLaunch";
 
 void SiteEngagementMetrics::RecordTotalSiteEngagement(
     double total_engagement) {
@@ -76,4 +78,8 @@ void SiteEngagementMetrics::RecordPercentOriginsWithMaxEngagement(
 
 void SiteEngagementMetrics::RecordEngagement(EngagementType type) {
   UMA_HISTOGRAM_ENUMERATION(kEngagementTypeHistogram, type, ENGAGEMENT_LAST);
+}
+
+void SiteEngagementMetrics::RecordDaysSinceLastShortcutLaunch(int days) {
+  UMA_HISTOGRAM_COUNTS_100(kDaysSinceLastShortcutLaunchHistogram, days);
 }

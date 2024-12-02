@@ -151,7 +151,7 @@ InspectorTest.waitUntilResumed = function(callback)
 InspectorTest.resumeExecution = function(callback)
 {
     if (WebInspector.panels.sources.paused())
-        WebInspector.panels.sources.togglePause();
+        WebInspector.panels.sources._togglePause();
     InspectorTest.waitUntilResumed(callback);
 };
 
@@ -169,7 +169,7 @@ InspectorTest.waitUntilPausedAndDumpStackAndResume = function(callback, options)
         if (typeof status === "string")
             caption = status;
         else
-            caption = status.textContent;
+            caption = status.deepTextContent();
         if (callFrames)
             step1();
     }
@@ -195,6 +195,26 @@ InspectorTest.waitUntilPausedAndDumpStackAndResume = function(callback, options)
     }
 };
 
+InspectorTest.stepOver = function()
+{
+    Promise.resolve().then(function(){WebInspector.panels.sources._stepOver()});
+};
+
+InspectorTest.stepInto = function()
+{
+    Promise.resolve().then(function(){WebInspector.panels.sources._stepInto()});
+};
+
+InspectorTest.stepOut = function()
+{
+    Promise.resolve().then(function(){WebInspector.panels.sources._stepOut()});
+};
+
+InspectorTest.togglePause = function()
+{
+    Promise.resolve().then(function(){WebInspector.panels.sources._togglePause()});
+};
+
 InspectorTest.waitUntilPausedAndPerformSteppingActions = function(actions, callback)
 {
     callback = InspectorTest.safeWrap(callback);
@@ -211,7 +231,7 @@ InspectorTest.waitUntilPausedAndPerformSteppingActions = function(actions, callb
         }
 
         if (!action) {
-            callback()
+            callback();
             return;
         }
 
@@ -219,23 +239,23 @@ InspectorTest.waitUntilPausedAndPerformSteppingActions = function(actions, callb
 
         switch (action) {
         case "StepInto":
-            WebInspector.panels.sources._stepIntoButton.element.click();
+            InspectorTest.stepInto();
             break;
         case "StepOver":
-            WebInspector.panels.sources._stepOverButton.element.click();
+            InspectorTest.stepOver();
             break;
         case "StepOut":
-            WebInspector.panels.sources._stepOutButton.element.click();
+            InspectorTest.stepOut();
             break;
         case "Resume":
-            WebInspector.panels.sources.togglePause();
+            InspectorTest.togglePause();
             break;
         case "StepIntoAsync":
             InspectorTest.DebuggerAgent.stepIntoAsync();
             break;
         default:
             InspectorTest.addResult("FAIL: Unknown action: " + action);
-            callback()
+            callback();
             return;
         }
 
@@ -366,27 +386,6 @@ InspectorTest.waitForScriptSource = function(scriptName, callback)
     InspectorTest.addSniffer(WebInspector.SourcesView.prototype, "_addUISourceCode", InspectorTest.waitForScriptSource.bind(InspectorTest, scriptName, callback));
 };
 
-InspectorTest.dumpNavigatorView = function(navigatorView, id, prefix)
-{
-    InspectorTest.addResult(prefix + "Dumping ScriptsNavigator " + id + " tab:");
-    dumpNavigatorTreeOutline(prefix, navigatorView._scriptsTree);
-
-    function dumpNavigatorTreeElement(prefix, treeElement)
-    {
-        InspectorTest.addResult(prefix + treeElement.titleText);
-        var children = treeElement.children();
-        for (var i = 0; i < children.length; ++i)
-            dumpNavigatorTreeElement(prefix + "  ", children[i]);
-    }
-
-    function dumpNavigatorTreeOutline(prefix, treeOutline)
-    {
-        var children = treeOutline.rootElement().children();
-        for (var i = 0; i < children.length; ++i)
-            dumpNavigatorTreeElement(prefix + "  ", children[i]);
-    }
-};
-
 InspectorTest.setBreakpoint = function(sourceFrame, lineNumber, condition, enabled)
 {
     if (!sourceFrame._muted)
@@ -408,7 +407,7 @@ InspectorTest.dumpBreakpointSidebarPane = function(title)
 InspectorTest.dumpScopeVariablesSidebarPane = function()
 {
     InspectorTest.addResult("Scope variables sidebar pane:");
-    var sections = WebInspector.panels.sources.sidebarPanes.scopechain._sections;
+    var sections = InspectorTest.scopeChainSections();
     for (var i = 0; i < sections.length; ++i) {
         var textContent = InspectorTest.textContentWithLineBreaks(sections[i].element);
         var text = InspectorTest.clearSpecificInfoFromStackFrames(textContent);
@@ -419,10 +418,20 @@ InspectorTest.dumpScopeVariablesSidebarPane = function()
     }
 };
 
+InspectorTest.scopeChainSections = function()
+{
+    var children = WebInspector.panels.sources.sidebarPanes.scopechain.contentElement.children;
+    var sections = [];
+    for (var i = 0; i < children.length; ++i)
+        sections.push(children[i]._section);
+
+    return sections;
+}
+
 InspectorTest.expandScopeVariablesSidebarPane = function(callback)
 {
     // Expand all but the global scope. Expanding global scope takes for too long so we keep it collapsed.
-    var sections = WebInspector.panels.sources.sidebarPanes.scopechain._sections;
+    var sections = InspectorTest.scopeChainSections();
     for (var i = 0; i < sections.length - 1; ++i)
         sections[i].expand();
     InspectorTest.runAfterPendingDispatches(callback);
@@ -498,7 +507,7 @@ InspectorTest.createScriptMock = function(url, startLine, startColumn, isContent
     var endLine = startLine + lineCount - 1;
     var endColumn = lineCount === 1 ? startColumn + source.length : source.length - source.lineEndings()[lineCount - 2];
     var hasSourceURL = !!source.match(/\/\/#\ssourceURL=\s*(\S*?)\s*$/m) || !!source.match(/\/\/@\ssourceURL=\s*(\S*?)\s*$/m);
-    var script = new WebInspector.Script(debuggerModel, scriptId, url, startLine, startColumn, endLine, endColumn, isContentScript, null, hasSourceURL);
+    var script = new WebInspector.Script(debuggerModel, scriptId, url, startLine, startColumn, endLine, endColumn, 0, isContentScript, false, false, undefined, hasSourceURL);
     script.requestContent = function(callback)
     {
         var trimmedSource = WebInspector.Script._trimSourceURLComment(source);
@@ -521,8 +530,8 @@ InspectorTest.checkRawLocation = function(script, lineNumber, columnNumber, loca
 
 InspectorTest.checkUILocation = function(uiSourceCode, lineNumber, columnNumber, location)
 {
-    InspectorTest.assertEquals(uiSourceCode, location.uiSourceCode, "Incorrect uiSourceCode, expected '" + (uiSourceCode ? uiSourceCode.uri() : null) + "'," +
-                                                                    " but got '" + (location.uiSourceCode ? location.uiSourceCode.uri() : null) + "'");
+    InspectorTest.assertEquals(uiSourceCode, location.uiSourceCode, "Incorrect uiSourceCode, expected '" + (uiSourceCode ? uiSourceCode.url() : null) + "'," +
+                                                                    " but got '" + (location.uiSourceCode ? location.uiSourceCode.url() : null) + "'");
     InspectorTest.assertEquals(lineNumber, location.lineNumber, "Incorrect lineNumber, expected '" + lineNumber + "', but got '" + location.lineNumber + "'");
     InspectorTest.assertEquals(columnNumber, location.columnNumber, "Incorrect columnNumber, expected '" + columnNumber + "', but got '" + location.columnNumber + "'");
 };

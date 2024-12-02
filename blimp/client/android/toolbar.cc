@@ -5,16 +5,30 @@
 #include "blimp/client/android/toolbar.h"
 
 #include "base/android/jni_string.h"
+#include "blimp/client/session/blimp_client_session_android.h"
 #include "jni/Toolbar_jni.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "url/gurl.h"
 
 namespace blimp {
+namespace client {
 
-// static
-static jlong Init(JNIEnv* env, const JavaParamRef<jobject>& jobj) {
-  return reinterpret_cast<intptr_t>(new Toolbar(env, jobj));
+namespace {
+
+const int kDummyTabId = 0;
+
+}  // namespace
+
+static jlong Init(JNIEnv* env,
+                  const JavaParamRef<jobject>& jobj,
+                  const JavaParamRef<jobject>& blimp_client_session) {
+  BlimpClientSession* client_session =
+      BlimpClientSessionAndroid::FromJavaObject(env,
+                                                blimp_client_session.obj());
+
+  return reinterpret_cast<intptr_t>(
+      new Toolbar(env, jobj, client_session->GetNavigationFeature()));
 }
 
 // static
@@ -23,54 +37,76 @@ bool Toolbar::RegisterJni(JNIEnv* env) {
 }
 
 Toolbar::Toolbar(JNIEnv* env,
-                 const base::android::JavaParamRef<jobject>& jobj) {
+                 const base::android::JavaParamRef<jobject>& jobj,
+                 NavigationFeature* navigation_feature)
+    : navigation_feature_(navigation_feature) {
   java_obj_.Reset(env, jobj);
+
+  navigation_feature_->SetDelegate(kDummyTabId, this);
 }
 
-Toolbar::~Toolbar() {}
+Toolbar::~Toolbar() {
+  navigation_feature_->RemoveDelegate(kDummyTabId);
+}
 
-void Toolbar::Destroy(JNIEnv* env, jobject jobj) {
+void Toolbar::Destroy(JNIEnv* env, const JavaParamRef<jobject>& jobj) {
   delete this;
 }
 
-void Toolbar::OnUrlTextEntered(JNIEnv* env, jobject jobj, jstring text) {
-  // TODO(dtrainor): Notify the content lite NavigationController.
+void Toolbar::OnUrlTextEntered(JNIEnv* env,
+                               const JavaParamRef<jobject>& jobj,
+                               const JavaParamRef<jstring>& text) {
+  navigation_feature_->NavigateToUrlText(
+      kDummyTabId, base::android::ConvertJavaStringToUTF8(env, text));
 }
 
-void Toolbar::OnReloadPressed(JNIEnv* env, jobject jobj) {
-  // TODO(dtrainor): Notify the content lite NavigationController.
+void Toolbar::OnReloadPressed(JNIEnv* env, const JavaParamRef<jobject>& jobj) {
+  navigation_feature_->Reload(kDummyTabId);
 }
 
-jboolean Toolbar::OnBackPressed(JNIEnv* env, jobject jobj) {
-  // TODO(dtrainor): Notify the content lite NavigationController.
+void Toolbar::OnForwardPressed(JNIEnv* env, const JavaParamRef<jobject>& jobj) {
+  navigation_feature_->GoForward(kDummyTabId);
+}
+
+jboolean Toolbar::OnBackPressed(JNIEnv* env,
+                                const JavaParamRef<jobject>& jobj) {
+  navigation_feature_->GoBack(kDummyTabId);
+
   // TODO(dtrainor): Find a way to determine whether or not we're at the end of
   // our history stack.
   return true;
 }
 
-void Toolbar::OnNavigationStateChanged(const GURL* url,
-                                       const SkBitmap* favicon,
-                                       const std::string* title) {
+void Toolbar::OnUrlChanged(int tab_id, const GURL& url) {
   JNIEnv* env = base::android::AttachCurrentThread();
+  ScopedJavaLocalRef<jstring> jurl(
+      base::android::ConvertUTF8ToJavaString(env, url.spec()));
 
-  ScopedJavaLocalRef<jstring> jurl;
-  ScopedJavaLocalRef<jobject> jfavicon;
-  ScopedJavaLocalRef<jstring> jtitle;
-
-  if (url)
-    jurl = base::android::ConvertUTF8ToJavaString(env, url->spec());
-
-  if (favicon)
-    jfavicon = gfx::ConvertToJavaBitmap(favicon);
-
-  if (title)
-    jtitle = base::android::ConvertUTF8ToJavaString(env, *title);
-
-  Java_Toolbar_onNavigationStateChanged(env,
-                                        java_obj_.obj(),
-                                        jurl.obj(),
-                                        jfavicon.obj(),
-                                        jtitle.obj());
+  Java_Toolbar_onEngineSentUrl(env, java_obj_.obj(), jurl.obj());
 }
 
+void Toolbar::OnFaviconChanged(int tab_id, const SkBitmap& favicon) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> jfavicon(gfx::ConvertToJavaBitmap(&favicon));
+
+  Java_Toolbar_onEngineSentFavicon(env, java_obj_.obj(), jfavicon.obj());
+}
+
+void Toolbar::OnTitleChanged(int tab_id, const std::string& title) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  ScopedJavaLocalRef<jstring> jtitle(
+      base::android::ConvertUTF8ToJavaString(env, title));
+
+  Java_Toolbar_onEngineSentTitle(env, java_obj_.obj(), jtitle.obj());
+}
+
+void Toolbar::OnLoadingChanged(int tab_id, bool loading) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+
+  Java_Toolbar_onEngineSentLoading(env,
+                                   java_obj_.obj(),
+                                   static_cast<jboolean>(loading));
+}
+
+}  // namespace client
 }  // namespace blimp

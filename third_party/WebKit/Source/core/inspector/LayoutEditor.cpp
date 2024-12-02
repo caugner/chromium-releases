@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "core/inspector/LayoutEditor.h"
 
 #include "bindings/core/v8/ScriptController.h"
@@ -137,8 +136,8 @@ LayoutEditor::LayoutEditor(Element* element, InspectorCSSAgent* cssAgent, Inspec
     , m_changingProperty(CSSPropertyInvalid)
     , m_propertyInitialValue(0)
     , m_isDirty(false)
-    , m_matchedRules(m_cssAgent->matchedRulesList(element))
-    , m_currentRuleIndex(m_matchedRules->length() - (m_element->style() ? 0 : 1))
+    , m_matchedStyles(cssAgent->matchingStyles(element))
+    , m_currentRuleIndex(0)
 {
 }
 
@@ -161,7 +160,7 @@ DEFINE_TRACE(LayoutEditor)
     visitor->trace(m_cssAgent);
     visitor->trace(m_domAgent);
     visitor->trace(m_scriptController);
-    visitor->trace(m_matchedRules);
+    visitor->trace(m_matchedStyles);
 }
 
 void LayoutEditor::rebuild()
@@ -188,12 +187,12 @@ void LayoutEditor::rebuild()
     object->setObject("marginQuad", quadToJSON(margin));
     object->setObject("borderQuad", quadToJSON(border));
     evaluateInOverlay("showLayoutEditor", object.release());
-    pushSelectorInfoInOverlay();
+    editableSelectorUpdated(false);
 }
 
 RefPtrWillBeRawPtr<CSSPrimitiveValue> LayoutEditor::getPropertyCSSValue(CSSPropertyID property) const
 {
-    RefPtrWillBeRawPtr<CSSStyleDeclaration> style = m_cssAgent->findEffectiveDeclaration(property, m_matchedRules.get(), m_element->style());
+    RefPtrWillBeRawPtr<CSSStyleDeclaration> style = m_cssAgent->findEffectiveDeclaration(property, m_matchedStyles);
     if (!style)
         return nullptr;
 
@@ -272,7 +271,6 @@ PassRefPtr<JSONObject> LayoutEditor::createValueDescription(const String& proper
         m_growsInside.set(propertyName, growInside(propertyName, cssValue.get()));
 
     object->setBoolean("growInside", m_growsInside.get(propertyName));
-
     return object.release();
 }
 
@@ -342,45 +340,45 @@ void LayoutEditor::commitChanges()
     m_domAgent->markUndoableState(&errorString);
 }
 
-bool LayoutEditor::currentStyleIsInline() const
-{
-    return m_currentRuleIndex == m_matchedRules->length() && !!m_element->style();
-}
-
 void LayoutEditor::nextSelector()
 {
-    if (m_currentRuleIndex == 0)
+    if (m_currentRuleIndex == m_matchedStyles.size() - 1)
         return;
 
-    m_currentRuleIndex--;
-    pushSelectorInfoInOverlay();
+    ++m_currentRuleIndex;
+    editableSelectorUpdated(true);
 }
 
 void LayoutEditor::previousSelector()
 {
-    if (currentStyleIsInline() || ((m_currentRuleIndex ==  m_matchedRules->length() - 1) && !m_element->style()))
+    if (m_currentRuleIndex == 0)
         return;
 
-    m_currentRuleIndex++;
-    pushSelectorInfoInOverlay();
-}
-void LayoutEditor::pushSelectorInfoInOverlay() const
-{
-    evaluateInOverlay("setSelectorInLayoutEditor", currentSelectorInfo());
+    --m_currentRuleIndex;
+    editableSelectorUpdated(true);
 }
 
-PassRefPtr<JSONObject> LayoutEditor::currentSelectorInfo() const
+void LayoutEditor::editableSelectorUpdated(bool hasChanged) const
+{
+    CSSStyleDeclaration* style = m_matchedStyles.at(m_currentRuleIndex).get();
+    evaluateInOverlay("setSelectorInLayoutEditor", currentSelectorInfo(style));
+    if (hasChanged)
+        m_cssAgent->layoutEditorItemSelected(m_element.get(), style);
+}
+
+PassRefPtr<JSONObject> LayoutEditor::currentSelectorInfo(CSSStyleDeclaration* style) const
 {
     RefPtr<JSONObject> object = JSONObject::create();
-    String currentSelectorText = currentStyleIsInline() ? "inline style" : toCSSStyleRule(m_matchedRules->item(m_currentRuleIndex))->selectorText();
+    CSSStyleRule* rule = style->parentRule() ? toCSSStyleRule(style->parentRule()) : nullptr;
+    String currentSelectorText = rule ? rule->selectorText() : "element.style";
     object->setString("selector", currentSelectorText);
 
     Document* ownerDocument = m_element->ownerDocument();
-    if (!ownerDocument->isActive() || currentStyleIsInline())
+    if (!ownerDocument->isActive() || !rule)
         return object.release();
 
     Vector<String> medias;
-    buildMediaListChain(m_matchedRules->item(m_currentRuleIndex), medias);
+    buildMediaListChain(rule, medias);
     RefPtr<JSONArray> mediasJSONArray = JSONArray::create();
     for (size_t i = 0; i < medias.size(); ++i)
         mediasJSONArray->pushString(medias[i]);
@@ -410,29 +408,8 @@ PassRefPtr<JSONObject> LayoutEditor::currentSelectorInfo() const
 
 bool LayoutEditor::setCSSPropertyValueInCurrentRule(const String& value)
 {
-    RefPtrWillBeRawPtr<CSSStyleDeclaration> effectiveDeclaration = m_cssAgent->findEffectiveDeclaration(m_changingProperty, m_matchedRules.get(), m_element->style());
-    bool forceImportant = false;
-
-    if (effectiveDeclaration) {
-        CSSStyleRule* effectiveRule = nullptr;
-        if (effectiveDeclaration->parentRule() && effectiveDeclaration->parentRule()->type() == CSSRule::STYLE_RULE)
-            effectiveRule = toCSSStyleRule(effectiveDeclaration->parentRule());
-
-        unsigned effectiveRuleIndex = m_matchedRules->length();
-        for (unsigned i = 0; i < m_matchedRules->length(); ++i) {
-            if (m_matchedRules->item(i) == effectiveRule) {
-                effectiveRuleIndex = i;
-                break;
-            }
-        }
-        forceImportant = effectiveDeclaration->getPropertyPriority(getPropertyNameString(m_changingProperty)) == "important";
-        forceImportant |= effectiveRuleIndex > m_currentRuleIndex;
-    }
-
-    CSSStyleDeclaration* style = currentStyleIsInline() ? m_element->style() : toCSSStyleRule(m_matchedRules->item(m_currentRuleIndex))->style();
-
     String errorString;
-    m_cssAgent->setCSSPropertyValue(&errorString, m_element.get(), style, m_changingProperty, value, forceImportant);
+    m_cssAgent->setLayoutEditorValue(&errorString, m_element.get(), m_matchedStyles.at(m_currentRuleIndex), m_changingProperty, value, false);
     return errorString.isEmpty();
 }
 

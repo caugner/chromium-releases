@@ -37,6 +37,18 @@ Polymer({
       type: Object,
       notify: true,
     },
+
+    /**
+     * The origin selected by the user.
+     */
+    originSelected: {
+      type: String,
+      observer: 'onSelectedOriginChanged_',
+    }
+  },
+
+  ready: function() {
+    this.ContentSettingsTypes = settings.ContentSettingsTypes;
   },
 
   /** @private */
@@ -52,5 +64,10 @@ Polymer({
   /** @private */
   onClearBrowsingDataTap_: function() {
     this.$.pages.setSubpageChain(['clear-browsing-data']);
+  },
+
+  onSelectedOriginChanged_: function() {
+    this.$.pages.setSubpageChain(
+        ['site-settings', 'site-settings-category', 'site-details']);
   },
 });

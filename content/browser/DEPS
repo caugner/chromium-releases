@@ -1,7 +1,10 @@
 include_rules = [
   # Allow inclusion of specific components that we depend on. We may only
   # depend on components which we share with the mojo html_viewer.
+  "+components/arc",
   "+components/mime_util",
+  "+components/mus/public/interfaces",
+  "+components/mus/public",
   "+components/scheduler/common",
   "+components/tracing",
   "+components/url_formatter",
@@ -11,6 +14,7 @@ include_rules = [
   "+device/battery",  # For battery status service.
   "+device/vibration",  # For Vibration API
   "+gin/v8_initializer.h",
+  "+media/media_features.h",
   "+media/audio",  # For audio input for speech input feature.
   "+media/base",  # For Android JNI registration.
   "+media/filters",  # For reporting GPU decoding UMA.
@@ -20,6 +24,7 @@ include_rules = [
   "+mojo",
   "+sql",
   "+ui/aura_extra",
+  "+ui/views/mus",  # http://crbug.com/555767
   "+ui/webui",
   "+win8/util",
 
@@ -84,6 +89,8 @@ include_rules = [
   "+third_party/WebKit/public/web/WebPopupType.h",
   "+third_party/WebKit/public/web/WebSandboxFlags.h",
   "+third_party/WebKit/public/web/WebSerializedScriptValueVersion.h",
+  "+third_party/WebKit/public/web/WebSharedWorkerCreationContextType.h",
+  "+third_party/WebKit/public/web/WebSharedWorkerCreationErrors.h",
   "+third_party/WebKit/public/web/WebTextDirection.h",
   "+third_party/WebKit/public/web/WebTextInputType.h",
   "+third_party/WebKit/public/web/WebTreeScopeType.h",

@@ -12,9 +12,10 @@
 #include <string>
 #include <vector>
 
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/safe_browsing/database_manager.h"
+#include "components/safe_browsing_db/database_manager.h"
 #include "url/gurl.h"
 
 namespace safe_browsing {

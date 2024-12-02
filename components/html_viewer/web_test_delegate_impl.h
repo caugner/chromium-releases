@@ -73,6 +73,7 @@ class WebTestDelegateImpl : public test_runner::WebTestDelegate {
   void SimulateWebNotificationClick(const std::string& title,
                                     int action_index) override;
   void SetDeviceScaleFactor(float factor) override;
+  void EnableUseZoomForDSF() override;
   void SetDeviceColorProfile(const std::string& name) override;
   void SetBluetoothMockDataSet(const std::string& data_set) override;
   void SetBluetoothManualChooser() override;
@@ -109,7 +110,10 @@ class WebTestDelegateImpl : public test_runner::WebTestDelegate {
                      const GURL& origin,
                      const GURL& embedding_origin) override;
   void ResetPermissions() override;
-  bool AddMediaStreamSourceAndTrack(blink::WebMediaStream* stream) override;
+  bool AddMediaStreamVideoSourceAndTrack(
+      blink::WebMediaStream* stream) override;
+  bool AddMediaStreamAudioSourceAndTrack(
+      blink::WebMediaStream* stream) override;
   cc::SharedBitmapManager* GetSharedBitmapManager() override;
   void DispatchBeforeInstallPromptEvent(
       int request_id,
@@ -121,6 +125,8 @@ class WebTestDelegateImpl : public test_runner::WebTestDelegate {
       blink::WebLocalFrame* frame,
       const blink::WebPluginParams& params) override;
   void OnWebTestProxyBaseDestroy(test_runner::WebTestProxyBase* base) override;
+  blink::WebPoint ConvertDIPToNative(
+      const blink::WebPoint& point_in_dip) const override;
 
   // Must not be constructed until after blink has been initialized.
   scoped_ptr<test_runner::TestPreferences> prefs_;

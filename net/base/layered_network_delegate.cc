@@ -4,12 +4,13 @@
 
 #include "net/base/layered_network_delegate.h"
 
+#include <utility>
+
 namespace net {
 
 LayeredNetworkDelegate::LayeredNetworkDelegate(
     scoped_ptr<NetworkDelegate> nested_network_delegate)
-    : nested_network_delegate_(nested_network_delegate.Pass()) {
-}
+    : nested_network_delegate_(std::move(nested_network_delegate)) {}
 
 LayeredNetworkDelegate::~LayeredNetworkDelegate() {
 }
@@ -175,12 +176,6 @@ void LayeredNetworkDelegate::OnURLRequestDestroyedInternal(
     URLRequest* request) {
 }
 
-void LayeredNetworkDelegate::OnURLRequestJobOrphaned(URLRequest* request) {
-  // This hook is only added to debug https://crbug.com/289715, so there is no
-  // need for a OnURLRequestJobOrphanedInternal hook.
-  nested_network_delegate_->NotifyURLRequestJobOrphaned(request);
-}
-
 void LayeredNetworkDelegate::OnPACScriptError(int line_number,
                                               const base::string16& error) {
   OnPACScriptErrorInternal(line_number, error);
@@ -262,8 +257,15 @@ bool LayeredNetworkDelegate::OnAreExperimentalCookieFeaturesEnabled() const {
   return nested_network_delegate_->AreExperimentalCookieFeaturesEnabled();
 }
 
+bool LayeredNetworkDelegate::OnAreStrictSecureCookiesEnabled() const {
+  OnAreStrictSecureCookiesEnabledInternal();
+  return nested_network_delegate_->AreStrictSecureCookiesEnabled();
+}
+
 void LayeredNetworkDelegate::OnAreExperimentalCookieFeaturesEnabledInternal()
     const {}
+
+void LayeredNetworkDelegate::OnAreStrictSecureCookiesEnabledInternal() const {}
 
 bool LayeredNetworkDelegate::
     OnCancelURLRequestWithPolicyViolatingReferrerHeader(

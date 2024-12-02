@@ -7,7 +7,6 @@
 #include <map>
 #include <string>
 
-#include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/strings/string_piece.h"
 #include "net/spdy/hpack/hpack_encoder.h"
@@ -91,8 +90,7 @@ const size_t kLiteralBound = 1024;
 
 class HpackDecoderTest : public ::testing::TestWithParam<bool> {
  protected:
-  HpackDecoderTest()
-      : decoder_(ObtainHpackHuffmanTable()), decoder_peer_(&decoder_) {}
+  HpackDecoderTest() : decoder_(), decoder_peer_(&decoder_) {}
 
   bool DecodeHeaderBlock(StringPiece str) {
     if (GetParam()) {

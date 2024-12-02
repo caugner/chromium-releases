@@ -4,12 +4,10 @@
 
 #include "mojo/runner/desktop/main_helper.h"
 
-
 #include "base/at_exit.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
-#include "base/debug/stack_trace.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/process/launch.h"
@@ -41,11 +39,8 @@ int RunnerMain(int argc, char** argv,
   InitializeLogging();
   WaitForDebuggerIfNecessary();
 
-#if !defined(OFFICIAL_BUILD)
-  base::debug::EnableInProcessStackDumping();
-#if defined(OS_WIN)
+#if !defined(OFFICIAL_BUILD) && defined(OS_WIN)
   base::RouteStdioToConsole(false);
-#endif
 #endif
 
   if (command_line.HasSwitch(switches::kChildProcess))

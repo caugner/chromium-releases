@@ -70,9 +70,9 @@
 #ifndef BASE_MEMORY_WEAK_PTR_H_
 #define BASE_MEMORY_WEAK_PTR_H_
 
-#include "base/basictypes.h"
 #include "base/base_export.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
 #include "base/template_util.h"
@@ -161,8 +161,8 @@ class SupportsWeakPtrBase {
   static WeakPtr<Derived> StaticAsWeakPtr(Derived* t) {
     typedef
         is_convertible<Derived, internal::SupportsWeakPtrBase&> convertible;
-    COMPILE_ASSERT(convertible::value,
-                   AsWeakPtr_argument_inherits_from_SupportsWeakPtr);
+    static_assert(convertible::value,
+                  "AsWeakPtr argument must inherit from SupportsWeakPtr");
     return AsWeakPtrImpl<Derived>(t, *t);
   }
 

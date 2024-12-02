@@ -5,16 +5,18 @@
 #include "content/browser/renderer_host/render_widget_host_view_aura.h"
 
 #include <set>
+#include <utility>
 
 #include "base/auto_reset.h"
-#include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/trace_event/trace_event.h"
+#include "build/build_config.h"
 #include "cc/layers/layer.h"
 #include "cc/output/copy_output_request.h"
 #include "cc/output/copy_output_result.h"
@@ -44,6 +46,7 @@
 #include "content/browser/renderer_host/web_input_event_aura.h"
 #include "content/common/gpu/client/gl_helper.h"
 #include "content/common/gpu/gpu_messages.h"
+#include "content/common/site_isolation_policy.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/overscroll_configuration.h"
@@ -99,6 +102,7 @@
 #include "content/common/plugin_constants_win.h"
 #include "ui/base/win/hidden_window.h"
 #include "ui/gfx/gdi_util.h"
+#include "ui/gfx/screen_win.h"
 #include "ui/gfx/win/dpi.h"
 #endif
 
@@ -351,7 +355,7 @@ void RenderWidgetHostViewAura::ApplyEventFilterForPopupExit(
     // notification. We also set a flag in the view indicating that we need
     // to force a Focus notification on the next mouse down.
     if (popup_parent_host_view_ && popup_parent_host_view_->host_) {
-      popup_parent_host_view_->set_focus_on_mouse_down_ = true;
+      popup_parent_host_view_->set_focus_on_mouse_down_or_key_event_ = true;
       popup_parent_host_view_->host_->Blur();
     }
     // Note: popup_parent_host_view_ may be NULL when there are multiple
@@ -449,7 +453,7 @@ class RenderWidgetHostViewAura::WindowAncestorObserver
 RenderWidgetHostViewAura::RenderWidgetHostViewAura(RenderWidgetHost* host,
                                                    bool is_guest_view_hack)
     : host_(RenderWidgetHostImpl::From(host)),
-      window_(new aura::Window(this)),
+      window_(nullptr),
       delegated_frame_host_(new DelegatedFrameHost(this)),
       in_shutdown_(false),
       in_bounds_changed_(false),
@@ -475,19 +479,11 @@ RenderWidgetHostViewAura::RenderWidgetHostViewAura(RenderWidgetHost* host,
       has_snapped_to_boundary_(false),
       is_guest_view_hack_(is_guest_view_hack),
       begin_frame_observer_proxy_(this),
-      set_focus_on_mouse_down_(false),
+      set_focus_on_mouse_down_or_key_event_(false),
       device_scale_factor_(0.0f),
       weak_ptr_factory_(this) {
   if (!is_guest_view_hack_)
     host_->SetView(this);
-
-  window_observer_.reset(new WindowObserver(this));
-
-  aura::client::SetTooltipText(window_, &tooltip_);
-  aura::client::SetActivationDelegate(window_, this);
-  aura::client::SetFocusChangeObserver(window_, this);
-  window_->set_layer_owner_delegate(delegated_frame_host_.get());
-  gfx::Screen::GetScreenFor(window_)->AddObserver(this);
 
   // Let the page-level input event router know about our surface ID
   // namespace for surface-based hit testing.
@@ -522,6 +518,7 @@ bool RenderWidgetHostViewAura::OnMessageReceived(
 
 void RenderWidgetHostViewAura::InitAsChild(
     gfx::NativeView parent_view) {
+  CreateAuraWindow();
   window_->SetType(ui::wm::WINDOW_TYPE_CONTROL);
   window_->Init(ui::LAYER_SOLID_COLOR);
   window_->SetName("RenderWidgetHostViewAura");
@@ -538,6 +535,7 @@ void RenderWidgetHostViewAura::InitAsChild(
 void RenderWidgetHostViewAura::InitAsPopup(
     RenderWidgetHostView* parent_host_view,
     const gfx::Rect& bounds_in_screen) {
+  CreateAuraWindow();
   popup_parent_host_view_ =
       static_cast<RenderWidgetHostViewAura*>(parent_host_view);
 
@@ -589,6 +587,7 @@ void RenderWidgetHostViewAura::InitAsPopup(
 
 void RenderWidgetHostViewAura::InitAsFullscreen(
     RenderWidgetHostView* reference_host_view) {
+  CreateAuraWindow();
   is_fullscreen_ = true;
   window_->SetType(ui::wm::WINDOW_TYPE_NORMAL);
   window_->Init(ui::LAYER_SOLID_COLOR);
@@ -775,8 +774,8 @@ void RenderWidgetHostViewAura::SetKeyboardFocus() {
       ::SetFocus(host->GetAcceleratedWidget());
   }
 #endif
-  if (host_ && set_focus_on_mouse_down_) {
-    set_focus_on_mouse_down_ = false;
+  if (host_ && set_focus_on_mouse_down_or_key_event_) {
+    set_focus_on_mouse_down_or_key_event_ = false;
     host_->Focus();
   }
 }
@@ -858,6 +857,23 @@ bool RenderWidgetHostViewAura::CanRendererHandleEvent(
   }
 #endif
   return true;
+}
+
+bool RenderWidgetHostViewAura::ShouldRouteEvent(const ui::Event* event) const {
+  // We should route an event in two cases:
+  // 1) Mouse events are routed only if cross-process frames are possible.
+  // 2) Touch events are always routed. In the absence of a BrowserPlugin
+  //    we expect the routing to always send the event to this view. If
+  //    one or more BrowserPlugins are present, then the event may be targeted
+  //    to one of them, or this view. This allows GuestViews to have access to
+  //    them while still forcing pinch-zoom to be handled by the top-level
+  //    frame. TODO(wjmaclean): At present, this doesn't work for OOPIF, but
+  //    it should be a simple extension to modify RenderWidgetHostViewChildFrame
+  //    in a similar manner to RenderWidgetHostViewGuest.
+  bool result = host_->delegate() && host_->delegate()->GetInputEventRouter();
+  if (event->IsMouseEvent())
+    result = result && SiteIsolationPolicy::AreCrossProcessFramesPossible();
+  return result;
 }
 
 void RenderWidgetHostViewAura::HandleParentBoundsChanged() {
@@ -1027,11 +1043,16 @@ void RenderWidgetHostViewAura::RenderProcessGone(base::TerminationStatus status,
 }
 
 void RenderWidgetHostViewAura::Destroy() {
-  // Beware, this function is not called on all destruction paths. It will
-  // implicitly end up calling ~RenderWidgetHostViewAura though, so all
-  // destruction/cleanup code should happen there, not here.
+  // Beware, this function is not called on all destruction paths. If |window_|
+  // has been created, then it will implicitly end up calling
+  // ~RenderWidgetHostViewAura when |window_| is destroyed. Otherwise, The
+  // destructor is invoked directly from here. So all destruction/cleanup code
+  // should happen there, not here.
   in_shutdown_ = true;
-  delete window_;
+  if (window_)
+    delete window_;
+  else
+    delete this;
 }
 
 void RenderWidgetHostViewAura::SetTooltipText(
@@ -1137,7 +1158,7 @@ bool RenderWidgetHostViewAura::CanCopyToVideoFrame() const {
 
 void RenderWidgetHostViewAura::BeginFrameSubscription(
     scoped_ptr<RenderWidgetHostViewFrameSubscriber> subscriber) {
-  delegated_frame_host_->BeginFrameSubscription(subscriber.Pass());
+  delegated_frame_host_->BeginFrameSubscription(std::move(subscriber));
 }
 
 void RenderWidgetHostViewAura::EndFrameSubscription() {
@@ -1186,21 +1207,21 @@ void RenderWidgetHostViewAura::OnLegacyWindowDestroyed() {
 #endif
 
 void RenderWidgetHostViewAura::OnSwapCompositorFrame(
-    uint32 output_surface_id,
+    uint32_t output_surface_id,
     scoped_ptr<cc::CompositorFrame> frame) {
   TRACE_EVENT0("content", "RenderWidgetHostViewAura::OnSwapCompositorFrame");
 
   last_scroll_offset_ = frame->metadata.root_scroll_offset;
   if (!frame->delegated_frame_data)
     return;
-  delegated_frame_host_->SwapDelegatedFrame(
-      output_surface_id, frame->delegated_frame_data.Pass(),
-      frame->metadata.device_scale_factor, frame->metadata.latency_info,
-      &frame->metadata.satisfies_sequences);
-  SelectionUpdated(frame->metadata.selection.is_editable,
-                   frame->metadata.selection.is_empty_text_form_control,
-                   ConvertSelectionBound(frame->metadata.selection.start),
-                   ConvertSelectionBound(frame->metadata.selection.end));
+
+  cc::ViewportSelection selection = frame->metadata.selection;
+
+  delegated_frame_host_->SwapDelegatedFrame(output_surface_id,
+                                            std::move(frame));
+  SelectionUpdated(selection.is_editable, selection.is_empty_text_form_control,
+                   ConvertSelectionBound(selection.start),
+                   ConvertSelectionBound(selection.end));
 }
 
 void RenderWidgetHostViewAura::ClearCompositorFrame() {
@@ -1392,9 +1413,7 @@ RenderWidgetHostViewAura::CreateBrowserAccessibilityManager(
 #if defined(OS_WIN)
   manager = new BrowserAccessibilityManagerWin(
       BrowserAccessibilityManagerWin::GetEmptyDocument(), delegate);
-#elif defined (OS_ANDROID)
-  // TODO(mfomitchev): Accessibility on Android Aura: crbug.com/543262
-#else
+#elif !defined(OS_ANDROID)
   manager = BrowserAccessibilityManager::Create(
       BrowserAccessibilityManager::GetEmptyDocument(), delegate);
 #endif
@@ -1709,7 +1728,7 @@ gfx::Rect RenderWidgetHostViewAura::GetCaretBounds() const {
 }
 
 bool RenderWidgetHostViewAura::GetCompositionCharacterBounds(
-    uint32 index,
+    uint32_t index,
     gfx::Rect* rect) const {
   DCHECK(rect);
   if (index >= composition_character_bounds_.size())
@@ -1941,19 +1960,16 @@ void RenderWidgetHostViewAura::OnWindowDestroying(aura::Window* window) {
   // Make sure that the input method no longer references to this object before
   // this object is removed from the root window (i.e. this object loses access
   // to the input method).
-  ui::InputMethod* input_method = GetInputMethod();
-  if (input_method)
-    input_method->DetachTextInputClient(this);
+  DetachFromInputMethod();
 
   if (overscroll_controller_)
     overscroll_controller_->Reset();
 }
 
 void RenderWidgetHostViewAura::OnWindowDestroyed(aura::Window* window) {
-  // Ask the RWH to drop reference to us.
-  if (!is_guest_view_hack_)
-    host_->ViewDestroyed();
-
+  // This is not called on all destruction paths (e.g. if this view was never
+  // inialized properly to create the window). So the destruction/cleanup code
+  // that do not depend on |window_| should happen in the destructor, not here.
   delete this;
 }
 
@@ -2008,6 +2024,10 @@ void RenderWidgetHostViewAura::OnKeyEvent(ui::KeyEvent* event) {
       accept_return_character_ = event->type() == ui::ET_KEY_PRESSED;
     }
 
+    // Call SetKeyboardFocus() for not only ET_KEY_PRESSED but also
+    // ET_KEY_RELEASED. If a user closed the hotdog menu with ESC key press,
+    // we need to notify focus to Blink on ET_KEY_RELEASED for ESC key.
+    SetKeyboardFocus();
     // We don't have to communicate with an input method here.
     NativeWebKeyboardEvent webkit_event(*event);
     ForwardKeyboardEvent(webkit_event);
@@ -2130,7 +2150,7 @@ void RenderWidgetHostViewAura::OnMouseEvent(ui::MouseEvent* event) {
     blink::WebMouseWheelEvent mouse_wheel_event =
         MakeWebMouseWheelEvent(static_cast<ui::MouseWheelEvent&>(*event));
     if (mouse_wheel_event.deltaX != 0 || mouse_wheel_event.deltaY != 0) {
-      if (host_->delegate() && host_->delegate()->GetInputEventRouter()) {
+      if (ShouldRouteEvent(event)) {
         host_->delegate()->GetInputEventRouter()->RouteMouseWheelEvent(
             this, &mouse_wheel_event);
       } else {
@@ -2149,7 +2169,7 @@ void RenderWidgetHostViewAura::OnMouseEvent(ui::MouseEvent* event) {
 
       blink::WebMouseEvent mouse_event = MakeWebMouseEvent(*event);
       ModifyEventMovementAndCoords(&mouse_event);
-      if (host_->delegate() && host_->delegate()->GetInputEventRouter()) {
+      if (ShouldRouteEvent(event)) {
         host_->delegate()->GetInputEventRouter()->RouteMouseEvent(this,
                                                                   &mouse_event);
       } else {
@@ -2222,6 +2242,20 @@ void RenderWidgetHostViewAura::ProcessMouseWheelEvent(
   host_->ForwardWheelEvent(event);
 }
 
+void RenderWidgetHostViewAura::ProcessTouchEvent(
+    const blink::WebTouchEvent& event,
+    const ui::LatencyInfo& latency) {
+  host_->ForwardTouchEventWithLatencyInfo(event, latency);
+}
+
+void RenderWidgetHostViewAura::TransformPointToLocalCoordSpace(
+    const gfx::Point& point,
+    cc::SurfaceId original_surface,
+    gfx::Point* transformed_point) {
+  delegated_frame_host_->TransformPointToLocalCoordSpace(
+      point, original_surface, transformed_point);
+}
+
 void RenderWidgetHostViewAura::OnScrollEvent(ui::ScrollEvent* event) {
   TRACE_EVENT0("input", "RenderWidgetHostViewAura::OnScrollEvent");
 
@@ -2288,7 +2322,12 @@ void RenderWidgetHostViewAura::OnTouchEvent(ui::TouchEvent* event) {
   // Set unchanged touch point to StateStationary for touchmove and
   // touchcancel to make sure only send one ack per WebTouchEvent.
   MarkUnchangedTouchPointsAsStationary(&touch_event, event->touch_id());
-  host_->ForwardTouchEventWithLatencyInfo(touch_event, *event->latency());
+  if (ShouldRouteEvent(event)) {
+    host_->delegate()->GetInputEventRouter()->RouteTouchEvent(
+        this, &touch_event, *event->latency());
+  } else {
+    ProcessTouchEvent(touch_event, *event->latency());
+  }
 }
 
 void RenderWidgetHostViewAura::OnGestureEvent(ui::GestureEvent* event) {
@@ -2452,6 +2491,10 @@ void RenderWidgetHostViewAura::OnHostMoved(const aura::WindowTreeHost* host,
 // RenderWidgetHostViewAura, private:
 
 RenderWidgetHostViewAura::~RenderWidgetHostViewAura() {
+  // Ask the RWH to drop reference to us.
+  if (!is_guest_view_hack_)
+    host_->ViewDestroyed();
+
   selection_controller_.reset();
   selection_controller_client_.reset();
 
@@ -2462,9 +2505,18 @@ RenderWidgetHostViewAura::~RenderWidgetHostViewAura() {
   }
   delegated_frame_host_.reset();
   window_observer_.reset();
-  if (window_->GetHost())
-    window_->GetHost()->RemoveObserver(this);
-  UnlockMouse();
+  if (window_) {
+    if (window_->GetHost())
+      window_->GetHost()->RemoveObserver(this);
+    UnlockMouse();
+    aura::client::SetTooltipText(window_, NULL);
+    gfx::Screen::GetScreenFor(window_)->RemoveObserver(this);
+
+    // This call is usually no-op since |this| object is already removed from
+    // the Aura root window and we don't have a way to get an input method
+    // object associated with the window, but just in case.
+    DetachFromInputMethod();
+  }
   if (popup_parent_host_view_) {
     DCHECK(popup_parent_host_view_->popup_child_host_view_ == NULL ||
            popup_parent_host_view_->popup_child_host_view_ == this);
@@ -2476,13 +2528,6 @@ RenderWidgetHostViewAura::~RenderWidgetHostViewAura() {
     popup_child_host_view_->popup_parent_host_view_ = NULL;
   }
   event_filter_for_popup_exit_.reset();
-  aura::client::SetTooltipText(window_, NULL);
-  gfx::Screen::GetScreenFor(window_)->RemoveObserver(this);
-
-  // This call is usually no-op since |this| object is already removed from the
-  // Aura root window and we don't have a way to get an input method object
-  // associated with the window, but just in case.
-  DetachFromInputMethod();
 
 #if defined(OS_WIN)
   // The LegacyRenderWidgetHostHWND window should have been destroyed in
@@ -2490,6 +2535,18 @@ RenderWidgetHostViewAura::~RenderWidgetHostViewAura() {
   // be set to NULL.
   DCHECK(!legacy_render_widget_host_HWND_);
 #endif
+}
+
+void RenderWidgetHostViewAura::CreateAuraWindow() {
+  DCHECK(!window_);
+  window_ = new aura::Window(this);
+  window_observer_.reset(new WindowObserver(this));
+
+  aura::client::SetTooltipText(window_, &tooltip_);
+  aura::client::SetActivationDelegate(window_, this);
+  aura::client::SetFocusChangeObserver(window_, this);
+  window_->set_layer_owner_delegate(delegated_frame_host_.get());
+  gfx::Screen::GetScreenFor(window_)->AddObserver(this);
 }
 
 void RenderWidgetHostViewAura::UpdateCursorIfOverSelf() {
@@ -2500,8 +2557,39 @@ void RenderWidgetHostViewAura::UpdateCursorIfOverSelf() {
   if (!root_window)
     return;
 
-  gfx::Point root_window_point =
-      gfx::Screen::GetScreenFor(GetNativeView())->GetCursorScreenPoint();
+  gfx::Screen* screen = gfx::Screen::GetScreenFor(GetNativeView());
+  DCHECK(screen);
+
+  gfx::Point cursor_screen_point = screen->GetCursorScreenPoint();
+
+#if !defined(OS_CHROMEOS)
+  // Ignore cursor update messages if the window under the cursor is not us.
+  aura::Window* window_at_screen_point = screen->GetWindowAtScreenPoint(
+      cursor_screen_point);
+#if defined(OS_WIN)
+  // On Windows we may fail to retrieve the aura Window at the current cursor
+  // position. This is because the WindowFromPoint API may return the legacy
+  // window which is not associated with an aura Window. In this case we need
+  // to get the aura window for the parent of the legacy window.
+  if (!window_at_screen_point && legacy_render_widget_host_HWND_) {
+    HWND hwnd_at_point = ::WindowFromPoint(cursor_screen_point.ToPOINT());
+
+    if (hwnd_at_point == legacy_render_widget_host_HWND_->hwnd())
+      hwnd_at_point = legacy_render_widget_host_HWND_->GetParent();
+
+    gfx::ScreenWin* screen_win = static_cast<gfx::ScreenWin*>(screen);
+    DCHECK(screen_win);
+    window_at_screen_point = screen_win->GetNativeWindowFromHWND(
+        hwnd_at_point);
+  }
+#endif
+  if (!window_at_screen_point ||
+      (window_at_screen_point->GetRootWindow() != root_window)) {
+    return;
+  }
+#endif
+
+  gfx::Point root_window_point = cursor_screen_point;
   aura::client::ScreenPositionClient* screen_position_client =
       aura::client::GetScreenPositionClient(root_window);
   if (screen_position_client) {
@@ -2534,7 +2622,7 @@ ui::InputMethod* RenderWidgetHostViewAura::GetInputMethod() const {
 void RenderWidgetHostViewAura::Shutdown() {
   if (!in_shutdown_) {
     in_shutdown_ = true;
-    host_->Shutdown();
+    host_->ShutdownAndDestroyWidget(true);
   }
 }
 
@@ -2773,6 +2861,8 @@ void RenderWidgetHostViewAura::ForwardKeyboardEvent(
   // out-of-process iframes), pick the one that should process this event.
   if (host_->delegate())
     target_host = host_->delegate()->GetFocusedRenderWidgetHost(host_);
+  if (!target_host)
+    return;
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
   ui::TextEditKeyBindingsDelegateAuraLinux* keybinding_delegate =
@@ -2841,6 +2931,7 @@ void RenderWidgetHostViewAura::HandleGestureForTouchSelection(
       }
       break;
     case ui::ET_GESTURE_SCROLL_BEGIN:
+      selection_controller_->OnScrollBeginEvent();
       selection_controller_client_->OnScrollStarted();
       break;
     case ui::ET_GESTURE_SCROLL_END:

@@ -5,14 +5,18 @@
 #ifndef COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_STORE_H_
 #define COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_STORE_H_
 
+#include <string>
+#include <vector>
+
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/ref_counted.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/observer_list_threadsafe.h"
 #include "base/single_thread_task_runner.h"
 #include "base/time/time.h"
+#include "components/keyed_service/core/refcounted_keyed_service.h"
 #include "components/password_manager/core/browser/password_store_change.h"
 #include "components/password_manager/core/browser/password_store_sync.h"
 #include "sync/api/syncable_service.h"
@@ -49,7 +53,7 @@ struct InteractionsStats;
 // PasswordStoreSync is a hidden base class because only PasswordSyncableService
 // needs to access these methods.
 class PasswordStore : protected PasswordStoreSync,
-                      public base::RefCountedThreadSafe<PasswordStore> {
+                      public RefcountedKeyedService {
  public:
   // Whether or not it's acceptable for Chrome to request access to locked
   // passwords, which requires prompting the user for permission.
@@ -73,6 +77,9 @@ class PasswordStore : protected PasswordStoreSync,
 
   // Reimplement this to add custom initialization. Always call this too.
   virtual bool Init(const syncer::SyncableService::StartSyncFlare& flare);
+
+  // RefcountedKeyedService:
+  void ShutdownOnUIThread() override;
 
   // Sets the affiliation-based match |helper| that will be used by subsequent
   // GetLogins() calls to return credentials stored not only for the requested
@@ -188,10 +195,6 @@ class PasswordStore : protected PasswordStoreSync,
   // Schedules the given |task| to be run on the PasswordStore's TaskRunner.
   bool ScheduleTask(const base::Closure& task);
 
-  // Before you destruct the store, call Shutdown to indicate that the store
-  // needs to shut itself down.
-  virtual void Shutdown();
-
   base::WeakPtr<syncer::SyncableService> GetPasswordSyncableService();
 
  protected:
@@ -213,7 +216,8 @@ class PasswordStore : protected PasswordStoreSync,
     void NotifyConsumerWithResults(
         ScopedVector<autofill::PasswordForm> results);
 
-    void NotifyWithSiteStatistics(ScopedVector<InteractionsStats> stats);
+    void NotifyWithSiteStatistics(
+        std::vector<scoped_ptr<InteractionsStats>> stats);
 
     void set_ignore_logins_cutoff(base::Time cutoff) {
       ignore_logins_cutoff_ = cutoff;
@@ -294,7 +298,7 @@ class PasswordStore : protected PasswordStoreSync,
   // Synchronous implementation for manipulating with statistics.
   virtual void AddSiteStatsImpl(const InteractionsStats& stats) = 0;
   virtual void RemoveSiteStatsImpl(const GURL& origin_domain) = 0;
-  virtual ScopedVector<InteractionsStats> GetSiteStatsImpl(
+  virtual std::vector<scoped_ptr<InteractionsStats>> GetSiteStatsImpl(
       const GURL& origin_domain) = 0;
 
   // Log UMA stats for number of bulk deletions.

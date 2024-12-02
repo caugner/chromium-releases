@@ -170,6 +170,7 @@ interface AudioContext : EventTarget
     method createDelay
     method createDynamicsCompressor
     method createGain
+    method createIIRFilter
     method createMediaElementSource
     method createMediaStreamDestination
     method createMediaStreamSource
@@ -310,7 +311,6 @@ interface BluetoothDevice
     getter id
     getter instanceID
     getter name
-    getter paired
     getter productID
     getter productVersion
     getter uuids
@@ -468,6 +468,10 @@ interface CacheStorage
     method keys
     method match
     method open
+interface CanvasCaptureMediaStreamTrack : MediaStreamTrack
+    getter canvas
+    method constructor
+    method requestFrame
 interface CanvasGradient
     method addColorStop
     method constructor
@@ -571,6 +575,7 @@ interface ChannelMergerNode : AudioNode
 interface ChannelSplitterNode : AudioNode
     method constructor
 interface CharacterData : Node
+    getter assignedSlot
     getter data
     getter length
     getter nextElementSibling
@@ -642,6 +647,9 @@ interface ConvolverNode : AudioNode
     method constructor
     setter buffer
     setter normalize
+interface CountQueuingStrategy
+    method constructor
+    method size
 interface Credential
     getter iconURL
     getter id
@@ -853,6 +861,7 @@ interface DOMTokenList
     method item
     method keys
     method remove
+    method supports
     method toString
     method toggle
     method values
@@ -1233,6 +1242,7 @@ interface DynamicsCompressorNode : AudioNode
     getter threshold
     method constructor
 interface Element : Node
+    getter assignedSlot
     getter attributes
     getter childElementCount
     getter children
@@ -1270,6 +1280,7 @@ interface Element : Node
     getter scrollTop
     getter scrollWidth
     getter shadowRoot
+    getter slot
     getter tagName
     method animate
     method attachShadow
@@ -1331,6 +1342,7 @@ interface Element : Node
     setter outerHTML
     setter scrollLeft
     setter scrollTop
+    setter slot
 interface ErrorEvent : Event
     getter colno
     getter error
@@ -1697,6 +1709,7 @@ interface HTMLButtonElement : HTMLElement
 interface HTMLCanvasElement : HTMLElement
     getter height
     getter width
+    method captureStream
     method constructor
     method getContext
     method toBlob
@@ -2313,6 +2326,7 @@ interface HTMLLinkElement : HTMLElement
     getter integrity
     getter media
     getter rel
+    getter relList
     getter rev
     getter sheet
     getter sizes
@@ -2382,6 +2396,7 @@ interface HTMLMediaElement : HTMLElement
     getter currentTime
     getter defaultMuted
     getter defaultPlaybackRate
+    getter disableRemotePlayback
     getter duration
     getter ended
     getter error
@@ -2425,6 +2440,7 @@ interface HTMLMediaElement : HTMLElement
     setter currentTime
     setter defaultMuted
     setter defaultPlaybackRate
+    setter disableRemotePlayback
     setter loop
     setter muted
     setter onencrypted
@@ -2691,6 +2707,8 @@ interface HTMLShadowElement : HTMLElement
 interface HTMLSlotElement : HTMLElement
     getter name
     method constructor
+    method getAssignedNodes
+    method getDistributedNodes
     setter name
 interface HTMLSourceElement : HTMLElement
     getter media
@@ -3081,6 +3099,9 @@ interface IDBVersionChangeEvent : Event
     getter newVersion
     getter oldVersion
     method constructor
+interface IIRFilterNode : AudioNode
+    method constructor
+    method getFrequencyResponse
 interface IdleDeadline
     getter didTimeout
     method constructor
@@ -3097,6 +3118,19 @@ interface ImageData
     method constructor
 interface InputDeviceCapabilities
     getter firesTouchEvents
+    method constructor
+interface IntersectionObserver
+    method constructor
+    method disconnect
+    method observe
+    method takeRecords
+    method unobserve
+interface IntersectionObserverEntry
+    getter boundingClientRect
+    getter intersectionRect
+    getter rootBounds
+    getter target
+    getter time
     method constructor
 interface KeyboardEvent : UIEvent
     attribute DOM_KEY_LOCATION_LEFT
@@ -3121,6 +3155,16 @@ interface KeyboardEvent : UIEvent
     method initKeyboardEvent
 interface KeyframeEffect : AnimationEffectReadOnly
     method constructor
+interface KeywordValue : StyleValue
+    getter keywordValue
+    method constructor
+interface LengthValue : StyleValue
+    static method fromValue
+    method add
+    method constructor
+    method divide
+    method multiply
+    method subtract
 interface Location
     method constructor
 interface MIDIAccess : EventTarget
@@ -3175,6 +3219,30 @@ interface MIDIPort : EventTarget
     method constructor
     method open
     setter onstatechange
+interface MatrixTransformComponent : TransformComponent
+    getter a
+    getter b
+    getter c
+    getter d
+    getter e
+    getter f
+    getter m11
+    getter m12
+    getter m13
+    getter m14
+    getter m21
+    getter m22
+    getter m23
+    getter m24
+    getter m31
+    getter m32
+    getter m33
+    getter m34
+    getter m41
+    getter m42
+    getter m43
+    getter m44
+    method constructor
 interface MediaDevices
     method constructor
     method enumerateDevices
@@ -3266,7 +3334,7 @@ interface MediaQueryListEvent : Event
     getter media
     method constructor
 interface MediaRecorder : EventTarget
-    static method canRecordMimeType
+    static method isTypeSupported
     getter ignoreMutedMedia
     getter mimeType
     getter ondataavailable
@@ -3383,8 +3451,6 @@ interface MouseEvent : UIEvent
     getter screenY
     getter shiftKey
     getter toElement
-    getter webkitMovementX
-    getter webkitMovementY
     getter which
     getter x
     getter y
@@ -3419,8 +3485,11 @@ interface MutationRecord
     getter type
     method constructor
 interface NFC
+    method cancelPush
+    method cancelWatch
     method constructor
-    method requestAdapter
+    method push
+    method watch
 interface NamedNodeMap
     getter length
     method constructor
@@ -3468,7 +3537,6 @@ interface Navigator
     method constructor
     method getBattery
     method getGamepads
-    method getStorageUpdates
     method getVRDevices
     method isProtocolHandlerRegistered
     method javaEnabled
@@ -3598,13 +3666,25 @@ interface Notification : EventTarget
     setter onclose
     setter onerror
     setter onshow
+interface NumberValue : StyleValue
+    getter value
+    method constructor
+    setter value
+interface OffScreenCanvas
+    getter height
+    getter width
+    method constructor
+    setter height
+    setter width
 interface OfflineAudioCompletionEvent : Event
     getter renderedBuffer
     method constructor
 interface OfflineAudioContext : AudioContext
     getter oncomplete
     method constructor
+    method resume
     method startRendering
+    method suspend
     setter oncomplete
 interface Option
     method constructor
@@ -3623,8 +3703,13 @@ interface PageTransitionEvent : Event
     getter persisted
     method constructor
 interface PasswordCredential : Credential
+    getter additionalData
+    getter idName
+    getter passwordName
     method constructor
-    method toFormData
+    setter additionalData
+    setter idName
+    setter passwordName
 interface Path2D
     method addPath
     method arc
@@ -3786,6 +3871,7 @@ interface PresentationConnection : EventTarget
     getter onmessage
     getter onstatechange
     getter state
+    method close
     method constructor
     method send
     method terminate
@@ -3833,6 +3919,7 @@ interface PushSubscription
     method toJSON
     method unsubscribe
 interface RTCCertificate
+    getter expires
     method constructor
 interface RTCIceCandidate
     getter candidate
@@ -3896,9 +3983,11 @@ interface ReadableByteStream
     method constructor
     method getReader
 interface ReadableStream
+    getter locked
     method cancel
     method constructor
     method getReader
+    method tee
 interface RelatedEvent : Event
     getter relatedTarget
     method constructor
@@ -4934,6 +5023,11 @@ interface SVGZoomEvent : UIEvent
     getter previousTranslate
     getter zoomRectScreen
     method constructor
+interface ScaleTransformComponent : TransformComponent
+    getter x
+    getter y
+    getter z
+    method constructor
 interface Screen
     getter availHeight
     getter availLeft
@@ -5073,6 +5167,11 @@ interface SharedWorker : EventTarget
     getter workerStart
     method constructor
     setter onerror
+interface SimpleLength : LengthValue
+    getter type
+    getter value
+    method constructor
+    setter value
 interface SpeechSynthesisEvent : Event
     getter charIndex
     getter elapsedTime
@@ -5144,6 +5243,10 @@ interface StyleSheetList
     getter length
     method constructor
     method item
+interface StyleValue
+    static method parse
+    getter cssString
+    method constructor
 interface SubtleCrypto
     method constructor
     method decrypt
@@ -5288,6 +5391,13 @@ interface TrackDefaultList
 interface TrackEvent : Event
     getter track
     method constructor
+interface TransformComponent
+    getter cssString
+    method constructor
+    method is2DComponent
+interface TransformValue : StyleValue
+    method constructor
+    method is2D
 interface TransitionEvent : Event
     getter elapsedTime
     getter propertyName
@@ -5340,6 +5450,19 @@ interface URL
     setter protocol
     setter search
     setter username
+interface URLSearchParams
+    method append
+    method constructor
+    method delete
+    method entries
+    method forEach
+    method get
+    method getAll
+    method has
+    method keys
+    method set
+    method toString
+    method values
 interface USBAlternateInterface
     getter alternateSetting
     getter endpoints
@@ -6222,6 +6345,7 @@ interface webkitAudioContext : EventTarget
     method createDelay
     method createDynamicsCompressor
     method createGain
+    method createIIRFilter
     method createMediaElementSource
     method createMediaStreamDestination
     method createMediaStreamSource
@@ -6362,7 +6486,9 @@ interface webkitMediaStream : EventTarget
 interface webkitOfflineAudioContext : AudioContext
     getter oncomplete
     method constructor
+    method resume
     method startRendering
+    method suspend
     setter oncomplete
 interface webkitRTCPeerConnection : EventTarget
     static method generateCertificate
@@ -6431,7 +6557,6 @@ interface webkitSpeechRecognition : EventTarget
     getter onspeechend
     getter onspeechstart
     getter onstart
-    getter serviceURI
     method abort
     method constructor
     method start
@@ -6453,7 +6578,6 @@ interface webkitSpeechRecognition : EventTarget
     setter onspeechend
     setter onspeechstart
     setter onstart
-    setter serviceURI
 interface webkitSpeechRecognitionError : Event
     getter error
     getter message

@@ -30,6 +30,7 @@
 #include "platform/geometry/FloatPoint.h"
 #include "platform/geometry/FloatRectOutsets.h"
 #include "third_party/skia/include/core/SkRect.h"
+#include "wtf/Allocator.h"
 #include "wtf/Vector.h"
 #include <iosfwd>
 
@@ -48,6 +49,7 @@ class LayoutRect;
 class LayoutSize;
 
 class PLATFORM_EXPORT FloatRect {
+    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 public:
     enum ContainsMode {
         InsideOrOnStroke,
@@ -166,6 +168,8 @@ public:
     void scale(float sx, float sy);
 
     FloatRect transposedRect() const { return FloatRect(m_location.transposedPoint(), m_size.transposedSize()); }
+
+    float squaredDistanceTo(const FloatPoint&) const;
 
 #if OS(MACOSX)
     FloatRect(const CGRect&);

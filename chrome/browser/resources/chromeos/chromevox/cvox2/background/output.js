@@ -9,9 +9,9 @@
 goog.provide('Output');
 goog.provide('Output.EventType');
 
-goog.require('AutomationUtil.Dir');
 goog.require('EarconEngine');
 goog.require('Spannable');
+goog.require('constants');
 goog.require('cursors.Cursor');
 goog.require('cursors.Range');
 goog.require('cursors.Unit');
@@ -22,7 +22,10 @@ goog.require('cvox.ValueSpan');
 goog.require('goog.i18n.MessageFormat');
 
 goog.scope(function() {
-var Dir = AutomationUtil.Dir;
+var AutomationNode = chrome.automation.AutomationNode;
+var Dir = constants.Dir;
+var EventType = chrome.automation.EventType;
+var RoleType = chrome.automation.RoleType;
 
 /**
  * An Output object formats a cursors.Range into speech, braille, or both
@@ -63,15 +66,31 @@ Output = function() {
 
   /**
    * Current global options.
-   * @type {{speech: boolean, braille: boolean, location: boolean}}
+   * @type {{speech: boolean, braille: boolean}}
+   * @private
    */
-  this.formatOptions_ = {speech: true, braille: false, location: true};
+  this.formatOptions_ = {speech: true, braille: false};
 
   /**
    * Speech properties to apply to the entire output.
    * @type {!Object<*>}
+   * @private
    */
   this.speechProperties_ = {};
+
+  /**
+   * The speech category for the generated speech utterance.
+   * @type {cvox.TtsCategory}
+   * @private
+   */
+  this.speechCategory_ = cvox.TtsCategory.NAV;
+
+  /**
+   * The speech queue mode for the generated speech utterance.
+   * @type {cvox.QueueMode}
+   * @private
+   */
+  this.queueMode_ = cvox.QueueMode.QUEUE;
 };
 
 /**
@@ -377,84 +396,89 @@ Output.INPUT_TYPE_MESSAGE_IDS_ = {
 Output.RULES = {
   navigate: {
     'default': {
-      speak: '$name $value $help $role',
+      speak: '$name $value $role $description',
       braille: ''
     },
     abstractContainer: {
-      enter: '$name $role',
+      enter: '$name $role $description',
       leave: '@exited_container($role)'
     },
     alert: {
       speak: '!doNotInterrupt $role $descendants'
     },
     alertDialog: {
-      enter: '$name $role $descendants'
+      enter: '$name $role $description $descendants'
     },
     cell: {
       enter: '@column_granularity $tableCellColumnIndex'
     },
     checkBox: {
       speak: '$if($checked, $earcon(CHECK_ON), $earcon(CHECK_OFF)) ' +
-             '$name $role $checked'
+             '$name $role $checked $description'
     },
     dialog: {
-      enter: '$name $role'
+      enter: '$name $role $description'
     },
     div: {
       enter: '$name',
-      speak: '$name'
+      speak: '$name $description'
     },
     grid: {
-      enter: '$name $role'
+      enter: '$name $role $description'
     },
     heading: {
       enter: '@tag_h+$hierarchicalLevel',
       speak: '@tag_h+$hierarchicalLevel $nameOrDescendants='
     },
     inlineTextBox: {
-      speak: '$value='
+      speak: '$name='
     },
     link: {
       enter: '$name $if($visited, @visited_link, $role)',
       stay: '$name= $if($visited, @visited_link, $role)',
-      speak: '$name= $if($visited, @visited_link, $role)'
+      speak: '$name= $if($visited, @visited_link, $role) $description'
     },
     list: {
       enter: '$role @@list_with_items($countChildren(listItem))'
     },
     listBox: {
-      enter: '$name $role @@list_with_items($countChildren(listBoxOption))'
+      enter: '$name $role @@list_with_items($countChildren(listBoxOption)) ' +
+          '$description'
     },
     listBoxOption: {
-      speak: '$name $role @describe_index($indexInParent, $parentChildCount)'
+      speak: '$name $role @describe_index($indexInParent, $parentChildCount) ' +
+          '$description'
     },
     listItem: {
       enter: '$role'
     },
     menu: {
-      enter: '$name $role @@list_with_items($countChildren(menuItem))'
+      enter: '$name $role @@list_with_items($countChildren(menuItem)) ' +
+          '$description'
     },
     menuItem: {
       speak: '$name $role $if($haspopup, @has_submenu) ' +
-          '@describe_index($indexInParent, $parentChildCount)'
+          '@describe_index($indexInParent, $parentChildCount) ' +
+          '$description'
     },
     menuListOption: {
-      speak: '$name $value @role_menuitem ' +
-          '@describe_index($indexInParent, $parentChildCount)'
+      speak: '$name @role_menuitem ' +
+          '@describe_index($indexInParent, $parentChildCount) $description'
     },
     paragraph: {
       speak: '$descendants'
     },
     popUpButton: {
       speak: '$earcon(POP_UP_BUTTON) $value $name $role @aria_has_popup ' +
-          '$if($collapsed, @aria_expanded_false, @aria_expanded_true)'
+          '$if($collapsed, @aria_expanded_false, @aria_expanded_true) ' +
+          '$description'
     },
     radioButton: {
       speak: '$if($checked, @describe_radio_selected($name), ' +
-          '@describe_radio_unselected($name))'
+          '@describe_radio_unselected($name)) $description'
     },
     radioGroup: {
-      enter: '$name $role'
+      enter: '$name $role $description'
     },
     rootWebArea: {
       enter: '$name'
@@ -463,21 +487,21 @@ Output.RULES = {
       enter: '@row_granularity $tableRowIndex'
     },
     slider: {
-      speak: '$earcon(SLIDER) @describe_slider($value, $name) $help'
+      speak: '$earcon(SLIDER) @describe_slider($value, $name) $description'
     },
     staticText: {
-      speak: '$value='
+      speak: '$name='
     },
     tab: {
       speak: '@describe_tab($name)'
     },
     textField: {
       speak: '$name $value $if(' +
-          '$inputType, $inputType, $role)',
+          '$inputType, $inputType, $role) $description',
       braille: ''
     },
     toolbar: {
-      enter: '$name $role'
+      enter: '$name $role $description'
     },
     tree: {
       enter: '$name $role @@list_with_items($countChildren(treeItem))'
@@ -512,7 +536,7 @@ Output.RULES = {
   alert: {
     default: {
       speak: '!doNotInterrupt ' +
-          '@role_alert $name $earcon(ALERT_NONMODAL) $descendants'
+          '@role_alert $name $earcon(ALERT_NONMODAL) $description $descendants'
     }
   }
 };
@@ -564,10 +588,9 @@ Output.SelectionSpan = function(startIndex, endIndex) {
 
 /**
  * Wrapper for automation nodes as annotations.  Since the
- * {@code chrome.automation.AutomationNode} constructor isn't exposed in
- * the API, this class is used to allow isntanceof checks on these
- * annotations.
- @ @param {chrome.automation.AutomationNode} node
+ * {@code AutomationNode} constructor isn't exposed in the API, this class is
+ * used to allow instanceof checks on these annotations.
+ @ @param {!AutomationNode} node
  * @constructor
  */
 Output.NodeSpan = function(node) {
@@ -580,6 +603,22 @@ Output.NodeSpan = function(node) {
  */
 Output.EventType = {
   NAVIGATE: 'navigate'
+};
+
+/**
+ * If true, the next speech utterance will flush instead of the normal
+ * queueing mode.
+ * @type {boolean}
+ * @private
+ */
+Output.flushNextSpeechUtterance_ = false;
+
+/**
+ * Calling this will make the next speech utterance flush even if it would
+ * normally queue or do a category flush.
+ */
+Output.flushNextSpeechUtterance = function() {
+  Output.flushNextSpeechUtterance_ = true;
 };
 
 Output.prototype = {
@@ -606,14 +645,25 @@ Output.prototype = {
   },
 
   /**
+   * @return {boolean} True if there's any speech that will be output.
+   */
+  get hasSpeech() {
+    for (var i = 0; i < this.speechBuffer_.length; i++) {
+      if (this.speechBuffer_[i].trim().length)
+        return true;
+    }
+    return false;
+  },
+
+  /**
    * Specify ranges for speech.
    * @param {!cursors.Range} range
    * @param {cursors.Range} prevRange
-   * @param {chrome.automation.EventType|Output.EventType} type
+   * @param {EventType|Output.EventType} type
    * @return {!Output}
    */
   withSpeech: function(range, prevRange, type) {
-    this.formatOptions_ = {speech: true, braille: false, location: true};
+    this.formatOptions_ = {speech: true, braille: false};
     this.render_(range, prevRange, type, this.speechBuffer_);
     return this;
   },
@@ -622,12 +672,25 @@ Output.prototype = {
    * Specify ranges for braille.
    * @param {!cursors.Range} range
    * @param {cursors.Range} prevRange
-   * @param {chrome.automation.EventType|Output.EventType} type
+   * @param {EventType|Output.EventType} type
    * @return {!Output}
    */
   withBraille: function(range, prevRange, type) {
-    this.formatOptions_ = {speech: false, braille: true, location: false};
+    this.formatOptions_ = {speech: false, braille: true};
     this.render_(range, prevRange, type, this.brailleBuffer_);
+    return this;
+  },
+
+  /**
+   * Specify ranges for location.
+   * @param {!cursors.Range} range
+   * @param {cursors.Range} prevRange
+   * @param {EventType|Output.EventType} type
+   * @return {!Output}
+   */
+  withLocation: function(range, prevRange, type) {
+    this.formatOptions_ = {speech: false, braille: false};
+    this.render_(range, prevRange, type, [] /*unused output*/);
     return this;
   },
 
@@ -635,7 +698,7 @@ Output.prototype = {
    * Specify the same ranges for speech and braille.
    * @param {!cursors.Range} range
    * @param {cursors.Range} prevRange
-   * @param {chrome.automation.EventType|Output.EventType} type
+   * @param {EventType|Output.EventType} type
    * @return {!Output}
    */
   withSpeechAndBraille: function(range, prevRange, type) {
@@ -650,7 +713,17 @@ Output.prototype = {
    * @return {!Output}
    */
   withSpeechCategory: function(category) {
-    this.speechProperties_['category'] = category;
+    this.speechCategory_ = category;
+    return this;
+  },
+
+  /**
+   * Applies the given speech queue mode to the output.
+   * @param {cvox.QueueMode} queueMode The queueMode for the speech.
+   * @return {!Output}
+   */
+  withQueueMode: function(queueMode) {
+    this.queueMode_ = queueMode;
     return this;
   },
 
@@ -658,14 +731,18 @@ Output.prototype = {
    * Apply a format string directly to the output buffer. This lets you
    * output a message directly to the buffer using the format syntax.
    * @param {string} formatStr
+   * @param {!AutomationNode=} opt_node An optional
+   *     node to apply the formatting to.
    * @return {!Output}
    */
-  format: function(formatStr) {
-    this.formatOptions_ = {speech: true, braille: false, location: true};
-    this.format_(null, formatStr, this.speechBuffer_);
+  format: function(formatStr, opt_node) {
+    var node = opt_node || null;
 
-    this.formatOptions_ = {speech: false, braille: true, location: false};
-    this.format_(null, formatStr, this.brailleBuffer_);
+    this.formatOptions_ = {speech: true, braille: false};
+    this.format_(node, formatStr, this.speechBuffer_);
+
+    this.formatOptions_ = {speech: false, braille: true};
+    this.format_(node, formatStr, this.brailleBuffer_);
 
     return this;
   },
@@ -687,8 +764,14 @@ Output.prototype = {
    */
   go: function() {
     // Speech.
-    var queueMode = this.speechProperties_['category'] ?
-        cvox.QueueMode.CATEGORY_FLUSH : cvox.QueueMode.FLUSH;
+    var queueMode = this.queueMode_;
+    if (Output.flushNextSpeechUtterance_) {
+      queueMode = cvox.QueueMode.FLUSH;
+      Output.flushNextSpeechUtterance_ = false;
+    }
+
+    this.speechProperties_.category = this.speechCategory_;
+
     this.speechBuffer_.forEach(function(buff, i, a) {
       (function() {
         var scopedBuff = buff;
@@ -736,7 +819,10 @@ Output.prototype = {
     }
 
     // Display.
-    chrome.accessibilityPrivate.setFocusRing(this.locations_);
+    if (cvox.ChromeVox.isChromeOS &&
+        this.speechCategory_ != cvox.TtsCategory.LIVE) {
+      chrome.accessibilityPrivate.setFocusRing(this.locations_);
+    }
   },
 
   /**
@@ -744,7 +830,7 @@ Output.prototype = {
    * type.
    * @param {!cursors.Range} range
    * @param {cursors.Range} prevRange
-   * @param {chrome.automation.EventType|string} type
+   * @param {EventType|Output.EventType} type
    * @param {!Array<Spannable>} buff Buffer to receive rendered output.
    * @private
    */
@@ -757,7 +843,7 @@ Output.prototype = {
 
   /**
    * Format the node given the format specifier.
-   * @param {chrome.automation.AutomationNode} node
+   * @param {AutomationNode} node
    * @param {string|!Object} format The output format either specified as an
    * output template string or a parsed output format tree.
    * @param {!Array<Spannable>} buff Buffer to receive rendered output.
@@ -823,8 +909,8 @@ Output.prototype = {
             }
           }
           // Annotate this as a name so we don't duplicate names from ancestors.
-          if (node.role == chrome.automation.RoleType.inlineTextBox ||
-              node.role == chrome.automation.RoleType.staticText)
+          if (node.role == RoleType.inlineTextBox ||
+              node.role == RoleType.staticText)
             token = 'name';
           options.annotation.push(token);
           this.append_(buff, text, options);
@@ -842,11 +928,7 @@ Output.prototype = {
               earconFinder = earconFinder.parent;
             }
           }
-
-          // Pending finalization of name calculation; we must use the
-          // description property to access aria-label. See crbug.com/473220.
-          var resolvedName = node.description || node.name;
-          this.append_(buff, resolvedName, options);
+          this.append_(buff, node.name, options);
         } else if (token == 'nameOrDescendants') {
           options.annotation.push(token);
           if (node.name)
@@ -876,7 +958,7 @@ Output.prototype = {
               this.format_(node, formatString, buff);
           }
         } else if (token == 'descendants') {
-          if (AutomationPredicate.leaf(node))
+          if (!node || AutomationPredicate.leaf(node))
             return;
 
           // Construct a range to the leftmost and rightmost leaves.
@@ -893,7 +975,7 @@ Output.prototype = {
           var prev = null;
           if (node)
             prev = cursors.Range.fromNode(node);
-          this.range_(subrange, prev, 'navigate', buff);
+          this.range_(subrange, prev, Output.EventType.NAVIGATE, buff);
         } else if (token == 'role') {
           options.annotation.push(token);
           var msg = node.role;
@@ -1038,7 +1120,7 @@ Output.prototype = {
   /**
    * @param {!cursors.Range} range
    * @param {cursors.Range} prevRange
-   * @param {chrome.automation.EventType|string} type
+   * @param {EventType|Output.EventType} type
    * @param {!Array<Spannable>} rangeBuff
    * @private
    */
@@ -1052,8 +1134,7 @@ Output.prototype = {
       var buff = [];
       this.ancestry_(node, prevNode, type, buff);
       this.node_(node, prevNode, type, buff);
-      if (this.formatOptions_.location)
-        this.locations_.push(node.location);
+      this.locations_.push(node.location);
       return buff;
     }.bind(this);
 
@@ -1074,9 +1155,9 @@ Output.prototype = {
   },
 
   /**
-   * @param {!chrome.automation.AutomationNode} node
-   * @param {!chrome.automation.AutomationNode} prevNode
-   * @param {chrome.automation.EventType|string} type
+   * @param {!AutomationNode} node
+   * @param {!AutomationNode} prevNode
+   * @param {EventType|Output.EventType} type
    * @param {!Array<Spannable>} buff
    * @param {!Object=} opt_exclude A list of attributes to exclude from
    * processing.
@@ -1146,9 +1227,9 @@ Output.prototype = {
   },
 
   /**
-   * @param {!chrome.automation.AutomationNode} node
-   * @param {!chrome.automation.AutomationNode} prevNode
-   * @param {chrome.automation.EventType|string} type
+   * @param {!AutomationNode} node
+   * @param {!AutomationNode} prevNode
+   * @param {EventType|Output.EventType} type
    * @param {!Array<Spannable>} buff
    * @private
    */
@@ -1163,7 +1244,7 @@ Output.prototype = {
   /**
    * @param {!cursors.Range} range
    * @param {cursors.Range} prevRange
-   * @param {chrome.automation.EventType|string} type
+   * @param {EventType|Output.EventType} type
    * @param {!Array<Spannable>} buff
    * @private
    */
@@ -1181,6 +1262,8 @@ Output.prototype = {
       endIndex++;
     this.append_(
         buff, range.start.getText().substring(startIndex, endIndex));
+    this.locations_.push(
+        range.start.node.boundsForRange(startIndex, endIndex));
   },
 
   /**

@@ -9,13 +9,18 @@
 
 #include "ash/shelf/shelf_item_types.h"
 #include "ash/shell_delegate.h"
-#include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
+#include "build/build_config.h"
 #include "chrome/browser/ui/ash/metrics/chrome_user_metrics_recorder.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+
+#if defined(OS_CHROMEOS)
+#include "ash/shell_observer.h"
+#endif
 
 class Browser;
 
@@ -52,7 +57,6 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   bool IsMultiProfilesEnabled() const override;
   bool IsIncognitoAllowed() const override;
   bool IsRunningInForcedAppMode() const override;
-  bool IsMultiAccountEnabled() const override;
   bool CanShowWindowForUser(aura::Window* window) const override;
   bool IsForceMaximizeOnFirstRun() const override;
   void PreInit() override;
@@ -88,6 +92,21 @@ class ChromeShellDelegate : public ash::ShellDelegate,
                const content::NotificationDetails& details) override;
 
  private:
+#if defined(OS_CHROMEOS)
+  // An Observer to track session state and start/stop ARC accordingly.
+  class ArcSessionObserver : public ash::ShellObserver {
+   public:
+    ArcSessionObserver();
+    ~ArcSessionObserver() override;
+
+    // ash::ShellObserver overrides:
+    void OnLoginStateChanged(ash::user::LoginStatus status) override;
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(ArcSessionObserver);
+  };
+#endif
+
   void PlatformInit();
 
   static ChromeShellDelegate* instance_;
@@ -105,6 +124,9 @@ class ChromeShellDelegate : public ash::ShellDelegate,
 #if defined(OS_CHROMEOS)
   scoped_ptr<chromeos::DisplayConfigurationObserver>
       display_configuration_observer_;
+
+  // An Observer to track session state and start/stop ARC accordingly.
+  scoped_ptr<ArcSessionObserver> arc_session_observer_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(ChromeShellDelegate);

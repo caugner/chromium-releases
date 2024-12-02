@@ -22,11 +22,12 @@ CookiesFetcher::CookiesFetcher(JNIEnv* env, jobject obj, Profile* profile) {
 CookiesFetcher::~CookiesFetcher() {
 }
 
-void CookiesFetcher::Destroy(JNIEnv* env, jobject obj) {
+void CookiesFetcher::Destroy(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   delete this;
 }
 
-void CookiesFetcher::PersistCookies(JNIEnv* env, jobject obj) {
+void CookiesFetcher::PersistCookies(JNIEnv* env,
+                                    const JavaParamRef<jobject>& obj) {
   Profile* profile = ProfileManager::GetPrimaryUserProfile();
   if (!profile->HasOffTheRecordProfile()) {
     // There is no work to be done. We might consider calling
@@ -98,15 +99,15 @@ void CookiesFetcher::OnCookiesFetchFinished(const net::CookieList& cookies) {
 }
 
 void CookiesFetcher::RestoreCookies(JNIEnv* env,
-                                    jobject obj,
-                                    jstring url,
-                                    jstring name,
-                                    jstring value,
-                                    jstring domain,
-                                    jstring path,
-                                    int64 creation,
-                                    int64 expiration,
-                                    int64 last_access,
+                                    const JavaParamRef<jobject>& obj,
+                                    const JavaParamRef<jstring>& url,
+                                    const JavaParamRef<jstring>& name,
+                                    const JavaParamRef<jstring>& value,
+                                    const JavaParamRef<jstring>& domain,
+                                    const JavaParamRef<jstring>& path,
+                                    int64_t creation,
+                                    int64_t expiration,
+                                    int64_t last_access,
                                     bool secure,
                                     bool httponly,
                                     bool firstpartyonly,
@@ -159,12 +160,14 @@ void CookiesFetcher::RestoreToCookieJarInternal(
   // TODO(estark): Remove kEnableExperimentalWebPlatformFeatures check
   // when we decide whether to ship cookie
   // prefixes. https://crbug.com/541511
+  bool experimental_features_enabled =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableExperimentalWebPlatformFeatures);
   monster->SetCookieWithDetailsAsync(
       cookie.Source(), cookie.Name(), cookie.Value(), cookie.Domain(),
       cookie.Path(), cookie.ExpiryDate(), cookie.IsSecure(),
       cookie.IsHttpOnly(), cookie.IsFirstPartyOnly(),
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableExperimentalWebPlatformFeatures),
+      experimental_features_enabled, experimental_features_enabled,
       cookie.Priority(), cb);
 }
 

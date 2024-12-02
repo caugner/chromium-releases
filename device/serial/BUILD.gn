@@ -5,6 +5,9 @@
 import("//build/config/features.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 
+# Library works only on desktop platforms.
+assert(is_win || is_linux || is_mac)
+
 # GYP version: device/serial/serial.gyp:device_serial
 static_library("serial") {
   output_name = "device_serial"
@@ -45,9 +48,11 @@ static_library("serial") {
   public_deps = [
     ":serial_mojo",
     "//base",
+    "//device/core",
   ]
   deps = [
     "//mojo/public/cpp/system",
+    "//net",
     "//third_party/re2",
   ]
 
@@ -55,7 +60,10 @@ static_library("serial") {
     deps += [ "//device/udev_linux" ]
   }
   if (is_chromeos) {
-    deps += [ "//chromeos" ]
+    deps += [
+      "//chromeos",
+      "//dbus",
+    ]
   }
 }
 

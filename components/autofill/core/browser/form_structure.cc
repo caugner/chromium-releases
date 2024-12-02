@@ -4,9 +4,11 @@
 
 #include "components/autofill/core/browser/form_structure.h"
 
+#include <stdint.h>
+
+#include <map>
 #include <utility>
 
-#include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
@@ -20,6 +22,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "components/autofill/core/browser/autofill_metrics.h"
+#include "components/autofill/core/browser/autofill_server_field_info.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/autofill_xml_parser.h"
 #include "components/autofill/core/browser/field_types.h"
@@ -31,8 +34,8 @@
 #include "components/autofill/core/common/form_field_data_predictions.h"
 #include "components/rappor/rappor_service.h"
 #include "components/rappor/rappor_utils.h"
-#include "third_party/icu/source/i18n/unicode/regex.h"
-#include "third_party/webrtc/libjingle/xmllite/xmlelement.h"
+#include "third_party/libxml/chromium/libxml_utils.h"
+#include "third_party/re2/src/re2/re2.h"
 
 namespace autofill {
 namespace {
@@ -41,6 +44,7 @@ namespace {
 const char kAttributeAutofillUsed[] = "autofillused";
 const char kAttributeAutofillType[] = "autofilltype";
 const char kAttributeClientVersion[] = "clientversion";
+const char kAttributeSubmission[] = "submission";
 const char kAttributeDataPresent[] = "datapresent";
 const char kAttributeFieldID[] = "fieldid";
 const char kAttributeFieldType[] = "fieldtype";
@@ -54,7 +58,6 @@ const char kAttributeControlType[] = "type";
 const char kAttributeAutocomplete[] = "autocomplete";
 const char kAttributeLoginFormSignature[] = "loginformsignature";
 const char kClientVersion[] = "6.1.1715.1442/en (GGLL)";
-const char kXMLDeclaration[] = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>";
 const char kXMLElementAutofillQuery[] = "autofillquery";
 const char kXMLElementAutofillUpload[] = "autofillupload";
 const char kXMLElementFieldAssignments[] = "fieldassignments";
@@ -65,7 +68,7 @@ const char kBillingMode[] = "billing";
 const char kShippingMode[] = "shipping";
 
 // Strip away >= 5 consecutive digits.
-const char kIgnorePatternInFieldName[] = "\\d{5,}+";
+const char kIgnorePatternInFieldName[] = "\\d{5,}";
 
 // A form is considered to have a high prediction mismatch rate if the number of
 // mismatches exceeds this threshold.
@@ -89,7 +92,7 @@ std::string EncodeFieldTypes(const ServerFieldTypeSet& available_field_types) {
   const size_t kNumBytes = (MAX_VALID_FIELD_TYPE + 0x7) / 8;
 
   // Pack the types in |available_field_types| into |bit_field|.
-  std::vector<uint8> bit_field(kNumBytes, 0);
+  std::vector<uint8_t> bit_field(kNumBytes, 0);
   for (const auto& field_type : available_field_types) {
     // Set the appropriate bit in the field.  The bit we set is the one
     // |field_type| % 8 from the left of the byte.
@@ -115,75 +118,86 @@ std::string EncodeFieldTypes(const ServerFieldTypeSet& available_field_types) {
   return data_presence;
 }
 
-// Helper for |EncodeFormRequest()| and |EncodeFieldForUpload| that returns an
-// XmlElement for the given field in query xml, and also add it to the parent
-// XmlElement.
-buzz::XmlElement* EncodeFieldForQuery(const AutofillField& field,
-                                      buzz::XmlElement* parent) {
-  buzz::XmlElement* field_element = new buzz::XmlElement(
-      buzz::QName(kXMLElementField));
-  field_element->SetAttr(buzz::QName(kAttributeSignature),
-                         field.FieldSignature());
+// Assumes that |xml_writer| has just started an element with name
+// |kXMLElementField|, and adds some field attributes based on |field|. Returns
+// true on success, false on failure.
+bool EncodeFieldForQuery(const AutofillField& field, XmlWriter* xml_writer) {
+  if (!xml_writer->AddAttribute(kAttributeSignature, field.FieldSignature()))
+    return false;
   if (IsAutofillFieldMetadataEnabled()) {
     if (!field.name.empty()) {
-      field_element->SetAttr(buzz::QName(kAttributeName),
-                             base::UTF16ToUTF8(field.name));
+      if (!xml_writer->AddAttribute(kAttributeName,
+                                    base::UTF16ToUTF8(field.name)))
+        return false;
     }
-    field_element->SetAttr(buzz::QName(kAttributeControlType),
-                           field.form_control_type);
+    if (!xml_writer->AddAttribute(kAttributeControlType,
+                                  field.form_control_type))
+      return false;
     if (!field.label.empty()) {
       std::string truncated;
       base::TruncateUTF8ToByteSize(base::UTF16ToUTF8(field.label),
                                    kMaxFieldLabelNumChars, &truncated);
-      field_element->SetAttr(buzz::QName(kAttributeFieldLabel), truncated);
+      if (!xml_writer->AddAttribute(kAttributeFieldLabel, truncated))
+        return false;
     }
   }
-  parent->AddElement(field_element);
-  return field_element;
+  return true;
 }
 
-// Helper for |EncodeFormRequest()| that creates XmlElements for the given field
-// in upload xml, and also add them to the parent XmlElement.
-void EncodeFieldForUpload(const AutofillField& field,
-                          buzz::XmlElement* parent) {
+// Uses |xml_writer| to write one tag named |kXMLElementField| for each item in
+// |field.possible_types()|, and adds some field attributes based on |field|.
+// Returns true on success, false on failure.
+bool EncodeFieldForUpload(const AutofillField& field, XmlWriter* xml_writer) {
   // Don't upload checkable fields.
   if (field.is_checkable)
-    return;
+    return true;
 
-  ServerFieldTypeSet types = field.possible_types();
-  // |types| could be empty in unit-tests only.
+  const ServerFieldTypeSet& types = field.possible_types();
   for (const auto& field_type : types) {
-    // We use the same field elements as the query and add a few more below.
-    buzz::XmlElement* field_element = EncodeFieldForQuery(field, parent);
+    if (!xml_writer->StartElement(kXMLElementField))
+      return false;
+    // Add the same field elements as the query and a few more below.
+    if (!EncodeFieldForQuery(field, xml_writer))
+      return false;
 
     if (IsAutofillFieldMetadataEnabled() &&
         !field.autocomplete_attribute.empty()) {
-      field_element->SetAttr(buzz::QName(kAttributeAutocomplete),
-                             field.autocomplete_attribute);
+      if (!xml_writer->AddAttribute(kAttributeAutocomplete,
+                                    field.autocomplete_attribute))
+        return false;
     }
 
-    field_element->SetAttr(buzz::QName(kAttributeAutofillType),
-                           base::IntToString(field_type));
+    if (!xml_writer->AddAttribute(kAttributeAutofillType,
+                                  base::IntToString(field_type)))
+      return false;
+    if (!xml_writer->EndElement())
+      return false;
   }
+  return true;
 }
 
-// Helper for |EncodeFormRequest()| that creates XmlElements for the given field
-// in field assignments xml, and also add them to the parent XmlElement.
-void EncodeFieldForFieldAssignments(const AutofillField& field,
-                                    buzz::XmlElement* parent) {
-  ServerFieldTypeSet types = field.possible_types();
+// Uses |xml_writer| to write one tag named |kXMLElementFields| for each item in
+// |field.possible_types()|, and adds some field attributes based on |field|.
+// Returns true on success, false on failure.
+bool EncodeFieldForFieldAssignments(const AutofillField& field,
+                                    XmlWriter* xml_writer) {
+  const ServerFieldTypeSet& types = field.possible_types();
   for (const auto& field_type : types) {
-    buzz::XmlElement *field_element = new buzz::XmlElement(
-        buzz::QName(kXMLElementFields));
+    if (!xml_writer->StartElement(kXMLElementFields))
+      return false;
 
-    field_element->SetAttr(buzz::QName(kAttributeFieldID),
-                           field.FieldSignature());
-    field_element->SetAttr(buzz::QName(kAttributeFieldType),
-                           base::IntToString(field_type));
-    field_element->SetAttr(buzz::QName(kAttributeName),
-                           base::UTF16ToUTF8(field.name));
-    parent->AddElement(field_element);
+    if (!xml_writer->AddAttribute(kAttributeFieldID, field.FieldSignature()))
+      return false;
+    if (!xml_writer->AddAttribute(kAttributeFieldType,
+                                  base::IntToString(field_type)))
+      return false;
+    if (!xml_writer->AddAttribute(kAttributeName,
+                                  base::UTF16ToUTF8(field.name)))
+      return false;
+    if (!xml_writer->EndElement())
+      return false;
   }
+  return true;
 }
 
 // Returns |true| iff the |token| is a type hint for a contact field, as
@@ -225,6 +239,9 @@ bool ContactTypeHintMatchesFieldType(const std::string& token,
 HtmlFieldType FieldTypeFromAutocompleteAttributeValue(
     const std::string& autocomplete_attribute_value,
     const AutofillField& field) {
+  if (autocomplete_attribute_value == "")
+    return HTML_TYPE_UNSPECIFIED;
+
   if (autocomplete_attribute_value == "name")
     return HTML_TYPE_NAME;
 
@@ -352,32 +369,14 @@ HtmlFieldType FieldTypeFromAutocompleteAttributeValue(
   if (autocomplete_attribute_value == "email")
     return HTML_TYPE_EMAIL;
 
-  return HTML_TYPE_UNKNOWN;
+  return HTML_TYPE_UNRECOGNIZED;
 }
 
 std::string StripDigitsIfRequired(const base::string16& input) {
-  UErrorCode status = U_ZERO_ERROR;
-  CR_DEFINE_STATIC_LOCAL(icu::UnicodeString, icu_pattern,
-                         (kIgnorePatternInFieldName));
-  CR_DEFINE_STATIC_LOCAL(icu::RegexMatcher, matcher,
-                         (icu_pattern, UREGEX_CASE_INSENSITIVE, status));
-  DCHECK_EQ(status, U_ZERO_ERROR);
+  std::string return_string = base::UTF16ToUTF8(input);
 
-  icu::UnicodeString icu_input(input.data(), input.length());
-  matcher.reset(icu_input);
-
-  icu::UnicodeString replaced_string = matcher.replaceAll("", status);
-
-  std::string return_string;
-  status = U_ZERO_ERROR;
-  base::UTF16ToUTF8(replaced_string.getBuffer(),
-                    static_cast<size_t>(replaced_string.length()),
-                    &return_string);
-  if (status != U_ZERO_ERROR) {
-    DVLOG(1) << "Couldn't strip digits in " << base::UTF16ToUTF8(input);
-    return base::UTF16ToUTF8(input);
-  }
-
+  re2::RE2::GlobalReplace(&return_string, re2::RE2(kIgnorePatternInFieldName),
+                          std::string());
   return return_string;
 }
 
@@ -391,8 +390,11 @@ FormStructure::FormStructure(const FormData& form)
       active_field_count_(0),
       upload_required_(USE_UPLOAD_RATES),
       has_author_specified_types_(false),
+      has_author_specified_sections_(false),
+      was_parsed_for_autocomplete_attributes_(false),
       has_password_field_(false),
-      is_form_tag_(form.is_form_tag) {
+      is_form_tag_(form.is_form_tag),
+      is_formless_checkout_(form.is_formless_checkout) {
   // Copy the form fields.
   std::map<base::string16, size_t> unique_names;
   for (const FormFieldData& field : form.fields) {
@@ -422,14 +424,15 @@ FormStructure::~FormStructure() {}
 
 void FormStructure::DetermineHeuristicTypes() {
   // First, try to detect field types based on each field's |autocomplete|
-  // attribute value.  If there is at least one form field that specifies an
-  // autocomplete type hint, don't try to apply other heuristics to match fields
-  // in this form.
-  bool has_author_specified_sections;
-  ParseFieldTypesFromAutocompleteAttributes(&has_author_specified_types_,
-                                            &has_author_specified_sections);
+  // attribute value.
+  if (!was_parsed_for_autocomplete_attributes_)
+    ParseFieldTypesFromAutocompleteAttributes();
 
-  if (!has_author_specified_types_) {
+  // Then if there are enough active fields, and if we are dealing with either a
+  // proper <form> or a <form>-less checkout, run the heuristics and server
+  // prediction routines.
+  if (active_field_count() >= kRequiredFieldsForPredictionRoutines &&
+      (is_form_tag_ || is_formless_checkout_)) {
     ServerFieldTypeMap field_type_map;
     FormField::ParseFormFields(fields_.get(), is_form_tag_, &field_type_map);
     for (size_t i = 0; i < field_count(); ++i) {
@@ -442,7 +445,7 @@ void FormStructure::DetermineHeuristicTypes() {
   }
 
   UpdateAutofillCount();
-  IdentifySections(has_author_specified_sections);
+  IdentifySections(has_author_specified_sections_);
 
   if (IsAutofillable()) {
     AutofillMetrics::LogDeveloperEngagementMetric(
@@ -458,50 +461,64 @@ bool FormStructure::EncodeUploadRequest(
     const ServerFieldTypeSet& available_field_types,
     bool form_was_autofilled,
     const std::string& login_form_signature,
+    bool observed_submission,
     std::string* encoded_xml) const {
+  DCHECK(encoded_xml);
   DCHECK(ShouldBeCrowdsourced());
 
   // Verify that |available_field_types| agrees with the possible field types we
   // are uploading.
   for (const AutofillField* field : *this) {
     for (const auto& type : field->possible_types()) {
-      DCHECK(type == UNKNOWN_TYPE ||
-             type == EMPTY_TYPE ||
+      DCHECK(type == UNKNOWN_TYPE || type == EMPTY_TYPE ||
              available_field_types.count(type));
     }
   }
 
   // Set up the <autofillupload> element and its attributes.
-  buzz::XmlElement autofill_request_xml(
-      (buzz::QName(kXMLElementAutofillUpload)));
-  autofill_request_xml.SetAttr(buzz::QName(kAttributeClientVersion),
-                               kClientVersion);
-  autofill_request_xml.SetAttr(buzz::QName(kAttributeFormSignature),
-                               FormSignature());
-  autofill_request_xml.SetAttr(buzz::QName(kAttributeAutofillUsed),
-                               form_was_autofilled ? "true" : "false");
-  autofill_request_xml.SetAttr(buzz::QName(kAttributeDataPresent),
-                               EncodeFieldTypes(available_field_types).c_str());
+  XmlWriter xml_writer;
+  xml_writer.StartWriting();
+  xml_writer.StopIndenting();
+  if (!xml_writer.StartElement(kXMLElementAutofillUpload))
+    return false;
+  if (!xml_writer.AddAttribute(kAttributeSubmission,
+                               observed_submission ? "true" : "false"))
+    return false;
+  if (!xml_writer.AddAttribute(kAttributeClientVersion, kClientVersion))
+    return false;
+  if (!xml_writer.AddAttribute(kAttributeFormSignature, FormSignature()))
+    return false;
+  if (!xml_writer.AddAttribute(kAttributeAutofillUsed,
+                               form_was_autofilled ? "true" : "false"))
+    return false;
+  if (!xml_writer.AddAttribute(kAttributeDataPresent,
+                               EncodeFieldTypes(available_field_types)))
+    return false;
   if (IsAutofillFieldMetadataEnabled()) {
-    autofill_request_xml.SetAttr(buzz::QName(kAttributeFormActionHostSignature),
-                                 Hash64Bit(target_url_.host()));
-    if(!form_name().empty()) {
-      autofill_request_xml.SetAttr(buzz::QName(kAttributeFormName),
-                                   base::UTF16ToUTF8(form_name()));
+    if (!xml_writer.AddAttribute(kAttributeFormActionHostSignature,
+                                 Hash64Bit(target_url_.host())))
+      return false;
+    if (!form_name().empty()) {
+      if (!xml_writer.AddAttribute(kAttributeFormName,
+                                   base::UTF16ToUTF8(form_name())))
+        return false;
     }
   }
 
   if (!login_form_signature.empty()) {
-    autofill_request_xml.SetAttr(buzz::QName(kAttributeLoginFormSignature),
-                                 login_form_signature);
+    if (!xml_writer.AddAttribute(kAttributeLoginFormSignature,
+                                 login_form_signature))
+      return false;
   }
 
-  if (!EncodeFormRequest(FormStructure::UPLOAD, &autofill_request_xml))
+  if (IsMalformed() || !EncodeFormRequest(FormStructure::UPLOAD, &xml_writer))
     return false;  // Malformed form, skip it.
+  if (!xml_writer.EndElement())
+    return false;
 
   // Obtain the XML structure as a string.
-  *encoded_xml = kXMLDeclaration;
-  *encoded_xml += autofill_request_xml.Str().c_str();
+  xml_writer.StopWriting();
+  *encoded_xml = xml_writer.GetWrittenString();
 
   // To enable this logging, run with the flag --vmodule="form_structure=2".
   VLOG(2) << "\n" << *encoded_xml;
@@ -512,21 +529,28 @@ bool FormStructure::EncodeUploadRequest(
 bool FormStructure::EncodeFieldAssignments(
     const ServerFieldTypeSet& available_field_types,
     std::string* encoded_xml) const {
+  DCHECK(encoded_xml);
   DCHECK(ShouldBeCrowdsourced());
 
   // Set up the <fieldassignments> element and its attributes.
-  buzz::XmlElement autofill_request_xml(
-      (buzz::QName(kXMLElementFieldAssignments)));
-  autofill_request_xml.SetAttr(buzz::QName(kAttributeFormSignature),
-                               FormSignature());
+  XmlWriter xml_writer;
+  xml_writer.StartWriting();
+  xml_writer.StopIndenting();
+  if (!xml_writer.StartElement(kXMLElementFieldAssignments))
+    return false;
+  if (!xml_writer.AddAttribute(kAttributeFormSignature, FormSignature()))
+    return false;
 
-  if (!EncodeFormRequest(FormStructure::FIELD_ASSIGNMENTS,
-                         &autofill_request_xml))
+  if (IsMalformed() ||
+      !EncodeFormRequest(FormStructure::FIELD_ASSIGNMENTS, &xml_writer)) {
     return false;  // Malformed form, skip it.
+  }
+  if (!xml_writer.EndElement())
+    return false;
 
   // Obtain the XML structure as a string.
-  *encoded_xml = kXMLDeclaration;
-  *encoded_xml += autofill_request_xml.Str().c_str();
+  xml_writer.StopWriting();
+  *encoded_xml = xml_writer.GetWrittenString();
 
   return true;
 }
@@ -538,37 +562,43 @@ bool FormStructure::EncodeQueryRequest(
     std::string* encoded_xml) {
   DCHECK(encoded_signatures);
   DCHECK(encoded_xml);
-  encoded_xml->clear();
   encoded_signatures->clear();
   encoded_signatures->reserve(forms.size());
 
   // Set up the <autofillquery> element and attributes.
-  buzz::XmlElement autofill_request_xml(
-      (buzz::QName(kXMLElementAutofillQuery)));
-  autofill_request_xml.SetAttr(buzz::QName(kAttributeClientVersion),
-                               kClientVersion);
+  XmlWriter xml_writer;
+  xml_writer.StartWriting();
+  xml_writer.StopIndenting();
+  if (!xml_writer.StartElement(kXMLElementAutofillQuery))
+    return false;
+  if (!xml_writer.AddAttribute(kAttributeClientVersion, kClientVersion))
+    return false;
 
   // Some badly formatted web sites repeat forms - detect that and encode only
   // one form as returned data would be the same for all the repeated forms.
   std::set<std::string> processed_forms;
-  for (const auto& it : forms) {
-    std::string signature(it->FormSignature());
+  for (const auto& form : forms) {
+    std::string signature(form->FormSignature());
     if (processed_forms.find(signature) != processed_forms.end())
       continue;
     processed_forms.insert(signature);
-    scoped_ptr<buzz::XmlElement> encompassing_xml_element(
-        new buzz::XmlElement(buzz::QName(kXMLElementForm)));
-    encompassing_xml_element->SetAttr(buzz::QName(kAttributeSignature),
-                                      signature);
+    if (form->IsMalformed())
+      continue;
+    if (!xml_writer.StartElement(kXMLElementForm))
+      return false;
+    if (!xml_writer.AddAttribute(kAttributeSignature, signature))
+      return false;
 
-    if (!it->EncodeFormRequest(FormStructure::QUERY,
-                               encompassing_xml_element.get())) {
-      continue;  // Malformed form, skip it.
-    }
+    if (!form->EncodeFormRequest(FormStructure::QUERY, &xml_writer))
+      continue;
 
-    autofill_request_xml.AddElement(encompassing_xml_element.release());
+    if (!xml_writer.EndElement())
+      return false;
+
     encoded_signatures->push_back(signature);
   }
+  if (!xml_writer.EndElement())
+    return false;
 
   if (!encoded_signatures->size())
     return false;
@@ -578,14 +608,14 @@ bool FormStructure::EncodeQueryRequest(
   // it ever resurfaces, re-add code here to set the attribute accordingly.
 
   // Obtain the XML structure as a string.
-  *encoded_xml = kXMLDeclaration;
-  *encoded_xml += autofill_request_xml.Str().c_str();
+  xml_writer.StopWriting();
+  *encoded_xml = xml_writer.GetWrittenString();
 
   return true;
 }
 
 // static
-void FormStructure::ParseQueryResponse(const std::string& response_xml,
+void FormStructure::ParseQueryResponse(std::string response_xml,
                                        const std::vector<FormStructure*>& forms,
                                        rappor::RapporService* rappor_service) {
   AutofillMetrics::LogServerQueryMetric(
@@ -594,11 +624,7 @@ void FormStructure::ParseQueryResponse(const std::string& response_xml,
   // Parse the field types from the server response to the query.
   std::vector<AutofillServerFieldInfo> field_infos;
   UploadRequired upload_required;
-  AutofillQueryXmlParser parse_handler(&field_infos,
-                                       &upload_required);
-  buzz::XmlParser parser(&parse_handler);
-  parser.Parse(response_xml.c_str(), response_xml.length(), true);
-  if (!parse_handler.succeeded())
+  if (!ParseAutofillQueryXml(response_xml, &field_infos, &upload_required))
     return;
 
   AutofillMetrics::LogServerQueryMetric(AutofillMetrics::QUERY_RESPONSE_PARSED);
@@ -727,7 +753,7 @@ bool FormStructure::ShouldSkipField(const FormFieldData& field) const {
 }
 
 bool FormStructure::IsAutofillable() const {
-  if (autofill_count() < kRequiredAutofillFields)
+  if (autofill_count() < kRequiredFieldsForPredictionRoutines)
     return false;
 
   return ShouldBeParsed();
@@ -742,8 +768,10 @@ void FormStructure::UpdateAutofillCount() {
 }
 
 bool FormStructure::ShouldBeParsed() const {
-  if (active_field_count() < kRequiredAutofillFields)
+  if (active_field_count() < kRequiredFieldsForPredictionRoutines &&
+      !has_author_specified_types_) {
     return false;
+  }
 
   // Rule out http(s)://*/search?...
   //  e.g. http://www.google.com/search?q=...
@@ -760,8 +788,9 @@ bool FormStructure::ShouldBeParsed() const {
 }
 
 bool FormStructure::ShouldBeCrowdsourced() const {
-  return (has_password_field_ || !has_author_specified_types_) &&
-      ShouldBeParsed();
+  return (has_password_field_ ||
+          active_field_count() >= kRequiredFieldsForPredictionRoutines) &&
+         ShouldBeParsed();
 }
 
 void FormStructure::UpdateFromCache(const FormStructure& cached_form) {
@@ -811,7 +840,8 @@ void FormStructure::LogQualityMetrics(const base::TimeTicks& load_time,
                                       const base::TimeTicks& interaction_time,
                                       const base::TimeTicks& submission_time,
                                       rappor::RapporService* rappor_service,
-                                      bool did_show_suggestions) const {
+                                      bool did_show_suggestions,
+                                      bool observed_submission) const {
   size_t num_detected_field_types = 0;
   size_t num_server_mismatches = 0;
   size_t num_heuristic_mismatches = 0;
@@ -873,101 +903,109 @@ void FormStructure::LogQualityMetrics(const base::TimeTicks& load_time,
     // Log heuristic, server, and overall type quality metrics, independently of
     // whether the field was autofilled.
     if (heuristic_type == UNKNOWN_TYPE) {
-      AutofillMetrics::LogHeuristicTypePrediction(AutofillMetrics::TYPE_UNKNOWN,
-                                                  field_type);
+      AutofillMetrics::LogHeuristicTypePrediction(
+          AutofillMetrics::TYPE_UNKNOWN, field_type, observed_submission);
     } else if (field_types.count(heuristic_type)) {
-      AutofillMetrics::LogHeuristicTypePrediction(AutofillMetrics::TYPE_MATCH,
-                                                  field_type);
+      AutofillMetrics::LogHeuristicTypePrediction(
+          AutofillMetrics::TYPE_MATCH, field_type, observed_submission);
     } else {
       ++num_heuristic_mismatches;
       AutofillMetrics::LogHeuristicTypePrediction(
-          AutofillMetrics::TYPE_MISMATCH, field_type);
+          AutofillMetrics::TYPE_MISMATCH, field_type, observed_submission);
     }
 
     if (server_type == NO_SERVER_DATA) {
       AutofillMetrics::LogServerTypePrediction(AutofillMetrics::TYPE_UNKNOWN,
-                                               field_type);
+                                               field_type, observed_submission);
     } else if (field_types.count(server_type)) {
       AutofillMetrics::LogServerTypePrediction(AutofillMetrics::TYPE_MATCH,
-                                               field_type);
+                                               field_type, observed_submission);
     } else {
       ++num_server_mismatches;
       AutofillMetrics::LogServerTypePrediction(AutofillMetrics::TYPE_MISMATCH,
-                                               field_type);
+                                               field_type, observed_submission);
     }
 
     if (predicted_type == UNKNOWN_TYPE) {
-      AutofillMetrics::LogOverallTypePrediction(AutofillMetrics::TYPE_UNKNOWN,
-                                                field_type);
+      AutofillMetrics::LogOverallTypePrediction(
+          AutofillMetrics::TYPE_UNKNOWN, field_type, observed_submission);
     } else if (field_types.count(predicted_type)) {
-      AutofillMetrics::LogOverallTypePrediction(AutofillMetrics::TYPE_MATCH,
-                                                field_type);
+      AutofillMetrics::LogOverallTypePrediction(
+          AutofillMetrics::TYPE_MATCH, field_type, observed_submission);
     } else {
-      AutofillMetrics::LogOverallTypePrediction(AutofillMetrics::TYPE_MISMATCH,
-                                                field_type);
+      AutofillMetrics::LogOverallTypePrediction(
+          AutofillMetrics::TYPE_MISMATCH, field_type, observed_submission);
     }
   }
 
-  AutofillMetrics::LogNumberOfEditedAutofilledFieldsAtSubmission(
-      num_edited_autofilled_fields);
+  AutofillMetrics::LogNumberOfEditedAutofilledFields(
+      num_edited_autofilled_fields, observed_submission);
 
-  if (num_detected_field_types < kRequiredAutofillFields) {
-    AutofillMetrics::LogAutofillFormSubmittedState(
-        AutofillMetrics::NON_FILLABLE_FORM_OR_NEW_DATA);
-  } else {
-    if (did_autofill_all_possible_fields) {
+  // We log "submission" and duration metrics if we are here after observing a
+  // submission event.
+  if (observed_submission) {
+    if (num_detected_field_types < kRequiredFieldsForPredictionRoutines) {
       AutofillMetrics::LogAutofillFormSubmittedState(
-          AutofillMetrics::FILLABLE_FORM_AUTOFILLED_ALL);
-    } else if (did_autofill_some_possible_fields) {
-      AutofillMetrics::LogAutofillFormSubmittedState(
-          AutofillMetrics::FILLABLE_FORM_AUTOFILLED_SOME);
-    } else if (!did_show_suggestions) {
-      AutofillMetrics::LogAutofillFormSubmittedState(
-          AutofillMetrics::
-              FILLABLE_FORM_AUTOFILLED_NONE_DID_NOT_SHOW_SUGGESTIONS);
+          AutofillMetrics::NON_FILLABLE_FORM_OR_NEW_DATA);
     } else {
-      AutofillMetrics::LogAutofillFormSubmittedState(
-          AutofillMetrics::FILLABLE_FORM_AUTOFILLED_NONE_DID_SHOW_SUGGESTIONS);
-    }
-
-    // Log some RAPPOR metrics for problematic cases.
-    if (num_server_mismatches >= kNumberOfMismatchesThreshold) {
-      rappor::SampleDomainAndRegistryFromGURL(
-          rappor_service, "Autofill.HighNumberOfServerMismatches", source_url_);
-    }
-    if (num_heuristic_mismatches >= kNumberOfMismatchesThreshold) {
-      rappor::SampleDomainAndRegistryFromGURL(
-          rappor_service, "Autofill.HighNumberOfHeuristicMismatches",
-          source_url_);
-    }
-
-    // Unlike the other times, the |submission_time| should always be available.
-    DCHECK(!submission_time.is_null());
-
-    // The |load_time| might be unset, in the case that the form was dynamically
-    // added to the DOM.
-    if (!load_time.is_null()) {
-      // Submission should always chronologically follow form load.
-      DCHECK(submission_time > load_time);
-      base::TimeDelta elapsed = submission_time - load_time;
-      if (did_autofill_some_possible_fields)
-        AutofillMetrics::LogFormFillDurationFromLoadWithAutofill(elapsed);
-      else
-        AutofillMetrics::LogFormFillDurationFromLoadWithoutAutofill(elapsed);
-    }
-
-    // The |interaction_time| might be unset, in the case that the user
-    // submitted a blank form.
-    if (!interaction_time.is_null()) {
-      // Submission should always chronologically follow interaction.
-      DCHECK(submission_time > interaction_time);
-      base::TimeDelta elapsed = submission_time - interaction_time;
-      if (did_autofill_some_possible_fields) {
-        AutofillMetrics::LogFormFillDurationFromInteractionWithAutofill(
-            elapsed);
+      if (did_autofill_all_possible_fields) {
+        AutofillMetrics::LogAutofillFormSubmittedState(
+            AutofillMetrics::FILLABLE_FORM_AUTOFILLED_ALL);
+      } else if (did_autofill_some_possible_fields) {
+        AutofillMetrics::LogAutofillFormSubmittedState(
+            AutofillMetrics::FILLABLE_FORM_AUTOFILLED_SOME);
+      } else if (!did_show_suggestions) {
+        AutofillMetrics::LogAutofillFormSubmittedState(
+            AutofillMetrics::
+                FILLABLE_FORM_AUTOFILLED_NONE_DID_NOT_SHOW_SUGGESTIONS);
       } else {
-        AutofillMetrics::LogFormFillDurationFromInteractionWithoutAutofill(
-            elapsed);
+        AutofillMetrics::LogAutofillFormSubmittedState(
+            AutofillMetrics::
+                FILLABLE_FORM_AUTOFILLED_NONE_DID_SHOW_SUGGESTIONS);
+      }
+
+      // Log some RAPPOR metrics for problematic cases.
+      if (num_server_mismatches >= kNumberOfMismatchesThreshold) {
+        rappor::SampleDomainAndRegistryFromGURL(
+            rappor_service, "Autofill.HighNumberOfServerMismatches",
+            source_url_);
+      }
+      if (num_heuristic_mismatches >= kNumberOfMismatchesThreshold) {
+        rappor::SampleDomainAndRegistryFromGURL(
+            rappor_service, "Autofill.HighNumberOfHeuristicMismatches",
+            source_url_);
+      }
+
+      // Unlike the other times, the |submission_time| should always be
+      // available.
+      DCHECK(!submission_time.is_null());
+
+      // The |load_time| might be unset, in the case that the form was
+      // dynamically
+      // added to the DOM.
+      if (!load_time.is_null()) {
+        // Submission should always chronologically follow form load.
+        DCHECK(submission_time > load_time);
+        base::TimeDelta elapsed = submission_time - load_time;
+        if (did_autofill_some_possible_fields)
+          AutofillMetrics::LogFormFillDurationFromLoadWithAutofill(elapsed);
+        else
+          AutofillMetrics::LogFormFillDurationFromLoadWithoutAutofill(elapsed);
+      }
+
+      // The |interaction_time| might be unset, in the case that the user
+      // submitted a blank form.
+      if (!interaction_time.is_null()) {
+        // Submission should always chronologically follow interaction.
+        DCHECK(submission_time > interaction_time);
+        base::TimeDelta elapsed = submission_time - interaction_time;
+        if (did_autofill_some_possible_fields) {
+          AutofillMetrics::LogFormFillDurationFromInteractionWithAutofill(
+              elapsed);
+        } else {
+          AutofillMetrics::LogFormFillDurationFromInteractionWithoutAutofill(
+              elapsed);
+        }
       }
     }
   }
@@ -1030,23 +1068,21 @@ std::string FormStructure::Hash64Bit(const std::string& str) {
   std::string hash_bin = base::SHA1HashString(str);
   DCHECK_EQ(base::kSHA1Length, hash_bin.length());
 
-  uint64 hash64 = (((static_cast<uint64>(hash_bin[0])) & 0xFF) << 56) |
-                  (((static_cast<uint64>(hash_bin[1])) & 0xFF) << 48) |
-                  (((static_cast<uint64>(hash_bin[2])) & 0xFF) << 40) |
-                  (((static_cast<uint64>(hash_bin[3])) & 0xFF) << 32) |
-                  (((static_cast<uint64>(hash_bin[4])) & 0xFF) << 24) |
-                  (((static_cast<uint64>(hash_bin[5])) & 0xFF) << 16) |
-                  (((static_cast<uint64>(hash_bin[6])) & 0xFF) << 8) |
-                   ((static_cast<uint64>(hash_bin[7])) & 0xFF);
+  uint64_t hash64 = (((static_cast<uint64_t>(hash_bin[0])) & 0xFF) << 56) |
+                    (((static_cast<uint64_t>(hash_bin[1])) & 0xFF) << 48) |
+                    (((static_cast<uint64_t>(hash_bin[2])) & 0xFF) << 40) |
+                    (((static_cast<uint64_t>(hash_bin[3])) & 0xFF) << 32) |
+                    (((static_cast<uint64_t>(hash_bin[4])) & 0xFF) << 24) |
+                    (((static_cast<uint64_t>(hash_bin[5])) & 0xFF) << 16) |
+                    (((static_cast<uint64_t>(hash_bin[6])) & 0xFF) << 8) |
+                    ((static_cast<uint64_t>(hash_bin[7])) & 0xFF);
 
   return base::Uint64ToString(hash64);
 }
 
-bool FormStructure::EncodeFormRequest(
-    FormStructure::EncodeRequestType request_type,
-    buzz::XmlElement* encompassing_xml_element) const {
+bool FormStructure::IsMalformed() const {
   if (!field_count())  // Nothing to add.
-    return false;
+    return true;
 
   // Some badly formatted web sites repeat fields - limit number of fields to
   // 48, which is far larger than any valid form and XML still fits into 2K.
@@ -1054,35 +1090,44 @@ bool FormStructure::EncodeFormRequest(
   // near certainly not valid/auto-fillable.
   const size_t kMaxFieldsOnTheForm = 48;
   if (field_count() > kMaxFieldsOnTheForm)
-    return false;
+    return true;
+  return false;
+}
 
+bool FormStructure::EncodeFormRequest(EncodeRequestType request_type,
+                                      XmlWriter* xml_writer) const {
+  DCHECK(!IsMalformed());
   // Add the child nodes for the form fields.
-  for (size_t index = 0; index < field_count(); ++index) {
-    const AutofillField* field = fields_[index];
+  for (const AutofillField* field : fields_) {
     switch (request_type) {
       case FormStructure::UPLOAD:
-        EncodeFieldForUpload(*field, encompassing_xml_element);
+        if (!EncodeFieldForUpload(*field, xml_writer))
+          return false;
         break;
       case FormStructure::QUERY:
         if (ShouldSkipField(*field))
           continue;
-        EncodeFieldForQuery(*field, encompassing_xml_element);
+        if (!xml_writer->StartElement(kXMLElementField))
+          return false;
+        if (!EncodeFieldForQuery(*field, xml_writer))
+          return false;
+        if (!xml_writer->EndElement())
+          return false;
         break;
       case FormStructure::FIELD_ASSIGNMENTS:
-        EncodeFieldForFieldAssignments(*field, encompassing_xml_element);
+        if (!EncodeFieldForFieldAssignments(*field, xml_writer))
+          return false;
         break;
     }
   }
   return true;
 }
 
-void FormStructure::ParseFieldTypesFromAutocompleteAttributes(
-    bool* found_types,
-    bool* found_sections) {
+void FormStructure::ParseFieldTypesFromAutocompleteAttributes() {
   const std::string kDefaultSection = "-default";
 
-  *found_types = false;
-  *found_sections = false;
+  has_author_specified_types_ = false;
+  has_author_specified_sections_ = false;
   for (AutofillField* field : fields_) {
     // To prevent potential section name collisions, add a default suffix for
     // other fields.  Without this, 'autocomplete' attribute values
@@ -1113,7 +1158,7 @@ void FormStructure::ParseFieldTypesFromAutocompleteAttributes(
     // This allows a website's author to specify an attribute like
     // autocomplete="other" on a field to disable all Autofill heuristics for
     // the form.
-    *found_types = true;
+    has_author_specified_types_ = true;
 
     // Tokenize the attribute value.  Per the spec, the tokens are parsed in
     // reverse order.
@@ -1128,7 +1173,7 @@ void FormStructure::ParseFieldTypesFromAutocompleteAttributes(
     tokens.pop_back();
     HtmlFieldType field_type =
         FieldTypeFromAutocompleteAttributeValue(field_type_token, *field);
-    if (field_type == HTML_TYPE_UNKNOWN)
+    if (field_type == HTML_TYPE_UNSPECIFIED)
       continue;
 
     // The preceding token, if any, may be a type hint.
@@ -1176,7 +1221,7 @@ void FormStructure::ParseFieldTypesFromAutocompleteAttributes(
       continue;
 
     if (section != kDefaultSection) {
-      *found_sections = true;
+      has_author_specified_sections_ = true;
       field->set_section(section);
     }
 
@@ -1184,6 +1229,8 @@ void FormStructure::ParseFieldTypesFromAutocompleteAttributes(
     // Update the |field|'s type based on what was parsed from the attribute.
     field->SetHtmlType(field_type, mode);
   }
+
+  was_parsed_for_autocomplete_attributes_ = true;
 }
 
 bool FormStructure::FillFields(

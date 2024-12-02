@@ -4,6 +4,8 @@
 
 #include "cc/tiles/picture_layer_tiling.h"
 
+#include <stddef.h>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -115,7 +117,7 @@ Tile* PictureLayerTiling::CreateTile(const Tile::CreateInfo& info) {
   all_tiles_done_ = false;
   ScopedTilePtr tile = client_->CreateTile(info);
   Tile* raw_ptr = tile.get();
-  tiles_.add(key, tile.Pass());
+  tiles_.add(key, std::move(tile));
   return raw_ptr;
 }
 

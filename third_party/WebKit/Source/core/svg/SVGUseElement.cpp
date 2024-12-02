@@ -22,8 +22,6 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "config.h"
-
 #include "core/svg/SVGUseElement.h"
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
@@ -48,17 +46,17 @@ namespace blink {
 
 static SVGUseEventSender& svgUseLoadEventSender()
 {
-    DEFINE_STATIC_LOCAL(SVGUseEventSender, sharedLoadEventSender, (EventTypeNames::load));
-    return sharedLoadEventSender;
+    DEFINE_STATIC_LOCAL(OwnPtrWillBePersistent<SVGUseEventSender>, sharedLoadEventSender, (SVGUseEventSender::create(EventTypeNames::load)));
+    return *sharedLoadEventSender;
 }
 
 inline SVGUseElement::SVGUseElement(Document& document)
     : SVGGraphicsElement(SVGNames::useTag, document)
     , SVGURIReference(this)
-    , m_x(SVGAnimatedLength::create(this, SVGNames::xAttr, SVGLength::create(SVGLengthMode::Width), AllowNegativeLengths))
-    , m_y(SVGAnimatedLength::create(this, SVGNames::yAttr, SVGLength::create(SVGLengthMode::Height), AllowNegativeLengths))
-    , m_width(SVGAnimatedLength::create(this, SVGNames::widthAttr, SVGLength::create(SVGLengthMode::Width), ForbidNegativeLengths))
-    , m_height(SVGAnimatedLength::create(this, SVGNames::heightAttr, SVGLength::create(SVGLengthMode::Height), ForbidNegativeLengths))
+    , m_x(SVGAnimatedLength::create(this, SVGNames::xAttr, SVGLength::create(SVGLengthMode::Width)))
+    , m_y(SVGAnimatedLength::create(this, SVGNames::yAttr, SVGLength::create(SVGLengthMode::Height)))
+    , m_width(SVGAnimatedLength::create(this, SVGNames::widthAttr, SVGLength::create(SVGLengthMode::Width)))
+    , m_height(SVGAnimatedLength::create(this, SVGNames::heightAttr, SVGLength::create(SVGLengthMode::Height)))
     , m_haveFiredLoadEvent(false)
     , m_needsShadowTreeRecreation(false)
 {
@@ -84,8 +82,8 @@ SVGUseElement::~SVGUseElement()
 #if !ENABLE(OILPAN)
     clearShadowTree();
     cancelShadowTreeRecreation();
-#endif
     svgUseLoadEventSender().cancelEvent(this);
+#endif
 }
 
 DEFINE_TRACE(SVGUseElement)
@@ -189,11 +187,11 @@ bool SVGUseElement::isPresentationAttributeWithSVGDOM(const QualifiedName& attrN
 
 void SVGUseElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomicString& value, MutableStylePropertySet* style)
 {
-    RefPtrWillBeRawPtr<SVGAnimatedPropertyBase> property = propertyFromAttribute(name);
+    SVGAnimatedPropertyBase* property = propertyFromAttribute(name);
     if (property == m_x)
-        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyX, *m_x->currentValue());
+        addPropertyToPresentationAttributeStyle(style, CSSPropertyX, m_x->currentValue()->asCSSPrimitiveValue());
     else if (property == m_y)
-        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyY, *m_y->currentValue());
+        addPropertyToPresentationAttributeStyle(style, CSSPropertyY, m_y->currentValue()->asCSSPrimitiveValue());
     else
         SVGGraphicsElement::collectStyleForPresentationAttribute(name, value, style);
 }
@@ -229,7 +227,8 @@ void SVGUseElement::svgAttributeChanged(const QualifiedName& attrName)
         SVGElement::InvalidationGuard invalidationGuard(this);
         if (isStructurallyExternal()) {
             KURL url = document().completeURL(hrefString());
-            if (url.hasFragmentIdentifier()) {
+            const KURL& existingURL = m_resource ? m_resource->url() : KURL();
+            if (url.hasFragmentIdentifier() && !equalIgnoringFragmentIdentifier(url, existingURL)) {
                 FetchRequest request(ResourceRequest(url), localName());
                 setDocumentResource(DocumentResource::fetchSVGDocument(request, document().fetcher()));
             }

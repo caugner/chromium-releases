@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/i18n/rtl.h"
+#include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
@@ -40,6 +41,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/renderer_preferences.h"
+#include "extensions/browser/view_type_utils.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
@@ -195,6 +197,7 @@ void WebUILoginView::Init() {
       SetDelegate(this);
 
   web_contents->SetDelegate(this);
+  extensions::SetViewType(web_contents, extensions::VIEW_TYPE_COMPONENT);
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
       web_contents);
   content::RendererPreferences* prefs = web_contents->GetMutableRendererPrefs();

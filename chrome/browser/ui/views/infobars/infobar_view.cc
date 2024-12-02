@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/views/infobars/infobar_view.h"
 
 #include <algorithm>
+#include <utility>
 
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
@@ -13,13 +14,14 @@
 #include "chrome/browser/ui/views/infobars/infobar_background.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/infobar_delegate.h"
+#include "grit/components_strings.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/compositor/clip_transform_recorder.h"
+#include "ui/compositor/clip_recorder.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/image/image.h"
@@ -31,6 +33,7 @@
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/button/label_button_border.h"
+#include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
@@ -75,7 +78,7 @@ const int InfoBarView::kButtonButtonSpacing = views::kRelatedButtonHSpacing;
 const int InfoBarView::kEndOfLabelSpacing = views::kItemLabelSpacing;
 
 InfoBarView::InfoBarView(scoped_ptr<infobars::InfoBarDelegate> delegate)
-    : infobars::InfoBar(delegate.Pass()),
+    : infobars::InfoBar(std::move(delegate)),
       views::ExternalFocusTracker(this, NULL),
       icon_(NULL),
       close_button_(NULL) {
@@ -112,35 +115,41 @@ views::Link* InfoBarView::CreateLink(const base::string16& text,
 }
 
 // static
+views::Button* InfoBarView::CreateTextButton(
+    views::ButtonListener* listener,
+    const base::string16& text) {
+  if (!ui::MaterialDesignController::IsModeMaterial())
+    return CreateLabelButton(listener, text);
+
+  return new views::MdTextButton(listener, text);
+}
+
+// static
 views::LabelButton* InfoBarView::CreateLabelButton(
     views::ButtonListener* listener,
     const base::string16& text) {
   views::LabelButton* button = new views::LabelButton(listener, text);
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    button->SetStyle(views::Button::STYLE_BUTTON);
-  } else {
-    scoped_ptr<views::LabelButtonAssetBorder> button_border(
-        new views::LabelButtonAssetBorder(views::Button::STYLE_TEXTBUTTON));
-    const int kNormalImageSet[] = IMAGE_GRID(IDR_INFOBARBUTTON_NORMAL);
-    button_border->SetPainter(
-        false, views::Button::STATE_NORMAL,
-        views::Painter::CreateImageGridPainter(kNormalImageSet));
-    const int kHoveredImageSet[] = IMAGE_GRID(IDR_INFOBARBUTTON_HOVER);
-    button_border->SetPainter(
-        false, views::Button::STATE_HOVERED,
-        views::Painter::CreateImageGridPainter(kHoveredImageSet));
-    const int kPressedImageSet[] = IMAGE_GRID(IDR_INFOBARBUTTON_PRESSED);
-    button_border->SetPainter(
-        false, views::Button::STATE_PRESSED,
-        views::Painter::CreateImageGridPainter(kPressedImageSet));
+  scoped_ptr<views::LabelButtonAssetBorder> button_border(
+      new views::LabelButtonAssetBorder(views::Button::STYLE_TEXTBUTTON));
+  const int kNormalImageSet[] = IMAGE_GRID(IDR_INFOBARBUTTON_NORMAL);
+  button_border->SetPainter(
+      false, views::Button::STATE_NORMAL,
+      views::Painter::CreateImageGridPainter(kNormalImageSet));
+  const int kHoveredImageSet[] = IMAGE_GRID(IDR_INFOBARBUTTON_HOVER);
+  button_border->SetPainter(
+      false, views::Button::STATE_HOVERED,
+      views::Painter::CreateImageGridPainter(kHoveredImageSet));
+  const int kPressedImageSet[] = IMAGE_GRID(IDR_INFOBARBUTTON_PRESSED);
+  button_border->SetPainter(
+      false, views::Button::STATE_PRESSED,
+      views::Painter::CreateImageGridPainter(kPressedImageSet));
 
-    button->SetBorder(button_border.Pass());
-    button->set_animate_on_state_change(false);
-    button->SetTextColor(views::Button::STATE_NORMAL, GetInfobarTextColor());
-    button->SetTextColor(views::Button::STATE_HOVERED, GetInfobarTextColor());
-    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    button->SetFontList(rb.GetFontList(ui::ResourceBundle::MediumFont));
-  }
+  button->SetBorder(std::move(button_border));
+  button->set_animate_on_state_change(false);
+  button->SetTextColor(views::Button::STATE_NORMAL, GetInfobarTextColor());
+  button->SetTextColor(views::Button::STATE_HOVERED, GetInfobarTextColor());
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  button->SetFontList(rb.GetFontList(ui::ResourceBundle::MediumFont));
   button->SetFocusable(true);
   return button;
 }
@@ -276,9 +285,8 @@ void InfoBarView::PaintChildren(const ui::PaintContext& context) {
   // canvas->sk_canvas()->clipPath(fill_path_);
   DCHECK_EQ(total_height(), height())
       << "Infobar piecewise heights do not match overall height";
-  ui::ClipTransformRecorder clip_transform_recorder(context);
-  clip_transform_recorder.ClipRect(
-      gfx::Rect(0, arrow_height(), width(), bar_height()));
+  ui::ClipRecorder clip_recorder(context);
+  clip_recorder.ClipRect(gfx::Rect(0, arrow_height(), width(), bar_height()));
   views::View::PaintChildren(context);
 }
 

@@ -5,12 +5,14 @@
 #ifndef CHROME_BROWSER_LOCAL_DISCOVERY_ENDPOINT_RESOLVER_H_
 #define CHROME_BROWSER_LOCAL_DISCOVERY_ENDPOINT_RESOLVER_H_
 
+#include <stdint.h>
+
 #include <string>
 
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/common/local_discovery/service_discovery_client.h"
+#include "chrome/browser/local_discovery/service_discovery_client.h"
 
 namespace net {
 class HostPortPair;
@@ -37,7 +39,7 @@ class EndpointResolver {
                               ServiceResolver::RequestStatus result,
                               const ServiceDescription& description);
 
-  void DomainResolveComplete(uint16 port,
+  void DomainResolveComplete(uint16_t port,
                              const ResultCallback& callback,
                              bool success,
                              const net::IPAddressNumber& address_ipv4,

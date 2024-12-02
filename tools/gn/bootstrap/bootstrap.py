@@ -3,6 +3,12 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+# This file isn't officially supported by the Chromium project. It's maintained
+# on a best-effort basis by volunteers, so some things may be broken from time
+# to time. If you encounter errors, it's most often due to files in base that
+# have been added or moved since somebody last tried this script. Generally
+# such errors are easy to diagnose.
+
 """Bootstraps gn.
 
 It is done by first building it manually in a temporary directory, then building
@@ -146,7 +152,7 @@ def write_ninja(path, options):
       continue
     if name.endswith('_unittest.cc'):
       continue
-    if name in ['generate_test_gn_data.cc', 'run_all_unittests.cc']:
+    if name == 'run_all_unittests.cc':
       continue
     full_path = os.path.join(GN_ROOT, name)
     static_libraries['gn']['sources'].append(
@@ -157,7 +163,7 @@ def write_ninja(path, options):
       'base/third_party/superfasthash/superfasthash.c',
   ])
   static_libraries['base']['sources'].extend([
-      'base/allocator/allocator_extension_thunks.cc',
+      'base/allocator/allocator_extension.cc',
       'base/at_exit.cc',
       'base/base_paths.cc',
       'base/base_switches.cc',
@@ -183,6 +189,7 @@ def write_ninja(path, options):
       'base/lazy_instance.cc',
       'base/location.cc',
       'base/logging.cc',
+      'base/md5.cc',
       'base/memory/ref_counted.cc',
       'base/memory/ref_counted_memory.cc',
       'base/memory/singleton.cc',
@@ -196,6 +203,7 @@ def write_ninja(path, options):
       'base/metrics/histogram.cc',
       'base/metrics/histogram_base.cc',
       'base/metrics/histogram_samples.cc',
+      'base/metrics/metrics_hashes.cc',
       'base/metrics/sample_map.cc',
       'base/metrics/sample_vector.cc',
       'base/metrics/sparse_histogram.cc',
@@ -245,12 +253,15 @@ def write_ninja(path, options):
       'base/time/time.cc',
       'base/timer/elapsed_timer.cc',
       'base/timer/timer.cc',
+      'base/trace_event/heap_profiler_allocation_context.cc',
+      'base/trace_event/heap_profiler_allocation_context_tracker.cc',
+      'base/trace_event/heap_profiler_stack_frame_deduplicator.cc',
+      'base/trace_event/heap_profiler_type_name_deduplicator.cc',
       'base/trace_event/memory_allocator_dump.cc',
       'base/trace_event/memory_allocator_dump_guid.cc',
       'base/trace_event/memory_dump_manager.cc',
       'base/trace_event/memory_dump_request_args.cc',
       'base/trace_event/memory_dump_session_state.cc',
-      'base/trace_event/memory_profiler_allocation_context.cc',
       'base/trace_event/process_memory_dump.cc',
       'base/trace_event/process_memory_maps.cc',
       'base/trace_event/process_memory_totals.cc',
@@ -259,12 +270,12 @@ def write_ninja(path, options):
       'base/trace_event/trace_config.cc',
       'base/trace_event/trace_event_argument.cc',
       'base/trace_event/trace_event_impl.cc',
-      'base/trace_event/trace_event_memory.cc',
       'base/trace_event/trace_event_memory_overhead.cc',
       'base/trace_event/trace_event_synthetic_delay.cc',
       'base/trace_event/trace_log.cc',
       'base/trace_event/trace_log_constants.cc',
       'base/trace_event/trace_sampling_thread.cc',
+      'base/trace_event/tracing_agent.cc',
       'base/tracked_objects.cc',
       'base/tracking_info.cc',
       'base/values.cc',
@@ -299,19 +310,19 @@ def write_ninja(path, options):
     ])
     static_libraries['libevent'] = {
         'sources': [
-            'third_party/libevent/buffer.c',
-            'third_party/libevent/evbuffer.c',
-            'third_party/libevent/evdns.c',
-            'third_party/libevent/event.c',
-            'third_party/libevent/event_tagging.c',
-            'third_party/libevent/evrpc.c',
-            'third_party/libevent/evutil.c',
-            'third_party/libevent/http.c',
-            'third_party/libevent/log.c',
-            'third_party/libevent/poll.c',
-            'third_party/libevent/select.c',
-            'third_party/libevent/signal.c',
-            'third_party/libevent/strlcpy.c',
+            'base/third_party/libevent/buffer.c',
+            'base/third_party/libevent/evbuffer.c',
+            'base/third_party/libevent/evdns.c',
+            'base/third_party/libevent/event.c',
+            'base/third_party/libevent/event_tagging.c',
+            'base/third_party/libevent/evrpc.c',
+            'base/third_party/libevent/evutil.c',
+            'base/third_party/libevent/http.c',
+            'base/third_party/libevent/log.c',
+            'base/third_party/libevent/poll.c',
+            'base/third_party/libevent/select.c',
+            'base/third_party/libevent/signal.c',
+            'base/third_party/libevent/strlcpy.c',
         ],
         'tool': 'cc',
         'include_dirs': [],
@@ -343,10 +354,10 @@ def write_ninja(path, options):
         'base/trace_event/process_memory_maps_dump_provider.cc',
     ])
     static_libraries['libevent']['include_dirs'].extend([
-        os.path.join(SRC_ROOT, 'third_party', 'libevent', 'linux')
+        os.path.join(SRC_ROOT, 'base', 'third_party', 'libevent', 'linux')
     ])
     static_libraries['libevent']['sources'].extend([
-        'third_party/libevent/epoll.c',
+        'base/third_party/libevent/epoll.c',
     ])
 
 
@@ -368,12 +379,13 @@ def write_ninja(path, options):
         'base/strings/sys_string_conversions_mac.mm',
         'base/time/time_mac.cc',
         'base/threading/platform_thread_mac.mm',
+        'base/trace_event/malloc_dump_provider.cc',
     ])
     static_libraries['libevent']['include_dirs'].extend([
-        os.path.join(SRC_ROOT, 'third_party', 'libevent', 'mac')
+        os.path.join(SRC_ROOT, 'base', 'third_party', 'libevent', 'mac')
     ])
     static_libraries['libevent']['sources'].extend([
-        'third_party/libevent/kqueue.c',
+        'base/third_party/libevent/kqueue.c',
     ])
 
 

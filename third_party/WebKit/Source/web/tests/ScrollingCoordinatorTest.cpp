@@ -22,7 +22,6 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
 
 #include "core/frame/FrameView.h"
@@ -40,10 +39,10 @@
 #include "public/platform/WebUnitTestSupport.h"
 #include "public/web/WebSettings.h"
 #include "public/web/WebViewClient.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebViewImpl.h"
 #include "web/tests/FrameTestHelpers.h"
-#include <gtest/gtest.h>
 
 namespace blink {
 

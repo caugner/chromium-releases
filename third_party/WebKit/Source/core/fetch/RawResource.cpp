@@ -23,7 +23,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/fetch/RawResource.h"
 
 #include "core/fetch/FetchRequest.h"
@@ -80,12 +79,19 @@ ResourcePtr<RawResource> RawResource::fetchTextTrack(FetchRequest& request, Reso
     return toRawResource(fetcher->requestResource(request, RawResourceFactory(Resource::TextTrack)));
 }
 
+ResourcePtr<RawResource> RawResource::fetchManifest(FetchRequest& request, ResourceFetcher* fetcher)
+{
+    ASSERT(request.resourceRequest().frameType() == WebURLRequest::FrameTypeNone);
+    ASSERT(request.resourceRequest().requestContext() == WebURLRequest::RequestContextManifest);
+    return toRawResource(fetcher->requestResource(request, RawResourceFactory(Resource::Manifest)));
+}
+
 RawResource::RawResource(const ResourceRequest& resourceRequest, Type type)
     : Resource(resourceRequest, type)
 {
 }
 
-void RawResource::appendData(const char* data, unsigned length)
+void RawResource::appendData(const char* data, size_t length)
 {
     Resource::appendData(data, length);
 

@@ -4,11 +4,15 @@
 
 #include "chrome/browser/profiles/profile_window.h"
 
+#include <stddef.h>
+
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/macros.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -467,12 +471,12 @@ void EnableNewProfileManagementPreview(Profile* profile) {
 #else
   // TODO(rogerta): instead of setting experiment flags and command line
   // args, we should set a profile preference.
-  const about_flags::FeatureEntry entry = {
+  const flags_ui::FeatureEntry entry = {
       kNewProfileManagementExperimentInternalName,
       0,  // string id for title of experiment
       0,  // string id for description of experiment
       0,  // supported platforms
-      about_flags::FeatureEntry::ENABLE_DISABLE_VALUE,
+      flags_ui::FeatureEntry::ENABLE_DISABLE_VALUE,
       switches::kEnableNewProfileManagement,
       "",  // not used with ENABLE_DISABLE_VALUE type
       switches::kDisableNewProfileManagement,

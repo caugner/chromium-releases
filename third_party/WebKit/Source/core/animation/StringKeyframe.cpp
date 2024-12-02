@@ -2,18 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "core/animation/StringKeyframe.h"
 
+#include "core/StylePropertyShorthand.h"
 #include "core/XLinkNames.h"
 #include "core/animation/CSSColorInterpolationType.h"
+#include "core/animation/CSSFontWeightInterpolationType.h"
 #include "core/animation/CSSImageInterpolationType.h"
 #include "core/animation/CSSImageListInterpolationType.h"
 #include "core/animation/CSSLengthInterpolationType.h"
+#include "core/animation/CSSLengthListInterpolationType.h"
 #include "core/animation/CSSNumberInterpolationType.h"
 #include "core/animation/CSSPaintInterpolationType.h"
 #include "core/animation/CSSShadowListInterpolationType.h"
 #include "core/animation/CSSValueInterpolationType.h"
+#include "core/animation/CSSVisibilityInterpolationType.h"
 #include "core/animation/CompositorAnimations.h"
 #include "core/animation/ConstantStyleInterpolation.h"
 #include "core/animation/DefaultSVGInterpolation.h"
@@ -21,27 +24,26 @@
 #include "core/animation/DoubleStyleInterpolation.h"
 #include "core/animation/FilterStyleInterpolation.h"
 #include "core/animation/ImageSliceStyleInterpolation.h"
-#include "core/animation/IntegerOptionalIntegerSVGInterpolation.h"
-#include "core/animation/IntegerSVGInterpolation.h"
 #include "core/animation/InterpolationType.h"
 #include "core/animation/InvalidatableInterpolation.h"
 #include "core/animation/LegacyStyleInterpolation.h"
 #include "core/animation/LengthBoxStyleInterpolation.h"
 #include "core/animation/LengthPairStyleInterpolation.h"
-#include "core/animation/LengthSVGInterpolation.h"
 #include "core/animation/LengthStyleInterpolation.h"
-#include "core/animation/ListSVGInterpolation.h"
 #include "core/animation/ListStyleInterpolation.h"
-#include "core/animation/NumberOptionalNumberSVGInterpolation.h"
-#include "core/animation/NumberSVGInterpolation.h"
-#include "core/animation/PathSVGInterpolation.h"
-#include "core/animation/PointSVGInterpolation.h"
-#include "core/animation/RectSVGInterpolation.h"
 #include "core/animation/SVGAngleInterpolationType.h"
+#include "core/animation/SVGIntegerInterpolationType.h"
+#include "core/animation/SVGIntegerOptionalIntegerInterpolationType.h"
+#include "core/animation/SVGLengthInterpolationType.h"
+#include "core/animation/SVGLengthListInterpolationType.h"
 #include "core/animation/SVGNumberInterpolationType.h"
-#include "core/animation/SVGStrokeDasharrayStyleInterpolation.h"
+#include "core/animation/SVGNumberListInterpolationType.h"
+#include "core/animation/SVGNumberOptionalNumberInterpolationType.h"
+#include "core/animation/SVGPathInterpolationType.h"
+#include "core/animation/SVGPointListInterpolationType.h"
+#include "core/animation/SVGRectInterpolationType.h"
+#include "core/animation/SVGTransformListInterpolationType.h"
 #include "core/animation/SVGValueInterpolationType.h"
-#include "core/animation/TransformSVGInterpolation.h"
 #include "core/animation/VisibilityStyleInterpolation.h"
 #include "core/animation/css/CSSAnimations.h"
 #include "core/css/CSSPropertyMetadata.h"
@@ -54,29 +56,36 @@ namespace blink {
 
 StringKeyframe::StringKeyframe(const StringKeyframe& copyFrom)
     : Keyframe(copyFrom.m_offset, copyFrom.m_composite, copyFrom.m_easing)
-    , m_propertySet(copyFrom.m_propertySet->mutableCopy())
-    , m_svgPropertyMap(copyFrom.m_svgPropertyMap)
+    , m_cssPropertyMap(copyFrom.m_cssPropertyMap->mutableCopy())
+    , m_presentationAttributeMap(copyFrom.m_presentationAttributeMap->mutableCopy())
+    , m_svgAttributeMap(copyFrom.m_svgAttributeMap)
 {
 }
 
-void StringKeyframe::setPropertyValue(CSSPropertyID property, const String& value, Element* element, StyleSheetContents* styleSheetContents)
+void StringKeyframe::setCSSPropertyValue(CSSPropertyID property, const String& value, Element* element, StyleSheetContents* styleSheetContents)
 {
     ASSERT(property != CSSPropertyInvalid);
     if (CSSAnimations::isAnimatableProperty(property))
-        m_propertySet->setProperty(property, value, false, styleSheetContents);
+        m_cssPropertyMap->setProperty(property, value, false, styleSheetContents);
 }
 
-void StringKeyframe::setPropertyValue(CSSPropertyID property, PassRefPtrWillBeRawPtr<CSSValue> value)
+void StringKeyframe::setCSSPropertyValue(CSSPropertyID property, PassRefPtrWillBeRawPtr<CSSValue> value)
 {
     ASSERT(property != CSSPropertyInvalid);
     ASSERT(CSSAnimations::isAnimatableProperty(property));
-    m_propertySet->setProperty(property, value, false);
+    m_cssPropertyMap->setProperty(property, value, false);
 }
 
-void StringKeyframe::setPropertyValue(const QualifiedName& attributeName, const String& value, Element* element)
+void StringKeyframe::setPresentationAttributeValue(CSSPropertyID property, const String& value, Element* element, StyleSheetContents* styleSheetContents)
 {
-    ASSERT(element->isSVGElement());
-    m_svgPropertyMap.set(&attributeName, value);
+    ASSERT(property != CSSPropertyInvalid);
+    if (CSSAnimations::isAnimatableProperty(property))
+        m_presentationAttributeMap->setProperty(property, value, false, styleSheetContents);
+}
+
+void StringKeyframe::setSVGAttributeValue(const QualifiedName& attributeName, const String& value)
+{
+    m_svgAttributeMap.set(&attributeName, value);
 }
 
 PropertyHandleSet StringKeyframe::properties() const
@@ -84,10 +93,18 @@ PropertyHandleSet StringKeyframe::properties() const
     // This is not used in time-critical code, so we probably don't need to
     // worry about caching this result.
     PropertyHandleSet properties;
-    for (unsigned i = 0; i < m_propertySet->propertyCount(); ++i)
-        properties.add(PropertyHandle(m_propertySet->propertyAt(i).id()));
+    for (unsigned i = 0; i < m_cssPropertyMap->propertyCount(); ++i) {
+        StylePropertySet::PropertyReference propertyReference = m_cssPropertyMap->propertyAt(i);
+        ASSERT_WITH_MESSAGE(
+            !isShorthandProperty(propertyReference.id()) || propertyReference.value()->isVariableReferenceValue(),
+            "Web Animations: Encountered unexpanded shorthand CSS property (%d).", propertyReference.id());
+        properties.add(PropertyHandle(propertyReference.id(), false));
+    }
 
-    for (const auto& key: m_svgPropertyMap.keys())
+    for (unsigned i = 0; i < m_presentationAttributeMap->propertyCount(); ++i)
+        properties.add(PropertyHandle(m_presentationAttributeMap->propertyAt(i).id(), true));
+
+    for (const auto& key: m_svgAttributeMap.keys())
         properties.add(PropertyHandle(*key));
 
     return properties;
@@ -102,6 +119,9 @@ PassOwnPtr<Keyframe::PropertySpecificKeyframe> StringKeyframe::createPropertySpe
 {
     if (property.isCSSProperty())
         return adoptPtr(new CSSPropertySpecificKeyframe(offset(), &easing(), cssPropertyValue(property.cssProperty()), composite()));
+
+    if (property.isPresentationAttribute())
+        return adoptPtr(new CSSPropertySpecificKeyframe(offset(), &easing(), presentationAttributeValue(property.presentationAttribute()), composite()));
 
     ASSERT(property.isSVGAttribute());
     return adoptPtr(new SVGPropertySpecificKeyframe(offset(), &easing(), svgPropertyValue(property.svgAttribute()), composite()));
@@ -146,8 +166,8 @@ const InterpolationTypes* applicableTypesForProperty(PropertyHandle property)
     bool fallbackToLegacy = false;
     OwnPtr<InterpolationTypes> applicableTypes = adoptPtr(new InterpolationTypes());
 
-    if (property.isCSSProperty()) {
-        CSSPropertyID cssProperty = property.cssProperty();
+    if (property.isCSSProperty() || property.isPresentationAttribute()) {
+        CSSPropertyID cssProperty = property.isCSSProperty() ? property.cssProperty() : property.presentationAttribute();
         switch (cssProperty) {
         case CSSPropertyBaselineShift:
         case CSSPropertyBorderBottomWidth:
@@ -254,6 +274,15 @@ const InterpolationTypes* applicableTypesForProperty(PropertyHandle property)
         case CSSPropertyWebkitMaskImage:
             applicableTypes->append(adoptPtr(new CSSImageListInterpolationType(cssProperty)));
             break;
+        case CSSPropertyStrokeDasharray:
+            applicableTypes->append(adoptPtr(new CSSLengthListInterpolationType(cssProperty)));
+            break;
+        case CSSPropertyFontWeight:
+            applicableTypes->append(adoptPtr(new CSSFontWeightInterpolationType(cssProperty)));
+            break;
+        case CSSPropertyVisibility:
+            applicableTypes->append(adoptPtr(new CSSVisibilityInterpolationType(cssProperty)));
+            break;
         default:
             // TODO(alancutter): Support all interpolable CSS properties here so we can stop falling back to the old StyleInterpolation implementation.
             if (CSSPropertyMetadata::isInterpolableProperty(cssProperty))
@@ -268,6 +297,40 @@ const InterpolationTypes* applicableTypesForProperty(PropertyHandle property)
         const QualifiedName& attribute = property.svgAttribute();
         if (attribute == SVGNames::orientAttr) {
             applicableTypes->append(adoptPtr(new SVGAngleInterpolationType(attribute)));
+        } else if (attribute == SVGNames::numOctavesAttr
+            || attribute == SVGNames::targetXAttr
+            || attribute == SVGNames::targetYAttr) {
+            applicableTypes->append(adoptPtr(new SVGIntegerInterpolationType(attribute)));
+        } else if (attribute == SVGNames::orderAttr) {
+            applicableTypes->append(adoptPtr(new SVGIntegerOptionalIntegerInterpolationType(attribute)));
+        } else if (attribute == SVGNames::cxAttr
+            || attribute == SVGNames::cyAttr
+            || attribute == SVGNames::fxAttr
+            || attribute == SVGNames::fyAttr
+            || attribute == SVGNames::heightAttr
+            || attribute == SVGNames::markerHeightAttr
+            || attribute == SVGNames::markerWidthAttr
+            || attribute == SVGNames::rAttr
+            || attribute == SVGNames::refXAttr
+            || attribute == SVGNames::refYAttr
+            || attribute == SVGNames::rxAttr
+            || attribute == SVGNames::ryAttr
+            || attribute == SVGNames::startOffsetAttr
+            || attribute == SVGNames::textLengthAttr
+            || attribute == SVGNames::widthAttr
+            || attribute == SVGNames::x1Attr
+            || attribute == SVGNames::x2Attr
+            || attribute == SVGNames::y1Attr
+            || attribute == SVGNames::y2Attr) {
+            applicableTypes->append(adoptPtr(new SVGLengthInterpolationType(attribute)));
+        } else if (attribute == SVGNames::dxAttr
+            || attribute == SVGNames::dyAttr) {
+            applicableTypes->append(adoptPtr(new SVGNumberInterpolationType(attribute)));
+            applicableTypes->append(adoptPtr(new SVGLengthListInterpolationType(attribute)));
+        } else if (attribute == SVGNames::xAttr
+            || attribute == SVGNames::yAttr) {
+            applicableTypes->append(adoptPtr(new SVGLengthInterpolationType(attribute)));
+            applicableTypes->append(adoptPtr(new SVGLengthListInterpolationType(attribute)));
         } else if (attribute == SVGNames::amplitudeAttr
             || attribute == SVGNames::azimuthAttr
             || attribute == SVGNames::biasAttr
@@ -294,6 +357,26 @@ const InterpolationTypes* applicableTypesForProperty(PropertyHandle property)
             || attribute == SVGNames::surfaceScaleAttr
             || attribute == SVGNames::zAttr) {
             applicableTypes->append(adoptPtr(new SVGNumberInterpolationType(attribute)));
+        } else if (attribute == SVGNames::kernelMatrixAttr
+            || attribute == SVGNames::rotateAttr
+            || attribute == SVGNames::tableValuesAttr
+            || attribute == SVGNames::valuesAttr) {
+            applicableTypes->append(adoptPtr(new SVGNumberListInterpolationType(attribute)));
+        } else if (attribute == SVGNames::baseFrequencyAttr
+            || attribute == SVGNames::kernelUnitLengthAttr
+            || attribute == SVGNames::radiusAttr
+            || attribute == SVGNames::stdDeviationAttr) {
+            applicableTypes->append(adoptPtr(new SVGNumberOptionalNumberInterpolationType(attribute)));
+        } else if (attribute == SVGNames::dAttr) {
+            applicableTypes->append(adoptPtr(new SVGPathInterpolationType(attribute)));
+        } else if (attribute == SVGNames::pointsAttr) {
+            applicableTypes->append(adoptPtr(new SVGPointListInterpolationType(attribute)));
+        } else if (attribute == SVGNames::viewBoxAttr) {
+            applicableTypes->append(adoptPtr(new SVGRectInterpolationType(attribute)));
+        } else if (attribute == SVGNames::gradientTransformAttr
+            || attribute == SVGNames::patternTransformAttr
+            || attribute == SVGNames::transformAttr) {
+            applicableTypes->append(adoptPtr(new SVGTransformListInterpolationType(attribute)));
         } else if (attribute == HTMLNames::classAttr
             || attribute == SVGNames::clipPathUnitsAttr
             || attribute == SVGNames::edgeModeAttr
@@ -357,12 +440,12 @@ PassRefPtr<Interpolation> StringKeyframe::CSSPropertySpecificKeyframe::maybeCrea
 {
     const InterpolationTypes* applicableTypes = applicableTypesForProperty(propertyHandle);
     if (applicableTypes)
-        return InvalidatableInterpolation::create(*applicableTypes, *this, end);
+        return InvalidatableInterpolation::create(propertyHandle, *applicableTypes, *this, end);
 
     // TODO(alancutter): Remove the remainder of this function.
 
     // FIXME: Refactor this into a generic piece that lives in InterpolationEffect, and a template parameter specific converter.
-    CSSPropertyID property = propertyHandle.cssProperty();
+    CSSPropertyID property = propertyHandle.isCSSProperty() ? propertyHandle.cssProperty() : propertyHandle.presentationAttribute();
     CSSValue* fromCSSValue = m_value.get();
     CSSValue* toCSSValue = toCSSPropertySpecificKeyframe(end).value();
     InterpolationRange range = RangeAll;
@@ -449,14 +532,6 @@ PassRefPtr<Interpolation> StringKeyframe::CSSPropertySpecificKeyframe::maybeCrea
             return interpolation.release();
         if (ImageSliceStyleInterpolation::usesDefaultInterpolation(*fromCSSValue, *toCSSValue))
             forceDefaultInterpolation = true;
-
-        break;
-    }
-
-    case CSSPropertyStrokeDasharray: {
-        RefPtr<Interpolation> interpolation = SVGStrokeDasharrayStyleInterpolation::maybeCreate(*fromCSSValue, *toCSSValue, property);
-        if (interpolation)
-            return interpolation.release();
 
         break;
     }
@@ -553,37 +628,19 @@ PassRefPtr<Interpolation> createSVGInterpolation(SVGPropertyBase* fromValue, SVG
     RefPtr<Interpolation> interpolation = nullptr;
     ASSERT(fromValue->type() == toValue->type());
     switch (fromValue->type()) {
-    case AnimatedInteger:
-        return IntegerSVGInterpolation::create(fromValue, toValue, attribute);
-    case AnimatedIntegerOptionalInteger: {
-        int min = &attribute->attributeName() == &SVGNames::orderAttr ? 1 : 0;
-        return IntegerOptionalIntegerSVGInterpolation::create(fromValue, toValue, attribute, min);
-    }
-    case AnimatedLength:
-        return LengthSVGInterpolation::create(fromValue, toValue, attribute);
-    case AnimatedLengthList:
-        interpolation = ListSVGInterpolation<LengthSVGInterpolation>::maybeCreate(fromValue, toValue, attribute);
-        break;
-    case AnimatedNumberOptionalNumber:
-        return NumberOptionalNumberSVGInterpolation::create(fromValue, toValue, attribute);
-    case AnimatedNumberList:
-        interpolation = ListSVGInterpolation<NumberSVGInterpolation>::maybeCreate(fromValue, toValue, attribute);
-        break;
-    case AnimatedPath:
-        interpolation = PathSVGInterpolation::maybeCreate(fromValue, toValue, attribute);
-        break;
-    case AnimatedPoints:
-        interpolation = ListSVGInterpolation<PointSVGInterpolation>::maybeCreate(fromValue, toValue, attribute);
-        break;
-    case AnimatedRect:
-        return RectSVGInterpolation::create(fromValue, toValue, attribute);
-    case AnimatedTransformList:
-        interpolation = ListSVGInterpolation<TransformSVGInterpolation>::maybeCreate(fromValue, toValue, attribute);
-        break;
-
     // Handled by SVGInterpolationTypes.
     case AnimatedAngle:
+    case AnimatedInteger:
+    case AnimatedIntegerOptionalInteger:
+    case AnimatedLength:
+    case AnimatedLengthList:
     case AnimatedNumber:
+    case AnimatedNumberList:
+    case AnimatedNumberOptionalNumber:
+    case AnimatedPath:
+    case AnimatedPoints:
+    case AnimatedRect:
+    case AnimatedTransformList:
         ASSERT_NOT_REACHED();
         // Fallthrough.
 
@@ -603,10 +660,10 @@ PassRefPtr<Interpolation> SVGPropertySpecificKeyframe::maybeCreateInterpolation(
 {
     const InterpolationTypes* applicableTypes = applicableTypesForProperty(propertyHandle);
     if (applicableTypes)
-        return InvalidatableInterpolation::create(*applicableTypes, *this, end);
+        return InvalidatableInterpolation::create(propertyHandle, *applicableTypes, *this, end);
 
     ASSERT(element);
-    RefPtrWillBeRawPtr<SVGAnimatedPropertyBase> attribute = toSVGElement(element)->propertyFromAttribute(propertyHandle.svgAttribute());
+    SVGAnimatedPropertyBase* attribute = toSVGElement(element)->propertyFromAttribute(propertyHandle.svgAttribute());
     ASSERT(attribute);
 
     RefPtrWillBeRawPtr<SVGPropertyBase> fromValue = attribute->currentValueBase()->cloneForAnimation(m_value);
@@ -615,7 +672,7 @@ PassRefPtr<Interpolation> SVGPropertySpecificKeyframe::maybeCreateInterpolation(
     if (!fromValue || !toValue)
         return nullptr;
 
-    return createSVGInterpolation(fromValue.get(), toValue.get(), attribute.get());
+    return createSVGInterpolation(fromValue.get(), toValue.get(), attribute);
 }
 
 } // namespace blink

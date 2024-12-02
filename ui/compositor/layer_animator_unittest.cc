@@ -4,11 +4,12 @@
 
 #include "ui/compositor/layer_animator.h"
 
-#include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
+#include "cc/animation/animation_events.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_delegate.h"
@@ -2452,6 +2453,8 @@ TEST(LayerAnimatorTest, LayerAnimatorCollectionTickTime) {
 
   collection->StopAnimator(layer.GetAnimator());
   EXPECT_FALSE(collection->HasActiveAnimators());
+
+  animator->SetDelegate(nullptr);
 }
 
 TEST(LayerAnimatorTest, AnimatorStartedCorrectly) {

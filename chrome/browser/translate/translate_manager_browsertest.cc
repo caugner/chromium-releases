@@ -5,6 +5,7 @@
 #include "components/translate/core/browser/translate_manager.h"
 
 #include "base/memory/scoped_ptr.h"
+#include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
@@ -61,7 +62,7 @@ class TranslateManagerBrowserTest : public InProcessBrowserTest {
 
 // Tests that the CLD (Compact Language Detection) works properly.
 IN_PROC_BROWSER_TEST_F(TranslateManagerBrowserTest, PageLanguageDetection) {
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // The InProcessBrowserTest opens a new tab, let's wait for that first.
   WaitUntilLanguageDetected();
@@ -73,7 +74,7 @@ IN_PROC_BROWSER_TEST_F(TranslateManagerBrowserTest, PageLanguageDetection) {
   EXPECT_EQ("und", adopted_language);
 
   // Open a new tab with a page in English.
-  AddTabAtIndex(0, GURL(test_server()->GetURL("files/english_page.html")),
+  AddTabAtIndex(0, GURL(embedded_test_server()->GetURL("/english_page.html")),
                 ui::PAGE_TRANSITION_TYPED);
 
   ResetObserver();
@@ -92,7 +93,7 @@ IN_PROC_BROWSER_TEST_F(TranslateManagerBrowserTest, PageLanguageDetection) {
 
   // Now navigate to a page in French.
   ui_test_utils::NavigateToURL(
-      browser(), GURL(test_server()->GetURL("files/french_page.html")));
+      browser(), GURL(embedded_test_server()->GetURL("/french_page.html")));
 
   WaitUntilLanguageDetected();
   adopted_language = GetLanguageFor(current_web_contents);

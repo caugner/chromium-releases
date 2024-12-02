@@ -35,7 +35,7 @@
 WebInspector.DataGrid = function(columnsArray, editCallback, deleteCallback, refreshCallback, contextMenuCallback)
 {
     this.element = createElementWithClass("div", "data-grid");
-    this.element.appendChild(WebInspector.Widget.createStyleElement("ui_lazy/dataGrid.css"));
+    WebInspector.appendStyle(this.element, "ui_lazy/dataGrid.css");
     this.element.tabIndex = 0;
     this.element.addEventListener("keydown", this._keyDown.bind(this), false);
 
@@ -250,6 +250,7 @@ WebInspector.DataGrid.prototype = {
         rootNode.hasChildren = false;
         rootNode._expanded = true;
         rootNode._revealed = true;
+        rootNode.selectable = false;
         rootNode.dataGrid = this;
     },
 
@@ -802,7 +803,6 @@ WebInspector.DataGrid.prototype = {
             if (this._deleteCallback) {
                 handled = true;
                 this._deleteCallback(this.selectedNode);
-                this.changeNodeAfterDeletion();
             }
         } else if (isEnterKey(event)) {
             if (this._editCallback) {
@@ -815,26 +815,41 @@ WebInspector.DataGrid.prototype = {
             nextSelectedNode.reveal();
             nextSelectedNode.select();
         }
-
         if (handled)
             event.consume(true);
     },
 
-    changeNodeAfterDeletion: function()
+    /**
+     * @param {?WebInspector.DataGridNode} root
+     * @param {boolean} onlyAffectsSubtree
+     */
+    updateSelectionBeforeRemoval: function(root, onlyAffectsSubtree)
     {
-        var nextSelectedNode = this.selectedNode.traverseNextNode(true);
+        var ancestor = this.selectedNode;
+        while (ancestor && ancestor !== root)
+            ancestor = ancestor.parent;
+        // Selection is not in the subtree being deleted.
+        if (!ancestor)
+            return;
+
+        var nextSelectedNode;
+        // Skip subtree being deleted when looking for the next selectable node.
+        for (ancestor = root; ancestor && !ancestor.nextSibling; ancestor = ancestor.parent) { }
+        if (ancestor)
+            nextSelectedNode = ancestor.nextSibling;
         while (nextSelectedNode && !nextSelectedNode.selectable)
             nextSelectedNode = nextSelectedNode.traverseNextNode(true);
 
         if (!nextSelectedNode || nextSelectedNode.isCreationNode) {
-            nextSelectedNode = this.selectedNode.traversePreviousNode(true);
+            nextSelectedNode = root.traversePreviousNode(true);
             while (nextSelectedNode && !nextSelectedNode.selectable)
                 nextSelectedNode = nextSelectedNode.traversePreviousNode(true);
         }
-
         if (nextSelectedNode) {
             nextSelectedNode.reveal();
             nextSelectedNode.select();
+        } else {
+            this.selectedNode.deselect();
         }
     },
 
@@ -1070,6 +1085,16 @@ WebInspector.DataGrid.prototype = {
         this._currentResizer = null;
         this._saveColumnWeights();
         this.dispatchEventToListeners(WebInspector.DataGrid.Events.ColumnsResized);
+    },
+
+    /**
+     * @return {!WebInspector.DataGridWidget}
+     */
+    asWidget: function()
+    {
+        if (!this._dataGridWidget)
+            this._dataGridWidget = new WebInspector.DataGridWidget(this);
+        return this._dataGridWidget;
     },
 
     ColumnResizePadding: 24,
@@ -1444,7 +1469,8 @@ WebInspector.DataGridNode.prototype = {
         if (child.parent !== this)
             throw("removeChild: Node is not a child of this node.");
 
-        child.deselect();
+        if (this.dataGrid)
+            this.dataGrid.updateSelectionBeforeRemoval(child, false);
         child._detach();
 
         this.children.remove(child, true);
@@ -1465,11 +1491,11 @@ WebInspector.DataGridNode.prototype = {
 
     removeChildren: function()
     {
+        if (this.dataGrid)
+            this.dataGrid.updateSelectionBeforeRemoval(this, true);
         for (var i = 0; i < this.children.length; ++i) {
             var child = this.children[i];
-            child.deselect();
             child._detach();
-
             child.dataGrid = null;
             child.parent = null;
             child.nextSibling = null;
@@ -1798,39 +1824,22 @@ WebInspector.CreationDataGridNode.prototype = {
 /**
  * @constructor
  * @extends {WebInspector.VBox}
+ * @param {!WebInspector.DataGrid} dataGrid
  */
-WebInspector.DataGridContainerWidget = function()
+WebInspector.DataGridWidget = function(dataGrid)
 {
     WebInspector.VBox.call(this);
-    this._dataGrids = [];
+    this._dataGrid = dataGrid;
+    this.element.appendChild(dataGrid.element);
 }
 
-WebInspector.DataGridContainerWidget.prototype = {
-    /**
-     * @param {!WebInspector.DataGrid} dataGrid
-     */
-    appendDataGrid: function(dataGrid)
-    {
-        this._dataGrids.push(dataGrid);
-        this.element.appendChild(dataGrid.element);
-    },
-
-    /**
-     * @param {!WebInspector.DataGrid} dataGrid
-     */
-    removeDataGrid: function(dataGrid)
-    {
-        this._dataGrids.remove(dataGrid);
-        this.element.removeChild(dataGrid.element);
-    },
-
+WebInspector.DataGridWidget.prototype = {
     /**
      * @override
      */
     wasShown: function()
     {
-        for (var dataGrid of this._dataGrids)
-            dataGrid.wasShown();
+        this._dataGrid.wasShown();
     },
 
     /**
@@ -1838,8 +1847,7 @@ WebInspector.DataGridContainerWidget.prototype = {
      */
     willHide: function()
     {
-        for (var dataGrid of this._dataGrids)
-            dataGrid.willHide();
+        this._dataGrid.willHide();
     },
 
     /**
@@ -1847,8 +1855,7 @@ WebInspector.DataGridContainerWidget.prototype = {
      */
     onResize: function()
     {
-        for (var dataGrid of this._dataGrids)
-            dataGrid.onResize();
+        this._dataGrid.onResize();
     },
 
     /**
@@ -1857,12 +1864,7 @@ WebInspector.DataGridContainerWidget.prototype = {
      */
     elementsToRestoreScrollPositionsFor: function()
     {
-        var result = [];
-        for (var dataGrid of this._dataGrids) {
-            if (!dataGrid._inline)
-                result.push(dataGrid._scrollContainer);
-        }
-        return result;
+        return [ this._dataGrid._scrollContainer ];
     },
 
     /**

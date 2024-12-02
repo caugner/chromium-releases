@@ -5,9 +5,13 @@
 #ifndef NET_SPDY_SPDY_TEST_UTIL_COMMON_H_
 #define NET_SPDY_SPDY_TEST_UTIL_COMMON_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <string>
 #include <vector>
 
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "crypto/ec_private_key.h"
@@ -52,27 +56,10 @@ const int kUploadDataSize = arraysize(kUploadData)-1;
 // SPDY.
 NextProtoVector SpdyNextProtos();
 
-// Chop a frame into an array of MockWrites.
-// |data| is the frame to chop.
-// |length| is the length of the frame to chop.
-// |num_chunks| is the number of chunks to create.
-MockWrite* ChopWriteFrame(const char* data, int length, int num_chunks);
-
 // Chop a SpdyFrame into an array of MockWrites.
 // |frame| is the frame to chop.
 // |num_chunks| is the number of chunks to create.
 MockWrite* ChopWriteFrame(const SpdyFrame& frame, int num_chunks);
-
-// Chop a frame into an array of MockReads.
-// |data| is the frame to chop.
-// |length| is the length of the frame to chop.
-// |num_chunks| is the number of chunks to create.
-MockRead* ChopReadFrame(const char* data, int length, int num_chunks);
-
-// Chop a SpdyFrame into an array of MockReads.
-// |frame| is the frame to chop.
-// |num_chunks| is the number of chunks to create.
-MockRead* ChopReadFrame(const SpdyFrame& frame, int num_chunks);
 
 // Adds headers and values to a map.
 // |extra_headers| is an array of { name, value } pairs, arranged as strings
@@ -136,20 +123,17 @@ class StreamReleaserCallback : public TestCompletionCallbackBase {
   void OnComplete(SpdyStreamRequest* request, int result);
 };
 
-const size_t kSpdyCredentialSlotUnused = 0;
-
 // This struct holds information used to construct spdy control and data frames.
 struct SpdyHeaderInfo {
   SpdyFrameType kind;
   SpdyStreamId id;
   SpdyStreamId assoc_id;
   SpdyPriority priority;
-  size_t credential_slot;  // SPDY3 only
   SpdyControlFlags control_flags;
   bool compressed;
   SpdyRstStreamStatus status;
   const char* data;
-  uint32 data_length;
+  uint32_t data_length;
   SpdyDataFlags data_flags;
 };
 
@@ -159,11 +143,11 @@ class MockECSignatureCreator : public crypto::ECSignatureCreator {
   explicit MockECSignatureCreator(crypto::ECPrivateKey* key);
 
   // crypto::ECSignatureCreator
-  bool Sign(const uint8* data,
+  bool Sign(const uint8_t* data,
             int data_len,
-            std::vector<uint8>* signature) override;
-  bool DecodeSignature(const std::vector<uint8>& signature,
-                       std::vector<uint8>* out_raw_sig) override;
+            std::vector<uint8_t>* signature) override;
+  bool DecodeSignature(const std::vector<uint8_t>& signature,
+                       std::vector<uint8_t>* out_raw_sig) override;
 
  private:
   crypto::ECPrivateKey* key_;
@@ -198,8 +182,6 @@ struct SpdySessionDependencies {
 
   static scoped_ptr<HttpNetworkSession> SpdyCreateSession(
       SpdySessionDependencies* session_deps);
-  static scoped_ptr<HttpNetworkSession> SpdyCreateSessionDeterministic(
-      SpdySessionDependencies* session_deps);
   static HttpNetworkSession::Params CreateSessionParams(
       SpdySessionDependencies* session_deps);
 
@@ -210,7 +192,6 @@ struct SpdySessionDependencies {
   scoped_ptr<ProxyService> proxy_service;
   scoped_refptr<SSLConfigService> ssl_config_service;
   scoped_ptr<MockClientSocketFactory> socket_factory;
-  scoped_ptr<DeterministicMockClientSocketFactory> deterministic_socket_factory;
   scoped_ptr<HttpAuthHandlerFactory> http_auth_handler_factory;
   HttpServerPropertiesImpl http_server_properties;
   bool enable_ip_pooling;
@@ -314,13 +295,13 @@ class SpdyTestUtil {
       base::StringPiece url) const;
   scoped_ptr<SpdyHeaderBlock> ConstructHeadHeaderBlock(
       base::StringPiece url,
-      int64 content_length) const;
+      int64_t content_length) const;
   scoped_ptr<SpdyHeaderBlock> ConstructPostHeaderBlock(
       base::StringPiece url,
-      int64 content_length) const;
+      int64_t content_length) const;
   scoped_ptr<SpdyHeaderBlock> ConstructPutHeaderBlock(
       base::StringPiece url,
-      int64 content_length) const;
+      int64_t content_length) const;
 
   // Construct a SPDY frame.  If it is a SYN_STREAM or SYN_REPLY frame (as
   // specified in header_info.kind), the provided headers are included in the
@@ -381,7 +362,7 @@ class SpdyTestUtil {
 
   // Construct a SPDY PING frame.
   // Returns the constructed frame.  The caller takes ownership of the frame.
-  SpdyFrame* ConstructSpdyPing(uint32 ping_id, bool is_ack) const;
+  SpdyFrame* ConstructSpdyPing(uint32_t ping_id, bool is_ack) const;
 
   // Construct a SPDY GOAWAY frame with last_good_stream_id = 0.
   // Returns the constructed frame.  The caller takes ownership of the frame.
@@ -400,9 +381,8 @@ class SpdyTestUtil {
 
   // Construct a SPDY WINDOW_UPDATE frame.
   // Returns the constructed frame.  The caller takes ownership of the frame.
-  SpdyFrame* ConstructSpdyWindowUpdate(
-      SpdyStreamId stream_id,
-      uint32 delta_window_size) const;
+  SpdyFrame* ConstructSpdyWindowUpdate(SpdyStreamId stream_id,
+                                       uint32_t delta_window_size) const;
 
   // Construct a SPDY RST_STREAM frame.
   // Returns the constructed frame.  The caller takes ownership of the frame.
@@ -418,11 +398,6 @@ class SpdyTestUtil {
                               bool compressed,
                               SpdyStreamId stream_id,
                               RequestPriority request_priority);
-
-  SpdyFrame* ConstructSpdyGetForProxy(const char* const url,
-                                      bool compressed,
-                                      SpdyStreamId stream_id,
-                                      RequestPriority request_priority) const;
 
   // Constructs a standard SPDY GET SYN frame, optionally compressed.
   // |extra_headers| are the extra header-value pairs, which typically
@@ -472,6 +447,12 @@ class SpdyTestUtil {
                                       const char* const headers[],
                                       int header_count);
 
+  // Constructs a SPDY header frame with END_STREAM flag set to |fin|.
+  SpdyFrame* ConstructSpdyHeaderFrame(int stream_id,
+                                      const char* const headers[],
+                                      int header_count,
+                                      bool fin);
+
   // Construct a SPDY syn (HEADERS or SYN_STREAM, depending on protocol
   // version) carrying exactly the given headers and priority.
   SpdyFrame* ConstructSpdySyn(int stream_id,
@@ -518,7 +499,7 @@ class SpdyTestUtil {
   // Returns a SpdyFrame.
   SpdyFrame* ConstructSpdyPost(const char* url,
                                SpdyStreamId stream_id,
-                               int64 content_length,
+                               int64_t content_length,
                                RequestPriority priority,
                                const char* const extra_headers[],
                                int extra_header_count);
@@ -542,13 +523,15 @@ class SpdyTestUtil {
                                     bool fin);
 
   // Constructs a single SPDY data frame with the given content.
-  SpdyFrame* ConstructSpdyBodyFrame(int stream_id, const char* data,
-                                    uint32 len, bool fin);
+  SpdyFrame* ConstructSpdyBodyFrame(int stream_id,
+                                    const char* data,
+                                    uint32_t len,
+                                    bool fin);
 
   // Constructs a single SPDY data frame with the given content and padding.
   SpdyFrame* ConstructSpdyBodyFrame(int stream_id,
                                     const char* data,
-                                    uint32 len,
+                                    uint32_t len,
                                     bool fin,
                                     int padding_length);
 
@@ -560,8 +543,6 @@ class SpdyTestUtil {
   // when setting dependencies based on priorioties) to notify the utility
   // class of stream destruction.
   void UpdateWithStreamDestruction(int stream_id);
-
-  const SpdyHeaderInfo MakeSpdyHeader(SpdyFrameType type);
 
   // For versions below SPDY4, adds the version HTTP/1.1 header.
   void MaybeAddVersionHeader(SpdyFrameWithHeaderBlockIR* frame_ir) const;
@@ -591,7 +572,7 @@ class SpdyTestUtil {
   scoped_ptr<SpdyHeaderBlock> ConstructHeaderBlock(
       base::StringPiece method,
       base::StringPiece url,
-      int64* content_length) const;
+      int64_t* content_length) const;
 
   const NextProto protocol_;
   const SpdyMajorVersion spdy_version_;

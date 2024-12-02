@@ -24,7 +24,6 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/css/resolver/ScopedStyleResolver.h"
 
 #include "core/HTMLNames.h"
@@ -90,7 +89,8 @@ void ScopedStyleResolver::appendCSSStyleSheet(CSSStyleSheet& cssSheet, const Med
     addKeyframeRules(ruleSet);
     addFontFaceRules(ruleSet);
     addTreeBoundaryCrossingRules(ruleSet, &cssSheet, index);
-    treeScope().document().styleResolver()->addMediaQueryResults(ruleSet.viewportDependentMediaQueryResults());
+    treeScope().document().styleResolver()->addViewportDependentMediaQueries(ruleSet.viewportDependentMediaQueryResults());
+    treeScope().document().styleResolver()->addDeviceDependentMediaQueries(ruleSet.deviceDependentMediaQueryResults());
 }
 
 void ScopedStyleResolver::collectFeaturesTo(RuleFeatureSet& features, WillBeHeapHashSet<RawPtrWillBeMember<const StyleSheetContents>>& visitedSharedStyleSheetContents) const

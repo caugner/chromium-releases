@@ -8,10 +8,13 @@
 
 #include "base/debug/stack_trace.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/stl_util.h"
+#include "net/quic/quic_bug_tracker.h"
 #include "net/quic/quic_flags.h"
 #include "net/quic/quic_utils.h"
 #include "net/tools/quic/quic_per_connection_packet_writer.h"
+#include "net/tools/quic/quic_simple_server_session.h"
 #include "net/tools/quic/quic_time_wait_list_manager.h"
 
 namespace net {
@@ -27,8 +30,7 @@ namespace {
 class DeleteSessionsAlarm : public QuicAlarm::Delegate {
  public:
   explicit DeleteSessionsAlarm(QuicDispatcher* dispatcher)
-      : dispatcher_(dispatcher) {
-  }
+      : dispatcher_(dispatcher) {}
 
   QuicTime OnAlarm() override {
     dispatcher_->DeleteSessions();
@@ -48,8 +50,7 @@ class DeleteSessionsAlarm : public QuicAlarm::Delegate {
 class QuicDispatcher::QuicFramerVisitor : public QuicFramerVisitorInterface {
  public:
   explicit QuicFramerVisitor(QuicDispatcher* dispatcher)
-      : dispatcher_(dispatcher),
-        connection_id_(0) {}
+      : dispatcher_(dispatcher), connection_id_(0) {}
 
   // QuicFramerVisitorInterface implementation
   void OnPacket() override {}
@@ -143,37 +144,15 @@ class QuicDispatcher::QuicFramerVisitor : public QuicFramerVisitorInterface {
   QuicConnectionId connection_id_;
 };
 
-QuicPacketWriter* QuicDispatcher::DefaultPacketWriterFactory::Create(
-    QuicPacketWriter* writer,
-    QuicConnection* connection) {
-  return new QuicPerConnectionPacketWriter(writer, connection);
-}
-
-QuicDispatcher::PacketWriterFactoryAdapter::PacketWriterFactoryAdapter(
-    QuicDispatcher* dispatcher)
-    : dispatcher_(dispatcher) {}
-
-QuicDispatcher::PacketWriterFactoryAdapter::~PacketWriterFactoryAdapter() {}
-
-QuicPacketWriter* QuicDispatcher::PacketWriterFactoryAdapter::Create(
-    QuicConnection* connection) const {
-  return dispatcher_->packet_writer_factory_->Create(
-      dispatcher_->writer_.get(),
-      connection);
-}
-
 QuicDispatcher::QuicDispatcher(const QuicConfig& config,
                                const QuicCryptoServerConfig* crypto_config,
                                const QuicVersionVector& supported_versions,
-                               PacketWriterFactory* packet_writer_factory,
                                QuicConnectionHelperInterface* helper)
     : config_(config),
       crypto_config_(crypto_config),
       helper_(helper),
       delete_sessions_alarm_(
           helper_->CreateAlarm(new DeleteSessionsAlarm(this))),
-      packet_writer_factory_(packet_writer_factory),
-      connection_writer_factory_(this),
       supported_versions_(supported_versions),
       current_packet_(nullptr),
       framer_(supported_versions,
@@ -290,7 +269,7 @@ void QuicDispatcher::OnUnauthenticatedHeader(const QuicPacketHeader& header) {
   switch (fate) {
     case kFateProcess: {
       // Create a session and process the packet.
-      QuicServerSession* session =
+      QuicServerSessionBase* session =
           CreateQuicSession(connection_id, current_client_address_);
       DVLOG(1) << "Created new session for " << connection_id;
       session_map_.insert(std::make_pair(connection_id, session));
@@ -389,8 +368,9 @@ bool QuicDispatcher::HasPendingWrites() const {
 
 void QuicDispatcher::Shutdown() {
   while (!session_map_.empty()) {
-    QuicServerSession* session = session_map_.begin()->second;
-    session->connection()->SendConnectionClose(QUIC_PEER_GOING_AWAY);
+    QuicServerSessionBase* session = session_map_.begin()->second;
+    session->connection()->SendConnectionCloseWithDetails(
+        QUIC_PEER_GOING_AWAY, "Server shutdown imminent");
     // Validate that the session removes itself from the session map on close.
     DCHECK(session_map_.empty() || session_map_.begin()->second != session);
   }
@@ -401,17 +381,16 @@ void QuicDispatcher::OnConnectionClosed(QuicConnectionId connection_id,
                                         QuicErrorCode error) {
   SessionMap::iterator it = session_map_.find(connection_id);
   if (it == session_map_.end()) {
-    LOG(DFATAL) << "ConnectionId " << connection_id
-                << " does not exist in the session map.  "
-                << "Error: " << QuicUtils::ErrorToString(error);
-    LOG(DFATAL) << base::debug::StackTrace().ToString();
+    QUIC_BUG << "ConnectionId " << connection_id
+             << " does not exist in the session map.  Error: "
+             << QuicUtils::ErrorToString(error);
+    QUIC_BUG << base::debug::StackTrace().ToString();
     return;
   }
 
-  DVLOG_IF(1, error != QUIC_NO_ERROR) << "Closing connection ("
-                                      << connection_id
-                                      << ") due to error: "
-                                      << QuicUtils::ErrorToString(error);
+  DVLOG_IF(1, error != QUIC_NO_ERROR)
+      << "Closing connection (" << connection_id
+      << ") due to error: " << QuicUtils::ErrorToString(error);
 
   if (closed_session_list_.empty()) {
     delete_sessions_alarm_->Cancel();
@@ -426,8 +405,8 @@ void QuicDispatcher::OnConnectionClosed(QuicConnectionId connection_id,
 void QuicDispatcher::OnWriteBlocked(
     QuicBlockedWriterInterface* blocked_writer) {
   if (!writer_->IsWriteBlocked()) {
-    LOG(DFATAL) <<
-        "QuicDispatcher::OnWriteBlocked called when the writer is not blocked.";
+    LOG(DFATAL) << "QuicDispatcher::OnWriteBlocked called when the writer is "
+                   "not blocked.";
     // Return without adding the connection to the blocked list, to avoid
     // infinite loops in OnCanWrite.
     return;
@@ -445,16 +424,16 @@ void QuicDispatcher::OnConnectionRemovedFromTimeWaitList(
   DVLOG(1) << "Connection " << connection_id << " removed from time wait list.";
 }
 
-QuicServerSession* QuicDispatcher::CreateQuicSession(
+QuicServerSessionBase* QuicDispatcher::CreateQuicSession(
     QuicConnectionId connection_id,
     const IPEndPoint& client_address) {
-  // The QuicServerSession takes ownership of |connection| below.
+  // The QuicServerSessionBase takes ownership of |connection| below.
   QuicConnection* connection = new QuicConnection(
-      connection_id, client_address, helper_.get(), connection_writer_factory_,
+      connection_id, client_address, helper_.get(), CreatePerConnectionWriter(),
       /* owns_writer= */ true, Perspective::IS_SERVER, supported_versions_);
 
-  QuicServerSession* session =
-      new QuicServerSession(config_, connection, this, crypto_config_);
+  QuicServerSessionBase* session =
+      new QuicSimpleServerSession(config_, connection, this, crypto_config_);
   session->Initialize();
   return session;
 }
@@ -462,8 +441,7 @@ QuicServerSession* QuicDispatcher::CreateQuicSession(
 QuicTimeWaitListManager* QuicDispatcher::CreateQuicTimeWaitListManager() {
   // TODO(rjshade): The QuicTimeWaitListManager should take ownership of the
   // per-connection packet writer.
-  time_wait_list_writer_.reset(
-      packet_writer_factory_->Create(writer_.get(), nullptr));
+  time_wait_list_writer_.reset(CreatePerConnectionWriter());
   return new QuicTimeWaitListManager(time_wait_list_writer_.get(), this,
                                      helper_.get());
 }
@@ -483,6 +461,10 @@ bool QuicDispatcher::HandlePacketForTimeWait(
   // Continue parsing the packet to extract the packet number.  Then
   // send it to the time wait manager in OnUnathenticatedHeader.
   return true;
+}
+
+QuicPacketWriter* QuicDispatcher::CreatePerConnectionWriter() {
+  return new QuicPerConnectionPacketWriter(writer_.get());
 }
 
 void QuicDispatcher::SetLastError(QuicErrorCode error) {

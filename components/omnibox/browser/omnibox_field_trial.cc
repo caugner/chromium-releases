@@ -14,6 +14,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/omnibox_switches.h"
 #include "components/search/search.h"
@@ -141,7 +142,7 @@ int OmniboxFieldTrial::GetDisabledProviderTypes() {
 }
 
 void OmniboxFieldTrial::GetActiveSuggestFieldTrialHashes(
-    std::vector<uint32>* field_trial_hashes) {
+    std::vector<uint32_t>* field_trial_hashes) {
   field_trial_hashes->clear();
   for (int i = 0; i < kMaxAutocompleteDynamicFieldTrials; ++i) {
     const std::string& trial_name = DynamicFieldTrialName(i);
@@ -410,10 +411,16 @@ float OmniboxFieldTrial::HQPExperimentalTopicalityThreshold() {
   return static_cast<float>(topicality_threshold);
 }
 
-bool OmniboxFieldTrial::HQPFixFrequencyScoringBugs() {
+bool OmniboxFieldTrial::HQPFixTypedVisitBug() {
   return variations::GetVariationParamValue(
       kBundledExperimentFieldTrialName,
-      kHQPFixFrequencyScoringBugsRule) == "true";
+      kHQPFixTypedVisitBugRule) == "true";
+}
+
+bool OmniboxFieldTrial::HQPFixFewVisitsBug() {
+  return variations::GetVariationParamValue(
+      kBundledExperimentFieldTrialName,
+      kHQPFixFewVisitsBugRule) == "true";
 }
 
 size_t OmniboxFieldTrial::HQPNumTitleWordsToAllow() {
@@ -432,6 +439,13 @@ bool OmniboxFieldTrial::HQPAlsoDoHUPLikeScoring() {
   return variations::GetVariationParamValue(
       kBundledExperimentFieldTrialName,
       kHQPAlsoDoHUPLikeScoringRule) == "true";
+}
+
+bool OmniboxFieldTrial::HUPSearchDatabase() {
+  const std::string& value = variations::GetVariationParamValue(
+      kBundledExperimentFieldTrialName,
+      kHUPSearchDatabaseRule);
+  return value.empty() || (value == "true");
 }
 
 bool OmniboxFieldTrial::PreventUWYTDefaultForNonURLInputs() {
@@ -468,6 +482,36 @@ int OmniboxFieldTrial::KeywordScoreForSufficientlyCompleteMatch() {
   return value;
 }
 
+bool OmniboxFieldTrial::HQPAllowDupMatchesForScoring() {
+  return variations::GetVariationParamValue(
+      kBundledExperimentFieldTrialName,
+      kHQPAllowDupMatchesForScoringRule) == "true";
+}
+
+OmniboxFieldTrial::EmphasizeTitlesCondition
+OmniboxFieldTrial::GetEmphasizeTitlesConditionForInput(
+    metrics::OmniboxInputType::Type input_type) {
+  // Look up the parameter named kEmphasizeTitlesRule + ":" + input_type,
+  // find its value, and return that value as an enum.  If the parameter
+  // isn't redefined, fall back to the generic rule kEmphasizeTitlesRule + ":*"
+  std::string value_str(variations::GetVariationParamValue(
+      kBundledExperimentFieldTrialName,
+      std::string(kEmphasizeTitlesRule) + "_" +
+      base::IntToString(static_cast<int>(input_type))));
+  if (value_str.empty()) {
+    value_str = variations::GetVariationParamValue(
+        kBundledExperimentFieldTrialName,
+        std::string(kEmphasizeTitlesRule) + "_*");
+  }
+  if (value_str.empty())
+    return EMPHASIZE_NEVER;
+  // This is a best-effort conversion; we trust the hand-crafted parameters
+  // downloaded from the server to be perfect.  There's no need for handle
+  // errors smartly.
+  int value;
+  base::StringToInt(value_str, &value);
+  return static_cast<EmphasizeTitlesCondition>(value);
+}
 
 const char OmniboxFieldTrial::kBundledExperimentFieldTrialName[] =
     "OmniboxBundledExperimentV1";
@@ -491,11 +535,14 @@ OmniboxFieldTrial::kMeasureSuggestPollingDelayFromLastKeystrokeRule[] =
     "MeasureSuggestPollingDelayFromLastKeystroke";
 const char OmniboxFieldTrial::kSuggestPollingDelayMsRule[] =
     "SuggestPollingDelayMs";
-const char OmniboxFieldTrial::kHQPFixFrequencyScoringBugsRule[] =
-    "HQPFixFrequencyScoringBugs";
+const char OmniboxFieldTrial::kHQPFixTypedVisitBugRule[] =
+    "HQPFixTypedVisitBug";
+const char OmniboxFieldTrial::kHQPFixFewVisitsBugRule[] = "HQPFixFewVisitsBug";
 const char OmniboxFieldTrial::kHQPNumTitleWordsRule[] = "HQPNumTitleWords";
 const char OmniboxFieldTrial::kHQPAlsoDoHUPLikeScoringRule[] =
     "HQPAlsoDoHUPLikeScoring";
+const char OmniboxFieldTrial::kHUPSearchDatabaseRule[] =
+    "HUPSearchDatabase";
 const char OmniboxFieldTrial::kPreventUWYTDefaultForNonURLInputsRule[] =
     "PreventUWYTDefaultForNonURLInputs";
 const char OmniboxFieldTrial::kKeywordRequiresRegistryRule[] =
@@ -504,6 +551,9 @@ const char OmniboxFieldTrial::kKeywordRequiresPrefixMatchRule[] =
     "KeywordRequiresPrefixMatch";
 const char OmniboxFieldTrial::kKeywordScoreForSufficientlyCompleteMatchRule[] =
     "KeywordScoreForSufficientlyCompleteMatch";
+const char OmniboxFieldTrial::kHQPAllowDupMatchesForScoringRule[] =
+    "HQPAllowDupMatchesForScoring";
+const char OmniboxFieldTrial::kEmphasizeTitlesRule[] = "EmphasizeTitles";
 
 const char OmniboxFieldTrial::kHUPNewScoringEnabledParam[] =
     "HUPExperimentalScoringEnabled";

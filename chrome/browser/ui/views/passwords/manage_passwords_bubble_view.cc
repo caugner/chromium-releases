@@ -4,13 +4,13 @@
 
 #include "chrome/browser/ui/views/passwords/manage_passwords_bubble_view.h"
 
+#include "base/macros.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
-#include "chrome/browser/ui/passwords/manage_passwords_bubble_model.h"
-#include "chrome/browser/ui/passwords/manage_passwords_ui_controller.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/passwords/credentials_item_view.h"
 #include "chrome/browser/ui/views/passwords/credentials_selection_view.h"
@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/views/passwords/manage_passwords_icon_views.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/render_view_host.h"
+#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/button/blue_button.h"
@@ -211,8 +212,6 @@ scoped_ptr<views::LabelButton> GenerateButton(views::ButtonListener* listener,
                                               const base::string16& text) {
   scoped_ptr<views::LabelButton> button(new views::LabelButton(listener, text));
   button->SetStyle(views::Button::STYLE_BUTTON);
-  button->SetFontList(ui::ResourceBundle::GetSharedInstance().GetFontList(
-      ui::ResourceBundle::SmallFont));
   return button;
 }
 
@@ -236,7 +235,8 @@ class ManagePasswordsBubbleView::AccountChooserView
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::StyledLabelListener:
-  void StyledLabelLinkClicked(const gfx::Range& range,
+  void StyledLabelLinkClicked(views::StyledLabel* label,
+                              const gfx::Range& range,
                               int event_flags) override;
 
   // Adds |password_forms| to the layout remembering their |type|.
@@ -246,7 +246,7 @@ class ManagePasswordsBubbleView::AccountChooserView
       password_manager::CredentialType type);
 
   ManagePasswordsBubbleView* parent_;
-  views::LabelButton* cancel_button_;
+  views::Button* cancel_button_;
 
   DISALLOW_COPY_AND_ASSIGN(AccountChooserView);
 };
@@ -323,6 +323,7 @@ void ManagePasswordsBubbleView::AccountChooserView::ButtonPressed(
 }
 
 void ManagePasswordsBubbleView::AccountChooserView::StyledLabelLinkClicked(
+    views::StyledLabel* label,
     const gfx::Range& range,
     int event_flags) {
   DCHECK_EQ(range, parent_->model()->title_brand_link_range());
@@ -346,7 +347,8 @@ class ManagePasswordsBubbleView::AutoSigninView
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::StyledLabelListener:
-  void StyledLabelLinkClicked(const gfx::Range& range,
+  void StyledLabelLinkClicked(views::StyledLabel* label,
+                              const gfx::Range& range,
                               int event_flags) override;
 
   // views::WidgetObserver:
@@ -363,7 +365,7 @@ class ManagePasswordsBubbleView::AutoSigninView
   base::OneShotTimer timer_;
   ManagePasswordsBubbleView* parent_;
   ScopedObserver<views::Widget, views::WidgetObserver> observed_browser_;
-  views::LabelButton* ok_button_;
+  views::Button* ok_button_;
 
   DISALLOW_COPY_AND_ASSIGN(AutoSigninView);
 };
@@ -443,7 +445,9 @@ void ManagePasswordsBubbleView::AutoSigninView::ButtonPressed(
 }
 
 void ManagePasswordsBubbleView::AutoSigninView::StyledLabelLinkClicked(
-    const gfx::Range& range, int event_flags) {
+    views::StyledLabel* label,
+    const gfx::Range& range,
+    int event_flags) {
   DCHECK_EQ(range, parent_->model()->autosignin_welcome_link_range());
   parent_->model()->OnBrandLinkClicked();
 }
@@ -482,13 +486,14 @@ class ManagePasswordsBubbleView::PendingView
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::StyledLabelListener:
-  void StyledLabelLinkClicked(const gfx::Range& range,
+  void StyledLabelLinkClicked(views::StyledLabel* label,
+                              const gfx::Range& range,
                               int event_flags) override;
 
   ManagePasswordsBubbleView* parent_;
 
-  views::BlueButton* save_button_;
-  views::LabelButton* never_button_;
+  views::Button* save_button_;
+  views::Button* never_button_;
 
   DISALLOW_COPY_AND_ASSIGN(PendingView);
 };
@@ -509,8 +514,6 @@ ManagePasswordsBubbleView::PendingView::PendingView(
   }
   save_button_ = new views::BlueButton(
       this, l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_SAVE_BUTTON));
-  save_button_->SetFontList(ui::ResourceBundle::GetSharedInstance().GetFontList(
-      ui::ResourceBundle::SmallFont));
   never_button_ = GenerateButton(
       this,
       l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_BUBBLE_BLACKLIST_BUTTON))
@@ -568,6 +571,7 @@ void ManagePasswordsBubbleView::PendingView::ButtonPressed(
 }
 
 void ManagePasswordsBubbleView::PendingView::StyledLabelLinkClicked(
+    views::StyledLabel* label,
     const gfx::Range& range,
     int event_flags) {
   DCHECK_EQ(range, parent_->model()->title_brand_link_range());
@@ -596,7 +600,7 @@ class ManagePasswordsBubbleView::ManageView : public views::View,
   ManagePasswordsBubbleView* parent_;
 
   views::Link* manage_link_;
-  views::LabelButton* done_button_;
+  views::Button* done_button_;
 
   DISALLOW_COPY_AND_ASSIGN(ManageView);
 };
@@ -638,8 +642,6 @@ ManagePasswordsBubbleView::ManageView::ManageView(
   // Then add the "manage passwords" link and "Done" button.
   manage_link_ = new views::Link(parent_->model()->manage_link());
   manage_link_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  manage_link_->SetFontList(ui::ResourceBundle::GetSharedInstance().GetFontList(
-      ui::ResourceBundle::SmallFont));
   manage_link_->SetUnderline(false);
   manage_link_->set_listener(this);
 
@@ -690,11 +692,12 @@ class ManagePasswordsBubbleView::SaveConfirmationView
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::StyledLabelListener implementation
-  void StyledLabelLinkClicked(const gfx::Range& range,
+  void StyledLabelLinkClicked(views::StyledLabel* label,
+                              const gfx::Range& range,
                               int event_flags) override;
 
   ManagePasswordsBubbleView* parent_;
-  views::LabelButton* ok_button_;
+  views::Button* ok_button_;
 
   DISALLOW_COPY_AND_ASSIGN(SaveConfirmationView);
 };
@@ -735,7 +738,9 @@ ManagePasswordsBubbleView::SaveConfirmationView::~SaveConfirmationView() {
 }
 
 void ManagePasswordsBubbleView::SaveConfirmationView::StyledLabelLinkClicked(
-    const gfx::Range& range, int event_flags) {
+    views::StyledLabel* label,
+    const gfx::Range& range,
+    int event_flags) {
   DCHECK_EQ(range, parent_->model()->save_confirmation_link_range());
   parent_->model()->OnManageLinkClicked();
   parent_->Close();
@@ -817,16 +822,16 @@ class ManagePasswordsBubbleView::UpdatePendingView
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::StyledLabelListener:
-  void StyledLabelLinkClicked(const gfx::Range& range,
+  void StyledLabelLinkClicked(views::StyledLabel* label,
+                              const gfx::Range& range,
                               int event_flags) override;
 
   ManagePasswordsBubbleView* parent_;
 
   CredentialsSelectionView* selection_view_;
 
-  views::BlueButton* update_button_;
-
-  views::LabelButton* nope_button_;
+  views::Button* update_button_;
+  views::Button* nope_button_;
 
   DISALLOW_COPY_AND_ASSIGN(UpdatePendingView);
 };
@@ -856,9 +861,6 @@ ManagePasswordsBubbleView::UpdatePendingView::UpdatePendingView(
 
   update_button_ = new views::BlueButton(
       this, l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_UPDATE_BUTTON));
-  update_button_->SetFontList(
-      ui::ResourceBundle::GetSharedInstance().GetFontList(
-          ui::ResourceBundle::SmallFont));
 
   // Title row.
   AddTitleRowWithLink(layout, parent_->model(), this);
@@ -899,6 +901,7 @@ void ManagePasswordsBubbleView::UpdatePendingView::ButtonPressed(
 }
 
 void ManagePasswordsBubbleView::UpdatePendingView::StyledLabelLinkClicked(
+    views::StyledLabel* label,
     const gfx::Range& range,
     int event_flags) {
   DCHECK_EQ(range, parent_->model()->title_brand_link_range());

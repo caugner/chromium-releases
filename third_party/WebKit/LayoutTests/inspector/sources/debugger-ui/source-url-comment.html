@@ -13,11 +13,6 @@ function doEval()
     eval("function keepAlive() {}\n//# sourceURL=evalURL.js");
 }
 
-function doDeprecatedEval()
-{
-    eval("function keepAlive() {}\n//@ sourceURL=deprecatedEvalURL.js");
-}
-
 function doEvalWithNonRelativeURL()
 {
     eval("function relativeURLScript() {}\n//# sourceURL=/js/nonRelativeURL.js");
@@ -33,6 +28,11 @@ function doDynamicScript()
 function doURLAndMappingURL()
 {
     eval("function keepAlive() {}\n//# sourceMappingURL=sourceMappingURL.map\n//# sourceURL=sourceURL.js");
+}
+
+function doEvalWithMultipleSourceURL()
+{
+    eval("\n//# sourceURL=evalURL2.js\nfunction keepAlive() {}\n//# sourceURL=evalMultipleURL.js");
 }
 
 function addScriptWithURL()
@@ -72,7 +72,7 @@ function test()
                 var uiSourceCodes = panel._workspace.uiSourceCodes();
                 var ignored = true;
                 for (var i = 0; i < uiSourceCodes.length && ignored; ++i) {
-                    if (uiSourceCodes[i].originURL().indexOf("inlineScriptURL.js") !== -1)
+                    if (uiSourceCodes[i].url().indexOf("inlineScriptURL.js") !== -1)
                         ignored = false;
                 }
                 if (ignored)
@@ -104,7 +104,7 @@ function test()
                 var panel = WebInspector.panels.sources;
                 var uiSourceCodes = panel._workspace.uiSourceCodes();
                 for (var i = 0; i < uiSourceCodes.length; ++i) {
-                    if (uiSourceCodes[i].originURL().indexOf("scriptWithPoorSourceURL.js") !== -1)
+                    if (uiSourceCodes[i].url().indexOf("scriptWithPoorSourceURL.js") !== -1)
                         InspectorTest.addResult("FAILED: poor sourceURL comment in script was used as a script name");
                 }
                 next();
@@ -120,19 +120,6 @@ function test()
             {
                 InspectorTest.addResult(sourceFrame.textEditor.text());
                 forEachScriptMatchingURL("evalURL.js", checkScriptSourceURL);
-                next();
-            }
-        },
-
-        function testDeprecatedSourceURLComment(next)
-        {
-            InspectorTest.showScriptSource("deprecatedEvalURL.js", didShowScriptSource);
-            InspectorTest.evaluateInPage("setTimeout(doDeprecatedEval, 0)");
-
-            function didShowScriptSource(sourceFrame)
-            {
-                InspectorTest.addResult(sourceFrame.textEditor.text());
-                forEachScriptMatchingURL("deprecatedEvalURL.js", checkScriptSourceURL);
                 next();
             }
         },
@@ -180,13 +167,26 @@ function test()
                 forEachScriptMatchingURL("nonRelativeURL.js", checkScriptSourceURL);
                 next();
             }
+        },
+
+        function testMultipleSourceURLComment(next)
+        {
+            InspectorTest.showScriptSource("evalMultipleURL.js", didShowScriptSource);
+            InspectorTest.evaluateInPage("setTimeout(doEvalWithMultipleSourceURL, 0)");
+
+            function didShowScriptSource(sourceFrame)
+            {
+                InspectorTest.addResult(sourceFrame.textEditor.text());
+                forEachScriptMatchingURL("evalMultipleURL.js", checkScriptSourceURL);
+                next();
+            }
         }
     ]);
 
     function checkScriptSourceURL(script)
     {
         InspectorTest.addResult("hasSourceURL: " + script.hasSourceURL);
-    }    
+    }
 };
 
 </script>

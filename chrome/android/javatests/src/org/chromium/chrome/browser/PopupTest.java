@@ -12,6 +12,7 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.infobar.InfoBar;
+import org.chromium.chrome.browser.infobar.InfoBarContainer;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
@@ -35,7 +36,7 @@ public class PopupTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     }
 
     private int getNumInfobarsShowing() {
-        return getActivity().getActivityTab().getInfoBarContainer().getInfoBars().size();
+        return getInfoBars().size();
     }
 
     @Override
@@ -59,12 +60,12 @@ public class PopupTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     @Feature({"Popup"})
     public void testPopupInfobarAppears() throws Exception {
         loadUrl(POPUP_HTML_FILENAME);
-        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
+        CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 return getNumInfobarsShowing() == 1;
             }
-        }));
+        });
     }
 
     @MediumTest
@@ -77,49 +78,50 @@ public class PopupTest extends ChromeActivityTestCaseBase<ChromeActivity> {
                 : getActivity().getTabModelSelector();
 
         loadUrl(POPUP_HTML_FILENAME);
-        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
+        CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 return getNumInfobarsShowing() == 1;
             }
-        }));
+        });
         assertEquals(1, selector.getTotalTabCount());
-        ArrayList<InfoBar> infobars = selector.getCurrentTab().getInfoBarContainer().getInfoBars();
+        final InfoBarContainer container = selector.getCurrentTab().getInfoBarContainer();
+        ArrayList<InfoBar> infobars = container.getInfoBarsForTesting();
         assertEquals(1, infobars.size());
 
         // Wait until the animations are done, then click the "open popups" button.
         final InfoBar infobar = infobars.get(0);
-        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
+        CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                return infobar.areControlsEnabled();
+                return !container.isAnimating();
             }
-        }));
-        TouchCommon.singleClickView(infobar.getContentWrapper().findViewById(R.id.button_primary));
+        });
+        TouchCommon.singleClickView(infobar.getView().findViewById(R.id.button_primary));
 
         // Document mode popups appear slowly and sequentially to prevent Android from throwing them
         // away, so use a long timeout.  http://crbug.com/498920.
-        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
+        CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 if (getNumInfobarsShowing() != 0) return false;
                 return TextUtils.equals("Popup #3", selector.getCurrentTab().getTitle());
             }
-        }, 7500, CriteriaHelper.DEFAULT_POLLING_INTERVAL));
+        }, 7500, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
 
         assertEquals(4, selector.getTotalTabCount());
         int currentTabId = selector.getCurrentTab().getId();
 
         // Test that revisiting the original page makes popup windows immediately.
         loadUrl(POPUP_HTML_FILENAME);
-        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
+        CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 if (getNumInfobarsShowing() != 0) return false;
                 if (selector.getTotalTabCount() != 7) return false;
                 return TextUtils.equals("Popup #3", selector.getCurrentTab().getTitle());
             }
-        }, 7500, CriteriaHelper.DEFAULT_POLLING_INTERVAL));
+        }, 7500, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
         assertNotSame(currentTabId, selector.getCurrentTab().getId());
     }
 }

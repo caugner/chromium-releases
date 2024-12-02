@@ -6,7 +6,7 @@
 #define MOJO_RUNNER_CHILD_RUNNER_CONNECTION_H_
 
 #include "base/macros.h"
-#include "mojo/application/public/interfaces/application.mojom.h"
+#include "mojo/shell/public/interfaces/application.mojom.h"
 
 namespace mojo {
 namespace runner {
@@ -24,7 +24,8 @@ class RunnerConnection {
   // If a connection to the runner cannot be established, |request| will not be
   // modified and this function will return null.
   static RunnerConnection* ConnectToRunner(
-      InterfaceRequest<Application>* request);
+      InterfaceRequest<Application>* request,
+      ScopedMessagePipeHandle handle);
 
  protected:
   RunnerConnection();

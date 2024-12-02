@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "platform/graphics/gpu/DrawingBuffer.h"
 
 #include "platform/RuntimeEnabledFeatures.h"
@@ -38,20 +37,43 @@
 #include "platform/graphics/test/MockWebGraphicsContext3D.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebExternalTextureMailbox.h"
+#include "testing/gmock/include/gmock/gmock.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "wtf/RefPtr.h"
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
 
 using testing::Test;
 using testing::_;
 
 namespace blink {
 
+namespace {
+
+// The target to use when binding a texture to a Chromium image.
+WGC3Denum imageTextureTarget()
+{
+#if OS(MACOSX)
+    return GC3D_TEXTURE_RECTANGLE_ARB;
+#else
+    return GL_TEXTURE_2D;
+#endif
+}
+
+// The target to use when preparing a mailbox texture.
+WGC3Denum drawingBufferTextureTarget()
+{
+    if (RuntimeEnabledFeatures::webGLImageChromiumEnabled())
+        return imageTextureTarget();
+    return GL_TEXTURE_2D;
+}
+
+} // namespace
+
 class WebGraphicsContext3DForTests : public MockWebGraphicsContext3D {
 public:
     WebGraphicsContext3DForTests()
         : MockWebGraphicsContext3D()
         , m_boundTexture(0)
+        , m_boundTextureTarget(0)
         , m_currentMailboxByte(0)
         , m_mostRecentlyWaitedSyncToken(0)
         , m_currentImageId(1)
@@ -60,9 +82,13 @@ public:
 
     void bindTexture(WGC3Denum target, WebGLId texture) override
     {
-        if (target == GL_TEXTURE_2D) {
-            m_boundTexture = texture;
-        }
+        if (target != m_boundTextureTarget && texture == 0)
+            return;
+
+        // For simplicity, only allow one target to ever be bound.
+        ASSERT_TRUE(m_boundTextureTarget == 0 || target == m_boundTextureTarget);
+        m_boundTextureTarget = target;
+        m_boundTexture = texture;
     }
 
     void texImage2D(WGC3Denum target, WGC3Dint level, WGC3Denum internalformat, WGC3Dsizei width, WGC3Dsizei height, WGC3Dint border, WGC3Denum format, WGC3Denum type, const void* pixels) override
@@ -81,7 +107,7 @@ public:
 
     void produceTextureDirectCHROMIUM(WebGLId texture, WGC3Denum target, const WGC3Dbyte* mailbox) override
     {
-        ASSERT_EQ(target, static_cast<WGC3Denum>(GL_TEXTURE_2D));
+        ASSERT_EQ(target, drawingBufferTextureTarget());
         ASSERT_TRUE(m_textureSizes.contains(texture));
         m_mostRecentlyProducedSize = m_textureSizes.get(texture);
     }
@@ -99,7 +125,19 @@ public:
         return true;
     }
 
-    void waitSyncToken(const WGC3Dbyte* syncToken) override
+    WGC3Duint64 insertFenceSyncCHROMIUM() override
+    {
+        static WGC3Duint64 syncPointGenerator = 0;
+        return ++syncPointGenerator;
+    }
+
+    bool genSyncTokenCHROMIUM(WGC3Duint64 fenceSync, WGC3Dbyte* syncToken) override
+    {
+        memcpy(syncToken, &fenceSync, sizeof(fenceSync));
+        return true;
+    }
+
+    void waitSyncTokenCHROMIUM(const WGC3Dbyte* syncToken) override
     {
         memcpy(&m_mostRecentlyWaitedSyncToken, syncToken, sizeof(m_mostRecentlyWaitedSyncToken));
     }
@@ -123,7 +161,7 @@ public:
     MOCK_METHOD1(bindTexImage2DMock, void(WGC3Dint imageId));
     void bindTexImage2DCHROMIUM(WGC3Denum target, WGC3Dint imageId)
     {
-        if (target == GL_TEXTURE_2D) {
+        if (target == imageTextureTarget()) {
             m_textureSizes.set(m_boundTexture, m_imageSizes.find(imageId)->value);
             m_imageToTextureMap.set(imageId, m_boundTexture);
             bindTexImage2DMock(imageId);
@@ -133,7 +171,7 @@ public:
     MOCK_METHOD1(releaseTexImage2DMock, void(WGC3Dint imageId));
     void releaseTexImage2DCHROMIUM(WGC3Denum target, WGC3Dint imageId)
     {
-        if (target == GL_TEXTURE_2D) {
+        if (target == imageTextureTarget()) {
             m_imageSizes.set(m_currentImageId, IntSize());
             m_imageToTextureMap.remove(imageId);
             releaseTexImage2DMock(imageId);
@@ -152,6 +190,7 @@ public:
 
 private:
     WebGLId m_boundTexture;
+    WGC3Denum m_boundTextureTarget;
     HashMap<WebGLId, IntSize> m_textureSizes;
     WGC3Dbyte m_currentMailboxByte;
     IntSize m_mostRecentlyProducedSize;
@@ -401,8 +440,8 @@ TEST_F(DrawingBufferTest, verifyInsertAndWaitSyncTokenCorrectly)
     // prepareMailbox() does not wait for any sync point.
     EXPECT_EQ(0u, webContext()->mostRecentlyWaitedSyncToken());
 
-    WGC3Duint waitSyncToken = 0;
-    webContext()->insertSyncPoint(reinterpret_cast<WGC3Dbyte*>(&waitSyncToken));
+    WGC3Duint64 waitSyncToken = 0;
+    webContext()->genSyncTokenCHROMIUM(webContext()->insertFenceSyncCHROMIUM(), reinterpret_cast<WGC3Dbyte*>(&waitSyncToken));
     memcpy(mailbox.syncToken, &waitSyncToken, sizeof(waitSyncToken));
     mailbox.validSyncToken = true;
     m_drawingBuffer->mailboxReleased(mailbox, false);
@@ -415,7 +454,7 @@ TEST_F(DrawingBufferTest, verifyInsertAndWaitSyncTokenCorrectly)
     EXPECT_EQ(waitSyncToken, webContext()->mostRecentlyWaitedSyncToken());
 
     m_drawingBuffer->beginDestruction();
-    webContext()->insertSyncPoint(reinterpret_cast<WGC3Dbyte*>(&waitSyncToken));
+    webContext()->genSyncTokenCHROMIUM(webContext()->insertFenceSyncCHROMIUM(), reinterpret_cast<WGC3Dbyte*>(&waitSyncToken));
     memcpy(mailbox.syncToken, &waitSyncToken, sizeof(waitSyncToken));
     mailbox.validSyncToken = true;
     m_drawingBuffer->mailboxReleased(mailbox, false);
@@ -598,7 +637,7 @@ TEST(DrawingBufferDepthStencilTest, packedDepthStencilSupported)
         DepthStencilTestCase(true, true, true, 1, "both"),
     };
 
-    for (size_t i = 0; i < arraysize(cases); i++) {
+    for (size_t i = 0; i < WTF_ARRAY_LENGTH(cases); i++) {
         SCOPED_TRACE(cases[i].testCaseName);
         OwnPtr<DepthStencilTrackingContext> context = adoptPtr(new DepthStencilTrackingContext);
         DepthStencilTrackingContext* trackingContext = context.get();
@@ -646,7 +685,7 @@ TEST_F(DrawingBufferTest, verifySetIsHiddenProperlyAffectsMailboxes)
     m_drawingBuffer->markContentsChanged();
     EXPECT_TRUE(m_drawingBuffer->prepareMailbox(&mailbox, 0));
 
-    mailbox.validSyncToken = webContext()->insertSyncPoint(mailbox.syncToken);
+    mailbox.validSyncToken = webContext()->genSyncTokenCHROMIUM(webContext()->insertFenceSyncCHROMIUM(), mailbox.syncToken);
     m_drawingBuffer->setIsHidden(true);
     m_drawingBuffer->mailboxReleased(mailbox);
     // m_drawingBuffer deletes mailbox immediately when hidden.

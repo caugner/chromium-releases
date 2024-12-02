@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_UI_VIEWS_FRAME_GLASS_BROWSER_FRAME_VIEW_H_
 
 #include "base/compiler_specific.h"
+#include "base/macros.h"
+#include "base/win/scoped_gdi_object.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/window/non_client_view.h"
@@ -74,9 +76,12 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView,
   // current state.
   int NonClientTopBorderHeight(bool restored) const;
 
+  // Returns whether the toolbar is currently visible.
+  bool IsToolbarVisible() const;
+
   // Paint various sub-components of this view.
   void PaintToolbarBackground(gfx::Canvas* canvas);
-  void PaintRestoredClientEdge(gfx::Canvas* canvas);
+  void PaintClientEdge(gfx::Canvas* canvas);
 
   // Layout various sub-components of this view.
   void LayoutIncognitoIcon();
@@ -88,7 +93,7 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView,
   gfx::Insets GetClientAreaInsets(bool restored) const;
 
   // Returns the bounds of the client area for the specified view size.
-  gfx::Rect CalculateClientAreaBounds(int width, int height) const;
+  gfx::Rect CalculateClientAreaBounds() const;
 
   // Starts/Stops the window throbber running.
   void StartThrobber();
@@ -102,6 +107,12 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView,
 
   // The bounds of the ClientView.
   gfx::Rect client_view_bounds_;
+
+  // The small icon created from the bitmap image of the window icon.
+  base::win::ScopedHICON small_window_icon_;
+
+  // The big icon created from the bitmap image of the window icon.
+  base::win::ScopedHICON big_window_icon_;
 
   // Whether or not the window throbber is currently animating.
   bool throbber_running_;

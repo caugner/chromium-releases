@@ -5,14 +5,19 @@
 #ifndef UI_VIEWS_MUS_NATIVE_WIDGET_MUS_H_
 #define UI_VIEWS_MUS_NATIVE_WIDGET_MUS_H_
 
+#include <stdint.h>
+
 #include <map>
 #include <string>
 
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/mus/public/interfaces/window_manager.mojom.h"
 #include "ui/aura/window_delegate.h"
+#include "ui/aura/window_tree_host_observer.h"
 #include "ui/platform_window/platform_window_delegate.h"
+#include "ui/views/mus/mus_export.h"
 #include "ui/views/widget/native_widget_private.h"
 
 namespace aura {
@@ -40,6 +45,8 @@ class FocusController;
 }
 
 namespace views {
+class SurfaceContextFactory;
+class WidgetDelegate;
 struct WindowManagerClientAreaInsets;
 class WindowTreeHostMus;
 
@@ -49,19 +56,15 @@ class WindowTreeHostMus;
 // aura::Window in a hierarchy is created without a delegate by the
 // aura::WindowTreeHost, we must create a child aura::Window in this class
 // (content_) and attach it to the root.
-class NativeWidgetMus : public internal::NativeWidgetPrivate,
-                        public aura::WindowDelegate {
+class VIEWS_MUS_EXPORT NativeWidgetMus : public internal::NativeWidgetPrivate,
+                                         public aura::WindowDelegate,
+                                         public aura::WindowTreeHostObserver {
  public:
   NativeWidgetMus(internal::NativeWidgetDelegate* delegate,
                   mojo::Shell* shell,
                   mus::Window* window,
                   mus::mojom::SurfaceType surface_type);
   ~NativeWidgetMus() override;
-
-  // Sets the insets for the client area. These values come from the window
-  // manager.
-  static void SetWindowManagerClientAreaInsets(
-      const WindowManagerClientAreaInsets& insets);
 
   // Configures the set of properties supplied to the window manager when
   // creating a new Window for a Widget.
@@ -75,9 +78,13 @@ class NativeWidgetMus : public internal::NativeWidgetPrivate,
   void OnActivationChanged(bool active);
 
  protected:
+  // Updates the client area in the mus::Window.
+  virtual void UpdateClientArea();
+
   // internal::NativeWidgetPrivate:
   NonClientFrameView* CreateNonClientFrameView() override;
   void InitNativeWidget(const Widget::InitParams& params) override;
+  void OnWidgetInitDone() override;
   bool ShouldUseNativeFrame() const override;
   bool ShouldWindowContentsBeTransparent() const override;
   void FrameTypeChanged() override;
@@ -187,9 +194,10 @@ class NativeWidgetMus : public internal::NativeWidgetPrivate,
   void OnScrollEvent(ui::ScrollEvent* event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
 
- private:
-  void UpdateClientAreaInWindowManager();
+  // Overridden from aura::WindowTreeHostObserver:
+  void OnHostCloseRequested(const aura::WindowTreeHost* host) override;
 
+ private:
   mus::Window* window_;
 
   mojo::Shell* shell_;
@@ -203,6 +211,7 @@ class NativeWidgetMus : public internal::NativeWidgetPrivate,
   Widget::InitParams::Ownership ownership_;
 
   // Aura configuration.
+  scoped_ptr<SurfaceContextFactory> context_factory_;
   scoped_ptr<WindowTreeHostMus> window_tree_host_;
   aura::Window* content_;
   scoped_ptr<wm::FocusController> focus_client_;

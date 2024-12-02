@@ -87,7 +87,7 @@ DebuggerScript.getGeneratorObjectDetails = function(object)
         return null;
     var result = {
         "function": funcMirror.value(),
-        "functionName": DebuggerScript._displayFunctionName(funcMirror) || "",
+        "functionName": funcMirror.debugName(),
         "status": mirror.status()
     };
     var script = funcMirror.script();
@@ -146,7 +146,7 @@ DebuggerScript.getScripts = function(contextGroupId)
             if (!script.context_data)
                 continue;
             // Context data is a string in the following format:
-            // <id>","("page"|"injected"|"worker")
+            // <id>,<contextId>,("page"|"injected"|"worker")
             if (script.context_data.indexOf(contextDataPrefix) !== 0)
                 continue;
         }
@@ -172,6 +172,24 @@ DebuggerScript._formatScript = function(script)
             endColumn = script.source.length - (lineEnds[lineCount - 2] + 1);
     }
 
+    /**
+     * @return {number}
+     */
+    function executionContextId()
+    {
+        var context_data = script.context_data;
+        if (!context_data)
+            return 0;
+        var firstComma = context_data.indexOf(",");
+        if (firstComma === -1)
+            return 0;
+        var secondComma = context_data.indexOf(",", firstComma + 1);
+        if (secondComma === -1)
+            return 0;
+
+        return parseInt(context_data.substring(firstComma + 1, secondComma), 10) || 0;
+    }
+
     return {
         id: script.id,
         name: script.nameOrSourceURL(),
@@ -182,6 +200,7 @@ DebuggerScript._formatScript = function(script)
         startColumn: script.column_offset,
         endLine: endLine,
         endColumn: endColumn,
+        executionContextId: executionContextId(),
         isContentScript: !!script.context_data && script.context_data.endsWith(",injected"),
         isInternalScript: script.is_debugger_script
     };
@@ -258,22 +277,22 @@ DebuggerScript.currentCallFrameByIndex = function(execState, index)
 
 DebuggerScript.stepIntoStatement = function(execState)
 {
-    execState.prepareStep(Debug.StepAction.StepIn, 1);
+    execState.prepareStep(Debug.StepAction.StepIn);
 }
 
 DebuggerScript.stepFrameStatement = function(execState)
 {
-    execState.prepareStep(Debug.StepAction.StepFrame, 1);
+    execState.prepareStep(Debug.StepAction.StepFrame);
 }
 
 DebuggerScript.stepOverStatement = function(execState, callFrame)
 {
-    execState.prepareStep(Debug.StepAction.StepNext, 1);
+    execState.prepareStep(Debug.StepAction.StepNext);
 }
 
 DebuggerScript.stepOutOfFunction = function(execState, callFrame)
 {
-    execState.prepareStep(Debug.StepAction.StepOut, 1);
+    execState.prepareStep(Debug.StepAction.StepOut);
 }
 
 DebuggerScript.clearStepping = function()
@@ -360,17 +379,6 @@ DebuggerScript.isEvalCompilation = function(eventData)
 {
     var script = eventData.script();
     return (script.compilationType() === Debug.ScriptCompilationType.Eval);
-}
-
-DebuggerScript._displayFunctionName = function(funcMirror)
-{
-    if (!funcMirror.resolved())
-        return undefined
-    var displayName;
-    var valueMirror = funcMirror.property("displayName").value();
-    if (valueMirror && valueMirror.isString())
-        displayName = valueMirror.value();
-    return displayName || funcMirror.name() || funcMirror.inferredName();
 }
 
 // NOTE: This function is performance critical, as it can be run on every
@@ -485,7 +493,7 @@ DebuggerScript._frameMirrorToJSCallFrame = function(frameMirror, callerFrame, sc
 
     function functionName()
     {
-        return DebuggerScript._displayFunctionName(ensureFuncMirror());
+        return ensureFuncMirror().debugName();
     }
 
     function functionLine()

@@ -4,6 +4,8 @@
 
 #include "chrome/browser/memory/tab_manager.h"
 
+#include <stddef.h>
+
 #include <algorithm>
 #include <set>
 #include <vector>
@@ -14,6 +16,8 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
+#include "base/macros.h"
 #include "base/memory/memory_pressure_monitor.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
@@ -80,18 +84,19 @@ const int kAudioProtectionTimeSeconds = 60;
 
 // Returns a unique ID for a WebContents. Do not cast back to a pointer, as
 // the WebContents could be deleted if the user closed the tab.
-int64 IdFromWebContents(WebContents* web_contents) {
-  return reinterpret_cast<int64>(web_contents);
+int64_t IdFromWebContents(WebContents* web_contents) {
+  return reinterpret_cast<int64_t>(web_contents);
 }
 
-int FindTabStripModelById(int64 target_web_contents_id, TabStripModel** model) {
+int FindTabStripModelById(int64_t target_web_contents_id,
+                          TabStripModel** model) {
   DCHECK(model);
   for (chrome::BrowserIterator it; !it.done(); it.Next()) {
     Browser* browser = *it;
     TabStripModel* local_model = browser->tab_strip_model();
     for (int idx = 0; idx < local_model->count(); idx++) {
       WebContents* web_contents = local_model->GetWebContentsAt(idx);
-      int64 web_contents_id = IdFromWebContents(web_contents);
+      int64_t web_contents_id = IdFromWebContents(web_contents);
       if (web_contents_id == target_web_contents_id) {
         *model = local_model;
         return idx;
@@ -124,10 +129,21 @@ TabManager::~TabManager() {
   Stop();
 }
 
-void TabManager::Start(bool discard_once) {
-  discard_once_ = discard_once;
-
+void TabManager::Start() {
 #if defined(OS_WIN) || defined(OS_MACOSX)
+  // If the feature is not enabled, do nothing.
+  if (!base::FeatureList::IsEnabled(features::kAutomaticTabDiscarding))
+    return;
+
+  // Check the variation parameter to see if a tab be discarded more than once.
+  // Default is to only discard once per tab.
+  std::string allow_multiple_discards = variations::GetVariationParamValue(
+      features::kAutomaticTabDiscarding.name, "AllowMultipleDiscards");
+  if (allow_multiple_discards == "true")
+    discard_once_ = true;
+  else
+    discard_once_ = false;
+
   // Check the variation parameter to see if a tab is to be protected for an
   // amount of time after being backgrounded. The value is in seconds.
   std::string minimum_protection_time_string =
@@ -142,6 +158,11 @@ void TabManager::Start(bool discard_once) {
             base::TimeDelta::FromSeconds(minimum_protection_time_seconds);
     }
   }
+
+#elif defined(OS_CHROMEOS)
+  // On Chrome OS, tab manager is always started and tabs can be discarded more
+  // than once.
+  discard_once_ = false;
 #endif
 
   if (!update_timer_.IsRunning()) {
@@ -219,7 +240,7 @@ bool TabManager::DiscardTab() {
   // Loop until a non-discarded tab to kill is found.
   for (TabStatsList::const_reverse_iterator stats_rit = stats.rbegin();
        stats_rit != stats.rend(); ++stats_rit) {
-    int64 least_important_tab_id = stats_rit->tab_contents_id;
+    int64_t least_important_tab_id = stats_rit->tab_contents_id;
     if (CanDiscardTab(least_important_tab_id) &&
         DiscardTabById(least_important_tab_id))
       return true;
@@ -227,7 +248,7 @@ bool TabManager::DiscardTab() {
   return false;
 }
 
-WebContents* TabManager::DiscardTabById(int64 target_web_contents_id) {
+WebContents* TabManager::DiscardTabById(int64_t target_web_contents_id) {
   TabStripModel* model;
   int index = FindTabStripModelById(target_web_contents_id, &model);
 
@@ -463,7 +484,7 @@ void TabManager::UpdateTimerCallback() {
 #endif
 }
 
-bool TabManager::CanDiscardTab(int64 target_web_contents_id) const {
+bool TabManager::CanDiscardTab(int64_t target_web_contents_id) const {
   TabStripModel* model;
   int idx = FindTabStripModelById(target_web_contents_id, &model);
 
@@ -529,6 +550,10 @@ WebContents* TabManager::DiscardWebContentsAt(int index, TabStripModel* model) {
   // Record statistics before discarding to capture the memory state that leads
   // to the discard.
   RecordDiscardStatistics();
+
+  UMA_HISTOGRAM_BOOLEAN(
+      "TabManager.Discarding.DiscardedTabHasBeforeUnloadHandler",
+      old_contents->NeedToFireBeforeUnload());
 
   WebContents* null_contents =
       WebContents::Create(WebContents::CreateParams(model->profile()));

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "chrome/common/instant_types.h"
@@ -109,7 +110,6 @@ class SearchIPCRouter : public content::WebContentsObserver {
     virtual bool ShouldSendSetPromoInformation() = 0;
     virtual bool ShouldSendSetDisplayInstantResults() = 0;
     virtual bool ShouldSendSetSuggestionToPrefetch() = 0;
-    virtual bool ShouldSendSetOmniboxStartMargin() = 0;
     virtual bool ShouldSendSetInputInProgress(bool is_active_tab) = 0;
     virtual bool ShouldSendOmniboxFocusChanged() = 0;
     virtual bool ShouldSendMostVisitedItems() = 0;
@@ -144,10 +144,6 @@ class SearchIPCRouter : public content::WebContentsObserver {
 
   // Tells the page the suggestion to be prefetched if any.
   void SetSuggestionToPrefetch(const InstantSuggestion& suggestion);
-
-  // Tells the page the left margin of the omnibox. This is used by the page to
-  // align text or assets properly with the omnibox.
-  void SetOmniboxStartMargin(int start_margin);
 
   // Tells the page that user input started or stopped.
   void SetInputInProgress(bool input_in_progress);

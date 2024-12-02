@@ -6,10 +6,12 @@
 
 #include <bitset>
 #include <string>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
@@ -19,6 +21,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/thread_task_runner_handle.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/extensions/extension_install_error_menu_item_id_provider.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
@@ -48,6 +51,7 @@
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "extensions/common/permissions/permission_message.h"
 #include "extensions/common/permissions/permissions_data.h"
+#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image.h"
@@ -61,87 +65,68 @@ namespace {
 
 static const int kIconSize = extension_misc::EXTENSION_ICON_SMALL;
 
-static base::LazyInstance<
-    std::bitset<IDC_EXTENSION_DISABLED_LAST -
-                IDC_EXTENSION_DISABLED_FIRST + 1> >
-    menu_command_ids = LAZY_INSTANCE_INITIALIZER;
-
-// Get an available menu ID.
-int GetMenuCommandID() {
-  int id;
-  for (id = IDC_EXTENSION_DISABLED_FIRST;
-       id <= IDC_EXTENSION_DISABLED_LAST; ++id) {
-    if (!menu_command_ids.Get()[id - IDC_EXTENSION_DISABLED_FIRST]) {
-      menu_command_ids.Get().set(id - IDC_EXTENSION_DISABLED_FIRST);
-      return id;
-    }
-  }
-  // This should not happen.
-  DCHECK(id <= IDC_EXTENSION_DISABLED_LAST) <<
-      "No available menu command IDs for ExtensionDisabledGlobalError";
-  return IDC_EXTENSION_DISABLED_LAST;
-}
-
-// Make a menu ID available when it is no longer used.
-void ReleaseMenuCommandID(int id) {
-  menu_command_ids.Get().reset(id - IDC_EXTENSION_DISABLED_FIRST);
-}
-
 }  // namespace
 
 // ExtensionDisabledDialogDelegate --------------------------------------------
 
-class ExtensionDisabledDialogDelegate
-    : public ExtensionInstallPrompt::Delegate,
-      public base::RefCountedThreadSafe<ExtensionDisabledDialogDelegate> {
+class ExtensionDisabledDialogDelegate {
  public:
   ExtensionDisabledDialogDelegate(ExtensionService* service,
                                   scoped_ptr<ExtensionInstallPrompt> install_ui,
                                   const Extension* extension);
 
  private:
-  friend class base::RefCountedThreadSafe<ExtensionDisabledDialogDelegate>;
+  ~ExtensionDisabledDialogDelegate();
 
-  ~ExtensionDisabledDialogDelegate() override;
-
-  // ExtensionInstallPrompt::Delegate:
-  void InstallUIProceed() override;
-  void InstallUIAbort(bool user_initiated) override;
+  void InstallPromptDone(ExtensionInstallPrompt::Result result);
 
   // The UI for showing the install dialog when enabling.
   scoped_ptr<ExtensionInstallPrompt> install_ui_;
 
   ExtensionService* service_;
   const Extension* extension_;
+
+  DISALLOW_COPY_AND_ASSIGN(ExtensionDisabledDialogDelegate);
 };
 
 ExtensionDisabledDialogDelegate::ExtensionDisabledDialogDelegate(
     ExtensionService* service,
     scoped_ptr<ExtensionInstallPrompt> install_ui,
     const Extension* extension)
-    : install_ui_(install_ui.Pass()),
+    : install_ui_(std::move(install_ui)),
       service_(service),
       extension_(extension) {
-  AddRef();  // Balanced in Proceed or Abort.
-  install_ui_->ConfirmReEnable(this, extension_);
+  ExtensionInstallPrompt::PromptType type =
+      ExtensionInstallPrompt::GetReEnablePromptTypeForExtension(
+          service_->profile(), extension);
+  // Unretained() is safe since this object manages its own lifetime and deletes
+  // itself only once the prompt finishes.
+  install_ui_->ShowDialog(
+      base::Bind(&ExtensionDisabledDialogDelegate::InstallPromptDone,
+                 base::Unretained(this)),
+      extension_, nullptr,
+      make_scoped_ptr(new ExtensionInstallPrompt::Prompt(type)),
+      ExtensionInstallPrompt::GetDefaultShowDialogCallback());
 }
 
 ExtensionDisabledDialogDelegate::~ExtensionDisabledDialogDelegate() {
 }
 
-void ExtensionDisabledDialogDelegate::InstallUIProceed() {
-  service_->GrantPermissionsAndEnableExtension(extension_);
-  Release();
-}
+void ExtensionDisabledDialogDelegate::InstallPromptDone(
+    ExtensionInstallPrompt::Result result) {
+  if (result == ExtensionInstallPrompt::Result::ACCEPTED) {
+    service_->GrantPermissionsAndEnableExtension(extension_);
+  } else {
+    const char* histogram_name =
+        result == ExtensionInstallPrompt::Result::USER_CANCELED
+            ? "ReEnableCancel"
+            : "ReEnableAbort";
+    ExtensionService::RecordPermissionMessagesHistogram(extension_,
+                                                        histogram_name);
+    // Do nothing. The extension will remain disabled.
+  }
 
-void ExtensionDisabledDialogDelegate::InstallUIAbort(bool user_initiated) {
-  std::string histogram_name = user_initiated ? "ReEnableCancel"
-                                              : "ReEnableAbort";
-  ExtensionService::RecordPermissionMessagesHistogram(
-      extension_, histogram_name.c_str());
-
-  // Do nothing. The extension will remain disabled.
-  Release();
+  delete this;
 }
 
 // ExtensionDisabledGlobalError -----------------------------------------------
@@ -207,8 +192,8 @@ class ExtensionDisabledGlobalError
 
   scoped_ptr<extensions::ExtensionUninstallDialog> uninstall_dialog_;
 
-  // Menu command ID assigned for this extension's error.
-  int menu_command_id_;
+  // Helper to get menu command ID assigned for this extension's error.
+  extensions::ExtensionInstallErrorMenuItemIdProvider id_provider_;
 
   content::NotificationRegistrar registrar_;
 
@@ -227,7 +212,6 @@ ExtensionDisabledGlobalError::ExtensionDisabledGlobalError(
       is_remote_install_(is_remote_install),
       icon_(icon),
       user_response_(IGNORED),
-      menu_command_id_(GetMenuCommandID()),
       registry_observer_(this) {
   if (icon_.IsEmpty()) {
     icon_ = gfx::Image(
@@ -246,7 +230,6 @@ ExtensionDisabledGlobalError::ExtensionDisabledGlobalError(
 }
 
 ExtensionDisabledGlobalError::~ExtensionDisabledGlobalError() {
-  ReleaseMenuCommandID(menu_command_id_);
   if (is_remote_install_) {
     UMA_HISTOGRAM_ENUMERATION("Extensions.DisabledUIUserResponseRemoteInstall",
                               user_response_,
@@ -267,7 +250,7 @@ bool ExtensionDisabledGlobalError::HasMenuItem() {
 }
 
 int ExtensionDisabledGlobalError::MenuItemCommandID() {
-  return menu_command_id_;
+  return id_provider_.menu_command_id();
 }
 
 base::string16 ExtensionDisabledGlobalError::MenuItemLabel() {
@@ -339,7 +322,8 @@ ExtensionDisabledGlobalError::GetBubbleViewMessages() {
 base::string16 ExtensionDisabledGlobalError::GetBubbleViewAcceptButtonLabel() {
   if (extensions::util::IsExtensionSupervised(extension_,
                                               service_->profile()) &&
-      extensions::util::NeedCustodianApprovalForPermissionIncrease()) {
+      extensions::util::NeedCustodianApprovalForPermissionIncrease(
+          service_->profile())) {
     // TODO(treib): Probably use a new string here once we get UX design.
     // For now, just use "OK". crbug.com/461261
     return l10n_util::GetStringUTF16(IDS_OK);
@@ -356,7 +340,8 @@ base::string16 ExtensionDisabledGlobalError::GetBubbleViewAcceptButtonLabel() {
 base::string16 ExtensionDisabledGlobalError::GetBubbleViewCancelButtonLabel() {
   if (extensions::util::IsExtensionSupervised(extension_,
                                               service_->profile())) {
-    if (extensions::util::NeedCustodianApprovalForPermissionIncrease()) {
+    if (extensions::util::NeedCustodianApprovalForPermissionIncrease(
+        service_->profile())) {
       // If the supervised user can't approve the update, then there is no
       // "cancel" button.
       return base::string16();
@@ -376,7 +361,8 @@ void ExtensionDisabledGlobalError::BubbleViewAcceptButtonPressed(
     Browser* browser) {
   if (extensions::util::IsExtensionSupervised(extension_,
                                               service_->profile()) &&
-      extensions::util::NeedCustodianApprovalForPermissionIncrease()) {
+      extensions::util::NeedCustodianApprovalForPermissionIncrease(
+          service_->profile())) {
     return;
   }
   // Delay extension reenabling so this bubble closes properly.
@@ -393,7 +379,8 @@ void ExtensionDisabledGlobalError::BubbleViewCancelButtonPressed(
     // For custodian-installed extensions, this button should only exist if the
     // supervised user can approve the update. Otherwise there is only an "OK"
     // button.
-    DCHECK(!extensions::util::NeedCustodianApprovalForPermissionIncrease());
+    DCHECK(!extensions::util::NeedCustodianApprovalForPermissionIncrease(
+        service_->profile()));
     // Supervised users may never remove custodian-installed extensions.
     return;
   }
@@ -482,11 +469,6 @@ void AddExtensionDisabledErrorWithIcon(base::WeakPtr<ExtensionService> service,
 void AddExtensionDisabledError(ExtensionService* service,
                                const Extension* extension,
                                bool is_remote_install) {
-  // Do not display notifications for ephemeral apps that have been disabled.
-  // Instead, a prompt will be shown the next time the app is launched.
-  if (util::IsEphemeralApp(extension->id(), service->profile()))
-    return;
-
   extensions::ExtensionResource image = extensions::IconsInfo::GetIconResource(
       extension, kIconSize, ExtensionIconSet::MATCH_BIGGER);
   gfx::Size size(kIconSize, kIconSize);
@@ -506,7 +488,8 @@ void ShowExtensionDisabledDialog(ExtensionService* service,
   scoped_ptr<ExtensionInstallPrompt> install_ui(
       new ExtensionInstallPrompt(web_contents));
   // This object manages its own lifetime.
-  new ExtensionDisabledDialogDelegate(service, install_ui.Pass(), extension);
+  new ExtensionDisabledDialogDelegate(service, std::move(install_ui),
+                                      extension);
 }
 
 }  // namespace extensions

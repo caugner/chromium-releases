@@ -113,7 +113,7 @@ WebInspector.Linkifier.linkifyUsingRevealer = function(revealable, text, fallbac
 }
 
 WebInspector.Linkifier._uiLocationSymbol = Symbol("uiLocation");
-WebInspector.Linkifier._fallbackAnchorSymbol = Symbol("fallbackAnchor");;
+WebInspector.Linkifier._fallbackAnchorSymbol = Symbol("fallbackAnchor");
 
 WebInspector.Linkifier.prototype = {
     /**
@@ -228,20 +228,6 @@ WebInspector.Linkifier.prototype = {
     },
 
     /**
-     * @param {!WebInspector.CSSMedia} media
-     * @return {?Element}
-     */
-    linkifyMedia: function(media)
-    {
-        var location = media.rawLocation();
-        if (location)
-            return this.linkifyCSSLocation(location);
-
-        // The "linkedStylesheet" case.
-        return WebInspector.linkifyResourceAsNode(media.sourceURL, undefined, undefined, "subtitle", media.sourceURL);
-    },
-
-    /**
      * @param {!WebInspector.Target} target
      * @param {!Element} anchor
      */
@@ -341,11 +327,12 @@ WebInspector.Linkifier.DefaultFormatter.prototype = {
     formatLiveAnchor: function(anchor, uiLocation)
     {
         var text = uiLocation.linkText();
+        text = text.replace(/([a-f0-9]{7})[a-f0-9]{13}[a-f0-9]*/g, "$1\u2026");
         if (this._maxLength)
             text = text.trimMiddle(this._maxLength);
         anchor.textContent = text;
 
-        var titleText = uiLocation.uiSourceCode.originURL();
+        var titleText = uiLocation.uiSourceCode.url();
         if (typeof uiLocation.lineNumber === "number")
             titleText += ":" + (uiLocation.lineNumber + 1);
         anchor.title = titleText;

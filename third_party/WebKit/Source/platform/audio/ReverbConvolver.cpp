@@ -26,12 +26,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-
-#if ENABLE(WEB_AUDIO)
-
 #include "platform/audio/ReverbConvolver.h"
-
 #include "platform/Task.h"
 #include "platform/audio/AudioBus.h"
 #include "platform/audio/VectorMath.h"
@@ -195,4 +190,3 @@ size_t ReverbConvolver::latencyFrames() const
 
 } // namespace blink
 
-#endif // ENABLE(WEB_AUDIO)

@@ -18,7 +18,7 @@
 
 #include <string>
 
-#include "base/basictypes.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_util.h"
@@ -192,6 +192,9 @@ class DownloadItemView : public views::ButtonListener,
     return mode_ == DANGEROUS_MODE || mode_ == MALICIOUS_MODE;
   }
 
+  // Clears or shows the warning dialog as per the state of |model_|.
+  void ToggleWarningDialog();
+
   // Reverts from dangerous mode to normal download mode.
   void ClearWarningDialog();
 
@@ -231,6 +234,9 @@ class DownloadItemView : public views::ButtonListener,
   // |from| and |to|.
   void AnimateStateTransition(State from, State to,
                               gfx::SlideAnimation* animation);
+
+  // Callback for |progress_timer_|.
+  void ProgressTimerFired();
 
   // The different images used for the background.
   BodyImageSet normal_body_image_set_;

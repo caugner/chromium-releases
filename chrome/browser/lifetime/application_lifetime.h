@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_LIFETIME_APPLICATION_LIFETIME_H_
 
 #include "base/compiler_specific.h"
+#include "build/build_config.h"
 
 class Browser;
 
@@ -24,26 +25,6 @@ void AttemptUserExit();
 // ChromeOS, this simply exits the chrome, which lets sesssion
 // manager re-launch the browser with restore last session flag.
 void AttemptRestart();
-
-#if defined(OS_WIN)
-enum AshExecutionStatus {
-  ASH_KEEP_RUNNING,
-  ASH_TERMINATE,
-};
-
-// Helper function to activate the desktop from Ash mode. The
-// |ash_execution_status| parameter indicates if we should exit Ash after
-// activating desktop.
-void ActivateDesktopHelper(AshExecutionStatus ash_execution_status);
-
-// Windows 7/8 specific: Like AttemptRestart but if chrome is running
-// in desktop mode it starts in metro mode and vice-versa. The switching like
-// the restarting is controlled by a preference.
-void AttemptRestartToDesktopMode();
-// Launches Chrome into Windows 8 metro mode on Windows 8. On Windows 7 it
-// launches Chrome into Windows ASH.
-void AttemptRestartToMetroMode();
-#endif
 
 // Attempt to exit by closing all browsers.  This is equivalent to
 // CloseAllBrowsers() on platforms where the application exits

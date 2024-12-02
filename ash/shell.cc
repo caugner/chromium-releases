@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <string>
+#include <utility>
 
 #include "ash/accelerators/accelerator_controller.h"
 #include "ash/accelerators/accelerator_delegate.h"
@@ -119,9 +120,9 @@
 #include "ash/accelerators/magnifier_key_scroller.h"
 #include "ash/accelerators/spoken_feedback_toggler.h"
 #include "ash/ash_constants.h"
+#include "ash/display/display_animator.h"
 #include "ash/display/display_change_observer_chromeos.h"
 #include "ash/display/display_color_manager_chromeos.h"
-#include "ash/display/display_configurator_animation.h"
 #include "ash/display/display_error_observer_chromeos.h"
 #include "ash/display/projecting_observer_chromeos.h"
 #include "ash/display/resolution_notification_controller.h"
@@ -588,7 +589,7 @@ ShelfDelegate* Shell::GetShelfDelegate() {
     ShelfID app_list_id = shelf_model_->items()[app_list_index].id;
     DCHECK(app_list_id);
     shelf_item_delegate_manager_->SetShelfItemDelegate(app_list_id,
-                                                       controller.Pass());
+                                                       std::move(controller));
     shelf_window_watcher_.reset(new ShelfWindowWatcher(
         shelf_model_.get(), shelf_item_delegate_manager_.get()));
   }
@@ -813,9 +814,8 @@ Shell::~Shell() {
   display_color_manager_.reset();
   if (display_change_observer_)
     display_configurator_->RemoveObserver(display_change_observer_.get());
-  if (display_configurator_animation_)
-    display_configurator_->RemoveObserver(
-        display_configurator_animation_.get());
+  if (display_animator_)
+    display_configurator_->RemoveObserver(display_animator_.get());
   if (display_error_observer_)
     display_configurator_->RemoveObserver(display_error_observer_.get());
   if (projecting_observer_) {
@@ -839,8 +839,8 @@ void Shell::Init(const ShellInitParams& init_params) {
   bool display_initialized = display_manager_->InitFromCommandLine();
 #if defined(OS_CHROMEOS)
   display_configurator_->Init(!gpu_support_->IsPanelFittingDisabled());
-  display_configurator_animation_.reset(new DisplayConfiguratorAnimation());
-  display_configurator_->AddObserver(display_configurator_animation_.get());
+  display_animator_.reset(new DisplayAnimator());
+  display_configurator_->AddObserver(display_animator_.get());
 
   // The DBusThreadManager must outlive this Shell. See the DCHECK in ~Shell.
   chromeos::DBusThreadManager* dbus_thread_manager =
@@ -935,7 +935,7 @@ void Shell::Init(const ShellInitParams& init_params) {
   AddShellObserver(overlay_filter_.get());
 
   accelerator_filter_.reset(new ::wm::AcceleratorFilter(
-      scoped_ptr< ::wm::AcceleratorDelegate>(new AcceleratorDelegate).Pass(),
+      scoped_ptr<::wm::AcceleratorDelegate>(new AcceleratorDelegate),
       accelerator_controller_->accelerator_history()));
   AddPreTargetHandler(accelerator_filter_.get());
 
@@ -1061,7 +1061,7 @@ void Shell::Init(const ShellInitParams& init_params) {
   // Set accelerator controller delegates.
   accelerator_controller_->SetBrightnessControlDelegate(
       scoped_ptr<ash::BrightnessControlDelegate>(
-          new ash::system::BrightnessControllerChromeos).Pass());
+          new ash::system::BrightnessControllerChromeos));
 
   power_event_observer_.reset(new PowerEventObserver());
   user_activity_notifier_.reset(
@@ -1076,6 +1076,8 @@ void Shell::Init(const ShellInitParams& init_params) {
   // order to create mirror window. Run it after the main message loop
   // is started.
   display_manager_->CreateMirrorWindowAsyncIfAny();
+
+  FOR_EACH_OBSERVER(ShellObserver, observers_, OnShellInitialized());
 
   user_metrics_recorder_->OnShellInitialized();
 }
@@ -1159,9 +1161,6 @@ scoped_ptr<ui::EventTargetIterator> Shell::GetChildIterator() const {
 ui::EventTargeter* Shell::GetEventTargeter() {
   NOTREACHED();
   return nullptr;
-}
-
-void Shell::OnEvent(ui::Event* event) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////

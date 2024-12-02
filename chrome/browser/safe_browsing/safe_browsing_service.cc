@@ -4,6 +4,8 @@
 
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 
+#include <stddef.h>
+
 #include <vector>
 
 #include "base/bind.h"
@@ -11,6 +13,7 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
+#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_change_registrar.h"
@@ -19,12 +22,14 @@
 #include "base/strings/string_util.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/trace_event/trace_event.h"
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
-#include "chrome/browser/safe_browsing/database_manager.h"
 #include "chrome/browser/safe_browsing/download_protection_service.h"
 #include "chrome/browser/safe_browsing/ping_manager.h"
 #include "chrome/browser/safe_browsing/protocol_manager.h"
@@ -34,6 +39,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/safe_browsing_db/database_manager.h"
 #include "components/user_prefs/tracked/tracked_preference_validation_delegate.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
@@ -57,7 +63,6 @@
 #include "chrome/browser/safe_browsing/incident_reporting/binary_integrity_analyzer.h"
 #include "chrome/browser/safe_browsing/incident_reporting/blacklist_load_analyzer.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident_reporting_service.h"
-#include "chrome/browser/safe_browsing/incident_reporting/off_domain_inclusion_detector.h"
 #include "chrome/browser/safe_browsing/incident_reporting/resource_request_detector.h"
 #include "chrome/browser/safe_browsing/incident_reporting/variations_seed_signature_analyzer.h"
 #endif
@@ -235,9 +240,6 @@ void SafeBrowsingService::Initialize() {
   incident_service_.reset(CreateIncidentReportingService());
   resource_request_detector_.reset(new ResourceRequestDetector(
       incident_service_->GetIncidentReceiver()));
-
-  off_domain_inclusion_detector_.reset(
-      new OffDomainInclusionDetector(database_manager_));
 #endif  // !defined(FULL_SAFE_BROWSING)
 
   // Track the safe browsing preference of existing profiles.
@@ -283,7 +285,6 @@ void SafeBrowsingService::ShutDown() {
   csd_service_.reset();
 
 #if defined(FULL_SAFE_BROWSING)
-  off_domain_inclusion_detector_.reset();
   resource_request_detector_.reset();
   incident_service_.reset();
 #endif
@@ -308,7 +309,7 @@ bool SafeBrowsingService::DownloadBinHashNeeded() const {
 
 #if defined(FULL_SAFE_BROWSING)
   return (database_manager_->download_protection_enabled() &&
-          safe_browsing::IsMetricsReportingActive()) ||
+          ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled()) ||
          (download_protection_service() &&
           download_protection_service()->enabled());
 #else
@@ -367,8 +368,8 @@ void SafeBrowsingService::AddDownloadManager(
 
 void SafeBrowsingService::OnResourceRequest(const net::URLRequest* request) {
 #if defined(FULL_SAFE_BROWSING)
-  if (off_domain_inclusion_detector_)
-    off_domain_inclusion_detector_->OnResourceRequest(request);
+  TRACE_EVENT1("loader", "SafeBrowsingService::OnResourceRequest", "url",
+               request->url().spec());
   if (resource_request_detector_)
     resource_request_detector_->OnResourceRequest(request);
 #endif

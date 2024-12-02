@@ -6,7 +6,6 @@
 
 #include <CoreServices/CoreServices.h>
 
-#include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/mac/mac_logging.h"
 #include "base/metrics/histogram_macros.h"
@@ -33,14 +32,21 @@ const int kInputCallbackStartTimeoutInSeconds = 5;
 
 static std::ostream& operator<<(std::ostream& os,
                                 const AudioStreamBasicDescription& format) {
+  // The 32-bit integer format.mFormatID is actually a non-terminated 4 byte
+  // string. Example: kAudioFormatLinearPCM = 'lpcm'.
+  char format_id_string[5];
+  // Converts a 32-bit integer from the host’s native byte order to big-endian.
+  UInt32 format_id = CFSwapInt32HostToBig(format.mFormatID);
+  bcopy(&format_id, format_id_string, 4);
   os << "sample rate       : " << format.mSampleRate << std::endl
-     << "format ID         : " << format.mFormatID << std::endl
+     << "format ID         : " << format_id_string << std::endl
      << "format flags      : " << format.mFormatFlags << std::endl
      << "bytes per packet  : " << format.mBytesPerPacket << std::endl
      << "frames per packet : " << format.mFramesPerPacket << std::endl
      << "bytes per frame   : " << format.mBytesPerFrame << std::endl
      << "channels per frame: " << format.mChannelsPerFrame << std::endl
-     << "bits per channel  : " << format.mBitsPerChannel;
+     << "bits per channel  : " << format.mBitsPerChannel << std::endl
+     << "reserved          : " << format.mReserved;
   return os;
 }
 
@@ -53,7 +59,7 @@ AUAudioInputStream::AUAudioInputStream(AudioManagerMac* manager,
                                        AudioDeviceID audio_device_id)
     : manager_(manager),
       number_of_frames_(input_params.frames_per_buffer()),
-      sink_(NULL),
+      sink_(nullptr),
       audio_unit_(0),
       input_device_id_(audio_device_id),
       started_(false),
@@ -80,7 +86,7 @@ AUAudioInputStream::AUAudioInputStream(AudioManagerMac* manager,
   format_.mBytesPerFrame = format_.mBytesPerPacket;
   format_.mReserved = 0;
 
-  DVLOG(1) << "Desired ouput format: " << format_;
+  DVLOG(1) << "Desired output format: " << format_;
 
   // Derive size (in bytes) of the buffers that we will render to.
   UInt32 data_byte_size = number_of_frames_ * format_.mBytesPerFrame;
@@ -89,7 +95,7 @@ AUAudioInputStream::AUAudioInputStream(AudioManagerMac* manager,
   // Allocate AudioBuffers to be used as storage for the received audio.
   // The AudioBufferList structure works as a placeholder for the
   // AudioBuffer structure, which holds a pointer to the actual data buffer.
-  audio_data_buffer_.reset(new uint8[data_byte_size]);
+  audio_data_buffer_.reset(new uint8_t[data_byte_size]);
   audio_buffer_list_.mNumberBuffers = 1;
 
   AudioBuffer* audio_buffer = audio_buffer_list_.mBuffers;
@@ -116,6 +122,10 @@ bool AUAudioInputStream::Open() {
   // Start by obtaining an AudioOuputUnit using an AUHAL component description.
 
   // Description for the Audio Unit we want to use (AUHAL in this case).
+  // The kAudioUnitSubType_HALOutput audio unit interfaces to any audio device.
+  // The user specifies which audio device to track. The audio unit can do
+  // input from the device as well as output to the device. Bus 0 is used for
+  // the output side, bus 1 is used to get audio input from the device.
   AudioComponentDescription desc = {
       kAudioUnitType_Output,
       kAudioUnitSubType_HALOutput,
@@ -124,7 +134,7 @@ bool AUAudioInputStream::Open() {
       0
   };
 
-  AudioComponent comp = AudioComponentFindNext(0, &desc);
+  AudioComponent comp = AudioComponentFindNext(nullptr, &desc);
   DCHECK(comp);
 
   // Get access to the service provided by the specified Audio Unit.
@@ -134,12 +144,27 @@ bool AUAudioInputStream::Open() {
     return false;
   }
 
+  // Initialize the AUHAL before making any changes or using it. The audio unit
+  // will be initialized once more as last operation in this method but that is
+  // intentional. This approach is based on a comment in the CAPlayThrough
+  // example from Apple, which states that "AUHAL needs to be initialized
+  // *before* anything is done to it".
+  // TODO(henrika): remove this extra call if we are unable to see any positive
+  // effects of it in our UMA stats.
+  result = AudioUnitInitialize(audio_unit_);
+  if (result != noErr) {
+    HandleError(result);
+    return false;
+  }
+
   // Enable IO on the input scope of the Audio Unit.
+  // Note that, these changes must be done *before* setting the AUHAL's
+  // current device.
 
   // After creating the AUHAL object, we must enable IO on the input scope
   // of the Audio Unit to obtain the device input. Input must be explicitly
   // enabled with the kAudioOutputUnitProperty_EnableIO property on Element 1
-  // of the AUHAL. Beacause the AUHAL can be used for both input and output,
+  // of the AUHAL. Because the AUHAL can be used for both input and output,
   // we must also disable IO on the output scope.
 
   UInt32 enableIO = 1;
@@ -182,20 +207,41 @@ bool AUAudioInputStream::Open() {
     return false;
   }
 
-  // Set up the the desired (output) format.
-  // For obtaining input from a device, the device format is always expressed
-  // on the output scope of the AUHAL's Element 1.
-  result = AudioUnitSetProperty(audio_unit_,
-                                kAudioUnitProperty_StreamFormat,
-                                kAudioUnitScope_Output,
-                                1,
-                                &format_,
-                                sizeof(format_));
+  // Register the input procedure for the AUHAL.
+  // This procedure will be called when the AUHAL has received new data
+  // from the input device.
+  AURenderCallbackStruct callback;
+  callback.inputProc = InputProc;
+  callback.inputProcRefCon = this;
+  result = AudioUnitSetProperty(
+      audio_unit_, kAudioOutputUnitProperty_SetInputCallback,
+      kAudioUnitScope_Global, 0, &callback, sizeof(callback));
   if (result != noErr) {
     HandleError(result);
     return false;
   }
 
+  // Get the stream format for the selected input device and ensure that the
+  // sample rate of the selected input device matches the desired (given at
+  // construction) sample rate. We should not rely on sample rate conversion
+  // in the AUHAL, only *simple* conversions, e.g., 32-bit float to 16-bit
+  // signed integer format.
+  AudioStreamBasicDescription input_device_format = {0};
+  UInt32 property_size = sizeof(input_device_format);
+  result = AudioUnitGetProperty(audio_unit_, kAudioUnitProperty_StreamFormat,
+                                kAudioUnitScope_Input, 1, &input_device_format,
+                                &property_size);
+  DVLOG(1) << "Input device format: " << input_device_format;
+  if (input_device_format.mSampleRate != format_.mSampleRate) {
+    LOG(ERROR)
+        << "Input device's sample rate does not match the client's sample rate";
+    result = kAudioUnitErr_FormatNotSupported;
+    HandleError(result);
+    return false;
+  }
+
+  // Modify the IO buffer size if not already set correctly for the selected
+  // device.
   if (!manager_->MaybeChangeBufferSize(input_device_id_, audio_unit_, 1,
                                        number_of_frames_,
                                        &buffer_size_was_changed_)) {
@@ -203,21 +249,33 @@ bool AUAudioInputStream::Open() {
     HandleError(result);
     return false;
   }
-  DLOG_IF(WARNING, buffer_size_was_changed_) << "IO buffer size was changed to "
-                                             << number_of_frames_;
 
-  // Register the input procedure for the AUHAL.
-  // This procedure will be called when the AUHAL has received new data
-  // from the input device.
-  AURenderCallbackStruct callback;
-  callback.inputProc = InputProc;
-  callback.inputProcRefCon = this;
-  result = AudioUnitSetProperty(audio_unit_,
-                                kAudioOutputUnitProperty_SetInputCallback,
-                                kAudioUnitScope_Global,
-                                0,
-                                &callback,
-                                sizeof(callback));
+  // If |number_of_frames_| is out of range, the closest valid buffer size will
+  // be set instead. Check the current setting and log a warning for a non
+  // perfect match. Any such mismatch will be compensated for in InputProc().
+  if (buffer_size_was_changed_) {
+    UInt32 io_buffer_size_frames;
+    property_size = sizeof(io_buffer_size_frames);
+    result = AudioUnitGetProperty(
+        audio_unit_, kAudioDevicePropertyBufferFrameSize,
+        kAudioUnitScope_Global, 0, &io_buffer_size_frames, &property_size);
+    LOG_IF(WARNING, io_buffer_size_frames != number_of_frames_)
+        << "AUHAL is using best match of IO buffer size: "
+        << io_buffer_size_frames;
+  }
+
+  // Channel mapping should be supported but add a warning just in case.
+  // TODO(henrika): perhaps add to UMA stat to track if this can happen.
+  DLOG_IF(WARNING,
+          input_device_format.mChannelsPerFrame != format_.mChannelsPerFrame)
+      << "AUHAL's audio converter must do channel conversion";
+
+  // Set up the the desired (output) format.
+  // For obtaining input from a device, the device format is always expressed
+  // on the output scope of the AUHAL's Element 1.
+  result = AudioUnitSetProperty(audio_unit_, kAudioUnitProperty_StreamFormat,
+                                kAudioUnitScope_Output, 1, &format_,
+                                sizeof(format_));
   if (result != noErr) {
     HandleError(result);
     return false;
@@ -295,7 +353,7 @@ void AUAudioInputStream::Stop() {
   DCHECK_EQ(result, noErr);
   SetInputCallbackIsActive(false);
   started_ = false;
-  sink_ = NULL;
+  sink_ = nullptr;
   fifo_.Clear();
   OSSTATUS_DLOG_IF(ERROR, result != noErr, result)
       << "Failed to stop acquiring data";
@@ -352,12 +410,9 @@ void AUAudioInputStream::SetVolume(double volume) {
 
   // Try to set the volume for master volume channel.
   if (IsVolumeSettableOnChannel(kAudioObjectPropertyElementMaster)) {
-    OSStatus result = AudioObjectSetPropertyData(input_device_id_,
-                                                 &property_address,
-                                                 0,
-                                                 NULL,
-                                                 sizeof(volume_float32),
-                                                 &volume_float32);
+    OSStatus result = AudioObjectSetPropertyData(
+        input_device_id_, &property_address, 0, nullptr, sizeof(volume_float32),
+        &volume_float32);
     if (result != noErr) {
       DLOG(WARNING) << "Failed to set volume to " << volume_float32;
     }
@@ -369,12 +424,9 @@ void AUAudioInputStream::SetVolume(double volume) {
   for (int i = 1; i <= number_of_channels_in_frame_; ++i) {
     property_address.mElement = static_cast<UInt32>(i);
     if (IsVolumeSettableOnChannel(i)) {
-      OSStatus result = AudioObjectSetPropertyData(input_device_id_,
-                                                   &property_address,
-                                                   0,
-                                                   NULL,
-                                                   sizeof(volume_float32),
-                                                   &volume_float32);
+      OSStatus result = AudioObjectSetPropertyData(
+          input_device_id_, &property_address, 0, NULL, sizeof(volume_float32),
+          &volume_float32);
       if (result == noErr)
         ++successful_channels;
     }
@@ -409,12 +461,9 @@ double AUAudioInputStream::GetVolume() {
     // master channel.
     Float32 volume_float32 = 0.0;
     UInt32 size = sizeof(volume_float32);
-    OSStatus result = AudioObjectGetPropertyData(input_device_id_,
-                                                 &property_address,
-                                                 0,
-                                                 NULL,
-                                                 &size,
-                                                 &volume_float32);
+    OSStatus result =
+        AudioObjectGetPropertyData(input_device_id_, &property_address, 0,
+                                   nullptr, &size, &volume_float32);
     if (result == noErr)
       return static_cast<double>(volume_float32);
   } else {
@@ -427,12 +476,9 @@ double AUAudioInputStream::GetVolume() {
       if (AudioObjectHasProperty(input_device_id_, &property_address)) {
         Float32 channel_volume = 0;
         UInt32 size = sizeof(channel_volume);
-        OSStatus result = AudioObjectGetPropertyData(input_device_id_,
-                                                     &property_address,
-                                                     0,
-                                                     NULL,
-                                                     &size,
-                                                     &channel_volume);
+        OSStatus result =
+            AudioObjectGetPropertyData(input_device_id_, &property_address, 0,
+                                       nullptr, &size, &channel_volume);
         if (result == noErr) {
           volume_float32 += channel_volume;
           ++successful_channels;
@@ -467,7 +513,7 @@ bool AUAudioInputStream::IsMuted() {
   UInt32 muted = 0;
   UInt32 size = sizeof(muted);
   OSStatus result = AudioObjectGetPropertyData(
-      input_device_id_, &property_address, 0, NULL, &size, &muted);
+      input_device_id_, &property_address, 0, nullptr, &size, &muted);
   DLOG_IF(WARNING, result != noErr) << "Failed to get mute state";
   return result == noErr && muted != 0;
 }
@@ -512,7 +558,7 @@ OSStatus AUAudioInputStream::InputProc(void* user_data,
       // handles it.
       // See See http://www.crbug.com/434681 for one example when we can enter
       // this scope.
-      audio_input->audio_data_buffer_.reset(new uint8[new_size]);
+      audio_input->audio_data_buffer_.reset(new uint8_t[new_size]);
       audio_buffer->mData = audio_input->audio_data_buffer_.get();
     }
 
@@ -573,9 +619,9 @@ OSStatus AUAudioInputStream::Provide(UInt32 number_of_frames,
   GetAgcVolume(&normalized_volume);
 
   AudioBuffer& buffer = io_data->mBuffers[0];
-  uint8* audio_data = reinterpret_cast<uint8*>(buffer.mData);
-  uint32 capture_delay_bytes = static_cast<uint32>
-      ((capture_latency_frames + 0.5) * format_.mBytesPerFrame);
+  uint8_t* audio_data = reinterpret_cast<uint8_t*>(buffer.mData);
+  uint32_t capture_delay_bytes = static_cast<uint32_t>(
+      (capture_latency_frames + 0.5) * format_.mBytesPerFrame);
   DCHECK(audio_data);
   if (!audio_data)
     return kAudioUnitErr_InvalidElement;
@@ -676,12 +722,8 @@ double AUAudioInputStream::GetHardwareLatency() {
   };
   UInt32 device_latency_frames = 0;
   size = sizeof(device_latency_frames);
-  result = AudioObjectGetPropertyData(input_device_id_,
-                                      &property_address,
-                                      0,
-                                      NULL,
-                                      &size,
-                                      &device_latency_frames);
+  result = AudioObjectGetPropertyData(input_device_id_, &property_address, 0,
+                                      nullptr, &size, &device_latency_frames);
   DLOG_IF(WARNING, result != noErr) << "Could not get audio device latency.";
 
   return static_cast<double>((audio_unit_latency_sec *
@@ -712,12 +754,8 @@ int AUAudioInputStream::GetNumberOfChannelsFromStream() {
   };
   AudioStreamBasicDescription stream_format;
   UInt32 size = sizeof(stream_format);
-  OSStatus result = AudioObjectGetPropertyData(input_device_id_,
-                                               &property_address,
-                                               0,
-                                               NULL,
-                                               &size,
-                                               &stream_format);
+  OSStatus result = AudioObjectGetPropertyData(
+      input_device_id_, &property_address, 0, nullptr, &size, &stream_format);
   if (result != noErr) {
     DLOG(WARNING) << "Could not get stream format";
     return 0;
@@ -756,7 +794,9 @@ bool AUAudioInputStream::GetInputCallbackIsActive() {
 
 void AUAudioInputStream::CheckInputStartupSuccess() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (started_) {
+  // Only add UMA stat related to failing input audio for streams where
+  // the AGC has been enabled, e.g. WebRTC audio input streams.
+  if (started_ && GetAutomaticGainControl()) {
     // Check if we have called Start() and input callbacks have actually
     // started in time as they should. If that is not the case, we have a
     // problem and the stream is considered dead.
@@ -764,7 +804,6 @@ void AUAudioInputStream::CheckInputStartupSuccess() {
     UMA_HISTOGRAM_BOOLEAN("Media.Audio.InputStartupSuccessMac",
                           input_callback_is_active);
     DVLOG(1) << "input_callback_is_active: " << input_callback_is_active;
-
     if (!input_callback_is_active) {
       // Now when we know that startup has failed for some reason, add extra
       // UMA stats in an attempt to figure out the exact reason.
@@ -775,6 +814,7 @@ void AUAudioInputStream::CheckInputStartupSuccess() {
 
 void AUAudioInputStream::CloseAudioUnit() {
   DCHECK(thread_checker_.CalledOnValidThread());
+  DVLOG(1) << "CloseAudioUnit";
   if (!audio_unit_)
     return;
   OSStatus result = AudioUnitUninitialize(audio_unit_);
@@ -798,6 +838,10 @@ void AUAudioInputStream::AddHistogramsForFailedStartup() {
                             manager_->low_latency_input_streams());
   UMA_HISTOGRAM_COUNTS_1000("Media.Audio.NumberOfBasicInputStreamsMac",
                             manager_->basic_input_streams());
+  // TODO(henrika): this value will currently always report true. It should be
+  // fixed when we understand the problem better.
+  UMA_HISTOGRAM_BOOLEAN("Media.Audio.AutomaticGainControlMac",
+                        GetAutomaticGainControl());
 }
 
 }  // namespace media

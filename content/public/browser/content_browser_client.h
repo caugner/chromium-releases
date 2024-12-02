@@ -5,6 +5,8 @@
 #ifndef CONTENT_PUBLIC_BROWSER_CONTENT_BROWSER_CLIENT_H_
 #define CONTENT_PUBLIC_BROWSER_CONTENT_BROWSER_CLIENT_H_
 
+#include <stddef.h>
+
 #include <map>
 #include <string>
 #include <utility>
@@ -15,6 +17,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "content/public/browser/certificate_request_result_type.h"
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/common/content_client.h"
@@ -361,7 +364,7 @@ class CONTENT_EXPORT ContentBrowserClient {
                               ResourceContext* context,
                               int render_process_id,
                               int render_frame_id,
-                              net::CookieOptions* options);
+                              const net::CookieOptions& options);
 
   // This is called on the IO thread.
   virtual bool AllowSaveLocalState(ResourceContext* context);
@@ -404,6 +407,9 @@ class CONTENT_EXPORT ContentBrowserClient {
                                         const GURL& first_party_url,
                                         ResourceContext* context);
 #endif  // defined(ENABLE_WEBRTC)
+
+  // Allow the embedder to control whether we can use <keygen>.
+  virtual bool AllowKeygen(const GURL& url, content::ResourceContext* context);
 
   // Allow the embedder to override the request context based on the URL for
   // certain operations, like cookie access. Returns nullptr to indicate the
@@ -461,8 +467,7 @@ class CONTENT_EXPORT ContentBrowserClient {
   // asynchronously. If |result| is not set to
   // CERTIFICATE_REQUEST_RESULT_TYPE_CONTINUE, the request will be cancelled
   // or denied immediately, and the callback won't be run.
-  virtual void AllowCertificateError(int render_process_id,
-                                     int render_frame_id,
+  virtual void AllowCertificateError(WebContents* web_contents,
                                      int cert_error,
                                      const net::SSLInfo& ssl_info,
                                      const GURL& request_url,
@@ -746,6 +751,15 @@ class CONTENT_EXPORT ContentBrowserClient {
   // an AppContainer.
   virtual base::string16 GetAppContainerSidForSandboxType(
       int sandbox_type) const;
+
+  // Returns whether the Win32k lockdown process mitigation should be applied to
+  // a process hosting a plugin with the specified |mime_type|.
+  virtual bool IsWin32kLockdownEnabledForMimeType(
+      const std::string& mime_type) const;
+
+  // Returns true if processes should be launched with a /prefetch:# argument.
+  // See the kPrefetchArgument* constants in content_switches.cc for details.
+  virtual bool ShouldUseWindowsPrefetchArgument() const;
 #endif
 
 #if defined(VIDEO_HOLE)

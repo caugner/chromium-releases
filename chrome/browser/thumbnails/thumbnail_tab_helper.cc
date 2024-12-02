@@ -4,6 +4,7 @@
 
 #include "chrome/browser/thumbnails/thumbnail_tab_helper.h"
 
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/thumbnails/thumbnail_service.h"
@@ -118,7 +119,6 @@ void AsyncProcessThumbnail(content::WebContents* web_contents,
 
 ThumbnailTabHelper::ThumbnailTabHelper(content::WebContents* contents)
     : content::WebContentsObserver(contents),
-      enabled_(true),
       load_interrupted_(false) {
   // Even though we deal in RenderWidgetHosts, we only care about its
   // subclass, RenderViewHost when it is in a tab. We don't make thumbnails
@@ -219,7 +219,5 @@ void ThumbnailTabHelper::RenderViewHostCreated(
 }
 
 void ThumbnailTabHelper::WidgetHidden(RenderWidgetHost* widget) {
-  if (!enabled_)
-    return;
   UpdateThumbnailIfNecessary(web_contents());
 }

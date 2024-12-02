@@ -24,18 +24,23 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/dom/shadow/ComposedTreeTraversal.h"
 
 #include "core/dom/Element.h"
 #include "core/dom/shadow/ElementShadow.h"
 #include "core/html/HTMLShadowElement.h"
+#include "core/html/HTMLSlotElement.h"
 
 namespace blink {
 
 static inline ElementShadow* shadowFor(const Node& node)
 {
     return node.isElementNode() ? toElement(node).shadow() : nullptr;
+}
+
+static inline bool canBeDistributedToInsertionPoint(const Node& node)
+{
+    return node.isInV0ShadowTree() || node.isChildOfV0ShadowHost();
 }
 
 Node* ComposedTreeTraversal::traverseChild(const Node& node, TraversalDirection direction)
@@ -50,7 +55,26 @@ Node* ComposedTreeTraversal::traverseChild(const Node& node, TraversalDirection 
 
 Node* ComposedTreeTraversal::resolveDistributionStartingAt(const Node* node, TraversalDirection direction)
 {
+    if (!node)
+        return nullptr;
     for (const Node* sibling = node; sibling; sibling = (direction == TraversalDirectionForward ? sibling->nextSibling() : sibling->previousSibling())) {
+        if (isHTMLSlotElement(*sibling)) {
+            const HTMLSlotElement& slot = toHTMLSlotElement(*sibling);
+            if (Node* found = (direction == TraversalDirectionForward ? slot.firstDistributedNode() : slot.lastDistributedNode()))
+                return found;
+            continue;
+        }
+        if (node->isInV0ShadowTree())
+            return v0ResolveDistributionStartingAt(*sibling, direction);
+        return const_cast<Node*>(sibling);
+    }
+    return nullptr;
+}
+
+Node* ComposedTreeTraversal::v0ResolveDistributionStartingAt(const Node& node, TraversalDirection direction)
+{
+    ASSERT(!isHTMLSlotElement(node));
+    for (const Node* sibling = &node; sibling; sibling = (direction == TraversalDirectionForward ? sibling->nextSibling() : sibling->previousSibling())) {
         if (!isActiveInsertionPoint(*sibling))
             return const_cast<Node*>(sibling);
         const InsertionPoint& insertionPoint = toInsertionPoint(*sibling);
@@ -61,45 +85,96 @@ Node* ComposedTreeTraversal::resolveDistributionStartingAt(const Node* node, Tra
     return nullptr;
 }
 
+static HTMLSlotElement* finalDestinationSlotFor(const Node& node)
+{
+    HTMLSlotElement* slot = node.assignedSlot();
+    if (!slot)
+        return nullptr;
+    for (HTMLSlotElement* next = slot->assignedSlot(); next; next = next->assignedSlot()) {
+        slot = next;
+    }
+    return slot;
+}
+
 // TODO(hayato): This may return a wrong result for a node which is not in a
 // document composed tree.  See ComposedTreeTraversalTest's redistribution test for details.
 Node* ComposedTreeTraversal::traverseSiblings(const Node& node, TraversalDirection direction)
 {
-    if (!shadowWhereNodeCanBeDistributed(node))
-        return traverseSiblingsOrShadowInsertionPointSiblings(node, direction);
+    if (node.isChildOfV1ShadowHost())
+        return traverseSiblingsForV1HostChild(node, direction);
 
+    if (shadowWhereNodeCanBeDistributed(node))
+        return traverseSiblingsForV0Distribution(node, direction);
+
+    if (Node* found = resolveDistributionStartingAt(direction == TraversalDirectionForward ? node.nextSibling() : node.previousSibling(), direction))
+        return found;
+
+    if (!node.isInV0ShadowTree())
+        return nullptr;
+
+    // For v0 older shadow tree
+    if (node.parentNode() && node.parentNode()->isShadowRoot()) {
+        ShadowRoot* parentShadowRoot = toShadowRoot(node.parentNode());
+        if (!parentShadowRoot->isYoungest()) {
+            HTMLShadowElement* assignedInsertionPoint = parentShadowRoot->shadowInsertionPointOfYoungerShadowRoot();
+            ASSERT(assignedInsertionPoint);
+            return traverseSiblings(*assignedInsertionPoint, direction);
+        }
+    }
+    return nullptr;
+}
+
+Node* ComposedTreeTraversal::traverseSiblingsForV1HostChild(const Node& node, TraversalDirection direction)
+{
+    HTMLSlotElement* slot = finalDestinationSlotFor(node);
+    if (!slot)
+        return nullptr;
+    if (Node* siblingInDistributedNodes = (direction == TraversalDirectionForward ? slot->distributedNodeNextTo(node) : slot->distributedNodePreviousTo(node)))
+        return siblingInDistributedNodes;
+    return traverseSiblings(*slot, direction);
+}
+
+Node* ComposedTreeTraversal::traverseSiblingsForV0Distribution(const Node& node, TraversalDirection direction)
+{
     const InsertionPoint* finalDestination = resolveReprojection(&node);
     if (!finalDestination)
         return nullptr;
     if (Node* found = (direction == TraversalDirectionForward ? finalDestination->distributedNodeNextTo(&node) : finalDestination->distributedNodePreviousTo(&node)))
         return found;
     return traverseSiblings(*finalDestination, direction);
+
 }
 
-Node* ComposedTreeTraversal::traverseSiblingsOrShadowInsertionPointSiblings(const Node& node, TraversalDirection direction)
-{
-    if (Node* found = resolveDistributionStartingAt(direction == TraversalDirectionForward ? node.nextSibling() : node.previousSibling(), direction))
-        return found;
-
-    if (node.parentNode() && node.parentNode()->isShadowRoot()) {
-        ShadowRoot* parentShadowRoot = toShadowRoot(node.parentNode());
-        if (!parentShadowRoot->isYoungest()) {
-            HTMLShadowElement* assignedInsertionPoint = parentShadowRoot->shadowInsertionPointOfYoungerShadowRoot();
-            ASSERT(assignedInsertionPoint);
-            return traverseSiblingsOrShadowInsertionPointSiblings(*assignedInsertionPoint, direction);
-        }
-    }
-    return nullptr;
-}
-
-// FIXME: Use an iterative algorithm so that it can be inlined.
-// https://bugs.webkit.org/show_bug.cgi?id=90415
 ContainerNode* ComposedTreeTraversal::traverseParent(const Node& node, ParentTraversalDetails* details)
 {
     // TODO(hayato): Stop this hack for a pseudo element because a pseudo element is not a child of its parentOrShadowHostNode() in a composed tree.
     if (node.isPseudoElement())
         return node.parentOrShadowHostNode();
 
+    if (node.isChildOfV1ShadowHost()) {
+        HTMLSlotElement* slot = finalDestinationSlotFor(node);
+        if (!slot)
+            return nullptr;
+        return traverseParent(*slot);
+    }
+
+    Element* parent = node.parentElement();
+    if (parent && isHTMLSlotElement(parent)) {
+        HTMLSlotElement& slot = toHTMLSlotElement(*parent);
+        if (!slot.getAssignedNodes().isEmpty())
+            return nullptr;
+        return traverseParent(slot, details);
+    }
+
+    if (canBeDistributedToInsertionPoint(node))
+        return traverseParentForV0(node, details);
+
+    ASSERT(!shadowWhereNodeCanBeDistributed(node));
+    return traverseParentOrHost(node);
+}
+
+ContainerNode* ComposedTreeTraversal::traverseParentForV0(const Node& node, ParentTraversalDetails* details)
+{
     if (shadowWhereNodeCanBeDistributed(node)) {
         if (const InsertionPoint* insertionPoint = resolveReprojection(&node)) {
             if (details)
@@ -107,14 +182,17 @@ ContainerNode* ComposedTreeTraversal::traverseParent(const Node& node, ParentTra
             // The node is distributed. But the distribution was stopped at this insertion point.
             if (shadowWhereNodeCanBeDistributed(*insertionPoint))
                 return nullptr;
-            return traverseParentOrHost(*insertionPoint);
+            return traverseParent(*insertionPoint);
         }
         return nullptr;
     }
-    return traverseParentOrHost(node);
+    ContainerNode* parent = traverseParentOrHost(node);
+    if (isActiveInsertionPoint(*parent))
+        return nullptr;
+    return parent;
 }
 
-inline ContainerNode* ComposedTreeTraversal::traverseParentOrHost(const Node& node)
+ContainerNode* ComposedTreeTraversal::traverseParentOrHost(const Node& node)
 {
     ContainerNode* parent = node.parentNode();
     if (!parent)
@@ -125,10 +203,7 @@ inline ContainerNode* ComposedTreeTraversal::traverseParentOrHost(const Node& no
     ASSERT(!shadowRoot->shadowInsertionPointOfYoungerShadowRoot());
     if (!shadowRoot->isYoungest())
         return nullptr;
-    Element* host = shadowRoot->host();
-    if (isActiveInsertionPoint(*host))
-        return nullptr;
-    return host;
+    return shadowRoot->host();
 }
 
 Node* ComposedTreeTraversal::childAt(const Node& node, unsigned index)

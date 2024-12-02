@@ -28,8 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-
 #include "platform/Task.h"
 #include "platform/ThreadSafeFunctional.h"
 #include "platform/heap/Handle.h"
@@ -41,10 +39,9 @@
 #include "platform/heap/Visitor.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebTraceLocation.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "wtf/HashTraits.h"
 #include "wtf/LinkedHashSet.h"
-
-#include <gtest/gtest.h>
 
 namespace blink {
 
@@ -1215,7 +1212,7 @@ class PreFinalizerBase : public GarbageCollectedFinalized<PreFinalizerBase> {
     USING_PRE_FINALIZER(PreFinalizerBase, dispose);
 public:
     static PreFinalizerBase* create() { return new PreFinalizerBase();  }
-    ~PreFinalizerBase() { m_wasDestructed = true; }
+    virtual ~PreFinalizerBase() { m_wasDestructed = true; }
     DEFINE_INLINE_VIRTUAL_TRACE() { }
     void dispose()
     {
@@ -4147,7 +4144,7 @@ public:
     InlinedVectorObjectWithVtable()
     {
     }
-    ~InlinedVectorObjectWithVtable()
+    virtual ~InlinedVectorObjectWithVtable()
     {
         s_destructorCalls++;
     }
@@ -4569,10 +4566,16 @@ public:
     MixinA() : m_obj(IntWrapper::create(100)) { }
     DEFINE_INLINE_VIRTUAL_TRACE()
     {
+        s_traceCount++;
         visitor->trace(m_obj);
     }
+
+    static int s_traceCount;
+
     Member<IntWrapper> m_obj;
 };
+
+int MixinA::s_traceCount = 0;
 
 class MixinB : public GarbageCollectedMixin {
 public:
@@ -4597,6 +4600,25 @@ public:
     Member<IntWrapper> m_obj;
 };
 
+class DerivedMultipleMixins : public MultipleMixins {
+public:
+    DerivedMultipleMixins() : m_obj(IntWrapper::create(103)) { }
+
+    DEFINE_INLINE_VIRTUAL_TRACE()
+    {
+        s_traceCalled++;
+        visitor->trace(m_obj);
+        MultipleMixins::trace(visitor);
+    }
+
+    static int s_traceCalled;
+
+private:
+    Member<IntWrapper> m_obj;
+};
+
+int DerivedMultipleMixins::s_traceCalled = 0;
+
 static const bool s_isMixinTrue = IsGarbageCollectedMixin<MultipleMixins>::value;
 static const bool s_isMixinFalse = IsGarbageCollectedMixin<IntWrapper>::value;
 
@@ -4620,6 +4642,58 @@ TEST(HeapTest, MultipleMixins)
     }
     preciselyCollectGarbage();
     EXPECT_EQ(3, IntWrapper::s_destructorCalls);
+}
+
+TEST(HeapTest, DerivedMultipleMixins)
+{
+    clearOutOldGarbage();
+    IntWrapper::s_destructorCalls = 0;
+    DerivedMultipleMixins::s_traceCalled = 0;
+
+    DerivedMultipleMixins* obj = new DerivedMultipleMixins();
+    {
+        Persistent<MixinA> a = obj;
+        preciselyCollectGarbage();
+        EXPECT_EQ(0, IntWrapper::s_destructorCalls);
+        EXPECT_EQ(1, DerivedMultipleMixins::s_traceCalled);
+    }
+    {
+        Persistent<MixinB> b = obj;
+        preciselyCollectGarbage();
+        EXPECT_EQ(0, IntWrapper::s_destructorCalls);
+        EXPECT_EQ(2, DerivedMultipleMixins::s_traceCalled);
+    }
+    preciselyCollectGarbage();
+    EXPECT_EQ(4, IntWrapper::s_destructorCalls);
+}
+
+class MixinInstanceWithoutTrace : public GarbageCollected<MixinInstanceWithoutTrace>, public MixinA {
+    USING_GARBAGE_COLLECTED_MIXIN(MixinInstanceWithoutTrace);
+public:
+    MixinInstanceWithoutTrace()
+    {
+    }
+};
+
+TEST(HeapTest, MixinInstanceWithoutTrace)
+{
+    // Verify that a mixin instance without any traceable
+    // references inherits the mixin's trace implementation.
+    clearOutOldGarbage();
+    MixinA::s_traceCount = 0;
+    MixinInstanceWithoutTrace* obj = new MixinInstanceWithoutTrace();
+    {
+        Persistent<MixinA> a = obj;
+        preciselyCollectGarbage();
+        EXPECT_EQ(1, MixinA::s_traceCount);
+    }
+    {
+        Persistent<MixinInstanceWithoutTrace> b = obj;
+        preciselyCollectGarbage();
+        EXPECT_EQ(2, MixinA::s_traceCount);
+    }
+    preciselyCollectGarbage();
+    EXPECT_EQ(2, MixinA::s_traceCount);
 }
 
 class GCParkingThreadTester {
@@ -5245,13 +5319,13 @@ TEST(HeapTest, IndirectStrongToWeak)
 
 static Mutex& mainThreadMutex()
 {
-    AtomicallyInitializedStaticReference(Mutex, mainMutex, new Mutex);
+    DEFINE_THREAD_SAFE_STATIC_LOCAL(Mutex, mainMutex, new Mutex);
     return mainMutex;
 }
 
 static ThreadCondition& mainThreadCondition()
 {
-    AtomicallyInitializedStaticReference(ThreadCondition, mainCondition, new ThreadCondition);
+    DEFINE_THREAD_SAFE_STATIC_LOCAL(ThreadCondition, mainCondition, new ThreadCondition);
     return mainCondition;
 }
 
@@ -5268,13 +5342,13 @@ static void wakeMainThread()
 
 static Mutex& workerThreadMutex()
 {
-    AtomicallyInitializedStaticReference(Mutex, workerMutex, new Mutex);
+    DEFINE_THREAD_SAFE_STATIC_LOCAL(Mutex, workerMutex, new Mutex);
     return workerMutex;
 }
 
 static ThreadCondition& workerThreadCondition()
 {
-    AtomicallyInitializedStaticReference(ThreadCondition, workerCondition, new ThreadCondition);
+    DEFINE_THREAD_SAFE_STATIC_LOCAL(ThreadCondition, workerCondition, new ThreadCondition);
     return workerCondition;
 }
 
@@ -5569,7 +5643,7 @@ TEST(HeapTest, GarbageCollectionDuringMixinConstruction)
 
 static RecursiveMutex& recursiveMutex()
 {
-    AtomicallyInitializedStaticReference(RecursiveMutex, recursiveMutex, new RecursiveMutex);
+    DEFINE_THREAD_SAFE_STATIC_LOCAL(RecursiveMutex, recursiveMutex, new RecursiveMutex);
     return recursiveMutex;
 }
 
@@ -5900,6 +5974,7 @@ TEST(HeapTest, PartObjectWithVirtualMethod)
 class AllocInSuperConstructorArgumentSuper : public GarbageCollectedFinalized<AllocInSuperConstructorArgumentSuper> {
 public:
     AllocInSuperConstructorArgumentSuper(bool value) : m_value(value) { }
+    virtual ~AllocInSuperConstructorArgumentSuper() { }
     DEFINE_INLINE_VIRTUAL_TRACE() { }
     bool value() { return m_value; }
 private:

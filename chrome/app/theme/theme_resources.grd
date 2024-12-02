@@ -33,6 +33,7 @@
       <structure type="chrome_scaled_image" name="IDR_ALLOWED_FULLSCREEN" file="common/allowed_fullscreen.png" />
       <structure type="chrome_scaled_image" name="IDR_ALLOWED_IMAGES" file="common/allowed_images.png" />
       <structure type="chrome_scaled_image" name="IDR_ALLOWED_JAVASCRIPT" file="common/allowed_script.png" />
+      <structure type="chrome_scaled_image" name="IDR_ALLOWED_KEYGEN" file="common/allowed_keygen.png" />
       <structure type="chrome_scaled_image" name="IDR_ALLOWED_LOCATION" file="common/allowed_location.png" />
       <structure type="chrome_scaled_image" name="IDR_ALLOWED_MIC" file="common/allowed_mic.png" />
       <structure type="chrome_scaled_image" name="IDR_ALLOWED_MIDI_SYSEX" file="common/allowed_midi.png" />
@@ -42,6 +43,7 @@
         <structure type="chrome_scaled_image" name="IDR_ALLOWED_PLUGINS" file="common/allowed_plugins.png" />
       </if>
       <structure type="chrome_scaled_image" name="IDR_ALLOWED_POPUPS" file="common/allowed_popups.png" />
+      <structure type="chrome_scaled_image" name="IDR_ALLOWED_USB" file="common/allowed_usb.png" />
       <if expr="enable_app_list and is_win and not _google_chrome">
         <structure type="chrome_scaled_image" name="IDR_APP_LIST" file="chromium/app_list_48.png" />
       </if>
@@ -77,16 +79,6 @@
         <structure type="chrome_scaled_image" name="IDR_APP_WINDOW_MINIMIZE_P" file="common/app_window_minimize_active.png" />
       </if>
       <if expr="use_ash">
-        <structure type="chrome_scaled_image" name="IDR_ASH_BROWSER_WINDOW_CONTROL_BACKGROUND_MAXIMIZED_H" file="common/ash/browser_window_control_background_maximized_hover.png" />
-        <structure type="chrome_scaled_image" name="IDR_ASH_BROWSER_WINDOW_CONTROL_BACKGROUND_MAXIMIZED_P" file="common/ash/browser_window_control_background_maximized_pressed.png" />
-        <structure type="chrome_scaled_image" name="IDR_ASH_BROWSER_WINDOW_CONTROL_BACKGROUND_RESTORED_H" file="common/ash/browser_window_control_background_restored_hover.png" />
-        <structure type="chrome_scaled_image" name="IDR_ASH_BROWSER_WINDOW_CONTROL_BACKGROUND_RESTORED_P" file="common/ash/browser_window_control_background_restored_pressed.png" />
-        <structure type="chrome_scaled_image" name="IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_CLOSE" file="common/ash/browser_window_control_icon_close.png" />
-        <structure type="chrome_scaled_image" name="IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_LEFT_SNAPPED" file="common/ash/browser_window_control_icon_left_snapped.png" />
-        <structure type="chrome_scaled_image" name="IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_MAXIMIZE" file="common/ash/browser_window_control_icon_maximize.png" />
-        <structure type="chrome_scaled_image" name="IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_MINIMIZE" file="common/ash/browser_window_control_icon_minimize.png" />
-        <structure type="chrome_scaled_image" name="IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_RESTORE" file="common/ash/browser_window_control_icon_restore.png" />
-        <structure type="chrome_scaled_image" name="IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_RIGHT_SNAPPED" file="common/ash/browser_window_control_icon_right_snapped.png" />
         <structure type="chrome_scaled_image" name="IDR_ASH_BROWSER_WINDOW_HEADER_SHADE_LEFT" file="common/ash/browser_window_header_shade_left.png" />
         <structure type="chrome_scaled_image" name="IDR_ASH_BROWSER_WINDOW_HEADER_SHADE_RIGHT" file="common/ash/browser_window_header_shade_right.png" />
         <structure type="chrome_scaled_image" name="IDR_ASH_BROWSER_WINDOW_HEADER_SHADE_TOP" file="common/ash/browser_window_header_shade_top.png" />
@@ -97,10 +89,6 @@
       <structure type="chrome_scaled_image" name="IDR_AUTOFILL_DIALOG_MENU_BUTTON_P" file="common/autofill_dialog_menu_button_pressed.png" />
       <structure type="chrome_scaled_image" name="IDR_AUTOFILL_DIALOG_MENU_BUTTON_H" file="common/autofill_dialog_menu_button_hover.png" />
       <structure type="chrome_scaled_image" name="IDR_AUTOFILL_DIALOG_MENU_BUTTON_D" file="common/autofill_dialog_menu_button_disabled.png" />
-      <if expr="is_macosx">
-        <structure type="chrome_scaled_image" name="IDR_AUTOFILL_TOOLTIP_ICON" file="legacy/autofill_tooltip_icon.png" />
-        <structure type="chrome_scaled_image" name="IDR_AUTOFILL_TOOLTIP_ICON_H" file="legacy/autofill_tooltip_icon_hover.png" />
-      </if>
       <!-- TODO(jamescook): Update all Chrome platforms to use the new art and metrics
            from Ash, crbug.com/118228 -->
       <if expr="toolkit_views or is_macosx or is_ios">
@@ -114,6 +102,7 @@
       <structure type="chrome_scaled_image" name="IDR_BLOCKED_DOWNLOADS" file="common/blocked_downloads.png" />
       <structure type="chrome_scaled_image" name="IDR_BLOCKED_IMAGES" file="common/blocked_images.png" />
       <structure type="chrome_scaled_image" name="IDR_BLOCKED_JAVASCRIPT" file="common/blocked_script.png" />
+      <structure type="chrome_scaled_image" name="IDR_BLOCKED_KEYGEN" file="common/blocked_keygen.png" />
       <structure type="chrome_scaled_image" name="IDR_BLOCKED_LOCATION" file="common/blocked_location.png" />
       <structure type="chrome_scaled_image" name="IDR_BLOCKED_MIC" file="common/blocked_mic.png" />
       <structure type="chrome_scaled_image" name="IDR_BLOCKED_MIDI_SYSEX" file="common/blocked_midi.png" />
@@ -125,6 +114,7 @@
       </if>
       <structure type="chrome_scaled_image" name="IDR_BLOCKED_POPUPS" file="common/blocked_popups.png" />
       <structure type="chrome_scaled_image" name="IDR_BLOCKED_PPAPI_BROKER" file="common/blocked_pepper_broker.png" />
+      <structure type="chrome_scaled_image" name="IDR_BLOCKED_USB" file="common/blocked_usb.png" />
       <if expr="chromeos">
         <structure type="chrome_scaled_image" name="IDR_BLUETOOTH_KEYBOARD" file="cros/bluetooth_pairing_keyboard.png" />
         <structure type="chrome_scaled_image" name="IDR_BLUETOOTH_MOUSE" file="cros/bluetooth_pairing_mouse.png" />
@@ -179,9 +169,9 @@
       </if>
       <if expr="use_ash">
         <structure type="chrome_scaled_image" name="IDR_CONTENT_TOP_CENTER" file="common/ash/content_top_center.png" />
-        <if expr="not chromeos">
-          <structure type="chrome_scaled_image" name="IDR_CONTENT_TOP_CENTER_DESKTOP" file="common/content_top_center.png" />
-        </if>
+      </if>
+      <if expr="not chromeos">
+        <structure type="chrome_scaled_image" name="IDR_CONTENT_TOP_CENTER_DESKTOP" file="common/content_top_center.png" />
       </if>
       <structure type="chrome_scaled_image" name="IDR_CONTENT_TOP_LEFT_CORNER" file="common/content_top_left_corner.png" />
       <structure type="chrome_scaled_image" name="IDR_CONTENT_TOP_LEFT_CORNER_MASK" file="common/content_top_left_corner_mask.png" />
@@ -247,11 +237,12 @@
       <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_PROGRESS_BACKGROUND_32" file="common/download_progress_background32.png" />
       <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_PROGRESS_FOREGROUND_32" file="common/download_progress_foreground32.png" />
       <if expr="chromeos">
-        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MENU_CANCEL" file="common/downloads/cancel.png" />
-        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MENU_DELETE" file="common/downloads/delete.png" />
-        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MENU_DOWNLOAD" file="common/downloads/download.png" />
-        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MENU_FOLDER" file="common/downloads/folder.png" />
-        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MENU_PAUSE" file="common/downloads/pause.png" />
+        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MENU_CANCEL" file="cros/downloads/cancel.png" />
+        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MENU_DELETE" file="cros/downloads/delete.png" />
+        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MENU_DOWNLOAD" file="cros/downloads/download.png" />
+        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MENU_FOLDER" file="cros/downloads/folder.png" />
+        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MENU_PAUSE" file="cros/downloads/pause.png" />
+        <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_NOTIFICATION_MENU_COPY_TO_CLIPBOARD" file="cros/downloads/copy_to_clipboard.png" />
         <structure type="chrome_scaled_image" name="IDR_ENABLE_DEBUGGING_FAILURE" file="cros/enable_debugging_failure.png" />
         <structure type="chrome_scaled_image" name="IDR_ENABLE_DEBUGGING_SUCCESS" file="cros/enable_debugging_success.png" />
       </if>
@@ -300,7 +291,6 @@
       <structure type="chrome_scaled_image" name="IDR_FIND_DIALOG_RIGHT" file="common/find_dialog_right.png" />
       <structure type="chrome_scaled_image" name="IDR_FIND_DLG_LEFT_BACKGROUND" file="common/find_dlg_left_bg.png" />
       <structure type="chrome_scaled_image" name="IDR_FIND_DLG_RIGHT_BACKGROUND" file="common/find_dlg_right_bg.png" />
-      <structure type="chrome_scaled_image" name="IDR_FLAGS_FAVICON" file="common/favicon_flags.png" />
       <if expr="toolkit_views or is_macosx or is_ios">
         <structure type="chrome_scaled_image" name="IDR_FORWARD" file="common/browser_forward_normal.png" />
         <structure type="chrome_scaled_image" name="IDR_FORWARD_D" file="common/browser_forward_disabled.png" />
@@ -385,9 +375,6 @@
       <structure type="chrome_scaled_image" name="IDR_INFOBAR_3D_BLOCKED" file="common/infobar_3d_blocked.png" />
       <structure type="chrome_scaled_image" name="IDR_INFOBAR_ALT_NAV_URL" file="common/infobar_alt_nav_url.png" />
       <structure type="chrome_scaled_image" name="IDR_INFOBAR_APP_BANNER" file="common/infobar_apps.png" />
-      <if expr="is_ios">
-        <structure type="chrome_scaled_image" name="IDR_INFOBAR_AUTOLOGIN" file="common/infobar_autologin.png" />
-      </if>
       <structure type="chrome_scaled_image" name="IDR_INFOBAR_COOKIE" file="common/infobar_cookie.png" />
       <if expr="is_macosx">
         <structure type="chrome_scaled_image" name="IDR_INFOBAR_DESKTOP_NOTIFICATIONS" file="legacy/infobar_desktop_notifications.png" />
@@ -422,8 +409,6 @@
         <!-- TODO(nkostylev): This resource needs to be removed when cros login code is moved to ash. -->
         <structure type="chrome_scaled_image" name="IDR_LAUNCHER_BACKGROUND" file="cros/launcher_background.png" />
         <structure type="chrome_scaled_image" name="IDR_LOGIN_PASSWORD_CAPS_LOCK" file="cros/login_password_capslock.png" />
-      </if>
-      <if expr="chromeos">
         <structure type="chrome_scaled_image" name="IDR_KIOSK_APP_USER_POD_ICON" file="cros/kiosk_app_user_pod_icon.png" />
         <structure type="chrome_scaled_image" name="IDR_LEGACY_SUPERVISED_USER_ICON" file="cros/limited_user.png" />
       </if>
@@ -443,8 +428,6 @@
       <structure type="chrome_scaled_image" name="IDR_MINIMIZE_BUTTON_MASK" file="common/minimize_button_mask.png" />
       <if expr="chromeos">
         <structure type="chrome_scaled_image" name="IDR_MIRROR_FLIP" file="cros/mirror_flip.png" />
-      </if>
-      <if expr="chromeos">
         <structure type="chrome_scaled_image" name="IDR_NETWORK_ADD_CONNECTION" file="cros/network_add_connection.png" />
         <structure type="chrome_scaled_image" name="IDR_NETWORK_HIDE_PASSWORD" file="cros/network_hide_password.png" />
         <structure type="chrome_scaled_image" name="IDR_NETWORK_HIDE_PASSWORD_HOVER" file="cros/network_hide_password_hover.png" />
@@ -471,12 +454,6 @@
         <structure type="chrome_scaled_image" name="IDR_NOTIFICATION_DRIVE" file="cros/notification_drive.png" />
         <structure type="chrome_scaled_image" name="IDR_NOTIFICATION_PERIPHERAL_BATTERY_LOW" file="cros/notification_peripheral_battery_low.png" />
         <structure type="chrome_scaled_image" name="IDR_PORTAL_DETECTION_ALERT" file="cros/captive_portal_icon.png" />
-      </if>
-      <if expr="is_win or desktop_linux">
-        <structure type="chrome_scaled_image" name="IDR_NOTIFICATION_TRAY_DO_NOT_DISTURB_ATTENTION" file="common/notification_tray_do_not_disturb_attention.png" />
-        <structure type="chrome_scaled_image" name="IDR_NOTIFICATION_TRAY_DO_NOT_DISTURB_EMPTY" file="common/notification_tray_do_not_disturb_empty.png" />
-        <structure type="chrome_scaled_image" name="IDR_NOTIFICATION_TRAY_ATTENTION" file="common/notification_tray_attention.png" />
-        <structure type="chrome_scaled_image" name="IDR_NOTIFICATION_TRAY_EMPTY" file="common/notification_tray_empty.png" />
       </if>
       <structure type="chrome_scaled_image" name="IDR_NOTIFICATION_WELCOME_ICON" file="common/notification_welcome_icon.png" />
       <structure type="chrome_scaled_image" name="IDR_NOTIFICATION_WELCOME_LEARN_MORE" file="common/notification_welcome_learn_more.png" />
@@ -542,9 +519,7 @@
       <structure type="chrome_scaled_image" name="IDR_OMNIBOX_TTS" file="common/omnibox_tts.png" />
       <structure type="chrome_scaled_image" name="IDR_OMNIBOX_TTS_SELECTED" file="common/omnibox_tts_selected.png" />
       <if expr="toolkit_views and not is_macosx">
-        <!-- In Material Design the Ash image is the same as the common one, so
-             once that mode is always on, these should be collapsed and the
-             duplicate image removed from the tree. -->
+        <!-- This image is not used in Material Design and can be removed when that mode is default. -->
         <if expr="not use_ash">
           <structure type="chrome_scaled_image" name="IDR_OTR_ICON" file="common/otr_icon.png" />
         </if>
@@ -583,14 +558,12 @@
       </if>
       <if expr="not _google_chrome">
         <structure type="chrome_scaled_image" name="IDR_PRODUCT_LOGO_16" file="chromium/product_logo_16.png" />
-        <structure type="chrome_scaled_image" name="IDR_PRODUCT_LOGO_26" file="chromium/product_logo_26.png" />
         <structure type="chrome_scaled_image" name="IDR_PRODUCT_LOGO_32" file="chromium/product_logo_32.png" />
         <structure type="chrome_scaled_image" name="IDR_PRODUCT_LOGO_NAME_48" file="chromium/product_logo_name_48.png" />
         <structure type="chrome_scaled_image" name="IDR_PRODUCT_LOGO_WHITE" file="chromium/product_logo_white.png" />
       </if>
       <if expr="_google_chrome">
         <structure type="chrome_scaled_image" name="IDR_PRODUCT_LOGO_16" file="google_chrome/product_logo_16.png" />
-        <structure type="chrome_scaled_image" name="IDR_PRODUCT_LOGO_26" file="google_chrome/product_logo_26.png" />
         <structure type="chrome_scaled_image" name="IDR_PRODUCT_LOGO_32" file="google_chrome/product_logo_32.png" />
         <structure type="chrome_scaled_image" name="IDR_PRODUCT_LOGO_32_BETA" file="google_chrome/product_logo_32_beta.png" />
         <structure type="chrome_scaled_image" name="IDR_PRODUCT_LOGO_32_CANARY" file="google_chrome/product_logo_32_canary.png" />
@@ -854,11 +827,11 @@
       <if expr="is_macosx">
         <structure type="chrome_scaled_image" name="IDR_TAB_AUDIO_INDICATOR" file="legacy/tab_audio_indicator.png" />
         <structure type="chrome_scaled_image" name="IDR_TAB_AUDIO_MUTING_INDICATOR" file="legacy/tab_audio_muting_indicator.png" />
+        <structure type="chrome_scaled_image" name="IDR_TAB_RECORDING_INDICATOR" file="legacy/tab_recording_indicator.png" />
+        <structure type="chrome_scaled_image" name="IDR_TAB_CAPTURE_INDICATOR" file="legacy/tab_capture_indicator.png" />
       </if>
-      <structure type="chrome_scaled_image" name="IDR_TAB_CAPTURE_INDICATOR" file="common/tab_capture_indicator.png" />
       <structure type="chrome_scaled_image" name="IDR_TAB_DROP_DOWN" file="tab_drop_down.png" />
       <structure type="chrome_scaled_image" name="IDR_TAB_DROP_UP" file="tab_drop_up.png" />
-      <structure type="chrome_scaled_image" name="IDR_TAB_RECORDING_INDICATOR" file="common/tab_recording_indicator.png" />
       <if expr="chromeos">
         <structure type="chrome_scaled_image" name="IDR_TECHNICAL_ERROR" file="cros/technical_error.png" />
       </if>
@@ -975,8 +948,8 @@
       <structure type="chrome_scaled_image" name="IDR_UPDATE_MENU_SEVERITY_HIGH" file="common/update_menu_severity_high.png" />
       <structure type="chrome_scaled_image" name="IDR_USB_NOTIFICATION_ICON" file="common/notification_usb_icon.png" />
       <if expr="chromeos">
-        <structure type="chrome_scaled_image" name="IDR_USER_IMAGE_CAPTURE" file="common/snapshot_wide.png" />
-        <structure type="chrome_scaled_image" name="IDR_USER_IMAGE_RECYCLE" file="common/discard_wide.png" />
+        <structure type="chrome_scaled_image" name="IDR_USER_IMAGE_CAPTURE" file="cros/snapshot_wide.png" />
+        <structure type="chrome_scaled_image" name="IDR_USER_IMAGE_RECYCLE" file="cros/discard_wide.png" />
       </if>
       <structure type="chrome_scaled_image" name="IDR_WARNING" file="common/alert_small.png" />
       <if expr="is_macosx">
@@ -1009,12 +982,14 @@
       </if>
 
       <!-- People search images -->
-      <structure type="chrome_scaled_image" name="IDR_PEOPLE_SEARCH_ACTION_EMAIL" file="common/mail.png" />
-      <structure type="chrome_scaled_image" name="IDR_PEOPLE_SEARCH_ACTION_EMAIL_HOVER" file="common/mail_hover.png" />
-      <structure type="chrome_scaled_image" name="IDR_PEOPLE_SEARCH_ACTION_EMAIL_PRESSED" file="common/mail_pressed.png" />
-      <structure type="chrome_scaled_image" name="IDR_PEOPLE_SEARCH_ACTION_CHAT" file="common/chat.png" />
-      <structure type="chrome_scaled_image" name="IDR_PEOPLE_SEARCH_ACTION_CHAT_HOVER" file="common/chat_hover.png" />
-      <structure type="chrome_scaled_image" name="IDR_PEOPLE_SEARCH_ACTION_CHAT_PRESSED" file="common/chat_pressed.png" />
+      <if expr="enable_app_list">
+        <structure type="chrome_scaled_image" name="IDR_PEOPLE_SEARCH_ACTION_EMAIL" file="common/mail.png" />
+        <structure type="chrome_scaled_image" name="IDR_PEOPLE_SEARCH_ACTION_EMAIL_HOVER" file="common/mail_hover.png" />
+        <structure type="chrome_scaled_image" name="IDR_PEOPLE_SEARCH_ACTION_EMAIL_PRESSED" file="common/mail_pressed.png" />
+        <structure type="chrome_scaled_image" name="IDR_PEOPLE_SEARCH_ACTION_CHAT" file="common/chat.png" />
+        <structure type="chrome_scaled_image" name="IDR_PEOPLE_SEARCH_ACTION_CHAT_HOVER" file="common/chat_hover.png" />
+        <structure type="chrome_scaled_image" name="IDR_PEOPLE_SEARCH_ACTION_CHAT_PRESSED" file="common/chat_pressed.png" />
+      </if>
     </structures>
   </release>
 </grit>

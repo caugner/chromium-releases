@@ -5,15 +5,31 @@
 #ifndef IOS_PUBLIC_PROVIDER_CHROME_BROWSER_BROWSER_STATE_CHROME_BROWSER_STATE_H_
 #define IOS_PUBLIC_PROVIDER_CHROME_BROWSER_BROWSER_STATE_CHROME_BROWSER_STATE_H_
 
-#include "base/basictypes.h"
-#include "base/compiler_specific.h"
-#include "base/memory/ref_counted.h"
-#include "ios/web/public/browser_state.h"
+#include <map>
+#include <string>
 
+#include "base/callback_forward.h"
+#include "base/compiler_specific.h"
+#include "base/macros.h"
+#include "base/memory/linked_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_vector.h"
+#include "ios/web/public/browser_state.h"
+#include "net/url_request/url_request_job_factory.h"
+
+class ChromeBrowserStateIOData;
+class PrefProxyConfigTracker;
 class PrefService;
+class TestChromeBrowserState;
 
 namespace base {
 class SequencedTaskRunner;
+class Time;
+}
+
+namespace net {
+class SSLConfigService;
+class URLRequestInterceptor;
 }
 
 namespace syncable_prefs {
@@ -26,14 +42,14 @@ class WebUIIOS;
 
 namespace ios {
 
+enum class ChromeBrowserStateType {
+  REGULAR_BROWSER_STATE,
+  INCOGNITO_BROWSER_STATE,
+};
+
 // This class is a Chrome-specific extension of the BrowserState interface.
 class ChromeBrowserState : public web::BrowserState {
  public:
-  enum ExitType {
-    EXIT_NORMAL,
-    EXIT_CRASHED,
-  };
-
   ~ChromeBrowserState() override {}
 
   // Returns the ChromeBrowserState corresponding to the given BrowserState.
@@ -69,21 +85,54 @@ class ChromeBrowserState : public web::BrowserState {
   // Retrieves a pointer to the PrefService that manages the preferences.
   virtual PrefService* GetPrefs() = 0;
 
+  // Retrieves a pointer to the PrefService that manages the preferences
+  // for OffTheRecord browser states.
+  virtual PrefService* GetOffTheRecordPrefs() = 0;
+
+  // Allows access to ChromeBrowserStateIOData without going through
+  // ResourceContext that is not compiled on iOS. This method must be called on
+  // UI thread, but the returned object must only be accessed on the IO thread.
+  virtual ChromeBrowserStateIOData* GetIOData() = 0;
+
   // Retrieves a pointer to the PrefService that manages the preferences as
   // a syncable_prefs::PrefServiceSyncable.
   virtual syncable_prefs::PrefServiceSyncable* GetSyncablePrefs() = 0;
 
-  // Sets the ExitType for the ChromeBrowserState. This may be invoked multiple
-  // times during shutdown; only the first such change (the transition from
-  // EXIT_CRASHED to one of the other values) is written to prefs, any later
-  // calls are ignored.
-  //
-  // NOTE: this is invoked internally on a normal shutdown, but is public so
-  // that it can be invoked to handle backgrounding/foregrounding.
-  virtual void SetExitType(ExitType exit_type) = 0;
+  // Deletes all network related data since |time|. It deletes transport
+  // security state since |time| and it also deletes HttpServerProperties data.
+  // Works asynchronously, however if the |completion| callback is non-null, it
+  // will be posted on the UI thread once the removal process completes.
+  // Be aware that theoretically it is possible that |completion| will be
+  // invoked after the Profile instance has been destroyed.
+  virtual void ClearNetworkingHistorySince(base::Time time,
+                                           const base::Closure& completion) = 0;
 
-  // Returns how the last session was shutdown.
-  virtual ExitType GetLastSessionExitType() = 0;
+  // Returns an identifier of the browser state for debugging.
+  std::string GetDebugName();
+
+  // Returns the helper object that provides the proxy configuration service
+  // access to the the proxy configuration possibly defined by preferences.
+  virtual PrefProxyConfigTracker* GetProxyConfigTracker() = 0;
+
+  // Returns the SSLConfigService for this browser state.
+  virtual net::SSLConfigService* GetSSLConfigService() = 0;
+
+  // Creates the main net::URLRequestContextGetter that will be returned by
+  // GetRequestContext(). Should only be called once.
+  virtual net::URLRequestContextGetter* CreateRequestContext(
+      std::map<std::string,
+               linked_ptr<net::URLRequestJobFactory::ProtocolHandler>>*
+          protocol_handlers,
+      ScopedVector<net::URLRequestInterceptor> request_interceptors) = 0;
+
+  // Creates a isolated net::URLRequestContextGetter. Should only be called once
+  // per partition_path per browser state object.
+  virtual net::URLRequestContextGetter* CreateIsolatedRequestContext(
+      const base::FilePath& partition_path) = 0;
+
+  // Returns the current ChromeBrowserState casted as a TestChromeBrowserState
+  // or null if it is not a TestChromeBrowserState.
+  virtual TestChromeBrowserState* AsTestChromeBrowserState() = 0;
 
  protected:
   ChromeBrowserState() {}

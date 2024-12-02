@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -21,6 +22,7 @@
 #include "chrome/browser/ui/views/find_bar_host.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/grit/generated_resources.h"
+#include "grit/components_strings.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "ui/base/ime/input_method.h"
