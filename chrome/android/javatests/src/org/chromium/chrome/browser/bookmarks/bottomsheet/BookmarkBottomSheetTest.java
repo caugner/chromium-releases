@@ -49,6 +49,7 @@ import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController.SheetState;
 import org.chromium.components.feature_engagement.Tracker;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
+import org.chromium.url.GURL;
 
 import java.util.ArrayList;
 
@@ -57,7 +58,7 @@ import java.util.ArrayList;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
-@Features.EnableFeatures({ChromeFeatureList.READ_LATER})
+@Features.EnableFeatures({ChromeFeatureList.BOOKMARK_BOTTOM_SHEET, ChromeFeatureList.READ_LATER})
 public class BookmarkBottomSheetTest {
     @Rule
     public MockitoRule mMockitoRule = MockitoJUnit.rule();
@@ -65,8 +66,8 @@ public class BookmarkBottomSheetTest {
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
 
     private static final String TITLE = "bookmark title";
-    private static final String TEST_URL_A = "http://a.com";
-    private static final String TEST_URL_B = "http://b.com";
+    private static final GURL TEST_URL_A = new GURL("http://a.com");
+    private static final GURL TEST_URL_B = new GURL("http://b.com");
     private static final String READING_LIST_TITLE = "Reading list ";
     private static final String READING_LIST_TITLE_NEW = "Reading list New";
 
