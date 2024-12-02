@@ -8,14 +8,14 @@ import platform
 import subprocess
 import sys
 
+from catapult_base import cloud_storage
+from catapult_base import support_binaries
 from telemetry.core.platform import linux_based_platform_backend
-from telemetry.core.platform import platform_backend
+from telemetry.core import os_version
 from telemetry.core.platform import posix_platform_backend
 from telemetry.core.platform.power_monitor import msr_power_monitor
 from telemetry.core import util
 from telemetry import decorators
-from telemetry.util import cloud_storage
-from telemetry.util import support_binaries
 
 
 _POSSIBLE_PERFHOST_APPLICATIONS = [
@@ -29,7 +29,7 @@ class LinuxPlatformBackend(
     linux_based_platform_backend.LinuxBasedPlatformBackend):
   def __init__(self):
     super(LinuxPlatformBackend, self).__init__()
-    self._power_monitor = msr_power_monitor.MsrPowerMonitor(self)
+    self._power_monitor = msr_power_monitor.MsrPowerMonitorLinux(self)
 
   @classmethod
   def IsPlatformBackendForHost(cls):
@@ -66,7 +66,7 @@ class LinuxPlatformBackend(
           version = 0
       if codename and version:
         break
-    return platform_backend.OSVersion(codename, version)
+    return os_version.OSVersion(codename, version)
 
   def CanFlushIndividualFilesFromSystemCache(self):
     return True

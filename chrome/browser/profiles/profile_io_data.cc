@@ -24,7 +24,7 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/devtools/devtools_network_controller.h"
@@ -53,10 +53,10 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/content_settings/core/browser/content_settings_provider.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/dom_distiller/core/url_constants.h"
-#include "components/startup_metric_utils/startup_metric_utils.h"
 #include "components/sync_driver/pref_names.h"
 #include "components/url_fixer/url_fixer.h"
 #include "content/public/browser/browser_thread.h"
@@ -96,6 +96,7 @@
 #include "chrome/browser/extensions/extension_resource_protocols.h"
 #include "extensions/browser/extension_protocols.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_throttle_manager.h"
 #include "extensions/browser/info_map.h"
 #include "extensions/common/constants.h"
 #endif
@@ -160,7 +161,8 @@ bool IsSupportedDevToolsURL(const GURL& url, base::FilePath* path) {
 
   if (!url.SchemeIs(content::kChromeDevToolsScheme) ||
       url.host() != chrome::kChromeUIDevToolsHost ||
-      !StartsWithASCII(url.path(), bundled_path_prefix, false)) {
+      !base::StartsWith(url.path(), bundled_path_prefix,
+                        base::CompareCase::INSENSITIVE_ASCII)) {
     return false;
   }
 
@@ -372,7 +374,7 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
 
   params->io_thread = g_browser_process->io_thread();
 
-  params->cookie_settings = CookieSettings::Factory::GetForProfile(profile);
+  params->cookie_settings = CookieSettingsFactory::GetForProfile(profile);
   params->host_content_settings_map = profile->GetHostContentSettingsMap();
   params->ssl_config_service = profile->GetSSLConfigService();
   params->cookie_monster_delegate =
@@ -456,7 +458,7 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
       &force_youtube_safety_mode_,
       pref_service);
 
-  scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy =
+  scoped_refptr<base::SingleThreadTaskRunner> io_task_runner =
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
 
   chrome_http_user_agent_settings_.reset(
@@ -467,25 +469,25 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
   if (!IsOffTheRecord()) {
     google_services_user_account_id_.Init(
         prefs::kGoogleServicesUserAccountId, pref_service);
-    google_services_user_account_id_.MoveToThread(io_message_loop_proxy);
+    google_services_user_account_id_.MoveToThread(io_task_runner);
 
     sync_disabled_.Init(sync_driver::prefs::kSyncManaged, pref_service);
-    sync_disabled_.MoveToThread(io_message_loop_proxy);
+    sync_disabled_.MoveToThread(io_task_runner);
 
     signin_allowed_.Init(prefs::kSigninAllowed, pref_service);
-    signin_allowed_.MoveToThread(io_message_loop_proxy);
+    signin_allowed_.MoveToThread(io_task_runner);
   }
 
   quick_check_enabled_.Init(prefs::kQuickCheckEnabled,
                             local_state_pref_service);
-  quick_check_enabled_.MoveToThread(io_message_loop_proxy);
+  quick_check_enabled_.MoveToThread(io_task_runner);
 
   media_device_id_salt_ = new MediaDeviceIDSalt(pref_service, IsOffTheRecord());
 
   network_prediction_options_.Init(prefs::kNetworkPredictionOptions,
                                    pref_service);
 
-  network_prediction_options_.MoveToThread(io_message_loop_proxy);
+  network_prediction_options_.MoveToThread(io_task_runner);
 
 #if defined(OS_CHROMEOS)
   scoped_ptr<policy::PolicyCertVerifier> verifier =
@@ -505,28 +507,24 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
   base::SequencedWorkerPool* pool = BrowserThread::GetBlockingPool();
   scoped_refptr<base::SequencedTaskRunner> background_task_runner =
       pool->GetSequencedTaskRunner(pool->GetSequenceToken());
-  url_blacklist_manager_.reset(
-      new policy::URLBlacklistManager(
-          pref_service,
-          background_task_runner,
-          io_message_loop_proxy,
-          callback,
-          base::Bind(policy::OverrideBlacklistForURL)));
+  url_blacklist_manager_.reset(new policy::URLBlacklistManager(
+      pref_service, background_task_runner, io_task_runner, callback,
+      base::Bind(policy::OverrideBlacklistForURL)));
 
   if (!IsOffTheRecord()) {
     // Add policy headers for non-incognito requests.
     policy::PolicyHeaderService* policy_header_service =
         policy::PolicyHeaderServiceFactory::GetForBrowserContext(profile);
     if (policy_header_service) {
-      policy_header_helper_ = policy_header_service->CreatePolicyHeaderIOHelper(
-          io_message_loop_proxy);
+      policy_header_helper_ =
+          policy_header_service->CreatePolicyHeaderIOHelper(io_task_runner);
     }
   }
 #endif
 
   incognito_availibility_pref_.Init(
       prefs::kIncognitoModeAvailability, pref_service);
-  incognito_availibility_pref_.MoveToThread(io_message_loop_proxy);
+  incognito_availibility_pref_.MoveToThread(io_task_runner);
 
   initialized_on_UI_thread_ = true;
 
@@ -805,11 +803,21 @@ extensions::InfoMap* ProfileIOData::GetExtensionInfoMap() const {
 #if defined(ENABLE_EXTENSIONS)
   return extension_info_map_.get();
 #else
-  return NULL;
+  return nullptr;
 #endif
 }
 
-CookieSettings* ProfileIOData::GetCookieSettings() const {
+extensions::ExtensionThrottleManager*
+ProfileIOData::GetExtensionThrottleManager() const {
+  DCHECK(initialized_) << "ExtensionSystem not initialized";
+#if defined(ENABLE_EXTENSIONS)
+  return extension_throttle_manager_.get();
+#else
+  return nullptr;
+#endif
+}
+
+content_settings::CookieSettings* ProfileIOData::GetCookieSettings() const {
   // Allow either Init() or SetCookieSettingsForTesting() to initialize.
   DCHECK(initialized_ || cookie_settings_.get());
   return cookie_settings_.get();
@@ -986,9 +994,6 @@ void ProfileIOData::Init(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!initialized_);
 
-  startup_metric_utils::ScopedSlowStartupUMA
-      scoped_timer("Startup.SlowStartupProfileIODataInit");
-
   // TODO(jhawkins): Remove once crbug.com/102004 is fixed.
   CHECK(initialized_on_UI_thread_);
 
@@ -1015,7 +1020,12 @@ void ProfileIOData::Init(
 #if defined(ENABLE_EXTENSIONS)
   network_delegate->set_extension_info_map(
       profile_params_->extension_info_map.get());
+  if (!command_line.HasSwitch(switches::kDisableExtensionsHttpThrottling)) {
+    extension_throttle_manager_.reset(
+        new extensions::ExtensionThrottleManager());
+  }
 #endif
+
 #if defined(ENABLE_CONFIGURATION_POLICY)
   network_delegate->set_url_blacklist_manager(url_blacklist_manager_.get());
 #endif
@@ -1290,7 +1300,7 @@ scoped_ptr<net::HttpCache> ProfileIOData::CreateHttpFactory(
 }
 
 void ProfileIOData::SetCookieSettingsForTesting(
-    CookieSettings* cookie_settings) {
+    content_settings::CookieSettings* cookie_settings) {
   DCHECK(!cookie_settings_.get());
   cookie_settings_ = cookie_settings;
 }

@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_IO_THREAD_H_
 #define CHROME_BROWSER_IO_THREAD_H_
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -56,6 +57,7 @@ class HttpServerProperties;
 class HttpTransactionFactory;
 class HttpUserAgentSettings;
 class NetworkDelegate;
+class NetworkQualityEstimator;
 class ProxyConfigService;
 class ProxyService;
 class SSLConfigService;
@@ -63,7 +65,6 @@ class TransportSecurityState;
 class URLRequestContext;
 class URLRequestContextGetter;
 class URLRequestJobFactory;
-class URLRequestThrottlerManager;
 class URLSecurityManager;
 }  // namespace net
 
@@ -138,7 +139,6 @@ class IOThread : public content::BrowserThreadDelegate {
         proxy_script_fetcher_ftp_transaction_factory;
     scoped_ptr<net::URLRequestJobFactory>
         proxy_script_fetcher_url_request_job_factory;
-    scoped_ptr<net::URLRequestThrottlerManager> throttler_manager;
     scoped_ptr<net::URLSecurityManager> url_security_manager;
     // TODO(willchan): Remove proxy script fetcher context since it's not
     // necessary now that I got rid of refcounting URLRequestContexts.
@@ -161,8 +161,8 @@ class IOThread : public content::BrowserThreadDelegate {
 #endif
     scoped_ptr<net::HostMappingRules> host_mapping_rules;
     scoped_ptr<net::HttpUserAgentSettings> http_user_agent_settings;
+    scoped_ptr<net::NetworkQualityEstimator> network_quality_estimator;
     bool ignore_certificate_errors;
-    bool use_stale_while_revalidate;
     uint16 testing_fixed_http_port;
     uint16 testing_fixed_https_port;
     Optional<bool> enable_tcp_fast_open_for_ssl;
@@ -187,6 +187,7 @@ class IOThread : public content::BrowserThreadDelegate {
     Optional<bool> quic_enable_connection_racing;
     Optional<bool> quic_enable_non_blocking_io;
     Optional<bool> quic_disable_disk_cache;
+    Optional<bool> quic_prefer_aes;
     Optional<int> quic_max_number_of_lossy_connections;
     Optional<float> quic_packet_loss_threshold;
     Optional<int> quic_socket_receive_buffer_size;
@@ -255,7 +256,6 @@ class IOThread : public content::BrowserThreadDelegate {
   // This handles initialization and destruction of state that must
   // live on the IO thread.
   void Init() override;
-  void InitAsync() override;
   void CleanUp() override;
 
   // Initializes |params| based on the settings in |globals|.
@@ -267,9 +267,6 @@ class IOThread : public content::BrowserThreadDelegate {
 
   // Sets up TCP FastOpen if enabled via field trials or via the command line.
   void ConfigureTCPFastOpen(const base::CommandLine& command_line);
-
-  // Sets up SDCH based on field trials.
-  void ConfigureSdch();
 
   // Configures available SPDY protocol versions in |globals| based on the flags
   // in |command_lin| as well as SPDY field trial group and parameters.  Must be
@@ -374,6 +371,9 @@ class IOThread : public content::BrowserThreadDelegate {
   static bool ShouldQuicDisableDiskCache(
       const VariationParameters& quic_trial_params);
 
+  // Returns true if QUIC should prefer AES-GCN even without hardware support.
+  static bool ShouldQuicPreferAes(const VariationParameters& quic_trial_params);
+
   // Returns the maximum number of QUIC connections with high packet loss in a
   // row after which QUIC should be disabled.  Returns 0 if the default value
   // should be used.
@@ -457,6 +457,7 @@ class IOThread : public content::BrowserThreadDelegate {
   std::string auth_server_whitelist_;
   std::string auth_delegate_whitelist_;
   std::string gssapi_library_name_;
+  std::string auth_android_negotiate_account_type_;
 
   // This is an instance of the default SSLConfigServiceManager for the current
   // platform and it gets SSL preferences from local_state object.

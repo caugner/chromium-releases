@@ -28,9 +28,14 @@ CreateSessionRequest::CreateSessionRequest(
 CreateSessionRequest::~CreateSessionRequest() {
 }
 
-void CreateSessionRequest::MaybeInvokeSuccessCallback() {
+void CreateSessionRequest::MaybeInvokeSuccessCallback(
+    const MediaRoute::Id& route_id) {
   if (!cb_invoked_) {
-    success_cb_.Run(presentation_info_);
+    // Overwrite presentation ID.
+    success_cb_.Run(content::PresentationSessionInfo(
+                        presentation_info_.presentation_url,
+                        GetPresentationIdAndUrl(route_id).first),
+                    route_id);
     cb_invoked_ = true;
   }
 }

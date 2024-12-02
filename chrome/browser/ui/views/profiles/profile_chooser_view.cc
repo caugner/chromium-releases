@@ -34,7 +34,6 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/signin/core/browser/mutable_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_error_controller.h"
 #include "components/signin/core/browser/signin_manager.h"
@@ -236,8 +235,9 @@ class EditableProfilePhoto : public views::LabelButton {
     const SkColor kBackgroundColor = SkColorSetARGB(65, 255, 255, 255);
     photo_overlay_->set_background(
         views::Background::CreateSolidBackground(kBackgroundColor));
-    photo_overlay_->SetImage(*ui::ResourceBundle::GetSharedInstance().
-        GetImageSkiaNamed(IDR_ICON_PROFILES_EDIT_CAMERA));
+    photo_overlay_->SetVectorIcon(gfx::VectorIconId::PHOTO_CAMERA,
+                                  SkColorSetRGB(0x33, 0x33, 0x33),
+                                  gfx::Size(48, 48));
 
     photo_overlay_->SetSize(bounds.size());
     photo_overlay_->SetVisible(false);
@@ -661,12 +661,13 @@ void ProfileChooserView::ShowView(profiles::BubbleViewMode view_to_display,
 
   views::GridLayout* layout;
   views::View* sub_view;
+  views::View* view_to_focus = nullptr;
   switch (view_mode_) {
     case profiles::BUBBLE_VIEW_MODE_GAIA_SIGNIN:
     case profiles::BUBBLE_VIEW_MODE_GAIA_ADD_ACCOUNT:
     case profiles::BUBBLE_VIEW_MODE_GAIA_REAUTH:
       layout = CreateSingleColumnLayout(this, kFixedGaiaViewWidth);
-      sub_view = CreateGaiaSigninView();
+      sub_view = CreateGaiaSigninView(&view_to_focus);
       break;
     case profiles::BUBBLE_VIEW_MODE_ACCOUNT_REMOVAL:
       layout = CreateSingleColumnLayout(this, kFixedAccountRemovalViewWidth);
@@ -691,6 +692,8 @@ void ProfileChooserView::ShowView(profiles::BubbleViewMode view_to_display,
   Layout();
   if (GetBubbleFrameView())
     SizeToContents();
+  if (view_to_focus)
+    view_to_focus->RequestFocus();
 }
 
 void ProfileChooserView::WindowClosing() {
@@ -820,9 +823,8 @@ void ProfileChooserView::ButtonPressed(views::Button* sender,
 
 void ProfileChooserView::RemoveAccount() {
   DCHECK(!account_id_to_remove_.empty());
-  MutableProfileOAuth2TokenService* oauth2_token_service =
-      ProfileOAuth2TokenServiceFactory::GetPlatformSpecificForProfile(
-      browser_->profile());
+  ProfileOAuth2TokenService* oauth2_token_service =
+      ProfileOAuth2TokenServiceFactory::GetForProfile(browser_->profile());
   if (oauth2_token_service) {
     oauth2_token_service->RevokeCredentials(account_id_to_remove_);
     PostActionPerformed(ProfileMetrics::PROFILE_DESKTOP_MENU_REMOVE_ACCT);
@@ -1478,7 +1480,8 @@ void ProfileChooserView::CreateAccountButton(views::GridLayout* layout,
   }
 }
 
-views::View* ProfileChooserView::CreateGaiaSigninView() {
+views::View* ProfileChooserView::CreateGaiaSigninView(
+    views::View** signin_content_view) {
   GURL url;
   int message_id;
 
@@ -1522,6 +1525,8 @@ views::View* ProfileChooserView::CreateGaiaSigninView() {
   TitleCard* title_card = new TitleCard(l10n_util::GetStringUTF16(message_id),
                                         this,
                                         &gaia_signin_cancel_button_);
+  if (signin_content_view)
+    *signin_content_view = web_view;
   return TitleCard::AddPaddedTitleCard(
       web_view, title_card, kFixedGaiaViewWidth);
 }

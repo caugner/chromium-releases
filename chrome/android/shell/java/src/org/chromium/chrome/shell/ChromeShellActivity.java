@@ -47,8 +47,8 @@ import org.chromium.chrome.browser.share.ShareHelper;
 import org.chromium.chrome.browser.sync.SyncController;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.shell.sync.AccountChooserFragment;
-import org.chromium.chrome.shell.sync.SignoutFragment;
+import org.chromium.chrome.shell.signin.AccountChooserFragment;
+import org.chromium.chrome.shell.signin.SignoutFragment;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.components.service_tab_launcher.ServiceTabLauncher;
 import org.chromium.content.app.ContentApplication;
@@ -189,7 +189,8 @@ public class ChromeShellActivity extends AppCompatActivity implements AppMenuPro
             mTabManager.setStartupUrl(startupUrl);
         }
         mToolbar = (ChromeShellToolbar) findViewById(R.id.toolbar);
-        mAppMenuHandler = sAppMenuHandlerFactory.getAppMenuHandler(this, this, R.menu.main_menu);
+        mAppMenuHandler = sAppMenuHandlerFactory.getAppMenuHandler(this, this,
+                R.menu.chrome_shell_main_menu);
         mToolbar.setMenuHandler(mAppMenuHandler);
 
         mDevToolsServer = new DevToolsServer("chrome_shell");
@@ -430,6 +431,11 @@ public class ChromeShellActivity extends AppCompatActivity implements AppMenuPro
     @Override
     public boolean shouldShowAppMenu() {
         return true;
+    }
+
+    @Override
+    public int getFooterResourceId() {
+        return 0;
     }
 
     @Override

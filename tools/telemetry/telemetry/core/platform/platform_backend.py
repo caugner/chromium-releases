@@ -4,45 +4,12 @@
 
 import weakref
 
-from telemetry.core.forwarders import do_nothing_forwarder
 from telemetry.core.platform import network_controller_backend
 from telemetry.core.platform import tracing_controller_backend
+from telemetry.internal.forwarders import do_nothing_forwarder
 
 
 # pylint: disable=W0613
-
-# pylint: disable=W0212
-class OSVersion(str):
-  def __new__(cls, friendly_name, sortable_name, *args, **kwargs):
-    version = str.__new__(cls, friendly_name)
-    version._sortable_name = sortable_name
-    return version
-
-  def __lt__(self, other):
-    return self._sortable_name < other._sortable_name
-
-  def __gt__(self, other):
-    return self._sortable_name > other._sortable_name
-
-  def __le__(self, other):
-    return self._sortable_name <= other._sortable_name
-
-  def __ge__(self, other):
-    return self._sortable_name >= other._sortable_name
-
-
-XP = OSVersion('xp', 5.1)
-VISTA = OSVersion('vista', 6.0)
-WIN7 = OSVersion('win7', 6.1)
-WIN8 = OSVersion('win8', 6.2)
-
-LEOPARD = OSVersion('leopard', 105)
-SNOWLEOPARD = OSVersion('snowleopard', 106)
-LION = OSVersion('lion', 107)
-MOUNTAINLION = OSVersion('mountainlion', 108)
-MAVERICKS = OSVersion('mavericks', 109)
-YOSEMITE = OSVersion('yosemite', 1010)
-
 
 class PlatformBackend(object):
 
@@ -120,7 +87,8 @@ class PlatformBackend(object):
     return port
 
   def DidCreateBrowser(self, browser, browser_backend):
-    self.SetFullPerformanceModeEnabled(True)
+    browser_options = browser_backend.browser_options
+    self.SetFullPerformanceModeEnabled(browser_options.full_performance_mode)
 
     # TODO(slamm): Remove this call when replay browser_backend dependencies
     # get moved to platform. https://crbug.com/423962
@@ -199,6 +167,9 @@ class PlatformBackend(object):
     raise NotImplementedError()
 
   def GetCommandLine(self, pid):
+    raise NotImplementedError()
+
+  def GetDeviceTypeName(self):
     raise NotImplementedError()
 
   def GetArchName(self):

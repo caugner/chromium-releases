@@ -100,12 +100,11 @@ class DownloadsEventsListener : public content::NotificationObserver {
           const std::string& event_name,
           const std::string& json_args,
           base::Time caught)
-      : profile_(profile),
-        event_name_(event_name),
-        json_args_(json_args),
-        args_(base::JSONReader::Read(json_args)),
-        caught_(caught) {
-    }
+        : profile_(profile),
+          event_name_(event_name),
+          json_args_(json_args),
+          args_(base::JSONReader::DeprecatedRead(json_args)),
+          caught_(caught) {}
 
     const base::Time& caught() { return caught_; }
 
@@ -179,8 +178,7 @@ class DownloadsEventsListener : public content::NotificationObserver {
           DownloadsNotificationSource* dns =
               content::Source<DownloadsNotificationSource>(source).ptr();
           Event* new_event = new Event(
-              dns->profile,
-              dns->event_name,
+              dns->profile, dns->event_name,
               *content::Details<std::string>(details).ptr(), base::Time::Now());
           events_.push_back(new_event);
           if (waiting_ &&
@@ -581,7 +579,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
           extension_->GetResourceURL("empty.html"),
           ui::PAGE_TRANSITION_LINK);
       function->set_extension(extension_);
-      function->SetRenderViewHost(tab->GetRenderViewHost());
+      function->SetRenderFrameHost(tab->GetMainFrame());
     }
   }
 

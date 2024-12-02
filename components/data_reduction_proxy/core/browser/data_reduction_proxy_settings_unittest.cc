@@ -7,8 +7,10 @@
 #include "base/command_line.h"
 #include "base/md5.h"
 #include "base/metrics/field_trial.h"
+#include "base/test/histogram_tester.h"
 #include "base/test/mock_entropy_provider.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_configurator_test_utils.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings_test_utils.h"
@@ -35,9 +37,9 @@ class DataReductionProxySettingsTest
                                             bool expected_fallback_restricted) {
     test_context_->pref_service()->SetBoolean(prefs::kDataReductionProxyEnabled,
                                               initially_enabled);
-    test_context_->config()->SetStateForTest(initially_enabled, false,
+    test_context_->config()->SetStateForTest(initially_enabled,
                                              request_succeeded);
-    ExpectSetProxyPrefs(expected_enabled, false, false);
+    ExpectSetProxyPrefs(expected_enabled, false);
     settings_->MaybeActivateDataReductionProxy(false);
     test_context_->RunUntilIdle();
   }
@@ -46,7 +48,7 @@ class DataReductionProxySettingsTest
 TEST_F(DataReductionProxySettingsTest, TestIsProxyEnabledOrManaged) {
   settings_->InitPrefMembers();
   // The proxy is disabled initially.
-  test_context_->config()->SetStateForTest(false, false, true);
+  test_context_->config()->SetStateForTest(false, true);
 
   EXPECT_FALSE(settings_->IsDataReductionProxyEnabled());
   EXPECT_FALSE(settings_->IsDataReductionProxyManaged());
@@ -65,7 +67,7 @@ TEST_F(DataReductionProxySettingsTest, TestIsProxyEnabledOrManaged) {
 TEST_F(DataReductionProxySettingsTest, TestCanUseDataReductionProxy) {
   settings_->InitPrefMembers();
   // The proxy is disabled initially.
-  test_context_->config()->SetStateForTest(false, false, true);
+  test_context_->config()->SetStateForTest(false, true);
 
   GURL http_gurl("http://url.com/");
   EXPECT_FALSE(settings_->CanUseDataReductionProxy(http_gurl));
@@ -219,7 +221,7 @@ TEST(DataReductionProxySettingsStandaloneTest, TestOnProxyEnabledPrefChange) {
           .Build();
 
   // The proxy is enabled initially.
-  drp_test_context->config()->SetStateForTest(true, false, true);
+  drp_test_context->config()->SetStateForTest(true, true);
   drp_test_context->InitSettings();
 
   MockDataReductionProxyService* mock_service =
@@ -227,14 +229,12 @@ TEST(DataReductionProxySettingsStandaloneTest, TestOnProxyEnabledPrefChange) {
           drp_test_context->data_reduction_proxy_service());
 
   // The pref is disabled, so correspondingly should be the proxy.
-  EXPECT_CALL(*mock_service,
-              SetProxyPrefs(false, false, false));
+  EXPECT_CALL(*mock_service, SetProxyPrefs(false, false));
   drp_test_context->pref_service()->SetBoolean(
       prefs::kDataReductionProxyEnabled, false);
 
   // The pref is enabled, so correspondingly should be the proxy.
-  EXPECT_CALL(*mock_service,
-              SetProxyPrefs(true, false, false));
+  EXPECT_CALL(*mock_service, SetProxyPrefs(true, false));
   drp_test_context->pref_service()->SetBoolean(
       prefs::kDataReductionProxyEnabled, true);
 }
@@ -245,9 +245,6 @@ TEST_F(DataReductionProxySettingsTest, TestMaybeActivateDataReductionProxy) {
   // is set.
   settings_->spdy_proxy_auth_enabled_.Init(
       prefs::kDataReductionProxyEnabled,
-      settings_->GetOriginalProfilePrefs());
-  settings_->data_reduction_proxy_alternative_enabled_.Init(
-      prefs::kDataReductionProxyAltEnabled,
       settings_->GetOriginalProfilePrefs());
 
   // TODO(bengr): Test enabling/disabling while a secure proxy check is
@@ -301,42 +298,242 @@ TEST_F(DataReductionProxySettingsTest, TestSetDataReductionProxyEnabled) {
   EXPECT_CALL(*settings, RecordStartupState(PROXY_ENABLED));
   test_context_->pref_service()->SetBoolean(prefs::kDataReductionProxyEnabled,
                                             true);
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableDataReductionProxyLoFi);
+  settings->SetLoFiModeActiveOnMainFrame(true);
   InitDataReductionProxy(true);
 
-  ExpectSetProxyPrefs(false, false, false);
+  ExpectSetProxyPrefs(false, false);
   settings_->SetDataReductionProxyEnabled(false);
   test_context_->RunUntilIdle();
   CheckDataReductionProxySyntheticTrial(false);
   CheckDataReductionProxyLoFiSyntheticTrial(false);
 
-  ExpectSetProxyPrefs(true, false, false);
+  ExpectSetProxyPrefs(true, false);
   settings->SetDataReductionProxyEnabled(true);
   CheckDataReductionProxySyntheticTrial(true);
   CheckDataReductionProxyLoFiSyntheticTrial(true);
 }
 
-TEST_F(DataReductionProxySettingsTest, TestEnableLoFiFromCommandLineProxyOn) {
+TEST_F(DataReductionProxySettingsTest, TestEnableLoFiSyntheticTrial) {
   MockSettings* settings = static_cast<MockSettings*>(settings_.get());
   EXPECT_CALL(*settings, RecordStartupState(PROXY_ENABLED));
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableDataReductionProxyLoFi);
   test_context_->pref_service()->SetBoolean(prefs::kDataReductionProxyEnabled,
                                             true);
   InitDataReductionProxy(true);
+
+  // The Lo-Fi field trial will be set to "Disabled" until the first main frame
+  // request with Lo-Fi active.
+  CheckDataReductionProxyLoFiSyntheticTrial(false);
+
+  // Turn Lo-Fi on.
+  settings->SetLoFiModeActiveOnMainFrame(true);
   CheckDataReductionProxyLoFiSyntheticTrial(true);
+
+  // Now turn it off.
+  settings->SetLoFiModeActiveOnMainFrame(false);
+  CheckDataReductionProxyLoFiSyntheticTrial(false);
 }
 
-TEST_F(DataReductionProxySettingsTest, TestEnableLoFiFromCommandLineProxyOff) {
-  MockSettings* settings = static_cast<MockSettings*>(settings_.get());
-  EXPECT_CALL(*settings, RecordStartupState(PROXY_DISABLED));
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableDataReductionProxyLoFi);
-  test_context_->pref_service()->SetBoolean(prefs::kDataReductionProxyEnabled,
-                                            false);
-  InitDataReductionProxy(false);
-  CheckDataReductionProxyLoFiSyntheticTrial(false);
+TEST_F(DataReductionProxySettingsTest, TestLoFiImplicitOptOutClicksPerSession) {
+  test_context_->config()->ResetLoFiStatusForTest();
+  EXPECT_EQ(0, test_context_->pref_service()->GetInteger(
+                   prefs::kLoFiLoadImagesPerSession));
+  EXPECT_EQ(LoFiStatus::LOFI_STATUS_TEMPORARILY_OFF,
+            test_context_->config()->GetLoFiStatus());
+
+  // Click "Load images" |lo_fi_user_requests_for_images_per_session_| times.
+  for (int i = 1; i <= settings_->lo_fi_user_requests_for_images_per_session_;
+       ++i) {
+    settings_->IncrementLoFiUserRequestsForImages();
+    EXPECT_EQ(i, test_context_->pref_service()->GetInteger(
+                     prefs::kLoFiLoadImagesPerSession));
+  }
+
+  test_context_->RunUntilIdle();
+  EXPECT_EQ(1, test_context_->pref_service()->GetInteger(
+                   prefs::kLoFiConsecutiveSessionDisables));
+  EXPECT_EQ(LoFiStatus::LOFI_STATUS_OFF,
+            test_context_->config()->GetLoFiStatus());
+
+  // Reset the opt out pref values and config Lo-Fi status as if we're starting
+  // a new session.
+  test_context_->config()->ResetLoFiStatusForTest();
+  settings_->data_reduction_proxy_service_->InitializeLoFiPrefs();
+  EXPECT_EQ(0, test_context_->pref_service()->GetInteger(
+                   prefs::kLoFiLoadImagesPerSession));
+  EXPECT_EQ(LoFiStatus::LOFI_STATUS_TEMPORARILY_OFF,
+            test_context_->config()->GetLoFiStatus());
+
+  // Have a session that doesn't have
+  // |lo_fi_user_requests_for_images_per_session_| so
+  // kLoFiConsecutiveSessionDisables resets.
+  for (int i = 1;
+       i <= settings_->lo_fi_user_requests_for_images_per_session_ - 1; ++i) {
+    settings_->IncrementLoFiUserRequestsForImages();
+    EXPECT_EQ(i, test_context_->pref_service()->GetInteger(
+                     prefs::kLoFiLoadImagesPerSession));
+  }
+
+  test_context_->RunUntilIdle();
+  // Still should have only one consecutive session disable and Lo-Fi status
+  // shouldn't have been set to off.
+  EXPECT_EQ(1, test_context_->pref_service()->GetInteger(
+                   prefs::kLoFiConsecutiveSessionDisables));
+  EXPECT_EQ(LoFiStatus::LOFI_STATUS_TEMPORARILY_OFF,
+            test_context_->config()->GetLoFiStatus());
+
+  // Start a new session. The consecutive session count should now be reset to
+  // zero.
+  test_context_->config()->ResetLoFiStatusForTest();
+  settings_->data_reduction_proxy_service_->InitializeLoFiPrefs();
+  EXPECT_EQ(0, test_context_->pref_service()->GetInteger(
+                   prefs::kLoFiConsecutiveSessionDisables));
+}
+
+TEST_F(DataReductionProxySettingsTest,
+       TestLoFiImplicitOptOutConsecutiveSessions) {
+  test_context_->config()->ResetLoFiStatusForTest();
+  EXPECT_EQ(0, test_context_->pref_service()->GetInteger(
+                   prefs::kLoFiLoadImagesPerSession));
+  EXPECT_EQ(0, test_context_->pref_service()->GetInteger(
+                   prefs::kLoFiConsecutiveSessionDisables));
+  EXPECT_EQ(LoFiStatus::LOFI_STATUS_TEMPORARILY_OFF,
+            test_context_->config()->GetLoFiStatus());
+
+  // Disable Lo-Fi for |lo_fi_consecutive_session_disables_|.
+  for (int i = 1; i <= settings_->lo_fi_consecutive_session_disables_; ++i) {
+    // Start a new session.
+    test_context_->config()->ResetLoFiStatusForTest();
+    settings_->data_reduction_proxy_service_->InitializeLoFiPrefs();
+    EXPECT_EQ(LoFiStatus::LOFI_STATUS_TEMPORARILY_OFF,
+              test_context_->config()->GetLoFiStatus());
+
+    // Click "Load images" |lo_fi_user_requests_for_images_per_session_| times
+    // for each session.
+    for (int j = 1; j <= settings_->lo_fi_user_requests_for_images_per_session_;
+         ++j) {
+      settings_->IncrementLoFiUserRequestsForImages();
+      EXPECT_EQ(j, test_context_->pref_service()->GetInteger(
+                       prefs::kLoFiLoadImagesPerSession));
+    }
+
+    test_context_->RunUntilIdle();
+    EXPECT_EQ(i, test_context_->pref_service()->GetInteger(
+                     prefs::kLoFiConsecutiveSessionDisables));
+    EXPECT_EQ(LoFiStatus::LOFI_STATUS_OFF,
+              test_context_->config()->GetLoFiStatus());
+  }
+
+  // Start a new session. Lo-Fi should be set off.
+  test_context_->config()->ResetLoFiStatusForTest();
+  settings_->data_reduction_proxy_service_->InitializeLoFiPrefs();
+  test_context_->RunUntilIdle();
+  EXPECT_EQ(3, test_context_->pref_service()->GetInteger(
+                   prefs::kLoFiConsecutiveSessionDisables));
+  EXPECT_EQ(LoFiStatus::LOFI_STATUS_OFF,
+            test_context_->config()->GetLoFiStatus());
+
+  // Set the implicit opt out epoch to -1 so that the default value of zero will
+  // be an increase and the opt out status will be reset.
+  test_context_->pref_service()->SetInteger(prefs::kLoFiImplicitOptOutEpoch,
+                                            -1);
+
+  // Start a new session. Lo-Fi should be set on again.
+  test_context_->config()->ResetLoFiStatusForTest();
+  settings_->data_reduction_proxy_service_->InitializeLoFiPrefs();
+  test_context_->RunUntilIdle();
+  EXPECT_EQ(0, test_context_->pref_service()->GetInteger(
+                   prefs::kLoFiConsecutiveSessionDisables));
+  EXPECT_EQ(LoFiStatus::LOFI_STATUS_TEMPORARILY_OFF,
+            test_context_->config()->GetLoFiStatus());
+}
+
+TEST_F(DataReductionProxySettingsTest, TestLoFiImplicitOptOutHistograms) {
+  const char kUMALoFiImplicitOptOutAction[] =
+      "DataReductionProxy.LoFi.ImplicitOptOutAction.Unknown";
+  base::HistogramTester histogram_tester;
+
+  // Disable Lo-Fi for |lo_fi_consecutive_session_disables_|.
+  for (int i = 1; i <= settings_->lo_fi_consecutive_session_disables_; ++i) {
+    // Start a new session.
+    test_context_->config()->ResetLoFiStatusForTest();
+    settings_->data_reduction_proxy_service_->InitializeLoFiPrefs();
+
+    // Click "Show images" |lo_fi_show_images_clicks_per_session_| times for
+    // each session.
+    for (int j = 1; j <= settings_->lo_fi_user_requests_for_images_per_session_;
+         ++j) {
+      settings_->IncrementLoFiUserRequestsForImages();
+    }
+
+    test_context_->RunUntilIdle();
+    histogram_tester.ExpectBucketCount(
+        kUMALoFiImplicitOptOutAction, LO_FI_OPT_OUT_ACTION_DISABLED_FOR_SESSION,
+        i);
+  }
+
+  histogram_tester.ExpectBucketCount(
+      kUMALoFiImplicitOptOutAction,
+      LO_FI_OPT_OUT_ACTION_DISABLED_UNTIL_NEXT_EPOCH, 1);
+
+  // Set the implicit opt out epoch to -1 so that the default value of zero
+  // will be an increase and implicit opt out will be reset.
+  test_context_->pref_service()->SetInteger(prefs::kLoFiImplicitOptOutEpoch,
+                                            -1);
+  test_context_->config()->ResetLoFiStatusForTest();
+  settings_->data_reduction_proxy_service_->InitializeLoFiPrefs();
+  test_context_->RunUntilIdle();
+  histogram_tester.ExpectBucketCount(kUMALoFiImplicitOptOutAction,
+                                     LO_FI_OPT_OUT_ACTION_NEXT_EPOCH, 1);
+}
+
+TEST_F(DataReductionProxySettingsTest, TestLoFiSessionStateHistograms) {
+  const char kUMALoFiSessionState[] = "DataReductionProxy.LoFi.SessionState";
+  base::HistogramTester histogram_tester;
+
+  settings_->data_reduction_proxy_service_->InitializeLoFiPrefs();
+  histogram_tester.ExpectBucketCount(
+      kUMALoFiSessionState,
+      DataReductionProxyService::LO_FI_SESSION_STATE_NOT_USED, 1);
+
+  // Disable Lo-Fi for |lo_fi_consecutive_session_disables_|.
+  for (int i = 1; i <= settings_->lo_fi_consecutive_session_disables_; ++i) {
+    settings_->SetLoFiModeActiveOnMainFrame(true);
+
+    // Click "Show images" |lo_fi_show_images_clicks_per_session_| times for
+    // each session.
+    for (int j = 1; j <= settings_->lo_fi_user_requests_for_images_per_session_;
+         ++j) {
+      settings_->IncrementLoFiUserRequestsForImages();
+    }
+
+    // Start a new session.
+    test_context_->config()->ResetLoFiStatusForTest();
+    settings_->data_reduction_proxy_service_->InitializeLoFiPrefs();
+    test_context_->RunUntilIdle();
+    histogram_tester.ExpectBucketCount(
+        kUMALoFiSessionState,
+        DataReductionProxyService::LO_FI_SESSION_STATE_USED, i);
+  }
+
+  // Set the implicit opt out epoch to -1 so that the default value of zero
+  // will be an increase and implicit opt out will be reset. This session
+  // should count that the previous session was implicitly opted out.
+  test_context_->pref_service()->SetInteger(prefs::kLoFiImplicitOptOutEpoch,
+                                            -1);
+  test_context_->config()->ResetLoFiStatusForTest();
+  settings_->data_reduction_proxy_service_->InitializeLoFiPrefs();
+  test_context_->RunUntilIdle();
+  histogram_tester.ExpectBucketCount(
+      kUMALoFiSessionState,
+      DataReductionProxyService::LO_FI_SESSION_STATE_OPTED_OUT, 1);
+
+  // The implicit opt out epoch should cause the state to no longer be opt out.
+  test_context_->config()->ResetLoFiStatusForTest();
+  settings_->data_reduction_proxy_service_->InitializeLoFiPrefs();
+  test_context_->RunUntilIdle();
+  histogram_tester.ExpectBucketCount(
+      kUMALoFiSessionState,
+      DataReductionProxyService::LO_FI_SESSION_STATE_NOT_USED, 2);
 }
 
 TEST_F(DataReductionProxySettingsTest, TestGetDailyContentLengths) {
@@ -359,7 +556,7 @@ TEST_F(DataReductionProxySettingsTest, CheckInitMetricsWhenNotAllowed) {
   // Clear the command line. Setting flags can force the proxy to be allowed.
   base::CommandLine::ForCurrentProcess()->InitFromArgv(0, NULL);
 
-  ResetSettings(false, false, false, false, false);
+  ResetSettings(false, false, false, false);
   MockSettings* settings = static_cast<MockSettings*>(settings_.get());
   EXPECT_FALSE(settings->allowed_);
   EXPECT_CALL(*settings, RecordStartupState(PROXY_NOT_AVAILABLE));
@@ -383,7 +580,7 @@ TEST_F(DataReductionProxySettingsTest, CheckQUICFieldTrials) {
     // Clear the command line. Setting flags can force the proxy to be allowed.
     base::CommandLine::ForCurrentProcess()->InitFromArgv(0, NULL);
 
-    ResetSettings(false, false, false, false, false);
+    ResetSettings(false, false, false, false);
     MockSettings* settings = static_cast<MockSettings*>(settings_.get());
     EXPECT_FALSE(settings->Allowed());
     EXPECT_CALL(*settings, RecordStartupState(PROXY_NOT_AVAILABLE));
@@ -394,13 +591,11 @@ TEST_F(DataReductionProxySettingsTest, CheckQUICFieldTrials) {
 
     base::FieldTrialList field_trial_list(new base::MockEntropyProvider());
     if (enable_quic) {
-      base::FieldTrialList::CreateFieldTrial(
-          DataReductionProxyParams::GetQuicFieldTrialName(),
-          "Enabled");
+      base::FieldTrialList::CreateFieldTrial(params::GetQuicFieldTrialName(),
+                                             "Enabled");
     } else {
-      base::FieldTrialList::CreateFieldTrial(
-          DataReductionProxyParams::GetQuicFieldTrialName(),
-          "Disabled");
+      base::FieldTrialList::CreateFieldTrial(params::GetQuicFieldTrialName(),
+                                             "Disabled");
     }
     test_context_->config()->EnableQuic(enable_quic);
 
@@ -409,8 +604,9 @@ TEST_F(DataReductionProxySettingsTest, CheckQUICFieldTrials) {
                    SyntheticFieldTrialRegistrationCallback,
                    base::Unretained(this)));
 
-    EXPECT_EQ(enable_quic,
-              test_context_->config()->test_params()->origin().is_quic()) << i;
+    net::ProxyServer origin =
+        test_context_->config()->test_params()->proxies_for_http().front();
+    EXPECT_EQ(enable_quic, origin.is_quic()) << i;
   }
 }
 

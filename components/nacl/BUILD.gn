@@ -56,6 +56,8 @@ if (enable_nacl) {
 
   source_set("nacl_browser") {
     sources = [
+      "browser/bad_message.cc",
+      "browser/bad_message.h",
       "browser/nacl_broker_host_win.cc",
       "browser/nacl_broker_host_win.h",
       "browser/nacl_broker_service_win.cc",
@@ -282,7 +284,7 @@ source_set("nacl_common") {
     "common/nacl_process_type.h",
     "common/nacl_renderer_messages.cc",
     "common/nacl_renderer_messages.h",
-    "common/nacl_sandbox_type_mac.h",
+    "common/nacl_sandbox_type.h",
     "common/nacl_types.cc",
     "common/nacl_types.h",
     "common/nacl_types_param_traits.cc",

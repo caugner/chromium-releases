@@ -452,6 +452,14 @@ void ExistingUserController::Signout() {
   NOTREACHED();
 }
 
+bool ExistingUserController::IsUserWhitelisted(const std::string& user_id) {
+  bool wildcard_match = false;
+  if (login_performer_.get())
+    return login_performer_->IsUserWhitelisted(user_id, &wildcard_match);
+
+  return chromeos::CrosSettings::IsWhitelisted(user_id, &wildcard_match);
+}
+
 void ExistingUserController::OnConsumerKioskAutoLaunchCheckCompleted(
     KioskAppManager::ConsumerKioskAutoLaunchStatus status) {
   if (status == KioskAppManager::CONSUMER_KIOSK_AUTO_LAUNCH_CONFIGURABLE)
@@ -1133,6 +1141,12 @@ void ExistingUserController::DoCompleteLogin(
     device_id = ChromeSigninClient::GenerateSigninScopedDeviceID(is_ephemeral);
   }
   user_context.SetDeviceId(device_id);
+
+  const std::string& gaps_cookie = user_context.GetGAPSCookie();
+  if (!gaps_cookie.empty()) {
+    user_manager::UserManager::Get()->SetKnownUserGAPSCookie(
+        user_context.GetUserID(), gaps_cookie);
+  }
 
   PerformPreLoginActions(user_context);
 

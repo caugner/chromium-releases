@@ -77,7 +77,7 @@ void It2MeNativeMessagingHost::OnMessage(const std::string& message) {
   DCHECK(task_runner()->BelongsToCurrentThread());
 
   scoped_ptr<base::DictionaryValue> response(new base::DictionaryValue());
-  scoped_ptr<base::Value> message_value(base::JSONReader::Read(message));
+  scoped_ptr<base::Value> message_value = base::JSONReader::Read(message);
   if (!message_value->IsType(base::Value::TYPE_DICTIONARY)) {
     LOG(ERROR) << "Received a message that's not a dictionary.";
     client_->CloseChannel(std::string());
@@ -121,7 +121,7 @@ void It2MeNativeMessagingHost::SendMessageToClient(
     scoped_ptr<base::DictionaryValue> message) const {
   DCHECK(task_runner()->BelongsToCurrentThread());
   std::string message_json;
-  base::JSONWriter::Write(message.get(), &message_json);
+  base::JSONWriter::Write(*message, &message_json);
   client_->PostMessageFromNativeHost(message_json);
 }
 
@@ -168,7 +168,8 @@ void It2MeNativeMessagingHost::ProcessConnect(
   // the authServiceWithToken field. But auth service part is always expected to
   // be set to oauth2.
   const char kOAuth2ServicePrefix[] = "oauth2:";
-  if (!StartsWithASCII(auth_service_with_token, kOAuth2ServicePrefix, true)) {
+  if (!base::StartsWithASCII(auth_service_with_token, kOAuth2ServicePrefix,
+                             true)) {
     SendErrorAndExit(response.Pass(), "Invalid 'authServiceWithToken': " +
                                           auth_service_with_token);
     return;
@@ -242,7 +243,9 @@ void It2MeNativeMessagingHost::SendErrorAndExit(
   client_->CloseChannel(std::string());
 }
 
-void It2MeNativeMessagingHost::OnStateChanged(It2MeHostState state) {
+void It2MeNativeMessagingHost::OnStateChanged(
+    It2MeHostState state,
+    const std::string& error_message) {
   DCHECK(task_runner()->BelongsToCurrentThread());
 
   state_ = state;
@@ -266,6 +269,14 @@ void It2MeNativeMessagingHost::OnStateChanged(It2MeHostState state) {
 
     case kDisconnected:
       client_username_.clear();
+      break;
+
+    case kError:
+      // kError is an internal-only state, sent to the web-app by a separate
+      // "error" message so that errors that occur before the "connect" message
+      // is sent can be communicated.
+      message->SetString("type", "error");
+      message->SetString("description", error_message);
       break;
 
     default:
@@ -315,4 +326,3 @@ std::string It2MeNativeMessagingHost::HostStateToString(
 }
 
 }  // namespace remoting
-

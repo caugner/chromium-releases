@@ -16,10 +16,10 @@
 #include "grit/theme_resources.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSColor+Luminance.h"
-#include "ui/gfx/text_elider.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
+#include "ui/gfx/text_elider.h"
 
 // Distance from top border to icon.
 const CGFloat kImagePaddingTop = 7;
@@ -566,30 +566,18 @@ void DummyRTLMirror(gfx::Rect* bounds) {
       if ([completionAnimation_ isAnimating]) {
         if (percentDone_ == -1) {
           DownloadShelf::PaintDownloadComplete(
-              &canvas,
-              base::Bind(&DummyRTLMirror),
-              x,
-              y,
-              [completionAnimation_ currentValue],
-              DownloadShelf::SMALL);
+              &canvas, base::Bind(&DummyRTLMirror), x, y,
+              [completionAnimation_ currentValue]);
         } else {
           DownloadShelf::PaintDownloadInterrupted(
-              &canvas,
-              base::Bind(&DummyRTLMirror),
-              x,
-              y,
-              [completionAnimation_ currentValue],
-              DownloadShelf::SMALL);
+              &canvas, base::Bind(&DummyRTLMirror), x, y,
+              [completionAnimation_ currentValue]);
         }
       }
     } else if (percentDone_ >= 0 || indeterminateProgressTimer_) {
-      DownloadShelf::PaintDownloadProgress(&canvas,
-                                           base::Bind(&DummyRTLMirror),
-                                           x,
-                                           y,
-                                           indeterminateProgressAngle_,
-                                           percentDone_,
-                                           DownloadShelf::SMALL);
+      DownloadShelf::PaintDownloadProgress(&canvas, base::Bind(&DummyRTLMirror),
+                                           x, y, indeterminateProgressAngle_,
+                                           percentDone_);
     }
   }
 

@@ -108,7 +108,7 @@ bool ValidateExpireDateFormat(const std::string& input) {
     if (i == 4 ||  i == 7) {
       if (input[i] != '-')
         return false;
-    } else if (!IsAsciiDigit(input[i])) {
+    } else if (!base::IsAsciiDigit(input[i])) {
       return false;
     }
   }
@@ -388,7 +388,7 @@ void InstallSigner::GetSignature(const SignatureCallback& callback) {
   }
   dictionary.Set(kIdsKey, id_list.release());
   std::string json;
-  base::JSONWriter::Write(&dictionary, &json);
+  base::JSONWriter::Write(dictionary, &json);
   if (json.empty()) {
     ReportErrorViaCallback();
     return;
@@ -434,7 +434,7 @@ void InstallSigner::ParseFetchResponse() {
   // could not be verified to be in the webstore.
 
   base::DictionaryValue* dictionary = NULL;
-  scoped_ptr<base::Value> parsed(base::JSONReader::Read(response));
+  scoped_ptr<base::Value> parsed = base::JSONReader::Read(response);
   bool json_success = parsed.get() && parsed->GetAsDictionary(&dictionary);
   UMA_HISTOGRAM_BOOLEAN("ExtensionInstallSigner.ParseJsonSuccess",
                         json_success);

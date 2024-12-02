@@ -5,7 +5,6 @@
 #include "chrome/browser/android/compositor/layer/tab_layer.h"
 
 #include "base/i18n/rtl.h"
-#include "cc/layers/image_layer.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_lists.h"
 #include "cc/layers/nine_patch_layer.h"
@@ -16,6 +15,7 @@
 #include "chrome/browser/android/compositor/layer/toolbar_layer.h"
 #include "chrome/browser/android/compositor/layer_title_cache.h"
 #include "chrome/browser/android/compositor/tab_content_manager.h"
+#include "content/public/browser/android/compositor.h"
 #include "ui/android/resources/resource_manager.h"
 #include "ui/android/resources/ui_resource_android.h"
 #include "ui/base/l10n/l10n_util_android.h"
@@ -124,9 +124,7 @@ void TabLayer::SetProperties(int id,
   ui::ResourceManager::Resource* close_btn_resource =
       resource_manager_->GetResource(ui::ANDROID_RESOURCE_TYPE_STATIC,
                                      close_button_resource_id);
-  ui::ResourceManager::Resource* back_logo_resource =
-      resource_manager_->GetResource(ui::ANDROID_RESOURCE_TYPE_STATIC,
-                                     back_logo_resource_id);
+  ui::ResourceManager::Resource* back_logo_resource = nullptr;
 
   DecorationTitle* title_layer = nullptr;
 
@@ -217,8 +215,13 @@ void TabLayer::SetProperties(int id,
   gfx::Size title_size(width - close_btn_effective_width, border_padding.y());
   gfx::Size back_logo_size;
   // TODO(clholgat): Figure out why the back logo is null sometimes.
-  if (back_logo_resource)
-    back_logo_size = back_logo_resource->size;
+  if (back_visible) {
+    back_logo_resource =
+        resource_manager_->GetResource(ui::ANDROID_RESOURCE_TYPE_STATIC,
+                                       back_logo_resource_id);
+    if (back_logo_resource)
+      back_logo_size = back_logo_resource->size;
+  }
 
   // Store this size at a point as it might go negative during the inset
   // calculations.
@@ -530,16 +533,21 @@ TabLayer::TabLayer(bool incognito,
     : incognito_(incognito),
       resource_manager_(resource_manager),
       layer_title_cache_(layer_title_cache),
-      layer_(cc::Layer::Create()),
+      layer_(cc::Layer::Create(content::Compositor::LayerSettings())),
       toolbar_layer_(ToolbarLayer::Create()),
-      title_(cc::Layer::Create()),
+      title_(cc::Layer::Create(content::Compositor::LayerSettings())),
       content_(ContentLayer::Create(tab_content_manager)),
-      padding_(cc::SolidColorLayer::Create()),
-      close_button_(cc::UIResourceLayer::Create()),
-      front_border_(cc::NinePatchLayer::Create()),
-      contour_shadow_(cc::NinePatchLayer::Create()),
-      shadow_(cc::NinePatchLayer::Create()),
-      back_logo_(cc::UIResourceLayer::Create()),
+      padding_(
+          cc::SolidColorLayer::Create(content::Compositor::LayerSettings())),
+      close_button_(
+          cc::UIResourceLayer::Create(content::Compositor::LayerSettings())),
+      front_border_(
+          cc::NinePatchLayer::Create(content::Compositor::LayerSettings())),
+      contour_shadow_(
+          cc::NinePatchLayer::Create(content::Compositor::LayerSettings())),
+      shadow_(cc::NinePatchLayer::Create(content::Compositor::LayerSettings())),
+      back_logo_(
+          cc::UIResourceLayer::Create(content::Compositor::LayerSettings())),
       brightness_(1.f) {
   layer_->AddChild(shadow_);
   layer_->AddChild(contour_shadow_);

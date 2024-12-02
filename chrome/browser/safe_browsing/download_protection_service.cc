@@ -62,83 +62,20 @@ const char DownloadProtectionService::kDownloadRequestUrl[] =
     "https://sb-ssl.google.com/safebrowsing/clientreport/download";
 
 namespace {
-// List of extensions for which we track some UMA stats. The position of the
-// extension in kDangerousFileTypes is considered to be the UMA enumeration
-// value. Naturally, new values should only be added at the end.
-const base::FilePath::CharType* const kDangerousFileTypes[] = {
-    FILE_PATH_LITERAL(".exe"),
-    FILE_PATH_LITERAL(".msi"),
-    FILE_PATH_LITERAL(".cab"),
-    FILE_PATH_LITERAL(".sys"),
-    FILE_PATH_LITERAL(".scr"),
-    FILE_PATH_LITERAL(".drv"),
-    FILE_PATH_LITERAL(".bat"),
-    FILE_PATH_LITERAL(".zip"),
-    FILE_PATH_LITERAL(".rar"),
-    FILE_PATH_LITERAL(".dll"),
-    FILE_PATH_LITERAL(".pif"),
-    FILE_PATH_LITERAL(".com"),
-    FILE_PATH_LITERAL(".jar"),
-    FILE_PATH_LITERAL(".class"),
-    FILE_PATH_LITERAL(".pdf"),
-    FILE_PATH_LITERAL(".vb"),
-    FILE_PATH_LITERAL(".reg"),
-    FILE_PATH_LITERAL(".grp"),
-    nullptr,  // The "Other" bucket. This is in the middle of the array due to
-              // historical reasons.
-    FILE_PATH_LITERAL(".crx"),
-    FILE_PATH_LITERAL(".apk"),
-    FILE_PATH_LITERAL(".dmg"),
-    FILE_PATH_LITERAL(".pkg"),
-    FILE_PATH_LITERAL(".torrent"),
-    FILE_PATH_LITERAL(".website"),
-    FILE_PATH_LITERAL(".url"),
-    FILE_PATH_LITERAL(".vbe"),
-    FILE_PATH_LITERAL(".vbs"),
-    FILE_PATH_LITERAL(".js"),
-    FILE_PATH_LITERAL(".jse"),
-    FILE_PATH_LITERAL(".mht"),
-    FILE_PATH_LITERAL(".mhtml"),
-    FILE_PATH_LITERAL(".msc"),
-    FILE_PATH_LITERAL(".msp"),
-    FILE_PATH_LITERAL(".mst"),
-    FILE_PATH_LITERAL(".bas"),
-    FILE_PATH_LITERAL(".hta"),
-    FILE_PATH_LITERAL(".msh"),
-    FILE_PATH_LITERAL(".msh1"),
-    FILE_PATH_LITERAL(".msh1xml"),
-    FILE_PATH_LITERAL(".msh2"),
-    FILE_PATH_LITERAL(".msh2xml"),
-    FILE_PATH_LITERAL(".mshxml"),
-    FILE_PATH_LITERAL(".ps1"),
-    FILE_PATH_LITERAL(".ps1xml"),
-    FILE_PATH_LITERAL(".ps2"),
-    FILE_PATH_LITERAL(".ps2xml"),
-    FILE_PATH_LITERAL(".psc1"),
-    FILE_PATH_LITERAL(".psc2"),
-    FILE_PATH_LITERAL(".scf"),
-    FILE_PATH_LITERAL(".sct"),
-    FILE_PATH_LITERAL(".wsf"),
-};
-
-// UMA enumeration value for unrecognized file types. This is the array index of
-// the "Other" bucket in kDangerousFileTypes.
-const int EXTENSION_OTHER = 18;
-
 void RecordFileExtensionType(const base::FilePath& file) {
-  DCHECK_EQ(static_cast<base::FilePath::CharType*>(nullptr),
-            kDangerousFileTypes[EXTENSION_OTHER]);
+  UMA_HISTOGRAM_ENUMERATION(
+      "SBClientDownload.DownloadExtensions",
+      download_protection_util::GetSBClientDownloadExtensionValueForUMA(file),
+      download_protection_util::kSBClientDownloadExtensionsMax);
+}
 
-  int extension_type = EXTENSION_OTHER;
-  for (const auto& extension : kDangerousFileTypes) {
-    if (extension && file.MatchesExtension(extension)) {
-      extension_type = &extension - kDangerousFileTypes;
-      break;
-    }
-  }
-
-  UMA_HISTOGRAM_ENUMERATION("SBClientDownload.DownloadExtensions",
-                            extension_type, arraysize(kDangerousFileTypes));
+void RecordArchivedArchiveFileExtensionType(
+    const base::FilePath::StringType& extension) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "SBClientDownload.ArchivedArchiveExtensions",
+      download_protection_util::GetSBClientDownloadExtensionValueForUMA(
+          base::FilePath(extension)),
+      download_protection_util::kSBClientDownloadExtensionsMax);
 }
 
 // Enumerate for histogramming purposes.
@@ -369,8 +306,6 @@ class DownloadProtectionService::CheckClientDownloadRequest
         FILE_PATH_LITERAL(".zip"))) {
       StartExtractZipFeatures();
     } else {
-      DCHECK(!download_protection_util::IsArchiveFile(
-          item_->GetTargetFilePath()));
       StartExtractFileFeatures();
     }
   }
@@ -501,7 +436,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
       *reason = REASON_INVALID_URL;
       return false;
     }
-    if (!download_protection_util::IsBinaryFile(target_path)) {
+    if (!download_protection_util::IsSupportedBinaryFile(target_path)) {
       *reason = REASON_NOT_BINARY_FILE;
       return false;
     }
@@ -600,6 +535,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
 
   void OnZipAnalysisFinished(const zip_analyzer::Results& results) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
+    DCHECK_EQ(ClientDownloadRequest::ZIPPED_EXECUTABLE, type_);
     if (!service_)
       return;
     if (results.success) {
@@ -617,11 +553,16 @@ class DownloadProtectionService::CheckClientDownloadRequest
                           results.has_archive && !zipped_executable_);
     UMA_HISTOGRAM_TIMES("SBClientDownload.ExtractZipFeaturesTime",
                         base::TimeTicks::Now() - zip_analysis_start_time_);
+    for (const auto& file_extension : results.archived_archive_filetypes)
+      RecordArchivedArchiveFileExtensionType(file_extension);
 
-    if (!zipped_executable_) {
+    if (!zipped_executable_ && !results.has_archive) {
       PostFinishTask(UNKNOWN, REASON_ARCHIVE_WITHOUT_BINARIES);
       return;
     }
+
+    if (!zipped_executable_ && results.has_archive)
+      type_ = ClientDownloadRequest::ZIPPED_ARCHIVE;
     OnFileFeatureExtractionDone();
   }
 
@@ -836,15 +777,6 @@ class DownloadProtectionService::CheckClientDownloadRequest
         UMA_HISTOGRAM_TIMES("SBClientDownload.DownloadRequestTimeoutDuration",
                             base::TimeTicks::Now() - timeout_start_time_);
       }
-    }
-    if (result == SAFE && (reason == REASON_WHITELISTED_URL ||
-                           reason == REASON_TRUSTED_EXECUTABLE)) {
-      // Due to the short-circuit logic in CheckWhitelists (see TODOs there), a
-      // ClientDownloadRequest was not generated for this download and callbacks
-      // were not run. Run them now with null to indicate that a download has
-      // taken place.
-      // TODO(grt): persist metadata for these downloads as well.
-      service_->client_download_request_callbacks_.Notify(item_, nullptr);
     }
     if (service_) {
       DVLOG(2) << "SafeBrowsing download verdict for: "

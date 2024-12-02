@@ -367,7 +367,7 @@ ActivityLog::ActivityLog(content::BrowserContext* context)
   watchdog_apps_active_ =
       profile_->GetPrefs()->GetInteger(prefs::kWatchdogExtensionActive);
 
-  observers_ = new ObserverListThreadSafe<Observer>;
+  observers_ = new base::ObserverListThreadSafe<Observer>;
 
   // Check that the right threads exist for logging to the database.
   // If not, we shouldn't try to do things that require them.
@@ -382,9 +382,7 @@ ActivityLog::ActivityLog(content::BrowserContext* context)
                            switches::kEnableExtensionActivityLogging) ||
                        watchdog_apps_active_);
 
-  ExtensionSystem::Get(profile_)->ready().Post(
-      FROM_HERE,
-      base::Bind(&ActivityLog::StartObserving, base::Unretained(this)));
+  extension_registry_observer_.Add(ExtensionRegistry::Get(profile_));
 
   if (!profile_->IsOffTheRecord())
     uma_policy_ = new UmaPolicy(profile_);
@@ -432,10 +430,6 @@ ActivityLog::~ActivityLog() {
 }
 
 // MAINTAIN STATUS. ------------------------------------------------------------
-
-void ActivityLog::StartObserving() {
-  extension_registry_observer_.Add(ExtensionRegistry::Get(profile_));
-}
 
 void ActivityLog::ChooseDatabasePolicy() {
   if (!(IsDatabaseEnabled() || IsWatchdogAppActive()))
@@ -527,7 +521,8 @@ void ActivityLog::LogAction(scoped_refptr<Action> action) {
 
   // Mark DOM XHR requests as such, for easier processing later.
   if (action->action_type() == Action::ACTION_DOM_ACCESS &&
-      StartsWithASCII(action->api_name(), kDomXhrPrefix, true) &&
+      base::StartsWith(action->api_name(), kDomXhrPrefix,
+                       base::CompareCase::SENSITIVE) &&
       action->other()) {
     base::DictionaryValue* other = action->mutable_other();
     int dom_verb = -1;

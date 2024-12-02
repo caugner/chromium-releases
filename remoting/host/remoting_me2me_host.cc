@@ -23,6 +23,7 @@
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_listener.h"
 #include "media/base/media.h"
+#include "net/base/net_util.h"
 #include "net/base/network_change_notifier.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/ssl_server_socket.h"
@@ -44,6 +45,8 @@
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/desktop_session_connector.h"
 #include "remoting/host/dns_blackhole_checker.h"
+#include "remoting/host/gcd_rest_client.h"
+#include "remoting/host/gcd_state_updater.h"
 #include "remoting/host/heartbeat_sender.h"
 #include "remoting/host/host_change_notification_listener.h"
 #include "remoting/host/host_config.h"
@@ -51,11 +54,13 @@
 #include "remoting/host/host_exit_codes.h"
 #include "remoting/host/host_main.h"
 #include "remoting/host/host_status_logger.h"
+#include "remoting/host/input_injector.h"
 #include "remoting/host/ipc_constants.h"
 #include "remoting/host/ipc_desktop_environment.h"
 #include "remoting/host/ipc_host_event_logger.h"
 #include "remoting/host/logging.h"
 #include "remoting/host/me2me_desktop_environment.h"
+#include "remoting/host/oauth_token_getter_impl.h"
 #include "remoting/host/pairing_registry_delegate.h"
 #include "remoting/host/policy_watcher.h"
 #include "remoting/host/session_manager_factory.h"
@@ -72,6 +77,7 @@
 #include "remoting/protocol/pairing_registry.h"
 #include "remoting/protocol/port_range.h"
 #include "remoting/protocol/token_validator.h"
+#include "remoting/signaling/push_notification_subscriber.h"
 #include "remoting/signaling/xmpp_signal_strategy.h"
 
 #if defined(OS_POSIX)
@@ -110,8 +116,14 @@ using remoting::protocol::NetworkSettings;
 
 namespace {
 
+#if !defined(REMOTING_MULTI_PROCESS)
 // This is used for tagging system event logs.
 const char kApplicationName[] = "chromoting";
+
+// Value used for --host-config option to indicate that the path must be read
+// from stdin.
+const char kStdinConfigPath[] = "-";
+#endif  // !defined(REMOTING_MULTI_PROCESS)
 
 #if defined(OS_LINUX)
 // The command line switch used to pass name of the pipe to capture audio on
@@ -132,10 +144,6 @@ const char kEnableVp9SwitchName[] = "enable-vp9";
 
 // Command line switch used to enable and configure the frame-recorder.
 const char kFrameRecorderBufferKbName[] = "frame-recorder-buffer-kb";
-
-// Value used for --host-config option to indicate that the path must be read
-// from stdin.
-const char kStdinConfigPath[] = "-";
 
 const char kWindowIdSwitchName[] = "window-id";
 
@@ -304,6 +312,8 @@ class HostProcess : public ConfigWatcher::Delegate,
                const std::string& file_name,
                const int& line_number);
 
+  bool using_gcd() { return !gcd_device_id_.empty(); }
+
   scoped_ptr<ChromotingHostContext> context_;
 
   // Accessed on the UI thread.
@@ -356,12 +366,17 @@ class HostProcess : public ConfigWatcher::Delegate,
   // Used to specify which window to stream, if enabled.
   webrtc::WindowId window_id_;
 
-  // |heartbeat_sender_| and |signaling_connector_| have to be destroyed before
-  // |signal_strategy_| because their destructors need to call
-  // signal_strategy_->RemoveListener(this)
+  // Must outlive |gcd_state_updater_| and |signaling_connector_|.
+  scoped_ptr<OAuthTokenGetter> oauth_token_getter_;
+
+  // Must outlive |signaling_connector_|, |gcd_subscriber_|, and
+  // |heartbeat_sender_|.
   scoped_ptr<SignalStrategy> signal_strategy_;
+
   scoped_ptr<SignalingConnector> signaling_connector_;
   scoped_ptr<HeartbeatSender> heartbeat_sender_;
+  scoped_ptr<GcdStateUpdater> gcd_state_updater_;
+  scoped_ptr<PushNotificationSubscriber> gcd_subscriber_;
 
   scoped_ptr<HostChangeNotificationListener> host_change_notification_listener_;
   scoped_ptr<HostStatusLogger> host_status_logger_;
@@ -403,10 +418,10 @@ HostProcess::HostProcess(scoped_ptr<ChromotingHostContext> context,
       enable_gnubby_auth_(false),
       enable_window_capture_(false),
       window_id_(0),
+      self_(this),
 #if defined(REMOTING_MULTI_PROCESS)
       desktop_session_connector_(nullptr),
 #endif  // defined(REMOTING_MULTI_PROCESS)
-      self_(this),
       exit_code_out_(exit_code_out),
       signal_parent_(false),
       shutdown_watchdog_(shutdown_watchdog) {
@@ -473,10 +488,11 @@ bool HostProcess::InitWithCommandLine(const base::CommandLine* cmd_line) {
 
     // Read config from stdin if necessary.
     if (host_config_path_ == base::FilePath(kStdinConfigPath)) {
-      char buf[4096];
+      const size_t kBufferSize = 4096;
+      scoped_ptr<char[]> buf(new char[kBufferSize]);
       size_t len;
-      while ((len = fread(buf, 1, sizeof(buf), stdin)) > 0) {
-        host_config_.append(buf, len);
+      while ((len = fread(buf.get(), 1, kBufferSize, stdin)) > 0) {
+        host_config_.append(buf.get(), len);
       }
     }
   } else {
@@ -629,6 +645,11 @@ void HostProcess::SetState(HostState target_state) {
 
 void HostProcess::StartOnNetworkThread() {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
+
+  if (state_ != HOST_STARTING) {
+    // Host was shutdown before the task had a chance to run.
+    return;
+  }
 
 #if !defined(REMOTING_MULTI_PROCESS)
   if (host_config_path_ == base::FilePath(kStdinConfigPath)) {
@@ -802,7 +823,7 @@ void HostProcess::StartOnUiThread() {
           daemon_channel_.get());
   desktop_session_connector_ = desktop_environment_factory;
 #else  // !defined(OS_WIN)
-  DesktopEnvironmentFactory* desktop_environment_factory;
+  BasicDesktopEnvironmentFactory* desktop_environment_factory;
   if (enable_window_capture_) {
     desktop_environment_factory =
       new SingleWindowDesktopEnvironmentFactory(
@@ -818,6 +839,8 @@ void HostProcess::StartOnUiThread() {
           context_->ui_task_runner());
   }
 #endif  // !defined(OS_WIN)
+  desktop_environment_factory->set_supports_touch_events(
+      InputInjector::SupportsTouchEvents());
 
   desktop_environment_factory_.reset(desktop_environment_factory);
   desktop_environment_factory_->SetEnableGnubbyAuth(enable_gnubby_auth_);
@@ -914,7 +937,15 @@ bool HostProcess::ApplyConfig(const base::DictionaryValue& config) {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
   if (!config.GetString(kHostIdConfigPath, &host_id_)) {
-    LOG(ERROR) << "host_id is not defined in the config.";
+    host_id_.clear();
+  }
+
+  if (!config.GetString(kGcdDeviceIdConfigPath, &gcd_device_id_)) {
+    gcd_device_id_.clear();
+  }
+
+  if (host_id_.empty() && gcd_device_id_.empty()) {
+    LOG(ERROR) << "Neither host_id nor gcd_device_id is defined in the config.";
     return false;
   }
 
@@ -985,10 +1016,6 @@ bool HostProcess::ApplyConfig(const base::DictionaryValue& config) {
   }
   if (frame_recorder_buffer_kb > 0) {
     frame_recorder_buffer_size_ = 1024LL * frame_recorder_buffer_kb;
-  }
-
-  if (!config.GetString(kGcdDeviceIdConfigPath, &gcd_device_id_)) {
-    gcd_device_id_.clear();
   }
 
   return true;
@@ -1069,7 +1096,7 @@ void HostProcess::ApplyHostDomainPolicy() {
       ShutdownHost(kInvalidHostDomainExitCode);
     }
 
-    if (!EndsWith(host_owner_, std::string("@") + host_domain_, false)) {
+    if (!base::EndsWith(host_owner_, std::string("@") + host_domain_, false)) {
       LOG(ERROR) << "The host domain does not match the policy.";
       ShutdownHost(kInvalidHostDomainExitCode);
     }
@@ -1104,9 +1131,9 @@ void HostProcess::ApplyUsernamePolicy() {
     }
 
     std::string username = GetUsername();
-    bool shutdown = username.empty() ||
-        !StartsWithASCII(host_owner_, username + std::string("@"),
-                         false);
+    bool shutdown =
+        username.empty() ||
+        !base::StartsWithASCII(host_owner_, username + std::string("@"), false);
 
 #if defined(OS_MACOSX)
     // On Mac, we run as root at the login screen, so the username won't match.
@@ -1193,7 +1220,10 @@ bool HostProcess::OnUdpPortPolicyUpdate(base::DictionaryValue* policies) {
     return false;
   }
 
-  DCHECK(PortRange::Parse(string_value, &udp_port_range_));
+  if (!PortRange::Parse(string_value, &udp_port_range_)) {
+    // PolicyWatcher verifies that the value is formatted correctly.
+    LOG(FATAL) << "Invalid port range: " << string_value;
+  }
   HOST_LOG << "Policy restricts UDP port range to: " << udp_port_range_;
   return true;
 }
@@ -1304,8 +1334,15 @@ bool HostProcess::OnGnubbyAuthPolicyUpdate(base::DictionaryValue* policies) {
 }
 
 void HostProcess::InitializeSignaling() {
-  DCHECK(!host_id_.empty());  // |ApplyConfig| should already have been run.
+  // ApplyConfig() should already have been run.
+  DCHECK(!host_id_.empty() || !gcd_device_id_.empty());
+
   DCHECK(!signal_strategy_);
+  DCHECK(!oauth_token_getter_);
+  DCHECK(!signaling_connector_);
+  DCHECK(!gcd_state_updater_);
+  DCHECK(!gcd_subscriber_);
+  DCHECK(!heartbeat_sender_);
 
   // Create SignalStrategy.
   XmppSignalStrategy* xmpp_signal_strategy = new XmppSignalStrategy(
@@ -1320,19 +1357,40 @@ void HostProcess::InitializeSignaling() {
       new OAuthTokenGetter::OAuthCredentials(xmpp_server_config_.username,
                                              oauth_refresh_token_,
                                              use_service_account_));
-  scoped_ptr<OAuthTokenGetter> oauth_token_getter(new OAuthTokenGetter(
+  oauth_token_getter_.reset(new OAuthTokenGetterImpl(
       oauth_credentials.Pass(), context_->url_request_context_getter(), false,
-      gcd_device_id_.empty()));
+      !using_gcd()));
   signaling_connector_.reset(new SignalingConnector(
       xmpp_signal_strategy, dns_blackhole_checker.Pass(),
-      oauth_token_getter.Pass(),
+      oauth_token_getter_.get(),
       base::Bind(&HostProcess::OnAuthFailed, base::Unretained(this))));
 
-  // Create HeartbeatSender.
-  heartbeat_sender_.reset(new HeartbeatSender(
-      base::Bind(&HostProcess::OnHeartbeatSuccessful, base::Unretained(this)),
-      base::Bind(&HostProcess::OnUnknownHostIdError, base::Unretained(this)),
-      host_id_, xmpp_signal_strategy, key_pair_, directory_bot_jid_));
+  if (using_gcd()) {
+    // Create objects to manage GCD state.
+    ServiceUrls* service_urls = ServiceUrls::GetInstance();
+    scoped_ptr<GcdRestClient> gcd_rest_client(new GcdRestClient(
+        service_urls->gcd_base_url(), gcd_device_id_,
+        context_->url_request_context_getter(), oauth_token_getter_.get()));
+    gcd_state_updater_.reset(
+        new GcdStateUpdater(base::Bind(&HostProcess::OnHeartbeatSuccessful,
+                                       base::Unretained(this)),
+                            base::Bind(&HostProcess::OnUnknownHostIdError,
+                                       base::Unretained(this)),
+                            signal_strategy_.get(), gcd_rest_client.Pass()));
+
+    PushNotificationSubscriber::Subscription sub;
+    sub.channel = "cloud_devices";
+    PushNotificationSubscriber::SubscriptionList subs;
+    subs.push_back(sub);
+    gcd_subscriber_.reset(
+        new PushNotificationSubscriber(signal_strategy_.get(), subs));
+  } else {
+    // Create HeartbeatSender.
+    heartbeat_sender_.reset(new HeartbeatSender(
+        base::Bind(&HostProcess::OnHeartbeatSuccessful, base::Unretained(this)),
+        base::Bind(&HostProcess::OnUnknownHostIdError, base::Unretained(this)),
+        host_id_, signal_strategy_.get(), key_pair_, directory_bot_jid_));
+  }
 }
 
 void HostProcess::StartHostIfReady() {
@@ -1408,9 +1466,14 @@ void HostProcess::StartHost() {
   host_change_notification_listener_.reset(new HostChangeNotificationListener(
       this, host_id_, signal_strategy_.get(), directory_bot_jid_));
 
-  host_status_logger_.reset(
-      new HostStatusLogger(host_->AsWeakPtr(), ServerLogEntry::ME2ME,
-                           signal_strategy_.get(), directory_bot_jid_));
+  if (using_gcd()) {
+    // TODO(jrw): Implement logging for GCD hosts.
+    HOST_LOG << "Logging not implemented for GCD hosts.";
+  } else {
+    host_status_logger_.reset(new HostStatusLogger(
+        host_->AsWeakPtr(), ServerLogEntry::ME2ME,
+        signal_strategy_.get(), directory_bot_jid_));
+  }
 
   // Set up reporting the host status notifications.
 #if defined(REMOTING_MULTI_PROCESS)
@@ -1484,10 +1547,18 @@ void HostProcess::GoOffline(const std::string& host_offline_reason) {
       InitializeSignaling();
 
     HOST_LOG << "SendHostOfflineReason: sending " << host_offline_reason << ".";
-    heartbeat_sender_->SetHostOfflineReason(
-        host_offline_reason,
-        base::TimeDelta::FromSeconds(kHostOfflineReasonTimeoutSeconds),
-        base::Bind(&HostProcess::OnHostOfflineReasonAck, this));
+    if (heartbeat_sender_) {
+      heartbeat_sender_->SetHostOfflineReason(
+          host_offline_reason,
+          base::TimeDelta::FromSeconds(kHostOfflineReasonTimeoutSeconds),
+          base::Bind(&HostProcess::OnHostOfflineReasonAck, this));
+    }
+    if (gcd_state_updater_) {
+      gcd_state_updater_->SetHostOfflineReason(
+          host_offline_reason,
+          base::TimeDelta::FromSeconds(kHostOfflineReasonTimeoutSeconds),
+          base::Bind(&HostProcess::OnHostOfflineReasonAck, this));
+    }
     return;  // Shutdown will resume after OnHostOfflineReasonAck.
   }
 
@@ -1503,8 +1574,11 @@ void HostProcess::OnHostOfflineReasonAck(bool success) {
 
   HOST_LOG << "SendHostOfflineReason " << (success ? "succeeded." : "failed.");
   heartbeat_sender_.reset();
+  oauth_token_getter_.reset();
   signaling_connector_.reset();
   signal_strategy_.reset();
+  gcd_state_updater_.reset();
+  gcd_subscriber_.reset();
 
   if (state_ == HOST_GOING_OFFLINE_TO_RESTART) {
     SetState(HOST_STARTING);
@@ -1560,7 +1634,7 @@ int HostProcessMain() {
   base::MessageLoopForUI message_loop;
   scoped_ptr<ChromotingHostContext> context =
       ChromotingHostContext::Create(new AutoThreadTaskRunner(
-          message_loop.message_loop_proxy(), base::MessageLoop::QuitClosure()));
+          message_loop.task_runner(), base::MessageLoop::QuitClosure()));
   if (!context)
     return kInitializationFailed;
 

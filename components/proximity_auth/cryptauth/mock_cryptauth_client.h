@@ -42,6 +42,7 @@ class MockCryptAuthClient : public CryptAuthClient {
                void(const cryptauth::FinishEnrollmentRequest& request,
                     const FinishEnrollmentCallback& callback,
                     const ErrorCallback& error_callback));
+  MOCK_METHOD0(GetAccessTokenUsed, std::string());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockCryptAuthClient);
@@ -57,9 +58,12 @@ class MockCryptAuthClientFactory : public CryptAuthClientFactory {
     virtual void OnCryptAuthClientCreated(MockCryptAuthClient* client) = 0;
   };
 
-  // If |is_strict| is true, then StrictMocks will be created. Otherwise,
+  // Represents the type of mock instances to create.
+  enum class MockType { MAKE_NICE_MOCKS, MAKE_STRICT_MOCKS };
+
+  // If |mock_type| is STRICT, then StrictMocks will be created. Otherwise,
   // NiceMocks will be created.
-  explicit MockCryptAuthClientFactory(bool is_strict);
+  explicit MockCryptAuthClientFactory(MockType mock_type);
   ~MockCryptAuthClientFactory() override;
 
   // CryptAuthClientFactory:
@@ -70,10 +74,10 @@ class MockCryptAuthClientFactory : public CryptAuthClientFactory {
 
  private:
   // Whether to create StrictMocks or NiceMocks.
-  bool is_strict_;
+  const MockType mock_type_;
 
   // Observers of the factory.
-  ObserverList<Observer> observer_list_;
+  base::ObserverList<Observer> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(MockCryptAuthClientFactory);
 };

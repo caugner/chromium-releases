@@ -485,7 +485,8 @@ class TestFailProvisionalLoadObserver : public content::WebContentsObserver {
       content::RenderFrameHost* render_frame_host,
       const GURL& validated_url,
       int error_code,
-      const base::string16& error_description) override {
+      const base::string16& error_description,
+      bool was_ignored_by_handler) override {
     fail_url_ = validated_url;
   }
 
@@ -964,7 +965,13 @@ class ErrorPageAutoReloadTest : public InProcessBrowserTest {
   FailFirstNRequestsInterceptor* interceptor_;
 };
 
-IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadTest, AutoReload) {
+// Fails on official mac_trunk build. See crbug.com/465789.
+#if defined(OFFICIAL_BUILD) && defined(OS_MACOSX)
+#define MAYBE_AutoReload DISABLED_AutoReload
+#else
+#define MAYBE_AutoReload AutoReload
+#endif
+IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadTest, MAYBE_AutoReload) {
   GURL test_url("http://error.page.auto.reload");
   const int kRequestsToFail = 2;
   InstallInterceptor(test_url, kRequestsToFail);

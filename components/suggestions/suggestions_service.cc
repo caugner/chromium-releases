@@ -6,12 +6,14 @@
 
 #include <string>
 
+#include "base/location.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop_proxy.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/suggestions/blacklist_store.h"
@@ -176,9 +178,8 @@ void SuggestionsService::UndoBlacklistURL(
 // static
 bool SuggestionsService::GetBlacklistedUrl(const net::URLFetcher& request,
                                            GURL* url) {
-  bool is_blacklist_request = StartsWithASCII(request.GetOriginalURL().spec(),
-                                              kSuggestionsBlacklistURLPrefix,
-                                              true);
+  bool is_blacklist_request = base::StartsWithASCII(
+      request.GetOriginalURL().spec(), kSuggestionsBlacklistURLPrefix, true);
   if (!is_blacklist_request) return false;
 
   // Extract the blacklisted URL from the blacklist request.
@@ -330,7 +331,7 @@ void SuggestionsService::ScheduleBlacklistUpload() {
     base::Closure blacklist_cb =
         base::Bind(&SuggestionsService::UploadOneFromBlacklist,
                    weak_ptr_factory_.GetWeakPtr());
-    base::MessageLoopProxy::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, blacklist_cb, time_delta + scheduling_delay_);
   }
 }

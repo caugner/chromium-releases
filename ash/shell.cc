@@ -29,6 +29,7 @@
 #include "ash/gpu_support.h"
 #include "ash/high_contrast/high_contrast_controller.h"
 #include "ash/host/ash_window_tree_host_init_params.h"
+#include "ash/ime/input_method_event_handler.h"
 #include "ash/keyboard_uma_event_filter.h"
 #include "ash/magnifier/magnification_controller.h"
 #include "ash/magnifier/partial_magnification_controller.h"
@@ -108,7 +109,6 @@
 #include "ui/wm/core/accelerator_filter.h"
 #include "ui/wm/core/compound_event_filter.h"
 #include "ui/wm/core/focus_controller.h"
-#include "ui/wm/core/input_method_event_filter.h"
 #include "ui/wm/core/nested_accelerator_controller.h"
 #include "ui/wm/core/shadow_controller.h"
 #include "ui/wm/core/visibility_controller.h"
@@ -660,6 +660,8 @@ Shell::Shell(ShellDelegate* delegate)
 Shell::~Shell() {
   TRACE_EVENT0("shutdown", "ash::Shell::Destructor");
 
+  user_metrics_recorder_->OnShellShuttingDown();
+
   delegate_->PreShutdown();
 
   views::FocusManagerFactory::Install(NULL);
@@ -672,6 +674,7 @@ Shell::~Shell() {
   // Please keep in same order as in Init() because it's easy to miss one.
   if (window_modality_controller_)
     window_modality_controller_.reset();
+  RemovePreTargetHandler(display_controller_->input_method_event_handler());
 #if defined(OS_CHROMEOS)
   RemovePreTargetHandler(magnifier_key_scroll_handler_.get());
   magnifier_key_scroll_handler_.reset();
@@ -680,7 +683,6 @@ Shell::~Shell() {
   speech_feedback_handler_.reset();
 #endif
   RemovePreTargetHandler(overlay_filter_.get());
-  RemovePreTargetHandler(input_method_filter_.get());
   RemovePreTargetHandler(accelerator_filter_.get());
   RemovePreTargetHandler(event_transformation_handler_.get());
   RemovePreTargetHandler(toplevel_window_event_handler_.get());
@@ -748,7 +750,6 @@ Shell::~Shell() {
 
   window_cycle_controller_.reset();
   window_selector_controller_.reset();
-  mru_window_tracker_.reset();
 
   // |shelf_window_watcher_| has a weak pointer to |shelf_Model_|
   // and has window observers.
@@ -756,6 +757,10 @@ Shell::~Shell() {
 
   // Destroy all child windows including widgets.
   display_controller_->CloseChildWindows();
+  // MruWindowTracker must be destroyed after all windows have been deleted to
+  // avoid a possible crash when Shell is destroyed from a non-normal shutdown
+  // path. (crbug.com/485438).
+  mru_window_tracker_.reset();
 
   // Chrome implementation of shelf delegate depends on FocusClient,
   // so must be deleted before |focus_client_|.
@@ -806,7 +811,7 @@ Shell::~Shell() {
   new_window_delegate_.reset();
   media_delegate_.reset();
 
-  keyboard::KeyboardController::ResetInstance(NULL);
+  keyboard::KeyboardController::ResetInstance(nullptr);
 
 #if defined(OS_CHROMEOS)
   display_color_manager_.reset();
@@ -915,6 +920,8 @@ void Shell::Init(const ShellInitParams& init_params) {
   accelerator_controller_.reset(new AcceleratorController);
   maximize_mode_controller_.reset(new MaximizeModeController());
 
+  AddPreTargetHandler(display_controller_->input_method_event_handler());
+
 #if defined(OS_CHROMEOS)
   magnifier_key_scroll_handler_ = MagnifierKeyScroller::CreateHandler();
   AddPreTargetHandler(magnifier_key_scroll_handler_.get());
@@ -931,10 +938,6 @@ void Shell::Init(const ShellInitParams& init_params) {
   overlay_filter_.reset(new OverlayEventFilter);
   AddPreTargetHandler(overlay_filter_.get());
   AddShellObserver(overlay_filter_.get());
-
-  input_method_filter_.reset(new ::wm::InputMethodEventFilter(
-      root_window->GetHost()->GetAcceleratedWidget()));
-  AddPreTargetHandler(input_method_filter_.get());
 
   accelerator_filter_.reset(new ::wm::AcceleratorFilter(
       scoped_ptr< ::wm::AcceleratorDelegate>(new AcceleratorDelegate).Pass(),
@@ -1082,6 +1085,8 @@ void Shell::Init(const ShellInitParams& init_params) {
   // order to create mirror window. Run it after the main message loop
   // is started.
   display_manager_->CreateMirrorWindowAsyncIfAny();
+
+  user_metrics_recorder_->OnShellInitialized();
 }
 
 void Shell::InitKeyboard() {
@@ -1107,7 +1112,6 @@ void Shell::InitRootWindow(aura::Window* root_window) {
   DCHECK(drag_drop_controller_.get());
 
   aura::client::SetFocusClient(root_window, focus_client_.get());
-  input_method_filter_->SetInputMethodPropertyInRootWindow(root_window);
   aura::client::SetActivationClient(root_window, activation_client_);
   ::wm::FocusController* focus_controller =
       static_cast< ::wm::FocusController*>(activation_client_);
@@ -1174,8 +1178,10 @@ void Shell::OnEvent(ui::Event* event) {
 ////////////////////////////////////////////////////////////////////////////////
 // Shell, aura::client::ActivationChangeObserver implementation:
 
-void Shell::OnWindowActivated(aura::Window* gained_active,
-                              aura::Window* lost_active) {
+void Shell::OnWindowActivated(
+    aura::client::ActivationChangeObserver::ActivationReason reason,
+    aura::Window* gained_active,
+    aura::Window* lost_active) {
   if (gained_active)
     target_root_window_ = gained_active->GetRootWindow();
 }

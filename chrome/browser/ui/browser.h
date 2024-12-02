@@ -81,7 +81,7 @@ class SessionStorageNamespace;
 }
 
 namespace extensions {
-class BookmarkAppBrowserController;
+class HostedAppBrowserController;
 class Extension;
 class ExtensionRegistry;
 class WindowController;
@@ -283,8 +283,8 @@ class Browser : public TabStripModelObserver,
   BrowserInstantController* instant_controller() {
     return instant_controller_.get();
   }
-  extensions::BookmarkAppBrowserController* bookmark_app_controller() {
-    return bookmark_app_controller_.get();
+  extensions::HostedAppBrowserController* hosted_app_controller() {
+    return hosted_app_controller_.get();
   }
 
   // Get the FindBarController for this browser, creating it if it does not
@@ -462,6 +462,9 @@ class Browser : public TabStripModelObserver,
   bool CanDragEnter(content::WebContents* source,
                     const content::DropData& data,
                     blink::WebDragOperationsMask operations_allowed) override;
+  content::SecurityStyle GetSecurityStyle(
+      content::WebContents* web_contents,
+      content::SecurityStyleExplanations* security_style_explanations) override;
 
   bool is_type_tabbed() const { return type_ == TYPE_TABBED; }
   bool is_type_popup() const { return type_ == TYPE_POPUP; }
@@ -587,13 +590,13 @@ class Browser : public TabStripModelObserver,
       int route_id,
       int main_frame_route_id,
       WindowContainerType window_container_type,
-      const base::string16& frame_name,
+      const std::string& frame_name,
       const GURL& target_url,
       const std::string& partition_id,
       content::SessionStorageNamespace* session_storage_namespace) override;
   void WebContentsCreated(content::WebContents* source_contents,
                           int opener_render_frame_id,
-                          const base::string16& frame_name,
+                          const std::string& frame_name,
                           const GURL& target_url,
                           content::WebContents* new_contents) override;
   void RendererUnresponsive(content::WebContents* source) override;
@@ -830,7 +833,7 @@ class Browser : public TabStripModelObserver,
       int route_id,
       int main_frame_route_id,
       content::WebContents* opener_web_contents,
-      const base::string16& frame_name,
+      const std::string& frame_name,
       const GURL& target_url,
       const std::string& partition_id,
       content::SessionStorageNamespace* session_storage_namespace);
@@ -963,7 +966,7 @@ class Browser : public TabStripModelObserver,
   scoped_ptr<BrowserInstantController> instant_controller_;
 
   // Helper which handles bookmark app specific browser configuration.
-  scoped_ptr<extensions::BookmarkAppBrowserController> bookmark_app_controller_;
+  scoped_ptr<extensions::HostedAppBrowserController> hosted_app_controller_;
 
   BookmarkBar::State bookmark_bar_state_;
 

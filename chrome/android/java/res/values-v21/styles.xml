@@ -53,7 +53,12 @@
     <style name="ButtonCompatBorderless" parent="ButtonCompat">
         <item name="android:background">@drawable/button_borderless_compat</item>
     </style>
-    <!-- Cast notification -->
+    <!-- Cast and media playback notifications -->
+    <style name="MediaNotificationTitle"
+        parent="@android:style/TextAppearance.Material.Notification.Title">
+    </style>
+    <style name="MediaNotificationText"
+        parent="@android:style/TextAppearance.Material.Notification"/>
     <style name="RemoteNotificationTitle"
         parent="@android:style/TextAppearance.Material.Notification.Title">
         <item name="android:layout_marginBottom">4dp</item>
@@ -63,5 +68,9 @@
     <style name="RemoteNotificationProgressBar" parent="@android:style/Widget.ProgressBar.Horizontal">
         <item name="android:minHeight">5dp</item>
     </style>
-    
+
+    <style name="IncognitoTheme" parent="MainTheme">
+        <item name="android:colorPrimary">@color/incognito_primary_color</item>
+    </style>
+
 </resources>

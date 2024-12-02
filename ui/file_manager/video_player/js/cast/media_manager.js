@@ -58,8 +58,9 @@ MediaManager.prototype.getToken = function(refresh) {
     }
     if (!url)
       return Promise.reject('Token fetch failed.');
-    var token = url.substring(url.indexOf('access_token=') + 13);
-    if (token) {
+    var index = url.indexOf('access_token=');
+    var token = url.substring(index + 13);
+    if (index > 0 && token) {
       this.cachedToken_ = token;
       return token;
     } else {
@@ -110,7 +111,7 @@ MediaManager.prototype.getMime = function() {
 
   return new Promise(function(fulfill, reject) {
     chrome.fileManagerPrivate.getEntryProperties(
-        [this.entry_.toURL()], ['contentMimeType', 'thumbnailUrl'], fulfill);
+        [this.entry_], ['contentMimeType', 'thumbnailUrl'], fulfill);
   }.bind(this)).then(function(props) {
     if (!props || !props[0]) {
       return Promise.reject('Mime fetch failed.');
@@ -136,9 +137,7 @@ MediaManager.prototype.getThumbnail = function() {
 
   return new Promise(function(fulfill, reject) {
     chrome.fileManagerPrivate.getEntryProperties(
-        [this.entry_.toURL()],
-        ['contentMimeType', 'thumbnailUrl'],
-        fulfill);
+        [this.entry_], ['contentMimeType', 'thumbnailUrl'], fulfill);
   }.bind(this)).then(function(props) {
     if (!props || !props[0]) {
       return Promise.reject('Thumbnail fetch failed.');

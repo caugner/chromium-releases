@@ -53,7 +53,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #elif defined(OS_WIN)
-#include "base/win/scoped_handle.h"
 #include "chrome/test/chromedriver/keycode_text_conversion.h"
 #endif
 
@@ -328,25 +327,6 @@ Status LaunchDesktopChrome(
     options.fds_to_remap = &no_stderr;
   }
 #elif defined(OS_WIN)
-  // Silence chrome error message.
-  HANDLE out_read;
-  HANDLE out_write;
-  SECURITY_ATTRIBUTES sa_attr;
-
-  sa_attr.nLength = sizeof(SECURITY_ATTRIBUTES);
-  sa_attr.bInheritHandle = TRUE;
-  sa_attr.lpSecurityDescriptor = NULL;
-  if (!CreatePipe(&out_read, &out_write, &sa_attr, 0))
-      return Status(kUnknownError, "CreatePipe() - Pipe creation failed");
-  // Prevent handle leak.
-  base::win::ScopedHandle scoped_out_read(out_read);
-  base::win::ScopedHandle scoped_out_write(out_write);
-
-  options.stdout_handle = out_write;
-  options.stderr_handle = out_write;
-  options.stdin_handle = GetStdHandle(STD_INPUT_HANDLE);
-  options.inherit_handles = true;
-
   if (!SwitchToUSKeyboardLayout())
     VLOG(0) << "Can not set to US keyboard layout - Some keycodes may be"
         "interpreted incorrectly";
@@ -381,6 +361,9 @@ Status LaunchDesktopChrome(
           termination_reason = "exited abnormally";
           break;
         case base::TERMINATION_STATUS_PROCESS_WAS_KILLED:
+#if defined(OS_CHROMEOS)
+        case base::TERMINATION_STATUS_PROCESS_WAS_KILLED_BY_OOM:
+#endif
           termination_reason = "was killed";
           break;
         case base::TERMINATION_STATUS_PROCESS_CRASHED:
@@ -664,7 +647,8 @@ Status ProcessExtension(const std::string& extension,
   std::string manifest_data;
   if (!base::ReadFileToString(manifest_path, &manifest_data))
     return Status(kUnknownError, "cannot read manifest");
-  scoped_ptr<base::Value> manifest_value(base::JSONReader::Read(manifest_data));
+  scoped_ptr<base::Value> manifest_value =
+      base::JSONReader::Read(manifest_data);
   base::DictionaryValue* manifest;
   if (!manifest_value || !manifest_value->GetAsDictionary(&manifest))
     return Status(kUnknownError, "invalid manifest");
@@ -692,7 +676,7 @@ Status ProcessExtension(const std::string& extension,
     }
   } else {
     manifest->SetString("key", public_key_base64);
-    base::JSONWriter::Write(manifest, &manifest_data);
+    base::JSONWriter::Write(*manifest, &manifest_data);
     if (base::WriteFile(
             manifest_path, manifest_data.c_str(), manifest_data.size()) !=
         static_cast<int>(manifest_data.size())) {
@@ -772,8 +756,9 @@ Status WritePrefsFile(
     const base::FilePath& path) {
   int code;
   std::string error_msg;
-  scoped_ptr<base::Value> template_value(base::JSONReader::ReadAndReturnError(
-          template_string, 0, &code, &error_msg));
+  scoped_ptr<base::Value> template_value(
+      base::JSONReader::DeprecatedReadAndReturnError(template_string, 0, &code,
+                                                     &error_msg));
   base::DictionaryValue* prefs;
   if (!template_value || !template_value->GetAsDictionary(&prefs)) {
     return Status(kUnknownError,
@@ -788,7 +773,7 @@ Status WritePrefsFile(
   }
 
   std::string prefs_str;
-  base::JSONWriter::Write(prefs, &prefs_str);
+  base::JSONWriter::Write(*prefs, &prefs_str);
   VLOG(0) << "Populating " << path.BaseName().value()
           << " file: " << PrettyPrintValue(*prefs);
   if (static_cast<int>(prefs_str.length()) != base::WriteFile(

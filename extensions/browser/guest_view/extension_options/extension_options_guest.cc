@@ -17,7 +17,6 @@
 #include "extensions/browser/bad_message.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/extension_web_contents_observer.h"
 #include "extensions/browser/guest_view/extension_options/extension_options_constants.h"
 #include "extensions/browser/guest_view/extension_options/extension_options_guest_delegate.h"
 #include "extensions/common/api/extension_options_internal.h"
@@ -117,11 +116,7 @@ void ExtensionOptionsGuest::CreateWebContents(
 
 void ExtensionOptionsGuest::DidInitialize(
     const base::DictionaryValue& create_params) {
-  extension_function_dispatcher_.reset(
-      new extensions::ExtensionFunctionDispatcher(browser_context(), this));
-  if (extension_options_guest_delegate_) {
-    extension_options_guest_delegate_->DidInitialize();
-  }
+  ExtensionsAPIClient::Get()->AttachWebContentsHelpers(web_contents());
   web_contents()->GetController().LoadURL(options_page_,
                                           content::Referrer(),
                                           ui::PAGE_TRANSITION_LINK,
@@ -146,10 +141,6 @@ bool ExtensionOptionsGuest::IsPreferredSizeModeEnabled() const {
   return true;
 }
 
-bool ExtensionOptionsGuest::IsDragAndDropEnabled() const {
-  return true;
-}
-
 void ExtensionOptionsGuest::OnPreferredSizeChanged(const gfx::Size& pref_size) {
   extension_options_internal::PreferredSizeChangedOptions options;
   // Convert the size from physical pixels to logical pixels.
@@ -158,10 +149,6 @@ void ExtensionOptionsGuest::OnPreferredSizeChanged(const gfx::Size& pref_size) {
   DispatchEventToView(new GuestViewEvent(
       extension_options_internal::OnPreferredSizeChanged::kEventName,
       options.ToValue()));
-}
-
-content::WebContents* ExtensionOptionsGuest::GetAssociatedWebContents() const {
-  return web_contents();
 }
 
 content::WebContents* ExtensionOptionsGuest::OpenURLFromTab(
@@ -205,7 +192,7 @@ bool ExtensionOptionsGuest::ShouldCreateWebContents(
     int route_id,
     int main_frame_route_id,
     WindowContainerType window_container_type,
-    const base::string16& frame_name,
+    const std::string& frame_name,
     const GURL& target_url,
     const std::string& partition_id,
     content::SessionStorageNamespace* session_storage_namespace) {
@@ -242,21 +229,6 @@ void ExtensionOptionsGuest::DidNavigateMainFrame(
                                       bad_message::EOG_BAD_ORIGIN);
     }
   }
-}
-
-bool ExtensionOptionsGuest::OnMessageReceived(const IPC::Message& message) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(ExtensionOptionsGuest, message)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_Request, OnRequest)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-  return handled;
-}
-
-void ExtensionOptionsGuest::OnRequest(
-    const ExtensionHostMsg_Request_Params& params) {
-  extension_function_dispatcher_->Dispatch(params,
-                                           web_contents()->GetRenderViewHost());
 }
 
 }  // namespace extensions

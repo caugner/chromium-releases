@@ -142,6 +142,8 @@ _ANDROID_NEGATIVE_FILTER['chrome'] = (
         'ChromeDriverTest.testShouldHandleNewWindowLoadingProperly',
         # Android doesn't support multiple sessions on one device.
         'SessionHandlingTest.testGetSessions',
+        # Android doesn't use the chrome://print dialog.
+        'ChromeDriverTest.testCanSwitchToPrintPreviewDialog',
     ]
 )
 _ANDROID_NEGATIVE_FILTER['chrome_stable'] = (
@@ -149,6 +151,7 @@ _ANDROID_NEGATIVE_FILTER['chrome_stable'] = (
         # The stable channel Chrome for Android does not yet support Synthetic
         # Gesture DevTools commands.
         # TODO(samuong): reenable when it does.
+        'ChromeDriverTest.testHasTouchScreen',
         'ChromeDriverTest.testTouchScrollElement',
         'ChromeDriverTest.testTouchDoubleTapElement',
         'ChromeDriverTest.testTouchLongPressElement',
@@ -159,6 +162,7 @@ _ANDROID_NEGATIVE_FILTER['chrome_beta'] = (
         # The beta channel Chrome for Android does not yet support Synthetic
         # Gesture DevTools commands.
         # TODO(samuong): reenable when it does.
+        'ChromeDriverTest.testHasTouchScreen',
         'ChromeDriverTest.testTouchScrollElement',
         'ChromeDriverTest.testTouchDoubleTapElement',
         'ChromeDriverTest.testTouchLongPressElement',
@@ -184,6 +188,14 @@ _ANDROID_NEGATIVE_FILTER['chromedriver_webview_shell'] = (
         'ChromeDriverTest.testEmulateNetworkConditionsOffline',
         'ChromeDriverTest.testEmulateNetworkConditionsSpeed',
         'ChromeDriverTest.testEmulateNetworkConditionsName',
+        # The WebView shell that we test against (on KitKat) does not yet
+        # support Synthetic Gesture DevTools commands.
+        # TODO(samuong): reenable when it does.
+        'ChromeDriverTest.testHasTouchScreen',
+        'ChromeDriverTest.testTouchScrollElement',
+        'ChromeDriverTest.testTouchDoubleTapElement',
+        'ChromeDriverTest.testTouchLongPressElement',
+        'ChromeDriverTest.testTouchPinch',
     ]
 )
 
@@ -225,6 +237,25 @@ class ChromeDriverBaseTest(unittest.TestCase):
     self._drivers += [driver]
     return driver
 
+  def WaitForNewWindow(self, driver, old_handles):
+    """Wait for at least one new window to show up in 20 seconds.
+
+    Args:
+      old_handles: Handles to all old windows before the new window is added.
+
+    Returns:
+      Handle to a new window. None if timeout.
+    """
+    deadline = time.time() + 20
+    while time.time() < deadline:
+      new_handles = driver.GetWindowHandles()
+      if len(new_handles) > len(old_handles):
+        for index, old_handle in enumerate(old_handles):
+          self.assertEquals(old_handle, new_handles[index])
+        return new_handles[len(old_handles)]
+      time.sleep(0.01)
+    return None
+
 
 class ChromeDriverTest(ChromeDriverBaseTest):
   """End to end tests for ChromeDriver."""
@@ -264,30 +295,11 @@ class ChromeDriverTest(ChromeDriverBaseTest):
   def testGetCurrentWindowHandle(self):
     self._driver.GetCurrentWindowHandle()
 
-  def _WaitForNewWindow(self, old_handles):
-    """Wait for at least one new window to show up in 20 seconds.
-
-    Args:
-      old_handles: Handles to all old windows before the new window is added.
-
-    Returns:
-      Handle to a new window. None if timeout.
-    """
-    deadline = time.time() + 20
-    while time.time() < deadline:
-      new_handles = self._driver.GetWindowHandles()
-      if len(new_handles) > len(old_handles):
-        for index, old_handle in enumerate(old_handles):
-          self.assertEquals(old_handle, new_handles[index])
-        return new_handles[len(old_handles)]
-      time.sleep(0.01)
-    return None
-
   def testCloseWindow(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/page_test.html'))
     old_handles = self._driver.GetWindowHandles()
     self._driver.FindElement('id', 'link').Click()
-    new_window_handle = self._WaitForNewWindow(old_handles)
+    new_window_handle = self.WaitForNewWindow(self._driver, old_handles)
     self.assertNotEqual(None, new_window_handle)
     self._driver.SwitchToWindow(new_window_handle)
     self.assertEquals(new_window_handle, self._driver.GetCurrentWindowHandle())
@@ -308,7 +320,7 @@ class ChromeDriverTest(ChromeDriverBaseTest):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/page_test.html'))
     old_handles = self._driver.GetWindowHandles()
     self._driver.FindElement('id', 'link').Click()
-    self.assertNotEqual(None, self._WaitForNewWindow(old_handles))
+    self.assertNotEqual(None, self.WaitForNewWindow(self._driver, old_handles))
 
   def testSwitchToWindow(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/page_test.html'))
@@ -317,7 +329,7 @@ class ChromeDriverTest(ChromeDriverBaseTest):
     window1_handle = self._driver.GetCurrentWindowHandle()
     old_handles = self._driver.GetWindowHandles()
     self._driver.FindElement('id', 'link').Click()
-    new_window_handle = self._WaitForNewWindow(old_handles)
+    new_window_handle = self.WaitForNewWindow(self._driver, old_handles)
     self.assertNotEqual(None, new_window_handle)
     self._driver.SwitchToWindow(new_window_handle)
     self.assertEquals(new_window_handle, self._driver.GetCurrentWindowHandle())
@@ -632,7 +644,7 @@ class ChromeDriverTest(ChromeDriverBaseTest):
     self._driver.Load(self._http_server.GetUrl() + '/newwindow')
     old_windows = self._driver.GetWindowHandles()
     self._driver.FindElement('tagName', 'a').Click()
-    new_window = self._WaitForNewWindow(old_windows)
+    new_window = self.WaitForNewWindow(self._driver, old_windows)
     self.assertNotEqual(None, new_window)
 
     self.assertFalse(self._driver.IsLoading())
@@ -645,7 +657,7 @@ class ChromeDriverTest(ChromeDriverBaseTest):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
     old_handles = self._driver.GetWindowHandles()
     self._driver.ExecuteScript('window.open("about:blank")')
-    new_window_handle = self._WaitForNewWindow(old_handles)
+    new_window_handle = self.WaitForNewWindow(self._driver, old_handles)
     self.assertNotEqual(None, new_window_handle)
 
   def testNoSuchFrame(self):
@@ -963,13 +975,14 @@ class ChromeDriverTest(ChromeDriverBaseTest):
   def testTouchScrollElement(self):
     self._driver.Load(self.GetHttpUrlForFile(
         '/chromedriver/touch_action_tests.html'))
+    scroll_left = 'return document.body.scrollLeft;'
+    scroll_top = 'return document.body.scrollTop;'
+    self.assertEquals(0, self._driver.ExecuteScript(scroll_left))
+    self.assertEquals(0, self._driver.ExecuteScript(scroll_top))
     events = self._driver.FindElement('id', 'events')
-    self.assertTrue(events.IsDisplayed())
-    xoffset = 0
-    yoffset = self._driver.ExecuteScript('return window.screen.height * 2;')
-    self._driver.TouchScroll(events, xoffset, yoffset)
-    bottom = self._driver.FindElement('id', 'bottom')
-    self.assertTrue(bottom.IsDisplayed())
+    self._driver.TouchScroll(events, 47, 53)
+    self.assertEquals(47, self._driver.ExecuteScript(scroll_left))
+    self.assertEquals(53, self._driver.ExecuteScript(scroll_top))
 
   def testTouchDoubleTapElement(self):
     self._driver.Load(self.GetHttpUrlForFile(
@@ -1033,10 +1046,50 @@ class ChromeDriverTest(ChromeDriverBaseTest):
     # TODO(samuong): when this test starts failing, re-enable touch tests and
     # delete this test.
     if _ANDROID_PACKAGE_KEY:
-      if _ANDROID_PACKAGE_KEY in ['chrome_stable', 'chrome_beta']:
-        self.assertRaisesRegexp(RuntimeError,
-                                'Server returned error: Not Implemented',
-                                self._driver.TouchPinch, 1, 2, 3.0)
+      packages = ['chrome_stable', 'chrome_beta', 'chromedriver_webview_shell']
+      if _ANDROID_PACKAGE_KEY in packages:
+        self.assertFalse(self._driver.capabilities['hasTouchScreen'])
+
+  def testHasTouchScreen(self):
+    self.assertIn('hasTouchScreen', self._driver.capabilities)
+    if _ANDROID_PACKAGE_KEY:
+      self.assertTrue(self._driver.capabilities['hasTouchScreen'])
+    else:
+      self.assertFalse(self._driver.capabilities['hasTouchScreen'])
+
+  def testSwitchesToTopFrameAfterNavigation(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/outer.html'))
+    frame = self._driver.FindElement('tag name', 'iframe')
+    self._driver.SwitchToFrame(frame)
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/outer.html'))
+    p = self._driver.FindElement('tag name', 'p')
+    self.assertEquals('Two', p.GetText())
+
+  def testSwitchesToTopFrameAfterRefresh(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/outer.html'))
+    frame = self._driver.FindElement('tag name', 'iframe')
+    self._driver.SwitchToFrame(frame)
+    self._driver.Refresh()
+    p = self._driver.FindElement('tag name', 'p')
+    self.assertEquals('Two', p.GetText())
+
+  def testSwitchesToTopFrameAfterGoingBack(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/outer.html'))
+    frame = self._driver.FindElement('tag name', 'iframe')
+    self._driver.SwitchToFrame(frame)
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/inner.html'))
+    self._driver.GoBack()
+    p = self._driver.FindElement('tag name', 'p')
+    self.assertEquals('Two', p.GetText())
+
+  def testCanSwitchToPrintPreviewDialog(self):
+    old_handles = self._driver.GetWindowHandles()
+    self.assertEquals(1, len(old_handles))
+    self._driver.ExecuteScript('setTimeout(function(){window.print();}, 0);')
+    new_window_handle = self.WaitForNewWindow(self._driver, old_handles)
+    self.assertNotEqual(None, new_window_handle)
+    self._driver.SwitchToWindow(new_window_handle)
+    self.assertEquals('chrome://print/', self._driver.GetCurrentUrl())
 
 
 class ChromeDriverAndroidTest(ChromeDriverBaseTest):
@@ -1187,6 +1240,19 @@ class ChromeExtensionsCapabilityTest(ChromeDriverBaseTest):
         chrome_extensions=[self._PackExtension(crx)])
     self.assertTrue(did_load_event.is_set())
 
+  def testCanLaunchApp(self):
+    app_path = os.path.join(_TEST_DATA_DIR, 'test_app')
+    driver = self.CreateDriver(chrome_switches=['load-extension=%s' % app_path])
+    old_handles = driver.GetWindowHandles()
+    self.assertEqual(1, len(old_handles))
+    driver.LaunchApp('gegjcdcfeiojglhifpmibkadodekakpc')
+    new_window_handle = self.WaitForNewWindow(driver, old_handles)
+    current_window_handle = driver.GetCurrentWindowHandle()
+    self.assertEqual(new_window_handle, current_window_handle,
+        "focus should switch to the window that the app launches in")
+    body_element = driver.FindElement('tag name', 'body')
+    self.assertEqual('It works!', body_element.GetText())
+
 
 class ChromeLogPathCapabilityTest(ChromeDriverBaseTest):
   """Tests that chromedriver properly processes chromeOptions.logPath."""
@@ -1302,20 +1368,6 @@ class MobileEmulationCapabilityTest(ChromeDriverBaseTest):
     value = driver.ExecuteScript('return arguments[0].value;', text)
     self.assertEquals('0123456789+-*/ Hi, there!', value)
 
-  def testHoverOverElement(self):
-    driver = self.CreateDriver(
-        mobile_emulation = {'deviceName': 'Google Nexus 5'})
-    driver.Load('about:blank')
-    div = driver.ExecuteScript(
-        'document.body.innerHTML = "<div>old</div>";'
-        'var div = document.getElementsByTagName("div")[0];'
-        'div.addEventListener("mouseover", function() {'
-        '  document.body.appendChild(document.createElement("br"));'
-        '});'
-        'return div;')
-    div.HoverOver()
-    self.assertEquals(1, len(driver.FindElements('tag name', 'br')))
-
   def testClickElement(self):
     driver = self.CreateDriver(
         mobile_emulation = {'deviceName': 'Google Nexus 5'})
@@ -1329,6 +1381,12 @@ class MobileEmulationCapabilityTest(ChromeDriverBaseTest):
         'return div;')
     div.Click()
     self.assertEquals(1, len(driver.FindElements('tag name', 'br')))
+
+  def testHasTouchScreen(self):
+    driver = self.CreateDriver(
+        mobile_emulation = {'deviceName': 'Google Nexus 5'})
+    self.assertIn('hasTouchScreen', driver.capabilities)
+    self.assertTrue(driver.capabilities['hasTouchScreen'])
 
 
 class ChromeDriverLogTest(unittest.TestCase):

@@ -99,8 +99,8 @@ namespace em = enterprise_management;
 using net::test_server::BasicHttpResponse;
 using net::test_server::HttpRequest;
 using net::test_server::HttpResponse;
-using testing::_;
 using testing::Return;
+using testing::_;
 
 namespace chromeos {
 
@@ -255,9 +255,11 @@ scoped_ptr<HttpResponse> FakeSamlIdp::BuildHTMLResponse(
     const std::string& relay_state,
     const std::string& next_path) {
   std::string response_html = html_template;
-  ReplaceSubstringsAfterOffset(&response_html, 0, "$RelayState", relay_state);
-  ReplaceSubstringsAfterOffset(&response_html, 0, "$Post", next_path);
-  ReplaceSubstringsAfterOffset(
+  base::ReplaceSubstringsAfterOffset(
+      &response_html, 0, "$RelayState", relay_state);
+  base::ReplaceSubstringsAfterOffset(
+      &response_html, 0, "$Post", next_path);
+  base::ReplaceSubstringsAfterOffset(
       &response_html, 0, "$Refresh", refresh_url_.spec());
 
   scoped_ptr<BasicHttpResponse> http_response(new BasicHttpResponse());
@@ -375,18 +377,21 @@ class SamlTest : public OobeBaseTest, public testing::WithParamInterface<bool> {
     std::string js =
         "$('confirm-password-input').value='$Password';"
         "$('confirm-password').onConfirmPassword_();";
-    ReplaceSubstringsAfterOffset(&js, 0, "$Password", password_to_confirm);
+    base::ReplaceSubstringsAfterOffset(
+        &js, 0, "$Password", password_to_confirm);
     ASSERT_TRUE(content::ExecuteScript(GetLoginUI()->GetWebContents(), js));
   }
 
   std::string WaitForAndGetFatalErrorMessage() {
     OobeScreenWaiter(OobeDisplay::SCREEN_FATAL_ERROR).Wait();
+    std::string message_element =
+        use_webview() ? "$('fatal-error-card')" : "$('fatal-error-message')";
     std::string error_message;
     if (!content::ExecuteScriptAndExtractString(
-          GetLoginUI()->GetWebContents(),
-          "window.domAutomationController.send("
-              "$('fatal-error-message').textContent);",
-          &error_message)) {
+            GetLoginUI()->GetWebContents(),
+            "window.domAutomationController.send(" + message_element +
+                ".textContent);",
+            &error_message)) {
       ADD_FAILURE();
     }
     return error_message;
@@ -414,7 +419,14 @@ class SamlTest : public OobeBaseTest, public testing::WithParamInterface<bool> {
 // Tests that signin frame should have 'saml' class and 'cancel' button is
 // visible when SAML IdP page is loaded. And 'cancel' button goes back to
 // gaia on clicking.
-IN_PROC_BROWSER_TEST_P(SamlTest, SamlUI) {
+//
+// Times out on CrOS MSAN. https://crbug.com/504141
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_SamlUI DISABLED_SamlUI
+#else
+#define MAYBE_SamlUI SamlUI
+#endif
+IN_PROC_BROWSER_TEST_P(SamlTest, MAYBE_SamlUI) {
   fake_saml_idp()->SetLoginHTMLTemplate("saml_login.html");
   StartSamlAndWaitForIdpPageLoad(kFirstSAMLUserEmail);
 
@@ -422,7 +434,7 @@ IN_PROC_BROWSER_TEST_P(SamlTest, SamlUI) {
   JsExpect("$('gaia-signin').classList.contains('full-width')");
   JsExpect("!$('saml-notice-container').hidden");
   std::string js = "$('saml-notice-message').textContent.indexOf('$Host') > -1";
-  ReplaceSubstringsAfterOffset(&js, 0, "$Host", kIdPHost);
+  base::ReplaceSubstringsAfterOffset(&js, 0, "$Host", kIdPHost);
   JsExpect(js);
   if (!use_webview()) {
     JsExpect("!$('cancel-add-user-button').hidden");
@@ -685,7 +697,7 @@ IN_PROC_BROWSER_TEST_P(SamlTest, NoticeUpdatedOnRedirect) {
       "      'authDomainChange',"
       "      processEventsAndSendIfHostFound);"
       "}";
-  ReplaceSubstringsAfterOffset(&js, 0, "$Host", kAdditionalIdPHost);
+  base::ReplaceSubstringsAfterOffset(&js, 0, "$Host", kAdditionalIdPHost);
   bool dummy;
   EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
       GetLoginUI()->GetWebContents(), js, &dummy));
@@ -783,7 +795,6 @@ void SAMLEnrollmentTest::SetUpCommandLine(base::CommandLine* command_line) {
   command_line->AppendSwitchASCII(policy::switches::kDeviceManagementUrl,
                                   test_server_->GetServiceURL().spec());
   command_line->AppendSwitch(policy::switches::kDisablePolicyKeyVerification);
-  command_line->AppendSwitch(switches::kEnterpriseEnrollmentSkipRobotAuth);
 
   SamlTest::SetUpCommandLine(command_line);
 }
@@ -1114,8 +1125,9 @@ IN_PROC_BROWSER_TEST_P(SAMLPolicyTest, PRE_NoSAML) {
 IN_PROC_BROWSER_TEST_P(SAMLPolicyTest, NoSAML) {
   login_screen_load_observer_->Wait();
   // Verify that offline login is allowed.
-  JsExpect("window.getComputedStyle(document.querySelector("
-           "    '#pod-row .signin-button-container')).display == 'none'");
+  JsExpect(
+      "window.getComputedStyle(document.querySelector("
+      "    '#pod-row .reauth-hint-container')).display == 'none'");
 }
 
 IN_PROC_BROWSER_TEST_P(SAMLPolicyTest, PRE_SAMLNoLimit) {
@@ -1130,8 +1142,9 @@ IN_PROC_BROWSER_TEST_P(SAMLPolicyTest, PRE_SAMLNoLimit) {
 IN_PROC_BROWSER_TEST_P(SAMLPolicyTest, SAMLNoLimit) {
   login_screen_load_observer_->Wait();
   // Verify that offline login is allowed.
-  JsExpect("window.getComputedStyle(document.querySelector("
-           "    '#pod-row .signin-button-container')).display == 'none'");
+  JsExpect(
+      "window.getComputedStyle(document.querySelector("
+      "    '#pod-row .reauth-hint-container')).display == 'none'");
 }
 
 IN_PROC_BROWSER_TEST_P(SAMLPolicyTest, PRE_SAMLZeroLimit) {
@@ -1146,8 +1159,9 @@ IN_PROC_BROWSER_TEST_P(SAMLPolicyTest, PRE_SAMLZeroLimit) {
 IN_PROC_BROWSER_TEST_P(SAMLPolicyTest, SAMLZeroLimit) {
   login_screen_load_observer_->Wait();
   // Verify that offline login is not allowed.
-  JsExpect("window.getComputedStyle(document.querySelector("
-           "    '#pod-row .signin-button-container')).display != 'none'");
+  JsExpect(
+      "window.getComputedStyle(document.querySelector("
+      "    '#pod-row .reauth-hint-container')).display != 'none'");
 }
 
 IN_PROC_BROWSER_TEST_P(SAMLPolicyTest, PRE_PRE_TransferCookiesAffiliated) {

@@ -200,6 +200,13 @@ function FileManager() {
   this.toolbarController_ = null;
 
   /**
+   * Tooltip controller.
+   * @type {TooltipController}
+   * @private
+   */
+  this.tooltipController_ = null;
+
+  /**
    * Empty folder controller.
    * @private {EmptyFolderController}
    */
@@ -334,6 +341,12 @@ FileManager.prototype = /** @struct */ {
     return this.taskController_;
   },
   /**
+   * @return {SpinnerController}
+   */
+  get spinnerController() {
+    return this.spinnerController_;
+  },
+  /**
    * @return {FileOperationManager}
    */
   get fileOperationManager() {
@@ -425,6 +438,7 @@ FileManager.prototype = /** @struct */ {
     assert(this.selectionHandler_);
     assert(this.launchParams_);
     assert(this.volumeManager_);
+    assert(this.dialogDom_);
 
     this.scanController_ = new ScanController(
         this.directoryModel_,
@@ -434,18 +448,25 @@ FileManager.prototype = /** @struct */ {
         this.selectionHandler_);
     this.sortMenuController_ = new SortMenuController(
         this.ui_.sortButton,
+        this.ui_.sortButtonToggleRipple,
         assert(this.directoryModel_.getFileList()));
     this.gearMenuController_ = new GearMenuController(
         this.ui_.gearButton,
+        this.ui_.gearButtonToggleRipple,
         this.ui_.gearMenu,
         this.directoryModel_,
         this.commandHandler);
     this.toolbarController_ = new ToolbarController(
         this.ui_.toolbar,
         this.ui_.dialogNavigationList,
+        this.ui_.listContainer,
         assert(this.ui_.locationLine),
         this.selectionHandler_,
         this.directoryModel_);
+    this.tooltipController_ = new TooltipController(
+        queryRequiredElement(this.dialogDom_, '#tooltip'),
+        Array.prototype.slice.call(
+            this.dialogDom_.querySelectorAll('[has-tooltip]')));
     this.emptyFolderController_ = new EmptyFolderController(
         this.ui_.emptyFolder,
         this.directoryModel_);
@@ -745,10 +766,8 @@ FileManager.prototype = /** @struct */ {
     // Show the window as soon as the UI pre-initialization is done.
     if (this.dialogType == DialogType.FULL_PAGE && !util.runningInBrowser()) {
       chrome.app.window.current().show();
-      setTimeout(callback, 100);  // Wait until the animation is finished.
-    } else {
-      callback();
     }
+    callback();
   };
 
   /**
@@ -963,8 +982,8 @@ FileManager.prototype = /** @struct */ {
 
     // Create spinner controller.
     this.spinnerController_ = new SpinnerController(
-        this.ui_.listContainer.spinner, this.directoryModel_);
-    this.spinnerController_.show();
+        this.ui_.listContainer.spinner);
+    this.spinnerController_.blink();
 
     // Create dialog action controller.
     assert(this.launchParams_);
@@ -988,6 +1007,9 @@ FileManager.prototype = /** @struct */ {
         (this.dialogDom_.querySelector('#directory-tree'));
     var fakeEntriesVisible =
         this.dialogType !== DialogType.SELECT_SAVEAS_FILE;
+    var addNewServicesVisible =
+        this.dialogType === DialogType.FULL_PAGE &&
+        !chrome.extension.inIncognitoContext;
     DirectoryTree.decorate(directoryTree,
                            assert(this.directoryModel_),
                            assert(this.volumeManager_),
@@ -996,7 +1018,7 @@ FileManager.prototype = /** @struct */ {
     directoryTree.dataModel = new NavigationListModel(
         assert(this.volumeManager_),
         assert(this.folderShortcutsModel_),
-        this.dialogType === DialogType.FULL_PAGE ?
+        addNewServicesVisible ?
             new NavigationModelMenuItem(
                 str('ADD_NEW_SERVICES_BUTTON_LABEL'),
                 '#add-new-services-menu',

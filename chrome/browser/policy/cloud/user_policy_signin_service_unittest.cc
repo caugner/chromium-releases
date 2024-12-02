@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/files/file_path.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/thread_task_runner_handle.h"
@@ -13,9 +14,9 @@
 #include "chrome/browser/policy/cloud/user_policy_signin_service_factory.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/account_tracker_service_factory.h"
+#include "chrome/browser/signin/account_fetcher_service_factory.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
-#include "chrome/browser/signin/fake_account_tracker_service.h"
+#include "chrome/browser/signin/fake_account_fetcher_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
 #include "chrome/browser/signin/fake_signin_manager.h"
@@ -95,8 +96,9 @@ class SigninManagerFake : public FakeSigninManager {
     SignOut(signin_metrics::SIGNOUT_TEST);
   }
 
-  static KeyedService* Build(content::BrowserContext* profile) {
-    return new SigninManagerFake(static_cast<Profile*>(profile));
+  static scoped_ptr<KeyedService> Build(content::BrowserContext* profile) {
+    return make_scoped_ptr(
+        new SigninManagerFake(static_cast<Profile*>(profile)));
   }
 };
 
@@ -135,7 +137,7 @@ class UserPolicySigninServiceTest : public testing::Test {
     // a valid login token, while on other platforms, the login refresh token
     // is specified directly.
 #if defined(OS_ANDROID)
-    GetTokenService()->IssueRefreshTokenForUser(
+    GetTokenService()->UpdateCredentials(
         AccountTrackerService::PickAccountIdForAccount(
             profile_.get()->GetPrefs(), kTestGaiaId, kTestUser),
         "oauth2_login_refresh_token");
@@ -184,8 +186,8 @@ class UserPolicySigninServiceTest : public testing::Test {
                               SigninManagerFake::Build);
     builder.AddTestingFactory(ProfileOAuth2TokenServiceFactory::GetInstance(),
                               BuildFakeProfileOAuth2TokenService);
-    builder.AddTestingFactory(AccountTrackerServiceFactory::GetInstance(),
-                              FakeAccountTrackerService::Build);
+    builder.AddTestingFactory(AccountFetcherServiceFactory::GetInstance(),
+                              FakeAccountFetcherService::BuildForTests);
     builder.AddTestingFactory(ChromeSigninClientFactory::GetInstance(),
                               signin::BuildTestSigninClient);
 
@@ -428,7 +430,7 @@ TEST_F(UserPolicySigninServiceSignedInTest, InitWhileSignedIn) {
   ASSERT_FALSE(IsRequestActive());
 
   // Make oauth token available.
-  GetTokenService()->IssueRefreshTokenForUser(
+  GetTokenService()->UpdateCredentials(
       SigninManagerFactory::GetForProfile(profile_.get())
           ->GetAuthenticatedAccountId(),
       "oauth_login_refresh_token");
@@ -449,7 +451,7 @@ TEST_F(UserPolicySigninServiceSignedInTest, InitWhileSignedInOAuthError) {
   ASSERT_FALSE(IsRequestActive());
 
   // Make oauth token available.
-  GetTokenService()->IssueRefreshTokenForUser(
+  GetTokenService()->UpdateCredentials(
       SigninManagerFactory::GetForProfile(profile_.get())
           ->GetAuthenticatedAccountId(),
       "oauth_login_refresh_token");
@@ -477,7 +479,7 @@ TEST_F(UserPolicySigninServiceTest, SignInAfterInit) {
   mock_store_->NotifyStoreLoaded();
 
   // Make oauth token available.
-  GetTokenService()->IssueRefreshTokenForUser(
+  GetTokenService()->UpdateCredentials(
       SigninManagerFactory::GetForProfile(profile_.get())
           ->GetAuthenticatedAccountId(),
       "oauth_login_refresh_token");
@@ -504,7 +506,7 @@ TEST_F(UserPolicySigninServiceTest, SignInWithNonEnterpriseUser) {
   mock_store_->NotifyStoreLoaded();
 
   // Make oauth token available.
-  GetTokenService()->IssueRefreshTokenForUser(
+  GetTokenService()->UpdateCredentials(
       SigninManagerFactory::GetForProfile(profile_.get())
           ->GetAuthenticatedAccountId(),
       "oauth_login_refresh_token");
@@ -525,7 +527,7 @@ TEST_F(UserPolicySigninServiceTest, UnregisteredClient) {
       ->SetAuthenticatedAccountInfo(kTestGaiaId, kTestUser);
 
   // Make oauth token available.
-  GetTokenService()->IssueRefreshTokenForUser(
+  GetTokenService()->UpdateCredentials(
       SigninManagerFactory::GetForProfile(profile_.get())
           ->GetAuthenticatedAccountId(),
       "oauth_login_refresh_token");
@@ -555,7 +557,7 @@ TEST_F(UserPolicySigninServiceTest, RegisteredClient) {
       ->SetAuthenticatedAccountInfo(kTestGaiaId, kTestUser);
 
   // Make oauth token available.
-  GetTokenService()->IssueRefreshTokenForUser(
+  GetTokenService()->UpdateCredentials(
       SigninManagerFactory::GetForProfile(profile_.get())
           ->GetAuthenticatedAccountId(),
       "oauth_login_refresh_token");

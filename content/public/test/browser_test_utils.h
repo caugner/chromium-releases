@@ -15,6 +15,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/process/process.h"
 #include "base/strings/string16.h"
+#include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/render_process_host_observer.h"
@@ -27,10 +28,6 @@
 #if defined(OS_WIN)
 #include "base/win/scoped_handle.h"
 #endif
-
-namespace base {
-class RunLoop;
-}
 
 namespace gfx {
 class Point;
@@ -118,6 +115,9 @@ void SimulateMouseEvent(WebContents* web_contents,
 
 // Taps the screen at |point|.
 void SimulateTapAt(WebContents* web_contents, const gfx::Point& point);
+
+// Generates a TouchStart at |point|.
+void SimulateTouchPressAt(WebContents* web_contents, const gfx::Point& point);
 
 // Taps the screen with modifires at |point|.
 void SimulateTapWithModifiersAt(WebContents* web_contents,
@@ -402,6 +402,36 @@ class WebContentsAddedObserver {
   scoped_refptr<MessageLoopRunner> runner_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsAddedObserver);
+};
+
+// Request a new frame be drawn, returns false if request fails.
+bool RequestFrame(WebContents* web_contents);
+
+// Watches compositor frame changes, blocking until a frame has been
+// composited. This class is intended to be run on the main thread; to
+// synchronize the main thread against the impl thread.
+class FrameWatcher : public BrowserMessageFilter {
+ public:
+  FrameWatcher();
+
+  // Listen for new frames from the |web_contents| renderer process.
+  void AttachTo(WebContents* web_contents);
+
+  // Wait for |frames_to_wait| swap mesages from the compositor.
+  void WaitFrames(int frames_to_wait);
+
+ private:
+  ~FrameWatcher() override;
+
+  // Overridden BrowserMessageFilter methods.
+  bool OnMessageReceived(const IPC::Message& message) override;
+
+  void ReceivedFrameSwap();
+
+  int frames_to_wait_;
+  base::Closure quit_;
+
+  DISALLOW_COPY_AND_ASSIGN(FrameWatcher);
 };
 
 }  // namespace content

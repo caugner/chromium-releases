@@ -74,9 +74,9 @@ net::BackendType ChooseCacheBackendType() {
   if (command_line.HasSwitch(switches::kUseSimpleCacheBackend)) {
     const std::string opt_value =
         command_line.GetSwitchValueASCII(switches::kUseSimpleCacheBackend);
-    if (LowerCaseEqualsASCII(opt_value, "off"))
+    if (base::LowerCaseEqualsASCII(opt_value, "off"))
       return net::CACHE_BACKEND_BLOCKFILE;
-    if (opt_value.empty() || LowerCaseEqualsASCII(opt_value, "on"))
+    if (opt_value.empty() || base::LowerCaseEqualsASCII(opt_value, "on"))
       return net::CACHE_BACKEND_SIMPLE;
   }
   const std::string experiment_name =
@@ -490,9 +490,6 @@ void ProfileImplIOData::InitializeInternal(
   main_context->set_fraudulent_certificate_reporter(
       fraudulent_certificate_reporter());
 
-  main_context->set_throttler_manager(
-      io_thread_globals->throttler_manager.get());
-
   main_context->set_proxy_service(proxy_service());
 
   scoped_refptr<net::CookieStore> cookie_store = NULL;
@@ -571,6 +568,8 @@ void ProfileImplIOData::InitializeInternal(
       main_context->network_delegate(),
       ftp_factory_.get());
   main_context->set_job_factory(main_job_factory_.get());
+  main_context->set_network_quality_estimator(
+      io_thread_globals->network_quality_estimator.get());
 
 #if defined(ENABLE_EXTENSIONS)
   InitializeExtensionsRequestContext(profile_params);
@@ -597,15 +596,11 @@ void ProfileImplIOData::
     InitializeExtensionsRequestContext(ProfileParams* profile_params) const {
   net::URLRequestContext* extensions_context = extensions_request_context();
   IOThread* const io_thread = profile_params->io_thread;
-  IOThread::Globals* const io_thread_globals = io_thread->globals();
   ApplyProfileParamsToContext(extensions_context);
 
   extensions_context->set_transport_security_state(transport_security_state());
 
   extensions_context->set_net_log(io_thread->net_log());
-
-  extensions_context->set_throttler_manager(
-      io_thread_globals->throttler_manager.get());
 
   content::CookieStoreConfig cookie_config(
       lazy_params_->extensions_cookie_path,

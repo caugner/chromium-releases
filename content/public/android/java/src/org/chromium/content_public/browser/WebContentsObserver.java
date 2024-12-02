@@ -48,7 +48,7 @@ public abstract class WebContentsObserver {
      * @param failingUrl The url that was loading when the error occurred.
      */
     public void didFailLoad(boolean isProvisionalLoad, boolean isMainFrame, int errorCode,
-            String description, String failingUrl) {}
+            String description, String failingUrl, boolean wasIgnoredByHandler) {}
 
     /**
      * Called when the main frame of the page has committed.
@@ -146,6 +146,13 @@ public abstract class WebContentsObserver {
      * @param url        The URL that we are navigating to.
      */
     public void didStartNavigationToPendingEntry(String url) {}
+
+    /**
+     * Called when the media session state changed.
+     * @param isControllable if the session can be resumed or suspended.
+     * @param isSuspended if the session currently suspended or not
+     */
+    public void mediaSessionStateChanged(boolean isControllable, boolean isSuspended) {}
 
     /**
      * Stop observing the web contents and clean up associated references.

@@ -75,9 +75,10 @@ importer.Destination = {
  * @return {boolean}
  */
 importer.isEligibleType = function(entry) {
+  // TODO(mtomasz): Add support to mime types.
   return !!entry &&
       entry.isFile &&
-      FileType.isType(entry, ['image', 'raw', 'video']);
+      FileType.isType(['image', 'raw', 'video'], entry);
 };
 
 /**
@@ -344,7 +345,7 @@ importer.getMachineId = function() {
             if (id) {
               return id;
             }
-            var id = importer.generateId();
+            id = importer.generateId();
             return storage.set(importer.Setting.MACHINE_ID, id)
                 .then(
                     function() {
@@ -1076,7 +1077,7 @@ importer.ChromeLocalStorage.prototype.get = function(key, opt_default) {
       function(resolve, reject) {
         chrome.storage.local.get(
             key,
-            /** @param {Object.<string, ?>} values */
+            /** @param {Object<?>} values */
             function(values) {
               if (chrome.runtime.lastError) {
                 reject(chrome.runtime.lastError);

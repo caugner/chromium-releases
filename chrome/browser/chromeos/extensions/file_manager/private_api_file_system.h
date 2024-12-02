@@ -13,6 +13,7 @@
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_base.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/extensions/chrome_extension_function_details.h"
+#include "device/media_transfer_protocol/mtp_storage_info.pb.h"
 #include "extensions/browser/extension_function.h"
 #include "storage/browser/fileapi/file_system_url.h"
 
@@ -76,8 +77,9 @@ class FileManagerPrivateGrantAccessFunction : public UIThreadExtensionFunction {
   DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateGrantAccessFunction);
 };
 
-// Base class for FileManagerPrivateAddFileWatchFunction and
-// FileManagerPrivateRemoveFileWatchFunction. Although it's called "FileWatch",
+// Base class for FileManagerPrivateInternalAddFileWatchFunction and
+// FileManagerPrivateInternalRemoveFileWatchFunction. Although it's called
+// "FileWatch",
 // the class and its sub classes are used only for watching changes in
 // directories.
 class FileWatchFunctionBase : public LoggedAsyncExtensionFunction {
@@ -100,13 +102,14 @@ class FileWatchFunctionBase : public LoggedAsyncExtensionFunction {
 
 // Implements the chrome.fileManagerPrivate.addFileWatch method.
 // Starts watching changes in directories.
-class FileManagerPrivateAddFileWatchFunction : public FileWatchFunctionBase {
+class FileManagerPrivateInternalAddFileWatchFunction
+    : public FileWatchFunctionBase {
  public:
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.addFileWatch",
-                             FILEMANAGERPRIVATE_ADDFILEWATCH)
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivateInternal.addFileWatch",
+                             FILEMANAGERPRIVATEINTERNAL_ADDFILEWATCH)
 
  protected:
-  ~FileManagerPrivateAddFileWatchFunction() override {}
+  ~FileManagerPrivateInternalAddFileWatchFunction() override {}
 
   // FileWatchFunctionBase override.
   void PerformFileWatchOperation(
@@ -118,13 +121,14 @@ class FileManagerPrivateAddFileWatchFunction : public FileWatchFunctionBase {
 
 // Implements the chrome.fileManagerPrivate.removeFileWatch method.
 // Stops watching changes in directories.
-class FileManagerPrivateRemoveFileWatchFunction : public FileWatchFunctionBase {
+class FileManagerPrivateInternalRemoveFileWatchFunction
+    : public FileWatchFunctionBase {
  public:
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.removeFileWatch",
-                             FILEMANAGERPRIVATE_REMOVEFILEWATCH)
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivateInternal.removeFileWatch",
+                             FILEMANAGERPRIVATEINTERNAL_REMOVEFILEWATCH)
 
  protected:
-  ~FileManagerPrivateRemoveFileWatchFunction() override {}
+  ~FileManagerPrivateInternalRemoveFileWatchFunction() override {}
 
   // FileWatchFunctionBase override.
   void PerformFileWatchOperation(
@@ -150,6 +154,9 @@ class FileManagerPrivateGetSizeStatsFunction
   void GetDriveAvailableSpaceCallback(drive::FileError error,
                                       int64 bytes_total,
                                       int64 bytes_used);
+
+  void GetMtpAvailableSpaceCallback(const MtpStorageInfo& mtp_storage_info,
+                                    const bool error);
 
   void GetSizeStatsCallback(const uint64* total_size,
                             const uint64* remaining_size);

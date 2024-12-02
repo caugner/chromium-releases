@@ -26,6 +26,7 @@ namespace chrome {
 void ChromeContentPluginClient::PreSandboxInitialization() {
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
   gin::V8Initializer::LoadV8Snapshot();
+  gin::V8Initializer::LoadV8Natives();
 #endif
 
 #if defined(ENABLE_REMOTING)
@@ -34,8 +35,7 @@ void ChromeContentPluginClient::PreSandboxInitialization() {
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && defined(USE_NSS_CERTS)
   // On platforms where we use system NSS libraries, the .so's must be loaded
   // before the sandbox is initialized.
-  crypto::ForceNSSNoDBInit();
-  crypto::EnsureNSSInit();
+  crypto::InitNSSSafely();
 #elif defined(OS_WIN)
   // crypt32.dll is used to decode X509 certificates for Chromoting.
   base::NativeLibraryLoadError error;

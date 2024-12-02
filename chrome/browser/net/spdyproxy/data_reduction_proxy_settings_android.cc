@@ -13,14 +13,13 @@
 #include "chrome/common/pref_names.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "jni/DataReductionProxySettings_jni.h"
 #include "net/proxy/proxy_server.h"
+#include "url/gurl.h"
 
 
 using base::android::ConvertUTF8ToJavaString;
 using base::android::ScopedJavaLocalRef;
-using data_reduction_proxy::DataReductionProxyParams;
 using data_reduction_proxy::DataReductionProxySettings;
 
 DataReductionProxySettingsAndroid::DataReductionProxySettingsAndroid() {
@@ -41,7 +40,7 @@ jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyPromoAllowed(
 
 jboolean DataReductionProxySettingsAndroid::IsIncludedInAltFieldTrial(
     JNIEnv* env, jobject obj) {
-  return DataReductionProxyParams::IsIncludedInAlternativeFieldTrial();
+  return false;
 }
 
 jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyEnabled(
@@ -49,9 +48,35 @@ jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyEnabled(
   return Settings()->IsDataReductionProxyEnabled();
 }
 
+jboolean DataReductionProxySettingsAndroid::CanUseDataReductionProxy(
+    JNIEnv* env, jobject obj, jstring url) {
+  return Settings()->CanUseDataReductionProxy(
+      GURL(base::android::ConvertJavaStringToUTF16(env, url)));
+}
+
+jboolean DataReductionProxySettingsAndroid::WasLoFiModeActiveOnMainFrame(
+    JNIEnv* env, jobject obj) {
+  return Settings()->WasLoFiModeActiveOnMainFrame();
+}
+
+jboolean DataReductionProxySettingsAndroid::WasLoFiLoadImageRequestedBefore(
+    JNIEnv* env, jobject obj) {
+  return Settings()->WasLoFiLoadImageRequestedBefore();
+}
+
+void DataReductionProxySettingsAndroid::SetLoFiLoadImageRequested(
+    JNIEnv* env, jobject obj) {
+  Settings()->SetLoFiLoadImageRequested();
+}
+
 jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyManaged(
     JNIEnv* env, jobject obj) {
   return Settings()->IsDataReductionProxyManaged();
+}
+
+void DataReductionProxySettingsAndroid::IncrementLoFiUserRequestsForImages(
+    JNIEnv* env, jobject obj) {
+  Settings()->IncrementLoFiUserRequestsForImages();
 }
 
 void DataReductionProxySettingsAndroid::SetDataReductionProxyEnabled(

@@ -30,6 +30,8 @@ class TestSigninClient : public SigninClient {
 
   // SigninClient implementation that is specialized for unit tests.
 
+  void DoFinalInit() override;
+
   // Returns NULL.
   // NOTE: This should be changed to return a properly-initalized PrefService
   // once there is a unit test that requires it.
@@ -99,6 +101,10 @@ class TestSigninClient : public SigninClient {
   void RemoveContentSettingsObserver(
       content_settings::Observer* observer) override;
   void DelayNetworkCall(const base::Closure& callback) override;
+  GaiaAuthFetcher* CreateGaiaAuthFetcher(
+      GaiaAuthConsumer* consumer,
+      const std::string& source,
+      net::URLRequestContextGetter* getter) override;
 
  private:
   // Loads the token database.

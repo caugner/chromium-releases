@@ -58,7 +58,7 @@ std::vector<GlobalError*> GetSignedInServiceErrors(Profile* profile) {
   // No auth error - now try other services. Currently the list is just hard-
   // coded but in the future if we add more we can create some kind of
   // registration framework.
-  if (profile->IsSyncAccessible()) {
+  if (profile->IsSyncAllowed()) {
     SyncGlobalError* error = SyncGlobalErrorFactory::GetForProfile(profile);
     if (error && error->HasMenuItem())
       errors.push_back(error);
@@ -74,7 +74,7 @@ base::string16 GetSigninMenuLabel(Profile* profile) {
     return error->MenuItemLabel();
 
   // No errors, so just display the signed in user, if any.
-  ProfileSyncService* service = profile->IsSyncAccessible() ?
+  ProfileSyncService* service = profile->IsSyncAllowed() ?
       ProfileSyncServiceFactory::GetForProfile(profile) : NULL;
 
   // Even if the user is signed in, don't display the "signed in as..."
@@ -157,10 +157,15 @@ void GetStatusLabelsForAuthError(Profile* profile,
 }
 
 void InitializePrefsForProfile(Profile* profile) {
-  // Suppresses the upgrade tutorial for a new profile.
   if (profile->IsNewProfile() && switches::IsNewAvatarMenu()) {
+    // Suppresses the upgrade tutorial for a new profile.
     profile->GetPrefs()->SetInteger(
         prefs::kProfileAvatarTutorialShown, kUpgradeWelcomeTutorialShowMax + 1);
+
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS) && !defined(OS_IOS)
+    profile->GetPrefs()->SetInteger(
+        prefs::kAccountIdMigrationState, AccountTrackerService::MIGRATION_DONE);
+#endif
   }
 }
 

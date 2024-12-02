@@ -66,6 +66,11 @@ class RenderFrameHostTester {
 
   virtual ~RenderFrameHostTester() {}
 
+  // Simulates initialization of the RenderFrame object in the renderer process
+  // and ensures internal state of RenderFrameHost is ready for simulating
+  // RenderFrame originated IPCs.
+  virtual void InitializeRenderFrameIfNeeded() = 0;
+
   // Gives tests access to RenderFrameHostImpl::OnCreateChild. The returned
   // RenderFrameHost is owned by the parent RenderFrameHost.
   virtual RenderFrameHost* AppendChild(const std::string& frame_name) = 0;
@@ -127,11 +132,11 @@ class RenderViewHostTester {
   virtual ~RenderViewHostTester() {}
 
   // Gives tests access to RenderViewHostImpl::CreateRenderView.
-  virtual bool CreateRenderView(const base::string16& frame_name,
-                                int opener_route_id,
-                                int proxy_routing_id,
-                                int32 max_page_id,
-                                bool created_with_opener) = 0;
+  virtual bool CreateTestRenderView(const base::string16& frame_name,
+                                    int opener_frame_route_id,
+                                    int proxy_routing_id,
+                                    int32 max_page_id,
+                                    bool created_with_opener) = 0;
 
   // Makes the WasHidden/WasShown calls to the RenderWidget that
   // tell it it has been hidden or restored from having been hidden.

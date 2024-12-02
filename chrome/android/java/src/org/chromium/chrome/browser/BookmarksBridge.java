@@ -4,14 +4,11 @@
 
 package org.chromium.chrome.browser;
 
-import android.util.Pair;
-
 import org.chromium.base.CalledByNative;
 import org.chromium.base.ObserverList;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.bookmarks.BookmarkId;
-import org.chromium.components.bookmarks.BookmarkMatch;
 import org.chromium.components.bookmarks.BookmarkType;
 
 import java.util.ArrayList;
@@ -208,6 +205,7 @@ public class BookmarksBridge {
 
     /**
      * @return A BookmarkItem instance for the given BookmarkId.
+     *         <code>null</code> if it doesn't exist.
      */
     public BookmarkItem getBookmarkById(BookmarkId id) {
         assert mIsNativeBookmarkModelLoaded;
@@ -257,6 +255,7 @@ public class BookmarksBridge {
      * The result list will be sorted alphabetically by title. "mobile", "other",
      * root node, managed folder, partner folder are NOT included as results.
      */
+    @VisibleForTesting
     public void getAllFoldersWithDepths(List<BookmarkId> folderList,
             List<Integer> depthList) {
         assert mIsNativeBookmarkModelLoaded;
@@ -379,19 +378,6 @@ public class BookmarksBridge {
     }
 
     /**
-     * Synchronously gets a list of bookmarks that match the specified search query.
-     * @param query Keyword used for searching bookmarks.
-     * @param maxNumberOfResult Maximum number of result to fetch.
-     * @return List of bookmarks that are related to the given query.
-     */
-    public List<BookmarkMatch> searchBookmarks(String query, int maxNumberOfResult) {
-        List<BookmarkMatch> bookmarkMatches = new ArrayList<BookmarkMatch>();
-        nativeSearchBookmarks(mNativeBookmarksBridge, bookmarkMatches, query,
-                maxNumberOfResult);
-        return bookmarkMatches;
-    }
-
-    /**
      * Set title of the given bookmark.
      */
     public void setBookmarkTitle(BookmarkId id, String title) {
@@ -404,6 +390,7 @@ public class BookmarksBridge {
      */
     public void setBookmarkUrl(BookmarkId id, String url) {
         assert mIsNativeBookmarkModelLoaded;
+        assert id.getType() == BookmarkType.NORMAL;
         nativeSetBookmarkUrl(mNativeBookmarksBridge, id.getId(), id.getType(), url);
     }
 
@@ -447,18 +434,13 @@ public class BookmarksBridge {
     }
 
     /**
-     * Fetches the number of bookmarks in the given folder.
-     *
-     * @param folderId The parent folder id.
-     * @return The number of bookmarks in the given folder or 0 if the bookmark model has not been
-     *         loaded.
+     * Check whether the given folder should be visible. This is for top permanent folders that we
+     * want to hide when there is no child.
+     * @return Whether the given folder should be visible.
      */
-    public int getBookmarkCountForFolder(BookmarkId folderId) {
-        if (!mIsNativeBookmarkModelLoaded) {
-            return 0;
-        }
-
-        return nativeGetBookmarkCountForFolder(mNativeBookmarksBridge, folderId);
+    public boolean isFolderVisible(BookmarkId id) {
+        assert mIsNativeBookmarkModelLoaded;
+        return nativeIsFolderVisible(mNativeBookmarksBridge, id.getId(), id.getType());
     }
 
     /**
@@ -507,6 +489,7 @@ public class BookmarksBridge {
      * @return Id of the added node. If adding failed (index is invalid, string is null, parent is
      *         not editable), returns null.
      */
+    @VisibleForTesting
     public BookmarkId addFolder(BookmarkId parent, int index, String title) {
         assert parent.getType() == BookmarkType.NORMAL;
         assert index >= 0;
@@ -527,6 +510,7 @@ public class BookmarksBridge {
      * @return Id of the added node. If adding failed (index is invalid, string is null, parent is
      *         not editable), returns null.
      */
+    @VisibleForTesting
     public BookmarkId addBookmark(BookmarkId parent, int index, String title, String url) {
         assert parent.getType() == BookmarkType.NORMAL;
         assert index >= 0;
@@ -684,24 +668,6 @@ public class BookmarksBridge {
     }
 
     @CalledByNative
-    private static void addToBookmarkMatchList(List<BookmarkMatch> bookmarkMatchList,
-            long id, int type, int[] titleMatchStartPositions,
-            int[] titleMatchEndPositions, int[] urlMatchStartPositions,
-            int[] urlMatchEndPositions) {
-        bookmarkMatchList.add(new BookmarkMatch(new BookmarkId(id, type),
-                createPairsList(titleMatchStartPositions, titleMatchEndPositions),
-                createPairsList(urlMatchStartPositions, urlMatchEndPositions)));
-    }
-
-    private static List<Pair<Integer, Integer>> createPairsList(int[] left, int[] right) {
-        List<Pair<Integer, Integer>> pairList = new ArrayList<Pair<Integer, Integer>>();
-        for (int i = 0; i < left.length; i++) {
-            pairList.add(new Pair<Integer, Integer>(left[i], right[i]));
-        }
-        return pairList;
-    }
-
-    @CalledByNative
     private static void addToBookmarkIdListWithDepth(List<BookmarkId> folderList, long id,
             int type, List<Integer> depthList, int depth) {
         folderList.add(new BookmarkId(id, type));
@@ -736,8 +702,7 @@ public class BookmarksBridge {
     private native void nativeGetBookmarksForFolder(long nativeBookmarksBridge,
             BookmarkId folderId, BookmarksCallback callback,
             List<BookmarkItem> bookmarksList);
-    private native int nativeGetBookmarkCountForFolder(long nativeBookmarksBridge,
-            BookmarkId folderId);
+    private native boolean nativeIsFolderVisible(long nativeBookmarksBridge, long id, int type);
     private native void nativeGetCurrentFolderHierarchy(long nativeBookmarksBridge,
             BookmarkId folderId, BookmarksCallback callback,
             List<BookmarkItem> bookmarksList);
@@ -746,8 +711,6 @@ public class BookmarksBridge {
     private native void nativeDeleteBookmark(long nativeBookmarksBridge, BookmarkId bookmarkId);
     private native void nativeMoveBookmark(long nativeBookmarksBridge, BookmarkId bookmarkId,
             BookmarkId newParentId, int index);
-    private native void nativeSearchBookmarks(long nativeBookmarksBridge,
-            List<BookmarkMatch> bookmarkMatches, String query, int maxNumber);
     private native BookmarkId nativeAddBookmark(long nativeBookmarksBridge, BookmarkId parent,
             int index, String title, String url);
     private native void nativeUndo(long nativeBookmarksBridge);
@@ -813,6 +776,16 @@ public class BookmarksBridge {
         /** @return Whether this bookmark can be edited. */
         public boolean isEditable() {
             return mIsEditable;
+        }
+
+        /**@return Whether this bookmark's URL can be edited */
+        public boolean isUrlEditable() {
+            return isEditable() && mId.getType() == BookmarkType.NORMAL;
+        }
+
+        /**@return Whether this bookmark can be moved */
+        public boolean isMovable() {
+            return isEditable() && mId.getType() == BookmarkType.NORMAL;
         }
 
         /** @return Whether this is a managed bookmark. */

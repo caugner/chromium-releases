@@ -66,6 +66,10 @@ ContentSettingsTypeHistogram ContentSettingTypeToHistogramValue(
 #endif
     case CONTENT_SETTINGS_TYPE_APP_BANNER:
       return CONTENT_SETTINGS_TYPE_HISTOGRAM_APP_BANNER;
+    case CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT:
+      return CONTENT_SETTINGS_TYPE_HISTOGRAM_SITE_ENGAGEMENT;
+    case CONTENT_SETTINGS_TYPE_DURABLE_STORAGE:
+      return CONTENT_SETTINGS_TYPE_HISTOGRAM_DURABLE_STORAGE;
     case CONTENT_SETTINGS_NUM_TYPES:
       return CONTENT_SETTINGS_TYPE_HISTOGRAM_INVALID;
   }
@@ -104,6 +108,8 @@ bool IsContentSettingsTypeSyncable(ContentSettingsType content_setting) {
     case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
 #endif
     case CONTENT_SETTINGS_TYPE_APP_BANNER:
+    case CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT:
+    case CONTENT_SETTINGS_TYPE_DURABLE_STORAGE:
       return false;
 
     case CONTENT_SETTINGS_TYPE_DEFAULT:
@@ -113,6 +119,11 @@ bool IsContentSettingsTypeSyncable(ContentSettingsType content_setting) {
   }
   NOTREACHED();
   return false;
+}
+
+bool IsContentSettingsTypeLossy(ContentSettingsType content_setting) {
+  return content_setting == CONTENT_SETTINGS_TYPE_APP_BANNER ||
+         content_setting == CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT;
 }
 
 ContentSettingPatternSource::ContentSettingPatternSource(

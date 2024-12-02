@@ -7,10 +7,11 @@
 #include <Carbon/Carbon.h>
 
 #include "base/mac/foundation_util.h"
+#include "base/mac/sdk_forward_declarations.h"
 #include "base/stl_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
+#import "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #include "chrome/browser/ui/cocoa/run_loop_testing.h"
 #import "chrome/browser/ui/cocoa/website_settings/permission_bubble_cocoa.h"
 #import "chrome/browser/ui/cocoa/website_settings/split_block_button.h"
@@ -41,8 +42,8 @@ const char* const kPermissionB = "Permission B";
 const char* const kPermissionC = "Permission C";
 }
 
-class PermissionBubbleControllerTest : public CocoaTest,
-  public PermissionBubbleView::Delegate {
+class PermissionBubbleControllerTest : public CocoaProfileTest,
+                                       public PermissionBubbleView::Delegate {
  public:
 
   MOCK_METHOD2(ToggleAccept, void(int, bool));
@@ -53,8 +54,8 @@ class PermissionBubbleControllerTest : public CocoaTest,
   MOCK_METHOD1(SetView, void(PermissionBubbleView*));
 
   void SetUp() override {
-    CocoaTest::SetUp();
-    bridge_.reset(new PermissionBubbleCocoa(nil));
+    CocoaProfileTest::SetUp();
+    bridge_.reset(new PermissionBubbleCocoa(browser()));
     AddRequest(kPermissionA);
     controller_ = [[PermissionBubbleController alloc]
         initWithParentWindow:test_window()
@@ -65,7 +66,7 @@ class PermissionBubbleControllerTest : public CocoaTest,
     [controller_ close];
     chrome::testing::NSRunLoopRunAllPending();
     STLDeleteElements(&requests_);
-    CocoaTest::TearDown();
+    CocoaProfileTest::TearDown();
   }
 
   void AddRequest(const std::string& title) {
@@ -305,4 +306,36 @@ TEST_F(PermissionBubbleControllerTest, EscapeCloses) {
       performKeyEquivalent:cocoa_test_event_utils::KeyEventWithKeyCode(
                                kVK_Escape, '\e', NSKeyDown, 0)];
   EXPECT_FALSE([[controller_ window] isVisible]);
+}
+
+TEST_F(PermissionBubbleControllerTest, EnterFullscreen) {
+  [controller_ showAtAnchor:NSZeroPoint
+               withDelegate:this
+                forRequests:requests_
+               acceptStates:accept_states_];
+
+  EXPECT_TRUE([[controller_ window] isVisible]);
+
+  // Post the "enter fullscreen" notification.
+  NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+  [center postNotificationName:NSWindowWillEnterFullScreenNotification
+                        object:test_window()];
+
+  EXPECT_TRUE([[controller_ window] isVisible]);
+}
+
+TEST_F(PermissionBubbleControllerTest, ExitFullscreen) {
+  [controller_ showAtAnchor:NSZeroPoint
+               withDelegate:this
+                forRequests:requests_
+               acceptStates:accept_states_];
+
+  EXPECT_TRUE([[controller_ window] isVisible]);
+
+  // Post the "enter fullscreen" notification.
+  NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+  [center postNotificationName:NSWindowWillExitFullScreenNotification
+                        object:test_window()];
+
+  EXPECT_TRUE([[controller_ window] isVisible]);
 }

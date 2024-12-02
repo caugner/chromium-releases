@@ -14,6 +14,7 @@
 #include "base/metrics/field_trial.h"
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -43,6 +44,7 @@ const char kAttributeClientVersion[] = "clientversion";
 const char kAttributeDataPresent[] = "datapresent";
 const char kAttributeFieldID[] = "fieldid";
 const char kAttributeFieldType[] = "fieldtype";
+const char kAttributeFieldLabel[] = "label";
 const char kAttributeFormSignature[] = "formsignature";
 const char kAttributeName[] = "name";
 const char kAttributeSignature[] = "signature";
@@ -70,7 +72,7 @@ const int kNumberOfMismatchesThreshold = 3;
 bool IsAutofillFieldMetadataEnabled() {
   const std::string group_name =
       base::FieldTrialList::FindFullName("AutofillFieldMetadata");
-  return StartsWithASCII(group_name, "Enabled", true);
+  return base::StartsWithASCII(group_name, "Enabled", true);
 }
 
 // Helper for |EncodeUploadRequest()| that creates a bit field corresponding to
@@ -126,6 +128,10 @@ buzz::XmlElement* EncodeFieldForQuery(const AutofillField& field,
     }
     field_element->SetAttr(buzz::QName(kAttributeControlType),
                            field.form_control_type);
+    if (!field.label.empty()) {
+      field_element->SetAttr(buzz::QName(kAttributeFieldLabel),
+                             base::UTF16ToUTF8(field.label));
+    }
   }
   parent->AddElement(field_element);
   return field_element;
@@ -146,14 +152,14 @@ void EncodeFieldForUpload(const AutofillField& field,
     // We use the same field elements as the query and add a few more below.
     buzz::XmlElement* field_element = EncodeFieldForQuery(field, parent);
 
-    if (IsAutofillFieldMetadataEnabled()) {
-      if (!field.autocomplete_attribute.empty()) {
-        field_element->SetAttr(buzz::QName(kAttributeAutocomplete),
-                               field.autocomplete_attribute);
-      }
-      field_element->SetAttr(buzz::QName(kAttributeAutofillType),
-                             base::IntToString(*field_type));
+    if (IsAutofillFieldMetadataEnabled() &&
+        !field.autocomplete_attribute.empty()) {
+      field_element->SetAttr(buzz::QName(kAttributeAutocomplete),
+                             field.autocomplete_attribute);
     }
+
+    field_element->SetAttr(buzz::QName(kAttributeAutofillType),
+                           base::IntToString(*field_type));
   }
 }
 
@@ -1099,8 +1105,9 @@ void FormStructure::ParseFieldTypesFromAutocompleteAttributes(
 
     // Tokenize the attribute value.  Per the spec, the tokens are parsed in
     // reverse order.
-    std::vector<std::string> tokens;
-    Tokenize(autocomplete_attribute, " ", &tokens);
+    std::vector<std::string> tokens = base::SplitString(
+        autocomplete_attribute, " ", base::KEEP_WHITESPACE,
+        base::SPLIT_WANT_NONEMPTY);
 
     // The final token must be the field type.
     // If it is not one of the known types, abort.
@@ -1145,7 +1152,7 @@ void FormStructure::ParseFieldTypesFromAutocompleteAttributes(
     // The preceding token, if any, may be a named section.
     const std::string kSectionPrefix = "section-";
     if (!tokens.empty() &&
-        StartsWithASCII(tokens.back(), kSectionPrefix, true)) {
+        base::StartsWithASCII(tokens.back(), kSectionPrefix, true)) {
       // Prepend this section name to the suffix set in the preceding block.
       section = tokens.back().substr(kSectionPrefix.size()) + section;
       tokens.pop_back();

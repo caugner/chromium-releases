@@ -118,8 +118,9 @@ bool UpdateLastOSUpgradeHandledByActiveSetup(BrowserDistribution* dist) {
       base::string16 existing_version;
       if (active_setup_key.ReadValue(L"Version",
                                      &existing_version) == ERROR_SUCCESS) {
-        std::vector<base::string16> version_components;
-        base::SplitString(existing_version, L',', &version_components);
+        std::vector<base::string16> version_components =
+            base::SplitString(existing_version, L",", base::TRIM_WHITESPACE,
+                              base::SPLIT_WANT_NONEMPTY);
         uint32_t latest_os_upgrade_uint = 0;
         if (version_components.size() == 4U &&
             base::StringToUint(
@@ -273,7 +274,14 @@ Version* GetMaxVersionFromArchiveDir(const base::FilePath& chrome_path) {
 }
 
 base::FilePath FindArchiveToPatch(const InstallationState& original_state,
-                                  const InstallerState& installer_state) {
+                                  const InstallerState& installer_state,
+                                  const base::Version& desired_version) {
+  if (desired_version.IsValid()) {
+    base::FilePath archive(installer_state.GetInstallerDirectory(
+        desired_version).Append(kChromeArchive));
+    return base::PathExists(archive) ? archive : base::FilePath();
+  }
+
   // Check based on the version number advertised to Google Update, since that
   // is the value used to select a specific differential update. If an archive
   // can't be found using that, fallback to using the newest version present.

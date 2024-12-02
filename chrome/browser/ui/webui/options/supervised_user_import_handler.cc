@@ -56,19 +56,12 @@ namespace options {
 SupervisedUserImportHandler::SupervisedUserImportHandler()
     : profile_observer_(this),
       signin_error_observer_(this),
+      supervised_user_sync_service_observer_(this),
       removed_profile_is_supervised_(false),
       weak_ptr_factory_(this) {
 }
 
 SupervisedUserImportHandler::~SupervisedUserImportHandler() {
-  Profile* profile = Profile::FromWebUI(web_ui());
-  if (!profile->IsSupervised()) {
-    SupervisedUserSyncService* service =
-        SupervisedUserSyncServiceFactory::GetForProfile(profile);
-    if (service)
-      service->RemoveObserver(this);
-    subscription_.reset();
-  }
 }
 
 void SupervisedUserImportHandler::GetLocalizedValues(
@@ -105,7 +98,7 @@ void SupervisedUserImportHandler::InitializeHandler() {
     SupervisedUserSyncService* sync_service =
         SupervisedUserSyncServiceFactory::GetForProfile(profile);
     if (sync_service) {
-      sync_service->AddObserver(this);
+      supervised_user_sync_service_observer_.Add(sync_service);
       signin_error_observer_.Add(
           SigninErrorControllerFactory::GetForProfile(profile));
       SupervisedUserSharedSettingsService* settings_service =
@@ -156,6 +149,12 @@ void SupervisedUserImportHandler::OnProfileWasRemoved(
   }
 }
 
+void SupervisedUserImportHandler::OnProfileIsOmittedChanged(
+    const base::FilePath& profile_path) {
+  if (ProfileIsLegacySupervised(profile_path))
+    FetchSupervisedUsers();
+}
+
 void SupervisedUserImportHandler::OnSupervisedUsersChanged() {
   FetchSupervisedUsers();
 }
@@ -194,8 +193,12 @@ void SupervisedUserImportHandler::SendExistingSupervisedUsers(
   // Collect the ids of local supervised user profiles.
   std::set<std::string> supervised_user_ids;
   for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
-    if (cache.ProfileIsLegacySupervisedAtIndex(i))
+    // Filter out omitted profiles. These are currently being imported, and
+    // shouldn't show up as "already on this device" just yet.
+    if (cache.ProfileIsLegacySupervisedAtIndex(i) &&
+        !cache.IsOmittedProfileAtIndex(i)) {
       supervised_user_ids.insert(cache.GetSupervisedUserIdOfProfileAtIndex(i));
+    }
   }
 
   base::ListValue supervised_users;

@@ -565,7 +565,7 @@ class SessionManagerClientImpl : public SessionManagerClient {
       LOG(ERROR) << "Invalid signal: " << signal->ToString();
       return;
     }
-    const bool success = StartsWithASCII(result_string, "success", false);
+    const bool success = base::StartsWithASCII(result_string, "success", false);
     FOR_EACH_OBSERVER(Observer, observers_, OwnerKeySet(success));
   }
 
@@ -577,7 +577,7 @@ class SessionManagerClientImpl : public SessionManagerClient {
       LOG(ERROR) << "Invalid signal: " << signal->ToString();
       return;
     }
-    const bool success = StartsWithASCII(result_string, "success", false);
+    const bool success = base::StartsWithASCII(result_string, "success", false);
     FOR_EACH_OBSERVER(Observer, observers_, PropertyChangeComplete(success));
   }
 
@@ -604,7 +604,7 @@ class SessionManagerClientImpl : public SessionManagerClient {
     std::vector<std::string> state_keys;
     if (!response) {
       LOG(ERROR) << "Failed to call "
-                 << login_manager::kSessionManagerStartSession;
+                 << login_manager::kSessionManagerGetServerBackedStateKeys;
     } else {
       dbus::MessageReader reader(response);
       dbus::MessageReader array_reader(NULL);
@@ -633,7 +633,7 @@ class SessionManagerClientImpl : public SessionManagerClient {
 
   dbus::ObjectProxy* session_manager_proxy_;
   scoped_ptr<BlockingMethodCaller> blocking_method_caller_;
-  ObserverList<Observer> observers_;
+  base::ObserverList<Observer> observers_;
 
   // Most recent screen-lock state received from session_manager.
   bool screen_is_locked_;
@@ -798,7 +798,7 @@ class SessionManagerClientStubImpl : public SessionManagerClient {
 
  private:
   StubDelegate* delegate_;  // Weak pointer; may be NULL.
-  ObserverList<Observer> observers_;
+  base::ObserverList<Observer> observers_;
   std::string device_policy_;
   bool screen_is_locked_;
 

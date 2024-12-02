@@ -6,6 +6,7 @@
 
 #include <ostream>
 
+#include "base/strings/pattern.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
@@ -329,8 +330,8 @@ void URLPattern::SetPath(const std::string& path) {
   spec_.clear();
   path_ = path;
   path_escaped_ = path_;
-  ReplaceSubstringsAfterOffset(&path_escaped_, 0, "\\", "\\\\");
-  ReplaceSubstringsAfterOffset(&path_escaped_, 0, "?", "\\?");
+  base::ReplaceSubstringsAfterOffset(&path_escaped_, 0, "\\", "\\\\");
+  base::ReplaceSubstringsAfterOffset(&path_escaped_, 0, "?", "\\?");
 }
 
 bool URLPattern::SetPort(const std::string& port) {
@@ -478,7 +479,7 @@ bool URLPattern::MatchesPath(const std::string& test) const {
   if (test + "/*" == path_escaped_)
     return true;
 
-  return MatchPattern(test, path_escaped_);
+  return base::MatchPattern(test, path_escaped_);
 }
 
 const std::string& URLPattern::GetAsString() const {

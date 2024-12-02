@@ -13,8 +13,6 @@ import android.preference.PreferenceGroup;
 import android.preference.PreferenceScreen;
 import android.support.v4.view.MenuItemCompat;
 import android.support.v7.widget.SearchView;
-import android.text.SpannableString;
-import android.text.style.ForegroundColorSpan;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
@@ -36,8 +34,6 @@ import org.chromium.chrome.browser.preferences.ProtectedContentResetCredentialCo
 import org.chromium.chrome.browser.widget.TintedDrawable;
 import org.chromium.content.browser.MediaDrmCredentialManager;
 import org.chromium.content.browser.MediaDrmCredentialManager.MediaDrmCredentialManagerCallback;
-import org.chromium.ui.text.SpanApplier;
-import org.chromium.ui.text.SpanApplier.SpanInfo;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -64,11 +60,8 @@ public class WebsitePreferences extends PreferenceFragment
     private TextView mEmptyView;
     // The view for searching the list of items.
     private SearchView mSearchView;
-    // What category the list is filtered by (e.g. show all, location, storage,
-    // etc). For full list see WebsiteSettingsCategoryFilter.
-    private String mCategoryFilter = "";
-    // The filter helper object.
-    private WebsiteSettingsCategoryFilter mFilter = null;
+    // The Site Settings Category we are showing.
+    private SiteSettingsCategory mCategory;
     // If not blank, represents a substring to use to search for site names.
     private String mSearch = "";
     // Whether to group by allowed/blocked list.
@@ -92,13 +85,15 @@ public class WebsitePreferences extends PreferenceFragment
     private static final String BLOCKED_GROUP = "blocked_group";
 
     private void getInfoForOrigins() {
-        if (mFilter.showGeolocationSites(mCategoryFilter)
-                && !LocationSettings.getInstance().isSystemLocationSettingEnabled()) {
-            return;  // No need to fetch any data if we're not going to show it.
+        if (!mCategory.enabledInAndroid(getActivity())) {
+            // No need to fetch any data if we're not going to show it, but we do need to update
+            // the global toggle to reflect updates in Android settings (e.g. Location).
+            resetList();
+            return;
         }
 
         WebsitePermissionsFetcher fetcher = new WebsitePermissionsFetcher(new ResultsPopulator());
-        fetcher.fetchPreferencesWithFilter(mCategoryFilter);
+        fetcher.fetchPreferencesForCategory(mCategory);
     }
 
     private void displayEmptyScreenMessage() {
@@ -121,7 +116,7 @@ public class WebsitePreferences extends PreferenceFragment
             for (Map.Entry<String, Set<Website>> element : sitesByOrigin.entrySet()) {
                 for (Website site : element.getValue()) {
                     if (mSearch.isEmpty() || site.getTitle().contains(mSearch)) {
-                        websites.add(new WebsitePreference(getActivity(), site, mCategoryFilter));
+                        websites.add(new WebsitePreference(getActivity(), site, mCategory));
                         displayedSites.add(site);
                     }
                 }
@@ -131,8 +126,7 @@ public class WebsitePreferences extends PreferenceFragment
                 for (Website site : element.getValue()) {
                     if (!displayedSites.contains(site)) {
                         if (mSearch.isEmpty() || site.getTitle().contains(mSearch)) {
-                            websites.add(new WebsitePreference(
-                                    getActivity(), site, mCategoryFilter));
+                            websites.add(new WebsitePreference(getActivity(), site, mCategory));
                             displayedSites.add(site);
                         }
                     }
@@ -206,29 +200,27 @@ public class WebsitePreferences extends PreferenceFragment
     }
 
     /**
-     * Returns whether a website is on the Blocked list for the category currently showing (if any).
+     * Returns whether a website is on the Blocked list for the category currently showing.
      * @param website The website to check.
      */
     private boolean isOnBlockList(WebsitePreference website) {
-        if (mFilter.showCookiesSites(mCategoryFilter)) {
+        if (mCategory.showCookiesSites()) {
             return website.site().getCookiePermission() == ContentSetting.BLOCK;
-        } else if (mFilter.showCameraSites(mCategoryFilter)) {
+        } else if (mCategory.showCameraSites()) {
             return website.site().getCameraPermission() == ContentSetting.BLOCK;
-        } else if (mFilter.showFullscreenSites(mCategoryFilter)) {
+        } else if (mCategory.showFullscreenSites()) {
             return website.site().getFullscreenPermission() == ContentSetting.ASK;
-        } else if (mFilter.showGeolocationSites(mCategoryFilter)) {
+        } else if (mCategory.showGeolocationSites()) {
             return website.site().getGeolocationPermission() == ContentSetting.BLOCK;
-        } else if (mFilter.showImagesSites(mCategoryFilter)) {
-            return website.site().getImagesPermission() == ContentSetting.BLOCK;
-        } else if (mFilter.showJavaScriptSites(mCategoryFilter)) {
+        } else if (mCategory.showJavaScriptSites()) {
             return website.site().getJavaScriptPermission() == ContentSetting.BLOCK;
-        } else if (mFilter.showMicrophoneSites(mCategoryFilter)) {
+        } else if (mCategory.showMicrophoneSites()) {
             return website.site().getMicrophonePermission() == ContentSetting.BLOCK;
-        } else if (mFilter.showPopupSites(mCategoryFilter)) {
+        } else if (mCategory.showPopupSites()) {
             return website.site().getPopupPermission() == ContentSetting.BLOCK;
-        } else if (mFilter.showPushNotificationsSites(mCategoryFilter)) {
+        } else if (mCategory.showNotificationsSites()) {
             return website.site().getPushNotificationPermission() == ContentSetting.BLOCK;
-        } else if (mFilter.showProtectedMediaSites(mCategoryFilter)) {
+        } else if (mCategory.showProtectedMediaSites()) {
             return website.site().getProtectedMediaIdentifierPermission() == ContentSetting.BLOCK;
         }
 
@@ -288,14 +280,18 @@ public class WebsitePreferences extends PreferenceFragment
         listView.setEmptyView(mEmptyView);
         listView.setDivider(null);
 
-        // Read which category, if any, we should be showing.
+        // Read which category we should be showing.
+        String category = "";
         if (getArguments() != null) {
-            mCategoryFilter = getArguments().getString(EXTRA_CATEGORY, "");
-            String title = getArguments().getString(EXTRA_TITLE);
-            if (title != null) getActivity().setTitle(title);
+            category = getArguments().getString(EXTRA_CATEGORY, "");
+            mCategory = SiteSettingsCategory.fromString(category);
+        }
+        if (mCategory == null) {
+            mCategory = SiteSettingsCategory.fromString(SiteSettingsCategory.CATEGORY_ALL_SITES);
         }
 
-        mFilter = new WebsiteSettingsCategoryFilter();
+        String title = getArguments().getString(EXTRA_TITLE);
+        if (title != null) getActivity().setTitle(title);
 
         configureGlobalToggles();
 
@@ -329,7 +325,7 @@ public class WebsitePreferences extends PreferenceFragment
                 };
         mSearchView.setOnQueryTextListener(queryTextListener);
 
-        if (mFilter.showProtectedMediaSites(mCategoryFilter)) {
+        if (mCategory.showProtectedMediaSites()) {
             // Add a menu item to reset protected media identifier device credentials.
             MenuItem resetMenu =
                     menu.add(Menu.NONE, Menu.NONE, Menu.FIRST, R.string.reset_device_credentials);
@@ -348,7 +344,7 @@ public class WebsitePreferences extends PreferenceFragment
     public boolean onPreferenceTreeClick(PreferenceScreen screen, Preference preference) {
         // Do not show the toast if the System Location setting is disabled.
         if (getPreferenceScreen().findPreference(READ_WRITE_TOGGLE_KEY) != null
-                && isCategoryManaged()) {
+                && mCategory.isManaged()) {
             showManagedToast();
             return false;
         }
@@ -373,35 +369,32 @@ public class WebsitePreferences extends PreferenceFragment
     @Override
     public boolean onPreferenceChange(Preference preference, Object newValue) {
         if (READ_WRITE_TOGGLE_KEY.equals(preference.getKey())) {
-            if (isCategoryManaged()) return false;
+            if (mCategory.isManaged()) return false;
 
-            if (mFilter.showGeolocationSites(mCategoryFilter)) {
+            if (mCategory.showGeolocationSites()) {
                 PrefServiceBridge.getInstance().setAllowLocationEnabled((boolean) newValue);
-            } else if (mFilter.showCookiesSites(mCategoryFilter)) {
+            } else if (mCategory.showCookiesSites()) {
                 PrefServiceBridge.getInstance().setAllowCookiesEnabled((boolean) newValue);
                 updateThirdPartyCookiesCheckBox();
-            } else if (mFilter.showCameraSites(mCategoryFilter)) {
+            } else if (mCategory.showCameraSites()) {
                 PrefServiceBridge.getInstance().setCameraEnabled((boolean) newValue);
-            } else if (mFilter.showFullscreenSites(mCategoryFilter)) {
+            } else if (mCategory.showFullscreenSites()) {
                 PrefServiceBridge.getInstance().setFullscreenAllowed((boolean) newValue);
-            } else if (mFilter.showImagesSites(mCategoryFilter)) {
-                PrefServiceBridge.getInstance().setImagesEnabled((boolean) newValue);
-            } else if (mFilter.showJavaScriptSites(mCategoryFilter)) {
+            } else if (mCategory.showJavaScriptSites()) {
                 PrefServiceBridge.getInstance().setJavaScriptEnabled((boolean) newValue);
-            } else if (mFilter.showMicrophoneSites(mCategoryFilter)) {
+            } else if (mCategory.showMicrophoneSites()) {
                 PrefServiceBridge.getInstance().setMicEnabled((boolean) newValue);
-            } else if (mFilter.showPopupSites(mCategoryFilter)) {
+            } else if (mCategory.showPopupSites()) {
                 PrefServiceBridge.getInstance().setAllowPopupsEnabled((boolean) newValue);
-            } else if (mFilter.showPushNotificationsSites(mCategoryFilter)) {
+            } else if (mCategory.showNotificationsSites()) {
                 PrefServiceBridge.getInstance().setPushNotificationsEnabled((boolean) newValue);
-            } else if (mFilter.showProtectedMediaSites(mCategoryFilter)) {
+            } else if (mCategory.showProtectedMediaSites()) {
                 PrefServiceBridge.getInstance().setProtectedMediaIdentifierEnabled(
                         (boolean) newValue);
             }
 
             // Categories that support adding exceptions also manage the 'Add site' preference.
-            if (mFilter.showImagesSites(mCategoryFilter)
-                    || mFilter.showJavaScriptSites(mCategoryFilter)) {
+            if (mCategory.showJavaScriptSites()) {
                 if ((boolean) newValue) {
                     Preference addException = getPreferenceScreen().findPreference(
                             ADD_EXCEPTION_KEY);
@@ -428,10 +421,8 @@ public class WebsitePreferences extends PreferenceFragment
 
     private String getAddExceptionDialogMessage() {
         int resource = 0;
-        if (mFilter.showJavaScriptSites(mCategoryFilter)) {
+        if (mCategory.showJavaScriptSites()) {
             resource = R.string.website_settings_add_site_description_javascript;
-        } else if (mFilter.showImagesSites(mCategoryFilter)) {
-            resource = R.string.website_settings_add_site_description_images;
         }
         assert resource > 0;
         return getResources().getString(resource);
@@ -460,7 +451,7 @@ public class WebsitePreferences extends PreferenceFragment
     @Override
     public void onAddSite(String hostname) {
         PrefServiceBridge.getInstance().nativeSetContentSettingForPattern(
-                    mFilter.toContentSettingsType(mCategoryFilter), hostname,
+                    mCategory.toContentSettingsType(), hostname,
                     ContentSetting.ALLOW.toInt());
 
         Toast.makeText(getActivity(),
@@ -470,43 +461,6 @@ public class WebsitePreferences extends PreferenceFragment
                 Toast.LENGTH_SHORT).show();
 
         getInfoForOrigins();
-    }
-
-    /*
-     * Returns whether the current category is managed either by enterprise policy or by the
-     * custodian of a supervised account.
-     */
-    private boolean isCategoryManaged() {
-        PrefServiceBridge prefs = PrefServiceBridge.getInstance();
-        if (mFilter.showCameraSites(mCategoryFilter)) return !prefs.isCameraUserModifiable();
-        if (mFilter.showCookiesSites(mCategoryFilter)) return prefs.isAcceptCookiesManaged();
-        if (mFilter.showFullscreenSites(mCategoryFilter)) return prefs.isFullscreenManaged();
-        if (mFilter.showGeolocationSites(mCategoryFilter)) {
-            return !prefs.isAllowLocationUserModifiable();
-        }
-        if (mFilter.showImagesSites(mCategoryFilter)) return prefs.imagesManaged();
-        if (mFilter.showJavaScriptSites(mCategoryFilter)) return prefs.javaScriptManaged();
-        if (mFilter.showMicrophoneSites(mCategoryFilter)) return !prefs.isMicUserModifiable();
-        if (mFilter.showPopupSites(mCategoryFilter)) return prefs.isPopupsManaged();
-        return false;
-    }
-
-    /*
-     * Returns whether the current category is managed by the custodian (e.g. parent, not an
-     * enterprise admin) of the account if the account is supervised.
-     */
-    private boolean isCategoryManagedByCustodian() {
-        PrefServiceBridge prefs = PrefServiceBridge.getInstance();
-        if (mFilter.showGeolocationSites(mCategoryFilter)) {
-            return prefs.isAllowLocationManagedByCustodian();
-        }
-        if (mFilter.showCameraSites(mCategoryFilter)) {
-            return prefs.isCameraManagedByCustodian();
-        }
-        if (mFilter.showMicrophoneSites(mCategoryFilter)) {
-            return prefs.isMicManagedByCustodian();
-        }
-        return false;
     }
 
     /**
@@ -520,10 +474,8 @@ public class WebsitePreferences extends PreferenceFragment
 
         configureGlobalToggles();
 
-        if ((mFilter.showJavaScriptSites(mCategoryFilter)
-                && !PrefServiceBridge.getInstance().javaScriptEnabled())
-                || (mFilter.showImagesSites(mCategoryFilter)
-                        && !PrefServiceBridge.getInstance().imagesEnabled())) {
+        if ((mCategory.showJavaScriptSites()
+                && !PrefServiceBridge.getInstance().javaScriptEnabled())) {
             getPreferenceScreen().addPreference(
                     new AddExceptionPreference(getActivity(), ADD_EXCEPTION_KEY,
                             getAddExceptionDialogMessage(), this));
@@ -538,7 +490,7 @@ public class WebsitePreferences extends PreferenceFragment
         // Configure/hide the third-party cookie toggle, as needed.
         Preference thirdPartyCookies = getPreferenceScreen().findPreference(
                 THIRD_PARTY_COOKIES_TOGGLE_KEY);
-        if (mFilter.showCookiesSites(mCategoryFilter)) {
+        if (mCategory.showCookiesSites()) {
             thirdPartyCookies.setOnPreferenceChangeListener(this);
             updateThirdPartyCookiesCheckBox();
         } else {
@@ -546,13 +498,13 @@ public class WebsitePreferences extends PreferenceFragment
         }
 
         // Show/hide the link that explains protected media settings, as needed.
-        if (!mFilter.showProtectedMediaSites(mCategoryFilter)) {
+        if (!mCategory.showProtectedMediaSites()) {
             getPreferenceScreen().removePreference(
                     getPreferenceScreen().findPreference(EXPLAIN_PROTECTED_MEDIA_KEY));
         }
 
-        if (mFilter.showAllSites(mCategoryFilter)
-                    || mFilter.showStorageSites(mCategoryFilter)) {
+        if (mCategory.showAllSites()
+                    || mCategory.showStorageSites()) {
             getPreferenceScreen().removePreference(globalToggle);
             getPreferenceScreen().removePreference(
                     getPreferenceScreen().findPreference(ALLOWED_GROUP));
@@ -571,36 +523,32 @@ public class WebsitePreferences extends PreferenceFragment
             PreferenceGroup blockedGroup =
                     (PreferenceGroup) getPreferenceScreen().findPreference(
                             BLOCKED_GROUP);
-            allowedGroup.setOnPreferenceClickListener(this);
-            blockedGroup.setOnPreferenceClickListener(this);
 
-            if (mFilter.showGeolocationSites(mCategoryFilter)
-                    && !LocationSettings.getInstance().isSystemLocationSettingEnabled()
-                    && (LocationSettings.getInstance().isChromeLocationSettingEnabled()
-                               || !isCategoryManaged())) {
+            if (mCategory.showPermissionBlockedMessage(getActivity())) {
                 getPreferenceScreen().removePreference(globalToggle);
                 getPreferenceScreen().removePreference(allowedGroup);
                 getPreferenceScreen().removePreference(blockedGroup);
 
-                // Show the link to system settings since system location is disabled.
-                ChromeBasePreference locationMessage =
-                        new ChromeBasePreference(getActivity(), null);
-                int color = getResources().getColor(R.color.pref_accent_color);
-                ForegroundColorSpan linkSpan = new ForegroundColorSpan(color);
-                final String message = getString(R.string.android_location_off);
-                final SpannableString messageWithLink =
-                        SpanApplier.applySpans(
-                                message, new SpanInfo("<link>", "</link>", linkSpan));
-                locationMessage.setTitle(messageWithLink);
-                locationMessage.setIntent(
-                        LocationSettings.getInstance().getSystemLocationSettingsIntent());
-                getPreferenceScreen().addPreference(locationMessage);
+                // Show the link to system settings since permission is disabled.
+                ChromeBasePreference osWarning = new ChromeBasePreference(getActivity(), null);
+                ChromeBasePreference osWarningExtra = new ChromeBasePreference(getActivity(), null);
+                mCategory.configurePermissionIsOffPreferences(osWarning, osWarningExtra,
+                        getActivity(), true);
+                if (osWarning.getTitle() != null) {
+                    getPreferenceScreen().addPreference(osWarning);
+                }
+                if (osWarningExtra.getTitle() != null) {
+                    getPreferenceScreen().addPreference(osWarningExtra);
+                }
             } else {
+                allowedGroup.setOnPreferenceClickListener(this);
+                blockedGroup.setOnPreferenceClickListener(this);
+
                 // Determine what toggle to use and what it should display.
-                int contentType = mFilter.toContentSettingsType(mCategoryFilter);
+                int contentType = mCategory.toContentSettingsType();
                 globalToggle.setOnPreferenceChangeListener(this);
                 globalToggle.setTitle(ContentSettingsResources.getTitle(contentType));
-                if (mFilter.showGeolocationSites(mCategoryFilter)
+                if (mCategory.showGeolocationSites()
                         && PrefServiceBridge.getInstance().isLocationAllowedByPolicy()) {
                     globalToggle.setSummaryOn(
                             ContentSettingsResources.getGeolocationAllowedSummary());
@@ -610,33 +558,30 @@ public class WebsitePreferences extends PreferenceFragment
                 }
                 globalToggle.setSummaryOff(
                         ContentSettingsResources.getDisabledSummary(contentType));
-                if (isCategoryManaged() && !isCategoryManagedByCustodian()) {
+                if (mCategory.isManaged() && !mCategory.isManagedByCustodian()) {
                     globalToggle.setIcon(R.drawable.controlled_setting_mandatory);
                 }
-                if (mFilter.showCameraSites(mCategoryFilter)) {
+                if (mCategory.showCameraSites()) {
                     globalToggle.setChecked(PrefServiceBridge.getInstance().isCameraEnabled());
-                } else if (mFilter.showGeolocationSites(mCategoryFilter)) {
+                } else if (mCategory.showGeolocationSites()) {
                     globalToggle.setChecked(
                             LocationSettings.getInstance().isChromeLocationSettingEnabled());
-                } else if (mFilter.showCookiesSites(mCategoryFilter)) {
+                } else if (mCategory.showCookiesSites()) {
                     globalToggle.setChecked(
                             PrefServiceBridge.getInstance().isAcceptCookiesEnabled());
-                } else if (mFilter.showFullscreenSites(mCategoryFilter)) {
+                } else if (mCategory.showFullscreenSites()) {
                     globalToggle.setChecked(
                             PrefServiceBridge.getInstance().isFullscreenAllowed());
-                } else if (mFilter.showImagesSites(mCategoryFilter)) {
-                    globalToggle.setChecked(
-                            PrefServiceBridge.getInstance().imagesEnabled());
-                } else if (mFilter.showJavaScriptSites(mCategoryFilter)) {
+                } else if (mCategory.showJavaScriptSites()) {
                     globalToggle.setChecked(PrefServiceBridge.getInstance().javaScriptEnabled());
-                } else if (mFilter.showMicrophoneSites(mCategoryFilter)) {
+                } else if (mCategory.showMicrophoneSites()) {
                     globalToggle.setChecked(PrefServiceBridge.getInstance().isMicEnabled());
-                } else if (mFilter.showPopupSites(mCategoryFilter)) {
+                } else if (mCategory.showPopupSites()) {
                     globalToggle.setChecked(PrefServiceBridge.getInstance().popupsEnabled());
-                } else if (mFilter.showPushNotificationsSites(mCategoryFilter)) {
+                } else if (mCategory.showNotificationsSites()) {
                     globalToggle.setChecked(
                             PrefServiceBridge.getInstance().isPushNotificationsEnabled());
-                } else if (mFilter.showProtectedMediaSites(mCategoryFilter)) {
+                } else if (mCategory.showProtectedMediaSites()) {
                     globalToggle.setChecked(
                             PrefServiceBridge.getInstance().isProtectedMediaIdentifierEnabled());
                 }
@@ -657,7 +602,7 @@ public class WebsitePreferences extends PreferenceFragment
     }
 
     private void showManagedToast() {
-        if (isCategoryManagedByCustodian()) {
+        if (mCategory.isManagedByCustodian()) {
             ManagedPreferencesUtils.showManagedByParentToast(getActivity());
         } else {
             ManagedPreferencesUtils.showManagedByAdministratorToast(getActivity());

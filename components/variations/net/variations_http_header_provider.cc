@@ -10,7 +10,7 @@
 
 #include "base/base64.h"
 #include "base/memory/singleton.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -97,7 +97,7 @@ bool VariationsHttpHeaderProvider::SetDefaultVariationIds(
       default_trigger_id_set_.clear();
       return false;
     }
-    bool trigger_id = StartsWithASCII(*it, "t", true);
+    bool trigger_id = base::StartsWithASCII(*it, "t", true);
     // Remove the "t" prefix if it's there.
     std::string entry = trigger_id ? it->substr(1) : *it;
 
@@ -280,7 +280,7 @@ bool VariationsHttpHeaderProvider::ShouldAppendHeaders(const GURL& url) {
   // is very straight forward.
   const std::string host = url.host();
   for (size_t i = 0; i < arraysize(kSuffixesToSetHeadersFor); ++i) {
-    if (EndsWith(host, kSuffixesToSetHeadersFor[i], false))
+    if (base::EndsWith(host, kSuffixesToSetHeadersFor[i], false))
       return true;
   }
 

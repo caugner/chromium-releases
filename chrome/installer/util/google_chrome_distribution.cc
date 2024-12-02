@@ -31,7 +31,6 @@
 #include "chrome/installer/util/updating_app_registration_data.h"
 #include "chrome/installer/util/util_constants.h"
 #include "chrome/installer/util/wmi.h"
-#include "content/public/common/result_codes.h"
 
 namespace {
 
@@ -53,8 +52,8 @@ base::string16 LocalizeUrl(const wchar_t* url) {
 }
 
 base::string16 GetUninstallSurveyUrl() {
-  const wchar_t kSurveyUrl[] = L"http://www.google.com/support/chrome/bin/"
-                               L"request.py?hl=$1&contact_type=uninstall";
+  const wchar_t kSurveyUrl[] = L"https://support.google.com/chrome/"
+                               L"contact/chromeuninstall3?hl=$1";
   return LocalizeUrl(kSurveyUrl);
 }
 

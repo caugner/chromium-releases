@@ -8,10 +8,10 @@ import screenshot_sync_expectations as expectations
 
 from telemetry import benchmark
 from telemetry.core import util
-from telemetry.image_processing import image_util
 from telemetry.page import page
-from telemetry.page import page_set
 from telemetry.page import page_test
+from telemetry.story import story_set as story_set_module
+from telemetry.util import image_util
 
 data_path = os.path.join(
     util.GetChromiumSrcDir(), 'content', 'test', 'data', 'gpu')
@@ -43,13 +43,12 @@ class _ScreenshotSyncValidator(page_test.PageTest):
       CheckScreenshot()
 
 class ScreenshotSyncPage(page.Page):
-  def __init__(self, page_set, base_dir):
+  def __init__(self, story_set, base_dir):
     super(ScreenshotSyncPage, self).__init__(
       url='file://screenshot_sync.html',
-      page_set=page_set,
+      page_set=story_set,
       base_dir=base_dir,
       name='ScreenshotSync')
-    self.user_agent_type = 'desktop'
 
   def RunNavigateSteps(self, action_runner):
     super(ScreenshotSyncPage, self).RunNavigateSteps(action_runner)
@@ -68,7 +67,7 @@ class ScreenshotSyncProcess(benchmark.Benchmark):
   def CreateExpectations(self):
     return expectations.ScreenshotSyncExpectations()
 
-  def CreatePageSet(self, options):
-    ps = page_set.PageSet(file_path=data_path, serving_dirs=[''])
-    ps.AddUserStory(ScreenshotSyncPage(ps, ps.base_dir))
+  def CreateStorySet(self, options):
+    ps = story_set_module.StorySet(base_dir=data_path, serving_dirs=[''])
+    ps.AddStory(ScreenshotSyncPage(ps, ps.base_dir))
     return ps

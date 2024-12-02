@@ -48,6 +48,15 @@ remoting.DesktopRemoting.prototype.getConnectionMode = function() {
 };
 
 /**
+ * @return {string} Application Id.
+ * @override {remoting.ApplicationInterface}
+ */
+remoting.DesktopRemoting.prototype.getApplicationId = function() {
+  // Application IDs are not used in desktop remoting.
+  return '';
+};
+
+/**
  * @return {string} Application product name to be used in UI.
  * @override {remoting.ApplicationInterface}
  */
@@ -108,18 +117,8 @@ remoting.DesktopRemoting.prototype.initApplication_ = function() {
   document.getElementById('access-mode-button').addEventListener(
       'click', this.connectIt2Me_.bind(this), false);
 
-  var homeFeedback = new remoting.MenuButton(
-      document.getElementById('help-feedback-main'));
-  var toolbarFeedback = new remoting.MenuButton(
-      document.getElementById('help-feedback-toolbar'));
   remoting.manageHelpAndFeedback(
       document.getElementById('title-bar'));
-  remoting.manageHelpAndFeedback(
-      document.getElementById('help-feedback-toolbar'));
-  remoting.manageHelpAndFeedback(
-      document.getElementById('help-feedback-main'));
-
-  remoting.windowShape.updateClientWindowShape();
 
   remoting.showOrHideIT2MeUi();
   remoting.showOrHideMe2MeUi();
@@ -155,6 +154,7 @@ remoting.DesktopRemoting.prototype.startApplication_ = function(token) {
 
 /** @override {remoting.ApplicationInterface} */
 remoting.DesktopRemoting.prototype.exitApplication_ = function() {
+  this.disconnect_();
   this.closeMainWindow_();
 };
 
@@ -165,11 +165,10 @@ remoting.DesktopRemoting.prototype.exitApplication_ = function() {
  * @private
  */
 remoting.DesktopRemoting.prototype.isWindowed_ = function(callback) {
-  /** @param {chrome.Window} win The current window. */
-  var windowCallback = function(win) {
+  var windowCallback = function(/** ChromeWindow  */ win) {
     callback(win.type == 'popup');
   };
-  /** @param {chrome.Tab} tab The current tab. */
+  /** @param {Tab=} tab */
   var tabCallback = function(tab) {
     if (tab.pinned) {
       callback(false);

@@ -15,11 +15,11 @@ import android.media.MediaCrypto;
 import android.media.MediaFormat;
 import android.os.Build;
 import android.os.Bundle;
-import android.util.Log;
 import android.view.Surface;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
+import org.chromium.base.Log;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -32,7 +32,7 @@ import java.util.Map;
  */
 @JNINamespace("media")
 class MediaCodecBridge {
-    private static final String TAG = "MediaCodecBridge";
+    private static final String TAG = "cr.media";
 
     // Error code for MediaCodecBridge. Keep this value in sync with
     // MediaCodecStatus in media_codec_bridge.h.
@@ -229,8 +229,8 @@ class MediaCodecBridge {
                 codecName = mediaCodec.getName();
                 mediaCodec.release();
             } catch (Exception e) {
-                Log.w(TAG, "getDefaultCodecName: Failed to create MediaCodec: "
-                        + mime + ", direction: " + direction, e);
+                Log.w(TAG, "getDefaultCodecName: Failed to create MediaCodec: %s, direction: %d",
+                        mime, direction, e);
             }
         }
         return codecName;
@@ -342,8 +342,8 @@ class MediaCodecBridge {
                 }
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to create MediaCodec: " +  mime + ", isSecure: "
-                    + isSecure + ", direction: " + direction, e);
+            Log.e(TAG, "Failed to create MediaCodec: %s, isSecure: %s, direction: %d",
+                    mime, isSecure, direction, e);
         }
 
         if (mediaCodec == null) {

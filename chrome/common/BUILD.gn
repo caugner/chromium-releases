@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//tools/grit/grit_rule.gni")
+import("//third_party/mojo/src/mojo/public/tools/bindings/mojom.gni")
 
 gypi_values = exec_script("//build/gypi_to_gn.py",
                           [ rebase_path("../chrome_common.gypi") ],
@@ -41,6 +42,11 @@ static_library("common") {
 
   configs += [ "//build/config/compiler:wexit_time_destructors" ]
 
+  public_deps = [
+    "//chrome/common:constants",
+    "//chrome/common/net",
+    "//chrome/common/safe_browsing:proto",
+  ]
   deps = [
     ":version",
     "//base:base",
@@ -50,9 +56,6 @@ static_library("common") {
     "//chrome:resources",
     "//chrome:strings",
     "//chrome/app/theme:theme_resources",
-    "//chrome/common:constants",
-    "//chrome/common/net",
-    "//chrome/common/safe_browsing:proto",
     "//chrome/installer/util",
     "//components/cloud_devices/common",
     "//components/component_updater",
@@ -60,6 +63,7 @@ static_library("common") {
     "//components/favicon_base",
     "//components/json_schema",
     "//components/metrics",
+    "//components/omnibox/common",
     "//components/policy:policy_component_common",
     "//components/translate/core/common",
     "//components/variations",
@@ -81,9 +85,14 @@ static_library("common") {
       # Use this Mac file that was filtered out.
       "chrome_version_info_mac.mm",
     ]
+    sources -= [
+      "resource_usage_reporter_type_converters.cc",
+      "resource_usage_reporter_type_converters.h",
+    ]
   } else {
     # Non-iOS.
     deps += [
+      ":mojo_bindings",
       "//components/visitedlink/common",
       "//components/autofill/content/common",
       "//components/autofill/core/common",
@@ -95,6 +104,7 @@ static_library("common") {
       "//third_party/re2",
       "//third_party/widevine/cdm:version_h",
     ]
+    public_deps += [ "//third_party/mojo/src/mojo/public/cpp/bindings" ]
   }
 
   if (enable_extensions) {
@@ -242,6 +252,14 @@ static_library("common") {
   }
 }
 
+# This target allows other targets to depend on result_codes.h which is a
+# header-only dependency, without bringing in all of content.
+source_set("result_codes") {
+  sources = [
+    "chrome_result_codes.h",
+  ]
+}
+
 import("//chrome/version.gni")
 process_version("version") {
   visibility = [ ":common" ]
@@ -338,5 +356,11 @@ static_library("app_mode_app_support") {
   deps = [
     ":constants",
     "//base",
+  ]
+}
+
+mojom("mojo_bindings") {
+  sources = [
+    "resource_usage_reporter.mojom",
   ]
 }

@@ -5,7 +5,10 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/location.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
+#include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -315,7 +318,7 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
     base::MessageLoopForUI* loop = base::MessageLoopForUI::current();
     base::MessageLoopForUI::ScopedNestableTaskAllower allow_nested(loop);
     base::RunLoop run_loop;
-    loop->PostTask(FROM_HERE, run_loop.QuitClosure());
+    loop->task_runner()->PostTask(FROM_HERE, run_loop.QuitClosure());
     run_loop.Run();
 
     ViewEventTestBase::TearDown();
@@ -584,7 +587,7 @@ class BookmarkContextMenuNotificationObserver
   void Observe(int type,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override {
-    base::MessageLoop::current()->PostTask(FROM_HERE, task_);
+    base::MessageLoop::current()->task_runner()->PostTask(FROM_HERE, task_);
   }
 
   // Sets the task that is posted when the context menu is shown.
@@ -1015,9 +1018,8 @@ class BookmarkBarViewTest9 : public BookmarkBarViewEventTestBase {
   }
 
   void Step3() {
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&BookmarkBarViewTest9::Step4, this),
+    base::MessageLoop::current()->task_runner()->PostDelayedTask(
+        FROM_HERE, base::Bind(&BookmarkBarViewTest9::Step4, this),
         base::TimeDelta::FromMilliseconds(200));
   }
 
@@ -1032,7 +1034,7 @@ class BookmarkBarViewTest9 : public BookmarkBarViewEventTestBase {
     // On linux, Cancelling menu will call Quit on the message loop,
     // which can interfere with Done. We need to run Done in the
     // next execution loop.
-    base::MessageLoop::current()->PostTask(
+    base::MessageLoop::current()->task_runner()->PostTask(
         FROM_HERE, base::Bind(&ViewEventTestBase::Done, this));
   }
 
@@ -1315,10 +1317,9 @@ class BookmarkBarViewTest12 : public BookmarkBarViewEventTestBase {
     tab_waiter.WaitForTab();
 
     // For some reason return isn't processed correctly unless we delay.
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(
-            &BookmarkBarViewTest12::Step5, this, base::Unretained(dialog)),
+    base::MessageLoop::current()->task_runner()->PostDelayedTask(
+        FROM_HERE, base::Bind(&BookmarkBarViewTest12::Step5, this,
+                              base::Unretained(dialog)),
         base::TimeDelta::FromSeconds(1));
   }
 
@@ -1337,7 +1338,8 @@ class BookmarkBarViewTest12 : public BookmarkBarViewEventTestBase {
   }
 };
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// Times out on Win. http://crbug.com/499858
+#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS))
 // TODO(erg): linux_aura bringup: http://crbug.com/163931
 #define MAYBE_CloseWithModalDialog DISABLED_CloseWithModalDialog
 #else
@@ -1581,7 +1583,7 @@ class BookmarkBarViewTest16 : public BookmarkBarViewEventTestBase {
     window_->Close();
     window_ = NULL;
 
-    base::MessageLoop::current()->PostTask(
+    base::MessageLoop::current()->task_runner()->PostTask(
         FROM_HERE, CreateEventTask(this, &BookmarkBarViewTest16::Done));
   }
 };
@@ -2060,3 +2062,77 @@ class BookmarkBarViewTest22 : public BookmarkBarViewEventTestBase {
 #endif
 
 VIEW_TEST(BookmarkBarViewTest22, MAYBE_CloseSourceBrowserDuringDrag)
+
+// Tests opening a context menu for a bookmark node from the keyboard.
+class BookmarkBarViewTest23 : public BookmarkBarViewEventTestBase {
+ public:
+  BookmarkBarViewTest23()
+      : observer_(CreateEventTask(this, &BookmarkBarViewTest23::Step4)) {
+  }
+
+ protected:
+  void DoTestOnMessageLoop() override {
+    // Move the mouse to the first folder on the bookmark bar and press the
+    // mouse.
+    views::LabelButton* button = bb_view_->other_bookmarks_button();
+    ui_test_utils::MoveMouseToCenterAndPress(button, ui_controls::LEFT,
+        ui_controls::DOWN | ui_controls::UP,
+        CreateEventTask(this, &BookmarkBarViewTest23::Step2));
+  }
+
+ private:
+  void Step2() {
+    // Menu should be showing.
+    views::MenuItemView* menu = bb_view_->GetMenu();
+    ASSERT_TRUE(menu);
+    ASSERT_TRUE(menu->GetSubmenu()->IsShowing());
+
+    // Navigate down to highlight the first menu item.
+    ui_controls::SendKeyPressNotifyWhenDone(
+        GetWidget()->GetNativeWindow(), ui::VKEY_DOWN,
+        false, false, false, false,  // No modifer keys
+        CreateEventTask(this, &BookmarkBarViewTest23::Step3));
+  }
+
+  void Step3() {
+    // Menu should be showing.
+    views::MenuItemView* menu = bb_view_->GetMenu();
+    ASSERT_TRUE(menu);
+    ASSERT_TRUE(menu->GetSubmenu()->IsShowing());
+
+    // Open the context menu via the keyboard.
+    ui_controls::SendKeyPress(
+        GetWidget()->GetNativeWindow(), ui::VKEY_APPS,
+        false, false, false, false);  // No modifer keys
+    // The BookmarkContextMenuNotificationObserver triggers Step4.
+  }
+
+  void Step4() {
+    // Make sure the context menu is showing.
+    views::MenuItemView* menu = bb_view_->GetContextMenu();
+    ASSERT_TRUE(menu);
+    ASSERT_TRUE(menu->GetSubmenu());
+    ASSERT_TRUE(menu->GetSubmenu()->IsShowing());
+
+    // Select the first menu item (open).
+    ui_test_utils::MoveMouseToCenterAndPress(
+        menu->GetSubmenu()->GetMenuItemAt(0),
+        ui_controls::LEFT, ui_controls::DOWN | ui_controls::UP,
+        CreateEventTask(this, &BookmarkBarViewTest23::Step5));
+  }
+
+  void Step5() {
+    EXPECT_EQ(navigator_.url_, model_->other_node()->GetChild(0)->url());
+    Done();
+  }
+
+  BookmarkContextMenuNotificationObserver observer_;
+};
+
+#if defined(USE_OZONE)
+// ozone bringup - http://crbug.com/401304
+#define MAYBE_ContextMenusKeyboard DISABLED_ContextMenusKeyboard
+#else
+#define MAYBE_ContextMenusKeyboard ContextMenusKeyboard
+#endif
+VIEW_TEST(BookmarkBarViewTest23, MAYBE_ContextMenusKeyboard)

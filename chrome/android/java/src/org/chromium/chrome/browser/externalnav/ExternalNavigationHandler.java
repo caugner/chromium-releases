@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser.externalnav;
 
-import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Intent;
@@ -15,7 +14,9 @@ import android.webkit.WebView;
 import org.chromium.base.CommandLine;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.UrlUtilities;
 import org.chromium.chrome.browser.util.IntentUtils;
@@ -59,11 +60,14 @@ public class ExternalNavigationHandler {
      *
      * @param activity The activity to launch an external intent from.
      */
-    public ExternalNavigationHandler(Activity activity) {
+    public ExternalNavigationHandler(ChromeActivity activity) {
         this(new ExternalNavigationDelegateImpl(activity));
     }
 
-    @VisibleForTesting
+    /**
+     * Constructs a new instance of {@link ExternalNavigationHandler}, using the injected
+     * {@link ExternalNavigationDelegate}.
+     */
     public ExternalNavigationHandler(ExternalNavigationDelegate delegate) {
         mDelegate = delegate;
     }
@@ -293,6 +297,10 @@ public class ExternalNavigationHandler {
         if (params.isOpenInNewTab()) intent.putExtra(Browser.EXTRA_CREATE_NEW_TAB, true);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 
+        if (params.getReferrerUrl() != null) {
+            IntentHandler.setPendingReferrer(intent, params.getReferrerUrl());
+        }
+
         // Make sure webkit can handle it internally before checking for specialized
         // handlers. If webkit can't handle it internally, we need to call
         // startActivityIfNeeded or startActivity.
@@ -350,17 +358,6 @@ public class ExternalNavigationHandler {
                 if (params.getRedirectHandler() != null && incomingIntentRedirect) {
                     if (!params.getRedirectHandler().hasNewResolver(intent)) {
                         return OverrideUrlLoadingResult.NO_OVERRIDE;
-                    }
-                }
-                if (mDelegate.isDocumentMode() && params.getTransitionPageHelper() != null
-                        && params.getTransitionPageHelper().isTransitionStarting()) {
-                    // Use web to native app navigation transitions if there is exactly one
-                    // activity to handle the intent.
-                    List<ComponentName> list = mDelegate.queryIntentActivities(intent);
-                    if (list.size() == 1) {
-                        params.getTransitionPageHelper().transitionToNativeApp(
-                                params.getUrl(), intent);
-                        return OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT;
                     }
                 }
                 if (mDelegate.startActivityIfNeeded(intent)) {

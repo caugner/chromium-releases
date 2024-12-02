@@ -121,5 +121,22 @@ public class FeatureUtilities {
         nativeSetDocumentModeEnabled(enabled);
     }
 
+    /**
+     * Records the current custom tab visibility state with native-side feature utilities.
+     * @param visible Whether a custom tab is visible.
+     */
+    public static void setCustomTabVisible(boolean visible) {
+        nativeSetCustomTabVisible(visible);
+    }
+
+    /**
+     * @return Whether a custom tab is visible.
+     */
+    public static boolean getCustomTabVisible() {
+        return nativeGetCustomTabVisible();
+    }
+
     private static native void nativeSetDocumentModeEnabled(boolean enabled);
+    private static native void nativeSetCustomTabVisible(boolean visible);
+    private static native boolean nativeGetCustomTabVisible();
 }

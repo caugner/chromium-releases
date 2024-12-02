@@ -11,11 +11,15 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
+#include "base/location.h"
 #include "base/path_service.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/test_file_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/non_thread_safe.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/net/net_error_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -51,6 +55,7 @@
 
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
+#include "chrome/test/base/scoped_bundle_swizzler_mac.h"
 #endif
 
 #if defined(OS_WIN)
@@ -183,6 +188,10 @@ InProcessBrowserTest::InProcessBrowserTest()
   // ContentMain. However that is after tests' constructors or SetUp methods,
   // which sometimes need it. So just override it.
   CHECK(PathService::Override(chrome::DIR_TEST_DATA, test_data_dir));
+
+#if defined(OS_MACOSX)
+  bundle_swizzler_.reset(new ScopedBundleSwizzlerMac);
+#endif
 }
 
 InProcessBrowserTest::~InProcessBrowserTest() {
@@ -372,6 +381,32 @@ void InProcessBrowserTest::TearDown() {
   com_initializer_.reset();
 #endif
   BrowserTestBase::TearDown();
+}
+
+void InProcessBrowserTest::CloseBrowserSynchronously(Browser* browser) {
+  content::WindowedNotificationObserver observer(
+      chrome::NOTIFICATION_BROWSER_CLOSED,
+      content::Source<Browser>(browser));
+  CloseBrowserAsynchronously(browser);
+  observer.Wait();
+}
+
+void InProcessBrowserTest::CloseBrowserAsynchronously(Browser* browser) {
+  browser->window()->Close();
+#if defined(OS_MACOSX)
+  // BrowserWindowController depends on the auto release pool being recycled
+  // in the message loop to delete itself.
+  AutoreleasePool()->Recycle();
+#endif
+}
+
+void InProcessBrowserTest::CloseAllBrowsers() {
+  chrome::CloseAllBrowsers();
+#if defined(OS_MACOSX)
+  // BrowserWindowController depends on the auto release pool being recycled
+  // in the message loop to delete itself.
+  AutoreleasePool()->Recycle();
+#endif
 }
 
 // TODO(alexmos): This function should expose success of the underlying
@@ -576,8 +611,8 @@ void InProcessBrowserTest::QuitBrowsers() {
   // Invoke AttemptExit on a running message loop.
   // AttemptExit exits the message loop after everything has been
   // shut down properly.
-  base::MessageLoopForUI::current()->PostTask(FROM_HERE,
-                                              base::Bind(&chrome::AttemptExit));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&chrome::AttemptExit));
   content::RunMessageLoop();
 
 #if defined(OS_MACOSX)

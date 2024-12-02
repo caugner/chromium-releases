@@ -5,13 +5,12 @@
 from live_tests import chrome_proxy_measurements as measurements
 from live_tests import pagesets
 from telemetry import benchmark
-from telemetry.core.backends.chrome import android_browser_finder
 
 
 class ChromeProxyLatency(benchmark.Benchmark):
   tag = 'latency'
   test = measurements.ChromeProxyLatency
-  page_set = pagesets.Top20PageSet
+  page_set = pagesets.Top20StorySet
 
   @classmethod
   def Name(cls):
@@ -21,7 +20,7 @@ class ChromeProxyLatency(benchmark.Benchmark):
 class ChromeProxyLatencyDirect(benchmark.Benchmark):
   tag = 'latency_direct'
   test = measurements.ChromeProxyLatency
-  page_set = pagesets.Top20PageSet
+  page_set = pagesets.Top20StorySet
 
   @classmethod
   def Name(cls):
@@ -31,7 +30,7 @@ class ChromeProxyLatencyDirect(benchmark.Benchmark):
 class ChromeProxyDataSaving(benchmark.Benchmark):
   tag = 'data_saving'
   test = measurements.ChromeProxyDataSaving
-  page_set = pagesets.Top20PageSet
+  page_set = pagesets.Top20StorySet
 
   @classmethod
   def Name(cls):
@@ -41,7 +40,7 @@ class ChromeProxyDataSaving(benchmark.Benchmark):
 class ChromeProxyDataSavingDirect(benchmark.Benchmark):
   tag = 'data_saving_direct'
   test = measurements.ChromeProxyDataSaving
-  page_set = pagesets.Top20PageSet
+  page_set = pagesets.Top20StorySet
 
   @classmethod
   def Name(cls):

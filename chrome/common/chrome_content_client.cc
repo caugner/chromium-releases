@@ -44,13 +44,12 @@
 #if defined(OS_WIN)
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
-#elif defined(OS_MACOSX)
-#include "components/nacl/common/nacl_sandbox_type_mac.h"
 #endif
 
 #if !defined(DISABLE_NACL)
 #include "components/nacl/common/nacl_constants.h"
 #include "components/nacl/common/nacl_process_type.h"
+#include "components/nacl/common/nacl_sandbox_type.h"
 #endif
 
 #if defined(ENABLE_PLUGINS)
@@ -312,23 +311,35 @@ bool GetBundledPepperFlash(content::PepperPluginInfo* plugin) {
 #endif  // FLAPPER_AVAILABLE
 }
 
+#if defined(FLAPPER_AVAILABLE)
+bool IsSystemFlashScriptDebuggerPresent() {
 #if defined(OS_WIN)
-const char kPepperFlashDLLBaseName[] =
-#if defined(ARCH_CPU_X86)
-    "pepflashplayer32_";
-#elif defined(ARCH_CPU_X86_64)
-    "pepflashplayer64_";
+  const wchar_t kFlashRegistryRoot[] =
+      L"SOFTWARE\\Macromedia\\FlashPlayerPepper";
+  const wchar_t kIsDebuggerValueName[] = L"isScriptDebugger";
+
+  base::win::RegKey path_key(HKEY_LOCAL_MACHINE, kFlashRegistryRoot, KEY_READ);
+  DWORD debug_value;
+  if (FAILED(path_key.ReadValueDW(kIsDebuggerValueName, &debug_value)))
+    return false;
+
+  return (debug_value == 1);
 #else
-#error Unsupported Windows CPU architecture.
-#endif  // defined(ARCH_CPU_X86)
-#endif  // defined(OS_WIN)
+  // TODO(wfh): implement this on OS X and Linux. crbug.com/497996.
+  return false;
+#endif
+}
+#endif
 
 bool GetSystemPepperFlash(content::PepperPluginInfo* plugin) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+
 #if defined(FLAPPER_AVAILABLE)
-  // If flapper is available, only try system plugin if
-  // --disable-bundled-ppapi-flash is specified.
-  if (!command_line->HasSwitch(switches::kDisableBundledPpapiFlash))
+  // If flapper is available, only try the system plugin if either:
+  // --disable-bundled-ppapi-flash is specified, or the system debugger is the
+  // Flash Script Debugger.
+  if (!command_line->HasSwitch(switches::kDisableBundledPpapiFlash) &&
+      !IsSystemFlashScriptDebuggerPresent())
     return false;
 #endif  // defined(FLAPPER_AVAILABLE)
 
@@ -337,14 +348,16 @@ bool GetSystemPepperFlash(content::PepperPluginInfo* plugin) {
   if (command_line->HasSwitch(switches::kPpapiFlashPath))
     return false;
 
-  base::FilePath flash_path;
-  if (!PathService::Get(chrome::DIR_PEPPER_FLASH_SYSTEM_PLUGIN, &flash_path))
+  base::FilePath flash_filename;
+  if (!PathService::Get(chrome::FILE_PEPPER_FLASH_SYSTEM_PLUGIN,
+                        &flash_filename))
     return false;
 
-  if (!base::PathExists(flash_path))
+  if (!base::PathExists(flash_filename))
     return false;
 
-  base::FilePath manifest_path(flash_path.AppendASCII("manifest.json"));
+  base::FilePath manifest_path(
+      flash_filename.DirName().AppendASCII("manifest.json"));
 
   std::string manifest_data;
   if (!base::ReadFileToString(manifest_path, &manifest_data))
@@ -361,23 +374,7 @@ bool GetSystemPepperFlash(content::PepperPluginInfo* plugin) {
   if (!chrome::CheckPepperFlashManifest(*manifest, &version))
     return false;
 
-#if defined(OS_WIN)
-  // PepperFlash DLLs on Windows look like basename_v_x_y_z.dll.
-  std::string filename(kPepperFlashDLLBaseName);
-  filename.append(version.GetString());
-  base::ReplaceChars(filename, ".", "_", &filename);
-  filename.append(".dll");
-
-  base::FilePath path(flash_path.Append(base::ASCIIToUTF16(filename)));
-#else
-  // PepperFlash on OS X is called PepperFlashPlayer.plugin
-  base::FilePath path(flash_path.Append(chrome::kPepperFlashPluginFilename));
-#endif
-
-  if (!base::PathExists(path))
-    return false;
-
-  *plugin = CreatePepperFlashInfo(path, version.GetString());
+  *plugin = CreatePepperFlashInfo(flash_filename, version.GetString());
   return true;
 }
 #endif  //  defined(ENABLE_PLUGINS)
@@ -545,10 +542,12 @@ bool ChromeContentClient::GetSandboxProfileForSandboxType(
     int sandbox_type,
     int* sandbox_profile_resource_id) const {
   DCHECK(sandbox_profile_resource_id);
+#if !defined(DISABLE_NACL)
   if (sandbox_type == NACL_SANDBOX_TYPE_NACL_LOADER) {
     *sandbox_profile_resource_id = IDR_NACL_SANDBOX_PROFILE;
     return true;
   }
+#endif
   return false;
 }
 #endif

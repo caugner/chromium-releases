@@ -24,6 +24,7 @@ var remoting = remoting || {};
 /**
  * @param {remoting.ClientPlugin} plugin
  * @param {remoting.SignalStrategy} signalStrategy Signal strategy.
+ * @param {boolean} useApiaryForLogging
  * @param {remoting.ClientSession.EventHandler} listener
  *
  * @constructor
@@ -31,7 +32,8 @@ var remoting = remoting || {};
  * @implements {base.Disposable}
  * @implements {remoting.ClientPlugin.ConnectionEventHandler}
  */
-remoting.ClientSession = function(plugin, signalStrategy, listener) {
+remoting.ClientSession = function(
+    plugin, signalStrategy, useApiaryForLogging, listener) {
   base.inherits(this, base.EventSourceImpl);
 
   /** @private */
@@ -55,13 +57,15 @@ remoting.ClientSession = function(plugin, signalStrategy, listener) {
   /** @private */
   this.hasReceivedFrame_ = false;
 
-  /** @private */
-  this.logToServer_ = new remoting.LogToServer(signalStrategy);
+  /** @private {remoting.Logger} */
+  this.logger_ = this.createLogger_(useApiaryForLogging, signalStrategy);
 
   /** @private */
   this.signalStrategy_ = signalStrategy;
-  base.debug.assert(this.signalStrategy_.getState() ==
-                    remoting.SignalStrategy.State.CONNECTED);
+
+  var state = this.signalStrategy_.getState();
+  console.assert(state == remoting.SignalStrategy.State.CONNECTED,
+                 'ClientSession ctor called in state ' + state + '.');
   this.signalStrategy_.setIncomingStanzaCallback(
       this.onIncomingMessage_.bind(this));
 
@@ -140,10 +144,6 @@ remoting.ClientSession.State = {
   UNKNOWN: 0,
   INITIALIZING: 1,
   CONNECTING: 2,
-  // We don't currently receive AUTHENTICATED from the host - it comes through
-  // as 'CONNECTING' instead.
-  // TODO(garykac) Update chromoting_instance.cc to send this once we've
-  // shipped a webapp release with support for AUTHENTICATED.
   AUTHENTICATED: 3,
   CONNECTED: 4,
   CLOSED: 5,
@@ -230,6 +230,11 @@ remoting.ClientSession.Capability = {
   // <1000 users on M-29 or below. Remove this and the capability on the host.
   RATE_LIMIT_RESIZE_REQUESTS: 'rateLimitResizeRequests',
 
+  // Indicates native touch input support. If the host does not support
+  // touch then the client will let Chrome synthesize mouse events from touch
+  // input, for compatibility with non-touch-aware systems.
+  TOUCH_EVENTS: 'touchEvents',
+
   // Indicates that host/client supports Google Drive integration, and that the
   // client should send to the host the OAuth tokens to be used by Google Drive
   // on the host.
@@ -315,10 +320,10 @@ remoting.ClientSession.prototype.getState = function() {
 };
 
 /**
- * @return {remoting.LogToServer}.
+ * @return {remoting.Logger}.
  */
 remoting.ClientSession.prototype.getLogger = function() {
-  return this.logToServer_;
+  return this.logger_;
 };
 
 /**
@@ -326,6 +331,29 @@ remoting.ClientSession.prototype.getLogger = function() {
  */
 remoting.ClientSession.prototype.getError = function() {
   return this.error_;
+};
+
+/**
+ * Drop the session when the computer is suspended for more than
+ * |suspendDurationInMS|.
+ *
+ * @param {number} suspendDurationInMS maximum duration of suspension allowed
+ *     before the session will be dropped.
+ */
+remoting.ClientSession.prototype.dropSessionOnSuspend = function(
+    suspendDurationInMS) {
+  if (this.state_ !== remoting.ClientSession.State.CONNECTED) {
+    console.error('The session is not connected.');
+    return;
+  }
+
+  var suspendDetector = new remoting.SuspendDetector(suspendDurationInMS);
+  this.connectedDisposables_.add(
+      suspendDetector,
+      new base.EventHook(
+          suspendDetector, remoting.SuspendDetector.Events.resume,
+          this.disconnect.bind(
+              this, new remoting.Error(remoting.Error.Tag.CLIENT_SUSPENDED))));
 };
 
 /**
@@ -342,6 +370,27 @@ remoting.ClientSession.prototype.onFirstFrameReceived = function() {
  */
 remoting.ClientSession.prototype.hasReceivedFrame = function() {
   return this.hasReceivedFrame_;
+};
+
+/**
+ * @param {boolean} useApiary
+ * @param {remoting.SignalStrategy} signalStrategy
+ * @return {remoting.Logger}
+ *
+ * @private
+ */
+remoting.ClientSession.prototype.createLogger_ = function(
+    useApiary, signalStrategy) {
+  if (useApiary) {
+    var logger = new remoting.SessionLogger(
+      remoting.ChromotingEvent.Role.CLIENT,
+      remoting.TelemetryEventWriter.Client.write
+    );
+    signalStrategy.sendConnectionSetupResults(logger);
+    return logger;
+  } else {
+    return new remoting.LogToServer(signalStrategy);
+  }
 };
 
 /**
@@ -452,7 +501,7 @@ remoting.ClientSession.prototype.onRouteChanged =
     function(channel, connectionType) {
   console.log('plugin: Channel ' + channel + ' using ' +
               connectionType + ' connection.');
-  this.logToServer_.setConnectionType(connectionType);
+  this.logger_.setConnectionType(connectionType);
 };
 
 /**
@@ -492,19 +541,28 @@ remoting.ClientSession.prototype.isFinished = function() {
  * @private
  */
 remoting.ClientSession.prototype.setState_ = function(newState) {
+  // If we are at a finished state, ignore further state changes.
+  if (this.isFinished()) {
+    return;
+  }
+
   var oldState = this.state_;
   this.state_ = this.translateState_(oldState, newState);
 
   if (newState == remoting.ClientSession.State.CONNECTED) {
     this.connectedDisposables_.add(
         new base.RepeatingTimer(this.reportStatistics.bind(this), 1000));
+    if (this.plugin_.hasCapability(
+          remoting.ClientSession.Capability.TOUCH_EVENTS)) {
+      this.plugin_.enableTouchEvents(true);
+    }
   } else if (this.isFinished()) {
     base.dispose(this.connectedDisposables_);
     this.connectedDisposables_ = null;
   }
 
   this.notifyStateChanges_(oldState, this.state_);
-  this.logToServer_.logClientSessionStateChange(this.state_, this.error_);
+  this.logger_.logClientSessionStateChange(this.state_, this.error_);
 };
 
 /**
@@ -590,7 +648,7 @@ remoting.ClientSession.prototype.translateState_ = function(previous, current) {
 
 /** @private */
 remoting.ClientSession.prototype.reportStatistics = function() {
-  this.logToServer_.logStatistics(this.plugin_.getPerfStats());
+  this.logger_.logStatistics(this.plugin_.getPerfStats());
 };
 
 /**

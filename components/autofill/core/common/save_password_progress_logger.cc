@@ -35,7 +35,8 @@ std::string ScrubURL(const GURL& url) {
 // Returns true for all characters which we don't want to see in the logged IDs
 // or names of HTML elements.
 bool IsUnwantedInElementID(char c) {
-  return !(c == '_' || c == '-' || IsAsciiAlpha(c) || IsAsciiDigit(c));
+  return !(c == '_' || c == '-' ||
+           base::IsAsciiAlpha(c) || base::IsAsciiDigit(c));
 }
 
 // The UTF-8 version of SavePasswordProgressLogger::ScrubElementID.
@@ -87,8 +88,6 @@ void SavePasswordProgressLogger::LogPasswordForm(
                 ScrubElementID(form.username_element));
   log.SetString(GetStringFromID(STRING_PASSWORD_ELEMENT),
                 ScrubElementID(form.password_element));
-  log.SetBoolean(GetStringFromID(STRING_PASSWORD_AUTOCOMPLETE_SET),
-                 form.password_autocomplete_set);
   log.SetString(GetStringFromID(STRING_NEW_PASSWORD_ELEMENT),
                 ScrubElementID(form.new_password_element));
   log.SetBoolean(GetStringFromID(STRING_SSL_VALID), form.ssl_valid);
@@ -143,7 +142,7 @@ void SavePasswordProgressLogger::LogMessage(
 void SavePasswordProgressLogger::LogValue(StringID label, const Value& log) {
   std::string log_string;
   bool conversion_to_string_successful = base::JSONWriter::WriteWithOptions(
-      &log, base::JSONWriter::OPTIONS_PRETTY_PRINT, &log_string);
+      log, base::JSONWriter::OPTIONS_PRETTY_PRINT, &log_string);
   DCHECK(conversion_to_string_successful);
   SendLog(GetStringFromID(label) + ": " + log_string);
 }
@@ -195,8 +194,6 @@ std::string SavePasswordProgressLogger::GetStringFromID(
       return "Username element";
     case SavePasswordProgressLogger::STRING_PASSWORD_ELEMENT:
       return "Password element";
-    case SavePasswordProgressLogger::STRING_PASSWORD_AUTOCOMPLETE_SET:
-      return "Password autocomplete set";
     case SavePasswordProgressLogger::STRING_NEW_PASSWORD_ELEMENT:
       return "New password element";
     case SavePasswordProgressLogger::STRING_SSL_VALID:

@@ -123,6 +123,10 @@ class ExtensionRegistry : public KeyedService {
   const Extension* GetExtensionById(const std::string& id,
                                     int include_mask) const;
 
+  // Looks up an extension by ID, regardless of whether it's enabled,
+  // disabled, blacklisted, or terminated.
+  const Extension* GetInstalledExtension(const std::string& id) const;
+
   // Adds the specified extension to the enabled set. The registry becomes an
   // owner. Any previous extension with the same ID is removed.
   // Returns true if there is no previous extension.
@@ -183,7 +187,7 @@ class ExtensionRegistry : public KeyedService {
   // Extensions that are installed and blocked. Will never be loaded.
   ExtensionSet blocked_extensions_;
 
-  ObserverList<ExtensionRegistryObserver> observers_;
+  base::ObserverList<ExtensionRegistryObserver> observers_;
 
   content::BrowserContext* const browser_context_;
 

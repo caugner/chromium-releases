@@ -4,8 +4,11 @@
 
 #include "chrome/browser/sync/sync_stopped_reporter.h"
 
+#include "base/location.h"
 #include "base/logging.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/local_device_info_provider_impl.h"
@@ -92,16 +95,16 @@ void SyncStoppedReporter::OnURLFetchComplete(const net::URLFetcher* source) {
   fetcher_.reset();
   timer_.Stop();
   if (!callback_.is_null()) {
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-        base::Bind(callback_, result));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(callback_, result));
   }
 }
 
 void SyncStoppedReporter::OnTimeout() {
   fetcher_.reset();
   if (!callback_.is_null()) {
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-        base::Bind(callback_, RESULT_TIMEOUT));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(callback_, RESULT_TIMEOUT));
   }
 }
 

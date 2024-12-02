@@ -4,6 +4,7 @@
 
 #include "media/cast/test/fake_media_source.h"
 
+#include "base/bind.h"
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
 #include "base/rand_util.h"
@@ -558,8 +559,9 @@ void FakeMediaSource::DecodeVideo(ScopedAVPacket packet) {
           avframe->data[0],
           avframe->data[1],
           avframe->data[2],
-          timestamp,
-          base::Bind(&AVFreeFrame, avframe)));
+          timestamp));
+  video_frame_queue_.back()->AddDestructionObserver(
+      base::Bind(&AVFreeFrame, avframe));
   last_video_frame_timestamp_ = timestamp;
 }
 

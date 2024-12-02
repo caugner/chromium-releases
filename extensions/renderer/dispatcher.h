@@ -86,7 +86,7 @@ class Dispatcher : public content::RenderProcessObserver,
 
   RequestSender* request_sender() { return request_sender_.get(); }
 
-  void OnRenderViewCreated(content::RenderView* render_view);
+  void OnRenderFrameCreated(content::RenderFrame* render_frame);
 
   bool IsExtensionActive(const std::string& extension_id) const;
 
@@ -99,12 +99,7 @@ class Dispatcher : public content::RenderProcessObserver,
                                 const v8::Local<v8::Context>& context,
                                 int world_id);
 
-  void DidCreateDocumentElement(blink::WebFrame* frame);
-
-  void DidMatchCSS(
-      blink::WebFrame* frame,
-      const blink::WebVector<blink::WebString>& newly_matching_selectors,
-      const blink::WebVector<blink::WebString>& stopped_matching_selectors);
+  void DidCreateDocumentElement(blink::WebLocalFrame* frame);
 
   void OnExtensionResponse(int request_id,
                            bool success,
@@ -116,7 +111,7 @@ class Dispatcher : public content::RenderProcessObserver,
                      const std::string& event_name) const;
 
   // Shared implementation of the various MessageInvoke IPCs.
-  void InvokeModuleSystemMethod(content::RenderView* render_view,
+  void InvokeModuleSystemMethod(content::RenderFrame* render_frame,
                                 const std::string& extension_id,
                                 const std::string& module_name,
                                 const std::string& function_name,
@@ -137,9 +132,17 @@ class Dispatcher : public content::RenderProcessObserver,
   bool WasWebRequestUsedBySomeExtensions() const { return webrequest_used_; }
 
  private:
+  // The RendererPermissionsPolicyDelegateTest.CannotScriptWebstore test needs
+  // to call LoadExtensionForTest and the OnActivateExtension IPCs.
   friend class ::ChromeRenderViewTest;
   FRIEND_TEST_ALL_PREFIXES(RendererPermissionsPolicyDelegateTest,
                            CannotScriptWebstore);
+
+  // Inserts an Extension into |extensions_|. Normally the only way to do this
+  // would be through the ExtensionMsg_Loaded IPC (OnLoaded) but this can't be
+  // triggered for tests, because in the process of serializing then
+  // deserializing the IPC, Extension IDs manually set for testing are lost.
+  void LoadExtensionForTest(const Extension* extension);
 
   // RenderProcessObserver implementation:
   bool OnControlMessageReceived(const IPC::Message& message) override;
@@ -158,7 +161,6 @@ class Dispatcher : public content::RenderProcessObserver,
   void OnDispatchOnDisconnect(int port_id, const std::string& error_message);
   void OnLoaded(
       const std::vector<ExtensionMsg_Loaded_Params>& loaded_extensions);
-  void OnLoadedInternal(scoped_refptr<const Extension> extension);
   void OnMessageInvoke(const std::string& extension_id,
                        const std::string& module_name,
                        const std::string& function_name,

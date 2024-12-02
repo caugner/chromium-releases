@@ -66,6 +66,8 @@ class ProfileInfoCache : public ProfileInfoInterface,
   const gfx::Image& GetAvatarIconOfProfileAtIndex(size_t index) override;
   std::string GetLocalAuthCredentialsOfProfileAtIndex(
       size_t index) const override;
+  std::string GetPasswordChangeDetectionTokenAtIndex(
+      size_t index) const override;
   // Note that a return value of false could mean an error in collection or
   // that there are currently no background apps running. However, the action
   // which results is the same in both cases (thus far).
@@ -105,6 +107,8 @@ class ProfileInfoCache : public ProfileInfoInterface,
   void SetSupervisedUserIdOfProfileAtIndex(size_t index, const std::string& id);
   void SetLocalAuthCredentialsOfProfileAtIndex(size_t index,
                                                const std::string& auth);
+  void SetPasswordChangeDetectionTokenAtIndex(size_t index,
+                                              const std::string& token);
   void SetBackgroundStatusOfProfileAtIndex(size_t index,
                                            bool running_background_apps);
   // Warning: This will re-sort profiles and thus may change indices!
@@ -159,6 +163,8 @@ class ProfileInfoCache : public ProfileInfoInterface,
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ProfileInfoCacheTest, DownloadHighResAvatarTest);
+  FRIEND_TEST_ALL_PREFIXES(ProfileInfoCacheTest,
+                           NothingToDownloadHighResAvatarTest);
 
   const base::DictionaryValue* GetInfoForProfileAtIndex(size_t index) const;
   // Saves the profile info to a cache and takes ownership of |info|.
@@ -216,7 +222,7 @@ class ProfileInfoCache : public ProfileInfoInterface,
   std::vector<std::string> sorted_keys_;
   base::FilePath user_data_dir_;
 
-  mutable ObserverList<ProfileInfoCacheObserver> observer_list_;
+  mutable base::ObserverList<ProfileInfoCacheObserver> observer_list_;
 
   // A cache of gaia/high res avatar profile pictures. This cache is updated
   // lazily so it needs to be mutable.

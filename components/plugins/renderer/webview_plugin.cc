@@ -5,10 +5,11 @@
 #include "components/plugins/renderer/webview_plugin.h"
 
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "content/public/common/web_preferences.h"
 #include "content/public/renderer/render_view.h"
+#include "gin/converter.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
@@ -52,7 +53,7 @@ WebViewPlugin::WebViewPlugin(WebViewPlugin::Delegate* delegate,
   // ApplyWebPreferences before making a WebLocalFrame so that the frame sees a
   // consistent view of our preferences.
   content::RenderView::ApplyWebPreferences(preferences, web_view_);
-  web_frame_ = WebLocalFrame::create(this);
+  web_frame_ = WebLocalFrame::create(blink::WebTreeScopeType::Document, this);
   web_view_->setMainFrame(web_frame_);
 }
 
@@ -61,6 +62,7 @@ WebViewPlugin* WebViewPlugin::Create(WebViewPlugin::Delegate* delegate,
                                      const WebPreferences& preferences,
                                      const std::string& html_data,
                                      const GURL& url) {
+  DCHECK(url.is_valid()) << "Blink requires the WebView to have a valid URL.";
   WebViewPlugin* plugin = new WebViewPlugin(delegate, preferences);
   plugin->web_view()->mainFrame()->loadHTMLString(html_data, url);
   return plugin;
@@ -110,11 +112,21 @@ WebPluginContainer* WebViewPlugin::container() const { return container_; }
 bool WebViewPlugin::initialize(WebPluginContainer* container) {
   container_ = container;
   if (container_) {
+    // We must call layout again here to ensure that the container is laid
+    // out before we next try to paint it, which is a requirement of the
+    // document life cycle in Blink. In most cases, needsLayout is set by
+    // scheduleAnimation, but due to timers controlling widget update,
+    // scheduleAnimation may be invoked before this initialize call (which
+    // comes through the widget update process). It doesn't hurt to mark
+    // for layout again, and it does help us in the race-condition situation.
+    container_->setNeedsLayout();
+
     old_title_ = container_->element().getAttribute("title");
 
-    // Propagate device scale to inner webview to load the correct resource
-    // when images have a "srcset" attribute.
+    // Propagate device scale and zoom level to inner webview.
     web_view_->setDeviceScaleFactor(container_->deviceScaleFactor());
+    web_view_->setZoomLevel(
+        blink::WebView::zoomFactorToZoomLevel(container_->pageZoomFactor()));
   }
   return true;
 }
@@ -171,6 +183,9 @@ void WebViewPlugin::updateGeometry(const WebRect& window_rect,
     WebSize newSize(window_rect.width, window_rect.height);
     web_view_->resize(newSize);
   }
+
+  if (delegate_)
+    delegate_->OnUnobscuredRectUpdate(gfx::Rect(unobscured_rect));
 }
 
 void WebViewPlugin::updateFocus(bool focused, blink::WebFocusType focus_type) {
@@ -251,6 +266,11 @@ void WebViewPlugin::didInvalidateRect(const WebRect& rect) {
     container_->invalidateRect(rect);
 }
 
+void WebViewPlugin::didUpdateLayoutSize(const WebSize&) {
+  if (container_)
+    container_->setNeedsLayout();
+}
+
 void WebViewPlugin::didChangeCursor(const WebCursorInfo& cursor) {
   current_cursor_ = cursor;
 }
@@ -261,8 +281,19 @@ void WebViewPlugin::scheduleAnimation() {
 }
 
 void WebViewPlugin::didClearWindowObject(WebLocalFrame* frame) {
-  if (delegate_)
-    delegate_->BindWebFrame(frame);
+  if (!delegate_)
+    return;
+
+  v8::Isolate* isolate = blink::mainThreadIsolate();
+  v8::HandleScope handle_scope(isolate);
+  v8::Local<v8::Context> context = frame->mainWorldScriptContext();
+  DCHECK(!context.IsEmpty());
+
+  v8::Context::Scope context_scope(context);
+  v8::Local<v8::Object> global = context->Global();
+
+  global->Set(gin::StringToV8(isolate, "plugin"),
+              delegate_->GetV8Handle(isolate));
 }
 
 void WebViewPlugin::didReceiveResponse(WebLocalFrame* frame,

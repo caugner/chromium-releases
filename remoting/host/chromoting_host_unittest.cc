@@ -5,7 +5,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/host/audio_capturer.h"
 #include "remoting/host/chromoting_host.h"
@@ -72,7 +71,7 @@ class ChromotingHostTest : public testing::Test {
 
   void SetUp() override {
     task_runner_ = new AutoThreadTaskRunner(
-        message_loop_.message_loop_proxy(),
+        message_loop_.task_runner(),
         base::Bind(&ChromotingHostTest::QuitMainMessageLoop,
                    base::Unretained(this)));
 

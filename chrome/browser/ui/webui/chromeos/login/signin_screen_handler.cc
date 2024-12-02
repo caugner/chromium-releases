@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "ash/shell.h"
+#include "ash/system/chromeos/devicetype_utils.h"
 #include "ash/wm/lock_state_controller.h"
 #include "base/bind.h"
 #include "base/location.h"
@@ -27,7 +28,6 @@
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
-#include "chrome/browser/chromeos/chromeos_utils.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/error_screens_histogram_helper.h"
 #include "chrome/browser/chromeos/login/hwid_checker.h"
@@ -52,7 +52,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
-#include "chrome/browser/signin/proximity_auth_facade.h"
 #include "chrome/browser/ui/webui/chromeos/login/error_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/gaia_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/l10n_util.h"
@@ -71,6 +70,7 @@
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/portal_detector/network_portal_detector.h"
 #include "components/login/localized_values_builder.h"
+#include "components/proximity_auth/screenlock_bridge.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_type.h"
@@ -296,8 +296,8 @@ SigninScreenHandler::~SigninScreenHandler() {
     max_mode_delegate_->RemoveObserver(this);
     max_mode_delegate_.reset(NULL);
   }
-  GetScreenlockBridgeInstance()->SetLockHandler(NULL);
-  GetScreenlockBridgeInstance()->SetFocusedUser("");
+  proximity_auth::ScreenlockBridge::Get()->SetLockHandler(NULL);
+  proximity_auth::ScreenlockBridge::Get()->SetFocusedUser("");
 }
 
 // static
@@ -359,7 +359,6 @@ void SigninScreenHandler::DeclareLocalizedValues(
   builder->Add("passwordFieldAccessibleName",
                IDS_LOGIN_POD_PASSWORD_FIELD_ACCESSIBLE_NAME);
   builder->Add("signedIn", IDS_SCREEN_LOCK_ACTIVE_USER);
-  builder->Add("signinButton", IDS_LOGIN_BUTTON);
   builder->Add("launchAppButton", IDS_LAUNCH_APP_BUTTON);
   builder->Add("restart", IDS_RESTART_BUTTON);
   builder->Add("shutDown", IDS_SHUTDOWN_BUTTON);
@@ -399,7 +398,6 @@ void SigninScreenHandler::DeclareLocalizedValues(
                IDS_MULTI_PROFILES_OWNER_PRIMARY_ONLY_MSG);
 
   // Strings used by password changed dialog.
-  builder->Add("passwordChangedTitle", IDS_LOGIN_PASSWORD_CHANGED_TITLE);
   builder->Add("passwordChangedDesc", IDS_LOGIN_PASSWORD_CHANGED_DESC);
   builder->AddF("passwordChangedMoreInfo",
                 IDS_LOGIN_PASSWORD_CHANGED_MORE_INFO,
@@ -422,7 +420,7 @@ void SigninScreenHandler::DeclareLocalizedValues(
                IDS_LOGIN_NEWGAIA_PASSWORD_CHANGED_FORGOT_PASSWORD);
   builder->AddF("passwordChangedTitle",
                 IDS_LOGIN_NEWGAIA_PASSWORD_CHANGED_TITLE,
-                GetChromeDeviceType());
+                ash::GetChromeOSDeviceName());
   builder->Add("passwordChangedProceedAnywayTitle",
                IDS_LOGIN_NEWGAIA_PASSWORD_CHANGED_PROCEED_ANYWAY);
   builder->Add("passwordChangedTryAgain",
@@ -447,8 +445,9 @@ void SigninScreenHandler::DeclareLocalizedValues(
 
   if (StartupUtils::IsWebviewSigninEnabled()) {
     builder->Add("samlNotice", IDS_LOGIN_SAML_NOTICE_NEW_GAIA_FLOW);
-    builder->Add("confirmPasswordTitle",
-                 IDS_LOGIN_CONFIRM_PASSWORD_TITLE_NEW_GAIA_FLOW);
+    builder->AddF("confirmPasswordTitle",
+                  IDS_LOGIN_CONFIRM_PASSWORD_TITLE_NEW_GAIA_FLOW,
+                  ash::GetChromeOSDeviceName());
     builder->Add("confirmPasswordLabel",
                  IDS_LOGIN_CONFIRM_PASSWORD_LABEL_NEW_GAIA_FLOW);
   } else {
@@ -1281,7 +1280,7 @@ void SigninScreenHandler::HandleUpdateOfflineLogin(bool offline_login_active) {
 void SigninScreenHandler::HandleFocusPod(const std::string& user_id) {
   SetUserInputMethod(user_id, ime_state_.get());
   WallpaperManager::Get()->SetUserWallpaperDelayed(user_id);
-  GetScreenlockBridgeInstance()->SetFocusedUser(user_id);
+  proximity_auth::ScreenlockBridge::Get()->SetFocusedUser(user_id);
   if (delegate_)
     delegate_->CheckUserStatus(user_id);
   if (!test_focus_pod_callback_.is_null())

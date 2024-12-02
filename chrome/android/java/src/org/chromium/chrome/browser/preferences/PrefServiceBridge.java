@@ -8,7 +8,6 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.preference.PreferenceManager;
-import android.text.TextUtils;
 import android.util.Log;
 
 import org.chromium.base.CalledByNative;
@@ -43,9 +42,7 @@ public final class PrefServiceBridge {
     public static final int SUPERVISED_USER_FILTERING_BLOCK = 2;
 
     private static final String MIGRATION_PREF_KEY = "PrefMigrationVersion";
-    private static final int MIGRATION_CURRENT_VERSION = 3;
-
-    private static String sProfilePath;
+    private static final int MIGRATION_CURRENT_VERSION = 4;
 
     private static final String HTTPS_SCHEME = "https";
 
@@ -66,15 +63,10 @@ public final class PrefServiceBridge {
      */
     public static class AboutVersionStrings {
         private final String mApplicationVersion;
-        private final String mWebkitVersion;
-        private final String mJavascriptVersion;
         private final String mOSVersion;
 
-        private AboutVersionStrings(String applicationVersion, String webkitVersion,
-                String javascriptVersion, String osVersion) {
+        private AboutVersionStrings(String applicationVersion, String osVersion) {
             mApplicationVersion = applicationVersion;
-            mWebkitVersion = webkitVersion;
-            mJavascriptVersion = javascriptVersion;
             mOSVersion = osVersion;
         }
 
@@ -82,35 +74,15 @@ public final class PrefServiceBridge {
             return mApplicationVersion;
         }
 
-        public String getWebkitVersion() {
-            return mWebkitVersion;
-        }
-
-        public String getJavascriptVersion() {
-            return mJavascriptVersion;
-        }
-
         public String getOSVersion() {
             return mOSVersion;
         }
     }
 
-    /**
-     * Callback to receive the profile path.
-     */
-    public interface ProfilePathCallback {
-        /**
-         * Called with the profile path, once it's available.
-         */
-        void onGotProfilePath(String profilePath);
-    }
-
     @CalledByNative
-    private static AboutVersionStrings createAboutVersionStrings(
-            String applicationVersion, String webkitVersion, String javascriptVersion,
+    private static AboutVersionStrings createAboutVersionStrings(String applicationVersion,
             String osVersion) {
-        return new AboutVersionStrings(
-                applicationVersion, webkitVersion, javascriptVersion, osVersion);
+        return new AboutVersionStrings(applicationVersion, osVersion);
     }
 
     private PrefServiceBridge() {
@@ -155,6 +127,12 @@ public final class PrefServiceBridge {
         if (currentVersion < 3) {
             nativeMigrateLocationPreference();
             nativeMigrateProtectedMediaPreference();
+        }
+        if (currentVersion < 4) {
+            // For a brief period (M44 Beta), it was possible for users to disable images via Site
+            // Settings. Now that this option has been removed, ensure that users are not stuck with
+            // images disabled.
+            setContentSettingEnabled(ContentSettingsType.CONTENT_SETTINGS_TYPE_IMAGES, true);
         }
         preferences.edit().putInt(MIGRATION_PREF_KEY, MIGRATION_CURRENT_VERSION).commit();
     }
@@ -232,24 +210,6 @@ public final class PrefServiceBridge {
     }
 
     /**
-     * Returns the path to the user's profile directory via a callback. The callback may be
-     * called synchronously or asynchronously.
-     */
-    public void getProfilePath(ProfilePathCallback callback) {
-        if (!TextUtils.isEmpty(sProfilePath)) {
-            callback.onGotProfilePath(sProfilePath);
-        } else {
-            nativeGetProfilePath(callback);
-        }
-    }
-
-    @CalledByNative
-    private static void onGotProfilePath(String profilePath, ProfilePathCallback callback) {
-        sProfilePath = profilePath;
-        callback.onGotProfilePath(profilePath);
-    }
-
-    /**
      * Returns whether a particular content setting type is enabled.
      * @param contentSettingsType The content setting type to check.
      */
@@ -294,6 +254,27 @@ public final class PrefServiceBridge {
         ContentSettingException exception = new ContentSettingException(
                 contentSettingsType, pattern, setting, source);
         list.add(exception);
+    }
+
+    /**
+     * Return the android permission string for a given {@link ContentSettingsType}.  If there
+     * is no corresponding permission, then null will be returned.
+     *
+     * @param contentSettingType The content setting to get the android permission for.
+     * @return The android permission for the given content setting.
+     */
+    @CalledByNative
+    public static String getAndroidPermissionForContentSetting(int contentSettingType) {
+        switch(contentSettingType) {
+            case ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION:
+                return android.Manifest.permission.ACCESS_FINE_LOCATION;
+            case ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
+                return android.Manifest.permission.RECORD_AUDIO;
+            case ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
+                return android.Manifest.permission.CAMERA;
+            default:
+                return null;
+        }
     }
 
     public boolean isAcceptCookiesEnabled() {
@@ -754,27 +735,6 @@ public final class PrefServiceBridge {
     }
 
     /**
-     * @return Whether the images permission is enabled.
-     */
-    public boolean imagesEnabled() {
-        return isContentSettingEnabled(ContentSettingsType.CONTENT_SETTINGS_TYPE_IMAGES);
-    }
-
-    /**
-     * @return whether Images is managed by policy
-     */
-    public boolean imagesManaged() {
-        return isContentSettingManaged(ContentSettingsType.CONTENT_SETTINGS_TYPE_IMAGES);
-    }
-
-    /**
-     * Sets whether webpages are allowed to load images.
-     */
-    public void setImagesEnabled(boolean enabled) {
-        setContentSettingEnabled(ContentSettingsType.CONTENT_SETTINGS_TYPE_IMAGES, enabled);
-    }
-
-    /**
      * @return Whether the camera permission is enabled.
      */
     public boolean isCameraEnabled() {
@@ -1030,7 +990,6 @@ public final class PrefServiceBridge {
     private native void nativeSetCrashReporting(boolean reporting);
     private native boolean nativeCanPredictNetworkActions();
     private native AboutVersionStrings nativeGetAboutVersionStrings();
-    private native void nativeGetProfilePath(ProfilePathCallback callback);
     private native void nativeSetContextualSearchPreference(String preference);
     private native String nativeGetContextualSearchPreference();
     private native boolean nativeGetContextualSearchPreferenceIsManaged();

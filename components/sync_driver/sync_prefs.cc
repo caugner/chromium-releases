@@ -120,7 +120,7 @@ bool SyncPrefs::HasSyncSetupCompleted() const {
 void SyncPrefs::SetSyncSetupCompleted() {
   DCHECK(CalledOnValidThread());
   pref_service_->SetBoolean(prefs::kSyncHasSetupCompleted, true);
-  SetStartSuppressed(false);
+  SetSyncRequested(true);
 }
 
 bool SyncPrefs::SyncHasAuthError() const {
@@ -133,14 +133,17 @@ void SyncPrefs::SetSyncAuthError(bool error) {
   pref_service_->SetBoolean(prefs::kSyncHasAuthError, error);
 }
 
-bool SyncPrefs::IsStartSuppressed() const {
+bool SyncPrefs::IsSyncRequested() const {
   DCHECK(CalledOnValidThread());
-  return pref_service_->GetBoolean(prefs::kSyncSuppressStart);
+  // IsSyncRequested is the inverse of the old SuppressStart pref.
+  // Since renaming a pref value is hard, here we still use the old one.
+  return !pref_service_->GetBoolean(prefs::kSyncSuppressStart);
 }
 
-void SyncPrefs::SetStartSuppressed(bool is_suppressed) {
+void SyncPrefs::SetSyncRequested(bool is_requested) {
   DCHECK(CalledOnValidThread());
-  pref_service_->SetBoolean(prefs::kSyncSuppressStart, is_suppressed);
+  // See IsSyncRequested for why we use this pref and !is_requested.
+  pref_service_->SetBoolean(prefs::kSyncSuppressStart, !is_requested);
 }
 
 base::Time SyncPrefs::GetLastSyncedTime() const {
@@ -197,8 +200,8 @@ syncer::ModelTypeSet SyncPrefs::GetPreferredDataTypes(
 void SyncPrefs::SetPreferredDataTypes(syncer::ModelTypeSet registered_types,
                                       syncer::ModelTypeSet preferred_types) {
   DCHECK(CalledOnValidThread());
-  DCHECK(registered_types.HasAll(preferred_types));
   preferred_types = ResolvePrefGroups(registered_types, preferred_types);
+  DCHECK(registered_types.HasAll(preferred_types));
   for (syncer::ModelTypeSet::Iterator i = registered_types.First(); i.Good();
        i.Inc()) {
     SetDataTypePreferred(i.Get(), preferred_types.Has(i.Get()));
@@ -252,9 +255,11 @@ const char* SyncPrefs::GetPrefNameForDataType(syncer::ModelType data_type) {
     case syncer::AUTOFILL:
       return prefs::kSyncAutofill;
     case syncer::AUTOFILL_PROFILE:
-      return prefs::kSyncAutofillWallet;
-    case syncer::AUTOFILL_WALLET_DATA:
       return prefs::kSyncAutofillProfile;
+    case syncer::AUTOFILL_WALLET_DATA:
+      return prefs::kSyncAutofillWallet;
+    case syncer::AUTOFILL_WALLET_METADATA:
+      return prefs::kSyncAutofillWalletMetadata;
     case syncer::THEMES:
       return prefs::kSyncThemes;
     case syncer::TYPED_URLS:
@@ -351,6 +356,7 @@ void SyncPrefs::RegisterPrefGroups() {
 
   pref_groups_[syncer::AUTOFILL].Put(syncer::AUTOFILL_PROFILE);
   pref_groups_[syncer::AUTOFILL].Put(syncer::AUTOFILL_WALLET_DATA);
+  pref_groups_[syncer::AUTOFILL].Put(syncer::AUTOFILL_WALLET_METADATA);
 
   pref_groups_[syncer::EXTENSIONS].Put(syncer::EXTENSION_SETTINGS);
 
@@ -426,7 +432,6 @@ void SyncPrefs::SetDataTypePreferred(syncer::ModelType type,
 syncer::ModelTypeSet SyncPrefs::ResolvePrefGroups(
     syncer::ModelTypeSet registered_types,
     syncer::ModelTypeSet types) const {
-  DCHECK(registered_types.HasAll(types));
   syncer::ModelTypeSet types_with_groups = types;
   for (PrefGroupsMap::const_iterator i = pref_groups_.begin();
        i != pref_groups_.end();
@@ -476,5 +481,3 @@ void SyncPrefs::SetCleanShutdown(bool value) {
 }
 
 }  // namespace sync_driver
-
-

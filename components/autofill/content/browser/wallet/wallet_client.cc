@@ -66,21 +66,21 @@ std::string RiskCapabilityToString(
 WalletClient::ErrorType StringToErrorType(const std::string& error_type) {
   std::string trimmed;
   base::TrimWhitespaceASCII(error_type, base::TRIM_ALL, &trimmed);
-  if (LowerCaseEqualsASCII(trimmed, "buyer_account_error"))
+  if (base::LowerCaseEqualsASCII(trimmed, "buyer_account_error"))
     return WalletClient::BUYER_ACCOUNT_ERROR;
-  if (LowerCaseEqualsASCII(trimmed, "unsupported_merchant"))
+  if (base::LowerCaseEqualsASCII(trimmed, "unsupported_merchant"))
     return WalletClient::UNSUPPORTED_MERCHANT;
-  if (LowerCaseEqualsASCII(trimmed, "internal_error"))
+  if (base::LowerCaseEqualsASCII(trimmed, "internal_error"))
     return WalletClient::INTERNAL_ERROR;
-  if (LowerCaseEqualsASCII(trimmed, "invalid_params"))
+  if (base::LowerCaseEqualsASCII(trimmed, "invalid_params"))
     return WalletClient::INVALID_PARAMS;
-  if (LowerCaseEqualsASCII(trimmed, "service_unavailable"))
+  if (base::LowerCaseEqualsASCII(trimmed, "service_unavailable"))
     return WalletClient::SERVICE_UNAVAILABLE;
-  if (LowerCaseEqualsASCII(trimmed, "unsupported_api_version"))
+  if (base::LowerCaseEqualsASCII(trimmed, "unsupported_api_version"))
     return WalletClient::UNSUPPORTED_API_VERSION;
-  if (LowerCaseEqualsASCII(trimmed, "unsupported_user_agent"))
+  if (base::LowerCaseEqualsASCII(trimmed, "unsupported_user_agent"))
     return WalletClient::UNSUPPORTED_USER_AGENT_OR_API_KEY;
-  if (LowerCaseEqualsASCII(trimmed, "spending_limit_exceeded"))
+  if (base::LowerCaseEqualsASCII(trimmed, "spending_limit_exceeded"))
     return WalletClient::SPENDING_LIMIT_EXCEEDED;
 
   DVLOG(1) << "Unknown wallet error string: \"" << error_type << '"';
@@ -93,9 +93,9 @@ WalletClient::ErrorType BuyerErrorStringToErrorType(
     const std::string& message_type_for_buyer) {
   std::string trimmed;
   base::TrimWhitespaceASCII(message_type_for_buyer, base::TRIM_ALL, &trimmed);
-  if (LowerCaseEqualsASCII(trimmed, "bla_country_not_supported"))
+  if (base::LowerCaseEqualsASCII(trimmed, "bla_country_not_supported"))
     return WalletClient::BUYER_LEGAL_ADDRESS_NOT_SUPPORTED;
-  if (LowerCaseEqualsASCII(trimmed, "buyer_kyc_error"))
+  if (base::LowerCaseEqualsASCII(trimmed, "buyer_kyc_error"))
     return WalletClient::UNVERIFIED_KNOW_YOUR_CUSTOMER_STATUS;
 
   return WalletClient::BUYER_ACCOUNT_ERROR;
@@ -295,7 +295,7 @@ void WalletClient::AuthenticateInstrument(
   request_dict.SetString(kInstrumentIdKey, instrument_id);
 
   std::string json_payload;
-  base::JSONWriter::Write(&request_dict, &json_payload);
+  base::JSONWriter::Write(request_dict, &json_payload);
 
   std::string escaped_card_verification_number = net::EscapeUrlEncodedData(
       card_verification_number, true);
@@ -339,7 +339,7 @@ void WalletClient::GetFullWallet(const FullWalletRequest& full_wallet_request) {
   request_dict.Set(kRiskCapabilitiesKey, risk_capabilities_list.release());
 
   std::string json_payload;
-  base::JSONWriter::Write(&request_dict, &json_payload);
+  base::JSONWriter::Write(request_dict, &json_payload);
 
   crypto::RandBytes(&(one_time_pad_[0]), one_time_pad_.size());
 
@@ -431,7 +431,7 @@ void WalletClient::SaveToWallet(
   }
 
   std::string json_payload;
-  base::JSONWriter::Write(&request_dict, &json_payload);
+  base::JSONWriter::Write(request_dict, &json_payload);
 
   if (!card_verification_number.empty()) {
     std::string post_body;
@@ -476,7 +476,7 @@ void WalletClient::GetWalletItems(const base::string16& amount,
     request_dict.SetString(kTransactionCurrencyKey, currency);
 
   std::string post_body;
-  base::JSONWriter::Write(&request_dict, &post_body);
+  base::JSONWriter::Write(request_dict, &post_body);
 
   MakeWalletRequest(GetGetWalletItemsUrl(user_index_),
                     post_body,
@@ -515,7 +515,7 @@ void WalletClient::DoAcceptLegalDocuments(
   request_dict.Set(kAcceptedLegalDocumentKey, docs_list.release());
 
   std::string post_body;
-  base::JSONWriter::Write(&request_dict, &post_body);
+  base::JSONWriter::Write(request_dict, &post_body);
 
   MakeWalletRequest(GetAcceptLegalDocumentsUrl(user_index_),
                     post_body,
@@ -580,7 +580,7 @@ void WalletClient::OnURLFetchComplete(
 
     // Valid response.
     case net::HTTP_OK: {
-      scoped_ptr<base::Value> message_value(base::JSONReader::Read(data));
+      scoped_ptr<base::Value> message_value = base::JSONReader::Read(data);
       if (message_value.get() &&
           message_value->IsType(base::Value::TYPE_DICTIONARY)) {
         response_dict.reset(
@@ -592,7 +592,7 @@ void WalletClient::OnURLFetchComplete(
     // Response contains an error to show the user.
     case net::HTTP_FORBIDDEN:
     case net::HTTP_INTERNAL_SERVER_ERROR: {
-      scoped_ptr<base::Value> message_value(base::JSONReader::Read(data));
+      scoped_ptr<base::Value> message_value = base::JSONReader::Read(data);
       if (message_value.get() &&
           message_value->IsType(base::Value::TYPE_DICTIONARY)) {
         response_dict.reset(
@@ -649,7 +649,7 @@ void WalletClient::OnURLFetchComplete(
         std::string trimmed;
         base::TrimWhitespaceASCII(auth_result, base::TRIM_ALL, &trimmed);
         delegate_->OnDidAuthenticateInstrument(
-            LowerCaseEqualsASCII(trimmed, "success"));
+            base::LowerCaseEqualsASCII(trimmed, "success"));
       } else {
         HandleMalformedResponse(type, scoped_request.get());
       }

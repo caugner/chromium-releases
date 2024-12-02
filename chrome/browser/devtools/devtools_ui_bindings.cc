@@ -4,7 +4,6 @@
 
 #include "chrome/browser/devtools/devtools_ui_bindings.h"
 
-#include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/metrics/histogram.h"
@@ -20,9 +19,6 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/themes/theme_properties.h"
-#include "chrome/browser/themes/theme_service.h"
-#include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -83,15 +79,6 @@ const size_t kMaxMessageChunkSize = IPC::Channel::kMaximumMessageSize / 4;
 typedef std::vector<DevToolsUIBindings*> DevToolsUIBindingsList;
 base::LazyInstance<DevToolsUIBindingsList>::Leaky g_instances =
     LAZY_INSTANCE_INITIALIZER;
-
-std::string SkColorToRGBAString(SkColor color) {
-  // We avoid StringPrintf because it will use locale specific formatters for
-  // the double (e.g. ',' instead of '.' in German).
-  return "rgba(" + base::IntToString(SkColorGetR(color)) + "," +
-      base::IntToString(SkColorGetG(color)) + "," +
-      base::IntToString(SkColorGetB(color)) + "," +
-      base::DoubleToString(SkColorGetA(color) / 255.0) + ")";
-}
 
 base::DictionaryValue* CreateFileSystemValue(
     DevToolsFileHelper::FileSystem file_system) {
@@ -337,6 +324,9 @@ void DevToolsUIBindings::FrontendWebContentsObserver::RenderProcessGone(
   switch (status) {
     case base::TERMINATION_STATUS_ABNORMAL_TERMINATION:
     case base::TERMINATION_STATUS_PROCESS_WAS_KILLED:
+#if defined(OS_CHROMEOS)
+    case base::TERMINATION_STATUS_PROCESS_WAS_KILLED_BY_OOM:
+#endif
     case base::TERMINATION_STATUS_PROCESS_CRASHED:
       if (devtools_bindings_->agent_host_.get())
         devtools_bindings_->Detach();
@@ -384,29 +374,6 @@ DevToolsUIBindings* DevToolsUIBindings::ForWebContents(
  return NULL;
 }
 
-// static
-GURL DevToolsUIBindings::ApplyThemeToURL(Profile* profile,
-                                         const GURL& base_url) {
-  std::string frontend_url = base_url.spec();
-  ThemeService* tp = ThemeServiceFactory::GetForProfile(profile);
-  DCHECK(tp);
-  std::string url_string(
-      frontend_url +
-      ((frontend_url.find("?") == std::string::npos) ? "?" : "&") +
-      "dockSide=undocked" + // TODO(dgozman): remove this support in M38.
-      "&toolbarColor=" +
-      SkColorToRGBAString(tp->GetColor(ThemeProperties::COLOR_TOOLBAR)) +
-      "&textColor=" +
-      SkColorToRGBAString(tp->GetColor(ThemeProperties::COLOR_BOOKMARK_TEXT)));
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableDevToolsExperiments))
-    url_string += "&experiments=true";
-#if defined(DEBUG_DEVTOOLS)
-  url_string += "&debugFrontend=true";
-#endif  // defined(DEBUG_DEVTOOLS)
-  return GURL(url_string);
-}
-
 DevToolsUIBindings::DevToolsUIBindings(content::WebContents* web_contents)
     : profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())),
       android_bridge_(DevToolsAndroidBridge::Factory::GetForProfile(profile_)),
@@ -431,11 +398,6 @@ DevToolsUIBindings::DevToolsUIBindings(content::WebContents* web_contents)
   entry->GetFavicon().valid = true;
 
   // Register on-load actions.
-  registrar_.Add(
-      this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-      content::Source<ThemeService>(
-          ThemeServiceFactory::GetForProfile(profile_)));
-
   embedder_message_dispatcher_.reset(
       DevToolsEmbedderMessageDispatcher::CreateForDevToolsFrontend(this));
 
@@ -465,14 +427,6 @@ DevToolsUIBindings::~DevToolsUIBindings() {
   instances->erase(it);
 }
 
-// content::NotificationObserver overrides ------------------------------------
-void DevToolsUIBindings::Observe(int type,
-                                 const content::NotificationSource& source,
-                                 const content::NotificationDetails& details) {
-  DCHECK_EQ(chrome::NOTIFICATION_BROWSER_THEME_CHANGED, type);
-  UpdateTheme();
-}
-
 // content::DevToolsFrontendHost::Delegate implementation ---------------------
 void DevToolsUIBindings::HandleMessageFromDevToolsFrontend(
     const std::string& message) {
@@ -481,7 +435,7 @@ void DevToolsUIBindings::HandleMessageFromDevToolsFrontend(
   base::ListValue* params = &empty_params;
 
   base::DictionaryValue* dict = NULL;
-  scoped_ptr<base::Value> parsed_message(base::JSONReader::Read(message));
+  scoped_ptr<base::Value> parsed_message = base::JSONReader::Read(message);
   if (!parsed_message ||
       !parsed_message->GetAsDictionary(&dict) ||
       !dict->GetString(kFrontendHostMethod, &method) ||
@@ -775,6 +729,7 @@ void DevToolsUIBindings::RecordEnumeratedHistogram(const std::string& name,
                                                    int boundary_value) {
   if (!(boundary_value >= 0 && boundary_value <= 100 && sample >= 0 &&
         sample < boundary_value)) {
+    // TODO(nick): Replace with chrome::bad_message::ReceivedBadMessage().
     frontend_host_->BadMessageRecieved();
     return;
   }
@@ -941,18 +896,6 @@ void DevToolsUIBindings::ShowDevToolsConfirmInfoBar(
       callback, message);
 }
 
-void DevToolsUIBindings::UpdateTheme() {
-  ThemeService* tp = ThemeServiceFactory::GetForProfile(profile_);
-  DCHECK(tp);
-
-  std::string command("DevToolsAPI.setToolbarColors(\"" +
-      SkColorToRGBAString(tp->GetColor(ThemeProperties::COLOR_TOOLBAR)) +
-      "\", \"" +
-      SkColorToRGBAString(tp->GetColor(ThemeProperties::COLOR_BOOKMARK_TEXT)) +
-      "\")");
-  web_contents_->GetMainFrame()->ExecuteJavaScript(base::ASCIIToUTF16(command));
-}
-
 void DevToolsUIBindings::AddDevToolsExtensionsToClient() {
   const extensions::ExtensionRegistry* registry =
       extensions::ExtensionRegistry::Get(profile_->GetOriginalProfile());
@@ -1016,13 +959,13 @@ void DevToolsUIBindings::CallClientFunction(const std::string& function_name,
   std::string javascript = function_name + "(";
   if (arg1) {
     std::string json;
-    base::JSONWriter::Write(arg1, &json);
+    base::JSONWriter::Write(*arg1, &json);
     javascript.append(json);
     if (arg2) {
-      base::JSONWriter::Write(arg2, &json);
+      base::JSONWriter::Write(*arg2, &json);
       javascript.append(", ").append(json);
       if (arg3) {
-        base::JSONWriter::Write(arg3, &json);
+        base::JSONWriter::Write(*arg3, &json);
         javascript.append(", ").append(json);
       }
     }
@@ -1053,6 +996,5 @@ void DevToolsUIBindings::FrontendLoaded() {
   // Call delegate first - it seeds importants bit of information.
   delegate_->OnLoadCompleted();
 
-  UpdateTheme();
   AddDevToolsExtensionsToClient();
 }

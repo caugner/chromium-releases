@@ -10,8 +10,8 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
-#include "chrome/browser/signin/proximity_auth_facade.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "components/proximity_auth/screenlock_bridge.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/notification_service.h"
@@ -77,7 +77,7 @@ class ScreenlockPrivateApiTest : public ExtensionApiTest,
                const content::NotificationDetails& details) override {
     const std::string& content = *content::Details<std::string>(details).ptr();
     if (content == kAttemptClickAuthMessage) {
-      GetScreenlockBridgeInstance()->lock_handler()->SetAuthType(
+      proximity_auth::ScreenlockBridge::Get()->lock_handler()->SetAuthType(
           kTestUser, proximity_auth::ScreenlockBridge::LockHandler::USER_CLICK,
           base::string16());
       EasyUnlockService::Get(profile())->AttemptAuth(kTestUser);
@@ -94,6 +94,9 @@ class ScreenlockPrivateApiTest : public ExtensionApiTest,
 
   DISALLOW_COPY_AND_ASSIGN(ScreenlockPrivateApiTest);
 };
+
+// Locking is currently implemented only on ChromeOS.
+#if defined(OS_CHROMEOS)
 
 // Time out under MSan. http://crbug.com/478091
 // Flaky under LSan on ChromeOS. http://crbug.com/482002
@@ -112,5 +115,7 @@ IN_PROC_BROWSER_TEST_F(ScreenlockPrivateApiTest, MAYBE_LockUnlock) {
 IN_PROC_BROWSER_TEST_F(ScreenlockPrivateApiTest, MAYBE_AuthType) {
   RunTest("screenlock_private/auth_type");
 }
+
+#endif  // defined(OS_CHROMEOS)
 
 }  // namespace extensions

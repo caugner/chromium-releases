@@ -11,6 +11,7 @@
 #include "base/observer_list.h"
 #include "base/time/time.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher_delegate.h"
+#include "chrome/common/web_application_info.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/manifest.h"
@@ -79,6 +80,13 @@ class AppBannerDataFetcher
   // Returns whether or not the pipeline has been stopped.
   bool is_active() { return is_active_; }
 
+  // Returns whether the beforeinstallprompt Javascript event was canceled.
+  bool was_canceled_by_page() { return was_canceled_by_page_; }
+
+  // Returns whether the page has validly requested that the banner be shown
+  // by calling prompt() on the beforeinstallprompt Javascript event.
+  bool page_requested_prompt() { return page_requested_prompt_; }
+
   // Returns the URL that kicked off the banner data retrieval.
   const GURL& validated_url() { return validated_url_; }
 
@@ -104,6 +112,11 @@ class AppBannerDataFetcher
                            int request_id,
                            blink::WebAppBannerPromptReply reply);
 
+  // Called when the client has prevented a banner from being shown, and is
+  // now requesting that it be shown later.
+  void OnRequestShowAppBanner(content::RenderFrameHost* render_frame_host,
+                              int request_id);
+
   content::WebContents* GetWebContents();
   virtual std::string GetAppIdentifier();
   const content::Manifest& web_app_data() { return web_app_data_; }
@@ -115,8 +128,8 @@ class AppBannerDataFetcher
   bool FetchIcon(const GURL& image_url);
 
   // Creates a banner for the app using the given |icon|.
-  virtual infobars::InfoBar* CreateBanner(const SkBitmap* icon,
-                                          const base::string16& title);
+  virtual void ShowBanner(const SkBitmap* icon,
+                          const base::string16& title) = 0;
 
   // Records that a banner was shown. The |event_name| corresponds to the RAPPOR
   // metric being recorded.
@@ -128,8 +141,13 @@ class AppBannerDataFetcher
   void OnDidCheckHasServiceWorker(bool has_service_worker);
   void OnFetchComplete(const GURL& url, const SkBitmap* icon) override;
 
+  // Returns whether the given web app has already been installed.
+  // Implemented on desktop platforms only.
+  virtual bool IsWebAppInstalled(content::BrowserContext* browser_context,
+                                 const GURL& start_url);
+
   // Shows a banner for the app, if the given |icon| is valid.
-  virtual void ShowBanner(const SkBitmap* icon);
+  virtual void RequestShowBanner(const SkBitmap* icon);
 
   // Record that the banner could be shown at this point, if the triggering
   // heuristic allowed.
@@ -149,8 +167,10 @@ class AppBannerDataFetcher
 
   const int ideal_icon_size_;
   const base::WeakPtr<Delegate> weak_delegate_;
-  ObserverList<Observer> observer_list_;
+  base::ObserverList<Observer> observer_list_;
   bool is_active_;
+  bool was_canceled_by_page_;
+  bool page_requested_prompt_;
   int event_request_id_;
   scoped_ptr<chrome::BitmapFetcher> bitmap_fetcher_;
   scoped_ptr<SkBitmap> app_icon_;

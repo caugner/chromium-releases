@@ -18,12 +18,15 @@
 #include "chrome/browser/extensions/chrome_app_sorting.h"
 #include "chrome/browser/extensions/chrome_component_extension_resource_manager.h"
 #include "chrome/browser/extensions/chrome_extension_host_delegate.h"
+#include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/extensions/chrome_mojo_service_registration.h"
 #include "chrome/browser/extensions/chrome_process_manager_delegate.h"
 #include "chrome/browser/extensions/chrome_url_request_util.h"
+#include "chrome/browser/extensions/error_console/error_console.h"
 #include "chrome/browser/extensions/event_router_forwarder.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/extension_util.h"
+#include "chrome/browser/extensions/menu_manager.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/profiles/profile.h"
@@ -33,6 +36,7 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/pref_names.h"
+#include "content/public/browser/render_process_host.h"
 #include "extensions/browser/api/generated_api_registration.h"
 #include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/extension_prefs.h"
@@ -315,6 +319,31 @@ bool ChromeExtensionsBrowserClient::IsMinBrowserVersionSupported(
     return false;
   }
   return true;
+}
+
+ExtensionWebContentsObserver*
+ChromeExtensionsBrowserClient::GetExtensionWebContentsObserver(
+    content::WebContents* web_contents) {
+  return ChromeExtensionWebContentsObserver::FromWebContents(web_contents);
+}
+
+void ChromeExtensionsBrowserClient::ReportError(
+    content::BrowserContext* context,
+    scoped_ptr<ExtensionError> error) {
+  extensions::ErrorConsole::Get(context)->ReportError(error.Pass());
+}
+
+void ChromeExtensionsBrowserClient::CleanUpWebView(int embedder_process_id,
+                                                   int view_instance_id) {
+  content::BrowserContext* browser_context =
+      content::RenderProcessHost::FromID(embedder_process_id)
+      ->GetBrowserContext();
+
+  // Clean up context menus for the WebView.
+  auto menu_manager =
+      MenuManager::Get(Profile::FromBrowserContext(browser_context));
+  menu_manager->RemoveAllContextItems(
+      MenuItem::ExtensionKey("", embedder_process_id, view_instance_id));
 }
 
 }  // namespace extensions

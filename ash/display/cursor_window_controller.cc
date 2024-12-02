@@ -34,7 +34,6 @@ class CursorWindowDelegate : public aura::WindowDelegate {
   gfx::Size GetMaximumSize() const override { return size_; }
   void OnBoundsChanged(const gfx::Rect& old_bounds,
                        const gfx::Rect& new_bounds) override {}
-  ui::TextInputClient* GetFocusedTextInputClient() override { return nullptr; }
   gfx::NativeCursor GetCursor(const gfx::Point& point) override {
     return gfx::kNullCursor;
   }
@@ -50,7 +49,7 @@ class CursorWindowDelegate : public aura::WindowDelegate {
   void OnCaptureLost() override {}
   void OnPaint(const ui::PaintContext& context) override {
     // No need to cache the output here, the CursorWindow is not invalidated.
-    ui::PaintRecorder recorder(context);
+    ui::PaintRecorder recorder(context, size_);
     recorder.canvas()->DrawImageInt(cursor_image_, 0, 0);
   }
   void OnDeviceScaleFactorChanged(float device_scale_factor) override {}

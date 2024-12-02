@@ -5,7 +5,10 @@
 #ifndef COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_SERVICE_H_
 #define COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_SERVICE_H_
 
+#include <string>
+
 #include "base/callback.h"
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -91,15 +94,25 @@ class DataReductionProxyService
   // Records whether the Data Reduction Proxy is unreachable or not.
   void SetUnreachable(bool unreachable);
 
+  // Sets if Lo-Fi was active on the last main frame load in
+  // DataReductionProxySettings.
+  void SetLoFiModeActiveOnMainFrame(bool lo_fi_mode_active);
+
+  // Sets Lo-Fi mode off on the IO thread.
+  void SetLoFiModeOff();
+
+  // Initializes the Lo-Fi implicit opt out prefs.
+  void InitializeLoFiPrefs();
+
   // Stores an int64 value in |prefs_|.
   void SetInt64Pref(const std::string& pref_path, int64 value);
 
+  // Stores a string value in |prefs_|.
+  void SetStringPref(const std::string& pref_path, const std::string& value);
+
   // Bridge methods to safely call to the UI thread objects.
   // Virtual for testing.
-  virtual void SetProxyPrefs(bool enabled,
-                             bool alternative_enabled,
-                             bool at_startup);
-  void RetrieveConfig();
+  virtual void SetProxyPrefs(bool enabled, bool at_startup);
 
   // Methods for adding/removing observers on |this|.
   void AddObserver(DataReductionProxyServiceObserver* observer);
@@ -108,10 +121,6 @@ class DataReductionProxyService
   // Accessor methods.
   DataReductionProxyCompressionStats* compression_stats() const {
     return compression_stats_.get();
-  }
-
-  DataReductionProxySettings* settings() const {
-    return settings_;
   }
 
   DataReductionProxyEventStore* event_store() const {
@@ -125,6 +134,22 @@ class DataReductionProxyService
   base::WeakPtr<DataReductionProxyService> GetWeakPtr();
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxySettingsTest,
+                           TestLoFiSessionStateHistograms);
+
+  // Values of the UMA DataReductionProxy.LoFi.SessionState histogram.
+  // This enum must remain synchronized with DataReductionProxyLoFiSessionState
+  // in metrics/histograms/histograms.xml.
+  enum LoFiSessionState {
+    LO_FI_SESSION_STATE_USED = 0,
+    LO_FI_SESSION_STATE_NOT_USED,
+    LO_FI_SESSION_STATE_OPTED_OUT,
+    LO_FI_SESSION_STATE_INDEX_BOUNDARY,
+  };
+
+  // Records UMA for Lo-Fi session state.
+  void RecordLoFiSessionState(LoFiSessionState state);
+
   net::URLRequestContextGetter* url_request_context_getter_;
 
   // Tracks compression statistics to be displayed to the user.
@@ -144,7 +169,7 @@ class DataReductionProxyService
   // make calls to IO based objects.
   base::WeakPtr<DataReductionProxyIOData> io_data_;
 
-  ObserverList<DataReductionProxyServiceObserver> observer_list_;
+  base::ObserverList<DataReductionProxyServiceObserver> observer_list_;
 
   bool initialized_;
 

@@ -5,9 +5,12 @@
 #include "chrome/browser/ui/webui/signin/user_manager_screen_handler.h"
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/prefs/pref_service.h"
 #include "base/profiler/scoped_tracker.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/value_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -22,7 +25,6 @@
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/signin/local_auth.h"
-#include "chrome/browser/signin/proximity_auth_facade.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -36,6 +38,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/proximity_auth/screenlock_bridge.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -80,6 +83,7 @@ const char kJsApiUserManagerLogRemoveUserWarningShown[] =
     "logRemoveUserWarningShown";
 
 const size_t kAvatarIconSize = 180;
+const int kMaxOAuthRetries = 3;
 
 void HandleAndDoNothing(const base::ListValue* args) {
 }
@@ -298,7 +302,7 @@ UserManagerScreenHandler::UserManagerScreenHandler()
 }
 
 UserManagerScreenHandler::~UserManagerScreenHandler() {
-  GetScreenlockBridgeInstance()->SetLockHandler(NULL);
+  proximity_auth::ScreenlockBridge::Get()->SetLockHandler(NULL);
 }
 
 void UserManagerScreenHandler::ShowBannerMessage(
@@ -390,7 +394,7 @@ void UserManagerScreenHandler::HandleInitialize(const base::ListValue* args) {
   desktop_type_ = chrome::GetHostDesktopTypeForNativeView(
       web_ui()->GetWebContents()->GetNativeView());
 
-  GetScreenlockBridgeInstance()->SetLockHandler(this);
+  proximity_auth::ScreenlockBridge::Get()->SetLockHandler(this);
 }
 
 void UserManagerScreenHandler::HandleAddUser(const base::ListValue* args) {
@@ -434,27 +438,44 @@ void UserManagerScreenHandler::HandleAuthenticatedLaunchUser(
   }
 
   authenticating_profile_index_ = profile_index;
-  if (!LocalAuth::ValidateLocalAuthCredentials(profile_index, password)) {
-    // Make a second attempt via an on-line authentication call.  This handles
-    // profiles that are missing sign-in credentials and also cases where the
-    // password has been changed externally.
-    client_login_.reset(new GaiaAuthFetcher(
-        this,
-        GaiaConstants::kChromeSource,
-        web_ui()->GetWebContents()->GetBrowserContext()->GetRequestContext()));
-
-    client_login_->StartClientLogin(
-        base::UTF16ToUTF8(email_address),
-        password,
-        GaiaConstants::kSyncService,
-        std::string(),
-        std::string(),
-        GaiaAuthFetcher::HostedAccountsAllowed);
-    password_attempt_ = password;
+  if (LocalAuth::ValidateLocalAuthCredentials(profile_index, password)) {
+    ReportAuthenticationResult(true, ProfileMetrics::AUTH_LOCAL);
     return;
   }
 
-  ReportAuthenticationResult(true, ProfileMetrics::AUTH_LOCAL);
+  email_address_ = email_address;
+  password_attempt_ = password;
+
+  // This could be a mis-typed password or typing a new password while we
+  // still have a hash of the old one.  The new way of checking a password
+  // change makes use of a token so we do that... if it's available.
+  if (!oauth_client_) {
+    oauth_client_.reset(new gaia::GaiaOAuthClient(
+        web_ui()->GetWebContents()->GetBrowserContext()->GetRequestContext()));
+  }
+  std::string token = info_cache.GetPasswordChangeDetectionTokenAtIndex(
+      profile_index);
+  if (!token.empty()) {
+    oauth_client_->GetTokenHandleInfo(token, kMaxOAuthRetries, this);
+    return;
+  }
+
+  // In order to support the upgrade case where we have a local hash but no
+  // password token, we fall back on (deprecated) ClientLogin.  This will
+  // have to be removed in future versions as the service gets turned down
+  // but by then we'll have seamlessly updated the majority of users.
+  client_login_.reset(new GaiaAuthFetcher(
+      this,
+      GaiaConstants::kChromeSource,
+      web_ui()->GetWebContents()->GetBrowserContext()->GetRequestContext()));
+
+  client_login_->StartClientLogin(
+      base::UTF16ToUTF8(email_address),
+      password,
+      GaiaConstants::kSyncService,
+      std::string(),
+      std::string(),
+      GaiaAuthFetcher::HostedAccountsAllowed);
 }
 
 void UserManagerScreenHandler::HandleRemoveUser(const base::ListValue* args) {
@@ -550,8 +571,42 @@ void UserManagerScreenHandler::HandleHardlockUserPod(
   HideUserPodCustomIcon(email);
 }
 
+void UserManagerScreenHandler::OnGetTokenInfoResponse(
+    scoped_ptr<base::DictionaryValue> token_info) {
+  // Password is unchanged so user just mistyped it.  Ask again.
+  ReportAuthenticationResult(false, ProfileMetrics::AUTH_FAILED);
+}
+
+void UserManagerScreenHandler::OnOAuthError() {
+  // Password has changed.  Go through online signin flow.
+  // ... if we had it.  Until then, use deprecated ClientLogin to validate
+  // the password.  This will have to be changed soon.  (TODO: bcwhite)
+    oauth_client_.reset();
+    client_login_.reset(new GaiaAuthFetcher(
+      this,
+      GaiaConstants::kChromeSource,
+      web_ui()->GetWebContents()->GetBrowserContext()->GetRequestContext()));
+
+  DCHECK(!email_address_.empty());
+  DCHECK(!password_attempt_.empty());
+  client_login_->StartClientLogin(
+      base::UTF16ToUTF8(email_address_),
+      password_attempt_,
+      GaiaConstants::kSyncService,
+      std::string(),
+      std::string(),
+      GaiaAuthFetcher::HostedAccountsAllowed);
+}
+
+void UserManagerScreenHandler::OnNetworkError(int response_code) {
+  // Inconclusive but can't do real signin without being online anyway.
+    oauth_client_.reset();
+    ReportAuthenticationResult(false, ProfileMetrics::AUTH_FAILED_OFFLINE);
+}
+
 void UserManagerScreenHandler::OnClientLoginSuccess(
     const ClientLoginResult& result) {
+  oauth_client_.reset();
   LocalAuth::SetLocalAuthCredentials(authenticating_profile_index_,
                                      password_attempt_);
   ReportAuthenticationResult(true, ProfileMetrics::AUTH_ONLINE);
@@ -578,9 +633,7 @@ void UserManagerScreenHandler::OnClientLoginFailure(
                                        password_attempt_);
   }
 
-  bool offline = (state == GoogleServiceAuthError::CONNECTION_FAILED ||
-                  state == GoogleServiceAuthError::SERVICE_UNAVAILABLE ||
-                  state == GoogleServiceAuthError::REQUEST_CANCELED);
+  bool offline = error.IsTransientError();
   ProfileMetrics::ProfileAuth failure_metric =
       offline ? ProfileMetrics::AUTH_FAILED_OFFLINE :
                 ProfileMetrics::AUTH_FAILED;
@@ -635,8 +688,6 @@ void UserManagerScreenHandler::GetLocalizedValues(
   // For Control Bar.
   localized_strings->SetString("signedIn",
       l10n_util::GetStringUTF16(IDS_SCREEN_LOCK_ACTIVE_USER));
-  localized_strings->SetString("signinButton",
-      l10n_util::GetStringUTF16(IDS_LOGIN_BUTTON));
   localized_strings->SetString("addUser",
       l10n_util::GetStringUTF16(IDS_ADD_USER_BUTTON));
   localized_strings->SetString("cancel", l10n_util::GetStringUTF16(IDS_CANCEL));
@@ -786,6 +837,7 @@ void UserManagerScreenHandler::ReportAuthenticationResult(
     bool success,
     ProfileMetrics::ProfileAuth auth) {
   ProfileMetrics::LogProfileAuthResult(auth);
+  email_address_.clear();
   password_attempt_.clear();
 
   if (success) {
@@ -828,7 +880,7 @@ void UserManagerScreenHandler::OnBrowserWindowReady(Browser* browser) {
   }
 
   if (!url_hash_.empty()) {
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&UrlHashHelper::ExecuteUrlHash,
                    base::Owned(new UrlHashHelper(browser, url_hash_))));

@@ -63,7 +63,6 @@
 #import "chrome/browser/ui/cocoa/profiles/avatar_icon_controller.h"
 #import "chrome/browser/ui/cocoa/status_bubble_mac.h"
 #import "chrome/browser/ui/cocoa/tab_contents/overlayable_contents_controller.h"
-#import "chrome/browser/ui/cocoa/tab_contents/sad_tab_controller.h"
 #import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
@@ -303,7 +302,7 @@ using content::WebContents;
     // Create the overlayable contents controller.  This provides the switch
     // view that TabStripController needs.
     overlayableContentsController_.reset(
-        [[OverlayableContentsController alloc] initWithBrowser:browser]);
+        [[OverlayableContentsController alloc] init]);
     [[overlayableContentsController_ view]
         setFrame:[[devToolsController_ view] bounds]];
     [[devToolsController_ view]
@@ -320,10 +319,9 @@ using content::WebContents;
     // registering for the appropriate command state changes from the back-end.
     // Adds the toolbar to the content area.
     toolbarController_.reset([[ToolbarController alloc]
-              initWithCommands:browser->command_controller()->command_updater()
-                       profile:browser->profile()
-                       browser:browser
-                resizeDelegate:self]);
+        initWithCommands:browser->command_controller()->command_updater()
+                 profile:browser->profile()
+                 browser:browser]);
     [toolbarController_ setHasToolbar:[self hasToolbar]
                        hasLocationBar:[self hasLocationBar]];
 
@@ -426,7 +424,6 @@ using content::WebContents;
 
 - (void)dealloc {
   browser_->tab_strip_model()->CloseAllTabs();
-  [downloadShelfController_ exiting];
 
   // Explicitly release |presentationModeController_| here, as it may call back
   // to this BWC in |-dealloc|.  We are required to call |-exitPresentationMode|
@@ -439,6 +436,20 @@ using content::WebContents;
     ignore_result(browser_.release());
 
   [[NSNotificationCenter defaultCenter] removeObserver:self];
+
+  // Inform reference counted objects that the Browser will be destroyed. This
+  // ensures they invalidate their weak Browser* to prevent use-after-free.
+  // These may outlive the Browser if they are retained by something else. For
+  // example, since 10.10, the Nib loader internally creates an NSDictionary
+  // that retains NSViewControllers and is autoreleased, so there is no way to
+  // guarantee that the [super dealloc] call below will also call dealloc on the
+  // controllers.
+  [toolbarController_ browserWillBeDestroyed];
+  [tabStripController_ browserWillBeDestroyed];
+  [findBarCocoaController_ browserWillBeDestroyed];
+  [downloadShelfController_ browserWillBeDestroyed];
+  [bookmarkBarController_ browserWillBeDestroyed];
+  [avatarButtonController_ browserWillBeDestroyed];
 
   [super dealloc];
 }
@@ -616,9 +627,7 @@ using content::WebContents;
 - (void)windowDidBecomeKey:(NSNotification*)notification {
   // We need to activate the controls (in the "WebView"). To do this, get the
   // selected WebContents's RenderWidgetHostView and tell it to activate.
-  if (WebContents* contents =
-          browser_->tab_strip_model()->GetActiveWebContents()) {
-
+  if (WebContents* contents = [self webContents]) {
     WebContents* devtools = DevToolsWindow::GetInTabWebContents(
         contents, NULL);
     if (devtools) {
@@ -645,9 +654,7 @@ using content::WebContents;
 
   // We need to deactivate the controls (in the "WebView"). To do this, get the
   // selected WebContents's RenderWidgetHostView and tell it to deactivate.
-  if (WebContents* contents =
-          browser_->tab_strip_model()->GetActiveWebContents()) {
-
+  if (WebContents* contents = [self webContents]) {
     WebContents* devtools = DevToolsWindow::GetInTabWebContents(
         contents, NULL);
     if (devtools) {
@@ -668,8 +675,7 @@ using content::WebContents;
   [self saveWindowPositionIfNeeded];
 
   // Let the selected RenderWidgetHostView know, so that it can tell plugins.
-  if (WebContents* contents =
-          browser_->tab_strip_model()->GetActiveWebContents()) {
+  if (WebContents* contents = [self webContents]) {
     if (RenderWidgetHostView* rwhv = contents->GetRenderWidgetHostView())
       rwhv->SetWindowVisibility(false);
   }
@@ -678,8 +684,7 @@ using content::WebContents;
 // Called when we have been unminimized.
 - (void)windowDidDeminiaturize:(NSNotification *)notification {
   // Let the selected RenderWidgetHostView know, so that it can tell plugins.
-  if (WebContents* contents =
-          browser_->tab_strip_model()->GetActiveWebContents()) {
+  if (WebContents* contents = [self webContents]) {
     if (RenderWidgetHostView* rwhv = contents->GetRenderWidgetHostView())
       rwhv->SetWindowVisibility(true);
   }
@@ -690,8 +695,7 @@ using content::WebContents;
   // Let the selected RenderWidgetHostView know, so that it can tell plugins
   // (unless we are minimized, in which case nothing has really changed).
   if (![[self window] isMiniaturized]) {
-  if (WebContents* contents =
-          browser_->tab_strip_model()->GetActiveWebContents()) {
+    if (WebContents* contents = [self webContents]) {
       if (RenderWidgetHostView* rwhv = contents->GetRenderWidgetHostView())
         rwhv->SetWindowVisibility(false);
     }
@@ -703,8 +707,7 @@ using content::WebContents;
   // Let the selected RenderWidgetHostView know, so that it can tell plugins
   // (unless we are minimized, in which case nothing has really changed).
   if (![[self window] isMiniaturized]) {
-  if (WebContents* contents =
-          browser_->tab_strip_model()->GetActiveWebContents()) {
+    if (WebContents* contents = [self webContents]) {
       if (RenderWidgetHostView* rwhv = contents->GetRenderWidgetHostView())
         rwhv->SetWindowVisibility(true);
     }
@@ -943,6 +946,34 @@ using content::WebContents;
   NSView* chromeContentView = [self chromeContentView];
   BOOL autoresizesSubviews = [chromeContentView autoresizesSubviews];
   [chromeContentView setAutoresizesSubviews:NO];
+
+  // On Yosemite the toolbar can flicker when hiding or showing the bookmarks
+  // bar. Here, |chromeContentView| is set to not autoresize its subviews during
+  // the window resize. Because |chromeContentView| is not flipped, if the
+  // window is getting shorter, the toolbar will move up within the window.
+  // Soon after, a call to layoutSubviews corrects its position. Passing NO to
+  // setFrame:display: should keep the toolbarView's intermediate position
+  // hidden, as should the prior call to NSDisableScreenUpdates(). For some
+  // reason, neither prevents the toolbarView's intermediate position from
+  // becoming visible. Its subsequent appearance in its correct location causes
+  // the flicker. It may be that the Appkit assumes that updating the window
+  // immediately is not a big deal given that everything in it is layer-backed.
+  // Indeed, turning off layer backing for all ancestors of the toolbarView
+  // causes the flicker to go away.
+  //
+  // By shifting the toolbarView enough so that it's in its correct location
+  // immediately after the call to setFrame:display:, the toolbar will be in
+  // the right spot when the Appkit prematurely flushes the window contents to
+  // the screen. http://crbug.com/444080 .
+  if ([self hasToolbar]) {
+    NSView* toolbarView = [toolbarController_ view];
+    NSRect currentWindowFrame = [window frame];
+    NSRect toolbarViewFrame = [toolbarView frame];
+    toolbarViewFrame.origin.y += windowFrame.size.height -
+        currentWindowFrame.size.height;
+    [toolbarView setFrame:toolbarViewFrame];
+  }
+
   [window setFrame:windowFrame display:NO];
   [chromeContentView setAutoresizesSubviews:autoresizesSubviews];
   return YES;
@@ -1020,8 +1051,7 @@ using content::WebContents;
 
   if (resizeRectDirty) {
     // Send new resize rect to foreground tab.
-    if (content::WebContents* contents =
-            browser_->tab_strip_model()->GetActiveWebContents()) {
+    if (WebContents* contents = [self webContents]) {
       if (content::RenderViewHost* rvh = contents->GetRenderViewHost()) {
         rvh->ResizeRectChanged(windowShim_->GetRootWindowResizerRect());
       }
@@ -1273,16 +1303,13 @@ using content::WebContents;
   if (oldContents) {
     manager = PermissionBubbleManager::FromWebContents(oldContents);
     if (manager)
-      manager->SetView(nullptr);
+      manager->HideBubble();
   }
 
   if (newContents) {
-    if (!permissionBubbleCocoa_.get()) {
-      permissionBubbleCocoa_.reset(new PermissionBubbleCocoa([self window]));
-    }
     manager = PermissionBubbleManager::FromWebContents(newContents);
     if (manager)
-      manager->SetView(permissionBubbleCocoa_.get());
+      manager->DisplayPendingRequests(browser_.get());
   }
 }
 
@@ -1795,7 +1822,7 @@ using content::WebContents;
   // ShowBubble. This should be unified.
   if (translateBubbleController_) {
     // When the user reads the advanced setting panel, the bubble should not be
-    // changed because he/she is focusing on the bubble.
+    // changed because they are focusing on the bubble.
     if (translateBubbleController_.webContents == contents &&
         translateBubbleController_.model->GetViewState() ==
         TranslateBubbleModel::VIEW_STATE_ADVANCED) {
@@ -1835,6 +1862,12 @@ using content::WebContents;
              selector:@selector(translateBubbleWindowWillClose:)
                  name:NSWindowWillCloseNotification
                object:[translateBubbleController_ window]];
+}
+
+- (void)dismissPermissionBubble {
+  PermissionBubbleManager* manager = [self permissionBubbleManager];
+  if (manager)
+    manager->HideBubble();
 }
 
 // Nil out the weak translate bubble controller reference.
@@ -1910,8 +1943,7 @@ using content::WebContents;
   }
 
   // Let the selected RenderWidgetHostView know, so that it can tell plugins.
-  if (WebContents* contents =
-          browser_->tab_strip_model()->GetActiveWebContents()) {
+  if (WebContents* contents = [self webContents]) {
     if (RenderWidgetHostView* rwhv = contents->GetRenderWidgetHostView())
       rwhv->WindowFrameChanged();
   }
@@ -1925,19 +1957,14 @@ using content::WebContents;
     [self layoutSubviews];
 }
 
-// Handle the openLearnMoreAboutCrashLink: action from SadTabController when
+// Handle the openLearnMoreAboutCrashLink: action from SadTabView when
 // "Learn more" link in "Aw snap" page (i.e. crash page or sad tab) is
 // clicked. Decoupling the action from its target makes unit testing possible.
 - (void)openLearnMoreAboutCrashLink:(id)sender {
-  if (SadTabController* sadTab =
-          base::mac::ObjCCast<SadTabController>(sender)) {
-    WebContents* webContents = [sadTab webContents];
-    if (webContents) {
-      OpenURLParams params(
-          GURL(chrome::kCrashReasonURL), Referrer(), CURRENT_TAB,
-          ui::PAGE_TRANSITION_LINK, false);
-      webContents->OpenURL(params);
-    }
+  if (WebContents* contents = [self webContents]) {
+    OpenURLParams params(GURL(chrome::kCrashReasonURL), Referrer(), CURRENT_TAB,
+                         ui::PAGE_TRANSITION_LINK, false);
+    contents->OpenURL(params);
   }
 }
 
@@ -1965,8 +1992,7 @@ using content::WebContents;
     [self resetWindowGrowthState];
 
   // Let the selected RenderWidgetHostView know, so that it can tell plugins.
-  if (WebContents* contents =
-          browser_->tab_strip_model()->GetActiveWebContents()) {
+  if (WebContents* contents = [self webContents]) {
     if (RenderWidgetHostView* rwhv = contents->GetRenderWidgetHostView())
       rwhv->WindowFrameChanged();
   }

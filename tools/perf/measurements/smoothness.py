@@ -2,8 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry.core.platform import tracing_category_filter
 from telemetry.page import page_test
+from telemetry.timeline import tracing_category_filter
 from telemetry.web_perf import timeline_based_measurement
 
 
@@ -32,6 +32,7 @@ class Smoothness(page_test.PageTest):
     options.AppendExtraBrowserArgs('--enable-gpu-benchmarking')
     options.AppendExtraBrowserArgs('--touch-events=enabled')
     options.AppendExtraBrowserArgs('--running-performance-benchmark')
+    options.AppendExtraBrowserArgs('--js-flags=--expose-gc')
 
   def WillNavigateToPage(self, page, tab):
     tracing_controller = tab.browser.platform.tracing_controller
@@ -44,7 +45,7 @@ class Smoothness(page_test.PageTest):
     self._tbm = timeline_based_measurement.TimelineBasedMeasurement(
         timeline_based_measurement.Options(category_filter),
         _CustomResultsWrapper)
-    self._tbm.WillRunUserStory(
+    self._tbm.WillRunStory(
         tracing_controller, page.GetSyntheticDelayCategories())
 
   def ValidateAndMeasurePage(self, _, tab, results):
@@ -53,7 +54,8 @@ class Smoothness(page_test.PageTest):
 
   def CleanUpAfterPage(self, _, tab):
     tracing_controller = tab.browser.platform.tracing_controller
-    self._tbm.DidRunUserStory(tracing_controller)
+    self._tbm.DidRunStory(tracing_controller)
+    tab.ExecuteJavaScript('window.gc();')
 
 
 class Repaint(Smoothness):

@@ -14,6 +14,7 @@
 #include "chrome/browser/profiles/incognito_mode_policy_handler.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/content_settings/core/common/pref_names.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/policy/core/browser/autofill_policy_handler.h"
 #include "components/policy/core/browser/configuration_policy_handler.h"
@@ -42,6 +43,8 @@
 #endif
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/drive/drive_pref_names.h"
+#include "chrome/browser/chromeos/platform_keys/key_permissions_policy_handler.h"
 #include "chrome/browser/chromeos/policy/configuration_policy_handler_chromeos.h"
 #include "chromeos/chromeos_pref_names.h"
 #include "chromeos/dbus/power_policy_controller.h"
@@ -60,10 +63,6 @@
 #include "chrome/browser/extensions/policy_handlers.h"
 #include "extensions/browser/pref_names.h"
 #include "extensions/common/manifest.h"
-#endif
-
-#if defined(ENABLE_PLUGINS)
-#include "chrome/browser/plugins/enable_npapi_plugins_policy_handler.h"
 #endif
 
 namespace policy {
@@ -362,9 +361,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kForceEphemeralProfiles,
     prefs::kForceEphemeralProfiles,
     base::Value::TYPE_BOOLEAN },
-  { key::kSSLVersionMin,
-    prefs::kSSLVersionMin,
-    base::Value::TYPE_STRING },
   { key::kSSLVersionFallbackMin,
     prefs::kSSLVersionFallbackMin,
     base::Value::TYPE_STRING },
@@ -388,10 +384,10 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     prefs::kChromeOsReleaseChannel,
     base::Value::TYPE_STRING },
   { key::kDriveDisabled,
-    prefs::kDisableDrive,
+    drive::prefs::kDisableDrive,
     base::Value::TYPE_BOOLEAN },
   { key::kDriveDisabledOverCellular,
-    prefs::kDisableDriveOverCellular,
+    drive::prefs::kDisableDriveOverCellular,
     base::Value::TYPE_BOOLEAN },
   { key::kExternalStorageDisabled,
     prefs::kExternalStorageDisabled,
@@ -502,6 +498,12 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     prefs::kBrowserAddPersonEnabled,
     base::Value::TYPE_BOOLEAN },
 #endif  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
+
+#if defined(OS_WIN)
+  { key::kWelcomePageOnOSUpgradeEnabled,
+    prefs::kWelcomePageOnOSUpgradeEnabled,
+    base::Value::TYPE_BOOLEAN },
+#endif  // OS_WIN
 };
 
 class ForceSafeSearchPolicyHandler : public TypeCheckingPolicyHandler {
@@ -523,8 +525,8 @@ class ForceSafeSearchPolicyHandler : public TypeCheckingPolicyHandler {
     }
     const base::Value* value = policies.GetValue(policy_name());
     if (value) {
-      prefs->SetValue(prefs::kForceGoogleSafeSearch, value->DeepCopy());
-      prefs->SetValue(prefs::kForceYouTubeSafetyMode, value->DeepCopy());
+      prefs->SetValue(prefs::kForceGoogleSafeSearch, value->CreateDeepCopy());
+      prefs->SetValue(prefs::kForceYouTubeSafetyMode, value->CreateDeepCopy());
     }
   }
 
@@ -630,10 +632,6 @@ scoped_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
       base::Bind(GetExtensionAllowedTypesMap))));
   handlers->AddHandler(make_scoped_ptr(
       new extensions::ExtensionSettingsPolicyHandler(chrome_schema)));
-#endif
-
-#if defined(ENABLE_PLUGINS)
-  handlers->AddHandler(make_scoped_ptr(new EnableNpapiPluginsPolicyHandler()));
 #endif
 
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
@@ -786,6 +784,8 @@ scoped_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
       key::kSessionLocales, NULL, chrome_schema, SCHEMA_STRICT,
       SimpleSchemaValidatingPolicyHandler::RECOMMENDED_ALLOWED,
       SimpleSchemaValidatingPolicyHandler::MANDATORY_PROHIBITED)));
+  handlers->AddHandler(make_scoped_ptr(
+      new chromeos::KeyPermissionsPolicyHandler(chrome_schema)));
 #endif  // defined(OS_CHROMEOS)
 
   return handlers.Pass();

@@ -23,6 +23,7 @@
 #include "content/public/common/file_chooser_params.h"
 #include "content/public/common/media_stream_request.h"
 #include "jni/AwWebContentsDelegate_jni.h"
+#include "net/base/escape.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ConvertUTF16ToJavaString;
@@ -76,7 +77,6 @@ void AwWebContentsDelegate::FindReply(WebContents* web_contents,
 }
 
 void AwWebContentsDelegate::CanDownload(
-    content::RenderViewHost* source,
     const GURL& url,
     const std::string& request_method,
     const base::Callback<void(bool)>& callback) {
@@ -180,7 +180,7 @@ void AwWebContentsDelegate::NavigationStateChanged(
 void AwWebContentsDelegate::WebContentsCreated(
     WebContents* source_contents,
     int opener_render_frame_id,
-    const base::string16& frame_name,
+    const std::string& frame_name,
     const GURL& target_url,
     content::WebContents* new_contents) {
   AwContentsIoThreadClientImpl::RegisterPendingContents(new_contents);
@@ -201,6 +201,18 @@ void AwWebContentsDelegate::ActivateContents(WebContents* contents) {
   ScopedJavaLocalRef<jobject> java_delegate = GetJavaDelegate(env);
   if (java_delegate.obj()) {
     Java_AwWebContentsDelegate_activateContents(env, java_delegate.obj());
+  }
+}
+
+void AwWebContentsDelegate::LoadingStateChanged(WebContents* source,
+                                                bool to_different_document) {
+  // Page title may have changed, need to inform the embedder.
+  // |source| may be null if loading has started.
+  JNIEnv* env = AttachCurrentThread();
+
+  ScopedJavaLocalRef<jobject> java_delegate = GetJavaDelegate(env);
+  if (java_delegate.obj()) {
+    Java_AwWebContentsDelegate_loadingStateChanged(env, java_delegate.obj());
   }
 }
 
@@ -262,7 +274,10 @@ static void FilesSelectedInChooser(
     GURL url(file_path_str[i]);
     if (!url.is_valid())
       continue;
-    base::FilePath path(url.SchemeIsFile() ? url.path() : file_path_str[i]);
+    base::FilePath path(url.SchemeIsFile() ?
+      net::UnescapeURLComponent(url.path(),
+        net::UnescapeRule::SPACES | net::UnescapeRule::URL_SPECIAL_CHARS) :
+        file_path_str[i]);
     content::FileChooserFileInfo file_info;
     file_info.file_path = path;
     if (!display_name_str[i].empty())

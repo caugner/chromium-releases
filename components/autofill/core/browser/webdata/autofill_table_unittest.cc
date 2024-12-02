@@ -759,120 +759,6 @@ TEST_F(AutofillTableTest, AutofillProfile) {
   EXPECT_FALSE(table_->GetAutofillProfile(billing_profile.guid(), &db_profile));
 }
 
-TEST_F(AutofillTableTest, AutofillProfileMultiValueNames) {
-  AutofillProfile p;
-  const base::string16 kJohnDoe(ASCIIToUTF16("John Doe"));
-  const base::string16 kJohnPDoe(ASCIIToUTF16("John P. Doe"));
-  std::vector<base::string16> set_values;
-  set_values.push_back(kJohnDoe);
-  set_values.push_back(kJohnPDoe);
-  p.SetRawMultiInfo(NAME_FULL, set_values);
-
-  EXPECT_TRUE(table_->AddAutofillProfile(p));
-
-  AutofillProfile* db_profile;
-  ASSERT_TRUE(table_->GetAutofillProfile(p.guid(), &db_profile));
-  EXPECT_EQ(p, *db_profile);
-  EXPECT_EQ(0, p.Compare(*db_profile));
-  delete db_profile;
-
-  // Update the values.
-  const base::string16 kNoOne(ASCIIToUTF16("No One"));
-  set_values[1] = kNoOne;
-  p.SetRawMultiInfo(NAME_FULL, set_values);
-  EXPECT_TRUE(table_->UpdateAutofillProfile(p));
-  ASSERT_TRUE(table_->GetAutofillProfile(p.guid(), &db_profile));
-  EXPECT_EQ(p, *db_profile);
-  EXPECT_EQ(0, p.Compare(*db_profile));
-  delete db_profile;
-
-  // Delete values.
-  set_values.clear();
-  p.SetRawMultiInfo(NAME_FULL, set_values);
-  EXPECT_TRUE(table_->UpdateAutofillProfile(p));
-  ASSERT_TRUE(table_->GetAutofillProfile(p.guid(), &db_profile));
-  EXPECT_EQ(p, *db_profile);
-  EXPECT_EQ(0, p.Compare(*db_profile));
-  EXPECT_EQ(base::string16(), db_profile->GetRawInfo(NAME_FULL));
-  delete db_profile;
-}
-
-TEST_F(AutofillTableTest, AutofillProfileMultiValueEmails) {
-  AutofillProfile p;
-  const base::string16 kJohnDoe(ASCIIToUTF16("john@doe.com"));
-  const base::string16 kJohnPDoe(ASCIIToUTF16("john_p@doe.com"));
-  std::vector<base::string16> set_values;
-  set_values.push_back(kJohnDoe);
-  set_values.push_back(kJohnPDoe);
-  p.SetRawMultiInfo(EMAIL_ADDRESS, set_values);
-
-  EXPECT_TRUE(table_->AddAutofillProfile(p));
-
-  AutofillProfile* db_profile;
-  ASSERT_TRUE(table_->GetAutofillProfile(p.guid(), &db_profile));
-  EXPECT_EQ(p, *db_profile);
-  EXPECT_EQ(0, p.Compare(*db_profile));
-  delete db_profile;
-
-  // Update the values.
-  const base::string16 kNoOne(ASCIIToUTF16("no@one.com"));
-  set_values[1] = kNoOne;
-  p.SetRawMultiInfo(EMAIL_ADDRESS, set_values);
-  EXPECT_TRUE(table_->UpdateAutofillProfile(p));
-  ASSERT_TRUE(table_->GetAutofillProfile(p.guid(), &db_profile));
-  EXPECT_EQ(p, *db_profile);
-  EXPECT_EQ(0, p.Compare(*db_profile));
-  delete db_profile;
-
-  // Delete values.
-  set_values.clear();
-  p.SetRawMultiInfo(EMAIL_ADDRESS, set_values);
-  EXPECT_TRUE(table_->UpdateAutofillProfile(p));
-  ASSERT_TRUE(table_->GetAutofillProfile(p.guid(), &db_profile));
-  EXPECT_EQ(p, *db_profile);
-  EXPECT_EQ(0, p.Compare(*db_profile));
-  EXPECT_EQ(base::string16(), db_profile->GetRawInfo(EMAIL_ADDRESS));
-  delete db_profile;
-}
-
-TEST_F(AutofillTableTest, AutofillProfileMultiValuePhone) {
-  AutofillProfile p;
-  const base::string16 kJohnDoe(ASCIIToUTF16("4151112222"));
-  const base::string16 kJohnPDoe(ASCIIToUTF16("4151113333"));
-  std::vector<base::string16> set_values;
-  set_values.push_back(kJohnDoe);
-  set_values.push_back(kJohnPDoe);
-  p.SetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, set_values);
-
-  EXPECT_TRUE(table_->AddAutofillProfile(p));
-
-  AutofillProfile* db_profile;
-  ASSERT_TRUE(table_->GetAutofillProfile(p.guid(), &db_profile));
-  EXPECT_EQ(p, *db_profile);
-  EXPECT_EQ(0, p.Compare(*db_profile));
-  delete db_profile;
-
-  // Update the values.
-  const base::string16 kNoOne(ASCIIToUTF16("4151110000"));
-  set_values[1] = kNoOne;
-  p.SetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, set_values);
-  EXPECT_TRUE(table_->UpdateAutofillProfile(p));
-  ASSERT_TRUE(table_->GetAutofillProfile(p.guid(), &db_profile));
-  EXPECT_EQ(p, *db_profile);
-  EXPECT_EQ(0, p.Compare(*db_profile));
-  delete db_profile;
-
-  // Delete values.
-  set_values.clear();
-  p.SetRawMultiInfo(PHONE_HOME_WHOLE_NUMBER, set_values);
-  EXPECT_TRUE(table_->UpdateAutofillProfile(p));
-  ASSERT_TRUE(table_->GetAutofillProfile(p.guid(), &db_profile));
-  EXPECT_EQ(p, *db_profile);
-  EXPECT_EQ(0, p.Compare(*db_profile));
-  EXPECT_EQ(base::string16(), db_profile->GetRawInfo(EMAIL_ADDRESS));
-  delete db_profile;
-}
-
 TEST_F(AutofillTableTest, AutofillProfileTrash) {
   std::vector<std::string> guids;
   table_->GetAutofillProfilesInTrash(&guids);
@@ -1897,8 +1783,7 @@ TEST_F(AutofillTableTest, SetServerProfileUpdateUsageStats) {
 
 // Tests that deleting time ranges re-masks server credit cards that were
 // unmasked in that time.
-// TODO(brettw) fix flakiness and re-enable: crbug.com/465882
-TEST_F(AutofillTableTest, DISABLED_DeleteUnmaskedCard) {
+TEST_F(AutofillTableTest, DeleteUnmaskedCard) {
   // This isn't the exact unmasked time, since the database will use the
   // current time that it is called. The code below has to be approximate.
   base::Time unmasked_time = base::Time::Now();
@@ -1937,7 +1822,9 @@ TEST_F(AutofillTableTest, DISABLED_DeleteUnmaskedCard) {
   outputs.clear();
 
   // Delete data in the range of the last 24 hours.
-  base::Time now = base::Time::Now();
+  // Fudge |now| to make sure it's strictly greater than the |now| that
+  // the database uses.
+  base::Time now = base::Time::Now() + base::TimeDelta::FromSeconds(1);
   ASSERT_TRUE(table_->RemoveAutofillDataModifiedBetween(
       now - base::TimeDelta::FromDays(1), now,
       &profile_guids, &credit_card_guids));

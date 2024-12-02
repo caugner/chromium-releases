@@ -15,12 +15,12 @@
 #include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
@@ -152,7 +152,7 @@ std::string BootTimesRecorder::Stats::SerializeToString() const {
   dictionary.SetString(kDisk, disk_);
 
   std::string result;
-  if (!base::JSONWriter::Write(&dictionary, &result)) {
+  if (!base::JSONWriter::Write(dictionary, &result)) {
     LOG(WARNING) << "BootTimesRecorder::Stats::SerializeToString(): failed.";
     return std::string();
   }
@@ -166,7 +166,7 @@ BootTimesRecorder::Stats BootTimesRecorder::Stats::DeserializeFromString(
   if (source.empty())
     return Stats();
 
-  scoped_ptr<base::Value> value(base::JSONReader::Read(source));
+  scoped_ptr<base::Value> value = base::JSONReader::Read(source);
   base::DictionaryValue* dictionary;
   if (!value || !value->GetAsDictionary(&dictionary)) {
     LOG(ERROR) << "BootTimesRecorder::Stats::DeserializeFromString(): not a "

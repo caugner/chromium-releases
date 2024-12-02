@@ -6,6 +6,7 @@ import("//build/config/chrome_build.gni")
 import("//build/config/crypto.gni")
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
+import("//third_party/protobuf/proto_library.gni")
 
 # //build/config/android/rules.gni imports //tools/grit/grit_rule.gni, which
 # produces a conflict for the "grit" template so we have to only include one.
@@ -82,9 +83,9 @@ source_set("browser") {
     "//chrome/app:generated_resources_map",
     "//chrome/app/resources:platform_locale_settings",
     "//chrome/app/theme:theme_resources",
-    "//chrome/browser/autocomplete:in_memory_url_index_cache_proto",
     "//chrome/browser/net:encrypted_cert_logger_proto",
     "//chrome/browser/net:probe_message_proto",
+    "//chrome/browser/offline_pages:offline_pages_proto",
     "//chrome/browser/ssl:cert_logger_proto",
     "//chrome/browser/ui",
     "//chrome/common",
@@ -108,12 +109,12 @@ source_set("browser") {
     "//components/gcm_driver",
     "//components/gcm_driver/instance_id",
     "//components/google/core/browser",
-    "//components/guest_view:guest_view",
+    "//components/guest_view/browser",
     "//components/handoff",
     "//components/history/core/browser",
     "//components/history/core/common",
     "//components/infobars/core",
-    "//components/invalidation",
+    "//components/invalidation/impl",
     "//components/metrics:gpu",
     "//components/metrics:net",
     "//components/metrics:profiler",
@@ -121,13 +122,14 @@ source_set("browser") {
     "//components/mime_util",
     "//components/navigation_metrics",
     "//components/network_time",
-    "//components/omnibox",
+    "//components/offline_pages",
+    "//components/omnibox/browser",
     "//components/os_crypt",
     "//components/packed_ct_ev_whitelist",
     "//components/password_manager/core/browser",
     "//components/password_manager/core/common",
     "//components/policy:policy_component",
-    "//components/precache/core",
+    "//components/proxy_config",
     "//components/query_parser",
     "//components/rappor",
     "//components/renderer_context_menu",
@@ -157,7 +159,6 @@ source_set("browser") {
     "//crypto",
     "//google_apis",
     "//gpu/config",
-    "//jingle:notifier",
     "//skia",
     "//sql",
     "//sync",
@@ -263,7 +264,7 @@ source_set("browser") {
       "//components/navigation_interception",
       "//components/password_manager/content/browser",
       "//components/plugins/common",
-      "//components/precache/content",
+      "//components/safe_json",
       "//components/sessions",
       "//components/storage_monitor",
       "//components/translate/content/browser",
@@ -274,6 +275,7 @@ source_set("browser") {
       "//components/web_modal",
       "//content/app/resources",
       "//media",
+      "//mojo/application/public/cpp",
       "//mojo/common",
       "//mojo/environment:chromium",
       "//net:extras",
@@ -289,7 +291,6 @@ source_set("browser") {
       "//third_party/mojo/src/mojo/edk/system",
       "//third_party/mojo/src/mojo/public/cpp/bindings",
       "//third_party/mojo/src/mojo/public/js",
-      "//third_party/npapi",
       "//third_party/re2",
       "//third_party/smhasher:cityhash",
       "//third_party/webrtc/modules/desktop_capture",
@@ -300,6 +301,10 @@ source_set("browser") {
       "//ui/web_dialogs",
       "//v8",
     ]
+
+    if (toolkit_views) {
+      deps += [ "//ui/views" ]
+    }
   } else {  # iOS
     sources +=
         rebase_path(gypi_values.chrome_browser_ios_sources, ".", "//chrome")
@@ -374,7 +379,7 @@ source_set("browser") {
     sources += rebase_path(gypi_values.chrome_browser_spellchecker_sources,
                            ".",
                            "//chrome")
-    deps += [ "//third_party/hunspell_new" ]
+    deps += [ "//third_party/hunspell" ]
   }
   if (enable_nacl) {
     sources +=
@@ -404,11 +409,6 @@ source_set("browser") {
     }
     if (is_win || is_mac || is_desktop_linux) {
       sources += rebase_path(gypi_values.chrome_browser_policy_desktop_sources,
-                             ".",
-                             "//chrome")
-    }
-    if (enable_plugins) {
-      sources += rebase_path(gypi_values.chrome_browser_policy_plugin_sources,
                              ".",
                              "//chrome")
     }
@@ -626,6 +626,8 @@ source_set("browser") {
     deps += [
       "//components/feedback",
       "//device/core",
+      "//device/devices_app/public/cpp",
+      "//device/devices_app/public/cpp:factory",
       "//device/usb",
     ]
   }
@@ -633,10 +635,17 @@ source_set("browser") {
   if (is_android) {
     sources +=
         rebase_path(gypi_values.chrome_browser_android_sources, ".", "//chrome")
+    sources += rebase_path(gypi_values.chrome_browser_bookmark_android_sources,
+                           ".",
+                           "//chrome")
     deps += [
+      ":client_discourse_context_proto",
+      ":delta_file_proto",
       ":jni_headers",
       "//components/cdm/browser",
       "//components/enhanced_bookmarks",
+      "//components/precache/content",
+      "//components/precache/core",
       "//components/resources:components_resources",
       "//components/service_tab_launcher",
       "//components/web_contents_delegate_android",
@@ -653,6 +662,7 @@ source_set("browser") {
 
     if (use_seccomp_bpf) {
       defines += [ "USE_SECCOMP_BPF" ]
+      deps += [ "//sandbox/linux:seccomp_bpf" ]
     }
   }
 
@@ -690,12 +700,6 @@ source_set("browser") {
   if (is_win) {
     sources +=
         rebase_path(gypi_values.chrome_browser_win_sources, ".", "//chrome")
-    if (!is_chrome_branded) {
-      sources -= [
-        "google/did_run_updater_win.cc",
-        "google/did_run_updater_win.h",
-      ]
-    }
     public_deps += [
       "//ui/views",
       "//ui/views/controls/webview",
@@ -720,6 +724,15 @@ source_set("browser") {
       "credui.lib",
       "netapi32.lib",
     ]
+    if (!is_chrome_branded) {
+      deps -= [ "//google_update" ]
+      sources -= [
+        "google/did_run_updater_win.cc",
+        "google/did_run_updater_win.h",
+        "google/google_update_win.cc",
+        "google/google_update_win.h",
+      ]
+    }
   } else {
     # Non-Windows.
     sources +=
@@ -766,6 +779,12 @@ source_set("browser") {
     sources += rebase_path(gypi_values.chrome_browser_supervised_user_sources,
                            ".",
                            "//chrome")
+  }
+  if (enable_supervised_users && !is_android && !is_ios) {
+    sources +=
+        rebase_path(gypi_values.chrome_browser_supervised_user_legacy_sources,
+                    ".",
+                    "//chrome")
   }
   if (enable_supervised_users && enable_themes) {
     sources += rebase_path(
@@ -818,6 +837,20 @@ if (is_android) {
         rebase_path(gypi_values.chrome_browser_jni_sources, ".", "//chrome")
     jni_package = "chrome"
   }
+
+  #GYP: '//chrome/chrome_browser.gypi:client_discourse_context_proto'
+  proto_library("client_discourse_context_proto") {
+    sources = [
+      "android/proto/client_discourse_context.proto",
+    ]
+  }
+
+  #GYP: '//chrome/chrome_browser.gypi:delta_file_proto'
+  proto_library("delta_file_proto") {
+    sources = [
+      "android/proto/delta_file.proto",
+    ]
+  }
 }
 
 if (is_win) {
@@ -863,6 +896,10 @@ grit("resources") {
   deps = [
     ":about_credits",
     ":chrome_internal_resources_gen",
+
+    # Depend only on the generated mojo bindings since we read the .mojom.js
+    # file, rather than the whole mojo target which will link the C++ bindings.
+    "//chrome/browser/ui/webui/omnibox:mojo_bindings__generator",
   ]
   inputs = [
     omnibox_mojom_file,
@@ -957,6 +994,8 @@ source_set("test_support") {
     "password_manager/mock_password_store_service.h",
     "password_manager/null_password_store_service.cc",
     "password_manager/null_password_store_service.h",
+    "password_manager/password_manager_test_base.cc",
+    "password_manager/password_manager_test_base.h",
     "password_manager/test_password_store_service.cc",
     "password_manager/test_password_store_service.h",
     "prefs/pref_service_mock_factory.cc",
@@ -971,8 +1010,8 @@ source_set("test_support") {
     "sessions/session_restore_test_helper.h",
     "sessions/session_service_test_helper.cc",
     "sessions/session_service_test_helper.h",
-    "signin/fake_account_tracker_service.cc",
-    "signin/fake_account_tracker_service.h",
+    "signin/fake_account_fetcher_service.cc",
+    "signin/fake_account_fetcher_service.h",
     "signin/fake_gaia_cookie_manager_service.cc",
     "signin/fake_gaia_cookie_manager_service.h",
     "signin/fake_profile_oauth2_token_service.cc",
@@ -1000,8 +1039,8 @@ source_set("test_support") {
     "//chrome/browser",
     "//chrome/common",
     "//chrome/common/safe_browsing:proto",
-    "//components/invalidation",
-    "//components/invalidation:test_support",
+    "//components/invalidation/impl",
+    "//components/invalidation/impl:test_support",
     "//components/password_manager/core/browser:test_support",
     "//components/search_engines:test_support",
     "//content/test:test_support",

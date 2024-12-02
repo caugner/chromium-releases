@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// This variable will be changed by iOS scripts.
+var distiller_on_ios = false;
+
 function addToPage(html) {
   var div = document.createElement('div');
   div.innerHTML = html;
@@ -40,19 +43,17 @@ function showLoadingIndicator(isLastPage) {
   updateLoadingIndicator(isLastPage);
 }
 
-// Sets the title. The title will be exposed with a simple animation. This
-// should only be used when the title was not included in the initial html.
+// Sets the title.
 function setTitle(title) {
   var holder = document.getElementById('titleHolder');
-  var collapse = document.getElementById('titleCollapse');
-
-  collapse.style.height = "0px";
 
   holder.textContent = title;
-  var newHeight = Math.max(90, holder.getBoundingClientRect().height);
+  document.title = title;
+}
 
-  collapse.style.transition = "height 0.2s";
-  collapse.style.height = newHeight + "px";
+// Set the text direction of the document ('ltr', 'rtl', or 'auto').
+function setTextDirection(direction) {
+  document.body.setAttribute('dir', direction);
 }
 
 // Maps JS Font Family to CSS class and then changes body class name.
@@ -114,10 +115,15 @@ var updateLoadingIndicator = function() {
  * @param noText The i18n text for the feedback answer 'NO'.
  */
 function showFeedbackForm(questionText, yesText, noText) {
+  // If the distiller is running on iOS, do not show the feedback form. This
+  // variable is set in distiller_viewer.cc before this function is run.
+  if (distiller_on_ios) return;
+
   document.getElementById('feedbackYes').innerText = yesText;
   document.getElementById('feedbackNo').innerText = noText;
   document.getElementById('feedbackQuestion').innerText = questionText;
 
+  document.getElementById('contentWrap').style.paddingBottom = '120px';
   document.getElementById('feedbackContainer').style.display = 'block';
 }
 
@@ -137,12 +143,13 @@ function sendFeedback(good) {
 }
 
 // Add a listener to the "View Original" link to report opt-outs.
-document.getElementById('showOriginal').addEventListener('click', function(e) {
-  var img = document.createElement('img');
-  img.src = "/vieworiginal";
-  img.style.display = "none";
-  document.body.appendChild(img);
-}, true);
+document.getElementById('closeReaderView').addEventListener('click',
+    function(e) {
+      var img = document.createElement('img');
+      img.src = "/vieworiginal";
+      img.style.display = "none";
+      document.body.appendChild(img);
+    }, true);
 
 document.getElementById('feedbackYes').addEventListener('click', function(e) {
   sendFeedback(true);
@@ -204,8 +211,8 @@ var pincher = (function() {
   var shiftY;
 
   // The zooming speed relative to pinching speed.
-  const FONT_SCALE_MULTIPLIER = 0.5;
-  const MIN_SPAN_LENGTH = 20;
+  var FONT_SCALE_MULTIPLIER = 0.5;
+  var MIN_SPAN_LENGTH = 20;
 
   // The font size is guaranteed to be in px.
   var baseSize =

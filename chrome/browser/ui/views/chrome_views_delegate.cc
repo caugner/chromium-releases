@@ -160,6 +160,7 @@ void ChromeViewsDelegate::SaveWindowPlacement(const views::Widget* window,
   window_preferences->SetInteger("bottom", bounds.bottom());
   window_preferences->SetBoolean("maximized",
                                  show_state == ui::SHOW_STATE_MAXIMIZED);
+  window_preferences->SetBoolean("docked", show_state == ui::SHOW_STATE_DOCKED);
   gfx::Rect work_area(gfx::Screen::GetScreenFor(window->GetNativeView())->
       GetDisplayNearestWindow(window->GetNativeView()).work_area());
   window_preferences->SetInteger("work_area_left", work_area.x());
@@ -389,16 +390,6 @@ std::string ChromeViewsDelegate::GetApplicationName() {
   return chrome::VersionInfo().Name();
 }
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-scoped_refptr<base::TaskRunner>
-    ChromeViewsDelegate::GetTaskRunnerForAuraLinuxAccessibilityInit() {
-  // This should be on the FILE thread so that we can open libatk-bridge.so
-  // without blocking.
-  return content::BrowserThread::GetMessageLoopProxyForThread(
-      content::BrowserThread::FILE);
-}
-#endif
-
 #if defined(OS_WIN)
 int ChromeViewsDelegate::GetAppbarAutohideEdges(HMONITOR monitor,
                                                 const base::Closure& callback) {
@@ -438,6 +429,11 @@ void ChromeViewsDelegate::OnGotAppbarAutohideEdges(
   callback.Run();
 }
 #endif
+
+scoped_refptr<base::TaskRunner>
+ChromeViewsDelegate::GetBlockingPoolTaskRunner() {
+  return content::BrowserThread::GetBlockingPool();
+}
 
 #if !defined(USE_AURA) && !defined(USE_CHROMEOS)
 views::Widget::InitParams::WindowOpacity

@@ -5,15 +5,18 @@
 #include "chrome/browser/signin/signin_header_helper.h"
 
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile_io_data.h"
+#include "chrome/browser/signin/account_reconcilor_factory.h"
 #include "chrome/browser/signin/chrome_signin_client.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/url_constants.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/signin/core/browser/account_reconcilor.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_request_info.h"
@@ -70,22 +73,18 @@ signin::GAIAServiceType GetGAIAServiceTypeFromHeader(
 // "key1=value1,key2=value2,...".
 MirrorResponseHeaderDictionary ParseMirrorResponseHeader(
     const std::string& header_value) {
-  std::vector<std::string> fields;
-  if (!Tokenize(header_value, std::string(","), &fields))
-    return MirrorResponseHeaderDictionary();
-
   MirrorResponseHeaderDictionary dictionary;
-  for (std::vector<std::string>::iterator i = fields.begin();
-       i != fields.end(); ++i) {
-    std::string field(*i);
-    std::vector<std::string> tokens;
+  for (const base::StringPiece& field :
+       base::SplitStringPiece(header_value, ",", base::KEEP_WHITESPACE,
+                              base::SPLIT_WANT_NONEMPTY)) {
     size_t delim = field.find_first_of('=');
     if (delim == std::string::npos) {
       DLOG(WARNING) << "Unexpected GAIA header field '" << field << "'.";
       continue;
     }
-    dictionary[field.substr(0, delim)] = net::UnescapeURLComponent(
-        field.substr(delim + 1), net::UnescapeRule::URL_SPECIAL_CHARS);
+    dictionary[field.substr(0, delim).as_string()] = net::UnescapeURLComponent(
+        field.substr(delim + 1).as_string(),
+        net::UnescapeRule::URL_SPECIAL_CHARS);
   }
   return dictionary;
 }
@@ -135,6 +134,8 @@ void ProcessMirrorHeaderUIThread(
   if (!web_contents)
     return;
 
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
 #if !defined(OS_ANDROID)
   Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
   if (browser) {
@@ -152,6 +153,8 @@ void ProcessMirrorHeaderUIThread(
       default:
         bubble_mode = BrowserWindow::AVATAR_BUBBLE_MODE_ACCOUNT_MANAGEMENT;
     }
+    signin_metrics::LogAccountReconcilorStateOnGaiaResponse(
+        AccountReconcilorFactory::GetForProfile(profile)->GetState());
     browser->window()->ShowAvatarBubbleFromAvatarButton(
         bubble_mode, manage_accounts_params);
   }
@@ -164,9 +167,10 @@ void ProcessMirrorHeaderUIThread(
         url, content::Referrer(), OFF_THE_RECORD,
         ui::PAGE_TRANSITION_AUTO_TOPLEVEL, false));
   } else {
-    AccountManagementScreenHelper::OpenAccountManagementScreen(
-        Profile::FromBrowserContext(web_contents->GetBrowserContext()),
-        service_type);
+    signin_metrics::LogAccountReconcilorStateOnGaiaResponse(
+        AccountReconcilorFactory::GetForProfile(profile)->GetState());
+    AccountManagementScreenHelper::OpenAccountManagementScreen(profile,
+                                                               service_type);
   }
 #endif // OS_ANDROID
 }
@@ -271,31 +275,41 @@ bool AppendMirrorRequestHeaderIfPossible(
   return true;
 }
 
-void ProcessMirrorResponseHeaderIfExists(
-    net::URLRequest* request,
-    ProfileIOData* io_data,
-    int child_id,
-    int route_id) {
-#if defined(OS_IOS)
-  NOTREACHED();
-#else
+ManageAccountsParams BuildManageAccountsParamsIfValid(net::URLRequest* request,
+                                                      ProfileIOData* io_data) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  if (!gaia::IsGaiaSignonRealm(request->url().GetOrigin()))
-    return;
 
+  ManageAccountsParams empty_params;
+  empty_params.service_type = GAIA_SERVICE_TYPE_NONE;
+  if (!gaia::IsGaiaSignonRealm(request->url().GetOrigin()))
+    return empty_params;
+
+#if !defined(OS_IOS)
   const content::ResourceRequestInfo* info =
       content::ResourceRequestInfo::ForRequest(request);
   if (!(info && info->GetResourceType() == content::RESOURCE_TYPE_MAIN_FRAME))
-    return;
+    return empty_params;
+#endif
 
   std::string header_value;
   if (!request->response_headers()->GetNormalizedHeader(
           kChromeManageAccountsHeader, &header_value)) {
-    return;
+    return empty_params;
   }
 
   DCHECK(switches::IsEnableAccountConsistency() && !io_data->IsOffTheRecord());
-  ManageAccountsParams params(BuildManageAccountsParams(header_value));
+  return BuildManageAccountsParams(header_value);
+}
+
+void ProcessMirrorResponseHeaderIfExists(net::URLRequest* request,
+                                         ProfileIOData* io_data,
+                                         int child_id,
+                                         int route_id) {
+#if defined(OS_IOS)
+  NOTREACHED();
+#else
+  ManageAccountsParams params =
+      BuildManageAccountsParamsIfValid(request, io_data);
   if (params.service_type == GAIA_SERVICE_TYPE_NONE)
     return;
 

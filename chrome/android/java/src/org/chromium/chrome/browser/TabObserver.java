@@ -74,7 +74,6 @@ public interface TabObserver {
      */
     void onLoadUrl(Tab tab, LoadUrlParams params, int loadType);
 
-
     /**
      * Called when a tab has started to load a page.
      * <p>
@@ -86,8 +85,9 @@ public interface TabObserver {
      * {@link #onLoadStopped(Tab)} should be used to drive updates.
      *
      * @param tab The notifying {@link Tab}.
+     * @param url The committed URL being navigated to.
      */
-    void onPageLoadStarted(Tab tab);
+    void onPageLoadStarted(Tab tab, String url);
 
     /**
      * Called when a tab has finished loading a page.
@@ -167,7 +167,10 @@ public interface TabObserver {
     // WebContentsDelegateAndroid methods ---------------------------------------------------------
 
     /**
-     * Called when the contents loading starts.
+     * Called when the WebContents starts loading. Different from
+     * {@link #onPageLoadStarted(Tab, String)}, if the user is navigated to a different url while
+     * staying in the same html document, {@link #onLoadStarted(Tab)} will be called, while
+     * {@link #onPageLoadStarted(Tab, String)} will not.
      * @param tab The notifying {@link Tab}.
      */
     void onLoadStarted(Tab tab);
@@ -257,6 +260,12 @@ public interface TabObserver {
      */
     public void onDidNavigateMainFrame(Tab tab, String url, String baseUrl,
             boolean isNavigationToDifferentPage, boolean isFragmentNavigation, int statusCode);
+
+    /**
+     * Called when the page has painted something non-empty.
+     * @param tab The notifying {@link Tab}.
+     */
+    public void didFirstVisuallyNonEmptyPaint(Tab tab);
 
     /**
      * Called when the theme color is changed

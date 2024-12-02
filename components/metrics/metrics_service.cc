@@ -128,15 +128,19 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/metrics/histogram.h"
+#include "base/location.h"
 #include "base/metrics/histogram_base.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
+#include "base/rand_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
@@ -151,6 +155,7 @@
 #include "components/metrics/metrics_service_client.h"
 #include "components/metrics/metrics_state_manager.h"
 #include "components/variations/entropy_provider.h"
+#include "components/variations/variations_associated_data.h"
 
 namespace metrics {
 
@@ -219,6 +224,21 @@ void MarkAppCleanShutdownAndCommit(CleanExitBeacon* clean_exit_beacon,
   local_state->CommitPendingWrite();
 }
 #endif  // defined(OS_ANDROID) || defined(OS_IOS)
+
+// Determines if current log should be sent based on sampling rate. Returns true
+// if the sampling rate is not set.
+bool ShouldUploadLog() {
+  std::string probability_str = variations::GetVariationParamValue(
+      "UMA_EnableCellularLogUpload", "Sample_Probability");
+  if (probability_str.empty())
+    return true;
+
+  int probability;
+  // In case specified sampling rate is invalid.
+  if (!base::StringToInt(probability_str, &probability))
+    return true;
+  return base::RandInt(1, 100) <= probability;
+}
 
 }  // namespace
 
@@ -357,6 +377,10 @@ int64 MetricsService::GetInstallDate() {
 
 int64 MetricsService::GetMetricsReportingEnabledDate() {
   return local_state_->GetInt64(prefs::kMetricsReportingEnabledTimestamp);
+}
+
+bool MetricsService::WasLastShutdownClean() const {
+  return clean_exit_beacon_.exited_cleanly();
 }
 
 scoped_ptr<const base::FieldTrial::EntropyProvider>
@@ -677,9 +701,9 @@ void MetricsService::NotifyOnDidCreateMetricsLog() {
 void MetricsService::ScheduleNextStateSave() {
   state_saver_factory_.InvalidateWeakPtrs();
 
-  base::MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      base::Bind(&MetricsService::SaveLocalState,
-                 state_saver_factory_.GetWeakPtr()),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&MetricsService::SaveLocalState,
+                            state_saver_factory_.GetWeakPtr()),
       base::TimeDelta::FromMinutes(kSaveStateIntervalMinutes));
 }
 
@@ -703,10 +727,9 @@ void MetricsService::OpenNewLog() {
     // We only need to schedule that run once.
     state_ = INIT_TASK_SCHEDULED;
 
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&MetricsService::StartGatheringMetrics,
-                   self_ptr_factory_.GetWeakPtr()),
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, base::Bind(&MetricsService::StartGatheringMetrics,
+                              self_ptr_factory_.GetWeakPtr()),
         base::TimeDelta::FromSeconds(kInitializationDelaySeconds));
   }
 }
@@ -931,6 +954,11 @@ void MetricsService::SendStagedLog() {
   DCHECK(!log_upload_in_progress_);
   log_upload_in_progress_ = true;
 
+  if (!ShouldUploadLog()) {
+    SkipAndDiscardUpload();
+    return;
+  }
+
   if (!log_uploader_) {
     log_uploader_ = client_->CreateUploader(
         base::Bind(&MetricsService::OnLogUploadComplete,
@@ -944,9 +972,7 @@ void MetricsService::SendStagedLog() {
   UMA_HISTOGRAM_BOOLEAN("UMA.UploadCreation", success);
   if (!success) {
     // Skip this upload and hope things work out next time.
-    log_manager_.DiscardStagedLog();
-    scheduler_->UploadCancelled();
-    log_upload_in_progress_ = false;
+    SkipAndDiscardUpload();
     return;
   }
 
@@ -1045,7 +1071,7 @@ void MetricsService::RegisterSyntheticFieldTrial(
 void MetricsService::RegisterMetricsProvider(
     scoped_ptr<MetricsProvider> provider) {
   DCHECK_EQ(INITIALIZED, state_);
-  metrics_providers_.push_back(provider.release());
+  metrics_providers_.push_back(provider.Pass());
 }
 
 void MetricsService::CheckForClonedInstall(
@@ -1111,7 +1137,7 @@ void MetricsService::LogCleanShutdown() {
 
 bool MetricsService::ShouldLogEvents() {
   // We simply don't log events to UMA if there is a single incognito
-  // session visible. The problem is that we always notify using the orginal
+  // session visible. The problem is that we always notify using the original
   // profile in order to simplify notification processing.
   return !client_->IsOffTheRecordSessionActive();
 }
@@ -1125,6 +1151,12 @@ void MetricsService::RecordBooleanPrefValue(const char* path, bool value) {
 void MetricsService::RecordCurrentState(PrefService* pref) {
   pref->SetInt64(prefs::kStabilityLastTimestampSec,
                  base::Time::Now().ToTimeT());
+}
+
+void MetricsService::SkipAndDiscardUpload() {
+  log_manager_.DiscardStagedLog();
+  scheduler_->UploadCancelled();
+  log_upload_in_progress_ = false;
 }
 
 }  // namespace metrics

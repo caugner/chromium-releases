@@ -4,16 +4,19 @@
 
 from collections import defaultdict
 
-from telemetry.core.platform import tracing_category_filter
-from telemetry.core.platform import tracing_options
 from telemetry.timeline import model as model_module
+from telemetry.timeline import tracing_category_filter
+from telemetry.timeline import tracing_options
 from telemetry.value import trace
+from telemetry.web_perf.metrics import blob_timeline
 from telemetry.web_perf.metrics import gpu_timeline
 from telemetry.web_perf.metrics import layout
+from telemetry.web_perf.metrics import memory_timeline
 from telemetry.web_perf.metrics import responsiveness_metric
 from telemetry.web_perf.metrics import smoothness
 from telemetry.web_perf import timeline_interaction_record as tir_module
 from telemetry.web_perf import smooth_gesture_util
+from telemetry import decorators
 
 # TimelineBasedMeasurement considers all instrumentation as producing a single
 # timeline. But, depending on the amount of instrumentation that is enabled,
@@ -37,7 +40,9 @@ def _GetAllTimelineBasedMetrics():
   return (smoothness.SmoothnessMetric(),
           responsiveness_metric.ResponsivenessMetric(),
           layout.LayoutMetric(),
-          gpu_timeline.GPUTimelineMetric())
+          gpu_timeline.GPUTimelineMetric(),
+          blob_timeline.BlobTimelineMetric(),
+          memory_timeline.MemoryTimelineMetric())
 
 
 class InvalidInteractions(Exception):
@@ -137,34 +142,52 @@ class Options(object):
         one of NO_OVERHEAD_LEVEL, MINIMAL_OVERHEAD_LEVEL or
         DEBUG_OVERHEAD_LEVEL.
     """
-    if (not isinstance(overhead_level,
-                       tracing_category_filter.TracingCategoryFilter) and
-        overhead_level not in ALL_OVERHEAD_LEVELS):
+    self._category_filter = None
+    if isinstance(overhead_level,
+                  tracing_category_filter.TracingCategoryFilter):
+      self._category_filter = overhead_level
+    elif overhead_level in ALL_OVERHEAD_LEVELS:
+      if overhead_level == NO_OVERHEAD_LEVEL:
+        self._category_filter = tracing_category_filter.CreateNoOverheadFilter()
+      elif overhead_level == MINIMAL_OVERHEAD_LEVEL:
+        self._category_filter = (
+          tracing_category_filter.CreateMinimalOverheadFilter())
+      else:
+        self._category_filter = (
+          tracing_category_filter.CreateDebugOverheadFilter())
+    else:
       raise Exception("Overhead level must be a TracingCategoryFilter object"
                       " or valid overhead level string."
                       " Given overhead level: %s" % overhead_level)
 
-    self._overhead_level = overhead_level
-    self._extra_category_filters = []
+    self._tracing_options = tracing_options.TracingOptions()
+    self._tracing_options.enable_chrome_trace = True
+    self._tracing_options.enable_platform_display_trace = True
 
-  def ExtendTraceCategoryFilters(self, filters):
-    self._extra_category_filters.extend(filters)
+
+  def ExtendTraceCategoryFilter(self, filters):
+    for new_category_filter in filters:
+      self._category_filter.AddIncludedCategory(new_category_filter)
 
   @property
-  def extra_category_filters(self):
-    return self._extra_category_filters
+  def category_filter(self):
+    return self._category_filter
 
   @property
-  def overhead_level(self):
-    return self._overhead_level
+  def tracing_options(self):
+    return self._tracing_options
+
+  @tracing_options.setter
+  def tracing_options(self, value):
+    self._tracing_options = value
 
 
 class TimelineBasedMeasurement(object):
   """Collects multiple metrics based on their interaction records.
 
   A timeline based measurement shifts the burden of what metrics to collect onto
-  the user story under test. Instead of the measurement
-  having a fixed set of values it collects, the user story being tested
+  the story under test. Instead of the measurement
+  having a fixed set of values it collects, the story being tested
   issues (via javascript) an Interaction record into the user timing API that
   describing what is happening at that time, as well as a standardized set
   of flags describing the semantics of the work being done. The
@@ -173,7 +196,7 @@ class TimelineBasedMeasurement(object):
   Telemetry's various timeline-producing APIs, tracing especially.
 
   It then passes the recorded timeline to different TimelineBasedMetrics based
-  on those flags. As an example, this allows a single user story run to produce
+  on those flags. As an example, this allows a single story run to produce
   load timing data, smoothness data, critical jank information and overall cpu
   usage information.
 
@@ -192,8 +215,7 @@ class TimelineBasedMeasurement(object):
     self._tbm_options = options
     self._results_wrapper_class = results_wrapper_class
 
-  def WillRunUserStory(self, tracing_controller,
-                       synthetic_delay_categories=None):
+  def WillRunStory(self, tracing_controller, synthetic_delay_categories=None):
     """Configure and start tracing.
 
     Args:
@@ -206,30 +228,19 @@ class TimelineBasedMeasurement(object):
     if not tracing_controller.IsChromeTracingSupported():
       raise Exception('Not supported')
 
-    if isinstance(self._tbm_options.overhead_level,
-                  tracing_category_filter.TracingCategoryFilter):
-      category_filter = self._tbm_options.overhead_level
-    else:
-      assert self._tbm_options.overhead_level in ALL_OVERHEAD_LEVELS, (
-          "Invalid TBM Overhead Level: %s" % self._tbm_options.overhead_level)
-
-      if self._tbm_options.overhead_level == NO_OVERHEAD_LEVEL:
-        category_filter = tracing_category_filter.CreateNoOverheadFilter()
-      elif self._tbm_options.overhead_level == MINIMAL_OVERHEAD_LEVEL:
-        category_filter = tracing_category_filter.CreateMinimalOverheadFilter()
-      else:
-        category_filter = tracing_category_filter.CreateDebugOverheadFilter()
-
-    for new_category_filter in self._tbm_options.extra_category_filters:
-      category_filter.AddIncludedCategory(new_category_filter)
-
+    category_filter = self._tbm_options.category_filter
     # TODO(slamm): Move synthetic_delay_categories to the TBM options.
     for delay in synthetic_delay_categories or []:
       category_filter.AddSyntheticDelay(delay)
-    options = tracing_options.TracingOptions()
-    options.enable_chrome_trace = True
-    options.enable_platform_display_trace = True
-    tracing_controller.Start(options, category_filter)
+
+    tracing_controller.Start(self._tbm_options.tracing_options, category_filter)
+
+  @decorators.Deprecated(
+    2015, 7, 19, 'Please use WillRunStory instead. The user story concept is '
+    'being renamed to story.')
+  def WillRunUserStory(self, tracing_controller,
+                       synthetic_delay_categories=None):
+    self.WillRunStory(tracing_controller, synthetic_delay_categories)
 
   def Measure(self, tracing_controller, results):
     """Collect all possible metrics and added them to results."""
@@ -244,6 +255,12 @@ class TimelineBasedMeasurement(object):
           self._results_wrapper_class)
       meta_metrics.AddResults(results)
 
-  def DidRunUserStory(self, tracing_controller):
+  def DidRunStory(self, tracing_controller):
     if tracing_controller.is_tracing_running:
       tracing_controller.Stop()
+
+  @decorators.Deprecated(
+    2015, 7, 19, 'Please use DidRunStory instead. The user story concept is '
+    'being renamed to story.')
+  def DidRunUserStory(self, tracing_controller):
+    self.DidRunStory(tracing_controller)

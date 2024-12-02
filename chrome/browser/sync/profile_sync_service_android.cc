@@ -66,7 +66,30 @@ enum ModelTypeSelection {
   SUPERVISED_USER_SETTING = 1 << 13,
   SUPERVISED_USER_WHITELIST = 1 << 14,
   AUTOFILL_WALLET = 1 << 15,
+  AUTOFILL_WALLET_METADATA = 1 << 16,
+  PREFERENCE = 1 << 17,
+  PRIORITY_PREFERENCE = 1 << 18,
 };
+
+// Native callback for the JNI GetAllNodes method. When
+// ProfileSyncService::GetAllNodes completes, this method is called and the
+// results are sent to the Java callback.
+void NativeGetAllNodesCallback(
+    const base::android::ScopedJavaGlobalRef<jobject>& callback,
+    scoped_ptr<base::ListValue> result) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  std::string json_string;
+  if (!result.get() || !base::JSONWriter::Write(*result, &json_string)) {
+    DVLOG(1) << "Writing as JSON failed. Passing empty string to Java code.";
+    json_string = std::string();
+  }
+
+  ScopedJavaLocalRef<jstring> java_json_string =
+      ConvertUTF8ToJavaString(env, json_string);
+  Java_ProfileSyncService_onGetAllNodesResult(env,
+                                              callback.obj(),
+                                              java_json_string.obj());
+}
 
 }  // namespace
 
@@ -129,50 +152,20 @@ void ProfileSyncServiceAndroid::SetPassphrasePrompted(JNIEnv* env,
   sync_prefs_->SetPassphrasePrompted(prompted);
 }
 
-void ProfileSyncServiceAndroid::EnableSync(JNIEnv* env, jobject) {
+void ProfileSyncServiceAndroid::RequestStart(JNIEnv* env, jobject) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  // Don't need to do anything if we're already enabled.
-  if (sync_prefs_->IsStartSuppressed())
-    sync_service_->UnsuppressAndStart();
-  else
-    DVLOG(2) << "Ignoring call to EnableSync() because sync is already enabled";
+  sync_service_->RequestStart();
 }
 
-void ProfileSyncServiceAndroid::DisableSync(JNIEnv* env, jobject) {
+void ProfileSyncServiceAndroid::RequestStop(JNIEnv* env, jobject) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  // Don't need to do anything if we're already disabled.
-  if (!sync_prefs_->IsStartSuppressed()) {
-    sync_service_->StopAndSuppress();
-  } else {
-    DVLOG(2)
-        << "Ignoring call to DisableSync() because sync is already disabled";
-  }
-}
-
-void ProfileSyncServiceAndroid::SignInSync(JNIEnv* env, jobject) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  // Just return if sync already has everything it needs to start up (sync
-  // should start up automatically as long as it has credentials). This can
-  // happen normally if (for example) the user closes and reopens the sync
-  // settings window quickly during initial startup.
-  if (sync_service_->IsSyncEnabledAndLoggedIn() &&
-      sync_service_->IsOAuthRefreshTokenAvailable() &&
-      sync_service_->HasSyncSetupCompleted()) {
-    return;
-  }
-
-  // Enable sync (if we don't have credentials yet, this will enable sync but
-  // will not start it up - sync will start once credentials arrive).
-  sync_service_->UnsuppressAndStart();
+  sync_service_->RequestStop(ProfileSyncService::KEEP_DATA);
 }
 
 void ProfileSyncServiceAndroid::SignOutSync(JNIEnv* env, jobject) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(profile_);
-  sync_service_->DisableForUser();
-
-  // Need to clear suppress start flag manually
-  sync_prefs_->SetStartSuppressed(false);
+  sync_service_->RequestStop(ProfileSyncService::CLEAR_DATA);
 }
 
 void ProfileSyncServiceAndroid::FlushDirectory(JNIEnv* env, jobject) {
@@ -186,6 +179,17 @@ ScopedJavaLocalRef<jstring> ProfileSyncServiceAndroid::QuerySyncStatusSummary(
   DCHECK(profile_);
   std::string status(sync_service_->QuerySyncStatusSummaryString());
   return ConvertUTF8ToJavaString(env, status);
+}
+
+void ProfileSyncServiceAndroid::GetAllNodes(JNIEnv* env,
+                                            jobject obj,
+                                            jobject callback) {
+  base::android::ScopedJavaGlobalRef<jobject> java_callback;
+  java_callback.Reset(env, callback);
+
+  base::Callback<void(scoped_ptr<base::ListValue>)> native_callback =
+      base::Bind(&NativeGetAllNodesCallback, java_callback);
+  sync_service_->GetAllNodes(native_callback);
 }
 
 jboolean ProfileSyncServiceAndroid::SetSyncSessionsId(
@@ -388,6 +392,8 @@ void ProfileSyncServiceAndroid::SetPreferredDataTypes(
     types.Put(syncer::PROXY_TABS);
   if (model_type_selection & TYPED_URL)
     types.Put(syncer::TYPED_URLS);
+  if (model_type_selection & PREFERENCE)
+    types.Put(syncer::PREFERENCES);
   DCHECK(syncer::UserSelectableTypes().HasAll(types));
   sync_service_->OnUserChoseDatatypes(sync_everything, types);
 }
@@ -410,10 +416,15 @@ jboolean ProfileSyncServiceAndroid::HasSyncSetupCompleted(
   return sync_service_->HasSyncSetupCompleted();
 }
 
-jboolean ProfileSyncServiceAndroid::IsStartSuppressed(
+jboolean ProfileSyncServiceAndroid::IsSyncRequested(
     JNIEnv* env, jobject obj) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  return sync_prefs_->IsStartSuppressed();
+  return sync_service_->IsSyncRequested();
+}
+
+jboolean ProfileSyncServiceAndroid::IsSyncActive(JNIEnv* env, jobject obj) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  return sync_service_->IsSyncActive();
 }
 
 void ProfileSyncServiceAndroid::EnableEncryptEverything(
@@ -441,7 +452,7 @@ ScopedJavaLocalRef<jstring> ProfileSyncServiceAndroid::GetAboutInfoForTest(
   scoped_ptr<base::DictionaryValue> about_info =
       sync_ui_util::ConstructAboutInformation(sync_service_);
   std::string about_info_json;
-  base::JSONWriter::Write(about_info.get(), &about_info_json);
+  base::JSONWriter::Write(*about_info, &about_info_json);
 
   return ConvertUTF8ToJavaString(env, about_info_json);
 }
@@ -481,8 +492,17 @@ jlong ProfileSyncServiceAndroid::ModelTypeSetToSelection(
   if (types.Has(syncer::AUTOFILL_WALLET_DATA)) {
     model_type_selection |= AUTOFILL_WALLET;
   }
+  if (types.Has(syncer::AUTOFILL_WALLET_METADATA)) {
+    model_type_selection |= AUTOFILL_WALLET_METADATA;
+  }
   if (types.Has(syncer::PASSWORDS)) {
     model_type_selection |= PASSWORD;
+  }
+  if (types.Has(syncer::PREFERENCES)) {
+    model_type_selection |= PREFERENCE;
+  }
+  if (types.Has(syncer::PRIORITY_PREFERENCES)) {
+    model_type_selection |= PRIORITY_PREFERENCE;
   }
   if (types.Has(syncer::TYPED_URLS)) {
     model_type_selection |= TYPED_URL;

@@ -4,11 +4,11 @@
 
 #include "chrome/browser/ui/omnibox/omnibox_navigation_observer.h"
 
-#include "chrome/browser/autocomplete/shortcuts_backend.h"
 #include "chrome/browser/autocomplete/shortcuts_backend_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/ui/omnibox/alternate_nav_infobar_delegate.h"
+#include "components/omnibox/browser/shortcuts_backend.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
@@ -137,7 +137,8 @@ void OmniboxNavigationObserver::DidFailProvisionalLoad(
     content::RenderFrameHost* render_frame_host,
     const GURL& validated_url,
     int error_code,
-    const base::string16& error_description) {
+    const base::string16& error_description,
+    bool was_ignored_by_handler) {
   if ((load_state_ != LOAD_COMMITTED) && !render_frame_host->GetParent())
     delete this;
 }

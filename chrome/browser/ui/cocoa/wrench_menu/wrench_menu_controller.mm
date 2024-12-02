@@ -17,9 +17,9 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#import "chrome/browser/ui/cocoa/encoding_menu_controller_delegate_mac.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_container_view.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_controller.h"
-#import "chrome/browser/ui/cocoa/encoding_menu_controller_delegate_mac.h"
 #import "chrome/browser/ui/cocoa/l10n_util.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #import "chrome/browser/ui/cocoa/wrench_menu/menu_tracked_root_view.h"
@@ -44,6 +44,7 @@ using base::UserMetricsAction;
 - (void)adjustPositioning;
 - (void)performCommandDispatch:(NSNumber*)tag;
 - (NSButton*)zoomDisplay;
+- (void)menu:(NSMenu*)menu willHighlightItem:(NSMenuItem*)item;
 - (void)removeAllItems:(NSMenu*)menu;
 - (NSMenu*)recentTabsSubmenu;
 - (RecentTabsSubMenuModel*)recentTabsMenuModel;
@@ -113,6 +114,24 @@ class ZoomLevelObserver {
   return self;
 }
 
+- (void)dealloc {
+  [self browserWillBeDestroyed];
+  [super dealloc];
+}
+
+- (void)browserWillBeDestroyed {
+  // This method indicates imminent destruction. Destroy owned objects that hold
+  // a weak Browser*, or pass this call onto reference counted objects.
+  recentTabsMenuModelDelegate_.reset();
+  [self setModel:nullptr];
+  wrenchMenuModel_.reset();
+  buttonViewController_.reset();
+
+  [browserActionsController_ browserWillBeDestroyed];
+
+  browser_ = nullptr;
+}
+
 - (void)addItemToMenu:(NSMenu*)menu
               atIndex:(NSInteger)index
             fromModel:(ui::MenuModel*)model {
@@ -133,6 +152,7 @@ class ZoomLevelObserver {
   MenuTrackedRootView* view = nil;
   switch (command_id) {
     case IDC_EXTENSIONS_OVERFLOW_MENU: {
+      browserActionsMenuItem_ = customItem.get();
       view = [buttonViewController_ toolbarActionsOverflowItem];
       BrowserActionsContainerView* containerView =
           [buttonViewController_ overflowActionsContainerView];
@@ -326,6 +346,7 @@ class ZoomLevelObserver {
 }
 
 - (void)createModel {
+  DCHECK(browser_);
   recentTabsMenuModelDelegate_.reset();
   wrenchMenuModel_.reset(
       new WrenchMenuModel(acceleratorDelegate_.get(), browser_));
@@ -384,6 +405,13 @@ class ZoomLevelObserver {
 
 - (NSButton*)zoomDisplay {
   return [buttonViewController_ zoomDisplay];
+}
+
+- (void)menu:(NSMenu*)menu willHighlightItem:(NSMenuItem*)item {
+  if (browserActionsController_.get()) {
+    [browserActionsController_ setFocusedInOverflow:
+        (item == browserActionsMenuItem_)];
+  }
 }
 
 // -[NSMenu removeAllItems] is only available on 10.6+.

@@ -10,13 +10,13 @@ from telemetry import benchmark as benchmark_module
 from telemetry.core import exceptions
 from telemetry.core import util
 from telemetry.page import page
-from telemetry.page import page_set
 from telemetry.page import page_test
+from telemetry.story import story_set as story_set_module
 
 data_path = os.path.join(
     util.GetChromiumSrcDir(), 'content', 'test', 'data', 'gpu')
 
-wait_timeout = 20  # seconds
+wait_timeout = 60  # seconds
 
 harness_script = r"""
   var domAutomationController = {};
@@ -201,10 +201,10 @@ class _ContextLostValidator(page_test.PageTest):
 # Test that navigating to chrome://gpucrash causes the GPU process to crash
 # exactly one time per navigation.
 class GPUProcessCrashesExactlyOnce(page.Page):
-  def __init__(self, page_set, base_dir):
+  def __init__(self, story_set, base_dir):
     super(GPUProcessCrashesExactlyOnce, self).__init__(
       url='file://gpu_process_crash.html',
-      page_set=page_set,
+      page_set=story_set,
       base_dir=base_dir,
       name='GpuCrash.GPUProcessCrashesExactlyOnce')
     self.script_to_evaluate_on_commit = harness_script
@@ -220,10 +220,10 @@ class GPUProcessCrashesExactlyOnce(page.Page):
         'window.domAutomationController._loaded')
 
 class WebGLContextLostFromGPUProcessExitPage(page.Page):
-  def __init__(self, page_set, base_dir):
+  def __init__(self, story_set, base_dir):
     super(WebGLContextLostFromGPUProcessExitPage, self).__init__(
       url='file://webgl.html?query=kill_after_notification',
-      page_set=page_set,
+      page_set=story_set,
       base_dir=base_dir,
       name='ContextLost.WebGLContextLostFromGPUProcessExit')
     self.script_to_evaluate_on_commit = harness_script
@@ -241,10 +241,10 @@ class WebGLContextLostFromGPUProcessExitPage(page.Page):
 
 
 class WebGLContextLostFromLoseContextExtensionPage(page.Page):
-  def __init__(self, page_set, base_dir):
+  def __init__(self, story_set, base_dir):
     super(WebGLContextLostFromLoseContextExtensionPage, self).__init__(
       url='file://webgl.html?query=WEBGL_lose_context',
-      page_set=page_set,
+      page_set=story_set,
       base_dir=base_dir,
       name='ContextLost.WebGLContextLostFromLoseContextExtension')
     self.script_to_evaluate_on_commit = harness_script
@@ -261,10 +261,10 @@ class WebGLContextLostFromLoseContextExtensionPage(page.Page):
 
 
 class WebGLContextLostInHiddenTabPage(page.Page):
-  def __init__(self, page_set, base_dir):
+  def __init__(self, story_set, base_dir):
     super(WebGLContextLostInHiddenTabPage, self).__init__(
       url='file://webgl.html?query=kill_after_notification',
-      page_set=page_set,
+      page_set=story_set,
       base_dir=base_dir,
       name='ContextLost.WebGLContextLostInHiddenTab')
     self.script_to_evaluate_on_commit = harness_script
@@ -280,10 +280,10 @@ class WebGLContextLostInHiddenTabPage(page.Page):
 
 
 class WebGLContextLostFromQuantityPage(page.Page):
-  def __init__(self, page_set, base_dir):
+  def __init__(self, story_set, base_dir):
     super(WebGLContextLostFromQuantityPage, self).__init__(
       url='file://webgl.html?query=forced_quantity_loss',
-      page_set=page_set,
+      page_set=story_set,
       base_dir=base_dir,
       name='ContextLost.WebGLContextLostFromQuantity')
     self.script_to_evaluate_on_commit = harness_script
@@ -299,10 +299,10 @@ class WebGLContextLostFromQuantityPage(page.Page):
         'window.domAutomationController._loaded')
 
 class WebGLContextLostFromSelectElementPage(page.Page):
-  def __init__(self, page_set, base_dir):
+  def __init__(self, story_set, base_dir):
     super(WebGLContextLostFromSelectElementPage, self).__init__(
       url='file://webgl_with_select_element.html',
-      page_set=page_set,
+      page_set=story_set,
       base_dir=base_dir,
       name='ContextLost.WebGLContextLostFromSelectElement')
     self.script_to_evaluate_on_commit = harness_script
@@ -332,16 +332,15 @@ class ContextLost(benchmark_module.Benchmark):
   # For the record, this would have been another way to get the pages
   # to repeat. pageset_repeat would be another option.
   # options = {'page_repeat': 5}
-  def CreatePageSet(self, options):
-    ps = page_set.PageSet(
-      file_path=data_path,
-      user_agent_type='desktop',
+  def CreateStorySet(self, options):
+    ps = story_set_module.StorySet(
+      base_dir=data_path,
       serving_dirs=set(['']))
-    ps.AddUserStory(GPUProcessCrashesExactlyOnce(ps, ps.base_dir))
-    ps.AddUserStory(WebGLContextLostFromGPUProcessExitPage(ps, ps.base_dir))
-    ps.AddUserStory(
+    ps.AddStory(GPUProcessCrashesExactlyOnce(ps, ps.base_dir))
+    ps.AddStory(WebGLContextLostFromGPUProcessExitPage(ps, ps.base_dir))
+    ps.AddStory(
         WebGLContextLostFromLoseContextExtensionPage(ps, ps.base_dir))
-    ps.AddUserStory(WebGLContextLostFromQuantityPage(ps, ps.base_dir))
-    ps.AddUserStory(WebGLContextLostFromSelectElementPage(ps, ps.base_dir))
-    ps.AddUserStory(WebGLContextLostInHiddenTabPage(ps, ps.base_dir))
+    ps.AddStory(WebGLContextLostFromQuantityPage(ps, ps.base_dir))
+    ps.AddStory(WebGLContextLostFromSelectElementPage(ps, ps.base_dir))
+    ps.AddStory(WebGLContextLostInHiddenTabPage(ps, ps.base_dir))
     return ps

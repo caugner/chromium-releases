@@ -9,12 +9,15 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/location.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
@@ -87,11 +90,9 @@ void CloseBalloon(const std::string& balloon_id, ProfileID profile_id) {
 void ScheduleCloseBalloon(const std::string& extension_id, Profile* profile) {
   if (g_disable_close_balloon_for_testing)
     return;
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&CloseBalloon,
-                 kNotificationPrefix + extension_id,
-                 NotificationUIManager::GetProfileID(profile)));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&CloseBalloon, kNotificationPrefix + extension_id,
+                            NotificationUIManager::GetProfileID(profile)));
 }
 
 // Delegate for the app/extension crash notification balloon. Restarts the
@@ -450,7 +451,7 @@ void BackgroundContentsService::OnExtensionLoaded(
       // EXTENSIONS_READY callback.
       LoadBackgroundContents(profile,
                              BackgroundInfo::GetBackgroundURL(extension),
-                             base::ASCIIToUTF16("background"),
+                             "background",
                              base::UTF8ToUTF16(extension->id()));
     }
   }
@@ -567,7 +568,7 @@ void BackgroundContentsService::LoadBackgroundContentsForExtension(
   if (extension && BackgroundInfo::HasBackgroundPage(extension)) {
     LoadBackgroundContents(profile,
                            BackgroundInfo::GetBackgroundURL(extension),
-                           base::ASCIIToUTF16("background"),
+                           "background",
                            base::UTF8ToUTF16(extension->id()));
     return;
   }
@@ -595,7 +596,7 @@ void BackgroundContentsService::LoadBackgroundContentsFromDictionary(
       dict == NULL)
     return;
 
-  base::string16 frame_name;
+  std::string frame_name;
   std::string url;
   dict->GetString(kUrlKey, &url);
   dict->GetString(kFrameNameKey, &frame_name);
@@ -613,7 +614,7 @@ void BackgroundContentsService::LoadBackgroundContentsFromManifests(
         BackgroundInfo::HasBackgroundPage(extension.get())) {
       LoadBackgroundContents(
           profile, BackgroundInfo::GetBackgroundURL(extension.get()),
-          base::ASCIIToUTF16("background"), base::UTF8ToUTF16(extension->id()));
+          "background", base::UTF8ToUTF16(extension->id()));
     }
   }
 }
@@ -621,7 +622,7 @@ void BackgroundContentsService::LoadBackgroundContentsFromManifests(
 void BackgroundContentsService::LoadBackgroundContents(
     Profile* profile,
     const GURL& url,
-    const base::string16& frame_name,
+    const std::string& frame_name,
     const base::string16& application_id) {
   // We are depending on the fact that we will initialize before any user
   // actions or session restore can take place, so no BackgroundContents should
@@ -649,7 +650,7 @@ BackgroundContents* BackgroundContentsService::CreateBackgroundContents(
     int routing_id,
     int main_frame_route_id,
     Profile* profile,
-    const base::string16& frame_name,
+    const std::string& frame_name,
     const base::string16& application_id,
     const std::string& partition_id,
     content::SessionStorageNamespace* session_storage_namespace) {

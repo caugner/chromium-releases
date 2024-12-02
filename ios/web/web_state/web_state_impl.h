@@ -164,6 +164,9 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   const base::string16& GetTitle() const;
 
   // Gets the HTTP response headers associated with the current page.
+  // NOTE: For a WKWebView-based WebState, these headers are generated via
+  // net::CreateHeadersFromNSHTTPURLResponse(); see comments in
+  // http_response_headers_util.h for limitations.
   net::HttpResponseHeaders* GetHttpResponseHeaders() const;
 
   // Called when HTTP response headers are received.
@@ -219,6 +222,7 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   const GURL& GetVisibleURL() const override;
   const GURL& GetLastCommittedURL() const override;
   GURL GetCurrentURL(URLVerificationTrustLevel* trust_level) const override;
+  void ShowTransientContentView(CRWContentView* content_view) override;
   bool IsShowingWebInterstitial() const override;
   WebInterstitial* GetWebInterstitial() const override;
   void AddScriptCommandCallback(const ScriptCommandCallback& callback,
@@ -231,15 +235,11 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
                     bool bypass_cache,
                     const ImageDownloadCallback& callback) override;
 
-  // Called before navigation events to clear the currently-displayed
-  // WebInterstitials.
-  void ClearWebInterstitialForNavigation();
-
   // Adds |interstitial|'s view to the web controller's content view.
-  void DisplayWebInterstitial(WebInterstitialImpl* interstitial);
+  void ShowWebInterstitial(WebInterstitialImpl* interstitial);
 
-  // Called to dismiss the currently-displayed WebInterstitial.
-  void DismissWebInterstitial();
+  // Called to dismiss the currently-displayed transient content view.
+  void ClearTransientContentView();
 
   // NavigationManagerDelegate:
   void NavigateToPendingEntry() override;
@@ -280,7 +280,7 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   scoped_ptr<web::WebUIIOS> web_ui_;
 
   // A list of observers notified when page state changes. Weak references.
-  ObserverList<WebStateObserver, true> observers_;
+  base::ObserverList<WebStateObserver, true> observers_;
 
   // Map of all the HTTP response headers received, for each URL.
   // This map is cleared after each page load, and only the headers of the main
@@ -291,7 +291,7 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   std::string mime_type_;
   std::string content_language_header_;
 
-  // Weak pointer to the he interstital page being displayed, if any.
+  // Weak pointer to the interstitial page being displayed, if any.
   WebInterstitialImpl* interstitial_;
 
   // Returned by reference.

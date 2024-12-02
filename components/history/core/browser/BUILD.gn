@@ -17,9 +17,9 @@ static_library("browser") {
     "expire_history_backend.h",
     "history_backend.cc",
     "history_backend.h",
+    "history_backend_client.h",
     "history_backend_notifier.h",
     "history_backend_observer.h",
-    "history_client.cc",
     "history_client.h",
     "history_constants.cc",
     "history_constants.h",
@@ -80,6 +80,10 @@ static_library("browser") {
     "web_history_service.h",
   ]
 
+  public_deps = [
+    "//skia",
+  ]
+
   deps = [
     "//base",
     "//base:i18n",
@@ -91,7 +95,6 @@ static_library("browser") {
     "//components/signin/core/browser",
     "//google_apis",
     "//net",
-    "//skia",
     "//sql",
     "//sync",
     "//third_party/sqlite",

@@ -52,9 +52,14 @@ class ChromeDesktopImpl : public ChromeImpl {
 
   // Overridden from ChromeImpl:
   bool IsMobileEmulationEnabled() const override;
+  bool HasTouchScreen() const override;
   Status QuitImpl() override;
 
   const base::CommandLine& command() const;
+
+  Status WaitForNewAppWindow(const base::TimeDelta& timeout,
+                             const std::string& app_id,
+                             std::string* web_view_id);
 
  private:
   base::Process process_;

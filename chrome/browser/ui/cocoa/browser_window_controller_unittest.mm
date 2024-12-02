@@ -23,6 +23,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#import "testing/gtest_mac.h"
 
 using ::testing::Return;
 
@@ -338,7 +339,7 @@ TEST_F(BrowserWindowControllerTest, TestAdjustWindowHeight) {
   [controller_ resetWindowGrowthState];
   [controller_ adjustWindowHeightBy:40];
   NSRect finalFrame = [window frame];
-  EXPECT_FALSE(NSEqualRects(finalFrame, initialFrame));
+  EXPECT_NSNE(finalFrame, initialFrame);
   EXPECT_FLOAT_EQ(NSMaxY(finalFrame), NSMaxY(initialFrame));
   EXPECT_FLOAT_EQ(NSHeight(finalFrame), NSHeight(initialFrame) + 40);
   [controller_ adjustWindowHeightBy:-40];
@@ -355,7 +356,7 @@ TEST_F(BrowserWindowControllerTest, TestAdjustWindowHeight) {
   [controller_ resetWindowGrowthState];
   [controller_ adjustWindowHeightBy:40];
   finalFrame = [window frame];
-  EXPECT_FALSE(NSEqualRects(finalFrame, initialFrame));
+  EXPECT_NSNE(finalFrame, initialFrame);
   EXPECT_FLOAT_EQ(NSMinY(finalFrame), NSMinY(initialFrame));
   EXPECT_FLOAT_EQ(NSHeight(finalFrame), NSHeight(initialFrame) + 40);
   [controller_ adjustWindowHeightBy:-40];
@@ -369,18 +370,18 @@ TEST_F(BrowserWindowControllerTest, TestAdjustWindowHeight) {
   [window setFrame:initialFrame display:YES];
   [controller_ resetWindowGrowthState];
   [controller_ adjustWindowHeightBy:40];
-  EXPECT_TRUE(NSEqualRects([window frame], initialFrame));
+  EXPECT_NSEQ([window frame], initialFrame);
   [controller_ adjustWindowHeightBy:-40];
-  EXPECT_TRUE(NSEqualRects([window frame], initialFrame));
+  EXPECT_NSEQ([window frame], initialFrame);
 
   // Make the window the same size as the workarea.  Resizing both larger and
   // smaller should have no effect.
   [window setFrame:workarea display:YES];
   [controller_ resetWindowGrowthState];
   [controller_ adjustWindowHeightBy:40];
-  EXPECT_TRUE(NSEqualRects([window frame], workarea));
+  EXPECT_NSEQ([window frame], workarea);
   [controller_ adjustWindowHeightBy:-40];
-  EXPECT_TRUE(NSEqualRects([window frame], workarea));
+  EXPECT_NSEQ([window frame], workarea);
 
   // Make the window smaller than the workarea and place it near the bottom of
   // the workarea.  The window should grow down until it hits the bottom and
@@ -421,7 +422,7 @@ TEST_F(BrowserWindowControllerTest, TestAdjustWindowHeight) {
   [controller_ resetWindowGrowthState];
   [controller_ adjustWindowHeightBy:40];
   finalFrame = [window frame];
-  EXPECT_FALSE(NSEqualRects(finalFrame, initialFrame));
+  EXPECT_NSNE(finalFrame, initialFrame);
   EXPECT_FLOAT_EQ(NSMinY(finalFrame), NSMinY(initialFrame));
   EXPECT_FLOAT_EQ(NSHeight(finalFrame), NSHeight(initialFrame) + 40);
   NSPoint oldOrigin = initialFrame.origin;
@@ -744,7 +745,7 @@ void WaitForFullScreenTransition() {
 }
 
 // http://crbug.com/53586
-TEST_F(BrowserWindowFullScreenControllerTest, DISABLED_TestFullscreen) {
+TEST_F(BrowserWindowFullScreenControllerTest, TestFullscreen) {
   [controller_ showWindow:nil];
   EXPECT_FALSE([controller_ isInAnyFullscreenMode]);
 
@@ -762,7 +763,7 @@ TEST_F(BrowserWindowFullScreenControllerTest, DISABLED_TestFullscreen) {
 // please do not mark it as flaky without first verifying that there are no bot
 // problems.
 // http://crbug.com/53586
-TEST_F(BrowserWindowFullScreenControllerTest, DISABLED_TestActivate) {
+TEST_F(BrowserWindowFullScreenControllerTest, TestActivate) {
   [controller_ showWindow:nil];
 
   EXPECT_FALSE([controller_ isInAnyFullscreenMode]);

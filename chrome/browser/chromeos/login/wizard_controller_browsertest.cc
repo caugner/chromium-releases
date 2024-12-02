@@ -383,17 +383,17 @@ class WizardControllerTestURLFetcherFactory
       const GURL& url,
       net::URLFetcher::RequestType request_type,
       net::URLFetcherDelegate* d) override {
-    if (StartsWithASCII(
+    if (base::StartsWith(
             url.spec(),
             SimpleGeolocationProvider::DefaultGeolocationProviderURL().spec(),
-            true)) {
+            base::CompareCase::SENSITIVE)) {
       return scoped_ptr<net::URLFetcher>(new net::FakeURLFetcher(
           url, d, std::string(kGeolocationResponseBody), net::HTTP_OK,
           net::URLRequestStatus::SUCCESS));
     }
-    if (StartsWithASCII(url.spec(),
-                        chromeos::DefaultTimezoneProviderURL().spec(),
-                        true)) {
+    if (base::StartsWith(url.spec(),
+                         chromeos::DefaultTimezoneProviderURL().spec(),
+                         base::CompareCase::SENSITIVE)) {
       return scoped_ptr<net::URLFetcher>(new net::FakeURLFetcher(
           url, d, std::string(kTimezoneResponseBody), net::HTTP_OK,
           net::URLRequestStatus::SUCCESS));
@@ -1026,8 +1026,9 @@ class WizardControllerProxyAuthOnSigninTest
   DISALLOW_COPY_AND_ASSIGN(WizardControllerProxyAuthOnSigninTest);
 };
 
+// Disabled, see https://crbug.com/504928.
 IN_PROC_BROWSER_TEST_P(WizardControllerProxyAuthOnSigninTest,
-                       ProxyAuthDialogOnSigninScreen) {
+                       DISABLED_ProxyAuthDialogOnSigninScreen) {
   content::WindowedNotificationObserver auth_needed_waiter(
       chrome::NOTIFICATION_AUTH_NEEDED,
       content::NotificationService::AllSources());

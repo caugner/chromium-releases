@@ -11,17 +11,19 @@
 #include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_string_value_serializer.h"
+#include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_member.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_piece.h"
+#include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/extensions/event_router_forwarder.h"
 #include "chrome/browser/net/about_protocol_handler.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
@@ -29,6 +31,7 @@
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/browser/api/web_request/upload_data_presenter.h"
@@ -121,9 +124,9 @@ void GetPartOfMessageArguments(IPC::Message* message,
                                ExtensionMsg_MessageInvoke::Param* param) {
   ASSERT_EQ(ExtensionMsg_MessageInvoke::ID, message->type());
   ASSERT_TRUE(ExtensionMsg_MessageInvoke::Read(message, param));
-  ASSERT_GE(get<3>(*param).GetSize(), 2u);
+  ASSERT_GE(base::get<3>(*param).GetSize(), 2u);
   const base::Value* value = NULL;
-  ASSERT_TRUE(get<3>(*param).Get(1, &value));
+  ASSERT_TRUE(base::get<3>(*param).Get(1, &value));
   const base::ListValue* list = NULL;
   ASSERT_TRUE(value->GetAsList(&list));
   ASSERT_EQ(1u, list->GetSize());
@@ -160,7 +163,8 @@ class TestIPCSender : public IPC::Sender {
     EXPECT_EQ(ExtensionMsg_MessageInvoke::ID, message->type());
 
     EXPECT_FALSE(task_queue_.empty());
-    base::MessageLoop::current()->PostTask(FROM_HERE, task_queue_.front());
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  task_queue_.front());
     task_queue_.pop();
 
     sent_messages_.push_back(linked_ptr<IPC::Message>(message));
@@ -188,7 +192,7 @@ class ExtensionWebRequestTest : public testing::Test {
         new ChromeNetworkDelegate(event_router_.get(), &enable_referrers_));
     network_delegate_->set_profile(&profile_);
     network_delegate_->set_cookie_settings(
-        CookieSettings::Factory::GetForProfile(&profile_).get());
+        CookieSettingsFactory::GetForProfile(&profile_).get());
     context_.reset(new net::TestURLRequestContext(true));
     context_->set_network_delegate(network_delegate_.get());
     context_->Init();
@@ -482,11 +486,11 @@ namespace {
 // extraInfoSpec by the event handler. Returns true on success, otherwise false.
 bool GenerateInfoSpec(const std::string& values, int* result) {
   // Create a base::ListValue of strings.
-  std::vector<std::string> split_values;
   base::ListValue list_value;
-  size_t num_values = Tokenize(values, ",", &split_values);
-  for (size_t i = 0; i < num_values ; ++i)
-    list_value.Append(new base::StringValue(split_values[i]));
+  for (const std::string& cur :
+       base::SplitString(values, ",", base::KEEP_WHITESPACE,
+                         base::SPLIT_WANT_NONEMPTY))
+    list_value.Append(new base::StringValue(cur));
   return ExtensionWebRequestEventRouter::ExtraInfoSpec::InitFromValue(
       list_value, result);
 }
@@ -582,7 +586,8 @@ TEST_F(ExtensionWebRequestTest, AccessRequestBodyData) {
   // Contents of formData.
   const char kFormData[] =
       "{\"A\":[\"test text\"],\"B\":[\"\"],\"C\":[\"test password\"]}";
-  scoped_ptr<const base::Value> form_data(base::JSONReader::Read(kFormData));
+  scoped_ptr<const base::Value> form_data(
+      base::JSONReader::DeprecatedRead(kFormData));
   ASSERT_TRUE(form_data.get() != NULL);
   ASSERT_TRUE(form_data->GetType() == base::Value::TYPE_DICTIONARY);
   // Contents of raw.
@@ -790,7 +795,7 @@ class ExtensionWebRequestHeaderModificationTest
         new ChromeNetworkDelegate(event_router_.get(), &enable_referrers_));
     network_delegate_->set_profile(&profile_);
     network_delegate_->set_cookie_settings(
-        CookieSettings::Factory::GetForProfile(&profile_).get());
+        CookieSettingsFactory::GetForProfile(&profile_).get());
     context_.reset(new net::TestURLRequestContext(true));
     host_resolver_.reset(new net::MockHostResolver());
     host_resolver_->rules()->AddSimulatedFailure("doesnotexist");
@@ -924,7 +929,7 @@ TEST_P(ExtensionWebRequestHeaderModificationTest, TestModifications) {
       continue;
     ExtensionMsg_MessageInvoke::Param message_tuple;
     ExtensionMsg_MessageInvoke::Read(message, &message_tuple);
-    base::ListValue& args = get<3>(message_tuple);
+    base::ListValue& args = base::get<3>(message_tuple);
 
     std::string event_name;
     if (!args.GetString(0, &event_name) ||

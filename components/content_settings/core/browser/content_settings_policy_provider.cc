@@ -28,25 +28,27 @@ const char* kPrefToManageType[] = {
   prefs::kManagedDefaultPopupsSetting,
   prefs::kManagedDefaultGeolocationSetting,
   prefs::kManagedDefaultNotificationsSetting,
-  NULL,  // No policy for default value of content type auto-select-certificate
-  NULL,  // No policy for default value of fullscreen requests
-  NULL,  // No policy for default value of mouse lock requests
-  NULL,  // No policy for default value of mixed script blocking
-  NULL,  // The MEDIASTREAM setting is deprecated
+  nullptr,  // No policy for default value of auto select certificate
+  nullptr,  // No policy for default value of fullscreen requests
+  nullptr,  // No policy for default value of mouse lock requests
+  nullptr,  // No policy for default value of mixed script blocking
+  nullptr,  // The MEDIASTREAM setting is deprecated
   prefs::kManagedDefaultMediaStreamSetting,
   prefs::kManagedDefaultMediaStreamSetting,
-  NULL,  // No policy for default value of protocol handlers
-  NULL,  // No policy for default value of PPAPI broker
-  NULL,  // No policy for default value of multiple automatic downloads
-  NULL,  // No policy for default value of MIDI system exclusive requests
-  NULL,  // No policy for default value of push messaging requests
-  NULL,  // No policy for default value of SSL certificate decisions
+  nullptr,  // No policy for default value of protocol handlers
+  nullptr,  // No policy for default value of PPAPI broker
+  nullptr,  // No policy for default value of multiple automatic downloads
+  nullptr,  // No policy for default value of MIDI system exclusive requests
+  nullptr,  // No policy for default value of push messaging requests
+  nullptr,  // No policy for default value of SSL certificate decisions
 #if defined(OS_WIN)
-  NULL,  // No policy for default value of "switch to desktop"
+  nullptr,  // No policy for default value of "switch to desktop"
 #elif defined(OS_ANDROID) || defined(OS_CHROMEOS)
-  NULL,  // No policy for default value of protected media identifier
+  nullptr,  // No policy for default value of protected media identifier
 #endif
-  NULL,  // No policy for default value of app banners
+  nullptr,  // No policy for default value of app banners
+  nullptr,  // No policy for default value of site engagement
+  nullptr,  // No policy for default value of durable storage
 };
 static_assert(arraysize(kPrefToManageType) == CONTENT_SETTINGS_NUM_TYPES,
               "kPrefToManageType should have CONTENT_SETTINGS_NUM_TYPES "
@@ -226,7 +228,7 @@ void PolicyProvider::GetContentSettingsFromPreferences(
     DCHECK(pref);
     DCHECK(pref->IsManaged());
 
-    const base::ListValue* pattern_str_list = NULL;
+    const base::ListValue* pattern_str_list = nullptr;
     if (!pref->GetValue()->GetAsList(&pattern_str_list)) {
       NOTREACHED();
       return;
@@ -275,7 +277,7 @@ void PolicyProvider::GetAutoSelectCertificateSettingsFromPreferences(
   DCHECK(pref);
   DCHECK(pref->IsManaged());
 
-  const base::ListValue* pattern_filter_str_list = NULL;
+  const base::ListValue* pattern_filter_str_list = nullptr;
   if (!pref->GetValue()->GetAsList(&pattern_filter_str_list)) {
     NOTREACHED();
     return;
@@ -305,8 +307,8 @@ void PolicyProvider::GetAutoSelectCertificateSettingsFromPreferences(
       continue;
     }
 
-    scoped_ptr<base::Value> value(base::JSONReader::Read(pattern_filter_json,
-        base::JSON_ALLOW_TRAILING_COMMAS));
+    scoped_ptr<base::Value> value(base::JSONReader::DeprecatedRead(
+        pattern_filter_json, base::JSON_ALLOW_TRAILING_COMMAS));
     if (!value || !value->IsType(base::Value::TYPE_DICTIONARY)) {
       VLOG(1) << "Ignoring invalid certificate auto select setting. Reason:"
                  " Invalid JSON object: " << pattern_filter_json;
@@ -318,7 +320,7 @@ void PolicyProvider::GetAutoSelectCertificateSettingsFromPreferences(
     std::string pattern_str;
     bool pattern_read = pattern_filter_pair->GetStringWithoutPathExpansion(
         "pattern", &pattern_str);
-    base::DictionaryValue* cert_filter = NULL;
+    base::DictionaryValue* cert_filter = nullptr;
     pattern_filter_pair->GetDictionaryWithoutPathExpansion("filter",
                                                            &cert_filter);
     if (!pattern_read || !cert_filter) {
@@ -348,7 +350,7 @@ void PolicyProvider::GetAutoSelectCertificateSettingsFromPreferences(
 
 void PolicyProvider::ReadManagedDefaultSettings() {
   for (size_t type = 0; type < arraysize(kPrefToManageType); ++type) {
-    if (kPrefToManageType[type] == NULL) {
+    if (kPrefToManageType[type] == nullptr) {
       continue;
     }
     UpdateManagedDefaultSetting(ContentSettingsType(type));
@@ -413,7 +415,7 @@ void PolicyProvider::ShutdownOnUIThread() {
   if (!prefs_)
     return;
   pref_change_registrar_.RemoveAll();
-  prefs_ = NULL;
+  prefs_ = nullptr;
 }
 
 void PolicyProvider::OnPreferenceChanged(const std::string& name) {

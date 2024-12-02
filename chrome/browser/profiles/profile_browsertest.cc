@@ -23,8 +23,6 @@
 #include "chrome/browser/profiles/chrome_version_service.h"
 #include "chrome/browser/profiles/profile_impl.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/profiles/startup_task_runner_service.h"
-#include "chrome/browser/profiles/startup_task_runner_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_constants.h"
@@ -32,6 +30,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/bookmarks/browser/startup_task_runner_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_utils.h"
 #include "net/base/net_errors.h"
@@ -119,13 +118,6 @@ void CheckChromeVersion(Profile *profile, bool is_new) {
       ChromeVersionService::GetVersion(profile->GetPrefs());
   // Assert that created_by_version pref gets set to current version.
   EXPECT_EQ(created_by_version, pref_version);
-}
-
-void BlockThread(
-    base::WaitableEvent* is_blocked,
-    base::WaitableEvent* unblock) {
-  is_blocked->Signal();
-  unblock->Wait();
 }
 
 void FlushTaskRunner(base::SequencedTaskRunner* runner) {
@@ -373,9 +365,6 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, DISABLED_ProfileReadmeCreated) {
   MockProfileDelegate delegate;
   EXPECT_CALL(delegate, OnProfileCreated(testing::NotNull(), true, true));
 
-  // No delay before README creation.
-  ProfileImpl::create_readme_delay_ms = 0;
-
   {
     content::WindowedNotificationObserver observer(
         chrome::NOTIFICATION_PROFILE_CREATED,
@@ -387,48 +376,10 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, DISABLED_ProfileReadmeCreated) {
     // Wait for the profile to be created.
     observer.Wait();
 
-    // Wait for file thread to create the README.
-    content::RunAllPendingInMessageLoop(content::BrowserThread::FILE);
-
     // Verify that README exists.
     EXPECT_TRUE(base::PathExists(
         temp_dir.path().Append(chrome::kReadmeFilename)));
   }
-
-  FlushIoTaskRunnerAndSpinThreads();
-}
-
-// Test that Profile can be deleted before README file is created.
-IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, ProfileDeletedBeforeReadmeCreated) {
-  base::ScopedTempDir temp_dir;
-  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-
-  MockProfileDelegate delegate;
-  EXPECT_CALL(delegate, OnProfileCreated(testing::NotNull(), true, true));
-
-  // No delay before README creation.
-  ProfileImpl::create_readme_delay_ms = 0;
-
-  base::WaitableEvent is_blocked(false, false);
-  base::WaitableEvent* unblock = new base::WaitableEvent(false, false);
-
-  // Block file thread.
-  content::BrowserThread::PostTask(
-      content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&BlockThread, &is_blocked, base::Owned(unblock)));
-  // Wait for file thread to actually be blocked.
-  is_blocked.Wait();
-
-  scoped_ptr<Profile> profile(CreateProfile(
-      temp_dir.path(), &delegate, Profile::CREATE_MODE_SYNCHRONOUS));
-
-  // Delete the Profile instance before we give the file thread a chance to
-  // create the README.
-  profile.reset();
-
-  // Now unblock the file thread again and run pending tasks (this includes the
-  // task for README creation).
-  unblock->Signal();
 
   FlushIoTaskRunnerAndSpinThreads();
 }
@@ -480,7 +431,7 @@ std::string GetExitTypePreferenceFromDisk(Profile* profile) {
   if (!base::ReadFileToString(prefs_path, &prefs))
     return std::string();
 
-  scoped_ptr<base::Value> value(base::JSONReader::Read(prefs));
+  scoped_ptr<base::Value> value = base::JSONReader::Read(prefs);
   if (!value)
     return std::string();
 

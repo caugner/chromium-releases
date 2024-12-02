@@ -1183,7 +1183,7 @@ void WebFormControlElementToFormField(const WebFormControlElement& element,
     // attribute was present.
     field->autocomplete_attribute = "x-max-data-length-exceeded";
   }
-  if (LowerCaseEqualsASCII(element.getAttribute(kRole), "presentation"))
+  if (base::LowerCaseEqualsASCII(element.getAttribute(kRole), "presentation"))
     field->role = FormFieldData::ROLE_ATTRIBUTE_PRESENTATION;
 
   if (!IsAutofillableElement(element))
@@ -1314,7 +1314,7 @@ bool UnownedFormElementsAndFieldSetsToFormData(
   std::string lang;
   if (!html_element.isNull())
     lang = html_element.getAttribute("lang").utf8();
-  if ((lang.empty() || StartsWithASCII(lang, "en", false)) &&
+  if ((lang.empty() || base::StartsWithASCII(lang, "en", false)) &&
       !MatchesPattern(document.title(),
           base::UTF8ToUTF16("payment|checkout|address|delivery|shipping"))) {
     return false;

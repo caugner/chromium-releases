@@ -27,6 +27,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "base/version.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_comptr.h"
@@ -65,6 +66,7 @@
 #include "chrome/installer/util/self_cleaning_temp_dir.h"
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/user_experiment.h"
+#include "version.h"  // NOLINT
 
 #if defined(GOOGLE_CHROME_BUILD)
 #include "chrome/installer/util/updating_app_registration_data.h"
@@ -78,7 +80,6 @@ using installer::Product;
 using installer::ProductState;
 using installer::Products;
 
-const wchar_t kChromePipeName[] = L"\\\\.\\pipe\\ChromeCrashServices";
 const wchar_t kGoogleUpdatePipeName[] = L"\\\\.\\pipe\\GoogleCrashServices\\";
 const wchar_t kSystemPrincipalSid[] = L"S-1-5-18";
 
@@ -142,7 +143,8 @@ bool UncompressAndPatchChromeArchive(
     const installer::InstallerState& installer_state,
     installer::ArchivePatchHelper* archive_helper,
     installer::ArchiveType* archive_type,
-    installer::InstallStatus* install_status) {
+    installer::InstallStatus* install_status,
+    const base::Version& previous_version) {
   installer_state.UpdateStage(installer::UNCOMPRESSING);
   if (!archive_helper->Uncompress(NULL)) {
     *install_status = installer::UNCOMPRESSION_FAILED;
@@ -161,7 +163,8 @@ bool UncompressAndPatchChromeArchive(
 
   // Find the installed version's archive to serve as the source for patching.
   base::FilePath patch_source(installer::FindArchiveToPatch(original_state,
-                                                            installer_state));
+                                                            installer_state,
+                                                            previous_version));
   if (patch_source.empty()) {
     LOG(ERROR) << "Failed to find archive to patch.";
     *install_status = installer::DIFF_PATCH_SOURCE_MISSING;
@@ -682,7 +685,7 @@ void RepairChromeIfBroken(const InstallationState& original_state,
 
   // Replace --uninstall with --do-not-launch-chrome to cause chrome to
   // self-repair.
-  ReplaceFirstSubstringAfterOffset(
+  base::ReplaceFirstSubstringAfterOffset(
       &setup_args, 0, base::UTF8ToUTF16(installer::switches::kUninstall),
       base::UTF8ToUTF16(installer::switches::kDoNotLaunchChrome));
   base::CommandLine setup_command(base::CommandLine::NO_PROGRAM);
@@ -879,7 +882,8 @@ installer::InstallStatus RegisterDevChrome(
     // Create the Start menu shortcut and pin it to the taskbar.
     ShellUtil::ShortcutProperties shortcut_properties(ShellUtil::CURRENT_USER);
     chrome.AddDefaultShortcutProperties(chrome_exe, &shortcut_properties);
-    shortcut_properties.set_dual_mode(true);
+    if (InstallUtil::ShouldInstallMetroProperties())
+      shortcut_properties.set_dual_mode(true);
     shortcut_properties.set_pin_to_taskbar(true);
     ShellUtil::CreateOrUpdateShortcut(
         ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_DIR, chrome_dist,
@@ -1074,9 +1078,18 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
         installer_state->FindProduct(BrowserDistribution::CHROME_BROWSER);
     installer::InstallStatus status = installer::INVALID_STATE_FOR_OPTION;
     if (chrome_install) {
-      installer::HandleOsUpgradeForBrowser(*installer_state,
-                                           *chrome_install);
-      status = installer::INSTALL_REPAIRED;
+      scoped_ptr<FileVersionInfo> version_info(
+          FileVersionInfo::CreateFileVersionInfo(setup_exe));
+      const base::Version installed_version(
+          base::UTF16ToUTF8(version_info->product_version()));
+      if (installed_version.IsValid()) {
+        installer::HandleOsUpgradeForBrowser(*installer_state, *chrome_install,
+                                             installed_version);
+        status = installer::INSTALL_REPAIRED;
+      } else {
+        LOG(DFATAL) << "Failed to extract product version from "
+                    << setup_exe.value();
+      }
     } else {
       LOG(DFATAL) << "Chrome product not found.";
     }
@@ -1192,21 +1205,18 @@ bool ShowRebootDialog() {
 // Returns the Custom information for the client identified by the exe path
 // passed in. This information is used for crash reporting.
 google_breakpad::CustomClientInfo* GetCustomInfo(const wchar_t* exe_path) {
-  base::string16 product;
   base::string16 version;
   scoped_ptr<FileVersionInfo> version_info(
       FileVersionInfo::CreateFileVersionInfo(base::FilePath(exe_path)));
-  if (version_info.get()) {
+  if (version_info.get())
     version = version_info->product_version();
-    product = version_info->product_short_name();
-  }
 
   if (version.empty())
     version = L"0.1.0.0";
 
-  if (product.empty())
-    product = L"Chrome Installer";
-
+  // Report crashes under the same product name as the browser. This string
+  // MUST match server-side configuration.
+  base::string16 product(base::ASCIIToUTF16(PRODUCT_SHORTNAME_STRING));
   static google_breakpad::CustomInfoEntry ver_entry(L"ver", version.c_str());
   static google_breakpad::CustomInfoEntry prod_entry(L"prod", product.c_str());
   static google_breakpad::CustomInfoEntry plat_entry(L"plat", L"Win32");
@@ -1248,6 +1258,15 @@ scoped_ptr<google_breakpad::ExceptionHandler> InitializeCrashReporting(
 
   base::string16 pipe_name = kGoogleUpdatePipeName;
   pipe_name += user_sid;
+
+#ifdef _WIN64
+  // The protocol for connecting to the out-of-process Breakpad crash
+  // reporter is different for x86-32 and x86-64: the message sizes
+  // are different because the message struct contains a pointer.  As
+  // a result, there are two different named pipes to connect to.  The
+  // 64-bit one is distinguished with an "-x64" suffix.
+  pipe_name += L"-x64";
+#endif
 
   return scoped_ptr<google_breakpad::ExceptionHandler>(
       new google_breakpad::ExceptionHandler(
@@ -1354,6 +1373,12 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
   base::FilePath uncompressed_archive(cmd_line.GetSwitchValuePath(
       switches::kUncompressedArchive));
   if (uncompressed_archive.empty()) {
+    base::Version previous_version;
+    if (cmd_line.HasSwitch(installer::switches::kPreviousVersion)) {
+      previous_version = base::Version(cmd_line.GetSwitchValueASCII(
+          installer::switches::kPreviousVersion));
+    }
+
     scoped_ptr<ArchivePatchHelper> archive_helper(
         CreateChromeArchiveHelper(setup_exe, cmd_line, installer_state,
                                   unpack_path));
@@ -1364,7 +1389,8 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
                                            installer_state,
                                            archive_helper.get(),
                                            archive_type,
-                                           &install_status)) {
+                                           &install_status,
+                                           previous_version)) {
         DCHECK_NE(install_status, UNKNOWN_STATUS);
         return install_status;
       }

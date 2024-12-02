@@ -10,13 +10,14 @@
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/content_settings/content_settings_mock_observer.h"
-#include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/content_settings/mock_settings_observer.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/content_settings_details.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/base/static_cookie_policy.h"
@@ -404,8 +405,8 @@ TEST_F(HostContentSettingsMapTest, HostTrimEndingDotCheck) {
   TestingProfile profile;
   HostContentSettingsMap* host_content_settings_map =
       profile.GetHostContentSettingsMap();
-  CookieSettings* cookie_settings =
-      CookieSettings::Factory::GetForProfile(&profile).get();
+  content_settings::CookieSettings* cookie_settings =
+      CookieSettingsFactory::GetForProfile(&profile).get();
 
   ContentSettingsPattern pattern =
        ContentSettingsPattern::FromString("[*.]example.com");
@@ -707,12 +708,12 @@ TEST_F(HostContentSettingsMapTest, CanonicalizeExceptionsUnicodeOnly) {
 TEST_F(HostContentSettingsMapTest, CanonicalizeExceptionsUnicodeAndPunycode) {
   TestingProfile profile;
 
-  scoped_ptr<base::Value> value(base::JSONReader::Read(
+  scoped_ptr<base::Value> value(base::JSONReader::DeprecatedRead(
       "{\"[*.]\\xC4\\x87ira.com,*\":{\"images\":1}}"));
   profile.GetPrefs()->Set(prefs::kContentSettingsPatternPairs, *value);
 
   // Set punycode equivalent, with different setting.
-  scoped_ptr<base::Value> puny_value(base::JSONReader::Read(
+  scoped_ptr<base::Value> puny_value(base::JSONReader::DeprecatedRead(
       "{\"[*.]xn--ira-ppa.com,*\":{\"images\":2}}"));
   profile.GetPrefs()->Set(
       prefs::kContentSettingsPatternPairs, *puny_value);
@@ -720,8 +721,8 @@ TEST_F(HostContentSettingsMapTest, CanonicalizeExceptionsUnicodeAndPunycode) {
   // Initialize the content map.
   profile.GetHostContentSettingsMap();
 
-  const base::DictionaryValue* content_setting_prefs =
-      profile.GetPrefs()->GetDictionary(
+  const base::DictionaryValue& content_setting_prefs =
+      *profile.GetPrefs()->GetDictionary(
           prefs::kContentSettingsImagesPatternPairs);
   std::string prefs_as_json;
   base::JSONWriter::Write(content_setting_prefs, &prefs_as_json);

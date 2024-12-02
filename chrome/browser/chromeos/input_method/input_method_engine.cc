@@ -22,10 +22,11 @@
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/ime/candidate_window.h"
 #include "ui/base/ime/chromeos/component_extension_ime_manager.h"
-#include "ui/base/ime/chromeos/composition_text.h"
+#include "ui/base/ime/chromeos/composition_text_chromeos.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/ime/chromeos/ime_keymap.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
+#include "ui/base/ime/input_method.h"
 #include "ui/base/ime/text_input_flags.h"
 #include "ui/chromeos/ime/input_method_menu_item.h"
 #include "ui/chromeos/ime/input_method_menu_manager.h"
@@ -71,13 +72,13 @@ size_t GetUtf8StringLength(const char* s) {
 
 std::string GetKeyFromEvent(const ui::KeyEvent& event) {
   const std::string code = event.GetCodeString();
-  if (StartsWithASCII(code, "Control", true))
+  if (base::StartsWith(code, "Control", base::CompareCase::SENSITIVE))
     return "Ctrl";
-  if (StartsWithASCII(code, "Shift", true))
+  if (base::StartsWith(code, "Shift", base::CompareCase::SENSITIVE))
     return "Shift";
-  if (StartsWithASCII(code, "Alt", true))
+  if (base::StartsWith(code, "Alt", base::CompareCase::SENSITIVE))
     return "Alt";
-  if (StartsWithASCII(code, "Arrow", true))
+  if (base::StartsWith(code, "Arrow", base::CompareCase::SENSITIVE))
     return code.substr(5);
   if (code == "Escape")
     return "Esc";
@@ -291,8 +292,8 @@ bool InputMethodEngine::SendKeyEvents(
     return false;
   }
 
-  ui::EventProcessor* dispatcher =
-      ash::Shell::GetPrimaryRootWindow()->GetHost()->event_processor();
+  ui::InputMethod* input_method =
+      ash::Shell::GetTargetRootWindow()->GetHost()->GetInputMethod();
 
   for (size_t i = 0; i < events.size(); ++i) {
     const KeyboardEvent& event = events[i];
@@ -323,9 +324,7 @@ bool InputMethodEngine::SendKeyEvents(
         ui::EventTimeForNow());
     base::AutoReset<const ui::KeyEvent*> reset_sent_key(&sent_key_event_,
                                                         &ui_event);
-    ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&ui_event);
-    if (details.dispatcher_destroyed)
-      break;
+    input_method->DispatchKeyEvent(ui_event);
   }
 
   return true;
@@ -599,6 +598,8 @@ void InputMethodEngine::Disable() {
   if (!CheckProfile())
     return;
   active_component_id_.clear();
+  IMEBridge::Get()->GetInputContextHandler()->CommitText(
+      base::UTF16ToUTF8(composition_text_->text()));
   observer_->OnDeactivated(active_component_id_);
 }
 

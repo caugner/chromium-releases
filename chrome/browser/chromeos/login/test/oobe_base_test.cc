@@ -10,7 +10,10 @@
 #include "base/path_service.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
+#include "chrome/browser/chromeos/login/session/user_session_manager.h"
+#include "chrome/browser/chromeos/login/session/user_session_manager_test_api.h"
 #include "chrome/browser/chromeos/login/test/https_forwarder.h"
+#include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 #include "chrome/browser/chromeos/net/network_portal_detector_test_impl.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/ui/webui/signin/inline_login_ui.h"
@@ -126,6 +129,14 @@ void OobeBaseTest::SetUpOnMainThread() {
       chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
       content::NotificationService::AllSources()));
 
+  js_checker_.set_web_contents(LoginDisplayHostImpl::default_host()
+                                   ->GetWebUILoginView()
+                                   ->GetWebContents());
+
+  test::UserSessionManagerTestApi session_manager_test_api(
+      UserSessionManager::GetInstance());
+  session_manager_test_api.SetShouldObtainTokenHandleInTests(false);
+
   ExtensionApiTest::SetUpOnMainThread();
 }
 
@@ -212,12 +223,7 @@ base::Closure OobeBaseTest::SimulateNetworkPortalClosure() {
 }
 
 void OobeBaseTest::JsExpect(const std::string& expression) {
-  bool result;
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-      GetLoginUI()->GetWebContents(),
-      "window.domAutomationController.send(!!(" + expression + "));",
-       &result));
-  ASSERT_TRUE(result) << expression;
+  JS().ExpectTrue(expression);
 }
 
 content::WebUI* OobeBaseTest::GetLoginUI() {
@@ -239,13 +245,12 @@ void OobeBaseTest::WaitForGaiaPageLoad() {
   if (!use_webview())
     return;
 
-  ASSERT_TRUE(content::ExecuteScript(
-      GetLoginUI()->GetWebContents(),
+  JS().Evaluate(
       "$('gaia-signin').gaiaAuthHost_.addEventListener('ready',"
       "function() {"
       "window.domAutomationController.setAutomationId(0);"
       "window.domAutomationController.send('GaiaReady');"
-      "});"));
+      "});");
 
   content::DOMMessageQueue message_queue;
   std::string message;
@@ -278,8 +283,8 @@ void OobeBaseTest::SetSignFormField(const std::string& field_id,
       "var e = new Event('input');"
       "document.getElementById('$FieldId').dispatchEvent(e);"
       "})();";
-  ReplaceSubstringsAfterOffset(&js, 0, "$FieldId", field_id);
-  ReplaceSubstringsAfterOffset(&js, 0, "$FieldValue", field_value);
+  base::ReplaceSubstringsAfterOffset(&js, 0, "$FieldId", field_id);
+  base::ReplaceSubstringsAfterOffset(&js, 0, "$FieldValue", field_value);
   ExecuteJsInSigninFrame(js);
 }
 

@@ -24,10 +24,10 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Process;
 import android.provider.Settings;
-import android.util.Log;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
+import org.chromium.base.Log;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -35,7 +35,7 @@ import java.util.List;
 
 @JNINamespace("media")
 class AudioManagerAndroid {
-    private static final String TAG = "AudioManagerAndroid";
+    private static final String TAG = "cr.media";
 
     // Set to true to enable debug logs. Avoid in production builds.
     // NOTE: always check in as false.

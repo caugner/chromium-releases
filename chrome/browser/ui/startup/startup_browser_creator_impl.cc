@@ -16,12 +16,13 @@
 #include "base/environment.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/apps/install_chrome_app.h"
@@ -76,10 +77,12 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_metrics.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/locale_settings.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/rappor/rappor_utils.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/notification_observer.h"
@@ -91,6 +94,7 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
+#include "net/base/network_change_notifier.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_MACOSX)
@@ -297,7 +301,8 @@ StartupBrowserCreatorImpl::StartupBrowserCreatorImpl(
       command_line_(command_line),
       profile_(NULL),
       browser_creator_(NULL),
-      is_first_run_(is_first_run == chrome::startup::IS_FIRST_RUN) {
+      is_first_run_(is_first_run == chrome::startup::IS_FIRST_RUN),
+      welcome_run_type_(WelcomeRunType::NONE) {
 }
 
 StartupBrowserCreatorImpl::StartupBrowserCreatorImpl(
@@ -309,7 +314,8 @@ StartupBrowserCreatorImpl::StartupBrowserCreatorImpl(
       command_line_(command_line),
       profile_(NULL),
       browser_creator_(browser_creator),
-      is_first_run_(is_first_run == chrome::startup::IS_FIRST_RUN) {
+      is_first_run_(is_first_run == chrome::startup::IS_FIRST_RUN),
+      welcome_run_type_(WelcomeRunType::NONE) {
 }
 
 StartupBrowserCreatorImpl::~StartupBrowserCreatorImpl() {
@@ -319,6 +325,10 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
                                        const std::vector<GURL>& urls_to_open,
                                        bool process_startup,
                                        chrome::HostDesktopType desktop_type) {
+  UMA_HISTOGRAM_COUNTS_100("Startup.BrowserLaunchURLCount",
+      static_cast<base::HistogramBase::Sample>(urls_to_open.size()));
+  RecordRapporOnStartupURLs(urls_to_open);
+
   DCHECK(profile);
   profile_ = profile;
 
@@ -490,7 +500,7 @@ bool StartupBrowserCreatorImpl::OpenApplicationWindow(
     return false;
 
 #if defined(OS_WIN)  // Fix up Windows shortcuts.
-  ReplaceSubstringsAfterOffset(&url_string, 0, "\\x", "%");
+  base::ReplaceSubstringsAfterOffset(&url_string, 0, "\\x", "%");
 #endif
   GURL url(url_string);
 
@@ -535,6 +545,9 @@ void StartupBrowserCreatorImpl::ProcessLaunchURLs(
     return;
   }
 
+  // Determine whether or not this launch must include the welcome page.
+  InitializeWelcomeRunType(urls_to_open);
+
 // TODO(tapted): Move this to startup_browser_creator_win.cc after refactor.
 #if defined(OS_WIN)
   if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
@@ -561,11 +574,18 @@ void StartupBrowserCreatorImpl::ProcessLaunchURLs(
     SessionService* service =
         SessionServiceFactory::GetForProfileForSessionRestore(profile_);
     if (service && service->ShouldNewWindowStartSession()) {
-      // Restore the last session if any.
-      if (!HasPendingUncleanExit(profile_) &&
-          service->RestoreIfNecessary(urls_to_open)) {
-        return;
+      // Restore the last session if any, optionally including the welcome page
+      // if desired.
+      if (!HasPendingUncleanExit(profile_)) {
+        std::vector<GURL> adjusted_urls(urls_to_open);
+        if (welcome_run_type_ == WelcomeRunType::FIRST_TAB) {
+          adjusted_urls.insert(adjusted_urls.begin(),
+                               internals::GetWelcomePageURL());
+        }
+        if (service->RestoreIfNecessary(adjusted_urls))
+          return;
       }
+
       // Open user-specified URLs like pinned tabs and startup tabs.
       Browser* browser = ProcessSpecifiedURLs(urls_to_open, desktop_type);
       if (browser) {
@@ -577,9 +597,9 @@ void StartupBrowserCreatorImpl::ProcessLaunchURLs(
 
   // Session startup didn't occur, open the urls.
   Browser* browser = NULL;
-  std::vector<GURL> adjust_urls = urls_to_open;
-  if (adjust_urls.empty()) {
-    AddStartupURLs(&adjust_urls);
+  std::vector<GURL> adjusted_urls = urls_to_open;
+  if (adjusted_urls.empty()) {
+    AddStartupURLs(&adjusted_urls);
   } else if (!command_line_.HasSwitch(switches::kOpenInNewWindow)) {
     // Always open a list of urls in a window on the native desktop.
     browser = chrome::FindTabbedBrowser(profile_, false,
@@ -587,8 +607,8 @@ void StartupBrowserCreatorImpl::ProcessLaunchURLs(
   }
   // This will launch a browser; prevent session restore.
   StartupBrowserCreator::in_synchronous_profile_launch_ = true;
-  browser = OpenURLsInBrowser(browser, process_startup, adjust_urls,
-                              desktop_type);
+  browser =
+      OpenURLsInBrowser(browser, process_startup, adjusted_urls, desktop_type);
   StartupBrowserCreator::in_synchronous_profile_launch_ = false;
   AddInfoBarsIfNecessary(browser, is_process_startup);
 }
@@ -642,11 +662,17 @@ bool StartupBrowserCreatorImpl::ProcessStartupURLs(
     }
 #endif
 
+    // Optionally include the welcome page.
+    std::vector<GURL> adjusted_urls(urls_to_open);
+    if (welcome_run_type_ == WelcomeRunType::FIRST_TAB) {
+      adjusted_urls.insert(adjusted_urls.begin(),
+                           internals::GetWelcomePageURL());
+    }
+
     // The startup code only executes for browsers launched in desktop mode.
     // i.e. HOST_DESKTOP_TYPE_NATIVE. Ash should never get here.
     Browser* browser = SessionRestore::RestoreSession(
-        profile_, NULL, desktop_type, restore_behavior,
-        urls_to_open);
+        profile_, NULL, desktop_type, restore_behavior, adjusted_urls);
 
     AddInfoBarsIfNecessary(browser, chrome::startup::IS_PROCESS_STARTUP);
     return true;
@@ -699,6 +725,9 @@ Browser* StartupBrowserCreatorImpl::ProcessSpecifiedURLs(
     UrlsToTabs(urls, &tabs);
   } else if (pref.type == SessionStartupPref::URLS && !pref.urls.empty() &&
              !HasPendingUncleanExit(profile_)) {
+    // Optionally include the welcome page first.
+    if (welcome_run_type_ == WelcomeRunType::FIRST_TAB)
+      UrlsToTabs(std::vector<GURL>(1, internals::GetWelcomePageURL()), &tabs);
     // Only use the set of urls specified in preferences if nothing was
     // specified on the command line. Filter out any urls that are to be
     // restored by virtue of having been previously pinned.
@@ -785,7 +814,6 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(
                                   ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
     params.disposition = first_tab ? NEW_FOREGROUND_TAB : NEW_BACKGROUND_TAB;
     params.tabstrip_add_types = add_types;
-    params.extension_app_id = tabs[i].app_id;
 
 #if defined(ENABLE_RLZ) && !defined(OS_IOS)
     if (process_startup && google_util::IsGoogleHomePageUrl(tabs[i].url)) {
@@ -881,12 +909,14 @@ void StartupBrowserCreatorImpl::AddStartupURLs(
     }
   }
 
-  // Otherwise open at least the new tab page (and the welcome page, if this
-  // is the first time the browser is being started), or the set of URLs
+  // Otherwise open at least the new tab page (and optionally the welcome page
+  // at the front or back as indicated by welcome_run_type_), or the set of URLs
   // specified on the command line.
   if (startup_urls->empty()) {
+    if (welcome_run_type_ == WelcomeRunType::FIRST_TAB)
+      startup_urls->push_back(internals::GetWelcomePageURL());
     startup_urls->push_back(GURL(chrome::kChromeUINewTabURL));
-    if (first_run::ShouldShowWelcomePage())
+    if (welcome_run_type_ == WelcomeRunType::FIRST_RUN_LAST_TAB)
       startup_urls->push_back(internals::GetWelcomePageURL());
   }
 
@@ -916,5 +946,84 @@ void StartupBrowserCreatorImpl::AddStartupURLs(
       else
         startup_urls->insert(startup_urls->begin(), sync_promo_url);
     }
+  }
+}
+
+// For first-run, the type will be FIRST_RUN_LAST for all systems except for
+// Windows 10+, where it will be FIRST_RUN_FIRST. For non-first run, the type
+// will be NONE for all systems except for Windows 10+, where it will be
+// ANY_RUN_FIRST if this is the first somewhat normal launch since an OS
+// upgrade.
+void StartupBrowserCreatorImpl::InitializeWelcomeRunType(
+    const std::vector<GURL>& urls_to_open) {
+  DCHECK_EQ(static_cast<int>(WelcomeRunType::NONE),
+            static_cast<int>(welcome_run_type_));
+#if defined(OS_WIN)
+  // Do not welcome if there are any URLs to open.
+  if (!urls_to_open.empty())
+    return;
+
+  base::win::OSInfo* const os_info = base::win::OSInfo::GetInstance();
+  const base::win::OSInfo::VersionNumber v(os_info->version_number());
+  const std::string this_version(base::StringPrintf("%d.%d", v.major, v.minor));
+  PrefService* const local_state = g_browser_process->local_state();
+
+  // Always welcome on first run.
+  if (first_run::ShouldShowWelcomePage()) {
+    // First tab for Win10+, last tab otherwise.
+    welcome_run_type_ = os_info->version() >= base::win::VERSION_WIN10
+                            ? WelcomeRunType::FIRST_TAB
+                            : WelcomeRunType::FIRST_RUN_LAST_TAB;
+  } else {
+    // Otherwise, do not welcome pre-Win10.
+    if (base::win::GetVersion() < base::win::VERSION_WIN10)
+      return;
+
+    // Do not welcome if launching into incognito.
+    if (IncognitoModePrefs::ShouldLaunchIncognito(command_line_,
+                                                  profile_->GetPrefs())) {
+      return;
+    }
+
+    // Do not welcome if there is no local state (tests).
+    if (!local_state)
+      return;
+
+    // Do not welcome if disabled by policy or master_preferences.
+    if (!local_state->GetBoolean(prefs::kWelcomePageOnOSUpgradeEnabled))
+      return;
+
+    // Do not welcome if already shown for this OS version.
+    if (local_state->GetString(prefs::kLastWelcomedOSVersion) == this_version)
+      return;
+
+    // Do not welcome if offline.
+    if (net::NetworkChangeNotifier::IsOffline())
+      return;
+
+    // Do not welcome if Chrome was the default browser at startup.
+    if (g_browser_process->CachedDefaultWebClientState() ==
+        ShellIntegration::IS_DEFAULT) {
+      return;
+    }
+
+    // Show the welcome page in the first tab.
+    welcome_run_type_ = WelcomeRunType::FIRST_TAB;
+  }
+
+  // Remember that the welcome page was shown for this OS version.
+  local_state->SetString(prefs::kLastWelcomedOSVersion, this_version);
+#else  // OS_WIN
+  // Show the welcome page as the last tab only on first-run.
+  if (first_run::ShouldShowWelcomePage())
+    welcome_run_type_ = WelcomeRunType::FIRST_RUN_LAST_TAB;
+#endif  // !OS_WIN
+}
+
+void StartupBrowserCreatorImpl::RecordRapporOnStartupURLs(
+    const std::vector<GURL>& urls_to_open) {
+  for (const GURL& url : urls_to_open) {
+    rappor::SampleDomainAndRegistryFromGURL(g_browser_process->rappor_service(),
+                                            "Startup.BrowserLaunchURL", url);
   }
 }

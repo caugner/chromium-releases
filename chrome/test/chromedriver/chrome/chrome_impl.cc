@@ -4,12 +4,20 @@
 
 #include "chrome/test/chromedriver/chrome/chrome_impl.h"
 
+#include "base/bind.h"
 #include "chrome/test/chromedriver/chrome/devtools_client.h"
 #include "chrome/test/chromedriver/chrome/devtools_event_listener.h"
 #include "chrome/test/chromedriver/chrome/devtools_http_client.h"
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/chrome/web_view_impl.h"
 #include "chrome/test/chromedriver/net/port_server.h"
+
+namespace {
+
+void DoNothingWithWebViewInfo(const WebViewInfo& view) {
+}
+
+}  // namespace
 
 ChromeImpl::~ChromeImpl() {
   if (!quit_)
@@ -20,7 +28,7 @@ Status ChromeImpl::GetAsDesktop(ChromeDesktopImpl** desktop) {
   return Status(kUnknownError, "operation unsupported");
 }
 
-const BrowserInfo* ChromeImpl::GetBrowserInfo() {
+const BrowserInfo* ChromeImpl::GetBrowserInfo() const {
   return devtools_http_client_->browser_info();
 }
 
@@ -34,6 +42,12 @@ bool ChromeImpl::HasCrashedWebView() {
 }
 
 Status ChromeImpl::GetWebViewIds(std::list<std::string>* web_view_ids) {
+  WebViewCallback callback = base::Bind(&DoNothingWithWebViewInfo);
+  return UpdateWebViewIds(web_view_ids, callback);
+}
+
+Status ChromeImpl::UpdateWebViewIds(std::list<std::string>* web_view_ids,
+                                    const WebViewCallback& on_open_web_view) {
   WebViewsInfo views_info;
   Status status = devtools_http_client_->GetWebViewsInfo(&views_info);
   if (status.IsError())
@@ -55,7 +69,8 @@ Status ChromeImpl::GetWebViewIds(std::list<std::string>* web_view_ids) {
     if (view.type == WebViewInfo::kPage ||
         view.type == WebViewInfo::kApp ||
         (view.type == WebViewInfo::kOther &&
-         view.url.find("chrome-extension://") == 0)) {
+         (view.url.find("chrome-extension://") == 0 ||
+          view.url == "chrome://print/"))) {
       bool found = false;
       for (WebViewList::const_iterator web_view_iter = web_views_.begin();
            web_view_iter != web_views_.end(); ++web_view_iter) {
@@ -78,6 +93,7 @@ Status ChromeImpl::GetWebViewIds(std::list<std::string>* web_view_ids) {
             devtools_http_client_->browser_info(),
             client.Pass(),
             devtools_http_client_->device_metrics())));
+        on_open_web_view.Run(view);
       }
     }
   }
@@ -121,6 +137,10 @@ Status ChromeImpl::ActivateWebView(const std::string& id) {
 }
 
 bool ChromeImpl::IsMobileEmulationEnabled() const {
+  return false;
+}
+
+bool ChromeImpl::HasTouchScreen() const {
   return false;
 }
 
