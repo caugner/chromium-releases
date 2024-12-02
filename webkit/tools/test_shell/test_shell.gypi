@@ -156,7 +156,7 @@
       'target_name': 'test_shell_pak',
       'type': 'none',
       'variables': {
-        'repack_path': '../../../tools/data_pack/repack.py',
+        'repack_path': '../../../tools/grit/grit/format/repack.py',
         'pak_path': '<(INTERMEDIATE_DIR)/repack/test_shell.pak',
       },
       'conditions': [
@@ -284,7 +284,7 @@
             '<(DEPTH)/third_party/mesa/mesa.gyp:osmesa',
           ],
           'variables': {
-            'repack_path': '../../../tools/data_pack/repack.py',
+            'repack_path': '../../../tools/grit/grit/format/repack.py',
           },
           'actions': [
             {
@@ -378,6 +378,8 @@
         '../../appcache/appcache_storage_impl_unittest.cc',
         '../../appcache/appcache_update_job_unittest.cc',
         '../../appcache/appcache_url_request_job_unittest.cc',
+        '../../appcache/mock_appcache_policy.h',
+        '../../appcache/mock_appcache_policy.cc',
         '../../appcache/mock_appcache_service.cc',
         '../../appcache/mock_appcache_service.h',
         '../../appcache/mock_appcache_storage.cc',
@@ -392,7 +394,6 @@
         '../../database/database_tracker_unittest.cc',
         '../../database/database_util_unittest.cc',
         '../../database/quota_table_unittest.cc',
-        '../../fileapi/file_system_context_unittest.cc',
         '../../fileapi/file_system_directory_database_unittest.cc',
         '../../fileapi/file_system_file_util_unittest.cc',
         '../../fileapi/file_system_operation_unittest.cc',
@@ -447,13 +448,13 @@
         '../../plugins/ppapi/resource_tracker_unittest.cc',
         '../../plugins/ppapi/time_conversion_unittest.cc',
         '../../plugins/ppapi/url_request_info_unittest.cc',
+        '../../quota/mock_quota_manager.cc',
+        '../../quota/mock_quota_manager.h',
+        '../../quota/mock_quota_manager_unittest.cc',
         '../../quota/mock_special_storage_policy.cc',
         '../../quota/mock_special_storage_policy.h',
         '../../quota/mock_storage_client.cc',
         '../../quota/mock_storage_client.h',
-        '../../quota/mock_quota_manager.cc',
-        '../../quota/mock_quota_manager.h',
-        '../../quota/mock_quota_manager_unittest.cc',
         '../../quota/quota_database_unittest.cc',
         '../../quota/quota_manager_unittest.cc',
         '../../quota/quota_temporary_storage_evictor_unittest.cc',

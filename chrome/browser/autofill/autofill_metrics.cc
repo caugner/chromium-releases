@@ -42,7 +42,7 @@ enum FieldTypeGroupForMetrics {
   ADDRESS_ZIP,
   ADDRESS_COUNTRY,
   PHONE,
-  FAX,
+  FAX,  // Deprecated.
   EMAIL,
   CREDIT_CARD_NAME,
   CREDIT_CARD_NUMBER,
@@ -120,12 +120,8 @@ int GetFieldTypeGroupMetric(const AutofillFieldType field_type,
       group = EMAIL;
       break;
 
-    case AutofillType::PHONE_HOME:
+    case AutofillType::PHONE:
       group = PHONE;
-      break;
-
-    case AutofillType::PHONE_FAX:
-      group = FAX;
       break;
 
     case AutofillType::CREDIT_CARD:

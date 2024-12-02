@@ -116,7 +116,7 @@ class RealFetchTester {
   scoped_ptr<DhcpProxyScriptFetcherWin> fetcher_;
   bool finished_;
   string16 pac_text_;
-  CompletionCallbackImpl<RealFetchTester> completion_callback_;
+  OldCompletionCallbackImpl<RealFetchTester> completion_callback_;
   base::OneShotTimer<RealFetchTester> timeout_;
   base::OneShotTimer<RealFetchTester> cancel_timer_;
   bool on_completion_is_error_;
@@ -160,23 +160,21 @@ class DelayingDhcpProxyScriptAdapterFetcher
       : DhcpProxyScriptAdapterFetcher(url_request_context) {
   }
 
-  class DelayingWorkerThread : public WorkerThread {
+  class DelayingDhcpQuery : public DhcpQuery {
    public:
-    explicit DelayingWorkerThread(
-        const base::WeakPtr<DhcpProxyScriptAdapterFetcher>& owner)
-        : WorkerThread(owner) {
+    explicit DelayingDhcpQuery()
+        : DhcpQuery() {
     }
 
     std::string ImplGetPacURLFromDhcp(
         const std::string& adapter_name) OVERRIDE {
       base::PlatformThread::Sleep(20);
-      return WorkerThread::ImplGetPacURLFromDhcp(adapter_name);
+      return DhcpQuery::ImplGetPacURLFromDhcp(adapter_name);
     }
   };
 
-  WorkerThread* ImplCreateWorkerThread(
-      const base::WeakPtr<DhcpProxyScriptAdapterFetcher>& owner) OVERRIDE {
-    return new DelayingWorkerThread(owner);
+  DhcpQuery* ImplCreateDhcpQuery() OVERRIDE {
+    return new DelayingDhcpQuery();
   }
 };
 
@@ -223,7 +221,7 @@ class DummyDhcpProxyScriptAdapterFetcher
   }
 
   void Fetch(const std::string& adapter_name,
-             CompletionCallback* callback) OVERRIDE {
+             OldCompletionCallback* callback) OVERRIDE {
     client_callback_ = callback;
     timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(fetch_delay_ms_),
                  this, &DummyDhcpProxyScriptAdapterFetcher::OnTimer);
@@ -262,22 +260,18 @@ class DummyDhcpProxyScriptAdapterFetcher
   int result_;
   string16 pac_script_;
   int fetch_delay_ms_;
-  CompletionCallback* client_callback_;
+  OldCompletionCallback* client_callback_;
   base::OneShotTimer<DummyDhcpProxyScriptAdapterFetcher> timer_;
 };
 
 class MockDhcpProxyScriptFetcherWin : public DhcpProxyScriptFetcherWin {
  public:
-  class MockWorkerThread : public WorkerThread {
+  class MockAdapterQuery : public AdapterQuery {
    public:
-    MockWorkerThread() : worker_finished_event_(true, false) {
+    MockAdapterQuery() {
     }
 
-    virtual ~MockWorkerThread() {
-    }
-
-    void Init(const base::WeakPtr<DhcpProxyScriptFetcherWin>& owner) {
-      WorkerThread::Init(owner);
+    virtual ~MockAdapterQuery() {
     }
 
     virtual bool ImplGetCandidateAdapterNames(
@@ -287,18 +281,13 @@ class MockDhcpProxyScriptFetcherWin : public DhcpProxyScriptFetcherWin {
       return true;
     }
 
-    virtual void OnThreadDone() OVERRIDE {
-      WorkerThread::OnThreadDone();
-      worker_finished_event_.Signal();
-    }
-
     std::vector<std::string> mock_adapter_names_;
-    base::WaitableEvent worker_finished_event_;
   };
 
   MockDhcpProxyScriptFetcherWin()
       : DhcpProxyScriptFetcherWin(new TestURLRequestContext()),
-        num_fetchers_created_(0) {
+        num_fetchers_created_(0),
+        worker_finished_event_(true, false) {
     ResetTestState();
   }
 
@@ -311,7 +300,7 @@ class MockDhcpProxyScriptFetcherWin : public DhcpProxyScriptFetcherWin {
   // returned by ImplGetCandidateAdapterNames.
   void PushBackAdapter(const std::string& adapter_name,
                        DhcpProxyScriptAdapterFetcher* fetcher) {
-    worker_thread_->mock_adapter_names_.push_back(adapter_name);
+    adapter_query_->mock_adapter_names_.push_back(adapter_name);
     adapter_fetchers_.push_back(fetcher);
   }
 
@@ -331,15 +320,17 @@ class MockDhcpProxyScriptFetcherWin : public DhcpProxyScriptFetcherWin {
     return adapter_fetchers_[next_adapter_fetcher_index_++];
   }
 
-  virtual WorkerThread* ImplCreateWorkerThread(
-      const base::WeakPtr<DhcpProxyScriptFetcherWin>& owner) OVERRIDE {
-    DCHECK(worker_thread_);
-    worker_thread_->Init(owner);
-    return worker_thread_.get();
+  virtual AdapterQuery* ImplCreateAdapterQuery() OVERRIDE {
+    DCHECK(adapter_query_);
+    return adapter_query_.get();
   }
 
   int ImplGetMaxWaitMs() OVERRIDE {
     return max_wait_ms_;
+  }
+
+  void ImplOnGetCandidateAdapterNamesDone() OVERRIDE {
+    worker_finished_event_.Signal();
   }
 
   void ResetTestState() {
@@ -355,7 +346,7 @@ class MockDhcpProxyScriptFetcherWin : public DhcpProxyScriptFetcherWin {
     next_adapter_fetcher_index_ = 0;
     num_fetchers_created_ = 0;
     adapter_fetchers_.clear();
-    worker_thread_ = new MockWorkerThread();
+    adapter_query_ = new MockAdapterQuery();
     max_wait_ms_ = TestTimeouts::tiny_timeout_ms();
   }
 
@@ -370,10 +361,11 @@ class MockDhcpProxyScriptFetcherWin : public DhcpProxyScriptFetcherWin {
   // deleted on destruction.
   std::vector<DhcpProxyScriptAdapterFetcher*> adapter_fetchers_;
 
-  scoped_refptr<MockWorkerThread> worker_thread_;
+  scoped_refptr<MockAdapterQuery> adapter_query_;
 
   int max_wait_ms_;
   int num_fetchers_created_;
+  base::WaitableEvent worker_finished_event_;
 };
 
 class FetcherClient {
@@ -398,8 +390,8 @@ public:
   }
 
   void RunMessageLoopUntilWorkerDone() {
-    DCHECK(fetcher_.worker_thread_.get());
-    while (!fetcher_.worker_thread_->worker_finished_event_.TimedWait(
+    DCHECK(fetcher_.adapter_query_.get());
+    while (!fetcher_.worker_finished_event_.TimedWait(
         base::TimeDelta::FromMilliseconds(10))) {
       MessageLoop::current()->RunAllPending();
     }
@@ -421,7 +413,7 @@ public:
   bool finished_;
   int result_;
   string16 pac_text_;
-  CompletionCallbackImpl<FetcherClient> completion_callback_;
+  OldCompletionCallbackImpl<FetcherClient> completion_callback_;
 };
 
 // We separate out each test's logic so that we can easily implement

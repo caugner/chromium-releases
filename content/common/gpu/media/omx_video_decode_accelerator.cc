@@ -4,6 +4,7 @@
 
 #include "content/common/gpu/media/omx_video_decode_accelerator.h"
 
+#include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
@@ -565,8 +566,8 @@ void OmxVideoDecodeAccelerator::BusyLoopInDestroying() {
   // tasks.  Instead we sleep for 5ms.  Really.
   base::PlatformThread::Sleep(5);
   message_loop_->PostTask(
-      FROM_HERE, NewRunnableMethod(
-          this, &OmxVideoDecodeAccelerator::BusyLoopInDestroying));
+      FROM_HERE, base::Bind(
+          &OmxVideoDecodeAccelerator::BusyLoopInDestroying, this));
 }
 
 void OmxVideoDecodeAccelerator::OnReachedIdleInDestroying() {
@@ -897,8 +898,9 @@ void OmxVideoDecodeAccelerator::EventHandlerCompleteTask(OMX_EVENTTYPE event,
           DispatchStateReached(static_cast<OMX_STATETYPE>(data2));
           return;
         case OMX_CommandFlush:
-          DCHECK(current_state_change_ == RESETTING ||
-                 current_state_change_ == DESTROYING);
+          if (current_state_change_ == DESTROYING)
+            return;
+          DCHECK(current_state_change_ == RESETTING);
           if (data2 == input_port_)
             InputPortFlushDone();
           else if (data2 == output_port_)
@@ -968,10 +970,9 @@ OMX_ERRORTYPE OmxVideoDecodeAccelerator::EventHandler(OMX_HANDLETYPE component,
   OmxVideoDecodeAccelerator* decoder =
       static_cast<OmxVideoDecodeAccelerator*>(priv_data);
   DCHECK_EQ(component, decoder->component_handle_);
-  decoder->message_loop_->PostTask(
-      FROM_HERE, NewRunnableMethod(
-          decoder, &OmxVideoDecodeAccelerator::EventHandlerCompleteTask,
-          event, data1, data2));
+  decoder->message_loop_->PostTask(FROM_HERE, base::Bind(
+      &OmxVideoDecodeAccelerator::EventHandlerCompleteTask, decoder,
+      event, data1, data2));
   return OMX_ErrorNone;
 }
 
@@ -986,11 +987,8 @@ OMX_ERRORTYPE OmxVideoDecodeAccelerator::EmptyBufferCallback(
   OmxVideoDecodeAccelerator* decoder =
       static_cast<OmxVideoDecodeAccelerator*>(priv_data);
   DCHECK_EQ(component, decoder->component_handle_);
-  decoder->message_loop_->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(decoder,
-                        &OmxVideoDecodeAccelerator::EmptyBufferDoneTask,
-                        buffer));
+  decoder->message_loop_->PostTask(FROM_HERE, base::Bind(
+      &OmxVideoDecodeAccelerator::EmptyBufferDoneTask, decoder, buffer));
   return OMX_ErrorNone;
 }
 
@@ -1009,11 +1007,8 @@ OMX_ERRORTYPE OmxVideoDecodeAccelerator::FillBufferCallback(
   OmxVideoDecodeAccelerator* decoder =
       static_cast<OmxVideoDecodeAccelerator*>(priv_data);
   DCHECK_EQ(component, decoder->component_handle_);
-  decoder->message_loop_->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(decoder,
-                        &OmxVideoDecodeAccelerator::FillBufferDoneTask,
-                        buffer));
+  decoder->message_loop_->PostTask(FROM_HERE, base::Bind(
+      &OmxVideoDecodeAccelerator::FillBufferDoneTask, decoder, buffer));
   return OMX_ErrorNone;
 }
 

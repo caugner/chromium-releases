@@ -18,6 +18,8 @@ class SavePackage;
 // Browser's download manager: manages all downloads and destination view.
 class DownloadManagerDelegate {
  public:
+  virtual ~DownloadManagerDelegate() {}
+
   // Lets the delegate know that the download manager is shutting down.
   virtual void Shutdown() = 0;
 
@@ -72,6 +74,8 @@ class DownloadManagerDelegate {
 
   // Notifies the delegate that information about the given download has change,
   // so that it can update its persistent store.
+  // Does not update |url|, |start_time|, |total_bytes|; uses |db_handle| only
+  // to select the row in the database table to update.
   virtual void UpdateItemInPersistentStore(DownloadItem* item) = 0;
 
   // Notifies the delegate that path for the download item has changed, so that
@@ -105,7 +109,6 @@ class DownloadManagerDelegate {
 
  protected:
   DownloadManagerDelegate() {}
-  virtual ~DownloadManagerDelegate() {}
 
   DISALLOW_COPY_AND_ASSIGN(DownloadManagerDelegate);
 };

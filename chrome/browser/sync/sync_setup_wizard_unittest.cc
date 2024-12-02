@@ -32,7 +32,7 @@ typedef GoogleServiceAuthError AuthError;
 
 class MockSyncSetupHandler : public OptionsSyncSetupHandler {
  public:
-  MockSyncSetupHandler() {}
+  MockSyncSetupHandler() : OptionsSyncSetupHandler(NULL) {}
 
   // SyncSetupFlowHandler implementation.
   virtual void ShowGaiaLogin(const DictionaryValue& args) {}
@@ -63,7 +63,6 @@ class ProfileSyncServiceForWizardTest : public ProfileSyncService {
         user_cancelled_dialog_(false),
         is_using_secondary_passphrase_(false),
         encrypt_everything_(false) {
-    RegisterPreferences();
     ResetTestStats();
   }
 
@@ -98,12 +97,7 @@ class ProfileSyncServiceForWizardTest : public ProfileSyncService {
   }
 
   virtual bool IsUsingSecondaryPassphrase() const {
-    // The only value of |is_using_secondary_passphrase_| we current care about
-    // is when it's true.
-    if (!is_using_secondary_passphrase_)
-      return ProfileSyncService::IsUsingSecondaryPassphrase();
-    else
-      return is_using_secondary_passphrase_;
+    return is_using_secondary_passphrase_;
   }
 
   void set_auth_state(const std::string& last_email,
@@ -235,19 +229,7 @@ class SyncSetupWizardTest : public BrowserWithTestWindowTest {
   MockSyncSetupHandler handler_;
 };
 
-// See http://code.google.com/p/chromium/issues/detail?id=40715 for
-// why we skip the below tests on OS X.  We don't use DISABLED_ as we
-// would have to change the corresponding FRIEND_TEST() declarations.
-
-#if defined(OS_MACOSX)
-#define SKIP_TEST_ON_MACOSX() \
-  do { LOG(WARNING) << "Test skipped on OS X"; return; } while (0)
-#else
-#define SKIP_TEST_ON_MACOSX() do {} while (0)
-#endif
-
 TEST_F(SyncSetupWizardTest, InitialStepLogin) {
-  SKIP_TEST_ON_MACOSX();
   ListValue credentials;
   std::string auth = "{\"user\":\"";
   auth += std::string(kTestUser) + "\",\"pass\":\"";
@@ -321,7 +303,6 @@ TEST_F(SyncSetupWizardTest, InitialStepLogin) {
 }
 
 TEST_F(SyncSetupWizardTest, ChooseDataTypesSetsPrefs) {
-  SKIP_TEST_ON_MACOSX();
   wizard_->Step(SyncSetupWizard::GAIA_LOGIN);
   AttachSyncSetupHandler();
   wizard_->Step(SyncSetupWizard::GAIA_SUCCESS);
@@ -329,7 +310,7 @@ TEST_F(SyncSetupWizardTest, ChooseDataTypesSetsPrefs) {
 
   ListValue data_type_choices_value;
   std::string data_type_choices =
-      "{\"keepEverythingSynced\":false,\"syncBookmarks\":true,"
+      "{\"syncAllDataTypes\":false,\"syncBookmarks\":true,"
       "\"syncPreferences\":true,\"syncThemes\":false,\"syncPasswords\":false,"
       "\"syncAutofill\":false,\"syncExtensions\":false,\"syncTypedUrls\":true,"
       "\"syncApps\":true,\"syncSearchEngines\":false,\"syncSessions\":false,"
@@ -339,7 +320,9 @@ TEST_F(SyncSetupWizardTest, ChooseDataTypesSetsPrefs) {
   // Simulate the user choosing data types; bookmarks, prefs, typed URLS, and
   // apps are on, the rest are off.
   handler_.HandleConfigure(&data_type_choices_value);
-  EXPECT_TRUE(wizard_->IsVisible());
+  // Since we don't need a passphrase, wizard should have transitioned to
+  // DONE state and closed the UI.
+  EXPECT_FALSE(wizard_->IsVisible());
   EXPECT_FALSE(service_->keep_everything_synced_);
   EXPECT_EQ(1U, service_->chosen_data_types_.count(syncable::BOOKMARKS));
   EXPECT_EQ(1U, service_->chosen_data_types_.count(syncable::PREFERENCES));
@@ -350,12 +333,9 @@ TEST_F(SyncSetupWizardTest, ChooseDataTypesSetsPrefs) {
   EXPECT_EQ(1U, service_->chosen_data_types_.count(syncable::TYPED_URLS));
   EXPECT_EQ(1U, service_->chosen_data_types_.count(syncable::APPS));
   EXPECT_EQ(0U, service_->chosen_data_types_.count(syncable::SEARCH_ENGINES));
-
-  CloseSetupUI();
 }
 
 TEST_F(SyncSetupWizardTest, EnterPassphraseRequired) {
-  SKIP_TEST_ON_MACOSX();
   wizard_->Step(SyncSetupWizard::GAIA_LOGIN);
   AttachSyncSetupHandler();
   wizard_->Step(SyncSetupWizard::GAIA_SUCCESS);
@@ -374,7 +354,6 @@ TEST_F(SyncSetupWizardTest, EnterPassphraseRequired) {
 }
 
 TEST_F(SyncSetupWizardTest, DialogCancelled) {
-  SKIP_TEST_ON_MACOSX();
   wizard_->Step(SyncSetupWizard::GAIA_LOGIN);
   AttachSyncSetupHandler();
   // Simulate the user closing the dialog.
@@ -397,7 +376,6 @@ TEST_F(SyncSetupWizardTest, DialogCancelled) {
 }
 
 TEST_F(SyncSetupWizardTest, InvalidTransitions) {
-  SKIP_TEST_ON_MACOSX();
   wizard_->Step(SyncSetupWizard::GAIA_SUCCESS);
   EXPECT_FALSE(wizard_->IsVisible());
 
@@ -415,12 +393,12 @@ TEST_F(SyncSetupWizardTest, InvalidTransitions) {
   EXPECT_EQ(SyncSetupWizard::SYNC_EVERYTHING, flow_->current_state_);
 
   wizard_->Step(SyncSetupWizard::FATAL_ERROR);
-  EXPECT_EQ(SyncSetupWizard::FATAL_ERROR, flow_->current_state_);
+  // Stepping to FATAL_ERROR sends us back to GAIA_LOGIN.
+  EXPECT_EQ(SyncSetupWizard::GAIA_LOGIN, flow_->current_state_);
   CloseSetupUI();
 }
 
 TEST_F(SyncSetupWizardTest, FullSuccessfulRunSetsPref) {
-  SKIP_TEST_ON_MACOSX();
   CompleteSetup();
   EXPECT_FALSE(wizard_->IsVisible());
   EXPECT_TRUE(service_->profile()->GetPrefs()->GetBoolean(
@@ -428,21 +406,19 @@ TEST_F(SyncSetupWizardTest, FullSuccessfulRunSetsPref) {
 }
 
 TEST_F(SyncSetupWizardTest, AbortedByPendingClear) {
-  SKIP_TEST_ON_MACOSX();
   wizard_->Step(SyncSetupWizard::GAIA_LOGIN);
   AttachSyncSetupHandler();
   wizard_->Step(SyncSetupWizard::GAIA_SUCCESS);
   wizard_->Step(SyncSetupWizard::SYNC_EVERYTHING);
   wizard_->Step(SyncSetupWizard::SETUP_ABORTED_BY_PENDING_CLEAR);
-  EXPECT_EQ(SyncSetupWizard::SETUP_ABORTED_BY_PENDING_CLEAR,
-            flow_->current_state_);
+  // Stepping to SETUP_ABORTED should redirect us to GAIA_LOGIN state, since
+  // that's where we display the error.
+  EXPECT_EQ(SyncSetupWizard::GAIA_LOGIN, flow_->current_state_);
   CloseSetupUI();
   EXPECT_FALSE(wizard_->IsVisible());
 }
 
 TEST_F(SyncSetupWizardTest, DiscreteRunChooseDataTypes) {
-  SKIP_TEST_ON_MACOSX();
-
   CompleteSetup();
 
   wizard_->Step(SyncSetupWizard::CONFIGURE);
@@ -455,24 +431,21 @@ TEST_F(SyncSetupWizardTest, DiscreteRunChooseDataTypes) {
 }
 
 TEST_F(SyncSetupWizardTest, DiscreteRunChooseDataTypesAbortedByPendingClear) {
-  SKIP_TEST_ON_MACOSX();
-
   CompleteSetup();
 
   wizard_->Step(SyncSetupWizard::CONFIGURE);
   AttachSyncSetupHandler();
   EXPECT_EQ(SyncSetupWizard::DONE, flow_->end_state_);
   wizard_->Step(SyncSetupWizard::SETUP_ABORTED_BY_PENDING_CLEAR);
-  EXPECT_EQ(SyncSetupWizard::SETUP_ABORTED_BY_PENDING_CLEAR,
-            flow_->current_state_);
+  // Stepping to SETUP_ABORTED should redirect us to GAIA_LOGIN state, since
+  // that's where we display the error.
+  EXPECT_EQ(SyncSetupWizard::GAIA_LOGIN, flow_->current_state_);
 
   CloseSetupUI();
   EXPECT_FALSE(wizard_->IsVisible());
 }
 
 TEST_F(SyncSetupWizardTest, DiscreteRunGaiaLogin) {
-  SKIP_TEST_ON_MACOSX();
-
   CompleteSetup();
 
   wizard_->Step(SyncSetupWizard::GAIA_LOGIN);
@@ -501,7 +474,6 @@ TEST_F(SyncSetupWizardTest, DiscreteRunGaiaLogin) {
 // Tests a scenario where sync is disabled on chrome os on startup due to
 // an auth error (application specific password is needed).
 TEST_F(SyncSetupWizardTest, CrosAuthSetup) {
-  SKIP_TEST_ON_MACOSX();
   service_->set_cros_mode();
 
   wizard_->Step(SyncSetupWizard::GAIA_LOGIN);
@@ -528,8 +500,6 @@ TEST_F(SyncSetupWizardTest, CrosAuthSetup) {
 }
 
 TEST_F(SyncSetupWizardTest, NonFatalError) {
-  SKIP_TEST_ON_MACOSX();
-
   CompleteSetup();
 
   // Set up the ENTER_PASSPHRASE case.
@@ -594,5 +564,3 @@ TEST_F(SyncSetupWizardTest, NonFatalError) {
   CloseSetupUI();
   EXPECT_FALSE(wizard_->IsVisible());
 }
-
-#undef SKIP_TEST_ON_MACOSX

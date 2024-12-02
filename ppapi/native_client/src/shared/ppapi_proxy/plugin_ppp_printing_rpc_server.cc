@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -104,5 +104,24 @@ void PppPrintingRpcServer::PPP_Printing_End(
   PPPPrintingInterface()->End(instance);
 
   DebugPrintf("PPP_Printing::End\n");
+  rpc->result = NACL_SRPC_RESULT_OK;
+}
+
+void PppPrintingRpcServer::PPP_Printing_IsScalingDisabled(
+    NaClSrpcRpc* rpc,
+    NaClSrpcClosure* done,
+    // inputs
+    PP_Instance instance,
+    // outputs
+    int32_t* /*PP_Bool*/ scaling_disabled) {
+  rpc->result = NACL_SRPC_RESULT_APP_ERROR;
+  NaClSrpcClosureRunner runner(done);
+
+  PP_Bool pp_scaling_disabled =
+      PPPPrintingInterface()->IsScalingDisabled(instance);
+  *scaling_disabled = pp_scaling_disabled == PP_TRUE;
+
+  DebugPrintf("PPP_Printing::IsScalingDisabled: scaling_disabled=%d\n",
+              pp_scaling_disabled);
   rpc->result = NACL_SRPC_RESULT_OK;
 }

@@ -155,6 +155,9 @@ void ExtensionFileBrowserEventRouter::RemoveFileWatch(
 void ExtensionFileBrowserEventRouter::DiskChanged(
     chromeos::MountLibraryEventType event,
     const chromeos::MountLibrary::Disk* disk) {
+  // Disregard hidden devices.
+  if (disk->is_hidden())
+    return;
   if (event == chromeos::MOUNT_DISK_ADDED) {
     OnDiskAdded(disk);
   } else if (event == chromeos::MOUNT_DISK_REMOVED) {
@@ -172,6 +175,7 @@ void ExtensionFileBrowserEventRouter::DeviceChanged(
   } else if (event == chromeos::MOUNT_DEVICE_SCANNED) {
     OnDeviceScanned(device_path);
   } else if (event == chromeos::MOUNT_FORMATTING_STARTED) {
+  // TODO(tbarzic): get rid of '!'.
     if (device_path[0] == '!') {
       OnFormattingStarted(device_path.substr(1), false);
     } else {
@@ -196,12 +200,12 @@ void ExtensionFileBrowserEventRouter::MountCompleted(
       event_type == chromeos::MountLibrary::MOUNTING) {
     chromeos::MountLibrary* mount_lib =
         chromeos::CrosLibrary::Get()->GetMountLibrary();
-    if (mount_lib->disks().find(mount_info.source_path) ==
-        mount_lib->disks().end()) {
+    chromeos::MountLibrary::DiskMap::const_iterator disk_it =
+        mount_lib->disks().find(mount_info.source_path);
+    if (disk_it == mount_lib->disks().end()) {
       return;
     }
-    chromeos::MountLibrary::Disk* disk =
-        mount_lib->disks().find(mount_info.source_path)->second;
+    chromeos::MountLibrary::Disk* disk = disk_it->second;
 
      notifications_->ManageNotificationsOnMountCompleted(
         disk->system_path_prefix(), disk->drive_label(), disk->is_parent(),

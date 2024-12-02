@@ -10,8 +10,8 @@
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper_delegate.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_source.h"
+#include "content/public/browser/notification_types.h"
 
 TemplateURLFetcherUICallbacks::TemplateURLFetcherUICallbacks(
     SearchEngineTabHelper* tab_helper,
@@ -28,15 +28,13 @@ TemplateURLFetcherUICallbacks::~TemplateURLFetcherUICallbacks() {
 
 void TemplateURLFetcherUICallbacks::ConfirmSetDefaultSearchProvider(
     TemplateURL* template_url,
-    TemplateURLService* template_url_service) {
+    Profile* profile) {
   scoped_ptr<TemplateURL> owned_template_url(template_url);
   if (!source_ || !source_->delegate() || !tab_contents_)
       return;
 
-  source_->delegate()->ConfirmSetDefaultSearchProvider(
-      tab_contents_,
-      owned_template_url.release(),
-      template_url_service);
+  source_->delegate()->ConfirmSetDefaultSearchProvider(tab_contents_,
+      owned_template_url.release(), profile);
 }
 
 void TemplateURLFetcherUICallbacks::ConfirmAddSearchProvider(

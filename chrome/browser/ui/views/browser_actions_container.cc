@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/views/browser_actions_container.h"
 
+#include "base/bind.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -47,6 +48,7 @@
 #include "views/controls/menu/menu_item_view.h"
 #include "views/controls/menu/menu_model_adapter.h"
 #include "views/controls/menu/menu_runner.h"
+#include "views/controls/resize_area.h"
 #include "views/drag_utils.h"
 #include "views/metrics.h"
 
@@ -65,7 +67,7 @@ bool BrowserActionsContainer::disable_animations_during_testing_ = false;
 BrowserActionButton::BrowserActionButton(const Extension* extension,
                                          BrowserActionsContainer* panel)
     : ALLOW_THIS_IN_INITIALIZER_LIST(
-          MenuButton(this, std::wstring(), NULL, false)),
+          MenuButton(this, string16(), NULL, false)),
       browser_action_(extension->browser_action()),
       extension_(extension),
       ALLOW_THIS_IN_INITIALIZER_LIST(tracker_(this)),
@@ -172,7 +174,7 @@ void BrowserActionButton::UpdateState() {
   string16 name = UTF8ToUTF16(browser_action()->GetTitle(tab_id));
   if (name.empty())
     name = UTF8ToUTF16(extension()->name());
-  SetTooltipText(UTF16ToWideHack(name));
+  SetTooltipText(name);
   SetAccessibleName(name);
   parent()->SchedulePaint();
 }
@@ -215,8 +217,8 @@ bool BrowserActionButton::Activate() {
 
 bool BrowserActionButton::OnMousePressed(const views::MouseEvent& event) {
   if (!event.IsRightMouseButton()) {
-    return IsPopup() ?
-        MenuButton::OnMousePressed(event) : TextButton::OnMousePressed(event);
+    return IsPopup() ? MenuButton::OnMousePressed(event)
+                     : TextButton::OnMousePressed(event);
   }
 
   ShowContextMenu(gfx::Point(), true);
@@ -241,8 +243,8 @@ void BrowserActionButton::OnMouseExited(const views::MouseEvent& event) {
 }
 
 bool BrowserActionButton::OnKeyReleased(const views::KeyEvent& event) {
-  return IsPopup() ?
-      MenuButton::OnKeyReleased(event) : TextButton::OnKeyReleased(event);
+  return IsPopup() ? MenuButton::OnKeyReleased(event)
+                   : TextButton::OnKeyReleased(event);
 }
 
 void BrowserActionButton::ShowContextMenu(const gfx::Point& p,
@@ -376,7 +378,7 @@ BrowserActionsContainer::BrowserActionsContainer(Browser* browser,
   resize_area_ = new views::ResizeArea(this);
   AddChildView(resize_area_);
 
-  chevron_ = new views::MenuButton(NULL, std::wstring(), this, false);
+  chevron_ = new views::MenuButton(NULL, string16(), this, false);
   chevron_->set_border(NULL);
   chevron_->EnableCanvasFlippingForRTLUI(true);
   chevron_->SetAccessibleName(
@@ -601,7 +603,7 @@ int BrowserActionsContainer::OnDragUpdated(
     const views::DropTargetEvent& event) {
   // First check if we are above the chevron (overflow) menu.
   if (GetEventHandlerForPoint(event.location()) == chevron_) {
-    if (show_menu_task_factory_.empty() && !overflow_menu_)
+    if (!show_menu_task_factory_.HasWeakPtrs() && !overflow_menu_)
       StartShowFolderDropMenuTimer();
     return ui::DragDropTypes::DRAG_MOVE;
   }
@@ -1010,14 +1012,15 @@ void BrowserActionsContainer::CloseOverflowMenu() {
 }
 
 void BrowserActionsContainer::StopShowFolderDropMenuTimer() {
-  show_menu_task_factory_.RevokeAll();
+  show_menu_task_factory_.InvalidateWeakPtrs();
 }
 
 void BrowserActionsContainer::StartShowFolderDropMenuTimer() {
   int delay = views::GetMenuShowDelay();
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      show_menu_task_factory_.NewRunnableMethod(
-          &BrowserActionsContainer::ShowDropFolder),
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&BrowserActionsContainer::ShowDropFolder,
+                 show_menu_task_factory_.GetWeakPtr()),
       delay);
 }
 

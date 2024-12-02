@@ -13,12 +13,14 @@ class DictionaryValue;
 }
 
 namespace sync_pb {
+class AppNotificationSpecifics;
 class AppSpecifics;
 class AutofillProfileSpecifics;
 class AutofillSpecifics;
 class BookmarkSpecifics;
 class EncryptedData;
 class EntitySpecifics;
+class ExtensionSettingSpecifics;
 class ExtensionSpecifics;
 class NigoriSpecifics;
 class PasswordSpecifics;
@@ -73,6 +75,9 @@ base::DictionaryValue* PasswordSpecificsDataToValue(
 
 // Main *SpecificsToValue functions.
 
+base::DictionaryValue* AppNotificationSpecificsToValue(
+    const sync_pb::AppNotificationSpecifics& app_notification_specifics);
+
 base::DictionaryValue* AppSpecificsToValue(
     const sync_pb::AppSpecifics& app_specifics);
 
@@ -84,6 +89,9 @@ base::DictionaryValue* AutofillProfileSpecificsToValue(
 
 base::DictionaryValue* BookmarkSpecificsToValue(
     const sync_pb::BookmarkSpecifics& bookmark_specifics);
+
+base::DictionaryValue* ExtensionSettingSpecificsToValue(
+    const sync_pb::ExtensionSettingSpecifics& extension_setting_specifics);
 
 base::DictionaryValue* ExtensionSpecificsToValue(
     const sync_pb::ExtensionSpecifics& extension_specifics);

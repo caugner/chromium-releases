@@ -13,6 +13,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/first_run/first_run_dialog.h"
 #include "chrome/browser/first_run/first_run_import_observer.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/importer/external_process_importer_host.h"
 #include "chrome/browser/importer/importer_host.h"
 #include "chrome/browser/importer/importer_list.h"
@@ -319,7 +320,9 @@ bool FirstRun::ProcessMasterPreferences(const FilePath& user_data_dir,
       installer::master_preferences::kDistroImportBookmarksFromFilePref,
       &import_bookmarks_path);
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // TODO(saintlou):
+#elif defined(OS_WIN)
   if (!IsOrganicFirstRun()) {
     // If search engines aren't explicitly imported, don't import.
     if (!(out_prefs->do_import_items & importer::SEARCH_ENGINES)) {
@@ -414,10 +417,8 @@ bool FirstRun::SetShowFirstRunBubblePref(bool show_bubble) {
   PrefService* local_state = g_browser_process->local_state();
   if (!local_state)
     return false;
-  if (!local_state->FindPreference(prefs::kShouldShowFirstRunBubble)) {
-    local_state->RegisterBooleanPref(prefs::kShouldShowFirstRunBubble, false);
+  if (!local_state->HasPrefPath(prefs::kShouldShowFirstRunBubble))
     local_state->SetBoolean(prefs::kShouldShowFirstRunBubble, show_bubble);
-  }
   return true;
 }
 
@@ -449,10 +450,20 @@ bool FirstRun::SetPersonalDataManagerFirstRunPref() {
 
 // static
 bool FirstRun::SearchEngineSelectorDisallowed() {
+#if defined(GOOGLE_CHROME_BUILD)
   // For now, the only case in which the search engine dialog should never be
   // shown is if the locale is Russia.
   std::string locale = g_browser_process->GetApplicationLocale();
   return (locale == "ru");
+#else
+  return false;
+#endif
+}
+
+// static
+bool FirstRun::ShouldShowSearchEngineSelector(const TemplateURLService* model) {
+  return !SearchEngineSelectorDisallowed() &&
+         model && !model->is_default_search_managed();
 }
 
 // static
@@ -649,6 +660,21 @@ void FirstRun::AutoImport(
   process_singleton->Unlock();
   FirstRun::CreateSentinel();
 }
+
+#if defined(OS_LINUX)
+// static
+bool FirstRun::IsOrganicFirstRun() {
+  // We treat all installs as organic.
+  return true;
+}
+#else
+// static
+bool FirstRun::IsOrganicFirstRun() {
+  std::string brand;
+  google_util::GetBrand(&brand);
+  return google_util::IsOrganicFirstRun(brand);
+}
+#endif  // OS_LINUX
 
 #if defined(OS_POSIX)
 namespace {

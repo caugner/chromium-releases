@@ -25,6 +25,11 @@ net::ProxyServer::Scheme GetProxyServerScheme(CFStringRef proxy_type) {
     return net::ProxyServer::SCHEME_DIRECT;
   if (CFEqual(proxy_type, kCFProxyTypeHTTP))
     return net::ProxyServer::SCHEME_HTTP;
+  if (CFEqual(proxy_type, kCFProxyTypeHTTPS)) {
+    // The "HTTPS" on the Mac side here means "proxy applies to https://" URLs;
+    // the proxy itself is still expected to be an HTTP proxy.
+    return net::ProxyServer::SCHEME_HTTP;
+  }
   if (CFEqual(proxy_type, kCFProxyTypeSOCKS)) {
     // We can't tell whether this was v4 or v5. We will assume it is
     // v5 since that is the only version OS X supports.
@@ -64,7 +69,7 @@ ProxyResolverMac::~ProxyResolverMac() {}
 // inspired by http://developer.apple.com/samplecode/CFProxySupportTool/
 int ProxyResolverMac::GetProxyForURL(const GURL& query_url,
                                      ProxyInfo* results,
-                                     CompletionCallback* /*callback*/,
+                                     OldCompletionCallback* /*callback*/,
                                      RequestHandle* /*request*/,
                                      const BoundNetLog& net_log) {
   base::mac::ScopedCFTypeRef<CFStringRef> query_ref(
@@ -188,7 +193,7 @@ void ProxyResolverMac::CancelSetPacScript() {
 
 int ProxyResolverMac::SetPacScript(
     const scoped_refptr<ProxyResolverScriptData>& script_data,
-    CompletionCallback* /*callback*/) {
+    OldCompletionCallback* /*callback*/) {
   script_data_ = script_data;
   return OK;
 }

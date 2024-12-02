@@ -5,7 +5,7 @@
 #ifndef PPAPI_PPB_IMAGE_DATA_PROXY_H_
 #define PPAPI_PPB_IMAGE_DATA_PROXY_H_
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_instance.h"
@@ -31,21 +31,6 @@ namespace ppapi {
 class HostResource;
 
 namespace proxy {
-
-class PPB_ImageData_Proxy : public InterfaceProxy {
- public:
-  PPB_ImageData_Proxy(Dispatcher* dispatcher, const void* target_interface);
-  virtual ~PPB_ImageData_Proxy();
-
-  static const Info* GetInfo();
-
-  const PPB_ImageData* ppb_image_data_target() const {
-    return static_cast<const PPB_ImageData*>(target_interface());
-  }
-
-  // InterfaceProxy implementation.
-  virtual bool OnMessageReceived(const IPC::Message& msg);
-};
 
 class ImageData : public ppapi::Resource,
                   public ppapi::thunk::PPB_ImageData_API,

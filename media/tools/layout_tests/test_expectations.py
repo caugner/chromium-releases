@@ -3,7 +3,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""A Module to analyze test expectations for Webkit layout tests."""
+"""A module to analyze test expectations for Webkit layout tests."""
 
 import re
 import urllib2
@@ -74,7 +74,7 @@ class TestExpectations(object):
     self.all_test_expectation_info = {}
     resp = urllib2.urlopen(url)
     if resp.code != 200:
-      raise NameError('Test expectation file does not exist in %s' % source)
+      raise NameError('Test expectation file does not exist in %s' % url)
     # Start parsing each line.
     comments = ''
     for line in resp.read().split('\n'):
@@ -109,7 +109,7 @@ class TestExpectations(object):
       ValueError when there is no test name match.
     """
     # First try to find test name ending with .html.
-    matches = re.search(r':\s+(\S+.html)', line)
+    matches = re.search(r':\s+(\S+(.html|.svg))', line)
     # Next try to find directory name.
     if matches:
       return matches.group(1)

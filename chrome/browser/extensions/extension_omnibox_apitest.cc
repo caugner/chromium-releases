@@ -22,15 +22,15 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/common/content_notification_types.h"
+#include "content/public/browser/notification_types.h"
 
 #if defined(TOOLKIT_GTK)
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #endif
 
-// Basic test is flaky on ChromeOS.
+// Basic test is flaky on ChromeOS and Linux.
 // http://crbug.com/52929
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_LINUX)
 #define MAYBE_Basic FLAKY_Basic
 #else
 #define MAYBE_Basic Basic
@@ -64,20 +64,23 @@ class OmniboxApiTest : public ExtensionApiTest {
   }
 
   void WaitForTemplateURLServiceToLoad() {
+    ui_test_utils::WindowedNotificationObserver loaded_observer(
+        chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED,
+        NotificationService::AllSources());
     TemplateURLService* model =
         TemplateURLServiceFactory::GetForProfile(browser()->profile());
     model->Load();
-    if (!model->loaded()) {
-      ui_test_utils::WaitForNotification(
-          chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED);
-    }
+    if (!model->loaded())
+      loaded_observer.Wait();
   }
 
+  // TODO(phajdan.jr): Get rid of this wait-in-a-loop pattern.
   void WaitForAutocompleteDone(AutocompleteController* controller) {
     while (!controller->done()) {
-      ui_test_utils::WaitForNotificationFrom(
+      ui_test_utils::WindowedNotificationObserver ready_observer(
           chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY,
           Source<AutocompleteController>(controller));
+      ready_observer.Wait();
     }
   }
 };

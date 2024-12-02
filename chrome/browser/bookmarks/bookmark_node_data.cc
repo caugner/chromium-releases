@@ -149,7 +149,7 @@ void BookmarkNodeData::WriteToClipboard(Profile* profile) const {
     const std::string url = elements[0].url.spec();
 
     scw.WriteBookmark(title, url);
-    scw.WriteHyperlink(EscapeForHTML(title), url);
+    scw.WriteHyperlink(net::EscapeForHTML(title), url);
 
     // Also write the URL to the clipboard as text so that it can be pasted
     // into text fields. We use WriteText instead of WriteURL because we don't
@@ -193,8 +193,15 @@ bool BookmarkNodeData::ReadFromClipboard() {
 }
 
 bool BookmarkNodeData::ClipboardContainsBookmarks() {
+#if defined(TOUCH_UI)
+  // Temporarily disabling clipboard due to bug 96448.
+  // TODO(wyck): Reenable when cause of message loop hang in
+  // gtk_clipboard_wait_for_contents is determined and fixed.
+  return false;
+#else
   return g_browser_process->clipboard()->IsFormatAvailableByString(
       BookmarkNodeData::kClipboardFormatString, ui::Clipboard::BUFFER_STANDARD);
+#endif
 }
 #else
 void BookmarkNodeData::WriteToClipboard(Profile* profile) const {

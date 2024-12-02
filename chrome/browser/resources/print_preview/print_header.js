@@ -15,6 +15,7 @@ cr.define('print_preview', function() {
     this.cancelButton_ = $('cancel-button');
     this.summary_ = $('print-summary');
     this.printButton_.focus();
+    this.addEventListeners_();
   }
 
   cr.addSingletonGetter(PrintHeader);
@@ -35,16 +36,28 @@ cr.define('print_preview', function() {
     /**
      * Adding event listeners where necessary. Listeners take care of changing
      * their behavior depending on the current state, no need to remove them.
+     * @private
      */
-    addEventListeners: function() {
+    addEventListeners_: function() {
       this.cancelButton_.onclick = function() {
-        chrome.send('closePrintPreviewTab');
-      };
+        this.disableCancelButton();
+        closePrintPreviewTab();
+      }.bind(this);
       this.printButton_.onclick = this.onPrintButtonClicked_.bind(this);
       document.addEventListener('updateSummary',
                                 this.updateSummary_.bind(this));
       document.addEventListener('updatePrintButton',
                                 this.updatePrintButton_.bind(this));
+      document.addEventListener('disableCancelButton',
+                                this.disableCancelButton.bind(this));
+    },
+
+    /**
+     * Disables the cancel button and removes its keydown event listener.
+     */
+    disableCancelButton: function() {
+      window.onkeydown = null;
+      this.cancelButton_.disabled = true;
     },
 
     /**
@@ -58,6 +71,7 @@ cr.define('print_preview', function() {
         this.cancelButton_.classList.add('loading');
         this.summary_.innerHTML = localStrings.getString('printing');
       }
+      this.disableCancelButton();
       requestToPrintDocument();
     },
 
@@ -84,6 +98,11 @@ cr.define('print_preview', function() {
 
       if ((!printToPDF && !copiesSettings.isValid()) ||
           !pageSettings.isPageSelectionValid()) {
+        this.summary_.innerHTML = '';
+        return;
+      }
+
+      if (!marginSettings.areMarginSettingsValid()) {
         this.summary_.innerHTML = '';
         return;
       }

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/views/login_view.h"
 #include "content/browser/browser_thread.h"
@@ -42,14 +43,14 @@ class LoginHandlerWin : public LoginHandler,
   }
 
   // views::DialogDelegate methods:
-  virtual std::wstring GetDialogButtonLabel(
-      MessageBoxFlags::DialogButton button) const OVERRIDE {
-    if (button == MessageBoxFlags::DIALOGBUTTON_OK)
+  virtual string16 GetDialogButtonLabel(
+      ui::MessageBoxFlags::DialogButton button) const OVERRIDE {
+    if (button == ui::MessageBoxFlags::DIALOGBUTTON_OK)
       return l10n_util::GetStringUTF16(IDS_LOGIN_DIALOG_OK_BUTTON_LABEL);
     return DialogDelegate::GetDialogButtonLabel(button);
   }
 
-  virtual std::wstring GetWindowTitle() const OVERRIDE {
+  virtual string16 GetWindowTitle() const OVERRIDE {
     return l10n_util::GetStringUTF16(IDS_LOGIN_DIALOG_TITLE);
   }
 
@@ -123,7 +124,10 @@ class LoginHandlerWin : public LoginHandler,
     // control).  However, that's OK since any UI interaction in those functions
     // will occur via an InvokeLater on the UI thread, which is guaranteed
     // to happen after this is called (since this was InvokeLater'd first).
-    SetDialog(new ConstrainedWindowViews(GetTabContentsForLogin(), this));
+    TabContents* requesting_contents = GetTabContentsForLogin();
+    TabContentsWrapper* wrapper =
+        TabContentsWrapper::GetCurrentWrapperForContents(requesting_contents);
+    SetDialog(new ConstrainedWindowViews(wrapper, this));
     NotifyAuthNeeded();
   }
 

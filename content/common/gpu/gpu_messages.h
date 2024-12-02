@@ -18,8 +18,10 @@
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
 #include "media/video/video_decode_accelerator.h"
+#include "ui/gfx/gl/gpu_preference.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
+#include "ui/gfx/surface/transport_dib.h"
 
 #define IPC_MESSAGE_START GpuMsgStart
 
@@ -28,16 +30,19 @@ IPC_STRUCT_BEGIN(GPUCreateCommandBufferConfig)
   IPC_STRUCT_MEMBER(std::string, allowed_extensions)
   IPC_STRUCT_MEMBER(std::vector<int>, attribs)
   IPC_STRUCT_MEMBER(GURL, active_url)
+  IPC_STRUCT_MEMBER(gfx::GpuPreference, gpu_preference)
 IPC_STRUCT_END()
 
 #if defined(OS_MACOSX)
-IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params)
+IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceNew_Params)
   IPC_STRUCT_MEMBER(int32, renderer_id)
   IPC_STRUCT_MEMBER(int32, render_view_id)
   IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, window)
   IPC_STRUCT_MEMBER(int32, width)
   IPC_STRUCT_MEMBER(int32, height)
-  IPC_STRUCT_MEMBER(uint64, identifier)
+  IPC_STRUCT_MEMBER(uint64, surface_id)
+  IPC_STRUCT_MEMBER(bool, create_transport_dib)
+  IPC_STRUCT_MEMBER(int32, route_id)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params)
@@ -46,17 +51,24 @@ IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params)
   IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, window)
   IPC_STRUCT_MEMBER(uint64, surface_id)
   IPC_STRUCT_MEMBER(int32, route_id)
-  IPC_STRUCT_MEMBER(uint64, swap_buffers_count)
+IPC_STRUCT_END()
+
+IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceRelease_Params)
+  IPC_STRUCT_MEMBER(int32, renderer_id)
+  IPC_STRUCT_MEMBER(int32, render_view_id)
+  IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, window)
+  IPC_STRUCT_MEMBER(uint64, identifier)
+  IPC_STRUCT_MEMBER(int32, route_id)
 IPC_STRUCT_END()
 #endif
 
-#if defined(TOUCH_UI)
-IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params)
+#if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
+IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceNew_Params)
   IPC_STRUCT_MEMBER(int32, renderer_id)
   IPC_STRUCT_MEMBER(int32, render_view_id)
   IPC_STRUCT_MEMBER(int32, width)
   IPC_STRUCT_MEMBER(int32, height)
-  IPC_STRUCT_MEMBER(uint64, identifier)
+  IPC_STRUCT_MEMBER(uint64, surface_id)
   IPC_STRUCT_MEMBER(int32, route_id)
 IPC_STRUCT_END()
 
@@ -65,7 +77,6 @@ IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params)
   IPC_STRUCT_MEMBER(int32, render_view_id)
   IPC_STRUCT_MEMBER(uint64, surface_id)
   IPC_STRUCT_MEMBER(int32, route_id)
-  IPC_STRUCT_MEMBER(uint64, swap_buffers_count)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceRelease_Params)
@@ -103,6 +114,7 @@ IPC_STRUCT_TRAITS_BEGIN(GPUInfo)
 IPC_STRUCT_TRAITS_END()
 
 IPC_ENUM_TRAITS(content::CauseForGpuLaunch)
+IPC_ENUM_TRAITS(gfx::GpuPreference)
 IPC_ENUM_TRAITS(gpu::error::ContextLostReason)
 
 IPC_ENUM_TRAITS(media::VideoDecodeAccelerator::Profile)
@@ -148,7 +160,8 @@ IPC_MESSAGE_CONTROL4(GpuMsg_CreateViewCommandBuffer,
 // information.
 IPC_MESSAGE_CONTROL0(GpuMsg_CollectGraphicsInfo)
 
-#if defined(TOOLKIT_USES_GTK) && !defined(TOUCH_UI) || defined(OS_WIN)
+#if defined(TOOLKIT_USES_GTK) && !defined(UI_COMPOSITOR_IMAGE_TRANSPORT) || \
+    defined(OS_WIN)
 // Tells the GPU process that the browser process has finished resizing the
 // view.
 IPC_MESSAGE_CONTROL2(GpuMsg_ResizeViewACK,
@@ -156,33 +169,15 @@ IPC_MESSAGE_CONTROL2(GpuMsg_ResizeViewACK,
                      int32 /* command_buffer_id */)
 #endif
 
-#if defined(TOUCH_UI)
+#if defined(OS_MACOSX) || defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
 // Tells the GPU process that it's safe to start rendering to the surface.
-IPC_MESSAGE_ROUTED1(AcceleratedSurfaceMsg_SetSurfaceACK,
-                    uint64 /* surface_id */)
+IPC_MESSAGE_ROUTED2(AcceleratedSurfaceMsg_NewACK,
+                    uint64 /* surface_id */,
+                    TransportDIB::Handle /* shared memory buffer */)
 
 // Tells the GPU process that the browser process handled the swap
 // buffers request with the given number.
 IPC_MESSAGE_ROUTED0(AcceleratedSurfaceMsg_BuffersSwappedACK)
-#endif
-
-#if defined(OS_MACOSX)
-// Tells the GPU process that the browser process handled the swap
-// buffers request with the given number. Note that it is possible
-// for the browser process to coalesce frames; it is not guaranteed
-// that every GpuHostMsg_AcceleratedSurfaceBuffersSwapped message
-// will result in a buffer swap on the browser side.
-IPC_MESSAGE_CONTROL3(GpuMsg_AcceleratedSurfaceBuffersSwappedACK,
-                     int /* renderer_id */,
-                     int32 /* route_id */,
-                     uint64 /* swap_buffers_count */)
-
-// Requests the GPU process to destroy the command buffer and remove the
-// associated route. Further messages to this command buffer will result in a
-// channel error.
-IPC_MESSAGE_CONTROL2(GpuMsg_DestroyCommandBuffer,
-                     int /* renderer_id */,
-                     int32 /* render_view_id */)
 #endif
 
 // Tells the GPU process to remove all contexts.
@@ -239,7 +234,8 @@ IPC_MESSAGE_CONTROL3(GpuHostMsg_OnLogMessage,
                      std::string /* header */,
                      std::string /* message */)
 
-#if defined(TOOLKIT_USES_GTK) && !defined(TOUCH_UI) || defined(OS_WIN)
+#if defined(TOOLKIT_USES_GTK) && !defined(UI_COMPOSITOR_IMAGE_TRANSPORT) || \
+    defined(OS_WIN)
 // Resize the window that is being drawn into. It's important that this
 // resize be synchronized with the swapping of the front and back buffers.
 IPC_MESSAGE_CONTROL4(GpuHostMsg_ResizeView,
@@ -249,22 +245,20 @@ IPC_MESSAGE_CONTROL4(GpuHostMsg_ResizeView,
                      gfx::Size /* size */)
 #endif
 
-#if defined(OS_MACOSX) || defined(TOUCH_UI)
-// This message is sent from the GPU process to the browser to indicate that a
-// new backing store was allocated. The renderer ID and render view ID are
-// needed in order to uniquely identify the RenderWidgetHostView on the
-// browser side.
-IPC_MESSAGE_CONTROL1(GpuHostMsg_AcceleratedSurfaceSetIOSurface,
-                     GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params)
+#if defined(OS_MACOSX) || defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
+// This message is sent from the GPU process to the browser to notify about a
+// new or resized surface in the GPU.  The browser allocates any resources
+// needed for it on its end and replies with an ACK containing any shared
+// resources/identifiers to be used in the GPU.
+IPC_MESSAGE_CONTROL1(GpuHostMsg_AcceleratedSurfaceNew,
+                     GpuHostMsg_AcceleratedSurfaceNew_Params)
 
 // This message notifies the browser process that the renderer
 // swapped the buffers associated with the given "window", which
 // should cause the browser to redraw the compositor's contents.
 IPC_MESSAGE_CONTROL1(GpuHostMsg_AcceleratedSurfaceBuffersSwapped,
                      GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params)
-#endif
 
-#if defined(TOUCH_UI)
 // Tells the browser to release whatever resources are associated with
 // the given surface. The browser must send an ACK once this operation
 // is complete.
@@ -305,6 +299,20 @@ IPC_MESSAGE_CONTROL2(GpuChannelMsg_CreateTransportTexture,
 IPC_MESSAGE_CONTROL1(GpuChannelMsg_Echo,
                      IPC::Message /* reply */)
 
+// Asks the GPU process whether the creation or destruction of a
+// command buffer on the given GPU (integrated or discrete) will cause
+// the system to switch which GPU it is using. All contexts that share
+// resources need to be created on the same GPU.
+IPC_SYNC_MESSAGE_CONTROL2_1(GpuChannelMsg_WillGpuSwitchOccur,
+                            bool /* is_creating_context */,
+                            gfx::GpuPreference /* preference */,
+                            bool /* will_cause_switch */)
+
+// Forcibly closes the channel on the GPU process side, in order to
+// have the side effect that all contexts associated with this
+// renderer go into the lost state.
+IPC_MESSAGE_CONTROL0(GpuChannelMsg_CloseChannel)
+
 //------------------------------------------------------------------------------
 // GPU Command Buffer Messages
 // These are messages between a renderer process to the GPU process relating to
@@ -328,12 +336,8 @@ IPC_SYNC_MESSAGE_ROUTED2_1(GpuCommandBufferMsg_SetParent,
 IPC_SYNC_MESSAGE_ROUTED0_1(GpuCommandBufferMsg_GetState,
                            gpu::CommandBuffer::State /* state */)
 
-// Synchronize the put and get offsets of both processes. Caller passes its
-// current put offset. Current state (including get offset) is returned.
-IPC_SYNC_MESSAGE_ROUTED3_1(GpuCommandBufferMsg_Flush,
-                           int32 /* put_offset */,
-                           int32 /* last_known_get */,
-                           uint32 /* flush_count */,
+// Get the current state of the command buffer, as fast as possible.
+IPC_SYNC_MESSAGE_ROUTED0_1(GpuCommandBufferMsg_GetStateFast,
                            gpu::CommandBuffer::State /* state */)
 
 // Asynchronously synchronize the put and get offsets of both processes.
@@ -415,6 +419,8 @@ IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_Destroyed,
 
 // Response to a GpuChannelMsg_Echo message.
 IPC_MESSAGE_ROUTED0(GpuCommandBufferMsg_EchoAck)
+
+IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_SetSurfaceVisible, bool /* visible */)
 
 // --------------------------------------------------------------------------
 // TransportTexture messages

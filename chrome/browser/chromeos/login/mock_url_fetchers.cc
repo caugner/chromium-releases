@@ -6,11 +6,12 @@
 
 #include <errno.h>
 
+#include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/stringprintf.h"
 #include "chrome/common/net/http_return.h"
 #include "content/browser/browser_thread.h"
-#include "content/common/url_fetcher.h"
+#include "content/common/net/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -24,7 +25,7 @@ ExpectCanceledFetcher::ExpectCanceledFetcher(
     URLFetcher::RequestType request_type,
     URLFetcher::Delegate* d)
     : URLFetcher(url, request_type, d),
-      ALLOW_THIS_IN_INITIALIZER_LIST(complete_fetch_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
 }
 
 ExpectCanceledFetcher::~ExpectCanceledFetcher() {
@@ -33,8 +34,8 @@ ExpectCanceledFetcher::~ExpectCanceledFetcher() {
 void ExpectCanceledFetcher::Start() {
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      complete_fetch_factory_.NewRunnableMethod(
-          &ExpectCanceledFetcher::CompleteFetch),
+      base::Bind(&ExpectCanceledFetcher::CompleteFetch,
+                 weak_factory_.GetWeakPtr()),
       100);
 }
 

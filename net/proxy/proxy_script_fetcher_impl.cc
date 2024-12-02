@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
+#include "net/base/cert_status_flags.h"
 #include "net/base/data_url.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
@@ -110,14 +111,14 @@ void ProxyScriptFetcherImpl::OnResponseCompleted(URLRequest* request) {
   // Use |result_code_| as the request's error if we have already set it to
   // something specific.
   if (result_code_ == OK && !request->status().is_success())
-    result_code_ = request->status().os_error();
+    result_code_ = request->status().error();
 
   FetchCompleted();
 }
 
 int ProxyScriptFetcherImpl::Fetch(const GURL& url,
                                   string16* text,
-                                  CompletionCallback* callback) {
+                                  OldCompletionCallback* callback) {
   // It is invalid to call Fetch() while a request is already in progress.
   DCHECK(!cur_request_.get());
 
@@ -190,12 +191,17 @@ void ProxyScriptFetcherImpl::OnAuthRequired(URLRequest* request,
 }
 
 void ProxyScriptFetcherImpl::OnSSLCertificateError(URLRequest* request,
-                                                   int cert_error,
-                                                   X509Certificate* cert) {
+                                                   const SSLInfo& ssl_info,
+                                                   bool is_hsts_host) {
   DCHECK_EQ(request, cur_request_.get());
+  // Revocation check failures are not fatal.
+  if (IsCertStatusMinorError(ssl_info.cert_status)) {
+    request->ContinueDespiteLastError();
+    return;
+  }
   LOG(WARNING) << "SSL certificate error when fetching PAC script, aborting.";
   // Certificate errors are in same space as net errors.
-  result_code_ = cert_error;
+  result_code_ = MapCertStatusToNetError(ssl_info.cert_status);
   request->Cancel();
 }
 
@@ -289,7 +295,7 @@ void ProxyScriptFetcherImpl::FetchCompleted() {
   }
 
   int result_code = result_code_;
-  CompletionCallback* callback = callback_;
+  OldCompletionCallback* callback = callback_;
 
   // Hold a reference to the URLRequestContext to prevent re-entrancy from
   // ~URLRequestContext.

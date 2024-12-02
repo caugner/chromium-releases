@@ -6,15 +6,14 @@
 
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/common/database_messages.h"
-#include "content/common/view_messages.h"
-#include "content/renderer/navigation_state.h"
-#include "content/renderer/render_view.h"
+#include "content/public/renderer/navigation_state.h"
+#include "content/public/renderer/render_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrameClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 using WebKit::WebDataSource;
@@ -22,7 +21,9 @@ using WebKit::WebFrame;
 using WebKit::WebFrameClient;
 using WebKit::WebSecurityOrigin;
 using WebKit::WebString;
+using WebKit::WebURL;
 using WebKit::WebView;
+using content::NavigationState;
 
 namespace {
 
@@ -53,9 +54,10 @@ static bool IsWhitelistedForContentSettings(WebFrame* frame) {
 
 ContentSettings ContentSettingsObserver::default_settings_;
 
-ContentSettingsObserver::ContentSettingsObserver(RenderView* render_view)
-    : RenderViewObserver(render_view),
-      RenderViewObserverTracker<ContentSettingsObserver>(render_view),
+ContentSettingsObserver::ContentSettingsObserver(
+    content::RenderView* render_view)
+    : content::RenderViewObserver(render_view),
+      content::RenderViewObserverTracker<ContentSettingsObserver>(render_view),
       plugins_temporarily_allowed_(false) {
   ClearBlockedContentSettings();
 }
@@ -75,10 +77,8 @@ void ContentSettingsObserver::SetDefaultContentSettings(
 
 ContentSetting ContentSettingsObserver::GetContentSetting(
     ContentSettingsType type) {
-  if (type == CONTENT_SETTINGS_TYPE_PLUGINS &&
-      plugins_temporarily_allowed_) {
-    return CONTENT_SETTING_ALLOW;
-  }
+  // Don't call this for plug-ins.
+  DCHECK_NE(CONTENT_SETTINGS_TYPE_PLUGINS, type);
   return current_content_settings_.settings[type];
 }
 
@@ -159,7 +159,8 @@ void ContentSettingsObserver::DidCommitProvisionalLoad(
     // The opener's view is not guaranteed to be non-null (it could be
     // detached from its page but not yet destructed).
     if (WebView* opener_view = frame->opener()->view()) {
-      RenderView* opener = RenderView::FromWebView(opener_view);
+      content::RenderView* opener =
+          content::RenderView::FromWebView(opener_view);
       ContentSettingsObserver* observer = ContentSettingsObserver::Get(opener);
       SetContentSettings(observer->current_content_settings_);
     }
@@ -194,8 +195,9 @@ bool ContentSettingsObserver::AllowFileSystem(WebFrame* frame) {
   return result;
 }
 
-bool ContentSettingsObserver::AllowImages(WebFrame* frame,
-                                          bool enabled_per_settings) {
+bool ContentSettingsObserver::AllowImage(WebFrame* frame,
+                                         bool enabled_per_settings,
+                                         const WebURL& image_url) {
   if (enabled_per_settings &&
       AllowContentType(CONTENT_SETTINGS_TYPE_IMAGES)) {
     return true;

@@ -93,7 +93,9 @@ class COMPOSITOR_EXPORT TextureGL : public Texture {
 
 class COMPOSITOR_EXPORT CompositorGL : public Compositor {
  public:
-  CompositorGL(gfx::AcceleratedWidget widget, const gfx::Size& size);
+  CompositorGL(CompositorDelegate* delegate,
+               gfx::AcceleratedWidget widget,
+               const gfx::Size& size);
   virtual ~CompositorGL();
 
   void MakeCurrent();
@@ -105,10 +107,9 @@ class COMPOSITOR_EXPORT CompositorGL : public Compositor {
  private:
   // Overridden from Compositor.
   virtual Texture* CreateTexture() OVERRIDE;
-  virtual void NotifyStart() OVERRIDE;
-  virtual void NotifyEnd() OVERRIDE;
+  virtual void OnNotifyStart(bool clear) OVERRIDE;
+  virtual void OnNotifyEnd() OVERRIDE;
   virtual void Blur(const gfx::Rect& bounds) OVERRIDE;
-  virtual void SchedulePaint() OVERRIDE;
 
   // The GL context used for compositing.
   scoped_refptr<gfx::GLSurface> gl_surface_;

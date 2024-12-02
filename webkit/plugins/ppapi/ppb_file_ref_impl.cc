@@ -108,7 +108,8 @@ PPB_FileRef_Impl* PPB_FileRef_Impl::CreateInternal(PP_Resource pp_file_system,
     return 0;
 
   if (file_system->type() != PP_FILESYSTEMTYPE_LOCALPERSISTENT &&
-      file_system->type() != PP_FILESYSTEMTYPE_LOCALTEMPORARY)
+      file_system->type() != PP_FILESYSTEMTYPE_LOCALTEMPORARY &&
+      file_system->type() != PP_FILESYSTEMTYPE_EXTERNAL)
     return 0;
 
   PPB_FileRef_CreateInfo info;
@@ -162,6 +163,8 @@ PP_Resource PPB_FileRef_Impl::GetParent() {
 
 int32_t PPB_FileRef_Impl::MakeDirectory(PP_Bool make_ancestors,
                                         PP_CompletionCallback callback) {
+  if (!callback.func)
+    return PP_ERROR_BLOCKS_MAIN_THREAD;
   if (!IsValidNonExternalFileSystem())
     return PP_ERROR_NOACCESS;
 
@@ -179,8 +182,11 @@ int32_t PPB_FileRef_Impl::MakeDirectory(PP_Bool make_ancestors,
 int32_t PPB_FileRef_Impl::Touch(PP_Time last_access_time,
                                 PP_Time last_modified_time,
                                 PP_CompletionCallback callback) {
+  if (!callback.func)
+    return PP_ERROR_BLOCKS_MAIN_THREAD;
   if (!IsValidNonExternalFileSystem())
     return PP_ERROR_NOACCESS;
+
   PluginInstance* plugin_instance = ResourceHelper::GetPluginInstance(this);
   if (!plugin_instance)
     return PP_ERROR_FAILED;
@@ -195,8 +201,11 @@ int32_t PPB_FileRef_Impl::Touch(PP_Time last_access_time,
 }
 
 int32_t PPB_FileRef_Impl::Delete(PP_CompletionCallback callback) {
+  if (!callback.func)
+    return PP_ERROR_BLOCKS_MAIN_THREAD;
   if (!IsValidNonExternalFileSystem())
     return PP_ERROR_NOACCESS;
+
   PluginInstance* plugin_instance = ResourceHelper::GetPluginInstance(this);
   if (!plugin_instance)
     return PP_ERROR_FAILED;
@@ -210,6 +219,8 @@ int32_t PPB_FileRef_Impl::Delete(PP_CompletionCallback callback) {
 
 int32_t PPB_FileRef_Impl::Rename(PP_Resource new_pp_file_ref,
                                  PP_CompletionCallback callback) {
+  if (!callback.func)
+    return PP_ERROR_BLOCKS_MAIN_THREAD;
   EnterResourceNoLock<PPB_FileRef_API> enter(new_pp_file_ref, true);
   if (enter.failed())
     return PP_ERROR_BADRESOURCE;
@@ -243,7 +254,8 @@ FilePath PPB_FileRef_Impl::GetSystemPath() const {
 
 GURL PPB_FileRef_Impl::GetFileSystemURL() const {
   if (GetFileSystemType() != PP_FILESYSTEMTYPE_LOCALPERSISTENT &&
-      GetFileSystemType() != PP_FILESYSTEMTYPE_LOCALTEMPORARY) {
+      GetFileSystemType() != PP_FILESYSTEMTYPE_LOCALTEMPORARY &&
+      GetFileSystemType() != PP_FILESYSTEMTYPE_EXTERNAL) {
     NOTREACHED();
     return GURL();
   }
@@ -257,6 +269,10 @@ GURL PPB_FileRef_Impl::GetFileSystemURL() const {
   // TODO(ericu): Switch this to use Resolve after fixing GURL to understand
   // FileSystem URLs.
   return GURL(file_system_->root_url().spec() + virtual_path.substr(1));
+}
+
+bool PPB_FileRef_Impl::HasValidFileSystem() const {
+  return file_system_ && file_system_->opened();
 }
 
 bool PPB_FileRef_Impl::IsValidNonExternalFileSystem() const {

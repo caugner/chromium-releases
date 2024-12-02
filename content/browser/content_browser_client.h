@@ -8,7 +8,7 @@
 
 #include <string>
 
-#include "base/callback_old.h"
+#include "base/callback.h"
 #include "content/common/content_client.h"
 #include "content/common/window_container_type.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
@@ -23,7 +23,10 @@ class GURL;
 class MHTMLGenerationManager;
 class PluginProcessHost;
 class QuotaPermissionContext;
+class RenderProcessHost;
 class RenderViewHost;
+class RenderWidgetHost;
+class RenderWidgetHostView;
 class ResourceDispatcherHost;
 class SSLCertErrorHandler;
 class SSLClientAuthHandler;
@@ -86,6 +89,19 @@ class ContentBrowserClient {
   virtual BrowserMainParts* CreateBrowserMainParts(
       const MainFunctionParams& parameters) = 0;
 
+  // Platform-specific creator. Use this to construct new RenderWidgetHostViews
+  // rather than using RenderWidgetHostViewWin & friends.
+  //
+  // This function must NOT size it, because the RenderView in the renderer
+  // wouldn't have been created yet. The widget would set its "waiting for
+  // resize ack" flag, and the ack would never come becasue no RenderView
+  // received it.
+  //
+  // The RenderWidgetHost must already be created (because we can't know if it's
+  // going to be a regular RenderWidgetHost or a RenderViewHost (a subclass).
+  virtual RenderWidgetHostView* CreateViewForWidget(
+      RenderWidgetHost* widget) = 0;
+
   virtual TabContentsView* CreateTabContentsView(TabContents* tab_contents) = 0;
 
   // Notifies that a new RenderHostView has been created.
@@ -124,6 +140,17 @@ class ContentBrowserClient {
   // SiteInstance.
   virtual bool IsURLSameAsAnySiteInstance(const GURL& url) = 0;
 
+  // Returns whether a new view for a given |site_url| can be launched in a
+  // given |process_host|.
+  virtual bool IsSuitableHost(RenderProcessHost* process_host,
+                              const GURL& site_url) = 0;
+
+  // Returns true if for the navigation from |current_url| to |new_url|,
+  // processes should be swapped (even if we are in a process model that
+  // doesn't usually swap).
+  virtual bool ShouldSwapProcessesForNavigation(const GURL& current_url,
+                                                const GURL& new_url) = 0;
+
   // See CharacterEncoding's comment.
   virtual std::string GetCanonicalEncodingNameByAliasName(
       const std::string& alias_name) = 0;
@@ -146,6 +173,7 @@ class ContentBrowserClient {
   // Allow the embedder to control if an AppCache can be used for the given url.
   // This is called on the IO thread.
   virtual bool AllowAppCache(const GURL& manifest_url,
+                             const GURL& first_party,
                              const content::ResourceContext& context) = 0;
 
   // Allow the embedder to control if the given cookie can be read.
@@ -194,7 +222,7 @@ class ContentBrowserClient {
   virtual void AllowCertificateError(
       SSLCertErrorHandler* handler,
       bool overridable,
-      Callback2<SSLCertErrorHandler*, bool>::Type* callback) = 0;
+      const base::Callback<void(SSLCertErrorHandler*, bool)>& callback) = 0;
 
   // Selects a SSL client certificate and returns it to the |handler|. If no
   // certificate was selected NULL is returned to the |handler|.
@@ -294,18 +322,10 @@ class ContentBrowserClient {
   // This can be called on any thread.
   virtual FilePath GetDefaultDownloadDirectory() = 0;
 
-  // Returns the "default" request context. There is no such thing in the world
-  // of multiple profiles, and all calls to this need to be removed.
-  virtual net::URLRequestContextGetter*
-      GetDefaultRequestContextDeprecatedCrBug64339() = 0;
-
-  // Returns the system request context, a context tied to no browser context.
-  // This is called on the UI thread.
-  virtual net::URLRequestContextGetter* GetSystemRequestContext() = 0;
-
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-  // Can return an optional fd for crash handling, otherwise returns -1.
-  virtual int GetCrashSignalFD(const std::string& process_type) = 0;
+  // Can return an optional fd for crash handling, otherwise returns -1. The
+  // passed |command_line| will be used to start the process in question.
+  virtual int GetCrashSignalFD(const CommandLine& command_line) = 0;
 #endif
 
 #if defined(OS_WIN)

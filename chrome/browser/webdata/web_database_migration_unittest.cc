@@ -51,7 +51,6 @@ void AutofillProfile31FromStatement(const sql::Statement& s,
   profile->SetInfo(ADDRESS_HOME_ZIP, s.ColumnString16(11));
   profile->SetInfo(ADDRESS_HOME_COUNTRY, s.ColumnString16(12));
   profile->SetInfo(PHONE_HOME_WHOLE_NUMBER, s.ColumnString16(13));
-  profile->SetInfo(PHONE_FAX_WHOLE_NUMBER, s.ColumnString16(14));
   *date_modified = s.ColumnInt64(15);
   profile->set_guid(s.ColumnString(16));
   EXPECT_TRUE(guid::IsValidGUID(profile->guid()));
@@ -186,7 +185,7 @@ class WebDatabaseMigrationTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(WebDatabaseMigrationTest);
 };
 
-const int WebDatabaseMigrationTest::kCurrentTestedVersionNumber = 39;
+const int WebDatabaseMigrationTest::kCurrentTestedVersionNumber = 40;
 
 void WebDatabaseMigrationTest::LoadDatabase(const FilePath::StringType& file) {
   std::string contents;
@@ -1167,10 +1166,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion32ToCurrent) {
     EXPECT_EQ(ASCIIToUTF16("4151112222"), s4.ColumnString16(2));
 
     // John Doe fax.
-    ASSERT_TRUE(s4.Step());
-    EXPECT_EQ("00580526-FF81-EE2A-0546-1AC593A32E2F", s4.ColumnString(0));
-    EXPECT_EQ(1, s4.ColumnInt(1));  // 1 means phone.
-    EXPECT_EQ(ASCIIToUTF16("4153334444"), s4.ColumnString16(2));
+    // Gets culled after fax type removed.
 
     // John P. Doe phone.
     // Gets culled during migration from 35 to 37 due to merging of John Doe and
@@ -1187,10 +1183,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion32ToCurrent) {
     EXPECT_EQ(ASCIIToUTF16(""), s4.ColumnString16(2));
 
     // 2 Main Street fax.
-    ASSERT_TRUE(s4.Step());
-    EXPECT_EQ("4C74A9D8-7EEE-423E-F9C2-E7FA70ED1396", s4.ColumnString(0));
-    EXPECT_EQ(1, s4.ColumnInt(1));  // 1 means fax.
-    EXPECT_EQ(ASCIIToUTF16(""), s4.ColumnString16(2));
+    // Gets culled after fax type removed.
 
     // 2 Main St phone.
     ASSERT_TRUE(s4.Step());
@@ -1199,10 +1192,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion32ToCurrent) {
     EXPECT_EQ(ASCIIToUTF16(""), s4.ColumnString16(2));
 
     // 2 Main St fax.
-    ASSERT_TRUE(s4.Step());
-    EXPECT_EQ("722DF5C4-F74A-294A-46F0-31FFDED0D635", s4.ColumnString(0));
-    EXPECT_EQ(1, s4.ColumnInt(1));  // 1 means fax.
-    EXPECT_EQ(ASCIIToUTF16(""), s4.ColumnString16(2));
+    // Gets culled after fax type removed.
 
     // Note no phone or fax for Alfred E Newman.
 
@@ -1213,10 +1203,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion32ToCurrent) {
     EXPECT_EQ(ASCIIToUTF16(""), s4.ColumnString16(2));
 
     // 2 Main St fax.
-    ASSERT_TRUE(s4.Step());
-    EXPECT_EQ("9E5FE298-62C7-83DF-6293-381BC589183F", s4.ColumnString(0));
-    EXPECT_EQ(1, s4.ColumnInt(1));  // 1 means fax.
-    EXPECT_EQ(ASCIIToUTF16(""), s4.ColumnString16(2));
+    // Gets culled after fax type removed.
 
     // Should be all.
     EXPECT_FALSE(s4.Step());
@@ -1504,3 +1491,78 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion38ToCurrent) {
     EXPECT_TRUE(connection.DoesColumnExist("keywords", "sync_guid"));
   }
 }
+
+// Tests that the backup field for the default search provider gets added to
+// the meta table of a version 39 database.
+TEST_F(WebDatabaseMigrationTest, MigrateVersion39ToCurrent) {
+  // This schema is taken from a build prior to the addition of the defaul
+  // search provider backup field to the meta table.
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_39.sql")));
+
+  // Verify pre-conditions.  These are expectations for version 39 of the
+  // database.
+  {
+    sql::Connection connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(&connection, 39, 39));
+
+    int64 default_search_provider_id = 0;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider ID",
+        &default_search_provider_id));
+
+    int64 default_search_provider_id_backup = 0;
+    EXPECT_FALSE(meta_table.GetValue(
+        "Default Search Provider ID Backup",
+        &default_search_provider_id_backup));
+
+    std::string default_search_provider_id_backup_signature;
+    EXPECT_FALSE(meta_table.GetValue(
+        "Default Search Provider ID Backup Signature",
+        &default_search_provider_id_backup_signature));
+  }
+
+  // Load the database via the WebDatabase class and migrate the database to
+  // the current version.
+  {
+    WebDatabase db;
+    ASSERT_EQ(sql::INIT_OK, db.Init(GetDatabasePath()));
+  }
+
+  // Verify post-conditions.  These are expectations for current version of the
+  // database.
+  {
+    sql::Connection connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    // Check version.
+    EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(
+        &connection,
+        kCurrentTestedVersionNumber,
+        kCurrentTestedVersionNumber));
+
+    int64 default_search_provider_id = 0;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider ID",
+        &default_search_provider_id));
+
+    int64 default_search_provider_id_backup = 0;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider ID Backup",
+        &default_search_provider_id_backup));
+    EXPECT_EQ(default_search_provider_id, default_search_provider_id_backup);
+
+    std::string default_search_provider_id_backup_signature;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider ID Backup Signature",
+        &default_search_provider_id_backup_signature));
+  }
+}
+

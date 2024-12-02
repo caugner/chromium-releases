@@ -10,11 +10,11 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "content/common/notification_observer.h"
 
@@ -23,16 +23,21 @@ class NotificationDetails;
 class NotificationSource;
 class PrefService;
 
-namespace base {
-class ListValue;
-}
-
 namespace policy {
 
 // Contains a set of filters to block and allow certain URLs, and matches GURLs
 // against this set. The filters are currently kept in memory.
 class URLBlacklist {
  public:
+  // A constant mapped to a scheme that can be filtered.
+  enum SchemeFlag {
+    SCHEME_HTTP   = 1 << 0,
+    SCHEME_HTTPS  = 1 << 1,
+    SCHEME_FTP    = 1 << 2,
+
+    SCHEME_ALL    = (1 << 3) - 1,
+  };
+
   URLBlacklist();
   virtual ~URLBlacklist();
 
@@ -45,15 +50,6 @@ class URLBlacklist {
 
   // Returns true if the URL is blocked.
   bool IsURLBlocked(const GURL& url) const;
-
-  // A constant mapped to a scheme that can be filtered.
-  enum SchemeFlag {
-    SCHEME_HTTP   = 1 << 0,
-    SCHEME_HTTPS  = 1 << 1,
-    SCHEME_FTP    = 1 << 2,
-
-    SCHEME_ALL    = (1 << 3) - 1,
-  };
 
   // Returns true if |scheme| is a scheme that can be filtered. Returns true
   // and sets |flag| to SCHEME_ALL if |scheme| is empty.
@@ -71,8 +67,6 @@ class URLBlacklist {
                                  uint16* port,
                                  std::string* path);
  private:
-  void AddFilter(const std::string& filter, bool block);
-
   struct PathFilter {
     explicit PathFilter(const std::string& path, uint16 port, bool match)
         : path_prefix(path),
@@ -91,6 +85,8 @@ class URLBlacklist {
   typedef std::vector<PathFilter> PathFilterList;
   typedef base::hash_map<std::string, PathFilterList*> HostFilterTable;
 
+  void AddFilter(const std::string& filter, bool block);
+
   HostFilterTable host_filters_;
 
   DISALLOW_COPY_AND_ASSIGN(URLBlacklist);
@@ -102,7 +98,7 @@ class URLBlacklist {
 // changes are received from, and the IO thread, which owns it (in the
 // ProfileIOData) and checks for blacklisted URLs (from ChromeNetworkDelegate).
 //
-// It must be constructed on the UI thread, to set up |ui_method_factory_| and
+// It must be constructed on the UI thread, to set up |ui_weak_ptr_factory_| and
 // the prefs listeners.
 //
 // ShutdownOnUIThread must be called from UI before destruction, to release
@@ -135,11 +131,13 @@ class URLBlacklistManager : public NotificationObserver {
  protected:
   typedef std::vector<std::string> StringVector;
 
-  // These are used to delay updating the blacklist while the preferences are
+  // Used to delay updating the blacklist while the preferences are
   // changing, and execute only one update per simultaneous prefs changes.
   void ScheduleUpdate();
-  virtual void PostUpdateTask(Task* task);  // Virtual for testing.
-  virtual void Update();  // Virtual for testing.
+
+  // Updates the blacklist using the current preference values.
+  // Virtual for testing.
+  virtual void Update();
 
   // Starts the blacklist update on the IO thread, using the filters in
   // |block| and |allow|. Protected for testing.
@@ -155,7 +153,7 @@ class URLBlacklistManager : public NotificationObserver {
   // ---------
 
   // Used to post update tasks to the UI thread.
-  ScopedRunnableMethodFactory<URLBlacklistManager> ui_method_factory_;
+  base::WeakPtrFactory<URLBlacklistManager> ui_weak_ptr_factory_;
 
   // Used to track the policies and update the blacklist on changes.
   PrefChangeRegistrar pref_change_registrar_;

@@ -4,6 +4,7 @@
 
 #include "views/desktop/desktop_window_view.h"
 
+#include "base/utf_string_conversions.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/transform.h"
 #include "views/desktop/desktop_background.h"
@@ -42,9 +43,17 @@ class DesktopWindow : public Widget {
     return WindowManager::Get()->HandleKeyEvent(this, event);
   }
 
-  virtual bool OnMouseEvent(const MouseEvent& event) {
+  virtual bool OnMouseEvent(const MouseEvent& event) OVERRIDE {
     return WindowManager::Get()->HandleMouseEvent(this, event) ||
         Widget::OnMouseEvent(event);
+  }
+
+  virtual ui::TouchStatus OnTouchEvent(const TouchEvent& event) OVERRIDE {
+    ui::TouchStatus status = WindowManager::Get()->
+        HandleTouchEvent(this, event);
+    if (status == ui::TOUCH_STATUS_UNKNOWN)
+      status = Widget::OnTouchEvent(event);
+    return status;
   }
 
   DesktopWindowView* desktop_window_view_;
@@ -54,7 +63,7 @@ class DesktopWindow : public Widget {
 
 class TestWindowContentView : public WidgetDelegateView {
  public:
-  TestWindowContentView(const std::wstring& title, SkColor color)
+  TestWindowContentView(const string16& title, SkColor color)
       : title_(title),
         color_(color) {
   }
@@ -67,7 +76,7 @@ class TestWindowContentView : public WidgetDelegateView {
   }
 
   // Overridden from WindowDelegate:
-  virtual std::wstring GetWindowTitle() const OVERRIDE {
+  virtual string16 GetWindowTitle() const OVERRIDE {
     return title_;
   }
   virtual View* GetContentsView() {
@@ -85,7 +94,7 @@ class TestWindowContentView : public WidgetDelegateView {
     return true;
   }
 
-  std::wstring title_;
+  string16 title_;
   SkColor color_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWindowContentView);
@@ -142,7 +151,7 @@ void DesktopWindowView::CreateDesktopWindow(DesktopType type) {
   window->Show();
 }
 
-void DesktopWindowView::CreateTestWindow(const std::wstring& title,
+void DesktopWindowView::CreateTestWindow(const string16& title,
                                          SkColor color,
                                          gfx::Rect initial_bounds,
                                          bool rotate) {
@@ -158,14 +167,32 @@ void DesktopWindowView::CreateTestWindow(const std::wstring& title,
     static_cast<NativeWidgetViews*>(window->native_widget())->GetView()->
         SetTransform(transform);
   }
-  static_cast<NativeWidgetViews*>(window->native_widget())->GetView()->
-      SetLayerPropertySetter(LayerPropertySetter::CreateAnimatingSetter());
+}
+
+void DesktopWindowView::AddObserver(DesktopWindowView::Observer* observer) {
+  observers_.AddObserver(observer);
+}
+
+void DesktopWindowView::RemoveObserver(DesktopWindowView::Observer* observer) {
+  observers_.RemoveObserver(observer);
+}
+
+bool DesktopWindowView::HasObserver(DesktopWindowView::Observer* observer) {
+  return observers_.HasObserver(observer);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // DesktopWindowView, View overrides:
 
 void DesktopWindowView::Layout() {
+}
+
+void DesktopWindowView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+  static_cast<DesktopWindowManager*>(WindowManager::Get())->
+      UpdateWindowsAfterScreenSizeChanged(bounds());
+
+  FOR_EACH_OBSERVER(Observer, observers_,
+                    OnDesktopBoundsChanged(previous_bounds));
 }
 
 void DesktopWindowView::ViewHierarchyChanged(
@@ -197,8 +224,8 @@ bool DesktopWindowView::CanMaximize() const {
   return CanResize();
 }
 
-std::wstring DesktopWindowView::GetWindowTitle() const {
-  return L"Aura Desktop";
+string16 DesktopWindowView::GetWindowTitle() const {
+  return ASCIIToUTF16("Aura Desktop");
 }
 
 SkBitmap DesktopWindowView::GetWindowAppIcon() {

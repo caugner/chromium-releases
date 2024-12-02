@@ -33,8 +33,8 @@
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/url_constants.h"
 #include "content/common/view_messages.h"
+#include "content/public/common/url_constants.h"
 #include "net/base/io_buffer.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
@@ -263,15 +263,12 @@ bool SavePackage::Init() {
     return false;
   }
 
-  ResourceDispatcherHost* rdh =
-      content::GetContentClient()->browser()->GetResourceDispatcherHost();
-
   // Create the download item, and add ourself as an observer.
   download_ = new DownloadItem(download_manager_,
                                saved_main_file_path_,
                                page_url_,
                                browser_context->IsOffTheRecord(),
-                               rdh->download_file_manager()->GetNextId());
+                               download_manager_->GetNextId());
   download_->AddObserver(this);
 
   // Transfer ownership to the download manager.
@@ -1224,7 +1221,7 @@ void SavePackage::OnPathPicked(const FilePath& final_name,
   saved_main_file_path_ = final_name;
   // TODO(asanka): This call may block on IO and shouldn't be made
   // from the UI thread.  See http://crbug.com/61827.
-  net::GenerateSafeFileName(tab_contents()->contents_mime_type(),
+  net::GenerateSafeFileName(tab_contents()->contents_mime_type(), false,
                             &saved_main_file_path_);
 
   saved_main_directory_path_ = saved_main_file_path_.DirName();
@@ -1241,8 +1238,8 @@ void SavePackage::OnPathPicked(const FilePath& final_name,
 
 // Static
 bool SavePackage::IsSavableURL(const GURL& url) {
-  for (int i = 0; chrome::kSavableSchemes[i] != NULL; ++i) {
-    if (url.SchemeIs(chrome::kSavableSchemes[i])) {
+  for (int i = 0; chrome::GetSavableSchemes()[i] != NULL; ++i) {
+    if (url.SchemeIs(chrome::GetSavableSchemes()[i])) {
       return true;
     }
   }

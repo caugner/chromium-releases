@@ -22,6 +22,7 @@
 #include "chrome/browser/history/thumbnail_database.h"
 #include "chrome/browser/history/visit_tracker.h"
 #include "chrome/browser/search_engines/template_url_id.h"
+#include "content/browser/cancelable_request.h"
 #include "sql/init_status.h"
 
 class BookmarkService;
@@ -57,7 +58,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
     virtual ~Delegate() {}
 
     // Called when the database cannot be read correctly for some reason.
-    virtual void NotifyProfileError(sql::InitStatus init_status) = 0;
+    virtual void NotifyProfileError(int backend_id,
+                                    sql::InitStatus init_status) = 0;
 
     // Sets the in-memory history backend. The in-memory backend is created by
     // the main backend. For non-unit tests, this happens on the background
@@ -68,21 +70,23 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
     // there may be no in-memory database.
     //
     // Ownership of the backend pointer is transferred to this function.
-    virtual void SetInMemoryBackend(InMemoryHistoryBackend* backend) = 0;
+    virtual void SetInMemoryBackend(int backend_id,
+                                    InMemoryHistoryBackend* backend) = 0;
 
     // Broadcasts the specified notification to the notification service.
     // This is implemented here because notifications must only be sent from
-    // the main thread.
+    // the main thread. This is the only method that doesn't identify the
+    // caller because notifications must always be sent.
     //
     // Ownership of the HistoryDetails is transferred to this function.
     virtual void BroadcastNotifications(int type,
                                         HistoryDetails* details) = 0;
 
     // Invoked when the backend has finished loading the db.
-    virtual void DBLoaded() = 0;
+    virtual void DBLoaded(int backend_id) = 0;
 
     // Tell TopSites to start reading thumbnails from the ThumbnailsDB.
-    virtual void StartTopSitesMigration() = 0;
+    virtual void StartTopSitesMigration(int backend_id) = 0;
   };
 
   // Init must be called to complete object creation. This object can be
@@ -93,11 +97,15 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // See the definition of BroadcastNotificationsCallback above. This function
   // takes ownership of the callback pointer.
   //
+  // |id| is used to communicate with the delegate, to identify which
+  // backend is calling the method.
+  //
   // |bookmark_service| is used to determine bookmarked URLs when deleting and
   // may be NULL.
   //
   // This constructor is fast and does no I/O, so can be called at any time.
   HistoryBackend(const FilePath& history_dir,
+                 int id,
                  Delegate* delegate,
                  BookmarkService* bookmark_service);
 
@@ -236,9 +244,10 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Downloads -----------------------------------------------------------------
 
+  void GetNextDownloadId(scoped_refptr<DownloadNextIdRequest> request);
   void QueryDownloads(scoped_refptr<DownloadQueryRequest> request);
   void CleanUpInProgressEntries();
-  void UpdateDownload(int64 received_bytes, int32 state, int64 db_handle);
+  void UpdateDownload(const DownloadPersistentStoreInfo& data);
   void UpdateDownloadPath(const FilePath& path, int64 db_handle);
   void CreateDownload(scoped_refptr<DownloadCreateRequest> request,
                       int32 id,
@@ -301,10 +310,11 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   virtual void DeleteURL(const GURL& url);
 
   // Calls ExpireHistoryBackend::ExpireHistoryBetween and commits the change.
-  void ExpireHistoryBetween(scoped_refptr<ExpireHistoryRequest> request,
-                            const std::set<GURL>& restrict_urls,
-                            base::Time begin_time,
-                            base::Time end_time);
+  void ExpireHistoryBetween(
+      scoped_refptr<CancelableRequest<base::Closure> > request,
+      const std::set<GURL>& restrict_urls,
+      base::Time begin_time,
+      base::Time end_time);
 
   // Bookmarks -----------------------------------------------------------------
 
@@ -341,6 +351,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   friend class HistoryBackendTest;
   friend class HistoryTest;  // So the unit tests can poke our innards.
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteAll);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteAllThenAddData);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, ImportedFaviconsTest);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, URLsNoLongerBookmarked);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, StripUsernamePasswordTest);
@@ -355,6 +366,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, SetFaviconMapping);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, AddOrUpdateIconMapping);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetMostRecentVisits);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconForURL);
 
   friend class ::TestingProfile;
 
@@ -383,7 +395,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   std::pair<URLID, VisitID> AddPageVisit(const GURL& url,
                                          base::Time time,
                                          VisitID referring_visit,
-                                         PageTransition::Type transition,
+                                         content::PageTransition transition,
                                          VisitSource visit_source);
 
   // Returns a redirect chain in |redirects| for the VisitID
@@ -449,7 +461,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   SegmentID UpdateSegments(const GURL& url,
                            VisitID from_visit,
                            VisitID visit_id,
-                           PageTransition::Type transition_type,
+                           content::PageTransition transition_type,
                            const base::Time ts);
 
   // Favicons ------------------------------------------------------------------
@@ -523,12 +535,22 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // NULL during testing.
   BookmarkService* GetBookmarkService();
 
+  // If there is a favicon for |page_url| and one of the types in |icon_types|,
+  // |favicon| is set appropriately and true is returned.
+  bool GetFaviconFromDB(const GURL& page_url,
+                        int icon_types,
+                        FaviconData* favicon);
+
   // Data ----------------------------------------------------------------------
 
   // Delegate. See the class definition above for more information. This will
   // be NULL before Init is called and after Cleanup, but is guaranteed
   // non-NULL in between.
   scoped_ptr<Delegate> delegate_;
+
+  // The id of this class, given in creation and used for identifying the
+  // backend when calling the delegate.
+  int id_;
 
   // Directory where database files will be stored.
   FilePath history_dir_;

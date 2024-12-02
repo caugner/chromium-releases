@@ -14,19 +14,18 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
-#include "media/base/callback.h"
 #include "media/base/filter_collection.h"
 #include "media/base/media.h"
 #include "media/base/media_log.h"
 #include "media/base/media_switches.h"
 #include "media/base/message_loop_factory_impl.h"
 #include "media/base/pipeline_impl.h"
-#include "media/filters/audio_renderer_impl.h"
 #include "media/filters/ffmpeg_audio_decoder.h"
 #include "media/filters/ffmpeg_demuxer_factory.h"
 #include "media/filters/ffmpeg_video_decoder.h"
 #include "media/filters/file_data_source_factory.h"
 #include "media/filters/null_audio_renderer.h"
+#include "media/filters/reference_audio_renderer.h"
 #include "media/tools/player_x11/gl_video_renderer.h"
 #include "media/tools/player_x11/x11_video_renderer.h"
 
@@ -105,7 +104,7 @@ bool InitPipeline(MessageLoop* message_loop,
   }
 
   if (enable_audio)
-    collection->AddAudioRenderer(new media::AudioRendererImpl());
+    collection->AddAudioRenderer(new media::ReferenceAudioRenderer());
   else
     collection->AddAudioRenderer(new media::NullAudioRenderer());
 
@@ -190,9 +189,9 @@ void PeriodicalUpdate(
     }
   }
 
-  message_loop->PostDelayedTask(FROM_HERE,
-      NewRunnableFunction(PeriodicalUpdate, make_scoped_refptr(pipeline),
-                          message_loop, audio_only), 10);
+  message_loop->PostDelayedTask(FROM_HERE, base::Bind(
+      PeriodicalUpdate, make_scoped_refptr(pipeline),
+      message_loop, audio_only), 10);
 }
 
 int main(int argc, char** argv) {
@@ -251,9 +250,8 @@ int main(int argc, char** argv) {
     // Check if video is present.
     audio_only = !pipeline->HasVideo();
 
-    message_loop.PostTask(FROM_HERE,
-        NewRunnableFunction(PeriodicalUpdate, pipeline,
-                            &message_loop, audio_only));
+    message_loop.PostTask(FROM_HERE, base::Bind(
+        PeriodicalUpdate, pipeline, &message_loop, audio_only));
     message_loop.Run();
   } else{
     std::cout << "Pipeline initialization failed..." << std::endl;

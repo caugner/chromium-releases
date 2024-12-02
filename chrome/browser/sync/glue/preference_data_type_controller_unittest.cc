@@ -11,6 +11,7 @@
 #include "base/tracked_objects.h"
 #include "chrome/browser/sync/glue/preference_data_type_controller.h"
 #include "chrome/browser/sync/glue/change_processor_mock.h"
+#include "chrome/browser/sync/glue/data_type_controller_mock.h"
 #include "chrome/browser/sync/glue/model_associator_mock.h"
 #include "chrome/browser/sync/profile_sync_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
@@ -21,17 +22,12 @@ using browser_sync::ChangeProcessorMock;
 using browser_sync::DataTypeController;
 using browser_sync::ModelAssociatorMock;
 using browser_sync::PreferenceDataTypeController;
+using browser_sync::StartCallback;
 using testing::_;
 using testing::DoAll;
 using testing::InvokeWithoutArgs;
 using testing::Return;
 using testing::SetArgumentPointee;
-
-class StartCallback {
- public:
-  MOCK_METHOD2(Run, void(DataTypeController::StartResult result,
-               const tracked_objects::Location& location));
-};
 
 class PreferenceDataTypeControllerTest : public testing::Test {
  public:
@@ -125,7 +121,7 @@ TEST_F(PreferenceDataTypeControllerTest, StartAssociationFailed) {
 
   EXPECT_CALL(start_callback_, Run(DataTypeController::ASSOCIATION_FAILED, _));
   preference_dtc_->Start(NewCallback(&start_callback_, &StartCallback::Run));
-  EXPECT_EQ(DataTypeController::NOT_RUNNING, preference_dtc_->state());
+  EXPECT_EQ(DataTypeController::DISABLED, preference_dtc_->state());
 }
 
 TEST_F(PreferenceDataTypeControllerTest,

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/automation/url_request_automation_job.h"
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/time.h"
@@ -17,8 +18,8 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
-#include "net/http/http_response_headers.h"
 #include "net/http/http_request_headers.h"
+#include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
 #include "net/url_request/url_request_context.h"
 
@@ -61,7 +62,7 @@ URLRequestAutomationJob::URLRequestAutomationJob(
       redirect_status_(0),
       request_id_(request_id),
       is_pending_(is_pending),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   DVLOG(1) << "URLRequestAutomationJob create. Count: " << ++instance_count_;
   DCHECK(message_filter_ != NULL);
 
@@ -76,7 +77,7 @@ URLRequestAutomationJob::~URLRequestAutomationJob() {
   Cleanup();
 }
 
-bool URLRequestAutomationJob::EnsureProtocolFactoryRegistered() {
+void URLRequestAutomationJob::EnsureProtocolFactoryRegistered() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   if (!is_protocol_factory_registered_) {
@@ -88,8 +89,6 @@ bool URLRequestAutomationJob::EnsureProtocolFactoryRegistered() {
             "https", &URLRequestAutomationJob::Factory);
     is_protocol_factory_registered_ = true;
   }
-
-  return true;
 }
 
 net::URLRequestJob* URLRequestAutomationJob::Factory(
@@ -130,8 +129,8 @@ void URLRequestAutomationJob::Start() {
     // callbacks happen as they would for network requests.
     MessageLoop::current()->PostTask(
         FROM_HERE,
-        method_factory_.NewRunnableMethod(
-            &URLRequestAutomationJob::StartAsync));
+        base::Bind(&URLRequestAutomationJob::StartAsync,
+                   weak_factory_.GetWeakPtr()));
   } else {
     // If this is a pending job, then register it immediately with the message
     // filter so it can be serviced later when we receive a request from the
@@ -169,8 +168,8 @@ bool URLRequestAutomationJob::ReadRawData(
   } else {
     MessageLoop::current()->PostTask(
         FROM_HERE,
-        method_factory_.NewRunnableMethod(
-            &URLRequestAutomationJob::NotifyJobCompletionTask));
+        base::Bind(&URLRequestAutomationJob::NotifyJobCompletionTask,
+                   weak_factory_.GetWeakPtr()));
   }
   return false;
 }
@@ -345,8 +344,8 @@ void URLRequestAutomationJob::OnRequestEnd(
   // so we don't.  We could possibly call OnSSLCertificateError with a NULL
   // certificate, but I'm not sure if all implementations expect it.
   // if (status.status() == net::URLRequestStatus::FAILED &&
-  //    net::IsCertificateError(status.os_error()) && request_->delegate()) {
-  //  request_->delegate()->OnSSLCertificateError(request_, status.os_error());
+  //    net::IsCertificateError(status.error()) && request_->delegate()) {
+  //  request_->delegate()->OnSSLCertificateError(request_, status.error());
   // }
 
   DisconnectFromMessageFilter();

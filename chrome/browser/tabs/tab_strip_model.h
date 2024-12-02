@@ -13,7 +13,7 @@
 #include "chrome/browser/tabs/tab_strip_selection_model.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
-#include "content/common/page_transition_types.h"
+#include "content/public/common/page_transition_types.h"
 
 class NavigationController;
 class Profile;
@@ -38,11 +38,11 @@ class TabStripModelOrderController;
 //   if a non-mini tab is added it is forced to be with non-mini tabs. Requests
 //   to move tabs outside the range of the tab type are ignored. For example,
 //   a request to move a mini-tab after non-mini-tabs is ignored.
-//   You'll notice there is no explcit api for making a tab a mini-tab, rather
+//   You'll notice there is no explicit api for making a tab a mini-tab, rather
 //   there are two tab types that are implicitly mini-tabs:
 //   . App. Corresponds to an extension that wants an app tab. App tabs are
 //     identified by TabContentsWrapper::extension_tab_helper()::is_app().
-//     App tabs are always pinneded (you can't unpin them).
+//     App tabs are always pinned (you can't unpin them).
 //   . Pinned. Any tab can be pinned. Non-app tabs whose pinned state is changed
 //     are moved to be with other mini-tabs or non-mini tabs.
 //
@@ -201,6 +201,12 @@ class TabStripModel : public NotificationObserver {
   TabContentsWrapper* ReplaceTabContentsAt(int index,
                                            TabContentsWrapper* new_contents);
 
+  // Destroys the TabContents at the specified index, but keeps the tab visible
+  // in the tab strip. Used to free memory in low-memory conditions, especially
+  // on Chrome OS. The tab reloads if the user clicks on it.
+  // Returns an empty TabContentsWrapper, used only for testing.
+  TabContentsWrapper* DiscardTabContentsAt(int index);
+
   // Detaches the TabContents at the specified index from this strip. The
   // TabContents is not destroyed, just removed from display. The caller is
   // responsible for doing something with it (e.g. stuffing it into another
@@ -212,6 +218,10 @@ class TabStripModel : public NotificationObserver {
   // command, false if the tab was activated as a by-product of some other
   // action.
   void ActivateTabAt(int index, bool user_gesture);
+
+  // Adds tab at |index| to the currently selected tabs, without changing the
+  // active tab index.
+  void AddTabAtToSelection(int index);
 
   // Move the TabContents at the specified index to another index. This method
   // does NOT send Detached/Attached notifications, rather it moves the
@@ -310,7 +320,7 @@ class TabStripModel : public NotificationObserver {
   // navigation, the TabStripModel may adjust its selection and grouping
   // behavior.
   void TabNavigating(TabContentsWrapper* contents,
-                     PageTransition::Type transition);
+                     content::PageTransition transition);
 
   // Forget all Opener relationships that are stored (but _not_ group
   // relationships!) This is to reduce unpredictable tab switching behavior
@@ -351,6 +361,10 @@ class TabStripModel : public NotificationObserver {
 
   // Returns true if the tab at |index| is blocked by a tab modal dialog.
   bool IsTabBlocked(int index) const;
+
+  // Returns true if the TabContents at |index| has been discarded to save
+  // memory.  See DiscardTabContentsAt() for details.
+  bool IsTabDiscarded(int index) const;
 
   // Returns the index of the first tab that is not a mini-tab. This returns
   // |count()| if all of the tabs are mini-tabs, and 0 if none of the tabs are
@@ -393,7 +407,7 @@ class TabStripModel : public NotificationObserver {
   // InsertTabContentsAt to do the actual inertion.
   void AddTabContents(TabContentsWrapper* contents,
                       int index,
-                      PageTransition::Type transition,
+                      content::PageTransition transition,
                       int add_types);
 
   // Closes the selected tabs.
@@ -428,7 +442,6 @@ class TabStripModel : public NotificationObserver {
     CommandRestoreTab,
     CommandTogglePinned,
     CommandBookmarkAllTabs,
-    CommandUseVerticalTabs,
     CommandUseCompactNavigationBar,
     CommandSelectByDomain,
     CommandSelectByOpener,
@@ -438,10 +451,6 @@ class TabStripModel : public NotificationObserver {
   // Returns true if the specified command is enabled. If |context_index| is
   // selected the response applies to all selected tabs.
   bool IsContextMenuCommandEnabled(int context_index,
-                                   ContextMenuCommand command_id) const;
-
-  // Returns true if the specified command is checked.
-  bool IsContextMenuCommandChecked(int context_index,
                                    ContextMenuCommand command_id) const;
 
   // Performs the action associated with the specified command for the given
@@ -571,7 +580,8 @@ class TabStripModel : public NotificationObserver {
         : contents(a_contents),
           reset_group_on_select(false),
           pinned(false),
-          blocked(false) {
+          blocked(false),
+          discarded(false) {
       SetGroup(NULL);
     }
 
@@ -618,29 +628,14 @@ class TabStripModel : public NotificationObserver {
 
     // Is the tab interaction blocked by a modal dialog?
     bool blocked;
+
+    // Has the tab data been discarded to save memory?
+    bool discarded;
   };
 
   // The TabContents data currently hosted within this TabStripModel.
   typedef std::vector<TabContentsData*> TabContentsDataVector;
-
-  // TODO(eroman): Temporary for investigating 93747.
-  class Padding {
-   public:
-    Padding();
-    void CheckValid() const;
-
-   private:
-    char bytes_[32];
-  };
-
-  // Surround contents_data_ with some extra bytes to try and catch external
-  // mutation of this memory. This is temporary for debugging 93747.
-  Padding padding1_;
   TabContentsDataVector contents_data_;
-  Padding padding2_;
-
-  // This is temporary for debugging 93747.
-  void CheckIsAliveAndWell() const;
 
   // A profile associated with this TabStripModel, used when creating new Tabs.
   Profile* profile_;
@@ -660,8 +655,6 @@ class TabStripModel : public NotificationObserver {
   NotificationRegistrar registrar_;
 
   TabStripSelectionModel selection_model_;
-
-  uint32 magic_id_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(TabStripModel);
 };

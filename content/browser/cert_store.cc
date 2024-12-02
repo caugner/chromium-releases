@@ -11,6 +11,7 @@
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/common/notification_service.h"
+#include "content/public/browser/notification_types.h"
 
 template <typename T>
 struct MatchSecond {
@@ -36,9 +37,9 @@ CertStore::CertStore() : next_cert_id_(1) {
   //                is not used anymore.
 
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
 }
 
 CertStore::~CertStore() {

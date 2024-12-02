@@ -5,7 +5,9 @@
 #include "chrome/browser/ui/views/extensions/extension_installed_bubble.h"
 
 #include <algorithm>
+#include <string>
 
+#include "base/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
@@ -76,7 +78,7 @@ void ShowExtensionInstalledBubble(
   ExtensionInstalledBubble::Show(extension, browser, icon);
 }
 
-} // namespace browser
+}  // namespace browser
 
 // InstalledBubbleContent is the content view which is placed in the
 // ExtensionInstalledBubble. It displays the install icon and explanatory
@@ -108,9 +110,9 @@ class InstalledBubbleContent : public views::View,
 
     string16 extension_name = UTF8ToUTF16(extension->name());
     base::i18n::AdjustStringForLocaleDirection(&extension_name);
-    heading_ = new views::Label(UTF16ToWide(
+    heading_ = new views::Label(
         l10n_util::GetStringFUTF16(IDS_EXTENSION_INSTALLED_HEADING,
-                                   extension_name)));
+                                   extension_name));
     heading_->SetFont(rb.GetFont(ResourceBundle::MediumFont));
     heading_->SetMultiLine(true);
     heading_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
@@ -118,8 +120,8 @@ class InstalledBubbleContent : public views::View,
 
     switch (type_) {
       case ExtensionInstalledBubble::PAGE_ACTION: {
-        info_ = new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-            IDS_EXTENSION_INSTALLED_PAGE_ACTION_INFO)));
+        info_ = new views::Label(l10n_util::GetStringUTF16(
+            IDS_EXTENSION_INSTALLED_PAGE_ACTION_INFO));
         info_->SetFont(font);
         info_->SetMultiLine(true);
         info_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
@@ -127,9 +129,9 @@ class InstalledBubbleContent : public views::View,
         break;
       }
       case ExtensionInstalledBubble::OMNIBOX_KEYWORD: {
-        info_ = new views::Label(UTF16ToWide(l10n_util::GetStringFUTF16(
+        info_ = new views::Label(l10n_util::GetStringFUTF16(
             IDS_EXTENSION_INSTALLED_OMNIBOX_KEYWORD_INFO,
-            UTF8ToUTF16(extension->omnibox_keyword()))));
+            UTF8ToUTF16(extension->omnibox_keyword())));
         info_->SetFont(font);
         info_->SetMultiLine(true);
         info_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
@@ -137,8 +139,8 @@ class InstalledBubbleContent : public views::View,
         break;
       }
       case ExtensionInstalledBubble::APP: {
-        views::Link* link = new views::Link(UTF16ToWide(
-            l10n_util::GetStringUTF16(IDS_EXTENSION_INSTALLED_APP_INFO)));
+        views::Link* link = new views::Link(
+            l10n_util::GetStringUTF16(IDS_EXTENSION_INSTALLED_APP_INFO));
         link->set_listener(this);
         manage_ = link;
         manage_->SetFont(font);
@@ -152,8 +154,8 @@ class InstalledBubbleContent : public views::View,
     }
 
     if (type_ != ExtensionInstalledBubble::APP) {
-      manage_ = new views::Label(UTF16ToWide(
-          l10n_util::GetStringUTF16(IDS_EXTENSION_INSTALLED_MANAGE_INFO)));
+      manage_ = new views::Label(
+          l10n_util::GetStringUTF16(IDS_EXTENSION_INSTALLED_MANAGE_INFO));
       manage_->SetFont(font);
       manage_->SetMultiLine(true);
       manage_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
@@ -318,8 +320,9 @@ void ExtensionInstalledBubble::Observe(int type,
     if (extension == extension_) {
       animation_wait_retries_ = 0;
       // PostTask to ourself to allow all EXTENSION_LOADED Observers to run.
-      MessageLoopForUI::current()->PostTask(FROM_HERE, NewRunnableMethod(this,
-          &ExtensionInstalledBubble::ShowInternal));
+      MessageLoopForUI::current()->PostTask(
+          FROM_HERE,
+          base::Bind(&ExtensionInstalledBubble::ShowInternal, this));
     }
   } else if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED) {
     const Extension* extension =
@@ -332,8 +335,7 @@ void ExtensionInstalledBubble::Observe(int type,
 }
 
 void ExtensionInstalledBubble::ShowInternal() {
-  BrowserView* browser_view = BrowserView::GetBrowserViewForNativeWindow(
-      browser_->window()->GetNativeHandle());
+  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_);
 
   const views::View* reference_view = NULL;
   if (type_ == APP) {
@@ -355,8 +357,9 @@ void ExtensionInstalledBubble::ShowInternal() {
       // We don't know where the view will be until the container has stopped
       // animating, so check back in a little while.
       MessageLoopForUI::current()->PostDelayedTask(
-          FROM_HERE, NewRunnableMethod(this,
-          &ExtensionInstalledBubble::ShowInternal), kAnimationWaitTime);
+          FROM_HERE,
+          base::Bind(&ExtensionInstalledBubble::ShowInternal, this),
+          kAnimationWaitTime);
       return;
     }
     reference_view = container->GetBrowserActionView(
@@ -413,8 +416,7 @@ void ExtensionInstalledBubble::ShowInternal() {
 void ExtensionInstalledBubble::BubbleClosing(Bubble* bubble,
                                              bool closed_by_escape) {
   if (extension_ && type_ == PAGE_ACTION) {
-    BrowserView* browser_view = BrowserView::GetBrowserViewForNativeWindow(
-        browser_->window()->GetNativeHandle());
+    BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_);
     browser_view->GetLocationBarView()->SetPreviewEnabledPageAction(
         extension_->page_action(),
         false);  // preview_enabled

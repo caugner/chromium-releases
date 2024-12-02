@@ -8,8 +8,7 @@
 #include "base/task.h"
 #include "content/common/desktop_notification_messages.h"
 #include "content/common/view_messages.h"
-#include "content/renderer/render_thread.h"
-#include "content/renderer/render_view.h"
+#include "content/renderer/render_view_impl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPermissionCallback.h"
@@ -24,8 +23,8 @@ using WebKit::WebSecurityOrigin;
 using WebKit::WebString;
 using WebKit::WebURL;
 
-NotificationProvider::NotificationProvider(RenderView* render_view)
-    : RenderViewObserver(render_view) {
+NotificationProvider::NotificationProvider(RenderViewImpl* render_view)
+    : content::RenderViewObserver(render_view) {
 }
 
 NotificationProvider::~NotificationProvider() {
@@ -71,7 +70,7 @@ void NotificationProvider::requestPermission(
     const WebSecurityOrigin& origin,
     WebNotificationPermissionCallback* callback) {
   // We only request permission in response to a user gesture.
-  if (!render_view()->webview()->mainFrame()->isProcessingUserGesture())
+      if (!render_view()->GetWebView()->mainFrame()->isProcessingUserGesture())
     return;
 
   int id = manager_.RegisterPermissionRequest(callback);
@@ -102,7 +101,7 @@ bool NotificationProvider::ShowHTML(const WebNotification& notification,
                                     int id) {
   DCHECK(notification.isHTML());
   DesktopNotificationHostMsg_Show_Params params;
-  WebDocument document = render_view()->webview()->mainFrame()->document();
+  WebDocument document = render_view()->GetWebView()->mainFrame()->document();
   params.origin = GURL(document.securityOrigin().toString());
   params.is_html = true;
   params.contents_url = notification.url();
@@ -116,7 +115,7 @@ bool NotificationProvider::ShowText(const WebNotification& notification,
   DCHECK(!notification.isHTML());
   DesktopNotificationHostMsg_Show_Params params;
   params.is_html = false;
-  WebDocument document = render_view()->webview()->mainFrame()->document();
+  WebDocument document = render_view()->GetWebView()->mainFrame()->document();
   params.origin = GURL(document.securityOrigin().toString());
   params.icon_url = notification.iconURL();
   params.title = notification.title();

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/task_manager_dialog.h"
 
+#include "base/bind.h"
 #include "base/memory/singleton.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/platform_util.h"
@@ -41,8 +42,12 @@ class TaskManagerDialogImpl : public HtmlDialogUIDelegate {
   }
   virtual GURL GetDialogContentURL() const OVERRIDE {
     std::string url_string(chrome::kChromeUITaskManagerURL);
+    url_string += "?";
+#if defined(OS_CHROMEOS)
+    url_string += "showclose=1&showtitle=1&";
+#endif  // defined(OS_CHROMEOS)
     if (is_background_page_mode_)
-      url_string += "#bg";
+      url_string += "background=1";
     return GURL(url_string);
   }
   virtual void GetWebUIMessageHandlers(
@@ -137,13 +142,12 @@ void TaskManagerDialogImpl::OpenHtmlDialog() {
 void TaskManagerDialog::Show() {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableFunction(&TaskManagerDialogImpl::Show, false));
+      base::Bind(&TaskManagerDialogImpl::Show, false));
 }
 
 // static
 void TaskManagerDialog::ShowBackgroundPages() {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableFunction(&TaskManagerDialogImpl::Show, true));
+      base::Bind(&TaskManagerDialogImpl::Show, true));
 }
-

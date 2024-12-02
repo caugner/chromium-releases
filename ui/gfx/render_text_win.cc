@@ -100,7 +100,7 @@ int RenderTextWin::GetStringWidth() {
 }
 
 void RenderTextWin::Draw(Canvas* canvas) {
-  skia::ScopedPlatformPaint scoped_platform_paint(canvas->AsCanvasSkia());
+  skia::ScopedPlatformPaint scoped_platform_paint(canvas->GetSkCanvas());
   HDC hdc = scoped_platform_paint.GetPlatformSurface();
   int saved_dc = SaveDC(hdc);
   DrawSelection(canvas);
@@ -237,10 +237,6 @@ SelectionModel RenderTextWin::RightEndSelectionModel() {
   return SelectionModel(cursor, caret, placement);
 }
 
-size_t RenderTextWin::GetIndexOfPreviousGrapheme(size_t position) {
-  return IndexOfAdjacentGrapheme(position, false);
-}
-
 std::vector<Rect> RenderTextWin::GetSubstringBounds(size_t from, size_t to) {
   ui::Range range(from, to);
   DCHECK(ui::Range(0, text().length()).Contains(range));
@@ -293,6 +289,41 @@ std::vector<Rect> RenderTextWin::GetSubstringBounds(size_t from, size_t to) {
     }
   }
   return bounds;
+}
+
+bool RenderTextWin::IsCursorablePosition(size_t position) {
+  if (position == 0 || position == text().length())
+    return true;
+
+  size_t run_index = GetRunContainingPosition(position);
+  if (run_index >= runs_.size())
+    return false;
+
+  internal::TextRun* run = runs_[run_index];
+  size_t start = run->range.start();
+  if (position == start)
+    return true;
+  return run->logical_clusters[position - start] !=
+         run->logical_clusters[position - start - 1];
+}
+
+size_t RenderTextWin::IndexOfAdjacentGrapheme(size_t index, bool next) {
+  size_t run_index = GetRunContainingPosition(index);
+  internal::TextRun* run = run_index < runs_.size() ? runs_[run_index] : NULL;
+  long start = run ? run->range.start() : 0;
+  long length = run ? run->range.length() : text().length();
+  long ch = index - start;
+  WORD cluster = run ? run->logical_clusters[ch] : 0;
+
+  if (!next) {
+    do {
+      ch--;
+    } while (ch >= 0 && run && run->logical_clusters[ch] == cluster);
+  } else {
+    while (ch < length && run && run->logical_clusters[ch] == cluster)
+      ch++;
+  }
+  return std::max(static_cast<long>(std::min(ch, length) + start), 0L);
 }
 
 void RenderTextWin::ItemizeLogicalText() {
@@ -354,34 +385,46 @@ void RenderTextWin::ItemizeLogicalText() {
 }
 
 void RenderTextWin::LayoutVisualText(HDC hdc) {
-  HRESULT hr = 0;
+  HRESULT hr = E_FAIL;
   std::vector<internal::TextRun*>::const_iterator run_iter;
   for (run_iter = runs_.begin(); run_iter < runs_.end(); ++run_iter) {
     internal::TextRun* run = *run_iter;
-    int run_length = run->range.length();
+    size_t run_length = run->range.length();
     string16 run_string(text().substr(run->range.start(), run_length));
     const wchar_t* run_text = run_string.c_str();
-    // Select the font desired for glyph generation
+    // Select the font desired for glyph generation.
     SelectObject(hdc, run->font.GetNativeFont());
 
     run->logical_clusters.reset(new WORD[run_length]);
     run->glyph_count = 0;
-    hr = E_OUTOFMEMORY;
-    // kGuess comes from: http://msdn.microsoft.com/en-us/library/dd368564.aspx
-    const int kGuess = static_cast<int>(1.5 * run_length + 16);
-    for (size_t n = kGuess; hr == E_OUTOFMEMORY && n < kMaxGlyphs; n *= 2) {
-      run->glyphs.reset(new WORD[n]);
-      run->visible_attributes.reset(new SCRIPT_VISATTR[n]);
+    // Max glyph guess: http://msdn.microsoft.com/en-us/library/dd368564.aspx
+    size_t max_glyphs = static_cast<size_t>(1.5 * run_length + 16);
+    while (max_glyphs < kMaxGlyphs) {
+      run->glyphs.reset(new WORD[max_glyphs]);
+      run->visible_attributes.reset(new SCRIPT_VISATTR[max_glyphs]);
       hr = ScriptShape(hdc,
                        &script_cache_,
                        run_text,
                        run_length,
-                       n,
+                       max_glyphs,
                        &(run->script_analysis),
                        run->glyphs.get(),
                        run->logical_clusters.get(),
                        run->visible_attributes.get(),
                        &(run->glyph_count));
+      if (hr == E_OUTOFMEMORY) {
+        max_glyphs *= 2;
+      } else if (hr == USP_E_SCRIPT_NOT_IN_FONT) {
+        // The run's font doesn't contain the required glyphs, use an alternate.
+        // TODO(msw): Font fallback... Don't use SCRIPT_UNDEFINED.
+        //            See https://bugzilla.mozilla.org/show_bug.cgi?id=341500
+        //            And http://maxradi.us/documents/uniscribe/
+        if (run->script_analysis.eScript == SCRIPT_UNDEFINED)
+          break;
+        run->script_analysis.eScript = SCRIPT_UNDEFINED;
+      } else {
+        break;
+      }
     }
     DCHECK(SUCCEEDED(hr));
 
@@ -449,34 +492,16 @@ size_t RenderTextWin::GetRunContainingPoint(const Point& point) const {
   return run;
 }
 
-size_t RenderTextWin::IndexOfAdjacentGrapheme(size_t index, bool next) const {
-  size_t run_index = GetRunContainingPosition(index);
-  internal::TextRun* run = run_index < runs_.size() ? runs_[run_index] : NULL;
-  long start = run ? run->range.start() : 0;
-  long length = run ? run->range.length() : text().length();
-  long ch = index - start;
-  WORD cluster = run ? run->logical_clusters[ch] : 0;
-
-  if (!next) {
-    do {
-      ch--;
-    } while (ch >= 0 && run && run->logical_clusters[ch] == cluster);
-  } else {
-    while (ch < length && run && run->logical_clusters[ch] == cluster)
-      ch++;
-  }
-  return std::max(static_cast<long>(std::min(ch, length) + start), 0L);
-}
 
 SelectionModel RenderTextWin::FirstSelectionModelInsideRun(
-    internal::TextRun* run) const {
+    internal::TextRun* run) {
   size_t caret = run->range.start();
   size_t cursor = IndexOfAdjacentGrapheme(caret, true);
   return SelectionModel(cursor, caret, SelectionModel::TRAILING);
 }
 
 SelectionModel RenderTextWin::LastSelectionModelInsideRun(
-    internal::TextRun* run) const {
+    internal::TextRun* run) {
   size_t caret = IndexOfAdjacentGrapheme(run->range.end(), false);
   return SelectionModel(caret, caret, SelectionModel::LEADING);
 }
@@ -565,7 +590,7 @@ void RenderTextWin::DrawVisualText(Canvas* canvas) {
   if (text().empty())
     return;
 
-  CanvasSkia* canvas_skia = canvas->AsCanvasSkia();
+  SkCanvas* canvas_skia = canvas->GetSkCanvas();
   skia::ScopedPlatformPaint scoped_platform_paint(canvas_skia);
 
   Point offset(ToViewPoint(Point()));
@@ -620,11 +645,11 @@ void RenderTextWin::DrawVisualText(Canvas* canvas) {
       strike.setStyle(SkPaint::kFill_Style);
       strike.setColor(run->foreground);
       strike.setStrokeWidth(kStrikeWidth);
-      canvas->AsCanvasSkia()->drawLine(SkIntToScalar(bounds.x()),
-                                       SkIntToScalar(bounds.bottom()),
-                                       SkIntToScalar(bounds.right()),
-                                       SkIntToScalar(bounds.y()),
-                                       strike);
+      canvas->GetSkCanvas()->drawLine(SkIntToScalar(bounds.x()),
+                                      SkIntToScalar(bounds.bottom()),
+                                      SkIntToScalar(bounds.right()),
+                                      SkIntToScalar(bounds.y()),
+                                      strike);
     }
     offset.Offset(run->width, 0);
   }

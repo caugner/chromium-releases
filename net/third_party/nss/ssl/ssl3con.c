@@ -2014,13 +2014,13 @@ ssl3_ComputeRecordMAC(
 
 static PRBool
 ssl3_ClientAuthTokenPresent(sslSessionID *sid) {
-#ifdef NSS_PLATFORM_CLIENT_AUTH
-    return PR_TRUE;
-#else
     PK11SlotInfo *slot = NULL;
     PRBool isPresent = PR_TRUE;
 
     /* we only care if we are doing client auth */
+    /* If NSS_PLATFORM_CLIENT_AUTH is defined and a platformClientKey is being
+     * used, u.ssl3.clAuthValid will be false and this function will always
+     * return PR_TRUE. */
     if (!sid || !sid->u.ssl3.clAuthValid) {
 	return PR_TRUE;
     }
@@ -2040,27 +2040,26 @@ ssl3_ClientAuthTokenPresent(sslSessionID *sid) {
 	PK11_FreeSlot(slot);
     }
     return isPresent;
-#endif /* NSS_PLATFORM_CLIENT_AUTH */
 }
 
+/* Caller must hold the spec read lock. wrBuf is sometimes, but not always,
+ * ss->sec.writeBuf.
+ */
 static SECStatus
-ssl3_CompressMACEncryptRecord(sslSocket *        ss,
+ssl3_CompressMACEncryptRecord(ssl3CipherSpec *   cwSpec,
+		              PRBool             isServer,
                               SSL3ContentType    type,
 		              const SSL3Opaque * pIn,
-		              PRUint32           contentLen)
+		              PRUint32           contentLen,
+		              sslBuffer *        wrBuf)
 {
-    ssl3CipherSpec *          cwSpec;
     const ssl3BulkCipherDef * cipher_def;
-    sslBuffer      *          wrBuf 	  = &ss->sec.writeBuf;
     SECStatus                 rv;
     PRUint32                  macLen      = 0;
     PRUint32                  fragLen;
     PRUint32  p1Len, p2Len, oddLen = 0;
     PRInt32   cipherBytes =  0;
 
-    ssl_GetSpecReadLock(ss);	/********************************/
-
-    cwSpec = ss->ssl3.cwSpec;
     cipher_def = cwSpec->cipher_def;
 
     if (cwSpec->compressor) {
@@ -2077,12 +2076,12 @@ ssl3_CompressMACEncryptRecord(sslSocket *        ss,
     /*
      * Add the MAC
      */
-    rv = ssl3_ComputeRecordMAC( cwSpec, (PRBool)(ss->sec.isServer),
+    rv = ssl3_ComputeRecordMAC( cwSpec, isServer,
 	type, cwSpec->version, cwSpec->write_seq_num, pIn, contentLen,
 	wrBuf->buf + contentLen + SSL3_RECORD_HEADER_LENGTH, &macLen);
     if (rv != SECSuccess) {
 	ssl_MapLowLevelError(SSL_ERROR_MAC_COMPUTATION_FAILURE);
-	goto spec_locked_loser;
+	return SECFailure;
     }
     p1Len   = contentLen;
     p2Len   = macLen;
@@ -2135,7 +2134,7 @@ ssl3_CompressMACEncryptRecord(sslSocket *        ss,
 	PORT_Assert(rv == SECSuccess && cipherBytes == p1Len);
 	if (rv != SECSuccess || cipherBytes != p1Len) {
 	    PORT_SetError(SSL_ERROR_ENCRYPTION_FAILURE);
-	    goto spec_locked_loser;
+	    return SECFailure;
 	}
     }
     if (p2Len > 0) {
@@ -2149,7 +2148,7 @@ ssl3_CompressMACEncryptRecord(sslSocket *        ss,
 	PORT_Assert(rv == SECSuccess && cipherBytesPart2 == p2Len);
 	if (rv != SECSuccess || cipherBytesPart2 != p2Len) {
 	    PORT_SetError(SSL_ERROR_ENCRYPTION_FAILURE);
-	    goto spec_locked_loser;
+	    return SECFailure;
 	}
 	cipherBytes += cipherBytesPart2;
     }	
@@ -2164,13 +2163,7 @@ ssl3_CompressMACEncryptRecord(sslSocket *        ss,
     wrBuf->buf[3] = MSB(cipherBytes);
     wrBuf->buf[4] = LSB(cipherBytes);
 
-    ssl_ReleaseSpecReadLock(ss); /************************************/
-
     return SECSuccess;
-
-spec_locked_loser:
-    ssl_ReleaseSpecReadLock(ss);
-    return SECFailure;
 }
 
 /* Process the plain text before sending it.
@@ -2231,28 +2224,77 @@ ssl3_SendRecord(   sslSocket *        ss,
 
     while (nIn > 0) {
 	PRUint32  contentLen = PR_MIN(nIn, MAX_FRAGMENT_LENGTH);
+	unsigned int spaceNeeded;
+	unsigned int numRecords;
 
-	if (wrBuf->space < contentLen + SSL3_BUFFER_FUDGE) {
-	    PRInt32 newSpace = PR_MAX(wrBuf->space * 2, contentLen);
-	    newSpace = PR_MIN(newSpace, MAX_FRAGMENT_LENGTH);
-	    newSpace += SSL3_BUFFER_FUDGE;
-	    rv = sslBuffer_Grow(wrBuf, newSpace);
+	ssl_GetSpecReadLock(ss);    /********************************/
+
+	if (nIn > 1 &&
+	    ss->opt.enableFalseStart &&
+	    ss->ssl3.cwSpec->version <= SSL_LIBRARY_VERSION_3_1_TLS &&
+	    type == content_application_data &&
+	    ss->ssl3.cwSpec->cipher_def->type == type_block /* CBC mode */) {
+	    /* We will split the first byte of the record into its own record,
+	     * as explained in the documentation for SSL_CBC_RANDOM_IV in ssl.h
+	     */
+	    numRecords = 2;
+	} else {
+	    numRecords = 1;
+	}
+
+	spaceNeeded = contentLen + (numRecords * SSL3_BUFFER_FUDGE);
+	if (spaceNeeded > wrBuf->space) {
+	    rv = sslBuffer_Grow(wrBuf, spaceNeeded);
 	    if (rv != SECSuccess) {
 		SSL_DBG(("%d: SSL3[%d]: SendRecord, tried to get %d bytes",
-			 SSL_GETPID(), ss->fd, newSpace));
-		return SECFailure; /* sslBuffer_Grow set a memory error code. */
+			 SSL_GETPID(), ss->fd, spaceNeeded));
+		goto spec_locked_loser; /* sslBuffer_Grow set a memory error code. */
 	    }
 	}
 
-	rv = ssl3_CompressMACEncryptRecord( ss, type, pIn, contentLen);
+	if (numRecords == 2) {
+	    sslBuffer secondRecord;
+
+	    rv = ssl3_CompressMACEncryptRecord(ss->ssl3.cwSpec,
+	                                       ss->sec.isServer, type, pIn, 1,
+	                                       wrBuf);
+	    if (rv != SECSuccess)
+	        goto spec_locked_loser;
+
+	    PRINT_BUF(50, (ss, "send (encrypted) record data [1/2]:",
+	                   wrBuf->buf, wrBuf->len));
+
+	    secondRecord.buf = wrBuf->buf + wrBuf->len;
+	    secondRecord.len = 0;
+	    secondRecord.space = wrBuf->space - wrBuf->len;
+
+	    rv = ssl3_CompressMACEncryptRecord(ss->ssl3.cwSpec,
+	                                       ss->sec.isServer, type, pIn + 1,
+	                                       contentLen - 1, &secondRecord);
+	    if (rv == SECSuccess) {
+	        PRINT_BUF(50, (ss, "send (encrypted) record data [2/2]:",
+	                       secondRecord.buf, secondRecord.len));
+	        wrBuf->len += secondRecord.len;
+	    }
+	} else {
+	    rv = ssl3_CompressMACEncryptRecord(ss->ssl3.cwSpec,
+	                                       ss->sec.isServer, type, pIn,
+	                                       contentLen, wrBuf);
+	    if (rv == SECSuccess) {
+	        PRINT_BUF(50, (ss, "send (encrypted) record data [1/1]:",
+	                       wrBuf->buf, wrBuf->len));
+	    }
+	}
+
+spec_locked_loser:
+	ssl_ReleaseSpecReadLock(ss); /************************************/
+
 	if (rv != SECSuccess)
 	    return SECFailure;
 
 	pIn += contentLen;
 	nIn -= contentLen;
 	PORT_Assert( nIn >= 0 );
-
-	PRINT_BUF(50, (ss, "send (encrypted) record data:", wrBuf->buf, wrBuf->len));
 
 	/* If there's still some previously saved ciphertext,
 	 * or the caller doesn't want us to send the data yet,
@@ -2321,8 +2363,6 @@ ssl3_SendApplicationData(sslSocket *ss, const unsigned char *in,
 {
     PRInt32   totalSent	= 0;
     PRInt32   discarded = 0;
-    PRBool    isBlockCipher;
-    int       recordIndex;
 
     PORT_Assert( ss->opt.noLocks || ssl_HaveXmitBufLock(ss) );
     if (len < 0 || !in) {
@@ -2347,12 +2387,7 @@ ssl3_SendApplicationData(sslSocket *ss, const unsigned char *in,
 	len--;
 	discarded = 1;
     }
-
-    ssl_GetSpecReadLock(ss);
-    isBlockCipher = ss->ssl3.cwSpec->cipher_def->type == type_block;
-    ssl_ReleaseSpecReadLock(ss);
-
-    for (recordIndex = 0; len > totalSent; recordIndex++) {
+    while (len > totalSent) {
 	PRInt32   sent, toSend;
 
 	if (totalSent > 0) {
@@ -2367,29 +2402,6 @@ ssl3_SendApplicationData(sslSocket *ss, const unsigned char *in,
 	    ssl_GetXmitBufLock(ss);
 	}
 	toSend = PR_MIN(len - totalSent, MAX_FRAGMENT_LENGTH);
-	if (isBlockCipher &&
-	    ss->opt.enableFalseStart &&
-	    ss->ssl3.cwSpec->version <= SSL_LIBRARY_VERSION_3_1_TLS) {
-	    /*
-	     * We assume that block ciphers are used in CBC mode and send
-	     * only one byte in the first record.  This effectively
-	     * randomizes the IV in a backward compatible way.
-	     *
-	     * We get back to the MAX_FRAGMENT_LENGTH record boundary in
-	     * the second record.  So for a large amount of data, we send
-	     *     1
-	     *     MAX_FRAGMENT_LENGTH - 1
-	     *     MAX_FRAGMENT_LENGTH
-	     *     MAX_FRAGMENT_LENGTH
-	     *     ...
-	     */
-	    if (recordIndex == 0) {
-		toSend = 1;
-	    } else if (recordIndex == 1 &&
-		       len - totalSent > MAX_FRAGMENT_LENGTH) {
-		toSend--;
-	    }
-	}
 	sent = ssl3_SendRecord(ss, content_application_data, 
 	                       in + totalSent, toSend, flags);
 	if (sent < 0) {
@@ -4857,31 +4869,33 @@ ssl3_SendCertificateVerify(sslSocket *ss)
     }
 
     isTLS = (PRBool)(ss->ssl3.pwSpec->version > SSL_LIBRARY_VERSION_3_0);
+    if (ss->ssl3.platformClientKey) {
 #ifdef NSS_PLATFORM_CLIENT_AUTH
-    rv = ssl3_PlatformSignHashes(&hashes, ss->ssl3.platformClientKey,
-                                 &buf, isTLS);
-    ssl_FreePlatformKey(ss->ssl3.platformClientKey);
-    ss->ssl3.platformClientKey = (PlatformKey)NULL;
-#else /* NSS_PLATFORM_CLIENT_AUTH */
-    rv = ssl3_SignHashes(&hashes, ss->ssl3.clientPrivateKey, &buf, isTLS);
-    if (rv == SECSuccess) {
-	PK11SlotInfo * slot;
-	sslSessionID * sid   = ss->sec.ci.sid;
-
-    	/* Remember the info about the slot that did the signing.
-	** Later, when doing an SSL restart handshake, verify this.
-	** These calls are mere accessors, and can't fail.
-	*/
-	slot = PK11_GetSlotFromPrivateKey(ss->ssl3.clientPrivateKey);
-	sid->u.ssl3.clAuthSeries     = PK11_GetSlotSeries(slot);
-	sid->u.ssl3.clAuthSlotID     = PK11_GetSlotID(slot);
-	sid->u.ssl3.clAuthModuleID   = PK11_GetModuleID(slot);
-	sid->u.ssl3.clAuthValid      = PR_TRUE;
-	PK11_FreeSlot(slot);
-    }
-    SECKEY_DestroyPrivateKey(ss->ssl3.clientPrivateKey);
-    ss->ssl3.clientPrivateKey = NULL;
+	rv = ssl3_PlatformSignHashes(&hashes, ss->ssl3.platformClientKey,
+				     &buf, isTLS);
+	ssl_FreePlatformKey(ss->ssl3.platformClientKey);
+	ss->ssl3.platformClientKey = (PlatformKey)NULL;
 #endif /* NSS_PLATFORM_CLIENT_AUTH */
+    } else {
+	rv = ssl3_SignHashes(&hashes, ss->ssl3.clientPrivateKey, &buf, isTLS);
+	if (rv == SECSuccess) {
+	    PK11SlotInfo * slot;
+	    sslSessionID * sid   = ss->sec.ci.sid;
+
+	    /* Remember the info about the slot that did the signing.
+	    ** Later, when doing an SSL restart handshake, verify this.
+	    ** These calls are mere accessors, and can't fail.
+	    */
+	    slot = PK11_GetSlotFromPrivateKey(ss->ssl3.clientPrivateKey);
+	    sid->u.ssl3.clAuthSeries     = PK11_GetSlotSeries(slot);
+	    sid->u.ssl3.clAuthSlotID     = PK11_GetSlotID(slot);
+	    sid->u.ssl3.clAuthModuleID   = PK11_GetModuleID(slot);
+	    sid->u.ssl3.clAuthValid      = PR_TRUE;
+	    PK11_FreeSlot(slot);
+	}
+	SECKEY_DestroyPrivateKey(ss->ssl3.clientPrivateKey);
+	ss->ssl3.clientPrivateKey = NULL;
+    }
     if (rv != SECSuccess) {
 	goto done;	/* err code was set by ssl3_SignHashes */
     }
@@ -5518,9 +5532,7 @@ ssl3_HandleCertificateRequest(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
     PORT_Assert(ss->ssl3.clientCertChain == NULL);
     PORT_Assert(ss->ssl3.clientCertificate == NULL);
     PORT_Assert(ss->ssl3.clientPrivateKey == NULL);
-#ifdef NSS_PLATFORM_CLIENT_AUTH
     PORT_Assert(ss->ssl3.platformClientKey == (PlatformKey)NULL);
-#endif  /* NSS_PLATFORM_CLIENT_AUTH */
 
     isTLS = (PRBool)(ss->ssl3.prSpec->version > SSL_LIBRARY_VERSION_3_0);
     rv = ssl3_ConsumeHandshakeVariable(ss, &cert_types, 1, &b, &length);
@@ -5596,7 +5608,9 @@ ssl3_HandleCertificateRequest(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
                                         ss->getPlatformClientAuthDataArg,
                                         ss->fd, &ca_list,
                                         &platform_cert_list,
-                                        (void**)&ss->ssl3.platformClientKey);
+                                        (void**)&ss->ssl3.platformClientKey,
+                                        &ss->ssl3.clientCertificate,
+                                        &ss->ssl3.clientPrivateKey);
     }
 #else
     if (ss->getClientAuthData == NULL) {
@@ -5626,33 +5640,34 @@ ssl3_HandleCertificateRequest(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
                 ssl_FreePlatformKey(ss->ssl3.platformClientKey);
                 ss->ssl3.platformClientKey = (PlatformKey)NULL;
             }
-            goto send_no_certificate;
-        }
+	    /* Fall through to NSS client auth check */
+        } else {
+	    certNode = CERT_LIST_HEAD(platform_cert_list);
+	    ss->ssl3.clientCertificate = CERT_DupCertificate(certNode->cert);
 
-        certNode = CERT_LIST_HEAD(platform_cert_list);
-        ss->ssl3.clientCertificate = CERT_DupCertificate(certNode->cert);
-
-        /* Setting ssl3.clientCertChain non-NULL will cause
-         * ssl3_HandleServerHelloDone to call SendCertificate.
-         * Note: clientCertChain should include the EE cert as
-         * clientCertificate is ignored during the actual sending
-         */
-        ss->ssl3.clientCertChain =
-            hack_NewCertificateListFromCertList(platform_cert_list);
-        CERT_DestroyCertList(platform_cert_list);
-        platform_cert_list = NULL;
-        if (ss->ssl3.clientCertChain == NULL) {
-            if (ss->ssl3.clientCertificate != NULL) {
-                CERT_DestroyCertificate(ss->ssl3.clientCertificate);
-                ss->ssl3.clientCertificate = NULL;
-            }
-            if (ss->ssl3.platformClientKey) {
-                ssl_FreePlatformKey(ss->ssl3.platformClientKey);
-                ss->ssl3.platformClientKey = (PlatformKey)NULL;
-            }
-            goto send_no_certificate;
-        } 
-#else
+	    /* Setting ssl3.clientCertChain non-NULL will cause
+	     * ssl3_HandleServerHelloDone to call SendCertificate.
+	     * Note: clientCertChain should include the EE cert as
+	     * clientCertificate is ignored during the actual sending
+	     */
+	    ss->ssl3.clientCertChain =
+		    hack_NewCertificateListFromCertList(platform_cert_list);
+	    CERT_DestroyCertList(platform_cert_list);
+	    platform_cert_list = NULL;
+	    if (ss->ssl3.clientCertChain == NULL) {
+		if (ss->ssl3.clientCertificate != NULL) {
+		    CERT_DestroyCertificate(ss->ssl3.clientCertificate);
+		    ss->ssl3.clientCertificate = NULL;
+		}
+		if (ss->ssl3.platformClientKey) {
+		    ssl_FreePlatformKey(ss->ssl3.platformClientKey);
+		    ss->ssl3.platformClientKey = (PlatformKey)NULL;
+		}
+		goto send_no_certificate;
+	    }
+	    break;  /* not an error */
+	}
+#endif   /* NSS_PLATFORM_CLIENT_AUTH */
         /* check what the callback function returned */
         if ((!ss->ssl3.clientCertificate) || (!ss->ssl3.clientPrivateKey)) {
             /* we are missing either the key or cert */
@@ -5685,7 +5700,6 @@ ssl3_HandleCertificateRequest(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	    }
 	    goto send_no_certificate;
 	}
-#endif   /* NSS_PLATFORM_CLIENT_AUTH */
 	break;	/* not an error */
 
     case SECFailure:
@@ -5851,26 +5865,23 @@ ssl3_HandleServerHelloDone(sslSocket *ss)
 	if (rv != SECSuccess) {
 	    goto loser;	/* error code is set. */
     	}
-    } else
+    } else if (ss->ssl3.clientCertChain != NULL &&
+               ss->ssl3.platformClientKey) {
 #ifdef NSS_PLATFORM_CLIENT_AUTH
-    if (ss->ssl3.clientCertChain != NULL &&
-        ss->ssl3.platformClientKey) {
         send_verify = PR_TRUE;
         rv = ssl3_SendCertificate(ss);
         if (rv != SECSuccess) {
             goto loser; /* error code is set. */
         }
-    }
-#else
-    if (ss->ssl3.clientCertChain  != NULL &&
-	ss->ssl3.clientPrivateKey != NULL) {
+#endif /* NSS_PLATFORM_CLIENT_AUTH */
+    } else if (ss->ssl3.clientCertChain  != NULL &&
+               ss->ssl3.clientPrivateKey != NULL) {
 	send_verify = PR_TRUE;
 	rv = ssl3_SendCertificate(ss);
 	if (rv != SECSuccess) {
 	    goto loser;	/* error code is set. */
     	}
     }
-#endif /* NSS_PLATFORM_CLIENT_AUTH */
 
     rv = ssl3_SendClientKeyExchange(ss);
     if (rv != SECSuccess) {

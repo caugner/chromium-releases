@@ -146,14 +146,28 @@ TEST_F(KeywordTableTest, KeywordMisc) {
 
   ASSERT_EQ(sql::INIT_OK, db.Init(file_));
 
-  ASSERT_EQ(0, db.GetKeywordTable()->GetDefaulSearchProviderID());
-  ASSERT_EQ(0, db.GetKeywordTable()->GetBuitinKeywordVersion());
+  ASSERT_EQ(0, db.GetKeywordTable()->GetDefaultSearchProviderID());
+  ASSERT_EQ(0, db.GetKeywordTable()->GetBuiltinKeywordVersion());
 
-  db.GetKeywordTable()->SetDefaultSearchProviderID(10);
-  db.GetKeywordTable()->SetBuitinKeywordVersion(11);
+  ASSERT_TRUE(db.GetKeywordTable()->SetDefaultSearchProviderID(10));
+  ASSERT_TRUE(db.GetKeywordTable()->SetBuiltinKeywordVersion(11));
 
-  ASSERT_EQ(10, db.GetKeywordTable()->GetDefaulSearchProviderID());
-  ASSERT_EQ(11, db.GetKeywordTable()->GetBuitinKeywordVersion());
+  ASSERT_EQ(10, db.GetKeywordTable()->GetDefaultSearchProviderID());
+  ASSERT_EQ(11, db.GetKeywordTable()->GetBuiltinKeywordVersion());
+}
+
+TEST_F(KeywordTableTest, DefaultSearchProviderBackup) {
+  WebDatabase db;
+
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+
+  EXPECT_EQ(0, db.GetKeywordTable()->GetDefaultSearchProviderID());
+
+  ASSERT_TRUE(db.GetKeywordTable()->SetDefaultSearchProviderID(10));
+  EXPECT_EQ(10, db.GetKeywordTable()->GetDefaultSearchProviderID());
+
+  ASSERT_TRUE(db.GetKeywordTable()->SetDefaultSearchProviderBackupID(11));
+  EXPECT_EQ(11, db.GetKeywordTable()->GetDefaultSearchProviderID());
 }
 
 TEST_F(KeywordTableTest, UpdateKeyword) {
@@ -250,5 +264,35 @@ TEST_F(KeywordTableTest, KeywordWithNoFavicon) {
   EXPECT_TRUE(!restored_url->GetFaviconURL().is_valid());
   EXPECT_TRUE(restored_url->safe_for_autoreplace());
   EXPECT_EQ(GetID(&template_url), GetID(restored_url));
+  delete restored_url;
+}
+
+TEST_F(KeywordTableTest, KeywordWithEmptySyncGUID) {
+  WebDatabase db;
+
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_));
+
+  TemplateURL template_url;
+  template_url.set_short_name(ASCIIToUTF16("short_name"));
+  template_url.set_keyword(ASCIIToUTF16("keyword"));
+  template_url.SetURL("http://url/", 0, 0);
+  template_url.set_safe_for_autoreplace(true);
+  SetID(-100, &template_url);
+
+  // A GUID should be generated when |template_url| was created. Clear it.
+  ASSERT_FALSE(template_url.sync_guid().empty());
+  template_url.set_sync_guid(std::string());
+
+  EXPECT_TRUE(db.GetKeywordTable()->AddKeyword(template_url));
+
+  std::vector<TemplateURL*> template_urls;
+  EXPECT_TRUE(db.GetKeywordTable()->GetKeywords(&template_urls));
+  EXPECT_EQ(1U, template_urls.size());
+  const TemplateURL* restored_url = template_urls.front();
+
+  EXPECT_EQ(template_url.short_name(), restored_url->short_name());
+  EXPECT_EQ(template_url.keyword(), restored_url->keyword());
+  EXPECT_EQ(GetID(&template_url), GetID(restored_url));
+  EXPECT_FALSE(restored_url->sync_guid().empty());
   delete restored_url;
 }

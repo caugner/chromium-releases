@@ -20,7 +20,8 @@ ResourceContext::ResourceContext()
       blob_storage_context_(NULL),
       quota_manager_(NULL),
       host_zoom_map_(NULL),
-      media_observer_(NULL) {
+      media_observer_(NULL),
+      media_stream_manager_(NULL) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
@@ -152,18 +153,29 @@ void ResourceContext::set_media_observer(MediaObserver* media_observer) {
   media_observer_ = media_observer;
 }
 
-const base::Callback<prerender::PrerenderManager*(void)>&
-ResourceContext::prerender_manager_getter() const {
+const DownloadManager::GetNextIdThunkType&
+ResourceContext::next_download_id_thunk() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   EnsureInitialized();
-  return prerender_manager_getter_;
+  return next_download_id_thunk_;
+}
+void ResourceContext::set_next_download_id_thunk(
+    const DownloadManager::GetNextIdThunkType& thunk) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  next_download_id_thunk_ = thunk;
 }
 
-void ResourceContext::set_prerender_manager_getter(
-      const base::Callback<prerender::PrerenderManager*(void)>&
-          prerender_manager_getter) {
+media_stream::MediaStreamManager*
+ResourceContext::media_stream_manager() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  prerender_manager_getter_ = prerender_manager_getter;
+  EnsureInitialized();
+  return media_stream_manager_;
+}
+
+void ResourceContext::set_media_stream_manager(
+    media_stream::MediaStreamManager* media_stream_manager) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  media_stream_manager_ = media_stream_manager;
 }
 
 }  // namespace content

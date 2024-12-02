@@ -9,13 +9,16 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/file_util.h"
+#include "base/json/json_value_serializer.h"
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "base/string_number_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -29,7 +32,7 @@
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_tabs_module.h"
+#include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/top_sites.h"
@@ -46,6 +49,7 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
+#include "chrome/browser/sessions/session_utils.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
@@ -55,6 +59,7 @@
 #include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/login/login_prompt.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
@@ -70,9 +75,10 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/json_value_serializer.h"
+#include "content/common/child_process_info.h"
 #include "content/common/notification_service.h"
 #include "googleurl/src/gurl.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/rect.h"
 
@@ -99,12 +105,15 @@ class InitialLoadObserver::TabTime {
 InitialLoadObserver::InitialLoadObserver(size_t tab_count,
                                          AutomationProvider* automation)
     : automation_(automation->AsWeakPtr()),
+      crashed_tab_count_(0),
       outstanding_tab_count_(tab_count),
       init_time_(base::TimeTicks::Now()) {
   if (outstanding_tab_count_ > 0) {
     registrar_.Add(this, content::NOTIFICATION_LOAD_START,
                    NotificationService::AllSources());
     registrar_.Add(this, content::NOTIFICATION_LOAD_STOP,
+                   NotificationService::AllSources());
+    registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
                    NotificationService::AllSources());
   }
 }
@@ -127,12 +136,37 @@ void InitialLoadObserver::Observe(int type,
         finished_tabs_.insert(source.map_key());
         iter->second.set_stop_time(base::TimeTicks::Now());
       }
-      if (outstanding_tab_count_ == finished_tabs_.size())
-        ConditionMet();
+    }
+  } else if (type == content::NOTIFICATION_RENDERER_PROCESS_CLOSED) {
+    base::TerminationStatus status =
+        Details<RenderProcessHost::RendererClosedDetails>(details)->status;
+    switch (status) {
+      case base::TERMINATION_STATUS_NORMAL_TERMINATION:
+        break;
+
+      case base::TERMINATION_STATUS_ABNORMAL_TERMINATION:
+      case base::TERMINATION_STATUS_PROCESS_WAS_KILLED:
+      case base::TERMINATION_STATUS_PROCESS_CRASHED:
+        crashed_tab_count_++;
+        break;
+
+      case base::TERMINATION_STATUS_STILL_RUNNING:
+        LOG(ERROR) << "Got RENDERER_PROCESS_CLOSED notification, "
+                   << "but the process is still running. We may miss further "
+                   << "crash notification, resulting in hangs.";
+        break;
+
+      default:
+        LOG(ERROR) << "Unhandled termination status " << status;
+        NOTREACHED();
+        break;
     }
   } else {
     NOTREACHED();
   }
+
+  if (finished_tabs_.size() + crashed_tab_count_ >= outstanding_tab_count_)
+    ConditionMet();
 }
 
 DictionaryValue* InitialLoadObserver::GetTimingInformation() const {
@@ -495,9 +529,7 @@ void ExtensionUninstallObserver::Observe(
 
   switch (type) {
     case chrome::NOTIFICATION_EXTENSION_UNINSTALLED: {
-      UninstalledExtensionInfo* info =
-          Details<UninstalledExtensionInfo>(details).ptr();
-      if (id_ == info->extension_id) {
+      if (id_ == *Details<const std::string>(details).ptr()) {
         scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
         return_value->SetBoolean("success", true);
         AutomationJSONReply(automation_, reply_message_.release())
@@ -539,6 +571,8 @@ ExtensionReadyNotificationObserver::ExtensionReadyNotificationObserver(
                  NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
                  NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOAD_ERROR,
+                 NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR,
                  NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UPDATE_DISABLED,
@@ -575,6 +609,7 @@ void ExtensionReadyNotificationObserver::Observe(
         return;
       break;
     case chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR:
+    case chrome::NOTIFICATION_EXTENSION_LOAD_ERROR:
     case chrome::NOTIFICATION_EXTENSION_UPDATE_DISABLED:
       break;
     default:
@@ -736,7 +771,7 @@ void ExtensionTestResultNotificationObserver::Observe(
 
     case chrome::NOTIFICATION_EXTENSION_TEST_FAILED:
       results_.push_back(false);
-      messages_.push_back(*(Details<std::string>(details).ptr()));
+      messages_.push_back(*Details<std::string>(details).ptr());
       break;
 
     default:
@@ -1354,7 +1389,7 @@ InfoBarCountObserver::InfoBarCountObserver(AutomationProvider* automation,
       reply_message_(reply_message),
       tab_contents_(tab_contents),
       target_count_(target_count) {
-  Source<TabContentsWrapper> source(tab_contents);
+  Source<InfoBarTabHelper> source(tab_contents->infobar_tab_helper());
   registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED,
                  source);
   registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED,
@@ -1703,8 +1738,8 @@ void PasswordStoreLoginsChangedObserver::Init() {
   BrowserThread::PostTask(
       BrowserThread::DB,
       FROM_HERE,
-      NewRunnableMethod(
-          this, &PasswordStoreLoginsChangedObserver::RegisterObserversTask));
+      base::Bind(&PasswordStoreLoginsChangedObserver::RegisterObserversTask,
+                 this));
   done_event_.Wait();
 }
 
@@ -1730,8 +1765,8 @@ void PasswordStoreLoginsChangedObserver::Observe(
     BrowserThread::PostTask(
         BrowserThread::UI,
         FROM_HERE,
-        NewRunnableMethod(
-            this, &PasswordStoreLoginsChangedObserver::IndicateError, error));
+        base::Bind(&PasswordStoreLoginsChangedObserver::IndicateError, this,
+                   error));
     return;
   }
 
@@ -1741,8 +1776,7 @@ void PasswordStoreLoginsChangedObserver::Observe(
   BrowserThread::PostTask(
       BrowserThread::UI,
       FROM_HERE,
-      NewRunnableMethod(
-          this, &PasswordStoreLoginsChangedObserver::IndicateDone));
+      base::Bind(&PasswordStoreLoginsChangedObserver::IndicateDone, this));
 }
 
 void PasswordStoreLoginsChangedObserver::IndicateDone() {
@@ -1875,8 +1909,8 @@ void PageSnapshotTaker::OnDomOperationCompleted(const std::string& json) {
 
     ThumbnailGenerator* generator =
         g_browser_process->GetThumbnailGenerator();
-    ThumbnailGenerator::ThumbnailReadyCallback* callback =
-        NewCallback(this, &PageSnapshotTaker::OnSnapshotTaken);
+    ThumbnailGenerator::ThumbnailReadyCallback callback =
+        base::Bind(&PageSnapshotTaker::OnSnapshotTaken, base::Unretained(this));
     // Don't actually start the thumbnail generator, this leads to crashes on
     // Mac, crbug.com/62986. Instead, just hook the generator to the
     // RenderViewHost manually.
@@ -1894,13 +1928,25 @@ void PageSnapshotTaker::OnModalDialogShown() {
 void PageSnapshotTaker::OnSnapshotTaken(const SkBitmap& bitmap) {
   base::ThreadRestrictions::ScopedAllowIO allow_io;
   std::vector<unsigned char> png_data;
-  gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, true, &png_data);
-  int bytes_written = file_util::WriteFile(image_path_,
-      reinterpret_cast<char*>(&png_data[0]), png_data.size());
-  bool success = bytes_written == static_cast<int>(png_data.size());
+  SkAutoLockPixels lock_input(bitmap);
+  bool success = gfx::PNGCodec::Encode(
+      reinterpret_cast<unsigned char*>(bitmap.getAddr32(0, 0)),
+      gfx::PNGCodec::FORMAT_BGRA,
+      gfx::Size(bitmap.width(), bitmap.height()),
+      bitmap.rowBytes(),
+      true,  // discard_transparency
+      std::vector<gfx::PNGCodec::Comment>(),
+      &png_data);
   std::string error_msg;
-  if (!success)
-    error_msg = "could not write snapshot to disk";
+  if (!success) {
+    error_msg = "could not encode bitmap as PNG";
+  } else {
+    int bytes_written = file_util::WriteFile(image_path_,
+        reinterpret_cast<char*>(&png_data[0]), png_data.size());
+    success = bytes_written == static_cast<int>(png_data.size());
+    if (!success)
+      error_msg = "could not write snapshot to disk";
+  }
   SendMessage(success, error_msg);
 }
 
@@ -2042,8 +2088,10 @@ NTPInfoObserver::NTPInfoObserver(
   ntp_info_->Set("apps", apps_list);
 
   // Get the info that would be displayed in the recently closed section.
+  TabRestoreService::Entries entries;
+  SessionUtils::FilteredEntries(service->entries(), &entries);
   ListValue* recently_closed_list = new ListValue;
-  RecentlyClosedTabsHandler::AddRecentlyClosedEntries(service->entries(),
+  RecentlyClosedTabsHandler::AddRecentlyClosedEntries(entries,
                                                       recently_closed_list);
   ntp_info_->Set("recently_closed", recently_closed_list);
 
@@ -2078,7 +2126,8 @@ void NTPInfoObserver::Observe(int type,
     if (request_ == *request_details.ptr()) {
       top_sites_->GetMostVisitedURLs(
           consumer_,
-          NewCallback(this, &NTPInfoObserver::OnTopSitesReceived));
+          base::Bind(&NTPInfoObserver::OnTopSitesReceived,
+                     base::Unretained(this)));
     }
   }
 }
@@ -2224,7 +2273,7 @@ void AutofillChangedObserver::Init() {
   BrowserThread::PostTask(
       BrowserThread::DB,
       FROM_HERE,
-      NewRunnableMethod(this, &AutofillChangedObserver::RegisterObserversTask));
+      base::Bind(&AutofillChangedObserver::RegisterObserversTask, this));
   done_event_.Wait();
 }
 
@@ -2259,7 +2308,7 @@ void AutofillChangedObserver::Observe(
     BrowserThread::PostTask(
         BrowserThread::UI,
         FROM_HERE,
-        NewRunnableMethod(this, &AutofillChangedObserver::IndicateDone));
+        base::Bind(&AutofillChangedObserver::IndicateDone, this));
   }
 }
 
@@ -2279,7 +2328,7 @@ AutofillFormSubmittedObserver::AutofillFormSubmittedObserver(
     : automation_(automation->AsWeakPtr()),
       reply_message_(reply_message),
       pdm_(pdm),
-      tab_contents_(NULL) {
+      infobar_helper_(NULL) {
   pdm_->SetObserver(this);
   registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED,
                  NotificationService::AllSources());
@@ -2288,12 +2337,11 @@ AutofillFormSubmittedObserver::AutofillFormSubmittedObserver(
 AutofillFormSubmittedObserver::~AutofillFormSubmittedObserver() {
   pdm_->RemoveObserver(this);
 
-  if (tab_contents_) {
-    InfoBarTabHelper* infobar_helper = tab_contents_->infobar_tab_helper();
+  if (infobar_helper_) {
     InfoBarDelegate* infobar = NULL;
-    if (infobar_helper->infobar_count() > 0 &&
-        (infobar = infobar_helper->GetInfoBarDelegateAt(0))) {
-      infobar_helper->RemoveInfoBar(infobar);
+    if (infobar_helper_->infobar_count() > 0 &&
+        (infobar = infobar_helper_->GetInfoBarDelegateAt(0))) {
+      infobar_helper_->RemoveInfoBar(infobar);
     }
   }
 }
@@ -2321,9 +2369,9 @@ void AutofillFormSubmittedObserver::Observe(
   DCHECK(type == chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED);
 
   // Accept in the infobar.
-  tab_contents_ = Source<TabContentsWrapper>(source).ptr();
+  infobar_helper_ = Source<InfoBarTabHelper>(source).ptr();
   InfoBarDelegate* infobar = NULL;
-  infobar = tab_contents_->infobar_tab_helper()->GetInfoBarDelegateAt(0);
+  infobar = infobar_helper_->GetInfoBarDelegateAt(0);
 
   ConfirmInfoBarDelegate* confirm_infobar = infobar->AsConfirmInfoBarDelegate();
   if (!confirm_infobar) {
@@ -2427,8 +2475,9 @@ OnNotificationBalloonCountObserver::OnNotificationBalloonCountObserver(
       count_(count) {
   registrar_.Add(this, chrome::NOTIFICATION_NOTIFY_BALLOON_CONNECTED,
                  NotificationService::AllSources());
-  collection_->set_on_collection_changed_callback(NewCallback(
-      this, &OnNotificationBalloonCountObserver::CheckBalloonCount));
+  collection_->set_on_collection_changed_callback(
+      base::Bind(&OnNotificationBalloonCountObserver::CheckBalloonCount,
+                 base::Unretained(this)));
   CheckBalloonCount();
 }
 
@@ -2452,7 +2501,7 @@ void OnNotificationBalloonCountObserver::CheckBalloonCount() {
   }
 
   if (balloon_count_met || !automation_) {
-    collection_->set_on_collection_changed_callback(NULL);
+    collection_->set_on_collection_changed_callback(base::Closure());
     delete this;
   }
 }
@@ -2641,10 +2690,10 @@ WaitForProcessLauncherThreadToGoIdleObserver(
   AddRef();
   BrowserThread::PostTask(
       BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
-      NewRunnableMethod(
-          this,
+      base::Bind(
           &WaitForProcessLauncherThreadToGoIdleObserver::
-              RunOnProcessLauncherThread));
+              RunOnProcessLauncherThread,
+          this));
 }
 
 WaitForProcessLauncherThreadToGoIdleObserver::
@@ -2656,10 +2705,10 @@ RunOnProcessLauncherThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::PROCESS_LAUNCHER));
   BrowserThread::PostTask(
       BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
-      NewRunnableMethod(
-          this,
+      base::Bind(
           &WaitForProcessLauncherThreadToGoIdleObserver::
-          RunOnProcessLauncherThread2));
+              RunOnProcessLauncherThread2,
+          this));
 }
 
 void WaitForProcessLauncherThreadToGoIdleObserver::
@@ -2667,9 +2716,8 @@ RunOnProcessLauncherThread2() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::PROCESS_LAUNCHER));
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &WaitForProcessLauncherThreadToGoIdleObserver::RunOnUIThread));
+      base::Bind(&WaitForProcessLauncherThreadToGoIdleObserver::RunOnUIThread,
+                 this));
 }
 
 void WaitForProcessLauncherThreadToGoIdleObserver::RunOnUIThread() {
@@ -2706,4 +2754,146 @@ void DragTargetDropAckNotificationObserver::Observe(
                         reply_message_.release()).SendSuccess(NULL);
   }
   delete this;
+}
+
+ProcessInfoObserver::ProcessInfoObserver(
+    AutomationProvider* automation,
+    IPC::Message* reply_message)
+    : automation_(automation->AsWeakPtr()),
+      reply_message_(reply_message) {}
+
+ProcessInfoObserver::~ProcessInfoObserver() {}
+
+void ProcessInfoObserver::OnDetailsAvailable() {
+  scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
+  ListValue* browser_proc_list = new ListValue();
+  const std::vector<ProcessData>& all_processes = processes();
+  for (size_t index = 0; index < all_processes.size(); ++index) {
+    DictionaryValue* browser_data = new DictionaryValue();
+    browser_data->SetString("name", all_processes[index].name);
+    browser_data->SetString("process_name", all_processes[index].process_name);
+
+    ListValue* proc_list = new ListValue();
+    for (ProcessMemoryInformationList::const_iterator iterator =
+             all_processes[index].processes.begin();
+         iterator != all_processes[index].processes.end(); ++iterator) {
+      DictionaryValue* proc_data = new DictionaryValue();
+
+      proc_data->SetInteger("pid", iterator->pid);
+
+      // Working set (resident) memory usage, in KBytes.
+      DictionaryValue* working_set = new DictionaryValue();
+      working_set->SetInteger("priv", iterator->working_set.priv);
+      working_set->SetInteger("shareable", iterator->working_set.shareable);
+      working_set->SetInteger("shared", iterator->working_set.shared);
+      proc_data->Set("working_set_mem", working_set);
+
+      // Committed (resident + paged) memory usage, in KBytes.
+      DictionaryValue* committed = new DictionaryValue();
+      committed->SetInteger("priv", iterator->committed.priv);
+      committed->SetInteger("mapped", iterator->committed.mapped);
+      committed->SetInteger("image", iterator->committed.image);
+      proc_data->Set("committed_mem", committed);
+
+      proc_data->SetString("version", iterator->version);
+      proc_data->SetString("product_name", iterator->product_name);
+      proc_data->SetInteger("num_processes", iterator->num_processes);
+      proc_data->SetBoolean("is_diagnostics", iterator->is_diagnostics);
+
+      // Process type, if this is a child process of Chrome (e.g., 'plugin').
+      std::string process_type = "Unknown";
+      // The following condition avoids a DCHECK in debug builds when the
+      // process type passed to |GetTypeNameInEnglish| is unknown.
+      if (iterator->type != ChildProcessInfo::UNKNOWN_PROCESS)
+        process_type = ChildProcessInfo::GetTypeNameInEnglish(iterator->type);
+      proc_data->SetString("child_process_type", process_type);
+
+      // Renderer type, if this is a renderer process.
+      std::string renderer_type = "Unknown";
+      if (iterator->renderer_type != ChildProcessInfo::RENDERER_UNKNOWN) {
+        renderer_type = ChildProcessInfo::GetRendererTypeNameInEnglish(
+            iterator->renderer_type);
+      }
+      proc_data->SetString("renderer_type", renderer_type);
+
+      // Titles associated with this process.
+      ListValue* titles = new ListValue();
+      for (size_t title_index = 0; title_index < iterator->titles.size();
+           ++title_index)
+        titles->Append(Value::CreateStringValue(iterator->titles[title_index]));
+      proc_data->Set("titles", titles);
+
+      proc_list->Append(proc_data);
+    }
+    browser_data->Set("processes", proc_list);
+
+    browser_proc_list->Append(browser_data);
+  }
+  return_value->Set("browsers", browser_proc_list);
+
+  if (automation_) {
+    AutomationJSONReply(automation_, reply_message_.release())
+        .SendSuccess(return_value.get());
+  }
+}
+
+BrowserOpenedWithNewProfileNotificationObserver::
+    BrowserOpenedWithNewProfileNotificationObserver(
+        AutomationProvider* automation,
+        IPC::Message* reply_message)
+        : automation_(automation->AsWeakPtr()),
+          reply_message_(reply_message),
+          new_window_id_(extension_misc::kUnknownWindowId) {
+  registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CREATED,
+                 NotificationService::AllBrowserContextsAndSources());
+  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_OPENED,
+                 NotificationService::AllBrowserContextsAndSources());
+  registrar_.Add(this, content::NOTIFICATION_LOAD_STOP,
+                 NotificationService::AllBrowserContextsAndSources());
+}
+
+BrowserOpenedWithNewProfileNotificationObserver::
+    ~BrowserOpenedWithNewProfileNotificationObserver() {
+}
+
+void BrowserOpenedWithNewProfileNotificationObserver::Observe(
+    int type,
+    const NotificationSource& source,
+    const NotificationDetails& details) {
+  if (!automation_) {
+    delete this;
+    return;
+  }
+
+  if (type == chrome::NOTIFICATION_PROFILE_CREATED) {
+    // As part of multi-profile creation, a new browser window will
+    // automatically be opened.
+    Profile* profile = Source<Profile>(source).ptr();
+    if (!profile) {
+      AutomationJSONReply(automation_,
+          reply_message_.release()).SendError("Profile could not be created.");
+      return;
+    }
+  } else if (type == chrome::NOTIFICATION_BROWSER_OPENED) {
+    // Store the new browser ID and continue waiting for a new tab within it
+    // to stop loading.
+    new_window_id_ = ExtensionTabUtil::GetWindowId(
+        Source<Browser>(source).ptr());
+  } else if (type == content::NOTIFICATION_LOAD_STOP) {
+    // Only send the result if the loaded tab is in the new window.
+    NavigationController* controller =
+        Source<NavigationController>(source).ptr();
+    TabContentsWrapper* tab = TabContentsWrapper::GetCurrentWrapperForContents(
+        controller->tab_contents());
+    int window_id = tab ? tab->restore_tab_helper()->window_id().id() : -1;
+    if (window_id == new_window_id_) {
+      if (automation_) {
+        AutomationJSONReply(automation_, reply_message_.release())
+            .SendSuccess(NULL);
+      }
+      delete this;
+    }
+  } else {
+    NOTREACHED();
+  }
 }

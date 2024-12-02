@@ -11,12 +11,12 @@
 #include "base/shared_memory.h"
 #include "build/build_config.h"
 #include "content/common/content_client.h"
+#include "content/common/npobject_proxy.h"
+#include "content/common/npobject_util.h"
 #include "content/common/plugin_messages.h"
-#include "content/common/url_constants.h"
-#include "content/plugin/npobject_proxy.h"
-#include "content/plugin/npobject_util.h"
 #include "content/plugin/plugin_channel.h"
 #include "content/plugin/plugin_thread.h"
+#include "content/public/common/url_constants.h"
 #include "skia/ext/platform_canvas.h"
 #include "skia/ext/platform_device.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
@@ -75,8 +75,8 @@ WebPluginProxy::WebPluginProxy(
   Display* display = ui::GetXDisplay();
   if (ui::QuerySharedMemorySupport(display) == ui::SHARED_MEMORY_PIXMAP &&
       ui::BitsPerPixelForPixmapDepth(
-          display, DefaultDepth(display, 0)) == 32) {
-    Visual* vis = DefaultVisual(display, 0);
+          display, DefaultDepth(display, DefaultScreen(display))) == 32) {
+    Visual* vis = DefaultVisual(display, DefaultScreen(display));
 
     if (vis->red_mask == 0xff0000 &&
         vis->green_mask == 0xff00 &&
@@ -603,7 +603,8 @@ void WebPluginProxy::CreateShmPixmapFromDIB(
     *pixmap_out = XShmCreatePixmap(display, root_window,
                                    NULL, &shminfo,
                                    window_rect.width(), window_rect.height(),
-                                   DefaultDepth(display, 0));
+                                   DefaultDepth(display,
+                                                DefaultScreen(display)));
   }
 }
 
@@ -672,9 +673,11 @@ void WebPluginProxy::BindFakePluginWindowHandle(bool opaque) {
   Send(new PluginHostMsg_BindFakePluginWindowHandle(route_id_, opaque));
 }
 
-WebPluginAcceleratedSurface* WebPluginProxy::GetAcceleratedSurface() {
+WebPluginAcceleratedSurface* WebPluginProxy::GetAcceleratedSurface(
+    gfx::GpuPreference gpu_preference) {
   if (!accelerated_surface_.get())
-    accelerated_surface_.reset(new WebPluginAcceleratedSurfaceProxy(this));
+    accelerated_surface_.reset(new WebPluginAcceleratedSurfaceProxy(
+        this, gpu_preference));
   return accelerated_surface_.get();
 }
 
@@ -747,3 +750,16 @@ void WebPluginProxy::ResourceClientDeleted(
 void WebPluginProxy::URLRedirectResponse(bool allow, int resource_id) {
   Send(new PluginHostMsg_URLRedirectResponse(route_id_, allow, resource_id));
 }
+
+#if defined(OS_WIN) && !defined(USE_AURA)
+void WebPluginProxy::UpdateIMEStatus() {
+  // Retrieve the IME status from a plug-in and send it to a renderer process
+  // when the plug-in has updated it.
+  int input_type;
+  gfx::Rect caret_rect;
+  if (!delegate_->GetIMEStatus(&input_type, &caret_rect))
+    return;
+
+  Send(new PluginHostMsg_NotifyIMEStatus(route_id_, input_type, caret_rect));
+}
+#endif

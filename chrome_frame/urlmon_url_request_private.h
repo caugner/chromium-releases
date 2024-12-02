@@ -58,6 +58,10 @@ class UrlmonUrlRequest
   // to identify request objects in the log.
   std::string me() const;
 
+  static bool ImplementsThreadSafeReferenceCounting() {
+    return true;
+  }
+
  protected:
   UrlmonUrlRequest();
   ~UrlmonUrlRequest();
@@ -210,15 +214,15 @@ class UrlmonUrlRequest
       return result_;
     }
 
-    void set_result(net::URLRequestStatus::Status status, int os_error) {
+    void set_result(net::URLRequestStatus::Status status, int error) {
       result_.set_status(status);
-      result_.set_os_error(os_error);
+      result_.set_error(error);
     }
 
     void set_result(HRESULT hr) {
       result_.set_status(FAILED(hr)? net::URLRequestStatus::FAILED:
                                      net::URLRequestStatus::SUCCESS);
-      result_.set_os_error(HresultToNetError(hr));
+      result_.set_error(HresultToNetError(hr));
     }
 
    private:

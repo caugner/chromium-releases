@@ -6,6 +6,7 @@
 
 #include <stdlib.h>  // For malloc
 
+#include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
@@ -17,6 +18,7 @@
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
+#include "ppapi/shared_impl/proxy_lock.h"
 #include "ppapi/shared_impl/time_conversion.h"
 
 namespace ppapi {
@@ -31,10 +33,12 @@ base::MessageLoopProxy* GetMainThreadMessageLoop() {
 }
 
 void AddRefResource(PP_Resource resource) {
+  ppapi::ProxyAutoLock lock;
   PluginResourceTracker::GetInstance()->AddRefResource(resource);
 }
 
 void ReleaseResource(PP_Resource resource) {
+  ppapi::ProxyAutoLock lock;
   PluginResourceTracker::GetInstance()->ReleaseResource(resource);
 }
 
@@ -58,7 +62,7 @@ void CallOnMainThread(int delay_in_ms,
                       int32_t result) {
   GetMainThreadMessageLoop()->PostDelayedTask(
       FROM_HERE,
-      NewRunnableFunction(&CallbackWrapper, callback, result),
+      base::Bind(&CallbackWrapper, callback, result),
       delay_in_ms);
 }
 
@@ -75,31 +79,23 @@ const PPB_Core core_interface = {
   &IsMainThread
 };
 
-InterfaceProxy* CreateCoreProxy(Dispatcher* dispatcher,
-                                const void* target_interface) {
-  return new PPB_Core_Proxy(dispatcher, target_interface);
-}
-
 }  // namespace
 
-PPB_Core_Proxy::PPB_Core_Proxy(Dispatcher* dispatcher,
-                               const void* target_interface)
-    : InterfaceProxy(dispatcher, target_interface) {
+PPB_Core_Proxy::PPB_Core_Proxy(Dispatcher* dispatcher)
+    : InterfaceProxy(dispatcher),
+      ppb_core_impl_(NULL) {
+  if (!dispatcher->IsPlugin()) {
+    ppb_core_impl_ = static_cast<const PPB_Core*>(
+        dispatcher->local_get_interface()(PPB_CORE_INTERFACE));
+  }
 }
 
 PPB_Core_Proxy::~PPB_Core_Proxy() {
 }
 
 // static
-const InterfaceProxy::Info* PPB_Core_Proxy::GetInfo() {
-  static const Info info = {
-    &core_interface,
-    PPB_CORE_INTERFACE,
-    INTERFACE_ID_PPB_CORE,
-    false,
-    &CreateCoreProxy,
-  };
-  return &info;
+const PPB_Core* PPB_Core_Proxy::GetPPB_Core_Interface() {
+  return &core_interface;
 }
 
 bool PPB_Core_Proxy::OnMessageReceived(const IPC::Message& msg) {
@@ -116,11 +112,11 @@ bool PPB_Core_Proxy::OnMessageReceived(const IPC::Message& msg) {
 }
 
 void PPB_Core_Proxy::OnMsgAddRefResource(const HostResource& resource) {
-  ppb_core_target()->AddRefResource(resource.host_resource());
+  ppb_core_impl_->AddRefResource(resource.host_resource());
 }
 
 void PPB_Core_Proxy::OnMsgReleaseResource(const HostResource& resource) {
-  ppb_core_target()->ReleaseResource(resource.host_resource());
+  ppb_core_impl_->ReleaseResource(resource.host_resource());
 }
 
 }  // namespace proxy

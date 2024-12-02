@@ -2,7 +2,6 @@
 <html i18n-values="dir:textdirection;">
 <head>
 <meta charset="utf-8">
-<include src="content_security_policy.html"/>
 <title i18n-content="pluginsTitle"></title>
 <link rel="stylesheet" href="plugins.css"/>
 </head>
@@ -12,11 +11,6 @@
   <div id="header"><h1 i18n-content="pluginsTitle">TITLE</h1></div>
 
   <div id="pluginTemplate">
-     
-    <div id="disabled-container" jsdisplay="!preferenceControlsEnabled()">
-      <span id="disabled-header" i18n-content="pluginsDisabledHeader"></span>
-      <span i18n-content="pluginsDisabledText"></span>
-    </div>
 
     <div id="container" class="vbox-container">
     <div id="top" class="wbox">
@@ -113,8 +107,6 @@
                   <div><table><tr>
                     <td class="plugin-details-label">&nbsp;</td>
                     <td>
-                      <span jsdisplay="enabledMode == 'disabledByUser'"
-                          i18n-content="pluginDisabled">(DISABLED)</span>
                       <span jsdisplay="enabledMode == 'disabledByPolicy'"
                           i18n-content="pluginDisabledByPolicy">(DISABLED_BY_POLICY)</span>
                       <span jsdisplay="enabledMode == 'enabledByPolicy'"
@@ -123,27 +115,17 @@
                         <a
                           class="disable-plugin-link"
                           jsvalues=".path:path"
-                          jsdisplay="enabledMode == 'enabledByUser' &&
-                                     preferenceControlsEnabled()"
+                          jsdisplay="enabledMode == 'enabledByUser'"
                           href="#"
                           i18n-content="disable"
                           >DISABLE</a>
                         <a
                           class="enable-plugin-link"
                           jsvalues=".path:path"
-                          jsdisplay="enabledMode == 'disabledByUser' &&
-                                     preferenceControlsEnabled()"
+                          jsdisplay="enabledMode == 'disabledByUser'"
                           href="#"
                           i18n-content="enable"
                           >ENABLE</a>
-                        <span
-                          jsdisplay="enabledMode == 'enabledByPolicy'"
-                          i18n-content="pluginCannotBeDisabledDueToPolicy"
-                          >CANNOT_DISABLE</span>
-                        <span
-                          jsdisplay="enabledMode == 'disabledByPolicy'"
-                          i18n-content="pluginCannotBeEnabledDueToPolicy"
-                          >CANNOT_ENABLE</span>
                       </span>
                     </td>
                   </tr></table></div>
@@ -182,27 +164,17 @@
               <a
                 class="disable-group-link"
                 jsvalues=".path:name"
-                jsdisplay="enabledMode == 'enabledByUser' &&
-                           preferenceControlsEnabled()"
+                jsdisplay="enabledMode == 'enabledByUser'"
                 href="#"
                 i18n-content="disable"
                 >DISABLE</a>
               <a
                 class="enable-group-link"
                 jsvalues=".path:name"
-                jsdisplay="enabledMode == 'disabledByUser' &&
-                           preferenceControlsEnabled()"
+                jsdisplay="enabledMode == 'disabledByUser'"
                 href="#"
                 i18n-content="enable"
                 >ENABLE</a>
-              <span
-                jsdisplay="enabledMode == 'enabledByPolicy'"
-                i18n-content="pluginCannotBeDisabledDueToPolicy"
-                >CANNOT_DISABLE</span>
-              <span
-                jsdisplay="enabledMode == 'disabledByPolicy'"
-                i18n-content="pluginCannotBeEnabledDueToPolicy"
-                >CANNOT_ENABLE</span>
             </span>
           </div>
         </td>
@@ -213,7 +185,6 @@
     </div>
   </div>
 </div>
-<script src="chrome://resources/js/local_strings.js"></script>    
 <script src="chrome://plugins/plugins.js"></script>
 <script src="chrome://plugins/strings.js"></script>
 <script src="chrome://resources/js/i18n_template.js"></script>

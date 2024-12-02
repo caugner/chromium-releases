@@ -16,6 +16,7 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/color_utils.h"
 #include "views/border.h"
 #include "views/controls/label.h"
 #include "views/controls/progress_bar.h"
@@ -79,29 +80,32 @@ void UpdateView::Init() {
   views::Painter* painter = chromeos::CreateWizardPainter(
       &chromeos::BorderDefinition::kScreenBorder);
   set_background(views::Background::CreateBackgroundPainter(true, painter));
+  SkColor background_color = color_utils::AlphaBlend(
+      BorderDefinition::kScreenBorder.top_color,
+      BorderDefinition::kScreenBorder.bottom_color, 128);
 
-  InitLabel(&installing_updates_label_);
-  InitLabel(&preparing_updates_label_);
-  InitLabel(&reboot_label_);
-  InitLabel(&manual_reboot_label_);
+  installing_updates_label_ = InitLabel(background_color);
+  preparing_updates_label_ = InitLabel(background_color);
   preparing_updates_label_->SetVisible(false);
+  reboot_label_ = InitLabel(background_color);
+  manual_reboot_label_ = InitLabel(background_color);
   manual_reboot_label_->SetVisible(false);
-  manual_reboot_label_->SetColor(kManualRebootLabelColor);
+  manual_reboot_label_->SetEnabledColor(kManualRebootLabelColor);
 
   progress_bar_ = new views::ProgressBar();
   AddChildView(progress_bar_);
   progress_bar_->SetDisplayRange(0.0, 100.0);
 
   // Curtain view.
-  InitLabel(&checking_label_);
+  checking_label_ = InitLabel(background_color);
   throbber_ = CreateDefaultThrobber();
   AddChildView(throbber_);
 
 #if !defined(OFFICIAL_BUILD)
-  InitLabel(&escape_to_skip_label_);
-  escape_to_skip_label_->SetColor(kSkipLabelColor);
+  escape_to_skip_label_ = InitLabel(background_color);
+  escape_to_skip_label_->SetEnabledColor(kSkipLabelColor);
   escape_to_skip_label_->SetText(
-      L"Press ESCAPE to skip (Non-official builds only)");
+      ASCIIToUTF16("Press ESCAPE to skip (Non-official builds only)"));
 #endif
 
   UpdateLocalizedStrings();
@@ -113,17 +117,17 @@ void UpdateView::Reset() {
 }
 
 void UpdateView::UpdateLocalizedStrings() {
-  installing_updates_label_->SetText(UTF16ToWide(l10n_util::GetStringFUTF16(
+  installing_updates_label_->SetText(l10n_util::GetStringFUTF16(
       IDS_INSTALLING_UPDATE,
-      l10n_util::GetStringUTF16(IDS_PRODUCT_OS_NAME))));
+      l10n_util::GetStringUTF16(IDS_PRODUCT_OS_NAME)));
   preparing_updates_label_->SetText(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_UPDATE_AVAILABLE)));
+      l10n_util::GetStringUTF16(IDS_UPDATE_AVAILABLE));
   reboot_label_->SetText(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_INSTALLING_UPDATE_DESC)));
+      l10n_util::GetStringUTF16(IDS_INSTALLING_UPDATE_DESC));
   manual_reboot_label_->SetText(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_UPDATE_COMPLETED)));
+      l10n_util::GetStringUTF16(IDS_UPDATE_COMPLETED));
   checking_label_->SetText(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_CHECKING_FOR_UPDATES)));
+      l10n_util::GetStringUTF16(IDS_CHECKING_FOR_UPDATES));
 }
 
 void UpdateView::AddProgress(int ticks) {
@@ -214,17 +218,19 @@ void UpdateView::Layout() {
   SchedulePaint();
 }
 
-void UpdateView::InitLabel(views::Label** label) {
-  *label = new views::Label();
-  (*label)->SetColor(kLabelColor);
-  (*label)->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-  (*label)->SetMultiLine(true);
+views::Label* UpdateView::InitLabel(SkColor background_color) {
+  views::Label* label = new views::Label();
+  label->SetBackgroundColor(background_color);
+  label->SetEnabledColor(kLabelColor);
+  label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  label->SetMultiLine(true);
 
   ResourceBundle& res_bundle = ResourceBundle::GetSharedInstance();
   gfx::Font label_font = res_bundle.GetFont(ResourceBundle::MediumFont);
-  (*label)->SetFont(label_font);
+  label->SetFont(label_font);
 
-  AddChildView(*label);
+  AddChildView(label);
+  return label;
 }
 
 void UpdateView::UpdateVisibility() {
@@ -260,7 +266,7 @@ void UpdateView::UpdateVisibility() {
     NOTREACHED();
   }
   const std::string text =
-      label_spoken ? WideToUTF8(label_spoken->GetText()) : std::string();
+      label_spoken ? UTF16ToUTF8(label_spoken->GetText()) : std::string();
   WizardAccessibilityHelper::GetInstance()->MaybeSpeak(text.c_str(), false,
                                                        true);
 }

@@ -8,7 +8,6 @@
 
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/values.h"
 #include "chrome/browser/policy/enterprise_metrics.h"
 #include "chrome/browser/policy/policy_notifier.h"
 
@@ -108,9 +107,9 @@ bool CloudPolicyCacheBase::SetPolicyInternal(
   if (!new_policy_differs) {
     UMA_HISTOGRAM_ENUMERATION(kMetricPolicy, kMetricPolicyFetchNotModified,
                               kMetricPolicySize);
-  } else {
-    NotifyObservers();
   }
+
+  NotifyObservers();
 
   InformNotifier(CloudPolicySubsystem::SUCCESS,
                  CloudPolicySubsystem::NO_DETAILS);

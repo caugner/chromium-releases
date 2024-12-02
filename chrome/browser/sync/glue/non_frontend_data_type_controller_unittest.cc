@@ -13,6 +13,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/sync/engine/model_safe_worker.h"
 #include "chrome/browser/sync/glue/change_processor_mock.h"
+#include "chrome/browser/sync/glue/data_type_controller_mock.h"
 #include "chrome/browser/sync/glue/non_frontend_data_type_controller.h"
 #include "chrome/browser/sync/glue/non_frontend_data_type_controller_mock.h"
 #include "chrome/browser/sync/glue/model_associator_mock.h"
@@ -28,18 +29,13 @@ using browser_sync::GROUP_DB;
 using browser_sync::NonFrontendDataTypeController;
 using browser_sync::NonFrontendDataTypeControllerMock;
 using browser_sync::ModelAssociatorMock;
+using browser_sync::StartCallback;
 using testing::_;
 using testing::DoAll;
 using testing::InvokeWithoutArgs;
 using testing::Return;
 using testing::SetArgumentPointee;
 using testing::StrictMock;
-
-class StartCallback {
- public:
-  MOCK_METHOD2(Run, void(DataTypeController::StartResult result,
-                         const tracked_objects::Location& from_here));
-};
 
 ACTION_P(WaitOnEvent, event) {
   event->Wait();
@@ -122,7 +118,7 @@ class NonFrontendDataTypeControllerTest : public testing::Test {
     EXPECT_CALL(profile_, GetProfileSyncService()).WillRepeatedly(
         Return(&service_));
     db_thread_.Start();
-    profile_sync_factory_.reset(new ProfileSyncFactoryMock());
+    profile_sync_factory_.reset(new StrictMock<ProfileSyncFactoryMock>());
 
     // Both of these are refcounted, so don't need to be released.
     dtc_mock_ = new StrictMock<NonFrontendDataTypeControllerMock>();
@@ -259,7 +255,7 @@ TEST_F(NonFrontendDataTypeControllerTest, StartAssociationFailed) {
   EXPECT_EQ(DataTypeController::NOT_RUNNING, non_frontend_dtc_->state());
   non_frontend_dtc_->Start(NewCallback(&start_callback_, &StartCallback::Run));
   WaitForDTC();
-  EXPECT_EQ(DataTypeController::NOT_RUNNING, non_frontend_dtc_->state());
+  EXPECT_EQ(DataTypeController::DISABLED, non_frontend_dtc_->state());
 }
 
 TEST_F(NonFrontendDataTypeControllerTest,

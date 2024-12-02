@@ -8,8 +8,8 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "chrome/browser/tab_contents/infobar.h"
-#include "chrome/browser/tab_contents/infobar_container.h"
+#include "chrome/browser/infobars/infobar.h"
+#include "chrome/browser/infobars/infobar_container.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "views/controls/button/button.h"
 #include "views/controls/menu/menu_item_view.h"
@@ -36,7 +36,7 @@ class InfoBarView : public InfoBar,
                     public views::ButtonListener,
                     public views::FocusChangeListener {
  public:
-  InfoBarView(TabContentsWrapper* owner, InfoBarDelegate* delegate);
+  InfoBarView(InfoBarTabHelper* owner, InfoBarDelegate* delegate);
 
   const SkPath& fill_path() const { return fill_path_; }
   const SkPath& stroke_path() const { return stroke_path_; }
@@ -48,19 +48,21 @@ class InfoBarView : public InfoBar,
   virtual ~InfoBarView();
 
   // Creates a label with the appropriate font and color for an infobar.
-  static views::Label* CreateLabel(const string16& text);
+  views::Label* CreateLabel(const string16& text) const;
 
   // Creates a link with the appropriate font and color for an infobar.
-  static views::Link* CreateLink(const string16& text,
-                                 views::LinkListener* listener,
-                                 const SkColor& background_color);
+  // NOTE: Subclasses must ignore link clicks if we're unowned.
+  views::Link* CreateLink(const string16& text,
+                          views::LinkListener* listener) const;
 
   // Creates a menu button with an infobar-specific appearance.
+  // NOTE: Subclasses must ignore button presses if we're unowned.
   static views::MenuButton* CreateMenuButton(
       const string16& text,
       views::ViewMenuDelegate* menu_delegate);
 
   // Creates a text button with an infobar-specific appearance.
+  // NOTE: Subclasses must ignore button presses if we're unowned.
   static views::TextButton* CreateTextButton(views::ButtonListener* listener,
                                              const string16& text,
                                              bool needs_elevation);
@@ -72,6 +74,8 @@ class InfoBarView : public InfoBar,
                                     View* child) OVERRIDE;
 
   // views::ButtonListener:
+  // NOTE: This must not be called if we're unowned.  (Subclasses should ignore
+  // calls to ButtonPressed() in this case.)
   virtual void ButtonPressed(views::Button* sender,
                              const views::Event& event) OVERRIDE;
 
@@ -88,8 +92,9 @@ class InfoBarView : public InfoBar,
   // Convenience getter.
   const InfoBarContainer::Delegate* container_delegate() const;
 
-  // Show a menu at the specified position. By invoking this InfobarView ensures
-  // the menu is destroyed at the appropriate time.
+  // Shows a menu at the specified position.
+  // NOTE: This must not be called if we're unowned.  (Subclasses should ignore
+  // calls to RunMenu() in this case.)
   void RunMenuAt(ui::MenuModel* menu_model,
                  views::MenuButton* button,
                  views::MenuItemView::AnchorPosition anchor);

@@ -87,9 +87,11 @@ struct FormField;
 //                      associated with a profile.
 //
 //   guid               The guid string that identifies the profile to which
-//                      the phone or fax number belongs.
-//   type               An integer constant designating either phone or fax type
-//                      of the number.
+//                      the phone number belongs.
+//   type               An integer constant designating either phone type of the
+//                      number.
+//                      TODO(jhawkins): Remove the type column and migrate the
+//                      database.
 //   number
 //
 // autofill_profiles_trash
@@ -114,9 +116,8 @@ struct FormField;
 //
 class AutofillTable : public WebDatabaseTable {
  public:
-  AutofillTable(sql::Connection* db, sql::MetaTable* meta_table)
-      : WebDatabaseTable(db, meta_table) {}
-  virtual ~AutofillTable() {}
+  AutofillTable(sql::Connection* db, sql::MetaTable* meta_table);
+  virtual ~AutofillTable();
   virtual bool Init();
   virtual bool IsSyncable();
 
@@ -277,6 +278,9 @@ class AutofillTable : public WebDatabaseTable {
   bool MigrateToVersion34ProfilesBasedOnCountryCode();
   bool MigrateToVersion35GreatBritainCountryCodes();
   bool MigrateToVersion37MergeAndCullOlderProfiles();
+
+  // Max data length saved in the table;
+  static const size_t kMaxDataLength;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(AutofillTableTest, Autofill);

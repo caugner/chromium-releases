@@ -15,47 +15,7 @@
 #include "content/common/notification_registrar.h"
 
 class BackingStore;
-class Browser;
 class SkBitmap;
-class TabContents;
-class TabContentsWrapper;
-class TabStripModel;
-
-namespace base {
-class DictionaryValue;
-class ListValue;
-}
-
-namespace ExtensionTabUtil {
-int GetWindowId(const Browser* browser);
-int GetTabId(const TabContents* tab_contents);
-std::string GetTabStatusText(bool is_loading);
-int GetWindowIdOfTab(const TabContents* tab_contents);
-base::ListValue* CreateTabList(const Browser* browser);
-base::DictionaryValue* CreateTabValue(const TabContents* tab_contents);
-base::DictionaryValue* CreateTabValue(const TabContents* tab_contents,
-                                      TabStripModel* tab_strip,
-                                      int tab_index);
-// Create a tab value, overriding its kSelectedKey to the provided boolean.
-base::DictionaryValue* CreateTabValueActive(const TabContents* tab_contents,
-                                            bool active);
-base::DictionaryValue* CreateWindowValue(const Browser* browser,
-                                         bool populate_tabs);
-// Gets the |tab_strip_model| and |tab_index| for the given |tab_contents|.
-bool GetTabStripModel(const TabContents* tab_contents,
-                      TabStripModel** tab_strip_model,
-                      int* tab_index);
-bool GetDefaultTab(Browser* browser,
-                   TabContentsWrapper** contents,
-                   int* tab_id);
-// Any out parameter (|browser|, |tab_strip|, |contents|, & |tab_index|) may
-// be NULL and will not be set within the function.
-bool GetTabById(int tab_id, Profile* profile, bool incognito_enabled,
-                Browser** browser,
-                TabStripModel** tab_strip,
-                TabContentsWrapper** contents,
-                int* tab_index);
-}
 
 // Windows
 class GetWindowFunction : public SyncExtensionFunction {
@@ -115,10 +75,20 @@ class GetAllTabsInWindowFunction : public SyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("tabs.getAllInWindow")
 };
+class QueryTabsFunction : public SyncExtensionFunction {
+  virtual ~QueryTabsFunction() {}
+  virtual bool RunImpl() OVERRIDE;
+  DECLARE_EXTENSION_FUNCTION_NAME("tabs.query")
+};
 class CreateTabFunction : public SyncExtensionFunction {
   virtual ~CreateTabFunction() {}
   virtual bool RunImpl() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("tabs.create")
+};
+class HighlightTabsFunction : public SyncExtensionFunction {
+  virtual ~HighlightTabsFunction() {}
+  virtual bool RunImpl() OVERRIDE;
+  DECLARE_EXTENSION_FUNCTION_NAME("tabs.highlight")
 };
 class UpdateTabFunction : public AsyncExtensionFunction,
                           public TabContentsObserver {
@@ -133,13 +103,18 @@ class UpdateTabFunction : public AsyncExtensionFunction,
                              const std::string& error);
   DECLARE_EXTENSION_FUNCTION_NAME("tabs.update")
 };
-class MoveTabFunction : public SyncExtensionFunction {
-  virtual ~MoveTabFunction() {}
+class MoveTabsFunction : public SyncExtensionFunction {
+  virtual ~MoveTabsFunction() {}
   virtual bool RunImpl() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("tabs.move")
 };
-class RemoveTabFunction : public SyncExtensionFunction {
-  virtual ~RemoveTabFunction() {}
+class ReloadTabFunction : public SyncExtensionFunction {
+  virtual ~ReloadTabFunction() {}
+  virtual bool RunImpl();
+  DECLARE_EXTENSION_FUNCTION_NAME("tabs.reload")
+};
+class RemoveTabsFunction : public SyncExtensionFunction {
+  virtual ~RemoveTabsFunction() {}
   virtual bool RunImpl() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("tabs.remove")
 };

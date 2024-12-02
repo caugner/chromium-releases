@@ -43,6 +43,9 @@ class FrameNavigationState {
   // True if navigation events for the given frame can be sent.
   bool CanSendEvents(int64 frame_id) const;
 
+  // True if in general webNavigation events may be sent for the given URL.
+  bool IsValidUrl(const GURL& url) const;
+
   // Starts to track a frame identified by its |frame_id| showing the URL |url|.
   void TrackFrame(int64 frame_id,
                   const GURL& url,
@@ -76,6 +79,13 @@ class FrameNavigationState {
   // True if the frame is currently not navigating.
   bool GetNavigationCompleted(int64 frame_id) const;
 
+  // Marks a frame as having committed its navigation, i.e. the onCommitted
+  // event was fired for this frame.
+  void SetNavigationCommitted(int64 frame_id);
+
+  // True if the frame has committed its navigation.
+  bool GetNavigationCommitted(int64 frame_id) const;
+
 #ifdef UNIT_TEST
   static void set_allow_extension_scheme(bool allow_extension_scheme) {
     allow_extension_scheme_ = allow_extension_scheme;
@@ -87,6 +97,7 @@ class FrameNavigationState {
     bool error_occurred;  // True if an error has occurred in this frame.
     bool is_main_frame;  // True if this is a main frame.
     bool is_navigating;  // True if there is a navigation going on.
+    bool is_committed;  // True if the navigation is already committed.
     GURL url;  // URL of this frame.
   };
   typedef std::map<int64, FrameState> FrameIdToStateMap;
@@ -130,25 +141,27 @@ class ExtensionWebNavigationTabObserver : public TabContentsObserver {
       int64 frame_id,
       bool is_main_frame,
       const GURL& url,
-      PageTransition::Type transition_type) OVERRIDE;
-  virtual void DidFailProvisionalLoad(int64 frame_id,
-                                      bool is_main_frame,
-                                      const GURL& validated_url,
-                                      int error_code) OVERRIDE;
+      content::PageTransition transition_type) OVERRIDE;
+  virtual void DidFailProvisionalLoad(
+      int64 frame_id,
+      bool is_main_frame,
+      const GURL& validated_url,
+      int error_code,
+      const string16& error_description) OVERRIDE;
   virtual void DocumentLoadedInFrame(int64 frame_id) OVERRIDE;
   virtual void DidFinishLoad(int64 frame_id) OVERRIDE;
+  virtual void DidOpenRequestedURL(TabContents* new_contents,
+                                   const GURL& url,
+                                   const GURL& referrer,
+                                   WindowOpenDisposition disposition,
+                                   content::PageTransition transition,
+                                   int64 source_frame_id) OVERRIDE;
   virtual void TabContentsDestroyed(TabContents* tab) OVERRIDE;
 
  private:
   // True if the transition and target url correspond to a reference fragment
   // navigation.
   bool IsReferenceFragmentNavigation(int64 frame_id, const GURL& url);
-
-  // Simulates a complete series of events for reference fragment navigations.
-  void NavigatedReferenceFragment(int64 frame_id,
-                                  bool is_main_frame,
-                                  const GURL& url,
-                                  PageTransition::Type transition_type);
 
   // Tracks the state of the frames we are sending events for.
   FrameNavigationState navigation_state_;
@@ -220,7 +233,14 @@ class ExtensionWebNavigationEventRouter : public NotificationObserver {
 class GetFrameFunction : public SyncExtensionFunction {
   virtual ~GetFrameFunction() {}
   virtual bool RunImpl() OVERRIDE;
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.webNavigation.getFrame")
+  DECLARE_EXTENSION_FUNCTION_NAME("webNavigation.getFrame")
+};
+
+// API function that returns the states of all frames in a given tab.
+class GetAllFramesFunction : public SyncExtensionFunction {
+  virtual ~GetAllFramesFunction() {}
+  virtual bool RunImpl() OVERRIDE;
+  DECLARE_EXTENSION_FUNCTION_NAME("webNavigation.getAllFrames")
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_WEBNAVIGATION_API_H_

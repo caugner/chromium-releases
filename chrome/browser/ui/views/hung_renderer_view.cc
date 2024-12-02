@@ -234,12 +234,12 @@ class HungRendererDialogView : public views::DialogDelegateView,
   void ShowForTabContents(TabContents* contents);
   void EndForTabContents(TabContents* contents);
 
-  // views::WindowDelegate overrides:
-  virtual std::wstring GetWindowTitle() const OVERRIDE;
+  // views::DialogDelegateView overrides:
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void WindowClosing() OVERRIDE;
   virtual int GetDialogButtons() const OVERRIDE;
-  virtual std::wstring GetDialogButtonLabel(
-      MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(
+      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
   virtual views::View* GetExtraView() OVERRIDE;
   virtual bool Accept(bool window_closing)  OVERRIDE;
   virtual views::View* GetContentsView()  OVERRIDE;
@@ -367,9 +367,8 @@ void HungRendererDialogView::EndForTabContents(TabContents* contents) {
 ///////////////////////////////////////////////////////////////////////////////
 // HungRendererDialogView, views::DialogDelegate implementation:
 
-std::wstring HungRendererDialogView::GetWindowTitle() const {
-  return UTF16ToWide(
-      l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_TITLE));
+string16 HungRendererDialogView::GetWindowTitle() const {
+  return l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_TITLE);
 }
 
 void HungRendererDialogView::WindowClosing() {
@@ -387,12 +386,11 @@ int HungRendererDialogView::GetDialogButtons() const {
   return MessageBoxFlags::DIALOGBUTTON_OK;
 }
 
-std::wstring HungRendererDialogView::GetDialogButtonLabel(
-    MessageBoxFlags::DialogButton button) const {
+string16 HungRendererDialogView::GetDialogButtonLabel(
+    ui::MessageBoxFlags::DialogButton button) const {
   if (button == MessageBoxFlags::DIALOGBUTTON_OK)
-    return UTF16ToWide(
-        l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_WAIT));
-  return std::wstring();
+    return l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_WAIT);
+  return string16();
 }
 
 views::View* HungRendererDialogView::GetExtraView() {
@@ -455,7 +453,7 @@ void HungRendererDialogView::Init() {
   frozen_icon_view_->SetImage(frozen_icon_);
 
   info_label_ = new views::Label(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER)));
+      l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER));
   info_label_->SetMultiLine(true);
   info_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
 
@@ -554,7 +552,7 @@ static HungRendererDialogView* CreateHungRendererDialogView() {
 
 namespace browser {
 
-void ShowHungRendererDialog(TabContents* contents) {
+void ShowNativeHungRendererDialog(TabContents* contents) {
   if (!logging::DialogsAreSuppressed()) {
     if (!g_instance)
       g_instance = CreateHungRendererDialogView();
@@ -562,7 +560,7 @@ void ShowHungRendererDialog(TabContents* contents) {
   }
 }
 
-void HideHungRendererDialog(TabContents* contents) {
+void HideNativeHungRendererDialog(TabContents* contents) {
   if (!logging::DialogsAreSuppressed() && g_instance)
     g_instance->EndForTabContents(contents);
 }

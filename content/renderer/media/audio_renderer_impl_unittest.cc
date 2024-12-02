@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/synchronization/waitable_event.h"
@@ -13,7 +14,7 @@
 #include "content/renderer/media/audio_renderer_impl.h"
 #include "content/renderer/mock_content_renderer_client.h"
 #include "content/renderer/render_process.h"
-#include "content/renderer/render_thread.h"
+#include "content/renderer/render_thread_impl.h"
 #include "ipc/ipc_channel.h"
 #include "media/base/data_buffer.h"
 #include "media/base/mock_callback.h"
@@ -145,7 +146,7 @@ class AudioRendererImplTest
     ASSERT_TRUE(channel_->Connect());
 
     mock_process_.reset(new MockRenderProcess);
-    render_thread_ = new RenderThread(kThreadName);
+    render_thread_ = new RenderThreadImpl(kThreadName);
     mock_process_->set_main_thread(render_thread_);
 
     // Create temporary shared memory.
@@ -154,15 +155,17 @@ class AudioRendererImplTest
     // Setup expectations for initialization.
     decoder_ = new media::MockAudioDecoder();
 
-    ON_CALL(*decoder_, config())
-      .WillByDefault(Return(media::AudioDecoderConfig(16,
-                                                      CHANNEL_LAYOUT_MONO,
-                                                      44100)));
+    EXPECT_CALL(*decoder_, bits_per_channel())
+        .WillRepeatedly(Return(16));
+    EXPECT_CALL(*decoder_, channel_layout())
+        .WillRepeatedly(Return(CHANNEL_LAYOUT_MONO));
+    EXPECT_CALL(*decoder_, samples_per_second())
+        .WillRepeatedly(Return(44100));
 
     // Create and initialize the audio renderer.
     renderer_ = new TestAudioRendererImpl();
     renderer_->set_host(&host_);
-    renderer_->Initialize(decoder_, media::NewExpectedCallback());
+    renderer_->Initialize(decoder_, media::NewExpectedClosure());
 
     // Wraps delegate calls into tasks.
     delegate_caller_ = new DelegateCaller(renderer_);
@@ -181,8 +184,8 @@ class AudioRendererImplTest
     // as all AudioMessageFilter::Delegate methods.
     ChildProcess::current()->io_message_loop()->PostTask(
         FROM_HERE,
-        NewRunnableMethod(delegate_caller_.get(),
-            &DelegateCaller::OnCreated, duplicated_handle, kSize));
+        base::Bind(&DelegateCaller::OnCreated, delegate_caller_.get(),
+                   duplicated_handle, kSize));
     WaitForIOThreadCompletion();
   }
 
@@ -202,7 +205,7 @@ class AudioRendererImplTest
   MessageLoopForIO message_loop_;
   content::MockContentRendererClient mock_content_renderer_client_;
   scoped_ptr<IPC::Channel> channel_;
-  RenderThread* render_thread_;  // owned by mock_process_
+  RenderThreadImpl* render_thread_;  // owned by mock_process_
   scoped_ptr<MockRenderProcess> mock_process_;
   base::SharedMemory shared_mem_;
   media::MockFilterHost host_;
@@ -226,7 +229,7 @@ TEST_F(AudioRendererImplTest, SetPlaybackRate) {
   renderer_->SetPlaybackRate(1.0f);
   renderer_->SetPlaybackRate(0.0f);
 
-  renderer_->Stop(media::NewExpectedCallback());
+  renderer_->Stop(media::NewExpectedClosure());
   WaitForIOThreadCompletion();
 }
 
@@ -236,14 +239,14 @@ TEST_F(AudioRendererImplTest, SetVolume) {
   // Tasks will be posted internally on the IO thread.
   renderer_->SetVolume(0.5f);
 
-  renderer_->Stop(media::NewExpectedCallback());
+  renderer_->Stop(media::NewExpectedClosure());
   WaitForIOThreadCompletion();
 }
 
 TEST_F(AudioRendererImplTest, Stop) {
   // Execute Stop() codepath.
   // Tasks will be posted internally on the IO thread.
-  renderer_->Stop(media::NewExpectedCallback());
+  renderer_->Stop(media::NewExpectedClosure());
 
   // Run AudioMessageFilter::Delegate methods, which can be executed after being
   // stopped. AudioRendererImpl shouldn't create any messages in this state.
@@ -252,29 +255,29 @@ TEST_F(AudioRendererImplTest, Stop) {
   if (renderer_->latency_type() == AudioRendererImpl::kHighLatency) {
     ChildProcess::current()->io_message_loop()->PostTask(
         FROM_HERE,
-        NewRunnableMethod(delegate_caller_.get(),
-        &DelegateCaller::OnRequestPacket, AudioBuffersState(kSize, 0)));
+        base::Bind(&DelegateCaller::OnRequestPacket,
+                   delegate_caller_.get(), AudioBuffersState(kSize, 0)));
   }
   ChildProcess::current()->io_message_loop()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(delegate_caller_.get(),
-      &DelegateCaller::OnStateChanged, kAudioStreamError));
+      base::Bind(&DelegateCaller::OnStateChanged,
+                 delegate_caller_.get(), kAudioStreamError));
   ChildProcess::current()->io_message_loop()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(delegate_caller_.get(),
-      &DelegateCaller::OnStateChanged, kAudioStreamPlaying));
+      base::Bind(&DelegateCaller::OnStateChanged,
+                 delegate_caller_.get(), kAudioStreamPlaying));
   ChildProcess::current()->io_message_loop()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(delegate_caller_.get(),
-      &DelegateCaller::OnStateChanged, kAudioStreamPaused));
+      base::Bind(&DelegateCaller::OnStateChanged,
+                 delegate_caller_.get(), kAudioStreamPaused));
   ChildProcess::current()->io_message_loop()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(delegate_caller_.get(),
-      &DelegateCaller::OnCreated, shared_mem_.handle(), kSize));
+      base::Bind(&DelegateCaller::OnCreated,
+                 delegate_caller_.get(), shared_mem_.handle(), kSize));
   ChildProcess::current()->io_message_loop()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(delegate_caller_.get(),
-      &DelegateCaller::OnVolume, 0.5));
+      base::Bind(&DelegateCaller::OnVolume,
+                 delegate_caller_.get(), 0.5));
 
   WaitForIOThreadCompletion();
 
@@ -288,8 +291,8 @@ TEST_F(AudioRendererImplTest, DestroyedMessageLoop_SetPlaybackRate) {
   // still works.
   ChildProcess::current()->io_message_loop()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(delegate_caller_.get(),
-      &DelegateCaller::DestroyCurrentMessageLoop));
+      base::Bind(&DelegateCaller::DestroyCurrentMessageLoop,
+                 delegate_caller_.get()));
   WaitForIOThreadCompletion();
 
   // No tasks will be posted on the IO thread here since we are in
@@ -297,7 +300,7 @@ TEST_F(AudioRendererImplTest, DestroyedMessageLoop_SetPlaybackRate) {
   renderer_->SetPlaybackRate(0.0f);
   renderer_->SetPlaybackRate(1.0f);
   renderer_->SetPlaybackRate(0.0f);
-  renderer_->Stop(media::NewExpectedCallback());
+  renderer_->Stop(media::NewExpectedClosure());
 }
 
 TEST_F(AudioRendererImplTest, DestroyedMessageLoop_SetVolume) {
@@ -305,14 +308,14 @@ TEST_F(AudioRendererImplTest, DestroyedMessageLoop_SetVolume) {
   // still works.
   ChildProcess::current()->io_message_loop()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(delegate_caller_.get(),
-      &DelegateCaller::DestroyCurrentMessageLoop));
+      base::Bind(&DelegateCaller::DestroyCurrentMessageLoop,
+                 delegate_caller_.get()));
   WaitForIOThreadCompletion();
 
   // No tasks will be posted on the IO thread here since we are in
   // a "stopped" state.
   renderer_->SetVolume(0.5f);
-  renderer_->Stop(media::NewExpectedCallback());
+  renderer_->Stop(media::NewExpectedClosure());
 }
 
 TEST_F(AudioRendererImplTest, DestroyedMessageLoop_ConsumeAudioSamples) {
@@ -320,15 +323,15 @@ TEST_F(AudioRendererImplTest, DestroyedMessageLoop_ConsumeAudioSamples) {
   // still works.
   ChildProcess::current()->io_message_loop()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(delegate_caller_.get(),
-      &DelegateCaller::DestroyCurrentMessageLoop));
+      base::Bind(&DelegateCaller::DestroyCurrentMessageLoop,
+                 delegate_caller_.get()));
   WaitForIOThreadCompletion();
 
   // No tasks will be posted on the IO thread here since we are in
   // a "stopped" state.
   scoped_refptr<media::Buffer> buffer(new media::DataBuffer(kSize));
   renderer_->ConsumeAudioSamples(buffer);
-  renderer_->Stop(media::NewExpectedCallback());
+  renderer_->Stop(media::NewExpectedClosure());
 }
 
 TEST_F(AudioRendererImplTest, UpdateEarliestEndTime) {
@@ -341,7 +344,6 @@ TEST_F(AudioRendererImplTest, UpdateEarliestEndTime) {
                                    time_now);
   int time_delta = (renderer_->earliest_end_time() - time_now).InMilliseconds();
   EXPECT_EQ(1100, time_delta);
-  renderer_->Stop(media::NewExpectedCallback());
+  renderer_->Stop(media::NewExpectedClosure());
   WaitForIOThreadCompletion();
 }
-

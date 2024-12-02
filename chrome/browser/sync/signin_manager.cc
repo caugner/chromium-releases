@@ -96,19 +96,20 @@ void SigninManager::PrepareForOAuthSignin() {
   // The Sign out should clear the token service credentials.
   // Note: In CHROMEOS we might have valid credentials but still need to
   // set up 2-factor authentication.
-  DCHECK(!profile_->GetTokenService()->AreOAuthCredentialsValid());
+  DCHECK(!profile_->GetTokenService()->HasOAuthCredentials());
 #endif
 }
 
 // Users must always sign out before they sign in again.
-void SigninManager::StartOAuthSignIn() {
+void SigninManager::StartOAuthSignIn(const std::string& oauth1_request_token) {
   DCHECK(browser_sync::IsUsingOAuth());
   PrepareForOAuthSignin();
+  oauth1_request_token_.assign(oauth1_request_token);
   oauth_login_.reset(new GaiaOAuthFetcher(this,
                                           profile_->GetRequestContext(),
                                           profile_,
                                           GaiaConstants::kSyncServiceOAuth));
-  oauth_login_->StartGetOAuthToken();
+  oauth_login_->StartOAuthGetAccessToken(oauth1_request_token_);
   // TODO(rogerta?): Bug 92325: Expand Autologin to include OAuth signin
 }
 
@@ -136,12 +137,9 @@ void SigninManager::StartSignIn(const std::string& username,
   // user when the GAIA service token is ready for use.  Only do this if we
   // are not running in ChomiumOS, since it handles pre-login itself.
 #if !defined(OS_CHROMEOS)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableAutologin) &&
-      profile_->GetPrefs()->GetBoolean(prefs::kAutologinEnabled)) {
-    registrar_.Add(this,
-                   chrome::NOTIFICATION_TOKEN_AVAILABLE,
-                   Source<TokenService>(profile_->GetTokenService()));
-  }
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_TOKEN_AVAILABLE,
+                 Source<TokenService>(profile_->GetTokenService()));
 #endif
 }
 
@@ -256,22 +254,6 @@ void SigninManager::OnClientLoginFailure(const GoogleServiceAuthError& error) {
   SignOut();
 }
 
-void SigninManager::OnGetOAuthTokenSuccess(const std::string& oauth_token) {
-  DCHECK(browser_sync::IsUsingOAuth());
-  VLOG(1) << "SigninManager::SigninManager::OnGetOAuthTokenSuccess";
-}
-
-void SigninManager::OnGetOAuthTokenFailure(
-    const GoogleServiceAuthError& error) {
-  DCHECK(browser_sync::IsUsingOAuth());
-  LOG(WARNING) << "SigninManager::OnGetOAuthTokenFailure";
-  NotificationService::current()->Notify(
-      chrome::NOTIFICATION_GOOGLE_SIGNIN_FAILED,
-      Source<Profile>(profile_),
-      Details<const GoogleServiceAuthError>(&error));
-  SignOut();
-}
-
 void SigninManager::OnOAuthGetAccessTokenSuccess(const std::string& token,
                                                  const std::string& secret) {
   DCHECK(browser_sync::IsUsingOAuth());
@@ -308,7 +290,7 @@ void SigninManager::OnUserInfoSuccess(const std::string& email) {
 
   // If |SignOut()| was called between the login start and |OnUserInfoSucess()|,
   // then the OAuth credentials would have been cleared.
-  if (!token_service->AreOAuthCredentialsValid())
+  if (!token_service->HasOAuthCredentials())
     return;
 
   VLOG(1) << "Sync signin for " << email << " is complete.";
@@ -325,7 +307,7 @@ void SigninManager::OnUserInfoSuccess(const std::string& email) {
       Source<Profile>(profile_),
       Details<const GoogleServiceSigninSuccessDetails>(&details));
 
-  DCHECK(token_service->AreOAuthCredentialsValid());
+  DCHECK(token_service->HasOAuthCredentials());
   token_service->StartFetchingOAuthTokens();
 }
 

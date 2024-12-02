@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
@@ -16,6 +17,7 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/synchronization/lock.h"
+#include "chrome/browser/chromeos/cros/cert_library.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
 #include "chrome/browser/chromeos/login/auth_response_handler.h"
 #include "chrome/browser/chromeos/login/authentication_notification_details.h"
@@ -46,6 +48,37 @@ using file_util::PathExists;
 using file_util::ReadFile;
 using file_util::ReadFileToString;
 
+namespace {
+
+const int kPassHashLen = 32;
+const size_t kKeySize = 16;
+
+// Decrypts (AES) hex encoded encrypted token given |key| and |salt|.
+std::string DecryptTokenWithKey(
+    crypto::SymmetricKey* key,
+    const std::string& salt,
+    const std::string& encrypted_token_hex) {
+  std::vector<uint8> encrypted_token_bytes;
+  if (!base::HexStringToBytes(encrypted_token_hex, &encrypted_token_bytes))
+    return std::string();
+
+  std::string encrypted_token(
+      reinterpret_cast<char*>(encrypted_token_bytes.data()),
+      encrypted_token_bytes.size());
+  crypto::Encryptor encryptor;
+  if (!encryptor.Init(key, crypto::Encryptor::CTR, std::string()))
+    return std::string();
+
+  std::string nonce = salt.substr(0, kKeySize);
+  std::string token;
+  CHECK(encryptor.SetCounter(nonce));
+  if (!encryptor.Decrypt(encrypted_token, &token))
+    return std::string();
+  return token;
+}
+
+}   // namespace
+
 namespace chromeos {
 
 // static
@@ -55,9 +88,6 @@ const char ParallelAuthenticator::kLocalaccountFile[] = "localaccount";
 const int ParallelAuthenticator::kClientLoginTimeoutMs = 10000;
 // static
 const int ParallelAuthenticator::kLocalaccountRetryIntervalMs = 20;
-
-const int kPassHashLen = 32;
-const size_t kKeySize = 16;
 
 ParallelAuthenticator::ParallelAuthenticator(LoginStatusConsumer* consumer)
     : Authenticator(consumer),
@@ -76,7 +106,7 @@ ParallelAuthenticator::ParallelAuthenticator(LoginStatusConsumer* consumer)
 
 ParallelAuthenticator::~ParallelAuthenticator() {}
 
-bool ParallelAuthenticator::AuthenticateToLogin(
+void ParallelAuthenticator::AuthenticateToLogin(
     Profile* profile,
     const std::string& username,
     const std::string& password,
@@ -97,8 +127,8 @@ bool ParallelAuthenticator::AuthenticateToLogin(
   // Sadly, this MUST be on the UI thread due to sending DBus traffic :-/
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(mounter_.get(), &CryptohomeOp::Initiate));
 
+      base::Bind(&CryptohomeOp::Initiate, mounter_.get()));
   // ClientLogin authentication check should happen immediately here.
   // We should not try OAuthLogin check until the profile loads.
   if (!using_oauth_) {
@@ -111,13 +141,11 @@ bool ParallelAuthenticator::AuthenticateToLogin(
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(this,
-                        &ParallelAuthenticator::LoadLocalaccount,
-                        std::string(kLocalaccountFile)));
-  return true;
+      base::Bind(&ParallelAuthenticator::LoadLocalaccount, this,
+                 std::string(kLocalaccountFile)));
 }
 
-bool ParallelAuthenticator::CompleteLogin(Profile* profile,
+void ParallelAuthenticator::CompleteLogin(Profile* profile,
                                           const std::string& username,
                                           const std::string& password) {
   std::string canonicalized = Authenticator::Canonicalize(username);
@@ -133,7 +161,7 @@ bool ParallelAuthenticator::CompleteLogin(Profile* profile,
   // Sadly, this MUST be on the UI thread due to sending DBus traffic :-/
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(mounter_.get(), &CryptohomeOp::Initiate));
+      base::Bind(&CryptohomeOp::Initiate, mounter_.get()));
 
   if (!using_oauth_) {
     // Test automation needs to disable oauth, but that leads to other
@@ -150,35 +178,30 @@ bool ParallelAuthenticator::CompleteLogin(Profile* profile,
     // parallel.
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(this,
-            &ParallelAuthenticator::ResolveLoginCompletionStatus));
+        base::Bind(&ParallelAuthenticator::ResolveLoginCompletionStatus, this));
   }
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(this,
-                        &ParallelAuthenticator::LoadLocalaccount,
-                        std::string(kLocalaccountFile)));
-  return true;
+      base::Bind(&ParallelAuthenticator::LoadLocalaccount, this,
+                 std::string(kLocalaccountFile)));
 }
 
-bool ParallelAuthenticator::AuthenticateToUnlock(const std::string& username,
+void ParallelAuthenticator::AuthenticateToUnlock(const std::string& username,
                                                  const std::string& password) {
   current_state_.reset(
       new AuthAttemptState(Authenticator::Canonicalize(username),
                            HashPassword(password)));
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(this,
-                        &ParallelAuthenticator::LoadLocalaccount,
-                        std::string(kLocalaccountFile)));
+      base::Bind(&ParallelAuthenticator::LoadLocalaccount, this,
+                 std::string(kLocalaccountFile)));
   key_checker_ = CryptohomeOp::CreateCheckKeyAttempt(current_state_.get(),
                                                      this);
   // Sadly, this MUST be on the UI thread due to sending DBus traffic :-/
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(key_checker_.get(), &CryptohomeOp::Initiate));
-  return true;
+      base::Bind(&CryptohomeOp::Initiate, key_checker_.get()));
 }
 
 void ParallelAuthenticator::LoginOffTheRecord() {
@@ -235,9 +258,7 @@ void ParallelAuthenticator::CheckLocalaccount(const LoginFailure& error) {
     if (!checked_for_localaccount_) {
       BrowserThread::PostDelayedTask(
           BrowserThread::FILE, FROM_HERE,
-          NewRunnableMethod(this,
-                            &ParallelAuthenticator::CheckLocalaccount,
-                            error),
+          base::Bind(&ParallelAuthenticator::CheckLocalaccount, this, error),
           kLocalaccountRetryIntervalMs);
       return;
     }
@@ -250,18 +271,18 @@ void ParallelAuthenticator::CheckLocalaccount(const LoginFailure& error) {
           CryptohomeOp::CreateMountGuestAttempt(current_state_.get(), this);
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(guest_mounter_.get(), &CryptohomeOp::Initiate));
+          base::Bind(&CryptohomeOp::Initiate, guest_mounter_.get()));
     } else {
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(this, &ParallelAuthenticator::OnLoginSuccess,
-                            GaiaAuthConsumer::ClientLoginResult(), false));
+          base::Bind(&ParallelAuthenticator::OnLoginSuccess, this,
+                     GaiaAuthConsumer::ClientLoginResult(), false));
     }
   } else {
     // Not the localaccount.  Fail, passing along cached error info.
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this, &ParallelAuthenticator::OnLoginFailure, error));
+        base::Bind(&ParallelAuthenticator::OnLoginFailure, this, error));
   }
 }
 
@@ -296,9 +317,8 @@ void ParallelAuthenticator::RecoverEncryptedData(
                                                      old_hash);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(this,
-                        &ParallelAuthenticator::ResyncRecoverHelper,
-                        key_migrator_));
+      base::Bind(&ParallelAuthenticator::ResyncRecoverHelper, this,
+                 key_migrator_));
 }
 
 void ParallelAuthenticator::ResyncEncryptedData(
@@ -307,9 +327,8 @@ void ParallelAuthenticator::ResyncEncryptedData(
       CryptohomeOp::CreateRemoveAttempt(current_state_.get(), this);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(this,
-                        &ParallelAuthenticator::ResyncRecoverHelper,
-                        data_remover_));
+      base::Bind(&ParallelAuthenticator::ResyncRecoverHelper, this,
+                 data_remover_));
 }
 
 void ParallelAuthenticator::ResyncRecoverHelper(CryptohomeOp* to_initiate) {
@@ -317,7 +336,7 @@ void ParallelAuthenticator::ResyncRecoverHelper(CryptohomeOp* to_initiate) {
   current_state_->ResetCryptohomeStatus();
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(to_initiate, &CryptohomeOp::Initiate));
+      base::Bind(&CryptohomeOp::Initiate, to_initiate));
 }
 
 void ParallelAuthenticator::RetryAuth(Profile* profile,
@@ -374,26 +393,24 @@ void ParallelAuthenticator::Resolve() {
       // the appropriate failure.
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(
-              this,
-              &ParallelAuthenticator::OnLoginFailure,
-              LoginFailure(LoginFailure::COULD_NOT_MOUNT_CRYPTOHOME)));
+          base::Bind(&ParallelAuthenticator::OnLoginFailure, this,
+                     LoginFailure(LoginFailure::COULD_NOT_MOUNT_CRYPTOHOME)));
       break;
     case FAILED_REMOVE:
       // In this case, we tried to remove the user's old cryptohome at her
       // request, and the remove failed.
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(this, &ParallelAuthenticator::OnLoginFailure,
-                            LoginFailure(LoginFailure::DATA_REMOVAL_FAILED)));
+          base::Bind(&ParallelAuthenticator::OnLoginFailure, this,
+                     LoginFailure(LoginFailure::DATA_REMOVAL_FAILED)));
       break;
     case FAILED_TMPFS:
       // In this case, we tried to mount a tmpfs for BWSI or the localaccount
       // user and failed.
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(this, &ParallelAuthenticator::OnLoginFailure,
-                            LoginFailure(LoginFailure::COULD_NOT_MOUNT_TMPFS)));
+          base::Bind(&ParallelAuthenticator::OnLoginFailure, this,
+                     LoginFailure(LoginFailure::COULD_NOT_MOUNT_TMPFS)));
       break;
     case CREATE_NEW:
       create = true;
@@ -404,14 +421,13 @@ void ParallelAuthenticator::Resolve() {
                                                   create);
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(mounter_.get(), &CryptohomeOp::Initiate));
+          base::Bind(&CryptohomeOp::Initiate, mounter_.get()));
       break;
     case NEED_OLD_PW:
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(this,
-                            &ParallelAuthenticator::OnPasswordChangeDetected,
-                            current_state_->credentials()));
+          base::Bind(&ParallelAuthenticator::OnPasswordChangeDetected, this,
+                     current_state_->credentials()));
       break;
     case ONLINE_FAILED:
       // In this case, we know online login was rejected because the account
@@ -432,8 +448,8 @@ void ParallelAuthenticator::Resolve() {
             // OnLoginSuccess(..., ..., true) -> OnLoginFailure().
             BrowserThread::PostTask(
                 BrowserThread::UI, FROM_HERE,
-                NewRunnableMethod(this, &ParallelAuthenticator::OnLoginSuccess,
-                                  current_state_->credentials(), true));
+                base::Bind(&ParallelAuthenticator::OnLoginSuccess, this,
+                           current_state_->credentials(), true));
           }
         }
         const LoginFailure& login_failure =
@@ -441,18 +457,16 @@ void ParallelAuthenticator::Resolve() {
                                   current_state_->online_outcome();
         BrowserThread::PostTask(
             BrowserThread::UI, FROM_HERE,
-            NewRunnableMethod(this, &ParallelAuthenticator::OnLoginFailure,
-                              login_failure));
+            base::Bind(&ParallelAuthenticator::OnLoginFailure, this,
+                       login_failure));
         // Check if we couldn't verify OAuth token here.
         if (using_oauth_ &&
             login_failure.reason() == LoginFailure::NETWORK_AUTH_FAILED) {
           BrowserThread::PostTask(
               BrowserThread::UI, FROM_HERE,
-              NewRunnableMethod(this,
-                                &ParallelAuthenticator::RecordOAuthCheckFailure,
-                                (reauth_state_.get() ?
-                                 reauth_state_->username :
-                                 current_state_->username)));
+              base::Bind(&ParallelAuthenticator::RecordOAuthCheckFailure, this,
+                         (reauth_state_.get() ? reauth_state_->username :
+                             current_state_->username)));
         }
         break;
     }
@@ -464,7 +478,7 @@ void ParallelAuthenticator::Resolve() {
                                              current_state_->ascii_hash);
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(key_migrator_.get(), &CryptohomeOp::Initiate));
+          base::Bind(&CryptohomeOp::Initiate, key_migrator_.get()));
       break;
     case OFFLINE_LOGIN:
       VLOG(2) << "Offline login";
@@ -484,22 +498,20 @@ void ParallelAuthenticator::Resolve() {
       VLOG(2) << "Online login";
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(this, &ParallelAuthenticator::OnLoginSuccess,
-                            current_state_->credentials(), request_pending));
+          base::Bind(&ParallelAuthenticator::OnLoginSuccess, this,
+                     current_state_->credentials(), request_pending));
       break;
     case LOCAL_LOGIN:
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(
-              this,
-              &ParallelAuthenticator::OnOffTheRecordLoginSuccess));
+          base::Bind(&ParallelAuthenticator::OnOffTheRecordLoginSuccess, this));
       break;
     case LOGIN_FAILED:
       current_state_->ResetCryptohomeStatus();
       BrowserThread::PostTask(
           BrowserThread::FILE, FROM_HERE,
-          NewRunnableMethod(this, &ParallelAuthenticator::CheckLocalaccount,
-                            current_state_->online_outcome()));
+          base::Bind(&ParallelAuthenticator::CheckLocalaccount, this,
+                     current_state_->online_outcome()));
       break;
     default:
       NOTREACHED();
@@ -673,6 +685,15 @@ void ParallelAuthenticator::LoadSystemSalt() {
   CHECK_EQ(system_salt_.size() % 2, 0U);
 }
 
+bool ParallelAuthenticator::LoadSupplementalUserKey() {
+  if (!supplemental_user_key_.get()) {
+    supplemental_user_key_.reset(
+        CrosLibrary::Get()->GetCertLibrary()->GetSupplementalUserKey());
+  }
+  return supplemental_user_key_.get() != NULL;
+}
+
+
 void ParallelAuthenticator::LoadLocalaccount(const std::string& filename) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   {
@@ -704,13 +725,11 @@ void ParallelAuthenticator::SetLocalaccount(const std::string& new_name) {
 }
 
 std::string ParallelAuthenticator::EncryptToken(const std::string& token) {
-  // TODO(zelidrag): Replace salt with
-  scoped_ptr<crypto::SymmetricKey> key(
-      crypto::SymmetricKey::DeriveKeyFromPassword(
-          crypto::SymmetricKey::AES, UserSupplementalKeyAsAscii(),
-          SaltAsAscii(), 1000, 256));
+  if (!LoadSupplementalUserKey())
+    return std::string();
   crypto::Encryptor encryptor;
-  if (!encryptor.Init(key.get(), crypto::Encryptor::CTR, std::string()))
+  if (!encryptor.Init(supplemental_user_key_.get(), crypto::Encryptor::CTR,
+                      std::string()))
     return std::string();
 
   std::string nonce = SaltAsAscii().substr(0, kKeySize);
@@ -723,32 +742,23 @@ std::string ParallelAuthenticator::EncryptToken(const std::string& token) {
       reinterpret_cast<const void*>(encoded_token.data()),
       encoded_token.size()));
 }
-
 std::string ParallelAuthenticator::DecryptToken(
     const std::string& encrypted_token_hex) {
-  std::vector<uint8> encrypted_token_bytes;
-  if (!base::HexStringToBytes(encrypted_token_hex, &encrypted_token_bytes))
+  if (!LoadSupplementalUserKey())
     return std::string();
+  return DecryptTokenWithKey(supplemental_user_key_.get(),
+                             SaltAsAscii(),
+                             encrypted_token_hex);
+}
 
-  std::string encrypted_token(
-      reinterpret_cast<char*>(encrypted_token_bytes.data()),
-                              encrypted_token_bytes.size());
+std::string ParallelAuthenticator::DecryptLegacyToken(
+    const std::string& encrypted_token_hex) {
   scoped_ptr<crypto::SymmetricKey> key(
       crypto::SymmetricKey::DeriveKeyFromPassword(
           crypto::SymmetricKey::AES, UserSupplementalKeyAsAscii(),
           SaltAsAscii(), 1000, 256));
-  crypto::Encryptor encryptor;
-  if (!encryptor.Init(key.get(), crypto::Encryptor::CTR, std::string()))
-    return std::string();
-
-  std::string nonce = SaltAsAscii().substr(0, kKeySize);
-  std::string token;
-  CHECK(encryptor.SetCounter(nonce));
-  if (!encryptor.Decrypt(encrypted_token, &token))
-    return std::string();
-  return token;
+  return DecryptTokenWithKey(key.get(), SaltAsAscii(), encrypted_token_hex);
 }
-
 
 std::string ParallelAuthenticator::HashPassword(const std::string& password) {
   // Get salt, ascii encode, update sha with that, then update with ascii

@@ -5,9 +5,13 @@
 #include "remoting/host/local_input_monitor.h"
 
 #import <AppKit/AppKit.h>
+#include <set>
 
 #include "base/compiler_specific.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/mac/scoped_cftyperef.h"
+#include "base/synchronization/lock.h"
 #include "remoting/host/chromoting_host.h"
 #import "third_party/GTM/AppKit/GTMCarbonEvent.h"
 
@@ -15,35 +19,73 @@
 // http://boredzo.org/blog/wp-content/uploads/2007/05/IMTx-virtual-keycodes.pdf
 static const NSUInteger kEscKeyCode = 53;
 
-@interface HotKeyMonitor : NSObject {
+namespace {
+typedef std::set<remoting::ChromotingHost*> Hosts;
+}
+
+@interface LocalInputMonitorImpl : NSObject {
  @private
-  GTMCarbonHotKey* hot_key_;
-  remoting::ChromotingHost* host_;
+  GTMCarbonHotKey* hotKey_;
+  CFRunLoopSourceRef mouseRunLoopSource_;
+  base::Lock hostsLock_;
+  Hosts hosts_;
 }
 
 // Called when the hotKey is hit.
 - (void)hotKeyHit:(GTMCarbonHotKey*)hotKey;
 
-// Must be called when the HotKeyMonitor is no longer to be used.
+// Called when the local mouse moves
+- (void)localMouseMoved:(const SkIPoint&)mousePos;
+
+// Must be called when the LocalInputMonitorImpl is no longer to be used.
 // Similar to NSTimer in that more than a simple release is required.
 - (void)invalidate;
 
+// Called to add a host to the list of those to be Shutdown() when the hotkey
+// is pressed.
+- (void)addHost:(remoting::ChromotingHost*)host;
+
+// Called to remove a host. Returns true if it was the last host being
+// monitored, in which case the object should be destroyed.
+- (bool)removeHost:(remoting::ChromotingHost*)host;
+
 @end
 
-@implementation HotKeyMonitor
+static CGEventRef LocalMouseMoved(CGEventTapProxy proxy, CGEventType type,
+                                  CGEventRef event, void* context) {
+  CGPoint cgMousePos = CGEventGetLocation(event);
+  SkIPoint mousePos = SkIPoint::Make(cgMousePos.x, cgMousePos.y);
+  [static_cast<LocalInputMonitorImpl*>(context) localMouseMoved:mousePos];
+  return NULL;
+}
 
-- (id)initWithHost:(remoting::ChromotingHost*)host {
+@implementation LocalInputMonitorImpl
+
+- (id)init {
   if ((self = [super init])) {
-    host_ = host;
     GTMCarbonEventDispatcherHandler* handler =
         [GTMCarbonEventDispatcherHandler sharedEventDispatcherHandler];
-    hot_key_ = [handler registerHotKey:kEscKeyCode
-                             modifiers:NSShiftKeyMask
+    hotKey_ = [handler registerHotKey:kEscKeyCode
+                             modifiers:(NSAlternateKeyMask | NSControlKeyMask)
                                 target:self
                                 action:@selector(hotKeyHit:)
                               userInfo:nil
                            whenPressed:YES];
-    if (!hot_key_) {
+    if (!hotKey_) {
+      LOG(ERROR) << "registerHotKey failed.";
+    }
+    base::mac::ScopedCFTypeRef<CFMachPortRef> mouseMachPort(CGEventTapCreate(
+        kCGSessionEventTap, kCGHeadInsertEventTap, kCGEventTapOptionListenOnly,
+        1 << kCGEventMouseMoved, LocalMouseMoved, self));
+    if (mouseMachPort) {
+      mouseRunLoopSource_ = CFMachPortCreateRunLoopSource(
+          NULL, mouseMachPort, 0);
+      CFRunLoopAddSource(
+          CFRunLoopGetMain(), mouseRunLoopSource_, kCFRunLoopCommonModes);
+    } else {
+      LOG(ERROR) << "CGEventTapCreate failed.";
+    }
+    if (!hotKey_ && !mouseMachPort) {
       [self release];
       return nil;
     }
@@ -52,13 +94,43 @@ static const NSUInteger kEscKeyCode = 53;
 }
 
 - (void)hotKeyHit:(GTMCarbonHotKey*)hotKey {
-  host_->Shutdown(NULL);
+  base::AutoLock lock(hostsLock_);
+  for (Hosts::const_iterator i = hosts_.begin(); i != hosts_.end(); ++i) {
+    (*i)->Shutdown(NULL);
+  }
+}
+
+- (void)localMouseMoved:(const SkIPoint&)mousePos {
+  base::AutoLock lock(hostsLock_);
+  for (Hosts::const_iterator i = hosts_.begin(); i != hosts_.end(); ++i) {
+    (*i)->LocalMouseMoved(mousePos);
+  }
 }
 
 - (void)invalidate {
-  GTMCarbonEventDispatcherHandler* handler =
-      [GTMCarbonEventDispatcherHandler sharedEventDispatcherHandler];
-  [handler unregisterHotKey:hot_key_];
+  if (hotKey_) {
+    GTMCarbonEventDispatcherHandler* handler =
+        [GTMCarbonEventDispatcherHandler sharedEventDispatcherHandler];
+    [handler unregisterHotKey:hotKey_];
+    hotKey_ = NULL;
+  }
+  if (mouseRunLoopSource_) {
+    CFRunLoopRemoveSource(
+        CFRunLoopGetMain(), mouseRunLoopSource_, kCFRunLoopCommonModes);
+    CFRelease(mouseRunLoopSource_);
+    mouseRunLoopSource_ = NULL;
+  }
+}
+
+- (void)addHost:(remoting::ChromotingHost*)host {
+  base::AutoLock lock(hostsLock_);
+  hosts_.insert(host);
+}
+
+- (bool)removeHost:(remoting::ChromotingHost*)host {
+  base::AutoLock lock(hostsLock_);
+  hosts_.erase(host);
+  return hosts_.empty();
 }
 
 @end
@@ -67,16 +139,18 @@ namespace {
 
 class LocalInputMonitorMac : public remoting::LocalInputMonitor {
  public:
-  LocalInputMonitorMac() : hot_key_monitor_(NULL) {}
+  LocalInputMonitorMac() : host_(NULL) {}
   virtual ~LocalInputMonitorMac();
   virtual void Start(remoting::ChromotingHost* host) OVERRIDE;
   virtual void Stop() OVERRIDE;
 
  private:
-  HotKeyMonitor* hot_key_monitor_;
-
+  remoting::ChromotingHost* host_;
   DISALLOW_COPY_AND_ASSIGN(LocalInputMonitorMac);
 };
+
+base::LazyInstance<base::Lock> monitor_lock(base::LINKER_INITIALIZED);
+LocalInputMonitorImpl* local_input_monitor = NULL;
 
 }  // namespace
 
@@ -85,15 +159,21 @@ LocalInputMonitorMac::~LocalInputMonitorMac() {
 }
 
 void LocalInputMonitorMac::Start(remoting::ChromotingHost* host) {
-  CHECK(!hot_key_monitor_);
-  hot_key_monitor_ = [[HotKeyMonitor alloc] initWithHost:host];
-  CHECK(hot_key_monitor_);
+  base::AutoLock lock(monitor_lock.Get());
+  if (!local_input_monitor)
+    local_input_monitor = [[LocalInputMonitorImpl alloc] init];
+  CHECK(local_input_monitor);
+  [local_input_monitor addHost:host];
+  host_ = host;
 }
 
 void LocalInputMonitorMac::Stop() {
-  [hot_key_monitor_ invalidate];
-  [hot_key_monitor_ release];
-  hot_key_monitor_ = nil;
+  base::AutoLock lock(monitor_lock.Get());
+  if ([local_input_monitor removeHost:host_]) {
+    [local_input_monitor invalidate];
+    [local_input_monitor release];
+    local_input_monitor = nil;
+  }
 }
 
 remoting::LocalInputMonitor* remoting::LocalInputMonitor::Create() {

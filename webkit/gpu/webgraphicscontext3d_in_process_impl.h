@@ -13,6 +13,7 @@
 #include "third_party/angle/include/GLSLANG/ShaderLang.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "ui/gfx/native_widget_types.h"
 
 #if !defined(OS_MACOSX)
 #define FLIP_FRAMEBUFFER_VERTICALLY
@@ -20,6 +21,7 @@
 namespace gfx {
 class GLContext;
 class GLSurface;
+class GLShareGroup;
 }
 
 using WebKit::WGC3Dchar;
@@ -51,7 +53,12 @@ namespace gpu {
 
 class WebGraphicsContext3DInProcessImpl : public WebGraphicsContext3D {
  public:
-  WebGraphicsContext3DInProcessImpl();
+  // Creates a WebGraphicsContext3DInProcessImpl for a given window. If window
+  // is gfx::kNullPluginWindow, then it creates an offscreen context.
+  // share_group is the group this context shares namespaces with. It's only
+  // used for window-bound countexts.
+  WebGraphicsContext3DInProcessImpl(gfx::PluginWindowHandle window,
+                                    gfx::GLShareGroup* share_group);
   virtual ~WebGraphicsContext3DInProcessImpl();
 
   //----------------------------------------------------------------------
@@ -68,6 +75,8 @@ class WebGraphicsContext3DInProcessImpl : public WebGraphicsContext3D {
   virtual bool setParentContext(WebGraphicsContext3D* parent_context);
 
   virtual void reshape(int width, int height);
+
+  virtual void setVisibility(bool visible);
 
   virtual bool readBackFramebuffer(unsigned char* pixels, size_t bufferSize);
   virtual bool readBackFramebuffer(unsigned char* pixels, size_t buffer_size,
@@ -423,6 +432,9 @@ class WebGraphicsContext3DInProcessImpl : public WebGraphicsContext3D {
 
   typedef base::hash_map<WebGLId, ShaderSourceEntry*> ShaderSourceMap;
 
+  bool AllocateOffscreenFrameBuffer(int width, int height);
+  void ClearRenderTarget();
+
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
   void FlipVertically(unsigned char* framebuffer,
                       unsigned int width,
@@ -484,6 +496,8 @@ class WebGraphicsContext3DInProcessImpl : public WebGraphicsContext3D {
 
   ShHandle fragment_compiler_;
   ShHandle vertex_compiler_;
+  gfx::PluginWindowHandle window_;
+  scoped_refptr<gfx::GLShareGroup> share_group_;
 };
 
 }  // namespace gpu

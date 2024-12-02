@@ -4,11 +4,13 @@
 
 #include "views/window/dialog_client_view.h"
 
+#include "build/build_config.h"
+
 #if defined(OS_WIN)
 #include <windows.h>
 #include <uxtheme.h>
 #include <vsstyle.h>
-#else
+#elif defined(TOOLKIT_USES_GTK)
 #include <gtk/gtk.h>
 #endif
 
@@ -31,21 +33,19 @@
 #include "ui/gfx/native_theme.h"
 #else
 #include "ui/gfx/skia_utils_gtk.h"
-#include "views/widget/widget.h"
 #include "views/window/hit_test.h"
 #endif
 
 using ui::MessageBoxFlags;
 
 namespace views {
-
 namespace {
 
 // Updates any of the standard buttons according to the delegate.
 void UpdateButtonHelper(NativeTextButton* button_view,
                         DialogDelegate* delegate,
                         MessageBoxFlags::DialogButton button) {
-  std::wstring label = delegate->GetDialogButtonLabel(button);
+  string16 label = delegate->GetDialogButtonLabel(button);
   if (!label.empty())
     button_view->SetText(label);
   button_view->SetEnabled(delegate->IsDialogButtonEnabled(button));
@@ -130,14 +130,14 @@ void DialogClientView::ShowDialogButtons() {
   DialogDelegate* dd = GetDialogDelegate();
   int buttons = dd->GetDialogButtons();
   if (buttons & MessageBoxFlags::DIALOGBUTTON_OK && !ok_button_) {
-    std::wstring label =
-        dd->GetDialogButtonLabel(MessageBoxFlags::DIALOGBUTTON_OK);
+    string16 label = dd->GetDialogButtonLabel(MessageBoxFlags::DIALOGBUTTON_OK);
     if (label.empty())
-      label = UTF16ToWide(l10n_util::GetStringUTF16(IDS_APP_OK));
+      label = l10n_util::GetStringUTF16(IDS_APP_OK);
     bool is_default_button =
         (dd->GetDefaultDialogButton() & MessageBoxFlags::DIALOGBUTTON_OK) != 0;
     ok_button_ = new DialogButton(this, GetWidget(),
-                                  MessageBoxFlags::DIALOGBUTTON_OK, label,
+                                  MessageBoxFlags::DIALOGBUTTON_OK,
+                                  UTF16ToWideHack(label),
                                   is_default_button);
     ok_button_->SetGroup(kButtonGroup);
     if (is_default_button)
@@ -148,13 +148,13 @@ void DialogClientView::ShowDialogButtons() {
     AddChildView(ok_button_);
   }
   if (buttons & MessageBoxFlags::DIALOGBUTTON_CANCEL && !cancel_button_) {
-    std::wstring label =
+    string16 label =
         dd->GetDialogButtonLabel(MessageBoxFlags::DIALOGBUTTON_CANCEL);
     if (label.empty()) {
       if (buttons & MessageBoxFlags::DIALOGBUTTON_OK) {
-        label = UTF16ToWide(l10n_util::GetStringUTF16(IDS_APP_CANCEL));
+        label = l10n_util::GetStringUTF16(IDS_APP_CANCEL);
       } else {
-        label = UTF16ToWide(l10n_util::GetStringUTF16(IDS_APP_CLOSE));
+        label = l10n_util::GetStringUTF16(IDS_APP_CLOSE);
       }
     }
     bool is_default_button =
@@ -162,7 +162,8 @@ void DialogClientView::ShowDialogButtons() {
         != 0;
     cancel_button_ = new DialogButton(this, GetWidget(),
                                       MessageBoxFlags::DIALOGBUTTON_CANCEL,
-                                      label, is_default_button);
+                                      UTF16ToWideHack(label),
+                                      is_default_button);
     cancel_button_->SetGroup(kButtonGroup);
     cancel_button_->AddAccelerator(Accelerator(ui::VKEY_ESCAPE,
                                                false, false, false));
@@ -312,7 +313,7 @@ const DialogClientView* DialogClientView::AsDialogClientView() const {
 void DialogClientView::OnPaint(gfx::Canvas* canvas) {
 #if defined(OS_WIN)
   FillViewWithSysColor(canvas, this, GetSysColor(COLOR_3DFACE));
-#elif defined(USE_WAYLAND)
+#elif defined(USE_WAYLAND) || defined(USE_AURA)
   SkColor sk_color = SkColorSetARGB(200, 255, 255, 255);
   canvas->FillRectInt(sk_color, 0, 0, width(), height());
 #else
@@ -449,7 +450,7 @@ void DialogClientView::PaintSizeBox(gfx::Canvas* canvas) {
     size_box_bounds_.set_x(size_box_bounds_.right() - gripper_size.width());
     size_box_bounds_.set_y(size_box_bounds_.bottom() - gripper_size.height());
 
-    gfx::NativeTheme::instance()->Paint(canvas->AsCanvasSkia(),
+    gfx::NativeTheme::instance()->Paint(canvas->GetSkCanvas(),
                                         gfx::NativeTheme::kWindowResizeGripper,
                                         gfx::NativeTheme::kNormal,
                                         size_box_bounds_,
@@ -463,10 +464,9 @@ void DialogClientView::PaintSizeBox(gfx::Canvas* canvas) {
 
 int DialogClientView::GetButtonWidth(int button) const {
   DialogDelegate* dd = GetDialogDelegate();
-  std::wstring button_label = dd->GetDialogButtonLabel(
+  string16 button_label = dd->GetDialogButtonLabel(
       static_cast<MessageBoxFlags::DialogButton>(button));
-  int string_width = dialog_button_font_->GetStringWidth(
-      WideToUTF16Hack(button_label));
+  int string_width = dialog_button_font_->GetStringWidth(button_label);
   return std::max(string_width + kDialogButtonLabelSpacing,
                   kDialogMinButtonWidth);
 }

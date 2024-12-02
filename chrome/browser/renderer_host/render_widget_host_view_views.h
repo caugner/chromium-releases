@@ -11,9 +11,13 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
+#include "base/task.h"
 #include "base/time.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_registrar.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "ui/gfx/compositor/compositor_observer.h"
 #include "ui/gfx/native_widget_types.h"
 #include "views/controls/native/native_view_host.h"
 #include "views/events/event.h"
@@ -26,6 +30,9 @@
 namespace ui {
 enum TouchStatus;
 }
+#endif
+
+#if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
 class AcceleratedSurfaceContainerTouch;
 #endif
 
@@ -36,8 +43,12 @@ struct NativeWebKeyboardEvent;
 // See comments in render_widget_host_view.h about this class and its members.
 // -----------------------------------------------------------------------------
 class RenderWidgetHostViewViews : public RenderWidgetHostView,
+#if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
+                                  public ui::CompositorObserver,
+#endif
                                   public views::TouchSelectionClientView,
-                                  public views::TextInputClient {
+                                  public views::TextInputClient,
+                                  public NotificationObserver {
  public:
   // Internal class name.
   static const char kViewClassName[];
@@ -69,9 +80,8 @@ class RenderWidgetHostViewViews : public RenderWidgetHostView,
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
   virtual void UpdateCursor(const WebCursor& cursor) OVERRIDE;
   virtual void SetIsLoading(bool is_loading) OVERRIDE;
-  virtual void ImeUpdateTextInputState(ui::TextInputType type,
-                                       bool can_compose_inline,
-                                       const gfx::Rect& caret_rect) OVERRIDE;
+  virtual void TextInputStateChanged(ui::TextInputType type,
+                                     bool can_compose_inline) OVERRIDE;
   virtual void ImeCancelComposition() OVERRIDE;
   virtual void DidUpdateBackingStore(
       const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
@@ -79,15 +89,17 @@ class RenderWidgetHostViewViews : public RenderWidgetHostView,
   virtual void RenderViewGone(base::TerminationStatus status,
                               int error_code) OVERRIDE;
   virtual void Destroy() OVERRIDE;
-  virtual void SetTooltipText(const std::wstring& tooltip_text) OVERRIDE;
-  virtual void SelectionChanged(const std::string& text,
-                                const ui::Range& range,
-                                const gfx::Point& start,
-                                const gfx::Point& end) OVERRIDE;
+  virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE;
+  virtual void SelectionChanged(const string16& text,
+                                size_t offset,
+                                const ui::Range& range) OVERRIDE;
+  virtual void SelectionBoundsChanged(const gfx::Rect& start_rect,
+                                      const gfx::Rect& end_rect) OVERRIDE;
   virtual void ShowingContextMenu(bool showing) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void SetBackground(const SkBitmap& background) OVERRIDE;
 #if defined(OS_POSIX)
+  virtual void GetDefaultScreenInfo(WebKit::WebScreenInfo* results);
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE;
   virtual gfx::Rect GetRootWindowBounds() OVERRIDE;
 #endif
@@ -111,10 +123,17 @@ class RenderWidgetHostViewViews : public RenderWidgetHostView,
   virtual void ShowCompositorHostWindow(bool show) OVERRIDE;
 #endif
   virtual gfx::PluginWindowHandle GetCompositingSurface() OVERRIDE;
+  virtual bool LockMouse() OVERRIDE;
+  virtual void UnlockMouse() OVERRIDE;
 
   // Overridden from views::TouchSelectionClientView.
   virtual void SelectRect(const gfx::Point& start,
                           const gfx::Point& end) OVERRIDE;
+
+  // Overriden from NotificationObserver
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE;
 
   // Overridden from ui::SimpleMenuModel::Delegate.
   virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
@@ -140,8 +159,7 @@ class RenderWidgetHostViewViews : public RenderWidgetHostView,
   virtual bool OnKeyReleased(const views::KeyEvent& event) OVERRIDE;
   virtual bool OnMouseWheel(const views::MouseWheelEvent& event) OVERRIDE;
   virtual views::TextInputClient* GetTextInputClient() OVERRIDE;
-  virtual bool GetTooltipText(const gfx::Point& p, std::wstring* tooltip)
-      OVERRIDE;
+  virtual bool GetTooltipText(const gfx::Point& p, string16* tooltip) OVERRIDE;
 
   // Overridden from TextInputClient:
   virtual void SetCompositionText(
@@ -150,7 +168,7 @@ class RenderWidgetHostViewViews : public RenderWidgetHostView,
   virtual void ClearCompositionText() OVERRIDE;
   virtual void InsertText(const string16& text) OVERRIDE;
   virtual void InsertChar(char16 ch, int flags) OVERRIDE;
-  virtual ui::TextInputType GetTextInputType() OVERRIDE;
+  virtual ui::TextInputType GetTextInputType() const OVERRIDE;
   virtual gfx::Rect GetCaretBounds() OVERRIDE;
   virtual bool HasCompositionText() OVERRIDE;
   virtual bool GetTextRange(ui::Range* range) OVERRIDE;
@@ -166,15 +184,24 @@ class RenderWidgetHostViewViews : public RenderWidgetHostView,
       base::i18n::TextDirection direction) OVERRIDE;
   virtual views::View* GetOwnerViewOfTextInputClient() OVERRIDE;
 
-#if defined(TOUCH_UI)
-  virtual void AcceleratedSurfaceSetIOSurface(
-      int32 width, int32 height, uint64 surface_id) OVERRIDE;
-  virtual void AcceleratedSurfaceBuffersSwapped(uint64 surface_id) OVERRIDE;
+#if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
+  virtual void AcceleratedSurfaceNew(
+      int32 width,
+      int32 height,
+      uint64* surface_id,
+      TransportDIB::Handle* surface_handle) OVERRIDE;
+  virtual void AcceleratedSurfaceBuffersSwapped(
+      uint64 surface_id,
+      int32 route_id,
+      int gpu_host_id) OVERRIDE;
   virtual void AcceleratedSurfaceRelease(uint64 surface_id) OVERRIDE;
+
+  // CompositorObserver implementation:
+  virtual void OnCompositingEnded(ui::Compositor* compositor) OVERRIDE;
 #endif
 
  protected:
-  // Overridden views::View.
+  // Overridden from views::View.
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual void OnFocus() OVERRIDE;
   virtual void OnBlur() OVERRIDE;
@@ -205,11 +232,13 @@ class RenderWidgetHostViewViews : public RenderWidgetHostView,
   // to cancel its ongoing composition sesstion.
   void FinishImeCompositionSession();
 
+  // Updates the touch-selection controller (e.g. when the selection/focus
+  // changes).
+  void UpdateTouchSelectionController();
+
 #if defined(TOOLKIT_USES_GTK)
-  // On some systems, there can be two native views, where an outer native view
-  // contains the inner native view (e.g. when using GTK+). This returns the
-  // inner view. This can return NULL when it's not attached to a view.
-  gfx::NativeView GetInnerNativeView() const;
+  // Returns true if the RWHV is ready to paint the content.
+  bool IsReadyToPaint();
 #endif
 
   // The model object.
@@ -260,19 +289,32 @@ class RenderWidgetHostViewViews : public RenderWidgetHostView,
   // The current text input type.
   ui::TextInputType text_input_type_;
 
-  // The current caret bounds.
-  gfx::Rect caret_bounds_;
+  string16 selection_text_;
+  size_t selection_text_offset_;
+  ui::Range selection_range_;
+  gfx::Rect selection_start_rect_;
+  gfx::Rect selection_end_rect_;
 
   // Indicates if there is onging composition text.
   bool has_composition_text_;
 
   string16 tooltip_text_;
 
+#if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
+  std::vector< base::Callback<void(void)> > on_compositing_ended_callbacks_;
+#endif
+
   scoped_ptr<views::TouchSelectionController> touch_selection_controller_;
-  gfx::Point selection_start_;
-  gfx::Point selection_end_;
+  ScopedRunnableMethodFactory<RenderWidgetHostViewViews>
+      update_touch_selection_;
 
 #if defined(TOUCH_UI)
+  // used to register for keyboard visiblity notificatons.
+  NotificationRegistrar registrar_;
+  gfx::Rect keyboard_rect_;
+#endif
+
+#if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
   std::map<uint64, scoped_refptr<AcceleratedSurfaceContainerTouch> >
       accelerated_surface_containers_;
 #endif

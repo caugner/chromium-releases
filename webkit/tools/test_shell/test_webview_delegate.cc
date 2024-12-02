@@ -603,39 +603,41 @@ WebPlugin* TestWebViewDelegate::createPlugin(WebFrame* frame,
   if (plugins.empty())
     return NULL;
 
+  WebPluginParams params_copy = params;
+  params_copy.mimeType = WebString::fromUTF8(mime_types.front());
+
 #if defined(OS_MACOSX)
   if (!shell_->layout_test_mode()) {
-    bool flash = LowerCaseEqualsASCII(params.mimeType.utf8(),
+    bool flash = LowerCaseEqualsASCII(params_copy.mimeType.utf8(),
                                       "application/x-shockwave-flash");
     if (flash) {
       // Mac does not support windowed plugins. Force Flash plugins to use
       // windowless mode by setting the wmode="opaque" attribute.
-      DCHECK(params.attributeNames.size() == params.attributeValues.size());
-      size_t size = params.attributeNames.size();
+      DCHECK(params_copy.attributeNames.size() ==
+             params_copy.attributeValues.size());
+      size_t size = params_copy.attributeNames.size();
 
       WebVector<WebString> new_names(size+1),  new_values(size+1);
 
       for (size_t i = 0; i < size; ++i) {
-        new_names[i] = params.attributeNames[i];
-        new_values[i] = params.attributeValues[i];
+        new_names[i] = params_copy.attributeNames[i];
+        new_values[i] = params_copy.attributeValues[i];
       }
 
       new_names[size] = "wmode";
       new_values[size] = "opaque";
 
-      WebPluginParams new_params = params;
-      new_params.attributeNames.swap(new_names);
-      new_params.attributeValues.swap(new_values);
+      params_copy.attributeNames.swap(new_names);
+      params_copy.attributeValues.swap(new_values);
 
       return new webkit::npapi::WebPluginImpl(
-          frame, new_params, plugins.front().path, mime_types.front(),
-          AsWeakPtr());
+          frame, params_copy, plugins.front().path, AsWeakPtr());
     }
   }
 #endif  // defined (OS_MACOSX)
 
   return new webkit::npapi::WebPluginImpl(
-      frame, params, plugins.front().path, mime_types.front(), AsWeakPtr());
+      frame, params, plugins.front().path, AsWeakPtr());
 }
 
 WebWorker* TestWebViewDelegate::createWorker(WebFrame* frame,
@@ -677,8 +679,9 @@ bool TestWebViewDelegate::allowPlugins(WebFrame* frame,
   return enabled_per_settings && shell_->allow_plugins();
 }
 
-bool TestWebViewDelegate::allowImages(WebFrame* frame,
-                                      bool enabled_per_settings) {
+bool TestWebViewDelegate::allowImage(WebFrame* frame,
+                                     bool enabled_per_settings,
+                                     const WebURL& image_url) {
   return enabled_per_settings && shell_->allow_images();
 }
 
@@ -835,9 +838,7 @@ void TestWebViewDelegate::didClearWindowObject(WebFrame* frame) {
 
 void TestWebViewDelegate::didReceiveTitle(
     WebFrame* frame, const WebString& title, WebTextDirection direction) {
-  std::wstring wtitle = UTF16ToWideHack(title);
-
-  SetPageTitle(wtitle);
+  SetPageTitle(title);
 }
 
 void TestWebViewDelegate::didFinishDocumentLoad(WebFrame* frame) {

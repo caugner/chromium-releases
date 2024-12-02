@@ -38,12 +38,11 @@ class PowerLibraryImpl : public PowerLibrary {
 
   // Begin PowerLibrary implementation.
   virtual void Init() OVERRIDE {
-    if (CrosLibrary::Get()->EnsureLoaded()) {
-      power_status_connection_ =
-          chromeos::MonitorPowerStatus(&PowerStatusChangedHandler, this);
-      resume_status_connection_ =
-          chromeos::MonitorResume(&SystemResumedHandler, this);
-    }
+    DCHECK(CrosLibrary::Get()->libcros_loaded());
+    power_status_connection_ =
+        chromeos::MonitorPowerStatus(&PowerStatusChangedHandler, this);
+    resume_status_connection_ =
+        chromeos::MonitorResume(&SystemResumedHandler, this);
   }
 
   virtual void AddObserver(Observer* observer) OVERRIDE {
@@ -54,34 +53,37 @@ class PowerLibraryImpl : public PowerLibrary {
     observers_.RemoveObserver(observer);
   }
 
-  virtual bool line_power_on() const OVERRIDE {
+  virtual bool IsLinePowerOn() const OVERRIDE {
     return status_.line_power_on;
   }
 
-  virtual bool battery_fully_charged() const OVERRIDE {
+  virtual bool IsBatteryFullyCharged() const OVERRIDE {
     return status_.battery_state == chromeos::BATTERY_STATE_FULLY_CHARGED;
   }
 
-  virtual double battery_percentage() const OVERRIDE {
+  virtual double GetBatteryPercentage() const OVERRIDE {
     return status_.battery_percentage;
   }
 
-  virtual bool battery_is_present() const OVERRIDE {
+  virtual bool IsBatteryPresent() const OVERRIDE {
     return status_.battery_is_present;
   }
 
-  virtual base::TimeDelta battery_time_to_empty() const OVERRIDE {
+  virtual base::TimeDelta GetBatteryTimeToEmpty() const OVERRIDE {
     return base::TimeDelta::FromSeconds(status_.battery_time_to_empty);
   }
 
-  virtual base::TimeDelta battery_time_to_full() const OVERRIDE {
+  virtual base::TimeDelta GetBatteryTimeToFull() const OVERRIDE {
     return base::TimeDelta::FromSeconds(status_.battery_time_to_full);
   }
 
-  virtual void EnableScreenLock(bool enable) OVERRIDE {
-    if (!CrosLibrary::Get()->EnsureLoaded())
-      return;
+  virtual void CalculateIdleTime(CalculateIdleTimeCallback* callback) OVERRIDE {
+    // TODO(sidor): Examine if it's really a good idea to use void* as a second
+    // argument.
+    chromeos::GetIdleTime(&GetIdleTimeCallback, callback);
+  }
 
+  virtual void EnableScreenLock(bool enable) OVERRIDE {
     // Make sure we run on FILE thread becuase chromeos::EnableScreenLock
     // would write power manager config file to disk.
     if (!BrowserThread::CurrentlyOn(BrowserThread::FILE)) {
@@ -95,17 +97,37 @@ class PowerLibraryImpl : public PowerLibrary {
   }
 
   virtual void RequestRestart() OVERRIDE {
-    if (CrosLibrary::Get()->EnsureLoaded())
-      chromeos::RequestRestart();
+    chromeos::RequestRestart();
   }
 
   virtual void RequestShutdown() OVERRIDE {
-    if (CrosLibrary::Get()->EnsureLoaded())
-      chromeos::RequestShutdown();
+    chromeos::RequestShutdown();
   }
+
+  virtual void RequestStatusUpdate() OVERRIDE {
+    // TODO(stevenjb): chromeos::RetrievePowerInformation has been deprecated;
+    // we should add a mechanism to immediately request an update, probably
+    // when we migrate the DBus code from libcros to here.
+  }
+
   // End PowerLibrary implementation.
 
  private:
+  static void GetIdleTimeCallback(void* object,
+                                 int64_t time_idle_ms,
+                                 bool success) {
+    DCHECK(object);
+    CalculateIdleTimeCallback* notify =
+        static_cast<CalculateIdleTimeCallback*>(object);
+    if (success) {
+      notify->Run(time_idle_ms/1000);
+    } else {
+      LOG(ERROR) << "Power manager failed to calculate idle time.";
+      notify->Run(-1);
+    }
+    delete notify;
+  }
+
   static void PowerStatusChangedHandler(void* object,
                                         const chromeos::PowerStatus& status) {
     PowerLibraryImpl* power = static_cast<PowerLibraryImpl*>(object);
@@ -169,13 +191,8 @@ class PowerLibraryStubImpl : public PowerLibrary {
  public:
   PowerLibraryStubImpl()
       : discharging_(true),
-        battery_percentage_(20),
+        battery_percentage_(80),
         pause_count_(0) {
-    timer_.Start(
-        FROM_HERE,
-        base::TimeDelta::FromMilliseconds(100),
-        this,
-        &PowerLibraryStubImpl::Update);
   }
 
   virtual ~PowerLibraryStubImpl() {}
@@ -190,39 +207,59 @@ class PowerLibraryStubImpl : public PowerLibrary {
     observers_.RemoveObserver(observer);
   }
 
-  virtual bool line_power_on() const OVERRIDE {
+  virtual bool IsLinePowerOn() const OVERRIDE {
     return !discharging_;
   }
 
-  virtual bool battery_fully_charged() const OVERRIDE {
+  virtual bool IsBatteryFullyCharged() const OVERRIDE {
     return battery_percentage_ == 100;
   }
 
-  virtual double battery_percentage() const OVERRIDE {
+  virtual double GetBatteryPercentage() const OVERRIDE {
     return battery_percentage_;
   }
 
-  virtual bool battery_is_present() const OVERRIDE {
+  virtual bool IsBatteryPresent() const OVERRIDE {
     return true;
   }
 
-  virtual base::TimeDelta battery_time_to_empty() const OVERRIDE {
+  virtual base::TimeDelta GetBatteryTimeToEmpty() const OVERRIDE {
     if (battery_percentage_ == 0)
       return base::TimeDelta::FromSeconds(1);
     else
       return (base::TimeDelta::FromHours(3) * battery_percentage_) / 100;
   }
 
-  virtual base::TimeDelta battery_time_to_full() const OVERRIDE {
+  virtual base::TimeDelta GetBatteryTimeToFull() const OVERRIDE {
     if (battery_percentage_ == 100)
       return base::TimeDelta::FromSeconds(1);
     else
-      return base::TimeDelta::FromHours(3) - battery_time_to_empty();
+      return base::TimeDelta::FromHours(3) - GetBatteryTimeToEmpty();
+  }
+
+  virtual void CalculateIdleTime(CalculateIdleTimeCallback* callback) OVERRIDE {
+    callback->Run(0);
+    delete callback;
   }
 
   virtual void EnableScreenLock(bool enable) OVERRIDE {}
+
   virtual void RequestRestart() OVERRIDE {}
+
   virtual void RequestShutdown() OVERRIDE {}
+
+  virtual void RequestStatusUpdate() OVERRIDE {
+    if (!timer_.IsRunning()) {
+      timer_.Start(
+          FROM_HERE,
+          base::TimeDelta::FromMilliseconds(100),
+          this,
+          &PowerLibraryStubImpl::Update);
+    } else {
+      timer_.Stop();
+    }
+  }
+
   // End PowerLibrary implementation.
 
  private:

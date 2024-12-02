@@ -25,12 +25,7 @@ class SerializedVarReturnValue;
 
 class PPP_Instance_Proxy : public InterfaceProxy {
  public:
-  template <class PPP_Instance_Type>
-  PPP_Instance_Proxy(Dispatcher* dispatcher,
-                     const PPP_Instance_Type* target_interface)
-      : InterfaceProxy(dispatcher, static_cast<const void*>(target_interface)),
-        combined_interface_(new PPP_Instance_Combined(*target_interface)) {
-  }
+  PPP_Instance_Proxy(Dispatcher* dispatcher);
   virtual ~PPP_Instance_Proxy();
 
   // Return the info for the 1.0 (latest, canonical) version of the interface.
@@ -53,7 +48,8 @@ class PPP_Instance_Proxy : public InterfaceProxy {
   void OnMsgDidChangeView(PP_Instance instance,
                           const PP_Rect& position,
                           const PP_Rect& clip,
-                          PP_Bool fullscreen);
+                          PP_Bool fullscreen,
+                          PP_Bool flash_fullscreen);
   void OnMsgDidChangeFocus(PP_Instance instance, PP_Bool has_focus);
   void OnMsgHandleDocumentLoad(PP_Instance instance,
                                const HostResource& url_loader,

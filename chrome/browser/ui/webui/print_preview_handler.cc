@@ -4,12 +4,14 @@
 
 #include "chrome/browser/ui/webui/print_preview_handler.h"
 
+#include <ctype.h>
+
 #include <string>
+#include <vector>
 
 #include "base/base64.h"
-#if !defined(OS_CHROMEOS)
-#include "base/command_line.h"
-#endif
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/json/json_reader.h"
 #include "base/memory/ref_counted.h"
@@ -23,9 +25,12 @@
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/printing/background_printing_manager.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
-#include "chrome/browser/printing/printer_manager_dialog.h"
+#include "chrome/browser/printing/print_dialog_cloud.h"
+#include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/printing/print_preview_tab_controller.h"
+#include "chrome/browser/printing/print_system_task_proxy.h"
 #include "chrome/browser/printing/print_view_manager.h"
+#include "chrome/browser/printing/printer_manager_dialog.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -33,9 +38,6 @@
 #include "chrome/browser/ui/webui/cloud_print_signin_dialog.h"
 #include "chrome/browser/ui/webui/print_preview_ui.h"
 #include "chrome/common/chrome_paths.h"
-#if !defined(OS_CHROMEOS)
-#include "chrome/common/chrome_switches.h"
-#endif
 #include "chrome/common/print_messages.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_view_host.h"
@@ -44,34 +46,14 @@
 #include "printing/metafile.h"
 #include "printing/metafile_impl.h"
 #include "printing/page_range.h"
-#include "printing/print_job_constants.h"
+#include "printing/print_settings.h"
 
-#if defined(USE_CUPS)
-#include <cups/cups.h>
-#include <cups/ppd.h>
-
-#include "base/file_util.h"
+#if !defined(OS_CHROMEOS)
+#include "base/command_line.h"
+#include "chrome/common/chrome_switches.h"
 #endif
 
 namespace {
-
-const char kDisableColorOption[] = "disableColorOption";
-const char kSetColorAsDefault[] = "setColorAsDefault";
-const char kSetDuplexAsDefault[] = "setDuplexAsDefault";
-const char kPrinterColorModelForColor[] = "printerColorModelForColor";
-
-#if defined(USE_CUPS)
-const char kColorDevice[] = "ColorDevice";
-const char kColorModel[] = "ColorModel";
-const char kColorModelForColor[] = "Color";
-const char kCMYK[] = "CMYK";
-const char kDuplex[] = "Duplex";
-const char kDuplexNone[] = "None";
-#elif defined(OS_WIN)
-const char kPskColor[] = "psk:Color";
-const char kPskDuplexFeature[] = "psk:JobDuplexAllDocumentsContiguously";
-const char kPskTwoSided[] = "psk:TwoSided";
-#endif
 
 enum UserActionBuckets {
   PRINT_TO_PRINTER,
@@ -82,6 +64,7 @@ enum UserActionBuckets {
   PREVIEW_STARTED,
   INITIATOR_TAB_CRASHED,
   INITIATOR_TAB_CLOSED,
+  PRINT_WITH_CLOUD_PRINT,
   USERACTION_BUCKET_BOUNDARY
 };
 
@@ -169,8 +152,8 @@ void ReportPrintSettingsStats(const DictionaryValue& settings) {
 
   int color_mode;
   if (settings.GetInteger(printing::kSettingColor, &color_mode)) {
-    ReportPrintSettingHistogram(color_mode == printing::GRAY ? BLACK_AND_WHITE :
-                                                               COLOR);
+    ReportPrintSettingHistogram(
+        printing::isColorModelSelected(color_mode) ? COLOR : BLACK_AND_WHITE);
   }
 }
 
@@ -179,213 +162,6 @@ printing::BackgroundPrintingManager* GetBackgroundPrintingManager() {
 }
 
 }  // namespace
-
-class PrintSystemTaskProxy
-    : public base::RefCountedThreadSafe<PrintSystemTaskProxy,
-                                        BrowserThread::DeleteOnUIThread> {
- public:
-  PrintSystemTaskProxy(const base::WeakPtr<PrintPreviewHandler>& handler,
-                       printing::PrintBackend* print_backend,
-                       bool has_logged_printers_count)
-      : handler_(handler),
-        print_backend_(print_backend),
-        has_logged_printers_count_(has_logged_printers_count) {
-  }
-
-  void GetDefaultPrinter() {
-    VLOG(1) << "Get default printer start";
-    StringValue* default_printer = NULL;
-    if (PrintPreviewHandler::last_used_printer_name_ == NULL) {
-      default_printer = new StringValue(
-          print_backend_->GetDefaultPrinterName());
-    } else {
-      default_printer = new StringValue(
-          *PrintPreviewHandler::last_used_printer_name_);
-    }
-    std::string default_printer_string;
-    default_printer->GetAsString(&default_printer_string);
-    VLOG(1) << "Get default printer finished, found: "
-            << default_printer_string;
-
-    StringValue* cloud_print_data = NULL;
-    if (PrintPreviewHandler::last_used_printer_cloud_print_data_ != NULL) {
-      cloud_print_data = new StringValue(
-          *PrintPreviewHandler::last_used_printer_cloud_print_data_);
-    } else {
-      cloud_print_data = new StringValue("");
-    }
-
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this,
-                          &PrintSystemTaskProxy::SendDefaultPrinter,
-                          default_printer,
-                          cloud_print_data));
-  }
-
-  void SendDefaultPrinter(const StringValue* default_printer,
-                          const StringValue* cloud_print_data) {
-    if (handler_)
-      handler_->SendDefaultPrinter(*default_printer, *cloud_print_data);
-    delete default_printer;
-  }
-
-  void EnumeratePrinters() {
-    VLOG(1) << "Enumerate printers start";
-    ListValue* printers = new ListValue;
-
-    printing::PrinterList printer_list;
-    print_backend_->EnumeratePrinters(&printer_list);
-
-    if (!has_logged_printers_count_) {
-      // Record the total number of printers.
-      UMA_HISTOGRAM_COUNTS("PrintPreview.NumberOfPrinters",
-                           printer_list.size());
-    }
-
-    int i = 0;
-    for (printing::PrinterList::iterator iter = printer_list.begin();
-         iter != printer_list.end(); ++iter, ++i) {
-      DictionaryValue* printer_info = new DictionaryValue;
-      std::string printerName;
-  #if defined(OS_MACOSX)
-      // On Mac, |iter->printer_description| specifies the printer name and
-      // |iter->printer_name| specifies the device name / printer queue name.
-      printerName = iter->printer_description;
-  #else
-      printerName = iter->printer_name;
-  #endif
-      printer_info->SetString(printing::kSettingPrinterName, printerName);
-      printer_info->SetString(printing::kSettingDeviceName, iter->printer_name);
-      printers->Append(printer_info);
-    }
-    VLOG(1) << "Enumerate printers finished, found " << i << " printers";
-
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this,
-                          &PrintSystemTaskProxy::SetupPrinterList,
-                          printers));
-  }
-
-  void SetupPrinterList(ListValue* printers) {
-    if (handler_) {
-      handler_->SetupPrinterList(*printers);
-    }
-    delete printers;
-  }
-
-  void GetPrinterCapabilities(const std::string& printer_name) {
-    VLOG(1) << "Get printer capabilities start for " << printer_name;
-    printing::PrinterCapsAndDefaults printer_info;
-    bool supports_color = true;
-    bool set_duplex_as_default = false;
-    int printer_color_space = printing::GRAY;
-    if (!print_backend_->GetPrinterCapsAndDefaults(printer_name,
-                                                   &printer_info)) {
-      return;
-    }
-
-#if defined(USE_CUPS)
-    FilePath ppd_file_path;
-    if (!file_util::CreateTemporaryFile(&ppd_file_path))
-      return;
-
-    int data_size = printer_info.printer_capabilities.length();
-    if (data_size != file_util::WriteFile(
-                         ppd_file_path,
-                         printer_info.printer_capabilities.data(),
-                         data_size)) {
-      file_util::Delete(ppd_file_path, false);
-      return;
-    }
-
-    ppd_file_t* ppd = ppdOpenFile(ppd_file_path.value().c_str());
-    if (ppd) {
-      ppd_attr_t* attr = ppdFindAttr(ppd, kColorDevice, NULL);
-      if (attr && attr->value)
-        supports_color = ppd->color_device;
-
-      ppd_choice_t* ch = ppdFindMarkedChoice(ppd, kDuplex);
-      if (ch == NULL) {
-        ppd_option_t* option = ppdFindOption(ppd, kDuplex);
-        if (option != NULL)
-          ch = ppdFindChoice(option, option->defchoice);
-      }
-
-      if (ch != NULL && strcmp(ch->choice, kDuplexNone) != 0)
-        set_duplex_as_default = true;
-
-      if (supports_color) {
-        // Identify the color space (COLOR/CMYK) for this printer.
-        ppd_option_t* color_model = ppdFindOption(ppd, kColorModel);
-        if (color_model != NULL) {
-          if (ppdFindChoice(color_model, kColorModelForColor))
-            printer_color_space = printing::COLOR;
-          else if (ppdFindChoice(color_model, kCMYK))
-            printer_color_space = printing::CMYK;
-        }
-      }
-
-      ppdClose(ppd);
-    }
-    file_util::Delete(ppd_file_path, false);
-#elif defined(OS_WIN)
-    // According to XPS 1.0 spec, only color printers have psk:Color.
-    // Therefore we don't need to parse the whole XML file, we just need to
-    // search the string.  The spec can be found at:
-    // http://msdn.microsoft.com/en-us/windows/hardware/gg463431.
-    supports_color = (printer_info.printer_capabilities.find(kPskColor) !=
-                      std::string::npos);
-    if (supports_color)
-      printer_color_space = printing::COLOR;
-
-    set_duplex_as_default =
-        (printer_info.printer_defaults.find(kPskDuplexFeature) !=
-            std::string::npos) &&
-        (printer_info.printer_defaults.find(kPskTwoSided) !=
-            std::string::npos);
-#else
-  NOTIMPLEMENTED();
-#endif
-
-    DictionaryValue settings_info;
-    settings_info.SetBoolean(kDisableColorOption, !supports_color);
-    if (!supports_color) {
-      settings_info.SetBoolean(kSetColorAsDefault, false);
-    } else {
-       settings_info.SetBoolean(kSetColorAsDefault,
-                                PrintPreviewHandler::last_used_color_setting_);
-    }
-    settings_info.SetBoolean(kSetDuplexAsDefault, set_duplex_as_default);
-    settings_info.SetInteger(kPrinterColorModelForColor, printer_color_space);
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this,
-                          &PrintSystemTaskProxy::SendPrinterCapabilities,
-                          settings_info.DeepCopy()));
-  }
-
-  void SendPrinterCapabilities(DictionaryValue* settings_info) {
-    if (handler_)
-      handler_->SendPrinterCapabilities(*settings_info);
-    delete settings_info;
-  }
-
- private:
-  friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
-  friend class DeleteTask<PrintSystemTaskProxy>;
-
-  ~PrintSystemTaskProxy() {}
-
-  base::WeakPtr<PrintPreviewHandler> handler_;
-
-  scoped_refptr<printing::PrintBackend> print_backend_;
-
-  bool has_logged_printers_count_;
-
-  DISALLOW_COPY_AND_ASSIGN(PrintSystemTaskProxy);
-};
 
 // A Task implementation that stores a PDF file on disk.
 class PrintToPdfTask : public Task {
@@ -419,7 +195,8 @@ class PrintToPdfTask : public Task {
 FilePath* PrintPreviewHandler::last_saved_path_ = NULL;
 std::string* PrintPreviewHandler::last_used_printer_cloud_print_data_ = NULL;
 std::string* PrintPreviewHandler::last_used_printer_name_ = NULL;
-bool PrintPreviewHandler::last_used_color_setting_ = false;
+printing::ColorModels PrintPreviewHandler::last_used_color_model_ =
+    printing::UNKNOWN_COLOR_MODEL;
 
 PrintPreviewHandler::PrintPreviewHandler()
     : print_backend_(printing::PrintBackend::CreateInstance(NULL)),
@@ -437,39 +214,50 @@ PrintPreviewHandler::~PrintPreviewHandler() {
 
 void PrintPreviewHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("getDefaultPrinter",
-      NewCallback(this, &PrintPreviewHandler::HandleGetDefaultPrinter));
+      base::Bind(&PrintPreviewHandler::HandleGetDefaultPrinter,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("getPrinters",
-      NewCallback(this, &PrintPreviewHandler::HandleGetPrinters));
+      base::Bind(&PrintPreviewHandler::HandleGetPrinters,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("getPreview",
-      NewCallback(this, &PrintPreviewHandler::HandleGetPreview));
+      base::Bind(&PrintPreviewHandler::HandleGetPreview,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("print",
-      NewCallback(this, &PrintPreviewHandler::HandlePrint));
+      base::Bind(&PrintPreviewHandler::HandlePrint,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("getPrinterCapabilities",
-      NewCallback(this, &PrintPreviewHandler::HandleGetPrinterCapabilities));
+      base::Bind(&PrintPreviewHandler::HandleGetPrinterCapabilities,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("showSystemDialog",
-      NewCallback(this, &PrintPreviewHandler::HandleShowSystemDialog));
-  web_ui_->RegisterMessageCallback("morePrinters",
-      NewCallback(this, &PrintPreviewHandler::HandleShowSystemDialog));
+      base::Bind(&PrintPreviewHandler::HandleShowSystemDialog,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("signIn",
-      NewCallback(this, &PrintPreviewHandler::HandleSignin));
-  web_ui_->RegisterMessageCallback("addCloudPrinter",
-      NewCallback(this, &PrintPreviewHandler::HandleManageCloudPrint));
+      base::Bind(&PrintPreviewHandler::HandleSignin,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("manageCloudPrinters",
-      NewCallback(this, &PrintPreviewHandler::HandleManageCloudPrint));
+      base::Bind(&PrintPreviewHandler::HandleManageCloudPrint,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("manageLocalPrinters",
-      NewCallback(this, &PrintPreviewHandler::HandleManagePrinters));
+      base::Bind(&PrintPreviewHandler::HandleManagePrinters,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("reloadCrashedInitiatorTab",
-      NewCallback(this, &PrintPreviewHandler::HandleReloadCrashedInitiatorTab));
+      base::Bind(&PrintPreviewHandler::HandleReloadCrashedInitiatorTab,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("closePrintPreviewTab",
-      NewCallback(this, &PrintPreviewHandler::HandleClosePreviewTab));
+      base::Bind(&PrintPreviewHandler::HandleClosePreviewTab,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("hidePreview",
-      NewCallback(this, &PrintPreviewHandler::HandleHidePreview));
+      base::Bind(&PrintPreviewHandler::HandleHidePreview,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("cancelPendingPrintRequest",
-      NewCallback(this, &PrintPreviewHandler::HandleCancelPendingPrintRequest));
+      base::Bind(&PrintPreviewHandler::HandleCancelPendingPrintRequest,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("saveLastPrinter",
-      NewCallback(this, &PrintPreviewHandler::HandleSaveLastPrinter));
+      base::Bind(&PrintPreviewHandler::HandleSaveLastPrinter,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("getInitiatorTabTitle",
-      NewCallback(this, &PrintPreviewHandler::HandleGetInitiatorTabTitle));
+      base::Bind(&PrintPreviewHandler::HandleGetInitiatorTabTitle,
+                 base::Unretained(this)));
 }
 
 TabContentsWrapper* PrintPreviewHandler::preview_tab_wrapper() const {
@@ -486,8 +274,7 @@ void PrintPreviewHandler::HandleGetDefaultPrinter(const ListValue* /*args*/) {
                                has_logged_printers_count_);
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(task.get(),
-                        &PrintSystemTaskProxy::GetDefaultPrinter));
+      base::Bind(&PrintSystemTaskProxy::GetDefaultPrinter, task.get()));
 }
 
 void PrintPreviewHandler::HandleGetPrinters(const ListValue* /*args*/) {
@@ -499,8 +286,7 @@ void PrintPreviewHandler::HandleGetPrinters(const ListValue* /*args*/) {
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(task.get(),
-                        &PrintSystemTaskProxy::EnumeratePrinters));
+      base::Bind(&PrintSystemTaskProxy::EnumeratePrinters, task.get()));
 }
 
 void PrintPreviewHandler::HandleGetPreview(const ListValue* args) {
@@ -591,43 +377,28 @@ void PrintPreviewHandler::HandlePrint(const ListValue* args) {
   if (!settings.get())
     return;
 
-  // Storing last used color setting.
-  int color_mode;
-  if (!settings->GetInteger(printing::kSettingColor, &color_mode))
-    color_mode = printing::GRAY;
-  last_used_color_setting_ = (color_mode != printing::GRAY);
+  // Storing last used color model.
+  int color_model;
+  if (!settings->GetInteger(printing::kSettingColor, &color_model))
+    color_model = printing::GRAY;
+  last_used_color_model_ = static_cast<printing::ColorModels>(color_model);
 
   bool print_to_pdf = false;
   settings->GetBoolean(printing::kSettingPrintToPDF, &print_to_pdf);
 
   settings->SetBoolean(printing::kSettingHeaderFooterEnabled, false);
 
-  bool print_to_cloud = settings->HasKey(printing::kSettingCloudPrintId);
-  if (print_to_cloud) {
+  bool is_cloud_printer = settings->HasKey(printing::kSettingCloudPrintId);
+  bool is_cloud_dialog = false;
+  settings->GetBoolean(printing::kSettingCloudPrintDialog, &is_cloud_dialog);
+  if (is_cloud_printer) {
     std::string print_ticket;
     args->GetString(1, &print_ticket);
     SendCloudPrintJob(*settings, print_ticket);
   } else if (print_to_pdf) {
-    ReportUserActionHistogram(PRINT_TO_PDF);
-    UMA_HISTOGRAM_COUNTS("PrintPreview.PageCount.PrintToPDF",
-                         GetPageCountFromSettingsDictionary(*settings));
-
-    // Pre-populating select file dialog with print job title.
-    string16 print_job_title_utf16 =
-        preview_tab_wrapper()->print_view_manager()->RenderSourceName();
-
-#if defined(OS_WIN)
-    FilePath::StringType print_job_title(print_job_title_utf16);
-#elif defined(OS_POSIX)
-    FilePath::StringType print_job_title = UTF16ToUTF8(print_job_title_utf16);
-#endif
-
-    file_util::ReplaceIllegalCharactersInPath(&print_job_title, '_');
-    FilePath default_filename(print_job_title);
-    default_filename =
-        default_filename.ReplaceExtension(FILE_PATH_LITERAL("pdf"));
-
-    SelectFile(default_filename);
+    HandlePrintToPdf(*settings);
+  } else if (is_cloud_dialog) {
+    HandlePrintWithCloudPrint();
   } else {
     ReportPrintSettingsStats(*settings);
     ReportUserActionHistogram(PRINT_TO_PRINTER);
@@ -646,6 +417,36 @@ void PrintPreviewHandler::HandlePrint(const ListValue* args) {
     settings->Remove(printing::kSettingPageRange, NULL);
     RenderViewHost* rvh = web_ui_->tab_contents()->render_view_host();
     rvh->Send(new PrintMsg_PrintForPrintPreview(rvh->routing_id(), *settings));
+  }
+}
+
+void PrintPreviewHandler::HandlePrintToPdf(
+    const base::DictionaryValue& settings) {
+  if (print_to_pdf_path_.get()) {
+    // User has already selected a path, no need to show the dialog again.
+    PostPrintToPdfTask();
+  } else if (!select_file_dialog_.get() || !select_file_dialog_->IsRunning(
+        platform_util::GetTopLevel(preview_tab()->GetNativeView()))) {
+    ReportUserActionHistogram(PRINT_TO_PDF);
+    UMA_HISTOGRAM_COUNTS("PrintPreview.PageCount.PrintToPDF",
+                         GetPageCountFromSettingsDictionary(settings));
+
+    // Pre-populating select file dialog with print job title.
+    PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(web_ui_);
+    string16 print_job_title_utf16 = print_preview_ui->initiator_tab_title();
+
+#if defined(OS_WIN)
+    FilePath::StringType print_job_title(print_job_title_utf16);
+#elif defined(OS_POSIX)
+    FilePath::StringType print_job_title = UTF16ToUTF8(print_job_title_utf16);
+#endif
+
+    file_util::ReplaceIllegalCharactersInPath(&print_job_title, '_');
+    FilePath default_filename(print_job_title);
+    default_filename =
+        default_filename.ReplaceExtension(FILE_PATH_LITERAL("pdf"));
+
+    SelectFile(default_filename);
   }
 }
 
@@ -697,13 +498,37 @@ void PrintPreviewHandler::HandleGetPrinterCapabilities(const ListValue* args) {
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(task.get(),
-                        &PrintSystemTaskProxy::GetPrinterCapabilities,
-                        printer_name));
+      base::Bind(&PrintSystemTaskProxy::GetPrinterCapabilities, task.get(),
+                 printer_name));
 }
 
 void PrintPreviewHandler::HandleSignin(const ListValue* /*args*/) {
   cloud_print_signin_dialog::CreateCloudPrintSigninDialog(preview_tab());
+}
+
+void PrintPreviewHandler::HandlePrintWithCloudPrint() {
+  // Record the number of times the user asks to print via cloud print
+  // instead of the print preview dialog.
+  ReportStats();
+  ReportUserActionHistogram(PRINT_WITH_CLOUD_PRINT);
+
+  PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(web_ui_);
+  scoped_refptr<RefCountedBytes> data;
+  print_preview_ui->GetPrintPreviewDataForIndex(
+      printing::COMPLETE_PREVIEW_DOCUMENT_INDEX, &data);
+  CHECK(data.get());
+  DCHECK_GT(data->size(), 0U);
+  print_dialog_cloud::CreatePrintDialogForBytes(data,
+      string16(print_preview_ui->initiator_tab_title()),
+      string16(),
+      std::string("application/pdf"),
+      true);
+
+  // Once the cloud print dialog comes up we're no longer in a background
+  // printing situation.  Close the print preview.
+  // TODO(abodenha@chromium.org) The flow should be changed as described in
+  // http://code.google.com/p/chromium/issues/detail?id=44093
+  ActivateInitiatorTabAndClosePreviewTab();
 }
 
 void PrintPreviewHandler::HandleManageCloudPrint(const ListValue* /*args*/) {
@@ -712,7 +537,7 @@ void PrintPreviewHandler::HandleManageCloudPrint(const ListValue* /*args*/) {
                    GetCloudPrintServiceManageURL(),
                    GURL(),
                    NEW_FOREGROUND_TAB,
-                   PageTransition::LINK);
+                   content::PAGE_TRANSITION_LINK);
 }
 
 void PrintPreviewHandler::HandleShowSystemDialog(const ListValue* /*args*/) {
@@ -748,7 +573,7 @@ void PrintPreviewHandler::HandleReloadCrashedInitiatorTab(
 
   TabContents* contents = initiator_tab->tab_contents();
   contents->OpenURL(contents->GetURL(), GURL(), CURRENT_TAB,
-                    PageTransition::RELOAD);
+                    content::PAGE_TRANSITION_RELOAD);
   ActivateInitiatorTabAndClosePreviewTab();
 }
 
@@ -772,7 +597,8 @@ void PrintPreviewHandler::ReportStats() {
 void PrintPreviewHandler::HandleGetInitiatorTabTitle(
     const ListValue* /*args*/) {
   PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(web_ui_);
-  print_preview_ui->SendInitiatorTabTitle();
+  base::StringValue tab_title(print_preview_ui->initiator_tab_title());
+  web_ui_->CallJavascriptFunction("setInitiatorTabTitle", tab_title);
 }
 
 void PrintPreviewHandler::ActivateInitiatorTabAndClosePreviewTab() {
@@ -805,17 +631,10 @@ void PrintPreviewHandler::SetupPrinterList(const ListValue& printers) {
 }
 
 void PrintPreviewHandler::SendCloudPrintEnabled() {
-#if defined(OS_CHROMEOS)
-  bool enable_cloud_print_integration = true;
-#else
-  bool enable_cloud_print_integration =
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableCloudPrint);
-#endif
   GURL gcp_url(CloudPrintURL(BrowserList::GetLastActive()->profile()).
                GetCloudPrintServiceURL());
-  base::FundamentalValue enable(enable_cloud_print_integration);
   base::StringValue gcp_url_value(gcp_url.spec());
-  web_ui_->CallJavascriptFunction("setUseCloudPrint", enable, gcp_url_value);
+  web_ui_->CallJavascriptFunction("setUseCloudPrint", gcp_url_value);
 }
 
 void PrintPreviewHandler::SendCloudPrintJob(const DictionaryValue& settings,
@@ -904,9 +723,7 @@ void PrintPreviewHandler::ClosePrintPreviewTab() {
 }
 
 void PrintPreviewHandler::OnPrintDialogShown() {
-  static_cast<RenderViewHostDelegate*>(
-      GetInitiatorTab()->tab_contents())->Activate();
-  ClosePrintPreviewTab();
+  ActivateInitiatorTabAndClosePreviewTab();
 }
 
 void PrintPreviewHandler::SelectFile(const FilePath& default_filename) {
@@ -960,24 +777,31 @@ void PrintPreviewHandler::ShowSystemDialog() {
 
 void PrintPreviewHandler::FileSelected(const FilePath& path,
                                        int index, void* params) {
+  // Updating last_saved_path_ to the newly selected folder.
+  *last_saved_path_ = path.DirName();
+
+  PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(web_ui_);
+  print_preview_ui->CallJavascriptFunction("fileSelectionCompleted");
+  scoped_refptr<RefCountedBytes> data;
+  print_preview_ui->GetPrintPreviewDataForIndex(
+      printing::COMPLETE_PREVIEW_DOCUMENT_INDEX, &data);
+  print_to_pdf_path_.reset(new FilePath(path));
+  if (data.get())
+    PostPrintToPdfTask();
+}
+
+void PrintPreviewHandler::PostPrintToPdfTask() {
   PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(web_ui_);
   scoped_refptr<RefCountedBytes> data;
   print_preview_ui->GetPrintPreviewDataForIndex(
       printing::COMPLETE_PREVIEW_DOCUMENT_INDEX, &data);
-  if (!data.get()) {
-    NOTREACHED();
-    return;
-  }
-
+  DCHECK(data.get());
   printing::PreviewMetafile* metafile = new printing::PreviewMetafile;
   metafile->InitFromData(static_cast<const void*>(data->front()), data->size());
-
-  // Updating last_saved_path_ to the newly selected folder.
-  *last_saved_path_ = path.DirName();
-
-  PrintToPdfTask* task = new PrintToPdfTask(metafile, path);
+  PrintToPdfTask* task = new PrintToPdfTask(metafile,
+                                            *print_to_pdf_path_);
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE, task);
-
+  print_to_pdf_path_.reset();
   ActivateInitiatorTabAndClosePreviewTab();
 }
 

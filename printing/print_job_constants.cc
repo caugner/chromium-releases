@@ -18,6 +18,9 @@ const char kPreviewUIAddr[] = "previewUIAddr";
 // Print using cloud print: true if selected, false if not.
 const char kSettingCloudPrintId[] = "cloudPrintID";
 
+// Print using cloud print dialog: true if selected, false if not.
+const char kSettingCloudPrintDialog[] = "printWithCloudPrint";
+
 // Print job setting 'collate'.
 const char kSettingCollate[] = "collate";
 
@@ -32,10 +35,6 @@ const char kSettingContentWidth[] = "contentWidth";
 
 // Number of copies.
 const char kSettingCopies[] = "copies";
-
-// Key that specifies if the default margins have been selected or not.
-// True if selected, false if not.
-const char kSettingDefaultMarginsSelected[] = "defaultMarginsSelected";
 
 // Device name: Unique printer identifier.
 const char kSettingDeviceName[] = "deviceName";
@@ -96,8 +95,12 @@ const char kSettingMarginRight[] = "marginRight";
 // Key that specifies the top margin of the page.
 const char kSettingMarginTop[] = "marginTop";
 
-// Key that specifies the array of custom margins as set by the user.
-const char kSettingMargins[] = "margins";
+// Key that specifies the dictionary of custom margins as set by the user.
+const char kSettingMarginsCustom[] = "marginsCustom";
+
+// Key that specifies the type of margins to use.  Value is an int from the
+// MarginType enum.
+const char kSettingMarginsType[] = "marginsType";
 
 // A page range.
 const char kSettingPageRange[] = "pageRange";
@@ -108,6 +111,8 @@ const char kSettingPageRangeFrom[] = "from";
 // The last page of a page range. (1-based)
 const char kSettingPageRangeTo[] = "to";
 
+const char kSettingPreviewModifiable[] = "previewModifiable";
+
 // Printer name.
 const char kSettingPrinterName[] = "printerName";
 
@@ -117,5 +122,23 @@ const char kSettingPrintToPDF[] = "printToPDF";
 // Indices used to represent first preview page and complete preview document.
 const int FIRST_PAGE_INDEX = 0;
 const int COMPLETE_PREVIEW_DOCUMENT_INDEX = -1;
+
+#if defined (USE_CUPS)
+const char kBlack[] = "Black";
+const char kCMYK[] = "CMYK";
+const char kKCMY[] = "KCMY";
+const char kCMY_K[] = "CMY+K";
+const char kCMY[] = "CMY";
+const char kColor[] = "Color";
+const char kGray[] = "Gray";
+const char kGrayscale[] = "Grayscale";
+const char kGreyscale[] = "Greyscale";
+const char kMonochrome[] = "Monochrome";
+const char kNormal[] = "Normal";
+const char kNormalGray[] = "Normal.Gray";
+const char kRGB[] = "RGB";
+const char kRGBA[] = "RGBA";
+const char kRGB16[] = "RGB16";
+#endif
 
 }  // namespace printing

@@ -12,6 +12,7 @@
 #include "base/string_util.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_network_transaction.h"
+#include "net/http/http_server_properties_impl.h"
 #include "net/spdy/spdy_framer.h"
 #include "net/spdy/spdy_http_utils.h"
 
@@ -193,6 +194,13 @@ spdy::SpdyFrame* ConstructSpdyPacket(const SpdyHeaderInfo& header_info,
 spdy::SpdyFrame* ConstructSpdySettings(spdy::SpdySettings settings) {
   spdy::SpdyFramer framer;
   return framer.CreateSettings(settings);
+}
+
+// Construct a SPDY PING frame.
+// Returns the constructed frame.  The caller takes ownership of the frame.
+spdy::SpdyFrame* ConstructSpdyPing() {
+  spdy::SpdyFramer framer;
+  return framer.CreatePingFrame(1);
 }
 
 // Construct a SPDY GOAWAY frame.
@@ -923,6 +931,7 @@ HttpNetworkSession* SpdySessionDependencies::SpdyCreateSession(
   params.ssl_config_service = session_deps->ssl_config_service;
   params.http_auth_handler_factory =
       session_deps->http_auth_handler_factory.get();
+  params.http_server_properties = &session_deps->http_server_properties;
   return new HttpNetworkSession(params);
 }
 
@@ -938,6 +947,7 @@ HttpNetworkSession* SpdySessionDependencies::SpdyCreateSessionDeterministic(
   params.ssl_config_service = session_deps->ssl_config_service;
   params.http_auth_handler_factory =
       session_deps->http_auth_handler_factory.get();
+  params.http_server_properties = &session_deps->http_server_properties;
   return new HttpNetworkSession(params);
 }
 
@@ -949,6 +959,7 @@ SpdyURLRequestContext::SpdyURLRequestContext()
   storage_.set_ssl_config_service(new SSLConfigServiceDefaults);
   storage_.set_http_auth_handler_factory(HttpAuthHandlerFactory::CreateDefault(
       host_resolver()));
+  storage_.set_http_server_properties(new HttpServerPropertiesImpl);
   net::HttpNetworkSession::Params params;
   params.client_socket_factory = &socket_factory_;
   params.host_resolver = host_resolver();
@@ -957,6 +968,7 @@ SpdyURLRequestContext::SpdyURLRequestContext()
   params.ssl_config_service = ssl_config_service();
   params.http_auth_handler_factory = http_auth_handler_factory();
   params.network_delegate = network_delegate();
+  params.http_server_properties = http_server_properties();
   scoped_refptr<HttpNetworkSession> network_session(
       new HttpNetworkSession(params));
   storage_.set_http_transaction_factory(new HttpCache(

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/system/timezone_settings.h"
 
+#include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
@@ -12,6 +13,8 @@
 #include "base/memory/singleton.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/chromeos/system/runtime_environment.h"
+#include "content/browser/browser_thread.h"
 
 namespace chromeos {
 namespace system {
@@ -31,9 +34,10 @@ const char kFallbackTimeZoneId[] = "America/Los_Angeles";
 
 }  // namespace
 
+// The TimezoneSettings implementation used in production.
 class TimezoneSettingsImpl : public TimezoneSettings {
  public:
-  // TimezoneSettings.implementation:
+  // TimezoneSettings implementation:
   virtual const icu::TimeZone& GetTimezone();
   virtual void SetTimezone(const icu::TimeZone& timezone);
   virtual void AddObserver(Observer* observer);
@@ -120,7 +124,12 @@ void TimezoneSettingsImpl::SetTimezone(const icu::TimeZone& timezone) {
   std::string id;
   UTF16ToUTF8(unicode.getBuffer(), unicode.length(), &id);
   VLOG(1) << "Setting timezone to " << id;
-  SetTimezoneIDFromString(id);
+  // Change the timezone config files on the FILE thread. It's safe to do this
+  // in the background as the following operations don't depend on the
+  // completion of the config change.
+  BrowserThread::PostTask(BrowserThread::FILE,
+                          FROM_HERE,
+                          base::Bind(&SetTimezoneIDFromString, id));
   icu::TimeZone::setDefault(timezone);
   FOR_EACH_OBSERVER(Observer, observers_, TimezoneChanged(timezone));
 }
@@ -152,13 +161,52 @@ TimezoneSettingsImpl* TimezoneSettingsImpl::GetInstance() {
                    DefaultSingletonTraits<TimezoneSettingsImpl> >::get();
 }
 
+// The stub TimezoneSettings implementation used on Linux desktop.
+class TimezoneSettingsStubImpl : public TimezoneSettings {
+ public:
+  // TimezoneSettings implementation:
+  virtual const icu::TimeZone& GetTimezone() {
+    return *timezone_.get();
+  }
+
+  virtual void SetTimezone(const icu::TimeZone& timezone) {
+    icu::TimeZone::setDefault(timezone);
+    FOR_EACH_OBSERVER(Observer, observers_, TimezoneChanged(timezone));
+  }
+
+  virtual void AddObserver(Observer* observer) {
+    observers_.AddObserver(observer);
+  }
+
+  virtual void RemoveObserver(Observer* observer) {
+    observers_.RemoveObserver(observer);
+  }
+
+  static TimezoneSettingsStubImpl* GetInstance() {
+    return Singleton<TimezoneSettingsStubImpl,
+                     DefaultSingletonTraits<TimezoneSettingsStubImpl> >::get();
+  }
+
+ private:
+  friend struct DefaultSingletonTraits<TimezoneSettingsStubImpl>;
+
+  TimezoneSettingsStubImpl() {
+    timezone_.reset(icu::TimeZone::createDefault());
+  }
+
+  scoped_ptr<icu::TimeZone> timezone_;
+  ObserverList<Observer> observers_;
+
+  DISALLOW_COPY_AND_ASSIGN(TimezoneSettingsStubImpl);
+};
+
 TimezoneSettings* TimezoneSettings::GetInstance() {
-  return TimezoneSettingsImpl::GetInstance();
+  if (system::runtime_environment::IsRunningOnChromeOS()) {
+    return TimezoneSettingsImpl::GetInstance();
+  } else {
+    return TimezoneSettingsStubImpl::GetInstance();
+  }
 }
 
 }  // namespace system
 }  // namespace chromeos
-
-// Allows InvokeLater without adding refcounting. TimezoneSettingsImpl is a
-// Singleton and won't be deleted until it's last InvokeLater is run.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(chromeos::system::TimezoneSettingsImpl);

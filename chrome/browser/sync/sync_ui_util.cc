@@ -12,6 +12,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/protocol/proto_enum_conversions.h"
+#include "chrome/browser/sync/protocol/sync_protocol_error.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/sessions/session_state.h"
 #include "chrome/browser/ui/browser.h"
@@ -31,40 +32,98 @@ namespace sync_ui_util {
 
 namespace {
 
-// Given an authentication state, this helper function returns the appropriate
-// status message and, if necessary, the text that should appear in the
-// re-login link.
+// Given an authentication state this helper function returns various labels
+// that can be used to display information about the state.
 void GetStatusLabelsForAuthError(const AuthError& auth_error,
-    ProfileSyncService* service, string16* status_label,
-    string16* link_label) {
+                                 const ProfileSyncService& service,
+                                 string16* status_label,
+                                 string16* link_label,
+                                 string16* global_error_menu_label,
+                                 string16* global_error_bubble_message,
+                                 string16* global_error_bubble_accept_label) {
+  string16 product_name = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
   if (link_label)
     link_label->assign(l10n_util::GetStringUTF16(IDS_SYNC_RELOGIN_LINK_LABEL));
-  if (auth_error.state() == AuthError::INVALID_GAIA_CREDENTIALS ||
-      auth_error.state() == AuthError::ACCOUNT_DELETED ||
-      auth_error.state() == AuthError::ACCOUNT_DISABLED) {
-    // If the user name is empty then the first login failed, otherwise the
-    // credentials are out-of-date.
-    if (service->GetAuthenticatedUsername().empty())
-      status_label->assign(
-          l10n_util::GetStringUTF16(IDS_SYNC_INVALID_USER_CREDENTIALS));
-    else
-      status_label->assign(
-          l10n_util::GetStringUTF16(IDS_SYNC_LOGIN_INFO_OUT_OF_DATE));
-  } else if (auth_error.state() == AuthError::SERVICE_UNAVAILABLE) {
-    DCHECK(service->GetAuthenticatedUsername().empty());
-    status_label->assign(
-        l10n_util::GetStringUTF16(IDS_SYNC_SERVICE_UNAVAILABLE));
-  } else if (auth_error.state() == AuthError::CONNECTION_FAILED) {
-    // Note that there is little the user can do if the server is not
-    // reachable. Since attempting to re-connect is done automatically by
-    // the Syncer, we do not show the (re)login link.
-    status_label->assign(
-        l10n_util::GetStringFUTF16(IDS_SYNC_SERVER_IS_UNREACHABLE,
-                              l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
-    if (link_label)
-      link_label->clear();
-  } else {
-    status_label->assign(l10n_util::GetStringUTF16(IDS_SYNC_ERROR_SIGNING_IN));
+
+  switch (auth_error.state()) {
+    case AuthError::INVALID_GAIA_CREDENTIALS:
+    case AuthError::ACCOUNT_DELETED:
+    case AuthError::ACCOUNT_DISABLED:
+      // If the user name is empty then the first login failed, otherwise the
+      // credentials are out-of-date.
+      if (service.GetAuthenticatedUsername().empty()) {
+        if (status_label) {
+          status_label->assign(
+              l10n_util::GetStringUTF16(IDS_SYNC_INVALID_USER_CREDENTIALS));
+        }
+      } else {
+        if (status_label) {
+          status_label->assign(
+              l10n_util::GetStringUTF16(IDS_SYNC_LOGIN_INFO_OUT_OF_DATE));
+        }
+        if (global_error_menu_label) {
+          global_error_menu_label->assign(l10n_util::GetStringUTF16(
+              IDS_SYNC_SIGN_IN_ERROR_WRENCH_MENU_ITEM));
+        }
+        if (global_error_bubble_message) {
+          global_error_bubble_message->assign(l10n_util::GetStringFUTF16(
+              IDS_SYNC_SIGN_IN_ERROR_BUBBLE_VIEW_MESSAGE, product_name));
+        }
+        if (global_error_bubble_accept_label) {
+          global_error_bubble_accept_label->assign(l10n_util::GetStringUTF16(
+              IDS_SYNC_SIGN_IN_ERROR_BUBBLE_VIEW_ACCEPT));
+        }
+      }
+      break;
+    case AuthError::SERVICE_UNAVAILABLE:
+      DCHECK(service.GetAuthenticatedUsername().empty());
+      if (status_label) {
+        status_label->assign(
+            l10n_util::GetStringUTF16(IDS_SYNC_SERVICE_UNAVAILABLE));
+      }
+      if (link_label)
+        link_label->clear();
+      if (global_error_menu_label) {
+        global_error_menu_label->assign(l10n_util::GetStringUTF16(
+            IDS_SYNC_SIGN_IN_ERROR_WRENCH_MENU_ITEM));
+      }
+      if (global_error_bubble_message) {
+        global_error_bubble_message->assign(l10n_util::GetStringFUTF16(
+            IDS_SYNC_UNAVAILABLE_ERROR_BUBBLE_VIEW_MESSAGE, product_name));
+      }
+      if (global_error_bubble_accept_label) {
+        global_error_bubble_accept_label->assign(l10n_util::GetStringUTF16(
+            IDS_SYNC_UNAVAILABLE_ERROR_BUBBLE_VIEW_ACCEPT));
+      }
+      break;
+    case AuthError::CONNECTION_FAILED:
+      // Note that there is little the user can do if the server is not
+      // reachable. Since attempting to re-connect is done automatically by
+      // the Syncer, we do not show the (re)login link.
+      if (status_label) {
+        status_label->assign(
+            l10n_util::GetStringFUTF16(IDS_SYNC_SERVER_IS_UNREACHABLE,
+                                       product_name));
+      }
+      break;
+    default:
+      if (status_label) {
+        status_label->assign(l10n_util::GetStringUTF16(
+            IDS_SYNC_ERROR_SIGNING_IN));
+      }
+      if (global_error_menu_label) {
+        global_error_menu_label->assign(l10n_util::GetStringUTF16(
+            IDS_SYNC_SIGN_IN_ERROR_WRENCH_MENU_ITEM));
+      }
+      if (global_error_bubble_message) {
+        global_error_bubble_message->assign(l10n_util::GetStringFUTF16(
+            IDS_SYNC_OTHER_SIGN_IN_ERROR_BUBBLE_VIEW_MESSAGE, product_name));
+      }
+      if (global_error_bubble_accept_label) {
+        global_error_bubble_accept_label->assign(l10n_util::GetStringUTF16(
+            IDS_SYNC_SIGN_IN_ERROR_BUBBLE_VIEW_ACCEPT));
+      }
+      break;
   }
 }
 
@@ -78,11 +137,9 @@ string16 GetSyncedStateStatusLabel(ProfileSyncService* service) {
     return label;
 
   return l10n_util::GetStringFUTF16(
-      ProfileManager::IsMultipleProfilesEnabled() ?
-          IDS_PROFILES_SYNCED_TO_USER_WITH_TIME :
-          IDS_SYNC_ACCOUNT_SYNCED_TO_USER_WITH_TIME,
+      IDS_SYNC_ACCOUNT_SYNCING_TO_USER,
       user_name,
-      service->GetLastSyncedTimeString());
+      ASCIIToUTF16(chrome::kSyncGoogleDashboardURL));
 }
 
 void GetStatusForActionableError(
@@ -145,8 +202,8 @@ MessageType GetStatusInfo(ProfileSyncService* service,
     // No auth in progress check for an auth error.
     if (auth_error.state() != AuthError::NONE) {
       if (status_label && link_label) {
-        GetStatusLabelsForAuthError(auth_error, service,
-                                    status_label, link_label);
+        GetStatusLabelsForAuthError(auth_error, *service,
+                                    status_label, link_label, NULL, NULL, NULL);
       }
       return SYNC_ERROR;
     }
@@ -174,14 +231,12 @@ MessageType GetStatusInfo(ProfileSyncService* service,
               l10n_util::GetStringUTF16(IDS_SYNC_PASSWORD_SYNC_ATTENTION));
         }
         return SYNC_PROMO;
-      } else {
-        // First machine.  Don't show promotion, just show everything
-        // normal.
-        if (status_label)
-          status_label->assign(GetSyncedStateStatusLabel(service));
-        return SYNCED;
       }
     }
+
+    // There is no error. Display "Last synced..." message.
+    if (status_label)
+      status_label->assign(GetSyncedStateStatusLabel(service));
     return SYNCED;
   } else {
     // Either show auth error information with a link to re-login, auth in prog,
@@ -203,7 +258,8 @@ MessageType GetStatusInfo(ProfileSyncService* service,
                  auth_error.state() != AuthError::TWO_FACTOR) {
         if (status_label) {
           status_label->clear();
-          GetStatusLabelsForAuthError(auth_error, service, status_label, NULL);
+          GetStatusLabelsForAuthError(auth_error, *service, status_label, NULL,
+                                      NULL, NULL, NULL);
         }
         result_type = SYNC_ERROR;
       } else if (!status.authenticated) {
@@ -282,6 +338,44 @@ MessageType GetStatusLabelsForNewTabPage(ProfileSyncService* service,
   DCHECK(link_label);
   return sync_ui_util::GetStatusInfoForNewTabPage(
       service, status_label, link_label);
+}
+
+void GetStatusLabelsForSyncGlobalError(ProfileSyncService* service,
+                                       string16* menu_label,
+                                       string16* bubble_message,
+                                       string16* bubble_accept_label) {
+  DCHECK(menu_label);
+  DCHECK(bubble_message);
+  DCHECK(bubble_accept_label);
+  *menu_label = string16();
+  *bubble_message = string16();
+  *bubble_accept_label = string16();
+
+  if (!service->HasSyncSetupCompleted())
+    return;
+
+  if (service->IsPassphraseRequired() &&
+      service->IsPassphraseRequiredForDecryption()) {
+    // This is not the first machine so ask user to enter passphrase.
+    *menu_label = l10n_util::GetStringUTF16(
+        IDS_SYNC_PASSPHRASE_ERROR_WRENCH_MENU_ITEM);
+    string16 product_name = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
+    *bubble_message = l10n_util::GetStringFUTF16(
+        IDS_SYNC_PASSPHRASE_ERROR_BUBBLE_VIEW_MESSAGE, product_name);
+    *bubble_accept_label = l10n_util::GetStringUTF16(
+        IDS_SYNC_PASSPHRASE_ERROR_BUBBLE_VIEW_ACCEPT);
+    return;
+  }
+
+  MessageType status = GetStatus(service);
+  if (status != SYNC_ERROR)
+    return;
+
+  const AuthError& auth_error = service->GetAuthError();
+  if (auth_error.state() != AuthError::NONE) {
+    GetStatusLabelsForAuthError(auth_error, *service, NULL, NULL,
+        menu_label, bubble_message, bubble_accept_label);
+  }
 }
 
 MessageType GetStatus(ProfileSyncService* service) {
@@ -473,9 +567,14 @@ void ConstructAboutInformation(ProfileSyncService* service,
     sync_ui_util::AddIntSyncDetail(details,
                                    "Useful Sync Cycles",
                                    full_status.useful_sync_cycles);
-    sync_ui_util::AddBoolSyncDetail(details,
-                                    "Explicit Passphrase",
-                                    service->IsUsingSecondaryPassphrase());
+    // Only safe to call IsUsingSecondaryPassphrase() if the backend is
+    // initialized already - otherwise, we have no idea whether we are
+    // using a secondary passphrase or not.
+    if (service->sync_initialized()) {
+      sync_ui_util::AddBoolSyncDetail(details,
+                                      "Explicit Passphrase",
+                                      service->IsUsingSecondaryPassphrase());
+    }
     sync_ui_util::AddBoolSyncDetail(details,
                                     "Passphrase Required",
                                     service->IsPassphraseRequired());
@@ -512,6 +611,27 @@ void ConstructAboutInformation(ProfileSyncService* service,
                                      snapshot->num_entries);
       sync_ui_util::AddBoolSyncDetail(details, "Throttled",
                                       snapshot->is_silenced);
+    }
+
+    // Now set the actionable errors.
+    ListValue* actionable_error = new ListValue();
+    strings->Set("actionable_error", actionable_error);
+    sync_ui_util::AddStringSyncDetails(actionable_error, "Error Type",
+        browser_sync::GetSyncErrorTypeString(
+            full_status.sync_protocol_error.error_type));
+    sync_ui_util::AddStringSyncDetails(actionable_error, "Action",
+        browser_sync::GetClientActionString(
+            full_status.sync_protocol_error.action));
+    sync_ui_util::AddStringSyncDetails(actionable_error, "url",
+        full_status.sync_protocol_error.url);
+    sync_ui_util::AddStringSyncDetails(actionable_error, "Error Description",
+        full_status.sync_protocol_error.error_description);
+
+    const FailedDatatypesHandler& failed_datatypes_handler =
+        service->failed_datatypes_handler();
+    if (failed_datatypes_handler.AnyFailedDatatype()) {
+      strings->SetString("failed_data_types",
+          failed_datatypes_handler.GetErrorString());
     }
 
     if (service->unrecoverable_error_detected()) {

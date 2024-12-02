@@ -5,10 +5,8 @@
 #include "chrome/browser/renderer_host/render_widget_host_view_views.h"
 
 #include "base/logging.h"
-#include "chrome/browser/renderer_host/accelerated_surface_container_touch.h"
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/gtk/WebInputEventFactory.h"
-#include "ui/gfx/gl/gl_bindings.h"
 #include "views/widget/widget.h"
 
 static const char kRenderWidgetHostViewKey[] = "__RENDER_WIDGET_HOST_VIEW__";
@@ -70,12 +68,6 @@ void UpdateTouchPointPosition(const views::TouchEvent* event,
 
 }  // namespace
 
-// static
-RenderWidgetHostView* RenderWidgetHostView::CreateViewForWidget(
-    RenderWidgetHost* widget) {
-  return new RenderWidgetHostViewViews(widget);
-}
-
 ui::TouchStatus RenderWidgetHostViewViews::OnTouchEvent(
     const views::TouchEvent& event) {
   if (!host_)
@@ -88,12 +80,12 @@ ui::TouchStatus RenderWidgetHostViewViews::OnTouchEvent(
   switch (event.type()) {
     case ui::ET_TOUCH_PRESSED:
       // Add a new touch point.
-      if (touch_event_.touchPointsLength <
-          WebTouchEvent::touchPointsLengthCap) {
-        point = &touch_event_.touchPoints[touch_event_.touchPointsLength++];
+      if (touch_event_.touchesLength <
+          WebTouchEvent::touchesLengthCap) {
+        point = &touch_event_.touches[touch_event_.touchesLength++];
         point->id = event.identity();
 
-        if (touch_event_.touchPointsLength == 1) {
+        if (touch_event_.touchesLength == 1) {
           // A new touch sequence has started.
           status = ui::TOUCH_STATUS_START;
 
@@ -114,8 +106,8 @@ ui::TouchStatus RenderWidgetHostViewViews::OnTouchEvent(
       // _PRESSED event. So find that.
       // At the moment, only a maximum of 4 touch-points are allowed. So a
       // simple loop should be sufficient.
-      for (int i = 0; i < touch_event_.touchPointsLength; ++i) {
-        point = touch_event_.touchPoints + i;
+      for (unsigned i = 0; i < touch_event_.touchesLength; ++i) {
+        point = touch_event_.touches + i;
         if (point->id == event.identity()) {
           break;
         }
@@ -149,8 +141,8 @@ ui::TouchStatus RenderWidgetHostViewViews::OnTouchEvent(
   UpdateTouchPointPosition(&event, GetMirroredPosition(), point);
 
   // Mark the rest of the points as stationary.
-  for (int i = 0; i < touch_event_.touchPointsLength; ++i) {
-    WebKit::WebTouchPoint* iter = touch_event_.touchPoints + i;
+  for (unsigned i = 0; i < touch_event_.touchesLength; ++i) {
+    WebKit::WebTouchPoint* iter = touch_event_.touches + i;
     if (iter != point) {
       iter->state = WebKit::WebTouchPoint::StateStationary;
     }
@@ -165,42 +157,17 @@ ui::TouchStatus RenderWidgetHostViewViews::OnTouchEvent(
 
   // If the touch was released, then remove it from the list of touch points.
   if (event.type() == ui::ET_TOUCH_RELEASED) {
-    --touch_event_.touchPointsLength;
-    for (int i = point - touch_event_.touchPoints;
-         i < touch_event_.touchPointsLength;
+    --touch_event_.touchesLength;
+    for (unsigned i = point - touch_event_.touches;
+         i < touch_event_.touchesLength;
          ++i) {
-      touch_event_.touchPoints[i] = touch_event_.touchPoints[i + 1];
+      touch_event_.touches[i] = touch_event_.touches[i + 1];
     }
-    if (touch_event_.touchPointsLength == 0)
+    if (touch_event_.touchesLength == 0)
       status = ui::TOUCH_STATUS_END;
   } else if (event.type() == ui::ET_TOUCH_CANCELLED) {
     status = ui::TOUCH_STATUS_CANCEL;
   }
 
   return status;
-}
-
-gfx::PluginWindowHandle RenderWidgetHostViewViews::GetCompositingSurface() {
-  // On TOUCH_UI builds, the GPU process renders to an offscreen surface
-  // (created by the GPU process), which is later displayed by the browser.
-  // As the GPU process creates this surface, we can return any non-zero value.
-  return 1;
-}
-
-void RenderWidgetHostViewViews::AcceleratedSurfaceSetIOSurface(
-    int32 width, int32 height, uint64 surface_id) {
-  accelerated_surface_containers_[surface_id] =
-    AcceleratedSurfaceContainerTouch::CreateAcceleratedSurfaceContainer(
-        gfx::Size(width, height),
-        surface_id);
-}
-
-void RenderWidgetHostViewViews::AcceleratedSurfaceRelease(uint64 surface_id) {
-  accelerated_surface_containers_.erase(surface_id);
-}
-
-void RenderWidgetHostViewViews::AcceleratedSurfaceBuffersSwapped(
-    uint64 surface_id) {
-  SetExternalTexture(accelerated_surface_containers_[surface_id].get());
-  glFlush();
 }

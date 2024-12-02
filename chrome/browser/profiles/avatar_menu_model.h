@@ -49,7 +49,7 @@ class AvatarMenuModel : public NotificationObserver {
   };
 
   // Constructor. No parameters can be NULL in practice. |browser| can be NULL
-  // for unit tests, but no actions should be executed.
+  // and a new one will be created if an action requires it.
   AvatarMenuModel(ProfileInfoInterface* profile_cache,
                   AvatarMenuModelObserver* observer,
                   Browser* browser);
@@ -72,10 +72,17 @@ class AvatarMenuModel : public NotificationObserver {
   // Gets the an Item at a specified index.
   const Item& GetItemAt(size_t index);
 
+  // This model is also used for the always-present Mac system menubar. As the
+  // last active browser changes, the model needs to update accordingly.
+  void set_browser(Browser* browser) { browser_ = browser; }
+
   // NotificationObserver:
   virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
+
+  // True if avatar menu should be displayed.
+  static bool ShouldShowAvatarMenu();
 
  private:
   // Rebuilds the menu from the cache and notifies the |observer_|.

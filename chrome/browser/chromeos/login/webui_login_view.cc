@@ -10,25 +10,32 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/accessibility_util.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 #include "chrome/browser/chromeos/status/clock_menu_button.h"
 #include "chrome/browser/chromeos/status/input_method_menu_button.h"
 #include "chrome/browser/chromeos/status/network_menu_button.h"
 #include "chrome/browser/chromeos/status/status_area_view.h"
-#include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/views/dom_view.h"
+#include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/renderer_host/render_view_host_observer.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
-#include "views/widget/native_widget_gtk.h"
+#include "views/desktop/desktop_window_view.h"
 #include "views/widget/widget.h"
 
-#if defined(TOUCH_UI)
-#include "chrome/browser/ui/touch/keyboard/keyboard_manager.h"
+#if defined(TOOLKIT_USES_GTK)
+#include "chrome/browser/chromeos/wm_ipc.h"
+#include "views/widget/native_widget_gtk.h"
+#endif
+
+#if defined(USE_VIRTUAL_KEYBOARD)
+#include "chrome/browser/ui/virtual_keyboard/virtual_keyboard_manager.h"
 #endif
 
 namespace {
@@ -37,6 +44,7 @@ const char kViewClassName[] = "browser/chromeos/login/WebUILoginView";
 
 // These strings must be kept in sync with handleAccelerator() in oobe.js.
 const char kAccelNameAccessibility[] = "accessibility";
+const char kAccelNameCancel[] = "cancel";
 const char kAccelNameEnrollment[] = "enrollment";
 
 // Observes IPC messages from the FrameSniffer and notifies JS if error
@@ -65,7 +73,7 @@ class SnifferObserver : public RenderViewHostObserver {
  private:
   void OnError(int error) {
     base::FundamentalValue error_value(error);
-    webui_->CallJavascriptFunction("login.OfflineMessageScreen.onFrameError",
+    webui_->CallJavascriptFunction("login.ErrorMessageScreen.onFrameError",
                                    error_value);
   }
 
@@ -107,12 +115,14 @@ WebUILoginView::WebUILoginView()
       status_window_(NULL),
       host_window_frozen_(false),
       status_area_visibility_on_init_(true) {
-#if defined(TOUCH_UI)
-  // Make sure the singleton KeyboardManager object is created.
-  KeyboardManager::GetInstance();
+#if defined(USE_VIRTUAL_KEYBOARD)
+  // Make sure the singleton VirtualKeyboardManager object is created.
+  VirtualKeyboardManager::GetInstance();
 #endif
   accel_map_[views::Accelerator(ui::VKEY_Z, false, true, true)] =
       kAccelNameAccessibility;
+  accel_map_[views::Accelerator(ui::VKEY_ESCAPE, false, false, false)] =
+      kAccelNameCancel;
   accel_map_[views::Accelerator(ui::VKEY_E, false, true, true)] =
       kAccelNameEnrollment;
 
@@ -152,7 +162,7 @@ bool WebUILoginView::AcceleratorPressed(
   if (!webui_login_)
     return true;
 
-  WebUI* web_ui = webui_login_->dom_contents()->tab_contents()->web_ui();
+  WebUI* web_ui = GetWebUI();
   if (web_ui) {
     base::StringValue accel_name(entry->second);
     web_ui->CallJavascriptFunction("cr.ui.Oobe.handleAccelerator",
@@ -167,17 +177,25 @@ gfx::NativeWindow WebUILoginView::GetNativeWindow() const {
 }
 
 void WebUILoginView::OnWindowCreated() {
+#if defined(TOOLKIT_USES_GTK)
   // Freezes host window update until the tab is rendered.
   host_window_frozen_ = static_cast<views::NativeWidgetGtk*>(
       GetWidget()->native_widget())->SuppressFreezeUpdates();
+#else
+  // TODO(saintlou): Unclear if we need this for the !gtk case.
+  // According to nkostylev it prevents the renderer from flashing with a
+  // white solid background until the content is fully rendered.
+#endif
 }
 
 void WebUILoginView::UpdateWindowType() {
+#if defined(TOOLKIT_USES_GTK)
   std::vector<int> params;
   WmIpc::instance()->SetWindowType(
       GTK_WIDGET(GetNativeWindow()),
       WM_IPC_WINDOW_LOGIN_WEBUI,
       &params);
+#endif
 }
 
 void WebUILoginView::LoadURL(const GURL & url) {
@@ -275,13 +293,34 @@ void WebUILoginView::OnTabMainFrameFirstRender() {
   VLOG(1) << "WebUI login main frame rendered.";
   InitStatusArea();
 
+#if defined(TOOLKIT_USES_GTK)
   if (host_window_frozen_) {
     host_window_frozen_ = false;
 
-    // Unfreezes the host window since tab is rendereed now.
+    // Unfreezes the host window since tab is rendered now.
     views::NativeWidgetGtk::UpdateFreezeUpdatesProperty(
         GetNativeWindow(), false);
   }
+#endif
+
+  bool emit_login_visible = false;
+
+  // In aura or views-desktop environment, there will be no window-manager. So
+  // chrome needs to emit the 'login-prompt-visible' signal. This needs to
+  // happen here, after the page has completed rendering itself.
+#if defined(USE_AURA)
+  emit_login_visible = true;
+#else
+  if (views::desktop::DesktopWindowView::desktop_window_view)
+    emit_login_visible = true;
+#endif
+  if (emit_login_visible && chromeos::CrosLibrary::Get()->EnsureLoaded())
+    chromeos::CrosLibrary::Get()->GetLoginLibrary()->EmitLoginPromptVisible();
+
+  OobeUI* oobe_ui = static_cast<OobeUI*>(GetWebUI());
+  // Notify OOBE that the login frame has been rendered. Currently
+  // this is used to start camera presence check.
+  oobe_ui->OnLoginPromptVisible();
 }
 
 void WebUILoginView::InitStatusArea() {
@@ -303,27 +342,29 @@ void WebUILoginView::InitStatusArea() {
       width() - widget_size.width() - kStatusAreaCornerPadding;
   gfx::Rect widget_bounds(widget_x, kStatusAreaCornerPadding,
                           widget_size.width(), widget_size.height());
-  // TODO(nkostylev): Make status area in the same window as |webui_login_|
-  // once RenderWidgetHostViewViews is ready.
 #if defined(TOUCH_UI)
-  // TODO(oshima): Window manager doesn't know about touch event, hence can't
-  // activate the window. Use POPUP for now. This will be non issue
-  // once we move to pure views + in chrome WM.
   views::Widget::InitParams widget_params(
-      views::Widget::InitParams::TYPE_POPUP);
+      views::Widget::InitParams::TYPE_CONTROL);
 #else
+  // TODO(nkostylev|oshima): Make status area in the same window as
+  // |webui_login_| once RenderWidgetHostViewViews and compositor are
+  // ready.
   views::Widget::InitParams widget_params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
 #endif
   widget_params.bounds = widget_bounds;
   widget_params.transparent = true;
-  widget_params.parent = login_window->GetNativeView();
+  widget_params.parent_widget = login_window;
   status_window_ = new views::Widget;
   status_window_->Init(widget_params);
+
+#if defined(TOOLKIT_USES_GTK)
   chromeos::WmIpc::instance()->SetWindowType(
       status_window_->GetNativeView(),
       chromeos::WM_IPC_WINDOW_CHROME_INFO_BUBBLE,
       NULL);
+#endif
+
   views::View* contents_view = new RightAlignedView;
   contents_view->AddChildView(status_area_);
   status_window_->SetContentsView(contents_view);

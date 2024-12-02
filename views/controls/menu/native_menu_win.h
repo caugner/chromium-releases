@@ -8,8 +8,11 @@
 
 #include <vector>
 
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
+#include "base/observer_list.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "views/controls/menu/menu_wrapper.h"
 #include "views/views_export.h"
@@ -27,15 +30,15 @@ class VIEWS_EXPORT NativeMenuWin : public MenuWrapper {
   virtual ~NativeMenuWin();
 
   // Overridden from MenuWrapper:
-  virtual void RunMenuAt(const gfx::Point& point, int alignment);
-  virtual void CancelMenu();
-  virtual void Rebuild();
-  virtual void UpdateStates();
-  virtual gfx::NativeMenu GetNativeMenu() const;
-  virtual MenuAction GetMenuAction() const;
-  virtual void AddMenuListener(MenuListener* listener);
-  virtual void RemoveMenuListener(MenuListener* listener);
-  virtual void SetMinimumWidth(int width);
+  virtual void RunMenuAt(const gfx::Point& point, int alignment) OVERRIDE;
+  virtual void CancelMenu() OVERRIDE;
+  virtual void Rebuild() OVERRIDE;
+  virtual void UpdateStates() OVERRIDE;
+  virtual gfx::NativeMenu GetNativeMenu() const OVERRIDE;
+  virtual MenuAction GetMenuAction() const OVERRIDE;
+  virtual void AddMenuListener(MenuListener* listener) OVERRIDE;
+  virtual void RemoveMenuListener(MenuListener* listener) OVERRIDE;
+  virtual void SetMinimumWidth(int width) OVERRIDE;
 
  private:
   // IMPORTANT: Note about indices.
@@ -130,8 +133,8 @@ class VIEWS_EXPORT NativeMenuWin : public MenuWrapper {
   // The action that took place during the call to RunMenuAt.
   MenuAction menu_action_;
 
-  // Vector of listeners to receive callbacks when the menu opens.
-  std::vector<MenuListener*> listeners_;
+  // A list of listeners to call when the menu opens.
+  ObserverList<MenuListener> listeners_;
 
   // Keep track of whether the listeners have already been called at least
   // once.
@@ -140,7 +143,7 @@ class VIEWS_EXPORT NativeMenuWin : public MenuWrapper {
   // See comment in MenuMessageHook for details on these.
   NativeMenuWin* menu_to_select_;
   int position_to_select_;
-  ScopedRunnableMethodFactory<NativeMenuWin> menu_to_select_factory_;
+  base::WeakPtrFactory<NativeMenuWin> menu_to_select_factory_;
 
   // If we're a submenu, this is our parent.
   NativeMenuWin* parent_;

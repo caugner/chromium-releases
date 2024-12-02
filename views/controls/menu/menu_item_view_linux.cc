@@ -68,8 +68,8 @@ void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
   // only need the background when we want it to look different, as when we're
   // selected.
   if (render_selection)
-    canvas->AsCanvasSkia()->drawColor(kSelectedBackgroundColor,
-                                      SkXfermode::kSrc_Mode);
+    canvas->GetSkCanvas()->drawColor(kSelectedBackgroundColor,
+                                     SkXfermode::kSrc_Mode);
 
   // Render the check.
   if (type_ == CHECKBOX && GetDelegate()->IsItemChecked(GetCommand())) {
@@ -107,7 +107,7 @@ void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
                         (available_height - font.GetHeight()) / 2, width,
                         font.GetHeight());
   text_bounds.set_x(GetMirroredXForRect(text_bounds));
-  canvas->DrawStringInt(WideToUTF16Hack(GetTitle()), font, fg_color,
+  canvas->DrawStringInt(title(), font, fg_color,
                         text_bounds.x(), text_bounds.y(), text_bounds.width(),
                         text_bounds.height(),
                         GetRootMenuItem()->GetDrawStringFlags());

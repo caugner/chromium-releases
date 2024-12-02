@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "chrome/browser/chromeos/cros_settings_provider.h"
 #include "chrome/browser/chromeos/login/signed_settings_helper.h"
 
@@ -37,12 +38,12 @@ class UserCrosSettingsProvider : public CrosSettingsProvider {
   // return trusted value.
   // Return false if trusted values are unavailable at a moment.
   // In latter case passed task will be posted when ready.
-  bool RequestTrustedAllowGuest(Task* callback);
-  bool RequestTrustedAllowNewUser(Task* callback);
-  bool RequestTrustedDataRoamingEnabled(Task* callback);
-  bool RequestTrustedShowUsersOnSignin(Task* callback);
-  bool RequestTrustedOwner(Task* callback);
-  bool RequestTrustedReportingEnabled(Task* callback);
+  bool RequestTrustedAllowGuest(const base::Closure& callback);
+  bool RequestTrustedAllowNewUser(const base::Closure& callback);
+  bool RequestTrustedDataRoamingEnabled(const base::Closure& callback);
+  bool RequestTrustedShowUsersOnSignin(const base::Closure& callback);
+  bool RequestTrustedOwner(const base::Closure& callback);
+  bool RequestTrustedReportingEnabled(const base::Closure& callback);
 
   // Reloads values from device settings.
   void Reload();
@@ -62,8 +63,9 @@ class UserCrosSettingsProvider : public CrosSettingsProvider {
   static bool IsEmailInCachedWhitelist(const std::string& email);
 
   // CrosSettingsProvider implementation.
-  virtual bool Get(const std::string& path, base::Value** out_value) const;
-  virtual bool HandlesSetting(const std::string& path);
+  virtual bool Get(const std::string& path,
+                   base::Value** out_value) const OVERRIDE;
+  virtual bool HandlesSetting(const std::string& path) const OVERRIDE;
 
   void WhitelistUser(const std::string& email);
   void UnwhitelistUser(const std::string& email);
@@ -73,7 +75,7 @@ class UserCrosSettingsProvider : public CrosSettingsProvider {
 
  private:
   // CrosSettingsProvider implementation.
-  virtual void DoSet(const std::string& path, base::Value* value);
+  virtual void DoSet(const std::string& path, base::Value* value) OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(UserCrosSettingsProvider);
 };

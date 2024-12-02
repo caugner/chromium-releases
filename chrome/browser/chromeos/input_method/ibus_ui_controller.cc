@@ -8,9 +8,9 @@
 #include <ibus.h>
 #endif
 
+#include <sstream>
 #include "base/logging.h"
 #include "base/string_util.h"
-#include "base/utf_string_conversions.h"
 #include "third_party/mozc/session/commands.pb.h"
 
 namespace chromeos {
@@ -26,23 +26,24 @@ InputMethodLookupTable::InputMethodLookupTable()
 InputMethodLookupTable::~InputMethodLookupTable() {
 }
 
-#if defined(HAVE_IBUS)
-
-// Checks the attribute if this indicates annotation.
-gboolean IsAnnotation(IBusAttribute *attr) {
-  g_return_val_if_fail(attr, FALSE);
-
-  // Define annotation text color.
-  static const guint kAnnotationColor = 0x888888;
-
-  // Currently, we can discriminate annotation by specific value |attr->value|
-  // TODO(nhiroki): We should change the way when iBus supports annotations.
-  if (attr->type == IBUS_ATTR_TYPE_FOREGROUND &&
-      attr->value == kAnnotationColor) {
-    return TRUE;
+std::string InputMethodLookupTable::ToString() const {
+  std::stringstream stream;
+  stream << "visible: " << visible << "\n";
+  stream << "cursor_absolute_index: " << cursor_absolute_index << "\n";
+  stream << "page_size: " << page_size << "\n";
+  stream << "orientation: " << orientation << "\n";
+  stream << "candidates:";
+  for (size_t i = 0; i < candidates.size(); ++i) {
+    stream << " [" << candidates[i] << "]";
   }
-  return FALSE;
+  stream << "\nlabels:";
+  for (size_t i = 0; i < labels.size(); ++i) {
+    stream << " [" << labels[i] << "]";
+  }
+  return stream.str();
 }
+
+#if defined(HAVE_IBUS)
 
 // Returns an string representation of |table| for debugging.
 std::string IBusLookupTableToString(IBusLookupTable* table) {
@@ -502,7 +503,6 @@ class IBusUiControllerImpl : public IBusUiController {
       lookup_table.orientation = InputMethodLookupTable::kHorizontal;
     }
 
-
 #ifdef OS_CHROMEOS
     // The function ibus_serializable_get_attachment had been changed
     // to use GVariant by the commit
@@ -524,44 +524,23 @@ class IBusUiControllerImpl : public IBusUiController {
       }
     }
 #endif
-
     // Copy candidates and annotations to |lookup_table|.
     for (int i = 0; ; i++) {
       IBusText *text = ibus_lookup_table_get_candidate(table, i);
       if (!text) {
         break;
       }
+      lookup_table.candidates.push_back(text->text);
 
-      if (!text->attrs || !text->attrs->attributes) {
-        lookup_table.candidates.push_back(text->text);
+      const mozc::commands::Candidates &candidates =
+          lookup_table.mozc_candidates;
+      if ((i < candidates.candidate_size()) &&
+          candidates.candidate(i).has_annotation() &&
+          candidates.candidate(i).annotation().has_description()) {
+        lookup_table.annotations.push_back(
+            candidates.candidate(i).annotation().description());
+      } else {
         lookup_table.annotations.push_back("");
-        continue;
-      }
-
-      // Divide candidate and annotation by specific attribute.
-      const guint length = text->attrs->attributes->len;
-      for (int j = 0; ; j++) {
-        IBusAttribute *attr = ibus_attr_list_get(text->attrs, j);
-
-        // The candidate does not have annotation.
-        if (!attr) {
-          lookup_table.candidates.push_back(text->text);
-          lookup_table.annotations.push_back("");
-          break;
-        }
-
-        // Check that the attribute indicates annotation.
-        if (IsAnnotation(attr) && j + 1 == static_cast<int>(length)) {
-        const std::wstring candidate_word =
-            UTF8ToWide(text->text).substr(0, attr->start_index);
-        lookup_table.candidates.push_back(WideToUTF8(candidate_word));
-
-        const std::wstring annotation_word =
-            UTF8ToWide(text->text).substr(attr->start_index, attr->end_index);
-        lookup_table.annotations.push_back(WideToUTF8(annotation_word));
-
-        break;
-        }
       }
     }
     DCHECK_EQ(lookup_table.candidates.size(),

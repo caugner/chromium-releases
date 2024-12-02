@@ -39,15 +39,15 @@ class FakeSocket : public net::StreamSocket {
 
   // net::Socket interface.
   virtual int Read(net::IOBuffer* buf, int buf_len,
-                   net::CompletionCallback* callback);
+                   net::OldCompletionCallback* callback);
   virtual int Write(net::IOBuffer* buf, int buf_len,
-                    net::CompletionCallback* callback);
+                    net::OldCompletionCallback* callback);
 
   virtual bool SetReceiveBufferSize(int32 size);
   virtual bool SetSendBufferSize(int32 size);
 
   // net::StreamSocket interface.
-  virtual int Connect(net::CompletionCallback* callback) OVERRIDE;
+  virtual int Connect(net::OldCompletionCallback* callback) OVERRIDE;
   virtual void Disconnect() OVERRIDE;
   virtual bool IsConnected() const OVERRIDE;
   virtual bool IsConnectedAndIdle() const OVERRIDE;
@@ -65,7 +65,7 @@ class FakeSocket : public net::StreamSocket {
   bool read_pending_;
   scoped_refptr<net::IOBuffer> read_buffer_;
   int read_buffer_size_;
-  net::CompletionCallback* read_callback_;
+  net::OldCompletionCallback* read_callback_;
 
   std::string written_data_;
   std::string input_data_;
@@ -95,9 +95,9 @@ class FakeUdpSocket : public net::Socket {
 
   // net::Socket interface.
   virtual int Read(net::IOBuffer* buf, int buf_len,
-                   net::CompletionCallback* callback);
+                   net::OldCompletionCallback* callback);
   virtual int Write(net::IOBuffer* buf, int buf_len,
-                    net::CompletionCallback* callback);
+                    net::OldCompletionCallback* callback);
 
   virtual bool SetReceiveBufferSize(int32 size);
   virtual bool SetSendBufferSize(int32 size);
@@ -106,7 +106,7 @@ class FakeUdpSocket : public net::Socket {
   bool read_pending_;
   scoped_refptr<net::IOBuffer> read_buffer_;
   int read_buffer_size_;
-  net::CompletionCallback* read_callback_;
+  net::OldCompletionCallback* read_callback_;
 
   std::vector<std::string> written_packets_;
   std::vector<std::string> input_packets_;
@@ -124,11 +124,13 @@ class FakeSession : public Session {
   FakeSession();
   virtual ~FakeSession();
 
-  StateChangeCallback* state_change_callback() { return callback_.get(); }
+  const StateChangeCallback& state_change_callback() { return callback_; }
 
   void set_message_loop(MessageLoop* message_loop) {
     message_loop_ = message_loop;
   }
+
+  void set_error(Session::Error error) { error_ = error; }
 
   bool is_closed() const { return closed_; }
 
@@ -136,7 +138,9 @@ class FakeSession : public Session {
   FakeUdpSocket* GetDatagramChannel(const std::string& name);
 
   // Session interface.
-  virtual void SetStateChangeCallback(StateChangeCallback* callback);
+  virtual void SetStateChangeCallback(const StateChangeCallback& callback);
+
+  virtual Session::Error error();
 
   virtual void CreateStreamChannel(
       const std::string& name, const StreamChannelCallback& callback);
@@ -149,8 +153,8 @@ class FakeSession : public Session {
   virtual const std::string& jid();
 
   virtual const CandidateSessionConfig* candidate_config();
-  virtual const SessionConfig* config();
-  virtual void set_config(const SessionConfig* config);
+  virtual const SessionConfig& config();
+  virtual void set_config(const SessionConfig& config);
 
   virtual const std::string& initiator_token();
   virtual void set_initiator_token(const std::string& initiator_token);
@@ -163,9 +167,9 @@ class FakeSession : public Session {
   virtual void Close();
 
  public:
-  scoped_ptr<StateChangeCallback> callback_;
+  StateChangeCallback callback_;
   scoped_ptr<const CandidateSessionConfig> candidate_config_;
-  scoped_ptr<const SessionConfig> config_;
+  SessionConfig config_;
   MessageLoop* message_loop_;
   FakeSocket control_channel_;
   FakeSocket event_channel_;
@@ -179,6 +183,8 @@ class FakeSession : public Session {
   std::string shared_secret_;
 
   std::string jid_;
+
+  Session::Error error_;
   bool closed_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeSession);

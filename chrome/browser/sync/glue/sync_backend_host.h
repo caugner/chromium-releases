@@ -15,6 +15,7 @@
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/threading/thread.h"
 #include "base/timer.h"
 #include "chrome/browser/sync/engine/model_safe_worker.h"
@@ -23,7 +24,7 @@
 #include "chrome/browser/sync/notifier/sync_notifier_factory.h"
 #include "chrome/browser/sync/protocol/sync_protocol_error.h"
 #include "chrome/browser/sync/syncable/model_type.h"
-#include "chrome/browser/sync/weak_handle.h"
+#include "chrome/browser/sync/util/weak_handle.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -41,6 +42,7 @@ class ChangeProcessor;
 class JsBackend;
 class JsEventHandler;
 class SyncBackendRegistrar;
+class SyncPrefs;
 
 // SyncFrontend is the interface used by SyncBackendHost to communicate with
 // the entity that created it and, presumably, is interested in sync-related
@@ -119,10 +121,13 @@ class SyncBackendHost {
   typedef sync_api::SyncManager::Status::Summary StatusSummary;
   typedef sync_api::SyncManager::Status Status;
 
-  // Create a SyncBackendHost with a reference to the |frontend| that it serves
-  // and communicates to via the SyncFrontend interface (on the same thread
-  // it used to call the constructor).
-  SyncBackendHost(const std::string& name, Profile* profile);
+  // Create a SyncBackendHost with a reference to the |frontend| that
+  // it serves and communicates to via the SyncFrontend interface (on
+  // the same thread it used to call the constructor).  Must outlive
+  // |sync_prefs|.
+  SyncBackendHost(const std::string& name,
+                  Profile* profile,
+                  const base::WeakPtr<SyncPrefs>& sync_prefs);
   // For testing.
   // TODO(skrul): Extract an interface so this is not needed.
   SyncBackendHost();
@@ -155,9 +160,15 @@ class SyncBackendHost {
   // *not* override an explicit passphrase set previously.
   void SetPassphrase(const std::string& passphrase, bool is_explicit);
 
+  // Called on |frontend_loop_| to kick off shutdown procedure. After this,
+  // no further sync activity will occur with the sync server and no further
+  // change applications will occur from changes already downloaded.
+  virtual void StopSyncingForShutdown();
+
   // Called on |frontend_loop_| to kick off shutdown.
   // |sync_disabled| indicates if syncing is being disabled or not.
   // See the implementation and Core::DoShutdown for details.
+  // Must be called *after* StopSyncingForShutdown.
   void Shutdown(bool sync_disabled);
 
   // Changes the set of data types that are currently being synced.
@@ -173,7 +184,7 @@ class SyncBackendHost {
 
   // Makes an asynchronous call to syncer to switch to config mode. When done
   // syncer will call us back on FinishConfigureDataTypes.
-  virtual void StartConfiguration(Callback0::Type* callback);
+  virtual void StartConfiguration(const base::Closure& callback);
 
   // Turns on encryption of all present and future sync data.
   virtual void EnableEncryptEverything();
@@ -224,9 +235,6 @@ class SyncBackendHost {
   // ONLY CALL THIS IF OnInitializationComplete was called!
   bool HasUnsyncedItems() const;
 
-  // Logs the unsynced items.
-  void LogUnsyncedItems(int level) const;
-
   // Whether or not we are syncing encryption keys.
   bool IsNigoriEnabled() const;
 
@@ -243,11 +251,18 @@ class SyncBackendHost {
  protected:
   // An enum representing the steps to initializing the SyncBackendHost.
   enum InitializationState {
-    NOT_INITIALIZED,     // Initialization hasn't completed.
-    DOWNLOADING_NIGORI,  // The SyncManager is initialized, but we're fetching
-                         // encryption information before alerting the
-                         // frontend.
-    INITIALIZED,         // Initialization is complete.
+    NOT_ATTEMPTED,
+    CREATING_SYNC_MANAGER,  // We're waiting for the first callback from the
+                            // sync thread to inform us that the sync manager
+                            // has been created.
+    NOT_INITIALIZED,        // Initialization hasn't completed, but we've
+                            // constructed a SyncManager.
+    DOWNLOADING_NIGORI,     // The SyncManager is initialized, but
+                            // we're fetching encryption information.
+    REFRESHING_ENCRYPTION,  // The SyncManager is initialized, and we
+                            // have the encryption information, but we
+                            // still need to refresh encryption.
+    INITIALIZED,            // Initialization is complete.
   };
 
   // The real guts of SyncBackendHost, to keep the public client API clean.
@@ -259,13 +274,6 @@ class SyncBackendHost {
     // SyncManager::Observer implementation.  The Core just acts like an air
     // traffic controller here, forwarding incoming messages to appropriate
     // landing threads.
-    virtual void OnChangesApplied(
-        syncable::ModelType model_type,
-        const sync_api::BaseTransaction* trans,
-        const sync_api::SyncManager::ChangeRecord* changes,
-        int change_count) OVERRIDE;
-    virtual void OnChangesComplete(
-        syncable::ModelType model_type) OVERRIDE;
     virtual void OnSyncCycleCompleted(
         const sessions::SyncSessionSnapshot* snapshot) OVERRIDE;
     virtual void OnInitializationComplete(
@@ -288,6 +296,7 @@ class SyncBackendHost {
 
     struct DoInitializeOptions {
       DoInitializeOptions(
+          MessageLoop* sync_loop,
           SyncBackendRegistrar* registrar,
           const WeakHandle<JsEventHandler>& event_handler,
           const GURL& service_url,
@@ -299,6 +308,7 @@ class SyncBackendHost {
           bool setup_for_test_mode);
       ~DoInitializeOptions();
 
+      MessageLoop* sync_loop;
       SyncBackendRegistrar* registrar;
       WeakHandle<JsEventHandler> event_handler;
       GURL service_url;
@@ -312,40 +322,48 @@ class SyncBackendHost {
 
     // Note:
     //
-    // The Do* methods are the various entry points from our SyncBackendHost.
-    // It calls us on a dedicated thread to actually perform synchronous
-    // (and potentially blocking) syncapi operations.
+    // The Do* methods are the various entry points from our
+    // SyncBackendHost.  They are all called on the sync thread to
+    // actually perform synchronous (and potentially blocking) syncapi
+    // operations.
     //
-    // Called on the SyncBackendHost sync_thread_ to perform initialization
-    // of the syncapi on behalf of SyncBackendHost::Initialize.
+    // Called to perform initialization of the syncapi on behalf of
+    // SyncBackendHost::Initialize.
     void DoInitialize(const DoInitializeOptions& options);
 
-    // Called on our SyncBackendHost's sync_thread_ to perform credential
-    // update on behalf of SyncBackendHost::UpdateCredentials
+    // Called to check server reachability after initialization is
+    // fully completed.
+    void DoCheckServerReachable();
+
+    // Called to perform credential update on behalf of
+    // SyncBackendHost::UpdateCredentials
     void DoUpdateCredentials(const sync_api::SyncCredentials& credentials);
 
     // Called when the user disables or enables a sync type.
     void DoUpdateEnabledTypes();
 
-    // Called on the SyncBackendHost sync_thread_ to tell the syncapi to start
-    // syncing (generally after initialization and authentication).
+    // Called to tell the syncapi to start syncing (generally after
+    // initialization and authentication).
     void DoStartSyncing();
 
-    // Called on the SyncBackendHost sync_thread_ to clear server
-    // data.
+    // Called to clear server data.
     void DoRequestClearServerData();
 
-    // Called on the SyncBackendHost sync_thread_ to cleanup disabled
-    // types.
+    // Called to cleanup disabled types.
     void DoRequestCleanupDisabledTypes();
 
-    // Called on our SyncBackendHost's |sync_thread_| to set the passphrase
-    // on behalf of SyncBackendHost::SupplyPassphrase.
+    // Called to set the passphrase on behalf of
+    // SyncBackendHost::SupplyPassphrase.
     void DoSetPassphrase(const std::string& passphrase, bool is_explicit);
 
-    // Called on SyncBackendHost's |sync_thread_| to turn on encryption of all
-    // sync data as well as reencrypt everything.
+    // Called to turn on encryption of all sync data as well as
+    // reencrypt everything.
     void DoEnableEncryptEverything();
+
+    // Called to refresh encryption with the most recent passphrase
+    // and set of encrypted types.  |done_callback| is called on the
+    // sync thread.
+    void DoRefreshEncryption(const base::Closure& done_callback);
 
     // The shutdown order is a bit complicated:
     // 1) From |sync_thread_|, invoke the syncapi Shutdown call to do
@@ -357,15 +375,16 @@ class SyncBackendHost {
     // 3) Destroy this Core. That will delete syncapi components in a
     //    safe order because the thread that was using them has exited
     //    (in step 2).
+    void DoStopSyncManagerForShutdown(const base::Closure& closure);
     void DoShutdown(bool stopping_sync);
 
-    // Posts a config request on the sync thread.
     virtual void DoRequestConfig(
         const syncable::ModelTypeBitSet& types_to_config,
         sync_api::ConfigureReason reason);
 
-    // Start the configuration mode.
-    virtual void DoStartConfiguration(Callback0::Type* callback);
+    // Start the configuration mode.  |callback| is called on the sync
+    // thread.
+    virtual void DoStartConfiguration(const base::Closure& callback);
 
     // Set the base request context to use when making HTTP calls.
     // This method will add a reference to the context to persist it
@@ -387,10 +406,6 @@ class SyncBackendHost {
         const WeakHandle<JsBackend>& js_backend,
         bool success);
 
-    // Let the front end handle the actionable error event.
-    void HandleActionableErrorEventOnFrontendLoop(
-        const browser_sync::SyncProtocolError& sync_error);
-
    private:
     friend class base::RefCountedThreadSafe<SyncBackendHost::Core>;
     friend class SyncBackendHostForProfileSyncTest;
@@ -410,6 +425,10 @@ class SyncBackendHost {
     // off as soon as the SyncManager tells us it completed
     // initialization.
     void SaveChanges();
+
+    // Let the front end handle the actionable error event.
+    void HandleActionableErrorEventOnFrontendLoop(
+        const browser_sync::SyncProtocolError& sync_error);
 
     // Dispatched to from OnAuthError to handle updating frontend UI
     // components.
@@ -450,6 +469,10 @@ class SyncBackendHost {
     // Our parent SyncBackendHost
     SyncBackendHost* host_;
 
+    // The loop where all the sync backend operations happen.
+    // Non-NULL only between calls to DoInitialize() and DoShutdown().
+    MessageLoop* sync_loop_;
+
     // Our parent's registrar (not owned).  Non-NULL only between
     // calls to DoInitialize() and DoShutdown().
     SyncBackendRegistrar* registrar_;
@@ -463,6 +486,11 @@ class SyncBackendHost {
     DISALLOW_COPY_AND_ASSIGN(Core);
   };
 
+  // Checks if we have received a notice to turn on experimental datatypes
+  // (via the nigori node) and informs the frontend if that is the case.
+  // Note: it is illegal to call this before the backend is initialized.
+  void AddExperimentalTypes();
+
   // InitializationComplete passes through the SyncBackendHost to forward
   // on to |frontend_|, and so that tests can intercept here if they need to
   // set up initial conditions.
@@ -472,7 +500,6 @@ class SyncBackendHost {
 
   // Called to finish the job of ConfigureDataTypes once the syncer is in
   // configuration mode.
-  void FinishConfigureDataTypes();
   void FinishConfigureDataTypesOnFrontendLoop();
 
   // Allows tests to perform alternate core initialization work.
@@ -483,14 +510,11 @@ class SyncBackendHost {
   virtual sync_api::HttpPostProviderFactory* MakeHttpBridgeFactory(
       const scoped_refptr<net::URLRequestContextGetter>& getter);
 
-  MessageLoop* sync_loop() { return sync_thread_.message_loop(); }
-
   // Helpers to persist a token that can be used to bootstrap sync encryption
   // across browser restart to avoid requiring the user to re-enter their
   // passphrase.  |token| must be valid UTF-8 as we use the PrefService for
   // storage.
   void PersistEncryptionBootstrapToken(const std::string& token);
-  std::string RestoreEncryptionBootstrapToken();
 
   // Our core, which communicates directly to the syncapi.
   scoped_refptr<Core> core_;
@@ -518,6 +542,14 @@ class SyncBackendHost {
   // For convenience, checks if initialization state is INITIALIZED.
   bool initialized() const { return initialization_state_ == INITIALIZED; }
 
+  // Must be called on |frontend_loop_|.  |done_callback| is called on
+  // |frontend_loop_|.
+  void RefreshEncryption(const base::Closure& done_callback);
+
+  // Handles stopping the core's SyncManager, accounting for whether
+  // initialization is done yet.
+  void StopSyncManagerForShutdown(const base::Closure& closure);
+
   // A thread where all the sync operations happen.
   base::Thread sync_thread_;
 
@@ -526,6 +558,8 @@ class SyncBackendHost {
   MessageLoop* const frontend_loop_;
 
   Profile* const profile_;
+
+  const base::WeakPtr<SyncPrefs> sync_prefs_;
 
   // Name used for debugging (set from profile_->GetDebugName()).
   const std::string name_;

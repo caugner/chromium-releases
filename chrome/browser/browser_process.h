@@ -21,6 +21,7 @@
 class AutomationProviderList;
 class BackgroundModeManager;
 class ChromeNetLog;
+class CRLSetFetcher;
 class ComponentUpdateService;
 class DevToolsManager;
 class DownloadRequestLimiter;
@@ -50,6 +51,10 @@ class Thread;
 }
 
 #if defined(OS_CHROMEOS)
+namespace browser {
+class OomPriorityManager;
+}
+
 namespace chromeos {
 class ProxyConfigServiceImpl;
 }
@@ -109,6 +114,9 @@ class BrowserProcess {
   // Returns ChromeOS's ProxyConfigServiceImpl, creating if not yet created.
   virtual chromeos::ProxyConfigServiceImpl*
       chromeos_proxy_config_service_impl() = 0;
+
+  // Returns the out-of-memory priority manager.
+  virtual browser::OomPriorityManager* oom_priority_manager() = 0;
 #endif  // defined(OS_CHROMEOS)
 
   virtual ExtensionEventRouterForwarder*
@@ -155,7 +163,7 @@ class BrowserProcess {
 
   virtual ThumbnailGenerator* GetThumbnailGenerator() = 0;
 
-  virtual AutomationProviderList* InitAutomationProviderList() = 0;
+  virtual AutomationProviderList* GetAutomationProviderList() = 0;
 
   virtual void InitDevToolsHttpProtocolHandler(
       Profile* profile,
@@ -236,6 +244,8 @@ class BrowserProcess {
   virtual GpuBlacklistUpdater* gpu_blacklist_updater() = 0;
 
   virtual ComponentUpdateService* component_updater() = 0;
+
+  virtual CRLSetFetcher* crl_set_fetcher() = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserProcess);

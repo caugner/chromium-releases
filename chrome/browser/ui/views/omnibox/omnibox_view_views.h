@@ -14,7 +14,6 @@
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "content/common/notification_observer.h"
-#include "content/common/page_transition_types.h"
 #include "ui/base/range/range.h"
 #include "views/controls/textfield/textfield_controller.h"
 #include "views/view.h"
@@ -70,6 +69,7 @@ class OmniboxViewViews : public views::View,
   virtual void Layout() OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual std::string GetClassName() const OVERRIDE;
+  virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
 
   // OmniboxView:
   virtual AutocompleteEditModel* model() OVERRIDE;
@@ -114,6 +114,7 @@ class OmniboxViewViews : public views::View,
   virtual void OnBeforePossibleChange() OVERRIDE;
   virtual bool OnAfterPossibleChange() OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
+  virtual gfx::NativeView GetRelativeWindowForPopup() const OVERRIDE;
   virtual CommandUpdater* GetCommandUpdater() OVERRIDE;
   virtual void SetInstantSuggestion(const string16& input,
                                     bool animate_to_complete) OVERRIDE;
@@ -152,9 +153,6 @@ class OmniboxViewViews : public views::View,
 
   // Returns the selected text.
   string16 GetSelectedText() const;
-
-  // Selects the text given by |caret| and |end|.
-  void SelectRange(size_t caret, size_t end);
 
   AutocompletePopupView* CreatePopupView(View* location_bar);
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #pragma once
 
 #include "base/basictypes.h"
+#include "content/common/content_export.h"
 
 class RenderViewHost;
 class RenderViewHostDelegate;
@@ -50,16 +51,16 @@ class RenderViewHostFactory {
   // Registers your factory to be called when new RenderViewHosts are created.
   // We have only one global factory, so there must be no factory registered
   // before the call. This class does NOT take ownership of the pointer.
-  static void RegisterFactory(RenderViewHostFactory* factory);
+  CONTENT_EXPORT static void RegisterFactory(RenderViewHostFactory* factory);
 
   // Unregister the previously registered factory. With no factory registered,
   // the default RenderViewHosts will be created.
-  static void UnregisterFactory();
+  CONTENT_EXPORT static void UnregisterFactory();
 
  private:
   // The current globally registered factory. This is NULL when we should
   // create the default RenderViewHosts.
-  static RenderViewHostFactory* factory_;
+  CONTENT_EXPORT static RenderViewHostFactory* factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewHostFactory);
 };

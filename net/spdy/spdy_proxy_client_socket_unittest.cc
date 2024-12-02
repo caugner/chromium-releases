@@ -40,7 +40,7 @@ static const int kStreamId = 1;
 
 static const char kMsg1[] = "\0hello!\xff";
 static const int kLen1 = 8;
-static const char kMsg2[] = "\012345678\0";
+static const char kMsg2[] = "\00012345678\0";
 static const int kLen2 = 10;
 static const char kMsg3[] = "bye!";
 static const int kLen3 = 4;
@@ -100,8 +100,8 @@ class SpdyProxyClientSocketTest : public PlatformTest {
   }
 
   scoped_ptr<SpdyProxyClientSocket> sock_;
-  TestCompletionCallback read_callback_;
-  TestCompletionCallback write_callback_;
+  TestOldCompletionCallback read_callback_;
+  TestOldCompletionCallback write_callback_;
   scoped_refptr<DeterministicSocketData> data_;
 
  private:

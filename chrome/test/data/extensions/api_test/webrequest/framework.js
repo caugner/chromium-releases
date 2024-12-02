@@ -1,3 +1,7 @@
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 var getURL = chrome.extension.getURL;
 var deepEq = chrome.test.checkDeepEq;
 var expectedEventData;
@@ -5,6 +9,7 @@ var capturedEventData;
 var expectedEventOrder;
 var tabId;
 var testServerPort;
+var testServer = "www.a.com";
 var eventsCaptured;
 
 function runTests(tests) {
@@ -19,10 +24,11 @@ function runTests(tests) {
 
 // Returns an URL from the test server, fixing up the port. Must be called
 // from within a test case passed to runTests.
-function getServerURL(path) {
+function getServerURL(path, opt_host) {
   if (!testServerPort)
     throw new Error("Called getServerURL outside of runTests.");
-  return "http://www.a.com:" + testServerPort + "/" + path;
+  var host = opt_host || testServer;
+  return "http://" + host + ":" + testServerPort + "/" + path;
 }
 
 // Helper to advance to the next test only when the tab has finished loading.
@@ -59,6 +65,18 @@ function expect(data, order, filter, extraInfoSpec) {
   tabAndFrameUrls = {};  // Maps "{tabId}-{frameId}" to the URL of the frame.
   removeListeners();
   initListeners(filter || {}, extraInfoSpec || []);
+  // Fill in default values.
+  for (var i = 0; i < expectedEventData.length; ++i) {
+    if (!expectedEventData[i].details.method) {
+      expectedEventData[i].details.method = "GET";
+    }
+    if (!expectedEventData[i].details.tabId) {
+      expectedEventData[i].details.tabId = tabId;
+    }
+    if (!expectedEventData[i].details.type) {
+      expectedEventData[i].details.type = "main_frame";
+    }
+  }
 }
 
 function checkExpectations() {
@@ -122,7 +140,10 @@ function captureEvent(name, details) {
   var currentIndex = capturedEventData.length;
   var extraOptions;
   if (expectedEventData.length > currentIndex) {
-    retval = expectedEventData[currentIndex].retval;
+    retval =
+        expectedEventData[currentIndex].retval_function ?
+        expectedEventData[currentIndex].retval_function(name, details) :
+        expectedEventData[currentIndex].retval;
   }
 
   // Check that the frameId can be used to reliably determine the URL of the
@@ -194,22 +215,26 @@ function initListeners(filter, extraInfoSpec) {
       function(details) {
     return captureEvent("onSendHeaders", details);
   }, filter, intersect(extraInfoSpec, ["requestHeaders"]));
+  chrome.experimental.webRequest.onHeadersReceived.addListener(
+      function(details) {
+    return captureEvent("onHeadersReceived", details);
+  }, filter, intersect(extraInfoSpec, ["blocking", "responseHeaders"]));
   chrome.experimental.webRequest.onAuthRequired.addListener(
       function(details) {
     return captureEvent("onAuthRequired", details);
-  }, filter, intersect(extraInfoSpec, ["responseHeaders", "statusLine"]));
+  }, filter, intersect(extraInfoSpec, ["blocking", "responseHeaders"]));
   chrome.experimental.webRequest.onResponseStarted.addListener(
       function(details) {
     return captureEvent("onResponseStarted", details);
-  }, filter, intersect(extraInfoSpec, ["responseHeaders", "statusLine"]));
+  }, filter, intersect(extraInfoSpec, ["responseHeaders"]));
   chrome.experimental.webRequest.onBeforeRedirect.addListener(
       function(details) {
     return captureEvent("onBeforeRedirect", details);
-  }, filter, intersect(extraInfoSpec, ["responseHeaders", "statusLine"]));
+  }, filter, intersect(extraInfoSpec, ["responseHeaders"]));
   chrome.experimental.webRequest.onCompleted.addListener(
       function(details) {
     return captureEvent("onCompleted", details);
-  }, filter, intersect(extraInfoSpec, ["responseHeaders", "statusLine"]));
+  }, filter, intersect(extraInfoSpec, ["responseHeaders"]));
   chrome.experimental.webRequest.onErrorOccurred.addListener(
       function(details) {
     return captureEvent("onErrorOccurred", details);
@@ -221,8 +246,8 @@ function removeListeners() {
     // Note: We're poking at the internal event data, but it's easier than
     // the alternative. If this starts failing, we just need to update this
     // helper.
-    for (var cb in event.callbackMap_) {
-      event.removeListener(cb);
+    for (var i in event.subEvents_) {
+      event.removeListener(event.subEvents_[i].callback);
     }
     chrome.test.assertFalse(event.hasListeners());
   }
@@ -230,6 +255,7 @@ function removeListeners() {
   helper(chrome.experimental.webRequest.onBeforeSendHeaders);
   helper(chrome.experimental.webRequest.onAuthRequired);
   helper(chrome.experimental.webRequest.onSendHeaders);
+  helper(chrome.experimental.webRequest.onHeadersReceived);
   helper(chrome.experimental.webRequest.onResponseStarted);
   helper(chrome.experimental.webRequest.onBeforeRedirect);
   helper(chrome.experimental.webRequest.onCompleted);

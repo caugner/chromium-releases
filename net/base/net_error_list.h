@@ -483,7 +483,7 @@ NET_ERROR(UNDOCUMENTED_SECURITY_LIBRARY_STATUS, -344)
 // The HTTP response was too big to drain.
 NET_ERROR(RESPONSE_BODY_TOO_BIG_TO_DRAIN, -345)
 
-// The HTTP response was too big to drain.
+// The HTTP response contained multiple distinct Content-Length headers.
 NET_ERROR(RESPONSE_HEADERS_MULTIPLE_CONTENT_LENGTH, -346)
 
 // SPDY Headers have been received, but not all of them - status or version
@@ -494,6 +494,19 @@ NET_ERROR(INCOMPLETE_SPDY_HEADERS, -347)
 // either a failure to retrieve the DHCP configuration, or that there was no
 // PAC URL configured in DHCP.
 NET_ERROR(PAC_NOT_IN_DHCP, -348)
+
+// The HTTP response contained multiple Content-Disposition headers.
+NET_ERROR(RESPONSE_HEADERS_MULTIPLE_CONTENT_DISPOSITION, -349)
+
+// The HTTP response contained multiple Location headers.
+NET_ERROR(RESPONSE_HEADERS_MULTIPLE_LOCATION, -350)
+
+// SPDY server refused the stream. Client should retry. This should never be a
+// user-visible error.
+NET_ERROR(SPDY_SERVER_REFUSED_STREAM, -351)
+
+// SPDY server didn't respond to the PING message.
+NET_ERROR(SPDY_PING_FAILED, -352)
 
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)
@@ -599,9 +612,6 @@ NET_ERROR(ORIGIN_BOUND_CERT_GENERATION_FAILED, -711)
 
 // Failure to export private key.
 NET_ERROR(PRIVATE_KEY_EXPORT_FAILED, -712)
-
-// Failure to get certificate bytes.
-NET_ERROR(GET_CERT_BYTES_FAILED, -713)
 
 // DNS error codes.
 

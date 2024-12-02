@@ -19,7 +19,7 @@
 #include "chrome/renderer/chrome_render_process_observer.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/extensions/extension_groups.h"
-#include "content/renderer/render_thread.h"
+#include "content/public/renderer/render_thread.h"
 #include "googleurl/src/gurl.h"
 #include "grit/renderer_resources.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
@@ -38,6 +38,7 @@ using WebKit::WebSecurityPolicy;
 using WebKit::WebString;
 using WebKit::WebVector;
 using WebKit::WebView;
+using content::RenderThread;
 
 // These two strings are injected before and after the Greasemonkey API and
 // user script to wrap it in an anonymous scope.
@@ -192,7 +193,7 @@ bool UserScriptSlave::UpdateScripts(base::SharedMemoryHandle shared_memory) {
   }
 
   // Push user styles down into WebCore
-  RenderThread::current()->EnsureWebKitInitialized();
+  RenderThread::Get()->EnsureWebKitInitialized();
   WebView::removeAllUserContent();
   for (size_t i = 0; i < scripts_.size(); ++i) {
     UserScript* script = scripts_[i];
@@ -229,8 +230,7 @@ bool UserScriptSlave::UpdateScripts(base::SharedMemoryHandle shared_memory) {
   return true;
 }
 
-void UserScriptSlave::InjectScripts(WebFrame* frame,
-                                    UserScript::RunLocation location) {
+GURL UserScriptSlave::GetLatestURLForFrame(WebFrame* frame) {
   // Normally we would use frame->document().url() to determine the document's
   // URL, but to decide whether to inject a content script, we use the URL from
   // the data source. This "quirk" helps prevents content scripts from
@@ -239,7 +239,15 @@ void UserScriptSlave::InjectScripts(WebFrame* frame,
   // changes to match the parent document after Gmail document.writes into
   // it to create the editor.
   // http://code.google.com/p/chromium/issues/detail?id=86742
-  GURL data_source_url = GURL(frame->dataSource()->request().url());
+  WebKit::WebDataSource* data_source = frame->provisionalDataSource() ?
+      frame->provisionalDataSource() : frame->dataSource();
+  CHECK(data_source);
+  return GURL(data_source->request().url());
+}
+
+void UserScriptSlave::InjectScripts(WebFrame* frame,
+                                    UserScript::RunLocation location) {
+  GURL data_source_url = GetLatestURLForFrame(frame);
   if (data_source_url.is_empty())
     return;
 

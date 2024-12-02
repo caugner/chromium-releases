@@ -6,8 +6,8 @@
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
-#include "content/common/page_transition_types.h"
 #include "content/common/view_messages.h"
+#include "content/public/common/page_transition_types.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
 #include "webkit/glue/webdropdata.h"
 
@@ -48,14 +48,15 @@ TEST_F(RenderViewHostTest, ResetUnloadOnReload) {
   //     fires the tab gets closed.
 
   NavigateAndCommit(url1);
-  controller().LoadURL(url2, GURL(), PageTransition::LINK);
+  controller().LoadURL(
+      url2, GURL(), content::PAGE_TRANSITION_LINK, std::string());
   // Simulate the ClosePage call which is normally sent by the net::URLRequest.
   rvh()->ClosePage();
   // Needed so that navigations are not suspended on the RVH.
   rvh()->SendShouldCloseACK(true);
   contents()->Stop();
   controller().Reload(false);
-  EXPECT_FALSE(rvh()->is_waiting_for_unload_ack());
+  EXPECT_FALSE(rvh()->is_waiting_for_unload_ack_for_testing());
 }
 
 class MockDraggingRenderViewHostDelegateView
@@ -143,7 +144,7 @@ TEST_F(RenderViewHostTest, StartDragging) {
 }
 
 // The test that follow trigger DCHECKS in debug build.
-#if defined(NDEBUG)
+#if defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON)
 
 // Test that when we fail to de-serialize a message, RenderViewHost calls the
 // ReceivedBadMessage() handler.
@@ -182,4 +183,4 @@ TEST_F(RenderViewHostTest, BadMessageHandlerInputEventAck) {
   EXPECT_EQ(1, process()->bad_msg_count());
 }
 
-#endif  // NDEBUG
+#endif

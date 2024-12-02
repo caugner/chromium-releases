@@ -22,10 +22,8 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#import "chrome/browser/ui/cocoa/accelerators_cocoa.h"
 #import "chrome/browser/ui/cocoa/background_gradient_view.h"
 #include "chrome/browser/ui/cocoa/drag_util.h"
-#import "chrome/browser/ui/cocoa/encoding_menu_controller_delegate_mac.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_action_button.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_container_view.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_controller.h"
@@ -41,6 +39,8 @@
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_view.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #import "chrome/browser/ui/cocoa/wrench_menu/wrench_menu_controller.h"
+#include "chrome/browser/ui/global_error_service.h"
+#include "chrome/browser/ui/global_error_service_factory.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
@@ -57,8 +57,6 @@
 #include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
-#include "ui/base/models/accelerator_cocoa.h"
-#include "ui/base/models/menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/rect.h"
@@ -79,7 +77,8 @@ const CGFloat kWrenchMenuLeftPadding = 3.0;
 
 }  // namespace
 
-@interface ToolbarController(Private)
+@interface ToolbarController()
+@property(assign, nonatomic) Browser* browser;
 - (void)addAccessibilityDescriptions;
 - (void)initCommandStatus:(CommandUpdater*)commands;
 - (void)prefChanged:(std::string*)prefName;
@@ -97,26 +96,6 @@ const CGFloat kWrenchMenuLeftPadding = 3.0;
 
 namespace ToolbarControllerInternal {
 
-// A C++ delegate that handles the accelerators in the wrench menu.
-class WrenchAcceleratorDelegate : public ui::AcceleratorProvider {
- public:
-  virtual bool GetAcceleratorForCommandId(int command_id,
-      ui::Accelerator* accelerator_generic) {
-    // Downcast so that when the copy constructor is invoked below, the key
-    // string gets copied, too.
-    ui::AcceleratorCocoa* out_accelerator =
-        static_cast<ui::AcceleratorCocoa*>(accelerator_generic);
-    AcceleratorsCocoa* keymap = AcceleratorsCocoa::GetInstance();
-    const ui::AcceleratorCocoa* accelerator =
-        keymap->GetAcceleratorForCommand(command_id);
-    if (accelerator) {
-      *out_accelerator = *accelerator;
-      return true;
-    }
-    return false;
-  }
-};
-
 // A class registered for C++ notifications. This is used to detect changes in
 // preferences and upgrade available notifications. Bridges the notification
 // back to the ToolbarController.
@@ -126,6 +105,8 @@ class NotificationBridge : public NotificationObserver {
       : controller_(controller) {
     registrar_.Add(this, chrome::NOTIFICATION_UPGRADE_RECOMMENDED,
                    NotificationService::AllSources());
+    registrar_.Add(this, chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED,
+                   Source<Profile>([controller browser]->profile()));
   }
 
   // Overridden from NotificationObserver:
@@ -137,6 +118,7 @@ class NotificationBridge : public NotificationObserver {
         [controller_ prefChanged:Details<std::string>(details).ptr()];
         break;
       case chrome::NOTIFICATION_UPGRADE_RECOMMENDED:
+      case chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED:
         [controller_ badgeWrenchMenuIfNeeded];
         break;
       default:
@@ -153,6 +135,8 @@ class NotificationBridge : public NotificationObserver {
 }  // namespace ToolbarControllerInternal
 
 @implementation ToolbarController
+
+@synthesize browser = browser_;
 
 - (id)initWithModel:(ToolbarModel*)model
            commands:(CommandUpdater*)commands
@@ -543,14 +527,11 @@ class NotificationBridge : public NotificationObserver {
 // Install the menu wrench buttons. Calling this repeatedly is inexpensive so it
 // can be done every time the buttons are shown.
 - (void)installWrenchMenu {
-  if (wrenchMenuModel_.get())
+  if (wrenchMenuController_.get())
     return;
-  acceleratorDelegate_.reset(
-      new ToolbarControllerInternal::WrenchAcceleratorDelegate());
 
-  wrenchMenuModel_.reset(new WrenchMenuModel(
-      acceleratorDelegate_.get(), browser_));
-  [wrenchMenuController_ setModel:wrenchMenuModel_.get()];
+  wrenchMenuController_.reset(
+      [[WrenchMenuController alloc] initWithBrowser:browser_]);
   [wrenchMenuController_ setUseWithPopUpButtonCell:YES];
   [wrenchButton_ setAttachedMenu:[wrenchMenuController_ menu]];
 }
@@ -564,9 +545,12 @@ class NotificationBridge : public NotificationObserver {
     [[wrenchButton_ cell]
         setOverlayImageID:UpgradeDetector::GetInstance()->GetIconResourceID(
             UpgradeDetector::UPGRADE_ICON_TYPE_BADGE)];
-  } else {
-    [[wrenchButton_ cell] setOverlayImageID:0];
+    return;
   }
+
+  int error_badge_id = GlobalErrorServiceFactory::GetForProfile(
+      browser_->profile())->GetFirstBadgeResourceID();
+  [[wrenchButton_ cell] setOverlayImageID:error_badge_id];
 }
 
 - (void)prefChanged:(std::string*)prefName {
@@ -744,6 +728,10 @@ class NotificationBridge : public NotificationObserver {
   return browserActionsController_.get();
 }
 
+- (NSView*)wrenchButton {
+  return wrenchButton_;
+}
+
 // (URLDropTargetController protocol)
 - (void)dropURLs:(NSArray*)urls inView:(NSView*)view at:(NSPoint)point {
   // TODO(viettrungluu): This code is more or less copied from the code in
@@ -768,7 +756,7 @@ class NotificationBridge : public NotificationObserver {
     return;
   }
   browser_->GetSelectedTabContents()->OpenURL(url, GURL(), CURRENT_TAB,
-                                              PageTransition::TYPED);
+                                              content::PAGE_TRANSITION_TYPED);
 }
 
 // (URLDropTargetController protocol)
@@ -784,7 +772,7 @@ class NotificationBridge : public NotificationObserver {
   GURL url(match.destination_url);
 
   browser_->GetSelectedTabContents()->OpenURL(url, GURL(), CURRENT_TAB,
-                                              PageTransition::TYPED);
+                                              content::PAGE_TRANSITION_TYPED);
 }
 
 // (URLDropTargetController protocol)

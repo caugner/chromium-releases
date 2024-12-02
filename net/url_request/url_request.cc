@@ -4,11 +4,14 @@
 
 #include "net/url_request/url_request.h"
 
+#include "base/bind.h"
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
 #include "base/metrics/stats_counters.h"
 #include "base/synchronization/lock.h"
+#include "net/base/auth.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -112,8 +115,8 @@ void URLRequest::Delegate::OnCertificateRequested(
 }
 
 void URLRequest::Delegate::OnSSLCertificateError(URLRequest* request,
-                                                 int cert_error,
-                                                 X509Certificate* cert) {
+                                                 const SSLInfo& ssl_info,
+                                                 bool is_hsts_ok) {
   request->Cancel();
 }
 
@@ -157,8 +160,11 @@ URLRequest::URLRequest(const GURL& url, Delegate* delegate)
 URLRequest::~URLRequest() {
   Cancel();
 
-  if (context_ && context_->network_delegate())
+  if (context_ && context_->network_delegate()) {
     context_->network_delegate()->NotifyURLRequestDestroyed(this);
+    if (job_)
+      job_->NotifyURLRequestDestroyed();
+  }
 
   if (job_)
     OrphanJob();
@@ -243,7 +249,11 @@ void URLRequest::SetExtraRequestHeaderByName(const string& name,
                                              const string& value,
                                              bool overwrite) {
   DCHECK(!is_pending_);
-  NOTREACHED() << "implement me!";
+  if (overwrite) {
+    extra_request_headers_.SetHeader(name, value);
+  } else {
+    extra_request_headers_.SetHeaderIfMissing(name, value);
+  }
 }
 
 void URLRequest::SetExtraRequestHeaders(
@@ -426,8 +436,7 @@ void URLRequest::BeforeRequestComplete(int error) {
   DCHECK(!job_);
   DCHECK_NE(ERR_IO_PENDING, error);
 
-  if (blocked_on_delegate_)
-    SetUnblockedOnDelegate();
+  SetUnblockedOnDelegate();
   if (error != OK) {
     net_log_.AddEvent(NetLog::TYPE_CANCELLED,
         make_scoped_refptr(new NetLogStringParameter("source", "delegate")));
@@ -435,7 +444,12 @@ void URLRequest::BeforeRequestComplete(int error) {
   } else if (!delegate_redirect_url_.is_empty()) {
     GURL new_url;
     new_url.Swap(&delegate_redirect_url_);
-    StartJob(new URLRequestRedirectJob(this, new_url));
+
+    URLRequestRedirectJob* job = new URLRequestRedirectJob(this, new_url);
+    // Use status code 307 to preserve the method, so POST requests work.
+    job->set_redirect_code(
+        URLRequestRedirectJob::REDIRECT_307_TEMPORARY_REDIRECT);
+    StartJob(job);
   } else {
     StartJob(URLRequestJobManager::GetInstance()->CreateJob(this));
   }
@@ -483,27 +497,27 @@ void URLRequest::Cancel() {
   DoCancel(ERR_ABORTED, SSLInfo());
 }
 
-void URLRequest::SimulateError(int os_error) {
-  DoCancel(os_error, SSLInfo());
+void URLRequest::SimulateError(int error) {
+  DoCancel(error, SSLInfo());
 }
 
-void URLRequest::SimulateSSLError(int os_error, const SSLInfo& ssl_info) {
+void URLRequest::SimulateSSLError(int error, const SSLInfo& ssl_info) {
   // This should only be called on a started request.
   if (!is_pending_ || !job_ || job_->has_response_started()) {
     NOTREACHED();
     return;
   }
-  DoCancel(os_error, ssl_info);
+  DoCancel(error, ssl_info);
 }
 
-void URLRequest::DoCancel(int os_error, const SSLInfo& ssl_info) {
-  DCHECK(os_error < 0);
+void URLRequest::DoCancel(int error, const SSLInfo& ssl_info) {
+  DCHECK(error < 0);
 
   // If the URL request already has an error status, then canceling is a no-op.
   // Plus, we don't want to change the error status once it has been set.
   if (status_.is_success()) {
     status_.set_status(URLRequestStatus::CANCELED);
-    status_.set_os_error(os_error);
+    status_.set_error(error);
     response_info_.ssl_info = ssl_info;
   }
 
@@ -568,7 +582,7 @@ void URLRequest::NotifyReceivedRedirect(const GURL& location,
 void URLRequest::NotifyResponseStarted() {
   scoped_refptr<NetLog::EventParameters> params;
   if (!status_.is_success())
-    params = new NetLogIntegerParameter("net_error", status_.os_error());
+    params = new NetLogIntegerParameter("net_error", status_.error());
   net_log_.EndEvent(NetLog::TYPE_URL_REQUEST_START_JOB, params);
 
   URLRequestJob* job =
@@ -644,6 +658,14 @@ void URLRequest::PrepareToRestart() {
 }
 
 void URLRequest::OrphanJob() {
+  // When calling this function, please check that URLRequestHttpJob is
+  // not in between calling NetworkDelegate::NotifyHeadersReceived receiving
+  // the call back. This is currently guaranteed by the following strategies:
+  // - OrphanJob is called on JobRestart, in this case the URLRequestJob cannot
+  //   be receiving any headers at that time.
+  // - OrphanJob is called in ~URLRequest, in this case
+  //   NetworkDelegate::NotifyURLRequestDestroyed notifies the NetworkDelegate
+  //   that the callback becomes invalid.
   job_->Kill();
   job_->DetachRequest();  // ensures that the job will not call us again
   job_ = NULL;
@@ -725,7 +747,7 @@ void URLRequest::set_context(const URLRequestContext* context) {
     // Log error only on failure, not cancellation, as even successful requests
     // are "cancelled" on destruction.
     if (status_.status() == URLRequestStatus::FAILED)
-      net_error = status_.os_error();
+      net_error = status_.error();
     net_log_.EndEventWithNetErrorCode(NetLog::TYPE_REQUEST_ALIVE, net_error);
     net_log_ = BoundNetLog();
 
@@ -757,20 +779,57 @@ void URLRequest::SetUserData(const void* key, UserData* data) {
 }
 
 void URLRequest::NotifyAuthRequired(AuthChallengeInfo* auth_info) {
-  // TODO(battre): We could simulate a redirection there as follows:
-  // if (context_ && context_->network_delegate()) {
-  //  // We simulate a redirection.
-  //   context_->network_delegate()->NotifyBeforeRedirect(this, url());
-  //}
-  // This fixes URLRequestTestHTTP.BasicAuth but not
-  // URLRequestTestHTTP.BasicAuthWithCookies. In both cases we observe a
-  // call sequence of OnBeforeSendHeaders -> OnSendHeaders ->
-  // OnBeforeSendHeaders.
-  if (context_ && context_->network_delegate())
-    context_->network_delegate()->NotifyAuthRequired(this, *auth_info);
+  NetworkDelegate::AuthRequiredResponse rv =
+      NetworkDelegate::AUTH_REQUIRED_RESPONSE_NO_ACTION;
+  auth_info_ = auth_info;
+  if (context_ && context_->network_delegate()) {
+    rv = context_->network_delegate()->NotifyAuthRequired(
+        this,
+        *auth_info,
+        base::Bind(&URLRequest::NotifyAuthRequiredComplete,
+                   base::Unretained(this)),
+        &auth_credentials_);
+  }
 
-  if (delegate_)
-    delegate_->OnAuthRequired(this, auth_info);
+  if (rv == NetworkDelegate::AUTH_REQUIRED_RESPONSE_IO_PENDING) {
+    SetBlockedOnDelegate();
+  } else {
+    NotifyAuthRequiredComplete(rv);
+  }
+}
+
+void URLRequest::NotifyAuthRequiredComplete(
+    NetworkDelegate::AuthRequiredResponse result) {
+  SetUnblockedOnDelegate();
+
+  // NotifyAuthRequired may be called multiple times, such as
+  // when an authentication attempt fails. Clear out the data
+  // so it can be reset on another round.
+  AuthCredentials credentials = auth_credentials_;
+  auth_credentials_ = AuthCredentials();
+  scoped_refptr<AuthChallengeInfo> auth_info;
+  auth_info.swap(auth_info_);
+
+  switch (result) {
+    case NetworkDelegate::AUTH_REQUIRED_RESPONSE_NO_ACTION:
+      // Defer to the URLRequest::Delegate, since the NetworkDelegate
+      // didn't take an action.
+      if (delegate_)
+        delegate_->OnAuthRequired(this, auth_info.get());
+      break;
+
+    case NetworkDelegate::AUTH_REQUIRED_RESPONSE_SET_AUTH:
+      SetAuth(credentials.username, credentials.password);
+      break;
+
+    case NetworkDelegate::AUTH_REQUIRED_RESPONSE_CANCEL_AUTH:
+      CancelAuth();
+      break;
+
+    case NetworkDelegate::AUTH_REQUIRED_RESPONSE_IO_PENDING:
+      NOTREACHED();
+      break;
+  }
 }
 
 void URLRequest::NotifyCertificateRequested(
@@ -779,10 +838,10 @@ void URLRequest::NotifyCertificateRequested(
     delegate_->OnCertificateRequested(this, cert_request_info);
 }
 
-void URLRequest::NotifySSLCertificateError(int cert_error,
-                                           X509Certificate* cert) {
+void URLRequest::NotifySSLCertificateError(const SSLInfo& ssl_info,
+                                           bool is_hsts_host) {
   if (delegate_)
-    delegate_->OnSSLCertificateError(this, cert_error, cert);
+    delegate_->OnSSLCertificateError(this, ssl_info, is_hsts_host);
 }
 
 bool URLRequest::CanGetCookies(const CookieList& cookie_list) const {
@@ -828,6 +887,8 @@ void URLRequest::SetBlockedOnDelegate() {
 }
 
 void URLRequest::SetUnblockedOnDelegate() {
+  if (!blocked_on_delegate_)
+    return;
   blocked_on_delegate_ = false;
   load_state_param_.clear();
   net_log_.EndEvent(NetLog::TYPE_URL_REQUEST_BLOCKED_ON_DELEGATE, NULL);

@@ -31,16 +31,17 @@ class MockFileStream : public net::FileStream {
   virtual int64 Available() OVERRIDE;
   virtual int Read(char* buf,
                    int buf_len,
-                   net::CompletionCallback* callback) OVERRIDE;
+                   const CompletionCallback& callback) OVERRIDE;
   virtual int ReadUntilComplete(char *buf, int buf_len) OVERRIDE;
   virtual int Write(const char* buf,
                     int buf_len,
-                    net::CompletionCallback* callback) OVERRIDE;
+                    const CompletionCallback& callback) OVERRIDE;
   virtual int64 Truncate(int64 bytes) OVERRIDE;
   virtual int Flush() OVERRIDE;
 
   void set_forced_error(int error) { forced_error_ = error; }
   void clear_forced_error() { forced_error_ = net::OK; }
+  int forced_error() const { return forced_error_; }
   const FilePath& get_path() const { return path_; }
 
  private:

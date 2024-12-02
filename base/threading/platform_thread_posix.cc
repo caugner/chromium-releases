@@ -30,10 +30,6 @@
 #include "base/android/jni_android.h"
 #endif
 
-#if defined(OS_NACL)
-#include <sys/nacl_syscalls.h>
-#endif
-
 namespace base {
 
 #if defined(OS_MACOSX)
@@ -136,11 +132,10 @@ PlatformThreadId PlatformThread::CurrentId() {
   return syscall(__NR_gettid);
 #elif defined(OS_ANDROID)
   return gettid();
-#elif defined(OS_FREEBSD)
-  // TODO(BSD): find a better thread ID
-  return reinterpret_cast<int64>(pthread_self());
 #elif defined(OS_NACL) || defined(OS_SOLARIS)
   return pthread_self();
+#elif defined(OS_POSIX)
+  return reinterpret_cast<int64>(pthread_self());
 #endif
 }
 

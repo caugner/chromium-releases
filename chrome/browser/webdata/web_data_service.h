@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
@@ -19,17 +20,18 @@
 
 class AutofillChange;
 class AutofillProfile;
+class AutofillProfileSyncableService;
 class CreditCard;
 class GURL;
 #if defined(OS_WIN)
 struct IE7PasswordInfo;
 #endif
 class MessageLoop;
+class Profile;
 class SkBitmap;
-class Task;
 class TemplateURL;
 class WebDatabase;
-struct WebIntentData;
+struct WebIntentServiceData;
 
 namespace base {
 class Thread;
@@ -186,8 +188,12 @@ class WebDataService
     virtual ~WebDataRequest();
 
     Handle GetHandle() const;
-    WebDataServiceConsumer* GetConsumer() const;
-    bool IsCancelled() const;
+
+    // Retrieves the |consumer_| set in the constructor.  If the request was
+    // cancelled via the |Cancel()| method then |true| is returned and
+    // |*consumer| is set to NULL.  The |consumer| parameter may be set to NULL
+    // if only the return value is desired.
+    bool IsCancelled(WebDataServiceConsumer** consumer) const;
 
     // This can be invoked from any thread. From this point we assume that
     // our consumer_ reference is invalid.
@@ -206,8 +212,13 @@ class WebDataService
     scoped_refptr<WebDataService> service_;
     MessageLoop* message_loop_;
     Handle handle_;
-    bool canceled_;
+
+    // A lock to protect against simultaneous cancellations of the request.
+    // Cancellation affects both the |cancelled_| flag and |consumer_|.
+    mutable base::Lock cancel_lock_;
+    bool cancelled_;
     WebDataServiceConsumer* consumer_;
+
     WDTypedResult* result_;
 
     DISALLOW_COPY_AND_ASSIGN(WebDataRequest);
@@ -262,6 +273,13 @@ class WebDataService
   };
 
   WebDataService();
+
+  // Notifies listeners on the UI thread that multiple changes have been made to
+  // to Autofill records of the database.
+  // NOTE: This method is intended to be called from the DB thread.  It
+  // it asynchronously notifies listeners on the UI thread.
+  // |web_data_service| may be NULL for testing purposes.
+  static void NotifyOfMultipleAutofillChanges(WebDataService* web_data_service);
 
   // Initializes the web data service. Returns false on failure
   // Takes the path of the profile directory as its argument.
@@ -341,10 +359,10 @@ class WebDataService
   //////////////////////////////////////////////////////////////////////////////
 
   // Adds a web intent provider registration.
-  void AddWebIntent(const WebIntentData& intent);
+  void AddWebIntent(const WebIntentServiceData& service);
 
   // Removes a web intent provider registration.
-  void RemoveWebIntent(const WebIntentData& intent);
+  void RemoveWebIntent(const WebIntentServiceData& service);
 
   // Get all web intent providers registered for the specified |action|.
   // |consumer| must not be NULL.
@@ -495,6 +513,12 @@ class WebDataService
       const base::Time& delete_begin,
       const base::Time& delete_end);
 
+  // TODO(georgey): Add support for autocomplete as well: http://crbug.com/95759
+  // Returns the syncable service for Autofill addresses and credit cards stored
+  // in this table. The returned service is owned by |this| object.
+  virtual AutofillProfileSyncableService*
+      GetAutofillProfileSyncableService() const;
+
   // Testing
 #ifdef UNIT_TEST
   void set_failed_init(bool value) { failed_init_ = value; }
@@ -536,17 +560,23 @@ class WebDataService
   // Initialize the database, if it hasn't already been initialized.
   void InitializeDatabaseIfNecessary();
 
+  // Initialize any syncable services.
+  void InitializeSyncableServices();
+
   // The notification method.
   void NotifyDatabaseLoadedOnUIThread();
 
   // Commit any pending transaction and deletes the database.
   void ShutdownDatabase();
 
+  // Deletes the syncable services.
+  void ShutdownSyncableServices();
+
   // Commit the current transaction and creates a new one.
   void Commit();
 
   // Schedule a task on our worker thread.
-  void ScheduleTask(Task* t);
+  void ScheduleTask(const base::Closure& task);
 
   // Schedule a commit if one is not already pending.
   void ScheduleCommit();
@@ -581,8 +611,8 @@ class WebDataService
   // Web Intents.
   //
   //////////////////////////////////////////////////////////////////////////////
-  void AddWebIntentImpl(GenericRequest<WebIntentData>* request);
-  void RemoveWebIntentImpl(GenericRequest<WebIntentData>* request);
+  void AddWebIntentImpl(GenericRequest<WebIntentServiceData>* request);
+  void RemoveWebIntentImpl(GenericRequest<WebIntentServiceData>* request);
   void GetWebIntentsImpl(GenericRequest<string16>* request);
   void GetAllWebIntentsImpl(GenericRequest<std::string>* request);
 
@@ -647,8 +677,16 @@ class WebDataService
   // The path with which to initialize the database.
   FilePath path_;
 
-  // Our database.
+  // Our database.  We own the |db_|, but don't use a |scoped_ptr| because the
+  // |db_| lifetime must be managed on the database thread.
   WebDatabase* db_;
+
+  // Syncable services for the database data.  We own the services, but don't
+  // use |scoped_ptr|s because the lifetimes must be managed on the database
+  // thread.
+  // Currently only Autofill profiles (and credit cards) use the new Sync API,
+  // but all the database data should migrate to this API over time.
+  AutofillProfileSyncableService* autofill_profile_syncable_service_;
 
   // Whether the database failed to initialize.  We use this to avoid
   // continually trying to reinit.

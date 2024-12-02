@@ -17,6 +17,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "content/common/notification_details.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
 #include "grit/generated_resources.h"
@@ -116,14 +117,6 @@ GlobalMenuBarCommand history_menu[] = {
   { MENU_END, MENU_END }
 };
 
-GlobalMenuBarCommand bookmark_menu[] = {
-  { IDS_BOOKMARK_MANAGER, IDC_SHOW_BOOKMARK_MANAGER },
-  { IDS_BOOKMARK_CURRENT_PAGE_LINUX, IDC_BOOKMARK_PAGE },
-  { IDS_BOOKMARK_ALL_TABS_LINUX, IDC_BOOKMARK_ALL_TABS },
-
-  { MENU_END, MENU_END }
-};
-
 GlobalMenuBarCommand tools_menu[] = {
   { IDS_SHOW_DOWNLOADS, IDC_SHOW_DOWNLOADS },
   { IDS_SHOW_HISTORY, IDC_SHOW_HISTORY },
@@ -171,22 +164,6 @@ GlobalMenuBar::GlobalMenuBar(Browser* browser)
   BuildGtkMenuFrom(IDS_HISTORY_MENU_LINUX, &id_to_menu_item_,
                    history_menu, &history_menu_);
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableGlobalBookmarkMenu)) {
-    // TODO(erg): dbusmenu-glib in Ubuntu Natty does not like it when we shove
-    // 100k or more of favicon data over it. Users have reported that the
-    // browser hangs on startup for over a minute and breaking during this time
-    // shows a stack entirely of dbus/glib code (See #86715).  For now, just
-    // hide the menu until appmenu-gtk catches up and doesn't hang if we throw
-    // (potentially) megs of icon data at it. (Some of our users have thousands
-    // of bookmarks and we're already unacceptably laggy at 100.)
-    //
-    // http://crbug.com/86715, http://crbug.com/85466
-    bookmark_menu_.reset(new GlobalBookmarkMenu(browser_));
-    BuildGtkMenuFrom(IDS_BOOKMARKS_MENU_LINUX, &id_to_menu_item_, bookmark_menu,
-                     bookmark_menu_.get());
-  }
-
   BuildGtkMenuFrom(IDS_TOOLS_MENU_LINUX, &id_to_menu_item_, tools_menu, NULL);
   BuildGtkMenuFrom(IDS_HELP_MENU_LINUX, &id_to_menu_item_, help_menu, NULL);
 
@@ -213,14 +190,9 @@ GlobalMenuBar::GlobalMenuBar(Browser* browser)
     browser_->command_updater()->AddCommandObserver(it->first, this);
   }
 
-  // We listen to all notification sources because the bookmark bar
-  // state needs to stay in sync between the incognito and normal profiles.
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
-                 NotificationService::AllBrowserContextsAndSources());
-  Observe(chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
-          Source<Profile>(browser->profile()),
-          NotificationService::NoDetails());
+  pref_change_registrar_.Init(browser_->profile()->GetPrefs());
+  pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
+  OnBookmarkBarVisibilityChanged();
 }
 
 GlobalMenuBar::~GlobalMenuBar() {
@@ -235,14 +207,7 @@ void GlobalMenuBar::Disable() {
   }
   id_to_menu_item_.clear();
 
-  if (registrar_.IsRegistered(this,
-                    chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
-                    NotificationService::AllBrowserContextsAndSources())) {
-    registrar_.Remove(
-        this,
-        chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
-        NotificationService::AllBrowserContextsAndSources());
-  }
+  pref_change_registrar_.RemoveAll();
 }
 
 void GlobalMenuBar::BuildGtkMenuFrom(
@@ -321,16 +286,17 @@ void GlobalMenuBar::EnabledStateChangedForCommand(int id, bool enabled) {
 void GlobalMenuBar::Observe(int type,
                             const NotificationSource& source,
                             const NotificationDetails& details) {
-  DCHECK_EQ(type, chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED);
+  DCHECK_EQ(chrome::NOTIFICATION_PREF_CHANGED, type);
+  const std::string& pref_name = *Details<std::string>(details).ptr();
+  DCHECK_EQ(prefs::kShowBookmarkBar, pref_name);
+  OnBookmarkBarVisibilityChanged();
+}
 
-  if (!browser_->profile()->IsSameProfile(Source<Profile>(source).ptr()))
-    return;
-
+void GlobalMenuBar::OnBookmarkBarVisibilityChanged() {
   CommandIDMenuItemMap::iterator it =
       id_to_menu_item_.find(IDC_SHOW_BOOKMARK_BAR);
   if (it != id_to_menu_item_.end()) {
     PrefService* prefs = browser_->profile()->GetPrefs();
-
     block_activation_ = true;
     gtk_check_menu_item_set_active(
         GTK_CHECK_MENU_ITEM(it->second),

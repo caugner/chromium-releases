@@ -12,6 +12,7 @@
 #include "ui/base/range/range.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/insets.h"
+#include "ui/gfx/selection_model.h"
 #include "ui/gfx/skia_utils_gtk.h"
 #include "views/controls/textfield/gtk_views_entry.h"
 #include "views/controls/textfield/gtk_views_textview.h"
@@ -257,6 +258,14 @@ void NativeTextfieldGtk::GetSelectedRange(ui::Range* range) const {
 }
 
 void NativeTextfieldGtk::SelectRange(const ui::Range& range) {
+  NOTREACHED();
+}
+
+void NativeTextfieldGtk::GetSelectionModel(gfx::SelectionModel* sel) const {
+  NOTREACHED();
+}
+
+void NativeTextfieldGtk::SelectSelectionModel(const gfx::SelectionModel& sel) {
   NOTREACHED();
 }
 

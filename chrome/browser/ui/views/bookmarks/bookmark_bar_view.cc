@@ -9,6 +9,7 @@
 #include <set>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
@@ -40,7 +41,7 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/notification_service.h"
-#include "content/common/page_transition_types.h"
+#include "content/public/common/page_transition_types.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
@@ -148,11 +149,11 @@ class BookmarkButton : public views::TextButton {
   }
 
   virtual bool GetTooltipText(const gfx::Point& p,
-                              std::wstring* tooltip) OVERRIDE {
+                              string16* tooltip) OVERRIDE {
     gfx::Point location(p);
     ConvertPointToScreen(this, &location);
     *tooltip = BookmarkBarView::CreateToolTipForURLAndTitle(location, url_,
-        text(), profile_);
+                                                            text(), profile_);
     return !tooltip->empty();
   }
 
@@ -183,7 +184,7 @@ const char BookmarkButton::kViewClassName[] =
 class BookmarkFolderButton : public views::MenuButton {
  public:
   BookmarkFolderButton(views::ButtonListener* listener,
-                       const std::wstring& title,
+                       const string16& title,
                        views::ViewMenuDelegate* menu_delegate,
                        bool show_menu_marker)
       : MenuButton(listener, title, menu_delegate, show_menu_marker) {
@@ -198,9 +199,9 @@ class BookmarkFolderButton : public views::MenuButton {
   }
 
   virtual bool GetTooltipText(const gfx::Point& p,
-                              std::wstring* tooltip) OVERRIDE {
+                              string16* tooltip) OVERRIDE {
     if (text_size_.width() > GetTextBounds().width())
-      *tooltip = UTF16ToWide(text_);
+      *tooltip = text_;
     return !tooltip->empty();
   }
 
@@ -231,7 +232,7 @@ class BookmarkFolderButton : public views::MenuButton {
 class OverFlowButton : public views::MenuButton {
  public:
   explicit OverFlowButton(BookmarkBarView* owner)
-      : MenuButton(NULL, std::wstring(), owner, false),
+      : MenuButton(NULL, string16(), owner, false),
         owner_(owner) {}
 
   virtual bool OnMousePressed(const views::MouseEvent& e) {
@@ -527,10 +528,10 @@ void BookmarkBarView::StopThrobbing(bool immediate) {
 }
 
 // static
-std::wstring BookmarkBarView::CreateToolTipForURLAndTitle(
+string16 BookmarkBarView::CreateToolTipForURLAndTitle(
     const gfx::Point& screen_loc,
     const GURL& url,
-    const std::wstring& title,
+    const string16& title,
     Profile* profile) {
   int max_width = views::TooltipManager::GetMaxWidth(screen_loc.x(),
                                                      screen_loc.y());
@@ -539,15 +540,15 @@ std::wstring BookmarkBarView::CreateToolTipForURLAndTitle(
 
   // First the title.
   if (!title.empty()) {
-    string16 localized_title = WideToUTF16(title);
+    string16 localized_title = title;
     base::i18n::AdjustStringForLocaleDirection(&localized_title);
     result.append(ui::ElideText(localized_title, tt_font, max_width, false));
   }
 
   // Only show the URL if the url and title differ.
-  if (title != UTF8ToWide(url.spec())) {
+  if (title != UTF8ToUTF16(url.spec())) {
     if (!result.empty())
-      result.append(WideToUTF16(views::TooltipManager::GetLineSeparator()));
+      result.push_back('\n');
 
     // We need to explicitly specify the directionality of the URL's text to
     // make sure it is treated as an LTR string when the context is RTL. For
@@ -561,7 +562,7 @@ std::wstring BookmarkBarView::CreateToolTipForURLAndTitle(
     elided_url = base::i18n::GetDisplayStringInLTRDirectionality(elided_url);
     result.append(elided_url);
   }
-  return UTF16ToWide(result);
+  return result;
 }
 
 bool BookmarkBarView::IsDetached() const {
@@ -1064,11 +1065,15 @@ void BookmarkBarView::ButtonPressed(views::Button* sender,
   if (node->is_url()) {
     RecordAppLaunch(profile, node->url());
     page_navigator_->OpenURL(node->url(), GURL(),
-        disposition_from_event_flags, PageTransition::AUTO_BOOKMARK);
+        disposition_from_event_flags, content::PAGE_TRANSITION_AUTO_BOOKMARK);
   } else {
     bookmark_utils::OpenAll(GetWidget()->GetNativeWindow(), profile,
         page_navigator_, node, disposition_from_event_flags);
   }
+
+  bookmark_utils::RecordBookmarkLaunch(IsDetached() ?
+      bookmark_utils::LAUNCH_DETACHED_BAR :
+      bookmark_utils::LAUNCH_ATTACHED_BAR);
   UserMetrics::RecordAction(UserMetricsAction("ClickedBookmarkBarURLButton"));
 }
 
@@ -1207,7 +1212,7 @@ int BookmarkBarView::GetFirstHiddenNodeIndex() {
 MenuButton* BookmarkBarView::CreateOtherBookmarkedButton() {
   MenuButton* button = new BookmarkFolderButton(
       this,
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOKMARK_BAR_OTHER_BOOKMARKED)),
+      l10n_util::GetStringUTF16(IDS_BOOKMARK_BAR_OTHER_BOOKMARKED),
       this,
       false);
   button->set_id(VIEW_ID_OTHER_BOOKMARKS);
@@ -1250,7 +1255,7 @@ views::TextButton* BookmarkBarView::CreateSyncErrorButton() {
   // The tooltip is the only way we have to display text explaining the error
   // to the user.
   sync_error_button->SetTooltipText(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_SYNC_BOOKMARK_BAR_ERROR_DESC)));
+      l10n_util::GetStringUTF16(IDS_SYNC_BOOKMARK_BAR_ERROR_DESC));
   sync_error_button->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_SYNC_ERROR_BUTTON));
   sync_error_button->SetIcon(
@@ -1265,8 +1270,8 @@ views::View* BookmarkBarView::CreateBookmarkButton(const BookmarkNode* node) {
     ConfigureButton(node, button);
     return button;
   } else {
-    views::MenuButton* button = new BookmarkFolderButton(this,
-        UTF16ToWide(node->GetTitle()), this, false);
+    views::MenuButton* button = new BookmarkFolderButton(
+        this, node->GetTitle(), this, false);
     button->SetIcon(GetFolderIcon());
     ConfigureButton(node, button);
     return button;
@@ -1275,7 +1280,7 @@ views::View* BookmarkBarView::CreateBookmarkButton(const BookmarkNode* node) {
 
 void BookmarkBarView::ConfigureButton(const BookmarkNode* node,
                                       views::TextButton* button) {
-  button->SetText(UTF16ToWide(node->GetTitle()));
+  button->SetText(node->GetTitle());
   button->SetAccessibleName(node->GetTitle());
   button->set_id(VIEW_ID_BOOKMARK_BAR_ELEMENT);
   // We don't always have a theme provider (ui tests, for example).
@@ -1381,7 +1386,7 @@ void BookmarkBarView::ShowDropFolderForNode(const BookmarkNode* node) {
 }
 
 void BookmarkBarView::StopShowFolderDropMenuTimer() {
-  show_folder_method_factory_.RevokeAll();
+  show_folder_method_factory_.InvalidateWeakPtrs();
 }
 
 void BookmarkBarView::StartShowFolderDropMenuTimer(const BookmarkNode* node) {
@@ -1391,11 +1396,12 @@ void BookmarkBarView::StartShowFolderDropMenuTimer(const BookmarkNode* node) {
     ShowDropFolderForNode(node);
     return;
   }
-  show_folder_method_factory_.RevokeAll();
+  show_folder_method_factory_.InvalidateWeakPtrs();
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      show_folder_method_factory_.NewRunnableMethod(
-          &BookmarkBarView::ShowDropFolderForNode, node),
+      base::Bind(&BookmarkBarView::ShowDropFolderForNode,
+                 show_folder_method_factory_.GetWeakPtr(),
+                 node),
       views::GetMenuShowDelay());
 }
 

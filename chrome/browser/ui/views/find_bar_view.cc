@@ -89,7 +89,6 @@ FindBarView::FindBarView(FindBarHost* host)
 
   match_count_text_ = new views::Label();
   match_count_text_->SetFont(rb.GetFont(ResourceBundle::BaseFont));
-  match_count_text_->SetColor(kTextColorMatchCount);
   match_count_text_->SetHorizontalAlignment(views::Label::ALIGN_CENTER);
   AddChildView(match_count_text_);
 
@@ -106,8 +105,8 @@ FindBarView::FindBarView(FindBarHost* host)
       rb.GetBitmapNamed(IDR_FINDINPAGE_PREV_H));
   find_previous_button_->SetImage(views::CustomButton::BS_DISABLED,
       rb.GetBitmapNamed(IDR_FINDINPAGE_PREV_P));
-  find_previous_button_->SetTooltipText(UTF16ToWide(
-      l10n_util::GetStringUTF16(IDS_FIND_IN_PAGE_PREVIOUS_TOOLTIP)));
+  find_previous_button_->SetTooltipText(
+      l10n_util::GetStringUTF16(IDS_FIND_IN_PAGE_PREVIOUS_TOOLTIP));
   find_previous_button_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_PREVIOUS));
   AddChildView(find_previous_button_);
@@ -122,7 +121,7 @@ FindBarView::FindBarView(FindBarHost* host)
   find_next_button_->SetImage(views::CustomButton::BS_DISABLED,
       rb.GetBitmapNamed(IDR_FINDINPAGE_NEXT_P));
   find_next_button_->SetTooltipText(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_FIND_IN_PAGE_NEXT_TOOLTIP)));
+      l10n_util::GetStringUTF16(IDS_FIND_IN_PAGE_NEXT_TOOLTIP));
   find_next_button_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_NEXT));
   AddChildView(find_next_button_);
@@ -137,7 +136,7 @@ FindBarView::FindBarView(FindBarHost* host)
   close_button_->SetImage(views::CustomButton::BS_PUSHED,
                           rb.GetBitmapNamed(IDR_CLOSE_BAR_P));
   close_button_->SetTooltipText(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_FIND_IN_PAGE_CLOSE_TOOLTIP)));
+      l10n_util::GetStringUTF16(IDS_FIND_IN_PAGE_CLOSE_TOOLTIP));
   close_button_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
   AddChildView(close_button_);
@@ -167,7 +166,7 @@ string16 FindBarView::GetFindSelectedText() const {
 }
 
 string16 FindBarView::GetMatchCountText() const {
-  return WideToUTF16Hack(match_count_text_->GetText());
+  return match_count_text_->GetText();
 }
 
 void FindBarView::UpdateForResult(const FindNotificationDetails& result,
@@ -183,21 +182,19 @@ void FindBarView::UpdateForResult(const FindNotificationDetails& result,
     find_text_->SelectAll();
   }
 
-  if (!find_text.empty() && have_valid_range) {
-    match_count_text_->SetText(UTF16ToWide(
-        l10n_util::GetStringFUTF16(IDS_FIND_IN_PAGE_COUNT,
-            base::IntToString16(result.active_match_ordinal()),
-            base::IntToString16(result.number_of_matches()))));
-
-    UpdateMatchCountAppearance(result.number_of_matches() == 0 &&
-                               result.final_update());
-  } else {
+  if (find_text.empty() || !have_valid_range) {
     // If there was no text entered, we don't show anything in the result count
     // area.
-    match_count_text_->SetText(std::wstring());
-
-    UpdateMatchCountAppearance(false);
+    ClearMatchCount();
+    return;
   }
+
+  match_count_text_->SetText(l10n_util::GetStringFUTF16(IDS_FIND_IN_PAGE_COUNT,
+      base::IntToString16(result.active_match_ordinal()),
+      base::IntToString16(result.number_of_matches())));
+
+  UpdateMatchCountAppearance(result.number_of_matches() == 0 &&
+                             result.final_update());
 
   // The match_count label may have increased/decreased in size so we need to
   // do a layout and repaint the dialog so that the find text field doesn't
@@ -207,7 +204,7 @@ void FindBarView::UpdateForResult(const FindNotificationDetails& result,
 }
 
 void FindBarView::ClearMatchCount() {
-  match_count_text_->SetText(L"");
+  match_count_text_->SetText(string16());
   UpdateMatchCountAppearance(false);
   Layout();
   SchedulePaint();
@@ -454,12 +451,14 @@ void FindBarView::UpdateMatchCountAppearance(bool no_match) {
   if (no_match) {
     match_count_text_->set_background(
         views::Background::CreateSolidBackground(kBackgroundColorNoMatch));
-    match_count_text_->SetColor(kTextColorNoMatch);
+    match_count_text_->SetEnabledColor(kTextColorNoMatch);
   } else {
     match_count_text_->set_background(
       views::Background::CreateSolidBackground(kBackgroundColorMatch));
-    match_count_text_->SetColor(kTextColorMatchCount);
+    match_count_text_->SetEnabledColor(kTextColorMatchCount);
   }
+  match_count_text_->SetBackgroundColor(
+      match_count_text_->background()->get_color());
 }
 
 bool FindBarView::FocusForwarderView::OnMousePressed(

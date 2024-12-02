@@ -4,24 +4,16 @@
 
 #include "chrome/browser/sync/js/js_sync_manager_observer.h"
 
-#include <cstddef>
-
 #include "base/basictypes.h"
+#include "base/location.h"
 #include "base/message_loop.h"
-#include "base/tracked.h"
 #include "base/values.h"
-#include "chrome/browser/sync/internal_api/read_node.h"
-#include "chrome/browser/sync/internal_api/read_transaction.h"
-#include "chrome/browser/sync/internal_api/write_node.h"
-#include "chrome/browser/sync/internal_api/write_transaction.h"
-#include "chrome/browser/sync/js/js_arg_list.h"
 #include "chrome/browser/sync/js/js_event_details.h"
 #include "chrome/browser/sync/js/js_test_util.h"
 #include "chrome/browser/sync/protocol/sync_protocol_error.h"
 #include "chrome/browser/sync/sessions/session_state.h"
 #include "chrome/browser/sync/syncable/model_type.h"
-#include "chrome/browser/sync/test/engine/test_user_share.h"
-#include "chrome/browser/sync/weak_handle.h"
+#include "chrome/browser/sync/util/weak_handle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace browser_sync {
@@ -72,27 +64,6 @@ TEST_F(JsSyncManagerObserverTest, NoArgNotifiations) {
   js_sync_manager_observer_.OnStopSyncingPermanently();
   js_sync_manager_observer_.OnClearServerDataSucceeded();
   js_sync_manager_observer_.OnClearServerDataFailed();
-  PumpLoop();
-}
-
-TEST_F(JsSyncManagerObserverTest, OnChangesComplete) {
-  InSequence dummy;
-
-  for (int i = syncable::FIRST_REAL_MODEL_TYPE;
-       i < syncable::MODEL_TYPE_COUNT; ++i) {
-    DictionaryValue expected_details;
-    expected_details.SetString(
-        "modelType",
-        syncable::ModelTypeToString(syncable::ModelTypeFromInt(i)));
-    EXPECT_CALL(mock_js_event_handler_,
-                HandleJsEvent("onChangesComplete",
-                             HasDetailsAsDictionary(expected_details)));
-  }
-
-  for (int i = syncable::FIRST_REAL_MODEL_TYPE;
-       i < syncable::MODEL_TYPE_COUNT; ++i) {
-    js_sync_manager_observer_.OnChangesComplete(syncable::ModelTypeFromInt(i));
-  }
   PumpLoop();
 }
 
@@ -238,117 +209,6 @@ TEST_F(JsSyncManagerObserverTest, OnEncryptionComplete) {
                            HasDetailsAsDictionary(expected_details)));
 
   js_sync_manager_observer_.OnEncryptionComplete(encrypted_types);
-  PumpLoop();
-}
-
-TEST_F(JsSyncManagerObserverTest, OnMigrationNeededForTypes) {
-  DictionaryValue expected_details;
-  ListValue* type_values = new ListValue();
-  expected_details.Set("types", type_values);
-  syncable::ModelTypeSet types;
-
-  for (int i = syncable::FIRST_REAL_MODEL_TYPE;
-       i < syncable::MODEL_TYPE_COUNT; ++i) {
-    syncable::ModelType type = syncable::ModelTypeFromInt(i);
-    types.insert(type);
-    type_values->Append(Value::CreateStringValue(
-        syncable::ModelTypeToString(type)));
-  }
-
-  EXPECT_CALL(mock_js_event_handler_,
-              HandleJsEvent("onMigrationNeededForTypes",
-                           HasDetailsAsDictionary(expected_details)));
-
-  js_sync_manager_observer_.OnMigrationNeededForTypes(types);
-  PumpLoop();
-}
-
-namespace {
-
-// Makes a node of the given model type.  Returns the id of the
-// newly-created node.
-int64 MakeNode(sync_api::UserShare* share, syncable::ModelType model_type) {
-  sync_api::WriteTransaction trans(FROM_HERE, share);
-  sync_api::ReadNode root_node(&trans);
-  root_node.InitByRootLookup();
-  sync_api::WriteNode node(&trans);
-  EXPECT_TRUE(node.InitUniqueByCreation(
-      model_type, root_node,
-      syncable::ModelTypeToString(model_type)));
-  node.SetIsFolder(false);
-  return node.GetId();
-}
-
-}  // namespace
-
-TEST_F(JsSyncManagerObserverTest, OnChangesApplied) {
-  InSequence dummy;
-
-  TestUserShare test_user_share;
-  test_user_share.SetUp();
-
-  // We don't test with passwords as that requires additional setup.
-
-  // Build a list of example ChangeRecords.
-  sync_api::SyncManager::ChangeRecord changes[syncable::MODEL_TYPE_COUNT];
-  for (int i = syncable::AUTOFILL_PROFILE;
-       i < syncable::MODEL_TYPE_COUNT; ++i) {
-    changes[i].id =
-        MakeNode(test_user_share.user_share(), syncable::ModelTypeFromInt(i));
-    switch (i % 3) {
-      case 0:
-        changes[i].action =
-            sync_api::SyncManager::ChangeRecord::ACTION_ADD;
-        break;
-      case 1:
-        changes[i].action =
-            sync_api::SyncManager::ChangeRecord::ACTION_UPDATE;
-        break;
-      default:
-        changes[i].action =
-            sync_api::SyncManager::ChangeRecord::ACTION_DELETE;
-        break;
-    }
-    {
-      sync_api::ReadTransaction trans(FROM_HERE, test_user_share.user_share());
-      sync_api::ReadNode node(&trans);
-      EXPECT_TRUE(node.InitByIdLookup(changes[i].id));
-      changes[i].specifics = node.GetEntry()->Get(syncable::SPECIFICS);
-    }
-  }
-
-  // For each i, we call OnChangesApplied() with the first arg equal
-  // to i cast to ModelType and the second argument with the changes
-  // starting from changes[i].
-
-  // Set expectations for each data type.
-  for (int i = syncable::AUTOFILL_PROFILE;
-       i < syncable::MODEL_TYPE_COUNT; ++i) {
-    const std::string& model_type_str =
-        syncable::ModelTypeToString(syncable::ModelTypeFromInt(i));
-    DictionaryValue expected_details;
-    expected_details.SetString("modelType", model_type_str);
-    ListValue* expected_changes = new ListValue();
-    expected_details.Set("changes", expected_changes);
-    for (int j = i; j < syncable::MODEL_TYPE_COUNT; ++j) {
-      sync_api::ReadTransaction trans(FROM_HERE, test_user_share.user_share());
-      expected_changes->Append(changes[j].ToValue(&trans));
-    }
-    EXPECT_CALL(mock_js_event_handler_,
-                HandleJsEvent("onChangesApplied",
-                             HasDetailsAsDictionary(expected_details)));
-  }
-
-  // Fire OnChangesApplied() for each data type.
-  for (int i = syncable::AUTOFILL_PROFILE;
-       i < syncable::MODEL_TYPE_COUNT; ++i) {
-    sync_api::ReadTransaction trans(FROM_HERE, test_user_share.user_share());
-    js_sync_manager_observer_.OnChangesApplied(syncable::ModelTypeFromInt(i),
-                                               &trans, &changes[i],
-                                               syncable::MODEL_TYPE_COUNT - i);
-  }
-
-  test_user_share.TearDown();
   PumpLoop();
 }
 

@@ -12,7 +12,7 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_service.h"
-#include "content/common/view_messages.h"
+#include "content/common/view_message_enums.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFindOptions.h"
 
 using WebKit::WebFindOptions;
@@ -84,9 +84,8 @@ void FindTabHelper::StartFinding(string16 search_string,
   options.forward = forward_direction;
   options.matchCase = case_sensitive;
   options.findNext = find_next;
-  tab_contents()->render_view_host()->Send(new ViewMsg_Find(
-      tab_contents()->render_view_host()->routing_id(),
-      current_find_request_id_, find_text_, options));
+  tab_contents()->render_view_host()->Find(current_find_request_id_,
+                                           find_text_, options);
 }
 
 void FindTabHelper::StopFinding(
@@ -120,8 +119,7 @@ void FindTabHelper::StopFinding(
       NOTREACHED();
       params.action = ViewMsg_StopFinding_Params::kKeepSelection;
   }
-  tab_contents()->render_view_host()->Send(new ViewMsg_StopFinding(
-      tab_contents()->render_view_host()->routing_id(), params));
+  tab_contents()->render_view_host()->StopFinding(params);
 }
 
 void FindTabHelper::HandleFindReply(int request_id,
@@ -153,12 +151,4 @@ void FindTabHelper::HandleFindReply(int request_id,
         Source<TabContents>(tab_contents()),
         Details<FindNotificationDetails>(&last_search_result_));
   }
-
-  // Send a notification to the renderer that we are ready to receive more
-  // results from the scoping effort of the Find operation. The FindInPage
-  // scoping is asynchronous and periodically sends results back up to the
-  // browser using IPC. In an effort to not spam the browser we have the
-  // browser send an ACK for each FindReply message and have the renderer
-  // queue up the latest status message while waiting for this ACK.
-  Send(new ViewMsg_FindReplyACK(routing_id()));
 }

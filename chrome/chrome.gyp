@@ -24,7 +24,7 @@
       'common',
       'browser',
       'debugger',
-      'profile_import',
+      'plugin',
       'renderer',
       'syncapi_core',
       'utility',
@@ -35,13 +35,6 @@
       '../content/content.gyp:content_worker',
       '../printing/printing.gyp:printing',
       '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:inspector_resources',
-    ],
-    'nacl_win64_dependencies': [
-      'common_nacl_win64',
-      'common_constants_win64',
-      'installer_util_nacl_win64',
-      '../base/base.gyp:base_static_win64',
-      '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations_win64',
     ],
     'allocator_target': '../base/allocator/allocator.gyp:allocator',
     'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/chrome',
@@ -125,6 +118,7 @@
     # Note on Win64 targets: targets that end with win64 be used
     # on 64-bit Windows only. Targets that end with nacl_win64 should be used
     # by Native Client only.
+    '../build/win_precompile.gypi',
     'app/policy/policy_templates.gypi',
     'chrome_browser.gypi',
     'chrome_common.gypi',
@@ -148,13 +142,6 @@
       'type': 'none',
       'actions': [
         # Data resources.
-        {
-          'action_name': 'autofill_resources',
-          'variables': {
-            'grit_grd_file': 'browser/autofill/autofill_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
         {
           'action_name': 'browser_resources',
           'variables': {
@@ -242,13 +229,6 @@
           },
           'includes': [ '../build/grit_action.gypi' ],
         },
-      ],
-      'includes': [ '../build/grit_target.gypi' ],
-    },
-    {
-      'target_name': 'theme_resources_large',
-      'type': 'none',
-      'actions': [
         {
           'action_name': 'theme_resources_large',
           'variables': {
@@ -256,13 +236,6 @@
           },
           'includes': [ '../build/grit_action.gypi' ],
         },
-      ],
-      'includes': [ '../build/grit_target.gypi' ],
-    },
-    {
-      'target_name': 'theme_resources_standard',
-      'type': 'none',
-      'actions': [
         {
           'action_name': 'theme_resources_standard',
           'variables': {
@@ -418,7 +391,6 @@
         'chrome_resources',
         'chrome_strings',
         'theme_resources',
-        'theme_resources_standard',
         '../base/base.gyp:base',
         '../content/content.gyp:content_browser',
         '../net/net.gyp:http_server',
@@ -466,6 +438,22 @@
       ],
     },
     {
+      'target_name': 'plugin',
+      'type': 'static_library',
+      'dependencies': [
+        '../base/base.gyp:base',
+        '../content/content.gyp:content_plugin',
+      ],
+      'sources': [
+        'plugin/chrome_content_plugin_client.cc',
+        'plugin/chrome_content_plugin_client.h',
+      ],
+      'include_dirs': [
+        '..',
+        '<(grit_out_dir)',
+      ],
+    },        
+    {
       'target_name': 'utility',
       'type': 'static_library',
       'dependencies': [
@@ -489,18 +477,6 @@
       ],
     },
     {
-      'target_name': 'profile_import',
-      'type': 'static_library',
-      'dependencies': [
-        '../base/base.gyp:base',
-      ],
-      'sources': [
-        'profile_import/profile_import_main.cc',
-        'profile_import/profile_import_thread.cc',
-        'profile_import/profile_import_thread.h',
-      ],
-    },
-    {
       # Provides a syncapi dynamic library target from checked-in binaries,
       # or from compiling a stub implementation.
       'target_name': 'syncapi_core',
@@ -512,9 +488,13 @@
         'browser/sync/internal_api/base_node.h',
         'browser/sync/internal_api/base_transaction.cc',
         'browser/sync/internal_api/base_transaction.h',
+        'browser/sync/internal_api/change_record.cc',
+        'browser/sync/internal_api/change_record.h',
         'browser/sync/internal_api/change_reorder_buffer.cc',
         'browser/sync/internal_api/change_reorder_buffer.h',
         'browser/sync/internal_api/configure_reason.h',
+        'browser/sync/internal_api/debug_info_event_listener.cc',
+        'browser/sync/internal_api/debug_info_event_listener.h',
         'browser/sync/internal_api/http_post_provider_factory.h',
         'browser/sync/internal_api/http_post_provider_interface.h',
         'browser/sync/internal_api/read_node.cc',
@@ -668,10 +648,10 @@
         'browser/sync/js/js_event_details.h',
         'browser/sync/js/js_event_handler.h',
         'browser/sync/js/js_reply_handler.h',
+        'browser/sync/js/js_mutation_event_observer.cc',
+        'browser/sync/js/js_mutation_event_observer.h',
         'browser/sync/js/js_sync_manager_observer.cc',
         'browser/sync/js/js_sync_manager_observer.h',
-        'browser/sync/js/js_transaction_observer.cc',
-        'browser/sync/js/js_transaction_observer.h',
         'browser/sync/protocol/proto_enum_conversions.cc',
         'browser/sync/protocol/proto_enum_conversions.h',
         'browser/sync/protocol/proto_value_conversions.cc',
@@ -679,6 +659,7 @@
         'browser/sync/protocol/service_constants.h',
         'browser/sync/protocol/sync_protocol_error.cc',
         'browser/sync/protocol/sync_protocol_error.h',
+        'browser/sync/sessions/debug_info_getter.h',
         'browser/sync/sessions/ordered_commit_set.cc',
         'browser/sync/sessions/ordered_commit_set.h',
         'browser/sync/sessions/session_state.cc',
@@ -689,7 +670,6 @@
         'browser/sync/sessions/sync_session.h',
         'browser/sync/sessions/sync_session_context.cc',
         'browser/sync/sessions/sync_session_context.h',
-        'browser/sync/shared_value.h',
         'browser/sync/sync_js_controller.cc',
         'browser/sync/sync_js_controller.h',
         'browser/sync/syncable/blob.h',
@@ -719,6 +699,7 @@
         'browser/sync/util/dbgq.h',
         'browser/sync/util/extensions_activity_monitor.cc',
         'browser/sync/util/extensions_activity_monitor.h',
+        'browser/sync/util/immutable.h',
         'browser/sync/util/logging.cc',
         'browser/sync/util/logging.h',
         'browser/sync/util/nigori.cc',
@@ -727,12 +708,14 @@
         'browser/sync/util/oauth.h',
         'browser/sync/util/sqlite_utils.cc',
         'browser/sync/util/sqlite_utils.h',
+        'browser/sync/util/time.cc',
+        'browser/sync/util/time.h',
         'browser/sync/util/user_settings.cc',
         'browser/sync/util/user_settings.h',
         'browser/sync/util/user_settings_posix.cc',
         'browser/sync/util/user_settings_win.cc',
-        'browser/sync/weak_handle.cc',
-        'browser/sync/weak_handle.h',
+        'browser/sync/util/weak_handle.cc',
+        'browser/sync/util/weak_handle.h',
       ],
       'include_dirs': [
         '..',
@@ -803,6 +786,7 @@
         'browser/sync/notifier/invalidation_notifier.cc',
         'browser/sync/notifier/invalidation_util.cc',
         'browser/sync/notifier/invalidation_util.h',
+        'browser/sync/notifier/invalidation_version_tracker.h',
         'browser/sync/notifier/non_blocking_invalidation_notifier.h',
         'browser/sync/notifier/non_blocking_invalidation_notifier.cc',
         'browser/sync/notifier/p2p_notifier.h',
@@ -928,7 +912,6 @@
          '..',
       ],
       'sources': [
-        'tools/ipclist/all_messages.h',
         'tools/ipclist/ipclist.cc',
       ],
     },
@@ -1129,7 +1112,7 @@
             'chrome_dll',
           ],
           'sources': [
-            'browser/plugin_carbon_interpose_mac.cc',
+            '../content/plugin/plugin_carbon_interpose_mac.cc',
           ],
           'include_dirs': [
             '..',
@@ -1230,7 +1213,7 @@
           'target_name': 'packed_extra_resources',
           'type': 'none',
           'variables': {
-            'repack_path': '../tools/data_pack/repack.py',
+            'repack_path': '../tools/grit/grit/format/repack.py',
           },
           'dependencies': [
             'chrome_extra_resources',
@@ -1333,7 +1316,6 @@
             '../skia/skia.gyp:skia',
           ],
           'sources': [
-            'tools/ipclist/all_messages.h',
             'tools/ipclist/ipcfuzz.cc',
           ],
         },
@@ -1342,8 +1324,7 @@
     ['OS=="win"',
       { 'targets': [
         {
-          # TODO(sgk):  remove this when we change the buildbots to
-          # use the generated build\all.sln file to build the world.
+          # This target pulls in other binary targets into chrome.sln.
           'target_name': 'pull_in_all',
           'type': 'none',
           'dependencies': [
@@ -1351,31 +1332,29 @@
             'installer/installer_tools.gyp:*',
             'installer/upgrade_test.gyp:*',
             '../base/base.gyp:*',
+            '../breakpad/breakpad.gyp:*',
+            '../build/temp_gyp/googleurl.gyp:*',
             '../chrome_frame/chrome_frame.gyp:*',
             '../content/content.gyp:*',
+            '../courgette/courgette.gyp:*',
             '../ipc/ipc.gyp:*',
             '../media/media.gyp:*',
             '../net/net.gyp:*',
             '../ppapi/ppapi.gyp:*',
             '../ppapi/ppapi_internal.gyp:*',
             '../printing/printing.gyp:*',
+            '../rlz/rlz.gyp:*',
+            '../sandbox/sandbox.gyp:*',
             '../sdch/sdch.gyp:*',
             '../skia/skia.gyp:*',
             '../sql/sql.gyp:*',
             '../testing/gmock.gyp:*',
             '../testing/gtest.gyp:*',
+            '../tools/memory_watcher/memory_watcher.gyp:*',
             '../ui/ui.gyp:*',
+            '../v8/tools/gyp/v8.gyp:v8_shell',
             '../webkit/support/webkit_support.gyp:*',
             '../webkit/webkit.gyp:*',
-
-            '../build/temp_gyp/googleurl.gyp:*',
-
-            '../breakpad/breakpad.gyp:*',
-            '../courgette/courgette.gyp:*',
-            '../rlz/rlz.gyp:*',
-            '../sandbox/sandbox.gyp:*',
-            '../tools/memory_watcher/memory_watcher.gyp:*',
-            '../v8/tools/gyp/v8.gyp:v8_shell',
             '<(libjpeg_gyp_path):*',
           ],
           'conditions': [
@@ -1390,7 +1369,7 @@
           'target_name': 'chrome_version_resources',
           'type': 'none',
           'dependencies': [
-            '../build/util/build_util.gyp:lastchange',
+            '../build/util/build_util.gyp:lastchange#target',
           ],
           'direct_dependent_settings': {
             'include_dirs': [
@@ -1401,7 +1380,6 @@
             'app/chrome_exe.ver',
             'app/chrome_dll.ver',
             'app/nacl64_exe.ver',
-            'app/nacl64_dll.ver',
             'app/other.ver',
           ],
           'rules': [
@@ -1452,7 +1430,7 @@
           'type': 'none',
           'hard_dependency': 1,
           'dependencies': [
-            '../build/util/build_util.gyp:lastchange',
+            '../build/util/build_util.gyp:lastchange#target',
           ],
           'actions': [
             {
@@ -1499,7 +1477,6 @@
           'type': 'static_library',
           'dependencies': [
             'theme_resources',
-            'theme_resources_standard',
             '../base/base.gyp:test_support_base',
             '../skia/skia.gyp:skia',
             '../testing/gtest.gyp:gtest',
@@ -1561,7 +1538,6 @@
           'type': 'executable',
           'product_name': 'crash_service64',
           'dependencies': [
-            'app/policy/cloud_policy_codegen.gyp:policy_win64',
             'common_constants_win64',
             'installer_util_nacl_win64',
             '../base/base.gyp:base_static_win64',
@@ -1594,7 +1570,7 @@
         'target_name': 'packed_resources',
         'type': 'none',
         'variables': {
-          'repack_path': '../tools/data_pack/repack.py',
+          'repack_path': '../tools/grit/grit/format/repack.py',
         },
         'dependencies': [
           # MSVS needs the dependencies explictly named, Make is able to
@@ -1604,8 +1580,6 @@
           'default_plugin/default_plugin.gyp:default_plugin_resources',
           'platform_locale_settings',
           'theme_resources',
-          'theme_resources_standard',
-          'theme_resources_large',
           '<(DEPTH)/net/net.gyp:net_resources',
           '<(DEPTH)/ui/base/strings/ui_strings.gyp:ui_strings',
           '<(DEPTH)/ui/ui.gyp:gfx_resources',
@@ -1626,7 +1600,6 @@
             'action_name': 'repack_chrome',
             'variables': {
               'pak_inputs': [
-                '<(grit_out_dir)/autofill_resources.pak',
                 '<(grit_out_dir)/browser_resources.pak',
                 '<(grit_out_dir)/common_resources.pak',
                 '<(grit_out_dir)/default_plugin_resources/default_plugin_resources.pak',
@@ -1737,6 +1710,21 @@
               '<(INTERMEDIATE_DIR)/repack/chrome.pak'
             ],
           },
+        ],
+        'conditions': [
+          ['branding=="Chrome"', {
+            'copies': [
+              {
+                # This location is for the Windows and Linux builds. For
+                # Windows, the chrome.release file ensures that these files are
+                # copied into the installer. Note that we have a separate
+                # section in chrome_dll.gyp to copy these files for Mac, as it
+                # needs to be dropped inside the framework.
+                'destination': '<(PRODUCT_DIR)/default_apps',
+                'files': ['<@(default_apps_list)']
+              },
+            ],
+          }],
         ],
       }],  # targets
     }],  # OS != "mac"

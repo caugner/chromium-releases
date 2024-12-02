@@ -50,6 +50,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "media/base/filters.h"
 #include "media/base/message_loop_factory.h"
@@ -77,7 +78,8 @@ class WebVideoRenderer;
 
 class WebMediaPlayerImpl
     : public WebKit::WebMediaPlayer,
-      public MessageLoop::DestructionObserver {
+      public MessageLoop::DestructionObserver,
+      public base::SupportsWeakPtr<WebMediaPlayerImpl> {
  public:
   // Construct a WebMediaPlayerImpl with reference to the client, and media
   // filter collection. By providing the filter collection the implementor can
@@ -207,6 +209,9 @@ class WebMediaPlayerImpl
   // Getter method to |client_|.
   WebKit::WebMediaPlayerClient* GetClient();
 
+  // Lets V8 know that player uses extra resources not managed by V8.
+  void IncrementExternallyAllocatedMemory();
+
   // TODO(hclam): get rid of these members and read from the pipeline directly.
   WebKit::WebMediaPlayer::NetworkState network_state_;
   WebKit::WebMediaPlayer::ReadyState ready_state_;
@@ -259,6 +264,8 @@ class WebMediaPlayerImpl
 #endif
 
   scoped_refptr<media::MediaLog> media_log_;
+
+  bool incremented_externally_allocated_memory_;
 
   DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerImpl);
 };

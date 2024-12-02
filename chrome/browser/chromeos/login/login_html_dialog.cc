@@ -4,12 +4,14 @@
 
 #include "chrome/browser/chromeos/login/login_html_dialog.h"
 
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/frame/bubble_frame_view.h"
 #include "chrome/browser/chromeos/frame/bubble_window.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/views/html_dialog_view.h"
 #include "content/common/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
@@ -18,6 +20,7 @@
 namespace chromeos {
 
 namespace {
+
 // Default width/height ratio of screen size.
 const double kDefaultWidthRatio = 0.6;
 const double kDefaultHeightRatio = 0.6;
@@ -51,6 +54,11 @@ LoginHtmlDialog::~LoginHtmlDialog() {
 void LoginHtmlDialog::Show() {
   HtmlDialogView* html_view =
       new HtmlDialogView(ProfileManager::GetDefaultProfile(), this);
+#if defined(USE_AURA)
+  // TODO(saintlou): Until the new Bubble have been landed.
+  views::Widget::CreateWindowWithParent(html_view, parent_window_);
+  html_view->InitDialog();
+#else
   if (style_ & STYLE_BUBBLE) {
     views::Widget* bubble_window = BubbleWindow::Create(parent_window_,
         static_cast<BubbleWindowStyle>(STYLE_XBAR | STYLE_THROBBER),
@@ -67,6 +75,7 @@ void LoginHtmlDialog::Show() {
         this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
         Source<TabContents>(html_view->dom_contents()->tab_contents()));
   }
+#endif
   html_view->GetWidget()->Show();
   is_open_ = true;
 }
@@ -130,8 +139,13 @@ void LoginHtmlDialog::Observe(int type,
                               const NotificationSource& source,
                               const NotificationDetails& details) {
   DCHECK(type == content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME);
+#if defined(USE_AURA)
+  // TODO(saintlou): Do we need a throbber for Aura?
+  NOTIMPLEMENTED();
+#else
   if (bubble_frame_view_)
     bubble_frame_view_->StopThrobber();
+#endif
 }
 
 }  // namespace chromeos

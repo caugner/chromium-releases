@@ -7,6 +7,7 @@
 #include <set>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/message_loop.h"
 #include "base/platform_file.h"
 #include "chrome/browser/extensions/mock_extension_special_storage_policy.h"
@@ -148,14 +149,16 @@ class RemoveHistoryTester : public BrowsingDataRemoverTester {
         url,
         true,
         &consumer_,
-        NewCallback(this, &RemoveHistoryTester::SaveResultAndQuit));
+        base::Bind(&RemoveHistoryTester::SaveResultAndQuit,
+                   base::Unretained(this)));
     BlockUntilNotified();
     return query_url_success_;
   }
 
   void AddHistory(const GURL& url, base::Time time) {
-    history_service_->AddPage(url, time, NULL, 0, GURL(), PageTransition::LINK,
-        history::RedirectList(), history::SOURCE_BROWSED, false);
+    history_service_->AddPage(url, time, NULL, 0, GURL(),
+        content::PAGE_TRANSITION_LINK, history::RedirectList(),
+        history::SOURCE_BROWSED, false);
   }
 
  private:
@@ -306,7 +309,7 @@ TEST_F(BrowsingDataRemoverTest, RemoveCookieForever) {
   ASSERT_TRUE(tester->ContainsCookie());
 
   BlockUntilBrowsingDataRemoved(BrowsingDataRemover::EVERYTHING,
-      BrowsingDataRemover::REMOVE_SITE_DATA, tester.get());
+      BrowsingDataRemover::REMOVE_COOKIES, tester.get());
 
   EXPECT_FALSE(tester->ContainsCookie());
 }
@@ -348,7 +351,8 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForeverBoth) {
 
   tester->PopulateTestQuotaManagedData(GetMockManager());
   BlockUntilBrowsingDataRemoved(BrowsingDataRemover::EVERYTHING,
-      BrowsingDataRemover::REMOVE_SITE_DATA, tester.get());
+      BrowsingDataRemover::REMOVE_SITE_DATA &
+      ~BrowsingDataRemover::REMOVE_LSO_DATA, tester.get());
 
   EXPECT_FALSE(GetMockManager()->OriginHasData(kOrigin1,
       quota::kStorageTypeTemporary));
@@ -370,7 +374,8 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForeverOnlyTemporary) {
 
   tester->PopulateTestQuotaManagedTemporaryData(GetMockManager());
   BlockUntilBrowsingDataRemoved(BrowsingDataRemover::EVERYTHING,
-      BrowsingDataRemover::REMOVE_SITE_DATA, tester.get());
+      BrowsingDataRemover::REMOVE_SITE_DATA &
+      ~BrowsingDataRemover::REMOVE_LSO_DATA, tester.get());
 
   EXPECT_FALSE(GetMockManager()->OriginHasData(kOrigin1,
       quota::kStorageTypeTemporary));
@@ -392,7 +397,8 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForeverOnlyPersistent) {
 
   tester->PopulateTestQuotaManagedPersistentData(GetMockManager());
   BlockUntilBrowsingDataRemoved(BrowsingDataRemover::EVERYTHING,
-      BrowsingDataRemover::REMOVE_SITE_DATA, tester.get());
+      BrowsingDataRemover::REMOVE_SITE_DATA &
+      ~BrowsingDataRemover::REMOVE_LSO_DATA, tester.get());
 
   EXPECT_FALSE(GetMockManager()->OriginHasData(kOrigin1,
       quota::kStorageTypeTemporary));
@@ -414,7 +420,8 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForeverNeither) {
 
   GetMockManager();  // Creates the QuotaManager instance.
   BlockUntilBrowsingDataRemoved(BrowsingDataRemover::EVERYTHING,
-      BrowsingDataRemover::REMOVE_SITE_DATA, tester.get());
+      BrowsingDataRemover::REMOVE_SITE_DATA &
+      ~BrowsingDataRemover::REMOVE_LSO_DATA, tester.get());
 
   EXPECT_FALSE(GetMockManager()->OriginHasData(kOrigin1,
       quota::kStorageTypeTemporary));
@@ -436,7 +443,8 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForLastHour) {
   tester->PopulateTestQuotaManagedData(GetMockManager());
 
   BlockUntilBrowsingDataRemoved(BrowsingDataRemover::LAST_HOUR,
-      BrowsingDataRemover::REMOVE_SITE_DATA, tester.get());
+      BrowsingDataRemover::REMOVE_SITE_DATA &
+      ~BrowsingDataRemover::REMOVE_LSO_DATA, tester.get());
 
   EXPECT_FALSE(GetMockManager()->OriginHasData(kOrigin1,
       quota::kStorageTypeTemporary));
@@ -458,7 +466,8 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedDataForLastWeek) {
   tester->PopulateTestQuotaManagedData(GetMockManager());
 
   BlockUntilBrowsingDataRemoved(BrowsingDataRemover::LAST_WEEK,
-      BrowsingDataRemover::REMOVE_SITE_DATA, tester.get());
+      BrowsingDataRemover::REMOVE_SITE_DATA &
+      ~BrowsingDataRemover::REMOVE_LSO_DATA, tester.get());
 
   EXPECT_FALSE(GetMockManager()->OriginHasData(kOrigin1,
       quota::kStorageTypeTemporary));
@@ -486,7 +495,8 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedUnprotectedOrigins) {
   tester->PopulateTestQuotaManagedData(GetMockManager());
 
   BlockUntilBrowsingDataRemoved(BrowsingDataRemover::EVERYTHING,
-      BrowsingDataRemover::REMOVE_SITE_DATA, tester.get());
+      BrowsingDataRemover::REMOVE_SITE_DATA &
+      ~BrowsingDataRemover::REMOVE_LSO_DATA, tester.get());
 
   EXPECT_TRUE(GetMockManager()->OriginHasData(kOrigin1,
       quota::kStorageTypeTemporary));

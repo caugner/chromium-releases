@@ -233,6 +233,7 @@ class AddMountFunction
                                                void* context) OVERRIDE;
 
  private:
+#if defined(OS_CHROMEOS)
   struct MountParamaters {
     MountParamaters(const std::string& type,
                     const chromeos::MountPathOptions& options)
@@ -241,6 +242,7 @@ class AddMountFunction
     std::string mount_type;
     chromeos::MountPathOptions mount_options;
   };
+#endif
 
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.addMount");
 };
@@ -296,6 +298,28 @@ class FormatDeviceFunction
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.formatDevice");
 };
 
+class GetSizeStatsFunction
+    : public FileBrowserFunction {
+ public:
+  GetSizeStatsFunction();
+
+ protected:
+  virtual ~GetSizeStatsFunction();
+
+  // FileBrowserFunction overrides.
+  virtual bool RunImpl() OVERRIDE;
+  virtual void GetLocalPathsResponseOnUIThread(const FilePathList& files,
+                                               void* context) OVERRIDE;
+
+ private:
+  void GetSizeStatsCallbackOnUIThread(const char* mount_path,
+                                      size_t total_size_kb,
+                                      size_t remaining_size_kb);
+  void CallGetSizeStatsOnFileThread(const char* mount_path);
+
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getSizeStats");
+};
+
 // Retrieves devices meta-data. Expects volume's device path as an argument.
 class GetVolumeMetadataFunction
     : public SyncExtensionFunction {
@@ -308,7 +332,7 @@ class GetVolumeMetadataFunction
   virtual bool RunImpl() OVERRIDE;
 
  private:
-#ifdef OS_CHROMEOS
+#if defined(OS_CHROMEOS)
   const std::string& DeviceTypeToString(chromeos::DeviceType type);
 #endif
 

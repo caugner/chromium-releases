@@ -346,7 +346,9 @@ TEST_P(FullTabUITest, TabCrashReload) {
 }
 
 // Tests if Chrome gets restarted after a crash by just refreshing the document.
-TEST_P(FullTabUITest, TabCrashRefresh) {
+// DISABLED as per bug http://crbug.com/99317 (one of the failures is a
+// timeout, which marking as FLAKY or FAILS won't mask).
+TEST_P(FullTabUITest, DISABLED_TabCrashRefresh) {
   using testing::DoAll;
 
   if (!GetParam().invokes_cf()) {

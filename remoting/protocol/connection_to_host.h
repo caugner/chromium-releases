@@ -21,16 +21,13 @@ namespace base {
 class MessageLoopProxy;
 }  // namespace base
 
-namespace talk_base {
-class NetworkManager;
-class PacketSocketFactory;
-}  // namespace talk_base
+namespace pp {
+class Instance;
+}  // namespace pp
 
 namespace remoting {
 
 class JingleThread;
-class HostResolverFactory;
-class PortAllocatorSessionFactory;
 class XmppProxy;
 class VideoPacket;
 
@@ -51,36 +48,31 @@ class ConnectionToHost : public SignalStrategy::StatusObserver,
                          public SessionManager::Listener {
  public:
   enum State {
-    STATE_EMPTY,
-    STATE_CONNECTED,
-    STATE_AUTHENTICATED,
-    STATE_FAILED,
-    STATE_CLOSED,
+    CONNECTING,
+    CONNECTED,
+    AUTHENTICATED,
+    FAILED,
+    CLOSED,
+  };
+
+  enum Error {
+    OK,
+    HOST_IS_OFFLINE,
+    SESSION_REJECTED,
+    INCOMPATIBLE_PROTOCOL,
+    NETWORK_FAILURE,
   };
 
   class HostEventCallback {
    public:
     virtual ~HostEventCallback() {}
 
-    // Called when the network connection is opened.
-    virtual void OnConnectionOpened(ConnectionToHost* conn) = 0;
-
-    // Called when the network connection is closed.
-    virtual void OnConnectionClosed(ConnectionToHost* conn) = 0;
-
-    // Called when the network connection has failed.
-    virtual void OnConnectionFailed(ConnectionToHost* conn) = 0;
+    // Called when state of the connection changes.
+    virtual void OnConnectionState(State state, Error error) = 0;
   };
 
-  // Takes ownership of |network_manager| and |socket_factory|. Both
-  // |network_manager| and |socket_factory| may be set to NULL.
-  //
-  // TODO(sergeyu): Constructor shouldn't need thread here.
-  ConnectionToHost(base::MessageLoopProxy* network_message_loop,
-                   talk_base::NetworkManager* network_manager,
-                   talk_base::PacketSocketFactory* socket_factory,
-                   HostResolverFactory* host_resolver_factory,
-                   PortAllocatorSessionFactory* session_factory,
+  ConnectionToHost(base::MessageLoopProxy* message_loop,
+                   pp::Instance* pp_instance,
                    bool allow_nat_traversal);
   virtual ~ConnectionToHost();
 
@@ -95,7 +87,7 @@ class ConnectionToHost : public SignalStrategy::StatusObserver,
 
   virtual void Disconnect(const base::Closure& shutdown_task);
 
-  virtual const SessionConfig* config();
+  virtual const SessionConfig& config();
 
   virtual InputStub* input_stub();
 
@@ -134,16 +126,15 @@ class ConnectionToHost : public SignalStrategy::StatusObserver,
   // Callback for |video_reader_|.
   void OnVideoPacket(VideoPacket* packet);
 
-  void CloseOnError();
+  void CloseOnError(Error error);
 
   // Stops writing in the channels.
   void CloseChannels();
 
+  void SetState(State state, Error error);
+
   scoped_refptr<base::MessageLoopProxy> message_loop_;
-  scoped_ptr<talk_base::NetworkManager> network_manager_;
-  scoped_ptr<talk_base::PacketSocketFactory> socket_factory_;
-  scoped_ptr<HostResolverFactory> host_resolver_factory_;
-  scoped_ptr<PortAllocatorSessionFactory> port_allocator_session_factory_;
+  pp::Instance* pp_instance_;
   bool allow_nat_traversal_;
 
   std::string host_jid_;
@@ -171,6 +162,7 @@ class ConnectionToHost : public SignalStrategy::StatusObserver,
 
   // Internal state of the connection.
   State state_;
+  Error error_;
 
   // State of the channels.
   bool control_connected_;

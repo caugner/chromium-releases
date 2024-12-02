@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,11 @@
 
 #include "base/basictypes.h"
 #include "content/common/speech_input_result.h"
-#include "content/renderer/render_view_observer.h"
+#include "content/public/renderer/render_view_observer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSpeechInputController.h"
 
 class GURL;
+class RenderViewImpl;
 
 namespace WebKit {
 class WebSpeechInputListener;
@@ -18,10 +19,10 @@ class WebSpeechInputListener;
 
 // SpeechInputDispatcher is a delegate for speech input messages used by WebKit.
 // It's the complement of SpeechInputDispatcherHost (owned by RenderViewHost).
-class SpeechInputDispatcher : public RenderViewObserver,
+class SpeechInputDispatcher : public content::RenderViewObserver,
                               public WebKit::WebSpeechInputController {
  public:
-  SpeechInputDispatcher(RenderView* render_view,
+  SpeechInputDispatcher(RenderViewImpl* render_view,
                         WebKit::WebSpeechInputListener* listener);
 
  private:
@@ -38,8 +39,8 @@ class SpeechInputDispatcher : public RenderViewObserver,
   virtual void cancelRecognition(int request_id);
   virtual void stopRecording(int request_id);
 
-  void OnSpeechRecognitionResult(
-      int request_id, const speech_input::SpeechInputResultArray& result);
+  void OnSpeechRecognitionResult(int request_id,
+      const speech_input::SpeechInputResult& result);
   void OnSpeechRecordingComplete(int request_id);
   void OnSpeechRecognitionComplete(int request_id);
   void OnSpeechRecognitionToggleSpeechInput();

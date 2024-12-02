@@ -14,8 +14,10 @@
 #include "base/memory/ref_counted.h"
 #include "base/process_util.h"
 #include "base/string16.h"
-#include "content/common/view_types.h"
+#include "base/values.h"
+#include "content/common/content_export.h"
 #include "content/common/window_container_type.h"
+#include "content/public/common/view_types.h"
 #include "ipc/ipc_channel.h"
 #include "net/base/load_states.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
@@ -63,11 +65,11 @@ class Size;
 //  exposing a more generic Send function on RenderViewHost and a response
 //  listener here to serve that need.
 //
-class RenderViewHostDelegate : public IPC::Channel::Listener {
+class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
  public:
   // View ----------------------------------------------------------------------
   // Functions that can be routed directly to a view-specific class.
-  class View {
+  class CONTENT_EXPORT View {
    public:
     // The page is trying to open a new page (e.g. a popup window). The window
     // should be created associated with the given route, but it should not be
@@ -158,7 +160,7 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
   // Functions for managing switching of Renderers. For TabContents, this is
   // implemented by the RenderViewHostManager
 
-  class RendererManagement {
+  class CONTENT_EXPORT RendererManagement {
    public:
     // Notification whether we should close the page, after an explicit call to
     // AttemptToClosePage.  This is called before a cross-site request or before
@@ -203,10 +205,11 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
 
   // Return this object cast to a BackgroundContents, if it is one. If the
   // object is not a BackgroundContents, returns NULL.
+  // DEPRECATED: http://crbug.com/98934
   virtual BackgroundContents* GetAsBackgroundContents();
 
   // Return type of RenderView which is attached with this object.
-  virtual ViewType::Type GetRenderViewType() const = 0;
+  virtual content::ViewType GetRenderViewType() const = 0;
 
   // The RenderView is being constructed (message sent to the renderer process
   // to construct a RenderView).  Now is a good time to send other setup events
@@ -281,7 +284,8 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
   // The page wants to open a URL with the specified disposition.
   virtual void RequestOpenURL(const GURL& url,
                               const GURL& referrer,
-                              WindowOpenDisposition disposition) {}
+                              WindowOpenDisposition disposition,
+                              int64 source_frame_id) {}
 
   // A javascript message, confirmation or prompt should be shown.
   virtual void RunJavaScriptMessage(const RenderViewHost* rvh,
@@ -371,9 +375,23 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
 
   // Notification that the page wants to go into or out of fullscreen mode.
   virtual void ToggleFullscreenMode(bool enter_fullscreen) {}
+  virtual bool IsFullscreenForCurrentTab() const;
 
   // The contents' preferred size changed.
   virtual void UpdatePreferredSize(const gfx::Size& pref_size) {}
+
+  // Notification message from HTML UI.
+  virtual void WebUISend(RenderViewHost* render_view_host,
+                         const GURL& source_url,
+                         const std::string& name,
+                         const base::ListValue& args) {}
+  // Requests to lock the mouse. Once the request is approved or rejected,
+  // GotResponseToLockMouseRequest() will be called on the requesting render
+  // view host.
+  virtual void RequestToLockMouse() {}
+
+  // Notification that the view has lost the mouse lock.
+  virtual void LostMouseLock() {}
 
  protected:
   virtual ~RenderViewHostDelegate() {}

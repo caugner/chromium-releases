@@ -4,12 +4,6 @@
 
 #include "base/bind.h"
 
-#if defined(BASE_CALLBACK_H_)
-// We explicitly do not want to include callback.h so people are not tempted
-// to use bind.h in a headerfile for getting the Callback types.
-#error "base/bind.h should avoid pulling in callback.h by default."
-#endif
-
 #include "base/callback.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -20,6 +14,8 @@ using ::testing::StrictMock;
 
 namespace base {
 namespace {
+
+class IncompleteType;
 
 class NoRef {
  public:
@@ -137,6 +133,22 @@ class CopyCounter {
   int* assigns_;
 };
 
+class DeleteCounter {
+ public:
+  explicit DeleteCounter(int* deletes)
+      : deletes_(deletes) {
+  }
+
+  ~DeleteCounter() {
+    (*deletes_)++;
+  }
+
+  void VoidMethod0() {}
+
+ private:
+  int* deletes_;
+};
+
 // Some test functions that we can Bind to.
 template <typename T>
 T PolymorphicIdentity(T t) {
@@ -157,6 +169,10 @@ int ArrayGet(const int array[], int n) {
 
 int Sum(int a, int b, int c, int d, int e, int f) {
   return a + b + c + d + e + f;
+}
+
+void OutputSum(int* output, int a, int b, int c, int d, int e) {
+  *output = a + b + c + d + e;
 }
 
 const char* CStringIdentity(const char* s) {
@@ -185,11 +201,6 @@ void RefArgSet(int &n) {
 
 int FunctionWithWeakFirstParam(WeakPtr<NoRef> o, int n) {
   return n;
-}
-
-// Only useful in no-compile tests.
-int UnwrapNoRefParentRef(Parent& p) {
-  return p.value;
 }
 
 class BindTest : public ::testing::Test {
@@ -249,9 +260,42 @@ TEST_F(BindTest, ArityTest) {
   EXPECT_EQ(69, c6.Run(13, 12, 11, 10, 9, 14));
 }
 
+// Bind should be able to take existing Callbacks and convert to a Closure.
+TEST_F(BindTest, CallbackBindMore) {
+  int output = 0;
+  Closure c;
+
+  Callback<void(int)> c1 = Bind(&OutputSum, &output, 16, 8, 4, 2);
+  c = Bind(c1, 10);
+  c.Run();
+  EXPECT_EQ(40, output);
+
+  Callback<void(int,int)> c2 = Bind(&OutputSum, &output, 16, 8, 4);
+  c = Bind(c2, 10, 9);
+  c.Run();
+  EXPECT_EQ(47, output);
+
+  Callback<void(int,int,int)> c3 = Bind(&OutputSum, &output, 16, 8);
+  c = Bind(c3, 10, 9, 8);
+  c.Run();
+  EXPECT_EQ(51, output);
+
+  Callback<void(int,int,int,int)> c4 = Bind(&OutputSum, &output, 16);
+  c = Bind(c4, 10, 9, 8, 7);
+  c.Run();
+  EXPECT_EQ(50, output);
+
+  Callback<void(int,int,int,int,int)> c5 = Bind(&OutputSum, &output);
+  c = Bind(c5, 10, 9, 8, 7, 6);
+  c.Run();
+  EXPECT_EQ(40, output);
+}
+
 // Function type support.
 //   - Normal function.
+//   - Normal function bound with non-refcounted first argument.
 //   - Method bound to non-const object.
+//   - Method bound to scoped_refptr.
 //   - Const method bound to non-const object.
 //   - Const method bound to const object.
 //   - Derived classes can be used with pointers to non-virtual base functions.
@@ -259,19 +303,26 @@ TEST_F(BindTest, ArityTest) {
 //     preserve virtual dispatch).
 TEST_F(BindTest, FunctionTypeSupport) {
   EXPECT_CALL(static_func_mock_, VoidMethod0());
-  EXPECT_CALL(has_ref_, AddRef()).Times(3);
-  EXPECT_CALL(has_ref_, Release()).Times(3);
-  EXPECT_CALL(has_ref_, VoidMethod0());
+  EXPECT_CALL(has_ref_, AddRef()).Times(5);
+  EXPECT_CALL(has_ref_, Release()).Times(5);
+  EXPECT_CALL(has_ref_, VoidMethod0()).Times(2);
   EXPECT_CALL(has_ref_, VoidConstMethod0()).Times(2);
 
   Closure normal_cb = Bind(&VoidFunc0);
+  Callback<NoRef*(void)> normal_non_refcounted_cb =
+      Bind(&PolymorphicIdentity<NoRef*>, &no_ref_);
+  normal_cb.Run();
+  EXPECT_EQ(&no_ref_, normal_non_refcounted_cb.Run());
+
   Closure method_cb = Bind(&HasRef::VoidMethod0, &has_ref_);
+  Closure method_refptr_cb = Bind(&HasRef::VoidMethod0,
+                                  make_scoped_refptr(&has_ref_));
   Closure const_method_nonconst_obj_cb = Bind(&HasRef::VoidConstMethod0,
                                               &has_ref_);
   Closure const_method_const_obj_cb = Bind(&HasRef::VoidConstMethod0,
                                            const_has_ref_ptr_);
-  normal_cb.Run();
   method_cb.Run();
+  method_refptr_cb.Run();
   const_method_nonconst_obj_cb.Run();
   const_method_const_obj_cb.Run();
 
@@ -312,6 +363,15 @@ TEST_F(BindTest, ReturnValues) {
   EXPECT_EQ(51337, const_method_const_obj_cb.Run());
 }
 
+// IgnoreReturn adapter test.
+//   - Function with return value, and no params can be converted to Closure.
+TEST_F(BindTest, IgnoreReturn) {
+  EXPECT_CALL(static_func_mock_, IntMethod0()).WillOnce(Return(1337));
+  Callback<int(void)> normal_cb = Bind(&IntFunc0);
+  Closure c = IgnoreReturn(normal_cb);
+  c.Run();
+}
+
 // Argument binding tests.
 //   - Argument binding to primitive.
 //   - Argument binding to primitive pointer.
@@ -319,6 +379,7 @@ TEST_F(BindTest, ReturnValues) {
 //   - Argument binding to a literal string.
 //   - Argument binding with template function.
 //   - Argument binding to an object.
+//   - Argument binding to pointer to incomplete type.
 //   - Argument gets type converted.
 //   - Pointer argument gets converted.
 //   - Const Reference forces conversion.
@@ -347,6 +408,11 @@ TEST_F(BindTest, ArgumentBinding) {
   p.value = 5;
   Callback<int(void)> bind_object_cb = Bind(&UnwrapNoRefParent, p);
   EXPECT_EQ(5, bind_object_cb.Run());
+
+  IncompleteType* incomplete_ptr = reinterpret_cast<IncompleteType*>(123);
+  Callback<IncompleteType*(void)> bind_incomplete_ptr_cb =
+      Bind(&PolymorphicIdentity<IncompleteType*>, incomplete_ptr);
+  EXPECT_EQ(incomplete_ptr, bind_incomplete_ptr_cb.Run());
 
   NoRefChild c;
   c.value = 6;
@@ -540,6 +606,31 @@ TEST_F(BindTest, ConstRef) {
   EXPECT_EQ(0, assigns);
 }
 
+// Test Owned() support.
+TEST_F(BindTest, Owned) {
+  int deletes = 0;
+  DeleteCounter* counter = new DeleteCounter(&deletes);
+
+  // If we don't capture, delete happens on Callback destruction/reset.
+  // return the same value.
+  Callback<DeleteCounter*(void)> no_capture_cb =
+      Bind(&PolymorphicIdentity<DeleteCounter*>, Owned(counter));
+  EXPECT_EQ(counter, no_capture_cb.Run());
+  EXPECT_EQ(counter, no_capture_cb.Run());
+  EXPECT_EQ(0, deletes);
+  no_capture_cb.Reset();  // This should trigger a delete.
+  EXPECT_EQ(1, deletes);
+
+  deletes = 0;
+  counter = new DeleteCounter(&deletes);
+  base::Closure own_object_cb =
+      Bind(&DeleteCounter::VoidMethod0, Owned(counter));
+  own_object_cb.Run();
+  EXPECT_EQ(0, deletes);
+  own_object_cb.Reset();
+  EXPECT_EQ(1, deletes);
+}
+
 // Argument Copy-constructor usage for non-reference parameters.
 //   - Bound arguments are only copied once.
 //   - Forwarded arguments are only copied once.
@@ -579,107 +670,6 @@ TEST_F(BindTest, ArgumentCopies) {
 //   - Assignment from other callback should only cause one ref
 //
 // TODO(ajwong): Is there actually a way to test this?
-
-// No-compile tests. These should not compile. If they do, we are allowing
-// error-prone, or incorrect behavior in the callback system.  Uncomment the
-// tests to check.
-TEST_F(BindTest, NoCompile) {
-  // - Method bound to const-object.
-  //
-  // Only const methods should be allowed to work with const objects.
-  //
-  // Callback<void(void)> method_to_const_cb =
-  //     Bind(&HasRef::VoidMethod0, const_has_ref_ptr_);
-  // method_to_const_cb.Run();
-
-  // - Method bound to non-refcounted object.
-  // - Const Method bound to non-refcounted object.
-  //
-  // We require refcounts unless you have Unretained().
-  //
-  // Callback<void(void)> no_ref_cb =
-  //     Bind(&NoRef::VoidMethod0, &no_ref_);
-  // no_ref_cb.Run();
-  // Callback<void(void)> no_ref_const_cb =
-  //     Bind(&NoRef::VoidConstMethod0, &no_ref_);
-  // no_ref_const_cb.Run();
-
-  // - Unretained() used with a refcounted object.
-  //
-  // If the object supports refcounts, unretaining it in the callback is a
-  // memory management contract break.
-  // Callback<void(void)> unretained_cb =
-  //     Bind(&HasRef::VoidConstMethod0, Unretained(&has_ref_));
-  // unretained_cb.Run();
-
-  // - Const argument used with non-const pointer parameter of same type.
-  // - Const argument used with non-const pointer parameter of super type.
-  //
-  // This is just a const-correctness check.
-  //
-  // const Parent* const_parent_ptr;
-  // const Child* const_child_ptr;
-  // Callback<Parent*(void)> pointer_same_cb =
-  //     Bind(&PolymorphicIdentity<Parent*>, const_parent_ptr);
-  // pointer_same_cb.Run();
-  // Callback<Parent*(void)> pointer_super_cb =
-  //     Bind(&PolymorphicIdentity<Parent*>, const_child_ptr);
-  // pointer_super_cb.Run();
-
-  // - Construction of Callback<A> from Callback<B> if A is supertype of B.
-  //   Specific example: Callback<void(void)> a; Callback<int(void)> b; a = b;
-  //
-  // While this is technically safe, most people aren't used to it when coding
-  // C++ so if this is happening, it is almost certainly an error.
-  //
-  // Callback<int(void)> cb_a0 = Bind(&Identity, 1);
-  // Callback<void(void)> cb_b0 = cb_a0;
-
-  // - Assignment of Callback<A> from Callback<B> if A is supertype of B.
-  // See explanation above.
-  //
-  // Callback<int(void)> cb_a1 = Bind(&Identity, 1);
-  // Callback<void(void)> cb_b1;
-  // cb_a1 = cb_b1;
-
-  // - Functions with reference parameters, unsupported.
-  //
-  // First, non-const reference parameters are disallowed by the Google
-  // style guide. Seconds, since we are doing argument forwarding it becomes
-  // very tricky to avoid copies, maintain const correctness, and not
-  // accidentally have the function be modifying a temporary, or a copy.
-  //
-  // NoRefParent p;
-  // Callback<int(Parent&)> ref_arg_cb = Bind(&UnwrapNoRefParentRef);
-  // ref_arg_cb.Run(p);
-  // Callback<int(void)> ref_cb = Bind(&UnwrapNoRefParentRef, p);
-  // ref_cb.Run();
-
-  // - A method should not be bindable with an array of objects.
-  //
-  // This is likely not wanted behavior. We specifically check for it though
-  // because it is possible, depending on how you implement prebinding, to
-  // implicitly convert an array type to a pointer type.
-  //
-  // HasRef p[10];
-  // Callback<void(void)> method_bound_to_array_cb =
-  //     Bind(&HasRef::VoidConstMethod0, p);
-  // method_bound_to_array_cb.Run();
-
-  // - Refcounted types should not be bound as a raw pointer.
-  // HasRef for_raw_ptr;
-  // Callback<void(void)> ref_count_as_raw_ptr =
-  //     Bind(&VoidPolymorphic1<HasRef*>, &for_raw_ptr);
-
-  // - WeakPtrs cannot be bound to methods with return types.
-  // HasRef for_raw_ptr;
-  // WeakPtrFactory<NoRef> weak_factory(&no_ref_);
-  // Callback<int(void)> weak_ptr_with_non_void_return_type =
-  //     Bind(&NoRef::IntMethod0, weak_factory.GetWeakPtr());
-
-  // - Bind result cannot be assigned to Callbacks with a mismatching type.
-  // Closure callback_mismatches_bind_type = Bind(&VoidPolymorphic1<int>);
-}
 
 #if defined(OS_WIN)
 int __fastcall FastCallFunc(int n) {

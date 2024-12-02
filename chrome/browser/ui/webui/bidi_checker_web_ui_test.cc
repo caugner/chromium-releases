@@ -5,17 +5,24 @@
 #include "chrome/browser/ui/webui/bidi_checker_web_ui_test.h"
 
 #include "base/base_paths.h"
+#include "base/i18n/rtl.h"
 #include "base/path_service.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/autofill/autofill_common_test.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
+#include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "ui/base/resource/resource_bundle.h"
+
+#if defined(OS_POSIX) && defined(TOOLKIT_USES_GTK)
+#include <gtk/gtk.h>
+#endif
 
 static const FilePath::CharType* kWebUIBidiCheckerLibraryJS =
     FILE_PATH_LITERAL("third_party/bidichecker/bidichecker_packaged.js");
@@ -50,10 +57,45 @@ void WebUIBidiCheckerBrowserTest::RunBidiCheckerOnPage(const char pageURL[],
                                 Value::CreateBooleanValue(isRTL)));
 }
 
+// WebUIBidiCheckerBrowserTestFakeBidi
+
+WebUIBidiCheckerBrowserTestFakeBidi::~WebUIBidiCheckerBrowserTestFakeBidi() {}
+
+WebUIBidiCheckerBrowserTestFakeBidi::WebUIBidiCheckerBrowserTestFakeBidi() {}
+
+void WebUIBidiCheckerBrowserTestFakeBidi::SetUpOnMainThread() {
+  WebUIBidiCheckerBrowserTest::SetUpOnMainThread();
+  FilePath pak_path;
+  app_locale_ = base::i18n::GetConfiguredLocale();
+  ASSERT_TRUE(PathService::Get(base::FILE_MODULE, &pak_path));
+  pak_path = pak_path.DirName();
+  pak_path = pak_path.AppendASCII("pseudo_locales");
+  pak_path = pak_path.AppendASCII("fake-bidi");
+  pak_path = pak_path.ReplaceExtension(FILE_PATH_LITERAL("pak"));
+  ResourceBundle::GetSharedInstance().OverrideLocalePakForTest(pak_path);
+  ResourceBundle::ReloadSharedInstance("he");
+  base::i18n::SetICUDefaultLocale("he");
+#if defined(OS_POSIX) && defined(TOOLKIT_USES_GTK)
+  gtk_widget_set_default_direction(GTK_TEXT_DIR_RTL);
+#endif
+}
+
+void WebUIBidiCheckerBrowserTestFakeBidi::CleanUpOnMainThread() {
+  WebUIBidiCheckerBrowserTest::CleanUpOnMainThread();
+#if defined(OS_POSIX) && defined(TOOLKIT_USES_GTK)
+  gtk_widget_set_default_direction(GTK_TEXT_DIR_LTR);
+#endif
+  base::i18n::SetICUDefaultLocale(app_locale_);
+  ResourceBundle::GetSharedInstance().OverrideLocalePakForTest(FilePath());
+  ResourceBundle::ReloadSharedInstance(app_locale_);
+}
+
+// Tests
+
 IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest, TestMainHistoryPageLTR) {
   HistoryService* history_service =
       browser()->profile()->GetHistoryService(Profile::IMPLICIT_ACCESS);
-  const GURL history_url = GURL("http://www.ynet.co.il");
+  GURL history_url = GURL("http://www.ynet.co.il");
   history_service->AddPage(history_url, history::SOURCE_BROWSED);
   string16 title;
   ASSERT_TRUE(UTF8ToUTF16("\xD7\x91\xD7\x93\xD7\x99\xD7\xA7\xD7\x94\x21",
@@ -63,38 +105,75 @@ IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest, TestMainHistoryPageLTR) {
   RunBidiCheckerOnPage(chrome::kChromeUIHistoryURL, false);
 }
 
-IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest, TestAboutPageLTR) {\
-  RunBidiCheckerOnPage(chrome::kChromeUIAboutURL, false);\
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestFakeBidi,
+                       TestMainHistoryPageRTL) {
+  HistoryService* history_service =
+      browser()->profile()->GetHistoryService(Profile::IMPLICIT_ACCESS);
+  GURL history_url = GURL("http://www.google.com");
+  history_service->AddPage(history_url, history::SOURCE_BROWSED);
+  string16 title = UTF8ToUTF16("Google");
+  history_service->SetPageTitle(history_url, title);
+  WebUIBidiCheckerBrowserTest::RunBidiCheckerOnPage(chrome::kChromeUIHistoryURL,
+                                                    true);
 }
 
-// Times out. http://code.google.com/p/chromium/issues/detail?id=82896
-IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest,
-                       DISABLED_TestBookmarksPageLTR) {\
-  RunBidiCheckerOnPage(chrome::kChromeUIBookmarksURL, false);\
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest, TestAboutPageLTR) {
+  RunBidiCheckerOnPage(chrome::kChromeUIAboutURL, false);
 }
 
-IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest, TestBugReportPageLTR) {\
-  RunBidiCheckerOnPage(chrome::kChromeUIBugReportURL, false);\
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest, TestBugReportPageLTR) {
+  RunBidiCheckerOnPage(chrome::kChromeUIBugReportURL, false);
 }
 
-IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest, TestCrashesPageLTR) {\
-  RunBidiCheckerOnPage(chrome::kChromeUICrashesURL, false);\
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest, TestCrashesPageLTR) {
+  RunBidiCheckerOnPage(chrome::kChromeUICrashesURL, false);
 }
 
-IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest, TestDownloadsPageLTR) {\
-  RunBidiCheckerOnPage(chrome::kChromeUIDownloadsURL, false);\
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestFakeBidi,
+                       TestCrashesPageRTL) {
+  WebUIBidiCheckerBrowserTest::RunBidiCheckerOnPage(chrome::kChromeUICrashesURL,
+                                                    true);
 }
 
-IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest, TestNewTabPageLTR) {\
-  RunBidiCheckerOnPage(chrome::kChromeUINewTabURL, false);\
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest, TestDownloadsPageLTR) {
+  RunBidiCheckerOnPage(chrome::kChromeUIDownloadsURL, false);
 }
 
-IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest, TestPluginsPageLTR) {\
-  RunBidiCheckerOnPage(chrome::kChromeUIPluginsURL, false);\
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestFakeBidi,
+                       TestDownloadsPageRTL) {
+  WebUIBidiCheckerBrowserTest::RunBidiCheckerOnPage(
+      chrome::kChromeUIDownloadsURL, true);
 }
 
-IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest, TestSettingsPageLTR) {\
-  RunBidiCheckerOnPage(chrome::kChromeUISettingsURL, false);\
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest, TestNewTabPageLTR) {
+  RunBidiCheckerOnPage(chrome::kChromeUINewTabURL, false);
+}
+
+// http://crbug.com/97453
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestFakeBidi,
+                       DISABLED_TestNewTabPageRTL) {
+  WebUIBidiCheckerBrowserTest::RunBidiCheckerOnPage(chrome::kChromeUINewTabURL,
+                                                    true);
+}
+
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest, TestPluginsPageLTR) {
+  RunBidiCheckerOnPage(chrome::kChromeUIPluginsURL, false);
+}
+
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestFakeBidi,
+                       TestPluginsPageRTL) {
+  WebUIBidiCheckerBrowserTest::RunBidiCheckerOnPage(chrome::kChromeUIPluginsURL,
+                                                    true);
+}
+
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest, TestSettingsPageLTR) {
+  RunBidiCheckerOnPage(chrome::kChromeUISettingsURL, false);
+}
+
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestFakeBidi,
+                       TestSettingsPageRTL) {
+  WebUIBidiCheckerBrowserTest::RunBidiCheckerOnPage(
+      chrome::kChromeUISettingsURL, true);
 }
 
 #if defined(OS_MACOSX)
@@ -126,14 +205,44 @@ IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTest,
       "",
       "66183",
       "\xD7\x99\xD7\xA9\xD7\xA8\xD7\x90\xD7\x9C",
-      "0000",
       "0000");
 
   PersonalDataManager* personal_data_manager =
-    browser()->profile()->GetPersonalDataManager();
+    PersonalDataManagerFactory::GetForProfile(browser()->profile());
   ASSERT_TRUE(personal_data_manager);
 
   personal_data_manager->AddProfile(profile);
 
   RunBidiCheckerOnPage(url.c_str(), false);
+}
+
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestFakeBidi,
+                       TestSettingsAutofillPageRTL) {
+  std::string url(chrome::kChromeUISettingsURL);
+  url += std::string(chrome::kAutofillSubPage);
+
+  autofill_test::DisableSystemServices(browser()->profile());
+  AutofillProfile profile;
+  autofill_test::SetProfileInfo(
+                                &profile,
+                                "Milton",
+                                "C.",
+                                "Waddams",
+                                "red.swingline@initech.com",
+                                "Initech",
+                                "4120 Freidrich Lane",
+                                "Basement",
+                                "Austin",
+                                "Texas",
+                                "78744",
+                                "United States",
+                                "5125551234");
+
+  PersonalDataManager* personal_data_manager =
+      PersonalDataManagerFactory::GetForProfile(browser()->profile());
+  ASSERT_TRUE(personal_data_manager);
+
+  personal_data_manager->AddProfile(profile);
+
+  WebUIBidiCheckerBrowserTest::RunBidiCheckerOnPage(url.c_str(), true);
 }

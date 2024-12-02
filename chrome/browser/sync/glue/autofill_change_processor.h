@@ -8,21 +8,16 @@
 
 #include <vector>
 
-#include "chrome/browser/autofill/autofill_profile.h"
-#include "chrome/browser/autofill/credit_card.h"
-#include "chrome/browser/autofill/personal_data_manager.h"
+#include "base/compiler_specific.h"
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
-#include "chrome/browser/sync/internal_api/sync_manager.h"
 #include "chrome/browser/sync/protocol/autofill_specifics.pb.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 
-class AutofillCreditCardChange;
 class AutofillEntry;
 class AutofillProfileChange;
-class PersonalDataManager;
 class WebDatabase;
 
 namespace sync_api {
@@ -44,7 +39,7 @@ class AutofillChangeProcessor : public ChangeProcessor,
  public:
   AutofillChangeProcessor(AutofillModelAssociator* model_associator,
                           WebDatabase* web_database,
-                          PersonalDataManager* personal_data,
+                          Profile* profile,
                           UnrecoverableErrorHandler* error_handler);
   virtual ~AutofillChangeProcessor();
 
@@ -52,17 +47,16 @@ class AutofillChangeProcessor : public ChangeProcessor,
   // WebDataService -> sync_api model change application.
   virtual void Observe(int type,
                        const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const NotificationDetails& details) OVERRIDE;
 
   // sync_api model -> WebDataService change application.
   virtual void ApplyChangesFromSyncModel(
       const sync_api::BaseTransaction* trans,
-      const sync_api::SyncManager::ChangeRecord* changes,
-      int change_count);
+      const sync_api::ImmutableChangeRecordList& changes) OVERRIDE;
 
   // Commit any changes from ApplyChangesFromSyncModel buffered in
   // autofill_changes_.
-  virtual void CommitChangesFromSyncModel();
+  virtual void CommitChangesFromSyncModel() OVERRIDE;
 
   // Copy the properties of the given Autofill entry into the sync
   // node.
@@ -72,8 +66,8 @@ class AutofillChangeProcessor : public ChangeProcessor,
   // buffers).
 
  protected:
-  virtual void StartImpl(Profile* profile);
-  virtual void StopImpl();
+  virtual void StartImpl(Profile* profile) OVERRIDE;
+  virtual void StopImpl() OVERRIDE;
 
  private:
   void StartObserving();
@@ -94,12 +88,12 @@ class AutofillChangeProcessor : public ChangeProcessor,
   // The following methods are the implementation of ApplyChangeFromSyncModel
   // for the respective autofill subtypes.
   void ApplySyncAutofillEntryChange(
-      sync_api::SyncManager::ChangeRecord::Action action,
+      sync_api::ChangeRecord::Action action,
       const sync_pb::AutofillSpecifics& autofill,
       std::vector<AutofillEntry>* new_entries,
       int64 sync_id);
   void ApplySyncAutofillProfileChange(
-      sync_api::SyncManager::ChangeRecord::Action action,
+      sync_api::ChangeRecord::Action action,
       const sync_pb::AutofillProfileSpecifics& profile,
       int64 sync_id);
 
@@ -108,10 +102,6 @@ class AutofillChangeProcessor : public ChangeProcessor,
       const sync_pb::AutofillSpecifics& autofill);
   void ApplySyncAutofillProfileDelete(
       int64 sync_id);
-
-  // Helper to post a task to the UI loop to inform the PersonalDataManager
-  // it needs to refresh itself.
-  void PostOptimisticRefreshTask();
 
   // Called to see if we need to upgrade to the new autofill2 profile.
   bool HasNotMigratedYet(const sync_api::BaseTransaction* trans);
@@ -124,9 +114,9 @@ class AutofillChangeProcessor : public ChangeProcessor,
   // holding a reference.
   WebDatabase* web_database_;
 
-  // We periodically tell the PersonalDataManager to refresh as we make
-  // changes to the autofill data in the WebDatabase.
-  PersonalDataManager* personal_data_;
+  // The profile we are syncing for.  This is used to notify listeners of
+  // the changes made.
+  Profile* profile_;
 
   NotificationRegistrar notification_registrar_;
 

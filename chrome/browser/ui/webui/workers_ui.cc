@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/workers_ui.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/json/json_writer.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/string_number_conversions.h"
@@ -14,10 +16,13 @@
 #include "chrome/browser/ui/webui/chrome_url_data_manager_backend.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/debugger/worker_devtools_manager_io.h"
+#include "content/browser/debugger/devtools_manager.h"
+#include "content/browser/debugger/worker_devtools_manager.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/worker_host/worker_process_host.h"
+#include "content/browser/worker_host/worker_service.h"
 #include "content/common/devtools_messages.h"
+#include "content/common/worker_messages.h"
 #include "grit/generated_resources.h"
 #include "grit/workers_resources.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -25,6 +30,7 @@
 static const char kWorkersDataFile[] = "workers_data.json";
 
 static const char kOpenDevToolsCommand[]  = "openDevTools";
+static const char kTerminateWorkerCommand[]  = "terminateWorker";
 
 static const char kWorkerProcessHostIdField[]  = "workerProcessHostId";
 static const char kWorkerRouteIdField[]  = "workerRouteId";
@@ -100,13 +106,18 @@ class WorkersDOMHandler : public WebUIMessageHandler {
 
   // Callback for "openDevTools" message.
   void HandleOpenDevTools(const ListValue* args);
+  void HandleTerminateWorker(const ListValue* args);
 
   DISALLOW_COPY_AND_ASSIGN(WorkersDOMHandler);
 };
 
 void WorkersDOMHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback(kOpenDevToolsCommand,
-      NewCallback(this, &WorkersDOMHandler::HandleOpenDevTools));
+      base::Bind(&WorkersDOMHandler::HandleOpenDevTools,
+                 base::Unretained(this)));
+  web_ui_->RegisterMessageCallback(kTerminateWorkerCommand,
+      base::Bind(&WorkersDOMHandler::HandleTerminateWorker,
+                 base::Unretained(this)));
 }
 
 void WorkersDOMHandler::HandleOpenDevTools(const ListValue* args) {
@@ -121,19 +132,47 @@ void WorkersDOMHandler::HandleOpenDevTools(const ListValue* args) {
                           &worker_process_host_id));
   CHECK(base::StringToInt(worker_route_id_str, &worker_route_id));
 
-  if (WorkerDevToolsManagerIO::HasDevToolsClient(worker_process_host_id,
-                                                 worker_route_id))
-    return;
   Profile* profile = Profile::FromWebUI(web_ui_);
   if (!profile)
+    return;
+  DevToolsAgentHost* agent_host =
+      WorkerDevToolsManager::GetDevToolsAgentHostForWorker(
+          worker_process_host_id,
+          worker_route_id);
+  if (DevToolsManager::GetInstance()->GetDevToolsClientHostFor(agent_host))
     return;
   DevToolsWindow* window = DevToolsWindow::CreateDevToolsWindowForWorker(
       profile);
   window->Show(DEVTOOLS_TOGGLE_ACTION_NONE);
-  WorkerDevToolsManagerIO::RegisterDevToolsClientForWorkerOnUIThread(
-      window,
-      worker_process_host_id,
-      worker_route_id);
+  DevToolsManager::GetInstance()->RegisterDevToolsClientHostFor(agent_host,
+                                                                window);
+}
+
+static void TerminateWorker(int worker_process_id, int worker_route_id) {
+  for (BrowserChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
+       !iter.Done(); ++iter) {
+    if (iter->id() == worker_process_id) {
+      (*iter)->Send(new WorkerMsg_TerminateWorkerContext(worker_route_id));
+      return;
+    }
+  }
+}
+
+void WorkersDOMHandler::HandleTerminateWorker(const ListValue* args) {
+  std::string worker_process_host_id_str;
+  std::string worker_route_id_str;
+  int worker_process_host_id;
+  int worker_route_id;
+  CHECK(args->GetSize() == 2);
+  CHECK(args->GetString(0, &worker_process_host_id_str));
+  CHECK(args->GetString(1, &worker_route_id_str));
+  CHECK(base::StringToInt(worker_process_host_id_str,
+                          &worker_process_host_id));
+  CHECK(base::StringToInt(worker_route_id_str, &worker_route_id));
+
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+      NewRunnableFunction(&TerminateWorker, worker_process_host_id,
+                          worker_route_id));
 }
 
 }  // namespace

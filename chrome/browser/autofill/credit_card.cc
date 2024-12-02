@@ -5,6 +5,8 @@
 #include "chrome/browser/autofill/credit_card.h"
 
 #include <stddef.h>
+
+#include <ostream>
 #include <string>
 
 #include "base/basictypes.h"
@@ -418,6 +420,26 @@ void CreditCard::operator=(const CreditCard& credit_card) {
   guid_ = credit_card.guid_;
 }
 
+bool CreditCard::UpdateFromImportedCard(const CreditCard& imported_card) {
+  if (this->GetCanonicalizedInfo(CREDIT_CARD_NUMBER) !=
+          imported_card.GetCanonicalizedInfo(CREDIT_CARD_NUMBER)) {
+    return false;
+  }
+
+  // Note that the card number is intentionally not updated, so as to preserve
+  // any formatting (i.e. separator characters).  Since the card number is not
+  // updated, there is no reason to update the card type, either.
+  if (!imported_card.name_on_card_.empty())
+    name_on_card_ = imported_card.name_on_card_;
+
+  // The expiration date for |imported_card| should always be set.
+  DCHECK(imported_card.expiration_month_ && imported_card.expiration_year_);
+  expiration_month_ = imported_card.expiration_month_;
+  expiration_year_ = imported_card.expiration_year_;
+
+  return true;
+}
+
 int CreditCard::Compare(const CreditCard& credit_card) const {
   // The following CreditCard field types are the only types we store in the
   // WebDB so far, so we're only concerned with matching these types in the
@@ -494,11 +516,10 @@ bool CreditCard::IsEmpty() const {
 }
 
 bool CreditCard::IsComplete() const {
-  if (!IsValidCreditCardNumber(number_))
-    return false;
-
   return
-      !name_on_card_.empty() && expiration_month_ != 0 && expiration_year_ != 0;
+      IsValidCreditCardNumber(number_) &&
+      expiration_month_ != 0 &&
+      expiration_year_ != 0;
 }
 
 string16 CreditCard::ExpirationMonthAsString() const {

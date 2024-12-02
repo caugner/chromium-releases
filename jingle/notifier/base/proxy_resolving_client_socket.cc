@@ -19,6 +19,7 @@
 namespace notifier {
 
 ProxyResolvingClientSocket::ProxyResolvingClientSocket(
+    net::ClientSocketFactory* socket_factory,
     const scoped_refptr<net::URLRequestContextGetter>& request_context_getter,
     const net::SSLConfig& ssl_config,
     const net::HostPortPair& dest_host_port_pair)
@@ -42,7 +43,7 @@ ProxyResolvingClientSocket::ProxyResolvingClientSocket(
       request_context_getter->GetURLRequestContext();
   DCHECK(request_context);
   net::HttpNetworkSession::Params session_params;
-  session_params.client_socket_factory = NULL;
+  session_params.client_socket_factory = socket_factory;
   session_params.host_resolver = request_context->host_resolver();
   session_params.cert_verifier = request_context->cert_verifier();
   // TODO(rkn): This is NULL because OriginBoundCertService is not thread safe.
@@ -55,6 +56,8 @@ ProxyResolvingClientSocket::ProxyResolvingClientSocket(
   session_params.http_auth_handler_factory =
       request_context->http_auth_handler_factory();
   session_params.network_delegate = request_context->network_delegate();
+  session_params.http_server_properties =
+      request_context->http_server_properties();
   session_params.net_log = request_context->net_log();
   network_session_ = new net::HttpNetworkSession(session_params);
 }
@@ -64,7 +67,7 @@ ProxyResolvingClientSocket::~ProxyResolvingClientSocket() {
 }
 
 int ProxyResolvingClientSocket::Read(net::IOBuffer* buf, int buf_len,
-                                     net::CompletionCallback* callback) {
+                                     net::OldCompletionCallback* callback) {
   if (transport_.get() && transport_->socket())
     return transport_->socket()->Read(buf, buf_len, callback);
   NOTREACHED();
@@ -72,7 +75,7 @@ int ProxyResolvingClientSocket::Read(net::IOBuffer* buf, int buf_len,
 }
 
 int ProxyResolvingClientSocket::Write(net::IOBuffer* buf, int buf_len,
-                                      net::CompletionCallback* callback) {
+                                      net::OldCompletionCallback* callback) {
   if (transport_.get() && transport_->socket())
     return transport_->socket()->Write(buf, buf_len, callback);
   NOTREACHED();
@@ -93,7 +96,7 @@ bool ProxyResolvingClientSocket::SetSendBufferSize(int32 size) {
   return false;
 }
 
-int ProxyResolvingClientSocket::Connect(net::CompletionCallback* callback) {
+int ProxyResolvingClientSocket::Connect(net::OldCompletionCallback* callback) {
   DCHECK(!user_connect_callback_);
 
   tried_direct_connect_fallback_ = false;
@@ -123,7 +126,7 @@ int ProxyResolvingClientSocket::Connect(net::CompletionCallback* callback) {
 
 void ProxyResolvingClientSocket::RunUserConnectCallback(int status) {
   DCHECK_LE(status, net::OK);
-  net::CompletionCallback* user_connect_callback = user_connect_callback_;
+  net::OldCompletionCallback* user_connect_callback = user_connect_callback_;
   user_connect_callback_ = NULL;
   user_connect_callback->Run(status);
 }

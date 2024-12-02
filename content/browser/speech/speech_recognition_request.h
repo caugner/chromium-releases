@@ -11,8 +11,9 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "content/common/content_export.h"
+#include "content/common/net/url_fetcher.h"
 #include "content/common/speech_input_result.h"
-#include "content/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 
 class URLFetcher;
@@ -28,46 +29,41 @@ namespace speech_input {
 class SpeechRecognitionRequest : public URLFetcher::Delegate {
  public:
   // ID passed to URLFetcher::Create(). Used for testing.
-  static int url_fetcher_id_for_tests;
+  CONTENT_EXPORT static int url_fetcher_id_for_tests;
 
   // Interface for receiving callbacks from this object.
-  class Delegate {
+  class CONTENT_EXPORT Delegate {
    public:
-    virtual void SetRecognitionResult(
-        bool error, const SpeechInputResultArray& result) = 0;
+    virtual void SetRecognitionResult(const SpeechInputResult& result) = 0;
 
    protected:
     virtual ~Delegate() {}
   };
 
   // |url| is the server address to which the request wil be sent.
-  SpeechRecognitionRequest(net::URLRequestContextGetter* context,
-                           Delegate* delegate);
+  CONTENT_EXPORT SpeechRecognitionRequest(net::URLRequestContextGetter* context,
+                                          Delegate* delegate);
 
-  virtual ~SpeechRecognitionRequest();
+  CONTENT_EXPORT virtual ~SpeechRecognitionRequest();
 
   // Sends a new request with the given audio data, returns true if successful.
   // The same object can be used to send multiple requests but only after the
   // previous request has completed.
-  void Start(const std::string& language,
-             const std::string& grammar,
-             bool censor_results,
-             const std::string& hardware_info,
-             const std::string& origin_url,
-             const std::string& content_type);
+  CONTENT_EXPORT void Start(const std::string& language,
+                            const std::string& grammar,
+                            bool filter_profanities,
+                            const std::string& hardware_info,
+                            const std::string& origin_url,
+                            const std::string& content_type);
 
   // Send a single chunk of audio immediately to the server.
-  void UploadAudioChunk(const std::string& audio_data, bool is_last_chunk);
+  CONTENT_EXPORT void UploadAudioChunk(const std::string& audio_data,
+                                       bool is_last_chunk);
 
-  bool HasPendingRequest() { return url_fetcher_ != NULL; }
+  CONTENT_EXPORT bool HasPendingRequest() { return url_fetcher_ != NULL; }
 
   // URLFetcher::Delegate methods.
-  virtual void OnURLFetchComplete(const URLFetcher* source,
-                                  const GURL& url,
-                                  const net::URLRequestStatus& status,
-                                  int response_code,
-                                  const net::ResponseCookies& cookies,
-                                  const std::string& data);
+  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
 
  private:
   scoped_refptr<net::URLRequestContextGetter> url_context_;

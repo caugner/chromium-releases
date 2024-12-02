@@ -9,7 +9,6 @@
 #include "base/command_line.h"
 #include "base/string_util.h"
 #include "chrome/common/chrome_switches.h"
-#include "net/base/escape.h"
 
 namespace extension_manifest_keys {
 
@@ -38,6 +37,11 @@ const char* kId = "id";
 const char* kIncognito = "incognito";
 const char* kIncludeGlobs = "include_globs";
 const char* kInputComponents = "input_components";
+const char* kIntents = "intents";
+const char* kIntentType = "type";
+const char* kIntentPath = "path";
+const char* kIntentTitle = "title";
+const char* kIntentDisposition = "disposition";
 const char* kIsolation = "app.isolation";
 const char* kJs = "js";
 const char* kKeycode = "keyCode";
@@ -89,8 +93,6 @@ const char* kThemeColors = "colors";
 const char* kThemeDisplayProperties = "properties";
 const char* kThemeImages = "images";
 const char* kThemeTints = "tints";
-const char* kToolstripPath = "path";
-const char* kToolstrips = "toolstrips";
 const char* kTtsEngine = "tts_engine";
 const char* kTtsGenderFemale = "female";
 const char* kTtsGenderMale = "male";
@@ -114,6 +116,8 @@ const char* kWebURLs = "app.urls";
 namespace extension_manifest_values {
 const char* kIncognitoSplit = "split";
 const char* kIncognitoSpanning = "spanning";
+const char* kIntentDispositionWindow = "window";
+const char* kIntentDispositionInline = "inline";
 const char* kIsolatedStorage = "storage";
 const char* kRunAtDocumentStart = "document_start";
 const char* kRunAtDocumentEnd = "document_end";
@@ -138,6 +142,8 @@ const char* kBackgroundPermissionNeeded =
 const char* kCannotAccessPage =
     "Cannot access contents of url \"*\". "
     "Extension manifest must request permission to access this host.";
+const char* kCannotChangeExtensionID =
+    "Installed extensions cannot change their IDs.";
 const char* kCannotClaimAllHostsInExtent =
     "Cannot claim all hosts ('*') in an extent.";
 const char* kCannotClaimAllURLsInExtent =
@@ -156,9 +162,6 @@ const char* kDevToolsExperimental =
 const char* kExpectString = "Expect string value.";
 const char* kExperimentalFlagRequired =
     "Loading extensions with 'experimental' permission requires"
-    " --enable-experimental-extension-apis command line flag.";
-const char *kExperimentalFeature =
-    "This feature requires 'experimental' permissions and"
     " --enable-experimental-extension-apis command line flag.";
 const char* kHostedAppsCannotIncludeExtensionFeatures =
     "Hosted apps cannot use the extension feature '*'.";
@@ -227,6 +230,18 @@ const char* kInvalidInputComponentShortcutKeycode =
     "Invalid value for 'input_conponents[*].shortcutKey.keyCode";
 const char* kInvalidInputComponentType =
     "Invalid value for 'input_conponents[*].type";
+const char* kInvalidIntent =
+    "Invalid value for intents[*]";
+const char* kInvalidIntentDisposition =
+    "Invalid value for intents[*].disposition";
+const char* kInvalidIntentPath =
+  "Invalid value for intents[*].path";
+const char* kInvalidIntents =
+    "Invalid value for intents";
+const char* kInvalidIntentType =
+    "Invalid value for intents[*].type";
+const char* kInvalidIntentTitle =
+    "Invalid value for intents[*].title";
 const char* kInvalidIsolation =
     "Invalid value for 'app.isolation'.";
 const char* kInvalidIsolationValue =
@@ -344,10 +359,6 @@ const char* kInvalidThemeImagesMissing =
     "An image specified in the theme is missing.";
 const char* kInvalidThemeTints =
     "Invalid value for theme images - tints must be decimal numbers.";
-const char* kInvalidToolstrip =
-    "Invalid value for 'toolstrips[*]'";
-const char* kInvalidToolstrips =
-    "Invalid value for 'toolstrips'.";
 const char* kInvalidTts =
     "Invalid value for 'tts_engine'.";
 const char* kInvalidTtsVoices =
@@ -402,6 +413,8 @@ const char* kNoWildCardsInPaths =
   "Wildcards are not allowed in extent URL pattern paths.";
 const char* kOneUISurfaceOnly =
     "Only one of 'browser_action', 'page_action', and 'app' can be specified.";
+const char* kPermissionNotAllowed =
+    "Access to permission '*' denied.";
 const char* kReservedMessageFound =
     "Reserved key * found in message catalog.";
 const char* kSidebarExperimental =
@@ -445,21 +458,6 @@ GURL GetWebstoreUpdateUrl(bool secure) {
     return GURL(cmdline->GetSwitchValueASCII(switches::kAppsGalleryUpdateURL));
   else
     return GURL(secure ? kGalleryUpdateHttpsUrl : kGalleryUpdateHttpUrl);
-}
-
-GURL GetWebstoreInstallUrl(const std::string& extension_id,
-                           const std::string& locale) {
-  std::vector<std::string> params;
-  params.push_back("id=" + extension_id);
-  params.push_back("lang=" + locale);
-  params.push_back("uc");
-  std::string url_string = extension_urls::GetWebstoreUpdateUrl(true).spec();
-
-  GURL url(url_string + "?response=redirect&x=" +
-      EscapeQueryParamValue(JoinString(params, '&'), true));
-  DCHECK(url.is_valid());
-
-  return url;
 }
 
 const char* kGalleryBrowsePrefix = "https://chrome.google.com/webstore";

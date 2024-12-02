@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/stl_util.h"
-#include "media/base/callback.h"
 #include "media/base/data_buffer.h"
 #include "media/base/limits.h"
 #include "media/base/mock_callback.h"
@@ -25,7 +25,7 @@ using ::testing::StrictMock;
 
 namespace media {
 ACTION(OnStop) {
-  AutoCallbackRunner auto_runner(arg0);
+  arg0.Run();
 }
 
 // Mocked subclass of VideoRendererBase for testing purposes.
@@ -36,7 +36,7 @@ class MockVideoRendererBase : public VideoRendererBase {
 
   // VideoRendererBase implementation.
   MOCK_METHOD1(OnInitialize, bool(VideoDecoder* decoder));
-  MOCK_METHOD1(OnStop, void(FilterCallback* callback));
+  MOCK_METHOD1(OnStop, void(const base::Closure& callback));
   MOCK_METHOD0(OnFrameAvailable, void());
 
   // Used for verifying check points during tests.
@@ -58,8 +58,7 @@ class VideoRendererBaseTest : public ::testing::Test {
     EXPECT_CALL(*decoder_, ProduceVideoFrame(_))
         .WillRepeatedly(Invoke(this, &VideoRendererBaseTest::EnqueueCallback));
 
-    EXPECT_CALL(*decoder_, width()).WillRepeatedly(Return(kWidth));
-    EXPECT_CALL(*decoder_, height()).WillRepeatedly(Return(kHeight));
+    EXPECT_CALL(*decoder_, natural_size()).WillRepeatedly(Return(kNaturalSize));
 
     EXPECT_CALL(stats_callback_object_, OnStatistics(_))
         .Times(AnyNumber());
@@ -70,11 +69,11 @@ class VideoRendererBaseTest : public ::testing::Test {
 
     if (renderer_.get()) {
       // Expect a call into the subclass.
-      EXPECT_CALL(*renderer_, OnStop(NotNull()))
+      EXPECT_CALL(*renderer_, OnStop(_))
           .WillOnce(DoAll(OnStop(), Return()))
           .RetiresOnSaturation();
 
-      renderer_->Stop(NewExpectedCallback());
+      renderer_->Stop(NewExpectedClosure());
     }
   }
 
@@ -92,7 +91,7 @@ class VideoRendererBaseTest : public ::testing::Test {
     InSequence s;
 
     // We expect the video size to be set.
-    EXPECT_CALL(host_, SetVideoSize(kWidth, kHeight));
+    EXPECT_CALL(host_, SetNaturalVideoSize(kNaturalSize));
 
     // Then our subclass will be asked to initialize.
     EXPECT_CALL(*renderer_, OnInitialize(_))
@@ -100,7 +99,7 @@ class VideoRendererBaseTest : public ::testing::Test {
 
     // Initialize, we shouldn't have any reads.
     renderer_->Initialize(decoder_,
-                          NewExpectedCallback(), NewStatisticsCallback());
+                          NewExpectedClosure(), NewStatisticsCallback());
     EXPECT_EQ(0u, read_queue_.size());
 
     // Now seek to trigger prerolling.
@@ -136,9 +135,9 @@ class VideoRendererBaseTest : public ::testing::Test {
   }
 
   void Flush() {
-    renderer_->Pause(NewExpectedCallback());
+    renderer_->Pause(NewExpectedClosure());
 
-    renderer_->Flush(NewExpectedCallback());
+    renderer_->Flush(NewExpectedClosure());
   }
 
   void CreateError() {
@@ -148,7 +147,8 @@ class VideoRendererBaseTest : public ::testing::Test {
   void CreateFrame(int64 timestamp, int64 duration) {
     const base::TimeDelta kZero;
     scoped_refptr<VideoFrame> frame =
-        VideoFrame::CreateFrame(VideoFrame::RGB32, kWidth, kHeight,
+        VideoFrame::CreateFrame(VideoFrame::RGB32, kNaturalSize.width(),
+                                kNaturalSize.height(),
                                 base::TimeDelta::FromMicroseconds(timestamp),
                                 base::TimeDelta::FromMicroseconds(duration));
     decoder_->VideoFrameReadyForTest(frame);
@@ -162,13 +162,12 @@ class VideoRendererBaseTest : public ::testing::Test {
   }
 
  protected:
-  static const size_t kWidth;
-  static const size_t kHeight;
+  static const gfx::Size kNaturalSize;
   static const int64 kDuration;
 
-  StatisticsCallback* NewStatisticsCallback() {
-    return NewCallback(&stats_callback_object_,
-                       &MockStatisticsCallback::OnStatistics);
+  StatisticsCallback NewStatisticsCallback() {
+    return base::Bind(&MockStatisticsCallback::OnStatistics,
+                      base::Unretained(&stats_callback_object_));
   }
 
   // Fixture members.
@@ -196,8 +195,7 @@ class VideoRendererBaseTest : public ::testing::Test {
   DISALLOW_COPY_AND_ASSIGN(VideoRendererBaseTest);
 };
 
-const size_t VideoRendererBaseTest::kWidth = 16u;
-const size_t VideoRendererBaseTest::kHeight = 16u;
+const gfx::Size VideoRendererBaseTest::kNaturalSize(16u, 16u);
 const int64 VideoRendererBaseTest::kDuration = 10;
 
 // Test initialization where the subclass failed for some reason.
@@ -205,7 +203,7 @@ TEST_F(VideoRendererBaseTest, Initialize_Failed) {
   InSequence s;
 
   // We expect the video size to be set.
-  EXPECT_CALL(host_, SetVideoSize(kWidth, kHeight));
+  EXPECT_CALL(host_, SetNaturalVideoSize(kNaturalSize));
 
   // Our subclass will fail when asked to initialize.
   EXPECT_CALL(*renderer_, OnInitialize(_))
@@ -216,7 +214,7 @@ TEST_F(VideoRendererBaseTest, Initialize_Failed) {
 
   // Initialize, we expect to have no reads.
   renderer_->Initialize(decoder_,
-                        NewExpectedCallback(), NewStatisticsCallback());
+                        NewExpectedClosure(), NewStatisticsCallback());
   EXPECT_EQ(0u, read_queue_.size());
 }
 
@@ -229,13 +227,13 @@ TEST_F(VideoRendererBaseTest, Initialize_Successful) {
 
 TEST_F(VideoRendererBaseTest, Play) {
   Initialize();
-  renderer_->Play(NewExpectedCallback());
+  renderer_->Play(NewExpectedClosure());
   Flush();
 }
 
 TEST_F(VideoRendererBaseTest, Error_Playing) {
   Initialize();
-  renderer_->Play(NewExpectedCallback());
+  renderer_->Play(NewExpectedClosure());
 
   EXPECT_CALL(host_, SetError(PIPELINE_ERROR_DECODE));
   CreateError();
@@ -278,7 +276,7 @@ TEST_F(VideoRendererBaseTest, Seek_RightAfter) {
 // decoder error.
 TEST_F(VideoRendererBaseTest, GetCurrentFrame_AfterError) {
   Initialize();
-  renderer_->Play(NewExpectedCallback());
+  renderer_->Play(NewExpectedClosure());
 
   EXPECT_CALL(host_, SetError(PIPELINE_ERROR_DECODE));
   CreateError();
@@ -293,7 +291,7 @@ TEST_F(VideoRendererBaseTest, GetCurrentFrame_AfterError) {
 // of a paint operation.
 TEST_F(VideoRendererBaseTest, Error_DuringPaint) {
   Initialize();
-  renderer_->Play(NewExpectedCallback());
+  renderer_->Play(NewExpectedClosure());
 
   scoped_refptr<VideoFrame> frame;
   renderer_->GetCurrentFrame(&frame);
@@ -316,11 +314,11 @@ TEST_F(VideoRendererBaseTest, Error_DuringPaint) {
 TEST_F(VideoRendererBaseTest, GetCurrentFrame_AfterStop) {
   Initialize();
 
-  EXPECT_CALL(*renderer_, OnStop(NotNull()))
+  EXPECT_CALL(*renderer_, OnStop(_))
       .WillOnce(DoAll(OnStop(), Return()))
       .RetiresOnSaturation();
 
-  renderer_->Stop(NewExpectedCallback());
+  renderer_->Stop(NewExpectedClosure());
 
   scoped_refptr<VideoFrame> frame;
   renderer_->GetCurrentFrame(&frame);

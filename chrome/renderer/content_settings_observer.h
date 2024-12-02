@@ -9,21 +9,22 @@
 #include <map>
 
 #include "chrome/common/content_settings.h"
-#include "content/renderer/render_view_observer.h"
-#include "content/renderer/render_view_observer_tracker.h"
+#include "content/public/renderer/render_view_observer.h"
+#include "content/public/renderer/render_view_observer_tracker.h"
 
 class GURL;
 
 namespace WebKit {
 class WebSecurityOrigin;
+class WebURL;
 }
 
 // Handles blocking content per content settings for each RenderView.
 class ContentSettingsObserver
-    : public RenderViewObserver,
-      public RenderViewObserverTracker<ContentSettingsObserver> {
+    : public content::RenderViewObserver,
+      public content::RenderViewObserverTracker<ContentSettingsObserver> {
  public:
-  explicit ContentSettingsObserver(RenderView* render_view);
+  explicit ContentSettingsObserver(content::RenderView* render_view);
   virtual ~ContentSettingsObserver();
 
   // Sets the content settings that back allowScripts(), allowImages(), and
@@ -36,6 +37,10 @@ class ContentSettingsObserver
 
   // Returns the setting for the given type.
   ContentSetting GetContentSetting(ContentSettingsType type);
+
+  bool plugins_temporarily_allowed() {
+    return plugins_temporarily_allowed_;
+  }
 
   // Sends an IPC notification that the specified content type was blocked.
   // If the content type requires it, |resource_identifier| names the specific
@@ -50,7 +55,9 @@ class ContentSettingsObserver
                      const WebKit::WebString& display_name,
                      unsigned long estimated_size);
   bool AllowFileSystem(WebKit::WebFrame* frame);
-  bool AllowImages(WebKit::WebFrame* frame, bool enabled_per_settings);
+  bool AllowImage(WebKit::WebFrame* frame,
+                  bool enabled_per_settings,
+                  const WebKit::WebURL& image_url);
   bool AllowIndexedDB(WebKit::WebFrame* frame,
                       const WebKit::WebString& name,
                       const WebKit::WebSecurityOrigin& origin);

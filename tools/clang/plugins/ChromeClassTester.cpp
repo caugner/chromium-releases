@@ -54,7 +54,6 @@ void ChromeClassTester::BuildBannedLists() {
   banned_directories_.push_back("llvm/");
   banned_directories_.push_back("ninja/");
   banned_directories_.push_back("xcodebuild/");
-  banned_directories_.push_back("clang/");
 
   // You are standing in a mazy of twisty dependencies, all resolved by
   // putting everything in the header.
@@ -73,9 +72,6 @@ void ChromeClassTester::BuildBannedLists() {
   // Part of the GPU system that uses multiple included header
   // weirdness. Never getting this right.
   ignored_record_names_.insert("Validators");
-
-  // RAII class that's simple enough (media/base/callback.h).
-  ignored_record_names_.insert("AutoCallbackRunner");
 
   // Has a UNIT_TEST only constructor. Isn't *terribly* complex...
   ignored_record_names_.insert("AutocompleteController");
@@ -142,10 +138,10 @@ void ChromeClassTester::emitWarning(SourceLocation loc, const char* raw_error) {
   std::string err;
   err = "[chromium-style] ";
   err += raw_error;
-  Diagnostic::Level level =
+  DiagnosticsEngine::Level level =
       diagnostic().getWarningsAsErrors() ?
-      Diagnostic::Error :
-      Diagnostic::Warning;
+      DiagnosticsEngine::Error :
+      DiagnosticsEngine::Warning;
   unsigned id = diagnostic().getCustomDiagID(level, err);
   DiagnosticBuilder B = diagnostic().Report(full, id);
 }
@@ -181,7 +177,7 @@ std::string ChromeClassTester::GetNamespaceImpl(const DeclContext* context,
       if (decl->isAnonymousNamespace())
         OS << "<anonymous namespace>";
       else
-        OS << decl;
+        OS << *decl;
       return GetNamespaceImpl(context->getParent(),
                               OS.str());
     }
@@ -233,8 +229,14 @@ bool ChromeClassTester::InBannedDirectory(SourceLocation loc) {
          it != banned_directories_.end(); ++it) {
       // If we can find any of the banned path components in this path, then
       // this file is rejected.
-      if (b.find(*it) != std::string::npos)
-        return true;
+      size_t index = b.find(*it);
+      if (index != std::string::npos) {
+        bool matches_full_dir_name = index == 0 || b[index - 1] == '/';
+        if ((*it)[0] == '/')
+          matches_full_dir_name = true;
+        if (matches_full_dir_name)
+          return true;
+      }
     }
   }
 

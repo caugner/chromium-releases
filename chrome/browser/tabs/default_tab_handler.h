@@ -39,7 +39,7 @@ class DefaultTabHandler : public TabHandler,
       const GURL& url,
       const GURL& referrer,
       Profile* profile,
-      PageTransition::Type transition,
+      content::PageTransition transition,
       bool defer_load,
       SiteInstance* instance) const;
   virtual bool CanDuplicateContentsAt(int index);
@@ -51,13 +51,9 @@ class DefaultTabHandler : public TabHandler,
   virtual bool CanBookmarkAllTabs() const;
   virtual void BookmarkAllTabs();
   virtual bool CanCloseTab() const;
-  virtual void ToggleUseVerticalTabs();
-  virtual void ToggleUseCompactNavigationBar();
   virtual bool CanRestoreTab();
   virtual void RestoreTab();
   virtual bool LargeIconsPermitted() const;
-  virtual bool UseVerticalTabs() const;
-  virtual bool UseCompactNavigationBar() const;
 
   // Overridden from TabStripModelObserver:
   virtual void TabInsertedAt(TabContentsWrapper* contents,

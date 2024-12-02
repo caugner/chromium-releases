@@ -55,17 +55,17 @@ typedef CancelableRequest<FaviconService::FaviconDataCallback>
 
 // Downloads ------------------------------------------------------------------
 
+typedef CancelableRequest1<HistoryService::DownloadNextIdCallback,
+                           int/*next_id*/>
+    DownloadNextIdRequest;
+
+
 typedef CancelableRequest1<HistoryService::DownloadQueryCallback,
                            std::vector<DownloadPersistentStoreInfo> >
     DownloadQueryRequest;
 
 typedef CancelableRequest<HistoryService::DownloadCreateCallback>
     DownloadCreateRequest;
-
-// Deletion --------------------------------------------------------------------
-
-typedef CancelableRequest<HistoryService::ExpireHistoryCallback>
-    ExpireHistoryRequest;
 
 // Segment usage --------------------------------------------------------------
 
@@ -85,8 +85,7 @@ typedef
 // The argument here is an input value, which is the task to run on the
 // background thread. The callback is used to execute the portion of the task
 // that executes on the main thread.
-typedef CancelableRequest1<HistoryService::HistoryDBTaskCallback,
-                           scoped_refptr<HistoryDBTask> >
+typedef CancelableRequest1<base::Closure, scoped_refptr<HistoryDBTask> >
     HistoryDBTaskRequest;
 
 }  // namespace history

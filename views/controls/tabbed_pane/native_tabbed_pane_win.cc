@@ -41,7 +41,7 @@ class TabBackground : public Background {
     gfx::Rect r(0, 0, view->width(), view->height());
     gfx::NativeTheme::ExtraParams extra;
     gfx::NativeTheme::instance()->Paint(
-        canvas->AsCanvasSkia(), gfx::NativeTheme::kTabPanelBackground,
+        canvas->GetSkCanvas(), gfx::NativeTheme::kTabPanelBackground,
         gfx::NativeTheme::kNormal, r, extra);
   }
 
@@ -130,11 +130,12 @@ NativeTabbedPaneWin::~NativeTabbedPaneWin() {
 ////////////////////////////////////////////////////////////////////////////////
 // NativeTabbedPaneWin, NativeTabbedPaneWrapper implementation:
 
-void NativeTabbedPaneWin::AddTab(const std::wstring& title, View* contents) {
+void NativeTabbedPaneWin::AddTab(const string16& title, View* contents) {
   AddTabAtIndex(static_cast<int>(tab_views_.size()), title, contents, true);
 }
 
-void NativeTabbedPaneWin::AddTabAtIndex(int index, const std::wstring& title,
+void NativeTabbedPaneWin::AddTabAtIndex(int index,
+                                        const string16& title,
                                         View* contents,
                                         bool select_if_first_tab) {
   DCHECK(index <= static_cast<int>(tab_views_.size()));
@@ -163,8 +164,7 @@ void NativeTabbedPaneWin::AddTabAtIndex(int index, const std::wstring& title,
   }
 }
 
-void NativeTabbedPaneWin::AddNativeTab(int index,
-                                       const std::wstring &title) {
+void NativeTabbedPaneWin::AddNativeTab(int index, const string16& title) {
   TCITEM tcitem;
   tcitem.mask = TCIF_TEXT;
 

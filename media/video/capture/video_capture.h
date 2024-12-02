@@ -10,12 +10,13 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/time.h"
+#include "media/base/media_export.h"
 #include "media/base/video_frame.h"
 #include "media/video/capture/video_capture_types.h"
 
 namespace media {
 
-class VideoCapture {
+class MEDIA_EXPORT VideoCapture {
  public:
   // Current status of the video capture device in the browser process. Browser
   // process sends information about the current capture state and error to the
@@ -66,6 +67,10 @@ class VideoCapture {
     // Notify client that video capture has hit some error |error_code|.
     virtual void OnError(VideoCapture* capture, int error_code) = 0;
 
+    // Notify client that the client has been removed and no more calls will be
+    // received.
+    virtual void OnRemoved(VideoCapture* capture) = 0;
+
     // Notify client that a buffer is available.
     virtual void OnBufferReady(VideoCapture* capture,
                                scoped_refptr<VideoFrameBuffer> buffer) = 0;
@@ -93,10 +98,12 @@ class VideoCapture {
 
   // Request video capture to start capturing with |capability|.
   // Also register |handler| with video capture for event handling.
+  // |handler| must remain valid until it has received |OnRemoved()|.
   virtual void StartCapture(EventHandler* handler,
                             const VideoCaptureCapability& capability) = 0;
 
   // Request video capture to stop capturing for client |handler|.
+  // |handler| must remain valid until it has received |OnRemoved()|.
   virtual void StopCapture(EventHandler* handler) = 0;
 
   // Feed buffer to video capture when done with it.

@@ -8,6 +8,7 @@
 #include "chrome/browser/repost_form_warning_controller.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -36,9 +37,11 @@ RepostFormWarningView::RepostFormWarningView(
         message_box_view_(NULL) {
   message_box_view_ = new views::MessageBoxView(
       ui::MessageBoxFlags::kIsConfirmMessageBox,
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_HTTP_POST_WARNING)),
-      std::wstring());
-  controller_->set_window(new ConstrainedWindowViews(tab_contents, this));
+      l10n_util::GetStringUTF16(IDS_HTTP_POST_WARNING),
+      string16());
+  TabContentsWrapper* wrapper =
+      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
+  controller_->set_window(new ConstrainedWindowViews(wrapper, this));
 }
 
 RepostFormWarningView::~RepostFormWarningView() {
@@ -47,17 +50,17 @@ RepostFormWarningView::~RepostFormWarningView() {
 //////////////////////////////////////////////////////////////////////////////
 // RepostFormWarningView, views::DialogDelegate implementation:
 
-std::wstring RepostFormWarningView::GetWindowTitle() const {
-  return UTF16ToWide(l10n_util::GetStringUTF16(IDS_HTTP_POST_WARNING_TITLE));
+string16 RepostFormWarningView::GetWindowTitle() const {
+  return l10n_util::GetStringUTF16(IDS_HTTP_POST_WARNING_TITLE);
 }
 
-std::wstring RepostFormWarningView::GetDialogButtonLabel(
+string16 RepostFormWarningView::GetDialogButtonLabel(
     ui::MessageBoxFlags::DialogButton button) const {
   if (button == ui::MessageBoxFlags::DIALOGBUTTON_OK)
-    return UTF16ToWide(l10n_util::GetStringUTF16(IDS_HTTP_POST_WARNING_RESEND));
+    return l10n_util::GetStringUTF16(IDS_HTTP_POST_WARNING_RESEND);
   if (button == ui::MessageBoxFlags::DIALOGBUTTON_CANCEL)
-    return UTF16ToWide(l10n_util::GetStringUTF16(IDS_CANCEL));
-  return std::wstring();
+    return l10n_util::GetStringUTF16(IDS_CANCEL);
+  return string16();
 }
 
 views::View* RepostFormWarningView::GetContentsView() {

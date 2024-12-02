@@ -6,10 +6,9 @@
 #define VIEWS_TEST_VIEWS_TEST_BASE_H_
 #pragma once
 
-#include "testing/gtest/include/gtest/gtest.h"
-
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/scoped_ptr.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "views/test/test_views_delegate.h"
 
 namespace views {
@@ -27,9 +26,7 @@ class ViewsTestBase : public testing::Test {
   virtual void SetUp() OVERRIDE;
   virtual void TearDown() OVERRIDE;
 
-  void RunPendingMessages() {
-    message_loop_.RunAllPending();
-  }
+  void RunPendingMessages();
 
  protected:
   TestViewsDelegate& views_delegate() const { return *views_delegate_.get(); }

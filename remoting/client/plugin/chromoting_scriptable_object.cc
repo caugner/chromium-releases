@@ -30,8 +30,8 @@ const char kDesktopWidth[] = "desktopWidth";
 const char kDesktopSizeUpdate[] = "desktopSizeUpdate";
 const char kLoginChallenge[] = "loginChallenge";
 const char kSendIq[] = "sendIq";
-const char kQualityAttribute[] = "quality";
 const char kStatusAttribute[] = "status";
+const char kErrorAttribute[] = "error";
 const char kVideoBandwidthAttribute[] = "videoBandwidth";
 const char kVideoCaptureLatencyAttribute[] = "videoCaptureLatency";
 const char kVideoEncodeLatencyAttribute[] = "videoEncodeLatency";
@@ -74,13 +74,15 @@ void ChromotingScriptableObject::Init() {
   AddAttribute("STATUS_CLOSED", Var(STATUS_CLOSED));
   AddAttribute("STATUS_FAILED", Var(STATUS_FAILED));
 
-  // Connection quality.
-  AddAttribute(kQualityAttribute, Var(QUALITY_UNKNOWN));
+  // Connection error.
+  AddAttribute(kErrorAttribute, Var(ERROR_NONE));
 
-  // Connection quality values.
-  AddAttribute("QUALITY_UNKNOWN", Var(QUALITY_UNKNOWN));
-  AddAttribute("QUALITY_GOOD", Var(QUALITY_GOOD));
-  AddAttribute("QUALITY_BAD", Var(QUALITY_BAD));
+  // Connection status values.
+  AddAttribute("ERROR_NONE", Var(ERROR_NONE));
+  AddAttribute("ERROR_HOST_IS_OFFLINE", Var(ERROR_HOST_IS_OFFLINE));
+  AddAttribute("ERROR_SESSION_REJECTED", Var(ERROR_SESSION_REJECTED));
+  AddAttribute("ERROR_INCOMPATIBLE_PROTOCOL", Var(ERROR_INCOMPATIBLE_PROTOCOL));
+  AddAttribute("ERROR_FAILURE_NONE", Var(ERROR_NETWORK_FAILURE));
 
   // Debug info to display.
   AddAttribute(kConnectionInfoUpdate, Var());
@@ -226,22 +228,26 @@ Var ChromotingScriptableObject::Call(const Var& method_name,
   return (this->*(properties_[iter->second].method))(args, exception);
 }
 
-void ChromotingScriptableObject::SetConnectionInfo(ConnectionStatus status,
-                                                   ConnectionQuality quality) {
+void ChromotingScriptableObject::SetConnectionStatus(
+    ConnectionStatus status, ConnectionError error) {
+  VLOG(1) << "Connection status is updated: " << status;
+
+  bool signal = false;
+
   int status_index = property_names_[kStatusAttribute];
-  int quality_index = property_names_[kQualityAttribute];
-
-  LOG(INFO) << "Connection status is updated: " << status;
-
-  if (properties_[status_index].attribute.AsInt() != status ||
-      properties_[quality_index].attribute.AsInt() != quality) {
-    // Update the connection state properties..
+  if (properties_[status_index].attribute.AsInt() != status) {
     properties_[status_index].attribute = Var(status);
-    properties_[quality_index].attribute = Var(quality);
-
-    // Signal the Chromoting Tab UI to get the update connection state values.
-    SignalConnectionInfoChange();
+    signal = true;
   }
+
+  int error_index = property_names_[kErrorAttribute];
+  if (properties_[error_index].attribute.AsInt() != error) {
+    properties_[error_index].attribute = Var(error);
+    signal = true;
+  }
+
+  if (signal)
+    SignalConnectionInfoChange();
 }
 
 void ChromotingScriptableObject::LogDebugInfo(const std::string& info) {
@@ -269,7 +275,7 @@ void ChromotingScriptableObject::SetDesktopSize(int width, int height) {
     SignalDesktopSizeChange();
   }
 
-  LOG(INFO) << "Update desktop size to: " << width << " x " << height;
+  VLOG(1) << "Update desktop size to: " << width << " x " << height;
 }
 
 void ChromotingScriptableObject::SignalLoginChallenge() {
@@ -398,8 +404,8 @@ Var ChromotingScriptableObject::DoConnect(const std::vector<Var>& args,
     return Var();
   }
 
-  LOG(INFO) << "Connecting to host.";
-  VLOG(1) << "client_jid: " << client_jid << ", host_jid: " << host_jid
+  VLOG(1) << "Connecting to host. "
+          << "client_jid: " << client_jid << ", host_jid: " << host_jid
           << ", access_code: " << access_code;
   ClientConfig config;
   config.local_jid = client_jid;
@@ -413,8 +419,7 @@ Var ChromotingScriptableObject::DoConnect(const std::vector<Var>& args,
 
 Var ChromotingScriptableObject::DoDisconnect(const std::vector<Var>& args,
                                              Var* exception) {
-  LOG(INFO) << "Disconnecting from host.";
-
+  VLOG(1) << "Disconnecting from host.";
   instance_->Disconnect();
   return Var();
 }
@@ -438,7 +443,7 @@ Var ChromotingScriptableObject::DoSubmitLogin(const std::vector<Var>& args,
   }
   std::string password = args[1].AsString();
 
-  LOG(INFO) << "Submitting login info to host.";
+  VLOG(1) << "Submitting login info to host.";
   instance_->SubmitLoginInfo(username, password);
   return Var();
 }
@@ -455,7 +460,7 @@ Var ChromotingScriptableObject::DoSetScaleToFit(const std::vector<Var>& args,
     return Var();
   }
 
-  LOG(INFO) << "Setting scale-to-fit.";
+  VLOG(1) << "Setting scale-to-fit.";
   instance_->SetScaleToFit(args[0].AsBool());
   return Var();
 }

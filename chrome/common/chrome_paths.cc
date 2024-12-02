@@ -305,8 +305,6 @@ bool PathProvider(int key, FilePath* result) {
 #else
       cur = FilePath(FILE_PATH_LITERAL("/etc/chromium/policies"));
 #endif
-      if (!file_util::PathExists(cur))  // we don't want to create this
-        return false;
       break;
     }
 #endif
@@ -334,16 +332,12 @@ bool PathProvider(int key, FilePath* result) {
 #endif
     case chrome::DIR_EXTERNAL_EXTENSIONS:
 #if defined(OS_MACOSX)
-      if (!PathService::Get(base::DIR_EXE, &cur))
+      if (!chrome::GetGlobalApplicationSupportDirectory(&cur))
         return false;
 
-      // On Mac, built-in extensions are in Contents/Extensions, a sibling of
-      // the App dir. If there are none, it may not exist.
-      // TODO(skerner): Reading external extensions from a file inside the
-      // app budle causes several problems.  Change this path to be outside
-      // the app bundle.  crbug/67203
-      cur = cur.DirName();
-      cur = cur.Append(FILE_PATH_LITERAL("Extensions"));
+      cur = cur.Append(FILE_PATH_LITERAL("Google"))
+               .Append(FILE_PATH_LITERAL("Chrome"))
+               .Append(FILE_PATH_LITERAL("External Extensions"));
       create_dir = false;
 #else
       if (!PathService::Get(base::DIR_MODULE, &cur))
@@ -353,6 +347,33 @@ bool PathProvider(int key, FilePath* result) {
       create_dir = true;
 #endif
       break;
+
+#if defined(OS_MACOSX)
+    case DIR_DEPRECATED_EXTERNAL_EXTENSIONS:
+      // TODO(skerner): Reading external extensions from a file inside the
+      // app budle causes several problems.  Once users have a chance to
+      // migrate, remove this path.  crbug/67203
+      if (!PathService::Get(base::DIR_EXE, &cur))
+        return false;
+
+      cur = cur.DirName();
+      cur = cur.Append(FILE_PATH_LITERAL("Extensions"));
+      create_dir = false;
+
+      break;
+#endif
+
+    case chrome::DIR_DEFAULT_APPS:
+#if defined(OS_MACOSX)
+      cur = base::mac::MainAppBundlePath();
+      cur = cur.Append(FILE_PATH_LITERAL("Default Apps"));
+#else
+      if (!PathService::Get(chrome::DIR_APP, &cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("default_apps"));
+#endif
+      break;
+
     default:
       return false;
   }

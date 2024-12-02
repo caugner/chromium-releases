@@ -5,7 +5,9 @@
 #include "chrome/browser/ui/views/tab_contents/render_view_context_menu_views.h"
 
 #include "base/logging.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
@@ -15,13 +17,6 @@
 #include "views/controls/menu/menu_item_view.h"
 #include "views/controls/menu/menu_model_adapter.h"
 #include "views/controls/menu/menu_runner.h"
-
-#if defined(TOUCH_UI)
-#include "chrome/browser/ui/views/tab_contents/tab_contents_view_touch.h"
-#include "views/widget/widget.h"
-#else
-#include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
-#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // RenderViewContextMenuViews, public:
@@ -37,17 +32,9 @@ RenderViewContextMenuViews::~RenderViewContextMenuViews() {
 }
 
 void RenderViewContextMenuViews::RunMenuAt(int x, int y) {
-#if defined(TOUCH_UI)
-  // TODO(oshima): Eliminate this once TabContentsViewTouch is replaced
-  // with TabContentsViewViews.
-  TabContentsViewTouch* touch =
-      static_cast<TabContentsViewTouch*>(source_tab_contents_->view());
-  views::Widget* parent = touch->GetWidget()->GetTopLevelWidget();
-#else
   TabContentsViewViews* tab =
       static_cast<TabContentsViewViews*>(source_tab_contents_->view());
   views::Widget* parent = tab->GetTopLevelWidget();
-#endif
   if (menu_runner_->RunMenuAt(parent, NULL,
           gfx::Rect(gfx::Point(x, y), gfx::Size()),
           views::MenuItemView::TOPLEFT, views::MenuRunner::HAS_MNEMONICS) ==
@@ -102,6 +89,10 @@ bool RenderViewContextMenuViews::GetAcceleratorForCommandId(
       *accel = views::Accelerator(ui::VKEY_V, false, true, false);
       return true;
 
+    case IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE:
+      *accel = views::Accelerator(ui::VKEY_V, true, true, false);
+      return true;
+
     case IDC_CONTENT_CONTEXT_SELECTALL:
       *accel = views::Accelerator(ui::VKEY_A, false, true, false);
       return true;
@@ -119,7 +110,7 @@ void RenderViewContextMenuViews::UpdateMenuItem(int command_id,
     return;
 
   item->SetEnabled(enabled);
-  item->SetTitle(UTF16ToWide(title));
+  item->SetTitle(UTF16ToWideHack(title));
 
   views::MenuItemView* parent = item->GetParentMenuItem();
   if (!parent)

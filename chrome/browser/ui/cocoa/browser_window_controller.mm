@@ -4,8 +4,6 @@
 
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 
-#include <Carbon/Carbon.h>
-
 #include <cmath>
 #include <numeric>
 
@@ -18,6 +16,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/instant/instant_controller.h"
+#include "chrome/browser/profiles/avatar_menu_model.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -32,7 +31,7 @@
 #import "chrome/browser/ui/cocoa/background_gradient_view.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_editor_controller.h"
-#import "chrome/browser/ui/cocoa/browser/avatar_button.h"
+#import "chrome/browser/ui/cocoa/browser/avatar_button_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller_private.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
@@ -724,10 +723,7 @@ enum {
 }
 
 - (void)activate {
-  [[self window] makeKeyAndOrderFront:self];
-  ProcessSerialNumber psn;
-  GetCurrentProcess(&psn);
-  SetFrontProcessWithOptions(&psn, kSetFrontProcessFrontWindowOnly);
+  [BrowserWindowUtils activateWindowForController:self];
 }
 
 // Determine whether we should let a window zoom/unzoom to the given |newFrame|.
@@ -1364,18 +1360,17 @@ enum {
 - (BOOL)shouldShowAvatar {
   if (![self hasTabStrip])
     return NO;
-
   if (browser_->profile()->IsOffTheRecord())
     return YES;
 
-  if (ProfileManager::IsMultipleProfilesEnabled()) {
-    // Show the profile avatar after the user has created more than one profile.
-    ProfileInfoCache& cache =
-        g_browser_process->profile_manager()->GetProfileInfoCache();
-    return cache.GetNumberOfProfiles() > 1;
+  ProfileInfoCache& cache =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
+  if (cache.GetIndexOfProfileWithPath(browser_->profile()->GetPath()) ==
+      std::string::npos) {
+    return NO;
   }
 
-  return NO;
+  return AvatarMenuModel::ShouldShowAvatarMenu();
 }
 
 - (BOOL)isBookmarkBarVisible {
@@ -1634,10 +1629,6 @@ enum {
   if (responds) {
     const BookmarkNode* node = [sender node];
     if (node) {
-#if defined(WEBUI_DIALOGS)
-      DCHECK(browser_);
-      browser_->OpenBookmarkManagerEditNode(node->id());
-#else
       // A BookmarkEditorController is a sheet that owns itself, and
       // deallocates itself when closed.
       [[[BookmarkEditorController alloc]
@@ -1647,7 +1638,6 @@ enum {
                          node:node
                 configuration:BookmarkEditor::SHOW_TREE]
         runAsModalSheet];
-#endif
     }
   }
 }
@@ -1656,21 +1646,17 @@ enum {
 // view to decorate the window at the upper right. Use the same base y
 // coordinate as the tab strip.
 - (void)installAvatar {
-  // Only install if this browser window is OTR and has a tab strip.
-  if (![self shouldShowAvatar])
-    return;
-
-  // Install the image into the badge view. Hide it for now; positioning,
-  // sizing, and showing will be done by the layout code. The AvatarButton will
-  // choose which image to display based on the browser.
-  avatarButton_.reset([[AvatarButton alloc] initWithBrowser:browser_.get()]);
-  [avatarButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
-  [avatarButton_ setHidden:YES];
-  // The button shouldn't do anything in incognito.
-  [avatarButton_ setOpenMenuOnClick:!browser_->profile()->IsOffTheRecord()];
+  // Install the image into the badge view. Hide it for now; positioning and
+  // sizing will be done by the layout code. The AvatarButton will choose which
+  // image to display based on the browser.
+  avatarButtonController_.reset(
+      [[AvatarButtonController alloc] initWithBrowser:browser_.get()]);
+  NSView* view = [avatarButtonController_ view];
+  [view setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
+  [view setHidden:![self shouldShowAvatar]];
 
   // Install the view.
-  [[[[self window] contentView] superview] addSubview:avatarButton_];
+  [[[[self window] contentView] superview] addSubview:view];
 }
 
 // Documented in 10.6+, but present starting in 10.5. Called when we get a
@@ -1768,7 +1754,8 @@ enum {
     if (tab_contents) {
       GURL helpUrl =
           google_util::AppendGoogleLocaleParam(GURL(chrome::kCrashReasonURL));
-      tab_contents->OpenURL(helpUrl, GURL(), CURRENT_TAB, PageTransition::LINK);
+      tab_contents->OpenURL(
+          helpUrl, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_LINK);
     }
   }
 }
@@ -1865,17 +1852,6 @@ willAnimateFromState:(bookmarks::VisualState)oldState
   return NSMakeSize(x, y);
 }
 
-// Override to swap in the correct tab strip controller based on the new
-// tab strip mode.
-- (void)toggleTabStripDisplayMode {
-  [super toggleTabStripDisplayMode];
-  [self createTabStripController];
-}
-
-- (BOOL)useVerticalTabs {
-  return browser_->tabstrip_model()->delegate()->UseVerticalTabs();
-}
-
 - (void)showInstant:(TabContents*)previewContents {
   [previewableContentsController_ showPreview:previewContents];
   [self updateBookmarkBarVisibilityWithAnimation:NO];
@@ -1937,7 +1913,9 @@ willAnimateFromState:(bookmarks::VisualState)oldState
 // "Enter Full Screen" menu item.  On Snow Leopard, this function is never
 // called by the UI directly, but it provides the implementation for
 // |-setPresentationMode:|.
-- (void)setFullscreen:(BOOL)fullscreen {
+- (void)setFullscreen:(BOOL)fullscreen
+                  url:(const GURL&)url
+           bubbleType:(FullscreenExitBubbleType)bubbleType {
   if (fullscreen == [self isFullscreen])
     return;
 
@@ -1954,12 +1932,21 @@ willAnimateFromState:(bookmarks::VisualState)oldState
     else
       [self exitFullscreenForSnowLeopardOrEarlier];
   }
+}
 
-  if (fullscreen) {
-    [self showFullscreenExitBubbleIfNecessary];
-  } else {
-    [self destroyFullscreenExitBubbleIfNecessary];
-  }
+- (void)enterFullscreenForURL:(const GURL&)url
+                   bubbleType:(FullscreenExitBubbleType)bubbleType {
+  [self setFullscreen:YES url:url bubbleType:bubbleType];
+}
+
+- (void)exitFullscreen {
+  // url: and bubbleType: are ignored when leaving fullscreen.
+  [self setFullscreen:NO url:GURL() bubbleType:FEB_TYPE_NONE];
+}
+
+- (void)updateFullscreenExitBubbleURL:(const GURL&)url
+                           bubbleType:(FullscreenExitBubbleType)bubbleType {
+  [fullscreenExitBubbleController_.get() updateURL:url bubbleType:bubbleType];
 }
 
 - (BOOL)isFullscreen {
@@ -1980,11 +1967,16 @@ willAnimateFromState:(bookmarks::VisualState)oldState
 // set presentation mode.  On Snow Leopard, this function is called by the
 // "Enter Presentation Mode" menu item, and triggering presentation mode always
 // moves the user into fullscreen mode.
-- (void)setPresentationMode:(BOOL)presentationMode {
+- (void)setPresentationMode:(BOOL)presentationMode
+                        url:(const GURL&)url
+                 bubbleType:(FullscreenExitBubbleType)bubbleType {
+  fullscreenUrl_ = url;
+  fullscreenBubbleType_ = bubbleType;
+
   // Presentation mode on Leopard and Snow Leopard maps directly to fullscreen
   // mode.
   if (base::mac::IsOSSnowLeopardOrEarlier()) {
-    [self setFullscreen:presentationMode];
+    [self setFullscreen:presentationMode url:url bubbleType:bubbleType];
     return;
   }
 
@@ -2006,6 +1998,9 @@ willAnimateFromState:(bookmarks::VisualState)oldState
       [self focusTabContents];
       [self setPresentationModeInternal:YES forceDropdown:YES];
       [self releaseBarVisibilityForOwner:self withAnimation:YES delay:YES];
+      // Since -windowDidEnterFullScreen: won't be called in the
+      // fullscreen --> presentation mode case, manually show the exit bubble.
+      [self showFullscreenExitBubbleIfNecessary];
     } else {
       // If not in fullscreen mode, trigger the Lion fullscreen mode machinery.
       // Presentation mode will automatically be enabled in
@@ -2014,8 +2009,6 @@ willAnimateFromState:(bookmarks::VisualState)oldState
       if ([window isKindOfClass:[FramedBrowserWindow class]])
         [static_cast<FramedBrowserWindow*>(window) toggleSystemFullScreen];
     }
-
-    [self showFullscreenExitBubbleIfNecessary];
   } else {
     if (enteredPresentationModeFromFullscreen_) {
       // The window is currently in fullscreen mode, but the user is choosing to
@@ -2024,6 +2017,9 @@ willAnimateFromState:(bookmarks::VisualState)oldState
       // window that goes fullscreen.
       [self setShouldUsePresentationModeWhenEnteringFullscreen:NO];
       [self setPresentationModeInternal:NO forceDropdown:NO];
+      // Since -windowWillExitFullScreen: won't be called in the
+      // presentation mode --> fullscreen case, manually hide the exit bubble.
+      [self destroyFullscreenExitBubbleIfNecessary];
     } else {
       // The user entered presentation mode directly from non-fullscreen mode
       // using the "Enter Presentation Mode" menu item and is using that same
@@ -2033,9 +2029,17 @@ willAnimateFromState:(bookmarks::VisualState)oldState
       if ([window isKindOfClass:[FramedBrowserWindow class]])
         [static_cast<FramedBrowserWindow*>(window) toggleSystemFullScreen];
     }
-
-    [self destroyFullscreenExitBubbleIfNecessary];
   }
+}
+
+- (void)enterPresentationModeForURL:(const GURL&)url
+                         bubbleType:(FullscreenExitBubbleType)bubbleType {
+  [self setPresentationMode:YES url:url bubbleType:bubbleType];
+}
+
+- (void)exitPresentationMode {
+  // url: and bubbleType: are ignored when leaving presentation mode.
+ [self setPresentationMode:NO url:GURL() bubbleType:FEB_TYPE_NONE];
 }
 
 - (BOOL)inPresentationMode {

@@ -13,7 +13,7 @@
 #include "views/controls/message_box_view.h"
 #include "views/widget/widget.h"
 
-#if defined(TOUCH_UI)
+#if defined(TOUCH_UI) || defined(USE_AURA)
 #include "views/focus/accelerator_handler.h"
 #endif
 
@@ -91,18 +91,18 @@ int SimpleMessageBoxViews::GetDialogButtons() const {
           ? ui::MessageBoxFlags::DIALOGBUTTON_CANCEL : 0);
 }
 
-std::wstring SimpleMessageBoxViews::GetDialogButtonLabel(
+string16 SimpleMessageBoxViews::GetDialogButtonLabel(
     ui::MessageBoxFlags::DialogButton button) const {
   return button == ui::MessageBoxFlags::DIALOGBUTTON_OK ?
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_OK)) :
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_CLOSE));
+      l10n_util::GetStringUTF16(IDS_OK) :
+      l10n_util::GetStringUTF16(IDS_CLOSE);
 }
 
 bool SimpleMessageBoxViews::ShouldShowWindowTitle() const {
   return true;
 }
 
-std::wstring SimpleMessageBoxViews::GetWindowTitle() const {
+string16 SimpleMessageBoxViews::GetWindowTitle() const {
   return message_box_title_;
 }
 
@@ -135,11 +135,10 @@ SimpleMessageBoxViews::SimpleMessageBoxViews(gfx::NativeWindow parent_window,
                                              const string16& message)
     : dialog_flags_(dialog_flags),
       disposition_(DISPOSITION_UNKNOWN) {
-  message_box_title_ = UTF16ToWide(title);
-  message_box_view_ = new views::MessageBoxView(
-      dialog_flags,
-      UTF16ToWide(message),
-      std::wstring());
+  message_box_title_ = title;
+  message_box_view_ = new views::MessageBoxView(dialog_flags,
+                                                message,
+                                                string16());
   browser::CreateViewsWindow(parent_window, this)->Show();
 
   // Add reference to be released in DeleteDelegate().
@@ -155,7 +154,7 @@ bool SimpleMessageBoxViews::Dispatch(const MSG& msg) {
   DispatchMessage(&msg);
   return disposition_ == DISPOSITION_UNKNOWN;
 }
-#elif defined(TOUCH_UI)
+#elif defined(TOUCH_UI) || defined(USE_AURA)
 base::MessagePumpDispatcher::DispatchStatus
     SimpleMessageBoxViews::Dispatch(XEvent* xev) {
   if (!views::DispatchXEvent(xev))

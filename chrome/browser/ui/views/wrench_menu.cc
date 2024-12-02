@@ -4,7 +4,9 @@
 
 #include "chrome/browser/ui/views/wrench_menu.h"
 
+#include <algorithm>
 #include <cmath>
+#include <set>
 
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -14,12 +16,13 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_delegate.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -239,10 +242,6 @@ class ScheduleAllView : public views::View {
     View::SchedulePaintInRect(gfx::Rect(0, 0, width(), height()));
   }
 
-  virtual void SchedulePaintInternal(const gfx::Rect& r) {
-    View::SchedulePaintInternal(gfx::Rect(0, 0, width(), height()));
-  }
-
  private:
   DISALLOW_COPY_AND_ASSIGN(ScheduleAllView);
 };
@@ -400,8 +399,9 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
         NULL, IDS_ACCNAME_ZOOM_MINUS2);
 
     zoom_label_ = new Label(
-        UTF16ToWide(l10n_util::GetStringFUTF16Int(IDS_ZOOM_PERCENT, 100)));
-    zoom_label_->SetColor(MenuConfig::instance().text_color);
+        l10n_util::GetStringFUTF16Int(IDS_ZOOM_PERCENT, 100));
+    zoom_label_->SetAutoColorReadabilityEnabled(false);
+    zoom_label_->SetEnabledColor(MenuConfig::instance().text_color);
     zoom_label_->SetHorizontalAlignment(Label::ALIGN_RIGHT);
     MenuButtonBackground* center_bg =
         new MenuButtonBackground(MenuButtonBackground::CENTER_BUTTON);
@@ -506,9 +506,8 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
       zoom = selected_tab->GetZoomPercent(&enable_increment, &enable_decrement);
     increment_button_->SetEnabled(enable_increment);
     decrement_button_->SetEnabled(enable_decrement);
-    zoom_label_->SetText(UTF16ToWide(l10n_util::GetStringFUTF16Int(
-                                     IDS_ZOOM_PERCENT,
-                                     zoom)));
+    zoom_label_->SetText(
+        l10n_util::GetStringFUTF16Int(IDS_ZOOM_PERCENT, zoom));
 
     zoom_label_width_ = MaxWidthForZoomLabel();
   }
@@ -572,6 +571,8 @@ WrenchMenu::WrenchMenu(Browser* browser)
       selected_index_(0),
       bookmark_menu_(NULL),
       first_bookmark_command_id_(0) {
+  registrar_.Add(this, chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED,
+                 Source<Profile>(browser_->profile()));
 }
 
 WrenchMenu::~WrenchMenu() {
@@ -611,10 +612,10 @@ void WrenchMenu::RunMenu(views::MenuButton* host) {
     selected_menu_model_->ActivatedAt(selected_index_);
 }
 
-std::wstring WrenchMenu::GetTooltipText(int id,
+string16 WrenchMenu::GetTooltipText(int id,
                                         const gfx::Point& p) {
   return is_bookmark_command(id) ?
-      bookmark_menu_delegate_->GetTooltipText(id, p) : std::wstring();
+      bookmark_menu_delegate_->GetTooltipText(id, p) : string16();
 }
 
 bool WrenchMenu::IsTriggerableEvent(views::MenuItemView* menu,
@@ -773,6 +774,21 @@ void WrenchMenu::BookmarkModelChanged() {
     root_->Cancel();
 }
 
+
+void WrenchMenu::Observe(int type,
+                         const NotificationSource& source,
+                         const NotificationDetails& details) {
+  switch (type) {
+    case chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED:
+      // A change in the global errors list can add or remove items from the
+      // menu. Close the menu to avoid have a stale menu on-screen.
+      root_->Cancel();
+      break;
+    default:
+      NOTREACHED();
+  }
+}
+
 void WrenchMenu::PopulateMenu(MenuItemView* parent,
                               MenuModel* model,
                               int* next_id) {
@@ -869,5 +885,6 @@ void WrenchMenu::CreateBookmarkMenu() {
                                first_bookmark_command_id_));
   bookmark_menu_delegate_->Init(
       this, bookmark_menu_, model->bookmark_bar_node(), 0,
-      BookmarkMenuDelegate::SHOW_OTHER_FOLDER);
+      BookmarkMenuDelegate::SHOW_OTHER_FOLDER,
+      bookmark_utils::LAUNCH_WRENCH_MENU);
 }

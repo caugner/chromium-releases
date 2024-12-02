@@ -85,7 +85,7 @@ void FillRoundRect(gfx::Canvas* canvas,
   // Need to unref shader, otherwise never deleted.
   s->unref();
 
-  canvas->AsCanvasSkia()->drawPath(path, paint);
+  canvas->GetSkCanvas()->drawPath(path, paint);
 }
 
 void FillRoundRect(gfx::Canvas* canvas,
@@ -106,7 +106,7 @@ void FillRoundRect(gfx::Canvas* canvas,
     paint.setStyle(SkPaint::kFill_Style);
     paint.setFlags(SkPaint::kAntiAlias_Flag);
     paint.setColor(gradient_start_color);
-    canvas->AsCanvasSkia()->drawPath(path, paint);
+    canvas->GetSkCanvas()->drawPath(path, paint);
   }
 }
 
@@ -124,10 +124,10 @@ void StrokeRoundRect(gfx::Canvas* canvas,
   paint.setStyle(SkPaint::kStroke_Style);
   paint.setFlags(SkPaint::kAntiAlias_Flag);
   paint.setStrokeWidth(SkIntToScalar(stroke_width));
-  canvas->AsCanvasSkia()->drawPath(path, paint);
+  canvas->GetSkCanvas()->drawPath(path, paint);
 }
 
-}  // anonymous namespace
+}  // namespace
 
 namespace views {
 
@@ -222,7 +222,7 @@ void ProgressBar::OnPaint(gfx::Canvas* canvas) {
 
     // Draw inner stroke and shadow if wide enough.
     if (progress_width > 2 * kBorderWidth) {
-      canvas->AsCanvasSkia()->save();
+      canvas->GetSkCanvas()->save();
 
       SkPath inner_path;
       AddRoundRectPathWithPadding(
@@ -230,7 +230,7 @@ void ProgressBar::OnPaint(gfx::Canvas* canvas) {
           kCornerRadius,
           SkIntToScalar(kBorderWidth),
           &inner_path);
-      canvas->AsCanvasSkia()->clipPath(inner_path);
+      canvas->GetSkCanvas()->clipPath(inner_path);
 
       // Draw bar inner stroke
       StrokeRoundRect(canvas,
@@ -248,7 +248,7 @@ void ProgressBar::OnPaint(gfx::Canvas* canvas) {
                       bar_inner_shadow_color,
                       kBorderWidth);
 
-      canvas->AsCanvasSkia()->restore();
+      canvas->GetSkCanvas()->restore();
     }
 
     // Draw bar stroke
@@ -289,11 +289,11 @@ void ProgressBar::OnPaint(gfx::Canvas* canvas) {
 #endif
 }
 
-bool ProgressBar::GetTooltipText(const gfx::Point& p, std::wstring* tooltip) {
+bool ProgressBar::GetTooltipText(const gfx::Point& p, string16* tooltip) {
   DCHECK(tooltip);
   if (tooltip == NULL)
     return false;
-  tooltip->assign(UTF16ToWideHack(tooltip_text_));
+  tooltip->assign(tooltip_text_);
   return !tooltip_text_.empty();
 }
 
@@ -315,8 +315,8 @@ void ProgressBar::SetValue(double value) {
   }
 }
 
-void ProgressBar::SetTooltipText(const std::wstring& tooltip_text) {
-  tooltip_text_ = WideToUTF16Hack(tooltip_text);
+void ProgressBar::SetTooltipText(const string16& tooltip_text) {
+  tooltip_text_ = tooltip_text;
 }
 
 }  // namespace views

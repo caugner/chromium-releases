@@ -10,11 +10,13 @@
 #include <map>
 
 #include "base/callback.h"
-#include "base/tracked.h"
+#include "base/location.h"
 #include "chrome/browser/sync/engine/model_safe_worker.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/unrecoverable_error_handler.h"
 #include "content/browser/browser_thread.h"
+
+class SyncError;
 
 namespace browser_sync {
 
@@ -34,8 +36,10 @@ class DataTypeController
     ASSOCIATING,    // Model association is in progress.
     RUNNING,        // The controller is running and the data type is
                     // in sync with the cloud.
-    STOPPING        // The controller is in the process of stopping
+    STOPPING,       // The controller is in the process of stopping
                     // and is waiting for dependent services to stop.
+    DISABLED        // The controller was started but encountered an error
+                    // so it is disabled waiting for it to be stopped.
   };
 
   enum StartResult {
@@ -53,8 +57,7 @@ class DataTypeController
     MAX_START_RESULT
   };
 
-  typedef Callback2<StartResult,
-      const tracked_objects::Location&>::Type StartCallback;
+  typedef Callback2<StartResult, const SyncError&>::Type StartCallback;
 
   typedef std::map<syncable::ModelType,
                    scoped_refptr<DataTypeController> > TypeMap;

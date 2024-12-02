@@ -5,13 +5,15 @@
 #ifndef CONTENT_RENDERER_MHTML_GENERATOR_H_
 #define CONTENT_RENDERER_MHTML_GENERATOR_H_
 
-#include "content/renderer/render_view_observer.h"
+#include "content/public/renderer/render_view_observer.h"
 
 #include "ipc/ipc_platform_file.h"
 
-class MHTMLGenerator : public RenderViewObserver {
+class RenderViewImpl;
+
+class MHTMLGenerator : public content::RenderViewObserver {
  public:
-  explicit MHTMLGenerator(RenderView* render_view);
+  explicit MHTMLGenerator(RenderViewImpl* render_view);
   virtual ~MHTMLGenerator();
 
  private:
@@ -21,8 +23,9 @@ class MHTMLGenerator : public RenderViewObserver {
   void OnSavePageAsMHTML(int job_id,
                          IPC::PlatformFileForTransit file_for_transit);
 
-  void NotifyBrowser(int job_id, bool success);
-  bool GenerateMHTML();
+  void NotifyBrowser(int job_id, int64 data_size);
+  // Returns the size of the generated MHTML, -1 if it failed.
+  int64 GenerateMHTML();
 
   base::PlatformFile file_;
 

@@ -81,19 +81,17 @@ chrome.sync.events = {
     'onUpdatedToken',
     'onPassphraseRequired',
     'onPassphraseAccepted',
-    'onEncryptionComplete',
-    'onMigrationNeededForTypes',
     'onInitializationComplete',
-    'onPaused',
-    'onResumed',
     'onStopSyncingPermanently',
     'onClearServerDataSucceeded',
-    'onClearServerDataFailed'
+    'onClearServerDataFailed',
+    'onEncryptionComplete',
+    'onActionableError'
   ],
 
   'transaction': [
     'onTransactionStart',
-    'onTransactionMutate',
+    'onTransactionWrite',
     'onTransactionEnd'
   ]
 };

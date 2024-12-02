@@ -20,11 +20,12 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
-#include "content/common/url_constants.h"
+#include "content/public/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/network_change_notifier.h"
 
@@ -33,7 +34,8 @@ namespace {
 const char* kAllowedIds[] = {
     "haiffjcadagjlijoggckpgfnoeiflnem",
     "gnedhmakppccajfpfiihfcdlnpgomkcf",
-    "fjcibdnjlbfnbfdjneajpipnlcppleek"
+    "fjcibdnjlbfnbfdjneajpipnlcppleek",
+    "okddffdblfhhnmhodogpojmfkjmhinfp"
 };
 
 class OriginValidator {
@@ -81,10 +83,6 @@ class OriginValidator {
       const std::string& hostname,
       unsigned short port,
       chromeos::WebSocketProxyController::ConnectionFlags flags) {
-    if (flags & chromeos::WebSocketProxyController::TLS_OVER_TCP) {
-      NOTIMPLEMENTED();
-      return false;
-    }
     return std::binary_search(
         allowed_ids_.begin(), allowed_ids_.end(), extension_id);
   }
@@ -117,7 +115,6 @@ class ProxyLifetime : public net::NetworkChangeNotifier::OnlineStateObserver {
  private:
   // net::NetworkChangeNotifier::OnlineStateObserver overrides.
   virtual void OnOnlineStateChanged(bool online) OVERRIDE {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     DCHECK(chromeos::WebSocketProxyController::IsInitiated());
     base::AutoLock alk(lock_);
     if (server_)
@@ -139,17 +136,8 @@ base::LazyInstance<ProxyLifetime> g_proxy_lifetime(base::LINKER_INITIALIZED);
 
 void ProxyTask::Run() {
   LOG(INFO) << "Attempt to run web socket proxy task";
-  const int kPort = 10101;
-
-  struct sockaddr_in sa;
-  memset(&sa, 0, sizeof(sa));
-  sa.sin_family = AF_INET;
-  sa.sin_port = htons(kPort);
-  sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-
   chromeos::WebSocketProxy* server = new chromeos::WebSocketProxy(
-      g_validator.Get().allowed_origins(),
-      reinterpret_cast<sockaddr*>(&sa), sizeof(sa));
+      g_validator.Get().allowed_origins());
   {
     base::AutoLock alk(g_proxy_lifetime.Get().lock_);
     if (g_proxy_lifetime.Get().shutdown_requested_)

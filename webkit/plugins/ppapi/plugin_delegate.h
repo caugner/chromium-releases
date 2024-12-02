@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "base/callback_old.h"
+#include "base/callback.h"
 #include "base/message_loop_proxy.h"
 #include "base/memory/ref_counted.h"
 #include "base/platform_file.h"
@@ -64,6 +64,7 @@ class PlatformCanvas;
 
 namespace WebKit {
 class WebFileChooserCompletion;
+struct WebCursorInfo;
 struct WebFileChooserParams;
 }
 
@@ -181,11 +182,11 @@ class PluginDelegate {
 
     // Set an optional callback that will be invoked when the context is lost
     // (e.g. gpu process crash). Takes ownership of the callback.
-    virtual void SetContextLostCallback(Callback0::Type* callback) = 0;
+    virtual void SetContextLostCallback(
+        const base::Callback<void()>& callback) = 0;
 
-    // Run the task once the channel has been flushed. Takes care of deleting
-    // the task whether the echo succeeds or not.
-    virtual bool Echo(Task* task) = 0;
+    // Run the callback once the channel has been flushed.
+    virtual bool Echo(const base::Callback<void()>& callback) = 0;
   };
 
   class PlatformAudio {
@@ -245,7 +246,14 @@ class PluginDelegate {
   };
 
   // Notification that the given plugin is focused or unfocused.
-  virtual void PluginFocusChanged(bool focused) = 0;
+  virtual void PluginFocusChanged(webkit::ppapi::PluginInstance* instance,
+                                  bool focused) = 0;
+  // Notification that the text input status of the given plugin is changed.
+  virtual void PluginTextInputTypeChanged(
+      webkit::ppapi::PluginInstance* instance) = 0;
+  // Notification that the plugin requested to cancel the current composition.
+  virtual void PluginRequestedCancelComposition(
+      webkit::ppapi::PluginInstance* instance) = 0;
 
   // Notification that the given plugin has crashed. When a plugin crashes, all
   // instances associated with that plugin will notify that they've crashed via
@@ -306,14 +314,15 @@ class PluginDelegate {
       WebKit::WebFileChooserCompletion* chooser_completion) = 0;
 
   // Sends an async IPC to open a file.
-  typedef Callback2<base::PlatformFileError, base::PassPlatformFile
-                    >::Type AsyncOpenFileCallback;
+  typedef base::Callback<void (base::PlatformFileError, base::PassPlatformFile)>
+      AsyncOpenFileCallback;
   virtual bool AsyncOpenFile(const FilePath& path,
                              int flags,
-                             AsyncOpenFileCallback* callback) = 0;
-  virtual bool AsyncOpenFileSystemURL(const GURL& path,
-                                      int flags,
-                                      AsyncOpenFileCallback* callback) = 0;
+                             const AsyncOpenFileCallback& callback) = 0;
+  virtual bool AsyncOpenFileSystemURL(
+      const GURL& path,
+      int flags,
+      const AsyncOpenFileCallback& callback) = 0;
 
   virtual bool OpenFileSystem(
       const GURL& url,
@@ -346,10 +355,10 @@ class PluginDelegate {
   virtual void PublishPolicy(const std::string& policy_json) = 0;
 
   // For quota handlings for FileIO API.
-  typedef Callback1<int64>::Type AvailableSpaceCallback;
+  typedef base::Callback<void (int64)> AvailableSpaceCallback;
   virtual void QueryAvailableSpace(const GURL& origin,
                                    quota::StorageType type,
-                                   AvailableSpaceCallback* callback) = 0;
+                                   const AvailableSpaceCallback& callback) = 0;
   virtual void WillUpdateFile(const GURL& file_path) = 0;
   virtual void DidUpdateFile(const GURL& file_path, int64_t delta) = 0;
 
@@ -402,7 +411,7 @@ class PluginDelegate {
   // Returns a string with the name of the default 8-bit char encoding.
   virtual std::string GetDefaultEncoding() = 0;
 
-  // Sets the mininum and maximium zoom factors.
+  // Sets the minimum and maximum zoom factors.
   virtual void ZoomLimitsChanged(double minimum_factor,
                                  double maximum_factor) = 0;
 
@@ -424,13 +433,6 @@ class PluginDelegate {
   // Tells the browser to bring up SaveAs dialog to save specified URL.
   virtual void SaveURLAs(const GURL& url) = 0;
 
-  // Socket dispatcher for P2P connections. Returns to NULL if P2P API
-  // is disabled.
-  //
-  // TODO(sergeyu): Stop using GetP2PSocketDispatcher() in remoting
-  // client and remove it from here.
-  virtual content::P2PSocketDispatcher* GetP2PSocketDispatcher() = 0;
-
   // Creates P2PTransport object.
   virtual webkit_glue::P2PTransport* CreateP2PTransport() = 0;
 
@@ -446,6 +448,32 @@ class PluginDelegate {
 
   // Returns the current preferences.
   virtual ::ppapi::Preferences GetPreferences() = 0;
+
+  // Locks the mouse for |instance|. It will call
+  // PluginInstance::OnLockMouseACK() to notify the instance when the operation
+  // is completed. The call to OnLockMouseACK() may be synchronous (i.e., it may
+  // be called when LockMouse() is still on the stack).
+  virtual void LockMouse(PluginInstance* instance) = 0;
+
+  // Unlocks the mouse if |instance| currently owns the mouse lock. Whenever an
+  // plugin instance has lost the mouse lock, it will be notified by
+  // PluginInstance::OnMouseLockLost(). Please note that UnlockMouse() is not
+  // the only cause of losing mouse lock. For example, a user may press the Esc
+  // key to quit the mouse lock mode, which also results in an OnMouseLockLost()
+  // call to the current mouse lock owner.
+  virtual void UnlockMouse(PluginInstance* instance) = 0;
+
+  // Notifies that |instance| has changed the cursor.
+  // This will update the cursor appearance if it is currently over the plugin
+  // instance.
+  virtual void DidChangeCursor(PluginInstance* instance,
+                               const WebKit::WebCursorInfo& cursor) = 0;
+
+  // Notifies that |instance| has received a mouse event.
+  virtual void DidReceiveMouseEvent(PluginInstance* instance) = 0;
+
+  // Determines if the browser entered fullscreen mode.
+  virtual bool IsInFullscreenMode() = 0;
 };
 
 }  // namespace ppapi

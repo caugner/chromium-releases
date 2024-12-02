@@ -14,9 +14,11 @@
 #include "net/base/origin_bound_cert_service.h"
 #include "net/ftp/ftp_transaction_factory.h"
 #include "net/http/http_auth_handler_factory.h"
+#include "net/http/http_server_properties.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/dns_cert_provenance_checker.h"
+#include "net/url_request/fraudulent_certificate_reporter.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory.h"
 
@@ -62,6 +64,13 @@ void URLRequestContextStorage::set_dns_cert_checker(
   dns_cert_checker_.reset(dns_cert_checker);
 }
 
+void URLRequestContextStorage::set_fraudulent_certificate_reporter(
+    FraudulentCertificateReporter* fraudulent_certificate_reporter) {
+  context_->set_fraudulent_certificate_reporter(
+      fraudulent_certificate_reporter);
+  fraudulent_certificate_reporter_.reset(fraudulent_certificate_reporter);
+}
+
 void URLRequestContextStorage::set_http_auth_handler_factory(
     HttpAuthHandlerFactory* http_auth_handler_factory) {
   context_->set_http_auth_handler_factory(http_auth_handler_factory);
@@ -85,6 +94,12 @@ void URLRequestContextStorage::set_network_delegate(
   network_delegate_.reset(network_delegate);
 }
 
+void URLRequestContextStorage::set_http_server_properties(
+    HttpServerProperties* http_server_properties) {
+  context_->set_http_server_properties(http_server_properties);
+  http_server_properties_.reset(http_server_properties);
+}
+
 void URLRequestContextStorage::set_cookie_store(CookieStore* cookie_store) {
   context_->set_cookie_store(cookie_store);
   cookie_store_ = cookie_store;
@@ -93,7 +108,7 @@ void URLRequestContextStorage::set_cookie_store(CookieStore* cookie_store) {
 void URLRequestContextStorage::set_transport_security_state(
     TransportSecurityState* transport_security_state) {
   context_->set_transport_security_state(transport_security_state);
-  transport_security_state_ = transport_security_state;
+  transport_security_state_.reset(transport_security_state);
 }
 
 void URLRequestContextStorage::set_http_transaction_factory(

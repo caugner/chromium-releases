@@ -52,10 +52,10 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/synchronization/lock.h"
-#include "base/task.h"
 #include "base/threading/thread.h"
 #include "base/threading/watchdog.h"
 #include "base/time.h"
@@ -64,12 +64,41 @@
 #include "content/common/notification_registrar.h"
 
 class CustomThreadWatcher;
+class StartupTimeBomb;
 class ThreadWatcherList;
 class ThreadWatcherObserver;
 
 // This class performs health check on threads that would like to be watched.
 class ThreadWatcher {
  public:
+  // base::Bind supports methods with up to 6 parameters. WatchingParams is used
+  // as a workaround that limitation for invoking ThreadWatcher::StartWatching.
+  struct WatchingParams {
+    const BrowserThread::ID& thread_id;
+    const std::string& thread_name;
+    const base::TimeDelta& sleep_time;
+    const base::TimeDelta& unresponsive_time;
+    uint32 unresponsive_threshold;
+    bool crash_on_hang;
+    uint32 live_threads_threshold;
+
+    WatchingParams(const BrowserThread::ID& thread_id_in,
+                   const std::string& thread_name_in,
+                   const base::TimeDelta& sleep_time_in,
+                   const base::TimeDelta& unresponsive_time_in,
+                   uint32 unresponsive_threshold_in,
+                   bool crash_on_hang_in,
+                   uint32 live_threads_threshold_in)
+        : thread_id(thread_id_in),
+          thread_name(thread_name_in),
+          sleep_time(sleep_time_in),
+          unresponsive_time(unresponsive_time_in),
+          unresponsive_threshold(unresponsive_threshold_in),
+          crash_on_hang(crash_on_hang_in),
+          live_threads_threshold(live_threads_threshold_in) {
+    }
+  };
+
   // This method starts performing health check on the given |thread_id|. It
   // will create ThreadWatcher object for the given |thread_id|, |thread_name|.
   // |sleep_time| is the wait time between ping messages. |unresponsive_time| is
@@ -83,13 +112,7 @@ class ThreadWatcher {
   // the browser and watched thread has become sufficiently unresponsive. It
   // will register that ThreadWatcher object and activate the thread watching of
   // the given thread_id.
-  static void StartWatching(const BrowserThread::ID& thread_id,
-                            const std::string& thread_name,
-                            const base::TimeDelta& sleep_time,
-                            const base::TimeDelta& unresponsive_time,
-                            uint32 unresponsive_threshold,
-                            bool crash_on_hang,
-                            uint32 live_threads_threshold);
+  static void StartWatching(const WatchingParams& params);
 
   // Return the |thread_id_| of the thread being watched.
   BrowserThread::ID thread_id() const { return thread_id_; }
@@ -116,13 +139,8 @@ class ThreadWatcher {
   // Construct a ThreadWatcher for the given |thread_id|. |sleep_time| is the
   // wait time between ping messages. |unresponsive_time| is the wait time after
   // ping message is sent, to check if we have received pong message or not.
-  ThreadWatcher(const BrowserThread::ID& thread_id,
-                const std::string& thread_name,
-                const base::TimeDelta& sleep_time,
-                const base::TimeDelta& unresponsive_time,
-                uint32 unresponsive_threshold,
-                bool crash_on_hang,
-                uint32 live_threads_threshold);
+  explicit ThreadWatcher(const WatchingParams& params);
+
   virtual ~ThreadWatcher();
 
   // This method activates the thread watching which starts ping/pong messaging.
@@ -157,7 +175,11 @@ class ThreadWatcher {
   // |ping_sequence_number| that is passed in, then we can assume that watched
   // thread has responded with a pong message.
   // This method is accessible on WatchDogThread.
-  virtual bool OnCheckResponsiveness(uint64 ping_sequence_number);
+  virtual void OnCheckResponsiveness(uint64 ping_sequence_number);
+
+  // Set by OnCheckResponsiveness when it determines if the watched thread is
+  // responsive or not.
+  bool responsive_;
 
  private:
   friend class ThreadWatcherList;
@@ -176,7 +198,7 @@ class ThreadWatcher {
   // Watched thread does nothing except post callback_task to the WATCHDOG
   // Thread. This method is called on watched thread.
   static void OnPingMessage(const BrowserThread::ID& thread_id,
-                            Task* callback_task);
+                            const base::Closure& callback_task);
 
   // This method resets |unresponsive_count_| to zero because watched thread is
   // responding to the ping message with a pong message.
@@ -273,7 +295,7 @@ class ThreadWatcher {
   // We use this factory to create callback tasks for ThreadWatcher object. We
   // use this during ping-pong messaging between WatchDog thread and watched
   // thread.
-  ScopedRunnableMethodFactory<ThreadWatcher> method_factory_;
+  base::WeakPtrFactory<ThreadWatcher> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ThreadWatcher);
 };
@@ -337,7 +359,7 @@ class ThreadWatcherList {
 
   // This constructs the |ThreadWatcherList| singleton and starts watching
   // browser threads by calling StartWatching() on each browser thread that is
-  // watched.
+  // watched. It disarms StartupTimeBomb.
   static void InitializeAndStartWatching(
       uint32 unresponsive_threshold,
       const std::set<std::string>& crash_on_hang_thread_names,
@@ -448,9 +470,10 @@ class WatchDogThread : public base::Thread {
   // They return true iff the watchdog thread existed and the task was posted.
   // Note that even if the task is posted, there's no guarantee that it will
   // run, since the target thread may already have a Quit message in its queue.
-  static bool PostTask(const tracked_objects::Location& from_here, Task* task);
+  static bool PostTask(const tracked_objects::Location& from_here,
+                       const base::Closure& task);
   static bool PostDelayedTask(const tracked_objects::Location& from_here,
-                              Task* task,
+                              const base::Closure& task,
                               int64 delay_ms);
 
  protected:
@@ -460,7 +483,7 @@ class WatchDogThread : public base::Thread {
  private:
   static bool PostTaskHelper(
       const tracked_objects::Location& from_here,
-      Task* task,
+      const base::Closure& task,
       int64 delay_ms);
 
   // This lock protects watchdog_thread_.
@@ -471,7 +494,27 @@ class WatchDogThread : public base::Thread {
   DISALLOW_COPY_AND_ASSIGN(WatchDogThread);
 };
 
-// This is a wrapper class for watching the jank during shutdown.
+// This is a wrapper class for getting the crash dumps of the hangs during
+// startup.
+class StartupTimeBomb {
+ public:
+  // Constructs |startup_watchdog_| which spawns a thread and starts timer.
+  // |duration| specifies how long |startup_watchdog_| will wait before it
+  // calls alarm.
+  static void Arm(const base::TimeDelta& duration);
+
+  // Disarms |startup_watchdog_| thread and then deletes it which stops the
+  // Watchdog thread.
+  static void Disarm();
+
+ private:
+  // Watches for hangs during startup until it is disarm'ed.
+  static base::Watchdog* startup_watchdog_;
+
+  DISALLOW_COPY_AND_ASSIGN(StartupTimeBomb);
+};
+
+// This is a wrapper class for detecting hangs during shutdown.
 class ShutdownWatcherHelper {
  public:
   // Create an empty holder for |shutdown_watchdog_|.
@@ -485,7 +528,7 @@ class ShutdownWatcherHelper {
   void Arm(const base::TimeDelta& duration);
 
  private:
-  // shutdown_watchdog_ watches the jank during shutdown.
+  // shutdown_watchdog_ watches for hangs during shutdown.
   base::Watchdog* shutdown_watchdog_;
 
   DISALLOW_COPY_AND_ASSIGN(ShutdownWatcherHelper);

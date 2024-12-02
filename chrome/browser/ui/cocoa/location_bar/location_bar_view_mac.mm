@@ -4,6 +4,7 @@
 
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 
+#include "base/bind.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
@@ -91,8 +92,10 @@ LocationBarViewMac::LocationBarViewMac(
       profile_(profile),
       browser_(browser),
       toolbar_model_(toolbar_model),
-      transition_(PageTransition::TYPED | PageTransition::FROM_ADDRESS_BAR),
-      first_run_bubble_(this) {
+      transition_(content::PageTransitionFromInt(
+          content::PAGE_TRANSITION_TYPED |
+          content::PAGE_TRANSITION_FROM_ADDRESS_BAR)),
+      weak_ptr_factory_(this) {
   for (size_t i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
     DCHECK_EQ(i, content_setting_decorations_.size());
     ContentSettingsType type = static_cast<ContentSettingsType>(i);
@@ -116,9 +119,9 @@ LocationBarViewMac::~LocationBarViewMac() {
 void LocationBarViewMac::ShowFirstRunBubble(FirstRun::BubbleType bubble_type) {
   // We need the browser window to be shown before we can show the bubble, but
   // we get called before that's happened.
-  Task* task = first_run_bubble_.NewRunnableMethod(
-      &LocationBarViewMac::ShowFirstRunBubbleInternal, bubble_type);
-  MessageLoop::current()->PostTask(FROM_HERE, task);
+  MessageLoop::current()->PostTask(FROM_HERE,
+      base::Bind(&LocationBarViewMac::ShowFirstRunBubbleInternal,
+          weak_ptr_factory_.GetWeakPtr(), bubble_type));
 }
 
 void LocationBarViewMac::ShowFirstRunBubbleInternal(
@@ -151,7 +154,7 @@ WindowOpenDisposition LocationBarViewMac::GetWindowOpenDisposition() const {
   return disposition_;
 }
 
-PageTransition::Type LocationBarViewMac::GetPageTransition() const {
+content::PageTransition LocationBarViewMac::GetPageTransition() const {
   return transition_;
 }
 
@@ -217,16 +220,18 @@ void LocationBarViewMac::Update(const TabContents* contents,
   OnChanged();
 }
 
-void LocationBarViewMac::OnAutocompleteAccept(const GURL& url,
-                                              WindowOpenDisposition disposition,
-                                              PageTransition::Type transition,
-                                              const GURL& alternate_nav_url) {
+void LocationBarViewMac::OnAutocompleteAccept(
+    const GURL& url,
+    WindowOpenDisposition disposition,
+    content::PageTransition transition,
+    const GURL& alternate_nav_url) {
   // WARNING: don't add an early return here. The calls after the if must
   // happen.
   if (url.is_valid()) {
     location_input_ = UTF8ToUTF16(url.spec());
     disposition_ = disposition;
-    transition_ = transition | PageTransition::FROM_ADDRESS_BAR;
+    transition_ = content::PageTransitionFromInt(
+        transition | content::PAGE_TRANSITION_FROM_ADDRESS_BAR);
 
     if (command_updater_) {
       if (!alternate_nav_url.is_valid()) {

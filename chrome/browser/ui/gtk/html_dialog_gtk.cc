@@ -16,7 +16,7 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/native_web_keyboard_event.h"
+#include "content/public/browser/native_web_keyboard_event.h"
 
 namespace browser {
 
@@ -166,7 +166,8 @@ gfx::NativeWindow HtmlDialogGtk::InitDialog() {
       tab_->tab_contents()->property_bag(), this);
 
   tab_->controller().LoadURL(GetDialogContentURL(),
-                             GURL(), PageTransition::START_PAGE);
+                             GURL(), content::PAGE_TRANSITION_START_PAGE,
+                             std::string());
   GtkDialogFlags flags = GTK_DIALOG_NO_SEPARATOR;
   if (delegate_->IsDialogModal())
     flags = static_cast<GtkDialogFlags>(flags | GTK_DIALOG_MODAL);

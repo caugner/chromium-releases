@@ -10,10 +10,10 @@
 #include "base/utf_string_conversions.h"
 #include "base/stringprintf.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/tab_contents/infobar.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
 #include "chrome/browser/translate/translate_manager.h"
@@ -27,7 +27,6 @@
 #include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/mock_render_process_host.h"
-#include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
 #include "content/common/notification_details.h"
@@ -154,13 +153,13 @@ class TranslateManagerTest : public TabContentsWrapperTestHarness,
  protected:
   virtual void SetUp() {
     // Access the TranslateManager singleton so it is created before we call
-    // RenderViewHostTestHarness::SetUp() to match what's done in Chrome, where
-    // the TranslateManager is created before the TabContents.  This matters as
-    // they both register for similar events and we want the notifications to
-    // happen in the same sequence (TranslateManager first, TabContents second).
-    // Also clears the translate script so it is fetched everytime and sets the
-    // expiration delay to a large value by default (in case it was zeroed in
-    // a previous test).
+    // TabContentsWrapperTestHarness::SetUp() to match what's done in Chrome,
+    // where the TranslateManager is created before the TabContents.  This
+    // matters as they both register for similar events and we want the
+    // notifications to happen in the same sequence (TranslateManager first,
+    // TabContents second).  Also clears the translate script so it is fetched
+    // everytime and sets the expiration delay to a large value by default (in
+    // case it was zeroed in a previous test).
     TranslateManager::GetInstance()->ClearTranslateScript();
     TranslateManager::GetInstance()->
         set_translate_script_expiration_delay(60 * 60 * 1000);
@@ -169,7 +168,7 @@ class TranslateManagerTest : public TabContentsWrapperTestHarness,
 
     notification_registrar_.Add(this,
         chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED,
-        Source<TabContentsWrapper>(contents_wrapper()));
+        Source<InfoBarTabHelper>(contents_wrapper()->infobar_tab_helper()));
   }
 
   virtual void TearDown() {
@@ -177,7 +176,7 @@ class TranslateManagerTest : public TabContentsWrapperTestHarness,
 
     notification_registrar_.Remove(this,
         chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED,
-        Source<TabContentsWrapper>(contents_wrapper()));
+        Source<InfoBarTabHelper>(contents_wrapper()->infobar_tab_helper()));
 
     TabContentsWrapperTestHarness::TearDown();
   }
@@ -667,7 +666,7 @@ TEST_F(TranslateManagerTest, Reload) {
   const content::LoadCommittedDetails& nav_details =
       nav_observer.get_load_commited_details();
   EXPECT_TRUE(nav_details.entry != NULL);  // There was a navigation.
-  EXPECT_EQ(NavigationType::EXISTING_PAGE, nav_details.type);
+  EXPECT_EQ(content::NAVIGATION_TYPE_EXISTING_PAGE, nav_details.type);
 
   // The TranslateManager class processes the navigation entry committed
   // notification in a posted task; process that task.
@@ -689,7 +688,8 @@ TEST_F(TranslateManagerTest, ReloadFromLocationBar) {
   // Create a pending navigation and simulate a page load.  That should be the
   // equivalent of typing the URL again in the location bar.
   NavEntryCommittedObserver nav_observer(contents());
-  contents()->controller().LoadURL(url, GURL(), PageTransition::TYPED);
+  contents()->controller().LoadURL(url, GURL(), content::PAGE_TRANSITION_TYPED,
+                                   std::string());
   rvh()->SendNavigate(0, url);
 
   // Test that we are really getting a same page navigation, the test would be
@@ -697,7 +697,7 @@ TEST_F(TranslateManagerTest, ReloadFromLocationBar) {
   const content::LoadCommittedDetails& nav_details =
       nav_observer.get_load_commited_details();
   EXPECT_TRUE(nav_details.entry != NULL);  // There was a navigation.
-  EXPECT_EQ(NavigationType::SAME_PAGE, nav_details.type);
+  EXPECT_EQ(content::NAVIGATION_TYPE_SAME_PAGE, nav_details.type);
 
   // The TranslateManager class processes the navigation entry committed
   // notification in a posted task; process that task.
@@ -735,12 +735,12 @@ TEST_F(TranslateManagerTest, CloseInfoBarInSubframeNavigation) {
 
   // Simulate a sub-frame auto-navigating.
   rvh()->SendNavigateWithTransition(1, GURL("http://pub.com"),
-                                    PageTransition::AUTO_SUBFRAME);
+                                    content::PAGE_TRANSITION_AUTO_SUBFRAME);
   EXPECT_TRUE(GetTranslateInfoBar() == NULL);
 
   // Simulate the user navigating in a sub-frame.
   rvh()->SendNavigateWithTransition(2, GURL("http://pub.com"),
-                                    PageTransition::MANUAL_SUBFRAME);
+                                    content::PAGE_TRANSITION_MANUAL_SUBFRAME);
   EXPECT_TRUE(GetTranslateInfoBar() == NULL);
 
   // Navigate out of page, a new infobar should show.

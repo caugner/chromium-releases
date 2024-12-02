@@ -23,15 +23,15 @@ JSModalDialogViews::JSModalDialogViews(
     : parent_(parent),
       message_box_view_(new views::MessageBoxView(
           parent->dialog_flags() | ui::MessageBoxFlags::kAutoDetectAlignment,
-          UTF16ToWideHack(parent->message_text()),
-          UTF16ToWideHack(parent->default_prompt_text()))) {
+          parent->message_text(),
+          parent->default_prompt_text())) {
   DCHECK(message_box_view_);
 
   message_box_view_->AddAccelerator(
       views::Accelerator(ui::VKEY_C, false, true, false));
   if (parent->display_suppress_checkbox()) {
-    message_box_view_->SetCheckBoxLabel(UTF16ToWide(
-        l10n_util::GetStringUTF16(IDS_JAVASCRIPT_MESSAGEBOX_SUPPRESS_OPTION)));
+    message_box_view_->SetCheckBoxLabel(
+        l10n_util::GetStringUTF16(IDS_JAVASCRIPT_MESSAGEBOX_SUPPRESS_OPTION));
   }
 }
 
@@ -90,8 +90,8 @@ int JSModalDialogViews::GetDialogButtons() const {
   return dialog_buttons;
 }
 
-std::wstring JSModalDialogViews::GetWindowTitle() const {
-  return UTF16ToWideHack(parent_->title());
+string16 JSModalDialogViews::GetWindowTitle() const {
+  return parent_->title();
 }
 
 
@@ -109,7 +109,7 @@ bool JSModalDialogViews::Cancel() {
 }
 
 bool JSModalDialogViews::Accept() {
-  parent_->OnAccept(WideToUTF16Hack(message_box_view_->GetInputText()),
+  parent_->OnAccept(message_box_view_->GetInputText(),
                     message_box_view_->IsCheckBoxSelected());
   return true;
 }
@@ -126,22 +126,22 @@ const views::Widget* JSModalDialogViews::GetWidget() const {
   return message_box_view_->GetWidget();
 }
 
-std::wstring JSModalDialogViews::GetDialogButtonLabel(
+string16 JSModalDialogViews::GetDialogButtonLabel(
     ui::MessageBoxFlags::DialogButton button) const {
   if (parent_->is_before_unload_dialog()) {
     if (button == ui::MessageBoxFlags::DIALOGBUTTON_OK) {
-      return UTF16ToWide(l10n_util::GetStringUTF16(
-          IDS_BEFOREUNLOAD_MESSAGEBOX_OK_BUTTON_LABEL));
+      return l10n_util::GetStringUTF16(
+          IDS_BEFOREUNLOAD_MESSAGEBOX_OK_BUTTON_LABEL);
     } else if (button == ui::MessageBoxFlags::DIALOGBUTTON_CANCEL) {
-      return UTF16ToWide(l10n_util::GetStringUTF16(
-          IDS_BEFOREUNLOAD_MESSAGEBOX_CANCEL_BUTTON_LABEL));
+      return l10n_util::GetStringUTF16(
+          IDS_BEFOREUNLOAD_MESSAGEBOX_CANCEL_BUTTON_LABEL);
     }
   }
   return DialogDelegate::GetDialogButtonLabel(button);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// JSModalDialogViews, views::WindowDelegate implementation:
+// JSModalDialogViews, views::WidgetDelegate implementation:
 
 bool JSModalDialogViews::IsModal() const {
   return true;

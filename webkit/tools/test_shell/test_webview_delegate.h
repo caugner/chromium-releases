@@ -171,7 +171,9 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   virtual WebKit::WebApplicationCacheHost* createApplicationCacheHost(
       WebKit::WebFrame*, WebKit::WebApplicationCacheHostClient*);
   virtual bool allowPlugins(WebKit::WebFrame* frame, bool enabled_per_settings);
-  virtual bool allowImages(WebKit::WebFrame* frame, bool enabled_per_settings);
+  virtual bool allowImage(WebKit::WebFrame* frame,
+                          bool enabled_per_settings,
+                          const WebKit::WebURL& image_url);
   virtual void loadURLExternally(
       WebKit::WebFrame*, const WebKit::WebURLRequest&,
       WebKit::WebNavigationPolicy);
@@ -332,7 +334,7 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
 
   // Called the title of the page changes.
   // Can be used to update the title of the window.
-  void SetPageTitle(const std::wstring& title);
+  void SetPageTitle(const string16& title);
 
   // Called when the URL of the page changes.
   // Extracts the URL and forwards on to SetAddressBarURL().

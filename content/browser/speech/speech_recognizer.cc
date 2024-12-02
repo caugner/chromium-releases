@@ -4,10 +4,9 @@
 
 #include "content/browser/speech/speech_recognizer.h"
 
+#include "base/bind.h"
 #include "base/time.h"
 #include "content/browser/browser_thread.h"
-#include "content/browser/content_browser_client.h"
-#include "content/common/content_client.h"
 #include "net/url_request/url_request_context_getter.h"
 
 using media::AudioInputController;
@@ -59,16 +58,18 @@ SpeechRecognizer::SpeechRecognizer(Delegate* delegate,
                                    int caller_id,
                                    const std::string& language,
                                    const std::string& grammar,
-                                   bool censor_results,
+                                   net::URLRequestContextGetter* context_getter,
+                                   bool filter_profanities,
                                    const std::string& hardware_info,
                                    const std::string& origin_url)
     : delegate_(delegate),
       caller_id_(caller_id),
       language_(language),
       grammar_(grammar),
-      censor_results_(censor_results),
+      filter_profanities_(filter_profanities),
       hardware_info_(hardware_info),
       origin_url_(origin_url),
+      context_getter_(context_getter),
       codec_(AudioEncoder::CODEC_FLAC),
       encoder_(NULL),
       endpointer_(kAudioSampleRate),
@@ -145,6 +146,7 @@ void SpeechRecognizer::StopRecording() {
   audio_controller_->Close();
   audio_controller_ = NULL;  // Releases the ref ptr.
 
+  delegate_->DidStopReceivingSpeech(caller_id_);
   delegate_->DidCompleteRecording(caller_id_);
 
   // UploadAudioChunk requires a non-empty final buffer. So we encode a packet
@@ -172,9 +174,8 @@ void SpeechRecognizer::StopRecording() {
 void SpeechRecognizer::OnError(AudioInputController* controller,
                                int error_code) {
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                         NewRunnableMethod(this,
-                                           &SpeechRecognizer::HandleOnError,
-                                           error_code));
+                         base::Bind(&SpeechRecognizer::HandleOnError,
+                                    this, error_code));
 }
 
 void SpeechRecognizer::HandleOnError(int error_code) {
@@ -186,7 +187,7 @@ void SpeechRecognizer::HandleOnError(int error_code) {
   if (!audio_controller_.get())
     return;
 
-  InformErrorAndCancelRecognition(RECOGNIZER_ERROR_CAPTURE);
+  InformErrorAndCancelRecognition(kErrorAudio);
 }
 
 void SpeechRecognizer::OnData(AudioInputController* controller,
@@ -196,9 +197,8 @@ void SpeechRecognizer::OnData(AudioInputController* controller,
 
   string* str_data = new string(reinterpret_cast<const char*>(data), size);
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                         NewRunnableMethod(this,
-                                           &SpeechRecognizer::HandleOnData,
-                                           str_data));
+                          base::Bind(&SpeechRecognizer::HandleOnData,
+                                     this, str_data));
 }
 
 void SpeechRecognizer::HandleOnData(string* data) {
@@ -209,6 +209,8 @@ void SpeechRecognizer::HandleOnData(string* data) {
     delete data;
     return;
   }
+
+  bool speech_was_heard_before_packet = endpointer_.DidStartReceivingSpeech();
 
   const short* samples = reinterpret_cast<const short*>(data->data());
   DCHECK((data->length() % sizeof(short)) == 0);
@@ -224,13 +226,9 @@ void SpeechRecognizer::HandleOnData(string* data) {
     // This was the first audio packet recorded, so start a request to the
     // server to send the data and inform the delegate.
     delegate_->DidStartReceivingAudio(caller_id_);
-    // Deprecated; see http://crbug.com/92366
-    net::URLRequestContextGetter* context_getter =
-        content::GetContentClient()->browser()->
-            GetDefaultRequestContextDeprecatedCrBug64339();
-    request_.reset(new SpeechRecognitionRequest(context_getter, this));
-    request_->Start(language_, grammar_, censor_results_, hardware_info_,
-                    origin_url_, encoder_->mime_type());
+    request_.reset(new SpeechRecognitionRequest(context_getter_.get(), this));
+    request_->Start(language_, grammar_, filter_profanities_,
+                    hardware_info_, origin_url_, encoder_->mime_type());
   }
 
   string encoded_data;
@@ -250,11 +248,15 @@ void SpeechRecognizer::HandleOnData(string* data) {
   }
 
   // Check if we have waited too long without hearing any speech.
-  if (!endpointer_.DidStartReceivingSpeech() &&
+  bool speech_was_heard_after_packet = endpointer_.DidStartReceivingSpeech();
+  if (!speech_was_heard_after_packet &&
       num_samples_recorded_ >= kNoSpeechTimeoutSec * kAudioSampleRate) {
-    InformErrorAndCancelRecognition(RECOGNIZER_ERROR_NO_SPEECH);
+    InformErrorAndCancelRecognition(kErrorNoSpeech);
     return;
   }
+
+  if (!speech_was_heard_before_packet && speech_was_heard_after_packet)
+    delegate_->DidStartReceivingSpeech(caller_id_);
 
   // Calculate the input volume to display in the UI, smoothing towards the
   // new level.
@@ -275,30 +277,26 @@ void SpeechRecognizer::HandleOnData(string* data) {
   delegate_->SetInputVolume(caller_id_, did_clip ? 1.0f : audio_level_,
                             noise_level);
 
-  if (endpointer_.speech_input_complete()) {
+  if (endpointer_.speech_input_complete())
     StopRecording();
-  }
-
-  // TODO(satish): Once we have streaming POST, start sending the data received
-  // here as POST chunks.
 }
 
 void SpeechRecognizer::SetRecognitionResult(
-    bool error, const SpeechInputResultArray& result) {
-  if (error || result.empty()) {
-    InformErrorAndCancelRecognition(error ? RECOGNIZER_ERROR_NETWORK :
-                                            RECOGNIZER_ERROR_NO_RESULTS);
+    const SpeechInputResult& result) {
+  if (result.error != kErrorNone) {
+    InformErrorAndCancelRecognition(result.error);
     return;
   }
 
-  delegate_->SetRecognitionResult(caller_id_, error, result);
-
   // Guard against the delegate freeing us until we finish our job.
   scoped_refptr<SpeechRecognizer> me(this);
+  delegate_->SetRecognitionResult(caller_id_, result);
   delegate_->DidCompleteRecognition(caller_id_);
 }
 
-void SpeechRecognizer::InformErrorAndCancelRecognition(ErrorCode error) {
+void SpeechRecognizer::InformErrorAndCancelRecognition(
+    SpeechInputError error) {
+  DCHECK_NE(error, kErrorNone);
   CancelRecognition();
 
   // Guard against the delegate freeing us until we finish our job.

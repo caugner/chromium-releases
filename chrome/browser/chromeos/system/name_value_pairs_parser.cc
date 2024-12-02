@@ -5,6 +5,8 @@
 #include "chrome/browser/chromeos/system/name_value_pairs_parser.h"
 
 #include "base/command_line.h"
+#include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/process_util.h"
 #include "base/string_tokenizer.h"
@@ -67,37 +69,21 @@ bool NameValuePairsParser::ParseNameValuePairs(const std::string& in_string,
 bool NameValuePairsParser::GetSingleValueFromTool(int argc,
                                                   const char* argv[],
                                                   const std::string& key) {
+  DCHECK_GE(argc, 1);
+
+  if (!file_util::PathExists(FilePath(argv[0]))) {
+    LOG(ERROR) << argv[0] << " not found";
+    return false;
+  }
+
   CommandLine command_line(argc, argv);
   std::string output_string;
-  // TODO(stevenjb,satorux): Make this non blocking: crosbug.com/5603.
-  base::ThreadRestrictions::ScopedAllowIO allow_io_for_thread_join;
-  if (argc < 1 || !base::GetAppOutput(command_line, &output_string)) {
-    LOG(WARNING) << "Error excuting: " << command_line.GetCommandLineString();
+  if (!base::GetAppOutput(command_line, &output_string)) {
+    LOG(ERROR) << "Error executing: " << command_line.GetCommandLineString();
     return false;
   }
   TrimWhitespaceASCII(output_string, TRIM_ALL, &output_string);
   AddNameValuePair(key, output_string);
-  return true;
-}
-
-bool NameValuePairsParser::ParseNameValuePairsFromTool(
-    int argc,
-    const char* argv[],
-    const std::string& eq,
-    const std::string& delim) {
-  CommandLine command_line(argc, argv);
-  std::string output_string;
-  // TODO(stevenjb,satorux): Make this non blocking: crosbug.com/5603.
-  base::ThreadRestrictions::ScopedAllowIO allow_io_for_thread_join;
-  if (argc < 1 || !base::GetAppOutput(command_line, &output_string)) {
-    LOG(WARNING) << "Error excuting: " << command_line.GetCommandLineString();
-    return false;
-  }
-  if (!ParseNameValuePairs(output_string, eq, delim)) {
-    LOG(WARNING) << "Error parsing values while excuting: "
-                 << command_line.GetCommandLineString();
-    return false;
-  }
   return true;
 }
 

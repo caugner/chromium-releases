@@ -5,10 +5,107 @@
 #include "printing/print_settings.h"
 
 #include "base/atomic_sequence_num.h"
+#include "base/logging.h"
 #include "printing/print_job_constants.h"
 #include "printing/units.h"
 
 namespace printing {
+
+#if defined (USE_CUPS)
+void GetColorModelForMode(
+    int color_mode, std::string* color_setting_name, std::string* color_value) {
+#if defined(OS_MACOSX)
+  const char kCUPSColorMode[] = "ColorMode";
+  const char kCUPSColorModel[] = "ColorModel";
+  const char kCUPSPrintoutMode[] = "PrintoutMode";
+  const char kCUPSProcessColorModel[] = "ProcessColorModel";
+#else
+  const char kCUPSColorMode[] = "cups-ColorMode";
+  const char kCUPSColorModel[] = "cups-ColorModel";
+  const char kCUPSPrintoutMode[] = "cups-PrintoutMode";
+  const char kCUPSProcessColorModel[] = "cups-ProcessColorModel";
+#endif
+
+  color_setting_name->assign(kCUPSColorModel);
+  switch (color_mode) {
+    case printing::COLOR:
+      color_value->assign(printing::kColor);
+      break;
+    case printing::CMYK:
+      color_value->assign(printing::kCMYK);
+      break;
+    case printing::PRINTOUTMODE_NORMAL:
+      color_value->assign(printing::kNormal);
+      color_setting_name->assign(kCUPSPrintoutMode);
+      break;
+    case printing::PRINTOUTMODE_NORMAL_GRAY:
+      color_value->assign(printing::kNormalGray);
+      color_setting_name->assign(kCUPSPrintoutMode);
+      break;
+    case printing::RGB16:
+      color_value->assign(printing::kRGB16);
+      break;
+    case printing::RGBA:
+      color_value->assign(printing::kRGBA);
+      break;
+    case printing::RGB:
+      color_value->assign(printing::kRGB);
+      break;
+    case printing::CMY:
+      color_value->assign(printing::kCMY);
+      break;
+    case printing::CMY_K:
+      color_value->assign(printing::kCMY_K);
+      break;
+    case printing::BLACK:
+      color_value->assign(printing::kBlack);
+      break;
+    case printing::GRAY:
+      color_value->assign(printing::kGray);
+      break;
+    case printing::COLORMODE_COLOR:
+      color_setting_name->assign(kCUPSColorMode);
+      color_value->assign(printing::kColor);
+      break;
+    case printing::COLORMODE_MONOCHROME:
+      color_setting_name->assign(kCUPSColorMode);
+      color_value->assign(printing::kMonochrome);
+      break;
+    case printing::HP_COLOR_COLOR:
+      color_setting_name->assign(kColor);
+      color_value->assign(printing::kColor);
+      break;
+    case printing::HP_COLOR_BLACK:
+      color_setting_name->assign(kColor);
+      color_value->assign(printing::kBlack);
+      break;
+    case printing::PROCESSCOLORMODEL_CMYK:
+      color_setting_name->assign(kCUPSProcessColorModel);
+      color_value->assign(printing::kCMYK);
+      break;
+    case printing::PROCESSCOLORMODEL_GREYSCALE:
+      color_setting_name->assign(kCUPSProcessColorModel);
+      color_value->assign(printing::kGreyscale);
+      break;
+    case printing::PROCESSCOLORMODEL_RGB:
+      color_setting_name->assign(kCUPSProcessColorModel);
+      color_value->assign(printing::kRGB);
+      break;
+    default:
+      color_value->assign(printing::kGrayscale);
+      break;
+  }
+}
+#endif
+
+bool isColorModelSelected(int model) {
+  return (model != printing::GRAY &&
+          model != printing::BLACK &&
+          model != printing::PRINTOUTMODE_NORMAL_GRAY &&
+          model != printing::COLORMODE_MONOCHROME &&
+          model != printing::PROCESSCOLORMODEL_GREYSCALE &&
+          model != printing::HP_COLOR_BLACK);
+}
 
 // Global SequenceNumber used for generating unique cookie values.
 static base::AtomicSequenceNumber cookie_seq(base::LINKER_INITIALIZED);
@@ -18,10 +115,7 @@ PrintSettings::PrintSettings()
       max_shrink(2.0),
       desired_dpi(72),
       selection_only(false),
-      use_overlays(true),
-      date(),
-      title(),
-      url(),
+      margin_type(DEFAULT_MARGINS),
       display_header_footer(false),
       dpi_(0),
       landscape_(false),
@@ -53,34 +147,71 @@ void PrintSettings::SetPrinterPrintableArea(
     gfx::Size const& physical_size_device_units,
     gfx::Rect const& printable_area_device_units,
     int units_per_inch) {
-
   int header_footer_text_height = 0;
-  int margin_printer_units = 0;
-  if (use_overlays) {
+  if (display_header_footer) {
     // Hard-code text_height = 0.5cm = ~1/5 of inch.
     header_footer_text_height = ConvertUnit(kSettingHeaderFooterInterstice,
                                             kPointsPerInch, units_per_inch);
-    // Default margins 1.0cm = ~2/5 of an inch.
-    margin_printer_units = ConvertUnit(1000, kHundrethsMMPerInch,
-                                       units_per_inch);
   }
-  // Start by setting the user configuration
   page_setup_device_units_.Init(physical_size_device_units,
                                 printable_area_device_units,
                                 header_footer_text_height);
 
-
-  // Apply default margins (not user configurable just yet).
-  // Since the font height is half the margin we put the header and footers at
-  // the font height from the margins.
   PageMargins margins;
-  margins.header = header_footer_text_height;
-  margins.footer = header_footer_text_height;
-  margins.left = margin_printer_units;
-  margins.top = margin_printer_units;
-  margins.right = margin_printer_units;
-  margins.bottom = margin_printer_units;
-  page_setup_device_units_.SetRequestedMargins(margins);
+  switch (margin_type) {
+    case DEFAULT_MARGINS: {
+      // Default margins 1.0cm = ~2/5 of an inch.
+      int margin_printer_units = ConvertUnit(1000, kHundrethsMMPerInch,
+                                             units_per_inch);
+      margins.header = header_footer_text_height;
+      margins.footer = header_footer_text_height;
+      margins.top = margin_printer_units;
+      margins.bottom = margin_printer_units;
+      margins.left = margin_printer_units;
+      margins.right = margin_printer_units;
+      break;
+    }
+    case NO_MARGINS:
+    case PRINTABLE_AREA_MARGINS: {
+      margins.header = 0;
+      margins.footer = 0;
+      margins.top = 0;
+      margins.bottom = 0;
+      margins.left = 0;
+      margins.right = 0;
+      break;
+    }
+    case CUSTOM_MARGINS: {
+      margins.header = 0;
+      margins.footer = 0;
+      margins.top = ConvertUnitDouble(custom_margins_in_points_.top,
+                                      printing::kPointsPerInch,
+                                      units_per_inch);
+      margins.bottom = ConvertUnitDouble(custom_margins_in_points_.bottom,
+                                         printing::kPointsPerInch,
+                                         units_per_inch);
+      margins.left = ConvertUnitDouble(custom_margins_in_points_.left,
+                                       printing::kPointsPerInch,
+                                       units_per_inch);
+      margins.right = ConvertUnitDouble(custom_margins_in_points_.right,
+                                        printing::kPointsPerInch,
+                                        units_per_inch);
+      break;
+    }
+    default: {
+      NOTREACHED();
+    }
+  }
+
+  if (margin_type == DEFAULT_MARGINS || margin_type == PRINTABLE_AREA_MARGINS)
+    page_setup_device_units_.SetRequestedMargins(margins);
+  else
+    page_setup_device_units_.ForceRequestedMargins(margins);
+}
+
+void PrintSettings::SetCustomMargins(const PageMargins& margins_in_points) {
+  custom_margins_in_points_ = margins_in_points;
+  margin_type = CUSTOM_MARGINS;
 }
 
 bool PrintSettings::Equals(const PrintSettings& rhs) const {

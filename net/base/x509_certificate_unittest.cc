@@ -20,6 +20,10 @@
 #include "net/base/x509_certificate.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if defined(USE_NSS)
+#include <cert.h>
+#endif
+
 // Unit tests aren't allowed to access external resources. Unfortunately, to
 // properly verify the EV-ness of a cert, we need to check for its revocation
 // through online servers. If you're manually running unit tests, feel free to
@@ -32,7 +36,6 @@
 #endif
 
 using base::HexEncode;
-using base::SHA1_LENGTH;
 using base::Time;
 
 namespace net {
@@ -231,7 +234,7 @@ void CheckGoogleCert(const scoped_refptr<X509Certificate>& google_cert,
   int flags = X509Certificate::VERIFY_REV_CHECKING_ENABLED |
                 X509Certificate::VERIFY_EV_CERT;
   EXPECT_EQ(OK, google_cert->Verify("www.google.com", flags, &verify_result));
-  EXPECT_EQ(0, verify_result.cert_status & CERT_STATUS_IS_EV);
+  EXPECT_FALSE(verify_result.cert_status & CERT_STATUS_IS_EV);
 #endif
 }
 
@@ -297,7 +300,7 @@ TEST(X509CertificateTest, WebkitCertParsing) {
                 X509Certificate::VERIFY_EV_CERT;
   CertVerifyResult verify_result;
   EXPECT_EQ(OK, webkit_cert->Verify("webkit.org", flags, &verify_result));
-  EXPECT_EQ(0, verify_result.cert_status & CERT_STATUS_IS_EV);
+  EXPECT_FALSE(verify_result.cert_status & CERT_STATUS_IS_EV);
 #endif
 
   // Test that the wildcard cert matches properly.
@@ -360,12 +363,12 @@ TEST(X509CertificateTest, ThawteCertParsing) {
   CertVerifyResult verify_result;
   // EV cert verification requires revocation checking.
   EXPECT_EQ(OK, thawte_cert->Verify("www.thawte.com", flags, &verify_result));
-  EXPECT_NE(0, verify_result.cert_status & CERT_STATUS_IS_EV);
+  EXPECT_TRUE(verify_result.cert_status & CERT_STATUS_IS_EV);
   // Consequently, if we don't have revocation checking enabled, we can't claim
   // any cert is EV.
   flags = X509Certificate::VERIFY_EV_CERT;
   EXPECT_EQ(OK, thawte_cert->Verify("www.thawte.com", flags, &verify_result));
-  EXPECT_EQ(0, verify_result.cert_status & CERT_STATUS_IS_EV);
+  EXPECT_FALSE(verify_result.cert_status & CERT_STATUS_IS_EV);
 #endif
 }
 
@@ -397,8 +400,8 @@ TEST(X509CertificateTest, PaypalNullCertParsing) {
   // name mismatch, or our certificate blacklist should cause us to report an
   // invalid certificate.
 #if !defined(OS_MACOSX) && !defined(USE_OPENSSL)
-  EXPECT_NE(0, verify_result.cert_status &
-            (CERT_STATUS_COMMON_NAME_INVALID | CERT_STATUS_INVALID));
+  EXPECT_TRUE(verify_result.cert_status &
+              (CERT_STATUS_COMMON_NAME_INVALID | CERT_STATUS_INVALID));
 #endif
 }
 
@@ -459,7 +462,7 @@ TEST(X509CertificateTest, IntermediateCARequireExplicitPolicy) {
   CertVerifyResult verify_result;
   int error = cert_chain->Verify("www.us.army.mil", flags, &verify_result);
   EXPECT_EQ(OK, error);
-  EXPECT_EQ(0, verify_result.cert_status);
+  EXPECT_EQ(0U, verify_result.cert_status);
   root_certs->Clear();
 }
 
@@ -494,7 +497,7 @@ TEST(X509CertificateTest, DISABLED_GlobalSignR3EVTest) {
               X509Certificate::VERIFY_EV_CERT;
   int error = cert_chain->Verify("2029.globalsign.com", flags, &verify_result);
   if (error == OK)
-    EXPECT_NE(0, verify_result.cert_status & CERT_STATUS_IS_EV);
+    EXPECT_TRUE(verify_result.cert_status & CERT_STATUS_IS_EV);
   else
     EXPECT_EQ(ERR_CERT_DATE_INVALID, error);
 }
@@ -587,7 +590,7 @@ TEST(X509CertificateTest, TestKnownRoot) {
   // against agl. Also see PublicKeyHashes in this file.
   int error = cert_chain->Verify("www.nist.gov", flags, &verify_result);
   EXPECT_EQ(OK, error);
-  EXPECT_EQ(0, verify_result.cert_status);
+  EXPECT_EQ(0U, verify_result.cert_status);
   EXPECT_TRUE(verify_result.is_issued_by_known_root);
 }
 
@@ -608,7 +611,7 @@ TEST(X509CertificateTest, ExtractSPKIFromDERCert) {
   base::StringPiece spkiBytes;
   EXPECT_TRUE(asn1::ExtractSPKIFromDERCert(derBytes, &spkiBytes));
 
-  uint8 hash[base::SHA1_LENGTH];
+  uint8 hash[base::kSHA1Length];
   base::SHA1HashBytes(reinterpret_cast<const uint8*>(spkiBytes.data()),
                       spkiBytes.size(), hash);
 
@@ -661,12 +664,12 @@ TEST(X509CertificateTest, PublicKeyHashes) {
 
   int error = cert_chain->Verify("www.nist.gov", flags, &verify_result);
   EXPECT_EQ(OK, error);
-  EXPECT_EQ(0, verify_result.cert_status);
+  EXPECT_EQ(0U, verify_result.cert_status);
   ASSERT_LE(2u, verify_result.public_key_hashes.size());
-  EXPECT_EQ(HexEncode(nistSPKIHash, base::SHA1_LENGTH),
-            HexEncode(verify_result.public_key_hashes[0].data, SHA1_LENGTH));
+  EXPECT_EQ(HexEncode(nistSPKIHash, base::kSHA1Length),
+      HexEncode(verify_result.public_key_hashes[0].data, base::kSHA1Length));
   EXPECT_EQ("83244223D6CBF0A26FC7DE27CEBCA4BDA32612AD",
-            HexEncode(verify_result.public_key_hashes[1].data, SHA1_LENGTH));
+      HexEncode(verify_result.public_key_hashes[1].data, base::kSHA1Length));
 
   TestRootCerts::GetInstance()->Clear();
 }
@@ -691,13 +694,13 @@ TEST(X509CertificateTest, InvalidKeyUsage) {
   EXPECT_EQ(ERR_CERT_AUTHORITY_INVALID, error);
 #else
   EXPECT_EQ(ERR_CERT_INVALID, error);
-  EXPECT_NE(0, verify_result.cert_status & CERT_STATUS_INVALID);
+  EXPECT_TRUE(verify_result.cert_status & CERT_STATUS_INVALID);
 #endif
   // TODO(wtc): fix http://crbug.com/75520 to get all the certificate errors
   // from NSS.
 #if !defined(USE_NSS)
   // The certificate is issued by an unknown CA.
-  EXPECT_NE(0, verify_result.cert_status & CERT_STATUS_AUTHORITY_INVALID);
+  EXPECT_TRUE(verify_result.cert_status & CERT_STATUS_AUTHORITY_INVALID);
 #endif
 }
 
@@ -1258,26 +1261,18 @@ void PrintTo(const CertificateNameVerifyTestData& data, std::ostream* os) {
 
 const CertificateNameVerifyTestData kNameVerifyTestData[] = {
     { true, "foo.com", "foo.com" },
-    { true, "foo.com", "foo.com." },
     { true, "f", "f" },
-    { true, "f", "f." },
     { false, "h", "i" },
     { true, "bar.foo.com", "*.foo.com" },
-    { true, "www-3.bar.foo.com", "*.bar.foo.com." },
     { true, "www.test.fr", "common.name",
         "*.test.com,*.test.co.uk,*.test.de,*.test.fr" },
     { true, "wwW.tESt.fr",  "common.name",
         ",*.*,*.test.de,*.test.FR,www" },
-    { false, "foo.com", "*.com" },
     { false, "f.uk", ".uk" },
-    { true,  "h.co.uk", "*.co.uk" },
-    { false, "foo.us", "*.us" },
     { false, "w.bar.foo.com", "?.bar.foo.com" },
     { false, "www.foo.com", "(www|ftp).foo.com" },
     { false, "www.foo.com", "www.foo.com#" }, // # = null char.
     { false, "www.foo.com", "", "www.foo.com#*.foo.com,#,#" },
-    { false, "foo", "*" },
-    { false, "foo.", "*." },
     { false, "www.house.example", "ww.house.example" },
     { false, "test.org", "", "www.test.org,*.test.org,*.org" },
     { false, "w.bar.foo.com", "w*.bar.foo.com" },
@@ -1317,6 +1312,32 @@ const CertificateNameVerifyTestData kNameVerifyTestData[] = {
     { true, "baz1.example.net", "baz*.example.net" },
     { true, "foobaz.example.net", "*baz.example.net" },
     { true, "buzz.example.net", "b*z.example.net" },
+    // Wildcards should not be valid unless there are at least three name
+    // components.
+    { true,  "h.co.uk", "*.co.uk" },
+    { false, "foo.com", "*.com" },
+    { false, "foo.us", "*.us" },
+    { false, "foo", "*" },
+    // Multiple wildcards are not valid.
+    { false, "foo.example.com", "*.*.com" },
+    { false, "foo.bar.example.com", "*.bar.*.com" },
+    // Absolute vs relative DNS name tests. Although not explicitly specified
+    // in RFC 6125, absolute reference names (those ending in a .) should
+    // match either absolute or relative presented names.
+    { true, "foo.com", "foo.com." },
+    { true, "foo.com.", "foo.com" },
+    { true, "foo.com.", "foo.com." },
+    { true, "f", "f." },
+    { true, "f.", "f" },
+    { true, "f.", "f." },
+    { true, "www-3.bar.foo.com", "*.bar.foo.com." },
+    { true, "www-3.bar.foo.com.", "*.bar.foo.com" },
+    { true, "www-3.bar.foo.com.", "*.bar.foo.com." },
+    { false, ".", "." },
+    { false, "example.com", "*.com." },
+    { false, "example.com.", "*.com" },
+    { false, "example.com.", "*.com." },
+    { false, "foo.", "*." },
     // IP addresses in common name; IPv4 only.
     { true, "127.0.0.1", "127.0.0.1" },
     { true, "192.168.1.1", "192.168.1.1" },

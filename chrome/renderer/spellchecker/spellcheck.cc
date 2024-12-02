@@ -11,9 +11,11 @@
 #include "chrome/common/render_messages.h"
 #include "chrome/common/spellcheck_common.h"
 #include "chrome/common/spellcheck_messages.h"
+#include "content/public/renderer/render_thread.h"
 #include "third_party/hunspell/src/hunspell/hunspell.hxx"
 
 using base::TimeTicks;
+using content::RenderThread;
 
 SpellCheck::SpellCheck()
     : file_(base::kInvalidPlatformFileValue),
@@ -108,12 +110,13 @@ bool SpellCheck::SpellCheckWord(
   if (in_word_len == 0)
     return true;  // No input means always spelled correctly.
 
-  SpellcheckWordIterator word_iterator;
   string16 word;
   int word_start;
   int word_length;
-  word_iterator.Initialize(&character_attributes_, in_word, in_word_len, true);
-  while (word_iterator.GetNextWord(&word, &word_start, &word_length)) {
+  if (!text_iterator_.IsInitialized())
+    text_iterator_.Initialize(&character_attributes_, true);
+  text_iterator_.SetText(in_word, in_word_len);
+  while (text_iterator_.GetNextWord(&word, &word_start, &word_length)) {
     // Found a word (or a contraction) that the spellchecker can check the
     // spelling of.
     if (CheckSpelling(word, tag))
@@ -192,7 +195,7 @@ void SpellCheck::InitializeHunspell() {
   bdict_file_.reset(new file_util::MemoryMappedFile);
 
   if (bdict_file_->Initialize(file_)) {
-    TimeTicks start_time = TimeTicks::Now();
+    TimeTicks debug_start_time = base::Histogram::DebugNow();
 
     hunspell_.reset(
         new Hunspell(bdict_file_->data(), bdict_file_->length()));
@@ -204,7 +207,7 @@ void SpellCheck::InitializeHunspell() {
     }
 
     DHISTOGRAM_TIMES("Spellcheck.InitTime",
-                     TimeTicks::Now() - start_time);
+                     base::Histogram::DebugNow() - debug_start_time);
   } else {
     NOTREACHED() << "Could not mmap spellchecker dictionary.";
   }
@@ -220,7 +223,7 @@ bool SpellCheck::InitializeIfNeeded() {
     return false;
 
   if (!initialized_) {
-    Send(new SpellCheckHostMsg_RequestDictionary);
+    RenderThread::Get()->Send(new SpellCheckHostMsg_RequestDictionary);
     initialized_ = true;
     return true;
   }
@@ -238,8 +241,8 @@ bool SpellCheck::CheckSpelling(const string16& word_to_check, int tag) {
   bool word_correct = false;
 
   if (is_using_platform_spelling_engine_) {
-    Send(new SpellCheckHostMsg_PlatformCheckSpelling(word_to_check, tag,
-                                                    &word_correct));
+    RenderThread::Get()->Send(new SpellCheckHostMsg_PlatformCheckSpelling(
+        word_to_check, tag, &word_correct));
   } else {
     std::string word_to_check_utf8(UTF16ToUTF8(word_to_check));
     // Hunspell shouldn't let us exceed its max, but check just in case
@@ -263,7 +266,7 @@ void SpellCheck::FillSuggestionList(
     const string16& wrong_word,
     std::vector<string16>* optional_suggestions) {
   if (is_using_platform_spelling_engine_) {
-    Send(new SpellCheckHostMsg_PlatformFillSuggestionList(
+    RenderThread::Get()->Send(new SpellCheckHostMsg_PlatformFillSuggestionList(
         wrong_word, optional_suggestions));
     return;
   }
@@ -292,14 +295,14 @@ void SpellCheck::FillSuggestionList(
 // returns a concatenated word which is not in the selected dictionary
 // (e.g. "in'n'out") but each word is valid.
 bool SpellCheck::IsValidContraction(const string16& contraction, int tag) {
-  SpellcheckWordIterator word_iterator;
-  word_iterator.Initialize(&character_attributes_, contraction.c_str(),
-                           contraction.length(), false);
+  if (!contraction_iterator_.IsInitialized())
+    contraction_iterator_.Initialize(&character_attributes_, false);
+  contraction_iterator_.SetText(contraction.c_str(), contraction.length());
 
   string16 word;
   int word_start;
   int word_length;
-  while (word_iterator.GetNextWord(&word, &word_start, &word_length)) {
+  while (contraction_iterator_.GetNextWord(&word, &word_start, &word_length)) {
     if (!CheckSpelling(word, tag))
       return false;
   }

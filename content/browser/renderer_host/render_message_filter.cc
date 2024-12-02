@@ -21,19 +21,21 @@
 #include "content/browser/download/download_types.h"
 #include "content/browser/plugin_process_host.h"
 #include "content/browser/plugin_service.h"
+#include "content/browser/plugin_service_filter.h"
 #include "content/browser/ppapi_plugin_process_host.h"
-#include "content/browser/ppapi_broker_process_host.h"
 #include "content/browser/renderer_host/browser_render_process_host.h"
 #include "content/browser/renderer_host/media/media_observer.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/browser/resource_context.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/content_switches.h"
+#include "content/common/child_process_host.h"
+#include "content/common/child_process_messages.h"
 #include "content/common/desktop_notification_messages.h"
 #include "content/common/notification_service.h"
-#include "content/common/url_constants.h"
 #include "content/common/view_messages.h"
+#include "content/public/common/content_switches.h"
+#include "content/public/common/url_constants.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_platform_file.h"
 #include "media/audio/audio_util.h"
@@ -43,10 +45,7 @@
 #include "net/base/io_buffer.h"
 #include "net/base/keygen_handler.h"
 #include "net/base/mime_util.h"
-#include "net/base/net_errors.h"
-#include "net/disk_cache/disk_cache.h"
 #include "net/http/http_cache.h"
-#include "net/http/http_network_layer.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
@@ -54,20 +53,16 @@
 #include "webkit/glue/webcookie.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/npapi/plugin_group.h"
-#include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/npapi/webplugin.h"
 #include "webkit/plugins/plugin_constants.h"
 #include "webkit/plugins/webplugininfo.h"
 
 #if defined(OS_MACOSX)
-#include "content/common/font_descriptor_mac.h"
-#include "content/common/font_loader_mac.h"
+#include "content/common/mac/font_descriptor.h"
+#include "content/common/mac/font_loader.h"
 #endif
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
-#endif
-#if defined(OS_WIN)
-#include "content/common/child_process_host.h"
 #endif
 
 using net::CookieStore;
@@ -105,77 +100,9 @@ class RenderMessageCompletionCallback {
   IPC::Message* reply_msg_;
 };
 
-class ClearCacheCompletion : public RenderMessageCompletionCallback,
-                             public net::CompletionCallback {
- public:
-  ClearCacheCompletion(RenderMessageFilter* filter,
-                       IPC::Message* reply_msg)
-      : RenderMessageCompletionCallback(filter, reply_msg) {
-  }
-
-  virtual void RunWithParams(const Tuple1<int>& params) {
-    ViewHostMsg_ClearCache::WriteReplyParams(reply_msg(), params.a);
-    SendReplyAndDeleteThis();
-  }
-};
-
-class OpenChannelToNpapiPluginCallback : public RenderMessageCompletionCallback,
-                                         public PluginProcessHost::Client {
- public:
-  OpenChannelToNpapiPluginCallback(RenderMessageFilter* filter,
-                                   const content::ResourceContext& context,
-                                   IPC::Message* reply_msg)
-      : RenderMessageCompletionCallback(filter, reply_msg),
-        context_(context) {
-  }
-
-  virtual int ID() OVERRIDE {
-    return filter()->render_process_id();
-  }
-
-  virtual const content::ResourceContext& GetResourceContext() OVERRIDE {
-    return context_;
-  }
-
-  virtual bool OffTheRecord() OVERRIDE {
-    if (filter()->OffTheRecord())
-      return true;
-    if (content::GetContentClient()->browser()->AllowSaveLocalState(context_))
-      return false;
-
-    // For now, only disallow storing data for Flash <http://crbug.com/97319>.
-    for (size_t i = 0; i < info_.mime_types.size(); ++i) {
-      if (info_.mime_types[i].mime_type == kFlashPluginSwfMimeType)
-        return true;
-    }
-    return false;
-  }
-
-  virtual void SetPluginInfo(const webkit::WebPluginInfo& info) OVERRIDE {
-    info_ = info;
-  }
-
-  virtual void OnChannelOpened(const IPC::ChannelHandle& handle) OVERRIDE {
-    WriteReplyAndDeleteThis(handle);
-  }
-
-  virtual void OnError() OVERRIDE {
-    WriteReplyAndDeleteThis(IPC::ChannelHandle());
-  }
-
- private:
-  void WriteReplyAndDeleteThis(const IPC::ChannelHandle& handle) {
-    ViewHostMsg_OpenChannelToPlugin::WriteReplyParams(reply_msg(),
-                                                      handle, info_);
-    SendReplyAndDeleteThis();
-  }
-
-  const content::ResourceContext& context_;
-  webkit::WebPluginInfo info_;
-};
-
-class OpenChannelToPpapiPluginCallback : public RenderMessageCompletionCallback,
-                                         public PpapiPluginProcessHost::Client {
+class OpenChannelToPpapiPluginCallback
+    : public RenderMessageCompletionCallback,
+      public PpapiPluginProcessHost::PluginClient {
  public:
   OpenChannelToPpapiPluginCallback(RenderMessageFilter* filter,
                                    const content::ResourceContext* context,
@@ -205,7 +132,8 @@ class OpenChannelToPpapiPluginCallback : public RenderMessageCompletionCallback,
   const content::ResourceContext* context_;
 };
 
-class OpenChannelToPpapiBrokerCallback : public PpapiBrokerProcessHost::Client {
+class OpenChannelToPpapiBrokerCallback
+    : public PpapiPluginProcessHost::BrokerClient {
  public:
   OpenChannelToPpapiBrokerCallback(RenderMessageFilter* filter,
                                    int routing_id,
@@ -238,56 +166,89 @@ class OpenChannelToPpapiBrokerCallback : public PpapiBrokerProcessHost::Client {
   int request_id_;
 };
 
-// Class to assist with clearing out the cache when we want to preserve
-// the sslhostinfo entries.  It's not very efficient, but its just for debug.
-class DoomEntriesHelper {
+}  // namespace
+
+class RenderMessageFilter::OpenChannelToNpapiPluginCallback
+    : public RenderMessageCompletionCallback,
+      public PluginProcessHost::Client {
  public:
-  explicit DoomEntriesHelper(disk_cache::Backend* backend)
-      : backend_(backend),
-        entry_(NULL),
-        iter_(NULL),
-        ALLOW_THIS_IN_INITIALIZER_LIST(callback_(this,
-            &DoomEntriesHelper::CacheCallback)),
-        user_callback_(NULL) {
+  OpenChannelToNpapiPluginCallback(RenderMessageFilter* filter,
+                                   const content::ResourceContext& context,
+                                   IPC::Message* reply_msg)
+      : RenderMessageCompletionCallback(filter, reply_msg),
+        context_(context),
+        host_(NULL),
+        sent_plugin_channel_request_(false) {
   }
 
-  void ClearCache(ClearCacheCompletion* callback) {
-    user_callback_ = callback;
-    return CacheCallback(net::OK);  // Start clearing the cache.
+  virtual int ID() OVERRIDE {
+    return filter()->render_process_id();
+  }
+
+  virtual const content::ResourceContext& GetResourceContext() OVERRIDE {
+    return context_;
+  }
+
+  virtual bool OffTheRecord() OVERRIDE {
+    if (filter()->OffTheRecord())
+      return true;
+    if (content::GetContentClient()->browser()->AllowSaveLocalState(context_))
+      return false;
+
+    // For now, only disallow storing data for Flash <http://crbug.com/97319>.
+    for (size_t i = 0; i < info_.mime_types.size(); ++i) {
+      if (info_.mime_types[i].mime_type == kFlashPluginSwfMimeType)
+        return true;
+    }
+    return false;
+  }
+
+  virtual void SetPluginInfo(const webkit::WebPluginInfo& info) OVERRIDE {
+    info_ = info;
+  }
+
+  virtual void OnFoundPluginProcessHost(PluginProcessHost* host) OVERRIDE {
+    DCHECK(host);
+    host_ = host;
+  }
+
+  virtual void OnSentPluginChannelRequest() OVERRIDE {
+    sent_plugin_channel_request_ = true;
+  }
+
+  virtual void OnChannelOpened(const IPC::ChannelHandle& handle) OVERRIDE {
+    WriteReplyAndDeleteThis(handle);
+  }
+
+  virtual void OnError() OVERRIDE {
+    WriteReplyAndDeleteThis(IPC::ChannelHandle());
+  }
+
+  PluginProcessHost* host() const {
+    return host_;
+  }
+
+  bool sent_plugin_channel_request() const {
+    return sent_plugin_channel_request_;
+  }
+
+  void Cancel() {
+    delete this;
   }
 
  private:
-  void CacheCallback(int result) {
-    do {
-      if (result != net::OK) {
-        user_callback_->RunWithParams(Tuple1<int>(result));
-        delete this;
-        return;
-      }
-
-      if (entry_) {
-        // Doom all entries except those with snapstart information.
-        std::string key = entry_->GetKey();
-        if (key.find("sslhostinfo:") != 0) {
-          entry_->Doom();
-          backend_->EndEnumeration(&iter_);
-          iter_ = NULL;  // We invalidated our iterator - start from the top!
-        }
-        entry_->Close();
-        entry_ = NULL;
-      }
-      result = backend_->OpenNextEntry(&iter_, &entry_, &callback_);
-    } while (result != net::ERR_IO_PENDING);
+  void WriteReplyAndDeleteThis(const IPC::ChannelHandle& handle) {
+    ViewHostMsg_OpenChannelToPlugin::WriteReplyParams(reply_msg(),
+                                                      handle, info_);
+    filter()->OnCompletedOpenChannelToNpapiPlugin(this);
+    SendReplyAndDeleteThis();
   }
 
-  disk_cache::Backend* backend_;
-  disk_cache::Entry* entry_;
-  void* iter_;
-  net::CompletionCallbackImpl<DoomEntriesHelper> callback_;
-  ClearCacheCompletion* user_callback_;
+  const content::ResourceContext& context_;
+  webkit::WebPluginInfo info_;
+  PluginProcessHost* host_;
+  bool sent_plugin_channel_request_;
 };
-
-}  // namespace
 
 RenderMessageFilter::RenderMessageFilter(
     int render_process_id,
@@ -313,22 +274,33 @@ RenderMessageFilter::RenderMessageFilter(
 RenderMessageFilter::~RenderMessageFilter() {
   // This function should be called on the IO thread.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK(plugin_host_clients_.empty());
 }
 
-void RenderMessageFilter::OverrideThreadForMessage(const IPC::Message& message,
-                                                   BrowserThread::ID* thread) {
-  switch (message.type()) {
-    // Can't load plugins on IO thread.
-    case ViewHostMsg_GetPlugins::ID:
-    // The PluginService::GetPluginInfo may need to load the plugins.  Don't do
-    // it on the IO thread.
-    case ViewHostMsg_GetPluginInfo::ID:
-      *thread = BrowserThread::FILE;
-      break;
-    default:
-      break;
+void RenderMessageFilter::OnChannelClosing() {
+  BrowserMessageFilter::OnChannelClosing();
+  for (std::set<OpenChannelToNpapiPluginCallback*>::iterator it =
+       plugin_host_clients_.begin(); it != plugin_host_clients_.end(); ++it) {
+    OpenChannelToNpapiPluginCallback* client = *it;
+    if (client->host()) {
+      if (client->sent_plugin_channel_request()) {
+        client->host()->CancelSentRequest(client);
+      } else {
+        client->host()->CancelPendingRequest(client);
+      }
+    } else {
+      plugin_service_->CancelOpenChannelToNpapiPlugin(client);
+    }
+    client->Cancel();
   }
+  plugin_host_clients_.clear();
 }
+
+#if defined (OS_WIN)
+void RenderMessageFilter::OnChannelError() {
+  ChildProcessHost::ReleaseCachedFonts(render_process_id_);
+}
+#endif
 
 bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message,
                                             bool* message_was_ok) {
@@ -343,7 +315,9 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message,
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetRootWindowRect, OnGetRootWindowRect)
 
     // This hack is Windows-specific.
-    IPC_MESSAGE_HANDLER(ViewHostMsg_PreCacheFont, OnPreCacheFont)
+    IPC_MESSAGE_HANDLER(ChildProcessHostMsg_PreCacheFont, OnPreCacheFont)
+    IPC_MESSAGE_HANDLER(ChildProcessHostMsg_ReleaseCachedFonts,
+                        OnReleaseCachedFonts)
 #endif
 
     IPC_MESSAGE_HANDLER(ViewHostMsg_GenerateRoutingID, OnGenerateRoutingID)
@@ -359,7 +333,7 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message,
 #if defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(ViewHostMsg_LoadFont, OnLoadFont)
 #endif
-    IPC_MESSAGE_HANDLER(ViewHostMsg_GetPlugins, OnGetPlugins)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetPlugins, OnGetPlugins)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetPluginInfo, OnGetPluginInfo)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DownloadUrl, OnDownloadUrl)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_OpenChannelToPlugin,
@@ -372,21 +346,14 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message,
         render_widget_helper_->DidReceiveUpdateMsg(message))
     IPC_MESSAGE_HANDLER(DesktopNotificationHostMsg_CheckPermission,
                         OnCheckNotificationPermission)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_AllocateSharedMemoryBuffer,
-                        OnAllocateSharedMemoryBuffer)
+    IPC_MESSAGE_HANDLER(ChildProcessHostMsg_SyncAllocateSharedMemory,
+                        OnAllocateSharedMemory)
 #if defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(ViewHostMsg_AllocTransportDIB, OnAllocTransportDIB)
     IPC_MESSAGE_HANDLER(ViewHostMsg_FreeTransportDIB, OnFreeTransportDIB)
 #endif
-    IPC_MESSAGE_HANDLER(ViewHostMsg_CloseCurrentConnections,
-                        OnCloseCurrentConnections)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_SetCacheMode, OnSetCacheMode)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_ClearCache, OnClearCache)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_ClearHostResolverCache,
-                        OnClearHostResolverCache)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidGenerateCacheableMetadata,
                         OnCacheableMetadataAvailable)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_EnableSpdy, OnEnableSpdy)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_Keygen, OnKeygen)
     IPC_MESSAGE_HANDLER(ViewHostMsg_AsyncOpenFile, OnAsyncOpenFile)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetHardwareSampleRate,
@@ -529,13 +496,17 @@ void RenderMessageFilter::OnLoadFont(const FontDescriptor& font,
 
 #if defined(OS_WIN)  // This hack is Windows-specific.
 void RenderMessageFilter::OnPreCacheFont(const LOGFONT& font) {
-  ChildProcessHost::PreCacheFont(font);
+  ChildProcessHost::PreCacheFont(font, render_process_id_);
+}
+
+void RenderMessageFilter::OnReleaseCachedFonts() {
+  ChildProcessHost::ReleaseCachedFonts(render_process_id_);
 }
 #endif  // OS_WIN
 
 void RenderMessageFilter::OnGetPlugins(
     bool refresh,
-    std::vector<webkit::WebPluginInfo>* plugins) {
+    IPC::Message* reply_msg) {
   // Don't refresh if the specified threshold has not been passed.  Note that
   // this check is performed before off-loading to the file thread.  The reason
   // we do this is that some pages tend to request that the list of plugins be
@@ -548,13 +519,39 @@ void RenderMessageFilter::OnGetPlugins(
     const base::TimeTicks now = base::TimeTicks::Now();
     if (now - last_plugin_refresh_time_ >= threshold) {
       // Only refresh if the threshold hasn't been exceeded yet.
-      webkit::npapi::PluginList::Singleton()->RefreshPlugins();
+      PluginService::GetInstance()->RefreshPluginList();
       last_plugin_refresh_time_ = now;
     }
   }
 
-  PluginService::GetInstance()->GetPlugins(resource_context_,
-                                           plugins);
+  PluginService::GetInstance()->GetPlugins(
+      base::Bind(&RenderMessageFilter::GetPluginsCallback, this, reply_msg));
+}
+
+void RenderMessageFilter::GetPluginsCallback(
+    IPC::Message* reply_msg,
+    const std::vector<webkit::WebPluginInfo>& all_plugins) {
+  // Filter the plugin list.
+  content::PluginServiceFilter* filter = PluginService::GetInstance()->filter();
+  std::vector<webkit::WebPluginInfo> plugins;
+
+  int child_process_id = -1;
+  int routing_id = MSG_ROUTING_NONE;
+  for (size_t i = 0; i < all_plugins.size(); ++i) {
+    // Copy because the filter can mutate.
+    webkit::WebPluginInfo plugin(all_plugins[i]);
+    if (!filter || filter->ShouldUsePlugin(child_process_id,
+                                           routing_id,
+                                           &resource_context_,
+                                           GURL(),
+                                           GURL(),
+                                           &plugin)) {
+      plugins.push_back(plugin);
+    }
+  }
+
+  ViewHostMsg_GetPlugins::WriteReplyParams(reply_msg, plugins);
+  Send(reply_msg);
 }
 
 void RenderMessageFilter::OnGetPluginInfo(
@@ -577,12 +574,13 @@ void RenderMessageFilter::OnOpenChannelToPlugin(int routing_id,
                                                 const GURL& policy_url,
                                                 const std::string& mime_type,
                                                 IPC::Message* reply_msg) {
+  OpenChannelToNpapiPluginCallback* client =
+      new OpenChannelToNpapiPluginCallback(this, resource_context_, reply_msg);
+  DCHECK(!ContainsKey(plugin_host_clients_, client));
+  plugin_host_clients_.insert(client);
   plugin_service_->OpenChannelToNpapiPlugin(
       render_process_id_, routing_id,
-      url, policy_url, mime_type,
-      new OpenChannelToNpapiPluginCallback(this,
-                                           resource_context_,
-                                           reply_msg));
+      url, policy_url, mime_type, client);
 }
 
 void RenderMessageFilter::OnOpenChannelToPepperPlugin(
@@ -617,13 +615,17 @@ void RenderMessageFilter::OnDownloadUrl(const IPC::Message& message,
   bool prompt_for_save_location = false;
   DownloadSaveInfo save_info;
   save_info.suggested_name = suggested_name;
-  resource_dispatcher_host_->BeginDownload(url,
-                                           referrer,
-                                           save_info,
-                                           prompt_for_save_location,
-                                           render_process_id_,
-                                           message.routing_id(),
-                                           resource_context_);
+  net::URLRequest* request = new net::URLRequest(
+      url, resource_dispatcher_host_);
+  request->set_referrer(referrer.spec());
+  resource_dispatcher_host_->BeginDownload(
+      request,
+      save_info,
+      prompt_for_save_location,
+      DownloadResourceHandler::OnStartedCallback(),
+      render_process_id_,
+      message.routing_id(),
+      resource_context_);
   download_stats::RecordDownloadCount(
       download_stats::INITIATED_BY_RENDERER_COUNT);
 }
@@ -634,16 +636,11 @@ void RenderMessageFilter::OnCheckNotificationPermission(
       CheckDesktopNotificationPermission(source_url, resource_context_);
 }
 
-void RenderMessageFilter::OnAllocateSharedMemoryBuffer(
+void RenderMessageFilter::OnAllocateSharedMemory(
     uint32 buffer_size,
     base::SharedMemoryHandle* handle) {
-  base::SharedMemory shared_buf;
-  if (!shared_buf.CreateAndMapAnonymous(buffer_size)) {
-    *handle = base::SharedMemory::NULLHandle();
-    NOTREACHED() << "Cannot map shared memory buffer";
-    return;
-  }
-  shared_buf.GiveToProcess(peer_handle(), handle);
+  ChildProcessHost::OnAllocateSharedMemory(
+      buffer_size, peer_handle(), handle);
 }
 
 net::URLRequestContext* RenderMessageFilter::GetRequestContextForURL(
@@ -671,85 +668,6 @@ void RenderMessageFilter::OnFreeTransportDIB(
 }
 #endif
 
-bool RenderMessageFilter::CheckBenchmarkingEnabled() const {
-  static bool checked = false;
-  static bool result = false;
-  if (!checked) {
-    const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-    result = command_line.HasSwitch(switches::kEnableBenchmarking);
-    checked = true;
-  }
-  return result;
-}
-
-void RenderMessageFilter::OnCloseCurrentConnections() {
-  // This function is disabled unless the user has enabled
-  // benchmarking extensions.
-  if (!CheckBenchmarkingEnabled())
-    return;
-  request_context_->GetURLRequestContext()->
-      http_transaction_factory()->GetCache()->CloseAllConnections();
-}
-
-void RenderMessageFilter::OnSetCacheMode(bool enabled) {
-  // This function is disabled unless the user has enabled
-  // benchmarking extensions.
-  if (!CheckBenchmarkingEnabled())
-    return;
-
-  net::HttpCache::Mode mode = enabled ?
-      net::HttpCache::NORMAL : net::HttpCache::DISABLE;
-  net::HttpCache* http_cache = request_context_->GetURLRequestContext()->
-      http_transaction_factory()->GetCache();
-  http_cache->set_mode(mode);
-}
-
-void RenderMessageFilter::OnClearCache(bool preserve_ssl_host_info,
-                                       IPC::Message* reply_msg) {
-  // This function is disabled unless the user has enabled
-  // benchmarking extensions.
-  int rv = -1;
-  if (CheckBenchmarkingEnabled()) {
-    disk_cache::Backend* backend = request_context_->GetURLRequestContext()->
-        http_transaction_factory()->GetCache()->GetCurrentBackend();
-    if (backend) {
-      ClearCacheCompletion* callback =
-          new ClearCacheCompletion(this, reply_msg);
-      if (preserve_ssl_host_info) {
-        DoomEntriesHelper* helper = new DoomEntriesHelper(backend);
-        helper->ClearCache(callback);  // Will self clean.
-        return;
-      } else {
-        rv = backend->DoomAllEntries(callback);
-        if (rv == net::ERR_IO_PENDING) {
-          // The callback will send the reply.
-          return;
-        }
-        // Completed synchronously, no need for the callback.
-        delete callback;
-      }
-    }
-  }
-  ViewHostMsg_ClearCache::WriteReplyParams(reply_msg, rv);
-  Send(reply_msg);
-}
-
-void RenderMessageFilter::OnClearHostResolverCache(int* result) {
-  // This function is disabled unless the user has enabled
-  // benchmarking extensions.
-  *result = -1;
-  DCHECK(CheckBenchmarkingEnabled());
-  net::HostResolverImpl* host_resolver_impl =
-      request_context_->GetURLRequestContext()->
-      host_resolver()->GetAsHostResolverImpl();
-  if (host_resolver_impl) {
-    net::HostCache* cache = host_resolver_impl->cache();
-    DCHECK(cache);
-    cache->clear();
-    *result = 0;
-  }
-}
-
 bool RenderMessageFilter::CheckPreparsedJsCachingEnabled() const {
   static bool checked = false;
   static bool result = false;
@@ -776,16 +694,6 @@ void RenderMessageFilter::OnCacheableMetadataAvailable(
   memcpy(buf->data(), &data.front(), data.size());
   cache->WriteMetadata(
       url, base::Time::FromDoubleT(expected_response_time), buf, data.size());
-}
-
-// TODO(lzheng): This only enables spdy over ssl. Enable spdy for http
-// when needed.
-void RenderMessageFilter::OnEnableSpdy(bool enable) {
-  if (enable) {
-    net::HttpNetworkLayer::EnableSpdy("npn,force-alt-protocols");
-  } else {
-    net::HttpNetworkLayer::EnableSpdy("npn-http");
-  }
 }
 
 void RenderMessageFilter::OnKeygen(uint32 key_size_index,
@@ -902,9 +810,10 @@ void RenderMessageFilter::CheckPolicyForCookies(
           url, first_party_for_cookies, cookie_list, resource_context_,
           render_process_id_, reply_msg->routing_id())) {
     // Gets the cookies from cookie store if allowed.
-    context->cookie_store()->GetCookiesAsync(
-        url, base::Bind(&RenderMessageFilter::SendGetCookiesResponse,
-                        this, reply_msg));
+    context->cookie_store()->GetCookiesWithOptionsAsync(
+        url, net::CookieOptions(),
+        base::Bind(&RenderMessageFilter::SendGetCookiesResponse,
+                   this, reply_msg));
   } else {
     SendGetCookiesResponse(reply_msg, std::string());
   }
@@ -924,4 +833,11 @@ void RenderMessageFilter::SendGetRawCookiesResponse(
     cookies.push_back(webkit_glue::WebCookie(cookie_list[i]));
   ViewHostMsg_GetRawCookies::WriteReplyParams(reply_msg, cookies);
   Send(reply_msg);
+}
+
+void RenderMessageFilter::OnCompletedOpenChannelToNpapiPlugin(
+    OpenChannelToNpapiPluginCallback* client) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK(ContainsKey(plugin_host_clients_, client));
+  plugin_host_clients_.erase(client);
 }

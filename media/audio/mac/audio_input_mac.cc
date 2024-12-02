@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -70,11 +70,17 @@ void PCMQueueInAudioInputStream::Start(AudioInputCallback* callback) {
   OSStatus err = AudioQueueStart(audio_queue_, NULL);
   if (err != noErr)
     HandleError(err);
+  else
+    manager_->IncreaseActiveInputStreamCount();
 }
 
 void PCMQueueInAudioInputStream::Stop() {
   if (!audio_queue_)
     return;
+  // Stop is always called before Close. In case of error, this will be
+  // also called when closing the input controller.
+  manager_->DecreaseActiveInputStreamCount();
+
   // We request a synchronous stop, so the next call can take some time. In
   // the windows implementation we block here as well.
   OSStatus err = AudioQueueStop(audio_queue_, true);
@@ -159,6 +165,7 @@ void PCMQueueInAudioInputStream::HandleInputBuffer(
   if (audio_buffer->mAudioDataByteSize)
     callback_->OnData(this,
                       reinterpret_cast<const uint8*>(audio_buffer->mAudioData),
+                      audio_buffer->mAudioDataByteSize,
                       audio_buffer->mAudioDataByteSize);
   // Recycle the buffer.
   OSStatus err = QueueNextBuffer(audio_buffer);

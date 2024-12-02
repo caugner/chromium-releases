@@ -6,8 +6,8 @@
 
 #include "base/file_path.h"
 #include "base/command_line.h"
-#include "content/common/content_switches.h"
 #include "content/browser/browser_thread.h"
+#include "content/public/common/content_switches.h"
 #include "webkit/quota/quota_manager.h"
 
 scoped_refptr<fileapi::FileSystemContext> CreateFileSystemContext(
@@ -23,7 +23,5 @@ scoped_refptr<fileapi::FileSystemContext> CreateFileSystemContext(
       is_incognito,
       CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kAllowFileAccessFromFiles),
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kUnlimitedQuotaForFiles),
       NULL);
 }

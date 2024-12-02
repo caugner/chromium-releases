@@ -33,6 +33,7 @@ import logging
 import optparse
 import os
 import pickle
+import pprint
 import shutil
 import signal
 import socket
@@ -135,6 +136,10 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     self.Initialize(pyautolib.FilePath(self.BrowserPath()))
     unittest.TestCase.__init__(self, methodName)
 
+    # Give all pyauto tests easy access to pprint.PrettyPrinter functions.
+    self.pprint = pprint.pprint
+    self.pformat = pprint.pformat
+
     # Set up remote proxies, if they were requested.
     self.remotes = []
     self.remote = None
@@ -235,6 +240,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         '--skip-oauth-login',
         # Enables injection of test content script for webui login automation
         '--auth-ext-path=/usr/share/chromeos-assets/gaia_auth',
+        # Enable automation provider and chromeos net logs
+        '--vmodule=*/browser/automation/*=2,*/chromeos/net/*=2',
       ]
     else:
       return []
@@ -313,12 +320,21 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     """
     consent_file = '/home/chronos/Consent To Send Stats'
     def _HasValidConsentFile():
-      return os.path.isfile(consent_file) and len(open(consent_file).read())
+      if not os.path.isfile(consent_file):
+        return False
+      stat = os.stat(consent_file)
+      return (len(open(consent_file).read()) and
+              (1000, 1000) == (stat.st_uid, stat.st_gid))
     if not _HasValidConsentFile():
       client_id = hashlib.md5('abcdefgh').hexdigest()
-      open(consent_file, 'w').write(client_id)
-      # This file must be owned by cronos:cronos!
-      os.chown(consent_file, 1000, 1000);
+      # Consent file creation and chown to chronos needs to be atomic
+      # to avoid races with the session_manager.  crosbug.com/18413
+      # Therefore, create a temp file, chown, then rename it as consent file.
+      temp_file = consent_file + '.tmp'
+      open(temp_file, 'w').write(client_id)
+      # This file must be owned by chronos:chronos!
+      os.chown(temp_file, 1000, 1000);
+      shutil.move(temp_file, consent_file)
     assert _HasValidConsentFile(), 'Could not create %s' % consent_file
 
   @staticmethod
@@ -682,6 +698,56 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       if self._ui_test.action_timeout_ms() != self._saved_timeout:
         self._ui_test.set_action_timeout_ms(self._saved_timeout)
 
+  class JavascriptExecutor(object):
+    """Abstract base class for JavaScript injection.
+
+    Derived classes should override Execute method."""
+    def Execute(self, script):
+      pass
+
+  class JavascriptExecutorInTab(JavascriptExecutor):
+    """Wrapper for injecting JavaScript in a tab."""
+    def __init__(self, ui_test, tab_index=0, windex=0, frame_xpath=''):
+      """Initialize.
+
+        Refer to ExecuteJavascript() for the complete argument list
+        description.
+
+      Args:
+        ui_test: a PyUITest object
+      """
+      self._ui_test = ui_test
+      self.windex = windex
+      self.tab_index = tab_index
+      self.frame_xpath = frame_xpath
+
+    def Execute(self, script):
+      """Execute script in the tab."""
+      return self._ui_test.ExecuteJavascript(script,
+                                             self.tab_index,
+                                             self.windex,
+                                             self.frame_xpath)
+
+  class JavascriptExecutorInRenderView(JavascriptExecutor):
+    """Wrapper for injecting JavaScript in an extension view."""
+    def __init__(self, ui_test, view, frame_xpath=''):
+      """Initialize.
+
+        Refer to ExecuteJavascriptInRenderView() for the complete argument list
+        description.
+
+      Args:
+        ui_test: a PyUITest object
+      """
+      self._ui_test = ui_test
+      self.view = view
+      self.frame_xpath = frame_xpath
+
+    def Execute(self, script):
+      """Execute script in the render view."""
+      return self._ui_test.ExecuteJavascriptInRenderView(script,
+                                                         self.view,
+                                                         self.frame_xpath)
 
   def _GetResultFromJSONRequest(self, cmd_dict, windex=0, timeout=-1):
     """Issue call over the JSON automation channel and fetch output.
@@ -1028,7 +1094,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     example: "session.restore_on_startup"
 
     Some preferences are managed, that is, they cannot be changed by the
-    user. It's upto the user to know which ones can be changed. Typically,
+    user. It's up to the user to know which ones can be changed. Typically,
     the options available via Chromium preferences can be changed.
 
     Args:
@@ -1295,6 +1361,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
           u'extension_id': u'dgcoklnmbeljaehamekjpeidmbicddfj',
           u'url': u'chrome-extension://dgcoklnmbeljaehamekjpeidmbicddfj/'
                     'bg.html',
+          u'loaded': True,
           u'view': {
             u'render_process_id': 2,
             u'render_view_id': 1},
@@ -1315,6 +1382,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         u'windows': [ { u'index': 0,
                         u'height': 1134,
                         u'incognito': False,
+                        u'profile_path': u'Default',
                         u'fullscreen': False,
                         u'selected_tab': 0,
                         u'tabs': [ {
@@ -1349,6 +1417,65 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     """
     cmd_dict = {  # Prepare command for the json interface
       'command': 'GetBrowserInfo',
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+
+  def GetProcessInfo(self):
+    """Returns information about browser-related processes that currently exist.
+
+    This will also return information about other currently-running browsers
+    besides just Chrome.
+
+    Returns:
+      A dictionary containing browser-related process information as identified
+      by class MemoryDetails in src/chrome/browser/memory_details.h.  The
+      dictionary contains a single key 'browsers', mapped to a list of
+      dictionaries containing information about each browser process name.
+      Each of those dictionaries contains a key 'processes', mapped to a list
+      of dictionaries containing the specific information for each process
+      with the given process name.
+
+      The memory values given in |committed_mem| and |working_set_mem| are in
+      KBytes.
+
+      Sample:
+      { 'browsers': [ { 'name': 'Chromium',
+                        'process_name': 'chrome',
+                        'processes': [ { 'child_process_type': 'Browser',
+                                         'committed_mem': { 'image': 0,
+                                                            'mapped': 0,
+                                                            'priv': 0},
+                                         'is_diagnostics': False,
+                                         'num_processes': 1,
+                                         'pid': 7770,
+                                         'product_name': '',
+                                         'renderer_type': 'Unknown',
+                                         'titles': [],
+                                         'version': '',
+                                         'working_set_mem': { 'priv': 43672,
+                                                              'shareable': 0,
+                                                              'shared': 59251}},
+                                       { 'child_process_type': 'Tab',
+                                         'committed_mem': { 'image': 0,
+                                                            'mapped': 0,
+                                                            'priv': 0},
+                                         'is_diagnostics': False,
+                                         'num_processes': 1,
+                                         'pid': 7791,
+                                         'product_name': '',
+                                         'renderer_type': 'Tab',
+                                         'titles': ['about:blank'],
+                                         'version': '',
+                                         'working_set_mem': { 'priv': 16768,
+                                                              'shareable': 0,
+                                                              'shared': 26256}},
+                                       ...<more processes>...]}]}
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {  # Prepare command for the json interface.
+      'command': 'GetProcessInfo',
     }
     return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
@@ -1594,6 +1721,67 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
+  def WaitUntilExtensionViewLoaded(self, name=None, extension_id=None,
+                                   url=None, view_type=None):
+    """Wait for a loaded extension view matching all the given properties.
+
+    If no matching extension views are found, wait for one to be loaded.
+    If there are more than one matching extension view, return one at random.
+    Uses WaitUntil so timeout is capped by automation timeout.
+    Refer to extension_view dictionary returned in GetBrowserInfo()
+    for sample input/output values.
+
+    Args:
+      name: (optional) Name of the extension.
+      extension_id: (optional) ID of the extension.
+      url: (optional) URL of the extension view.
+      view_type: (optional) Type of the extension view.
+
+    Returns:
+      The 'view' property of the extension view.
+      None, if no view loaded.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation returns an error.
+    """
+    def _GetExtensionViewLoaded():
+      extension_views = self.GetBrowserInfo()['extension_views']
+      for extension_view in extension_views:
+        if ((name and name != extension_view['name']) or
+            (extension_id and extension_id != extension_view['extension_id']) or
+            (url and url != extension_view['url']) or
+            (view_type and view_type != extension_view['view_type'])):
+          continue
+        if extension_view['loaded']:
+          return extension_view['view']
+      return False
+
+    if self.WaitUntil(lambda: _GetExtensionViewLoaded()):
+      return _GetExtensionViewLoaded()
+    return None
+
+  def WaitUntilExtensionViewClosed(self, view):
+    """Wait for the given extension view to to be closed.
+
+    Uses WaitUntil so timeout is capped by automation timeout.
+    Refer to extension_view dictionary returned by GetBrowserInfo()
+    for sample input value.
+
+    Args:
+      view: 'view' property of extension view.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation returns an error.
+    """
+    def _IsExtensionViewClosed():
+      extension_views = self.GetBrowserInfo()['extension_views']
+      for extension_view in extension_views:
+        if view == extension_view['view']:
+          return False
+      return True
+
+    return self.WaitUntil(lambda: _IsExtensionViewClosed())
+
   def SelectTranslateOption(self, option, tab_index=0, window_index=0):
     """Selects one of the options in the drop-down menu for the translate bar.
 
@@ -1693,8 +1881,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'NAME_FIRST', 'NAME_MIDDLE', 'NAME_LAST', 'EMAIL_ADDRESS',
       'COMPANY_NAME', 'ADDRESS_HOME_LINE1', 'ADDRESS_HOME_LINE2',
       'ADDRESS_HOME_CITY', 'ADDRESS_HOME_STATE', 'ADDRESS_HOME_ZIP',
-      'ADDRESS_HOME_COUNTRY', 'PHONE_HOME_WHOLE_NUMBER',
-      'PHONE_FAX_WHOLE_NUMBER'
+      'ADDRESS_HOME_COUNTRY', 'PHONE_HOME_WHOLE_NUMBER'
 
       credit_cards: (optional) a list of dictionaries representing each credit
       card to add. Example:
@@ -1982,7 +2169,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       f.close()
       return all_data
     finally:
-      shutil.rmtree(tempdir)
+      shutil.rmtree(tempdir, ignore_errors=True)
 
   def ImportSettings(self, import_from, first_run, import_items):
     """Import the specified import items from the specified browser.
@@ -2298,6 +2485,40 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     return self._GetResultFromJSONRequest(cmd_dict, windex=windex)
 
+  def ExecuteJavascript(self, js, tab_index=0, windex=0, frame_xpath=''):
+    """Executes a script in the specified frame of a tab.
+
+    By default, execute the script in the top frame of the first tab in the
+    first window. The invoked javascript function must send a result back via
+    the domAutomationController.send function, or this function will never
+    return.
+
+    Args:
+      js: script to be executed.
+      windex: index of the window.
+      tab_index: index of the tab.
+      frame_xpath: XPath of the frame to execute the script.  Default is no
+      frame. Example: '//frames[1]'.
+
+    Returns:
+      a value that was sent back via the domAutomationController.send method
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'ExecuteJavascript',
+      'javascript' : js,
+      'windex' : windex,
+      'tab_index' : tab_index,
+      'frame_xpath' : frame_xpath,
+    }
+    result = self._GetResultFromJSONRequest(cmd_dict)['result']
+    # Wrap result in an array before deserializing because valid JSON has an
+    # array or an object as the root.
+    json_string = '[' + result + ']'
+    return json.loads(json_string)[0]
+
   def ExecuteJavascriptInRenderView(self, js, view, frame_xpath=''):
     """Executes a script in the specified frame of an render view.
 
@@ -2305,9 +2526,9 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     domAutomationController.send function, or this function will never return.
 
     Args:
-      js: script to be executed
+      js: script to be executed.
       view: A dictionary representing a unique id for the render view as
-      returned for example by
+      returned for example by.
       self.GetBrowserInfo()['extension_views'][]['view'].
       Example:
       { 'render_process_id': 1,
@@ -2329,11 +2550,30 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'view' : view,
       'frame_xpath' : frame_xpath,
     }
-    result = self._GetResultFromJSONRequest(cmd_dict)['result']
+    result = self._GetResultFromJSONRequest(cmd_dict, windex=-1)['result']
     # Wrap result in an array before deserializing because valid JSON has an
     # array or an object as the root.
     json_string = '[' + result + ']'
     return json.loads(json_string)[0]
+
+  def GetDOMValue(self, expr, tab_index=0, windex=0, frame_xpath=''):
+    """Executes a Javascript expression and returns the value.
+
+    This is a wrapper for ExecuteJavascript, eliminating the need to
+    explicitly call domAutomationController.send function.
+
+    Args:
+      expr: expression value to be returned.
+      tab_index: index of the tab.
+      windex: index of the window.
+      frame_xpath: XPath of the frame to execute the script.  Default is no
+      frame. Example: '//frames[1]'.
+
+    Returns:
+      a string that was sent back via the domAutomationController.send method.
+    """
+    js = 'window.domAutomationController.send(%s);' % expr
+    return self.ExecuteJavascript(js, tab_index, windex, frame_xpath)
 
   def CallJavascriptFunc(self, function, args=[], tab_index=0, windex=0):
     """Executes a script which calls a given javascript function.
@@ -2344,11 +2584,11 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     Defaults to first tab in first window.
 
     Args:
-      function: name of the function
+      function: name of the function.
       args: list of all the arguments to pass into the called function. These
             should be able to be converted to a string using the |str| function.
-      tab_index: index of the tab within the given window
-      windex: index of the window
+      tab_index: index of the tab within the given window.
+      windex: index of the window.
 
     Returns:
       a string that was sent back via the domAutomationController.send method
@@ -2356,7 +2596,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     converted_args = map(lambda arg: json.dumps(arg), args)
     js = '%s(%s)' % (function, ', '.join(converted_args))
     logging.debug('Executing javascript: %s', js)
-    return self.ExecuteJavascript(js, windex, tab_index)
+    return self.ExecuteJavascript(js, tab_index, windex)
 
   def JavascriptFocusElementById(self, field_id, tab_index=0, windex=0):
     """Uses Javascript to focus an element with the given ID in a webpage.
@@ -2379,7 +2619,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
           window.domAutomationController.send("done");
         }
     """ % field_id
-    return self.ExecuteJavascript(focus_field_js, windex, tab_index) == 'done'
+    return self.ExecuteJavascript(focus_field_js, tab_index, windex) == 'done'
 
   def SignInToSync(self, username, password):
     """Signs in to sync using the given username and password.
@@ -2969,6 +3209,89 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     self._GetResultFromJSONRequest(cmd_dict)
 
+  def OpenNewBrowserWindowWithNewProfile(self):
+    """Creates a new multi-profiles user, and then opens and shows a new
+    tabbed browser window with the new profile.
+
+    This is equivalent to 'Add new user' action with multi-profiles.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'OpenNewBrowserWindowWithNewProfile'
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+
+  def GetMultiProfileInfo(self):
+    """Fetch info about all multi-profile users.
+
+    Returns:
+      A dictionary.
+      Sample:
+      {
+        'enabled': True,
+        'profiles': [{'name': 'First user',
+                      'path': '/tmp/.org.chromium.Chromium.Tyx17X/Default'},
+                     {'name': 'User 1',
+                      'path': '/tmp/.org.chromium.Chromium.Tyx17X/profile_1'}],
+      }
+
+      Profiles will be listed in the same order as visible in preferences.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'GetMultiProfileInfo'
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+
+  def SetPolicies(self, managed_platform=None, recommended_platform=None,
+                  managed_cloud=None, recommended_cloud=None):
+    """Sets the policies on the browser. Always fails on official builds.
+
+    Args:
+      managed_platform: a dictionary with the policy values for the managed
+                        platform provider.
+      recommended_platform: a dictionary with the policy values for the
+                            recommended platform provider.
+      managed_cloud: a dictionary with the policy values for the managed
+                     cloud provider.
+      recommended_cloud: a dictionary with the policy values for the recommended
+                         cloud provider.
+
+    Leaving an argument to None will restore the default behavior for that
+    provider.
+    """
+    assert not self.GetBrowserInfo()['properties']['is_official']
+    cmd_dict = {
+        'command': 'SetPolicies',
+        'managed_cloud': managed_cloud,
+        'managed_platform': managed_platform,
+        'recommended_cloud': recommended_cloud,
+        'recommended_platform': recommended_platform
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)
+
+  def GetPolicyDefinitionList(self):
+    """Gets a dictionary of existing policies mapped to their value types.
+
+    SAMPLE OUTPUT:
+    {
+      'ShowHomeButton': 'bool',
+      'DefaultSearchProviderSearchURL': 'str',
+      ...
+    }
+
+    Returns:
+      A dictionary mapping policy names to their value types.
+    """
+    cmd_dict = {
+        'command': 'GetPolicyDefinitionList'
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)
+
   ## ChromeOS section
 
   def GetLoginInfo(self):
@@ -3417,6 +3740,43 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     self._GetResultFromJSONRequest(cmd_dict, windex=-1, timeout=50000)
 
+  def ConnectToCellularNetwork(self):
+    """Connects to the available cellular network.
+
+    Blocks until connection succeeds or fails.
+
+    Returns:
+      An error string if an error occured.
+      None otherwise.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    # Every device should only have one cellular network present, so we can
+    # scan for it.
+    cellular_networks = self.NetworkScan().get('cellular_networks', {}).keys()
+    self.assertTrue(cellular_networks, 'Could not find cellular service.')
+    service_path = cellular_networks[0]
+
+    cmd_dict = {
+        'command': 'ConnectToCellularNetwork',
+        'service_path': service_path,
+    }
+    result = self._GetResultFromJSONRequest(cmd_dict, windex=-1, timeout=50000)
+    return result.get('error_string')
+
+  def DisconnectFromCellularNetwork(self):
+    """Disconnect from the connected cellular network.
+
+    Blocks until disconnect is complete.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'DisconnectFromCellularNetwork',
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def ConnectToWifiNetwork(self, service_path, password=''):
     """Connect to a wifi network by its service path.
@@ -3707,8 +4067,12 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     equivalent to pressing Ctrl-Alt-e to enroll the device from the login
     screen.
 
+    Returns:
+      An error string if the enrollment fails.
+      None otherwise.
+
     Raises:
-      pyauto_errors.JSONInterfaceError if the enrollment fails.
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
     cmd_dict = {
         'command': 'EnrollEnterpriseDevice',
@@ -3716,7 +4080,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         'password': password,
     }
     time.sleep(5) # TODO(craigdh): Block until Install Attributes is ready.
-    return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+    result = self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+    return result.get('error_string')
 
   def GetUpdateInfo(self):
     """Gets the status of the ChromeOS updater.
@@ -3847,7 +4212,7 @@ class _RemoteProxy():
   Example usage:
     class MyTest(pyauto.PyUITest):
       def testRemoteExample(self):
-        remote = pyauto._RemoteProxy('127.0.0.1')
+        remote = pyauto._RemoteProxy(('127.0.0.1', 7410))
         remote.NavigateToURL('http://www.google.com')
         title = remote.GetActiveTabTitle()
         self.assertEqual(title, 'Google')
@@ -3855,12 +4220,20 @@ class _RemoteProxy():
   class RemoteException(Exception):
     pass
 
-  def __init__(self, address, port=7410):
-    self.RemoteConnect(address, port)
+  def __init__(self, host):
+    self.RemoteConnect(host)
 
-  def RemoteConnect(self, address, port):
-    self._socket = socket.socket()
-    self._socket.connect((address, port))
+  def RemoteConnect(self, host):
+    begin = time.time()
+    while time.time() - begin < 50:
+      self._socket = socket.socket()
+      if not self._socket.connect_ex(host):
+        break
+      time.sleep(0.25)
+    else:
+      # Make one last attempt, but raise a socket error on failure.
+      self._socket = socket.socket()
+      self._socket.connect(host)
 
   def RemoteDisconnect(self):
     if self._socket:
@@ -3975,7 +4348,25 @@ class PyUITestSuite(pyautolib.PyUITestSuiteBase, unittest.TestSuite):
     assert not _REMOTE_PROXY, 'Already connected to a remote host.'
     _REMOTE_PROXY = []
     for address in addresses:
-      _REMOTE_PROXY.append(_RemoteProxy(address))
+      if address == 'localhost' or address == '127.0.0.1':
+        self._StartLocalRemoteHost()
+      _REMOTE_PROXY.append(_RemoteProxy((address, 7410)))
+
+  def _StartLocalRemoteHost(self):
+    """Start a remote PyAuto instance on the local machine."""
+    # Add the path to our main class to the RemoteHost's
+    # environment, so it can load that class at runtime.
+    import __main__
+    main_path = os.path.dirname(__main__.__file__)
+    env = os.environ
+    if env.get('PYTHONPATH', None):
+      env['PYTHONPATH'] += ':' + main_path
+    else:
+      env['PYTHONPATH'] = main_path
+
+    # Run it!
+    subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__),
+                                                   'remote_host.py')], env=env)
 
 
 class _GTestTextTestResult(unittest._TextTestResult):
@@ -4054,14 +4445,8 @@ class Main(object):
     """Parse command line args."""
     parser = optparse.OptionParser()
     parser.add_option(
-        '-v', '--verbose', action='store_true', default=False,
-        help='Make PyAuto verbose.')
-    parser.add_option(
-        '', '--log-file', type='string', default=None,
-        help='Provide a path to a file to which the logger will log')
-    parser.add_option(
-        '-D', '--wait-for-debugger', action='store_true', default=False,
-        help='Block PyAuto on startup for attaching debugger.')
+        '', '--channel-id', type='string', default='',
+        help='Name of channel id, if using named interface.')
     parser.add_option(
         '', '--chrome-flags', type='string', default='',
         help='Flags passed to Chrome.  This is in addition to the usual flags '
@@ -4069,8 +4454,26 @@ class Main(object):
              'See chrome/common/chrome_switches.cc for the list of flags '
              'chrome understands.')
     parser.add_option(
+        '', '--http-data-dir', type='string',
+        default=os.path.join('chrome', 'test', 'data'),
+        help='Relative path from which http server should serve files.')
+    parser.add_option(
         '', '--list-missing-tests', action='store_true', default=False,
         help='Print a list of tests not included in PYAUTO_TESTS, and exit')
+    parser.add_option(
+        '-L', '--list-tests', action='store_true', default=False,
+        help='List all tests, and exit.')
+    parser.add_option(
+        '', '--log-file', type='string', default=None,
+        help='Provide a path to a file to which the logger will log')
+    parser.add_option(
+        '', '--no-http-server', action='store_true', default=False,
+        help='Do not start an http server to serve files in data dir.')
+    parser.add_option(
+        '', '--remote-host', type='string', default=None,
+        help='Connect to remote hosts for remote automation. If "localhost" '
+            '"127.0.0.1" is specified, a remote host will be launched '
+            'automatically on the local machine.')
     parser.add_option(
         '', '--repeat', type='int', default=1,
         help='Number of times to repeat the tests. Useful to determine '
@@ -4079,21 +4482,11 @@ class Main(object):
         '-S', '--suite', type='string', default='FULL',
         help='Name of the suite to load.  Defaults to "FULL".')
     parser.add_option(
-        '-L', '--list-tests', action='store_true', default=False,
-        help='List all tests, and exit.')
+        '-v', '--verbose', action='store_true', default=False,
+        help='Make PyAuto verbose.')
     parser.add_option(
-        '', '--no-http-server', action='store_true', default=False,
-        help='Do not start an http server to serve files in data dir.')
-    parser.add_option(
-        '', '--remote-host', type='string', default=None,
-        help='Connect to remote hosts for remote automation.')
-    parser.add_option(
-        '', '--http-data-dir', type='string',
-        default=os.path.join('chrome', 'test', 'data'),
-        help='Relative path from which http server should serve files.')
-    parser.add_option(
-        '', '--channel-id', type='string', default='',
-        help='Name of channel id, if using named interface.')
+        '-D', '--wait-for-debugger', action='store_true', default=False,
+        help='Block PyAuto on startup for attaching debugger.')
 
     self._options, self._args = parser.parse_args()
     global _OPTIONS

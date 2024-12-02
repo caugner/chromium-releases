@@ -14,6 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "net/base/completion_callback.h"
+#include "webkit/appcache/appcache_export.h"
 #include "webkit/appcache/appcache_working_set.h"
 
 class GURL;
@@ -29,11 +30,11 @@ class AppCacheService;
 struct AppCacheInfoCollection;
 struct HttpResponseInfoIOBuffer;
 
-class AppCacheStorage {
+class APPCACHE_EXPORT AppCacheStorage {
  public:
   typedef std::map<GURL, int64> UsageMap;
 
-  class Delegate {
+  class APPCACHE_EXPORT Delegate {
    public:
     virtual ~Delegate() {}
 
@@ -65,8 +66,7 @@ class AppCacheStorage {
     virtual void OnMainResponseFound(
         const GURL& url, const AppCacheEntry& entry,
         const GURL& fallback_url, const AppCacheEntry& fallback_entry,
-        int64 cache_id, const GURL& mainfest_url,
-        bool was_blocked_by_policy) {}
+        int64 cache_id, const GURL& mainfest_url) {}
   };
 
   explicit AppCacheStorage(AppCacheService* service);
@@ -251,7 +251,7 @@ class AppCacheStorage {
     scoped_ptr<AppCacheResponseReader> reader_;
     DelegateReferenceVector delegates_;
     scoped_refptr<HttpResponseInfoIOBuffer> info_buffer_;
-    net::CompletionCallbackImpl<ResponseInfoLoadTask> read_callback_;
+    net::OldCompletionCallbackImpl<ResponseInfoLoadTask> read_callback_;
   };
 
   typedef std::map<int64, ResponseInfoLoadTask*> PendingResponseInfoLoads;

@@ -15,6 +15,7 @@
 
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/json/json_value_serializer.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
@@ -30,7 +31,6 @@
 #include "chrome/installer/util/installation_state.h"
 #include "chrome/installer/util/util_constants.h"
 #include "chrome/installer/util/work_item_list.h"
-#include "content/common/json_value_serializer.h"
 
 using base::win::RegKey;
 using installer::ProductState;
@@ -183,6 +183,31 @@ Version* InstallUtil::GetChromeVersion(BrowserDistribution* dist,
   if (result == ERROR_SUCCESS && !version_str.empty()) {
     VLOG(1) << "Existing " << dist->GetApplicationName()
             << " version found " << version_str;
+    ret = Version::GetVersionFromString(WideToASCII(version_str));
+  } else {
+    DCHECK_EQ(ERROR_FILE_NOT_FOUND, result);
+    VLOG(1) << "No existing " << dist->GetApplicationName()
+            << " install found.";
+  }
+
+  return ret;
+}
+
+Version* InstallUtil::GetCriticalUpdateVersion(BrowserDistribution* dist) {
+  DCHECK(dist);
+  RegKey key;
+  LONG result =
+      key.Open(HKEY_CURRENT_USER, dist->GetVersionKey().c_str(), KEY_READ);
+
+  string16 version_str;
+  if (result == ERROR_SUCCESS)
+    result = key.ReadValue(google_update::kRegCriticalUpdateField,
+                           &version_str);
+
+  Version* ret = NULL;
+  if (result == ERROR_SUCCESS && !version_str.empty()) {
+    VLOG(1) << "Critical Update version for " << dist->GetApplicationName()
+            << " found " << version_str;
     ret = Version::GetVersionFromString(WideToASCII(version_str));
   } else {
     DCHECK_EQ(ERROR_FILE_NOT_FOUND, result);

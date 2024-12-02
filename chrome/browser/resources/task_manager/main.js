@@ -13,6 +13,7 @@ cr.addSingletonGetter(TaskManager);
  */
 var DEFAULT_COLUMNS = [
     ['title', 'PAGE_COLUMN', 300, true],
+    ['profileName', 'PROFILE_NAME_COLUMN', 120, false],
     ['physicalMemory', 'PHYSICAL_MEM_COLUMN', 80, true],
     ['sharedMemory', 'SHARED_MEM_COLUMN', 80, false],
     ['privateMemory', 'PRIVATE_MEM_COLUMN', 80, false],
@@ -88,13 +89,13 @@ TaskManager.prototype = {
    * Initializes taskmanager.
    * @public
    */
-  initialize: function (dialogDom, backgroundMode) {
+  initialize: function (dialogDom, opt) {
     if (!dialogDom) {
       console.log('ERROR: dialogDom is not defined.');
       return;
     }
 
-    this.backgroundMode_ = backgroundMode;
+    this.opt_ = opt;
 
     this.initialized_ = true;
     this.enableTaskManager();
@@ -146,6 +147,13 @@ TaskManager.prototype = {
           };
       }();
       dm.setCompareFunction(column_id, compare_func);
+    }
+
+    var ary = this.dialogDom_.querySelectorAll('[visibleif]');
+    for (var i = 0; i < ary.length; i++) {
+      var expr = ary[i].getAttribute('visibleif');
+      if (!eval(expr))
+        ary[i].hidden = true;
     }
 
     this.initTable_();
@@ -236,7 +244,7 @@ TaskManager.prototype = {
     var listItem = new cr.ui.ListItem({label: ''});
 
     listItem.className = 'table-row';
-    if (this.backgroundMode_ && dataItem.isBackgroundResource)
+    if (this.opt_.isBackgroundMode_ && dataItem.isBackgroundResource)
       listItem.className += ' table-background-row';
 
     for (var i = 0; i < cm.size; i++) {
@@ -368,8 +376,12 @@ TaskManager.prototype = {
 var taskmanager = TaskManager.getInstance();
 
 function init() {
-  var backgroundMode = (location.hash == '#bg');
-  taskmanager.initialize(document.body, backgroundMode);
+  var params = parseQueryParams(window.location);
+  var opt = {};
+  opt['isShowTitle'] = params.showtitle;
+  opt['isBackgroundMode'] = params.background;
+  opt['isShowCloseButton'] = params.showclose;
+  taskmanager.initialize(document.body, opt);
 }
 
 function onClose() {

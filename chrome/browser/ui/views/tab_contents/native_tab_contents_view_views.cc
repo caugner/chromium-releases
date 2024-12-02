@@ -8,6 +8,7 @@
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_delegate.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
+#include "views/background.h"
 #include "views/widget/widget.h"
 
 // TODO(beng): HiddenTabHostWindow??
@@ -25,6 +26,33 @@ NativeTabContentsViewViews::~NativeTabContentsViewViews() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// NativeTabContentsViewViews, NativeWidgetViews implementation:
+void NativeTabContentsViewViews::OnBoundsChanged(
+    const gfx::Rect& new_bounds, const gfx::Rect& old_bounds) {
+  // TODO(oshima): Find out if we need to adjust constrained window.
+  delegate_->OnNativeTabContentsViewSized(new_bounds.size());
+  views::NativeWidgetViews::OnBoundsChanged(new_bounds, old_bounds);
+}
+
+bool NativeTabContentsViewViews::OnMouseEvent(const views::MouseEvent& event) {
+  if (!delegate_->IsShowingSadTab()) {
+    switch (event.type()) {
+      case ui::ET_MOUSE_EXITED:
+        delegate_->OnNativeTabContentsViewMouseMove(false);
+        break;
+      case ui::ET_MOUSE_MOVED:
+        delegate_->OnNativeTabContentsViewMouseMove(true);
+        break;
+      default:
+        // TODO(oshima): mouse wheel
+        break;
+    }
+  }
+  // Pass all mouse event to renderer.
+  return views::NativeWidgetViews::OnMouseEvent(event);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // NativeTabContentsViewViews, NativeTabContentsView implementation:
 
 void NativeTabContentsViewViews::InitNativeTabContentsView() {
@@ -32,6 +60,10 @@ void NativeTabContentsViewViews::InitNativeTabContentsView() {
   params.native_widget = this;
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   GetWidget()->Init(params);
+  // Set root view to be white such that the user sees white instead of black
+  // when the RWHV is destroyed as a result of navigating to a new URL.
+  GetWidget()->GetRootView()->set_background(
+      views::Background::CreateSolidBackground(SK_ColorWHITE));
 }
 
 void NativeTabContentsViewViews::Unparent() {
@@ -59,7 +91,7 @@ gfx::NativeWindow NativeTabContentsViewViews::GetTopLevelNativeWindow() const {
   return NULL;
 }
 
-void NativeTabContentsViewViews::SetPageTitle(const std::wstring& title) {
+void NativeTabContentsViewViews::SetPageTitle(const string16& title) {
   SetWindowTitle(title);
 }
 
@@ -88,3 +120,14 @@ void NativeTabContentsViewViews::SetDragCursor(
 views::NativeWidget* NativeTabContentsViewViews::AsNativeWidget() {
   return this;
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// NativeTabContentsView, public:
+#if defined(TOUCH_UI)
+// TODO(oshima): The above implies pure views only
+// static
+NativeTabContentsView* NativeTabContentsView::CreateNativeTabContentsView(
+    internal::NativeTabContentsViewDelegate* delegate) {
+  return new NativeTabContentsViewViews(delegate);
+}
+#endif

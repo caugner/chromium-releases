@@ -12,11 +12,11 @@
 #include "content/browser/renderer_host/render_view_host_observer.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
-#include "content/common/url_constants.h"
+#include "content/public/browser/notification_types.h"
+#include "content/public/common/url_constants.h"
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
 
@@ -83,8 +83,8 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
 
   // Wait for the cross-site transition in the new tab to finish.
   ui_test_utils::WaitForLoadStop(browser()->GetSelectedTabContents());
-  EXPECT_FALSE(browser()->GetSelectedTabContents()->render_manager()->
-                   pending_render_view_host());
+  EXPECT_FALSE(browser()->GetSelectedTabContents()->
+                   render_manager_for_testing()->pending_render_view_host());
 
   // Should have a new SiteInstance.
   scoped_refptr<SiteInstance> noref_blank_site_instance(

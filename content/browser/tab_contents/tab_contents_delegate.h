@@ -11,8 +11,9 @@
 
 #include "base/basictypes.h"
 #include "content/browser/tab_contents/navigation_entry.h"
-#include "content/common/navigation_types.h"
-#include "content/common/page_transition_types.h"
+#include "content/common/content_export.h"
+#include "content/public/browser/navigation_types.h"
+#include "content/public/common/page_transition_types.h"
 #include "ui/gfx/native_widget_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
@@ -31,6 +32,10 @@ namespace history {
 class HistoryAddPageArgs;
 }
 
+namespace webkit_glue {
+struct WebIntentData;
+}
+
 struct ContextMenuParams;
 struct OpenURLParams;
 class DownloadItem;
@@ -44,7 +49,7 @@ class FilePath;
 
 // Objects implement this interface to get notified about changes in the
 // TabContents and to provide necessary functionality.
-class TabContentsDelegate {
+class CONTENT_EXPORT TabContentsDelegate {
  public:
   TabContentsDelegate();
 
@@ -63,7 +68,7 @@ class TabContentsDelegate {
                                       const GURL& url,
                                       const GURL& referrer,
                                       WindowOpenDisposition disposition,
-                                      PageTransition::Type transition);
+                                      content::PageTransition transition);
 
   virtual TabContents* OpenURLFromTab(TabContents* source,
                                       const OpenURLParams& params);
@@ -124,12 +129,6 @@ class TabContentsDelegate {
   // Called to determine if the TabContents is contained in a popup window
   // or a panel window.
   virtual bool IsPopupOrPanel(const TabContents* source) const;
-
-  // Returns true if constrained windows should be focused. Default is true.
-  virtual bool ShouldFocusConstrainedWindow();
-
-  // Invoked prior to the TabContents showing a constrained window.
-  virtual void WillShowConstrainedWindow(TabContents* source);
 
   // Notification that the target URL has changed.
   virtual void UpdateTargetURL(TabContents* source, int32 page_id,
@@ -193,12 +192,6 @@ class TabContentsDelegate {
 
   // Invoked when the page loses mouse capture.
   virtual void LostCapture();
-
-  // Changes the blocked state of the tab at |index|. TabContents are
-  // considered blocked while displaying a tab modal dialog. During that time
-  // renderer host will ignore any UI interaction within TabContent outside of
-  // the currently displaying dialog.
-  virtual void SetTabContentBlocked(TabContents* contents, bool blocked);
 
   // Notification that |tab_contents| has gained focus.
   virtual void TabContentsFocused(TabContents* tab_content);
@@ -266,7 +259,7 @@ class TabContentsDelegate {
   // history.
   virtual bool ShouldAddNavigationToHistory(
       const history::HistoryAddPageArgs& add_page_args,
-      NavigationType::Type navigation_type);
+      content::NavigationType navigation_type);
 
   // Returns the native window framing the view containing the tab contents.
   virtual gfx::NativeWindow GetFrameNativeWindow();
@@ -314,6 +307,7 @@ class TabContentsDelegate {
   // Called when the renderer puts a tab into or out of fullscreen mode.
   virtual void ToggleFullscreenModeForTab(TabContents* tab,
                                           bool enter_fullscreen);
+  virtual bool IsFullscreenForTab(const TabContents* tab) const;
 
   // Called when a Javascript out of memory notification is received.
   virtual void JSOutOfMemory(TabContents* tab);
@@ -334,9 +328,7 @@ class TabContentsDelegate {
   // WebIntent notification handler.
   virtual void WebIntentDispatch(TabContents* tab,
                                  int routing_id,
-                                 const string16& action,
-                                 const string16& type,
-                                 const string16& data,
+                                 const webkit_glue::WebIntentData& intent,
                                  int intent_id);
 
   // Result of string search in the page. This includes the number of matches
@@ -355,6 +347,14 @@ class TabContentsDelegate {
   // Invoked when the preferred size of the contents has been changed.
   virtual void UpdatePreferredSize(TabContents* source,
                                    const gfx::Size& pref_size);
+
+  // Requests to lock the mouse. Once the request is approved or rejected,
+  // GotResponseToLockMouseRequest() will be called on the requesting tab
+  // contents.
+  virtual void RequestToLockMouse(TabContents* tab);
+
+  // Notification that the page has lost the mouse lock.
+  virtual void LostMouseLock();
 
  protected:
   virtual ~TabContentsDelegate();

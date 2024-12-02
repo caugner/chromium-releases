@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_PRERENDER_PRERENDER_CONTENTS_H_
 #pragma once
 
+#include <list>
 #include <string>
 #include <vector>
 
@@ -68,6 +69,16 @@ class PrerenderContents : public NotificationObserver,
     DISALLOW_COPY_AND_ASSIGN(Factory);
   };
 
+  // Information on pages that the prerendered page has tried to prerender.
+  struct PendingPrerenderData {
+    PendingPrerenderData(Origin origin, const GURL& url, const GURL& referrer);
+
+    Origin origin;
+    GURL url;
+    GURL referrer;
+  };
+  typedef std::list<PendingPrerenderData> PendingPrerenderList;
+
   virtual ~PrerenderContents();
 
   bool Init();
@@ -120,16 +131,17 @@ class PrerenderContents : public NotificationObserver,
   bool MatchesURL(const GURL& url, GURL* matching_url) const;
 
   void OnJSOutOfMemory();
-  void OnRunJavaScriptMessage(const string16& message,
-                              const string16& default_prompt,
-                              const GURL& frame_url,
-                              const int flags,
-                              bool* did_suppress_message,
-                              string16* prompt_field);
-  virtual void OnRenderViewGone(int status, int exit_code);
+  bool ShouldSuppressDialogs();
 
   // TabContentsObserver implementation.
   virtual void DidStopLoading() OVERRIDE;
+  virtual void DidStartProvisionalLoadForFrame(
+      int64 frame_id,
+      bool is_main_frame,
+      const GURL& validated_url,
+      bool is_error_page,
+      RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RenderViewGone() OVERRIDE;
 
   // NotificationObserver
   virtual void Observe(int type,
@@ -166,6 +178,18 @@ class PrerenderContents : public NotificationObserver,
   // MouseEvent being dispatched by a link to a website installed as an app.
   bool IsCrossSiteNavigationPending() const;
 
+  // Adds a pending prerender to the list.
+  virtual void AddPendingPrerender(Origin origin,
+                                   const GURL& url,
+                                   const GURL& referrer);
+
+  // Returns true if |url| corresponds to a pending prerender.
+  bool IsPendingEntry(const GURL& url) const;
+
+  // Reissues any pending prerender requests from the prerendered page.  Also
+  // clears the list of pending requests.
+  void StartPendingPrerenders();
+
  protected:
   PrerenderContents(PrerenderManager* prerender_manager,
                     PrerenderTracker* prerender_tracker,
@@ -175,13 +199,17 @@ class PrerenderContents : public NotificationObserver,
                     Origin origin,
                     uint8 experiment_id);
 
+  // Called whenever a RenderViewHost is created for prerendering.  Only called
+  // once the RenderViewHost has a RenderView and RenderWidgetHostView.
+  virtual void OnRenderViewHostCreated(RenderViewHost* new_render_view_host);
+
   NotificationRegistrar& notification_registrar() {
     return notification_registrar_;
   }
 
-  // Called whenever a RenderViewHost is created for prerendering.  Only called
-  // once the RenderViewHost has a RenderView and RenderWidgetHostView.
-  virtual void OnRenderViewHostCreated(RenderViewHost* new_render_view_host);
+  const PendingPrerenderList* pending_prerender_list() const {
+    return &pending_prerender_list_;
+  }
 
  private:
   class TabContentsDelegateImpl;
@@ -192,10 +220,6 @@ class PrerenderContents : public NotificationObserver,
   friend class PrerenderRenderViewHostObserver;
 
   // Message handlers.
-  void OnDidStartProvisionalLoadForFrame(int64 frame_id,
-                                         bool main_frame,
-                                         bool has_opener_set,
-                                         const GURL& url);
   void OnUpdateFaviconURL(int32 page_id, const std::vector<FaviconURL>& urls);
 
   // Returns the RenderViewHost Delegate for this prerender.
@@ -278,6 +302,9 @@ class PrerenderContents : public NotificationObserver,
 
   // Experiment during which this prerender is performed.
   uint8 experiment_id_;
+
+  // List of all pages the prerendered page has tried to prerender.
+  PendingPrerenderList pending_prerender_list_;
 
   // Offset by which to offset prerendered pages
   static const int32 kPrerenderPageIdOffset = 10;

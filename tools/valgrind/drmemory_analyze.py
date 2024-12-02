@@ -1,11 +1,11 @@
 #!/usr/bin/python
-# Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 # drmemory_analyze.py
 
-''' Given a ThreadSanitizer output file, parses errors and uniques them.'''
+''' Given a Dr. Memory output file, parses errors and uniques them.'''
 
 import logging
 import optparse
@@ -36,7 +36,7 @@ class DrMemoryAnalyze:
     '''
 
     self.reports = []
-    self.used_suppressions = {}
+    self.used_suppressions = []
     for file in files:
       self.ParseReportFile(file)
 
@@ -45,69 +45,10 @@ class DrMemoryAnalyze:
     self.stack_trace_line_ = None
 
   def ReadSection(self):
-    FILE_PREFIXES_TO_CUT = [
-        "build\\src\\",
-        "chromium\\src\\",
-        "crt_bld\\self_x86\\",
-    ]
-    CUT_STACK_BELOW = ".*testing.*Test.*Run.*|testing::internal.*"
-
     result = [self.line_]
     self.ReadLine()
-    cnt = 1
     while len(self.line_.strip()) > 0:
-      tmp_line = self.line_
-      match_syscall = re.search("system call (.*)\n", tmp_line)
-      if match_syscall:
-        syscall_name = match_syscall.groups()[0]
-        result.append(" #%2i <sys.call> %s\n" % (cnt, syscall_name))
-        cnt = cnt + 1
-        self.ReadLine() # skip "<system call> line
-        self.ReadLine()
-        continue
-
-      # Dr. Memory sometimes prints adjacent malloc'ed regions next to the
-      # access address in the UNADDRESSABLE ACCESS reports like this:
-      # Note: next higher malloc: <address range>
-      # Note: prev lower malloc:  <address range>
-      # Note: 0x1234-0x5678 overlaps freed memory 0x1000-0x6000
-      if tmp_line.startswith("Note: "):
-        result.append(tmp_line)
-        self.ReadLine()
-        continue
-
-      match_binary_fname = re.search("0x[0-9a-fA-F]+ <(.*)> .*!([^+]*)"
-                                     "(?:\+0x[0-9a-fA-F]+)?\n", tmp_line)
-      if match_binary_fname:
-        self.ReadLine()
-        match_src_line = re.search("\s*(.*):([0-9]+)(?:\+0x[0-9a-fA-F]+)?",
-                                 self.line_)
-        if match_src_line:
-          binary, fname = match_binary_fname.groups()
-          if re.search(CUT_STACK_BELOW, fname):
-            break
-          report_line = (" #%2i %-50s" % (cnt, fname))
-          if (not re.search("\.exe\+0x", binary) and
-              not re.search("chrome\.dll", binary)):
-            # Print the DLL name
-            report_line += " " + binary
-          src, lineno = match_src_line.groups()
-          if src != "??":
-            for pat in FILE_PREFIXES_TO_CUT:
-              idx = src.rfind(pat)
-              if idx != -1:
-                src = src[idx+len(pat):]
-            report_line += " " + src
-            if int(lineno) != 0:
-              report_line += ":%i" % int(lineno)
-          result.append(report_line + "\n")
-          cnt = cnt + 1
-      else:
-        match_other = re.search("0x[0-9a-fA-F]+ (<.*>)(.*)\n", tmp_line)
-        if match_other:
-          module, other = match_other.groups()
-          result.append(" #%2i %-50s %s\n" % (cnt, module, other))
-          cnt = cnt + 1
+      result.append(self.line_)
       self.ReadLine()
     return result
 
@@ -116,10 +57,9 @@ class DrMemoryAnalyze:
 
     while True:
       self.ReadLine()
-      if (self.line_ == ''):
-        break
-      if re.search("Grouping errors that", self.line_):
-        # DrMemory has finished working.
+      if (self.line_ == ''): break
+      if re.search("FINAL SUMMARY:", self.line_):
+        # No more reports since this point.
         break
       tmp = []
       match = re.search("^Error #[0-9]+: (.*)", self.line_)
@@ -130,11 +70,33 @@ class DrMemoryAnalyze:
       elif self.line_.startswith("ASSERT FAILURE"):
         self.reports.append(self.line_.strip())
 
+    while True:
+      self.ReadLine();
+      if (self.line_ == ''): break
+
+      if re.search("SUPPRESSIONS USED:", self.line_):
+        self.ReadLine()
+        while self.line_.strip() != "":
+          line = self.line_.strip()
+          (count, name) = re.match(" *([0-9]+)x: (.*)", line).groups()
+          self.used_suppressions.append("%7s %s" % (count, name))
+          self.ReadLine()
+        break
+
     self.cur_fd_.close()
 
   def Report(self, check_sanity):
     sys.stdout.flush()
     #TODO(timurrrr): support positive tests / check_sanity==True
+
+    if self.used_suppressions:
+      print "-----------------------------------------------------"
+      # TODO(timurrrr): sum up the counts from different wrappers (e.g. ui_tests)
+      # or does it work now already? Or add the memcheck-like per-test printing.
+      print "Suppressions used:\n  count name\n%s" % (
+                "\n".join(self.used_suppressions))
+      print "-----------------------------------------------------"
+      sys.stdout.flush()
 
     if len(self.reports) > 0:
       logging.error("Found %i error reports" % len(self.reports))

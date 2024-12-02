@@ -4,6 +4,7 @@
 
 #include "webkit/fileapi/file_system_url_request_job.h"
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/file_util_proxy.h"
@@ -106,9 +107,7 @@ FileSystemURLRequestJob::FileSystemURLRequestJob(
       file_system_context_(file_system_context),
       file_thread_proxy_(file_thread_proxy),
       ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(callback_factory_(this)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          io_callback_(this, &FileSystemURLRequestJob::DidRead)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       stream_(NULL),
       is_directory_(false),
       remaining_bytes_(0) {
@@ -134,7 +133,7 @@ void FileSystemURLRequestJob::Kill() {
   }
   URLRequestJob::Kill();
   method_factory_.RevokeAll();
-  callback_factory_.RevokeAll();
+  weak_factory_.InvalidateWeakPtrs();
 }
 
 bool FileSystemURLRequestJob::ReadRawData(net::IOBuffer* dest, int dest_size,
@@ -154,7 +153,9 @@ bool FileSystemURLRequestJob::ReadRawData(net::IOBuffer* dest, int dest_size,
     return true;
   }
 
-  int rv = stream_->Read(dest->data(), dest_size, &io_callback_);
+  int rv = stream_->Read(dest->data(), dest_size,
+                         base::Bind(&FileSystemURLRequestJob::DidRead,
+                                    base::Unretained(this)));
   if (rv >= 0) {
     // Data is immediately available.
     *bytes_read = rv;
@@ -238,7 +239,8 @@ void FileSystemURLRequestJob::DidGetMetadata(
   if (!is_directory_) {
     base::FileUtilProxy::CreateOrOpen(
         file_thread_proxy_, platform_path, kFileFlags,
-        callback_factory_.NewCallback(&FileSystemURLRequestJob::DidOpen));
+        base::Bind(&FileSystemURLRequestJob::DidOpen,
+                   weak_factory_.GetWeakPtr()));
   } else {
     NotifyHeadersComplete();
   }

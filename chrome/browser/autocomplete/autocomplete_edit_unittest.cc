@@ -52,7 +52,8 @@ class TestingOmniboxView : public OmniboxView {
   virtual void OnRevertTemporaryText() {}
   virtual void OnBeforePossibleChange() {}
   virtual bool OnAfterPossibleChange() { return false; }
-  virtual gfx::NativeView GetNativeView() const { return 0; }
+  virtual gfx::NativeView GetNativeView() const { return NULL; }
+  virtual gfx::NativeView GetRelativeWindowForPopup() const { return NULL; }
   virtual CommandUpdater* GetCommandUpdater() { return NULL; }
   virtual void SetInstantSuggestion(const string16& input,
                                     bool animate_to_complete) {}
@@ -74,7 +75,7 @@ class TestingAutocompleteEditController : public AutocompleteEditController {
   TestingAutocompleteEditController() {}
   virtual void OnAutocompleteAccept(const GURL& url,
                                     WindowOpenDisposition disposition,
-                                    PageTransition::Type transition,
+                                    content::PageTransition transition,
                                     const GURL& alternate_nav_url) OVERRIDE {}
   virtual void OnChanged() OVERRIDE {}
   virtual void OnSelectionBoundsChanged() OVERRIDE {}

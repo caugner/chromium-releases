@@ -23,17 +23,12 @@ class SerializedVarReturnValue;
 
 class PPB_Instance_Proxy : public InterfaceProxy,
                            public ppapi::InstanceImpl,
-                           public ppapi::FunctionGroupBase,
                            public ppapi::thunk::PPB_Instance_FunctionAPI {
  public:
-  PPB_Instance_Proxy(Dispatcher* dispatcher, const void* target_interface);
+  PPB_Instance_Proxy(Dispatcher* dispatcher);
   virtual ~PPB_Instance_Proxy();
 
-  static const Info* GetInfo0_5();
-  static const Info* GetInfo1_0();
-  static const Info* GetInfoMessaging();
   static const Info* GetInfoPrivate();
-  static const Info* GetInfoFullscreen();
 
   // InterfaceProxy implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg);
@@ -50,10 +45,29 @@ class PPB_Instance_Proxy : public InterfaceProxy,
   virtual PP_Var ExecuteScript(PP_Instance instance,
                                PP_Var script,
                                PP_Var* exception) OVERRIDE;
+  virtual PP_Var GetDefaultCharSet(PP_Instance instance) OVERRIDE;
+  virtual void Log(PP_Instance instance,
+                   int log_level,
+                   PP_Var value) OVERRIDE;
+  virtual void LogWithSource(PP_Instance instance,
+                             int log_level,
+                             PP_Var source,
+                             PP_Var value) OVERRIDE;
+  virtual void NumberOfFindResultsChanged(PP_Instance instance,
+                                          int32_t total,
+                                          PP_Bool final_result) OVERRIDE;
+  virtual void SelectedFindResultChanged(PP_Instance instance,
+                                         int32_t index) OVERRIDE;
   virtual PP_Bool IsFullscreen(PP_Instance instance) OVERRIDE;
   virtual PP_Bool SetFullscreen(PP_Instance instance,
-                                PP_Bool fullscreen) OVERRIDE;
-  virtual PP_Bool GetScreenSize(PP_Instance instance, PP_Size* size) OVERRIDE;
+                                     PP_Bool fullscreen) OVERRIDE;
+  virtual PP_Bool GetScreenSize(PP_Instance instance,
+                                     PP_Size* size) OVERRIDE;
+  virtual PP_Bool FlashIsFullscreen(PP_Instance instance) OVERRIDE;
+  virtual PP_Bool FlashSetFullscreen(PP_Instance instance,
+                                    PP_Bool fullscreen) OVERRIDE;
+  virtual PP_Bool FlashGetScreenSize(PP_Instance instance, PP_Size* size)
+      OVERRIDE;
   virtual int32_t RequestInputEvents(PP_Instance instance,
                                      uint32_t event_classes) OVERRIDE;
   virtual int32_t RequestFilteringInputEvents(PP_Instance instance,
@@ -65,7 +79,24 @@ class PPB_Instance_Proxy : public InterfaceProxy,
                                  double minimum_factor,
                                  double maximium_factor) OVERRIDE;
   virtual void SubscribeToPolicyUpdates(PP_Instance instance) OVERRIDE;
+  virtual PP_Var ResolveRelativeToDocument(
+      PP_Instance instance,
+      PP_Var relative,
+      PP_URLComponents_Dev* components) OVERRIDE;
+  virtual PP_Bool DocumentCanRequest(PP_Instance instance, PP_Var url) OVERRIDE;
+  virtual PP_Bool DocumentCanAccessDocument(PP_Instance instance,
+                                            PP_Instance target) OVERRIDE;
+  virtual PP_Var GetDocumentURL(PP_Instance instance,
+                                PP_URLComponents_Dev* components) OVERRIDE;
+  virtual PP_Var GetPluginInstanceURL(
+      PP_Instance instance,
+      PP_URLComponents_Dev* components) OVERRIDE;
   virtual void PostMessage(PP_Instance instance, PP_Var message) OVERRIDE;
+  virtual int32_t LockMouse(PP_Instance instance,
+                            PP_CompletionCallback callback) OVERRIDE;
+  virtual void UnlockMouse(PP_Instance instance) OVERRIDE;
+
+  static const InterfaceID kInterfaceID = INTERFACE_ID_PPB_INSTANCE;
 
  private:
   // Message handlers.
@@ -81,12 +112,27 @@ class PPB_Instance_Proxy : public InterfaceProxy,
                           SerializedVarReceiveInput script,
                           SerializedVarOutParam out_exception,
                           SerializedVarReturnValue result);
+  void OnMsgGetDefaultCharSet(PP_Instance instance,
+                              SerializedVarReturnValue result);
+  void OnMsgLog(PP_Instance instance,
+                int log_level,
+                SerializedVarReceiveInput value);
+  void OnMsgLogWithSource(PP_Instance instance,
+                          int log_level,
+                          SerializedVarReceiveInput source,
+                          SerializedVarReceiveInput value);
   void OnMsgSetFullscreen(PP_Instance instance,
-                          PP_Bool fullscreen,
-                          PP_Bool* result);
+                               PP_Bool fullscreen,
+                               PP_Bool* result);
   void OnMsgGetScreenSize(PP_Instance instance,
-                          PP_Bool* result,
-                          PP_Size* size);
+                               PP_Bool* result,
+                               PP_Size* size);
+  void OnMsgFlashSetFullscreen(PP_Instance instance,
+                               PP_Bool fullscreen,
+                               PP_Bool* result);
+  void OnMsgFlashGetScreenSize(PP_Instance instance,
+                               PP_Bool* result,
+                               PP_Size* size);
   void OnMsgRequestInputEvents(PP_Instance instance,
                                bool is_filtering,
                                uint32_t event_classes);
@@ -94,6 +140,22 @@ class PPB_Instance_Proxy : public InterfaceProxy,
                              uint32_t event_classes);
   void OnMsgPostMessage(PP_Instance instance,
                         SerializedVarReceiveInput message);
+  void OnMsgLockMouse(PP_Instance instance,
+                      uint32_t serialized_callback);
+  void OnMsgUnlockMouse(PP_Instance instance);
+  void OnMsgResolveRelativeToDocument(PP_Instance instance,
+                                      SerializedVarReceiveInput relative,
+                                      SerializedVarReturnValue result);
+  void OnMsgDocumentCanRequest(PP_Instance instance,
+                               SerializedVarReceiveInput url,
+                               PP_Bool* result);
+  void OnMsgDocumentCanAccessDocument(PP_Instance active,
+                                      PP_Instance target,
+                                      PP_Bool* result);
+  void OnMsgGetDocumentURL(PP_Instance instance,
+                           SerializedVarReturnValue result);
+  void OnMsgGetPluginInstanceURL(PP_Instance instance,
+                                 SerializedVarReturnValue result);
 };
 
 }  // namespace proxy

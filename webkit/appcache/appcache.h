@@ -15,6 +15,7 @@
 #include "googleurl/src/gurl.h"
 #include "webkit/appcache/appcache_database.h"
 #include "webkit/appcache/appcache_entry.h"
+#include "webkit/appcache/appcache_export.h"
 #include "webkit/appcache/manifest_parser.h"
 
 namespace appcache {
@@ -26,7 +27,7 @@ class AppCacheService;
 // Set of cached resources for an application. A cache exists as long as a
 // host is associated with it, the cache is in an appcache group or the
 // cache is being created during an appcache upate.
-class AppCache : public base::RefCounted<AppCache> {
+class APPCACHE_EXPORT AppCache : public base::RefCounted<AppCache> {
  public:
   typedef std::map<GURL, AppCacheEntry> EntryMap;
   typedef std::set<AppCacheHost*> AppCacheHosts;

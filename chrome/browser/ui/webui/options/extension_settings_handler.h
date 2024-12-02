@@ -11,6 +11,7 @@
 
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
+#include "chrome/browser/extensions/extension_warning_set.h"
 #include "chrome/browser/ui/shell_dialogs.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 #include "chrome/browser/ui/webui/chrome_web_ui.h"
@@ -31,7 +32,7 @@ class DictionaryValue;
 class ListValue;
 }
 
-// Information about a page running in an extension, for example a toolstrip,
+// Information about a page running in an extension, for example a popup bubble,
 // a background page, or a tab contents.
 struct ExtensionPage {
   ExtensionPage(const GURL& url, int render_process_id, int render_view_id,
@@ -51,49 +52,18 @@ class ExtensionSettingsHandler : public OptionsPageUIHandler,
                                  public SelectFileDialog::Listener,
                                  public ExtensionUninstallDialog::Delegate {
  public:
-  // Helper class that loads the icons for the extensions in the management UI.
-  // We do this with native code instead of just using chrome-extension:// URLs
-  // for two reasons:
-  //
-  // 1. We need to support the disabled extensions, too, and using URLs won't
-  //    work for them.
-  // 2. We want to desaturate the icons of the disabled extensions to make them
-  //    look disabled.
-  class IconLoader : public base::RefCountedThreadSafe<IconLoader> {
-   public:
-    explicit IconLoader(ExtensionSettingsHandler* handler);
-
-    // Load |icons|. Will call handler->OnIconsLoaded when complete. IconLoader
-    // takes ownership of both arguments.
-    void LoadIcons(std::vector<ExtensionResource>* icons,
-                   base::DictionaryValue* json);
-
-    // Cancel the load. IconLoader won't try to call back to the handler after
-    // this.
-    void Cancel();
-
-   private:
-    // Load the icons and call ReportResultOnUIThread when done. This method
-    // takes ownership of both arguments.
-    void LoadIconsOnFileThread(std::vector<ExtensionResource>* icons,
-                               base::DictionaryValue* json);
-
-    // Report back to the handler. This method takes ownership of |json|.
-    void ReportResultOnUIThread(base::DictionaryValue* json);
-
-    // The handler we will report back to.
-    ExtensionSettingsHandler* handler_;
-  };
-
   ExtensionSettingsHandler();
   virtual ~ExtensionSettingsHandler();
 
+  static void RegisterUserPrefs(PrefService* prefs);
+
   // Extension Detail JSON Struct for page. (static for ease of testing).
-  // Note: service can be NULL in unit tests.
+  // Note: |service| and |warnings| can be NULL in unit tests.
   static base::DictionaryValue* CreateExtensionDetailValue(
       ExtensionService* service,
       const Extension* extension,
       const std::vector<ExtensionPage>& pages,
+      const ExtensionWarningSet* warnings,
       bool enabled,
       bool terminated);
 
@@ -153,6 +123,9 @@ class ExtensionSettingsHandler : public OptionsPageUIHandler,
   // Forces a UI update if appropriate after a notification is received.
   void MaybeUpdateAfterNotification();
 
+  // Register for notifications that we need to reload the page.
+  void MaybeRegisterForNotifications();
+
   // SelectFileDialog::Listener
   virtual void FileSelected(const FilePath& path,
                             int index, void* params) OVERRIDE;
@@ -176,8 +149,8 @@ class ExtensionSettingsHandler : public OptionsPageUIHandler,
 
   // ExtensionUninstallDialog::Delegate implementation, used for receiving
   // notification about uninstall confirmation dialog selections.
-  virtual void ExtensionDialogAccepted() OVERRIDE;
-  virtual void ExtensionDialogCanceled() OVERRIDE;
+  virtual void ExtensionUninstallAccepted() OVERRIDE;
+  virtual void ExtensionUninstallCanceled() OVERRIDE;
 
  private:
   // Helper that lists the current active html pages for an extension.
@@ -188,20 +161,6 @@ class ExtensionSettingsHandler : public OptionsPageUIHandler,
       const Extension* extension,
       std::vector<ExtensionPage> *result);
 
-  // Returns the best icon to display in the UI for an extension, or an empty
-  // ExtensionResource if no good icon exists.
-  ExtensionResource PickExtensionIcon(const Extension* extension);
-
-  // Loads the extension resources into the json data, then calls OnIconsLoaded.
-  // Takes ownership of |icons|.
-  // Called on the file thread.
-  void LoadExtensionIcons(std::vector<ExtensionResource>* icons,
-                          base::DictionaryValue* json_data);
-
-  // Takes ownership of |json_data| and tells HTML about it.
-  // Called on the UI thread.
-  void OnIconsLoaded(base::DictionaryValue* json_data);
-
   // Returns the ExtensionUninstallDialog object for this class, creating it if
   // needed.
   ExtensionUninstallDialog* GetExtensionUninstallDialog();
@@ -211,9 +170,6 @@ class ExtensionSettingsHandler : public OptionsPageUIHandler,
 
   // Used to pick the directory when loading an extension.
   scoped_refptr<SelectFileDialog> load_extension_dialog_;
-
-  // Used to load icons asynchronously on the file thread.
-  scoped_refptr<IconLoader> icon_loader_;
 
   // Used to show confirmation UI for uninstalling extensions in incognito mode.
   scoped_ptr<ExtensionUninstallDialog> extension_uninstall_dialog_;
@@ -232,6 +188,12 @@ class ExtensionSettingsHandler : public OptionsPageUIHandler,
   // it is removed from the process). Keep a pointer to it so we can exclude
   // it from the active views.
   RenderViewHost* deleting_rvh_;
+
+  // We want to register for notifications only after we've responded at least
+  // once to the page, otherwise we'd be calling javacsript functions on objects
+  // that don't exist yet when notifications come in. This variable makes sure
+  // we do so only once.
+  bool registered_for_notifications_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionSettingsHandler);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@ MappedHostResolver::~MappedHostResolver() {
 
 int MappedHostResolver::Resolve(const RequestInfo& info,
                                 AddressList* addresses,
-                                CompletionCallback* callback,
+                                OldCompletionCallback* callback,
                                 RequestHandle* out_req,
                                 const BoundNetLog& net_log) {
   DCHECK(addresses);
@@ -55,6 +55,10 @@ void MappedHostResolver::RemoveObserver(Observer* observer) {
 
 HostResolverImpl* MappedHostResolver::GetAsHostResolverImpl() {
   return impl_->GetAsHostResolverImpl();
+}
+
+HostCache* MappedHostResolver::GetHostCache() {
+  return impl_->GetHostCache();
 }
 
 }  // namespace net

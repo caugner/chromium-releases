@@ -4,6 +4,7 @@
 
 #include "chrome/browser/plugin_data_remover.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
@@ -16,7 +17,6 @@
 #include "content/browser/plugin_service.h"
 #include "content/common/plugin_messages.h"
 #include "webkit/plugins/npapi/plugin_group.h"
-#include "webkit/plugins/npapi/plugin_list.h"
 
 #if defined(OS_POSIX)
 #include "ipc/ipc_channel_posix.h"
@@ -24,9 +24,9 @@
 
 namespace {
 
-const char* kFlashMimeType = "application/x-shockwave-flash";
+const char kFlashMimeType[] = "application/x-shockwave-flash";
 // The minimum Flash Player version that implements NPP_ClearSiteData.
-const char* kMinFlashVersion = "10.3";
+const char kMinFlashVersion[] = "10.3";
 const int64 kRemovalTimeoutMs = 10000;
 const uint64 kClearAllData = 0;
 
@@ -62,7 +62,7 @@ base::WaitableEvent* PluginDataRemover::StartRemoving(base::Time begin_time) {
   BrowserThread::PostDelayedTask(
       BrowserThread::IO,
       FROM_HERE,
-      NewRunnableMethod(this, &PluginDataRemover::OnTimeout),
+      base::Bind(&PluginDataRemover::OnTimeout, this),
       kRemovalTimeoutMs);
 
   return event_.get();
@@ -70,14 +70,12 @@ base::WaitableEvent* PluginDataRemover::StartRemoving(base::Time begin_time) {
 
 void PluginDataRemover::Wait() {
   base::Time start_time(base::Time::Now());
-  bool result = true;
   if (is_removing_)
-    result = event_->Wait();
+    event_->Wait();
   UMA_HISTOGRAM_TIMES("ClearPluginData.wait_at_shutdown",
                       base::Time::Now() - start_time);
   UMA_HISTOGRAM_TIMES("ClearPluginData.time_at_shutdown",
                       base::Time::Now() - remove_start_time_);
-  DCHECK(result) << "Error waiting for plugin process";
 }
 
 int PluginDataRemover::ID() {
@@ -95,6 +93,13 @@ const content::ResourceContext& PluginDataRemover::GetResourceContext() {
 
 void PluginDataRemover::SetPluginInfo(
     const webkit::WebPluginInfo& info) {
+}
+
+void PluginDataRemover::OnFoundPluginProcessHost(
+    PluginProcessHost* host) {
+}
+
+void PluginDataRemover::OnSentPluginChannelRequest() {
 }
 
 void PluginDataRemover::OnChannelOpened(const IPC::ChannelHandle& handle) {
@@ -173,11 +178,10 @@ void PluginDataRemover::SignalDone() {
 
 // static
 bool PluginDataRemover::IsSupported(PluginPrefs* plugin_prefs) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   bool allow_wildcard = false;
   std::vector<webkit::WebPluginInfo> plugins;
-  webkit::npapi::PluginList::Singleton()->GetPluginInfoArray(
-      GURL(), kFlashMimeType, allow_wildcard, NULL, &plugins, NULL);
+  PluginService::GetInstance()->GetPluginInfoArray(
+      GURL(), kFlashMimeType, allow_wildcard, &plugins, NULL);
   std::vector<webkit::WebPluginInfo>::iterator plugin = plugins.begin();
   if (plugin == plugins.end())
     return false;

@@ -34,8 +34,8 @@ class PluginDataRemover : public base::RefCountedThreadSafe<PluginDataRemover>,
   base::WaitableEvent* StartRemoving(base::Time begin_time);
 
   // Returns whether there is a plug-in installed that supports removing
-  // LSO data. Because this method possibly has to load the plug-in list, it
-  // should only be called on the FILE thread.
+  // LSO data. This method will use cached plugin data. Call
+  // PluginService::GetPlugins() if the latest data is needed.
   static bool IsSupported(PluginPrefs* plugin_prefs);
 
   // Indicates whether we are still in the process of removing plug-in data.
@@ -47,16 +47,18 @@ class PluginDataRemover : public base::RefCountedThreadSafe<PluginDataRemover>,
   void Wait();
 
   // PluginProcessHost::Client methods.
-  virtual int ID();
-  virtual bool OffTheRecord();
-  virtual const content::ResourceContext& GetResourceContext();
-  virtual void SetPluginInfo(const webkit::WebPluginInfo& info);
-  virtual void OnChannelOpened(const IPC::ChannelHandle& handle);
-  virtual void OnError();
+  virtual int ID() OVERRIDE;
+  virtual bool OffTheRecord() OVERRIDE;
+  virtual const content::ResourceContext& GetResourceContext() OVERRIDE;
+  virtual void SetPluginInfo(const webkit::WebPluginInfo& info) OVERRIDE;
+  virtual void OnFoundPluginProcessHost(PluginProcessHost* host) OVERRIDE;
+  virtual void OnSentPluginChannelRequest() OVERRIDE;
+  virtual void OnChannelOpened(const IPC::ChannelHandle& handle) OVERRIDE;
+  virtual void OnError() OVERRIDE;
 
   // IPC::Channel::Listener methods.
-  virtual bool OnMessageReceived(const IPC::Message& message);
-  virtual void OnChannelError();
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void OnChannelError() OVERRIDE;
 
  private:
   friend class base::RefCountedThreadSafe<PluginDataRemover>;

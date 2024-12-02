@@ -4,6 +4,7 @@
 
 #include <vector>
 
+#include "base/bind.h"
 #include "base/message_loop.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -54,7 +55,7 @@ class HistoryEnumerator : public HistoryService::URLEnumerator {
     BrowserThread::PostTask(
         BrowserThread::UI,
         FROM_HERE,
-        NewRunnableMethod(history, &HistoryService::IterateURLs, this));
+        base::Bind(&HistoryService::IterateURLs, history, this));
     ui_test_utils::RunMessageLoop();
   }
 
@@ -108,10 +109,8 @@ class HistoryBrowserTest : public InProcessBrowserTest {
     HistoryService* history = GetHistoryService();
     BrowserThread::PostTask(BrowserThread::UI,
                             FROM_HERE,
-                            NewRunnableMethod(history,
-                                              &HistoryService::ScheduleDBTask,
-                                              task,
-                                              &request_consumer));
+                            base::Bind(&HistoryService::ScheduleDBTask,
+                                       history, task, &request_consumer));
     ui_test_utils::RunMessageLoop();
   }
 
@@ -143,8 +142,6 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SavingHistoryEnabled) {
 
 // Test that disabling saving browser history really works.
 IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SavingHistoryDisabled) {
-  base::TimeTicks start_time = base::TimeTicks::Now();
-
   GetPrefs()->SetBoolean(prefs::kSavingBrowserHistoryDisabled, true);
 
   EXPECT_TRUE(GetProfile()->GetHistoryService(Profile::EXPLICIT_ACCESS));
@@ -161,8 +158,6 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SavingHistoryDisabled) {
 // Test that changing the pref takes effect immediately
 // when the browser is running.
 IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SavingHistoryEnabledThenDisabled) {
-  base::TimeTicks start_time = base::TimeTicks::Now();
-
   EXPECT_FALSE(GetPrefs()->GetBoolean(prefs::kSavingBrowserHistoryDisabled));
 
   ui_test_utils::WaitForHistoryToLoad(browser());

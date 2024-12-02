@@ -7,7 +7,8 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -30,8 +31,8 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
+#include "content/public/browser/notification_types.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -201,8 +202,6 @@ void AdvancedOptionsHandler::Initialize() {
   SetupMetricsReportingCheckbox();
   SetupMetricsReportingSettingVisibility();
   SetupFontSizeLabel();
-  SetupDownloadLocationPath();
-  SetupPromptForDownload();
   SetupAutoOpenFileTypesDisabledAttribute();
   SetupProxySettingsSection();
   SetupSSLConfigSettings();
@@ -244,11 +243,6 @@ WebUIMessageHandler* AdvancedOptionsHandler::Attach(WebUI* web_ui) {
                                 this);
 #endif
 
-  default_download_location_.Init(prefs::kDownloadDefaultDirectory,
-                                  prefs, this);
-  ask_for_save_location_.Init(prefs::kPromptForDownload, prefs, this);
-  allow_file_selection_dialogs_.Init(prefs::kAllowFileSelectionDialogs,
-                                     g_browser_process->local_state(), this);
   auto_open_files_.Init(prefs::kDownloadExtensionsToOpen, prefs, this);
   default_font_size_.Init(prefs::kWebKitDefaultFontSize, prefs, this);
   proxy_prefs_.reset(
@@ -262,49 +256,47 @@ void AdvancedOptionsHandler::RegisterMessages() {
   // Setup handlers specific to this panel.
   DCHECK(web_ui_);
   web_ui_->RegisterMessageCallback("selectDownloadLocation",
-      NewCallback(this,
-                  &AdvancedOptionsHandler::HandleSelectDownloadLocation));
-  web_ui_->RegisterMessageCallback("promptForDownloadAction",
-      NewCallback(this,
-                  &AdvancedOptionsHandler::HandlePromptForDownload));
+      base::Bind(&AdvancedOptionsHandler::HandleSelectDownloadLocation,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("autoOpenFileTypesAction",
-      NewCallback(this,
-                  &AdvancedOptionsHandler::HandleAutoOpenButton));
+      base::Bind(&AdvancedOptionsHandler::HandleAutoOpenButton,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("defaultFontSizeAction",
-      NewCallback(this, &AdvancedOptionsHandler::HandleDefaultFontSize));
+      base::Bind(&AdvancedOptionsHandler::HandleDefaultFontSize,
+                 base::Unretained(this)));
 #if !defined(OS_CHROMEOS)
   web_ui_->RegisterMessageCallback("metricsReportingCheckboxAction",
-      NewCallback(this,
-                  &AdvancedOptionsHandler::HandleMetricsReportingCheckbox));
+      base::Bind(&AdvancedOptionsHandler::HandleMetricsReportingCheckbox,
+                 base::Unretained(this)));
 #endif
 #if !defined(USE_NSS) && !defined(USE_OPENSSL)
   web_ui_->RegisterMessageCallback("showManageSSLCertificates",
-      NewCallback(this,
-                  &AdvancedOptionsHandler::ShowManageSSLCertificates));
+      base::Bind(&AdvancedOptionsHandler::ShowManageSSLCertificates,
+                 base::Unretained(this)));
 #endif
   web_ui_->RegisterMessageCallback("showCloudPrintManagePage",
-      NewCallback(this,
-                  &AdvancedOptionsHandler::ShowCloudPrintManagePage));
+      base::Bind(&AdvancedOptionsHandler::ShowCloudPrintManagePage,
+                 base::Unretained(this)));
 #if !defined(OS_CHROMEOS)
   if (cloud_print_proxy_ui_enabled_) {
     web_ui_->RegisterMessageCallback("showCloudPrintSetupDialog",
-        NewCallback(this,
-                    &AdvancedOptionsHandler::ShowCloudPrintSetupDialog));
+        base::Bind(&AdvancedOptionsHandler::ShowCloudPrintSetupDialog,
+                   base::Unretained(this)));
     web_ui_->RegisterMessageCallback("disableCloudPrintProxy",
-        NewCallback(this,
-                    &AdvancedOptionsHandler::HandleDisableCloudPrintProxy));
+        base::Bind(&AdvancedOptionsHandler::HandleDisableCloudPrintProxy,
+                   base::Unretained(this)));
   }
   web_ui_->RegisterMessageCallback("showNetworkProxySettings",
-      NewCallback(this,
-                  &AdvancedOptionsHandler::ShowNetworkProxySettings));
+      base::Bind(&AdvancedOptionsHandler::ShowNetworkProxySettings,
+                 base::Unretained(this)));
 #endif
   web_ui_->RegisterMessageCallback("checkRevocationCheckboxAction",
-      NewCallback(this,
-                  &AdvancedOptionsHandler::HandleCheckRevocationCheckbox));
+      base::Bind(&AdvancedOptionsHandler::HandleCheckRevocationCheckbox,
+                 base::Unretained(this)));
 #if !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
   web_ui_->RegisterMessageCallback("backgroundModeAction",
-      NewCallback(this,
-                  &AdvancedOptionsHandler::HandleBackgroundModeCheckbox));
+      base::Bind(&AdvancedOptionsHandler::HandleBackgroundModeCheckbox,
+                 base::Unretained(this)));
 #endif
 }
 
@@ -313,12 +305,7 @@ void AdvancedOptionsHandler::Observe(int type,
                                      const NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_PREF_CHANGED) {
     std::string* pref_name = Details<std::string>(details).ptr();
-    if ((*pref_name == prefs::kDownloadDefaultDirectory) ||
-        (*pref_name == prefs::kPromptForDownload) ||
-        (*pref_name == prefs::kAllowFileSelectionDialogs)) {
-      SetupDownloadLocationPath();
-      SetupPromptForDownload();
-    } else if (*pref_name == prefs::kDownloadExtensionsToOpen) {
+    if (*pref_name == prefs::kDownloadExtensionsToOpen) {
       SetupAutoOpenFileTypesDisabledAttribute();
     } else if (proxy_prefs_->IsObserved(*pref_name)) {
       SetupProxySettingsSection();
@@ -350,17 +337,11 @@ void AdvancedOptionsHandler::HandleSelectDownloadLocation(
       web_ui_->tab_contents()->view()->GetTopLevelNativeWindow(), NULL);
 }
 
-void AdvancedOptionsHandler::HandlePromptForDownload(
-    const ListValue* args) {
-  std::string checked_str = UTF16ToUTF8(ExtractStringValue(args));
-  ask_for_save_location_.SetValue(checked_str == "true");
-}
-
 void AdvancedOptionsHandler::FileSelected(const FilePath& path, int index,
                                           void* params) {
   UserMetrics::RecordAction(UserMetricsAction("Options_SetDownloadDirectory"));
-  default_download_location_.SetValue(path);
-  SetupDownloadLocationPath();
+  PrefService* pref_service = Profile::FromWebUI(web_ui_)->GetPrefs();
+  pref_service->SetFilePath(prefs::kDownloadDefaultDirectory, path);
 }
 
 void AdvancedOptionsHandler::OnCloudPrintSetupClosed() {
@@ -452,7 +433,7 @@ void AdvancedOptionsHandler::ShowCloudPrintManagePage(const ListValue* args) {
   Profile* profile = Profile::FromWebUI(web_ui_);
   web_ui_->tab_contents()->OpenURL(
       CloudPrintURL(profile).GetCloudPrintServiceManageURL(),
-      GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+      GURL(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK);
 }
 
 #if !defined(OS_CHROMEOS)
@@ -463,7 +444,7 @@ void AdvancedOptionsHandler::ShowCloudPrintSetupDialog(const ListValue* args) {
   web_ui_->tab_contents()->OpenURL(
       CloudPrintURL(profile).GetCloudPrintServiceEnableURL(
           CloudPrintProxyServiceFactory::GetForProfile(profile)->proxy_id()),
-      GURL(), CURRENT_TAB, PageTransition::LINK);
+      GURL(), CURRENT_TAB, content::PAGE_TRANSITION_LINK);
 }
 
 void AdvancedOptionsHandler::HandleDisableCloudPrintProxy(
@@ -550,28 +531,6 @@ void AdvancedOptionsHandler::SetupFontSizeLabel() {
   base::FundamentalValue font_size(default_font_size_.GetValue());
   web_ui_->CallJavascriptFunction(
       "options.AdvancedOptions.SetFontSize", font_size);
-}
-
-void AdvancedOptionsHandler::SetupDownloadLocationPath() {
-  StringValue value(default_download_location_.GetValue().value());
-  // In case allow_file_selection_dialogs_ is false, we will not display any
-  // file-selection dialogs but show an InfoBar. That is why we can disable
-  // the DownloadLocationPath-Chooser right-away.
-  base::FundamentalValue disabled(default_download_location_.IsManaged() ||
-                            !allow_file_selection_dialogs_.GetValue());
-  web_ui_->CallJavascriptFunction(
-      "options.AdvancedOptions.SetDownloadLocationPath", value, disabled);
-}
-
-void AdvancedOptionsHandler::SetupPromptForDownload() {
-  base::FundamentalValue checked(ask_for_save_location_.GetValue());
-  // If either the DownloadDirectory is managed or if file-selection dialogs are
-  // disallowed then |ask_for_save_location_| must currently be false and cannot
-  // be changed.
-  base::FundamentalValue disabled(default_download_location_.IsManaged() ||
-                            !allow_file_selection_dialogs_.GetValue());
-  web_ui_->CallJavascriptFunction(
-      "options.AdvancedOptions.SetPromptForDownload", checked, disabled);
 }
 
 void AdvancedOptionsHandler::SetupAutoOpenFileTypesDisabledAttribute() {

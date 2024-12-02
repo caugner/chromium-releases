@@ -23,6 +23,7 @@
 #include "chrome/browser/media/media_internals.h"
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
 #include "chrome/browser/net/chrome_dns_cert_provenance_checker_factory.h"
+#include "chrome/browser/net/chrome_fraudulent_certificate_reporter.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/pref_proxy_config_service.h"
@@ -30,9 +31,9 @@
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/policy/url_blacklist_manager.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/transport_security_persister.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager_backend.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -42,6 +43,7 @@
 #include "content/browser/browser_thread.h"
 #include "content/browser/chrome_blob_storage_context.h"
 #include "content/browser/host_zoom_map.h"
+#include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/browser/resource_context.h"
@@ -55,9 +57,9 @@
 #include "net/url_request/url_request.h"
 #include "webkit/blob/blob_data.h"
 #include "webkit/blob/blob_url_request_job_factory.h"
+#include "webkit/database/database_tracker.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_url_request_job_factory.h"
-#include "webkit/database/database_tracker.h"
 #include "webkit/quota/quota_manager.h"
 
 #if defined(OS_CHROMEOS)
@@ -178,22 +180,16 @@ Profile* GetProfileOnUI(ProfileManager* profile_manager, Profile* profile) {
   return NULL;
 }
 
-prerender::PrerenderManager* GetPrerenderManagerOnUI(
-    const base::Callback<Profile*(void)>& profile_getter) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  Profile* profile = profile_getter.Run();
-  if (profile)
-    return profile->GetPrerenderManager();
-  return NULL;
-}
-
 }  // namespace
 
 void ProfileIOData::InitializeOnUIThread(Profile* profile) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   PrefService* pref_service = profile->GetPrefs();
 
+  next_download_id_thunk_ = profile->GetDownloadManager()->GetNextIdThunk();
+
   scoped_ptr<ProfileParams> params(new ProfileParams);
+  params->path = profile->GetPath();
   params->is_incognito = profile->IsOffTheRecord();
   params->clear_local_state_on_exit =
       pref_service->GetBoolean(prefs::kClearSiteDataOnExit);
@@ -225,7 +221,6 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
 
   params->host_content_settings_map = profile->GetHostContentSettingsMap();
   params->host_zoom_map = profile->GetHostZoomMap();
-  params->transport_security_state = profile->GetTransportSecurityState();
   params->ssl_config_service = profile->GetSSLConfigService();
   base::Callback<Profile*(void)> profile_getter =
       base::Bind(&GetProfileOnUI, g_browser_process->profile_manager(),
@@ -240,8 +235,6 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
   params->extension_info_map = profile->GetExtensionInfoMap();
   params->notification_service =
       DesktopNotificationServiceFactory::GetForProfile(profile);
-  params->prerender_manager_getter =
-      base::Bind(&GetPrerenderManagerOnUI, profile_getter);
   params->protocol_handler_registry = profile->GetProtocolHandlerRegistry();
 
   params->proxy_config_service.reset(
@@ -421,6 +414,9 @@ void ProfileIOData::LazyInitialize() const {
   dns_cert_checker_.reset(
       CreateDnsCertProvenanceChecker(io_thread_globals->dnsrr_resolver.get(),
                                      main_request_context_));
+  fraudulent_certificate_reporter_.reset(
+      new chrome_browser_net::ChromeFraudulentCertificateReporter(
+          main_request_context_));
 
   proxy_service_.reset(
       ProxyServiceFactory::CreateProxyService(
@@ -428,6 +424,13 @@ void ProfileIOData::LazyInitialize() const {
           io_thread_globals->proxy_script_fetcher_context.get(),
           profile_params_->proxy_config_service.release(),
           command_line));
+
+  transport_security_state_.reset(new net::TransportSecurityState(
+      command_line.GetSwitchValueASCII(switches::kHstsHosts)));
+  transport_security_persister_.reset(
+      new TransportSecurityPersister(transport_security_state_.get(),
+                                     profile_params_->path,
+                                     !profile_params_->is_incognito));
 
   // NOTE(willchan): Keep these protocol handlers in sync with
   // ProfileIOData::IsHandledProtocol().
@@ -473,6 +476,8 @@ void ProfileIOData::LazyInitialize() const {
     job_factory_->AddInterceptor(new chromeos::GViewRequestInterceptor);
 #endif  // defined(OS_CHROMEOS)
 
+  media_stream_manager_.reset(new media_stream::MediaStreamManager);
+
   // Take ownership over these parameters.
   database_tracker_ = profile_params_->database_tracker;
   appcache_service_ = profile_params_->appcache_service;
@@ -483,7 +488,6 @@ void ProfileIOData::LazyInitialize() const {
   host_content_settings_map_ = profile_params_->host_content_settings_map;
   notification_service_ = profile_params_->notification_service;
   extension_info_map_ = profile_params_->extension_info_map;
-  prerender_manager_getter_ = profile_params_->prerender_manager_getter;
 
   resource_context_.set_host_resolver(io_thread_globals->host_resolver.get());
   resource_context_.set_request_context(main_request_context_);
@@ -493,10 +497,11 @@ void ProfileIOData::LazyInitialize() const {
   resource_context_.set_file_system_context(file_system_context_);
   resource_context_.set_quota_manager(quota_manager_);
   resource_context_.set_host_zoom_map(host_zoom_map_);
-  resource_context_.set_prerender_manager_getter(prerender_manager_getter_);
   resource_context_.SetUserData(NULL, const_cast<ProfileIOData*>(this));
   resource_context_.set_media_observer(
       io_thread_globals->media.media_internals.get());
+  resource_context_.set_next_download_id_thunk(next_download_id_thunk_);
+  resource_context_.set_media_stream_manager(media_stream_manager_.get());
 
   LazyInitializeInternal(profile_params_.get());
 
@@ -510,8 +515,6 @@ void ProfileIOData::ApplyProfileParamsToContext(
   context->set_accept_language(profile_params_->accept_language);
   context->set_accept_charset(profile_params_->accept_charset);
   context->set_referrer_charset(profile_params_->referrer_charset);
-  context->set_transport_security_state(
-      profile_params_->transport_security_state);
   context->set_ssl_config_service(profile_params_->ssl_config_service);
 }
 

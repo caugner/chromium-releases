@@ -87,7 +87,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerDigest : public HttpAuthHandler {
   virtual int GenerateAuthTokenImpl(const string16* username,
                                     const string16* password,
                                     const HttpRequestInfo* request,
-                                    CompletionCallback* callback,
+                                    OldCompletionCallback* callback,
                                     std::string* auth_token);
 
  private:
@@ -168,6 +168,11 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerDigest : public HttpAuthHandler {
   bool stale_;
   DigestAlgorithm algorithm_;
   QualityOfProtection qop_;
+
+  // The realm as initially encoded over-the-wire. This is used in the
+  // challenge text, rather than |realm_| which has been converted to
+  // UTF-8.
+  std::string original_realm_;
 
   int nonce_count_;
   const NonceGenerator* nonce_generator_;

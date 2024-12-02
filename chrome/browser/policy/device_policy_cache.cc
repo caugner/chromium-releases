@@ -4,16 +4,19 @@
 
 #include "chrome/browser/policy/device_policy_cache.h"
 
+#include <limits>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/update_library.h"
-#include "chrome/browser/chromeos/cros_settings_names.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
 #include "chrome/browser/chromeos/user_cros_settings_provider.h"
 #include "chrome/browser/policy/cloud_policy_data_store.h"
@@ -32,11 +35,11 @@ namespace {
 class StorePolicyOperation : public chromeos::SignedSettingsHelper::Callback,
                              public chromeos::OwnerManager::KeyUpdateDelegate {
  public:
-  typedef Callback1<chromeos::SignedSettings::ReturnCode>::Type Callback;
+  typedef base::Callback<void(chromeos::SignedSettings::ReturnCode)> Callback;
 
   StorePolicyOperation(chromeos::SignedSettingsHelper* signed_settings_helper,
                        const em::PolicyFetchResponse& policy,
-                       Callback* callback)
+                       const Callback& callback)
       : signed_settings_helper_(signed_settings_helper),
         policy_(policy),
         callback_(callback) {
@@ -50,7 +53,7 @@ class StorePolicyOperation : public chromeos::SignedSettingsHelper::Callback,
   virtual void OnStorePolicyCompleted(
       chromeos::SignedSettings::ReturnCode code) OVERRIDE {
     if (code != chromeos::SignedSettings::SUCCESS) {
-      callback_->Run(code);
+      callback_.Run(code);
       delete this;
       return;
     }
@@ -66,7 +69,7 @@ class StorePolicyOperation : public chromeos::SignedSettingsHelper::Callback,
       return;
     } else {
       UpdateUserCrosSettings();
-      callback_->Run(chromeos::SignedSettings::SUCCESS);
+      callback_.Run(chromeos::SignedSettings::SUCCESS);
       delete this;
       return;
     }
@@ -75,7 +78,7 @@ class StorePolicyOperation : public chromeos::SignedSettingsHelper::Callback,
   // OwnerManager::KeyUpdateDelegate implementation:
   virtual void OnKeyUpdated() OVERRIDE {
     UpdateUserCrosSettings();
-    callback_->Run(chromeos::SignedSettings::SUCCESS);
+    callback_.Run(chromeos::SignedSettings::SUCCESS);
     delete this;
   }
 
@@ -89,7 +92,7 @@ class StorePolicyOperation : public chromeos::SignedSettingsHelper::Callback,
 
   chromeos::SignedSettingsHelper* signed_settings_helper_;
   em::PolicyFetchResponse policy_;
-  scoped_ptr<Callback> callback_;
+  Callback callback_;
 
   DISALLOW_COPY_AND_ASSIGN(StorePolicyOperation);
 };
@@ -117,7 +120,7 @@ DevicePolicyCache::DevicePolicyCache(
     : data_store_(data_store),
       install_attributes_(install_attributes),
       signed_settings_helper_(chromeos::SignedSettingsHelper::Get()),
-      ALLOW_THIS_IN_INITIALIZER_LIST(callback_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
 }
 
 DevicePolicyCache::DevicePolicyCache(
@@ -127,7 +130,7 @@ DevicePolicyCache::DevicePolicyCache(
     : data_store_(data_store),
       install_attributes_(install_attributes),
       signed_settings_helper_(signed_settings_helper),
-      ALLOW_THIS_IN_INITIALIZER_LIST(callback_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
 }
 
 DevicePolicyCache::~DevicePolicyCache() {
@@ -177,10 +180,10 @@ void DevicePolicyCache::SetPolicy(const em::PolicyFetchResponse& policy) {
   set_last_policy_refresh_time(base::Time::NowFromSystemTime());
 
   // Start a store operation.
-  new StorePolicyOperation(signed_settings_helper_,
-                           policy,
-                           callback_factory_.NewCallback(
-                               &DevicePolicyCache::PolicyStoreOpCompleted));
+  StorePolicyOperation::Callback callback =
+      base::Bind(&DevicePolicyCache::PolicyStoreOpCompleted,
+                 weak_ptr_factory_.GetWeakPtr());
+  new StorePolicyOperation(signed_settings_helper_, policy, callback);
 }
 
 void DevicePolicyCache::SetUnmanaged() {
@@ -341,13 +344,20 @@ void DevicePolicyCache::DecodeDevicePolicy(
 
   if (policy.has_release_channel() &&
       policy.release_channel().has_release_channel()) {
-    std::string channel = policy.release_channel().release_channel();
-    mandatory->Set(
-        kPolicyChromeOsReleaseChannel, Value::CreateStringValue(channel));
+    std::string channel(policy.release_channel().release_channel());
+    mandatory->Set(kPolicyChromeOsReleaseChannel,
+                   Value::CreateStringValue(channel));
     // TODO(dubroy): Once http://crosbug.com/17015 is implemented, we won't
     // have to pass the channel in here, only ping the update engine to tell
     // it to fetch the channel from the policy.
     chromeos::CrosLibrary::Get()->GetUpdateLibrary()->SetReleaseTrack(channel);
+  }
+
+  if (policy.has_network_configuration() &&
+      policy.network_configuration().has_network_configuration()) {
+    std::string config(policy.network_configuration().network_configuration());
+    mandatory->Set(kPolicyDeviceNetworkConfiguration,
+                   Value::CreateStringValue(config));
   }
 }
 

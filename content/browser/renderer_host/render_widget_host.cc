@@ -10,6 +10,7 @@
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/stats_counters.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/accessibility/browser_accessibility_state.h"
 #include "content/browser/gpu/gpu_process_host.h"
@@ -19,15 +20,17 @@
 #include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/content_switches.h"
 #include "content/common/gpu/gpu_messages.h"
-#include "content/common/native_web_keyboard_event.h"
 #include "content/common/notification_service.h"
 #include "content/common/result_codes.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/browser/notification_types.h"
+#include "content/public/common/content_switches.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "webkit/glue/webcursor.h"
+#include "webkit/glue/webpreferences.h"
 #include "webkit/plugins/npapi/webplugin.h"
 
 using base::Time;
@@ -54,6 +57,21 @@ static const int kHungRendererDelayMs = 20000;
 // smoothness of scrolling with a risk of falling behind the events, resulting
 // in trailing scrolls after the user ends their input.
 static const int kMaxTimeBetweenWheelMessagesMs = 250;
+
+namespace {
+
+// Returns |true| if the two wheel events should be coalesced.
+bool ShouldCoalesceMouseWheelEvents(const WebMouseWheelEvent& last_event,
+                                    const WebMouseWheelEvent& new_event) {
+  return last_event.modifiers == new_event.modifiers &&
+         last_event.scrollByPage == new_event.scrollByPage &&
+         last_event.hasPreciseScrollingDeltas
+             == new_event.hasPreciseScrollingDeltas &&
+         last_event.phase == new_event.phase &&
+         last_event.momentumPhase == new_event.momentumPhase;
+}
+
+}  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHost
@@ -82,7 +100,8 @@ RenderWidgetHost::RenderWidgetHost(RenderProcessHost* process,
       text_direction_updated_(false),
       text_direction_(WebKit::WebTextDirectionLeftToRight),
       text_direction_canceled_(false),
-      suppress_next_char_events_(false) {
+      suppress_next_char_events_(false),
+      pending_mouse_lock_request_(false) {
   if (routing_id_ == MSG_ROUTING_NONE)
     routing_id_ = process_->GetNextRoutingID();
 
@@ -175,14 +194,16 @@ bool RenderWidgetHost::OnMessageReceived(const IPC::Message &msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_Focus, OnMsgFocus)
     IPC_MESSAGE_HANDLER(ViewHostMsg_Blur, OnMsgBlur)
     IPC_MESSAGE_HANDLER(ViewHostMsg_SetCursor, OnMsgSetCursor)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_ImeUpdateTextInputState,
-                        OnMsgImeUpdateTextInputState)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_TextInputStateChanged,
+                        OnMsgTextInputStateChanged)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ImeCompositionRangeChanged,
                         OnMsgImeCompositionRangeChanged)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ImeCancelComposition,
                         OnMsgImeCancelComposition)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidActivateAcceleratedCompositing,
                         OnMsgDidActivateAcceleratedCompositing)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_LockMouse, OnMsgLockMouse)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_UnlockMouse, OnMsgUnlockMouse)
 #if defined(OS_POSIX)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetScreenInfo, OnMsgGetScreenInfo)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetWindowRect, OnMsgGetWindowRect)
@@ -239,11 +260,6 @@ void RenderWidgetHost::WasHidden() {
       0,
       content::CAUSE_FOR_GPU_LAUNCH_NO_LAUNCH,
       new GpuMsg_VisibilityChanged(routing_id_, process()->id(), false));
-
-  // TODO(darin): what about constrained windows?  it doesn't look like they
-  // see a message when their parent is hidden.  maybe there is something more
-  // generic we can do at the TabContents API level instead of relying on
-  // Windows messages.
 
   // Tell the RenderProcessHost we were hidden.
   process_->WidgetHidden();
@@ -339,7 +355,8 @@ void RenderWidgetHost::WasResized() {
   // only reserved area is changed.
   resize_ack_pending_ = !new_size.IsEmpty() && new_size != current_size_;
 
-  if (!Send(new ViewMsg_Resize(routing_id_, new_size, reserved_rect))) {
+  if (!Send(new ViewMsg_Resize(routing_id_, new_size, reserved_rect,
+                               IsFullscreen()))) {
     resize_ack_pending_ = false;
   } else {
     if (resize_ack_pending_) {
@@ -365,6 +382,12 @@ void RenderWidgetHost::Focus() {
 }
 
 void RenderWidgetHost::Blur() {
+  // If there is a pending mouse lock request, we don't want to reject it at
+  // this point. The user can switch focus back to this view and approve the
+  // request later.
+  if (IsMouseLocked())
+    view_->UnlockMouse();
+
   Send(new ViewMsg_SetFocus(routing_id_, false));
 }
 
@@ -372,7 +395,13 @@ void RenderWidgetHost::LostCapture() {
   Send(new ViewMsg_MouseCaptureLost(routing_id_));
 }
 
+void RenderWidgetHost::LostMouseLock() {
+  Send(new ViewMsg_MouseLockLost(routing_id_));
+}
+
 void RenderWidgetHost::ViewDestroyed() {
+  RejectMouseLockOrUnlockIfNecessary();
+
   // TODO(evanm): tracking this may no longer be necessary;
   // eliminate this function if so.
   SetView(NULL);
@@ -511,7 +540,16 @@ void RenderWidgetHost::ForwardMouseEvent(const WebMouseEvent& mouse_event) {
   // more WM_MOUSEMOVE events than we wish to send to the renderer.
   if (mouse_event.type == WebInputEvent::MouseMove) {
     if (mouse_move_pending_) {
-      next_mouse_move_.reset(new WebMouseEvent(mouse_event));
+      if (!next_mouse_move_.get()) {
+        next_mouse_move_.reset(new WebMouseEvent(mouse_event));
+      } else {
+        // Accumulate movement deltas.
+        int x = next_mouse_move_->movementX;
+        int y = next_mouse_move_->movementY;
+        *next_mouse_move_ = mouse_event;
+        next_mouse_move_->movementX += x;
+        next_mouse_move_->movementY += y;
+      }
       return;
     }
     mouse_move_pending_ = true;
@@ -537,10 +575,8 @@ void RenderWidgetHost::ForwardWheelEvent(
   // which many, very small wheel events are sent).
   if (mouse_wheel_pending_) {
     if (coalesced_mouse_wheel_events_.empty() ||
-        coalesced_mouse_wheel_events_.back().modifiers
-            != wheel_event.modifiers ||
-        coalesced_mouse_wheel_events_.back().scrollByPage
-            != wheel_event.scrollByPage) {
+        !ShouldCoalesceMouseWheelEvents(coalesced_mouse_wheel_events_.back(),
+                                        wheel_event)) {
       coalesced_mouse_wheel_events_.push_back(wheel_event);
     } else {
       WebMouseWheelEvent* last_wheel_event =
@@ -754,16 +790,46 @@ void RenderWidgetHost::ImeSetComposition(
 }
 
 void RenderWidgetHost::ImeConfirmComposition(const string16& text) {
-  Send(new ViewMsg_ImeConfirmComposition(routing_id(), text));
+  ImeConfirmComposition(text, ui::Range::InvalidRange());
+}
+
+void RenderWidgetHost::ImeConfirmComposition(
+    const string16& text, const ui::Range& replacement_range) {
+  Send(new ViewMsg_ImeConfirmComposition(
+        routing_id(), text, replacement_range));
 }
 
 void RenderWidgetHost::ImeConfirmComposition() {
-  Send(new ViewMsg_ImeConfirmComposition(routing_id(), string16()));
+  ImeConfirmComposition(string16());
 }
 
 void RenderWidgetHost::ImeCancelComposition() {
   Send(new ViewMsg_ImeSetComposition(routing_id(), string16(),
             std::vector<WebKit::WebCompositionUnderline>(), 0, 0));
+}
+
+void RenderWidgetHost::RequestToLockMouse() {
+  // Directly reject to lock the mouse. Subclass can override this method to
+  // decide whether to allow mouse lock or not.
+  GotResponseToLockMouseRequest(false);
+}
+
+void RenderWidgetHost::RejectMouseLockOrUnlockIfNecessary() {
+  DCHECK(!pending_mouse_lock_request_ || !IsMouseLocked());
+  if (pending_mouse_lock_request_) {
+    pending_mouse_lock_request_ = false;
+    Send(new ViewMsg_LockMouse_ACK(routing_id_, false));
+  } else if (IsMouseLocked()) {
+    view_->UnlockMouse();
+  }
+}
+
+bool RenderWidgetHost::IsMouseLocked() const {
+  return view_ ? view_->mouse_locked() : false;
+}
+
+bool RenderWidgetHost::IsFullscreen() const {
+  return false;
 }
 
 void RenderWidgetHost::Destroy() {
@@ -854,7 +920,7 @@ void RenderWidgetHost::OnMsgSetTooltipText(
     }
   }
   if (view())
-    view()->SetTooltipText(UTF16ToWide(wrapped_tooltip_text));
+    view()->SetTooltipText(wrapped_tooltip_text);
 }
 
 void RenderWidgetHost::OnMsgRequestMove(const gfx::Rect& pos) {
@@ -989,7 +1055,8 @@ void RenderWidgetHost::OnMsgUpdateRect(
   UMA_HISTOGRAM_TIMES("MPArch.RWH_OnMsgUpdateRect", delta);
 }
 
-void RenderWidgetHost::OnMsgInputEventAck(const IPC::Message& message) {
+void RenderWidgetHost::OnMsgInputEventAck(WebInputEvent::Type event_type,
+                                          bool processed) {
   TRACE_EVENT0("renderer_host", "RenderWidgetHost::OnMsgInputEventAck");
 
   // Log the time delta for processing an input event.
@@ -999,9 +1066,8 @@ void RenderWidgetHost::OnMsgInputEventAck(const IPC::Message& message) {
   // Cancel pending hung renderer checks since the renderer is responsive.
   StopHangMonitorTimeout();
 
-  void* iter = NULL;
-  int type = 0;
-  if (!message.ReadInt(&iter, &type) || (type < WebInputEvent::Undefined)) {
+  int type = static_cast<int>(event_type);
+  if (type < WebInputEvent::Undefined) {
     UserMetrics::RecordAction(UserMetricsAction("BadMessageTerminate_RWH2"));
     process()->ReceivedBadMessage();
   } else if (type == WebInputEvent::MouseMove) {
@@ -1013,20 +1079,8 @@ void RenderWidgetHost::OnMsgInputEventAck(const IPC::Message& message) {
       ForwardMouseEvent(*next_mouse_move_);
     }
   } else if (WebInputEvent::isKeyboardEventType(type)) {
-    bool processed = false;
-    if (!message.ReadBool(&iter, &processed)) {
-      UserMetrics::RecordAction(UserMetricsAction("BadMessageTerminate_RWH3"));
-      process()->ReceivedBadMessage();
-    }
-
     ProcessKeyboardEventAck(type, processed);
   } else if (type == WebInputEvent::MouseWheel) {
-    bool processed = false;
-    if (!message.ReadBool(&iter, &processed)) {
-      UserMetrics::RecordAction(UserMetricsAction("BadMessageTerminate_RWH4"));
-      process()->ReceivedBadMessage();
-    }
-
     ProcessWheelAck(processed);
   } else if (type == WebInputEvent::TouchMove) {
     touch_move_pending_ = false;
@@ -1076,12 +1130,11 @@ void RenderWidgetHost::OnMsgSetCursor(const WebCursor& cursor) {
   view_->UpdateCursor(cursor);
 }
 
-void RenderWidgetHost::OnMsgImeUpdateTextInputState(
+void RenderWidgetHost::OnMsgTextInputStateChanged(
     ui::TextInputType type,
-    bool can_compose_inline,
-    const gfx::Rect& caret_rect) {
+    bool can_compose_inline) {
   if (view_)
-    view_->ImeUpdateTextInputState(type, can_compose_inline, caret_rect);
+    view_->TextInputStateChanged(type, can_compose_inline);
 }
 
 void RenderWidgetHost::OnMsgImeCompositionRangeChanged(const ui::Range& range) {
@@ -1109,6 +1162,23 @@ void RenderWidgetHost::OnMsgDidActivateAcceleratedCompositing(bool activated) {
   if (view_)
     view_->AcceleratedCompositingActivated(activated);
 #endif
+}
+
+void RenderWidgetHost::OnMsgLockMouse() {
+  if (pending_mouse_lock_request_) {
+    Send(new ViewMsg_LockMouse_ACK(routing_id_, false));
+    return;
+  } else if (IsMouseLocked()) {
+    Send(new ViewMsg_LockMouse_ACK(routing_id_, true));
+    return;
+  }
+
+  pending_mouse_lock_request_ = true;
+  RequestToLockMouse();
+}
+
+void RenderWidgetHost::OnMsgUnlockMouse() {
+  RejectMouseLockOrUnlockIfNecessary();
 }
 
 #if defined(OS_POSIX)
@@ -1193,6 +1263,7 @@ void RenderWidgetHost::EnableRendererAccessibility() {
     return;
   }
 
+  SIMPLE_STATS_COUNTER("Accessibility.SessionCount");
   renderer_accessible_ = true;
 
   if (process_->HasConnection()) {
@@ -1237,6 +1308,7 @@ void RenderWidgetHost::ProcessKeyboardEventAck(int type, bool processed) {
 }
 
 void RenderWidgetHost::ActivateDeferredPluginHandles() {
+#if !defined(USE_AURA)
   if (view_ == NULL)
     return;
 
@@ -1247,8 +1319,114 @@ void RenderWidgetHost::ActivateDeferredPluginHandles() {
   }
 
   deferred_plugin_handles_.clear();
+#endif
 }
 
 void RenderWidgetHost::StartUserGesture() {
   OnUserGesture();
+}
+
+void RenderWidgetHost::Stop() {
+  Send(new ViewMsg_Stop(routing_id()));
+}
+
+void RenderWidgetHost::SetBackground(const SkBitmap& background) {
+  Send(new ViewMsg_SetBackground(routing_id(), background));
+}
+
+void RenderWidgetHost::SetEditCommandsForNextKeyEvent(
+    const std::vector<EditCommand>& commands) {
+  Send(new ViewMsg_SetEditCommandsForNextKeyEvent(routing_id(), commands));
+}
+
+void RenderWidgetHost::AccessibilityDoDefaultAction(int object_id) {
+  Send(new ViewMsg_AccessibilityDoDefaultAction(routing_id(), object_id));
+}
+
+void RenderWidgetHost::AccessibilitySetFocus(int object_id) {
+  Send(new ViewMsg_SetAccessibilityFocus(routing_id(), object_id));
+}
+
+void RenderWidgetHost::ExecuteEditCommand(const std::string& command,
+                                          const std::string& value) {
+  Send(new ViewMsg_ExecuteEditCommand(routing_id(), command, value));
+}
+
+void RenderWidgetHost::ScrollFocusedEditableNodeIntoRect(
+    const gfx::Rect& rect) {
+  Send(new ViewMsg_ScrollFocusedEditableNodeIntoRect(routing_id(), rect));
+}
+
+void RenderWidgetHost::SelectRange(const gfx::Point& start,
+                                   const gfx::Point& end) {
+  Send(new ViewMsg_SelectRange(routing_id(), start, end));
+}
+
+void RenderWidgetHost::Undo() {
+  Send(new ViewMsg_Undo(routing_id()));
+  UserMetrics::RecordAction(UserMetricsAction("Undo"));
+}
+
+void RenderWidgetHost::Redo() {
+  Send(new ViewMsg_Redo(routing_id()));
+  UserMetrics::RecordAction(UserMetricsAction("Redo"));
+}
+
+void RenderWidgetHost::Cut() {
+  Send(new ViewMsg_Cut(routing_id()));
+  UserMetrics::RecordAction(UserMetricsAction("Cut"));
+}
+
+void RenderWidgetHost::Copy() {
+  Send(new ViewMsg_Copy(routing_id()));
+  UserMetrics::RecordAction(UserMetricsAction("Copy"));
+}
+
+void RenderWidgetHost::CopyToFindPboard() {
+#if defined(OS_MACOSX)
+  // Windows/Linux don't have the concept of a find pasteboard.
+  Send(new ViewMsg_CopyToFindPboard(routing_id()));
+  UserMetrics::RecordAction(UserMetricsAction("CopyToFindPboard"));
+#endif
+}
+
+void RenderWidgetHost::Paste() {
+  Send(new ViewMsg_Paste(routing_id()));
+  UserMetrics::RecordAction(UserMetricsAction("Paste"));
+}
+
+void RenderWidgetHost::PasteAndMatchStyle() {
+  Send(new ViewMsg_PasteAndMatchStyle(routing_id()));
+  UserMetrics::RecordAction(UserMetricsAction("PasteAndMatchStyle"));
+}
+
+void RenderWidgetHost::Delete() {
+  Send(new ViewMsg_Delete(routing_id()));
+  UserMetrics::RecordAction(UserMetricsAction("DeleteSelection"));
+}
+
+void RenderWidgetHost::SelectAll() {
+  Send(new ViewMsg_SelectAll(routing_id()));
+  UserMetrics::RecordAction(UserMetricsAction("SelectAll"));
+}
+bool RenderWidgetHost::GotResponseToLockMouseRequest(bool allowed) {
+  if (!allowed) {
+    RejectMouseLockOrUnlockIfNecessary();
+    return false;
+  } else {
+    if (!pending_mouse_lock_request_) {
+      // This is possible, e.g., the plugin sends us an unlock request before
+      // the user allows to lock to mouse.
+      return false;
+    }
+
+    pending_mouse_lock_request_ = false;
+    if (!view_ || !view_->HasFocus()|| !view_->LockMouse()) {
+      Send(new ViewMsg_LockMouse_ACK(routing_id_, false));
+      return false;
+    } else {
+      Send(new ViewMsg_LockMouse_ACK(routing_id_, true));
+      return true;
+    }
+  }
 }

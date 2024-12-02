@@ -88,12 +88,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentSettings) {
                 url, url, CONTENT_SETTINGS_TYPE_NOTIFICATIONS, ""));
 }
 
+// Flaky on the trybots. See http://crbug.com/96725.
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
-                       ContentSettingsGetResourceIdentifiers) {
+                       FLAKY_ContentSettingsGetResourceIdentifiers) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableExperimentalExtensionApis);
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableResourceContentSettings);
 
   FilePath::CharType kFooPath[] = FILE_PATH_LITERAL("/plugins/foo.plugin");
   FilePath::CharType kBarPath[] = FILE_PATH_LITERAL("/plugins/bar.plugin");
@@ -116,10 +115,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
                             FilePath(kBarPath),
                             ASCIIToUTF16("2.3.4"),
                             ASCIIToUTF16("bar")));
-  GetResourceIdentifiersFunction::SetPluginListForTesting(&plugin_list);
+
+  std::vector<webkit::npapi::PluginGroup> groups;
+  plugin_list.GetPluginGroups(true, &groups);
+
+  GetResourceIdentifiersFunction::SetPluginGroupsForTesting(&groups);
 
   EXPECT_TRUE(RunExtensionTest("content_settings/getresourceidentifiers"))
       << message_;
 
-  GetResourceIdentifiersFunction::SetPluginListForTesting(NULL);
+  GetResourceIdentifiersFunction::SetPluginGroupsForTesting(NULL);
 }

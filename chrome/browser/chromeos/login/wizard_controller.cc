@@ -4,13 +4,13 @@
 
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 
-#include <gdk/gdk.h>
 #include <signal.h>
 #include <sys/types.h>
 
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
@@ -40,8 +40,8 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/options/options_util.h"
 #include "chrome/common/pref_names.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "views/accelerator.h"
 
@@ -436,9 +436,8 @@ void WizardController::OnUserImageSelected() {
   BrowserThread::PostTask(
       BrowserThread::UI,
       FROM_HERE,
-      NewRunnableFunction(&chromeos::LoginUtils::DoBrowserLaunch,
-                          ProfileManager::GetDefaultProfile(),
-                          host_));
+      base::Bind(&chromeos::LoginUtils::DoBrowserLaunch,
+                 ProfileManager::GetDefaultProfile(), host_));
   host_ = NULL;
   // TODO(avayvod): Sync image with Google Sync.
 }
@@ -592,7 +591,7 @@ bool WizardController::IsDeviceRegistered() {
     BrowserThread::PostTask(
         BrowserThread::FILE,
         FROM_HERE,
-        NewRunnableFunction(&CreateOobeCompleteFlagFile));
+        base::Bind(&CreateOobeCompleteFlagFile));
     return true;
   } else if (value == 0) {
     return false;
@@ -613,7 +612,7 @@ void WizardController::MarkDeviceRegistered() {
   BrowserThread::PostTask(
       BrowserThread::FILE,
       FROM_HERE,
-      NewRunnableFunction(&CreateOobeCompleteFlagFile));
+      base::Bind(&CreateOobeCompleteFlagFile));
 }
 
 // static

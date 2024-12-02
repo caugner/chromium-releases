@@ -8,8 +8,8 @@
 #include <map>
 #include <set>
 
+#include "base/location.h"
 #include "base/metrics/histogram.h"
-#include "base/tracked.h"
 #include "chrome/browser/sync/engine/syncer.h"
 #include "chrome/browser/sync/engine/syncer_util.h"
 #include "chrome/browser/sync/protocol/service_constants.h"
@@ -185,7 +185,7 @@ namespace {
 bool AttemptToFixCircularConflict(WriteTransaction* trans,
                                   ConflictSet* conflict_set) {
   UMA_HISTOGRAM_COUNTS("Sync.ConflictFixCircularity", 1);
-  ConflictSet::const_iterator i, j;
+  ConflictSet::const_iterator i;
   for (i = conflict_set->begin() ; i != conflict_set->end() ; ++i) {
     MutableEntry entryi(trans, syncable::GET_BY_ID, *i);
     if (entryi.Get(syncable::PARENT_ID) ==
@@ -350,7 +350,7 @@ bool AttemptToFixUpdateEntryInDeletedLocalTree(WriteTransaction* trans,
 bool AttemptToFixRemovedDirectoriesWithContent(WriteTransaction* trans,
                                                ConflictSet* conflict_set) {
   UMA_HISTOGRAM_COUNTS("Sync.ConflictFixRemovedDirectoriesWithContent", 1);
-  ConflictSet::const_iterator i, j;
+  ConflictSet::const_iterator i;
   for (i = conflict_set->begin() ; i != conflict_set->end() ; ++i) {
     Entry entry(trans, syncable::GET_BY_ID, *i);
     if (AttemptToFixUnsyncedEntryInDeletedServerTree(trans,

@@ -142,28 +142,24 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PopupBlockingHostedApp) {
           .ReplaceComponents(replace_host);
 
   browser()->OpenURL(open_tab, GURL(), NEW_FOREGROUND_TAB,
-                     PageTransition::TYPED);
+                     content::PAGE_TRANSITION_TYPED);
   browser()->OpenURL(open_popup, GURL(), NEW_FOREGROUND_TAB,
-                     PageTransition::TYPED);
+                     content::PAGE_TRANSITION_TYPED);
 
   WaitForTabsAndPopups(browser(), 3, 1);
 }
-
-#if defined(OS_MACOSX) || defined(OS_WIN)
-// Focus test fails if there is no window manager on Linux.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowOpenFocus) {
-  ASSERT_TRUE(RunExtensionTest("window_open/focus")) << message_;
-}
-#endif
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowArgumentsOverflow) {
   ASSERT_TRUE(RunExtensionTest("window_open/argument_overflow")) << message_;
 }
 
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowOpenPanelNotEnabled) {
+  ASSERT_TRUE(RunExtensionTest("window_open/panel_not_enabled")) << message_;
+}
+
 class WindowOpenPanelTest : public ExtensionApiTest {
   virtual void SetUpCommandLine(CommandLine* command_line) {
     ExtensionApiTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
     command_line->AppendSwitch(switches::kEnablePanels);
   }
 };
@@ -171,6 +167,13 @@ class WindowOpenPanelTest : public ExtensionApiTest {
 IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, WindowOpenPanel) {
   ASSERT_TRUE(RunExtensionTest("window_open/panel")) << message_;
 }
+
+#if defined(OS_MACOSX) || defined(OS_WIN)
+// Focus test fails if there is no window manager on Linux.
+IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, WindowOpenFocus) {
+  ASSERT_TRUE(RunExtensionTest("window_open/focus")) << message_;
+}
+#endif
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowOpener) {
   ASSERT_TRUE(RunExtensionTest("window_open/opener")) << message_;

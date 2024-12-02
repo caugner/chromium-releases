@@ -9,30 +9,35 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
-#include "ui/base/models/simple_menu_model.h"
+#include "ui/base/animation/animation_delegate.h"
 #include "views/controls/button/button.h"
-#include "views/controls/menu/menu_item_view.h"
-#include "views/controls/menu/menu_model_adapter.h"
-#include "views/controls/menu/menu_runner.h"
 #include "views/controls/menu/view_menu_delegate.h"
 
 class Extension;
 class PanelBrowserView;
+class PanelSettingsMenuModel;
+namespace gfx {
+class Font;
+}
+namespace ui {
+class SlideAnimation;
+}
 namespace views {
 class ImageButton;
 class Label;
 class MenuButton;
+class MenuItemView;
+class MenuModelAdapter;
+class MenuRunner;
 }
 
 class PanelBrowserFrameView : public BrowserNonClientFrameView,
                               public views::ButtonListener,
                               public views::ViewMenuDelegate,
-                              public ui::SimpleMenuModel::Delegate,
                               public TabIconView::TabIconViewModel,
-                              public ExtensionUninstallDialog::Delegate {
+                              public ui::AnimationDelegate {
  public:
   PanelBrowserFrameView(BrowserFrame* frame, PanelBrowserView* browser_view);
   virtual ~PanelBrowserFrameView();
@@ -43,9 +48,6 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
   // Returns the height of the entire nonclient top border, including the window
   // frame, any title area, and any connected client edge.
   int NonClientTopBorderHeight() const;
-
-  // Returns the height of the panel in minimized state.
-  static int MinimizedPanelHeight();
 
   // Returns the size of the non-client area, that is, the window size minus
   // the size of the client area.
@@ -86,39 +88,24 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
   // Overridden from views::ViewMenuDelegate:
   virtual void RunMenu(View* source, const gfx::Point& pt) OVERRIDE;
 
-  // Overridden from ui::SimpleMenuModel::Delegate:
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
-  virtual bool GetAcceleratorForCommandId(
-      int command_id, ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id) OVERRIDE;
-
   // Overridden from TabIconView::TabIconViewModel:
   virtual bool ShouldTabIconViewAnimate() const OVERRIDE;
   virtual SkBitmap GetFaviconForTabIconView() OVERRIDE;
 
-  // ExtensionUninstallDialog::Delegate:
-  virtual void ExtensionDialogAccepted() OVERRIDE;
-  virtual void ExtensionDialogCanceled() OVERRIDE;
+  // Overridden from AnimationDelegate:
+  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
+  virtual void AnimationCanceled(const ui::Animation* animation) OVERRIDE;
 
  private:
   friend class PanelBrowserViewTest;
-  FRIEND_TEST_ALL_PREFIXES(PanelBrowserViewTest, CreatePanel);
-  FRIEND_TEST_ALL_PREFIXES(PanelBrowserViewTest, ShowOrHideSettingsButton);
+  friend class NativePanelTestingWin;
 
   enum PaintState {
     NOT_PAINTED,
     PAINT_AS_INACTIVE,
     PAINT_AS_ACTIVE,
     PAINT_FOR_ATTENTION
-  };
-
-  enum {
-    COMMAND_NAME = 0,
-    COMMAND_CONFIGURE,
-    COMMAND_DISABLE,
-    COMMAND_UNINSTALL,
-    COMMAND_MANAGE
   };
 
   class MouseWatcher : public MessageLoopForUI::Observer {
@@ -128,11 +115,12 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
 
     virtual bool IsCursorInViewBounds() const;
 
-  #if defined(OS_WIN)
-    virtual void WillProcessMessage(const MSG& msg) OVERRIDE { }
-    virtual void DidProcessMessage(const MSG& msg) OVERRIDE;
-  #else
-    virtual void WillProcessEvent(GdkEvent* event) OVERRIDE { }
+  #if defined(OS_WIN) || defined(TOUCH_UI) || defined(USE_AURA)
+    virtual base::EventStatus WillProcessEvent(
+        const base::NativeEvent& event) OVERRIDE;
+    virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
+  #elif defined(TOOLKIT_USES_GTK)
+    virtual void WillProcessEvent(GdkEvent* event) OVERRIDE;
     virtual void DidProcessEvent(GdkEvent* event) OVERRIDE;
   #endif
 
@@ -171,9 +159,13 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
 
   const Extension* GetExtension() const;
 
-  void EnsureSettingsMenuCreated();
+  bool EnsureSettingsMenuCreated();
 
 #ifdef UNIT_TEST
+  PanelSettingsMenuModel* settings_menu_model() const {
+    return settings_menu_model_.get();
+  }
+
   void set_mouse_watcher(MouseWatcher* mouse_watcher) {
     mouse_watcher_.reset(mouse_watcher);
   }
@@ -190,18 +182,21 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
 
   PaintState paint_state_;
   views::MenuButton* settings_button_;
-  bool is_settings_button_visible_;
   views::ImageButton* close_button_;
   TabIconView* title_icon_;
   views::Label* title_label_;
   gfx::Rect client_view_bounds_;
   scoped_ptr<MouseWatcher> mouse_watcher_;
-  ui::SimpleMenuModel settings_menu_contents_;
-  views::MenuModelAdapter settings_menu_adapter_;
-  // Owned by |settings_menu_runner_|.
-  views::MenuItemView* settings_menu_;
-  views::MenuRunner settings_menu_runner_;
-  scoped_ptr<ExtensionUninstallDialog> extension_uninstall_dialog_;
+  scoped_ptr<PanelSettingsMenuModel> settings_menu_model_;
+  scoped_ptr<views::MenuModelAdapter> settings_menu_adapter_;
+  views::MenuItemView* settings_menu_;  // Owned by |settings_menu_runner_|.
+  scoped_ptr<views::MenuRunner> settings_menu_runner_;
+
+  // Used to animate the visibility change of settings button.
+  scoped_ptr<ui::SlideAnimation> settings_button_animator_;
+  gfx::Rect settings_button_full_bounds_;
+  gfx::Rect settings_button_zero_bounds_;
+  bool is_settings_button_visible_;
 
   DISALLOW_COPY_AND_ASSIGN(PanelBrowserFrameView);
 };

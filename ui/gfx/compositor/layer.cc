@@ -7,17 +7,45 @@
 #include <algorithm>
 
 #include "base/logging.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
+#include "ui/base/animation/animation.h"
+#include "ui/gfx/compositor/layer_animator.h"
 #include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/interpolated_transform.h"
 #include "ui/gfx/point3.h"
+
+namespace {
+
+const float EPSILON = 1e-3f;
+
+bool IsApproximateMultilpleOf(float value, float base) {
+  float remainder = fmod(fabs(value), base);
+  return remainder < EPSILON || base - remainder < EPSILON;
+}
+
+}  // namespace
 
 namespace ui {
 
 Layer::Layer(Compositor* compositor)
-    : compositor_(compositor),
-      texture_(compositor->CreateTexture()),
+    : type_(LAYER_HAS_TEXTURE),
+      compositor_(compositor),
       parent_(NULL),
-      fills_bounds_opaquely_(false),
+      visible_(true),
+      fills_bounds_opaquely_(true),
+      layer_updated_externally_(false),
+      opacity_(1.0f),
+      delegate_(NULL) {
+}
+
+Layer::Layer(Compositor* compositor, LayerType type)
+    : type_(type),
+      compositor_(compositor),
+      parent_(NULL),
+      visible_(true),
+      fills_bounds_opaquely_(true),
+      layer_updated_externally_(false),
+      opacity_(1.0f),
       delegate_(NULL) {
 }
 
@@ -28,14 +56,26 @@ Layer::~Layer() {
     children_[i]->parent_ = NULL;
 }
 
+Compositor* Layer::GetCompositor() {
+  return compositor_ ? compositor_ : parent_ ? parent_->GetCompositor() : NULL;
+}
+
+void Layer::SetCompositor(Compositor* compositor) {
+  // This function must only be called once, with a valid compositor, and only
+  // for the compositor's root layer.
+  DCHECK(!compositor_);
+  DCHECK(compositor);
+  DCHECK_EQ(compositor->root_layer(), this);
+  compositor_ = compositor;
+}
+
 void Layer::Add(Layer* child) {
   if (child->parent_)
     child->parent_->Remove(child);
   child->parent_ = this;
   children_.push_back(child);
 
-  if (child->fills_bounds_opaquely())
-    RecomputeHole();
+  RecomputeHole();
 }
 
 void Layer::Remove(Layer* child) {
@@ -45,8 +85,17 @@ void Layer::Remove(Layer* child) {
   children_.erase(i);
   child->parent_ = NULL;
 
-  if (child->fills_bounds_opaquely())
-    RecomputeHole();
+  RecomputeHole();
+
+  child->DropTextures();
+}
+
+void Layer::MoveToFront(Layer* child) {
+  std::vector<Layer*>::iterator i =
+      std::find(children_.begin(), children_.end(), child);
+  DCHECK(i != children_.end());
+  children_.erase(i);
+  children_.push_back(child);
 }
 
 bool Layer::Contains(const Layer* other) const {
@@ -57,18 +106,71 @@ bool Layer::Contains(const Layer* other) const {
   return false;
 }
 
-void Layer::SetTransform(const ui::Transform& transform) {
-  transform_ = transform;
+void Layer::SetAnimation(Animation* animation) {
+  if (animation) {
+    if (!animator_.get())
+      animator_.reset(new LayerAnimator(this));
+    animation->Start();
+    animator_->SetAnimation(animation);
+  } else {
+    animator_.reset();
+  }
+}
 
-  if (parent() && fills_bounds_opaquely_)
-    parent()->RecomputeHole();
+void Layer::SetTransform(const ui::Transform& transform) {
+  StopAnimatingIfNecessary(LayerAnimator::TRANSFORM);
+  if (animator_.get() && animator_->IsRunning()) {
+    animator_->AnimateTransform(transform);
+    return;
+  }
+  SetTransformImmediately(transform);
 }
 
 void Layer::SetBounds(const gfx::Rect& bounds) {
-  bounds_ = bounds;
+  StopAnimatingIfNecessary(LayerAnimator::LOCATION);
+  if (animator_.get() && animator_->IsRunning() &&
+      bounds.size() == bounds_.size()) {
+    animator_->AnimateToPoint(bounds.origin());
+    return;
+  }
+  SetBoundsImmediately(bounds);
+}
 
-  if (parent() && fills_bounds_opaquely_)
-    parent()->RecomputeHole();
+void Layer::SetOpacity(float opacity) {
+  StopAnimatingIfNecessary(LayerAnimator::OPACITY);
+  if (animator_.get() && animator_->IsRunning()) {
+    animator_->AnimateOpacity(opacity);
+    return;
+  }
+  SetOpacityImmediately(opacity);
+}
+
+void Layer::SetVisible(bool visible) {
+  if (visible_ == visible)
+    return;
+
+  bool was_drawn = IsDrawn();
+  visible_ = visible;
+  bool is_drawn = IsDrawn();
+  if (was_drawn == is_drawn)
+    return;
+
+  if (!is_drawn)
+    DropTextures();
+  if (parent_)
+    parent_->RecomputeHole();
+}
+
+bool Layer::IsDrawn() const {
+  const Layer* layer = this;
+  while (layer && layer->visible_)
+    layer = layer->parent_;
+  return layer == NULL;
+}
+
+bool Layer::ShouldDraw() {
+  return type_ == LAYER_HAS_TEXTURE && GetCombinedOpacity() > 0.0f &&
+      !hole_rect_.Contains(gfx::Rect(gfx::Point(0, 0), bounds_.size()));
 }
 
 // static
@@ -100,25 +202,42 @@ void Layer::SetFillsBoundsOpaquely(bool fills_bounds_opaquely) {
     parent()->RecomputeHole();
 }
 
-void Layer::SetTexture(ui::Texture* texture) {
-  if (texture == NULL)
-    texture_ = compositor_->CreateTexture();
-  else
-    texture_ = texture;
+void Layer::SetExternalTexture(ui::Texture* texture) {
+  DCHECK(texture);
+  layer_updated_externally_ = true;
+  texture_ = texture;
 }
 
 void Layer::SetCanvas(const SkCanvas& canvas, const gfx::Point& origin) {
+  DCHECK_EQ(type_, LAYER_HAS_TEXTURE);
+
+  if (!texture_.get())
+    texture_ = GetCompositor()->CreateTexture();
+
   texture_->SetCanvas(canvas, origin, bounds_.size());
   invalid_rect_ = gfx::Rect();
 }
 
 void Layer::SchedulePaint(const gfx::Rect& invalid_rect) {
   invalid_rect_ = invalid_rect_.Union(invalid_rect);
-  compositor_->SchedulePaint();
+  ScheduleDraw();
+}
+
+void Layer::ScheduleDraw() {
+  if (GetCompositor())
+    GetCompositor()->ScheduleDraw();
 }
 
 void Layer::Draw() {
+  DCHECK(GetCompositor());
+  if (!ShouldDraw())
+    return;
+
   UpdateLayerCanvas();
+
+  // Layer drew nothing, no texture was created.
+  if (!texture_.get())
+    return;
 
   ui::TextureDrawParams texture_draw_params;
   for (Layer* layer = this; layer; layer = layer->parent_) {
@@ -128,73 +247,157 @@ void Layer::Draw() {
         static_cast<float>(layer->bounds_.y()));
   }
 
-  // Only blend for transparent child layers.
-  // The root layer will clobber the cleared bg.
-  texture_draw_params.blend = parent_ != NULL && !fills_bounds_opaquely_;
-  texture_draw_params.compositor_size = compositor_->size();
+  const float combined_opacity = GetCombinedOpacity();
 
-  hole_rect_ = hole_rect_.Intersect(
-      gfx::Rect(0, 0, bounds_.width(), bounds_.height()));
+  // Only blend for transparent child layers (and when we're forcing
+  // transparency). The root layer will clobber the cleared bg.
+  const bool is_root = parent_ == NULL;
+  const bool forcing_transparency = combined_opacity < 1.0f;
+  const bool is_opaque = fills_bounds_opaquely_ || !has_valid_alpha_channel();
+  texture_draw_params.blend = !is_root && (forcing_transparency || !is_opaque);
 
-  // top
-  DrawRegion(texture_draw_params, gfx::Rect(0,
-                                            0,
-                                            bounds_.width(),
-                                            hole_rect_.y()));
-  // left
-  DrawRegion(texture_draw_params, gfx::Rect(0,
-                                            hole_rect_.y(),
-                                            hole_rect_.x(),
-                                            hole_rect_.height()));
-  // right
-  DrawRegion(texture_draw_params, gfx::Rect(
-      hole_rect_.right(),
-      hole_rect_.y(),
-      bounds_.width() - hole_rect_.right(),
-      hole_rect_.height()));
+  texture_draw_params.compositor_size = GetCompositor()->size();
+  texture_draw_params.opacity = combined_opacity;
+  texture_draw_params.has_valid_alpha_channel = has_valid_alpha_channel();
 
-  // bottom
-  DrawRegion(texture_draw_params, gfx::Rect(
-      0,
-      hole_rect_.bottom(),
-      bounds_.width(),
-      bounds_.height() - hole_rect_.bottom()));
+  std::vector<gfx::Rect> regions_to_draw;
+  PunchHole(gfx::Rect(gfx::Point(), bounds().size()), hole_rect_,
+            &regions_to_draw);
+
+  for (size_t i = 0; i < regions_to_draw.size(); ++i) {
+    if (!regions_to_draw[i].IsEmpty())
+      texture_->Draw(texture_draw_params, regions_to_draw[i]);
+  }
 }
 
-void Layer::DrawRegion(const ui::TextureDrawParams& params,
-                       const gfx::Rect& region_to_draw) {
-  if (!region_to_draw.IsEmpty())
-    texture_->Draw(params, region_to_draw);
+void Layer::DrawTree() {
+  if (!visible_)
+    return;
+
+  Draw();
+  for (size_t i = 0; i < children_.size(); ++i)
+    children_.at(i)->DrawTree();
+}
+
+float Layer::GetCombinedOpacity() const {
+  float opacity = opacity_;
+  Layer* current = this->parent_;
+  while (current) {
+    opacity *= current->opacity_;
+    current = current->parent_;
+  }
+  return opacity;
 }
 
 void Layer::UpdateLayerCanvas() {
   // If we have no delegate, that means that whoever constructed the Layer is
   // setting its canvas directly with SetCanvas().
-  if (!delegate_)
+  if (!delegate_ || layer_updated_externally_)
     return;
   gfx::Rect local_bounds = gfx::Rect(gfx::Point(), bounds_.size());
-  gfx::Rect draw_rect = invalid_rect_.Intersect(local_bounds);
+  gfx::Rect draw_rect = texture_.get() ? invalid_rect_.Intersect(local_bounds) :
+      local_bounds;
   if (draw_rect.IsEmpty()) {
     invalid_rect_ = gfx::Rect();
     return;
   }
   scoped_ptr<gfx::Canvas> canvas(gfx::Canvas::CreateCanvas(
       draw_rect.width(), draw_rect.height(), false));
-  canvas->TranslateInt(draw_rect.x(), draw_rect.y());
-  delegate_->OnPaint(canvas.get());
-  SetCanvas(*canvas->AsCanvasSkia(), bounds().origin());
+  canvas->TranslateInt(-draw_rect.x(), -draw_rect.y());
+  delegate_->OnPaintLayer(canvas.get());
+  SetCanvas(*canvas->GetSkCanvas(), draw_rect.origin());
 }
 
 void Layer::RecomputeHole() {
-  for (size_t i = 0; i < children_.size(); ++i) {
-    if (children_[i]->fills_bounds_opaquely() &&
-        !children_[i]->transform().HasChange()) {
-      hole_rect_ = children_[i]->bounds();
-      return;
-    }
-  }
-  // no opaque child layers, set hole_rect_ to empty
+  if (type_ == LAYER_HAS_NO_TEXTURE)
+    return;
+
+  // Reset to default.
   hole_rect_ = gfx::Rect();
+
+  // Find the largest hole
+  for (size_t i = 0; i < children_.size(); ++i) {
+    // Ignore non-opaque and hidden children.
+    if (!children_[i]->IsCompletelyOpaque() || !children_[i]->visible_)
+      continue;
+
+    // Ignore children that aren't rotated by multiples of 90 degrees.
+    float degrees;
+    if (!InterpolatedTransform::FactorTRS(children_[i]->transform(),
+                                          NULL, &degrees, NULL) ||
+        !IsApproximateMultilpleOf(degrees, 90.0f))
+      continue;
+
+    // The reason why we don't just take the bounds and apply the transform is
+    // that the bounds encodes a position, too, so the effective transformation
+    // matrix is actually different that the one reported. As well, the bounds
+    // will not necessarily be at the origin.
+    gfx::Rect candidate_hole(children_[i]->bounds_.size());
+    ui::Transform transform = children_[i]->transform();
+    transform.ConcatTranslate(static_cast<float>(children_[i]->bounds_.x()),
+                              static_cast<float>(children_[i]->bounds_.y()));
+    transform.TransformRect(&candidate_hole);
+
+    // This layer might not contain the child (e.g., a portion of the child may
+    // be offscreen). Only the portion of the child that overlaps this layer is
+    // of any importance, so take the intersection.
+    candidate_hole = bounds().Intersect(candidate_hole);
+
+    // Ensure we have the largest hole.
+    if (candidate_hole.size().GetArea() > hole_rect_.size().GetArea())
+      hole_rect_ = candidate_hole;
+  }
+
+  // Free up texture memory if the hole fills bounds of layer.
+  if (!ShouldDraw() && !layer_updated_externally_)
+    texture_ = NULL;
+}
+
+bool Layer::IsCompletelyOpaque() const {
+  return fills_bounds_opaquely() && GetCombinedOpacity() == 1.0f;
+}
+
+// static
+void Layer::PunchHole(const gfx::Rect& rect,
+                      const gfx::Rect& region_to_punch_out,
+                      std::vector<gfx::Rect>* sides) {
+  gfx::Rect trimmed_rect = rect.Intersect(region_to_punch_out);
+
+  if (trimmed_rect.IsEmpty()) {
+    sides->push_back(rect);
+    return;
+  }
+
+  // Top (above the hole).
+  sides->push_back(gfx::Rect(rect.x(),
+                             rect.y(),
+                             rect.width(),
+                             trimmed_rect.y() - rect.y()));
+
+  // Left (of the hole).
+  sides->push_back(gfx::Rect(rect.x(),
+                             trimmed_rect.y(),
+                             trimmed_rect.x() - rect.x(),
+                             trimmed_rect.height()));
+
+  // Right (of the hole).
+  sides->push_back(gfx::Rect(trimmed_rect.right(),
+                             trimmed_rect.y(),
+                             rect.right() - trimmed_rect.right(),
+                             trimmed_rect.height()));
+
+  // Bottom (below the hole).
+  sides->push_back(gfx::Rect(rect.x(),
+                             trimmed_rect.bottom(),
+                             rect.width(),
+                             rect.bottom() - trimmed_rect.bottom()));
+}
+
+void Layer::DropTextures() {
+  if (!layer_updated_externally_)
+    texture_ = NULL;
+  for (size_t i = 0; i < children_.size(); ++i)
+    children_[i]->DropTextures();
 }
 
 bool Layer::ConvertPointForAncestor(const Layer* ancestor,
@@ -227,6 +430,77 @@ bool Layer::GetTransformRelativeTo(const Layer* ancestor,
                                static_cast<float>(p->bounds().y()));
   }
   return p == ancestor;
+}
+
+void Layer::StopAnimatingIfNecessary(
+    LayerAnimator::AnimationProperty property) {
+  if (!animator_.get() || !animator_->IsRunning() ||
+      !animator_->got_initial_tick()) {
+    return;
+  }
+
+  if (property != LayerAnimator::LOCATION &&
+      animator_->IsAnimating(LayerAnimator::LOCATION)) {
+    SetBoundsImmediately(
+        gfx::Rect(animator_->GetTargetPoint(), bounds_.size()));
+  }
+  if (property != LayerAnimator::OPACITY &&
+      animator_->IsAnimating(LayerAnimator::OPACITY)) {
+    SetOpacityImmediately(animator_->GetTargetOpacity());
+  }
+  if (property != LayerAnimator::TRANSFORM &&
+      animator_->IsAnimating(LayerAnimator::TRANSFORM)) {
+    SetTransformImmediately(animator_->GetTargetTransform());
+  }
+  animator_.reset();
+}
+
+void Layer::SetBoundsImmediately(const gfx::Rect& bounds) {
+  bounds_ = bounds;
+
+  if (parent())
+    parent()->RecomputeHole();
+}
+
+void Layer::SetTransformImmediately(const ui::Transform& transform) {
+  transform_ = transform;
+
+  if (parent())
+    parent()->RecomputeHole();
+}
+
+void Layer::SetOpacityImmediately(float opacity) {
+  bool was_opaque = GetCombinedOpacity() == 1.0f;
+  opacity_ = opacity;
+  bool is_opaque = GetCombinedOpacity() == 1.0f;
+
+  // If our opacity has changed we need to recompute our hole, our parent's hole
+  // and the holes of all our descendants.
+  if (was_opaque != is_opaque) {
+    if (parent_)
+      parent_->RecomputeHole();
+    std::queue<Layer*> to_process;
+    to_process.push(this);
+    while (!to_process.empty()) {
+      Layer* current = to_process.front();
+      to_process.pop();
+      current->RecomputeHole();
+      for (size_t i = 0; i < current->children_.size(); ++i)
+        to_process.push(current->children_.at(i));
+    }
+  }
+}
+
+void Layer::SetBoundsFromAnimator(const gfx::Rect& bounds) {
+  SetBoundsImmediately(bounds);
+}
+
+void Layer::SetTransformFromAnimator(const Transform& transform) {
+  SetTransformImmediately(transform);
+}
+
+void Layer::SetOpacityFromAnimator(float opacity) {
+  SetOpacityImmediately(opacity);
 }
 
 }  // namespace ui

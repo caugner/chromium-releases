@@ -17,7 +17,7 @@
 #include "base/memory/scoped_vector.h"
 #include "base/time.h"
 #include "chrome/browser/autofill/autofill_type.h"
-#include "content/common/url_fetcher.h"
+#include "content/common/net/url_fetcher.h"
 
 class AutofillMetrics;
 class FormStructure;
@@ -91,7 +91,7 @@ class AutofillDownloadManager : public URLFetcher::Delegate {
                      AutofillRequestType request_type);
 
  private:
-  friend class AutofillDownloadTestHelper;  // unit-test.
+  friend class AutofillDownloadTest;
   FRIEND_TEST_ALL_PREFIXES(AutofillDownloadTest, QueryAndUploadTest);
 
   struct FormRequestData;
@@ -126,12 +126,7 @@ class AutofillDownloadManager : public URLFetcher::Delegate {
       const std::vector<std::string>& forms_in_query) const;
 
   // URLFetcher::Delegate implementation:
-  virtual void OnURLFetchComplete(const URLFetcher* source,
-                                  const GURL& url,
-                                  const net::URLRequestStatus& status,
-                                  int response_code,
-                                  const net::ResponseCookies& cookies,
-                                  const std::string& data);
+  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
 
   // Probability of the form upload. Between 0 (no upload) and 1 (upload all).
   // GetPositiveUploadRate() is for matched forms,
@@ -170,4 +165,3 @@ class AutofillDownloadManager : public URLFetcher::Delegate {
 };
 
 #endif  // CHROME_BROWSER_AUTOFILL_AUTOFILL_DOWNLOAD_H_
-

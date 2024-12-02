@@ -8,6 +8,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request_status.h"
 
 ScopedURLFetcherFactory::ScopedURLFetcherFactory(URLFetcher::Factory* factory) {
@@ -48,6 +49,15 @@ void TestURLFetcher::set_status(const net::URLRequestStatus& status) {
   fake_status_ = status;
 }
 
+void TestURLFetcher::set_was_fetched_via_proxy(bool flag) {
+  URLFetcher::set_was_fetched_via_proxy(flag);
+}
+
+void TestURLFetcher::set_response_headers(
+    scoped_refptr<net::HttpResponseHeaders> headers) {
+  URLFetcher::set_response_headers(headers);
+}
+
 void TestURLFetcher::SetResponseString(const std::string& response) {
   SetResponseDestinationForTesting(STRING);
   fake_response_string_ = response;
@@ -56,6 +66,10 @@ void TestURLFetcher::SetResponseString(const std::string& response) {
 void TestURLFetcher::SetResponseFilePath(const FilePath& path) {
   SetResponseDestinationForTesting(TEMP_FILE);
   fake_response_file_path_ = path;
+}
+
+const std::string& TestURLFetcher::GetResponseStringRef() const {
+  return fake_response_string_;
 }
 
 bool TestURLFetcher::GetResponseAsString(
@@ -125,15 +139,45 @@ class FakeURLFetcher : public URLFetcher {
       url_(url),
       response_data_(response_data),
       success_(success),
+      status_(success ? net::URLRequestStatus::SUCCESS :
+                        net::URLRequestStatus::FAILED, 0),
       ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
   }
 
   // Start the request.  This will call the given delegate asynchronously
   // with the pre-baked response as parameter.
-  virtual void Start() {
+  virtual void Start() OVERRIDE {
     MessageLoop::current()->PostTask(
         FROM_HERE,
         method_factory_.NewRunnableMethod(&FakeURLFetcher::RunDelegate));
+  }
+
+  // These methods are overriden so we can use the version of
+  // OnURLFetchComplete that only has a single URLFetcher argument.
+  virtual const net::ResponseCookies& cookies() const OVERRIDE {
+    return cookies_;
+  }
+
+  virtual const std::string& GetResponseStringRef() const OVERRIDE {
+    return response_data_;
+  }
+
+  virtual bool GetResponseAsString(
+      std::string* out_response_string) const OVERRIDE {
+    *out_response_string = response_data_;
+    return true;
+  }
+
+  virtual int response_code() const OVERRIDE {
+    return success_ ? 200 : 500;
+  }
+
+  virtual const net::URLRequestStatus& status() const OVERRIDE {
+    return status_;
+  }
+
+  virtual const GURL& url() const OVERRIDE {
+    return url_;
   }
 
  private:
@@ -143,11 +187,7 @@ class FakeURLFetcher : public URLFetcher {
   // This is the method which actually calls the delegate that is passed in the
   // constructor.
   void RunDelegate() {
-    net::URLRequestStatus status;
-    status.set_status(success_ ? net::URLRequestStatus::SUCCESS :
-                                 net::URLRequestStatus::FAILED);
-    delegate()->OnURLFetchComplete(this, url_, status, success_ ? 200 : 500,
-                                   net::ResponseCookies(), response_data_);
+    delegate()->OnURLFetchComplete(this);
   }
 
   // Pre-baked response data and flag which indicates whether the request should
@@ -155,6 +195,8 @@ class FakeURLFetcher : public URLFetcher {
   GURL url_;
   std::string response_data_;
   bool success_;
+  net::URLRequestStatus status_;
+  net::ResponseCookies cookies_;
 
   // Method factory used to run the delegate.
   ScopedRunnableMethodFactory<FakeURLFetcher> method_factory_;
@@ -200,7 +242,7 @@ void FakeURLFetcherFactory::SetFakeResponse(const std::string& url,
   fake_responses_[GURL(url)] = std::make_pair(response_data, success);
 }
 
-void FakeURLFetcherFactory::ClearFakeReponses() {
+void FakeURLFetcherFactory::ClearFakeResponses() {
   fake_responses_.clear();
 }
 

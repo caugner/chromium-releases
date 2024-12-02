@@ -1,20 +1,19 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/policy/asynchronous_policy_loader.h"
 #include "chrome/browser/policy/asynchronous_policy_test_base.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
-#include "chrome/browser/policy/configuration_policy_store_interface.h"
 #include "chrome/browser/policy/file_based_policy_provider.h"
-#include "chrome/browser/policy/mock_configuration_policy_store.h"
+#include "chrome/browser/policy/policy_map.h"
 #include "policy/policy_constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using testing::_;
 using testing::InSequence;
 using testing::Return;
+using testing::_;
 
 namespace policy {
 
@@ -42,12 +41,13 @@ TEST_F(AsynchronousPolicyTestBase, ProviderInit) {
   // when the file watcher is initialized, since this file may have changed
   // between the initial load and creating watcher.
   EXPECT_CALL(*provider_delegate, Load()).WillOnce(Return(policies));
-  FileBasedPolicyProvider provider(
-      ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList(),
-      provider_delegate);
+  FileBasedPolicyProvider provider(GetChromePolicyDefinitionList(),
+                                   provider_delegate);
   loop_.RunAllPending();
-  EXPECT_CALL(*store_, Apply(policy::kPolicySyncDisabled, _)).Times(1);
-  provider.Provide(store_.get());
+  PolicyMap policy_map;
+  provider.Provide(&policy_map);
+  EXPECT_TRUE(policy_map.Get(policy::kPolicySyncDisabled));
+  EXPECT_EQ(1U, policy_map.size());
 }
 
 TEST_F(AsynchronousPolicyTestBase, ProviderRefresh) {
@@ -59,9 +59,8 @@ TEST_F(AsynchronousPolicyTestBase, ProviderRefresh) {
   InSequence s;
   EXPECT_CALL(*provider_delegate, Load()).WillOnce(Return(
       new DictionaryValue));
-  FileBasedPolicyProvider file_based_provider(
-          ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList(),
-          provider_delegate);
+  FileBasedPolicyProvider file_based_provider(GetChromePolicyDefinitionList(),
+                                              provider_delegate);
   // A second call to Load gets triggered during the provider's construction
   // when the file watcher is initialized, since this file may have changed
   // between the initial load and creating watcher.
@@ -75,8 +74,10 @@ TEST_F(AsynchronousPolicyTestBase, ProviderRefresh) {
   EXPECT_CALL(*provider_delegate, Load()).WillOnce(Return(policies));
   file_based_provider.loader()->Reload();
   loop_.RunAllPending();
-  EXPECT_CALL(*store_, Apply(policy::kPolicySyncDisabled, _)).Times(1);
-  file_based_provider.Provide(store_.get());
+  PolicyMap policy_map;
+  file_based_provider.Provide(&policy_map);
+  EXPECT_TRUE(policy_map.Get(policy::kPolicySyncDisabled));
+  EXPECT_EQ(1U, policy_map.size());
 }
 
 }  // namespace policy

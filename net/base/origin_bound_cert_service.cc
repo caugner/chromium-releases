@@ -7,6 +7,7 @@
 #include <limits>
 
 #include "base/compiler_specific.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -18,6 +19,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/origin_bound_cert_store.h"
 #include "net/base/x509_certificate.h"
+#include "net/base/x509_util.h"
 
 #if defined(USE_NSS)
 #include <private/pprthred.h>  // PR_DetachThread
@@ -35,7 +37,7 @@ const int kValidityPeriodInDays = 365;
 // Represents the output and result callback of a request.
 class OriginBoundCertServiceRequest {
  public:
-  OriginBoundCertServiceRequest(CompletionCallback* callback,
+  OriginBoundCertServiceRequest(const CompletionCallback& callback,
                                 std::string* private_key,
                                 std::string* cert)
       : callback_(callback),
@@ -45,7 +47,7 @@ class OriginBoundCertServiceRequest {
 
   // Ensures that the result callback will never be made.
   void Cancel() {
-    callback_ = NULL;
+    callback_.Reset();
     private_key_ = NULL;
     cert_ = NULL;
   }
@@ -55,18 +57,18 @@ class OriginBoundCertServiceRequest {
   void Post(int error,
             const std::string& private_key,
             const std::string& cert) {
-    if (callback_) {
+    if (!callback_.is_null()) {
       *private_key_ = private_key;
       *cert_ = cert;
-      callback_->Run(error);
+      callback_.Run(error);
     }
     delete this;
   }
 
-  bool canceled() const { return !callback_; }
+  bool canceled() const { return callback_.is_null(); }
 
  private:
-  CompletionCallback* callback_;
+  CompletionCallback callback_;
   std::string* private_key_;
   std::string* cert_;
 };
@@ -255,14 +257,15 @@ OriginBoundCertService::~OriginBoundCertService() {
   STLDeleteValues(&inflight_);
 }
 
-int OriginBoundCertService::GetOriginBoundCert(const std::string& origin,
-                                               std::string* private_key,
-                                               std::string* cert,
-                                               CompletionCallback* callback,
-                                               RequestHandle* out_req) {
+int OriginBoundCertService::GetOriginBoundCert(
+    const std::string& origin,
+    std::string* private_key,
+    std::string* cert,
+    const CompletionCallback& callback,
+    RequestHandle* out_req) {
   DCHECK(CalledOnValidThread());
 
-  if (!callback || !private_key || !cert || origin.empty()) {
+  if (callback.is_null() || !private_key || !cert || origin.empty()) {
     *out_req = NULL;
     return ERR_INVALID_ARGUMENT;
   }
@@ -316,20 +319,19 @@ int OriginBoundCertService::GenerateCert(const std::string& origin,
                                          uint32 serial_number,
                                          std::string* private_key,
                                          std::string* cert) {
-  std::string subject = "CN=OBC";
   scoped_ptr<crypto::RSAPrivateKey> key(
       crypto::RSAPrivateKey::Create(kKeySizeInBits));
   if (!key.get()) {
     LOG(WARNING) << "Unable to create key pair for client";
     return ERR_KEY_GENERATION_FAILED;
   }
-
-  scoped_refptr<X509Certificate> x509_cert = X509Certificate::CreateSelfSigned(
+  std::string der_cert;
+  if (!x509_util::CreateOriginBoundCert(
       key.get(),
-      subject,
+      origin,
       serial_number,
-      base::TimeDelta::FromDays(kValidityPeriodInDays));
-  if (!x509_cert) {
+      base::TimeDelta::FromDays(kValidityPeriodInDays),
+      &der_cert)) {
     LOG(WARNING) << "Unable to create x509 cert for client";
     return ERR_ORIGIN_BOUND_CERT_GENERATION_FAILED;
   }
@@ -342,12 +344,6 @@ int OriginBoundCertService::GenerateCert(const std::string& origin,
   // TODO(rkn): Perhaps ExportPrivateKey should be changed to output a
   // std::string* to prevent this copying.
   std::string key_out(private_key_info.begin(), private_key_info.end());
-
-  std::string der_cert;
-  if (!x509_cert->GetDEREncoded(&der_cert)) {
-    LOG(WARNING) << "Unable to get DER-encoded cert";
-    return ERR_GET_CERT_BYTES_FAILED;
-  }
 
   private_key->swap(key_out);
   cert->swap(der_cert);

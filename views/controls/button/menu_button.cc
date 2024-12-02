@@ -46,10 +46,10 @@ const char MenuButton::kViewClassName[] = "views/MenuButton";
 ////////////////////////////////////////////////////////////////////////////////
 
 MenuButton::MenuButton(ButtonListener* listener,
-                       const std::wstring& text,
+                       const string16& text,
                        ViewMenuDelegate* menu_delegate,
                        bool show_menu_marker)
-    : TextButton(listener, text),
+    : TextButton(listener, UTF16ToWideHack(text)),
       menu_visible_(false),
       menu_offset_(kDefaultMenuOffsetX, kDefaultMenuOffsetY),
       menu_delegate_(menu_delegate),
@@ -227,10 +227,8 @@ bool MenuButton::OnKeyPressed(const KeyEvent& event) {
     case ui::VKEY_RETURN:
     case ui::VKEY_UP:
     case ui::VKEY_DOWN: {
-      bool result = Activate();
-      if (GetFocusManager()->GetFocusedView() == NULL)
-        RequestFocus();
-      return result;
+      // WARNING: we may have been deleted by the time Activate returns.
+      return Activate();
     }
     default:
       break;
@@ -258,9 +256,7 @@ int MenuButton::GetMaximumScreenXCoordinate() {
     return 0;
   }
 
-  gfx::Rect monitor_bounds =
-      gfx::Screen::GetMonitorWorkAreaNearestWindow(
-          GetWidget()->GetTopLevelWidget()->GetNativeView());
+  gfx::Rect monitor_bounds = GetWidget()->GetWorkAreaBoundsInScreen();
   return monitor_bounds.right() - 1;
 }
 

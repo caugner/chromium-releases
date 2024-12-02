@@ -20,6 +20,7 @@
 #include "chrome/browser/extensions/extension_webrequest_time_tracker.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
+#include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/url_pattern.h"
@@ -28,13 +29,14 @@
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
+#include "googleurl/src/gurl.h"
+#include "grit/generated_resources.h"
 #include "net/base/auth.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/http/http_response_headers.h"
+#include "net/http/http_util.h"
 #include "net/url_request/url_request.h"
-#include "googleurl/src/gurl.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace keys = extension_webrequest_api_constants;
@@ -51,6 +53,7 @@ static const char* const kWebRequestEvents[] = {
   keys::kOnSendHeaders,
   keys::kOnAuthRequired,
   keys::kOnResponseStarted,
+  keys::kOnHeadersReceived,
 };
 
 static const char* kResourceTypeStrings[] = {
@@ -152,15 +155,23 @@ bool IsWebRequestEvent(const std::string& event_name) {
                    event_name) != ARRAYEND(kWebRequestEvents);
 }
 
-bool allow_extension_scheme = false;
+// Returns true if the scheme is one we want to allow extensions to have access
+// to. Extensions still need specific permissions for a given URL, which is
+// covered by CanExtensionAccessURL.
 bool HasWebRequestScheme(const GURL& url) {
-  if (allow_extension_scheme && url.SchemeIs(chrome::kExtensionScheme))
-    return true;
   return (url.SchemeIs(chrome::kAboutScheme) ||
           url.SchemeIs(chrome::kFileScheme) ||
           url.SchemeIs(chrome::kFtpScheme) ||
           url.SchemeIs(chrome::kHttpScheme) ||
-          url.SchemeIs(chrome::kHttpsScheme));
+          url.SchemeIs(chrome::kHttpsScheme) ||
+          url.SchemeIs(chrome::kExtensionScheme));
+}
+
+bool CanExtensionAccessURL(const Extension* extension, const GURL& url) {
+  // about: URLs are not covered in host permissions, but are allowed anyway.
+  return (url.SchemeIs(chrome::kAboutScheme) ||
+          extension->HasHostPermission(url) ||
+          url.GetOrigin() == extension->url());
 }
 
 const char* ResourceTypeToString(ResourceType::Type type) {
@@ -182,12 +193,12 @@ bool ParseResourceType(const std::string& type_str,
   return true;
 }
 
-void ExtractRequestInfo(net::URLRequest* request,
-                        bool* is_main_frame,
-                        int64* frame_id,
-                        int* tab_id,
-                        int* window_id,
-                        ResourceType::Type* resource_type) {
+void ExtractRequestInfoDetails(net::URLRequest* request,
+                               bool* is_main_frame,
+                               int64* frame_id,
+                               int* tab_id,
+                               int* window_id,
+                               ResourceType::Type* resource_type) {
   if (!request->GetUserData(NULL))
     return;
 
@@ -204,6 +215,30 @@ void ExtractRequestInfo(net::URLRequest* request,
                 info->resource_type());
   *resource_type = (iter != ARRAYEND(kResourceTypeValues)) ?
       *iter : ResourceType::LAST_TYPE;
+}
+
+// Extracts from |request| information for the keys requestId, url, method,
+// frameId, tabId, type, and timeStamp and writes these into |out| to be passed
+// on to extensions.
+void ExtractRequestInfo(net::URLRequest* request, DictionaryValue* out) {
+  bool is_main_frame = false;
+  int64 frame_id = -1;
+  int frame_id_for_extension = -1;
+  int tab_id = -1;
+  int window_id = -1;
+  ResourceType::Type resource_type = ResourceType::LAST_TYPE;
+  ExtractRequestInfoDetails(request, &is_main_frame, &frame_id, &tab_id,
+                            &window_id, &resource_type);
+  frame_id_for_extension = GetFrameId(is_main_frame, frame_id);
+
+  out->SetString(keys::kRequestIdKey,
+                 base::Uint64ToString(request->identifier()));
+  out->SetString(keys::kUrlKey, request->url().spec());
+  out->SetString(keys::kMethodKey, request->method());
+  out->SetInteger(keys::kFrameIdKey, frame_id_for_extension);
+  out->SetInteger(keys::kTabIdKey, tab_id);
+  out->SetString(keys::kTypeKey, ResourceTypeToString(resource_type));
+  out->SetDouble(keys::kTimeStampKey, base::Time::Now().ToDoubleT() * 1000);
 }
 
 // Creates a list of HttpHeaders (see extension_api.json). If |headers| is
@@ -293,7 +328,7 @@ struct ExtensionWebRequestEventRouter::BlockedRequest {
   const net::BoundNetLog* net_log;
 
   // The callback to call when we get a response from all event handlers.
-  net::CompletionCallback* callback;
+  net::OldCompletionCallback* callback;
 
   // If non-empty, this contains the new URL that the request will redirect to.
   // Only valid for OnBeforeRequest.
@@ -302,6 +337,23 @@ struct ExtensionWebRequestEventRouter::BlockedRequest {
   // The request headers that will be issued along with this request. Only valid
   // for OnBeforeSendHeaders.
   net::HttpRequestHeaders* request_headers;
+
+  // The response headers that were received from the server. Only valid for
+  // OnHeadersReceived.
+  scoped_refptr<net::HttpResponseHeaders> original_response_headers;
+
+  // Location where to override response headers. Only valid for
+  // OnHeadersReceived.
+  scoped_refptr<net::HttpResponseHeaders>* override_response_headers;
+
+  // If non-empty, this contains the auth credentials that may be filled in.
+  // Only valid for OnAuthRequired.
+  net::AuthCredentials* auth_credentials;
+
+  // The callback to invoke for auth. If |auth_callback.is_null()| is false,
+  // |callback| must be NULL.
+  // Only valid for OnAuthRequired.
+  net::NetworkDelegate::AuthCallback auth_callback;
 
   // Time the request was paused. Used for logging purposes.
   base::Time blocking_time;
@@ -316,7 +368,9 @@ struct ExtensionWebRequestEventRouter::BlockedRequest {
         net_log(NULL),
         callback(NULL),
         new_url(NULL),
-        request_headers(NULL) {}
+        request_headers(NULL),
+        override_response_headers(NULL),
+        auth_credentials(NULL) {}
 };
 
 bool ExtensionWebRequestEventRouter::RequestFilter::InitFromValue(
@@ -373,12 +427,8 @@ bool ExtensionWebRequestEventRouter::ExtraInfoSpec::InitFromValue(
     if (!value.GetString(i, &str))
       return false;
 
-    if (str == "requestLine")
-      *extra_info_spec |= REQUEST_LINE;
-    else if (str == "requestHeaders")
+    if (str == "requestHeaders")
       *extra_info_spec |= REQUEST_HEADERS;
-    else if (str == "statusLine")
-      *extra_info_spec |= STATUS_LINE;
     else if (str == "responseHeaders")
       *extra_info_spec |= RESPONSE_HEADERS;
     else if (str == "blocking")
@@ -423,11 +473,6 @@ ExtensionWebRequestEventRouter::RequestFilter::~RequestFilter() {
 //
 
 // static
-void ExtensionWebRequestEventRouter::SetAllowChromeExtensionScheme() {
-  allow_extension_scheme = true;
-}
-
-// static
 ExtensionWebRequestEventRouter* ExtensionWebRequestEventRouter::GetInstance() {
   return Singleton<ExtensionWebRequestEventRouter>::get();
 }
@@ -443,7 +488,7 @@ int ExtensionWebRequestEventRouter::OnBeforeRequest(
     void* profile,
     ExtensionInfoMap* extension_info_map,
     net::URLRequest* request,
-    net::CompletionCallback* callback,
+    net::OldCompletionCallback* callback,
     GURL* new_url) {
   // TODO(jochen): Figure out what to do with events from the system context.
   if (!profile)
@@ -454,23 +499,13 @@ int ExtensionWebRequestEventRouter::OnBeforeRequest(
 
   request_time_tracker_->LogRequestStartTime(request->identifier(),
                                              base::Time::Now(),
-                                             request->url());
-
-  bool is_main_frame = false;
-  int64 frame_id = -1;
-  int frame_id_for_extension = -1;
-  int tab_id = -1;
-  int window_id = -1;
-  ResourceType::Type resource_type = ResourceType::LAST_TYPE;
-  ExtractRequestInfo(request, &is_main_frame, &frame_id, &tab_id, &window_id,
-                     &resource_type);
-  frame_id_for_extension = GetFrameId(is_main_frame, frame_id);
+                                             request->url(),
+                                             profile);
 
   int extra_info_spec = 0;
   std::vector<const EventListener*> listeners =
       GetMatchingListeners(profile, extension_info_map, keys::kOnBeforeRequest,
-                           request->url(), tab_id, window_id, resource_type,
-                           &extra_info_spec);
+                           request, &extra_info_spec);
   if (listeners.empty())
     return net::OK;
 
@@ -479,14 +514,7 @@ int ExtensionWebRequestEventRouter::OnBeforeRequest(
 
   ListValue args;
   DictionaryValue* dict = new DictionaryValue();
-  dict->SetString(keys::kRequestIdKey,
-                  base::Uint64ToString(request->identifier()));
-  dict->SetString(keys::kUrlKey, request->url().spec());
-  dict->SetString(keys::kMethodKey, request->method());
-  dict->SetInteger(keys::kFrameIdKey, frame_id_for_extension);
-  dict->SetInteger(keys::kTabIdKey, tab_id);
-  dict->SetString(keys::kTypeKey, ResourceTypeToString(resource_type));
-  dict->SetDouble(keys::kTimeStampKey, base::Time::Now().ToDoubleT() * 1000);
+  ExtractRequestInfo(request, dict);
   args.Append(dict);
 
   if (DispatchEvent(profile, request, listeners, args)) {
@@ -503,7 +531,7 @@ int ExtensionWebRequestEventRouter::OnBeforeSendHeaders(
     void* profile,
     ExtensionInfoMap* extension_info_map,
     net::URLRequest* request,
-    net::CompletionCallback* callback,
+    net::OldCompletionCallback* callback,
     net::HttpRequestHeaders* headers) {
   // TODO(jochen): Figure out what to do with events from the system context.
   if (!profile)
@@ -525,15 +553,9 @@ int ExtensionWebRequestEventRouter::OnBeforeSendHeaders(
 
   ListValue args;
   DictionaryValue* dict = new DictionaryValue();
-  dict->SetString(keys::kRequestIdKey,
-                  base::Uint64ToString(request->identifier()));
-  dict->SetString(keys::kUrlKey, request->url().spec());
-  dict->SetDouble(keys::kTimeStampKey, base::Time::Now().ToDoubleT() * 1000);
-
+  ExtractRequestInfo(request, dict);
   if (extra_info_spec & ExtraInfoSpec::REQUEST_HEADERS)
     dict->Set(keys::kRequestHeadersKey, GetRequestHeadersList(*headers));
-  // TODO(battre): implement request line.
-
   args.Append(dict);
 
   if (DispatchEvent(profile, request, listeners, args)) {
@@ -554,8 +576,6 @@ void ExtensionWebRequestEventRouter::OnSendHeaders(
   if (!profile)
     return;
 
-  base::Time time(base::Time::Now());
-
   if (!HasWebRequestScheme(request->url()))
     return;
 
@@ -573,57 +593,113 @@ void ExtensionWebRequestEventRouter::OnSendHeaders(
 
   ListValue args;
   DictionaryValue* dict = new DictionaryValue();
-  dict->SetString(keys::kRequestIdKey,
-                  base::Uint64ToString(request->identifier()));
-  dict->SetString(keys::kUrlKey, request->url().spec());
-  dict->SetDouble(keys::kTimeStampKey, time.ToDoubleT() * 1000);
+  ExtractRequestInfo(request, dict);
   if (extra_info_spec & ExtraInfoSpec::REQUEST_HEADERS)
     dict->Set(keys::kRequestHeadersKey, GetRequestHeadersList(headers));
-  // TODO(battre): support "request line".
   args.Append(dict);
 
   DispatchEvent(profile, request, listeners, args);
 }
 
-void ExtensionWebRequestEventRouter::OnAuthRequired(
+int ExtensionWebRequestEventRouter::OnHeadersReceived(
     void* profile,
     ExtensionInfoMap* extension_info_map,
     net::URLRequest* request,
-    const net::AuthChallengeInfo& auth_info) {
+    net::OldCompletionCallback* callback,
+    net::HttpResponseHeaders* original_response_headers,
+    scoped_refptr<net::HttpResponseHeaders>* override_response_headers) {
   if (!profile)
-    return;
-
-  base::Time time(base::Time::Now());
+    return net::OK;
 
   if (!HasWebRequestScheme(request->url()))
-    return;
+    return net::OK;
+
+  int extra_info_spec = 0;
+  std::vector<const EventListener*> listeners =
+      GetMatchingListeners(profile, extension_info_map,
+                           keys::kOnHeadersReceived, request,
+                           &extra_info_spec);
+
+  if (listeners.empty())
+    return net::OK;
+
+  if (GetAndSetSignaled(request->identifier(), kOnHeadersReceived))
+    return net::OK;
+
+  ListValue args;
+  DictionaryValue* dict = new DictionaryValue();
+  ExtractRequestInfo(request, dict);
+  dict->SetString(keys::kStatusLineKey,
+      original_response_headers->GetStatusLine());
+  if (extra_info_spec & ExtraInfoSpec::RESPONSE_HEADERS) {
+    dict->Set(keys::kResponseHeadersKey,
+        GetResponseHeadersList(original_response_headers));
+  }
+  args.Append(dict);
+
+  if (DispatchEvent(profile, request, listeners, args)) {
+    blocked_requests_[request->identifier()].event = kOnHeadersReceived;
+    blocked_requests_[request->identifier()].callback = callback;
+    blocked_requests_[request->identifier()].net_log = &request->net_log();
+    blocked_requests_[request->identifier()].override_response_headers =
+        override_response_headers;
+    blocked_requests_[request->identifier()].original_response_headers =
+        original_response_headers;
+    return net::ERR_IO_PENDING;
+  }
+  return net::OK;
+}
+
+net::NetworkDelegate::AuthRequiredResponse
+ExtensionWebRequestEventRouter::OnAuthRequired(
+    void* profile,
+    ExtensionInfoMap* extension_info_map,
+    net::URLRequest* request,
+    const net::AuthChallengeInfo& auth_info,
+    const net::NetworkDelegate::AuthCallback& callback,
+    net::AuthCredentials* credentials) {
+  // No profile means that this is for authentication challenges in the
+  // system context. Skip in that case.
+  if (!profile)
+    return net::NetworkDelegate::AUTH_REQUIRED_RESPONSE_NO_ACTION;
+
+  if (!HasWebRequestScheme(request->url()))
+    return net::NetworkDelegate::AUTH_REQUIRED_RESPONSE_NO_ACTION;
 
   int extra_info_spec = 0;
   std::vector<const EventListener*> listeners =
       GetMatchingListeners(profile, extension_info_map,
                            keys::kOnAuthRequired, request, &extra_info_spec);
   if (listeners.empty())
-    return;
+    return net::NetworkDelegate::AUTH_REQUIRED_RESPONSE_NO_ACTION;
 
   ListValue args;
   DictionaryValue* dict = new DictionaryValue();
-  dict->SetString(keys::kRequestIdKey,
-                  base::Uint64ToString(request->identifier()));
-  dict->SetString(keys::kUrlKey, request->url().spec());
+  ExtractRequestInfo(request, dict);
   dict->SetBoolean(keys::kIsProxyKey, auth_info.is_proxy);
-  dict->SetString(keys::kSchemeKey, WideToUTF8(auth_info.scheme));
+  if (!auth_info.scheme.empty())
+    dict->SetString(keys::kSchemeKey, auth_info.scheme);
   if (!auth_info.realm.empty())
-    dict->SetString(keys::kRealmKey, WideToUTF8(auth_info.realm));
-  dict->SetDouble(keys::kTimeStampKey, time.ToDoubleT() * 1000);
-  if (extra_info_spec & ExtraInfoSpec::REQUEST_HEADERS) {
+    dict->SetString(keys::kRealmKey, auth_info.realm);
+  DictionaryValue* challenger = new DictionaryValue();
+  challenger->SetString(keys::kHostKey, auth_info.challenger.host());
+  challenger->SetInteger(keys::kPortKey, auth_info.challenger.port());
+  dict->Set(keys::kChallengerKey, challenger);
+  dict->Set(keys::kStatusLineKey, GetStatusLine(request->response_headers()));
+  if (extra_info_spec & ExtraInfoSpec::RESPONSE_HEADERS) {
     dict->Set(keys::kResponseHeadersKey,
               GetResponseHeadersList(request->response_headers()));
   }
-  if (extra_info_spec & ExtraInfoSpec::STATUS_LINE)
-    dict->Set(keys::kStatusLineKey, GetStatusLine(request->response_headers()));
   args.Append(dict);
 
-  DispatchEvent(profile, request, listeners, args);
+  if (DispatchEvent(profile, request, listeners, args)) {
+    blocked_requests_[request->identifier()].event = kOnAuthRequired;
+    blocked_requests_[request->identifier()].auth_callback = callback;
+    blocked_requests_[request->identifier()].auth_credentials = credentials;
+    blocked_requests_[request->identifier()].net_log = &request->net_log();
+    return net::NetworkDelegate::AUTH_REQUIRED_RESPONSE_IO_PENDING;
+  }
+  return net::NetworkDelegate::AUTH_REQUIRED_RESPONSE_NO_ACTION;
 }
 
 void ExtensionWebRequestEventRouter::OnBeforeRedirect(
@@ -637,14 +713,13 @@ void ExtensionWebRequestEventRouter::OnBeforeRedirect(
   if (!HasWebRequestScheme(request->url()))
     return;
 
-  base::Time time(base::Time::Now());
-
   if (GetAndSetSignaled(request->identifier(), kOnBeforeRedirect))
     return;
 
   ClearSignaled(request->identifier(), kOnBeforeRequest);
   ClearSignaled(request->identifier(), kOnBeforeSendHeaders);
   ClearSignaled(request->identifier(), kOnSendHeaders);
+  ClearSignaled(request->identifier(), kOnHeadersReceived);
 
   int extra_info_spec = 0;
   std::vector<const EventListener*> listeners =
@@ -659,21 +734,17 @@ void ExtensionWebRequestEventRouter::OnBeforeRedirect(
 
   ListValue args;
   DictionaryValue* dict = new DictionaryValue();
-  dict->SetString(keys::kRequestIdKey,
-                  base::Uint64ToString(request->identifier()));
-  dict->SetString(keys::kUrlKey, request->url().spec());
+  ExtractRequestInfo(request, dict);
   dict->SetString(keys::kRedirectUrlKey, new_location.spec());
   dict->SetInteger(keys::kStatusCodeKey, http_status_code);
   if (!response_ip.empty())
     dict->SetString(keys::kIpKey, response_ip);
   dict->SetBoolean(keys::kFromCache, request->was_cached());
-  dict->SetDouble(keys::kTimeStampKey, time.ToDoubleT() * 1000);
+  dict->Set(keys::kStatusLineKey, GetStatusLine(request->response_headers()));
   if (extra_info_spec & ExtraInfoSpec::RESPONSE_HEADERS) {
     dict->Set(keys::kResponseHeadersKey,
               GetResponseHeadersList(request->response_headers()));
   }
-  if (extra_info_spec & ExtraInfoSpec::STATUS_LINE)
-    dict->Set(keys::kStatusLineKey, GetStatusLine(request->response_headers()));
   args.Append(dict);
 
   DispatchEvent(profile, request, listeners, args);
@@ -693,8 +764,6 @@ void ExtensionWebRequestEventRouter::OnResponseStarted(
   if (request->status().status() != net::URLRequestStatus::SUCCESS)
     return;
 
-  base::Time time(base::Time::Now());
-
   int extra_info_spec = 0;
   std::vector<const EventListener*> listeners =
       GetMatchingListeners(profile, extension_info_map,
@@ -711,20 +780,16 @@ void ExtensionWebRequestEventRouter::OnResponseStarted(
 
   ListValue args;
   DictionaryValue* dict = new DictionaryValue();
-  dict->SetString(keys::kRequestIdKey,
-                  base::Uint64ToString(request->identifier()));
-  dict->SetString(keys::kUrlKey, request->url().spec());
+  ExtractRequestInfo(request, dict);
   if (!response_ip.empty())
     dict->SetString(keys::kIpKey, response_ip);
   dict->SetBoolean(keys::kFromCache, request->was_cached());
   dict->SetInteger(keys::kStatusCodeKey, response_code);
-  dict->SetDouble(keys::kTimeStampKey, time.ToDoubleT() * 1000);
+  dict->Set(keys::kStatusLineKey, GetStatusLine(request->response_headers()));
   if (extra_info_spec & ExtraInfoSpec::RESPONSE_HEADERS) {
     dict->Set(keys::kResponseHeadersKey,
               GetResponseHeadersList(request->response_headers()));
   }
-  if (extra_info_spec & ExtraInfoSpec::STATUS_LINE)
-    dict->Set(keys::kStatusLineKey, GetStatusLine(request->response_headers()));
   args.Append(dict);
 
   DispatchEvent(profile, request, listeners, args);
@@ -747,8 +812,6 @@ void ExtensionWebRequestEventRouter::OnCompleted(
 
   DCHECK(!GetAndSetSignaled(request->identifier(), kOnCompleted));
 
-  base::Time time(base::Time::Now());
-
   int extra_info_spec = 0;
   std::vector<const EventListener*> listeners =
       GetMatchingListeners(profile, extension_info_map,
@@ -765,20 +828,16 @@ void ExtensionWebRequestEventRouter::OnCompleted(
 
   ListValue args;
   DictionaryValue* dict = new DictionaryValue();
-  dict->SetString(keys::kRequestIdKey,
-                  base::Uint64ToString(request->identifier()));
-  dict->SetString(keys::kUrlKey, request->url().spec());
+  ExtractRequestInfo(request, dict);
   dict->SetInteger(keys::kStatusCodeKey, response_code);
   if (!response_ip.empty())
     dict->SetString(keys::kIpKey, response_ip);
   dict->SetBoolean(keys::kFromCache, request->was_cached());
-  dict->SetDouble(keys::kTimeStampKey, time.ToDoubleT() * 1000);
+  dict->Set(keys::kStatusLineKey, GetStatusLine(request->response_headers()));
   if (extra_info_spec & ExtraInfoSpec::RESPONSE_HEADERS) {
     dict->Set(keys::kResponseHeadersKey,
               GetResponseHeadersList(request->response_headers()));
   }
-  if (extra_info_spec & ExtraInfoSpec::STATUS_LINE)
-    dict->Set(keys::kStatusLineKey, GetStatusLine(request->response_headers()));
   args.Append(dict);
 
   DispatchEvent(profile, request, listeners, args);
@@ -802,8 +861,6 @@ void ExtensionWebRequestEventRouter::OnErrorOccurred(
 
   DCHECK(!GetAndSetSignaled(request->identifier(), kOnErrorOccurred));
 
-  base::Time time(base::Time::Now());
-
   int extra_info_spec = 0;
   std::vector<const EventListener*> listeners =
       GetMatchingListeners(profile, extension_info_map,
@@ -815,15 +872,12 @@ void ExtensionWebRequestEventRouter::OnErrorOccurred(
 
   ListValue args;
   DictionaryValue* dict = new DictionaryValue();
-  dict->SetString(keys::kRequestIdKey,
-                  base::Uint64ToString(request->identifier()));
-  dict->SetString(keys::kUrlKey, request->url().spec());
+  ExtractRequestInfo(request, dict);
   if (!response_ip.empty())
     dict->SetString(keys::kIpKey, response_ip);
   dict->SetBoolean(keys::kFromCache, request->was_cached());
   dict->SetString(keys::kErrorKey,
-                  net::ErrorToString(request->status().os_error()));
-  dict->SetDouble(keys::kTimeStampKey, time.ToDoubleT() * 1000);
+                  net::ErrorToString(request->status().error()));
   args.Append(dict);
 
   DispatchEvent(profile, request, listeners, args);
@@ -858,8 +912,6 @@ bool ExtensionWebRequestEventRouter::DispatchEvent(
       dict->Remove(keys::kRequestHeadersKey, NULL);
     if (!((*it)->extra_info_spec & ExtraInfoSpec::RESPONSE_HEADERS))
       dict->Remove(keys::kResponseHeadersKey, NULL);
-    if (!((*it)->extra_info_spec & ExtraInfoSpec::STATUS_LINE))
-      dict->Remove(keys::kStatusLineKey, NULL);
 
     base::JSONWriter::Write(args_filtered.get(), false, &json_args);
 
@@ -1014,14 +1066,19 @@ void ExtensionWebRequestEventRouter::GetMatchingListenersImpl(
                   resource_type) == it->filter.types.end())
       continue;
 
-    // Check if this event crosses incognito boundaries when it shouldn't.
     // extension_info_map can be NULL if this is a system-level request.
     if (extension_info_map) {
       const Extension* extension =
           extension_info_map->extensions().GetByID(it->extension_id);
+
+      // Check if this event crosses incognito boundaries when it shouldn't.
       if (!extension ||
           (crosses_incognito &&
            !extension_info_map->CanCrossIncognito(extension)))
+        continue;
+
+      // Only send webRequest events for URLs the extension has access to.
+      if (!CanExtensionAccessURL(extension, url))
         continue;
     }
 
@@ -1035,13 +1092,20 @@ ExtensionWebRequestEventRouter::GetMatchingListeners(
     void* profile,
     ExtensionInfoMap* extension_info_map,
     const std::string& event_name,
-    const GURL& url,
-    int tab_id,
-    int window_id,
-    ResourceType::Type resource_type,
+    net::URLRequest* request,
     int* extra_info_spec) {
   // TODO(mpcomplete): handle profile == NULL (should collect all listeners).
   *extra_info_spec = 0;
+
+  bool is_main_frame = false;
+  int64 frame_id = -1;
+  int tab_id = -1;
+  int window_id = -1;
+  ResourceType::Type resource_type = ResourceType::LAST_TYPE;
+  const GURL& url = request->url();
+
+  ExtractRequestInfoDetails(request, &is_main_frame, &frame_id, &tab_id,
+                            &window_id, &resource_type);
 
   std::vector<const ExtensionWebRequestEventRouter::EventListener*>
       matching_listeners;
@@ -1058,26 +1122,6 @@ ExtensionWebRequestEventRouter::GetMatchingListeners(
   }
 
   return matching_listeners;
-}
-
-std::vector<const ExtensionWebRequestEventRouter::EventListener*>
-ExtensionWebRequestEventRouter::GetMatchingListeners(
-    void* profile,
-    ExtensionInfoMap* extension_info_map,
-    const std::string& event_name,
-    net::URLRequest* request,
-    int* extra_info_spec) {
-  bool is_main_frame = false;
-  int64 frame_id = -1;
-  int tab_id = -1;
-  int window_id = -1;
-  ResourceType::Type resource_type = ResourceType::LAST_TYPE;
-  ExtractRequestInfo(request, &is_main_frame, &frame_id, &tab_id, &window_id,
-                     &resource_type);
-
-  return GetMatchingListeners(
-      profile, extension_info_map, event_name, request->url(),
-      tab_id, window_id, resource_type, extra_info_spec);
 }
 
 linked_ptr<ExtensionWebRequestEventRouter::EventResponseDelta>
@@ -1118,6 +1162,24 @@ linked_ptr<ExtensionWebRequestEventRouter::EventResponseDelta>
       }
     }
   }
+
+  if (blocked_request->event == kOnHeadersReceived) {
+    net::HttpResponseHeaders* old_headers =
+        blocked_request->original_response_headers.get();
+    if (!response->response_headers_string.empty()) {
+      std::string new_headers_string =
+          old_headers->GetStatusLine() + "\n" +
+          response->response_headers_string;
+
+      result->new_response_headers =
+          new net::HttpResponseHeaders(
+              net::HttpUtil::AssembleRawHeaders(new_headers_string.c_str(),
+                                                new_headers_string.length()));
+    }
+  }
+
+  if (blocked_request->event == kOnAuthRequired)
+    result->auth_credentials.swap(response->auth_credentials);
 
   return result;
 }
@@ -1163,7 +1225,6 @@ void ExtensionWebRequestEventRouter::MergeOnBeforeSendHeadersResponses(
   // We assume here that the deltas are sorted in decreasing extension
   // precedence (i.e. decreasing extension installation time).
   for (delta = deltas.begin(); delta != deltas.end(); ++delta) {
-
     if ((*delta)->modified_request_headers.IsEmpty() &&
         (*delta)->deleted_request_headers.empty()) {
       continue;
@@ -1250,6 +1311,73 @@ void ExtensionWebRequestEventRouter::MergeOnBeforeSendHeadersResponses(
   }
 }
 
+void ExtensionWebRequestEventRouter::MergeOnHeadersReceivedResponses(
+    BlockedRequest* request,
+    std::list<std::string>* conflicting_extensions) const {
+  EventResponseDeltas::iterator delta;
+  EventResponseDeltas& deltas = request->response_deltas;
+
+  // Whether any extension has overridden the response headers, yet.
+  bool headers_overridden = false;
+
+  // We assume here that the deltas are sorted in decreasing extension
+  // precedence (i.e. decreasing extension installation time).
+  for (delta = deltas.begin(); delta != deltas.end(); ++delta) {
+    if (!(*delta)->new_response_headers.get())
+      continue;
+
+    scoped_refptr<NetLogModificationParameter> log(
+        new NetLogModificationParameter((*delta)->extension_id));
+
+    // Conflict if a second extension returned new response headers;
+    bool extension_conflicts = headers_overridden;
+
+    if (!extension_conflicts) {
+      headers_overridden = true;
+      *request->override_response_headers = (*delta)->new_response_headers;
+      request->net_log->AddEvent(
+          net::NetLog::TYPE_CHROME_EXTENSION_MODIFIED_HEADERS, log);
+    } else {
+      conflicting_extensions->push_back((*delta)->extension_id);
+      request->net_log->AddEvent(
+          net::NetLog::TYPE_CHROME_EXTENSION_IGNORED_DUE_TO_CONFLICT,
+          make_scoped_refptr(
+              new NetLogExtensionIdParameter((*delta)->extension_id)));
+    }
+  }
+}
+
+bool ExtensionWebRequestEventRouter::MergeOnAuthRequiredResponses(
+    BlockedRequest* request,
+    std::list<std::string>* conflicting_extensions) const {
+  CHECK(request);
+  CHECK(request->auth_credentials);
+  bool credentials_set = false;
+
+  const EventResponseDeltas& deltas = request->response_deltas;
+  for (EventResponseDeltas::const_iterator delta = deltas.begin();
+       delta != deltas.end();
+       ++delta) {
+    if (!(*delta)->auth_credentials.get())
+      continue;
+    if (credentials_set) {
+      conflicting_extensions->push_back((*delta)->extension_id);
+      request->net_log->AddEvent(
+          net::NetLog::TYPE_CHROME_EXTENSION_IGNORED_DUE_TO_CONFLICT,
+          make_scoped_refptr(
+              new NetLogExtensionIdParameter((*delta)->extension_id)));
+    } else {
+      request->net_log->AddEvent(
+          net::NetLog::TYPE_CHROME_EXTENSION_PROVIDE_AUTH_CREDENTIALS,
+          make_scoped_refptr(
+              new NetLogExtensionIdParameter((*delta)->extension_id)));
+      *request->auth_credentials = *(*delta)->auth_credentials;
+      credentials_set = true;
+    }
+  }
+  return credentials_set;
+}
+
 void ExtensionWebRequestEventRouter::DecrementBlockCount(
     void* profile,
     const std::string& extension_id,
@@ -1280,14 +1408,14 @@ void ExtensionWebRequestEventRouter::DecrementBlockCount(
   if (num_handlers_blocking == 0) {
     request_time_tracker_->IncrementTotalBlockTime(request_id, block_time);
 
-    EventResponseDeltas::iterator i;
     EventResponseDeltas& deltas = blocked_request.response_deltas;
-
     bool canceled = false;
-    for (i = deltas.begin(); i != deltas.end(); ++i) {
+    bool credentials_set = false;
+    for (EventResponseDeltas::const_iterator i = deltas.begin();
+         i != deltas.end(); ++i) {
       if ((*i)->cancel) {
-        canceled = true;
-        blocked_request.net_log->AddEvent(
+       canceled = true;
+       blocked_request.net_log->AddEvent(
             net::NetLog::TYPE_CHROME_EXTENSION_ABORTED_REQUEST,
             make_scoped_refptr(
                 new NetLogExtensionIdParameter((*i)->extension_id)));
@@ -1300,11 +1428,22 @@ void ExtensionWebRequestEventRouter::DecrementBlockCount(
 
     if (blocked_request.event == kOnBeforeRequest) {
       CHECK(blocked_request.callback);
-      MergeOnBeforeRequestResponses(&blocked_request, &conflicting_extensions);
+      MergeOnBeforeRequestResponses(&blocked_request,
+                                    &conflicting_extensions);
     } else if (blocked_request.event == kOnBeforeSendHeaders) {
       CHECK(blocked_request.callback);
       MergeOnBeforeSendHeadersResponses(&blocked_request,
                                         &conflicting_extensions);
+    } else if (blocked_request.event == kOnHeadersReceived) {
+      CHECK(blocked_request.callback);
+      MergeOnHeadersReceivedResponses(&blocked_request,
+                                      &conflicting_extensions);
+    } else if (blocked_request.event == kOnAuthRequired) {
+      CHECK(!blocked_request.callback);
+      CHECK(!blocked_request.auth_callback.is_null());
+      credentials_set = MergeOnAuthRequiredResponses(
+         &blocked_request,
+         &conflicting_extensions);
     } else {
       NOTREACHED();
     }
@@ -1330,11 +1469,23 @@ void ExtensionWebRequestEventRouter::DecrementBlockCount(
     // distinguished from a regular failure.
     if (blocked_request.callback) {
       int rv = canceled ? net::ERR_EMPTY_RESPONSE : net::OK;
-      net::CompletionCallback* callback = blocked_request.callback;
+      net::OldCompletionCallback* callback = blocked_request.callback;
       // Ensure that request is removed before callback because the callback
       // might trigger the next event.
       blocked_requests_.erase(request_id);
       callback->Run(rv);
+    } else if (!blocked_request.auth_callback.is_null()) {
+      net::NetworkDelegate::AuthRequiredResponse response =
+          net::NetworkDelegate::AUTH_REQUIRED_RESPONSE_NO_ACTION;
+      if (canceled) {
+        response = net::NetworkDelegate::AUTH_REQUIRED_RESPONSE_CANCEL_AUTH;
+      } else if (credentials_set) {
+        response = net::NetworkDelegate::AUTH_REQUIRED_RESPONSE_SET_AUTH;
+      }
+      net::NetworkDelegate::AuthCallback callback =
+          blocked_request.auth_callback;
+      blocked_requests_.erase(request_id);
+      callback.Run(response);
     } else {
       blocked_requests_.erase(request_id);
     }
@@ -1410,7 +1561,7 @@ bool WebRequestAddEventListener::RunImpl() {
   std::string extension_name = extension ? extension->name() : extension_id();
 
   ExtensionWebRequestEventRouter::GetInstance()->AddEventListener(
-      profile(), extension_id(), extension_name,
+      profile_id(), extension_id(), extension_name,
       event_name, sub_event_name, filter,
       extra_info_spec, ipc_sender_weak());
 
@@ -1485,11 +1636,52 @@ bool WebRequestEventHandled::RunImpl() {
         response->request_headers->SetHeader(name, value);
       }
     }
+
+    if (value->HasKey("responseHeaders")) {
+      std::string response_headers_string;
+      ListValue* response_headers_value = NULL;
+      EXTENSION_FUNCTION_VALIDATE(value->GetList(keys::kResponseHeadersKey,
+                                                 &response_headers_value));
+      for (size_t i = 0; i < response_headers_value->GetSize(); ++i) {
+        DictionaryValue* header_value = NULL;
+        std::string name;
+        std::string value;
+        EXTENSION_FUNCTION_VALIDATE(
+            response_headers_value->GetDictionary(i, &header_value));
+        EXTENSION_FUNCTION_VALIDATE(
+            header_value->GetString(keys::kHeaderNameKey, &name));
+        EXTENSION_FUNCTION_VALIDATE(
+            header_value->GetString(keys::kHeaderValueKey, &value));
+
+        response_headers_string += name + ": " + value + '\n';
+      }
+      response_headers_string += '\n';
+      response->response_headers_string.swap(response_headers_string);
+    }
+
+    if (value->HasKey(keys::kAuthCredentialsKey)) {
+      DictionaryValue* credentials_value = NULL;
+      EXTENSION_FUNCTION_VALIDATE(value->GetDictionary(
+          keys::kAuthCredentialsKey,
+          &credentials_value));
+      response->auth_credentials.reset(new net::AuthCredentials());
+      EXTENSION_FUNCTION_VALIDATE(
+          credentials_value->GetString(keys::kUsernameKey,
+                                       &response->auth_credentials->username));
+      EXTENSION_FUNCTION_VALIDATE(
+          credentials_value->GetString(keys::kPasswordKey,
+                                       &response->auth_credentials->password));
+    }
   }
 
   ExtensionWebRequestEventRouter::GetInstance()->OnEventHandled(
-      profile(), extension_id(), event_name, sub_event_name, request_id,
+      profile_id(), extension_id(), event_name, sub_event_name, request_id,
       response.release());
 
+  return true;
+}
+
+bool WebRequestHandlerBehaviorChanged::RunImpl() {
+  WebCacheManager::GetInstance()->ClearCacheOnNavigation();
   return true;
 }

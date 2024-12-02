@@ -8,13 +8,13 @@
 #include <string>
 #include <vector>
 
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/content_settings_details.h"
-#include "chrome/browser/content_settings/content_settings_pattern.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
@@ -24,13 +24,14 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/content_notification_types.h"
-#include "content/common/content_switches.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
+#include "content/public/browser/notification_types.h"
+#include "content/public/common/content_switches.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -62,6 +63,7 @@ const ContentSettingsTypeNameEntry kContentSettingsTypeGroupNames[] = {
   {CONTENT_SETTINGS_TYPE_NOTIFICATIONS, "notifications"},
   {CONTENT_SETTINGS_TYPE_INTENTS, "intents"},
   {CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE, "auto-select-certificate"},
+  {CONTENT_SETTINGS_TYPE_FULLSCREEN, "fullscreen"},
 };
 COMPILE_ASSERT(arraysize(kContentSettingsTypeGroupNames) ==
                    CONTENT_SETTINGS_NUM_TYPES,
@@ -273,7 +275,6 @@ void ContentSettingsHandler::GetLocalizedValues(
 }
 
 void ContentSettingsHandler::Initialize() {
-  const HostContentSettingsMap* settings_map = GetContentSettingsMap();
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_PROFILE_CREATED,
       NotificationService::AllSources());
@@ -285,7 +286,7 @@ void ContentSettingsHandler::Initialize() {
   UpdateAllExceptionsViewsFromModel();
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED,
-      Source<HostContentSettingsMap>(settings_map));
+      NotificationService::AllSources());
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_DESKTOP_NOTIFICATION_SETTINGS_CHANGED,
       NotificationService::AllSources());
@@ -318,6 +319,13 @@ void ContentSettingsHandler::Observe(int type,
     }
 
     case chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED: {
+      // Filter out notifications from other profiles.
+      HostContentSettingsMap* map =
+          Source<HostContentSettingsMap>(source).ptr();
+      if (map != GetContentSettingsMap() &&
+          map != GetOTRContentSettingsMap())
+        break;
+
       const ContentSettingsDetails* settings_details =
           Details<const ContentSettingsDetails>(details).ptr();
 
@@ -409,6 +417,9 @@ void ContentSettingsHandler::UpdateAllExceptionsViewsFromModel() {
     // for this content type and we skip it here.
     if (type == CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE)
       continue;
+    // TODO(koz): Implement fullscreen content settings UI.
+    if (type == CONTENT_SETTINGS_TYPE_FULLSCREEN)
+      continue;
     UpdateExceptionsViewFromModel(static_cast<ContentSettingsType>(type));
   }
 }
@@ -422,6 +433,12 @@ void ContentSettingsHandler::UpdateAllOTRExceptionsViewsFromModel() {
 
 void ContentSettingsHandler::UpdateExceptionsViewFromModel(
     ContentSettingsType type) {
+  // Skip updating intents unless it's enabled from the command line.
+  if (type == CONTENT_SETTINGS_TYPE_INTENTS &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableWebIntents))
+    return;
+
   switch (type) {
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
       UpdateGeolocationExceptionsView();
@@ -440,6 +457,8 @@ void ContentSettingsHandler::UpdateOTRExceptionsViewFromModel(
   switch (type) {
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
+    case CONTENT_SETTINGS_TYPE_INTENTS:
+    case CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE:
       break;
     default:
       UpdateExceptionsViewFromOTRHostContentSettingsMap(type);
@@ -546,12 +565,13 @@ void ContentSettingsHandler::UpdateExceptionsViewFromHostContentSettingsMap(
     // secondary pattern is by default a wildcard pattern. Hence users are not
     // able to modify content settings with a secondary pattern other than the
     // wildcard pattern. So only show settings that the user is able to modify.
+    // TODO(bauerb): Support a read-only view for those patterns.
     if (entries[i].b == ContentSettingsPattern::Wildcard()) {
       exceptions.Append(
           GetExceptionForPage(entries[i].a, entries[i].c, entries[i].d));
     } else {
-      LOG(DFATAL) << "Secondary content settings patterns are not"
-                  << "supported by the content settings UI";
+      LOG(ERROR) << "Secondary content settings patterns are not "
+                 << "supported by the content settings UI";
     }
   }
 
@@ -577,9 +597,26 @@ void ContentSettingsHandler::UpdateExceptionsViewFromOTRHostContentSettingsMap(
 
   ListValue otr_exceptions;
   for (size_t i = 0; i < otr_entries.size(); ++i) {
-    otr_exceptions.Append(GetExceptionForPage(otr_entries[i].a,
-                                              otr_entries[i].c,
-                                              otr_entries[i].d));
+    // Off-the-record HostContentSettingsMap contains incognito content settings
+    // as well as normal content settings. Here, we use the incongnito settings
+    // only.
+    if (!otr_entries[i].e)
+      continue;
+    // The content settings UI does not support secondary content settings
+    // pattern yet. For content settings set through the content settings UI the
+    // secondary pattern is by default a wildcard pattern. Hence users are not
+    // able to modify content settings with a secondary pattern other than the
+    // wildcard pattern. So only show settings that the user is able to modify.
+    // TODO(bauerb): Support a read-only view for those patterns.
+    if (otr_entries[i].b == ContentSettingsPattern::Wildcard()) {
+      otr_exceptions.Append(
+          GetExceptionForPage(otr_entries[i].a,
+                              otr_entries[i].c,
+                              otr_entries[i].d));
+    } else {
+      LOG(ERROR) << "Secondary content settings patterns are not "
+                 << "supported by the content settings UI";
+    }
   }
 
   StringValue type_string(ContentSettingsTypeToGroupName(type));
@@ -589,17 +626,17 @@ void ContentSettingsHandler::UpdateExceptionsViewFromOTRHostContentSettingsMap(
 
 void ContentSettingsHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("setContentFilter",
-      NewCallback(this,
-                  &ContentSettingsHandler::SetContentFilter));
+      base::Bind(&ContentSettingsHandler::SetContentFilter,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("removeException",
-      NewCallback(this,
-                  &ContentSettingsHandler::RemoveException));
+      base::Bind(&ContentSettingsHandler::RemoveException,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("setException",
-      NewCallback(this,
-                  &ContentSettingsHandler::SetException));
+      base::Bind(&ContentSettingsHandler::SetException,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("checkExceptionPatternValidity",
-      NewCallback(this,
-                  &ContentSettingsHandler::CheckExceptionPatternValidity));
+      base::Bind(&ContentSettingsHandler::CheckExceptionPatternValidity,
+                 base::Unretained(this)));
 }
 
 void ContentSettingsHandler::SetContentFilter(const ListValue* args) {

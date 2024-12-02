@@ -13,7 +13,6 @@
 #include "net/base/host_resolver.h"
 #include "net/base/net_export.h"
 #include "net/base/ssl_client_auth_cache.h"
-#include "net/http/http_alternate_protocols.h"
 #include "net/http/http_auth_cache.h"
 #include "net/http/http_stream_factory.h"
 #include "net/socket/client_socket_pool_manager.h"
@@ -35,6 +34,7 @@ class HttpAuthHandlerFactory;
 class HttpNetworkSessionPeer;
 class HttpProxyClientSocketPool;
 class HttpResponseBodyDrainer;
+class HttpServerProperties;
 class NetLog;
 class NetworkDelegate;
 class ProxyService;
@@ -59,6 +59,7 @@ class NET_EXPORT HttpNetworkSession
           ssl_config_service(NULL),
           http_auth_handler_factory(NULL),
           network_delegate(NULL),
+          http_server_properties(NULL),
           net_log(NULL) {}
 
     ClientSocketFactory* client_socket_factory;
@@ -72,6 +73,7 @@ class NET_EXPORT HttpNetworkSession
     SSLConfigService* ssl_config_service;
     HttpAuthHandlerFactory* http_auth_handler_factory;
     NetworkDelegate* network_delegate;
+    HttpServerProperties* http_server_properties;
     NetLog* net_log;
   };
 
@@ -85,13 +87,6 @@ class NET_EXPORT HttpNetworkSession
   void AddResponseDrainer(HttpResponseBodyDrainer* drainer);
 
   void RemoveResponseDrainer(HttpResponseBodyDrainer* drainer);
-
-  const HttpAlternateProtocols& alternate_protocols() const {
-    return alternate_protocols_;
-  }
-  HttpAlternateProtocols* mutable_alternate_protocols() {
-    return &alternate_protocols_;
-  }
 
   TransportClientSocketPool* transport_socket_pool() {
     return socket_pool_manager_.transport_socket_pool();
@@ -120,11 +115,12 @@ class NET_EXPORT HttpNetworkSession
   NetworkDelegate* network_delegate() {
     return network_delegate_;
   }
-
+  HttpServerProperties* http_server_properties() {
+    return http_server_properties_;
+  }
   HttpStreamFactory* http_stream_factory() {
     return http_stream_factory_.get();
   }
-
   NetLog* net_log() {
     return net_log_;
   }
@@ -148,6 +144,7 @@ class NET_EXPORT HttpNetworkSession
 
   NetLog* const net_log_;
   NetworkDelegate* const network_delegate_;
+  HttpServerProperties* const http_server_properties_;
   CertVerifier* const cert_verifier_;
   HttpAuthHandlerFactory* const http_auth_handler_factory_;
 
@@ -157,7 +154,6 @@ class NET_EXPORT HttpNetworkSession
 
   HttpAuthCache http_auth_cache_;
   SSLClientAuthCache ssl_client_auth_cache_;
-  HttpAlternateProtocols alternate_protocols_;
   ClientSocketPoolManager socket_pool_manager_;
   SpdySessionPool spdy_session_pool_;
   scoped_ptr<HttpStreamFactory> http_stream_factory_;

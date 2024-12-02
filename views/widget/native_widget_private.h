@@ -6,6 +6,7 @@
 #define VIEWS_WIDGET_NATIVE_WIDGET_PRIVATE_H_
 #pragma once
 
+#include "base/string16.h"
 #include "ui/gfx/native_widget_types.h"
 #include "views/ime/input_method_delegate.h"
 #include "views/widget/native_widget.h"
@@ -94,9 +95,9 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
   virtual ui::Compositor* GetCompositor() = 0;
 
   // See description in View for details.
-  virtual void MarkLayerDirty() = 0;
   virtual void CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
-                                                  View** ancestor) = 0;
+                                                  ui::Layer** layer_parent) = 0;
+  virtual void ReorderLayers() = 0;
 
   // Notifies the NativeWidget that a view was removed from the Widget's view
   // hierarchy.
@@ -144,7 +145,7 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
       ui::WindowShowState* show_state) const = 0;
 
   // Sets the NativeWindow title.
-  virtual void SetWindowTitle(const std::wstring& title) = 0;
+  virtual void SetWindowTitle(const string16& title) = 0;
 
   // Sets the Window icons. |window_icon| is a 16x16 icon suitable for use in
   // a title bar. |app_icon| is a larger size for use in the host environment
@@ -153,7 +154,7 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
                               const SkBitmap& app_icon) = 0;
 
   // Update native accessibility properties on the native window.
-  virtual void SetAccessibleName(const std::wstring& name) = 0;
+  virtual void SetAccessibleName(const string16& name) = 0;
   virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) = 0;
   virtual void SetAccessibleState(ui::AccessibilityTypes::State state) = 0;
 
@@ -204,6 +205,7 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
   virtual void FocusNativeView(gfx::NativeView native_view) = 0;
   virtual bool ConvertPointFromAncestor(
       const Widget* ancestor, gfx::Point* point) const = 0;
+  virtual gfx::Rect GetWorkAreaBoundsInScreen() const = 0;
 
   // Overridden from NativeWidget:
   virtual internal::NativeWidgetPrivate* AsNativeWidgetPrivate() OVERRIDE;

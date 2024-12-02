@@ -10,6 +10,7 @@
 #include "base/threading/thread.h"
 #include "net/base/host_port_pair.h"
 #include "net/http/http_network_session.h"
+#include "net/http/http_server_properties_impl.h"
 #include "net/url_request/url_request_job_factory.h"
 
 namespace {
@@ -21,12 +22,14 @@ namespace {
 const int kStageBeforeURLRequest = 1 << 0;
 const int kStageBeforeSendHeaders = 1 << 1;
 const int kStageSendHeaders = 1 << 2;
-const int kStageBeforeRedirect = 1 << 3;
-const int kStageResponseStarted = 1 << 4;
-const int kStageCompletedSuccess = 1 << 5;
-const int kStageCompletedError = 1 << 6;
-const int kStageURLRequestDestroyed = 1 << 7;
-const int kStageDestruction = 1 << 8;
+const int kStageHeadersReceived = 1 << 3;
+const int kStageAuthRequired = 1 << 4;
+const int kStageBeforeRedirect = 1 << 5;
+const int kStageResponseStarted = 1 << 6;
+const int kStageCompletedSuccess = 1 << 7;
+const int kStageCompletedError = 1 << 8;
+const int kStageURLRequestDestroyed = 1 << 9;
+const int kStageDestruction = 1 << 10;
 
 }  // namespace
 
@@ -116,6 +119,10 @@ void TestURLRequestContext::Init() {
     context_storage_.set_http_auth_handler_factory(
         net::HttpAuthHandlerFactory::CreateDefault(host_resolver()));
   }
+  if (!http_server_properties()) {
+    context_storage_.set_http_server_properties(
+        new net::HttpServerPropertiesImpl);
+  }
   net::HttpNetworkSession::Params params;
   params.host_resolver = host_resolver();
   params.cert_verifier = cert_verifier();
@@ -123,6 +130,7 @@ void TestURLRequestContext::Init() {
   params.ssl_config_service = ssl_config_service();
   params.http_auth_handler_factory = http_auth_handler_factory();
   params.network_delegate = network_delegate();
+  params.http_server_properties = http_server_properties();
 
   if (!http_transaction_factory()) {
     context_storage_.set_http_transaction_factory(new net::HttpCache(
@@ -166,6 +174,7 @@ TestDelegate::TestDelegate()
       received_data_before_response_(false),
       request_failed_(false),
       have_certificate_errors_(false),
+      auth_required_(false),
       buf_(new net::IOBuffer(kBufferSize)) {
 }
 
@@ -185,6 +194,7 @@ void TestDelegate::OnReceivedRedirect(net::URLRequest* request,
 
 void TestDelegate::OnAuthRequired(net::URLRequest* request,
                                   net::AuthChallengeInfo* auth_info) {
+  auth_required_ = true;
   if (!username_.empty() || !password_.empty()) {
     request->SetAuth(username_, password_);
   } else {
@@ -193,8 +203,8 @@ void TestDelegate::OnAuthRequired(net::URLRequest* request,
 }
 
 void TestDelegate::OnSSLCertificateError(net::URLRequest* request,
-                                         int cert_error,
-                                         net::X509Certificate* cert) {
+                                         const net::SSLInfo& ssl_info,
+                                         bool is_hsts_host) {
   // The caller can control whether it needs all SSL requests to go through,
   // independent of any possible errors, or whether it wants SSL errors to
   // cancel the request.
@@ -303,7 +313,7 @@ void TestDelegate::OnResponseCompleted(net::URLRequest* request) {
 }
 
 TestNetworkDelegate::TestNetworkDelegate()
-  : last_os_error_(0),
+  : last_error_(0),
     error_count_(0),
     created_requests_(0),
     destroyed_requests_(0),
@@ -325,32 +335,32 @@ void TestNetworkDelegate::InitRequestStatesIfNew(int request_id) {
   }
 }
 
-
 int TestNetworkDelegate::OnBeforeURLRequest(
     net::URLRequest* request,
-    net::CompletionCallback* callback,
+    net::OldCompletionCallback* callback,
     GURL* new_url ) {
   int req_id = request->identifier();
-  event_order_[req_id] += "OnBeforeURLRequest\n";
   InitRequestStatesIfNew(req_id);
+  event_order_[req_id] += "OnBeforeURLRequest\n";
   EXPECT_TRUE(next_states_[req_id] & kStageBeforeURLRequest) <<
       event_order_[req_id];
   next_states_[req_id] =
       kStageBeforeSendHeaders |
       kStageResponseStarted |  // data: URLs do not trigger sending headers
       kStageBeforeRedirect |  // a delegate can trigger a redirection
-      kStageCompletedError;  // request canceled by delegate
+      kStageCompletedError |  // request canceled by delegate
+      kStageAuthRequired;  // Auth can come next for FTP requests
   created_requests_++;
   return net::OK;
 }
 
 int TestNetworkDelegate::OnBeforeSendHeaders(
     net::URLRequest* request,
-    net::CompletionCallback* callback,
+    net::OldCompletionCallback* callback,
     net::HttpRequestHeaders* headers) {
   int req_id = request->identifier();
-  event_order_[req_id] += "OnBeforeSendHeaders\n";
   InitRequestStatesIfNew(req_id);
+  event_order_[req_id] += "OnBeforeSendHeaders\n";
   EXPECT_TRUE(next_states_[req_id] & kStageBeforeSendHeaders) <<
       event_order_[req_id];
   next_states_[req_id] =
@@ -364,25 +374,43 @@ void TestNetworkDelegate::OnSendHeaders(
     net::URLRequest* request,
     const net::HttpRequestHeaders& headers) {
   int req_id = request->identifier();
-  event_order_[req_id] += "OnSendHeaders\n";
   InitRequestStatesIfNew(req_id);
+  event_order_[req_id] += "OnSendHeaders\n";
   EXPECT_TRUE(next_states_[req_id] & kStageSendHeaders) <<
+      event_order_[req_id];
+  next_states_[req_id] =
+      kStageHeadersReceived |
+      kStageCompletedError;
+}
+
+int TestNetworkDelegate::OnHeadersReceived(
+    net::URLRequest* request,
+    net::OldCompletionCallback* callback,
+    net::HttpResponseHeaders* original_response_headers,
+    scoped_refptr<net::HttpResponseHeaders>* override_response_headers) {
+  int req_id = request->identifier();
+  event_order_[req_id] += "OnHeadersReceived\n";
+  InitRequestStatesIfNew(req_id);
+  EXPECT_TRUE(next_states_[req_id] & kStageHeadersReceived) <<
       event_order_[req_id];
   next_states_[req_id] =
       kStageBeforeRedirect |
       kStageResponseStarted |
+      kStageAuthRequired |
       kStageCompletedError;  // e.g. proxy resolution problem
 
   // Basic authentication sends a second request from the URLRequestHttpJob
   // layer before the URLRequest reports that a response has started.
   next_states_[req_id] |= kStageBeforeSendHeaders;
+
+  return net::OK;
 }
 
 void TestNetworkDelegate::OnBeforeRedirect(net::URLRequest* request,
                                            const GURL& new_location) {
   int req_id = request->identifier();
-  event_order_[req_id] += "OnBeforeRedirect\n";
   InitRequestStatesIfNew(req_id);
+  event_order_[req_id] += "OnBeforeRedirect\n";
   EXPECT_TRUE(next_states_[req_id] & kStageBeforeRedirect) <<
       event_order_[req_id];
   next_states_[req_id] =
@@ -398,14 +426,14 @@ void TestNetworkDelegate::OnBeforeRedirect(net::URLRequest* request,
 
 void TestNetworkDelegate::OnResponseStarted(net::URLRequest* request) {
   int req_id = request->identifier();
-  event_order_[req_id] += "OnResponseStarted\n";
   InitRequestStatesIfNew(req_id);
+  event_order_[req_id] += "OnResponseStarted\n";
   EXPECT_TRUE(next_states_[req_id] & kStageResponseStarted) <<
       event_order_[req_id];
   next_states_[req_id] = kStageCompletedSuccess | kStageCompletedError;
   if (request->status().status() == net::URLRequestStatus::FAILED) {
     error_count_++;
-    last_os_error_ = request->status().os_error();
+    last_error_ = request->status().error();
   }
 }
 
@@ -415,8 +443,8 @@ void TestNetworkDelegate::OnRawBytesRead(const net::URLRequest& request,
 
 void TestNetworkDelegate::OnCompleted(net::URLRequest* request) {
   int req_id = request->identifier();
-  event_order_[req_id] += "OnCompleted\n";
   InitRequestStatesIfNew(req_id);
+  event_order_[req_id] += "OnCompleted\n";
   // Expect "Success -> (next_states_ & kStageCompletedSuccess)"
   // is logically identical to
   // Expect "!(Success) || (next_states_ & kStageCompletedSuccess)"
@@ -430,34 +458,39 @@ void TestNetworkDelegate::OnCompleted(net::URLRequest* request) {
   completed_requests_++;
   if (request->status().status() == net::URLRequestStatus::FAILED) {
     error_count_++;
-    last_os_error_ = request->status().os_error();
+    last_error_ = request->status().error();
   }
 }
 
 void TestNetworkDelegate::OnURLRequestDestroyed(
     net::URLRequest* request) {
   int req_id = request->identifier();
-  event_order_[req_id] += "OnURLRequestDestroyed\n";
   InitRequestStatesIfNew(req_id);
+  event_order_[req_id] += "OnURLRequestDestroyed\n";
   EXPECT_TRUE(next_states_[req_id] & kStageURLRequestDestroyed) <<
       event_order_[req_id];
   next_states_[req_id] = kStageDestruction;
   destroyed_requests_++;
 }
 
-void TestNetworkDelegate::OnHttpTransactionDestroyed(uint64 request_id) {
-}
-
-net::URLRequestJob* TestNetworkDelegate::OnMaybeCreateURLRequestJob(
-    net::URLRequest* request) {
-  return NULL;
-}
-
 void TestNetworkDelegate::OnPACScriptError(int line_number,
                                            const string16& error) {
 }
 
-void TestNetworkDelegate::OnAuthRequired(
-    net::URLRequest* reqest,
-    const net::AuthChallengeInfo& auth_info) {
+net::NetworkDelegate::AuthRequiredResponse TestNetworkDelegate::OnAuthRequired(
+    net::URLRequest* request,
+    const net::AuthChallengeInfo& auth_info,
+    const AuthCallback& callback,
+    net::AuthCredentials* credentials) {
+  int req_id = request->identifier();
+  InitRequestStatesIfNew(req_id);
+  event_order_[req_id] += "OnAuthRequired\n";
+  EXPECT_TRUE(next_states_[req_id] & kStageAuthRequired) <<
+      event_order_[req_id];
+  next_states_[req_id] = kStageBeforeSendHeaders |
+      kStageHeadersReceived |  // Request canceled by delegate simulates empty
+                               // response.
+      kStageResponseStarted |  // data: URLs do not trigger sending headers
+      kStageBeforeRedirect;  // a delegate can trigger a redirection
+  return net::NetworkDelegate::AUTH_REQUIRED_RESPONSE_NO_ACTION;
 }

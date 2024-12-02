@@ -19,14 +19,29 @@
 #include "content/browser/gpu/gpu_blacklist.h"
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/common/content_client.h"
-#include "content/common/content_switches.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/gpu/gpu_info_collector.h"
+#include "content/public/common/content_switches.h"
 #include "ui/gfx/gl/gl_implementation.h"
 #include "ui/gfx/gl/gl_switches.h"
 #include "webkit/plugins/plugin_switches.h"
 
 namespace {
+
+enum GpuFeatureStatus {
+    kGpuFeatureEnabled = 0,
+    kGpuFeatureBlacklisted = 1,
+    kGpuFeatureDisabled = 2,  // disabled by user but not blacklisted
+    kGpuFeatureNumStatus
+};
+
+struct GpuFeatureInfo {
+  std::string name;
+  uint32 blocked;
+  bool disabled;
+  std::string disabled_description;
+  bool fallback_to_software;
+};
 
 #if defined(OS_MACOSX)
 void DisplayReconfigCallback(CGDirectDisplayID display,
@@ -60,6 +75,13 @@ DictionaryValue* NewDescriptionValuePair(const std::string& desc,
   return dict;
 }
 
+Value* NewStatusValue(const char* name, const char* status) {
+  DictionaryValue* value = new DictionaryValue();
+  value->SetString("name", name);
+  value->SetString("status", status);
+  return value;
+}
+
 #if defined(OS_WIN)
 enum WinSubVersion {
   kWinOthers = 0,
@@ -89,7 +111,7 @@ ListValue* DxDiagNodeToList(const DxDiagNode& node) {
   return list;
 }
 
-int GetGpuBlacklistHistogramValueWin(bool blocked) {
+int GetGpuBlacklistHistogramValueWin(GpuFeatureStatus status) {
   static WinSubVersion sub_version = kNumWinSubVersions;
   if (sub_version == kNumWinSubVersions) {
     sub_version = kWinOthers;
@@ -108,27 +130,79 @@ int GetGpuBlacklistHistogramValueWin(bool blocked) {
         sub_version = kWin7;
     }
   }
-  int entry_index = static_cast<int>(sub_version) * 2;
-  if (blocked)
-    entry_index++;
+  int entry_index = static_cast<int>(sub_version) * kGpuFeatureNumStatus;
+  switch (status) {
+    case kGpuFeatureEnabled:
+      break;
+    case kGpuFeatureBlacklisted:
+      entry_index++;
+      break;
+    case kGpuFeatureDisabled:
+      entry_index += 2;
+      break;
+  }
   return entry_index;
 }
 #endif  // OS_WIN
 
 }  // namespace anonymous
 
+GpuDataManager::UserFlags::UserFlags()
+    : disable_accelerated_2d_canvas_(false),
+      disable_accelerated_compositing_(false),
+      disable_accelerated_layers_(false),
+      disable_experimental_webgl_(false),
+      disable_gl_multisampling_(false),
+      ignore_gpu_blacklist_(false) {
+}
+
+void GpuDataManager::UserFlags::Initialize() {
+  const CommandLine& browser_command_line =
+      *CommandLine::ForCurrentProcess();
+
+  disable_accelerated_2d_canvas_ = browser_command_line.HasSwitch(
+      switches::kDisableAccelerated2dCanvas);
+  disable_accelerated_compositing_ = browser_command_line.HasSwitch(
+      switches::kDisableAcceleratedCompositing);
+  disable_accelerated_layers_ = browser_command_line.HasSwitch(
+      switches::kDisableAcceleratedLayers);
+  disable_experimental_webgl_ = browser_command_line.HasSwitch(
+      switches::kDisableExperimentalWebGL);
+  disable_gl_multisampling_ = browser_command_line.HasSwitch(
+      switches::kDisableGLMultisampling);
+
+  ignore_gpu_blacklist_ = browser_command_line.HasSwitch(
+      switches::kIgnoreGpuBlacklist);
+
+  use_gl_ = browser_command_line.GetSwitchValueASCII(switches::kUseGL);
+
+  ApplyPolicies();
+}
+
+void GpuDataManager::UserFlags::ApplyPolicies() {
+  if (disable_accelerated_compositing_) {
+    disable_accelerated_2d_canvas_ = true;
+    disable_accelerated_layers_ = true;
+  }
+}
+
 GpuDataManager::GpuDataManager()
     : complete_gpu_info_already_requested_(false) {
+  Initialize();
+}
+
+void GpuDataManager::Initialize() {
   // Certain tests doesn't go through the browser startup path that
   // initializes GpuDataManager on FILE thread; therefore, it is initialized
   // on UI thread later, and we skip the preliminary gpu info collection
   // in such situation.
-  if (!BrowserThread::CurrentlyOn(BrowserThread::FILE))
-    return;
+  if (BrowserThread::CurrentlyOn(BrowserThread::FILE)) {
+    GPUInfo gpu_info;
+    gpu_info_collector::CollectPreliminaryGraphicsInfo(&gpu_info);
+    UpdateGpuInfo(gpu_info);
+  }
 
-  GPUInfo gpu_info;
-  gpu_info_collector::CollectPreliminaryGraphicsInfo(&gpu_info);
-  UpdateGpuInfo(gpu_info);
+  user_flags_.Initialize();
 
 #if defined(OS_MACOSX)
   CGDisplayRegisterReconfigurationCallback(DisplayReconfigCallback, this);
@@ -181,23 +255,124 @@ const GPUInfo& GpuDataManager::gpu_info() const {
 }
 
 Value* GpuDataManager::GetFeatureStatus() {
-  const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
-  if (gpu_blacklist_.get())
-    return gpu_blacklist_->GetFeatureStatus(GpuAccessAllowed(),
-        browser_command_line.HasSwitch(
-            switches::kDisableAcceleratedCompositing),
-        browser_command_line.HasSwitch(
-            switches::kDisableAccelerated2dCanvas),
-        browser_command_line.HasSwitch(switches::kDisableExperimentalWebGL),
-        browser_command_line.HasSwitch(switches::kDisableGLMultisampling));
-  return NULL;
+  bool gpu_access_blocked = !GpuAccessAllowed();
+
+  uint32 flags = GetGpuFeatureFlags().flags();
+  DictionaryValue* status = new DictionaryValue();
+
+  const GpuFeatureInfo kGpuFeatureInfo[] = {
+      {
+          "2d_canvas",
+          flags & GpuFeatureFlags::kGpuFeatureAccelerated2dCanvas,
+          user_flags_.disable_accelerated_2d_canvas(),
+          "Accelerated 2D canvas has been disabled at the command line.",
+          true
+      },
+      {
+          "compositing",
+          flags & GpuFeatureFlags::kGpuFeatureAcceleratedCompositing,
+          user_flags_.disable_accelerated_compositing(),
+          "Accelerated compositing has been disabled, either via about:flags or"
+          " command line. This adversely affects performance of all hardware"
+          " accelerated features.",
+          true
+      },
+      {
+          "3d_css",
+          flags & GpuFeatureFlags::kGpuFeatureAcceleratedCompositing,
+          user_flags_.disable_accelerated_layers(),
+          "Accelerated layers have been disabled at the command line.",
+          false
+      },
+      {
+          "webgl",
+          flags & GpuFeatureFlags::kGpuFeatureWebgl,
+          user_flags_.disable_experimental_webgl(),
+          "WebGL has been disabled, either via about:flags or command line.",
+          false
+      },
+      {
+          "multisampling",
+          flags & GpuFeatureFlags::kGpuFeatureMultisampling,
+          user_flags_.disable_gl_multisampling(),
+          "Multisampling has been disabled, either via about:flags or command"
+          " line.",
+          false
+      }
+  };
+  const size_t kNumFeatures = sizeof(kGpuFeatureInfo) / sizeof(GpuFeatureInfo);
+
+  // Build the feature_status field.
+  {
+    ListValue* feature_status_list = new ListValue();
+
+    for (size_t i = 0; i < kNumFeatures; ++i) {
+      std::string status;
+      if (kGpuFeatureInfo[i].disabled) {
+        status = "disabled";
+        if (kGpuFeatureInfo[i].fallback_to_software)
+          status += "_software";
+        else
+          status += "_off";
+      } else if (kGpuFeatureInfo[i].blocked || gpu_access_blocked) {
+        status = "unavailable";
+        if (kGpuFeatureInfo[i].fallback_to_software)
+          status += "_software";
+        else
+          status += "_off";
+      } else {
+        status = "enabled";
+        if (kGpuFeatureInfo[i].name == "webgl" &&
+            (user_flags_.disable_accelerated_compositing() ||
+             (flags & GpuFeatureFlags::kGpuFeatureAcceleratedCompositing)))
+          status += "_readback";
+      }
+      feature_status_list->Append(
+          NewStatusValue(kGpuFeatureInfo[i].name.c_str(), status.c_str()));
+    }
+
+    status->Set("featureStatus", feature_status_list);
+  }
+
+  // Build the problems list.
+  {
+    ListValue* problem_list = new ListValue();
+
+    if (gpu_access_blocked) {
+      DictionaryValue* problem = new DictionaryValue();
+      problem->SetString("description",
+          "GPU process was unable to boot. Access to GPU disallowed.");
+      problem->Set("crBugs", new ListValue());
+      problem->Set("webkitBugs", new ListValue());
+      problem_list->Append(problem);
+    }
+
+    for (size_t i = 0; i < kNumFeatures; ++i) {
+      if (kGpuFeatureInfo[i].disabled) {
+        DictionaryValue* problem = new DictionaryValue();
+        problem->SetString(
+            "description", kGpuFeatureInfo[i].disabled_description);
+        problem->Set("crBugs", new ListValue());
+        problem->Set("webkitBugs", new ListValue());
+        problem_list->Append(problem);
+      }
+    }
+
+    GpuBlacklist* blacklist = GetGpuBlacklist();
+    if (blacklist && (!UseGLIsOSMesaOrAny()))
+      blacklist->GetBlacklistReasons(problem_list);
+
+    status->Set("problems", problem_list);
+  }
+
+  return status;
 }
 
 std::string GpuDataManager::GetBlacklistVersion() const {
-  if (gpu_blacklist_.get() != NULL) {
+  GpuBlacklist* blacklist = GetGpuBlacklist();
+  if (blacklist != NULL) {
     uint16 version_major, version_minor;
-    if (gpu_blacklist_->GetVersion(&version_major,
-                                   &version_minor)) {
+    if (blacklist->GetVersion(&version_major, &version_minor)) {
       std::string version_string =
           base::UintToString(static_cast<unsigned>(version_major)) +
           "." +
@@ -219,10 +394,15 @@ const ListValue& GpuDataManager::log_messages() const {
 }
 
 GpuFeatureFlags GpuDataManager::GetGpuFeatureFlags() {
+  if (UseGLIsOSMesaOrAny())
+    return GpuFeatureFlags();
   return gpu_feature_flags_;
 }
 
 bool GpuDataManager::GpuAccessAllowed() {
+  if (UseGLIsOSMesaOrAny())
+    return true;
+
   // We only need to block GPU process if more features are disallowed other
   // than those in the preliminary gpu feature flags because the latter work
   // through renderer commandline switches.
@@ -267,6 +447,27 @@ void GpuDataManager::AppendRendererCommandLine(
   if ((flags & GpuFeatureFlags::kGpuFeatureAccelerated2dCanvas) &&
       !command_line->HasSwitch(switches::kDisableAccelerated2dCanvas))
     command_line->AppendSwitch(switches::kDisableAccelerated2dCanvas);
+}
+
+void GpuDataManager::AppendGpuCommandLine(
+    CommandLine* command_line) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK(command_line);
+
+  uint32 flags = gpu_feature_flags_.flags();
+  if ((flags & GpuFeatureFlags::kGpuFeatureMultisampling) &&
+      !command_line->HasSwitch(switches::kDisableGLMultisampling))
+    command_line->AppendSwitch(switches::kDisableGLMultisampling);
+
+  if ((flags & (GpuFeatureFlags::kGpuFeatureWebgl |
+                GpuFeatureFlags::kGpuFeatureAcceleratedCompositing |
+                GpuFeatureFlags::kGpuFeatureAccelerated2dCanvas)) &&
+      (user_flags_.use_gl() == "any")) {
+    command_line->AppendSwitchASCII(
+        switches::kUseGL, gfx::kGLImplementationOSMesaName);
+  } else if (!user_flags_.use_gl().empty()) {
+    command_line->AppendSwitchASCII(switches::kUseGL, user_flags_.use_gl());
+  }
 }
 
 void GpuDataManager::SetBuiltInGpuBlacklist(GpuBlacklist* built_in_list) {
@@ -408,18 +609,30 @@ void GpuDataManager::UpdateGpuFeatureFlags() {
 
   uint32 flags = gpu_feature_flags_.flags();
   uint32 max_entry_id = gpu_blacklist->max_entry_id();
+  bool disabled = false;
   if (flags == 0) {
     UMA_HISTOGRAM_ENUMERATION("GPU.BlacklistTestResultsPerEntry",
         0, max_entry_id + 1);
   } else {
     std::vector<uint32> flag_entries;
     gpu_blacklist->GetGpuFeatureFlagEntries(
-        GpuFeatureFlags::kGpuFeatureAll, flag_entries);
+        GpuFeatureFlags::kGpuFeatureAll, flag_entries, disabled);
     DCHECK_GT(flag_entries.size(), 0u);
     for (size_t i = 0; i < flag_entries.size(); ++i) {
       UMA_HISTOGRAM_ENUMERATION("GPU.BlacklistTestResultsPerEntry",
           flag_entries[i], max_entry_id + 1);
     }
+  }
+
+  // This counts how many users are affected by a disabled entry - this allows
+  // us to understand the impact of an entry before enable it.
+  std::vector<uint32> flag_disabled_entries;
+  disabled = true;
+  gpu_blacklist->GetGpuFeatureFlagEntries(
+      GpuFeatureFlags::kGpuFeatureAll, flag_disabled_entries, disabled);
+  for (size_t i = 0; i < flag_disabled_entries.size(); ++i) {
+    UMA_HISTOGRAM_ENUMERATION("GPU.BlacklistTestResultsPerDisabledEntry",
+        flag_disabled_entries[i], max_entry_id + 1);
   }
 
   const GpuFeatureFlags::GpuFeatureType kGpuFeatures[] = {
@@ -432,11 +645,16 @@ void GpuDataManager::UpdateGpuFeatureFlags() {
       "GPU.BlacklistFeatureTestResults.AcceleratedCompositing",
       "GPU.BlacklistFeatureTestResults.Webgl"
   };
+  const bool kGpuFeatureUserFlags[] = {
+      user_flags_.disable_accelerated_2d_canvas(),
+      user_flags_.disable_accelerated_compositing(),
+      user_flags_.disable_experimental_webgl()
+  };
 #if defined(OS_WIN)
   const std::string kGpuBlacklistFeatureHistogramNamesWin[] = {
-      "GPU.BlacklistFeatureTestResultsWin.Accelerated2dCanvas",
-      "GPU.BlacklistFeatureTestResultsWin.AcceleratedCompositing",
-      "GPU.BlacklistFeatureTestResultsWin.Webgl"
+      "GPU.BlacklistFeatureTestResultsWindows.Accelerated2dCanvas",
+      "GPU.BlacklistFeatureTestResultsWindows.AcceleratedCompositing",
+      "GPU.BlacklistFeatureTestResultsWindows.Webgl"
   };
 #endif
   const size_t kNumFeatures =
@@ -444,31 +662,39 @@ void GpuDataManager::UpdateGpuFeatureFlags() {
   for (size_t i = 0; i < kNumFeatures; ++i) {
     // We can't use UMA_HISTOGRAM_ENUMERATION here because the same name is
     // expected if the macro is used within a loop.
+    GpuFeatureStatus value = kGpuFeatureEnabled;
+    if (flags & kGpuFeatures[i])
+      value = kGpuFeatureBlacklisted;
+    else if (kGpuFeatureUserFlags[i])
+      value = kGpuFeatureDisabled;
     base::Histogram* histogram_pointer = base::LinearHistogram::FactoryGet(
-        kGpuBlacklistFeatureHistogramNames[i], 1, 2, 3,
+        kGpuBlacklistFeatureHistogramNames[i],
+        1, kGpuFeatureNumStatus, kGpuFeatureNumStatus + 1,
         base::Histogram::kUmaTargetedHistogramFlag);
-    histogram_pointer->Add((flags & kGpuFeatures[i]) ? 1 : 0);
+    histogram_pointer->Add(value);
 #if defined(OS_WIN)
     histogram_pointer = base::LinearHistogram::FactoryGet(
         kGpuBlacklistFeatureHistogramNamesWin[i],
-        1, kNumWinSubVersions * 2, kNumWinSubVersions * 2 + 1,
+        1, kNumWinSubVersions * kGpuFeatureNumStatus,
+        kNumWinSubVersions * kGpuFeatureNumStatus + 1,
         base::Histogram::kUmaTargetedHistogramFlag);
-    histogram_pointer->Add(
-        GetGpuBlacklistHistogramValueWin(
-            (flags & kGpuFeatures[i]) ? true : false));
+    histogram_pointer->Add(GetGpuBlacklistHistogramValueWin(value));
 #endif
   }
 }
 
-GpuBlacklist* GpuDataManager::GetGpuBlacklist() {
+GpuBlacklist* GpuDataManager::GetGpuBlacklist() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
-  if (browser_command_line.HasSwitch(switches::kIgnoreGpuBlacklist) ||
-      browser_command_line.GetSwitchValueASCII(
-          switches::kUseGL) == gfx::kGLImplementationOSMesaName)
+  if (user_flags_.ignore_gpu_blacklist())
     return NULL;
   // No need to return an empty blacklist.
   if (gpu_blacklist_.get() != NULL && gpu_blacklist_->max_entry_id() == 0)
     return NULL;
   return gpu_blacklist_.get();
 }
+
+bool GpuDataManager::UseGLIsOSMesaOrAny() {
+  return (user_flags_.use_gl() == "any" ||
+          user_flags_.use_gl() == gfx::kGLImplementationOSMesaName);
+}
+

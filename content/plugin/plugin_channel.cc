@@ -11,8 +11,8 @@
 #include "base/synchronization/waitable_event.h"
 #include "build/build_config.h"
 #include "content/common/child_process.h"
-#include "content/common/content_switches.h"
 #include "content/common/plugin_messages.h"
+#include "content/public/common/content_switches.h"
 #include "content/plugin/plugin_thread.h"
 #include "content/plugin/webplugin_delegate_stub.h"
 #include "content/plugin/webplugin_proxy.h"
@@ -143,12 +143,13 @@ PluginChannel* PluginChannel::GetPluginChannel(
       "%d.r%d", base::GetCurrentProcId(), renderer_id);
 
   PluginChannel* channel =
-      static_cast<PluginChannel*>(PluginChannelBase::GetChannel(
+      static_cast<PluginChannel*>(NPChannelBase::GetChannel(
           channel_key,
           IPC::Channel::MODE_SERVER,
           ClassFactory,
           ipc_message_loop,
-          false));
+          false,
+          ChildProcess::current()->GetShutDownEvent()));
 
   if (channel)
     channel->renderer_id_ = renderer_id;
@@ -187,7 +188,7 @@ bool PluginChannel::Send(IPC::Message* msg) {
     VLOG(1) << "sending message @" << msg << " on channel @" << this
             << " with type " << msg->type();
   }
-  bool result = PluginChannelBase::Send(msg);
+  bool result = NPChannelBase::Send(msg);
   in_send_--;
   return result;
 }
@@ -197,7 +198,7 @@ bool PluginChannel::OnMessageReceived(const IPC::Message& msg) {
     VLOG(1) << "received message @" << &msg << " on channel @" << this
             << " with type " << msg.type();
   }
-  return PluginChannelBase::OnMessageReceived(msg);
+  return NPChannelBase::OnMessageReceived(msg);
 }
 
 bool PluginChannel::OnControlMessageReceived(const IPC::Message& msg) {
@@ -297,13 +298,13 @@ void PluginChannel::OnChannelConnected(int32 peer_pid) {
     NOTREACHED();
   }
   renderer_handle_ = handle;
-  PluginChannelBase::OnChannelConnected(peer_pid);
+  NPChannelBase::OnChannelConnected(peer_pid);
 }
 
 void PluginChannel::OnChannelError() {
   base::CloseProcessHandle(renderer_handle_);
   renderer_handle_ = 0;
-  PluginChannelBase::OnChannelError();
+  NPChannelBase::OnChannelError();
   CleanUp();
 }
 
@@ -324,8 +325,9 @@ void PluginChannel::CleanUp() {
 }
 
 bool PluginChannel::Init(base::MessageLoopProxy* ipc_message_loop,
-                         bool create_pipe_now) {
-  if (!PluginChannelBase::Init(ipc_message_loop, create_pipe_now))
+                         bool create_pipe_now,
+                         base::WaitableEvent* shutdown_event) {
+  if (!NPChannelBase::Init(ipc_message_loop, create_pipe_now, shutdown_event))
     return false;
 
   channel_->AddFilter(filter_.get());

@@ -19,7 +19,6 @@
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/browser/ui/views/autocomplete/autocomplete_popup_contents_view.h"
-#include "content/common/page_transition_types.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/font.h"
 #include "views/controls/menu/menu_2.h"
@@ -69,6 +68,10 @@ class OmniboxViewWin
                  bool popup_window_mode,
                  views::View* location_bar);
   ~OmniboxViewWin();
+
+  // Gets the relative window for the specified native view.
+  static gfx::NativeView GetRelativeWindowForNativeView(
+      gfx::NativeView edit_native_view);
 
   views::View* parent_view() const;
 
@@ -132,6 +135,7 @@ class OmniboxViewWin
   virtual void OnBeforePossibleChange() OVERRIDE;
   virtual bool OnAfterPossibleChange() OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
+  virtual gfx::NativeView GetRelativeWindowForPopup() const OVERRIDE;
   virtual CommandUpdater* GetCommandUpdater() OVERRIDE;
   virtual void SetInstantSuggestion(const string16& suggestion,
                                     bool animate_to_complete) OVERRIDE;

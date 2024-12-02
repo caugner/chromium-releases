@@ -9,11 +9,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "chrome/common/print_messages.h"
-#include "content/common/view_messages.h"
+#include "content/public/renderer/render_thread.h"
 #include "printing/metafile.h"
 #include "printing/metafile_impl.h"
 #include "printing/metafile_skia_wrapper.h"
 #include "printing/page_size_margins.h"
+#include "skia/ext/platform_device.h"
 #include "skia/ext/vector_canvas.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
@@ -56,7 +57,7 @@ bool PrintWebViewHelper::RenderPreviewPage(int page_number) {
 
 bool PrintWebViewHelper::PrintPages(const PrintMsg_PrintPages_Params& params,
                                     WebFrame* frame,
-                                    WebNode* node,
+                                    const WebNode& node,
                                     PrepareFrameAndViewForPrint* prepare) {
   printing::NativeMetafile metafile;
   if (!metafile.Init())
@@ -93,9 +94,8 @@ bool PrintWebViewHelper::PrintPages(const PrintMsg_PrintPages_Params& params,
   printed_page_params.data_size = 0;
   printed_page_params.document_cookie = params.params.document_cookie;
 
-  base::SharedMemoryHandle shared_mem_handle;
-  Send(new ViewHostMsg_AllocateSharedMemoryBuffer(buf_size,
-                                                  &shared_mem_handle));
+  base::SharedMemoryHandle shared_mem_handle =
+      content::RenderThread::Get()->HostAllocateSharedMemoryBuffer(buf_size);
   if (!base::SharedMemory::IsHandleValid(shared_mem_handle)) {
     NOTREACHED() << "AllocateSharedMemoryBuffer returned bad handle";
     return false;
@@ -142,7 +142,7 @@ bool PrintWebViewHelper::PrintPages(const PrintMsg_PrintPages_Params& params,
 
 bool PrintWebViewHelper::RenderPages(const PrintMsg_PrintPages_Params& params,
                                      WebKit::WebFrame* frame,
-                                     WebKit::WebNode* node,
+                                     const WebKit::WebNode& node,
                                      int* page_count,
                                      PrepareFrameAndViewForPrint* prepare,
                                      printing::Metafile* metafile) {
@@ -159,9 +159,6 @@ bool PrintWebViewHelper::RenderPages(const PrintMsg_PrintPages_Params& params,
                                                   *page_count));
 #endif
 
-  base::TimeTicks begin_time = base::TimeTicks::Now();
-  base::TimeTicks page_begin_time = begin_time;
-
   PrintMsg_PrintPage_Params page_params;
   page_params.params = print_params;
   const gfx::Size& canvas_size = prepare->GetPrintCanvasSize();
@@ -176,8 +173,6 @@ bool PrintWebViewHelper::RenderPages(const PrintMsg_PrintPages_Params& params,
       PrintPageInternal(page_params, canvas_size, frame, metafile);
     }
   }
-
-  base::TimeDelta render_time = base::TimeTicks::Now() - begin_time;
 
   prepare->FinishPrinting();
   metafile->FinishDocument();
@@ -214,9 +209,8 @@ void PrintWebViewHelper::PrintPageInternal(
   // can't be a stack object.
   SkRefPtr<skia::VectorCanvas> canvas = new skia::VectorCanvas(device);
   canvas->unref();  // SkRefPtr and new both took a reference.
-  printing::MetafileSkiaWrapper::SetMetafileOnCanvas(canvas.get(), metafile);
-  printing::MetafileSkiaWrapper::SetDraftMode(canvas.get(),
-                                              is_print_ready_metafile_sent_);
+  printing::MetafileSkiaWrapper::SetMetafileOnCanvas(*canvas, metafile);
+  skia::SetIsDraftMode(*canvas, is_print_ready_metafile_sent_);
   frame->printPage(params.page_number, canvas.get());
 
   if (params.params.display_header_footer) {

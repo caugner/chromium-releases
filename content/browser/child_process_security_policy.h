@@ -15,6 +15,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/singleton.h"
 #include "base/synchronization/lock.h"
+#include "content/common/content_export.h"
 
 class FilePath;
 class GURL;
@@ -26,7 +27,7 @@ class GURL;
 //
 // ChildProcessSecurityPolicy is a singleton that may be used on any thread.
 //
-class ChildProcessSecurityPolicy {
+class CONTENT_EXPORT ChildProcessSecurityPolicy {
  public:
   // Object can only be created through GetInstance() so the constructor is
   // private.
@@ -106,9 +107,6 @@ class ChildProcessSecurityPolicy {
   // Grant the child process the ability to use Web UI Bindings.
   void GrantWebUIBindings(int child_id);
 
-  // Grant the child process the ability to use extension Bindings.
-  void GrantExtensionBindings(int child_id);
-
   // Grant the child process the ability to read raw cookies.
   void GrantReadRawCookies(int child_id);
 
@@ -139,11 +137,6 @@ class ChildProcessSecurityPolicy {
   // The browser should check this property before assuming the child process is
   // allowed to use WebUIBindings.
   bool HasWebUIBindings(int child_id);
-
-  // Returns true if the specified child_id has been granted WebUIBindings.
-  // The browser should check this property before assuming the child process is
-  // allowed to use extension bindings.
-  bool HasExtensionBindings(int child_id);
 
   // Returns true if the specified child_id has been granted ReadRawCookies.
   bool CanReadRawCookies(int child_id);

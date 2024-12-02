@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
@@ -75,9 +76,8 @@ void GoogleAuthenticator::CancelClientLogin() {
 
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(this,
-                          &GoogleAuthenticator::LoadLocalaccount,
-                          std::string(kLocalaccountFile)));
+        base::Bind(&GoogleAuthenticator::LoadLocalaccount, this,
+                   std::string(kLocalaccountFile)));
 
     CheckOffline(LoginFailure(LoginFailure::LOGIN_TIMED_OUT));
   }
@@ -87,16 +87,14 @@ void GoogleAuthenticator::TryClientLogin() {
   gaia_authenticator_->StartClientLogin(
       username_,
       password_,
-      GaiaConstants::kContactsService,
+      GaiaConstants::kPicasaService,
       login_token_,
       login_captcha_,
       hosted_policy_);
 
   BrowserThread::PostDelayedTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      NewRunnableMethod(this,
-                        &GoogleAuthenticator::CancelClientLogin),
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&GoogleAuthenticator::CancelClientLogin, this),
       kClientLoginTimeoutMs);
 }
 
@@ -117,7 +115,7 @@ void GoogleAuthenticator::ClearClientLoginAttempt() {
   login_token_.clear();
   login_captcha_.clear();
 }
-bool GoogleAuthenticator::CompleteLogin(Profile* profile,
+void GoogleAuthenticator::CompleteLogin(Profile* profile,
                                         const std::string& username,
                                         const std::string& password) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -127,13 +125,11 @@ bool GoogleAuthenticator::CompleteLogin(Profile* profile,
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this,
-                        &GoogleAuthenticator::OnLoginSuccess,
-                        GaiaAuthConsumer::ClientLoginResult(), false));
-  return true;
+      base::Bind(&GoogleAuthenticator::OnLoginSuccess, this,
+                 GaiaAuthConsumer::ClientLoginResult(), false));
 }
 
-bool GoogleAuthenticator::AuthenticateToLogin(
+void GoogleAuthenticator::AuthenticateToLogin(
     Profile* profile,
     const std::string& username,
     const std::string& password,
@@ -154,10 +150,9 @@ bool GoogleAuthenticator::AuthenticateToLogin(
   // Will be used for retries.
   PrepareClientLoginAttempt(password, login_token, login_captcha);
   TryClientLogin();
-  return true;
 }
 
-bool GoogleAuthenticator::AuthenticateToUnlock(const std::string& username,
+void GoogleAuthenticator::AuthenticateToUnlock(const std::string& username,
                                                const std::string& password) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   username_.assign(Canonicalize(username));
@@ -165,14 +160,12 @@ bool GoogleAuthenticator::AuthenticateToUnlock(const std::string& username,
   unlock_ = true;
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(this,
-                        &GoogleAuthenticator::LoadLocalaccount,
-                        std::string(kLocalaccountFile)));
+      base::Bind(&GoogleAuthenticator::LoadLocalaccount, this,
+                 std::string(kLocalaccountFile)));
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &GoogleAuthenticator::CheckOffline,
-                        LoginFailure(LoginFailure::UNLOCK_FAILED)));
-  return true;
+      base::Bind(&GoogleAuthenticator::CheckOffline, this,
+                 LoginFailure(LoginFailure::UNLOCK_FAILED)));
 }
 
 void GoogleAuthenticator::LoginOffTheRecord() {
@@ -213,9 +206,8 @@ void GoogleAuthenticator::OnClientLoginSuccess(
   }
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this,
-                        &GoogleAuthenticator::OnLoginSuccess,
-                        credentials, false));
+      base::Bind(&GoogleAuthenticator::OnLoginSuccess, this, credentials,
+                 false));
 }
 
 void GoogleAuthenticator::OnClientLoginFailure(
@@ -242,9 +234,8 @@ void GoogleAuthenticator::OnClientLoginFailure(
                 GoogleServiceAuthError::HOSTED_NOT_ALLOWED));
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this,
-                          &GoogleAuthenticator::OnLoginFailure,
-                          failure_details));
+        base::Bind(&GoogleAuthenticator::OnLoginFailure, this,
+                   failure_details));
     LOG(WARNING) << "Rejecting valid HOSTED account.";
     hosted_policy_ = GaiaAuthFetcher::HostedAccountsNotAllowed;
     return;
@@ -262,9 +253,8 @@ void GoogleAuthenticator::OnClientLoginFailure(
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(this,
-                        &GoogleAuthenticator::LoadLocalaccount,
-                        std::string(kLocalaccountFile)));
+      base::Bind(&GoogleAuthenticator::LoadLocalaccount, this,
+                 std::string(kLocalaccountFile)));
 
   LoginFailure failure_details = LoginFailure::FromNetworkAuthFailure(error);
 
@@ -272,17 +262,15 @@ void GoogleAuthenticator::OnClientLoginFailure(
     // The fetch failed for network reasons, try offline login.
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this, &GoogleAuthenticator::CheckOffline,
-                          failure_details));
+        base::Bind(&GoogleAuthenticator::CheckOffline, this, failure_details));
     return;
   }
 
   // The fetch succeeded, but ClientLogin said no, or we exhausted retries.
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this,
-        &GoogleAuthenticator::CheckLocalaccount,
-        failure_details));
+      base::Bind(&GoogleAuthenticator::CheckLocalaccount, this,
+                 failure_details));
 }
 
 void GoogleAuthenticator::OnLoginSuccess(
@@ -337,9 +325,7 @@ void GoogleAuthenticator::CheckLocalaccount(const LoginFailure& error) {
       BrowserThread::PostDelayedTask(
           BrowserThread::UI,
           FROM_HERE,
-          NewRunnableMethod(this,
-                            &GoogleAuthenticator::CheckLocalaccount,
-                            error),
+          base::Bind(&GoogleAuthenticator::CheckLocalaccount, this, error),
           kLocalaccountRetryIntervalMs);
       return;
     }
@@ -418,6 +404,11 @@ std::string GoogleAuthenticator::EncryptToken(const std::string& unused) {
 }
 
 std::string GoogleAuthenticator::DecryptToken(const std::string& unused) {
+  NOTIMPLEMENTED();
+  return std::string();
+}
+
+std::string GoogleAuthenticator::DecryptLegacyToken(const std::string& unused) {
   NOTIMPLEMENTED();
   return std::string();
 }

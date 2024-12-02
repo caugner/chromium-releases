@@ -4,37 +4,37 @@
 
 #include "chrome/browser/chromeos/login/mock_authenticator.h"
 
+#include "base/bind.h"
+#include "content/browser/browser_thread.h"
+
 namespace chromeos {
 
-bool MockAuthenticator::AuthenticateToLogin(Profile* profile,
+void MockAuthenticator::AuthenticateToLogin(Profile* profile,
                                  const std::string& username,
                                  const std::string& password,
                                  const std::string& login_token,
                                  const std::string& login_captcha) {
   if (expected_username_ == username && expected_password_ == password) {
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this, &MockAuthenticator::OnLoginSuccess,
-                          GaiaAuthConsumer::ClientLoginResult(), false));
-    return true;
+        base::Bind(&MockAuthenticator::OnLoginSuccess, this,
+                   GaiaAuthConsumer::ClientLoginResult(), false));
   }
   GoogleServiceAuthError error(
       GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &MockAuthenticator::OnLoginFailure,
-                        LoginFailure::FromNetworkAuthFailure(error)));
-  return false;
+      base::Bind(&MockAuthenticator::OnLoginFailure, this,
+                 LoginFailure::FromNetworkAuthFailure(error)));
 }
 
-bool MockAuthenticator::CompleteLogin(Profile* profile,
+void MockAuthenticator::CompleteLogin(Profile* profile,
                                       const std::string& username,
                                       const std::string& password) {
-  return false;
 }
 
-bool MockAuthenticator::AuthenticateToUnlock(const std::string& username,
+void MockAuthenticator::AuthenticateToUnlock(const std::string& username,
                                   const std::string& password) {
-  return AuthenticateToLogin(NULL /* not used */, username, password,
-                             std::string(), std::string());
+  AuthenticateToLogin(NULL /* not used */, username, password,
+                      std::string(), std::string());
 }
 
 void MockAuthenticator::LoginOffTheRecord() {
@@ -65,6 +65,11 @@ std::string MockAuthenticator::EncryptToken(const std::string& token) {
 }
 
 std::string MockAuthenticator::DecryptToken(
+    const std::string& encrypted_token) {
+  return std::string();
+}
+
+std::string MockAuthenticator::DecryptLegacyToken(
     const std::string& encrypted_token) {
   return std::string();
 }
@@ -101,7 +106,7 @@ void MockLoginUtils::PrepareProfile(
 void MockLoginUtils::DelegateDeleted(Delegate* delegate) {
 }
 
-Authenticator* MockLoginUtils::CreateAuthenticator(
+scoped_refptr<Authenticator> MockLoginUtils::CreateAuthenticator(
     LoginStatusConsumer* consumer) {
   return new MockAuthenticator(
       consumer, expected_username_, expected_password_);
@@ -122,9 +127,12 @@ std::string MockLoginUtils::GetOffTheRecordCommandLine(
   return std::string();
 }
 
-bool MockLoginUtils::TransferDefaultCookies(Profile* default_profile,
-                                                   Profile* new_profile) {
-  return true;
+void MockLoginUtils::TransferDefaultCookies(Profile* default_profile,
+                                            Profile* new_profile) {
+}
+
+void MockLoginUtils::TransferDefaultAuthCache(Profile* default_profile,
+                                              Profile* new_profile) {
 }
 
 }  // namespace chromeos

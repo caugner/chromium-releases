@@ -24,11 +24,12 @@ extern const char kUrlKey[];
 
 // Events.
 extern const char kOnBeforeNavigate[];
-extern const char kOnBeforeRetarget[];
 extern const char kOnCommitted[];
 extern const char kOnCompleted[];
+extern const char kOnCreatedNavigationTarget[];
 extern const char kOnDOMContentLoaded[];
 extern const char kOnErrorOccurred[];
+extern const char kOnReferenceFragmentUpdated[];
 
 }  // namespace extension_webnavigation_api_constants
 

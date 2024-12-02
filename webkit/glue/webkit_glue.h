@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -88,17 +88,14 @@ string16 DumpFrameScrollPosition(WebKit::WebFrame* web_frame, bool recursive);
 string16 DumpHistoryState(const std::string& history_state, int indent,
                           bool is_current);
 
-// Returns the WebKit version (major.minor).
-std::string GetWebKitVersion();
+// Sets the user agent.  Pass true for overriding if this is a custom
+// user agent instead of the default one (in order to turn off any browser
+// sniffing workarounds). This must be called before GetUserAgent() can
+// be called.
+void SetUserAgent(const std::string& user_agent, bool overriding);
 
-// Called to override the default user agent with a custom one.  Call this
-// before anyone actually asks for the user agent in order to prevent
-// inconsistent behavior.
-void SetUserAgent(const std::string& new_user_agent);
-
-// Returns the user agent to use for the given URL, which is usually the
-// default user agent but may be overriden by a call to SetUserAgent() (which
-// should be done at startup).
+// Returns the user agent to use for the given URL. SetUserAgent() must
+// be called prior to calling this function.
 const std::string& GetUserAgent(const GURL& url);
 
 // Creates serialized state for the specified URL. This is a variant of
@@ -150,10 +147,6 @@ WebKit::WebCanvas* ToWebCanvas(skia::PlatformCanvas*);
 // used to get memory usage statistics.
 int GetGlyphPageCount();
 
-// Construct the User-Agent header, filling in |result|.
-// - If mimic_windows is true, produce a fake Windows Chrome string.
-std::string BuildUserAgent(bool mimic_windows);
-
 //---- END FUNCTIONS IMPLEMENTED BY WEBKIT/GLUE -------------------------------
 
 
@@ -191,7 +184,8 @@ void ClipboardReadAsciiText(ui::Clipboard::Buffer buffer, std::string* result);
 
 // Reads HTML from the clipboard, if available.
 void ClipboardReadHTML(ui::Clipboard::Buffer buffer, string16* markup,
-                       GURL* url);
+                       GURL* url, uint32* fragment_start,
+                       uint32* fragment_end);
 
 void ClipboardReadImage(ui::Clipboard::Buffer buffer, std::string* data);
 
@@ -218,49 +212,8 @@ bool IsProtocolSupportedForMedia(const GURL& url);
 // the form language-country (e.g., en-US or pt-BR).
 std::string GetWebKitLocale();
 
-// Close current connections.  Used for debugging.
-void CloseCurrentConnections();
-
-// Enable or disable the disk cache.  Used for debugging.
-void SetCacheMode(bool enabled);
-
-// Clear the disk cache.  Used for debugging.
-// |preserve_ssl_host_info| indicates whether disk cache entries related to
-// SSL information should be purged.
-void ClearCache(bool preserve_ssl_host_info);
-
-// Clear the host resolver cache.  Used for debugging.
-void ClearHostResolverCache();
-
-// Clear the predictor cache (for DNS prefetch and preconnect).  Used for
-// debugging.
-void ClearPredictorCache();
-
 // Returns true if the embedder is running in single process mode.
 bool IsSingleProcess();
-
-// Enables/Disables Spdy for requests afterwards. Used for benchmarking.
-void EnableSpdy(bool enable);
-
-#if defined(OS_LINUX)
-// Return a read-only file descriptor to the font which best matches the given
-// properties or -1 on failure.
-//   charset: specifies the language(s) that the font must cover. See
-// render_sandbox_host_linux.cc for more information.
-int MatchFontWithFallback(const std::string& face, bool bold,
-                          bool italic, int charset);
-
-// GetFontTable loads a specified font table from an open SFNT file.
-//   fd: a file descriptor to the SFNT file. The position doesn't matter.
-//   table: the table in *big-endian* format, or 0 for the whole font file.
-//   output: a buffer of size output_length that gets the data.  can be 0, in
-//     which case output_length will be set to the required size in bytes.
-//   output_length: size of output, if it's not 0.
-//
-//   returns: true on success.
-bool GetFontTable(int fd, uint32_t table, uint8_t* output,
-                  size_t* output_length);
-#endif
 
 // ---- END FUNCTIONS IMPLEMENTED BY EMBEDDER ---------------------------------
 

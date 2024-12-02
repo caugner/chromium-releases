@@ -25,14 +25,15 @@
 #include "base/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "content/browser/renderer_host/backing_store_x.h"
+#include "content/browser/renderer_host/backing_store_gtk.h"
 #include "content/browser/renderer_host/gtk_im_context_wrapper.h"
 #include "content/browser/renderer_host/gtk_window_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host.h"
-#include "content/common/content_switches.h"
-#include "content/common/native_web_keyboard_event.h"
+#include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/common/content_switches.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/gtk/WebInputEventFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/x11/WebScreenInfoFactory.h"
@@ -94,6 +95,12 @@ GdkCursor* GetMozSpinningCursor() {
   return moz_spinning_cursor;
 }
 
+bool MovedToCenter(const WebKit::WebMouseEvent& mouse_event,
+                   const gfx::Point& center) {
+  return mouse_event.globalX == center.x() &&
+         mouse_event.globalY == center.y();
+}
+
 }  // namespace
 
 using WebKit::WebInputEventFactory;
@@ -115,6 +122,7 @@ class RenderWidgetHostViewGtkWidget {
     gtk_widget_set_size_request(widget, 0, 0);
 
     gtk_widget_add_events(widget, GDK_EXPOSURE_MASK |
+                                  GDK_STRUCTURE_MASK |
                                   GDK_POINTER_MOTION_MASK |
                                   GDK_BUTTON_PRESS_MASK |
                                   GDK_BUTTON_RELEASE_MASK |
@@ -127,6 +135,10 @@ class RenderWidgetHostViewGtkWidget {
 
     g_signal_connect(widget, "expose-event",
                      G_CALLBACK(OnExposeEvent), host_view);
+    g_signal_connect(widget, "realize",
+                     G_CALLBACK(OnRealize), host_view);
+    g_signal_connect(widget, "configure-event",
+                     G_CALLBACK(OnConfigureEvent), host_view);
     g_signal_connect(widget, "key-press-event",
                      G_CALLBACK(OnKeyPressReleaseEvent), host_view);
     g_signal_connect(widget, "key-release-event",
@@ -167,6 +179,24 @@ class RenderWidgetHostViewGtkWidget {
       return FALSE;
     const gfx::Rect damage_rect(expose->area);
     host_view->Paint(damage_rect);
+    return FALSE;
+  }
+
+  static gboolean OnRealize(GtkWidget* widget,
+                            RenderWidgetHostViewGtk* host_view) {
+    // Use GtkSignalRegistrar to register events on a widget we don't
+    // control the lifetime of, auto disconnecting at our end of our life.
+    host_view->signals_.Connect(gtk_widget_get_toplevel(widget),
+                                "configure-event",
+                                G_CALLBACK(OnConfigureEvent), host_view);
+    return FALSE;
+  }
+
+  static gboolean OnConfigureEvent(GtkWidget* widget,
+                                   GdkEventConfigure* event,
+                                   RenderWidgetHostViewGtk* host_view) {
+    host_view->widget_center_valid_ = false;
+    host_view->mouse_has_been_warped_to_new_center_ = false;
     return FALSE;
   }
 
@@ -351,8 +381,31 @@ class RenderWidgetHostViewGtkWidget {
     }
 
     host_view->ModifyEventForEdgeDragging(widget, event);
-    host_view->GetRenderWidgetHost()->ForwardMouseEvent(
-        WebInputEventFactory::mouseEvent(event));
+
+    WebKit::WebMouseEvent mouse_event =
+        WebInputEventFactory::mouseEvent(event);
+
+    if (host_view->mouse_locked_) {
+      gfx::Point center = host_view->GetWidgetCenter();
+
+      bool moved_to_center = MovedToCenter(mouse_event, center);
+      if (moved_to_center)
+        host_view->mouse_has_been_warped_to_new_center_ = true;
+
+      host_view->ModifyEventMovementAndCoords(&mouse_event);
+
+      if (!moved_to_center &&
+          (mouse_event.movementX || mouse_event.movementY)) {
+        GdkDisplay* display = gtk_widget_get_display(widget);
+        GdkScreen* screen = gtk_widget_get_screen(widget);
+        gdk_display_warp_pointer(display, screen, center.x(), center.y());
+        if (host_view->mouse_has_been_warped_to_new_center_)
+          host_view->GetRenderWidgetHost()->ForwardMouseEvent(mouse_event);
+      }
+    } else {  // Mouse is not locked.
+      host_view->ModifyEventMovementAndCoords(&mouse_event);
+      host_view->GetRenderWidgetHost()->ForwardMouseEvent(mouse_event);
+    }
     return FALSE;
   }
 
@@ -372,8 +425,15 @@ class RenderWidgetHostViewGtkWidget {
     // additionally send this crossing event with the state indicating the
     // button is down, it causes problems with drag and drop in WebKit.)
     if (!(event->state & any_button_mask)) {
-      host_view->GetRenderWidgetHost()->ForwardMouseEvent(
-          WebInputEventFactory::mouseEvent(event));
+      WebKit::WebMouseEvent mouse_event =
+          WebInputEventFactory::mouseEvent(event);
+      host_view->ModifyEventMovementAndCoords(&mouse_event);
+      // When crossing out and back into a render view the movement values
+      // must represent the instantaneous movement of the mouse, not the jump
+      // from the exit to re-entry point.
+      mouse_event.movementX = 0;
+      mouse_event.movementY = 0;
+      host_view->GetRenderWidgetHost()->ForwardMouseEvent(mouse_event);
     }
 
     return FALSE;
@@ -494,12 +554,6 @@ class RenderWidgetHostViewGtkWidget {
   DISALLOW_IMPLICIT_CONSTRUCTORS(RenderWidgetHostViewGtkWidget);
 };
 
-// static
-RenderWidgetHostView* RenderWidgetHostView::CreateViewForWidget(
-    RenderWidgetHost* widget) {
-  return new RenderWidgetHostViewGtk(widget);
-}
-
 RenderWidgetHostViewGtk::RenderWidgetHostViewGtk(RenderWidgetHost* widget_host)
     : host_(widget_host),
       about_to_validate_and_paint_(false),
@@ -522,6 +576,7 @@ RenderWidgetHostViewGtk::RenderWidgetHostViewGtk(RenderWidgetHost* widget_host)
 }
 
 RenderWidgetHostViewGtk::~RenderWidgetHostViewGtk() {
+  UnlockMouse();
   set_last_mouse_down(NULL);
   view_.Destroy();
 }
@@ -735,11 +790,10 @@ void RenderWidgetHostViewGtk::SetIsLoading(bool is_loading) {
     ShowCurrentCursor();
 }
 
-void RenderWidgetHostViewGtk::ImeUpdateTextInputState(
+void RenderWidgetHostViewGtk::TextInputStateChanged(
     ui::TextInputType type,
-    bool can_compose_inline,
-    const gfx::Rect& caret_rect) {
-  im_context_->UpdateInputMethodState(type, can_compose_inline, caret_rect);
+    bool can_compose_inline) {
+  im_context_->UpdateInputMethodState(type, can_compose_inline);
 }
 
 void RenderWidgetHostViewGtk::ImeCancelComposition() {
@@ -819,7 +873,7 @@ void RenderWidgetHostViewGtk::Destroy() {
   MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
-void RenderWidgetHostViewGtk::SetTooltipText(const std::wstring& tooltip_text) {
+void RenderWidgetHostViewGtk::SetTooltipText(const string16& tooltip_text) {
   // Maximum number of characters we allow in a tooltip.
   const int kMaxTooltipLength = 8 << 10;
   // Clamp the tooltip length to kMaxTooltipLength so that we don't
@@ -827,8 +881,7 @@ void RenderWidgetHostViewGtk::SetTooltipText(const std::wstring& tooltip_text) {
   // this itself).
   // I filed https://bugzilla.gnome.org/show_bug.cgi?id=604641 upstream.
   const string16 clamped_tooltip =
-      ui::TruncateString(WideToUTF16Hack(tooltip_text),
-                         kMaxTooltipLength);
+      ui::TruncateString(tooltip_text, kMaxTooltipLength);
 
   if (clamped_tooltip.empty()) {
     gtk_widget_set_has_tooltip(view_.get(), FALSE);
@@ -836,19 +889,39 @@ void RenderWidgetHostViewGtk::SetTooltipText(const std::wstring& tooltip_text) {
     gtk_widget_set_tooltip_text(view_.get(),
                                 UTF16ToUTF8(clamped_tooltip).c_str());
 #if defined(OS_CHROMEOS)
-    tooltip_window_->SetTooltipText(UTF16ToWideHack(clamped_tooltip));
+    tooltip_window_->SetTooltipText(clamped_tooltip);
 #endif  // defined(OS_CHROMEOS)
   }
 }
 
-void RenderWidgetHostViewGtk::SelectionChanged(const std::string& text,
-                                               const ui::Range& range,
-                                               const gfx::Point& start,
-                                               const gfx::Point& end) {
-  if (!text.empty()) {
-    GtkClipboard* x_clipboard = gtk_clipboard_get(GDK_SELECTION_PRIMARY);
-    gtk_clipboard_set_text(x_clipboard, text.c_str(), text.length());
+void RenderWidgetHostViewGtk::SelectionChanged(const string16& text,
+                                               size_t offset,
+                                               const ui::Range& range) {
+  if (text.empty() || range.is_empty())
+    return;
+  size_t pos = range.GetMin() - offset;
+  size_t n = range.length();
+
+  DCHECK(pos + n <= text.length()) << "The text can not fully cover range.";
+  if (pos >= text.length()) {
+    NOTREACHED() << "The text can not cover range.";
+    return;
   }
+
+  selection_text_ = text;
+  selection_text_offset_ = offset;
+  selection_range_ = range;
+
+  std::string utf8_selection = UTF16ToUTF8(text.substr(pos, n));
+  GtkClipboard* x_clipboard = gtk_clipboard_get(GDK_SELECTION_PRIMARY);
+  gtk_clipboard_set_text(
+      x_clipboard, utf8_selection.c_str(), utf8_selection.length());
+}
+
+void RenderWidgetHostViewGtk::SelectionBoundsChanged(
+    const gfx::Rect& start_rect,
+    const gfx::Rect& end_rect) {
+  im_context_->UpdateCaretBounds(start_rect.Union(end_rect));
 }
 
 void RenderWidgetHostViewGtk::ShowingContextMenu(bool showing) {
@@ -923,9 +996,9 @@ void RenderWidgetHostViewGtk::DoPopupOrFullscreenInit(GtkWindow* window,
 
 BackingStore* RenderWidgetHostViewGtk::AllocBackingStore(
     const gfx::Size& size) {
-  return new BackingStoreX(host_, size,
-                           ui::GetVisualFromGtkWidget(view_.get()),
-                           gtk_widget_get_visual(view_.get())->depth);
+  return new BackingStoreGtk(host_, size,
+                             ui::GetVisualFromGtkWidget(view_.get()),
+                             gtk_widget_get_visual(view_.get())->depth);
 }
 
 void RenderWidgetHostViewGtk::SetBackground(const SkBitmap& background) {
@@ -999,7 +1072,7 @@ void RenderWidgetHostViewGtk::Paint(const gfx::Rect& damage_rect) {
 
   invalid_rect_ = damage_rect;
   about_to_validate_and_paint_ = true;
-  BackingStoreX* backing_store = static_cast<BackingStoreX*>(
+  BackingStoreGtk* backing_store = static_cast<BackingStoreGtk*>(
       host_->GetBackingStore(true));
   // Calling GetBackingStore maybe have changed |invalid_rect_|...
   about_to_validate_and_paint_ = false;
@@ -1184,6 +1257,66 @@ gfx::PluginWindowHandle RenderWidgetHostViewGtk::GetCompositingSurface() {
   return compositing_surface_;
 }
 
+bool RenderWidgetHostViewGtk::LockMouse() {
+  if (mouse_locked_)
+    return true;
+
+  mouse_locked_ = true;
+
+  // Release any current grab.
+  GtkWidget* current_grab_window = gtk_grab_get_current();
+  if (current_grab_window) {
+    gtk_grab_remove(current_grab_window);
+    LOG(WARNING) << "Locking Mouse with gdk_pointer_grab, "
+                 << "but had to steal grab from another window";
+  }
+
+  GtkWidget* widget = view_.get();
+  GdkWindow* window = gtk_widget_get_window(widget);
+  GdkCursor* cursor = gdk_cursor_new(GDK_BLANK_CURSOR);
+
+  GdkGrabStatus grab_status =
+      gdk_pointer_grab(window,
+                       FALSE, // owner_events
+                       static_cast<GdkEventMask>(
+                           GDK_POINTER_MOTION_MASK |
+                           GDK_BUTTON_PRESS_MASK |
+                           GDK_BUTTON_RELEASE_MASK),
+                       window, // confine_to
+                       cursor,
+                       GDK_CURRENT_TIME);
+
+  if (grab_status != GDK_GRAB_SUCCESS) {
+    LOG(WARNING) << "Failed to grab pointer for LockMouse. "
+                 << "gdk_pointer_grab returned: " << grab_status;
+    mouse_locked_ = false;
+    return false;
+  }
+
+  // Clear the tooltip window.
+  SetTooltipText(string16());
+
+  return true;
+}
+
+void RenderWidgetHostViewGtk::UnlockMouse() {
+  if (!mouse_locked_)
+    return;
+
+  mouse_locked_ = false;
+
+  GtkWidget* widget = view_.get();
+  GdkDisplay* display = gtk_widget_get_display(widget);
+  GdkScreen* screen = gtk_widget_get_screen(widget);
+  gdk_display_pointer_ungrab(display, GDK_CURRENT_TIME);
+  gdk_display_warp_pointer(display, screen,
+                           unlocked_global_mouse_position_.x(),
+                           unlocked_global_mouse_position_.y());
+
+  if (host_)
+    host_->LostMouseLock();
+}
+
 void RenderWidgetHostViewGtk::ForwardKeyboardEvent(
     const NativeWebKeyboardEvent& event) {
   if (!host_)
@@ -1230,6 +1363,52 @@ void RenderWidgetHostViewGtk::set_last_mouse_down(GdkEventButton* event) {
     gdk_event_free(reinterpret_cast<GdkEvent*>(last_mouse_down_));
 
   last_mouse_down_ = temp;
+}
+
+gfx::Point RenderWidgetHostViewGtk::GetWidgetCenter() {
+  if (widget_center_valid_)
+    return widget_center_;
+
+  GdkWindow* window = gtk_widget_get_window(view_.get());
+  gint window_x = 0;
+  gint window_y = 0;
+  gdk_window_get_origin(window, &window_x, &window_y);
+  gint window_w = 0;
+  gint window_h = 0;
+  gdk_drawable_get_size(window, &window_w, &window_h);
+
+  widget_center_.SetPoint(window_x + window_w / 2,
+                          window_y + window_h / 2);
+  widget_center_valid_ = true;
+  return widget_center_;
+}
+
+void RenderWidgetHostViewGtk::ModifyEventMovementAndCoords(
+    WebKit::WebMouseEvent* event) {
+  // Movement is computed by taking the difference of the new cursor position
+  // and the previous. Under mouse lock the cursor will be warped back to the
+  // center so that we are not limited by clipping boundaries.
+  // We do not measure movement as the delta from cursor to center because
+  // we may receive more mouse movement events before our warp has taken
+  // effect.
+  event->movementX = event->globalX - global_mouse_position_.x();
+  event->movementY = event->globalY - global_mouse_position_.y();
+
+  global_mouse_position_.SetPoint(event->globalX, event->globalY);
+
+  // Under mouse lock, coordinates of mouse are locked to what they were when
+  // mouse lock was entered.
+  if (mouse_locked_) {
+    event->x = unlocked_mouse_position_.x();
+    event->y = unlocked_mouse_position_.y();
+    event->windowX = unlocked_mouse_position_.x();
+    event->windowY = unlocked_mouse_position_.y();
+    event->globalX = unlocked_global_mouse_position_.x();
+    event->globalY = unlocked_global_mouse_position_.y();
+  } else {
+    unlocked_mouse_position_.SetPoint(event->windowX, event->windowY);
+    unlocked_global_mouse_position_.SetPoint(event->globalX, event->globalY);
+  }
 }
 
 // static

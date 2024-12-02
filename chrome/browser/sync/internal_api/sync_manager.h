@@ -6,15 +6,16 @@
 #define CHROME_BROWSER_SYNC_INTERNAL_API_SYNC_MANAGER_H_
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
-#include "base/callback_old.h"
-#include "base/memory/linked_ptr.h"
+#include "base/callback.h"
+#include "base/threading/thread_checker.h"
+#include "chrome/browser/sync/internal_api/change_record.h"
 #include "chrome/browser/sync/internal_api/configure_reason.h"
-#include "chrome/browser/sync/protocol/password_specifics.pb.h"
 #include "chrome/browser/sync/protocol/sync_protocol_error.h"
 #include "chrome/browser/sync/syncable/model_type.h"
-#include "chrome/browser/sync/weak_handle.h"
+#include "chrome/browser/sync/util/weak_handle.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 
 class FilePath;
@@ -36,10 +37,6 @@ struct SyncSessionSnapshot;
 namespace sync_notifier {
 class SyncNotifier;
 }  // namespace sync_notifier
-
-namespace sync_pb {
-class PasswordSpecificsData;
-}  // namespace sync_pb
 
 namespace sync_api {
 
@@ -69,56 +66,20 @@ struct SyncCredentials {
   std::string sync_token;
 };
 
-// SyncManager encapsulates syncable::DirectoryManager and serves as the parent
-// of all other objects in the sync API.  SyncManager is thread-safe.  If
-// multiple threads interact with the same local sync repository (i.e. the
-// same sqlite database), they should share a single SyncManager instance.  The
-// caller should typically create one SyncManager for the lifetime of a user
-// session.
+// SyncManager encapsulates syncable::DirectoryManager and serves as
+// the parent of all other objects in the sync API.  If multiple
+// threads interact with the same local sync repository (i.e. the same
+// sqlite database), they should share a single SyncManager instance.
+// The caller should typically create one SyncManager for the lifetime
+// of a user session.
+//
+// Unless stated otherwise, all methods of SyncManager should be
+// called on the same thread.
 class SyncManager {
  public:
   // SyncInternal contains the implementation of SyncManager, while abstracting
   // internal types from clients of the interface.
   class SyncInternal;
-
-  // TODO(zea): One day get passwords playing nicely with the rest of encryption
-  // and get rid of this.
-  class ExtraPasswordChangeRecordData {
-   public:
-    ExtraPasswordChangeRecordData();
-    explicit ExtraPasswordChangeRecordData(
-        const sync_pb::PasswordSpecificsData& data);
-    virtual ~ExtraPasswordChangeRecordData();
-
-    // Transfers ownership of the DictionaryValue to the caller.
-    virtual base::DictionaryValue* ToValue() const;
-
-    const sync_pb::PasswordSpecificsData& unencrypted() const;
-   private:
-    sync_pb::PasswordSpecificsData unencrypted_;
-  };
-
-  // ChangeRecord indicates a single item that changed as a result of a sync
-  // operation.  This gives the sync id of the node that changed, and the type
-  // of change.  To get the actual property values after an ADD or UPDATE, the
-  // client should get the node with InitByIdLookup(), using the provided id.
-  struct ChangeRecord {
-    enum Action {
-      ACTION_ADD,
-      ACTION_DELETE,
-      ACTION_UPDATE,
-    };
-    ChangeRecord();
-    ~ChangeRecord();
-
-    // Transfers ownership of the DictionaryValue to the caller.
-    base::DictionaryValue* ToValue(const BaseTransaction* trans) const;
-
-    int64 id;
-    Action action;
-    sync_pb::EntitySpecifics specifics;
-    linked_ptr<ExtraPasswordChangeRecordData> extra;
-  };
 
   // Status encapsulates detailed state about the internals of the SyncManager.
   struct Status {
@@ -206,17 +167,12 @@ class SyncManager {
     bool crypto_has_pending_keys;
   };
 
-  // An interface the embedding application implements to receive notifications
-  // from the SyncManager.  Register an observer via SyncManager::AddObserver.
-  // This observer is an event driven model as the events may be raised from
-  // different internal threads, and simply providing an "OnStatusChanged" type
-  // notification complicates things such as trying to determine "what changed",
-  // if different members of the Status object are modified from different
-  // threads.  This way, the event is explicit, and it is safe for the Observer
-  // to dispatch to a native thread or synchronize accordingly.
-  class Observer {
+  // An interface the embedding application implements to be notified
+  // on change events.  Note that these methods may be called on *any*
+  // thread.
+  class ChangeDelegate {
    public:
-    // Notify the observer that changes have been applied to the sync model.
+    // Notify the delegate that changes have been applied to the sync model.
     //
     // This will be invoked on the same thread as on which ApplyChanges was
     // called. |changes| is an array of size |change_count|, and contains the
@@ -241,10 +197,10 @@ class SyncManager {
     // forward dependencies.  But since deletions come before reparent
     // operations, a delete may temporarily orphan a node that is
     // updated later in the list.
-    virtual void OnChangesApplied(syncable::ModelType model_type,
-                                  const BaseTransaction* trans,
-                                  const ChangeRecord* changes,
-                                  int change_count) = 0;
+    virtual void OnChangesApplied(
+        syncable::ModelType model_type,
+        const BaseTransaction* trans,
+        const ImmutableChangeRecordList& changes) = 0;
 
     // OnChangesComplete gets called when the TransactionComplete event is
     // posted (after OnChangesApplied finishes), after the transaction lock
@@ -259,6 +215,48 @@ class SyncManager {
     // I/O to when it no longer holds any lock).
     virtual void OnChangesComplete(syncable::ModelType model_type) = 0;
 
+   protected:
+    virtual ~ChangeDelegate();
+  };
+
+  // Like ChangeDelegate, except called only on the sync thread and
+  // not while a transaction is held.  For objects that want to know
+  // when changes happen, but don't need to process them.
+  class ChangeObserver {
+   public:
+    // Ids referred to in |changes| may or may not be in the write
+    // transaction specified by |write_transaction_id|.  If they're
+    // not, that means that the node didn't actually change, but we
+    // marked them as changed for some other reason (e.g., siblings of
+    // re-ordered nodes).
+    //
+    // TODO(sync, long-term): Ideally, ChangeDelegate/Observer would
+    // be passed a transformed version of EntryKernelMutation instead
+    // of a transaction that would have to be used to look up the
+    // changed nodes.  That is, ChangeDelegate::OnChangesApplied()
+    // would still be called under the transaction, but all the needed
+    // data will be passed down.
+    //
+    // Even more ideally, we would have sync semantics such that we'd
+    // be able to apply changes without being under a transaction.
+    // But that's a ways off...
+    virtual void OnChangesApplied(
+        syncable::ModelType model_type,
+        int64 write_transaction_id,
+        const ImmutableChangeRecordList& changes) = 0;
+
+    virtual void OnChangesComplete(syncable::ModelType model_type) = 0;
+
+   protected:
+    virtual ~ChangeObserver();
+  };
+
+  // An interface the embedding application implements to receive
+  // notifications from the SyncManager.  Register an observer via
+  // SyncManager::AddObserver.  All methods are called only on the
+  // sync thread.
+  class Observer {
+   public:
     // A round-trip sync-cycle took place and the syncer has resolved any
     // conflicts that may have arisen.
     virtual void OnSyncCycleCompleted(
@@ -383,14 +381,11 @@ class SyncManager {
         const syncable::ModelTypeSet& encrypted_types) = 0;
 
     virtual void OnActionableError(
-        const browser_sync::SyncProtocolError& sync_protocol_error)
-            = 0;
+        const browser_sync::SyncProtocolError& sync_protocol_error) = 0;
 
    protected:
     virtual ~Observer();
   };
-
-  typedef Callback0::Type ModeChangeCallback;
 
   // Create an uninitialized SyncManager.  Callers must Init() before using.
   explicit SyncManager(const std::string& name);
@@ -419,20 +414,25 @@ class SyncManager {
             bool use_ssl,
             HttpPostProviderFactory* post_factory,
             browser_sync::ModelSafeWorkerRegistrar* registrar,
+            ChangeDelegate* change_delegate,
             const std::string& user_agent,
             const SyncCredentials& credentials,
             sync_notifier::SyncNotifier* sync_notifier,
             const std::string& restored_key_for_bootstrapping,
             bool setup_for_test_mode);
 
+  // Checks if the sync server is reachable.
+  void CheckServerReachable();
+
   // Returns the username last used for a successful authentication.
-  // Returns empty if there is no such username.
+  // Returns empty if there is no such username.  May be called on any
+  // thread.
   const std::string& GetAuthenticatedUsername();
 
   // Check if the database has been populated with a full "initial" download of
   // sync items for each data type currently present in the routing info.
   // Prerequisite for calling this is that OnInitializationComplete has been
-  // called.
+  // called.  May be called from any thread.
   bool InitialSyncEndedForAllEnabledTypes();
 
   // Update tokens that we're using in Sync. Email must stay the same.
@@ -465,7 +465,7 @@ class SyncManager {
   // will occur, but calls to RequestConfig will be supported.  If |callback|
   // is provided, it will be invoked (from the internal SyncScheduler) when
   // the thread has changed to configuration mode.
-  void StartConfigurationMode(ModeChangeCallback* callback);
+  void StartConfigurationMode(const base::Closure& callback);
 
   // Switches the mode of operation to CONFIGURATION_MODE and
   // schedules a config task to fetch updates for |types|.
@@ -476,6 +476,10 @@ class SyncManager {
 
   // Request a clearing of all data on the server
   void RequestClearServerData();
+
+  // Add/remove change observers.
+  void AddChangeObserver(ChangeObserver* observer);
+  void RemoveChangeObserver(ChangeObserver* observer);
 
   // Adds a listener to be notified of sync events.
   // NOTE: It is OK (in fact, it's probably a good idea) to call this before
@@ -489,26 +493,33 @@ class SyncManager {
 
   // Status-related getters. Typically GetStatusSummary will suffice, but
   // GetDetailedSyncStatus can be useful for gathering debug-level details of
-  // the internals of the sync engine.
+  // the internals of the sync engine.  May be called on any thread.
   Status::Summary GetStatusSummary() const;
   Status GetDetailedStatus() const;
 
   // Whether or not the Nigori node is encrypted using an explicit passphrase.
+  // May be called on any thread.
   bool IsUsingExplicitPassphrase();
-
-  // Get the internal implementation for use by BaseTransaction, etc.
-  SyncInternal* GetImpl() const;
 
   // Call periodically from a database-safe thread to persist recent changes
   // to the syncapi model.
   void SaveChanges();
 
-  void RequestEarlyExit();
+  // Initiates shutdown of various components in the sync engine.  Must be
+  // called from the main thread to allow preempting ongoing tasks on the sync
+  // loop (that may be blocked on I/O).  The semantics of |callback| are the
+  // same as with StartConfigurationMode. If provided and a scheduler / sync
+  // loop exists, it will be invoked from the sync loop by the scheduler to
+  // notify that all work has been flushed + cancelled, and it is idle.
+  // If no scheduler exists, the callback is run immediately (from the loop
+  // this was created on, which is the sync loop), as sync is effectively
+  // stopped.
+  void StopSyncingForShutdown(const base::Closure& callback);
 
-  // Issue a final SaveChanges, close sqlite handles, and stop running threads.
-  // Must be called from the same thread that called Init().
-  void Shutdown();
+  // Issue a final SaveChanges, and close sqlite handles.
+  void ShutdownOnSyncThread();
 
+  // May be called from any thread.
   UserShare* GetUserShare() const;
 
   // Inform the cryptographer of the most recent passphrase and set of encrypted
@@ -522,24 +533,22 @@ class SyncManager {
   // without clearing the server data.
   void EnableEncryptEverything();
 
-  // Returns true if we are currently encrypting all sync data.
+  // Returns true if we are currently encrypting all sync data.  May
+  // be called on any thread.
   bool EncryptEverythingEnabled() const;
 
   // Gets the set of encrypted types from the cryptographer
-  // Note: opens a transaction.
+  // Note: opens a transaction.  May be called from any thread.
   syncable::ModelTypeSet GetEncryptedDataTypes() const;
 
   // Reads the nigori node to determine if any experimental types should be
   // enabled.
-  // Note: opens a transaction.
+  // Note: opens a transaction.  May be called on any thread.
   bool ReceivedExperimentalTypes(syncable::ModelTypeSet* to_add) const;
 
   // Uses a read-only transaction to determine if the directory being synced has
-  // any remaining unsynced items.
+  // any remaining unsynced items.  May be called on any thread.
   bool HasUnsyncedItems() const;
-
-  // Logs the list of unsynced meta handles.
-  void LogUnsyncedItems(int level) const;
 
   // Functions used for testing.
 
@@ -550,6 +559,8 @@ class SyncManager {
       const syncable::ModelTypeBitSet& model_types);
 
  private:
+  base::ThreadChecker thread_checker_;
+
   // An opaque pointer to the nested private class.
   SyncInternal* data_;
 

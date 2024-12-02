@@ -180,7 +180,6 @@ Bus::Bus(const Options& options)
       dbus_thread_message_loop_proxy_(options.dbus_thread_message_loop_proxy),
       on_shutdown_(false /* manual_reset */, false /* initially_signaled */),
       connection_(NULL),
-      origin_loop_(MessageLoop::current()),
       origin_thread_id_(base::PlatformThread::CurrentId()),
       async_operations_set_up_(false),
       shutdown_completed_(false),
@@ -188,6 +187,10 @@ Bus::Bus(const Options& options)
       num_pending_timeouts_(0) {
   // This is safe to call multiple times.
   dbus_threads_init_default();
+  // The origin message loop is unnecessary if the client uses synchronous
+  // functions only.
+  if (MessageLoop::current())
+    origin_message_loop_proxy_ =  MessageLoop::current()->message_loop_proxy();
 }
 
 Bus::~Bus() {
@@ -290,6 +293,12 @@ void Bus::ShutdownAndBlock() {
     iter->second->Detach();
   }
 
+  // Release object proxies and exported objects here. We should do this
+  // here rather than in the destructor to avoid memory leaks due to
+  // cyclic references.
+  object_proxy_table_.clear();
+  exported_object_table_.clear();
+
   // Private connection should be closed.
   if (connection_) {
     if (connection_type_ == PRIVATE)
@@ -387,7 +396,6 @@ bool Bus::SetUpAsyncOperations() {
                                                      NULL);
   CHECK(success) << "Unable to allocate memory";
 
-  // TODO(satorux): Timeout is not yet implemented.
   success = dbus_connection_set_timeout_functions(connection_,
                                                   &Bus::OnAddTimeoutThunk,
                                                   &Bus::OnRemoveTimeoutThunk,
@@ -436,37 +444,45 @@ void Bus::Send(DBusMessage* request, uint32* serial) {
   CHECK(success) << "Unable to allocate memory";
 }
 
-void Bus::AddFilterFunction(DBusHandleMessageFunction filter_function,
+bool Bus::AddFilterFunction(DBusHandleMessageFunction filter_function,
                             void* user_data) {
   DCHECK(connection_);
   AssertOnDBusThread();
 
-  if (filter_functions_added_.find(filter_function) !=
+  std::pair<DBusHandleMessageFunction, void*> filter_data_pair =
+      std::make_pair(filter_function, user_data);
+  if (filter_functions_added_.find(filter_data_pair) !=
       filter_functions_added_.end()) {
-    LOG(ERROR) << "Filter function already exists: " << filter_function;
-    return;
+    VLOG(1) << "Filter function already exists: " << filter_function
+            << " with associated data: " << user_data;
+    return false;
   }
 
   const bool success = dbus_connection_add_filter(
       connection_, filter_function, user_data, NULL);
   CHECK(success) << "Unable to allocate memory";
-  filter_functions_added_.insert(filter_function);
+  filter_functions_added_.insert(filter_data_pair);
+  return true;
 }
 
-void Bus::RemoveFilterFunction(DBusHandleMessageFunction filter_function,
+bool Bus::RemoveFilterFunction(DBusHandleMessageFunction filter_function,
                                void* user_data) {
   DCHECK(connection_);
   AssertOnDBusThread();
 
-  if (filter_functions_added_.find(filter_function) ==
+  std::pair<DBusHandleMessageFunction, void*> filter_data_pair =
+      std::make_pair(filter_function, user_data);
+  if (filter_functions_added_.find(filter_data_pair) ==
       filter_functions_added_.end()) {
-    LOG(ERROR) << "Requested to remove an unknown filter function: "
-               << filter_function;
-    return;
+    VLOG(1) << "Requested to remove an unknown filter function: "
+            << filter_function
+            << " with associated data: " << user_data;
+    return false;
   }
 
   dbus_connection_remove_filter(connection_, filter_function, user_data);
-  filter_functions_added_.erase(filter_function);
+  filter_functions_added_.erase(filter_data_pair);
+  return true;
 }
 
 void Bus::AddMatch(const std::string& match_rule, DBusError* error) {
@@ -474,7 +490,7 @@ void Bus::AddMatch(const std::string& match_rule, DBusError* error) {
   AssertOnDBusThread();
 
   if (match_rules_added_.find(match_rule) != match_rules_added_.end()) {
-    LOG(ERROR) << "Match rule already exists: " << match_rule;
+    VLOG(1) << "Match rule already exists: " << match_rule;
     return;
   }
 
@@ -560,25 +576,42 @@ void Bus::ProcessAllIncomingDataIfAny() {
 
 void Bus::PostTaskToOriginThread(const tracked_objects::Location& from_here,
                                  const base::Closure& task) {
-  origin_loop_->PostTask(from_here, task);
+  DCHECK(origin_message_loop_proxy_.get());
+  if (!origin_message_loop_proxy_->PostTask(from_here, task)) {
+    LOG(WARNING) << "Failed to post a task to the origin message loop";
+  }
 }
 
 void Bus::PostTaskToDBusThread(const tracked_objects::Location& from_here,
                                const base::Closure& task) {
-  if (dbus_thread_message_loop_proxy_.get())
-    dbus_thread_message_loop_proxy_->PostTask(from_here, task);
-  else
-    origin_loop_->PostTask(from_here, task);
+  if (dbus_thread_message_loop_proxy_.get()) {
+    if (!dbus_thread_message_loop_proxy_->PostTask(from_here, task)) {
+      LOG(WARNING) << "Failed to post a task to the D-Bus thread message loop";
+    }
+  } else {
+    DCHECK(origin_message_loop_proxy_.get());
+    if (!origin_message_loop_proxy_->PostTask(from_here, task)) {
+      LOG(WARNING) << "Failed to post a task to the origin message loop";
+    }
+  }
 }
 
 void Bus::PostDelayedTaskToDBusThread(
     const tracked_objects::Location& from_here,
     const base::Closure& task,
     int delay_ms) {
-  if (dbus_thread_message_loop_proxy_.get())
-    dbus_thread_message_loop_proxy_->PostDelayedTask(from_here, task, delay_ms);
-  else
-    origin_loop_->PostDelayedTask(from_here, task, delay_ms);
+  if (dbus_thread_message_loop_proxy_.get()) {
+    if (!dbus_thread_message_loop_proxy_->PostDelayedTask(
+            from_here, task, delay_ms)) {
+      LOG(WARNING) << "Failed to post a task to the D-Bus thread message loop";
+    }
+  } else {
+    DCHECK(origin_message_loop_proxy_.get());
+    if (!origin_message_loop_proxy_->PostDelayedTask(
+            from_here, task, delay_ms)) {
+      LOG(WARNING) << "Failed to post a task to the origin message loop";
+    }
+  }
 }
 
 bool Bus::HasDBusThread() {

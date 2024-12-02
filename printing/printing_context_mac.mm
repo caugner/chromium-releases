@@ -15,10 +15,6 @@
 #include "base/values.h"
 #include "printing/print_settings_initializer_mac.h"
 
-static const CFStringRef kColorModel = CFSTR("ColorModel");
-static const CFStringRef kGrayColor = CFSTR("Gray");
-static const CFStringRef kCMYK = CFSTR("CMYK");
-
 namespace printing {
 
 // static
@@ -111,6 +107,7 @@ PrintingContext::Result PrintingContextMac::UpdatePrinterSettings(
   int color;
   bool landscape;
   bool print_to_pdf;
+  bool is_cloud_dialog;
   int copies;
   int duplex_mode;
   std::string device_name;
@@ -121,13 +118,14 @@ PrintingContext::Result PrintingContextMac::UpdatePrinterSettings(
       !job_settings.GetBoolean(kSettingPrintToPDF, &print_to_pdf) ||
       !job_settings.GetInteger(kSettingDuplexMode, &duplex_mode) ||
       !job_settings.GetInteger(kSettingCopies, &copies) ||
-      !job_settings.GetString(kSettingDeviceName, &device_name)) {
+      !job_settings.GetString(kSettingDeviceName, &device_name) ||
+      !job_settings.GetBoolean(kSettingCloudPrintDialog, &is_cloud_dialog)) {
     return OnError();
   }
 
   bool print_to_cloud = job_settings.HasKey(printing::kSettingCloudPrintId);
 
-  if (!print_to_pdf && !print_to_cloud) {
+  if (!print_to_pdf && !print_to_cloud && !is_cloud_dialog) {
     if (!SetPrinter(device_name))
       return OnError();
 
@@ -236,9 +234,11 @@ bool PrintingContextMac::SetDuplexModeInPrintSettings(DuplexMode mode) {
     case SHORT_EDGE:
       duplexSetting = kPMDuplexTumble;
       break;
-    default:
+    case SIMPLEX:
       duplexSetting = kPMDuplexNone;
       break;
+    default:  // UNKNOWN_DUPLEX_MODE
+      return true;
   }
 
   PMPrintSettings pmPrintSettings =
@@ -249,15 +249,17 @@ bool PrintingContextMac::SetDuplexModeInPrintSettings(DuplexMode mode) {
 bool PrintingContextMac::SetOutputColor(int color_mode) {
   PMPrintSettings pmPrintSettings =
       static_cast<PMPrintSettings>([print_info_.get() PMPrintSettings]);
-  CFStringRef output_color = NULL;
-  if (color_mode == printing::GRAY)
-    output_color = kGrayColor;
-  else if (color_mode == printing::CMYK)
-    output_color = kCMYK;
+  std::string color_setting_name;
+  std::string color_value;
+  printing::GetColorModelForMode(color_mode, &color_setting_name, &color_value);
+  base::mac::ScopedCFTypeRef<CFStringRef> color_setting(
+      base::SysUTF8ToCFStringRef(color_setting_name));
+  base::mac::ScopedCFTypeRef<CFStringRef> output_color(
+      base::SysUTF8ToCFStringRef(color_value));
 
   return PMPrintSettingsSetValue(pmPrintSettings,
-                                 kColorModel,
-                                 output_color,
+                                 color_setting.get(),
+                                 output_color.get(),
                                  false) == noErr;
 }
 

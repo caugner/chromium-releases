@@ -6,20 +6,23 @@
 #define CHROME_RENDERER_PAGE_LOAD_HISTOGRAMS_H_
 
 #include "base/basictypes.h"
-#include "content/renderer/render_view_observer.h"
+#include "content/public/renderer/render_view_observer.h"
 
-class NavigationState;
 class RendererHistogramSnapshots;
 
-class PageLoadHistograms : public RenderViewObserver {
+namespace content {
+class NavigationState;
+}
+
+class PageLoadHistograms : public content::RenderViewObserver {
  public:
-  PageLoadHistograms(RenderView* render_view,
+  PageLoadHistograms(content::RenderView* render_view,
                      RendererHistogramSnapshots* histogram_snapshots);
 
  private:
   // RenderViewObserver implementation.
-  virtual void FrameWillClose(WebKit::WebFrame* frame);
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual void FrameWillClose(WebKit::WebFrame* frame) OVERRIDE;
+  virtual void ClosePage() OVERRIDE;
 
   // Dump all page load histograms appropriate for the given frame.
   //
@@ -44,7 +47,7 @@ class PageLoadHistograms : public RenderViewObserver {
 
   void ResetCrossFramePropertyAccess();
 
-  void LogPageLoadTime(const NavigationState* state,
+  void LogPageLoadTime(const content::NavigationState* state,
                        const WebKit::WebDataSource* ds) const;
 
   // Site isolation metric counts.

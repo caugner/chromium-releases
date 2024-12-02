@@ -17,11 +17,27 @@
 #include "printing/print_job_constants.h"
 #include "printing/print_settings_initializer_win.h"
 #include "printing/printed_document.h"
+#include "printing/units.h"
 #include "skia/ext/platform_device.h"
 
 using base::Time;
 
 namespace {
+
+// Constants for setting default PDF settings.
+const int kPDFDpi = 300;  // 300 dpi
+// LETTER: 8.5 x 11 inches
+const int kPDFLetterWidth = 8.5 * kPDFDpi;
+const int kPDFLetterHeight = 11 * kPDFDpi;
+// LEGAL: 8.5 x 14 inches
+const int kPDFLegalWidth = 8.5 * kPDFDpi;
+const int kPDFLegalHeight = 14 * kPDFDpi;
+// A4: 8.27 x 11.69 inches
+const int kPDFA4Width = 8.27 * kPDFDpi;
+const int kPDFA4Height = 11.69 * kPDFDpi;
+// A3: 11.69 x 16.54 inches
+const int kPDFA3Width = 11.69 * kPDFDpi;
+const int kPDFA3Height = 16.54 * kPDFDpi;
 
 // Retrieves the printer's PRINTER_INFO_* structure.
 // Output |level| can be 9 (user-default), 8 (admin-default), or 2
@@ -201,6 +217,7 @@ void PrintingContextWin::AskUserForSettings(gfx::NativeView view,
                                             int max_pages,
                                             bool has_selection,
                                             PrintSettingsCallback* callback) {
+#if !defined(USE_AURA)
   DCHECK(!in_print_job_);
   dialog_box_dismissed_ = false;
 
@@ -255,6 +272,8 @@ void PrintingContextWin::AskUserForSettings(gfx::NativeView view,
 
   // TODO(maruel):  Support PD_PRINTTOFILE.
   callback->Run(ParseDialogResultEx(dialog_options));
+  delete callback;
+#endif
 }
 
 PrintingContext::Result PrintingContextWin::UseDefaultSettings() {
@@ -311,6 +330,7 @@ PrintingContext::Result PrintingContextWin::UpdatePrinterSettings(
   int color;
   bool landscape;
   bool print_to_pdf;
+  bool is_cloud_dialog;
   int copies;
   int duplex_mode;
   string16 device_name;
@@ -321,23 +341,47 @@ PrintingContext::Result PrintingContextWin::UpdatePrinterSettings(
       !job_settings.GetBoolean(kSettingPrintToPDF, &print_to_pdf) ||
       !job_settings.GetInteger(kSettingDuplexMode, &duplex_mode) ||
       !job_settings.GetInteger(kSettingCopies, &copies) ||
-      !job_settings.GetString(kSettingDeviceName, &device_name)) {
+      !job_settings.GetString(kSettingDeviceName, &device_name) ||
+      !job_settings.GetBoolean(kSettingCloudPrintDialog, &is_cloud_dialog)) {
     return OnError();
   }
 
   bool print_to_cloud = job_settings.HasKey(printing::kSettingCloudPrintId);
 
-  if (print_to_pdf || print_to_cloud) {
-    // Pseudo printer: handle orientation and ranges only.
+  if (print_to_pdf || print_to_cloud || is_cloud_dialog) {
+    // Default fallback to Letter size.
+    gfx::Size paper_size;
+    gfx::Rect paper_rect;
+    paper_size.SetSize(kPDFLetterWidth, kPDFLetterHeight);
+
+    // Get settings from locale. Paper type buffer length is at most 4.
+    const int paper_type_buffer_len = 4;
+    wchar_t paper_type_buffer[paper_type_buffer_len] = {0};
+    GetLocaleInfo(LOCALE_USER_DEFAULT, LOCALE_IPAPERSIZE, paper_type_buffer,
+                  paper_type_buffer_len);
+    if (wcslen(paper_type_buffer)) {  // The call succeeded.
+      int paper_code = _wtoi(paper_type_buffer);
+      switch (paper_code) {
+        case DMPAPER_LEGAL:
+          paper_size.SetSize(kPDFLegalWidth, kPDFLegalHeight);
+          break;
+        case DMPAPER_A4:
+          paper_size.SetSize(kPDFA4Width, kPDFA4Height);
+          break;
+        case DMPAPER_A3:
+          paper_size.SetSize(kPDFA3Width, kPDFA3Height);
+          break;
+        default:  // DMPAPER_LETTER is used for default fallback.
+          break;
+      }
+    }
+    paper_rect.SetRect(0, 0, paper_size.width(), paper_size.height());
+    settings_.SetPrinterPrintableArea(paper_size, paper_rect, kPDFDpi);
+    settings_.set_dpi(kPDFDpi);
     settings_.SetOrientation(landscape);
     settings_.ranges = ranges;
     return OK;
   }
-
-  // Underlying |settings_| do not have these attributes, so we need to
-  // operate on printer directly, which involves reloading settings.
-  // Therefore, reset the settings anyway.
-  ResetSettings();
 
   HANDLE printer;
   LPWSTR device_name_wide = const_cast<wchar_t*>(device_name.c_str());
@@ -380,8 +424,10 @@ PrintingContext::Result PrintingContextWin::UpdatePrinterSettings(
     case SHORT_EDGE:
       dev_mode->dmDuplex = DMDUP_HORIZONTAL;
       break;
-    default:  // simplex
+    case SIMPLEX:
       dev_mode->dmDuplex = DMDUP_SIMPLEX;
+      break;
+    default:  // UNKNOWN_DUPLEX_MODE
       break;
   }
   dev_mode->dmOrientation = landscape ? DMORIENT_LANDSCAPE : DMORIENT_PORTRAIT;

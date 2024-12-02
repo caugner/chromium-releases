@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_VIEWS_BUBBLE_BUBBLE_H_
 #pragma once
 
+#include "base/observer_list.h"
 #include "views/bubble/bubble_border.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "views/accelerator.h"
@@ -15,6 +16,8 @@
 #include "views/widget/native_widget_aura.h"
 #elif defined(OS_WIN)
 #include "views/widget/native_widget_win.h"
+#elif defined(TOUCH_UI)
+#include "views/widget/native_widget_views.h"
 #elif defined(TOOLKIT_USES_GTK)
 #include "views/widget/native_widget_gtk.h"
 #endif
@@ -65,7 +68,7 @@ class BubbleDelegate {
   virtual bool FadeInOnShow() = 0;
 
   // The name of the window to which this delegate belongs.
-  virtual std::wstring accessible_name();
+  virtual string16 GetAccessibleName();
 };
 
 // TODO(sky): this code is ifdef-tastic. It might be cleaner to refactor the
@@ -76,12 +79,20 @@ class Bubble
     : public views::NativeWidgetAura,
 #elif defined(OS_WIN)
     : public views::NativeWidgetWin,
+#elif defined(TOUCH_UI)
+    : public views::NativeWidgetViews,
 #elif defined(TOOLKIT_USES_GTK)
     : public views::NativeWidgetGtk,
 #endif
       public views::AcceleratorTarget,
       public ui::AnimationDelegate {
  public:
+  class Observer {
+   public:
+    // See BubbleDelegate::BubbleClosing for when this is called.
+    virtual void OnBubbleClosing() = 0;
+  };
+
   // Shows the Bubble.
   // |parent| is set as the parent window.
   // |contents| are the contents shown in the bubble.
@@ -129,6 +140,11 @@ class Bubble
     fade_away_on_close_ = fade_away_on_close;
   }
 
+  // Whether the Bubble should automatically close when it gets deactivated.
+  void set_close_on_deactivate(bool close_on_deactivate) {
+    close_on_deactivate_ = close_on_deactivate;
+  }
+
   // Overridden from NativeWidget:
   virtual void Close();
 
@@ -139,6 +155,14 @@ class Bubble
 #ifdef UNIT_TEST
   views::View* contents() const { return contents_; }
 #endif
+
+  void AddObserver(Observer* obs) {
+    observer_list_.AddObserver(obs);
+  }
+
+  void RemoveObserver(Observer* obs) {
+    observer_list_.RemoveObserver(obs);
+  }
 
   static const SkColor kBackgroundColor;
 
@@ -167,6 +191,9 @@ class Bubble
 #elif defined(OS_WIN)
   // Overridden from NativeWidgetWin:
   virtual void OnActivate(UINT action, BOOL minimized, HWND window);
+#elif defined(TOUCH_UI)
+  // Overridden from NativeWidgetViews::
+  virtual void Deactivate() OVERRIDE;
 #elif defined(TOOLKIT_USES_GTK)
   // Overridden from NativeWidgetGtk:
   virtual void OnActiveChanged() OVERRIDE;
@@ -219,6 +246,10 @@ class Bubble
   // Whether to fade away when the bubble closes.
   bool fade_away_on_close_;
 
+  // Whether to close automatically when the bubble deactivates. Defaults to
+  // true.
+  bool close_on_deactivate_;
+
 #if defined(OS_LINUX)
   // Some callers want the bubble to be a child control instead of a window.
   views::Widget::InitParams::Type type_;
@@ -235,6 +266,8 @@ class Bubble
   views::View* contents_;
 
   bool accelerator_registered_;
+
+  ObserverList<Observer> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(Bubble);
 };

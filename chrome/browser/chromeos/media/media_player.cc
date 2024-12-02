@@ -36,7 +36,7 @@
 #include "content/browser/download/download_manager.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/url_fetcher.h"
+#include "content/common/net/url_fetcher.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -46,7 +46,7 @@
 #include "net/url_request/url_request_job.h"
 #include "ui/base/resource/resource_bundle.h"
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && defined(TOOLKIT_USES_GTK)
 #include "chrome/browser/chromeos/frame/panel_browser_view.h"
 #endif
 
@@ -82,18 +82,11 @@ MediaPlayer* MediaPlayer::GetInstance() {
   return Singleton<MediaPlayer>::get();
 }
 
-void MediaPlayer::EnqueueMediaFile(Profile* profile, const FilePath& file_path,
-                                   Browser* creator) {
+void MediaPlayer::EnqueueMediaFile(Profile* profile,
+                                   const FilePath& file_path) {
   GURL url;
   if (!FileManagerUtil::ConvertFileToFileSystemUrl(profile, file_path,
                                                    GetOriginUrl(), &url)) {
-  }
-  EnqueueMediaFileUrl(url, creator);
-}
-
-void MediaPlayer::EnqueueMediaFileUrl(const GURL& url, Browser* creator) {
-  if (mediaplayer_browser_ == NULL) {
-    PopupMediaPlayer(creator);
   }
   EnqueueMediaFileUrl(url);
 }
@@ -104,20 +97,16 @@ void MediaPlayer::EnqueueMediaFileUrl(const GURL& url) {
 }
 
 void MediaPlayer::ForcePlayMediaFile(Profile* profile,
-                                     const FilePath& file_path,
-                                     Browser* creator) {
+                                     const FilePath& file_path) {
   GURL url;
   if (!FileManagerUtil::ConvertFileToFileSystemUrl(profile, file_path,
                                                    GetOriginUrl(), &url)) {
     return;
   }
-  ForcePlayMediaURL(url, creator);
+  ForcePlayMediaURL(url);
 }
 
-void MediaPlayer::ForcePlayMediaURL(const GURL& url, Browser* creator) {
-  if (mediaplayer_browser_ == NULL) {
-    PopupMediaPlayer(creator);
-  }
+void MediaPlayer::ForcePlayMediaURL(const GURL& url) {
   current_playlist_.clear();
   current_playlist_.push_back(MediaUrl(url));
   current_position_ = current_playlist_.size() - 1;
@@ -129,12 +118,6 @@ void MediaPlayer::TogglePlaylistWindowVisible() {
   if (playlist_browser_) {
     ClosePlaylistWindow();
   } else {
-    ShowPlaylistWindow();
-  }
-}
-
-void MediaPlayer::ShowPlaylistWindow() {
-  if (playlist_browser_ == NULL) {
     PopupPlaylist(NULL);
   }
 }
@@ -194,11 +177,14 @@ void MediaPlayer::SetPlaybackRequest() {
 
 void MediaPlayer::ToggleFullscreen() {
   if (mediaplayer_browser_) {
-    mediaplayer_browser_->ToggleFullscreenMode();
+    mediaplayer_browser_->ToggleFullscreenMode(false);
   }
 }
 
 void MediaPlayer::PopupPlaylist(Browser* creator) {
+  if (playlist_browser_)
+    return;  // Already opened.
+
   Profile* profile = BrowserList::GetLastActive()->profile();
   playlist_browser_ = Browser::CreateForApp(Browser::TYPE_PANEL,
                                             kMediaPlayerAppName,
@@ -208,7 +194,7 @@ void MediaPlayer::PopupPlaylist(Browser* creator) {
                  chrome::NOTIFICATION_BROWSER_CLOSED,
                  Source<Browser>(playlist_browser_));
   playlist_browser_->AddSelectedTabWithURL(GetMediaplayerPlaylistUrl(),
-                                           PageTransition::LINK);
+                                           content::PAGE_TRANSITION_LINK);
   playlist_browser_->window()->SetBounds(gfx::Rect(kPopupLeft,
                                                    kPopupTop,
                                                    kPopupWidth,
@@ -224,6 +210,9 @@ void MediaPlayer::PopupMediaPlayer(Browser* creator) {
                           static_cast<Browser*>(NULL)));
     return;
   }
+  if (mediaplayer_browser_)
+    return;  // Already opened.
+
   Profile* profile = BrowserList::GetLastActive()->profile();
   mediaplayer_browser_ = Browser::CreateForApp(Browser::TYPE_PANEL,
                                                kMediaPlayerAppName,
@@ -233,7 +222,7 @@ void MediaPlayer::PopupMediaPlayer(Browser* creator) {
                  chrome::NOTIFICATION_BROWSER_CLOSED,
                  Source<Browser>(mediaplayer_browser_));
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && defined(TOOLKIT_USES_GTK)
   // Since we are on chromeos, popups should be a PanelBrowserView,
   // so we can just cast it.
   if (creator) {
@@ -246,7 +235,7 @@ void MediaPlayer::PopupMediaPlayer(Browser* creator) {
   }
 #endif
   mediaplayer_browser_->AddSelectedTabWithURL(GetMediaPlayerUrl(),
-                                              PageTransition::LINK);
+                                              content::PAGE_TRANSITION_LINK);
   mediaplayer_browser_->window()->SetBounds(gfx::Rect(kPopupLeft,
                                                       kPopupTop,
                                                       kPopupWidth,
@@ -283,7 +272,8 @@ net::URLRequestJob* MediaPlayer::MaybeInterceptResponse(
   if (supported_mime_types_.find(mime_type) != supported_mime_types_.end()) {
     if (request->referrer() != chrome::kChromeUIMediaplayerURL &&
         !request->referrer().empty()) {
-      EnqueueMediaFileUrl(request->url(), NULL);
+      PopupMediaPlayer(NULL);
+      ForcePlayMediaURL(request->url());
       request->Cancel();
     }
   }

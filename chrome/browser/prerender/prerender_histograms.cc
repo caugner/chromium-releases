@@ -26,16 +26,22 @@ std::string ComposeHistogramName(const std::string& prefix_type,
 }
 
 std::string GetHistogramName(Origin origin, uint8 experiment_id,
-                             const std::string& name) {
+                             bool is_wash, const std::string& name) {
+  if (is_wash)
+    return ComposeHistogramName("wash", name);
   switch (origin) {
-    case ORIGIN_OMNIBOX:
+    case ORIGIN_OMNIBOX_ORIGINAL:
       if (experiment_id != kNoExperiment)
         return ComposeHistogramName("wash", name);
-      return ComposeHistogramName("omnibox", name);
+      return ComposeHistogramName("omnibox_original", name);
+    case ORIGIN_OMNIBOX_CONSERVATIVE:
+      if (experiment_id != kNoExperiment)
+        return ComposeHistogramName("wash", name);
+      return ComposeHistogramName("omnibox_conservative", name);
     case ORIGIN_LINK_REL_PRERENDER:
       if (experiment_id != kNoExperiment)
         return ComposeHistogramName("wash", name);
-      return ComposeHistogramName("", name);
+      return ComposeHistogramName("web", name);
     case ORIGIN_GWS_PRERENDER:
       if (experiment_id == kNoExperiment)
         return ComposeHistogramName("gws", name);
@@ -54,37 +60,56 @@ std::string GetHistogramName(Origin origin, uint8 experiment_id,
 }  // namespace
 
 // Helper macros for experiment-based and origin-based histogram reporting.
-#define PREFIXED_HISTOGRAM(histogram) \
+// All HISTOGRAM arguments must be UMA_HISTOGRAM... macros that contain an
+// argument "name" which these macros will eventually substitute for the
+// actual name used.
+#define PREFIXED_HISTOGRAM(histogram_name, HISTOGRAM) \
   PREFIXED_HISTOGRAM_INTERNAL(GetCurrentOrigin(), GetCurrentExperimentId(), \
-                              IsOriginExperimentWash(), histogram)
+                              IsOriginExperimentWash(), HISTOGRAM, \
+                              histogram_name)
 
-#define PREFIXED_HISTOGRAM_ORIGIN_EXPERIMENT(origin, experiment, histogram) \
-  PREFIXED_HISTOGRAM_INTERNAL(origin, experiment, false, histogram)
+#define PREFIXED_HISTOGRAM_ORIGIN_EXPERIMENT(histogram_name, origin, \
+                                             experiment, HISTOGRAM) \
+  PREFIXED_HISTOGRAM_INTERNAL(origin, experiment, false, HISTOGRAM, \
+                              histogram_name)
 
-#define PREFIXED_HISTOGRAM_INTERNAL(origin, experiment, wash, histogram) { \
+#define PREFIXED_HISTOGRAM_INTERNAL(origin, experiment, wash, HISTOGRAM, \
+                                    histogram_name) { \
+  { \
+    /* Do not rename.  HISTOGRAM expects a local variable "name". */ \
+    std::string name = ComposeHistogramName("", histogram_name); \
+    HISTOGRAM; \
+  } \
+  /* Do not rename.  HISTOGRAM expects a local variable "name". */ \
+  std::string name = GetHistogramName(origin, experiment, wash, \
+                                      histogram_name); \
   static uint8 recording_experiment = kNoExperiment; \
   if (recording_experiment == kNoExperiment && experiment != kNoExperiment) \
     recording_experiment = experiment; \
   if (wash) { \
-    histogram; \
+    HISTOGRAM; \
   } else if (experiment != kNoExperiment && \
              (origin != ORIGIN_GWS_PRERENDER || \
               experiment != recording_experiment)) { \
   } else if (origin == ORIGIN_LINK_REL_PRERENDER) { \
-    histogram; \
-  } else if (origin == ORIGIN_OMNIBOX) { \
-    histogram; \
+    HISTOGRAM; \
+  } else if (origin == ORIGIN_OMNIBOX_ORIGINAL) { \
+    HISTOGRAM; \
+  } else if (origin == ORIGIN_OMNIBOX_CONSERVATIVE) { \
+    HISTOGRAM; \
   } else if (experiment != kNoExperiment) { \
-    histogram; \
+    HISTOGRAM; \
   } else { \
-    histogram; \
+    HISTOGRAM; \
   } \
 }
 
 PrerenderHistograms::PrerenderHistograms()
     : last_experiment_id_(kNoExperiment),
       last_origin_(ORIGIN_LINK_REL_PRERENDER),
-      origin_experiment_wash_(false) {
+      origin_experiment_wash_(false),
+      seen_any_pageload_(true),
+      seen_pageload_started_after_prerender_(true) {
 }
 
 void PrerenderHistograms::RecordPrerender(Origin origin, const GURL& url) {
@@ -112,6 +137,8 @@ void PrerenderHistograms::RecordPrerender(Origin origin, const GURL& url) {
   // reset the window to begin at the most recent occurrence, so that we will
   // always be in a window in the 30 seconds from each occurrence.
   last_prerender_seen_time_ = GetCurrentTimeTicks();
+  seen_any_pageload_ = false;
+  seen_pageload_started_after_prerender_ = false;
 }
 
 base::TimeTicks PrerenderHistograms::GetCurrentTimeTicks() const {
@@ -121,8 +148,9 @@ base::TimeTicks PrerenderHistograms::GetCurrentTimeTicks() const {
 // Helper macro for histograms.
 #define RECORD_PLT(tag, perceived_page_load_time) { \
   PREFIXED_HISTOGRAM( \
+    base::FieldTrial::MakeName(tag, "Prefetch"), \
     UMA_HISTOGRAM_CUSTOM_TIMES( \
-        base::FieldTrial::MakeName(GetDefaultHistogramName(tag), "Prefetch"), \
+        name, \
         perceived_page_load_time, \
         base::TimeDelta::FromMilliseconds(10), \
         base::TimeDelta::FromSeconds(60), \
@@ -130,67 +158,96 @@ base::TimeTicks PrerenderHistograms::GetCurrentTimeTicks() const {
 }
 
 void PrerenderHistograms::RecordPerceivedPageLoadTime(
-    base::TimeDelta perceived_page_load_time, bool was_prerender) const {
+    base::TimeDelta perceived_page_load_time, bool was_prerender,
+    const GURL& url) {
+  if (!IsWebURL(url))
+    return;
   bool within_window = WithinWindow();
+  bool is_google_url = IsGoogleDomain(url);
   RECORD_PLT("PerceivedPLT", perceived_page_load_time);
   if (within_window)
     RECORD_PLT("PerceivedPLTWindowed", perceived_page_load_time);
   if (was_prerender) {
     RECORD_PLT("PerceivedPLTMatched", perceived_page_load_time);
-  } else {
-    if (within_window)
-      RECORD_PLT("PerceivedPLTWindowNotMatched", perceived_page_load_time);
+    seen_any_pageload_ = true;
+    seen_pageload_started_after_prerender_ = true;
+  } else if (within_window) {
+    RECORD_PLT("PerceivedPLTWindowNotMatched", perceived_page_load_time);
+    if (!is_google_url) {
+      bool recorded_any = false;
+      bool recorded_non_overlapping = false;
+      if (!seen_any_pageload_) {
+        seen_any_pageload_ = true;
+        RECORD_PLT("PerceivedPLTFirstAfterMiss", perceived_page_load_time);
+        recorded_any = true;
+      }
+      if (!seen_pageload_started_after_prerender_ &&
+          perceived_page_load_time <= GetTimeSinceLastPrerender()) {
+        seen_pageload_started_after_prerender_ = true;
+        RECORD_PLT("PerceivedPLTFirstAfterMissNonOverlapping",
+                   perceived_page_load_time);
+        recorded_non_overlapping = true;
+      }
+      if (recorded_any || recorded_non_overlapping) {
+        if (recorded_any && recorded_non_overlapping) {
+          RECORD_PLT("PerceivedPLTFirstAfterMissBoth",
+                     perceived_page_load_time);
+        } else if (recorded_any) {
+          RECORD_PLT("PerceivedPLTFirstAfterMissAnyOnly",
+                     perceived_page_load_time);
+        } else if (recorded_non_overlapping) {
+          RECORD_PLT("PerceivedPLTFirstAfterMissNonOverlappingOnly",
+                     perceived_page_load_time);
+        }
+      }
+    }
   }
+}
+
+base::TimeDelta PrerenderHistograms::GetTimeSinceLastPrerender() const {
+  return base::TimeTicks::Now() - last_prerender_seen_time_;
 }
 
 bool PrerenderHistograms::WithinWindow() const {
   if (last_prerender_seen_time_.is_null())
     return false;
-  base::TimeDelta elapsed_time =
-      base::TimeTicks::Now() - last_prerender_seen_time_;
-  return elapsed_time <= base::TimeDelta::FromSeconds(kWindowDurationSeconds);
+  return GetTimeSinceLastPrerender() <=
+      base::TimeDelta::FromSeconds(kWindowDurationSeconds);
 }
 
 
 void PrerenderHistograms::RecordTimeUntilUsed(
     base::TimeDelta time_until_used, base::TimeDelta max_age) const {
-  PREFIXED_HISTOGRAM(UMA_HISTOGRAM_CUSTOM_TIMES(
-      GetDefaultHistogramName("TimeUntilUsed"),
-      time_until_used,
-      base::TimeDelta::FromMilliseconds(10),
-      max_age,
-      50));
+  PREFIXED_HISTOGRAM(
+      "TimeUntilUsed",
+      UMA_HISTOGRAM_CUSTOM_TIMES(
+          name,
+          time_until_used,
+          base::TimeDelta::FromMilliseconds(10),
+          max_age,
+          50));
 }
 
 void PrerenderHistograms::RecordPerSessionCount(int count) const {
-  PREFIXED_HISTOGRAM(UMA_HISTOGRAM_COUNTS(
-      GetDefaultHistogramName("PrerendersPerSessionCount"), count));
+  PREFIXED_HISTOGRAM(
+      "PrerendersPerSessionCount",
+      UMA_HISTOGRAM_COUNTS(name, count));
 }
 
 void PrerenderHistograms::RecordTimeBetweenPrerenderRequests(
     base::TimeDelta time) const {
-  PREFIXED_HISTOGRAM(UMA_HISTOGRAM_TIMES(
-      GetDefaultHistogramName("TimeBetweenPrerenderRequests"), time));
+  PREFIXED_HISTOGRAM(
+      "TimeBetweenPrerenderRequests",
+      UMA_HISTOGRAM_TIMES(name, time));
 }
 
 void PrerenderHistograms::RecordFinalStatus(Origin origin,
                                             uint8 experiment_id,
                                             FinalStatus final_status) const {
   DCHECK(final_status != FINAL_STATUS_MAX);
-  PREFIXED_HISTOGRAM_ORIGIN_EXPERIMENT(origin, experiment_id,
-                     UMA_HISTOGRAM_ENUMERATION(
-                         GetHistogramName(origin, experiment_id, "FinalStatus"),
-                         final_status,
-                         FINAL_STATUS_MAX));
-}
-
-std::string PrerenderHistograms::GetDefaultHistogramName(
-    const std::string& name) const {
-  if (!WithinWindow())
-    return ComposeHistogramName("", name);
-  if (origin_experiment_wash_)
-    return ComposeHistogramName("wash", name);
-  return GetHistogramName(last_origin_, last_experiment_id_, name);
+  PREFIXED_HISTOGRAM_ORIGIN_EXPERIMENT(
+      "FinalStatus", origin, experiment_id,
+      UMA_HISTOGRAM_ENUMERATION(name, final_status, FINAL_STATUS_MAX));
 }
 
 uint8 PrerenderHistograms::GetCurrentExperimentId() const {

@@ -8,6 +8,7 @@
 
 #include <string>
 #include <vector>
+#include <map>
 
 #include "build/build_config.h"
 
@@ -17,7 +18,10 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "content/common/content_notification_types.h"
+#include "base/memory/singleton.h"
+#include "base/shared_memory.h"
+#include "base/string16.h"
+#include "content/common/content_export.h"
 #include "ipc/ipc_channel_proxy.h"
 
 class CommandLine;
@@ -30,8 +34,8 @@ class Message;
 // Provides common functionality for hosting a child process and processing IPC
 // messages between the host and the child process. Subclasses are responsible
 // for the actual launching and terminating of the child processes.
-class ChildProcessHost : public IPC::Channel::Listener,
-                         public IPC::Message::Sender {
+class CONTENT_EXPORT ChildProcessHost : public IPC::Channel::Listener,
+                                        public IPC::Message::Sender {
  public:
 
   // These flags may be passed to GetChildPath in order to alter its behavior,
@@ -86,7 +90,8 @@ class ChildProcessHost : public IPC::Channel::Listener,
 #if defined(OS_WIN)
   // See comments in the cc file. This is a common hack needed for a process
   // hosting a sandboxed child process. Hence it lives in this file.
-  static void PreCacheFont(LOGFONT font);
+  static void PreCacheFont(LOGFONT font, int pid);
+  static void ReleaseCachedFonts(int pid);
 #endif  // defined(OS_WIN)
 
   // IPC::Message::Sender implementation.
@@ -94,6 +99,11 @@ class ChildProcessHost : public IPC::Channel::Listener,
 
   // Adds an IPC message filter.  A reference will be kept to the filter.
   void AddFilter(IPC::ChannelProxy::MessageFilter* filter);
+
+  // Public and static for reuse by RenderMessageFilter.
+  static void OnAllocateSharedMemory(
+      uint32 buffer_size, base::ProcessHandle child_process,
+      base::SharedMemoryHandle* handle);
 
  protected:
   ChildProcessHost();
@@ -108,9 +118,6 @@ class ChildProcessHost : public IPC::Channel::Listener,
   // Creates the IPC channel.  Returns true iff it succeeded.
   virtual bool CreateChannel();
 
-  // Notifies us that an instance has been created on this child process.
-  virtual void InstanceCreated();
-
   // IPC::Channel::Listener implementation:
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
@@ -120,12 +127,16 @@ class ChildProcessHost : public IPC::Channel::Listener,
   const std::string& channel_id() { return channel_id_; }
   IPC::Channel* channel() { return channel_.get(); }
 
-  // Called when the child process goes away.
+  // Called when the child process goes away. See OnChildDisconnected().
   virtual void OnChildDied();
+
+  // Called when the child process unexpected closes the IPC channel. The
+  // default action is to call OnChildDied(). Subclasses might want to override
+  // this behavior.
+  virtual void OnChildDisconnected();
+
   // Notifies the derived class that we told the child process to kill itself.
   virtual void ShutdownStarted();
-  // Subclasses can implement specific notification methods.
-  virtual void Notify(int type);
 
  private:
   // By using an internal class as the IPC::Channel::Listener, we can intercept
@@ -134,6 +145,7 @@ class ChildProcessHost : public IPC::Channel::Listener,
   class ListenerHook : public IPC::Channel::Listener {
    public:
     explicit ListenerHook(ChildProcessHost* host);
+    virtual ~ListenerHook();
 
     void Shutdown();
 
@@ -141,12 +153,48 @@ class ChildProcessHost : public IPC::Channel::Listener,
     virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
     virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
     virtual void OnChannelError() OVERRIDE;
+
+    bool Send(IPC::Message* message);
+
    private:
+    void OnShutdownRequest();
+    void OnAllocateSharedMemory(uint32 buffer_size,
+                                base::SharedMemoryHandle* handle);
     ChildProcessHost* host_;
+    base::ProcessHandle peer_handle_;
     DISALLOW_COPY_AND_ASSIGN(ListenerHook);
   };
 
   ListenerHook listener_;
+
+#if defined (OS_WIN)
+  class FontCache {
+   public:
+    static FontCache* GetInstance();
+    void PreCacheFont(LOGFONT font, int process_id);
+    void ReleaseCachedFonts(int process_id);
+
+   private:
+    struct CacheElement {
+      CacheElement();
+      ~CacheElement();
+
+      HFONT font_;
+      HDC dc_;
+      int ref_count_;
+    };
+    friend struct DefaultSingletonTraits<FontCache>;
+
+    FontCache();
+    ~FontCache();
+
+    std::map<string16, CacheElement> cache_;
+    std::map<int, std::vector<string16> > process_id_font_map_;
+    base::Lock mutex_;
+
+    DISALLOW_COPY_AND_ASSIGN(FontCache);
+  };
+#endif
 
   bool opening_channel_;  // True while we're waiting the channel to be opened.
   scoped_ptr<IPC::Channel> channel_;

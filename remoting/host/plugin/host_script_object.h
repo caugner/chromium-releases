@@ -74,10 +74,8 @@ class HostNPScriptObject : public HostStatusObserver {
                                      const std::string& full_jid) OVERRIDE;
   virtual void OnSignallingDisconnected() OVERRIDE;
   virtual void OnAccessDenied() OVERRIDE;
-  virtual void OnClientAuthenticated(
-      remoting::protocol::ConnectionToClient* client) OVERRIDE;
-  virtual void OnClientDisconnected(
-      remoting::protocol::ConnectionToClient* client) OVERRIDE;
+  virtual void OnClientAuthenticated(const std::string& jid) OVERRIDE;
+  virtual void OnClientDisconnected(const std::string& jid) OVERRIDE;
   virtual void OnShutdown() OVERRIDE;
 
   // Post LogDebugInfo to the correct proxy (and thus, on the correct thread).
@@ -152,6 +150,10 @@ class HostNPScriptObject : public HostStatusObserver {
   bool LocalizeString(NPObject* localize_func, const char* tag,
                       string16* result);
 
+  // If the web-app has registered a callback to be notified of changes to the
+  // NAT traversal policy, notify it.
+  void UpdateWebappNatPolicy(bool nat_traversal_enabled);
+
   // Helper function for executing InvokeDefault on an NPObject, and ignoring
   // the return value.
   bool InvokeAndIgnoreResult(NPObject* func,
@@ -171,6 +173,7 @@ class HostNPScriptObject : public HostStatusObserver {
 
   std::string client_username_;
   ScopedRefNPObject log_debug_info_func_;
+  ScopedRefNPObject on_nat_traversal_policy_changed_func_;
   ScopedRefNPObject on_state_changed_func_;
   base::PlatformThreadId np_thread_id_;
   scoped_refptr<PluginMessageLoopProxy> plugin_message_loop_proxy_;
@@ -190,6 +193,8 @@ class HostNPScriptObject : public HostStatusObserver {
 
   // True if we're in the middle of handling a log message.
   bool am_currently_logging_;
+
+  base::Lock nat_policy_lock_;
 
   scoped_ptr<policy_hack::NatPolicy> nat_policy_;
 

@@ -688,8 +688,8 @@ void AutocompleteResult::SortAndCull(const AutocompleteInput& input) {
   if (((input.type() == AutocompleteInput::UNKNOWN) ||
        (input.type() == AutocompleteInput::REQUESTED_URL)) &&
       (default_match_ != end()) &&
-      (default_match_->transition != PageTransition::TYPED) &&
-      (default_match_->transition != PageTransition::KEYWORD) &&
+      (default_match_->transition != content::PAGE_TRANSITION_TYPED) &&
+      (default_match_->transition != content::PAGE_TRANSITION_KEYWORD) &&
       (input.canonicalized_url() != default_match_->destination_url))
     alternate_nav_url_ = input.canonicalized_url();
 }
@@ -891,9 +891,8 @@ void AutocompleteController::Start(
   if (matches_requested == AutocompleteInput::ALL_MATCHES &&
       (text.length() < 6)) {
     base::TimeTicks end_time = base::TimeTicks::Now();
-    std::string name = "Omnibox.QueryTime." +
-                       InstantFieldTrial::GetGroupName(profile_) + "." +
-                       base::IntToString(text.length());
+    std::string name = "Omnibox.QueryTime." + base::IntToString(text.length())
+                       + InstantFieldTrial::GetGroupName(profile_);
     base::Histogram* counter = base::Histogram::FactoryGet(
         name, 1, 1000, 50, base::Histogram::kUmaTargetedHistogramFlag);
     counter->Add(static_cast<int>((end_time - start_time).InMilliseconds()));

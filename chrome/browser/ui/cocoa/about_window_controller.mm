@@ -182,6 +182,7 @@ static BOOL recentShownUserActionFailedStatus = NO;
     AutoupdateStatus recentStatus = [keystoneGlue recentStatus];
     if ([keystoneGlue asyncOperationPending] ||
         recentStatus == kAutoupdateRegisterFailed ||
+        recentStatus == kAutoupdateNeedsPromotion ||
         ((recentStatus == kAutoupdateInstallFailed ||
           recentStatus == kAutoupdatePromoteFailed) &&
          !recentShownUserActionFailedStatus)) {
@@ -248,8 +249,9 @@ static BOOL recentShownUserActionFailedStatus = NO;
       allowUpdate = true;
       allowPromotion = true;
     } else {
-      // Show the update block only if a promotion is not absolutely required.
-      allowUpdate = ![keystoneGlue needsPromotion];
+      // Show the update block even when promotion is absolutely required,
+      // because the promotion button is contained within it.
+      allowUpdate = true;
 
       // Show the promotion block if promotion is a possibility.
       allowPromotion = [keystoneGlue wantsPromotion];
@@ -579,6 +581,16 @@ static BOOL recentShownUserActionFailedStatus = NO;
 
       break;
 
+    case kAutoupdateNeedsPromotion:
+      {
+        imageID = IDR_UPDATE_FAIL;
+        string16 productName = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
+        message = l10n_util::GetNSStringFWithFixup(IDS_PROMOTE_INFOBAR_TEXT,
+                                                   productName);
+      }
+
+      break;
+
     default:
       NOTREACHED();
 
@@ -608,7 +620,7 @@ static BOOL recentShownUserActionFailedStatus = NO;
   // an existing one just to pass in the NEW_WINDOW disposition.
   Browser* browser = Browser::Create(profile_);
   browser->OpenURL(GURL([link UTF8String]), GURL(), NEW_FOREGROUND_TAB,
-                   PageTransition::LINK);
+                   content::PAGE_TRANSITION_LINK);
   browser->window()->Show();
   return YES;
 }

@@ -44,6 +44,7 @@
 #include "base/shared_memory.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/simple_thread.h"
+#include "content/common/content_export.h"
 #include "content/renderer/media/audio_message_filter.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_manager.h"
@@ -52,7 +53,7 @@
 
 class AudioMessageFilter;
 
-class AudioRendererImpl
+class CONTENT_EXPORT AudioRendererImpl
     : public media::AudioRendererBase,
       public AudioMessageFilter::Delegate,
       public base::DelegateSimpleThread::Delegate,
@@ -75,9 +76,9 @@ class AudioRendererImpl
   // Methods called on pipeline thread ----------------------------------------
   // media::Filter implementation.
   virtual void SetPlaybackRate(float rate);
-  virtual void Pause(media::FilterCallback* callback);
+  virtual void Pause(const base::Closure& callback);
   virtual void Seek(base::TimeDelta time, const media::FilterStatusCB& cb);
-  virtual void Play(media::FilterCallback* callback);
+  virtual void Play(const base::Closure& callback);
 
   // media::AudioRenderer implementation.
   virtual void SetVolume(float volume);
@@ -85,7 +86,9 @@ class AudioRendererImpl
  protected:
   // Methods called on audio renderer thread ----------------------------------
   // These methods are called from AudioRendererBase.
-  virtual bool OnInitialize(const media::AudioDecoderConfig& config);
+  virtual bool OnInitialize(int bits_per_channel,
+                            ChannelLayout channel_layout,
+                            int sample_rate);
   virtual void OnStop();
 
   // Called when the decoder completes a Read().

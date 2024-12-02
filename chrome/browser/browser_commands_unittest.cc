@@ -86,7 +86,7 @@ TEST_F(BrowserCommandsTest, BookmarkCurrentPage) {
   // Navigate to a url.
   GURL url1("http://foo/1");
   AddTab(browser(), url1);
-  browser()->OpenURL(url1, GURL(), CURRENT_TAB, PageTransition::TYPED);
+  browser()->OpenURL(url1, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
 
   // TODO(beng): remove this once we can use TabContentses directly in testing
   //             instead of the TestTabContents which causes this command not to
@@ -166,3 +166,30 @@ TEST_F(BrowserCommandsTest, BackForwardInNewTab) {
   ASSERT_EQ(4, browser()->active_index());
   ASSERT_EQ(url2, browser()->GetSelectedTabContents()->GetURL());
 }
+
+// Tests IDC_SEARCH (the Search key on Chrome OS devices).
+#if defined(OS_CHROMEOS)
+TEST_F(BrowserCommandsTest, Search) {
+  // Load a non-NTP URL.
+  GURL non_ntp_url("http://foo/");
+  AddTab(browser(), non_ntp_url);
+  ASSERT_EQ(1, browser()->tab_count());
+  EXPECT_EQ(non_ntp_url, browser()->GetSelectedTabContents()->GetURL());
+
+  // Pressing the Search key should open a new tab containing the NTP.
+  browser()->Search();
+  ASSERT_EQ(2, browser()->tab_count());
+  ASSERT_EQ(1, browser()->active_index());
+  GURL current_url = browser()->GetSelectedTabContents()->GetURL();
+  EXPECT_TRUE(current_url.SchemeIs(chrome::kChromeUIScheme));
+  EXPECT_EQ(chrome::kChromeUINewTabHost, current_url.host());
+
+  // Pressing it a second time while the NTP is open shouldn't change anything.
+  browser()->Search();
+  ASSERT_EQ(2, browser()->tab_count());
+  ASSERT_EQ(1, browser()->active_index());
+  current_url = browser()->GetSelectedTabContents()->GetURL();
+  EXPECT_TRUE(current_url.SchemeIs(chrome::kChromeUIScheme));
+  EXPECT_EQ(chrome::kChromeUINewTabHost, current_url.host());
+}
+#endif

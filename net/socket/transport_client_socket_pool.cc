@@ -385,9 +385,8 @@ TransportClientSocketPool::TransportClientSocketPool(
     ClientSocketFactory* client_socket_factory,
     NetLog* net_log)
     : base_(max_sockets, max_sockets_per_group, histograms,
-            base::TimeDelta::FromSeconds(
-                ClientSocketPool::unused_idle_socket_timeout()),
-            base::TimeDelta::FromSeconds(kUsedIdleSocketTimeout),
+            ClientSocketPool::unused_idle_socket_timeout(),
+            ClientSocketPool::used_idle_socket_timeout(),
             new TransportConnectJobFactory(client_socket_factory,
                                      host_resolver, net_log)) {
   base_.EnableConnectBackupJobs();
@@ -400,7 +399,7 @@ int TransportClientSocketPool::RequestSocket(
     const void* params,
     RequestPriority priority,
     ClientSocketHandle* handle,
-    CompletionCallback* callback,
+    OldCompletionCallback* callback,
     const BoundNetLog& net_log) {
   const scoped_refptr<TransportSocketParams>* casted_params =
       static_cast<const scoped_refptr<TransportSocketParams>*>(params);

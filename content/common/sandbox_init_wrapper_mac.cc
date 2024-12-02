@@ -7,8 +7,8 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/logging.h"
-#include "content/common/content_switches.h"
 #include "content/common/sandbox_mac.h"
+#include "content/public/common/content_switches.h"
 
 bool SandboxInitWrapper::InitializeSandbox(const CommandLine& command_line,
                                            const std::string& process_type) {
@@ -34,15 +34,6 @@ bool SandboxInitWrapper::InitializeSandbox(const CommandLine& command_line,
     } else {
       sandbox_process_type = Sandbox::SANDBOX_TYPE_RENDERER;
     }
-  } else if (process_type == switches::kExtensionProcess) {
-    // Extension processes are just renderers [they use RenderMain()] with a
-    // different set of command line flags.
-    // If we ever get here it means something has changed in regards
-    // to the extension process mechanics and we should probably reexamine
-    // how we sandbox extension processes since they are no longer identical
-    // to renderers.
-    NOTREACHED();
-    return true;
   } else if (process_type == switches::kUtilityProcess) {
     // Utility process sandbox.
     sandbox_process_type = Sandbox::SANDBOX_TYPE_UTILITY;
@@ -57,7 +48,6 @@ bool SandboxInitWrapper::InitializeSandbox(const CommandLine& command_line,
   } else if (process_type == switches::kGpuProcess) {
     sandbox_process_type = Sandbox::SANDBOX_TYPE_GPU;
   } else if ((process_type == switches::kPluginProcess) ||
-             (process_type == switches::kProfileImportProcess) ||
              (process_type == switches::kServiceProcess)) {
     return true;
   } else if (process_type == switches::kPpapiPluginProcess) {

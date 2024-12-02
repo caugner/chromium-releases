@@ -32,6 +32,10 @@ namespace base {
 class Lock;
 }
 
+namespace crypto {
+class SymmetricKey;
+}
+
 namespace chromeos {
 
 class LoginStatusConsumer;
@@ -80,7 +84,7 @@ class ParallelAuthenticator : public Authenticator,
   virtual ~ParallelAuthenticator();
 
   // Authenticator overrides.
-  virtual bool CompleteLogin(Profile* profile,
+  virtual void CompleteLogin(Profile* profile,
                              const std::string& username,
                              const std::string& password) OVERRIDE;
 
@@ -109,9 +113,7 @@ class ParallelAuthenticator : public Authenticator,
   // NOTE: We do not allow HOSTED accounts to log in.  In the event that
   // we are asked to authenticate valid HOSTED account creds, we will
   // call OnLoginFailure() with HOSTED_NOT_ALLOWED.
-  //
-  // Returns true if the attempt gets sent successfully and false if not.
-  virtual bool AuthenticateToLogin(Profile* profile,
+  virtual void AuthenticateToLogin(Profile* profile,
                                    const std::string& username,
                                    const std::string& password,
                                    const std::string& login_token,
@@ -121,7 +123,7 @@ class ParallelAuthenticator : public Authenticator,
   // authenticate to the cached credentials. This will never contact
   // the server even if it's online. The auth result is sent to
   // LoginStatusConsumer in a same way as AuthenticateToLogin does.
-  virtual bool AuthenticateToUnlock(const std::string& username,
+  virtual void AuthenticateToUnlock(const std::string& username,
                                     const std::string& password) OVERRIDE;
 
   // Initiates incognito ("browse without signing in") login.
@@ -149,6 +151,8 @@ class ParallelAuthenticator : public Authenticator,
       const std::string& oauth1_secret) OVERRIDE;
   virtual std::string EncryptToken(const std::string& token) OVERRIDE;
   virtual std::string DecryptToken(const std::string& encrypted_token) OVERRIDE;
+  virtual std::string DecryptLegacyToken(
+      const std::string& encrypted_token) OVERRIDE;
 
   // AuthAttemptStateResolver overrides.
   // Attempts to make a decision and call back |consumer_| based on
@@ -220,6 +224,9 @@ class ParallelAuthenticator : public Authenticator,
 
   // If we don't have the system salt yet, loads it from the CryptohomeLibrary.
   void LoadSystemSalt();
+  // If we don't have supplemental_user_key_ yet, loads it from the NSS DB.
+  // Returns false if the key can not be loaded/created.
+  bool LoadSupplementalUserKey();
 
   // If we haven't already, looks in a file called |filename| next to
   // the browser executable for a "localaccount" name, and retrieves it
@@ -275,6 +282,7 @@ class ParallelAuthenticator : public Authenticator,
 
   std::string ascii_hash_;
   chromeos::CryptohomeBlob system_salt_;
+  scoped_ptr<crypto::SymmetricKey> supplemental_user_key_;
 
   // When the user has changed her password, but gives us the old one, we will
   // be able to mount her cryptohome, but online authentication will fail.

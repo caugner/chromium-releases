@@ -13,10 +13,12 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/ui/gtk/constrained_window_gtk.h"
+#include "chrome/browser/ui/gtk/bubble/bubble_gtk.h"
 #include "chrome/browser/ui/intents/web_intent_picker.h"
 #include "ui/base/gtk/gtk_signal.h"
+#include "ui/base/gtk/owned_widget_gtk.h"
 
+class Browser;
 class CustomDrawButton;
 class GURL;
 class TabContents;
@@ -25,9 +27,10 @@ class WebIntentPickerDelegate;
 
 // Gtk implementation of WebIntentPicker.
 class WebIntentPickerGtk : public WebIntentPicker,
-                           public ConstrainedWindowGtkDelegate {
+                           public BubbleDelegateGtk {
  public:
-  WebIntentPickerGtk(TabContents* tab_contents,
+  WebIntentPickerGtk(Browser* browser,
+                     TabContentsWrapper* tab_contents,
                      WebIntentPickerDelegate* delegate);
   virtual ~WebIntentPickerGtk();
 
@@ -35,13 +38,10 @@ class WebIntentPickerGtk : public WebIntentPicker,
   virtual void SetServiceURLs(const std::vector<GURL>& urls) OVERRIDE;
   virtual void SetServiceIcon(size_t index, const SkBitmap& icon) OVERRIDE;
   virtual void SetDefaultServiceIcon(size_t index) OVERRIDE;
-  virtual void Show() OVERRIDE;
   virtual void Close() OVERRIDE;
 
-  // ConstrainedWindowGtkDelegate implementation.
-  virtual GtkWidget* GetWidgetRoot() OVERRIDE;
-  virtual GtkWidget* GetFocusWidget() OVERRIDE;
-  virtual void DeleteDelegate() OVERRIDE;
+  // BubbleDelegateGtk implementation.
+  virtual void BubbleClosing(BubbleGtk* bubble, bool closed_by_escape) OVERRIDE;
 
  private:
   // Callback when a service button is clicked.
@@ -49,26 +49,33 @@ class WebIntentPickerGtk : public WebIntentPicker,
   // Callback when close button is clicked.
   CHROMEGTK_CALLBACK_0(WebIntentPickerGtk, void, OnCloseButtonClick);
 
+  // Initialize the contents of the bubble. After this call, contents_ will be
+  // non-NULL.
+  void InitContents();
+
+  // Get the button widget at |index|.
+  GtkWidget* GetServiceButton(size_t index);
+
   // A weak pointer to the tab contents on which to display the picker UI.
-  TabContents* tab_contents_;
+  TabContentsWrapper* wrapper_;
 
   // A weak pointer to the WebIntentPickerDelegate to notify when the user
   // chooses a service or cancels.
   WebIntentPickerDelegate* delegate_;
 
-  // The root GtkWidget of the dialog.
-  ui::OwnedWidgetGtk root_;
+  // A weak pointer to the widget that contains all other widgets in
+  // the bubble.
+  GtkWidget* contents_;
 
   // A weak pointer to the hbox that contains the buttons used to choose the
   // service.
   GtkWidget* button_hbox_;
 
-  // A button to close the dialog delegate.
+  // A button to close the bubble.
   scoped_ptr<CustomDrawButton> close_button_;
 
-  // The displayed constrained window. Technically owned by the TabContents
-  // page, but this object tells it when to destroy.
-  ConstrainedWindow* window_;
+  // A weak pointer to the bubble widget.
+  BubbleGtk* bubble_;
 
   DISALLOW_COPY_AND_ASSIGN(WebIntentPickerGtk);
 };

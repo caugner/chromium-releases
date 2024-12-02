@@ -9,7 +9,7 @@ const EMPTY_IMAGE_URI = 'data:image/gif;base64,'
 
 var g_slideshow_data = null;
 
-const IMAGE_EDITOR_ENABLED = false;
+const GALLERY_ENABLED = true;
 
 /**
  * FileManager constructor.
@@ -42,8 +42,6 @@ function FileManager(dialogDom, filesystem, rootEntries) {
                  {};
 
   this.listType_ = null;
-
-  this.metadataCache_ = {};
 
   this.selection = null;
 
@@ -123,13 +121,14 @@ function FileManager(dialogDom, filesystem, rootEntries) {
 
   var self = this;
 
+  // The list of callbacks to be invoked during the directory rescan after
+  // all paste tasks are complete.
+  this.pasteSuccessCallbacks_ = [];
+
   // The list of active mount points to distinct them from other directories.
   chrome.fileBrowserPrivate.getMountPoints(function(mountPoints) {
       self.mountPoints_ = mountPoints;
   });
-
-  chrome.fileBrowserHandler.onExecute.addListener(
-    this.onFileTaskExecute_.bind(this));
 
   this.initCommands_();
   this.initDom_();
@@ -139,18 +138,11 @@ function FileManager(dialogDom, filesystem, rootEntries) {
   this.summarizeSelection_();
   this.updatePreview_();
 
-  this.dataModel_.sort('name', 'asc');
+  this.dataModel_.sort('cachedMtime_', 'desc');
 
   this.refocus();
 
-  // Pass all URLs to the metadata reader until we have a correct filter.
-  this.metadataUrlFilter_ = /.*/;
-
-  this.metadataReader_ = new Worker('js/metadata_dispatcher.js');
-  this.metadataReader_.onmessage = this.onMetadataMessage_.bind(this);
-  this.metadataReader_.postMessage({verb: 'init'});
-  // Initialization is not complete until the Worker sends back the
-  // 'initialized' message.  See below.
+  this.createMetadataProvider_();
 }
 
 FileManager.prototype = {
@@ -212,36 +204,53 @@ FileManager.prototype = {
    */
   var localStrings;
 
-  /**
-   * Map of icon types to regular expressions and functions
-   *
-   * The first regexp/function to match the entry name determines the icon type
-   * assigned to dom elements for a file. Order of evaluation is not
-   * defined, so don't depend on it.
-   */
-  const iconTypes = {
-    'audio': /\.(flac|mp3|m4a|oga|ogg|wav)$/i,
-    'html': /\.(html?)$/i,
-    'image': /\.(bmp|gif|jpe?g|ico|png|webp)$/i,
-    'pdf' : /\.(pdf)$/i,
-    'text': /\.(pod|rst|txt|log)$/i,
-    'video': /\.(3gp|avi|mov|mp4|m4v|mpe?g4?|ogm|ogv|ogx|webm)$/i,
-    'device': function(self, entry) {
-      var deviceNumber = self.getDeviceNumber(entry);
-      if (deviceNumber != undefined)
-        return (self.mountPoints_[deviceNumber].mountCondition == '');
-      return false;
-    },
-    'unreadable': function(self, entry) {
-      var deviceNumber = self.getDeviceNumber(entry);
-      if (deviceNumber != undefined) {
-        return self.mountPoints_[deviceNumber].mountCondition ==
-               'unknown_filesystem' ||
-               self.mountPoints_[deviceNumber].mountCondition ==
-               'unsupported_filesystem';
-      }
-      return false;
-    }
+  const fileTypes = {
+    // Images
+    'jpeg': {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'JPEG'},
+    'jpg':  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'JPEG'},
+    'bmp':  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'BMP'},
+    'gif':  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'GIF'},
+    'ico':  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'ICO'},
+    'png':  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'PNG'},
+    'webp': {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'WebP'},
+
+    // Video
+    '3gp':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: '3GP'},
+    'avi':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'AVI'},
+    'mov':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'QuickTime'},
+    'mp4':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
+    'mpg':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
+    'mpeg': {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
+    'mpg4': {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
+    'mpeg4': {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'MPEG'},
+    'ogm':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'OGG'},
+    'ogv':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'OGG'},
+    'ogx':  {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'OGG'},
+    'webm': {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: 'WebM'},
+
+    // Audio
+    'flac': {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'FLAC'},
+    'mp3':  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'MP3'},
+    'm4a':  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'MPEG'},
+    'oga':  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'OGG'},
+    'ogg':  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'OGG'},
+    'wav':  {type: 'audio', name: 'AUDIO_FILE_TYPE', subtype: 'WAV'},
+
+    // Text
+    'pod': {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'POD'},
+    'rst': {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'RST'},
+    'txt': {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'TXT'},
+    'log': {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'LOG'},
+
+    // Others
+    'zip': {type: 'archive', name: 'ZIP_ARCHIVE_FILE_TYPE'},
+
+    'pdf': {type: 'text', icon: 'pdf', name: 'PDF_DOCUMENT_FILE_TYPE',
+            subtype: 'PDF'},
+    'html': {type: 'text', icon: 'html', name: 'HTML_DOCUMENT_FILE_TYPE',
+             subtype: 'HTML'},
+    'htm': {type: 'text', icon: 'html', name: 'HTML_DOCUMENT_FILE_TYPE',
+            subtype: 'HTML'}
   };
 
   const previewArt = {
@@ -617,6 +626,8 @@ FileManager.prototype = {
                                        this.compareMtime_.bind(this));
     this.dataModel_.setCompareFunction('cachedSize_',
                                        this.compareSize_.bind(this));
+    this.dataModel_.setCompareFunction('type',
+                                       this.compareType_.bind(this));
     this.dataModel_.prepareSort = this.prepareSort_.bind(this);
 
     if (this.dialogType_ == FileManager.DialogType.SELECT_OPEN_FILE ||
@@ -646,49 +657,81 @@ FileManager.prototype = {
    *     'unknown'.
    */
   FileManager.prototype.getIconType = function(entry) {
-    if (entry.cachedIconType_)
-      return entry.cachedIconType_;
+    if (!('cachedIconType_' in entry))
+      entry.cachedIconType_ = this.computeIconType_(entry);
+    return entry.cachedIconType_;
+  }
 
-    var rv = 'unknown';
-   if (entry.isDirectory)
-      rv = 'folder';
-    for (var name in iconTypes) {
-      var value = iconTypes[name];
+  /**
+   * Extract extension from the file name and cat it to to lower case.
+   *
+   * @param {string} name.
+   * @return {strin}
+   */
+  function getFileExtension(name) {
+    var extIndex = name.lastIndexOf('.');
+    if (extIndex < 0)
+      return '';
 
-      if (value instanceof RegExp) {
-        if (value.test(entry.name))  {
-          rv = name;
-          break;
-        }
-      } else if (typeof value == 'function') {
-        try {
-          if (value(this,entry)) {
-            rv = name;
-            break;
-          }
-        } catch (ex) {
-          console.error('Caught exception while evaluating iconType: ' +
-                        name, ex);
-        }
-      } else {
-        console.log('Unexpected value in iconTypes[' + name + ']: ' + value);
-      }
+    return name.substr(extIndex + 1).toLowerCase();
+  }
+
+  FileManager.prototype.computeIconType_ = function(entry) {
+    var deviceNumber = this.getDeviceNumber(entry);
+    if (deviceNumber != undefined) {
+      if (this.mountPoints_[deviceNumber].mountCondition == '')
+        return 'device';
+      var mountCondition = this.mountPoints_[deviceNumber].mountCondition;
+      if (mountCondition == 'unknown_filesystem' ||
+          mountCondition == 'unsupported_filesystem')
+        return 'unreadable';
     }
-    entry.cachedIconType_ = rv;
-    return rv;
+    if (entry.isDirectory)
+      return 'folder';
+
+    var extension = getFileExtension(entry.name);
+    if (fileTypes[extension])
+      return fileTypes[extension].icon || fileTypes[extension].type;
+    return undefined;
+  };
+
+  /**
+   * Get the file type for a given Entry.
+   *
+   * @param {Entry} entry An Entry subclass (FileEntry or DirectoryEntry).
+   * @return {string} One of the values from FileManager.fileTypes, 'FOLDER',
+   *                  or undefined.
+   */
+  FileManager.prototype.getFileType = function(entry) {
+    if (!('cachedFileType_' in entry))
+      entry.cachedFileType_ = this.computeFileType_(entry);
+    return entry.cachedFileType_;
+  };
+
+  FileManager.prototype.computeFileType_ = function(entry) {
+    if (entry.isDirectory) {
+      var deviceNumber = this.getDeviceNumber(entry);
+      // The type field is used for sorting. Starting dot maked devices and
+      // directories to precede files.
+      if (deviceNumber != undefined)
+        return {name: 'DEVICE', type: '.device'};
+      return {name: 'FOLDER', type: '.folder'};
+    }
+
+    var extension = getFileExtension(entry.name);
+    if (extension in fileTypes)
+      return fileTypes[extension];
+
+    return {};
   };
 
 
   /**
    * Get the icon type of a file, caching the result.
    *
-   * When this method completes, the fileEntry object will get a
+   * When this method completes, the entry object will get a
    * 'cachedIconType_' property (if it doesn't already have one) containing the
    * icon type of the file as a string.
-   *
-   * The successCallback is always invoked synchronously, since this does not
-   * actually require an async call.  You should not depend on this, as it may
-   * change if we were to start reading magic numbers (for example).
    *
    * @param {Entry} entry An HTML5 Entry object.
    * @param {function(Entry)} successCallback The function to invoke once the
@@ -698,7 +741,25 @@ FileManager.prototype = {
     this.getIconType(entry);
     if (successCallback)
       setTimeout(function() { successCallback(entry) }, 0);
-  }
+  };
+
+  /**
+   * Get the file type of the entry, caching the result.
+   *
+   * When this method completes, the entry object will get a
+   * 'cachedIconType_' property (if it doesn't already have one) containing the
+   * icon type of the file as a string.
+   *
+   * @param {Entry} entry An HTML5 Entry object.
+   * @param {function(Entry)} successCallback The function to invoke once the
+   *     file size is known.
+   */
+  FileManager.prototype.cacheEntryFileType = function(entry, successCallback) {
+    this.getFileType(entry);
+
+    if (successCallback)
+      setTimeout(function() { successCallback(entry) }, 0);
+  };
 
   /**
    * Compare by mtime first, then by name.
@@ -722,6 +783,25 @@ FileManager.prototype = {
 
     if (a.cachedSize_ < b.cachedSize_)
       return -1;
+
+    return this.collator_.compare(a.name, b.name);
+  };
+
+  /**
+   * Compare by type first, then by subtype and then by name.
+   */
+  FileManager.prototype.compareType_ = function(a, b) {
+    // Files of unknows type follows all the others.
+    var result = this.collator_.compare(a.cachedFileType_.type || 'Z',
+                                        b.cachedFileType_.type || 'Z');
+    if (result != 0)
+      return result;
+
+    // If types are same both subtypes are defined of both are undefined.
+    result = this.collator_.compare(a.cachedFileType_.subtype || '',
+                                    b.cachedFileType_.subtype || '');
+    if (result != 0)
+      return result;
 
     return this.collator_.compare(a.name, b.name);
   };
@@ -867,8 +947,6 @@ FileManager.prototype = {
       case 'paste':
         event.canExecute =
           (this.clipboard_ &&
-           this.clipboard_.sourceDirEntry.fullPath !=
-           this.currentDirEntry_.fullPath &&
            !isSystemDirEntry(this.currentDirEntry_));
         if (this.pasteButton_)
           this.pasteButton_.disabled = !event.canExecute;
@@ -968,6 +1046,8 @@ FileManager.prototype = {
                                     64 - checkWidth),
         new cr.ui.table.TableColumn('cachedSize_',
                                     str('SIZE_COLUMN_LABEL'), 15.5),
+        new cr.ui.table.TableColumn('type',
+                                    str('TYPE_COLUMN_LABEL'), 15.5),
         new cr.ui.table.TableColumn('cachedMtime_',
                                     str('DATE_COLUMN_LABEL'), 21)
     ];
@@ -975,7 +1055,8 @@ FileManager.prototype = {
     columns[0].renderFunction = this.renderIconType_.bind(this);
     columns[1].renderFunction = this.renderName_.bind(this);
     columns[2].renderFunction = this.renderSize_.bind(this);
-    columns[3].renderFunction = this.renderDate_.bind(this);
+    columns[3].renderFunction = this.renderType_.bind(this);
+    columns[4].renderFunction = this.renderDate_.bind(this);
 
     this.table_ = this.dialogDom_.querySelector('.detail-table');
     cr.ui.Table.decorate(this.table_);
@@ -1020,6 +1101,18 @@ FileManager.prototype = {
       if (this.clipboard_.isCut)
         this.clipboard_ = null;
       this.updateCommands_();
+      self = this;
+      this.rescanDirectory_(function() {
+        var callback;
+        while (callback = self.pasteSuccessCallbacks_.shift()) {
+          try {
+            callback();
+          } catch (ex) {
+            console.error('Caught exception while inovking callback: ' +
+                          callback, ex);
+          }
+        }
+      });
 
     } else if (event.reason == 'ERROR') {
       switch (event.error.reason) {
@@ -1040,16 +1133,16 @@ FileManager.prototype = {
           this.showButterError(strf('PASTE_UNEXPECTED_ERROR', event.error));
           break;
       }
-
+      this.rescanDirectory_();
     } else if (event.reason == 'CANCELLED') {
       this.showButter(str('PASTE_CANCELLED'));
+      this.rescanDirectory_();
     } else {
       console.log('Unknown event reason: ' + event.reason);
+      this.rescanDirectory_();
     }
 
-    this.rescanDirectory_();
   };
-
   /**
    * Respond to a command being executed.
    */
@@ -1288,10 +1381,12 @@ FileManager.prototype = {
       cacheFunction = cacheEntryDate;
     } else if (field == 'cachedSize_') {
       cacheFunction = cacheEntrySize;
+    } else if (field == 'type') {
+      cacheFunction = this.cacheEntryFileType.bind(this);
     } else if (field == 'cachedIconType_') {
       cacheFunction = this.cacheEntryIconType.bind(this);
     } else {
-      callback();
+      setTimeout(callback, 0);
       return;
     }
 
@@ -1345,7 +1440,67 @@ FileManager.prototype = {
     }
 
     return input;
-  }
+  };
+
+  /**
+   * Insert a thumbnail image to fit/fill the container.
+   *
+   * Using webkit center packing does not align the image properly, so we need
+   * to wait until the image loads and its proportions are known, then manually
+   * position it at the center.
+   *
+   * @param {HTMLElement} parent
+   * @param {HTMLImageElement} img
+   * @param {string} url
+   * @param {boolean} fill True: the image should fill the entire container,
+   *                       false: the image should fully fit into the container.
+   */
+  FileManager.insertCenteredImage_ = function(parent, img, url, fill) {
+    img.onload = function() {
+      function percent(fraction) {
+        return Math.round(fraction * 100 * 10) / 10 + '%';  // Round to 0.1%
+      }
+
+      // First try vertical fit or horizontal fill.
+      var fractionX = img.width / img.height;
+      var fractionY = 1;
+      if ((fractionX < 1) == !!fill) {  // Vertical fill or horizontal fit.
+        fractionY = 1 / fractionX;
+        fractionX = 1;
+      }
+
+      img.style.width = percent(fractionX);
+      img.style.height = percent(fractionY);
+      img.style.left = percent((1 - fractionX) / 2);
+      img.style.top = percent((1 - fractionY) / 2);
+
+      parent.appendChild(img);
+    };
+    img.src = url;
+  };
+
+  /**
+   * Create a box containing a centered thumbnail image.
+   *
+   * @param {Entry} entry
+   * @param {boolean} True if fill, false if fit.
+   * @return {HTMLDivElement}
+   */
+  FileManager.prototype.renderThumbnailBox_ = function(entry, fill) {
+    var box = this.document_.createElement('div');
+    box.className = 'img-container';
+    var img = this.document_.createElement('img');
+    this.getThumbnailURL(entry, function(iconType, url, transform) {
+      FileManager.insertCenteredImage_(box, img, url, fill);
+      if (transform) {
+        box.style.webkitTransform =
+            'scaleX(' + transform.scaleX + ') ' +
+            'scaleY(' + transform.scaleY + ') ' +
+            'rotate(' + transform.rotate90 * 90 + 'deg)';
+      }
+    });
+    return box;
+  };
 
   FileManager.prototype.renderThumbnail_ = function(entry) {
     var li = this.document_.createElement('li');
@@ -1354,15 +1509,9 @@ FileManager.prototype = {
     if (this.showCheckboxes_)
       li.appendChild(this.renderCheckbox_(entry));
 
+    li.appendChild(this.renderThumbnailBox_(entry, false));
+
     var div = this.document_.createElement('div');
-    div.className = 'img-container';
-    li.appendChild(div);
-
-    var img = this.document_.createElement('img');
-    this.getThumbnailURL(entry, function(type, url) { img.src = url });
-    div.appendChild(img);
-
-    div = this.document_.createElement('div');
     div.className = 'filename-label';
     var labelText = entry.name;
     if (this.currentDirEntry_.name == '')
@@ -1396,7 +1545,7 @@ FileManager.prototype = {
 
     var icon = this.document_.createElement('div');
     icon.className = 'detail-icon';
-    entry.cachedIconType_ = this.getIconType(entry);
+    this.cacheEntryIconType(entry);
     icon.setAttribute('iconType', entry.cachedIconType_);
     div.appendChild(icon);
 
@@ -1457,6 +1606,32 @@ FileManager.prototype = {
       } else {
         div.textContent = util.bytesToSi(entry.cachedSize_);
       }
+    });
+
+    return div;
+  };
+
+  /**
+   * Render the Type column of the detail table.
+   *
+   * @param {Entry} entry The Entry object to render.
+   * @param {string} columnId The id of the column to be rendered.
+   * @param {cr.ui.Table} table The table doing the rendering.
+   */
+  FileManager.prototype.renderType_ = function(entry, columnId, table) {
+    var div = this.document_.createElement('div');
+    div.className = 'detail-type';
+
+    div.textContent = '...';
+    this.cacheEntryFileType(entry, function(entry) {
+      var info = entry.cachedFileType_;
+      if (info.name) {
+        if (info.subtype)
+          div.textContent = strf(info.name, info.subtype);
+        else
+          div.textContent = str(info.name);
+      } else
+        div.textContent = '';
     });
 
     return div;
@@ -1572,7 +1747,7 @@ FileManager.prototype = {
       } else {
         self.dispatchEvent(new cr.Event('selection-summarized'));
       }
-    };
+    }
 
     if (this.dialogType_ == FileManager.DialogType.FULL_PAGE) {
       this.taskButtons_.innerHTML = '';
@@ -1592,60 +1767,36 @@ FileManager.prototype = {
     cacheNextFile();
   };
 
-  FileManager.prototype.onMetadataResult_ = function(fileURL, metadata) {
-    var observers = this.metadataCache_[fileURL];
-    if (!observers || !(observers instanceof Array)) {
-      console.error('Missing or invalid metadata observers: ' + fileURL + ': ' +
-                    observers);
-      return;
+
+  FileManager.prototype.createMetadataProvider_ = function() {
+    // Subclass MetadataProvider to notify tests when the initialization
+    // is complete.
+
+    var fileManager = this;
+
+    function TestAwareMetadataProvider () {
+      MetadataProvider.apply(this, arguments);
     }
 
-    console.log('metadata result:', metadata);
-    for (var i = 0; i < observers.length; i++) {
-      observers[i](metadata);
-    }
+    TestAwareMetadataProvider.prototype = {
+      __proto__: MetadataProvider.prototype,
 
-    this.metadataCache_[fileURL] = metadata;
-  };
+      onInitialized_: function() {
+        MetadataProvider.prototype.onInitialized_.apply(this, arguments);
 
-  FileManager.prototype.onMetadataError_ = function(fileURL, step, error) {
-    console.warn('metadata: ' + fileURL + ': ' + step + ': ' + error);
-    this.onMetadataResult_(fileURL, {});
-  };
+        // We're ready to run.  Tests can monitor for this state with
+        // ExtensionTestMessageListener listener("worker-initialized");
+        // ASSERT_TRUE(listener.WaitUntilSatisfied());
+        // Automated tests need to wait for this, otherwise we crash in
+        // browser_test cleanup because the worker process still has
+        // URL requests in-flight.
+        chrome.test.sendMessage('worker-initialized');
+        // PyAuto tests monitor this state by polling this variable
+        fileManager.workerInitialized_ = true;
+      }
+    };
 
-  /**
-   * Handles the 'initialized' message from the metadata reader Worker.
-   */
-  FileManager.prototype.onMetadataInitialized_ = function(regexp) {
-    this.metadataUrlFilter_ = regexp;
-    // We're ready to run.  Tests can monitor for this state with
-    // ExtensionTestMessageListener listener("worker-initialized");
-    // ASSERT_TRUE(listener.WaitUntilSatisfied());
-    // Automated tests need to wait for this, otherwise we crash in browser_test
-    // cleanup because the worker process still has URL requests in-flight.
-    chrome.test.sendMessage('worker-initialized');
-  };
-
-  FileManager.prototype.onMetadataLog_ = function(arglist) {
-    console.log.apply(console, ['metadata:'].concat(arglist));
-  };
-
-  /**
-   * Dispatch a message from a metadata reader to the appropriate onMetadata*
-   * method.
-   */
-  FileManager.prototype.onMetadataMessage_ = function(event) {
-    var data = event.data;
-
-    var methodName = 'onMetadata' + data.verb.substr(0, 1).toUpperCase() +
-        data.verb.substr(1) + '_';
-
-    if (!(methodName in this)) {
-      console.log('Unknown message from metadata reader: ' + data.verb, data);
-      return;
-    }
-
-    this[methodName].apply(this, data.arguments);
+    this.metadataProvider_ = new TestAwareMetadataProvider();
   };
 
   /**
@@ -1670,11 +1821,6 @@ FileManager.prototype = {
           task.iconUrl =
               chrome.extension.getURL('images/icon_preview_16x16.png');
           task.title = str('PREVIEW_IMAGE');
-        } else if (task_parts[1] == 'edit') {
-          task.iconUrl =
-              chrome.extension.getURL('images/icon_preview_16x16.png');
-          task.title = 'Edit';
-          if (!IMAGE_EDITOR_ENABLED) continue;  // Skip the button creation.
         } else if (task_parts[1] == 'play') {
           task.iconUrl =
               chrome.extension.getURL('images/icon_play_16x16.png');
@@ -1689,6 +1835,12 @@ FileManager.prototype = {
           task.title = str('MOUNT_ARCHIVE');
           if (str('ENABLE_ARCHIVES') != 'true')
             continue;
+        } else if (task_parts[1] == 'gallery') {
+          task.iconUrl =
+              chrome.extension.getURL('images/icon_preview_16x16.png');
+          task.title = str('GALLERY');
+          task.allTasks = tasksList;
+          if (!GALLERY_ENABLED) continue;  // Skip the button creation.
         }
       }
       this.renderTaskButton_(task);
@@ -1742,7 +1894,8 @@ FileManager.prototype = {
         taskId: this.getExtensionId_() + '|unmount-archive',
         iconUrl:
             chrome.extension.getURL('images/icon_unmount_archive_16x16.png'),
-        title: str('UNMOUNT_ARCHIVE')
+        title: str('UNMOUNT_ARCHIVE'),
+        internal: true
     });
    };
 
@@ -1770,7 +1923,8 @@ FileManager.prototype = {
           var task = {
             taskId: self.getExtensionId_() + '|format-device',
             iconUrl: chrome.extension.getURL('images/filetype_generic.png'),
-            title: str('FORMAT_DEVICE')
+            title: str('FORMAT_DEVICE'),
+            internal: true
           };
           self.renderTaskButton_(task);
         }
@@ -1805,16 +1959,18 @@ FileManager.prototype = {
   };
 
   FileManager.prototype.onTaskButtonClicked_ = function(event) {
-    var task = event.srcElement.task;
+    this.dispatchFileTask_(event.srcElement.task, this.selection.urls);
+  };
+
+  FileManager.prototype.dispatchFileTask_ = function(task, urls) {
     if (task.internal) {
       // For internal tasks call the handler directly to avoid being handled
       // multiple times.
       var taskId = task.taskId.split('|')[1];
-      this.onFileTaskExecute_(taskId, {entries: this.selection.entries});
+      this.onFileTaskExecute_(taskId, {urls: urls, task: task});
       return;
     }
-    chrome.fileBrowserPrivate.executeTask(task.taskId,
-                                          this.selection.urls);
+    chrome.fileBrowserPrivate.executeTask(task.taskId, urls);
   };
 
   /**
@@ -1869,14 +2025,10 @@ FileManager.prototype = {
    * Event handler called when some internal task should be executed.
    */
   FileManager.prototype.onFileTaskExecute_ = function(id, details) {
-    var urls = details.entries.map(function(entry) {
-        return entry.toURL();
-    });
+    var urls = details.urls;
     if (id == 'preview') {
       g_slideshow_data = urls;
       chrome.tabs.create({url: "slideshow.html"});
-    } else if (id == 'edit') {
-      this.openImageEditor_(details.entries[0]);
     } else if (id == 'play' || id == 'enqueue') {
       chrome.fileBrowserPrivate.viewFiles(urls, id);
     } else if (id == 'mount-archive') {
@@ -1892,11 +2044,23 @@ FileManager.prototype = {
       this.confirm.show(str('FORMATTING_WARNING'), function() {
         chrome.fileBrowserPrivate.formatDevice(urls[0]);
       });
+    } else if (id == 'gallery') {
+      // Pass to gallery all possible tasks except the gallery itself.
+      var noGallery = [];
+      for (var index = 0; index < details.task.allTasks.length; index++) {
+        var task = details.task.allTasks[index];
+        if (task.taskId != this.getExtensionId_() + '|gallery') {
+          // Add callback, so gallery can execute the task.
+          task.execute = this.dispatchFileTask_.bind(this, task);
+          noGallery.push(task);
+        }
+      }
+      this.openGallery_(urls, noGallery);
     }
   };
 
   FileManager.prototype.getDeviceNumber = function(entry) {
-    if (!entry.isDirectory) return false;
+    if (!entry.isDirectory) return undefined;
     for (var i = 0; i < this.mountPoints_.length; i++) {
       if (normalizeAbsolutePath(entry.fullPath) ==
           normalizeAbsolutePath(this.mountPoints_[i].mountPath)) {
@@ -1904,35 +2068,51 @@ FileManager.prototype = {
       }
     }
     return undefined;
-  }
-
-  FileManager.prototype.openImageEditor_ = function(entry) {
-    var self = this;
-
-    var editorFrame = this.document_.createElement('iframe');
-    editorFrame.className = 'overlay-pane';
-    editorFrame.scrolling = 'no';
-
-    editorFrame.onload = function() {
-      self.cacheMetadata_(entry, function(metadata) {
-        editorFrame.contentWindow.ImageEditor.open(
-            self.onImageEditorSave_.bind(self, entry),
-            function () { self.dialogDom_.removeChild(editorFrame) },
-            entry.toURL(),
-            metadata);
-      });
-    };
-
-    editorFrame.src = 'js/image_editor/image_editor.html';
-
-    this.dialogDom_.appendChild(editorFrame);
   };
 
-  FileManager.prototype.onImageEditorSave_ = function(entry, blob) {
-    // TODO(kaznacheev): Notify user properly about write failures.
-    util.writeBlobToFile(entry, blob, function(){},
-        util.flog('Error writing to ' + entry.fullPath));
-    this.updatePreview_();  // Metadata may have changed.
+  FileManager.prototype.openGallery_ = function(urls, shareActions) {
+    var self = this;
+
+    var galleryFrame = this.document_.createElement('iframe');
+    galleryFrame.className = 'overlay-pane';
+    galleryFrame.scrolling = 'no';
+
+    var selectedUrl;
+    if (urls.length == 1) {
+      // Single item selected. Pass to the Gallery as a selected.
+      selectedUrl = urls[0];
+      // Pass every image in the directory so that it shows up in the ribbon.
+      urls = [];
+      for (var i = 0; i != this.dataModel_.length; i++) {
+        var entry = this.dataModel_.item(i);
+        if (this.getIconType(entry) == 'image') {
+          urls.push(entry.toURL());
+        }
+      }
+    } else {
+      // Multiple selection. Pass just those items, select the first entry.
+      selectedUrl = urls[0];
+    }
+
+    galleryFrame.onload = function() {
+      galleryFrame.contentWindow.Gallery.open(
+          self.currentDirEntry_,
+          urls,
+          selectedUrl,
+          function () {
+            // TODO(kaznacheev): keep selection.
+            self.rescanDirectoryNow_();  // Make sure new files show up.
+            self.dialogDom_.removeChild(galleryFrame);
+            self.refocus();
+          },
+          self.metadataProvider_,
+          shareActions,
+          str);
+    };
+
+    galleryFrame.src = 'js/image_editor/gallery.html';
+    this.dialogDom_.appendChild(galleryFrame);
+    galleryFrame.focus();
   };
 
   /**
@@ -2105,38 +2285,6 @@ FileManager.prototype = {
     }
   };
 
-  FileManager.prototype.cacheMetadata_ = function(entry, callback) {
-    var url = entry.toURL();
-    var cacheValue = this.metadataCache_[url];
-
-    if (!cacheValue) {
-      // This is the first time anyone's asked, go get it.
-      if (entry.name.match(this.metadataUrlFilter_)) {
-        this.metadataCache_[url] = [callback];
-        this.metadataReader_.postMessage(
-            {verb: 'request', arguments: [entry.toURL()]});
-        return;
-      }
-      // Cannot extract metadata for this file, return an empty map.
-      setTimeout(function() { callback({}) });
-      return;
-    }
-
-    if (cacheValue instanceof Array) {
-      // Something is already pending, add to the list of observers.
-      cacheValue.push(callback);
-      return;
-    }
-
-    if (cacheValue instanceof Object) {
-      // We already know the answer, let the caller know in a fresh call stack.
-      setTimeout(function() { callback(cacheValue) });
-      return;
-    }
-
-    console.error('Unexpected metadata cache value:' + cacheValue);
-  };
-
   FileManager.prototype.setPreviewMetadata = function(metadata) {
     this.previewMetadata_.textContent = '';
     if (!(metadata && metadata.ifd))
@@ -2176,7 +2324,7 @@ FileManager.prototype = {
 
     var iconType = this.getIconType(entry);
 
-    this.cacheMetadata_(entry, function (metadata) {
+    this.metadataProvider_.fetch(entry.toURL(), function (metadata) {
       var url = metadata.thumbnailURL;
       if (!url) {
         if (iconType == 'image') {
@@ -2186,7 +2334,12 @@ FileManager.prototype = {
         }
       }
 
-      callback(iconType, url);
+      var transform =
+          metadata.thumbnailURL ?
+          metadata.thumbnailTransform :
+          metadata.imageTransform;
+
+      callback(iconType, url, transform);
     });
   };
 
@@ -2194,7 +2347,7 @@ FileManager.prototype = {
     if (!entry)
       return;
 
-    this.cacheMetadata_(entry, function(metadata) {
+    this.metadataProvider_.fetch(entry.toURL(), function(metadata) {
       callback(metadata.description);
     });
   };
@@ -2211,6 +2364,98 @@ FileManager.prototype = {
   };
 
   /**
+   * Add the file/directory with given name to the current selection.
+   *
+   * @param {string} name The name of the entry to select.
+   * @return {boolean} Whether entry exists.
+   */
+  FileManager.prototype.addItemToSelection = function(name) {
+    var entryExists = false;
+    for (var i = 0; i < this.dataModel_.length; i++) {
+      if (this.dataModel_.item(i).name == name) {
+        this.currentList_.selectionModel.setIndexSelected(i, true);
+        this.currentList_.scrollIndexIntoView(i);
+        this.currentList_.focus();
+        entryExists = true;
+        break;
+      }
+    }
+    return entryExists;
+  }
+
+  /**
+   * Return the name of the entries in the current directory
+   *
+   * @return {object} Array of entry names.
+   */
+  FileManager.prototype.listDirectory = function() {
+    var list = []
+    for (var i = 0; i < this.dataModel_.length; i++) {
+      list.push(this.dataModel_.item(i).name);
+    }
+    return list;
+  }
+
+  /**
+   * Open the item selected
+   */
+  FileManager.prototype.doOpen = function() {
+    switch (this.dialogType_) {
+      case FileManager.DialogType.SELECT_FOLDER:
+      case FileManager.DialogType.SELECT_OPEN_FILE:
+      case FileManager.DialogType.SELECT_OPEN_MULTI_FILE:
+        this.onOk_();
+        break;
+      default:
+        throw new Error('Cannot open an item in this dialog type.');
+    }
+  }
+
+  /**
+   * Save the item using the given name
+   *
+   * @param {string} name The name given to item to be saved
+   */
+  FileManager.prototype.doSaveAs = function(name) {
+    if (this.dialogType_ == FileManager.DialogType.SELECT_SAVEAS_FILE) {
+      this.filenameInput_.value = name;
+      this.onOk_();
+    }
+    else {
+      throw new Error('Cannot save an item in this dialog type.');
+    }
+  }
+
+  /**
+   * Return full path of the current directory
+   */
+  FileManager.prototype.getCurrentDirectory = function() {
+    return this.currentDirEntry_.fullPath;
+  }
+
+  /**
+   * Get remaining and total size of selected directory in KB.
+   *
+   * @param {object} callback Function to call with stats string as the
+   * argument.
+   */
+  FileManager.prototype.getSelectedDirectorySizeStats = function(callback) {
+    directoryURL = fileManager.selection.entries[0].toURL();
+    chrome.fileBrowserPrivate.getSizeStats(directoryURL, function(stats) {
+      callback(stats);
+    });
+  }
+
+  /**
+   * Used by tests to wait before interacting with the file maanager
+   */
+  FileManager.prototype.isInitialized = function() {
+    var initialized =  (this.workerInitialized_ != null) &&
+        (this.directoryChanged_ != null);
+    return initialized;
+  }
+
+  /**
    * Change the current directory to the directory represented by a
    * DirectoryEntry.
    *
@@ -2225,7 +2470,8 @@ FileManager.prototype = {
    */
   FileManager.prototype.changeDirectoryEntry = function(dirEntry,
                                                         opt_saveHistory,
-                                                        opt_selectedEntry) {
+                                                        opt_selectedEntry,
+                                                        opt_callback) {
     if (typeof opt_saveHistory == 'undefined') {
       opt_saveHistory = true;
     } else {
@@ -2256,6 +2502,7 @@ FileManager.prototype = {
     e.newDirEntry = dirEntry;
     e.saveHistory = opt_saveHistory;
     e.selectedEntry = opt_selectedEntry;
+    e.opt_callback = opt_callback;
     this.currentDirEntry_ = dirEntry;
     this.dispatchEvent(e);
   }
@@ -2275,11 +2522,13 @@ FileManager.prototype = {
    */
   FileManager.prototype.changeDirectory = function(path,
                                                    opt_saveHistory,
-                                                   opt_selectedEntry) {
+                                                   opt_selectedEntry,
+                                                   opt_callback) {
     if (path == '/')
       return this.changeDirectoryEntry(this.filesystem_.root,
                                        opt_saveHistory,
-                                       opt_selectedEntry);
+                                       opt_selectedEntry,
+                                       opt_callback);
 
     var self = this;
 
@@ -2287,7 +2536,7 @@ FileManager.prototype = {
         path, {create: false},
         function(dirEntry) {
           self.changeDirectoryEntry(
-              dirEntry, opt_saveHistory, opt_selectedEntry);
+              dirEntry, opt_saveHistory, opt_selectedEntry, opt_callback);
         },
         function(err) {
           console.error('Error changing directory to: ' + path + ', ' + err);
@@ -2304,7 +2553,7 @@ FileManager.prototype = {
         });
   };
 
-  FileManager.prototype.deleteEntries = function(entries, force) {
+  FileManager.prototype.deleteEntries = function(entries, force, opt_callback) {
     if (!force) {
       var self = this;
       var msg;
@@ -2324,7 +2573,10 @@ FileManager.prototype = {
     var self = this;
     function onDelete() {
       if (--count == 0)
-         self.rescanDirectory_();
+        self.rescanDirectory_(function() {
+          if (opt_callback)
+            opt_callback();
+        });
     }
 
     for (var i = 0; i < entries.length; i++) {
@@ -2393,13 +2645,13 @@ FileManager.prototype = {
   /**
    * Queue up a file copy operation based on the current clipboard.
    */
-  FileManager.prototype.pasteFromClipboard = function(successCallback,
-                                                      errorCallback) {
+  FileManager.prototype.pasteFromClipboard = function(successCallback) {
     if (!this.clipboard_)
       return null;
 
     this.showButter(str('PASTE_STARTED'), {timeout: 0});
 
+    this.pasteSuccessCallbacks_.push(successCallback);
     this.copyManager_.queueCopy(this.clipboard_.sourceDirEntry,
                                 this.currentDirEntry_,
                                 this.clipboard_.entries,
@@ -2649,9 +2901,18 @@ FileManager.prototype = {
     this.rescanDirectory_(function() {
         if (event.selectedEntry)
           self.selectEntry(event.selectedEntry);
+        if (event.opt_callback) {
+          try {
+            event.opt_callback();
+          } catch (ex) {
+            console.error('Caught exception while inovking callback: ', ex);
+          }
+        }
         // For tests that open the dialog to empty directories, everything
         // is loaded at this point.
         chrome.test.sendMessage('directory-change-complete');
+        // PyAuto tests monitor this state by polling this variable
+        self.directoryChanged_ = true;
       });
   };
 
@@ -2900,6 +3161,11 @@ FileManager.prototype = {
         event.preventDefault();
         break;
     }
+
+    // Do not move selection in list during rename.
+    if (event.keyIdentifier == 'Up' || event.keyIdentifier == 'Down') {
+      event.stopPropagation();
+    }
   };
 
   FileManager.prototype.onRenameInputBlur_ = function(event) {
@@ -2907,23 +3173,14 @@ FileManager.prototype = {
       this.cancelRename_();
   };
 
-  FileManager.prototype.commitRename_ = function() {
-    var entry = this.renameInput_.currentEntry;
-    var newName = this.renameInput_.value;
-    if (!this.validateFileName_(newName))
-      return;
-
-    this.renameInput_.currentEntry = null;
-    this.lastLabelClick_ = null;
-
-    if (this.renameInput_.parentNode)
-      this.renameInput_.parentNode.removeChild(this.renameInput_);
-
-    this.refocus();
-
+  FileManager.prototype.renameEntry = function(entry, newName, opt_callback) {
     var self = this;
     function onSuccess() {
-      self.rescanDirectory_(function() { self.selectEntry(newName) });
+      self.rescanDirectory_(function() {
+        self.selectEntry(newName);
+        if (opt_callback)
+          opt_callback();
+      });
     }
 
     function onError(err) {
@@ -2944,6 +3201,22 @@ FileManager.prototype = {
 
     this.resolvePath(this.currentDirEntry_.fullPath + '/' + newName,
         resolveCallback, resolveCallback);
+  };
+
+  FileManager.prototype.commitRename_ = function() {
+    var entry = this.renameInput_.currentEntry;
+    var newName = this.renameInput_.value;
+    if (!this.validateFileName_(newName))
+      return;
+
+    this.renameInput_.currentEntry = null;
+    this.lastLabelClick_ = null;
+
+    if (this.renameInput_.parentNode)
+      this.renameInput_.parentNode.removeChild(this.renameInput_);
+
+    this.refocus();
+    this.renameEntry(entry, newName);
   };
 
   FileManager.prototype.cancelRename_ = function(event) {
@@ -3002,11 +3275,15 @@ FileManager.prototype = {
     promptForName(str('DEFAULT_NEW_FOLDER_NAME'));
   };
 
-  FileManager.prototype.createNewFolder = function(name) {
+  FileManager.prototype.createNewFolder = function(name, opt_callback) {
     var self = this;
 
     function onSuccess(dirEntry) {
-      self.rescanDirectory_(function() { self.selectEntry(name) });
+      self.rescanDirectory_(function() {
+        self.selectEntry(name);
+        if (opt_callback)
+          opt_callback();
+      });
     }
 
     function onError(err) {
@@ -3030,7 +3307,7 @@ FileManager.prototype = {
    * KeyDown event handler for the document.
    */
   FileManager.prototype.onKeyDown_ = function(event) {
-    if (event.srcElement.tagName == 'INPUT') {
+    if (event.srcElement === this.renameInput_) {
       // Ignore keydown handler in the rename input box.
       return;
     }

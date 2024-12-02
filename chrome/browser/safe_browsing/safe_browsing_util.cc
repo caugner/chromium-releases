@@ -6,11 +6,11 @@
 
 #include "base/base64.h"
 #include "base/logging.h"
-#include "base/stringprintf.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "chrome/browser/google/google_util.h"
 #include "crypto/hmac.h"
 #include "crypto/sha2.h"
-#include "chrome/browser/google/google_util.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_util.h"
 #include "net/base/escape.h"
@@ -170,6 +170,7 @@ const char kPhishingList[] = "goog-phish-shavar";
 const char kBinUrlList[] = "goog-badbinurl-shavar";
 const char kBinHashList[] = "goog-badbin-digestvar";
 const char kCsdWhiteList[] = "goog-csdwhite-sha256";
+const char kDownloadWhiteList[] = "goog-downloadwhite-digest256";
 
 int GetListId(const std::string& name) {
   int id;
@@ -183,6 +184,8 @@ int GetListId(const std::string& name) {
     id = BINHASH;
   } else if (name == safe_browsing_util::kCsdWhiteList) {
     id = CSDWHITELIST;
+  } else if (name == safe_browsing_util::kDownloadWhiteList) {
+    id = DOWNLOADWHITELIST;
   } else {
     id = INVALID;
   }
@@ -206,6 +209,9 @@ bool GetListName(int list_id, std::string* list) {
     case CSDWHITELIST:
       *list = safe_browsing_util::kCsdWhiteList;
       break;
+    case DOWNLOADWHITELIST:
+      *list = safe_browsing_util::kDownloadWhiteList;
+      break;
     default:
       return false;
   }
@@ -219,7 +225,7 @@ std::string Unescape(const std::string& url) {
   int loop_var = 0;
   do {
     old_unescaped_str = unescaped_str;
-    unescaped_str = UnescapeURLComponent(old_unescaped_str,
+    unescaped_str = net::UnescapeURLComponent(old_unescaped_str,
         UnescapeRule::CONTROL_CHARS | UnescapeRule::SPACES |
         UnescapeRule::URL_SPECIAL_CHARS);
   } while (unescaped_str != old_unescaped_str && ++loop_var <=
@@ -511,9 +517,10 @@ GURL GeneratePhishingReportUrl(const std::string& report_page,
   const char* lang = locale.getLanguage();
   if (!lang)
     lang = "en";  // fallback
-  const std::string continue_esc =
-      EscapeQueryParamValue(base::StringPrintf(kContinueUrlFormat, lang), true);
-  const std::string current_esc = EscapeQueryParamValue(url_to_report, true);
+  const std::string continue_esc = net::EscapeQueryParamValue(
+      base::StringPrintf(kContinueUrlFormat, lang), true);
+  const std::string current_esc = net::EscapeQueryParamValue(url_to_report,
+                                                             true);
 
 #if defined(OS_WIN)
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
@@ -532,12 +539,12 @@ GURL GeneratePhishingReportUrl(const std::string& report_page,
 }
 
 void StringToSBFullHash(const std::string& hash_in, SBFullHash* hash_out) {
-  DCHECK_EQ(static_cast<size_t>(crypto::SHA256_LENGTH), hash_in.size());
-  memcpy(hash_out->full_hash, hash_in.data(), crypto::SHA256_LENGTH);
+  DCHECK_EQ(crypto::kSHA256Length, hash_in.size());
+  memcpy(hash_out->full_hash, hash_in.data(), crypto::kSHA256Length);
 }
 
 std::string SBFullHashToString(const SBFullHash& hash) {
-  DCHECK_EQ(static_cast<size_t>(crypto::SHA256_LENGTH), sizeof(hash.full_hash));
+  DCHECK_EQ(crypto::kSHA256Length, sizeof(hash.full_hash));
   return std::string(hash.full_hash, sizeof(hash.full_hash));
 }
 }  // namespace safe_browsing_util

@@ -84,7 +84,7 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
       RequestPriority priority,
       scoped_refptr<SpdyStream>* spdy_stream,
       const BoundNetLog& stream_net_log,
-      CompletionCallback* callback);
+      OldCompletionCallback* callback);
 
   // Remove PendingCreateStream objects on transaction deletion
   void CancelPendingCreateStreams(const scoped_refptr<SpdyStream>* spdy_stream);
@@ -104,7 +104,8 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
   // NOTE:  This function can have false negatives on some platforms.
   bool VerifyDomainAuthentication(const std::string& domain);
 
-  // Send the SYN frame for |stream_id|.
+  // Send the SYN frame for |stream_id|. This also sends PING message to check
+  // the status of the connection.
   int WriteSynStream(
       spdy::SpdyStreamId stream_id,
       RequestPriority priority,
@@ -147,12 +148,28 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
   static void set_flow_control(bool enable) { use_flow_control_ = enable; }
   static bool flow_control() { return use_flow_control_; }
 
-  // Sets the max concurrent streams per session.
+  // Sets the max concurrent streams per session, as a ceiling on any server
+  // specific SETTINGS value.
   static void set_max_concurrent_streams(size_t value) {
     max_concurrent_stream_limit_ = value;
   }
   static size_t max_concurrent_streams() {
-      return max_concurrent_stream_limit_;
+    return max_concurrent_stream_limit_;
+  }
+
+  // Enable sending of PING frame with each request.
+  static void set_enable_ping_based_connection_checking(bool enable) {
+    enable_ping_based_connection_checking_ = enable;
+  }
+  static bool enable_ping_based_connection_checking() {
+    return enable_ping_based_connection_checking_;
+  }
+
+  // The initial max concurrent streams per session, can be overridden by the
+  // server via SETTINGS.
+  static void set_init_max_concurrent_streams(size_t value) {
+    init_max_concurrent_streams_ =
+        std::min(value, max_concurrent_stream_limit_);
   }
 
   // Send WINDOW_UPDATE frame, called by a stream whenever receive window
@@ -190,6 +207,11 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
     spdy_session_pool_ = NULL;
   }
 
+  // Returns true if session is not currently active
+  bool is_active() const {
+    return !active_streams_.empty();
+  }
+
   // Access to the number of active and pending streams.  These are primarily
   // available for testing and diagnostics.
   size_t num_active_streams() const { return active_streams_.size(); }
@@ -204,13 +226,15 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
 
  private:
   friend class base::RefCounted<SpdySession>;
+  // Allow tests to access our innards for testing purposes.
+  FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, Ping);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, GetActivePushStream);
 
   struct PendingCreateStream {
     PendingCreateStream(const GURL& url, RequestPriority priority,
                         scoped_refptr<SpdyStream>* spdy_stream,
                         const BoundNetLog& stream_net_log,
-                        CompletionCallback* callback)
+                        OldCompletionCallback* callback)
         : url(&url), priority(priority), spdy_stream(spdy_stream),
           stream_net_log(&stream_net_log), callback(callback) { }
 
@@ -218,7 +242,7 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
     RequestPriority priority;
     scoped_refptr<SpdyStream>* spdy_stream;
     const BoundNetLog* stream_net_log;
-    CompletionCallback* callback;
+    OldCompletionCallback* callback;
   };
   typedef std::queue<PendingCreateStream, std::list< PendingCreateStream> >
       PendingCreateStreamQueue;
@@ -229,10 +253,10 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
 
   struct CallbackResultPair {
     CallbackResultPair() : callback(NULL), result(OK) {}
-    CallbackResultPair(CompletionCallback* callback_in, int result_in)
+    CallbackResultPair(OldCompletionCallback* callback_in, int result_in)
         : callback(callback_in), result(result_in) {}
 
-    CompletionCallback* callback;
+    OldCompletionCallback* callback;
     int result;
   };
 
@@ -245,8 +269,6 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
     CONNECTED,
     CLOSED
   };
-
-  enum { kDefaultMaxConcurrentStreams = 10 };
 
   virtual ~SpdySession();
 
@@ -266,6 +288,7 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
                  const linked_ptr<spdy::SpdyHeaderBlock>& headers);
   void OnRst(const spdy::SpdyRstStreamControlFrame& frame);
   void OnGoAway(const spdy::SpdyGoAwayControlFrame& frame);
+  void OnPing(const spdy::SpdyPingControlFrame& frame);
   void OnSettings(const spdy::SpdySettingsControlFrame& frame);
   void OnWindowUpdate(const spdy::SpdyWindowUpdateControlFrame& frame);
 
@@ -279,6 +302,31 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
   // Handle SETTINGS.  Either when we send settings, or when we receive a
   // SETTINGS ontrol frame, update our SpdySession accordingly.
   void HandleSettings(const spdy::SpdySettings& settings);
+
+  // Send the PING (preface-PING and trailing-PING) frames.
+  void SendPrefacePingIfNoneInFlight();
+
+  // Send PING if there are no PINGs in flight and we haven't heard from server.
+  void SendPrefacePing();
+
+  // Send a PING after delay. Don't post a PING if there is already
+  // a trailing PING pending.
+  void PlanToSendTrailingPing();
+
+  // Send a PING if there is no |trailing_ping_pending_|. This PING verifies
+  // that the requests are being received by the server.
+  void SendTrailingPing();
+
+  // Send the PING frame.
+  void WritePingFrame(uint32 unique_id);
+
+  // Post a CheckPingStatus call after delay. Don't post if there is already
+  // CheckPingStatus running.
+  void PlanToCheckPingStatus();
+
+  // Check the status of the connection. It calls |CloseSessionOnError| if we
+  // haven't received any data in |kHungInterval| time period.
+  void CheckPingStatus(base::TimeTicks last_check_time);
 
   // Start reading from the socket.
   // Returns OK on success, or an error on failure.
@@ -315,6 +363,8 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
   bool Respond(const spdy::SpdyHeaderBlock& headers,
                const scoped_refptr<SpdyStream> stream);
 
+
+  void RecordPingRTTHistogram(base::TimeDelta duration);
   void RecordHistograms();
 
   // Closes all streams.  Used as part of shutdown.
@@ -331,9 +381,49 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
                                  size_t len);
   virtual void OnControl(const spdy::SpdyControlFrame* frame);
 
+  virtual bool OnControlFrameHeaderData(spdy::SpdyStreamId stream_id,
+                                        const char* header_data,
+                                        size_t len);
+
+  virtual void OnDataFrameHeader(const spdy::SpdyDataFrame* frame);
+
+  // --------------------------
+  // Helper methods for testing
+  // --------------------------
+  static void set_connection_at_risk_of_loss_ms(int duration) {
+    connection_at_risk_of_loss_ms_ = duration;
+  }
+  static int connection_at_risk_of_loss_ms() {
+    return connection_at_risk_of_loss_ms_;
+  }
+
+  static void set_trailing_ping_delay_time_ms(int duration) {
+    trailing_ping_delay_time_ms_ = duration;
+  }
+  static int trailing_ping_delay_time_ms() {
+    return trailing_ping_delay_time_ms_;
+  }
+
+  static void set_hung_interval_ms(int duration) {
+    hung_interval_ms_ = duration;
+  }
+  static int hung_interval_ms() {
+    return hung_interval_ms_;
+  }
+
+  int64 pings_in_flight() const { return pings_in_flight_; }
+
+  uint32 next_ping_id() const { return next_ping_id_; }
+
+  base::TimeTicks received_data_time() const { return received_data_time_; }
+
+  bool trailing_ping_pending() const { return trailing_ping_pending_; }
+
+  bool check_ping_status_pending() const { return check_ping_status_pending_; }
+
   // Callbacks for the Spdy session.
-  CompletionCallbackImpl<SpdySession> read_callback_;
-  CompletionCallbackImpl<SpdySession> write_callback_;
+  OldCompletionCallbackImpl<SpdySession> read_callback_;
+  OldCompletionCallbackImpl<SpdySession> write_callback_;
 
   // Used for posting asynchronous IO tasks.  We use this even though
   // SpdySession is refcounted because we don't need to keep the SpdySession
@@ -420,6 +510,31 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
                             // frame.
   int stalled_streams_;     // Count of streams that were ever stalled.
 
+  // Count of all pings on the wire, for which we have not gotten a response.
+  int64 pings_in_flight_;
+
+  // This is the next ping_id (unique_id) to be sent in PING frame.
+  uint32 next_ping_id_;
+
+  // This is the last time we have sent a PING.
+  base::TimeTicks last_ping_sent_time_;
+
+  // This is the last time we have received data.
+  base::TimeTicks received_data_time_;
+
+  // Indicate if we have already scheduled a delayed task to send a trailing
+  // ping (and we never have more than one scheduled at a time).
+  bool trailing_ping_pending_;
+
+  // Indicate if we have already scheduled a delayed task to check the ping
+  // status.
+  bool check_ping_status_pending_;
+
+  // Indicate if we need to send a ping (generally, a trailing ping). This helps
+  // us to decide if we need yet another trailing ping, or if it would be a
+  // waste of effort (and MUST not be done).
+  bool need_to_send_ping_;
+
   // Initial send window size for the session; can be changed by an
   // arriving SETTINGS frame; newly created streams use this value for the
   // initial send window size.
@@ -438,7 +553,38 @@ class NET_EXPORT SpdySession : public base::RefCounted<SpdySession>,
 
   static bool use_ssl_;
   static bool use_flow_control_;
+  static size_t init_max_concurrent_streams_;
   static size_t max_concurrent_stream_limit_;
+
+  // This enables or disables connection health checking system.
+  static bool enable_ping_based_connection_checking_;
+
+  // |connection_at_risk_of_loss_ms_| is an optimization to avoid sending
+  // wasteful preface pings (when we just got some data).
+  //
+  // If it is zero (the most conservative figure), then we always send the
+  // preface ping (when none are in flight).
+  //
+  // It is common for TCP/IP sessions to time out in about 3-5 minutes.
+  // Certainly if it has been more than 3 minutes, we do want to send a preface
+  // ping.
+  //
+  // We don't think any connection will time out in under about 10 seconds. So
+  // this might as well be set to something conservative like 10 seconds. Later,
+  // we could adjust it to send fewer pings perhaps.
+  static int connection_at_risk_of_loss_ms_;
+
+  // This is the amount of time (in milliseconds) we wait before sending a
+  // trailing ping. We use a trailing ping (sent after all data) to get an
+  // effective acknowlegement from the server that it has indeed received all
+  // (prior) data frames. With that assurance, we are willing to enter into a
+  // wait state for responses to our last data frame(s) without further pings.
+  static int trailing_ping_delay_time_ms_;
+
+  // The amount of time (in milliseconds) that we are willing to tolerate with
+  // no data received (of any form), while there is a ping in flight, before we
+  // declare the connection to be hung.
+  static int hung_interval_ms_;
 };
 
 class NetLogSpdySynParameter : public NetLog::EventParameters {

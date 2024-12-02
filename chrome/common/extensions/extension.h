@@ -25,6 +25,7 @@
 #include "chrome/common/extensions/url_pattern_set.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/size.h"
+#include "webkit/glue/web_intent_service_data.h"
 
 class ExtensionAction;
 class ExtensionResource;
@@ -328,7 +329,8 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
 
   // Generates an extension ID from arbitrary input. The same input string will
   // always generate the same output ID.
-  static bool GenerateId(const std::string& input, std::string* output);
+  static bool GenerateId(const std::string& input,
+                         std::string* output) WARN_UNUSED_RESULT;
 
   // Expects base64 encoded |input| and formats into |output| including
   // the appropriate header & footer.
@@ -382,6 +384,14 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // mechanisms that are implicitly trusted.
   bool CanSilentlyIncreasePermissions() const;
 
+  // Returns true if this extension can specify |api|.
+  bool CanSpecifyAPIPermission(const ExtensionAPIPermission* api,
+                               std::string* error) const;
+  bool CanSpecifyComponentOnlyPermission() const;
+  bool CanSpecifyExperimentalPermission() const;
+  bool CanSpecifyPermissionForHostedApp(
+      const ExtensionAPIPermission* api) const;
+
   // Whether or not the extension is allowed permission for a URL pattern from
   // the manifest.  http, https, and chrome://favicon/ is allowed for all
   // extensions, while component extensions are allowed access to
@@ -419,6 +429,11 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
 
   // Whether context menu should be shown for page and browser actions.
   bool ShowConfigureContextMenus() const;
+
+  // Whether network requests should be delayed on browser startup until the
+  // extension's background page has loaded, even if the extension doesn't
+  // explicitly request a delay.
+  bool ImplicitlyDelaysNetworkStartup() const;
 
   // Returns the Homepage URL for this extension. If homepage_url was not
   // specified in the manifest, this returns the Google Gallery URL. For
@@ -513,7 +528,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   const GURL& background_url() const { return background_url_; }
   const GURL& options_url() const { return options_url_; }
   const GURL& devtools_url() const { return devtools_url_; }
-  const std::vector<GURL>& toolstrips() const { return toolstrips_; }
   const ExtensionPermissionSet* optional_permission_set() const {
     return optional_permission_set_.get();
   }
@@ -533,6 +547,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   bool incognito_split_mode() const { return incognito_split_mode_; }
   bool offline_enabled() const { return offline_enabled_; }
   const std::vector<TtsVoice>& tts_voices() const { return tts_voices_; }
+  const std::vector<WebIntentServiceData>& intents() const { return intents_; }
 
   bool wants_file_access() const { return wants_file_access_; }
   int creation_flags() const { return creation_flags_; }
@@ -641,6 +656,8 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
                      std::string* error);
   bool LoadAppIsolation(const base::DictionaryValue* manifest,
                         std::string* error);
+  bool LoadWebIntents(const base::DictionaryValue& manifest,
+                      std::string* error);
   bool EnsureNotHybridApp(const base::DictionaryValue* manifest,
                           std::string* error);
 
@@ -668,15 +685,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // Figures out if a source contains keys not associated with themes - we
   // don't want to allow scripts and such to be bundled with themes.
   bool ContainsNonThemeKeys(const base::DictionaryValue& source) const;
-
-  // Only allow the experimental API permission if the command line
-  // flag is present.
-  bool IsDisallowedExperimentalPermission(
-      ExtensionAPIPermission::ID permission) const;
-
-  // Returns true if this is a component, or we are not attempting to access a
-  // component-private permission.
-  bool IsComponentOnlyPermission(const ExtensionAPIPermission* api) const;
 
   // Updates the launch URL and extents for the extension using the given
   // |override_url|.
@@ -777,9 +785,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // Optional URL to a devtools extension page.
   GURL devtools_url_;
 
-  // Optional list of toolstrips and associated properties.
-  std::vector<GURL> toolstrips_;
-
   // The public key used to sign the contents of the crx package.
   std::string public_key_;
 
@@ -843,6 +848,9 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // List of text-to-speech voices that this extension provides, if any.
   std::vector<TtsVoice> tts_voices_;
 
+  // List of intents that this extension provides, if any.
+  std::vector<WebIntentServiceData> intents_;
+
   // Whether the extension has host permissions or user script patterns that
   // imply access to file:/// scheme URLs (the user may not have actually
   // granted it that access).
@@ -882,22 +890,6 @@ struct ExtensionInfo {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ExtensionInfo);
-};
-
-// Struct used for the details of the EXTENSION_UNINSTALLED
-// notification.
-//
-// TODO(akalin): Now that sync doesn't need to listen to
-// EXTENSION_UNINSTALLED, everything but |extension_id| can be
-// removed.
-struct UninstalledExtensionInfo {
-  explicit UninstalledExtensionInfo(const Extension& extension);
-  ~UninstalledExtensionInfo();
-
-  std::string extension_id;
-  std::set<std::string> extension_api_permissions;
-  Extension::Type extension_type;
-  GURL update_url;
 };
 
 struct UnloadedExtensionInfo {

@@ -62,13 +62,21 @@ uint8 GetQueryStringBasedExperiment(const GURL& url) {
   return kNoExperiment;
 }
 
+bool IsGoogleDomain(const GURL& url) {
+  return StartsWithASCII(url.host(), std::string("www.google."), true);
+}
+
 bool IsGoogleSearchResultURL(const GURL& url) {
-  if (!StartsWithASCII(url.host(), std::string("www.google."), true))
+  if (!IsGoogleDomain(url))
     return false;
   return (url.path().empty() ||
           StartsWithASCII(url.path(), std::string("/search"), true) ||
           (url.path() == "/") ||
           StartsWithASCII(url.path(), std::string("/webhp"), true));
+}
+
+bool IsWebURL(const GURL& url) {
+  return url.SchemeIs("http") || url.SchemeIs("https");
 }
 
 }  // namespace prerender

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <ostream>
 #include <set>
 
 #include "base/basictypes.h"
@@ -56,7 +57,6 @@ void GetFieldsForDistinguishingProfiles(
     ADDRESS_HOME_COUNTRY,
     EMAIL_ADDRESS,
     PHONE_HOME_WHOLE_NUMBER,
-    PHONE_FAX_WHOLE_NUMBER,
     COMPANY_NAME,
   };
 
@@ -167,14 +167,6 @@ void CollapseCompoundFieldTypes(FieldTypeSet* type_set) {
         collapsed_set.insert(PHONE_HOME_WHOLE_NUMBER);
         break;
 
-      case PHONE_FAX_NUMBER:
-      case PHONE_FAX_CITY_CODE:
-      case PHONE_FAX_COUNTRY_CODE:
-      case PHONE_FAX_CITY_AND_NUMBER:
-      case PHONE_FAX_WHOLE_NUMBER:
-        collapsed_set.insert(PHONE_FAX_WHOLE_NUMBER);
-        break;
-
       default:
         collapsed_set.insert(*iter);
     }
@@ -202,22 +194,30 @@ class FindByPhone {
   std::string country_code_;
 };
 
+// Functor used to check for case-insensitive equality of two strings.
+struct CaseInsensitiveStringEquals
+    : public std::binary_function<string16, string16, bool>
+{
+  bool operator()(const string16& x, const string16& y) const {
+    return
+        x.size() == y.size() && StringToLowerASCII(x) == StringToLowerASCII(y);
+  }
+};
+
 }  // namespace
 
 AutofillProfile::AutofillProfile(const std::string& guid)
     : guid_(guid),
       name_(1),
       email_(1),
-      home_number_(1, PhoneNumber(AutofillType::PHONE_HOME, this)),
-      fax_number_(1, PhoneNumber(AutofillType::PHONE_FAX, this)) {
+      home_number_(1, PhoneNumber(this)) {
 }
 
 AutofillProfile::AutofillProfile()
     : guid_(guid::GenerateGUID()),
       name_(1),
       email_(1),
-      home_number_(1, PhoneNumber(AutofillType::PHONE_HOME, this)),
-      fax_number_(1, PhoneNumber(AutofillType::PHONE_FAX, this)) {
+      home_number_(1, PhoneNumber(this)) {
 }
 
 AutofillProfile::AutofillProfile(const AutofillProfile& profile)
@@ -239,13 +239,10 @@ AutofillProfile& AutofillProfile::operator=(const AutofillProfile& profile) {
   email_ = profile.email_;
   company_ = profile.company_;
   home_number_ = profile.home_number_;
-  for (size_t i = 0; i < home_number_.size(); ++i) {
+
+  for (size_t i = 0; i < home_number_.size(); ++i)
     home_number_[i].set_profile(this);
-  }
-  fax_number_ = profile.fax_number_;
-  for (size_t i = 0; i < fax_number_.size(); ++i) {
-    fax_number_[i].set_profile(this);
-  }
+
   address_ = profile.address_;
 
   return *this;
@@ -309,17 +306,11 @@ void AutofillProfile::SetMultiInfo(AutofillFieldType type,
     case AutofillType::EMAIL:
       CopyValuesToItems(type, values, &email_, EmailInfo());
       break;
-    case AutofillType::PHONE_HOME:
+    case AutofillType::PHONE:
       CopyValuesToItems(type,
                         values,
                         &home_number_,
-                        PhoneNumber(AutofillType::PHONE_HOME, this));
-      break;
-    case AutofillType::PHONE_FAX:
-      CopyValuesToItems(type,
-                        values,
-                        &fax_number_,
-                        PhoneNumber(AutofillType::PHONE_FAX, this));
+                        PhoneNumber(this));
       break;
     default:
       if (values.size() == 1) {
@@ -354,11 +345,8 @@ void AutofillProfile::GetMultiInfoImpl(AutofillFieldType type,
     case AutofillType::EMAIL:
       CopyItemsToValues(type, email_, canonicalize, values);
       break;
-    case AutofillType::PHONE_HOME:
+    case AutofillType::PHONE:
       CopyItemsToValues(type, home_number_, canonicalize, values);
-      break;
-    case AutofillType::PHONE_FAX:
-      CopyItemsToValues(type, fax_number_, canonicalize, values);
       break;
     default:
       values->resize(1);
@@ -371,8 +359,7 @@ bool AutofillProfile::SupportsMultiValue(AutofillFieldType type) {
   AutofillType::FieldTypeGroup group = AutofillType(type).group();
   return group == AutofillType::NAME ||
          group == AutofillType::EMAIL ||
-         group == AutofillType::PHONE_HOME ||
-         group == AutofillType::PHONE_FAX;
+         group == AutofillType::PHONE;
 }
 
 const string16 AutofillProfile::Label() const {
@@ -470,8 +457,7 @@ int AutofillProfile::Compare(const AutofillProfile& profile) const {
                                       ADDRESS_HOME_STATE,
                                       ADDRESS_HOME_ZIP,
                                       ADDRESS_HOME_COUNTRY,
-                                      PHONE_HOME_NUMBER,
-                                      PHONE_FAX_NUMBER };
+                                      PHONE_HOME_NUMBER };
 
   for (size_t index = 0; index < arraysize(types); ++index) {
     int comparison = GetInfo(types[index]).compare(
@@ -503,8 +489,7 @@ int AutofillProfile::CompareMulti(const AutofillProfile& profile) const {
                                                   NAME_MIDDLE,
                                                   NAME_LAST,
                                                   EMAIL_ADDRESS,
-                                                  PHONE_HOME_NUMBER,
-                                                  PHONE_FAX_NUMBER };
+                                                  PHONE_HOME_NUMBER };
 
   for (size_t i = 0; i < arraysize(multi_value_types); ++i) {
     std::vector<string16> values_a;
@@ -538,15 +523,35 @@ const string16 AutofillProfile::PrimaryValue() const {
          GetInfo(ADDRESS_HOME_CITY);
 }
 
-// Functor used to check for case-insensitive equality of two strings.
-struct CaseInsensitiveStringEquals
-    : public std::binary_function<string16, string16, bool>
-{
-  bool operator()(const string16& x, const string16& y) const {
-    if (x.size() != y.size()) return false;
-    return StringToLowerASCII(x) == StringToLowerASCII(y);
+bool AutofillProfile::IsSubsetOf(const AutofillProfile& profile) const {
+  FieldTypeSet types;
+  GetNonEmptyTypes(&types);
+
+  for (FieldTypeSet::const_iterator iter = types.begin(); iter != types.end();
+       ++iter) {
+    if (*iter == NAME_FULL) {
+      // Ignore the compound "full name" field type.  We are only interested in
+      // comparing the constituent parts.  For example, if |this| has a middle
+      // name saved, but |profile| lacks one, |profile| could still be a subset
+      // of |this|.
+      continue;
+    } else if (AutofillType(*iter).group() == AutofillType::PHONE) {
+      // Phone numbers should be canonicalized prior to being compared.
+      if (*iter != PHONE_HOME_WHOLE_NUMBER) {
+        continue;
+      } else if (!autofill_i18n::PhoneNumbersMatch(GetInfo(*iter),
+                                                   profile.GetInfo(*iter),
+                                                   CountryCode())) {
+        return false;
+      }
+    } else if (StringToLowerASCII(GetInfo(*iter)) !=
+                   StringToLowerASCII(profile.GetInfo(*iter))) {
+      return false;
+    }
   }
-};
+
+  return true;
+}
 
 void AutofillProfile::OverwriteWithOrAddTo(const AutofillProfile& profile) {
   FieldTypeSet field_types;
@@ -563,12 +568,17 @@ void AutofillProfile::OverwriteWithOrAddTo(const AutofillProfile& profile) {
       profile.GetMultiInfo(*iter, &new_values);
       std::vector<string16> existing_values;
       GetMultiInfo(*iter, &existing_values);
+
+      // GetMultiInfo always returns at least one element, even if the profile
+      // has no data stored for this field type.
+      if (existing_values.size() == 1 && existing_values.front().empty())
+        existing_values.clear();
+
       FieldTypeGroup group = AutofillType(*iter).group();
       for (std::vector<string16>::iterator value_iter = new_values.begin();
            value_iter != new_values.end(); ++value_iter) {
         // Don't add duplicates.
-        if (group == AutofillType::PHONE_HOME ||
-            group == AutofillType::PHONE_FAX) {
+        if (group == AutofillType::PHONE) {
           AddPhoneIfUnique(*value_iter, &existing_values);
         } else {
           std::vector<string16>::const_iterator existing_iter = std::find_if(
@@ -580,7 +590,9 @@ void AutofillProfile::OverwriteWithOrAddTo(const AutofillProfile& profile) {
       }
       SetMultiInfo(*iter, existing_values);
     } else {
-      SetInfo(*iter, profile.GetInfo(*iter));
+      string16 new_value = profile.GetInfo(*iter);
+      if (StringToLowerASCII(GetInfo(*iter)) != StringToLowerASCII(new_value))
+        SetInfo(*iter, new_value);
     }
   }
 }
@@ -617,11 +629,6 @@ string16 AutofillProfile::ConstructInferredLabel(
     if (!label.empty())
       label.append(separator);
 
-    // Fax number has special format, to indicate that this is a fax number.
-    if (*it == PHONE_FAX_WHOLE_NUMBER) {
-      field = l10n_util::GetStringFUTF16(
-          IDS_AUTOFILL_DIALOG_ADDRESS_SUMMARY_FAX_FORMAT, field);
-    }
     label.append(field);
     ++num_fields_used;
   }
@@ -706,13 +713,12 @@ void AutofillProfile::CreateDifferentiatingLabels(
 }
 
 AutofillProfile::FormGroupList AutofillProfile::FormGroups() const {
-  FormGroupList v(6);
+  FormGroupList v(5);
   v[0] = &name_[0];
   v[1] = &email_[0];
   v[2] = &company_;
   v[3] = &home_number_[0];
-  v[4] = &fax_number_[0];
-  v[5] = &address_;
+  v[4] = &address_;
   return v;
 }
 
@@ -733,11 +739,8 @@ FormGroup* AutofillProfile::MutableFormGroupForType(AutofillFieldType type) {
     case AutofillType::COMPANY:
       form_group = &company_;
       break;
-    case AutofillType::PHONE_HOME:
+    case AutofillType::PHONE:
       form_group = &home_number_[0];
-      break;
-    case AutofillType::PHONE_FAX:
-      form_group = &fax_number_[0];
       break;
     case AutofillType::ADDRESS_HOME:
       form_group = &address_;
@@ -777,7 +780,5 @@ std::ostream& operator<<(std::ostream& os, const AutofillProfile& profile) {
       << " "
       << UTF16ToUTF8(profile.GetInfo(ADDRESS_HOME_COUNTRY))
       << " "
-      << UTF16ToUTF8(MultiString(profile, PHONE_HOME_WHOLE_NUMBER))
-      << " "
-      << UTF16ToUTF8(MultiString(profile, PHONE_FAX_WHOLE_NUMBER));
+      << UTF16ToUTF8(MultiString(profile, PHONE_HOME_WHOLE_NUMBER));
 }

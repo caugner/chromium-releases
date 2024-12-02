@@ -8,8 +8,10 @@
 
 #include "base/basictypes.h"
 #include "base/memory/singleton.h"
+#include "base/observer_list.h"
 #include "base/threading/non_thread_safe.h"
 #include "content/browser/worker_host/worker_process_host.h"
+#include "content/common/content_export.h"
 #include "content/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 
@@ -19,6 +21,7 @@ class ResourceContext;
 namespace net {
 class URLRequestContextGetter;
 }  // namespace net
+class WorkerServiceObserver;
 struct ViewHostMsg_CreateWorker_Params;
 
 // A singleton for managing HTML5 web workers.
@@ -59,12 +62,22 @@ class WorkerService {
   const WorkerProcessHost::WorkerInstance* FindWorkerInstance(
       int worker_process_id);
 
+  void AddObserver(WorkerServiceObserver* observer);
+  void RemoveObserver(WorkerServiceObserver* observer);
+
+  void NotifyWorkerDestroyed(
+      WorkerProcessHost* process,
+      const WorkerProcessHost::WorkerInstance& instance);
+  void NotifyWorkerContextStarted(
+      WorkerProcessHost* process,
+      int worker_route_id);
+
   // Used when multiple workers can run in the same process.
   static const int kMaxWorkerProcessesWhenSharing;
 
   // Used when we run each worker in a separate process.
-  static const int kMaxWorkersWhenSeparate;
-  static const int kMaxWorkersPerTabWhenSeparate;
+  CONTENT_EXPORT static const int kMaxWorkersWhenSeparate;
+  CONTENT_EXPORT static const int kMaxWorkersPerTabWhenSeparate;
 
  private:
   friend struct DefaultSingletonTraits<WorkerService>;
@@ -129,6 +142,8 @@ class WorkerService {
   // We need to keep a list of these to synchronously detect shared worker
   // URL mismatches when two pages launch shared workers simultaneously.
   WorkerProcessHost::Instances pending_shared_workers_;
+
+  ObserverList<WorkerServiceObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(WorkerService);
 };

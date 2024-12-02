@@ -34,7 +34,8 @@ class TestCase {
   virtual ~TestCase();
 
   // Optionally override to do testcase specific initialization.
-  virtual bool Init() { return true; }
+  // Default implementation just returns true.
+  virtual bool Init();
 
   // Override to implement the test. It will be called after the plugin is
   // first displayed.
@@ -54,6 +55,16 @@ class TestCase {
   // that want to handle incoming postMessage events should override this
   // method.
   virtual void HandleMessage(const pp::Var& message_data);
+
+  // A function that is invoked whenever DidChangeView is called on the
+  // associated TestingInstance. Default implementation does nothing. TestCases
+  // that want to handle view changes should override this method.
+  virtual void DidChangeView(const pp::Rect& position, const pp::Rect& clip);
+
+  // A function that is invoked whenever HandleInputEvent is called on the
+  // associated TestingInstance. Default implementation returns false. TestCases
+  // that want to handle view changes should override this method.
+  virtual bool HandleInputEvent(const pp::InputEvent& event);
 
  protected:
 #if !(defined __native_client__)

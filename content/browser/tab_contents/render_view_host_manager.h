@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "content/common/content_export.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "content/browser/site_instance.h"
@@ -28,7 +29,7 @@ class BrowserContext;
 // Manages RenderViewHosts for a TabContents. Normally there is only one and
 // it is easy to do. But we can also have transitions of processes (and hence
 // RenderViewHosts) that can get complex.
-class RenderViewHostManager
+class CONTENT_EXPORT RenderViewHostManager
     : public RenderViewHostDelegate::RendererManagement,
       public NotificationObserver {
  public:
@@ -41,7 +42,7 @@ class RenderViewHostManager
   // There is additional complexity that some of the functions we need in
   // TabContents are inherited and non-virtual. These are named with
   // "RenderManager" so that the duplicate implementation of them will be clear.
-  class Delegate {
+  class CONTENT_EXPORT Delegate {
    public:
     // See tab_contents.h's implementation for more.
     virtual bool CreateRenderViewForRenderManager(
@@ -183,11 +184,6 @@ class RenderViewHostManager
 
   // Called when a RenderViewHost is about to be deleted.
   void RenderViewDeleted(RenderViewHost* rvh);
-
-  // Allows a caller to swap in a provided RenderViewHost to replace the
-  // current RenderViewHost.  The current RVH will be shutdown and ultimately
-  // deleted.
-  void SwapInRenderViewHost(RenderViewHost* rvh);
 
   // Returns whether the given RenderViewHost is on the list of swapped out
   // RenderViewHosts.

@@ -10,7 +10,8 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "content/renderer/content_renderer_client.h"
+#include "base/string16.h"
+#include "content/public/renderer/content_renderer_client.h"
 
 class ChromeRenderProcessObserver;
 class ExtensionDispatcher;
@@ -25,6 +26,7 @@ class PhishingClassifierFilter;
 }
 
 namespace webkit {
+struct WebPluginInfo;
 namespace npapi {
 class PluginGroup;
 }
@@ -38,20 +40,22 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   virtual ~ChromeContentRendererClient();
 
   virtual void RenderThreadStarted() OVERRIDE;
-  virtual void RenderViewCreated(RenderView* render_view) OVERRIDE;
+  virtual void RenderViewCreated(content::RenderView* render_view) OVERRIDE;
   virtual void SetNumberOfViews(int number_of_views) OVERRIDE;
   virtual SkBitmap* GetSadPluginBitmap() OVERRIDE;
   virtual std::string GetDefaultEncoding() OVERRIDE;
-  virtual WebKit::WebPlugin* CreatePlugin(
-      RenderView* render_view,
+  virtual bool OverrideCreatePlugin(
+      content::RenderView* render_view,
       WebKit::WebFrame* frame,
-      const WebKit::WebPluginParams& params) OVERRIDE;
-  virtual void ShowErrorPage(RenderView* render_view,
-                             WebKit::WebFrame* frame,
-                             int http_status_code) OVERRIDE;
-  virtual std::string GetNavigationErrorHtml(
+      const WebKit::WebPluginParams& params,
+      WebKit::WebPlugin** plugin) OVERRIDE;
+  virtual bool HasErrorPage(int http_status_code,
+                            std::string* error_domain) OVERRIDE;
+  virtual void GetNavigationErrorStrings(
       const WebKit::WebURLRequest& failed_request,
-      const WebKit::WebURLError& error) OVERRIDE;
+      const WebKit::WebURLError& error,
+      std::string* error_html,
+      string16* error_description) OVERRIDE;
   virtual bool RunIdleHandlerWhenWidgetsHidden() OVERRIDE;
   virtual bool AllowPopup(const GURL& creator) OVERRIDE;
   virtual bool ShouldFork(WebKit::WebFrame* frame,
@@ -63,26 +67,35 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                                const GURL& url,
                                GURL* new_url) OVERRIDE;
   virtual bool ShouldPumpEventsDuringCookieMessage() OVERRIDE;
-  virtual void DidCreateScriptContext(WebKit::WebFrame* frame) OVERRIDE;
-  virtual void DidDestroyScriptContext(WebKit::WebFrame* frame) OVERRIDE;
-  virtual void DidCreateIsolatedScriptContext(
-      WebKit::WebFrame* frame, int world_id,
-      v8::Handle<v8::Context> context) OVERRIDE;
+  virtual void DidCreateScriptContext(WebKit::WebFrame* frame,
+                                      v8::Handle<v8::Context> context,
+                                      int world_id) OVERRIDE;
+  virtual void WillReleaseScriptContext(WebKit::WebFrame* frame,
+                                        v8::Handle<v8::Context> context,
+                                        int world_id) OVERRIDE;
   virtual unsigned long long VisitedLinkHash(const char* canonical_url,
                                              size_t length) OVERRIDE;
   virtual bool IsLinkVisited(unsigned long long link_hash) OVERRIDE;
   virtual void PrefetchHostName(const char* hostname, size_t length) OVERRIDE;
   virtual bool ShouldOverridePageVisibilityState(
-      const RenderView* render_view,
+      const content::RenderView* render_view,
       WebKit::WebPageVisibilityState* override_state) const OVERRIDE;
-  virtual bool HandleGetCookieRequest(RenderView* sender,
+  virtual bool HandleGetCookieRequest(content::RenderView* sender,
                                       const GURL& url,
                                       const GURL& first_party_for_cookies,
                                       std::string* cookies) OVERRIDE;
-  virtual bool HandleSetCookieRequest(RenderView* sender,
+  virtual bool HandleSetCookieRequest(content::RenderView* sender,
                                       const GURL& url,
                                       const GURL& first_party_for_cookies,
                                       const std::string& value) OVERRIDE;
+  virtual bool IsProtocolSupportedForMedia(const GURL& url) OVERRIDE;
+
+  // TODO(mpcomplete): remove after we collect histogram data.
+  // http://crbug.com/100411
+  bool IsAdblockInstalled();
+  bool IsAdblockPlusInstalled();
+  bool IsAdblockWithWebRequestInstalled();
+  bool IsAdblockPlusWithWebRequestInstalled();
 
   // For testing.
   void SetExtensionDispatcher(ExtensionDispatcher* extension_dispatcher);
@@ -92,17 +105,17 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   void OnPurgeMemory();
 
  private:
-  WebKit::WebPlugin* CreatePluginImpl(
-      RenderView* render_view,
+  WebKit::WebPlugin* CreatePlugin(
+      content::RenderView* render_view,
       WebKit::WebFrame* frame,
-      const WebKit::WebPluginParams& params,
-      bool* is_default_plugin);
+      const WebKit::WebPluginParams& params);
 
   WebKit::WebPlugin* CreatePluginPlaceholder(
-      RenderView* render_view,
+      content::RenderView* render_view,
       WebKit::WebFrame* frame,
+      const webkit::WebPluginInfo& plugin,
       const WebKit::WebPluginParams& params,
-      const webkit::npapi::PluginGroup& group,
+      const webkit::npapi::PluginGroup* group,
       int resource_id,
       int message_id,
       bool is_blocked_for_prerendering,
@@ -113,6 +126,14 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   bool CrossesExtensionExtents(WebKit::WebFrame* frame,
                                const GURL& new_url,
                                bool is_initial_navigation);
+
+  // Returns true if the NaCl plugin can be created. If it returns true, as a
+  // side effect, it may add special attributes to params.
+  bool IsNaClAllowed(const webkit::WebPluginInfo& plugin,
+                     const GURL& url,
+                     const std::string& actual_mime_type,
+                     bool enable_nacl,
+                     WebKit::WebPluginParams& params);
 
   scoped_ptr<ChromeRenderProcessObserver> chrome_observer_;
   scoped_ptr<ExtensionDispatcher> extension_dispatcher_;

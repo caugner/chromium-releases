@@ -6,7 +6,6 @@
 
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
@@ -16,6 +15,10 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "views/widget/widget.h"
+
+#if defined(TOOLKIT_USES_GTK)
+#include "chrome/browser/chromeos/wm_ipc.h"
+#endif
 
 namespace {
 const int kHorizontalPaddingPixels = 2;
@@ -51,16 +54,19 @@ void LayoutModeButton::Observe(int type,
 }
 
 void LayoutModeButton::Init() {
+#if defined(TOOLKIT_USES_GTK)
   WmIpc* wm_ipc = WmIpc::instance();
   registrar_.Add(this,
                  chrome::NOTIFICATION_LAYOUT_MODE_CHANGED,
                  Source<WmIpc>(wm_ipc));
+#endif
   UpdateForCurrentLayoutMode();
 }
 
 void LayoutModeButton::ButtonPressed(views::Button* sender,
                                      const views::Event& event) {
   DCHECK_EQ(sender, this);
+#if defined(TOOLKIT_USES_GTK)
   WmIpc* wm_ipc = WmIpc::instance();
   const WmIpcLayoutMode mode = wm_ipc->layout_mode();
 
@@ -77,25 +83,28 @@ void LayoutModeButton::ButtonPressed(views::Button* sender,
       message.set_param(0, WM_IPC_LAYOUT_MAXIMIZED);
   }
   wm_ipc->SendMessage(message);
+#endif
 }
 
 void LayoutModeButton::UpdateForCurrentLayoutMode() {
+#if defined(TOOLKIT_USES_GTK)
   const WmIpcLayoutMode mode = WmIpc::instance()->layout_mode();
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   switch (mode) {
     case WM_IPC_LAYOUT_MAXIMIZED:
       SetImage(BS_NORMAL, rb.GetBitmapNamed(IDR_STATUSBAR_WINDOW_RESTORE));
-      SetTooltipText(UTF16ToWide(
-          l10n_util::GetStringUTF16(IDS_STATUSBAR_WINDOW_RESTORE_TOOLTIP)));
+      SetTooltipText(
+          l10n_util::GetStringUTF16(IDS_STATUSBAR_WINDOW_RESTORE_TOOLTIP));
       break;
     case WM_IPC_LAYOUT_OVERLAPPING:
       SetImage(BS_NORMAL, rb.GetBitmapNamed(IDR_STATUSBAR_WINDOW_MAXIMIZE));
-      SetTooltipText(UTF16ToWide(
-          l10n_util::GetStringUTF16(IDS_STATUSBAR_WINDOW_MAXIMIZE_TOOLTIP)));
+      SetTooltipText(
+          l10n_util::GetStringUTF16(IDS_STATUSBAR_WINDOW_MAXIMIZE_TOOLTIP));
       break;
     default:
       DLOG(WARNING) << "Unknown layout mode " << mode;
   }
+#endif
 }
 
 }  // namespace chromeos

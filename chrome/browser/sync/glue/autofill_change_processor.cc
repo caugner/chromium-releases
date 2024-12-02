@@ -7,14 +7,13 @@
 #include <string>
 #include <vector>
 
+#include "base/location.h"
 #include "base/string_util.h"
-#include "base/tracked.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/autofill_model_associator.h"
-#include "chrome/browser/sync/glue/autofill_profile_model_associator.h"
-#include "chrome/browser/sync/glue/do_optimistic_refresh_task.h"
+#include "chrome/browser/sync/internal_api/change_record.h"
 #include "chrome/browser/sync/internal_api/read_node.h"
 #include "chrome/browser/sync/internal_api/write_node.h"
 #include "chrome/browser/sync/internal_api/write_transaction.h"
@@ -30,10 +29,10 @@
 namespace browser_sync {
 
 struct AutofillChangeProcessor::AutofillChangeRecord {
-  sync_api::SyncManager::ChangeRecord::Action action_;
+  sync_api::ChangeRecord::Action action_;
   int64 id_;
   sync_pb::AutofillSpecifics autofill_;
-  AutofillChangeRecord(sync_api::SyncManager::ChangeRecord::Action action,
+  AutofillChangeRecord(sync_api::ChangeRecord::Action action,
                        int64 id, const sync_pb::AutofillSpecifics& autofill)
       : action_(action),
         id_(id),
@@ -43,17 +42,17 @@ struct AutofillChangeProcessor::AutofillChangeRecord {
 AutofillChangeProcessor::AutofillChangeProcessor(
     AutofillModelAssociator* model_associator,
     WebDatabase* web_database,
-    PersonalDataManager* personal_data,
+    Profile* profile,
     UnrecoverableErrorHandler* error_handler)
     : ChangeProcessor(error_handler),
       model_associator_(model_associator),
       web_database_(web_database),
-      personal_data_(personal_data),
+      profile_(profile),
       observing_(false) {
   DCHECK(model_associator);
   DCHECK(web_database);
+  DCHECK(profile);
   DCHECK(error_handler);
-  DCHECK(personal_data);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   StartObserving();
 }
@@ -86,12 +85,6 @@ void AutofillChangeProcessor::Observe(int type,
 
   AutofillChangeList* changes = Details<AutofillChangeList>(details).ptr();
   ObserveAutofillEntriesChanged(changes, &trans, autofill_root);
-}
-
-void AutofillChangeProcessor::PostOptimisticRefreshTask() {
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      new DoOptimisticRefreshForAutofill(
-           personal_data_));
 }
 
 void AutofillChangeProcessor::ObserveAutofillEntriesChanged(
@@ -197,8 +190,7 @@ void AutofillChangeProcessor::RemoveSyncNode(const std::string& tag,
 
 void AutofillChangeProcessor::ApplyChangesFromSyncModel(
     const sync_api::BaseTransaction* trans,
-    const sync_api::SyncManager::ChangeRecord* changes,
-    int change_count) {
+    const sync_api::ImmutableChangeRecordList& changes) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   if (!running())
     return;
@@ -211,16 +203,17 @@ void AutofillChangeProcessor::ApplyChangesFromSyncModel(
     return;
   }
 
-  for (int i = 0; i < change_count; ++i) {
-    sync_api::SyncManager::ChangeRecord::Action action(changes[i].action);
-    if (sync_api::SyncManager::ChangeRecord::ACTION_DELETE == action) {
-      DCHECK(changes[i].specifics.HasExtension(sync_pb::autofill))
+  for (sync_api::ChangeRecordList::const_iterator it =
+           changes.Get().begin(); it != changes.Get().end(); ++it) {
+    sync_api::ChangeRecord::Action action(it->action);
+    if (sync_api::ChangeRecord::ACTION_DELETE == action) {
+      DCHECK(it->specifics.HasExtension(sync_pb::autofill))
           << "Autofill specifics data not present on delete!";
       const sync_pb::AutofillSpecifics& autofill =
-          changes[i].specifics.GetExtension(sync_pb::autofill);
+          it->specifics.GetExtension(sync_pb::autofill);
       if (autofill.has_value()) {
-        autofill_changes_.push_back(AutofillChangeRecord(changes[i].action,
-                                                         changes[i].id,
+        autofill_changes_.push_back(AutofillChangeRecord(it->action,
+                                                         it->id,
                                                          autofill));
       } else if (autofill.has_profile()) {
         LOG(WARNING) << "Change for old-style autofill profile being dropped!";
@@ -232,7 +225,7 @@ void AutofillChangeProcessor::ApplyChangesFromSyncModel(
 
     // Handle an update or add.
     sync_api::ReadNode sync_node(trans);
-    if (!sync_node.InitByIdLookup(changes[i].id)) {
+    if (!sync_node.InitByIdLookup(it->id)) {
       error_handler()->OnUnrecoverableError(FROM_HERE,
           "Autofill node lookup failed.");
       return;
@@ -246,7 +239,7 @@ void AutofillChangeProcessor::ApplyChangesFromSyncModel(
         sync_node.GetAutofillSpecifics());
     int64 sync_id = sync_node.GetId();
     if (autofill.has_value()) {
-      autofill_changes_.push_back(AutofillChangeRecord(changes[i].action,
+      autofill_changes_.push_back(AutofillChangeRecord(it->action,
                                                        sync_id, autofill));
     } else if (autofill.has_profile()) {
       LOG(WARNING) << "Change for old-style autofill profile being dropped!";
@@ -267,7 +260,7 @@ void AutofillChangeProcessor::CommitChangesFromSyncModel() {
   std::vector<AutofillEntry> new_entries;
   for (unsigned int i = 0; i < autofill_changes_.size(); i++) {
     // Handle deletions.
-    if (sync_api::SyncManager::ChangeRecord::ACTION_DELETE ==
+    if (sync_api::ChangeRecord::ACTION_DELETE ==
         autofill_changes_[i].action_) {
       if (autofill_changes_[i].autofill_.has_value()) {
         ApplySyncAutofillEntryDelete(autofill_changes_[i].autofill_);
@@ -302,7 +295,8 @@ void AutofillChangeProcessor::CommitChangesFromSyncModel() {
     return;
   }
 
-  PostOptimisticRefreshTask();
+  WebDataService::NotifyOfMultipleAutofillChanges(
+      profile_->GetWebDataService(Profile::EXPLICIT_ACCESS));
 
   StartObserving();
 }
@@ -318,11 +312,11 @@ void AutofillChangeProcessor::ApplySyncAutofillEntryDelete(
 }
 
 void AutofillChangeProcessor::ApplySyncAutofillEntryChange(
-      sync_api::SyncManager::ChangeRecord::Action action,
+      sync_api::ChangeRecord::Action action,
       const sync_pb::AutofillSpecifics& autofill,
       std::vector<AutofillEntry>* new_entries,
       int64 sync_id) {
-  DCHECK_NE(sync_api::SyncManager::ChangeRecord::ACTION_DELETE, action);
+  DCHECK_NE(sync_api::ChangeRecord::ACTION_DELETE, action);
 
   std::vector<base::Time> timestamps;
   size_t timestamps_size = autofill.usage_timestamp_size();
@@ -335,18 +329,18 @@ void AutofillChangeProcessor::ApplySyncAutofillEntryChange(
 
   new_entries->push_back(new_entry);
   std::string tag(AutofillModelAssociator::KeyToTag(k.name(), k.value()));
-  if (action == sync_api::SyncManager::ChangeRecord::ACTION_ADD)
+  if (action == sync_api::ChangeRecord::ACTION_ADD)
     model_associator_->Associate(&tag, sync_id);
 }
 
 void AutofillChangeProcessor::ApplySyncAutofillProfileChange(
-    sync_api::SyncManager::ChangeRecord::Action action,
+    sync_api::ChangeRecord::Action action,
     const sync_pb::AutofillProfileSpecifics& profile,
     int64 sync_id) {
-  DCHECK_NE(sync_api::SyncManager::ChangeRecord::ACTION_DELETE, action);
+  DCHECK_NE(sync_api::ChangeRecord::ACTION_DELETE, action);
 
   switch (action) {
-    case sync_api::SyncManager::ChangeRecord::ACTION_ADD: {
+    case sync_api::ChangeRecord::ACTION_ADD: {
       std::string guid(guid::GenerateGUID());
       if (guid::IsValidGUID(guid) == false) {
         DCHECK(false) << "Guid generated is invalid " << guid;
@@ -363,7 +357,7 @@ void AutofillChangeProcessor::ApplySyncAutofillProfileChange(
       model_associator_->Associate(&guid, sync_id);
       break;
     }
-    case sync_api::SyncManager::ChangeRecord::ACTION_UPDATE: {
+    case sync_api::ChangeRecord::ACTION_UPDATE: {
       const std::string* guid = model_associator_->GetChromeNodeFromSyncId(
           sync_id);
       if (guid == NULL) {

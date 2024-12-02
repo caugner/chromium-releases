@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/core_oobe_handler.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/values.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/accessibility_util.h"
@@ -36,6 +38,8 @@ CoreOobeHandler::~CoreOobeHandler() {
 void CoreOobeHandler::GetLocalizedStrings(
     base::DictionaryValue* localized_strings) {
   localized_strings->SetString(
+      "title", l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
+  localized_strings->SetString(
       "productName", l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
 }
 
@@ -50,9 +54,11 @@ void CoreOobeHandler::Initialize() {
 
 void CoreOobeHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback(kJsApiToggleAccessibility,
-      NewCallback(this, &CoreOobeHandler::OnToggleAccessibility));
+      base::Bind(&CoreOobeHandler::OnToggleAccessibility,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback(kJsApiScreenStateInitialize,
-      NewCallback(this, &CoreOobeHandler::OnInitialized));
+      base::Bind(&CoreOobeHandler::OnInitialized,
+                 base::Unretained(this)));
 }
 
 void CoreOobeHandler::OnInitialized(const base::ListValue* args) {

@@ -8,10 +8,12 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
+#include "chrome/browser/sync/protocol/app_notification_specifics.pb.h"
 #include "chrome/browser/sync/protocol/app_specifics.pb.h"
 #include "chrome/browser/sync/protocol/autofill_specifics.pb.h"
 #include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
 #include "chrome/browser/sync/protocol/encryption.pb.h"
+#include "chrome/browser/sync/protocol/extension_setting_specifics.pb.h"
 #include "chrome/browser/sync/protocol/extension_specifics.pb.h"
 #include "chrome/browser/sync/protocol/nigori_specifics.pb.h"
 #include "chrome/browser/sync/protocol/password_specifics.pb.h"
@@ -44,7 +46,7 @@ TEST_F(ProtoValueConversionsTest, ProtoChangeCheck) {
   // If this number changes, that means we added or removed a data
   // type.  Don't forget to add a unit test for {New
   // type}SpecificsToValue below.
-  EXPECT_EQ(14, syncable::MODEL_TYPE_COUNT);
+  EXPECT_EQ(16, syncable::MODEL_TYPE_COUNT);
 
   // We'd also like to check if we changed any field in our messages.
   // However, that's hard to do: sizeof could work, but it's
@@ -83,6 +85,10 @@ TEST_F(ProtoValueConversionsTest, PasswordSpecificsData) {
   EXPECT_EQ("<redacted>", password_value);
 }
 
+TEST_F(ProtoValueConversionsTest, AppNotificationSpecificsToValue) {
+  TestSpecificsToValue(AppNotificationSpecificsToValue);
+}
+
 TEST_F(ProtoValueConversionsTest, AppSpecificsToValue) {
   TestSpecificsToValue(AppSpecificsToValue);
 }
@@ -97,6 +103,10 @@ TEST_F(ProtoValueConversionsTest, AutofillProfileSpecificsToValue) {
 
 TEST_F(ProtoValueConversionsTest, BookmarkSpecificsToValue) {
   TestSpecificsToValue(BookmarkSpecificsToValue);
+}
+
+TEST_F(ProtoValueConversionsTest, ExtensionSettingSpecificsToValue) {
+  TestSpecificsToValue(ExtensionSettingSpecificsToValue);
 }
 
 TEST_F(ProtoValueConversionsTest, ExtensionSpecificsToValue) {
@@ -140,10 +150,12 @@ TEST_F(ProtoValueConversionsTest, EntitySpecificsToValue) {
 #define SET_EXTENSION(key) (void)specifics.MutableExtension(sync_pb::key)
 
   SET_EXTENSION(app);
+  SET_EXTENSION(app_notification);
   SET_EXTENSION(autofill);
   SET_EXTENSION(autofill_profile);
   SET_EXTENSION(bookmark);
   SET_EXTENSION(extension);
+  SET_EXTENSION(extension_setting);
   SET_EXTENSION(nigori);
   SET_EXTENSION(password);
   SET_EXTENSION(preference);

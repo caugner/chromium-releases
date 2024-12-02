@@ -13,16 +13,20 @@
 
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/task.h"
+#include "base/time.h"
 #include "base/win/scoped_comptr.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/common/content_export.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "ui/base/win/ime_input.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/point.h"
 #include "webkit/glue/webcursor.h"
 
 class BackingStore;
@@ -44,7 +48,7 @@ class ViewProp;
 typedef CWinTraits<WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0>
     RenderWidgetHostHWNDTraits;
 
-extern const wchar_t kRenderWidgetHostHWNDClass[];
+CONTENT_EXPORT extern const wchar_t kRenderWidgetHostHWNDClass[];
 
 ///////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewWin
@@ -70,14 +74,14 @@ class RenderWidgetHostViewWin
       public BrowserAccessibilityDelegate {
  public:
   // The view will associate itself with the given widget.
-  explicit RenderWidgetHostViewWin(RenderWidgetHost* widget);
+  CONTENT_EXPORT explicit RenderWidgetHostViewWin(RenderWidgetHost* widget);
   virtual ~RenderWidgetHostViewWin();
 
-  void CreateWnd(HWND parent);
+  CONTENT_EXPORT void CreateWnd(HWND parent);
 
   void ScheduleComposite();
 
-  IAccessible* GetIAccessible();
+  CONTENT_EXPORT IAccessible* GetIAccessible();
 
   DECLARE_WND_CLASS_EX(kRenderWidgetHostHWNDClass, CS_DBLCLKS, 0);
 
@@ -150,9 +154,10 @@ class RenderWidgetHostViewWin
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
   virtual void UpdateCursor(const WebCursor& cursor) OVERRIDE;
   virtual void SetIsLoading(bool is_loading) OVERRIDE;
-  virtual void ImeUpdateTextInputState(ui::TextInputType type,
-                                       bool can_compose_inline,
-                                       const gfx::Rect& caret_rect) OVERRIDE;
+  virtual void TextInputStateChanged(ui::TextInputType type,
+                                     bool can_compose_inline) OVERRIDE;
+  virtual void SelectionBoundsChanged(const gfx::Rect& start_rect,
+                                      const gfx::Rect& end_rect) OVERRIDE;
   virtual void ImeCancelComposition() OVERRIDE;
   virtual void DidUpdateBackingStore(
       const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
@@ -162,7 +167,7 @@ class RenderWidgetHostViewWin
   // called by TabContents before DestroyWindow
   virtual void WillWmDestroy() OVERRIDE;
   virtual void Destroy() OVERRIDE;
-  virtual void SetTooltipText(const std::wstring& tooltip_text) OVERRIDE;
+  virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void SetBackground(const SkBitmap& background) OVERRIDE;
   virtual void SetVisuallyDeemphasized(const SkColor* color,
@@ -178,6 +183,8 @@ class RenderWidgetHostViewWin
   virtual void OnAccessibilityNotifications(
       const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params
       ) OVERRIDE;
+  virtual bool LockMouse() OVERRIDE;
+  virtual void UnlockMouse() OVERRIDE;
 
   // Implementation of NotificationObserver:
   virtual void Observe(int type,
@@ -288,6 +295,11 @@ class RenderWidgetHostViewWin
                                const gfx::Rect& pos,
                                DWORD ex_style);
 
+  CPoint GetClientCenter() const;
+  void MoveCursorToCenter() const;
+
+  void HandleLockedMouseEvent(UINT message, WPARAM wparam, LPARAM lparam);
+
   // The associated Model.  While |this| is being Destroyed,
   // |render_widget_host_| is NULL and the Windows message loop is run one last
   // time. Message handlers must check for a NULL |render_widget_host_|.
@@ -339,7 +351,7 @@ class RenderWidgetHostViewWin
 
   // Tooltips
   // The text to be shown in the tooltip, supplied by the renderer.
-  std::wstring tooltip_text_;
+  string16 tooltip_text_;
   // The tooltip control hwnd
   HWND tooltip_hwnd_;
   // Whether or not a tooltip is currently visible. We use this to track
@@ -374,7 +386,7 @@ class RenderWidgetHostViewWin
   // Registrar so we can listen to RENDERER_PROCESS_TERMINATED events.
   NotificationRegistrar registrar_;
 
-  // Stores the current text input type received by ImeUpdateTextInputState()
+  // Stores the current text input type received by TextInputStateChanged()
   // method.
   ui::TextInputType text_input_type_;
 
@@ -382,6 +394,18 @@ class RenderWidgetHostViewWin
 
   // Is the widget fullscreen?
   bool is_fullscreen_;
+
+  // Used to record the last position of the mouse.
+  // While the mouse is locked, they store the last known position just as mouse
+  // lock was entered.
+  // Relative to the upper-left corner of the view.
+  gfx::Point last_mouse_position_;
+  // Relative to the upper-left corner of the screen.
+  gfx::Point last_global_mouse_position_;
+
+  // In the case of the mouse being moved away from the view and then moved
+  // back, we regard the mouse movement as (0, 0).
+  bool ignore_mouse_movement_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewWin);
 };

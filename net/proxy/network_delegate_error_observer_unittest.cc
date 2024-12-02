@@ -26,17 +26,24 @@ class TestNetworkDelegate : public net::NetworkDelegate {
  private:
   // net::NetworkDelegate:
   virtual int OnBeforeURLRequest(URLRequest* request,
-                                 CompletionCallback* callback,
+                                 OldCompletionCallback* callback,
                                  GURL* new_url) OVERRIDE {
-    return net::OK;
+    return OK;
   }
   virtual int OnBeforeSendHeaders(URLRequest* request,
-                                  CompletionCallback* callback,
+                                  OldCompletionCallback* callback,
                                   HttpRequestHeaders* headers) OVERRIDE {
-    return net::OK;
+    return OK;
   }
   virtual void OnSendHeaders(URLRequest* request,
                              const HttpRequestHeaders& headers) OVERRIDE {}
+  virtual int OnHeadersReceived(
+      URLRequest* request,
+      OldCompletionCallback* callback,
+      HttpResponseHeaders* original_response_headers,
+      scoped_refptr<HttpResponseHeaders>* override_response_headers) OVERRIDE {
+    return net::OK;
+  }
   virtual void OnBeforeRedirect(URLRequest* request,
                                 const GURL& new_location) OVERRIDE {}
   virtual void OnResponseStarted(URLRequest* request) OVERRIDE {}
@@ -49,8 +56,13 @@ class TestNetworkDelegate : public net::NetworkDelegate {
                                 const string16& error) OVERRIDE {
     got_pac_error_ = true;
   }
-  virtual void OnAuthRequired(URLRequest* request,
-                              const AuthChallengeInfo& auth_info) OVERRIDE {}
+  virtual AuthRequiredResponse OnAuthRequired(
+      URLRequest* request,
+      const AuthChallengeInfo& auth_info,
+      const AuthCallback& callback,
+      AuthCredentials* credentials) OVERRIDE {
+    return AUTH_REQUIRED_RESPONSE_NO_ACTION;
+  }
 
   bool got_pac_error_;
 };

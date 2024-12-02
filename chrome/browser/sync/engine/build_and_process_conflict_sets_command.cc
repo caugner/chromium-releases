@@ -11,7 +11,7 @@
 
 #include "base/basictypes.h"
 #include "base/format_macros.h"
-#include "base/tracked.h"
+#include "base/location.h"
 #include "chrome/browser/sync/engine/syncer_util.h"
 #include "chrome/browser/sync/engine/update_applicator.h"
 #include "chrome/browser/sync/sessions/sync_session.h"
@@ -116,8 +116,10 @@ bool RollbackEntry(syncable::WriteTransaction* trans,
   entry.Put(syncable::PARENT_ID, backup->ref(syncable::PARENT_ID));
 
   if (!backup->ref(syncable::IS_DEL)) {
-    if (!entry.PutPredecessor(backup->ref(syncable::PREV_ID)))
-      return false;
+    if (!entry.PutPredecessor(backup->ref(syncable::PREV_ID))) {
+      // TODO(lipalani) : Propagate the error to caller. crbug.com/100444.
+      NOTREACHED();
+    }
   }
 
   if (backup->ref(syncable::PREV_ID) != entry.Get(syncable::PREV_ID))

@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <set>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/md5.h"
 #include "base/string_util.h"
@@ -26,8 +28,10 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/thumbnail_score.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/navigation_entry.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -147,6 +151,8 @@ TopSites::TopSites(Profile* profile)
   if (NotificationService::current()) {
     registrar_.Add(this, chrome::NOTIFICATION_HISTORY_URLS_DELETED,
                    Source<Profile>(profile_));
+    // Listen for any nav commits. We'll ignore those not related to this
+    // profile when we get the notification.
     registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
                    NotificationService::AllSources());
   }
@@ -175,7 +181,8 @@ void TopSites::Init(const FilePath& db_name) {
   backend_->Init(db_name);
   backend_->GetMostVisitedThumbnails(
       &top_sites_consumer_,
-      NewCallback(this, &TopSites::OnGotMostVisitedThumbnails));
+      base::Bind(&TopSites::OnGotMostVisitedThumbnails,
+                 base::Unretained(this)));
 
   // History may have already finished loading by the time we're created.
   HistoryService* history = profile_->GetHistoryServiceWithoutCreating();
@@ -226,7 +233,7 @@ bool TopSites::SetPageThumbnail(const GURL& url,
 }
 
 void TopSites::GetMostVisitedURLs(CancelableRequestConsumer* consumer,
-                                  GetTopSitesCallback* callback) {
+                                  const GetTopSitesCallback& callback) {
   // WARNING: this may be invoked on any thread.
   scoped_refptr<CancelableRequest<GetTopSitesCallback> > request(
       new CancelableRequest<GetTopSitesCallback>(callback));
@@ -245,7 +252,7 @@ void TopSites::GetMostVisitedURLs(CancelableRequestConsumer* consumer,
 
     filtered_urls = thread_safe_cache_->top_sites();
   }
-  request->ForwardResult(GetTopSitesCallback::TupleType(filtered_urls));
+  request->ForwardResult(filtered_urls);
 }
 
 bool TopSites::GetPageThumbnail(const GURL& url,
@@ -286,7 +293,11 @@ static int IndexOf(const MostVisitedURLList& urls, const GURL& url) {
 
 void TopSites::MigrateFromHistory() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK_EQ(history_state_, HISTORY_LOADING);
+
+  if (history_state_ != HISTORY_LOADING) {
+    // This can happen if history was unloaded then loaded again.
+    return;
+  }
 
   history_state_ = HISTORY_MIGRATING;
   profile_->GetHistoryService(Profile::EXPLICIT_ACCESS)->ScheduleDBTask(
@@ -325,12 +336,12 @@ void TopSites::FinishHistoryMigration(const ThumbnailMigration& data) {
   // we can tell history to finish its part of migration.
   backend_->DoEmptyRequest(
       &top_sites_consumer_,
-      NewCallback(this, &TopSites::OnHistoryMigrationWrittenToDisk));
+      base::Bind(&TopSites::OnHistoryMigrationWrittenToDisk,
+                 base::Unretained(this)));
 }
 
 void TopSites::HistoryLoaded() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK_NE(history_state_, HISTORY_LOADED);
 
   if (history_state_ != HISTORY_MIGRATING) {
     // No migration from history is needed.
@@ -343,6 +354,7 @@ void TopSites::HistoryLoaded() {
       MoveStateToLoaded();
     }
   }
+  // else case can happen if history is unloaded, then loaded again.
 }
 
 void TopSites::SyncWithHistory() {
@@ -527,7 +539,8 @@ CancelableRequestProvider::Handle TopSites::StartQueryForMostVisited() {
         num_results_to_request_from_history(),
         kDaysOfHistory,
         &history_consumer_,
-        NewCallback(this, &TopSites::OnTopSitesAvailableFromHistory));
+        base::Bind(&TopSites::OnTopSitesAvailableFromHistory,
+                   base::Unretained(this)));
   }
   return 0;
 }
@@ -784,7 +797,7 @@ void TopSites::ProcessPendingCallbacks(
        i != pending_callbacks.end(); ++i) {
     scoped_refptr<CancelableRequest<GetTopSitesCallback> > request = *i;
     if (!request->canceled())
-      request->ForwardResult(GetTopSitesCallback::TupleType(urls));
+      request->ForwardResult(urls);
   }
 }
 
@@ -821,7 +834,11 @@ void TopSites::Observe(int type,
     }
     StartQueryForMostVisited();
   } else if (type == content::NOTIFICATION_NAV_ENTRY_COMMITTED) {
-    if (!IsFull()) {
+    NavigationController* controller =
+        Source<NavigationController>(source).ptr();
+    Profile* profile = Profile::FromBrowserContext(
+        controller->tab_contents()->browser_context());
+    if (profile == profile_ && !IsFull()) {
       content::LoadCommittedDetails* load_details =
           Details<content::LoadCommittedDetails>(details).ptr();
       if (!load_details)

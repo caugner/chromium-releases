@@ -11,7 +11,7 @@
 #include "content/renderer/gpu/command_buffer_proxy.h"
 #include "content/renderer/gpu/transport_texture_service.h"
 #include "content/renderer/render_process.h"
-#include "content/renderer/render_thread.h"
+#include "content/renderer/render_thread_impl.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_sync_message_filter.h"
 
@@ -123,7 +123,7 @@ GpuChannelHost::~GpuChannelHost() {
 void GpuChannelHost::Connect(
     const IPC::ChannelHandle& channel_handle,
     base::ProcessHandle renderer_process_for_gpu) {
-  DCHECK(RenderThread::current());
+  DCHECK(RenderThreadImpl::current());
   // Open a channel to the GPU process. We pass NULL as the main listener here
   // since we need to filter everything to route it to the right thread.
   channel_.reset(new IPC::SyncChannel(
@@ -179,12 +179,18 @@ bool GpuChannelHost::Send(IPC::Message* message) {
   // preserve order.
   message->set_unblock(false);
 
-  // Unfortunately a sync filter cannot be used on the main (listener) thread.
-  // TODO: Is that true even when we don't install a listener?
-  if (RenderThread::current()) {
+  // Currently we need to choose between two different mechanisms for sending.
+  // On the main thread we use the regular channel Send() method, on another
+  // thread we use SyncMessageFilter. We also have to be careful interpreting
+  // RenderThreadImpl::current() since it might return NULL during shutdown,
+  // impl we are actually calling from the main thread (discard message then).
+  //
+  // TODO: Can we just always use sync_filter_ since we setup the channel
+  //       without a main listener?
+  if (RenderThreadImpl::current()) {
     if (channel_.get())
       return channel_->Send(message);
-  } else {
+  } else if (MessageLoop::current()) {
     return sync_filter_->Send(message);
   }
 
@@ -199,7 +205,9 @@ CommandBufferProxy* GpuChannelHost::CreateViewCommandBuffer(
     CommandBufferProxy* share_group,
     const std::string& allowed_extensions,
     const std::vector<int32>& attribs,
-    const GURL& active_url) {
+    const GURL& active_url,
+    gfx::GpuPreference gpu_preference) {
+  DCHECK(ChildThread::current());
 #if defined(ENABLE_GPU)
   AutoLock lock(context_lock_);
   // An error occurred. Need to get the host again to reinitialize it.
@@ -212,8 +220,9 @@ CommandBufferProxy* GpuChannelHost::CreateViewCommandBuffer(
   init_params.allowed_extensions = allowed_extensions;
   init_params.attribs = attribs;
   init_params.active_url = active_url;
+  init_params.gpu_preference = gpu_preference;
   int32 route_id;
-  if (!RenderThread::current()->Send(
+  if (!ChildThread::current()->Send(
       new GpuHostMsg_CreateViewCommandBuffer(
           render_view_id,
           init_params,
@@ -249,7 +258,8 @@ CommandBufferProxy* GpuChannelHost::CreateOffscreenCommandBuffer(
     CommandBufferProxy* share_group,
     const std::string& allowed_extensions,
     const std::vector<int32>& attribs,
-    const GURL& active_url) {
+    const GURL& active_url,
+    gfx::GpuPreference gpu_preference) {
 #if defined(ENABLE_GPU)
   AutoLock lock(context_lock_);
   // An error occurred. Need to get the host again to reinitialize it.
@@ -262,6 +272,7 @@ CommandBufferProxy* GpuChannelHost::CreateOffscreenCommandBuffer(
   init_params.allowed_extensions = allowed_extensions;
   init_params.attribs = attribs;
   init_params.active_url = active_url;
+  init_params.gpu_preference = gpu_preference;
   int32 route_id;
   if (!Send(new GpuChannelMsg_CreateOffscreenCommandBuffer(size,
                                                            init_params,
@@ -314,4 +325,20 @@ void GpuChannelHost::RemoveRoute(int route_id) {
                         channel_filter_.get(),
                         &GpuChannelHost::MessageFilter::RemoveRoute,
                         route_id));
+}
+
+bool GpuChannelHost::WillGpuSwitchOccur(
+    bool is_creating_context, gfx::GpuPreference gpu_preference) {
+  bool result = false;
+  if (!Send(new GpuChannelMsg_WillGpuSwitchOccur(is_creating_context,
+                                                 gpu_preference,
+                                                 &result))) {
+    return false;
+  }
+  return result;
+}
+
+void GpuChannelHost::ForciblyCloseChannel() {
+  Send(new GpuChannelMsg_CloseChannel());
+  SetStateLost();
 }

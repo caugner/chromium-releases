@@ -10,9 +10,11 @@
 
 #include <stddef.h>         // For size_t
 
+#include "content/common/content_export.h"
+
 namespace content {
 
-extern const unsigned int kMaxRendererProcessCount;
+CONTENT_EXPORT extern const unsigned int kMaxRendererProcessCount;
 
 // The maximum number of session history entries per tab.
 extern const int kMaxSessionHistoryEntries;
@@ -27,13 +29,13 @@ extern const size_t kMaxTitleChars;
 // We have different values for "max accepted" and "max displayed" because
 // a data: URI may be legitimately massive, but the full URI would kill all
 // known operating systems if you dropped it into a UI control.
-extern const size_t kMaxURLChars;
-extern const size_t kMaxURLDisplayChars;
+CONTENT_EXPORT extern const size_t kMaxURLChars;
+CONTENT_EXPORT extern const size_t kMaxURLDisplayChars;
 
 // The render view and render process id associated with the default plugin
 // instance.
-extern const char kDefaultPluginRenderViewId[];
-extern const char kDefaultPluginRenderProcessId[];
+CONTENT_EXPORT extern const char kDefaultPluginRenderViewId[];
+CONTENT_EXPORT extern const char kDefaultPluginRenderProcessId[];
 
 extern const char kStatsFilename[];
 extern const int kStatsMaxThreads;

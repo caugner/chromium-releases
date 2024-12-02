@@ -11,8 +11,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/shared_memory.h"
 #include "base/time.h"
-#include "content/renderer/render_view_observer.h"
-#include "content/renderer/render_view_observer_tracker.h"
+#include "content/public/renderer/render_view_observer.h"
+#include "content/public/renderer/render_view_observer_tracker.h"
 #include "printing/metafile.h"
 #include "printing/metafile_impl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCanvas.h"
@@ -47,7 +47,7 @@ class PrepareFrameAndViewForPrint {
   // printed.
   PrepareFrameAndViewForPrint(const PrintMsg_Print_Params& print_params,
                               WebKit::WebFrame* frame,
-                              WebKit::WebNode* node);
+                              const WebKit::WebNode& node);
   ~PrepareFrameAndViewForPrint();
 
   void UpdatePrintParams(const PrintMsg_Print_Params& print_params);
@@ -86,34 +86,24 @@ class PrepareFrameAndViewForPrint {
 // PrintWebViewHelper handles most of the printing grunt work for RenderView.
 // We plan on making print asynchronous and that will require copying the DOM
 // of the document and creating a new WebView with the contents.
-class PrintWebViewHelper : public RenderViewObserver,
-                           public RenderViewObserverTracker<PrintWebViewHelper>,
-                           public WebKit::WebViewClient,
-                           public WebKit::WebFrameClient {
+class PrintWebViewHelper
+    : public content::RenderViewObserver,
+      public content::RenderViewObserverTracker<PrintWebViewHelper>,
+      public WebKit::WebViewClient,
+      public WebKit::WebFrameClient {
  public:
-  explicit PrintWebViewHelper(RenderView* render_view);
+  explicit PrintWebViewHelper(content::RenderView* render_view);
   virtual ~PrintWebViewHelper();
 
  protected:
   // WebKit::WebViewClient override:
   virtual void didStopLoading();
+
  private:
+  friend class PrintWebViewHelperTestBase;
   FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperTest,
                            BlockScriptInitiatedPrinting);
   FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperTest, OnPrintPages);
-  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperPreviewTest, OnPrintPreview);
-  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperPreviewTest, OnPrintPreviewCancel);
-  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperPreviewTest, OnPrintPreviewFail);
-  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperPreviewTest,
-                           OnPrintForPrintPreview);
-  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperPreviewTest,
-                           OnPrintForPrintPreviewFail);
-  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperPreviewTest,
-                           OnPrintPreviewForSelectedPages);
-  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperPreviewTest,
-                           OnPrintPreviewUsingInvalidPrinterSettings);
-  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperPreviewTest,
-                           OnPrintForPrintPreviewUsingInvalidPrinterSettings);
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
   FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperTest, PrintLayoutTest);
@@ -137,6 +127,7 @@ class PrintWebViewHelper : public RenderViewObserver,
 
   // Start the process of generating a print preview using |settings|.
   void OnPrintPreview(const base::DictionaryValue& settings);
+
   // Initialize the print preview document.
   bool CreatePreviewDocument();
 
@@ -158,7 +149,7 @@ class PrintWebViewHelper : public RenderViewObserver,
 
   // Main printing code -------------------------------------------------------
 
-  void Print(WebKit::WebFrame* frame, WebKit::WebNode* node);
+  void Print(WebKit::WebFrame* frame, const WebKit::WebNode& node);
 
   enum PrintingResult {
     OK,
@@ -172,27 +163,30 @@ class PrintWebViewHelper : public RenderViewObserver,
   // Print Settings -----------------------------------------------------------
 
   // Initialize print page settings with default settings.
-  bool InitPrintSettings(WebKit::WebFrame* frame,
-                         WebKit::WebNode* node,
-                         bool is_preview);
+  // Used only for native printing workflow.
+  bool InitPrintSettings(WebKit::WebFrame* frame, const WebKit::WebNode& node);
 
   // Initialize print page settings with default settings and prepare the frame
   // for print. A new PrepareFrameAndViewForPrint is created to fulfill the
   // request and is filled into the |prepare| argument.
+  // Used only for native printing workflow.
   bool InitPrintSettingsAndPrepareFrame(
       WebKit::WebFrame* frame,
-      WebKit::WebNode* node,
+      const WebKit::WebNode& node,
       scoped_ptr<PrepareFrameAndViewForPrint>* prepare);
 
   // Update the current print settings with new |job_settings|. |job_settings|
   // dictionary contains print job details such as printer name, number of
   // copies, page range, etc.
-  bool UpdatePrintSettings(const base::DictionaryValue& job_settings,
-                           bool generating_preview);
+  bool UpdatePrintSettings(WebKit::WebFrame* frame,
+                           const WebKit::WebNode& node,
+                           const base::DictionaryValue& passed_job_settings,
+                           bool print_for_preview);
 
   // Get final print settings from the user.
   // Return false if the user cancels or on error.
   bool GetPrintSettingsFromUser(WebKit::WebFrame* frame,
+                                const WebKit::WebNode& node,
                                 int expected_pages_count,
                                 bool use_browser_overlays);
 
@@ -202,7 +196,7 @@ class PrintWebViewHelper : public RenderViewObserver,
   // It will implicitly revert the document to display CSS media type.
   bool PrintPages(const PrintMsg_PrintPages_Params& params,
                   WebKit::WebFrame* frame,
-                  WebKit::WebNode* node,
+                  const WebKit::WebNode& node,
                   PrepareFrameAndViewForPrint* prepare);
 
   // Prints the page listed in |params|.
@@ -218,7 +212,7 @@ class PrintWebViewHelper : public RenderViewObserver,
 #endif
 
   // Render the frame for printing.
-  bool RenderPagesForPrint(WebKit::WebFrame* frame, WebKit::WebNode* node,
+  bool RenderPagesForPrint(WebKit::WebFrame* frame, const WebKit::WebNode& node,
                            PrepareFrameAndViewForPrint* prepare);
 
   // Platform specific helper function for rendering page(s) to |metafile|.
@@ -234,10 +228,11 @@ class PrintWebViewHelper : public RenderViewObserver,
 #elif defined(OS_MACOSX)
   void RenderPage(const gfx::Size& page_size, const gfx::Rect& content_area,
                   const float& scale_factor, int page_number,
-                  WebKit::WebFrame* frame, printing::Metafile* metafile);
+                  WebKit::WebFrame* frame, bool is_preview,
+                  printing::Metafile* metafile);
 #elif defined(OS_POSIX)
   bool RenderPages(const PrintMsg_PrintPages_Params& params,
-                   WebKit::WebFrame* frame, WebKit::WebNode* node,
+                   WebKit::WebFrame* frame, const WebKit::WebNode& node,
                    int* page_count, PrepareFrameAndViewForPrint* prepare,
                    printing::Metafile* metafile);
 #endif  // defined(OS_WIN)
@@ -257,7 +252,7 @@ class PrintWebViewHelper : public RenderViewObserver,
 
   static void UpdatePrintableSizeInPrintParameters(
       WebKit::WebFrame* frame,
-      WebKit::WebNode* node,
+      const WebKit::WebNode& node,
       PrepareFrameAndViewForPrint* prepare,
       PrintMsg_Print_Params* params);
 
@@ -308,7 +303,7 @@ class PrintWebViewHelper : public RenderViewObserver,
   WebKit::WebView* print_web_view_;
 
   scoped_ptr<PrintMsg_PrintPages_Params> print_pages_params_;
-  bool is_preview_;
+  bool is_preview_enabled_;
   bool is_print_ready_metafile_sent_;
 
   // Used for scripted initiated printing blocking.
@@ -324,6 +319,19 @@ class PrintWebViewHelper : public RenderViewObserver,
   // Strings generated by the browser process to be printed as headers and
   // footers if requested by the user.
   scoped_ptr<base::DictionaryValue> header_footer_info_;
+
+  enum PrintPreviewErrorBuckets {
+    PREVIEW_ERROR_NONE,  // Always first.
+    PREVIEW_ERROR_BAD_SETTING,
+    PREVIEW_ERROR_METAFILE_COPY_FAILED,
+    PREVIEW_ERROR_METAFILE_INIT_FAILED,
+    PREVIEW_ERROR_ZERO_PAGES,
+    PREVIEW_ERROR_MAC_DRAFT_METAFILE_INIT_FAILED,
+    PREVIEW_ERROR_PAGE_RENDERED_WITHOUT_METAFILE,
+    PREVIEW_ERROR_UPDATING_PRINT_SETTINGS,
+    PREVIEW_ERROR_INVALID_PRINTER_SETTINGS,
+    PREVIEW_ERROR_LAST_ENUM  // Always last.
+  };
 
   // Keeps track of the state of print preview between messages.
   class PrintPreviewContext {
@@ -357,26 +365,28 @@ class PrintWebViewHelper : public RenderViewObserver,
     void Finished();
 
     // Cleanup after print preview fails.
-    void Failed();
+    void Failed(bool report_error);
 
     // Helper functions
     int GetNextPageNumber();
-    bool IsReadyToRender() const;
+    bool IsRendering() const;
     bool IsModifiable() const;
     bool IsLastPageOfPrintReadyMetafile() const;
     bool IsFinalPageRendered() const;
 
     // Setters
     void set_generate_draft_pages(bool generate_draft_pages);
+    void set_error(enum PrintPreviewErrorBuckets error);
 
     // Getters
     WebKit::WebFrame* frame() const;
-    WebKit::WebNode* node() const;
+    const WebKit::WebNode& node() const;
     int total_page_count() const;
     bool generate_draft_pages();
     printing::PreviewMetafile* metafile() const;
     const PrintMsg_Print_Params& print_params() const;
     const gfx::Size& GetPrintCanvasSize() const;
+    int last_error() const;
 
    private:
     enum State {
@@ -391,7 +401,7 @@ class PrintWebViewHelper : public RenderViewObserver,
 
     // Specifies what to render for print preview.
     WebKit::WebFrame* frame_;
-    scoped_ptr<WebKit::WebNode> node_;
+    WebKit::WebNode node_;
 
     scoped_ptr<PrepareFrameAndViewForPrint> prep_frame_view_;
     scoped_ptr<printing::PreviewMetafile> metafile_;
@@ -414,6 +424,8 @@ class PrintWebViewHelper : public RenderViewObserver,
 
     base::TimeDelta document_render_time_;
     base::TimeTicks begin_time_;
+
+    enum PrintPreviewErrorBuckets error_;
 
     State state_;
   };

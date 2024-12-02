@@ -9,20 +9,11 @@
 
 namespace remoting {
 
-namespace {
-
-// A task that does nothing.
-class DummyTask : public Task {
- public:
-  void Run() {}
-};
-
-}  // namespace
-
 using protocol::MockConnectionToClient;
 using protocol::MockConnectionToClientEventHandler;
 using protocol::MockHostStub;
 using protocol::MockInputStub;
+using protocol::MockSession;
 
 using testing::_;
 using testing::DeleteArg;
@@ -35,10 +26,16 @@ class ClientSessionTest : public testing::Test {
   ClientSessionTest() {}
 
   virtual void SetUp() {
+    client_jid_ = "user@domain/rest-of-jid";
+    EXPECT_CALL(session_, jid()).WillRepeatedly(ReturnRef(client_jid_));
+
     connection_ = new MockConnectionToClient(
         &connection_event_handler_, &host_stub_, &input_stub_);
+
+    EXPECT_CALL(*connection_, session()).WillRepeatedly(Return(&session_));
+
     // Set up a large default screen size that won't affect most tests.
-    default_screen_size_.SetSize(1000, 1000);
+    default_screen_size_.set(1000, 1000);
     ON_CALL(capturer_, size_most_recent()).WillByDefault(ReturnRef(
         default_screen_size_));
 
@@ -52,8 +49,10 @@ class ClientSessionTest : public testing::Test {
   }
 
  protected:
-  gfx::Size default_screen_size_;
+  SkISize default_screen_size_;
   MessageLoop message_loop_;
+  std::string client_jid_;
+  MockSession session_;
   MockConnectionToClientEventHandler connection_event_handler_;
   MockHostStub host_stub_;
   MockInputStub input_stub_;
@@ -122,7 +121,7 @@ TEST_F(ClientSessionTest, InputStubFilter) {
   // because the client isn't authenticated yet.
   client_session_->InjectKeyEvent(key_event1);
   client_session_->InjectMouseEvent(mouse_event1);
-  client_session_->BeginSessionRequest(&credentials, new DummyTask());
+  client_session_->BeginSessionRequest(&credentials, base::Closure());
   // These events should get through to the input stub.
   client_session_->InjectKeyEvent(key_event2_down);
   client_session_->InjectKeyEvent(key_event2_up);
@@ -157,16 +156,16 @@ TEST_F(ClientSessionTest, LocalInputTest) {
   EXPECT_CALL(input_stub_, InjectMouseEvent(EqualsMouseEvent(100, 101)));
   EXPECT_CALL(input_stub_, InjectMouseEvent(EqualsMouseEvent(200, 201)));
 
-  client_session_->BeginSessionRequest(&credentials, new DummyTask());
+  client_session_->BeginSessionRequest(&credentials, base::Closure());
   // This event should get through to the input stub.
   client_session_->InjectMouseEvent(mouse_event1);
   // This one should too because the local event echoes the remote one.
-  client_session_->LocalMouseMoved(gfx::Point(mouse_event1.x(),
-                                              mouse_event1.y()));
+  client_session_->LocalMouseMoved(SkIPoint::Make(mouse_event1.x(),
+                                                  mouse_event1.y()));
   client_session_->InjectMouseEvent(mouse_event2);
   // This one should not.
-  client_session_->LocalMouseMoved(gfx::Point(mouse_event1.x(),
-                                              mouse_event1.y()));
+  client_session_->LocalMouseMoved(SkIPoint::Make(mouse_event1.x(),
+                                                  mouse_event1.y()));
   client_session_->InjectMouseEvent(mouse_event3);
   // TODO(jamiewalch): Verify that remote inputs are re-enabled eventually
   // (via dependency injection, not sleep!)
@@ -199,7 +198,7 @@ TEST_F(ClientSessionTest, RestoreEventState) {
 }
 
 TEST_F(ClientSessionTest, ClampMouseEvents) {
-  gfx::Size screen(200, 100);
+  SkISize screen(SkISize::Make(200, 100));
   EXPECT_CALL(capturer_, size_most_recent())
       .WillRepeatedly(ReturnRef(screen));
 
@@ -210,7 +209,7 @@ TEST_F(ClientSessionTest, ClampMouseEvents) {
   EXPECT_CALL(*user_authenticator_, Authenticate(_, _))
       .WillOnce(Return(true));
   EXPECT_CALL(session_event_handler_, LocalLoginSucceeded(_));
-  client_session_->BeginSessionRequest(&credentials, new DummyTask());
+  client_session_->BeginSessionRequest(&credentials, base::Closure());
 
   int input_x[3] = { -999, 100, 999 };
   int expected_x[3] = { 0, 100, 199 };

@@ -10,23 +10,25 @@
 #include "base/time.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/extensions/url_pattern.h"
+#include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/renderer/prerender/prerender_helper.h"
 #include "chrome/renderer/renderer_histogram_snapshots.h"
-#include "content/common/view_messages.h"
-#include "content/renderer/navigation_state.h"
-#include "content/renderer/render_view.h"
+#include "content/public/renderer/navigation_state.h"
+#include "content/public/renderer/render_view.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPerformance.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
-using base::Time;
-using base::TimeDelta;
 using WebKit::WebDataSource;
 using WebKit::WebFrame;
 using WebKit::WebPerformance;
 using WebKit::WebString;
+using base::Time;
+using base::TimeDelta;
+using content::NavigationState;
 
 static const TimeDelta kPLTMin(TimeDelta::FromMilliseconds(10));
 static const TimeDelta kPLTMax(TimeDelta::FromMinutes(10));
@@ -48,7 +50,7 @@ static URLPattern::SchemeMasks GetSupportedSchemeType(const GURL& url) {
 static void DumpWebTiming(const Time& navigation_start,
                           const Time& load_event_start,
                           const Time& load_event_end,
-                          NavigationState* navigation_state) {
+                          content::NavigationState* navigation_state) {
   if (navigation_start.is_null() ||
       load_event_start.is_null() ||
       load_event_end.is_null())
@@ -82,9 +84,9 @@ enum AbandonType {
 };
 
 PageLoadHistograms::PageLoadHistograms(
-    RenderView* render_view,
+    content::RenderView* render_view,
     RendererHistogramSnapshots* histogram_snapshots)
-    : RenderViewObserver(render_view),
+    : content::RenderViewObserver(render_view),
       cross_origin_access_count_(0),
       same_origin_access_count_(0),
       histogram_snapshots_(histogram_snapshots) {
@@ -100,6 +102,10 @@ void PageLoadHistograms::Dump(WebFrame* frame) {
   URLPattern::SchemeMasks scheme_type =
       GetSupportedSchemeType(frame->document().url());
   if (scheme_type == 0)
+    return;
+
+  // Ignore multipart requests.
+  if (frame->dataSource()->response().isMultipartPayload())
     return;
 
   NavigationState* navigation_state =
@@ -572,6 +578,138 @@ void PageLoadHistograms::Dump(WebFrame* frame) {
     }
   }
 
+  // TODO(mpcomplete): remove the extension-related histograms after we collect
+  // enough data. http://crbug.com/100411
+  chrome::ChromeContentRendererClient* client =
+      static_cast<chrome::ChromeContentRendererClient*>(
+          content::GetContentClient()->renderer());
+
+  const bool use_adblock_histogram = client->IsAdblockInstalled();
+  if (use_adblock_histogram) {
+    UMA_HISTOGRAM_ENUMERATION(
+        "PLT.Abandoned_ExtensionAdblock",
+        abandoned_page ? 1 : 0, 2);
+    switch (load_type) {
+      case NavigationState::NORMAL_LOAD:
+        PLT_HISTOGRAM(
+            "PLT.BeginToFinish_NormalLoad_ExtensionAdblock",
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::LINK_LOAD_NORMAL:
+        PLT_HISTOGRAM(
+            "PLT.BeginToFinish_LinkLoadNormal_ExtensionAdblock",
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::LINK_LOAD_RELOAD:
+        PLT_HISTOGRAM(
+            "PLT.BeginToFinish_LinkLoadReload_ExtensionAdblock",
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::LINK_LOAD_CACHE_STALE_OK:
+        PLT_HISTOGRAM(
+            "PLT.BeginToFinish_LinkLoadStaleOk_ExtensionAdblock",
+            begin_to_finish_all_loads);
+        break;
+      default:
+        break;
+    }
+  }
+
+  const bool use_adblockplus_histogram = client->IsAdblockPlusInstalled();
+  if (use_adblockplus_histogram) {
+    UMA_HISTOGRAM_ENUMERATION(
+        "PLT.Abandoned_ExtensionAdblock",
+        abandoned_page ? 1 : 0, 2);
+    switch (load_type) {
+      case NavigationState::NORMAL_LOAD:
+        PLT_HISTOGRAM(
+            "PLT.BeginToFinish_NormalLoad_ExtensionAdblockPlus",
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::LINK_LOAD_NORMAL:
+        PLT_HISTOGRAM(
+            "PLT.BeginToFinish_LinkLoadNormal_ExtensionAdblockPlus",
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::LINK_LOAD_RELOAD:
+        PLT_HISTOGRAM(
+            "PLT.BeginToFinish_LinkLoadReload_ExtensionAdblockPlus",
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::LINK_LOAD_CACHE_STALE_OK:
+        PLT_HISTOGRAM(
+            "PLT.BeginToFinish_LinkLoadStaleOk_ExtensionAdblockPlus",
+            begin_to_finish_all_loads);
+        break;
+      default:
+        break;
+    }
+  }
+
+  const bool use_webrequest_adblock_histogram =
+      client->IsAdblockWithWebRequestInstalled();
+  if (use_webrequest_adblock_histogram) {
+    UMA_HISTOGRAM_ENUMERATION(
+        "PLT.Abandoned_ExtensionWebRequestAdblock",
+        abandoned_page ? 1 : 0, 2);
+    switch (load_type) {
+      case NavigationState::NORMAL_LOAD:
+        PLT_HISTOGRAM(
+            "PLT.BeginToFinish_NormalLoad_ExtensionWebRequestAdblock",
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::LINK_LOAD_NORMAL:
+        PLT_HISTOGRAM(
+            "PLT.BeginToFinish_LinkLoadNormal_ExtensionWebRequestAdblock",
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::LINK_LOAD_RELOAD:
+        PLT_HISTOGRAM(
+            "PLT.BeginToFinish_LinkLoadReload_ExtensionWebRequestAdblock",
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::LINK_LOAD_CACHE_STALE_OK:
+        PLT_HISTOGRAM(
+            "PLT.BeginToFinish_LinkLoadStaleOk_ExtensionWebRequestAdblock",
+            begin_to_finish_all_loads);
+        break;
+      default:
+        break;
+    }
+  }
+
+  const bool use_webrequest_adblockplus_histogram =
+      client->IsAdblockPlusWithWebRequestInstalled();
+  if (use_webrequest_adblockplus_histogram) {
+    UMA_HISTOGRAM_ENUMERATION(
+        "PLT.Abandoned_ExtensionWebRequestAdblockPlus",
+        abandoned_page ? 1 : 0, 2);
+    switch (load_type) {
+      case NavigationState::NORMAL_LOAD:
+        PLT_HISTOGRAM(
+            "PLT.BeginToFinish_NormalLoad_ExtensionWebRequestAdblockPlus",
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::LINK_LOAD_NORMAL:
+        PLT_HISTOGRAM(
+            "PLT.BeginToFinish_LinkLoadNormal_ExtensionWebRequestAdblockPlus",
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::LINK_LOAD_RELOAD:
+        PLT_HISTOGRAM(
+            "PLT.BeginToFinish_LinkLoadReload_ExtensionWebRequestAdblockPlus",
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::LINK_LOAD_CACHE_STALE_OK:
+        PLT_HISTOGRAM(
+            "PLT.BeginToFinish_LinkLoadStaleOk_ExtensionWebRequestAdblockPlus",
+            begin_to_finish_all_loads);
+        break;
+      default:
+        break;
+    }
+  }
+
   // For the SPDY field trials, we need to verify that the page loaded was
   // the type we requested:
   //   if we asked for a SPDY request, we got a SPDY request
@@ -771,15 +909,12 @@ void PageLoadHistograms::FrameWillClose(WebFrame* frame) {
   Dump(frame);
 }
 
-bool PageLoadHistograms::OnMessageReceived(const IPC::Message& message) {
-  if (message.type() == ViewMsg_ClosePage::ID) {
-    // TODO(davemoore) This code should be removed once willClose() gets
-    // called when a page is destroyed. page_load_histograms_.Dump() is safe
-    // to call multiple times for the same frame, but it will simplify things.
-    Dump(render_view()->webview()->mainFrame());
-    ResetCrossFramePropertyAccess();
-  }
-  return false;
+void PageLoadHistograms::ClosePage() {
+  // TODO(davemoore) This code should be removed once willClose() gets
+  // called when a page is destroyed. page_load_histograms_.Dump() is safe
+  // to call multiple times for the same frame, but it will simplify things.
+  Dump(render_view()->GetWebView()->mainFrame());
+  ResetCrossFramePropertyAccess();
 }
 
 void PageLoadHistograms::LogPageLoadTime(const NavigationState* state,

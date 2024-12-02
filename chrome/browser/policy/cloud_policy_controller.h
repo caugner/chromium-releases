@@ -6,19 +6,18 @@
 #define CHROME_BROWSER_POLICY_CLOUD_POLICY_CONTROLLER_H_
 #pragma once
 
-#include <string>
-
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/policy/cloud_policy_data_store.h"
-#include "chrome/browser/policy/configuration_policy_provider.h"
-#include "chrome/browser/policy/delayed_work_scheduler.h"
-#include "chrome/browser/policy/device_token_fetcher.h"
+#include "chrome/browser/policy/device_management_backend.h"
 
 namespace policy {
 
 class CloudPolicyCacheBase;
-class DeviceManagementBackend;
+class DelayedWorkScheduler;
+class DeviceManagementService;
+class DeviceTokenFetcher;
+class PolicyNotifier;
 
 // Coordinates the actions of DeviceTokenFetcher, CloudPolicyDataStore,
 // DeviceManagementBackend, and CloudPolicyCache: calls their methods and
@@ -38,7 +37,7 @@ class CloudPolicyController
   // Sets the refresh rate at which to re-fetch policy information.
   void SetRefreshRate(int64 refresh_rate_milliseconds);
 
-  // Triggers an immediate retry of of the current operation.
+  // Triggers an immediate retry of the current operation.
   void Retry();
 
   // Stops any pending activity and resets the controller to unenrolled state.

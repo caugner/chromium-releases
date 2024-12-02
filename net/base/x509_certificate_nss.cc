@@ -6,7 +6,6 @@
 
 #include <cert.h>
 #include <cryptohi.h>
-#include <keyhi.h>
 #include <nss.h>
 #include <pk11pub.h>
 #include <prerror.h>
@@ -26,6 +25,7 @@
 #include "net/base/cert_verify_result.h"
 #include "net/base/ev_root_ca_metadata.h"
 #include "net/base/net_errors.h"
+#include "net/base/x509_util_nss.h"
 
 namespace net {
 
@@ -127,7 +127,7 @@ int MapSecurityError(int err) {
 }
 
 // Map PORT_GetError() return values to our cert status flags.
-int MapCertErrorToCertStatus(int err) {
+CertStatus MapCertErrorToCertStatus(int err) {
   switch (err) {
     case SSL_ERROR_BAD_CERT_DOMAIN:
       return CERT_STATUS_COMMON_NAME_INVALID;
@@ -631,100 +631,17 @@ X509Certificate* X509Certificate::CreateSelfSigned(
     base::TimeDelta valid_duration) {
   DCHECK(key);
 
-  // Create info about public key.
-  CERTSubjectPublicKeyInfo* spki =
-      SECKEY_CreateSubjectPublicKeyInfo(key->public_key());
-  if (!spki)
-    return NULL;
-
-  // Create the certificate request.
-  CERTName* subject_name =
-      CERT_AsciiToName(const_cast<char*>(subject.c_str()));
-  CERTCertificateRequest* cert_request =
-      CERT_CreateCertificateRequest(subject_name, spki, NULL);
-  SECKEY_DestroySubjectPublicKeyInfo(spki);
-
-  if (!cert_request) {
-    PRErrorCode prerr = PR_GetError();
-    LOG(ERROR) << "Failed to create certificate request: " << prerr;
-    CERT_DestroyName(subject_name);
-    return NULL;
-  }
-
-  PRTime now = PR_Now();
-  PRTime not_after = now + valid_duration.InMicroseconds();
-
-  // Note that the time is now in micro-second unit.
-  CERTValidity* validity = CERT_CreateValidity(now, not_after);
-  CERTCertificate* cert = CERT_CreateCertificate(serial_number, subject_name,
-                                                 validity, cert_request);
-  if (!cert) {
-    PRErrorCode prerr = PR_GetError();
-    LOG(ERROR) << "Failed to create certificate: " << prerr;
-  }
-
-  // Cleanup for resources used to generate the cert.
-  CERT_DestroyName(subject_name);
-  CERT_DestroyValidity(validity);
-  CERT_DestroyCertificateRequest(cert_request);
+  CERTCertificate* cert = x509_util::CreateSelfSignedCert(key->public_key(),
+                                                          key->key(),
+                                                          subject,
+                                                          serial_number,
+                                                          valid_duration);
 
   if (!cert)
     return NULL;
 
-  // Sign the cert here. The logic of this method references SignCert() in NSS
-  // utility certutil: http://mxr.mozilla.org/security/ident?i=SignCert.
-
-  // |arena| is used to encode the cert.
-  PRArenaPool* arena = cert->arena;
-  SECOidTag algo_id = SEC_GetSignatureAlgorithmOidTag(key->key()->keyType,
-                                                      SEC_OID_SHA1);
-  if (algo_id == SEC_OID_UNKNOWN) {
-    CERT_DestroyCertificate(cert);
-    return NULL;
-  }
-
-  SECStatus rv = SECOID_SetAlgorithmID(arena, &cert->signature, algo_id, 0);
-  if (rv != SECSuccess) {
-    CERT_DestroyCertificate(cert);
-    return NULL;
-  }
-
-  // Generate a cert of version 3.
-  *(cert->version.data) = 2;
-  cert->version.len = 1;
-
-  SECItem der;
-  der.len = 0;
-  der.data = NULL;
-
-  // Use ASN1 DER to encode the cert.
-  void* encode_result = SEC_ASN1EncodeItem(
-      arena, &der, cert, SEC_ASN1_GET(CERT_CertificateTemplate));
-  if (!encode_result) {
-    CERT_DestroyCertificate(cert);
-    return NULL;
-  }
-
-  // Allocate space to contain the signed cert.
-  SECItem* result = SECITEM_AllocItem(arena, NULL, 0);
-  if (!result) {
-    CERT_DestroyCertificate(cert);
-    return NULL;
-  }
-
-  // Sign the ASN1 encoded cert and save it to |result|.
-  rv = SEC_DerSignData(arena, result, der.data, der.len, key->key(), algo_id);
-  if (rv != SECSuccess) {
-    CERT_DestroyCertificate(cert);
-    return NULL;
-  }
-
-  // Save the signed result to the cert.
-  cert->derCert = *result;
-
-  X509Certificate* x509_cert = CreateFromHandle(cert, OSCertHandles());
-  CERT_DestroyCertificate(cert);
-  return x509_cert;
+  return X509Certificate::CreateFromHandle(cert,
+                                           X509Certificate::OSCertHandles());
 }
 
 void X509Certificate::GetSubjectAltName(
@@ -812,9 +729,9 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
     // CERT_PKIXVerifyCert rerports the wrong error code for
     // expired certificates (NSS bug 491174)
     if (err == SEC_ERROR_CERT_NOT_VALID &&
-        (verify_result->cert_status & CERT_STATUS_DATE_INVALID) != 0)
+        (verify_result->cert_status & CERT_STATUS_DATE_INVALID))
       err = SEC_ERROR_EXPIRED_CERTIFICATE;
-    int cert_status = MapCertErrorToCertStatus(err);
+    CertStatus cert_status = MapCertErrorToCertStatus(err);
     if (cert_status) {
       verify_result->cert_status |= cert_status;
       return MapCertStatusToNetError(verify_result->cert_status);

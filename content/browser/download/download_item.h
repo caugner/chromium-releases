@@ -27,10 +27,13 @@
 #include "base/timer.h"
 #include "content/browser/download/download_request_handle.h"
 #include "content/browser/download/download_state_info.h"
+#include "content/browser/download/interrupt_reasons.h"
+#include "content/common/content_export.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 
 class DownloadFileManager;
+class DownloadId;
 class DownloadManager;
 struct DownloadCreateInfo;
 struct DownloadPersistentStoreInfo;
@@ -40,7 +43,7 @@ struct DownloadPersistentStoreInfo;
 // Destination tab's download view, may refer to a given DownloadItem.
 //
 // This is intended to be used only on the UI thread.
-class DownloadItem {
+class CONTENT_EXPORT DownloadItem {
  public:
   enum DownloadState {
     // Download is actively progressing.
@@ -98,7 +101,7 @@ class DownloadItem {
 
   // Interface that observers of a particular download must implement in order
   // to receive updates to the download's status.
-  class Observer {
+  class CONTENT_EXPORT Observer {
    public:
     virtual void OnDownloadUpdated(DownloadItem* download) = 0;
 
@@ -123,7 +126,7 @@ class DownloadItem {
                const FilePath& path,
                const GURL& url,
                bool is_otr,
-               int download_id);
+               DownloadId download_id);
 
   virtual ~DownloadItem();
 
@@ -160,12 +163,12 @@ class DownloadItem {
   // exit (DownloadManager destructor) from user interface initiated cancels
   // because at exit, the history system may not exist, and any updates to it
   // require AddRef'ing the DownloadManager in the destructor which results in
-  // a DCHECK failure. Set 'update_history' to false when canceling from at
+  // a DCHECK failure. Set |user_cancel| to false when canceling from at
   // exit to prevent this crash. This may result in a difference between the
   // downloaded file's size on disk, and what the history system's last record
   // of it is. At worst, we'll end up re-downloading a small portion of the file
   // when resuming a download (assuming the server supports byte ranges).
-  void Cancel(bool update_history);
+  void Cancel(bool user_cancel);
 
   // Called by external code (SavePackage) using the DownloadItem interface
   // to display progress when the DownloadItem should be considered complete.
@@ -183,8 +186,8 @@ class DownloadItem {
 
   // Download operation had an error.
   // |size| is the amount of data received at interruption.
-  // |error| is the network error code that the operation received.
-  void Interrupted(int64 size, net::Error error);
+  // |reason| is the download interrupt reason code that the operation received.
+  void Interrupted(int64 size, InterruptReason reason);
 
   // Deletes the file from disk and removes the download from the views and
   // history.  |user| should be true if this is the result of the user clicking
@@ -274,7 +277,9 @@ class DownloadItem {
   }
   int64 received_bytes() const { return received_bytes_; }
   int32 id() const { return download_id_; }
+  DownloadId global_id() const;
   base::Time start_time() const { return start_time_; }
+  base::Time end_time() const { return end_time_; }
   void set_db_handle(int64 handle) { db_handle_ = handle; }
   int64 db_handle() const { return db_handle_; }
   DownloadManager* download_manager() { return download_manager_; }
@@ -299,6 +304,8 @@ class DownloadItem {
   bool is_temporary() const { return is_temporary_; }
   void set_opened(bool opened) { opened_ = opened; }
   bool opened() const { return opened_; }
+
+  InterruptReason last_reason() const { return last_reason_; }
 
   DownloadPersistentStoreInfo GetPersistentStoreInfo() const;
   DownloadStateInfo state_info() const { return state_info_; }
@@ -333,10 +340,7 @@ class DownloadItem {
 
   std::string DebugString(bool verbose) const;
 
-#ifdef UNIT_TEST
-  // Mock opening downloads (for testing only).
-  void TestMockDownloadOpen() { open_enabled_ = false; }
-#endif
+  void MockDownloadOpenForTesting() { open_enabled_ = false; }
 
  private:
   // Construction common to all constructors. |active| should be true for new
@@ -415,8 +419,8 @@ class DownloadItem {
   // Current received bytes
   int64 received_bytes_;
 
-  // Last error.
-  net::Error last_error_;
+  // Last reason.
+  InterruptReason last_reason_;
 
   // Start time for calculating remaining time
   base::TimeTicks start_tick_;
@@ -429,6 +433,9 @@ class DownloadItem {
 
   // Time the download was started
   base::Time start_time_;
+
+  // Time the download completed
+  base::Time end_time_;
 
   // Our persistent store handle
   int64 db_handle_;

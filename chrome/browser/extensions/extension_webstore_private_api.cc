@@ -48,14 +48,11 @@ const char kCannotSpecifyIconDataAndUrlError[] =
 const char kInvalidIconUrlError[] = "Invalid icon url";
 const char kInvalidIdError[] = "Invalid id";
 const char kInvalidManifestError[] = "Invalid manifest";
-const char kNoPreviousBeginInstallError[] =
-    "* does not match a previous call to beginInstall";
+const char kNoPreviousBeginInstallWithManifestError[] =
+    "* does not match a previous call to beginInstallWithManifest3";
 const char kUserCancelledError[] = "User cancelled install";
-const char kUserGestureRequiredError[] =
-    "This function must be called during a user gesture";
 
 ProfileSyncService* test_sync_service = NULL;
-bool ignore_user_gesture_for_tests = false;
 
 // Returns either the test sync service, or the real one from |profile|.
 ProfileSyncService* GetSyncService(Profile* profile) {
@@ -95,6 +92,8 @@ DictionaryValue* CreateLoginResult(Profile* profile) {
   return dictionary;
 }
 
+WebstoreInstaller::Delegate* test_webstore_installer_delegate = NULL;
+
 }  // namespace
 
 // static
@@ -104,31 +103,9 @@ void WebstorePrivateApi::SetTestingProfileSyncService(
 }
 
 // static
-void BeginInstallFunction::SetIgnoreUserGestureForTests(bool ignore) {
-  ignore_user_gesture_for_tests = ignore;
-}
-
-bool BeginInstallFunction::RunImpl() {
-  if (!IsWebStoreURL(profile_, source_url()))
-    return false;
-
-  std::string id;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &id));
-  if (!Extension::IdIsValid(id)) {
-    error_ = kInvalidIdError;
-    return false;
-  }
-
-  if (!user_gesture() && !ignore_user_gesture_for_tests) {
-    error_ = kUserGestureRequiredError;
-    return false;
-  }
-
-  // This gets cleared in CrxInstaller::ConfirmInstall(). TODO(asargent) - in
-  // the future we may also want to add time-based expiration, where a whitelist
-  // entry is only valid for some number of minutes.
-  CrxInstaller::SetWhitelistedInstallId(id);
-  return true;
+void WebstorePrivateApi::SetWebstoreInstallerDelegateForTesting(
+    WebstoreInstaller::Delegate* delegate) {
+  test_webstore_installer_delegate = delegate;
 }
 
 BeginInstallWithManifestFunction::BeginInstallWithManifestFunction()
@@ -139,12 +116,6 @@ BeginInstallWithManifestFunction::~BeginInstallWithManifestFunction() {}
 bool BeginInstallWithManifestFunction::RunImpl() {
   if (!IsWebStoreURL(profile_, source_url())) {
     SetResult(PERMISSION_DENIED);
-    return false;
-  }
-
-  if (!user_gesture() && !ignore_user_gesture_for_tests) {
-    SetResult(NO_GESTURE);
-    error_ = kUserGestureRequiredError;
     return false;
   }
 
@@ -233,21 +204,12 @@ void BeginInstallWithManifestFunction::SetResult(ResultCode code) {
     case PERMISSION_DENIED:
       result_.reset(Value::CreateStringValue("permission_denied"));
       break;
-    case NO_GESTURE:
-      result_.reset(Value::CreateStringValue("no_gesture"));
-      break;
     case INVALID_ICON_URL:
       result_.reset(Value::CreateStringValue("invalid_icon_url"));
       break;
     default:
       CHECK(false);
   }
-}
-
-// static
-void BeginInstallWithManifestFunction::SetIgnoreUserGestureForTests(
-    bool ignore) {
-  ignore_user_gesture_for_tests = ignore;
 }
 
 void BeginInstallWithManifestFunction::OnWebstoreParseSuccess(
@@ -258,7 +220,7 @@ void BeginInstallWithManifestFunction::OnWebstoreParseSuccess(
 
   ExtensionInstallUI::Prompt prompt(ExtensionInstallUI::INSTALL_PROMPT);
 
-  ShowExtensionInstallDialogForManifest(
+  if (!ShowExtensionInstallDialogForManifest(
       profile(),
       this,
       parsed_manifest,
@@ -267,8 +229,7 @@ void BeginInstallWithManifestFunction::OnWebstoreParseSuccess(
       "", // no localized description
       &icon_,
       prompt,
-      &dummy_extension_);
-  if (!dummy_extension_.get()) {
+      &dummy_extension_)) {
     OnWebstoreParseFailure(WebstoreInstallHelper::Delegate::MANIFEST_ERROR,
                            kInvalidManifestError);
     return;
@@ -302,6 +263,9 @@ void BeginInstallWithManifestFunction::OnWebstoreParseFailure(
 }
 
 void BeginInstallWithManifestFunction::InstallUIProceed() {
+  // This gets cleared in CrxInstaller::ConfirmInstall(). TODO(asargent) - in
+  // the future we may also want to add time-based expiration, where a whitelist
+  // entry is only valid for some number of minutes.
   CrxInstaller::WhitelistEntry* entry = new CrxInstaller::WhitelistEntry;
   entry->parsed_manifest.reset(parsed_manifest_.release());
   entry->localized_name = localized_name_;
@@ -358,21 +322,17 @@ bool CompleteInstallFunction::RunImpl() {
   if (!CrxInstaller::IsIdWhitelisted(id) &&
       !CrxInstaller::GetWhitelistEntry(id)) {
     error_ = ExtensionErrorUtils::FormatErrorMessage(
-        kNoPreviousBeginInstallError, id);
+        kNoPreviousBeginInstallWithManifestError, id);
     return false;
   }
 
-  GURL install_url(extension_urls::GetWebstoreInstallUrl(
-      id, g_browser_process->GetApplicationLocale()));
-
-  // The download url for the given |id| is now contained in |url|. We
-  // navigate the current (calling) tab to this url which will result in a
-  // download starting. Once completed it will go through the normal extension
-  // install flow. The above call to SetWhitelistedInstallId will bypass the
-  // normal permissions install dialog.
-  NavigationController& controller =
-      dispatcher()->delegate()->GetAssociatedTabContents()->controller();
-  controller.LoadURL(install_url, source_url(), PageTransition::LINK);
+  // The extension will install through the normal extension install flow, but
+  // the above call to SetWhitelistedInstallId will bypass the normal
+  // permissions install dialog.
+  WebstoreInstaller* installer =
+      profile()->GetExtensionService()->webstore_installer();
+  installer->InstallExtension(
+      id, test_webstore_installer_delegate, WebstoreInstaller::FLAG_NONE);
 
   return true;
 }

@@ -12,9 +12,9 @@
 #include "content/browser/in_process_webkit/indexed_db_transaction_callbacks.h"
 #include "content/browser/renderer_host/render_message_filter.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/content_switches.h"
 #include "content/common/indexed_db_messages.h"
 #include "content/common/result_codes.h"
+#include "content/public/common/content_switches.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDOMStringList.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCursor.h"
@@ -125,6 +125,8 @@ bool IndexedDBDispatcherHost::OnMessageReceived(const IPC::Message& message,
   if (!handled) {
     handled = true;
     IPC_BEGIN_MESSAGE_MAP_EX(IndexedDBDispatcherHost, message, *message_was_ok)
+      IPC_MESSAGE_HANDLER(IndexedDBHostMsg_FactoryGetDatabaseNames,
+                          OnIDBFactoryGetDatabaseNames)
       IPC_MESSAGE_HANDLER(IndexedDBHostMsg_FactoryOpen, OnIDBFactoryOpen)
       IPC_MESSAGE_HANDLER(IndexedDBHostMsg_FactoryDeleteDatabase,
                           OnIDBFactoryDeleteDatabase)
@@ -185,6 +187,43 @@ int32 IndexedDBDispatcherHost::Add(WebIDBTransaction* idb_transaction,
   idb_transaction->setCallbacks(new IndexedDBTransactionCallbacks(this, id));
   transaction_dispatcher_host_->transaction_url_map_[id] = url;
   return id;
+}
+
+void IndexedDBDispatcherHost::OnIDBFactoryGetDatabaseNames(
+    const IndexedDBHostMsg_FactoryGetDatabaseNames_Params& params) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
+  FilePath base_path = webkit_context_->data_path();
+  FilePath indexed_db_path;
+  if (!base_path.empty()) {
+    indexed_db_path = base_path.Append(
+        IndexedDBContext::kIndexedDBDirectory);
+  }
+
+  // TODO(jorlow): This doesn't support file:/// urls properly. We probably need
+  //               to add some toString method to WebSecurityOrigin that doesn't
+  //               return null for them.  Look at
+  //               DatabaseUtil::GetOriginFromIdentifier.
+  WebSecurityOrigin origin(
+      WebSecurityOrigin::createFromDatabaseIdentifier(params.origin));
+  GURL origin_url(origin.toString());
+
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
+
+  WebKit::WebIDBFactory::BackingStoreType backingStoreType =
+      WebKit::WebIDBFactory::LevelDBBackingStore;
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kSQLiteIndexedDatabase)) {
+    backingStoreType = WebKit::WebIDBFactory::SQLiteBackingStore;
+  }
+
+  // TODO(dgrogan): Delete this magic constant once we've removed sqlite.
+  static const uint64 kIncognitoSqliteBackendQuota = 50 * 1024 * 1024;
+
+  Context()->GetIDBFactory()->getDatabaseNames(
+      new IndexedDBCallbacks<WebDOMStringList>(this, params.response_id),
+      origin, NULL, webkit_glue::FilePathToWebString(indexed_db_path),
+      kIncognitoSqliteBackendQuota, backingStoreType);
 }
 
 void IndexedDBDispatcherHost::OnIDBFactoryOpen(
@@ -858,9 +897,6 @@ bool IndexedDBDispatcherHost::CursorDispatcherHost::OnMessageReceived(
   IPC_BEGIN_MESSAGE_MAP_EX(IndexedDBDispatcherHost::CursorDispatcherHost,
                            message, *msg_is_ok)
     IPC_MESSAGE_HANDLER(IndexedDBHostMsg_CursorDirection, OnDirection)
-    IPC_MESSAGE_HANDLER(IndexedDBHostMsg_CursorKey, OnKey)
-    IPC_MESSAGE_HANDLER(IndexedDBHostMsg_CursorPrimaryKey, OnPrimaryKey)
-    IPC_MESSAGE_HANDLER(IndexedDBHostMsg_CursorValue, OnValue)
     IPC_MESSAGE_HANDLER(IndexedDBHostMsg_CursorUpdate, OnUpdate)
     IPC_MESSAGE_HANDLER(IndexedDBHostMsg_CursorContinue, OnContinue)
     IPC_MESSAGE_HANDLER(IndexedDBHostMsg_CursorDelete, OnDelete)

@@ -424,13 +424,17 @@ void Clipboard::ReadAsciiText(Clipboard::Buffer buffer,
 }
 
 void Clipboard::ReadHTML(Clipboard::Buffer buffer, string16* markup,
-                         std::string* src_url) const {
+                         std::string* src_url, uint32* fragment_start,
+                         uint32* fragment_end) const {
   DCHECK_EQ(buffer, BUFFER_STANDARD);
-  if (markup)
-    markup->clear();
 
+  markup->clear();
+  // TODO(dcheng): Remove these checks, I don't think they should be optional.
+  DCHECK(src_url);
   if (src_url)
     src_url->clear();
+  *fragment_start = 0;
+  *fragment_end = 0;
 
   // Acquire the clipboard.
   ScopedClipboard clipboard;
@@ -441,14 +445,30 @@ void Clipboard::ReadHTML(Clipboard::Buffer buffer, string16* markup,
   if (!data)
     return;
 
-  std::string html_fragment(static_cast<const char*>(::GlobalLock(data)));
+  std::string cf_html(static_cast<const char*>(::GlobalLock(data)));
   ::GlobalUnlock(data);
 
-  std::string markup_utf8;
-  ClipboardUtil::CFHtmlToHtml(html_fragment, markup ? &markup_utf8 : NULL,
-                              src_url);
-  if (markup)
-    markup->assign(UTF8ToWide(markup_utf8));
+  size_t html_start = std::string::npos;
+  size_t start_index = std::string::npos;
+  size_t end_index = std::string::npos;
+  ClipboardUtil::CFHtmlExtractMetadata(cf_html, src_url, &html_start,
+                                       &start_index, &end_index);
+
+  // This might happen if the contents of the clipboard changed and CF_HTML is
+  // no longer available.
+  if (start_index == std::string::npos ||
+      end_index == std::string::npos ||
+      html_start == std::string::npos)
+    return;
+
+  DCHECK(start_index - html_start >= 0);
+  DCHECK(end_index - html_start >= 0);
+  DCHECK((start_index - html_start) <= kuint32max);
+  DCHECK((end_index - html_start) <= kuint32max);
+
+  markup->assign(UTF8ToWide(cf_html.data() + html_start));
+  *fragment_start = static_cast<uint32>(start_index - html_start);
+  *fragment_end = static_cast<uint32>(end_index - html_start);
 }
 
 SkBitmap Clipboard::ReadImage(Buffer buffer) const {
@@ -490,7 +510,7 @@ SkBitmap Clipboard::ReadImage(Buffer buffer) const {
   gfx::CanvasSkia canvas(bitmap->bmiHeader.biWidth, bitmap->bmiHeader.biHeight,
                          false);
   {
-    skia::ScopedPlatformPaint scoped_platform_paint(&canvas);
+    skia::ScopedPlatformPaint scoped_platform_paint(canvas.sk_canvas());
     HDC dc = scoped_platform_paint.GetPlatformSurface();
     ::SetDIBitsToDevice(dc, 0, 0, bitmap->bmiHeader.biWidth,
                         bitmap->bmiHeader.biHeight, 0, 0, 0,
@@ -505,7 +525,8 @@ SkBitmap Clipboard::ReadImage(Buffer buffer) const {
   // we assume the alpha channel contains garbage and force the bitmap to be
   // opaque as well. Note that this  heuristic will fail on a transparent bitmap
   // containing only black pixels...
-  const SkBitmap& device_bitmap = canvas.getDevice()->accessBitmap(true);
+  const SkBitmap& device_bitmap =
+      canvas.sk_canvas()->getDevice()->accessBitmap(true);
   {
     SkAutoLockPixels lock(device_bitmap);
     bool has_invalid_alpha_channel = bitmap->bmiHeader.biBitCount < 32 ||

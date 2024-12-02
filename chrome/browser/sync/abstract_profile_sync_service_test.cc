@@ -4,7 +4,7 @@
 
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 
-#include "base/tracked.h"
+#include "base/location.h"
 #include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
@@ -32,14 +32,16 @@ using syncable::UNIQUE_SERVER_TAG;
 using syncable::UNITTEST;
 using syncable::WriteTransaction;
 
+/* static */
 const std::string ProfileSyncServiceTestHelper::GetTagForType(
     ModelType model_type) {
   return syncable::ModelTypeToRootTag(model_type);
 }
 
-bool ProfileSyncServiceTestHelper::CreateRoot(
-    ModelType model_type, UserShare* user_share,
-    TestIdFactory* ids) {
+/* static */
+bool ProfileSyncServiceTestHelper::CreateRoot(ModelType model_type,
+                                              UserShare* user_share,
+                                              TestIdFactory* ids) {
   DirectoryManager* dir_manager = user_share->dir_manager.get();
 
   ScopedDirLookup dir(dir_manager, user_share->name);
@@ -69,10 +71,34 @@ bool ProfileSyncServiceTestHelper::CreateRoot(
   return true;
 }
 
+/* static */
+sync_api::ImmutableChangeRecordList
+    ProfileSyncServiceTestHelper::MakeSingletonChangeRecordList(
+        int64 node_id, sync_api::ChangeRecord::Action action) {
+  sync_api::ChangeRecord record;
+  record.action = action;
+  record.id = node_id;
+  sync_api::ChangeRecordList records(1, record);
+  return sync_api::ImmutableChangeRecordList(&records);
+}
+
+/* static */
+sync_api::ImmutableChangeRecordList
+    ProfileSyncServiceTestHelper::MakeSingletonDeletionChangeRecordList(
+        int64 node_id, const sync_pb::EntitySpecifics& specifics) {
+  sync_api::ChangeRecord record;
+  record.action = sync_api::ChangeRecord::ACTION_DELETE;
+  record.id = node_id;
+  record.specifics = specifics;
+  sync_api::ChangeRecordList records(1, record);
+  return sync_api::ImmutableChangeRecordList(&records);
+}
+
 AbstractProfileSyncServiceTest::AbstractProfileSyncServiceTest()
     : ui_thread_(BrowserThread::UI, &ui_loop_),
       db_thread_(BrowserThread::DB),
-      io_thread_(BrowserThread::IO) {}
+      io_thread_(BrowserThread::IO),
+      token_service_(new TokenService) {}
 
 AbstractProfileSyncServiceTest::~AbstractProfileSyncServiceTest() {}
 
@@ -87,6 +113,12 @@ void AbstractProfileSyncServiceTest::TearDown() {
   // Pump messages posted by the sync core thread (which may end up
   // posting on the IO thread).
   ui_loop_.RunAllPending();
+  // We need to destroy the |token_service_| here before we stop the
+  // |io_thread_| because it holds references to a ref-counted
+  // URLRequestContext. The deletion is passed to the |io_thread_|
+  // by scoped_refptr. If |token_service_| is destroyed after stopping
+  // the |io_thread_|, the deletion never happens.
+  token_service_.reset(NULL);
   io_thread_.Stop();
   db_thread_.Stop();
   ui_loop_.RunAllPending();
@@ -99,12 +131,16 @@ bool AbstractProfileSyncServiceTest::CreateRoot(ModelType model_type) {
       service_->id_factory());
 }
 
-CreateRootTask::CreateRootTask(
-    AbstractProfileSyncServiceTest* test, ModelType model_type)
-    : test_(test), model_type_(model_type), success_(false) {
+CreateRootTask::CreateRootTask(AbstractProfileSyncServiceTest* test,
+                               ModelType model_type)
+    : test_(test),
+      model_type_(model_type),
+      success_(false) {
 }
 
-CreateRootTask::~CreateRootTask() {}
+CreateRootTask::~CreateRootTask() {
+}
+
 void CreateRootTask::Run() {
   success_ = test_->CreateRoot(model_type_);
 }

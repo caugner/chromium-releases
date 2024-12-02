@@ -8,6 +8,7 @@
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_webstore_private_api.h"
+#include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -17,6 +18,63 @@
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
 #include "net/base/mock_host_resolver.h"
+
+namespace {
+
+class WebstoreInstallListener : public WebstoreInstaller::Delegate {
+ public:
+  WebstoreInstallListener()
+      : received_failure_(false), received_success_(false), waiting_(false) {}
+
+  void OnExtensionInstallSuccess(const std::string& id) OVERRIDE;
+  void OnExtensionInstallFailure(const std::string& id,
+                                 const std::string& error) OVERRIDE;
+  void Wait();
+
+  bool received_failure() const { return received_failure_; }
+  bool received_success() const { return received_success_; }
+  const std::string& id() const { return id_; }
+  const std::string& error() const { return error_; }
+
+ private:
+  bool received_failure_;
+  bool received_success_;
+  bool waiting_;
+  std::string id_;
+  std::string error_;
+};
+
+void WebstoreInstallListener::OnExtensionInstallSuccess(const std::string& id) {
+  received_success_ = true;
+  id_ = id;
+
+  if (waiting_) {
+    waiting_ = false;
+    MessageLoopForUI::current()->Quit();
+  }
+}
+
+void WebstoreInstallListener::OnExtensionInstallFailure(
+    const std::string& id, const std::string& error) {
+  received_failure_ = true;
+  id_ = id;
+  error_ = error;
+
+  if (waiting_) {
+    waiting_ = false;
+    MessageLoopForUI::current()->Quit();
+  }
+}
+
+void WebstoreInstallListener::Wait() {
+  if (received_success_ || received_failure_)
+    return;
+
+  waiting_ = true;
+  ui_test_utils::RunMessageLoop();
+}
+
+}  // namespace
 
 // A base class for tests below.
 class ExtensionWebstorePrivateApiTest : public ExtensionApiTest {
@@ -32,7 +90,6 @@ class ExtensionWebstorePrivateApiTest : public ExtensionApiTest {
     // API functions.
     host_resolver()->AddRule("www.example.com", "127.0.0.1");
     ASSERT_TRUE(test_server()->Start());
-    BeginInstallWithManifestFunction::SetIgnoreUserGestureForTests(true);
     SetExtensionInstallDialogForManifestAutoConfirmForTests(true);
     ExtensionInstallUI::DisableFailureUIForTests();
   }
@@ -85,34 +142,36 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, InstallCancelled) {
   ASSERT_TRUE(RunInstallTest("cancelled.html", "extension.crx"));
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, InstallNoGesture) {
-  BeginInstallFunction::SetIgnoreUserGestureForTests(false);
-  ASSERT_TRUE(RunInstallTest("no_user_gesture.html", "extension.crx"));
-}
-
 IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
                        IncorrectManifest1) {
-  ui_test_utils::WindowedNotificationObserver observer(
-      chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR,
-      NotificationService::AllSources());
+  WebstoreInstallListener listener;
+  WebstorePrivateApi::SetWebstoreInstallerDelegateForTesting(&listener);
   ASSERT_TRUE(RunInstallTest("incorrect_manifest1.html", "extension.crx"));
-  observer.Wait();
+  listener.Wait();
+  ASSERT_TRUE(listener.received_failure());
+  ASSERT_EQ("Manifest file is invalid.", listener.error());
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
                        IncorrectManifest2) {
-  ui_test_utils::WindowedNotificationObserver observer(
-      chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR,
-      NotificationService::AllSources());
+  WebstoreInstallListener listener;
+  WebstorePrivateApi::SetWebstoreInstallerDelegateForTesting(&listener);
   ASSERT_TRUE(RunInstallTest("incorrect_manifest2.html", "extension.crx"));
-  observer.Wait();
+  listener.Wait();
+  EXPECT_TRUE(listener.received_failure());
+  ASSERT_EQ("Manifest file is invalid.", listener.error());
 }
 
 // Tests that we can request an app installed bubble (instead of the default
 // UI when an app is installed).
 IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
                        AppInstallBubble) {
+  WebstoreInstallListener listener;
+  WebstorePrivateApi::SetWebstoreInstallerDelegateForTesting(&listener);
   ASSERT_TRUE(RunInstallTest("app_install_bubble.html", "app.crx"));
+  listener.Wait();
+  ASSERT_TRUE(listener.received_success());
+  ASSERT_EQ("iladmdjkfniedhfhcfoefgojhgaiaccc", listener.id());
 }
 
 // Tests using the iconUrl parameter to the install function.

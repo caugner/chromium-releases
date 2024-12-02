@@ -8,6 +8,21 @@ cr.define('options.autofillOptions', function() {
   const InlineEditableItem = options.InlineEditableItem;
   const InlineEditableItemList = options.InlineEditableItemList;
 
+  function AutofillEditProfileButton(guid, edit) {
+    var editButtonEl = document.createElement('button');
+    editButtonEl.className = 'raw-button';
+    editButtonEl.textContent =
+        templateData.autofillEditProfileButton;
+    editButtonEl.onclick = function(e) { edit(guid); };
+
+    // Don't select the row when clicking the button.
+    editButtonEl.onmousedown = function(e) {
+      e.stopPropagation();
+    };
+
+    return editButtonEl;
+  }
+
   /**
    * Creates a new address list item.
    * @param {Array} entry An array of the form [guid, label].
@@ -36,6 +51,12 @@ cr.define('options.autofillOptions', function() {
       label.className = 'autofill-list-item';
       label.textContent = this.label;
       this.contentElement.appendChild(label);
+
+      // The 'Edit' button.
+      var editButtonEl = new AutofillEditProfileButton(
+        this.guid,
+        AutofillOptions.loadAddressEditor);
+      this.contentElement.appendChild(editButtonEl);
     },
   };
 
@@ -75,6 +96,12 @@ cr.define('options.autofillOptions', function() {
       icon.src = this.icon;
       icon.alt = this.description;
       this.contentElement.appendChild(icon);
+
+      // The 'Edit' button.
+      var editButtonEl = new AutofillEditProfileButton(
+        this.guid,
+        AutofillOptions.loadCreditCardEditor);
+      this.contentElement.appendChild(editButtonEl);
     },
   };
 
@@ -88,7 +115,7 @@ cr.define('options.autofillOptions', function() {
   function ValuesListItem(list, entry) {
     var el = cr.doc.createElement('div');
     el.list = list;
-    el.value = entry;
+    el.value = entry ? entry : '';
     el.__proto__ = ValuesListItem.prototype;
     el.decorate();
 
@@ -102,6 +129,7 @@ cr.define('options.autofillOptions', function() {
     decorate: function() {
       InlineEditableItem.prototype.decorate.call(this);
 
+      // Note: This must be set prior to calling |createEditableTextCell|.
       this.isPlaceholder = !this.value;
 
       // The stored value.
@@ -109,92 +137,184 @@ cr.define('options.autofillOptions', function() {
       this.contentElement.appendChild(cell);
       this.input = cell.querySelector('input');
 
+      if (this.isPlaceholder) {
+        this.input.placeholder = this.list.getAttribute('placeholder');
+        this.deletable = false;
+      }
+
       this.addEventListener('commitedit', this.onEditCommitted_);
     },
 
     /**
+     * @return This item's value.
+     * @protected
+     */
+    value_: function() {
+      return this.input.value;
+    },
+
+    /**
+     * @param {Object} value The value to test.
+     * @return true if the given value is non-empty.
+     * @protected
+     */
+    valueIsNonEmpty_: function(value) {
+      return !!value;
+    },
+
+    /**
+     * @return true if value1 is logically equal to value2.
+     */
+    valuesAreEqual_: function(value1, value2) {
+      return value1 === value2;
+    },
+
+    /**
+     * Clears the item's value.
+     * @protected
+     */
+    clearValue_: function() {
+      this.input.value = '';
+    },
+
+    /**
      * Called when committing an edit.
+     * If this is an "Add ..." item, committing a non-empty value adds that
+     * value to the end of the values list, but also leaves this "Add ..." item
+     * in place.
      * @param {Event} e The end event.
      * @private
      */
     onEditCommitted_: function(e) {
+      var value = this.value_();
       var i = this.list.items.indexOf(this);
-      if (this.input.value == this.list.dataModel.item(i))
+      if (i < this.list.dataModel.length &&
+          this.valuesAreEqual_(value, this.list.dataModel.item(i))) {
         return;
+      }
 
-      if (this.input.value &&
-          this.list.dataModel.indexOf(this.input.value) == -1) {
+      var entries = this.list.dataModel.slice();
+      if (this.valueIsNonEmpty_(value) &&
+          !entries.some(this.valuesAreEqual_.bind(this, value))) {
         // Update with new value.
-        this.list.validateAndSave(i, 1, this.input.value);
+        if (this.isPlaceholder) {
+          // It is important that updateIndex is done before validateAndSave.
+          // Otherwise we can not be sure about AddRow index.
+          this.list.dataModel.updateIndex(i);
+          this.list.validateAndSave(i, 0, value);
+        } else {
+          this.list.validateAndSave(i, 1, value);
+        }
       } else {
         // Reject empty values and duplicates.
-        this.list.dataModel.splice(i, 1);
+        if (!this.isPlaceholder)
+          this.list.dataModel.splice(i, 1);
+        else
+          this.clearValue_();
       }
     },
   };
 
   /**
-   * Creates a new list item for the Add New Item row, which doesn't represent
-   * an actual entry in the values list but allows the user to add new
-   * values.
-   * @param {AutofillValuesList} entry The parent list of this item.
+   * Creates a new name value list item.
+   * @param {AutofillNameValuesList} list The parent list of this item.
+   * @param {array} entry An array of [first, middle, last] names.
    * @constructor
-   * @extends {cr.ui.ValuesListItem}
+   * @extends {options.ValuesListItem}
    */
-  function ValuesAddRowListItem(list) {
+  function NameListItem(list, entry) {
     var el = cr.doc.createElement('div');
     el.list = list;
-    el.__proto__ = ValuesAddRowListItem.prototype;
+    el.first = entry ? entry[0] : '';
+    el.middle = entry ? entry[1] : '';
+    el.last = entry ? entry[2] : '';
+    el.__proto__ = NameListItem.prototype;
     el.decorate();
 
     return el;
   }
 
-  ValuesAddRowListItem.prototype = {
+  NameListItem.prototype = {
     __proto__: ValuesListItem.prototype,
 
+    /** @inheritDoc */
     decorate: function() {
-      ValuesListItem.prototype.decorate.call(this);
-      this.input.value = '';
-      this.input.placeholder = this.list.getAttribute('placeholder');
-      this.deletable = false;
+      InlineEditableItem.prototype.decorate.call(this);
+
+      // Note: This must be set prior to calling |createEditableTextCell|.
+      this.isPlaceholder = !this.first && !this.middle && !this.last;
+
+      // The stored value.
+      // For the simulated static "input element" to display correctly, the
+      // value must not be empty.  We use a space to force the UI to render
+      // correctly when the value is logically empty.
+      var cell = this.createEditableTextCell(this.first);
+      this.contentElement.appendChild(cell);
+      this.firstNameInput = cell.querySelector('input');
+
+      cell = this.createEditableTextCell(this.middle);
+      this.contentElement.appendChild(cell);
+      this.middleNameInput = cell.querySelector('input');
+
+      cell = this.createEditableTextCell(this.last);
+      this.contentElement.appendChild(cell);
+      this.lastNameInput = cell.querySelector('input');
+
+      if (this.isPlaceholder) {
+        this.firstNameInput.placeholder =
+            templateData.autofillAddFirstNamePlaceholder;
+        this.middleNameInput.placeholder =
+            templateData.autofillAddMiddleNamePlaceholder;
+        this.lastNameInput.placeholder =
+            templateData.autofillAddLastNamePlaceholder;
+        this.deletable = false;
+      }
+
+      this.addEventListener('commitedit', this.onEditCommitted_);
     },
 
-    /**
-     * Called when committing an edit.  Committing a non-empty value adds it
-     * to the end of the values list, leaving this "AddRow" in place.
-     * @param {Event} e The end event.
-     * @extends {options.ValuesListItem}
-     * @private
-     */
-    onEditCommitted_: function(e) {
-      var i = this.list.items.indexOf(this);
-      if (i < 0 || i >= this.list.dataModel.length || !this.input.value.length)
-        return;
+    /** @inheritDoc */
+    value_: function() {
+      return [ this.firstNameInput.value,
+               this.middleNameInput.value,
+               this.lastNameInput.value ];
+    },
 
-      if (this.input.value &&
-          this.list.dataModel.indexOf(this.input.value) == -1) {
-        // It is important that updateIndex is done before validateAndSave.
-        // Otherwise we can not be sure about AddRow index.
-        this.list.dataModel.updateIndex(i);
-        this.list.validateAndSave(i, 0, this.input.value);
-      } else {
-        this.input.value = '';
-      }
+    /** @inheritDoc */
+    valueIsNonEmpty_: function(value) {
+      return value[0] || value[1] || value[2];
+    },
+
+    /** @inheritDoc */
+    valuesAreEqual_: function(value1, value2) {
+      // First, check for null values.
+      if (!value1 || !value2)
+        return value1 == value2;
+
+      return value1[0] === value2[0] &&
+             value1[1] === value2[1] &&
+             value1[2] === value2[2];
+    },
+
+    /** @inheritDoc */
+    clearValue_: function() {
+      this.firstNameInput.value = '';
+      this.middleNameInput.value = '';
+      this.lastNameInput.value = '';
     },
   };
 
   /**
-   * Create a new address list.
+   * Base class for shared implementation between address and credit card lists.
    * @constructor
    * @extends {options.DeletableItemList}
    */
-  var AutofillAddressList = cr.ui.define('list');
+  var AutofillProfileList = cr.ui.define('list');
 
-  AutofillAddressList.prototype = {
+  AutofillProfileList.prototype = {
     __proto__: DeletableItemList.prototype,
 
-    decorate: function() {
+    decorate:  function() {
       DeletableItemList.prototype.decorate.call(this);
 
       this.addEventListener('blur', this.onBlur_);
@@ -207,15 +327,30 @@ cr.define('options.autofillOptions', function() {
     onBlur_: function() {
       this.selectionModel.unselectAll();
     },
+  };
 
-    /** @inheritDoc */
-    createItem: function(entry) {
-      return new AddressListItem(entry);
+  /**
+   * Create a new address list.
+   * @constructor
+   * @extends {options.AutofillProfileList}
+   */
+  var AutofillAddressList = cr.ui.define('list');
+
+  AutofillAddressList.prototype = {
+    __proto__: AutofillProfileList.prototype,
+
+    decorate: function() {
+      AutofillProfileList.prototype.decorate.call(this);
     },
 
     /** @inheritDoc */
     activateItemAtIndex: function(index) {
       AutofillOptions.loadAddressEditor(this.dataModel.item(index)[0]);
+    },
+
+    /** @inheritDoc */
+    createItem: function(entry) {
+      return new AddressListItem(entry);
     },
 
     /** @inheritDoc */
@@ -232,30 +367,20 @@ cr.define('options.autofillOptions', function() {
   var AutofillCreditCardList = cr.ui.define('list');
 
   AutofillCreditCardList.prototype = {
-    __proto__: DeletableItemList.prototype,
+    __proto__: AutofillProfileList.prototype,
 
     decorate: function() {
-      DeletableItemList.prototype.decorate.call(this);
-
-      this.addEventListener('blur', this.onBlur_);
-    },
-
-    /**
-     * When the list loses focus, unselect all items in the list.
-     * @private
-     */
-    onBlur_: function() {
-      this.selectionModel.unselectAll();
-    },
-
-    /** @inheritDoc */
-    createItem: function(entry) {
-      return new CreditCardListItem(entry);
+      AutofillProfileList.prototype.decorate.call(this);
     },
 
     /** @inheritDoc */
     activateItemAtIndex: function(index) {
       AutofillOptions.loadCreditCardEditor(this.dataModel.item(index)[0]);
+    },
+
+    /** @inheritDoc */
+    createItem: function(entry) {
+      return new CreditCardListItem(entry);
     },
 
     /** @inheritDoc */
@@ -274,31 +399,9 @@ cr.define('options.autofillOptions', function() {
   AutofillValuesList.prototype = {
     __proto__: InlineEditableItemList.prototype,
 
-    decorate: function() {
-      InlineEditableItemList.prototype.decorate.call(this);
-
-      var self = this;
-      function handleBlur(e) {
-        // When the blur event happens we do not know who is getting focus so we
-        // delay this a bit until we know if the new focus node is outside the
-        // list.
-        var doc = e.target.ownerDocument;
-        window.setTimeout(function() {
-          var activeElement = doc.activeElement;
-          if (!self.contains(activeElement))
-            self.selectionModel.unselectAll();
-        }, 50);
-      }
-
-      this.addEventListener('blur', handleBlur, true);
-    },
-
     /** @inheritDoc */
     createItem: function(entry) {
-      if (entry != null)
-        return new ValuesListItem(this, entry);
-      else
-        return new ValuesAddRowListItem(this);
+      return new ValuesListItem(this, entry);
     },
 
     /** @inheritDoc */
@@ -309,6 +412,34 @@ cr.define('options.autofillOptions', function() {
     /** @inheritDoc */
     shouldFocusPlaceholder: function() {
       return false;
+    },
+
+    /**
+     * Called when the list hierarchy as a whole loses or gains focus.
+     * If the list was focused in response to a mouse click, call into the
+     * superclass's implementation.  If the list was focused in response to a
+     * keyboard navigation, focus the first item.
+     * If the list loses focus, unselect all the elements.
+     * @param {Event} e The change event.
+     * @private
+     */
+    handleListFocusChange_: function(e) {
+      // We check to see whether there is a selected item as a proxy for
+      // distinguishing between mouse- and keyboard-originated focus events.
+      var selectedItem = this.selectedItem;
+      if (selectedItem)
+        InlineEditableItemList.prototype.handleListFocusChange_.call(this, e);
+
+      if (!e.newValue) {
+        // When the list loses focus, unselect all the elements.
+        this.selectionModel.unselectAll();
+      } else {
+        // When the list gains focus, select the first item if nothing else is
+        // selected.
+        var firstItem = this.getListItemByIndex(0);
+        if (!selectedItem && firstItem && e.newValue)
+          firstItem.handleFocus_();
+      }
     },
 
     /**
@@ -328,14 +459,26 @@ cr.define('options.autofillOptions', function() {
    * @constructor
    * @extends {options.AutofillValuesList}
    */
+  var AutofillNameValuesList = cr.ui.define('list');
+
+  AutofillNameValuesList.prototype = {
+    __proto__: AutofillValuesList.prototype,
+
+    /** @inheritDoc */
+    createItem: function(entry) {
+      return new NameListItem(this, entry);
+    },
+  };
+
+  /**
+   * Create a new value list for phone number validation.
+   * @constructor
+   * @extends {options.AutofillValuesList}
+   */
   var AutofillPhoneValuesList = cr.ui.define('list');
 
   AutofillPhoneValuesList.prototype = {
     __proto__: AutofillValuesList.prototype,
-
-    decorate: function() {
-      AutofillValuesList.prototype.decorate.call(this);
-    },
 
     /** @inheritDoc */
     validateAndSave: function(index, remove, value) {
@@ -349,41 +492,15 @@ cr.define('options.autofillOptions', function() {
     },
   };
 
-  /**
-   * Create a new value list for fax number validation.
-   * @constructor
-   * @extends {options.AutofillValuesList}
-   */
-  var AutofillFaxValuesList = cr.ui.define('list');
-
-  AutofillFaxValuesList.prototype = {
-    __proto__: AutofillValuesList.prototype,
-
-    decorate: function() {
-      AutofillValuesList.prototype.decorate.call(this);
-    },
-
-    /** @inheritDoc */
-    validateAndSave: function(index, remove, value) {
-      var numbers = this.dataModel.slice(0, this.dataModel.length - 1);
-      numbers.splice(index, remove, value);
-      var info = new Array();
-      info[0] = index;
-      info[1] = numbers;
-      info[2] = $('country').value;
-      chrome.send('validateFaxNumbers', info);
-    },
-  };
-
   return {
     AddressListItem: AddressListItem,
     CreditCardListItem: CreditCardListItem,
     ValuesListItem: ValuesListItem,
-    ValuesAddRowListItem: ValuesAddRowListItem,
+    NameListItem: NameListItem,
     AutofillAddressList: AutofillAddressList,
     AutofillCreditCardList: AutofillCreditCardList,
     AutofillValuesList: AutofillValuesList,
+    AutofillNameValuesList: AutofillNameValuesList,
     AutofillPhoneValuesList: AutofillPhoneValuesList,
-    AutofillFaxValuesList: AutofillFaxValuesList,
   };
 });

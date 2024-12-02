@@ -20,6 +20,7 @@
 #if defined(OS_WIN)
 #include "base/memory/scoped_ptr.h"
 #include "base/win/scoped_handle.h"
+#include "content/common/child_process_messages.h"
 #include "printing/emf_win.h"
 #endif
 
@@ -29,6 +30,7 @@ ServiceUtilityProcessHost::ServiceUtilityProcessHost(
           client_(client),
           client_message_loop_proxy_(client_message_loop_proxy),
           waiting_for_reply_(false) {
+  process_id_ = ChildProcessInfo::GenerateChildProcessUniqueId();
 }
 
 ServiceUtilityProcessHost::~ServiceUtilityProcessHost() {
@@ -36,8 +38,7 @@ ServiceUtilityProcessHost::~ServiceUtilityProcessHost() {
 
 bool ServiceUtilityProcessHost::StartRenderPDFPagesToMetafile(
     const FilePath& pdf_path,
-    const gfx::Rect& render_area,
-    int render_dpi,
+    const printing::PdfRenderSettings& render_settings,
     const std::vector<printing::PageRange>& page_ranges) {
 #if !defined(OS_WIN)
   // This is only implemented on Windows (because currently it is only needed
@@ -77,8 +78,7 @@ bool ServiceUtilityProcessHost::StartRenderPDFPagesToMetafile(
       new ChromeUtilityMsg_RenderPDFPagesToMetafile(
           pdf_file_in_utility_process,
           metafile_path_,
-          render_area,
-          render_dpi,
+          render_settings,
           page_ranges));
 #endif  // !defined(OS_WIN)
 }
@@ -144,35 +144,39 @@ bool ServiceUtilityProcessHost::OnMessageReceived(const IPC::Message& message) {
   bool msg_is_ok = false;
   IPC_BEGIN_MESSAGE_MAP_EX(ServiceUtilityProcessHost, message, msg_is_ok)
 #if defined(OS_WIN)  // This hack is Windows-specific.
-    IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_PreCacheFont, OnPreCacheFont)
+    IPC_MESSAGE_HANDLER(ChildProcessHostMsg_PreCacheFont, OnPreCacheFont)
+    IPC_MESSAGE_HANDLER(ChildProcessHostMsg_ReleaseCachedFonts,
+                        OnReleaseCachedFonts)
 #endif
     IPC_MESSAGE_HANDLER(
         ChromeUtilityHostMsg_RenderPDFPagesToMetafile_Succeeded,
         OnRenderPDFPagesToMetafileSucceeded)
-    IPC_MESSAGE_UNHANDLED(msg_is_ok__ = MessageForClient(message))
+    IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_RenderPDFPagesToMetafile_Failed,
+                        OnRenderPDFPagesToMetafileFailed)
+    IPC_MESSAGE_HANDLER(
+        ChromeUtilityHostMsg_GetPrinterCapsAndDefaults_Succeeded,
+        OnGetPrinterCapsAndDefaultsSucceeded)
+    IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_GetPrinterCapsAndDefaults_Failed,
+                        OnGetPrinterCapsAndDefaultsFailed)
+    IPC_MESSAGE_UNHANDLED(msg_is_ok__ = false)
   IPC_END_MESSAGE_MAP_EX()
   return true;
 }
 
-bool ServiceUtilityProcessHost::MessageForClient(const IPC::Message& message) {
-  DCHECK(waiting_for_reply_);
-  bool ret = client_message_loop_proxy_->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(client_.get(), &Client::OnMessageReceived,
-                        message));
-  waiting_for_reply_ = false;
-  return ret;
-}
-
 #if defined(OS_WIN)  // This hack is Windows-specific.
 void ServiceUtilityProcessHost::OnPreCacheFont(const LOGFONT& font) {
-  PreCacheFont(font);
+  PreCacheFont(font, process_id_);
+}
+
+void ServiceUtilityProcessHost::OnReleaseCachedFonts() {
+  ReleaseCachedFonts(process_id_);
 }
 #endif  // OS_WIN
 
 void ServiceUtilityProcessHost::OnRenderPDFPagesToMetafileSucceeded(
     int highest_rendered_page_number) {
   DCHECK(waiting_for_reply_);
+  waiting_for_reply_ = false;
   // If the metafile was successfully created, we need to take our hands off the
   // scratch metafile directory. The client will delete it when it is done with
   // metafile.
@@ -183,24 +187,39 @@ void ServiceUtilityProcessHost::OnRenderPDFPagesToMetafileSucceeded(
                         &Client::MetafileAvailable,
                         metafile_path_,
                         highest_rendered_page_number));
-  waiting_for_reply_ = false;
 }
 
-bool ServiceUtilityProcessHost::Client::OnMessageReceived(
-    const IPC::Message& message) {
-  bool msg_is_ok = true;
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP_EX(ServiceUtilityProcessHost, message, msg_is_ok)
-    IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_RenderPDFPagesToMetafile_Failed,
-                        Client::OnRenderPDFPagesToMetafileFailed)
-    IPC_MESSAGE_HANDLER(
-        ChromeUtilityHostMsg_GetPrinterCapsAndDefaults_Succeeded,
-        Client::OnGetPrinterCapsAndDefaultsSucceeded)
-    IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_GetPrinterCapsAndDefaults_Failed,
-                        Client::OnGetPrinterCapsAndDefaultsFailed)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP_EX()
-  return handled;
+void ServiceUtilityProcessHost::OnRenderPDFPagesToMetafileFailed() {
+  DCHECK(waiting_for_reply_);
+  waiting_for_reply_ = false;
+  client_message_loop_proxy_->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(client_.get(),
+                        &Client::OnRenderPDFPagesToMetafileFailed));
+}
+
+void ServiceUtilityProcessHost::OnGetPrinterCapsAndDefaultsSucceeded(
+    const std::string& printer_name,
+    const printing::PrinterCapsAndDefaults& caps_and_defaults) {
+  DCHECK(waiting_for_reply_);
+  waiting_for_reply_ = false;
+  client_message_loop_proxy_->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(client_.get(),
+                        &Client::OnGetPrinterCapsAndDefaultsSucceeded,
+                        printer_name,
+                        caps_and_defaults));
+}
+
+void ServiceUtilityProcessHost::OnGetPrinterCapsAndDefaultsFailed(
+    const std::string& printer_name) {
+  DCHECK(waiting_for_reply_);
+  waiting_for_reply_ = false;
+  client_message_loop_proxy_->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(client_.get(),
+                        &Client::OnGetPrinterCapsAndDefaultsFailed,
+                        printer_name));
 }
 
 void ServiceUtilityProcessHost::Client::MetafileAvailable(

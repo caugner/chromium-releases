@@ -13,14 +13,15 @@
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/chrome_view_types.h"
 #include "content/browser/renderer_host/browser_render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/site_instance.h"
-#include "content/common/bindings_policy.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
 #include "content/common/renderer_preferences.h"
 #include "content/common/view_messages.h"
+#include "content/public/common/bindings_policy.h"
 #include "ipc/ipc_message.h"
 #include "webkit/glue/webpreferences.h"
 
@@ -81,12 +82,11 @@ void BalloonHost::Close(RenderViewHost* render_view_host) {
 }
 
 void BalloonHost::RenderViewCreated(RenderViewHost* render_view_host) {
-  render_view_host->Send(new ViewMsg_DisableScrollbarsForSmallWindows(
-      render_view_host->routing_id(), balloon_->min_scrollbar_size()));
+  render_view_host->DisableScrollbarsForThreshold(
+      balloon_->min_scrollbar_size());
   render_view_host->WasResized();
-  render_view_host->Send(new ViewMsg_EnablePreferredSizeChangedMode(
-      render_view_host->routing_id(),
-      kPreferredSizeWidth | kPreferredSizeHeightThisIsSlow));
+  render_view_host->EnablePreferredSizeMode(
+      kPreferredSizeWidth | kPreferredSizeHeightThisIsSlow);
 }
 
 void BalloonHost::RenderViewReady(RenderViewHost* render_view_host) {
@@ -102,8 +102,8 @@ void BalloonHost::RenderViewGone(RenderViewHost* render_view_host,
   Close(render_view_host);
 }
 
-ViewType::Type BalloonHost::GetRenderViewType() const {
-  return ViewType::NOTIFICATION;
+content::ViewType BalloonHost::GetRenderViewType() const {
+  return chrome::VIEW_TYPE_NOTIFICATION;
 }
 
 RenderViewHostDelegate::View* BalloonHost::GetViewDelegate() {
@@ -178,7 +178,7 @@ void BalloonHost::Init() {
   RenderViewHost* rvh = new RenderViewHost(
       site_instance_.get(), this, MSG_ROUTING_NONE, NULL);
   if (enable_web_ui_)
-    rvh->AllowBindings(BindingsPolicy::WEB_UI);
+    rvh->AllowBindings(content::BINDINGS_POLICY_WEB_UI);
 
   // Do platform-specific initialization.
   render_view_host_ = rvh;

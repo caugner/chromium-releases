@@ -11,9 +11,21 @@
 #include "base/string16.h"
 #include "printing/page_range.h"
 #include "printing/page_setup.h"
+#include "printing/print_job_constants.h"
+#include "printing/printing_export.h"
 #include "ui/gfx/rect.h"
 
 namespace printing {
+
+// Returns true if color model is selected.
+PRINTING_EXPORT bool isColorModelSelected(int model);
+
+#if defined (USE_CUPS)
+  // Get the color model setting name and value for the |color_mode|.
+  PRINTING_EXPORT  void GetColorModelForMode(int color_mode,
+                                             std::string* color_setting_name,
+                                             std::string* color_value);
+#endif
 
 // OS-independent print settings.
 class PRINTING_EXPORT PrintSettings {
@@ -29,20 +41,22 @@ class PRINTING_EXPORT PrintSettings {
                                gfx::Rect const& printable_area_device_units,
                                int units_per_inch);
 
+  void SetCustomMargins(const PageMargins& margins_in_points);
+
   // Equality operator.
   // NOTE: printer_name is NOT tested for equality since it doesn't affect the
   // output.
   bool Equals(const PrintSettings& rhs) const;
 
   void set_landscape(bool landscape) { landscape_ = landscape; }
-  void set_printer_name(const std::wstring& printer_name) {
+  void set_printer_name(const string16& printer_name) {
     printer_name_ = printer_name;
   }
-  const std::wstring& printer_name() const { return printer_name_; }
-  void set_device_name(const std::wstring& device_name) {
+  const string16& printer_name() const { return printer_name_; }
+  void set_device_name(const string16& device_name) {
     device_name_ = device_name;
   }
-  const std::wstring& device_name() const { return device_name_; }
+  const string16& device_name() const { return device_name_; }
   void set_dpi(int dpi) { dpi_ = dpi; }
   int dpi() const { return dpi_; }
   void set_supports_alpha_blend(bool supports_alpha_blend) {
@@ -84,10 +98,8 @@ class PRINTING_EXPORT PrintSettings {
   // Indicates if the user only wants to print the current selection.
   bool selection_only;
 
-  // Indicates whether we should use browser-controlled page overlays
-  // (header, footer, margins etc). If it is false, the overlays are
-  // controlled by the renderer.
-  bool use_overlays;
+  // Indicates what kind of margins should be applied to the printable area.
+  MarginType margin_type;
 
   // Cookie generator. It is used to initialize PrintedDocument with its
   // associated PrintSettings, to be sure that each generated PrintedPage is
@@ -110,10 +122,10 @@ class PRINTING_EXPORT PrintSettings {
   // Settings that can't be changed without side-effects.
 
   // Printer name as shown to the user.
-  std::wstring printer_name_;
+  string16 printer_name_;
 
   // Printer device name as opened by the OS.
-  std::wstring device_name_;
+  string16 device_name_;
 
   // Page setup in device units.
   PageSetup page_setup_device_units_;
@@ -126,6 +138,9 @@ class PRINTING_EXPORT PrintSettings {
 
   // True if this printer supports AlphaBlend.
   bool supports_alpha_blend_;
+
+  // If margin type is custom, these are the margins.
+  PageMargins custom_margins_in_points_;
 };
 
 }  // namespace printing

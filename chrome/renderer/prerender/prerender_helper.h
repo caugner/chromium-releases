@@ -8,8 +8,8 @@
 
 #include "base/compiler_specific.h"
 #include "base/time.h"
-#include "content/renderer/render_view_observer.h"
-#include "content/renderer/render_view_observer_tracker.h"
+#include "content/public/renderer/render_view_observer.h"
+#include "content/public/renderer/render_view_observer_tracker.h"
 
 namespace prerender {
 
@@ -19,19 +19,20 @@ namespace prerender {
 // prerendering starts and deleted as soon as just after the prerendering
 // histograms have been recorded for a displayed prerendered page.  For
 // non-displayed pages, deleted on destruction of the RenderView.
-class PrerenderHelper : public RenderViewObserver,
-                        public RenderViewObserverTracker<PrerenderHelper> {
+class PrerenderHelper
+    : public content::RenderViewObserver,
+      public content::RenderViewObserverTracker<PrerenderHelper> {
  public:
-  explicit PrerenderHelper(RenderView* render_view);
+  explicit PrerenderHelper(content::RenderView* render_view);
   virtual ~PrerenderHelper();
 
   // Returns true if |render_view| is currently prerendering.
-  static bool IsPrerendering(const RenderView* render_view);
+  static bool IsPrerendering(const content::RenderView* render_view);
 
   // Records prerender histograms.  These are recorded even for pages that are
   // not prerendered, for comparison to pages that are.
   static void RecordHistograms(
-      RenderView* render_view,
+      content::RenderView* render_view,
       const base::Time& finish_all_loads,
       const base::TimeDelta& begin_to_finish_all_loads);
 

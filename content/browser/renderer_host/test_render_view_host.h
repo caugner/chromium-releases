@@ -14,8 +14,12 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/common/page_transition_types.h"
+#include "content/public/common/page_transition_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+namespace content {
+class BrowserContext;
+}
 
 namespace gfx {
 class Rect;
@@ -23,7 +27,6 @@ class Rect;
 
 class NavigationController;
 class SiteInstance;
-class TestingProfile;
 class TestTabContents;
 struct WebMenuItem;
 struct ViewHostMsg_FrameNavigate_Params;
@@ -33,7 +36,7 @@ struct ViewHostMsg_FrameNavigate_Params;
 void InitNavigateParams(ViewHostMsg_FrameNavigate_Params* params,
                         int page_id,
                         const GURL& url,
-                        PageTransition::Type transition_type);
+                        content::PageTransition transition_type);
 
 // This file provides a testing framework for mocking out the RenderProcessHost
 // layer. It allows you to test RenderViewHost, TabContents,
@@ -73,9 +76,8 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
   virtual void SetIsLoading(bool is_loading) OVERRIDE {}
   virtual void UpdateCursor(const WebCursor& cursor) OVERRIDE {}
-  virtual void ImeUpdateTextInputState(ui::TextInputType state,
-                                       bool can_compose_inline,
-                                       const gfx::Rect& caret_rect) OVERRIDE {}
+  virtual void TextInputStateChanged(ui::TextInputType state,
+                                     bool can_compose_inline) OVERRIDE {}
   virtual void ImeCancelComposition() OVERRIDE {}
   virtual void DidUpdateBackingStore(
       const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
@@ -84,7 +86,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
                               int error_code) OVERRIDE;
   virtual void WillDestroyRenderWidget(RenderWidgetHost* rwh) { }
   virtual void Destroy() OVERRIDE {}
-  virtual void SetTooltipText(const std::wstring& tooltip_text) OVERRIDE {}
+  virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE {}
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
 #if defined(OS_MACOSX)
   virtual void SetTakesFocusOnlyOnMouseDown(bool flag) OVERRIDE {}
@@ -115,15 +117,14 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
       uint64 surface_id,
       int renderer_id,
       int32 route_id,
-      int gpu_host_id,
-      uint64 swap_buffers_count) OVERRIDE;
+      int gpu_host_id) OVERRIDE;
   virtual void GpuRenderingStateDidChange() OVERRIDE;
 #elif defined(OS_WIN)
   virtual void WillWmDestroy() OVERRIDE;
   virtual void ShowCompositorHostWindow(bool show) OVERRIDE;
 #endif
 #if defined(OS_POSIX)
-  virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE {};
+  virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE {}
   virtual gfx::Rect GetRootWindowBounds() OVERRIDE;
 #endif
   virtual void SetVisuallyDeemphasized(const SkColor* color, bool animate) { }
@@ -134,10 +135,14 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
   virtual void SetScrollOffsetPinning(
       bool is_pinned_to_left, bool is_pinned_to_right) { }
 
-#if defined(TOUCH_UI)
-  virtual void AcceleratedSurfaceSetIOSurface(
-      int32 width, int32 height, uint64 surface_id) { }
-  virtual void AcceleratedSurfaceBuffersSwapped(uint64 surface_id) { }
+#if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
+  virtual void AcceleratedSurfaceNew(
+      int32 width, int32 height, uint64* surface_id,
+      TransportDIB::Handle* surface_handle) { }
+  virtual void AcceleratedSurfaceBuffersSwapped(
+      uint64 surface_id,
+      int32 route_id,
+      int gpu_host_id) OVERRIDE {}
   virtual void AcceleratedSurfaceRelease(uint64 surface_id) { }
 #endif
 
@@ -148,6 +153,9 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
 #endif
 
   virtual gfx::PluginWindowHandle GetCompositingSurface() OVERRIDE;
+
+  virtual bool LockMouse() OVERRIDE;
+  virtual void UnlockMouse() OVERRIDE;
 
   bool is_showing() const { return is_showing_; }
 
@@ -180,11 +188,11 @@ class TestRenderViewHost : public RenderViewHost {
   void SendNavigate(int page_id, const GURL& url);
 
   // Calls OnMsgNavigate on the RenderViewHost with the given information,
-  // including a custom PageTransition::Type.  Sets the rest of the parameters
-  // in the message to the "typical" values.
-  // This is a helper function for simulating the most common types of loads.
+  // including a custom content::PageTransition.  Sets the rest of the
+  // parameters in the message to the "typical" values. This is a helper
+  // function for simulating the most common types of loads.
   void SendNavigateWithTransition(int page_id, const GURL& url,
-                                  PageTransition::Type transition);
+                                  content::PageTransition transition);
 
   // Calls OnMsgShouldCloseACK on the RenderViewHost with the given parameter.
   void SendShouldCloseACK(bool proceed);
@@ -292,7 +300,7 @@ class RenderViewHostTestHarness : public testing::Test {
   TestRenderViewHost* rvh();
   TestRenderViewHost* pending_rvh();
   TestRenderViewHost* active_rvh();
-  TestingProfile* profile();
+  content::BrowserContext* browser_context();
   MockRenderProcessHost* process();
 
   // Frees the current tab contents for tests that want to test destruction.
@@ -317,10 +325,11 @@ class RenderViewHostTestHarness : public testing::Test {
   virtual void SetUp();
   virtual void TearDown();
 
-  // This profile will be created in SetUp if it has not already been created.
-  // This allows tests to override the profile if they so choose in their own
-  // SetUp function before calling the base class's (us) SetUp().
-  scoped_ptr<TestingProfile> profile_;
+  // This browser context will be created in SetUp if it has not already been
+  // created.  This allows tests to override the browser context if they so
+  // choose in their own SetUp function before calling the base class's (us)
+  // SetUp().
+  scoped_ptr<content::BrowserContext> browser_context_;
 
   MessageLoopForUI message_loop_;
 

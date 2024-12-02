@@ -23,6 +23,7 @@
 
 #include <map>
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/environment.h"
 #include "base/file_path.h"
@@ -218,11 +219,23 @@ class SettingGetterImplGConf : public ProxyConfigServiceLinux::SettingGetter {
         VLOG(1) << "~SettingGetterImplGConf: releasing gconf client";
         ShutDown();
       } else {
-        LOG(WARNING) << "~SettingGetterImplGConf: leaking gconf client";
-        client_ = NULL;
+        // This is very bad! We are deleting the setting getter but we're not on
+        // the UI thread. This is not supposed to happen: the setting getter is
+        // owned by the proxy config service's delegate, which is supposed to be
+        // destroyed on the UI thread only. We will get change notifications to
+        // a deleted object if we continue here, so fail now.
+        LOG(FATAL) << "~SettingGetterImplGConf: deleting on wrong thread!";
       }
     }
     DCHECK(!client_);
+    // Invert the bits of |this_|. This seems like a pretty unlikely coincidence
+    // for stray memory corruption, so if we see this later, it's a pretty sure
+    // bet that we have a use-after-free issue rather than external corruption.
+    // (Note that we will still have the original value of |this| in that case.)
+    // See below. This is to try and track bugs 75508 and 84673.
+    // TODO(mdm): remove this once it gives us some results.
+    this_ = reinterpret_cast<SettingGetterImplGConf*>(
+        ~reinterpret_cast<uintptr_t>(this));
   }
 
   virtual bool Init(MessageLoop* glib_default_loop,
@@ -448,7 +461,9 @@ class SettingGetterImplGConf : public ProxyConfigServiceLinux::SettingGetter {
 
   void OnChangeNotification() {
     // See below. This check is to try and track bugs 75508 and 84673.
-    // TODO(mdm): remove this check once it gives us some results.
+    // TODO(mdm): remove these checks once they give us some results.
+    CHECK(this_ != reinterpret_cast<SettingGetterImplGConf*>(
+        ~reinterpret_cast<uintptr_t>(this)));
     CHECK(this_ == this);
     // We don't use Reset() because the timer may not yet be running.
     // (In that case Stop() is a no-op.)
@@ -493,18 +508,6 @@ class SettingGetterImplGConf : public ProxyConfigServiceLinux::SettingGetter {
 class SettingGetterImplGSettings
     : public ProxyConfigServiceLinux::SettingGetter {
  public:
-#if 0
-GSettings* (*g_settings_new)(const gchar* schema);
-  GSettings* (*g_settings_get_child)(GSettings* settings, const gchar* name);
-  gboolean (*g_settings_get_boolean)(GSettings* settings, const gchar* key);
-  gchar* (*g_settings_get_string)(GSettings* settings, const gchar* key);
-  gint (*g_settings_get_int)(GSettings* settings, const gchar* key);
-  gchar** (*g_settings_get_strv)(GSettings* settings, const gchar* key);
-  const gchar* const* (*g_settings_list_schemas)();
-
-  // The library handle.
-  void* gio_handle_;
-#endif
   SettingGetterImplGSettings() :
 #if defined(DLOPEN_GSETTINGS)
     g_settings_new(NULL),
@@ -1647,11 +1650,8 @@ void ProxyConfigServiceLinux::Delegate::SetUpAndFetchInitialConfig(
         SetUpNotifications();
       } else {
         // Post a task to set up notifications. We don't wait for success.
-        required_loop->PostTask(
-            FROM_HERE,
-            NewRunnableMethod(
-                this,
-                &ProxyConfigServiceLinux::Delegate::SetUpNotifications));
+        required_loop->PostTask(FROM_HERE, base::Bind(
+            &ProxyConfigServiceLinux::Delegate::SetUpNotifications, this));
       }
     }
   }
@@ -1719,12 +1719,9 @@ void ProxyConfigServiceLinux::Delegate::OnCheckProxyConfigSettings() {
       !new_config.Equals(reference_config_)) {
     // Post a task to |io_loop| with the new configuration, so it can
     // update |cached_config_|.
-    io_loop_->PostTask(
-        FROM_HERE,
-        NewRunnableMethod(
-            this,
-            &ProxyConfigServiceLinux::Delegate::SetNewProxyConfig,
-            new_config));
+    io_loop_->PostTask(FROM_HERE, base::Bind(
+        &ProxyConfigServiceLinux::Delegate::SetNewProxyConfig,
+        this, new_config));
     // Update the thread-private copy in |reference_config_| as well.
     reference_config_ = new_config;
   } else {
@@ -1753,11 +1750,8 @@ void ProxyConfigServiceLinux::Delegate::PostDestroyTask() {
   } else {
     // Post to shutdown thread. Note that on browser shutdown, we may quit
     // this MessageLoop and exit the program before ever running this.
-    shutdown_loop->PostTask(
-        FROM_HERE,
-        NewRunnableMethod(
-            this,
-            &ProxyConfigServiceLinux::Delegate::OnDestroy));
+    shutdown_loop->PostTask(FROM_HERE, base::Bind(
+        &ProxyConfigServiceLinux::Delegate::OnDestroy, this));
   }
 }
 void ProxyConfigServiceLinux::Delegate::OnDestroy() {

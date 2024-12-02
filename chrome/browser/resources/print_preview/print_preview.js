@@ -17,12 +17,11 @@ var lastSelectedPrinterIndex = 0;
 var previewModifiable = false;
 
 // Destination list special value constants.
-const ADD_CLOUD_PRINTER = 'addCloudPrinter';
 const MANAGE_CLOUD_PRINTERS = 'manageCloudPrinters';
 const MANAGE_LOCAL_PRINTERS = 'manageLocalPrinters';
-const MORE_PRINTERS = 'morePrinters';
 const SIGN_IN = 'signIn';
 const PRINT_TO_PDF = 'Print to PDF';
+const PRINT_WITH_CLOUD_PRINT = 'printWithCloudPrint';
 
 // State of the print preview settings.
 var printSettings = new PrintSettings();
@@ -35,6 +34,9 @@ var defaultOrLastUsedPrinterName = '';
 
 // True when a pending print preview request exists.
 var hasPendingPreviewRequest = false;
+
+// True when the first page is loaded in the plugin.
+var isFirstPageLoaded = false;
 
 // The ID of the last preview request.
 var lastPreviewRequestID = -1;
@@ -51,23 +53,31 @@ var isPrintReadyMetafileReady = false;
 // True when preview tab is hidden.
 var isTabHidden = false;
 
-// Object holding all the pages related settings.
+// @type {print_preview.PrintHeader} Holds the print and cancel buttons.
+var printHeader;
+
+// @type {print_preview.PageSettings} Holds all the pages related settings.
 var pageSettings;
 
-// Object holding all the copies related settings.
+// @type {print_preview.CopiesSettings} Holds all the copies related settings.
 var copiesSettings;
 
-// Object holding all the layout related settings.
+// @type {print_preview.LayoutSettings} Holds all the layout related settings.
 var layoutSettings;
 
-// Object holding all the margin related settings.
+// @type {print_preview.MarginSettings} Holds all the margin related settings.
 var marginSettings;
 
-// Object holding all the header footer related settings.
+// @type {print_preview.HeaderFooterSettings} Holds all the header footer
+//     related settings.
 var headerFooterSettings;
 
-// Object holding all the color related settings.
+// @type {print_preview.ColorSettings} Holds all the color related settings.
 var colorSettings;
+
+// @type {print_preview.PreviewArea} Holds information related to the preview
+//     area (on the right).
+var previewArea;
 
 // True if the user has click 'Advanced...' in order to open the system print
 // dialog.
@@ -82,10 +92,6 @@ var currentPreviewUid = '';
 
 // True if we need to generate draft preview data.
 var generateDraftData = true;
-
-// TODO(abodenha@chromium.org) A lot of cloud print specific logic has
-// made its way into this file.  Refactor to create a cleaner boundary
-// between print preview and GCP code.  Reference bug 88098 when fixing.
 
 // A dictionary of cloud printers that have been added to the printer
 // dropdown.
@@ -106,6 +112,8 @@ function onLoad() {
   initialPreviewRequestID = randomInteger(MIN_REQUEST_ID, MAX_REQUEST_ID);
   lastPreviewRequestID = initialPreviewRequestID;
 
+  printHeader = print_preview.PrintHeader.getInstance();
+
   if (!checkCompatiblePluginExists()) {
     disableInputElementsInSidebar();
     displayErrorMessageWithButton(localStrings.getString('noPlugin'),
@@ -120,20 +128,13 @@ function onLoad() {
 
   $('printer-list').disabled = true;
 
-  printHeader = print_preview.PrintHeader.getInstance();
   pageSettings = print_preview.PageSettings.getInstance();
   copiesSettings = print_preview.CopiesSettings.getInstance();
   layoutSettings = print_preview.LayoutSettings.getInstance();
   marginSettings = print_preview.MarginSettings.getInstance();
   headerFooterSettings = print_preview.HeaderFooterSettings.getInstance();
   colorSettings = print_preview.ColorSettings.getInstance();
-  printHeader.addEventListeners();
-  pageSettings.addEventListeners();
-  copiesSettings.addEventListeners();
-  headerFooterSettings.addEventListeners();
-  layoutSettings.addEventListeners();
-  marginSettings.addEventListeners();
-  colorSettings.addEventListeners();
+  previewArea = print_preview.PreviewArea.getInstance();
   $('printer-list').onchange = updateControlsWithSelectedPrinterCapabilities;
 
   showLoadingAnimation();
@@ -146,8 +147,11 @@ function onLoad() {
  */
 function disableInputElementsInSidebar() {
   var els = $('sidebar').querySelectorAll('input, button, select');
-  for (var i = 0; i < els.length; i++)
+  for (var i = 0; i < els.length; i++) {
+    if (els[i] == printHeader.cancelButton)
+      continue;
     els[i].disabled = true;
+  }
 }
 
 /**
@@ -172,6 +176,7 @@ function launchNativePrintDialog() {
     return;
   showingSystemDialog = true;
   $('error-button').disabled = true;
+  printHeader.disableCancelButton();
   $('native-print-dialog-throbber').classList.remove('hidden');
   chrome.send('showSystemDialog');
 }
@@ -221,24 +226,23 @@ function updateControlsWithSelectedPrinterCapabilities() {
   var skip_refresh = false;
   var selectedValue = printerList.options[selectedIndex].value;
   if (cloudprint.isCloudPrint(printerList.options[selectedIndex])) {
-    updateWithCloudPrinterCapabilities();
+    cloudprint.updatePrinterCaps(printerList.options[selectedIndex],
+                                 doUpdateCloudPrinterCapabilities);
     skip_refresh = true;
   } else if (selectedValue == SIGN_IN ||
              selectedValue == MANAGE_CLOUD_PRINTERS ||
-             selectedValue == MANAGE_LOCAL_PRINTERS ||
-             selectedValue == ADD_CLOUD_PRINTER) {
+             selectedValue == MANAGE_LOCAL_PRINTERS) {
     printerList.selectedIndex = lastSelectedPrinterIndex;
     chrome.send(selectedValue);
     skip_refresh = true;
-  } else if (selectedValue == MORE_PRINTERS) {
-    onSystemDialogLinkClicked();
-    skip_refresh = true;
-  } else if (selectedValue == PRINT_TO_PDF) {
+  } else if (selectedValue == PRINT_TO_PDF ||
+             selectedValue == PRINT_WITH_CLOUD_PRINT) {
     updateWithPrinterCapabilities({
         'disableColorOption': true,
         'setColorAsDefault': true,
         'setDuplexAsDefault': false,
-        'printerColorModelForColor': colorSettings.COLOR,
+        'printerColorModelForColor': print_preview.ColorSettings.COLOR,
+        'printerDefaultDuplexValue': copiesSettings.UNKNOWN_DUPLEX_MODE,
         'disableCopiesOption': true});
   } else {
     // This message will call back to 'updateWithPrinterCapabilities'
@@ -251,17 +255,6 @@ function updateControlsWithSelectedPrinterCapabilities() {
     // Regenerate the preview data based on selected printer settings.
     setDefaultValuesAndRegeneratePreview(true);
   }
-}
-
-/**
- * Updates the printer capabilities for the currently selected
- * cloud print printer.
- */
-function updateWithCloudPrinterCapabilities() {
-  var printerList = $('printer-list');
-  var selectedIndex = printerList.selectedIndex;
-  cloudprint.updatePrinterCaps(printerList.options[selectedIndex],
-                               doUpdateCloudPrinterCapabilities);
 }
 
 /**
@@ -295,11 +288,10 @@ function updateWithPrinterCapabilities(settingInfo) {
 
 /**
  * Turn on the integration of Cloud Print.
- * @param {boolean} enable True if cloud print should be used.
  * @param {string} cloudPrintUrl The URL to use for cloud print servers.
  */
-function setUseCloudPrint(enable, cloudPrintURL) {
-  useCloudPrint = enable;
+function setUseCloudPrint(cloudPrintURL) {
+  useCloudPrint = true;
   cloudprint.setBaseURL(cloudPrintURL);
 }
 
@@ -325,9 +317,11 @@ function finishedCloudPrinting() {
  * @return {boolean} true if settings are valid, false if not.
  */
 function areSettingsValid() {
+  var selectedPrinter = getSelectedPrinterName();
   return pageSettings.isPageSelectionValid() &&
-      (copiesSettings.isValid() ||
-       getSelectedPrinterName() == PRINT_TO_PDF);
+      marginSettings.areMarginSettingsValid() &&
+      (copiesSettings.isValid() || selectedPrinter == PRINT_TO_PDF ||
+       selectedPrinter == PRINT_WITH_CLOUD_PRINT);
 }
 
 /**
@@ -337,7 +331,8 @@ function areSettingsValid() {
  */
 function getSettings() {
   var deviceName = getSelectedPrinterName();
-  var printToPDF = (deviceName == PRINT_TO_PDF);
+  var printToPDF = deviceName == PRINT_TO_PDF;
+  var printWithCloudPrint = deviceName == PRINT_WITH_CLOUD_PRINT;
 
   var settings =
       {'deviceName': deviceName,
@@ -348,12 +343,16 @@ function getSettings() {
        'landscape': layoutSettings.isLandscape(),
        'color': colorSettings.colorMode,
        'printToPDF': printToPDF,
+       'printWithCloudPrint': printWithCloudPrint,
        'isFirstRequest' : false,
        'headerFooterEnabled': headerFooterSettings.hasHeaderFooter(),
-       'defaultMarginsSelected': marginSettings.isDefaultMarginsSelected(),
-       'margins': marginSettings.customMargins,
+       'marginsType': marginSettings.selectedMarginsValue,
        'requestID': -1,
-       'generateDraftData': generateDraftData};
+       'generateDraftData': generateDraftData,
+       'previewModifiable': previewModifiable};
+
+  if (marginSettings.isCustomMarginsSelected())
+    settings['marginsCustom'] = marginSettings.customMargins;
 
   var printerList = $('printer-list');
   var selectedPrinter = printerList.selectedIndex;
@@ -431,15 +430,19 @@ function getSelectedPrinterName() {
  */
 function requestToPrintDocument() {
   hasPendingPrintDocumentRequest = !isPrintReadyMetafileReady;
-  var printToPDF = getSelectedPrinterName() == PRINT_TO_PDF;
-
+  var selectedPrinterName = getSelectedPrinterName();
+  var printToPDF = selectedPrinterName == PRINT_TO_PDF;
+  var printWithCloudPrint = selectedPrinterName == PRINT_WITH_CLOUD_PRINT;
   if (hasPendingPrintDocumentRequest) {
     if (printToPDF) {
-      // TODO(thestig) disable controls here.
-     } else {
-       isTabHidden = true;
-       chrome.send('hidePreview');
-     }
+      sendPrintDocumentRequest();
+    } else if (printWithCloudPrint) {
+      showCustomMessage(localStrings.getString('printWithCloudPrintWait'));
+      disableInputElementsInSidebar();
+    } else {
+      isTabHidden = true;
+      chrome.send('hidePreview');
+    }
     return;
   }
 
@@ -448,21 +451,6 @@ function requestToPrintDocument() {
   } else {
     window.setTimeout(function() { sendPrintDocumentRequest(); }, 1000);
   }
-}
-
-/**
- * Asks the browser to print the pending preview PDF that just finished
- * loading.
- */
-function requestToPrintPendingDocument() {
-  hasPendingPrintDocumentRequest = false;
-
-  if (!areSettingsValid()) {
-    if (isTabHidden)
-      cancelPendingPrintRequest();
-    return;
-  }
-  sendPrintDocumentRequest();
 }
 
 /**
@@ -487,7 +475,6 @@ function sendPrintDocumentRequest() {
  * Loads the selected preview pages.
  */
 function loadSelectedPages() {
-  hasPendingPreviewRequest = false;
   pageSettings.updatePageSelection();
   var pageSet = pageSettings.previouslySelectedPages;
   var pageCount = pageSet.length;
@@ -518,7 +505,9 @@ function requestPrintPreview() {
 
   printSettings.save();
   layoutSettings.updateState();
+  previewArea.resetState();
   isPrintReadyMetafileReady = false;
+  isFirstPageLoaded = false;
 
   var totalPageCount = pageSettings.totalPageCount;
   if (!previewModifiable && totalPageCount > 0)
@@ -539,6 +528,17 @@ function fileSelectionCancelled() {
 }
 
 /**
+ * Called from PrintPreviewUI::OnFileSelectionCompleted to notify the print
+ * preview tab regarding the file selection completed event.
+ */
+function fileSelectionCompleted() {
+  // If the file selection is completed and the tab is not already closed it
+  // means that a pending print to pdf request exists.
+  disableInputElementsInSidebar();
+  showCustomMessage(localStrings.getString('printingToPDFInProgress'));
+}
+
+/**
  * Set the default printer. If there is one, generate a print preview.
  * @param {string} printer Name of the default printer. Empty if none.
  * @param {string} cloudPrintData Cloud print related data to restore if
@@ -552,7 +552,7 @@ function setDefaultPrinter(printer_name, cloudPrintData) {
     if (cloudPrintData) {
       cloudprint.setDefaultPrinter(printer_name,
                                    cloudPrintData,
-                                   addCloudPrinters,
+                                   addDestinationListOptionAtPosition,
                                    doUpdateCloudPrinterCapabilities);
     } else {
       $('printer-list')[0].value = defaultOrLastUsedPrinterName;
@@ -588,18 +588,24 @@ function setPrinters(printers) {
                            false,
                            false);
   addDestinationListOption('', '', false, true, true);
-
+  if (useCloudPrint) {
+    addDestinationListOption(localStrings.getString('printWithCloudPrint'),
+                             PRINT_WITH_CLOUD_PRINT,
+                             false,
+                             false,
+                             false);
+    addDestinationListOption('', '', false, true, true);
+  }
   // Add options to manage printers.
   if (!cr.isChromeOS) {
-    addDestinationListOption(localStrings.getString('manageLocalPrinters'),
+    addDestinationListOption(localStrings.getString('managePrinters'),
         MANAGE_LOCAL_PRINTERS, false, false, false);
-  }
-  if (useCloudPrint) {
+  } else if (useCloudPrint) {
     // Fetch recent printers.
-    cloudprint.fetchPrinters(addCloudPrinters, false);
+    cloudprint.fetchPrinters(addDestinationListOptionAtPosition, false);
     // Fetch the full printer list.
-    cloudprint.fetchPrinters(addCloudPrinters, true);
-    addDestinationListOption(localStrings.getString('manageCloudPrinters'),
+    cloudprint.fetchPrinters(addDestinationListOptionAtPosition, true);
+    addDestinationListOption(localStrings.getString('managePrinters'),
         MANAGE_CLOUD_PRINTERS, false, false, false);
   }
 
@@ -677,130 +683,6 @@ function addDestinationListOptionAtPosition(position,
   printerList.add(option, before);
   return option;
 }
-
-/**
- * Test if a particular cloud printer has already been added to the
- * printer dropdown.
- * @param {string} id A unique value to track this printer.
- * @return {boolean} True if this id has previously been passed to
- *     trackCloudPrinterAdded.
- */
-function cloudPrinterAlreadyAdded(id) {
-  return (addedCloudPrinters[id]);
-}
-
-/**
- * Record that a cloud printer will added to the printer dropdown.
- * @param {string} id A unique value to track this printer.
- * @return {boolean} False if adding this printer would exceed
- *     |maxCloudPrinters|.
- */
-function trackCloudPrinterAdded(id) {
-  if (Object.keys(addedCloudPrinters).length < maxCloudPrinters) {
-    addedCloudPrinters[id] = true;
-    return true;
-  } else {
-    return false;
-  }
-}
-
-
-/**
- * Add cloud printers to the list drop down.
- * Called from the cloudprint object on receipt of printer information from the
- * cloud print server.
- * @param {Array} printers Array of printer info objects.
- * @return {Object} The currently selected printer.
- */
-function addCloudPrinters(printers) {
-  var isFirstPass = false;
-  var showMorePrintersOption = false;
-  var printerList = $('printer-list');
-
-  if (firstCloudPrintOptionPos == lastCloudPrintOptionPos) {
-    isFirstPass = true;
-    // Remove empty entry added by setDefaultPrinter.
-    if (printerList[0] && printerList[0].textContent == '')
-      printerList.remove(0);
-    var option = addDestinationListOptionAtPosition(
-        lastCloudPrintOptionPos++,
-        localStrings.getString('cloudPrinters'),
-        'Label',
-        false,
-        true,
-        false);
-    cloudprint.setCloudPrint(option, null, null);
-  }
-  if (printers != null) {
-    if (printers.length == 0) {
-      addDestinationListOptionAtPosition(lastCloudPrintOptionPos++,
-          localStrings.getString('addCloudPrinter'),
-          ADD_CLOUD_PRINTER,
-          false,
-          false,
-          false);
-    } else {
-      for (var i = 0; i < printers.length; i++) {
-        if (!cloudPrinterAlreadyAdded(printers[i]['id'])) {
-          if (!trackCloudPrinterAdded(printers[i]['id'])) {
-            showMorePrintersOption = true;
-            break;
-          }
-          var option = addDestinationListOptionAtPosition(
-              lastCloudPrintOptionPos++,
-              printers[i]['name'],
-              printers[i]['id'],
-              printers[i]['name'] == defaultOrLastUsedPrinterName,
-              false,
-              false);
-          cloudprint.setCloudPrint(option,
-                                   printers[i]['name'],
-                                   printers[i]['id']);
-        }
-      }
-      if (showMorePrintersOption) {
-        addDestinationListOptionAtPosition(lastCloudPrintOptionPos++,
-                                           '',
-                                           '',
-                                           false,
-                                           true,
-                                           true);
-        addDestinationListOptionAtPosition(lastCloudPrintOptionPos++,
-            localStrings.getString('morePrinters'),
-            MORE_PRINTERS, false, false, false);
-      }
-    }
-  } else {
-    if (!cloudPrinterAlreadyAdded(SIGN_IN)) {
-      addDestinationListOptionAtPosition(lastCloudPrintOptionPos++,
-                                         localStrings.getString('signIn'),
-                                         SIGN_IN,
-                                         false,
-                                         false,
-                                         false);
-      trackCloudPrinterAdded(SIGN_IN);
-    }
-  }
-  if (isFirstPass) {
-    addDestinationListOptionAtPosition(lastCloudPrintOptionPos,
-                                       '',
-                                       '',
-                                       false,
-                                       true,
-                                       true);
-    addDestinationListOptionAtPosition(lastCloudPrintOptionPos + 1,
-                                       localStrings.getString('localPrinters'),
-                                       '',
-                                       false,
-                                       true,
-                                       false);
-  }
-  var selectedPrinter = printerList.selectedIndex;
-  if (selectedPrinter < 0)
-    return null;
-  return printerList.options[selectedPrinter];
-}
-
 /**
  * Sets the color mode for the PDF plugin.
  * Called from PrintPreviewHandler::ProcessColorSetting().
@@ -823,9 +705,12 @@ function setColor(color) {
 function displayErrorMessage(errorMessage) {
   $('print-button').disabled = true;
   $('overlay-layer').classList.remove('invisible');
-  $('dancing-dots-text').classList.add('hidden');
-  $('error-text').innerHTML = errorMessage;
-  $('error-text').classList.remove('hidden');
+  var customMessage = $('custom-message');
+  customMessage.textContent = errorMessage;
+  customMessage.hidden = false;
+  var customMessageWithDots = $('custom-message-with-dots');
+  customMessageWithDots.innerHTML = '';
+  customMessageWithDots.hidden = true;;
   var pdfViewer = $('pdf-viewer');
   if (pdfViewer)
     $('mainview').removeChild(pdfViewer);
@@ -866,7 +751,7 @@ function printPreviewFailed() {
 
 /**
  * Display an error message when encountered invalid printer settings.
- * Called from PrintPreviewMessageHandler::OnInvalidDefaultPrinter().
+ * Called from PrintPreviewMessageHandler::OnInvalidPrinterSettings().
  */
 function invalidPrinterSettings() {
   displayErrorMessage(localStrings.getString('invalidPrinterSettings'));
@@ -879,9 +764,10 @@ function onPDFLoad() {
   if (previewModifiable) {
     setPluginPreviewPageCount();
   }
-  $('pdf-viewer').fitToHeight();
   cr.dispatchSimpleEvent(document, 'PDFLoaded');
-  hideLoadingAnimation();
+  isFirstPageLoaded = true;
+  checkAndHideOverlayLayerIfValid();
+  sendPrintDocumentRequestIfNeeded();
 }
 
 function setPluginPreviewPageCount() {
@@ -909,8 +795,34 @@ function onDidGetPreviewPageCount(pageCount, isModifiable, previewResponseId) {
   cr.dispatchSimpleEvent(document, 'updateSummary');
 }
 
+/**
+ * @param {printing::PageSizeMargins} pageLayout The default layout of the page
+ *     in points.
+ */
 function onDidGetDefaultPageLayout(pageLayout) {
-  // TODO(aayushkumar): Do something here!
+  marginSettings.currentDefaultPageLayout = new print_preview.PageLayout(
+      pageLayout.contentWidth,
+      pageLayout.contentHeight,
+      pageLayout.marginLeft,
+      pageLayout.marginTop,
+      pageLayout.marginRight,
+      pageLayout.marginBottom);
+}
+
+/**
+ * This function sends a request to hide the overlay layer only if there is no
+ * pending print document request and we are not waiting for the print ready
+ * metafile.
+ */
+function checkAndHideOverlayLayerIfValid() {
+  var selectedPrinter = getSelectedPrinterName();
+  var printToDialog = selectedPrinter == PRINT_TO_PDF ||
+      selectedPrinter == PRINT_WITH_CLOUD_PRINT;
+  if ((printToDialog || !previewModifiable) &&
+      !isPrintReadyMetafileReady && hasPendingPrintDocumentRequest) {
+    return;
+  }
+  hideOverlayLayer();
 }
 
 /**
@@ -922,15 +834,16 @@ function onDidGetDefaultPageLayout(pageLayout) {
 function reloadPreviewPages(previewUid, previewResponseId) {
   if (!isExpectedPreviewResponse(previewResponseId))
     return;
-  hasPendingPreviewRequest = false;
-  isPrintReadyMetafileReady = true;
 
   cr.dispatchSimpleEvent(document, 'updatePrintButton');
-  hideLoadingAnimation();
+  checkAndHideOverlayLayerIfValid();
   var pageSet = pageSettings.previouslySelectedPages;
   for (var i = 0; i < pageSet.length; i++)
     $('pdf-viewer').loadPreviewPage(getPageSrcURL(previewUid, pageSet[i]-1), i);
-  // TODO(dpapad): handle pending print file requests.
+
+  hasPendingPreviewRequest = false;
+  isPrintReadyMetafileReady = true;
+  sendPrintDocumentRequestIfNeeded();
 }
 
 /**
@@ -958,13 +871,17 @@ function onDidPreviewPage(pageNumber, previewUid, previewResponseId) {
     return;
 
   currentPreviewUid = previewUid;
-  if (pageIndex == 0) {
+  if (pageIndex == 0)
     createPDFPlugin(pageNumber);
-    hasPendingPreviewRequest = false;
-  }
 
   $('pdf-viewer').loadPreviewPage(
       getPageSrcURL(previewUid, pageNumber), pageIndex);
+
+  if (pageIndex + 1 == pageSettings.previouslySelectedPages.length) {
+    hasPendingPreviewRequest = false;
+    if (pageIndex != 0)
+      sendPrintDocumentRequestIfNeeded();
+  }
 }
 
 /**
@@ -979,19 +896,48 @@ function onDidPreviewPage(pageNumber, previewUid, previewResponseId) {
 function updatePrintPreview(previewUid, previewResponseId) {
   if (!isExpectedPreviewResponse(previewResponseId))
     return;
-  hasPendingPreviewRequest = false;
   isPrintReadyMetafileReady = true;
 
   if (!previewModifiable) {
     // If the preview is not modifiable the plugin has not been created yet.
     currentPreviewUid = previewUid;
+    hasPendingPreviewRequest = false;
     createPDFPlugin(PRINT_READY_DATA_INDEX);
   }
 
   cr.dispatchSimpleEvent(document, 'updatePrintButton');
+  if (previewModifiable)
+    sendPrintDocumentRequestIfNeeded();
+}
 
-  if (hasPendingPrintDocumentRequest)
-    requestToPrintPendingDocument();
+/**
+ * Checks to see if the requested print data is available for printing and
+ * sends a print document request if needed.
+ */
+function sendPrintDocumentRequestIfNeeded() {
+  if (!hasPendingPrintDocumentRequest || !isFirstPageLoaded)
+    return;
+
+  // If the selected printer is PRINT_TO_PDF or PRINT_WITH_CLOUD_PRINT or
+  // the preview source is not modifiable, we need the print ready data for
+  // printing. If the preview source is modifiable, we need to wait till all
+  // the requested pages are loaded in the plugin for printing.
+  var selectedPrinter = getSelectedPrinterName();
+  var printToDialog = selectedPrinter == PRINT_TO_PDF ||
+      selectedPrinter == PRINT_WITH_CLOUD_PRINT;
+  if (((printToDialog || !previewModifiable) && !isPrintReadyMetafileReady) ||
+      (previewModifiable && hasPendingPreviewRequest)) {
+    return;
+  }
+
+  hasPendingPrintDocumentRequest = false;
+
+  if (!areSettingsValid()) {
+    if (isTabHidden)
+      cancelPendingPrintRequest();
+    return;
+  }
+  sendPrintDocumentRequest();
 }
 
 /**
@@ -1023,7 +969,8 @@ function createPDFPlugin(srcDataIndex) {
     pdfViewer.goToPage('0');
     pdfViewer.resetPrintPreviewUrl(srcURL);
     pdfViewer.reload();
-    pdfViewer.grayscale(colorSettings.colorMode == colorSettings.GRAY);
+    pdfViewer.grayscale(
+        colorSettings.colorMode == print_preview.ColorSettings.GRAY);
     return;
   }
 
@@ -1036,24 +983,49 @@ function createPDFPlugin(srcDataIndex) {
   pdfViewer.setAttribute('aria-atomic', 'true');
   $('mainview').appendChild(pdfViewer);
   pdfViewer.onload('onPDFLoad()');
+  pdfViewer.onScroll('onPreviewPositionChanged()');
+  pdfViewer.onPluginSizeChanged('onPreviewPositionChanged()');
   pdfViewer.removePrintButton();
   pdfViewer.grayscale(true);
+}
+
+/**
+ * Called either when there is a scroll event or when the plugin size changes.
+ */
+function onPreviewPositionChanged() {
+  marginSettings.onPreviewPositionChanged();
 }
 
 /**
  * @return {boolean} true if a compatible pdf plugin exists.
  */
 function checkCompatiblePluginExists() {
-  var dummyPlugin = $('dummy-viewer')
-  return !!(dummyPlugin.onload &&
-            dummyPlugin.goToPage &&
-            dummyPlugin.removePrintButton &&
-            dummyPlugin.loadPreviewPage &&
-            dummyPlugin.printPreviewPageCount &&
-            dummyPlugin.resetPrintPreviewUrl);
-}
+  var dummyPlugin = $('dummy-viewer');
+  var pluginInterface = [ dummyPlugin.onload,
+                          dummyPlugin.goToPage,
+                          dummyPlugin.removePrintButton,
+                          dummyPlugin.loadPreviewPage,
+                          dummyPlugin.printPreviewPageCount,
+                          dummyPlugin.resetPrintPreviewUrl,
+                          dummyPlugin.onPluginSizeChanged,
+                          dummyPlugin.onScroll,
+                          dummyPlugin.pageXOffset,
+                          dummyPlugin.pageYOffset,
+                          dummyPlugin.setZoomLevel,
+                          dummyPlugin.setPageXOffset,
+                          dummyPlugin.setPageYOffset,
+                          dummyPlugin.getHorizontalScrollbarThickness,
+                          dummyPlugin.getVerticalScrollbarThickness,
+                          dummyPlugin.getPageLocationNormalized,
+                          dummyPlugin.getHeight,
+                          dummyPlugin.getWidth ];
 
-window.addEventListener('DOMContentLoaded', onLoad);
+  for (var i = 0; i < pluginInterface.length; i++) {
+    if (!pluginInterface[i])
+      return false;
+  }
+  return true;
+}
 
 /**
  * Sets the default values and sends a request to regenerate preview data.
@@ -1097,6 +1069,28 @@ function setInitiatorTabTitle(initiatorTabTitle) {
       'printPreviewTitleFormat', initiatorTabTitle);
 }
 
+/**
+ * Closes this print preview tab.
+ */
+function closePrintPreviewTab() {
+  chrome.send('closePrintPreviewTab');
+}
+
+/**
+  * Handle keyboard events.
+  * @param {KeyboardEvent} e The keyboard event.
+  */
+function onKeyDown(e) {
+  // Escape key closes the dialog.
+  if (e.keyCode == 27 && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    printHeader.disableCancelButton();
+    closePrintPreviewTab();
+  }
+}
+
+window.addEventListener('DOMContentLoaded', onLoad);
+window.onkeydown = onKeyDown;
+
 /// Pull in all other scripts in a single shot.
 <include src="print_preview_animations.js"/>
 <include src="print_preview_cloud.js"/>
@@ -1108,3 +1102,8 @@ function setInitiatorTabTitle(initiatorTabTitle) {
 <include src="layout_settings.js"/>
 <include src="color_settings.js"/>
 <include src="margin_settings.js"/>
+<include src="margin_textbox.js"/>
+<include src="margin_line.js"/>
+<include src="margin_utils.js"/>
+<include src="margins_ui.js"/>
+<include src="preview_area.js"/>

@@ -22,15 +22,13 @@ class InfobarTest(pyauto.PyUITest):
     To run:
       python chrome/test/functional/infobars.py infobars.InfobarTest.Debug
     """
-    import pprint
-    pp = pprint.PrettyPrinter(indent=2)
     while True:
       raw_input('Hit <enter> to dump info.. ')
       info = self.GetBrowserInfo()
       for window in info['windows']:
         for tab in window['tabs']:
           print 'Window', window['index'], 'tab', tab['index']
-          pp.pprint(tab['infobars'])
+          self.pprint(tab['infobars'])
 
   def setUp(self):
     pyauto.PyUITest.setUp(self)
@@ -146,12 +144,12 @@ class InfobarTest(pyauto.PyUITest):
 
   def testPluginCrashForMultiTabs(self):
     """Verify plugin crash infobar shows up only on the tabs using plugin."""
-    if self.IsMac():
-      # On Mac 10.5, flash files loaded too quickly after firing browser ends
-      # up getting downloaded, which seems to indicate that the plugin hasn't
-      # been registered yet.
-      # Hack to register Flash plugin on Mac 10.5.  crbug.com/94123
-      self.GetPluginsInfo()
+    # Flash files loaded too quickly after firing browser end up getting
+    # downloaded, which seems to indicate that the plugin hasn't been
+    # registered yet.
+    # Hack to register Flash plugin on all platforms.  crbug.com/94123
+    self.GetPluginsInfo()
+
     non_flash_url = self.GetFileURLForDataPath('english_page.html')
     flash_url = self.GetFileURLForDataPath('plugin', 'FlashSpin.swf')
     # False = Non flash url, True = Flash url

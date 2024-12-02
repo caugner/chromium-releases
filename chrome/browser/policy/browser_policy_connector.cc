@@ -4,17 +4,16 @@
 
 #include "chrome/browser/policy/browser_policy_connector.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/path_service.h"
 #include "chrome/browser/net/gaia/token_service.h"
-#include "chrome/browser/policy/cloud_policy_data_store.h"
 #include "chrome/browser/policy/cloud_policy_provider.h"
 #include "chrome/browser/policy/cloud_policy_provider_impl.h"
 #include "chrome/browser/policy/cloud_policy_subsystem.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
 #include "chrome/browser/policy/configuration_policy_provider.h"
-#include "chrome/browser/policy/dummy_cloud_policy_provider.h"
-#include "chrome/browser/policy/dummy_configuration_policy_provider.h"
 #include "chrome/browser/policy/user_policy_cache.h"
 #include "chrome/browser/policy/user_policy_token_cache.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -24,6 +23,7 @@
 #include "chrome/common/pref_names.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
+#include "policy/policy_constants.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/policy/configuration_policy_provider_win.h"
@@ -35,6 +35,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/policy/device_policy_cache.h"
 #endif
 
@@ -53,6 +54,26 @@ const FilePath::CharType kPolicyCacheFile[] = FILE_PATH_LITERAL("Policy");
 // on startup. (So that displaying Chrome's GUI does not get delayed.)
 // Delay in milliseconds from startup.
 const int64 kServiceInitializationStartupDelay = 5000;
+
+#if defined(OS_CHROMEOS)
+// MachineInfo key names.
+const char kMachineInfoSystemHwqual[] = "hardware_class";
+
+// These are the machine serial number keys that we check in order until we
+// find a non-empty serial number. The VPD spec says the serial number should be
+// in the "serial_number" key for v2+ VPDs. However, we cannot check this first,
+// since we'd get the "serial_number" value from the SMBIOS (yes, there's a name
+// clash here!), which is different from the serial number we want and not
+// actually per-device. So, we check the the legacy keys first. If we find a
+// serial number for these, we use it, otherwise we must be on a newer device
+// that provides the correct data in "serial_number".
+const char* kMachineInfoSerialNumberKeys[] = {
+  "sn",            // ZGB
+  "Product_S/N",   // Alex
+  "Product_SN",    // Mario
+  "serial_number"  // VPD v2+ devices
+};
+#endif
 
 }  // namespace
 
@@ -104,6 +125,30 @@ void BrowserPolicyConnector::RegisterForDevicePolicy(
     TokenType token_type) {
 #if defined(OS_CHROMEOS)
   if (device_data_store_.get()) {
+    if (device_data_store_->machine_id().empty() ||
+        device_data_store_->machine_model().empty()) {
+      std::string machine_id;
+      std::string machine_model;
+      chromeos::system::StatisticsProvider* provider =
+          chromeos::system::StatisticsProvider::GetInstance();
+      if (!provider->GetMachineStatistic(kMachineInfoSystemHwqual,
+                                         &machine_model)) {
+        LOG(ERROR) << "Failed to get machine model.";
+      }
+      for (size_t i = 0; i < arraysize(kMachineInfoSerialNumberKeys); i++) {
+        if (provider->GetMachineStatistic(kMachineInfoSerialNumberKeys[i],
+                                          &machine_id) &&
+            !machine_id.empty()) {
+          break;
+        }
+      }
+
+      if (machine_id.empty())
+        LOG(ERROR) << "Failed to get machine serial number.";
+
+      device_data_store_->set_machine_id(machine_id);
+      device_data_store_->set_machine_model(machine_model);
+    }
     device_data_store_->set_user_name(owner_email);
     switch (token_type) {
       case TOKEN_TYPE_OAUTH:
@@ -156,7 +201,6 @@ void BrowserPolicyConnector::ResetDevicePolicy() {
 void BrowserPolicyConnector::FetchDevicePolicy() {
 #if defined(OS_CHROMEOS)
   if (device_data_store_.get()) {
-    DCHECK(!device_data_store_->device_token().empty());
     device_data_store_->NotifyDeviceTokenChanged();
   }
 #endif
@@ -165,7 +209,6 @@ void BrowserPolicyConnector::FetchDevicePolicy() {
 void BrowserPolicyConnector::FetchUserPolicy() {
 #if defined(OS_CHROMEOS)
   if (user_data_store_.get()) {
-    DCHECK(!user_data_store_->device_token().empty());
     user_data_store_->NotifyDeviceTokenChanged();
   }
 #endif
@@ -266,15 +309,15 @@ const CloudPolicyDataStore*
 }
 
 BrowserPolicyConnector::BrowserPolicyConnector()
-    : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+    : ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
   managed_platform_provider_.reset(CreateManagedPlatformProvider());
   recommended_platform_provider_.reset(CreateRecommendedPlatformProvider());
 
   managed_cloud_provider_.reset(new CloudPolicyProviderImpl(
-      ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList(),
+      GetChromePolicyDefinitionList(),
       CloudPolicyCacheBase::POLICY_LEVEL_MANDATORY));
   recommended_cloud_provider_.reset(new CloudPolicyProviderImpl(
-      ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList(),
+      GetChromePolicyDefinitionList(),
       CloudPolicyCacheBase::POLICY_LEVEL_RECOMMENDED));
 
 #if defined(OS_CHROMEOS)
@@ -291,7 +334,7 @@ BrowserPolicyConnector::BrowserPolicyConnector(
       recommended_platform_provider_(recommended_platform_provider),
       managed_cloud_provider_(managed_cloud_provider),
       recommended_cloud_provider_(recommended_cloud_provider),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {}
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {}
 
 void BrowserPolicyConnector::Observe(int type,
                                      const NotificationSource& source,
@@ -340,8 +383,8 @@ void BrowserPolicyConnector::InitializeDevicePolicy() {
     // Initialize the subsystem once the message loops are spinning.
     MessageLoop::current()->PostTask(
         FROM_HERE,
-        method_factory_.NewRunnableMethod(
-            &BrowserPolicyConnector::InitializeDevicePolicySubsystem));
+        base::Bind(&BrowserPolicyConnector::InitializeDevicePolicySubsystem,
+                   weak_ptr_factory_.GetWeakPtr()));
   }
 #endif
 }
@@ -373,21 +416,13 @@ CloudPolicyDataStore::UserAffiliation
 
 // static
 BrowserPolicyConnector* BrowserPolicyConnector::CreateForTests() {
-  const ConfigurationPolicyProvider::PolicyDefinitionList*
-      policy_list = ConfigurationPolicyPrefStore::
-          GetChromePolicyDefinitionList();
-  return new BrowserPolicyConnector(
-      new policy::DummyConfigurationPolicyProvider(policy_list),
-      new policy::DummyConfigurationPolicyProvider(policy_list),
-      new policy::DummyCloudPolicyProvider(policy_list),
-      new policy::DummyCloudPolicyProvider(policy_list));
+  return new BrowserPolicyConnector(NULL, NULL, NULL, NULL);
 }
 
 // static
 ConfigurationPolicyProvider*
     BrowserPolicyConnector::CreateManagedPlatformProvider() {
-  const ConfigurationPolicyProvider::PolicyDefinitionList* policy_list =
-      ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList();
+  const PolicyDefinitionList* policy_list = GetChromePolicyDefinitionList();
 #if defined(OS_WIN)
   return new ConfigurationPolicyProviderWin(policy_list);
 #elif defined(OS_MACOSX)
@@ -399,30 +434,29 @@ ConfigurationPolicyProvider*
         policy_list,
         config_dir_path.Append(FILE_PATH_LITERAL("managed")));
   } else {
-    return new DummyConfigurationPolicyProvider(policy_list);
+    return NULL;
   }
 #else
-  return new DummyConfigurationPolicyProvider(policy_list);
+  return NULL;
 #endif
 }
 
 // static
 ConfigurationPolicyProvider*
     BrowserPolicyConnector::CreateRecommendedPlatformProvider() {
-  const ConfigurationPolicyProvider::PolicyDefinitionList* policy_list =
-      ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList();
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
+  const PolicyDefinitionList* policy_list = GetChromePolicyDefinitionList();
   FilePath config_dir_path;
   if (PathService::Get(chrome::DIR_POLICY_FILES, &config_dir_path)) {
     return new ConfigDirPolicyProvider(
         policy_list,
         config_dir_path.Append(FILE_PATH_LITERAL("recommended")));
   } else {
-    return new DummyConfigurationPolicyProvider(policy_list);
+    return NULL;
   }
 #else
-  return new DummyConfigurationPolicyProvider(policy_list);
+  return NULL;
 #endif
 }
 
-}  // namespace
+}  // namespace policy

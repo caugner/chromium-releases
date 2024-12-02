@@ -14,32 +14,28 @@
 #include "content/browser/speech/audio_encoder.h"
 #include "content/browser/speech/endpointer/endpointer.h"
 #include "content/browser/speech/speech_recognition_request.h"
+#include "content/common/content_export.h"
 #include "media/audio/audio_input_controller.h"
+
+namespace net {
+class URLRequestContextGetter;
+}
 
 namespace speech_input {
 
 // Records audio, sends recorded audio to server and translates server response
 // to recognition result.
-class SpeechRecognizer
+class CONTENT_EXPORT SpeechRecognizer
     : public base::RefCountedThreadSafe<SpeechRecognizer>,
       public media::AudioInputController::EventHandler,
       public SpeechRecognitionRequestDelegate {
  public:
-  enum ErrorCode {
-    RECOGNIZER_NO_ERROR,
-    RECOGNIZER_ERROR_CAPTURE,
-    RECOGNIZER_ERROR_NO_SPEECH,
-    RECOGNIZER_ERROR_NO_RESULTS,
-    RECOGNIZER_ERROR_NETWORK,
-  };
-
   // Implemented by the caller to receive recognition events.
-  class Delegate {
+  class CONTENT_EXPORT Delegate {
    public:
     virtual void SetRecognitionResult(
         int caller_id,
-        bool error,
-        const SpeechInputResultArray& result) = 0;
+        const SpeechInputResult& result) = 0;
 
     // Invoked when the first audio packet was received from the audio capture
     // device.
@@ -55,12 +51,18 @@ class SpeechRecognizer
     // sequence and the |SpeechRecognizer| object can be freed up if necessary.
     virtual void DidCompleteRecognition(int caller_id) = 0;
 
+    // Informs that the end pointer has started detecting speech.
+    virtual void DidStartReceivingSpeech(int caller_id) = 0;
+
+    // Informs that the end pointer has stopped detecting speech.
+    virtual void DidStopReceivingSpeech(int caller_id) = 0;
+
     // Invoked if there was an error while recording or recognizing audio. The
     // session has already been cancelled when this call is made and the DidXxxx
     // callbacks will not be issued. It is safe to destroy/release the
     // |SpeechRecognizer| object while processing this call.
     virtual void OnRecognizerError(int caller_id,
-                                   SpeechRecognizer::ErrorCode error) = 0;
+                                   SpeechInputError error) = 0;
 
     // At the start of recognition, a short amount of audio is recorded to
     // estimate the environment/background noise and this callback is issued
@@ -82,9 +84,11 @@ class SpeechRecognizer
                    int caller_id,
                    const std::string& language,
                    const std::string& grammar,
-                   bool censor_results,
+                   net::URLRequestContextGetter* context_getter,
+                   bool filter_profanities,
                    const std::string& hardware_info,
                    const std::string& origin_url);
+
   virtual ~SpeechRecognizer();
 
   // Starts audio recording and does recognition after recording ends. The same
@@ -109,8 +113,7 @@ class SpeechRecognizer
                       uint32 size);
 
   // SpeechRecognitionRequest::Delegate methods.
-  virtual void SetRecognitionResult(bool error,
-                                    const SpeechInputResultArray& result);
+  virtual void SetRecognitionResult(const SpeechInputResult& result);
 
   static const int kAudioSampleRate;
   static const int kAudioPacketIntervalMs;  // Duration of each audio packet.
@@ -120,7 +123,7 @@ class SpeechRecognizer
   static const int kEndpointerEstimationTimeMs;
 
  private:
-  void InformErrorAndCancelRecognition(ErrorCode error);
+  void InformErrorAndCancelRecognition(SpeechInputError error);
   void SendRecordedAudioToServer();
 
   void HandleOnError(int error_code);  // Handles OnError in the IO thread.
@@ -132,12 +135,13 @@ class SpeechRecognizer
   int caller_id_;
   std::string language_;
   std::string grammar_;
-  bool censor_results_;
+  bool filter_profanities_;
   std::string hardware_info_;
   std::string origin_url_;
 
   scoped_ptr<SpeechRecognitionRequest> request_;
   scoped_refptr<media::AudioInputController> audio_controller_;
+  scoped_refptr<net::URLRequestContextGetter> context_getter_;
   AudioEncoder::Codec codec_;
   scoped_ptr<AudioEncoder> encoder_;
   Endpointer endpointer_;

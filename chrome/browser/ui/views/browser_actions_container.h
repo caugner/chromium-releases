@@ -10,8 +10,9 @@
 #include <string>
 #include <vector>
 
+#include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/extensions/extension_toolbar_model.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
@@ -24,7 +25,7 @@
 #include "ui/base/animation/tween.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/menu/view_menu_delegate.h"
-#include "views/controls/resize_area.h"
+#include "views/controls/resize_area_delegate.h"
 #include "views/drag_controller.h"
 #include "views/view.h"
 
@@ -47,6 +48,7 @@ class SlideAnimation;
 
 namespace views {
 class MenuItemView;
+class ResizeArea;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -260,7 +262,7 @@ class BrowserActionsContainer
     : public views::View,
       public views::ViewMenuDelegate,
       public views::DragController,
-      public views::ResizeArea::ResizeAreaDelegate,
+      public views::ResizeAreaDelegate,
       public ui::AnimationDelegate,
       public ExtensionToolbarModel::Observer,
       public BrowserActionOverflowMenuController::Observer,
@@ -345,7 +347,7 @@ class BrowserActionsContainer
                                    const gfx::Point& press_pt,
                                    const gfx::Point& p) OVERRIDE;
 
-  // Overridden from ResizeArea::ResizeAreaDelegate:
+  // Overridden from views::ResizeAreaDelegate:
   virtual void OnResize(int resize_amount, bool done_resizing) OVERRIDE;
 
   // Overridden from ui::AnimationDelegate:
@@ -512,10 +514,10 @@ class BrowserActionsContainer
   // The x position for where to draw the drop indicator. -1 if no indicator.
   int drop_indicator_position_;
 
-  ScopedRunnableMethodFactory<BrowserActionsContainer> task_factory_;
+  base::WeakPtrFactory<BrowserActionsContainer> task_factory_;
 
   // Handles delayed showing of the overflow menu when hovering.
-  ScopedRunnableMethodFactory<BrowserActionsContainer> show_menu_task_factory_;
+  base::WeakPtrFactory<BrowserActionsContainer> show_menu_task_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserActionsContainer);
 };

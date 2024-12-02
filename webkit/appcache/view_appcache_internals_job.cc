@@ -71,17 +71,17 @@ void EmitListItem(const std::string& label,
                   const std::string& data,
                   std::string* out) {
   out->append("<li>");
-  out->append(EscapeForHTML(label));
-  out->append(EscapeForHTML(data));
+  out->append(net::EscapeForHTML(label));
+  out->append(net::EscapeForHTML(data));
   out->append("</li>\n");
 }
 
 void EmitAnchor(const std::string& url, const std::string& text,
                 std::string* out) {
   out->append("<a href=\"");
-  out->append(EscapeForHTML(url));
+  out->append(net::EscapeForHTML(url));
   out->append("\">");
-  out->append(EscapeForHTML(text));
+  out->append(net::EscapeForHTML(text));
   out->append("</a>");
 }
 
@@ -112,7 +112,7 @@ void EmitAppCacheInfo(const GURL& base_url,
   EmitAnchor(info->manifest_url.spec(), info->manifest_url.spec(), out);
   out->append("<br/>\n");
   if (!service->appcache_policy()->CanLoadAppCache(
-          info->manifest_url)) {
+          info->manifest_url, info->manifest_url)) {
     out->append(kFormattedDisabledAppCacheMsg);
   }
   out->append("\n<br/>\n");
@@ -239,15 +239,15 @@ void EmitAppCacheResourceInfoVector(
 
 void EmitResponseHeaders(net::HttpResponseHeaders* headers, std::string* out) {
   out->append("<hr><pre>");
-  out->append(EscapeForHTML(headers->GetStatusLine()));
+  out->append(net::EscapeForHTML(headers->GetStatusLine()));
   out->push_back('\n');
 
   void* iter = NULL;
   std::string name, value;
   while (headers->EnumerateHeaderLines(&iter, &name, &value)) {
-    out->append(EscapeForHTML(name));
+    out->append(net::EscapeForHTML(name));
     out->append(": ");
-    out->append(EscapeForHTML(value));
+    out->append(net::EscapeForHTML(value));
     out->push_back('\n');
   }
   out->append("</pre>");
@@ -315,7 +315,7 @@ class MainPageJob : public BaseInternalsJob {
     DCHECK(request_);
     info_collection_ = new AppCacheInfoCollection;
     gotinfo_complete_callback_ =
-        new net::CancelableCompletionCallback<MainPageJob>(
+        new net::CancelableOldCompletionCallback<MainPageJob>(
             this, &MainPageJob::OnGotInfoComplete);
     appcache_service_->GetAllAppCacheInfo(
         info_collection_, gotinfo_complete_callback_);
@@ -365,7 +365,7 @@ class MainPageJob : public BaseInternalsJob {
     StartAsync();
   }
 
-  scoped_refptr<net::CancelableCompletionCallback<MainPageJob> >
+  scoped_refptr<net::CancelableOldCompletionCallback<MainPageJob> >
       gotinfo_complete_callback_;
   scoped_refptr<AppCacheInfoCollection> info_collection_;
   DISALLOW_COPY_AND_ASSIGN(MainPageJob);
@@ -402,7 +402,7 @@ class RemoveAppCacheJob : public RedirectToMainPageJob {
   virtual void Start() {
     DCHECK(request_);
     delete_appcache_callback_ =
-        new net::CancelableCompletionCallback<RemoveAppCacheJob>(
+        new net::CancelableOldCompletionCallback<RemoveAppCacheJob>(
             this, &RemoveAppCacheJob::OnDeleteAppCacheComplete);
     appcache_service_->DeleteAppCacheGroup(
         manifest_url_, delete_appcache_callback_);
@@ -420,7 +420,7 @@ class RemoveAppCacheJob : public RedirectToMainPageJob {
   }
 
   GURL manifest_url_;
-  scoped_refptr<net::CancelableCompletionCallback<RemoveAppCacheJob> >
+  scoped_refptr<net::CancelableOldCompletionCallback<RemoveAppCacheJob> >
       delete_appcache_callback_;
 };
 
@@ -579,7 +579,7 @@ class ViewEntryJob : public BaseInternalsJob,
   scoped_refptr<net::IOBuffer> response_data_;
   int amount_read_;
   scoped_ptr<AppCacheResponseReader> reader_;
-  net::CompletionCallbackImpl<ViewEntryJob> read_callback_;
+  net::OldCompletionCallbackImpl<ViewEntryJob> read_callback_;
 };
 
 }  // namespace

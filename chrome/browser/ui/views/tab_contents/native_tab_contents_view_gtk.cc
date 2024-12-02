@@ -5,17 +5,17 @@
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_gtk.h"
 
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/tab_contents/web_drag_dest_gtk.h"
 #include "chrome/browser/ui/gtk/constrained_window_gtk.h"
 #include "chrome/browser/ui/gtk/tab_contents_drag_source.h"
+#include "chrome/browser/tab_contents/web_drag_bookmark_handler_gtk.h"
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_delegate.h"
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_views.h"
 #include "content/browser/renderer_host/render_widget_host_view_gtk.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/browser/tab_contents/web_drag_dest_gtk.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
-#include "views/views_delegate.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -63,6 +63,17 @@ gboolean OnMouseScroll(GtkWidget* widget, GdkEventScroll* event,
 
   return FALSE;
 }
+
+// Our dragging needs to use views datatypes instead of the default GTK ones.
+class WebDragBookmarkHandlerViewGtk : public WebDragBookmarkHandlerGtk {
+ public:
+  virtual GdkAtom GetBookmarkTargetAtom() const {
+    // For Views, bookmark drag data is encoded in the same format, and
+    // associated with a custom format. See BookmarkNodeData::Write() for
+    // details.
+    return BookmarkNodeData::GetBookmarkCustomFormat();
+  }
+};
 
 }  // namespace
 
@@ -136,9 +147,12 @@ RenderWidgetHostView* NativeTabContentsViewGtk::CreateRenderWidgetHostView(
   views::NativeWidgetGtk::RegisterChildExposeHandler(view->native_view());
 
   // Renderer target DnD.
-  if (delegate_->GetTabContents()->ShouldAcceptDragAndDrop())
-    drag_dest_.reset(new WebDragDestGtk(delegate_->GetTabContents(),
-                                        view->native_view()));
+  if (delegate_->GetTabContents()->ShouldAcceptDragAndDrop()) {
+    drag_dest_.reset(new content::WebDragDestGtk(delegate_->GetTabContents(),
+                                                 view->native_view()));
+    bookmark_handler_gtk_.reset(new WebDragBookmarkHandlerGtk);
+    drag_dest_->set_delegate(bookmark_handler_gtk_.get());
+  }
 
   gtk_fixed_put(GTK_FIXED(GetWidget()->GetNativeView()), view->native_view(), 0,
                 0);
@@ -151,11 +165,11 @@ gfx::NativeWindow NativeTabContentsViewGtk::GetTopLevelNativeWindow() const {
   return window ? GTK_WINDOW(window) : NULL;
 }
 
-void NativeTabContentsViewGtk::SetPageTitle(const std::wstring& title) {
+void NativeTabContentsViewGtk::SetPageTitle(const string16& title) {
   // Set the window name to include the page title so it's easier to spot
   // when debugging (e.g. via xwininfo -tree).
   if (GDK_IS_WINDOW(GetNativeView()->window))
-    gdk_window_set_title(GetNativeView()->window, WideToUTF8(title).c_str());
+    gdk_window_set_title(GetNativeView()->window, UTF16ToUTF8(title).c_str());
 }
 
 void NativeTabContentsViewGtk::StartDragging(const WebDropData& drop_data,
@@ -274,8 +288,7 @@ void NativeTabContentsViewGtk::PositionConstrainedWindows(
 // static
 NativeTabContentsView* NativeTabContentsView::CreateNativeTabContentsView(
     internal::NativeTabContentsViewDelegate* delegate) {
-  if (views::Widget::IsPureViews() &&
-      views::ViewsDelegate::views_delegate->GetDefaultParentView())
+  if (views::Widget::IsPureViews())
     return new NativeTabContentsViewViews(delegate);
   return new NativeTabContentsViewGtk(delegate);
 }

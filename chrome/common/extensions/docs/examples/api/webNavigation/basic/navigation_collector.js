@@ -48,16 +48,18 @@ function NavigationCollector() {
   // Bind handlers to the 'webNavigation' events that we're interested
   // in handling in order to build up a complete picture of the whole
   // navigation event.
-  chrome.experimental.webNavigation.onBeforeRetarget.addListener(
-      this.onBeforeRetargetListener_.bind(this));
-  chrome.experimental.webNavigation.onBeforeNavigate.addListener(
+  chrome.webNavigation.onCreatedNavigationTarget.addListener(
+      this.onCreatedNavigationTargetListener_.bind(this));
+  chrome.webNavigation.onBeforeNavigate.addListener(
       this.onBeforeNavigateListener_.bind(this));
-  chrome.experimental.webNavigation.onCompleted.addListener(
+  chrome.webNavigation.onCompleted.addListener(
       this.onCompletedListener_.bind(this));
-  chrome.experimental.webNavigation.onCommitted.addListener(
+  chrome.webNavigation.onCommitted.addListener(
       this.onCommittedListener_.bind(this));
-  chrome.experimental.webNavigation.onErrorOccurred.addListener(
+  chrome.webNavigation.onErrorOccurred.addListener(
       this.onErrorOccurredListener_.bind(this));
+  chrome.webNavigation.onReferenceFragmentUpdated.addListener(
+      this.onReferenceFragmentUpdatedListener_.bind(this));
 
   // Bind handler to extension messages for communication from popup.
   chrome.extension.onRequest.addListener(this.onRequestListener_.bind(this));
@@ -157,8 +159,9 @@ NavigationCollector.prototype = {
 
 
   /**
-   * Handler for the 'onBeforeRetarget' event. Updates the pending request
-   * with a source frame/tab, and notes that it was opened in a new tab.
+   * Handler for the 'onCreatedNavigationTarget' event. Updates the
+   * pending request with a source frame/tab, and notes that it was opened in a
+   * new tab.
    *
    * Pushes the request onto the
    * 'pending_' object, and stores it for later use.
@@ -166,7 +169,7 @@ NavigationCollector.prototype = {
    * @param {!Object} data The event data generated for this request.
    * @private
    */
-  onBeforeRetargetListener_: function(data) {
+  onCreatedNavigationTargetListener_: function(data) {
     var id = this.parseId_(data);
     this.prepareDataStorage_(id, data.url);
     this.pending_[id].openedInNewTab = data.tabId;
@@ -209,6 +212,40 @@ NavigationCollector.prototype = {
           chrome.i18n.getMessage('errorCommittedWithoutPending'),
           data.url,
           data);
+    } else {
+      this.prepareDataStorage_(id, data.url);
+      this.pending_[id].transitionType = data.transitionType;
+      this.pending_[id].transitionQualifiers =
+          data.transitionQualifiers;
+    }
+  },
+
+
+  /**
+   * Handler for the 'onReferenceFragmentUpdated' event. Updates the pending
+   * request with transition information.
+   *
+   * Pushes the request onto the
+   * 'pending_' object, and stores it for later use.
+   *
+   * @param {!Object} data The event data generated for this request.
+   * @private
+   */
+  onReferenceFragmentUpdatedListener_: function(data) {
+    var id = this.parseId_(data);
+    if (!this.pending_[id]) {
+      this.completed_[data.url] = this.completed_[data.url] || [];
+      this.completed_[data.url].push({
+        duration: 0,
+        openedInNewWindow: false,
+        source: {
+          frameId: null,
+          tabId: null
+        },
+        transitionQualifiers: data.transitionQualifiers,
+        transitionType: data.transitionType,
+        url: data.url
+      });
     } else {
       this.prepareDataStorage_(id, data.url);
       this.pending_[id].transitionType = data.transitionType;

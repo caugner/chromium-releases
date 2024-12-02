@@ -13,14 +13,14 @@
 #define UI_GFX_RECT_H_
 #pragma once
 
-#include <iosfwd>
+#include <string>
 
 #include "ui/gfx/point.h"
 #include "ui/gfx/size.h"
 
 #if defined(OS_WIN)
 typedef struct tagRECT RECT;
-#elif defined(USE_X11)
+#elif defined(TOOLKIT_USES_GTK)
 typedef struct _GdkRectangle GdkRectangle;
 #endif
 
@@ -41,7 +41,7 @@ class UI_EXPORT Rect {
   explicit Rect(const RECT& r);
 #elif defined(OS_MACOSX)
   explicit Rect(const CGRect& r);
-#elif defined(USE_X11)
+#elif defined(TOOLKIT_USES_GTK)
   explicit Rect(const GdkRectangle& r);
 #endif
 #if defined(USE_WAYLAND)
@@ -50,13 +50,13 @@ class UI_EXPORT Rect {
   explicit Rect(const gfx::Size& size);
   Rect(const gfx::Point& origin, const gfx::Size& size);
 
-  ~Rect() {}
+  ~Rect();
 
 #if defined(OS_WIN)
   Rect& operator=(const RECT& r);
 #elif defined(OS_MACOSX)
   Rect& operator=(const CGRect& r);
-#elif defined(USE_X11)
+#elif defined(TOOLKIT_USES_GTK)
   Rect& operator=(const GdkRectangle& r);
 #endif
 #if defined(USE_WAYLAND)
@@ -123,7 +123,7 @@ class UI_EXPORT Rect {
 #if defined(OS_WIN)
   // Construct an equivalent Win32 RECT object.
   RECT ToRECT() const;
-#elif defined(USE_X11)
+#elif defined(TOOLKIT_USES_GTK)
   GdkRectangle ToGdkRectangle() const;
 #elif defined(OS_MACOSX)
   // Construct an equivalent CoreGraphics object.
@@ -181,16 +181,19 @@ class UI_EXPORT Rect {
   // at given |size|.
   Rect Center(const gfx::Size& size) const;
 
+  // Splits |this| in two halves, |left_half| and |right_half|.
+  void SplitVertically(gfx::Rect* left_half, gfx::Rect* right_half) const;
+
   // Returns true if this rectangle shares an entire edge (i.e., same width or
   // same height) with the given rectangle, and the rectangles do not overlap.
   bool SharesEdgeWith(const gfx::Rect& rect) const;
+
+  std::string ToString() const;
 
  private:
   gfx::Point origin_;
   gfx::Size size_;
 };
-
-UI_EXPORT std::ostream& operator<<(std::ostream& out, const gfx::Rect& r);
 
 }  // namespace gfx
 

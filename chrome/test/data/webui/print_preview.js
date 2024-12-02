@@ -68,6 +68,7 @@ PrintPreviewWebUITest.prototype = {
             disableColorOption: true,
             setColorAsDefault: true,
             disableCopiesOption: true,
+            printerDefaultDuplexValue: copiesSettings.SIMPLEX,
           });
         }));
     var savedArgs = new SaveMockArguments();
@@ -78,7 +79,6 @@ PrintPreviewWebUITest.prototype = {
 
     mockHandler.stubs().getPrinters().
         will(callFunction(function() {
-          setUseCloudPrint(false, '');
           setPrinters([{
               printerName: 'FooName',
               deviceName: 'FooDevice',
@@ -166,6 +166,19 @@ PrintPreviewWebUITest.prototype = {
     pdfViewer.removePrintButton = fakeFunction;
     pdfViewer.fitToHeight = fakeFunction;
     pdfViewer.grayscale = fakeFunction;
+    pdfViewer.getZoomLevel = fakeFunction;
+    pdfViewer.setZoomLevel = fakeFunction;
+    pdfViewer.pageXOffset = fakeFunction;
+    pdfViewer.pageYOffset = fakeFunction;
+    pdfViewer.setPageXOffset = fakeFunction;
+    pdfViewer.setPageYOffset = fakeFunction;
+    pdfViewer.getHeight = fakeFunction;
+    pdfViewer.getWidth = fakeFunction;
+    pdfViewer.getPageLocationNormalized = fakeFunction;
+    pdfViewer.onScroll = fakeFunction;
+    pdfViewer.onPluginSizeChanged = fakeFunction;
+    pdfViewer.getHorizontalScrollbarThickness = fakeFunction;
+    pdfViewer.getVerticalScrollbarThickness = fakeFunction;
     $('mainview').appendChild(pdfViewer);
     onPDFLoad();
   },
@@ -234,48 +247,32 @@ TEST_F('PrintPreviewWebUITest', 'TestPrinterList', function() {
 
 // Test that the printer list is structured correctly after calling
 // addCloudPrinters with an empty list.
-TEST_F('PrintPreviewWebUITest', 'FLAKY_TestPrinterListCloudEmpty', function() {
-  addCloudPrinters([]);
+TEST_F('PrintPreviewWebUITest', 'TestPrinterListCloudEmpty', function() {
+  cloudprint.addCloudPrinters([], addDestinationListOptionAtPosition);
   var printerList = $('printer-list');
   assertNotEquals(null, printerList);
-  expectEquals(localStrings.getString('cloudPrinters'),
-               printerList.options[0].text);
-  expectEquals(localStrings.getString('addCloudPrinter'),
-               printerList.options[1].text);
-});
-
-// Test that the printer list is structured correctly after calling
-// addCloudPrinters with a null list.
-TEST_F('PrintPreviewWebUITest', 'FLAKY_TestPrinterListCloudNull', function() {
-  addCloudPrinters(null);
-  var printerList = $('printer-list');
-  assertNotEquals(null, printerList);
-  expectEquals(localStrings.getString('cloudPrinters'),
-               printerList.options[0].text);
-  expectEquals(localStrings.getString('signIn'),
-               printerList.options[1].text);
 });
 
 // Test that the printer list is structured correctly after attempting to add
 // individual cloud printers until no more can be added.
-TEST_F('PrintPreviewWebUITest', 'FLAKY_TestPrinterListCloud', function() {
+TEST_F('PrintPreviewWebUITest', 'TestPrinterListCloud', function() {
   var printerList = $('printer-list');
   assertNotEquals(null, printerList);
   var printer = new Object;
   printer['name'] = 'FooCloud';
   for (var i = 0; i < maxCloudPrinters; i++) {
     printer['id'] = String(i);
-    addCloudPrinters([printer]);
-    expectEquals(localStrings.getString('cloudPrinters'),
-                 printerList.options[0].text);
-    expectEquals('FooCloud', printerList.options[i + 1].text);
-    expectEquals(String(i), printerList.options[i + 1].value);
+    cloudprint.addCloudPrinters([printer], addDestinationListOptionAtPosition);
+    expectEquals('FooCloud', printerList.options[i].text);
+    expectEquals(String(i), printerList.options[i].value);
   }
-  printer['id'] = maxCloudPrinters + 1;
-  addCloudPrinters([printer]);
-  expectEquals('', printerList.options[maxCloudPrinters + 1].text);
-  expectEquals(localStrings.getString('morePrinters'),
-               printerList.options[maxCloudPrinters + 2].text);
+  cloudprint.addCloudPrinters([printer], addDestinationListOptionAtPosition);
+  expectNotEquals('FooCloud', printerList.options[i].text);
+  expectNotEquals(String(i), printerList.options[i].value);
+  for (var i = 0; i < maxCloudPrinters; i++) {
+    expectEquals('FooCloud', printerList.options[i].text);
+    expectEquals(String(i), printerList.options[i].value);
+  }
 });
 
 /**
@@ -298,6 +295,7 @@ TEST_F('PrintPreviewWebUITest', 'TestSectionsDisabled', function() {
           setColorAsDefault: true,
           disableCopiesOption: true,
           disableLandscapeOption: true,
+          printerDefaultDuplexValue: copiesSettings.SIMPLEX,
         });
       }));
 
@@ -317,6 +315,7 @@ TEST_F('PrintPreviewWebUITest', 'TestColorSettings', function() {
           setColorAsDefault: true,
           disableCopiesOption: false,
           disableLandscapeOption: false,
+          printerDefaultDuplexValue: copiesSettings.SIMPLEX,
         });
       }));
 
@@ -331,12 +330,63 @@ TEST_F('PrintPreviewWebUITest', 'TestColorSettings', function() {
           setColorAsDefault: false,
           disableCopiesOption: false,
           disableLandscapeOption: false,
+          printerDefaultDuplexValue: copiesSettings.SIMPLEX,
         });
       }));
 
   updateControlsWithSelectedPrinterCapabilities();
   expectFalse(colorSettings.colorRadioButton.checked);
   expectTrue(colorSettings.bwRadioButton.checked);
+});
+
+// Test to verify that duplex settings are set according to the printer
+// capabilities.
+TEST_F('PrintPreviewWebUITest', 'TestDuplexSettings', function() {
+  this.mockHandler.expects(once()).getPrinterCapabilities('FooDevice').
+      will(callFunction(function() {
+        updateWithPrinterCapabilities({
+          disableColorOption: false,
+          setColorAsDefault: false,
+          disableCopiesOption: false,
+          disableLandscapeOption: false,
+          printerDefaultDuplexValue: copiesSettings.SIMPLEX,
+        });
+      }));
+  updateControlsWithSelectedPrinterCapabilities();
+  expectEquals(copiesSettings.duplexMode, copiesSettings.SIMPLEX);
+  expectEquals(copiesSettings.twoSidedOption_.hidden, false);
+
+  // If the printer default duplex value is UNKNOWN_DUPLEX_MODE, hide the
+  // two sided option.
+  this.mockHandler.expects(once()).getPrinterCapabilities('FooDevice').
+      will(callFunction(function() {
+        updateWithPrinterCapabilities({
+          disableColorOption: false,
+          setColorAsDefault: false,
+          disableCopiesOption: false,
+          disableLandscapeOption: false,
+          printerDefaultDuplexValue: copiesSettings.UNKNOWN_DUPLEX_MODE,
+        });
+      }));
+  updateControlsWithSelectedPrinterCapabilities();
+  expectEquals(copiesSettings.duplexMode, copiesSettings.UNKNOWN_DUPLEX_MODE);
+  expectEquals(copiesSettings.twoSidedOption_.hidden, true);
+
+  this.mockHandler.expects(once()).getPrinterCapabilities('FooDevice').
+      will(callFunction(function() {
+        updateWithPrinterCapabilities({
+          disableColorOption: false,
+          setColorAsDefault: false,
+          disableCopiesOption: false,
+          disableLandscapeOption: false,
+          printerDefaultDuplexValue: copiesSettings.SIMPLEX,
+        });
+      }));
+  updateControlsWithSelectedPrinterCapabilities();
+  expectEquals(copiesSettings.twoSidedOption_.hidden, false);
+  expectEquals(copiesSettings.duplexMode, copiesSettings.SIMPLEX);
+  copiesSettings.twoSidedCheckbox.checked = true;
+  expectEquals(copiesSettings.duplexMode, copiesSettings.LONG_EDGE);
 });
 
 // Test that changing the selected printer updates the preview.
@@ -395,7 +445,7 @@ TEST_F('PrintPreviewNoPDFWebUITest', 'TestErrorMessage', function() {
   var errorButton = $('error-button');
   assertNotEquals(null, errorButton);
   expectFalse(errorButton.disabled);
-  var errorText = $('error-text');
+  var errorText = $('custom-message');
   assertNotEquals(null, errorText);
   expectFalse(errorText.classList.contains('hidden'));
 });

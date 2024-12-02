@@ -7,6 +7,12 @@
  */
 
 cr.define('login', function() {
+  // Network state constants.
+  const NET_STATE = {
+    OFFLINE: 0,
+    ONLINE: 1,
+    PORTAL: 2
+  };
 
   /**
    * Creates a header bar element.
@@ -20,12 +26,14 @@ cr.define('login', function() {
 
     /** @inheritDoc */
     decorate: function() {
-      $('shutdown-button').addEventListener('click', function(e) {
-        chrome.send('shutdownSystem');
-      });
+      $('shutdown-header-bar-item').addEventListener('click',
+          this.handleShutdownClick_);
+      $('shutdown-button').addEventListener('click',
+          this.handleShutdownClick_);
       $('add-user-button').addEventListener('click', function(e) {
         chrome.send('loginRequestNetworkState',
-                    ['login.HeaderBar.updateState']);
+                    ['login.HeaderBar.handleAddUser',
+                     'check']);
       });
       $('cancel-add-user-button').addEventListener('click', function(e) {
         this.hidden = true;
@@ -33,21 +41,46 @@ cr.define('login', function() {
         Oobe.showScreen({id: SCREEN_ACCOUNT_PICKER});
         Oobe.resetSigninUI();
       });
+    },
+
+    /**
+     * Shutdown button click handler.
+     * @private
+     */
+    handleShutdownClick_: function(e) {
+      chrome.send('shutdownSystem');
     }
   };
 
   /**
-   * Network state changed callback.
-   * @param {Integer} state Current state of the network: 0 - offline;
-   * 1 - online; 2 - under the captive portal.
+   * Continues add user button click handling after network state has
+   * been recieved.
+   * @param {Integer} state Current state of the network (see NET_STATE).
+   * @param {string} network Name of the network.
+   * @param {string} reason Reason the callback was called.
    */
-  HeaderBar.updateState = function(state) {
-    var isOffline = state == 0;
-    if (!isOffline) {
+  HeaderBar.handleAddUser = function(state, network, reason) {
+    if (state != NET_STATE.OFFLINE) {
       Oobe.showSigninUI();
     } else {
       $('bubble').showTextForElement($('add-user-button'),
-          localStrings.getString('addUserOfflineMessage'));
+          localStrings.getString('addUserErrorMessage'));
+      chrome.send('loginAddNetworkStateObserver',
+                  ['login.HeaderBar.bubbleWatchdog']);
+    }
+  }
+
+  /**
+   * Observes network state, and close the bubble when network becomes online.
+   * @param {Integer} state Current state of the network (see NET_STATE).
+   * @param {string} network Name of the network.
+   * @param {string} reason Reason the callback was called.
+   */
+  HeaderBar.bubbleWatchdog = function(state, network, reason) {
+    if (state != NET_STATE.OFFLINE) {
+      $('bubble').hideForElement($('add-user-button'));
+      chrome.send('loginRemoveNetworkStateObserver',
+                  ['login.HeaderBar.bubbleWatchdog']);
     }
   }
 

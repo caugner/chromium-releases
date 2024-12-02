@@ -7,13 +7,13 @@
 
 #include "base/compiler_specific.h"
 #include "base/pickle.h"
-#include "base/threading/thread.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/threading/thread.h"
+#include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_error_job.h"
-#include "net/base/io_buffer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/appcache/appcache_response.h"
 #include "webkit/appcache/appcache_url_request_job.h"
@@ -476,7 +476,7 @@ class AppCacheURLRequestJobTest : public testing::Test {
   }
 
   void VerifyDeliverNetworkResponse() {
-    EXPECT_EQ(request_->status().os_error(),
+    EXPECT_EQ(request_->status().error(),
               net::ERR_INTERNET_DISCONNECTED);
     TestFinished();
   }
@@ -508,7 +508,7 @@ class AppCacheURLRequestJobTest : public testing::Test {
   }
 
   void VerifyDeliverErrorResponse() {
-    EXPECT_EQ(request_->status().os_error(), net::ERR_FAILED);
+    EXPECT_EQ(request_->status().error(), net::ERR_FAILED);
     TestFinished();
   }
 
@@ -751,8 +751,8 @@ class AppCacheURLRequestJobTest : public testing::Test {
   scoped_refptr<HttpResponseInfoIOBuffer> read_info_buffer_;
   scoped_refptr<IOBuffer> read_buffer_;
   int expected_read_result_;
-  net::CompletionCallbackImpl<AppCacheURLRequestJobTest> read_callback_;
-  net::CompletionCallbackImpl<AppCacheURLRequestJobTest> read_info_callback_;
+  net::OldCompletionCallbackImpl<AppCacheURLRequestJobTest> read_callback_;
+  net::OldCompletionCallbackImpl<AppCacheURLRequestJobTest> read_info_callback_;
   bool should_delete_reader_in_completion_callback_;
   int reader_deletion_count_down_;
   bool read_callback_was_called_;
@@ -762,8 +762,8 @@ class AppCacheURLRequestJobTest : public testing::Test {
   scoped_refptr<HttpResponseInfoIOBuffer> write_info_buffer_;
   scoped_refptr<IOBuffer> write_buffer_;
   int expected_write_result_;
-  net::CompletionCallbackImpl<AppCacheURLRequestJobTest> write_callback_;
-  net::CompletionCallbackImpl<AppCacheURLRequestJobTest> write_info_callback_;
+  net::OldCompletionCallbackImpl<AppCacheURLRequestJobTest> write_callback_;
+  net::OldCompletionCallbackImpl<AppCacheURLRequestJobTest> write_info_callback_;
   bool should_delete_writer_in_completion_callback_;
   int writer_deletion_count_down_;
   bool write_callback_was_called_;

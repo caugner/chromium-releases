@@ -17,8 +17,8 @@
 #include "chrome/browser/chromeos/status/network_menu_button.h"
 #include "chrome/browser/chromeos/status/status_area_button.h"
 #include "chrome/browser/chromeos/status/status_area_view.h"
+#include "chrome/browser/chromeos/system/runtime_environment.h"
 #include "chrome/browser/chromeos/view_ids.h"
-#include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
@@ -46,10 +46,12 @@
 #include "views/widget/widget.h"
 #include "views/window/hit_test.h"
 
+#if defined(TOOLKIT_USES_GTK)
+#include "chrome/browser/chromeos/wm_ipc.h"
+#endif
+
 namespace {
 
-// Amount to offset the toolbar by when vertical tabs are enabled.
-const int kVerticalTabStripToolbarOffset = 2;
 // Amount to tweak the position of the status area to get it to look right.
 const int kStatusAreaVerticalAdjustment = -1;
 
@@ -70,7 +72,7 @@ class SimpleMenuModelDelegateAdapter : public views::MenuDelegate {
   // views::MenuDelegate implementation.
   virtual bool GetAccelerator(int id,
                               views::Accelerator* accelerator) OVERRIDE;
-  virtual std::wstring GetLabel(int id) const OVERRIDE;
+  virtual string16 GetLabel(int id) const OVERRIDE;
   virtual bool IsCommandEnabled(int id) const OVERRIDE;
   virtual bool IsItemChecked(int id) const OVERRIDE;
   virtual void ExecuteCommand(int id) OVERRIDE;
@@ -96,8 +98,8 @@ bool SimpleMenuModelDelegateAdapter::GetAccelerator(
       id, accelerator);
 }
 
-std::wstring SimpleMenuModelDelegateAdapter::GetLabel(int id) const {
-  return UTF16ToWide(simple_menu_model_delegate_->GetLabelForCommandId(id));
+string16 SimpleMenuModelDelegateAdapter::GetLabel(int id) const {
+  return simple_menu_model_delegate_->GetLabelForCommandId(id);
 }
 
 bool SimpleMenuModelDelegateAdapter::IsCommandEnabled(int id) const {
@@ -168,19 +170,7 @@ class BrowserViewLayout : public ::BrowserViewLayout {
     views::View::ConvertPointToView(browser_view_->parent(), browser_view_,
                                     &tabstrip_origin);
     tabstrip_bounds.set_origin(tabstrip_origin);
-    return browser_view_->UseVerticalTabs() ?
-        LayoutTitlebarComponentsWithVerticalTabs(tabstrip_bounds) :
-        LayoutTitlebarComponents(tabstrip_bounds);
-  }
-
-  virtual int LayoutToolbar(int top) OVERRIDE {
-    if (!browser_view_->IsFullscreen() && browser_view_->IsTabStripVisible() &&
-        browser_view_->UseVerticalTabs()) {
-      // For vertical tabs the toolbar is positioned in
-      // LayoutTitlebarComponentsWithVerticalTabs.
-      return top;
-    }
-    return ::BrowserViewLayout::LayoutToolbar(top);
+    return LayoutTitlebarComponents(tabstrip_bounds);
   }
 
   virtual bool IsPositionInWindowCaption(const gfx::Point& point) OVERRIDE {
@@ -219,53 +209,6 @@ class BrowserViewLayout : public ::BrowserViewLayout {
       return true;
 
     return false;
-  }
-
-  // Positions the titlebar, toolbar and tabstrip. This is
-  // used when side tabs are enabled.
-  int LayoutTitlebarComponentsWithVerticalTabs(const gfx::Rect& bounds) {
-    if (bounds.IsEmpty())
-      return 0;
-
-    tabstrip_->SetVisible(true);
-    status_area_->SetVisible(true);
-    layout_mode_button_->SetVisible(false);
-    layout_mode_button_->SetBounds(0, 0, 0, 0);
-
-    gfx::Size status_size = status_area_->GetPreferredSize();
-    int status_height = status_size.height();
-
-    int status_x = bounds.x();
-    // Layout the status area.
-    status_area_->SetBounds(status_x, bounds.bottom() - status_height,
-                            status_size.width(), status_height);
-    UpdateStatusAreaBoundsProperty();
-
-    // The tabstrip's width is the bigger of its preferred width and the width
-    // the status area.
-    int tabstrip_w = std::max(status_x + status_size.width(),
-                              tabstrip_->GetPreferredSize().width());
-    tabstrip_->SetBounds(bounds.x(), bounds.y(), tabstrip_w,
-                         bounds.height() - status_height);
-
-    // The toolbar is promoted to the title for vertical tabs.
-    bool toolbar_visible = browser_view_->IsToolbarVisible();
-    int toolbar_height = 0;
-    if (toolbar_) {
-      toolbar_->SetVisible(toolbar_visible);
-      if (toolbar_visible)
-        toolbar_height = toolbar_->GetPreferredSize().height();
-      int tabstrip_max_x = tabstrip_->bounds().right();
-      toolbar_->SetBounds(tabstrip_max_x,
-                          bounds.y() - kVerticalTabStripToolbarOffset,
-                          browser_view_->width() - tabstrip_max_x,
-                          toolbar_height);
-    }
-    // Adjust the available bounds for other components.
-    gfx::Rect available_bounds = vertical_layout_rect();
-    available_bounds.Inset(tabstrip_w, 0, 0, 0);
-    set_vertical_layout_rect(available_bounds);
-    return bounds.y() + toolbar_height;
   }
 
   // Lays out tabstrip, status area, and layout mode button in the title bar
@@ -329,9 +272,11 @@ class BrowserViewLayout : public ::BrowserViewLayout {
 
     if (status_area_bounds_for_property_ != current_bounds) {
       status_area_bounds_for_property_ = current_bounds;
+#if defined(TOOLKIT_USES_GTK)
       WmIpc::instance()->SetStatusBoundsProperty(
           GTK_WIDGET(chromeos_browser_view()->frame()->GetNativeWindow()),
           status_area_bounds_for_property_);
+#endif
     }
   }
 
@@ -359,11 +304,13 @@ BrowserView::BrowserView(Browser* browser)
   BrowserList::AddObserver(this);
   MessageLoopForUI::current()->AddObserver(this);
 
+#if defined(TOOLKIT_USES_GTK)
   if (!g_chrome_state_gdk_atom)
     g_chrome_state_gdk_atom =
         gdk_atom_intern(
             WmIpc::instance()->GetAtomName(WmIpc::ATOM_CHROME_STATE).c_str(),
             FALSE);  // !only_if_exists
+#endif
 }
 
 BrowserView::~BrowserView() {
@@ -404,10 +351,12 @@ void BrowserView::Init() {
   params.push_back(browser()->tab_count());
   params.push_back(browser()->active_index());
   params.push_back(gtk_get_current_event_time());
+#if defined(TOOLKIT_USES_GTK)
   WmIpc::instance()->SetWindowType(
       GTK_WIDGET(frame()->GetNativeWindow()),
       WM_IPC_WINDOW_CHROME_TOPLEVEL,
       &params);
+#endif
 }
 
 void BrowserView::Show() {
@@ -429,10 +378,12 @@ void BrowserView::ShowInternal(bool is_active) {
     std::vector<int> params;
     params.push_back(browser()->tab_count());
     params.push_back(browser()->active_index());
+#if defined(TOOLKIT_USES_GTK)
     WmIpc::instance()->SetWindowType(
         GTK_WIDGET(frame()->GetNativeWindow()),
         WM_IPC_WINDOW_CHROME_TOPLEVEL,
         &params);
+#endif
   }
 }
 
@@ -452,13 +403,13 @@ void BrowserView::ChildPreferredSizeChanged(View* child) {
 bool BrowserView::GetSavedWindowPlacement(
     gfx::Rect* bounds,
     ui::WindowShowState* show_state) const {
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kChromeosFrame)) {
+  if (system::runtime_environment::IsRunningOnChromeOS() ||
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kStartMaximized)) {
     // Typically we don't request a full screen size. This means we'll request a
     // non-full screen size, layout/paint at that size, then the window manager
     // will snap us to full screen size. This results in an ugly
     // resize/paint. To avoid this we always request a full screen size.
-    *bounds = gfx::Screen::GetMonitorWorkAreaNearestWindow(
-        GTK_WIDGET(GetWidget()->GetNativeWindow()));
+    *bounds = GetWidget()->GetWorkAreaBoundsInScreen();
     *show_state = ui::SHOW_STATE_NORMAL;
     return true;
   }
@@ -594,7 +545,16 @@ void BrowserView::ButtonVisibilityChanged(views::View* button_view) {
 }
 
 // BrowserView, MessageLoopForUI::Observer implementation.
+#if defined(TOUCH_UI) || defined(USE_AURA)
+base::EventStatus BrowserView::WillProcessEvent(
+    const base::NativeEvent& event) OVERRIDE {
+  return base::EVENT_CONTINUE;
+}
 
+void BrowserView::DidProcessEvent(const base::NativeEvent& event) OVERRIDE {
+  // TODO(oshima): On Aura, WM should notify chrome someshow.
+}
+#else
 void BrowserView::DidProcessEvent(GdkEvent* event) {
   if (event->type == GDK_PROPERTY_NOTIFY) {
     if (!frame()->GetNativeWindow())
@@ -613,6 +573,7 @@ void BrowserView::DidProcessEvent(GdkEvent* event) {
     }
   }
 }
+#endif
 
 // BrowserView protected:
 
@@ -640,6 +601,7 @@ void BrowserView::InitSystemMenu() {
 }
 
 void BrowserView::FetchHideStatusAreaProperty() {
+#if defined(TOOLKIT_USES_GTK)
   std::set<WmIpc::AtomType> state_atoms;
   if (WmIpc::instance()->GetWindowState(
           GTK_WIDGET(frame()->GetNativeWindow()), &state_atoms)) {
@@ -648,6 +610,7 @@ void BrowserView::FetchHideStatusAreaProperty() {
       return;
     }
   }
+#endif
   has_hide_status_area_property_ = false;
 }
 

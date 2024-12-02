@@ -76,9 +76,13 @@ class RenderMessageFilter : public BrowserMessageFilter {
                       net::URLRequestContextGetter* request_context,
                       RenderWidgetHelper* render_widget_helper);
 
+  // IPC::ChannelProxy::MessageFilter methods:
+  virtual void OnChannelClosing() OVERRIDE;
+#if defined (OS_WIN)
+  virtual void OnChannelError() OVERRIDE;
+#endif
+
   // BrowserMessageFilter methods:
-  virtual void OverrideThreadForMessage(const IPC::Message& message,
-                                        BrowserThread::ID* thread);
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok);
   virtual void OnDestruct() const;
@@ -98,6 +102,8 @@ class RenderMessageFilter : public BrowserMessageFilter {
  private:
   friend class BrowserThread;
   friend class DeleteTask<RenderMessageFilter>;
+
+  class OpenChannelToNpapiPluginCallback;
 
   virtual ~RenderMessageFilter();
 
@@ -143,10 +149,14 @@ class RenderMessageFilter : public BrowserMessageFilter {
   // Cache fonts for the renderer. See RenderMessageFilter::OnPreCacheFont
   // implementation for more details.
   void OnPreCacheFont(const LOGFONT& font);
+
+  // Release fonts cached for renderer.
+  void OnReleaseCachedFonts();
 #endif
 
-  void OnGetPlugins(bool refresh,
-                    std::vector<webkit::WebPluginInfo>* plugins);
+  void OnGetPlugins(bool refresh, IPC::Message* reply_msg);
+  void GetPluginsCallback(IPC::Message* reply_msg,
+                          const std::vector<webkit::WebPluginInfo>& plugins);
   void OnGetPluginInfo(int routing_id,
                        const GURL& url,
                        const GURL& policy_url,
@@ -177,8 +187,8 @@ class RenderMessageFilter : public BrowserMessageFilter {
   // Used to ask the browser to allocate a block of shared memory for the
   // renderer to send back data in, since shared memory can't be created
   // in the renderer on POSIX due to the sandbox.
-  void OnAllocateSharedMemoryBuffer(uint32 buffer_size,
-                                    base::SharedMemoryHandle* handle);
+  void OnAllocateSharedMemory(uint32 buffer_size,
+                              base::SharedMemoryHandle* handle);
   void OnResolveProxy(const GURL& url, IPC::Message* reply_msg);
 
   // Browser side transport DIB allocation
@@ -186,14 +196,9 @@ class RenderMessageFilter : public BrowserMessageFilter {
                            bool cache_in_browser,
                            TransportDIB::Handle* result);
   void OnFreeTransportDIB(TransportDIB::Id dib_id);
-  void OnCloseCurrentConnections();
-  void OnSetCacheMode(bool enabled);
-  void OnClearCache(bool preserve_ssl_host_info, IPC::Message* reply_msg);
-  void OnClearHostResolverCache(int* result);
   void OnCacheableMetadataAvailable(const GURL& url,
                                     double expected_response_time,
                                     const std::vector<char>& data);
-  void OnEnableSpdy(bool enable);
   void OnKeygen(uint32 key_size_index, const std::string& challenge_string,
                 const GURL& url, IPC::Message* reply_msg);
   void OnKeygenOnWorkerThread(
@@ -226,6 +231,8 @@ class RenderMessageFilter : public BrowserMessageFilter {
 
   bool CheckBenchmarkingEnabled() const;
   bool CheckPreparsedJsCachingEnabled() const;
+  void OnCompletedOpenChannelToNpapiPlugin(
+      OpenChannelToNpapiPluginCallback* client);
 
   // Cached resource request dispatcher host and plugin service, guaranteed to
   // be non-null if Init succeeds. We do not own the objects, they are managed
@@ -254,6 +261,8 @@ class RenderMessageFilter : public BrowserMessageFilter {
   scoped_refptr<WebKitContext> webkit_context_;
 
   int render_process_id_;
+
+  std::set<OpenChannelToNpapiPluginCallback*> plugin_host_clients_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderMessageFilter);
 };

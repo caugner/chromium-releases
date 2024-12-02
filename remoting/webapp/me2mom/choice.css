@@ -135,9 +135,45 @@ label {
   vertical-align: top;
 }
 
+.information-box {
+  background-color: #f9e9be;
+  border: 1px solid #cacaca;
+  bottom: 8px;
+  color: black;
+  padding: 20px;
+  position: absolute;
+  text-align: center;
+  width: 600px; /* body width - 2*padding */
+}
+
 .message {
   text-align:center;
   margin-bottom: 10px;
+}
+
+.mode-select-button {
+  width: 100%;
+  height: 32px;
+  white-space: nowrap;
+}
+
+.mode-select-label {
+  padding-__MSG_@@bidi_end_edge__: 20px;
+}
+
+.mode-select-table {
+  margin-__MSG_@@bidi_start_edge__: 40px;
+  width: 600px;  /* width + margin = body width */
+  border-collapse: collapse;
+  margin-top: 40px;
+}
+
+.mode-select-table-spacer {
+  height: 20px;
+}
+
+.mode-select-table-underline td {
+  border-bottom: 1px solid #c6c6c6;
 }
 
 .hide-scrollbars {

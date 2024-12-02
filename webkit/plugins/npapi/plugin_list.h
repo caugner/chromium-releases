@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/file_path.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_vector.h"
@@ -36,7 +37,9 @@ extern FilePath::CharType kDefaultPluginLibraryName[];
 class PluginInstance;
 
 // This struct holds entry points into a plugin.  The entry points are
-// slightly different between Win/Mac and Unixes.
+// slightly different between Win/Mac and Unixes.  Note that the interface for
+// querying plugins is synchronous and it is preferable to use a higher-level
+// asynchronous information to query information.
 struct PluginEntryPoints {
 #if !defined(OS_POSIX) || defined(OS_MACOSX)
   NP_GetEntryPointsFunc np_getentrypoints;
@@ -118,8 +121,12 @@ class PluginList {
       const string16& mime_type_descriptions,
       std::vector<webkit::WebPluginMimeType>* parsed_mime_types);
 
-  // Get all the plugins.
+  // Get all the plugins synchronously.
   void GetPlugins(std::vector<webkit::WebPluginInfo>* plugins);
+
+  // Returns true if the list of plugins is cached and is copied into the out
+  // pointer; returns false if the plugin list needs to be refreshed.
+  bool GetPluginsIfNoRefreshNeeded(std::vector<webkit::WebPluginInfo>* plugins);
 
   // Returns a list in |info| containing plugins that are found for
   // the given url and mime type (including disabled plugins, for
@@ -141,57 +148,38 @@ class PluginList {
                           std::vector<webkit::WebPluginInfo>* info,
                           std::vector<std::string>* actual_mime_types);
 
-  // Get plugin info by plugin path (including disabled plugins). Returns true
-  // if the plugin is found and WebPluginInfo has been filled in |info|.
-  bool GetPluginInfoByPath(const FilePath& plugin_path,
-                           webkit::WebPluginInfo* info);
-
-  // Populates the given vector with all available plugin groups.
+  // Populates the given vector with all available plugin groups. If
+  // |load_if_necessary| is true, this will potentially load the plugin list
+  // synchronously.
   void GetPluginGroups(bool load_if_necessary,
                        std::vector<PluginGroup>* plugin_groups);
 
-  // Returns the PluginGroup corresponding to the given WebPluginInfo. If no
-  // such group exists, it is created and added to the cache.
-  // Beware: when calling this from the Browser process, the group that the
-  // returned pointer points to might disappear suddenly. This happens when
-  // |RefreshPlugins()| is called and then |LoadPlugins()| is triggered by a
-  // call to |GetPlugins()|, |GetEnabledPlugins()|, |GetPluginInfoArray()|,
-  // |GetPluginInfoByPath()|, or |GetPluginGroups(true, _)|. It is the caller's
-  // responsibility to make sure this doesn't happen.
-  const PluginGroup* GetPluginGroup(
-      const webkit::WebPluginInfo& web_plugin_info);
+  // Returns a copy of the PluginGroup corresponding to the given WebPluginInfo.
+  // The caller takes ownership of the returned PluginGroup.
+  PluginGroup* GetPluginGroup(const webkit::WebPluginInfo& web_plugin_info);
 
   // Returns the name of the PluginGroup with the given identifier.
   // If no such group exists, an empty string is returned.
   string16 GetPluginGroupName(const std::string& identifier);
 
-  // Returns the identifier string of the PluginGroup corresponding to the given
-  // WebPluginInfo. If no such group exists, it is created and added to the
-  // cache.
-  std::string GetPluginGroupIdentifier(
-      const webkit::WebPluginInfo& web_plugin_info);
-
   // Load a specific plugin with full path.
   void LoadPlugin(const FilePath& filename,
                   ScopedVector<PluginGroup>* plugin_groups);
 
-  // Enable a specific plugin, specified by path. Returns |true| iff a plugin
-  // currently in the plugin list was actually enabled as a result; regardless
-  // of return value, if a plugin is found in the future with the given name, it
-  // will be enabled.
-  bool EnablePlugin(const FilePath& filename);
+  // The following functions are used to support probing for WebPluginInfo
+  // using a different instance of this class.
 
-  // Disable a specific plugin, specified by path. Returns |true| iff a plugin
-  // currently in the plugin list was actually disabled as a result; regardless
-  // of return value, if a plugin is found in the future with the given name, it
-  // will be disabled.
-  bool DisablePlugin(const FilePath& filename);
+  // Returns the extra plugin paths, extra plugin directories, and internal
+  // plugin paths that should be loaded.
+  void GetPluginPathListsToLoad(
+      std::vector<FilePath>* extra_plugin_paths,
+      std::vector<FilePath>* extra_plugin_dirs,
+      std::vector<webkit::WebPluginInfo>* internal_plugins);
 
-  // Enable/disable a plugin group, specified by group_name.  Returns |true| iff
-  // a plugin currently in the plugin list was actually enabled/disabled as a
-  // result; regardless of return value, if a plugin is found in the future with
-  // the given name, it will be enabled/disabled.
-  bool EnableGroup(bool enable, const string16& name);
+  // Clears the internal list of PluginGroups and copies them from the vector.
+  void SetPlugins(const std::vector<webkit::WebPluginInfo>& plugins);
+
+  void set_will_load_plugins_callback(const base::Closure& callback);
 
   virtual ~PluginList();
 
@@ -211,40 +199,40 @@ class PluginList {
   friend struct base::DefaultLazyInstanceTraits<PluginList>;
   FRIEND_TEST_ALL_PREFIXES(PluginGroupTest, PluginGroupDefinition);
 
-  // Constructors are private for singletons
+  // Constructors are private for singletons.
   PluginList();
 
-  // Creates PluginGroups for the static group definitions, and adds them to
-  // the list of PluginGroups.
-  void AddHardcodedPluginGroups(ScopedVector<PluginGroup>* groups);
+  // Creates PluginGroups for the hardcoded group definitions, and stores them
+  // in |hardcoded_plugin_groups_|.
+  void AddHardcodedPluginGroups(const PluginGroupDefinition* group_definitions,
+                                size_t num_group_definitions);
 
-  // Implements all IO dependant operations of the LoadPlugins method so that
-  // test classes can mock these out. Return value false means LoadPlugins
-  // should not go on with the loading.
+  // Creates a new PluginGroup either from a hardcoded group definition, or from
+  // the plug-in information.
+  // Caller takes ownership of the returned PluginGroup.
+  PluginGroup* CreatePluginGroup(
+      const webkit::WebPluginInfo& web_plugin_info) const;
+
+  // Implements all IO dependent operations of the LoadPlugins method so that
+  // test classes can mock these out.
   virtual void LoadPluginsInternal(ScopedVector<PluginGroup>* plugin_groups);
 
-  // Load all plugins from the default plugins directory
+  // Load all plugins from the default plugins directory.
   void LoadPlugins();
 
   // Load all plugins from a specific directory.
-  // |plugins| is updated with loaded plugin information.
+  // |plugin_groups| is updated with loaded plugin information.
   // |visited_plugins| is updated with paths to all plugins that were considered
-  //   (including those we didn't load)
+  // (including those we didn't load).
   void LoadPluginsFromDir(const FilePath& path,
                           ScopedVector<PluginGroup>* plugin_groups,
                           std::set<FilePath>* visited_plugins);
 
   // Returns true if we should load the given plugin, or false otherwise.
-  // plugins is the list of plugins we have crawled in the current plugin
+  // |plugins| is the list of plugins we have crawled in the current plugin
   // loading run.
   bool ShouldLoadPlugin(const webkit::WebPluginInfo& info,
                         ScopedVector<PluginGroup>* plugins);
-
-  // Return whether a plug-in group with the given name should be disabled,
-  // either because it already is on the list of disabled groups, or because it
-  // is blacklisted by a policy. In the latter case, add the plugin group to the
-  // list of disabled groups as well.
-  bool ShouldDisableGroup(const string16& group_name);
 
   // Returns true if the plugin supports |mime_type|. |mime_type| should be all
   // lower case.
@@ -301,24 +289,15 @@ class PluginList {
   // Holds information about internal plugins.
   std::vector<InternalPlugin> internal_plugins_;
 
-  // Hardcoded plugin group definitions.
-  const PluginGroupDefinition* const group_definitions_;
-  const size_t num_group_definitions_;
-
   // Holds the currently available plugin groups.
   ScopedVector<PluginGroup> plugin_groups_;
 
-  // The set of plugins that have been scheduled for disabling once they get
-  // loaded. This list is used in LoadPlugins and pruned after it. Contains
-  // plugins that were either disabled by the user (prefs are loaded before
-  // plugins) or disabled by a policy.
-  std::set<FilePath> plugins_to_disable_;
-  // Equivalent to the |plugins_to_disable_| this is the set of groups
-  // scheduled for disabling once they appear. This list is never completely
-  // pruned but all groups that do get created are removed from it. New groups
-  // might get added if they should be pruned because of plugins getting removed
-  // for example.
-  std::set<string16> groups_to_disable_;
+  // Holds the hardcoded definitions of well-known plug-ins.
+  // This should only be modified during construction of the PluginList.
+  ScopedVector<PluginGroup> hardcoded_plugin_groups_;
+
+  // Callback that is invoked whenever the PluginList will reload the plugins.
+  base::Closure will_load_plugins_callback_;
 
   // Need synchronization for the above members since this object can be
   // accessed on multiple threads.

@@ -9,6 +9,7 @@
 #include <map>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "chrome/browser/history/history.h"
 #include "content/browser/cancelable_request.h"
 
@@ -22,23 +23,28 @@ class Time;
 // Interacts with the HistoryService on behalf of the download subsystem.
 class DownloadHistory {
  public:
-  typedef Callback2<int32, bool>::Type VisitedBeforeDoneCallback;
+  typedef base::Callback<void(int32, bool)> VisitedBeforeDoneCallback;
 
   explicit DownloadHistory(Profile* profile);
   ~DownloadHistory();
 
+  // Retrieves the next_id counter from the sql meta_table.
+  // Should be much faster than Load so that we may delay downloads until after
+  // this call with minimal performance penalty.
+  void GetNextId(const HistoryService::DownloadNextIdCallback& callback);
+
   // Retrieves DownloadCreateInfos saved in the history.
-  void Load(HistoryService::DownloadQueryCallback* callback);
+  void Load(const HistoryService::DownloadQueryCallback& callback);
 
   // Checks whether |referrer_url| has been visited before today.  This takes
   // ownership of |callback|.
   void CheckVisitedReferrerBefore(int32 download_id,
                                   const GURL& referrer_url,
-                                  VisitedBeforeDoneCallback* callback);
+                                  const VisitedBeforeDoneCallback& callback);
 
   // Adds a new entry for a download to the history database.
   void AddEntry(DownloadItem* download_item,
-                HistoryService::DownloadCreateCallback* callback);
+                const HistoryService::DownloadCreateCallback& callback);
 
   // Updates the history entry for |download_item|.
   void UpdateEntry(DownloadItem* download_item);
@@ -59,7 +65,7 @@ class DownloadHistory {
 
  private:
   typedef std::map<HistoryService::Handle,
-                   std::pair<int32, VisitedBeforeDoneCallback*> >
+                   std::pair<int32, VisitedBeforeDoneCallback> >
       VisitedBeforeRequestsMap;
 
   void OnGotVisitCountToHost(HistoryService::Handle handle,

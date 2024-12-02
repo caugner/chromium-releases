@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,13 +13,12 @@ namespace policy {
 class ConfigurationPolicyProviderDelegateWin
     : public AsynchronousPolicyProvider::Delegate {
  public:
-  ConfigurationPolicyProviderDelegateWin(
-      const ConfigurationPolicyProvider::PolicyDefinitionList*
-          policy_definition_list);
+  explicit ConfigurationPolicyProviderDelegateWin(
+      const PolicyDefinitionList* policy_definition_list);
   virtual ~ConfigurationPolicyProviderDelegateWin() {}
 
   // AsynchronousPolicyProvider::Delegate overrides:
-  virtual DictionaryValue* Load();
+  virtual DictionaryValue* Load() OVERRIDE;
 
  private:
   // Methods to perform type-specific policy lookups in the registry.
@@ -36,8 +35,7 @@ class ConfigurationPolicyProviderDelegateWin
   bool GetRegistryPolicyInteger(const string16& value_name,
                                 uint32* result) const;
 
-  const ConfigurationPolicyProvider::PolicyDefinitionList*
-      policy_definition_list_;
+  const PolicyDefinitionList* policy_definition_list_;
 
   DISALLOW_COPY_AND_ASSIGN(ConfigurationPolicyProviderDelegateWin);
 };

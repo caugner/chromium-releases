@@ -8,12 +8,13 @@
 
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "chrome/browser/chromeos/status/status_area_host.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "views/context_menu_controller.h"
-#include "views/controls/menu/menu_wrapper.h"
+#include "views/controls/menu/menu_listener.h"
 
 class AccessibleToolbarView;
 class Profile;
@@ -94,8 +95,15 @@ class BrowserView : public ::BrowserView,
   virtual void ButtonVisibilityChanged(views::View* button_view) OVERRIDE;
 
   // MessageLoopForUI::Observer overrides.
+#if defined(TOUCH_UI) || defined(USE_AURA)
+  // MessageLoopForUI::Observer overrides.
+  virtual base::EventStatus WillProcessEvent(
+      const base::NativeEvent& event) OVERRIDE;
+  virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
+#else
   virtual void WillProcessEvent(GdkEvent* event) OVERRIDE {}
   virtual void DidProcessEvent(GdkEvent* event) OVERRIDE;
+#endif
 
   gfx::NativeView saved_focused_widget() const {
     return saved_focused_widget_;

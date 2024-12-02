@@ -6,6 +6,8 @@
 
 #include <vector>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
@@ -21,6 +23,8 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_test_util.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -279,7 +283,8 @@ void WaitForBrowserActionUpdated(ExtensionAction* browser_action) {
 void WaitForLoadStop(TabContents* tab) {
   // In many cases, the load may have finished before we get here.  Only wait if
   // the tab still has a pending navigation.
-  if (!tab->IsLoading() && !tab->render_manager()->pending_render_view_host())
+  if (!tab->IsLoading() &&
+      !tab->render_manager_for_testing()->pending_render_view_host())
     return;
   TestNotificationObserver observer;
   RegisterAndWait(&observer, content::NOTIFICATION_LOAD_STOP,
@@ -344,11 +349,16 @@ static void NavigateToURLWithDispositionBlockUntilNavigationsComplete(
        ++iter) {
     initial_browsers.insert(*iter);
   }
-  browser->OpenURL(url, GURL(), disposition, PageTransition::TYPED);
+
+  WindowedNotificationObserver tab_added_observer(
+      content::NOTIFICATION_TAB_ADDED,
+      NotificationService::AllSources());
+
+  browser->OpenURL(url, GURL(), disposition, content::PAGE_TRANSITION_TYPED);
   if (browser_test_flags & BROWSER_TEST_WAIT_FOR_BROWSER)
     browser = WaitForBrowserNotInSet(initial_browsers);
   if (browser_test_flags & BROWSER_TEST_WAIT_FOR_TAB)
-    WaitForNotification(content::NOTIFICATION_TAB_ADDED);
+    tab_added_observer.Wait();
   if (!(browser_test_flags & BROWSER_TEST_WAIT_FOR_NAVIGATION)) {
     // Some other flag caused the wait prior to this.
     return;
@@ -517,17 +527,6 @@ int FindInPage(TabContentsWrapper* tab_contents, const string16& search_string,
   return observer.number_of_matches();
 }
 
-void WaitForNotification(int type) {
-  TestNotificationObserver observer;
-  RegisterAndWait(&observer, type, NotificationService::AllSources());
-}
-
-void WaitForNotificationFrom(int type,
-                             const NotificationSource& source) {
-  TestNotificationObserver observer;
-  RegisterAndWait(&observer, type, source);
-}
-
 void RegisterAndWait(NotificationObserver* observer,
                      int type,
                      const NotificationSource& source) {
@@ -546,11 +545,22 @@ void WaitForBookmarkModelToLoad(BookmarkModel* model) {
   ASSERT_TRUE(model->IsLoaded());
 }
 
+void WaitForTemplateURLServiceToLoad(TemplateURLService* service) {
+  if (service->loaded())
+    return;
+  service->Load();
+  TemplateURLServiceTestUtil::BlockTillServiceProcessesRequests();
+  ASSERT_TRUE(service->loaded());
+}
+
 void WaitForHistoryToLoad(Browser* browser) {
   HistoryService* history_service =
       browser->profile()->GetHistoryService(Profile::EXPLICIT_ACCESS);
+  WindowedNotificationObserver history_loaded_observer(
+      chrome::NOTIFICATION_HISTORY_LOADED,
+      NotificationService::AllSources());
   if (!history_service->BackendLoaded())
-    WaitForNotification(chrome::NOTIFICATION_HISTORY_LOADED);
+    history_loaded_observer.Wait();
 }
 
 bool GetNativeWindow(const Browser* browser, gfx::NativeWindow* native_window) {
@@ -594,7 +604,7 @@ bool SendKeyPressSync(const Browser* browser,
 
   if (!ui_controls::SendKeyPressNotifyWhenDone(
           window, key, control, shift, alt, command,
-          new MessageLoop::QuitTask())) {
+          MessageLoop::QuitClosure())) {
     LOG(ERROR) << "ui_controls::SendKeyPressNotifyWhenDone failed";
     return false;
   }
@@ -811,7 +821,7 @@ void WindowedNotificationObserver::Observe(int type,
 
 TitleWatcher::TitleWatcher(TabContents* tab_contents,
                            const string16& expected_title)
-    : expected_tab_(tab_contents),
+    : tab_contents_(tab_contents),
       expected_title_observed_(false),
       quit_loop_on_observation_(false) {
   EXPECT_TRUE(tab_contents != NULL);
@@ -819,6 +829,16 @@ TitleWatcher::TitleWatcher(TabContents* tab_contents,
   notification_registrar_.Add(this,
                               content::NOTIFICATION_TAB_CONTENTS_TITLE_UPDATED,
                               Source<TabContents>(tab_contents));
+
+  // When navigating through the history, the restored NavigationEntry's title
+  // will be used. If the entry ends up having the same title after we return
+  // to it, as will usually be the case, the
+  // NOTIFICATION_TAB_CONTENTS_TITLE_UPDATED will then be suppressed, since the
+  // NavigationEntry's title hasn't changed.
+  notification_registrar_.Add(
+      this,
+      content::NOTIFICATION_LOAD_STOP,
+      Source<NavigationController>(&tab_contents->controller()));
 }
 
 void TitleWatcher::AlsoWaitForTitle(const string16& expected_title) {
@@ -839,15 +859,21 @@ const string16& TitleWatcher::WaitAndGetTitle() {
 void TitleWatcher::Observe(int type,
                            const NotificationSource& source,
                            const NotificationDetails& details) {
-  if (type != content::NOTIFICATION_TAB_CONTENTS_TITLE_UPDATED)
-    return;
+  if (type == content::NOTIFICATION_TAB_CONTENTS_TITLE_UPDATED) {
+    TabContents* source_contents = Source<TabContents>(source).ptr();
+    ASSERT_EQ(tab_contents_, source_contents);
+  } else if (type == content::NOTIFICATION_LOAD_STOP) {
+    NavigationController* controller =
+        Source<NavigationController>(source).ptr();
+    ASSERT_EQ(&tab_contents_->controller(), controller);
+  } else {
+    FAIL() << "Unexpected notification received.";
+  }
 
-  TabContents* source_contents = Source<TabContents>(source).ptr();
-  ASSERT_EQ(expected_tab_, source_contents);
   std::vector<string16>::const_iterator it =
       std::find(expected_titles_.begin(),
                 expected_titles_.end(),
-                source_contents->GetTitle());
+                tab_contents_->GetTitle());
   if (it == expected_titles_.end())
     return;
   observed_title_ = *it;
@@ -905,7 +931,7 @@ class SnapshotTaker {
     generator->AskForSnapshot(
         rwh,
         false,  // don't use backing_store
-        NewCallback(this, &SnapshotTaker::OnSnapshotTaken),
+        base::Bind(&SnapshotTaker::OnSnapshotTaken, base::Unretained(this)),
         page_size,
         desired_size);
     ui_test_utils::RunMessageLoop();

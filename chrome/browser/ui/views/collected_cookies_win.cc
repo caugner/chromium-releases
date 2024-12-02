@@ -10,6 +10,7 @@
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/collected_cookies_infobar_delegate.h"
+#include "chrome/browser/ui/constrained_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/views/cookie_info_view.h"
@@ -181,7 +182,7 @@ CollectedCookiesWin::CollectedCookiesWin(gfx::NativeWindow parent_window,
 
   Init();
 
-  window_ = new ConstrainedWindowViews(wrapper->tab_contents(), this);
+  window_ = new ConstrainedWindowViews(wrapper, this);
 }
 
 CollectedCookiesWin::~CollectedCookiesWin() {
@@ -212,10 +213,10 @@ void CollectedCookiesWin::Init() {
   layout->AddView(tabbed_pane);
   // NOTE: the panes need to be added after the tabbed_pane has been added to
   // its parent.
-  std::wstring label_allowed = UTF16ToWide(l10n_util::GetStringUTF16(
-      IDS_COLLECTED_COOKIES_ALLOWED_COOKIES_TAB_LABEL));
-  std::wstring label_blocked = UTF16ToWide(l10n_util::GetStringUTF16(
-      IDS_COLLECTED_COOKIES_BLOCKED_COOKIES_TAB_LABEL));
+  string16 label_allowed = l10n_util::GetStringUTF16(
+      IDS_COLLECTED_COOKIES_ALLOWED_COOKIES_TAB_LABEL);
+  string16 label_blocked = l10n_util::GetStringUTF16(
+      IDS_COLLECTED_COOKIES_BLOCKED_COOKIES_TAB_LABEL);
   tabbed_pane->AddTab(label_allowed, CreateAllowedPane());
   tabbed_pane->AddTab(label_blocked, CreateBlockedPane());
   tabbed_pane->SelectTabAt(0);
@@ -239,8 +240,8 @@ views::View* CollectedCookiesWin::CreateAllowedPane() {
   TabSpecificContentSettings* content_settings = wrapper_->content_settings();
 
   // Create the controls that go into the pane.
-  allowed_label_ = new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-      IDS_COLLECTED_COOKIES_ALLOWED_COOKIES_LABEL)));
+  allowed_label_ = new views::Label(l10n_util::GetStringUTF16(
+      IDS_COLLECTED_COOKIES_ALLOWED_COOKIES_LABEL));
   allowed_cookies_tree_model_.reset(
       content_settings->GetAllowedCookiesTreeModel());
   allowed_cookies_tree_ = new views::TreeView();
@@ -291,10 +292,10 @@ views::View* CollectedCookiesWin::CreateBlockedPane() {
 
   // Create the controls that go into the pane.
   blocked_label_ = new views::Label(
-      UTF16ToWide(l10n_util::GetStringUTF16(
+      l10n_util::GetStringUTF16(
           host_content_settings_map->BlockThirdPartyCookies() ?
               IDS_COLLECTED_COOKIES_BLOCKED_THIRD_PARTY_BLOCKING_ENABLED :
-              IDS_COLLECTED_COOKIES_BLOCKED_COOKIES_LABEL)));
+              IDS_COLLECTED_COOKIES_BLOCKED_COOKIES_LABEL));
   blocked_label_->SetMultiLine(true);
   blocked_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   blocked_cookies_tree_model_.reset(
@@ -353,18 +354,17 @@ views::View* CollectedCookiesWin::CreateBlockedPane() {
 ///////////////////////////////////////////////////////////////////////////////
 // views::DialogDelegate implementation.
 
-std::wstring CollectedCookiesWin::GetWindowTitle() const {
-  return UTF16ToWide(
-      l10n_util::GetStringUTF16(IDS_COLLECTED_COOKIES_DIALOG_TITLE));
+string16 CollectedCookiesWin::GetWindowTitle() const {
+  return l10n_util::GetStringUTF16(IDS_COLLECTED_COOKIES_DIALOG_TITLE);
 }
 
 int CollectedCookiesWin::GetDialogButtons() const {
   return MessageBoxFlags::DIALOGBUTTON_CANCEL;
 }
 
-std::wstring CollectedCookiesWin::GetDialogButtonLabel(
-    MessageBoxFlags::DialogButton button) const {
-  return UTF16ToWide(l10n_util::GetStringUTF16(IDS_CLOSE));
+string16 CollectedCookiesWin::GetDialogButtonLabel(
+    ui::MessageBoxFlags::DialogButton button) const {
+  return l10n_util::GetStringUTF16(IDS_CLOSE);
 }
 
 void CollectedCookiesWin::DeleteDelegate() {
@@ -373,8 +373,9 @@ void CollectedCookiesWin::DeleteDelegate() {
 
 bool CollectedCookiesWin::Cancel() {
   if (status_changed_) {
-    wrapper_->infobar_tab_helper()->AddInfoBar(
-        new CollectedCookiesInfoBarDelegate(wrapper_->tab_contents()));
+    InfoBarTabHelper* infobar_helper = wrapper_->infobar_tab_helper();
+    infobar_helper->AddInfoBar(
+        new CollectedCookiesInfoBarDelegate(infobar_helper));
   }
 
   return true;

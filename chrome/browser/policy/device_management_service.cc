@@ -4,27 +4,50 @@
 
 #include "chrome/browser/policy/device_management_service.h"
 
+#include "base/bind.h"
+#include "base/message_loop.h"
+#include "base/message_loop_proxy.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_net_log.h"
+#include "chrome/browser/policy/device_management_backend.h"
 #include "chrome/browser/policy/device_management_backend_impl.h"
 #include "content/browser/browser_thread.h"
+#include "content/common/content_client.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/host_resolver.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/ssl_config_service_defaults.h"
-#include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_network_layer.h"
+#include "net/http/http_response_headers.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
-#include "webkit/glue/webkit_glue.h"
 
 namespace policy {
 
 namespace {
+
+bool IsProxyError(const net::URLRequestStatus status) {
+  switch (status.error()) {
+    case net::ERR_PROXY_CONNECTION_FAILED:
+    case net::ERR_TUNNEL_CONNECTION_FAILED:
+    case net::ERR_PROXY_AUTH_UNSUPPORTED:
+    case net::ERR_HTTPS_PROXY_TUNNEL_RESPONSE:
+    case net::ERR_MANDATORY_PROXY_CONFIGURATION_FAILED:
+    case net::ERR_PROXY_CERTIFICATE_INVALID:
+    case net::ERR_SOCKS_CONNECTION_FAILED:
+    case net::ERR_SOCKS_CONNECTION_HOST_UNREACHABLE:
+      return true;
+  }
+  return false;
+}
+
+bool IsProtobufMimeType(const URLFetcher* source) {
+  return source->response_headers()->HasHeaderValue(
+      "content-type", "application/x-protobuffer");
+}
 
 // Custom request context implementation that allows to override the user agent,
 // amongst others. Wraps a baseline request context from which we reuse the
@@ -36,7 +59,7 @@ class DeviceManagementRequestContext : public net::URLRequestContext {
 
  private:
   // Overridden from net::URLRequestContext:
-  virtual const std::string& GetUserAgent(const GURL& url) const;
+  virtual const std::string& GetUserAgent(const GURL& url) const OVERRIDE;
 };
 
 DeviceManagementRequestContext::DeviceManagementRequestContext(
@@ -68,20 +91,21 @@ DeviceManagementRequestContext::~DeviceManagementRequestContext() {
 
 const std::string& DeviceManagementRequestContext::GetUserAgent(
     const GURL& url) const {
-  return webkit_glue::GetUserAgent(url);
+  return content::GetUserAgent(url);
 }
 
 // Request context holder.
 class DeviceManagementRequestContextGetter
     : public net::URLRequestContextGetter {
  public:
-  DeviceManagementRequestContextGetter(
+  explicit DeviceManagementRequestContextGetter(
       net::URLRequestContextGetter* base_context_getter)
       : base_context_getter_(base_context_getter) {}
 
   // Overridden from net::URLRequestContextGetter:
-  virtual net::URLRequestContext* GetURLRequestContext();
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const;
+  virtual net::URLRequestContext* GetURLRequestContext() OVERRIDE;
+  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy()
+      const OVERRIDE;
 
  private:
   scoped_refptr<net::URLRequestContext> context_;
@@ -121,11 +145,11 @@ DeviceManagementBackend* DeviceManagementService::CreateBackend() {
 void DeviceManagementService::ScheduleInitialization(int64 delay_milliseconds) {
   if (initialized_)
     return;
-  CancelableTask* initialization_task = method_factory_.NewRunnableMethod(
-      &DeviceManagementService::Initialize);
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-                                          initialization_task,
-                                          delay_milliseconds);
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&DeviceManagementService::Initialize,
+                 weak_ptr_factory_.GetWeakPtr()),
+      delay_milliseconds);
 }
 
 void DeviceManagementService::Initialize() {
@@ -156,7 +180,7 @@ DeviceManagementService::DeviceManagementService(
     const std::string& server_url)
     : server_url_(server_url),
       initialized_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
 }
 
 void DeviceManagementService::AddJob(DeviceManagementJob* job) {
@@ -212,19 +236,25 @@ void DeviceManagementService::OnURLFetchComplete(
     // Retry the job if it failed due to a broken proxy, by bypassing the
     // proxy on the next try. Don't retry if this URLFetcher already bypassed
     // the proxy.
-    int error = status.os_error();
-    if (!status.is_success() &&
-        ((source->load_flags() & net::LOAD_BYPASS_PROXY) == 0) &&
-        (error == net::ERR_PROXY_CONNECTION_FAILED ||
-         error == net::ERR_TUNNEL_CONNECTION_FAILED ||
-         error == net::ERR_PROXY_AUTH_UNSUPPORTED ||
-         error == net::ERR_HTTPS_PROXY_TUNNEL_RESPONSE ||
-         error == net::ERR_MANDATORY_PROXY_CONFIGURATION_FAILED ||
-         error == net::ERR_PROXY_CERTIFICATE_INVALID ||
-         error == net::ERR_SOCKS_CONNECTION_FAILED ||
-         error == net::ERR_SOCKS_CONNECTION_HOST_UNREACHABLE)) {
-      LOG(WARNING) << "Proxy failed while contacting dmserver. Retrying "
-                   << "without using the proxy.";
+    bool retry = false;
+    if ((source->load_flags() & net::LOAD_BYPASS_PROXY) == 0) {
+      if (!status.is_success() && IsProxyError(status)) {
+        LOG(WARNING) << "Proxy failed while contacting dmserver.";
+        retry = true;
+      } else if (status.is_success() &&
+                 source->was_fetched_via_proxy() &&
+                 !IsProtobufMimeType(source)) {
+        // The proxy server can be misconfigured but pointing to an existing
+        // server that replies to requests. Try to recover if a successful
+        // request that went through a proxy returns an unexpected mime type.
+        LOG(WARNING) << "Got bad mime-type in response from dmserver that was "
+                     << "fetched via a proxy.";
+        retry = true;
+      }
+    }
+
+    if (retry) {
+      LOG(WARNING) << "Retrying dmserver request without using a proxy.";
       StartJob(job, true);
     } else {
       job->HandleResponse(status, response_code, cookies, data);

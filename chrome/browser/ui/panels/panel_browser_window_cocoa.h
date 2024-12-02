@@ -30,19 +30,20 @@ class PanelBrowserWindowCocoa : public NativePanel {
   virtual void ShowPanelInactive() OVERRIDE;
   virtual gfx::Rect GetPanelBounds() const OVERRIDE;
   virtual void SetPanelBounds(const gfx::Rect& bounds) OVERRIDE;
-  virtual void OnPanelExpansionStateChanged(
-      Panel::ExpansionState expansion_state) OVERRIDE;
-  virtual bool ShouldBringUpPanelTitlebar(int mouse_x,
-                                          int mouse_y) const OVERRIDE;
   virtual void ClosePanel() OVERRIDE;
   virtual void ActivatePanel() OVERRIDE;
   virtual void DeactivatePanel() OVERRIDE;
   virtual bool IsPanelActive() const OVERRIDE;
   virtual gfx::NativeWindow GetNativePanelHandle() OVERRIDE;
   virtual void UpdatePanelTitleBar() OVERRIDE;
+  virtual void UpdatePanelLoadingAnimations(bool should_animate) OVERRIDE;
   virtual void ShowTaskManagerForPanel() OVERRIDE;
   virtual FindBar* CreatePanelFindBar() OVERRIDE;
   virtual void NotifyPanelOnUserChangedTheme() OVERRIDE;
+  virtual void PanelTabContentsFocused(TabContents* tab_contents) OVERRIDE;
+  virtual void PanelCut() OVERRIDE;
+  virtual void PanelCopy() OVERRIDE;
+  virtual void PanelPaste() OVERRIDE;
   virtual void DrawAttention() OVERRIDE;
   virtual bool IsDrawingAttention() const OVERRIDE;
   virtual bool PreHandlePanelKeyboardEvent(
@@ -52,9 +53,13 @@ class PanelBrowserWindowCocoa : public NativePanel {
       const NativeWebKeyboardEvent& event) OVERRIDE;
   virtual Browser* GetPanelBrowser() const OVERRIDE;
   virtual void DestroyPanelBrowser() OVERRIDE;
-  virtual gfx::Size GetNonClientAreaExtent() const OVERRIDE;
-  virtual int GetRestoredHeight() const OVERRIDE;
-  virtual void SetRestoredHeight(int height) OVERRIDE;
+
+  // These sizes are in screen coordinates.
+  virtual gfx::Size WindowSizeFromContentSize(
+      const gfx::Size& content_size) const OVERRIDE;
+  virtual gfx::Size ContentSizeFromWindowSize(
+      const gfx::Size& window_size) const OVERRIDE;
+  virtual int TitleOnlyHeight() const OVERRIDE;
 
   Panel* panel() { return panel_.get(); }
   Browser* browser() const { return browser_.get(); }
@@ -66,6 +71,7 @@ class PanelBrowserWindowCocoa : public NativePanel {
 
  private:
   friend class PanelBrowserWindowCocoaTest;
+  friend class NativePanelTestingCocoa;
   FRIEND_TEST_ALL_PREFIXES(PanelBrowserWindowCocoaTest, CreateClose);
   FRIEND_TEST_ALL_PREFIXES(PanelBrowserWindowCocoaTest, NativeBounds);
   FRIEND_TEST_ALL_PREFIXES(PanelBrowserWindowCocoaTest, TitlebarViewCreate);
@@ -75,12 +81,18 @@ class PanelBrowserWindowCocoa : public NativePanel {
   FRIEND_TEST_ALL_PREFIXES(PanelBrowserWindowCocoaTest, KeyEvent);
   FRIEND_TEST_ALL_PREFIXES(PanelBrowserWindowCocoaTest, ThemeProvider);
   FRIEND_TEST_ALL_PREFIXES(PanelBrowserWindowCocoaTest, SetTitle);
+  FRIEND_TEST_ALL_PREFIXES(PanelBrowserWindowCocoaTest, ActivatePanel);
 
   bool isClosed();
 
   scoped_ptr<Browser> browser_;
   scoped_ptr<Panel> panel_;
+
+  // These use platform-independent screen coordinates, with (0,0) at
+  // top-left of the primary screen. They have to be converted to Cocoa
+  // screen coordinates before calling Cocoa API.
   gfx::Rect bounds_;
+
   PanelWindowControllerCocoa* controller_;  // Weak, owns us.
   bool is_shown_;  // Panel is hidden on creation, Show() changes that forever.
   bool has_find_bar_; // Find bar should only be created once per panel.

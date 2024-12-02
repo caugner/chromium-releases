@@ -41,7 +41,8 @@ namespace chromeos {
 const int kTimerSlopSeconds = 1;
 
 ClockMenuButton::ClockMenuButton(StatusAreaHost* host)
-    : StatusAreaButton(host, this) {
+    : StatusAreaButton(host, this),
+      default_use_24hour_clock_(false) {
   // Add as TimezoneSettings observer. We update the clock if timezone changes.
   system::TimezoneSettings::GetInstance()->AddObserver(this);
   CrosLibrary::Get()->GetPowerLibrary()->AddObserver(this);
@@ -87,16 +88,24 @@ void ClockMenuButton::UpdateTextAndSetNextTimer() {
 void ClockMenuButton::UpdateText() {
   base::Time time(base::Time::Now());
   // If the profie is present, check the use 24-hour clock preference.
-  const bool use_24hour_clock =
-      host_->GetProfile() &&
-      host_->GetProfile()->GetPrefs()->GetBoolean(prefs::kUse24HourClock);
-  SetText(UTF16ToWide(base::TimeFormatTimeOfDayWithHourClockType(
+  const bool use_24hour_clock = host_->GetProfile() ?
+      host_->GetProfile()->GetPrefs()->GetBoolean(prefs::kUse24HourClock) :
+      default_use_24hour_clock_;
+  SetText(base::TimeFormatTimeOfDayWithHourClockType(
       time,
       use_24hour_clock ? base::k24HourClock : base::k12HourClock,
-      base::kDropAmPm)));
-  SetTooltipText(UTF16ToWide(base::TimeFormatFriendlyDateAndTime(time)));
+      base::kDropAmPm));
+  SetTooltipText(base::TimeFormatFriendlyDateAndTime(time));
   SetAccessibleName(base::TimeFormatFriendlyDateAndTime(time));
   SchedulePaint();
+}
+
+void ClockMenuButton::SetDefaultUse24HourClock(bool use_24hour_clock) {
+  if (default_use_24hour_clock_ == use_24hour_clock)
+    return;
+
+  default_use_24hour_clock_ = use_24hour_clock;
+  UpdateText();
 }
 
 // ClockMenuButton, NotificationObserver implementation:
@@ -113,10 +122,9 @@ void ClockMenuButton::Observe(int type,
 }
 
 // ClockMenuButton, views::MenuDelegate implementation:
-std::wstring ClockMenuButton::GetLabel(int id) const {
+string16 ClockMenuButton::GetLabel(int id) const {
   DCHECK_EQ(CLOCK_DISPLAY_ITEM, id);
-  const string16 label = base::TimeFormatFriendlyDate(base::Time::Now());
-  return UTF16ToWide(label);
+  return base::TimeFormatFriendlyDate(base::Time::Now());
 }
 
 bool ClockMenuButton::IsCommandEnabled(int id) const {

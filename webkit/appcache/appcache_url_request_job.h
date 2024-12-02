@@ -11,6 +11,7 @@
 #include "net/http/http_byte_range.h"
 #include "net/url_request/url_request_job.h"
 #include "webkit/appcache/appcache_entry.h"
+#include "webkit/appcache/appcache_export.h"
 #include "webkit/appcache/appcache_response.h"
 #include "webkit/appcache/appcache_storage.h"
 
@@ -18,8 +19,8 @@ namespace appcache {
 
 // A net::URLRequestJob derivative that knows how to return a response stored
 // in the appcache.
-class AppCacheURLRequestJob : public net::URLRequestJob,
-                              public AppCacheStorage::Delegate {
+class APPCACHE_EXPORT AppCacheURLRequestJob : public net::URLRequestJob,
+                                              public AppCacheStorage::Delegate {
  public:
   AppCacheURLRequestJob(net::URLRequest* request, AppCacheStorage* storage);
   virtual ~AppCacheURLRequestJob();
@@ -132,7 +133,7 @@ class AppCacheURLRequestJob : public net::URLRequestJob,
   net::HttpByteRange range_requested_;
   scoped_ptr<net::HttpResponseInfo> range_response_info_;
   scoped_ptr<AppCacheResponseReader> reader_;
-  net::CompletionCallbackImpl<AppCacheURLRequestJob> read_callback_;
+  net::OldCompletionCallbackImpl<AppCacheURLRequestJob> read_callback_;
   ScopedRunnableMethodFactory<AppCacheURLRequestJob> method_factory_;
 };
 

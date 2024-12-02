@@ -9,6 +9,7 @@
 
 #include "base/file_util.h"
 #include "base/lazy_instance.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
@@ -22,6 +23,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/convert_user_script.h"
 #include "chrome/browser/extensions/convert_web_app.h"
+#include "chrome/browser/extensions/default_apps_trial.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/shell_integration.h"
@@ -31,6 +33,7 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/user_metrics.h"
 #include "content/common/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -122,6 +125,7 @@ CrxInstaller::CrxInstaller(base::WeakPtr<ExtensionService> frontend_weak,
       create_app_shortcut_(false),
       page_index_(-1),
       frontend_weak_(frontend_weak),
+      profile_(frontend_weak->profile()),
       client_(client),
       apps_require_extension_mime_type_(false),
       allow_silent_install_(false),
@@ -170,11 +174,11 @@ void CrxInstaller::InstallCrx(const FilePath& source_file) {
 }
 
 void CrxInstaller::InstallUserScript(const FilePath& source_file,
-                                     const GURL& original_url) {
-  DCHECK(!original_url.is_empty());
+                                     const GURL& download_url) {
+  DCHECK(!download_url.is_empty());
 
   source_file_ = source_file;
-  original_url_ = original_url;
+  download_url_ = download_url;
 
   if (!BrowserThread::PostTask(
           BrowserThread::FILE, FROM_HERE,
@@ -186,7 +190,7 @@ void CrxInstaller::InstallUserScript(const FilePath& source_file,
 void CrxInstaller::ConvertUserScriptOnFileThread() {
   std::string error;
   scoped_refptr<Extension> extension =
-      ConvertUserScriptToExtension(source_file_, original_url_, &error);
+      ConvertUserScriptToExtension(source_file_, download_url_, &error);
   if (!extension) {
     ReportFailureFromFileThread(error);
     return;
@@ -258,7 +262,7 @@ bool CrxInstaller::AllowInstall(const Extension* extension,
     // will be set.  In this case, check that it was served with the
     // right mime type.  Make an exception for file URLs, which come
     // from the users computer and have no headers.
-    if (!original_url_.SchemeIsFile() &&
+    if (!download_url_.SchemeIsFile() &&
         apps_require_extension_mime_type_ &&
         original_mime_type_ != Extension::kMimeType) {
       *error = base::StringPrintf(
@@ -285,7 +289,7 @@ bool CrxInstaller::AllowInstall(const Extension* extension,
       // host (or a subdomain of the host) the download happened from.  There's
       // no way for us to verify that the app controls any other hosts.
       URLPattern pattern(UserScript::kValidUserScriptSchemes);
-      pattern.SetHost(original_url_.host());
+      pattern.SetHost(download_url_.host());
       pattern.SetMatchSubdomains(true);
 
       URLPatternSet patterns = extension_->web_extent();
@@ -538,6 +542,21 @@ void CrxInstaller::ReportFailureFromUIThread(const std::string& error) {
 
 void CrxInstaller::ReportSuccessFromFileThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
+  // Tracking number of extensions installed by users
+  if (install_cause() == extension_misc::INSTALL_CAUSE_USER_DOWNLOAD) {
+    UMA_HISTOGRAM_ENUMERATION("Extensions.ExtensionInstalled", 1, 2);
+
+    static bool default_apps_trial_exists =
+        base::FieldTrialList::TrialExists(kDefaultAppsTrial_Name);
+    if (default_apps_trial_exists) {
+      UMA_HISTOGRAM_ENUMERATION(
+          base::FieldTrial::MakeName("Extensions.ExtensionInstalled",
+                                     kDefaultAppsTrial_Name),
+          1, 2);
+    }
+  }
+
   if (!BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
           NewRunnableMethod(this,

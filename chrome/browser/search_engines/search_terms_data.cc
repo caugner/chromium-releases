@@ -13,8 +13,8 @@
 #include "googleurl/src/gurl.h"
 
 #if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/rlz/rlz.h"
-#include "chrome/installer/util/google_update_settings.h"
 #endif
 
 SearchTermsData::SearchTermsData() {
@@ -24,27 +24,11 @@ SearchTermsData::~SearchTermsData() {
 }
 
 std::string SearchTermsData::GoogleBaseSuggestURLValue() const {
-  // The suggest base URL we want at the end is something like
-  // "http://clients1.google.TLD/complete/".  The key bit we want from the
-  // original Google base URL is the TLD.
-
-  // This is being temporarilly modified to (experimentally) use
-  // "http://www.google.TLD/complete/".
-  static bool www = base::FieldTrialList::TrialExists("SuggestHostPrefix") &&
-      base::FieldTrialList::FindFullName("SuggestHostPrefix") == "Www_Prefix";
-  const char* prefix = www ? "www." : "clients1.";
-
   // Start with the Google base URL.
   const GURL base_url(GoogleBaseURLValue());
   DCHECK(base_url.is_valid());
 
-  // Change "www." to "clients1." in the hostname.  If no "www." was found, just
-  // prepend "clients1.".
-  const std::string base_host(base_url.host());
   GURL::Replacements repl;
-  const std::string suggest_host(prefix +
-      (base_host.compare(0, 4, "www.") ? base_host : base_host.substr(4)));
-  repl.SetHostStr(suggest_host);
 
   // Replace any existing path with "/complete/".
   static const std::string suggest_path("/complete/");
@@ -90,9 +74,9 @@ string16 UIThreadSearchTermsData::GetRlzParameterValue() const {
   string16 rlz_string;
   // For organic brandcodes do not use rlz at all. Empty brandcode usually
   // means a chromium install. This is ok.
-  string16 brand;
-  if (GoogleUpdateSettings::GetBrand(&brand) && !brand.empty() &&
-      !GoogleUpdateSettings::IsOrganic(brand)) {
+  std::string brand;
+  if (google_util::GetBrand(&brand) && !brand.empty() &&
+      !google_util::IsOrganic(brand)) {
     // This call will return false the first time(s) it is called until the
     // value has been cached. This normally would mean that at most one omnibox
     // search might not send the RLZ data but this is not really a problem.

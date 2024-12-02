@@ -16,6 +16,8 @@
 #include "ppapi/c/ppb_graphics_3d.h"
 #include "ppapi/c/ppb_image_data.h"
 #include "ppapi/c/ppb_input_event.h"
+#include "ppapi/c/dev/pp_video_dev.h"
+#include "ppapi/c/dev/ppb_transport_dev.h"
 #include "ppapi/proxy/interface_id.h"
 
 struct PP_Flash_Menu;
@@ -60,7 +62,7 @@ class ResourceCreationAPI {
   virtual PP_Resource CreateFileChooser(
       PP_Instance instance,
       PP_FileChooserMode_Dev mode,
-      const PP_Var& accept_mime_types) = 0;
+      const char* accept_mime_types) = 0;
   virtual PP_Resource CreateFileIO(PP_Instance instance) = 0;
   virtual PP_Resource CreateFileRef(PP_Resource file_system,
                                     const char* path) = 0;
@@ -70,6 +72,7 @@ class ResourceCreationAPI {
                                       const PP_Flash_Menu* menu_data) = 0;
   virtual PP_Resource CreateFlashNetConnector(PP_Instance instance) = 0;
   virtual PP_Resource CreateFlashTCPSocket(PP_Instance instace) = 0;
+  virtual PP_Resource CreateFlashUDPSocket(PP_Instance instace) = 0;
   // Note: can't be called CreateFont due to Windows #defines.
   virtual PP_Resource CreateFontObject(
       PP_Instance instance,
@@ -110,7 +113,7 @@ class ResourceCreationAPI {
                                       const int32_t* attrib_list) = 0;
   virtual PP_Resource CreateTransport(PP_Instance instance,
                                       const char* name,
-                                      const char* proto) = 0;
+                                      PP_TransportType type) = 0;
   virtual PP_Resource CreateURLLoader(PP_Instance instance) = 0;
   virtual PP_Resource CreateURLRequestInfo(
       PP_Instance instance,

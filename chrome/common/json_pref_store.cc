@@ -9,10 +9,10 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/file_util.h"
+#include "base/json/json_value_serializer.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop_proxy.h"
 #include "base/values.h"
-#include "content/common/json_value_serializer.h"
 
 namespace {
 
@@ -37,9 +37,8 @@ class FileThreadDeserializer
     DCHECK(origin_loop_proxy_->BelongsToCurrentThread());
     file_loop_proxy_->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this,
-                          &FileThreadDeserializer::ReadFileAndReport,
-                          path));
+        base::Bind(&FileThreadDeserializer::ReadFileAndReport,
+                   this, path));
   }
 
   // Deserializes JSON on the file thread.
@@ -50,7 +49,7 @@ class FileThreadDeserializer
 
     origin_loop_proxy_->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &FileThreadDeserializer::ReportOnOriginThread));
+        base::Bind(&FileThreadDeserializer::ReportOnOriginThread, this));
   }
 
   // Reports deserialization result on the origin thread.
@@ -186,7 +185,7 @@ void JsonPrefStore::SetValue(const std::string& key, Value* value) {
   prefs_->Get(key, &old_value);
   if (!old_value || !value->Equals(old_value)) {
     prefs_->Set(key, new_value.release());
-    FOR_EACH_OBSERVER(PrefStore::Observer, observers_, OnPrefValueChanged(key));
+    ReportValueChanged(key);
   }
 }
 
@@ -195,14 +194,16 @@ void JsonPrefStore::SetValueSilently(const std::string& key, Value* value) {
   scoped_ptr<Value> new_value(value);
   Value* old_value = NULL;
   prefs_->Get(key, &old_value);
-  if (!old_value || !value->Equals(old_value))
+  if (!old_value || !value->Equals(old_value)) {
     prefs_->Set(key, new_value.release());
+    if (!read_only_)
+      writer_.ScheduleWrite(this);
+  }
 }
 
 void JsonPrefStore::RemoveValue(const std::string& key) {
-  if (prefs_->Remove(key, NULL)) {
-    FOR_EACH_OBSERVER(PrefStore::Observer, observers_, OnPrefValueChanged(key));
-  }
+  if (prefs_->Remove(key, NULL))
+    ReportValueChanged(key);
 }
 
 bool JsonPrefStore::ReadOnly() const {
@@ -286,19 +287,19 @@ bool JsonPrefStore::WritePrefs() {
   if (!SerializeData(&data))
     return false;
 
-  // Lie about our ability to save.
-  if (read_only_)
-    return true;
+  // Don't actually write prefs if we're read-only or don't have any pending
+  // writes.
+  // TODO(bauerb): Make callers of this method call CommitPendingWrite directly.
+  if (writer_.HasPendingWrite() && !read_only_)
+    writer_.WriteNow(data);
 
-  writer_.WriteNow(data);
   return true;
 }
 
 void JsonPrefStore::ScheduleWritePrefs() {
-  if (read_only_)
-    return;
-
-  writer_.ScheduleWrite(this);
+  // Writing prefs should be scheduled automatically, so this is a no-op
+  // for now.
+  // TODO(bauerb): Remove calls to this method.
 }
 
 void JsonPrefStore::CommitPendingWrite() {
@@ -308,6 +309,8 @@ void JsonPrefStore::CommitPendingWrite() {
 
 void JsonPrefStore::ReportValueChanged(const std::string& key) {
   FOR_EACH_OBSERVER(PrefStore::Observer, observers_, OnPrefValueChanged(key));
+  if (!read_only_)
+    writer_.ScheduleWrite(this);
 }
 
 bool JsonPrefStore::SerializeData(std::string* output) {

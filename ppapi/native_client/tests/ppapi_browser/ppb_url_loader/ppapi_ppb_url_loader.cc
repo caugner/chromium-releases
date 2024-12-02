@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -407,7 +407,7 @@ void TestOpenSimple() {
   loader = PPBURLLoader()->Create(pp_instance());
   // We are on the main thread, performing a sync call should fail
   rv = PPBURLLoader()->Open(loader, request, PP_BlockUntilComplete());
-  EXPECT(PP_ERROR_BADARGUMENT == rv);
+  EXPECT(PP_ERROR_BLOCKS_MAIN_THREAD == rv);
   PPBCore()->ReleaseResource(loader);
 
   LOG_TO_BROWSER("open (asynchronous) normal");

@@ -43,7 +43,12 @@ class TestBrowserWindow : public BrowserWindow {
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual bool IsMaximized() const OVERRIDE;
   virtual bool IsMinimized() const OVERRIDE;
-  virtual void SetFullscreen(bool fullscreen) OVERRIDE {}
+  virtual void EnterFullscreen(
+      const GURL& url, FullscreenExitBubbleType type) OVERRIDE {}
+  virtual void ExitFullscreen() OVERRIDE {}
+  virtual void UpdateFullscreenExitBubbleContent(
+      const GURL& url,
+      FullscreenExitBubbleType bubble_type) OVERRIDE {}
   virtual bool IsFullscreen() const OVERRIDE;
   virtual bool IsFullscreenBubbleVisible() const OVERRIDE;
   virtual LocationBar* GetLocationBar() const OVERRIDE;
@@ -66,7 +71,6 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void ShowCreateChromeAppShortcutsDialog(
       Profile* profile,
       const Extension* app) OVERRIDE {}
-  virtual void ToggleUseCompactNavigationBar() OVERRIDE {}
 
   virtual bool IsBookmarkBarVisible() const OVERRIDE;
   virtual bool IsBookmarkBarAnimating() const OVERRIDE;
@@ -89,9 +93,6 @@ class TestBrowserWindow : public BrowserWindow {
       TabContentsWrapper* wrapper) OVERRIDE {}
   virtual void ShowThemeInstallBubble() OVERRIDE {}
   virtual void ConfirmBrowserCloseWithPendingDownloads() OVERRIDE {}
-  virtual gfx::NativeWindow ShowHTMLDialog(
-      HtmlDialogUIDelegate* delegate,
-      gfx::NativeWindow parent_window) OVERRIDE;
   virtual void UserChangedTheme() OVERRIDE {}
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
   virtual void TabContentsFocused(TabContents* tab_contents) OVERRIDE {}
@@ -102,20 +103,23 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void Cut() OVERRIDE {}
   virtual void Copy() OVERRIDE {}
   virtual void Paste() OVERRIDE {}
-  virtual void ToggleTabStripMode() OVERRIDE {}
 #if defined(OS_MACOSX)
   virtual void OpenTabpose() OVERRIDE {}
-  virtual void SetPresentationMode(bool presentation_mode) OVERRIDE {}
+  virtual void EnterPresentationMode(
+      const GURL& url,
+      FullscreenExitBubbleType bubble_type) OVERRIDE {}
+  virtual void ExitPresentationMode() OVERRIDE {}
   virtual bool InPresentationMode() OVERRIDE;
 #endif
 
-  virtual void PrepareForInstant() OVERRIDE {}
   virtual void ShowInstant(TabContentsWrapper* preview_contents) OVERRIDE {}
-  virtual void HideInstant(bool instant_is_active) OVERRIDE {}
+  virtual void HideInstant() OVERRIDE {}
   virtual gfx::Rect GetInstantBounds() OVERRIDE;
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) OVERRIDE;
   virtual FindBar* CreateFindBar() OVERRIDE;
+  virtual void ShowAvatarBubble(TabContents* tab_contents,
+                                const gfx::Rect& rect) OVERRIDE {}
 
 #if defined(OS_CHROMEOS)
   virtual void ShowKeyboardOverlay(gfx::NativeWindow owning_window) OVERRIDE {}

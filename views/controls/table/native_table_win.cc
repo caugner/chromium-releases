@@ -7,7 +7,10 @@
 #include <commctrl.h>
 #include <windowsx.h>
 
+#include <algorithm>
+
 #include "base/logging.h"
+#include "base/win/scoped_gdi_object.h"
 #include "skia/ext/skia_utils_win.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
@@ -324,8 +327,8 @@ bool NativeTableWin::ProcessMessage(UINT message, WPARAM w_param,
         // be called when dwFlags would be LVGIT_UNFOLDED.  Removing it entirely
         // will disable all of the above behavior.
         NMLVGETINFOTIP* info_tip = reinterpret_cast<NMLVGETINFOTIP*>(hdr);
-        std::wstring tooltip = table_->model()->GetTooltip(info_tip->iItem);
-        CHECK(info_tip->cchTextMax >= 2);
+        string16 tooltip = table_->model()->GetTooltip(info_tip->iItem);
+        CHECK_GE(info_tip->cchTextMax, 2);
         if (tooltip.length() >= static_cast<size_t>(info_tip->cchTextMax)) {
           // Elide the tooltip if necessary.
           tooltip.erase(info_tip->cchTextMax - 2);  // Ellipsis + '\0'
@@ -392,12 +395,13 @@ void NativeTableWin::CreateNativeControl() {
     // rect does not include the icon).
     gfx::CanvasSkia canvas(kImageSize, kImageSize, false);
     // Make the background completely transparent.
-    canvas.drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
-    HICON empty_icon =
-        IconUtil::CreateHICONFromSkBitmap(canvas.ExtractBitmap());
-    ImageList_AddIcon(image_list, empty_icon);
-    ImageList_AddIcon(image_list, empty_icon);
-    DeleteObject(empty_icon);
+    canvas.sk_canvas()->drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
+    {
+      base::win::ScopedHICON empty_icon(
+          IconUtil::CreateHICONFromSkBitmap(canvas.ExtractBitmap()));
+      ImageList_AddIcon(image_list, empty_icon);
+      ImageList_AddIcon(image_list, empty_icon);
+    }
     ListView_SetImageList(native_view(), image_list, LVSIL_SMALL);
   }
 
@@ -483,7 +487,7 @@ LRESULT NativeTableWin::OnCustomDraw(NMLVCUSTOMDRAW* draw_info) {
         r |= CDRF_NOTIFYPOSTPAINT;
       return r;
     }
-    case (CDDS_ITEMPREPAINT | CDDS_SUBITEM): {
+    case CDDS_ITEMPREPAINT | CDDS_SUBITEM: {
       // TODO(jcampan): implement custom colors and fonts.
       return CDRF_DODEFAULT;
     }
@@ -529,14 +533,15 @@ LRESULT NativeTableWin::OnCustomDraw(NMLVCUSTOMDRAW* draw_info) {
               // NOTE: This may be invoked without the ListView filling in the
               // background (or rather windows paints background, then invokes
               // this twice). As such, we always fill in the background.
-              canvas.drawColor(
+              canvas.sk_canvas()->drawColor(
                   skia::COLORREFToSkColor(GetSysColor(bg_color_index)),
                   SkXfermode::kSrc_Mode);
               // + 1 for padding (we declared the image as 18x18 in the list-
               // view when they are 16x16 so we get an extra pixel of padding).
               canvas.DrawBitmapInt(image, 0, 0,
                                    image.width(), image.height(),
-                                   1, 1, kFaviconSize, kFaviconSize, true);
+                                   1, 1,
+                                   gfx::kFaviconSize, gfx::kFaviconSize, true);
 
               // Only paint the visible region of the icon.
               RECT to_draw = { intersection.left - icon_rect.left,
@@ -546,9 +551,9 @@ LRESULT NativeTableWin::OnCustomDraw(NMLVCUSTOMDRAW* draw_info) {
                               (intersection.right - intersection.left);
               to_draw.bottom = to_draw.top +
                               (intersection.bottom - intersection.top);
-              skia::DrawToNativeContext(&canvas, draw_info->nmcd.hdc,
-                                       intersection.left, intersection.top,
-                                       &to_draw);
+              skia::DrawToNativeContext(canvas.sk_canvas(), draw_info->nmcd.hdc,
+                                        intersection.left, intersection.top,
+                                        &to_draw);
               r = CDRF_SKIPDEFAULT;
             }
           }

@@ -12,7 +12,7 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_tabs_module.h"
+#include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -36,9 +36,11 @@ class BrowserActionApiTest : public ExtensionApiTest {
 
   bool OpenPopup(int index) {
     ResultCatcher catcher;
+    ui_test_utils::WindowedNotificationObserver popup_observer(
+        chrome::NOTIFICATION_EXTENSION_POPUP_VIEW_READY,
+        NotificationService::AllSources());
     GetBrowserActionsBar().Press(index);
-    ui_test_utils::WaitForNotification(
-        chrome::NOTIFICATION_EXTENSION_POPUP_VIEW_READY);
+    popup_observer.Wait();
     EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
     return GetBrowserActionsBar().HasPopup();
   }
@@ -341,8 +343,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoDragging) {
   BrowserActionTestUtil incognito_bar(incognito_browser);
 
   // Navigate just to have a tab in this window, otherwise wonky things happen.
-  ui_test_utils::OpenURLOffTheRecord(browser()->profile(),
-                                     GURL(chrome::kChromeUIExtensionsURL));
+  ui_test_utils::OpenURLOffTheRecord(browser()->profile(), GURL("about:blank"));
 
   ASSERT_EQ(2, incognito_bar.NumberOfBrowserActions());
 
@@ -378,4 +379,35 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoDragging) {
 
   EXPECT_EQ(kTooltipC, incognito_bar.GetTooltip(0));
   EXPECT_EQ(kTooltipA, incognito_bar.GetTooltip(1));
+}
+
+// Disabled because of failures (crashes) on ASAN bot.
+// See http://crbug.com/98861.
+IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DISABLED_CloseBackgroundPage) {
+  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII(
+      "browser_action/close_background")));
+  const Extension* extension = GetSingleLoadedExtension();
+
+  // There is a background page and a browser action with no badge text.
+  ExtensionProcessManager* manager =
+      browser()->profile()->GetExtensionProcessManager();
+  ASSERT_TRUE(manager->GetBackgroundHostForExtension(extension));
+  ExtensionAction* action = extension->browser_action();
+  ASSERT_EQ("", action->GetBadgeText(ExtensionAction::kDefaultTabId));
+
+  ui_test_utils::WindowedNotificationObserver host_destroyed_observer(
+      chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED,
+      NotificationService::AllSources());
+
+  // Click the browser action.
+  browser()->profile()->GetExtensionService()->browser_event_router()->
+      BrowserActionExecuted(
+          browser()->profile(), action->extension_id(), browser());
+
+  // It can take a moment for the background page to actually get destroyed
+  // so we wait for the notification before checking that it's really gone
+  // and the badge text has been set.
+  host_destroyed_observer.Wait();
+  ASSERT_FALSE(manager->GetBackgroundHostForExtension(extension));
+  ASSERT_EQ("X", action->GetBadgeText(ExtensionAction::kDefaultTabId));
 }

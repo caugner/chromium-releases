@@ -29,22 +29,24 @@ std::string MockContentRendererClient::GetDefaultEncoding() {
   return std::string();
 }
 
-WebKit::WebPlugin* MockContentRendererClient::CreatePlugin(
+bool MockContentRendererClient::OverrideCreatePlugin(
     RenderView* render_view,
     WebKit::WebFrame* frame,
-    const WebKit::WebPluginParams& params) {
-  return NULL;
+    const WebKit::WebPluginParams& params,
+    WebKit::WebPlugin** plugin) {
+  return false;
 }
 
-void MockContentRendererClient::ShowErrorPage(RenderView* render_view,
-                                              WebKit::WebFrame* frame,
-                                              int http_status_code) {
+bool MockContentRendererClient::HasErrorPage(int http_status_code,
+                                             std::string* error_domain) {
+  return false;
 }
 
-std::string MockContentRendererClient::GetNavigationErrorHtml(
+void MockContentRendererClient::GetNavigationErrorStrings(
     const WebKit::WebURLRequest& failed_request,
-    const WebKit::WebURLError& error) {
-  return std::string();
+    const WebKit::WebURLError& error,
+    std::string* error_html,
+    string16* error_description) {
 }
 
 bool MockContentRendererClient::RunIdleHandlerWhenWidgetsHidden() {
@@ -74,15 +76,11 @@ bool MockContentRendererClient::ShouldPumpEventsDuringCookieMessage() {
 }
 
 void MockContentRendererClient::DidCreateScriptContext(
-    WebKit::WebFrame* frame) {
+    WebKit::WebFrame* frame, v8::Handle<v8::Context> context, int world_id) {
 }
 
-void MockContentRendererClient::DidDestroyScriptContext(
-    WebKit::WebFrame* frame) {
-}
-
-void MockContentRendererClient::DidCreateIsolatedScriptContext(
-    WebKit::WebFrame* frame, int world_id, v8::Handle<v8::Context> context) {
+void MockContentRendererClient::WillReleaseScriptContext(
+    WebKit::WebFrame* frame, v8::Handle<v8::Context> context, int world_id) {
 }
 
 unsigned long long MockContentRendererClient::VisitedLinkHash(
@@ -119,4 +117,9 @@ bool MockContentRendererClient::HandleSetCookieRequest(
     const std::string& value) {
   return false;
 }
+
+bool MockContentRendererClient::IsProtocolSupportedForMedia(const GURL& url) {
+  return false;
+}
+
 }  // namespace content

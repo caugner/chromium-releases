@@ -199,9 +199,9 @@
                   <li><a href="background_pages.html">Background Pages</a></li>
                   <li><a href="content_scripts.html">Content Scripts</a></li>
                   <li><a href="xhr.html">Cross-Origin XHR</a></li>
-                  <li><a href="idle.html">Idle</a></li>
                   <li><a href="i18n.html">Internationalization</a></li>
                   <li><a href="messaging.html">Message Passing</a></li>
+                  <li><a href="permissions.html">Optional Permissions</a></li>
                   <li><a href="npapi.html">NPAPI Plugins</a></li>
                 </ul>
               </li>
@@ -725,6 +725,13 @@ shows you how to
 declare the "tabs" permission.
 </p>
 
+<p class="note">
+<b>Note:</b>
+As of Chrome 16, some permissions can be optional.
+For details, see
+<a href="permissions.html">Optional Permissions</a>.
+</p>
+
 <p>
 Here's an example of the permissions part of a manifest file
 for an extension:
@@ -881,6 +888,11 @@ table.
        <a href="notifications.html">Desktop Notifications</a>.</td>
 </tr>
 <tr>
+  <td> "proxy" </td>
+  <td> Required if the extension uses the
+       <a href="proxy.html">chrome.proxy</a> module. </td>
+</tr>
+<tr>
   <td> "tabs" </td>
   <td> Required if the extension uses the
        <a href="tabs.html">chrome.tabs</a> or
@@ -911,7 +923,13 @@ table.
       <code>http://*.example.com</code>.
       </p>       
   </td>
+</tr><tr>
+</tr><tr>
+  <td> "webNavigation" </td>
+  <td> Required if the extension uses the
+       <a href="webNavigation.html">chrome.webNavigation</a> module. </td>
 </tr>
+
 </tbody></table>
 
 

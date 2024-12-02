@@ -11,10 +11,12 @@
 #include "base/logging.h"
 #include "base/string_number_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/sync/protocol/app_notification_specifics.pb.h"
 #include "chrome/browser/sync/protocol/app_specifics.pb.h"
 #include "chrome/browser/sync/protocol/autofill_specifics.pb.h"
 #include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
 #include "chrome/browser/sync/protocol/encryption.pb.h"
+#include "chrome/browser/sync/protocol/extension_setting_specifics.pb.h"
 #include "chrome/browser/sync/protocol/extension_specifics.pb.h"
 #include "chrome/browser/sync/protocol/nigori_specifics.pb.h"
 #include "chrome/browser/sync/protocol/password_specifics.pb.h"
@@ -163,6 +165,19 @@ DictionaryValue* PasswordSpecificsDataToValue(
   return value;
 }
 
+DictionaryValue* AppNotificationSpecificsToValue(
+    const sync_pb::AppNotificationSpecifics& proto) {
+  DictionaryValue* value = new DictionaryValue();
+  SET_STR(guid);
+  SET_STR(app_id);
+  SET_INT64(creation_timestamp_ms);
+  SET_STR(title);
+  SET_STR(body_text);
+  SET_STR(link_url);
+  SET_STR(link_text);
+  return value;
+}
+
 DictionaryValue* AppSpecificsToValue(
     const sync_pb::AppSpecifics& proto) {
   DictionaryValue* value = new DictionaryValue();
@@ -213,6 +228,15 @@ DictionaryValue* BookmarkSpecificsToValue(
   return value;
 }
 
+DictionaryValue* ExtensionSettingSpecificsToValue(
+    const sync_pb::ExtensionSettingSpecifics& proto) {
+  DictionaryValue* value = new DictionaryValue();
+  SET_STR(extension_id);
+  SET_STR(key);
+  SET_STR(value);
+  return value;
+}
+
 DictionaryValue* ExtensionSpecificsToValue(
     const sync_pb::ExtensionSpecifics& proto) {
   DictionaryValue* value = new DictionaryValue();
@@ -242,6 +266,7 @@ DictionaryValue* NigoriSpecificsToValue(
   SET_BOOL(encrypt_search_engines);
   SET_BOOL(sync_tabs);
   SET_BOOL(encrypt_everything);
+  SET_BOOL(encrypt_extension_settings);
   return value;
 }
 
@@ -275,7 +300,6 @@ DictionaryValue* SearchEngineSpecificsToValue(
   SET_STR(suggestions_url);
   SET_INT32(prepopulate_id);
   SET_BOOL(autogenerate_keyword);
-  SET_BOOL(created_by_policy);
   SET_STR(instant_url);
   SET_INT64(last_modified);
   SET_STR(sync_guid);
@@ -316,11 +340,13 @@ DictionaryValue* TypedUrlSpecificsToValue(
 DictionaryValue* EntitySpecificsToValue(
     const sync_pb::EntitySpecifics& specifics) {
   DictionaryValue* value = new DictionaryValue();
+  SET_EXTENSION(sync_pb, app_notification, AppNotificationSpecificsToValue);
   SET_EXTENSION(sync_pb, app, AppSpecificsToValue);
   SET_EXTENSION(sync_pb, autofill, AutofillSpecificsToValue);
   SET_EXTENSION(sync_pb, autofill_profile, AutofillProfileSpecificsToValue);
   SET_EXTENSION(sync_pb, bookmark, BookmarkSpecificsToValue);
   SET_EXTENSION(sync_pb, extension, ExtensionSpecificsToValue);
+  SET_EXTENSION(sync_pb, extension_setting, ExtensionSettingSpecificsToValue);
   SET_EXTENSION(sync_pb, nigori, NigoriSpecificsToValue);
   SET_EXTENSION(sync_pb, password, PasswordSpecificsToValue);
   SET_EXTENSION(sync_pb, preference, PreferenceSpecificsToValue);

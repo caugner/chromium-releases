@@ -6,13 +6,12 @@
 
 #include <vector>
 
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/logging.h"
-#include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
-#include "base/string_piece.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/bug_report_data.h"
@@ -25,7 +24,6 @@
 #include "chrome/browser/ui/webui/screenshot_source.h"
 #include "chrome/browser/ui/window_snapshot/window_snapshot.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -34,9 +32,7 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/base/escape.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/rect.h"
 
 #if defined(OS_CHROMEOS)
 #include "base/file_util.h"
@@ -91,8 +87,8 @@ void GetSavedScreenshots(std::vector<std::string>* saved_screenshots,
 void GetScreenshotUrls(std::vector<std::string>* saved_screenshots) {
   base::WaitableEvent done(true, false);
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                          NewRunnableFunction(&GetSavedScreenshots,
-                                              saved_screenshots, &done));
+                          base::Bind(&GetSavedScreenshots,
+                                     saved_screenshots, &done));
   done.Wait();
 }
 
@@ -392,19 +388,25 @@ bool BugReportHandler::Init() {
 
 void BugReportHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("getDialogDefaults",
-      NewCallback(this, &BugReportHandler::HandleGetDialogDefaults));
+      base::Bind(&BugReportHandler::HandleGetDialogDefaults,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("refreshCurrentScreenshot",
-      NewCallback(this, &BugReportHandler::HandleRefreshCurrentScreenshot));
+      base::Bind(&BugReportHandler::HandleRefreshCurrentScreenshot,
+                 base::Unretained(this)));
 #if defined(OS_CHROMEOS)
   web_ui_->RegisterMessageCallback("refreshSavedScreenshots",
-      NewCallback(this, &BugReportHandler::HandleRefreshSavedScreenshots));
+      base::Bind(&BugReportHandler::HandleRefreshSavedScreenshots,
+                 base::Unretained(this)));
 #endif
   web_ui_->RegisterMessageCallback("sendReport",
-      NewCallback(this, &BugReportHandler::HandleSendReport));
+      base::Bind(&BugReportHandler::HandleSendReport,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("cancel",
-      NewCallback(this, &BugReportHandler::HandleCancel));
+      base::Bind(&BugReportHandler::HandleCancel,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("openSystemTab",
-      NewCallback(this, &BugReportHandler::HandleOpenSystemTab));
+      base::Bind(&BugReportHandler::HandleOpenSystemTab,
+                 base::Unretained(this)));
 }
 
 void BugReportHandler::HandleGetDialogDefaults(const ListValue*) {
@@ -431,7 +433,8 @@ void BugReportHandler::HandleGetDialogDefaults(const ListValue*) {
         true,  // don't compress.
         chromeos::system::SyslogsProvider::SYSLOGS_FEEDBACK,
         &syslogs_consumer_,
-        NewCallback(bug_report_data_, &BugReportData::SyslogsComplete));
+        base::Bind(&BugReportData::SyslogsComplete,
+                   base::Unretained(bug_report_data_)));
   }
   // 2: user e-mail
   dialog_defaults.Append(new StringValue(GetUserEmail()));

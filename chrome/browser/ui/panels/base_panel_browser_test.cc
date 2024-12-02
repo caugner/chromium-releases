@@ -4,18 +4,21 @@
 
 #include "chrome/browser/ui/panels/base_panel_browser_test.h"
 
+#include "chrome/browser/ui/browser_list.h"
+
 #include "base/command_line.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/message_loop.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/panels/native_panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
-#include "content/common/url_constants.h"
+#include "content/public/common/url_constants.h"
 
 #if defined(OS_MACOSX)
 #include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
@@ -26,8 +29,6 @@ namespace {
 const int kTestingWorkAreaWidth = 800;
 const int kTestingWorkAreaHeight = 600;
 const int kDefaultAutoHidingDesktopBarThickness = 40;
-const int kDefaultPanelWidth = 150;
-const int kDefaultPanelHeight = 120;
 
 struct MockDesktopBar {
   bool auto_hiding_enabled;
@@ -175,6 +176,51 @@ void BasePanelBrowserTest::SetUpOnMainThread() {
   panel_manager->set_auto_hiding_desktop_bar(mock_auto_hiding_desktop_bar_);
   panel_manager->SetWorkAreaForTesting(testing_work_area_);
   panel_manager->enable_auto_sizing(false);
+  // This is needed so the subsequently created panels can be activated.
+  // On a Mac, it transforms background-only test process into foreground one.
+  EXPECT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
+}
+
+// TODO(prasadt): If we start having even more of these WaitFor* pattern
+// methods, refactor. The only way to refactor would be to pass in a function
+// pointer, it may not be worth complicating the code till we have more of
+// these.
+void BasePanelBrowserTest::WaitForPanelActiveState(
+    Panel* panel, ActiveState expected_state) {
+  DCHECK(expected_state == SHOW_AS_ACTIVE ||
+         expected_state == SHOW_AS_INACTIVE);
+  ui_test_utils::WindowedNotificationObserver signal(
+      chrome::NOTIFICATION_PANEL_CHANGED_ACTIVE_STATUS,
+      Source<Panel>(panel));
+  if (panel->IsActive() == (expected_state == SHOW_AS_ACTIVE))
+    return;  // Already in required state.
+  signal.Wait();
+  // Verify that transition happened in the desired direction.
+  EXPECT_TRUE(panel->IsActive() == (expected_state == SHOW_AS_ACTIVE));
+}
+
+void BasePanelBrowserTest::WaitForWindowSizeAvailable(Panel* panel) {
+  scoped_ptr<NativePanelTesting> panel_testing(
+      NativePanelTesting::Create(panel->native_panel()));
+  ui_test_utils::WindowedNotificationObserver signal(
+      chrome::NOTIFICATION_PANEL_WINDOW_SIZE_KNOWN,
+      Source<Panel>(panel));
+  if (panel_testing->IsWindowSizeKnown())
+    return;
+  signal.Wait();
+  EXPECT_TRUE(panel_testing->IsWindowSizeKnown());
+}
+
+void BasePanelBrowserTest::WaitForBoundsAnimationFinished(Panel* panel) {
+  scoped_ptr<NativePanelTesting> panel_testing(
+      NativePanelTesting::Create(panel->native_panel()));
+  ui_test_utils::WindowedNotificationObserver signal(
+      chrome::NOTIFICATION_PANEL_BOUNDS_ANIMATIONS_FINISHED,
+      Source<Panel>(panel));
+  if (!panel_testing->IsAnimatingBounds())
+    return;
+  signal.Wait();
+  EXPECT_TRUE(!panel_testing->IsAnimatingBounds());
 }
 
 Panel* BasePanelBrowserTest::CreatePanelWithParams(
@@ -196,20 +242,53 @@ Panel* BasePanelBrowserTest::CreatePanelWithParams(
   if (params.url.is_empty()) {
     TabContentsWrapper* tab_contents =
         new TabContentsWrapper(new TestTabContents(browser()->profile(), NULL));
-    panel_browser->AddTab(tab_contents, PageTransition::LINK);
+    panel_browser->AddTab(tab_contents, content::PAGE_TRANSITION_LINK);
   } else {
     panel_browser->AddSelectedTabWithURL(params.url,
-                                         PageTransition::START_PAGE);
+                                         content::PAGE_TRANSITION_START_PAGE);
     ui_test_utils::WaitForNavigation(
         &panel_browser->GetSelectedTabContents()->controller());
   }
 
   Panel* panel = static_cast<Panel*>(panel_browser->window());
-  if (params.show_flag == SHOW_AS_ACTIVE)
+
+  if (params.show_flag == SHOW_AS_ACTIVE) {
     panel->Show();
-  else
+  } else {
+#if defined(OS_LINUX)
+    std::string wm_name;
+    bool has_name = ui::GetWindowManagerName(&wm_name);
+    // On bots, we might have a simple window manager which always activates new
+    // windows, and can't always deactivate them. Activate previously active
+    // window back to ensure the new window is inactive.
+    // IceWM has a name string like "IceWM 1.3.6 (Linux 2.6.24-23-server/x86)"
+    if (has_name && wm_name.find("IceWM") != std::string::npos) {
+      Browser* last_active_browser = BrowserList::GetLastActive();
+      EXPECT_TRUE(last_active_browser);
+      EXPECT_NE(last_active_browser, panel->browser());
+      panel->ShowInactive();  // Shows as active anyways in icewm.
+      MessageLoopForUI::current()->RunAllPending();
+      // Restore focus where it was. It will deactivate the new panel.
+      last_active_browser->window()->Activate();
+    } else {
+      panel->ShowInactive();
+    }
+#else
     panel->ShowInactive();
+#endif
+  }
   MessageLoopForUI::current()->RunAllPending();
+  // More waiting, because gaining or losing focus may require inter-process
+  // asynchronous communication, and it is not enough to just run the local
+  // message loop to make sure this activity has completed.
+  WaitForPanelActiveState(panel, params.show_flag);
+
+  // On Linux, window size is not available right away and we should wait
+  // before moving forward with the test.
+  WaitForWindowSizeAvailable(panel);
+
+  // Wait for the bounds animations on creation to finish.
+  WaitForBoundsAnimationFinished(panel);
 
   return panel;
 }

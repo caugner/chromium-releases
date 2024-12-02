@@ -4,11 +4,15 @@
 
 #include "chrome/browser/ui/views/infobars/infobar_view.h"
 
+#if defined(OS_WIN)
+#include <shellapi.h>
+#endif
+
 #include <algorithm>
 
 #include "base/memory/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/tab_contents/infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_delegate.h"
 #include "chrome/browser/ui/views/infobars/infobar_background.h"
 #include "chrome/browser/ui/views/infobars/infobar_button_border.h"
 #include "grit/generated_resources.h"
@@ -33,8 +37,6 @@
 #include "views/window/non_client_view.h"
 
 #if defined(OS_WIN)
-#include <shellapi.h>
-
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
 #include "ui/base/win/hwnd_util.h"
@@ -59,7 +61,7 @@ const int InfoBarView::kButtonButtonSpacing = 10;
 const int InfoBarView::kEndOfLabelSpacing = 16;
 const int InfoBarView::kHorizontalPadding = 6;
 
-InfoBarView::InfoBarView(TabContentsWrapper* owner, InfoBarDelegate* delegate)
+InfoBarView::InfoBarView(InfoBarTabHelper* owner, InfoBarDelegate* delegate)
     : InfoBar(owner, delegate),
       icon_(NULL),
       close_button_(NULL) {
@@ -68,28 +70,30 @@ InfoBarView::InfoBarView(TabContentsWrapper* owner, InfoBarDelegate* delegate)
 }
 
 InfoBarView::~InfoBarView() {
+  // We should have closed any open menus in PlatformSpecificHide(), then
+  // subclasses' RunMenu() functions should have prevented opening any new ones
+  // once we became unowned.
+  DCHECK(!menu_runner_.get());
 }
 
-// static
-views::Label* InfoBarView::CreateLabel(const string16& text) {
-  views::Label* label = new views::Label(UTF16ToWideHack(text),
+views::Label* InfoBarView::CreateLabel(const string16& text) const {
+  views::Label* label = new views::Label(text,
       ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::MediumFont));
-  label->SetColor(SK_ColorBLACK);
+  label->SetBackgroundColor(background()->get_color());
+  label->SetEnabledColor(SK_ColorBLACK);
   label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   return label;
 }
 
-// static
 views::Link* InfoBarView::CreateLink(const string16& text,
-                                     views::LinkListener* listener,
-                                     const SkColor& background_color) {
+                                     views::LinkListener* listener) const {
   views::Link* link = new views::Link;
-  link->SetText(UTF16ToWideHack(text));
+  link->SetText(text);
   link->SetFont(
       ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::MediumFont));
   link->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   link->set_listener(listener);
-  link->MakeReadableOverBackgroundColor(background_color);
+  link->SetBackgroundColor(background()->get_color());
   return link;
 }
 
@@ -97,8 +101,8 @@ views::Link* InfoBarView::CreateLink(const string16& text,
 views::MenuButton* InfoBarView::CreateMenuButton(
     const string16& text,
     views::ViewMenuDelegate* menu_delegate) {
-  views::MenuButton* menu_button =
-      new views::MenuButton(NULL, UTF16ToWideHack(text), menu_delegate, true);
+  views::MenuButton* menu_button = new views::MenuButton(
+      NULL, text, menu_delegate, true);
   menu_button->set_border(new InfoBarButtonBorder);
   menu_button->set_animate_on_state_change(false);
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
@@ -259,12 +263,10 @@ void InfoBarView::PaintChildren(gfx::Canvas* canvas) {
 
 void InfoBarView::ButtonPressed(views::Button* sender,
                                 const views::Event& event) {
+  if (!owned())
+    return;  // We're closing; don't call anything, it might access the owner.
   if (sender == close_button_) {
-    // If we're not owned, we're already closing, so don't call
-    // InfoBarDismissed(), since this can lead to us double-recording
-    // dismissals.
-    if (delegate() && owned())
-      delegate()->InfoBarDismissed();
+    delegate()->InfoBarDismissed();
     RemoveSelf();
   }
 }
@@ -294,16 +296,15 @@ const InfoBarContainer::Delegate* InfoBarView::container_delegate() const {
 void InfoBarView::RunMenuAt(ui::MenuModel* menu_model,
                             views::MenuButton* button,
                             views::MenuItemView::AnchorPosition anchor) {
+  DCHECK(owned());  // We'd better not open any menus while we're closing.
   views::MenuModelAdapter adapter(menu_model);
   gfx::Point screen_point;
   views::View::ConvertPointToScreen(button, &screen_point);
   menu_runner_.reset(new views::MenuRunner(adapter.CreateMenu()));
-  // Ignore the result as we know we can only get here after the menu has
-  // closed.
+  // Ignore the result since we don't need to handle a deleted menu specially.
   ignore_result(menu_runner_->RunMenuAt(
       GetWidget(), button, gfx::Rect(screen_point, button->size()), anchor,
       views::MenuRunner::HAS_MNEMONICS));
-  // TODO(pkasting): this may be deleted after rewrite.
 }
 
 void InfoBarView::PlatformSpecificShow(bool animate) {
@@ -327,10 +328,10 @@ void InfoBarView::PlatformSpecificShow(bool animate) {
 }
 
 void InfoBarView::PlatformSpecificHide(bool animate) {
-  // We're being removed. Cancel any menus we may have open.  Because we are
-  // deleted after a delay and after our delegate is deleted we have to
-  // explicitly cancel the menu rather than relying on the destructor to cancel
-  // the menu.
+  // Cancel any menus we may have open.  It doesn't make sense to leave them
+  // open while we're hidden, and if we're going to become unowned, we can't
+  // allow the user to choose any options and potentially call functions that
+  // try to access the owner.
   menu_runner_.reset();
 
   // It's possible to be called twice (once with |animate| true and once with it

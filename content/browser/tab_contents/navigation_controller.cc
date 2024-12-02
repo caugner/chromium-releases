@@ -21,9 +21,9 @@
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/content_constants.h"
-#include "content/common/navigation_types.h"
 #include "content/common/notification_service.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/notification_types.h"
 #include "net/base/escape.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
@@ -70,7 +70,7 @@ void ConfigureEntriesForRestore(
   for (size_t i = 0; i < entries->size(); ++i) {
     // Use a transition type of reload so that we don't incorrectly increase
     // the typed count.
-    (*entries)[i]->set_transition_type(PageTransition::RELOAD);
+    (*entries)[i]->set_transition_type(content::PAGE_TRANSITION_RELOAD);
     (*entries)[i]->set_restore_type(from_last_session ?
         NavigationEntry::RESTORE_LAST_SESSION :
         NavigationEntry::RESTORE_CURRENT_SESSION);
@@ -195,7 +195,8 @@ void NavigationController::ReloadInternal(bool check_for_repost,
     DiscardNonCommittedEntriesInternal();
 
     pending_entry_index_ = current_index;
-    entries_[pending_entry_index_]->set_transition_type(PageTransition::RELOAD);
+    entries_[pending_entry_index_]->set_transition_type(
+        content::PAGE_TRANSITION_RELOAD);
     NavigateToPendingEntry(reload_type);
   }
 }
@@ -220,8 +221,8 @@ bool NavigationController::IsInitialNavigation() {
 
 // static
 NavigationEntry* NavigationController::CreateNavigationEntry(
-    const GURL& url, const GURL& referrer, PageTransition::Type transition,
-    const std::string& extra_headers,
+    const GURL& url, const GURL& referrer, content::PageTransition transition,
+    bool is_renderer_initiated, const std::string& extra_headers,
     content::BrowserContext* browser_context) {
   // Allow the browser URL handler to rewrite the URL. This will, for example,
   // remove "view-source:" from the beginning of the URL to get the URL that
@@ -239,7 +240,8 @@ NavigationEntry* NavigationController::CreateNavigationEntry(
       loaded_url,
       referrer,
       string16(),
-      transition);
+      transition,
+      is_renderer_initiated);
   entry->set_virtual_url(url);
   entry->set_user_typed_url(url);
   entry->set_update_virtual_url_with_url(reverse_on_redirect);
@@ -290,8 +292,15 @@ NavigationEntry* NavigationController::GetActiveEntry() const {
 NavigationEntry* NavigationController::GetVisibleEntry() const {
   if (transient_entry_index_ != -1)
     return entries_[transient_entry_index_].get();
-  // Only return pending_entry for new navigations.
-  if (pending_entry_ && pending_entry_->page_id() == -1)
+  // Only return the pending_entry for new (non-history), browser-initiated
+  // navigations, in order to prevent URL spoof attacks.
+  // Ideally we would also show the pending entry's URL for new renderer-
+  // initiated navigations with no last committed entry (e.g., a link opening
+  // in a new tab), but an attacker can insert content into the about:blank
+  // page while the pending URL loads in that case.
+  if (pending_entry_ &&
+      pending_entry_->page_id() == -1 &&
+      !pending_entry_->is_renderer_initiated())
     return pending_entry_;
   return GetLastCommittedEntry();
 }
@@ -357,8 +366,9 @@ void NavigationController::GoBack() {
 
   pending_entry_index_ = current_index - 1;
   entries_[pending_entry_index_]->set_transition_type(
-      entries_[pending_entry_index_]->transition_type() |
-      PageTransition::FORWARD_BACK);
+      content::PageTransitionFromInt(
+          entries_[pending_entry_index_]->transition_type() |
+          content::PAGE_TRANSITION_FORWARD_BACK));
   NavigateToPendingEntry(NO_RELOAD);
 }
 
@@ -390,8 +400,9 @@ void NavigationController::GoForward() {
     pending_entry_index_++;
 
   entries_[pending_entry_index_]->set_transition_type(
-      entries_[pending_entry_index_]->transition_type() |
-      PageTransition::FORWARD_BACK);
+      content::PageTransitionFromInt(
+          entries_[pending_entry_index_]->transition_type() |
+          content::PAGE_TRANSITION_FORWARD_BACK));
   NavigateToPendingEntry(NO_RELOAD);
 }
 
@@ -431,8 +442,9 @@ void NavigationController::GoToIndex(int index) {
 
   pending_entry_index_ = index;
   entries_[pending_entry_index_]->set_transition_type(
-      entries_[pending_entry_index_]->transition_type() |
-      PageTransition::FORWARD_BACK);
+      content::PageTransitionFromInt(
+          entries_[pending_entry_index_]->transition_type() |
+          content::PAGE_TRANSITION_FORWARD_BACK));
   NavigateToPendingEntry(NO_RELOAD);
 }
 
@@ -458,7 +470,7 @@ void NavigationController::RemoveEntryAtIndex(int index,
     } else {
       // If there is nothing to show, show a default page.
       LoadURL(default_url.is_empty() ? GURL("about:blank") : default_url,
-              GURL(), PageTransition::START_PAGE);
+              GURL(), content::PAGE_TRANSITION_START_PAGE, std::string());
     }
   }
 }
@@ -483,22 +495,32 @@ void NavigationController::AddTransientEntry(NavigationEntry* entry) {
   tab_contents_->NotifyNavigationStateChanged(kInvalidateAll);
 }
 
-void NavigationController::LoadURL(const GURL& url, const GURL& referrer,
-                                   PageTransition::Type transition) {
-  LoadURLWithHeaders(url, referrer, transition, std::string());
-}
-
-// TODO(rogerta): Remove this call and put the extra_headers argument directly
-// in LoadURL().
-void NavigationController::LoadURLWithHeaders(
+void NavigationController::LoadURL(
     const GURL& url,
     const GURL& referrer,
-    PageTransition::Type transition,
+    content::PageTransition transition,
     const std::string& extra_headers) {
   // The user initiated a load, we don't need to reload anymore.
   needs_reload_ = false;
 
   NavigationEntry* entry = CreateNavigationEntry(url, referrer, transition,
+                                                 false,
+                                                 extra_headers,
+                                                 browser_context_);
+
+  LoadEntry(entry);
+}
+
+void NavigationController::LoadURLFromRenderer(
+    const GURL& url,
+    const GURL& referrer,
+    content::PageTransition transition,
+    const std::string& extra_headers) {
+  // The user initiated a load, we don't need to reload anymore.
+  needs_reload_ = false;
+
+  NavigationEntry* entry = CreateNavigationEntry(url, referrer, transition,
+                                                 true,
                                                  extra_headers,
                                                  browser_context_);
 
@@ -534,26 +556,26 @@ bool NavigationController::RendererDidNavigate(
   details->type = ClassifyNavigation(params);
 
   switch (details->type) {
-    case NavigationType::NEW_PAGE:
+    case content::NAVIGATION_TYPE_NEW_PAGE:
       RendererDidNavigateToNewPage(params, &(details->did_replace_entry));
       break;
-    case NavigationType::EXISTING_PAGE:
+    case content::NAVIGATION_TYPE_EXISTING_PAGE:
       RendererDidNavigateToExistingPage(params);
       break;
-    case NavigationType::SAME_PAGE:
+    case content::NAVIGATION_TYPE_SAME_PAGE:
       RendererDidNavigateToSamePage(params);
       break;
-    case NavigationType::IN_PAGE:
+    case content::NAVIGATION_TYPE_IN_PAGE:
       RendererDidNavigateInPage(params, &(details->did_replace_entry));
       break;
-    case NavigationType::NEW_SUBFRAME:
+    case content::NAVIGATION_TYPE_NEW_SUBFRAME:
       RendererDidNavigateNewSubframe(params);
       break;
-    case NavigationType::AUTO_SUBFRAME:
+    case content::NAVIGATION_TYPE_AUTO_SUBFRAME:
       if (!RendererDidNavigateAutoSubframe(params))
         return false;
       break;
-    case NavigationType::NAV_IGNORE:
+    case content::NAVIGATION_TYPE_NAV_IGNORE:
       // If a pending navigation was in progress, this canceled it.  We should
       // discard it and make sure it is removed from the URL bar.  After that,
       // there is nothing we can do with this navigation, so we just return to
@@ -574,12 +596,17 @@ bool NavigationController::RendererDidNavigate(
   NavigationEntry* active_entry = GetActiveEntry();
   active_entry->set_content_state(params.content_state);
 
+  // Once committed, we do not need to track if the entry was initiated by
+  // the renderer.
+  active_entry->set_is_renderer_initiated(false);
+
   // The active entry's SiteInstance should match our SiteInstance.
   DCHECK(active_entry->site_instance() == tab_contents_->GetSiteInstance());
 
   // Now prep the rest of the details for the notification and broadcast.
   details->entry = active_entry;
-  details->is_main_frame = PageTransition::IsMainFrame(params.transition);
+  details->is_main_frame =
+      content::PageTransitionIsMainFrame(params.transition);
   details->serialized_security_info = params.security_info;
   details->http_status_code = params.http_status_code;
   NotifyNavigationEntryCommitted(details);
@@ -587,7 +614,7 @@ bool NavigationController::RendererDidNavigate(
   return true;
 }
 
-NavigationType::Type NavigationController::ClassifyNavigation(
+content::NavigationType NavigationController::ClassifyNavigation(
     const ViewHostMsg_FrameNavigate_Params& params) const {
   if (params.page_id == -1) {
     // The renderer generates the page IDs, and so if it gives us the invalid
@@ -608,15 +635,15 @@ NavigationType::Type NavigationController::ClassifyNavigation(
     //   list.
     //
     // In these cases, there's nothing we can do with them, so ignore.
-    return NavigationType::NAV_IGNORE;
+    return content::NAVIGATION_TYPE_NAV_IGNORE;
   }
 
   if (params.page_id > tab_contents_->GetMaxPageID()) {
     // Greater page IDs than we've ever seen before are new pages. We may or may
     // not have a pending entry for the page, and this may or may not be the
     // main frame.
-    if (PageTransition::IsMainFrame(params.transition))
-      return NavigationType::NEW_PAGE;
+    if (content::PageTransitionIsMainFrame(params.transition))
+      return content::NAVIGATION_TYPE_NEW_PAGE;
 
     // When this is a new subframe navigation, we should have a committed page
     // for which it's a suframe in. This may not be the case when an iframe is
@@ -624,10 +651,10 @@ NavigationType::Type NavigationController::ClassifyNavigation(
     // written into the popup by script on the main page). For these cases,
     // there isn't any navigation stuff we can do, so just ignore it.
     if (!GetLastCommittedEntry())
-      return NavigationType::NAV_IGNORE;
+      return content::NAVIGATION_TYPE_NAV_IGNORE;
 
     // Valid subframe navigation.
-    return NavigationType::NEW_SUBFRAME;
+    return content::NAVIGATION_TYPE_NEW_SUBFRAME;
   }
 
   // Now we know that the notification is for an existing page. Find that entry.
@@ -646,16 +673,16 @@ NavigationType::Type NavigationController::ClassifyNavigation(
     UserMetrics::RecordAction(UserMetricsAction("BadMessageTerminate_NC"));
     if (tab_contents_->GetSiteInstance()->HasProcess())
       tab_contents_->GetSiteInstance()->GetProcess()->ReceivedBadMessage();
-    return NavigationType::NAV_IGNORE;
+    return content::NAVIGATION_TYPE_NAV_IGNORE;
   }
   NavigationEntry* existing_entry = entries_[existing_entry_index].get();
 
-  if (!PageTransition::IsMainFrame(params.transition)) {
+  if (!content::PageTransitionIsMainFrame(params.transition)) {
     // All manual subframes would get new IDs and were handled above, so we
     // know this is auto. Since the current page was found in the navigation
     // entry list, we're guaranteed to have a last committed entry.
     DCHECK(GetLastCommittedEntry());
-    return NavigationType::AUTO_SUBFRAME;
+    return content::NAVIGATION_TYPE_AUTO_SUBFRAME;
   }
 
   // Anything below here we know is a main frame navigation.
@@ -670,7 +697,7 @@ NavigationType::Type NavigationController::ClassifyNavigation(
     // (the user doesn't want to have a new back/forward entry when they do
     // this). If this matches the last committed entry, we want to just ignore
     // the pending entry and go back to where we were (the "existing entry").
-    return NavigationType::SAME_PAGE;
+    return content::NAVIGATION_TYPE_SAME_PAGE;
   }
 
   // Any toplevel navigations with the same base (minus the reference fragment)
@@ -679,19 +706,19 @@ NavigationType::Type NavigationController::ClassifyNavigation(
   // navigations that don't actually navigate, but it can happen when there is
   // an encoding override (it always sends a navigation request).
   if (AreURLsInPageNavigation(existing_entry->url(), params.url))
-    return NavigationType::IN_PAGE;
+    return content::NAVIGATION_TYPE_IN_PAGE;
 
   // Since we weeded out "new" navigations above, we know this is an existing
   // (back/forward) navigation.
-  return NavigationType::EXISTING_PAGE;
+  return content::NAVIGATION_TYPE_EXISTING_PAGE;
 }
 
 bool NavigationController::IsRedirect(
   const ViewHostMsg_FrameNavigate_Params& params) {
   // For main frame transition, we judge by params.transition.
   // Otherwise, by params.redirects.
-  if (PageTransition::IsMainFrame(params.transition)) {
-    return PageTransition::IsRedirect(params.transition);
+  if (content::PageTransitionIsMainFrame(params.transition)) {
+    return content::PageTransitionIsRedirect(params.transition);
   }
   return params.redirects.size() > 1;
 }
@@ -735,7 +762,7 @@ void NavigationController::RendererDidNavigateToNewPage(
 void NavigationController::RendererDidNavigateToExistingPage(
     const ViewHostMsg_FrameNavigate_Params& params) {
   // We should only get here for main frame navigations.
-  DCHECK(PageTransition::IsMainFrame(params.transition));
+  DCHECK(content::PageTransitionIsMainFrame(params.transition));
 
   // This is a back/forward navigation. The existing page for the ID is
   // guaranteed to exist by ClassifyNavigation, and we just need to update it
@@ -800,7 +827,7 @@ void NavigationController::RendererDidNavigateToSamePage(
 
 void NavigationController::RendererDidNavigateInPage(
     const ViewHostMsg_FrameNavigate_Params& params, bool* did_replace_entry) {
-  DCHECK(PageTransition::IsMainFrame(params.transition)) <<
+  DCHECK(content::PageTransitionIsMainFrame(params.transition)) <<
       "WebKit should only tell us about in-page navs for the main frame.";
   // We're guaranteed to have an entry for this one.
   NavigationEntry* existing_entry = GetEntryWithPageID(
@@ -829,8 +856,8 @@ void NavigationController::RendererDidNavigateInPage(
 
 void NavigationController::RendererDidNavigateNewSubframe(
     const ViewHostMsg_FrameNavigate_Params& params) {
-  if (PageTransition::StripQualifier(params.transition) ==
-      PageTransition::AUTO_SUBFRAME) {
+  if (content::PageTransitionStripQualifier(params.transition) ==
+      content::PAGE_TRANSITION_AUTO_SUBFRAME) {
     // This is not user-initiated. Ignore.
     return;
   }
@@ -1012,7 +1039,7 @@ void NavigationController::DiscardNonCommittedEntries() {
 
 void NavigationController::InsertOrReplaceEntry(NavigationEntry* entry,
                                                 bool replace) {
-  DCHECK(entry->transition_type() != PageTransition::AUTO_SUBFRAME);
+  DCHECK(entry->transition_type() != content::PAGE_TRANSITION_AUTO_SUBFRAME);
 
   // Copy the pending entry's unique ID to the committed entry.
   // I don't know if pending_entry_index_ can be other than -1 here.
@@ -1058,6 +1085,23 @@ void NavigationController::InsertOrReplaceEntry(NavigationEntry* entry,
 
 void NavigationController::NavigateToPendingEntry(ReloadType reload_type) {
   needs_reload_ = false;
+
+  // If we were navigating to a slow-to-commit page, and the user performs
+  // a session history navigation to the last committed page, RenderViewHost
+  // will force the throbber to start, but WebKit will essentially ignore the
+  // navigation, and won't send a message to stop the throbber. To prevent this
+  // from happening, we drop the navigation here and stop the slow-to-commit
+  // page from loading (which would normally happen during the navigation).
+  if (pending_entry_index_ != -1 &&
+      pending_entry_index_ == last_committed_entry_index_ &&
+      (entries_[pending_entry_index_]->restore_type() ==
+          NavigationEntry::RESTORE_NONE) &&
+      (entries_[pending_entry_index_]->transition_type() &
+          content::PAGE_TRANSITION_FORWARD_BACK)) {
+    tab_contents_->Stop();
+    DiscardNonCommittedEntries();
+    return;
+  }
 
   // For session history navigations only the pending_entry_index_ is set.
   if (!pending_entry_) {

@@ -5,9 +5,7 @@
    "version": "0.1",
    "background_page": "background.html",
    "permissions": [ 
-     "experimental",
      "management",
-     "permissions",
      "http://a.com/*"
    ],
    "optional_permissions": [

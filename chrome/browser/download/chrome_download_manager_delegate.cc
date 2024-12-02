@@ -4,6 +4,8 @@
 
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
@@ -59,7 +61,11 @@ void ChromeDownloadManagerDelegate::SetDownloadManager(DownloadManager* dm) {
   download_manager_ = dm;
   download_history_.reset(new DownloadHistory(profile_));
   download_history_->Load(
-      NewCallback(dm, &DownloadManager::OnPersistentStoreQueryComplete));
+      base::Bind(&DownloadManager::OnPersistentStoreQueryComplete,
+                 base::Unretained(dm)));
+  download_history_->GetNextId(
+      base::Bind(&DownloadManager::OnPersistentStoreGetNextId,
+                 base::Unretained(dm)));
 }
 
 void ChromeDownloadManagerDelegate::Shutdown() {
@@ -87,7 +93,8 @@ bool ChromeDownloadManagerDelegate::ShouldStartDownload(int32 download_id) {
       download_id, download->url_chain(), download->referrer_url(),
           profile_->GetPrefs()->GetBoolean(prefs::kSafeBrowsingEnabled));
   sb_client->CheckDownloadUrl(
-      NewCallback(this, &ChromeDownloadManagerDelegate::CheckDownloadUrlDone));
+      base::Bind(&ChromeDownloadManagerDelegate::CheckDownloadUrlDone,
+                 base::Unretained(this)));
 #else
   CheckDownloadUrlDone(download_id, false);
 #endif
@@ -197,15 +204,16 @@ void ChromeDownloadManagerDelegate::OnResponseCompleted(
                                prefs::kSafeBrowsingEnabled));
   sb_client->CheckDownloadHash(
       hash,
-      NewCallback(this, &ChromeDownloadManagerDelegate::CheckDownloadHashDone));
+      base::Bind(&ChromeDownloadManagerDelegate::CheckDownloadHashDone,
+                 base::Unretained(this)));
 #endif
 }
 
 void ChromeDownloadManagerDelegate::AddItemToPersistentStore(
     DownloadItem* item) {
   download_history_->AddEntry(item,
-      NewCallback(this,
-          &ChromeDownloadManagerDelegate::OnItemAddedToPersistentStore));
+      base::Bind(&ChromeDownloadManagerDelegate::OnItemAddedToPersistentStore,
+                 base::Unretained(this)));
 }
 
 void ChromeDownloadManagerDelegate::UpdateItemInPersistentStore(
@@ -291,9 +299,10 @@ void ChromeDownloadManagerDelegate::CheckDownloadUrlDone(
   if (is_dangerous_url)
     download->MarkUrlDangerous();
 
-  download_history_->CheckVisitedReferrerBefore(download_id,
-      download->referrer_url(), NewCallback(this,
-          &ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone));
+  download_history_->CheckVisitedReferrerBefore(
+      download_id, download->referrer_url(),
+      base::Bind(&ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone,
+                 base::Unretained(this)));
 }
 
 // NotificationObserver implementation.
@@ -378,12 +387,9 @@ void ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone(
   // now and pass the value to the FILE thread.
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &ChromeDownloadManagerDelegate::CheckIfSuggestedPathExists,
-          download->id(),
-          state,
-          download_prefs_->download_path()));
+      base::Bind(&ChromeDownloadManagerDelegate::CheckIfSuggestedPathExists,
+                 this, download->id(), state,
+                 download_prefs_->download_path()));
 }
 
 void ChromeDownloadManagerDelegate::CheckIfSuggestedPathExists(
@@ -470,11 +476,8 @@ void ChromeDownloadManagerDelegate::CheckIfSuggestedPathExists(
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &ChromeDownloadManagerDelegate::OnPathExistenceAvailable,
-          download_id,
-          state));
+      base::Bind(&ChromeDownloadManagerDelegate::OnPathExistenceAvailable,
+                 this, download_id, state));
 }
 
 void ChromeDownloadManagerDelegate::OnPathExistenceAvailable(
@@ -496,7 +499,7 @@ bool ChromeDownloadManagerDelegate::IsDangerousFile(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // Anything loaded directly from the address bar is OK.
-  if (state.transition_type & PageTransition::FROM_ADDRESS_BAR)
+  if (state.transition_type & content::PAGE_TRANSITION_FROM_ADDRESS_BAR)
     return false;
 
   // Extensions that are not from the gallery are considered dangerous.

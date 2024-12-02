@@ -11,13 +11,12 @@
 namespace ui {
 
 class TestCompositorHostWin : public TestCompositorHost,
-                              public ui::WindowImpl {
+                              public WindowImpl,
+                              public CompositorDelegate {
  public:
-  TestCompositorHostWin(const gfx::Rect& bounds,
-                        TestCompositorHostDelegate* delegate)
-      : delegate_(delegate) {
+  TestCompositorHostWin(const gfx::Rect& bounds) {
     Init(NULL, bounds);
-    compositor_ = ui::Compositor::Create(hwnd(), GetSize());
+    compositor_ = ui::Compositor::Create(this, hwnd(), GetSize());
   }
 
   virtual ~TestCompositorHostWin() {
@@ -39,15 +38,20 @@ class TestCompositorHostWin : public TestCompositorHost,
     return compositor_;
   }
 
+  // Overridden from CompositorDelegate:
+  virtual void ScheduleDraw() OVERRIDE {
+    RECT rect;
+    ::GetClientRect(hwnd(), &rect);
+    InvalidateRect(hwnd(), &rect, FALSE);
+  }
+
  private:
   BEGIN_MSG_MAP_EX(TestCompositorHostWin)
     MSG_WM_PAINT(OnPaint)
   END_MSG_MAP()
 
   void OnPaint(HDC dc) {
-    compositor_->NotifyStart();
-    delegate_->Draw();
-    compositor_->NotifyEnd();
+    compositor_->Draw(false);
     ValidateRect(hwnd(), NULL);
   }
 
@@ -58,16 +62,12 @@ class TestCompositorHostWin : public TestCompositorHost,
   }
 
   scoped_refptr<ui::Compositor> compositor_;
-  TestCompositorHostDelegate* delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(TestCompositorHostWin);
 };
 
-TestCompositorHost* TestCompositorHost::Create(
-    const gfx::Rect& bounds,
-    TestCompositorHostDelegate* delegate) {
-  return new TestCompositorHostWin(bounds, delegate);
+TestCompositorHost* TestCompositorHost::Create(const gfx::Rect& bounds) {
+  return new TestCompositorHostWin(bounds);
 }
 
 }  // namespace ui
-
