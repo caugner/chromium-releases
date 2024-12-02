@@ -12,8 +12,7 @@
 #include "ash/components/arc/arc_util.h"
 #include "ash/constants/ash_pref_names.h"
 #include "ash/constants/ash_switches.h"
-#include "ash/public/cpp/login_screen.h"
-#include "ash/public/cpp/login_screen_model.h"
+#include "ash/public/cpp/login/login_utils.h"
 #include "base/command_line.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -21,13 +20,11 @@
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/ranges/algorithm.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "chrome/browser/ash/login/demo_mode/demo_session.h"
-#include "chrome/browser/ash/login/easy_unlock/easy_unlock_service.h"
 #include "chrome/browser/ash/login/helper.h"
 #include "chrome/browser/ash/login/lock/screen_locker.h"
 #include "chrome/browser/ash/login/lock_screen_utils.h"
@@ -36,6 +33,7 @@
 #include "chrome/browser/ash/login/quick_unlock/quick_unlock_storage.h"
 #include "chrome/browser/ash/login/quick_unlock/quick_unlock_utils.h"
 #include "chrome/browser/ash/login/reauth_stats.h"
+#include "chrome/browser/ash/login/smart_lock/smart_lock_service.h"
 #include "chrome/browser/ash/login/ui/login_display_host.h"
 #include "chrome/browser/ash/login/ui/views/user_board_view.h"
 #include "chrome/browser/ash/login/users/chrome_user_manager.h"
@@ -53,8 +51,6 @@
 #include "chromeos/ash/components/cryptohome/cryptohome_parameters.h"
 #include "chromeos/ash/components/dbus/dbus_thread_manager.h"
 #include "chromeos/ash/components/dbus/userdataauth/userdataauth_client.h"
-#include "chromeos/ash/components/login/auth/auth_performer.h"
-#include "chromeos/ash/components/login/auth/public/auth_session_intent.h"
 #include "chromeos/ash/components/proximity_auth/screenlock_bridge.h"
 #include "chromeos/ash/components/settings/cros_settings_names.h"
 #include "chromeos/dbus/tpm_manager/tpm_manager.pb.h"
@@ -73,8 +69,6 @@
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
-#include "ui/chromeos/resources/grit/ui_chromeos_resources.h"
 
 // Enable VLOG level 1.
 #undef ENABLED_VLOG_LEVEL
@@ -497,7 +491,6 @@ UserSelectionScreen::UserSelectionScreen(DisplayedScreen display_type)
           base::BindRepeating(
               &UserSelectionScreen::OnAllowedInputMethodsChanged,
               base::Unretained(this)));
-
   OnAllowedInputMethodsChanged();
 }
 
@@ -515,36 +508,6 @@ void UserSelectionScreen::SetTpmLockedState(bool is_locked,
   for (user_manager::User* user : users_) {
     view_->SetTpmLockedState(user->GetAccountId(), is_locked, time_left);
   }
-}
-
-// static
-UserAvatar UserSelectionScreen::BuildAshUserAvatarForUser(
-    const user_manager::User& user) {
-  UserAvatar avatar;
-  avatar.image = user.GetImage();
-  if (avatar.image.isNull()) {
-    avatar.image = *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-        IDR_LOGIN_DEFAULT_USER);
-  }
-
-  // TODO(jdufault): Unify image handling between this code and
-  // user_image_source::GetUserImageInternal.
-  auto load_image_from_resource = [&avatar](int resource_id) {
-    auto& rb = ui::ResourceBundle::GetSharedInstance();
-    base::StringPiece avatar_data = rb.GetRawDataResourceForScale(
-        resource_id, rb.GetMaxResourceScaleFactor());
-    avatar.bytes.assign(avatar_data.begin(), avatar_data.end());
-  };
-
-  if (user.has_image_bytes()) {
-    avatar.bytes.assign(
-        user.image_bytes()->front(),
-        user.image_bytes()->front() + user.image_bytes()->size());
-  } else if (user.image_is_stub()) {
-    load_image_from_resource(IDR_LOGIN_DEFAULT_USER);
-  }
-
-  return avatar;
 }
 
 void UserSelectionScreen::SetView(UserBoardView* view) {
@@ -807,7 +770,7 @@ void UserSelectionScreen::OnOnlineSigninEnforced(const AccountId& account_id) {
 }
 
 void UserSelectionScreen::AttemptEasyUnlock(const AccountId& account_id) {
-  EasyUnlockService* service = GetEasyUnlockServiceForUser(account_id);
+  SmartLockService* service = GetSmartLockServiceForUser(account_id);
   if (!service) {
     return;
   }
@@ -816,7 +779,7 @@ void UserSelectionScreen::AttemptEasyUnlock(const AccountId& account_id) {
 
 std::vector<LoginUserInfo>
 UserSelectionScreen::UpdateAndReturnUserListForAsh() {
-  user_info_list_.clear();
+  std::vector<LoginUserInfo> user_info_list;
 
   const AccountId owner = GetOwnerAccountId();
   const bool is_signin_to_add = IsSigninToAdd();
@@ -848,7 +811,7 @@ UserSelectionScreen::UpdateAndReturnUserListForAsh() {
     user_info.basic_user_info.display_name =
         base::UTF16ToUTF8(user->GetDisplayName());
     user_info.basic_user_info.display_email = user->display_email();
-    user_info.basic_user_info.avatar = BuildAshUserAvatarForUser(*user);
+    user_info.basic_user_info.avatar = ash::BuildAshUserAvatarForUser(*user);
     user_info.auth_type = initial_auth_type;
     user_info.is_signed_in = user->is_logged_in();
     user_info.is_device_owner = is_owner;
@@ -856,10 +819,10 @@ UserSelectionScreen::UpdateAndReturnUserListForAsh() {
     user_info.fingerprint_state = quick_unlock::GetFingerprintStateForUser(
         user, quick_unlock::Purpose::kUnlock);
 
-    auto* easy_unlock_service = GetEasyUnlockServiceForUser(account_id);
-    if (easy_unlock_service) {
+    auto* smart_lock_service = GetSmartLockServiceForUser(account_id);
+    if (smart_lock_service) {
       user_info.smart_lock_state =
-          easy_unlock_service->GetInitialSmartLockState();
+          smart_lock_service->GetInitialSmartLockState();
     }
 
     user_info.show_pin_pad_for_password = false;
@@ -929,46 +892,17 @@ UserSelectionScreen::UpdateAndReturnUserListForAsh() {
           account_id, user_info.public_account_info->default_locale);
     }
 
-    auto user_context = std::make_unique<UserContext>(*user);
-
-    auth_performer_.StartAuthSession(
-        std::move(user_context), false, AuthSessionIntent::kVerifyOnly,
-        base::BindOnce(&UserSelectionScreen::OnStartAuthSession,
-                       weak_factory_.GetWeakPtr()));
-
-    user_info_list_.push_back(std::move(user_info));
+    user_info_list.push_back(std::move(user_info));
   }
 
-  return user_info_list_;
-}
-
-void UserSelectionScreen::OnStartAuthSession(
-    bool user_exists,
-    std::unique_ptr<UserContext> user_context,
-    absl::optional<AuthenticationError> error) {
-  auto user_info = base::ranges::find_if(
-      std::begin(user_info_list_), std::end(user_info_list_),
-      [&user_context](const LoginUserInfo& info) {
-        return info.basic_user_info.account_id == user_context->GetAccountId();
-      });
-  if (user_info == std::end(user_info_list_)) {
-    LOG(ERROR) << "Failed to find user info in user info list, could not "
-                  "retrieve status of recovery factor";
-    return;
-  }
-  bool is_recovery_configured =
-      user_context->GetAuthFactorsData().FindRecoveryFactor() != nullptr;
-  if (is_recovery_configured != user_info->is_recovery_configured) {
-    user_info->is_recovery_configured = is_recovery_configured;
-    LoginScreen::Get()->GetModel()->SetUserList(user_info_list_);
-  }
+  return user_info_list;
 }
 
 void UserSelectionScreen::SetUsersLoaded(bool loaded) {
   users_loaded_ = loaded;
 }
 
-EasyUnlockService* UserSelectionScreen::GetEasyUnlockServiceForUser(
+SmartLockService* UserSelectionScreen::GetSmartLockServiceForUser(
     const AccountId& account_id) const {
   if (GetScreenType() == OTHER_SCREEN) {
     return nullptr;
@@ -1000,7 +934,7 @@ EasyUnlockService* UserSelectionScreen::GetEasyUnlockServiceForUser(
     profile = profile_helper->GetSigninProfile();
   }
 
-  return EasyUnlockService::Get(profile);
+  return SmartLockService::Get(profile);
 }
 
 }  // namespace ash

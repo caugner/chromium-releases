@@ -8,9 +8,9 @@
 #import "components/autofill/ios/browser/form_suggestion.h"
 #import "components/password_manager/core/browser/ui/credential_ui_entry.h"
 #import "components/password_manager/ios/shared_password_controller.h"
+#import "components/url_formatter/elide_url.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
 #import "ios/chrome/browser/shared/ui/table_view/cells/table_view_url_item.h"
-#import "ios/chrome/browser/ui/passwords/bottom_sheet/password_suggestion_bottom_sheet_constants.h"
 #import "ios/chrome/browser/ui/passwords/bottom_sheet/password_suggestion_bottom_sheet_delegate.h"
 #import "ios/chrome/browser/ui/passwords/bottom_sheet/password_suggestion_bottom_sheet_handler.h"
 #import "ios/chrome/browser/ui/settings/password/branded_navigation_item_title_view.h"
@@ -22,6 +22,17 @@
 #import "ios/chrome/grit/ios_branded_strings.h"
 #import "ios/chrome/grit/ios_strings.h"
 #import "ui/base/l10n/l10n_util_mac.h"
+#import "url/gurl.h"
+
+namespace {
+
+// Spacing use for the spacing before the logo title in the bottom sheet.
+CGFloat const kSpacingBeforeTitle = 16;
+
+// Spacing use for the spacing after the logo title in the bottom sheet.
+CGFloat const kSpacingAfterTitle = 4;
+
+}  // namespace
 
 @interface PasswordSuggestionBottomSheetViewController () <
     ConfirmationAlertActionHandler,
@@ -44,6 +55,15 @@
   // The current's page domain. This is used for the password bottom sheet
   // description label.
   NSString* _domain;
+
+  // URL of the current page the bottom sheet is being displayed on.
+  GURL _URL;
+
+  // The following are displayed to the user whenever they receive some new
+  // passwords via password sharing that they have not acknowledged before. Nil
+  // otherwise.
+  NSString* _title;
+  NSString* _subtitle;
 }
 
 // The password controller handler used to open the password manager.
@@ -54,10 +74,12 @@
 @implementation PasswordSuggestionBottomSheetViewController
 
 - (instancetype)initWithHandler:
-    (id<PasswordSuggestionBottomSheetHandler>)handler {
+                    (id<PasswordSuggestionBottomSheetHandler>)handler
+                            URL:(const GURL&)URL {
   self = [super init];
   if (self) {
     self.handler = handler;
+    _URL = URL;
   }
   return self;
 }
@@ -67,19 +89,33 @@
 - (void)viewDidLoad {
   _tableViewIsMinimized = YES;
 
-  self.titleView = [self setUpTitleView];
-  self.customSpacing = 0;
+  self.aboveTitleView = [self setUpTitleView];
+  self.customSpacing = kSpacingAfterTitle;
+  self.customSpacingBeforeImageIfNoNavigationBar = kSpacingBeforeTitle;
 
   // Set the properties read by the super when constructing the
   // views in `-[ConfirmationAlertViewController viewDidLoad]`.
   self.actionHandler = self;
 
+  self.titleString = _title;
+  self.titleTextStyle = UIFontTextStyleTitle2;
   self.primaryActionString =
       l10n_util::GetNSString(IDS_IOS_PASSWORD_BOTTOM_SHEET_USE_PASSWORD);
   self.secondaryActionString =
       l10n_util::GetNSString(IDS_IOS_PASSWORD_BOTTOM_SHEET_USE_KEYBOARD);
   self.secondaryActionImage =
       DefaultSymbolWithPointSize(kKeyboardSymbol, kSymbolActionPointSize);
+
+  if (_subtitle) {
+    self.subtitleString = _subtitle;
+  } else {
+    self.subtitleTextStyle = UIFontTextStyleFootnote;
+    std::u16string formattedURL =
+        url_formatter::FormatUrlForDisplayOmitSchemePathAndTrivialSubdomains(
+            _URL);
+    self.subtitleString = l10n_util::GetNSStringF(
+        IDS_IOS_PASSWORD_BOTTOM_SHEET_SUBTITLE, formattedURL);
+  }
 
   [super viewDidLoad];
 }
@@ -130,6 +166,11 @@
   _domain = domain;
 }
 
+- (void)setTitle:(NSString*)title subtitle:(NSString*)subtitle {
+  _title = title;
+  _subtitle = subtitle;
+}
+
 - (void)dismiss {
   __weak __typeof(self) weakSelf = self;
   [self dismissViewControllerAnimated:NO
@@ -142,6 +183,10 @@
 
 - (void)tableView:(UITableView*)tableView
     didSelectRowAtIndexPath:(NSIndexPath*)indexPath {
+  base::UmaHistogramBoolean(
+      "IOS.PasswordBottomSheet.UsernameTapped.MinimizedState",
+      _tableViewIsMinimized);
+
   if (_suggestions.count <= 1) {
     return;
   }
@@ -255,6 +300,10 @@
   NSString* title = l10n_util::GetNSString(IDS_IOS_PASSWORD_BOTTOM_SHEET_TITLE);
   UIView* titleView = password_manager::CreatePasswordManagerTitleView(title);
   titleView.backgroundColor = [UIColor colorNamed:kPrimaryBackgroundColor];
+  titleView.accessibilityLabel = [NSString
+      stringWithFormat:@"%@. %@", title,
+                       l10n_util::GetNSString(
+                           IDS_IOS_PASSWORD_BOTTOM_SHEET_SELECT_PASSWORD)];
   return titleView;
 }
 
@@ -272,7 +321,6 @@
   UITableView* tableView = [super createTableView];
 
   tableView.dataSource = self;
-  tableView.accessibilityIdentifier = kPasswordSuggestionBottomSheetTableViewId;
   [tableView registerClass:TableViewURLCell.class
       forCellReuseIdentifier:@"cell"];
 
@@ -315,7 +363,13 @@
 
 // Notifies the delegate that a password suggestion was selected by the user.
 - (void)didSelectSuggestion {
-  [self.delegate didSelectSuggestion:[self selectedRow]];
+  NSInteger index = [self selectedRow];
+  [self.delegate didSelectSuggestion:index];
+
+  if (_suggestions.count > 1) {
+    base::UmaHistogramCounts100("PasswordManager.TouchToFill.CredentialIndex",
+                                (int)index);
+  }
 }
 
 // Returns whether the provided index path points to the last row of the table

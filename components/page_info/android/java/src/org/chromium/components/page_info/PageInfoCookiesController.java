@@ -49,20 +49,34 @@ public class PageInfoCookiesController
     private long mExpiration;
     private int mConfidenceLevel;
     private Website mWebsite;
+    private boolean mTrackingProtectionUI;
+    private boolean mBlockAll3PC;
 
     public PageInfoCookiesController(PageInfoMainController mainController, PageInfoRowView rowView,
             PageInfoControllerDelegate delegate) {
         super(delegate);
+
+        mTrackingProtectionUI =
+                PageInfoFeatures.USER_BYPASS_UI.isEnabled() && delegate.showTrackingProtectionUI();
+        mBlockAll3PC = delegate.allThirdPartyCookiesBlockedTrackingProtection();
+
         mMainController = mainController;
         mRowView = rowView;
         mFullUrl = mainController.getURL().getSpec();
-        mTitle = mRowView.getContext().getResources().getString(R.string.page_info_cookies_title);
+        mTitle =
+                mRowView.getContext()
+                        .getResources()
+                        .getString(
+                                mTrackingProtectionUI
+                                        ? R.string.page_info_tracking_protection_title
+                                        : R.string.page_info_cookies_title);
         mBridge = delegate.createCookieControlsBridge(this);
 
         PageInfoRowView.ViewParams rowParams = new PageInfoRowView.ViewParams();
         rowParams.visible = delegate.isSiteSettingsAvailable();
         rowParams.title = mTitle;
-        rowParams.iconResId = R.drawable.permission_cookie;
+        rowParams.iconResId =
+                mTrackingProtectionUI ? R.drawable.ic_eye_crossed : R.drawable.permission_cookie;
         rowParams.decreaseIconSize = true;
         rowParams.clickCallback = this::launchSubpage;
         mRowView.setParams(rowParams);
@@ -102,10 +116,15 @@ public class PageInfoCookiesController
         params.thirdPartyCookieBlockingEnabled = getDelegate().cookieControlsShown();
         params.onThirdPartyCookieToggleChanged = this::onThirdPartyCookieToggleChanged;
         params.onClearCallback = this::onClearCookiesClicked;
-        params.onCookieSettingsLinkClicked = getDelegate()::showCookieSettings;
+        params.onCookieSettingsLinkClicked =
+                mTrackingProtectionUI
+                        ? getDelegate()::showTrackingProtectionSettings
+                        : getDelegate()::showCookieSettings;
         params.onFeedbackLinkClicked = getDelegate()::showCookieFeedback;
         params.disableCookieDeletion = isDeletionDisabled();
         params.hostName = mMainController.getURL().getHost();
+        params.showTrackingProtectionUI = mTrackingProtectionUI;
+        params.blockAll3PC = mBlockAll3PC;
         mSubPage.setParams(params);
         if (PageInfoFeatures.USER_BYPASS_UI.isEnabled()) {
             mSubPage.setCookieStatus(mStatus, mIsEnforced, mExpiration);
@@ -201,7 +220,7 @@ public class PageInfoCookiesController
     }
 
     @Override
-    public void onStatusChanged(int status, int enforcement, long expiration) {
+    public void onStatusChanged(int status, int enforcement, int blockingStatus, long expiration) {
         mStatus = status;
         mIsEnforced = enforcement != CookieControlsEnforcement.NO_ENFORCEMENT;
         mExpiration = expiration;
@@ -229,7 +248,8 @@ public class PageInfoCookiesController
     }
 
     private boolean isDeletionDisabled() {
-        return WebsitePreferenceBridge.isCookieDeletionDisabled(mMainController.getBrowserContext(), mFullUrl);
+        return WebsitePreferenceBridge.isCookieDeletionDisabled(
+                mMainController.getBrowserContext(), mFullUrl);
     }
 
     private void updateRowViewSubtitle() {
@@ -237,6 +257,13 @@ public class PageInfoCookiesController
         if (mStatus == CookieControlsStatus.DISABLED_FOR_SITE) {
             mRowView.updateSubtitle(
                     mRowView.getContext().getString(R.string.page_info_cookies_subtitle_allowed));
+            return;
+        }
+        if (mTrackingProtectionUI) {
+            mRowView.updateSubtitle(mRowView.getContext().getString(
+                    mBlockAll3PC
+                    ? R.string.page_info_cookies_subtitle_blocked
+                    : R.string.page_info_tracking_protection_subtitle_cookies_limited));
             return;
         }
         mRowView.updateSubtitle(mRowView.getContext().getString(

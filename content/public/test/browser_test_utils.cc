@@ -68,8 +68,6 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/browser/network_service_instance.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -1588,21 +1586,21 @@ class ExecuteJavaScriptForTestsWaiter : public WebContentsObserver {
         status == base::TERMINATION_STATUS_STILL_RUNNING) {
       return;
     }
-    RendererTerminated();
+    UpdateAfterScriptFailed("Renderer terminated.");
   }
   void RenderFrameDeleted(RenderFrameHost* render_frame_host) override {
     if (render_frame_host_ != render_frame_host)
       return;
-    RendererTerminated();
+    UpdateAfterScriptFailed("RenderFrame deleted.");
   }
 
  private:
-  void RendererTerminated() {
+  void UpdateAfterScriptFailed(const std::string& msg) {
     render_frame_host_ = nullptr;
     if (has_value_)
       return;
     SetValue(blink::mojom::JavaScriptExecutionResultType::kException,
-             base::Value("Renderer terminated"));
+             base::Value(msg));
   }
 
   void SetValue(blink::mojom::JavaScriptExecutionResultType type,
@@ -2071,20 +2069,6 @@ bool AccessibilityTreeContainsNodeWithName(BrowserAccessibility* node,
       return true;
   }
   return false;
-}
-
-bool AccessibilityTreeContainsNodeWithName(WebContents* web_contents,
-                                           base::StringPiece name) {
-  WebContentsImpl* web_contents_impl =
-      static_cast<WebContentsImpl*>(web_contents);
-  RenderFrameHostImpl* main_frame = static_cast<RenderFrameHostImpl*>(
-      web_contents_impl->GetPrimaryMainFrame());
-  BrowserAccessibilityManager* main_frame_manager =
-      main_frame->browser_accessibility_manager();
-
-  return !main_frame_manager ||
-         AccessibilityTreeContainsNodeWithName(
-             main_frame_manager->GetBrowserAccessibilityRoot(), name);
 }
 
 void WaitForAccessibilityTreeToChange(WebContents* web_contents) {
@@ -2818,9 +2802,9 @@ InputMsgWatcher::GetAckStateWaitIfNecessary() {
 
 InputEventAckWaiter::InputEventAckWaiter(RenderWidgetHost* render_widget_host,
                                          InputEventAckPredicate predicate)
-    : render_widget_host_(render_widget_host),
-      predicate_(predicate),
-      event_received_(false) {
+    : render_widget_host_(
+          static_cast<RenderWidgetHostImpl*>(render_widget_host)->GetWeakPtr()),
+      predicate_(predicate) {
   render_widget_host_->AddInputEventObserver(this);
 }
 
@@ -2843,7 +2827,9 @@ InputEventAckWaiter::InputEventAckWaiter(RenderWidgetHost* render_widget_host,
     : InputEventAckWaiter(render_widget_host, EventAckHasType(type)) {}
 
 InputEventAckWaiter::~InputEventAckWaiter() {
-  render_widget_host_->RemoveInputEventObserver(this);
+  if (render_widget_host_) {
+    render_widget_host_->RemoveInputEventObserver(this);
+  }
 }
 
 void InputEventAckWaiter::Wait() {

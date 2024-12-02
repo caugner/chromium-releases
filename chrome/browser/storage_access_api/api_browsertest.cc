@@ -7,6 +7,7 @@
 #include "base/path_service.h"
 #include "base/strings/escape.h"
 #include "base/strings/strcat.h"
+#include "base/strings/string_piece_forward.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
@@ -156,6 +157,10 @@ bool ThirdPartyPartitionedStorageAllowedByDefault() {
              net::features::kThirdPartyStoragePartitioning);
 }
 
+std::string CookieAttributes(base::StringPiece domain) {
+  return base::StrCat({";SameSite=None;Secure;Domain=", domain, ";Path=/"});
+}
+
 class StorageAccessAPIBaseBrowserTest : public policy::PolicyTest {
  protected:
   explicit StorageAccessAPIBaseBrowserTest(bool is_storage_partitioned)
@@ -248,9 +253,8 @@ class StorageAccessAPIBaseBrowserTest : public policy::PolicyTest {
   void SetCrossSiteCookieOnDomain(const std::string& domain) {
     GURL domain_url = GetURL(domain);
     std::string cookie = base::StrCat({"cross-site=", domain});
-    content::SetCookie(
-        browser()->profile(), domain_url,
-        base::StrCat({cookie, ";SameSite=None;Secure;Domain=", domain}));
+    content::SetCookie(browser()->profile(), domain_url,
+                       base::StrCat({cookie, CookieAttributes(domain)}));
     ASSERT_THAT(content::GetCookies(browser()->profile(), domain_url),
                 testing::HasSubstr(cookie));
   }
@@ -264,7 +268,8 @@ class StorageAccessAPIBaseBrowserTest : public policy::PolicyTest {
         net::CookiePartitionKey::FromURLForTesting(GetURL(top_level_host));
     content::SetPartitionedCookie(
         browser()->profile(), host_url,
-        base::StrCat({cookie, ";SameSite=None;Secure;Partitioned"}),
+        base::StrCat({cookie, CookieAttributes(/*domain=*/embedded_host),
+                      ";Partitioned"}),
         partition_key);
     ASSERT_THAT(content::GetCookies(
                     browser()->profile(), host_url,
@@ -1496,6 +1501,32 @@ IN_PROC_BROWSER_TEST_P(StorageAccessAPIBrowserTest,
             CookieBundle("cross-site=a.test"));
 }
 
+IN_PROC_BROWSER_TEST_P(StorageAccessAPIBrowserTest,
+                       DedicatedWorker_InheritsStorageAccessFromDocument) {
+  SetBlockThirdPartyCookies(true);
+  prompt_factory()->set_response_type(
+      permissions::PermissionRequestManager::ACCEPT_ALL);
+
+  // Get storage access and then do a self-initiated same-site navigation to the
+  // fetch_from_worker.html, so that fetch_from_worker.html has storage access
+  // upon load (and therefore has storage access when it creates the Worker).
+  NavigateToPageWithFrame(kHostA);
+  NavigateFrameTo(EchoCookiesURL(kHostB));
+  ASSERT_TRUE(storage::test::RequestAndCheckStorageAccessForFrame(GetFrame()));
+  ASSERT_TRUE(content::NavigateToURLFromRenderer(
+      GetFrame(),
+      https_server().GetURL(
+          kHostB,
+          "/workers/fetch_from_worker.html?script=fetch_from_worker.js")));
+  ASSERT_TRUE(storage::test::HasStorageAccessForFrame(GetFrame()));
+
+  // When the worker's parent document has storage access at the time the worker
+  // is created, the worker should inherit that access and be able to use it.
+  EXPECT_EQ(
+      content::EvalJs(GetFrame(), "fetch_from_worker('/echoheader?cookie');"),
+      "cross-site=b.test");
+}
+
 INSTANTIATE_TEST_SUITE_P(
     /* no prefix */,
     StorageAccessAPIBrowserTest,
@@ -1745,7 +1776,7 @@ class StorageAccessAPIWithFirstPartySetsBrowserTest
   void SetUpCommandLine(base::CommandLine* command_line) override {
     StorageAccessAPIBaseBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(
-        network::switches::kUseFirstPartySet,
+        network::switches::kUseRelatedWebsiteSet,
         base::StrCat({R"({"primary": "https://)", kHostA,
                       R"(", "associatedSites": ["https://)", kHostB, R"("])",
                       R"(, "serviceSites": ["https://)", kHostD, R"("]})"}));
@@ -1810,15 +1841,20 @@ IN_PROC_BROWSER_TEST_P(StorageAccessAPIWithFirstPartySetsBrowserTest,
 
   content::FetchHistogramsFromChildProcesses();
 
-  EXPECT_THAT(histogram_tester.GetBucketCount(
-                  kRequestOutcomeHistogram,
-                  0 /*RequestOutcome::kGrantedByFirstPartySet*/),
-              Gt(0));
+  EXPECT_THAT(
+      histogram_tester.GetBucketCount(kRequestOutcomeHistogram,
+                                      RequestOutcome::kGrantedByFirstPartySet),
+      Gt(0));
 }
 
 IN_PROC_BROWSER_TEST_P(StorageAccessAPIWithFirstPartySetsBrowserTest,
-                       Permission_AutodeniedUnderServiceDomain) {
+                       Permission_PromptOrDenyUnderServiceDomain) {
+  prompt_factory()->set_response_type(
+      permissions::PermissionRequestManager::DENY_ALL);
+
+  EnsureUserInteractionOn(kHostA);
   SetBlockThirdPartyCookies(true);
+
   base::HistogramTester histogram_tester;
 
   NavigateToPageWithFrame(kHostD);
@@ -1830,6 +1866,8 @@ IN_PROC_BROWSER_TEST_P(StorageAccessAPIWithFirstPartySetsBrowserTest,
   // The promise should be rejected; `kHostD` is a service domain.
   EXPECT_FALSE(content::ExecJs(GetFrame(), "document.requestStorageAccess()"));
   EXPECT_FALSE(storage::test::HasStorageAccessForFrame(GetFrame()));
+  EXPECT_EQ(prompt_factory()->TotalRequestCount(),
+            PermissionStorageAccessAPIFeatureEnabled() ? 1 : 0);
 
   NavigateFrameTo(EchoCookiesURL(kHostA));
 
@@ -1839,7 +1877,9 @@ IN_PROC_BROWSER_TEST_P(StorageAccessAPIWithFirstPartySetsBrowserTest,
   content::FetchHistogramsFromChildProcesses();
   EXPECT_THAT(histogram_tester.GetBucketCount(
                   kRequestOutcomeHistogram,
-                  5 /*RequestOutcome::kDeniedByPrerequisites*/),
+                  PermissionStorageAccessAPIFeatureEnabled()
+                      ? RequestOutcome::kDeniedByUser
+                      : RequestOutcome::kDeniedByFirstPartySet),
               Gt(0));
   // Ensure that the denied state is not exposed to developers, per the spec.
   EXPECT_EQ(QueryPermission(GetFrame()), "prompt");
@@ -1905,10 +1945,10 @@ IN_PROC_BROWSER_TEST_P(StorageAccessAPIWithFirstPartySetsBrowserTest,
 
   content::FetchHistogramsFromChildProcesses();
 
-  EXPECT_THAT(histogram_tester.GetBucketCount(
-                  kRequestOutcomeHistogram,
-                  3 /*RequestOutcome::kDeniedByFirstPartySet*/),
-              Gt(0));
+  EXPECT_THAT(
+      histogram_tester.GetBucketCount(kRequestOutcomeHistogram,
+                                      RequestOutcome::kDeniedByFirstPartySet),
+      Gt(0));
 }
 
 // Verifies kPermissionStorageAccessAPI feature turns off the autodenial.
@@ -1937,10 +1977,9 @@ IN_PROC_BROWSER_TEST_P(StorageAccessAPIWithFirstPartySetsBrowserTest,
 
   content::FetchHistogramsFromChildProcesses();
 
-  EXPECT_THAT(
-      histogram_tester.GetBucketCount(kRequestOutcomeHistogram,
-                                      2 /*RequestOutcome::kGrantedByUser*/),
-      Gt(0));
+  EXPECT_THAT(histogram_tester.GetBucketCount(kRequestOutcomeHistogram,
+                                              RequestOutcome::kGrantedByUser),
+              Gt(0));
 }
 
 IN_PROC_BROWSER_TEST_P(
@@ -2090,10 +2129,10 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_TRUE(storage::test::RequestAndCheckStorageAccessForFrame(GetFrame()));
 }
 
-class StorageAccessAPIWithCHIPSBrowserTest
+class StorageAccessAPIWithPartitionedCookiesBrowserTest
     : public StorageAccessAPIBaseBrowserTest {
  public:
-  StorageAccessAPIWithCHIPSBrowserTest()
+  StorageAccessAPIWithPartitionedCookiesBrowserTest()
       : StorageAccessAPIBaseBrowserTest(
             /*is_storage_partitioned=*/false) {}
 
@@ -2105,8 +2144,8 @@ class StorageAccessAPIWithCHIPSBrowserTest
   }
 };
 
-IN_PROC_BROWSER_TEST_F(StorageAccessAPIWithCHIPSBrowserTest,
-                       RequestStorageAccess_CoexistsWithCHIPS) {
+IN_PROC_BROWSER_TEST_F(StorageAccessAPIWithPartitionedCookiesBrowserTest,
+                       RequestStorageAccess_CoexistsWithPartitionedCookies) {
   SetBlockThirdPartyCookies(true);
 
   SetPartitionedCookieInContext(/*top_level_host=*/kHostA,

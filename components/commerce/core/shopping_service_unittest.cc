@@ -6,7 +6,6 @@
 #include "base/functional/bind.h"
 #include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/uuid.h"
 #include "base/values.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node.h"
@@ -412,9 +411,9 @@ TEST_P(ShoppingServiceTest,
   // The page will have finished its initial load prior to DidFinishLoad.
   web.SetIsFirstLoadForNavigationFinished(true);
   DidFinishLoad(&web);
-  // The js should only be able to run now after all loading has completed (for
-  // at least the timeout duration).
-  SimulateProductInfoJsTaskFinished();
+  // The local extraction should only be able to run now after all loading has
+  // completed (for at least the timeout duration).
+  SimulateProductInfoLocalExtractionTaskFinished();
 
   // At this point we should have the image in the cache.
   cached_info =
@@ -452,7 +451,7 @@ TEST_P(ShoppingServiceTest,
 
   DidNavigatePrimaryMainFrame(&web);
   // If the page was already loaded, assume the js has time to run now.
-  SimulateProductInfoJsTaskFinished();
+  SimulateProductInfoLocalExtractionTaskFinished();
 
   // By this point there should be something in the cache.
   ASSERT_EQ(1, GetProductInfoCacheOpenURLCount(GURL(kProductUrl)));
@@ -558,17 +557,18 @@ TEST_P(ShoppingServiceTest, TestGetUpdatedProductInfoForBookmarks) {
   opt_guide_->AddOnDemandShoppingResponse(
       GURL(kProductUrl), OptimizationGuideDecision::kTrue, updated_meta);
 
-  std::vector<base::Uuid> bookmark_uuids;
-  bookmark_uuids.push_back(product1->uuid());
-  int expected_calls = bookmark_uuids.size();
+  std::vector<int64_t> bookmark_ids;
+  bookmark_ids.push_back(product1->id());
+  int expected_calls = bookmark_ids.size();
 
   base::RunLoop run_loop;
 
   auto callback = base::BindRepeating(
       [](bookmarks::BookmarkModel* model, int* call_count,
-         base::RunLoop* run_loop, const base::Uuid& uuid, const GURL& url,
+         base::RunLoop* run_loop, const int64_t id, const GURL& url,
          absl::optional<ProductInfo> info) {
-        const bookmarks::BookmarkNode* node = model->GetNodeByUuid(uuid);
+        const bookmarks::BookmarkNode* node =
+            bookmarks::GetBookmarkNodeByID(model, id);
         EXPECT_EQ(url.spec(), node->url().spec());
 
         (*call_count)--;
@@ -578,8 +578,7 @@ TEST_P(ShoppingServiceTest, TestGetUpdatedProductInfoForBookmarks) {
       },
       model, &expected_calls, &run_loop);
 
-  shopping_service_->GetUpdatedProductInfoForBookmarks(bookmark_uuids,
-                                                       callback);
+  shopping_service_->GetUpdatedProductInfoForBookmarks(bookmark_ids, callback);
   run_loop.Run();
 
   EXPECT_EQ(0, expected_calls);
@@ -1059,6 +1058,198 @@ TEST_P(ShoppingServiceTest, TestPriceInsightsInfoResponse_EmptyRange) {
           },
           &run_loop));
   run_loop.Run();
+}
+
+TEST_P(ShoppingServiceTest, TestPriceInsightsInfoResponse_WithoutCache) {
+  test_features_.InitAndEnableFeature(kPriceInsights);
+
+  std::vector<std::tuple<std::string, int64_t>> history_prices;
+  history_prices.emplace_back("2021-01-01", 100);
+  history_prices.emplace_back("2021-01-02", 200);
+
+  OptimizationMetadata meta = opt_guide_->BuildPriceInsightsResponse(
+      kClusterId, kCurrencyCode, kLowTypicalPrice, kHighTypicalPrice,
+      kCurrencyCode, kAttributes, history_prices, kJackpotUrl,
+      PriceBucket::kHighPrice, true);
+
+  opt_guide_->SetResponse(GURL(kPriceInsightsUrl),
+                          OptimizationType::PRICE_INSIGHTS,
+                          OptimizationGuideDecision::kTrue, meta);
+
+  base::RunLoop run_loop1;
+  shopping_service_->GetPriceInsightsInfoForUrl(
+      GURL(kPriceInsightsUrl),
+      base::BindOnce(
+          [](base::RunLoop* run_loop, const GURL& url,
+             const absl::optional<PriceInsightsInfo>& info) {
+            ASSERT_EQ(kPriceInsightsUrl, url.spec());
+            ASSERT_TRUE(info.has_value());
+            ASSERT_EQ(kClusterId, info->product_cluster_id);
+            run_loop->Quit();
+          },
+          &run_loop1));
+  run_loop1.Run();
+
+  // Simulate that the OptGuide result is not saved in cache and is cleared
+  // after some time.
+  opt_guide_->SetResponse(
+      GURL(kPriceInsightsUrl), OptimizationType::PRICE_INSIGHTS,
+      OptimizationGuideDecision::kTrue, OptimizationMetadata());
+  base::RunLoop run_loop2;
+  shopping_service_->GetPriceInsightsInfoForUrl(
+      GURL(kPriceInsightsUrl),
+      base::BindOnce(
+          [](base::RunLoop* run_loop, const GURL& url,
+             const absl::optional<PriceInsightsInfo>& info) {
+            ASSERT_EQ(kPriceInsightsUrl, url.spec());
+            ASSERT_FALSE(info.has_value());
+            run_loop->Quit();
+          },
+          &run_loop2));
+  run_loop2.Run();
+}
+
+TEST_P(ShoppingServiceTest, TestPriceInsightsInfoResponse_WithCache) {
+  test_features_.InitAndEnableFeature(kPriceInsights);
+
+  std::vector<std::tuple<std::string, int64_t>> history_prices;
+  history_prices.emplace_back("2021-01-01", 100);
+  history_prices.emplace_back("2021-01-02", 200);
+
+  OptimizationMetadata meta = opt_guide_->BuildPriceInsightsResponse(
+      kClusterId, kCurrencyCode, kLowTypicalPrice, kHighTypicalPrice,
+      kCurrencyCode, kAttributes, history_prices, kJackpotUrl,
+      PriceBucket::kHighPrice, true);
+
+  opt_guide_->SetResponse(GURL(kPriceInsightsUrl),
+                          OptimizationType::PRICE_INSIGHTS,
+                          OptimizationGuideDecision::kTrue, meta);
+
+  base::RunLoop run_loop1;
+  shopping_service_->GetPriceInsightsInfoForUrl(
+      GURL(kPriceInsightsUrl),
+      base::BindOnce(
+          [](base::RunLoop* run_loop, const GURL& url,
+             const absl::optional<PriceInsightsInfo>& info) {
+            ASSERT_EQ(kPriceInsightsUrl, url.spec());
+            ASSERT_TRUE(info.has_value());
+            ASSERT_EQ(kClusterId, info->product_cluster_id);
+            run_loop->Quit();
+          },
+          &run_loop1));
+  run_loop1.Run();
+
+  // Simulate that the OptGuide result is cleared after some time but saved in
+  // cache already.
+  MockWebWrapper web(GURL(kPriceInsightsUrl), false);
+  DidNavigatePrimaryMainFrame(&web);
+
+  opt_guide_->SetResponse(
+      GURL(kPriceInsightsUrl), OptimizationType::PRICE_INSIGHTS,
+      OptimizationGuideDecision::kTrue, OptimizationMetadata());
+  base::RunLoop run_loop2;
+  shopping_service_->GetPriceInsightsInfoForUrl(
+      GURL(kPriceInsightsUrl),
+      base::BindOnce(
+          [](base::RunLoop* run_loop, const GURL& url,
+             const absl::optional<PriceInsightsInfo>& info) {
+            ASSERT_EQ(kPriceInsightsUrl, url.spec());
+            ASSERT_TRUE(info.has_value());
+            ASSERT_EQ(kClusterId, info->product_cluster_id);
+            run_loop->Quit();
+          },
+          &run_loop2));
+  run_loop2.Run();
+
+  // On navigating away, we should clear the cache.
+  DidNavigateAway(&web, GURL(kPriceInsightsUrl));
+  base::RunLoop run_loop3;
+  shopping_service_->GetPriceInsightsInfoForUrl(
+      GURL(kPriceInsightsUrl),
+      base::BindOnce(
+          [](base::RunLoop* run_loop, const GURL& url,
+             const absl::optional<PriceInsightsInfo>& info) {
+            ASSERT_EQ(kPriceInsightsUrl, url.spec());
+            ASSERT_FALSE(info.has_value());
+            run_loop->Quit();
+          },
+          &run_loop3));
+  run_loop3.Run();
+}
+
+TEST_P(ShoppingServiceTest,
+       TestPriceInsightsInfoResponse_WithCacheMultipleTabs) {
+  test_features_.InitAndEnableFeature(kPriceInsights);
+
+  std::vector<std::tuple<std::string, int64_t>> history_prices;
+  history_prices.emplace_back("2021-01-01", 100);
+  history_prices.emplace_back("2021-01-02", 200);
+
+  OptimizationMetadata meta = opt_guide_->BuildPriceInsightsResponse(
+      kClusterId, kCurrencyCode, kLowTypicalPrice, kHighTypicalPrice,
+      kCurrencyCode, kAttributes, history_prices, kJackpotUrl,
+      PriceBucket::kHighPrice, true);
+
+  opt_guide_->SetResponse(GURL(kPriceInsightsUrl),
+                          OptimizationType::PRICE_INSIGHTS,
+                          OptimizationGuideDecision::kTrue, meta);
+
+  MockWebWrapper web1(GURL(kPriceInsightsUrl), false);
+  DidNavigatePrimaryMainFrame(&web1);
+
+  base::RunLoop run_loop1;
+  shopping_service_->GetPriceInsightsInfoForUrl(
+      GURL(kPriceInsightsUrl),
+      base::BindOnce(
+          [](base::RunLoop* run_loop, const GURL& url,
+             const absl::optional<PriceInsightsInfo>& info) {
+            ASSERT_EQ(kPriceInsightsUrl, url.spec());
+            ASSERT_TRUE(info.has_value());
+            ASSERT_EQ(kClusterId, info->product_cluster_id);
+            run_loop->Quit();
+          },
+          &run_loop1));
+  run_loop1.Run();
+
+  opt_guide_->SetResponse(
+      GURL(kPriceInsightsUrl), OptimizationType::PRICE_INSIGHTS,
+      OptimizationGuideDecision::kTrue, OptimizationMetadata());
+
+  // Simulate navigating to another tab with the same url.
+  MockWebWrapper web2(GURL(kPriceInsightsUrl), false);
+  DidNavigatePrimaryMainFrame(&web2);
+
+  // Navigating away from one tab should not clear the cache.
+  DidNavigateAway(&web1, GURL(kPriceInsightsUrl));
+
+  base::RunLoop run_loop2;
+  shopping_service_->GetPriceInsightsInfoForUrl(
+      GURL(kPriceInsightsUrl),
+      base::BindOnce(
+          [](base::RunLoop* run_loop, const GURL& url,
+             const absl::optional<PriceInsightsInfo>& info) {
+            ASSERT_EQ(kPriceInsightsUrl, url.spec());
+            ASSERT_TRUE(info.has_value());
+            ASSERT_EQ(kClusterId, info->product_cluster_id);
+            run_loop->Quit();
+          },
+          &run_loop2));
+  run_loop2.Run();
+
+  // Navigating away from or destroying all tabs should clear the cache.
+  WebWrapperDestroyed(&web2);
+  base::RunLoop run_loop3;
+  shopping_service_->GetPriceInsightsInfoForUrl(
+      GURL(kPriceInsightsUrl),
+      base::BindOnce(
+          [](base::RunLoop* run_loop, const GURL& url,
+             const absl::optional<PriceInsightsInfo>& info) {
+            ASSERT_EQ(kPriceInsightsUrl, url.spec());
+            ASSERT_FALSE(info.has_value());
+            run_loop->Quit();
+          },
+          &run_loop3));
+  run_loop3.Run();
 }
 
 TEST_P(ShoppingServiceTest, TestIsShoppingPage) {

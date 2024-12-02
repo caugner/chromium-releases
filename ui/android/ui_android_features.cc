@@ -6,6 +6,9 @@
 #include "base/feature_list.h"
 
 namespace ui {
+
+BASE_FEATURE(kAndroidHDR, "AndroidHDR", base::FEATURE_ENABLED_BY_DEFAULT);
+
 BASE_FEATURE(kConvertTrackpadEventsToMouse,
              "ConvertTrackpadEventsToMouse",
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -18,6 +21,6 @@ BASE_FEATURE(kPwaRestoreUi, "PwaRestoreUi", base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kReportAllAvailablePointerTypes,
              "ReportAllAvailablePointerTypes",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 }  // namespace ui

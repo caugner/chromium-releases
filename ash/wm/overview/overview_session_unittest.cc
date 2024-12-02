@@ -49,6 +49,7 @@
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/overview/overview_constants.h"
 #include "ash/wm/overview/overview_controller.h"
+#include "ash/wm/overview/overview_drop_target.h"
 #include "ash/wm/overview/overview_focus_cycler.h"
 #include "ash/wm/overview/overview_grid.h"
 #include "ash/wm/overview/overview_grid_event_handler.h"
@@ -88,7 +89,6 @@
 #include "base/time/time.h"
 #include "chromeos/constants/chromeos_features.h"
 #include "chromeos/ui/base/window_state_type.h"
-#include "chromeos/ui/wm/features.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
@@ -947,7 +947,8 @@ TEST_P(OverviewSessionTest, MaximizedWindow) {
 // maximized and fullscreen window.
 #if defined(NDEBUG) && !defined(ADDRESS_SANITIZER) && \
     !defined(LEAK_SANITIZER) && !defined(THREAD_SANITIZER)
-TEST_P(OverviewSessionTest, MaximizedFullscreenHistograms) {
+// TODO(crbug.com/1493835): Re-enable this test. Disabled because of flakiness.
+TEST_P(OverviewSessionTest, DISABLED_MaximizedFullscreenHistograms) {
   std::unique_ptr<aura::Window> maximized_window(CreateTestWindow());
   std::unique_ptr<aura::Window> fullscreen_window(CreateTestWindow());
 
@@ -987,7 +988,8 @@ TEST_P(OverviewSessionTest, MaximizedFullscreenHistograms) {
 }
 #endif
 
-TEST_P(OverviewSessionTest, TabletModeHistograms) {
+// TODO(crbug.com/1493835): Re-enable this test. Disabled because of flakiness.
+TEST_P(OverviewSessionTest, DISABLED_TabletModeHistograms) {
   ui::ScopedAnimationDurationScaleMode anmatin_scale(
       ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
 
@@ -1020,7 +1022,8 @@ TEST_P(OverviewSessionTest, TabletModeHistograms) {
 // Tests that entering overview when a fullscreen window is active in maximized
 // mode correctly applies the transformations to the window and correctly
 // updates the window bounds on exiting overview mode: http://crbug.com/401664.
-TEST_P(OverviewSessionTest, FullscreenWindowTabletMode) {
+// TODO(crbug.com/1493835): Re-enable this test. Disabled because of flakiness.
+TEST_P(OverviewSessionTest, DISABLED_FullscreenWindowTabletMode) {
   ui::ScopedAnimationDurationScaleMode anmatin_scale(
       ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
 
@@ -2591,8 +2594,8 @@ TEST_P(OverviewSessionTest, DropTargetStackedAtBottomForOverviewItem) {
   generator->PressLeftButton();
   generator->MoveMouseBy(5, 0);
   ASSERT_TRUE(GetDropTarget(0));
-  EXPECT_TRUE(window_util::IsStackedBelow(GetDropTarget(0)->GetWindow(),
-                                          window2.get()));
+  EXPECT_TRUE(window_util::IsStackedBelow(
+      GetDropTarget(0)->item_widget()->GetNativeWindow(), window2.get()));
   generator->ReleaseLeftButton();
   EXPECT_FALSE(GetDropTarget(0));
 }
@@ -2767,7 +2770,7 @@ TEST_P(OverviewSessionTest, ShadowBounds) {
   auto item_ratio = [](OverviewItemBase* item) {
     gfx::RectF boundsf = chromeos::features::IsJellyrollEnabled()
                              ? item->target_bounds()
-                             : item->GetWindowTargetBoundsWithInsets();
+                             : item->GetTargetBoundsWithInsets();
     return boundsf.width() / boundsf.height();
   };
 
@@ -3067,14 +3070,14 @@ TEST_P(OverviewSessionTest, EatKeysDuringStartAnimation) {
 
   // Keys should be eaten by overview session when entering overview mode.
   ToggleOverview();
-  ASSERT_TRUE(Shell::Get()->overview_controller()->IsInStartAnimation());
+  ASSERT_TRUE(OverviewController::Get()->IsInStartAnimation());
   ASSERT_TRUE(test_window->HasFocus());
   SendKey(ui::VKEY_B);
   EXPECT_FALSE(test_event_handler.HasSeenEvent());
   EXPECT_TRUE(InOverviewSession());
 
   WaitForOverviewEnterAnimation();
-  ASSERT_FALSE(Shell::Get()->overview_controller()->IsInStartAnimation());
+  ASSERT_FALSE(OverviewController::Get()->IsInStartAnimation());
   EXPECT_FALSE(test_window->HasFocus());
 
   ToggleOverview();
@@ -3540,7 +3543,7 @@ TEST_P(OverviewSessionTest, FrameThrottlingArc) {
 
 // Tests that if we combine a desk in overview, the overview applied clipping is
 // removed properly (other portions of the window will not be visible on exiting
-// overview). Regression test for b/282010852.
+// overview). Regression test for http://b/282010852.
 TEST_P(OverviewSessionTest, WindowClippingAfterCombiningDesks) {
   // Need at least two desks to combine them.
   auto* controller = DesksController::Get();
@@ -3568,6 +3571,37 @@ TEST_P(OverviewSessionTest, WindowClippingAfterCombiningDesks) {
   ToggleOverview();
   WaitForOverviewExitAnimation();
   EXPECT_TRUE(normal_window->layer()->clip_rect().IsEmpty());
+}
+
+// Tests that if we tab while the desks bar is sliding out, there is no crash.
+// Regression test for http://b/302708219.
+TEST_P(OverviewSessionTest, TabbingDuringExitAnimation) {
+  ui::ScopedAnimationDurationScaleMode scale_mode(
+      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
+
+  ToggleOverview();
+  WaitForOverviewEnterAnimation();
+
+  auto* overview_grid = GetOverviewGridForRoot(Shell::GetPrimaryRootWindow());
+  const views::Widget* desks_widget = overview_grid->desks_widget();
+
+  // First activate the desks bar by clicking it (but do not click on the desk
+  // preview because that will exit overview). See bug details for why we need
+  // to activate the desks bar first.
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->set_current_screen_location(
+      desks_widget->GetWindowBoundsInScreen().origin());
+  generator->ClickLeftButton();
+  ASSERT_TRUE(wm::IsActiveWindow(desks_widget->GetNativeWindow()));
+
+  // Exit overview. This will slide out the desks widget.
+  ToggleOverview();
+
+  // Try tab focus traversal while the animation is in progress. There should be
+  // no crash.
+  SendKey(ui::VKEY_TAB);
+  SendKey(ui::VKEY_TAB);
+  SendKey(ui::VKEY_TAB);
 }
 
 // If you update the parameterisation of OverviewSessionTest also update the
@@ -5241,8 +5275,7 @@ INSTANTIATE_TEST_SUITE_P(/*no prefix*/,
 
 class FloatOverviewSessionTest : public OverviewTestBase {
  public:
-  FloatOverviewSessionTest()
-      : scoped_feature_list_(chromeos::wm::features::kWindowLayoutMenu) {}
+  FloatOverviewSessionTest() = default;
   FloatOverviewSessionTest(const FloatOverviewSessionTest&) = delete;
   FloatOverviewSessionTest& operator=(const FloatOverviewSessionTest&) = delete;
   ~FloatOverviewSessionTest() override = default;
@@ -5278,9 +5311,6 @@ class FloatOverviewSessionTest : public OverviewTestBase {
 
     return true;
   }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 // Tests that the float container is stacked properly when entering and exiting
@@ -6609,7 +6639,7 @@ TEST_F(TabletModeOverviewSessionTest, AvoidUaFOnCompleteDrag) {
   window_state->OnWMEvent(&snap_type);
   EXPECT_EQ(chromeos::WindowStateType::kPrimarySnapped,
             window_state->GetStateType());
-  OverviewController* overview_controller = Shell::Get()->overview_controller();
+  OverviewController* overview_controller = OverviewController::Get();
   EXPECT_TRUE(overview_controller->InOverviewSession());
 
   window_state->Minimize();
@@ -6619,8 +6649,8 @@ TEST_F(TabletModeOverviewSessionTest, AvoidUaFOnCompleteDrag) {
   // Trigger `OverviewWindowDragController::CompleteDrag()` and verify that
   // there will be no crash.
   auto* event_generator = GetEventGenerator();
-  event_generator->MoveMouseTo(gfx::ToRoundedPoint(
-      overview_item->GetTargetBoundsInScreen().CenterPoint()));
+  event_generator->MoveMouseTo(
+      gfx::ToRoundedPoint(overview_item->target_bounds().CenterPoint()));
   event_generator->ClickLeftButton();
   EXPECT_EQ(chromeos::WindowStateType::kPrimarySnapped,
             window_state->GetStateType());
@@ -7106,7 +7136,7 @@ TEST_F(SplitViewOverviewSessionTest, Clipping) {
     EXPECT_TRUE(aspect_ratio_near(window2->layer()->clip_rect(),
                                   split_view_bounds_right));
     EXPECT_TRUE(aspect_ratio_near(
-        gfx::ToEnclosedRect(item2->GetWindowTargetBoundsWithInsets()),
+        gfx::ToEnclosedRect(item2->GetTargetBoundsWithInsets()),
         split_view_bounds_right));
     EXPECT_TRUE(
         aspect_ratio_near(window2->GetBoundsInScreen(), maximized_bounds));
@@ -7126,7 +7156,7 @@ TEST_F(SplitViewOverviewSessionTest, Clipping) {
         preview_layer->transform().MapRect(preview_layer->clip_rect());
     EXPECT_TRUE(aspect_ratio_near(clip_rects3, split_view_bounds_right));
     EXPECT_TRUE(aspect_ratio_near(
-        gfx::ToEnclosedRect(item3->GetWindowTargetBoundsWithInsets()),
+        gfx::ToEnclosedRect(item3->GetTargetBoundsWithInsets()),
         split_view_bounds_right));
     EXPECT_TRUE(
         aspect_ratio_near(window3->GetBoundsInScreen(), maximized_bounds));
@@ -7138,7 +7168,7 @@ TEST_F(SplitViewOverviewSessionTest, Clipping) {
     EXPECT_TRUE(aspect_ratio_near(window4->layer()->clip_rect(),
                                   split_view_bounds_right));
     EXPECT_TRUE(aspect_ratio_near(
-        gfx::ToEnclosedRect(item4->GetWindowTargetBoundsWithInsets()),
+        gfx::ToEnclosedRect(item4->GetTargetBoundsWithInsets()),
         split_view_bounds_right));
     EXPECT_TRUE(
         aspect_ratio_near(window4->GetBoundsInScreen(), maximized_bounds));
@@ -7152,7 +7182,7 @@ TEST_F(SplitViewOverviewSessionTest, Clipping) {
     EXPECT_TRUE(aspect_ratio_near(window2->layer()->clip_rect(),
                                   split_view_bounds_right));
     EXPECT_TRUE(aspect_ratio_near(
-        gfx::ToEnclosedRect(item2->GetWindowTargetBoundsWithInsets()),
+        gfx::ToEnclosedRect(item2->GetTargetBoundsWithInsets()),
         split_view_bounds_right));
     EXPECT_TRUE(
         aspect_ratio_near(window2->GetBoundsInScreen(), maximized_bounds));
@@ -7160,7 +7190,7 @@ TEST_F(SplitViewOverviewSessionTest, Clipping) {
     EXPECT_TRUE(window3->layer()->clip_rect().IsEmpty());
     EXPECT_TRUE(aspect_ratio_near(clip_rects3, split_view_bounds_right));
     EXPECT_TRUE(aspect_ratio_near(
-        gfx::ToEnclosedRect(item3->GetWindowTargetBoundsWithInsets()),
+        gfx::ToEnclosedRect(item3->GetTargetBoundsWithInsets()),
         split_view_bounds_right));
     EXPECT_TRUE(
         aspect_ratio_near(window3->GetBoundsInScreen(), maximized_bounds));
@@ -7170,7 +7200,7 @@ TEST_F(SplitViewOverviewSessionTest, Clipping) {
     EXPECT_TRUE(aspect_ratio_near(window4->layer()->clip_rect(),
                                   split_view_bounds_right));
     EXPECT_TRUE(aspect_ratio_near(
-        gfx::ToEnclosedRect(item4->GetWindowTargetBoundsWithInsets()),
+        gfx::ToEnclosedRect(item4->GetTargetBoundsWithInsets()),
         split_view_bounds_right));
     EXPECT_TRUE(
         aspect_ratio_near(window4->GetBoundsInScreen(), maximized_bounds));
@@ -7934,7 +7964,7 @@ TEST_F(SplitViewOverviewSessionTest, DragDividerToExitTest) {
   DragWindowTo(overview_item1, gfx::PointF());
   // Test that overview mode and split view mode are both active.
   EXPECT_TRUE(split_view_controller()->InSplitViewMode());
-  EXPECT_TRUE(Shell::Get()->overview_controller()->InOverviewSession());
+  EXPECT_TRUE(OverviewController::Get()->InOverviewSession());
 
   // Drag the divider toward closing the snapped window.
   gfx::Rect divider_bounds = GetSplitViewDividerBounds(false /* is_dragging */);
@@ -7944,14 +7974,14 @@ TEST_F(SplitViewOverviewSessionTest, DragDividerToExitTest) {
 
   // Test that split view mode is ended. Overview mode is still active.
   EXPECT_FALSE(split_view_controller()->InSplitViewMode());
-  EXPECT_TRUE(Shell::Get()->overview_controller()->InOverviewSession());
+  EXPECT_TRUE(OverviewController::Get()->InOverviewSession());
 
   // Now drag |window2| selector item to snap to left.
   auto* overview_item2 = GetOverviewItemForWindow(window2.get());
   DragWindowTo(overview_item2, gfx::PointF());
   // Test that overview mode and split view mode are both active.
   EXPECT_TRUE(split_view_controller()->InSplitViewMode());
-  EXPECT_TRUE(Shell::Get()->overview_controller()->InOverviewSession());
+  EXPECT_TRUE(OverviewController::Get()->InOverviewSession());
 
   // Drag the divider toward closing the overview window grid.
   divider_bounds = GetSplitViewDividerBounds(false /*is_dragging=*/);
@@ -7963,7 +7993,7 @@ TEST_F(SplitViewOverviewSessionTest, DragDividerToExitTest) {
   // Test that split view mode is ended. Overview mode is also ended. |window2|
   // should be activated.
   EXPECT_FALSE(split_view_controller()->InSplitViewMode());
-  EXPECT_FALSE(Shell::Get()->overview_controller()->InOverviewSession());
+  EXPECT_FALSE(OverviewController::Get()->InOverviewSession());
   EXPECT_EQ(window2.get(), window_util::GetActiveWindow());
 }
 
@@ -8016,7 +8046,7 @@ TEST_F(SplitViewOverviewSessionTest, SnappedWindowBoundsTest) {
   DragWindowTo(overview_item1, gfx::PointF());
   EXPECT_EQ(SplitViewController::State::kPrimarySnapped,
             split_view_controller()->state());
-  EXPECT_TRUE(Shell::Get()->overview_controller()->InOverviewSession());
+  EXPECT_TRUE(OverviewController::Get()->InOverviewSession());
 
   // Then drag the divider to left toward closing the snapped window.
   gfx::Rect divider_bounds = GetSplitViewDividerBounds(false /*is_dragging=*/);
@@ -8028,7 +8058,7 @@ TEST_F(SplitViewOverviewSessionTest, SnappedWindowBoundsTest) {
 
   // Test that split view mode is ended. Overview mode is still active.
   EXPECT_FALSE(split_view_controller()->InSplitViewMode());
-  EXPECT_TRUE(Shell::Get()->overview_controller()->InOverviewSession());
+  EXPECT_TRUE(OverviewController::Get()->InOverviewSession());
   // Test that |window1| has the dimensions of a tablet mode maxed window, so
   // that when it is placed back on the grid it will not look skinny.
   EXPECT_LE(window1->bounds().x(), 0);
@@ -8042,7 +8072,7 @@ TEST_F(SplitViewOverviewSessionTest, SnappedWindowBoundsTest) {
   DragWindowTo(overview_item2, gfx::PointF(end_location2));
   EXPECT_EQ(SplitViewController::State::kSecondarySnapped,
             split_view_controller()->state());
-  EXPECT_TRUE(Shell::Get()->overview_controller()->InOverviewSession());
+  EXPECT_TRUE(OverviewController::Get()->InOverviewSession());
 
   // Then drag the divider to right toward closing the snapped window.
   divider_bounds = GetSplitViewDividerBounds(false /* is_dragging */);
@@ -8055,7 +8085,7 @@ TEST_F(SplitViewOverviewSessionTest, SnappedWindowBoundsTest) {
 
   // Test that split view mode is ended. Overview mode is still active.
   EXPECT_FALSE(split_view_controller()->InSplitViewMode());
-  EXPECT_TRUE(Shell::Get()->overview_controller()->InOverviewSession());
+  EXPECT_TRUE(OverviewController::Get()->InOverviewSession());
   // Test that |window2| has the dimensions of a tablet mode maxed window, so
   // that when it is placed back on the grid it will not look skinny.
   EXPECT_GE(window2->bounds().x(), 0);
@@ -9935,7 +9965,7 @@ TEST_F(SplitViewOverviewSessionInClamshellTestMultiDisplayOnly,
   // On the grid where the drag starts (|grid2|), the drop target is inserted at
   // the index immediately following the dragged item (|item4|).
   ASSERT_EQ(4u, grid2->window_list().size());
-  EXPECT_EQ(grid2->GetDropTarget(), grid2->window_list()[2].get());
+  EXPECT_EQ(GetDropTarget(1), grid2->window_list()[2].get());
   // Drag over |grid1|.
   cursor_manager->SetDisplay(display_with_root1);
   GetOverviewSession()->Drag(item4, gfx::PointF(400.f, 0.f));
@@ -9943,7 +9973,7 @@ TEST_F(SplitViewOverviewSessionInClamshellTestMultiDisplayOnly,
   // correct position according to MRU order (between the overview items for
   // |window3| and |window5|).
   ASSERT_EQ(4u, grid1->window_list().size());
-  EXPECT_EQ(grid1->GetDropTarget(), grid1->window_list()[2].get());
+  EXPECT_EQ(GetDropTarget(0), grid1->window_list()[2].get());
 }
 
 // Verify that the drop target in each overview grid has the correct bounds when
@@ -9975,8 +10005,10 @@ TEST_F(SplitViewOverviewSessionInClamshellTestMultiDisplayOnly,
   // |OverviewItem::GetWindowDimensionsType|, because it does not work for drop
   // targets (and that is okay). The bounds of |drop_target|, minus the margin
   // should have an aspect ratio of 1 : 2.
-  gfx::RectF drop_target_bounds = drop_target->target_bounds();
-  EXPECT_EQ(0.5f, drop_target_bounds.width() / drop_target_bounds.height());
+  const gfx::Size drop_target_size =
+      drop_target->item_widget()->GetWindowBoundsInScreen().size();
+  EXPECT_EQ(0.5f, static_cast<float>(drop_target_size.width()) /
+                      drop_target_size.height());
 }
 
 // Verify that the drop target in each overview grid has bounds representing

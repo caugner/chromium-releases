@@ -18,8 +18,8 @@ GLContextStub::GLContextStub(GLShareGroup* share_group)
   SetExtensionsString("GL_EXT_framebuffer_object");
 }
 
-bool GLContextStub::Initialize(GLSurface* compatible_surface,
-                               const GLContextAttribs& attribs) {
+bool GLContextStub::InitializeImpl(GLSurface* compatible_surface,
+                                   const GLContextAttribs& attribs) {
   return true;
 }
 
@@ -59,10 +59,6 @@ unsigned int GLContextStub::CheckStickyGraphicsResetStatusImpl() {
   return graphics_reset_status_;
 }
 
-GLDisplayEGL* GLContextStub::GetGLDisplayEGL() {
-  return gl_display_;
-}
-
 void GLContextStub::SetUseStubApi(bool stub_api) {
   use_stub_api_ = stub_api;
 }
@@ -80,15 +76,13 @@ bool GLContextStub::HasRobustness() {
          HasExtension("GL_KHR_robustness") || HasExtension("GL_EXT_robustness");
 }
 
-void GLContextStub::SetGLDisplayEGL(GLDisplayEGL* display) {
-  gl_display_ = display;
-}
-
 #if BUILDFLAG(IS_MAC)
 void GLContextStub::FlushForDriverCrashWorkaround() {}
 #endif
 
-GLContextStub::~GLContextStub() {}
+GLContextStub::~GLContextStub() {
+  OnContextWillDestroy();
+}
 
 GLApi* GLContextStub::CreateGLApi(DriverGL* driver) {
   if (use_stub_api_) {

@@ -18,10 +18,10 @@
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
-#include "components/password_manager/core/browser/login_database.h"
+#include "components/password_manager/core/browser/features/password_features.h"
 #include "components/password_manager/core/browser/password_form.h"
-#include "components/password_manager/core/browser/password_store_sync.h"
 #include "components/password_manager/core/browser/sync/password_proto_utils.h"
+#include "components/password_manager/core/browser/sync/password_store_sync.h"
 #include "components/password_manager/core/common/password_manager_features.h"
 #include "components/sync/base/client_tag_hash.h"
 #include "components/sync/base/features.h"
@@ -1300,7 +1300,6 @@ TEST_F(PasswordSyncBridgeTest,
       syncer::WipeModelUponSyncDisabledBehavior::kNever, base::DoNothing());
 }
 
-#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 // Tests that in case ReadAllCredentials() during initial merge returns
 // encryption service failure, the bridge would try to do a DB clean up.
 class PasswordSyncBridgeMergeTest
@@ -1328,6 +1327,8 @@ class PasswordSyncBridgeMergeTest
 };
 
 TEST_P(PasswordSyncBridgeMergeTest, ShouldFixWhenDatabaseEncryptionFails) {
+  base::test::ScopedFeatureList feature_list(
+      features::kClearUndecryptablePasswordsOnSync);
   ShouldDeleteUndecryptableLoginsDuringMerge();
 }
 
@@ -1337,7 +1338,6 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Values(
         FormRetrievalResult::kEncryptionServiceFailure,
         FormRetrievalResult::kEncryptionServiceFailureWithPartialData));
-#endif
 
 TEST_F(PasswordSyncBridgeTest,
        ShouldDeleteSyncMetadataWhenApplyDisableSyncChanges) {

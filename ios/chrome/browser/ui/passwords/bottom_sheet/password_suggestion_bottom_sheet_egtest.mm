@@ -5,17 +5,21 @@
 #import <UIKit/UIKit.h>
 #import <XCTest/XCTest.h>
 
+#import "base/strings/sys_string_conversions.h"
 #import "base/test/ios/wait_util.h"
+#import "components/password_manager/core/browser/features/password_features.h"
 #import "components/password_manager/core/common/password_manager_features.h"
-#import "ios/chrome/browser/passwords/password_manager_app_interface.h"
+#import "components/url_formatter/elide_url.h"
+#import "ios/chrome/browser/metrics/metrics_app_interface.h"
+#import "ios/chrome/browser/passwords/model/password_manager_app_interface.h"
 #import "ios/chrome/browser/signin/fake_system_identity.h"
 #import "ios/chrome/browser/ui/authentication/signin_earl_grey_ui_test_util.h"
 #import "ios/chrome/browser/ui/passwords/bottom_sheet/password_suggestion_bottom_sheet_app_interface.h"
-#import "ios/chrome/browser/ui/passwords/bottom_sheet/password_suggestion_bottom_sheet_constants.h"
 #import "ios/chrome/browser/ui/settings/password/password_manager_egtest_utils.h"
 #import "ios/chrome/browser/ui/settings/password/password_manager_ui_features.h"
 #import "ios/chrome/browser/ui/settings/password/password_settings_app_interface.h"
 #import "ios/chrome/browser/ui/settings/password/passwords_table_view_constants.h"
+#import "ios/chrome/common/ui/confirmation_alert/constants.h"
 #import "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/earl_grey/chrome_actions.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
@@ -64,6 +68,28 @@ id<GREYMatcher> ButtonWithAccessibilityID(NSString* id) {
                     grey_accessibilityTrait(UIAccessibilityTraitButton), nil);
 }
 
+id<GREYMatcher> SubtitleString(const GURL& url) {
+  return grey_text(l10n_util::GetNSStringF(
+      IDS_IOS_PASSWORD_BOTTOM_SHEET_SUBTITLE,
+      url_formatter::FormatUrlForDisplayOmitSchemePathAndTrivialSubdomains(
+          url)));
+}
+
+// Verifies the number of Password Details visits recorded.
+void CheckPasswordDetailsVisitMetricCount(int count) {
+  NSString* histogram = @"PasswordManager.iOS.PasswordDetailsVisit";
+
+  // Check password details visit metric.
+  NSError* error = [MetricsAppInterface expectTotalCount:count
+                                            forHistogram:histogram];
+  GREYAssertNil(error, @"Unexpected Password Details Visit histogram count");
+
+  error = [MetricsAppInterface expectCount:count
+                                 forBucket:YES
+                              forHistogram:histogram];
+  GREYAssertNil(error, @"Unexpected Password Details Visit histogram count");
+}
+
 }  // namespace
 
 @interface PasswordSuggestionBottomSheetEGTest : ChromeTestCase
@@ -84,11 +110,19 @@ id<GREYMatcher> ButtonWithAccessibilityID(NSString* id) {
   // Also reset the dismiss count pref to 0 to make sure the bottom sheet is
   // enabled by default.
   [PasswordSuggestionBottomSheetAppInterface setDismissCount:0];
+
+  GREYAssertNil([MetricsAppInterface setupHistogramTester],
+                @"Cannot setup histogram tester.");
+  [MetricsAppInterface overrideMetricsAndCrashReportingForTesting];
 }
 
 - (void)tearDown {
   [PasswordManagerAppInterface clearCredentials];
   [PasswordSuggestionBottomSheetAppInterface removeMockReauthenticationModule];
+
+  [MetricsAppInterface stopOverridingMetricsAndCrashReportingForTesting];
+  GREYAssertNil([MetricsAppInterface releaseHistogramTester],
+                @"Failed to release histogram tester.");
   [super tearDown];
 }
 
@@ -111,6 +145,15 @@ id<GREYMatcher> ButtonWithAccessibilityID(NSString* id) {
         password_manager::features::kIOSPasswordAuthOnEntryV2);
   }
 
+  if ([self isRunningTest:@selector
+            (testOpenPasswordBottomSheetWithSingleSharedPassword)] ||
+      [self isRunningTest:@selector
+            (testOpenPasswordBottomSheetWithMultipleSharedPasswords)] ||
+      [self isRunningTest:@selector
+            (testOpenPasswordBottomSheetWithSharedPasswordsAndUseKeyboard)]) {
+    config.features_enabled.push_back(
+        password_manager::features::kSharedPasswordNotificationUI);
+  }
   return config;
 }
 
@@ -152,11 +195,12 @@ id<GREYMatcher> NavigationBarEditButton() {
   [PasswordSuggestionBottomSheetAppInterface
       mockReauthenticationModuleExpectedResult:ReauthenticationResult::
                                                    kSuccess];
+
+  GURL URL = self.testServer->GetURL("/simple_login_form.html");
   [PasswordManagerAppInterface
       storeCredentialWithUsername:@"user"
                          password:@"password"
-                              URL:net::NSURLWithGURL(self.testServer->GetURL(
-                                      "/simple_login_form.html"))];
+                              URL:net::NSURLWithGURL(URL)];
   [SigninEarlGreyUI signinWithFakeIdentity:[FakeSystemIdentity fakeIdentity1]
                                 enableSync:NO];
   [self loadLoginPage];
@@ -167,10 +211,20 @@ id<GREYMatcher> NavigationBarEditButton() {
   [ChromeEarlGrey
       waitForUIElementToAppearWithMatcher:grey_accessibilityID(@"user")];
 
+  // Verify that the subtitle string appears.
+  [ChromeEarlGrey waitForUIElementToAppearWithMatcher:SubtitleString(URL)];
+
   [[EarlGrey
       selectElementWithMatcher:grey_accessibilityLabel(l10n_util::GetNSString(
                                    IDS_IOS_PASSWORD_BOTTOM_SHEET_USE_PASSWORD))]
       performAction:grey_tap()];
+
+  // No histogram logged because there is only 1 credential shown to the user.
+  GREYAssertNil(
+      [MetricsAppInterface
+          expectTotalCount:0
+              forHistogram:@"PasswordManager.TouchToFill.CredentialIndex"],
+      @"Unexpected histogram error for touch to fill credential index");
 
   [self verifyPasswordFieldsHaveBeenFilled:@"user"];
 }
@@ -361,14 +415,19 @@ id<GREYMatcher> NavigationBarEditButton() {
                                    IDS_IOS_SHOW_PASSWORD_VIEW_USERNAME)]
       assertWithMatcher:grey_notVisible()];
 
-  // Emit auth result so password details surface is revealed.
+  // Verify visit metric was not recorded yet.
+  CheckPasswordDetailsVisitMetricCount(0);
 
+  // Emit auth result so password details surface is revealed.
   [PasswordSettingsAppInterface mockReauthenticationModuleReturnMockedResult];
 
   [[EarlGrey
       selectElementWithMatcher:chrome_test_util::TextFieldForCellWithLabelId(
                                    IDS_IOS_SHOW_PASSWORD_VIEW_USERNAME)]
       assertWithMatcher:grey_textFieldValue(@"user2")];
+
+  // Verify visit metric was recorded.
+  CheckPasswordDetailsVisitMetricCount(1);
 }
 
 - (void)testOpenPasswordBottomSheetOpenPasswordDetailsWithoutAuthentication {
@@ -421,6 +480,9 @@ id<GREYMatcher> NavigationBarEditButton() {
       selectElementWithMatcher:chrome_test_util::TextFieldForCellWithLabelId(
                                    IDS_IOS_SHOW_PASSWORD_VIEW_USERNAME)]
       assertWithMatcher:grey_textFieldValue(@"user2")];
+
+  // Verify visit metric was recorded.
+  CheckPasswordDetailsVisitMetricCount(1);
 }
 
 - (void)testOpenPasswordBottomSheetDeletePassword {
@@ -527,16 +589,42 @@ id<GREYMatcher> NavigationBarEditButton() {
   [[EarlGrey selectElementWithMatcher:grey_accessibilityID(@"user")]
       performAction:grey_tap()];
 
+  GREYAssertNil(
+      [MetricsAppInterface
+           expectCount:1
+             forBucket:YES
+          forHistogram:@"IOS.PasswordBottomSheet.UsernameTapped."
+                       @"MinimizedState"],
+      @"Unexpected histogram error for password bottom sheet username tapped "
+      @"minimized state");
+
   [ChromeEarlGrey
       waitForUIElementToAppearWithMatcher:grey_accessibilityID(@"user2")];
 
   [[EarlGrey selectElementWithMatcher:grey_accessibilityID(@"user2")]
       performAction:grey_tap()];
 
+  GREYAssertNil(
+      [MetricsAppInterface
+           expectCount:1
+             forBucket:NO
+          forHistogram:@"IOS.PasswordBottomSheet.UsernameTapped."
+                       @"MinimizedState"],
+      @"Unexpected histogram error for password bottom sheet username tapped "
+      @"minimized state");
+
   [[EarlGrey
       selectElementWithMatcher:grey_accessibilityLabel(l10n_util::GetNSString(
                                    IDS_IOS_PASSWORD_BOTTOM_SHEET_USE_PASSWORD))]
       performAction:grey_tap()];
+
+  GREYAssertNil(
+      [MetricsAppInterface
+          expectUniqueSampleWithCount:1
+                            forBucket:1
+                         forHistogram:
+                             @"PasswordManager.TouchToFill.CredentialIndex"],
+      @"Unexpected histogram error for touch to fill credential index");
 
   [self verifyPasswordFieldsHaveBeenFilled:@"user2"];
 
@@ -582,9 +670,9 @@ id<GREYMatcher> NavigationBarEditButton() {
       performAction:grey_tap()];
 
   // Scroll to the last password.
-  [[EarlGrey
-      selectElementWithMatcher:grey_accessibilityID(
-                                   kPasswordSuggestionBottomSheetTableViewId)]
+  [[EarlGrey selectElementWithMatcher:
+                 grey_accessibilityID(
+                     kConfirmationAlertUnderTitleViewAccessibilityIdentifier)]
       performAction:grey_scrollToContentEdge(kGREYContentEdgeBottom)];
 
   [ChromeEarlGrey
@@ -766,6 +854,182 @@ id<GREYMatcher> NavigationBarEditButton() {
   } else {
     EARL_GREY_TEST_SKIPPED(@"Not available for under iOS 17.");
   }
+}
+
+- (void)testOpenPasswordBottomSheetWithSingleSharedPassword {
+  [PasswordSuggestionBottomSheetAppInterface setUpMockReauthenticationModule];
+  [PasswordSuggestionBottomSheetAppInterface
+      mockReauthenticationModuleExpectedResult:ReauthenticationResult::
+                                                   kSuccess];
+
+  // Save 1 password that has been received via sharing and the other not.
+  NSURL* URL =
+      net::NSURLWithGURL(self.testServer->GetURL("/simple_login_form.html"));
+  [PasswordManagerAppInterface storeCredentialWithUsername:@"user1"
+                                                  password:@"password1"
+                                                       URL:URL
+                                                    shared:YES];
+  [PasswordManagerAppInterface storeCredentialWithUsername:@"user2"
+                                                  password:@"password2"
+                                                       URL:URL
+                                                    shared:NO];
+  [SigninEarlGreyUI signinWithFakeIdentity:[FakeSystemIdentity fakeIdentity1]
+                                enableSync:NO];
+  [self loadLoginPage];
+
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
+      performAction:chrome_test_util::TapWebElementWithId(kFormPassword)];
+  [ChromeEarlGrey
+      waitForUIElementToAppearWithMatcher:grey_accessibilityID(@"user1")];
+
+  // Verify that the sharing notification title is visible.
+  id<GREYMatcher> titleMatcher = grey_accessibilityLabel(
+      base::SysUTF16ToNSString(l10n_util::GetPluralStringFUTF16(
+          IDS_IOS_PASSWORD_SHARING_NOTIFICATION_TITLE, 1)));
+  [[EarlGrey
+      selectElementWithMatcher:grey_allOf(titleMatcher,
+                                          grey_sufficientlyVisible(), nil)]
+      assertWithMatcher:grey_notNil()];
+
+  // Verify that the other password is also accessible to fill.
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(@"user1")]
+      performAction:grey_tap()];
+  [ChromeEarlGrey
+      waitForUIElementToAppearWithMatcher:grey_accessibilityID(@"user2")];
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(@"user2")]
+      performAction:grey_tap()];
+  [[EarlGrey
+      selectElementWithMatcher:grey_accessibilityLabel(l10n_util::GetNSString(
+                                   IDS_IOS_PASSWORD_BOTTOM_SHEET_USE_PASSWORD))]
+      performAction:grey_tap()];
+  [self verifyPasswordFieldsHaveBeenFilled:@"user2"];
+
+  // Verify that after using the shared password regular bottom sheet is
+  // displayed.
+  [self loadLoginPage];
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
+      performAction:chrome_test_util::TapWebElementWithId(kFormPassword)];
+
+  [ChromeEarlGrey
+      waitForUIElementToAppearWithMatcher:grey_accessibilityID(@"user1")];
+
+  // Verify that the sharing notification is not visible anymore.
+  [[EarlGrey
+      selectElementWithMatcher:grey_allOf(titleMatcher,
+                                          grey_sufficientlyVisible(), nil)]
+      assertWithMatcher:grey_nil()];
+  [[EarlGrey
+      selectElementWithMatcher:grey_accessibilityLabel(l10n_util::GetNSString(
+                                   IDS_IOS_PASSWORD_BOTTOM_SHEET_USE_PASSWORD))]
+      performAction:grey_tap()];
+  [self verifyPasswordFieldsHaveBeenFilled:@"user1"];
+}
+
+- (void)testOpenPasswordBottomSheetWithMultipleSharedPasswords {
+  [PasswordSuggestionBottomSheetAppInterface setUpMockReauthenticationModule];
+  [PasswordSuggestionBottomSheetAppInterface
+      mockReauthenticationModuleExpectedResult:ReauthenticationResult::
+                                                   kSuccess];
+
+  NSURL* URL =
+      net::NSURLWithGURL(self.testServer->GetURL("/simple_login_form.html"));
+  [PasswordManagerAppInterface storeCredentialWithUsername:@"user1"
+                                                  password:@"password1"
+                                                       URL:URL
+                                                    shared:YES];
+  [PasswordManagerAppInterface storeCredentialWithUsername:@"user2"
+                                                  password:@"password2"
+                                                       URL:URL
+                                                    shared:YES];
+  [SigninEarlGreyUI signinWithFakeIdentity:[FakeSystemIdentity fakeIdentity1]
+                                enableSync:NO];
+  [self loadLoginPage];
+
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
+      performAction:chrome_test_util::TapWebElementWithId(kFormPassword)];
+
+  [ChromeEarlGrey
+      waitForUIElementToAppearWithMatcher:grey_accessibilityID(@"user1")];
+
+  // Verify that the sharing notification title is visible.
+  id<GREYMatcher> titleMatcher = grey_accessibilityLabel(
+      base::SysUTF16ToNSString(l10n_util::GetPluralStringFUTF16(
+          IDS_IOS_PASSWORD_SHARING_NOTIFICATION_TITLE, 2)));
+  [[EarlGrey
+      selectElementWithMatcher:grey_allOf(titleMatcher,
+                                          grey_sufficientlyVisible(), nil)]
+      assertWithMatcher:grey_notNil()];
+
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(@"user1")]
+      performAction:grey_tap()];
+  [ChromeEarlGrey
+      waitForUIElementToAppearWithMatcher:grey_accessibilityID(@"user2")];
+
+  [[EarlGrey
+      selectElementWithMatcher:grey_accessibilityLabel(l10n_util::GetNSString(
+                                   IDS_IOS_PASSWORD_BOTTOM_SHEET_USE_PASSWORD))]
+      performAction:grey_tap()];
+  [self verifyPasswordFieldsHaveBeenFilled:@"user1"];
+}
+
+- (void)testOpenPasswordBottomSheetWithSharedPasswordsAndUseKeyboard {
+  [PasswordSuggestionBottomSheetAppInterface setUpMockReauthenticationModule];
+  [PasswordSuggestionBottomSheetAppInterface
+      mockReauthenticationModuleExpectedResult:ReauthenticationResult::
+                                                   kSuccess];
+
+  // Save a password that has been received via sharing.
+  [PasswordManagerAppInterface
+      storeCredentialWithUsername:@"user1"
+                         password:@"password1"
+                              URL:net::NSURLWithGURL(self.testServer->GetURL(
+                                      "/simple_login_form.html"))
+                           shared:YES];
+
+  [SigninEarlGreyUI signinWithFakeIdentity:[FakeSystemIdentity fakeIdentity1]
+                                enableSync:NO];
+  [self loadLoginPage];
+
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
+      performAction:chrome_test_util::TapWebElementWithId(kFormPassword)];
+
+  [ChromeEarlGrey
+      waitForUIElementToAppearWithMatcher:grey_accessibilityID(@"user1")];
+
+  // Verify that the sharing notification title is visible.
+  id<GREYMatcher> titleMatcher = grey_accessibilityLabel(
+      base::SysUTF16ToNSString(l10n_util::GetPluralStringFUTF16(
+          IDS_IOS_PASSWORD_SHARING_NOTIFICATION_TITLE, 1)));
+  [[EarlGrey
+      selectElementWithMatcher:grey_allOf(titleMatcher,
+                                          grey_sufficientlyVisible(), nil)]
+      assertWithMatcher:grey_notNil()];
+
+  [[EarlGrey
+      selectElementWithMatcher:chrome_test_util::ButtonWithAccessibilityLabelId(
+                                   IDS_IOS_PASSWORD_BOTTOM_SHEET_USE_KEYBOARD)]
+      performAction:grey_tap()];
+
+  // Verify that after dismissing the shared notification bottom sheet, regular
+  // bottom sheet is displayed.
+  [self loadLoginPage];
+
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
+      performAction:chrome_test_util::TapWebElementWithId(kFormPassword)];
+
+  [ChromeEarlGrey
+      waitForUIElementToAppearWithMatcher:grey_accessibilityID(@"user1")];
+  [[EarlGrey
+      selectElementWithMatcher:grey_allOf(titleMatcher,
+                                          grey_sufficientlyVisible(), nil)]
+      assertWithMatcher:grey_nil()];
+
+  [[EarlGrey
+      selectElementWithMatcher:grey_accessibilityLabel(l10n_util::GetNSString(
+                                   IDS_IOS_PASSWORD_BOTTOM_SHEET_USE_PASSWORD))]
+      performAction:grey_tap()];
+
+  [self verifyPasswordFieldsHaveBeenFilled:@"user1"];
 }
 
 @end

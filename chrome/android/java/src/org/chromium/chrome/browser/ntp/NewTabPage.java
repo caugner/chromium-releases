@@ -382,7 +382,7 @@ public class NewTabPage implements NativePage, InvalidationAwareThumbnailProvide
         mTabContentManagerSupplier = tabContentManagerSupplier;
         mIsInNightMode = isInNightMode;
 
-        Profile profile = Profile.fromWebContents(mTab.getWebContents());
+        Profile profile = mTab.getProfile();
 
         SuggestionsNavigationDelegate navigationDelegate = new SuggestionsNavigationDelegate(
                 activity, profile, nativePageHost, tabModelSelector, mTab);
@@ -513,8 +513,8 @@ public class NewTabPage implements NativePage, InvalidationAwareThumbnailProvide
                 mFeedSurfaceProvider.getScrollDelegate(),
                 mFeedSurfaceProvider.getTouchEnabledDelegate(), mFeedSurfaceProvider.getUiConfig(),
                 lifecycleDispatcher, uma, mTab.isIncognito(), windowAndroid,
-                mIsNtpAsHomeSurfaceEnabled, mIsSurfacePolishEnabled,
-                mIsSurfacePolishOmniboxColorEnabled);
+                isNtpAsHomeSurfaceOnTablet(), mIsSurfacePolishEnabled,
+                mIsSurfacePolishOmniboxColorEnabled, mIsTablet);
 
         // If new NewTabPage is created via back operations, re-show the single Tab card with the
         // previously tracked Tab.
@@ -538,7 +538,7 @@ public class NewTabPage implements NativePage, InvalidationAwareThumbnailProvide
     protected void initializeMainView(Activity activity, WindowAndroid windowAndroid,
             SnackbarManager snackbarManager, NewTabPageUma uma, boolean isInNightMode,
             Supplier<ShareDelegate> shareDelegateSupplier, String url) {
-        Profile profile = Profile.fromWebContents(mTab.getWebContents());
+        Profile profile = mTab.getProfile();
 
         LayoutInflater inflater = LayoutInflater.from(activity);
         mNewTabPageLayout = (NewTabPageLayout) inflater.inflate(R.layout.new_tab_page_layout, null);
@@ -1093,7 +1093,7 @@ public class NewTabPage implements NativePage, InvalidationAwareThumbnailProvide
             }
         }
 
-        if (mIsNtpAsHomeSurfaceEnabled && mSearchProviderHasLogo) {
+        if (isNtpAsHomeSurfaceOnTablet() && mSearchProviderHasLogo) {
             return resources.getDimensionPixelSize(R.dimen.ntp_logo_vertical_top_margin_tablet);
         }
 
@@ -1111,7 +1111,7 @@ public class NewTabPage implements NativePage, InvalidationAwareThumbnailProvide
             }
         }
 
-        if (mIsNtpAsHomeSurfaceEnabled && mSearchProviderHasLogo) {
+        if (isNtpAsHomeSurfaceOnTablet() && mSearchProviderHasLogo) {
             return resources.getDimensionPixelSize(R.dimen.ntp_logo_vertical_bottom_margin_tablet);
         }
 
@@ -1155,11 +1155,12 @@ public class NewTabPage implements NativePage, InvalidationAwareThumbnailProvide
         updateSingleTabCardContainerMargins();
         mSingleTabSwitcherCoordinator = new SingleTabSwitcherCoordinator(
                 mActivity, mSingleTabCardContainer, mActivityLifecycleDispatcher, mTabModelSelector,
-                true, isScrollableMvtEnabled(mContext), mostRecentTab, this::onSingleTabCardClicked,
+                true, mIsTablet, isScrollableMvtEnabled(mContext), mostRecentTab,
+                this::onSingleTabCardClicked,
                 ()
                         -> mSnapshotSingleTabCardChanged = true,
-                mTabContentManagerSupplier.get() /* tabContentManager */
-        );
+                mTabContentManagerSupplier.get() /* tabContentManager */,
+                mIsTablet ? mFeedSurfaceProvider.getUiConfig() : null);
         mSingleTabSwitcherCoordinator.initWithNative();
         mSingleTabSwitcherCoordinator.showModule();
     }
@@ -1209,5 +1210,13 @@ public class NewTabPage implements NativePage, InvalidationAwareThumbnailProvide
 
     public boolean getSnapshotSingleTabCardChangedForTesting() {
         return mSnapshotSingleTabCardChanged;
+    }
+
+    /**
+     * Returns whether Chrome is running on tablet with NTP as home surface enabled. Returns false
+     * if Chrome is running on phone.
+     */
+    private boolean isNtpAsHomeSurfaceOnTablet() {
+        return mIsNtpAsHomeSurfaceEnabled && mIsTablet;
     }
 }

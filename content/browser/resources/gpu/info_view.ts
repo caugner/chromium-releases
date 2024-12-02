@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {assert} from 'chrome://resources/js/assert_ts.js';
+import {assert} from 'chrome://resources/js/assert.js';
 import {CustomElement} from 'chrome://resources/js/custom_element.js';
 
 import {AngleFeature, BrowserBridge, ClientInfo, FeatureStatus, Problem} from './browser_bridge.js';
@@ -315,7 +315,6 @@ const kSections = {
   dawnInfo: ['DAWN Info', 'ul'],
   clientInfo: ['Version Information', 'div'],
   basicInfo: ['Driver Information', 'div'],
-  devices: ['Device Information', 'div'],
   compositorInfo: ['Compositor Information', 'div'],
   gpuMemoryBufferInfo: ['GpuMemoryBuffers Status', 'div'],
   displayInfo: ['Display(s) Information', 'div'],
@@ -573,11 +572,6 @@ export class InfoViewElement extends CustomElement {
       }
 
       this.setTable_(sections.basicInfo, gpuInfo.basicInfo);
-      sections.devices.list.textContent = '';
-      gpuInfo.devices.forEach(entry => {
-        sections.devices.list.appendChild(createInfoTable(entry));
-        sections.devices.list.appendChild(createElem('br'));
-      });
       this.setTable_(sections.compositorInfo, gpuInfo.compositorInfo);
       this.setTable_(sections.gpuMemoryBufferInfo, gpuInfo.gpuMemoryBufferInfo);
       this.setTable_(sections.displayInfo, gpuInfo.displayInfo);

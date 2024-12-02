@@ -108,12 +108,6 @@ public final class ChromePreferenceKeys {
      */
     public static final String CHROME_DEFAULT_BROWSER = "applink.chrome_default_browser";
 
-    /**
-     * Key prefix used to indicate the timestamps when the survey prompt is displayed for a
-     * certain survey.
-     */
-    public static final KeyPrefix CHROME_SURVEY_PROMPT_DISPLAYED_TIMESTAMP =
-            new KeyPrefix("Chrome.Survey.PromptDisplayedTimestamp.*");
 
     /**
      * The ID generated to represent the current browser installation in the DM Server for Cloud
@@ -401,6 +395,9 @@ public final class ChromePreferenceKeys {
     public static final String ISOLATED_SPLITS_DEX_COMPILE_VERSION =
             "Chrome.IsolatedSplits.VersionCode";
 
+    /** Whether the device is from an EEA country. */
+    public static final String IS_EEA_CHOICE_COUNTRY = "Chrome.SearchEngine.IsEeaChoiceCountry";
+
     /**
      * Whether the default search engine is Google.
      */
@@ -598,6 +595,24 @@ public final class ChromePreferenceKeys {
      */
     public static final String PERSISTENT_OFFLINE_CONTENT_AVAILABILITY_STATUS =
             "Chrome.OfflineIndicatorV2.HasPersistentOfflineContent";
+
+    /**
+     * Indicates whether Page Insights Hub's Privacy Notice has been closed by user; used to ensure
+     * user does not see it again.
+     */
+    public static final String PIH_PRIVACY_NOTICE_CLOSED =
+            "Chrome.PageInsightsHub.PrivacyNoticeClosedByUser";
+
+    /** Indicates the latest timestamp when Privacy Notice was shown to the user */
+    public static final String PIH_PRIVACY_NOTICE_LAST_SHOWN_TIMESTAMP =
+            "Chrome.PageInsightsHub.PageInsightsHubLastOpenedTimestamp";
+
+    /**
+     * Indicates the number of times Privacy Notice of Page Insights Hub was opened by user till now
+     * . The privacy notice is not shown after it has been shown 3 times.
+     */
+    public static final String PIH_PRIVACY_NOTICE_SHOWN_TOTAL_COUNT =
+            "Chrome.PageInsightsHub.NumberOfTimesPageInsightsHubOpenedByUser";
 
     /**
      * Save the timestamp of the last time that we record metrics on whether user enables the price
@@ -846,8 +861,6 @@ public final class ChromePreferenceKeys {
 
     public static final String SNAPSHOT_DATABASE_REMOVED = "snapshot_database_removed";
 
-    public static final String SURVEY_DATE_LAST_ROLLED = "last_rolled_for_chrome_survey_key";
-
     // sWAA (Supplemental Web and App Activity) user setting.
     public static final String SWAA_TIMESTAMP = "Chrome.Swaa.Timestamp";
     public static final String SWAA_STATUS = "Chrome.Swaa.Status";
@@ -897,9 +910,9 @@ public final class ChromePreferenceKeys {
     public static final String UI_THEME_SETTING = "ui_theme_setting";
 
     // Diagnostic counters for short sessions; see histogram
-    // UMA.PreNative.ChromeActivityCounter.
-    public static final String UMA_ON_PRECREATE_COUNTER = "Chrome.UMA.OnPreCreateCounter";
-    public static final String UMA_ON_RESUME_COUNTER = "Chrome.UMA.OnResumeCounter";
+    // UMA.PreNative.ChromeActivityCounter2.
+    public static final String UMA_ON_POSTCREATE_COUNTER = "Chrome.UMA.OnPostCreateCounter2";
+    public static final String UMA_ON_RESUME_COUNTER = "Chrome.UMA.OnResumeCounter2";
 
     public static final String VERIFIED_DIGITAL_ASSET_LINKS = "verified_digital_asset_links";
 
@@ -966,7 +979,6 @@ public final class ChromePreferenceKeys {
      */
     @CheckDiscard("Validation is performed in tests and in debug builds.")
     static List<String> getKeysInUse() {
-        // clang-format off
         return Arrays.asList(
                 ADAPTIVE_TOOLBAR_CUSTOMIZATION_ENABLED,
                 ADAPTIVE_TOOLBAR_CUSTOMIZATION_SETTINGS,
@@ -978,7 +990,6 @@ public final class ChromePreferenceKeys {
                 BLUETOOTH_NOTIFICATION_IDS,
                 BOOKMARKS_SORT_ORDER,
                 BOOKMARKS_VISUALS_PREF,
-                CHROME_SURVEY_PROMPT_DISPLAYED_TIMESTAMP.pattern(),
                 CLIPBOARD_SHARED_URI,
                 CLIPBOARD_SHARED_URI_TIMESTAMP,
                 CLOUD_MANAGEMENT_CLIENT_ID,
@@ -1027,6 +1038,7 @@ public final class ChromePreferenceKeys {
                 INCOGNITO_REAUTH_PROMO_CARD_ENABLED,
                 INCOGNITO_REAUTH_PROMO_SHOW_COUNT,
                 INCOGNITO_TAB_COUNT,
+                IS_EEA_CHOICE_COUNTRY,
                 IS_LAST_VISITED_TAB_SRP,
                 IS_DSE_GOOGLE,
                 ISOLATED_SPLITS_DEX_COMPILE_VERSION,
@@ -1064,6 +1076,9 @@ public final class ChromePreferenceKeys {
                 OPTIMIZATION_GUIDE_PUSH_NOTIFICATION_CACHE.pattern(),
                 PASSWORD_PROTECTION_ACCOUNTS,
                 PERSISTENT_OFFLINE_CONTENT_AVAILABILITY_STATUS,
+                PIH_PRIVACY_NOTICE_CLOSED,
+                PIH_PRIVACY_NOTICE_LAST_SHOWN_TIMESTAMP,
+                PIH_PRIVACY_NOTICE_SHOWN_TOTAL_COUNT,
                 PRICE_TRACKING_ANNOTATIONS_ENABLED_METRICS_TIMESTAMP,
                 PRICE_TRACKING_CHROME_MANAGED_NOTIFICATIONS_TIMESTAMPS,
                 PRICE_TRACKING_PRICE_ALERTS_MESSAGE_CARD,
@@ -1097,16 +1112,14 @@ public final class ChromePreferenceKeys {
                 SWAA_STATUS,
                 TABBED_ACTIVITY_LAST_VISIBLE_TIME_MS,
                 TWA_DISCLOSURE_SEEN_PACKAGES,
-                UMA_ON_PRECREATE_COUNTER,
+                UMA_ON_POSTCREATE_COUNTER,
                 UMA_ON_RESUME_COUNTER,
                 USB_NOTIFICATION_IDS,
                 USER_ENABLED_DESKTOP_SITE_GLOBAL_SETTING_PREFERENCE_KEY,
                 WEB_FEED_INTRO_LAST_SHOWN_TIME_MS,
                 WEB_FEED_INTRO_WEB_FEED_ID_SHOWN_TIME_MS_PREFIX.pattern(),
                 WEB_FEED_INTRO_WEB_FEED_ID_SHOWN_COUNT_PREFIX.pattern(),
-                WEB_SIGNIN_ACCOUNT_PICKER_ACTIVE_DISMISSAL_COUNT
-        );
-        // clang-format on
+                WEB_SIGNIN_ACCOUNT_PICKER_ACTIVE_DISMISSAL_COUNT);
     }
 
     private ChromePreferenceKeys() {}

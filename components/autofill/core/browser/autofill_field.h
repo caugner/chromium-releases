@@ -8,6 +8,7 @@
 #include <stddef.h>
 
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -312,8 +313,8 @@ class AutofillField : public FormFieldData {
   void ClearLogEvents() { field_log_events_.clear(); }
 
   void set_autofill_source_profile_guid(
-      const std::string& autofill_profile_guid) {
-    autofill_source_profile_guid_ = autofill_profile_guid;
+      std::optional<std::string> autofill_profile_guid) {
+    autofill_source_profile_guid_ = std::move(autofill_profile_guid);
   }
   absl::optional<std::string> autofill_source_profile_guid() const {
     return autofill_source_profile_guid_;
@@ -364,6 +365,10 @@ class AutofillField : public FormFieldData {
   // heuristic_type_).
   // |AutofillType(NO_SERVER_DATA)| is used when this |overall_type_| has not
   // been set.
+  // This field serves as a cache to prevent frequent re-evaluation of
+  // ComputedType(). It is invalidated when set_heuristic_type(),
+  // set_server_predictions() or SetHtmlType() is called and then set to a
+  // value during the rationalization.
   AutofillType overall_type_;
 
   // The type of the field, as specified by the site author in HTML.
@@ -442,7 +447,7 @@ class AutofillField : public FormFieldData {
   // Note: `is_autofilled` is true for autocompleted fields. So `is_autofilled`
   // is not a sufficient condition for `autofill_source_profile_guid_` to have a
   // value.
-  absl::optional<std::string> autofill_source_profile_guid_;
+  std::optional<std::string> autofill_source_profile_guid_;
 };
 
 }  // namespace autofill

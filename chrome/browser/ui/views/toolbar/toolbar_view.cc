@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/command_line.h"
@@ -19,7 +20,7 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/apps/intent_helper/intent_picker_features.h"
+#include "chrome/browser/apps/link_capturing/link_capturing_features.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/companion/core/features.h"
 #include "chrome/browser/download/bubble/download_bubble_prefs.h"
@@ -73,6 +74,7 @@
 #include "chrome/browser/ui/views/toolbar/browser_app_menu_button.h"
 #include "chrome/browser/ui/views/toolbar/chrome_labs_button.h"
 #include "chrome/browser/ui/views/toolbar/home_button.h"
+#include "chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.h"
 #include "chrome/browser/ui/views/toolbar/reload_button.h"
 #include "chrome/browser/ui/views/toolbar/side_panel_toolbar_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
@@ -125,6 +127,10 @@
 
 #if !BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/ui/bookmarks/bookmark_bubble_sign_in_delegate.h"
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "chromeos/components/mgs/managed_guest_session_utils.h"
 #endif
 
 #if BUILDFLAG(ENABLE_WEBUI_TAB_STRIP)
@@ -373,20 +379,6 @@ void ToolbarView::Init() {
             browser_view_);
   }
 
-  std::unique_ptr<SidePanelToolbarButton> side_panel_button;
-  std::unique_ptr<SidePanelToolbarContainer> side_panel_toolbar_container;
-  if (browser_view_->unified_side_panel()) {
-    if (base::FeatureList::IsEnabled(features::kSidePanelPinning)) {
-      // TODO(b:299463334): Use the new SidePanelContainer which supports
-      // ActionItems
-    } else if (companion::IsCompanionFeatureEnabled()) {
-      side_panel_toolbar_container =
-          std::make_unique<SidePanelToolbarContainer>(browser_view_);
-    } else {
-      side_panel_button = std::make_unique<SidePanelToolbarButton>(browser_);
-    }
-  }
-
   // Always add children in order from left to right, for accessibility.
   back_ = container_view_->AddChildView(std::move(back));
   forward_ = container_view_->AddChildView(std::move(forward));
@@ -404,6 +396,11 @@ void ToolbarView::Init() {
         container_view_->AddChildView(std::move(toolbar_divider));
     toolbar_divider_->SetPreferredSize(
         gfx::Size(kToolbarDividerWidth, kToolbarDividerHeight));
+  }
+
+  if (base::FeatureList::IsEnabled(features::kSidePanelPinning)) {
+    pinned_toolbar_actions_container_ = container_view_->AddChildView(
+        std::make_unique<PinnedToolbarActionsContainer>(browser_view_));
   }
 
   if (IsChromeLabsEnabled()) {
@@ -447,12 +444,14 @@ void ToolbarView::Init() {
     send_tab_to_self_button_ =
         container_view_->AddChildView(std::move(send_tab_to_self_button));
 
-  if (side_panel_toolbar_container) {
-    side_panel_container_ =
-        container_view_->AddChildView(std::move(side_panel_toolbar_container));
-  } else if (side_panel_button) {
-    side_panel_button_ =
-        container_view_->AddChildView(std::move(side_panel_button));
+  if (!base::FeatureList::IsEnabled(features::kSidePanelPinning)) {
+    if (companion::IsCompanionFeatureEnabled()) {
+      side_panel_container_ = container_view_->AddChildView(
+          std::make_unique<SidePanelToolbarContainer>(browser_view_));
+    } else {
+      side_panel_button_ = container_view_->AddChildView(
+          std::make_unique<SidePanelToolbarButton>(browser_));
+    }
   }
 
   avatar_ = container_view_->AddChildView(
@@ -467,7 +466,7 @@ void ToolbarView::Init() {
       (browser_->profile()->IsOffTheRecord() &&
        browser_->profile()->GetOTRProfileID().IsCaptivePortal());
 #elif BUILDFLAG(IS_CHROMEOS_LACROS)
-  show_avatar_toolbar_button = !profiles::IsManagedGuestSession();
+  show_avatar_toolbar_button = !chromeos::IsManagedGuestSession();
 #endif
   avatar_->SetVisible(show_avatar_toolbar_button);
 
@@ -534,6 +533,10 @@ void ToolbarView::Update(WebContents* tab) {
 
   if (extensions_container_)
     extensions_container_->UpdateAllIcons();
+
+  if (pinned_toolbar_actions_container_) {
+    pinned_toolbar_actions_container_->UpdateAllIcons();
+  }
 
   if (side_panel_container_) {
     side_panel_container_->UpdateAllIcons();
@@ -611,7 +614,7 @@ void ToolbarView::ShowIntentPickerBubble(
     highlighted_button =
 
         GetPageActionIconView(PageActionIconType::kClickToCall);
-  } else if (apps::features::LinkCapturingUiUpdateEnabled()) {
+  } else if (apps::features::ShouldShowLinkCapturingUX()) {
     highlighted_button = GetIntentChipButton();
   } else {
     highlighted_button =
@@ -792,18 +795,20 @@ void ToolbarView::Layout() {
   // indicator of overflow not the cause. (See crbug.com/1484294)
   // In the first pass turn off overflow button right before each layout.
   // TODO(pengchaocai): Explore possible optimizations.
-  if (base::FeatureList::IsEnabled(features::kResponsiveToolbar)) {
-    toolbar_controller_->SetOverflowButtonVisible(false);
+  views::ManualLayoutUtil manual_layout_util(layout_manager_);
+  if (toolbar_controller_) {
+    manual_layout_util.SetViewHidden(toolbar_controller_->overflow_button(),
+                                     true);
   }
 
   // Call super implementation to ensure layout manager and child layouts
   // happen.
   AccessiblePaneView::Layout();
 
-  if (base::FeatureList::IsEnabled(features::kResponsiveToolbar) &&
-      toolbar_controller_->ShouldShowOverflowButton()) {
+  if (toolbar_controller_ && toolbar_controller_->ShouldShowOverflowButton()) {
     // This is the second pass layout that shows overflow button if necessary.
-    toolbar_controller_->SetOverflowButtonVisible(true);
+    manual_layout_util.SetViewHidden(toolbar_controller_->overflow_button(),
+                                     false);
     AccessiblePaneView::Layout();
   }
 }
@@ -877,7 +882,7 @@ void ToolbarView::InitLayout() {
   // Order 1 - kOrderOffset will be assigned to new flex-able elements.
   constexpr int kOrderOffset = 1000;
   constexpr int kLocationBarFlexOrder = kOrderOffset + 1;
-  constexpr int kSidePanelFlexOrder = kOrderOffset + 2;
+  constexpr int kToolbarActionsFlexOrder = kOrderOffset + 2;
   constexpr int kExtensionsFlexOrder = kOrderOffset + 3;
 
   const views::FlexSpecification location_bar_flex_rule =
@@ -908,12 +913,21 @@ void ToolbarView::InitLayout() {
                                        extensions_flex_rule);
   }
 
-  if (side_panel_container_) {
+  if (pinned_toolbar_actions_container_) {
+    const views::FlexSpecification toolbar_actions_flex_rule =
+        views::FlexSpecification(
+            pinned_toolbar_actions_container_->GetAnimatingLayoutManager()
+                ->GetDefaultFlexRule())
+            .WithOrder(kToolbarActionsFlexOrder);
+
+    pinned_toolbar_actions_container_->SetProperty(views::kFlexBehaviorKey,
+                                                   toolbar_actions_flex_rule);
+  } else if (side_panel_container_) {
     const views::FlexSpecification side_panel_flex_rule =
         views::FlexSpecification(
             side_panel_container_->GetAnimatingLayoutManager()
                 ->GetDefaultFlexRule())
-            .WithOrder(kSidePanelFlexOrder);
+            .WithOrder(kToolbarActionsFlexOrder);
 
     side_panel_container_->SetProperty(views::kFlexBehaviorKey,
                                        side_panel_flex_rule);
@@ -931,11 +945,11 @@ void ToolbarView::InitLayout() {
     // TODO(crbug.com/1479588): Ignore containers till issue addressed.
     toolbar_controller_ = std::make_unique<ToolbarController>(
         std::vector<ui::ElementIdentifier>{
-            kToolbarForwardButtonElementId, kToolbarAvatarButtonElementId,
+            kToolbarAvatarButtonElementId, kToolbarForwardButtonElementId,
+            kToolbarDownloadButtonElementId, kToolbarMediaButtonElementId,
             kToolbarHomeButtonElementId, kToolbarChromeLabsButtonElementId},
-        PopOutIdentifierMap(),  // TODO(crbug.com/1445573): Fill in
-                                // PopOutIdentifierMap.
-        kToolbarFlexOrderStart, container_view_, overflow_button_);
+        ToolbarController::GetDefaultElementInfoMap(), kToolbarFlexOrderStart,
+        container_view_, overflow_button_);
 
     overflow_button_->set_create_menu_model_callback(
         base::BindRepeating(&ToolbarController::CreateOverflowMenuModel,
@@ -992,7 +1006,8 @@ void ToolbarView::LayoutCommon() {
       extend_buttons_to_edge ? interior_margin.right() : 0);
 
   if (toolbar_divider_ && extensions_container_) {
-    toolbar_divider_->SetVisible(extensions_container_->GetVisible());
+    views::ManualLayoutUtil(layout_manager_)
+        .SetViewHidden(toolbar_divider_, !extensions_container_->GetVisible());
     const SkColor toolbar_extension_separator_color =
         GetColorProvider()->GetColor(kColorToolbarExtensionSeparatorEnabled);
     toolbar_divider_->SetBackground(views::CreateRoundedRectBackground(

@@ -19,6 +19,7 @@
 #include "base/feature_list.h"
 #include "base/functional/callback_helpers.h"
 #include "base/json/json_writer.h"
+#include "base/location.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/notreached.h"
@@ -1328,7 +1329,11 @@ MATCHER_P2(HasMetricWithValue, key, matcher, "") {
     *result_listener << "which does not contain " << key;
     return false;
   }
-  return ExplainMatchResult(arg.at(key), matcher, result_listener);
+  if (!ExplainMatchResult(arg.at(key), matcher, result_listener)) {
+    *result_listener << "in which " << key << " is " << arg.at(key);
+    return false;
+  }
+  return true;
 }
 
 MATCHER_P(HasMetric, key, "") {
@@ -1341,7 +1346,8 @@ MATCHER_P(HasMetric, key, "") {
 
 MATCHER_P(DoesNotHaveMetric, key, "") {
   if (arg.contains(key)) {
-    *result_listener << "which unexpectedly contains " << key;
+    *result_listener << "which unexpectedly contains " << key << " with value "
+                     << arg.at(key);
     return false;
   }
   return true;
@@ -1356,7 +1362,7 @@ MATCHER_P2(OnlyHasMetricIf, key, condition, "") {
   } else {
     if (arg.contains(key)) {
       *result_listener << "which unexpectedly contains " << key
-                       << " and shouldn't";
+                       << " with value " << arg.at(key) << " and shouldn't";
       return false;
     }
   }
@@ -1366,7 +1372,8 @@ MATCHER_P2(OnlyHasMetricIf, key, condition, "") {
 MATCHER_P2(HasMetricWithValueOrNotIfNullOpt, key, matcher, "") {
   if (!matcher.has_value()) {
     if (arg.contains(key)) {
-      *result_listener << "which unexpectedly contains " << key;
+      *result_listener << "which unexpectedly contains " << key
+                       << " with value " << arg.at(key);
       return false;
     }
     // Metric has no value and none was expected, which is good.
@@ -1377,7 +1384,11 @@ MATCHER_P2(HasMetricWithValueOrNotIfNullOpt, key, matcher, "") {
     *result_listener << "which does not contain " << key;
     return false;
   }
-  return ExplainMatchResult(arg.at(key), matcher, result_listener);
+  if (!ExplainMatchResult(arg.at(key), matcher, result_listener)) {
+    *result_listener << "in which " << key << " is " << arg.at(key);
+    return false;
+  }
+  return true;
 }
 
 class EventReportingAttestationBrowserClient : public TestContentBrowserClient {
@@ -1401,7 +1412,7 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
     Result(const Result&) = delete;
     Result& operator=(const Result&) = delete;
 
-    bool manually_aborted = false;
+    bool aborted_by_script = false;
     absl::optional<InterestGroupKey> winning_group_id;
     absl::optional<blink::AdDescriptor> ad_descriptor;
     std::vector<blink::AdDescriptor> ad_component_descriptors;
@@ -1475,6 +1486,8 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
   void SetUp() override {
     RenderViewHostTestHarness::SetUp();
     auction_nonce_manager_ = std::make_unique<AuctionNonceManager>(GetFrame());
+    ad_auction_page_data_ = PageUserData<AdAuctionPageData>::GetOrCreateForPage(
+        web_contents()->GetPrimaryPage());
   }
 
   void TearDown() override {
@@ -1501,6 +1514,8 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
 
     interest_group_manager_.reset();
     auction_nonce_manager_.reset();
+
+    ad_auction_page_data_ = nullptr;
 
     RenderViewHostTestHarness::TearDown();
   }
@@ -1791,14 +1806,11 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
     auction_runner_ = AuctionRunner::CreateAndStart(
         auction_worklet_manager_.get(), auction_nonce_manager_.get(),
         interest_group_manager_.get(), /*browser_context=*/browser_context(),
-        &private_aggregation_manager_,
+        &private_aggregation_manager_, ad_auction_page_data_.get(),
         private_aggregation_manager_.GetLogPrivateAggregationRequestsCallback(),
         std::move(auction_config), top_frame_origin_, frame_origin_, source_id_,
         GetClientSecurityState(), dummy_report_shared_url_loader_factory_,
-        IsInterestGroupApiAllowedCallback(), base::BindLambdaForTesting([&]() {
-          return ad_auction_page_data_.get();
-        }),
-        std::move(attestation_callback),
+        IsInterestGroupApiAllowedCallback(), std::move(attestation_callback),
         abortable_ad_auction_.BindNewPipeAndPassReceiver(),
         base::BindOnce(&AuctionRunnerTest::OnAuctionComplete,
                        base::Unretained(this)));
@@ -1812,7 +1824,7 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
 
   void OnAuctionComplete(
       AuctionRunner* auction_runner,
-      bool manually_aborted,
+      bool aborted_by_script,
       absl::optional<InterestGroupKey> winning_group_key,
       absl::optional<blink::AdSize> requested_ad_size,
       absl::optional<blink::AdDescriptor> ad_descriptor,
@@ -1832,7 +1844,7 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
     }
 
     auction_complete_ = true;
-    result_.manually_aborted = manually_aborted;
+    result_.aborted_by_script = aborted_by_script;
     result_.winning_group_id = std::move(winning_group_key);
     result_.ad_descriptor = std::move(ad_descriptor);
     result_.ad_component_descriptors = std::move(ad_component_descriptors);
@@ -1877,7 +1889,9 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
     reporter_->Start(base::BindOnce(&AuctionRunnerTest::OnReportingComplete,
                                     base::Unretained(this)));
     // Invoke callback immediately, so as not to block reporter completion.
-    reporter_->OnNavigateToWinningAdCallback().Run();
+    reporter_
+        ->OnNavigateToWinningAdCallback(FrameTreeNode::kFrameTreeNodeInvalidId)
+        .Run();
   }
 
   void OnReportingComplete() {
@@ -2200,6 +2214,7 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
     auction_process_manager_ = std::move(mock_auction_process_manager);
   }
 
+  // TODO(orrb): Replace this with a MockAuctionMetricsRecorder.
   ukm::TestUkmRecorder::HumanReadableUkmMetrics GetUkmMetrics() const {
     using Entry = ukm::builders::AdsInterestGroup_AuctionLatency_V2;
     std::vector<ukm::TestUkmRecorder::HumanReadableUkmEntry> ukm_entries =
@@ -2211,6 +2226,7 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
                 Entry::kEndToEndLatencyInMillisName,
                 Entry::kLoadInterestGroupPhaseLatencyInMillisName,
                 Entry::kNumInterestGroupsName,
+                Entry::kNumNegativeInterestGroupsName,
                 Entry::kNumOwnersWithInterestGroupsName,
                 Entry::kNumDistinctOwnersWithInterestGroupsName,
                 Entry::kNumSellersWithBiddersName,
@@ -2224,6 +2240,7 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
                 /* Properties of the auction metrics */
                 Entry::kKAnonymityBidModeName,
                 Entry::kNumConfigPromisesName,
+                Entry::kNumAuctionsWithConfigPromisesName,
                 /* GenerateBid outcome metrics */
                 Entry::kNumInterestGroupsWithNoBidsName,
                 Entry::kNumInterestGroupsWithOnlyNonKAnonBidName,
@@ -2313,6 +2330,11 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
       return *this;
     }
 
+    MetricsExpectations& SetNumNegativeInterestGroups(int64_t value) {
+      num_negative_interest_groups = value;
+      return *this;
+    }
+
     MetricsExpectations& SetNumOwners(int64_t value) {
       num_owners = value;
       return *this;
@@ -2342,6 +2364,11 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
 
     MetricsExpectations& SetNumConfigPromises(int64_t value) {
       num_config_promises = value;
+      return *this;
+    }
+
+    MetricsExpectations& SetNumAuctionsWithConfigPromises(int64_t value) {
+      num_auctions_with_config_promises = value;
       return *this;
     }
 
@@ -2468,11 +2495,13 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
 
     AuctionResult result;
     absl::optional<int64_t> num_interest_groups;
+    absl::optional<int64_t> num_negative_interest_groups;
     absl::optional<int64_t> num_owners;
     absl::optional<int64_t> num_sellers;
     int64_t num_distinct_owners = 0;
     int64_t num_bidder_worklets = 0;
     int64_t num_config_promises = 0;
+    int64_t num_auctions_with_config_promises = 0;
     int64_t num_bids_aborted_by_buyer_cumulative_timeout = 0;
     int64_t num_bids_aborted_by_bidder_worklet_fatal_error = 0;
     int64_t num_bids_filtered_during_interest_group_load = 0;
@@ -2498,7 +2527,9 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
   // Check histogram values and UKMs.
   // If `num_interest_groups` or `num_owners` is null, expect the auction to be
   // aborted before the corresponding histograms or UKMs are recorded.
-  void CheckMetrics(MetricsExpectations expectations) {
+  void CheckMetrics(MetricsExpectations expectations,
+                    const base::Location& location = FROM_HERE) {
+    SCOPED_TRACE(location.ToString());
     using UkmEntry = ukm::builders::AdsInterestGroup_AuctionLatency_V2;
     ukm::TestUkmRecorder::HumanReadableUkmMetrics ukm_metrics = GetUkmMetrics();
     histogram_tester_->ExpectUniqueSample("Ads.InterestGroup.Auction.Result",
@@ -2519,6 +2550,20 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
           "Ads.InterestGroup.Auction.NumInterestGroups", 0);
       EXPECT_THAT(ukm_metrics,
                   DoesNotHaveMetric(UkmEntry::kNumInterestGroupsName));
+    }
+
+    if (expectations.num_negative_interest_groups.has_value()) {
+      histogram_tester_->ExpectUniqueSample(
+          "Ads.InterestGroup.Auction.NumNegativeInterestGroups",
+          *expectations.num_negative_interest_groups, 1);
+      EXPECT_THAT(ukm_metrics, HasMetricWithValue(
+                                   UkmEntry::kNumNegativeInterestGroupsName,
+                                   expectations.num_negative_interest_groups));
+    } else {
+      histogram_tester_->ExpectTotalCount(
+          "Ads.InterestGroup.Auction.NumNegativeInterestGroups", 0);
+      EXPECT_THAT(ukm_metrics,
+                  DoesNotHaveMetric(UkmEntry::kNumNegativeInterestGroupsName));
     }
 
     if (expectations.num_owners.has_value()) {
@@ -2575,6 +2620,11 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
     EXPECT_THAT(ukm_metrics,
                 HasMetricWithValue(UkmEntry::kNumConfigPromisesName,
                                    expectations.num_config_promises));
+
+    EXPECT_THAT(
+        ukm_metrics,
+        HasMetricWithValue(UkmEntry::kNumAuctionsWithConfigPromisesName,
+                           expectations.num_auctions_with_config_promises));
     EXPECT_THAT(
         ukm_metrics,
         HasMetric(UkmEntry::kLoadInterestGroupPhaseLatencyInMillisName));
@@ -2756,7 +2806,8 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
       const url::Origin& bidder1_seller,
       const url::Origin& bidder2_seller,
       bool bid_from_component_auction_wins,
-      bool report_post_auction_signals = false) {
+      bool report_post_auction_signals = false,
+      bool add_component2_with_no_buyers = false) {
     interest_group_buyers_.emplace();
     std::vector<url::Origin> component1_buyers;
     std::vector<url::Origin> component2_buyers;
@@ -2787,7 +2838,10 @@ class AuctionRunnerTest : public RenderViewHostTestHarness,
             /*bid_from_component_auction_wins=*/false,
             /*report_post_auction_signals=*/report_post_auction_signals));
 
-    if (!component2_buyers.empty()) {
+    if (!component2_buyers.empty() || add_component2_with_no_buyers) {
+      if (add_component2_with_no_buyers) {
+        DCHECK(component2_buyers.empty());
+      }
       component_auctions_.emplace_back(CreateAuctionConfig(
           kComponentSeller2Url, std::move(component2_buyers)));
       auction_worklet::AddJavascriptResponse(
@@ -3355,7 +3409,7 @@ TEST_F(AuctionRunnerTest, Basic) {
       kBidder2SignalsJson);
 
   RunStandardAuction();
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_EQ(kBidder2Key, result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad2.com/"), result_.ad_descriptor->url);
   EXPECT_EQ(std::vector<blink::AdDescriptor>{blink::AdDescriptor(
@@ -3549,7 +3603,7 @@ TEST_F(AuctionRunnerTest, BasicCurrencyRedact) {
       kBidder2SignalsJson);
 
   RunStandardAuction();
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_EQ(kBidder2Key, result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad2.com/"), result_.ad_descriptor->url);
   EXPECT_THAT(result_.report_urls,
@@ -3585,7 +3639,7 @@ TEST_F(AuctionRunnerTest, BasicCurrencyRedact2) {
       std::string(kMinimumDecisionScript) + kBasicReportResult);
 
   RunStandardAuction(/*request_trusted_bidding_signals=*/false);
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_EQ(kBidder2Key, result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad2.com/"), result_.ad_descriptor->url);
   EXPECT_THAT(
@@ -6761,7 +6815,7 @@ TEST_F(AuctionRunnerTest, PromiseCheckNoBidders) {
   EXPECT_THAT(result_.errors, testing::ElementsAre());
   EXPECT_FALSE(result_.winning_group_id);
   EXPECT_FALSE(result_.ad_descriptor);
-  EXPECT_TRUE(result_.manually_aborted);
+  EXPECT_TRUE(result_.aborted_by_script);
 }
 
 // An auction that passes auctionSignals via promises. This makes sure to
@@ -6816,6 +6870,7 @@ TEST_F(AuctionRunnerTest, PromiseAuctionSignals) {
   CheckMetrics(MetricsExpectations(AuctionResult::kSuccess)
                    .SetNumBidderWorklets(2)
                    .SetNumConfigPromises(1)
+                   .SetNumAuctionsWithConfigPromises(1)
                    .SetNumOwnersAndDistinctOwners(2)
                    .SetNumInterestGroups(2)
                    .SetNumInterestGroupsWithOnlyNonKAnonBid(2)
@@ -7292,7 +7347,7 @@ TEST_F(AuctionRunnerTest, PromiseSignalsResolveAfterAbort) {
 
   abortable_ad_auction_->Abort();
   auction_run_loop_->Run();
-  EXPECT_TRUE(result_.manually_aborted);
+  EXPECT_TRUE(result_.aborted_by_script);
 
   // Feed in sellerSignals. Nothing weird should happen.
   auction_run_loop_ = std::make_unique<base::RunLoop>();
@@ -7302,7 +7357,7 @@ TEST_F(AuctionRunnerTest, PromiseSignalsResolveAfterAbort) {
       MakeSellerSignals(/*use_promise=*/false, kSellerUrl).value());
   task_environment()->RunUntilIdle();
   EXPECT_FALSE(auction_run_loop_->AnyQuitCalled());
-  EXPECT_TRUE(result_.manually_aborted);
+  EXPECT_TRUE(result_.aborted_by_script);
 }
 
 TEST_F(AuctionRunnerTest, PromiseSignalsComponentAuction) {
@@ -7372,6 +7427,176 @@ TEST_F(AuctionRunnerTest, PromiseSignalsComponentAuction) {
 
   EXPECT_EQ(GURL("https://ad2.com/"), result_.ad_descriptor->url);
   EXPECT_THAT(result_.errors, testing::ElementsAre());
+}
+
+// Test what happens when a network error on seller JS happens in a component
+// auction (kComponentSeller2 below) that had no bids but potential additional
+// bids, with promise coming in after the error.
+//
+// See https://crbug.com/1488417
+TEST_F(AuctionRunnerTest, PromiseAndNetworkErrors) {
+  base::test::ScopedFeatureList additional_bids_on;
+  additional_bids_on.InitAndEnableFeature(
+      blink::features::kFledgeNegativeTargeting);
+
+  SetUpComponentAuctionAndResponses(/*bidder1_seller=*/kComponentSeller1,
+                                    /*bidder2_seller=*/kComponentSeller1,
+                                    /*bid_from_component_auction_wins=*/true,
+                                    /*report_post_auction_signals=*/false,
+                                    /*add_component2_with_no_buyers=*/true);
+  component_auctions_[1].expects_additional_bids = true;
+  component_auctions_[1].non_shared_params.auction_nonce =
+      static_cast<base::Uuid>(auction_nonce_manager_->CreateAuctionNonce());
+  url_loader_factory_.EraseResponse(kComponentSeller2Url);
+
+  std::vector<StorageInterestGroup> bidders;
+  bidders.emplace_back(MakeInterestGroup(
+      kBidder1, kBidder1Name, kBidder1Url, kBidder1TrustedSignalsUrl,
+      {"k1", "k2"}, GURL("https://ad1.com"),
+      std::vector<GURL>{GURL("https://ad1.com-component1.com"),
+                        GURL("https://ad1.com-component2.com")}));
+  bidders.emplace_back(MakeInterestGroup(
+      kBidder2, kBidder2Name, kBidder2Url, kBidder2TrustedSignalsUrl,
+      {"l1", "l2"}, GURL("https://ad2.com"),
+      std::vector<GURL>{GURL("https://ad2.com-component1.com"),
+                        GURL("https://ad2.com-component2.com")}));
+  StartAuction(kSellerUrl, std::move(bidders));
+
+  // Can't complete yet.
+  task_environment()->RunUntilIdle();
+  EXPECT_FALSE(auction_run_loop_->AnyQuitCalled());
+
+  url_loader_factory_.AddResponse(kComponentSeller2Url.spec(), "",
+                                  net::HTTP_NOT_FOUND);
+  task_environment()->RunUntilIdle();
+
+  abortable_ad_auction_->ResolvedAdditionalBids(
+      blink::mojom::AuctionAdConfigAuctionId::NewComponentAuction(1));
+  auction_run_loop_->Run();
+
+  EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
+  EXPECT_THAT(result_.errors,
+              testing::ElementsAre(
+                  "Failed to load https://component.seller2.test/bar.js HTTP "
+                  "status = 404 Not Found."));
+}
+
+// Test what happens when a component auction has a network error on bidder
+// JS (kBidder2Url), then seller JS (kComponentSeller2Url), then a promise
+// coming in.
+//
+// See https://crbug.com/1488417
+TEST_F(AuctionRunnerTest, PromiseAndNetworkErrors2) {
+  SetUpComponentAuctionAndResponses(/*bidder1_seller=*/kComponentSeller1,
+                                    /*bidder2_seller=*/kComponentSeller2,
+                                    /*bid_from_component_auction_wins=*/true);
+  url_loader_factory_.EraseResponse(kComponentSeller2Url);
+  url_loader_factory_.EraseResponse(kBidder2Url);
+
+  std::vector<StorageInterestGroup> bidders;
+  bidders.emplace_back(MakeInterestGroup(
+      kBidder1, kBidder1Name, kBidder1Url, kBidder1TrustedSignalsUrl,
+      {"k1", "k2"}, GURL("https://ad1.com"),
+      std::vector<GURL>{GURL("https://ad1.com-component1.com"),
+                        GURL("https://ad1.com-component2.com")}));
+  bidders.emplace_back(MakeInterestGroup(
+      kBidder2, kBidder2Name, kBidder2Url, kBidder2TrustedSignalsUrl,
+      {"l1", "l2"}, GURL("https://ad2.com"),
+      std::vector<GURL>{GURL("https://ad2.com-component1.com"),
+                        GURL("https://ad2.com-component2.com")}));
+  component_auctions_[1].non_shared_params.buyer_timeouts =
+      blink::AuctionConfig::MaybePromiseBuyerTimeouts::FromPromise();
+  StartAuction(kSellerUrl, std::move(bidders));
+
+  // Can't complete yet.
+  task_environment()->RunUntilIdle();
+  EXPECT_FALSE(auction_run_loop_->AnyQuitCalled());
+
+  url_loader_factory_.AddResponse(kBidder2Url.spec(), "", net::HTTP_NOT_FOUND);
+  task_environment()->RunUntilIdle();
+
+  url_loader_factory_.AddResponse(kComponentSeller2Url.spec(), "",
+                                  net::HTTP_NOT_FOUND);
+  task_environment()->RunUntilIdle();
+
+  abortable_ad_auction_->ResolvedBuyerTimeoutsPromise(
+      blink::mojom::AuctionAdConfigAuctionId::NewComponentAuction(1),
+      blink::mojom::AuctionAdConfigBuyerTimeoutField::kPerBuyerTimeouts,
+      MakeBuyerCumulativeTimeouts(/*use_promise=*/false).value());
+  auction_run_loop_->Run();
+
+  EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
+  EXPECT_THAT(result_.errors,
+              testing::UnorderedElementsAre(
+                  "Failed to load https://anotheradthing.com/bids.js HTTP "
+                  "status = 404 Not Found.",
+                  "Failed to load https://component.seller2.test/bar.js HTTP "
+                  "status = 404 Not Found."));
+}
+
+// Test what happens when a component auction has a network error on bidder
+// JS, then seller JS, then a promise for header-based direct from seller
+// sigmals coming in --- in particular we should not be spending time
+// parsing those signals since the component auction already failed
+// (so there should be no error to the fact that the value for the slot is
+//  actually missing).
+//
+// See https://crbug.com/1488417
+TEST_F(AuctionRunnerTest, PromiseAndNetworkErrors3) {
+  base::test::ScopedFeatureList direct_from_seller_signals_header_ad_slot_on;
+  direct_from_seller_signals_header_ad_slot_on.InitAndEnableFeature(
+      blink::features::kFledgeDirectFromSellerSignalsHeaderAdSlot);
+  const char kSignals[] =
+      R"([{
+        "adSlot": "adSlot1",
+        "sellerSignals": 3
+      }])";
+  ad_auction_page_data_->AddAuctionSignalsWitnessForOrigin(kComponentSeller2,
+                                                           kSignals);
+
+  SetUpComponentAuctionAndResponses(/*bidder1_seller=*/kComponentSeller1,
+                                    /*bidder2_seller=*/kComponentSeller2,
+                                    /*bid_from_component_auction_wins=*/true,
+                                    /*report_post_auction_signals=*/false);
+  url_loader_factory_.EraseResponse(kComponentSeller2Url);
+  url_loader_factory_.EraseResponse(kBidder2Url);
+  component_auctions_[1].expects_direct_from_seller_signals_header_ad_slot =
+      true;
+
+  std::vector<StorageInterestGroup> bidders;
+  bidders.emplace_back(MakeInterestGroup(
+      kBidder1, kBidder1Name, kBidder1Url, kBidder1TrustedSignalsUrl,
+      {"k1", "k2"}, GURL("https://ad1.com"),
+      std::vector<GURL>{GURL("https://ad1.com-component1.com"),
+                        GURL("https://ad1.com-component2.com")}));
+  bidders.emplace_back(MakeInterestGroup(
+      kBidder2, kBidder2Name, kBidder2Url, kBidder2TrustedSignalsUrl,
+      {"l1", "l2"}, GURL("https://ad2.com"),
+      std::vector<GURL>{GURL("https://ad2.com-component1.com"),
+                        GURL("https://ad2.com-component2.com")}));
+  StartAuction(kSellerUrl, std::move(bidders));
+
+  // Can't complete yet.
+  task_environment()->RunUntilIdle();
+  EXPECT_FALSE(auction_run_loop_->AnyQuitCalled());
+
+  url_loader_factory_.AddResponse(kBidder2Url.spec(), "", net::HTTP_NOT_FOUND);
+  task_environment()->RunUntilIdle();
+
+  url_loader_factory_.AddResponse(kComponentSeller2Url.spec(), "",
+                                  net::HTTP_NOT_FOUND);
+  task_environment()->RunUntilIdle();
+
+  abortable_ad_auction_->ResolvedDirectFromSellerSignalsHeaderAdSlotPromise(
+      blink::mojom::AuctionAdConfigAuctionId::NewComponentAuction(1), "slot1");
+  auction_run_loop_->Run();
+  EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
+  EXPECT_THAT(result_.errors,
+              testing::UnorderedElementsAre(
+                  "Failed to load https://anotheradthing.com/bids.js HTTP "
+                  "status = 404 Not Found.",
+                  "Failed to load https://component.seller2.test/bar.js HTTP "
+                  "status = 404 Not Found."));
 }
 
 // Coverage of what happens when promises come in for a component auction that
@@ -7782,15 +8007,13 @@ TEST_F(AuctionRunnerTest, PromiseSignalsBadAuctionIdAdditionalBids) {
 
 // An auction where the winning additional bid claims to be from an IG the user
 // is already in.
-TEST_F(AuctionRunnerTest, AdditionalBidAliasesInterestGroup) {
+// TODO(crbug.com/1497719): Re-enable this flaky test.
+TEST_F(AuctionRunnerTest, DISABLED_AdditionalBidAliasesInterestGroup) {
   base::test::ScopedFeatureList additional_bids_on;
   additional_bids_on.InitWithFeatures(
       {blink::features::kFledgeNegativeTargeting,
        blink::features::kBiddingAndScoringDebugReportingAPI},
       {});
-
-  ad_auction_page_data_ = PageUserData<AdAuctionPageData>::GetOrCreateForPage(
-      web_contents()->GetPrimaryPage());
 
   const char kAdditionalBidUrl[] =
       "https://adplatform.com/offers-contextual.js";
@@ -7877,7 +8100,7 @@ TEST_F(AuctionRunnerTest, AdditionalBidAliasesInterestGroup) {
       blink::mojom::AuctionAdConfigAuctionId::NewMainAuction(0));
   auction_run_loop_->Run();
 
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_THAT(result_.errors, testing::ElementsAre());
   EXPECT_EQ(kBidder1Key, result_.winning_group_id);
   EXPECT_EQ(GURL("https://additional.test/"), result_.ad_descriptor->url);
@@ -7978,6 +8201,7 @@ TEST_F(AuctionRunnerTest, AdditionalBidAliasesInterestGroup) {
                    // execution time and platform.
                    .SetNumBidsQueuedWaitingForSellerWorklet(-1)
                    .SetNumInterestGroups(2)
+                   .SetNumNegativeInterestGroups(0)
                    .SetNumOwnersAndDistinctOwners(2)
                    .SetNumSellers(1)
                    .SetNumBidderWorklets(2)
@@ -8029,22 +8253,17 @@ TEST_F(AuctionRunnerTest, AdditionalBidAliasesInterestGroup) {
         run_loop2.Quit();
       }));
   run_loop2.Run();
-
-  // Clear this before the page expires to avoid the dangling ptr error.
-  ad_auction_page_data_ = nullptr;
 }
 
 // An auction where the winning additional bid claims to be from an IG the user
 // is not in.
-TEST_F(AuctionRunnerTest, AdditionalBidDistinctFromInterestGroup) {
+// TODO(crbug.com/1497452): Re-enable this flaky test.
+TEST_F(AuctionRunnerTest, DISABLED_AdditionalBidDistinctFromInterestGroup) {
   base::test::ScopedFeatureList additional_bids_on;
   additional_bids_on.InitWithFeatures(
       {blink::features::kFledgeNegativeTargeting,
        blink::features::kBiddingAndScoringDebugReportingAPI},
       {});
-
-  ad_auction_page_data_ = PageUserData<AdAuctionPageData>::GetOrCreateForPage(
-      web_contents()->GetPrimaryPage());
 
   const char kAdditionalBidUrl[] =
       "https://adplatform.com/offers-contextual.js";
@@ -8132,7 +8351,7 @@ TEST_F(AuctionRunnerTest, AdditionalBidDistinctFromInterestGroup) {
       blink::mojom::AuctionAdConfigAuctionId::NewMainAuction(0));
   auction_run_loop_->Run();
 
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_THAT(result_.errors, testing::ElementsAre());
   EXPECT_EQ(InterestGroupKey(kBidder1, kAdditionalBidName),
             result_.winning_group_id);
@@ -8235,6 +8454,7 @@ TEST_F(AuctionRunnerTest, AdditionalBidDistinctFromInterestGroup) {
                    // execution time and platform.
                    .SetNumBidsQueuedWaitingForSellerWorklet(-1)
                    .SetNumInterestGroups(2)
+                   .SetNumNegativeInterestGroups(0)
                    .SetNumOwnersAndDistinctOwners(2)
                    .SetNumSellers(1)
                    .SetNumBidderWorklets(2)
@@ -8271,9 +8491,6 @@ TEST_F(AuctionRunnerTest, AdditionalBidDistinctFromInterestGroup) {
         run_loop2.Quit();
       }));
   run_loop2.Run();
-
-  // Clear this before the page expires to avoid the dangling ptr error.
-  ad_auction_page_data_ = nullptr;
 }
 
 class AuctionRunnerDfssAdSlotTest : public AuctionRunnerTest {
@@ -8378,8 +8595,6 @@ TEST_F(AuctionRunnerDfssAdSlotTest,
   "adSlot": "adSlot1",
   "sellerSignals": 3
 }])";
-  ad_auction_page_data_ = PageUserData<AdAuctionPageData>::GetOrCreateForPage(
-      web_contents()->GetPrimaryPage());
   ad_auction_page_data_->AddAuctionSignalsWitnessForOrigin(kSeller, kSignals);
 
   pass_promise_for_direct_from_seller_signals_header_ad_slot_ = true;
@@ -8420,9 +8635,6 @@ TEST_F(AuctionRunnerDfssAdSlotTest,
   EXPECT_EQ(InterestGroupKey(kBidder2, kBidder2Name), result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad2.com/"), result_.ad_descriptor->url);
   EXPECT_THAT(result_.errors, testing::ElementsAre());
-
-  // Clear this before the page expires to avoid the dangling ptr error.
-  ad_auction_page_data_ = nullptr;
 }
 
 // An auction that passes nullopt directFromSellerSignalsHeaderAdSlot via a
@@ -8434,8 +8646,6 @@ TEST_F(AuctionRunnerDfssAdSlotTest,
   "adSlot": "adSlot1",
   "sellerSignals": 3
 }])";
-  ad_auction_page_data_ = PageUserData<AdAuctionPageData>::GetOrCreateForPage(
-      web_contents()->GetPrimaryPage());
   ad_auction_page_data_->AddAuctionSignalsWitnessForOrigin(kSeller, kSignals);
 
   pass_promise_for_direct_from_seller_signals_header_ad_slot_ = true;
@@ -8476,9 +8686,6 @@ TEST_F(AuctionRunnerDfssAdSlotTest,
   EXPECT_EQ(InterestGroupKey(kBidder2, kBidder2Name), result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad2.com/"), result_.ad_descriptor->url);
   EXPECT_THAT(result_.errors, testing::ElementsAre());
-
-  // Clear this before the page expires to avoid the dangling ptr error.
-  ad_auction_page_data_ = nullptr;
 }
 
 // An auction that passes directFromSellerSignalsHeaderAdSlot via a promise.
@@ -8490,8 +8697,6 @@ TEST_F(AuctionRunnerDfssAdSlotTest,
   "adSlot": "adSlot1",
   "sellerSignals": 3
 }])";
-  ad_auction_page_data_ = PageUserData<AdAuctionPageData>::GetOrCreateForPage(
-      web_contents()->GetPrimaryPage());
   ad_auction_page_data_->AddAuctionSignalsWitnessForOrigin(kSeller, kSignals);
 
   pass_promise_for_direct_from_seller_signals_header_ad_slot_ = true;
@@ -8544,9 +8749,6 @@ TEST_F(AuctionRunnerDfssAdSlotTest,
   EXPECT_EQ(InterestGroupKey(kBidder2, kBidder2Name), result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad2.com/"), result_.ad_descriptor->url);
   EXPECT_THAT(result_.errors, testing::ElementsAre());
-
-  // Clear this before the page expires to avoid the dangling ptr error.
-  ad_auction_page_data_ = nullptr;
 }
 
 // An auction that passes directFromSellerSignalsHeaderAdSlot via a promise --
@@ -8558,8 +8760,6 @@ TEST_F(AuctionRunnerDfssAdSlotTest,
   "adSlot": "adSlot1",
   "sellerSignals": 3
 })";
-  ad_auction_page_data_ = PageUserData<AdAuctionPageData>::GetOrCreateForPage(
-      web_contents()->GetPrimaryPage());
   ad_auction_page_data_->AddAuctionSignalsWitnessForOrigin(kSeller, kSignals);
 
   pass_promise_for_direct_from_seller_signals_header_ad_slot_ = true;
@@ -8609,53 +8809,6 @@ TEST_F(AuctionRunnerDfssAdSlotTest,
               "\"sellerSignals\": 3\n}"),
           testing::Eq("When looking for directFromSellerSignalsHeaderAdSlot "
                       "adSlot1, failed to find a matching response.")));
-
-  // Clear this before the page expires to avoid the dangling ptr error.
-  ad_auction_page_data_ = nullptr;
-}
-
-// An auction that passes directFromSellerSignalsHeaderAdSlot via a promise, but
-// the auction fails since there's no AdAuctionPageData.
-TEST_F(AuctionRunnerDfssAdSlotTest,
-       PromiseDirectFromSellerSignalsHeaderAdSlotNoPageData) {
-  pass_promise_for_direct_from_seller_signals_header_ad_slot_ = true;
-
-  auction_worklet::AddJavascriptResponse(
-      &url_loader_factory_, kBidder1Url,
-      MakeBidScript(kSeller, "1", "https://ad1.com/", /*num_ad_components=*/0,
-                    kBidder1, kBidder1Name));
-  auction_worklet::AddJavascriptResponse(
-      &url_loader_factory_, kBidder2Url,
-      MakeBidScript(kSeller, "2", "https://ad2.com/", /*num_ad_components=*/0,
-                    kBidder2, kBidder2Name));
-  auction_worklet::AddJavascriptResponse(&url_loader_factory_, kSellerUrl,
-                                         MakeAuctionScript());
-
-  std::vector<StorageInterestGroup> bidders;
-  bidders.emplace_back(MakeInterestGroup(
-      kBidder1, kBidder1Name, kBidder1Url,
-      /*trusted_bidding_signals_url=*/absl::nullopt,
-      /*trusted_bidding_signals_keys=*/{}, GURL("https://ad1.com"),
-      /*ad_component_urls=*/absl::nullopt));
-  bidders.emplace_back(MakeInterestGroup(
-      kBidder2, kBidder2Name, kBidder2Url,
-      /*trusted_bidding_signals_url=*/absl::nullopt,
-      /*trusted_bidding_signals_keys=*/{}, GURL("https://ad2.com"),
-      /*ad_component_urls=*/absl::nullopt));
-  StartAuction(kSellerUrl, std::move(bidders));
-
-  // Can't complete yet.
-  task_environment()->RunUntilIdle();
-  EXPECT_FALSE(auction_run_loop_->AnyQuitCalled());
-
-  // Feed in directFromSellerSignalsHeaderAdSlot.
-  abortable_ad_auction_->ResolvedDirectFromSellerSignalsHeaderAdSlotPromise(
-      blink::mojom::AuctionAdConfigAuctionId::NewMainAuction(0), "adSlot1");
-  auction_run_loop_->Run();
-
-  EXPECT_EQ(absl::nullopt, result_.winning_group_id);
-  EXPECT_EQ(absl::nullopt, result_.ad_descriptor);
-  EXPECT_THAT(result_.errors, testing::ElementsAre());
 }
 
 // Trying to update auctionSignals which wasn't originally passed in as a
@@ -9058,8 +9211,6 @@ TEST_F(AuctionRunnerTest, PromiseServerResponseResolveTwice) {
           ->EncapsulateAndSerialize();
 
   std::string witnessed_hash = crypto::SHA256HashString(encrypted_response);
-  ad_auction_page_data_ = PageUserData<AdAuctionPageData>::GetOrCreateForPage(
-      web_contents()->GetPrimaryPage());
   ad_auction_page_data_->AddAuctionResultWitnessForOrigin(kSeller,
                                                           witnessed_hash);
 
@@ -9094,9 +9245,6 @@ TEST_F(AuctionRunnerTest, PromiseServerResponseResolveTwice) {
   task_environment()->RunUntilIdle();
   EXPECT_EQ("ResolvedAuctionAdResponsePromise updating non-promise",
             TakeBadMessage());
-
-  // Clear this before the page expires to avoid the dangling ptr error.
-  ad_auction_page_data_ = nullptr;
 }
 
 // Trying to update perBuyerCurrencies twice.
@@ -9244,8 +9392,6 @@ TEST_F(AuctionRunnerTest, PromiseSignalsUpdateAdditionalBidsFeatureOff) {
 // Trying to update directFromSellerSignalsHeaderAdSlot twice.
 TEST_F(AuctionRunnerDfssAdSlotTest,
        PromiseSignalsUpdateNonPromiseDirectFromSellerSignalsHeaderAdSlot) {
-  ad_auction_page_data_ = PageUserData<AdAuctionPageData>::GetOrCreateForPage(
-      web_contents()->GetPrimaryPage());
 
   // Have two kind of promises so we don't just finish after first
   // directFromSellerSignalsHeaderAdSlot update
@@ -9289,9 +9435,6 @@ TEST_F(AuctionRunnerDfssAdSlotTest,
   task_environment()->RunUntilIdle();
   EXPECT_EQ("ResolvedDirectFromSellerSignalsHeaderAdSlot updating non-promise",
             TakeBadMessage());
-
-  // Clear this before the page expires to avoid the dangling ptr error.
-  ad_auction_page_data_ = nullptr;
 }
 
 class AuctionRunnerDfssAdSlotDisabledTest : public AuctionRunnerTest {
@@ -13147,6 +13290,7 @@ TEST_F(AuctionRunnerTest,
   EXPECT_EQ(absl::nullopt, result_.ad_descriptor);
 
   CheckMetrics(MetricsExpectations(AuctionResult::kNoBids)
+                   .SetNumAuctionsWithConfigPromises(0)
                    .SetNumInterestGroups(2)
                    .SetNumOwnersAndDistinctOwners(1)
                    .SetNumSellers(1)
@@ -13248,7 +13392,7 @@ TEST_F(AuctionRunnerTest, Abort) {
   StartAuction(kSellerUrl, std::move(bidders));
   abortable_ad_auction_->Abort();
   auction_run_loop_->Run();
-  EXPECT_TRUE(result_.manually_aborted);
+  EXPECT_TRUE(result_.aborted_by_script);
   EXPECT_FALSE(result_.winning_group_id.has_value());
   EXPECT_THAT(result_.errors, testing::ElementsAre());
   EXPECT_THAT(result_.interest_groups_that_bid,
@@ -13277,7 +13421,7 @@ TEST_F(AuctionRunnerTest, AbortLate) {
   dont_reset_auction_runner_ = true;
   RunAuctionAndWait(kSellerUrl, std::move(bidders));
   EXPECT_EQ(kBidder1Name, result_.winning_group_id->name);
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_THAT(result_.errors, testing::ElementsAre());
   abortable_ad_auction_->Abort();
   task_environment()->RunUntilIdle();
@@ -13850,7 +13994,7 @@ TEST_F(AuctionRunnerTest, PrivateAggregationRequestForEventContributionEvents) {
   // Bidder 2 won the auction.
   RunStandardAuction(/*request_trusted_bidding_signals=*/false);
   EXPECT_THAT(result_.errors, testing::UnorderedElementsAre());
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_EQ(kBidder2Key, result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad2.com/"), result_.ad_descriptor->url);
 
@@ -14008,7 +14152,7 @@ TEST_F(AuctionRunnerTest,
     // kBidder2 was rejected by seller, so kBidder1 won the auction.
     RunStandardAuction(/*request_trusted_bidding_signals=*/false);
     EXPECT_THAT(result_.errors, testing::UnorderedElementsAre());
-    EXPECT_FALSE(result_.manually_aborted);
+    EXPECT_FALSE(result_.aborted_by_script);
     EXPECT_EQ(kBidder1Key, result_.winning_group_id);
     EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
 
@@ -14169,7 +14313,7 @@ TEST_F(AuctionRunnerTest,
     // kBidder2 won the auction.
     RunStandardAuction(/*request_trusted_bidding_signals=*/false);
     EXPECT_THAT(result_.errors, testing::UnorderedElementsAre());
-    EXPECT_FALSE(result_.manually_aborted);
+    EXPECT_FALSE(result_.aborted_by_script);
     EXPECT_EQ(kBidder2Key, result_.winning_group_id);
     EXPECT_EQ(GURL("https://ad2.com/"), result_.ad_descriptor->url);
 
@@ -14325,7 +14469,7 @@ TEST_F(AuctionRunnerTest,
   // kBidder2 was rejected by seller, so kBidder1 won the auction.
   RunStandardAuction(/*request_trusted_bidding_signals=*/false);
   EXPECT_THAT(result_.errors, testing::UnorderedElementsAre());
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_EQ(kBidder1Key, result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
 
@@ -14448,7 +14592,7 @@ TEST_F(AuctionRunnerTest,
 
   RunStandardAuction(/*request_trusted_bidding_signals=*/false);
   EXPECT_THAT(result_.errors, testing::UnorderedElementsAre());
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_EQ(kBidder1Key, result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
 
@@ -15876,7 +16020,7 @@ TEST_P(CostRoundingTest, AdCostPassed) {
   // Only one bidder, to keep things simple.
   interest_group_buyers_ = {{kBidder1}};
   RunStandardAuction(/*request_trusted_bidding_signals=*/false);
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_EQ(kBidder1Key, result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
 
@@ -15922,7 +16066,7 @@ TEST_P(CostRoundingTest, AdCostRounded) {
   // Only one bidder, to keep things simple.
   interest_group_buyers_ = {{kBidder1}};
   RunStandardAuction(/*request_trusted_bidding_signals=*/false);
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_EQ(kBidder1Key, result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
 
@@ -15987,7 +16131,7 @@ TEST_P(CostRoundingTest, AdCostExponentTruncated) {
   // Only one bidder, to keep things simple.
   interest_group_buyers_ = {{kBidder1}};
   RunStandardAuction(/*request_trusted_bidding_signals=*/false);
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_EQ(kBidder1Key, result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
 
@@ -16053,7 +16197,7 @@ TEST_F(AuctionRunnerTest, ModelingSignalsPassed) {
   int num_correct = 0;
   for (int i = 0; i < kNumRuns; i++) {
     RunStandardAuction(/*request_trusted_bidding_signals=*/false);
-    EXPECT_FALSE(result_.manually_aborted);
+    EXPECT_FALSE(result_.aborted_by_script);
     EXPECT_EQ(kBidder1Key, result_.winning_group_id);
     EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
 
@@ -16105,7 +16249,7 @@ TEST_F(AuctionRunnerTest, ModelingSignalsNotPresent) {
                                          kSellerScript);
 
   RunStandardAuction(/*request_trusted_bidding_signals=*/false);
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_EQ(kBidder1Key, result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
 
@@ -16178,7 +16322,7 @@ TEST_F(AuctionRunnerTest, JoinCountPassedToReportWin) {
     StartAuction(kSellerUrl, std::move(bidders));
     auction_run_loop_->Run();
 
-    EXPECT_FALSE(result_.manually_aborted);
+    EXPECT_FALSE(result_.aborted_by_script);
     EXPECT_EQ(kBidder1Key, result_.winning_group_id);
     EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
 
@@ -16254,7 +16398,7 @@ TEST_F(AuctionRunnerTest, RecencyPassedReportWin) {
   for (int i = 0; i < kNumRuns; i++) {
     between_join_run_auction_delay_ = kRecency;
     RunStandardAuction(/*request_trusted_bidding_signals=*/false);
-    EXPECT_FALSE(result_.manually_aborted);
+    EXPECT_FALSE(result_.aborted_by_script);
     EXPECT_EQ(kBidder1Key, result_.winning_group_id);
     EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
 
@@ -16316,7 +16460,7 @@ TEST_F(AuctionRunnerTest, RecencyPassedGenerateBid) {
 
   between_join_run_auction_delay_ = kRecency;
   RunStandardAuction(/*request_trusted_bidding_signals=*/false);
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_EQ(kBidder1Key, result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
 }
@@ -16366,7 +16510,7 @@ TEST_F(AuctionRunnerPassRecencyToGenerateBidDisabledTest, NotPassed) {
                                          kSellerScript);
 
   RunStandardAuction(/*request_trusted_bidding_signals=*/false);
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_EQ(kBidder1Key, result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
 }
@@ -16405,7 +16549,7 @@ TEST_P(BidRoundingTest, BidRounded) {
   // Only one bidder, to keep things simple.
   interest_group_buyers_ = {{kBidder1}};
   RunStandardAuction(/*request_trusted_bidding_signals=*/false);
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_EQ(kBidder1Key, result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
 
@@ -16474,7 +16618,7 @@ TEST_P(BidRoundingTest, HighestScoringOtherBidRounded) {
                                          kSellerScript);
 
   RunStandardAuction(/*request_trusted_bidding_signals=*/false);
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_EQ(kBidder2Key, result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad2.com/"), result_.ad_descriptor->url);
 
@@ -16557,7 +16701,7 @@ TEST_P(ScoreRoundingTest, ScoreRounded) {
   // Only one bidder, to keep things simple.
   interest_group_buyers_ = {{kBidder1}};
   RunStandardAuction(/*request_trusted_bidding_signals=*/false);
-  EXPECT_FALSE(result_.manually_aborted);
+  EXPECT_FALSE(result_.aborted_by_script);
   EXPECT_EQ(kBidder1Key, result_.winning_group_id);
   EXPECT_EQ(GURL("https://ad1.com/"), result_.ad_descriptor->url);
 
@@ -19726,7 +19870,7 @@ TEST_P(AuctionRunnerKAnonTest, FailureHandling) {
   // Run the auction, and simulate it being interrupted by navigating away.
   StartAuction(kSellerUrl, bidders);
   task_environment()->RunUntilIdle();
-  auction_runner_->FailAuction(/*manually_aborted=*/false);
+  auction_runner_->FailAuction(/*aborted_by_script=*/false);
 
   EXPECT_THAT(result_.errors, testing::ElementsAre());
 
@@ -19994,9 +20138,6 @@ TEST_P(AuctionRunnerKAnonTest, AdditionalBidBuyerReporting) {
   additional_bids_on.InitAndEnableFeature(
       blink::features::kFledgeNegativeTargeting);
 
-  ad_auction_page_data_ = PageUserData<AdAuctionPageData>::GetOrCreateForPage(
-      web_contents()->GetPrimaryPage());
-
   const char kAdditionalBidUrl[] =
       "https://adplatform.com/offers-contextual.js";
 
@@ -20075,9 +20216,67 @@ TEST_P(AuctionRunnerKAnonTest, AdditionalBidBuyerReporting) {
               testing::UnorderedElementsAre(
                   "https://reporting.example.com/40",
                   "https://contextual.test/?additionalPseudoIG"));
+}
 
-  // Clear this before the page expires to avoid the dangling ptr error.
-  ad_auction_page_data_ = nullptr;
+TEST_P(AuctionRunnerKAnonTest, CookieDeprecationFacilitatedTestingExcluded) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      features::kCookieDeprecationFacilitatedTesting);
+  auction_worklet::AddJavascriptResponse(
+      &url_loader_factory_, kBidder1Url,
+      // bidding script tries to bid with ad that is not k-anonymous.
+      std::string(R"(
+        function generateBid(interestGroup, auctionSignals, perBuyerSignals,
+                         trustedBiddingSignals, browserSignals) {
+          privateAggregation.contributeToHistogramOnEvent("reserved.loss", {
+              bucket: {baseValue: "bid-reject-reason"},
+              value: 0,
+            });
+          privateAggregation.contributeToHistogramOnEvent("reserved.loss", {
+              bucket: {baseValue: "winning-bid"},
+              value: 2,
+            });
+          return {ad: {},
+              bid: 1,
+              render: "https://ad1.com",
+              allowComponentAuction: true};
+        })") +
+          kReportWinNoUrl);
+  auction_worklet::AddJavascriptResponse(
+      &url_loader_factory_, kSellerUrl,
+      std::string(kMinimumDecisionScript) + kBasicReportResult);
+
+  std::vector<StorageInterestGroup> bidders;
+  bidders.emplace_back(MakeInterestGroup(
+      kBidder1, kBidder1Name, kBidder1Url,
+      /*trusted_bidding_signals_url=*/absl::nullopt,
+      /*trusted_bidding_signals_keys=*/{}, GURL("https://ad1.com")));
+
+  // No k-anon authorizations.
+  StartAuction(kSellerUrl, bidders);
+  auction_run_loop_->Run();
+  // Have to spin all message loops to flush any k-anon set join events.
+  task_environment()->RunUntilIdle();
+  EXPECT_THAT(interest_group_manager_->TakeJoinedKAnonSets(),
+              testing::UnorderedElementsAre(
+                  blink::KAnonKeyForAdBid(
+                      bidders[0].interest_group,
+                      bidders[0].interest_group.ads.value()[0].render_url),
+                  blink::KAnonKeyForAdNameReporting(
+                      bidders[0].interest_group,
+                      bidders[0].interest_group.ads.value()[0])));
+  histogram_tester_->ExpectUniqueSample(
+      "Ads.InterestGroup.Auction.NonKAnonWinnerIsKAnon", false, 1);
+
+  // Always act like the k-anonymity mode is `KAnonMode::kNone`
+  ASSERT_TRUE(result_.ad_descriptor.has_value());
+  EXPECT_EQ(GURL("https://ad1.com"), result_.ad_descriptor->url);
+  EXPECT_THAT(result_.errors, testing::ElementsAre());
+  EXPECT_THAT(
+      private_aggregation_manager_.TakePrivateAggregationRequests(),
+      testing::UnorderedElementsAre(testing::Pair(
+          kSeller, ElementsAreRequests(
+                       kExpectedReportResultPrivateAggregationRequest))));
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -20271,9 +20470,6 @@ TEST_F(AuctionRunnerTest, ServerResponseLogsErrors) {
     hist.ExpectUniqueSample("Ads.InterestGroup.ServerAuction.Result",
                             test_case.result, 1);
   }
-
-  // Clear this before the page expires to avoid the dangling ptr error.
-  ad_auction_page_data_ = nullptr;
 }
 
 }  // namespace

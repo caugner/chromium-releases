@@ -21,7 +21,9 @@
 
 class AutoPipSettingOverlayViewTest : public views::ViewsTestBase {
  public:
-  AutoPipSettingOverlayViewTest() = default;
+  AutoPipSettingOverlayViewTest()
+      : views::ViewsTestBase(
+            base::test::TaskEnvironment::TimeSource::MOCK_TIME) {}
 
   void SetUp() override {
     ViewsTestBase::SetUp();
@@ -62,9 +64,9 @@ class AutoPipSettingOverlayViewTest : public views::ViewsTestBase {
     ViewsTestBase::TearDown();
   }
 
-  const AutoPipSettingOverlayView* setting_overlay() const {
-    return setting_overlay_;
-  }
+  AutoPipSettingOverlayView* setting_overlay() { return setting_overlay_; }
+
+  views::Widget* anchor_view_widget() { return anchor_view_widget_.get(); }
 
   views::View* background() const {
     return setting_overlay_->get_background_for_testing();
@@ -105,4 +107,85 @@ TEST_F(AutoPipSettingOverlayViewTest, TestBackgroundLayerAnimation) {
   // a 0.70f opacity.
   background()->layer()->GetAnimator()->StopAnimating();
   EXPECT_EQ(0.70f, background()->layer()->GetTargetOpacity());
+}
+
+TEST_F(AutoPipSettingOverlayViewTest, TestWantsEvent) {
+  setting_overlay()->ShowBubble(
+      anchor_view_widget()->GetNativeView(),
+      AutoPipSettingOverlayView::PipWindowType::kDocumentPip);
+  // Assume nothing is at screen coordinate 0,0.
+  EXPECT_FALSE(setting_overlay()->WantsEvent(gfx::Point(0, 0)));
+
+  // Make sure that the buttons work.
+  auto* view = setting_overlay()->get_view_for_testing();
+  EXPECT_TRUE(setting_overlay()->WantsEvent(
+      view->get_allow_always_button_center_in_screen_for_testing()));
+  EXPECT_TRUE(setting_overlay()->WantsEvent(
+      view->get_allow_once_button_center_in_screen_for_testing()));
+  EXPECT_TRUE(setting_overlay()->WantsEvent(
+      view->get_block_button_center_in_screen_for_testing()));
+}
+
+TEST_F(AutoPipSettingOverlayViewTest,
+       TestOverlayViewDoesNotHaveFocusForDocumentPip) {
+  setting_overlay()->ShowBubble(
+      anchor_view_widget()->GetNativeView(),
+      AutoPipSettingOverlayView::PipWindowType::kDocumentPip);
+  EXPECT_FALSE(setting_overlay()->HasFocus());
+}
+
+TEST_F(AutoPipSettingOverlayViewTest,
+       TestOverlayViewDoesNotHaveFocusForVideoPip) {
+  setting_overlay()->ShowBubble(
+      anchor_view_widget()->GetNativeView(),
+      AutoPipSettingOverlayView::PipWindowType::kVideoPip);
+  EXPECT_FALSE(setting_overlay()->HasFocus());
+}
+
+#if BUILDFLAG(IS_MAC)
+// Ensure that bubbles requested for Document Picture-in-Picture windows are
+// shown not shown before an 180Ms delay, on Mac.
+TEST_F(AutoPipSettingOverlayViewTest,
+       TestOverlayViewNotShownBeforeDelayForDocumentPip) {
+  // Initially bubble should not be shown.
+  setting_overlay()->ShowBubble(
+      anchor_view_widget()->GetNativeView(),
+      AutoPipSettingOverlayView::PipWindowType::kDocumentPip);
+  EXPECT_FALSE(
+      setting_overlay()->get_view_for_testing()->GetWidget()->IsVisible());
+
+  // Bubble should not be shown before an 180Ms delay. This is to ensure that
+  // the Mac window animation has completed, before we show the permission
+  // prompt.
+  task_environment()->FastForwardBy(base::Milliseconds(179));
+  EXPECT_FALSE(
+      setting_overlay()->get_view_for_testing()->GetWidget()->IsVisible());
+}
+#endif  // BUILDFLAG(IS_MAC)
+
+// Ensure that bubbles requested for Document Picture-in-Picture windows are
+// shown after the scrim animation.
+TEST_F(AutoPipSettingOverlayViewTest,
+       TestOverlayViewShownWithDelayForDocumentPip) {
+  setting_overlay()->ShowBubble(
+      anchor_view_widget()->GetNativeView(),
+      AutoPipSettingOverlayView::PipWindowType::kDocumentPip);
+  EXPECT_FALSE(
+      setting_overlay()->get_view_for_testing()->GetWidget()->IsVisible());
+
+  // Bubble should be shown after an 500Ms delay.
+  task_environment()->FastForwardBy(base::Milliseconds(505));
+  EXPECT_TRUE(
+      setting_overlay()->get_view_for_testing()->GetWidget()->IsVisible());
+}
+
+TEST_F(AutoPipSettingOverlayViewTest,
+       TestOverlayViewShownWithoutDelayForVideoPip) {
+  // Ensure that bubbles requested for Video Picture-in-Picture windows are
+  // shown without delay, regardless of platform.
+  setting_overlay()->ShowBubble(
+      anchor_view_widget()->GetNativeView(),
+      AutoPipSettingOverlayView::PipWindowType::kVideoPip);
+  EXPECT_TRUE(
+      setting_overlay()->get_view_for_testing()->GetWidget()->IsVisible());
 }

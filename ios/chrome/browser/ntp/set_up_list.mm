@@ -10,7 +10,8 @@
 #import "components/sync/base/user_selectable_type.h"
 #import "components/sync/service/sync_service.h"
 #import "components/sync/service/sync_user_settings.h"
-#import "ios/chrome/browser/default_browser/utils.h"
+#import "ios/chrome/browser/default_browser/model/utils.h"
+#import "ios/chrome/browser/ntp/home/features.h"
 #import "ios/chrome/browser/ntp/set_up_list_delegate.h"
 #import "ios/chrome/browser/ntp/set_up_list_item.h"
 #import "ios/chrome/browser/ntp/set_up_list_item_type.h"
@@ -112,17 +113,28 @@ bool IsSigninEnabled(AuthenticationService* auth_service) {
   }
   NSMutableArray<SetUpListItem*>* items =
       [[NSMutableArray<SetUpListItem*> alloc] init];
-  if (IsSigninEnabled(authService) &&
-      !syncService->HasDisableReason(
-          syncer::SyncService::DISABLE_REASON_ENTERPRISE_POLICY) &&
-      !HasManagedSyncDataType(syncService)) {
-    AddItemIfNotNil(items, BuildItem(SetUpListItemType::kSignInSync, prefs,
-                                     localState, authService));
+
+  auto AddSignInItem = ^{
+    if (IsSigninEnabled(authService) &&
+        !syncService->HasDisableReason(
+            syncer::SyncService::DISABLE_REASON_ENTERPRISE_POLICY) &&
+        !HasManagedSyncDataType(syncService)) {
+      AddItemIfNotNil(items, BuildItem(SetUpListItemType::kSignInSync, prefs,
+                                       localState, authService));
+    }
+  };
+
+  if (!IsMagicStackEnabled()) {
+    AddSignInItem();
   }
   AddItemIfNotNil(items, BuildItem(SetUpListItemType::kDefaultBrowser, prefs,
                                    localState, authService));
   AddItemIfNotNil(items, BuildItem(SetUpListItemType::kAutofill, prefs,
                                    localState, authService));
+  if (IsMagicStackEnabled()) {
+    AddSignInItem();
+  }
+
   // TODO(crbug.com/1428070): Add a Follow item to the Set Up List.
   return [[self alloc] initWithItems:items localState:localState];
 }

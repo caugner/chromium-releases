@@ -161,6 +161,15 @@ TEST_F(ChromeExtensionNavigationTest, PrepareURLForNavigation) {
     EXPECT_EQ(tabs_constants::kFileUrlsNotAllowedInExtensionNavigations,
               url.error());
   }
+  // File URLs with view-source scheme should return false and set the error.
+  {
+    const std::string kViewSourceFileURL("view-source:file:///etc/passwd");
+    auto url = ExtensionTabUtil::PrepareURLForNavigation(
+        kViewSourceFileURL, extension.get(), browser_context());
+    ASSERT_FALSE(url.has_value());
+    EXPECT_EQ(tabs_constants::kFileUrlsNotAllowedInExtensionNavigations,
+              url.error());
+  }
   // File URLs are returned when the extension has access to file.
   {
     util::SetAllowFileAccess(extension->id(), browser_context(), true);
@@ -168,6 +177,14 @@ TEST_F(ChromeExtensionNavigationTest, PrepareURLForNavigation) {
     auto url = ExtensionTabUtil::PrepareURLForNavigation(
         kFileURLWithAccess, extension.get(), browser_context());
     EXPECT_THAT(url, base::test::ValueIs(GURL(kFileURLWithAccess)));
+  }
+  // Regression test for crbug.com/1487908. Ensure that file URLs are returned
+  // when the call originates from non-extension contexts (e.g. WebUI contexts).
+  {
+    const std::string kFileURL("file:///etc/passwd");
+    auto url = ExtensionTabUtil::PrepareURLForNavigation(
+        kFileURL, /*extension=*/nullptr, browser_context());
+    EXPECT_THAT(url, base::test::ValueIs(GURL(kFileURL)));
   }
 }
 
@@ -195,6 +212,18 @@ TEST_F(ChromeExtensionNavigationTest,
   auto url = ExtensionTabUtil::PrepareURLForNavigation(
       kFileURLWithEnterprisePolicy, extension.get(), browser_context());
   EXPECT_THAT(url, base::test::ValueIs(GURL(kFileURLWithEnterprisePolicy)));
+}
+
+TEST_F(ChromeExtensionNavigationTest, PrepareURLForNavigationWithPDFViewer) {
+  // Set ID for PDF viewer extension.
+  auto extension =
+      ExtensionBuilder("test").SetID(extension_misc::kPdfExtensionId).Build();
+
+  // File URLs are returned when the extension has access to file.
+  const std::string kFileURLWithPDFViewer("file:///etc/passwd");
+  auto url = ExtensionTabUtil::PrepareURLForNavigation(
+      kFileURLWithPDFViewer, extension.get(), browser_context());
+  EXPECT_THAT(url, base::test::ValueIs(GURL(kFileURLWithPDFViewer)));
 }
 
 TEST_F(ChromeExtensionNavigationTest, PrepareURLForNavigationOnDevtools) {

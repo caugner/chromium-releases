@@ -17,11 +17,15 @@
 #import "components/autofill/ios/form_util/form_activity_observer_bridge.h"
 #import "components/autofill/ios/form_util/form_activity_params.h"
 #import "components/password_manager/core/browser/password_counter.h"
+#import "ios/chrome/browser/autofill/bottom_sheet/autofill_bottom_sheet_observer_bridge.h"
+#import "ios/chrome/browser/autofill/bottom_sheet/autofill_bottom_sheet_tab_helper.h"
 #import "ios/chrome/browser/autofill/form_input_accessory_view_handler.h"
 #import "ios/chrome/browser/autofill/form_input_suggestions_provider.h"
 #import "ios/chrome/browser/autofill/form_suggestion_tab_helper.h"
-#import "ios/chrome/browser/default_browser/utils.h"
+#import "ios/chrome/browser/default_browser/model/utils.h"
 #import "ios/chrome/browser/shared/coordinator/chrome_coordinator/chrome_coordinator.h"
+#import "ios/chrome/browser/shared/model/prefs/pref_backed_boolean.h"
+#import "ios/chrome/browser/shared/model/prefs/pref_names.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/shared/public/commands/security_alert_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
@@ -72,7 +76,9 @@ class PasswordCounterDelegateBridge
   password_manager::PasswordCounter counter_;
 };
 
-@interface FormInputAccessoryMediator () <FormActivityObserver,
+@interface FormInputAccessoryMediator () <AutofillBottomSheetObserving,
+                                          BooleanObserver,
+                                          FormActivityObserver,
                                           FormInputAccessoryViewDelegate,
                                           CRWWebStateObserver,
                                           PasswordCounterObserver,
@@ -142,6 +148,10 @@ class PasswordCounterDelegateBridge
   std::unique_ptr<autofill::FormActivityObserverBridge>
       _formActivityObserverBridge;
 
+  // Bridge for the AutofillBottomSheetObserver.
+  std::unique_ptr<autofill::AutofillBottomSheetObserverBridge>
+      _autofillBottomSheetObserverBridge;
+
   // Whether suggestions have previously been shown.
   BOOL _suggestionsHaveBeenShown;
 
@@ -151,6 +161,9 @@ class PasswordCounterDelegateBridge
 
   // If YES `_lastSeenParams` is valid.
   BOOL _hasLastSeenParams;
+
+  // Pref tracking if bottom omnibox is enabled.
+  PrefBackedBoolean* _bottomOmniboxEnabled;
 }
 
 - (instancetype)
@@ -187,6 +200,9 @@ class PasswordCounterDelegateBridge
         _formActivityObserverBridge =
             std::make_unique<autofill::FormActivityObserverBridge>(_webState,
                                                                    self);
+        _autofillBottomSheetObserverBridge =
+            std::make_unique<autofill::AutofillBottomSheetObserverBridge>(
+                self, AutofillBottomSheetTabHelper::FromWebState(webState));
         _webStateObserverBridge =
             std::make_unique<web::WebStateObserverBridge>(self);
         webState->AddObserver(_webStateObserverBridge.get());
@@ -245,6 +261,7 @@ class PasswordCounterDelegateBridge
 - (void)dealloc {
   // TODO(crbug.com/1454777)
   DUMP_WILL_BE_CHECK(!_formActivityObserverBridge.get());
+  DUMP_WILL_BE_CHECK(!_autofillBottomSheetObserverBridge.get());
   DUMP_WILL_BE_CHECK(!_personalDataManager);
   DUMP_WILL_BE_CHECK(!_webState);
   DUMP_WILL_BE_CHECK(!_webStateList);
@@ -252,6 +269,7 @@ class PasswordCounterDelegateBridge
 
 - (void)disconnect {
   _formActivityObserverBridge.reset();
+  _autofillBottomSheetObserverBridge.reset();
   if (_personalDataManager && _personalDataManagerObserver.get()) {
     _personalDataManager->RemoveObserver(_personalDataManagerObserver.get());
     _personalDataManagerObserver.reset();
@@ -267,6 +285,9 @@ class PasswordCounterDelegateBridge
     _webStateListObserver.reset();
     _webStateList = nullptr;
   }
+  [_bottomOmniboxEnabled stop];
+  [_bottomOmniboxEnabled setObserver:nil];
+  _bottomOmniboxEnabled = nil;
 }
 
 - (void)detachFromWebState {
@@ -276,6 +297,7 @@ class PasswordCounterDelegateBridge
     _webStateObserverBridge.reset();
     _webState = nullptr;
     _formActivityObserverBridge.reset();
+    _autofillBottomSheetObserverBridge.reset();
   }
 }
 
@@ -286,6 +308,20 @@ class PasswordCounterDelegateBridge
 #pragma mark - KeyboardNotification
 
 - (void)keyboardWillShow:(NSNotification*)notification {
+  [self updateSuggestionsIfNeeded];
+}
+
+#pragma mark - AutofillBottomSheetObserving
+
+- (void)willShowPaymentsBottomSheetWithParams:
+    (const autofill::FormActivityParams&)params {
+  // Update params in this mediator because -keyboardWillShow will be called
+  // before the bottom sheet is being notified to show and that will call
+  // -retrieveSuggestionsForForm with the last seen params. Depending on what
+  // the current page is auto focused on, it could be the incorrect params and
+  // we need to update it.
+  _lastSeenParams = params;
+  _hasLastSeenParams = YES;
   [self updateSuggestionsIfNeeded];
 }
 
@@ -372,6 +408,11 @@ class PasswordCounterDelegateBridge
   return ChromiumAccessoryViewTextData();
 }
 
+- (void)fromInputAccessoryViewDidTapOmniboxTypingShield:
+    (FormInputAccessoryView*)sender {
+  [self.formNavigationHandler closeKeyboardWithOmniboxTypingShield];
+}
+
 #pragma mark - CRWWebStateObserver
 
 - (void)webStateWasShown:(web::WebState*)webState {
@@ -448,6 +489,22 @@ class PasswordCounterDelegateBridge
   _currentProvider.formInputNavigator = self.formNavigationHandler;
 }
 
+- (void)setOriginalPrefService:(PrefService*)originalPrefService {
+  _originalPrefService = originalPrefService;
+  if (IsBottomOmniboxSteadyStateEnabled() && _originalPrefService) {
+    _bottomOmniboxEnabled =
+        [[PrefBackedBoolean alloc] initWithPrefService:_originalPrefService
+                                              prefName:prefs::kBottomOmnibox];
+    [_bottomOmniboxEnabled setObserver:self];
+    // Initialize to the current value.
+    [self booleanDidChange:_bottomOmniboxEnabled];
+  } else {
+    [_bottomOmniboxEnabled stop];
+    [_bottomOmniboxEnabled setObserver:nil];
+    _bottomOmniboxEnabled = nil;
+  }
+}
+
 #pragma mark - Private
 
 // Returns the reauthentication module, which can be an override for testing
@@ -489,6 +546,10 @@ class PasswordCounterDelegateBridge
     webState->AddObserver(_webStateObserverBridge.get());
     _formActivityObserverBridge =
         std::make_unique<autofill::FormActivityObserverBridge>(webState, self);
+    _autofillBottomSheetObserverBridge =
+        std::make_unique<autofill::AutofillBottomSheetObserverBridge>(
+            self, AutofillBottomSheetTabHelper::FromWebState(webState));
+
     FormSuggestionTabHelper* tabHelper =
         FormSuggestionTabHelper::FromWebState(webState);
     if (tabHelper) {
@@ -578,47 +639,75 @@ class PasswordCounterDelegateBridge
   [self.handler resetFormInputView];
 }
 
+// Logs information about what type of suggestion the user selected.
+- (void)logReauthenticationEvent:(ReauthenticationEvent)reauthenticationEvent
+                     popupItemId:(autofill::PopupItemId)popupItemId {
+  std::string histogramName;
+  if (self.currentProvider.type == SuggestionProviderTypePassword) {
+    histogramName = "IOS.Reauth.Password.Autofill";
+  } else if (self.currentProvider.type == SuggestionProviderTypeAutofill) {
+    switch (popupItemId) {
+      case autofill::PopupItemId::kCreditCardEntry:
+        histogramName = "IOS.Reauth.CreditCard.Autofill";
+        break;
+      case autofill::PopupItemId::kAddressEntry:
+        histogramName = "IOS.Reauth.Address.Autofill";
+        break;
+      default:
+        break;
+    }
+  }
+  if (!histogramName.empty()) {
+    UmaHistogramEnumeration(histogramName, reauthenticationEvent);
+  }
+}
+
+// Handles the selection of a suggestion.
+- (void)handleSuggestion:(FormSuggestion*)formSuggestion {
+  if (self.currentProvider.type == SuggestionProviderTypePassword) {
+    LogLikelyInterestedDefaultBrowserUserActivity(DefaultPromoTypeStaySafe);
+  }
+  if (formSuggestion.featureForIPH.length) {
+    // The IPH is only shown if the suggestion was the first one. It doesn't
+    // matter if the IPH was shown for this suggestion as we don't want to
+    // show more IPH's to the user.
+    [self.handler notifyAutofillSuggestionWithIPHSelected];
+  }
+  [self.currentProvider didSelectSuggestion:formSuggestion];
+}
+
+#pragma mark - Boolean Observer
+
+- (void)booleanDidChange:(id<ObservableBoolean>)observableBoolean {
+  if (observableBoolean == _bottomOmniboxEnabled) {
+    CHECK(IsBottomOmniboxSteadyStateEnabled());
+    [self.consumer newOmniboxPositionIsBottom:_bottomOmniboxEnabled.value];
+  }
+}
+
 #pragma mark - FormSuggestionClient
 
 - (void)didSelectSuggestion:(FormSuggestion*)formSuggestion {
-  UmaHistogramEnumeration("IOS.Reauth.Password.Autofill",
-                          ReauthenticationEvent::kAttempt);
+  [self logReauthenticationEvent:ReauthenticationEvent::kAttempt
+                     popupItemId:formSuggestion.popupItemId];
   LogAutofillUseForDefaultBrowserPromo();
 
-  __weak __typeof(self) weakSelf = self;
-  auto suggestionHandler = ^() {
-    __typeof(self) strongSelf = weakSelf;
-    if (!strongSelf) {
-      return;
-    }
-    if (strongSelf.currentProvider.type == SuggestionProviderTypePassword) {
-      LogLikelyInterestedDefaultBrowserUserActivity(DefaultPromoTypeStaySafe);
-    }
-    if (formSuggestion.featureForIPH.length) {
-      // The IPH is only shown if the suggestion was the first one. It doesn't
-      // matter if the IPH was shown for this suggestion as we don't want to
-      // show more IPH's to the user.
-      [self.handler notifyAutofillSuggestionWithIPHSelected];
-    }
-    [strongSelf.currentProvider didSelectSuggestion:formSuggestion];
-  };
-
   if (!formSuggestion.requiresReauth) {
-    UmaHistogramEnumeration("IOS.Reauth.Password.Autofill",
-                            ReauthenticationEvent::kSuccess);
-    suggestionHandler();
+    [self logReauthenticationEvent:ReauthenticationEvent::kSuccess
+                       popupItemId:formSuggestion.popupItemId];
+    [self handleSuggestion:formSuggestion];
     return;
   }
   if ([self.reauthenticationModule canAttemptReauth]) {
     NSString* reason = l10n_util::GetNSString(IDS_IOS_AUTOFILL_REAUTH_REASON);
     auto completionHandler = ^(ReauthenticationResult result) {
       if (result != ReauthenticationResult::kFailure) {
-        UmaHistogramEnumeration("IOS.Reauth.Password.Autofill",
-                                ReauthenticationEvent::kSuccess);
-        suggestionHandler();
+        [self logReauthenticationEvent:ReauthenticationEvent::kSuccess
+                           popupItemId:formSuggestion.popupItemId];
+        [self handleSuggestion:formSuggestion];
       } else {
-        UmaHistogramEnumeration("IOS.Reauth.Password.Autofill",
-                                ReauthenticationEvent::kFailure);
+        [self logReauthenticationEvent:ReauthenticationEvent::kFailure
+                           popupItemId:formSuggestion.popupItemId];
       }
     };
 
@@ -627,9 +716,9 @@ class PasswordCounterDelegateBridge
                     canReusePreviousAuth:YES
                                  handler:completionHandler];
   } else {
-    UmaHistogramEnumeration("IOS.Reauth.Password.Autofill",
-                            ReauthenticationEvent::kMissingPasscode);
-    suggestionHandler();
+    [self logReauthenticationEvent:ReauthenticationEvent::kMissingPasscode
+                       popupItemId:formSuggestion.popupItemId];
+    [self handleSuggestion:formSuggestion];
   }
 }
 

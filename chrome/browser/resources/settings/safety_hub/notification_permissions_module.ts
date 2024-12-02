@@ -15,15 +15,16 @@ import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
 import 'chrome://resources/cr_elements/cr_button/cr_button.js';
 import '../settings_shared.css.js';
 import '../i18n_setup.js';
+import '../icons.html.js';
 
 import {CrActionMenuElement} from 'chrome://resources/cr_elements/cr_action_menu/cr_action_menu.js';
 import {CrToastElement} from 'chrome://resources/cr_elements/cr_toast/cr_toast.js';
 import {I18nMixin} from 'chrome://resources/cr_elements/i18n_mixin.js';
 import {WebUiListenerMixin} from 'chrome://resources/cr_elements/web_ui_listener_mixin.js';
-import {assert, assertNotReached} from 'chrome://resources/js/assert_ts.js';
+import {assert, assertNotReached} from 'chrome://resources/js/assert.js';
 import {EventTracker} from 'chrome://resources/js/event_tracker.js';
 import {PluralStringProxyImpl} from 'chrome://resources/js/plural_string_proxy.js';
-import {isUndoKeyboardEvent} from 'chrome://resources/js/util_ts.js';
+import {isUndoKeyboardEvent} from 'chrome://resources/js/util.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {BaseMixin} from '../base_mixin.js';
@@ -86,6 +87,9 @@ export class SettingsSafetyHubNotificationPermissionsModuleElement extends
       // Text below primary header label.
       subheaderString_: String,
 
+      // The icon next to primary header label.
+      headerIconString_: String,
+
       // The text that will be shown in the undo toast element.
       toastText_: String,
 
@@ -118,6 +122,7 @@ export class SettingsSafetyHubNotificationPermissionsModuleElement extends
 
   private headerString_: string;
   private subheaderString_: string;
+  private headerIconString_: string;
   private toastText_: string|null;
   private sites_: NotificationPermissionsDisplay[]|null;
   private shouldShowCompletionInfo_: boolean;
@@ -167,6 +172,14 @@ export class SettingsSafetyHubNotificationPermissionsModuleElement extends
             ({...site, detail: site.notificationInfoString}));
   }
 
+  private async setHeaderToCompletionState_() {
+    this.headerString_ = this.toastText_ ?
+        this.toastText_ :
+        this.i18n('safetyCheckNotificationPermissionReviewDoneLabel');
+    this.subheaderString_ = '';
+    this.headerIconString_ = 'cr:check';
+  }
+
   private async onSitesChanged_() {
     if (this.sites_ === null) {
       return;
@@ -180,22 +193,18 @@ export class SettingsSafetyHubNotificationPermissionsModuleElement extends
     this.renderedOrigins_ = this.sites_.map(site => site.origin);
 
     if (this.shouldShowCompletionInfo_) {
-      // In the completion state, the header string should be replaced with
-      // completion string.
-      this.headerString_ =
-          this.i18n('safetyCheckNotificationPermissionReviewDoneLabel');
-      this.subheaderString_ = '';
+      this.setHeaderToCompletionState_();
       return;
     }
 
     this.headerString_ =
         await PluralStringProxyImpl.getInstance().getPluralString(
-            'safetyCheckNotificationPermissionReviewPrimaryLabel',
-            this.sites_.length);
+            'safetyHubNotificationPermissionsPrimaryLabel', this.sites_.length);
     this.subheaderString_ =
         await PluralStringProxyImpl.getInstance().getPluralString(
-            'safetyCheckNotificationPermissionReviewSecondaryLabel',
+            'safetyHubNotificationPermissionsSecondaryLabel',
             this.sites_.length);
+    this.headerIconString_ = 'settings:notifications-none';
   }
 
   private onBlockClick_(e: CustomEvent<NotificationPermission>) {
@@ -249,6 +258,13 @@ export class SettingsSafetyHubNotificationPermissionsModuleElement extends
     // origins that were blocked.
     assert(this.sites_);
     this.lastOrigins_ = this.sites_.map(site => site.origin);
+
+    // Pre-emptively set the header to the completion state, as that is the
+    // state we expect at the end of the animation. In the corner case that
+    // another site was added to the list at exactly the same time as the
+    // animation runs, the callback will still re-render the header correctly.
+    this.setHeaderToCompletionState_();
+
     this.$.module.animateHide(
         /* all origins */ null,
         this.browserProxy_.blockNotificationPermissionForOrigins.bind(

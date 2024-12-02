@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "ash/constants/ash_features.h"
 #include "base/check.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/id_map.h"
@@ -320,6 +321,9 @@ void AddPrintPreviewFlags(content::WebUIDataSource* source, Profile* profile) {
   source->AddBoolean(
       "isPrintPreviewSetupAssistanceEnabled",
       base::FeatureList::IsEnabled(::features::kPrintPreviewSetupAssistance));
+  source->AddBoolean(
+      "isLocalPrinterObservingEnabled",
+      base::FeatureList::IsEnabled(::features::kLocalPrinterObserving));
 #else
   bool system_default_printer = profile->GetPrefs()->GetBoolean(
       prefs::kPrintPreviewUseSystemDefaultPrinter);
@@ -387,6 +391,28 @@ PrintPreviewHandler* CreatePrintPreviewHandlers(content::WebUI* web_ui) {
 }
 
 }  // namespace
+
+PrintPreviewUIConfig::PrintPreviewUIConfig()
+    : WebUIConfig(content::kChromeUIScheme, chrome::kChromeUIPrintHost) {}
+
+bool PrintPreviewUIConfig::IsWebUIEnabled(
+    content::BrowserContext* browser_context) {
+  Profile* profile = Profile::FromBrowserContext(browser_context);
+  bool disabled = profile->GetPrefs()->GetBoolean(prefs::kPrintPreviewDisabled);
+  return !disabled;
+}
+
+bool PrintPreviewUIConfig::ShouldHandleURL(const GURL& url) {
+  return url.path() == "/" || url.path() == "/test_loader.html";
+}
+
+PrintPreviewUIConfig::~PrintPreviewUIConfig() = default;
+
+std::unique_ptr<content::WebUIController>
+PrintPreviewUIConfig::CreateWebUIController(content::WebUI* web_ui,
+                                            const GURL& url) {
+  return std::make_unique<PrintPreviewUI>(web_ui);
+}
 
 WEB_UI_CONTROLLER_TYPE_IMPL(PrintPreviewUI)
 

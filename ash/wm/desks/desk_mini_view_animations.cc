@@ -23,6 +23,7 @@
 #include "base/functional/bind.h"
 #include "base/functional/callback_forward.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "chromeos/constants/chromeos_features.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_observer.h"
@@ -707,9 +708,11 @@ void PerformDeskBarSlideAnimation(std::unique_ptr<views::Widget> desks_widget,
 
   // The desks widget should no longer process events at this point.
   desks_widget->SetVisibilityChangedAnimationsEnabled(false);
+  desks_widget->widget_delegate()->SetCanActivate(false);
   desks_widget->GetNativeWindow()->SetEventTargetingPolicy(
       aura::EventTargetingPolicy::kNone);
-  desks_widget->widget_delegate()->SetCanActivate(false);
+  desks_widget->GetContentsView()->SetCanProcessEventsWithinSubtree(false);
+  desks_widget->GetFocusManager()->set_shortcut_handling_suspended(true);
 
   gfx::Transform transform;
   transform.Translate(0, -desks_widget->GetWindowBoundsInScreen().height());

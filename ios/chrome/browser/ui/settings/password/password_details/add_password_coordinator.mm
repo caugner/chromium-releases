@@ -9,8 +9,8 @@
 #import "base/metrics/histogram_functions.h"
 #import "base/strings/sys_string_conversions.h"
 #import "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/passwords/ios_chrome_password_check_manager.h"
-#import "ios/chrome/browser/passwords/ios_chrome_password_check_manager_factory.h"
+#import "ios/chrome/browser/passwords/model/ios_chrome_password_check_manager.h"
+#import "ios/chrome/browser/passwords/model/ios_chrome_password_check_manager_factory.h"
 #import "ios/chrome/browser/shared/coordinator/alert/alert_coordinator.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
 #import "ios/chrome/browser/shared/model/browser_state/chrome_browser_state.h"
@@ -80,6 +80,7 @@
 - (void)start {
   ChromeBrowserState* browserState = self.browser->GetBrowserState();
   self.viewController = [[AddPasswordViewController alloc] init];
+  self.viewController.presentationController.delegate = self;
 
   self.mediator = [[AddPasswordMediator alloc]
           initWithDelegate:self
@@ -117,6 +118,13 @@
   self.viewController = nil;
 
   [self stopReauthCoordinator];
+}
+
+#pragma mark - UIAdaptivePresentationControllerDelegate
+
+- (void)presentationControllerDidDismiss:
+    (UIPresentationController*)presentationController {
+  [self.delegate passwordDetailsTableViewControllerDidFinish:self];
 }
 
 #pragma mark - AddPasswordMediatorDelegate

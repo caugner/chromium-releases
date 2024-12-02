@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {assert} from 'chrome://resources/js/assert_ts.js';
+import {assert} from 'chrome://resources/js/assert.js';
 import {addWebUiListener, sendWithPromise} from 'chrome://resources/js/cr.js';
 
 export interface ClientInfo {
@@ -43,7 +43,6 @@ interface GpuInfo {
   compositorInfo: any[];
   dawnInfo?: string[];
   devicePerfInfo: any[];
-  devices: any[];
   diagnostics?: any[];
   displayInfo: any[];
   featureStatus: FeatureStatus;
