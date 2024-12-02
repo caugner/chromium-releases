@@ -304,14 +304,6 @@ using feed::FeedUserActionType;
       base::UserMetricsAction(kDiscoverFeedUserActionManageActivityTapped));
 }
 
-- (void)recordHeaderMenuManageInterestsTapped {
-  [self recordDiscoverFeedUserActionHistogram:FeedUserActionType::
-                                                  kTappedManageInterests
-                                asInteraction:NO];
-  base::RecordAction(
-      base::UserMetricsAction(kDiscoverFeedUserActionManageInterestsTapped));
-}
-
 - (void)recordHeaderMenuManageHiddenTapped {
   [self recordDiscoverFeedUserActionHistogram:FeedUserActionType::
                                                   kTappedManageHidden
@@ -583,7 +575,10 @@ using feed::FeedUserActionType;
 
 - (void)recordFeedSelected:(FeedType)feedType
     fromPreviousFeedPosition:(NSUInteger)index {
-  DCHECK(self.followDelegate);
+  if (!self.followDelegate) {
+    NOTREACHED(base::NotFatalUntil::M129);
+    return;
+  }
   switch (feedType) {
     case FeedTypeDiscover:
       [self recordDiscoverFeedUserActionHistogram:FeedUserActionType::
@@ -1229,16 +1224,15 @@ using feed::FeedUserActionType;
   base::Time now = base::Time::Now();
   base::TimeDelta additionalTimeInFeed = now - self.feedBecameVisibleTime;
 
-  if (self.feedBecameVisibleTime.is_null()) {
-    base::debug::DumpWithoutCrashing();
-  }
   if (additionalTimeInFeed.is_negative()) {
-    base::debug::DumpWithoutCrashing();
+    // TODO(crbug.com/340554892): Fix Good Visits metric.
+    // Temporary fix, but it should reduce the number of occurances.
+    self.feedBecameVisibleTime = now;
+    additionalTimeInFeed = now - self.feedBecameVisibleTime;
   }
   // Temporary fix to resolve negative values in prefs.
   // TODO(crbug.com/329274886): Remove fix once crashes are down to zero.
   if (self.previousTimeInFeedForGoodVisitSession < 0) {
-    base::debug::DumpWithoutCrashing();
     self.previousTimeInFeedForGoodVisitSession = 0;
   }
   self.previousTimeInFeedForGoodVisitSession =

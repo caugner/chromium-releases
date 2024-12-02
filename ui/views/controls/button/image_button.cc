@@ -2,6 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#if defined(UNSAFE_BUFFERS_BUILD)
+// TODO(https://crbug.com/344639839): fix the unsafe buffer errors in this file,
+// then remove this pragma.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "ui/views/controls/button/image_button.h"
 
 #include <utility>
@@ -16,6 +22,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/scoped_canvas.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/animation/ink_drop.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/highlight_path_generator.h"
@@ -249,6 +256,16 @@ gfx::ImageSkia ImageButton::GetImageToPaint() {
   return !img.isNull() ? img : images_[STATE_NORMAL].Rasterize(color_provider);
 }
 
+void ToggleImageButton::UpdateAccessibleRoleIfNeeded() {
+  if ((toggled_ && !images_[ButtonState::STATE_NORMAL].IsEmpty()) ||
+      (!toggled_ && !alternate_images_[ButtonState::STATE_NORMAL].IsEmpty())) {
+    GetViewAccessibility().SetRole(ax::mojom::Role::kToggleButton);
+    return;
+  }
+
+  GetViewAccessibility().SetRole(ax::mojom::Role::kButton);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // ImageButton, private:
 
@@ -301,6 +318,7 @@ void ToggleImageButton::SetToggled(bool toggled) {
   toggled_ = toggled;
 
   OnPropertyChanged(&toggled_, kPropertyEffectsPaint);
+  UpdateAccessibleRoleIfNeeded();
   NotifyAccessibilityEvent(ax::mojom::Event::kCheckedStateChanged, true);
 }
 
@@ -320,6 +338,8 @@ void ToggleImageButton::SetToggledImageModel(
   } else {
     alternate_images_[image_state] = image_model;
   }
+
+  UpdateAccessibleRoleIfNeeded();
 }
 
 void ToggleImageButton::SetToggledBackground(std::unique_ptr<Background> b) {
@@ -368,6 +388,8 @@ void ToggleImageButton::SetImageModel(ButtonState image_state,
       SchedulePaint();
   }
   PreferredSizeChanged();
+
+  UpdateAccessibleRoleIfNeeded();
 }
 
 void ToggleImageButton::OnPaintBackground(gfx::Canvas* canvas) {
@@ -403,7 +425,6 @@ void ToggleImageButton::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   // accessible toggle button.
   if ((toggled_ && !images_[ButtonState::STATE_NORMAL].IsEmpty()) ||
       (!toggled_ && !alternate_images_[ButtonState::STATE_NORMAL].IsEmpty())) {
-    node_data->role = ax::mojom::Role::kToggleButton;
     node_data->SetCheckedState(toggled_ ? ax::mojom::CheckedState::kTrue
                                         : ax::mojom::CheckedState::kFalse);
   }

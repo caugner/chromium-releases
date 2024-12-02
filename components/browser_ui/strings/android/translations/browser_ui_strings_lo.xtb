@@ -68,7 +68,6 @@
 <translation id="2241587408274973373">ບັດໜ້າແຖບໃໝ່</translation>
 <translation id="2241634353105152135">ຄັ້ງ​ດຽວ​ເທົ່າ​ນັ້ນ</translation>
 <translation id="2253414712144136228"><ph name="NAME_OF_LIST_ITEM" /> ລຶບອອກ</translation>
-<translation id="2253989982043948086">{NUM_SELECTED,plural, =1{ມີ 1 ເວັບໄຊທີ່ຖືກບລັອກ}other{ມີ # ເວັບໄຊທີ່ຖືກບລັອກ}}</translation>
 <translation id="228293613124499805">ເວັບໄຊສ່ວນຫຼາຍທີ່ທ່ານເຂົ້າຈະບັນທຶກຂໍ້ມູນໄປໃສ່ອຸປະກອນຂອງທ່ານ, ສ່ວນຫຼາຍແມ່ນເພື່ອປັບປຸງປະສົບການຂອງທ່ານໂດຍການບັນທຶກການຕັ້ງຄ່າ ຫຼື ຂໍ້ມູນທີ່ທ່ານແບ່ງປັນກັບເວັບໄຊ. ພວກເຮົາແນະນຳໃຫ້ເປີດການຕັ້ງຄ່ານີ້ໄວ້.</translation>
 <translation id="2289270750774289114">ຖາມເມື່ອເວັບໄຊຕ້ອງການກວດຫາອຸປະກອນ Bluetooth ທີ່ຢູ່ໃກ້ຄຽງ (ແນະນຳ)</translation>
 <translation id="2315043854645842844">ການ​ເລືອກ​ໃບ​ຢັ້ງ​ຢືນເບື້ອງ​ລູກ​ຂ່າຍ​ບໍ່​ຖືກ​ຮອງ​ຮັບ​ໂດຍ​ລະ​ບົບ​ປະຕິບັດການ.</translation>
@@ -98,7 +97,6 @@
 <translation id="2586657967955657006">ຄລິບບອດ</translation>
 <translation id="2597457036804169544">ຢ່ານຳໃຊ້ຮູບແບບສີສັນມືດໃສ່ເວັບໄຊ</translation>
 <translation id="2606760465469169465">ຢັ້ງຢືນອັດຕະໂນມັດ</translation>
-<translation id="2613007545732217283"><ph name="HOST_NAME" /> <ph name="SEPARATOR" /> <ph name="RECENCY" /></translation>
 <translation id="2621115761605608342">ອະນຸຍາດ JavaScript ສຳລັບເວັບໄຊສະເພາະໃດໜຶ່ງ.</translation>
 <translation id="2653659639078652383">ສົ່ງ</translation>
 <translation id="2677748264148917807">ອອກ​ໄປ</translation>
@@ -174,6 +172,7 @@
 <translation id="3859306556332390985">ເລື່ອນໄປໜ້າ</translation>
 <translation id="3895926599014793903">ບັງຄັບໃຫ້ເປີດ​ໃຊ້​ການ​ຊູມ</translation>
 <translation id="3908288065506437185">ບລັອກຄຸກກີ້ພາກສ່ວນທີສາມໃນໂໝດບໍ່ເປີດເຜີຍຕົວຕົນ</translation>
+<translation id="3913461097001554748"><ph name="DOMAIN_URL" /> <ph name="SEPARATOR1" /> <ph name="DEVICE_NAME" /></translation>
 <translation id="3918378745482005425">ຄຸນສົມບັດບາງຢ່າງອາດບໍ່ເຮັດວຽກ. ເວັບໄຊທີ່ກ່ຽວຂ້ອງຍັງສາມາດໃຊ້ຄຸກກີ້ພາກສ່ວນທີສາມຢູ່.</translation>
 <translation id="3933121352599513978">ຫຍໍ້ການ​ຮ້ອງ​ຂໍທີ່ບໍ່ຕ້ອງການລົງ (ແນະນຳ)</translation>
 <translation id="3955193568934677022">ອະນຸຍາດໃຫ້ເວັບໄຊຕ່າງໆຫຼິ້ນເນື້ອຫາທີ່ໄດ້ຮັບການປົກປ້ອງ (ແນະນຳ)</translation>
@@ -191,7 +190,6 @@
 <translation id="4169549551965910670">ເຊື່ອມຕໍ່ຫາອຸປະກອນ USB ແລ້ວ</translation>
 <translation id="4194328954146351878">ຖາມກ່ອນການອະນຸຍາດໃຫ້ເວັບໄຊເບິ່ງເຫັນ ແລະ ປ່ຽນຂໍ້ມູນຢູ່ອຸປະກອນ NFC (ແນະນຳ)</translation>
 <translation id="4200726100658658164">ເປີດການຕັ້ງຄ່າສະຖານທີ່</translation>
-<translation id="4206661981211220935"><ph name="RECENCY" /> <ph name="SEPARATOR" /> ຈາກ <ph name="FROM_DEVICE" /></translation>
 <translation id="4226663524361240545">ການແຈ້ງເຕືອນອາດຈະເຮັດໃຫ້ອຸປະກອນສັ່ນ</translation>
 <translation id="4259722352634471385">ການນໍາທາງຖືກບລັອກໄວ້: <ph name="URL" /></translation>
 <translation id="4278390842282768270">ອະນຸຍາດແລ້ວ</translation>
@@ -199,7 +197,6 @@
 <translation id="42981349822642051">ຂະ​ຫຍາຍ</translation>
 <translation id="4336219115486912529">{COUNT,plural, =1{ໝົດອາຍຸມື້ອື່ນ}other{ໝົດອາຍຸໃນ # ມື້}}</translation>
 <translation id="4336566011000459927">Chrome ຈະຈຳກັດຄຸກກີ້ອີກເທື່ອໜຶ່ງໃນມື້ນີ້</translation>
-<translation id="4336836404251800362"><ph name="RECENCY" /> <ph name="SEPARATOR" /> ແຖບສຸດທ້າຍຂອງທ່ານ</translation>
 <translation id="4338831206024587507">ເວັບໄຊທັງໝົດພາຍໃຕ້ <ph name="DOMAIN" /></translation>
 <translation id="4402755511846832236">ບລັອກບໍ່ໃຫ້ເວັບໄຊຮູ້ໃນເວລາທີ່ທ່ານກຳລັງໃຊ້ອຸປະກອນນີ້ຢູ່</translation>
 <translation id="4412992751769744546">ອະ​ນຸ​ຍາດ​ຄຸກ​ກີ້​ບຸກ​ຄົນ​ທີ​ສາມ</translation>
@@ -360,7 +357,6 @@
 <translation id="6790428901817661496">​ຫຼິ້ນ</translation>
 <translation id="6818926723028410516">ເລືອກລາຍການ</translation>
 <translation id="6864395892908308021">ອຸປະກອນນີ້ບໍ່ສາມາດອ່ານ NFC ໄດ້</translation>
-<translation id="6867014948848323204">ຈາກ <ph name="FROM_DEVICE" /></translation>
 <translation id="6912998170423641340">ບລັອກບໍ່ໃຫ້ເວັບໄຊອ່ານຂໍ້ຄວາມ ແລະ ຮູບພາບຈາກຄລິບບອດ</translation>
 <translation id="6945221475159498467">ເລືອກ</translation>
 <translation id="6950072572526089586">ເວັບໄຊທີ່ທ່ານເຂົ້າເບິ່ງສາມາດບັນທຶກຂໍ້ມູນກ່ຽວກັບສິ່ງທີ່ທ່ານເຮັດຢູ່ເພື່ອໃຫ້ມັນເຮັດວຽກໄດ້ຕາມທີ່ຕ້ອງການ — ຕົວຢ່າງ: ເພື່ອໃຫ້ທ່ານເຂົ້າສູ່ລະບົບເວັບໄຊຄ້າງໄວ້ ຫຼື ບັນທຶກສິນຄ້າໄວ້ໃນກະຕ່າຊື້ເຄື່ອງຂອງທ່ານ. ເວັບໄຊຕ່າງໆມັກຈະບັນທຶກຂໍ້ມູນນີ້ໄວ້ຊົ່ວຄາວຢູ່ໃນອຸປະກອນຂອງທ່ານ.</translation>
@@ -480,7 +476,6 @@
 <translation id="8721719390026067591">ເມື່ອເປີດ, ເວັບໄຊສາມາດຂໍຊອກຫາອຸປະກອນ Bluetooth ໄດ້. ເມື່ອປິດ, ເວັບໄຊບໍ່ສາມາດຊອກຫາອຸປະກອນ Bluetooth ໄດ້.</translation>
 <translation id="8725066075913043281">ລອງໃໝ່ອີກ</translation>
 <translation id="8730621377337864115">ສໍາເລັດ</translation>
-<translation id="8736193154595564524">{NUM_SELECTED,plural, =1{ມີ 1 ເວັບໄຊທີ່ອະນຸຍາດ}other{ມີ # ເວັບໄຊທີ່ອະນຸຍາດ}}</translation>
 <translation id="8751914237388039244">ເລືອກຮູບ</translation>
 <translation id="8800034312320686233">ເວັບໄຊໃຊ້ບໍ່ໄດ້ບໍ?</translation>
 <translation id="8801436777607969138">ບລັອກ JavaScript ສຳລັບເວັບໄຊສະເພາະ.</translation>

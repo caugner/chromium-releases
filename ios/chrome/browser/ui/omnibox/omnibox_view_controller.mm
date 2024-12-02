@@ -413,6 +413,7 @@ using base::UserMetricsAction;
 }
 
 - (void)textFieldDidRemoveAdditionalText:(OmniboxTextFieldIOS*)textField {
+  base::RecordAction(UserMetricsAction("MobileOmniboxRichInlineRemoved"));
   if (_textChangeDelegate) {
     _textChangeDelegate->OnRemoveAdditionalText();
   }
@@ -452,7 +453,7 @@ using base::UserMetricsAction;
   } else if ([self.textField canPerformKeyboardAction:keyboardAction]) {
     [self.textField performKeyboardAction:keyboardAction];
   } else {
-    NOTREACHED() << "Check canPerformKeyboardAction before!";
+    NOTREACHED_IN_MIGRATION() << "Check canPerformKeyboardAction before!";
   }
 }
 

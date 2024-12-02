@@ -47,6 +47,7 @@
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 #include "chrome/browser/ui/layout_constants.h"
+#include "chrome/browser/ui/lens/lens_overlay_controller.h"
 #include "chrome/browser/ui/omnibox/chrome_omnibox_client.h"
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller.h"
 #include "chrome/browser/ui/side_search/side_search_utils.h"
@@ -59,7 +60,6 @@
 #include "chrome/browser/ui/views/location_bar/intent_chip_button.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_layout.h"
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
-#include "chrome/browser/ui/views/location_bar/read_anything_icon_view.h"
 #include "chrome/browser/ui/views/location_bar/selected_keyword_view.h"
 #include "chrome/browser/ui/views/location_bar/star_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
@@ -82,6 +82,7 @@
 #include "components/content_settings/core/common/features.h"
 #include "components/dom_distiller/core/dom_distiller_features.h"
 #include "components/favicon/content/content_favicon_driver.h"
+#include "components/lens/lens_features.h"
 #include "components/omnibox/browser/location_bar_model.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
@@ -204,9 +205,7 @@ LocationBarView::LocationBarView(Browser* browser,
           return v->omnibox_view_->model()->is_caret_visible() &&
                  !v->GetOmniboxPopupView()->IsOpen();
         }));
-    if (features::IsChromeRefresh2023()) {
-      views::FocusRing::Get(this)->SetOutsetFocusRingDisabled(true);
-    }
+    views::FocusRing::Get(this)->SetOutsetFocusRingDisabled(true);
     views::InstallPillHighlightPathGenerator(this);
 
 #if BUILDFLAG(IS_MAC)
@@ -345,6 +344,7 @@ void LocationBarView::Init() {
       params.types_enabled.push_back(
           PageActionIconType::kProductSpecifications);
     }
+
     params.types_enabled.push_back(PageActionIconType::kPriceInsights);
     params.types_enabled.push_back(PageActionIconType::kPriceTracking);
 
@@ -365,16 +365,11 @@ void LocationBarView::Init() {
     params.types_enabled.push_back(PageActionIconType::kZoom);
     params.types_enabled.push_back(PageActionIconType::kFileSystemAccess);
 
-    if (features::IsReadAnythingOmniboxIconEnabled()) {
-      params.types_enabled.push_back(PageActionIconType::kReadAnything);
-    }
     params.types_enabled.push_back(PageActionIconType::kCookieControls);
     params.types_enabled.push_back(
         PageActionIconType::kPaymentsOfferNotification);
     params.types_enabled.push_back(PageActionIconType::kMemorySaver);
   }
-  // Add icons only when feature is not enabled. Otherwise icons will
-  // be added to the ToolbarPageActionIconContainerView.
   params.types_enabled.push_back(PageActionIconType::kSaveCard);
   params.types_enabled.push_back(PageActionIconType::kSaveIban);
   params.types_enabled.push_back(PageActionIconType::kLocalCardMigration);
@@ -387,14 +382,22 @@ void LocationBarView::Init() {
   // mocks.
   params.types_enabled.push_back(PageActionIconType::kAutofillAddress);
 
-  if (browser_) {
-    if (sharing_hub::HasPageAction(profile_, is_popup_mode_) &&
-        !features::IsChromeRefresh2023()) {
-      params.types_enabled.push_back(PageActionIconType::kSharingHub);
+  if (browser_ && LensOverlayController::IsEnabled(browser_) &&
+      lens::features::IsOmniboxEntryPointEnabled()) {
+    // The persistent compact entrypoint should be positioned directly before
+    // the star icon and the prominent expanding entrypoint should be
+    // positioned in the leading position.
+    if (lens::features::IsOmniboxEntrypointAlwaysVisible()) {
+      params.types_enabled.push_back(PageActionIconType::kLensOverlay);
+    } else {
+      params.types_enabled.insert(params.types_enabled.begin(),
+                                  PageActionIconType::kLensOverlay);
     }
   }
-  if (browser_ && !is_popup_mode_)
+
+  if (browser_ && !is_popup_mode_) {
     params.types_enabled.push_back(PageActionIconType::kBookmarkStar);
+  }
 
   params.icon_color = color_provider->GetColor(kColorPageActionIcon);
   params.between_icon_spacing = 8;
@@ -531,6 +534,54 @@ OmniboxView* LocationBarView::GetOmniboxView() {
   return omnibox_view_;
 }
 
+void LocationBarView::AddedToWidget() {
+  if (lens::features::IsOmniboxEntryPointEnabled() &&
+      LensOverlayController::IsEnabled(browser_) && GetFocusManager()) {
+    CHECK(!focus_manager_);
+    focus_manager_ = GetFocusManager();
+    focus_manager_->AddFocusChangeListener(this);
+  }
+}
+
+void LocationBarView::RemovedFromWidget() {
+  // No-op unless registered (see above).
+  if (focus_manager_) {
+    focus_manager_->RemoveFocusChangeListener(this);
+    focus_manager_ = nullptr;
+  }
+}
+
+void LocationBarView::OnWillChangeFocus(views::View* before, views::View* now) {
+}
+
+void LocationBarView::OnDidChangeFocus(views::View* before, views::View* now) {
+  // This is very blunt. There's a page action (LensOverlayPageActionView) whose
+  // visibility state depends on whether focus is within the location bar or
+  // not. Maybe that dependency should be better understood rather than "refresh
+  // all page actions if focus changes". For now for expediency we update the
+  // page actions when focus changes under the assumption that this in practice
+  // isn't likely to be janky (or we already have a problem here).
+  //
+  // TODO(pbos): We should move focus listening to the LensOverlayPageActionView
+  // instead and have that invoke LocationBarView::RefreshPageActionIconViews
+  // instead. That would make sure that its dependency on FocusManager is
+  // explicit and also make sure that the corresponding focus-listening code
+  // would get cleaned up if no page action needs it. It would also be great if
+  // views supported declaring interest in whether focus is inside / outside a
+  // View hierarchy rather than monitoring any focus changes.
+  //
+  // We post a task instead of synchronously updating the page actions due to a
+  // bug where navigation triggers dialog closure which triggers a focus change
+  // which calls here. If we directly call UpdateAll() here then
+  // CookieControlsIconView will try to prompt a RenderFrameHost::IsSandboxed()
+  // but the RenderFrameHost hasn't yet been updated to be queryable for
+  // IsSandboxed() during this stack so we crash. By posting a task we make sure
+  // the RenderFrameHost is not in the middle of updating its own state.
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(&LocationBarView::RefreshPageActionIconViews,
+                                weak_factory_.GetWeakPtr()));
+}
+
 bool LocationBarView::HasFocus() const {
   return omnibox_view_ && omnibox_view_->model()->has_focus();
 }
@@ -604,7 +655,8 @@ void LocationBarView::Layout(PassKey) {
 
   selected_keyword_view_->SetVisible(false);
 
-  const int edge_padding = GetLayoutConstant(LOCATION_BAR_ELEMENT_PADDING);
+  const int trailing_decoration_inner_padding =
+      GetLayoutConstant(LOCATION_BAR_TRAILING_DECORATION_INNER_PADDING);
 
   // The text should be indented only if these are all true:
   //  - The popup is open.
@@ -676,7 +728,8 @@ void LocationBarView::Layout(PassKey) {
   LocationBarLayout leading_decorations(LocationBarLayout::Position::kLeftEdge,
                                         text_left);
   LocationBarLayout trailing_decorations(
-      LocationBarLayout::Position::kRightEdge, edge_padding);
+      LocationBarLayout::Position::kRightEdge,
+      trailing_decoration_inner_padding);
 
   const std::u16string keyword(omnibox_view_->model()->keyword());
   // In some cases (e.g. fullscreen mode) we may have 0 height.  We still want
@@ -751,14 +804,12 @@ void LocationBarView::Layout(PassKey) {
   add_trailing_decoration(page_action_icon_container_,
                           /*intra_item_padding=*/0);
   for (ContentSettingImageView* view : base::Reversed(content_setting_views_)) {
-    int intra_item_padding =
-        features::IsChromeRefresh2023() ? kContentSettingIntraItemPadding : 0;
+    int intra_item_padding = kContentSettingIntraItemPadding;
     add_trailing_decoration(view, intra_item_padding);
   }
 
   if (intent_chip_) {
-    int intra_item_padding =
-        features::IsChromeRefresh2023() ? kIntentChipIntraItemPadding : 0;
+    int intra_item_padding = kIntentChipIntraItemPadding;
     add_trailing_decoration(intent_chip_, intra_item_padding);
   }
 
@@ -766,8 +817,18 @@ void LocationBarView::Layout(PassKey) {
 
   // Perform layout.
   int entry_width = width();
-  leading_decorations.LayoutPass1(&entry_width);
-  trailing_decorations.LayoutPass1(&entry_width);
+
+  // Use the unelided omnibox width as the `reserved_width` so preferred size
+  // calculations of decorations are calculated to maximize this constraint.
+  // TODO(crbug.com/350541615): This can be removed once current non-resizable
+  // decorations are updated to support LocationBayLayout::auto_collapse.
+  const int inset_width = GetInsets().width();
+  const int padding = GetLayoutConstant(LOCATION_BAR_ELEMENT_PADDING);
+  const int unelided_omnibox_width = omnibox_view_->GetUnelidedTextWidth();
+  const int reserved_width = unelided_omnibox_width + inset_width + padding * 2;
+
+  leading_decorations.LayoutPass1(&entry_width, reserved_width);
+  trailing_decorations.LayoutPass1(&entry_width, reserved_width);
   leading_decorations.LayoutPass2(&entry_width);
   trailing_decorations.LayoutPass2(&entry_width);
 
@@ -1560,14 +1621,25 @@ ui::ImageModel LocationBarView::GetLocationIcon(
 }
 
 void LocationBarView::UpdateChipVisibility() {
-  if (!GetChipController()->chip()->GetVisible()) {
+  if (!IsEditingOrEmpty()) {
     return;
   }
 
-  if (IsEditingOrEmpty()) {
+  if (GetChipController()->chip()->GetVisible()) {
     // If a user starts typing, a permission request should be ignored and the
     // chip finalized.
     GetChipController()->ResetPermissionPromptChip();
+  }
+
+  if (base::FeatureList::IsEnabled(
+          content_settings::features::kLeftHandSideActivityIndicators)) {
+    // Hide the LHS indicator to prevent it appearing in the location bar
+    // search panel.
+    // This is needed only if the indicator is already visible. If the
+    // location bar is in editing mode, we do not show new indicators.
+    if (permission_dashboard_view_->GetVisible()) {
+      permission_dashboard_view_->SetVisible(false);
+    }
   }
 }
 

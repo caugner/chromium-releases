@@ -30,7 +30,6 @@
 #include "third_party/blink/renderer/core/css/selector_checker.h"
 
 #include "base/auto_reset.h"
-#include "style_rule.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
 #include "third_party/blink/renderer/core/css/check_pseudo_has_argument_context.h"
 #include "third_party/blink/renderer/core/css/check_pseudo_has_cache_scope.h"
@@ -38,6 +37,7 @@
 #include "third_party/blink/renderer/core/css/part_names.h"
 #include "third_party/blink/renderer/core/css/post_style_update_scope.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
+#include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/core/css/style_scope_data.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
@@ -73,6 +73,7 @@
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
 #include "third_party/blink/renderer/core/html/track/vtt/vtt_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/core/layout/custom_scrollbar.h"
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/scrolling/fragment_anchor.h"
@@ -82,6 +83,7 @@
 #include "third_party/blink/renderer/core/scroll/scrollable_area.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/view_transition/view_transition.h"
 #include "third_party/blink/renderer/core/view_transition/view_transition_utils.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -387,6 +389,7 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForSubSelector(
   }
 
   next_context.has_selection_pseudo = dynamic_pseudo == kPseudoIdSelection;
+  next_context.has_search_text_pseudo = dynamic_pseudo == kPseudoIdSearchText;
   next_context.is_sub_selector = true;
   return MatchSelector(next_context, result);
 }
@@ -591,7 +594,7 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForRelation(
     case CSSSelector::kScopeActivation:
       break;
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return kSelectorFailsCompletely;
 }
 
@@ -663,7 +666,7 @@ static bool AttributeValueMatches(const Attribute& attribute_item,
       }
       return true;
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return false;
   }
 }
@@ -810,7 +813,7 @@ ALWAYS_INLINE bool SelectorChecker::CheckOne(
       return CheckPseudoElement(context, result);
 
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return false;
   }
 }
@@ -936,7 +939,7 @@ inline bool CacheMatchedElementsAndReturnMatchedResult(
           has_anchor_element, has_argument_leftmost_compound_matches,
           cache_scope_context, TraverseToPreviousSibling);
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return false;
   }
 }
@@ -1004,7 +1007,7 @@ void SetAffectedByHasFlagsForHasAnchorElement(
           argument_context.GetSiblingsAffectedByHasFlags());
       break;
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       break;
   }
 }
@@ -1256,6 +1259,11 @@ EarlyBreakOnHasArgumentChecking CheckEarlyBreakForHasArgument(
   }
 
   return kNoEarlyBreak;
+}
+
+bool MatchesExternalSVGUseTarget(Element& element) {
+  const auto* svg_element = DynamicTo<SVGElement>(element);
+  return svg_element && svg_element->IsResourceTarget();
 }
 
 }  // namespace
@@ -1579,7 +1587,8 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
       if (force_pseudo_state) {
         return true;
       }
-      return element == element.GetDocument().CssTarget();
+      return element == element.GetDocument().CssTarget() ||
+             MatchesExternalSVGUseTarget(element);
     case CSSSelector::kPseudoIs:
     case CSSSelector::kPseudoWhere:
     case CSSSelector::kPseudoAny:
@@ -2049,9 +2058,14 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
       return false;
     case CSSSelector::kPseudoTrue:
       return true;
+    case CSSSelector::kPseudoCurrent:
+      if (!context.has_search_text_pseudo) {
+        return false;
+      }
+      return context.search_text_request_is_current;
     case CSSSelector::kPseudoUnknown:
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       break;
   }
   return false;
@@ -2086,7 +2100,7 @@ bool SelectorChecker::CheckPseudoAutofill(CSSSelector::PseudoType pseudo_type,
     case CSSSelector::kPseudoAutofillSelected:
       return form_control_element->IsAutofilled();
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
   }
   return false;
 }

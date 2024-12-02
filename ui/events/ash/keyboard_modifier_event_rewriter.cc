@@ -93,7 +93,8 @@ EventDispatchDetails KeyboardModifierEventRewriter::RewriteEvent(
         RecordModifierKeyPressedAfterRemapping(
             *keyboard_capability_,
             GetKeyboardDeviceIdProperty(*event_for_record),
-            event_for_record->code());
+            event_for_record->code(), event.AsKeyEvent()->code(),
+            HasRightAltProperty(*event_for_record));
       }
       break;
     }
@@ -149,6 +150,12 @@ std::unique_ptr<Event> KeyboardModifierEventRewriter::RewritePressKeyEvent(
     if (modifier_flag == EF_CAPS_LOCK_ON) {
       // This is to be consistent with KeyboardEvdev::UpdateModifier.
       modifier_flag = EF_MOD3_DOWN;
+    }
+    // Short term workaround for Neo-2 keyboard. See b/349505909 for details.
+    // TODO: Get rid of this once we support level3-shift properly.
+    if (keyboard_layout_engine_->GetLayoutName() == "de(neo)" &&
+        remapped.key == DomKey::ALT_GRAPH) {
+      modifier_flag |= EF_MOD3_DOWN;
     }
     if (pressed_modifier_keys_.insert_or_assign(physical_key, modifier_flag)
             .second) {

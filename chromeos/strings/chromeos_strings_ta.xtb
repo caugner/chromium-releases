@@ -13,6 +13,7 @@
 <translation id="1049663189809099096">பேஸ்ட்டல் மஞ்சள்</translation>
 <translation id="1056898198331236512">எச்சரிக்கை</translation>
 <translation id="1059913517121127803">ஸ்கேன் செய்ய முடியவில்லை</translation>
+<translation id="1061864016440983342">இருப்பிடம் இல்லாமல் பயன்படுத்து</translation>
 <translation id="1062823486781306604"><ph name="COUNT" />ல் <ph name="INDEX" />வது, <ph name="NAME" />.</translation>
 <translation id="1070066693520972135">WEP</translation>
 <translation id="1071587090247825784">ஃபயர்வால் கண்டறியப்பட்டது</translation>
@@ -217,6 +218,7 @@
 <translation id="2080070583977670716">மேலும் அமைப்புகள்</translation>
 <translation id="2082932131694554252">அமைக்கப்பட்ட கீபோர்டு பட்டன்</translation>
 <translation id="2085089206770112532">காட்சி ஒளிர்வைக் குறைக்கும்</translation>
+<translation id="2086091080968010660">நேரம் சார்ந்த மாற்றங்கள் துல்லியமற்றதாக இருக்கக்கூடும். அமைப்புகளுக்குச் சென்று சாதனத்தின் இருப்பிட அணுகலை இயக்கவும்.</translation>
 <translation id="2102231663024125441">வார்த்தைகளைத் திருத்துதல்</translation>
 <translation id="2105810540595158374">சாதனம் ஒரு கேம் கண்ட்ரோலர்.</translation>
 <translation id="2119172414412204879"><ph name="BOARD_NAME" />, பதிப்பு <ph name="MILESTONE_VERSION" /></translation>
@@ -236,7 +238,6 @@
 <translation id="2189104374785738357">APN விவரங்களை மாற்றுதல்</translation>
 <translation id="2195732836444333448">தற்போது அதிகமானோர் பயன்படுத்துகின்றனர். மீண்டும் வந்து பார்க்கவும்.</translation>
 <translation id="2201758491318984023">சைக்கிள்</translation>
-<translation id="2203222757805818543">தற்போதைய கால அட்டவணை <ph name="SUNRISE" /> - <ph name="SUNSET" /> என்று அமைக்கப்பட்டுள்ளது. டார்க் பயன்முறையின் கால அட்டவணையைத் தானாக மாற்ற <ph name="BEGIN_LINK" />இருப்பிட அணுகலை இயக்கவும்<ph name="END_LINK" /></translation>
 <translation id="2203272733515928691">வெந்நீரூற்று</translation>
 <translation id="2203642483788377106">செங்குத்தான பாறை</translation>
 <translation id="2208388655216963643">உணர்வுப்பதிவுவாதம்</translation>
@@ -259,8 +260,10 @@
 <translation id="2279051792571591988">இயல்புநிலைகளை மீட்டெடு</translation>
 <translation id="2286454467119466181">எளிதானது</translation>
 <translation id="2287186687001756809">படங்கள் எதுவுமில்லை. படங்களைச் சேர்க்க, <ph name="LINK" /> தளத்திற்குச் செல்லவும்</translation>
+<translation id="2294577623958216786">தற்போதைய கால அட்டவணை <ph name="SUNRISE" />-<ph name="SUNSET" /> என்று அமைக்கப்பட்டுள்ளது. சூரிய அஸ்தமனம் மற்றும் சூரிய உதயத்திற்கான கால அட்டவணையைத் தானாக மாற்ற, சாதனத்தின் இருப்பிட அணுகலை இயக்கவும்.</translation>
 <translation id="2305172810646967500">கருப்பு</translation>
 <translation id="2307344026739914387">தற்போதைய குறியீட்டு இணையைப் பயன்படுத்து</translation>
+<translation id="2308243864813041101">புதுப்பிப்பைத் தொடர <ph name="DEVICE_NAME" /> இன் USB கேபிளை அகற்றவும்</translation>
 <translation id="2320295602967756579">லைட் தீமினை இயக்குதல்</translation>
 <translation id="2323506179655536734">தவிர்க்கப்பட்டது</translation>
 <translation id="2324354238778375592">மிதக்கும் பட்டன்</translation>
@@ -312,11 +315,13 @@
 <translation id="2618015542787108131">மணல் மேடு</translation>
 <translation id="2619761439309613843">தினசரிப் புதுப்பிப்பு</translation>
 <translation id="2620436844016719705">அமைப்பு</translation>
+<translation id="2637303424821734920">முடக்கப்பட்டுள்ளது - உள்ளூர் வானிலையைக் காட்ட, <ph name="BEGIN_LINK" />சிஸ்டத்திற்கு இருப்பிட அணுகலை இயக்கவும்<ph name="END_LINK" /></translation>
 <translation id="2638662041295312666">உள்நுழைவுப் படம்</translation>
 <translation id="2640549051766135490"><ph name="TITLE" /> <ph name="DESC" /> ஆல்பம் தேர்ந்தெடுக்கப்பட்டது</translation>
 <translation id="2645380101799517405">கட்டுப்பாடுகள்</translation>
 <translation id="2652403576514495859">சொல்வதை எழுதும் வசதியை இயக்கும் அல்லது நிலைமாற்றும்</translation>
 <translation id="2653659639078652383">சமர்ப்பி</translation>
+<translation id="2654647726140493436">புதுப்பிக்கப்படும்போது <ph name="DEVICE_TYPE" /> ஐ ஆஃப் செய்யவோ <ph name="DEVICE_TYPE" /> இன் பவர் கேபிளை அகற்றவோ வேண்டாம்</translation>
 <translation id="2656001153562991489">Chromebook Plus பயனர்களுக்கான பிரத்தியேகப் பிரிவு</translation>
 <translation id="2665671725390405060">உச்சரிப்பை வாசித்துக் காட்டும்</translation>
 <translation id="267442004702508783">புதுப்பிக்கும்</translation>
@@ -359,9 +364,11 @@
 <translation id="3017079585324758401">பின்புலம்</translation>
 <translation id="3027578600144895987">கேமராவை மூடும்</translation>
 <translation id="3031560714565892478">சாதனம் ஒரு வீடியோ கேமரா.</translation>
+<translation id="3051968340259309715">இதைச் செய்தால், உங்கள் இருப்பிடத்தைத் தீர்மானிக்க சிஸ்டம் சேவைகள் இருப்பிடத் துல்லியத்தைப் பயன்படுத்தும். சாதனத்தின் இருப்பிடத்தைக் கணிப்பதற்கு ஆக்சலரோமீட்டர், திசை காட்டி போன்ற சாதன சென்சார் தரவுடன் வைஃபை ஆக்சஸ் பாயின்ட்டுகள், மொபைல் நெட்வொர்க் டவர்கள், GPS போன்ற வயர்லெஸ் சிக்னல்கள் குறித்த தகவல்களை இருப்பிடத் துல்லியம் பயன்படுத்தும். அமைப்புகள் &gt; தனியுரிமையும் பாதுகாப்பும் &gt; தனியுரிமைக் கட்டுப்பாடுகள் &gt; இருப்பிட அணுகல் என்பதற்குச் சென்று இருப்பிட அமைப்பை முடக்கிக்கொள்ளலாம். <ph name="LINK_BEGIN" />மேலும் அறிக<ph name="LINK_END" /></translation>
 <translation id="3054177598518735801"><ph name="CURRENT_VALUE" />mA</translation>
 <translation id="3056720590588772262">எண்ட்பாயிண்ட்</translation>
 <translation id="3060579846059757016">அவுட்லைன்கள்</translation>
+<translation id="3061850252076394168">பேசும் திரையை இயக்கும்</translation>
 <translation id="3069085583900247081">சோதனை தோல்வியடைந்தது</translation>
 <translation id="3078740164268491126">அட்டவணை</translation>
 <translation id="3081652522083185657">லைட்</translation>
@@ -395,6 +402,7 @@
 <translation id="3237710083340813756">மீண்டும் எழுதுதல்</translation>
 <translation id="3246869037381808805">1 நாளுக்கும் முன்னதாக உள்ள பிரிண்ட்டிங் பணிகள் அகற்றப்படும்</translation>
 <translation id="324961752321393509">இந்த ஆப்ஸை மூடுவதை உங்கள் நிர்வாகி அனுமதிக்கவில்லை</translation>
+<translation id="3263941347294171263">புதுப்பிப்பைத் தொடர <ph name="DEVICE_NAME" /> ஐ அகற்றிவிட்டு மீண்டும் செருகவும்</translation>
 <translation id="3268178239013324452">பிரிண்டரின் மூடி திறந்துள்ளதால் அச்சிட முடியவில்லை</translation>
 <translation id="3275729367986477355">தோற்றப் படம்</translation>
 <translation id="3283504360622356314">{0,plural, =1{ஃபைலைத் திருத்துக}other{ஃபைல்களைத் திருத்துக}}</translation>
@@ -627,7 +635,6 @@
 <translation id="458794348635939462">அனைத்து ஹோஸ்ட்களையும் சரிசெய்ய முடியவில்லை</translation>
 <translation id="4593212453765072419">பிராக்ஸி அங்கீகரிப்பு தேவை</translation>
 <translation id="4609350030397390689">கீபோர்டு ஒளிர்வைக் குறைக்கும்</translation>
-<translation id="4617553623719764431">உங்கள் இருப்பிடம் தெரியாததால் வானிலைத் தகவல் காட்டப்படவில்லை. உள்ளூர் வானிலைத் தகவலைப் பார்க்க <ph name="BEGIN_LINK" />இருப்பிட அணுகலை இயக்கவும்<ph name="END_LINK" /></translation>
 <translation id="4627232916386272576"><ph name="DOCUMENT_TITLE" />, <ph name="PRINTER_NAME" />, <ph name="CREATION_TIME" />, <ph name="PRINTED_PAGE_NUMBER" />/<ph name="TOTAL_PAGE_NUMBER" />. அச்சுப் பணியை ரத்துசெய்ய என்ட்டர் விசையை அழுத்தவும்.</translation>
 <translation id="463791356324567266">ஸ்கேன் செய்வதை ரத்துசெய்கிறது...</translation>
 <translation id="4646949265910132906">பாதுகாப்பான வைஃபை இணைப்பு</translation>
@@ -701,6 +708,7 @@
 <translation id="4985509611418653372">இயக்கு</translation>
 <translation id="4987769320337599931">ஃபயர்வால்</translation>
 <translation id="4988526792673242964">பக்கங்கள்</translation>
+<translation id="4989542687859782284">இல்லை</translation>
 <translation id="4999333166442584738">அறிக்கையை மறை</translation>
 <translation id="500920857929044050">சோதனையை நிறுத்து</translation>
 <translation id="5017508259293544172">LEAP</translation>
@@ -715,6 +723,7 @@
 <translation id="5088172560898466307">சேவையக ஹோஸ்ட்பெயர்</translation>
 <translation id="5089810972385038852">மாநிலம்</translation>
 <translation id="5090362543162270857">IPsec (IKEv2)</translation>
+<translation id="5095761549884461003">புதுப்பிப்பைத் தொடர <ph name="DEVICE_NAME" /> இன் USB கேபிளை அகற்றிவிட்டு மீண்டும் செருகவும்</translation>
 <translation id="5099354524039520280">மேல்</translation>
 <translation id="5107243100836678918"><ph name="META_KEY" /> பட்டன் இல்லாத ஷார்ட்கட், சில ஆப்ஸின் ஷார்ட்கட்டுடன் முரண்படக்கூடும். இந்த ஷார்ட்கட்டைத் தொடர்ந்து பயன்படுத்த, அதை மீண்டும் அழுத்தவும் அல்லது <ph name="KEY" /> பட்டனைப் பயன்படுத்தி புதிய ஷார்ட்கட்டை அழுத்தவும். <ph name="LINK_BEGIN" />மேலும் அறிக<ph name="LINK_END" /></translation>
 <translation id="5108781503443873320">இதைப் போன்றவை:</translation>
@@ -728,6 +737,7 @@
 <translation id="5160857336552977725"><ph name="DEVICE_TYPE" /> இல் உள்நுழையவும்</translation>
 <translation id="5168185087976003268">பேட்டரி நிலை</translation>
 <translation id="5170568018924773124">ஃபோல்டரில் காண்பி</translation>
+<translation id="517075088756846356">புதுப்பிப்பைத் தொடர <ph name="DEVICE_NAME" /> இன் பவர் கேபிளை அகற்றிவிட்டு மீண்டும் செருகவும்</translation>
 <translation id="5180108905184566358">போபாப் மரங்கள்</translation>
 <translation id="5180712487038406644">உணர்வுபூர்வமான வண்ணம்</translation>
 <translation id="5190187232518914472">உங்களின் மனதிற்கினிய நினைவுகளை அசைபோடுங்கள். ஆல்பங்களைச் சேர்க்கவோ திருத்தவோ <ph name="LINK_BEGIN" />Google Photos<ph name="LINK_END" />ஸிற்குச் செல்லுங்கள்.</translation>
@@ -789,6 +799,7 @@
 <translation id="554067135846762198">பவளம் மற்றும் பழுப்பு</translation>
 <translation id="5543701552415191873">பூட்டப்பட்டுள்ளது</translation>
 <translation id="554517032089923082">GTC</translation>
+<translation id="5554741914132564590">இந்தப் புதுப்பிப்பை வெளிப்புறச் சாதன உற்பத்தியாளர் வழங்கியிருப்பதுடன், இதை Google சரிபார்க்கவில்லை.</translation>
 <translation id="5559898619118303662">சூரிய அஸ்தமனத்தின்போது தானாகவே டார்க் தீமிற்கு மாறும்</translation>
 <translation id="556042886152191864">பட்டன்</translation>
 <translation id="5562551811867441927"><ph name="TERRAIN_COLOR" /> ஷேட்களில் <ph name="TERRAIN_FEATURE" /></translation>
@@ -953,8 +964,8 @@
 <translation id="6411934471898487866">கீபோர்டு ஒளிர்வு</translation>
 <translation id="6412715219990689313">உள்ளமைந்த கீபோர்டு</translation>
 <translation id="6417265370957905582">Google Assistant</translation>
+<translation id="6419454453018688975">சாதனத்தின் இருப்பிட அணுகலை இயக்கு</translation>
 <translation id="6423239382391657905">OpenVPN</translation>
-<translation id="6438073885402882007">இது, உங்கள் இருப்பிட விவரத்தைப் பயன்படுத்த சிஸ்டம் சேவைகளை அனுமதிக்கும். உங்கள் சாதனத்தின் இருப்பிடத்தைக் கணிக்க உதவுவதற்கு வைஃபை, மொபைல் நெட்வொர்க்குகள், சென்சார்கள் போன்றவற்றை இருப்பிட அமைப்புகள் பயன்படுத்தக்கூடும். <ph name="LINK_BEGIN" />மேலும் தெரிந்துகொள்ளுங்கள்<ph name="LINK_END" /></translation>
 <translation id="6439505561246192797">மோசமாக உள்ளது (<ph name="SIGNAL_STRENGTH" />)</translation>
 <translation id="6447630859861661624">கணக்கு அமைப்புகளுக்குச் செல்லும்</translation>
 <translation id="6462978824459367242">'APNனைச் சேர்' பட்டன் இப்போது இயக்கப்பட்டுள்ளது</translation>
@@ -1080,6 +1091,7 @@
 <translation id="7086440545492620869"><ph name="VALUE" /> <ph name="DISPLAY_NAME" /></translation>
 <translation id="7097908713073775559">வண்ணமயமான</translation>
 <translation id="710028965487274708">தோல்வியடைந்தது - அங்கீகரிக்க முடியவில்லை</translation>
+<translation id="7101959270679078188">புதுப்பிப்பைத் தொடர <ph name="DEVICE_NAME" /> ஐ அன்லாக் செய்யவும்</translation>
 <translation id="7103252855940681301"><ph name="COUNT" /> சாதனங்களில் <ph name="INDEX" />வது சாதனத்தின் பெயர் <ph name="NAME" />.</translation>
 <translation id="7107255225945990211"><ph name="PRODUCT_NAME" /> பிரத்தியேக ஆர்ட்வொர்க்கைத் தேர்வுசெய்யும்</translation>
 <translation id="7108668606237948702">உள்ளிடு</translation>
@@ -1355,6 +1367,7 @@
 <translation id="8675354002693747642">முன்பே பகிரப்பட்ட விசை</translation>
 <translation id="8677859815076891398">ஆல்பங்கள் எதுவுமில்லை. <ph name="LINK_BEGIN" />Google Photos<ph name="LINK_END" />ஸில் ஓர் ஆல்பத்தை உருவாக்குங்கள்.</translation>
 <translation id="8682949824227998083">ராமென்</translation>
+<translation id="8689520252402395106">புதுப்பிப்பைத் தொடர <ph name="DEVICE_NAME" /> இன் USB கேபிளை மீண்டும் செருகவும்</translation>
 <translation id="8709616837707653427"><ph name="DESC_TEXT" /> இந்த அம்சத்தை நிர்வகிக்க, இடது/வலது அம்புக்குறி விசையைப் பயன்படுத்துங்கள்.</translation>
 <translation id="8712637175834984815">புரிந்தது</translation>
 <translation id="871560550817059752">பிரிண்டரில் மை தீர்ந்துவிட்டதால் அச்சிட முடியவில்லை</translation>
@@ -1362,6 +1375,7 @@
 <translation id="8725066075913043281">மீண்டும் முயற்சிக்கவும்</translation>
 <translation id="8726019395068607495">மூடி திறந்துள்ளதால் அச்சிட முடியவில்லை</translation>
 <translation id="8730621377337864115">முடிந்தது</translation>
+<translation id="8739555075907731077">இடைநிறுத்தப்பட்டது (<ph name="PERCENTAGE_VALUE" />% நிறைவடைந்துள்ளது)</translation>
 <translation id="8747900814994928677">மாற்றத்தை உறுதிப்படுத்துங்கள்</translation>
 <translation id="8749478549112817787">கேமராவின் பின்புலம்</translation>
 <translation id="8755946156089753497">கோபுரம்</translation>

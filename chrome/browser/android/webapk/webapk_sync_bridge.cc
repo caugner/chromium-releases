@@ -57,7 +57,10 @@ std::unique_ptr<syncer::EntityData> CreateSyncEntityData(
 
 webapps::AppId ManifestIdStrToAppId(const std::string& manifest_id) {
   GURL manifest_id_gurl(manifest_id);
-  CHECK(manifest_id_gurl.is_valid()) << "manifest_id: " << manifest_id;
+  if (!manifest_id_gurl.is_valid()) {
+    LOG(ERROR) << "Invalid manifest_id: " << manifest_id;
+    return "";
+  }
   return GenerateAppIdFromManifestId(manifest_id_gurl.GetWithoutRef());
 }
 
@@ -151,6 +154,14 @@ std::unique_ptr<webapps::ShortcutInfo> CreateShortcutInfoFromSpecifics(
   return shortcut_info;
 }
 
+// Legacy (pre-manifest-id) WebAPKs can have empty manifest_ids. These, in turn,
+// get translated into empty app_ids via ManifestIdStrToAppId(). If we end up
+// with an empty app_id, generally we need to abort Sync-handling and ignore
+// that WebAPK for Sync purposes.
+bool IsLegacyAppId(webapps::AppId app_id) {
+  return app_id.empty();
+}
+
 }  // anonymous namespace
 
 WebApkSyncBridge::WebApkSyncBridge(
@@ -202,8 +213,8 @@ void WebApkSyncBridge::OnDatabaseOpened(
 
   registry_ = std::move(registry);
   std::move(callback).Run();
-  if (init_done_callback_) {
-    std::move(init_done_callback_).Run(/* initialized= */ true);
+  for (auto& task : init_done_callback_) {
+    std::move(task).Run(/* initialized= */ true);
   }
 }
 
@@ -235,6 +246,10 @@ void WebApkSyncBridge::ApplyIncrementalSyncChangesToRegistry(
   for (auto& app : update_data->apps_to_create) {
     webapps::AppId app_id =
         ManifestIdStrToAppId(app->sync_data().manifest_id());
+    if (IsLegacyAppId(app_id)) {
+      continue;
+    }
+
     auto it = registry_.find(app_id);
     if (it != registry_.end()) {
       registry_.erase(it);
@@ -257,7 +272,9 @@ bool WebApkSyncBridge::SyncDataContainsNewApps(
   for (const std::unique_ptr<sync_pb::WebApkSpecifics>& sync_update :
        installed_apps) {
     webapps::AppId app_id = ManifestIdStrToAppId(sync_update->manifest_id());
-    sync_update_from_installed_set.insert(app_id);
+    if (!IsLegacyAppId(app_id)) {
+      sync_update_from_installed_set.insert(app_id);
+    }
   }
 
   for (const auto& sync_change : sync_changes) {
@@ -300,7 +317,7 @@ void WebApkSyncBridge::RegisterDoneInitializingCallback(
     return;
   }
 
-  init_done_callback_ = std::move(init_done_callback);
+  init_done_callback_.push_back(std::move(init_done_callback));
 }
 
 void WebApkSyncBridge::MergeSyncDataForTesting(
@@ -404,6 +421,9 @@ void WebApkSyncBridge::OnWebApkUninstalled(const std::string& manifest_id) {
   }
 
   webapps::AppId app_id = ManifestIdStrToAppId(manifest_id);
+  if (IsLegacyAppId(app_id)) {
+    return;
+  }
   WebApkProto* app = GetAppByIdMutable(registry_, app_id);
 
   if (app == nullptr) {
@@ -411,7 +431,8 @@ void WebApkSyncBridge::OnWebApkUninstalled(const std::string& manifest_id) {
   }
 
   if (!AppWasUsedRecently(&app->sync_data())) {
-    DeleteAppsFromSync(std::vector<webapps::AppId>{app_id});
+    DeleteAppsFromSync(std::vector<webapps::AppId>{app_id},
+                       database_.is_opened());
     return;
   }
 
@@ -516,12 +537,18 @@ void WebApkSyncBridge::RemoveOldWebAPKsFromSync(
       app_ids.push_back(app_id);
     }
   }
-  DeleteAppsFromSync(app_ids);
+
+  RegisterDoneInitializingCallback(
+      base::BindOnce(&WebApkSyncBridge::DeleteAppsFromSync,
+                     weak_ptr_factory_.GetWeakPtr(), app_ids));
 }
 
 void WebApkSyncBridge::AddOrModifyAppInSync(std::unique_ptr<WebApkProto> app,
                                             bool is_install) {
   webapps::AppId app_id = ManifestIdStrToAppId(app->sync_data().manifest_id());
+  if (IsLegacyAppId(app_id)) {
+    return;
+  }
   RecordSyncedWebApkAdditionHistogram(is_install, registry_.count(app_id) > 0);
 
   std::unique_ptr<syncer::EntityData> entity_data =
@@ -545,10 +572,13 @@ void WebApkSyncBridge::AddOrModifyAppInSync(std::unique_ptr<WebApkProto> app,
 }
 
 void WebApkSyncBridge::DeleteAppsFromSync(
-    const std::vector<webapps::AppId>& app_ids) {
-  if (app_ids.size() > 0) {
-    RecordSyncedWebApkRemovalCountHistogram(app_ids.size());
+    const std::vector<webapps::AppId>& app_ids,
+    bool database_opened) {
+  if (app_ids.size() == 0 || !database_opened) {
+    return;
   }
+
+  RecordSyncedWebApkRemovalCountHistogram(app_ids.size());
 
   std::unique_ptr<syncer::MetadataChangeList> metadata_change_list =
       syncer::ModelTypeStore::WriteBatch::CreateMetadataChangeList();

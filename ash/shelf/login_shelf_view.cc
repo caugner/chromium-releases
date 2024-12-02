@@ -617,7 +617,7 @@ void LoginShelfView::OnEnterpriseAccountDomainChanged() {}
 void LoginShelfView::HandleLocaleChange() {
   for (LoginShelfButton* button : login_shelf_buttons_) {
     button->SetText(l10n_util::GetStringUTF16(button->text_resource_id()));
-    button->SetAccessibleName(button->GetText());
+    button->GetViewAccessibility().SetName(button->GetText());
   }
 }
 
@@ -919,6 +919,9 @@ void LoginShelfView::OnAddUserButtonClicked() {
     return;
   }
   AuthEventsRecorder::Get()->OnAddUser();
+
+  // TODO(b/333882432): Remove this log after the bug fixed.
+  LOG(WARNING) << "b/333882432: LoginShelfView::OnAddUserButtonClicked";
   Shell::Get()->login_screen_controller()->ShowGaiaSignin(EmptyAccountId());
 }
 

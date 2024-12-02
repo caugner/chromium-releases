@@ -18,6 +18,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/intersection_observer/intersection_observer.h"
+#include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_receiver.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_receiver_set.h"
@@ -41,9 +42,13 @@ class CORE_EXPORT HTMLPermissionElement final
   ~HTMLPermissionElement() override;
 
   const AtomicString& GetType() const;
+  String invalidReason() const;
+  bool isValid() const;
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(resolve, kResolve)
   DEFINE_ATTRIBUTE_EVENT_LISTENER(dismiss, kDismiss)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(validationstatuschange,
+                                  kValidationstatuschange)
 
   void Trace(Visitor*) const override;
 
@@ -53,6 +58,7 @@ class CORE_EXPORT HTMLPermissionElement final
   bool SupportsFocus(UpdateBehavior) const override;
   int DefaultTabIndex() const override;
   CascadeFilter GetCascadeFilter() const override;
+  bool CanGeneratePseudoElement(PseudoId) const override;
 
   bool granted() const { return permissions_granted_; }
 
@@ -73,7 +79,7 @@ class CORE_EXPORT HTMLPermissionElement final
  private:
   // TODO(crbug.com/1315595): remove this friend class once migration
   // to blink_unittests_v2 completes.
-  friend class ClickingEnabledChecker;
+  friend class DeferredChecker;
   friend class RegistrationWaiter;
 
   FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementClickingEnabledTest,
@@ -86,6 +92,8 @@ class CORE_EXPORT HTMLPermissionElement final
                            BlockedByMissingFrameAncestorsCSP);
   FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementSimTest,
                            EnableClickingAfterDelay);
+  FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementSimTest,
+                           FontSizeCanDisableElement);
   FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementLayoutChangeTest,
                            InvalidatePEPCAfterMove);
   FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementLayoutChangeTest,
@@ -94,24 +102,119 @@ class CORE_EXPORT HTMLPermissionElement final
                            InvalidatePEPCAfterMoveContainer);
   FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementLayoutChangeTest,
                            InvalidatePEPCAfterTransformContainer);
+  FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementLayoutChangeTest,
+                           InvalidatePEPCLayoutInAnimationFrameCallback);
+  FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementDispatchValidationEventTest,
+                           ChangeReasonRestartTimer);
+  FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementDispatchValidationEventTest,
+                           DisableEnableClicking);
+  FRIEND_TEST_ALL_PREFIXES(HTMLPemissionElementDispatchValidationEventTest,
+                           DisableEnableClickingDifferentReasons);
 
   enum class DisableReason {
+    kUnknown,
+
     // This element is temporarily disabled for a short period
     // (`kDefaultDisableTimeout`) after being attached to the layout tree.
     kRecentlyAttachedToLayoutTree,
 
     // This element is temporarily disabled for a short period
     // (`kDefaultDisableTimeout`) after its intersection status changed from
-    // invisible to visible.
-    kIntersectionChanged,
+    // invisible to visible (observed by IntersectionObserver).
+    kIntersectionVisibilityChanged,
+
+    // This element is temporarily disabled for a short period
+    // (`kDefaultDisableTimeout`) after its intersection rect with the viewport
+    // has been changed.
+    kIntersectionWithViewportChanged,
 
     // This element is disabled because of the element's style.
     kInvalidStyle,
   };
 
+  // These values are used for histograms. Entries should not be renumbered and
+  // numeric values should never be reused.
+  enum class UserInteractionDeniedReason {
+    kInvalidType = 0,
+    kFailedOrHasNotBeenRegistered = 1,
+    kRecentlyAttachedToLayoutTree = 2,
+    kIntersectionVisibilityChanged = 3,
+    kInvalidStyle = 4,
+    kUntrustedEvent = 5,
+    kIntersectionWithViewportChanged = 6,
+    kMaxValue = kIntersectionWithViewportChanged,
+  };
+
+  // Customized HeapTaskRunnerTimer class to contain disable reason, firing to
+  // indicate that the disable reason is expired.
+  class DisableReasonExpireTimer final : public TimerBase {
+    DISALLOW_NEW();
+
+   public:
+    using TimerFiredFunction = void (HTMLPermissionElement::*)(TimerBase*);
+
+    DisableReasonExpireTimer(HTMLPermissionElement* element,
+                             TimerFiredFunction function)
+        : TimerBase(element->GetTaskRunner()),
+          element_(element),
+          function_(function) {}
+
+    ~DisableReasonExpireTimer() final = default;
+
+    void Trace(Visitor* visitor) const { visitor->Trace(element_); }
+
+    void StartOrRestartWithReason(DisableReason reason,
+                                  base::TimeDelta interval) {
+      if (IsActive()) {
+        Stop();
+      }
+
+      reason_ = reason;
+      StartOneShot(interval, FROM_HERE);
+    }
+
+    void set_reason(DisableReason reason) { reason_ = reason; }
+    DisableReason reason() const { return reason_; }
+
+   protected:
+    void Fired() final { (element_->*function_)(this); }
+
+    base::OnceClosure BindTimerClosure() final {
+      return WTF::BindOnce(&DisableReasonExpireTimer::RunInternalTrampoline,
+                           WTF::Unretained(this),
+                           WrapWeakPersistent(element_.Get()));
+    }
+
+   private:
+    // Trampoline used for garbage-collected timer version also checks whether
+    // the object has been deemed as dead by the GC but not yet reclaimed. Dead
+    // objects that have not been reclaimed yet must not be touched (which is
+    // enforced by ASAN poisoning).
+    static void RunInternalTrampoline(DisableReasonExpireTimer* timer,
+                                      HTMLPermissionElement* element) {
+      // If the element have been garbage collected, the timer does not fire.
+      if (element) {
+        timer->RunInternal();
+      }
+    }
+
+    WeakMember<HTMLPermissionElement> element_;
+    TimerFiredFunction function_;
+    DisableReason reason_;
+  };
+
   // Translates `DisableReason` into strings, primarily used for logging
   // console messages.
   static String DisableReasonToString(DisableReason reason);
+
+  // Translates `DisableReason` into `UserInteractionDeniedReason`, primarily
+  // used for metrics.
+  static UserInteractionDeniedReason DisableReasonToUserInteractionDeniedReason(
+      DisableReason reason);
+
+  // Translates `DisableReason` into strings, which will be represented in
+  // `invalidReason` attr.
+  static AtomicString DisableReasonToInvalidReasonString(DisableReason reason);
 
   // Ensure there is a connection to the permission service and return it.
   mojom::blink::PermissionService* GetPermissionService();
@@ -146,6 +249,12 @@ class CORE_EXPORT HTMLPermissionElement final
   // Callback triggered when permission is decided from browser side.
   void OnEmbeddedPermissionsDecided(
       mojom::blink::EmbeddedPermissionControlResult result);
+
+  // Callback triggered when the `disable_reason_expire_timer_` fires.
+  void DisableReasonExpireTimerFired(TimerBase*);
+
+  // Dispatch validation status change event if necessary.
+  void MaybeDispatchValidationChangeEvent();
 
   // Verify whether the element has been registered in browser process by
   // checking `permission_status_map_`. This map is initially empty and is
@@ -187,6 +296,30 @@ class CORE_EXPORT HTMLPermissionElement final
   void EnableClickingAfterDelay(DisableReason reason,
                                 const base::TimeDelta& delay);
 
+  struct ClickingEnabledState {
+    // Indicates if the element is clickable.
+    bool is_valid;
+    // Carries the reason if the element is unclickable, and will be the empty
+    // string if |is_valid| is true.
+    AtomicString invalid_reason;
+
+    bool operator==(const ClickingEnabledState& other) const {
+      return is_valid == other.is_valid &&
+             invalid_reason == other.invalid_reason;
+    }
+  };
+
+  ClickingEnabledState GetClickingEnabledState() const;
+
+  // Refresh disable reasons to remove expired reasons, and update the
+  // `disable_reason_expire_timer_` interval. The logic here:
+  // - If there's an "indefinitely disabling" for any reason, stop the timer.
+  // - Otherwise, keep looping to check if there's a disabling reason that will
+  //   be exprired later than the current timer, update the timer based on that
+  //   reason. As the result, the timer will always match with the "longest
+  //   alive temporary disabling reason".
+  void RefreshDisableReasonsAndUpdateTimer();
+
   void UpdateAppearance();
 
   void UpdateText();
@@ -200,22 +333,26 @@ class CORE_EXPORT HTMLPermissionElement final
   bool IsStyleValid();
 
   // Returns an adjusted bounded length that takes in the site-provided length
-  // and creates an expression-type length of the form:
-  // `min|max(|length|, (|fit-content-size| *)? |bound|)`,
-  // |is_lower_bound| determines whether `min` or `max` should be used.
-  // |should_multiply_by_content_size| determines whether the |bound| is
-  // multiplied by the permission element's content size or is simply a fixed
-  // pixel length.
+  // and creates an expression-type length that is bounded on upper or lower
+  // sides by the provided bounds. The expression uses min|max|clamp depending
+  // on which bound(s) is/are present. The bounds will be multiplied by
+  // |fit-content-size| if |should_multiply_by_content_size| is true. At least
+  // one of the bounds must be specified.
 
-  // If |length| is not a specified length, it is ignored, together with
-  // |is_lower_bound|.
+  // If |length| is not a "specified" length, it is ignored and the returned
+  // length will be |lower_bound| or |upper_bound| (if both are specified,
+  // |lower_bound| is used), optionally multiplied by |fit-content-size| as
+  // described above.
   Length AdjustedBoundedLength(const Length& length,
-                               float bound,
-                               bool is_lower_bound,
+                               std::optional<float> lower_bound,
+                               std::optional<float> upper_bound,
                                bool should_multiply_by_content_size);
 
   // LocalFrameView::LifecycleNotificationObserver
   void DidFinishLifecycleUpdate(const LocalFrameView&) override;
+
+  // Computes the intersection rect of the element with the viewport.
+  gfx::Rect ComputeIntersectionRectWithViewport(const Page* page);
 
   HeapMojoRemote<mojom::blink::PermissionService> permission_service_;
 
@@ -260,6 +397,9 @@ class CORE_EXPORT HTMLPermissionElement final
   // by IntersectionObserver).
   bool is_fully_visible_ = true;
 
+  // Store the up-to-date click state.
+  ClickingEnabledState clicking_enabled_state_{false, AtomicString()};
+
   // The intersection rectangle between the layout box of this element and the
   // viewport.
   gfx::Rect intersection_rect_;
@@ -271,6 +411,12 @@ class CORE_EXPORT HTMLPermissionElement final
   // A bool that tracks whether a specific console message was sent already to
   // ensure it's not sent again.
   bool length_console_error_sent_ = false;
+
+  // The timer firing to indicate the temporary disable reason is expired. The
+  // fire interval time should match the maximum timetick (not
+  // base::TimeTicks::Max()), which is the timetick of the longest alive
+  // temporary disabling reason in `clicking_disabled_reasons_`.
+  DisableReasonExpireTimer disable_reason_expire_timer_;
 };
 
 // The custom type casting is required for the PermissionElement OT because the

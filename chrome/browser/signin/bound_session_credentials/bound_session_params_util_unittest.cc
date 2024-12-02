@@ -23,7 +23,7 @@ Credential CreateValidCookieCredential() {
 BoundSessionParams CreateValidBoundSessionParams() {
   BoundSessionParams params;
   params.set_session_id("123");
-  params.set_site("https://google.com");
+  params.set_site("https://google.com/");
   params.set_wrapped_key("456");
   *params.add_credentials() = CreateValidCookieCredential();
   return params;
@@ -53,7 +53,7 @@ TEST(BoundSessionParamsUtilTest, ParamsValid) {
 TEST(BoundSessionParamsUtilTest, ParamsValidYoutube) {
   bound_session_credentials::BoundSessionParams params =
       CreateValidBoundSessionParams();
-  params.set_site("https://youtube.com");
+  params.set_site("https://youtube.com/");
   UpdateAllCookieCredentialsDomains(params, ".youtube.com");
   EXPECT_TRUE(AreParamsValid(params));
 }
@@ -103,6 +103,13 @@ TEST(BoundSessionParamsUtilTest, ParamsInvalidSiteInvalid) {
   bound_session_credentials::BoundSessionParams params =
       CreateValidBoundSessionParams();
   params.set_site("http//google.com");
+  EXPECT_FALSE(AreParamsValid(params));
+}
+
+TEST(BoundSessionParamsUtilTest, ParamsInvalidSiteNotCanonical) {
+  bound_session_credentials::BoundSessionParams params =
+      CreateValidBoundSessionParams();
+  params.set_site("https://google.com");
   EXPECT_FALSE(AreParamsValid(params));
 }
 
@@ -190,6 +197,54 @@ TEST(BoundSessionParamsUtilTest, CookieCredentialValidCookieDomainEmpty) {
   credential.mutable_cookie_credential()->set_domain("");
   EXPECT_TRUE(
       IsCookieCredentialValid(credential, GURL("https://accounts.google.com")));
+}
+
+TEST(BoundSessionParamsUtilTest, GetBoundSessionKey) {
+  const GURL kUrl("https://google.com");
+  const std::string kSessionId = "123456";
+  bound_session_credentials::BoundSessionParams params =
+      CreateValidBoundSessionParams();
+  params.set_site(kUrl.spec());
+  params.set_session_id(kSessionId);
+  BoundSessionKey key = GetBoundSessionKey(params);
+  EXPECT_EQ(key.site, kUrl);
+  EXPECT_EQ(key.session_id, kSessionId);
+}
+
+TEST(BoundSessionParamsUtilTest, AreSameSessionParamsIdentical) {
+  bound_session_credentials::BoundSessionParams params =
+      CreateValidBoundSessionParams();
+  EXPECT_TRUE(AreSameSessionParams(params, params));
+}
+
+TEST(BoundSessionParamsUtilTest, AreSameSessionParamsSameSiteAndSessionId) {
+  bound_session_credentials::BoundSessionParams params =
+      CreateValidBoundSessionParams();
+  bound_session_credentials::BoundSessionParams params2 =
+      CreateValidBoundSessionParams();
+  params2.set_wrapped_key("abcdef2");
+  params2.mutable_credentials(0)->mutable_cookie_credential()->set_name(
+      "cookie2");
+  EXPECT_TRUE(AreSameSessionParams(params, params2));
+}
+
+TEST(BoundSessionParamsUtilTest, AreSameSessionParamsDifferentSite) {
+  bound_session_credentials::BoundSessionParams params =
+      CreateValidBoundSessionParams();
+  bound_session_credentials::BoundSessionParams params2 =
+      CreateValidBoundSessionParams();
+  params2.set_site("https://youtube.com/");
+  UpdateAllCookieCredentialsDomains(params2, ".youtube.com");
+  EXPECT_FALSE(AreSameSessionParams(params, params2));
+}
+
+TEST(BoundSessionParamsUtilTest, AreSameSessionParamsDifferentSessionId) {
+  bound_session_credentials::BoundSessionParams params =
+      CreateValidBoundSessionParams();
+  bound_session_credentials::BoundSessionParams params2 =
+      CreateValidBoundSessionParams();
+  params2.set_session_id("session_id2");
+  EXPECT_FALSE(AreSameSessionParams(params, params2));
 }
 
 TEST(BoundSessionParamsUtilTest, ResolveEndpointPathRelative) {

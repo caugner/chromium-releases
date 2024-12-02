@@ -19,6 +19,7 @@
 #include "base/observer_list.h"
 #include "base/sequence_checker.h"
 #include "chrome/browser/webauthn/enclave_manager_interface.h"
+#include "chrome/common/chrome_version.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/trusted_vault/trusted_vault_connection.h"
 #include "device/fido/enclave/types.h"
@@ -79,6 +80,11 @@ class TrustedVaultAccessTokenFetcherFrontend;
 // enclave, which is the ultimate point of this class.
 class EnclaveManager : public EnclaveManagerInterface {
  public:
+#if BUILDFLAG(IS_MAC)
+  static constexpr char kEnclaveKeysKeychainAccessGroup[] =
+      MAC_TEAM_IDENTIFIER_STRING "." MAC_BUNDLE_IDENTIFIER_STRING
+                                 ".webauthn-uvk";
+#endif  // BUILDFLAG(IS_MAC)
   struct StoreKeysArgs;
   class Observer : public base::CheckedObserver {
    public:
@@ -171,6 +177,17 @@ class EnclaveManager : public EnclaveManagerInterface {
   // user, erase local keys, and erase local state for the user. Safe to call in
   // any state and is a no-op if no registration exists.
   void Unenroll(Callback callback) override;
+  // Process the current security domain state. Requires `is_registered()`. This
+  // can update the locally-cached view of the current GPM PIN, or can make
+  // `is_ready()` false if the security domain has been reset.
+  //
+  // Returns whether `is_ready()` will return true in the future. (Because
+  // other operations may be running at the time, is_ready() may not update
+  // immediately.)
+  bool ConsiderSecurityDomainState(
+      const trusted_vault::DownloadAuthenticationFactorsRegistrationStateResult&
+          state,
+      Callback callback);
 
   // Get a callback to sign with the registered "hw" key. Only valid to call if
   // `is_ready`.
@@ -260,11 +277,16 @@ class EnclaveManager : public EnclaveManagerInterface {
   // Clears the registration as if we were starting from scratch.
   void ClearRegistrationForTesting();
 
+  // Toggle invariant checks.
+  static void EnableInvariantChecksForTesting(bool enable);
+
   // Create a wrapped PIN, suitable for putting into a simulated security domain
   // member.
   static std::string MakeWrappedPINForTesting(
       base::span<const uint8_t> security_domain_secret,
       std::string_view pin);
+
+  base::WeakPtr<EnclaveManager> GetWeakPtr();
 
  private:
   class StateMachine;

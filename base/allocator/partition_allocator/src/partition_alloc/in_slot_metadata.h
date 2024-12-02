@@ -24,9 +24,9 @@
 #include "partition_alloc/partition_alloc_forward.h"
 #include "partition_alloc/tagging.h"
 
-#if BUILDFLAG(IS_APPLE)
+#if PA_BUILDFLAG(IS_APPLE)
 #include "partition_alloc/partition_alloc_base/bits.h"
-#endif  // BUILDFLAG(IS_APPLE)
+#endif  // PA_BUILDFLAG(IS_APPLE)
 
 namespace partition_alloc::internal {
 
@@ -42,11 +42,11 @@ namespace partition_alloc::internal {
 // this gating.
 PA_ALWAYS_INLINE size_t
 AlignUpInSlotMetadataSizeForApple(size_t in_slot_metadata_size) {
-#if BUILDFLAG(IS_APPLE)
+#if PA_BUILDFLAG(IS_APPLE)
   return internal::base::bits::AlignUp<size_t>(in_slot_metadata_size, 8);
 #else
   return in_slot_metadata_size;
-#endif  // BUILDFLAG(IS_APPLE)
+#endif  // PA_BUILDFLAG(IS_APPLE)
 }
 
 #if PA_BUILDFLAG(ENABLE_BACKUP_REF_PTR_SUPPORT)
@@ -132,6 +132,9 @@ class PA_COMPONENT_EXPORT(PARTITION_ALLOC) InSlotMetadata {
   static constexpr CountType kMemoryHeldByAllocatorBit =
       BitField<CountType>::Bit(0);
   static constexpr CountType kPtrCountMask = BitField<CountType>::Mask(1, 29);
+  // The most significant bit of the refcount is reserved to prevent races with
+  // overflow detection.
+  static constexpr CountType kMaxPtrCount = BitField<CountType>::Mask(1, 28);
   static constexpr CountType kRequestQuarantineBit =
       BitField<CountType>::Bit(30);
   static constexpr CountType kNeedsMac11MallocSizeHackBit =
@@ -144,6 +147,9 @@ class PA_COMPONENT_EXPORT(PARTITION_ALLOC) InSlotMetadata {
   using CountType = uint64_t;
   static constexpr auto kMemoryHeldByAllocatorBit = BitField<CountType>::Bit(0);
   static constexpr auto kPtrCountMask = BitField<CountType>::Mask(1, 31);
+  // The most significant bit of the refcount is reserved to prevent races with
+  // overflow detection.
+  static constexpr auto kMaxPtrCount = BitField<CountType>::Mask(1, 30);
   static constexpr auto kDanglingRawPtrDetectedBit =
       BitField<CountType>::Bit(32);
   static constexpr auto kNeedsMac11MallocSizeHackBit =
@@ -152,6 +158,10 @@ class PA_COMPONENT_EXPORT(PARTITION_ALLOC) InSlotMetadata {
       BitField<CountType>::Bit(34);
   static constexpr auto kUnprotectedPtrCountMask =
       BitField<CountType>::Mask(35, 63);
+  // The most significant bit of the refcount is reserved to prevent races with
+  // overflow detection.
+  static constexpr auto kMaxUnprotectedPtrCount =
+      BitField<CountType>::Mask(35, 62);
 #endif  // !PA_BUILDFLAG(ENABLE_DANGLING_RAW_PTR_CHECKS)
 
   // Quick check to assert these masks do not overlap.
@@ -183,7 +193,7 @@ class PA_COMPONENT_EXPORT(PARTITION_ALLOC) InSlotMetadata {
 
     CountType old_count = count_.fetch_add(kPtrInc, std::memory_order_relaxed);
     // Check overflow.
-    PA_CHECK((old_count & kPtrCountMask) != kPtrCountMask);
+    PA_CHECK((old_count & kPtrCountMask) != kMaxPtrCount);
   }
 
   // Similar to |Acquire()|, but for raw_ptr<T, DisableDanglingPtrDetection>
@@ -194,8 +204,7 @@ class PA_COMPONENT_EXPORT(PARTITION_ALLOC) InSlotMetadata {
     CountType old_count =
         count_.fetch_add(kUnprotectedPtrInc, std::memory_order_relaxed);
     // Check overflow.
-    PA_CHECK((old_count & kUnprotectedPtrCountMask) !=
-             kUnprotectedPtrCountMask);
+    PA_CHECK((old_count & kUnprotectedPtrCountMask) != kMaxUnprotectedPtrCount);
 #else
     Acquire();
 #endif
@@ -252,11 +261,14 @@ class PA_COMPONENT_EXPORT(PARTITION_ALLOC) InSlotMetadata {
   PA_ALWAYS_INLINE bool ReleaseFromAllocator() {
     CheckCookieIfSupported();
 
-    // TODO(bartekn): Make the double-free check more effective. Once freed, the
-    // in-slot metadata is overwritten by an encoded freelist-next pointer.
     CountType old_count =
         count_.fetch_and(~kMemoryHeldByAllocatorBit, std::memory_order_release);
 
+    // If kMemoryHeldByAllocatorBit was already unset, it indicates a double
+    // free, but it could also be caused by a memory corruption. Note, this
+    // detection mechanism isn't perfect, because in-slot-metadata can be
+    // overwritten by the freelist pointer (or its shadow) for very small slots,
+    // thus masking the error away.
     if (PA_UNLIKELY(!(old_count & kMemoryHeldByAllocatorBit))) {
       DoubleFreeOrCorruptionDetected(old_count);
     }

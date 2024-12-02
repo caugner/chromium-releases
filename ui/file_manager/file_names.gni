@@ -216,6 +216,7 @@ ts_files = [
   "file_manager/foreground/js/constants.ts",
   "file_manager/foreground/js/crossover_search_utils.ts",
   "file_manager/foreground/js/crostini_controller.ts",
+  "file_manager/foreground/js/one_drive_controller.ts",
   "file_manager/foreground/js/deferred_elements.ts",
   "file_manager/foreground/js/dialog_action_controller.ts",
   "file_manager/foreground/js/directory_contents.ts",
@@ -520,6 +521,7 @@ other_dts_files = [
   "//tools/typescript/definitions/webview_tag.d.ts",
   "//ui/file_manager/file_manager/definitions/file_manager_private.d.ts",
   "//ui/file_manager/image_loader/image_loader_private.d.ts",
+  "//ui/file_manager/image_loader/overrides.d.ts",
 ]
 
 generated_js_files = [

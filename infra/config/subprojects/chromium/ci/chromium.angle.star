@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 """Definitions of builders in the chromium.angle builder group."""
 
-load("//lib/builders.star", "os", "reclient", "sheriff_rotations")
+load("//lib/builders.star", "gardener_rotations", "os", "siso")
 load("//lib/builder_config.star", "builder_config")
 load("//lib/builder_health_indicators.star", "health_spec")
 load("//lib/ci.star", "ci")
@@ -15,18 +15,17 @@ ci.defaults.set(
     executable = "recipe:angle_chromium",
     builder_group = "chromium.angle",
     pool = ci.gpu.POOL,
-    sheriff_rotations = sheriff_rotations.ANGLE,
     execution_timeout = ci.DEFAULT_EXECUTION_TIMEOUT,
+    gardener_rotations = gardener_rotations.ANGLE,
     health_spec = health_spec.DEFAULT,
     properties = {
         "perf_dashboard_machine_group": "ChromiumANGLE",
     },
-    reclient_instance = reclient.instance.DEFAULT_TRUSTED,
-    reclient_jobs = reclient.jobs.DEFAULT,
     service_account = ci.gpu.SERVICE_ACCOUNT,
     shadow_service_account = ci.gpu.SHADOW_SERVICE_ACCOUNT,
     siso_enabled = True,
-    siso_remote_jobs = reclient.jobs.DEFAULT,
+    siso_project = siso.project.DEFAULT_TRUSTED,
+    siso_remote_jobs = siso.remote_jobs.DEFAULT,
     thin_tester_cores = 2,
 )
 
@@ -72,7 +71,7 @@ ci.gpu.linux_builder(
             "android_builder_without_codecs",
             "release_try_builder",
             "minimal_symbols",
-            "reclient",
+            "remoteexec",
             "arm64",
             "static_angle",
             "android_fastbuild",
@@ -122,7 +121,6 @@ ci.gpu.linux_builder(
         gclient_config = builder_config.gclient_config(
             config = "chromium",
             apply_configs = [
-                "angle_internal",
                 "angle_top_of_tree",
                 "fuchsia",
             ],
@@ -143,7 +141,7 @@ ci.gpu.linux_builder(
             "angle_deqp_tests",
             "shared",
             "release",
-            "reclient",
+            "remoteexec",
             "minimal_symbols",
             "dcheck_always_on",
             "fuchsia",
@@ -180,7 +178,7 @@ ci.gpu.linux_builder(
         configs = [
             "gpu_tests",
             "release_builder",
-            "reclient",
+            "remoteexec",
             "minimal_symbols",
             "dcheck_always_on",
         ],
@@ -277,7 +275,7 @@ ci.gpu.mac_builder(
         configs = [
             "gpu_tests",
             "release_builder",
-            "reclient",
+            "remoteexec",
             "minimal_symbols",
             "dcheck_always_on",
             "x64",
@@ -358,7 +356,6 @@ ci.gpu.mac_builder(
         gclient_config = builder_config.gclient_config(
             config = "ios",
             apply_configs = [
-                "angle_internal",
                 "angle_top_of_tree",
             ],
         ),
@@ -378,7 +375,7 @@ ci.gpu.mac_builder(
         configs = [
             "angle_deqp_tests",
             "release_builder",
-            "reclient",
+            "remoteexec",
             "minimal_symbols",
             "dcheck_always_on",
             "ios_simulator",
@@ -405,7 +402,6 @@ ci.thin_tester(
         gclient_config = builder_config.gclient_config(
             config = "ios",
             apply_configs = [
-                "angle_internal",
                 "angle_top_of_tree",
             ],
         ),
@@ -453,7 +449,7 @@ ci.gpu.windows_builder(
         configs = [
             "gpu_tests",
             "release_builder",
-            "reclient",
+            "remoteexec",
             "minimal_symbols",
             "dcheck_always_on",
         ],
@@ -463,7 +459,7 @@ ci.gpu.windows_builder(
         short_name = "x64",
     ),
     contact_team_email = "angle-team@google.com",
-    reclient_jobs = reclient.jobs.LOW_JOBS_FOR_CI,
+    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CI,
 )
 
 ci.thin_tester(
@@ -550,7 +546,7 @@ ci.gpu.windows_builder(
         configs = [
             "gpu_tests",
             "release_builder",
-            "reclient",
+            "remoteexec",
             "minimal_symbols",
             "dcheck_always_on",
             "x86",
@@ -561,5 +557,5 @@ ci.gpu.windows_builder(
         short_name = "x86",
     ),
     contact_team_email = "angle-team@google.com",
-    reclient_jobs = reclient.jobs.LOW_JOBS_FOR_CI,
+    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CI,
 )

@@ -22,7 +22,6 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "build/config/coverage/buildflags.h"
-#include "chrome/browser/ash/file_manager/copy_or_move_io_task_policy_impl.h"
 #include "chrome/browser/ash/file_manager/file_manager_browsertest_base.h"
 #include "chrome/browser/ash/file_manager/file_manager_browsertest_utils.h"
 #include "chrome/browser/ash/file_manager/file_manager_test_util.h"
@@ -390,6 +389,12 @@ WRAPPED_INSTANTIATE_TEST_SUITE_P(
             .DontMountVolumes()
             .EnableSkyVault(),
         TestCase("fileDisplayLocalFilesDisableInMyFiles")
+            .DontMountVolumes()
+            .EnableSkyVault(),
+        TestCase("fileDisplayOneDrivePlaceholder")
+            .DontMountVolumes()
+            .EnableSkyVault(),
+        TestCase("fileDisplayFileSystemDisabled")
             .DontMountVolumes()
             .EnableSkyVault()));
 
@@ -963,13 +968,20 @@ WRAPPED_INSTANTIATE_TEST_SUITE_P(
             .SetTestAccountType(TestAccountType::kNonManaged)
             .SetLocale("en-US")
             .SetCountry("us"),
-        // Disabled by the flag case.
+        // Disabled by the enable flag case. Used by Gamgee nudge.
         TestCase("driveGoogleOneOfferBannerDisabled")
             .SetDeviceMode(DeviceMode::kConsumerOwned)
             .SetTestAccountType(TestAccountType::kNonManaged)
             .SetLocale("en-US")
             .SetCountry("us")
             .DisableGoogleOneOfferFilesBanner(),
+        // Disabled by the disable flag case. Used by G1+ nudge.
+        TestCase("driveGoogleOneOfferBannerDisabled")
+            .SetDeviceMode(DeviceMode::kConsumerOwned)
+            .SetTestAccountType(TestAccountType::kNonManaged)
+            .SetLocale("en-US")
+            .SetCountry("us")
+            .DisableGoogleOneOfferFilesBannerWithG1Nudge(),
         // A country is not in supported countries set case.
         TestCase("driveGoogleOneOfferBannerDisabled")
             .SetDeviceMode(DeviceMode::kConsumerOwned)
@@ -1012,7 +1024,6 @@ WRAPPED_INSTANTIATE_TEST_SUITE_P(
             .SetTestAccountType(TestAccountType::kNonManaged),
         // We do not show a banner if a profile is not an owner profile.
         TestCase("driveGoogleOneOfferBannerDisabled")
-            .EnableGoogleOneOfferFilesBanner()
             .SetLocale("en-US")
             .SetCountry("us")
             .SetDeviceMode(kConsumerOwned)

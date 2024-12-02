@@ -607,11 +607,8 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // windows.
   virtual gfx::Size GetMaximumSize() const;
 
-  // Return the preferred height for a specific width. Override if the
-  // preferred height depends upon the width (such as a multi-line label). If
-  // a LayoutManger has been installed this returns the value of
-  // LayoutManager::GetPreferredHeightForWidth(), otherwise this returns
-  // GetPreferredSize().height().
+  // Return the preferred height for a specific width. It is a helper function
+  // of GetPreferredSize(SizeBounds(w, SizeBound())).height().
   virtual int GetHeightForWidth(int w) const;
 
   // Returns a bound on the available space for a child view, for example, in
@@ -820,9 +817,17 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Sets whether or not the layout manager need to respect the available space.
   //
-  // TODO(crbug.com/40232718): All layout management needs to respect the
-  // available space. But there are some problems with `FlexLayout`. After we
-  // fix the problem with FlexLayout. Remove this.
+  // TODO(crbug.com/40232718): If the cross axis of the constraint space is
+  // constrained in FlexLayout, the cross axis of the host view will be
+  // stretched to the incoming constraint size by default. This results in
+  // incorrect calculations.
+  //
+  // When vertical BoxLayouts and other views are nested inside the horizontal
+  // BoxLayout, the width of the horizontal BoxLayout will be passed in as the
+  // cross axis of the vertical BoxLayout. At this time, if the vertical
+  // BoxLayout is set to stretch the cross axis (default), the first vertical
+  // BoxLayout will occupy all the space, which will cause the subsequent
+  // BoxLayout to be unable to be displayed.
   void SetLayoutManagerUseConstrainedSpace(
       bool layout_manager_use_constrained_space);
 
@@ -2256,11 +2261,18 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   //////////////////////////////////////////////////////////////////////////////
 
+  // Observers -----------------------------------------------------------------
+
+  base::ObserverList<ViewObserver>::Unchecked observers_;
+
   // Creation and lifetime -----------------------------------------------------
 
   // False if this View is owned by its parent - i.e. it will be deleted by its
   // parent during its parents destruction. False is the default.
   bool owned_by_client_ = false;
+
+  // http://crbug.com/1162949 : Instrumentation that indicates if this is alive.
+  LifeCycleState life_cycle_state_ = LifeCycleState::kAlive;
 
   // Attributes ----------------------------------------------------------------
 
@@ -2345,7 +2357,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // TODO(crbug.com/40232718): All layout management needs to respect the
   // available space. But there are some problems with `FlexLayout`. After we
   // fix the problem with FlexLayout. Remove this.
-  bool layout_manager_use_constrained_space_ = false;
+  bool layout_manager_use_constrained_space_ = true;
 
   // Used to generate an UMA metric for the maximum reentrant call depth seen
   // during layout. Normally the metric value will be one (Layout() was not
@@ -2490,20 +2502,15 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Accessibility -------------------------------------------------------------
 
-  // Manages the accessibility interface for this View.
+  // Manages the accessibility interface for this View. Some ViewAccessibility
+  // implementations are `ViewObserver`s, so this must be ordered after
+  // `observers_`.
   mutable std::unique_ptr<ViewAccessibility> view_accessibility_;
 
   // Keeps track of whether accessibility checks for this View have run yet.
   // They run once inside ::OnPaint() to keep overhead low. The idea is that if
   // a View is ready to paint it should also be set up to be accessible.
   bool has_run_accessibility_paint_checks_ = false;
-
-  // Observers -----------------------------------------------------------------
-
-  base::ObserverList<ViewObserver>::Unchecked observers_;
-
-  // http://crbug.com/1162949 : Instrumentation that indicates if this is alive.
-  LifeCycleState life_cycle_state_ = LifeCycleState::kAlive;
 
   // View Controller Interfaces
   base::RepeatingClosureList notify_view_controller_callback_list_;

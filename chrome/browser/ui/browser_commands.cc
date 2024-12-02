@@ -78,6 +78,7 @@
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/intent_picker_tab_helper.h"
 #include "chrome/browser/ui/lens/lens_overlay_controller.h"
+#include "chrome/browser/ui/lens/lens_overlay_invocation_source.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller.h"
 #include "chrome/browser/ui/qrcode_generator/qrcode_generator_bubble_controller.h"
@@ -434,14 +435,30 @@ void RecordReloadWithCookieBlocking(const Browser* browser,
 void ReloadInternal(Browser* browser,
                     WindowOpenDisposition disposition,
                     bool bypass_cache) {
-  const WebContents* active_contents =
+  const WebContents* const active_contents =
       browser->tab_strip_model()->GetActiveWebContents();
-  const auto& selected_indices =
-      browser->tab_strip_model()->selection_model().selected_indices();
-  for (int index : selected_indices) {
-    WebContents* selected_tab =
-        browser->tab_strip_model()->GetWebContentsAt(index);
-    WebContents* new_tab =
+
+  // Reloading a tab may change the selection (see crbug.com/339061099), so take
+  // a defensive copy into a more stable form before we begin. We take
+  // WebContents* so we can follow the tabs as they shift within the same
+  // tabstrip (e.g. if `disposition` is NEW_BACKGROUND_TAB).
+  std::vector<WebContents*> selected_tabs;
+  for (const int selected_index :
+       browser->tab_strip_model()->selection_model().selected_indices()) {
+    selected_tabs.push_back(
+        browser->tab_strip_model()->GetWebContentsAt(selected_index));
+  }
+
+  for (WebContents* const selected_tab : selected_tabs) {
+    // Skip this tab if it is no longer part of this tabstrip. N.B. we do this
+    // instead of using WeakPtr<WebContents> because we do not want to reload
+    // tabs that move to another browser.
+    if (browser->tab_strip_model()->GetIndexOfWebContents(selected_tab) ==
+        TabStripModel::kNoTab) {
+      continue;
+    }
+
+    WebContents* const new_tab =
         GetTabAndRevertIfNecessaryHelper(browser, disposition, selected_tab);
 
     // If the selected_tab is the activated page, give the focus to it, as this
@@ -454,7 +471,7 @@ void ReloadInternal(Browser* browser,
     // User reloads is a possible breakage indicator from blocking 3P cookies.
     RecordReloadWithCookieBlocking(browser, selected_tab);
 
-    DevToolsWindow* devtools =
+    DevToolsWindow* const devtools =
         DevToolsWindow::GetInstanceForInspectedWebContents(new_tab);
     constexpr content::ReloadType kBypassingType =
         content::ReloadType::BYPASSING_CACHE;
@@ -597,6 +614,12 @@ Browser* OpenEmptyWindow(Profile* profile,
       Browser::CreationStatus::kOk) {
     return nullptr;
   }
+
+  // Don't create a new window when the profile is shutting down.
+  if (profile->ShutdownStarted()) {
+    return nullptr;
+  }
+
   Browser::CreateParams params =
       Browser::CreateParams(Browser::TYPE_NORMAL, profile, true);
   params.should_trigger_session_restore = should_trigger_session_restore;
@@ -1110,7 +1133,8 @@ void MoveTabsToNewWindow(Browser* browser,
 
       service->DisconnectLocalTabGroup(group.value());
       browser->tab_strip_model()->CloseAllTabsInGroup(group.value());
-      service->OpenSavedTabGroupInBrowser(new_browser, saved_guid);
+      service->OpenSavedTabGroupInBrowser(new_browser, saved_guid,
+                                          tab_groups::OpeningSource::kUnknown);
       return;
     }
 
@@ -1543,6 +1567,7 @@ void StartTabOrganizationRequest(Browser* browser) {
       TabOrganizationServiceFactory::GetForProfile(browser->profile());
   UMA_HISTOGRAM_BOOLEAN("Tab.Organization.AllEntrypoints.Clicked", true);
   UMA_HISTOGRAM_BOOLEAN("Tab.Organization.ThreeDotMenu.Clicked", true);
+  browser->window()->NotifyPromoFeatureUsed(features::kTabOrganization);
 
   service->RestartSessionAndShowUI(browser,
                                    TabOrganizationEntryPoint::kThreeDotMenu);
@@ -1923,7 +1948,7 @@ void OpenTaskManager(Browser* browser) {
   base::RecordAction(UserMetricsAction("TaskManager"));
   chrome::ShowTaskManager(browser);
 #else
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 #endif
 }
 
@@ -1949,6 +1974,13 @@ void ToggleShowFullURLs(Browser* browser) {
       omnibox::kPreventUrlElisionsInOmnibox, !pref_enabled);
 }
 
+void ToggleShowGoogleLensShortcut(Browser* browser) {
+  bool pref_enabled = browser->profile()->GetPrefs()->GetBoolean(
+      omnibox::kShowGoogleLensShortcut);
+  browser->profile()->GetPrefs()->SetBoolean(omnibox::kShowGoogleLensShortcut,
+                                             !pref_enabled);
+}
+
 void ShowAppMenu(Browser* browser) {
   // We record the user metric for this event in AppMenu::RunMenu.
   browser->window()->ShowAppMenu();
@@ -1959,12 +1991,22 @@ void ShowAvatarMenu(Browser* browser) {
       /*is_source_accelerator=*/true);
 }
 
+// TODO(crbug.com/345770406): Rename the function name.
+// We removed the extra confirmation step in the Chrome update flow. After the
+// full rollout of the code, this name will be misleading. We will clean up the
+// code and its related source enums.
 void OpenUpdateChromeDialog(Browser* browser) {
   if (UpgradeDetector::GetInstance()->is_outdated_install()) {
     UpgradeDetector::GetInstance()->NotifyOutdatedInstall();
   } else if (UpgradeDetector::GetInstance()->is_outdated_install_no_au()) {
     UpgradeDetector::GetInstance()->NotifyOutdatedInstallNoAutoUpdate();
   } else {
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+    if (base::FeatureList::IsEnabled(features::kFewerUpdateConfirmations)) {
+      chrome::AttemptRelaunch();
+      return;
+    }
+#endif
     base::RecordAction(UserMetricsAction("UpdateChrome"));
     browser->window()->ShowUpdateChromeDialog();
   }
@@ -2207,7 +2249,7 @@ void ProcessInterceptedChromeURLNavigationInIncognito(Browser* browser,
   } else if (url == GURL(chrome::kChromeUIHistoryURL)) {
     ShowIncognitoHistoryDisclaimerDialog(browser);
   } else {
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
   }
 }
 
@@ -2233,7 +2275,7 @@ void ExecLensOverlay(Browser* browser) {
   LensOverlayController* const controller =
       LensOverlayController::GetController(web_contents);
   CHECK(controller);
-  controller->ShowUI(LensOverlayController::InvocationSource::kAppMenu);
+  controller->ShowUI(lens::LensOverlayInvocationSource::kAppMenu);
   browser->window()->NotifyPromoFeatureUsed(lens::features::kLensOverlay);
 }
 

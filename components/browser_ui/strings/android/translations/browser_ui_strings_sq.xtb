@@ -68,7 +68,6 @@
 <translation id="2241587408274973373">Kartat në faqen e skedës së re</translation>
 <translation id="2241634353105152135">Vetëm një herë</translation>
 <translation id="2253414712144136228"><ph name="NAME_OF_LIST_ITEM" /> - Hiq</translation>
-<translation id="2253989982043948086">{NUM_SELECTED,plural, =1{1 sajti i bllokuar}other{# sajte të bllokuara}}</translation>
 <translation id="228293613124499805">Shumica e sajteve që viziton ka mundësi që të ruajnë të dhëna në pajisjen tënde, shpesh për të përmirësuar përvojën tënde duke ruajtur preferencat e tua ose informacionet që ti ndan me sajtin. Ne rekomandojmë që ta mbash të aktivizuar këtë cilësim.</translation>
 <translation id="2289270750774289114">Pyet kur një sajt dëshiron të zbulojë pajisjet Bluetooth në afërsi (rekomandohet)</translation>
 <translation id="2315043854645842844">Përzgjedhja e certifikatës nga ana e klientit nuk mbështetet nga sistemi operativ.</translation>
@@ -98,7 +97,6 @@
 <translation id="2586657967955657006">Kujtesa e fragmenteve</translation>
 <translation id="2597457036804169544">Mos zbato temën e errët për sajtet</translation>
 <translation id="2606760465469169465">Verifiko automatikisht</translation>
-<translation id="2613007545732217283"><ph name="HOST_NAME" /> <ph name="SEPARATOR" /> <ph name="RECENCY" /></translation>
 <translation id="2621115761605608342">Lejo JavaScript për një sajt specifik</translation>
 <translation id="2653659639078652383">Dërgoje</translation>
 <translation id="2677748264148917807">Largohu</translation>
@@ -174,6 +172,7 @@
 <translation id="3859306556332390985">Kërko përpara</translation>
 <translation id="3895926599014793903">Aktivizo me detyrim zmadhimin</translation>
 <translation id="3908288065506437185">Blloko kukit e palëve të treta në "Modalitetin 'e fshehtë'"</translation>
+<translation id="3913461097001554748"><ph name="DOMAIN_URL" /> <ph name="SEPARATOR1" /> <ph name="DEVICE_NAME" /></translation>
 <translation id="3918378745482005425">Disa veçori mund të mos funksionojnë. Sajtet e lidhura mund të përdorin përsëri kukit e palëve të treta.</translation>
 <translation id="3933121352599513978">Palos kërkesat e padëshiruara (rekomandohet)</translation>
 <translation id="3955193568934677022">Lejo që sajtet të luajnë përmbajtje të mbrojtur (rekomandohet)</translation>
@@ -191,7 +190,6 @@
 <translation id="4169549551965910670">U lidh me një pajisje USB</translation>
 <translation id="4194328954146351878">Pyet përpara se të lejosh sajtet të shikojnë dhe ndryshojnë informacionin në pajisjet NFC (rekomandohet)</translation>
 <translation id="4200726100658658164">Hap "Cilësimet e vendndodhjes"</translation>
-<translation id="4206661981211220935"><ph name="RECENCY" /> <ph name="SEPARATOR" /> Nga <ph name="FROM_DEVICE" /></translation>
 <translation id="4226663524361240545">Njoftimet mund të bëjnë që pajisja të dridhet</translation>
 <translation id="4259722352634471385">Lundrimi është bllokuar: <ph name="URL" /></translation>
 <translation id="4278390842282768270">Të lejuara</translation>
@@ -199,7 +197,6 @@
 <translation id="42981349822642051">Zgjero</translation>
 <translation id="4336219115486912529">{COUNT,plural, =1{Skadon nesër}other{Skadon për # ditë}}</translation>
 <translation id="4336566011000459927">Chrome do t'i kufizojë kukit përsëri sot</translation>
-<translation id="4336836404251800362"><ph name="RECENCY" /> <ph name="SEPARATOR" /> Skeda jote e fundit</translation>
 <translation id="4338831206024587507">Të gjitha sajtet nën domenin <ph name="DOMAIN" /></translation>
 <translation id="4402755511846832236">Blloko sajtet që të mos e dinë kur ti e përdor këtë pajisje në mënyrë aktive</translation>
 <translation id="4412992751769744546">Lejo kukit e palëve të treta</translation>
@@ -360,7 +357,6 @@
 <translation id="6790428901817661496">Luaj</translation>
 <translation id="6818926723028410516">Zgjidh artikujt</translation>
 <translation id="6864395892908308021">Kjo pajisje nuk mund të lexojë NFC-në</translation>
-<translation id="6867014948848323204">Nga <ph name="FROM_DEVICE" /></translation>
 <translation id="6912998170423641340">Blloko sajtet që të mos lexojnë tekstin dhe imazhet nga kujtesa e fragmenteve</translation>
 <translation id="6945221475159498467">Përzgjidhe</translation>
 <translation id="6950072572526089586">Një sajt që viziton mund të ruajë informacione për gjërat që ti po bën që ai të mund të funksionojë siç pritet, p.sh. për të të mbajtur të identifikuar në një sajt ose për të ruajtur artikuj në karrocën e blerjeve. Shpesh sajtet i ruajnë këto informacione përkohësisht në pajisjen tënde.</translation>
@@ -480,7 +476,6 @@
 <translation id="8721719390026067591">Kur cilësimi është aktiv, sajtet mund të kërkojnë leje që të kërkojnë për pajisjet me Bluetooth. Kur cilësimi është joaktiv, sajtet mund të kërkojnë për pajisjet me Bluetooth.</translation>
 <translation id="8725066075913043281">Provo sërish</translation>
 <translation id="8730621377337864115">U krye</translation>
-<translation id="8736193154595564524">{NUM_SELECTED,plural, =1{Lejohet 1 sajt}other{Lejohen # sajte}}</translation>
 <translation id="8751914237388039244">Zgjidh një imazh</translation>
 <translation id="8800034312320686233">Sajti nuk funksionon?</translation>
 <translation id="8801436777607969138">Blloko JavaScript për një sajt specifik.</translation>

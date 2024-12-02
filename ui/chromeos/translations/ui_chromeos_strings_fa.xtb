@@ -193,7 +193,7 @@
 <translation id="2500392669976258912">گجراتی (آوایی)</translation>
 <translation id="2515586267016047495">Alt</translation>
 <translation id="2517472476991765520">اسکن</translation>
-<translation id="252641322760726369">برای دسترسی سریع به فایل‌های داخل قفسه، فایلی را لمس کنید و نگه دارید، روی <ph name="ICON" /> ضربه بزنید، و «<ph name="PIN_COMMAND" />» را انتخاب کنید.</translation>
+<translation id="252641322760726369">برای دسترسی سریع به فایل‌های داخل قفسه، فایلی را لمس کنید و نگه دارید، روی <ph name="ICON" /> تک‌ضرب بزنید، و «<ph name="PIN_COMMAND" />» را انتخاب کنید.</translation>
 <translation id="2534460670861217804">‏پروکسی HTTP امن</translation>
 <translation id="2541377937973966830">محتوای این پوشه فقط خواندنی است. برخی از فعالیت‌ها پشتیبانی نمی‌شوند.</translation>
 <translation id="2542049655219295786">‏جدول Google </translation>
@@ -257,7 +257,6 @@
 <translation id="3083975830683400843">‏دستگاه‌های Chromebit</translation>
 <translation id="3085752524577180175">‏میزبان SOCKS</translation>
 <translation id="3104793765551262433">شبکه <ph name="NETWORK_INDEX" /> از <ph name="NETWORK_COUNT" /> شبکه، <ph name="NETWORK_NAME" />، <ph name="SECURITY_STATUS" />، <ph name="CONNECTION_STATUS" />، قدرت سیگنال <ph name="SIGNAL_STRENGTH" />٪، سرپرست آن را مسدود کرده است، جزئیات</translation>
-<translation id="3113153474486991170">نمی‌توان «<ph name="PATH" />» را از این مکان باز کرد. لطفاً آن را برای باز کردن در «فایل‌های من» کپی کنید.</translation>
 <translation id="3113592018909187986">۱ تلاش دیگر دارید. تا زمانی‌که پین جدیدی راه‌اندازی نکنید، نمی‌توانید از این شبکه استفاده کنید.</translation>
 <translation id="3124404833828281817">شخصی درحال رویاپردازی</translation>
 <translation id="3126026824346185272">Ctrl</translation>
@@ -1085,7 +1084,7 @@
 <translation id="945522503751344254">ارسال بازخورد</translation>
 <translation id="947144732524271678">مجموعه‌ای از <ph name="ENTRY_COUNT" /> ورودی، از <ph name="FROM_ENTRY_NAME" /> تا <ph name="TO_ENTRY_NAME" /> انتخاب شد.</translation>
 <translation id="954194396377670556">خط‌مشی سرپرست مانع از کارهای زیر می‌شود:</translation>
-<translation id="965477715979482472">انگلیسی (آفریقای جنوبی)</translation>
+<translation id="965477715979482472">انگلیسی (افریقای جنوبی)</translation>
 <translation id="976666271385981812">درحال انتقال <ph name="NUMBER_OF_ITEMS" /> مورد به «حذف‌شده‌ها»</translation>
 <translation id="981121421437150478">آفلاین</translation>
 <translation id="988685240266037636">فایلی با نام «<ph name="FILE_NAME" />» ازقبل وجود دارد. می‌خواهید آن را جایگزین کنید؟</translation>

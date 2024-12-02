@@ -18,6 +18,7 @@ import android.widget.FrameLayout.LayoutParams;
 import android.widget.ImageButton;
 
 import androidx.annotation.RequiresApi;
+import androidx.core.graphics.Insets;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.test.filters.MediumTest;
 import androidx.test.runner.lifecycle.Stage;
@@ -37,6 +38,7 @@ import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Criteria;
 import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.base.test.util.Restriction;
@@ -58,9 +60,9 @@ import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.R;
-import org.chromium.components.browser_ui.widget.InsetObserver;
-import org.chromium.components.browser_ui.widget.InsetsRectProvider;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
+import org.chromium.ui.InsetObserver;
+import org.chromium.ui.InsetsRectProvider;
 import org.chromium.ui.test.util.UiRestriction;
 
 /** Browser test for {@link AppHeaderCoordinator} */
@@ -73,14 +75,19 @@ public class AppHeaderCoordinatorBrowserTest {
     private static final int APP_HEADER_LEFT_PADDING = 10;
     private static final int APP_HEADER_RIGHT_PADDING = 20;
 
+    private static final WindowInsetsCompat BOTTOM_NAV_BAR_INSETS =
+            new WindowInsetsCompat.Builder()
+                    .setInsets(
+                            WindowInsetsCompat.Type.navigationBars(),
+                            Insets.of(0, 0, 0, /* bottom= */ 100))
+                    .build();
+
     @Rule
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
 
     @Rule public MockitoRule mockitoRule = MockitoJUnit.rule();
 
     private @Mock InsetsRectProvider mInsetsRectProvider;
-    private @Mock InsetObserver mInsetObserver;
-    private @Mock WindowInsetsCompat mWindowInsets;
 
     private Rect mWidestUnoccludedRect = new Rect();
     private Rect mWindowRect = new Rect();
@@ -89,7 +96,7 @@ public class AppHeaderCoordinatorBrowserTest {
     @Before
     public void setup() {
         ToolbarFeatures.setIsTabStripLayoutOptimizationEnabledForTesting(true);
-        InsetObserver.setInitialRawWindowInsetsForTesting(mWindowInsets);
+        InsetObserver.setInitialRawWindowInsetsForTesting(BOTTOM_NAV_BAR_INSETS);
         AppHeaderCoordinator.setInsetsRectProviderForTesting(mInsetsRectProvider);
 
         doAnswer(args -> mWidestUnoccludedRect).when(mInsetsRectProvider).getWidestUnoccludedRect();
@@ -230,6 +237,7 @@ public class AppHeaderCoordinatorBrowserTest {
     @Test
     @MediumTest
     @EnableFeatures(ChromeFeatureList.ANDROID_HUB)
+    @DisabledTest(message = "Flaky, crbug.com/339854841")
     public void testEnterTabSwitcherInDesktopWindow_HubLayout() {
         ChromeTabbedActivity activity = mActivityTestRule.getActivity();
 
@@ -272,6 +280,7 @@ public class AppHeaderCoordinatorBrowserTest {
     @Test
     @MediumTest
     @EnableFeatures(ChromeFeatureList.ANDROID_HUB)
+    @DisabledTest(message = "Flaky, crbug.com/339854841")
     public void testEnterDesktopWindowWithTabSwitcherActive_HubLayout() {
         ChromeTabbedActivity activity = mActivityTestRule.getActivity();
 
@@ -321,11 +330,10 @@ public class AppHeaderCoordinatorBrowserTest {
 
     @Test
     @MediumTest
+    @DisabledTest(message = "Flaky, crbug.com/340589545")
     public void testRecreateActivitiesInDesktopWindow() {
         // Assume that the current activity enters desktop windowing mode.
         ChromeTabbedActivity firstActivity = mActivityTestRule.getActivity();
-        AppHeaderUtils.setAppInDesktopWindowForTesting(true);
-        firstActivity = ApplicationTestUtils.recreateActivity(firstActivity);
         triggerDesktopWindowingModeChange(firstActivity, true);
 
         // Create a new (desktop) window, that should gain focus and cause the first activity to
@@ -346,7 +354,8 @@ public class AppHeaderCoordinatorBrowserTest {
 
         // Trigger activity recreation in desktop windowing mode (an app theme change for eg. would
         // trigger this).
-        firstActivity = ApplicationTestUtils.recreateActivity(firstActivity);
+        mActivityTestRule.recreateActivity();
+        firstActivity = mActivityTestRule.getActivity();
         secondActivity = ApplicationTestUtils.recreateActivity(secondActivity);
 
         // Activity recreation will send an #onTopResumedActivityChanged(false) signal as the

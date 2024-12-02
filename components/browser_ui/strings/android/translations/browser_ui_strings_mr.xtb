@@ -68,7 +68,6 @@
 <translation id="2241587408274973373">नवीन टॅब पेज कार्ड</translation>
 <translation id="2241634353105152135">फक्त एकदाच</translation>
 <translation id="2253414712144136228"><ph name="NAME_OF_LIST_ITEM" /> काढून टाका</translation>
-<translation id="2253989982043948086">{NUM_SELECTED,plural, =1{१ साइट ब्लॉक केली आहे}other{# साइट ब्लॉक केल्या आहेत}}</translation>
 <translation id="228293613124499805">तुम्ही भेट देता त्या बहुतांश साइट या तुमच्या डिव्हाइसवर डेटा सेव्ह करत असण्याची शक्यता आहे. बरेचदा तुमची प्राधान्ये किंवा तुम्ही साइटसोबत शेअर करता ती माहिती सेव्ह करून, तुमच्या अनुभवामध्ये सुधारणा करण्यासाठी हे केले जाते. हे सेटिंग सुरू ठेवण्याची आम्ही शिफारस करतो.</translation>
 <translation id="2289270750774289114">साइटला केव्हा जवळपासचे ब्लूटूथ डिव्हाइस शोधायचे आहे हे विचारा (शिफारस केलेले)</translation>
 <translation id="2315043854645842844">क्लायंट साइड प्रमाणपत्र निवडीला ऑपरेटिंग सिस्टमचा सपोर्ट नाही.</translation>
@@ -98,7 +97,6 @@
 <translation id="2586657967955657006">क्लिपबोर्ड</translation>
 <translation id="2597457036804169544">साइटवर गडद थीम लागू करू नका</translation>
 <translation id="2606760465469169465">ऑटो पडताळणी</translation>
-<translation id="2613007545732217283"><ph name="HOST_NAME" /> <ph name="SEPARATOR" /> <ph name="RECENCY" /></translation>
 <translation id="2621115761605608342">विशिष्ट साइटसाठी JavaScript ला अनुमती द्या.</translation>
 <translation id="2653659639078652383">सबमिट करा</translation>
 <translation id="2677748264148917807">सोडा</translation>
@@ -174,6 +172,7 @@
 <translation id="3859306556332390985">पुढे शोधा</translation>
 <translation id="3895926599014793903">झूम सुरू करण्याची सक्ती</translation>
 <translation id="3908288065506437185">गुप्त मोडमध्ये तृतीय पक्ष कुकी ब्लॉक करा</translation>
+<translation id="3913461097001554748"><ph name="DOMAIN_URL" /> <ph name="SEPARATOR1" /> <ph name="DEVICE_NAME" /></translation>
 <translation id="3918378745482005425">काही वैशिष्ट्ये कदाचित काम करणार नाहीत. संबंधित साइट तरीही तृतीय पक्ष कुकी वापरू शकतात.</translation>
 <translation id="3933121352599513978">अनावश्यक विनंत्या कोलॅप्स करा (शिफारस केलेले)</translation>
 <translation id="3955193568934677022">संरक्षित आशय प्ले करण्यासाठी साइटना अनुमती द्या (शिफारस केलेले)</translation>
@@ -191,7 +190,6 @@
 <translation id="4169549551965910670">USB डिव्हाइसशी कनेक्ट केले आहे</translation>
 <translation id="4194328954146351878">साइटना NFC डिव्हाइसवरील माहिती पाहू देण्याची किंवा बदलण्याची अनुमती देण्यापूर्वी विचारा (शिफारस केलेले)</translation>
 <translation id="4200726100658658164">स्थान सेटिंग्ज उघडा</translation>
-<translation id="4206661981211220935"><ph name="RECENCY" /> <ph name="SEPARATOR" /> <ph name="FROM_DEVICE" /> वरून</translation>
 <translation id="4226663524361240545">सूचनांमुळे डिव्हाइसचे कंपन होऊ शकते</translation>
 <translation id="4259722352634471385">नेव्हिगेशन ब्लॉक केले आहे: <ph name="URL" /></translation>
 <translation id="4278390842282768270">अनुमत</translation>
@@ -199,7 +197,6 @@
 <translation id="42981349822642051">विस्तृत करा</translation>
 <translation id="4336219115486912529">{COUNT,plural, =1{उद्या एक्स्पायर होईल}other{# दिवसांमध्ये एक्स्पायर होईल}}</translation>
 <translation id="4336566011000459927">Chrome आज पुन्हा कुकी मर्यादित करेल</translation>
-<translation id="4336836404251800362"><ph name="RECENCY" /> <ph name="SEPARATOR" /> तुमचा शेवटचा टॅब</translation>
 <translation id="4338831206024587507"><ph name="DOMAIN" /> अंतर्गत सर्व साइट</translation>
 <translation id="4402755511846832236">तुम्ही हे डिव्हाइस ॲक्टिव्हपणे कधी वापरता हे साइटना जाणून घेण्यापासून ब्लॉक करा</translation>
 <translation id="4412992751769744546">तृतीय-पक्ष कुकीजना अनुमती द्या</translation>
@@ -360,7 +357,6 @@
 <translation id="6790428901817661496">प्ले करा</translation>
 <translation id="6818926723028410516">आयटम निवडा</translation>
 <translation id="6864395892908308021">हे डिव्हाइस NFC रीड करू शकत नाही</translation>
-<translation id="6867014948848323204"><ph name="FROM_DEVICE" /> वरून</translation>
 <translation id="6912998170423641340">साइटचे क्लिपबोर्डवरील मजकूर आणि इमेज रीड करणे ब्लॉक करा</translation>
 <translation id="6945221475159498467">निवडा</translation>
 <translation id="6950072572526089586">तुम्ही भेट दिलेली साइट ही तुम्ही काय करत आहात याबद्दलची माहिती सेव्ह करू शकते, जेणेकरून ती अपेक्षेप्रमाणे काम करेल — उदाहरणार्थ, तुम्हाला साइटवर साइन इन केलेले ठेवण्यासाठी किंवा तुमच्या शॉपिंग कार्टमधील आयटम सेव्ह करण्यासाठी. साइट या बरेचदा तुमच्या डिव्हाइसवर ही माहिती तात्पुरती सेव्ह करतात.</translation>
@@ -480,7 +476,6 @@
 <translation id="8721719390026067591">सुरू असताना, साइट ब्लूटूथ डिव्हाइस शोधण्याची विनंती करू शकतात. बंद असताना, साइट ब्लूटूथ डिव्हाइस शोधू शकत नाहीत.</translation>
 <translation id="8725066075913043281">पुन्हा प्रयत्न करा</translation>
 <translation id="8730621377337864115">पूर्ण झाले</translation>
-<translation id="8736193154595564524">{NUM_SELECTED,plural, =1{१ साइटला अनुमती दिली आहे}other{# साइटना अनुमती दिली आहे}}</translation>
 <translation id="8751914237388039244">इमेज निवडा</translation>
 <translation id="8800034312320686233">साइट काम करत नाही का?</translation>
 <translation id="8801436777607969138">विशिष्ट साइटसाठी JavaScript ब्लॉक करा.</translation>

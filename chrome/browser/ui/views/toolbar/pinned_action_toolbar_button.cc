@@ -8,8 +8,8 @@
 
 #include "base/metrics/user_metrics.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/views/frame/browser_actions.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_util.h"
+#include "chrome/browser/ui/browser_actions.h"
+#include "chrome/browser/ui/views/side_panel/side_panel_action_callback.h"
 #include "chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_ink_drop_util.h"
@@ -55,6 +55,10 @@ PinnedActionToolbarButton::PinnedActionToolbarButton(
   action_count_changed_subscription_ = AddAnchorCountChangedCallback(
       base::BindRepeating(&PinnedActionToolbarButton::OnAnchorCountChanged,
                           base::Unretained(this)));
+
+  // TODO(shibalik): Revisit since all pinned actions should not be toggle
+  // buttons.
+  GetViewAccessibility().SetRole(ax::mojom::Role::kToggleButton);
 }
 
 PinnedActionToolbarButton::~PinnedActionToolbarButton() = default;
@@ -62,9 +66,6 @@ PinnedActionToolbarButton::~PinnedActionToolbarButton() = default;
 void PinnedActionToolbarButton::GetAccessibleNodeData(
     ui::AXNodeData* node_data) {
   ToolbarButton::GetAccessibleNodeData(node_data);
-  // TODO(shibalik): Revisit since all pinned actions should not be toggle
-  // buttons.
-  node_data->role = ax::mojom::Role::kToggleButton;
   node_data->SetCheckedState(IsActive() ? ax::mojom::CheckedState::kTrue
                                         : ax::mojom::CheckedState::kFalse);
 }
@@ -280,7 +281,7 @@ void PinnedActionToolbarButtonActionViewInterface::OnViewChangedImpl(
           ? l10n_util::GetStringFUTF16(
                 IDS_PINNED_ACTION_BUTTON_ACCESSIBLE_TITLE, accessible_name)
           : accessible_name;
-  action_view_->SetAccessibleName(stateful_accessible_name);
+  action_view_->GetViewAccessibility().SetName(stateful_accessible_name);
 }
 
 BEGIN_METADATA(PinnedActionToolbarButton)

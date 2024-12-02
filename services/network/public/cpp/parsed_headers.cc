@@ -25,6 +25,7 @@
 #include "services/network/public/cpp/cross_origin_opener_policy_parser.h"
 #include "services/network/public/cpp/document_isolation_policy_parser.h"
 #include "services/network/public/cpp/features.h"
+#include "services/network/public/cpp/fence_event_reporting_parser.h"
 #include "services/network/public/cpp/link_header_parser.h"
 #include "services/network/public/cpp/no_vary_search_header_parser.h"
 #include "services/network/public/cpp/origin_agent_cluster_parser.h"
@@ -82,7 +83,8 @@ mojom::ParsedHeadersPtr PopulateParsedHeaders(
           clear_site_data_set.end()) {
     parsed_headers->client_hints_ignored_due_to_clear_site_data_header = true;
   }
-  if (!parsed_headers->client_hints_ignored_due_to_clear_site_data_header) {
+  if (!features::ShouldBlockAcceptClientHintsFor(url::Origin::Create(url)) &&
+      !parsed_headers->client_hints_ignored_due_to_clear_site_data_header) {
     std::string accept_ch;
     if (headers->GetNormalizedHeader("Accept-CH", &accept_ch)) {
       parsed_headers->accept_ch = ParseClientHintsHeader(accept_ch);
@@ -153,6 +155,9 @@ mojom::ParsedHeadersPtr PopulateParsedHeaders(
 
   parsed_headers->observe_browsing_topics =
       ParseObserveBrowsingTopicsFromHeader(*headers);
+
+  parsed_headers->allow_cross_origin_event_reporting =
+      ParseAllowCrossOriginEventReportingFromHeader(*headers);
 
   return parsed_headers;
 }

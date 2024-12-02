@@ -101,7 +101,7 @@ enum class ComposeSessionCloseReason {
 // Keep in sync with ComposeSessionEventCounts in
 // src/tools/metrics/histograms/metadata/compose/enums.xml.
 enum class ComposeSessionEventTypes {
-  kDialogShown = 0,
+  kMainDialogShown = 0,
   kFREShown = 1,
   kFREAccepted = 2,
   kMSBBShown = 3,
@@ -126,7 +126,10 @@ enum class ComposeSessionEventTypes {
   kRedoClicked = 22,
   kResultEdited = 23,
   kEditedResultInserted = 24,
-  kMaxValue = kEditedResultInserted,
+  kSuccessfulRequest = 25,
+  kFailedRequest = 26,
+  kComposeDialogOpened = 27,
+  kMaxValue = kComposeDialogOpened,
 };
 
 // Enum for recording the show status of both the HMW context menu item and
@@ -159,7 +162,10 @@ enum class ComposeShowStatus {
   kPractiveNudgeUnknownServerConfig = 20,
   kRandomlyBlocked = 21,
   kProactiveNudgeDisabledByMSBB = 22,
-  kMaxValue = kProactiveNudgeDisabledByMSBB,
+  kProactiveNudgeBlockedBySegmentationPlatform = 23,
+  kComposeNotEnabledInCountry = 24,
+  kUndefinedCountry = 25,
+  kMaxValue = kUndefinedCountry,
 };
 
 // Enum for calculating the CTR of the Compose proactive nudge.
@@ -208,6 +214,27 @@ enum class ComposeRequestFeedback {
   kMaxValue = kRequestError,
 };
 
+// The output metric for the proactive nudge segmentation model. Represents what
+// effect the nudge had on the user's engagement. Keep in sync with
+// ProactiveNudgeDerivedEngagement in
+// src/tools/metrics/histograms/metadata/compose/enums.xml.
+enum class ProactiveNudgeDerivedEngagement {
+  // The user didn't interact with the nudge.
+  kIgnored,
+  // The user disabled the nudge on this site using the three-dot menu.
+  kNudgeDisabledOnSingleSite,
+  // The user disabled the nudge on all sites using the three-dot menu.
+  kNudgeDisabledOnAllSites,
+  // User clicked the nudge, but didn't press generate in Compose.
+  kOpenedComposeMinimalUse,
+  // User clicked the nudge, pressed generate at least once, but didn't accept
+  // the suggestion.
+  kGeneratedComposeSuggestion,
+  // User clicked, pressed generate, and accepted a suggestion.
+  kAcceptedComposeSuggestion,
+  kMaxValue = kAcceptedComposeSuggestion,
+};
+
 // Struct containing event and logging information for an individual
 // |ComposeSession|.
 struct ComposeSessionEvents {
@@ -217,14 +244,20 @@ struct ComposeSessionEvents {
   ~ComposeSessionEvents() = default;
 
   // Logging counters.
+  // Times we have opened Compose to any section (main, FRE, or MSBB).
+  unsigned int compose_dialog_open_count = 0;
+  // Times we have shown the Compose prompot (i.e. past the FRE & MSBB).
+  unsigned int compose_prompt_view_count = 0;
   // The total number of Compose Requests for the session.
-  unsigned int compose_count = 0;
-  // Times we have shown the compose dialog.
-  unsigned int dialog_shown_count = 0;
-  // Times we have shown the first run dialog.
-  unsigned int fre_dialog_shown_count = 0;
-  // Times we have shown the dialog to enable MSBB.
-  unsigned int msbb_dialog_shown_count = 0;
+  unsigned int compose_requests_count = 0;
+  // The total number of successful Compose requests.
+  unsigned int successful_requests_count = 0;
+  // The total number of Compose requests with an error.
+  unsigned int failed_requests_count = 0;
+  // Times we have shown the first run view.
+  unsigned int fre_view_count = 0;
+  // Times we have shown the view to enable MSBB.
+  unsigned int msbb_view_count = 0;
   // Times the user has pressed "undo" this session.
   unsigned int undo_count = 0;
   // Times the user has pressed "redo" this session.
@@ -252,6 +285,8 @@ struct ComposeSessionEvents {
   // True if the MSBB was enabled in the session.
   bool msbb_enabled_in_session = false;
 
+  // True if the session started from the proactive nudge.
+  bool started_with_proactive_nudge = false;
   // True if the session started with selected text.
   bool has_initial_text = false;
   // True if thumbs up was ever clicked during the session.
@@ -330,6 +365,16 @@ class PageUkmTracker {
   // proactive nudge could be shown even if the nudge is eventually blocked.
   void ComposeProactiveNudgeShouldShow();
 
+  // The compose proactive nudge was shown.
+  void ProactiveNudgeShown();
+
+  // The compose proactive nudge was opened.
+  void ProactiveNudgeOpened();
+
+  // Mark that proactive nudge preferences were set during this page load.
+  void ProactiveNudgeDisabledGlobally();
+  void ProactiveNudgeDisabledForSite();
+
   // The compose dialog was requested but not shown due to problems obtaining
   // form data from Autofill.
   void ShowDialogAbortedDueToMissingFormData();
@@ -343,8 +388,16 @@ class PageUkmTracker {
   bool event_was_recorded_ = false;
   unsigned int menu_item_shown_count_ = 0;
   unsigned int menu_item_clicked_count_ = 0;
+
   unsigned int compose_text_inserted_count_ = 0;
-  unsigned int compose_proactive_nudge_should_show_ = 0;
+
+  unsigned int proactive_nudge_should_show_count_ = 0;
+  unsigned int proactive_nudge_shown_count_ = 0;
+  unsigned int proactive_nudge_opened_count_ = 0;
+
+  bool proactive_nudge_disabled_globally_ = false;
+  bool proactive_nudge_disabled_for_site_ = false;
+
   unsigned int missing_form_data_count_ = 0;
   unsigned int missing_form_field_data_count_ = 0;
 
@@ -365,8 +418,10 @@ void LogComposeRequestReason(ComposeRequestReason reason);
 void LogComposeRequestReason(EvalLocation eval_location,
                              ComposeRequestReason reason);
 
-void LogComposeRequestStatus(compose::mojom::ComposeStatus status);
+void LogComposeRequestStatus(bool page_language_supported,
+                             compose::mojom::ComposeStatus status);
 void LogComposeRequestStatus(EvalLocation eval_location,
+                             bool page_language_supported,
                              compose::mojom::ComposeStatus status);
 
 // Log the duration of a compose request. |is_ok| indicates the status of
@@ -432,6 +487,11 @@ void LogComposeRequestFeedback(EvalLocation eval_location,
                                ComposeRequestFeedback feedback);
 
 void LogComposeSelectAllStatus(ComposeSelectAllStatus select_all_status);
+
+// Emit an enum for for each event present in `session_events`.
+// Split the event counts histogram on `eval_location` if provided.
+void LogComposeSessionEventCounts(std::optional<EvalLocation> eval_location,
+                                  const ComposeSessionEvents& session_events);
 
 }  // namespace compose
 

@@ -293,6 +293,35 @@ class ASH_EXPORT AshNotificationView
   // called only if this notification view is draggable.
   void AttachBinaryImageAsDropData(ui::OSExchangeData* data);
 
+  // Called when the fade out animation for `view` has ended. This function
+  // resets the views's opacity to 1.0f and makes it invisible.
+  void OnFadeOutAnimationEnded(views::View* view);
+
+  // Called when the grouped animation for this view has ended, or has been
+  // aborted.
+  void OnGroupedAnimationEnded(views::View* left_content,
+                               views::View* right_content,
+                               views::View* message_label_in_expanded_state,
+                               views::View* image_container_view,
+                               views::View* action_buttons_row,
+                               AshNotificationExpandButton* expand_button,
+                               std::string notification_id,
+                               std::string parent_id);
+
+  // A helper wrapping `OnFadeOutAnimationEnded` for `view` as a closure.
+  base::OnceClosure OnFadeOutAnimationEndedClosure(views::View* view);
+
+  // A helper for grouped animations ending/aborting.
+  base::OnceClosure OnGroupedAnimationEndedClosure(
+      views::View* left_content,
+      views::View* right_content,
+      views::View* message_label_in_expanded_state,
+      views::View* image_container_view,
+      views::View* action_buttons_row,
+      AshNotificationExpandButton* expand_button,
+      const std::string& notification_id,
+      std::string parent_id);
+
   // Owned by views hierarchy.
   raw_ptr<views::View> main_view_ = nullptr;
   raw_ptr<views::View> main_right_view_ = nullptr;

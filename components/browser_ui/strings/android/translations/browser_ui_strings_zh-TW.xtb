@@ -68,7 +68,6 @@
 <translation id="2241587408274973373">新分頁資訊卡</translation>
 <translation id="2241634353105152135">只有這一次</translation>
 <translation id="2253414712144136228">移除<ph name="NAME_OF_LIST_ITEM" /></translation>
-<translation id="2253989982043948086">{NUM_SELECTED,plural, =1{已封鎖 1 個網站}other{已封鎖 # 個網站}}</translation>
 <translation id="228293613124499805">你造訪的大多數網站可能會在裝置上儲存資料 (偏好設定或你與網站分享的資訊)，通常是為了改善使用體驗。建議你將這項設定保持開啟。</translation>
 <translation id="2289270750774289114">當網站要搜尋附近的藍牙裝置時，必須先詢問你 (建議)</translation>
 <translation id="2315043854645842844">作業系統不允許您在用戶端選取憑證。</translation>
@@ -98,7 +97,6 @@
 <translation id="2586657967955657006">剪貼簿</translation>
 <translation id="2597457036804169544">不要對網站套用深色主題</translation>
 <translation id="2606760465469169465">自動驗證</translation>
-<translation id="2613007545732217283"><ph name="HOST_NAME" /> <ph name="SEPARATOR" /> <ph name="RECENCY" /></translation>
 <translation id="2621115761605608342">允許特定網站執行 JavaScript。</translation>
 <translation id="2653659639078652383">提交</translation>
 <translation id="2677748264148917807">離開</translation>
@@ -174,6 +172,7 @@
 <translation id="3859306556332390985">快轉到特定的播放時間點</translation>
 <translation id="3895926599014793903">強制啟用縮放功能</translation>
 <translation id="3908288065506437185">在無痕模式中封鎖第三方 Cookie</translation>
+<translation id="3913461097001554748"><ph name="DOMAIN_URL" /> <ph name="SEPARATOR1" /> <ph name="DEVICE_NAME" /></translation>
 <translation id="3918378745482005425">某些功能可能無法運作，相關網站仍可使用第三方 Cookie。</translation>
 <translation id="3933121352599513978">收合不需要的要求 (建議)</translation>
 <translation id="3955193568934677022">允許網站播放受保護的內容 (建議)</translation>
@@ -191,7 +190,6 @@
 <translation id="4169549551965910670">已連接至 USB 裝置</translation>
 <translation id="4194328954146351878">系統必須先詢問你，才能允許網站在 NFC 裝置上查看和變更資訊 (建議設定)</translation>
 <translation id="4200726100658658164">開啟位置資訊設定</translation>
-<translation id="4206661981211220935"><ph name="RECENCY" /> <ph name="SEPARATOR" /> 來自「<ph name="FROM_DEVICE" />」</translation>
 <translation id="4226663524361240545">收到通知時裝置會震動</translation>
 <translation id="4259722352634471385">瀏覽的網址已封鎖：<ph name="URL" /></translation>
 <translation id="4278390842282768270">允許</translation>
@@ -199,7 +197,6 @@
 <translation id="42981349822642051">展開</translation>
 <translation id="4336219115486912529">{COUNT,plural, =1{明天到期}other{# 天後到期}}</translation>
 <translation id="4336566011000459927">Chrome 將於今天再次限制 Cookie</translation>
-<translation id="4336836404251800362"><ph name="RECENCY" /> <ph name="SEPARATOR" /> 最後一個分頁</translation>
 <translation id="4338831206024587507"><ph name="DOMAIN" /> 底下的所有網站</translation>
 <translation id="4402755511846832236">禁止網站取得這部裝置的使用狀態</translation>
 <translation id="4412992751769744546">允許第三方 Cookie</translation>
@@ -360,7 +357,6 @@
 <translation id="6790428901817661496">播放</translation>
 <translation id="6818926723028410516">選取項目</translation>
 <translation id="6864395892908308021">這部裝置無法讀取 NFC</translation>
-<translation id="6867014948848323204">來自「<ph name="FROM_DEVICE" />」</translation>
 <translation id="6912998170423641340">禁止網站讀取剪貼簿中的文字和圖片</translation>
 <translation id="6945221475159498467">選取</translation>
 <translation id="6950072572526089586">你造訪的網站可儲存使用者的活動資訊，協助正常運作，例如在網站上保持登入狀態或儲存購物車內的項目。網站通常會暫時在裝置上儲存這項資訊。</translation>
@@ -480,7 +476,6 @@
 <translation id="8721719390026067591">如果啟用，網站就可以要求尋找藍牙裝置。如果停用，網站將無法尋找藍牙裝置。</translation>
 <translation id="8725066075913043281">再試一次</translation>
 <translation id="8730621377337864115">完成</translation>
-<translation id="8736193154595564524">{NUM_SELECTED,plural, =1{已允許 1 個網站}other{已允許 # 個網站}}</translation>
 <translation id="8751914237388039244">選取圖片</translation>
 <translation id="8800034312320686233">網站無法正常運作嗎？</translation>
 <translation id="8801436777607969138">封鎖特定網站的 JavaScript。</translation>

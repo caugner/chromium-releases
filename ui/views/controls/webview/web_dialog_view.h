@@ -141,9 +141,8 @@ class WEBVIEW_EXPORT WebDialogView : public ClientView,
   // content::WebContentsDelegate:
   void SetContentsBounds(content::WebContents* source,
                          const gfx::Rect& bounds) override;
-  bool HandleKeyboardEvent(
-      content::WebContents* source,
-      const content::NativeWebKeyboardEvent& event) override;
+  bool HandleKeyboardEvent(content::WebContents* source,
+                           const input::NativeWebKeyboardEvent& event) override;
   void CloseContents(content::WebContents* source) override;
   content::WebContents* OpenURLFromTab(
       content::WebContents* source,
@@ -175,15 +174,6 @@ class WEBVIEW_EXPORT WebDialogView : public ClientView,
   bool CheckMediaAccessPermission(content::RenderFrameHost* render_frame_host,
                                   const url::Origin& security_origin,
                                   blink::mojom::MediaStreamType type) override;
-  void EnterFullscreenModeForTab(
-      content::RenderFrameHost* requesting_frame,
-      const blink::mojom::FullscreenOptions& options) override;
-  void ExitFullscreenModeForTab(content::WebContents* web_contents) override;
-  content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
-      content::WebContents* source,
-      const content::NativeWebKeyboardEvent& event) override;
-  bool IsFullscreenForTabOrPending(
-      const content::WebContents* web_contents) override;
 
   void SetWebViewCornersRadii(const gfx::RoundedCornersF& radii);
 

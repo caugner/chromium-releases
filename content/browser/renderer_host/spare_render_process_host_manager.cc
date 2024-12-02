@@ -12,8 +12,10 @@
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_main_runner.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
 
 namespace content {
 
@@ -59,6 +61,13 @@ void SpareRenderProcessHostManager::WarmupSpareRenderProcessHost(
     return;
   }
 
+  if (BrowserMainRunner::ExitedMainMessageLoop()) {
+    // Don't create a new process when the browser is shutting down. No
+    // DumpWithoutCrashing here since there are known cases in the wild. See
+    // https://crbug.com/40274462 for details.
+    return;
+  }
+
   // Don't create a spare renderer if we're using --single-process or if we've
   // got too many processes. See also ShouldTryToUseExistingProcessHost in
   // this file.
@@ -91,18 +100,14 @@ void SpareRenderProcessHostManager::WarmupSpareRenderProcessHost(
 void SpareRenderProcessHostManager::DeferredWarmupSpareRenderProcessHost(
     BrowserContext* browser_context,
     base::TimeDelta delay) {
-  if (delay == base::TimeDelta::Max()) {
-    return;
-  }
-
   deferred_warmup_timer_.Start(
       FROM_HERE, delay,
       base::BindOnce(
           [](SpareRenderProcessHostManager* self,
              base::WeakPtr<BrowserContext> browser_context) {
-            // The browser context might have been destroyed when the timer
-            // fires.
-            if (browser_context) {
+            // Don't create spare process if the browser context is destroyed
+            // or the shutdown has started.
+            if (browser_context && !browser_context->ShutdownStarted()) {
               self->WarmupSpareRenderProcessHost(browser_context.get());
             }
           },
@@ -139,6 +144,17 @@ SpareRenderProcessHostManager::MaybeTakeSpareRenderProcessHost(
           browser_context, site_instance->GetSiteInfo().process_lock_url())) {
     embedder_allows_spare_usage = false;
   }
+
+  // Do not use spare renderer if running an experiment to run SkiaFontManager.
+  // SkiaFontManager needs to be initialized during renderer creation.
+  // This is temporary and will be removed after the experiment has concluded;
+  // see crbug.com/335680565.
+  bool use_skia_font_manager = false;
+#if BUILDFLAG(IS_WIN)
+  use_skia_font_manager =
+      GetContentClient()->browser()->ShouldUseSkiaFontManager(
+          site_instance->GetSiteURL());
+#endif
 
   // We shouldn't use the spare if:
   // 1. The SiteInstance has already got an associated process.  This is
@@ -189,7 +205,8 @@ SpareRenderProcessHostManager::MaybeTakeSpareRenderProcessHost(
       browser_context == spare_render_process_host_->GetBrowserContext() &&
       spare_render_process_host_->InSameStoragePartition(site_storage) &&
       !site_instance->IsGuest() && embedder_allows_spare_usage &&
-      site_instance_allows_spare_usage && !hosts_pdf_content) {
+      site_instance_allows_spare_usage && !hosts_pdf_content &&
+      !use_skia_font_manager) {
     CHECK(spare_render_process_host_->HostHasNotBeenUsed());
 
     // If the spare process ends up getting killed, the spare manager should
@@ -220,9 +237,6 @@ void SpareRenderProcessHostManager::PrepareForFutureRequests(
     // Always keep around a spare process for the most recently requested
     // |browser_context|.
     if (delay.has_value()) {
-      // The actual delay time is not necessarily `delay` because the
-      // process can be delayed until the page stops loading, in which case
-      // `delay` is TimeDelta::Max().
       delay_timer_ = std::make_unique<base::ElapsedTimer>();
       DeferredWarmupSpareRenderProcessHost(browser_context, *delay);
     } else {

@@ -32,7 +32,7 @@
 #include "chrome/browser/ui/views/location_bar/cookie_controls/cookie_controls_icon_view.h"
 #include "chrome/browser/ui/views/location_bar/find_bar_icon.h"
 #include "chrome/browser/ui/views/location_bar/intent_picker_view.h"
-#include "chrome/browser/ui/views/location_bar/read_anything_icon_view.h"
+#include "chrome/browser/ui/views/location_bar/lens_overlay_page_action_icon_view.h"
 #include "chrome/browser/ui/views/location_bar/star_view.h"
 #include "chrome/browser/ui/views/location_bar/zoom_bubble_view.h"
 #include "chrome/browser/ui/views/page_action/page_action_icon_container.h"
@@ -49,6 +49,7 @@
 #include "chrome/browser/ui/views/translate/translate_icon_view.h"
 #include "chrome/common/chrome_features.h"
 #include "components/content_settings/core/common/features.h"
+#include "components/omnibox/browser/omnibox_prefs.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/common/content_features.h"
 #include "ui/views/animation/ink_drop.h"
@@ -195,12 +196,6 @@ void PageActionIconController::Init(const PageActionIconParams& params,
                       params.command_updater, params.icon_label_bubble_delegate,
                       params.page_action_icon_delegate, params.browser));
         break;
-      case PageActionIconType::kReadAnything:
-        add_page_action_icon(type, std::make_unique<ReadAnythingIconView>(
-                                       params.command_updater, params.browser,
-                                       params.icon_label_bubble_delegate,
-                                       params.page_action_icon_delegate));
-        break;
       case PageActionIconType::kAutofillAddress:
         add_page_action_icon(
             type, std::make_unique<autofill::AddressBubblesIconView>(
@@ -241,10 +236,9 @@ void PageActionIconController::Init(const PageActionIconParams& params,
                 base::BindRepeating(SharingDialogView::GetAsBubble)));
         break;
       case PageActionIconType::kSideSearch:
-        DCHECK(params.command_updater);
         add_page_action_icon(
             type, std::make_unique<SideSearchIconView>(
-                      params.command_updater, params.icon_label_bubble_delegate,
+                      params.icon_label_bubble_delegate,
                       params.page_action_icon_delegate, params.browser));
         break;
       case PageActionIconType::kTranslate:
@@ -252,7 +246,7 @@ void PageActionIconController::Init(const PageActionIconParams& params,
         add_page_action_icon(
             type, std::make_unique<TranslateIconView>(
                       params.command_updater, params.icon_label_bubble_delegate,
-                      params.page_action_icon_delegate));
+                      params.page_action_icon_delegate, params.browser));
         break;
       case PageActionIconType::kVirtualCardEnroll:
         add_page_action_icon(
@@ -271,12 +265,24 @@ void PageActionIconController::Init(const PageActionIconParams& params,
             type, std::make_unique<ZoomView>(params.icon_label_bubble_delegate,
                                              params.page_action_icon_delegate));
         break;
+      case PageActionIconType::kLensOverlay:
+        add_page_action_icon(
+            type, std::make_unique<LensOverlayPageActionIconView>(
+                      params.browser, params.icon_label_bubble_delegate,
+                      params.page_action_icon_delegate));
+        break;
     }
   }
 
   if (params.browser) {
     zoom_observation_.Observe(zoom::ZoomEventManager::GetForBrowserContext(
         params.browser->profile()));
+
+    pref_change_registrar_.Init(params.browser->profile()->GetPrefs());
+    pref_change_registrar_.Add(
+        omnibox::kShowGoogleLensShortcut,
+        base::BindRepeating(&PageActionIconController::UpdateAll,
+                            base::Unretained(this)));
   }
 }
 

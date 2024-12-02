@@ -24,7 +24,10 @@
 #include "components/autofill/core/common/aliases.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/form_field_data.h"
-#include "ui/gfx/geometry/rect_f.h"
+
+namespace gfx {
+class Rect;
+}  // namespace gfx
 
 namespace autofill {
 
@@ -37,7 +40,7 @@ enum class CreditCardFetchResult;
 class AutofillExternalDelegate : public AutofillSuggestionDelegate,
                                  public AddressDataManager::Observer {
  public:
-  class ScopedAutofillPopupShortcutForTesting;
+  class ScopedSuggestionSelectionShortcut;
 
   // Creates an AutofillExternalDelegate for the specified
   // BrowserAutofillManager and AutofillDriver.
@@ -74,11 +77,15 @@ class AutofillExternalDelegate : public AutofillSuggestionDelegate,
   // not want to display the warning if a website has disabled Autocomplete
   // because they have their own popup, and showing our popup on to of theirs
   // would be a poor user experience.
+  // `caret_bounds` represents the position of the focused field caret. This is
+  // used as bounds to anchor the Autofill popup on. Today this is only used by
+  // compose suggestions.
   //
   // TODO(crbug.com/40144964): Storing `form` and `field` in member variables
   // breaks the cache.
   virtual void OnQuery(const FormData& form,
                        const FormFieldData& field,
+                       const gfx::Rect& caret_bounds,
                        AutofillSuggestionTriggerSource trigger_source);
 
   // Records query results and correctly formats them before sending them off
@@ -87,17 +94,14 @@ class AutofillExternalDelegate : public AutofillSuggestionDelegate,
       FieldGlobalId field_id,
       const std::vector<Suggestion>& suggestions);
 
-  // Returns the last targeted field types to be filled. This does not
-  // equate to the field types that were actually filed, but only to those
-  // that were targeted. If a field type is not present on the form that
-  // triggered the suggestions, it cannot possibly be filled.
+  // Returns the type of the last accepted address filling suggestion.
   // This is used by group filling to keep users in the same granularity level
   // by filtering out fields that do not match the last targeted fields group
   // granularity. For example, if users choose to fill every address field, we
   // will store these fields so that in a next iteration, when the user clicks,
   // say a name field only fields that are of group name are filled, therefore
   // staying at a group filling level.
-  std::optional<FieldTypeSet> GetLastFieldTypesToFillForSection(
+  SuggestionType GetLastAcceptedSuggestionToFillForSection(
       const Section& section) const;
 
   // Returns true if there is a screen reader installed on the machine.
@@ -109,10 +113,10 @@ class AutofillExternalDelegate : public AutofillSuggestionDelegate,
   virtual void OnAutofillAvailabilityEvent(
       mojom::AutofillSuggestionAvailability suggestion_availability);
 
-  // Set the data list value associated with the current field.
+  // Sets the data list value associated with the current field.
   void SetCurrentDataListValues(std::vector<SelectOption> datalist);
 
-  // Inform the delegate that the text field editing has ended. This is
+  // Informs the delegate that the text field editing has ended. This is
   // used to help record the metrics of when a new popup is shown.
   void DidEndTextFieldEditing();
 
@@ -169,6 +173,7 @@ class AutofillExternalDelegate : public AutofillSuggestionDelegate,
   // this data.
   void FillAutofillFormData(SuggestionType type,
                             Suggestion::BackendId backend_id,
+                            std::optional<SuggestionPosition> position,
                             bool is_preview,
                             const AutofillTriggerDetails& trigger_details);
 
@@ -245,9 +250,9 @@ class AutofillExternalDelegate : public AutofillSuggestionDelegate,
   // delete address profile dialog is closed.
   AutofillSuggestionTriggerSource GetReopenTriggerSource() const;
 
-  // If true, OnSuggestionsReturned() passes one of the suggestions directly to
-  // DidAcceptSuggestion(). See ScopedAutofillPopupShortcutForTesting for
-  // details.
+  // If non-negative, OnSuggestionsReturned() passes one of the suggestions
+  // directly to DidAcceptSuggestion(). See ScopedSuggestionSelectionShortcut
+  // for details.
   static int shortcut_test_suggestion_index_;
 
   const raw_ref<BrowserAutofillManager> manager_;
@@ -255,16 +260,13 @@ class AutofillExternalDelegate : public AutofillSuggestionDelegate,
   // The current form and field selected by Autofill.
   FormData query_form_;
   FormFieldData query_field_;
-  // The bounds of the form field that the user is interacting with.
-  gfx::RectF element_bounds_;
   // The method how suggestions were triggered on the current form.
   AutofillSuggestionTriggerSource trigger_source_;
 
-  // Stores the last `AutofillTriggerDetails::field_types_to_fill`.
   // We key this information by form section to guarantee granular filling
   // side effects are specific are not "leaked" to other forms.
-  base::flat_map<Section, FieldTypeSet>
-      last_field_types_to_fill_for_address_form_section_;
+  base::flat_map<Section, SuggestionType>
+      last_accepted_address_suggestion_for_address_form_section_;
 
   bool show_cards_from_account_suggestion_was_shown_ = false;
 
@@ -272,6 +274,9 @@ class AutofillExternalDelegate : public AutofillSuggestionDelegate,
 
   // The current data list values.
   std::vector<SelectOption> datalist_;
+
+  // The caret position of the focused field.
+  gfx::Rect caret_bounds_;
 
   // Autofill profile update and deletion are async operations. ADM observer is
   // used to detect when these operations finish. These operations can happen at
@@ -296,20 +301,20 @@ class AutofillExternalDelegate : public AutofillSuggestionDelegate,
 // narrower scope around, for example, AutofillDriver::AskForValuesToFill(),
 // but beware of potential asynchronicity (e.g., due to asynchronous parsing or
 // asynchronous fetching of suggestions).
-class AutofillExternalDelegate::ScopedAutofillPopupShortcutForTesting {
+class AutofillExternalDelegate::ScopedSuggestionSelectionShortcut {
  public:
-  explicit ScopedAutofillPopupShortcutForTesting(int index = 0) {
+  explicit ScopedSuggestionSelectionShortcut(int index = 0) {
     DCHECK(index >= 0);
     DCHECK(shortcut_test_suggestion_index_ < 0);
     shortcut_test_suggestion_index_ = index;
   }
 
-  ScopedAutofillPopupShortcutForTesting(
-      const ScopedAutofillPopupShortcutForTesting&) = delete;
-  ScopedAutofillPopupShortcutForTesting& operator=(
-      const ScopedAutofillPopupShortcutForTesting&) = delete;
+  ScopedSuggestionSelectionShortcut(const ScopedSuggestionSelectionShortcut&) =
+      delete;
+  ScopedSuggestionSelectionShortcut& operator=(
+      const ScopedSuggestionSelectionShortcut&) = delete;
 
-  ~ScopedAutofillPopupShortcutForTesting() {
+  ~ScopedSuggestionSelectionShortcut() {
     DCHECK(shortcut_test_suggestion_index_ >= 0);
     shortcut_test_suggestion_index_ = -1;
   }

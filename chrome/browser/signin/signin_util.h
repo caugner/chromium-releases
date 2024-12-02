@@ -22,6 +22,10 @@
 
 class Profile;
 
+namespace signin {
+class IdentityManager;
+}
+
 namespace signin_util {
 
 enum class ProfileSeparationPolicyState {
@@ -30,6 +34,16 @@ enum class ProfileSeparationPolicyState {
   kEnforcedOnMachineLevel,
   kKeepsBrowsingData,
   kMaxValue = kKeepsBrowsingData
+};
+
+// Enum used to share the sign in state with the WebUI.
+enum class SignedInState {
+  kSignedOut = 0,
+  kSignedIn = 1,
+  kSyncing = 2,
+  kSignInPending = 3,
+  kWebOnlySignedIn = 4,
+  kSyncPaused = 5,
 };
 
 using ProfileSeparationPolicyStateSet =
@@ -136,13 +150,23 @@ void RecordEnterpriseProfileCreationUserChoice(bool enforced_by_policy,
 // TODO(b/339214136): Add a standalone unit for this function.
 // Add an account with `user_email` and `gaia_id` to `profile`, and then set it
 // as the primary account. A invalid refresh token will be set to mimic the
-// behavior of a signed-out user. It is expected that
+// behavior of a signed-out user. It is expected that the user is not tracked
+// yet.
 PrimaryAccountError SetPrimaryAccountWithInvalidToken(
     Profile* profile,
     const std::string& user_email,
     const std::string& gaia_id,
     bool is_under_advanced_protection,
-    signin_metrics::AccessPoint access_point);
+    signin_metrics::AccessPoint access_point,
+    signin_metrics::SourceForRefreshTokenOperation source);
+
+// Returns true if the Chrome is signed into with an account that is in
+// persistent error state. Always return false for Syncing users, even if in
+// error state.
+bool IsSigninPending(signin::IdentityManager* identity_manager);
+
+// Returns the current state of the primary account that is used in Chrome.
+SignedInState GetSignedInState(signin::IdentityManager* identity_manager);
 
 }  // namespace signin_util
 

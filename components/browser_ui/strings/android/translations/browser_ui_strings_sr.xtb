@@ -68,7 +68,6 @@
 <translation id="2241587408274973373">Картице на страници нове картице</translation>
 <translation id="2241634353105152135">Само једном</translation>
 <translation id="2253414712144136228"><ph name="NAME_OF_LIST_ITEM" /> Уклоните</translation>
-<translation id="2253989982043948086">{NUM_SELECTED,plural, =1{1 сајт је блокиран}one{# сајт је блокиран}few{# сајта су блокирана}other{# сајтова је блокирано}}</translation>
 <translation id="228293613124499805">Већина сајтова које посећујете вероватно чува податке на уређају, често ради побољшања доживљаја тако што чува подешавања или информације које делите са сајтом. Препоручујемо да ово подешавање остане укључено.</translation>
 <translation id="2289270750774289114">Питај када сајт жели да открије Bluetooth уређаје у близини (препоручено)</translation>
 <translation id="2315043854645842844">Оперативни систем не подржава избор сертификата за клијента.</translation>
@@ -98,7 +97,6 @@
 <translation id="2586657967955657006">Меморија</translation>
 <translation id="2597457036804169544">Тамна тема се не примењује за сајтове</translation>
 <translation id="2606760465469169465">Аутоматска верификација</translation>
-<translation id="2613007545732217283"><ph name="HOST_NAME" /> <ph name="SEPARATOR" /> <ph name="RECENCY" /></translation>
 <translation id="2621115761605608342">Дозволите JavaScript за одређени сајт.</translation>
 <translation id="2653659639078652383">Пошаљи</translation>
 <translation id="2677748264148917807">Затвори</translation>
@@ -174,6 +172,7 @@
 <translation id="3859306556332390985">Премотај унапред</translation>
 <translation id="3895926599014793903">Принудно омогући зумирање</translation>
 <translation id="3908288065506437185">Блокирај колачиће треће стране у режиму без архивирања</translation>
+<translation id="3913461097001554748"><ph name="DOMAIN_URL" /> <ph name="SEPARATOR1" /> <ph name="DEVICE_NAME" /></translation>
 <translation id="3918378745482005425">Неке функције можда неће радити. Сродни сајтови и даље могу да користе колачиће треће стране.</translation>
 <translation id="3933121352599513978">Скупи нежељене захтеве (препоручено)</translation>
 <translation id="3955193568934677022">Дозволи сајтовима да пуштају заштићени садржај (препоручено)</translation>
@@ -191,7 +190,6 @@
 <translation id="4169549551965910670">Повезано са USB уређајем</translation>
 <translation id="4194328954146351878">Пре него што дозволите сајтовима да виде и мењају информације на NFC уређајима приказује се упит (препоручено)</translation>
 <translation id="4200726100658658164">Отворите подешавања локације</translation>
-<translation id="4206661981211220935"><ph name="RECENCY" /> <ph name="SEPARATOR" /> Са уређаја <ph name="FROM_DEVICE" /></translation>
 <translation id="4226663524361240545">Уређај ће вибрирати када примате обавештења</translation>
 <translation id="4259722352634471385">Навигација је блокирана: <ph name="URL" /></translation>
 <translation id="4278390842282768270">Дозвољено</translation>
@@ -199,7 +197,6 @@
 <translation id="42981349822642051">Проширите</translation>
 <translation id="4336219115486912529">{COUNT,plural, =1{Истиче сутра}one{Истиче за # дан}few{Истиче за # дана}other{Истиче за # дана}}</translation>
 <translation id="4336566011000459927">Chrome ће данас поново ограничити колачиће</translation>
-<translation id="4336836404251800362"><ph name="RECENCY" /> <ph name="SEPARATOR" /> Последња картица</translation>
 <translation id="4338831206024587507">Сви сајтови у оквиру домена <ph name="DOMAIN" /></translation>
 <translation id="4402755511846832236">Не дозволите сајтовима да знају када активно користите овај уређај</translation>
 <translation id="4412992751769744546">Дозволи колачиће треће стране</translation>
@@ -360,7 +357,6 @@
 <translation id="6790428901817661496">Пусти</translation>
 <translation id="6818926723028410516">Изаберите ставке</translation>
 <translation id="6864395892908308021">Овај уређај не може да чита NFC</translation>
-<translation id="6867014948848323204">Са уређаја <ph name="FROM_DEVICE" /></translation>
 <translation id="6912998170423641340">Блокирај сајтове тако да не читају текст и слике из привремене меморије</translation>
 <translation id="6945221475159498467">Изабери</translation>
 <translation id="6950072572526089586">Сајт који посећујете може да чува информације о томе шта радите како би радио на очекивани начин – на пример, да бисте остали пријављени на сајт или да бисте сачували ставке у корпи за куповину. Сајтови често привремено чувају те информације на уређају.</translation>
@@ -480,7 +476,6 @@
 <translation id="8721719390026067591">Када је укључено, сајтови могу да питају да траже Bluetooth уређаје. Када је искључено, сајтови не могу да траже Bluetooth уређаје.</translation>
 <translation id="8725066075913043281">Пробајте поново</translation>
 <translation id="8730621377337864115">Готово</translation>
-<translation id="8736193154595564524">{NUM_SELECTED,plural, =1{1 сајт је дозвољен}one{# сајт је дозвољен}few{# сајтa су дозвољена}other{# сајтова је дозвољено}}</translation>
 <translation id="8751914237388039244">Изаберите слику</translation>
 <translation id="8800034312320686233">Да ли сајт не ради?</translation>
 <translation id="8801436777607969138">Блокирајте JavaScript за одређени сајт.</translation>

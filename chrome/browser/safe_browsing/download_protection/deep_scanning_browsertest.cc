@@ -839,16 +839,11 @@ IN_PROC_BROWSER_TEST_P(DownloadDeepScanningBrowserTest,
   EXPECT_EQ(item->GetState(), download::DownloadItem::INTERRUPTED);
 }
 
-// When the resumable protocol is used for deep scans, the fact that the
-// a file is password protected does not affect whether it is blocked or
-// not.  The final verdict is determined by the server.  So this test
-// applies only to the multi-part upload protocol.
+// Regardless of resumable or multipart upload protocol, when a file is password
+// protected and the `block_password_protected` setting is on, the file should
+// be blocked.
 IN_PROC_BROWSER_TEST_P(DownloadDeepScanningBrowserTest,
-                       PasswordProtectedTxtFilesAreBlocked_MultipartOnly) {
-  if (is_resumable()) {
-    return;
-  }
-
+                       PasswordProtectedTxtFilesAreBlocked) {
   // This allows the blocking DM token reads happening on profile-Connector
   // triggers.
   base::ScopedAllowBlockingForTesting allow_blocking;
@@ -1473,7 +1468,8 @@ IN_PROC_BROWSER_TEST_P(SavePackageDeepScanningBrowserTest, Blocked) {
       /*username*/ kUserName,
       /*profile_identifier*/ GetProfileIdentifier(),
       /*scan_id*/ last_request().request_token(),
-      /*content_transfer_method*/ std::nullopt);
+      /*content_transfer_method*/ std::nullopt,
+      /*user_justification*/ std::nullopt);
 
   SendFcmMessage(response);
   run_loop.Run();
@@ -1551,7 +1547,8 @@ IN_PROC_BROWSER_TEST_P(SavePackageDeepScanningBrowserTest, KeepAfterWarning) {
       /*username*/ kUserName,
       /*profile_identifier*/ GetProfileIdentifier(),
       /*scan_id*/ last_request().request_token(),
-      /*content_transfer_method*/ std::nullopt);
+      /*content_transfer_method*/ std::nullopt,
+      /*user_justification*/ std::nullopt);
 
   SendFcmMessage(response);
   validator_run_loop.Run();
@@ -1589,7 +1586,8 @@ IN_PROC_BROWSER_TEST_P(SavePackageDeepScanningBrowserTest, KeepAfterWarning) {
       /*username*/ kUserName,
       /*profile_identifier*/ GetProfileIdentifier(),
       /*scan_id*/ last_request().request_token(),
-      /*content_transfer_method*/ std::nullopt);
+      /*content_transfer_method*/ std::nullopt,
+      /*user_justification*/ std::nullopt);
 
   DownloadItemModel model(item);
   DownloadCommands(model.GetWeakPtr()).ExecuteCommand(DownloadCommands::KEEP);
@@ -1667,7 +1665,8 @@ IN_PROC_BROWSER_TEST_P(SavePackageDeepScanningBrowserTest,
       /*username*/ kUserName,
       /*profile_identifier*/ GetProfileIdentifier(),
       /*scan_id*/ last_request().request_token(),
-      /*content_transfer_method*/ std::nullopt);
+      /*content_transfer_method*/ std::nullopt,
+      /*user_justification*/ std::nullopt);
 
   SendFcmMessage(response);
   validator_run_loop.Run();
@@ -1776,7 +1775,8 @@ IN_PROC_BROWSER_TEST_P(SavePackageDeepScanningBrowserTest, OpenNow) {
       /*username*/ kUserName,
       /*profile_identifier*/ GetProfileIdentifier(),
       /*scan_id*/ last_request().request_token(),
-      /*content_transfer_method*/ std::nullopt);
+      /*content_transfer_method*/ std::nullopt,
+      /*user_justification*/ std::nullopt);
 
   SendFcmMessage(response);
   validator_run_loop.Run();

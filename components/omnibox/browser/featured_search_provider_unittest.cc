@@ -18,9 +18,12 @@
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_match_type.h"
-#include "components/omnibox/browser/mock_autocomplete_provider_client.h"
+#include "components/omnibox/browser/fake_autocomplete_provider_client.h"
+#include "components/omnibox/browser/omnibox_prefs.h"
 #include "components/omnibox/browser/test_scheme_classifier.h"
 #include "components/omnibox/common/omnibox_features.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/testing_pref_service.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_data.h"
 #include "components/search_engines/template_url_service.h"
@@ -69,10 +72,13 @@ class FeaturedSearchProviderTest : public testing::Test {
       delete;
 
   void SetUp() override {
-    client_ = std::make_unique<MockAutocompleteProviderClient>();
+    client_ = std::make_unique<FakeAutocompleteProviderClient>();
     client_->set_template_url_service(
         std::make_unique<TemplateURLService>(nullptr, 0));
     provider_ = new FeaturedSearchProvider(client_.get());
+    omnibox::RegisterProfilePrefs(
+        static_cast<TestingPrefServiceSimple*>(client_->GetPrefs())
+            ->registry());
   }
   void TearDown() override { provider_ = nullptr; }
 
@@ -300,7 +306,7 @@ TEST_F(FeaturedSearchProviderTest, FeaturedEnterpriseSearch) {
   RunTest(typing_scheme_cases, std::size(typing_scheme_cases));
 }
 
-TEST_F(FeaturedSearchProviderTest, ZeroSuggestIPHSuggestion) {
+TEST_F(FeaturedSearchProviderTest, ZeroSuggestStarterPackIPHSuggestion) {
   base::test::ScopedFeatureList features;
   features.InitAndEnableFeature(omnibox::kStarterPackIPH);
 
@@ -308,11 +314,14 @@ TEST_F(FeaturedSearchProviderTest, ZeroSuggestIPHSuggestion) {
   AutocompleteInput input;
   input.set_focus_type(metrics::INTERACTION_FOCUS);
 
-  // Run the provider, there should be one match of type `NULL_RESULT_MESSAGE`.
+  // Run the provider, there should be one match corresponding to IPH for
+  // Starter Pack.
   provider_->Start(input, false);
   ACMatches matches = provider_->matches();
   EXPECT_EQ(matches.size(), 1u);
   EXPECT_EQ(matches[0].type, AutocompleteMatchType::NULL_RESULT_MESSAGE);
+  EXPECT_EQ(FeaturedSearchProvider::GetIPHType(matches[0]),
+            FeaturedSearchProvider::IPHType::kGemini);
 
   // Not in ZPS, the IPH should not be provided.
   input.set_focus_type(metrics::INTERACTION_DEFAULT);
@@ -326,4 +335,191 @@ TEST_F(FeaturedSearchProviderTest, ZeroSuggestIPHSuggestion) {
       // Typing '@' should give all the starter pack suggestions, and no IPH.
       {u"@", {kBookmarksUrl, kAskGoogleUrl, kHistoryUrl, kTabsUrl}}};
   RunTest(typing_scheme_cases, std::size(typing_scheme_cases));
+}
+
+TEST_F(FeaturedSearchProviderTest,
+       ZeroSuggestStarterPackIPHSuggestion_DeleteMatch) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeature(omnibox::kStarterPackIPH);
+  PrefService* prefs = client_->GetPrefs();
+
+  // "Focus" omnibox with zero input to put us in Zero suggest mode.
+  AutocompleteInput input;
+  input.set_focus_type(metrics::INTERACTION_FOCUS);
+
+  // Run the provider, there should be one match corresponding to IPH for
+  // Starter Pack.
+  EXPECT_TRUE(prefs->GetBoolean(omnibox::kShowGeminiIPH));
+  provider_->Start(input, false);
+  ACMatches matches = provider_->matches();
+  EXPECT_EQ(matches.size(), 1u);
+  EXPECT_EQ(matches[0].type, AutocompleteMatchType::NULL_RESULT_MESSAGE);
+  EXPECT_EQ(FeaturedSearchProvider::GetIPHType(matches[0]),
+            FeaturedSearchProvider::IPHType::kGemini);
+
+  // Call `DeleteMatch()`, match should be deleted from `matches_` and the pref
+  // should be set to false.
+  provider_->DeleteMatch(matches[0]);
+  matches = provider_->matches();
+  EXPECT_EQ(matches.size(), 0u);
+  EXPECT_FALSE(prefs->GetBoolean(omnibox::kShowGeminiIPH));
+
+  // Run the provider again, IPH match should not be provided.
+  provider_->Start(input, false);
+  matches = provider_->matches();
+  EXPECT_EQ(matches.size(), 0u);
+}
+
+TEST_F(FeaturedSearchProviderTest, ZeroSuggestFeaturedSearchIPHSuggestion) {
+  base::test::ScopedFeatureList features;
+  features.InitWithFeatures({omnibox::kShowFeaturedEnterpriseSiteSearch,
+                             omnibox::kShowFeaturedEnterpriseSiteSearchIPH,
+                             omnibox::kStarterPackExpansion},
+                            {omnibox::kStarterPackIPH});
+
+  AddStarterPackEntriesToTemplateUrlService();
+
+  AddFeaturedEnterpriseSearchEngine(kFeaturedKeyword2, kFeaturedUrl2);
+  AddFeaturedEnterpriseSearchEngine(kFeaturedKeyword1, kFeaturedUrl1);
+  AddFeaturedEnterpriseSearchEngine(kFeaturedKeyword3, kFeaturedUrl3);
+
+  // "Focus" omnibox with zero input to put us in Zero suggest mode.
+  AutocompleteInput input;
+  input.set_focus_type(metrics::INTERACTION_FOCUS);
+
+  // Run the provider, there should be one match corresponding to IPH for
+  // featured Enterprise search.
+  provider_->Start(input, false);
+  ACMatches matches = provider_->matches();
+  EXPECT_EQ(matches.size(), 1u);
+  EXPECT_EQ(matches[0].type, AutocompleteMatchType::NULL_RESULT_MESSAGE);
+  EXPECT_EQ(FeaturedSearchProvider::GetIPHType(matches[0]),
+            FeaturedSearchProvider::IPHType::kFeaturedEnterpriseSearch);
+
+  // Not in ZPS, the IPH should not be provided.
+  input.set_focus_type(metrics::INTERACTION_DEFAULT);
+  provider_->Start(input, false);
+  matches = provider_->matches();
+  EXPECT_EQ(matches.size(), 0u);
+
+  // "@" state - Confirm expected starter pack is still shown but no ZPS.
+  TestData typing_scheme_cases[] = {
+      // Typing '@' should give all the starter pack suggestions, and no IPH.
+      {u"@",
+       {kBookmarksUrl, kFeaturedUrl1, kFeaturedUrl2, kFeaturedUrl3,
+        kAskGoogleUrl, kHistoryUrl, kTabsUrl}}};
+  RunTest(typing_scheme_cases, std::size(typing_scheme_cases));
+}
+
+TEST_F(FeaturedSearchProviderTest,
+       ZeroSuggestFeaturedSearchIPHSuggestion_DeleteMatch) {
+  base::test::ScopedFeatureList features;
+  features.InitWithFeatures({omnibox::kShowFeaturedEnterpriseSiteSearch,
+                             omnibox::kShowFeaturedEnterpriseSiteSearchIPH,
+                             omnibox::kStarterPackExpansion},
+                            {omnibox::kStarterPackIPH});
+
+  AddStarterPackEntriesToTemplateUrlService();
+
+  AddFeaturedEnterpriseSearchEngine(kFeaturedKeyword2, kFeaturedUrl2);
+  AddFeaturedEnterpriseSearchEngine(kFeaturedKeyword1, kFeaturedUrl1);
+  AddFeaturedEnterpriseSearchEngine(kFeaturedKeyword3, kFeaturedUrl3);
+
+  // "Focus" omnibox with zero input to put us in Zero suggest mode.
+  AutocompleteInput input;
+  input.set_focus_type(metrics::INTERACTION_FOCUS);
+
+  // Run the provider, there should be one match corresponding to IPH for
+  // featured Enterprise search.
+  PrefService* prefs = client_->GetPrefs();
+  EXPECT_TRUE(
+      prefs->GetBoolean(omnibox::kShowFeaturedEnterpriseSiteSearchIPHPrefName));
+  provider_->Start(input, false);
+  ACMatches matches = provider_->matches();
+  EXPECT_EQ(matches.size(), 1u);
+  EXPECT_EQ(matches[0].type, AutocompleteMatchType::NULL_RESULT_MESSAGE);
+  EXPECT_EQ(FeaturedSearchProvider::GetIPHType(matches[0]),
+            FeaturedSearchProvider::IPHType::kFeaturedEnterpriseSearch);
+
+  // Call `DeleteMatch()`, match should be deleted from `matches_` and the pref
+  // should be set to false.
+  provider_->DeleteMatch(matches[0]);
+  matches = provider_->matches();
+  EXPECT_EQ(matches.size(), 0u);
+  EXPECT_FALSE(
+      prefs->GetBoolean(omnibox::kShowFeaturedEnterpriseSiteSearchIPHPrefName));
+
+  // Run the provider again, IPH match should not be provided.
+  provider_->Start(input, false);
+  matches = provider_->matches();
+  EXPECT_EQ(matches.size(), 0u);
+}
+
+TEST_F(FeaturedSearchProviderTest,
+       ZeroSuggestStarerPackIPHAfterFeaturedSearchIPHDeleted) {
+  base::test::ScopedFeatureList features;
+  features.InitWithFeatures(
+      {
+          omnibox::kShowFeaturedEnterpriseSiteSearch,
+          omnibox::kShowFeaturedEnterpriseSiteSearchIPH,
+          omnibox::kStarterPackExpansion,
+          omnibox::kStarterPackIPH,
+      },
+      {});
+
+  AddStarterPackEntriesToTemplateUrlService();
+
+  AddFeaturedEnterpriseSearchEngine(kFeaturedKeyword2, kFeaturedUrl2);
+  AddFeaturedEnterpriseSearchEngine(kFeaturedKeyword1, kFeaturedUrl1);
+  AddFeaturedEnterpriseSearchEngine(kFeaturedKeyword3, kFeaturedUrl3);
+
+  // "Focus" omnibox with zero input to put us in Zero suggest mode.
+  AutocompleteInput input;
+  input.set_focus_type(metrics::INTERACTION_FOCUS);
+
+  // Run the provider, there should be one match corresponding to IPH for
+  // featured Enterprise search.
+  PrefService* prefs = client_->GetPrefs();
+  EXPECT_TRUE(
+      prefs->GetBoolean(omnibox::kShowFeaturedEnterpriseSiteSearchIPHPrefName));
+  EXPECT_TRUE(prefs->GetBoolean(omnibox::kShowGeminiIPH));
+  provider_->Start(input, false);
+  ACMatches matches = provider_->matches();
+  EXPECT_EQ(matches.size(), 1u);
+  EXPECT_EQ(matches[0].type, AutocompleteMatchType::NULL_RESULT_MESSAGE);
+  EXPECT_EQ(FeaturedSearchProvider::GetIPHType(matches[0]),
+            FeaturedSearchProvider::IPHType::kFeaturedEnterpriseSearch);
+
+  // Call `DeleteMatch()`, match should be deleted from `matches_` and the pref
+  // should be set to false.
+  provider_->DeleteMatch(matches[0]);
+  matches = provider_->matches();
+  EXPECT_EQ(matches.size(), 0u);
+  EXPECT_FALSE(
+      prefs->GetBoolean(omnibox::kShowFeaturedEnterpriseSiteSearchIPHPrefName));
+  EXPECT_TRUE(prefs->GetBoolean(omnibox::kShowGeminiIPH));
+
+  // Run the provider again, there should be one match corresponding to IPH for
+  // Starter Pack.
+  EXPECT_TRUE(prefs->GetBoolean(omnibox::kShowGeminiIPH));
+  provider_->Start(input, false);
+  matches = provider_->matches();
+  EXPECT_EQ(matches.size(), 1u);
+  EXPECT_EQ(matches[0].type, AutocompleteMatchType::NULL_RESULT_MESSAGE);
+  EXPECT_EQ(FeaturedSearchProvider::GetIPHType(matches[0]),
+            FeaturedSearchProvider::IPHType::kGemini);
+
+  // Call `DeleteMatch()`, match should be deleted from `matches_` and the pref
+  // should be set to false.
+  provider_->DeleteMatch(matches[0]);
+  matches = provider_->matches();
+  EXPECT_EQ(matches.size(), 0u);
+  EXPECT_FALSE(
+      prefs->GetBoolean(omnibox::kShowFeaturedEnterpriseSiteSearchIPHPrefName));
+  EXPECT_FALSE(prefs->GetBoolean(omnibox::kShowGeminiIPH));
+
+  // Run the provider again, IPH match should not be provided.
+  provider_->Start(input, false);
+  matches = provider_->matches();
+  EXPECT_EQ(matches.size(), 0u);
 }

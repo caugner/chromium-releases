@@ -83,7 +83,6 @@ inline constexpr char kSyncAppsEnabledByOs[] = "sync.apps_enabled_by_os";
 inline constexpr char kSyncApps[] = "sync.apps";
 inline constexpr char kSyncAutofill[] = "sync.autofill";
 inline constexpr char kSyncBookmarks[] = "sync.bookmarks";
-inline constexpr char kSyncCompare[] = "sync.compare";
 inline constexpr char kSyncCookies[] = "sync.cookies";
 inline constexpr char kSyncExtensions[] = "sync.extensions";
 // Note: The pref for history is called "typed_urls" for historic reasons - not
@@ -92,6 +91,7 @@ inline constexpr char kSyncHistory[] = "sync.typed_urls";
 inline constexpr char kSyncPasswords[] = "sync.passwords";
 inline constexpr char kSyncPayments[] = "sync.payments";
 inline constexpr char kSyncPreferences[] = "sync.preferences";
+inline constexpr char kSyncProductComparison[] = "sync.product_comparison";
 inline constexpr char kSyncReadingList[] = "sync.reading_list";
 inline constexpr char kSyncSavedTabGroups[] = "sync.saved_tab_groups";
 inline constexpr char kSyncSharedTabGroupData[] = "sync.shared_tab_group_data";
@@ -109,10 +109,10 @@ inline constexpr char kSyncManaged[] = "sync.managed";
 inline constexpr char kSyncCachedPassphraseType[] =
     "sync.cached_passphrase_type";
 
-// The user's AutoUpgradeDebugInfo, determined the first time the engine is
-// successfully initialized.
-inline constexpr char kSyncCachedTrustedVaultAutoUpgradeDebugInfo[] =
-    "sync.cached_trusted_vault_auto_upgrade_debug_info";
+// The user's TrustedVaultAutoUpgradeExperimentGroup, determined the first time
+// the engine is successfully initialized.
+inline constexpr char kSyncCachedTrustedVaultAutoUpgradeExperimentGroup[] =
+    "sync.cached_trusted_vault_auto_upgrade_experiment_group";
 
 // A string that can be used to restore sync encryption infrastructure on
 // startup so that the user doesn't need to provide credentials on each start.

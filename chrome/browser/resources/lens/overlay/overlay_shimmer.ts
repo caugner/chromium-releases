@@ -3,52 +3,21 @@
 // found in the LICENSE file.
 
 import './shimmer_circle.js';
+import './strings.m.js';
 
 import {assert, assertInstanceof, assertNotReached} from '//resources/js/assert.js';
 import {EventTracker} from '//resources/js/event_tracker.js';
+import {loadTimeData} from '//resources/js/load_time_data.js';
 import {PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import type {DomRepeat} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {BrowserProxyImpl} from './browser_proxy.js';
+import {getFallbackTheme, getShaderLayerColorHexes} from './color_utils.js';
+import type {OverlayTheme} from './lens.mojom-webui.js';
 import {getTemplate} from './overlay_shimmer.html.js';
+import type {OverlayShimmerFocusedRegion, OverlayShimmerUnfocusRegion} from './selection_utils.js';
+import {ShimmerControlRequester} from './selection_utils.js';
 import {toPercent} from './values_converter.js';
-
-/**
- * Helper function to dispatch event to focus the shimmer on a region. This
- * should be used instead of directly dispatching the event, so if
- * implementation changes, it can be easily changed across the codebase.
- */
-export function focusShimmerOnRegion(
-    dispatchEl: PolymerElement, top: number, left: number, width: number,
-    height: number, requester: ShimmerControlRequester) {
-  dispatchEl.dispatchEvent(
-      new CustomEvent<OverlayShimmerFocusedRegion>('focus-region', {
-        bubbles: true,
-        composed: true,
-        detail: {
-          top,
-          left,
-          width,
-          height,
-          requester,
-        },
-      }));
-}
-
-/**
- * Helper function to dispatch event to unfocus the shimmer. This should be used
- * instead of directly dispatching the event, so if implementation changes, it
- * can be easily changed across the codebase.
- */
-export function unfocusShimmer(
-    dispatchEl: PolymerElement, requester: ShimmerControlRequester) {
-  dispatchEl.dispatchEvent(
-      new CustomEvent<OverlayShimmerUnfocusRegion>('unfocus-region', {
-        bubbles: true,
-        composed: true,
-        detail: {requester},
-      }));
-}
 
 interface CircleProperties {
   // The HEX value to color the circle.
@@ -60,16 +29,6 @@ interface CircleProperties {
   // steady state, relative to the parent rect.
   steadyStateCenterY: number;
 }
-
-// The colors of the different circles that compose the shimmer. One circle
-// will be generated for each color hex in this array.
-export const COLOR_HEXES = [
-  '#0B57D0',
-  '#5B8CFF',
-  '#FDACEE',
-  '#E5EDFF',
-  '#88A9FF',
-];
 
 // INVOCATION CONSTANTS: These are the values that the circles will have on
 // the initial invocation, which then transition to the steady state constants.
@@ -147,35 +106,6 @@ const REGION_SELECTION_STATE_FOCUS_DURATION = 750;
 // The time (in MS) to wait between updating the sparkle seed.
 const SPARKLE_MOTION_TIMEOUT_MS = 100;
 
-// Specifies which feature is requesting to control the Shimmer. Features are
-// ordered by priority, meaning requesters with higher enum values can take
-// control from lower value requesters, but not vice versa. For example, if
-// CURSOR is the requester, and a new focus region gets called for SEGMENTATION,
-// the focus region request will be executed. But if CURSOR sends a focus region
-// request while SEGMENTATION has control, the request will be ignored.
-export enum ShimmerControlRequester {
-  NONE = 0,
-  CURSOR = 1,
-  POST_SELECTION = 2,
-  SEGMENTATION = 3,
-  MANUAL_REGION = 4,
-}
-
-// Region sent to OverlayShimmerElement to focus the shimmer on.
-// The numbers should be normalized to the image dimensions, between 0 and 1.
-export interface OverlayShimmerFocusedRegion {
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-  requester: ShimmerControlRequester;
-}
-
-// Request to unfocus a region and relinquish control from the given requester.
-export interface OverlayShimmerUnfocusRegion {
-  requester: ShimmerControlRequester;
-}
-
 export interface OverlayShimmerElement {
   $: {
     circlesContainer: DomRepeat,
@@ -204,6 +134,18 @@ export class OverlayShimmerElement extends PolymerElement {
       isSteadyState: Boolean,
       isWiggling: Boolean,
       sparkleSeed: Number,
+      enableSparkles: {
+        type: Boolean,
+        reflectToAttribute: true,
+      },
+      shaderLayerColorHexes: {
+        type: Array,
+        computed: 'computeShaderLayerColorHexes_(theme)',
+      },
+      theme: {
+        type: Object,
+        value: getFallbackTheme,
+      },
     };
   }
 
@@ -215,6 +157,13 @@ export class OverlayShimmerElement extends PolymerElement {
   private isWiggling: boolean = true;
   // The current seed of the sparkling noise.
   private sparkleSeed: number = 0;
+  // Whether the sparkles are enabled or not.
+  private enableSparkles: boolean =
+      loadTimeData.getBoolean('enableShimmerSparkles');
+  // The overlay theme.
+  private theme: OverlayTheme;
+  // Shader hex colors.
+  private shaderLayerColorHexes: string[];
 
   // Event tracker for receiving DOM events.
   private eventTracker_: EventTracker = new EventTracker();
@@ -272,6 +221,10 @@ export class OverlayShimmerElement extends PolymerElement {
     this.listenerIds = [];
   }
 
+  private computeShaderLayerColorHexes_() {
+    return getShaderLayerColorHexes(this.theme);
+  }
+
   async startAnimation() {
     // Set the invocation values.
     this.style.setProperty(
@@ -307,7 +260,7 @@ export class OverlayShimmerElement extends PolymerElement {
       const centerXOffsetInt = parseInt(STEADY_STATE_CENTER_X_PERCENT_OFFSET);
       const centerYOffsetInt = parseInt(STEADY_STATE_CENTER_Y_PERCENT_OFFSET);
       // Create a circle for each colorHex defined.
-      this.circles = COLOR_HEXES.map((colorHex: string) => {
+      this.circles = this.shaderLayerColorHexes.map((colorHex: string) => {
         return {
           colorHex,
           steadyStateCenterX: 50 - centerXOffsetInt * (Math.random() * 2 - 1),
@@ -321,7 +274,9 @@ export class OverlayShimmerElement extends PolymerElement {
   }
 
   private startSparkles() {
-    this.updateSparkles(0);
+    if (this.enableSparkles) {
+      this.updateSparkles(0);
+    }
   }
 
   private updateSparkles(time: number) {

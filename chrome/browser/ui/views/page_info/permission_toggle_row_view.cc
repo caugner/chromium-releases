@@ -31,11 +31,11 @@
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/strings/grit/ui_strings.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/image_button_factory.h"
 #include "ui/views/controls/button/toggle_button.h"
 #include "ui/views/controls/highlight_path_generator.h"
-#include "ui/views/controls/label.h"
 #include "ui/views/controls/styled_label.h"
 #include "ui/views/style/typography.h"
 #include "ui/views/view_class_properties.h"
@@ -44,6 +44,9 @@ DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(PermissionToggleRowView,
                                       kRowSubTitleCameraElementId);
 DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(PermissionToggleRowView,
                                       kRowSubTitleMicrophoneElementId);
+DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(
+    PermissionToggleRowView,
+    kPermissionDisabledAtSystemLevelElementId);
 
 using content_settings::SettingSource;
 
@@ -79,7 +82,7 @@ PermissionToggleRowView::PermissionToggleRowView(
                 url_formatter::SchemeDisplay::OMIT_CRYPTOGRAPHIC);
         break;
       default:
-        NOTREACHED();
+        NOTREACHED_IN_MIGRATION();
     }
     row_view_->AddSecondaryLabel(requesting_origin_string);
     toggle_accessible_name = l10n_util::GetStringFUTF16(
@@ -90,11 +93,11 @@ PermissionToggleRowView::PermissionToggleRowView(
   int settings_text_id = 0, settings_link_id = 0;
   if (delegate->ShouldShowSettingsLinkForPermission(
           permission.type, &settings_text_id, &settings_link_id)) {
-    permission_disabled_on_system_level_ = true;
+    permission_blocked_on_system_level_ = true;
     std::u16string settings_text_for_link =
         l10n_util::GetStringUTF16(settings_link_id);
     size_t offset;
-    views::StyledLabel* label =
+    blocked_on_system_level_label_ =
         row_view_->AddSecondaryStyledLabel(l10n_util::GetStringFUTF16(
             settings_text_id, settings_text_for_link, &offset));
     base::RepeatingClosure clicked = base::BindRepeating(
@@ -102,9 +105,15 @@ PermissionToggleRowView::PermissionToggleRowView(
           row->delegate_->SettingsLinkClicked(type);
         },
         base::Unretained(this), permission.type);
-    label->AddStyleRange(
+    blocked_on_system_level_label_->AddStyleRange(
         gfx::Range(offset, offset + settings_text_for_link.length()),
         views::StyledLabel::RangeStyleInfo::CreateForLink(clicked));
+
+    // Setting the element identifier key to easily get a handle to the label in
+    // tests.
+    blocked_on_system_level_label_->SetProperty(
+        views::kElementIdentifierKey,
+        kPermissionDisabledAtSystemLevelElementId);
 
     // When permission is blocked on the system level, all control elements are
     // disabled. The permission row's title should match color with disabled
@@ -181,7 +190,7 @@ void PermissionToggleRowView::InitForUserSource(
                              gfx::Insets::VH(0, icon_label_spacing));
   toggle_button->SetTooltipText(PageInfoUI::PermissionTooltipUiString(
       permission_.type, permission_.requesting_origin));
-  toggle_button->SetAccessibleName(toggle_accessible_name);
+  toggle_button->GetViewAccessibility().SetName(toggle_accessible_name);
 
   toggle_button_ = row_view_->AddControl(std::move(toggle_button));
 
@@ -214,10 +223,8 @@ void PermissionToggleRowView::InitForUserSource(
           features::kFileSystemAccessPersistentPermissions) &&
       base::FeatureList::IsEnabled(
           features::kFileSystemAccessPersistentPermissionsUpdatedPageInfo);
-  if ((base::FeatureList::IsEnabled(
-           permissions::features::kOneTimePermission) &&
-       permissions::PermissionUtil::CanPermissionBeAllowedOnce(
-           permission_.type)) ||
+  if (permissions::PermissionUtil::CanPermissionBeAllowedOnce(
+          permission_.type) ||
       permission_.is_one_time || show_updated_page_info_file_system) {
     auto subpage_button = views::CreateVectorImageButtonWithNativeTheme(
         base::BindRepeating(
@@ -232,7 +239,7 @@ void PermissionToggleRowView::InitForUserSource(
     views::InstallCircleHighlightPathGenerator(subpage_button.get());
     subpage_button->SetMinimumImageSize({icon_size, icon_size});
     subpage_button->SetFlipCanvasOnPaintForRTLUI(false);
-    if (permission_disabled_on_system_level_) {
+    if (permission_blocked_on_system_level_) {
       subpage_button->SetEnabled(false);
     }
     row_view_->AddControl(std::move(subpage_button));
@@ -272,13 +279,23 @@ void PermissionToggleRowView::InitForManagedSource(
 }
 
 void PermissionToggleRowView::UpdateUiOnPermissionChanged() {
+  if (blocked_on_system_level_label_) {
+    if (permission_.setting == CONTENT_SETTING_DEFAULT) {
+      permission_blocked_on_system_level_ = false;
+      blocked_on_system_level_label_->SetVisible(false);
+    } else {
+      permission_blocked_on_system_level_ = true;
+      blocked_on_system_level_label_->SetVisible(true);
+    }
+  }
+
   // Change the permission icon to reflect the selected setting.
   row_view_->SetIcon(PageInfoViewFactory::GetPermissionIcon(
-      permission_, permission_disabled_on_system_level_));
+      permission_, permission_blocked_on_system_level_));
 
   // Update toggle state if it is used.
   if (toggle_button_) {
-    toggle_button_->SetEnabled(!permission_disabled_on_system_level_);
+    toggle_button_->SetEnabled(!permission_blocked_on_system_level_);
     toggle_button_->AnimateIsOn(PageInfoUI::IsToggleOn(permission_));
   }
 

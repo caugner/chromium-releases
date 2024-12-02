@@ -145,8 +145,7 @@ class MEDIA_GPU_EXPORT MediaFoundationVideoEncodeAccelerator
 
   // Activates the asynchronous encoder instance |encoder_| according to codec
   // merit.
-  bool ActivateAsyncEncoder(IMFActivate** pp_activates,
-                            uint32_t activate_count,
+  bool ActivateAsyncEncoder(std::vector<IMFActivate*>& activates,
                             bool is_constrained_h264);
 
   // Initializes and allocates memory for input and output parameters.
@@ -187,11 +186,10 @@ class MEDIA_GPU_EXPORT MediaFoundationVideoEncodeAccelerator
   // process all inputs, produce all outputs and tell us when it's done.
   void DrainEncoder();
 
-  // Check if |size| is supported by current profile. It depends on the result
-  // of |GetSupportedProfiles|. As max resolution is hard coded at this time,
+  // Check if |size| is supported. As max resolution is hard coded at this time,
   // frame size larger than 1920x1088 will be rejected even it could be
   // supported by hardware and driver.
-  bool IsFrameSizeAllowed(const gfx::Size& size);
+  bool IsFrameSizeAllowed(gfx::Size size);
   // Update frame size without re-initializing the encoder.
   void UpdateFrameSize(const gfx::Size& size);
 
@@ -325,10 +323,6 @@ class MEDIA_GPU_EXPORT MediaFoundationVideoEncodeAccelerator
   // from the front.
   base::circular_deque<OutOfBandMetadata> sample_metadata_queue_;
   gpu::GpuDriverBugWorkarounds workarounds_;
-
-  // Enumerating supported profiles takes time, so cache the result here for
-  // future requests.
-  std::optional<SupportedProfiles> supported_profiles_;
 
   // Declared last to ensure that all weak pointers are invalidated before
   // other destructors run.

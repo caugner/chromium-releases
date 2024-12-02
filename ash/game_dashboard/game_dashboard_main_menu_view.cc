@@ -53,6 +53,7 @@
 #include "ui/gfx/geometry/rounded_corners_f.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/text_constants.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/animation/animation_builder.h"
 #include "ui/views/animation/ink_drop.h"
 #include "ui/views/background.h"
@@ -392,7 +393,7 @@ class ScreenSizeRow : public views::Button {
     const std::u16string title = l10n_util::GetStringUTF16(
         IDS_ASH_GAME_DASHBOARD_SCREEN_SIZE_SETTINGS_TITLE);
     SetTooltipText(tooltip ? l10n_util::GetStringUTF16(tooltip) : title);
-    SetAccessibleName(l10n_util::GetStringUTF16(
+    GetViewAccessibility().SetName(l10n_util::GetStringUTF16(
         IDS_ASH_GAME_DASHBOARD_SCREEN_SIZE_SETTINGS_BUTTON_A11Y_LABEL));
 
     auto* layout =
@@ -567,7 +568,8 @@ class GameDashboardMainMenuView::GameControlsDetailsRow : public views::Button {
     main_menu_->UpdateGameControlsTile();
     UpdateSubtitle(/*is_game_controls_enabled=*/is_switch_on);
 
-    RecordGameDashboardControlsFeatureToggleState(is_switch_on);
+    RecordGameDashboardControlsFeatureToggleState(
+        main_menu_->context_->app_id(), is_switch_on);
   }
 
   void UpdateColors(bool enabled) {
@@ -610,11 +612,12 @@ class GameDashboardMainMenuView::GameControlsDetailsRow : public views::Button {
         kArcGameControlsFlagsKey,
         game_dashboard_utils::UpdateFlag(*flags, ArcGameControlsFlag::kEdit,
                                          /*enable_flag=*/true));
+    const auto& app_id = main_menu_->context_->app_id();
     RecordGameDashboardEditControlsWithEmptyState(
-        main_menu_->context_->app_id(),
+        app_id,
         game_dashboard_utils::IsFlagSet(*flags, ArcGameControlsFlag::kEmpty));
     RecordGameDashboardFunctionTriggered(
-        GameDashboardFunction::kGameControlsSetupOrEdit);
+        app_id, GameDashboardFunction::kGameControlsSetupOrEdit);
 
     // Always close the main menu in the end in case of the race condition that
     // this instance is destroyed before the following calls.
@@ -871,14 +874,16 @@ void GameDashboardMainMenuView::OnSettingsBackButtonPressed() {
   settings_view_container_->SetVisible(false);
   main_menu_container_->SetVisible(true);
   SizeToContents();
-  RecordGameDashboardFunctionTriggered(GameDashboardFunction::kSettingBack);
+  RecordGameDashboardFunctionTriggered(context_->app_id(),
+                                       GameDashboardFunction::kSettingBack);
 }
 
 void GameDashboardMainMenuView::OnWelcomeDialogSwitchPressed() {
   const bool new_state = welcome_dialog_settings_switch_->GetIsOn();
   game_dashboard_utils::SetShowWelcomeDialog(new_state);
   OnWelcomeDialogSwitchStateChanged(new_state);
-  RecordGameDashboardWelcomeDialogNotificationToggleState(new_state);
+  RecordGameDashboardWelcomeDialogNotificationToggleState(context_->app_id(),
+                                                          new_state);
 }
 
 void GameDashboardMainMenuView::OnGameControlsTilePressed() {
@@ -891,8 +896,8 @@ void GameDashboardMainMenuView::OnGameControlsTilePressed() {
           ArcGameControlsFlag::kHint,
           /*enable_flag=*/!was_toggled));
   UpdateGameControlsTile();
-  RecordGameDashboardControlsHintToggleSource(GameDashboardMenu::kMainMenu,
-                                              !was_toggled);
+  RecordGameDashboardControlsHintToggleSource(
+      context_->app_id(), GameDashboardMenu::kMainMenu, !was_toggled);
 }
 
 void GameDashboardMainMenuView::UpdateGameControlsTile() {
@@ -908,7 +913,8 @@ void GameDashboardMainMenuView::UpdateGameControlsTile() {
 
 void GameDashboardMainMenuView::OnScreenSizeSettingsButtonPressed() {
   GameDashboardController::Get()->ShowResizeToggleMenu(context_->game_window());
-  RecordGameDashboardFunctionTriggered(GameDashboardFunction::kScreenSize);
+  RecordGameDashboardFunctionTriggered(context_->app_id(),
+                                       GameDashboardFunction::kScreenSize);
 
   // Always close the main menu in the end in case of the race condition that
   // this instance is destroyed before the following calls.
@@ -921,14 +927,16 @@ void GameDashboardMainMenuView::OnFeedbackButtonPressed() {
       ShellDelegate::FeedbackSource::kGameDashboard,
       /*description_template=*/"#GameDashboard\n\n",
       /*category_tag=*/std::string());
-  RecordGameDashboardFunctionTriggered(GameDashboardFunction::kFeedback);
+  RecordGameDashboardFunctionTriggered(context_->app_id(),
+                                       GameDashboardFunction::kFeedback);
 }
 
 void GameDashboardMainMenuView::OnHelpButtonPressed() {
   NewWindowDelegate::GetPrimary()->OpenUrl(
       GURL(kHelpUrl), NewWindowDelegate::OpenUrlFrom::kUserInteraction,
       NewWindowDelegate::Disposition::kNewForegroundTab);
-  RecordGameDashboardFunctionTriggered(GameDashboardFunction::kHelp);
+  RecordGameDashboardFunctionTriggered(context_->app_id(),
+                                       GameDashboardFunction::kHelp);
 }
 
 void GameDashboardMainMenuView::OnSettingsButtonPressed() {
@@ -940,7 +948,8 @@ void GameDashboardMainMenuView::OnSettingsButtonPressed() {
     AddSettingsViews();
   }
   SizeToContents();
-  RecordGameDashboardFunctionTriggered(GameDashboardFunction::kSetting);
+  RecordGameDashboardFunctionTriggered(context_->app_id(),
+                                       GameDashboardFunction::kSetting);
 }
 
 void GameDashboardMainMenuView::AddMainMenuViews() {
@@ -1009,7 +1018,7 @@ void GameDashboardMainMenuView::AddShortcutTilesRow() {
           IDS_ASH_GAME_DASHBOARD_SCREENSHOT_TILE_BUTTON_TITLE),
       /*sub_label=*/std::nullopt));
   // `screenshot_tile` is treated as a button instead of toggle button here.
-  screenshot_tile->SetAccessibleRole(ax::mojom::Role::kButton);
+  screenshot_tile->GetViewAccessibility().SetRole(ax::mojom::Role::kButton);
 
   // Remove the sub-label view from Screenshot Feature Tile.
   if (tile_type == FeatureTile::TileType::kPrimary) {
@@ -1152,7 +1161,7 @@ void GameDashboardMainMenuView::AddUtilityClusterRow() {
                           base::Unretained(this)),
       VIEW_ID_GD_HELP_BUTTON, kGdHelpIcon,
       l10n_util::GetStringUTF16(IDS_ASH_GAME_DASHBOARD_HELP_TOOLTIP)));
-  help_button->SetAccessibleName(
+  help_button->GetViewAccessibility().SetName(
       l10n_util::GetStringUTF16(IDS_ASH_GAME_DASHBOARD_HELP_BUTTON_A11Y_LABEL));
   container->AddChildView(CreateIconButton(
       base::BindRepeating(&GameDashboardMainMenuView::OnSettingsButtonPressed,
@@ -1297,11 +1306,12 @@ void GameDashboardMainMenuView::AddWelcomeDialogSettingsRow() {
 
 void GameDashboardMainMenuView::OnWelcomeDialogSwitchStateChanged(
     bool is_enabled) {
-  welcome_dialog_settings_switch_->SetAccessibleName(l10n_util::GetStringFUTF16(
-      IDS_ASH_GAME_DASHBOARD_SETTINGS_WELCOME_DIALOG_A11Y_LABEL,
-      l10n_util::GetStringUTF16(is_enabled
-                                    ? IDS_ASH_GAME_DASHBOARD_TILE_ON
-                                    : IDS_ASH_GAME_DASHBOARD_GC_TILE_OFF)));
+  welcome_dialog_settings_switch_->GetViewAccessibility().SetName(
+      l10n_util::GetStringFUTF16(
+          IDS_ASH_GAME_DASHBOARD_SETTINGS_WELCOME_DIALOG_A11Y_LABEL,
+          l10n_util::GetStringUTF16(is_enabled
+                                        ? IDS_ASH_GAME_DASHBOARD_TILE_ON
+                                        : IDS_ASH_GAME_DASHBOARD_GC_TILE_OFF)));
 }
 
 PillButton* GameDashboardMainMenuView::GetGameControlsSetupButton() {

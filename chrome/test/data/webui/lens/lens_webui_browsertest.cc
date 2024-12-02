@@ -6,13 +6,14 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/lens/lens_overlay_controller.h"
-#include "chrome/browser/ui/lens/lens_overlay_permission_utils.h"
-#include "chrome/browser/ui/tabs/tab_features.h"
+#include "chrome/browser/ui/lens/lens_overlay_invocation_source.h"
+#include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/base/web_ui_mocha_browser_test.h"
 #include "components/lens/lens_features.h"
+#include "components/lens/lens_overlay_permission_utils.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test.h"
@@ -75,17 +76,13 @@ class LensOverlayTest : public LensWebUIBrowserTest {
     ASSERT_EQ(controller->state(), State::kOff);
 
     // Showing UI should eventually result in overlay state.
-    controller->ShowUI(LensOverlayController::InvocationSource::kAppMenu);
+    controller->ShowUI(lens::LensOverlayInvocationSource::kAppMenu);
     ASSERT_TRUE(base::test::RunUntil(
         [&]() { return controller->state() == State::kOverlay; }));
 
     // Get the overlay webview and wait for WebUI to finish loading.
-    raw_ptr<views::WebView> overlay_web_view =
-        views::AsViewClass<views::WebView>(
-            controller->GetOverlayWidgetForTesting()
-                ->GetContentsView()
-                ->children()[0]);
-    auto* web_contents = overlay_web_view->GetWebContents();
+    auto* web_contents =
+        controller->GetOverlayWebViewForTesting()->GetWebContents();
     content::WaitForLoadStop(web_contents);
     ASSERT_TRUE(RunTestOnWebContents(web_contents, file, trigger, true));
 
@@ -118,12 +115,17 @@ IN_PROC_BROWSER_TEST_F(LensOverlayTest, OverlayCloseButton) {
   RunOverlayTest("lens/overlay/overlay_close_button_test.js", "mocha.run()");
 }
 
-IN_PROC_BROWSER_TEST_F(LensOverlayTest, OverlayFeedbackButton) {
-  RunOverlayTest("lens/overlay/overlay_feedback_button_test.js", "mocha.run()");
+IN_PROC_BROWSER_TEST_F(LensOverlayTest, OverlayMoreOptionsButton) {
+  RunOverlayTest("lens/overlay/overlay_more_options_button_test.js",
+                 "mocha.run()");
 }
 
 IN_PROC_BROWSER_TEST_F(LensOverlayTest, OverlayScreenshot) {
   RunOverlayTest("lens/overlay/overlay_screenshot_test.js", "mocha.run()");
+}
+
+IN_PROC_BROWSER_TEST_F(LensOverlayTest, OverlayTheme) {
+  RunOverlayTest("lens/overlay/overlay_theme_test.js", "mocha.run()");
 }
 
 IN_PROC_BROWSER_TEST_F(LensOverlayTest, ManualRegionSelection) {
@@ -146,6 +148,18 @@ IN_PROC_BROWSER_TEST_F(LensOverlayTest, PostSelectionRenderer) {
   RunOverlayTest("lens/overlay/post_selection_renderer_test.js", "mocha.run()");
 }
 
+IN_PROC_BROWSER_TEST_F(LensOverlayTest, FindWordsInRegion) {
+  RunOverlayTest("lens/overlay/find_words_in_region_test.js", "mocha.run()");
+}
+
+IN_PROC_BROWSER_TEST_F(LensOverlayTest, CubicBezier) {
+  RunOverlayTest("lens/overlay/cubic_bezier_test.js", "mocha.run()");
+}
+
+IN_PROC_BROWSER_TEST_F(LensOverlayTest, CursorTooltip) {
+  RunOverlayTest("lens/overlay/cursor_tooltip_test.js", "mocha.run()");
+}
+
 using LensSidePanelTest = LensOverlayTest;
 IN_PROC_BROWSER_TEST_F(LensSidePanelTest, SidePanelResultsFrame) {
   RunOverlayTest("lens/side_panel/results_frame_test.js", "mocha.run()");
@@ -156,4 +170,7 @@ IN_PROC_BROWSER_TEST_F(LensSidePanelTest, SearchboxBackButton) {
                  "mocha.run()");
 }
 
+IN_PROC_BROWSER_TEST_F(LensSidePanelTest, ErrorPage) {
+  RunOverlayTest("lens/side_panel/error_page_test.js", "mocha.run()");
+}
 }  // namespace

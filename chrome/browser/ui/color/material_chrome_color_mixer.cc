@@ -77,6 +77,10 @@ void AddMaterialChromeColorMixer(ui::ColorProvider* provider,
   mixer[kColorExtensionsMenuText] = {ui::kColorSysOnSurface};
   mixer[kColorExtensionsMenuSecondaryText] = {ui::kColorSysOnSurfaceSubtle};
 
+  // Lens overlay colors.
+  mixer[kColorLensOverlayToastBackground] = {
+      ui::kColorSysInverseSurfacePrimary};
+
   // PageInfo colors.
   mixer[kColorPageInfoPermissionBlockedOnSystemLevelDisabled] = {
       ui::kColorSysStateDisabled};
@@ -164,7 +168,6 @@ void AddMaterialChromeColorMixer(ui::ColorProvider* provider,
   mixer[kColorComposeDialogResultForegroundWhileLoading] = {
       ui::kColorSysPrimary};
   mixer[kColorComposeDialogResultIcon] = {ui::kColorSysOnSurfaceSubtle};
-  mixer[kColorComposeDialogResultButtonsDivider] = {ui::kColorSysTonalOutline};
   mixer[kColorComposeDialogResultContainerScrollbarThumb] = {
       ui::kColorSysTonalOutline};
   mixer[kColorComposeDialogTitle] = {ui::kColorSysOnSurface};

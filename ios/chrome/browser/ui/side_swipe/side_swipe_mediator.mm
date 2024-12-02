@@ -196,7 +196,7 @@ const CGFloat kIpadTabSwipeDistance = 100;
   switch (swipeType) {
     case SwipeType::NONE:
     case SwipeType::CHANGE_TAB:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       break;
     case SwipeType::CHANGE_PAGE:
       [self animatePageNavigationInDirection:direction];
@@ -239,7 +239,7 @@ const CGFloat kIpadTabSwipeDistance = 100;
   if (_swipeType == SwipeType::CHANGE_PAGE) {
     return [self handleSwipeToNavigate:gesture];
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 }
 
 - (void)handleiPadTabSwipe:(SideSwipeGestureRecognizer*)gesture {
@@ -404,8 +404,12 @@ const CGFloat kIpadTabSwipeDistance = 100;
 // Animate page navigation.
 - (void)animatePageNavigationInDirection:
     (UISwipeGestureRecognizerDirection)direction {
-  BOOL canNavigate = [self canNavigate:IsSwipingBack(direction)];
-  CHECK(canNavigate);
+  if (![self canNavigate:IsSwipingBack(direction)]) {
+    // Back/forward state has changed when the user begins to swipe.
+    NOTREACHED(base::NotFatalUntil::M128)
+        << "Back/forward state has changed when the user begins to swipe.";
+    return;
+  }
 
   _inSwipe = YES;
   [_swipeDelegate updateAccessoryViewsForSideSwipeWithVisibility:NO];

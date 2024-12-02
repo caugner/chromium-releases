@@ -22,7 +22,6 @@ import org.chromium.base.ObserverList;
 import org.chromium.base.ResettersForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.cc.input.BrowserControlsState;
-import org.chromium.chrome.browser.browser_controls.BrowserControlsSizer;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider.Observer;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsVisibilityManager;
@@ -45,6 +44,8 @@ public class TabStripTransitionCoordinator implements ComponentCallbacks, AppHea
     // Delay to kickoff the transition to avoid frame drops while application is too busy when the
     // configuration changed.
     private static final int TRANSITION_DELAY_MS = 200;
+
+    private static final int DEFAULT_DTC_THRESHOLD_DP = 412;
 
     /** Observes height of tab strip that could change during run time. */
     // TODO(crbug.com/41481630): Rework the observer interface.
@@ -373,9 +374,9 @@ public class TabStripTransitionCoordinator implements ComponentCallbacks, AppHea
         // clears out, #onTokenUpdated will route into this method again.
         if (mDeferTransitionTokenHolder.hasTokens()) return;
 
-        // Invalid width will be ignored. This can happen when the mControlContainer is created
-        // hidden after theme changes. See crbug.com/1511599.
-        if (tabStripWidth <= 0) return;
+        // Invalid width / height will be ignored. This can happen when the mControlContainer is
+        // created hidden after theme changes. See crbug.com/1511599.
+        if (tabStripWidth <= 0 || controlContainerView().getHeight() == 0) return;
 
         boolean showTabStrip;
         if (ToolbarFeatures.isTabStripWindowLayoutOptimizationEnabled(/* isTablet= */ true)) {
@@ -392,7 +393,11 @@ public class TabStripTransitionCoordinator implements ComponentCallbacks, AppHea
         // Update the min size for the control container. This is needed one-layout-before browser
         // controls start changing its height, as it assumed a fixed size control container during
         // transition. See b/324178484.
-        int maxHeight = calculateTabStripHeight() + mToolbarLayout.getMeasuredHeight();
+        View toolbarHairline = controlContainerView().findViewById(R.id.toolbar_hairline);
+        int maxHeight =
+                calculateTabStripHeight()
+                        + mToolbarLayout.getMeasuredHeight()
+                        + toolbarHairline.getMeasuredHeight();
         controlContainerView().setMinimumHeight(maxHeight);
 
         // When transition kicked off by the BrowserControlsManager, the toolbar capture can be
@@ -420,8 +425,8 @@ public class TabStripTransitionCoordinator implements ComponentCallbacks, AppHea
      * Set the new height for the tab strip. This on high level consists with 3 steps:
      *
      * <ul>
-     *   <li>1. Use {@link BrowserControlsSizer} to change the browser control height. This will
-     *       kick off the scene layer transition.
+     *   <li>1. Use BrowserControlsSizer to change the browser control height. This will kick off
+     *       the scene layer transition.
      *   <li>2. Add / remove margins from the toolbar and toolbar hairline based on tab strip's new
      *       height.
      *   <li>3. Notify the tab strip scene layer for the new height. This will in turn notify
@@ -577,7 +582,7 @@ public class TabStripTransitionCoordinator implements ComponentCallbacks, AppHea
     /** Get the min screen width required in DP for the tab strip to become visible. */
     private static int getScreenWidthThresholdDp() {
         if (sMinScreenWidthForTesting != null) return sMinScreenWidthForTesting;
-        return ToolbarFeatures.DTC_TRANSITION_THRESHOLD_DP.getValue();
+        return DEFAULT_DTC_THRESHOLD_DP;
     }
 
     private boolean isTopControlAtSteadyState() {
@@ -619,8 +624,13 @@ public class TabStripTransitionCoordinator implements ComponentCallbacks, AppHea
         mHandler.post(
                 mCallbackController.makeCancelable(
                         () -> {
+                            View toolbarHairline =
+                                    controlContainerView().findViewById(R.id.toolbar_hairline);
                             controlContainerView()
-                                    .setMinimumHeight(mToolbarLayout.getHeight() + mTabStripHeight);
+                                    .setMinimumHeight(
+                                            mToolbarLayout.getHeight()
+                                                    + mTabStripHeight
+                                                    + toolbarHairline.getHeight());
                             ViewUtils.requestLayout(
                                     controlContainerView(),
                                     "TabStripTransitionCoordinator.remeasureControlContainer");

@@ -77,10 +77,7 @@ void SetThreadCgroup(PlatformThreadId thread_id,
                      const FilePath& cgroup_directory) {
   FilePath tasks_filepath = cgroup_directory.Append(FILE_PATH_LITERAL("tasks"));
   std::string tid = NumberToString(thread_id);
-  // TODO(crbug.com/40227936): Remove cast.
-  const int size = static_cast<int>(tid.size());
-  int bytes_written = WriteFile(tasks_filepath, tid.data(), size);
-  if (bytes_written != size) {
+  if (!WriteFile(tasks_filepath, as_byte_span(tid))) {
     DVLOG(1) << "Failed to add " << tid << " to " << tasks_filepath.value();
   }
 }
@@ -154,7 +151,15 @@ bool CanSetThreadTypeToRealtimeAudio() {
 
 bool SetCurrentThreadTypeForPlatform(ThreadType thread_type,
                                      MessagePumpType pump_type_hint) {
-  PlatformThreadLinux::SetThreadType(PlatformThread::CurrentId(), thread_type);
+  const PlatformThreadId thread_id = PlatformThread::CurrentId();
+
+  if (g_thread_type_delegate &&
+      g_thread_type_delegate->HandleThreadTypeChange(thread_id, thread_type)) {
+    return true;
+  }
+
+  internal::SetThreadType(getpid(), thread_id, thread_type, IsViaIPC(false));
+
   return true;
 }
 
@@ -270,31 +275,21 @@ void PlatformThreadLinux::SetThreadType(ProcessId process_id,
                                         PlatformThreadId thread_id,
                                         ThreadType thread_type,
                                         IsViaIPC via_ipc) {
-  SetThreadTypeInternal(process_id, thread_id, thread_type, via_ipc);
+  internal::SetThreadType(process_id, thread_id, thread_type, via_ipc);
 }
 
-// static
-void PlatformThreadLinux::SetThreadType(PlatformThreadId thread_id,
-                                        ThreadType thread_type) {
-  if (g_thread_type_delegate &&
-      g_thread_type_delegate->HandleThreadTypeChange(thread_id, thread_type)) {
-    return;
-  }
-  SetThreadTypeInternal(getpid(), thread_id, thread_type, IsViaIPC(false));
-}
-
-// static
-void PlatformThreadLinux::SetThreadTypeInternal(ProcessId process_id,
-                                                PlatformThreadId thread_id,
-                                                ThreadType thread_type,
-                                                IsViaIPC via_ipc) {
-  SetThreadCgroupsForThreadType(thread_id, thread_type);
+namespace internal {
+void SetThreadTypeLinux(ProcessId process_id,
+                        PlatformThreadId thread_id,
+                        ThreadType thread_type,
+                        IsViaIPC via_ipc) {
+  PlatformThreadLinux::SetThreadCgroupsForThreadType(thread_id, thread_type);
 
   // Some scheduler syscalls require thread ID of 0 for current thread.
   // This prevents us from requiring to translate the NS TID to
   // global TID.
   PlatformThreadId syscall_tid = thread_id;
-  if (thread_id == PlatformThread::CurrentId()) {
+  if (thread_id == PlatformThreadLinux::CurrentId()) {
     syscall_tid = 0;
   }
 
@@ -307,11 +302,13 @@ void PlatformThreadLinux::SetThreadTypeInternal(ProcessId process_id,
     DPLOG(ERROR) << "Failed to set realtime priority for thread " << thread_id;
   }
 
-  const int nice_setting = internal::ThreadTypeToNiceValue(thread_type);
+  const int nice_setting = ThreadTypeToNiceValue(thread_type);
   if (setpriority(PRIO_PROCESS, static_cast<id_t>(syscall_tid), nice_setting)) {
     DVPLOG(1) << "Failed to set nice value of thread (" << thread_id << ") to "
               << nice_setting;
   }
 }
+
+}  // namespace internal
 
 }  // namespace base

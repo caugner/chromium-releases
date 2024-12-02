@@ -438,7 +438,7 @@ static Position PositionForIndex(HTMLElement* inner_editor, unsigned index) {
       continue;
     }
 
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
   }
   DCHECK(last_br_or_text);
   return LastPositionInOrAfterNode(*last_br_or_text);
@@ -651,7 +651,7 @@ static const AtomicString& DirectionString(
       return backward;
   }
 
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return none;
 }
 
@@ -816,8 +816,14 @@ void TextControlElement::ScheduleSelectEvent() {
 
 void TextControlElement::ScheduleSelectionchangeEvent() {
   if (RuntimeEnabledFeatures::DispatchSelectionchangeEventPerElementEnabled()) {
-    EnqueueEvent(*Event::CreateBubble(event_type_names::kSelectionchange),
-                 TaskType::kMiscPlatformAPI);
+    if (!IsInShadowTree()) {
+      EnqueueEvent(*Event::CreateBubble(event_type_names::kSelectionchange),
+                   TaskType::kMiscPlatformAPI);
+    } else {
+      GetDocument().EnqueueEvent(
+          *Event::CreateBubble(event_type_names::kSelectionchange),
+          TaskType::kMiscPlatformAPI);
+    }
   }
 }
 

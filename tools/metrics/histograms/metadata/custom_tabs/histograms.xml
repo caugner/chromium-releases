@@ -35,6 +35,22 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
+<histogram name="CustomTabs.AuthView.UrlParams" units="bit field"
+    expires_after="2024-12-01">
+  <owner>sinansahin@google.com</owner>
+  <owner>chrome-connective-tissue@google.com</owner>
+  <summary>
+    A bit field with each bit representing the presence of a potential OAuth
+    query param in the URL. Recorded when the Custom Tab receives and handles
+    the initial intent. Android only.
+
+    Available bit flags:
+
+    0b00001: client_id, 0b00010: redirect_uri, 0b00100: response_type, 0b01000:
+    scope, 0b10000: state
+  </summary>
+</histogram>
+
 <histogram name="CustomTabs.AutoclosedSessionDuration" units="ms"
     expires_after="2023-08-20">
   <owner>jinsukkim@chromium.org</owner>
@@ -178,7 +194,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="CustomTabs.DetachedResourceRequest.FinalStatus"
-    enum="NetErrorCodes" expires_after="2024-09-22">
+    enum="NetErrorCodes" expires_after="2024-11-24">
   <owner>lizeb@chromium.org</owner>
   <owner>cct-team@google.com</owner>
   <summary>
@@ -225,6 +241,76 @@ chromium-metrics-reviews@google.com.
     single large list of features and their percentage usage (one or more times
     per session) right in the UMA timeline. Recorded during a CCT Session.
     Android only.
+  </summary>
+</histogram>
+
+<histogram name="CustomTabs.GoogleBottomBar.Button.Clicked"
+    enum="GoogleBottomBarButtonEvent" expires_after="2025-05-16">
+  <owner>tivi@google.com</owner>
+  <owner>chrome-connective-tissue@google.com</owner>
+  <summary>
+    Recorded only on Android. Records clicks on GoogleBottomBar buttons in the
+    GoogleBottomBar. Logged when a button is clicked in the GoogleBottomBar
+    (when the GoogleBottomBar feature is enabled and visible at the bottom of
+    the CCT).
+  </summary>
+</histogram>
+
+<histogram name="CustomTabs.GoogleBottomBar.Button.Shown"
+    enum="GoogleBottomBarButtonEvent" expires_after="2025-05-16">
+  <owner>tivi@google.com</owner>
+  <owner>chrome-connective-tissue@google.com</owner>
+  <summary>
+    Recorded only on Android. Records GoogleBottomBar buttons that are shown.
+    Logged when a button is displayed in the GoogleBottomBar (when the
+    GoogleBottomBar feature is enabled and visible at the bottom of the CCT).
+  </summary>
+</histogram>
+
+<histogram name="CustomTabs.GoogleBottomBar.Button.Updated"
+    enum="GoogleBottomBarButtonEvent" expires_after="2025-05-16">
+  <owner>tivi@google.com</owner>
+  <owner>chrome-connective-tissue@google.com</owner>
+  <summary>
+    Recorded only on Android. Records GoogleBottomBar(GBB) buttons that are
+    updated. Logged when embedder send request to update a button that is
+    displayed in the GoogleBottomBar (when the GoogleBottomBar feature is
+    enabled and visible at the bottom of the CCT).
+  </summary>
+</histogram>
+
+<histogram name="CustomTabs.GoogleBottomBar.Created"
+    enum="GoogleBottomBarCreatedEvent" expires_after="2025-05-16">
+  <owner>tivi@google.com</owner>
+  <owner>chrome-connective-tissue@google.com</owner>
+  <summary>
+    Recorded only on Android. Records type of the layout used to create the
+    GoogleBottomBar. Logged when the GoogleBottomBar is displayed (when the
+    GoogleBottomBar feature is enabled and visible at the bottom of the CCT).
+  </summary>
+</histogram>
+
+<histogram name="CustomTabs.GoogleBottomBar.LensSupportStatus"
+    enum="LensSupportStatus" expires_after="2025-07-01">
+  <owner>tivi@google.com</owner>
+  <owner>gbb-cct@google.com</owner>
+  <summary>
+    Whether the user supports the Google Lens entrypoint in Google Bottom Bar
+    and if not, the reason why. Recorded when user clicks on Lens button in
+    Google Bottom bar, that is visible only if the GoogleBottomBarVariantLayouts
+    feature is enabled.
+  </summary>
+</histogram>
+
+<histogram name="CustomTabs.GoogleBottomBar.Variant.Created"
+    enum="GoogleBottomBarVariantCreatedEvent" expires_after="2025-05-16">
+  <owner>tivi@google.com</owner>
+  <owner>chrome-connective-tissue@google.com</owner>
+  <summary>
+    Recorded only on Android. Records type of the variant layout type used to
+    create the GoogleBottomBar. Logged when the GoogleBottomBar is displayed
+    (when the GoogleBottomBarVariant feature is enabled and visible at the
+    bottom of the CCT).
   </summary>
 </histogram>
 
@@ -290,7 +376,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="CustomTabs.IncognitoCCTCallerId" enum="IncognitoCCTCallerId"
-    expires_after="2024-08-04">
+    expires_after="2024-11-10">
   <owner>arabm@google.com</owner>
   <owner>chrome-incognito@google.com</owner>
   <owner>cct-team@google.com</owner>
@@ -299,6 +385,18 @@ chromium-metrics-reviews@google.com.
     feature name is recorded, for external calls, either Google App or
     Non-Google App categories are recorded. The metric is recorded when an
     Incognito CCT opening intent is received.
+  </summary>
+</histogram>
+
+<histogram name="CustomTabs.IncognitoCCTCallerIsTrusted" enum="Boolean"
+    expires_after="2024-11-10">
+  <owner>dullweber@google.com</owner>
+  <owner>chrome-incognito@google.com</owner>
+  <owner>cct-team@google.com</owner>
+  <summary>
+    This metrics records whether a caller who requested Incognito CCT is
+    considered trusted. Only recorded when CCTIncognitoAvailableToThirdParty is
+    false.
   </summary>
 </histogram>
 
@@ -388,26 +486,6 @@ chromium-metrics-reviews@google.com.
     #onFinishNativeInitialization() when the availability is first checked to
     initialize the feature. Android only.
   </summary>
-</histogram>
-
-<histogram name="CustomTabs.MinimizeSuccessAfterException.{Exception}"
-    units="count" expires_after="2024-06-02">
-  <owner>sinansahin@google.com</owner>
-  <owner>chrome-connective-tissue@google.com</owner>
-  <summary>
-    Records the number of times {Exception} was thrown by
-    `Activity#enterPictureInPictureMode` when the said method succeeds. The
-    count includes exceptions seen since the last successful minimize event or
-    since the `CustomTabMinimizationManager` was created. This is recorded at
-    most once per CCT. Android only.
-  </summary>
-  <token key="Exception">
-    <variant name="IAE"
-        summary="IllegalStateException for addRootTaskReferenceIfNeeded"/>
-    <variant name="ISE_ACTIVITY" summary="IllegalStateException for Activity"/>
-    <variant name="ISE_DEVICE" summary="IllegalStateException for device"/>
-    <variant name="NPE" summary="NullPointerException for TaskDisplayArea"/>
-  </token>
 </histogram>
 
 <histogram name="CustomTabs.Omnibox.EnabledState" units="BooleanEnabled"

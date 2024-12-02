@@ -17,7 +17,7 @@
 #include "ash/wm/desks/desk_preview_view.h"
 #include "ash/wm/desks/desk_profiles_button.h"
 #include "ash/wm/desks/desks_controller.h"
-#include "ash/wm/desks/legacy_desk_bar_view.h"
+#include "ash/wm/desks/overview_desk_bar_view.h"
 #include "ash/wm/desks/templates/saved_desk_grid_view.h"
 #include "ash/wm/desks/templates/saved_desk_item_view.h"
 #include "ash/wm/desks/templates/saved_desk_library_view.h"
@@ -28,7 +28,7 @@
 #include "ash/wm/overview/overview_item_view.h"
 #include "ash/wm/overview/overview_session.h"
 #include "ash/wm/overview/overview_utils.h"
-#include "ash/wm/splitview/faster_split_view.h"
+#include "ash/wm/splitview/faster_split_view_old.h"
 #include "base/containers/contains.h"
 #include "base/ranges/algorithm.h"
 #include "chromeos/constants/chromeos_features.h"
@@ -128,6 +128,7 @@ void OverviewFocusCyclerOld::MoveFocus(bool reverse) {
           ->MaybeToggleA11yHighlightOnUndoDeskRemovalToast()) {
     SetFocusVisibility(false);
     focused_view_ = nullptr;
+    focused_view_tracker_.SetView(nullptr);
     return;
   }
 
@@ -140,8 +141,9 @@ void OverviewFocusCyclerOld::UpdateA11yFocusWindow(
       name_view->GetView()->GetWidget()->GetNativeWindow());
 }
 
-void OverviewFocusCyclerOld::MoveFocusToView(OverviewFocusableView* target_view,
-                                          bool suppress_accessibility_event) {
+void OverviewFocusCyclerOld::MoveFocusToView(
+    OverviewFocusableView* target_view,
+    bool suppress_accessibility_event) {
   const std::vector<OverviewFocusableView*> traversable_views =
       GetTraversableViews();
   DCHECK(base::Contains(traversable_views, target_view));
@@ -181,6 +183,7 @@ void OverviewFocusCyclerOld::OnViewDestroyingOrDisabling(
   deleted_index_ = view_index;
   focused_view_->SetFocused(false);
   focused_view_ = nullptr;
+  focused_view_tracker_.SetView(nullptr);
 }
 
 void OverviewFocusCyclerOld::SetFocusVisibility(bool visible) {
@@ -242,6 +245,7 @@ void OverviewFocusCyclerOld::ResetFocusedView() {
   deleted_index_.reset();
   focused_view_->SetFocused(false);
   focused_view_ = nullptr;
+  focused_view_tracker_.SetView(nullptr);
 }
 
 std::vector<OverviewFocusableView*> OverviewFocusCyclerOld::GetTraversableViews()
@@ -280,7 +284,7 @@ std::vector<OverviewFocusableView*> OverviewFocusCyclerOld::GetTraversableViews(
 
     // UI elements in faster split screen partial overview will be traversed
     // right after the overview items.
-    if (auto* faster_split_view = grid->GetFasterSplitView()) {
+    if (auto* faster_split_view = grid->GetFasterSplitViewOld()) {
       traversable_views.push_back(faster_split_view->GetToast());
       traversable_views.push_back(faster_split_view->settings_button());
     }
@@ -297,14 +301,18 @@ std::vector<OverviewFocusableView*> OverviewFocusCyclerOld::GetTraversableViews(
   return traversable_views;
 }
 
-void OverviewFocusCyclerOld::UpdateFocus(OverviewFocusableView* view_to_be_focused,
-                                      bool suppress_accessibility_event) {
+void OverviewFocusCyclerOld::UpdateFocus(
+    OverviewFocusableView* view_to_be_focused,
+    bool suppress_accessibility_event) {
   if (focused_view_ == view_to_be_focused) {
     return;
   }
 
   OverviewFocusableView* previous_view = focused_view_;
   focused_view_ = view_to_be_focused;
+  focused_view_tracker_.SetView(view_to_be_focused->GetView());
+  focused_view_tracker_.SetIsDeletingCallback(base::BindOnce(
+      &OverviewFocusCyclerOld::OnFocusedViewDeleting, base::Unretained(this)));
 
   // Perform accessibility related tasks.
   if (!suppress_accessibility_event) {
@@ -324,6 +332,10 @@ void OverviewFocusCyclerOld::UpdateFocus(OverviewFocusableView* view_to_be_focus
     previous_view->SetFocused(false);
   }
   focused_view_->SetFocused(true);
+}
+
+void OverviewFocusCyclerOld::OnFocusedViewDeleting() {
+  focused_view_ = nullptr;
 }
 
 }  // namespace ash

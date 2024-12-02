@@ -14,8 +14,7 @@ import android.widget.TextView;
 import androidx.annotation.Nullable;
 
 import org.chromium.chrome.browser.tab_resumption.TabResumptionModuleMetricsUtils.ModuleShowConfig;
-import org.chromium.chrome.browser.tab_resumption.TabResumptionModuleUtils.SuggestionClickCallbacks;
-import org.chromium.chrome.browser.tab_ui.ThumbnailProvider;
+import org.chromium.chrome.browser.tab_resumption.TabResumptionModuleUtils.SuggestionClickCallback;
 
 /**
  * The View for the tab resumption module, consisting of a header followed by suggestion tile(s).
@@ -23,8 +22,7 @@ import org.chromium.chrome.browser.tab_ui.ThumbnailProvider;
 public class TabResumptionModuleView extends LinearLayout {
     private TabResumptionTileContainerView mTileContainerView;
     private UrlImageProvider mUrlImageProvider;
-    private ThumbnailProvider mThumbnailProvider;
-    private SuggestionClickCallbacks mClickCallbacks;
+    private SuggestionClickCallback mClickCallback;
     private SuggestionBundle mBundle;
     private boolean mUseSalientImage;
 
@@ -35,6 +33,7 @@ public class TabResumptionModuleView extends LinearLayout {
 
     public TabResumptionModuleView(Context context, @Nullable AttributeSet attrs) {
         super(context, attrs);
+        mUseSalientImage = TabResumptionModuleUtils.TAB_RESUMPTION_USE_SALIENT_IMAGE.getValue();
     }
 
     @Override
@@ -54,17 +53,8 @@ public class TabResumptionModuleView extends LinearLayout {
         mTileContainerView.destroy();
     }
 
-    void setUseSalientImage(boolean useSalientImage) {
-        mUseSalientImage = useSalientImage;
-    }
-
     void setUrlImageProvider(UrlImageProvider urlImageProvider) {
         mUrlImageProvider = urlImageProvider;
-        renderIfReady();
-    }
-
-    void setThumbnailProvider(ThumbnailProvider thumbnailProvider) {
-        mThumbnailProvider = thumbnailProvider;
         renderIfReady();
     }
 
@@ -81,8 +71,8 @@ public class TabResumptionModuleView extends LinearLayout {
                         });
     }
 
-    void setClickCallbacks(SuggestionClickCallbacks clickCallbacks) {
-        mClickCallbacks = clickCallbacks;
+    void setClickCallback(SuggestionClickCallback clickCallback) {
+        mClickCallback = clickCallback;
         renderIfReady();
     }
 
@@ -104,21 +94,15 @@ public class TabResumptionModuleView extends LinearLayout {
     }
 
     private void renderIfReady() {
-        if (mIsSuggestionBundleReady
-                && mUrlImageProvider != null
-                && mClickCallbacks != null
-                && mThumbnailProvider != null) {
+        if (mIsSuggestionBundleReady && mUrlImageProvider != null && mClickCallback != null) {
             if (mBundle == null) {
                 mTileContainerView.removeAllViews();
+                mTileContainerView.cancelAllCallbacks();
                 mAllTilesTexts = null;
             } else {
                 mAllTilesTexts =
                         mTileContainerView.renderAllTiles(
-                                mBundle,
-                                mUrlImageProvider,
-                                mThumbnailProvider,
-                                mClickCallbacks,
-                                mUseSalientImage);
+                                mBundle, mUrlImageProvider, mClickCallback, mUseSalientImage);
             }
             setContentDescriptionOfTabResumption();
         }

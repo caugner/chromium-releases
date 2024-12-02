@@ -314,7 +314,7 @@ of interesting buckets, such as "internal + external".
 
 <histogram
     name="Extensions.CommandLineWith{DeveloperModeState}{ExtensionState}"
-    units="count" expires_after="2024-09-01">
+    units="count" expires_after="2024-11-17">
   <owner>richche@google.com</owner>
   <owner>chrome-counter-abuse-alerts@google.com</owner>
   <summary>
@@ -360,7 +360,7 @@ of interesting buckets, such as "internal + external".
 </histogram>
 
 <histogram name="Extensions.ContentScripts.ScriptsWithoutPrefixRetrieved"
-    enum="Boolean" expires_after="2024-07-02">
+    enum="Boolean" expires_after="2025-07-02">
   <owner>kelvinjiang@chromium.org</owner>
   <owner>extensions-core@chromium.org</owner>
   <summary>
@@ -403,7 +403,7 @@ of interesting buckets, such as "internal + external".
 
 <histogram
     name="Extensions.ContentSettings.PrimaryPatternUniqueSecondaryPatternWildcard"
-    enum="ContentType" expires_after="2024-09-15">
+    enum="ContentType" expires_after="2024-11-17">
   <owner>erikchen@chromium.org</owner>
   <owner>extensions-core@chromium.org</owner>
   <summary>
@@ -431,7 +431,7 @@ of interesting buckets, such as "internal + external".
 
 <histogram
     name="Extensions.ContentSettings.PrimaryPatternWildcardSecondaryPatternWildcard"
-    enum="ContentType" expires_after="2024-09-15">
+    enum="ContentType" expires_after="2024-11-17">
   <owner>erikchen@chromium.org</owner>
   <owner>extensions-core@chromium.org</owner>
   <summary>
@@ -489,6 +489,19 @@ of interesting buckets, such as "internal + external".
 </histogram>
 
 <histogram
+    name="Extensions.ContentVerification.DidHashMismatchOnFetchCompleteMV2.GoogleDocsOffline"
+    enum="Boolean" expires_after="2024-12-01">
+  <owner>rdevlin.cronin@chromium.org</owner>
+  <owner>extensions-core@chromium.org</owner>
+  <summary>
+    Reports whether content verification hashes found a hash mismatch when hash
+    fetching completes for the Google Docs Offline extension running on Manifest
+    Version 2. Hash fetching occurs both for a specific content verification job
+    and when the extension first loads.
+  </summary>
+</histogram>
+
+<histogram
     name="Extensions.ContentVerification.DidHashMismatchOnFetchCompleteMV3"
     enum="Boolean" expires_after="2024-12-01">
   <owner>rdevlin.cronin@chromium.org</owner>
@@ -498,6 +511,19 @@ of interesting buckets, such as "internal + external".
     fetching completes for a Manifest Version 3 extension. Hash fetching occurs
     both for a specific content verification job and when the extension first
     loads.
+  </summary>
+</histogram>
+
+<histogram
+    name="Extensions.ContentVerification.DidHashMismatchOnFetchCompleteMV3.GoogleDocsOffline"
+    enum="Boolean" expires_after="2024-12-01">
+  <owner>rdevlin.cronin@chromium.org</owner>
+  <owner>extensions-core@chromium.org</owner>
+  <summary>
+    Reports whether content verification hashes found a hash mismatch when hash
+    fetching completes for the Google Docs Offline extension running on Manifest
+    Version 3. Hash fetching occurs both for a specific content verification job
+    and when the extension first loads.
   </summary>
 </histogram>
 
@@ -533,14 +559,44 @@ of interesting buckets, such as "internal + external".
 </histogram>
 
 <histogram
+    name="Extensions.ContentVerification.VerifyFailedOnFileMV2.GoogleDocsOffline{VerifiedFileType}"
+    enum="ContentVerifyJobResult" expires_after="2024-12-01">
+  <owner>rdevlin.cronin@chromium.org</owner>
+  <owner>extensions-core@chromium.org</owner>
+  <summary>
+    The content verification failure reason for why a {VerifiedFileType} failed.
+    Emitted when content verification fails for a {VerifiedFileType} for the
+    Google Docs Offline extension running Manifest V2.
+  </summary>
+  <token key="VerifiedFileType" variants="VerifiedFileType">
+    <variant name=""/>
+  </token>
+</histogram>
+
+<histogram
     name="Extensions.ContentVerification.VerifyFailedOnFileMV2{VerifiedFileType}"
     enum="ContentVerifyJobResult" expires_after="2024-12-01">
   <owner>rdevlin.cronin@chromium.org</owner>
   <owner>extensions-core@chromium.org</owner>
   <summary>
     The content verification failure reason for why a {VerifiedFileType} failed.
-    Emmitted when content verification fails for a {VerifiedFileType} in a
+    Emitted when content verification fails for a {VerifiedFileType} in a
     manifest V2 extension.
+  </summary>
+  <token key="VerifiedFileType" variants="VerifiedFileType">
+    <variant name=""/>
+  </token>
+</histogram>
+
+<histogram
+    name="Extensions.ContentVerification.VerifyFailedOnFileMV3.GoogleDocsOffline{VerifiedFileType}"
+    enum="ContentVerifyJobResult" expires_after="2024-12-01">
+  <owner>rdevlin.cronin@chromium.org</owner>
+  <owner>extensions-core@chromium.org</owner>
+  <summary>
+    The content verification failure reason for why a {VerifiedFileType} failed.
+    Emitted when content verification fails for a {VerifiedFileType} for the
+    Google Docs Offline extension running Manifest V2.
   </summary>
   <token key="VerifiedFileType" variants="VerifiedFileType">
     <variant name=""/>
@@ -554,7 +610,7 @@ of interesting buckets, such as "internal + external".
   <owner>extensions-core@chromium.org</owner>
   <summary>
     The content verification failure reason for why a {VerifiedFileType} failed.
-    Emmitted when content verification fails for a {VerifiedFileType} in a
+    Emitted when content verification fails for a {VerifiedFileType} in a
     manifest V3 extension.
   </summary>
   <token key="VerifiedFileType" variants="VerifiedFileType">
@@ -568,7 +624,19 @@ of interesting buckets, such as "internal + external".
   <owner>extensions-core@chromium.org</owner>
   <summary>
     The type of file content verification failed to verify in an MV2 extension.
-    Emmitted at the time content verification fails, once per file that failed.
+    Emitted at the time content verification fails, once per file that failed.
+  </summary>
+</histogram>
+
+<histogram
+    name="Extensions.ContentVerification.VerifyFailedOnFileTypeMV2.GoogleDocsOffline"
+    enum="VerifiedFileType" expires_after="2024-12-01">
+  <owner>rdevlin.cronin@chromium.org</owner>
+  <owner>extensions-core@chromium.org</owner>
+  <summary>
+    The type of file content verification failed to verify for the Google Docs
+    Offline extension running Manifest V2. Emitted at the time content
+    verification fails, once per file that failed.
   </summary>
 </histogram>
 
@@ -578,7 +646,19 @@ of interesting buckets, such as "internal + external".
   <owner>extensions-core@chromium.org</owner>
   <summary>
     The type of file content verification failed to verify in an MV3 extension.
-    Emmitted at the time content verification fails, once per file that failed.
+    Emitted at the time content verification fails, once per file that failed.
+  </summary>
+</histogram>
+
+<histogram
+    name="Extensions.ContentVerification.VerifyFailedOnFileTypeMV3.GoogleDocsOffline"
+    enum="VerifiedFileType" expires_after="2024-12-01">
+  <owner>rdevlin.cronin@chromium.org</owner>
+  <owner>extensions-core@chromium.org</owner>
+  <summary>
+    The type of file content verification failed to verify for the Google Docs
+    Offline extension running Manifest V3. Emitted at the time content
+    verification fails, once per file that failed.
   </summary>
 </histogram>
 
@@ -593,6 +673,19 @@ of interesting buckets, such as "internal + external".
   </summary>
 </histogram>
 
+<histogram
+    name="Extensions.ContentVerification.VerifyJobResultMV2.GoogleDocsOffline"
+    enum="ContentVerifyJobResult" expires_after="2024-12-01">
+  <owner>rdevlin.cronin@chromium.org</owner>
+  <owner>extensions-core@chromium.org</owner>
+  <summary>
+    Reports the result of a given content verification job succeeded for the
+    Docs Offline extension running on Manifest Version 2. Emitted when the job
+    is complete. A content verification job is started for a given extension
+    resource request.
+  </summary>
+</histogram>
+
 <histogram name="Extensions.ContentVerification.VerifyJobResultMV3"
     enum="ContentVerifyJobResult" expires_after="2024-12-01">
   <owner>rdevlin.cronin@chromium.org</owner>
@@ -601,6 +694,19 @@ of interesting buckets, such as "internal + external".
     Reports the result of a given content verification job succeeded for a
     Manifest Version 3 extension. Emitted when the job is complete. A content
     verification job is started for a given extension resource request.
+  </summary>
+</histogram>
+
+<histogram
+    name="Extensions.ContentVerification.VerifyJobResultMV3.GoogleDocsOffline"
+    enum="ContentVerifyJobResult" expires_after="2024-12-01">
+  <owner>rdevlin.cronin@chromium.org</owner>
+  <owner>extensions-core@chromium.org</owner>
+  <summary>
+    Reports the result of a given content verification job succeeded for the
+    Docs Offline extension running on Manifest Version 3. Emitted when the job
+    is complete. A content verification job is started for a given extension
+    resource request.
   </summary>
 </histogram>
 
@@ -873,7 +979,7 @@ of interesting buckets, such as "internal + external".
 
 <histogram
     name="Extensions.DeclarativeNetRequest.EvaluateHeadersReceivedTime.SingleExtension2"
-    units="microseconds" expires_after="2024-06-30">
+    units="microseconds" expires_after="2025-06-30">
   <owner>kelvinjiang@chromium.org</owner>
   <owner>src/extensions/OWNERS</owner>
   <summary>
@@ -921,7 +1027,7 @@ of interesting buckets, such as "internal + external".
 </histogram>
 
 <histogram name="Extensions.DeclarativeNetRequest.LoadRulesetResult"
-    enum="LoadRulesetResult" expires_after="2024-06-30">
+    enum="LoadRulesetResult" expires_after="2025-06-30">
   <owner>kelvinjiang@chromium.org</owner>
   <owner>src/extensions/OWNERS</owner>
   <summary>
@@ -1140,9 +1246,10 @@ of interesting buckets, such as "internal + external".
 </histogram>
 
 <histogram name="Extensions.DeclarativeNetRequest.UpdateDynamicRulesStatus"
-    enum="UpdateDynamicRulesStatus" expires_after="2024-06-26">
+    enum="UpdateDynamicRulesStatus" expires_after="2025-06-26">
   <owner>rdevlin.cronin@chromium.org</owner>
-  <owner>src/extensions/OWNERS</owner>
+  <owner>kelvinjiang@chromium.org</owner>
+  <owner>extensions-core@chromium.org</owner>
   <summary>
     Indicates the result of an extension function call to add or remove dynamic
     rules. Logged every time an extension calls the addDynamicRules or
@@ -1651,17 +1758,20 @@ of interesting buckets, such as "internal + external".
     include any requests that utilize the EventRouter::DispatchEventToSender()
     event routing flow (some web request API, and web view API events).
 
-    Note: this histogram was incremented March, 2024 since it was emitting for
-    an incorrect definition of &quot;started&quot;.&quot;
+    If the extension was unloaded when the event was dispatched, the worker is
+    considered inactive.
+
+    Note: this histogram was incremented May, 2024 since it additionally started
+    emmitting when the extension is unloaded.
   </summary>
   <token key="ContextActive">
     <variant name="" summary=""/>
-    <variant name=".Active2"
+    <variant name=".Active3"
         summary="and in status active. Active means that the background
                  script was started and ready to receive and run events (both
                  //content browser notification and extension renderer JS
                  global evaluation completed) when the event was dispatched"/>
-    <variant name=".Inactive2"
+    <variant name=".Inactive3"
         summary="and in status inactive. Inactive means that the background
                  script was not started and not ready to receive and run
                  events (either the //content browser notification or
@@ -2556,6 +2666,20 @@ of interesting buckets, such as "internal + external".
   </summary>
 </histogram>
 
+<histogram name="Extensions.Functions.ExtractJSCallStackElapsedTime"
+    units="microseconds" expires_after="2024-11-28">
+  <owner>anunoy@chromium.org</owner>
+  <owner>chrome-counter-abuse-alerts@google.com</owner>
+  <summary>
+    The amount of time it takes to extract the JS call stack when an extension
+    API method is invoked. The elapsed time is recorded on the renderer side
+    before the API request is sent to the browser. Recorded regardless of the
+    API method's execution result. Only supported for a subset of extension API
+    methods, for example, some chrome.tabs and chrome.cookies methods. This
+    histogram is recorded only for clients with high-resolution clocks.
+  </summary>
+</histogram>
+
 <histogram
     name="Extensions.Functions.FailedTime{ExtensionFunctionExecutionTime}"
     enum="ExtensionFunctions" expires_after="never">
@@ -2642,7 +2766,7 @@ of interesting buckets, such as "internal + external".
 </histogram>
 
 <histogram name="Extensions.Functions.SucceededTotalExecutionTime" units="ms"
-    expires_after="2024-09-15">
+    expires_after="2024-11-17">
   <owner>rdevlin.cronin@chromium.org</owner>
   <owner>extensions-core@chromium.org</owner>
   <summary>
@@ -2655,7 +2779,7 @@ of interesting buckets, such as "internal + external".
 </histogram>
 
 <histogram name="Extensions.Functions.SynchronousExecutionTime" units="ms"
-    expires_after="2024-09-22">
+    expires_after="2024-11-24">
   <owner>rdevlin.cronin@chromium.org</owner>
   <owner>extensions-core@chromium.org</owner>
   <summary>
@@ -3130,7 +3254,7 @@ of interesting buckets, such as "internal + external".
 </histogram>
 
 <histogram name="Extensions.InstallFrictionDialogAction"
-    enum="ExtensionInstallFrictionDialogAction" expires_after="2024-09-15">
+    enum="ExtensionInstallFrictionDialogAction" expires_after="2024-11-17">
   <owner>jeffcyr@google.com</owner>
   <owner>chrome-counter-abuse-alerts@google.com</owner>
   <summary>
@@ -3677,7 +3801,7 @@ of interesting buckets, such as "internal + external".
 </histogram>
 
 <histogram name="Extensions.LoadTheme2" units="units"
-    expires_after="2024-09-15">
+    expires_after="2024-11-17">
   <owner>rdevlin.cronin@chromium.org</owner>
   <owner>extensions-core@chromium.org</owner>
   <summary>
@@ -3925,7 +4049,7 @@ of interesting buckets, such as "internal + external".
 </histogram>
 
 <histogram name="Extensions.Navigation.Scheme" enum="ExtensionNavigationScheme"
-    expires_after="2024-09-15">
+    expires_after="2024-11-17">
   <owner>jkokatsu@google.com</owner>
   <owner>extensions-core@chromium.org</owner>
   <summary>
@@ -4007,8 +4131,8 @@ of interesting buckets, such as "internal + external".
 </histogram>
 
 <histogram
-    name="Extensions.NonWebstoreLocationWith{DeveloperModeState}{ExtensionState}2"
-    enum="ExtensionLocation" expires_after="2024-09-01">
+    name="Extensions.NonWebstoreLocationWith{DeveloperModeState}{ExtensionState}3"
+    enum="ExtensionLocation" expires_after="2024-11-17">
   <owner>richche@google.com</owner>
   <owner>chrome-counter-abuse-alerts@google.com</owner>
   <summary>
@@ -4017,6 +4141,10 @@ of interesting buckets, such as "internal + external".
     Extension::Location. Emitted on every profile open only for &quot;user
     profiles&quot; (profiles where people can install extensions, specifically
     profiles that can have non-component extensions installed).
+
+    This replaces the previous histogram,
+    NonWebstoreLocationWith{DeveloperModeState}{ExtensionState}2, due to missing
+    data from M126.
   </summary>
   <token key="DeveloperModeState" variants="DeveloperModeState"/>
   <token key="ExtensionState" variants="ExtensionState"/>
@@ -4388,7 +4516,7 @@ of interesting buckets, such as "internal + external".
 </histogram>
 
 <histogram
-    name="Extensions.ServiceWorkerBackground.AddPendingTaskForRunningWorker2"
+    name="Extensions.ServiceWorkerBackground.AddPendingTaskForRunningWorker3"
     enum="Boolean" expires_after="2024-09-15">
 <!-- expires-never: Monitors core extension system health. -->
 
@@ -4398,10 +4526,11 @@ of interesting buckets, such as "internal + external".
     It is emitted every time we add a pending task for a worker. Records true if
     the worker was ready to run tasks when pendings tasks are added (this is not
     optimal). Records false if the worker was not ready to run tasks when the
-    pending task was added (this is the optimal expected state).
+    pending task was added (this is the optimal expected state). `false` is
+    recorded if the task is added when the extension is unloaded.
 
-    Note: this histogram was incremented March, 2024 since it was emitting for
-    an incorrect definition of &quot;started&quot;.
+    Note: this histogram was incremented May, 2024 since it additionally started
+    emmitting when the extension is unloaded.
   </summary>
 </histogram>
 
@@ -4583,7 +4712,7 @@ of interesting buckets, such as "internal + external".
 </histogram>
 
 <histogram
-    name="Extensions.ServiceWorkerBackground.RequestedWorkerStartForStartedWorker2"
+    name="Extensions.ServiceWorkerBackground.RequestedWorkerStartForStartedWorker3"
     enum="Boolean" expires_after="never">
 <!-- expires-never: Monitors core extension system health. -->
 
@@ -4596,10 +4725,11 @@ of interesting buckets, such as "internal + external".
     that we will redundantly reqeust to start a worker when it was already
     running and could've processed the event without the request to start. A
     `false` value means that we correctly started the worker because it was not
-    ready to run events.
+    ready to run events. `false` is recorded if the worker start is requested
+    when the extension is unloaded.
 
-    Note: this histogram was incremented March, 2024 since it was emitting for
-    an incorrect definition of &quot;started&quot;.
+    Note: this histogram was incremented May, 2024 since it additionally started
+    emmitting when the extension is unloaded.
   </summary>
 </histogram>
 

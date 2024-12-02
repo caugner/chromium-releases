@@ -33,6 +33,7 @@
 #include "components/crash/core/common/crash_key.h"
 #include "components/lens/lens_metadata.mojom.h"
 #include "components/no_state_prefetch/renderer/no_state_prefetch_helper.h"
+#include "components/no_state_prefetch/renderer/no_state_prefetch_utils.h"
 #include "components/offline_pages/buildflags/buildflags.h"
 #include "components/optimization_guide/content/renderer/page_text_agent.h"
 #include "components/translate/content/renderer/translate_agent.h"
@@ -70,7 +71,6 @@
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/renderer/accessibility/read_anything_app_controller.h"
 #include "chrome/renderer/searchbox/searchbox_extension.h"
-#include "ui/accessibility/accessibility_features.h"
 #endif  // !BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
@@ -330,9 +330,8 @@ void ChromeRenderFrameObserver::DidClearWindowObject() {
   // url, which is chrome-untrusted. ReadAnythingAppController installs v8
   // bindings in the chrome.readingMode namespace which are consumed by
   // read_anything/app.ts, the resource of the Read Anything WebUI.
-  if (features::IsReadAnythingEnabled() &&
-      render_frame()->GetWebFrame()->GetDocument().Url() ==
-          chrome::kChromeUIUntrustedReadAnythingSidePanelURL) {
+  if (render_frame()->GetWebFrame()->GetDocument().Url() ==
+      chrome::kChromeUIUntrustedReadAnythingSidePanelURL) {
     ReadAnythingAppController::Install(render_frame());
   }
 #endif  // !BUILDFLAG(IS_ANDROID)
@@ -509,6 +508,56 @@ void ChromeRenderFrameObserver::RequestBitmapForContextNode(
   std::move(callback).Run(image);
 }
 
+void ChromeRenderFrameObserver::RequestBitmapForContextNodeWithBoundsDiagnostic(
+    RequestBitmapForContextNodeWithBoundsDiagnosticCallback callback) {
+  WebNode context_node = render_frame()->GetWebFrame()->ContextMenuImageNode();
+  SkBitmap image;
+  gfx::Rect bounds;
+  if (context_node.IsNull() || !context_node.IsElementNode()) {
+    std::move(callback).Run(image, bounds);
+    return;
+  }
+
+  WebElement web_element = context_node.To<WebElement>();
+  image = web_element.ImageContents();
+  bounds = web_element.BoundsInWidget();
+  std::move(callback).Run(image, bounds);
+}
+
+void ChromeRenderFrameObserver::RequestBoundsForAllImagesDiagnostic(
+    RequestBoundsForAllImagesDiagnosticCallback callback) {
+  std::vector<blink::WebElement> image_elements;
+  std::vector<gfx::Rect> all_bounds;
+  const blink::WebDocument doc = render_frame()->GetWebFrame()->GetDocument();
+  if (doc.IsNull() || doc.Body().IsNull()) {
+    return;
+  }
+  FindImageElements(doc.Body(), image_elements);
+
+  for (auto& element : image_elements) {
+    all_bounds.emplace_back(
+        render_frame()->ConvertViewportToWindow(element.BoundsInWidget()));
+  }
+  std::move(callback).Run(all_bounds);
+}
+
+// Depth-first search for recursively traversing DOM elements and pulling out
+// references for images.
+void ChromeRenderFrameObserver::FindImageElements(
+    blink::WebElement element,
+    std::vector<blink::WebElement>& images) {
+  if (element.ImageContents().isNull()) {
+    for (blink::WebNode child = element.FirstChild(); !child.IsNull();
+         child = child.NextSibling()) {
+      if (child.IsElementNode()) {
+        FindImageElements(child.To<blink::WebElement>(), images);
+      }
+    }
+  } else {
+    images.emplace_back(element);
+  }
+}
+
 void ChromeRenderFrameObserver::RequestReloadImageForContextNode() {
   WebLocalFrame* frame = render_frame()->GetWebFrame();
   // TODO(dglazkov): This code is clearly in the wrong place. Need
@@ -557,6 +606,10 @@ void ChromeRenderFrameObserver::SetSupportsDraggableRegions(
     bool supports_draggable_regions) {
   render_frame()->GetWebView()->SetSupportsDraggableRegions(
       supports_draggable_regions);
+}
+
+void ChromeRenderFrameObserver::SetShouldDeferMediaLoad(bool should_defer) {
+  prerender::SetShouldDeferMediaLoad(render_frame(), should_defer);
 }
 
 void ChromeRenderFrameObserver::SetClientSidePhishingDetection() {
@@ -755,7 +808,7 @@ bool ChromeRenderFrameObserver::NeedsEncodeImage(
   }
 
   // Should never hit this code since all cases were handled above.
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return true;
 }
 

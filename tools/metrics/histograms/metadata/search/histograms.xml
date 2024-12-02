@@ -120,15 +120,15 @@ chromium-metrics-reviews@google.com.
   <token key="AuxiliarySearchDataType" variants="AuxiliarySearchDataType"/>
 </histogram>
 
-<histogram name="Search.ChoiceDebug.IsDefaultProviderAddedToChoices"
-    enum="Boolean" expires_after="2025-02-11">
-  <owner>dgn@chromium.org</owner>
+<histogram name="Search.ChoiceDebug.ScrollStateWithMoreButtonClick"
+    enum="SearchEngineChoiceScrollState" expires_after="2025-02-11">
+  <owner>jyammine@google.com</owner>
   <owner>chrome-waffle-eng@google.com</owner>
   <summary>
-    Records whether the current default search provided was inserted in the
-    choice screen in addition to the normal, country-based prepopulated set.
-    This histogram is recorded when the list of search engines is fetched for
-    the dialog, on Desktop.
+    Records an enum that represents the search engine choice page scroll state
+    when the &quot;More&quot; button is clicked. In some cases, the page doesn't
+    scroll to the exact bottom when the button is clicked. Recorded only when
+    the &quot;More&quot; button is clicked.
   </summary>
 </histogram>
 
@@ -745,7 +745,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Search.DefaultSearchProviderType2{Population}"
-    enum="OmniboxSearchEngineType" expires_after="2024-09-22">
+    enum="OmniboxSearchEngineType" expires_after="2024-11-24">
   <owner>mpearson@chromium.org</owner>
   <owner>ftirelo@chromium.org</owner>
   <summary>

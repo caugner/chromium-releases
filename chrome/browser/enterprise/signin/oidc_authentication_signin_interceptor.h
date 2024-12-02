@@ -26,24 +26,9 @@ class CloudPolicyClientRegistrationHelper;
 
 class OidcAuthenticationSigninInterceptorTest;
 
-enum class OidcInterceptionStatus {
-  kNoInterception = 0,
-  kRegister = 1,
-  kConsentCollection = 2,
-  kProfileCreation = 3,
-  kPolicyFetch = 4,
-  kSetPrimaryAccountWithInvalidToken = 5,
-  kCompleted = 6,
-  // TODO(b/319479021): Add more error reporting and retry logics to make the
-  // interceptor class more resilient
-  kError = 7,
-};
-
 class Profile;
 class ProfileAttributesEntry;
 
-using ClientRegisterCallback =
-    base::OnceCallback<void(std::unique_ptr<policy::CloudPolicyClient>)>;
 using OidcInterceptionCallback = base::OnceCallback<void()>;
 using policy::CloudPolicyClient;
 
@@ -73,6 +58,7 @@ class OidcAuthenticationSigninInterceptor : public WebSigninInterceptor,
   virtual void MaybeInterceptOidcAuthentication(
       content::WebContents* intercepted_contents,
       ProfileManagementOicdTokens oidc_tokens,
+      std::string issuer_id,
       std::string subject_id,
       OidcInterceptionCallback oidc_callback);
 
@@ -84,24 +70,22 @@ class OidcAuthenticationSigninInterceptor : public WebSigninInterceptor,
     client_for_testing_ = std::move(client);
   }
 
-  void SetDisableBrowserCreationAfterInterceptionForTesting(bool disable) {
-    disable_browser_creation_after_interception_for_testing_ = disable;
-  }
-
-  OidcInterceptionStatus interception_status() { return interception_status_; }
-
- private:
-  void CreateBrowserAfterSigninInterception();
+ protected:
+  virtual void CreateBrowserAfterSigninInterception();
   // Cancels any current signin interception and resets the interceptor to its
   // initial state.
+
+ private:
   void Reset();
 
   // Try to send OIDC tokens to DM server for registration.
-  void StartOidcRegistration(ClientRegisterCallback callback);
+  void StartOidcRegistration();
   // Called when OIDC registration finishes, the client should be registered
   // (aka has a dm token) and various information should be included, most
   // importantly, if the 3P user identity is sync-ed to Google or not.
-  void OnClientRegistered(std::unique_ptr<CloudPolicyClient> client);
+  void OnClientRegistered(std::unique_ptr<CloudPolicyClient> client,
+                          std::string preset_profile_guid,
+                          base::TimeTicks registration_start_time);
 
   // Called when user makes a decision on the profile creation dialog.
   void OnProfileCreationChoice(SigninInterceptionResult create);
@@ -110,7 +94,10 @@ class OidcAuthenticationSigninInterceptor : public WebSigninInterceptor,
   // Called when policy fetch response has been received, For Dasher-based
   // profiles, pulls gaia id from fetched policies and user email from DM server
   // response, and sets this AccountId as primary user of the new profile.
-  void OnPolicyFetchCompleteInNewProfile(Profile* new_profile, bool success);
+  void OnPolicyFetchCompleteInNewProfile(
+      Profile* new_profile,
+      base::TimeTicks policy_fetch_start_time,
+      bool success);
 
   const raw_ptr<Profile, DanglingUntriaged> profile_;
   std::unique_ptr<Delegate> delegate_;
@@ -123,16 +110,18 @@ class OidcAuthenticationSigninInterceptor : public WebSigninInterceptor,
   std::string client_id_;
   std::string user_display_name_;
   std::string user_email_;
-  // 'sub' idenitifer of the OIDC response, unique for each user identity from
-  // the IDP.
-  std::string subject_id_;
+  // Unique id for the OIDC user, format:
+  // "iss:<value of 'iss' field>,sub:<value of 'sub'field>"
+  // For context, 'iss' is the ID of the OIDC issuer and 'sub' is the
+  // unique-per-user subject ID within the issuer.
+  std::string unique_user_identifier_;
   bool dasher_based_ = true;
+  std::string preset_profile_id_;
   raw_ptr<const ProfileAttributesEntry> switch_to_entry_ = nullptr;
   SkColor profile_color_;
   // TODO(b/319479021): utilize the status variable to have better error
   // handling and in metrics.
-  OidcInterceptionStatus interception_status_ =
-      OidcInterceptionStatus::kNoInterception;
+  bool interception_in_progress_ = false;
 
   std::unique_ptr<policy::CloudPolicyClientRegistrationHelper>
       registration_helper_for_temporary_client_;
@@ -142,7 +131,6 @@ class OidcAuthenticationSigninInterceptor : public WebSigninInterceptor,
       interception_bubble_handle_;
 
   std::unique_ptr<CloudPolicyClient> client_for_testing_ = nullptr;
-  bool disable_browser_creation_after_interception_for_testing_ = false;
 
   OidcInterceptionCallback oidc_callback_;
 

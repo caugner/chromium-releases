@@ -15,6 +15,7 @@
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/view_utils.h"
 
@@ -96,11 +97,11 @@ void ActionTypeButtonGroup::Init() {
       move_button->SetSelected(true);
       break;
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
   }
 
-  SetAccessibilityProperties(ax::mojom::Role::kRadioGroup);
-  SetAccessibleName(
+  GetViewAccessibility().SetProperties(ax::mojom::Role::kRadioGroup);
+  GetViewAccessibility().SetName(
       l10n_util::GetStringUTF16(IDS_INPUT_OVERLAY_BUTTON_OPTIONS_BUTTON_TYPE));
 }
 
@@ -152,6 +153,7 @@ void ActionTypeButtonGroup::OnActionTapButtonPressed() {
   selected_action_type_ = ActionType::TAP;
   controller_->ChangeActionType(action_, ActionType::TAP);
   RecordButtonOptionsMenuFunctionTriggered(
+      controller_->GetPackageName(),
       ButtonOptionsMenuFunction::kOptionSingleButton);
 }
 
@@ -162,6 +164,7 @@ void ActionTypeButtonGroup::OnActionMoveButtonPressed() {
   selected_action_type_ = ActionType::MOVE;
   controller_->ChangeActionType(action_, ActionType::MOVE);
   RecordButtonOptionsMenuFunctionTriggered(
+      controller_->GetPackageName(),
       ButtonOptionsMenuFunction::kOptionJoystick);
 }
 

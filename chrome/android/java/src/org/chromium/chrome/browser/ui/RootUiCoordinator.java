@@ -45,6 +45,7 @@ import org.chromium.chrome.browser.back_press.BackPressManager;
 import org.chromium.chrome.browser.bookmarks.AddToBookmarksToolbarButtonController;
 import org.chromium.chrome.browser.bookmarks.BookmarkModel;
 import org.chromium.chrome.browser.bookmarks.TabBookmarker;
+import org.chromium.chrome.browser.browser_controls.BottomControlsStacker;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
 import org.chromium.chrome.browser.browserservices.intents.WebappConstants;
 import org.chromium.chrome.browser.commerce.ShoppingServiceFactory;
@@ -313,7 +314,6 @@ public class RootUiCoordinator
     protected final ObservableSupplierImpl<EdgeToEdgeController> mEdgeToEdgeControllerSupplier;
     protected final @ActivityType int mActivityType;
     protected final Supplier<Boolean> mIsInOverviewModeSupplier;
-    private final Supplier<Boolean> mIsWarmOnResumeSupplier;
     private final AppMenuDelegate mAppMenuDelegate;
     private final StatusBarColorProvider mStatusBarColorProvider;
     private final Supplier<TabContentManager> mTabContentManagerSupplier;
@@ -326,6 +326,7 @@ public class RootUiCoordinator
     protected final ExpandedSheetHelper mExpandedBottomSheetHelper;
     protected final ObservableSupplierImpl<ReadAloudController> mReadAloudControllerSupplier =
             new ObservableSupplierImpl<>();
+    protected final BottomControlsStacker mBottomControlsStacker;
     @Nullable private ContextualSearchObserver mReadAloudContextualSearchObserver;
     @Nullable private ContextualSearchSelectionObserver mContextualSearchSelectionObserver;
     @Nullable private PageZoomCoordinator mPageZoomCoordinator;
@@ -379,7 +380,6 @@ public class RootUiCoordinator
      * @param edgeToEdgeControllerSupplier Supplies an {@link EdgeToEdgeController}.
      * @param activityType The {@link ActivityType} for the activity.
      * @param isInOverviewModeSupplier Supplies whether the app is in overview mode.
-     * @param isWarmOnResumeSupplier Supplies whether the app was warm on resume.
      * @param appMenuDelegate The app menu delegate.
      * @param statusBarColorProvider Provides the status bar color.
      * @param intentRequestTracker Tracks intent requests.
@@ -427,7 +427,6 @@ public class RootUiCoordinator
             @NonNull ObservableSupplierImpl<EdgeToEdgeController> edgeToEdgeControllerSupplier,
             @ActivityType int activityType,
             @NonNull Supplier<Boolean> isInOverviewModeSupplier,
-            @NonNull Supplier<Boolean> isWarmOnResumeSupplier,
             @NonNull AppMenuDelegate appMenuDelegate,
             @NonNull StatusBarColorProvider statusBarColorProvider,
             @NonNull IntentRequestTracker intentRequestTracker,
@@ -458,7 +457,6 @@ public class RootUiCoordinator
         mEdgeToEdgeControllerSupplier = edgeToEdgeControllerSupplier;
         mActivityType = activityType;
         mIsInOverviewModeSupplier = isInOverviewModeSupplier;
-        mIsWarmOnResumeSupplier = isWarmOnResumeSupplier;
         mAppMenuDelegate = appMenuDelegate;
         mStatusBarColorProvider = statusBarColorProvider;
         mIntentRequestTracker = intentRequestTracker;
@@ -575,6 +573,7 @@ public class RootUiCoordinator
                 new ExpandedSheetHelperImpl(mModalDialogManagerSupplier, getTabObscuringHandler());
         mOverviewColorSupplier = overviewColorSupplier;
         mBaseChromeLayout = baseChromeLayout;
+        mBottomControlsStacker = new BottomControlsStacker(mBrowserControlsManager);
     }
 
     // TODO(pnoland, crbug.com/865801): remove this in favor of wiring it directly.
@@ -775,7 +774,7 @@ public class RootUiCoordinator
             mBoardingPassController.destroy();
             mBoardingPassController = null;
         }
-
+        mBottomControlsStacker.destroy();
         mActivity = null;
     }
 
@@ -881,11 +880,6 @@ public class RootUiCoordinator
     @Override
     @CallSuper
     public void onFinishNativeInitialization() {
-        // Setup IncognitoReauthController as early as possible, to show the re-auth screen.
-        if (IncognitoReauthManager.isIncognitoReauthFeatureAvailable()) {
-            initIncognitoReauthController();
-        }
-
         if (mProfileSupplier.hasValue()) {
             initProfileDependentFeatures(mProfileSupplier.get());
         } else {
@@ -912,7 +906,7 @@ public class RootUiCoordinator
                             tabModelSelector.getModel(/* incognito= */ false),
                             tabModelSelector.getModel(/* incognito= */ true),
                             getBottomSheetController(),
-                            mBrowserControlsManager,
+                            mBottomControlsStacker,
                             mLayoutManagerSupplier,
                             mWindowAndroid,
                             mActivityLifecycleDispatcher);
@@ -953,6 +947,12 @@ public class RootUiCoordinator
     @CallSuper
     protected void initProfileDependentFeatures(Profile currentlySelectedProfile) {
         Profile originalProfile = currentlySelectedProfile.getOriginalProfile();
+
+        // Setup IncognitoReauthController as early as possible, to show the re-auth screen.
+        if (IncognitoReauthManager.isIncognitoReauthFeatureAvailable()) {
+            initIncognitoReauthController(originalProfile);
+        }
+
         if (DeviceFormFactor.isWindowOnTablet(mWindowAndroid)
                 && (RequestDesktopUtils.maybeDefaultEnableGlobalSetting(
                         getPrimaryDisplaySizeInInches(), originalProfile, mActivity))) {
@@ -1010,9 +1010,9 @@ public class RootUiCoordinator
         MessagesFactory.attachMessageDispatcher(mWindowAndroid, mMessageDispatcher);
     }
 
-    private void initIncognitoReauthController() {
+    private void initIncognitoReauthController(Profile profile) {
         IncognitoReauthCoordinatorFactory incognitoReauthCoordinatorFactory =
-                getIncognitoReauthCoordinatorFactory();
+                getIncognitoReauthCoordinatorFactory(profile);
         assert incognitoReauthCoordinatorFactory != null
                 : "Sub-classes need to provide a valid factory instance.";
         mIncognitoReauthController =
@@ -1038,12 +1038,13 @@ public class RootUiCoordinator
     }
 
     /**
-     * This method is meant to be overridden for sub-classes which needs to provide an
-     * incognito re-auth view.
+     * This method is meant to be overridden for sub-classes which needs to provide an incognito
+     * re-auth view.
      *
      * @return {@link IncognitoReauthCoordiantorFactory} instance.
      */
-    protected IncognitoReauthCoordinatorFactory getIncognitoReauthCoordinatorFactory() {
+    protected IncognitoReauthCoordinatorFactory getIncognitoReauthCoordinatorFactory(
+            Profile profile) {
         return null;
     }
 
@@ -1453,6 +1454,7 @@ public class RootUiCoordinator
             mToolbarManager =
                     new ToolbarManager(
                             mActivity,
+                            mBottomControlsStacker,
                             mBrowserControlsManager,
                             mFullscreenManager,
                             mEdgeToEdgeControllerSupplier,
@@ -1486,7 +1488,6 @@ public class RootUiCoordinator
                             mActivityLifecycleDispatcher,
                             mStartSurfaceParentTabSupplier,
                             mBottomSheetController,
-                            mIsWarmOnResumeSupplier,
                             mTabContentManagerSupplier.get(),
                             mTabCreatorManagerSupplier.get(),
                             mSnackbarManagerSupplier.get(),

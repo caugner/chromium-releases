@@ -26,8 +26,10 @@
 #include "chrome/browser/ui/views/bookmarks/saved_tab_groups/saved_tab_group_overflow_button.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/feature_engagement/public/feature_list.h"
 #include "components/saved_tab_groups/features.h"
 #include "components/saved_tab_groups/saved_tab_group_tab.h"
+#include "components/saved_tab_groups/types.h"
 #include "ui/accessibility/ax_enums.mojom-shared.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
@@ -44,6 +46,7 @@
 #include "ui/gfx/geometry/insets_outsets_base.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/bubble/bubble_dialog_delegate_view.h"
 #include "ui/views/layout/box_layout.h"
@@ -202,7 +205,7 @@ SavedTabGroupBar::SavedTabGroupBar(Browser* browser,
   // feature flag is turned off, there is no SavedTabGroupModel.
   DCHECK(browser_->profile()->IsRegularProfile());
   DCHECK(saved_tab_group_model_);
-  SetAccessibilityProperties(
+  GetViewAccessibility().SetProperties(
       ax::mojom::Role::kToolbar,
       /*name=*/l10n_util::GetStringUTF16(IDS_ACCNAME_SAVED_TAB_GROUPS));
 
@@ -453,6 +456,8 @@ void SavedTabGroupBar::SavedTabGroupRemovedLocally(
 void SavedTabGroupBar::SavedTabGroupLocalIdChanged(
     const base::Uuid& saved_group_id) {
   SavedTabGroupUpdated(saved_group_id);
+
+  MaybeShowClosePromo(saved_group_id);
 }
 
 void SavedTabGroupBar::SavedTabGroupUpdatedLocally(
@@ -497,6 +502,15 @@ void SavedTabGroupBar::OnWidgetDestroying(views::Widget* widget) {
 
 void SavedTabGroupBar::Layout(PassKey) {
   LayoutSuperclass<views::View>(this);
+
+  // The box layout manager has applied a vertical inset of `kButtonPadding` to
+  // the `overflow_button_`. This is not what we want. So manually layout
+  // `overflow_button_` again to make sure it gets the same height as `this`
+  // height and vertically centered.
+  const auto overflow_button_bounds = overflow_button_->bounds();
+  overflow_button_->SetBounds(overflow_button_bounds.x(), 0,
+                              overflow_button_bounds.width(), height());
+
   const int stg_bar_width = width();
   bool should_show_overflow = ShouldShowOverflowButtonForWidth(stg_bar_width);
   const int overflow_button_width =
@@ -727,7 +741,8 @@ void SavedTabGroupBar::OnTabGroupButtonPressed(const base::Uuid& id,
     SavedTabGroupKeyedService* const keyed_service =
         SavedTabGroupServiceFactory::GetForProfile(browser_->profile());
 
-    keyed_service->OpenSavedTabGroupInBrowser(browser_, group->saved_guid());
+    keyed_service->OpenSavedTabGroupInBrowser(
+        browser_, group->saved_guid(), OpeningSource::kOpenedFromRevisitUi);
   }
 }
 
@@ -947,6 +962,35 @@ SavedTabGroupBar::CalculateDropIndicatorIndexInCombinedSpace() const {
 
   // Otherwise we can show an indicator at the actual drop index.
   return insertion_index;
+}
+
+void SavedTabGroupBar::MaybeShowClosePromo(const base::Uuid& saved_group_id) {
+  // Only show this promo with the V2 enabled flag.
+  if (!tab_groups::IsTabGroupsSaveV2Enabled()) {
+    return;
+  }
+
+  // Do not show close promo while the browser is closing
+  if (browser_->IsBrowserClosing()) {
+    return;
+  }
+
+  // Only show this promo if the group exists and was closed.
+  const tab_groups::SavedTabGroup* const group =
+      saved_tab_group_model_->Get(saved_group_id);
+  if (!group || group->local_group_id().has_value()) {
+    return;
+  }
+
+  BrowserFeaturePromoController* const promo_controller =
+      BrowserFeaturePromoController::GetForView(this);
+  if (!promo_controller) {
+    return;
+  }
+
+  user_education::FeaturePromoParams params(
+      feature_engagement::kIPHTabGroupsSaveV2CloseGroupFeature);
+  promo_controller->MaybeShowPromo(std::move(params));
 }
 
 BEGIN_METADATA(SavedTabGroupBar)

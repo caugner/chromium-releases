@@ -68,7 +68,6 @@
 <translation id="2241587408274973373">การ์ดหน้าแท็บใหม่</translation>
 <translation id="2241634353105152135">เพียงครั้งเดียว</translation>
 <translation id="2253414712144136228">นำ<ph name="NAME_OF_LIST_ITEM" />ออก</translation>
-<translation id="2253989982043948086">{NUM_SELECTED,plural, =1{มี 1 เว็บไซต์ที่ถูกบล็อก}other{มี # เว็บไซต์ที่ถูกบล็อก}}</translation>
 <translation id="228293613124499805">เว็บไซต์ส่วนใหญ่ที่คุณเข้าชมอาจบันทึกข้อมูลลงในอุปกรณ์บ่อยๆ เพื่อปรับปรุงประสบการณ์การใช้งานโดยการบันทึกค่ากำหนดหรือข้อมูลที่คุณแชร์กับเว็บไซต์ เราขอแนะนำให้เปิดการตั้งค่านี้ไว้</translation>
 <translation id="2289270750774289114">ถามเมื่อเว็บไซต์ต้องการค้นหาอุปกรณ์บลูทูธใกล้เคียง (แนะนำ)</translation>
 <translation id="2315043854645842844">ระบบปฏิบัติการไม่สนับสนุนการเลือกใบรับรองฝั่งลูกค้า</translation>
@@ -98,7 +97,6 @@
 <translation id="2586657967955657006">คลิปบอร์ด</translation>
 <translation id="2597457036804169544">ไม่ใช้ธีมมืดกับเว็บไซต์ต่างๆ</translation>
 <translation id="2606760465469169465">การยืนยันอัตโนมัติ</translation>
-<translation id="2613007545732217283"><ph name="HOST_NAME" /> <ph name="SEPARATOR" /> <ph name="RECENCY" /></translation>
 <translation id="2621115761605608342">อนุญาต JavaScript สำหรับเว็บไซต์ใดเว็บไซต์หนึ่ง</translation>
 <translation id="2653659639078652383">ส่ง</translation>
 <translation id="2677748264148917807">ออก</translation>
@@ -174,6 +172,7 @@
 <translation id="3859306556332390985">ไปข้างหน้า</translation>
 <translation id="3895926599014793903">บังคับให้เปิดใช้การซูม</translation>
 <translation id="3908288065506437185">บล็อกคุกกี้ของบุคคลที่สามในโหมดไม่ระบุตัวตน</translation>
+<translation id="3913461097001554748"><ph name="DOMAIN_URL" /> <ph name="SEPARATOR1" /> <ph name="DEVICE_NAME" /></translation>
 <translation id="3918378745482005425">ฟีเจอร์บางอย่างอาจใช้งานไม่ได้ เว็บไซต์ที่เกี่ยวข้องจะยังคงใช้คุกกี้ของบุคคลที่สามได้</translation>
 <translation id="3933121352599513978">ยุบคำขอที่ไม่ต้องการ (แนะนำ)</translation>
 <translation id="3955193568934677022">อนุญาตให้เว็บไซต์เล่นเนื้อหาที่ได้รับความคุ้มครอง (แนะนำ)</translation>
@@ -191,7 +190,6 @@
 <translation id="4169549551965910670">เชื่อมต่ออยู่กับอุปกรณ์ USB</translation>
 <translation id="4194328954146351878">ถามก่อนที่จะอนุญาตให้เว็บไซต์ดูและเปลี่ยนแปลงข้อมูลในอุปกรณ์ NFC (แนะนำ)</translation>
 <translation id="4200726100658658164">เปิดการตั้งค่าตำแหน่ง</translation>
-<translation id="4206661981211220935"><ph name="RECENCY" /> <ph name="SEPARATOR" /> จาก <ph name="FROM_DEVICE" /></translation>
 <translation id="4226663524361240545">การแจ้งเตือนอาจทำให้อุปกรณ์สั่น</translation>
 <translation id="4259722352634471385">มีการบล็อกการนำทาง: <ph name="URL" /></translation>
 <translation id="4278390842282768270">อนุญาตแล้ว</translation>
@@ -199,7 +197,6 @@
 <translation id="42981349822642051">ขยาย</translation>
 <translation id="4336219115486912529">{COUNT,plural, =1{หมดอายุวันพรุ่งนี้}other{หมดอายุในอีก # วัน}}</translation>
 <translation id="4336566011000459927">Chrome จะจำกัดคุกกี้อีกครั้งในวันนี้</translation>
-<translation id="4336836404251800362"><ph name="RECENCY" /> <ph name="SEPARATOR" /> แท็บสุดท้าย</translation>
 <translation id="4338831206024587507">ทุกเว็บไซต์ในโดเมน <ph name="DOMAIN" /></translation>
 <translation id="4402755511846832236">บล็อกเว็บไซต์ไม่ให้ทราบเวลาที่คุณใช้งานอุปกรณ์นี้อยู่</translation>
 <translation id="4412992751769744546">อนุญาตคุกกี้ของบุคคลที่สาม</translation>
@@ -216,7 +213,7 @@
 <translation id="4598549027014564149">ขณะอยู่ในโหมดไม่ระบุตัวตน เว็บไซต์ไม่สามารถใช้คุกกี้เพื่อดูกิจกรรมการท่องเว็บของคุณในเว็บไซต์ต่างๆ แม้กระทั่งเว็บไซต์ที่เกี่ยวข้อง ระบบจะไม่ใช้กิจกรรมการท่องเว็บเพื่อวัตถุประสงค์ต่างๆ เช่น การปรับโฆษณาตามโปรไฟล์ของผู้ใช้ ฟีเจอร์ในบางเว็บไซต์อาจใช้งานไม่ได้</translation>
 <translation id="4619615317237390068">แท็บจากอุปกรณ์อื่นๆ</translation>
 <translation id="4644713492825682049">ลบและรีเซ็ต</translation>
-<translation id="4645575059429386691">มีการจัดการโดยผู้ปกครอง</translation>
+<translation id="4645575059429386691">จัดการโดยผู้ปกครอง</translation>
 <translation id="4670064810192446073">Virtual Reality</translation>
 <translation id="4751476147751820511">เซ็นเซอร์จับความเคลื่อนไหวหรือเซ็นเซอร์แสง</translation>
 <translation id="4755971844837804407">เมื่อเปิด เว็บไซต์จะแสดงโฆษณาต่อคุณได้ เมื่อปิด เว็บไซต์จะไม่แสดงโฆษณาที่รบกวนหรือทำให้เข้าใจผิด</translation>
@@ -360,7 +357,6 @@
 <translation id="6790428901817661496">เล่น</translation>
 <translation id="6818926723028410516">เลือกรายการ</translation>
 <translation id="6864395892908308021">อุปกรณ์นี้อ่าน NFC ไม่ได้</translation>
-<translation id="6867014948848323204">จาก <ph name="FROM_DEVICE" /></translation>
 <translation id="6912998170423641340">บล็อกเว็บไซต์ไม่ให้อ่านข้อความและดูรูปภาพจากคลิปบอร์ด</translation>
 <translation id="6945221475159498467">เลือก</translation>
 <translation id="6950072572526089586">เว็บไซต์ที่คุณเข้าชมสามารถบันทึกข้อมูลเกี่ยวกับสิ่งที่คุณทำอยู่เพื่อให้ใช้งานได้ตามที่ต้องการ เช่น ให้คุณลงชื่อเข้าใช้เว็บไซต์ค้างไว้หรือบันทึกสินค้าไว้ในรถเข็นช็อปปิ้ง เว็บไซต์ต่างๆ มักจะบันทึกข้อมูลนี้ไว้ชั่วคราวบนอุปกรณ์</translation>
@@ -480,7 +476,6 @@
 <translation id="8721719390026067591">เมื่อเปิด เว็บไซต์จะขอค้นหาอุปกรณ์บลูทูธได้ เมื่อปิด เว็บไซต์จะค้นหาอุปกรณ์บลูทูธไม่ได้</translation>
 <translation id="8725066075913043281">ลองอีกครั้ง</translation>
 <translation id="8730621377337864115">เสร็จสิ้น</translation>
-<translation id="8736193154595564524">{NUM_SELECTED,plural, =1{มี 1 เว็บไซต์ที่อนุญาต}other{มี # เว็บไซต์ที่อนุญาต}}</translation>
 <translation id="8751914237388039244">เลือกรูปภาพ</translation>
 <translation id="8800034312320686233">หากเว็บไซต์ไม่ทำงาน</translation>
 <translation id="8801436777607969138">บล็อก JavaScript ในเว็บไซต์ที่ต้องการ</translation>
@@ -502,7 +497,7 @@
 <translation id="8993853206419610596">ขยายคำขอทั้งหมด</translation>
 <translation id="9002538116239926534">เมื่อเปิด เว็บไซต์จะบันทึกข้อมูลลงในอุปกรณ์ของคุณได้ เมื่อปิด เว็บไซต์จะบันทึกข้อมูลลงในอุปกรณ์ของคุณไม่ได้</translation>
 <translation id="9011903857143958461">อนุญาตให้เข้าถึง <ph name="SITE_NAME" /> ได้</translation>
-<translation id="9019902583201351841">มีการจัดการโดยผู้ปกครอง</translation>
+<translation id="9019902583201351841">จัดการโดยผู้ปกครอง</translation>
 <translation id="9039697262778250930">ระบบอาจนำคุณออกจากระบบเว็บไซต์เหล่านี้</translation>
 <translation id="9074739597929991885">บลูทูธ</translation>
 <translation id="9090268041676521955">เว็บไซต์นี้อยู่ในกลุ่มที่สามารถดูกิจกรรมของคุณได้ ซึ่งเป็นกลุ่มที่ <ph name="FPS_OWNER" /> กำหนดไว้</translation>

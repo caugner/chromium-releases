@@ -168,7 +168,7 @@ struct ProcessManager::ExtensionRenderFrameData {
       case extensions::mojom::ViewType::kExtensionSidePanel:
         return false;
     }
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
     return false;
   }
 };
@@ -351,6 +351,11 @@ bool ProcessManager::CreateBackgroundHost(const Extension* extension,
   // Don't create multiple background hosts for an extension.
   if (GetBackgroundHostForExtension(extension->id()))
     return true;  // TODO(kalman): return false here? It might break things...
+
+  // Don't create a background host when the BrowserContext is shutting down.
+  if (browser_context_->ShutdownStarted()) {
+    return false;
+  }
 
   DVLOG(1) << "CreateBackgroundHost " << extension->id();
   ExtensionHost* host =

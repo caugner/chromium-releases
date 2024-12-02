@@ -70,7 +70,8 @@ void DefaultBrowserPromptManager::RemoveObserver(Observer *observer) {
 void DefaultBrowserPromptManager::MaybeShowPrompt() {
   CHECK(base::FeatureList::IsEnabled(features::kDefaultBrowserPromptRefresh));
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS)
-  NOTREACHED() << "Unsupported platforms for showing default browser prompts.";
+  NOTREACHED_IN_MIGRATION()
+      << "Unsupported platforms for showing default browser prompts.";
 #endif
 
   if (features::kShowDefaultBrowserAppMenuItem.Get()) {
@@ -94,7 +95,8 @@ void DefaultBrowserPromptManager::MaybeShowPrompt() {
 
 void DefaultBrowserPromptManager::CloseAllPrompts(CloseReason close_reason) {
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS)
-  NOTREACHED() << "Unsupported platforms for showing default browser prompts.";
+  NOTREACHED_IN_MIGRATION()
+      << "Unsupported platforms for showing default browser prompts.";
 #endif
 
   CloseAllInfoBars();
@@ -117,6 +119,14 @@ void DefaultBrowserPromptManager::CreateInfoBarForWebContents(
 
   infobars::InfoBar *infobar = chrome::DefaultBrowserInfoBarDelegate::Create(
       infobars::ContentInfoBarManager::FromWebContents(web_contents), profile);
+
+  if (infobar == nullptr) {
+    // Infobar may be null if `InfoBarManager::ShouldShowInfoBar` returns false,
+    // in which case this function should do nothing. One case where this can
+    // happen is if the --headless command  line switch is present.
+    return;
+  }
+
   infobars_[web_contents] = infobar;
 
   static_cast<ConfirmInfoBarDelegate *>(infobar->delegate())->AddObserver(this);
@@ -165,8 +175,13 @@ void DefaultBrowserPromptManager::SetShowAppMenuPromptVisibility(bool show) {
 
     app_menu_prompt_dismiss_timer_.Start(
         FROM_HERE, app_menu_remaining_duration, base::BindOnce([]() {
-          chrome::startup::default_prompt::UpdatePrefsForDismissedPrompt(
-              BrowserList::GetInstance()->GetLastActive()->profile());
+          Browser* last_active = BrowserList::GetInstance()->GetLastActive();
+          // If there is no active browser, just dismiss the prompts and the
+          // prefs will be updated on the next startup.
+          if (last_active) {
+            chrome::startup::default_prompt::UpdatePrefsForDismissedPrompt(
+                last_active->profile());
+          }
           DefaultBrowserPromptManager::GetInstance()->CloseAllPrompts(
               CloseReason::kDismiss);
         }));

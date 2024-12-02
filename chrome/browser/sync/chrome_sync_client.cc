@@ -20,11 +20,12 @@
 #include "chrome/browser/data_sharing/data_sharing_service_factory.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/metrics/variations/google_groups_updater_service_factory.h"
+#include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/password_manager/account_password_store_factory.h"
 #include "chrome/browser/password_manager/password_receiver_service_factory.h"
 #include "chrome/browser/password_manager/password_sender_service_factory.h"
 #include "chrome/browser/password_manager/profile_password_store_factory.h"
+#include "chrome/browser/plus_addresses/plus_address_setting_service_factory.h"
 #include "chrome/browser/power_bookmarks/power_bookmark_service_factory.h"
 #include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -65,13 +66,14 @@
 #include "components/data_sharing/public/features.h"
 #include "components/desks_storage/core/desk_sync_service.h"
 #include "components/history/core/browser/history_service.h"
-#include "components/metrics/demographics/user_demographics.h"
 #include "components/password_manager/core/browser/password_store/password_store_interface.h"
 #include "components/password_manager/core/browser/sharing/password_receiver_service.h"
 #include "components/password_manager/core/browser/sharing/password_sender_service.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
+#include "components/plus_addresses/settings/plus_address_setting_service.h"
 #include "components/plus_addresses/webdata/plus_address_webdata_service.h"
 #include "components/prefs/pref_service.h"
+#include "components/saved_tab_groups/features.h"
 #include "components/saved_tab_groups/tab_group_sync_service.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/send_tab_to_self/send_tab_to_self_sync_service.h"
@@ -94,7 +96,6 @@
 #include "components/sync_sessions/session_sync_service.h"
 #include "components/sync_user_events/user_event_service.h"
 #include "components/trusted_vault/trusted_vault_service.h"
-#include "components/variations/service/google_groups_updater_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/buildflags/buildflags.h"
 
@@ -157,6 +158,10 @@ using content::BrowserThread;
 namespace browser_sync {
 
 namespace {
+
+// A global variable is needed to detect multiprofile scenarios where more than
+// one profile try to register a synthetic field trial.
+bool trusted_vault_synthetic_field_trial_registered = false;
 
 #if BUILDFLAG(IS_WIN)
 constexpr base::FilePath::CharType kLoopbackServerBackendFilename[] =
@@ -260,6 +265,7 @@ ChromeSyncClient::ChromeSyncClient(Profile* profile)
       AccountBookmarkSyncServiceFactory::GetForProfile(profile_),
       PowerBookmarkServiceFactory::GetForBrowserContext(profile_),
       supervised_user_settings_service,
+      PlusAddressSettingServiceFactory::GetForBrowserContext(profile_),
       WebDataServiceFactory::GetPlusAddressWebDataForProfile(
           profile_, ServiceAccessType::IMPLICIT_ACCESS),
       commerce::ProductSpecificationsServiceFactory::GetForBrowserContext(
@@ -472,7 +478,10 @@ ChromeSyncClient::CreateModelTypeControllers(
     BUILDFLAG(IS_WIN)
     enable_tab_group_sync = true;
 #elif BUILDFLAG(IS_ANDROID)
-    enable_tab_group_sync = tab_groups::IsTabGroupSyncEnabled(GetPrefService());
+    enable_tab_group_sync =
+        tab_groups::IsTabGroupSyncEnabled(GetPrefService()) &&
+        !base::FeatureList::IsEnabled(
+            tab_groups::kTabGroupSyncDisableNetworkLayer);
     tab_groups::TabGroupTrial::OnTabgroupSyncEnabled(enable_tab_group_sync);
 #endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) ||
         // BUILDFLAG(IS_WIN)
@@ -480,9 +489,13 @@ ChromeSyncClient::CreateModelTypeControllers(
     if (enable_tab_group_sync) {
       controllers.push_back(std::make_unique<syncer::ModelTypeController>(
           syncer::SAVED_TAB_GROUP,
+          /*delegate_for_full_sync_mode=*/
           std::make_unique<syncer::ForwardingModelTypeControllerDelegate>(
               GetControllerDelegateForModelType(syncer::SAVED_TAB_GROUP).get()),
-          /*delegate_for_transport_mode=*/nullptr));
+          /*delegate_for_transport_mode=*/
+          std::make_unique<syncer::ForwardingModelTypeControllerDelegate>(
+              GetControllerDelegateForModelType(syncer::SAVED_TAB_GROUP)
+                  .get())));
     }
 
     if (base::FeatureList::IsEnabled(
@@ -648,7 +661,7 @@ ChromeSyncClient::GetSyncableServiceForType(syncer::ModelType type) {
           ->AsWeakPtr();
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return nullptr;
   }
 }
@@ -668,7 +681,7 @@ ChromeSyncClient::GetControllerDelegateForModelType(syncer::ModelType type) {
       return tab_groups::TabGroupSyncServiceFactory::GetForProfile(profile_)
           ->GetSavedTabGroupControllerDelegate();
 #else
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return base::WeakPtr<syncer::ModelTypeControllerDelegate>();
 #endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) ||
         // BUILDFLAG(IS_WIN)
@@ -749,11 +762,11 @@ ChromeSyncClient::GetControllerDelegateForModelType(syncer::ModelType type) {
     case syncer::SECURITY_EVENTS:
     case syncer::SEND_TAB_TO_SELF:
     case syncer::SESSIONS:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return base::WeakPtr<syncer::ModelTypeControllerDelegate>();
 
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return base::WeakPtr<syncer::ModelTypeControllerDelegate>();
   }
 }
@@ -772,16 +785,6 @@ bool ChromeSyncClient::IsCustomPassphraseAllowed() {
     return supervised_user_settings_service->IsCustomPassphraseAllowed();
   }
   return true;
-}
-
-void ChromeSyncClient::OnLocalSyncTransportDataCleared() {
-  metrics::ClearDemographicsPrefs(profile_->GetPrefs());
-
-  GoogleGroupsUpdaterService* google_groups_updater =
-      GoogleGroupsUpdaterServiceFactory::GetForBrowserContext(profile_);
-  if (google_groups_updater != nullptr) {
-    google_groups_updater->ClearSigninScopedState();
-  }
 }
 
 bool ChromeSyncClient::IsPasswordSyncAllowed() {
@@ -816,7 +819,27 @@ void ChromeSyncClient::RegisterTrustedVaultAutoUpgradeSyntheticFieldTrial(
     const syncer::TrustedVaultAutoUpgradeSyntheticFieldTrialGroup& group) {
   CHECK(group.is_valid());
 
-  NOTIMPLEMENTED();
+  if (!base::FeatureList::IsEnabled(
+          syncer::kTrustedVaultAutoUpgradeSyntheticFieldTrial)) {
+    // Disabled via variations, as additional safeguard.
+    return;
+  }
+
+  // If `trusted_vault_synthetic_field_trial_registered` is true, and given that
+  // each SyncService invokes this function at most once, it means that multiple
+  // profiles are trying to register a synthetic field trial. In that case,
+  // register a special "conflict" group.
+  const std::string group_name =
+      trusted_vault_synthetic_field_trial_registered
+          ? syncer::TrustedVaultAutoUpgradeSyntheticFieldTrialGroup::
+                GetMultiProfileConflictGroupName()
+          : group.name();
+
+  trusted_vault_synthetic_field_trial_registered = true;
+
+  ChromeMetricsServiceAccessor::RegisterSyntheticFieldTrial(
+      syncer::kTrustedVaultAutoUpgradeSyntheticFieldTrialName, group_name,
+      variations::SyntheticTrialAnnotationMode::kCurrentLog);
 }
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)

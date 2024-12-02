@@ -61,6 +61,7 @@ static_library("service") {
   public_deps = [ "//base" ]
   deps = [
     ":buildflags",
+    "//base/version_info:channel",
     "//build:branding_buildflags",
     "//build:chromeos_buildflags",
     "//build/config/chromebox_for_meetings:buildflags",
@@ -72,6 +73,7 @@ static_library("service") {
     "//components/network_time",
     "//components/pref_registry",
     "//components/prefs",
+    "//components/sync/service",
     "//components/variations",
     "//components/variations/field_trial_config",
     "//components/variations/proto",
@@ -105,6 +107,7 @@ source_set("unit_tests") {
     "//components/metrics",
     "//components/metrics:test_support",
     "//components/prefs:test_support",
+    "//components/sync:test_support",
     "//components/sync_preferences:test_support",
     "//components/variations",
     "//components/variations:test_support",

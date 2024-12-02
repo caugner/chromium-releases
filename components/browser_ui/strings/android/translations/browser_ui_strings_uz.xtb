@@ -68,7 +68,6 @@
 <translation id="2241587408274973373">Yangi varaq sahifasi bildirgilari</translation>
 <translation id="2241634353105152135">Bir marta</translation>
 <translation id="2253414712144136228">Olib tashlash: <ph name="NAME_OF_LIST_ITEM" /></translation>
-<translation id="2253989982043948086">{NUM_SELECTED,plural, =1{1 ta sayt bloklangan}other{# ta sayt bloklangan}}</translation>
 <translation id="228293613124499805">Siz ochgan saytlarning aksariyati sozlamalaringiz yoki ularga ulashgan axborotlar kabilarni qurilmangizda saqlashi mumkin. Koʻpincha bu qulayligingiz uchun amalga oshiriladi. Bu sozlamani oʻchirmaslikni tavsiya qilamiz.</translation>
 <translation id="2289270750774289114">Sayt atrofdagi Bluetooth qurilmalarni tekshirmoqchi boʻlsa, xabar berilsin (tavsiya etiladi)</translation>
 <translation id="2315043854645842844">Tanlangan mijoz sertifikati eskirgan va operatsion tizim tomonidan qo‘llab-quvvatlanmaydi.</translation>
@@ -98,7 +97,6 @@
 <translation id="2586657967955657006">Klipbord</translation>
 <translation id="2597457036804169544">Saytlar uchun tungi mavzu tatbiq etilmaydi</translation>
 <translation id="2606760465469169465">Avtomatik tekshiruv</translation>
-<translation id="2613007545732217283"><ph name="HOST_NAME" /> <ph name="SEPARATOR" /> <ph name="RECENCY" /></translation>
 <translation id="2621115761605608342">Ko‘rsatilgan saytga JavaScript ishga tushirishga ruxsat berish.</translation>
 <translation id="2653659639078652383">Yuborish</translation>
 <translation id="2677748264148917807">Tark etish</translation>
@@ -174,6 +172,7 @@
 <translation id="3859306556332390985">Oldinga surish</translation>
 <translation id="3895926599014793903">Hajmni majburiy o‘zgartirish funksiyasini yoqish</translation>
 <translation id="3908288065506437185">Inkognito rejimidagi tashqi cookie fayllarni taqiqlash</translation>
+<translation id="3913461097001554748"><ph name="DOMAIN_URL" />, <ph name="SEPARATOR1" /> (<ph name="DEVICE_NAME" />)</translation>
 <translation id="3918378745482005425">Ayrim funksiyalar ishlamasligi mumkin. Tegishli saytlar tashqi cookie fayllaridan foydalanishda davom etishi mumkin.</translation>
 <translation id="3933121352599513978">Keraksiz soʻrovlarni yigʻish (tavsiya etiladi)</translation>
 <translation id="3955193568934677022">Saytlarga himoyalangan kontentni ijro qilish uchun ruxsat berish (tavsiya etiladi)</translation>
@@ -191,7 +190,6 @@
 <translation id="4169549551965910670">USB qurilmaga ulandi</translation>
 <translation id="4194328954146351878">Saytlar NFC qurilmalarni koʻrishi va ulardagi axborotni oʻzgartirishidan oldin ruxsat olsin (tavsiya etiladi)</translation>
 <translation id="4200726100658658164">Joylashuv sozlamalarini ochish</translation>
-<translation id="4206661981211220935"><ph name="RECENCY" /> <ph name="SEPARATOR" /> Manba: <ph name="FROM_DEVICE" /></translation>
 <translation id="4226663524361240545">Bildirishnoma kelganida qurilma tebranishi mumkin</translation>
 <translation id="4259722352634471385">Sahifa bloklandi: <ph name="URL" /></translation>
 <translation id="4278390842282768270">Berilgan ruxsatnomalar</translation>
@@ -199,7 +197,6 @@
 <translation id="42981349822642051">Kengaytirish</translation>
 <translation id="4336219115486912529">{COUNT,plural, =1{Muddati ertaga tugaydi}other{# kundan keyin muddati tugaydi}}</translation>
 <translation id="4336566011000459927">Chrome cookie fayllarni bugun yana cheklaydi</translation>
-<translation id="4336836404251800362"><ph name="RECENCY" /> <ph name="SEPARATOR" /> Oxirgi varaq</translation>
 <translation id="4338831206024587507">Barcha saytlar <ph name="DOMAIN" /> ostida</translation>
 <translation id="4402755511846832236">Bu qurilmadan foydalanish axborotlarini saytlar bilishini taqiqlash</translation>
 <translation id="4412992751769744546">Tashqi saytlarga cookie fayllarni saqlashga ruxsat berish</translation>
@@ -360,7 +357,6 @@
 <translation id="6790428901817661496">Ijro etish</translation>
 <translation id="6818926723028410516">Fayllarni tanlang</translation>
 <translation id="6864395892908308021">Bu qurilma NFC teglarni oʻqiy olmaydi</translation>
-<translation id="6867014948848323204">Manba: <ph name="FROM_DEVICE" /></translation>
 <translation id="6912998170423641340">Saytlarga klipboarddagi matn va rasmlarni ko‘rishni taqiqlash</translation>
 <translation id="6945221475159498467">Tanlash</translation>
 <translation id="6950072572526089586">Ochilgan saytlar sizni hisobda qoldirish yoki mahsulotlarni xarid savatida saqlash uchun saytdagi harakatlaringiz haqidagi maʼlumotlarni saqlashi mumkin. Odatda bu maʼlumotlar qurilmangizda vaqtincha saqlanadi.</translation>
@@ -480,7 +476,6 @@
 <translation id="8721719390026067591">Yoqilsa, saytlar Bluetooth qurilmalarni qidirish uchun ruxsat soʻrashi mumkin. Oʻchirilsa, saytlar bunday qurilmalarni qidira olmaydi.</translation>
 <translation id="8725066075913043281">Qayta urinib ko‘ring</translation>
 <translation id="8730621377337864115">Tayyor</translation>
-<translation id="8736193154595564524">{NUM_SELECTED,plural, =1{1 ta saytga ruxsat berilgan}other{# ta saytga ruxsat berilgan}}</translation>
 <translation id="8751914237388039244">Rasmni tanlang</translation>
 <translation id="8800034312320686233">Sayt ishlamayaptimi?</translation>
 <translation id="8801436777607969138">Muayyan saytda JavaScript kodini bloklash.</translation>

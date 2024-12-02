@@ -14,6 +14,7 @@ import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.chrome.browser.magic_stack.ModuleDelegate.ModuleType;
 import org.chromium.chrome.browser.util.BrowserUiUtils.HostSurface;
+import org.chromium.chrome.browser.util.BrowserUiUtils.ModuleTypeOnStartAndNtp;
 
 /** Unit tests for {@link HomeModulesMetricsUtils}. */
 @RunWith(BaseRobolectricTestRunner.class)
@@ -27,14 +28,26 @@ public class HomeModulesMetricsUtilsUnitTest {
         int modulePosition = 2;
         String histogramName = "MagicStack.Clank.StartSurface.Module.TopImpressionV2";
         String histogramNameWithPosition =
-                "MagicStack.Clank.StartSurface.Module.SingleTab.Impression";
+                "MagicStack.Clank.StartSurface.Regular.Module.SingleTab.Impression";
+        String histogramNameStartupWithPosition =
+                "MagicStack.Clank.StartSurface.Startup.Module.SingleTab.Impression";
 
         var histogramWatcher =
                 HistogramWatcher.newBuilder()
                         .expectIntRecords(histogramName, moduleType)
                         .expectIntRecord(histogramNameWithPosition, modulePosition)
                         .build();
-        HomeModulesMetricsUtils.recordModuleShown(hostSurface, moduleType, modulePosition);
+        HomeModulesMetricsUtils.recordModuleShown(
+                hostSurface, moduleType, modulePosition, /* isShownAtStartup= */ false);
+        histogramWatcher.assertExpected();
+
+        histogramWatcher =
+                HistogramWatcher.newBuilder()
+                        .expectIntRecords(histogramName, moduleType)
+                        .expectIntRecord(histogramNameStartupWithPosition, modulePosition)
+                        .build();
+        HomeModulesMetricsUtils.recordModuleShown(
+                hostSurface, moduleType, modulePosition, /* isShownAtStartup= */ true);
         histogramWatcher.assertExpected();
     }
 
@@ -181,14 +194,32 @@ public class HomeModulesMetricsUtilsUnitTest {
         int modulePosition = 2;
 
         String histogramName = "MagicStack.Clank.StartSurface.Module.Click";
-        String histogramNameWithPosition = "MagicStack.Clank.StartSurface.Module.SingleTab.Click";
+        String histogramNameHomeSurface = "StartSurface.Module.Click";
+        String histogramNameWithPosition =
+                "MagicStack.Clank.StartSurface.Regular.Module.SingleTab.Click";
+        String histogramNameStartupWithPosition =
+                "MagicStack.Clank.StartSurface.Startup.Module.SingleTab.Click";
 
         var histogramWatcher =
                 HistogramWatcher.newBuilder()
                         .expectIntRecord(histogramName, moduleType)
+                        .expectIntRecord(
+                                histogramNameHomeSurface, ModuleTypeOnStartAndNtp.MAGIC_STACK)
                         .expectIntRecords(histogramNameWithPosition, modulePosition)
                         .build();
-        HomeModulesMetricsUtils.recordModuleClicked(hostSurface, moduleType, modulePosition);
+        HomeModulesMetricsUtils.recordModuleClicked(
+                hostSurface, moduleType, modulePosition, /* isShownAtStartup= */ false);
+        histogramWatcher.assertExpected();
+
+        histogramWatcher =
+                HistogramWatcher.newBuilder()
+                        .expectIntRecord(histogramName, moduleType)
+                        .expectIntRecord(
+                                histogramNameHomeSurface, ModuleTypeOnStartAndNtp.MAGIC_STACK)
+                        .expectIntRecords(histogramNameStartupWithPosition, modulePosition)
+                        .build();
+        HomeModulesMetricsUtils.recordModuleClicked(
+                hostSurface, moduleType, modulePosition, /* isShownAtStartup= */ true);
         histogramWatcher.assertExpected();
     }
 
@@ -231,11 +262,20 @@ public class HomeModulesMetricsUtilsUnitTest {
         @ModuleType int moduleType = ModuleType.SINGLE_TAB;
         int modulePosition = 2;
 
-        String histogramName = "MagicStack.Clank.StartSurface.Module.SingleTab.Build";
+        String histogramName = "MagicStack.Clank.StartSurface.Regular.Module.SingleTab.Build";
+        String histogramNameStartup =
+                "MagicStack.Clank.StartSurface.Startup.Module.SingleTab.Build";
 
         var histogramWatcher =
                 HistogramWatcher.newSingleRecordWatcher(histogramName, modulePosition);
-        HomeModulesMetricsUtils.recordModuleBuiltPosition(hostSurface, moduleType, modulePosition);
+        HomeModulesMetricsUtils.recordModuleBuiltPosition(
+                hostSurface, moduleType, modulePosition, /* isShownAtStartup= */ false);
+        histogramWatcher.assertExpected();
+
+        histogramWatcher =
+                HistogramWatcher.newSingleRecordWatcher(histogramNameStartup, modulePosition);
+        HomeModulesMetricsUtils.recordModuleBuiltPosition(
+                hostSurface, moduleType, modulePosition, /* isShownAtStartup= */ true);
         histogramWatcher.assertExpected();
     }
 }

@@ -13,6 +13,7 @@
 <translation id="1049663189809099096">пастель сары</translation>
 <translation id="1056898198331236512">Эскертүү</translation>
 <translation id="1059913517121127803">Скандалып башталган жок</translation>
+<translation id="1061864016440983342">Жүргөн жерсиз колдонуу</translation>
 <translation id="1062823486781306604"><ph name="COUNT" /> ичинен <ph name="INDEX" />, <ph name="NAME" />.</translation>
 <translation id="1070066693520972135">WEP</translation>
 <translation id="1071587090247825784">Тармактык коргоо аныкталды</translation>
@@ -127,7 +128,7 @@
 <translation id="1643449475550628585">Тушкагаздын сүрөтүн күн сайын өзгөртүү</translation>
 <translation id="1644574205037202324">Таржымал</translation>
 <translation id="1651925268237749928">Жалпы альбомду тандадыңыз. Башка адамдар сүрөттөрдү кошуп же өзгөртө алышат. Учурда бул альбомдо жок сүрөттөр тушкагаз катары көрсөтүлүшү мүмкүн.</translation>
-<translation id="1661865805917886535">Аккаунт жана тутум жөнүндө айрым маалымат Google'га жөнөтүлүшү мүмкүн. Бул маалыматты Купуялык саясаты (<ph name="PRIVACYPOLICYURL" />) жана Тейлөө шарттарына (<ph name="TERMSOFSERVICEURL" />) ылайык техникалык маселелерди чечүү жана кызматтарыбызды жакшыртуу үчүн колдонобуз. Контентке өзгөртүүлөрдү киргизүүнү сурануу үчүн Юридикалык жардам (<ph name="LEGALHELPPAGEURL" />) барагына өтүңүз.</translation>
+<translation id="1661865805917886535">Аккаунт жана система жөнүндө айрым маалымат Google'га жөнөтүлүшү мүмкүн. Бул маалыматты Купуялык саясаты (<ph name="PRIVACYPOLICYURL" />) жана Тейлөө шарттарына (<ph name="TERMSOFSERVICEURL" />) ылайык техникалык маселелерди чечүү жана кызматтарыбызды жакшыртуу үчүн колдонобуз. Контентке өзгөртүүлөрдү киргизүүнү сурануу үчүн Юридикалык жардам (<ph name="LEGALHELPPAGEURL" />) барагына өтүңүз.</translation>
 <translation id="1662989795263954667">Токтоду – Сыя түгөнүп калды</translation>
 <translation id="1664796644829245314"><ph name="PREVIEW_OBJECT" /> алдын ала көрүү</translation>
 <translation id="1668469839109562275">Камтылган VPN</translation>
@@ -217,6 +218,7 @@
 <translation id="2080070583977670716">Дагы параметрлер</translation>
 <translation id="2082932131694554252">Дайындалган баскычтоп баскычы</translation>
 <translation id="2085089206770112532">Дисплейдин жарыктыгын азайтуу</translation>
+<translation id="2086091080968010660">Убакыттын негизиндеги өзгөртүүлөр так болбошу мүмкүн. Параметрлерден системага жайгашкан жерди аныктоо мүмкүнчүлүгүн күйгүзүңүз.</translation>
 <translation id="2102231663024125441">Текстти оңдоо</translation>
 <translation id="2105810540595158374">Түзмөк — оюнду көзөмөлдөгүч.</translation>
 <translation id="2119172414412204879"><ph name="BOARD_NAME" />, <ph name="MILESTONE_VERSION" /> версиясы</translation>
@@ -236,7 +238,6 @@
 <translation id="2189104374785738357">APN маалыматын түзөтүү</translation>
 <translation id="2195732836444333448">Учурда иштете албайт. Кийинчерээк кайра кирип көрүңүз.</translation>
 <translation id="2201758491318984023">велосипед</translation>
-<translation id="2203222757805818543">Учурдагы график <ph name="SUNRISE" /> - <ph name="SUNSET" /> деп коюлду. Караңгы тема графигин автоматтык түрдө жаңыртуу үчүн <ph name="BEGIN_LINK" />жайгашкан жерди көрүү мүмкүнчүлүгүн күйгүзүңүз<ph name="END_LINK" /></translation>
 <translation id="2203272733515928691">кайнар булак</translation>
 <translation id="2203642483788377106">зоо</translation>
 <translation id="2208388655216963643">импрессионизм</translation>
@@ -259,6 +260,7 @@
 <translation id="2279051792571591988">Демейкилерди калыбына келтирүү</translation>
 <translation id="2286454467119466181">Жөнөкөй</translation>
 <translation id="2287186687001756809">Сүрөт жок. Сүрөттөрдү кошуу үчүн төмөнкү жерге өтүңүз: <ph name="LINK" /></translation>
+<translation id="2294577623958216786">Учурдагы график <ph name="SUNRISE" />-<ph name="SUNSET" /> деп коюлду. Күндүн батышынын жана чыгышынын графигин автоматтык түрдө жаңыртуу үчүн системага жайгашкан жерди аныктоо мүмкүнчүлүгүн бериңиз.</translation>
 <translation id="2305172810646967500">кара</translation>
 <translation id="2307344026739914387">Учурдагы жуп ачкычты колдонуу</translation>
 <translation id="2308243864813041101">Жаңыртуу процессин улантуу үчүн <ph name="DEVICE_NAME" /> түзмөгүнүн электр кубатынын кабелин сууруңуз</translation>
@@ -313,6 +315,7 @@
 <translation id="2618015542787108131">кум дөбө</translation>
 <translation id="2619761439309613843">Күн сайын жаңыртуу</translation>
 <translation id="2620436844016719705">Система</translation>
+<translation id="2637303424821734920">ӨЧҮК - Жергиликтүү аба ырайын көрсөтүү үчүн <ph name="BEGIN_LINK" />системага жайгашкан жерди аныктоо мүмкүнчүлүгүн бериңиз<ph name="END_LINK" /></translation>
 <translation id="2638662041295312666">Аккаунтка кирүү сүрөтү</translation>
 <translation id="2640549051766135490"><ph name="TITLE" /> <ph name="DESC" /> альбому тандалды</translation>
 <translation id="2645380101799517405">Башкаруу элементтери</translation>
@@ -361,9 +364,11 @@
 <translation id="3017079585324758401">Фон</translation>
 <translation id="3027578600144895987">Камераны жабуу</translation>
 <translation id="3031560714565892478">Түзмөк — видео камера.</translation>
+<translation id="3051968340259309715">Бул системдик кызматтарга Жайгашкан жерди так аныктоо параметри аркылуу жүргөн жериңизди аныктоо мүмкүнчүлүгүн берет. Жайгашкан жерди так аныктоо параметри түзмөктүн турган жерин болжолдоо үчүн Wi‑Fi байланыш түйүндөрү, мобилдик тармактын мунаралары жана GPS сыяктуу зымсыз сигналдар жөнүндө маалыматты, ошондой эле акселерометр жана гироскоп сыяктуу түзмөктүн сенсордук дайындарын колдонот. Жүргөн жериңизди аныктоону Параметрлер &gt; Купуялык жана коопсуздук &gt; Купуялуулукту көзөмөлдөө каражаттары &gt; Жайгашкан жерди көрүү бөлүмүнөн өчүрө аласыз. <ph name="LINK_BEGIN" />Кеңири маалымат<ph name="LINK_END" /></translation>
 <translation id="3054177598518735801"><ph name="CURRENT_VALUE" />мА</translation>
 <translation id="3056720590588772262">Аяктоо чекити</translation>
 <translation id="3060579846059757016">Тышкы сызыктар</translation>
+<translation id="3061850252076394168">"Басып туруп угуңуз" функциясын иштетүү</translation>
 <translation id="3069085583900247081">Сыналган жок</translation>
 <translation id="3078740164268491126">жадыбал</translation>
 <translation id="3081652522083185657">жарык</translation>
@@ -630,7 +635,6 @@
 <translation id="458794348635939462">Бардык башкы түйүндөр чечилген жок</translation>
 <translation id="4593212453765072419">Проксиде аныктыгын текшерүү талап кылынат</translation>
 <translation id="4609350030397390689">Баскычтоптун жарыктыгын азайтуу</translation>
-<translation id="4617553623719764431">Аба ырайы көрсөтүлбөйт, анткени жайгашкан жерди көрүү мүмкүнчүлүгү күйгүзүлгөн эмес. Аба ырайын көрсөтүү үчүн <ph name="BEGIN_LINK" />Жайгашкан жерди көрүү мүмкүнчүлүгүн күйгүзүңүз<ph name="END_LINK" /></translation>
 <translation id="4627232916386272576"><ph name="DOCUMENT_TITLE" />, <ph name="PRINTER_NAME" />, <ph name="CREATION_TIME" />, <ph name="TOTAL_PAGE_NUMBER" /> ичинен <ph name="PRINTED_PAGE_NUMBER" /> Басып чыгарууну токтотуу үчүн "Enter" баскычын басыңыз.</translation>
 <translation id="463791356324567266">Скандоо токтотулууда...</translation>
 <translation id="4646949265910132906">Коопсуз WiFi туташуусу</translation>
@@ -704,12 +708,13 @@
 <translation id="4985509611418653372">Иштетүү</translation>
 <translation id="4987769320337599931">Тармактык коргоо</translation>
 <translation id="4988526792673242964">Барактар</translation>
+<translation id="4989542687859782284">Жеткиликсиз</translation>
 <translation id="4999333166442584738">Отчётту жашыруу</translation>
 <translation id="500920857929044050">Сынакты токтотуу</translation>
 <translation id="5017508259293544172">LEAP</translation>
 <translation id="5035083460461104704">Теманын түсү</translation>
 <translation id="5038292761217083259">бир нече түстүү баскычтоп</translation>
-<translation id="5039804452771397117">Уруксат берүү</translation>
+<translation id="5039804452771397117">Ооба</translation>
 <translation id="5049856988445523908">SIM карта кулпуланды (<ph name="LOCK_TYPE" />)</translation>
 <translation id="5050042263972837708">Топтун аталышы:</translation>
 <translation id="5051044138948155788">Бир эле бет бар. Ушуну менен скандап баштоо экранына өтөсүз.</translation>
@@ -718,6 +723,7 @@
 <translation id="5088172560898466307">Сервер түйүнүнүн аталышы</translation>
 <translation id="5089810972385038852">Штат</translation>
 <translation id="5090362543162270857">IPsec (IKEv2)</translation>
+<translation id="5095761549884461003">Жаңыртуу процессин улантуу үчүн <ph name="DEVICE_NAME" /> түзмөгүнүн USB кабелин сууруп, анан кайра сайыңыз</translation>
 <translation id="5099354524039520280">өйдө</translation>
 <translation id="5107243100836678918"><ph name="META_KEY" /> баскычы жок ыкчам баскыч айрым колдонмолордун ыкчам баскычына каршы келиши мүмкүн. Бул ыкчам баскычты колдоно берүү үчүн кайра басыңыз же <ph name="KEY" /> баскычы бар жаңы ыкчам баскычты басыңыз. <ph name="LINK_BEGIN" />Кеңири маалымат<ph name="LINK_END" /></translation>
 <translation id="5108781503443873320">Окшош:</translation>
@@ -958,8 +964,8 @@
 <translation id="6411934471898487866">баскычтоптун жарыктыгы</translation>
 <translation id="6412715219990689313">Кыстарылган баскычтоп</translation>
 <translation id="6417265370957905582">Google Жардамчы</translation>
+<translation id="6419454453018688975">Системага жайгашкан жерди аныктоо мүмкүнчүлүгүн бериңиз</translation>
 <translation id="6423239382391657905">OpenVPN</translation>
-<translation id="6438073885402882007">Бул уруксаты бар системдик кызматтарга жайгашкан жериңизди колдонууга уруксат берет. Түзмөктүн жайгашкан жери Wi‑Fi, мобилдик тармактар жана сенсорлор аркылуу аныкталат. <ph name="LINK_BEGIN" />Кеңири маалымат<ph name="LINK_END" /></translation>
 <translation id="6439505561246192797">Начар (<ph name="SIGNAL_STRENGTH" />)</translation>
 <translation id="6447630859861661624">Аккаунттун параметрлерине өтүү</translation>
 <translation id="6462978824459367242">APN кошуу баскычы иштетилди</translation>
@@ -1002,7 +1008,7 @@
 <translation id="6647510110698214773">Шифрлөөнүн алгоритми</translation>
 <translation id="6648412990074186169">минималдуу</translation>
 <translation id="6650062777702288430">Кана/сандар менен тамгалар которгучу</translation>
-<translation id="6657240842932274095">Системдик кызматтарга жайгашкан жериңизди колдонууга уруксат берилсинби?</translation>
+<translation id="6657240842932274095">Системдик кызматтарга жайгашкан жериңизди колдонууга уруксат бересизби?</translation>
 <translation id="6657585470893396449">Сырсөз</translation>
 <translation id="6659594942844771486">Өтмөк</translation>
 <translation id="66621959568103627">кызгылт маржан</translation>
@@ -1067,7 +1073,7 @@
           ЖИ аркылуу контент түзсөңүз, сурам Google ЖИ серверлерине жөнөтүлүп, <ph name="BEGIN_LINK_GOOGLE_PRIVACY_POLICY" />Google'дун Купуялык эрежелерине<ph name="END_LINK_GOOGLE_PRIVACY_POLICY" /> ылайык сүрөттөрдү түзүү жана кызматты жакшыртуу үчүн колдонулат.
           <ph name="LINE_BREAK" />
           <ph name="LINE_BREAK" />
-          Генеративдүү жасалма интеллект сынамык функция жана иштеп чыгуунун алгачкы баскычында болгондуктан, учурда жеткиликтүүлүгү чектелген.</translation>
+          Жаратуучу жасалма интеллект сынамык функция жана иштеп чыгуунун алгачкы баскычында болгондуктан, учурда жеткиликтүүлүгү чектелген.</translation>
 <translation id="6982462588253070448">кум дөбөлөр</translation>
 <translation id="7005833343836210400">Түзмөк офлайн режиминде</translation>
 <translation id="7028979494427204405"><ph name="MANAGER" /> бул түзмөктү башкарып, андагы колдонуучунун бардык аракеттерине, анын ичинде баш баккан веб-барактарга, сырсөздөргө жана электрондук каттарга кирүү мүмкүнчүлүгү бар.</translation>
@@ -1199,7 +1205,7 @@
 <translation id="7705524343798198388">VPN</translation>
 <translation id="7716280709122323042">WPA3</translation>
 <translation id="7718231387947923843">баскычтоптун жарыгы</translation>
-<translation id="7730077286107534951">Аккаунт жана тутум жөнүндө айрым маалымат Google'га жөнөтүлүшү мүмкүн. Бул маалыматты <ph name="BEGIN_LINK2" />Купуялык саясаты<ph name="END_LINK2" /> жана <ph name="BEGIN_LINK3" />Тейлөө шарттарына<ph name="END_LINK3" /> ылайык техникалык маселелерди чечүү жана кызматтарыбызды жакшыртуу үчүн колдонобуз. Контентке өзгөртүүлөрдү киргизүүнү сурануу үчүн <ph name="BEGIN_LINK1" />Юридикалык жардам<ph name="END_LINK1" /> барагына өтүңүз.</translation>
+<translation id="7730077286107534951">Аккаунт жана система жөнүндө айрым маалымат Google'га жөнөтүлүшү мүмкүн. Бул маалыматты <ph name="BEGIN_LINK2" />Купуялык саясаты<ph name="END_LINK2" /> жана <ph name="BEGIN_LINK3" />Тейлөө шарттарына<ph name="END_LINK3" /> ылайык техникалык маселелерди чечүү жана кызматтарыбызды жакшыртуу үчүн колдонобуз. Контентке өзгөртүүлөрдү киргизүүнү сурануу үчүн <ph name="BEGIN_LINK1" />Юридикалык жардам<ph name="END_LINK1" /> барагына өтүңүз.</translation>
 <translation id="773153675489693198">Циклдердин саны</translation>
 <translation id="7746357909584236306">түзөтүүгө болот</translation>
 <translation id="7747039790905080783">Алдын ала бөлүшүлгөн ачкыч</translation>

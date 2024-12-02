@@ -187,6 +187,7 @@
     IDC_SHOW_SAVE_LOCAL_CARD_SIGN_IN_PROMO_IF_APPLICABLE) \
   E(kActionCloseSignInPromo, IDC_CLOSE_SIGN_IN_PROMO) \
   E(kActionShowFullUrls, IDC_SHOW_FULL_URLS) \
+  E(kActionShowGoogleLensShortcut, IDC_SHOW_GOOGLE_LENS_SHORTCUT) \
   E(kActionCaretBrowsingToggle, IDC_CARET_BROWSING_TOGGLE) \
   E(kActionChromeTips, IDC_CHROME_TIPS) \
   E(kActionChromeWhatsNew, IDC_CHROME_WHATS_NEW) \
@@ -467,10 +468,6 @@
   /* Screen AI layout extraction. */ \
   E(kActionContentContextRunLayoutExtraction, \
     IDC_CONTENT_CONTEXT_RUN_LAYOUT_EXTRACTION) \
-  /* PDF OCR */ \
-  E(kActionContentContextPdfOcr, IDC_CONTENT_CONTEXT_PDF_OCR) \
-  E(kActionContentContextPdfOcrAlways, IDC_CONTENT_CONTEXT_PDF_OCR_ALWAYS) \
-  E(kActionContentContextPdfOcrOnce, IDC_CONTENT_CONTEXT_PDF_OCR_ONCE) \
   /* Tab Search */ \
   E(kActionTabSearch, IDC_TAB_SEARCH) \
   E(kActionTabSearchClose, IDC_TAB_SEARCH_CLOSE) \

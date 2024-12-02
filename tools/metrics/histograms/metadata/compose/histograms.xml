@@ -141,12 +141,25 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
+<histogram name="Compose.ProactiveNudge.DerivedEngagement"
+    enum="ProactiveNudgeDerivedEngagement" expires_after="2024-12-01">
+  <owner>harringtond@chromium.org</owner>
+  <owner>chrome-compose-frontend@google.com</owner>
+  <summary>
+    The final derived engagement value for the nudge. Reported when the compose
+    session ends, if the nudge was shown as a result of segmentation platform
+    evaluation. Sessions end on insert, manual cancel, page navigation or tab
+    destruction.
+  </summary>
+</histogram>
+
 <histogram name="Compose.ProactiveNudge.ShowStatus" enum="ComposeShowStatus"
     expires_after="2024-11-01">
   <owner>perrier@chromium.org</owner>
   <owner>chrome-compose-frontend@google.com</owner>
   <summary>
     Histogram that records the show status of the Compose proactive nudge.
+    Segmentation Platform block reasons are recorded with the lowest priority.
     Logged each time the nudge is displayed or blocked from displaying (with a
     reason why).
   </summary>
@@ -177,8 +190,8 @@ chromium-metrics-reviews@google.com.
   <owner>cuianthony@chromium.org</owner>
   <owner>chrome-compose-frontend@google.com</owner>
   <summary>
-    Histogram for recording the reason why a Compose dialog that had shown the
-    FRE UI closed. Recorded once per session when it is closed or destroyed.
+    Reports the close reason for sessions where the FRE UI was shown. Recorded
+    on session destruction only for session where the FRE dialog was shown.
   </summary>
 </histogram>
 
@@ -202,8 +215,8 @@ chromium-metrics-reviews@google.com.
   <owner>jeffreycohen@chromium.org</owner>
   <owner>chrome-compose-frontend@google.com</owner>
   <summary>
-    Histogram for recording the reason why a Compose dialog that had shown the
-    MSBB UI closed. Recorded once per session when it is closed or destroyed.
+    Reports the close reason for sessions where the MSBB UI was shown. Recorded
+    on session destruction only for session where the MSBB dialog was shown.
   </summary>
 </histogram>
 
@@ -220,6 +233,18 @@ chromium-metrics-reviews@google.com.
     <variant name="Accepted" summary="MSBB was accepted or acknowledged"/>
     <variant name="Ignored" summary="MSBB was rejected or ignored"/>
   </token>
+</histogram>
+
+<histogram name="Compose.TextElementUsage.LongField.EditingTime" units="ms"
+    expires_after="2024-12-01">
+  <owner>harringtond@chromium.org</owner>
+  <owner>chrome-compose-frontend@google.com</owner>
+  <summary>
+    Records the time a user spends editing a long field (TextArea or
+    contenteditable). This is the sum of time between each keystroke, up to a
+    maximum of 5 seconds for each. Reported once per long field a user edits,
+    once per page load.
+  </summary>
 </histogram>
 
 <histogram name="Compose.{ComposeEvalLocation}Request.Duration.Error"
@@ -290,6 +315,26 @@ chromium-metrics-reviews@google.com.
   <token key="ComposeEvalLocation" variants="ComposeEvalLocation"/>
 </histogram>
 
+<histogram
+    name="Compose.{ComposeEvalLocation}Request.{PageLanguageStatus}.Status"
+    enum="ComposeRequestStatus" expires_after="2024-11-01">
+  <owner>carlosk@chromium.org</owner>
+  <owner>chrome-compose-frontend@google.com</owner>
+  <summary>
+    Records the Compose server request status when a request is made from a
+    {PageLanguageStatus}. Logged each time a Compose request receives a
+    response. {ComposeEvalLocation}
+  </summary>
+  <token key="PageLanguageStatus">
+    <variant name="PageLanguageSupported"
+        summary="page whose language is supported by Compose"/>
+    <variant name="PageLanguageUnsupported"
+        summary="page whose language is not supported by Compose (but usage
+                 was still allowed)."/>
+  </token>
+  <token key="ComposeEvalLocation" variants="ComposeEvalLocation"/>
+</histogram>
+
 <histogram name="Compose.{ComposeEvalLocation}Session.CloseReason"
     enum="ComposeSessionCloseReasonType" expires_after="2024-11-01">
   <owner>petewil@chromium.org</owner>
@@ -328,9 +373,10 @@ chromium-metrics-reviews@google.com.
   <owner>perrier@chromium.org</owner>
   <owner>chrome-compose-frontend@google.com</owner>
   <summary>
-    Count of the number of times the Compose dialog was shown in a session where
-    {FinalStatus}. Recorded once per session when it is closed or destroyed.
-    {ComposeEvalLocation} if a mix of Server and OnDevice requests were used for
+    Count of the number of times the main Compose dialog was shown in a session
+    where {FinalStatus}. Is not recorded if the session never passed the FRE or
+    MSBB disclaimers. Recorded once per session when it is closed or destroyed.
+    {ComposeEvalLocation} If a mix of Server and OnDevice requests were used for
     this session, or no requests were made, then neither Server nor OnDevice
     variant is recorded.
   </summary>

@@ -41,7 +41,6 @@
 #import "components/optimization_guide/core/optimization_guide_prefs.h"
 #import "components/password_manager/core/browser/password_manager.h"
 #import "components/payments/core/payment_prefs.h"
-#import "components/plus_addresses/plus_address_prefs.h"
 #import "components/policy/core/browser/browser_policy_connector.h"
 #import "components/policy/core/browser/url_blocklist_manager.h"
 #import "components/policy/core/common/local_test_policy_provider.h"
@@ -51,6 +50,7 @@
 #import "components/prefs/pref_service.h"
 #import "components/proxy_config/pref_proxy_config_tracker_impl.h"
 #import "components/safe_browsing/core/common/safe_browsing_prefs.h"
+#import "components/saved_tab_groups/pref_names.h"
 #import "components/search_engines/template_url_prepopulate_data.h"
 #import "components/segmentation_platform/embedder/default_model/device_switcher_result_dispatcher.h"
 #import "components/segmentation_platform/public/segmentation_platform_service.h"
@@ -79,6 +79,7 @@
 #import "ios/chrome/browser/metrics/model/ios_chrome_metrics_service_client.h"
 #import "ios/chrome/browser/ntp/model/set_up_list_prefs.h"
 #import "ios/chrome/browser/ntp_tiles/model/tab_resumption/tab_resumption_prefs.h"
+#import "ios/chrome/browser/parcel_tracking/parcel_tracking_opt_in_status.h"
 #import "ios/chrome/browser/parcel_tracking/parcel_tracking_prefs.h"
 #import "ios/chrome/browser/photos/model/photos_policy.h"
 #import "ios/chrome/browser/policy/model/policy_util.h"
@@ -185,6 +186,19 @@ const char kObsoleteAccountStorageNoticeShown[] =
 constexpr char kPreferencesMigratedToBasic[] =
     "browser.clear_data.preferences_migrated_to_basic";
 
+// Deprecated 05/2024.
+constexpr char kSyncCachedTrustedVaultAutoUpgradeDebugInfo[] =
+    "sync.cached_trusted_vault_auto_upgrade_debug_info";
+
+// Deprecated 05/2024.
+inline constexpr char kAutologinEnabled[] = "autologin.enabled";
+inline constexpr char kReverseAutologinRejectedEmailList[] =
+    "reverse_autologin.rejected_email_list";
+
+// Deprecated 06/2024.
+constexpr char kObsoletePasswordsPerAccountPrefMigrationDone[] =
+    "sync.passwords_per_account_pref_migration_done";
+
 // Helper function migrating the preference `pref_name` of type "double" from
 // `defaults` to `pref_service`.
 void MigrateDoublePreferenceFromUserDefaults(std::string_view pref_name,
@@ -285,53 +299,169 @@ void MigrateArrayOfDatesPreferenceFromUserDefaults(std::string_view pref_name,
   [defaults removeObjectForKey:key];
 }
 
+// Migrates a boolean pref from source to target PrefService.
+void MigrateBooleanPref(std::string_view pref_name,
+                        PrefService* target_pref_service,
+                        PrefService* source_pref_service) {
+  const std::string pref_key = pref_name.data();
+  const PrefService::Preference* target_pref =
+      target_pref_service->FindPreference(pref_key);
+  CHECK(target_pref);
+
+  const PrefService::Preference* source_pref =
+      source_pref_service->FindPreference(pref_key);
+  CHECK(source_pref);
+
+  // Only migrate the pref if 1. it is not set in target,
+  // 2. it is not the default in source.
+  if (target_pref->IsDefaultValue() && !source_pref->IsDefaultValue()) {
+    target_pref_service->SetBoolean(pref_key,
+                                    source_pref_service->GetBoolean(pref_key));
+  }
+
+  // In all cases, clear the pref from source.
+  source_pref_service->ClearPref(pref_key);
+}
+
+// Migrates a list pref from source to target PrefService.
+void MigrateListPref(std::string_view pref_name,
+                     PrefService* target_pref_service,
+                     PrefService* source_pref_service) {
+  const std::string pref_key = pref_name.data();
+  const PrefService::Preference* target_pref =
+      target_pref_service->FindPreference(pref_key);
+  CHECK(target_pref);
+
+  const PrefService::Preference* source_pref =
+      source_pref_service->FindPreference(pref_key);
+  CHECK(source_pref);
+
+  // Only migrate the pref if 1. it is not set in target,
+  // 2. it is not the default in source.
+  if (target_pref->IsDefaultValue() && !source_pref->IsDefaultValue()) {
+    target_pref_service->SetList(
+        pref_key, source_pref_service->GetList(pref_key).Clone());
+  }
+
+  // In all cases, clear the pref from source.
+  source_pref_service->ClearPref(pref_key);
+}
+
+// Migrates a integer pref from source to target PrefService.
+void MigrateIntegerPref(std::string_view pref_name,
+                        PrefService* target_pref_service,
+                        PrefService* source_pref_service) {
+  const std::string pref_key = pref_name.data();
+  const PrefService::Preference* target_pref =
+      target_pref_service->FindPreference(pref_key);
+  CHECK(target_pref);
+
+  const PrefService::Preference* source_pref =
+      source_pref_service->FindPreference(pref_key);
+  CHECK(source_pref);
+
+  // Only migrate the pref if 1. it is not set in target,
+  // 2. it is not the default in source.
+  if (target_pref->IsDefaultValue() && !source_pref->IsDefaultValue()) {
+    target_pref_service->SetInteger(pref_key,
+                                    source_pref_service->GetInteger(pref_key));
+  }
+
+  // In all cases, clear the pref from source.
+  source_pref_service->ClearPref(pref_key);
+}
+
+// Migrates a time pref from source to target PrefService.
+void MigrateTimePref(std::string_view pref_name,
+                     PrefService* target_pref_service,
+                     PrefService* source_pref_service) {
+  const std::string pref_key = pref_name.data();
+  const PrefService::Preference* target_pref =
+      target_pref_service->FindPreference(pref_key);
+  CHECK(target_pref);
+
+  const PrefService::Preference* source_pref =
+      source_pref_service->FindPreference(pref_key);
+  CHECK(source_pref);
+
+  // Only migrate the pref if 1. it is not set in target,
+  // 2. it is not the default in source.
+  if (target_pref->IsDefaultValue() && !source_pref->IsDefaultValue()) {
+    target_pref_service->SetTime(pref_key,
+                                 source_pref_service->GetTime(pref_key));
+  }
+
+  // In all cases, clear the pref from source.
+  source_pref_service->ClearPref(pref_key);
+}
+
+// Migrates a string pref from source to target PrefService.
+void MigrateStringPref(std::string_view pref_name,
+                       PrefService* target_pref_service,
+                       PrefService* source_pref_service) {
+  const std::string pref_key = pref_name.data();
+  const PrefService::Preference* target_pref =
+      target_pref_service->FindPreference(pref_key);
+  CHECK(target_pref);
+
+  const PrefService::Preference* source_pref =
+      source_pref_service->FindPreference(pref_key);
+  CHECK(source_pref);
+
+  // Only migrate the pref if 1. it is not set in target,
+  // 2. it is not the default in source.
+  if (target_pref->IsDefaultValue() && !source_pref->IsDefaultValue()) {
+    target_pref_service->SetString(pref_key,
+                                   source_pref_service->GetString(pref_key));
+  }
+
+  // In all cases, clear the pref from source.
+  source_pref_service->ClearPref(pref_key);
+}
+
 // Helper function migrating the `list` preference from LocalState prefs to
 // BrowserState prefs.
 void MigrateListPrefFromLocalStatePrefsToProfilePrefs(
     std::string_view pref_name,
-    PrefService* pref_service) {
-  PrefService* local_pref_service = GetApplicationContext()->GetLocalState();
-
-  const PrefService::Preference* legacy_pref =
-      local_pref_service->FindPreference(pref_name.data());
-  if (legacy_pref && !legacy_pref->IsDefaultValue()) {
-    pref_service->SetList(
-        pref_name.data(),
-        local_pref_service->GetList(pref_name.data()).Clone());
-    local_pref_service->ClearPref(pref_name.data());
-  }
+    PrefService* profile_pref_service) {
+  MigrateListPref(pref_name, profile_pref_service,
+                  GetApplicationContext()->GetLocalState());
 }
 
 // Helper function migrating the `string` preference from LocalState prefs to
 // BrowserState prefs.
 void MigrateStringPrefFromLocalStatePrefsToProfilePrefs(
     std::string_view pref_name,
-    PrefService* pref_service) {
-  PrefService* local_pref_service = GetApplicationContext()->GetLocalState();
-
-  const PrefService::Preference* legacy_pref =
-      local_pref_service->FindPreference(pref_name.data());
-  if (legacy_pref && !legacy_pref->IsDefaultValue()) {
-    pref_service->SetString(pref_name.data(),
-                            local_pref_service->GetString(pref_name.data()));
-    local_pref_service->ClearPref(pref_name.data());
-  }
+    PrefService* profile_pref_service) {
+  MigrateStringPref(pref_name, profile_pref_service,
+                    GetApplicationContext()->GetLocalState());
 }
 
 // Helper function migrating the `time` preference from LocalState prefs to
 // BrowserState prefs.
 void MigrateTimePrefFromLocalStatePrefsToProfilePrefs(
     std::string_view pref_name,
-    PrefService* pref_service) {
-  PrefService* local_pref_service = GetApplicationContext()->GetLocalState();
+    PrefService* profile_pref_service) {
+  MigrateTimePref(pref_name, profile_pref_service,
+                  GetApplicationContext()->GetLocalState());
+}
 
-  const PrefService::Preference* legacy_pref =
-      local_pref_service->FindPreference(pref_name.data());
-  if (legacy_pref && !legacy_pref->IsDefaultValue()) {
-    pref_service->SetTime(pref_name.data(),
-                          local_pref_service->GetTime(pref_name.data()));
-    local_pref_service->ClearPref(pref_name.data());
-  }
+// Helper function migrating the `int` preference from LocalState prefs to
+// BrowserState prefs.
+void MigrateIntegerPrefFromLocalStatePrefsToProfilePrefs(
+    std::string_view pref_name,
+    PrefService* profile_pref_service) {
+  MigrateIntegerPref(pref_name, profile_pref_service,
+                     GetApplicationContext()->GetLocalState());
+}
+
+// Helper function migrating the `bool` preference from BrowserState prefs to
+// LocalState prefs.
+void MigrateBooleanPrefFromProfilePrefsToLocalStatePrefs(
+    std::string_view pref_name,
+    PrefService* profile_pref_service) {
+  MigrateBooleanPref(pref_name, GetApplicationContext()->GetLocalState(),
+                     profile_pref_service);
 }
 
 }  // namespace
@@ -463,9 +593,6 @@ void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
   // Preference related to the tab pickup feature.
   registry->RegisterBooleanPref(prefs::kTabPickupEnabled, true);
 
-  registry->RegisterIntegerPref(prefs::kIosSyncSegmentsNewTabPageDisplayCount,
-                                0);
-
   // Pref used to store the number of impressions of the Most Visited Sites
   // since a freshness signal of the Most Visited Sites.
   registry->RegisterIntegerPref(
@@ -521,6 +648,21 @@ void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
   registry->RegisterStringPref(kIOSChromeNextVersionKey, std::string());
   registry->RegisterStringPref(kIOSChromeUpgradeURLKey, std::string());
   registry->RegisterTimePref(kLastInfobarDisplayTimeKey, base::Time());
+
+  // Bottom omnibox preferences.
+  registry->RegisterBooleanPref(prefs::kBottomOmnibox, false);
+  registry->RegisterBooleanPref(prefs::kBottomOmniboxByDefault, false);
+
+  // Prefs migrated to browserState prefs.
+  registry->RegisterListPref(prefs::kIosLatestMostVisitedSites,
+                             PrefRegistry::LOSSY_PREF);
+  registry->RegisterStringPref(
+      tab_resumption_prefs::kTabResumptionLastOpenedTabURLPref, std::string());
+  registry->RegisterTimePref(prefs::kTabPickupLastDisplayedTime, base::Time());
+  registry->RegisterStringPref(prefs::kTabPickupLastDisplayedURL,
+                               std::string());
+  registry->RegisterIntegerPref(prefs::kIosSyncSegmentsNewTabPageDisplayCount,
+                                0);
 }
 
 void RegisterBrowserStatePrefs(user_prefs::PrefRegistrySyncable* registry) {
@@ -540,7 +682,6 @@ void RegisterBrowserStatePrefs(user_prefs::PrefRegistrySyncable* registry) {
   optimization_guide::prefs::RegisterProfilePrefs(registry);
   password_manager::PasswordManager::RegisterProfilePrefs(registry);
   payments::RegisterProfilePrefs(registry);
-  plus_addresses::RegisterProfilePrefs(registry);
   policy::URLBlocklistManager::RegisterProfilePrefs(registry);
   PrefProxyConfigTrackerImpl::RegisterProfilePrefs(registry);
   PushNotificationService::RegisterBrowserStatePrefs(registry);
@@ -571,11 +712,11 @@ void RegisterBrowserStatePrefs(user_prefs::PrefRegistrySyncable* registry) {
   [SigninCoordinator registerBrowserStatePrefs:registry];
   [SigninPromoViewMediator registerBrowserStatePrefs:registry];
 
+  tab_groups::prefs::RegisterProfilePrefs(registry);
+
   registry->RegisterIntegerPref(prefs::kAddressBarSettingsNewBadgeShownCount,
                                 0);
   registry->RegisterIntegerPref(prefs::kNTPLensEntryPointNewBadgeShownCount, 0);
-  registry->RegisterBooleanPref(prefs::kBottomOmnibox, false);
-  registry->RegisterBooleanPref(prefs::kBottomOmniboxByDefault, false);
   registry->RegisterBooleanPref(policy::policy_prefs::kPolicyTestPageEnabled,
                                 true);
   registry->RegisterBooleanPref(kDataSaverEnabled, false);
@@ -716,7 +857,9 @@ void RegisterBrowserStatePrefs(user_prefs::PrefRegistrySyncable* registry) {
   // Preferences related to parcel tracking.
   registry->RegisterBooleanPref(
       prefs::kIosParcelTrackingOptInPromptDisplayLimitMet, false);
-  registry->RegisterIntegerPref(prefs::kIosParcelTrackingOptInStatus, 2);
+  registry->RegisterIntegerPref(
+      prefs::kIosParcelTrackingOptInStatus,
+      static_cast<int>(IOSParcelTrackingOptInStatus::kStatusNotSet));
   registry->RegisterBooleanPref(prefs::kIosParcelTrackingOptInPromptSwipedDown,
                                 false);
 
@@ -796,6 +939,22 @@ void RegisterBrowserStatePrefs(user_prefs::PrefRegistrySyncable* registry) {
 
   registry->RegisterDictionaryPref(
       prefs::kContentNotificationsEnrollmentEligibility);
+
+  registry->RegisterStringPref(kSyncCachedTrustedVaultAutoUpgradeDebugInfo, "");
+
+  // Deprecated 05/2024.
+  registry->RegisterBooleanPref(kAutologinEnabled, true);
+  registry->RegisterListPref(kReverseAutologinRejectedEmailList);
+
+  registry->RegisterIntegerPref(prefs::kIosSyncSegmentsNewTabPageDisplayCount,
+                                0);
+
+  registry->RegisterBooleanPref(kObsoletePasswordsPerAccountPrefMigrationDone,
+                                false);
+
+  // Prefs migrated to localState prefs.
+  registry->RegisterBooleanPref(prefs::kBottomOmnibox, false);
+  registry->RegisterBooleanPref(prefs::kBottomOmniboxByDefault, false);
 }
 
 // This method should be periodically pruned of year+ old migrations.
@@ -1009,6 +1168,28 @@ void MigrateObsoleteBrowserStatePrefs(const base::FilePath& state_path,
       spotlight::kSpotlightLastIndexingVersionKey, prefs, defaults);
   MigrateNSDatePreferenceFromUserDefaults(
       spotlight::kSpotlightLastIndexingDateKey, prefs, defaults);
+
+  // Added 05/2024.
+  prefs->ClearPref(kSyncCachedTrustedVaultAutoUpgradeDebugInfo);
+
+  // Added 05/2024.
+  prefs->ClearPref(kAutologinEnabled);
+  prefs->ClearPref(kReverseAutologinRejectedEmailList);
+
+  // Added 06/2024.
+  MigrateIntegerPrefFromLocalStatePrefsToProfilePrefs(
+      prefs::kIosSyncSegmentsNewTabPageDisplayCount, prefs);
+
+  // Added 06/2024.
+  MigrateBooleanPrefFromProfilePrefsToLocalStatePrefs(prefs::kBottomOmnibox,
+                                                      prefs);
+
+  // Added 06/2024.
+  MigrateBooleanPrefFromProfilePrefsToLocalStatePrefs(
+      prefs::kBottomOmniboxByDefault, prefs);
+
+  // Added 06/2024.
+  prefs->ClearPref(kObsoletePasswordsPerAccountPrefMigrationDone);
 }
 
 void MigrateObsoleteUserDefault() {

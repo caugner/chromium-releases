@@ -257,7 +257,6 @@
 <translation id="3083975830683400843">Chromebits</translation>
 <translation id="3085752524577180175">SOCKS ಹೋಸ್ಟ್</translation>
 <translation id="3104793765551262433"><ph name="NETWORK_COUNT" /> ರಲ್ಲಿ <ph name="NETWORK_INDEX" /> ನೆಟ್‌ವರ್ಕ್,<ph name="NETWORK_NAME" />, <ph name="SECURITY_STATUS" />, <ph name="CONNECTION_STATUS" />, ಸಿಗ್ನಲ್ ಸಾಮರ್ಥ್ಯ <ph name="SIGNAL_STRENGTH" />%, ನಿಮ್ಮ ನಿರ್ವಾಹಕರು ನಿರ್ಬಂಧಿಸಿದ್ದಾರೆ, ವಿವರಗಳು</translation>
-<translation id="3113153474486991170">ಈ ಸ್ಥಳದಿಂದ "<ph name="PATH" />" ಅನ್ನು ತೆರೆಯಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ತೆರೆಯಲು "ನನ್ನ ಫೈಲ್‌ಗಳಿಗೆ" ನಕಲಿಸಿ.</translation>
 <translation id="3113592018909187986">ನೀವು 1 ಬಾಕಿ ಉಳಿದಿರುವ ಪ್ರಯತ್ನವನ್ನು ಹೊಂದಿರುವಿರಿ. ಹೊಸ ಪಿನ್ ಅನ್ನು ಸೆಟಪ್ ಮಾಡುವವರೆಗೆ ಈ ನೆಟ್‌ವರ್ಕ್ ಅನ್ನು ಬಳಸಲು ನಿಮಗೆ ಸಾಧ್ಯವಾಗುವುದಿಲ್ಲ.</translation>
 <translation id="3124404833828281817">ಹಗಲುಗನಸು ಕಾಣುತ್ತಿರುವ ವ್ಯಕ್ತಿ</translation>
 <translation id="3126026824346185272">Ctrl</translation>
@@ -529,7 +528,7 @@
 <translation id="5109254780565519649">ದೋಷ ಎದುರಾಗಿದೆ. ಕೆಲವು ಐಟಂಗಳನ್ನು ಮರುಸ್ಥಾಪಿಸಲು ಆಗದೇ ಇರಬಹುದು.</translation>
 <translation id="5110329002213341433">ಇಂಗ್ಲಿಷ್ (ಕೆನಡಾ)</translation>
 <translation id="5119780910075847424">ಸಿಂಕ್ ಮಾಡುವುದನ್ನು ವಿರಾಮಗೊಳಿಸಲಾಗಿದೆ</translation>
-<translation id="5123433949759960244">ಬ್ಯಾಸ್ಕೆಟ್‌ಬಾಲ್‌</translation>
+<translation id="5123433949759960244">ಬಾಸ್ಕೆಟ್‌ಬಾಲ್‌</translation>
 <translation id="5129662217315786329">ಪೋಲಿಶ್</translation>
 <translation id="5144820558584035333">ಹಂಗುಲ್ 3 ಸೆಟ್ (390)</translation>
 <translation id="5145331109270917438">ದಿನಾಂಕ ಮಾರ್ಪಡಿಸಿದೆ</translation>

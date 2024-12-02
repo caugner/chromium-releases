@@ -123,7 +123,7 @@ extensions::api::passwords_private::ExportProgressStatus ConvertStatus(
           kFailedWriteFailed;
   }
 
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return extensions::api::passwords_private::ExportProgressStatus::kNone;
 }
 
@@ -174,7 +174,7 @@ ConvertPlaintextReason(
     case extensions::api::passwords_private::PlaintextReason::kEdit:
       return password_manager::metrics_util::ACCESS_PASSWORD_EDITED;
     case extensions::api::passwords_private::PlaintextReason::kNone:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return password_manager::metrics_util::ACCESS_PASSWORD_VIEWED;
   }
 }
@@ -194,7 +194,7 @@ ConvertToPasswordFormStores(
     default:
       break;
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return {};
 }
 
@@ -305,9 +305,11 @@ PasswordsPrivateDelegateImpl::PasswordsPrivateDelegateImpl(Profile* profile)
           base::BindRepeating(
               &PasswordsPrivateDelegateImpl::OnPasswordsExportProgress,
               base::Unretained(this)))),
-      password_check_delegate_(profile,
-                               &saved_passwords_presenter_,
-                               &credential_id_generator_),
+      password_check_delegate_(
+          profile,
+          &saved_passwords_presenter_,
+          &credential_id_generator_,
+          PasswordsPrivateEventRouterFactory::GetForProfile(profile_)),
       current_entries_initialized_(false),
       is_initialized_(false) {
   auth_timeout_handler_.Init(
@@ -352,7 +354,8 @@ PasswordsPrivateDelegateImpl::GetDeviceAuthenticator(
       "PasswordManager.ReauthToAccessPasswordInSettings");
 
   return ChromeDeviceAuthenticatorFactory::GetForProfile(
-      Profile::FromBrowserContext(web_contents->GetBrowserContext()), params);
+      Profile::FromBrowserContext(web_contents->GetBrowserContext()),
+      web_contents->GetTopLevelNativeWindow(), params);
 }
 #endif
 

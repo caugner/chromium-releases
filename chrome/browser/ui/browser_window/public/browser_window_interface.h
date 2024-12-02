@@ -14,11 +14,22 @@
 // your feature needs. This comment will be deleted after there are 10+ features
 // in BrowserWindowFeatures.
 
+namespace tabs {
+class TabInterface;
+}  // namespace tabs
+
 namespace views {
 class WebView;
+class View;
 }  // namespace views
 
+namespace web_modal {
+class WebContentsModalDialogHost;
+}  // namespace web_modal
+
+class BrowserWindowFeatures;
 class GURL;
+class SessionID;
 
 class BrowserWindowInterface {
  public:
@@ -29,6 +40,29 @@ class BrowserWindowInterface {
 
   // Opens a URL, with the given disposition.
   virtual void OpenURL(const GURL& gurl, WindowOpenDisposition disposition) = 0;
+
+  // Returns a session-unique ID.
+  virtual const SessionID& GetSessionID() = 0;
+
+  // Returns true if the tab strip is currently visible for this browser window.
+  // Will return false on browser initialization before the tab strip is
+  // initialized.
+  virtual bool IsTabStripVisible() = 0;
+
+  // Returns the top container view.
+  virtual views::View* TopContainer() = 0;
+
+  // Returns the foreground tab. This can be nullptr very early during
+  // BrowserWindow initialization, and very late during BrowserWindow teardown.
+  virtual tabs::TabInterface* GetActiveTabInterface() = 0;
+
+  // Returns the feature controllers scoped to this browser window.
+  virtual BrowserWindowFeatures& GetFeatures() = 0;
+
+  // Returns the web contents modal dialog host pertaining to this
+  // BrowserWindow.
+  virtual web_modal::WebContentsModalDialogHost*
+  GetWebContentsModalDialogHostForWindow() = 0;
 };
 
 #endif  // CHROME_BROWSER_UI_BROWSER_WINDOW_PUBLIC_BROWSER_WINDOW_INTERFACE_H_

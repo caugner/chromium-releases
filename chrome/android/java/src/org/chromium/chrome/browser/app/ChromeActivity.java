@@ -196,8 +196,6 @@ import org.chromium.components.browser_ui.modaldialog.AppModalPresenter;
 import org.chromium.components.browser_ui.notifications.NotificationManagerProxy;
 import org.chromium.components.browser_ui.notifications.NotificationManagerProxyImpl;
 import org.chromium.components.browser_ui.settings.SettingsLauncher;
-import org.chromium.components.browser_ui.widget.InsetObserver;
-import org.chromium.components.browser_ui.widget.InsetObserverSupplier;
 import org.chromium.components.browser_ui.widget.MenuOrKeyboardActionController;
 import org.chromium.components.browser_ui.widget.gesture.BackPressHandler;
 import org.chromium.components.browser_ui.widget.gesture.BackPressHandler.Type;
@@ -232,6 +230,7 @@ import org.chromium.content_public.common.ContentSwitches;
 import org.chromium.printing.PrintManagerDelegateImpl;
 import org.chromium.printing.PrintingController;
 import org.chromium.printing.PrintingControllerImpl;
+import org.chromium.ui.InsetObserver;
 import org.chromium.ui.UiUtils;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.ApplicationViewportInsetSupplier;
@@ -271,6 +270,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
     private static final String TAG = "ChromeActivity";
     private static final int CONTENT_VIS_DELAY_MS = 5;
     public static final String UNFOLD_LATENCY_BEGIN_TIMESTAMP = "unfold_latency_begin_timestamp";
+    public static final String IS_FROM_RECREATING = "is_from_recreating";
     private C mComponent;
 
     /** Used to generate a unique ID for each ChromeActivity. */
@@ -296,7 +296,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
     protected final ObservableSupplierImpl<EdgeToEdgeController> mEdgeToEdgeControllerSupplier =
             new ObservableSupplierImpl<>();
 
-    private final UnownedUserDataSupplier<ManualFillingComponent> mManualFillingComponentSupplier =
+    protected final ManualFillingComponentSupplier mManualFillingComponentSupplier =
             new ManualFillingComponentSupplier();
     // TODO(crbug.com/40182241): Move ownership to RootUiCoordinator.
     private final UnownedUserDataSupplier<BrowserControlsManager> mBrowserControlsManagerSupplier =
@@ -339,8 +339,6 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
             new ObservableSupplierImpl<>();
     private ObservableSupplierImpl<LayoutManagerImpl> mLayoutManagerSupplier =
             new ObservableSupplierImpl<>();
-    protected final UnownedUserDataSupplier<InsetObserver> mInsetObserverViewSupplier =
-            new InsetObserverSupplier();
     private final ObservableSupplierImpl<ContextualSearchManager> mContextualSearchManagerSupplier =
             new ObservableSupplierImpl<>();
 
@@ -406,6 +404,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
     private boolean mBlockingDrawForAppRestart;
     private Runnable mShowContentRunnable;
     private boolean mIsRecreatingForTabletModeChange;
+    private boolean mIsRecreating;
     // This is only used on automotive.
     private @Nullable MissingDeviceLockLauncher mMissingDeviceLockLauncher;
     // Handling the dismissal of tab modal dialog.
@@ -492,11 +491,6 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         // insets.
         rootView.setFitsSystemWindows(false);
 
-        // Add an inset observer that stores the insets to access later.
-        // WebContents needs the insets to determine the portion of the screen obscured by
-        // non-content displaying things such as the OSK.
-        mInsetObserverViewSupplier.set(new InsetObserver(rootView));
-
         if (BuildInfo.getInstance().isAutomotive
                 && ChromeFeatureList.sVerticalAutomotiveBackButtonToolbar.isEnabled()) {
             mBaseChromeLayout = new FrameLayout(this);
@@ -574,7 +568,6 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         mTabModelSelectorSupplier.attach(getWindowAndroid().getUnownedUserDataHost());
         mTabCreatorManagerSupplier.attach(getWindowAndroid().getUnownedUserDataHost());
         mManualFillingComponentSupplier.attach(getWindowAndroid().getUnownedUserDataHost());
-        mInsetObserverViewSupplier.attach(getWindowAndroid().getUnownedUserDataHost());
         mBrowserControlsManagerSupplier.attach(getWindowAndroid().getUnownedUserDataHost());
         // BrowserControlsManager is ready immediately.
         mBrowserControlsManagerSupplier.set(
@@ -701,7 +694,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
             mBottomContainer = (BottomContainer) findViewById(R.id.bottom_container);
 
             mSnackbarManager = new SnackbarManager(this, mBottomContainer, getWindowAndroid());
-            mInsetObserverViewSupplier.get().addObserver(mSnackbarManager);
+            getWindowAndroid().getInsetObserver().addObserver(mSnackbarManager);
             SnackbarManagerProvider.attach(getWindowAndroid(), mSnackbarManager);
 
             // Make the activity listen to policy change events
@@ -1044,7 +1037,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
                 .onNativeLibraryReady(getWindowAndroid(), getTabContentManager(), prefs);
 
         // TODO(crbug.com/40141057): Move contextual search initialization to the RootUiCoordinator.
-        if (ContextualSearchFieldTrial.isEnabled()) {
+        if (isContextualSearchEnabled()) {
             mContextualSearchManagerSupplier.set(
                     new ContextualSearchManager(
                             this,
@@ -1061,6 +1054,10 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         }
 
         TraceEvent.end("ChromeActivity:CompositorInitialization");
+    }
+
+    protected boolean isContextualSearchEnabled() {
+        return ContextualSearchFieldTrial.isEnabled();
     }
 
     @Override
@@ -1371,6 +1368,13 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         super.onStopWithNative();
     }
 
+    @CallSuper
+    @Override
+    public void recreate() {
+        super.recreate();
+        mIsRecreating = true;
+    }
+
     @Override
     public void onNewIntentWithNative(Intent intent) {
         if (mFullscreenVideoPictureInPictureController != null) {
@@ -1620,6 +1624,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
             outState.putLong(
                     UNFOLD_LATENCY_BEGIN_TIMESTAMP, getOnPauseBeforeFoldRecreateTimestampMs());
         }
+        outState.putBoolean(IS_FROM_RECREATING, mIsRecreating);
         mRootUiCoordinator.onSaveInstanceState(outState, mIsRecreatingForTabletModeChange);
     }
 
@@ -1712,9 +1717,17 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
             mBottomContainer = null;
         }
 
-        if (mDisplayAndroidObserver != null) {
-            getWindowAndroid().getDisplay().removeObserver(mDisplayAndroidObserver);
-            mDisplayAndroidObserver = null;
+        WindowAndroid windowAndroid = getWindowAndroid();
+        if (windowAndroid != null) {
+            if (mDisplayAndroidObserver != null) {
+                windowAndroid.getDisplay().removeObserver(mDisplayAndroidObserver);
+                mDisplayAndroidObserver = null;
+            }
+
+            InsetObserver insetObserver = windowAndroid.getInsetObserver();
+            if (insetObserver != null) {
+                insetObserver.removeObserver(mSnackbarManager);
+            }
         }
 
         if (mTextBubbleBackPressHandler != null) {
@@ -1735,10 +1748,6 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         if (mStylusWritingCoordinator != null) {
             mStylusWritingCoordinator.destroy();
             mStylusWritingCoordinator = null;
-        }
-
-        if (mInsetObserverViewSupplier.get() != null) {
-            mInsetObserverViewSupplier.get().removeObserver(mSnackbarManager);
         }
 
         // Destroy spare tab on activity destruction.
@@ -2172,7 +2181,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         ApplicationViewportInsetSupplier insetSupplier =
                 getWindowAndroid().getApplicationBottomInsetSupplier();
         insetSupplier.setKeyboardInsetSupplier(
-                mInsetObserverViewSupplier.get().getSupplierForKeyboardInset());
+                getWindowAndroid().getInsetObserver().getSupplierForKeyboardInset());
         insetSupplier.setKeyboardAccessoryInsetSupplier(
                 mManualFillingComponentSupplier.get().getBottomInsetSupplier());
         compositorViewHolder.setApplicationViewportInsetSupplier(insetSupplier);

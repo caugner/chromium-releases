@@ -45,6 +45,7 @@
 #include "components/keep_alive_registry/keep_alive_types.h"
 #include "components/keep_alive_registry/scoped_keep_alive.h"
 #include "components/saved_tab_groups/features.h"
+#include "components/saved_tab_groups/types.h"
 #include "components/sessions/core/tab_restore_service.h"
 #include "components/sessions/core/tab_restore_service_observer.h"
 #include "components/sessions/core/tab_restore_types.h"
@@ -447,12 +448,13 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreWindowAndTab) {
   EXPECT_EQ(2u, active_browser_list_->size());
 
   // Close the first browser.
+  const int active_tab_index = browser()->tab_strip_model()->active_index();
   CloseBrowserSynchronously(browser());
   EXPECT_EQ(1u, active_browser_list_->size());
 
   // Restore the first window. The expected_tabstrip_index (second argument)
   // indicates the expected active tab.
-  ASSERT_NO_FATAL_FAILURE(RestoreTab(1, 0));
+  ASSERT_NO_FATAL_FAILURE(RestoreTab(1, active_tab_index));
   Browser* browser = GetBrowser(1);
   EXPECT_EQ(starting_tab_count + 2, browser->tab_strip_model()->count());
 
@@ -996,6 +998,7 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreWindow) {
       ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
 
   // Close the window.
+  const int active_tab_index = browser()->tab_strip_model()->active_index();
   CloseBrowserSynchronously(browser());
   EXPECT_EQ(window_count - 1, active_browser_list_->size());
 
@@ -1008,7 +1011,7 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreWindow) {
   EXPECT_EQ(initial_tab_count + 2, browser->tab_strip_model()->count());
   EXPECT_TRUE(content::WaitForLoadStop(tab_added_waiter.Wait()));
 
-  EXPECT_EQ(0, browser->tab_strip_model()->active_index());
+  EXPECT_EQ(active_tab_index, browser->tab_strip_model()->active_index());
   content::WebContents* restored_tab =
       browser->tab_strip_model()->GetWebContentsAt(initial_tab_count + 1);
   EnsureTabFinishedRestoring(restored_tab);
@@ -1018,6 +1021,28 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreWindow) {
       browser->tab_strip_model()->GetWebContentsAt(initial_tab_count);
   EnsureTabFinishedRestoring(restored_tab);
   EXPECT_EQ(url1_, restored_tab->GetURL());
+}
+
+// Verifies that active tab index is the same as before closing.
+IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreWindow_ActiveTabIndex) {
+  AddSomeTabs(browser(), 4);
+
+  // Create a second browser.
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL(chrome::kChromeUINewTabURL),
+      WindowOpenDisposition::NEW_WINDOW,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_BROWSER);
+  EXPECT_EQ(2u, active_browser_list_->size());
+
+  constexpr int kActiveTabIndex = 2;
+  browser()->tab_strip_model()->ActivateTabAt(kActiveTabIndex);
+
+  // Close the first browser.
+  CloseBrowserSynchronously(browser());
+  EXPECT_EQ(1u, active_browser_list_->size());
+
+  // Restore the first browser. Verify the active tab index.
+  ASSERT_NO_FATAL_FAILURE(RestoreTab(1, kActiveTabIndex));
 }
 
 // https://crbug.com/825305: Timeout flakiness on Mac10.13 Tests (dbg) and
@@ -1217,6 +1242,7 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest,
   const int tabs_count = 4;
   AddSomeTabs(browser2, tabs_count - browser2->tab_strip_model()->count());
   EXPECT_EQ(tabs_count, browser2->tab_strip_model()->count());
+  const int active_tab_index = browser2->tab_strip_model()->active_index();
   CloseBrowserSynchronously(browser2);
 
   // Limit the number of restored tabs that are loaded.
@@ -1235,18 +1261,22 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest,
   browser2 = GetBrowser(1);
 
   EXPECT_EQ(tabs_count, browser2->tab_strip_model()->count());
-  EXPECT_EQ(0, browser2->tab_strip_model()->active_index());
+  EXPECT_EQ(active_tab_index, browser2->tab_strip_model()->active_index());
 
   // These two tabs should be loaded by TabLoader.
   EnsureTabFinishedRestoring(browser2->tab_strip_model()->GetWebContentsAt(0));
-  EnsureTabFinishedRestoring(browser2->tab_strip_model()->GetWebContentsAt(1));
+  EnsureTabFinishedRestoring(
+      browser2->tab_strip_model()->GetWebContentsAt(active_tab_index));
 
   // The following isn't necessary but just to be sure there is no any async
   // task that could have an impact on the expectations below.
   content::RunAllPendingInMessageLoop();
 
   // These tabs shouldn't want to be loaded.
-  for (int tab_idx = 2; tab_idx < tabs_count; ++tab_idx) {
+  for (int tab_idx = 1; tab_idx < tabs_count; ++tab_idx) {
+    if (tab_idx == active_tab_index) {
+      continue;  // Active tab should be loaded.
+    }
     auto* contents = browser2->tab_strip_model()->GetWebContentsAt(tab_idx);
     EXPECT_FALSE(contents->IsLoading());
     EXPECT_TRUE(contents->GetController().NeedsReload());
@@ -1314,11 +1344,12 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreWindowWithName) {
   EXPECT_EQ(2u, active_browser_list_->size());
 
   // Close the first browser.
+  const int active_tab_index = browser()->tab_strip_model()->active_index();
   CloseBrowserSynchronously(browser());
   EXPECT_EQ(1u, active_browser_list_->size());
 
   // Restore the first browser.
-  ASSERT_NO_FATAL_FAILURE(RestoreTab(1, 0));
+  ASSERT_NO_FATAL_FAILURE(RestoreTab(1, active_tab_index));
   Browser* browser = GetBrowser(1);
   EXPECT_EQ("foobar", browser->user_title());
 }
@@ -2341,7 +2372,9 @@ IN_PROC_BROWSER_TEST_F(TabRestoreSavedGroupsTest,
   browser()->tab_strip_model()->CloseAllTabsInGroup(group);
 
   // Reopen the group.
-  service->OpenSavedTabGroupInBrowser(browser(), saved_group_id);
+  service->OpenSavedTabGroupInBrowser(
+      browser(), saved_group_id,
+      tab_groups::OpeningSource::kOpenedFromTabRestore);
 
   // Focus a tab not in the group.
   browser()->tab_strip_model()->ActivateTabAt(0);
@@ -2398,7 +2431,7 @@ IN_PROC_BROWSER_TEST_F(TabRestoreSavedGroupsTest, RestoreTabInUnsavedGroup) {
 
   // Closing all tabs individually should unsave the group but do it manually in
   // case that behavior changes in the future.
-  service->UnsaveGroup(group);
+  service->UnsaveGroup(group, tab_groups::ClosingSource::kDeletedByUser);
 
   // Close both tabs individually and restore them. Verify both tabs added to
   // the group.
@@ -2686,7 +2719,9 @@ IN_PROC_BROWSER_TEST_F(TabRestoreSavedGroupsTest,
 
   // Open the saved group in the second browser.
   Browser* second_browser = GetBrowser(0);
-  service->OpenSavedTabGroupInBrowser(second_browser, saved_group_id);
+  service->OpenSavedTabGroupInBrowser(
+      second_browser, saved_group_id,
+      tab_groups::OpeningSource::kOpenedFromTabRestore);
 
   // Use the second browser to restore the closed window.
   chrome::RestoreTab(second_browser);
