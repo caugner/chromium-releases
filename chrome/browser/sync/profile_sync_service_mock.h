@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/memory/weak_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -30,8 +30,8 @@ class ProfileSyncServiceMock : public ProfileSyncService {
   static TestingProfile* MakeSignedInTestingProfile();
 
   // Helper routine to be used in conjunction with
-  // ProfileKeyedServiceFactory::SetTestingFactory().
-  static ProfileKeyedService* BuildMockProfileSyncService(
+  // BrowserContextKeyedServiceFactory::SetTestingFactory().
+  static BrowserContextKeyedService* BuildMockProfileSyncService(
       content::BrowserContext* profile);
 
   MOCK_METHOD0(DisableForUser, void());
@@ -63,8 +63,8 @@ class ProfileSyncServiceMock : public ProfileSyncService {
                void(syncer::ModelType, syncer::ModelSafeGroup,
                     browser_sync::ChangeProcessor*));
   MOCK_METHOD1(DeactivateDataType, void(syncer::ModelType));
+  MOCK_METHOD0(UnsuppressAndStart, void());
 
-  MOCK_METHOD0(StartUp, void());
   MOCK_METHOD1(AddObserver, void(Observer*));
   MOCK_METHOD1(RemoveObserver, void(Observer*));
   MOCK_METHOD0(GetJsController, base::WeakPtr<syncer::JsController>());
@@ -75,6 +75,7 @@ class ProfileSyncServiceMock : public ProfileSyncService {
 
   MOCK_METHOD1(ChangePreferredDataTypes,
                void(syncer::ModelTypeSet preferred_types));
+  MOCK_CONST_METHOD0(GetActiveDataTypes, syncer::ModelTypeSet());
   MOCK_CONST_METHOD0(GetPreferredDataTypes, syncer::ModelTypeSet());
   MOCK_CONST_METHOD0(GetRegisteredDataTypes, syncer::ModelTypeSet());
   MOCK_CONST_METHOD0(GetLastSessionSnapshot,
@@ -102,7 +103,7 @@ class ProfileSyncServiceMock : public ProfileSyncService {
 
   MOCK_METHOD0(IsSyncEnabledAndLoggedIn, bool());
   MOCK_CONST_METHOD0(IsManaged, bool());
-  MOCK_METHOD0(IsSyncTokenAvailable, bool());
+  MOCK_METHOD0(IsOAuthRefreshTokenAvailable, bool());
 
   MOCK_CONST_METHOD0(IsPassphraseRequired, bool());
   MOCK_CONST_METHOD0(IsPassphraseRequiredForDecryption, bool());

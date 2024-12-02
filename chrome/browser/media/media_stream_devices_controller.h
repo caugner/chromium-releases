@@ -28,6 +28,10 @@ class MediaStreamDevicesController {
 
   virtual ~MediaStreamDevicesController();
 
+  // TODO(tommi): Clean up all the policy code and integrate with
+  // HostContentSettingsMap instead.  This will make creating the UI simpler
+  // and the code cleaner.  crbug.com/244389.
+
   // Registers the prefs backing the audio and video policies.
   static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
 
@@ -52,7 +56,8 @@ class MediaStreamDevicesController {
 
   // Called by GetAudioDevicePolicy and GetVideoDevicePolicy to check
   // the currently set capture device policy.
-  DevicePolicy GetDevicePolicy(const char* policy_name) const;
+  DevicePolicy GetDevicePolicy(const char* policy_name,
+                               const char* whitelist_policy_name) const;
 
   // Returns true if the origin of the request has been granted the media
   // access before, otherwise returns false.
@@ -76,6 +81,14 @@ class MediaStreamDevicesController {
   // Sets the permission of the origin of the request. This is triggered when
   // the users deny the request or allow the request for https sites.
   void SetPermission(bool allowed) const;
+
+  // Notifies the content setting UI that the media stream access request or
+  // part of the request is accepted.
+  void NotifyUIRequestAccepted() const;
+
+  // Notifies the content setting UI that the media stream access request or
+  // part of the request is denied.
+  void NotifyUIRequestDenied() const;
 
   content::WebContents* web_contents_;
 

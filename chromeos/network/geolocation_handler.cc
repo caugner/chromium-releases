@@ -5,15 +5,13 @@
 #include "chromeos/network/geolocation_handler.h"
 
 #include "base/bind.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_manager_client.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace chromeos {
-
-static GeolocationHandler* g_geolocation_handler = NULL;
 
 GeolocationHandler::GeolocationHandler()
     : wifi_enabled_(false),
@@ -34,27 +32,6 @@ void GeolocationHandler::Init() {
       base::Bind(&GeolocationHandler::ManagerPropertiesCallback,
                  weak_ptr_factory_.GetWeakPtr()));
   manager_client->AddPropertyChangedObserver(this);
-}
-
-// static
-void GeolocationHandler::Initialize() {
-  CHECK(!g_geolocation_handler);
-  g_geolocation_handler = new GeolocationHandler();
-  g_geolocation_handler->Init();
-}
-
-// static
-void GeolocationHandler::Shutdown() {
-  CHECK(g_geolocation_handler);
-  delete g_geolocation_handler;
-  g_geolocation_handler = NULL;
-}
-
-// static
-GeolocationHandler* GeolocationHandler::Get() {
-  CHECK(g_geolocation_handler)
-      << "GeolocationHandler::Get() called before Initialize()";
-  return g_geolocation_handler;
 }
 
 bool GeolocationHandler::GetWifiAccessPoints(

@@ -6,6 +6,7 @@
 #include "win8/metro_driver/chrome_app_view_ash.h"
 
 #include <corewindow.h>
+#include <shellapi.h>
 #include <windows.foundation.h>
 
 #include "base/bind.h"
@@ -25,6 +26,7 @@
 #include "win8/metro_driver/file_picker_ash.h"
 #include "win8/metro_driver/metro_driver.h"
 #include "win8/metro_driver/winrt_utils.h"
+#include "win8/viewer/metro_viewer_constants.h"
 
 typedef winfoundtn::ITypedEventHandler<
     winapp::Core::CoreApplicationView*,
@@ -53,6 +55,10 @@ typedef winfoundtn::ITypedEventHandler<
 typedef winfoundtn::ITypedEventHandler<
     winui::Core::CoreWindow*,
     winui::Core::WindowActivatedEventArgs*> WindowActivatedHandler;
+
+typedef winfoundtn::ITypedEventHandler<
+    winui::Core::CoreWindow*,
+    winui::Core::WindowSizeChangedEventArgs*> SizeChangedHandler;
 
 // This function is exported by chrome.exe.
 typedef int (__cdecl *BreakpadExceptionHandler)(EXCEPTION_POINTERS* info);
@@ -85,6 +91,7 @@ class ChromeChannelListener : public IPC::Listener {
                           OnDisplayFileSaveAsDialog)
       IPC_MESSAGE_HANDLER(MetroViewerHostMsg_DisplaySelectFolder,
                           OnDisplayFolderPicker)
+      IPC_MESSAGE_HANDLER(MetroViewerHostMsg_SetCursorPos, OnSetCursorPos)
       IPC_MESSAGE_UNHANDLED(__debugbreak())
     IPC_END_MESSAGE_MAP()
     return true;
@@ -132,6 +139,16 @@ class ChromeChannelListener : public IPC::Listener {
                    base::Unretained(app_view_),
                    title));
   }
+
+  void OnSetCursorPos(int x, int y) {
+    VLOG(1) << "In IPC OnSetCursorPos: " << x << ", " << y;
+    ui_proxy_->PostTask(
+        FROM_HERE,
+        base::Bind(&ChromeAppViewAsh::OnSetCursorPos,
+                   base::Unretained(app_view_),
+                   x, y));
+  }
+
 
   scoped_refptr<base::MessageLoopProxy> ui_proxy_;
   ChromeAppViewAsh* app_view_;
@@ -283,7 +300,9 @@ uint32 GetKeyboardEventFlags() {
 ChromeAppViewAsh::ChromeAppViewAsh()
     : mouse_down_flags_(ui::EF_NONE),
       ui_channel_(nullptr),
-      core_window_hwnd_(NULL) {
+      core_window_hwnd_(NULL),
+      ui_loop_(base::MessageLoop::TYPE_UI) {
+  DVLOG(1) << __FUNCTION__;
   globals.previous_state =
       winapp::Activation::ApplicationExecutionState_NotRunning;
 }
@@ -313,6 +332,11 @@ ChromeAppViewAsh::SetWindow(winui::Core::ICoreWindow* window) {
   HRESULT hr = window->QueryInterface(interop.GetAddressOf());
   CheckHR(hr);
   hr = interop->get_WindowHandle(&core_window_hwnd_);
+  CheckHR(hr);
+
+  hr = window_->add_SizeChanged(mswr::Callback<SizeChangedHandler>(
+      this, &ChromeAppViewAsh::OnSizeChanged).Get(),
+      &sizechange_token_);
   CheckHR(hr);
 
   // Register for pointer and keyboard notifications. We forward
@@ -403,29 +427,19 @@ ChromeAppViewAsh::Run() {
     return hr;
   }
 
-  // Create a message loop to allow message passing into this thread.
-  base::MessageLoop msg_loop(base::MessageLoop::TYPE_UI);
-
   // Create the IPC channel IO thread. It needs to out-live the ChannelProxy.
   base::Thread io_thread("metro_IO_thread");
   base::Thread::Options options;
   options.message_loop_type = base::MessageLoop::TYPE_IO;
   io_thread.StartWithOptions(options);
 
-  std::string ipc_channel_name("viewer");
-
-  // TODO(robertshield): Figure out how to receive and append the channel ID
-  // from the delegate_execute instance that launched the browser process.
-  // See http://crbug.com/162474
-  // ipc_channel_name.append(IPC::Channel::GenerateUniqueRandomChannelID());
-
   // Start up Chrome and wait for the desired IPC server connection to exist.
-  WaitForChromeIPCConnection(ipc_channel_name);
+  WaitForChromeIPCConnection(win8::kMetroViewerIPCChannelName);
 
   // In Aura mode we create an IPC channel to the browser, then ask it to
   // connect to us.
-  ChromeChannelListener ui_channel_listener(&msg_loop, this);
-  IPC::ChannelProxy ui_channel(ipc_channel_name,
+  ChromeChannelListener ui_channel_listener(&ui_loop_, this);
+  IPC::ChannelProxy ui_channel(win8::kMetroViewerIPCChannelName,
                                IPC::Channel::MODE_NAMED_CLIENT,
                                &ui_channel_listener,
                                io_thread.message_loop_proxy());
@@ -437,9 +451,17 @@ ChromeAppViewAsh::Run() {
                     gfx::NativeViewId(core_window_hwnd_)));
   DVLOG(1) << "ICoreWindow sent " << core_window_hwnd_;
 
+  // Send an initial size message so that the Ash root window host gets sized
+  // correctly.
+  RECT rect = {0};
+  ::GetWindowRect(core_window_hwnd_, &rect);
+  ui_channel_->Send(
+      new MetroViewerHostMsg_WindowSizeChanged(rect.right - rect.left,
+                                               rect.bottom - rect.top));
+
   // And post the task that'll do the inner Metro message pumping to it.
-  msg_loop.PostTask(FROM_HERE, base::Bind(&RunMessageLoop, dispatcher.Get()));
-  msg_loop.Run();
+  ui_loop_.PostTask(FROM_HERE, base::Bind(&RunMessageLoop, dispatcher.Get()));
+  ui_loop_.Run();
 
   DVLOG(0) << "ProcessEvents done, hr=" << hr;
   return hr;
@@ -525,6 +547,19 @@ void ChromeAppViewAsh::OnDisplayFolderPicker(const string16& title) {
   file_picker_->Run();
 }
 
+void ChromeAppViewAsh::OnSetCursorPos(int x, int y) {
+  if (ui_channel_) {
+    ::SetCursorPos(x, y);
+    DVLOG(1) << "In UI OnSetCursorPos: " << x << ", " << y;
+    ui_channel_->Send(new MetroViewerHostMsg_SetCursorPosAck());
+    // Generate a fake mouse move which matches the SetCursor coordinates as
+    // the browser expects to receive a mouse move for these coordinates.
+    // It is not clear why we don't receive a real mouse move in response to
+    // the SetCursorPos calll above.
+    ui_channel_->Send(new MetroViewerHostMsg_MouseMoved(x, y, 0));
+  }
+}
+
 void ChromeAppViewAsh::OnOpenFileCompleted(
     OpenFilePickerSession* open_file_picker,
     bool success) {
@@ -579,6 +614,18 @@ HRESULT ChromeAppViewAsh::OnActivate(
   args->get_PreviousExecutionState(&globals.previous_state);
   DVLOG(1) << "Previous Execution State: " << globals.previous_state;
 
+  winapp::Activation::ActivationKind activation_kind;
+  CheckHR(args->get_Kind(&activation_kind));
+  if (activation_kind == winapp::Activation::ActivationKind_Search)
+    HandleSearchRequest(args);
+  else if (activation_kind == winapp::Activation::ActivationKind_Protocol)
+    HandleProtocolRequest(args);
+  // We call ICoreWindow::Activate after the handling for the search/protocol
+  // requests because Chrome can be launched to handle a search request which
+  // in turn launches the chrome browser process in desktop mode via
+  // ShellExecute. If we call ICoreWindow::Activate before this, then
+  // Windows kills the metro chrome process when it calls ShellExecute. Seems
+  // to be a bug.
   window_->Activate();
   return S_OK;
 }
@@ -806,6 +853,93 @@ HRESULT ChromeAppViewAsh::OnWindowActivated(
   return S_OK;
 }
 
+HRESULT ChromeAppViewAsh::HandleSearchRequest(
+    winapp::Activation::IActivatedEventArgs* args) {
+  mswr::ComPtr<winapp::Activation::ISearchActivatedEventArgs> search_args;
+  CheckHR(args->QueryInterface(
+          winapp::Activation::IID_ISearchActivatedEventArgs, &search_args));
+
+  if (!ui_channel_) {
+    DVLOG(1) << "Launched to handle search request";
+    base::FilePath chrome_exe_path;
+
+    if (!PathService::Get(base::FILE_EXE, &chrome_exe_path))
+      return E_FAIL;
+
+    SHELLEXECUTEINFO sei = { sizeof(sei) };
+    sei.nShow = SW_SHOWNORMAL;
+    sei.lpFile = chrome_exe_path.value().c_str();
+    sei.lpDirectory = L"";
+    sei.lpParameters =
+        L"--silent-launch --viewer-connection=viewer --windows8-search";
+    ::ShellExecuteEx(&sei);
+  }
+
+  mswrw::HString search_string;
+  CheckHR(search_args->get_QueryText(search_string.GetAddressOf()));
+  string16 search_text(MakeStdWString(search_string.Get()));
+
+  ui_loop_.PostTask(FROM_HERE,
+                    base::Bind(&ChromeAppViewAsh::OnSearchRequest,
+                    base::Unretained(this),
+                    search_text));
+  return S_OK;
+}
+
+HRESULT ChromeAppViewAsh::HandleProtocolRequest(
+    winapp::Activation::IActivatedEventArgs* args) {
+  DVLOG(1) << __FUNCTION__;
+  if (!ui_channel_)
+    DVLOG(1) << "Launched to handle url request";
+
+  mswr::ComPtr<winapp::Activation::IProtocolActivatedEventArgs>
+      protocol_args;
+  CheckHR(args->QueryInterface(
+          winapp::Activation::IID_IProtocolActivatedEventArgs,
+          &protocol_args));
+
+  mswr::ComPtr<winfoundtn::IUriRuntimeClass> uri;
+  protocol_args->get_Uri(&uri);
+  mswrw::HString url;
+  uri->get_AbsoluteUri(url.GetAddressOf());
+  string16 actual_url(MakeStdWString(url.Get()));
+  DVLOG(1) << "Received url request: " << actual_url;
+
+  ui_loop_.PostTask(FROM_HERE,
+                    base::Bind(&ChromeAppViewAsh::OnNavigateToUrl,
+                               base::Unretained(this),
+                               actual_url));
+  return S_OK;
+}
+
+void ChromeAppViewAsh::OnSearchRequest(const string16& search_string) {
+  DCHECK(ui_channel_);
+  ui_channel_->Send(new MetroViewerHostMsg_SearchRequest(search_string));
+}
+
+void ChromeAppViewAsh::OnNavigateToUrl(const string16& url) {
+  DCHECK(ui_channel_);
+ ui_channel_->Send(new MetroViewerHostMsg_OpenURL(url));
+}
+
+HRESULT ChromeAppViewAsh::OnSizeChanged(winui::Core::ICoreWindow* sender,
+    winui::Core::IWindowSizeChangedEventArgs* args) {
+  if (!window_) {
+    return S_OK;
+  }
+
+  winfoundtn::Size size;
+  HRESULT hr = args->get_Size(&size);
+  if (FAILED(hr))
+    return hr;
+
+  uint32 cx = static_cast<uint32>(size.Width);
+  uint32 cy = static_cast<uint32>(size.Height);
+
+  DVLOG(1) << "Window size changed: width=" << cx << ", height=" << cy;
+  ui_channel_->Send(new MetroViewerHostMsg_WindowSizeChanged(cx, cy));
+  return S_OK;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 

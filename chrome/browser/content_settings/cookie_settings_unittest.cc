@@ -22,20 +22,21 @@ namespace {
 
 class CookieSettingsTest : public testing::Test {
  public:
-  CookieSettingsTest() :
-      ui_thread_(BrowserThread::UI, &message_loop_),
-      cookie_settings_(CookieSettings::Factory::GetForProfile(&profile_)),
-      kBlockedSite("http://ads.thirdparty.com"),
-      kAllowedSite("http://good.allays.com"),
-      kFirstPartySite("http://cool.things.com"),
-      kBlockedFirstPartySite("http://no.thirdparties.com"),
-      kExtensionURL("chrome-extension://deadbeef"),
-      kHttpsSite("https://example.com"),
-      kAllHttpsSitesPattern(ContentSettingsPattern::FromString("https://*")) {
-}
+  CookieSettingsTest()
+      : ui_thread_(BrowserThread::UI, &message_loop_),
+        cookie_settings_(CookieSettings::Factory::GetForProfile(&profile_)
+                             .get()),
+        kBlockedSite("http://ads.thirdparty.com"),
+        kAllowedSite("http://good.allays.com"),
+        kFirstPartySite("http://cool.things.com"),
+        kBlockedFirstPartySite("http://no.thirdparties.com"),
+        kExtensionURL("chrome-extension://deadbeef"),
+        kHttpsSite("https://example.com"),
+        kAllHttpsSitesPattern(ContentSettingsPattern::FromString("https://*")) {
+  }
 
  protected:
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
   content::TestBrowserThread ui_thread_;
   TestingProfile profile_;
   CookieSettings* cookie_settings_;

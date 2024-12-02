@@ -6,7 +6,9 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/values.h"
 #include "cc/test/fake_content_layer_client.h"
+#include "cc/test/skia_common.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkDevice.h"
@@ -18,55 +20,6 @@
 
 namespace cc {
 namespace {
-
-class TestLazyPixelRef : public skia::LazyPixelRef {
- public:
-  // Pure virtual implementation.
-  TestLazyPixelRef(int width, int height)
-    : pixels_(new char[4 * width * height]) {}
-  virtual SkFlattenable::Factory getFactory() OVERRIDE { return NULL; }
-  virtual void* onLockPixels(SkColorTable** color_table) OVERRIDE {
-      return pixels_.get();
-  }
-  virtual void onUnlockPixels() OVERRIDE {}
-  virtual bool PrepareToDecode(const PrepareParams& params) OVERRIDE {
-    return true;
-  }
-  virtual SkPixelRef* deepCopy(
-      SkBitmap::Config config,
-      const SkIRect* subset) OVERRIDE {
-    this->ref();
-    return this;
-  }
-  virtual void Decode() OVERRIDE {}
- private:
-  scoped_ptr<char[]> pixels_;
-};
-
-void DrawPicture(unsigned char* buffer,
-                 gfx::Rect layer_rect,
-                 scoped_refptr<Picture> picture) {
-  SkBitmap bitmap;
-  bitmap.setConfig(SkBitmap::kARGB_8888_Config,
-                   layer_rect.width(),
-                   layer_rect.height());
-  bitmap.setPixels(buffer);
-  SkDevice device(bitmap);
-  SkCanvas canvas(&device);
-  canvas.clipRect(gfx::RectToSkRect(layer_rect));
-  picture->Raster(&canvas, layer_rect, 1.0f, false);
-}
-
-void CreateBitmap(gfx::Size size, const char* uri, SkBitmap* bitmap) {
-  SkAutoTUnref<TestLazyPixelRef> lazy_pixel_ref;
-  lazy_pixel_ref.reset(new TestLazyPixelRef(size.width(), size.height()));
-  lazy_pixel_ref->setURI(uri);
-
-  bitmap->setConfig(SkBitmap::kARGB_8888_Config,
-                    size.width(),
-                    size.height());
-  bitmap->setPixelRef(lazy_pixel_ref);
-}
 
 TEST(PictureTest, AsBase64String) {
   SkGraphics::Init();
@@ -80,43 +33,30 @@ TEST(PictureTest, AsBase64String) {
 
   FakeContentLayerClient content_layer_client;
 
+  scoped_ptr<base::Value> tmp;
+
   SkPaint red_paint;
   red_paint.setColor(SkColorSetARGB(255, 255, 0, 0));
   SkPaint green_paint;
   green_paint.setColor(SkColorSetARGB(255, 0, 255, 0));
 
-  // Invalid picture (not base64).
+  // Invalid picture (not a dict).
+  tmp.reset(new base::StringValue("abc!@#$%"));
   scoped_refptr<Picture> invalid_picture =
-      Picture::CreateFromBase64String("abc!@#$%");
-  EXPECT_TRUE(!invalid_picture);
-
-  // Invalid picture (empty string).
-  scoped_refptr<Picture> second_invalid_picture =
-      Picture::CreateFromBase64String("");
-  EXPECT_TRUE(!second_invalid_picture);
-
-  // Invalid picture (random base64 string).
-  scoped_refptr<Picture> third_invalid_picture =
-      Picture::CreateFromBase64String("ABCDABCDABCDABCDABCDABCDABCDABCDABCD"
-                                      "ABCDABCDABCDABCDABCDABCDABCDABCDABCD"
-                                      "ABCDABCDABCDABCDABCDABCDABCDABCDABCD"
-                                      "ABCDABCDABCDABCDABCDABCDABCDABCDABCD"
-                                      "ABCDABCDABCDABCDABCDABCDABCDABCDABCD"
-                                      "ABCDABCDABCDABCDABCDABCDABCDABCDABCD"
-                                      "ABCDABCDABCDABCDABCDABCDABCDABCDABCD");
-  EXPECT_TRUE(!third_invalid_picture);
+      Picture::CreateFromValue(tmp.get());
+  EXPECT_TRUE(!invalid_picture.get());
 
   // Single full-size rect picture.
   content_layer_client.add_draw_rect(layer_rect, red_paint);
   scoped_refptr<Picture> one_rect_picture = Picture::Create(layer_rect);
   one_rect_picture->Record(&content_layer_client, tile_grid_info, NULL);
-  std::string serialized_one_rect;
-  one_rect_picture->AsBase64String(&serialized_one_rect);
+  scoped_ptr<base::Value> serialized_one_rect(
+      one_rect_picture->AsValue());
 
   // Reconstruct the picture.
   scoped_refptr<Picture> one_rect_picture_check =
-      Picture::CreateFromBase64String(serialized_one_rect);
-  EXPECT_TRUE(!!one_rect_picture_check);
+      Picture::CreateFromValue(serialized_one_rect.get());
+  EXPECT_TRUE(!!one_rect_picture_check.get());
 
   // Check for equivalence.
   unsigned char one_rect_buffer[4 * 100 * 100] = {0};
@@ -135,13 +75,14 @@ TEST(PictureTest, AsBase64String) {
   content_layer_client.add_draw_rect(gfx::Rect(25, 25, 50, 50), green_paint);
   scoped_refptr<Picture> two_rect_picture = Picture::Create(layer_rect);
   two_rect_picture->Record(&content_layer_client, tile_grid_info, NULL);
-  std::string serialized_two_rect;
-  two_rect_picture->AsBase64String(&serialized_two_rect);
+
+  scoped_ptr<base::Value> serialized_two_rect(
+      two_rect_picture->AsValue());
 
   // Reconstruct the picture.
   scoped_refptr<Picture> two_rect_picture_check =
-      Picture::CreateFromBase64String(serialized_two_rect);
-  EXPECT_TRUE(!!two_rect_picture_check);
+      Picture::CreateFromValue(serialized_two_rect.get());
+  EXPECT_TRUE(!!two_rect_picture_check.get());
 
   // Check for equivalence.
   unsigned char two_rect_buffer[4 * 100 * 100] = {0};
@@ -200,9 +141,8 @@ TEST(PictureTest, PixelRefIterator) {
   }
   for (int y = 0; y < 4; ++y) {
     for (int x = 0; x < 4; ++x) {
-      Picture::PixelRefIterator iterator(
-          gfx::Rect(x * 512, y * 512, 500, 500),
-          picture);
+      Picture::PixelRefIterator iterator(gfx::Rect(x * 512, y * 512, 500, 500),
+                                         picture.get());
       if ((x + y) & 1) {
         EXPECT_TRUE(iterator) << x << " " << y;
         EXPECT_TRUE(*iterator == lazy_bitmap[y][x].pixelRef()) << x << " " << y;
@@ -214,9 +154,8 @@ TEST(PictureTest, PixelRefIterator) {
   }
   // Capture 4 pixel refs.
   {
-    Picture::PixelRefIterator iterator(
-        gfx::Rect(512, 512, 2048, 2048),
-        picture);
+    Picture::PixelRefIterator iterator(gfx::Rect(512, 512, 2048, 2048),
+                                       picture.get());
     EXPECT_TRUE(iterator);
     EXPECT_TRUE(*iterator == lazy_bitmap[1][2].pixelRef());
     EXPECT_TRUE(++iterator);
@@ -229,9 +168,8 @@ TEST(PictureTest, PixelRefIterator) {
   }
 
   // Copy test.
-  Picture::PixelRefIterator iterator(
-        gfx::Rect(512, 512, 2048, 2048),
-        picture);
+  Picture::PixelRefIterator iterator(gfx::Rect(512, 512, 2048, 2048),
+                                     picture.get());
   EXPECT_TRUE(iterator);
   EXPECT_TRUE(*iterator == lazy_bitmap[1][2].pixelRef());
   EXPECT_TRUE(++iterator);
@@ -299,8 +237,7 @@ TEST(PictureTest, PixelRefIteratorNonZeroLayer) {
   for (int y = 0; y < 4; ++y) {
     for (int x = 0; x < 4; ++x) {
       Picture::PixelRefIterator iterator(
-          gfx::Rect(1024 + x * 512, y * 512, 500, 500),
-          picture);
+          gfx::Rect(1024 + x * 512, y * 512, 500, 500), picture.get());
       if ((x + y) & 1) {
         EXPECT_TRUE(iterator) << x << " " << y;
         EXPECT_TRUE(*iterator == lazy_bitmap[y][x].pixelRef());
@@ -312,9 +249,8 @@ TEST(PictureTest, PixelRefIteratorNonZeroLayer) {
   }
   // Capture 4 pixel refs.
   {
-    Picture::PixelRefIterator iterator(
-        gfx::Rect(1024 + 512, 512, 2048, 2048),
-        picture);
+    Picture::PixelRefIterator iterator(gfx::Rect(1024 + 512, 512, 2048, 2048),
+                                       picture.get());
     EXPECT_TRUE(iterator);
     EXPECT_TRUE(*iterator == lazy_bitmap[1][2].pixelRef());
     EXPECT_TRUE(++iterator);
@@ -328,9 +264,8 @@ TEST(PictureTest, PixelRefIteratorNonZeroLayer) {
 
   // Copy test.
   {
-    Picture::PixelRefIterator iterator(
-          gfx::Rect(1024 + 512, 512, 2048, 2048),
-          picture);
+    Picture::PixelRefIterator iterator(gfx::Rect(1024 + 512, 512, 2048, 2048),
+                                       picture.get());
     EXPECT_TRUE(iterator);
     EXPECT_TRUE(*iterator == lazy_bitmap[1][2].pixelRef());
     EXPECT_TRUE(++iterator);
@@ -356,27 +291,23 @@ TEST(PictureTest, PixelRefIteratorNonZeroLayer) {
 
   // Non intersecting rects
   {
-    Picture::PixelRefIterator iterator(
-        gfx::Rect(0, 0, 1000, 1000),
-        picture);
+    Picture::PixelRefIterator iterator(gfx::Rect(0, 0, 1000, 1000),
+                                       picture.get());
     EXPECT_FALSE(iterator);
   }
   {
-    Picture::PixelRefIterator iterator(
-        gfx::Rect(3500, 0, 1000, 1000),
-        picture);
+    Picture::PixelRefIterator iterator(gfx::Rect(3500, 0, 1000, 1000),
+                                       picture.get());
     EXPECT_FALSE(iterator);
   }
   {
-    Picture::PixelRefIterator iterator(
-        gfx::Rect(0, 1100, 1000, 1000),
-        picture);
+    Picture::PixelRefIterator iterator(gfx::Rect(0, 1100, 1000, 1000),
+                                       picture.get());
     EXPECT_FALSE(iterator);
   }
   {
-    Picture::PixelRefIterator iterator(
-        gfx::Rect(3500, 1100, 1000, 1000),
-        picture);
+    Picture::PixelRefIterator iterator(gfx::Rect(3500, 1100, 1000, 1000),
+                                       picture.get());
     EXPECT_FALSE(iterator);
   }
 }
@@ -420,8 +351,7 @@ TEST(PictureTest, PixelRefIteratorOnePixelQuery) {
   for (int y = 0; y < 4; ++y) {
     for (int x = 0; x < 4; ++x) {
       Picture::PixelRefIterator iterator(
-          gfx::Rect(x * 512, y * 512 + 256, 1, 1),
-          picture);
+          gfx::Rect(x * 512, y * 512 + 256, 1, 1), picture.get());
       if ((x + y) & 1) {
         EXPECT_TRUE(iterator) << x << " " << y;
         EXPECT_TRUE(*iterator == lazy_bitmap[y][x].pixelRef());

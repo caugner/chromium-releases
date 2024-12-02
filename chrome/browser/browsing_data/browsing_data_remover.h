@@ -20,7 +20,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/quota/quota_types.h"
+#include "webkit/common/quota/quota_types.h"
 
 class ExtensionSpecialStoragePolicy;
 class IOThread;
@@ -82,20 +82,17 @@ class BrowsingDataRemover : public content::NotificationObserver
     REMOVE_WEBSQL = 1 << 11,
     REMOVE_SERVER_BOUND_CERTS = 1 << 12,
     REMOVE_CONTENT_LICENSES = 1 << 13,
-    REMOVE_SHADER_CACHE = 1 << 14,
     // The following flag is used only in tests. In normal usage, hosted app
     // data is controlled by the REMOVE_COOKIES flag, applied to the
     // protected-web origin.
     REMOVE_HOSTED_APP_DATA_TESTONLY = 1 << 31,
 
     // "Site data" includes cookies, appcache, file systems, indexedDBs, local
-    // storage, webSQL, shader, and plugin data.
+    // storage, webSQL, and plugin data.
     REMOVE_SITE_DATA = REMOVE_APPCACHE | REMOVE_COOKIES | REMOVE_FILE_SYSTEMS |
                        REMOVE_INDEXEDDB | REMOVE_LOCAL_STORAGE |
                        REMOVE_PLUGIN_DATA | REMOVE_WEBSQL |
                        REMOVE_SERVER_BOUND_CERTS,
-    // "cached data" includes the http cache and the shader cache.
-    REMOVE_CACHED_DATA = REMOVE_CACHE | REMOVE_SHADER_CACHE
   };
 
   // When BrowsingDataRemover successfully removes data, a notification of type
@@ -341,12 +338,12 @@ class BrowsingDataRemover : public content::NotificationObserver
   // NotifyAndDeleteIfDone.
   void OnClearedServerBoundCerts();
 
-  // Callback on the DB thread so that we can wait for the form data to be
-  // cleared.
-  void FormDataDBThreadHop();
-
   // Callback from the above method.
   void OnClearedFormData();
+
+  // Callback when the Autofill profile and credit card origin URLs have been
+  // deleted.
+  void OnClearedAutofillOriginURLs();
 
   // Callback when the shader cache has been deleted.
   // Invokes NotifyAndDeleteIfDone.
@@ -401,6 +398,7 @@ class BrowsingDataRemover : public content::NotificationObserver
   uint32 deauthorize_content_licenses_request_id_;
   // True if we're waiting for various data to be deleted.
   // These may only be accessed from UI thread in order to avoid races!
+  bool waiting_for_clear_autofill_origin_urls_;
   bool waiting_for_clear_cache_;
   bool waiting_for_clear_content_licenses_;
   // Non-zero if waiting for cookies to be cleared.

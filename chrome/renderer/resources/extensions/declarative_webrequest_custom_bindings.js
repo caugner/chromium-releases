@@ -6,8 +6,6 @@
 
 var binding = require('binding').Binding.create('declarativeWebRequest');
 
-var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
-var chrome = requireNative('chrome').GetChrome();
 var utils = require('utils');
 var validate = require('schemaUtils').validate;
 
@@ -28,7 +26,7 @@ binding.registerCustomHook(function(api) {
   // generated union dictionary against the schema for |typeId|.
   function setupInstance(instance, parameters, typeId) {
     for (var key in parameters) {
-      if (parameters.hasOwnProperty(key)) {
+      if ($Object.hasOwnProperty(parameters, key)) {
         instance[key] = parameters[key];
       }
     }

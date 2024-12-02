@@ -6,7 +6,7 @@
 #include <string>
 
 #include "ash/shell.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/input_method/candidate_view.h"
 #include "chrome/browser/chromeos/input_method/candidate_window_constants.h"
 #include "chrome/browser/chromeos/input_method/hidable_area.h"
@@ -789,7 +789,7 @@ void CandidateWindowView::MaybeInitializeCandidateViews(
   for (size_t i = 0; i < candidate_views_.size(); ++i) {
     candidate_area_contents->RemoveChildView(candidate_views_[i]);
     // Delete the view after getting out the current message loop iteration.
-    MessageLoop::current()->DeleteSoon(FROM_HERE, candidate_views_[i]);
+    base::MessageLoop::current()->DeleteSoon(FROM_HERE, candidate_views_[i]);
   }
   candidate_views_.clear();
   selected_candidate_index_in_page_ = -1;  // Invalidates the index.

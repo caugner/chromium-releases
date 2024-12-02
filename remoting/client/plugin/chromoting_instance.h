@@ -18,6 +18,7 @@
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/cpp/var.h"
 #include "third_party/skia/include/core/SkPoint.h"
+#include "third_party/skia/include/core/SkRegion.h"
 #include "third_party/skia/include/core/SkSize.h"
 
 // Windows defines 'PostMessage', so we have to undef it before we
@@ -61,7 +62,7 @@ class FrameConsumerProxy;
 class PepperAudioPlayer;
 class PepperTokenFetcher;
 class PepperView;
-class PepperXmppProxy;
+class PepperSignalStrategy;
 class RectangleUpdateDecoder;
 
 struct ClientConfig;
@@ -118,6 +119,8 @@ class ChromotingInstance :
                                  protocol::ErrorCode error) OVERRIDE;
   virtual void OnConnectionReady(bool ready) OVERRIDE;
   virtual void SetCapabilities(const std::string& capabilities) OVERRIDE;
+  virtual void SetPairingResponse(
+      const protocol::PairingResponse& pairing_response) OVERRIDE;
   virtual protocol::ClipboardStub* GetClipboardStub() OVERRIDE;
   virtual protocol::CursorShapeStub* GetCursorShapeStub() OVERRIDE;
   virtual scoped_ptr<protocol::ThirdPartyClientAuthenticator::TokenFetcher>
@@ -133,6 +136,7 @@ class ChromotingInstance :
 
   // Called by PepperView.
   void SetDesktopSize(const SkISize& size, const SkIPoint& dpi);
+  void SetDesktopShape(const SkRegion& shape);
   void OnFirstFrameReceived();
 
   // Return statistics record by ChromotingClient.
@@ -175,6 +179,7 @@ class ChromotingInstance :
   // Immediately calls |secret_fetched_callback| with |shared_secret|.
   static void FetchSecretFromString(
       const std::string& shared_secret,
+      bool pairing_supported,
       const protocol::SecretFetchedCallback& secret_fetched_callback);
 
   // Message handlers for messages that come from JavaScript. Called
@@ -193,6 +198,7 @@ class ChromotingInstance :
   void OnPinFetched(const std::string& pin);
   void OnThirdPartyTokenFetched(const std::string& token,
                                 const std::string& shared_secret);
+  void RequestPairing(const std::string& client_name);
 
   // Helper method to post messages to the webapp.
   void PostChromotingMessage(const std::string& method,
@@ -201,7 +207,7 @@ class ChromotingInstance :
   // Posts trapped keys to the web-app to handle.
   void SendTrappedKey(uint32 usb_keycode, bool pressed);
 
-  // Callback for PepperXmppProxy.
+  // Callback for PepperSignalStrategy.
   void SendOutgoingIq(const std::string& iq);
 
   void SendPerfStats();
@@ -217,6 +223,7 @@ class ChromotingInstance :
   // Used as the |FetchSecretCallback| for Me2Me connections.
   // Uses the PIN request dialog in the webapp to obtain the shared secret.
   void FetchSecretFromDialog(
+      bool pairing_supported,
       const protocol::SecretFetchedCallback& secret_fetched_callback);
 
   bool initialized_;
@@ -227,6 +234,11 @@ class ChromotingInstance :
   scoped_refptr<RectangleUpdateDecoder> rectangle_decoder_;
   scoped_ptr<PepperView> view_;
   pp::View plugin_view_;
+
+  // Contains the most-recently-reported desktop shape, if any.
+  scoped_ptr<SkRegion> desktop_shape_;
+
+  scoped_ptr<PepperSignalStrategy> signal_strategy_;
 
   scoped_ptr<protocol::ConnectionToHost> host_connection_;
   scoped_ptr<ChromotingClient> client_;
@@ -239,12 +251,6 @@ class ChromotingInstance :
 #endif
   KeyEventMapper key_mapper_;
   PepperInputHandler input_handler_;
-
-  // XmppProxy is a refcounted interface used to perform thread-switching and
-  // detaching between objects whose lifetimes are controlled by pepper, and
-  // jingle_glue objects. This is used when if we start a sandboxed jingle
-  // connection.
-  scoped_refptr<PepperXmppProxy> xmpp_proxy_;
 
   // PIN Fetcher.
   bool use_async_pin_dialog_;

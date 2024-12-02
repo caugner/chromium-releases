@@ -13,11 +13,12 @@
 #include "base/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/threading/platform_thread.h"
+#include "base/process_util.h"
 #include "base/safe_strerror_posix.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
+#include "base/threading/platform_thread.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/utf_string_conversions.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/foundation_util.h"
@@ -96,6 +97,11 @@ void SharedMemory::CloseHandle(const SharedMemoryHandle& handle) {
   DCHECK_GE(handle.fd, 0);
   if (HANDLE_EINTR(close(handle.fd)) < 0)
     DPLOG(ERROR) << "close";
+}
+
+// static
+size_t SharedMemory::GetHandleLimit() {
+  return base::GetMaxFds();
 }
 
 bool SharedMemory::CreateAndMapAnonymous(size_t size) {

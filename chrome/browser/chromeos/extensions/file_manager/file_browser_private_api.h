@@ -13,14 +13,14 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
 #include "base/prefs/pref_service.h"
+#include "base/time.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
-#include "chrome/browser/chromeos/drive/search_metadata.h"
-#include "chrome/browser/chromeos/extensions/file_manager/file_manager_event_router.h"
+#include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/extensions/file_manager/zip_file_creator.h"
 #include "chrome/browser/extensions/extension_function.h"
-#include "chrome/browser/profiles/profile_keyed_service.h"
-#include "googleurl/src/url_util.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 
+class FileManagerEventRouter;
 class GURL;
 class Profile;
 
@@ -35,8 +35,8 @@ class FileSystemURL;
 
 namespace drive {
 class FileCacheEntry;
-class DriveWebAppsRegistry;
-struct DriveWebAppInfo;
+class DriveAppRegistry;
+struct DriveAppInfo;
 struct SearchResultInfo;
 }
 
@@ -45,12 +45,12 @@ struct SelectedFileInfo;
 }
 
 // Manages and registers the fileBrowserPrivate API with the extension system.
-class FileBrowserPrivateAPI : public ProfileKeyedService {
+class FileBrowserPrivateAPI : public BrowserContextKeyedService {
  public:
   explicit FileBrowserPrivateAPI(Profile* profile);
   virtual ~FileBrowserPrivateAPI();
 
-  // ProfileKeyedService overrides.
+  // BrowserContextKeyedService overrides.
   virtual void Shutdown() OVERRIDE;
 
   // Convenience function to return the FileBrowserPrivateAPI for a Profile.
@@ -64,6 +64,60 @@ class FileBrowserPrivateAPI : public ProfileKeyedService {
   scoped_ptr<FileManagerEventRouter> event_router_;
 };
 
+// Parent class for the chromium extension APIs for the file manager.
+class FileBrowserFunction : public AsyncExtensionFunction {
+ public:
+  FileBrowserFunction();
+
+ protected:
+  typedef std::vector<GURL> UrlList;
+  typedef std::vector<ui::SelectedFileInfo> SelectedFileInfoList;
+  typedef base::Callback<void(const SelectedFileInfoList&)>
+      GetSelectedFileInfoCallback;
+
+  virtual ~FileBrowserFunction();
+
+  // Figures out the tab_id of the hosting tab.
+  int32 GetTabId() const;
+
+  // Returns the local FilePath associated with |url|. If the file isn't of the
+  // type CrosMountPointProvider handles, returns an empty FilePath.
+  //
+  // Local paths will look like "/home/chronos/user/Downloads/foo/bar.txt" or
+  // "/special/drive/foo/bar.txt".
+  base::FilePath GetLocalPathFromURL(const GURL& url);
+
+  // Runs |callback| with SelectedFileInfoList created from |file_urls|.
+  void GetSelectedFileInfo(const UrlList& file_urls,
+                           bool for_opening,
+                           GetSelectedFileInfoCallback callback);
+
+  virtual void SendResponse(bool success) OVERRIDE;
+
+ protected:
+  base::TimeDelta GetElapsedTime();
+  void set_log_on_completion(bool log_on_completion) {
+    log_on_completion_ = log_on_completion;
+  }
+
+ private:
+  struct GetSelectedFileInfoParams;
+
+  // Used to implement GetSelectedFileInfo().
+  void GetSelectedFileInfoInternal(
+      scoped_ptr<GetSelectedFileInfoParams> params);
+
+  // Used to implement GetSelectedFileInfo().
+  void ContinueGetSelectedFileInfo(scoped_ptr<GetSelectedFileInfoParams> params,
+                                   drive::FileError error,
+                                   const base::FilePath& local_file_path,
+                                   scoped_ptr<drive::ResourceEntry> entry);
+
+  base::Time start_time_;
+  bool log_on_completion_;
+};
+
+// Select a single file.  Closes the dialog window.
 // Implements the chrome.fileBrowserPrivate.logoutUser method.
 class LogoutUserFunction : public SyncExtensionFunction {
  public:
@@ -77,28 +131,40 @@ class LogoutUserFunction : public SyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 };
 
-// Implements the chrome.fileBrowserPrivate.requestLocalFileSystem method.
-class RequestLocalFileSystemFunction : public AsyncExtensionFunction {
+// Implements the chrome.fileBrowserPrivate.requestFileSystem method.
+class RequestFileSystemFunction : public FileBrowserFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.requestLocalFileSystem",
-                             FILEBROWSERPRIVATE_REQUESTLOCALFILESYSTEM)
+  DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.requestFileSystem",
+                             FILEBROWSERPRIVATE_REQUESTFILESYSTEM)
 
  protected:
-  virtual ~RequestLocalFileSystemFunction() {}
+  virtual ~RequestFileSystemFunction() {}
 
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  class LocalFileSystemCallbackDispatcher;
-
   void RespondSuccessOnUIThread(const std::string& name,
                                 const GURL& root_path);
   void RespondFailedOnUIThread(base::PlatformFileError error_code);
-  void RequestOnFileThread(
+
+  // Called when FileSystemContext::OpenFileSystem() is done.
+  void DidOpenFileSystem(
       scoped_refptr<fileapi::FileSystemContext> file_system_context,
-      const GURL& source_url,
-      int child_id);
+      base::PlatformFileError result,
+      const std::string& name,
+      const GURL& root_path);
+
+  // Called when something goes wrong. Records the error to |error_| per the
+  // error code and reports that the private API function failed.
+  void DidFail(base::PlatformFileError error_code);
+
+  // Sets up file system access permissions to the extension identified by
+  // |child_id|.
+  bool SetupFileSystemAccessPermissions(
+      scoped_refptr<fileapi::FileSystemContext> file_system_context,
+      int child_id,
+      scoped_refptr<const extensions::Extension> extension);
 };
 
 // Implements the chrome.fileBrowserPrivate.addFileWatch method.
@@ -165,44 +231,35 @@ class GetFileTasksFileBrowserFunction : public AsyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  struct FileInfo {
-    GURL file_url;
-    base::FilePath file_path;
-    std::string mime_type;
-  };
+  struct FileInfo;
   typedef std::vector<FileInfo> FileInfoList;
 
-  // Typedef for holding a map from app_id to DriveWebAppInfo so
-  // we can look up information on the apps.
-  typedef std::map<std::string, drive::DriveWebAppInfo*> WebAppInfoMap;
+  // Holds fields to build a task result.
+  struct TaskInfo;
 
-  // Look up apps in the registry, and collect applications that match the file
-  // paths given. Returns the intersection of all available application ids in
-  // |available_apps| and a map of application ID to the Drive web application
-  // info collected in |app_info| so details can be collected later. The caller
-  // takes ownership of the pointers in |app_info|.
-  static void IntersectAvailableDriveTasks(
-      drive::DriveWebAppsRegistry* registry,
-      const FileInfoList& file_info_list,
-      WebAppInfoMap* app_info,
-      std::set<std::string>* available_apps);
+  // Map from a task id to TaskInfo.
+  typedef std::map<std::string, TaskInfo> TaskInfoMap;
 
-  // Takes a map of app_id to application information in |app_info|, and the set
-  // of |available_apps| and adds Drive tasks to the |result_list| for each of
-  // the |available_apps|.  If a default task is set in the result list,
-  // then |default_already_set| is set to true.
-  static void CreateDriveTasks(drive::DriveWebAppsRegistry* registry,
-                               const WebAppInfoMap& app_info,
-                               const std::set<std::string>& available_apps,
-                               const std::set<std::string>& default_apps,
-                               ListValue* result_list,
-                               bool* default_already_set);
+  // Looks up available apps for each file in |file_info_list| in the
+  // |registry|, and returns the intersection of all available apps as a
+  // map from task id to TaskInfo.
+  static void GetAvailableDriveTasks(drive::DriveAppRegistry* registry,
+                                     const FileInfoList& file_info_list,
+                                     TaskInfoMap* task_info_map);
 
   // Looks in the preferences and finds any of the available apps that are
   // also listed as default apps for any of the files in the info list.
   void FindDefaultDriveTasks(const FileInfoList& file_info_list,
-                             const std::set<std::string>& available_apps,
-                             std::set<std::string>* default_apps);
+                             const TaskInfoMap& task_info_map,
+                             std::set<std::string>* default_tasks);
+
+  // Creates a list of each task in |task_info_map| and stores the result into
+  // |result_list|. If a default task is set in the result list,
+  // |default_already_set| is set to true.
+  static void CreateDriveTasks(const TaskInfoMap& task_info_map,
+                               const std::set<std::string>& default_tasks,
+                               ListValue* result_list,
+                               bool* default_already_set);
 
   // Find the list of drive apps that can be used with the given file types. If
   // a default task is set in the result list, then |default_already_set| is set
@@ -212,9 +269,11 @@ class GetFileTasksFileBrowserFunction : public AsyncExtensionFunction {
                          bool* default_already_set);
 
   // Find the list of app file handlers that can be used with the given file
-  // types, appending them to the |result_list|.
+  // types, appending them to the |result_list|. If a default task is set in the
+  // result list, then |default_already_set| is set to true.
   bool FindAppTasks(const std::vector<base::FilePath>& file_paths,
-                    ListValue* result_list);
+                    ListValue* result_list,
+                    bool* default_already_set);
 };
 
 // Implements the chrome.fileBrowserPrivate.executeTask method.
@@ -249,50 +308,6 @@ class SetDefaultTaskFileBrowserFunction : public SyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 };
 
-// Parent class for the chromium extension APIs for the file dialog.
-class FileBrowserFunction : public AsyncExtensionFunction {
- public:
-  FileBrowserFunction();
-
- protected:
-  typedef std::vector<GURL> UrlList;
-  typedef std::vector<ui::SelectedFileInfo> SelectedFileInfoList;
-  typedef base::Callback<void(const SelectedFileInfoList&)>
-      GetSelectedFileInfoCallback;
-
-  virtual ~FileBrowserFunction();
-
-  // Figures out the tab_id of the hosting tab.
-  int32 GetTabId() const;
-
-  // Returns the local FilePath associated with |url|. If the file isn't of the
-  // type CrosMountPointProvider handles, returns an empty FilePath.
-  //
-  // Local paths will look like "/home/chronos/user/Downloads/foo/bar.txt" or
-  // "/special/drive/foo/bar.txt".
-  base::FilePath GetLocalPathFromURL(const GURL& url);
-
-  // Runs |callback| with SelectedFileInfoList created from |file_urls|.
-  void GetSelectedFileInfo(const UrlList& file_urls,
-                           bool for_opening,
-                           GetSelectedFileInfoCallback callback);
-
- private:
-  struct GetSelectedFileInfoParams;
-
-  // Used to implement GetSelectedFileInfo().
-  void GetSelectedFileInfoInternal(
-      scoped_ptr<GetSelectedFileInfoParams> params);
-
-  // Used to implement GetSelectedFileInfo().
-  void ContinueGetSelectedFileInfo(scoped_ptr<GetSelectedFileInfoParams> params,
-                                   drive::FileError error,
-                                   const base::FilePath& local_file_path,
-                                   const std::string& mime_type,
-                                   drive::DriveFileType file_type);
-};
-
-// Select a single file.  Closes the dialog window.
 class SelectFileFunction : public FileBrowserFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.selectFile",
@@ -401,7 +416,7 @@ class RemoveMountFunction : public FileBrowserFunction {
   void GetSelectedFileInfoResponse(const SelectedFileInfoList& files);
 };
 
-class GetMountPointsFunction : public AsyncExtensionFunction {
+class GetMountPointsFunction : public FileBrowserFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.getMountPoints",
                              FILEBROWSERPRIVATE_GETMOUNTPOINTS)
@@ -545,23 +560,6 @@ class PinDriveFileFunction : public FileBrowserFunction {
   void OnPinStateSet(drive::FileError error);
 };
 
-// Get file locations for the given list of file URLs. Returns a list of
-// location identifiers, like ['drive', 'local'], where 'drive' means the
-// file is on gdata, and 'local' means the file is on the local drive.
-class GetFileLocationsFunction : public FileBrowserFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.getFileLocations",
-                             FILEBROWSERPRIVATE_GETFILELOCATIONS)
-
-  GetFileLocationsFunction();
-
- protected:
-  virtual ~GetFileLocationsFunction();
-
-  // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
-};
-
 // Get gdata files for the given list of file URLs. Initiate downloading of
 // gdata files if these are not cached. Return a list of local file names.
 // This function puts empty strings instead of local paths for files could
@@ -592,8 +590,7 @@ class GetDriveFilesFunction : public FileBrowserFunction {
   // |remaining_drive_paths_|, and calls GetFileOrSendResponse().
   void OnFileReady(drive::FileError error,
                    const base::FilePath& local_path,
-                   const std::string& unused_mime_type,
-                   drive::DriveFileType file_type);
+                   scoped_ptr<drive::ResourceEntry> entry);
 
   std::queue<base::FilePath> remaining_drive_paths_;
   ListValue* local_paths_;
@@ -670,27 +667,15 @@ class SearchDriveFunction : public AsyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  // Callback fo OpenFileSystem called from RunImpl.
-  void OnFileSystemOpened(base::PlatformFileError result,
-                          const std::string& file_system_name,
-                          const GURL& file_system_url);
-  // Callback for google_apis::SearchAsync called after file system is opened.
+  // Callback for Search().
   void OnSearch(drive::FileError error,
                 const GURL& next_feed,
                 scoped_ptr<std::vector<drive::SearchResultInfo> > result_paths);
-
-  // Query for which the search is being performed.
-  std::string query_;
-  std::string next_feed_;
-  // Information about remote file system we will need to create file entries
-  // to represent search results.
-  std::string file_system_name_;
-  GURL file_system_url_;
 };
 
 // Similar to SearchDriveFunction but this one is used for searching drive
 // metadata which is stored locally.
-class SearchDriveMetadataFunction : public AsyncExtensionFunction {
+class SearchDriveMetadataFunction : public FileBrowserFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.searchDriveMetadata",
                              FILEBROWSERPRIVATE_SEARCHDRIVEMETADATA)
@@ -703,30 +688,9 @@ class SearchDriveMetadataFunction : public AsyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  // Callback fo OpenFileSystem called from RunImpl.
-  void OnFileSystemOpened(base::PlatformFileError result,
-                          const std::string& file_system_name,
-                          const GURL& file_system_url);
-  // Callback for LocalSearch().
-  void OnSearchMetadata(
-      drive::FileError error,
-      scoped_ptr<drive::MetadataSearchResultVector> results);
-
-  // Query for which the search is being performed.
-  std::string query_;
-  // String representing what type of entries are needed. It corresponds to
-  // SearchMetadataOptions:
-  // SEARCH_METADATA_OPTION_EXCLUDE_DIRECTORIES => "EXCLUDE_DIRECTORIES"
-  // SEARCH_METADATA_OPTION_ALL => "ALL"
-  std::string types_;
-  // Maximum number of results. The results contains |max_num_results_| entries
-  // at most.
-  int max_results_;
-
-  // Information about remote file system we will need to create file entries
-  // to represent search results.
-  std::string file_system_name_;
-  GURL file_system_url_;
+  // Callback for SearchMetadata();
+  void OnSearchMetadata(drive::FileError error,
+                        scoped_ptr<drive::MetadataSearchResultVector> results);
 };
 
 class ClearDriveCacheFunction : public AsyncExtensionFunction {
@@ -830,6 +794,16 @@ class OpenNewWindowFunction : public AsyncExtensionFunction {
   virtual ~OpenNewWindowFunction();
 
   // AsyncExtensionFunction overrides.
+  virtual bool RunImpl() OVERRIDE;
+};
+
+class ZoomFunction : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.zoom",
+                             FILEBROWSERPRIVATE_ZOOM);
+
+ protected:
+  virtual ~ZoomFunction() {}
   virtual bool RunImpl() OVERRIDE;
 };
 

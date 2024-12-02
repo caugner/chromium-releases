@@ -105,8 +105,16 @@ content::WebContents* PanelHost::OpenURLFromTab(
   chrome::NavigateParams navigate_params(profile_,
                                          params.url,
                                          params.transition);
-  navigate_params.disposition = params.disposition == NEW_BACKGROUND_TAB ?
-      params.disposition : NEW_FOREGROUND_TAB;
+  switch (params.disposition) {
+    case NEW_BACKGROUND_TAB:
+    case NEW_WINDOW:
+    case OFF_THE_RECORD:
+      navigate_params.disposition = params.disposition;
+      break;
+    default:
+      navigate_params.disposition = NEW_FOREGROUND_TAB;
+      break;
+  }
   chrome::Navigate(&navigate_params);
   return navigate_params.target_contents;
 }
@@ -204,7 +212,7 @@ void PanelHost::WebContentsDestroyed(content::WebContents* web_contents) {
   // Close the panel after we return to the message loop (not immediately,
   // otherwise, it may destroy this object before the stack has a chance
   // to cleanly unwind.)
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&PanelHost::ClosePanel, weak_factory_.GetWeakPtr()));
 }

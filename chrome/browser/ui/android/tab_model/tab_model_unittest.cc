@@ -28,15 +28,21 @@ class TestTabModel : public TabModel {
   explicit TestTabModel(Profile* profile)
     : TabModel(profile) {}
 
-  int GetTabCount() const OVERRIDE { return 0; }
-  int GetActiveIndex() const OVERRIDE { return 0; }
-  content::WebContents* GetWebContentsAt(int index) const OVERRIDE {
+  virtual int GetTabCount() const OVERRIDE { return 0; }
+  virtual int GetActiveIndex() const OVERRIDE { return 0; }
+  virtual content::WebContents* GetWebContentsAt(int index) const OVERRIDE {
     return NULL;
   }
-  SessionID::id_type GetTabIdAt(int index) const OVERRIDE { return 0; }
-  void CreateTab(content::WebContents* web_contents) OVERRIDE {}
-  bool IsSessionRestoreInProgress() const OVERRIDE { return false; }
-  void OpenClearBrowsingData() const OVERRIDE {}
+  virtual void CreateTab(content::WebContents* web_contents) OVERRIDE {}
+  virtual content::WebContents* CreateTabForTesting(const GURL& url) OVERRIDE {
+    return NULL;
+  }
+  virtual bool IsSessionRestoreInProgress() const OVERRIDE { return false; }
+  virtual void OpenClearBrowsingData() const OVERRIDE {}
+  virtual browser_sync::SyncedTabDelegate* GetTabAt(int index) const OVERRIDE {
+    return NULL;
+  }
+
 };
 
 TEST_F(TabModelTest, TestProfileHandling) {

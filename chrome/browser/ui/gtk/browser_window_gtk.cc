@@ -22,9 +22,9 @@
 #include "base/nix/xdg_util.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_item_model.h"
@@ -112,6 +112,7 @@
 using content::NativeWebKeyboardEvent;
 using content::SSLStatus;
 using content::WebContents;
+using web_modal::WebContentsModalDialogHost;
 
 namespace {
 
@@ -594,9 +595,10 @@ void BrowserWindowGtk::Show() {
   // size.
   gtk_widget_set_size_request(contents_container_->widget(), -1, -1);
 
+  bool update_devtools = !window_has_shown_ && devtools_window_;
   window_has_shown_ = true;
   browser()->OnWindowDidShow();
-  if (devtools_window_)
+  if (update_devtools)
     UpdateDevToolsSplitPosition();
 }
 
@@ -796,6 +798,14 @@ void BrowserWindowGtk::ZoomChangedForActiveTab(bool can_show_bubble) {
 
 gfx::Rect BrowserWindowGtk::GetRestoredBounds() const {
   return restored_bounds_;
+}
+
+ui::WindowShowState BrowserWindowGtk::GetRestoredState() const {
+  if (IsMaximized())
+    return ui::SHOW_STATE_MAXIMIZED;
+  if (IsMinimized())
+    return ui::SHOW_STATE_MINIMIZED;
+  return ui::SHOW_STATE_NORMAL;
 }
 
 gfx::Rect BrowserWindowGtk::GetBounds() const {
@@ -1414,7 +1424,7 @@ void BrowserWindowGtk::OnMainWindowDestroy(GtkWidget* widget) {
   //
   // We don't want to use DeleteSoon() here since it won't work on a nested pump
   // (like in UI tests).
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE, base::Bind(&base::DeletePointer<BrowserWindowGtk>, this));
 }
 
@@ -2254,8 +2264,6 @@ void BrowserWindowGtk::UpdateDevToolsForContents(WebContents* contents) {
   // Fast return in case of the same window having same orientation.
   if (devtools_window_ == new_devtools_window && (!new_devtools_window ||
         new_devtools_window->dock_side() == devtools_dock_side_)) {
-    if (new_devtools_window)
-      UpdateDevToolsSplitPosition();
     return;
   }
 

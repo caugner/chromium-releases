@@ -11,7 +11,7 @@
 #include "cc/test/animation_test_common.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebAnimationDelegate.h"
+#include "third_party/WebKit/public/platform/WebAnimationDelegate.h"
 #include "ui/gfx/transform.h"
 
 namespace cc {
@@ -38,7 +38,7 @@ TEST(LayerAnimationControllerTest, SyncNewAnimation) {
 
   EXPECT_FALSE(controller_impl->GetAnimation(Animation::Opacity));
 
-  AddOpacityTransitionToController(controller, 1, 0, 1, false);
+  AddOpacityTransitionToController(controller.get(), 1, 0, 1, false);
   int group_id = controller->GetAnimation(Animation::Opacity)->group();
 
   controller->PushAnimationUpdatesTo(controller_impl.get());
@@ -63,7 +63,7 @@ TEST(LayerAnimationControllerTest, DoNotClobberStartTimes) {
 
   EXPECT_FALSE(controller_impl->GetAnimation(Animation::Opacity));
 
-  AddOpacityTransitionToController(controller, 1, 0, 1, false);
+  AddOpacityTransitionToController(controller.get(), 1, 0, 1, false);
   int group_id = controller->GetAnimation(Animation::Opacity)->group();
 
   controller->PushAnimationUpdatesTo(controller_impl.get());
@@ -106,7 +106,7 @@ TEST(LayerAnimationControllerTest, SyncPauseAndResume) {
 
   EXPECT_FALSE(controller_impl->GetAnimation(Animation::Opacity));
 
-  AddOpacityTransitionToController(controller, 1, 0, 1, false);
+  AddOpacityTransitionToController(controller.get(), 1, 0, 1, false);
   int group_id = controller->GetAnimation(Animation::Opacity)->group();
 
   controller->PushAnimationUpdatesTo(controller_impl.get());
@@ -167,7 +167,7 @@ TEST(LayerAnimationControllerTest, DoNotSyncFinishedAnimation) {
   EXPECT_FALSE(controller_impl->GetAnimation(Animation::Opacity));
 
   int animation_id =
-      AddOpacityTransitionToController(controller, 1, 0, 1, false);
+      AddOpacityTransitionToController(controller.get(), 1, 0, 1, false);
   int group_id = controller->GetAnimation(Animation::Opacity)->group();
 
   controller->PushAnimationUpdatesTo(controller_impl.get());
@@ -208,7 +208,7 @@ TEST(LayerAnimationControllerTest, AnimationsAreDeleted) {
   controller->AddValueObserver(&dummy);
   controller_impl->AddValueObserver(&dummy_impl);
 
-  AddOpacityTransitionToController(controller, 1.0, 0.0f, 1.0f, false);
+  AddOpacityTransitionToController(controller.get(), 1.0, 0.0f, 1.0f, false);
   controller->Animate(0.0);
   controller->UpdateState(true, NULL);
   controller->PushAnimationUpdatesTo(controller_impl.get());
@@ -246,45 +246,6 @@ TEST(LayerAnimationControllerTest, AnimationsAreDeleted) {
   // Both controllers should now have deleted the animation.
   EXPECT_FALSE(controller->has_any_animation());
   EXPECT_FALSE(controller_impl->has_any_animation());
-}
-
-TEST(LayerAnimationControllerTest, TransferAnimationsTo) {
-  FakeLayerAnimationValueObserver dummy;
-  scoped_refptr<LayerAnimationController> controller(
-      LayerAnimationController::Create(0));
-  scoped_refptr<LayerAnimationController> other_controller(
-      LayerAnimationController::Create(1));
-  controller->AddValueObserver(&dummy);
-
-  int opacity_animation_id =
-      AddOpacityTransitionToController(controller, 1.0, 0.0f, 1.0f, false);
-
-  int transform_animation_id =
-      AddAnimatedTransformToController(controller, 1.0, 10, 10);
-
-  controller->Animate(1.0);
-
-  // Both animations should now be Starting.
-  EXPECT_EQ(Animation::Starting,
-            controller->GetAnimation(Animation::Opacity)->run_state());
-  EXPECT_EQ(Animation::Starting,
-            controller->GetAnimation(Animation::Transform)->run_state());
-
-  controller->TransferAnimationsTo(other_controller);
-
-  // Ensure both animations have been transfered.
-  EXPECT_FALSE(controller->has_any_animation());
-  EXPECT_EQ(other_controller->GetAnimation(Animation::Opacity)->id(),
-            opacity_animation_id);
-  EXPECT_EQ(other_controller->GetAnimation(Animation::Transform)->id(),
-            transform_animation_id);
-
-  // Ensure that the run state of the transferred animations has been
-  // preserved.
-  EXPECT_EQ(Animation::Starting,
-            other_controller->GetAnimation(Animation::Opacity)->run_state());
-  EXPECT_EQ(Animation::Starting,
-            other_controller->GetAnimation(Animation::Transform)->run_state());
 }
 
 // Tests that transitioning opacity from 0 to 1 works as expected.
@@ -1091,6 +1052,69 @@ TEST(LayerAnimationControllerTest, SkipUpdateState) {
   // The float tranisition should now be done.
   EXPECT_EQ(1.f, dummy.opacity());
   EXPECT_FALSE(controller->HasActiveAnimation());
+}
+
+// Tests that an animation controller with only an inactive observer gets ticked
+// but doesn't progress animations past the Starting state.
+TEST(LayerAnimationControllerTest, InactiveObserverGetsTicked) {
+  scoped_ptr<AnimationEventsVector> events(
+      make_scoped_ptr(new AnimationEventsVector));
+  FakeLayerAnimationValueObserver dummy;
+  FakeInactiveLayerAnimationValueObserver inactive_dummy;
+  scoped_refptr<LayerAnimationController> controller(
+      LayerAnimationController::Create(0));
+
+  const int id = 1;
+  controller->AddAnimation(CreateAnimation(scoped_ptr<AnimationCurve>(
+      new FakeFloatTransition(1.0, 0.5f, 1.f)).Pass(),
+      id,
+      Animation::Opacity));
+
+  // Without an observer, the animation shouldn't progress to the Starting
+  // state.
+  controller->Animate(0.0);
+  controller->UpdateState(true, events.get());
+  EXPECT_EQ(0u, events->size());
+  EXPECT_EQ(Animation::WaitingForTargetAvailability,
+            controller->GetAnimation(id, Animation::Opacity)->run_state());
+
+  controller->AddValueObserver(&inactive_dummy);
+
+  // With only an inactive observer, the animation should progress to the
+  // Starting state and get ticked at its starting point, but should not
+  // progress to Running.
+  controller->Animate(1.0);
+  controller->UpdateState(true, events.get());
+  EXPECT_EQ(0u, events->size());
+  EXPECT_EQ(Animation::Starting,
+            controller->GetAnimation(id, Animation::Opacity)->run_state());
+  EXPECT_EQ(0.5f, inactive_dummy.opacity());
+
+  // Even when already in the Starting state, the animation should stay
+  // there, and shouldn't be ticked past its starting point.
+  controller->Animate(2.0);
+  controller->UpdateState(true, events.get());
+  EXPECT_EQ(0u, events->size());
+  EXPECT_EQ(Animation::Starting,
+            controller->GetAnimation(id, Animation::Opacity)->run_state());
+  EXPECT_EQ(0.5f, inactive_dummy.opacity());
+
+  controller->AddValueObserver(&dummy);
+
+  // Now that an active observer has been added, the animation should still
+  // initially tick at its starting point, but should now progress to Running.
+  controller->Animate(3.0);
+  controller->UpdateState(true, events.get());
+  EXPECT_EQ(1u, events->size());
+  EXPECT_EQ(Animation::Running,
+            controller->GetAnimation(id, Animation::Opacity)->run_state());
+  EXPECT_EQ(0.5f, inactive_dummy.opacity());
+  EXPECT_EQ(0.5f, dummy.opacity());
+
+  // The animation should now tick past its starting point.
+  controller->Animate(3.5);
+  EXPECT_NE(0.5f, inactive_dummy.opacity());
+  EXPECT_NE(0.5f, dummy.opacity());
 }
 
 }  // namespace

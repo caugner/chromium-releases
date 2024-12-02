@@ -6,7 +6,6 @@
 
 #include "ash/display/display_controller.h"
 #include "ash/launcher/launcher.h"
-#include "ash/root_window_controller.h"
 #include "ash/screen_ash.h"
 #include "ash/shelf/shelf_types.h"
 #include "ash/shelf/shelf_widget.h"
@@ -50,25 +49,26 @@ PanelWindowResizer*
 PanelWindowResizer::Create(WindowResizer* next_window_resizer,
                            aura::Window* window,
                            const gfx::Point& location,
-                           int window_component) {
-  Details details(window, location, window_component);
+                           int window_component,
+                           aura::client::WindowMoveSource source) {
+  Details details(window, location, window_component, source);
   return details.is_resizable ?
       new PanelWindowResizer(next_window_resizer, details) : NULL;
 }
 
 void PanelWindowResizer::Drag(const gfx::Point& location, int event_flags) {
+  last_location_ = location;
+  wm::ConvertPointToScreen(GetTarget()->parent(), &last_location_);
   bool destroyed = false;
   if (!did_move_or_resize_) {
     did_move_or_resize_ = true;
     StartedDragging();
   }
-  gfx::Point location_in_screen = location;
-  wm::ConvertPointToScreen(GetTarget()->parent(), &location_in_screen);
 
   // Check if the destination has changed displays.
   gfx::Screen* screen = Shell::GetScreen();
   const gfx::Display dst_display =
-      screen->GetDisplayNearestPoint(location_in_screen);
+      screen->GetDisplayNearestPoint(last_location_);
   if (dst_display.id() !=
       screen->GetDisplayNearestWindow(panel_container_->GetRootWindow()).id()) {
     // The panel is being dragged to a new display. If the previous container is
@@ -122,6 +122,10 @@ void PanelWindowResizer::RevertDrag() {
 
 aura::Window* PanelWindowResizer::GetTarget() {
   return next_window_resizer_->GetTarget();
+}
+
+const gfx::Point& PanelWindowResizer::GetInitialLocation() const {
+  return details_.initial_location_in_parent;
 }
 
 PanelWindowResizer::PanelWindowResizer(WindowResizer* next_window_resizer,
@@ -192,9 +196,11 @@ void PanelWindowResizer::StartedDragging() {
     // Attach the panel while dragging placing it in front of other panels.
     GetTarget()->SetProperty(internal::kContinueDragAfterReparent, true);
     GetTarget()->SetProperty(internal::kPanelAttachedKey, true);
+    // We use root window coordinates to ensure that during the drag the panel
+    // is reparented to a container in the root window that has that window.
     GetTarget()->SetDefaultParentByRootWindow(
         GetTarget()->GetRootWindow(),
-        GetTarget()->GetBoundsInScreen());
+        GetTarget()->GetRootWindow()->GetBoundsInScreen());
   }
 }
 
@@ -204,9 +210,11 @@ void PanelWindowResizer::FinishDragging() {
   if (GetTarget()->GetProperty(internal::kPanelAttachedKey) !=
       should_attach_) {
     GetTarget()->SetProperty(internal::kPanelAttachedKey, should_attach_);
+    // We use last known location to ensure that after the drag the panel
+    // is reparented to a container in the root window that has that location.
     GetTarget()->SetDefaultParentByRootWindow(
         GetTarget()->GetRootWindow(),
-        GetTarget()->GetBoundsInScreen());
+        gfx::Rect(last_location_, gfx::Size()));
   }
   if (panel_container_)
     GetPanelLayoutManager(panel_container_)->FinishDragging();

@@ -7,7 +7,7 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/auto_launch_trial.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
@@ -27,7 +27,6 @@
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 
 using content::BrowserThread;
 
@@ -53,7 +52,7 @@ class AutolaunchInfoBarDelegate : public ConfirmInfoBarDelegate {
   void AllowExpiry() { should_expire_ = true; }
 
   // ConfirmInfoBarDelegate:
-  virtual gfx::Image* GetIcon() const OVERRIDE;
+  virtual int GetIconID() const OVERRIDE;
   virtual string16 GetMessageText() const OVERRIDE;
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
@@ -98,7 +97,7 @@ AutolaunchInfoBarDelegate::AutolaunchInfoBarDelegate(
 
   // We want the info-bar to stick-around for a few seconds and then be hidden
   // on the next navigation after that.
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&AutolaunchInfoBarDelegate::AllowExpiry,
                  weak_factory_.GetWeakPtr()),
@@ -108,9 +107,8 @@ AutolaunchInfoBarDelegate::AutolaunchInfoBarDelegate(
 AutolaunchInfoBarDelegate::~AutolaunchInfoBarDelegate() {
 }
 
-gfx::Image* AutolaunchInfoBarDelegate::GetIcon() const {
-  return &ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-      IDR_PRODUCT_LOGO_32);
+int AutolaunchInfoBarDelegate::GetIconID() const {
+  return IDR_PRODUCT_LOGO_32;
 }
 
 string16 AutolaunchInfoBarDelegate::GetMessageText() const {

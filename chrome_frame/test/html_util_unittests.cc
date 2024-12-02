@@ -15,7 +15,7 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "net/base/net_util.h"
 
 #include "chrome/browser/automation/url_request_automation_job.h"
@@ -24,7 +24,7 @@
 #include "chrome_frame/chrome_frame_delegate.h"
 #include "chrome_frame/html_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/user_agent/user_agent_util.h"
+#include "webkit/common/user_agent/user_agent_util.h"
 
 const char kChromeFrameUserAgent[] = "chromeframe";
 

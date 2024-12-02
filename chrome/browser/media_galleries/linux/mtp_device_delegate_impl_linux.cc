@@ -5,9 +5,8 @@
 #include "chrome/browser/media_galleries/linux/mtp_device_delegate_impl_linux.h"
 
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "chrome/browser/media_galleries/linux/mtp_device_task_helper.h"
 #include "chrome/browser/media_galleries/linux/mtp_device_task_helper_map_service.h"
 #include "chrome/browser/media_galleries/linux/snapshot_file_details.h"

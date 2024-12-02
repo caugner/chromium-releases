@@ -37,14 +37,14 @@
  * All files should initially have content: kInitialFileContent.
  */
 
-var kInitialFileContent = 'xxxxxxxxxxxxx';
-var kWriteOffset = 13;
-var kWriteData = '!!!';
-var kFileContentAfterWrite = 'xxxxxxxxxxxxx!!!';
-var kTruncateShortLength = 5;
-var kFileContentAfterTruncateShort = 'xxxxx';
-var kTruncateLongLength = 7;
-var kFileContentAfterTruncateLong = 'xxxxx\0\0';
+var kInitialFileContent = 'This is some test content.';
+var kWriteOffset = 26;
+var kWriteData = ' Yay!';
+var kFileContentAfterWrite = 'This is some test content. Yay!';
+var kTruncateShortLength = 4;
+var kFileContentAfterTruncateShort = 'This';
+var kTruncateLongLength = 6;
+var kFileContentAfterTruncateLong = 'This\0\0';
 
 function assertEqAndRunCallback(expectedValue, value, errorMessage,
                                 callback, callbackArg) {
@@ -436,14 +436,13 @@ function collectTestsForMountPoint(mountPointName, mountPoint) {
   });
 
   testsToRun.push(function deleteDirectoryTest() {
-    // The directory exists if and only if the file system is not drive.
+    // Verify that the directory still exists after the operation.
     var callback = getDirectory.bind(null, mountPoint, 'test_dir', false,
-        !isOnDrive, chrome.test.succeed);
+        true, chrome.test.succeed);
 
     // The directory should still contain some files, so non-recursive delete
-    // should fail. The drive file system does not respect is_recursive flag, so
-    // the operation succeeds.
-    deleteDirectory(mountPoint, 'test_dir', isOnDrive, callback);
+    // should fail.
+    deleteDirectory(mountPoint, 'test_dir', false, callback);
   });
 
   // On drive, the directory was deleted in the previous test.
@@ -471,7 +470,7 @@ function collectTestsForMountPoint(mountPointName, mountPoint) {
  *     to run will be null.
  */
 function initTests(callback) {
-  chrome.fileBrowserPrivate.requestLocalFileSystem(function(fileSystem) {
+  chrome.fileBrowserPrivate.requestFileSystem(function(fileSystem) {
     if(!fileSystem) {
       callback(null, 'Failed to get file system.');
       return;

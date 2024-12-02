@@ -25,7 +25,9 @@
 #include "ash/touch/touch_observer_hud.h"
 #include "ash/wm/base_layout_manager.h"
 #include "ash/wm/boot_splash_screen.h"
+#include "ash/wm/dock/docked_window_layout_manager.h"
 #include "ash/wm/panels/panel_layout_manager.h"
+#include "ash/wm/panels/panel_window_event_handler.h"
 #include "ash/wm/property_util.h"
 #include "ash/wm/root_window_layout_manager.h"
 #include "ash/wm/screen_dimmer.h"
@@ -111,6 +113,7 @@ void ReparentAllWindows(aura::RootWindow* src, aura::RootWindow* dst) {
   // Set of windows to move.
   const int kContainerIdsToMove[] = {
     internal::kShellWindowId_DefaultContainer,
+    internal::kShellWindowId_DockedContainer,
     internal::kShellWindowId_PanelContainer,
     internal::kShellWindowId_AlwaysOnTopContainer,
     internal::kShellWindowId_SystemModalContainer,
@@ -166,7 +169,7 @@ namespace internal {
 RootWindowController::RootWindowController(aura::RootWindow* root_window)
     : root_window_(root_window),
       root_window_layout_(NULL),
-      shelf_(NULL),
+      docked_layout_manager_(NULL),
       panel_layout_manager_(NULL),
       touch_observer_hud_(NULL) {
   SetRootWindowController(root_window, this);
@@ -183,10 +186,7 @@ RootWindowController::~RootWindowController() {
 
 // static
 RootWindowController* RootWindowController::ForLauncher(aura::Window* window) {
-  if (Shell::IsLauncherPerDisplayEnabled())
-    return GetRootWindowController(window->GetRootWindow());
-  else
-    return Shell::GetPrimaryRootWindowController();
+  return GetRootWindowController(window->GetRootWindow());
 }
 
 // static
@@ -275,18 +275,29 @@ void RootWindowController::InitForPrimaryDisplay() {
   shelf_.reset(new ash::ShelfWidget(
       shelf_container, status_container, workspace_controller()));
 
-  if (Shell::IsLauncherPerDisplayEnabled() ||
-      root_window_ == Shell::GetPrimaryRootWindow()) {
-    // Create Panel layout manager
-    aura::Window* panel_container = GetContainer(
-        internal::kShellWindowId_PanelContainer);
-    panel_layout_manager_ =
-        new internal::PanelLayoutManager(panel_container);
-    panel_container_handler_.reset(
-        new ToplevelWindowEventHandler(panel_container));
-    panel_container->SetLayoutManager(panel_layout_manager_);
-  }
-  if (Shell::GetInstance()->session_state_delegate()->HasActiveUser())
+  // Create Docked windows layout manager
+  aura::Window* docked_container = GetContainer(
+      internal::kShellWindowId_DockedContainer);
+  docked_layout_manager_ =
+      new internal::DockedWindowLayoutManager(docked_container);
+  docked_container_handler_.reset(
+      new ToplevelWindowEventHandler(docked_container));
+  docked_container->SetLayoutManager(docked_layout_manager_);
+
+  // Create Panel layout manager
+  aura::Window* panel_container = GetContainer(
+      internal::kShellWindowId_PanelContainer);
+  panel_layout_manager_ =
+      new internal::PanelLayoutManager(panel_container);
+  panel_container_handler_.reset(
+      new PanelWindowEventHandler(panel_container));
+  panel_container->SetLayoutManager(panel_layout_manager_);
+
+  // TODO(stevenjb/oshima): Remove this call to CreateLauncher() and call
+  // ash::Shell::CreateLauncher() explicitly in ash_shell and ash_unittests
+  // so that the behavior and construction order is consistent betwheen Ash
+  // and Chrome.
+  if (Shell::GetInstance()->session_state_delegate()->NumberOfLoggedInUsers())
     shelf_->CreateLauncher();
 
   InitKeyboard();
@@ -327,6 +338,8 @@ void RootWindowController::CreateSystemBackground(
 void RootWindowController::OnLauncherCreated() {
   if (panel_layout_manager_)
     panel_layout_manager_->SetLauncher(shelf_->launcher());
+  if (docked_layout_manager_)
+    docked_layout_manager_->SetLauncher(shelf_->launcher());
 }
 
 void RootWindowController::ShowLauncher() {
@@ -414,13 +427,11 @@ SystemTray* RootWindowController::GetSystemTray() {
   return shelf_->status_area_widget()->system_tray();
 }
 
-void RootWindowController::ShowContextMenu(
-    const gfx::Point& location_in_screen) {
-  aura::RootWindow* target = Shell::IsLauncherPerDisplayEnabled() ?
-      root_window() : Shell::GetPrimaryRootWindow();
+void RootWindowController::ShowContextMenu(const gfx::Point& location_in_screen,
+                                           ui::MenuSourceType source_type) {
   DCHECK(Shell::GetInstance()->delegate());
   scoped_ptr<ui::MenuModel> menu_model(
-      Shell::GetInstance()->delegate()->CreateContextMenu(target));
+      Shell::GetInstance()->delegate()->CreateContextMenu(root_window()));
   if (!menu_model)
     return;
 
@@ -434,7 +445,8 @@ void RootWindowController::ShowContextMenu(
   views::MenuRunner menu_runner(menu_model.get());
   if (menu_runner.RunMenuAt(background->widget(),
           NULL, gfx::Rect(location_in_screen, gfx::Size()),
-          views::MenuItemView::TOPLEFT, views::MenuRunner::CONTEXT_MENU) ==
+          views::MenuItemView::TOPLEFT, source_type,
+          views::MenuRunner::CONTEXT_MENU) ==
       views::MenuRunner::MENU_DELETED) {
     return;
   }
@@ -539,6 +551,12 @@ void RootWindowController::CreateContainersInRootWindow(
   views::corewm::SetChildWindowVisibilityChangesAnimated(
       always_on_top_container);
   SetUsesScreenCoordinates(always_on_top_container);
+
+  aura::Window* docked_container = CreateContainer(
+      kShellWindowId_DockedContainer,
+      "DockedContainer",
+      non_lock_screen_containers);
+  SetUsesScreenCoordinates(docked_container);
 
   aura::Window* panel_container = CreateContainer(
       kShellWindowId_PanelContainer,

@@ -52,11 +52,11 @@ class ScreensaverControllerTest : public InProcessBrowserTest {
 IN_PROC_BROWSER_TEST_F(ScreensaverControllerTest, Basic) {
   scoped_refptr<extensions::Extension> extension(
       CreateTestScreensaverExtension());
-  InstallExtensionToDefaultProfile(extension);
+  InstallExtensionToDefaultProfile(extension.get());
 
   scoped_ptr<ScreensaverController> controller_;
   controller_.reset(new ScreensaverController());
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   // Trigger idle.
   controller_->IdleNotify(0);
@@ -70,11 +70,11 @@ IN_PROC_BROWSER_TEST_F(ScreensaverControllerTest, Basic) {
 IN_PROC_BROWSER_TEST_F(ScreensaverControllerTest, OutOfOrder) {
   scoped_refptr<extensions::Extension> extension(
       CreateTestScreensaverExtension());
-  InstallExtensionToDefaultProfile(extension);
+  InstallExtensionToDefaultProfile(extension.get());
 
   scoped_ptr<ScreensaverController> controller_;
   controller_.reset(new ScreensaverController());
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   // Trigger active.
   controller_->OnUserActivity();

@@ -19,11 +19,11 @@
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
 #include "base/json/json_writer.h"
-#include "base/string16.h"
-#include "base/stringprintf.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/choose_mobile_network_dialog.h"
@@ -33,26 +33,28 @@
 #include "chrome/browser/chromeos/enrollment_dialog_view.h"
 #include "chrome/browser/chromeos/mobile_config.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
-#include "chrome/browser/chromeos/proxy_config_service_impl.h"
+#include "chrome/browser/chromeos/options/network_connect.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/sim_dialog_delegate.h"
 #include "chrome/browser/chromeos/status/network_menu_icon.h"
-#include "chrome/browser/net/pref_proxy_config_tracker.h"
-#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/chromeos/ui_proxy_config_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/singleton_tabs.h"
+#include "chrome/browser/ui/webui/options/chromeos/core_chromeos_options_handler.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/time_format.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/network/network_ip_config.h"
+#include "chromeos/network/network_ui_data.h"
 #include "chromeos/network/network_util.h"
 #include "chromeos/network/onc/onc_constants.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
@@ -142,12 +144,10 @@ const char kSetSimCardLockMessage[] = "setSimCardLock";
 const char kShowMorePlanInfoMessage[] = "showMorePlanInfo";
 
 // These are strings used to communicate with JavaScript.
-const char kTagAccessLocked[] = "accessLocked";
 const char kTagActivate[] = "activate";
 const char kTagActivated[] = "activated";
 const char kTagActivationState[] = "activationState";
 const char kTagAddConnection[] = "add";
-const char kTagAirplaneMode[] = "airplaneMode";
 const char kTagApn[] = "apn";
 const char kTagAutoConnect[] = "autoConnect";
 const char kTagBssid[] = "bssid";
@@ -155,7 +155,6 @@ const char kTagCarrierSelectFlag[] = "showCarrierSelect";
 const char kTagCarrierUrl[] = "carrierUrl";
 const char kTagCellular[] = "cellular";
 const char kTagCellularAvailable[] = "cellularAvailable";
-const char kTagCellularBusy[] = "cellularBusy";
 const char kTagCellularEnabled[] = "cellularEnabled";
 const char kTagCellularSupportsScan[] = "cellularSupportsScan";
 const char kTagConnect[] = "connect";
@@ -235,14 +234,11 @@ const char kTagVpnList[] = "vpnList";
 const char kTagWarning[] = "warning";
 const char kTagWifi[] = "wifi";
 const char kTagWifiAvailable[] = "wifiAvailable";
-const char kTagWifiBusy[] = "wifiBusy";
 const char kTagWifiEnabled[] = "wifiEnabled";
 const char kTagWimaxAvailable[] = "wimaxAvailable";
-const char kTagWimaxBusy[] = "wimaxBusy";
 const char kTagWimaxEnabled[] = "wimaxEnabled";
 const char kTagWiredList[] = "wiredList";
 const char kTagWirelessList[] = "wirelessList";
-const char kToggleAirplaneModeMessage[] = "toggleAirplaneMode";
 
 // A helper class for building network information dictionaries to be sent to
 // the webui code.
@@ -498,7 +494,7 @@ void SetValueDictionary(
   // DictionaryValue::Set() takes ownership of |value|.
   dict->Set(kTagValue, value);
   const base::Value* recommended_value = ui_data.default_value();
-  if (ui_data.managed())
+  if (ui_data.IsManaged())
     dict->SetString(kTagControlledBy, kTagPolicy);
   else if (recommended_value && recommended_value->Equals(value))
     dict->SetString(kTagControlledBy, kTagRecommended);
@@ -522,42 +518,13 @@ void PopulateVPNDetails(
 
   chromeos::NetworkPropertyUIData hostname_ui_data;
   hostname_ui_data.ParseOncProperty(
-      vpn->ui_data(), &onc,
+      vpn->ui_data().onc_source(), &onc,
       base::StringPrintf("%s.%s",
                          chromeos::onc::network_config::kVPN,
                          chromeos::onc::vpn::kHost));
   SetValueDictionary(dictionary, kTagServerHostname,
                      new base::StringValue(vpn->server_hostname()),
                      hostname_ui_data);
-}
-
-// Activate the cellular device pointed to by the service path.
-void Activate(std::string service_path) {
-  chromeos::Network* network = NULL;
-  if (!service_path.empty()) {
-    network = chromeos::CrosLibrary::Get()->GetNetworkLibrary()->
-        FindNetworkByPath(service_path);
-  } else {
-    NOTREACHED();
-    return;
-  }
-
-  if (network->type() != chromeos::TYPE_CELLULAR)
-    return;
-
-  chromeos::CellularNetwork* cellular =
-      static_cast<chromeos::CellularNetwork*>(network);
-  if (cellular->activation_state() != chromeos::ACTIVATION_STATE_ACTIVATED)
-    cellular->StartActivation();
-}
-
-// Check if the current cellular device can be activated by directly calling
-// it's activate function instead of going through the activation process.
-// Note: Currently Sprint is the only carrier that uses this.
-bool UseDirectActivation() {
-  const chromeos::NetworkDevice* device =
-      chromeos::CrosLibrary::Get()->GetNetworkLibrary()->FindCellularDevice();
-  return device && (device->carrier() == shill::kCarrierSprint);
 }
 
 // Given a list of supported carrier's by the device, return the index of
@@ -589,12 +556,26 @@ int FindCurrentCarrierIndex(const base::ListValue* carriers,
   return -1;
 }
 
+chromeos::ConnectionType ParseNetworkTypeString(const std::string& type) {
+  if (type == flimflam::kTypeEthernet)
+    return chromeos::TYPE_ETHERNET;
+  if (type == flimflam::kTypeWifi)
+    return chromeos::TYPE_WIFI;
+  if (type == flimflam::kTypeWimax)
+    return chromeos::TYPE_WIMAX;
+  if (type == flimflam::kTypeCellular)
+    return chromeos::TYPE_CELLULAR;
+  if (type == flimflam::kTypeVPN)
+    return chromeos::TYPE_VPN;
+  return chromeos::TYPE_UNKNOWN;
+}
+
 }  // namespace
 
 namespace options {
 
 InternetOptionsHandler::InternetOptionsHandler()
-  : weak_factory_(this) {
+    : weak_factory_(this) {
   registrar_.Add(this, chrome::NOTIFICATION_REQUIRE_PIN_SETTING_CHANGE_ENDED,
       content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_ENTER_PIN_ENDED,
@@ -623,12 +604,9 @@ void InternetOptionsHandler::GetLocalizedValues(
 
     { "ethernetTitle", IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET },
     { "wifiTitle", IDS_OPTIONS_SETTINGS_SECTION_TITLE_WIFI_NETWORK },
-    // TODO(zelidrag): Change details title to Wimax once we get strings.
-    { "wimaxTitle", IDS_OPTIONS_SETTINGS_SECTION_TITLE_CELLULAR_NETWORK },
+    { "wimaxTitle", IDS_OPTIONS_SETTINGS_SECTION_TITLE_WIMAX_NETWORK },
     { "cellularTitle", IDS_OPTIONS_SETTINGS_SECTION_TITLE_CELLULAR_NETWORK },
     { "vpnTitle", IDS_OPTIONS_SETTINGS_SECTION_TITLE_PRIVATE_NETWORK },
-    { "airplaneModeTitle", IDS_OPTIONS_SETTINGS_SECTION_TITLE_AIRPLANE_MODE },
-    { "airplaneModeLabel", IDS_OPTIONS_SETTINGS_NETWORK_AIRPLANE_MODE_LABEL },
     { "networkNotConnected", IDS_OPTIONS_SETTINGS_NETWORK_NOT_CONNECTED },
     { "networkConnected", IDS_CHROMEOS_NETWORK_STATE_READY },
     { "joinOtherNetwork", IDS_OPTIONS_SETTINGS_NETWORK_OTHER },
@@ -689,12 +667,10 @@ void InternetOptionsHandler::GetLocalizedValues(
     { "disconnectButton", IDS_OPTIONS_SETTINGS_DISCONNECT },
     { "viewAccountButton", IDS_STATUSBAR_NETWORK_VIEW_ACCOUNT },
 
-    // TODO(zelidrag): Change details title to Wimax once we get strings.
-    { "wimaxConnTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_CONNECTION },
+    { "wimaxConnTabLabel", IDS_OPTIONS_SETTINGS_INTERNET_TAB_WIMAX },
 
     // Wifi Tab.
 
-    { "accessLockedMsg", IDS_STATUSBAR_NETWORK_LOCKED },
     { "inetSsid", IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NETWORK_ID },
     { "inetBssid", IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NETWORK_BSSID },
     { "inetEncryption",
@@ -849,9 +825,6 @@ void InternetOptionsHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(kChangePinMessage,
       base::Bind(&InternetOptionsHandler::ChangePinCallback,
                  base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(kToggleAirplaneModeMessage,
-      base::Bind(&InternetOptionsHandler::ToggleAirplaneModeCallback,
-                 base::Unretained(this)));
   web_ui()->RegisterMessageCallback(kSetServerHostname,
       base::Bind(&InternetOptionsHandler::SetServerHostnameCallback,
                  base::Unretained(this)));
@@ -866,7 +839,6 @@ void InternetOptionsHandler::DisableWifiCallback(const ListValue* args) {
 }
 
 void InternetOptionsHandler::EnableCellularCallback(const ListValue* args) {
-  // TODO(nkostylev): Code duplication, see NetworkMenu::ToggleCellular().
   const chromeos::NetworkDevice* mobile = cros_->FindMobileDevice();
   if (!mobile) {
     LOG(ERROR) << "Didn't find mobile device, it should have been available.";
@@ -916,12 +888,7 @@ void InternetOptionsHandler::ShowMorePlanInfoCallback(const ListValue* args) {
     NOTREACHED();
     return;
   }
-
-  const chromeos::CellularNetwork* cellular =
-      cros_->FindCellularNetworkByPath(service_path);
-  if (!cellular)
-    return;
-  ash::Shell::GetInstance()->delegate()->OpenMobileSetup(service_path);
+  chromeos::network_connect::ShowMobileSetup(service_path);
 }
 
 void InternetOptionsHandler::BuyDataPlanCallback(const ListValue* args) {
@@ -933,7 +900,7 @@ void InternetOptionsHandler::BuyDataPlanCallback(const ListValue* args) {
     NOTREACHED();
     return;
   }
-  ash::Shell::GetInstance()->delegate()->OpenMobileSetup(service_path);
+  chromeos::network_connect::ShowMobileSetup(service_path);
 }
 
 void InternetOptionsHandler::SetApnCallback(const ListValue* args) {
@@ -963,8 +930,8 @@ void InternetOptionsHandler::CarrierStatusCallback(
     chromeos::NetworkMethodErrorType error,
     const std::string& error_message) {
   if ((error == chromeos::NETWORK_METHOD_ERROR_NONE) &&
-      UseDirectActivation()) {
-    Activate(service_path);
+      cros_->CellularDeviceUsesDirectActivation()) {
+    chromeos::network_connect::ActivateCellular(service_path);
     UpdateConnectionData(cros_->FindNetworkByPath(service_path));
   }
 
@@ -1039,8 +1006,7 @@ void InternetOptionsHandler::UpdateConnectionData(
     const chromeos::Network* network) {
   DictionaryValue dictionary;
   PopulateConnectionDetails(network, &dictionary);
-  web_ui()->CallJavascriptFunction(
-      kUpdateConnectionDataFunction, dictionary);
+  web_ui()->CallJavascriptFunction(kUpdateConnectionDataFunction, dictionary);
 }
 
 void InternetOptionsHandler::UpdateCarrier() {
@@ -1258,11 +1224,8 @@ void InternetOptionsHandler::PopulateIPConfigsCallback(
   if (!network)
     return;
 
-  Profile::FromWebUI(web_ui())->GetProxyConfigTracker()->UISetCurrentNetwork(
-      service_path);
-
   const chromeos::NetworkUIData& ui_data = network->ui_data();
-  const chromeos::NetworkPropertyUIData property_ui_data(ui_data);
+  const chromeos::NetworkPropertyUIData property_ui_data(ui_data.onc_source());
   const base::DictionaryValue* onc =
       cros_->FindOncForNetwork(network->unique_id());
 
@@ -1347,7 +1310,7 @@ void InternetOptionsHandler::PopulateIPConfigsCallback(
   bool staticIPConfig = type == chromeos::TYPE_ETHERNET ||
       (type == chromeos::TYPE_WIFI &&
        CommandLine::ForCurrentProcess()->HasSwitch(
-           switches::kEnableStaticIPConfig));
+           chromeos::switches::kEnableStaticIPConfig));
   dictionary.SetBoolean(kTagShowStaticIPConfig, staticIPConfig);
 
   dictionary.SetBoolean(kTagShowPreferred,
@@ -1356,7 +1319,7 @@ void InternetOptionsHandler::PopulateIPConfigsCallback(
                      new base::FundamentalValue(network->preferred()),
                      property_ui_data);
 
-  chromeos::NetworkPropertyUIData auto_connect_ui_data(ui_data);
+  chromeos::NetworkPropertyUIData auto_connect_ui_data(ui_data.onc_source());
   std::string onc_path_to_auto_connect;
   if (type == chromeos::TYPE_WIFI) {
     onc_path_to_auto_connect = base::StringPrintf(
@@ -1371,7 +1334,7 @@ void InternetOptionsHandler::PopulateIPConfigsCallback(
   }
   if (!onc_path_to_auto_connect.empty()) {
     auto_connect_ui_data.ParseOncProperty(
-        ui_data,
+        ui_data.onc_source(),
         onc,
         onc_path_to_auto_connect);
   }
@@ -1385,7 +1348,9 @@ void InternetOptionsHandler::PopulateIPConfigsCallback(
 }
 
 void InternetOptionsHandler::PopulateConnectionDetails(
-    const chromeos::Network* network, DictionaryValue* dictionary) {
+    const chromeos::Network* network,
+    DictionaryValue* dictionary) {
+  dictionary->SetString(kNetworkInfoKeyServicePath, network->service_path());
   chromeos::ConnectionType type = network->type();
   dictionary->SetBoolean(kTagConnecting, network->connecting());
   dictionary->SetBoolean(kTagConnected, network->connected());
@@ -1463,7 +1428,7 @@ void InternetOptionsHandler::PopulateCellularDetails(
     DictionaryValue* dictionary) {
   dictionary->SetBoolean(kTagCarrierSelectFlag,
                          CommandLine::ForCurrentProcess()->HasSwitch(
-                             switches::kEnableCarrierSwitching));
+                             chromeos::switches::kEnableCarrierSwitching));
   // Cellular network / connection settings.
   dictionary->SetString(kTagServiceName, cellular->name());
   dictionary->SetString(kTagNetworkTechnology,
@@ -1492,7 +1457,7 @@ void InternetOptionsHandler::PopulateCellularDetails(
       cros_->FindNetworkDeviceByPath(cellular->device_path());
   if (device) {
     const chromeos::NetworkPropertyUIData cellular_property_ui_data(
-        cellular->ui_data());
+        cellular->ui_data().onc_source());
     dictionary->SetString(kTagManufacturer, device->manufacturer());
     dictionary->SetString(kTagModelId, device->model_id());
     dictionary->SetString(kTagFirmwareRevision, device->firmware_revision());
@@ -1533,7 +1498,7 @@ void InternetOptionsHandler::PopulateCellularDetails(
                        cellular_property_ui_data);
 
     if (CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kEnableCarrierSwitching)) {
+            chromeos::switches::kEnableCarrierSwitching)) {
       base::ListValue* supported_carriers = device->supported_carriers();
       if (supported_carriers) {
         dictionary->Set(kTagCarriers, supported_carriers->DeepCopy());
@@ -1593,11 +1558,7 @@ void InternetOptionsHandler::SetCellularButtonsVisibility(
 }
 
 gfx::NativeWindow InternetOptionsHandler::GetNativeWindow() const {
-  // TODO(beng): This is an improper direct dependency on Browser. Route this
-  // through some sort of delegate.
-  Browser* browser =
-      chrome::FindBrowserWithWebContents(web_ui()->GetWebContents());
-  return browser->window()->GetNativeWindow();
+  return web_ui()->GetWebContents()->GetView()->GetTopLevelNativeWindow();
 }
 
 Browser* InternetOptionsHandler::GetAppropriateBrowser() {
@@ -1618,8 +1579,11 @@ void InternetOptionsHandler::NetworkCommandCallback(const ListValue* args) {
     return;
   }
 
-  chromeos::ConnectionType type =
-      (chromeos::ConnectionType) atoi(str_type.c_str());
+  // First try as a string, e.g. "wifi".
+  chromeos::ConnectionType type = ParseNetworkTypeString(str_type);
+  // Next try casting as an enum.
+  if (type == chromeos::TYPE_UNKNOWN)
+    type = (chromeos::ConnectionType) atoi(str_type.c_str());
 
   // Process commands that do not require an existing network.
   if (command == kTagAddConnection) {
@@ -1652,31 +1616,19 @@ void InternetOptionsHandler::NetworkCommandCallback(const ListValue* args) {
         base::Bind(&InternetOptionsHandler::PopulateDictionaryDetailsCallback,
                    weak_factory_.GetWeakPtr()));
   } else if (command == kTagConnect) {
-    ConnectToNetwork(network);
+    chromeos::network_connect::ConnectToNetwork(
+        service_path, GetNativeWindow());
   } else if (command == kTagDisconnect && type != chromeos::TYPE_ETHERNET) {
     cros_->DisconnectFromNetwork(network);
   } else if (command == kTagActivate && type == chromeos::TYPE_CELLULAR) {
-    if (!UseDirectActivation()) {
-      ash::Shell::GetInstance()->delegate()->OpenMobileSetup(
-          network->service_path());
-    } else {
-      Activate(service_path);
-      // Update network properties after we start activation. The Activate
-      // call is a blocking call, which blocks on finishing the "start" of
-      // the activation, hence when we query for network properties after
-      // this call is done, we will have the "activating" activation state.
-      UpdateConnectionData(network);
-    }
+    chromeos::network_connect::ActivateCellular(service_path);
+    // Activation may update network properties (e.g. ActivationState), so
+    // request them here in case they change.
+    UpdateConnectionData(network);
   } else {
     VLOG(1) << "Unknown command: " << command;
     NOTREACHED();
   }
-}
-
-void InternetOptionsHandler::ToggleAirplaneModeCallback(const ListValue* args) {
-  // TODO(kevers): The use of 'offline_mode' is not quite correct.  Update once
-  // we have proper back-end support.
-  cros_->EnableOfflineMode(!cros_->offline_mode());
 }
 
 void InternetOptionsHandler::AddConnection(chromeos::ConnectionType type) {
@@ -1691,58 +1643,6 @@ void InternetOptionsHandler::AddConnection(chromeos::ConnectionType type) {
       break;
     default:
       NOTREACHED();
-  }
-}
-
-void InternetOptionsHandler::ConnectToNetwork(chromeos::Network* network) {
-  if (network->type() == chromeos::TYPE_CELLULAR) {
-    cros_->ConnectToCellularNetwork(
-        static_cast<chromeos::CellularNetwork*>(network));
-  } else {
-    network->SetEnrollmentDelegate(
-        chromeos::CreateEnrollmentDelegate(
-            GetNativeWindow(),
-            network->name(),
-            ProfileManager::GetLastUsedProfile()));
-    network->AttemptConnection(base::Bind(&InternetOptionsHandler::DoConnect,
-                                          weak_factory_.GetWeakPtr(),
-                                          network));
-  }
-}
-
-void InternetOptionsHandler::DoConnect(chromeos::Network* network) {
-  if (network->type() == chromeos::TYPE_VPN) {
-    chromeos::VirtualNetwork* vpn =
-        static_cast<chromeos::VirtualNetwork*>(network);
-    if (vpn->NeedMoreInfoToConnect()) {
-      chromeos::NetworkConfigView::Show(network, GetNativeWindow());
-    } else {
-      cros_->ConnectToVirtualNetwork(vpn);
-      // Connection failures are responsible for updating the UI, including
-      // reopening dialogs.
-    }
-  } else if (network->type() == chromeos::TYPE_WIFI) {
-    chromeos::WifiNetwork* wifi = static_cast<chromeos::WifiNetwork*>(network);
-    if (wifi->IsPassphraseRequired()) {
-      // Show the connection UI if we require a passphrase.
-      chromeos::NetworkConfigView::Show(wifi, GetNativeWindow());
-    } else {
-      cros_->ConnectToWifiNetwork(wifi);
-      // Connection failures are responsible for updating the UI, including
-      // reopening dialogs.
-    }
-  } else if (network->type() == chromeos::TYPE_WIMAX) {
-    chromeos::WimaxNetwork* wimax =
-        static_cast<chromeos::WimaxNetwork*>(network);
-    if (wimax->passphrase_required()) {
-      // Show the connection UI if we require a passphrase.
-      // TODO(stevenjb): Implement WiMAX connection UI.
-      chromeos::NetworkConfigView::Show(wimax, GetNativeWindow());
-    } else {
-      cros_->ConnectToWimaxNetwork(wimax);
-      // Connection failures are responsible for updating the UI, including
-      // reopening dialogs.
-    }
   }
 }
 
@@ -1844,16 +1744,13 @@ ListValue* InternetOptionsHandler::GetRememberedList() {
 }
 
 void InternetOptionsHandler::FillNetworkInfo(DictionaryValue* dictionary) {
-  dictionary->SetBoolean(kTagAccessLocked, cros_->IsLocked());
   dictionary->Set(kTagWiredList, GetWiredList());
   dictionary->Set(kTagWirelessList, GetWirelessList());
   dictionary->Set(kTagVpnList, GetVPNList());
   dictionary->Set(kTagRememberedList, GetRememberedList());
   dictionary->SetBoolean(kTagWifiAvailable, cros_->wifi_available());
-  dictionary->SetBoolean(kTagWifiBusy, cros_->wifi_busy());
   dictionary->SetBoolean(kTagWifiEnabled, cros_->wifi_enabled());
   dictionary->SetBoolean(kTagCellularAvailable, cros_->cellular_available());
-  dictionary->SetBoolean(kTagCellularBusy, cros_->cellular_busy());
   dictionary->SetBoolean(kTagCellularEnabled, cros_->cellular_enabled());
 
   const chromeos::NetworkDevice* cellular_device = cros_->FindCellularDevice();
@@ -1863,10 +1760,6 @@ void InternetOptionsHandler::FillNetworkInfo(DictionaryValue* dictionary) {
 
   dictionary->SetBoolean(kTagWimaxEnabled, cros_->wimax_enabled());
   dictionary->SetBoolean(kTagWimaxAvailable, cros_->wimax_available());
-  dictionary->SetBoolean(kTagWimaxBusy, cros_->wimax_busy());
-  // TODO(kevers): The use of 'offline_mode' is not quite correct.  Update once
-  // we have proper back-end support.
-  dictionary->SetBoolean(kTagAirplaneMode, cros_->offline_mode());
 }
 
 }  // namespace options

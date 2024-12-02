@@ -36,8 +36,8 @@ class MockRenderProcessHost : public RenderProcessHost {
   virtual void EnableSendQueue() OVERRIDE;
   virtual bool Init() OVERRIDE;
   virtual int GetNextRoutingID() OVERRIDE;
-  virtual void SimulateSwapOutACK(
-      const ViewMsg_SwapOut_Params& params) OVERRIDE;
+  virtual void AddRoute(int32 routing_id, IPC::Listener* listener) OVERRIDE;
+  virtual void RemoveRoute(int32 routing_id) OVERRIDE;
   virtual bool WaitForBackingStoreMsg(int render_widget_id,
                                       const base::TimeDelta& max_delay,
                                       IPC::Message* msg) OVERRIDE;
@@ -52,25 +52,21 @@ class MockRenderProcessHost : public RenderProcessHost {
   virtual bool FastShutdownStarted() const OVERRIDE;
   virtual void DumpHandles() OVERRIDE;
   virtual base::ProcessHandle GetHandle() const OVERRIDE;
+  virtual TransportDIB* MapTransportDIB(TransportDIB::Id dib_id) OVERRIDE;
   virtual TransportDIB* GetTransportDIB(TransportDIB::Id dib_id) OVERRIDE;
   virtual int GetID() const OVERRIDE;
   virtual bool HasConnection() const OVERRIDE;
   virtual void SetIgnoreInputEvents(bool ignore_input_events) OVERRIDE;
   virtual bool IgnoreInputEvents() const OVERRIDE;
-  virtual void Attach(RenderWidgetHost* host, int routing_id) OVERRIDE;
-  virtual void Release(int routing_id) OVERRIDE;
   virtual void Cleanup() OVERRIDE;
   virtual void AddPendingView() OVERRIDE;
   virtual void RemovePendingView() OVERRIDE;
   virtual void SetSuddenTerminationAllowed(bool allowed) OVERRIDE;
   virtual bool SuddenTerminationAllowed() const OVERRIDE;
-  virtual RenderWidgetHost* GetRenderWidgetHostByID(int routing_id)
-        OVERRIDE;
   virtual BrowserContext* GetBrowserContext() const OVERRIDE;
   virtual bool InSameStoragePartition(
       StoragePartition* partition) const OVERRIDE;
   virtual IPC::ChannelProxy* GetChannel() OVERRIDE;
-  virtual RenderWidgetHostsIterator GetRenderWidgetHostsIterator() OVERRIDE;
   virtual bool FastShutdownForPageCount(size_t count) OVERRIDE;
   virtual base::TimeDelta GetChildProcessIdleTime() const OVERRIDE;
   virtual void SurfaceUpdated(int32 surface_id) OVERRIDE;
@@ -89,6 +85,8 @@ class MockRenderProcessHost : public RenderProcessHost {
     factory_ = factory;
   }
 
+  int GetActiveViewCount();
+
  private:
   // Stores IPC messages that would have been sent to the renderer.
   IPC::TestSink sink_;
@@ -99,6 +97,7 @@ class MockRenderProcessHost : public RenderProcessHost {
   BrowserContext* browser_context_;
 
   IDMap<RenderWidgetHost> render_widget_hosts_;
+  IDMap<IPC::Listener> listeners_;
   bool fast_shutdown_started_;
 
   DISALLOW_COPY_AND_ASSIGN(MockRenderProcessHost);
@@ -110,7 +109,8 @@ class MockRenderProcessHostFactory : public RenderProcessHostFactory {
   virtual ~MockRenderProcessHostFactory();
 
   virtual RenderProcessHost* CreateRenderProcessHost(
-      BrowserContext* browser_context) const OVERRIDE;
+      BrowserContext* browser_context,
+      SiteInstance* site_instance) const OVERRIDE;
 
   // Removes the given MockRenderProcessHost from the MockRenderProcessHost list
   // without deleting it. When a test deletes a MockRenderProcessHost, we need

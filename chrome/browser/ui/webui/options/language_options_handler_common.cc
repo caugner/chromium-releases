@@ -13,13 +13,15 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/prefs/pref_service.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
+#include "chrome/browser/translate/translate_manager.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -44,50 +46,54 @@ void LanguageOptionsHandlerCommon::GetLocalizedValues(
     DictionaryValue* localized_strings) {
   DCHECK(localized_strings);
   static OptionsStringResource resources[] = {
-    { "add_button", IDS_OPTIONS_SETTINGS_LANGUAGES_ADD_BUTTON },
+    { "addButton", IDS_OPTIONS_SETTINGS_LANGUAGES_ADD_BUTTON },
     { "languages", IDS_OPTIONS_SETTINGS_LANGUAGES_LANGUAGES },
-    { "add_language_instructions",
+    { "addLanguageInstructions",
       IDS_OPTIONS_SETTINGS_LANGUAGES_ADD_LANGUAGE_INSTRUCTIONS },
-    { "cannot_be_displayed_in_this_language",
+    { "cannotBeDisplayedInThisLanguage",
       IDS_OPTIONS_SETTINGS_LANGUAGES_CANNOT_BE_DISPLAYED_IN_THIS_LANGUAGE,
       IDS_PRODUCT_NAME },
-    { "is_displayed_in_this_language",
+    { "isDisplayedInThisLanguage",
       IDS_OPTIONS_SETTINGS_LANGUAGES_IS_DISPLAYED_IN_THIS_LANGUAGE,
       IDS_PRODUCT_NAME },
-    { "display_in_this_language",
+    { "displayInThisLanguage",
       IDS_OPTIONS_SETTINGS_LANGUAGES_DISPLAY_IN_THIS_LANGUAGE,
       IDS_PRODUCT_NAME },
-    { "restart_required", IDS_OPTIONS_RELAUNCH_REQUIRED },
+    { "restartRequired", IDS_OPTIONS_RELAUNCH_REQUIRED },
   // OS X uses the OS native spellchecker so no need for these strings.
 #if !defined(OS_MACOSX)
-    { "use_this_for_spell_checking",
+    { "useThisForSpellChecking",
       IDS_OPTIONS_SETTINGS_USE_THIS_FOR_SPELL_CHECKING },
-    { "cannot_be_used_for_spell_checking",
+    { "cannotBeUsedForSpellChecking",
       IDS_OPTIONS_SETTINGS_CANNOT_BE_USED_FOR_SPELL_CHECKING },
-    { "is_used_for_spell_checking",
+    { "isUsedForSpellChecking",
       IDS_OPTIONS_SETTINGS_IS_USED_FOR_SPELL_CHECKING },
-    { "enable_spell_check", IDS_OPTIONS_ENABLE_SPELLCHECK },
-    { "enable_auto_spell_correction",
+    { "enableSpellCheck", IDS_OPTIONS_ENABLE_SPELLCHECK },
+    { "enableAutoSpellCorrection",
       IDS_OPTIONS_ENABLE_AUTO_SPELL_CORRECTION },
-    { "downloading_dictionary", IDS_OPTIONS_DICTIONARY_DOWNLOADING },
-    { "download_failed", IDS_OPTIONS_DICTIONARY_DOWNLOAD_FAILED },
-    { "retry_button", IDS_OPTIONS_DICTIONARY_DOWNLOAD_RETRY },
-    { "download_fail_help", IDS_OPTIONS_DICTIONARY_DOWNLOAD_FAIL_HELP },
+    { "downloadingDictionary", IDS_OPTIONS_DICTIONARY_DOWNLOADING },
+    { "downloadFailed", IDS_OPTIONS_DICTIONARY_DOWNLOAD_FAILED },
+    { "retryButton", IDS_OPTIONS_DICTIONARY_DOWNLOAD_RETRY },
+    { "downloadFailHelp", IDS_OPTIONS_DICTIONARY_DOWNLOAD_FAIL_HELP },
 #endif  // !OS_MACOSX
-    { "add_language_title", IDS_OPTIONS_LANGUAGES_ADD_TITLE },
-    { "add_language_select_label", IDS_OPTIONS_LANGUAGES_ADD_SELECT_LABEL },
-    { "restart_button", IDS_OPTIONS_SETTINGS_LANGUAGES_RELAUNCH_BUTTON }
+    { "addLanguageTitle", IDS_OPTIONS_LANGUAGES_ADD_TITLE },
+    { "addLanguageSelectLabel", IDS_OPTIONS_LANGUAGES_ADD_SELECT_LABEL },
+    { "restartButton", IDS_OPTIONS_SETTINGS_LANGUAGES_RELAUNCH_BUTTON },
+    { "dontTranslateInThisLanguage",
+      IDS_OPTIONS_LANGUAGES_DONT_TRANSLATE_IN_THIS_LANGUAGE },
+    { "cannotTranslateInThisLanguage",
+      IDS_OPTIONS_LANGUAGES_CANNOT_TRANSLATE_IN_THIS_LANGUAGE },
   };
 
 #if defined(ENABLE_SETTINGS_APP)
   static OptionsStringResource app_resources[] = {
-    { "cannot_be_displayed_in_this_language",
+    { "cannotBeDisplayedInThisLanguage",
       IDS_OPTIONS_SETTINGS_LANGUAGES_CANNOT_BE_DISPLAYED_IN_THIS_LANGUAGE,
       IDS_SETTINGS_APP_LAUNCHER_PRODUCT_NAME },
-    { "is_displayed_in_this_language",
+    { "isDisplayedInThisLanguage",
       IDS_OPTIONS_SETTINGS_LANGUAGES_IS_DISPLAYED_IN_THIS_LANGUAGE,
       IDS_SETTINGS_APP_LAUNCHER_PRODUCT_NAME },
-    { "display_in_this_language",
+    { "displayInThisLanguage",
       IDS_OPTIONS_SETTINGS_LANGUAGES_DISPLAY_IN_THIS_LANGUAGE,
       IDS_SETTINGS_APP_LAUNCHER_PRODUCT_NAME },
   };
@@ -113,7 +119,22 @@ void LanguageOptionsHandlerCommon::GetLocalizedValues(
   bool enable_spelling_auto_correct =
       command_line.HasSwitch(switches::kEnableSpellingAutoCorrect);
   localized_strings->SetBoolean("enableSpellingAutoCorrect",
-      enable_spelling_auto_correct);
+                                enable_spelling_auto_correct);
+  bool enable_translate_settings =
+      command_line.HasSwitch(switches::kEnableTranslateSettings);
+  localized_strings->SetBoolean("enableTranslateSettings",
+                                enable_translate_settings);
+
+  std::vector<std::string> languages;
+  TranslateManager::GetSupportedLanguages(&languages);
+
+  ListValue* languages_list = new ListValue();
+  for (std::vector<std::string>::iterator it = languages.begin();
+       it != languages.end(); ++it) {
+    languages_list->Append(new StringValue(*it));
+  }
+
+  localized_strings->Set("translateSupportedLanguages", languages_list);
 }
 
 void LanguageOptionsHandlerCommon::Uninitialize() {

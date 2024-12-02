@@ -7,12 +7,13 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"  // IDC_HISTORY_MENU
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
+#include "chrome/browser/favicon/favicon_types.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/profiles/profile.h"
@@ -206,12 +207,12 @@ void HistoryMenuBridge::TabRestoreServiceChanged(TabRestoreService* service) {
       item->session_id = entry_win->id;
 
       // Create the submenu.
-      scoped_nsobject<NSMenu> submenu([[NSMenu alloc] init]);
+      base::scoped_nsobject<NSMenu> submenu([[NSMenu alloc] init]);
 
       // Create standard items within the window submenu.
       NSString* restore_title = l10n_util::GetNSString(
           IDS_HISTORY_CLOSED_RESTORE_WINDOW_MAC);
-      scoped_nsobject<NSMenuItem> restore_item(
+      base::scoped_nsobject<NSMenuItem> restore_item(
           [[NSMenuItem alloc] initWithTitle:restore_title
                                      action:@selector(openHistoryMenuItem:)
                               keyEquivalent:@""]);
@@ -460,7 +461,7 @@ void HistoryMenuBridge::GetFaviconForHistoryItem(HistoryItem* item) {
   CancelableTaskTracker::TaskId task_id = service->GetFaviconImageForURL(
       FaviconService::FaviconForURLParams(profile_,
                                           item->url,
-                                          history::FAVICON,
+                                          chrome::FAVICON,
                                           gfx::kFaviconSize),
       base::Bind(&HistoryMenuBridge::GotFaviconData,
                  base::Unretained(this),
@@ -472,7 +473,7 @@ void HistoryMenuBridge::GetFaviconForHistoryItem(HistoryItem* item) {
 
 void HistoryMenuBridge::GotFaviconData(
     HistoryItem* item,
-    const history::FaviconImageResult& image_result) {
+    const chrome::FaviconImageResult& image_result) {
   // Since we're going to do Cocoa-y things, make sure this is the main thread.
   DCHECK([NSThread isMainThread]);
 

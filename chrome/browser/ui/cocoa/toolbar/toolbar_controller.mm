@@ -10,9 +10,9 @@
 #include "base/mac/mac_util.h"
 #include "base/memory/singleton.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
@@ -20,8 +20,8 @@
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search/search.h"
+#include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -35,7 +35,6 @@
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/ui/cocoa/menu_button.h"
-#import "chrome/browser/ui/cocoa/menu_controller.h"
 #import "chrome/browser/ui/cocoa/toolbar/back_forward_menu_controller.h"
 #import "chrome/browser/ui/cocoa/toolbar/reload_button.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_button.h"
@@ -59,6 +58,7 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#import "ui/base/cocoa/menu_controller.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -73,10 +73,6 @@ namespace {
 
 // Height of the toolbar in pixels when the bookmark bar is closed.
 const CGFloat kBaseToolbarHeightNormal = 35.0;
-
-// Height of the toolbar in pixels when the bookmark bar is if instant extended
-// is enabled.
-const CGFloat kBaseToolbarHeightInstantExtended = 36.0;
 
 // The minimum width of the location bar in pixels.
 const CGFloat kMinimumLocationBarWidth = 100.0;
@@ -221,16 +217,6 @@ class NotificationBridge
 // Now we can hook up bridges that rely on UI objects such as the location
 // bar and button state.
 - (void)awakeFromNib {
-  // Make the location bar taller in instant extended mode. TODO(sail): Move
-  // this to the xib file once this switch is removed.
-  if (chrome::IsInstantExtendedAPIEnabled()) {
-    NSRect toolbarFrame = [[self view] frame];
-    toolbarFrame.size.height += 1;
-    [[self view] setFrame:toolbarFrame];
-    NSRect frame = NSInsetRect([locationBar_ frame], 0, -1);
-    [locationBar_ setFrame:frame];
-  }
-
   [[backButton_ cell] setImageID:IDR_BACK
                   forButtonState:image_button_cell::kDefaultState];
   [[backButton_ cell] setImageID:IDR_BACK_H
@@ -751,9 +737,6 @@ class NotificationBridge
   // With no toolbar, just ignore the compression.
   if (!hasToolbar_)
     return NSHeight([locationBar_ frame]);
-
-  if (chrome::IsInstantExtendedAPIEnabled())
-    return kBaseToolbarHeightInstantExtended - compressByHeight;
 
   return kBaseToolbarHeightNormal - compressByHeight;
 }

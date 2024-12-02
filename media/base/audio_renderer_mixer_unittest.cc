@@ -52,8 +52,8 @@ class AudioRendererMixerTest
         std::tr1::get<1>(GetParam()), 16, kLowLatencyBufferSize);
 
     sink_ = new MockAudioRendererSink();
-    EXPECT_CALL(*sink_, Start());
-    EXPECT_CALL(*sink_, Stop());
+    EXPECT_CALL(*sink_.get(), Start());
+    EXPECT_CALL(*sink_.get(), Stop());
 
     mixer_.reset(new AudioRendererMixer(
         input_parameters_, output_parameters_, sink_));
@@ -415,32 +415,32 @@ TEST_P(AudioRendererMixerBehavioralTest, MixerPausesStream) {
   mixer_->set_pause_delay_for_testing(kPauseTime);
 
   base::WaitableEvent pause_event(true, false);
-  EXPECT_CALL(*sink_, Pause())
-      .Times(2).WillRepeatedly(SignalEvent(&pause_event));
+  EXPECT_CALL(*sink_.get(), Pause()).Times(2)
+      .WillRepeatedly(SignalEvent(&pause_event));
   InitializeInputs(1);
 
   // Ensure never playing the input results in a sink pause.
   const base::TimeDelta kSleepTime = base::TimeDelta::FromMilliseconds(100);
-  base::Time start_time = base::Time::Now();
+  base::TimeTicks start_time = base::TimeTicks::Now();
   while (!pause_event.IsSignaled()) {
     mixer_callback_->Render(audio_bus_.get(), 0);
     base::PlatformThread::Sleep(kSleepTime);
-    ASSERT_TRUE(base::Time::Now() - start_time < kTestTimeout);
+    ASSERT_TRUE(base::TimeTicks::Now() - start_time < kTestTimeout);
   }
   pause_event.Reset();
 
   // Playing the input for the first time should cause a sink play.
   mixer_inputs_[0]->Start();
-  EXPECT_CALL(*sink_, Play());
+  EXPECT_CALL(*sink_.get(), Play());
   mixer_inputs_[0]->Play();
   mixer_inputs_[0]->Pause();
 
   // Ensure once the input is paused the sink eventually pauses.
-  start_time = base::Time::Now();
+  start_time = base::TimeTicks::Now();
   while (!pause_event.IsSignaled()) {
     mixer_callback_->Render(audio_bus_.get(), 0);
     base::PlatformThread::Sleep(kSleepTime);
-    ASSERT_TRUE(base::Time::Now() - start_time < kTestTimeout);
+    ASSERT_TRUE(base::TimeTicks::Now() - start_time < kTestTimeout);
   }
 
   mixer_inputs_[0]->Stop();

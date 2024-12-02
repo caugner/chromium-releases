@@ -39,3 +39,12 @@ class PlatformBackend(object):
 
   def GetChildPids(self, pid):  # pylint: disable=W0613
     raise NotImplementedError()
+
+  def GetCommandLine(self, pid):
+    raise NotImplementedError()
+
+  def GetOSName(self):
+    raise NotImplementedError()
+
+  def GetOSVersionName(self):
+    return None

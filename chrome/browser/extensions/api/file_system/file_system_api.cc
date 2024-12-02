@@ -4,14 +4,15 @@
 
 #include "chrome/browser/extensions/api/file_system/file_system_api.h"
 
+#include "apps/saved_files_service.h"
 #include "base/bind.h"
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/file_handlers/app_file_handler_util.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -33,10 +34,10 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 #include "ui/shell_dialogs/selected_file_info.h"
-#include "webkit/fileapi/external_mount_points.h"
-#include "webkit/fileapi/file_system_types.h"
-#include "webkit/fileapi/file_system_util.h"
-#include "webkit/fileapi/isolated_context.h"
+#include "webkit/browser/fileapi/external_mount_points.h"
+#include "webkit/browser/fileapi/isolated_context.h"
+#include "webkit/common/fileapi/file_system_types.h"
+#include "webkit/common/fileapi/file_system_util.h"
 
 #if defined(OS_MACOSX)
 #include <CoreFoundation/CoreFoundation.h>
@@ -47,6 +48,8 @@
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #endif
 
+using apps::SavedFileEntry;
+using apps::SavedFilesService;
 using fileapi::IsolatedContext;
 
 const char kInvalidParameters[] = "Invalid parameters";
@@ -54,25 +57,36 @@ const char kSecurityError[] = "Security error";
 const char kInvalidCallingPage[] = "Invalid calling page. This function can't "
     "be called from a background page.";
 const char kUserCancelled[] = "User cancelled";
-const char kWritableFileError[] = "Invalid file for writing";
+const char kWritableFileError[] =
+    "Cannot write to file in a restricted location";
 const char kRequiresFileSystemWriteError[] =
     "Operation requires fileSystem.write permission";
+const char kUnknownIdError[] = "Unknown id";
 
 namespace file_system = extensions::api::file_system;
 namespace ChooseEntry = file_system::ChooseEntry;
 
 namespace {
 
+const int kBlacklistedPaths[] = {
+  chrome::DIR_APP,
+  chrome::DIR_USER_DATA,
+};
+
+#if defined(OS_CHROMEOS)
+// On Chrome OS, the default downloads directory is a subdirectory of user data
+// directory, and should be whitelisted.
+const int kWhitelistedPaths[] = {
+  chrome::DIR_DEFAULT_DOWNLOADS_SAFE,
+};
+#endif
+
 #if defined(OS_MACOSX)
 // Retrieves the localized display name for the base name of the given path.
 // If the path is not localized, this will just return the base name.
 std::string GetDisplayBaseName(const base::FilePath& path) {
-  base::mac::ScopedCFTypeRef<CFURLRef> url(
-      CFURLCreateFromFileSystemRepresentation(
-          NULL,
-          (const UInt8*)path.value().c_str(),
-          path.value().length(),
-          true));
+  base::ScopedCFTypeRef<CFURLRef> url(CFURLCreateFromFileSystemRepresentation(
+      NULL, (const UInt8*)path.value().c_str(), path.value().length(), true));
   if (!url)
     return path.BaseName().value();
 
@@ -140,13 +154,14 @@ bool g_skip_picker_for_test = false;
 bool g_use_suggested_path_for_test = false;
 base::FilePath* g_path_to_be_picked_for_test;
 
-bool GetFilePathOfFileEntry(const std::string& filesystem_name,
-                            const std::string& filesystem_path,
-                            const content::RenderViewHost* render_view_host,
-                            base::FilePath* file_path,
-                            std::string* error) {
-  std::string filesystem_id;
-  if (!fileapi::CrackIsolatedFileSystemName(filesystem_name, &filesystem_id)) {
+bool GetFileSystemAndPathOfFileEntry(
+    const std::string& filesystem_name,
+    const std::string& filesystem_path,
+    const content::RenderViewHost* render_view_host,
+    std::string* filesystem_id,
+    base::FilePath* file_path,
+    std::string* error) {
+  if (!fileapi::CrackIsolatedFileSystemName(filesystem_name, filesystem_id)) {
     *error = kInvalidParameters;
     return false;
   }
@@ -156,7 +171,7 @@ bool GetFilePathOfFileEntry(const std::string& filesystem_name,
   content::ChildProcessSecurityPolicy* policy =
       content::ChildProcessSecurityPolicy::GetInstance();
   if (!policy->CanReadFileSystem(render_view_host->GetProcess()->GetID(),
-                                 filesystem_id)) {
+                                 *filesystem_id)) {
     *error = kSecurityError;
     return false;
   }
@@ -164,10 +179,10 @@ bool GetFilePathOfFileEntry(const std::string& filesystem_name,
   IsolatedContext* context = IsolatedContext::GetInstance();
   base::FilePath relative_path =
       base::FilePath::FromUTF8Unsafe(filesystem_path);
-  base::FilePath virtual_path = context->CreateVirtualRootPath(filesystem_id)
+  base::FilePath virtual_path = context->CreateVirtualRootPath(*filesystem_id)
       .Append(relative_path);
   if (!context->CrackVirtualPath(virtual_path,
-                                 &filesystem_id,
+                                 filesystem_id,
                                  NULL,
                                  file_path)) {
     *error = kInvalidParameters;
@@ -177,10 +192,51 @@ bool GetFilePathOfFileEntry(const std::string& filesystem_name,
   return true;
 }
 
-bool DoCheckWritableFile(const base::FilePath& path) {
+bool GetFilePathOfFileEntry(const std::string& filesystem_name,
+                            const std::string& filesystem_path,
+                            const content::RenderViewHost* render_view_host,
+                            base::FilePath* file_path,
+                            std::string* error) {
+  std::string filesystem_id;
+  return GetFileSystemAndPathOfFileEntry(filesystem_name,
+                                         filesystem_path,
+                                         render_view_host,
+                                         &filesystem_id,
+                                         file_path,
+                                         error);
+}
+
+bool DoCheckWritableFile(const base::FilePath& path,
+                         const base::FilePath& extension_directory) {
   // Don't allow links.
   if (file_util::PathExists(path) && file_util::IsLink(path))
     return false;
+
+  if (extension_directory == path || extension_directory.IsParent(path))
+    return false;
+
+  bool is_whitelisted_path = false;
+
+#if defined(OS_CHROMEOS)
+  for (size_t i = 0; i < arraysize(kWhitelistedPaths); i++) {
+    base::FilePath whitelisted_path;
+    if (PathService::Get(kWhitelistedPaths[i], &whitelisted_path) &&
+        (whitelisted_path == path || whitelisted_path.IsParent(path))) {
+      is_whitelisted_path = true;
+      break;
+    }
+  }
+#endif
+
+  if (!is_whitelisted_path) {
+    for (size_t i = 0; i < arraysize(kBlacklistedPaths); i++) {
+      base::FilePath blacklisted_path;
+      if (PathService::Get(kBlacklistedPaths[i], &blacklisted_path) &&
+          (blacklisted_path == path || blacklisted_path.IsParent(path))) {
+        return false;
+      }
+    }
+  }
 
   // Create the file if it doesn't already exist.
   base::PlatformFileError error = base::PLATFORM_FILE_OK;
@@ -197,11 +253,12 @@ bool DoCheckWritableFile(const base::FilePath& path) {
 }
 
 void CheckLocalWritableFile(const base::FilePath& path,
+                            const base::FilePath& extension_directory,
                             const base::Closure& on_success,
                             const base::Closure& on_failure) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
   content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-      DoCheckWritableFile(path) ? on_success : on_failure);
+      DoCheckWritableFile(path, extension_directory) ? on_success : on_failure);
 }
 
 #if defined(OS_CHROMEOS)
@@ -321,11 +378,17 @@ void FileSystemEntryFunction::CheckWritableFile(const base::FilePath& path) {
   }
 #endif
   content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&CheckLocalWritableFile, path, on_success, on_failure));
+      base::Bind(&CheckLocalWritableFile, path, extension_->path(), on_success,
+                 on_failure));
 }
 
 void FileSystemEntryFunction::RegisterFileSystemAndSendResponse(
     const base::FilePath& path, EntryType entry_type) {
+  RegisterFileSystemAndSendResponseWithIdOverride(path, entry_type, "");
+}
+
+void FileSystemEntryFunction::RegisterFileSystemAndSendResponseWithIdOverride(
+    const base::FilePath& path, EntryType entry_type, const std::string& id) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
   fileapi::IsolatedContext* isolated_context =
@@ -338,11 +401,14 @@ void FileSystemEntryFunction::RegisterFileSystemAndSendResponse(
           GetExtension()->id(), render_view_host_->GetProcess()->GetID(), path,
           writable);
 
-  DictionaryValue* dict = new DictionaryValue();
+  base::DictionaryValue* dict = new base::DictionaryValue();
   SetResult(dict);
   dict->SetString("fileSystemId", file_entry.filesystem_id);
   dict->SetString("baseName", file_entry.registered_name);
-  dict->SetString("id", file_entry.id);
+  if (id.empty())
+    dict->SetString("id", file_entry.id);
+  else
+    dict->SetString("id", id);
 
   SendResponse(true);
 }
@@ -558,7 +624,7 @@ void FileSystemChooseEntryFunction::RegisterTempExternalFileSystemForTest(
 void FileSystemChooseEntryFunction::SetInitialPathOnFileThread(
     const base::FilePath& suggested_name,
     const base::FilePath& previous_path) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
   if (!previous_path.empty() && file_util::DirectoryExists(previous_path)) {
     initial_path_ = previous_path.Append(suggested_name);
   } else {
@@ -689,8 +755,8 @@ bool FileSystemChooseEntryFunction::RunImpl() {
       extension_prefs()->GetLastChooseEntryDirectory(
           GetExtension()->id(), &previous_path);
 
-  BrowserThread::PostTaskAndReply(
-      BrowserThread::FILE,
+  content::BrowserThread::PostTaskAndReply(
+      content::BrowserThread::FILE,
       FROM_HERE,
       base::Bind(
           &FileSystemChooseEntryFunction::SetInitialPathOnFileThread, this,
@@ -698,6 +764,82 @@ bool FileSystemChooseEntryFunction::RunImpl() {
       base::Bind(
           &FileSystemChooseEntryFunction::ShowPicker, this, file_type_info,
           picker_type, entry_type));
+  return true;
+}
+
+bool FileSystemRetainEntryFunction::RunImpl() {
+  std::string entry_id;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &entry_id));
+  SavedFilesService* saved_files_service = SavedFilesService::Get(profile());
+  // Add the file to the retain list if it is not already on there.
+  if (!saved_files_service->IsRegistered(extension_->id(), entry_id) &&
+      !RetainFileEntry(entry_id)) {
+    return false;
+  }
+  saved_files_service->EnqueueFileEntry(extension_->id(), entry_id);
+  return true;
+}
+
+bool FileSystemRetainEntryFunction::RetainFileEntry(
+    const std::string& entry_id) {
+  std::string filesystem_name;
+  std::string filesystem_path;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(1, &filesystem_name));
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(2, &filesystem_path));
+  std::string filesystem_id;
+  base::FilePath path;
+  if (!GetFileSystemAndPathOfFileEntry(filesystem_name,
+                                       filesystem_path,
+                                       render_view_host_,
+                                       &filesystem_id,
+                                       &path,
+                                       &error_)) {
+    return false;
+  }
+
+  content::ChildProcessSecurityPolicy* policy =
+      content::ChildProcessSecurityPolicy::GetInstance();
+  bool is_writable = policy->CanReadWriteFileSystem(
+      render_view_host_->GetProcess()->GetID(), filesystem_id);
+  SavedFilesService::Get(profile())->RegisterFileEntry(
+      extension_->id(), entry_id, path, is_writable);
+  return true;
+}
+
+bool FileSystemIsRestorableFunction::RunImpl() {
+  std::string entry_id;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &entry_id));
+  SetResult(new base::FundamentalValue(SavedFilesService::Get(
+      profile())->IsRegistered(extension_->id(), entry_id)));
+  return true;
+}
+
+bool FileSystemRestoreEntryFunction::RunImpl() {
+  std::string entry_id;
+  bool needs_new_entry;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &entry_id));
+  EXTENSION_FUNCTION_VALIDATE(args_->GetBoolean(1, &needs_new_entry));
+  const SavedFileEntry* file_entry = SavedFilesService::Get(
+      profile())->GetFileEntry(extension_->id(), entry_id);
+  if (!file_entry) {
+    error_ = kUnknownIdError;
+    return false;
+  }
+
+  SavedFilesService::Get(profile())->EnqueueFileEntry(
+      extension_->id(), entry_id);
+
+  // Only create a new file entry if the renderer requests one.
+  // |needs_new_entry| will be false if the renderer already has an Entry for
+  // |entry_id|.
+  if (needs_new_entry) {
+    // Reuse the ID of the retained file entry so retainEntry returns the same
+    // ID that was passed to restoreEntry.
+    RegisterFileSystemAndSendResponseWithIdOverride(
+        file_entry->path,
+        file_entry->writable ? WRITABLE : READ_ONLY,
+        file_entry->id);
+  }
   return true;
 }
 

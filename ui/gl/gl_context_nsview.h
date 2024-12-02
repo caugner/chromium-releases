@@ -8,7 +8,7 @@
 #import <AppKit/NSOpenGL.h>
 
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #include "ui/gl/gl_context.h"
 
 namespace gfx {
@@ -17,7 +17,7 @@ class GLSurface;
 
 // GLContextNSView encapsulates an NSView-based GLContext.  This is paired with
 // the GLSurfaceNSView class.
-class GLContextNSView : public GLContext {
+class GLContextNSView : public GLContextReal {
  public:
   explicit GLContextNSView(GLShareGroup* group);
   virtual ~GLContextNSView();
@@ -36,7 +36,7 @@ class GLContextNSView : public GLContext {
   void FlushBuffer();
 
  private:
-  scoped_nsobject<NSOpenGLContext> context_;
+  base::scoped_nsobject<NSOpenGLContext> context_;
   GpuPreference gpu_preference_;
 
   DISALLOW_COPY_AND_ASSIGN(GLContextNSView);

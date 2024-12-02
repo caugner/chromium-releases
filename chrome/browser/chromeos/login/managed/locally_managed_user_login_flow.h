@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/chromeos/login/user_flow.h"
 
 namespace chromeos {
@@ -29,7 +29,6 @@ class LocallyManagedUserLoginFlow : public ExtendedUserFlow {
       OVERRIDE;
   virtual void LaunchExtraSteps(Profile* profile) OVERRIDE;
 
-  virtual void LoadSyncSetupData();
   virtual void OnSyncSetupDataLoaded(const std::string& token);
   virtual void ConfigureSync(const std::string& token);
 

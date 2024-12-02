@@ -30,7 +30,6 @@ class FixRateTest : public ::testing::Test {
  protected:
   FixRateTest()
       : rtt_(QuicTime::Delta::FromMilliseconds(30)),
-        unused_bandwidth_(QuicBandwidth::Zero()),
         sender_(new FixRateSender(&clock_)),
         receiver_(new FixRateReceiverPeer()),
         start_(clock_.Now()) {
@@ -38,7 +37,6 @@ class FixRateTest : public ::testing::Test {
     clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(2));
   }
   const QuicTime::Delta rtt_;
-  const QuicBandwidth unused_bandwidth_;
   MockClock clock_;
   SendAlgorithmInterface::SentPacketsMap unused_packet_map_;
   scoped_ptr<FixRateSender> sender_;
@@ -61,26 +59,26 @@ TEST_F(FixRateTest, SenderAPI) {
   feedback.type = kFixRate;
   feedback.fix_rate.bitrate = QuicBandwidth::FromKBytesPerSecond(300);
   sender_->OnIncomingQuicCongestionFeedbackFrame(feedback,  clock_.Now(),
-      unused_bandwidth_, unused_packet_map_);
+                                                 unused_packet_map_);
   EXPECT_EQ(300000, sender_->BandwidthEstimate().ToBytesPerSecond());
   EXPECT_TRUE(sender_->TimeUntilSend(
-      clock_.Now(), NOT_RETRANSMISSION, NO_RETRANSMITTABLE_DATA).IsZero());
+      clock_.Now(), NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA).IsZero());
   sender_->SentPacket(clock_.Now(), 1, kMaxPacketSize, NOT_RETRANSMISSION);
   EXPECT_TRUE(sender_->TimeUntilSend(
-      clock_.Now(), NOT_RETRANSMISSION, NO_RETRANSMITTABLE_DATA).IsZero());
+      clock_.Now(), NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA).IsZero());
   sender_->SentPacket(clock_.Now(), 2, kMaxPacketSize, NOT_RETRANSMISSION);
   sender_->SentPacket(clock_.Now(), 3, 600, NOT_RETRANSMISSION);
   EXPECT_EQ(QuicTime::Delta::FromMilliseconds(10), sender_->TimeUntilSend(
-      clock_.Now(), NOT_RETRANSMISSION, NO_RETRANSMITTABLE_DATA));
+      clock_.Now(), NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA));
   clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(2));
   EXPECT_EQ(QuicTime::Delta::Infinite(), sender_->TimeUntilSend(
-      clock_.Now(), NOT_RETRANSMISSION, NO_RETRANSMITTABLE_DATA));
+      clock_.Now(), NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA));
   clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(8));
   sender_->OnIncomingAck(1, kMaxPacketSize, rtt_);
   sender_->OnIncomingAck(2, kMaxPacketSize, rtt_);
   sender_->OnIncomingAck(3, 600, rtt_);
   EXPECT_TRUE(sender_->TimeUntilSend(
-      clock_.Now(), NOT_RETRANSMISSION, NO_RETRANSMITTABLE_DATA).IsZero());
+      clock_.Now(), NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA).IsZero());
 }
 
 TEST_F(FixRateTest, FixRatePacing) {
@@ -91,20 +89,20 @@ TEST_F(FixRateTest, FixRatePacing) {
   receiver_->SetBitrate(QuicBandwidth::FromKBytesPerSecond(240));
   ASSERT_TRUE(receiver_->GenerateCongestionFeedback(&feedback));
   sender_->OnIncomingQuicCongestionFeedbackFrame(feedback, clock_.Now(),
-      unused_bandwidth_, unused_packet_map_);
+                                                 unused_packet_map_);
   QuicTime acc_advance_time(QuicTime::Zero());
   QuicPacketSequenceNumber sequence_number = 0;
   for (int i = 0; i < num_packets; i += 2) {
     EXPECT_TRUE(sender_->TimeUntilSend(
-        clock_.Now(), NOT_RETRANSMISSION, NO_RETRANSMITTABLE_DATA).IsZero());
+        clock_.Now(), NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA).IsZero());
     sender_->SentPacket(clock_.Now(), sequence_number++, packet_size,
                         NOT_RETRANSMISSION);
     EXPECT_TRUE(sender_->TimeUntilSend(
-        clock_.Now(), NOT_RETRANSMISSION, NO_RETRANSMITTABLE_DATA).IsZero());
+        clock_.Now(), NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA).IsZero());
     sender_->SentPacket(clock_.Now(), sequence_number++, packet_size,
                         NOT_RETRANSMISSION);
     QuicTime::Delta advance_time = sender_->TimeUntilSend(
-        clock_.Now(), NOT_RETRANSMISSION, NO_RETRANSMITTABLE_DATA);
+        clock_.Now(), NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA);
     clock_.AdvanceTime(advance_time);
     sender_->OnIncomingAck(sequence_number - 1, packet_size, rtt_);
     sender_->OnIncomingAck(sequence_number - 2, packet_size, rtt_);

@@ -10,15 +10,14 @@
 #include "base/command_line.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
-#import "base/memory/scoped_nsobject.h"
+#import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"  // IDC_*
 #include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/devtools/devtools_window.h"
-#include "chrome/browser/managed_mode/managed_mode.h"
 #include "chrome/browser/profiles/avatar_menu_model.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
@@ -42,7 +41,6 @@
 #import "chrome/browser/ui/cocoa/chrome_to_mobile_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/dev_tools_controller.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
-#import "chrome/browser/ui/cocoa/event_utils.h"
 #include "chrome/browser/ui/cocoa/extensions/extension_keybinding_registry_cocoa.h"
 #import "chrome/browser/ui/cocoa/fast_resize_view.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
@@ -67,16 +65,19 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/browser/ui/window_sizer/window_sizer.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
+#include "content/public/common/content_switches.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#import "ui/base/cocoa/cocoa_event_utils.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/mac/scoped_ns_disable_screen_updates.h"
@@ -163,6 +164,7 @@ using content::OpenURLParams;
 using content::Referrer;
 using content::RenderWidgetHostView;
 using content::WebContents;
+using web_modal::WebContentsModalDialogManager;
 
 @interface NSWindow (NSPrivateApis)
 // Note: These functions are private, use -[NSObject respondsToSelector:]
@@ -264,6 +266,14 @@ enum {
     ownsBrowser_ = ownIt;
     NSWindow* window = [self window];
     windowShim_.reset(new BrowserWindowCocoa(browser, self));
+
+    // Eagerly enable core animation if requested.
+    if (CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kUseCoreAnimation) &&
+        CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+            switches::kUseCoreAnimation) != "lazy") {
+      [[[self window] contentView] setWantsLayer:YES];
+    }
 
     // Set different minimum sizes on tabbed windows vs non-tabbed, e.g. popups.
     // This has to happen before -enforceMinWindowSize: is called further down.
@@ -374,6 +384,7 @@ enum {
     // ToolbarController.
     infoBarContainerController_.reset(
         [[InfoBarContainerController alloc] initWithResizeDelegate:self]);
+    [self updateInfoBarTipVisibility];
 
     // We don't want to try and show the bar before it gets placed in its parent
     // view, so this step shoudn't be inside the bookmark bar controller's
@@ -565,6 +576,7 @@ enum {
 - (void)updateDevToolsForContents:(WebContents*)contents {
   [devToolsController_ updateDevToolsForWebContents:contents
                                         withProfile:browser_->profile()];
+  [self updateAllowOverlappingViews:[self inPresentationMode]];
 }
 
 // Called when the user wants to close a window or from the shutdown process.
@@ -665,7 +677,7 @@ enum {
     if (devtoolsWindow) {
       RenderWidgetHostView* devtoolsView =
           devtoolsWindow->web_contents()->GetRenderWidgetHostView();
-      if (devtoolsView->HasFocus()) {
+      if (devtoolsView && devtoolsView->HasFocus()) {
         devtoolsView->SetActive(false);
         return;
       }
@@ -1190,7 +1202,7 @@ enum {
     modifierFlags &= ~NSCommandKeyMask;
   }
   WindowOpenDisposition disposition =
-      event_utils::WindowOpenDispositionFromNSEventWithFlags(
+      ui::WindowOpenDispositionFromNSEventWithFlags(
           [NSApp currentEvent], modifierFlags);
   switch (command) {
     case IDC_BACK:
@@ -1474,10 +1486,8 @@ enum {
 - (BOOL)shouldShowAvatar {
   if (![self hasTabStrip])
     return NO;
-  if (browser_->profile()->IsOffTheRecord() ||
-      ManagedMode::IsInManagedMode()) {
+  if (browser_->profile()->IsOffTheRecord())
     return YES;
-  }
 
   ProfileInfoCache& cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
@@ -1525,16 +1535,8 @@ enum {
 
   // Create a controller for the findbar.
   findBarCocoaController_.reset([findBarCocoaController retain]);
+  [self layoutSubviews];
   [self updateSubviewZOrder:[self inPresentationMode]];
-
-  // Place the find bar immediately below the toolbar/attached bookmark bar. In
-  // presentation mode, it hangs off the top of the screen when the bar is
-  // hidden.
-  CGFloat maxY = [self placeBookmarkBarBelowInfoBar] ?
-      NSMinY([[toolbarController_ view] frame]) :
-      NSMinY([[bookmarkBarController_ view] frame]);
-  CGFloat maxWidth = NSWidth([[[self window] contentView] frame]);
-  [findBarCocoaController_ positionFindBarViewAtMaxY:maxY maxWidth:maxWidth];
 }
 
 - (NSWindow*)createFullscreenWindow {
@@ -1600,6 +1602,8 @@ enum {
   [infoBarContainerController_ changeWebContents:contents];
 
   [overlayableContentsController_ onActivateTabWithContents:contents];
+
+  [self updateAllowOverlappingViews:[self inPresentationMode]];
 }
 
 - (void)onTabChanged:(TabStripModelObserver::TabChangeType)change
@@ -1729,6 +1733,7 @@ enum {
   // image to display based on the browser.
   avatarButtonController_.reset(
       [[AvatarButtonController alloc] initWithBrowser:browser_.get()]);
+
   NSView* view = [avatarButtonController_ view];
   [view setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
   [view setHidden:![self shouldShowAvatar]];
@@ -1761,7 +1766,7 @@ enum {
     chrome::ExecuteCommandWithDisposition(
         browser_.get(),
         command,
-        event_utils::WindowOpenDispositionFromNSEvent(event));
+        ui::WindowOpenDispositionFromNSEvent(event));
   }
 }
 
@@ -1796,7 +1801,7 @@ enum {
     chrome::ExecuteCommandWithDisposition(
         browser_.get(),
         command,
-        event_utils::WindowOpenDispositionFromNSEvent(event));
+        ui::WindowOpenDispositionFromNSEvent(event));
   }
 }
 
@@ -1884,10 +1889,7 @@ enum {
 - (id)windowWillReturnFieldEditor:(NSWindow*)sender toObject:(id)obj {
   // Ask the toolbar controller if it wants to return a custom field editor
   // for the specific object.
-  id fieldEditor = [toolbarController_ customFieldEditorForObject:obj];
-  if (!fieldEditor && findBarCocoaController_)
-    fieldEditor = [findBarCocoaController_ customFieldEditorForObject:obj];
-  return fieldEditor;
+  return [toolbarController_ customFieldEditorForObject:obj];
 }
 
 // (Needed for |BookmarkBarControllerDelegate| protocol.)
@@ -1941,6 +1943,19 @@ willAnimateFromState:(BookmarkBar::State)oldState
   return fullscreenExitBubbleController_.get();
 }
 
+- (NSRect)omniboxPopupAnchorRect {
+  // Start with toolbar rect.
+  NSView* toolbarView = [toolbarController_ view];
+  NSRect anchorRect = [toolbarView frame];
+
+  // Adjust to account for height and possible bookmark bar.
+  anchorRect.origin.y =
+      NSMaxY(anchorRect) - [toolbarController_ desiredHeightForCompression:0];
+
+  // Shift to window base coordinates.
+  return [[toolbarView superview] convertRect:anchorRect toView:nil];
+}
+
 - (void)commitInstant {
   if (BrowserInstantController* controller = browser_->instant_controller())
     controller->instant()->CommitIfPossible(INSTANT_COMMIT_FOCUS_LOST);
@@ -1977,6 +1992,21 @@ willAnimateFromState:(BookmarkBar::State)oldState
   [toolbarController_ setDividerOpacity:[self toolbarDividerOpacity]];
   [self updateContentOffsets];
   [self updateSubviewZOrder:[self inPresentationMode]];
+  [self updateInfoBarTipVisibility];
+}
+
+- (void)onFindBarVisibilityChanged {
+  [self updateAllowOverlappingViews:[self inPresentationMode]];
+}
+
+- (void)onHistoryOverlayShown {
+  ++historyOverlayCount_;
+  [self updateAllowOverlappingViews:[self inPresentationMode]];
+}
+
+- (void)onHistoryOverlayHidden {
+  --historyOverlayCount_;
+  [self updateAllowOverlappingViews:[self inPresentationMode]];
 }
 
 @end  // @implementation BrowserWindowController

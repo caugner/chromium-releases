@@ -8,9 +8,8 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/run_loop.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "base/threading/thread.h"
-#include "google_apis/gaia/gaia_urls.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "remoting/host/service_urls.h"
@@ -27,7 +26,7 @@ using remoting::HostStarter;
 bool g_started = false;
 
 // The main message loop.
-MessageLoop* g_message_loop = NULL;
+base::MessageLoop* g_message_loop = NULL;
 
 // Lets us hide the PIN that a user types.
 void SetEcho(bool echo) {
@@ -159,11 +158,9 @@ int main(int argc, char** argv) {
   }
 
   // Start the host.
-  scoped_ptr<HostStarter> host_starter(
-      HostStarter::Create(
-          GaiaUrls::GetInstance()->oauth2_token_url(),
-          remoting::ServiceUrls::GetInstance()->directory_hosts_url(),
-          url_request_context_getter));
+  scoped_ptr<HostStarter> host_starter(HostStarter::Create(
+      remoting::ServiceUrls::GetInstance()->directory_hosts_url(),
+      url_request_context_getter.get()));
   if (redirect_url.empty()) {
     redirect_url = remoting::GetDefaultOauthRedirectUrl();
   }

@@ -4,8 +4,8 @@
 
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile_io_data.h"
@@ -178,7 +178,7 @@ AutocompleteInput::Type AutocompleteInput::Parse(
     // reach the renderer or else the renderer handles internally without
     // reaching the net::URLRequest logic.  We thus won't catch these above, but
     // we should still claim to handle them.
-    if (LowerCaseEqualsASCII(parsed_scheme, chrome::kViewSourceScheme) ||
+    if (LowerCaseEqualsASCII(parsed_scheme, content::kViewSourceScheme) ||
         LowerCaseEqualsASCII(parsed_scheme, chrome::kJavaScriptScheme) ||
         LowerCaseEqualsASCII(parsed_scheme, chrome::kDataScheme))
       return URL;
@@ -266,8 +266,10 @@ AutocompleteInput::Type AutocompleteInput::Parse(
   // use the registry length later below.)
   const string16 host(text.substr(parts->host.begin, parts->host.len));
   const size_t registry_length =
-      net::RegistryControlledDomainService::GetRegistryLength(UTF16ToUTF8(host),
-                                                              false);
+      net::registry_controlled_domains::GetRegistryLength(
+          UTF16ToUTF8(host),
+          net::registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES,
+          net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
   if (registry_length == std::string::npos) {
     // Try to append the desired_tld.
     if (!desired_tld.empty()) {
@@ -275,8 +277,12 @@ AutocompleteInput::Type AutocompleteInput::Parse(
       if (host[host.length() - 1] != '.')
         host_with_tld += '.';
       host_with_tld += desired_tld;
-      if (net::RegistryControlledDomainService::GetRegistryLength(
-          UTF16ToUTF8(host_with_tld), false) != std::string::npos)
+      const size_t tld_length =
+          net::registry_controlled_domains::GetRegistryLength(
+              UTF16ToUTF8(host_with_tld),
+              net::registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES,
+              net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
+      if (tld_length != std::string::npos)
         return URL;  // Something like "99999999999" that looks like a bad IP
                      // address, but becomes valid on attaching a TLD.
     }
@@ -425,7 +431,7 @@ void AutocompleteInput::ParseForEmphasizeComponents(
   int after_scheme_and_colon = parts.scheme.end() + 1;
   // For the view-source scheme, we should emphasize the scheme and host of the
   // URL qualified by the view-source prefix.
-  if (LowerCaseEqualsASCII(scheme_str, chrome::kViewSourceScheme) &&
+  if (LowerCaseEqualsASCII(scheme_str, content::kViewSourceScheme) &&
       (static_cast<int>(text.length()) > after_scheme_and_colon)) {
     // Obtain the URL prefixed by view-source and parse it.
     string16 real_url(text.substr(after_scheme_and_colon));

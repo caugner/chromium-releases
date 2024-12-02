@@ -71,7 +71,7 @@ def DispatchPythonTests(options):
   logging.debug('All available tests: ' + str(test_names))
 
   available_tests = test_collection.GetAvailableTests(
-      options.annotations, options.test_filter)
+      options.annotations, options.exclude_annotations, options.test_filter)
 
   if not available_tests:
     logging.warning('No Python tests to run with current args.')
@@ -87,7 +87,12 @@ def DispatchPythonTests(options):
                                         options.test_apk_jar_path)
     test_files_copier = test_runner.TestRunner(
         options, device_id, 0, test_pkg, [])
-    test_files_copier.PushDependencies()
+    test_files_copier.InstallTestPackage()
+    if options.push_deps:
+      logging.info('Pushing data deps to device.')
+      test_files_copier.PushDataDeps()
+    else:
+      logging.warning('Skipping pushing data deps to device.')
 
   # Actually run the tests.
   if len(attached_devices) > 1 and options.wait_for_debugger:

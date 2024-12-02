@@ -5,6 +5,7 @@
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 
 #include "base/logging.h"
+#include "base/mac/sdk_forward_declarations.h"
 #include "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/nsview_additions.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller.h"
@@ -13,20 +14,14 @@
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#import "ui/base/cocoa/nsgraphics_context_additions.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
-#if !defined(MAC_OS_X_VERSION_10_7) || \
-    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
-@interface NSWindow (LionAPI)
-- (CGFloat)backingScaleFactor;
-@end
-#endif
 
 const int kMaskHeight = 29;  // Height of the mask bitmap.
 const int kFillHeight = 25;  // Height of the "mask on" part of the mask bitmap.
-
 
 // Constants for inset and control points for tab shape.
 const CGFloat kInsetMultiplier = 2.0/3.0;
@@ -147,12 +142,8 @@ const CGFloat kRapidCloseDist = 2.5;
 // view or our child close button.
 - (NSView*)hitTest:(NSPoint)aPoint {
   NSPoint viewPoint = [self convertPoint:aPoint fromView:[self superview]];
-  if (![closeButton_ isHidden]) {
-    if (NSPointInRect(viewPoint,[closeButton_ frame]) &&
-        [closeButton_ hitTest:viewPoint]) {
-      return closeButton_;
-    }
-  }
+  if (![closeButton_ isHidden])
+    if (NSPointInRect(viewPoint, [closeButton_ frame])) return closeButton_;
 
   NSRect pointRect = NSMakeRect(viewPoint.x, viewPoint.y, 1, 1);
 
@@ -220,7 +211,7 @@ const CGFloat kRapidCloseDist = 2.5;
   // strip and then deallocated. This will also result in *us* being
   // deallocated. Both these are bad, so we prevent this by retaining the
   // controller.
-  scoped_nsobject<TabController> controller([controller_ retain]);
+  base::scoped_nsobject<TabController> controller([controller_ retain]);
 
   // Try to initiate a drag. This will spin a custom event loop and may
   // dispatch other mouse events.
@@ -318,7 +309,7 @@ const CGFloat kRapidCloseDist = 2.5;
 
   ThemeService* themeProvider =
       static_cast<ThemeService*>([[self window] themeProvider]);
-  [context setPatternPhase:[[self window] themePatternPhase]];
+  [context cr_setPatternPhase:[[self window] themePatternPhase] forView:self];
 
 
   CGImageRef mask([self tabClippingMask]);
@@ -388,7 +379,7 @@ const CGFloat kRapidCloseDist = 2.5;
     // Draw a mouse hover gradient for the default themes.
     if (!selected && hoverAlpha > 0) {
       if (themeProvider && !hasCustomTheme) {
-        scoped_nsobject<NSGradient> glow([NSGradient alloc]);
+        base::scoped_nsobject<NSGradient> glow([NSGradient alloc]);
         [glow initWithStartingColor:[NSColor colorWithCalibratedWhite:1.0
                                         alpha:1.0 * hoverAlpha]
                         endingColor:[NSColor colorWithCalibratedWhite:1.0
@@ -676,7 +667,7 @@ const CGFloat kRapidCloseDist = 2.5;
 
   // Image masks must be in the DeviceGray colorspace. Create a context and
   // draw the mask into it.
-  base::mac::ScopedCFTypeRef<CGColorSpaceRef> colorspace(
+  base::ScopedCFTypeRef<CGColorSpaceRef> colorspace(
       CGColorSpaceCreateDeviceGray());
   CGContextRef maskContext =
       CGBitmapContextCreate(NULL, tabWidth * scale, kMaskHeight * scale,

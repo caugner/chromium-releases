@@ -4,25 +4,26 @@
 
 #include "chrome/browser/bookmarks/bookmark_html_writer.h"
 
-#include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/i18n/time_formatting.h"
-#include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/string16.h"
-#include "base/string_util.h"
+#include "base/run_loop.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
+#include "chrome/browser/bookmarks/bookmark_html_reader.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/bookmarks/imported_bookmark_entry.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
+#include "chrome/browser/favicon/imported_favicon_usage.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/importer/firefox2_importer.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "grit/generated_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -56,8 +57,9 @@ class BookmarkHTMLWriterTest : public testing::Test {
     path_ = temp_dir_.path().AppendASCII("bookmarks.html");
   }
 
-  // Converts a BookmarkEntry to a string suitable for assertion testing.
-  string16 BookmarkEntryToString(const ProfileWriter::BookmarkEntry& entry) {
+  // Converts an ImportedBookmarkEntry to a string suitable for assertion
+  // testing.
+  string16 BookmarkEntryToString(const ImportedBookmarkEntry& entry) {
     string16 result;
     result.append(ASCIIToUTF16("on_toolbar="));
     if (entry.in_toolbar)
@@ -90,7 +92,7 @@ class BookmarkHTMLWriterTest : public testing::Test {
                                   const string16& f1,
                                   const string16& f2,
                                   const string16& f3) {
-    ProfileWriter::BookmarkEntry entry;
+    ImportedBookmarkEntry entry;
     entry.in_toolbar = on_toolbar;
     entry.url = url;
     if (!f1.empty()) {
@@ -106,7 +108,7 @@ class BookmarkHTMLWriterTest : public testing::Test {
     return BookmarkEntryToString(entry);
   }
 
-  void AssertBookmarkEntryEquals(const ProfileWriter::BookmarkEntry& entry,
+  void AssertBookmarkEntryEquals(const ImportedBookmarkEntry& entry,
                                  bool on_toolbar,
                                  const GURL& url,
                                  const string16& title,
@@ -126,7 +128,7 @@ class BookmarkHTMLWriterTest : public testing::Test {
 // Class that will notify message loop when file is written.
 class BookmarksObserver : public BookmarksExportObserver {
  public:
-  explicit BookmarksObserver(MessageLoop* loop) : loop_(loop) {
+  explicit BookmarksObserver(base::RunLoop* loop) : loop_(loop) {
     DCHECK(loop);
   }
 
@@ -135,17 +137,15 @@ class BookmarksObserver : public BookmarksExportObserver {
   }
 
  private:
-  MessageLoop* loop_;
+  base::RunLoop* loop_;
+
   DISALLOW_COPY_AND_ASSIGN(BookmarksObserver);
 };
 
 // Tests bookmark_html_writer by populating a BookmarkModel, writing it out by
 // way of bookmark_html_writer, then using the importer to read it back in.
 TEST_F(BookmarkHTMLWriterTest, Test) {
-  MessageLoop message_loop;
-  content::TestBrowserThread fake_ui_thread(BrowserThread::UI, &message_loop);
-  content::TestBrowserThread fake_file_thread(BrowserThread::FILE,
-                                              &message_loop);
+  content::TestBrowserThreadBundle thread_bundle;
 
   TestingProfile profile;
   profile.CreateHistoryService(true, false);
@@ -178,7 +178,7 @@ TEST_F(BookmarkHTMLWriterTest, Test) {
   //       url1
   // Mobile
   //   url1
-  //   <bookmark without a title.  Not supported by Firefox 2 import>
+  //   <bookmark without a title.>
   string16 f1_title = ASCIIToUTF16("F\"&;<1\"");
   string16 f2_title = ASCIIToUTF16("F2");
   string16 f3_title = ASCIIToUTF16("F 3");
@@ -205,9 +205,8 @@ TEST_F(BookmarkHTMLWriterTest, Test) {
       AddPage(url1, base::Time::Now(), history::SOURCE_BROWSED);
   FaviconServiceFactory::GetForProfile(
       &profile, Profile::EXPLICIT_ACCESS)->SetFavicons(
-          url1, url1_favicon, history::FAVICON,
+          url1, url1_favicon, chrome::FAVICON,
           gfx::Image::CreateFrom1xBitmap(bitmap));
-  message_loop.RunUntilIdle();
   const BookmarkNode* f2 = model->AddFolder(f1, 1, f2_title);
   model->AddURLWithCreationTime(f2, 0, url2_title, url2, t2);
   model->AddURLWithCreationTime(model->bookmark_bar_node(),
@@ -224,26 +223,26 @@ TEST_F(BookmarkHTMLWriterTest, Test) {
   model->AddURLWithCreationTime(model->mobile_node(), 1, unnamed_bookmark_title,
                                 unnamed_bookmark_url, t2);
 
+  base::RunLoop run_loop;
+
   // Write to a temp file.
-  BookmarksObserver observer(&message_loop);
+  BookmarksObserver observer(&run_loop);
   bookmark_html_writer::WriteBookmarks(&profile, path_, &observer);
-  message_loop.Run();
+  run_loop.Run();
 
   // Clear favicon so that it would be read from file.
   FaviconServiceFactory::GetForProfile(
       &profile, Profile::EXPLICIT_ACCESS)->SetFavicons(
-          url1, url1_favicon, history::FAVICON, gfx::Image());
-  message_loop.RunUntilIdle();
+          url1, url1_favicon, chrome::FAVICON, gfx::Image());
 
   // Read the bookmarks back in.
-  std::vector<ProfileWriter::BookmarkEntry> parsed_bookmarks;
-  std::vector<history::ImportedFaviconUsage> favicons;
-  Firefox2Importer::ImportBookmarksFile(path_,
-                                        std::set<GURL>(),
-                                        NULL,
-                                        &parsed_bookmarks,
-                                        NULL,
-                                        &favicons);
+  std::vector<ImportedBookmarkEntry> parsed_bookmarks;
+  std::vector<ImportedFaviconUsage> favicons;
+  bookmark_html_reader::ImportBookmarksFile(base::Callback<bool(void)>(),
+                                            base::Callback<bool(const GURL&)>(),
+                                            path_,
+                                            &parsed_bookmarks,
+                                            &favicons);
 
   // Check loaded favicon (url1 is represented by 4 separate bookmarks).
   EXPECT_EQ(4U, favicons.size());
@@ -258,7 +257,7 @@ TEST_F(BookmarkHTMLWriterTest, Test) {
   }
 
   // Verify we got back what we wrote.
-  ASSERT_EQ(8U, parsed_bookmarks.size());
+  ASSERT_EQ(9U, parsed_bookmarks.size());
   // Windows and ChromeOS builds use Sentence case.
   string16 bookmark_folder_name =
       l10n_util::GetStringUTF16(IDS_BOOKMARK_BAR_FOLDER_NAME);
@@ -277,5 +276,8 @@ TEST_F(BookmarkHTMLWriterTest, Test) {
   AssertBookmarkEntryEquals(parsed_bookmarks[6], false, url1, url1_title, t1,
                             f3_title, f4_title, string16());
   AssertBookmarkEntryEquals(parsed_bookmarks[7], false, url1, url1_title, t1,
+                            string16(), string16(), string16());
+  AssertBookmarkEntryEquals(parsed_bookmarks[8], false, unnamed_bookmark_url,
+                            unnamed_bookmark_title, t2,
                             string16(), string16(), string16());
 }

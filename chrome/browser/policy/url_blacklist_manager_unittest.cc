@@ -70,7 +70,7 @@ class TestingURLBlacklistManager : public URLBlacklistManager {
 class URLBlacklistManagerTest : public testing::Test {
  protected:
   URLBlacklistManagerTest()
-      : loop_(MessageLoop::TYPE_IO),
+      : loop_(base::MessageLoop::TYPE_IO),
         ui_thread_(BrowserThread::UI, &loop_),
         file_thread_(BrowserThread::FILE, &loop_),
         io_thread_(BrowserThread::IO, &loop_) {
@@ -93,7 +93,7 @@ class URLBlacklistManagerTest : public testing::Test {
     blacklist_manager_.reset();
   }
 
-  MessageLoop loop_;
+  base::MessageLoop loop_;
   TestingPrefServiceSimple pref_service_;
   scoped_ptr<TestingURLBlacklistManager> blacklist_manager_;
 
@@ -223,16 +223,6 @@ TEST_F(URLBlacklistManagerTest, ShutdownWithPendingTask2) {
   EXPECT_FALSE(blacklist_manager_->set_blacklist_called());
   blacklist_manager_.reset();
   loop_.RunUntilIdle();
-}
-
-TEST_F(URLBlacklistManagerTest, HasStandardScheme) {
-  EXPECT_TRUE(URLBlacklist::HasStandardScheme(GURL("http://example.com")));
-  EXPECT_TRUE(URLBlacklist::HasStandardScheme(GURL("https://example.com")));
-  EXPECT_TRUE(URLBlacklist::HasStandardScheme(GURL("ftp://example.com")));
-  EXPECT_TRUE(URLBlacklist::HasStandardScheme(GURL("gopher://example.com")));
-  EXPECT_TRUE(URLBlacklist::HasStandardScheme(GURL("ws://example.com")));
-  EXPECT_TRUE(URLBlacklist::HasStandardScheme(GURL("wss://example.com")));
-  EXPECT_FALSE(URLBlacklist::HasStandardScheme(GURL("wtf://example.com")));
 }
 
 INSTANTIATE_TEST_CASE_P(

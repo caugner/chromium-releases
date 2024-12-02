@@ -8,10 +8,11 @@
 #include <functional>
 #include <utility>
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/history/history_tab_helper.h"
 #include "chrome/browser/history/history_types.h"
+#include "chrome/browser/prerender/prerender_field_trial.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
 #include "chrome/browser/prerender/prerender_handle.h"
 #include "chrome/browser/prerender/prerender_manager.h"
@@ -141,11 +142,6 @@ void PrerenderContents::Observer::OnPrerenderStopLoading(
     PrerenderContents* contents) {
 }
 
-void PrerenderContents::Observer::OnPrerenderAddAlias(
-    PrerenderContents* contents,
-    const GURL& alias_url) {
-}
-
 void PrerenderContents::Observer::OnPrerenderCreatedMatchCompleteReplacement(
     PrerenderContents* contents, PrerenderContents* replacement) {
 }
@@ -272,6 +268,11 @@ void PrerenderContents::StartPrerendering(
   if (prerender_manager_->IsControlGroup(experiment_id()))
     return;
 
+  if (origin_ == ORIGIN_LOCAL_PREDICTOR &&
+      IsLocalPredictorPrerenderAlwaysControlEnabled()) {
+    return;
+  }
+
   prerendering_has_started_ = true;
 
   prerender_contents_.reset(CreateWebContents(session_storage_namespace));
@@ -369,6 +370,15 @@ PrerenderContents::~PrerenderContents() {
 
   prerender_manager_->RecordFinalStatusWithMatchCompleteStatus(
       origin(), experiment_id(), match_complete_status(), final_status());
+
+  // Broadcast the removal of aliases.
+  for (content::RenderProcessHost::iterator host_iterator =
+           content::RenderProcessHost::AllHostsIterator();
+       !host_iterator.IsAtEnd();
+       host_iterator.Advance()) {
+    content::RenderProcessHost* host = host_iterator.GetCurrentValue();
+    host->Send(new PrerenderMsg_OnPrerenderRemoveAliases(alias_urls_));
+  }
 
   // If we still have a WebContents, clean up anything we need to and then
   // destroy it.
@@ -485,11 +495,6 @@ void PrerenderContents::NotifyPrerenderStop() {
   observer_list_.Clear();
 }
 
-void PrerenderContents::NotifyPrerenderAddAlias(const GURL& alias_url) {
-  FOR_EACH_OBSERVER(Observer, observer_list_, OnPrerenderAddAlias(this,
-                                                                  alias_url));
-}
-
 void PrerenderContents::NotifyPrerenderCreatedMatchCompleteReplacement(
     PrerenderContents* replacement) {
   FOR_EACH_OBSERVER(Observer, observer_list_,
@@ -531,14 +536,21 @@ bool PrerenderContents::AddAliasURL(const GURL& url) {
   }
 
   alias_urls_.push_back(url);
-  NotifyPrerenderAddAlias(url);
+
+  for (content::RenderProcessHost::iterator host_iterator =
+           content::RenderProcessHost::AllHostsIterator();
+       !host_iterator.IsAtEnd();
+       host_iterator.Advance()) {
+    content::RenderProcessHost* host = host_iterator.GetCurrentValue();
+    host->Send(new PrerenderMsg_OnPrerenderAddAlias(url));
+  }
+
   return true;
 }
 
 bool PrerenderContents::Matches(
     const GURL& url,
     const SessionStorageNamespace* session_storage_namespace) const {
-  DCHECK(child_id_ == -1 || session_storage_namespace);
   if (session_storage_namespace &&
       session_storage_namespace_id_ != session_storage_namespace->id()) {
     return false;
@@ -696,6 +708,8 @@ Value* PrerenderContents::GetAsValue() const {
   base::TimeTicks current_time = base::TimeTicks::Now();
   base::TimeDelta duration = current_time - load_start_time_;
   dict_value->SetInteger("duration", duration.InSeconds());
+  dict_value->SetBoolean("is_loaded", prerender_contents_ &&
+                                      !prerender_contents_->IsLoading());
   return dict_value;
 }
 

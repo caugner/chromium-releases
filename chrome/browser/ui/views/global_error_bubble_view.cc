@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/global_error_bubble_view.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
@@ -70,9 +70,10 @@ GlobalErrorBubbleView::GlobalErrorBubbleView(
       gfx::Insets(kAnchorVerticalInset, 0, kAnchorVerticalInset, 0));
 
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  int resource_id = error_->GetBubbleViewIconResourceID();
+  gfx::Image image = error_->GetBubbleViewIcon();
+  CHECK(!image.IsEmpty());
   scoped_ptr<views::ImageView> image_view(new views::ImageView());
-  image_view->SetImage(rb.GetImageNamed(resource_id).ToImageSkia());
+  image_view->SetImage(image.ToImageSkia());
 
   string16 title_string(error_->GetBubbleViewTitle());
   scoped_ptr<views::Label> title_label(new views::Label(title_string));

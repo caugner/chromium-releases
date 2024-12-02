@@ -12,10 +12,10 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_extensions.h"
 #include "chrome/browser/download/download_service.h"
@@ -30,7 +30,7 @@
 #include "content/public/browser/save_page_type.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/drive/drive_system_service.h"
+#include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #endif
 
@@ -56,6 +56,7 @@ DownloadPrefs::DownloadPrefs(Profile* profile) : profile_(profile) {
 
   prompt_for_download_.Init(prefs::kPromptForDownload, prefs);
   download_path_.Init(prefs::kDownloadDefaultDirectory, prefs);
+  save_file_path_.Init(prefs::kSaveFileDefaultDirectory, prefs);
   save_file_type_.Init(prefs::kSaveFileType, prefs);
 
   // We store any file extension that should be opened automatically at
@@ -72,7 +73,7 @@ DownloadPrefs::DownloadPrefs(Profile* profile) : profile_(profile) {
     base::FilePath path(UTF8ToWide(extensions[i]));
 #endif
     if (!extensions[i].empty() &&
-        download_util::GetFileDangerLevel(path) == download_util::NotDangerous)
+        download_util::GetFileDangerLevel(path) == download_util::NOT_DANGEROUS)
       auto_open_.insert(path.value());
   }
 }
@@ -107,6 +108,10 @@ void DownloadPrefs::RegisterUserPrefs(
       prefs::kDownloadDefaultDirectory,
       default_download_path,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterFilePathPref(
+      prefs::kSaveFileDefaultDirectory,
+      default_download_path,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 
 #if defined(OS_CHROMEOS)
   // Ensure that the download directory specified in the preferences exists.
@@ -134,14 +139,31 @@ DownloadPrefs* DownloadPrefs::FromBrowserContext(
 
 base::FilePath DownloadPrefs::DownloadPath() const {
 #if defined(OS_CHROMEOS)
-  // If the download path is under /drive, and DriveSystemService isn't
+  // If the download path is under /drive, and DriveIntegrationService isn't
   // available (which it isn't for incognito mode, for instance), use the
   // default download directory (/Downloads).
   if (drive::util::IsUnderDriveMountPoint(*download_path_) &&
-      !drive::DriveSystemServiceFactory::GetForProfile(profile_))
+      !drive::DriveIntegrationServiceFactory::GetForProfile(profile_))
     return download_util::GetDefaultDownloadDirectory();
 #endif
   return *download_path_;
+}
+
+void DownloadPrefs::SetDownloadPath(const base::FilePath& path) {
+  download_path_.SetValue(path);
+  SetSaveFilePath(path);
+}
+
+base::FilePath DownloadPrefs::SaveFilePath() const {
+  return *save_file_path_;
+}
+
+void DownloadPrefs::SetSaveFilePath(const base::FilePath& path) {
+  save_file_path_.SetValue(path);
+}
+
+void DownloadPrefs::SetSaveFileType(int type) {
+  save_file_type_.SetValue(type);
 }
 
 bool DownloadPrefs::PromptForDownload() const {

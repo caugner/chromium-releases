@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-var forEach = require('utils').forEach;
-
 /**
  * Returns a function that throws a 'not available' exception when called.
  *
@@ -29,7 +27,7 @@ function generateDisabledMethodStub(messagePrefix, opt_messageSuffix) {
  * @param {Array.<string>} methodNames names of methods to disable.
  */
 function disableMethods(object, objectName, methodNames) {
-  forEach(methodNames, function(i, methodName) {
+  $Array.forEach(methodNames, function(methodName) {
     object[methodName] =
         generateDisabledMethodStub(objectName + '.' + methodName + '()');
   });
@@ -49,7 +47,7 @@ function disableMethods(object, objectName, methodNames) {
  * @param {Array.<string>} propertyNames names of properties to disable.
  */
 function disableGetters(object, objectName, propertyNames, opt_messageSuffix) {
-  forEach(propertyNames, function(i, propertyName) {
+  $Array.forEach(propertyNames, function(propertyName) {
     var stub = generateDisabledMethodStub(objectName + '.' + propertyName,
                                           opt_messageSuffix);
     stub._is_platform_app_disabled_getter = true;
@@ -117,6 +115,10 @@ window.addEventListener('readystatechange', function(event) {
 
   // Deprecated document properties from
   // https://developer.mozilla.org/en/DOM/document.
+  // To deprecate document.all, simply changing its getter and setter would
+  // activate its cache mechanism, and degrade the performance. Here we assign
+  // it first to 'undefined' to avoid this.
+  document.all = undefined;
   disableGetters(document, 'document',
       ['alinkColor', 'all', 'bgColor', 'fgColor', 'linkColor',
        'vlinkColor']);
@@ -132,5 +134,5 @@ Window.prototype.addEventListener = function(type) {
   if (type === 'unload' || type === 'beforeunload')
     generateDisabledMethodStub(type)();
   else
-    return windowAddEventListener.apply(window, arguments);
+    return $Function.apply(windowAddEventListener, window, arguments);
 };

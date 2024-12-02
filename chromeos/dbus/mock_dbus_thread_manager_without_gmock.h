@@ -26,12 +26,13 @@ class FakeBluetoothInputClient;
 class FakeBluetoothProfileManagerClient;
 class FakeCrosDisksClient;
 class FakeCryptohomeClient;
-class FakeOldBluetoothAdapterClient;
-class FakeOldBluetoothDeviceClient;
-class FakeOldBluetoothManagerClient;
-class FakeShillManagerClient;
+class FakeGsmSMSClient;
+class FakePowerManagerClient;
 class FakeImageBurnerClient;
+class FakeSessionManagerClient;
+class FakeShillManagerClient;
 class FakeSystemClockClient;
+class FakeUpdateEngineClient;
 class MockIBusClient;
 class MockIBusConfigClient;
 class MockIBusEngineFactoryService;
@@ -57,24 +58,16 @@ class MockDBusThreadManagerWithoutGMock : public DBusThreadManager {
   virtual dbus::Bus* GetIBusBus() OVERRIDE;
 
   virtual BluetoothAdapterClient* GetBluetoothAdapterClient() OVERRIDE;
+  virtual BluetoothAgentManagerClient*
+      GetBluetoothAgentManagerClient() OVERRIDE;
   virtual BluetoothDeviceClient* GetBluetoothDeviceClient() OVERRIDE;
   virtual BluetoothInputClient* GetBluetoothInputClient() OVERRIDE;
-  virtual BluetoothManagerClient* GetBluetoothManagerClient() OVERRIDE;
-  virtual BluetoothNodeClient* GetBluetoothNodeClient() OVERRIDE;
+  virtual BluetoothProfileManagerClient*
+      GetBluetoothProfileManagerClient() OVERRIDE;
   virtual CrasAudioClient* GetCrasAudioClient() OVERRIDE;
   virtual CrosDisksClient* GetCrosDisksClient() OVERRIDE;
   virtual CryptohomeClient* GetCryptohomeClient() OVERRIDE;
   virtual DebugDaemonClient* GetDebugDaemonClient() OVERRIDE;
-  virtual ExperimentalBluetoothAdapterClient*
-      GetExperimentalBluetoothAdapterClient() OVERRIDE;
-  virtual ExperimentalBluetoothAgentManagerClient*
-      GetExperimentalBluetoothAgentManagerClient() OVERRIDE;
-  virtual ExperimentalBluetoothDeviceClient*
-      GetExperimentalBluetoothDeviceClient() OVERRIDE;
-  virtual ExperimentalBluetoothInputClient*
-      GetExperimentalBluetoothInputClient() OVERRIDE;
-  virtual ExperimentalBluetoothProfileManagerClient*
-      GetExperimentalBluetoothProfileManagerClient() OVERRIDE;
   virtual ShillDeviceClient* GetShillDeviceClient() OVERRIDE;
   virtual ShillIPConfigClient* GetShillIPConfigClient() OVERRIDE;
   virtual ShillManagerClient* GetShillManagerClient() OVERRIDE;
@@ -91,7 +84,6 @@ class MockDBusThreadManagerWithoutGMock : public DBusThreadManager {
   virtual SMSClient* GetSMSClient() OVERRIDE;
   virtual SystemClockClient* GetSystemClockClient() OVERRIDE;
   virtual UpdateEngineClient* GetUpdateEngineClient() OVERRIDE;
-  virtual BluetoothOutOfBandClient* GetBluetoothOutOfBandClient() OVERRIDE;
   virtual IBusClient* GetIBusClient() OVERRIDE;
   virtual IBusConfigClient* GetIBusConfigClient() OVERRIDE;
   virtual IBusInputContextClient* GetIBusInputContextClient() OVERRIDE;
@@ -122,20 +114,40 @@ class MockDBusThreadManagerWithoutGMock : public DBusThreadManager {
     return fake_bluetooth_profile_manager_client_.get();
   }
 
+  FakeCrosDisksClient* fake_cros_disks_client() {
+    return fake_cros_disks_client_.get();
+  }
+
   FakeCryptohomeClient* fake_cryptohome_client() {
     return fake_cryptohome_client_.get();
   }
 
-  FakeShillManagerClient* fake_shill_manager_client() {
-    return fake_shill_manager_client_.get();
+  FakeGsmSMSClient* fake_gsm_sms_client() {
+    return fake_gsm_sms_client_.get();
   }
 
   FakeImageBurnerClient* fake_image_burner_client() {
     return fake_image_burner_client_.get();
   }
 
+  FakeSessionManagerClient* fake_session_manager_client() {
+    return fake_session_manager_client_.get();
+  }
+
+  FakeShillManagerClient* fake_shill_manager_client() {
+    return fake_shill_manager_client_.get();
+  }
+
   FakeSystemClockClient* fake_system_clock_client() {
     return fake_system_clock_client_.get();
+  }
+
+  FakePowerManagerClient* fake_power_manager_client() {
+    return fake_power_manager_client_.get();
+  }
+
+  FakeUpdateEngineClient* fake_update_engine_client() {
+    return fake_update_engine_client_.get();
   }
 
   MockIBusClient* mock_ibus_client() {
@@ -167,7 +179,10 @@ class MockDBusThreadManagerWithoutGMock : public DBusThreadManager {
   }
 
  private:
-  // These fake_bluetooth_*_client_ are for ExperimentalBluetooth*Client.
+  // Note: Keep this before other members so they can call AddObserver() in
+  // their c'tors.
+  ObserverList<DBusThreadManagerObserver> observers_;
+
   scoped_ptr<FakeBluetoothAdapterClient> fake_bluetooth_adapter_client_;
   scoped_ptr<FakeBluetoothAgentManagerClient>
       fake_bluetooth_agent_manager_client_;
@@ -177,15 +192,13 @@ class MockDBusThreadManagerWithoutGMock : public DBusThreadManager {
       fake_bluetooth_profile_manager_client_;
   scoped_ptr<FakeCrosDisksClient> fake_cros_disks_client_;
   scoped_ptr<FakeCryptohomeClient> fake_cryptohome_client_;
+  scoped_ptr<FakeGsmSMSClient> fake_gsm_sms_client_;
   scoped_ptr<FakeImageBurnerClient> fake_image_burner_client_;
+  scoped_ptr<FakeSessionManagerClient> fake_session_manager_client_;
   scoped_ptr<FakeShillManagerClient> fake_shill_manager_client_;
   scoped_ptr<FakeSystemClockClient> fake_system_clock_client_;
-
-  // These fake_old_bluetooth_*_client_ are for old Bluetooth*Client.
-  // Will be removed once http://crbug.com/221813 is resolved.
-  scoped_ptr<FakeOldBluetoothManagerClient> fake_old_bluetooth_manager_client_;
-  scoped_ptr<FakeOldBluetoothAdapterClient> fake_old_bluetooth_adapter_client_;
-  scoped_ptr<FakeOldBluetoothDeviceClient> fake_old_bluetooth_device_client_;
+  scoped_ptr<FakePowerManagerClient> fake_power_manager_client_;
+  scoped_ptr<FakeUpdateEngineClient> fake_update_engine_client_;
 
   scoped_ptr<MockIBusClient> mock_ibus_client_;
   scoped_ptr<MockIBusConfigClient> mock_ibus_config_client_;
@@ -194,9 +207,8 @@ class MockDBusThreadManagerWithoutGMock : public DBusThreadManager {
   scoped_ptr<MockIBusEngineFactoryService> mock_ibus_engine_factory_service_;
   scoped_ptr<MockIBusPanelService> mock_ibus_panel_service_;
 
+  scoped_ptr<PowerPolicyController> power_policy_controller_;
   dbus::Bus* ibus_bus_;
-
-  ObserverList<DBusThreadManagerObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(MockDBusThreadManagerWithoutGMock);
 };

@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "content/browser/devtools/render_view_devtools_agent_host.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
@@ -30,6 +31,14 @@
 #include "content/public/common/url_constants.h"
 
 namespace content {
+
+RenderViewHostManager::PendingNavigationParams::PendingNavigationParams() {
+}
+
+RenderViewHostManager::PendingNavigationParams::PendingNavigationParams(
+    const GlobalRequestID& global_request_id)
+    : global_request_id(global_request_id) {
+}
 
 RenderViewHostManager::RenderViewHostManager(
     RenderViewHostDelegate* render_view_delegate,
@@ -64,7 +73,8 @@ RenderViewHostManager::~RenderViewHostManager() {
 
 void RenderViewHostManager::Init(BrowserContext* browser_context,
                                  SiteInstance* site_instance,
-                                 int routing_id) {
+                                 int routing_id,
+                                 int main_frame_routing_id) {
   // Create a RenderViewHost, once we have an instance.  It is important to
   // immediately give this SiteInstance to a RenderViewHost so that it is
   // ref counted.
@@ -73,7 +83,7 @@ void RenderViewHostManager::Init(BrowserContext* browser_context,
   render_view_host_ = static_cast<RenderViewHostImpl*>(
       RenderViewHostFactory::Create(
           site_instance, render_view_delegate_, render_widget_delegate_,
-          routing_id, false, delegate_->
+          routing_id, main_frame_routing_id, false, delegate_->
           GetControllerForRenderManager().GetSessionStorageNamespace(
               site_instance)));
 
@@ -117,6 +127,7 @@ void RenderViewHostManager::SetPendingWebUI(const NavigationEntryImpl& entry) {
 
 RenderViewHostImpl* RenderViewHostManager::Navigate(
     const NavigationEntryImpl& entry) {
+  TRACE_EVENT0("browser", "RenderViewHostManager:Navigate");
   // Create a pending RenderViewHost. It will give us the one we should use
   RenderViewHostImpl* dest_render_view_host =
       static_cast<RenderViewHostImpl*>(UpdateRendererStateForNavigate(entry));
@@ -185,11 +196,17 @@ bool RenderViewHostManager::ShouldCloseTabOnUnresponsiveRenderer() {
   if (!cross_navigation_pending_)
     return true;
 
-  // If the tab becomes unresponsive during unload while doing a
+  // If the tab becomes unresponsive during {before}unload while doing a
   // cross-site navigation, proceed with the navigation.  (This assumes that
   // the pending RenderViewHost is still responsive.)
-  int pending_request_id = pending_render_view_host_->GetPendingRequestId();
-  if (pending_request_id == -1) {
+  if (render_view_host_->is_waiting_for_unload_ack()) {
+    // The request has been started and paused while we're waiting for the
+    // unload handler to finish.  We'll pretend that it did.  The pending
+    // renderer will then be swapped in as part of the usual DidNavigate logic.
+    // (If the unload handler later finishes, this call will be ignored because
+    // the pending_nav_params_ state will already be cleaned up.)
+    current_host()->OnSwappedOut(true);
+  } else if (render_view_host_->is_waiting_for_beforeunload_ack()) {
     // Haven't gotten around to starting the request, because we're still
     // waiting for the beforeunload handler to finish.  We'll pretend that it
     // did finish, to let the navigation proceed.  Note that there's a danger
@@ -199,22 +216,29 @@ bool RenderViewHostManager::ShouldCloseTabOnUnresponsiveRenderer() {
     if (pending_render_view_host_->are_navigations_suspended())
       pending_render_view_host_->SetNavigationsSuspended(
           false, base::TimeTicks::Now());
-  } else {
-    // The request has been started and paused while we're waiting for the
-    // unload handler to finish.  We'll pretend that it did, by notifying the
-    // IO thread to let the response continue.  The pending renderer will then
-    // be swapped in as part of the usual DidNavigate logic.  (If the unload
-    // handler later finishes, this call will be ignored because the state in
-    // CrossSiteResourceHandler will already be cleaned up.)
-    ViewMsg_SwapOut_Params params;
-    params.closing_process_id = render_view_host_->GetProcess()->GetID();
-    params.closing_route_id = render_view_host_->GetRoutingID();
-    params.new_render_process_host_id =
-        pending_render_view_host_->GetProcess()->GetID();
-    params.new_request_id = pending_request_id;
-    current_host()->GetProcess()->SimulateSwapOutACK(params);
   }
   return false;
+}
+
+void RenderViewHostManager::SwappedOut(RenderViewHost* render_view_host) {
+  // Make sure this is from our current RVH, and that we have a pending
+  // navigation from OnCrossSiteResponse.  (There may be no pending navigation
+  // for data URLs that don't make network requests, for example.)   If not,
+  // just return early and ignore.
+  if (render_view_host != render_view_host_ || !pending_nav_params_.get()) {
+    pending_nav_params_.reset();
+    return;
+  }
+
+  // Now that the unload handler has run, we need to resume the paused response.
+  if (pending_render_view_host_) {
+    RenderProcessHostImpl* pending_process =
+        static_cast<RenderProcessHostImpl*>(
+            pending_render_view_host_->GetProcess());
+    pending_process->ResumeDeferredNavigation(
+        pending_nav_params_->global_request_id);
+  }
+  pending_nav_params_.reset();
 }
 
 void RenderViewHostManager::DidNavigateMainFrame(
@@ -236,10 +260,8 @@ void RenderViewHostManager::DidNavigateMainFrame(
     // If it committed without sending network requests (e.g., data URLs),
     // then we still need to swap out the old RVH first and run its unload
     // handler.  OK for that to happen in the background.
-    if (pending_render_view_host_->GetPendingRequestId() == -1) {
-      OnCrossSiteResponse(pending_render_view_host_->GetProcess()->GetID(),
-                          pending_render_view_host_->GetRoutingID());
-    }
+    if (pending_render_view_host_->HasPendingCrossSiteRequest())
+      SwapOutOldPage();
 
     CommitPending();
     cross_navigation_pending_ = false;
@@ -337,8 +359,20 @@ void RenderViewHostManager::ShouldClosePage(
   }
 }
 
-void RenderViewHostManager::OnCrossSiteResponse(int new_render_process_host_id,
-                                                int new_request_id) {
+void RenderViewHostManager::OnCrossSiteResponse(
+    RenderViewHost* pending_render_view_host,
+    const GlobalRequestID& global_request_id) {
+  // This should be called when the pending RVH is ready to commit.
+  DCHECK_EQ(pending_render_view_host_, pending_render_view_host);
+
+  // Remember the request ID until the unload handler has run.
+  pending_nav_params_.reset(new PendingNavigationParams(global_request_id));
+
+  // Run the unload handler of the current page.
+  SwapOutOldPage();
+}
+
+void RenderViewHostManager::SwapOutOldPage() {
   // Should only see this while we have a pending renderer.
   if (!cross_navigation_pending_)
     return;
@@ -347,16 +381,15 @@ void RenderViewHostManager::OnCrossSiteResponse(int new_render_process_host_id,
   // Tell the old renderer it is being swapped out.  This will fire the unload
   // handler (without firing the beforeunload handler a second time).  When the
   // unload handler finishes and the navigation completes, we will send a
-  // message to the ResourceDispatcherHost with the given pending request IDs,
-  // allowing the pending RVH's response to resume.
-  render_view_host_->SwapOut(new_render_process_host_id, new_request_id);
+  // message to the ResourceDispatcherHost, allowing the pending RVH's response
+  // to resume.
+  render_view_host_->SwapOut();
 
   // ResourceDispatcherHost has told us to run the onunload handler, which
   // means it is not a download or unsafe page, and we are going to perform the
   // navigation.  Thus, we no longer need to remember that the RenderViewHost
   // is part of a pending cross-site request.
-  pending_render_view_host_->SetHasPendingCrossSiteRequest(false,
-                                                           new_request_id);
+  pending_render_view_host_->SetHasPendingCrossSiteRequest(false);
 }
 
 void RenderViewHostManager::Observe(
@@ -499,8 +532,7 @@ SiteInstance* RenderViewHostManager::GetSiteInstanceForEntry(
     // GetRelatedSiteInstance() for this, which will eagerly set the site and
     // thus use the correct process.
     bool use_process_per_site =
-        RenderProcessHostImpl::ShouldUseProcessPerSite(browser_context,
-                                                       dest_url) &&
+        RenderProcessHost::ShouldUseProcessPerSite(browser_context, dest_url) &&
         RenderProcessHostImpl::GetProcessHostForSite(browser_context, dest_url);
     if (curr_site_instance->HasRelatedSiteInstance(dest_url) ||
         use_process_per_site) {
@@ -624,7 +656,7 @@ int RenderViewHostManager::CreateRenderView(
     new_render_view_host = static_cast<RenderViewHostImpl*>(
         RenderViewHostFactory::Create(instance,
             render_view_delegate_, render_widget_delegate_, MSG_ROUTING_NONE,
-            swapped_out, delegate_->
+            MSG_ROUTING_NONE, swapped_out, delegate_->
             GetControllerForRenderManager().GetSessionStorageNamespace(
                 instance)));
 
@@ -676,7 +708,7 @@ void RenderViewHostManager::CommitPending() {
   DCHECK(!(pending_web_ui_.get() && pending_and_current_web_ui_.get()));
   if (pending_web_ui_)
     web_ui_.reset(pending_web_ui_.release());
-  else if (!pending_and_current_web_ui_)
+  else if (!pending_and_current_web_ui_.get())
     web_ui_.reset();
 
   // It's possible for the pending_render_view_host_ to be NULL when we aren't
@@ -832,10 +864,6 @@ RenderViewHostImpl* RenderViewHostManager::UpdateRendererStateForNavigate(
     }
     // Otherwise, it's safe to treat this as a pending cross-site transition.
 
-    // Make sure the old render view stops, in case a load is in progress.
-    render_view_host_->Send(
-        new ViewMsg_Stop(render_view_host_->GetRoutingID()));
-
     // We need to wait until the beforeunload handler has run, unless we are
     // transferring an existing request (in which case it has already run).
     // Suspend the new render view (i.e., don't let it send the cross-site
@@ -846,6 +874,12 @@ RenderViewHostImpl* RenderViewHostManager::UpdateRendererStateForNavigate(
     bool is_transfer =
         entry.transferred_global_request_id() != GlobalRequestID();
     if (!is_transfer) {
+      // Also make sure the old render view stops, in case a load is in
+      // progress.  (We don't want to do this for transfers, since it will
+      // interrupt the transfer with an unexpected DidStopLoading.)
+      render_view_host_->Send(
+          new ViewMsg_Stop(render_view_host_->GetRoutingID()));
+
       pending_render_view_host_->SetNavigationsSuspended(true,
                                                          base::TimeTicks());
     }
@@ -853,7 +887,7 @@ RenderViewHostImpl* RenderViewHostManager::UpdateRendererStateForNavigate(
     // Tell the CrossSiteRequestManager that this RVH has a pending cross-site
     // request, so that ResourceDispatcherHost will know to tell us to run the
     // old page's unload handler before it sends the response.
-    pending_render_view_host_->SetHasPendingCrossSiteRequest(true, -1);
+    pending_render_view_host_->SetHasPendingCrossSiteRequest(true);
 
     // We now have a pending RVH.
     DCHECK(!cross_navigation_pending_);
@@ -915,9 +949,7 @@ void RenderViewHostManager::CancelPending() {
     // Any currently suspended navigations are no longer needed.
     pending_render_view_host->CancelSuspendedNavigations();
 
-    // We can pass -1,-1 because there is no pending response in the
-    // ResourceDispatcherHost to unpause.
-    pending_render_view_host->SwapOut(-1, -1);
+    pending_render_view_host->SwapOut();
   } else {
     // We won't be coming back, so shut this one down.
     pending_render_view_host->Shutdown();

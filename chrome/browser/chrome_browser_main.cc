@@ -31,15 +31,16 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_impl.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
@@ -76,7 +77,7 @@
 #include "chrome/browser/performance_monitor/performance_monitor.h"
 #include "chrome/browser/performance_monitor/startup_timer.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
-#include "chrome/browser/policy/policy_service.h"
+#include "chrome/browser/pref_service_flags_storage.h"
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -184,10 +185,6 @@
 
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "chrome/browser/mac/keystone_glue.h"
-#endif
-
-#if defined(ENABLE_CONFIGURATION_POLICY)
-#include "policy/policy_constants.h"
 #endif
 
 #if defined(ENABLE_LANGUAGE_DETECTION)
@@ -324,7 +321,7 @@ base::FilePath GetStartupProfilePath(const base::FilePath& user_data_dir,
   // If we are showing the app list then chrome isn't shown so load the app
   // list's profile rather than chrome's.
   if (command_line.HasSwitch(switches::kShowAppList))
-    return AppListService::Get()->GetAppListProfilePath(user_data_dir);
+    return AppListService::Get()->GetProfilePath(user_data_dir);
 
   return g_browser_process->profile_manager()->GetLastUsedProfileDir(
       user_data_dir);
@@ -425,7 +422,19 @@ bool ProcessSingletonNotificationCallback(
   if (!g_browser_process || g_browser_process->IsShuttingDown())
     return false;
 
-  g_browser_process->PlatformSpecificCommandLineProcessing(command_line);
+  if (command_line.HasSwitch(switches::kOriginalProcessStartTime)) {
+    std::string start_time_string =
+        command_line.GetSwitchValueASCII(switches::kOriginalProcessStartTime);
+    int64 remote_start_time;
+    if (base::StringToInt64(start_time_string, &remote_start_time)) {
+      UMA_HISTOGRAM_LONG_TIMES(
+          "Startup.WarmStartTimeFromRemoteProcessStart",
+          base::Time::Now() - base::Time::FromInternalValue(remote_start_time));
+    }
+  }
+
+  g_browser_process->platform_part()->PlatformSpecificCommandLineProcessing(
+      command_line);
 
   // TODO(erikwright): Consider removing this - AFAIK it is no longer used.
   // Handle the --uninstall-extension startup action. This needs to done here in
@@ -458,8 +467,7 @@ bool ProcessSingletonNotificationCallback(
   return true;
 }
 
-void LaunchDevToolsHandlerIfNeeded(Profile* profile,
-                                   const CommandLine& command_line) {
+void LaunchDevToolsHandlerIfNeeded(const CommandLine& command_line) {
   if (command_line.HasSwitch(::switches::kRemoteDebuggingPort)) {
     std::string port_str =
         command_line.GetSwitchValueASCII(::switches::kRemoteDebuggingPort);
@@ -471,7 +479,6 @@ void LaunchDevToolsHandlerIfNeeded(Profile* profile,
             ::switches::kRemoteDebuggingFrontend);
       }
       g_browser_process->CreateDevToolsHttpProtocolHandler(
-          profile,
           chrome::HOST_DESKTOP_TYPE_NATIVE,
           "127.0.0.1",
           port,
@@ -701,6 +708,9 @@ DLLEXPORT void __cdecl RelaunchChromeBrowserWithNewCommandLineIfNeeded() {
 // content::BrowserMainParts implementation ------------------------------------
 
 void ChromeBrowserMainParts::PreEarlyInitialization() {
+#if defined(USE_X11)
+  SetBrowserX11ErrorHandlersPreEarlyInitialization();
+#endif
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::PreEarlyInitialization");
   for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
     chrome_extra_parts_[i]->PreEarlyInitialization();
@@ -728,6 +738,9 @@ void ChromeBrowserMainParts::PostMainMessageLoopStart() {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::PostMainMessageLoopStart");
   for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
     chrome_extra_parts_[i]->PostMainMessageLoopStart();
+#if defined(USE_X11)
+  SetBrowserX11ErrorHandlersPostMainMessageLoopStart();
+#endif
 }
 
 int ChromeBrowserMainParts::PreCreateThreads() {
@@ -771,9 +784,7 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
       (!force_first_run &&
        parsed_command_line().HasSwitch(switches::kNoFirstRun));
 
-  is_first_run =
-      (force_first_run || first_run::IsChromeFirstRun()) &&
-      !ProfileManager::IsImportProcess(parsed_command_line());
+  is_first_run = force_first_run || first_run::IsChromeFirstRun();
 #endif
 
   scoped_refptr<base::SequencedTaskRunner> local_state_task_runner =
@@ -784,7 +795,7 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
   {
     TRACE_EVENT0("startup",
       "ChromeBrowserMainParts::PreCreateThreadsImpl:InitBrowswerProcessImpl");
-    browser_process_.reset(new BrowserProcessImpl(local_state_task_runner,
+    browser_process_.reset(new BrowserProcessImpl(local_state_task_runner.get(),
                                                   parsed_command_line()));
   }
 
@@ -810,9 +821,8 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
             switches::kProfilingOutputFile));
   }
 
-  local_state_ = InitializeLocalState(local_state_task_runner,
-                                      parsed_command_line(),
-                                      is_first_run);
+  local_state_ = InitializeLocalState(
+      local_state_task_runner.get(), parsed_command_line(), is_first_run);
 
   // These members must be initialized before returning from this function.
   master_prefs_.reset(new first_run::MasterPrefs);
@@ -831,7 +841,9 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
   {
     TRACE_EVENT0("startup",
         "ChromeBrowserMainParts::PreCreateThreadsImpl:ConvertFlags");
-    about_flags::ConvertFlagsToSwitches(local_state_,
+    about_flags::PrefServiceFlagsStorage flags_storage_(
+        g_browser_process->local_state());
+    about_flags::ConvertFlagsToSwitches(&flags_storage_,
                                         CommandLine::ForCurrentProcess());
   }
 
@@ -1026,7 +1038,7 @@ void ChromeBrowserMainParts::PreProfileInit() {
 
 void ChromeBrowserMainParts::PostProfileInit() {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::PostProfileInit");
-  LaunchDevToolsHandlerIfNeeded(profile(), parsed_command_line());
+  LaunchDevToolsHandlerIfNeeded(parsed_command_line());
   for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
     chrome_extra_parts_[i]->PostProfileInit();
 }
@@ -1146,19 +1158,9 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
     return chrome::RESULT_CODE_PACK_EXTENSION_ERROR;
   }
 
-  bool pass_command_line = true;
-
-#if !defined(OS_MACOSX)
-  // In environments other than Mac OS X we support import of settings
-  // from other browsers. In case this process is a short-lived "import"
-  // process that another browser runs just to import the settings, we
-  // don't want to be checking for another browser process, by design.
-  pass_command_line = !ProfileManager::IsImportProcess(parsed_command_line());
-#endif
-
   // If we're being launched just to check the connector policy, we are
   // short-lived and don't want to be passing that switch off.
-  pass_command_line = pass_command_line && !parsed_command_line().HasSwitch(
+  bool pass_command_line = !parsed_command_line().HasSwitch(
       switches::kCheckCloudPrintConnectorPolicy);
 
   if (pass_command_line) {
@@ -1205,10 +1207,6 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   }
 #endif  // !defined(OS_ANDROID)
 
-#if defined(USE_X11)
-  SetBrowserX11ErrorHandlers();
-#endif
-
   // Desktop construction occurs here, (required before profile creation).
   PreProfileInit();
 
@@ -1251,6 +1249,10 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
     browser_process_->profile_manager()->SetWillImport();
   }
 
+  // Called before CreateProfile because creating the profile can trigger
+  // calls to GetDefaultProfile().
+  ProfileManager::AllowGetDefaultProfile();
+
   profile_ = CreateProfile(parameters(), user_data_dir_, parsed_command_line());
   if (!profile_)
     return content::RESULT_CODE_NORMAL_EXIT;
@@ -1261,16 +1263,6 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   browser_process_->profile_manager()->AutoloadProfiles();
 #endif
   // Post-profile init ---------------------------------------------------------
-
-#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
-  // Importing other browser settings is done in a browser-like process
-  // that exits when this task has finished.
-  // TODO(port): Port the Mac's IPC-based implementation to other platforms to
-  //             replace this implementation. http://crbug.com/22142
-  if (ProfileManager::IsImportProcess(parsed_command_line())) {
-    return first_run::ImportNow(profile_, parsed_command_line());
-  }
-#endif
 
 #if defined(OS_WIN)
   // Do the tasks if chrome has been upgraded while it was last running.
@@ -1327,7 +1319,9 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
     first_run::AutoImport(profile_,
                           master_prefs_->homepage_defined,
                           master_prefs_->do_import_items,
-                          master_prefs_->dont_import_items);
+                          master_prefs_->dont_import_items,
+                          master_prefs_->import_bookmarks_path);
+
     // Note: this can pop the first run consent dialog on linux.
     first_run::DoPostImportTasks(profile_, master_prefs_->make_chrome_default);
 
@@ -1407,24 +1401,6 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
     if (!sdch_enabled)
       net::SdchManager::EnableSdchSupport(false);
   }
-  if (sdch_enabled) {
-    // Perform A/B test to measure global impact of SDCH support.
-    // Set up a field trial to see what disabling SDCH does to latency of page
-    // layout globally.
-    base::FieldTrial::Probability kSDCH_DIVISOR = 1000;
-    base::FieldTrial::Probability kSDCH_DISABLE_PROBABILITY = 1;  // 0.1% prob.
-    // After March 31, 2012 builds, it will always be in default group.
-    int sdch_enabled_group = -1;
-    scoped_refptr<base::FieldTrial> sdch_trial(
-        base::FieldTrialList::FactoryGetFieldTrial(
-            "GlobalSdch", kSDCH_DIVISOR, "global_enable_sdch", 2012, 3, 31,
-            &sdch_enabled_group));
-
-    sdch_trial->AppendGroup("global_disable_sdch",
-                            kSDCH_DISABLE_PROBABILITY);
-    if (sdch_enabled_group != sdch_trial->group())
-      net::SdchManager::EnableSdchSupport(false);
-  }
 
   if (parsed_command_line().HasSwitch(switches::kEnableWatchdog))
     InstallJankometer(parsed_command_line());
@@ -1480,7 +1456,8 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // the service process if needed. This is needed because the service process
   // might have shutdown because an update was available.
   // TODO(torne): this should maybe be done with
-  // ProfileKeyedServiceFactory::ServiceIsCreatedWithProfile() instead?
+  // BrowserContextKeyedServiceFactory::ServiceIsCreatedWithBrowserContext()
+  // instead?
 #if !defined(OS_ANDROID)
   CloudPrintProxyServiceFactory::GetForProfile(profile_);
 #endif
@@ -1577,14 +1554,10 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
 #endif
       }
 
-#if !defined(OS_CHROMEOS)
-      // TODO(mad): Move this call in a proper place on CrOS.
-      // http://crosbug.com/17687
       if (translate_manager_ != NULL) {
         translate_manager_->FetchLanguageListFromTranslateServer(
             profile_->GetPrefs());
       }
-#endif
     }
 
     run_message_loop_ = true;
@@ -1629,7 +1602,7 @@ bool ChromeBrowserMainParts::MainMessageLoopRun(int* result_code) {
   startup_timer_->SignalStartupComplete(
       performance_monitor::StartupTimer::STARTUP_NORMAL);
 
-  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
+  DCHECK_EQ(base::MessageLoop::TYPE_UI, base::MessageLoop::current()->type());
 #if !defined(USE_AURA) && defined(TOOLKIT_VIEWS)
   views::AcceleratorHandler accelerator_handler;
   base::RunLoop run_loop(&accelerator_handler);

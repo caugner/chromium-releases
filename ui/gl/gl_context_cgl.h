@@ -7,7 +7,6 @@
 
 #include <OpenGL/CGLTypes.h>
 
-#include "base/memory/scoped_generic_obj.h"
 #include "ui/gl/gl_context.h"
 
 namespace gfx {
@@ -15,7 +14,7 @@ namespace gfx {
 class GLSurface;
 
 // Encapsulates a CGL OpenGL context.
-class GLContextCGL : public GLContext {
+class GLContextCGL : public GLContextReal {
  public:
   explicit GLContextCGL(GLShareGroup* share_group);
 
@@ -48,14 +47,6 @@ class GLContextCGL : public GLContext {
 
   DISALLOW_COPY_AND_ASSIGN(GLContextCGL);
 };
-
-class ScopedCGLDestroyRendererInfo {
- public:
-  void operator()(CGLRendererInfoObj x) const;
-};
-
-typedef ScopedGenericObj<CGLRendererInfoObj, ScopedCGLDestroyRendererInfo>
-    ScopedCGLRendererInfoObj;
 
 }  // namespace gfx
 

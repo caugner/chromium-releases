@@ -38,13 +38,17 @@ class InputMethodBridge : public InputMethodBase,
   virtual void Init(Widget* widget) OVERRIDE;
   virtual void OnFocus() OVERRIDE;
   virtual void OnBlur() OVERRIDE;
+  virtual bool OnUntranslatedIMEMessage(const base::NativeEvent& event,
+                                        NativeEventResult* result) OVERRIDE;
   virtual void DispatchKeyEvent(const ui::KeyEvent& key) OVERRIDE;
   virtual void OnTextInputTypeChanged(View* view) OVERRIDE;
   virtual void OnCaretBoundsChanged(View* view) OVERRIDE;
   virtual void CancelComposition(View* view) OVERRIDE;
+  virtual void OnInputLocaleChanged() OVERRIDE;
   virtual std::string GetInputLocale() OVERRIDE;
   virtual base::i18n::TextDirection GetInputTextDirection() OVERRIDE;
   virtual bool IsActive() OVERRIDE;
+  virtual bool IsCandidatePopupOpen() const OVERRIDE;
 
   // Overridden from TextInputClient:
   virtual void SetCompositionText(
@@ -53,6 +57,7 @@ class InputMethodBridge : public InputMethodBase,
   virtual void ClearCompositionText() OVERRIDE;
   virtual void InsertText(const string16& text) OVERRIDE;
   virtual void InsertChar(char16 ch, int flags) OVERRIDE;
+  virtual gfx::NativeWindow GetAttachedWindow() const OVERRIDE;
   virtual ui::TextInputType GetTextInputType() const OVERRIDE;
   virtual bool CanComposeInline() const OVERRIDE;
   virtual gfx::Rect GetCaretBounds() OVERRIDE;
@@ -75,6 +80,8 @@ class InputMethodBridge : public InputMethodBase,
   // Overridden from FocusChangeListener.
   virtual void OnWillChangeFocus(View* focused_before, View* focused) OVERRIDE;
   virtual void OnDidChangeFocus(View* focused_before, View* focused) OVERRIDE;
+
+  ui::InputMethod* GetHostInputMethod() const;
 
  private:
   void UpdateViewFocusState();

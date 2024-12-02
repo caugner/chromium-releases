@@ -4,7 +4,7 @@
 
 #include <set>
 #include "base/basictypes.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/fake_auth_status_provider.h"
 #include "chrome/browser/signin/fake_signin_manager.h"
@@ -69,12 +69,12 @@ void VerifySyncGlobalErrorResult(NiceMock<ProfileSyncServiceMock>* service,
 // Test that GetStatusLabelsForSyncGlobalError returns an error if a
 // passphrase is required.
 TEST(SyncUIUtilTest, PassphraseGlobalError) {
-  MessageLoopForUI message_loop;
+  base::MessageLoopForUI message_loop;
   content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
   scoped_ptr<Profile> profile(
       ProfileSyncServiceMock::MakeSignedInTestingProfile());
   NiceMock<ProfileSyncServiceMock> service(profile.get());
-  FakeSigninManagerBase signin(profile.get());
+  FakeSigninManagerBase signin;
   browser_sync::SyncBackendHost::Status status;
   EXPECT_CALL(service, QueryDetailedSyncStatus(_))
               .WillRepeatedly(Return(false));
@@ -89,12 +89,12 @@ TEST(SyncUIUtilTest, PassphraseGlobalError) {
 // Test that GetStatusLabelsForSyncGlobalError returns an error if a
 // passphrase is required and not for auth errors.
 TEST(SyncUIUtilTest, AuthAndPassphraseGlobalError) {
-  MessageLoopForUI message_loop;
+  base::MessageLoopForUI message_loop;
   content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
   scoped_ptr<Profile> profile(
       ProfileSyncServiceMock::MakeSignedInTestingProfile());
   NiceMock<ProfileSyncServiceMock> service(profile.get());
-  FakeSigninManagerBase signin(profile.get());
+  FakeSigninManagerBase signin;
   browser_sync::SyncBackendHost::Status status;
   EXPECT_CALL(service, QueryDetailedSyncStatus(_))
               .WillRepeatedly(Return(false));
@@ -121,7 +121,7 @@ TEST(SyncUIUtilTest, AuthAndPassphraseGlobalError) {
 // Test that GetStatusLabelsForSyncGlobalError does not indicate errors for
 // auth errors (these are reported through SigninGlobalError).
 TEST(SyncUIUtilTest, AuthStateGlobalError) {
-  MessageLoopForUI message_loop;
+  base::MessageLoopForUI message_loop;
   content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
   scoped_ptr<Profile> profile(
       ProfileSyncServiceMock::MakeSignedInTestingProfile());
@@ -145,7 +145,7 @@ TEST(SyncUIUtilTest, AuthStateGlobalError) {
     GoogleServiceAuthError::HOSTED_NOT_ALLOWED
   };
 
-  FakeSigninManagerBase signin(profile.get());
+  FakeSigninManagerBase signin;
   for (size_t i = 0; i < arraysize(table); ++i) {
     VerifySyncGlobalErrorResult(&service, signin, table[i], true, false);
     VerifySyncGlobalErrorResult(&service, signin, table[i], false, false);
@@ -163,7 +163,8 @@ TEST(SyncUIUtilTest, AuthStateGlobalError) {
 class FakeSigninManagerForSyncUIUtilTest : public FakeSigninManagerBase {
  public:
   explicit FakeSigninManagerForSyncUIUtilTest(Profile* profile)
-      : FakeSigninManagerBase(profile), auth_in_progress_(false) {
+      : auth_in_progress_(false) {
+    Initialize(profile, NULL);
   }
 
   virtual ~FakeSigninManagerForSyncUIUtilTest() {
@@ -321,13 +322,13 @@ void GetDistinctCase(ProfileSyncServiceMock& service,
 TEST(SyncUIUtilTest, DistinctCasesReportUniqueMessageSets) {
   std::set<string16> messages;
   for (int idx = 0; idx != NUMBER_OF_STATUS_CASES; idx++) {
-    scoped_ptr<Profile> profile(
-        ProfileSyncServiceMock::MakeSignedInTestingProfile());
+    scoped_ptr<Profile> profile(new TestingProfile());
     ProfileSyncServiceMock service(profile.get());
     FakeSigninManagerForSyncUIUtilTest signin(profile.get());
     signin.SetAuthenticatedUsername("test_user@test.com");
-    FakeAuthStatusProvider provider(signin.signin_global_error());
-    GetDistinctCase(service, &signin, &provider, idx);
+    scoped_ptr<FakeAuthStatusProvider> provider(
+        new FakeAuthStatusProvider(signin.signin_global_error()));
+    GetDistinctCase(service, &signin, provider.get(), idx);
     string16 status_label;
     string16 link_label;
     sync_ui_util::GetStatusLabels(&service,
@@ -347,6 +348,8 @@ TEST(SyncUIUtilTest, DistinctCasesReportUniqueMessageSets) {
     messages.insert(combined_label);
     testing::Mock::VerifyAndClearExpectations(&service);
     testing::Mock::VerifyAndClearExpectations(&signin);
+    provider.reset();
+    signin.Shutdown();
   }
 }
 
@@ -359,8 +362,9 @@ TEST(SyncUIUtilTest, HtmlNotIncludedInStatusIfNotRequested) {
     ProfileSyncServiceMock service(profile.get());
     FakeSigninManagerForSyncUIUtilTest signin(profile.get());
     signin.SetAuthenticatedUsername("test_user@test.com");
-    FakeAuthStatusProvider provider(signin.signin_global_error());
-    GetDistinctCase(service, &signin, &provider, idx);
+    scoped_ptr<FakeAuthStatusProvider> provider(
+        new FakeAuthStatusProvider(signin.signin_global_error()));
+    GetDistinctCase(service, &signin, provider.get(), idx);
     string16 status_label;
     string16 link_label;
     sync_ui_util::GetStatusLabels(&service,
@@ -377,5 +381,7 @@ TEST(SyncUIUtilTest, HtmlNotIncludedInStatusIfNotRequested) {
               string16::npos);
     testing::Mock::VerifyAndClearExpectations(&service);
     testing::Mock::VerifyAndClearExpectations(&signin);
+    provider.reset();
+    signin.Shutdown();
   }
 }

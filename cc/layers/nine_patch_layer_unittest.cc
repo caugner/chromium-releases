@@ -4,7 +4,6 @@
 
 #include "cc/layers/nine_patch_layer.h"
 
-#include "cc/base/thread.h"
 #include "cc/debug/overdraw_metrics.h"
 #include "cc/resources/prioritized_resource_manager.h"
 #include "cc/resources/resource_provider.h"
@@ -32,7 +31,7 @@ class MockLayerTreeHost : public LayerTreeHost {
  public:
   explicit MockLayerTreeHost(LayerTreeHostClient* client)
       : LayerTreeHost(client, LayerTreeSettings()) {
-    Initialize(scoped_ptr<Thread>(NULL));
+    Initialize(NULL);
   }
 };
 
@@ -57,7 +56,7 @@ class NinePatchLayerTest : public testing::Test {
 
 TEST_F(NinePatchLayerTest, TriggerFullUploadOnceWhenChangingBitmap) {
   scoped_refptr<NinePatchLayer> test_layer = NinePatchLayer::Create();
-  ASSERT_TRUE(test_layer);
+  ASSERT_TRUE(test_layer.get());
   test_layer->SetIsDrawable(true);
   test_layer->SetBounds(gfx::Size(100, 100));
 

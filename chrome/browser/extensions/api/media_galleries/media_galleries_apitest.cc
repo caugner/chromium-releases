@@ -3,14 +3,14 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
 #include "chrome/browser/media_galleries/media_galleries_test_util.h"
-#include "chrome/browser/storage_monitor/media_storage_util.h"
+#include "chrome/browser/storage_monitor/storage_info.h"
 #include "chrome/browser/storage_monitor/storage_monitor.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
@@ -32,7 +32,7 @@ base::FilePath::CharType kDevicePath[] = FILE_PATH_LITERAL("/qux");
 
 const char kTestGalleries[] = "testGalleries(%d)";
 
-class ExperimentalMediaGalleriesApiTest : public ExtensionApiTest {
+class MediaGalleriesExperimentalApiTest : public ExtensionApiTest {
  public:
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
@@ -42,7 +42,7 @@ class ExperimentalMediaGalleriesApiTest : public ExtensionApiTest {
 
 }  // namespace
 
-class PlatformAppMediaGalleriesBrowserTest : public PlatformAppBrowserTest {
+class MediaGalleriesPlatformAppBrowserTest : public PlatformAppBrowserTest {
  protected:
   // Since ExtensionTestMessageListener does not work with RunPlatformAppTest(),
   // This helper method can be used to run additional media gallery tests.
@@ -59,12 +59,13 @@ class PlatformAppMediaGalleriesBrowserTest : public PlatformAppBrowserTest {
   }
 
   void AttachFakeDevice() {
-    device_id_ = chrome::MediaStorageUtil::MakeDeviceId(
-        chrome::MediaStorageUtil::REMOVABLE_MASS_STORAGE_WITH_DCIM, kDeviceId);
+    device_id_ = chrome::StorageInfo::MakeDeviceId(
+        chrome::StorageInfo::REMOVABLE_MASS_STORAGE_WITH_DCIM, kDeviceId);
 
     chrome::StorageMonitor::GetInstance()->receiver()->ProcessAttach(
-        chrome::StorageInfo(device_id_, ASCIIToUTF16(kDeviceName), kDevicePath,
-                            string16(), string16(), string16(), 0));
+        chrome::StorageInfo(device_id_, string16(), kDevicePath,
+                            ASCIIToUTF16(kDeviceName),
+                            string16(), string16(), 0));
     content::RunAllPendingInMessageLoop();
   }
 
@@ -78,7 +79,7 @@ class PlatformAppMediaGalleriesBrowserTest : public PlatformAppBrowserTest {
   std::string device_id_;
 };
 
-IN_PROC_BROWSER_TEST_F(PlatformAppMediaGalleriesBrowserTest,
+IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest,
                        MediaGalleriesNoAccess) {
   chrome::EnsureMediaDirectoriesExists media_directories;
   ASSERT_TRUE(RunPlatformAppTest("api_test/media_galleries/no_access"))
@@ -87,13 +88,13 @@ IN_PROC_BROWSER_TEST_F(PlatformAppMediaGalleriesBrowserTest,
       kTestGalleries, media_directories.num_galleries())));
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppMediaGalleriesBrowserTest, NoGalleriesRead) {
+IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest, NoGalleriesRead) {
   chrome::EnsureMediaDirectoriesExists media_directories;
   ASSERT_TRUE(RunPlatformAppTest("api_test/media_galleries/no_galleries"))
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppMediaGalleriesBrowserTest,
+IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest,
                        MediaGalleriesRead) {
   chrome::EnsureMediaDirectoriesExists media_directories;
   ASSERT_TRUE(RunPlatformAppTest("api_test/media_galleries/read_access"))
@@ -102,7 +103,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppMediaGalleriesBrowserTest,
       kTestGalleries, media_directories.num_galleries())));
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppMediaGalleriesBrowserTest,
+IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest,
                        MediaGalleriesAccessAttached) {
   chrome::EnsureMediaDirectoriesExists media_directories;
 
@@ -118,7 +119,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppMediaGalleriesBrowserTest,
   DetachFakeDevice();
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppMediaGalleriesBrowserTest,
+IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest,
                        GetFilesystemMetadata) {
   chrome::EnsureMediaDirectoriesExists media_directories;
   ASSERT_TRUE(RunPlatformAppTest("api_test/media_galleries/metadata"))
@@ -126,7 +127,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppMediaGalleriesBrowserTest,
 }
 
 
-IN_PROC_BROWSER_TEST_F(ExperimentalMediaGalleriesApiTest,
+IN_PROC_BROWSER_TEST_F(MediaGalleriesExperimentalApiTest,
                        ExperimentalMediaGalleries) {
   ASSERT_TRUE(RunExtensionTest("media_galleries/experimental")) << message_;
 }

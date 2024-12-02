@@ -4,7 +4,6 @@
 
 #include "chrome/browser/chromeos/policy/network_configuration_updater_impl_cros.h"
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -146,7 +145,7 @@ class NetworkConfigurationUpdaterTest : public testing::Test {
   StrictMock<chromeos::MockNetworkLibrary> network_library_;
   StrictMock<MockConfigurationPolicyProvider> provider_;
   scoped_ptr<PolicyServiceImpl> policy_service_;
-  MessageLoop loop_;
+  base::MessageLoop loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread io_thread_;
 };
@@ -196,7 +195,8 @@ TEST_F(NetworkConfigurationUpdaterTest, PolicyIsValidatedAndRepaired) {
 
   EXPECT_CALL(network_library_, RemoveNetworkProfileObserver(_));
 
-  updater.OnUserPolicyInitialized(false, "hash");
+  updater.SetUserPolicyService(false, "hash", policy_service_.get());
+  updater.UnsetUserPolicyService();
 }
 
 class NetworkConfigurationUpdaterTestWithParam
@@ -258,7 +258,10 @@ TEST_P(NetworkConfigurationUpdaterTestWithParam, InitialUpdates) {
 
   EXPECT_CALL(network_library_, RemoveNetworkProfileObserver(_));
 
-  updater.OnUserPolicyInitialized(false, "hash");
+  // We just need an initialized PolicyService, so we can reuse
+  // |policy_service_|.
+  updater.SetUserPolicyService(false, "hash", policy_service_.get());
+  updater.UnsetUserPolicyService();
 }
 
 TEST_P(NetworkConfigurationUpdaterTestWithParam,
@@ -290,7 +293,7 @@ TEST_P(NetworkConfigurationUpdaterTestWithParam,
   EXPECT_TRUE(trust_provider->GetAdditionalTrustAnchors().empty());
 
   // Initially, certificates imported from policy don't have trust flags.
-  updater.OnUserPolicyInitialized(false, "hash");
+  updater.SetUserPolicyService(false, "hash", policy_service_.get());
   content::RunAllPendingInMessageLoop(content::BrowserThread::IO);
   Mock::VerifyAndClearExpectations(&network_library_);
   Mock::VerifyAndClearExpectations(&certificate_handler);
@@ -307,7 +310,7 @@ TEST_P(NetworkConfigurationUpdaterTestWithParam,
       .WillRepeatedly(SetCertificateList(cert_list));
   // Trigger a new policy load, and spin the IO message loop to pass the
   // certificates to the |trust_provider| on the IO thread.
-  updater.OnUserPolicyInitialized(true, "hash");
+  updater.SetUserPolicyService(true, "hash", policy_service_.get());
   base::RunLoop loop;
   loop.RunUntilIdle();
   Mock::VerifyAndClearExpectations(&network_library_);
@@ -322,6 +325,7 @@ TEST_P(NetworkConfigurationUpdaterTestWithParam,
             trust_provider->GetAdditionalTrustAnchors().size());
 
   EXPECT_CALL(network_library_, RemoveNetworkProfileObserver(_));
+  updater.UnsetUserPolicyService();
 }
 
 TEST_P(NetworkConfigurationUpdaterTestWithParam, PolicyChange) {
@@ -338,7 +342,7 @@ TEST_P(NetworkConfigurationUpdaterTestWithParam, PolicyChange) {
       policy_service_.get(),
       &network_library_,
       make_scoped_ptr<chromeos::CertificateHandler>(certificate_handler));
-  updater.OnUserPolicyInitialized(false, "hash");
+  updater.SetUserPolicyService(false, "hash", policy_service_.get());
   Mock::VerifyAndClearExpectations(&network_library_);
   Mock::VerifyAndClearExpectations(&certificate_handler);
 
@@ -386,6 +390,7 @@ TEST_P(NetworkConfigurationUpdaterTestWithParam, PolicyChange) {
 
   policy.Erase(GetParam());
   UpdateProviderPolicy(policy);
+  updater.UnsetUserPolicyService();
 }
 
 INSTANTIATE_TEST_CASE_P(

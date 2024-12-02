@@ -17,7 +17,8 @@ IMEBase.prototype = {
   onKeyEvent: function(context, engine, keyData) { return false; },
   onCandidateClicked: function(candidateID, button) {},
   onMenuItemActivated: function(name) {},
-  onSurroundingTextChanged: function(text, focus, anchor) {}
+  onSurroundingTextChanged: function(text, focus, anchor) {},
+  onReset: function(engineID) {}
 };
 
 /**
@@ -26,50 +27,6 @@ IMEBase.prototype = {
  **/
 var IdentityIME = function() {};
 IdentityIME.prototype = new IMEBase();
-
-/**
- * This class echo back called function name to chrome.
- * @constructor
- **/
-var EchoBackIME = function() {};
-EchoBackIME.prototype = new IMEBase();
-EchoBackIME.prototype.onActivate = function() {
-  chrome.test.sendMessage('onActivate');
-};
-
-EchoBackIME.prototype.onDeactivated = function() {
-  chrome.test.sendMessage('onDeactivated');
-};
-
-EchoBackIME.prototype.onFocus = function(context) {
-  chrome.test.sendMessage('onFocus');
-};
-
-EchoBackIME.prototype.onBlur = function(contextID) {
-  chrome.test.sendMessage('onBlur');
-};
-
-EchoBackIME.prototype.onInputContextUpdate = function(context) {
-  chrome.test.sendMessage('onInputContextUpdate');
-  console.log('onInputContextUpdate');
-};
-
-EchoBackIME.prototype.onKeyEvent = function(context, engine, keyData) {
-  chrome.test.sendMessage('onKeyEvent');
-  return false;
-};
-
-EchoBackIME.prototype.onCandidateClicked = function(candidateID, button) {
-  chrome.test.sendMessage('onCandidateClicked');
-};
-
-EchoBackIME.prototype.onMenuItemActivated = function(name) {
-  chrome.test.sendMessage('onMenuItemActivated');
-};
-
-EchoBackIME.prototype.onSurroundingTextChanged = function(text, focus, anchor) {
-  chrome.test.sendMessage('onSurroundingTextChanged');
-};
 
 /**
  * This class provides an IME which capitalize given character.
@@ -92,6 +49,31 @@ ToUpperIME.prototype.onKeyEvent = function(context, engine, keyData) {
     }, function() {});
     return true;
   }
+  return false;
+};
+
+/**
+ * This class provide an IME which sneds message with API argument.
+ * @constructor
+ */
+var APIArgumentIME = function() {};
+APIArgumentIME.prototype = new IMEBase();
+
+/**
+ * @param {Object} context A context object passed from input.ime.onFocus.
+ * @param {string} engine An engine ID.
+ * @param {Object} keyData A keyevent object passed from input.ime.onKeyEvent.
+ * @return {boolean} True on the key event is consumed.
+ **/
+APIArgumentIME.prototype.onKeyEvent = function(context, engine, keyData) {
+  chrome.test.sendMessage('onKeyEvent:' +
+                          keyData.type + ':' +
+                          keyData.key + ':' +
+                          keyData.code + ':' +
+                          keyData.ctrlKey + ':' +
+                          keyData.altKey + ':' +
+                          keyData.shiftKey + ':' +
+                          keyData.capsLock);
   return false;
 };
 
@@ -132,6 +114,7 @@ EngineBridge.prototype = {
   onActivate_: function(engineID) {
     this.activeEngine_ = engineID;
     this.engineInstance_[engineID].onActivate();
+    chrome.test.sendMessage('onActivate');
   },
 
   /**
@@ -143,6 +126,7 @@ EngineBridge.prototype = {
     if (this.engineInstance_[engineID])
       this.engineInstance_[engineID].onDeactivated();
     this.activeEngine_ = null;
+    chrome.test.sendMessage('onDeactivated');
   },
 
   /**
@@ -154,6 +138,7 @@ EngineBridge.prototype = {
     this.focusedContext_ = context;
     if (this.activeEngine_)
       this.engineInstance_[this.activeEngine_].onFocus(context);
+    chrome.test.sendMessage('onFocus');
   },
 
   /**
@@ -165,6 +150,7 @@ EngineBridge.prototype = {
     if (this.activeEngine_)
       this.engineInstance_[this.activeEngine_].onBlur(contextID);
     this.focusedContext_ = null;
+    chrome.test.sendMessage('onBlur');
   },
 
   /**
@@ -176,6 +162,7 @@ EngineBridge.prototype = {
     this.focusedContext_ = context;
     if (this.activeEngine_)
       this.engineInstance_[this.activeEngine_].onInputContextUpdate(context);
+    chrome.test.sendMessage('onInputContextUpdate');
   },
 
   /**
@@ -185,6 +172,7 @@ EngineBridge.prototype = {
    * @return {boolean} True on the key event is consumed.
    **/
   onKeyEvent_: function(engineID, keyData) {
+    chrome.test.sendMessage('onKeyEvent');
     if (this.engineInstance_[engineID])
       return this.engineInstance_[engineID].onKeyEvent(
           this.focusedContext_, this.activeEngine_, keyData);
@@ -199,6 +187,7 @@ EngineBridge.prototype = {
   onCandidateClicked_: function(engineID, candidateID, button) {
     if (this.engineInstance_[engineID])
       this.engineInstance_[engineID].onCandidateClicked(candidateID, button);
+    chrome.test.sendMessage('onCandidateClicked');
   },
 
   /**
@@ -208,6 +197,7 @@ EngineBridge.prototype = {
    **/
   onMenuItemActivated_: function(engineID, name) {
     this.engineInstance_[engineID].onMenuItemActivated(name);
+    chrome.test.sendMessage('onMenuItemActivated');
   },
 
   /**
@@ -218,6 +208,17 @@ EngineBridge.prototype = {
   onSurroundingTextChanged_: function(engineID, object) {
     this.engineInstance_[engineID].onSurroundingTextChanged(
         object.text, object.focus, object.anchor);
+    chrome.test.sendMessage('onSurroundingTextChanged');
+  },
+
+  /**
+   * Called from chrome.input.ime.onReset.
+   * @private
+   * @this EngineBridge
+   **/
+  onReset_: function(engineID) {
+    this.engineInstance_[engineID].onReset(engineID);
+    chrome.test.sendMessage('onReset');
   },
 
   /**
@@ -246,6 +247,7 @@ EngineBridge.prototype = {
         this.onMenuItemActivated_.bind(this));
     chrome.input.ime.onSurroundingTextChanged.addListener(
         this.onSurroundingTextChanged_.bind(this));
+    chrome.input.ime.onReset.addListener(this.onReset_.bind(this));
   }
 };
 
@@ -255,7 +257,7 @@ document.addEventListener('readystatechange', function() {
     engineBridge.Initialize();
     engineBridge.addEngine('IdentityIME', new IdentityIME());
     engineBridge.addEngine('ToUpperIME', new ToUpperIME());
-    engineBridge.addEngine('EchoBackIME', new EchoBackIME());
+    engineBridge.addEngine('APIArgumentIME', new APIArgumentIME());
     chrome.test.sendMessage('ReadyToUseImeEvent');
   }
 });

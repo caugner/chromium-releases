@@ -8,7 +8,7 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/task_runner_util.h"
 #include "base/threading/worker_pool.h"
 #include "chrome/browser/browser_process.h"
@@ -64,7 +64,7 @@ std::string GetBrand() {
 
 void SetBrandFromFile(const base::Closure& callback) {
   base::PostTaskAndReplyWithResult(
-      base::WorkerPool::GetTaskRunner(false /* task_is_slow */),
+      base::WorkerPool::GetTaskRunner(false /* task_is_slow */).get(),
       FROM_HERE,
       base::Bind(&ReadBrandFromFile),
       base::Bind(&SetBrand, callback));

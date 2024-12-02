@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_CHROMEOS_DRIVE_FILE_SYSTEM_PROXY_H_
 
 #include "chrome/browser/chromeos/drive/file_errors.h"
-#include "webkit/fileapi/remote_file_system_proxy.h"
+#include "webkit/browser/fileapi/remote_file_system_proxy.h"
 
 namespace fileapi {
 class FileSystemURL;
@@ -19,12 +19,13 @@ class ResourceEntry;
 
 typedef std::vector<ResourceEntry> ResourceEntryVector;
 
-// Implementation of File API's remote file system proxy for Drive file system.
+// Implementation of File API's remote file system proxy for Drive-backed
+// file system.
 class FileSystemProxy : public fileapi::RemoteFileSystemProxyInterface {
  public:
   using fileapi::RemoteFileSystemProxyInterface::OpenFileCallback;
 
-  // |file_system| is the FileSystem instance owned by DriveSystemService.
+  // |file_system| is the FileSystem instance owned by DriveIntegrationService.
   explicit FileSystemProxy(FileSystemInterface* file_system);
 
   // Detaches this instance from |file_system_|.
@@ -104,7 +105,7 @@ class FileSystemProxy : public fileapi::RemoteFileSystemProxyInterface {
   static bool ValidateUrl(const fileapi::FileSystemURL& url,
                           base::FilePath* file_path);
 
-  // Helper method to call methods of DriveFilesSystem. This method aborts
+  // Helper method to call methods of FileSystem. This method aborts
   // method calls in case DetachFromFileSystem() has been called.
   void CallFileSystemMethodOnUIThread(const base::Closure& method_call);
 
@@ -121,15 +122,14 @@ class FileSystemProxy : public fileapi::RemoteFileSystemProxyInterface {
   // Helper callback for relaying reply for metadata retrieval request to the
   // calling thread.
   void OnGetMetadata(
-      const base::FilePath& file_path,
       const fileapi::FileSystemOperation::GetMetadataCallback&
           callback,
       FileError error,
       scoped_ptr<ResourceEntry> entry);
 
-  // Helper callback for relaying reply for GetEntryInfoByPath() to the
+  // Helper callback for relaying reply for GetResourceEntryByPath() to the
   // calling thread.
-  void OnGetEntryInfoByPath(
+  void OnGetResourceEntryByPath(
       const base::FilePath& entry_path,
       const fileapi::FileSystemOperation::SnapshotFileCallback&
           callback,
@@ -203,9 +203,12 @@ class FileSystemProxy : public fileapi::RemoteFileSystemProxyInterface {
       base::PlatformFile* platform_file,
       base::PlatformFileError* truncate_result);
 
+  // Returns |file_system_| on UI thread.
+  FileSystemInterface* GetFileSystemOnUIThread();
+
   FileSystemInterface* file_system_;
 };
 
-}  // namespace chromeos
+}  // namespace drive
 
 #endif  // CHROME_BROWSER_CHROMEOS_DRIVE_FILE_SYSTEM_PROXY_H_

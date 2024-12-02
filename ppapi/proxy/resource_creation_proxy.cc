@@ -6,18 +6,20 @@
 
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/pp_size.h"
-#include "ppapi/c/trusted/ppb_image_data_trusted.h"
 #include "ppapi/proxy/audio_input_resource.h"
 #include "ppapi/proxy/browser_font_resource_trusted.h"
 #include "ppapi/proxy/connection.h"
+#include "ppapi/proxy/ext_crx_file_system_private_resource.h"
 #include "ppapi/proxy/file_chooser_resource.h"
 #include "ppapi/proxy/file_io_resource.h"
 #include "ppapi/proxy/file_system_resource.h"
-#include "ppapi/proxy/flash_device_id_resource.h"
+#include "ppapi/proxy/flash_drm_resource.h"
 #include "ppapi/proxy/flash_font_file_resource.h"
 #include "ppapi/proxy/flash_menu_resource.h"
 #include "ppapi/proxy/graphics_2d_resource.h"
 #include "ppapi/proxy/host_resolver_private_resource.h"
+#include "ppapi/proxy/host_resolver_resource.h"
+#include "ppapi/proxy/net_address_resource.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_globals.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
@@ -32,13 +34,15 @@
 #include "ppapi/proxy/ppb_network_monitor_private_proxy.h"
 #include "ppapi/proxy/ppb_tcp_server_socket_private_proxy.h"
 #include "ppapi/proxy/ppb_tcp_socket_private_proxy.h"
-#include "ppapi/proxy/ppb_url_loader_proxy.h"
+#include "ppapi/proxy/ppb_tcp_socket_proxy.h"
 #include "ppapi/proxy/ppb_video_decoder_proxy.h"
 #include "ppapi/proxy/ppb_x509_certificate_private_proxy.h"
 #include "ppapi/proxy/printing_resource.h"
 #include "ppapi/proxy/talk_resource.h"
 #include "ppapi/proxy/truetype_font_resource.h"
 #include "ppapi/proxy/udp_socket_private_resource.h"
+#include "ppapi/proxy/udp_socket_resource.h"
+#include "ppapi/proxy/url_loader_resource.h"
 #include "ppapi/proxy/url_request_info_resource.h"
 #include "ppapi/proxy/url_response_info_resource.h"
 #include "ppapi/proxy/video_capture_resource.h"
@@ -81,11 +85,25 @@ PP_Resource ResourceCreationProxy::CreateFileRef(PP_Instance instance,
   return PPB_FileRef_Proxy::CreateProxyResource(instance, file_system, path);
 }
 
+PP_Resource ResourceCreationProxy::CreateFileRef(
+    const PPB_FileRef_CreateInfo& create_info) {
+  return PPB_FileRef_Proxy::DeserializeFileRef(create_info);
+}
+
 PP_Resource ResourceCreationProxy::CreateFileSystem(
     PP_Instance instance,
     PP_FileSystemType type) {
   return (new FileSystemResource(GetConnection(), instance,
                                  type))->GetReference();
+}
+
+PP_Resource ResourceCreationProxy::CreateIsolatedFileSystem(
+    PP_Instance instance,
+    const char* fsid) {
+  FileSystemResource* fs = new FileSystemResource(
+      GetConnection(), instance, PP_FILESYSTEMTYPE_ISOLATED);
+  fs->InitIsolatedFileSystem(fsid);
+  return fs->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateIMEInputEvent(
@@ -156,22 +174,13 @@ PP_Resource ResourceCreationProxy::CreateTrueTypeFont(
 }
 
 PP_Resource ResourceCreationProxy::CreateURLLoader(PP_Instance instance) {
-  return PPB_URLLoader_Proxy::CreateProxyResource(instance);
+    return (new URLLoaderResource(GetConnection(), instance))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateURLRequestInfo(
     PP_Instance instance) {
   return (new URLRequestInfoResource(
       GetConnection(), instance, URLRequestInfoData()))->GetReference();
-}
-
-PP_Resource ResourceCreationProxy::CreateURLResponseInfo(
-    PP_Instance instance,
-    const URLResponseInfoData& data,
-    PP_Resource file_ref_resource) {
-  return (new URLResponseInfoResource(GetConnection(), instance,
-                                      data,
-                                      file_ref_resource))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateWheelInputEvent(
@@ -213,9 +222,9 @@ PP_Resource ResourceCreationProxy::CreateFileChooser(
     PP_FileChooserMode_Dev mode,
     const PP_Var& accept_types) {
   scoped_refptr<StringVar> string_var = StringVar::FromPPVar(accept_types);
-  std::string str = string_var ? string_var->value() : std::string();
-  return (new FileChooserResource(GetConnection(), instance, mode,
-                                  str.c_str()))->GetReference();
+  std::string str = string_var.get() ? string_var->value() : std::string();
+  return (new FileChooserResource(GetConnection(), instance, mode, str.c_str()))
+      ->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateGraphics2D(PP_Instance instance,
@@ -242,29 +251,64 @@ PP_Resource ResourceCreationProxy::CreateGraphics3DRaw(
   return 0;
 }
 
+PP_Resource ResourceCreationProxy::CreateHostResolver(PP_Instance instance) {
+  return (new HostResolverResource(GetConnection(), instance))->GetReference();
+}
+
 PP_Resource ResourceCreationProxy::CreateHostResolverPrivate(
     PP_Instance instance) {
   return (new HostResolverPrivateResource(
       GetConnection(), instance))->GetReference();
 }
 
-PP_Resource ResourceCreationProxy::CreateImageData(PP_Instance instance,
-                                                   PP_ImageDataFormat format,
-                                                   const PP_Size* size,
-                                                   PP_Bool init_to_zero) {
-  return PPB_ImageData_Proxy::CreateProxyResource(instance, format, *size,
-                                                  init_to_zero);
-}
-
-PP_Resource ResourceCreationProxy::CreateImageDataNaCl(
+PP_Resource ResourceCreationProxy::CreateImageData(
     PP_Instance instance,
     PP_ImageDataFormat format,
     const PP_Size* size,
     PP_Bool init_to_zero) {
-  // These really only are different on the host side. On the plugin side, we
-  // always request a "platform" ImageData if we're trusted, or a "NaCl" one
-  // if we're untrusted (see PPB_ImageData_Proxy::CreateProxyResource()).
-  return CreateImageData(instance, format, size, init_to_zero);
+  // On the plugin side, we create PlatformImageData resources for trusted
+  // plugins and SimpleImageData resources for untrusted ones.
+  PPB_ImageData_Shared::ImageDataType type =
+#if !defined(OS_NACL)
+      PPB_ImageData_Shared::PLATFORM;
+#else
+      PPB_ImageData_Shared::SIMPLE;
+#endif
+  return PPB_ImageData_Proxy::CreateProxyResource(
+      instance, type,
+      format, *size, init_to_zero);
+}
+
+PP_Resource ResourceCreationProxy::CreateImageDataSimple(
+    PP_Instance instance,
+    PP_ImageDataFormat format,
+    const PP_Size* size,
+    PP_Bool init_to_zero) {
+  return PPB_ImageData_Proxy::CreateProxyResource(
+      instance,
+      PPB_ImageData_Shared::SIMPLE,
+      format, *size, init_to_zero);
+}
+
+PP_Resource ResourceCreationProxy::CreateNetAddressFromIPv4Address(
+    PP_Instance instance,
+    const PP_NetAddress_IPv4* ipv4_addr) {
+  return (new NetAddressResource(GetConnection(), instance,
+                                 *ipv4_addr))->GetReference();
+}
+
+PP_Resource ResourceCreationProxy::CreateNetAddressFromIPv6Address(
+    PP_Instance instance,
+    const PP_NetAddress_IPv6* ipv6_addr) {
+  return (new NetAddressResource(GetConnection(), instance,
+                                 *ipv6_addr))->GetReference();
+}
+
+PP_Resource ResourceCreationProxy::CreateNetAddressFromNetAddressPrivate(
+    PP_Instance instance,
+    const PP_NetAddress_Private& private_addr) {
+  return (new NetAddressResource(GetConnection(), instance,
+                                 private_addr))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateNetworkMonitor(
@@ -284,15 +328,35 @@ PP_Resource ResourceCreationProxy::CreateTCPServerSocketPrivate(
   return PPB_TCPServerSocket_Private_Proxy::CreateProxyResource(instance);
 }
 
+PP_Resource ResourceCreationProxy::CreateTCPSocket(
+    PP_Instance instance) {
+  return PPB_TCPSocket_Proxy::CreateProxyResource(instance);
+}
+
 PP_Resource ResourceCreationProxy::CreateTCPSocketPrivate(
     PP_Instance instance) {
   return PPB_TCPSocket_Private_Proxy::CreateProxyResource(instance);
+}
+
+PP_Resource ResourceCreationProxy::CreateUDPSocket(PP_Instance instance) {
+  return (new UDPSocketResource(GetConnection(), instance))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateUDPSocketPrivate(
     PP_Instance instance) {
   return (new UDPSocketPrivateResource(
       GetConnection(), instance))->GetReference();
+}
+
+PP_Resource ResourceCreationProxy::CreateVideoDestination(
+    PP_Instance instance) {
+  return (new VideoDestinationResource(GetConnection(),
+                                       instance))->GetReference();
+}
+
+PP_Resource ResourceCreationProxy::CreateVideoSource(
+    PP_Instance instance) {
+  return (new VideoSourceResource(GetConnection(), instance))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateWebSocket(PP_Instance instance) {
@@ -331,8 +395,8 @@ PP_Resource ResourceCreationProxy::CreateBuffer(PP_Instance instance,
   return PPB_Buffer_Proxy::CreateProxyResource(instance, size);
 }
 
-PP_Resource ResourceCreationProxy::CreateFlashDeviceID(PP_Instance instance) {
-  return (new FlashDeviceIDResource(GetConnection(), instance))->GetReference();
+PP_Resource ResourceCreationProxy::CreateFlashDRM(PP_Instance instance) {
+  return (new FlashDRMResource(GetConnection(), instance))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateFlashFontFile(
@@ -382,17 +446,6 @@ PP_Resource ResourceCreationProxy::CreateVideoDecoder(
     PP_VideoDecoder_Profile profile) {
   return PPB_VideoDecoder_Proxy::CreateProxyResource(
       instance, context3d_id, profile);
-}
-
-PP_Resource ResourceCreationProxy::CreateVideoDestination(
-    PP_Instance instance) {
-  return (new VideoDestinationResource(GetConnection(),
-                                       instance))->GetReference();
-}
-
-PP_Resource ResourceCreationProxy::CreateVideoSource(
-    PP_Instance instance) {
-  return (new VideoSourceResource(GetConnection(), instance))->GetReference();
 }
 
 #endif  // !defined(OS_NACL)

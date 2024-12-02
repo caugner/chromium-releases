@@ -7,6 +7,7 @@ import sys
 
 import android_commands
 import json
+import logging
 import math
 
 # Valid values of result type.
@@ -19,7 +20,18 @@ RESULT_TYPES = {'unimportant': 'RESULT ',
 
 def _EscapePerfResult(s):
   """Escapes |s| for use in a perf result."""
-  return re.sub('[\:|=/#&]', '_', s)
+  return re.sub('[\:|=/#&,]', '_', s)
+
+
+def _Flatten(values):
+  """Returns a simple list without sub-lists."""
+  ret = []
+  for entry in values:
+    if isinstance(entry, list):
+      ret.extend(_Flatten(entry))
+    else:
+      ret.append(entry)
+  return ret
 
 
 def GeomMeanAndStdDevFromHistogram(histogram_json):
@@ -66,6 +78,11 @@ def _MeanAndStdDevFromList(values):
   return value, avg, sd
 
 
+def PrintPages(page_list):
+  """Prints list of pages to stdout in the format required by perf tests."""
+  print 'Pages: [%s]' % ','.join([_EscapePerfResult(p) for p in page_list])
+
+
 def PrintPerfResult(measurement, trace, values, units, result_type='default',
                     print_to_stdout=True):
   """Prints numerical data to stdout in the format required by perf tests.
@@ -76,7 +93,8 @@ def PrintPerfResult(measurement, trace, values, units, result_type='default',
   Args:
     measurement: A description of the quantity being measured, e.g. "vm_peak".
     trace: A description of the particular data point, e.g. "reference".
-    values: A list of numeric measured values.
+    values: A list of numeric measured values. An N-dimensional list will be
+        flattened and treated as a simple list.
     units: A description of the units of measure, e.g. "bytes".
     result_type: Accepts values of RESULT_TYPES.
     print_to_stdout: If True, prints the output in stdout instead of returning
@@ -93,7 +111,7 @@ def PrintPerfResult(measurement, trace, values, units, result_type='default',
     assert isinstance(values, list)
     assert len(values)
     assert '/' not in measurement
-    value, avg, sd = _MeanAndStdDevFromList(values)
+    value, avg, sd = _MeanAndStdDevFromList(_Flatten(values))
     output = '%s%s: %s%s%s %s' % (
         RESULT_TYPES[result_type],
         _EscapePerfResult(measurement),
@@ -147,9 +165,10 @@ class PerfControl(object):
   def __init__(self, adb):
     self._adb = adb
     kernel_max = self._adb.GetFileContents('/sys/devices/system/cpu/kernel_max',
-                                         log_result=False)
+                                           log_result=False)
     assert kernel_max, 'Unable to find /sys/devices/system/cpu/kernel_max'
     self._kernel_max = int(kernel_max[0])
+    logging.info('Maximum CPU index: %d' % self._kernel_max)
     self._original_scaling_governor = self._adb.GetFileContents(
       PerfControl._SCALING_GOVERNOR_FMT % 0,
       log_result=False)[0]
@@ -178,4 +197,6 @@ class PerfControl(object):
     for cpu in range(self._kernel_max + 1):
       scaling_governor_file = PerfControl._SCALING_GOVERNOR_FMT % cpu
       if self._adb.FileExistsOnDevice(scaling_governor_file):
+        logging.info('Writing scaling governor mode \'%s\' -> %s' %
+                     (value, scaling_governor_file))
         self._adb.SetProtectedFileContents(scaling_governor_file, value)

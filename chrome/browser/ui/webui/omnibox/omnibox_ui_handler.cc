@@ -8,10 +8,10 @@
 
 #include "base/auto_reset.h"
 #include "base/bind.h"
-#include "base/string16.h"
-#include "base/stringprintf.h"
+#include "base/strings/string16.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_controller.h"
@@ -139,7 +139,7 @@ void OmniboxUIHandler::AddResultToDictionary(const std::string& prefix,
     output->SetBoolean(item_prefix + ".is_history_what_you_typed_match",
                        it->is_history_what_you_typed_match);
     output->SetString(item_prefix + ".type",
-                      AutocompleteMatch::TypeToString(it->type));
+                      AutocompleteMatchType::ToString(it->type));
     if (it->associated_keyword.get() != NULL) {
       output->SetString(item_prefix + ".associated_keyword",
                         it->associated_keyword->keyword);

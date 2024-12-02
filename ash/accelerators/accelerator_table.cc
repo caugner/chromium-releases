@@ -44,7 +44,7 @@ const AcceleratorData kAcceleratorData[] = {
   { true, ui::VKEY_KBD_BRIGHTNESS_DOWN, ui::EF_NONE, KEYBOARD_BRIGHTNESS_DOWN },
   { true, ui::VKEY_KBD_BRIGHTNESS_UP, ui::EF_NONE, KEYBOARD_BRIGHTNESS_UP },
   // Maximize button.
-  { true, ui::VKEY_MEDIA_LAUNCH_APP2, ui::EF_CONTROL_DOWN, CYCLE_DISPLAY_MODE },
+  { true, ui::VKEY_MEDIA_LAUNCH_APP2, ui::EF_CONTROL_DOWN, TOGGLE_MIRROR_MODE },
   { true, ui::VKEY_MEDIA_LAUNCH_APP2, ui::EF_ALT_DOWN, SWAP_PRIMARY_DISPLAY },
   // Cycle windows button.
   { true, ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_CONTROL_DOWN, TAKE_SCREENSHOT },
@@ -70,16 +70,21 @@ const AcceleratorData kAcceleratorData[] = {
   { true, ui::VKEY_T, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN, OPEN_CROSH },
   { true, ui::VKEY_G, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
     DISABLE_GPU_WATCHDOG },
+  { true, ui::VKEY_I, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
+    TOUCH_HUD_MODE_CHANGE },
+  { true, ui::VKEY_I, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN,
+    TOUCH_HUD_CLEAR },
+  // Accessibility: Spoken feedback shortcuts. The first one is to toggle
+  // spoken feedback on or off. The others are only valid when
+  // spoken feedback is enabled.
+  { true, ui::VKEY_Z, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
+    TOGGLE_SPOKEN_FEEDBACK },
+  { true, ui::VKEY_CONTROL, ui::EF_CONTROL_DOWN, SILENCE_SPOKEN_FEEDBACK},
 #endif  // defined(OS_CHROMEOS)
   { true, ui::VKEY_I, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, OPEN_FEEDBACK_PAGE },
 #if !defined(OS_WIN)
   { true, ui::VKEY_Q, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, EXIT },
 #endif
-  { true, ui::VKEY_I, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
-    TOUCH_HUD_MODE_CHANGE },
-  { true, ui::VKEY_I, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN,
-    TOUCH_HUD_CLEAR },
-
   { true, ui::VKEY_N, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
     NEW_INCOGNITO_WINDOW },
   { true, ui::VKEY_N, ui::EF_CONTROL_DOWN, NEW_WINDOW },
@@ -104,7 +109,7 @@ const AcceleratorData kAcceleratorData[] = {
   // extended keyboard shortcuts.
   { false, ui::VKEY_LWIN, ui::EF_NONE, TOGGLE_APP_LIST },
   { false, ui::VKEY_LWIN, ui::EF_ALT_DOWN, TOGGLE_CAPS_LOCK },
-  { true, ui::VKEY_MEDIA_LAUNCH_APP2, ui::EF_NONE, TOGGLE_MAXIMIZED },
+  { true, ui::VKEY_MEDIA_LAUNCH_APP2, ui::EF_NONE, TOGGLE_FULLSCREEN },
   { true, ui::VKEY_MEDIA_LAUNCH_APP2, ui::EF_SHIFT_DOWN, TOGGLE_FULLSCREEN },
   { true, ui::VKEY_VOLUME_MUTE, ui::EF_NONE, VOLUME_MUTE },
   { true, ui::VKEY_VOLUME_DOWN, ui::EF_NONE, VOLUME_DOWN },
@@ -125,15 +130,15 @@ const AcceleratorData kAcceleratorData[] = {
   { true, ui::VKEY_S, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
     SHOW_SYSTEM_TRAY_BUBBLE },
   { true, ui::VKEY_ESCAPE, ui::EF_SHIFT_DOWN, SHOW_TASK_MANAGER },
-  { true, ui::VKEY_1, ui::EF_ALT_DOWN, SELECT_WIN_0 },
-  { true, ui::VKEY_2, ui::EF_ALT_DOWN, SELECT_WIN_1 },
-  { true, ui::VKEY_3, ui::EF_ALT_DOWN, SELECT_WIN_2 },
-  { true, ui::VKEY_4, ui::EF_ALT_DOWN, SELECT_WIN_3 },
-  { true, ui::VKEY_5, ui::EF_ALT_DOWN, SELECT_WIN_4 },
-  { true, ui::VKEY_6, ui::EF_ALT_DOWN, SELECT_WIN_5 },
-  { true, ui::VKEY_7, ui::EF_ALT_DOWN, SELECT_WIN_6 },
-  { true, ui::VKEY_8, ui::EF_ALT_DOWN, SELECT_WIN_7 },
-  { true, ui::VKEY_9, ui::EF_ALT_DOWN, SELECT_LAST_WIN },
+  { true, ui::VKEY_1, ui::EF_ALT_DOWN, LAUNCH_APP_0 },
+  { true, ui::VKEY_2, ui::EF_ALT_DOWN, LAUNCH_APP_1 },
+  { true, ui::VKEY_3, ui::EF_ALT_DOWN, LAUNCH_APP_2 },
+  { true, ui::VKEY_4, ui::EF_ALT_DOWN, LAUNCH_APP_3 },
+  { true, ui::VKEY_5, ui::EF_ALT_DOWN, LAUNCH_APP_4 },
+  { true, ui::VKEY_6, ui::EF_ALT_DOWN, LAUNCH_APP_5 },
+  { true, ui::VKEY_7, ui::EF_ALT_DOWN, LAUNCH_APP_6 },
+  { true, ui::VKEY_8, ui::EF_ALT_DOWN, LAUNCH_APP_7 },
+  { true, ui::VKEY_9, ui::EF_ALT_DOWN, LAUNCH_LAST_APP },
 
   // Window management shortcuts.
   { true, ui::VKEY_OEM_4, ui::EF_ALT_DOWN, WINDOW_SNAP_LEFT },
@@ -157,12 +162,6 @@ const AcceleratorData kAcceleratorData[] = {
   { true, ui::VKEY_U, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN,
     PRINT_UI_HIERARCHIES },
 
-  // Accessibility: Spoken feedback shortcuts. The first one is to toggle
-  // spoken feedback on or off. The others are only valid when
-  // spoken feedback is enabled.
-  { true, ui::VKEY_Z, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
-    TOGGLE_SPOKEN_FEEDBACK },
-  { true, ui::VKEY_CONTROL, ui::EF_CONTROL_DOWN, SILENCE_SPOKEN_FEEDBACK},
   { false, ui::VKEY_HOME, ui::EF_SHIFT_DOWN, ACCESSIBLE_FOCUS_PREVIOUS},
   { false, ui::VKEY_PRIOR, ui::EF_SHIFT_DOWN, ACCESSIBLE_FOCUS_PREVIOUS},
   { false, ui::VKEY_END, ui::EF_SHIFT_DOWN, ACCESSIBLE_FOCUS_NEXT},
@@ -185,10 +184,15 @@ const AcceleratorData kDesktopAcceleratorData[] = {
   { true, ui::VKEY_L, ui::EF_ALT_DOWN, LOCK_SCREEN },
   { true, ui::VKEY_POWER, ui::EF_SHIFT_DOWN, LOCK_PRESSED },
   { false, ui::VKEY_POWER, ui::EF_SHIFT_DOWN, LOCK_RELEASED },
-#endif
+  { true, ui::VKEY_D, ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN,
+    ADD_REMOVE_DISPLAY },
+  { true, ui::VKEY_M, ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN,
+    TOGGLE_MIRROR_MODE },
+  { true, ui::VKEY_W, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN, TOGGLE_WIFI },
   // Extra shortcut for display swaping as alt-f4 is taken on linux desktop.
   { true, ui::VKEY_S, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
     SWAP_PRIMARY_DISPLAY },
+#endif
   // Extra shortcut to rotate/scale up/down the screen on linux desktop.
   { true, ui::VKEY_R,
     ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN, ROTATE_SCREEN },
@@ -196,7 +200,6 @@ const AcceleratorData kDesktopAcceleratorData[] = {
   { true, ui::VKEY_W, ui::EF_ALT_DOWN, CYCLE_FORWARD_MRU },
 
   { true, ui::VKEY_F11, ui::EF_CONTROL_DOWN, TOGGLE_ROOT_WINDOW_FULL_SCREEN },
-  { true, ui::VKEY_W, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN, TOGGLE_WIFI },
   { true, ui::VKEY_W, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
       CYCLE_BACKWARD_MRU },
   { true, ui::VKEY_B, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
@@ -237,6 +240,18 @@ const AcceleratorAction kReservedActions[] = {
 
 const size_t kReservedActionsLength = arraysize(kReservedActions);
 
+const AcceleratorAction kReservedDebugActions[] = {
+  PRINT_LAYER_HIERARCHY,
+  PRINT_VIEW_HIERARCHY,
+  PRINT_WINDOW_HIERARCHY,
+  DEBUG_TOGGLE_DEVICE_SCALE_FACTOR,
+  DEBUG_TOGGLE_SHOW_DEBUG_BORDERS,
+  DEBUG_TOGGLE_SHOW_FPS_COUNTER,
+  DEBUG_TOGGLE_SHOW_PAINT_RECTS,
+};
+
+const size_t kReservedDebugActionsLength = arraysize(kReservedDebugActions);
+
 const AcceleratorAction kActionsAllowedAtLoginOrLockScreen[] = {
   BRIGHTNESS_DOWN,
   BRIGHTNESS_UP,
@@ -256,15 +271,16 @@ const AcceleratorAction kActionsAllowedAtLoginOrLockScreen[] = {
   TAKE_PARTIAL_SCREENSHOT,
   TAKE_SCREENSHOT,
   TOGGLE_CAPS_LOCK,
-  TOGGLE_SPOKEN_FEEDBACK,
   TOGGLE_WIFI,
   TOUCH_HUD_CLEAR,
   VOLUME_DOWN,
   VOLUME_MUTE,
   VOLUME_UP,
 #if defined(OS_CHROMEOS)
-  CYCLE_DISPLAY_MODE,
+  TOGGLE_SPOKEN_FEEDBACK,
+  ADD_REMOVE_DISPLAY,
   DISABLE_GPU_WATCHDOG,
+  TOGGLE_MIRROR_MODE,
 #endif
 #if defined(OS_CHROMEOS) && !defined(NDEBUG)
   POWER_PRESSED,
@@ -301,19 +317,22 @@ const AcceleratorAction kActionsAllowedAtModalWindow[] = {
   PREVIOUS_IME,
   PRINT_UI_HIERARCHIES,
   SHOW_KEYBOARD_OVERLAY,
-  SWAP_PRIMARY_DISPLAY,
   SWITCH_IME,
   TAKE_PARTIAL_SCREENSHOT,
   TAKE_SCREENSHOT,
   TOGGLE_CAPS_LOCK,
-  TOGGLE_SPOKEN_FEEDBACK,
   TOGGLE_WIFI,
   VOLUME_DOWN,
   VOLUME_MUTE,
   VOLUME_UP,
 #if defined(OS_CHROMEOS)
-  CYCLE_DISPLAY_MODE,
+  SWAP_PRIMARY_DISPLAY,
+  TOGGLE_SPOKEN_FEEDBACK,
+#if !defined(NDEBUG)
+  ADD_REMOVE_DISPLAY,
+#endif
   LOCK_SCREEN,
+  TOGGLE_MIRROR_MODE,
 #endif
 };
 
@@ -326,6 +345,7 @@ const AcceleratorAction kNonrepeatableActions[] = {
   CYCLE_BACKWARD_MRU,
   CYCLE_FORWARD_LINEAR,
   CYCLE_FORWARD_MRU,
+  EXIT,
   PRINT_UI_HIERARCHIES,  // Don't fill the logs if the key is held down.
   ROTATE_SCREEN,
   ROTATE_WINDOW,
@@ -368,18 +388,19 @@ const AcceleratorAction kActionsAllowedInAppMode[] = {
   SCALE_UI_DOWN,
   SCALE_UI_RESET,
   SCALE_UI_UP,
-  SWAP_PRIMARY_DISPLAY,
   SWITCH_IME,  // Switch to another IME depending on the accelerator.
   TOGGLE_CAPS_LOCK,
-  TOGGLE_SPOKEN_FEEDBACK,
   TOGGLE_WIFI,
   TOUCH_HUD_CLEAR,
   VOLUME_DOWN,
   VOLUME_MUTE,
   VOLUME_UP,
 #if defined(OS_CHROMEOS)
-  CYCLE_DISPLAY_MODE,
+  SWAP_PRIMARY_DISPLAY,
+  TOGGLE_SPOKEN_FEEDBACK,
+  ADD_REMOVE_DISPLAY,
   DISABLE_GPU_WATCHDOG,
+  TOGGLE_MIRROR_MODE,
 #endif  // defined(OS_CHROMEOS)
 };
 

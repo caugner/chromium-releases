@@ -5,10 +5,10 @@
 #include "chrome/browser/sync/test/integration/passwords_helper.h"
 
 #include "base/compiler_specific.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_form_data.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/password_manager/password_store_consumer.h"
@@ -59,7 +59,7 @@ class PasswordStoreConsumerHelper : public PasswordStoreConsumer {
     }
 
     // Quit the message loop to wake up passwords_helper::GetLogins.
-    MessageLoopForUI::current()->Quit();
+    base::MessageLoopForUI::current()->Quit();
   }
 
  private:
@@ -128,12 +128,12 @@ bool SetDecryptionPassphrase(int index, const std::string& passphrase) {
 
 PasswordStore* GetPasswordStore(int index) {
   return PasswordStoreFactory::GetForProfile(test()->GetProfile(index),
-                                             Profile::IMPLICIT_ACCESS);
+                                             Profile::IMPLICIT_ACCESS).get();
 }
 
 PasswordStore* GetVerifierPasswordStore() {
   return PasswordStoreFactory::GetForProfile(test()->verifier(),
-                                             Profile::IMPLICIT_ACCESS);
+                                             Profile::IMPLICIT_ACCESS).get();
 }
 
 bool ProfileContainsSamePasswordFormsAsVerifier(int index) {

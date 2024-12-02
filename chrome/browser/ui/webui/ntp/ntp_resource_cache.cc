@@ -11,14 +11,13 @@
 #include "apps/field_trial_names.h"
 #include "apps/pref_names.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/metrics/field_trial.h"
 #include "base/prefs/pref_service.h"
-#include "base/string16.h"
-#include "base/stringprintf.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/first_run/first_run.h"
@@ -32,10 +31,10 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar_constants.h"
+#include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/ntp/ntp_login_handler.h"
-#include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/browser/ui/webui/sync_setup_handler.h"
 #include "chrome/browser/web_resource/notification_promo.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -200,6 +199,8 @@ NTPResourceCache::NTPResourceCache(Profile* profile)
     local_state_pref_change_registrar_.Init(g_browser_process->local_state());
     local_state_pref_change_registrar_.Add(apps::prefs::kShowAppLauncherPromo,
                                            callback);
+    local_state_pref_change_registrar_.Add(
+        apps::prefs::kAppLauncherHasBeenEnabled, callback);
   }
 }
 
@@ -348,6 +349,7 @@ void NTPResourceCache::CreateNewTabHTML() {
   std::string app_launcher_promo_group_name =
       base::FieldTrialList::FindFullName(apps::kLauncherPromoTrialName);
   bool show_app_launcher_promo =
+      !apps::IsAppLauncherEnabled() &&
       local_state->GetBoolean(apps::prefs::kShowAppLauncherPromo) &&
       (app_launcher_promo_group_name == apps::kShowLauncherPromoOnceGroupName ||
        app_launcher_promo_group_name ==
@@ -441,6 +443,12 @@ void NTPResourceCache::CreateNewTabHTML() {
   load_time_data.SetBoolean("showApps", should_show_apps_page_);
   load_time_data.SetBoolean("showWebStoreIcon",
                             !prefs->GetBoolean(prefs::kHideWebStoreIcon));
+
+#if defined(OS_MACOSX)
+  load_time_data.SetBoolean(
+      "disableCreateAppShortcut",
+      !CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableAppShims));
+#endif
 
 #if defined(OS_CHROMEOS)
   load_time_data.SetString("expandMenu",

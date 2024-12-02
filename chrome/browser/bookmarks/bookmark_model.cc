@@ -12,18 +12,20 @@
 #include "base/i18n/string_compare.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/sequenced_task_runner.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/bookmarks/bookmark_expanded_state_tracker.h"
 #include "chrome/browser/bookmarks/bookmark_index.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_storage.h"
+#include "chrome/browser/bookmarks/bookmark_title_match.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/favicon/favicon_changed_details.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/favicon/favicon_types.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -42,6 +44,25 @@ namespace {
 // Helper to get a mutable bookmark node.
 BookmarkNode* AsMutable(const BookmarkNode* node) {
   return const_cast<BookmarkNode*>(node);
+}
+
+// Helper to recursively determine if a Dictionary has any valid values.
+bool HasValues(const base::DictionaryValue& root) {
+  if (root.empty())
+    return false;
+  for (base::DictionaryValue::Iterator iter(root); !iter.IsAtEnd();
+       iter.Advance()) {
+    const base::Value& value = iter.value();
+    if (value.IsType(base::Value::TYPE_DICTIONARY)) {
+      const base::DictionaryValue* dict_value = NULL;
+      if (value.GetAsDictionary(&dict_value) && HasValues(*dict_value))
+        return true;
+    } else {
+      // A non dictionary type was encountered, assume it's a valid value.
+      return true;
+    }
+  }
+  return false;
 }
 
 // Whitespace characters to strip from bookmark titles.
@@ -121,9 +142,8 @@ bool BookmarkNode::DeleteMetaInfo(const std::string& key) {
   JSONStringValueSerializer serializer(&meta_info_str_);
   scoped_ptr<DictionaryValue> meta_dict(
       static_cast<DictionaryValue*>(serializer.Deserialize(NULL, NULL)));
-  if (meta_dict.get() && meta_dict->HasKey(key)) {
-    meta_dict->Remove(key, NULL);
-    if (meta_dict->empty()) {
+  if (meta_dict.get() && meta_dict->Remove(key, NULL)) {
+    if (!HasValues(*meta_dict)) {
       meta_info_str_.clear();
     } else {
       serializer.Serialize(*meta_dict);
@@ -217,7 +237,7 @@ BookmarkModel::~BookmarkModel() {
   FOR_EACH_OBSERVER(BookmarkModelObserver, observers_,
                     BookmarkModelBeingDeleted(this));
 
-  if (store_) {
+  if (store_.get()) {
     // The store maintains a reference back to us. We need to tell it we're gone
     // so that it doesn't try and invoke a method back on us again.
     store_->BookmarkModelDeleted();
@@ -251,12 +271,8 @@ void BookmarkModel::Load(
                  content::Source<Profile>(profile_));
 
   // Load the bookmarks. BookmarkStorage notifies us when done.
-  store_ = new BookmarkStorage(profile_, this, task_runner);
+  store_ = new BookmarkStorage(profile_, this, task_runner.get());
   store_->LoadBookmarks(CreateLoadDetails());
-}
-
-bool BookmarkModel::IsLoaded() const {
-  return loaded_;
 }
 
 const BookmarkNode* BookmarkModel::GetParentForNewNodes() {
@@ -299,8 +315,12 @@ void BookmarkModel::Remove(const BookmarkNode* parent, int index) {
 }
 
 void BookmarkModel::RemoveAll() {
-  std::set<GURL> changed_urls;
+  std::set<GURL> removed_urls;
   ScopedVector<BookmarkNode> removed_nodes;
+
+  FOR_EACH_OBSERVER(BookmarkModelObserver, observers_,
+                    OnWillRemoveAllBookmarks(this));
+
   BeginExtensiveChanges();
   // Skip deleting permanent nodes. Permanent bookmark nodes are the root and
   // its immediate children. For removing all non permanent nodes just remove
@@ -312,7 +332,7 @@ void BookmarkModel::RemoveAll() {
       for (int j = permanent_node->child_count() - 1; j >= 0; --j) {
         BookmarkNode* child_node = AsMutable(permanent_node->GetChild(j));
         removed_nodes.push_back(child_node);
-        RemoveNodeAndGetRemovedUrls(child_node, &changed_urls);
+        RemoveNodeAndGetRemovedUrls(child_node, &removed_urls);
       }
     }
   }
@@ -320,7 +340,7 @@ void BookmarkModel::RemoveAll() {
   if (store_.get())
     store_->ScheduleSave();
 
-  NotifyHistoryAboutRemovedBookmarks(changed_urls);
+  NotifyHistoryAboutRemovedBookmarks(removed_urls);
 
   FOR_EACH_OBSERVER(BookmarkModelObserver, observers_,
                     BookmarkAllNodesRemoved(this));
@@ -381,8 +401,8 @@ void BookmarkModel::Copy(const BookmarkNode* node,
   }
 
   SetDateFolderModified(new_parent, Time::Now());
-  BookmarkNodeData drag_data_(node);
-  std::vector<BookmarkNodeData::Element> elements(drag_data_.elements);
+  BookmarkNodeData drag_data(node);
+  std::vector<BookmarkNodeData::Element> elements(drag_data.elements);
   // CloneBookmarkNode will use BookmarkModel methods to do the job, so we
   // don't need to send notifications here.
   bookmark_utils::CloneBookmarkNode(this, elements, new_parent, index);
@@ -413,6 +433,9 @@ void BookmarkModel::SetTitle(const BookmarkNode* node, const string16& title) {
     NOTREACHED();
     return;
   }
+
+  FOR_EACH_OBSERVER(BookmarkModelObserver, observers_,
+                    OnWillChangeBookmarkNode(this, node));
 
   // The title index doesn't support changing the title, instead we remove then
   // add it back.
@@ -445,6 +468,9 @@ void BookmarkModel::SetURL(const BookmarkNode* node, const GURL& url) {
   BookmarkNode* mutable_node = AsMutable(node);
   mutable_node->InvalidateFavicon();
   CancelPendingFaviconLoadRequests(mutable_node);
+
+  FOR_EACH_OBSERVER(BookmarkModelObserver, observers_,
+                    OnWillChangeBookmarkNode(this, node));
 
   {
     base::AutoLock url_lock(url_lock_);
@@ -629,6 +655,9 @@ void BookmarkModel::SortChildren(const BookmarkNode* parent) {
     return;
   }
 
+  FOR_EACH_OBSERVER(BookmarkModelObserver, observers_,
+                    OnWillReorderBookmarkNode(this, parent));
+
   UErrorCode error = U_ZERO_ERROR;
   scoped_ptr<icu::Collator> collator(icu::Collator::createInstance(error));
   if (U_FAILURE(error))
@@ -637,6 +666,26 @@ void BookmarkModel::SortChildren(const BookmarkNode* parent) {
   std::sort(mutable_parent->children().begin(),
             mutable_parent->children().end(),
             SortComparator(collator.get()));
+
+  if (store_.get())
+    store_->ScheduleSave();
+
+  FOR_EACH_OBSERVER(BookmarkModelObserver, observers_,
+                    BookmarkNodeChildrenReordered(this, parent));
+}
+
+void BookmarkModel::ReorderChildren(
+    const BookmarkNode* parent,
+    const std::vector<BookmarkNode*>& ordered_nodes) {
+  // Ensure that all children in |parent| are in |ordered_nodes|.
+  DCHECK_EQ(static_cast<size_t>(parent->child_count()), ordered_nodes.size());
+  for (size_t i = 0; i < ordered_nodes.size(); ++i)
+    DCHECK_EQ(parent, ordered_nodes[i]->parent());
+
+  FOR_EACH_OBSERVER(BookmarkModelObserver, observers_,
+                    OnWillReorderBookmarkNode(this, parent));
+
+  AsMutable(parent)->SetChildren(ordered_nodes);
 
   if (store_.get())
     store_->ScheduleSave();
@@ -661,7 +710,7 @@ void BookmarkModel::ResetDateFolderModified(const BookmarkNode* node) {
 void BookmarkModel::GetBookmarksWithTitlesMatching(
     const string16& text,
     size_t max_count,
-    std::vector<bookmark_utils::TitleMatch>* matches) {
+    std::vector<BookmarkTitleMatch>* matches) {
   if (!loaded_)
     return;
 
@@ -781,16 +830,19 @@ void BookmarkModel::RemoveAndDeleteNode(BookmarkNode* delete_me) {
   DCHECK(parent);
   int index = parent->GetIndexOf(node.get());
 
-  std::set<GURL> changed_urls;
+  FOR_EACH_OBSERVER(BookmarkModelObserver, observers_,
+                    OnWillRemoveBookmarks(this, parent, index, node.get()));
+
+  std::set<GURL> removed_urls;
   {
     base::AutoLock url_lock(url_lock_);
-    RemoveNodeAndGetRemovedUrls(node.get(), &changed_urls);
+    RemoveNodeAndGetRemovedUrls(node.get(), &removed_urls);
   }
 
   if (store_.get())
     store_->ScheduleSave();
 
-  NotifyHistoryAboutRemovedBookmarks(changed_urls);
+  NotifyHistoryAboutRemovedBookmarks(removed_urls);
 
   FOR_EACH_OBSERVER(BookmarkModelObserver, observers_,
                     BookmarkNodeRemoved(this, parent, index, node.get()));
@@ -908,7 +960,7 @@ BookmarkPermanentNode* BookmarkModel::CreatePermanentNode(
 
 void BookmarkModel::OnFaviconDataAvailable(
     BookmarkNode* node,
-    const history::FaviconImageResult& image_result) {
+    const chrome::FaviconImageResult& image_result) {
   DCHECK(node);
   node->set_favicon_load_task_id(CancelableTaskTracker::kBadTaskId);
   node->set_favicon_state(BookmarkNode::LOADED_FAVICON);
@@ -931,7 +983,7 @@ void BookmarkModel::LoadFavicon(BookmarkNode* node) {
   FaviconService::Handle handle = favicon_service->GetFaviconImageForURL(
       FaviconService::FaviconForURLParams(profile_,
                                           node->url(),
-                                          history::FAVICON,
+                                          chrome::FAVICON,
                                           gfx::kFaviconSize),
       base::Bind(&BookmarkModel::OnFaviconDataAvailable,
                  base::Unretained(this), node),
@@ -957,7 +1009,7 @@ void BookmarkModel::Observe(int type,
   switch (type) {
     case chrome::NOTIFICATION_FAVICON_CHANGED: {
       // Prevent the observers from getting confused for multiple favicon loads.
-      content::Details<history::FaviconChangeDetails> favicon_details(details);
+      content::Details<FaviconChangedDetails> favicon_details(details);
       for (std::set<GURL>::const_iterator i = favicon_details->urls.begin();
            i != favicon_details->urls.end(); ++i) {
         std::vector<const BookmarkNode*> nodes;

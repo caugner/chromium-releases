@@ -5,14 +5,16 @@
 #include "chrome/test/base/testing_browser_process.h"
 
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/bookmarks/bookmark_prompt_controller.h"
+#include "chrome/test/base/testing_browser_process_platform_part.h"
 #include "content/public/browser/notification_service.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/message_center/message_center.h"
 
 #if !defined(OS_IOS)
 #include "chrome/browser/media_galleries/media_file_system_registry.h"
@@ -24,21 +26,11 @@
 #include "chrome/browser/thumbnails/render_widget_snapshot_taker.h"
 #endif
 
-#if defined(OS_CHROMEOS)
-#include "chrome/test/base/testing_browser_process_platform_part_chromeos.h"
-#else
-#include "chrome/test/base/testing_browser_process_platform_part.h"
-#endif  // defined(OS_CHROMEOS)
-
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #include "chrome/browser/policy/browser_policy_connector.h"
 #else
 #include "chrome/browser/policy/policy_service_stub.h"
 #endif  // defined(ENABLE_CONFIGURATION_POLICY)
-
-#if defined(ENABLE_MESSAGE_CENTER)
-#include "ui/message_center/message_center.h"
-#endif
 
 // static
 TestingBrowserProcess* TestingBrowserProcess::GetGlobal() {
@@ -200,11 +192,9 @@ NotificationUIManager* TestingBrowserProcess::notification_ui_manager() {
 #endif
 }
 
-#if defined(ENABLE_MESSAGE_CENTER)
 message_center::MessageCenter* TestingBrowserProcess::message_center() {
   return message_center::MessageCenter::Get();
 }
-#endif
 
 IntranetRedirectDetector* TestingBrowserProcess::intranet_redirect_detector() {
   return NULL;
@@ -215,7 +205,6 @@ AutomationProviderList* TestingBrowserProcess::GetAutomationProviderList() {
 }
 
 void TestingBrowserProcess::CreateDevToolsHttpProtocolHandler(
-    Profile* profile,
     chrome::HostDesktopType host_desktop_type,
     const std::string& ip,
     int port,
@@ -331,13 +320,15 @@ TestingBrowserProcess::media_file_system_registry() {
 #endif
 }
 
-void TestingBrowserProcess::PlatformSpecificCommandLineProcessing(
-    const CommandLine& command_line) {
-}
-
 bool TestingBrowserProcess::created_local_state() const {
     return (local_state_ != NULL);
 }
+
+#if defined(ENABLE_WEBRTC)
+WebRtcLogUploader* TestingBrowserProcess::webrtc_log_uploader() {
+  return NULL;
+}
+#endif
 
 void TestingBrowserProcess::SetBookmarkPromptController(
     BookmarkPromptController* controller) {

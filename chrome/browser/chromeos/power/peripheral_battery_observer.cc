@@ -8,10 +8,10 @@
 
 #include "ash/shell.h"
 #include "base/bind.h"
-#include "base/string16.h"
-#include "base/stringprintf.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_split.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
@@ -32,7 +32,7 @@ namespace {
 
 // When a peripheral device's battery level is <= kLowBatteryLevel, consider
 // it to be in low battery condition.
-const int kLowBatteryLevel = 5;
+const int kLowBatteryLevel = 15;
 
 // Don't show 2 low battery notification within |kNotificationIntervalSec|
 // seconds.
@@ -180,7 +180,7 @@ void PeripheralBatteryObserver::DeviceRemoved(device::BluetoothAdapter* adapter,
 void PeripheralBatteryObserver::InitializeOnBluetoothReady(
     scoped_refptr<device::BluetoothAdapter> adapter) {
   bluetooth_adapter_ = adapter;
-  CHECK(bluetooth_adapter_);
+  CHECK(bluetooth_adapter_.get());
   bluetooth_adapter_->AddObserver(this);
 }
 

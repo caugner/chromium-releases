@@ -317,6 +317,13 @@ def AddBookmarkManagerActions(actions):
   actions.add('BookmarkManager_Command_UndoGlobal')
   actions.add('BookmarkManager_Command_UndoNone')
 
+  actions.add('BookmarkManager_NavigateTo_BookmarkBar')
+  actions.add('BookmarkManager_NavigateTo_Mobile')
+  actions.add('BookmarkManager_NavigateTo_Other')
+  actions.add('BookmarkManager_NavigateTo_Recent')
+  actions.add('BookmarkManager_NavigateTo_Search')
+  actions.add('BookmarkManager_NavigateTo_SubFolder')
+
 def AddChromeOSActions(actions):
   """Add actions reported by non-Chrome processes in Chrome OS.
 
@@ -345,6 +352,9 @@ def AddExtensionActions(actions):
   actions.add('GoogleNow.MessageClicked')
   actions.add('GoogleNow.ButtonClicked0')
   actions.add('GoogleNow.ButtonClicked1')
+  actions.add('GoogleNow.WelcomeToastClickedYes')
+  actions.add('GoogleNow.WelcomeToastClickedNo')
+  actions.add('GoogleNow.WelcomeToastDismissed')
   actions.add('GoogleNow.Dismissed')
 
 def GrepForActions(path, actions):

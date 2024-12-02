@@ -12,7 +12,7 @@
 #include "base/file_util.h"
 #include "base/metrics/histogram.h"
 #include "base/rand_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/time.h"
 #include "sql/transaction.h"
 
@@ -27,7 +27,7 @@ namespace {
 // Current version number. We write databases at the "current" version number,
 // but any previous version that can read the "compatible" one can make do with
 // or database without *too* many bad effects.
-static const int kCurrentVersionNumber = 25;
+static const int kCurrentVersionNumber = 26;
 static const int kCompatibleVersionNumber = 16;
 static const char kEarlyExpirationThresholdKey[] = "early_expiration_threshold";
 
@@ -44,12 +44,11 @@ HistoryDatabase::HistoryDatabase()
 HistoryDatabase::~HistoryDatabase() {
 }
 
-sql::InitStatus HistoryDatabase::Init(const base::FilePath& history_name,
-                                      sql::ErrorDelegate* error_delegate) {
-  db_.set_error_histogram_name("Sqlite.History.Error");
+sql::InitStatus HistoryDatabase::Init(const base::FilePath& history_name) {
+  db_.set_histogram_tag("History");
 
   // Set the exceptional sqlite error handler.
-  db_.set_error_delegate(error_delegate);
+  db_.set_error_callback(error_callback_);
 
   // Set the database page size to something a little larger to give us
   // better performance (we're typically seek rather than bandwidth limited).
@@ -57,11 +56,11 @@ sql::InitStatus HistoryDatabase::Init(const base::FilePath& history_name,
   // this is a NOP. Must be a power of 2 and a max of 8192.
   db_.set_page_size(4096);
 
-  // Increase the cache size. The page size, plus a little extra, times this
+  // Set the cache size. The page size, plus a little extra, times this
   // value, tells us how much memory the cache will use maximum.
-  // 6000 * 4MB = 24MB
+  // 1000 * 4kB = 4MB
   // TODO(brettw) scale this value to the amount of available memory.
-  db_.set_cache_size(6000);
+  db_.set_cache_size(1000);
 
   // Note that we don't set exclusive locking here. That's done by
   // BeginExclusiveMode below which is called later (we have to be in shared
@@ -413,6 +412,15 @@ sql::InitStatus HistoryDatabase::EnsureCurrentVersion() {
   if (cur_version == 24) {
     if (!MigratePresentationIndex()) {
       LOG(WARNING) << "Unable to migrate history to version 25";
+      return sql::INIT_FAILURE;
+    }
+    cur_version++;
+    meta_table_.SetVersionNumber(cur_version);
+  }
+
+  if (cur_version == 25) {
+    if (!MigrateReferrer()) {
+      LOG(WARNING) << "Unable to migrate history to version 26";
       return sql::INIT_FAILURE;
     }
     cur_version++;

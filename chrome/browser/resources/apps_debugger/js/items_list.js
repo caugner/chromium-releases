@@ -5,14 +5,17 @@
 cr.define('apps_dev_tool', function() {
   'use strict';
 
-  // The list of all apps & extensions.
+  // The list of all packed/unpacked apps and extensions.
   var completeList = [];
 
-  // The list of all apps.
-  var appList = [];
+  // The list of all packed apps.
+  var packedAppList = [];
 
-  // The list of all extensions.
-  var extensionList = [];
+  // The list of all packed extensions.
+  var packedExtensionList = [];
+
+  // The list of all unpacked apps or extensions.
+  var unpackedList = [];
 
   /** const*/ var AppsDevTool = apps_dev_tool.AppsDevTool;
 
@@ -52,10 +55,13 @@ cr.define('apps_dev_tool', function() {
    * Refreshes the app.
    */
   function reloadAppDisplay() {
-    var extensions = new ItemsList($('extension-settings-list'), extensionList);
-    var apps = new ItemsList($('app-settings-list'), appList);
+    var extensions = new ItemsList($('packed-extension-list'),
+                                   packedExtensionList);
+    var apps = new ItemsList($('packed-app-list'), packedAppList);
+    var unpacked = new ItemsList($('unpacked-list'), unpackedList);
     extensions.showItemNodes();
     apps.showItemNodes();
+    unpacked.showItemNodes();
   }
 
   /**
@@ -63,17 +69,20 @@ cr.define('apps_dev_tool', function() {
    * @param {string} filter Curent string in the search box.
    */
   function rebuildAppList(filter) {
-    appList = [];
-    extensionList = [];
+    packedAppList = [];
+    packedExtensionList = [];
+    unpackedList = [];
 
     for (var i = 0; i < completeList.length; i++) {
       var item = completeList[i];
-      if (filter && item.name.toLowerCase().search(filter) < 0)
+      if (filter && item.name.toLowerCase().search(filter.toLowerCase()) < 0)
         continue;
-      if (item.isApp)
-        appList.push(item);
+      if (item.is_unpacked)
+        unpackedList.push(item);
+      else if (item.isApp)
+        packedAppList.push(item);
       else
-        extensionList.push(item);
+        packedExtensionList.push(item);
     }
   }
 
@@ -131,11 +140,13 @@ cr.define('apps_dev_tool', function() {
       if (!item.enabled)
         node.classList.add('inactive-extension');
 
+      node.querySelector('.extension-disabled').hidden = item.enabled;
+
       if (!item.may_disable)
         node.classList.add('may-not-disable');
 
       var itemNode = node.querySelector('.extension-list-item');
-      itemNode.style.backgroundImage = 'url(' + item.icon + ')';
+      itemNode.style.backgroundImage = 'url(' + item.icon_url + ')';
 
       var title = node.querySelector('.extension-title');
       title.textContent = item.name;
@@ -191,13 +202,44 @@ cr.define('apps_dev_tool', function() {
           });
         });
         restart.hidden = false;
+
+        var launchButton = node.querySelector('.extension-run-button');
+        launchButton.addEventListener('click', function(e) {
+          ItemsList.launchApp(item.id);
+        });
+
+        var restartButton = node.querySelector('.extension-restart-button');
+        restartButton.addEventListener('click', function(e) {
+          chrome.developerPrivate.restart(item.id, function() {
+            ItemsList.loadItemsInfo();
+          });
+        });
+
+        var showLogs = node.querySelector('.extension-show-logs-button');
+        showLogs.addEventListener('click', function(e) {
+          if (!item.views.length)
+            return;
+          var view = item.views[0];
+
+          // Opens the devtools inspect window for the page.
+          chrome.developerPrivate.inspect({
+            extension_id: String(item.id),
+            render_process_id: String(view.render_process_id),
+            render_view_id: String(view.render_view_id),
+            incognito: view.incognito,
+          });
+        });
+      } else {
+        node.querySelector('.extension-run-button').hidden = true;
+        node.querySelector('.extension-restart-button').hidden = true;
+        node.querySelector('.extension-show-logs-button').hidden = true;
       }
 
       // The terminated reload link.
       if (!item.terminated)
         this.setEnabledCheckbox_(item, node);
       else
-        this.setTerminatedReloadLink_(node, item);
+        this.setTerminatedReloadLink_(item, node);
 
       // Set remove button handler.
       this.setRemoveButton_(item, node);
@@ -206,12 +248,14 @@ cr.define('apps_dev_tool', function() {
       var idLabel = node.querySelector('.extension-id');
       idLabel.textContent = ' ' + item.id;
 
-      // Then the path, if provided by unpacked app / extension.
+      // Set the path and show the pack button, if provided by unpacked
+      // app / extension.
       if (item.is_unpacked) {
         var loadPath = node.querySelector('.load-path');
         loadPath.hidden = false;
         loadPath.querySelector('span:nth-of-type(2)').textContent =
             ' ' + item.path;
+        this.setPackButton_(item, node);
       }
 
       // Then the 'managed, cannot uninstall/disable' message.
@@ -220,13 +264,19 @@ cr.define('apps_dev_tool', function() {
 
       this.setActiveViews_(item, node);
 
+      var moreDetailsLink =
+          node.querySelector('.extension-more-details-button');
+      moreDetailsLink.addEventListener('click', function(e) {
+        this.toggleExtensionDetails_(item, node);
+      }.bind(this));
+
       this.itemsTabNode_.appendChild(node);
     },
 
     /**
      * Sets the webstore link.
      * @param {!Object} item A dictionary of item metadata.
-     * @param {HTMLElement} el HTML element containing all items.
+     * @param {!HTMLElement} el HTML element containing all items.
      * @private
      */
     setWebstoreLink_: function(item, el) {
@@ -241,7 +291,7 @@ cr.define('apps_dev_tool', function() {
     /**
      * Sets the reload link handler.
      * @param {!Object} item A dictionary of item metadata.
-     * @param {HTMLElement} el HTML element containing all items.
+     * @param {!HTMLElement} el HTML element containing all items.
      * @private
      */
     setReloadLink_: function(item, el) {
@@ -257,21 +307,23 @@ cr.define('apps_dev_tool', function() {
     /**
      * Sets the terminated reload link handler.
      * @param {!Object} item A dictionary of item metadata.
-     * @param {HTMLElement} el HTML element containing all items.
+     * @param {!HTMLElement} el HTML element containing all items.
      * @private
      */
     setTerminatedReloadLink_: function(item, el) {
       var terminatedReload = el.querySelector('.terminated-reload-link');
-      terminatedReload.hidden = false;
-      chrome.developerPrivate.reload(item.id, function() {
-        ItemsList.loadItemsInfo();
+      terminatedReload.addEventListener('click', function(e) {
+        chrome.developerPrivate.reload(item.id, function() {
+          ItemsList.loadItemsInfo();
+        });
       });
+      terminatedReload.hidden = false;
     },
 
     /**
      * Sets the permissions link handler.
      * @param {!Object} item A dictionary of item metadata.
-     * @param {HTMLElement} el HTML element containing all items.
+     * @param {!HTMLElement} el HTML element containing all items.
      * @private
      */
     setPermissionsLink_: function(item, el) {
@@ -282,28 +334,40 @@ cr.define('apps_dev_tool', function() {
     },
 
     /**
+     * Sets the pack button handler.
+     * @param {!Object} item A dictionary of item metadata.
+     * @param {!HTMLElement} el HTML element containing all items.
+     * @private
+     */
+    setPackButton_: function(item, el) {
+      var packButton = el.querySelector('.pack-link');
+      packButton.addEventListener('click', function(e) {
+        $('item-root-dir').value = item.path;
+        AppsDevTool.showOverlay($('packItemOverlay'));
+      });
+      packButton.hidden = false;
+    },
+
+    /**
      * Sets the remove button handler.
      * @param {!Object} item A dictionary of item metadata.
-     * @param {HTMLElement} el HTML element containing all items.
+     * @param {!HTMLElement} el HTML element containing all items.
      * @private
      */
     setRemoveButton_: function(item, el) {
-      var trashTemplate = $('template-collection').querySelector('.trash');
-      var trash = trashTemplate.cloneNode(true);
-      trash.title = str('extensionUninstall');
-      trash.addEventListener('click', function(e) {
+      var deleteLink = el.querySelector('.delete-link');
+      deleteLink.addEventListener('click', function(e) {
         var options = {showConfirmDialog: false};
         chrome.management.uninstall(item.id, options, function() {
           ItemsList.loadItemsInfo();
         });
       });
-      el.querySelector('.enable-controls').appendChild(trash);
     },
 
     /**
      * Sets the handler for enable checkbox.
      * @param {!Object} item A dictionary of item metadata.
-     * @param {HTMLElement} el HTML element containing all items.
+     * @param {!HTMLElement} el HTML element containing all items.
      * @private
      */
     setEnabledCheckbox_: function(item, el) {
@@ -314,7 +378,9 @@ cr.define('apps_dev_tool', function() {
       if (item.may_disable) {
         enable.addEventListener('click', function(e) {
           chrome.developerPrivate.enable(
-              item.id, !!e.target.checked, ItemsList.loadItemsInfo);
+              item.id, !!e.target.checked, function() {
+                ItemsList.loadItemsInfo();
+              });
         });
       }
 
@@ -324,7 +390,7 @@ cr.define('apps_dev_tool', function() {
     /**
      * Sets the handler for the allow_file_access checkbox.
      * @param {!Object} item A dictionary of item metadata.
-     * @param {HTMLElement} el HTML element containing all items.
+     * @param {!HTMLElement} el HTML element containing all items.
      * @private
      */
     setAllowFileAccessCheckbox_: function(item, el) {
@@ -339,7 +405,7 @@ cr.define('apps_dev_tool', function() {
     /**
      * Sets the handler for the allow_incognito checkbox.
      * @param {!Object} item A dictionary of item metadata.
-     * @param {HTMLElement} el HTML element containing all items.
+     * @param {!HTMLElement} el HTML element containing all items.
      * @private
      */
     setAllowIncognitoCheckbox_: function(item, el) {
@@ -360,7 +426,7 @@ cr.define('apps_dev_tool', function() {
      * Sets the active views link of an item. Clicking on the link
      * opens devtools window to inspect.
      * @param {!Object} item A dictionary of item metadata.
-     * @param {HTMLElement} el HTML element containing all items.
+     * @param {!HTMLElement} el HTML element containing all items.
      * @private
      */
     setActiveViews_: function(item, el) {
@@ -377,15 +443,13 @@ cr.define('apps_dev_tool', function() {
             (view.render_process_id == -1 ? ' ' + str('viewInactive') : '');
         link.textContent = label;
         link.addEventListener('click', function(e) {
-          var inspectOptions = {
+          // Opens the devtools inspect window for the page.
+          chrome.developerPrivate.inspect({
             extension_id: String(item.id),
             render_process_id: String(view.render_process_id),
             render_view_id: String(view.render_view_id),
             incognito: view.incognito,
-          };
-
-          // Opens the devtools inspect window for the page.
-          chrome.developerPrivate.inspect(inspectOptions);
+          });
         });
 
         if (i < item.views.length - 1) {
@@ -393,6 +457,53 @@ cr.define('apps_dev_tool', function() {
           activeViews.appendChild(link);
         }
       });
+    },
+
+    /**
+     * If the details of an app / extension is expanded, this function will
+     * collapse it, else it will expand this them.
+     * @param {!Object} item A dictionary of item metadata.
+     * @param {!HTMLElement} node HTML element containing all items.
+     * @private
+     */
+    toggleExtensionDetails_: function(item, node)  {
+      var itemNode = node.querySelector('.extension-details');
+      if (itemNode.classList.contains('expanded'))
+        this.setExtensionDetailsVisible_(node, false);
+      else
+        this.setExtensionDetailsVisible_(node, true);
+    },
+
+    /**
+     * If visible is true, this function will expand the details of an
+     * app/extension, else it will collapse them.
+     * @param {!HTMLElement} node HTML element containing all items.
+     * @param {boolean} visible Visiblity of the details.
+     * @private
+     */
+    setExtensionDetailsVisible_: function(node, visible) {
+      var itemNode = node.querySelector('.extension-details');
+      var details = node.querySelector('.extension-details-all');
+      if (visible) {
+        // Hide other details.
+        var otherNodeList =
+            document.querySelectorAll('extension-list-item-wrapper');
+        for (var i = 0; i < otherNodeList.length; i++) {
+          if (otherNodeList[i] != node)
+            this.setExtensionDetailsVisible_(otherNodeList[i], false);
+        }
+
+        var container =
+            details.querySelector('.extension-details-all-container');
+        // Adds 10 pixels to height because .extension-details-all-bubble has
+        // a 10px top margin.
+        var height = container.clientHeight + 10;
+        details.style.height = height + 'px';
+        itemNode.classList.add('expanded');
+      } else {
+        details.style.height = 0;
+        itemNode.classList.remove('expanded');
+      }
     }
   };
 
@@ -406,11 +517,16 @@ cr.define('apps_dev_tool', function() {
 
   /**
    * Fetches items info and reloads the app.
+   * @param {Function=} opt_callback An optional callback to be run when
+   *     reloading is finished.
    */
-  ItemsList.loadItemsInfo = function() {
+  ItemsList.loadItemsInfo = function(callback) {
     chrome.developerPrivate.getItemsInfo(true, true, function(info) {
       completeList = info.sort(compareByName);
       ItemsList.onSearchInput();
+      assert(/undefined|function/.test(typeof callback));
+      if (callback)
+        callback();
     });
   };
 
@@ -420,8 +536,32 @@ cr.define('apps_dev_tool', function() {
    */
   ItemsList.launchApp = function(id) {
     chrome.management.launchApp(id, function() {
-      ItemsList.loadItemsInfo();
+      ItemsList.loadItemsInfo(function() {
+        var unpacked = new ItemsList($('unpacked-list'), unpackedList);
+        unpacked.setExtensionDetailsVisible_($(id), true);
+      });
     });
+  };
+
+  /**
+   * Selects the unpacked apps / extensions tab, scrolls to the app /extension
+   * with the given |id| and expand its details.
+   * @param {string} id Identifier of the app / extension.
+   */
+  ItemsList.makeUnpackedExtensionVisible = function(id) {
+    var tabbox = document.querySelector('tabbox');
+    // Unpacked tab is the first tab.
+    tabbox.selectedIndex = 0;
+
+    var firstItem =
+        document.querySelector('#unpacked-list .extension-list-item-wrapper');
+    if (!firstItem)
+      return;
+    // Scroll relatively to the position of the first item.
+    var node = $(id);
+    document.body.scrollTop = node.offsetTop - firstItem.offsetTop;
+    var unpacked = new ItemsList($('unpacked-list'), unpackedList);
+    unpacked.setExtensionDetailsVisible_(node, true);
   };
 
   return {

@@ -4,10 +4,10 @@
 
 #import "ui/message_center/cocoa/popup_controller.h"
 
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #import "ui/base/test/ui_cocoa_test_helper.h"
 #include "ui/message_center/notification.h"
 
@@ -21,13 +21,19 @@ TEST_F(PopupControllerTest, Creation) {
           "",
           ASCIIToUTF16("Added to circles"),
           ASCIIToUTF16("Jonathan and 5 others"),
+          gfx::Image(),
           string16(),
           std::string(),
+          message_center::RichNotificationData(),
           NULL));
 
-  scoped_nsobject<MCPopupController> controller(
+  base::scoped_nsobject<MCPopupController> controller(
       [[MCPopupController alloc] initWithNotification:notification.get()
-                                        messageCenter:NULL]);
+                                        messageCenter:nil
+                                      popupCollection:nil]);
+  // Add an extra ref count for scoped_nsobject since MCPopupController will
+  // release itself when it is being closed.
+  [controller retain];
 
   EXPECT_TRUE([controller window]);
   EXPECT_EQ(notification.get(), [controller notification]);

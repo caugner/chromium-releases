@@ -6,9 +6,9 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "net/base/auth.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/load_timing_info_test_util.h"
@@ -181,9 +181,10 @@ class SSLClientSocketPoolTest : public testing::Test {
     HttpNetworkSession::Params params;
     params.host_resolver = &host_resolver_;
     params.cert_verifier = cert_verifier_.get();
+    params.transport_security_state = transport_security_state_.get();
     params.proxy_service = proxy_service_.get();
     params.client_socket_factory = &socket_factory_;
-    params.ssl_config_service = ssl_config_service_;
+    params.ssl_config_service = ssl_config_service_.get();
     params.http_auth_handler_factory = http_auth_handler_factory_.get();
     params.http_server_properties = &http_server_properties_;
     params.enable_spdy_compression = false;
@@ -195,6 +196,7 @@ class SSLClientSocketPoolTest : public testing::Test {
   MockClientSocketFactory socket_factory_;
   MockCachingHostResolver host_resolver_;
   scoped_ptr<CertVerifier> cert_verifier_;
+  scoped_ptr<TransportSecurityState> transport_security_state_;
   const scoped_ptr<ProxyService> proxy_service_;
   const scoped_refptr<SSLConfigService> ssl_config_service_;
   const scoped_ptr<HttpAuthHandlerFactory> http_auth_handler_factory_;
@@ -720,7 +722,7 @@ TEST_F(SSLClientSocketPoolTest, IPPooling) {
   struct TestHosts {
     std::string name;
     std::string iplist;
-    HostPortProxyPair pair;
+    SpdySessionKey key;
     AddressList addresses;
   } test_hosts[] = {
     { "www.webkit.org",    "192.0.2.33,192.168.0.1,192.168.0.5" },
@@ -739,9 +741,10 @@ TEST_F(SSLClientSocketPoolTest, IPPooling) {
     host_resolver_.Resolve(info, &test_hosts[i].addresses, CompletionCallback(),
                            NULL, BoundNetLog());
 
-    // Setup a HostPortProxyPair
-    test_hosts[i].pair = HostPortProxyPair(
-        HostPortPair(test_hosts[i].name, kTestPort), ProxyServer::Direct());
+    // Setup a SpdySessionKey
+    test_hosts[i].key = SpdySessionKey(
+        HostPortPair(test_hosts[i].name, kTestPort), ProxyServer::Direct(),
+        kPrivacyModeDisabled);
   }
 
   MockRead reads[] = {
@@ -782,17 +785,17 @@ TEST_F(SSLClientSocketPoolTest, IPPooling) {
   // TODO(rtenneti): MockClientSocket::GetPeerAddress returns 0 as the port
   // number. Fix it to return port 80 and then use GetPeerAddress to AddAlias.
   SpdySessionPoolPeer pool_peer(session_->spdy_session_pool());
-  pool_peer.AddAlias(test_hosts[0].addresses.front(), test_hosts[0].pair);
+  pool_peer.AddAlias(test_hosts[0].addresses.front(), test_hosts[0].key);
 
   scoped_refptr<SpdySession> spdy_session;
   rv = session_->spdy_session_pool()->GetSpdySessionFromSocket(
-    test_hosts[0].pair, handle.release(), BoundNetLog(), 0,
+    test_hosts[0].key, handle.release(), BoundNetLog(), 0,
       &spdy_session, true);
   EXPECT_EQ(0, rv);
 
-  EXPECT_TRUE(session_->spdy_session_pool()->HasSession(test_hosts[0].pair));
-  EXPECT_FALSE(session_->spdy_session_pool()->HasSession(test_hosts[1].pair));
-  EXPECT_TRUE(session_->spdy_session_pool()->HasSession(test_hosts[2].pair));
+  EXPECT_TRUE(session_->spdy_session_pool()->HasSession(test_hosts[0].key));
+  EXPECT_FALSE(session_->spdy_session_pool()->HasSession(test_hosts[1].key));
+  EXPECT_TRUE(session_->spdy_session_pool()->HasSession(test_hosts[2].key));
 
   session_->spdy_session_pool()->CloseAllSessions();
 }
@@ -803,7 +806,7 @@ void SSLClientSocketPoolTest::TestIPPoolingDisabled(
   struct TestHosts {
     std::string name;
     std::string iplist;
-    HostPortProxyPair pair;
+    SpdySessionKey key;
     AddressList addresses;
   } test_hosts[] = {
     { "www.webkit.org",    "192.0.2.33,192.168.0.1,192.168.0.5" },
@@ -823,9 +826,10 @@ void SSLClientSocketPoolTest::TestIPPoolingDisabled(
                                 callback.callback(), NULL, BoundNetLog());
     EXPECT_EQ(OK, callback.GetResult(rv));
 
-    // Setup a HostPortProxyPair
-    test_hosts[i].pair = HostPortProxyPair(
-        HostPortPair(test_hosts[i].name, kTestPort), ProxyServer::Direct());
+    // Setup a SpdySessionKey
+    test_hosts[i].key = SpdySessionKey(
+        HostPortPair(test_hosts[i].name, kTestPort), ProxyServer::Direct(),
+        kPrivacyModeDisabled);
   }
 
   MockRead reads[] = {
@@ -861,16 +865,16 @@ void SSLClientSocketPoolTest::TestIPPoolingDisabled(
   // TODO(rtenneti): MockClientSocket::GetPeerAddress returns 0 as the port
   // number. Fix it to return port 80 and then use GetPeerAddress to AddAlias.
   SpdySessionPoolPeer pool_peer(session_->spdy_session_pool());
-  pool_peer.AddAlias(test_hosts[0].addresses.front(), test_hosts[0].pair);
+  pool_peer.AddAlias(test_hosts[0].addresses.front(), test_hosts[0].key);
 
   scoped_refptr<SpdySession> spdy_session;
   rv = session_->spdy_session_pool()->GetSpdySessionFromSocket(
-    test_hosts[0].pair, handle.release(), BoundNetLog(), 0,
+    test_hosts[0].key, handle.release(), BoundNetLog(), 0,
       &spdy_session, true);
   EXPECT_EQ(0, rv);
 
-  EXPECT_TRUE(session_->spdy_session_pool()->HasSession(test_hosts[0].pair));
-  EXPECT_FALSE(session_->spdy_session_pool()->HasSession(test_hosts[1].pair));
+  EXPECT_TRUE(session_->spdy_session_pool()->HasSession(test_hosts[0].key));
+  EXPECT_FALSE(session_->spdy_session_pool()->HasSession(test_hosts[1].key));
 
   session_->spdy_session_pool()->CloseAllSessions();
 }

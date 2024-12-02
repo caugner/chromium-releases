@@ -10,7 +10,7 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/profiles/profile_keyed_service.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/dbus/dbus_method_call_status.h"
@@ -24,13 +24,13 @@ class SequencedTaskRunner;
 
 namespace policy {
 
-class DeviceLocalAccountPolicyProvider;
+class ConfigurationPolicyProvider;
 class ManagedModePolicyProvider;
 class PolicyService;
 
-// A ProfileKeyedService that creates and manages the per-Profile policy
+// A BrowserContextKeyedService that creates and manages the per-Profile policy
 // components.
-class ProfilePolicyConnector : public ProfileKeyedService {
+class ProfilePolicyConnector : public BrowserContextKeyedService {
  public:
   explicit ProfilePolicyConnector(Profile* profile);
   virtual ~ProfilePolicyConnector();
@@ -41,7 +41,7 @@ class ProfilePolicyConnector : public ProfileKeyedService {
 
   void InitForTesting(scoped_ptr<PolicyService> service);
 
-  // ProfileKeyedService:
+  // BrowserContextKeyedService:
   virtual void Shutdown() OVERRIDE;
 
   // This is never NULL.
@@ -62,8 +62,6 @@ class ProfilePolicyConnector : public ProfileKeyedService {
 #if defined(ENABLE_CONFIGURATION_POLICY)
 
 #if defined(OS_CHROMEOS)
-  class PolicyInitializationObserver;
-
   void InitializeDeviceLocalAccountPolicyProvider(const std::string& username);
 
   // Callback for CryptohomeClient::GetSanitizedUsername() that initializes the
@@ -84,10 +82,7 @@ class ProfilePolicyConnector : public ProfileKeyedService {
   // local state.
   bool is_primary_user_;
 
-  scoped_ptr<DeviceLocalAccountPolicyProvider>
-      device_local_account_policy_provider_;
-
-  scoped_ptr<PolicyInitializationObserver> user_policy_init_observer_;
+  scoped_ptr<ConfigurationPolicyProvider> special_user_policy_provider_;
 #endif
 
 #if defined(ENABLE_MANAGED_USERS) && defined(ENABLE_CONFIGURATION_POLICY)

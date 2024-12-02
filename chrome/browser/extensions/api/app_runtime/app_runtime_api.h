@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_APP_RUNTIME_APP_RUNTIME_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_APP_RUNTIME_APP_RUNTIME_API_H_
 
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/extensions/extension_function.h"
 
 class Profile;
@@ -28,10 +28,8 @@ class AppEventRouter {
   // data.
   static void DispatchOnLaunchedEvent(Profile* profile,
                                       const Extension* extension);
-  static void DispatchOnRestartedEvent(
-      Profile* profile,
-      const Extension* extension,
-      const std::vector<app_file_handler_util::GrantedFileEntry>& file_entries);
+  static void DispatchOnRestartedEvent(Profile* profile,
+                                       const Extension* extension);
 
   // TODO(benwells): Update this comment, it is out of date.
   // Dispatches the onLaunched event to the given app, providing launch data of
@@ -53,8 +51,7 @@ class AppEventRouter {
       const Extension* extension,
       const std::string& handler_id,
       const std::string& mime_type,
-      const std::string& file_system_id,
-      const std::string& base_name);
+      const extensions::app_file_handler_util::GrantedFileEntry& file_entry);
 };
 
 }  // namespace extensions

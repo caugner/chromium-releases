@@ -8,7 +8,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome_frame/test/mock_ie_event_sink_actions.h"
 #include "chrome_frame/test/mock_ie_event_sink_test.h"
-#include "components/autofill/browser/webdata/autofill_table.h"
+#include "components/autofill/core/browser/webdata/autofill_table.h"
 #include "components/webdata/common/web_database.h"
 #include "components/webdata/common/webdata_constants.h"
 
@@ -210,7 +210,7 @@ TEST_F(DeleteBrowsingHistoryTest, DISABLED_CFDeleteBrowsingHistory) {
   EXPECT_CALL(load_helper, OnLoadComplete())
       .WillOnce(testing::DoAll(
           AccLeftClickInRenderer(&ie_mock_, AccObjectMatcher(L"username")),
-          PostCharMessagesToRenderer(&ie_mock_, WideToASCII(kFormFieldValue)),
+          PostKeyMessagesToRenderer(&ie_mock_, WideToASCII(kFormFieldValue)),
           AccLeftClickInRenderer(&ie_mock_, AccObjectMatcher(L"Submit"))));
 
   EXPECT_CALL(server_mock_, Post(_, testing::StrEq(L"/form"), _))

@@ -33,8 +33,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, MAYBE_GetLastFocusedWindow) {
   Browser* new_browser = CreateBrowser(browser()->profile());
   int focused_window_id = ExtensionTabUtil::GetWindowId(new_browser);
 
-  scoped_refptr<WindowsGetLastFocusedFunction> function =
-      new WindowsGetLastFocusedFunction();
+  scoped_refptr<extensions::WindowsGetLastFocusedFunction> function =
+      new extensions::WindowsGetLastFocusedFunction();
   scoped_refptr<extensions::Extension> extension(utils::CreateEmptyExtension());
   function->set_extension(extension.get());
   scoped_ptr<base::DictionaryValue> result(utils::ToDictionary(
@@ -45,10 +45,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, MAYBE_GetLastFocusedWindow) {
   // The id should always match the last focused window and does not depend
   // on what was passed to RunFunctionAndReturnSingleResult.
   EXPECT_EQ(focused_window_id, utils::GetInteger(result.get(), "id"));
-  ListValue* tabs = NULL;
+  base::ListValue* tabs = NULL;
   EXPECT_FALSE(result.get()->GetList(keys::kTabsKey, &tabs));
 
-  function = new WindowsGetLastFocusedFunction();
+  function = new extensions::WindowsGetLastFocusedFunction();
   function->set_extension(extension.get());
   result.reset(utils::ToDictionary(
       utils::RunFunctionAndReturnSingleResult(function.get(),
@@ -84,24 +84,25 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DISABLED_QueryLastFocusedWindowTabs) {
   int focused_window_id = ExtensionTabUtil::GetWindowId(focused_window);
 
   // Get tabs in the 'last focused' window called from non-focused browser.
-  scoped_refptr<TabsQueryFunction> function = new TabsQueryFunction();
+  scoped_refptr<extensions::TabsQueryFunction> function =
+      new extensions::TabsQueryFunction();
   scoped_ptr<base::ListValue> result(utils::ToList(
       utils::RunFunctionAndReturnSingleResult(function.get(),
                                               "[{\"lastFocusedWindow\":true}]",
                                               browser())));
 
-  ListValue* result_tabs = result.get();
+  base::ListValue* result_tabs = result.get();
   // We should have one initial tab and one added tab.
   EXPECT_EQ(2u, result_tabs->GetSize());
   for (size_t i = 0; i < result_tabs->GetSize(); ++i) {
-    DictionaryValue* result_tab = NULL;
+    base::DictionaryValue* result_tab = NULL;
     EXPECT_TRUE(result_tabs->GetDictionary(i, &result_tab));
     EXPECT_EQ(focused_window_id, utils::GetInteger(result_tab,
                                                    keys::kWindowIdKey));
   }
 
   // Get tabs NOT in the 'last focused' window called from the focused browser.
-  function = new TabsQueryFunction();
+  function = new extensions::TabsQueryFunction();
   result.reset(utils::ToList(
       utils::RunFunctionAndReturnSingleResult(function.get(),
                                               "[{\"lastFocusedWindow\":false}]",
@@ -111,7 +112,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DISABLED_QueryLastFocusedWindowTabs) {
   // We should get one tab for each extra window and one for the initial window.
   EXPECT_EQ(kExtraWindows + 1, result_tabs->GetSize());
   for (size_t i = 0; i < result_tabs->GetSize(); ++i) {
-    DictionaryValue* result_tab = NULL;
+    base::DictionaryValue* result_tab = NULL;
     EXPECT_TRUE(result_tabs->GetDictionary(i, &result_tab));
     EXPECT_NE(focused_window_id, utils::GetInteger(result_tab,
                                                    keys::kWindowIdKey));

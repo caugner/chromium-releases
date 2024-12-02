@@ -11,9 +11,9 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/stl_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "base/task_runner_util.h"
 #include "base/threading/worker_pool.h"
 #include "dbus/bus.h"
@@ -434,11 +434,9 @@ class CrosDisksClientStubImpl : public CrosDisksClient {
 
     // Perform fake mount.
     base::PostTaskAndReplyWithResult(
-        base::WorkerPool::GetTaskRunner(true /* task_is_slow */),
+        base::WorkerPool::GetTaskRunner(true /* task_is_slow */).get(),
         FROM_HERE,
-        base::Bind(&PerformFakeMount,
-                   source_path,
-                   mounted_path),
+        base::Bind(&PerformFakeMount, source_path, mounted_path),
         base::Bind(&CrosDisksClientStubImpl::ContinueMount,
                    weak_ptr_factory_.GetWeakPtr(),
                    source_path,

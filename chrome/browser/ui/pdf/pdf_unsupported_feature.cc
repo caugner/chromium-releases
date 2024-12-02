@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -104,7 +104,7 @@ bool PDFEnableAdobeReaderPromptDelegate::ShouldExpire(
 
 void PDFEnableAdobeReaderPromptDelegate::Accept() {
   content::RecordAction(UserMetricsAction("PDF_EnableReaderInfoBarOK"));
-  PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile_);
+  PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile_).get();
   plugin_prefs->EnablePluginGroup(
       true, ASCIIToUTF16(PluginMetadata::kAdobeReaderGroupName));
   plugin_prefs->EnablePluginGroup(

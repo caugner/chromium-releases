@@ -7,8 +7,8 @@
 #include "base/bind.h"
 #include "base/format_macros.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_device_client.h"
@@ -21,8 +21,6 @@
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace {
-
-const char kLogModule[] = "ShillPropertyHandler";
 
 // Limit the number of services or devices we observe. Since they are listed in
 // priority order, it should be reasonable to ignore services past this.
@@ -160,8 +158,19 @@ void ShillPropertyHandler::SetTechnologyEnabled(
         technology,
         base::Bind(&base::DoNothing),
         base::Bind(&network_handler::ShillErrorCallbackFunction,
-                   kLogModule, technology, error_callback));
+                   technology, error_callback));
   }
+}
+
+void ShillPropertyHandler::SetCheckPortalList(
+    const std::string& check_portal_list) {
+  base::StringValue value(check_portal_list);
+  shill_manager_->SetProperty(
+      flimflam::kCheckPortalListProperty,
+      value,
+      base::Bind(&base::DoNothing),
+      base::Bind(&network_handler::ShillErrorCallbackFunction,
+                 "", network_handler::ErrorCallback()));
 }
 
 void ShillPropertyHandler::RequestScan() const {
@@ -169,15 +178,15 @@ void ShillPropertyHandler::RequestScan() const {
       "",
       base::Bind(&base::DoNothing),
       base::Bind(&network_handler::ShillErrorCallbackFunction,
-                 kLogModule, "", network_handler::ErrorCallback()));
+                 "", network_handler::ErrorCallback()));
 }
 
 void ShillPropertyHandler::ConnectToBestServices() const {
-  network_event_log::AddEntry(kLogModule, "ConnectToBestServices", "");
+  NET_LOG_EVENT("ConnectToBestServices", "");
   shill_manager_->ConnectToBestServices(
       base::Bind(&base::DoNothing),
       base::Bind(&network_handler::ShillErrorCallbackFunction,
-                 kLogModule, "", network_handler::ErrorCallback()));
+                 "", network_handler::ErrorCallback()));
 }
 
 void ShillPropertyHandler::RequestProperties(ManagedState::ManagedType type,
@@ -203,11 +212,15 @@ void ShillPropertyHandler::RequestProperties(ManagedState::ManagedType type,
 
 void ShillPropertyHandler::OnPropertyChanged(const std::string& key,
                                              const base::Value& value) {
-  if (ManagerPropertyChanged(key, value))
-    listener_->ManagerPropertyChanged();
-  // If the service watch or device list changed and there are no pending
+  if (ManagerPropertyChanged(key, value)) {
+    std::string detail = key;
+    detail += " = " + network_event_log::ValueAsString(value);
+    NET_LOG_DEBUG("ManagerPropertyChanged", detail);
+    listener_->NotifyManagerPropertyChanged();
+  }
+  // If the service or device list changed and there are no pending
   // updates, signal the state list changed callback.
-  if ((key == flimflam::kServiceWatchListProperty) &&
+  if ((key == flimflam::kServicesProperty) &&
       pending_updates_[ManagedState::MANAGED_TYPE_NETWORK].size() == 0) {
     listener_->ManagedStateListChanged(ManagedState::MANAGED_TYPE_NETWORK);
   }
@@ -224,9 +237,11 @@ void ShillPropertyHandler::ManagerPropertiesCallback(
     DBusMethodCallStatus call_status,
     const base::DictionaryValue& properties) {
   if (call_status != DBUS_METHOD_CALL_SUCCESS) {
-    LOG(ERROR) << "Failed to get Manager properties:" << call_status;
+    NET_LOG_ERROR("ManagerPropertiesCallback",
+                  base::StringPrintf("Failed: %d", call_status));
     return;
   }
+  NET_LOG_EVENT("ManagerPropertiesCallback", "Success");
   bool notify = false;
   bool update_service_list = false;
   for (base::DictionaryValue::Iterator iter(properties);
@@ -245,7 +260,7 @@ void ShillPropertyHandler::ManagerPropertiesCallback(
       notify |= ManagerPropertyChanged(flimflam::kServicesProperty, *value);
   }
   if (notify)
-    listener_->ManagerPropertyChanged();
+    listener_->NotifyManagerPropertyChanged();
   // If there are no pending updates, signal the state list changed callbacks.
   if (pending_updates_[ManagedState::MANAGED_TYPE_NETWORK].size() == 0)
     listener_->ManagedStateListChanged(ManagedState::MANAGED_TYPE_NETWORK);
@@ -258,15 +273,16 @@ bool ShillPropertyHandler::ManagerPropertyChanged(const std::string& key,
   bool notify_manager_changed = false;
   if (key == flimflam::kServicesProperty) {
     const base::ListValue* vlist = GetListValue(key, value);
-    if (vlist)
-      listener_->UpdateManagedList(ManagedState::MANAGED_TYPE_NETWORK, *vlist);
-  } else if (key == flimflam::kServiceWatchListProperty) {
-    const base::ListValue* vlist = GetListValue(key, value);
     if (vlist) {
+      listener_->UpdateManagedList(ManagedState::MANAGED_TYPE_NETWORK, *vlist);
+      // UpdateObserved used to use kServiceWatchListProperty for TYPE_NETWORK,
+      // however that prevents us from receiving Strength updates from inactive
+      // networks. The overhead for observing all services is not unreasonable
+      // (and we limit the max number of observed services to kMaxObserved).
       UpdateObserved(ManagedState::MANAGED_TYPE_NETWORK, *vlist);
     }
   } else if (key == flimflam::kDevicesProperty) {
-    const ListValue* vlist = GetListValue(key, value);
+    const base::ListValue* vlist = GetListValue(key, value);
     if (vlist) {
       listener_->UpdateManagedList(ManagedState::MANAGED_TYPE_DEVICE, *vlist);
       UpdateObserved(ManagedState::MANAGED_TYPE_DEVICE, *vlist);
@@ -291,6 +307,12 @@ bool ShillPropertyHandler::ManagerPropertyChanged(const std::string& key,
     }
   } else if (key == flimflam::kProfilesProperty) {
     listener_->ProfileListChanged();
+  } else if (key == flimflam::kCheckPortalListProperty) {
+    std::string check_portal_list;
+    if (value.GetAsString(&check_portal_list)) {
+      listener_->CheckPortalListChanged(check_portal_list);
+      notify_manager_changed = true;
+    }
   }
   return notify_manager_changed;
 }
@@ -317,7 +339,7 @@ void ShillPropertyHandler::UpdateObserved(ManagedState::ManagedType type,
       new_observed[path] = new ShillPropertyObserver(
           type, path, base::Bind(
               &ShillPropertyHandler::PropertyChangedCallback, AsWeakPtr()));
-      network_event_log::AddEntry(kLogModule, "StartObserving", path);
+      NET_LOG_DEBUG("StartObserving", path);
     }
     observer_map.erase(path);
     // Limit the number of observed services.
@@ -327,7 +349,7 @@ void ShillPropertyHandler::UpdateObserved(ManagedState::ManagedType type,
   // Delete network service observers still in observer_map.
   for (ShillPropertyObserverMap::iterator iter =  observer_map.begin();
        iter != observer_map.end(); ++iter) {
-    network_event_log::AddEntry(kLogModule, "StopObserving", iter->first);
+    NET_LOG_DEBUG("StopObserving", iter->first);
     delete iter->second;
   }
   observer_map.swap(new_observed);
@@ -336,9 +358,8 @@ void ShillPropertyHandler::UpdateObserved(ManagedState::ManagedType type,
 void ShillPropertyHandler::UpdateAvailableTechnologies(
     const base::ListValue& technologies) {
   available_technologies_.clear();
-  network_event_log::AddEntry(
-      kLogModule, "AvailableTechnologiesChanged",
-      base::StringPrintf("Size: %"PRIuS, technologies.GetSize()));
+  NET_LOG_EVENT("AvailableTechnologiesChanged",
+                base::StringPrintf("Size: %"PRIuS, technologies.GetSize()));
   for (base::ListValue::const_iterator iter = technologies.begin();
        iter != technologies.end(); ++iter) {
     std::string technology;
@@ -351,9 +372,8 @@ void ShillPropertyHandler::UpdateAvailableTechnologies(
 void ShillPropertyHandler::UpdateEnabledTechnologies(
     const base::ListValue& technologies) {
   enabled_technologies_.clear();
-  network_event_log::AddEntry(
-      kLogModule, "EnabledTechnologiesChanged",
-      base::StringPrintf("Size: %"PRIuS, technologies.GetSize()));
+  NET_LOG_EVENT("EnabledTechnologiesChanged",
+                base::StringPrintf("Size: %"PRIuS, technologies.GetSize()));
   for (base::ListValue::const_iterator iter = technologies.begin();
        iter != technologies.end(); ++iter) {
     std::string technology;
@@ -367,9 +387,8 @@ void ShillPropertyHandler::UpdateEnabledTechnologies(
 void ShillPropertyHandler::UpdateUninitializedTechnologies(
     const base::ListValue& technologies) {
   uninitialized_technologies_.clear();
-  network_event_log::AddEntry(
-      kLogModule, "UninitializedTechnologiesChanged",
-      base::StringPrintf("Size: %"PRIuS, technologies.GetSize()));
+  NET_LOG_EVENT("UninitializedTechnologiesChanged",
+                base::StringPrintf("Size: %"PRIuS, technologies.GetSize()));
   for (base::ListValue::const_iterator iter = technologies.begin();
        iter != technologies.end(); ++iter) {
     std::string technology;
@@ -386,7 +405,7 @@ void ShillPropertyHandler::EnableTechnologyFailed(
     const std::string& error_message) {
   enabling_technologies_.erase(technology);
   network_handler::ShillErrorCallbackFunction(
-      kLogModule, technology, error_callback, error_name, error_message);
+      technology, error_callback, error_name, error_message);
 }
 
 void ShillPropertyHandler::GetPropertiesCallback(

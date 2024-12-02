@@ -10,7 +10,8 @@
   "content_scripts": [
     {
       "matches": ["http://www.google.com.bo/*"],
-      "js": ["google_cs.js"]
+      "js": ["google_cs.js"],
+      "run_at": "document_start"
     }
   ]
 }

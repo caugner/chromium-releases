@@ -22,9 +22,9 @@
 #include "base/prefs/json_pref_store.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_piece.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/system_monitor/system_monitor.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
@@ -37,6 +37,7 @@
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/browser/process_singleton.h"
+#include "chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/common/chrome_constants.h"
@@ -318,7 +319,10 @@ void FilterDisabledTests() {
     "HTTPSRequestTest.TLSv1Fallback",
     "HTTPSOCSPTest.*",
     "HTTPSEVCRLSetTest.*",
-    "HTTPSCRLSetTest.*"
+    "HTTPSCRLSetTest.*",
+
+    // Chrome Frame doesn't support GetFullRequestHeaders.
+    "URLRequestTest*.*_GetFullRequestHeaders"
   };
 
   const char* ie9_disabled_tests[] = {
@@ -723,12 +727,11 @@ void CFUrlRequestUnittestRunner::InitializeLogging() {
   base::FilePath exe;
   PathService::Get(base::FILE_EXE, &exe);
   base::FilePath log_filename = exe.ReplaceExtension(FILE_PATH_LITERAL("log"));
-  logging::InitLogging(
-      log_filename.value().c_str(),
-      logging::LOG_TO_BOTH_FILE_AND_SYSTEM_DEBUG_LOG,
-      logging::LOCK_LOG_FILE,
-      logging::DELETE_OLD_LOG_FILE,
-      logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
+  logging::LoggingSettings settings;
+  settings.logging_dest = logging::LOG_TO_ALL;
+  settings.log_file = log_filename.value().c_str();
+  settings.delete_old = logging::DELETE_OLD_LOG_FILE;
+  logging::InitLogging(settings);
   // We want process and thread IDs because we may have multiple processes.
   // Note: temporarily enabled timestamps in an effort to catch bug 6361.
   logging::SetLogItems(true, true, true, true);
@@ -742,7 +745,7 @@ void CFUrlRequestUnittestRunner::StartInitializationTimeout() {
   timeout_closure_.Reset(
       base::Bind(&CFUrlRequestUnittestRunner::OnInitializationTimeout,
                  base::Unretained(this)));
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       timeout_closure_.callback(),
       TestTimeouts::action_max_timeout());
@@ -824,8 +827,8 @@ void CFUrlRequestUnittestRunner::PreMainMessageLoopRun() {
 }
 
 bool CFUrlRequestUnittestRunner::MainMessageLoopRun(int* result_code) {
-  DCHECK(MessageLoop::current());
-  DCHECK(MessageLoop::current()->type() == MessageLoop::TYPE_UI);
+  DCHECK(base::MessageLoop::current());
+  DCHECK(base::MessageLoop::current()->type() == base::MessageLoop::TYPE_UI);
 
   // We need to allow IO on the main thread for these tests.
   base::ThreadRestrictions::SetIOAllowed(true);
@@ -917,6 +920,11 @@ const char* IEVersionToString(IEVersion version) {
 
 content::BrowserMainParts* FakeContentBrowserClient::CreateBrowserMainParts(
     const content::MainFunctionParams& parameters) {
+  // Normally this would happen during browser startup, but for tests
+  // we need to trigger creation of Profile-related services.
+  ChromeBrowserMainExtraPartsProfiles::
+      EnsureBrowserContextKeyedServiceFactoriesBuilt();
+
   // We never delete this, as the content module takes ownership.
   //
   // We must not construct this earlier, or we will have out-of-order

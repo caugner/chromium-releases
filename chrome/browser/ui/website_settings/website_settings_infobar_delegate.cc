@@ -5,13 +5,12 @@
 #include "chrome/browser/ui/website_settings/website_settings_infobar_delegate.h"
 
 #include "base/logging.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 
 // static
 void WebsiteSettingsInfobarDelegate::Create(InfoBarService* infobar_service) {
@@ -24,9 +23,8 @@ WebsiteSettingsInfobarDelegate::WebsiteSettingsInfobarDelegate(
     : ConfirmInfoBarDelegate(infobar_service) {
 }
 
-gfx::Image* WebsiteSettingsInfobarDelegate::GetIcon() const {
-  return &ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-      IDR_INFOBAR_ALT_NAV_URL);
+int WebsiteSettingsInfobarDelegate::GetIconID() const {
+  return IDR_INFOBAR_ALT_NAV_URL;
 }
 
 InfoBarDelegate::Type WebsiteSettingsInfobarDelegate::GetInfoBarType() const {

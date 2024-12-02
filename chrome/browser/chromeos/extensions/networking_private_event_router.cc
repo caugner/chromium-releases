@@ -12,13 +12,13 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/common/extensions/api/networking_private.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/onc/onc_constants.h"
 #include "chromeos/network/onc/onc_signature.h"
 #include "chromeos/network/onc/onc_translator.h"
+#include "components/browser_context_keyed_service/browser_context_dependency_manager.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 using extensions::event_names::kOnNetworkListChanged;
@@ -46,6 +46,7 @@ NetworkingPrivateEventRouter::NetworkingPrivateEventRouter(Profile* profile)
 }
 
 NetworkingPrivateEventRouter::~NetworkingPrivateEventRouter() {
+  DCHECK(!listening_);
 }
 
 void NetworkingPrivateEventRouter::Shutdown() {
@@ -56,8 +57,10 @@ void NetworkingPrivateEventRouter::Shutdown() {
   if (event_router)
     event_router->UnregisterObserver(this);
 
-  if (listening_)
-    NetworkStateHandler::Get()->RemoveObserver(this);
+  if (listening_) {
+    NetworkHandler::Get()->network_state_handler()->RemoveObserver(
+        this, FROM_HERE);
+  }
   listening_ = false;
 }
 
@@ -79,26 +82,26 @@ void NetworkingPrivateEventRouter::StartOrStopListeningForNetworkChanges() {
   bool should_listen = event_router->HasEventListener(kOnNetworksChanged) ||
       event_router->HasEventListener(kOnNetworkListChanged);
 
-  if (should_listen) {
-    if (!listening_)
-      NetworkStateHandler::Get()->AddObserver(this);
-  } else {
-    if (listening_)
-      NetworkStateHandler::Get()->RemoveObserver(this);
+  if (should_listen && !listening_) {
+    NetworkHandler::Get()->network_state_handler()->AddObserver(
+        this, FROM_HERE);
+  } else if (!should_listen && listening_) {
+    NetworkHandler::Get()->network_state_handler()->RemoveObserver(
+        this, FROM_HERE);
   }
   listening_ = should_listen;
 }
 
 void NetworkingPrivateEventRouter::NetworkListChanged() {
   EventRouter* event_router = ExtensionSystem::Get(profile_)->event_router();
-  NetworkStateList networks;
-  NetworkStateHandler::Get()->GetNetworkList(&networks);
+  NetworkStateHandler::NetworkStateList networks;
+  NetworkHandler::Get()->network_state_handler()->GetNetworkList(&networks);
   if (!event_router->HasEventListener(kOnNetworkListChanged))
     return;
 
   std::vector<std::string> changes;
-  for (NetworkStateList::const_iterator iter = networks.begin();
-      iter != networks.end(); ++iter) {
+  for (NetworkStateHandler::NetworkStateList::const_iterator iter =
+           networks.begin(); iter != networks.end(); ++iter) {
     // TODO(gspencer): Currently the "GUID" is actually the service path. Fix
     // this to be the real GUID once we're using
     // ManagedNetworkConfigurationManager.

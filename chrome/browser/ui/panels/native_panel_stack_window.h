@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_UI_PANELS_NATIVE_PANEL_STACK_WINDOW_H_
 
 #include "base/memory/scoped_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 
 class Panel;
 namespace gfx {
@@ -85,6 +85,9 @@ class NativePanelStackWindow {
   // Draws or clears the attention via system. The system might choose to
   // flash the taskbar icon for attention.
   virtual void DrawSystemAttention(bool draw_attention) = 0;
+
+  // Called when the panel is activated.
+  virtual void OnPanelActivated(Panel* panel) = 0;
 };
 
 #endif  // CHROME_BROWSER_UI_PANELS_NATIVE_PANEL_STACK_WINDOW_H_

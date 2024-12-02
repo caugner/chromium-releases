@@ -33,7 +33,7 @@ def Dispatch(options):
   test_pkg = test_package.TestPackage(options.test_apk_path,
                                       options.test_apk_jar_path)
   tests = test_pkg._GetAllMatchingTests(
-      options.annotations, options.test_filter)
+      options.annotations, options.exclude_annotations, options.test_filter)
   if not tests:
     logging.warning('No instrumentation tests to run with current args.')
     return base_test_result.TestRunResults()
@@ -56,4 +56,5 @@ def Dispatch(options):
 
   return shard.ShardAndRunTests(TestRunnerFactory, attached_devices, tests,
                                 options.build_type,
+                                test_timeout=None,
                                 num_retries=options.num_retries)

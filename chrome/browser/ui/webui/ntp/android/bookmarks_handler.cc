@@ -6,8 +6,8 @@
 
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -144,7 +144,7 @@ void BookmarksHandler::HandleGetBookmarks(const ListValue* args) {
   bookmark_data_requested_ = true;
   Profile* profile = Profile::FromBrowserContext(
       web_ui()->GetWebContents()->GetBrowserContext());
-  if (!BookmarkModelFactory::GetForProfile(profile)->IsLoaded())
+  if (!BookmarkModelFactory::GetForProfile(profile)->loaded())
     return;  // is handled in Loaded().
 
   // Attach the Partner Bookmarks shim under the Mobile Bookmarks.
@@ -393,8 +393,8 @@ void BookmarksHandler::HandleCreateHomeScreenBookmarkShortcut(
       FaviconService::FaviconForURLParams(
           profile,
           node->url(),
-          history::TOUCH_PRECOMPOSED_ICON | history::TOUCH_ICON |
-              history::FAVICON,
+          chrome::TOUCH_PRECOMPOSED_ICON | chrome::TOUCH_ICON |
+              chrome::FAVICON,
           0),  // request the largest icon.
       ui::SCALE_FACTOR_100P,  // density doesn't matter for the largest icon.
       base::Bind(&BookmarksHandler::OnShortcutFaviconDataAvailable,
@@ -405,7 +405,7 @@ void BookmarksHandler::HandleCreateHomeScreenBookmarkShortcut(
 
 void BookmarksHandler::OnShortcutFaviconDataAvailable(
     const BookmarkNode* node,
-    const history::FaviconBitmapResult& bitmap_result) {
+    const chrome::FaviconBitmapResult& bitmap_result) {
   SkColor color = SK_ColorWHITE;
   SkBitmap favicon_bitmap;
   if (bitmap_result.is_valid()) {

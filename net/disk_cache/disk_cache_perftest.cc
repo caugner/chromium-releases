@@ -9,7 +9,7 @@
 #include "base/bind_helpers.h"
 #include "base/hash.h"
 #include "base/perftimer.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/threading/thread.h"
 #include "base/test/test_file_util.h"
 #include "base/timer.h"
@@ -67,7 +67,7 @@ bool TimeWrite(int num_entries, disk_cache::Backend* cache,
     if (net::OK != cb.GetResult(rv))
       break;
     int ret = cache_entry->WriteData(
-        0, 0, buffer1, kSize1,
+        0, 0, buffer1.get(), kSize1,
         base::Bind(&CallbackTest::Run, base::Unretained(&callback)), false);
     if (net::ERR_IO_PENDING == ret)
       expected++;
@@ -75,7 +75,7 @@ bool TimeWrite(int num_entries, disk_cache::Backend* cache,
       break;
 
     ret = cache_entry->WriteData(
-        1, 0, buffer2, entry.data_len,
+        1, 0, buffer2.get(), entry.data_len,
         base::Bind(&CallbackTest::Run, base::Unretained(&callback)), false);
     if (net::ERR_IO_PENDING == ret)
       expected++;
@@ -116,7 +116,7 @@ bool TimeRead(int num_entries, disk_cache::Backend* cache,
     if (net::OK != cb.GetResult(rv))
       break;
     int ret = cache_entry->ReadData(
-        0, 0, buffer1, kSize1,
+        0, 0, buffer1.get(), kSize1,
         base::Bind(&CallbackTest::Run, base::Unretained(&callback)));
     if (net::ERR_IO_PENDING == ret)
       expected++;
@@ -124,7 +124,7 @@ bool TimeRead(int num_entries, disk_cache::Backend* cache,
       break;
 
     ret = cache_entry->ReadData(
-        1, 0, buffer2, entries[i].data_len,
+        1, 0, buffer2.get(), entries[i].data_len,
         base::Bind(&CallbackTest::Run, base::Unretained(&callback)));
     if (net::ERR_IO_PENDING == ret)
       expected++;
@@ -161,14 +161,14 @@ TEST_F(DiskCacheTest, Hash) {
 TEST_F(DiskCacheTest, CacheBackendPerformance) {
   base::Thread cache_thread("CacheThread");
   ASSERT_TRUE(cache_thread.StartWithOptions(
-                  base::Thread::Options(MessageLoop::TYPE_IO, 0)));
+                  base::Thread::Options(base::MessageLoop::TYPE_IO, 0)));
 
   ASSERT_TRUE(CleanupCacheDir());
   net::TestCompletionCallback cb;
   disk_cache::Backend* cache;
   int rv = disk_cache::CreateCacheBackend(
       net::DISK_CACHE, net::CACHE_BACKEND_BLOCKFILE, cache_path_, 0, false,
-      cache_thread.message_loop_proxy(), NULL, &cache, cb.callback());
+      cache_thread.message_loop_proxy().get(), NULL, &cache, cb.callback());
 
   ASSERT_EQ(net::OK, cb.GetResult(rv));
 
@@ -180,7 +180,7 @@ TEST_F(DiskCacheTest, CacheBackendPerformance) {
 
   EXPECT_TRUE(TimeWrite(num_entries, cache, &entries));
 
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   delete cache;
 
   ASSERT_TRUE(file_util::EvictFileFromSystemCache(
@@ -196,15 +196,14 @@ TEST_F(DiskCacheTest, CacheBackendPerformance) {
 
   rv = disk_cache::CreateCacheBackend(
       net::DISK_CACHE, net::CACHE_BACKEND_BLOCKFILE, cache_path_, 0, false,
-      cache_thread.message_loop_proxy(),
-      NULL, &cache, cb.callback());
+      cache_thread.message_loop_proxy().get(), NULL, &cache, cb.callback());
   ASSERT_EQ(net::OK, cb.GetResult(rv));
 
   EXPECT_TRUE(TimeRead(num_entries, cache, entries, true));
 
   EXPECT_TRUE(TimeRead(num_entries, cache, entries, false));
 
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   delete cache;
 }
 
@@ -247,6 +246,6 @@ TEST_F(DiskCacheTest, BlockFilesPerformance) {
   }
 
   timer2.Done();
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   delete[] address;
 }

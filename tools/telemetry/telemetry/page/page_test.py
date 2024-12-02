@@ -3,6 +3,9 @@
 # found in the LICENSE file.
 import logging
 
+from telemetry.core import util
+from telemetry.page import gtest_test_results
+from telemetry.page import page_test_results
 from telemetry.page.actions import all_page_actions
 from telemetry.page.actions import page_action
 
@@ -39,25 +42,6 @@ class Failure(Exception):
   undesired but designed-for problem."""
   pass
 
-class PageTestResults(object):
-  def __init__(self):
-    self.page_successes = []
-    self.page_failures = []
-    self.skipped_pages = []
-
-  def AddSuccess(self, page):
-    self.page_successes.append({'page': page})
-
-  def AddFailure(self, page, message, details):
-    self.page_failures.append({'page': page,
-                               'message': message,
-                               'details': details})
-
-  def AddSkippedPage(self, page, message, details):
-    self.skipped_pages.append({'page': page,
-                               'message': message,
-                               'details': details})
-
 class PageTest(object):
   """A class styled on unittest.TestCase for creating page-specific tests."""
 
@@ -65,7 +49,8 @@ class PageTest(object):
                test_method_name,
                action_name_to_run='',
                needs_browser_restart_after_each_run=False,
-               discard_first_result=False):
+               discard_first_result=False,
+               clear_cache_before_each_run=False):
     self.options = None
     try:
       self._test_method = getattr(self, test_method_name)
@@ -76,10 +61,7 @@ class PageTest(object):
     self._needs_browser_restart_after_each_run = (
         needs_browser_restart_after_each_run)
     self._discard_first_result = discard_first_result
-
-  @property
-  def needs_browser_restart_after_each_run(self):
-    return self._needs_browser_restart_after_each_run
+    self._clear_cache_before_each_run = clear_cache_before_each_run
 
   @property
   def discard_first_result(self):
@@ -87,6 +69,16 @@ class PageTest(object):
     useful for cases where it's desirable to have some test resource cached so
     the first run of the test can warm things up. """
     return self._discard_first_result
+
+  @property
+  def clear_cache_before_each_run(self):
+    """When set to True, the browser's disk and memory cache will be cleared
+    before each run."""
+    return self._clear_cache_before_each_run
+
+  def NeedsBrowserRestartAfterEachRun(self, tab): # pylint: disable=W0613
+    """Override to specify browser restart after each run."""
+    return self._needs_browser_restart_after_each_run
 
   def AddCommandLineOptions(self, parser):
     """Override to expose command-line options for this test.
@@ -115,13 +107,17 @@ class PageTest(object):
     """Override to customize if the test can be ran for the given page."""
     return True
 
-  def WillRunPageSet(self, tab, results):
+  def WillRunPageSet(self, tab):
     """Override to do operations before the page set is navigated."""
     pass
 
   def DidRunPageSet(self, tab, results):
     """Override to do operations after page set is completed, but before browser
     is torn down."""
+    pass
+
+  def DidStartHTTPServer(self, tab):
+    """Override to do operations after the HTTP server is started."""
     pass
 
   def WillNavigateToPage(self, page, tab):
@@ -141,10 +137,36 @@ class PageTest(object):
     """Override to do operations after running the action on the page."""
     pass
 
-  def CreatePageSet(self, options):  # pylint: disable=W0613
+  def CreatePageSet(self, args, options):  # pylint: disable=W0613
     """Override to make this test generate its own page set instead of
     allowing arbitrary page sets entered from the command-line."""
     return None
+
+  def AddOutputOptions(self, parser):
+    parser.add_option('--output-format',
+                      default=self.output_format_choices[0],
+                      choices=self.output_format_choices,
+                      help='Output format. Defaults to "%%default". '
+                      'Can be %s.' % ', '.join(self.output_format_choices))
+
+  @property
+  def output_format_choices(self):
+    """Allowed output formats. The default is the first item in the list."""
+    return ['gtest', 'none']
+
+  def PrepareResults(self, options):
+    if not hasattr(options, 'output_format'):
+      options.output_format = self.output_format_choices[0]
+
+    if options.output_format == 'gtest':
+      return gtest_test_results.GTestTestResults()
+    elif options.output_format == 'none':
+      return page_test_results.PageTestResults()
+    else:
+      # Should never be reached. The parser enforces the choices.
+      raise Exception('Invalid --output-format "%s". Valid choices are: %s'
+                      % (options.output_format,
+                         ', '.join(self.output_format_choices)))
 
   def Run(self, options, page, tab, results):
     self.options = options
@@ -172,6 +194,10 @@ class PageTest(object):
           action.RunAction(page, tab, prev_action)
         finally:
           self.DidRunAction(page, tab, action)
+
+      # Closing the connections periodically is needed; otherwise we won't be
+      # able to open enough sockets, and the pages will time out.
+      util.CloseConnections(tab)
 
   @property
   def action_name_to_run(self):

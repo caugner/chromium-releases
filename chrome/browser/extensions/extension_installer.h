@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/requirements_checker.h"
 #include "chrome/common/extensions/extension.h"
@@ -33,17 +33,6 @@ class ExtensionInstaller {
 
   // Called on the UI thread to start the requirements check on the extension
   void CheckRequirements(const RequirementsCallback& callback);
-
-#if defined(ENABLE_MANAGED_USERS)
-  // Shows the managed user passphrase dialog if the managed user is not in
-  // elevated state yet.
-  void ShowPassphraseDialog(content::WebContents* web_contents,
-                            const base::Closure& authorization_callback);
-
-  // Runs on the UI thread. Callback from the managed user passphrase dialog.
-  void OnAuthorizationResult(const base::Closure& authorization_callback,
-                             bool success);
-#endif
 
   // Checks the management policy if the extension can be installed.
   string16 CheckManagementPolicy();

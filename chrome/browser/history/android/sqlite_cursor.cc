@@ -132,7 +132,17 @@ jint SQLiteCursor::GetColumnType(JNIEnv* env, jobject obj, jint column) {
 }
 
 void SQLiteCursor::Destroy(JNIEnv* env, jobject obj) {
-  delete this;
+  // We do our best to cleanup when Destroy() is called from Java's finalize()
+  // where the UI message loop might stop running or in the process of shutting
+  // down, as the whole process will be destroyed soon, it's fine to leave some
+  // objects out there.
+  if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    DestroyOnUIThread();
+  } else if (!BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                 base::Bind(&SQLiteCursor::DestroyOnUIThread,
+                     base::Unretained(this)))) {
+    delete this;
+  }
 }
 
 SQLiteCursor::SQLiteCursor(const std::vector<std::string>& column_names,
@@ -150,28 +160,19 @@ SQLiteCursor::SQLiteCursor(const std::vector<std::string>& column_names,
 }
 
 SQLiteCursor::~SQLiteCursor() {
-  // Consumer requests were set in the UI thread. They must be cancelled
-  // using the same thread.
-  if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    CancelAllRequests(NULL);
-  } else {
-    base::WaitableEvent event(false, false);
-    BrowserThread::PostTask(
-        BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(&SQLiteCursor::CancelAllRequests, base::Unretained(this),
-                   &event));
-    event.Wait();
-  }
-
-  BrowserThread::PostTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&AndroidHistoryProviderService::CloseStatement,
-                 base::Unretained(service_), statement_));
 }
 
-bool SQLiteCursor::GetFavicon(history::FaviconID id,
+void SQLiteCursor::DestroyOnUIThread() {
+  // Consumer requests were set in the UI thread. They must be cancelled
+  // using the same thread.
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  consumer_.reset();
+  tracker_.reset();
+  service_->CloseStatement(statement_);
+  delete this;
+}
+
+bool SQLiteCursor::GetFavicon(chrome::FaviconID id,
                               std::vector<unsigned char>* image_data) {
   if (id) {
     BrowserThread::PostTask(
@@ -200,7 +201,7 @@ bool SQLiteCursor::GetFavicon(history::FaviconID id,
 }
 
 void SQLiteCursor::GetFaviconForIDInUIThread(
-    history::FaviconID id,
+    chrome::FaviconID id,
     const FaviconService::FaviconRawCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!tracker_.get())
@@ -210,7 +211,7 @@ void SQLiteCursor::GetFaviconForIDInUIThread(
 
 
 void SQLiteCursor::OnFaviconData(
-    const history::FaviconBitmapResult& bitmap_result) {
+    const chrome::FaviconBitmapResult& bitmap_result) {
   favicon_bitmap_result_ = bitmap_result;
   event_.Signal();
   if (test_observer_)
@@ -224,17 +225,6 @@ void SQLiteCursor::OnMoved(AndroidHistoryProviderService::Handle handle,
   if (test_observer_)
     // Notified test_observer on UI thread instead of the one it will wait.
     test_observer_->OnGetMoveToResult();
-}
-
-void SQLiteCursor::CancelAllRequests(base::WaitableEvent* finished) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  // Destruction will cancel all pending tasks.
-  consumer_.reset();
-  tracker_.reset();
-
-  if (finished)
-    finished->Signal();
 }
 
 SQLiteCursor::JavaColumnType SQLiteCursor::GetColumnTypeInternal(int column) {

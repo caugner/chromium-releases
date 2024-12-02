@@ -3,11 +3,24 @@
 // found in the LICENSE file.
 
 var embedder = {};
-embedder.tests = {};
+embedder.test = {};
 embedder.baseGuestURL = '';
 embedder.guestURL = '';
 
-embedder.setUp = function(config) {
+window.runNewWindowTest = function(testName) {
+  if (!embedder.test.testList[testName]) {
+    console.log('Incorrect testName: ' + testName);
+    embedder.test.fail();
+    return;
+  }
+
+  // Run the test.
+  embedder.test.testList[testName]();
+};
+// window.* exported functions end.
+
+/** @private */
+embedder.setUp_ = function(config) {
   embedder.baseGuestURL = 'http://localhost:' + config.testServer.port;
   embedder.guestURL = embedder.baseGuestURL +
       '/files/extensions/platform_apps/web_view/newwindow' +
@@ -24,7 +37,7 @@ embedder.setUpGuest_ = function(partitionName) {
     webview.partition = partitionName;
   }
   if (!webview) {
-    chrome.test.fail('No <webview> element created');
+    embedder.test.fail('No <webview> element created');
   }
   return webview;
 };
@@ -40,6 +53,36 @@ embedder.setUpNewWindowRequest_ = function(webview, url, frameName, testName) {
   };
   webview.addEventListener('loadstop', onWebViewLoadStop);
   webview.setAttribute('src', embedder.guestURL);
+};
+
+embedder.test = {};
+embedder.test.succeed = function() {
+  chrome.test.sendMessage('DoneNewWindowTest.PASSED');
+};
+
+embedder.test.fail = function() {
+  chrome.test.sendMessage('DoneNewWindowTest.FAILED');
+};
+
+embedder.test.assertEq = function(a, b) {
+  if (a != b) {
+    console.log('assertion failed: ' + a + ' != ' + b);
+    embedder.test.fail();
+  }
+};
+
+embedder.test.assertTrue = function(condition) {
+  if (!condition) {
+    console.log('assertion failed: true != ' + condition);
+    embedder.test.fail();
+  }
+};
+
+embedder.test.assertFalse = function(condition) {
+  if (condition) {
+    console.log('assertion failed: false != ' + condition);
+    embedder.test.fail();
+  }
 };
 
 /** @private */
@@ -63,11 +106,11 @@ embedder.requestFrameName_ =
       if (testName != name)
         return;
       var frameName = data[2];
-      chrome.test.assertEq(expectedFrameName, frameName);
-      chrome.test.assertEq(expectedFrameName, webview.name);
-      chrome.test.assertEq(openerWebview.partition, webview.partition);
+      embedder.test.assertEq(expectedFrameName, frameName);
+      embedder.test.assertEq(expectedFrameName, webview.name);
+      embedder.test.assertEq(openerWebview.partition, webview.partition);
       window.removeEventListener('message', onPostMessageReceived);
-      chrome.test.succeed();
+      embedder.test.succeed();
     }
   };
   window.addEventListener('message', onPostMessageReceived);
@@ -82,15 +125,31 @@ embedder.requestClose_ = function(webview, testName) {
   webview.addEventListener('loadstop', onWebViewLoadStop);
   var onWebViewClose = function(e) {
     webview.removeEventListener('close', onWebViewClose);
-    chrome.test.succeed();
+    embedder.test.succeed();
   };
   webview.addEventListener('close', onWebViewClose);
 };
 
 /** @private */
-embedder.assertCorrectEvent_ = function(e) {
-  chrome.test.assertEq('newwindow', e.type);
-  chrome.test.assertTrue(!!e.targetUrl);
+embedder.requestExecuteScript_ =
+    function(webview, script, expectedResult, testName) {
+  var onWebViewLoadStop = function(e) {
+    webview.executeScript(
+      {code: script},
+      function(results) {
+        embedder.test.assertEq(1, results.length);
+        embedder.test.assertEq(expectedResult, results[0]);
+        embedder.test.succeed();
+      });
+  };
+  webview.addEventListener('loadstop', onWebViewLoadStop);
+};
+
+/** @private */
+embedder.assertCorrectEvent_ = function(e, guestName) {
+  embedder.test.assertEq('newwindow', e.type);
+  embedder.test.assertTrue(!!e.targetUrl);
+  embedder.test.assertEq(guestName, e.name);
 };
 
 // Tests begin.
@@ -104,7 +163,7 @@ var testNewWindowName = function(testName,
 
   var onNewWindow = function(e) {
     chrome.test.log('Embedder notified on newwindow');
-    embedder.assertCorrectEvent_(e);
+    embedder.assertCorrectEvent_(e, guestName);
 
     var newwebview = document.createElement('webview');
     newwebview.setAttribute('name', webViewName);
@@ -114,7 +173,7 @@ var testNewWindowName = function(testName,
     try {
       e.window.attach(newwebview);
     } catch (e) {
-      chrome.test.fail();
+      embedder.test.fail();
     }
   };
   webview.addEventListener('newwindow', onNewWindow);
@@ -124,8 +183,7 @@ var testNewWindowName = function(testName,
 };
 
 // Loads a guest which requests a new window.
-embedder.tests.testNewWindowNameTakesPrecedence =
-    function testNewWindowNameTakesPrecedence() {
+function testNewWindowNameTakesPrecedence() {
   var webViewName = 'foo';
   var guestName = 'bar';
   var partitionName = 'foobar';
@@ -134,8 +192,7 @@ embedder.tests.testNewWindowNameTakesPrecedence =
                     webViewName, guestName, partitionName, expectedName);
 };
 
-embedder.tests.testWebViewNameTakesPrecedence =
-    function testWebViewNameTakesPrecedence() {
+function testWebViewNameTakesPrecedence() {
   var webViewName = 'foo';
   var guestName = '';
   var partitionName = 'persist:foobar';
@@ -144,7 +201,7 @@ embedder.tests.testWebViewNameTakesPrecedence =
                     webViewName, guestName, partitionName, expectedName);
 };
 
-embedder.tests.testNoName = function testNoName() {
+function testNoName() {
   var webViewName = '';
   var guestName = '';
   var partitionName = '';
@@ -153,8 +210,7 @@ embedder.tests.testNoName = function testNoName() {
                     webViewName, guestName, partitionName, expectedName);
 };
 
-embedder.tests.testNewWindowRedirect =
-    function testNewWindowRedirect() {
+function testNewWindowRedirect() {
   var webViewName = 'foo';
   var guestName = '';
   var partitionName = 'persist:foobar';
@@ -163,13 +219,13 @@ embedder.tests.testNewWindowRedirect =
                     webViewName, guestName, partitionName, expectedName);
 };
 
-embedder.tests.testNewWindowClose = function testNewWindowClose() {
+function testNewWindowClose() {
   var testName = 'testNewWindowClose';
   var webview = embedder.setUpGuest_('foobar');
 
   var onNewWindow = function(e) {
     chrome.test.log('Embedder notified on newwindow');
-    embedder.assertCorrectEvent_(e);
+    embedder.assertCorrectEvent_(e, '');
 
     var newwebview = document.createElement('webview');
     document.querySelector('#webview-tag-container').appendChild(newwebview);
@@ -177,7 +233,7 @@ embedder.tests.testNewWindowClose = function testNewWindowClose() {
     try {
       e.window.attach(newwebview);
     } catch (e) {
-      chrome.test.fail();
+      embedder.test.fail();
     }
   };
   webview.addEventListener('newwindow', onNewWindow);
@@ -186,15 +242,82 @@ embedder.tests.testNewWindowClose = function testNewWindowClose() {
   embedder.setUpNewWindowRequest_(webview, 'guest.html', '', testName);
 };
 
+
+function testNewWindowExecuteScript() {
+  var testName = 'testNewWindowExecuteScript';
+  var webview = embedder.setUpGuest_('foobar');
+
+  var onNewWindow = function(e) {
+    chrome.test.log('Embedder notified on newwindow');
+    embedder.assertCorrectEvent_(e, '');
+
+    var newwebview = document.createElement('webview');
+    document.querySelector('#webview-tag-container').appendChild(newwebview);
+    embedder.requestExecuteScript_(
+        newwebview,
+        'document.body.style.backgroundColor = "red";',
+        'red',
+        testName);
+    try {
+      e.window.attach(newwebview);
+    } catch (e) {
+      embedder.test.fail();
+    }
+  };
+  webview.addEventListener('newwindow', onNewWindow);
+
+  // Load a new window with the given name.
+  embedder.setUpNewWindowRequest_(webview, 'about:blank', '', testName);
+};
+
+function testNewWindowWebRequest() {
+  var testName = 'testNewWindowExecuteScript';
+  var webview = embedder.setUpGuest_('foobar');
+
+  var onNewWindow = function(e) {
+    chrome.test.log('Embedder notified on newwindow');
+    embedder.assertCorrectEvent_(e, '');
+
+    var newwebview = document.createElement('webview');
+    document.querySelector('#webview-tag-container').appendChild(newwebview);
+    var calledWebRequestEvent = false;
+    e.preventDefault();
+    // The WebRequest API is not exposed until the <webview> MutationObserver
+    // picks up the <webview> in the DOM. Thus, we cannot immediately access
+    // WebRequest API.
+    window.setTimeout(function() {
+      newwebview.onBeforeRequest.addListener(function(e) {
+          if (!calledWebRequestEvent) {
+            calledWebRequestEvent = true;
+            embedder.test.succeed();
+          }
+        }, { urls: ['<all_urls>'] }, ['blocking']);
+      try {
+        e.window.attach(newwebview);
+      } catch (e) {
+        embedder.test.fail();
+      }
+    }, 0);
+  };
+  webview.addEventListener('newwindow', onNewWindow);
+
+  // Load a new window with the given name.
+  embedder.setUpNewWindowRequest_(webview, 'guest.html', '', testName);
+};
+
+embedder.test.testList = {
+  'testNewWindowNameTakesPrecedence': testNewWindowNameTakesPrecedence,
+  'testWebViewNameTakesPrecedence': testWebViewNameTakesPrecedence,
+  'testNoName': testNoName,
+  'testNewWindowRedirect':  testNewWindowRedirect,
+  'testNewWindowClose': testNewWindowClose,
+  'testNewWindowExecuteScript': testNewWindowExecuteScript,
+  'testNewWindowWebRequest': testNewWindowWebRequest
+};
+
 onload = function() {
   chrome.test.getConfig(function(config) {
-    embedder.setUp(config);
-    chrome.test.runTests([
-      embedder.tests.testNewWindowNameTakesPrecedence,
-      embedder.tests.testWebViewNameTakesPrecedence,
-      embedder.tests.testNoName,
-      embedder.tests.testNewWindowRedirect,
-      embedder.tests.testNewWindowClose
-    ]);
+    embedder.setUp_(config);
+    chrome.test.sendMessage('Launched');
   });
 };

@@ -9,7 +9,7 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "content/public/browser/plugin_service.h"
@@ -180,7 +180,7 @@ TEST_F(PluginPrefsTest, EnabledAndDisabledByPolicy) {
 TEST_F(PluginPrefsTest, UnifiedPepperFlashState) {
   base::ShadowingAtExitManager at_exit_manager_;  // Destroys the PluginService.
 
-  MessageLoop message_loop;
+  base::MessageLoop message_loop;
   content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
   webkit::npapi::MockPluginList plugin_list;
   PluginService::GetInstance()->SetPluginListForTesting(&plugin_list);

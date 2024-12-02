@@ -7,9 +7,9 @@
 #include "base/bind.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/base/net_log_unittest.h"
@@ -542,7 +542,7 @@ class AsyncFailDhcpFetcher
   virtual int Fetch(base::string16* utf16_text,
                     const CompletionCallback& callback) OVERRIDE {
     callback_ = callback;
-    MessageLoop::current()->PostTask(
+    base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&AsyncFailDhcpFetcher::CallbackWithFailure, AsWeakPtr()));
     return ERR_IO_PENDING;
@@ -592,7 +592,7 @@ TEST(ProxyScriptDeciderTest, DhcpCancelledByDestructor) {
   // back. Before the fix linked to above, this would try to invoke on
   // the callback object provided by ProxyScriptDecider after it was
   // no longer valid.
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 }
 
 }  // namespace

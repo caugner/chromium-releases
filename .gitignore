@@ -49,7 +49,7 @@ v8.log
 /build/Release_x64
 /build/gomacc.lock
 /build/ipch/
-/build/util/LASTCHANGE
+/build/util/LASTCHANGE*
 /build/util/support
 /build/x64/
 # The Chrome OS build creates a /c symlink due to http://crbug.com/54866.
@@ -78,7 +78,7 @@ v8.log
 /chrome/chrome_version_resources.xml
 /chrome/common/extensions/api/api.xml
 /chrome/Hammer
-/chrome/installer/linux
+/chrome/installer/linux/internal
 /chrome/installer/mac/internal
 /chrome/installer/mac/third_party/xz/xz
 /chrome/installer/mini_installer.xml
@@ -170,6 +170,7 @@ v8.log
 /third_party/amd/
 /third_party/android_tools/
 /third_party/angle
+/third_party/angle_dx11
 /third_party/aosp
 /third_party/apache-mime4j
 /third_party/asan
@@ -225,6 +226,7 @@ v8.log
 /third_party/llvm-allocated-type
 /third_party/llvm-build
 /third_party/lss
+/third_party/mesa/src
 /third_party/mingw-w64
 /third_party/mkl
 /third_party/mt19937ar
@@ -240,6 +242,7 @@ v8.log
 /third_party/perl
 /third_party/platformsdk_win7
 /third_party/platformsdk_win8
+/third_party/polymer
 /third_party/ppapi
 /third_party/psyco_win32
 /third_party/pthreads-win32
@@ -253,7 +256,7 @@ v8.log
 /third_party/pywebsocket/src
 /third_party/safe_browsing/testing
 /third_party/scons-2.0.1
-/third_party/sfntly
+/third_party/sfntly/cpp
 /third_party/skia
 /third_party/smhasher
 /third_party/snappy/src
@@ -266,6 +269,7 @@ v8.log
 /third_party/tsan/
 /third_party/undoview
 /third_party/usb_ids
+/third_party/usrsctp/usrsctplib
 /third_party/v8-i18n
 /third_party/valgrind
 /third_party/webdriver/pylib
@@ -306,8 +310,8 @@ v8.log
 /webkit/data/test_shell/plugins
 /webkit/data/xbm_decoder
 /webkit/Debug
-/webkit/media/crypto/ppapi/cdm
 /webkit/Release
+/webkit/renderer/media/crypto/ppapi/cdm
 /webpagereplay_logs/
 /win8/delegate_execute/delegate_execute_version_resources.xml
 /win8/metro_driver/metro_driver_version_resources.xml

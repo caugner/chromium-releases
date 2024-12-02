@@ -13,10 +13,10 @@
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/time.h"
-#include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/storage_monitor/removable_storage_observer.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 
 class Profile;
 
@@ -103,6 +103,15 @@ struct MediaGalleryPrefInfo {
   // 1 if the display_name is only set externally when it is overriding
   // the name constructed from volume metadata.
   int prefs_version;
+
+  // Called by views to provide details for the gallery permission entries.
+  string16 GetGalleryDisplayName() const;
+  string16 GetGalleryTooltip() const;
+  string16 GetGalleryAdditionalDetails() const;
+
+  // Returns true if the gallery is currently a removable device gallery which
+  // is now attached, or a fixed storage gallery.
+  bool IsGalleryAvailable() const;
 };
 
 typedef std::map<MediaGalleryPrefId, MediaGalleryPrefInfo>
@@ -111,15 +120,19 @@ typedef std::set<MediaGalleryPrefId> MediaGalleryPrefIdSet;
 
 // A class to manage the media gallery preferences.  There is one instance per
 // user profile.
-class MediaGalleriesPreferences : public ProfileKeyedService,
+class MediaGalleriesPreferences : public BrowserContextKeyedService,
                                   public RemovableStorageObserver {
  public:
   class GalleryChangeObserver {
     public:
      // |extension_id| specifies the extension affected by this change.
      // It is empty if the gallery change affects all extensions.
+     // If not empty, |pref_id| and |has_permission| are relevant
+     // and refer to a specific relationship.
      virtual void OnGalleryChanged(MediaGalleriesPreferences* pref,
-                                   const std::string& extension_id) {}
+                                   const std::string& extension_id,
+                                   MediaGalleryPrefId pref_id,
+                                   bool has_permission) = 0;
 
     protected:
      virtual ~GalleryChangeObserver();
@@ -165,13 +178,6 @@ class MediaGalleriesPreferences : public ProfileKeyedService,
                                 uint64 total_size_in_bytes,
                                 base::Time last_attach_time);
 
-  // Teaches the registry about a new gallery.
-  // Returns the gallery's pref id.
-  MediaGalleryPrefId AddGalleryWithName(const std::string& device_id,
-                                        const string16& display_name,
-                                        const base::FilePath& relative_path,
-                                        bool user_added);
-
   // Teach the registry about a user added registry simply from the path.
   // Returns the gallery's pref id.
   MediaGalleryPrefId AddGalleryByPath(const base::FilePath& path);
@@ -190,7 +196,7 @@ class MediaGalleriesPreferences : public ProfileKeyedService,
     return known_galleries_;
   }
 
-  // ProfileKeyedService implementation:
+  // BrowserContextKeyedService implementation:
   virtual void Shutdown() OVERRIDE;
 
   static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
@@ -202,6 +208,7 @@ class MediaGalleriesPreferences : public ProfileKeyedService,
 
  private:
   friend class MediaGalleriesPreferencesTest;
+  friend class MediaGalleriesPermissionsTest;
 
   typedef std::map<std::string /*device id*/, MediaGalleryPrefIdSet>
       DeviceIdPrefIdsMap;
@@ -209,15 +216,31 @@ class MediaGalleriesPreferences : public ProfileKeyedService,
   // Populates the default galleries if this is a fresh profile.
   void AddDefaultGalleriesIfFreshProfile();
 
+  // This is a hack - Some devices (iTunes, Picasa) are singletons in that only
+  // one instance of that type is supported at a time. As such, the device id
+  // should just be "itunes:" or "picasa:" but that would mean finding the
+  // location of the database file multiple times, which may be an async
+  // operation. Storing the location of the backing database in the device
+  // id allows that look up to be avoided. However, the cost is that if the
+  // database moves, the device id in preferences has to be updated.  This
+  // method searches for a gallery of the type passed in and updates its
+  // device id.  It returns true if the device id is up to date.
+  bool UpdateDeviceIDForSingletonType(const std::string& device_id);
+
   // Try to add an entry for the iTunes 'device'.
   void OnITunesDeviceID(const std::string& device_id);
+
+  // Try to add an entry for the Picasa 'device'.
+  void OnPicasaDeviceID(const std::string& device_id);
 
   // Builds |known_galleries_| from the persistent store.
   // Notifies GalleryChangeObservers if |notify_observers| is true.
   void InitFromPrefs(bool notify_observers);
 
   // Notifies |gallery_change_observers_| about changes in |known_galleries_|.
-  void NotifyChangeObservers(const std::string& extension_id);
+  void NotifyChangeObservers(const std::string& extension_id,
+                             MediaGalleryPrefId pref_id,
+                             bool has_permission);
 
   MediaGalleryPrefId AddGalleryInternal(const std::string& device_id,
                                         const string16& display_name,
@@ -231,12 +254,43 @@ class MediaGalleriesPreferences : public ProfileKeyedService,
                                         bool volume_metadata_valid,
                                         int prefs_version);
 
+  // Sets permission for the media galleries identified by |gallery_id| for the
+  // extension in the given |prefs|.
+  void SetGalleryPermissionInPrefs(const std::string& extension_id,
+                                   MediaGalleryPrefId gallery_id,
+                                   bool has_access);
+
+  // Removes the entry for the media galleries permissions identified by
+  // |gallery_id| for the extension in the given |prefs|.
+  void UnsetGalleryPermissionInPrefs(const std::string& extension_id,
+                                     MediaGalleryPrefId gallery_id);
+
+  // Return all media gallery permissions for the extension in the given
+  // |prefs|.
+  std::vector<MediaGalleryPermission> GetGalleryPermissionsFromPrefs(
+      const std::string& extension_id) const;
+
+  // Remove all the media gallery permissions in |prefs| for the gallery
+  // specified by |gallery_id|.
+  void RemoveGalleryPermissionsFromPrefs(MediaGalleryPrefId gallery_id);
+
+  // Get the ExtensionPrefs to use; this will be either the ExtensionPrefs
+  // object associated with |profile_|, or extension_prefs_for_testing_, if
+  // SetExtensionPrefsForTesting() has been called.
   extensions::ExtensionPrefs* GetExtensionPrefs() const;
+
+  // Set the ExtensionPrefs object to be returned by GetExtensionPrefs().
+  void SetExtensionPrefsForTesting(extensions::ExtensionPrefs* extension_prefs);
 
   base::WeakPtrFactory<MediaGalleriesPreferences> weak_factory_;
 
   // The profile that owns |this|.
   Profile* profile_;
+
+  // The ExtensionPrefs used in a testing environment, where
+  // BrowserContextKeyedServices aren't used. This will be NULL unless it is
+  // set with SetExtensionPrefsForTesting().
+  extensions::ExtensionPrefs* extension_prefs_for_testing_;
 
   // An in-memory cache of known galleries.
   MediaGalleriesPrefInfoMap known_galleries_;

@@ -31,25 +31,33 @@ OptionsMenuModel::OptionsMenuModel(
   string16 target_language = translate_delegate->language_name_at(
       translate_delegate->target_language_index());
 
+  bool autodetermined_source_language =
+      translate_delegate->original_language_index() ==
+      TranslateInfoBarDelegate::kNoIndex;
+
   // Populate the menu.
   // Incognito mode does not get any preferences related items.
   if (!translate_delegate->web_contents()->GetBrowserContext()->
       IsOffTheRecord()) {
-    AddCheckItem(IDC_TRANSLATE_OPTIONS_ALWAYS,
-        l10n_util::GetStringFUTF16(IDS_TRANSLATE_INFOBAR_OPTIONS_ALWAYS,
-            original_language, target_language));
-    AddCheckItem(IDC_TRANSLATE_OPTIONS_NEVER_TRANSLATE_LANG,
-        l10n_util::GetStringFUTF16(
-            IDS_TRANSLATE_INFOBAR_OPTIONS_NEVER_TRANSLATE_LANG,
-            original_language));
+    if (!autodetermined_source_language) {
+      AddCheckItem(IDC_TRANSLATE_OPTIONS_ALWAYS,
+          l10n_util::GetStringFUTF16(IDS_TRANSLATE_INFOBAR_OPTIONS_ALWAYS,
+                                     original_language, target_language));
+      AddCheckItem(IDC_TRANSLATE_OPTIONS_NEVER_TRANSLATE_LANG,
+          l10n_util::GetStringFUTF16(
+              IDS_TRANSLATE_INFOBAR_OPTIONS_NEVER_TRANSLATE_LANG,
+              original_language));
+    }
     AddCheckItem(IDC_TRANSLATE_OPTIONS_NEVER_TRANSLATE_SITE,
         l10n_util::GetStringUTF16(
             IDS_TRANSLATE_INFOBAR_OPTIONS_NEVER_TRANSLATE_SITE));
     AddSeparator(ui::NORMAL_SEPARATOR);
   }
-  AddItem(IDC_TRANSLATE_REPORT_BAD_LANGUAGE_DETECTION,
-          l10n_util::GetStringFUTF16(IDS_TRANSLATE_INFOBAR_OPTIONS_REPORT_ERROR,
-                                     original_language));
+  if (!autodetermined_source_language) {
+    AddItem(IDC_TRANSLATE_REPORT_BAD_LANGUAGE_DETECTION,
+        l10n_util::GetStringFUTF16(IDS_TRANSLATE_INFOBAR_OPTIONS_REPORT_ERROR,
+                                   original_language));
+  }
   AddItemWithStringId(IDC_TRANSLATE_OPTIONS_ABOUT,
       IDS_TRANSLATE_INFOBAR_OPTIONS_ABOUT);
 }
@@ -60,7 +68,7 @@ OptionsMenuModel::~OptionsMenuModel() {
 bool OptionsMenuModel::IsCommandIdChecked(int command_id) const {
   switch (command_id) {
     case IDC_TRANSLATE_OPTIONS_NEVER_TRANSLATE_LANG:
-      return translate_infobar_delegate_->IsLanguageBlacklisted();
+      return !translate_infobar_delegate_->IsTranslatableLanguageByPrefs();
 
     case IDC_TRANSLATE_OPTIONS_NEVER_TRANSLATE_SITE:
       return translate_infobar_delegate_->IsSiteBlacklisted();
@@ -82,7 +90,7 @@ bool OptionsMenuModel::IsCommandIdEnabled(int command_id) const {
       return !translate_infobar_delegate_->ShouldAlwaysTranslate();
 
     case IDC_TRANSLATE_OPTIONS_ALWAYS :
-      return (!translate_infobar_delegate_->IsLanguageBlacklisted() &&
+      return (translate_infobar_delegate_->IsTranslatableLanguageByPrefs() &&
           !translate_infobar_delegate_->IsSiteBlacklisted());
 
     default:
@@ -99,17 +107,17 @@ bool OptionsMenuModel::GetAcceleratorForCommandId(
 void OptionsMenuModel::ExecuteCommand(int command_id, int event_flags) {
   switch (command_id) {
     case IDC_TRANSLATE_OPTIONS_NEVER_TRANSLATE_LANG:
-      UMA_HISTOGRAM_COUNTS("Translate.NeverTranslateLang", 1);
-      translate_infobar_delegate_->ToggleLanguageBlacklist();
+      UMA_HISTOGRAM_BOOLEAN("Translate.NeverTranslateLang", true);
+      translate_infobar_delegate_->ToggleTranslatableLanguageByPrefs();
       break;
 
     case IDC_TRANSLATE_OPTIONS_NEVER_TRANSLATE_SITE:
-      UMA_HISTOGRAM_COUNTS("Translate.NeverTranslateSite", 1);
+      UMA_HISTOGRAM_BOOLEAN("Translate.NeverTranslateSite", true);
       translate_infobar_delegate_->ToggleSiteBlacklist();
       break;
 
     case IDC_TRANSLATE_OPTIONS_ALWAYS:
-      UMA_HISTOGRAM_COUNTS("Translate.AlwaysTranslateLang", 1);
+      UMA_HISTOGRAM_BOOLEAN("Translate.AlwaysTranslateLang", true);
       translate_infobar_delegate_->ToggleAlwaysTranslate();
       break;
 

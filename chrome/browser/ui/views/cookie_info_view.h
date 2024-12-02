@@ -10,7 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "ui/base/models/combobox_model.h"
 #include "ui/views/controls/combobox/combobox_listener.h"
 #include "ui/views/view.h"
@@ -65,9 +65,8 @@ class CookieInfoView : public views::View,
 
  protected:
   // views::View:
-  virtual void ViewHierarchyChanged(bool is_add,
-                                    views::View* parent,
-                                    views::View* child) OVERRIDE;
+  virtual void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) OVERRIDE;
 
   // views::ComboboxListener:
   virtual void OnSelectedIndexChanged(views::Combobox* combobox) OVERRIDE;

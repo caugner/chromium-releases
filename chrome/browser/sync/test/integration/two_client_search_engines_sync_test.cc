@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -145,7 +145,8 @@ IN_PROC_BROWSER_TEST_F(TwoClientSearchEnginesSyncTest, ConflictKeyword) {
   // conflict.
   search_engines_helper::AddSearchEngine(0, 0);
   search_engines_helper::AddSearchEngine(1, 1);
-  TemplateURLService* service = search_engines_helper::GetServiceForProfile(1);
+  TemplateURLService* service =
+      search_engines_helper::GetServiceForBrowserContext(1);
   TemplateURL* turl = service->GetTemplateURLForKeyword(ASCIIToUTF16("test1"));
   EXPECT_TRUE(turl);
   service->ResetTemplateURL(turl, turl->short_name(), ASCIIToUTF16("test0"),

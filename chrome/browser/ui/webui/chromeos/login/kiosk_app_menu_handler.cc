@@ -7,12 +7,13 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/values.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_launch_error.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_launcher.h"
-#include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
+#include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
+#include "chromeos/chromeos_switches.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
@@ -23,7 +24,8 @@
 namespace chromeos {
 
 KioskAppMenuHandler::KioskAppMenuHandler()
-    : initialized_(false) {
+    : initialized_(false),
+      weak_ptr_factory_(this) {
   KioskAppManager::Get()->AddObserver(this);
 }
 
@@ -35,7 +37,8 @@ void KioskAppMenuHandler::GetLocalizedStrings(
     base::DictionaryValue* localized_strings) {
   localized_strings->SetBoolean(
       "enableAppMode",
-      !CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableAppMode));
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kDisableAppMode));
   localized_strings->SetString(
       "showApps",
       l10n_util::GetStringUTF16(IDS_KIOSK_APPS_BUTTON));
@@ -68,7 +71,7 @@ void KioskAppMenuHandler::SendKioskApps() {
     const KioskAppManager::App& app_data = apps[i];
 
     scoped_ptr<base::DictionaryValue> app_info(new base::DictionaryValue);
-    app_info->SetString("id", app_data.id);
+    app_info->SetString("id", app_data.app_id);
     app_info->SetString("label", app_data.name);
 
     // TODO(xiyuan): Replace data url with a URLDataSource.
@@ -86,7 +89,21 @@ void KioskAppMenuHandler::SendKioskApps() {
 
 void KioskAppMenuHandler::HandleInitializeKioskApps(
     const base::ListValue* args) {
-  initialized_ = true;
+  if (g_browser_process->browser_policy_connector()->IsEnterpriseManaged()) {
+    initialized_ = true;
+    SendKioskApps();
+    return;
+  }
+
+  KioskAppManager::Get()->GetConsumerKioskModeStatus(
+      base::Bind(&KioskAppMenuHandler::OnGetConsumerKioskModeStatus,
+                 weak_ptr_factory_.GetWeakPtr()));
+}
+
+void KioskAppMenuHandler::OnGetConsumerKioskModeStatus(
+    KioskAppManager::ConsumerKioskModeStatus status) {
+  initialized_ =
+      status == KioskAppManager::CONSUMER_KIOSK_MODE_ENABLED;
   SendKioskApps();
 }
 
@@ -108,7 +125,7 @@ void KioskAppMenuHandler::HandleLaunchKioskApps(const base::ListValue* args) {
   ExistingUserController::current_controller()->PrepareKioskAppLaunch();
 
   // KioskAppLauncher deletes itself when done.
-  (new KioskAppLauncher(app_id))->Start();
+  (new KioskAppLauncher(KioskAppManager::Get(), app_id))->Start();
 }
 
 void KioskAppMenuHandler::HandleCheckKioskAppLaunchError(

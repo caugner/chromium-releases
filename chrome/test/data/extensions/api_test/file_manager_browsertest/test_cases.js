@@ -8,9 +8,11 @@
  * @const
  */
 var EXPECTED_FILES_BEFORE_LOCAL = [
-  ['hello.txt', '123 bytes', 'Plain text', 'Sep 4, 1998 12:34 PM'],
-  ['world.mpeg', '1,000 bytes', 'MPEG video', 'Jul 4, 2012 10:35 AM'],
-  ['My Desktop Background.png', '1 KB', 'PNG image', 'Jan 18, 2038 1:02 AM'],
+  ['hello.txt', '51 bytes', 'Plain text', 'Sep 4, 1998 12:34 PM'],
+  ['world.ogv', '59 KB', 'OGG video', 'Jul 4, 2012 10:35 AM'],
+  ['My Desktop Background.png', '272 bytes', 'PNG image',
+      'Jan 18, 2038 1:02 AM'],
+  ['Beautiful Song.ogg', '14 KB', 'OGG audio', 'Nov 12, 2086 12:00 PM'],
   ['photos', '--', 'Folder', 'Jan 1, 1980 11:59 PM']
   // ['.warez', '--', 'Folder', 'Oct 26, 1985 1:39 PM']  # should be hidden
 ].sort();
@@ -21,9 +23,11 @@ var EXPECTED_FILES_BEFORE_LOCAL = [
  * @const
  */
 var EXPECTED_FILES_BEFORE_DRIVE = [
-  ['hello.txt', '123 bytes', 'Plain text', 'Sep 4, 1998 12:34 PM'],
-  ['world.mpeg', '1,000 bytes', 'MPEG video', 'Jul 4, 2012 10:35 AM'],
-  ['My Desktop Background.png', '1 KB', 'PNG image', 'Jan 18, 2038 1:02 AM'],
+  ['hello.txt', '51 bytes', 'Plain text', 'Sep 4, 1998 12:34 PM'],
+  ['world.ogv', '59 KB', 'OGG video', 'Jul 4, 2012 10:35 AM'],
+  ['My Desktop Background.png', '272 bytes', 'PNG image',
+      'Jan 18, 2038 1:02 AM'],
+  ['Beautiful Song.ogg', '14 KB', 'OGG audio', 'Nov 12, 2086 12:00 PM'],
   ['photos', '--', 'Folder', 'Jan 1, 1980 11:59 PM'],
   ['Test Document.gdoc','--','Google document','Apr 10, 2013 4:20 PM'],
   ['Test Shared Document.gdoc','--','Google document','Mar 20, 2013 10:40 PM']
@@ -35,7 +39,7 @@ var EXPECTED_FILES_BEFORE_DRIVE = [
  * @const
  */
 var EXPECTED_NEWLY_ADDED_FILE = [
-  ['newly added file.mp3', '2 KB', 'MP3 audio', 'Sep 4, 1998 12:00 AM']
+  ['newly added file.ogg', '14 KB', 'OGG audio', 'Sep 4, 1998 12:00 AM']
 ];
 
 /**
@@ -83,9 +87,11 @@ function checkIfNoErrorsOccured(callback) {
  * @const
  */
 var EXPECTED_FILES_IN_RECENT = [
-  ['hello.txt', '123 bytes', 'Plain text', 'Sep 4, 1998 12:34 PM'],
-  ['world.mpeg', '1,000 bytes', 'MPEG video', 'Jul 4, 2012 10:35 AM'],
-  ['My Desktop Background.png', '1 KB', 'PNG image', 'Jan 18, 2038 1:02 AM'],
+  ['hello.txt', '51 bytes', 'Plain text', 'Sep 4, 1998 12:34 PM'],
+  ['world.ogv', '59 KB', 'OGG video', 'Jul 4, 2012 10:35 AM'],
+  ['My Desktop Background.png', '272 bytes', 'PNG image',
+      'Jan 18, 2038 1:02 AM'],
+  ['Beautiful Song.ogg', '14 KB', 'OGG audio', 'Nov 12, 2086 12:00 PM'],
   ['Test Document.gdoc','--','Google document','Apr 10, 2013 4:20 PM'],
   ['Test Shared Document.gdoc','--','Google document','Mar 20, 2013 10:40 PM']
 ].sort();
@@ -113,6 +119,33 @@ var EXPECTED_FILES_IN_SHARED_WITH_ME = [
 ];
 
 /**
+ * Returns the name of the given file list entry.
+ * @param {Array.<string>} file An entry in a file list.
+ * @return {string} Name of the file.
+ */
+function getFileName(fileListEntry) {
+  return fileListEntry[0];
+}
+
+/**
+ * Returns the size of the given file list entry.
+ * @param {Array.<string>} An entry in a file list.
+ * @return {string} Size of the file.
+ */
+function getFileSize(fileListEntry) {
+  return fileListEntry[1];
+}
+
+/**
+ * Returns the type of the given file list entry.
+ * @param {Array.<string>} An entry in a file list.
+ * @return {string} Type of the file.
+ */
+function getFileType(fileListEntry) {
+  return fileListEntry[2];
+}
+
+/**
  * Namespace for test cases.
  */
 var testcase = {};
@@ -129,23 +162,238 @@ testcase.intermediate = {};
  * @param {string} path Directory path to be tested.
  */
 testcase.intermediate.fileDisplay = function(path) {
+  var appId;
+
   var expectedFilesBefore = getExpectedFilesBefore(path == '/drive/root');
   var expectedFilesAfter =
       expectedFilesBefore.concat(EXPECTED_NEWLY_ADDED_FILE).sort();
 
-  setupAndWaitUntilReady(path, function(appId, actualFilesBefore) {
-    chrome.test.assertEq(expectedFilesBefore, actualFilesBefore);
-    chrome.test.sendMessage('initial check done', function(reply) {
-      chrome.test.assertEq('file added', reply);
+  StepsRunner.run([
+    function() {
+      setupAndWaitUntilReady(path, this.next);
+    },
+    // Notify that the list has been verified and a new file can be added
+    // in file_manager_browsertest.cc.
+    function(inAppId, actualFilesBefore) {
+      appId = inAppId;
+      chrome.test.assertEq(expectedFilesBefore, actualFilesBefore);
+      chrome.test.sendMessage('addEntry', this.next);
+    },
+    // Confirm that the file has been added externally and wait for it
+    // to appear in UI.
+    function(reply) {
+      chrome.test.assertEq('onEntryAdded', reply);
       callRemoteTestUtil(
           'waitForFileListChange',
           appId,
-          [expectedFilesBefore.length], function(actualFilesAfter) {
-            chrome.test.assertEq(expectedFilesAfter, actualFilesAfter);
-            checkIfNoErrorsOccured(chrome.test.succeed);
-          });
-    });
-  });
+          [expectedFilesBefore.length],
+          this.next);
+    },
+    // Confirm the file list.
+    function(actualFilesAfter) {
+      chrome.test.assertEq(expectedFilesAfter, actualFilesAfter);
+      checkIfNoErrorsOccured(this.next);
+    },
+  ]);
+};
+
+/**
+ * Tests if the gallery shows up for the selected image and that the image
+ * gets displayed.
+ *
+ * @param {string} path Directory path to be tested.
+ */
+testcase.intermediate.galleryOpen = function(path) {
+  var appId;
+  StepsRunner.run([
+    function() {
+      setupAndWaitUntilReady(path, this.next);
+    },
+    // Resize the window to desired dimensions to avoid flakyness.
+    function(inAppId) {
+      appId = inAppId;
+      callRemoteTestUtil('resizeWindow',
+                         appId,
+                         [320, 320],
+                         this.next);
+    },
+    // Select the image.
+    function(result) {
+      chrome.test.assertTrue(result);
+      callRemoteTestUtil('selectFile',
+                         appId,
+                         ['My Desktop Background.png'],
+                         this.next);
+    },
+    // Double click on the label to enter the photo viewer.
+    function(result) {
+      chrome.test.assertTrue(result);
+      callRemoteTestUtil(
+          'fakeMouseDoubleClick',
+          appId,
+          ['#file-list li.table-row[selected] .filename-label span'],
+          this.next);
+    },
+    // Wait for the image in the gallery's screen image.
+    function(result) {
+      chrome.test.assertTrue(result);
+      callRemoteTestUtil('waitForElement',
+                         appId,
+                         ['.gallery .content canvas.image',
+                          'iframe.overlay-pane'],
+                         this.next);
+    },
+    // Verify the gallery's screen image.
+    function(element) {
+      chrome.test.assertEq('320', element.attributes.width);
+      chrome.test.assertEq('240', element.attributes.height);
+      // Get the full-resolution image.
+      callRemoteTestUtil('waitForElement',
+                         appId,
+                         ['.gallery .content canvas.fullres',
+                          'iframe.overlay-pane'],
+                         this.next);
+    },
+    // Verify the gallery's full resolution image.
+    function(element) {
+      chrome.test.assertEq('800', element.attributes.width);
+      chrome.test.assertEq('600', element.attributes.height);
+      checkIfNoErrorsOccured(this.next);
+    }
+  ]);
+};
+
+/**
+ * Tests if the audio player shows up for the selected image and that the audio
+ * is loaded successfully.
+ *
+ * @param {string} path Directory path to be tested.
+ */
+testcase.intermediate.audioOpen = function(path) {
+  var appId;
+  var audioAppId;
+  StepsRunner.run([
+    function() {
+      setupAndWaitUntilReady(path, this.next);
+    },
+    // Select the song.
+    function(inAppId) {
+      appId = inAppId;
+      callRemoteTestUtil(
+          'selectFile', appId, ['Beautiful Song.ogg'], this.next);
+    },
+    // Double click on the label to enter the audio player.
+    function(result) {
+      chrome.test.assertTrue(result);
+      callRemoteTestUtil(
+          'fakeMouseDoubleClick',
+          appId,
+          ['#file-list li.table-row[selected] .filename-label span'],
+          this.next);
+    },
+    // Wait for the audio player.
+    function(result) {
+      chrome.test.assertTrue(result);
+      callRemoteTestUtil('waitForWindow',
+                         null,
+                         ['mediaplayer.html'],
+                         this.next);
+    },
+    // Wait for the audio tag and verify the source.
+    function(inAppId) {
+      audioAppId = inAppId;
+      callRemoteTestUtil('waitForElement',
+                         audioAppId,
+                         ['audio[src]'],
+                         this.next);
+    },
+    // Get the title tag.
+    function(element) {
+      chrome.test.assertEq(
+          'filesystem:chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/' +
+              'external' + path + '/Beautiful%20Song.ogg',
+          element.attributes.src);
+      callRemoteTestUtil('waitForElement',
+                         audioAppId,
+                         ['.data-title'],
+                         this.next);
+    },
+    // Get the artist tag.
+    function(element) {
+      chrome.test.assertEq('Beautiful Song', element.text);
+      callRemoteTestUtil('waitForElement',
+                         audioAppId,
+                         ['.data-artist'],
+                         this.next);
+    },
+    // Verify the artist and if there are no javascript errors.
+    function(element) {
+      chrome.test.assertEq('Unknown Artist', element.text);
+      checkIfNoErrorsOccured(this.next);
+    }
+  ]);
+};
+
+/**
+ * Tests if the video player shows up for the selected movie and that it is
+ * loaded successfully.
+ *
+ * @param {string} path Directory path to be tested.
+ */
+testcase.intermediate.videoOpen = function(path) {
+  var appId;
+  var videoAppId;
+  StepsRunner.run([
+    function() {
+      setupAndWaitUntilReady(path, this.next);
+    },
+    function(inAppId) {
+      appId = inAppId;
+      // Select the song.
+      callRemoteTestUtil(
+          'selectFile', appId, ['world.ogv'], this.next);
+    },
+    function(result) {
+      chrome.test.assertTrue(result);
+      // Double click on the label to enter the video player.
+      callRemoteTestUtil(
+          'fakeMouseDoubleClick',
+          appId,
+          ['#file-list li.table-row[selected] .filename-label span'],
+          this.next);
+    },
+    function(result) {
+      chrome.test.assertTrue(result);
+      // Wait for the video player.
+      callRemoteTestUtil('waitForWindow',
+                         null,
+                         ['video_player.html'],
+                         this.next);
+    },
+    function(inAppId) {
+      videoAppId = inAppId;
+      // Wait for the video tag and verify the source.
+      callRemoteTestUtil('waitForElement',
+                         videoAppId,
+                         ['video[src]'],
+                         this.next);
+    },
+    function(element) {
+      chrome.test.assertEq(
+          'filesystem:chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/' +
+              'external' + path + '/world.ogv',
+          element.attributes.src);
+      // Wait for the window's inner dimensions. Should be changed to the video
+      // size once the metadata is loaded.
+      callRemoteTestUtil('waitForWindowGeometry',
+                         videoAppId,
+                         [320, 192],
+                         this.next);
+    },
+    function(element) {
+      checkIfNoErrorsOccured(this.next);
+    }
+  ]);
 };
 
 /**
@@ -155,16 +403,57 @@ testcase.intermediate.fileDisplay = function(path) {
  * @param {string} path Directory path to be tested.
  */
 testcase.intermediate.keyboardCopy = function(path, callback) {
-  setupAndWaitUntilReady(path, function(appId) {
-    callRemoteTestUtil('copyFile', appId, ['world.mpeg'], function(result) {
-      chrome.test.assertFalse(!result);
+  // Returns true if |fileList| contains a copy of |filename|.
+  var isCopyPresent = function(filename, fileList) {
+    var originalEntry;
+    for (var i = 0; i < fileList.length; i++) {
+      if (getFileName(fileList[i]) == filename)
+        originalEntry = fileList[i];
+    }
+    if (!originalEntry)
+      return false;
+
+    var baseName = filename.substring(0, filename.lastIndexOf('.'));
+    var extension = filename.substring(filename.lastIndexOf('.'));
+    var filenamePattern = new RegExp('^' + baseName + '.+' + extension + '$');
+    for (var i = 0; i < fileList.length; i++) {
+      // Check size, type and file name pattern to find a copy.
+      if (getFileSize(fileList[i]) == getFileSize(originalEntry) &&
+          getFileType(fileList[i]) == getFileType(originalEntry) &&
+          filenamePattern.exec(getFileName(fileList[i])))
+        return true;
+    }
+    return false;
+  };
+
+  var filename = 'world.ogv';
+  var appId, fileListBefore;
+  StepsRunner.run([
+    // Set up File Manager.
+    function() {
+      setupAndWaitUntilReady(path, this.next);
+    },
+    // Copy the file.
+    function(inAppId, inFileListBefore) {
+      appId = inAppId;
+      fileListBefore = inFileListBefore;
+      chrome.test.assertFalse(isCopyPresent(filename, fileListBefore));
+      callRemoteTestUtil('copyFile', appId, [filename], this.next);
+    },
+    // Wait for a file list change.
+    function(result) {
+      chrome.test.assertTrue(result);
       callRemoteTestUtil('waitForFileListChange',
                          appId,
-                         [getExpectedFilesBefore(path == '/drive/root').length],
-                         checkIfNoErrorsOccured.bind(null,
-                                                     chrome.test.succeed));
-    });
-  });
+                         [fileListBefore.length],
+                         this.next);
+    },
+    // Verify the result.
+    function(fileList) {
+      chrome.test.assertTrue(isCopyPresent(filename, fileList));
+      checkIfNoErrorsOccured(this.next);
+    }
+  ]);
 };
 
 /**
@@ -172,22 +461,83 @@ testcase.intermediate.keyboardCopy = function(path, callback) {
  * @param {string} path Directory path to be tested.
  */
 testcase.intermediate.keyboardDelete = function(path) {
-  setupAndWaitUntilReady(path, function(appId) {
-    callRemoteTestUtil('deleteFile', appId, ['world.mpeg'], function(result) {
-      chrome.test.assertFalse(!result);
-      callRemoteTestUtil('waitAndAcceptDialog', appId, [], function() {
-        callRemoteTestUtil(
-            'waitForFileListChange',
-            appId,
-            [getExpectedFilesBefore(path == '/drive/root').length],
-            checkIfNoErrorsOccured.bind(null, chrome.test.succeed));
-      });
-    });
-  });
+  // Returns true if |fileList| contains |filename|.
+  var isFilePresent = function(filename, fileList) {
+    for (var i = 0; i < fileList.length; i++) {
+      if (getFileName(fileList[i]) == filename)
+        return true;
+    }
+    return false;
+  };
+
+  var filename = 'world.ogv';
+  var directoryName = 'photos';
+  var appId, fileListBefore;
+  StepsRunner.run([
+    // Set up File Manager.
+    function() {
+      setupAndWaitUntilReady(path, this.next);
+    },
+    // Delete the file.
+    function(inAppId, inFileListBefore) {
+      appId = inAppId;
+      fileListBefore = inFileListBefore;
+      chrome.test.assertTrue(isFilePresent(filename, fileListBefore));
+      callRemoteTestUtil(
+          'deleteFile', appId, [filename], this.next);
+    },
+    // Reply to a dialog.
+    function(result) {
+      chrome.test.assertTrue(result);
+      callRemoteTestUtil(
+          'waitAndAcceptDialog', appId, [], this.next);
+    },
+    // Wait for a file list change.
+    function() {
+      callRemoteTestUtil('waitForFileListChange',
+                         appId,
+                         [fileListBefore.length],
+                         this.next);
+    },
+    // Delete the directory.
+    function(fileList) {
+      fileListBefore = fileList;
+      chrome.test.assertFalse(isFilePresent(filename, fileList));
+      chrome.test.assertTrue(isFilePresent(directoryName, fileList));
+      callRemoteTestUtil('deleteFile', appId, [directoryName], this.next);
+    },
+    // Reply to a dialog.
+    function(result) {
+      chrome.test.assertTrue(result);
+      callRemoteTestUtil('waitAndAcceptDialog', appId, [], this.next);
+    },
+    // Wait for a file list change.
+    function() {
+      callRemoteTestUtil('waitForFileListChange', appId,
+                         [fileListBefore.length], this.next);
+    },
+    // Verify the result.
+    function(fileList) {
+      chrome.test.assertFalse(isFilePresent(directoryName, fileList));
+      checkIfNoErrorsOccured(this.next);
+    }
+  ]);
 };
 
 testcase.fileDisplayDownloads = function() {
   testcase.intermediate.fileDisplay('/Downloads');
+};
+
+testcase.galleryOpenDownloads = function() {
+  testcase.intermediate.galleryOpen('/Downloads');
+};
+
+testcase.audioOpenDownloads = function() {
+  testcase.intermediate.audioOpen('/Downloads');
+};
+
+testcase.videoOpenDownloads = function() {
+  testcase.intermediate.videoOpen('/Downloads');
 };
 
 testcase.keyboardCopyDownloads = function() {
@@ -200,6 +550,18 @@ testcase.keyboardDeleteDownloads = function() {
 
 testcase.fileDisplayDrive = function() {
   testcase.intermediate.fileDisplay('/drive/root');
+};
+
+testcase.galleryOpenDrive = function() {
+  testcase.intermediate.galleryOpen('/drive/root');
+};
+
+testcase.audioOpenDrive = function() {
+  testcase.intermediate.audioOpen('/drive/root');
+};
+
+testcase.videoOpenDrive = function() {
+  testcase.intermediate.videoOpen('/drive/root');
 };
 
 testcase.keyboardCopyDrive = function() {
@@ -217,24 +579,32 @@ testcase.keyboardDeleteDrive = function() {
  * Drive.
  */
 testcase.openSidebarRecent = function() {
-  var onFileListChange = function(actualFilesAfter) {
-    chrome.test.assertEq(EXPECTED_FILES_IN_RECENT, actualFilesAfter);
-    checkIfNoErrorsOccured(chrome.test.succeed);
-  };
-
-  setupAndWaitUntilReady('/drive/root', function(appId) {
-    // Use the icon for a click target.
-    callRemoteTestUtil(
-        'selectVolume', appId, ['drive_recent'],
-        function(result) {
-          chrome.test.assertFalse(!result);
-          callRemoteTestUtil(
-              'waitForFileListChange',
-              appId,
-              [getExpectedFilesBefore(true /* isDrive */).length],
-              onFileListChange);
-        });
-  });
+  var appId;
+  StepsRunner.run([
+    function() {
+      setupAndWaitUntilReady('/drive/root', this.next);
+    },
+    // Click the icon of the Recent volume.
+    function(inAppId) {
+      appId = inAppId;
+      callRemoteTestUtil(
+        'selectVolume', appId, ['drive_recent'], this.next);
+    },
+    // Wait until the file list is updated.
+    function(result) {
+      chrome.test.assertFalse(!result);
+      callRemoteTestUtil(
+          'waitForFileListChange',
+          appId,
+          [getExpectedFilesBefore(true /* isDrive */).length],
+          this.next);
+    },
+    // Verify the file list.
+    function(actualFilesAfter) {
+      chrome.test.assertEq(EXPECTED_FILES_IN_RECENT, actualFilesAfter);
+      checkIfNoErrorsOccured(this.next);
+    }
+  ]);
 };
 
 /**
@@ -244,24 +614,32 @@ testcase.openSidebarRecent = function() {
  * entries cached by DriveCache.
  */
 testcase.openSidebarOffline = function() {
-  var onFileListChange = function(actualFilesAfter) {
-    chrome.test.assertEq(EXPECTED_FILES_IN_OFFLINE, actualFilesAfter);
-    checkIfNoErrorsOccured(chrome.test.succeed);
-  };
-
-  setupAndWaitUntilReady('/drive/root/', function(appId) {
-    // Use the icon for a click target.
-    callRemoteTestUtil(
-        'selectVolume', appId, ['drive_offline'],
-        function(result) {
-          chrome.test.assertFalse(!result);
-          callRemoteTestUtil(
-              'waitForFileListChange',
-              appId,
-              [getExpectedFilesBefore(true /* isDrive */).length],
-              onFileListChange);
-        });
-  });
+  var appId;
+  StepsRunner.run([
+    function() {
+      setupAndWaitUntilReady('/drive/root/', this.next)
+    },
+    // Click the icon of the Offline volume.
+    function(inAppId) {
+      appId = inAppId;
+      callRemoteTestUtil(
+        'selectVolume', appId, ['drive_offline'], this.next);
+    },
+    // Wait until the file list is updated.
+    function(result) {
+      chrome.test.assertFalse(!result);
+      callRemoteTestUtil(
+          'waitForFileListChange',
+          appId,
+          [getExpectedFilesBefore(true /* isDrive */).length],
+          this.next);
+    },
+    // Verify the file list.
+    function(actualFilesAfter) {
+      chrome.test.assertEq(EXPECTED_FILES_IN_OFFLINE, actualFilesAfter);
+      checkIfNoErrorsOccured(this.next);
+    }
+  ]);
 };
 
 /**
@@ -270,23 +648,34 @@ testcase.openSidebarOffline = function() {
  * "shared-with-me" should be shown.
  */
 testcase.openSidebarSharedWithMe = function() {
-  var onFileListChange = chrome.test.callbackPass(function(actualFilesAfter) {
-    chrome.test.assertEq(EXPECTED_FILES_IN_SHARED_WITH_ME, actualFilesAfter);
-  });
-
-  setupAndWaitUntilReady('/drive/root/', function(appId) {
-    // Use the icon for a click target.
-    callRemoteTestUtil(
-        'selectVolume', appId, ['drive_shared_with_me'],
-        function(result) {
-          chrome.test.assertFalse(!result);
-          callRemoteTestUtil(
-              'waitForFileListChange',
-              appId,
-              [getExpectedFilesBefore(true /* isDrive */).length],
-              onFileListChange);
-        });
-  });
+  var appId;
+  StepsRunner.run([
+    function() {
+      setupAndWaitUntilReady('/drive/root/', this.next);
+    },
+    // Click the icon of the Shared With Me volume.
+    function(inAppId) {
+      appId = inAppId;
+      // Use the icon for a click target.
+      callRemoteTestUtil('selectVolume',
+                         appId,
+                         ['drive_shared_with_me'], this.next);
+    },
+    // Wait until the file list is updated.
+    function(result) {
+      chrome.test.assertFalse(!result);
+      callRemoteTestUtil(
+          'waitForFileListChange',
+          appId,
+          [getExpectedFilesBefore(true /* isDrive */).length],
+          this.next);
+    },
+    // Verify the file list.
+    function(actualFilesAfter) {
+      chrome.test.assertEq(EXPECTED_FILES_IN_SHARED_WITH_ME, actualFilesAfter);
+      checkIfNoErrorsOccured(this.next);
+    }
+  ]);
 };
 
 /**
@@ -299,84 +688,386 @@ testcase.autocomplete = function() {
     'hello.txt\n',
   ];
 
-  var onAutocompleteListShown = function(autocompleteList) {
-    chrome.test.assertEq(EXPECTED_AUTOCOMPLETE_LIST, autocompleteList);
-    checkIfNoErrorsOccured(chrome.test.succeed);
-  };
-
-  setupAndWaitUntilReady('/drive/root', function(appId, list) {
-    callRemoteTestUtil('performAutocompleteAndWait',
-                       appId,
-                       ['hello', EXPECTED_AUTOCOMPLETE_LIST.length],
-                       onAutocompleteListShown);
-  });
+  StepsRunner.run([
+    function() {
+      setupAndWaitUntilReady('/drive/root', this.next);
+    },
+    // Perform an auto complete test and wait until the list changes.
+    // TODO(mtomasz): Move the operation from test_util.js to tests_cases.js.
+    function(appId, list) {
+      callRemoteTestUtil('performAutocompleteAndWait',
+                         appId,
+                         ['hello', EXPECTED_AUTOCOMPLETE_LIST.length],
+                         this.next);
+    },
+    // Verify the list contents.
+    function(autocompleteList) {
+      chrome.test.assertEq(EXPECTED_AUTOCOMPLETE_LIST, autocompleteList);
+      checkIfNoErrorsOccured(this.next);
+    }
+  ]);
 };
 
 /**
- * Tests copy from Drive's root to local's downloads.
+ * Test function to copy from the specified source to the specified destination.
+ * @param {string} targetFile Name of target file to be copied.
+ * @param {string} srcName Type of source volume. e.g. downloads, drive,
+ *     drive_recent, drive_shared_with_me, drive_offline.
+ * @param {Array.<Array.<string>>} srcContents Expected initial contents in the
+ *     source volume.
+ * @param {string} dstName Type of destination volume.
+ * @param {Array.<Array.<string>>} dstContents Expected initial contents in the
+ *     destination volume.
  */
-testcase.transferFromDriveToDownloads = function() {
+testcase.intermediate.copyBetweenVolumes = function(targetFile,
+                                                    srcName,
+                                                    srcContents,
+                                                    dstName,
+                                                    dstContents) {
   var appId;
-  var steps = [
+  StepsRunner.run([
+    // Set up File Manager.
     function() {
-      setupAndWaitUntilReady('/Downloads', steps.shift());
+      setupAndWaitUntilReady('/Downloads', this.next);
     },
+    // Select the source volume.
     function(inAppId) {
       appId = inAppId;
-      callRemoteTestUtil('selectVolume', appId, ['drive'], steps.shift());
+      callRemoteTestUtil(
+          'selectVolume', appId, [srcName], this.next);
     },
+    // Wait for the expected files to appear in the file list.
     function(result) {
       chrome.test.assertTrue(result);
-      // Using callRemoteTestUtil assumes EXPECTED_FILES_BEFORE_LOCAL.length !=
-      // EXPECTED_FILES_BEFORE_DRIVE.length
-      callRemoteTestUtil('waitForFileListChange', appId,
-                         [EXPECTED_FILES_BEFORE_LOCAL.length], steps.shift());
+      callRemoteTestUtil(
+          'waitForFiles', appId, [srcContents], this.next);
     },
+    // Select the source file.
+    function() {
+      callRemoteTestUtil(
+          'selectFile', appId, [targetFile], this.next);
+    },
+    // Copy the file.
+    function(result) {
+      chrome.test.assertTrue(result);
+      callRemoteTestUtil('execCommand', appId, ['copy'], this.next);
+    },
+    // Select the destination volume.
+    function(result) {
+      chrome.test.assertTrue(result);
+      callRemoteTestUtil(
+          'selectVolume', appId, [dstName], this.next);
+    },
+    // Wait for the expected files to appear in the file list.
+    function(result) {
+      chrome.test.assertTrue(result);
+      callRemoteTestUtil(
+          'waitForFiles', appId, [dstContents], this.next);
+    },
+    // Paste the file.
+    function() {
+      callRemoteTestUtil(
+          'execCommand', appId, ['paste'], this.next);
+    },
+    // Wait for the file list to change.
+    function(result) {
+      chrome.test.assertTrue(result);
+      callRemoteTestUtil('waitForFileListChange',
+                         appId,
+                         [dstContents.length],
+                         this.next);
+    },
+    // Check the last contents of file list.
     function(actualFilesAfter) {
-      chrome.test.assertEq(EXPECTED_FILES_BEFORE_DRIVE, actualFilesAfter);
-      callRemoteTestUtil('selectFile', appId, ['hello.txt'], steps.shift());
-    },
-    function(result) {
-      chrome.test.assertTrue(result);
-      // Ctrl + C
-      callRemoteTestUtil('fakeKeyDown', appId,
-                         ['#file-list', 'U+0043', true], steps.shift());
-    },
-    function(result) {
-      chrome.test.assertTrue(result);
-      // Switch to downloads
-      callRemoteTestUtil('selectVolume', appId, ['downloads'], steps.shift());
-    },
-    function(result) {
-      chrome.test.assertTrue(result);
-      callRemoteTestUtil('waitForFileListChange', appId,
-                         [EXPECTED_FILES_BEFORE_DRIVE.length], steps.shift());
-    },
-    function(actualFilesAfter) {
-      chrome.test.assertEq(EXPECTED_FILES_BEFORE_LOCAL, actualFilesAfter);
-      // Ctrl + V
-      callRemoteTestUtil('fakeKeyDown', appId,
-                         ['#file-list', 'U+0056', true], steps.shift());
-    },
-    function(result) {
-      chrome.test.assertTrue(result);
-      callRemoteTestUtil('waitForFileListChange', appId,
-                         [EXPECTED_FILES_BEFORE_LOCAL.length], steps.shift());
-    },
-    function(actualFilesAfter) {
-      chrome.test.assertEq(EXPECTED_FILES_BEFORE_LOCAL.length + 1,
+      chrome.test.assertEq(dstContents.length + 1,
                            actualFilesAfter.length);
+      var copiedItem = null;
+      for (var i = 0; i < srcContents.length; i++) {
+        if (srcContents[i][0] == targetFile) {
+          copiedItem = srcContents[i];
+          break;
+        }
+      }
+      chrome.test.assertTrue(copiedItem != null);
+      for (var i = 0; i < dstContents.length; i++) {
+        if (dstContents[i][0] == targetFile) {
+          // Replace the last '.' in filename with ' (1).'.
+          // e.g. 'my.note.txt' -> 'my.note (1).txt'
+          copiedItem[0] = copiedItem[0].replace(/\.(?=[^\.]+$)/, ' (1).');
+          break;
+        }
+      }
+      // File size can not be obtained on drive_shared_with_me volume and
+      // drive_offline.
+      var ignoreSize = srcName == 'drive_shared_with_me' ||
+                       dstName == 'drive_shared_with_me' ||
+                       srcName == 'drive_offline' ||
+                       dstName == 'drive_offline';
       for (var i = 0; i < actualFilesAfter.length; i++) {
-        if (actualFilesAfter[i][0] == 'hello (1).txt' &&
-            actualFilesAfter[i][1] == '123 bytes' &&
-            actualFilesAfter[i][2] == 'Plain text') {
-          chrome.test.succeed();
+        if (actualFilesAfter[i][0] == copiedItem[0] &&
+            (ignoreSize || actualFilesAfter[i][1] == copiedItem[1]) &&
+            actualFilesAfter[i][2] == copiedItem[2]) {
+          checkIfNoErrorsOccured(this.next);
           return;
         }
       }
       chrome.test.fail();
     }
+  ]);
+};
+
+/**
+ * Tests copy from drive's root to local's downloads.
+ */
+testcase.transferFromDriveToDownloads = function() {
+  testcase.intermediate.copyBetweenVolumes('hello.txt',
+                                           'drive',
+                                           EXPECTED_FILES_BEFORE_DRIVE,
+                                           'downloads',
+                                           EXPECTED_FILES_BEFORE_LOCAL);
+};
+
+/**
+ * Tests copy from local's downloads to drive's root.
+ */
+testcase.transferFromDownloadsToDrive = function() {
+  testcase.intermediate.copyBetweenVolumes('hello.txt',
+                                           'downloads',
+                                           EXPECTED_FILES_BEFORE_LOCAL,
+                                           'drive',
+                                           EXPECTED_FILES_BEFORE_DRIVE);
+};
+
+/**
+ * Tests copy from drive's shared_with_me to local's downloads.
+ */
+testcase.transferFromSharedToDownloads = function() {
+  testcase.intermediate.copyBetweenVolumes('Test Shared Document.gdoc',
+                                           'drive_shared_with_me',
+                                           EXPECTED_FILES_IN_SHARED_WITH_ME,
+                                           'downloads',
+                                           EXPECTED_FILES_BEFORE_LOCAL);
+};
+
+/**
+ * Tests copy from drive's shared_with_me to drive's root.
+ */
+testcase.transferFromSharedToDrive = function() {
+  testcase.intermediate.copyBetweenVolumes('Test Shared Document.gdoc',
+                                           'drive_shared_with_me',
+                                           EXPECTED_FILES_IN_SHARED_WITH_ME,
+                                           'drive',
+                                           EXPECTED_FILES_BEFORE_DRIVE);
+};
+
+/**
+ * Tests copy from drive's recent to local's downloads.
+ */
+testcase.transferFromRecentToDownloads = function() {
+  testcase.intermediate.copyBetweenVolumes('hello.txt',
+                                           'drive_recent',
+                                           EXPECTED_FILES_IN_RECENT,
+                                           'downloads',
+                                           EXPECTED_FILES_BEFORE_LOCAL);
+};
+
+/**
+ * Tests copy from drive's recent to drive's root.
+ */
+testcase.transferFromRecentToDrive = function() {
+  testcase.intermediate.copyBetweenVolumes('hello.txt',
+                                           'drive_recent',
+                                           EXPECTED_FILES_IN_RECENT,
+                                           'drive',
+                                           EXPECTED_FILES_BEFORE_DRIVE);
+};
+
+/**
+ * Tests copy from drive's offline to local's downloads.
+ */
+testcase.transferFromOfflineToDownloads = function() {
+  testcase.intermediate.copyBetweenVolumes('Test Document.gdoc',
+                                           'drive_offline',
+                                           EXPECTED_FILES_IN_OFFLINE,
+                                           'downloads',
+                                           EXPECTED_FILES_BEFORE_LOCAL);
+};
+
+/**
+ * Tests copy from drive's offline to drive's root.
+ */
+testcase.transferFromOfflineToDrive = function() {
+  testcase.intermediate.copyBetweenVolumes('Test Document.gdoc',
+                                           'drive_offline',
+                                           EXPECTED_FILES_IN_OFFLINE,
+                                           'drive',
+                                           EXPECTED_FILES_BEFORE_DRIVE);
+};
+
+/**
+ * Tests hiding the search box.
+ */
+testcase.hideSearchBox = function() {
+  var appId;
+  StepsRunner.run([
+    // Set up File Manager.
+    function() {
+      setupAndWaitUntilReady('/Downloads', this.next);
+    },
+    // Resize the window.
+    function(inAppId, inFileListBefore) {
+      appId = inAppId;
+      callRemoteTestUtil('resizeWindow', appId, [100, 100], this.next);
+    },
+    // Wait for the style change.
+    function(result) {
+      chrome.test.assertTrue(result);
+      callRemoteTestUtil('waitForStyles',
+                         appId,
+                         [{
+                            query: '.search-box-wrapper',
+                            styles: {visibility: 'display'}
+                          }, {
+                            query: '#search-clear-button',
+                            styles: {hidden: 'none'}
+                          }],
+                         this.next);
+    },
+    // Check the styles
+    function() {
+      checkIfNoErrorsOccured(this.next);
+    }
+  ]);
+};
+
+/**
+ * Tests restoring the sorting order.
+ */
+testcase.restoreSortColumn = function() {
+  var appId;
+  var EXPECTED_FILES = [
+    ['world.ogv', '59 KB', 'OGG video', 'Jul 4, 2012 10:35 AM'],
+    ['photos', '--', 'Folder', 'Jan 1, 1980 11:59 PM'],
+    ['My Desktop Background.png', '272 bytes', 'PNG image',
+     'Jan 18, 2038 1:02 AM'],
+    ['hello.txt', '51 bytes', 'Plain text', 'Sep 4, 1998 12:34 PM'],
+    ['Beautiful Song.ogg', '14 KB', 'OGG audio', 'Nov 12, 2086 12:00 PM']
   ];
-  steps = steps.map(function(f) { return chrome.test.callbackPass(f); });
-  steps.shift()();
+  StepsRunner.run([
+    // Set up File Manager.
+    function() {
+      setupAndWaitUntilReady('/Downloads', this.next);
+    },
+    // Sort by name.
+    function(inAppId) {
+      appId = inAppId;
+      callRemoteTestUtil('fakeMouseClick',
+                         appId,
+                         ['.table-header-cell:nth-of-type(1)'],
+                         this.next);
+    },
+    // Check the sorted style of the header.
+    function() {
+      callRemoteTestUtil('waitForElement',
+                         appId,
+                         ['.table-header-sort-image-asc'],
+                         this.next);
+    },
+    // Sort by name.
+    function() {
+      callRemoteTestUtil('fakeMouseClick',
+                         appId,
+                         ['.table-header-cell:nth-of-type(1)'],
+                         this.next);
+    },
+    // Check the sorted style of the header.
+    function() {
+      callRemoteTestUtil('waitForElement',
+                         appId,
+                         ['.table-header-sort-image-desc'],
+                         this.next);
+    },
+    // Check the sorted files.
+    function() {
+      callRemoteTestUtil('waitForFiles',
+                         appId,
+                         [EXPECTED_FILES, true /* Check the order */],
+                         this.next);
+    },
+    // Open another window, where the sorted column should be restored.
+    function() {
+      setupAndWaitUntilReady('/Downloads', this.next);
+    },
+    // Check the sorted style of the header.
+    function(inAppId) {
+      appId = inAppId;
+      callRemoteTestUtil('waitForElement',
+                         appId,
+                         ['.table-header-sort-image-desc'],
+                         this.next);
+    },
+    // Check the sorted files.
+    function() {
+      callRemoteTestUtil('waitForFiles',
+                         appId,
+                         [EXPECTED_FILES, true /* Check the order */],
+                         this.next);
+    },
+    // Check the error.
+    function() {
+      checkIfNoErrorsOccured(this.next);
+    }
+  ]);
+};
+
+/**
+ * Tests restoring the current view (the file list or the thumbnail grid).
+ */
+testcase.restoreCurrentView = function() {
+  var appId;
+  StepsRunner.run([
+    // Set up File Manager.
+    function() {
+      setupAndWaitUntilReady('/Downloads', this.next);
+    },
+    // Check the initial view.
+    function(inAppId) {
+      appId = inAppId;
+      callRemoteTestUtil('waitForElement',
+                         appId,
+                         ['.thumbnail-grid[style*="display: none;"]'],
+                         this.next);
+    },
+    // Change the current view.
+    function() {
+      callRemoteTestUtil('fakeEvent',
+                         appId,
+                         ['#thumbnail-view', 'activate'],
+                         this.next);
+    },
+    // Check the new current view.
+    function(result) {
+      chrome.test.assertTrue(result);
+      callRemoteTestUtil('waitForElement',
+                         appId,
+                         ['.detail-table[style*="display: none;"]'],
+                         this.next);
+    },
+    // Open another window, where the current view is restored.
+    function() {
+      callRemoteTestUtil('openMainWindow', null, ['/Downloads'], this.next);
+    },
+    // Check the current view.
+    function(inAppId) {
+      appId = inAppId;
+      callRemoteTestUtil('waitForElement',
+                         appId,
+                         ['.detail-table[style*="display: none;"]'],
+                         this.next);
+    },
+    // Check the error.
+    function() {
+      checkIfNoErrorsOccured(this.next);
+    }
+  ]);
 };

@@ -4,7 +4,6 @@
 
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_split.h"
@@ -12,26 +11,20 @@
 #include "chrome/common/extensions/api/extension_api.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/extensions/features/base_feature_provider.h"
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
 #include "chrome/renderer/extensions/module_system.h"
 #include "chrome/renderer/extensions/user_script_slave.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/v8_value_converter.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebScopedMicrotaskSuppression.h"
+#include "third_party/WebKit/public/web/WebView.h"
 #include "v8/include/v8.h"
 
 using content::V8ValueConverter;
 
 namespace extensions {
-
-namespace {
-
-const char kChromeHidden[] = "chromeHidden";
-const char kValidateCallbacks[] = "validateCallbacks";
-const char kValidateAPI[] = "validateAPI";
-
-}  // namespace
 
 ChromeV8Context::ChromeV8Context(v8::Handle<v8::Context> v8_context,
                                  WebKit::WebFrame* web_frame,
@@ -40,7 +33,8 @@ ChromeV8Context::ChromeV8Context(v8::Handle<v8::Context> v8_context,
     : v8_context_(v8_context),
       web_frame_(web_frame),
       extension_(extension),
-      context_type_(context_type) {
+      context_type_(context_type),
+      safe_builtins_(this) {
   VLOG(1) << "Created context:\n"
           << "  extension id: " << GetExtensionID() << "\n"
           << "  frame:        " << web_frame_ << "\n"
@@ -54,7 +48,7 @@ ChromeV8Context::~ChromeV8Context() {
 }
 
 void ChromeV8Context::Invalidate() {
-  if (v8_context_.get().IsEmpty())
+  if (!is_valid())
     return;
   if (module_system_)
     module_system_->Invalidate();
@@ -62,39 +56,8 @@ void ChromeV8Context::Invalidate() {
   v8_context_.reset();
 }
 
-std::string ChromeV8Context::GetExtensionID() {
-  return extension_ ? extension_->id() : std::string();
-}
-
-// static
-v8::Handle<v8::Value> ChromeV8Context::GetOrCreateChromeHidden(
-    v8::Handle<v8::Context> context) {
-  v8::Local<v8::Object> global = context->Global();
-  v8::Local<v8::Value> hidden = global->GetHiddenValue(
-      v8::String::New(kChromeHidden));
-
-  if (hidden.IsEmpty() || hidden->IsUndefined()) {
-    hidden = v8::Object::New();
-    global->SetHiddenValue(v8::String::New(kChromeHidden), hidden);
-
-    if (DCHECK_IS_ON()) {
-      // Tell bindings.js to validate callbacks and events against their schema
-      // definitions.
-      v8::Local<v8::Object>::Cast(hidden)->Set(
-          v8::String::New(kValidateCallbacks), v8::True());
-      // Tell bindings.js to validate API for ambiguity.
-      v8::Local<v8::Object>::Cast(hidden)->Set(
-          v8::String::New(kValidateAPI), v8::True());
-    }
-  }
-
-  DCHECK(hidden->IsObject());
-  return v8::Local<v8::Object>::Cast(hidden);
-}
-
-v8::Handle<v8::Value> ChromeV8Context::GetChromeHidden() const {
-  v8::Local<v8::Object> global = v8_context_->Global();
-  return global->GetHiddenValue(v8::String::New(kChromeHidden));
+std::string ChromeV8Context::GetExtensionID() const {
+  return extension_.get() ? extension_->id() : std::string();
 }
 
 content::RenderView* ChromeV8Context::GetRenderView() const {
@@ -104,77 +67,50 @@ content::RenderView* ChromeV8Context::GetRenderView() const {
     return NULL;
 }
 
-bool ChromeV8Context::CallChromeHiddenMethod(
-    const std::string& function_name,
+GURL ChromeV8Context::GetURL() const {
+  return web_frame_ ?
+      UserScriptSlave::GetDataSourceURLForFrame(web_frame_) : GURL();
+}
+
+v8::Local<v8::Value> ChromeV8Context::CallFunction(
+    v8::Handle<v8::Function> function,
     int argc,
-    v8::Handle<v8::Value>* argv,
-    v8::Handle<v8::Value>* result) const {
-  // ChromeV8ContextSet calls Invalidate() and then schedules a task to delete
-  // this object. This check prevents a race from attempting to execute script
-  // on a NULL web_frame_.
+    v8::Handle<v8::Value> argv[]) const {
+  v8::HandleScope handle_scope;
+  v8::Context::Scope scope(v8_context());
+
+  WebKit::WebScopedMicrotaskSuppression suppression;
+  if (!is_valid())
+    return handle_scope.Close(v8::Undefined());
+
+  v8::Handle<v8::Object> global = v8_context()->Global();
   if (!web_frame_)
-    return false;
-
-  v8::Context::Scope context_scope(v8_context_.get());
-
-  // Look up the function name, which may be a sub-property like
-  // "Port.dispatchOnMessage" in the hidden global variable.
-  v8::Local<v8::Value> value = v8::Local<v8::Value>::New(GetChromeHidden());
-  if (value.IsEmpty())
-    return false;
-
-  std::vector<std::string> components;
-  base::SplitStringDontTrim(function_name, '.', &components);
-  for (size_t i = 0; i < components.size(); ++i) {
-    if (!value.IsEmpty() && value->IsObject()) {
-      value = v8::Local<v8::Object>::Cast(value)->Get(
-          v8::String::New(components[i].c_str()));
-    }
-  }
-
-  if (value.IsEmpty() || !value->IsFunction()) {
-    VLOG(1) << "Could not execute chrome hidden method: " << function_name;
-    return false;
-  }
-
-  TRACE_EVENT1("v8", "v8.callChromeHiddenMethod",
-               "function_name", function_name);
-
-  v8::Local<v8::Function> function = v8::Local<v8::Function>::Cast(value);
-  v8::Handle<v8::Value> result_temp =
+    return handle_scope.Close(function->Call(global, argc, argv));
+  return handle_scope.Close(
       web_frame_->callFunctionEvenIfScriptDisabled(function,
-                                                   v8::Object::New(),
+                                                   global,
                                                    argc,
-                                                   argv);
-  if (result)
-    *result = result_temp;
-
-  return true;
+                                                   argv));
 }
 
-Feature::Availability ChromeV8Context::GetAvailability(
+bool ChromeV8Context::IsAnyFeatureAvailableToContext(
     const std::string& api_name) {
-  return GetAvailabilityInternal(api_name, extension_);
-}
-
-Feature::Availability ChromeV8Context::GetAvailabilityForContext(
-    const std::string& api_name) {
-  return GetAvailabilityInternal(api_name, NULL);
-}
-
-Feature::Availability ChromeV8Context::GetAvailabilityInternal(
-    const std::string& api_name,
-    const Extension* extension) {
-  return ExtensionAPI::GetSharedInstance()->IsAvailable(
+  return ExtensionAPI::GetSharedInstance()->IsAnyFeatureAvailableToContext(
       api_name,
-      extension,
       context_type_,
       UserScriptSlave::GetDataSourceURLForFrame(web_frame_));
 }
 
+Feature::Availability ChromeV8Context::GetAvailability(
+    const std::string& api_name) {
+  return ExtensionAPI::GetSharedInstance()->IsAvailable(api_name,
+                                                        extension_.get(),
+                                                        context_type_,
+                                                        GetURL());
+}
+
 void ChromeV8Context::DispatchOnUnloadEvent() {
-  v8::HandleScope handle_scope;
-  CallChromeHiddenMethod("dispatchOnUnload", 0, NULL, NULL);
+  module_system_->CallModuleMethod("unload_event", "dispatch");
 }
 
 std::string ChromeV8Context::GetContextTypeDescription() {
@@ -209,9 +145,9 @@ void ChromeV8Context::OnResponseReceived(const std::string& name,
     v8::String::New(error.c_str())
   };
 
-  v8::Handle<v8::Value> retval;
-  CHECK(CallChromeHiddenMethod("handleResponse", arraysize(argv), argv,
-                               &retval));
+  v8::Handle<v8::Value> retval = module_system_->CallModuleMethod(
+      "sendRequest", "handleResponse", arraysize(argv), argv);
+
   // In debug, the js will validate the callback parameters and return a
   // string if a validation error has occured.
   if (DCHECK_IS_ON()) {

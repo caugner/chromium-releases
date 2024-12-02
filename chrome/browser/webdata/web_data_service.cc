@@ -4,6 +4,7 @@
 
 #include "chrome/browser/webdata/web_data_service.h"
 
+#include "base/bind.h"
 #include "base/stl_util.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/webdata/keyword_table.h"
@@ -13,6 +14,7 @@
 #include "chrome/browser/webdata/web_intents_table.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "components/webdata/common/web_database_service.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -41,7 +43,8 @@ WDKeywordsResult::~WDKeywordsResult() {}
 
 WebDataService::WebDataService(scoped_refptr<WebDatabaseService> wdbs,
                                const ProfileErrorCallback& callback)
-    : WebDataServiceBase(wdbs, callback) {
+    : WebDataServiceBase(wdbs, callback,
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI)) {
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -113,33 +116,10 @@ WebDataServiceBase::Handle WebDataService::GetWebAppImages(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-//
-// Token Service
-//
-////////////////////////////////////////////////////////////////////////////////
-
-void WebDataService::SetTokenForService(const std::string& service,
-                                        const std::string& token) {
-  wdbs_->ScheduleDBTask(FROM_HERE,
-      Bind(&WebDataService::SetTokenForServiceImpl, this, service, token));
-}
-
-void WebDataService::RemoveAllTokens() {
-  wdbs_->ScheduleDBTask(FROM_HERE,
-      Bind(&WebDataService::RemoveAllTokensImpl, this));
-}
-
-// Null on failure. Success is WDResult<std::string>
-WebDataServiceBase::Handle WebDataService::GetAllTokens(
-    WebDataServiceConsumer* consumer) {
-  return wdbs_->ScheduleDBTaskWithResult(FROM_HERE,
-      Bind(&WebDataService::GetAllTokensImpl, this), consumer);
-}
-
-////////////////////////////////////////////////////////////////////////////////
 
 WebDataService::WebDataService()
-    : WebDataServiceBase(NULL, ProfileErrorCallback()) {
+    : WebDataServiceBase(NULL, ProfileErrorCallback(),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI)) {
 }
 
 WebDataService::~WebDataService() {
@@ -235,33 +215,4 @@ scoped_ptr<WDTypedResult> WebDataService::GetWebAppImagesImpl(
   WebAppsTable::FromWebDatabase(db)->GetWebAppImages(app_url, &result.images);
   return scoped_ptr<WDTypedResult>(
       new WDResult<WDAppImagesResult>(WEB_APP_IMAGES, result));
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//
-// Token Service implementation.
-//
-////////////////////////////////////////////////////////////////////////////////
-
-WebDatabase::State WebDataService::RemoveAllTokensImpl(WebDatabase* db) {
-  if (TokenServiceTable::FromWebDatabase(db)->RemoveAllTokens()) {
-    return WebDatabase::COMMIT_NEEDED;
-  }
-  return WebDatabase::COMMIT_NOT_NEEDED;
-}
-
-WebDatabase::State WebDataService::SetTokenForServiceImpl(
-    const std::string& service, const std::string& token, WebDatabase* db) {
-  if (TokenServiceTable::FromWebDatabase(db)->SetTokenForService(service,
-                                                                 token)) {
-    return WebDatabase::COMMIT_NEEDED;
-  }
-  return WebDatabase::COMMIT_NOT_NEEDED;
-}
-
-scoped_ptr<WDTypedResult> WebDataService::GetAllTokensImpl(WebDatabase* db) {
-  std::map<std::string, std::string> map;
-  TokenServiceTable::FromWebDatabase(db)->GetAllTokens(&map);
-  return scoped_ptr<WDTypedResult>(
-      new WDResult<std::map<std::string, std::string> >(TOKEN_RESULT, map));
 }

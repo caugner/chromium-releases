@@ -7,8 +7,8 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "base/containers/hash_tables.h"
 #include "base/files/file_path.h"
-#include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
@@ -18,6 +18,11 @@
 class ChromeURLRequestContext;
 class ChromeURLRequestContextGetter;
 class Profile;
+
+namespace net {
+class FtpTransactionFactory;
+class HttpTransactionFactory;
+}  // namespace net
 
 // OffTheRecordProfile owns a OffTheRecordProfileIOData::Handle, which holds a
 // reference to the OffTheRecordProfileIOData. OffTheRecordProfileIOData is

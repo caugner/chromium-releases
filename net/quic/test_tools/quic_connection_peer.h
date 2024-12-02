@@ -6,14 +6,19 @@
 #define NET_QUIC_TEST_TOOLS_QUIC_CONNECTION_PEER_H_
 
 #include "base/basictypes.h"
+#include "net/base/ip_endpoint.h"
 #include "net/quic/quic_protocol.h"
 #include "net/quic/quic_stats.h"
 
 namespace net {
 
 struct QuicAckFrame;
+struct QuicPacketHeader;
 class QuicConnection;
+class QuicConnectionHelperInterface;
 class QuicConnectionVisitorInterface;
+class QuicFecGroup;
+class QuicFramer;
 class QuicPacketCreator;
 class ReceiveAlgorithmInterface;
 class SendAlgorithmInterface;
@@ -42,6 +47,8 @@ class QuicConnectionPeer {
 
   static size_t GetNumRetransmissionTimeouts(QuicConnection* connection);
 
+  static QuicTime::Delta GetNetworkTimeout(QuicConnection* connection);
+
   static bool IsSavedForRetransmission(
       QuicConnection* connection,
       QuicPacketSequenceNumber sequence_number);
@@ -66,6 +73,19 @@ class QuicConnectionPeer {
   static bool IsServer(QuicConnection* connection);
 
   static void SetIsServer(QuicConnection* connection, bool is_server);
+
+  static void SetSelfAddress(QuicConnection* connection,
+                             const IPEndPoint& self_address);
+
+  static void SwapCrypters(QuicConnection* connection, QuicFramer* framer);
+
+  static void SetMaxPacketsPerRetransmissionAlarm(QuicConnection* connection,
+                                                  int max_packets);
+
+  static QuicConnectionHelperInterface* GetHelper(QuicConnection* connection);
+
+  // Set last_header_->fec_group = fec_group and return connection->GetFecGroup
+  static QuicFecGroup* GetFecGroup(QuicConnection* connection, int fec_group);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicConnectionPeer);

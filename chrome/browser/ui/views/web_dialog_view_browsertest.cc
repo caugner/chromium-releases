@@ -7,7 +7,7 @@
 #include "base/files/file_path.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -57,8 +57,10 @@ class TestWebDialogView : public views::WebDialogView {
       // Schedule message loop quit because we could be called while
       // the bounds change call is on the stack and not in the nested message
       // loop.
-      MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
-          &MessageLoop::Quit, base::Unretained(MessageLoop::current())));
+      base::MessageLoop::current()->PostTask(
+          FROM_HERE,
+          base::Bind(&base::MessageLoop::Quit,
+                     base::Unretained(base::MessageLoop::current())));
     }
 
     last_size_ = bounds.size();

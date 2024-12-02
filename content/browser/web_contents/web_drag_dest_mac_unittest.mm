@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/mac/scoped_nsautorelease_pool.h"
-#import "base/memory/scoped_nsobject.h"
+#import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #import "content/browser/web_contents/web_drag_dest_mac.h"
 #include "content/test/test_web_contents.h"
@@ -13,7 +13,7 @@
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 #import "ui/base/dragdrop/cocoa_dnd_util.h"
 #import "ui/base/test/ui_cocoa_test_helper.h"
-#include "webkit/glue/webdropdata.h"
+#include "webkit/common/webdropdata.h"
 
 using content::RenderViewHostImplTestHarness;
 
@@ -53,7 +53,7 @@ class WebDragDestTest : public RenderViewHostImplTestHarness {
   }
 
   base::mac::ScopedNSAutoreleasePool pool_;
-  scoped_nsobject<WebDragDest> drag_dest_;
+  base::scoped_nsobject<WebDragDest> drag_dest_;
 };
 
 // Make sure nothing leaks.
@@ -64,7 +64,7 @@ TEST_F(WebDragDestTest, Init) {
 // Test flipping of coordinates given a point in window coordinates.
 TEST_F(WebDragDestTest, Flip) {
   NSPoint windowPoint = NSZeroPoint;
-  scoped_nsobject<NSWindow> window([[CocoaTestHelperWindow alloc] init]);
+  base::scoped_nsobject<NSWindow> window([[CocoaTestHelperWindow alloc] init]);
   NSPoint viewPoint =
       [drag_dest_ flipWindowPointToView:windowPoint
                                    view:[window contentView]];

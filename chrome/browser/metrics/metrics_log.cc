@@ -10,27 +10,26 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/perftimer.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/profiler/alternate_timer.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
 #include "base/third_party/nspr/prtime.h"
 #include "base/time.h"
 #include "base/tracked_objects.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
-#include "chrome/browser/autocomplete/autocomplete_log.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/omnibox/omnibox_log.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_process_type.h"
@@ -44,11 +43,11 @@
 #include "chrome/installer/util/google_update_settings.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/gpu_info.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "googleurl/src/gurl.h"
+#include "gpu/config/gpu_info.h"
 #include "ui/gfx/screen.h"
 #include "webkit/plugins/webplugininfo.h"
 
@@ -111,31 +110,31 @@ OmniboxEventProto::InputType AsOmniboxEventInputType(
 OmniboxEventProto::Suggestion::ResultType AsOmniboxEventResultType(
     AutocompleteMatch::Type type) {
   switch (type) {
-    case AutocompleteMatch::URL_WHAT_YOU_TYPED:
+    case AutocompleteMatchType::URL_WHAT_YOU_TYPED:
       return OmniboxEventProto::Suggestion::URL_WHAT_YOU_TYPED;
-    case AutocompleteMatch::HISTORY_URL:
+    case AutocompleteMatchType::HISTORY_URL:
       return OmniboxEventProto::Suggestion::HISTORY_URL;
-    case AutocompleteMatch::HISTORY_TITLE:
+    case AutocompleteMatchType::HISTORY_TITLE:
       return OmniboxEventProto::Suggestion::HISTORY_TITLE;
-    case AutocompleteMatch::HISTORY_BODY:
+    case AutocompleteMatchType::HISTORY_BODY:
       return OmniboxEventProto::Suggestion::HISTORY_BODY;
-    case AutocompleteMatch::HISTORY_KEYWORD:
+    case AutocompleteMatchType::HISTORY_KEYWORD:
       return OmniboxEventProto::Suggestion::HISTORY_KEYWORD;
-    case AutocompleteMatch::NAVSUGGEST:
+    case AutocompleteMatchType::NAVSUGGEST:
       return OmniboxEventProto::Suggestion::NAVSUGGEST;
-    case AutocompleteMatch::SEARCH_WHAT_YOU_TYPED:
+    case AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED:
       return OmniboxEventProto::Suggestion::SEARCH_WHAT_YOU_TYPED;
-    case AutocompleteMatch::SEARCH_HISTORY:
+    case AutocompleteMatchType::SEARCH_HISTORY:
       return OmniboxEventProto::Suggestion::SEARCH_HISTORY;
-    case AutocompleteMatch::SEARCH_SUGGEST:
+    case AutocompleteMatchType::SEARCH_SUGGEST:
       return OmniboxEventProto::Suggestion::SEARCH_SUGGEST;
-    case AutocompleteMatch::SEARCH_OTHER_ENGINE:
+    case AutocompleteMatchType::SEARCH_OTHER_ENGINE:
       return OmniboxEventProto::Suggestion::SEARCH_OTHER_ENGINE;
-    case AutocompleteMatch::EXTENSION_APP:
+    case AutocompleteMatchType::EXTENSION_APP:
       return OmniboxEventProto::Suggestion::EXTENSION_APP;
-    case AutocompleteMatch::CONTACT:
+    case AutocompleteMatchType::CONTACT:
       return OmniboxEventProto::Suggestion::CONTACT;
-    case AutocompleteMatch::BOOKMARK_TITLE:
+    case AutocompleteMatchType::BOOKMARK_TITLE:
       return OmniboxEventProto::Suggestion::BOOKMARK_TITLE;
     default:
       NOTREACHED();
@@ -193,7 +192,7 @@ PluginPrefs* GetPluginPrefs() {
   if (profiles.empty())
     return NULL;
 
-  return PluginPrefs::GetForProfile(profiles.front());
+  return PluginPrefs::GetForProfile(profiles.front()).get();
 }
 
 // Fills |plugin| with the info contained in |plugin_info| and |plugin_prefs|.
@@ -272,7 +271,7 @@ void ProductDataToProto(const GoogleUpdateSettings::ProductData& product_data,
 #endif
 
 #if defined(OS_WIN)
-struct ScreenDPIInformation{
+struct ScreenDPIInformation {
   double max_dpi_x;
   double max_dpi_y;
 };
@@ -299,7 +298,7 @@ BOOL CALLBACK GetMonitorDPICallback(HMONITOR, HDC hdc, LPRECT, LPARAM dwData) {
 void WriteScreenDPIInformationProto(SystemProfileProto::Hardware* hardware) {
   HDC desktop_dc = GetDC(NULL);
   if (desktop_dc) {
-    ScreenDPIInformation si = {0,0};
+    ScreenDPIInformation si = {0, 0};
     if (EnumDisplayMonitors(desktop_dc, NULL, GetMonitorDPICallback,
             reinterpret_cast<LPARAM>(&si))) {
       hardware->set_max_dpi_x(si.max_dpi_x);
@@ -420,8 +419,6 @@ void MetricsLog::RecordIncrementalStabilityElements(
 
   OPEN_ELEMENT_FOR_SCOPE("profile");
   WriteCommonEventAttributes();
-
-  WriteInstallElement();
 
   {
     OPEN_ELEMENT_FOR_SCOPE("stability");  // Minimal set of stability elements.
@@ -689,11 +686,8 @@ void MetricsLog::WriteRealtimeStabilityAttributes(PrefService* pref) {
 }
 
 void MetricsLog::WritePluginList(
-    const std::vector<webkit::WebPluginInfo>& plugin_list,
-    bool write_as_xml) {
+    const std::vector<webkit::WebPluginInfo>& plugin_list) {
   DCHECK(!locked());
-
-  OPEN_ELEMENT_FOR_SCOPE("plugins");
 
 #if defined(ENABLE_PLUGINS)
   PluginPrefs* plugin_prefs = GetPluginPrefs();
@@ -701,42 +695,10 @@ void MetricsLog::WritePluginList(
   for (std::vector<webkit::WebPluginInfo>::const_iterator iter =
            plugin_list.begin();
        iter != plugin_list.end(); ++iter) {
-    if (write_as_xml) {
-      std::string base64_name_hash;
-      uint64 numeric_hash_ignored;
-      CreateHashes(UTF16ToUTF8(iter->name), &base64_name_hash,
-                   &numeric_hash_ignored);
-
-      std::string filename_bytes = iter->path.BaseName().AsUTF8Unsafe();
-      std::string base64_filename_hash;
-      CreateHashes(filename_bytes, &base64_filename_hash,
-                   &numeric_hash_ignored);
-
-      // Write the XML version.
-      OPEN_ELEMENT_FOR_SCOPE("plugin");
-
-      // Plugin name and filename are hashed for the privacy of those
-      // testing unreleased new extensions.
-      WriteAttribute("name", base64_name_hash);
-      WriteAttribute("filename", base64_filename_hash);
-      WriteAttribute("version", UTF16ToUTF8(iter->version));
-      if (plugin_prefs)
-        WriteIntAttribute("disabled", !plugin_prefs->IsPluginEnabled(*iter));
-    } else {
-      // Write the protobuf version.
-      SystemProfileProto::Plugin* plugin = system_profile->add_plugin();
-      SetPluginInfo(*iter, plugin_prefs, plugin);
-    }
+    SystemProfileProto::Plugin* plugin = system_profile->add_plugin();
+    SetPluginInfo(*iter, plugin_prefs, plugin);
   }
 #endif  // defined(ENABLE_PLUGINS)
-}
-
-void MetricsLog::WriteInstallElement() {
-  // Write the XML version.
-  // We'll write the protobuf version in RecordEnvironmentProto().
-  OPEN_ELEMENT_FOR_SCOPE("install");
-  WriteAttribute("installdate", GetMetricsEnabledDate(GetPrefService()));
-  WriteIntAttribute("buildid", 0);  // We're using appversion instead.
 }
 
 void MetricsLog::RecordEnvironment(
@@ -749,13 +711,6 @@ void MetricsLog::RecordEnvironment(
 
   OPEN_ELEMENT_FOR_SCOPE("profile");
   WriteCommonEventAttributes();
-
-  WriteInstallElement();
-
-  // Write the XML version.
-  // We'll write the protobuf version in RecordEnvironmentProto().
-  bool write_as_xml = true;
-  WritePluginList(plugin_list, write_as_xml);
 
   WriteStabilityElement(plugin_list, pref);
 
@@ -786,7 +741,7 @@ void MetricsLog::RecordEnvironment(
 
   {
     OPEN_ELEMENT_FOR_SCOPE("gpu");
-    const content::GPUInfo& gpu_info =
+    const gpu::GPUInfo& gpu_info =
         GpuDataManager::GetInstance()->GetGPUInfo();
 
     // Write the XML version.
@@ -886,7 +841,7 @@ void MetricsLog::RecordEnvironmentProto(
       base::android::BuildInfo::GetInstance()->android_build_fp());
 #endif
 
-  const content::GPUInfo& gpu_info =
+  const gpu::GPUInfo& gpu_info =
       GpuDataManager::GetInstance()->GetGPUInfo();
   SystemProfileProto::Hardware::Graphics* gpu = hardware->mutable_gpu();
   gpu->set_vendor_id(gpu_info.gpu.vendor_id);
@@ -913,8 +868,7 @@ void MetricsLog::RecordEnvironmentProto(
 
   WriteGoogleUpdateProto(google_update_metrics);
 
-  bool write_as_xml = false;
-  WritePluginList(plugin_list, write_as_xml);
+  WritePluginList(plugin_list);
 
   std::vector<ActiveGroupId> field_trial_ids;
   GetFieldTrialIds(&field_trial_ids);
@@ -1018,58 +972,13 @@ void MetricsLog::WriteProfileMetrics(const std::string& profileidhash,
   }
 }
 
-void MetricsLog::RecordOmniboxOpenedURL(const AutocompleteLog& log) {
+void MetricsLog::RecordOmniboxOpenedURL(const OmniboxLog& log) {
   DCHECK(!locked());
-
-  // Write the XML version.
-  OPEN_ELEMENT_FOR_SCOPE("uielement");
-  WriteAttribute("action", "autocomplete");
-  WriteAttribute("targetidhash", std::string());
-  // TODO(kochi): Properly track windows.
-  WriteIntAttribute("window", 0);
-  if (log.tab_id != -1) {
-    // If we know what tab the autocomplete URL was opened in, log it.
-    WriteIntAttribute("tab", static_cast<int>(log.tab_id));
-  }
-  WriteCommonEventAttributes();
 
   std::vector<string16> terms;
   const int num_terms =
       static_cast<int>(Tokenize(log.text, kWhitespaceUTF16, &terms));
-  {
-    OPEN_ELEMENT_FOR_SCOPE("autocomplete");
 
-    WriteIntAttribute("typedlength", static_cast<int>(log.text.length()));
-    WriteIntAttribute("numterms", num_terms);
-    WriteIntAttribute("selectedindex", static_cast<int>(log.selected_index));
-    WriteIntAttribute("completedlength",
-                      log.completed_length != string16::npos ?
-                      static_cast<int>(log.completed_length) : 0);
-    if (log.elapsed_time_since_user_first_modified_omnibox !=
-        base::TimeDelta::FromMilliseconds(-1)) {
-      // Only upload the typing duration if it is set/valid.
-      WriteInt64Attribute("typingduration",
-          log.elapsed_time_since_user_first_modified_omnibox.InMilliseconds());
-    }
-    const std::string input_type(
-        AutocompleteInput::TypeToString(log.input_type));
-    if (!input_type.empty())
-      WriteAttribute("inputtype", input_type);
-
-    for (AutocompleteResult::const_iterator i(log.result.begin());
-         i != log.result.end(); ++i) {
-      OPEN_ELEMENT_FOR_SCOPE("autocompleteitem");
-      if (i->provider)
-        WriteAttribute("provider", i->provider->GetName());
-      const std::string result_type(AutocompleteMatch::TypeToString(i->type));
-      if (!result_type.empty())
-        WriteAttribute("resulttype", result_type);
-      WriteIntAttribute("relevance", i->relevance);
-      WriteIntAttribute("isstarred", i->starred ? 1 : 0);
-    }
-  }
-
-  // Write the protobuf version.
   OmniboxEventProto* omnibox_event = uma_proto()->add_omnibox_event();
   omnibox_event->set_time(MetricsLogBase::GetCurrentTime());
   if (log.tab_id != -1) {

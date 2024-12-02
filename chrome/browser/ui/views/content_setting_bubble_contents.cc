@@ -11,7 +11,7 @@
 
 #include "base/bind.h"
 #include "base/stl_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_metadata.h"
@@ -55,7 +55,7 @@ const int kMinMultiLineContentsWidth = 250;
 // The minimum width of the media menu buttons.
 const int kMinMediaMenuButtonWidth = 100;
 
-}
+}  // namespace
 
 using content::PluginService;
 using content::WebContents;
@@ -384,7 +384,7 @@ void ContentSettingBubbleContents::Init() {
   if (!bubble_content_empty) {
     layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
     layout->StartRow(0, kSingleColumnSetId);
-    layout->AddView(new views::Separator, 1, 1,
+    layout->AddView(new views::Separator(views::Separator::HORIZONTAL), 1, 1,
                     GridLayout::FILL, GridLayout::FILL);
     layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
   }
@@ -464,6 +464,7 @@ void ContentSettingBubbleContents::OnMenuButtonClicked(
       i->first,
       gfx::Rect(screen_location, i->first->size()),
       views::MenuItemView::TOPLEFT,
+      ui::MENU_SOURCE_NONE,
       views::MenuRunner::HAS_MNEMONICS));
 }
 

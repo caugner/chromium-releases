@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/api/messaging/native_message_port.h"
 
+#include "base/bind.h"
 #include "chrome/browser/extensions/api/messaging/native_message_process_host.h"
 #include "content/public/browser/browser_thread.h"
 

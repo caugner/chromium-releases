@@ -50,9 +50,8 @@ class ConflictingModuleView : public views::BubbleDelegateView,
 
   // views::View implementation.
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
-  virtual void ViewHierarchyChanged(bool is_add,
-                                    views::View* parent,
-                                    views::View* child) OVERRIDE;
+  virtual void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(

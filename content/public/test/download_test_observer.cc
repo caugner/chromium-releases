@@ -18,35 +18,6 @@
 
 namespace content {
 
-namespace {
-
-// These functions take scoped_refptr's to DownloadManager because they
-// are posted to message queues, and hence may execute arbitrarily after
-// their actual posting.  Once posted, there is no connection between
-// these routines and the DownloadTestObserver class from which
-// they came, so the DownloadTestObserver's reference to the
-// DownloadManager cannot be counted on to keep the DownloadManager around.
-
-// Fake user click on "Accept".
-void AcceptDangerousDownload(scoped_refptr<DownloadManager> download_manager,
-                             int32 download_id) {
-  DownloadItem* download = download_manager->GetDownload(download_id);
-  if (download && (download->GetState() == DownloadItem::IN_PROGRESS))
-    download->DangerousDownloadValidated();
-}
-
-// Fake user click on "Deny".
-void DenyDangerousDownload(scoped_refptr<DownloadManager> download_manager,
-                           int32 download_id) {
-  DownloadItem* download = download_manager->GetDownload(download_id);
-  if (download && (download->GetState() == DownloadItem::IN_PROGRESS)) {
-    download->Cancel(true);
-    download->Delete(DownloadItem::DELETE_DUE_TO_USER_DISCARD);
-  }
-}
-
-}  // namespace
-
 DownloadUpdatedObserver::DownloadUpdatedObserver(
     DownloadItem* item, DownloadUpdatedObserver::EventFilter filter)
     : item_(item),
@@ -97,7 +68,8 @@ DownloadTestObserver::DownloadTestObserver(
       wait_count_(wait_count),
       finished_downloads_at_construction_(0),
       waiting_(false),
-      dangerous_download_action_(dangerous_download_action) {
+      dangerous_download_action_(dangerous_download_action),
+      weak_factory_(this) {
 }
 
 DownloadTestObserver::~DownloadTestObserver() {
@@ -105,7 +77,8 @@ DownloadTestObserver::~DownloadTestObserver() {
        it != downloads_observed_.end(); ++it)
     (*it)->RemoveObserver(this);
 
-  download_manager_->RemoveObserver(this);
+  if (download_manager_)
+    download_manager_->RemoveObserver(this);
 }
 
 void DownloadTestObserver::Init() {
@@ -120,6 +93,12 @@ void DownloadTestObserver::Init() {
   states_observed_.clear();
 }
 
+void DownloadTestObserver::ManagerGoingDown(DownloadManager* manager) {
+  CHECK_EQ(manager, download_manager_);
+  download_manager_ = NULL;
+  SignalIfFinished();
+}
+
 void DownloadTestObserver::WaitForFinished() {
   if (!IsFinished()) {
     waiting_ = true;
@@ -130,7 +109,7 @@ void DownloadTestObserver::WaitForFinished() {
 
 bool DownloadTestObserver::IsFinished() const {
   return (finished_downloads_.size() - finished_downloads_at_construction_ >=
-          wait_count_);
+          wait_count_) || (download_manager_ == NULL);
 }
 
 void DownloadTestObserver::OnDownloadCreated(
@@ -162,7 +141,7 @@ void DownloadTestObserver::OnDownloadUpdated(DownloadItem* download) {
       !ContainsKey(dangerous_downloads_seen_, download->GetId())) {
     dangerous_downloads_seen_.insert(download->GetId());
 
-    // Calling DangerousDownloadValidated() at this point will
+    // Calling ValidateDangerousDownload() at this point will
     // cause the download to be completed twice.  Do what the real UI
     // code does: make the call as a delayed task.
     switch (dangerous_download_action_) {
@@ -171,7 +150,8 @@ void DownloadTestObserver::OnDownloadUpdated(DownloadItem* download) {
         // real UI would.
         BrowserThread::PostTask(
             BrowserThread::UI, FROM_HERE,
-            base::Bind(&AcceptDangerousDownload, download_manager_,
+            base::Bind(&DownloadTestObserver::AcceptDangerousDownload,
+                       weak_factory_.GetWeakPtr(),
                        download->GetId()));
         break;
 
@@ -180,7 +160,8 @@ void DownloadTestObserver::OnDownloadUpdated(DownloadItem* download) {
         // real UI would.
         BrowserThread::PostTask(
             BrowserThread::UI, FROM_HERE,
-            base::Bind(&DenyDangerousDownload, download_manager_,
+            base::Bind(&DownloadTestObserver::DenyDangerousDownload,
+                       weak_factory_.GetWeakPtr(),
                        download->GetId()));
         break;
 
@@ -234,6 +215,26 @@ void DownloadTestObserver::SignalIfFinished() {
     base::MessageLoopForUI::current()->Quit();
 }
 
+void DownloadTestObserver::AcceptDangerousDownload(int32 download_id) {
+  // Download manager was shutdown before the UI thread could accept the
+  // download.
+  if (!download_manager_)
+    return;
+  DownloadItem* download = download_manager_->GetDownload(download_id);
+  if (download && !download->IsDone())
+    download->ValidateDangerousDownload();
+}
+
+void DownloadTestObserver::DenyDangerousDownload(int32 download_id) {
+  // Download manager was shutdown before the UI thread could deny the
+  // download.
+  if (!download_manager_)
+    return;
+  DownloadItem* download = download_manager_->GetDownload(download_id);
+  if (download && !download->IsDone())
+    download->Remove();
+}
+
 DownloadTestObserverTerminal::DownloadTestObserverTerminal(
     DownloadManager* download_manager,
     size_t wait_count,
@@ -254,7 +255,7 @@ DownloadTestObserverTerminal::~DownloadTestObserverTerminal() {
 
 bool DownloadTestObserverTerminal::IsDownloadInFinalState(
     DownloadItem* download) {
-  return (download->GetState() != DownloadItem::IN_PROGRESS);
+  return download->IsDone();
 }
 
 DownloadTestObserverInProgress::DownloadTestObserverInProgress(
@@ -278,6 +279,29 @@ bool DownloadTestObserverInProgress::IsDownloadInFinalState(
     DownloadItem* download) {
   return (download->GetState() == DownloadItem::IN_PROGRESS) &&
       !download->GetTargetFilePath().empty();
+}
+
+DownloadTestObserverInterrupted::DownloadTestObserverInterrupted(
+    DownloadManager* download_manager,
+    size_t wait_count,
+    DangerousDownloadAction dangerous_download_action)
+        : DownloadTestObserver(download_manager,
+                               wait_count,
+                               dangerous_download_action) {
+  // You can't rely on overriden virtual functions in a base class constructor;
+  // the virtual function table hasn't been set up yet.  So, we have to do any
+  // work that depends on those functions in the derived class constructor
+  // instead.  In this case, it's because of |IsDownloadInFinalState()|.
+  Init();
+}
+
+DownloadTestObserverInterrupted::~DownloadTestObserverInterrupted() {
+}
+
+
+bool DownloadTestObserverInterrupted::IsDownloadInFinalState(
+    DownloadItem* download) {
+  return download->GetState() == DownloadItem::INTERRUPTED;
 }
 
 DownloadTestFlushObserver::DownloadTestFlushObserver(

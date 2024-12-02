@@ -47,10 +47,9 @@ WebKit::WebPluginContainer* MockRendererPpapiHost::GetContainerForInstance(
   return NULL;
 }
 
-webkit::ppapi::PluginDelegate::PlatformGraphics2D*
-MockRendererPpapiHost::GetPlatformGraphics2D(PP_Resource resource) {
+base::ProcessId MockRendererPpapiHost::GetPluginPID() const {
   NOTIMPLEMENTED();
-  return NULL;
+  return base::kNullProcessId;
 }
 
 bool MockRendererPpapiHost::HasUserGesture(PP_Instance instance) const {
@@ -77,6 +76,15 @@ IPC::PlatformFileForTransit MockRendererPpapiHost::ShareHandleWithRemote(
 bool MockRendererPpapiHost::IsRunningInProcess() const {
   NOTIMPLEMENTED();
   return false;
+}
+
+void MockRendererPpapiHost::CreateBrowserResourceHost(
+    PP_Instance instance,
+    const IPC::Message& nested_msg,
+    const base::Callback<void(int)>& callback) const {
+  NOTIMPLEMENTED();
+  callback.Run(0);
+  return;
 }
 
 }  // namespace content

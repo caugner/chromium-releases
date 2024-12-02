@@ -17,8 +17,7 @@
 #include "ash/system/tray/system_tray_notifier.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/volume_control_delegate.h"
-#include "base/command_line.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chromeos/audio/cras_audio_handler.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
@@ -38,6 +37,8 @@
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/view.h"
 
+using chromeos::CrasAudioHandler;
+
 namespace ash {
 namespace internal {
 
@@ -56,21 +57,9 @@ const int kNoAudioDeviceIcon = -1;
 // four are used for ascending volume levels.
 const int kVolumeLevels = 4;
 
-bool UseNewAudioHandler() {
-  return !CommandLine::ForCurrentProcess()->
-      HasSwitch(ash::switches::kAshDisableNewAudioHandler);
-}
-
-// Returns true if we should show the audio device switching UI.
-bool ShowAudioDeviceMenu() {
-  return UseNewAudioHandler() &&
-      CommandLine::ForCurrentProcess()->
-          HasSwitch(ash::switches::kAshEnableAudioDeviceMenu);
-}
-
 bool IsAudioMuted() {
-  if(UseNewAudioHandler()) {
-    return chromeos::CrasAudioHandler::Get()->IsOutputMuted();
+  if(ash::switches::UseNewAudioHandler()) {
+    return CrasAudioHandler::Get()->IsOutputMuted();
   } else {
     return Shell::GetInstance()->system_tray_delegate()->
         GetVolumeControlDelegate()->IsAudioMuted();
@@ -78,8 +67,8 @@ bool IsAudioMuted() {
 }
 
 float GetVolumeLevel() {
-  if (UseNewAudioHandler()) {
-    return chromeos::CrasAudioHandler::Get()->GetOutputVolumePercent() / 100.0f;
+  if (ash::switches::UseNewAudioHandler()) {
+    return CrasAudioHandler::Get()->GetOutputVolumePercent() / 100.0f;
   } else {
     return Shell::GetInstance()->system_tray_delegate()->
         GetVolumeControlDelegate()->GetVolumeLevel();
@@ -233,7 +222,14 @@ class VolumeView : public ActionableView,
     Layout();
   }
 
+  // Sets volume level on slider_, |percent| is ranged from [0.00] to [1.00].
   void SetVolumeLevel(float percent) {
+    // Slider's value is in finer granularity than audio volume level(0.01),
+    // there will be a small discrepancy between slider's value and volume level
+    // on audio side. To avoid the jittering in slider UI, do not set change
+    // slider value if the change is less than 1%.
+    if (std::abs(percent-slider_->value()) < 0.01)
+      return;
     // The change in volume will be reflected via accessibility system events,
     // so we prevent the UI event from being sent here.
     slider_->set_enable_accessibility_events(false);
@@ -248,15 +244,14 @@ class VolumeView : public ActionableView,
  private:
   // Updates bar_, device_type_ icon, and more_ buttons.
   void UpdateDeviceTypeAndMore() {
-    if (!ShowAudioDeviceMenu() || !is_default_view_) {
+    if (!ash::switches::ShowAudioDeviceMenu() || !is_default_view_) {
       more_->SetVisible(false);
       bar_->SetVisible(false);
       device_type_->SetVisible(false);
       return;
     }
 
-    chromeos::CrasAudioHandler* audio_handler =
-        chromeos::CrasAudioHandler::Get();
+    CrasAudioHandler* audio_handler = CrasAudioHandler::Get();
     bool show_more = audio_handler->has_alternative_output() ||
                      audio_handler->has_alternative_input();
     more_->SetVisible(show_more);
@@ -274,6 +269,26 @@ class VolumeView : public ActionableView,
     } else {
       device_type_->SetVisible(false);
       bar_->SetVisible(show_more);
+    }
+  }
+
+  void HandleVolumeUp(int volume) {
+    CrasAudioHandler* audio_handler = CrasAudioHandler::Get();
+    audio_handler->SetOutputVolumePercent(volume);
+    if (audio_handler->IsOutputMuted() &&
+        !audio_handler->IsOutputVolumeBelowDefaultMuteLvel())
+      audio_handler->SetOutputMute(false);
+  }
+
+  void HandleVolumeDown(int volume) {
+    CrasAudioHandler* audio_handler =  CrasAudioHandler::Get();
+    audio_handler->SetOutputVolumePercent(volume);
+    if (audio_handler->IsOutputVolumeBelowDefaultMuteLvel() &&
+        !audio_handler->IsOutputMuted()) {
+      audio_handler->SetOutputMute(true);
+    } else if (!audio_handler->IsOutputVolumeBelowDefaultMuteLvel() &&
+               audio_handler->IsOutputMuted()) {
+      audio_handler->SetOutputMute(false);
     }
   }
 
@@ -321,8 +336,11 @@ class VolumeView : public ActionableView,
   virtual void ButtonPressed(views::Button* sender,
                              const ui::Event& event) OVERRIDE {
     CHECK(sender == icon_);
-    if (UseNewAudioHandler()) {
-      chromeos::CrasAudioHandler::Get()->SetOutputMute(!IsAudioMuted());
+    if (ash::switches::UseNewAudioHandler()) {
+      bool mute_on = !IsAudioMuted();
+      CrasAudioHandler::Get()->SetOutputMute(mute_on);
+      if (!mute_on)
+        CrasAudioHandler::Get()->AdjustOutputVolumeToAudibleLevel();
     } else {
       ash::Shell::GetInstance()->system_tray_delegate()->
           GetVolumeControlDelegate()->SetAudioMuted(!IsAudioMuted());
@@ -335,11 +353,18 @@ class VolumeView : public ActionableView,
                                   float old_value,
                                   views::SliderChangeReason reason) OVERRIDE {
     if (reason == views::VALUE_CHANGED_BY_USER) {
-      if (UseNewAudioHandler()) {
-        chromeos::CrasAudioHandler::Get()->
-            SetOutputVolumePercent(value * 100.0f);
-      }
-      else {
+      if (ash::switches::UseNewAudioHandler()) {
+        int volume = value * 100.0f;
+        int old_volume = CrasAudioHandler::Get()->GetOutputVolumePercent();
+        // Do not call change audio volume if the difference is less than
+        // 1%, which is beyond cras audio api's granularity for output volume.
+        if (std::abs(volume - old_volume) < 1)
+          return;
+        if (volume > old_volume)
+          HandleVolumeUp(volume);
+        else
+          HandleVolumeDown(volume);
+      } else {
         ash::Shell::GetInstance()->system_tray_delegate()->
             GetVolumeControlDelegate()->SetVolumeLevel(value);
       }
@@ -398,7 +423,7 @@ class AudioDetailedView : public TrayDetailsView,
     output_devices_.clear();
     input_devices_.clear();
     chromeos::AudioDeviceList devices;
-    chromeos::CrasAudioHandler::Get()->GetAudioDevices(&devices);
+    CrasAudioHandler::Get()->GetAudioDevices(&devices);
     for (size_t i = 0; i < devices.size(); ++i) {
       if (devices[i].is_input)
         input_devices_.push_back(devices[i]);
@@ -419,7 +444,7 @@ class AudioDetailedView : public TrayDetailsView,
         false);  /* no checkmark */
     for (size_t i = 0; i < output_devices_.size(); ++i) {
       HoverHighlightView* container = AddScrollListItem(
-          output_devices_[i].display_name,
+          UTF8ToUTF16(output_devices_[i].display_name),
           gfx::Font::NORMAL,
           output_devices_[i].active);  /* checkmark if active */
       device_map_[container] = output_devices_[i];
@@ -434,7 +459,7 @@ class AudioDetailedView : public TrayDetailsView,
         false);  /* no checkmark */
     for (size_t i = 0; i < input_devices_.size(); ++i) {
       HoverHighlightView* container = AddScrollListItem(
-          input_devices_[i].display_name,
+          UTF8ToUTF16(input_devices_[i].display_name),
           gfx::Font::NORMAL,
           input_devices_[i].active);  /* checkmark if active */
       device_map_[container] = input_devices_[i];
@@ -463,9 +488,9 @@ class AudioDetailedView : public TrayDetailsView,
         return;
       chromeos::AudioDevice& device = iter->second;
       if (device.is_input)
-        chromeos::CrasAudioHandler::Get()->SetActiveInputNode(device.id);
+        CrasAudioHandler::Get()->SetActiveInputNode(device.id);
       else
-        chromeos::CrasAudioHandler::Get()->SetActiveOutputNode(device.id);
+        CrasAudioHandler::Get()->SetActiveOutputNode(device.id);
     }
   }
 
@@ -486,16 +511,16 @@ TrayAudio::TrayAudio(SystemTray* system_tray)
       volume_view_(NULL),
       audio_detail_(NULL),
       pop_up_volume_view_(false) {
-  if (UseNewAudioHandler())
-    chromeos::CrasAudioHandler::Get()->AddAudioObserver(this);
+  if (ash::switches::UseNewAudioHandler())
+    CrasAudioHandler::Get()->AddAudioObserver(this);
   else
     Shell::GetInstance()->system_tray_notifier()->AddAudioObserver(this);
 }
 
 TrayAudio::~TrayAudio() {
-  if (UseNewAudioHandler()) {
-    if (chromeos::CrasAudioHandler::IsInitialized())
-      chromeos::CrasAudioHandler::Get()->RemoveAudioObserver(this);
+  if (ash::switches::UseNewAudioHandler()) {
+    if (CrasAudioHandler::IsInitialized())
+      CrasAudioHandler::Get()->RemoveAudioObserver(this);
   } else {
     Shell::GetInstance()->system_tray_notifier()->RemoveAudioObserver(this);
   }
@@ -511,7 +536,7 @@ views::View* TrayAudio::CreateDefaultView(user::LoginStatus status) {
 }
 
 views::View* TrayAudio::CreateDetailedView(user::LoginStatus status) {
-  if (!ShowAudioDeviceMenu() || pop_up_volume_view_) {
+  if (!ash::switches::ShowAudioDeviceMenu() || pop_up_volume_view_) {
     volume_view_ = new tray::VolumeView(this, false);
     return volume_view_;
   } else {
@@ -542,7 +567,7 @@ bool TrayAudio::ShouldShowLauncher() const {
 }
 
 void TrayAudio::OnVolumeChanged(float percent) {
-  DCHECK(!UseNewAudioHandler());
+  DCHECK(!ash::switches::UseNewAudioHandler());
   if (tray_view())
     tray_view()->SetVisible(GetInitialVisibility());
 
@@ -557,7 +582,7 @@ void TrayAudio::OnVolumeChanged(float percent) {
 }
 
 void TrayAudio::OnMuteToggled() {
-  DCHECK(!UseNewAudioHandler());
+  DCHECK(!ash::switches::UseNewAudioHandler());
   if (tray_view())
       tray_view()->SetVisible(GetInitialVisibility());
 
@@ -569,7 +594,7 @@ void TrayAudio::OnMuteToggled() {
 
 
 void TrayAudio::OnOutputVolumeChanged() {
-  DCHECK(UseNewAudioHandler());
+  DCHECK(ash::switches::UseNewAudioHandler());
   float percent = GetVolumeLevel();
   if (tray_view())
     tray_view()->SetVisible(GetInitialVisibility());
@@ -584,7 +609,7 @@ void TrayAudio::OnOutputVolumeChanged() {
 }
 
 void TrayAudio::OnOutputMuteChanged() {
-  DCHECK(UseNewAudioHandler());
+  DCHECK(ash::switches::UseNewAudioHandler());
   if (tray_view())
       tray_view()->SetVisible(GetInitialVisibility());
 
@@ -594,6 +619,12 @@ void TrayAudio::OnOutputMuteChanged() {
     pop_up_volume_view_ = true;
     PopupDetailedView(kTrayPopupAutoCloseDelayInSeconds, false);
   }
+}
+
+void TrayAudio::OnInputGainChanged() {
+}
+
+void TrayAudio::OnInputMuteChanged() {
 }
 
 void TrayAudio::OnAudioNodesChanged() {

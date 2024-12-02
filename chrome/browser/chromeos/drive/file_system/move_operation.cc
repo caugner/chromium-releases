@@ -5,7 +5,6 @@
 #include "chrome/browser/chromeos/drive/file_system/move_operation.h"
 
 #include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/file_cache.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_observer.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/drive/job_scheduler.h"
@@ -16,12 +15,12 @@ using content::BrowserThread;
 namespace drive {
 namespace file_system {
 
-MoveOperation::MoveOperation(JobScheduler* job_scheduler,
-                             internal::ResourceMetadata* metadata,
-                             OperationObserver* observer)
-  : job_scheduler_(job_scheduler),
+MoveOperation::MoveOperation(OperationObserver* observer,
+                             JobScheduler* scheduler,
+                             internal::ResourceMetadata* metadata)
+  : observer_(observer),
+    scheduler_(scheduler),
     metadata_(metadata),
-    observer_(observer),
     weak_ptr_factory_(this) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
@@ -36,16 +35,16 @@ void MoveOperation::Move(const base::FilePath& src_file_path,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
-  metadata_->GetEntryInfoPairByPaths(
+  metadata_->GetResourceEntryPairByPathsOnUIThread(
       src_file_path,
       dest_file_path.DirName(),
-      base::Bind(&MoveOperation::MoveAfterGetEntryInfoPair,
+      base::Bind(&MoveOperation::MoveAfterGetResourceEntryPair,
                  weak_ptr_factory_.GetWeakPtr(),
                  dest_file_path,
                  callback));
 }
 
-void MoveOperation::MoveAfterGetEntryInfoPair(
+void MoveOperation::MoveAfterGetResourceEntryPair(
     const base::FilePath& dest_file_path,
     const FileOperationCallback& callback,
     scoped_ptr<EntryInfoPairResult> src_dest_info) {
@@ -153,13 +152,13 @@ void MoveOperation::Rename(const std::string& src_id,
       new_name_has_hosted_extension ? new_name.RemoveExtension() : new_name);
 
   // Rename on the server.
-  job_scheduler_->RenameResource(src_id,
-                                 new_name_arg.AsUTF8Unsafe(),
-                                 base::Bind(&MoveOperation::RenameLocally,
-                                            weak_ptr_factory_.GetWeakPtr(),
-                                            src_path,
-                                            new_name_arg,
-                                            callback));
+  scheduler_->RenameResource(src_id,
+                             new_name_arg.AsUTF8Unsafe(),
+                             base::Bind(&MoveOperation::RenameLocally,
+                                        weak_ptr_factory_.GetWeakPtr(),
+                                        src_path,
+                                        new_name_arg,
+                                        callback));
 }
 
 void MoveOperation::RenameLocally(const base::FilePath& src_path,
@@ -173,7 +172,7 @@ void MoveOperation::RenameLocally(const base::FilePath& src_path,
     callback.Run(error, base::FilePath());
     return;
   }
-  metadata_->RenameEntry(src_path, new_name.AsUTF8Unsafe(), callback);
+  metadata_->RenameEntryOnUIThread(src_path, new_name.AsUTF8Unsafe(), callback);
 }
 
 
@@ -184,7 +183,7 @@ void MoveOperation::AddToDirectory(const std::string& src_id,
                                    const FileMoveCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  job_scheduler_->AddResourceToDirectory(
+  scheduler_->AddResourceToDirectory(
       dest_dir_id, src_id,
       base::Bind(&MoveOperation::AddToDirectoryLocally,
                  weak_ptr_factory_.GetWeakPtr(),
@@ -204,7 +203,7 @@ void MoveOperation::AddToDirectoryLocally(const base::FilePath& src_path,
     callback.Run(error, base::FilePath());
     return;
   }
-  metadata_->MoveEntryToDirectory(src_path, dest_dir_path, callback);
+  metadata_->MoveEntryToDirectoryOnUIThread(src_path, dest_dir_path, callback);
 }
 
 void MoveOperation::RemoveFromDirectory(
@@ -213,7 +212,14 @@ void MoveOperation::RemoveFromDirectory(
     const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  job_scheduler_->RemoveResourceFromDirectory(
+  // Moving files out from "drive/other" special folder for storing orphan files
+  // has no meaning in the server. Just skip the step.
+  if (util::IsSpecialResourceId(directory_resource_id)) {
+    callback.Run(FILE_ERROR_OK);
+    return;
+  }
+
+  scheduler_->RemoveResourceFromDirectory(
       directory_resource_id,
       resource_id,
       base::Bind(&MoveOperation::RemoveFromDirectoryCompleted,

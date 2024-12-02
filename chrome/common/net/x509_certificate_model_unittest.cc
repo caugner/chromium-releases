@@ -4,7 +4,6 @@
 
 #include "chrome/common/net/x509_certificate_model.h"
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "net/base/test_data_directory.h"
@@ -15,7 +14,7 @@
 TEST(X509CertificateModelTest, GetTypeCA) {
   scoped_refptr<net::X509Certificate> cert(
       net::ImportCertFromFile(net::GetTestCertsDirectory(),
-                              "root_ca_cert.crt"));
+                              "root_ca_cert.pem"));
   ASSERT_TRUE(cert.get());
 
 #if defined(USE_OPENSSL)
@@ -29,7 +28,7 @@ TEST(X509CertificateModelTest, GetTypeCA) {
   // Test that explicitly distrusted CA certs are still returned as CA_CERT
   // type. See http://crbug.com/96654.
   EXPECT_TRUE(net::NSSCertDatabase::GetInstance()->SetCertTrust(
-      cert, net::CA_CERT, net::NSSCertDatabase::DISTRUSTED_SSL));
+      cert.get(), net::CA_CERT, net::NSSCertDatabase::DISTRUSTED_SSL));
 
   EXPECT_EQ(net::CA_CERT,
             x509_certificate_model::GetType(cert->os_cert_handle()));
@@ -57,14 +56,14 @@ TEST(X509CertificateModelTest, GetTypeServer) {
   net::NSSCertDatabase* cert_db = net::NSSCertDatabase::GetInstance();
   // Test GetCertType with server certs and explicit trust.
   EXPECT_TRUE(cert_db->SetCertTrust(
-      cert, net::SERVER_CERT, net::NSSCertDatabase::TRUSTED_SSL));
+      cert.get(), net::SERVER_CERT, net::NSSCertDatabase::TRUSTED_SSL));
 
   EXPECT_EQ(net::SERVER_CERT,
             x509_certificate_model::GetType(cert->os_cert_handle()));
 
   // Test GetCertType with server certs and explicit distrust.
   EXPECT_TRUE(cert_db->SetCertTrust(
-      cert, net::SERVER_CERT, net::NSSCertDatabase::DISTRUSTED_SSL));
+      cert.get(), net::SERVER_CERT, net::NSSCertDatabase::DISTRUSTED_SSL));
 
   EXPECT_EQ(net::SERVER_CERT,
             x509_certificate_model::GetType(cert->os_cert_handle()));

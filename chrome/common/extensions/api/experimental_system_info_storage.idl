@@ -2,22 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Use the <code>chrome.experimental.systemInfo.storage</code> API to query
+// storage device information and be notified when it changes.
 namespace experimental.systemInfo.storage {
 
   enum StorageUnitType {
-    // Unknow storage type.
-    unknown,
-    // Hard disk.
-    harddisk,
-    // Removable storage, e.g.USB device.
-    removable
+    // The storage has fixed media, e.g. hard disk or SSD.
+    fixed,
+    // The storage is removable, e.g. USB flash drive.
+    removable,
+    // The storage type is unknown.
+    unknown
   };
 
   dictionary StorageUnitInfo {
     // The unique id of the storage unit.
     DOMString id;
-    // The type of storage device. The value is one of the constants defined
-    // for this type.
+    // The media type of the storage unit.
     StorageUnitType type;
     // The total amount of the storage space, in bytes.
     double capacity;
@@ -32,12 +33,35 @@ namespace experimental.systemInfo.storage {
     double availableCapacity;
   };
 
+  // A dictionary that describes the add particular storage device watch
+  // request results.
+  dictionary AddWatchResult {
+    DOMString id;
+    boolean success;
+  };
+
   callback StorageInfoCallback = void (StorageUnitInfo[] info);
+
+  callback AddWatchCallback = void (AddWatchResult info);
+
+  callback GetAllWatchCallback = void (DOMString[] storageIds);
 
   interface Functions {
     // Get the storage information from the system. The argument passed to the
     // callback is an array of StorageUnitInfo objects.
     static void get(StorageInfoCallback callback);
+
+    // Monitor a particular storage device available change capacity.
+    static void addWatch(DOMString id, AddWatchCallback callback);
+
+    // Remove the monitor of a particular device.
+    static void removeWatch(DOMString id);
+
+    // Get all the watched storage devices.
+    static void getAllWatch(GetAllWatchCallback callback);
+
+    // Remove all the storage devices monitors.
+    static void removeAllWatch();
   };
 
   interface Events {
@@ -51,6 +75,6 @@ namespace experimental.systemInfo.storage {
     // Fired when a removable storage is detached from the system.
     static void onDetached(DOMString id);
   };
- 
+
 };
 

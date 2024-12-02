@@ -5,7 +5,7 @@
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
 
 #include "base/command_line.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/api/tabs/tabs_api.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/extensions/shell_window_registry.h"
@@ -21,6 +21,10 @@ using content::WebContents;
 namespace utils = extension_function_test_utils;
 
 namespace extensions {
+
+PlatformAppBrowserTest::PlatformAppBrowserTest() {
+  ShellWindow::DisableExternalOpenForTesting();
+}
 
 void PlatformAppBrowserTest::SetUpCommandLine(CommandLine* command_line) {
   // Skips ExtensionApiTest::SetUpCommandLine.
@@ -82,7 +86,7 @@ WebContents* PlatformAppBrowserTest::GetFirstShellWindowWebContents() {
 ShellWindow* PlatformAppBrowserTest::GetFirstShellWindow() {
   ShellWindowRegistry* app_registry =
       ShellWindowRegistry::Get(browser()->profile());
-  const ShellWindowRegistry::ShellWindowSet& shell_windows =
+  const ShellWindowRegistry::ShellWindowList& shell_windows =
       app_registry->shell_windows();
 
   ShellWindowRegistry::const_iterator iter = shell_windows.begin();
@@ -157,6 +161,20 @@ void PlatformAppBrowserTest::CloseShellWindow(ShellWindow* window) {
       content::NotificationService::AllSources());
   window->GetBaseWindow()->Close();
   destroyed_observer.Wait();
+}
+
+void PlatformAppBrowserTest::CallAdjustBoundsToBeVisibleOnScreenForShellWindow(
+    ShellWindow* window,
+    const gfx::Rect& cached_bounds,
+    const gfx::Rect& cached_screen_bounds,
+    const gfx::Rect& current_screen_bounds,
+    const gfx::Size& minimum_size,
+    gfx::Rect* bounds) {
+  window->AdjustBoundsToBeVisibleOnScreen(cached_bounds,
+                                          cached_screen_bounds,
+                                          current_screen_bounds,
+                                          minimum_size,
+                                          bounds);
 }
 
 void ExperimentalPlatformAppBrowserTest::SetUpCommandLine(

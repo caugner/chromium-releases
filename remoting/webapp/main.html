@@ -15,6 +15,7 @@ found in the LICENSE file.
     <link rel="stylesheet" href="main.css">
     <link rel="stylesheet" href="menu_button.css">
     <link rel="stylesheet" href="toolbar.css">
+    <script src="butter_bar.js"></script>
     <script src="client_plugin.js"></script>
     <script src="client_plugin_async.js"></script>
     <script src="client_screen.js"></script>
@@ -27,9 +28,9 @@ found in the LICENSE file.
     <script src="format_iq.js"></script>
     <script src="host.js"></script>
     <script src="host_controller.js"></script>
+    <script src="host_dispatcher.js"></script>
     <script src="host_list.js"></script>
     <script src="host_native_messaging.js"></script>
-    <script src="host_plugin_wrapper.js"></script>
     <script src="host_screen.js"></script>
     <script src="host_session.js"></script>
     <script src="host_settings.js"></script>
@@ -41,11 +42,9 @@ found in the LICENSE file.
     <script src="oauth2.js"></script>
     <script src="plugin_settings.js"></script>
     <script src="remoting.js"></script>
-    <script src="session_connector.js"></script>
     <script src="server_log_entry.js"></script>
+    <script src="session_connector.js"></script>
     <script src="stats_accumulator.js"></script>
-    <script src="storage.js"></script>
-    <script src="survey.js"></script>
     <script src="third_party_host_permissions.js"></script>
     <script src="third_party_token_fetcher.js"></script>
     <script src="toolbar.js"></script>
@@ -65,6 +64,7 @@ found in the LICENSE file.
     </section> <!-- loading-mode -->
 
     <div id="daemon-plugin-container"></div>
+    <div id="host-plugin-container"></div>
 
     <iframe id="wcs-sandbox" src="wcs_sandbox.html" hidden></iframe>
 
@@ -88,17 +88,15 @@ found in the LICENSE file.
       </div>
     </header>
 
-    <div id="survey-opt-in" class="butter-bar" hidden>
-      <p>
-        <span i18n-content="SURVEY_INVITATION"></span>
-        <a id="survey-accept"
-           href="http://goo.gl/njH2q"
-           target="_blank"
-           i18n-content="SIGN_ME_UP"></a>
-        <a id="survey-decline" href="#">
-          <img src="icon_cross.webp" class="close-icon"></img>
-        </a>
-      </p>
+    <div data-ui-mode="home">
+      <div id="butter-bar" hidden>
+        <p>
+          <span id="butter-bar-message"></span>
+          <a id="butter-bar-dismiss" href="#">
+            <img src="icon_cross.webp" class="close-icon">
+          </a>
+        </p>
+      </div>
     </div>
 
     <div data-ui-mode="home" hidden>
@@ -180,7 +178,6 @@ found in the LICENSE file.
               <div class="box-spacer host-list-label"
                    id="start-daemon-message"
                    i18n-content="HOME_DAEMON_START_MESSAGE"></div>
-              <div id="this-host-spacer" class="box-spacer"></div>
               <button type="button"
                       id="start-daemon"
                       i18n-content="HOME_DAEMON_START_BUTTON">
@@ -239,7 +236,7 @@ found in the LICENSE file.
           <p id="auth-error-message"
              i18n-content="DESCRIPTION_AUTHORIZE"
              class="message"></p>
-          <div class="centered">
+          <div class="button-row">
             <button id="auth-button"
                     type="button"
                     autofocus="autofocus"
@@ -318,7 +315,7 @@ found in the LICENSE file.
               </td>
             <tr>
           </table>
-          <div id="daemon-pin-error-div" class="message centered" hidden>
+          <div id="daemon-pin-error-div" class="message" hidden>
             <span id="daemon-pin-error-message" class="error-state">
             </span>
           </div>
@@ -328,8 +325,7 @@ found in the LICENSE file.
               <span i18n-content="HOST_SETUP_CRASH_REPORTING_MESSAGE"></span>
             </label>
           </div>
-          <div class="box">
-            <div class="box-spacer"></div>
+          <div class="button-row">
             <button id="daemon-pin-ok" type="submit" i18n-content="OK">
             </button>
             <button id="daemon-pin-cancel" type="button" i18n-content="CANCEL">
@@ -389,7 +385,7 @@ found in the LICENSE file.
            class="kd-modaldialog"
            data-ui-mode="home.host">
 
-        <div data-ui-mode="home.host.waiting-for-code" class="message centered"
+        <div data-ui-mode="home.host.waiting-for-code" class="message"
              i18n-content="MESSAGE_GENERATING">
         </div> <!-- host.waiting-for-code -->
 
@@ -406,9 +402,9 @@ found in the LICENSE file.
         </div> <!-- host.waiting-for-connection -->
 
         <div data-ui-mode="home.host.shared">
-          <div id="host-shared-message" class="message centered"
+          <div id="host-shared-message" class="message"
                i18n-content="MESSAGE_SHARED"></div>
-          <div class="centered">
+          <div class="button-row">
             <button id="stop-sharing-button"
                     type="button"
                     i18n-content="STOP_SHARING_BUTTON">
@@ -416,16 +412,16 @@ found in the LICENSE file.
           </div>
         </div> <!-- host.shared -->
 
-        <div data-ui-mode="home.host.share-failed" class="message centered">
+        <div data-ui-mode="home.host.share-failed" class="message">
           <span id="host-plugin-error" class="error-state"></span>
         </div> <!-- host.share-failed -->
 
-        <div data-ui-mode="home.host.share-finished" class="message centered"
+        <div data-ui-mode="home.host.share-finished" class="message"
              i18n-content="MESSAGE_SESSION_FINISHED">
         </div> <!-- host.share-finished -->
 
-        <div class="centered"
-             data-ui-mode="home.host.share-failed home.host.share-finished">
+        <div data-ui-mode="home.host.share-failed home.host.share-finished"
+             class="button-row">
           <button id="host-finished-button"
                   type="button"
                   autofocus="autofocus"
@@ -445,8 +441,6 @@ found in the LICENSE file.
           <div class="box-spacer"></div>
           <button id="cancel-share-button" i18n-content="CANCEL"></button>
         </div>
-
-        <div id="host-plugin-container"></div>
 
       </div> <!-- host dialog -->
 
@@ -470,8 +464,7 @@ found in the LICENSE file.
                        autocomplete="off"/>
                 <div class="box-spacer"></div>
               </div>
-              <div class="box space-before">
-                <div class="box-spacer"></div>
+              <div class="button-row">
                 <button id="connect-button"
                         type="submit"
                         i18n-content="CONNECT_BUTTON">
@@ -509,8 +502,7 @@ found in the LICENSE file.
                target="_blank"
                i18n-content="LEARN_HOW"></a>
           </div>
-          <div class="box">
-            <div class="box-spacer"></div>
+          <div class="button-row">
             <button id="host-needs-update-connect-button"
                     type="button"
                     i18n-content="CONNECT_ANYWAY"
@@ -523,35 +515,39 @@ found in the LICENSE file.
           </div>
         </div> <!-- home.client.host-needs-upgrade -->
 
-        <div data-ui-mode="home.client.pin-prompt" class="centered">
+        <div data-ui-mode="home.client.pin-prompt">
           <div id="pin-message"
                i18n-content="PIN_MESSAGE"
                class="message"></div>
-          <div>
-            <form id="pin-form" action="">
-              <label for="pin-entry"
-                     i18n-content="PIN"
-                     class="editbox-label"></label>
-              <input id="pin-entry"
-                     type="password"
-                     autofocus="autofocus"
-                     autocomplete="off"/>
-              <button id="connect-button"
-                      type="submit"
-                      i18n-content="CONNECT_BUTTON">
-              </button>
-              <button id="cancel-pin-entry-button"
-                      type="button"
-                      i18n-content="CANCEL">
-              </button>
-            </form>
-            <div id="startup-mode-box-me2me" class="information-box" hidden>
-              <span i18n-content="WARNING_NOT_WINDOWED"></span>
-              <a href="http://support.google.com/chrome/bin/answer.py?hl=en&answer=1649523"
-                 target="_blank"
-                 i18n-content="LEARN_HOW"></a>
-            </div> <!-- startup-mode-box-it2me -->
-          </div>
+          <form id="pin-form" action="" class="centered">
+            <label for="pin-entry"
+                   i18n-content="PIN"
+                   class="editbox-label"></label>
+            <input id="pin-entry"
+                   type="password"
+                   autofocus="autofocus"
+                   autocomplete="off"/>
+            <button id="connect-button"
+                    type="submit"
+                    i18n-content="CONNECT_BUTTON">
+            </button>
+            <button id="cancel-pin-entry-button"
+                    type="button"
+                    i18n-content="CANCEL">
+            </button>
+          </form>
+          <label id="remember-pin" class="checkbox-label">
+            <input id="remember-pin-checkbox" type="checkbox">
+            <span i18n-content="REMEMBER_PIN"></span>
+          </label>
+          <div id="startup-mode-box-me2me"
+               class="information-box centered"
+               hidden>
+            <span i18n-content="WARNING_NOT_WINDOWED"></span>
+            <a href="http://support.google.com/chrome/bin/answer.py?hl=en&answer=1649523"
+               target="_blank"
+               i18n-content="LEARN_HOW"></a>
+          </div> <!-- startup-mode-box-it2me -->
         </div> <!-- client.pin-prompt -->
 
         <div data-ui-mode="home.client.third-party-auth" class="centered">
@@ -560,7 +556,7 @@ found in the LICENSE file.
                class="message"></div>
           <div id="third-party-auth-url"
                class="message"></div>
-          <div>
+          <div class="button-row">
             <button id="third-party-auth-button"
                     type="button"
                     autofocus="autofocus"
@@ -570,16 +566,16 @@ found in the LICENSE file.
         </div> <!-- third-party-auth-dialog -->
 
         <div data-ui-mode="home.client.connect-failed"
-             class="message centered">
+             class="message">
           <span id="connect-error-message" class="error-state"></span>
         </div> <!-- client.connect-failed -->
 
         <div data-ui-mode="home.client.session-finished"
-             class="message centered" i18n-content="MESSAGE_SESSION_FINISHED">
+             class="message" i18n-content="MESSAGE_SESSION_FINISHED">
         </div> <!-- client.session-finished -->
 
         <div data-ui-mode="home.client.connect-failed.it2me home.client.session-finished.it2me"
-             class="centered">
+             class="button-row">
           <button id="client-finished-it2me-button"
                   type="button"
                   i18n-content="OK"
@@ -588,7 +584,7 @@ found in the LICENSE file.
         </div> <!-- connect-failed.it2me session-finished.it2me -->
 
         <div data-ui-mode="home.client.connect-failed.me2me home.client.session-finished.me2me"
-             class="centered">
+             class="button-row">
           <button id="client-reconnect-button"
                   type="button"
                   i18n-content="RETRY"
@@ -651,7 +647,7 @@ found in the LICENSE file.
            i18n-content="CONFIRM_HOST_DELETE"
            class="message">
         </p>
-        <div class="centered">
+        <div class="button-row">
           <button id="confirm-host-delete"
                   i18n-content="DISABLE_HOST"
                   type="button">

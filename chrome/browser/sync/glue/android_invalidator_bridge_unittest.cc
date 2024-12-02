@@ -13,7 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
 #include "base/threading/thread.h"
@@ -149,7 +149,7 @@ class AndroidInvalidatorBridgeTest : public testing::Test {
     run_loop.Run();
   }
 
-  MessageLoop ui_loop_;
+  base::MessageLoop ui_loop_;
   content::TestBrowserThread ui_thread_;
   base::Thread sync_thread_;
   NiceMock<ProfileMock> mock_profile_;

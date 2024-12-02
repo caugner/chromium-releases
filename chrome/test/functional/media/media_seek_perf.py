@@ -28,15 +28,14 @@ _TEST_HTML_PATH = os.path.join('media', 'html', 'media_seek.html')
 # The media files used for testing.
 # Path under CNS root folder (pyauto_private/media).
 _TEST_VIDEOS = [posixpath.join('dartmoor', name) for name in
-                ['dartmoor2.ogg', 'dartmoor2.m4a', 'dartmoor2.mp3',
-                 'dartmoor2.wav']]
-_TEST_VIDEOS.extend(posixpath.join('crowd', name) for name in
+                ['dartmoor2.mp3', 'dartmoor2.wav']]
+
+_TEST_VIDEOS.extend([posixpath.join('crowd', name) for name in
                     ['crowd1080.webm', 'crowd1080.ogv', 'crowd1080.mp4',
-                     'crowd360.webm', 'crowd360.ogv', 'crowd360.mp4'])
+                     'crowd360.webm', 'crowd360.ogv', 'crowd360.mp4']])
 
 # Constraints to run tests on.
 _TESTS_TO_RUN = [
-    cns_test_base.Cable,
     cns_test_base.Wifi,
     cns_test_base.NoConstraints]
 
@@ -87,8 +86,8 @@ class SeekWorkerThread(worker_thread.WorkerThread):
           results = [float(value) for value in values.split(',')]
         else:
           results = []
-        pyauto_utils.PrintPerfResult('seek', '%s_%s_%s' %
-                                     (state, seek_case, graph_name),
+        pyauto_utils.PrintPerfResult('seek_%s_%s' % (state.lower(),
+                                     seek_case.lower()), graph_name,
                                      results, 'ms')
 
     if error_msg:

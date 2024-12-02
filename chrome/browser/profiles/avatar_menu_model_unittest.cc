@@ -4,15 +4,19 @@
 
 #include "chrome/browser/profiles/avatar_menu_model.h"
 
+#include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
-#include "base/string16.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string16.h"
+#include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/avatar_menu_model_observer.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "grit/generated_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace {
 
@@ -58,8 +62,10 @@ TEST_F(AvatarMenuModelTest, InitialCreation) {
   string16 name1(ASCIIToUTF16("Test 1"));
   string16 name2(ASCIIToUTF16("Test 2"));
 
-  manager()->CreateTestingProfile("p1", name1, 0);
-  manager()->CreateTestingProfile("p2", name2, 0);
+  manager()->CreateTestingProfile("p1", scoped_ptr<PrefServiceSyncable>(),
+                                  name1, 0);
+  manager()->CreateTestingProfile("p2", scoped_ptr<PrefServiceSyncable>(),
+                                  name2, 0);
 
   MockObserver observer;
   EXPECT_EQ(0, observer.change_count());
@@ -82,8 +88,10 @@ TEST_F(AvatarMenuModelTest, ActiveItem) {
   string16 name1(ASCIIToUTF16("Test 1"));
   string16 name2(ASCIIToUTF16("Test 2"));
 
-  manager()->CreateTestingProfile("p1", name1, 0);
-  manager()->CreateTestingProfile("p2", name2, 0);
+  manager()->CreateTestingProfile("p1", scoped_ptr<PrefServiceSyncable>(),
+                                  name1, 0);
+  manager()->CreateTestingProfile("p2", scoped_ptr<PrefServiceSyncable>(),
+                                  name2, 0);
 
   MockObserver observer;
   AvatarMenuModel model(manager()->profile_info_cache(), &observer, browser());
@@ -98,8 +106,10 @@ TEST_F(AvatarMenuModelTest, ModifyingNameResortsCorrectly) {
   string16 name2(ASCIIToUTF16("Beta"));
   string16 newname1(ASCIIToUTF16("Gamma"));
 
-  manager()->CreateTestingProfile("p1", name1, 0);
-  manager()->CreateTestingProfile("p2", name2, 0);
+  manager()->CreateTestingProfile("p1", scoped_ptr<PrefServiceSyncable>(),
+                                  name1, 0);
+  manager()->CreateTestingProfile("p2", scoped_ptr<PrefServiceSyncable>(),
+                                  name2, 0);
 
   MockObserver observer;
   AvatarMenuModel model(manager()->profile_info_cache(), &observer, browser());
@@ -132,8 +142,10 @@ TEST_F(AvatarMenuModelTest, ChangeOnNotify) {
   string16 name1(ASCIIToUTF16("Test 1"));
   string16 name2(ASCIIToUTF16("Test 2"));
 
-  manager()->CreateTestingProfile("p1", name1, 0);
-  manager()->CreateTestingProfile("p2", name2, 0);
+  manager()->CreateTestingProfile("p1", scoped_ptr<PrefServiceSyncable>(),
+                                  name1, 0);
+  manager()->CreateTestingProfile("p2", scoped_ptr<PrefServiceSyncable>(),
+                                  name2, 0);
 
   MockObserver observer;
   EXPECT_EQ(0, observer.change_count());
@@ -143,7 +155,8 @@ TEST_F(AvatarMenuModelTest, ChangeOnNotify) {
   EXPECT_EQ(2U, model.GetNumberOfItems());
 
   string16 name3(ASCIIToUTF16("Test 3"));
-  manager()->CreateTestingProfile("p3", name3, 0);
+  manager()->CreateTestingProfile("p3", scoped_ptr<PrefServiceSyncable>(),
+                                  name3, 0);
 
   // Four changes happened via the call to CreateTestingProfile: adding the
   // profile to the cache, setting the user name, rebuilding the list of
@@ -167,7 +180,7 @@ TEST_F(AvatarMenuModelTest, ChangeOnNotify) {
 }
 
 TEST_F(AvatarMenuModelTest, ShowAvatarMenuInTrial) {
-  // If multiple profiles is not enabled, the trial will not be enabled, so it
+  // If multiprofile mode is not enabled, the trial will not be enabled, so it
   // isn't tested.
   if (!ProfileManager::IsMultipleProfilesEnabled())
     return;
@@ -184,37 +197,69 @@ TEST_F(AvatarMenuModelTest, ShowAvatarMenuInTrial) {
 
 TEST_F(AvatarMenuModelTest, DontShowAvatarMenu) {
   string16 name1(ASCIIToUTF16("Test 1"));
-  manager()->CreateTestingProfile("p1", name1, 0);
+  manager()->CreateTestingProfile("p1", scoped_ptr<PrefServiceSyncable>(),
+                                  name1, 0);
 
   EXPECT_FALSE(AvatarMenuModel::ShouldShowAvatarMenu());
 
-  // If multiple profiles is enabled, there are no other cases when we wouldn't
+  // If multiprofile mode is enabled, there are no other cases when we wouldn't
   // show the menu.
   if (ProfileManager::IsMultipleProfilesEnabled())
     return;
 
   string16 name2(ASCIIToUTF16("Test 2"));
-  manager()->CreateTestingProfile("p2", name2, 0);
+  manager()->CreateTestingProfile("p2", scoped_ptr<PrefServiceSyncable>(),
+                                  name2, 0);
 
   EXPECT_FALSE(AvatarMenuModel::ShouldShowAvatarMenu());
 }
 
 TEST_F(AvatarMenuModelTest, ShowAvatarMenu) {
-  // If multiple profiles is enabled then the menu is never show.
+  // If multiprofile mode is not enabled then the menu is never shown.
   if (!ProfileManager::IsMultipleProfilesEnabled())
     return;
 
   string16 name1(ASCIIToUTF16("Test 1"));
   string16 name2(ASCIIToUTF16("Test 2"));
 
-  manager()->CreateTestingProfile("p1", name1, 0);
-  manager()->CreateTestingProfile("p2", name2, 0);
+  manager()->CreateTestingProfile("p1", scoped_ptr<PrefServiceSyncable>(),
+                                  name1, 0);
+  manager()->CreateTestingProfile("p2", scoped_ptr<PrefServiceSyncable>(),
+                                  name2, 0);
 
 #if defined(OS_CHROMEOS)
   EXPECT_FALSE(AvatarMenuModel::ShouldShowAvatarMenu());
 #else
   EXPECT_TRUE(AvatarMenuModel::ShouldShowAvatarMenu());
 #endif
+}
+
+TEST_F(AvatarMenuModelTest, SyncState) {
+  // If multiprofile mode is not enabled then the menu is never shown.
+  if (!ProfileManager::IsMultipleProfilesEnabled())
+    return;
+
+  manager()->CreateTestingProfile("p1", scoped_ptr<PrefServiceSyncable>(),
+                                  ASCIIToUTF16("Test 1"), 0);
+
+  // Add a managed user profile.
+  ProfileInfoCache* cache = manager()->profile_info_cache();
+  manager()->profile_info_cache()->AddProfileToCache(
+      cache->GetUserDataDir().AppendASCII("p2"), ASCIIToUTF16("Test 2"),
+      string16(), 0, true);
+  MockObserver observer;
+  AvatarMenuModel model(manager()->profile_info_cache(), &observer, browser());
+  EXPECT_EQ(2U, model.GetNumberOfItems());
+
+  // Now check that the sync_state of a managed user shows the managed user
+  // avatar label instead.
+  base::string16 managed_user_label =
+      l10n_util::GetStringUTF16(IDS_MANAGED_USER_AVATAR_LABEL);
+  const AvatarMenuModel::Item& item1 = model.GetItemAt(0);
+  EXPECT_NE(item1.sync_state, managed_user_label);
+
+  const AvatarMenuModel::Item& item2 = model.GetItemAt(1);
+  EXPECT_EQ(item2.sync_state, managed_user_label);
 }
 
 }  // namespace

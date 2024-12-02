@@ -15,21 +15,13 @@ body {
   -webkit-box-flex: 1;
   -webkit-box-orient: vertical;
   -webkit-tap-highlight-color: transparent;
-  -webkit-transition: opacity 70ms linear;
   -webkit-user-select: none;
   cursor: default;
   display: -webkit-box;
   height: 100%;
   margin: 0;
-  opacity: 0;
   padding: 0;
   width: 100%;
-}
-
-body.loaded {
-  /* Do not use display:none because list will calculate metrics incorrectly. */
-  /* display: -webkit-box;*/
-  opacity: 1;
 }
 
 /* Drop opacity of selected rows to give a visual feedback on copy/cut
@@ -38,13 +30,13 @@ body.loaded {
   opacity: 0.8;
 }
 
-body[new-ui] ::-webkit-scrollbar {
+::-webkit-scrollbar {
   height: 0;
   width: 0;
 }
 
 /* TODO(mtomasz): Flip scrollbars to the opposite side for RTL languages. */
-body[new-ui] .scrollbar-vertical {
+.scrollbar-vertical {
   bottom: 0;
   position: absolute;
   right: 0;
@@ -53,8 +45,7 @@ body[new-ui] .scrollbar-vertical {
   z-index: 1000;
 }
 
-body[new-ui] .scrollbar-button {
-  -webkit-transition: opacity 100ms;
+.scrollbar-button {
   background-color: black;
   border: 1px solid #ccc;
   border-radius: 3px;
@@ -63,95 +54,49 @@ body[new-ui] .scrollbar-button {
   margin-right: 2px;
   opacity: 0;
   position: absolute;
+  transition: opacity 100ms;
   width: 8px;
 }
 
-body[new-ui] :hover > .scrollbar-vertical > .scrollbar-button {
+:hover > .scrollbar-vertical > .scrollbar-button {
   opacity: 0.3;
 }
 
-body[new-ui] .scrollbar-vertical > .scrollbar-button:hover {
+.scrollbar-vertical > .scrollbar-button:hover {
   opacity: 0.4;
 }
 
-body[new-ui] .scrollbar-vertical > .scrollbar-button.pressed {
+.scrollbar-vertical > .scrollbar-button.pressed {
   opacity: 0.5;
 }
 
-body:not([new-ui]) #butter-bar-container {
-  -webkit-box-pack: center;
-  display: -webkit-box;
-  left: 0;
-  pointer-events: none;
-  position: absolute;
-  top: 0;
-  width: 100%;
-  z-index: 3;
-}
-
-body[new-ui] #butter-bar-container {
+#butter-bar-container {
   width: 100%;
 }
 
-body:not([new-ui]) #butter-bar {
-  -webkit-border-radius: 2px;
-  -webkit-box-align: center;
-  -webkit-box-orient: horizontal;
-  -webkit-box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  -webkit-transition: opacity 130ms;
-  background-color: #e3e3e3;
-  border: 1px solid #d4d4d4;
-  border-top-width: 0;
-  color: #222;
-  display: -webkit-box;
-  margin-top: 2px;
-  max-width: 340px;
-  min-width: 200px;
-  padding: 0 1em;
-  pointer-events: auto;
-  top: 1px;
-  width: 30%;
-  z-index: 2;
-}
-
-body[new-ui] #butter-bar {
+#butter-bar {
   color: #666;
   display: -webkit-box;
   padding: 15px;
 }
 
-body #butter-bar:not(.visible) {
-  opacity: 0;
-  pointer-events: none;
-}
-
-body[new-ui] #butter-bar:not(.visible) {
+#butter-bar:not(.visible) {
   display: none;
 }
 
 #butter-bar .content {
   -webkit-box-flex: 1.0;
   -webkit-box-orient: block-axis;
-  -webkit-box-pack: center;
-  display: -webkit-box;
-  min-height: 35px;
-}
-
-body[new-ui] #butter-bar .content {
   -webkit-box-pack: end;
-  min-height: 0;
+  display: -webkit-box;
 }
 
 #butter-bar .actions {
-  -webkit-box-align: center;
+  -webkit-box-align: end;
   -webkit-box-orient: horizontal;
   -webkit-box-pack: end;
   -webkit-margin-start: 6px;
   display: -webkit-box;
-}
-
-body[new-ui] #butter-bar .actions {
-  -webkit-box-align: end;
 }
 
 #butter-bar .actions a {
@@ -175,40 +120,15 @@ body[new-ui] #butter-bar .actions {
   margin-left: -6px;
 }
 
-body[new-ui] #butter-bar .actions a.x {
+#butter-bar .actions a.x {
   margin-bottom: -14px;
 }
 
-#butter-bar.error {
-  background-color: rgba(221, 75, 57, 0.2);
-}
-
 #butter-bar .butter-message.single-line {
+  line-height: 2.0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-body[new-ui] #butter-bar .butter-message.single-line {
-  line-height: 2.0;
-}
-
-body:not([new-ui]) #butter-bar .progress-track {
-  height: 5px;
-}
-
-/* The top title of the dialog. */
-.dialog-title {
-  -webkit-box-sizing: border-box;
-  -webkit-padding-start: 15px;
-  background-image: -webkit-linear-gradient(top, #fff, #f6f6f6);
-  border-bottom: 1px rgb(214, 217, 227) solid;
-  color: rgb(66, 80, 108);
-  font-size: 15px;
-  font-weight: bold;
-  height: 32px;
-  padding-bottom: 8px;
-  padding-top: 8px;
 }
 
 /* Main part of the dialog between header and footer. */
@@ -217,13 +137,10 @@ body:not([new-ui]) #butter-bar .progress-track {
   -webkit-box-flex: 1;
   -webkit-box-orient: horizontal;
   background-color: white;  /* Makes #drag-container invisible. */
+  border-radius: 2px;
   display: -webkit-box;
   overflow: hidden;
   position: relative;
-}
-
-body[new-ui] .dialog-container {
-  -webkit-border-radius: 2px;
 }
 
 /* List/grid and preview are inside this container. */
@@ -236,53 +153,45 @@ body[new-ui] .dialog-container {
 
 /* Directory tree at the left. */
 .dialog-sidebar {
-  -webkit-border-end: 1px solid rgb(170, 170, 170);
+  -webkit-border-end: 1px solid rgb(225, 225, 225);
   -webkit-box-flex: 0;
   -webkit-box-orient: vertical;
-  background-color: #e6e6e6;
+  background-color: #f1f1f1;
   display: -webkit-box;
   max-width: 50%;
-  min-width: 45px;
+  min-width: 100px;
   overflow: hidden;
   position: relative;
-  width: 168px;
-}
-
-body[new-ui] .dialog-sidebar {
-  -webkit-border-end: 1px solid rgb(225, 225, 225);
-  background-color: #f1f1f1;
-  min-width: 100px;
   width: 200px;
 }
 
-body[new-ui] .dialog-sidebar-header {
+.dialog-sidebar-header {
   -webkit-app-region: drag;
   -webkit-box-flex: 0;
   display: -webkit-box;
-  height: 45px;  /* Keep in sync with #dialog-header. */
+  height: 48px;  /* Keep in sync with #dialog-header. */
   line-height: 45px;
 }
 
-body[new-ui] .dialog-sidebar-header #app-name {
+.dialog-sidebar-header #app-name {
   -webkit-margin-start: 15px;
   color: #303030;
   font-size: 130%;
 }
 
-body[new-ui] .dialog-sidebar-contents {
+.dialog-sidebar-contents {
   -webkit-box-flex: 1;
-  border-top: 1px solid rgb(210, 210, 210);
   display: -webkit-box;
   position: relative;
 }
 
-body[new-ui] .dialog-sidebar-footer {
+.dialog-sidebar-footer {
   -webkit-box-flex: 0;
   display: -webkit-box;
 }
 
 /* A vertical splitter between the roots list and the file list. It is actually
-  a transparent area centered on the roots list right border.*/
+   a transparent area centered on the roots list right border.*/
 div.splitter {
   -webkit-box-flex: 0;
   cursor: col-resize;
@@ -293,51 +202,42 @@ div.splitter {
   z-index: 100;
 }
 
-body[new-ui] #volume-list {
+#volume-list {
   -webkit-box-flex: 1;
   -webkit-box-orient: vertical;
   display: -webkit-box;
 }
 
-body[new-ui] #volume-list > * {
-  background-color: rgb(240, 240, 240);
-  background-image: none;
-  border: none;
+#volume-list > * {
   height: 40px;
-  margin: 0;
   padding: 0 5px;
 }
 
-body[new-ui] #volume-list > :hover {
-  background-color: rgba(0, 0, 0, 0.05);
-  border-color: rgba(0, 0, 0, 0.05);
-}
-
-body[new-ui] #volume-list > .accepts,
-body[new-ui] #volume-list > [lead][selected],
-body[new-ui] #volume-list > [lead],
-body[new-ui] #volume-list > [selected],
-body[new-ui] #volume-list > [anchor] {
+#volume-list > .accepts,
+#volume-list > [lead][selected],
+#volume-list > [lead],
+#volume-list > [selected],
+#volume-list > [anchor] {
   background-color: rgb(225, 225, 225);
 }
 
-body[new-ui] #volume-list:focus > .accepts,
-body[new-ui] #volume-list:focus > [lead][selected],
-body[new-ui] #volume-list:focus > [lead],
-body[new-ui] #volume-list:focus > [selected],
-body[new-ui] #volume-list:focus > [anchor] {
-  background-color: rgb(77, 144, 254);
+#volume-list:focus > .accepts,
+#volume-list:focus > [lead][selected],
+#volume-list:focus > [lead],
+#volume-list:focus > [selected],
+#volume-list:focus > [anchor] {
+  background-color: rgb(66, 129, 244);
   color: white;
 }
 
-body[new-ui] #volume-list li.root-item {
+#volume-list li.root-item {
   -webkit-box-align: center;
   display: -webkit-box;
   line-height: 22px;  /* To accomodate for icons. */
   padding-left: 11px;
 }
 
-body[new-ui] #volume-list li.root-item > .root-label {
+#volume-list li.root-item > .root-label {
   -webkit-box-flex: 1;
   margin: 0 2px;
   overflow: hidden;
@@ -345,49 +245,47 @@ body[new-ui] #volume-list li.root-item > .root-label {
   white-space: nowrap;
 }
 
-body[new-ui] #volume-list .volume-icon {
+#volume-list .volume-icon {
   background-position: center 2px;
   background-repeat: no-repeat;
   height: 24px;
   width: 24px;
 }
 
+#middlebar-header {
+  -webkit-box-sizing: border-box;
+  -webkit-padding-start: 20px;
+  border-right: 1px solid rgb(212, 212, 212);
+  color: rgb(100, 100, 100);
+  height: 47px;
+  line-height: 40px;
+  overflow-x: hidden;
+  position: absolute;
+  text-overflow: ellipsis;
+  width: 100%;
+}
 
 #directory-tree {
+  border-right: 1px solid rgb(212, 212, 212);
   bottom: 0;
   left: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  padding-bottom: 0;  /* For the preview panel. Will be overridden by JS. */
   position: absolute;
   right: 0;
-  top: 0;
-}
-
-body[new-ui] #directory-tree {
-  border-right: 1px solid rgb(212, 212, 212);
+  top: 47px;
 }
 
 #directory-tree .tree-row {
-  -webkit-border-radius: 0;
-  background-image: none;
-  border: none;
-  display: -webkit-box;
-  line-height: 39px;
-  margin: 0;
-  padding: 0 3px;
-}
-
-body[new-ui] #directory-tree .tree-row {
   cursor: pointer;
+  display: -webkit-box;
   line-height: 29px;
+  padding: 0 3px;
 }
 
 /* For rows of subitems (non-top items) */
 #directory-tree .tree-children .tree-row {
-  line-height: 31px;
-}
-
-body[new-ui] #directory-tree .tree-children .tree-row {
   line-height: 29px;
 }
 
@@ -398,6 +296,10 @@ body[new-ui] #directory-tree .tree-children .tree-row {
   top: 0;
   vertical-align: middle;
   width: 37px;
+}
+
+#directory-tree:focus .tree-row[selected] > .expand-icon {
+  background-image: -webkit-canvas(tree-triangle-inverted);
 }
 
 #directory-tree .tree-row > .volume-icon {
@@ -416,10 +318,6 @@ body[new-ui] #directory-tree .tree-children .tree-row {
   text-overflow: ellipsis;
 }
 
-#directory-tree .tree-row:hover {
-  background-color: rgba(0, 0, 0, 0.05);
-}
-
 #directory-tree .tree-item.accepts > .tree-row,
 #directory-tree .tree-row[lead][selected],
 #directory-tree .tree-row[lead],
@@ -428,11 +326,11 @@ body[new-ui] #directory-tree .tree-children .tree-row {
   background-color: rgb(204, 204, 204);
 }
 
-body[new-ui] #directory-tree .tree-item.accepts > .tree-row,
-body[new-ui] #directory-tree .tree-row[lead][selected],
-body[new-ui] #directory-tree .tree-row[lead],
-body[new-ui] #directory-tree .tree-row[selected],
-body[new-ui] #directory-tree .tree-row[anchor] {
+#directory-tree .tree-item.accepts > .tree-row,
+#directory-tree .tree-row[lead][selected],
+#directory-tree .tree-row[lead],
+#directory-tree .tree-row[selected],
+#directory-tree .tree-row[anchor] {
   background-color: rgb(225, 225, 225);
 }
 
@@ -444,44 +342,16 @@ body[new-ui] #directory-tree .tree-row[anchor] {
   background-color: rgb(193, 209, 232);
 }
 
-body[new-ui] #directory-tree:focus .tree-item.accepts > .tree-row,
-body[new-ui] #directory-tree:focus .tree-row[lead][selected],
-body[new-ui] #directory-tree:focus .tree-row[lead],
-body[new-ui] #directory-tree:focus .tree-row[selected],
-body[new-ui] #directory-tree:focus .tree-row[anchor] {
-  background-color: rgb(77, 144, 254);
+#directory-tree:focus .tree-item.accepts > .tree-row,
+#directory-tree:focus .tree-row[lead][selected],
+#directory-tree:focus .tree-row[lead],
+#directory-tree:focus .tree-row[selected],
+#directory-tree:focus .tree-row[anchor] {
+  background-color: rgb(66, 129, 244);
   color: white;
 }
 
-#directory-tree:hover .tree-item.accepts > .tree-row:hover,
-#directory-tree:hover .tree-row[lead]:hover,
-#directory-tree:hover .tree-row[lead][selected]:hover,
-#directory-tree:hover .tree-row[selected]:hover,
-#directory-tree:hover .tree-row[anchor]:hover {
-  background-color: rgb(177, 193, 216);
-}
-
-body[new-ui] #directory-tree:hover .tree-item.accepts > .tree-row:hover,
-body[new-ui] #directory-tree:hover .tree-row[lead]:hover,
-body[new-ui] #directory-tree:hover .tree-row[lead][selected]:hover,
-body[new-ui] #directory-tree:hover .tree-row[selected]:hover,
-body[new-ui] #directory-tree:hover .tree-row[anchor]:hover {
-  background-color: rgb(225, 225, 225);
-}
-
-body[new-ui] #directory-tree:focus:hover .tree-item.accepts > .tree-row:hover,
-body[new-ui] #directory-tree:focus:hover .tree-row[lead]:hover,
-body[new-ui] #directory-tree:focus:hover .tree-row[lead][selected]:hover,
-body[new-ui] #directory-tree:focus:hover .tree-row[selected]:hover,
-body[new-ui] #directory-tree:focus:hover .tree-row[anchor]:hover {
-  background-color: rgb(77, 144, 254);
-  color: white;
-}
-
-body[new-ui] #volume-list .root-item > div.root-eject,
-body:not([new-ui]) #directory-tree .tree-row > div.root-eject {
-  /* The transition commented out to work around crbug.com/157813 */
-  /*-webkit-transition: opacity 70ms linear;*/
+#volume-list .root-item > div.root-eject {
   background-image: -webkit-image-set(
     url('../images/files/ui/eject.png') 1x,
     url('../images/files/ui/2x/eject.png') 2x);
@@ -491,8 +361,14 @@ body:not([new-ui]) #directory-tree .tree-row > div.root-eject {
   height: 20px;
   margin-right: 6px;
   opacity: 0.7;
+  transition: opacity 70ms linear;
   vertical-align: middle;
   width: 20px;
+}
+
+#volume-list:focus .root-item[selected] > div.root-eject {
+  -webkit-filter: brightness(0) invert();
+  opacity: 1;
 }
 
 #directory-tree .tree-row > div.root-eject[hidden] {
@@ -513,86 +389,75 @@ body:not([new-ui]) #directory-tree .tree-row > div.root-eject {
 
 /* Breadcrumbs and things under the title but above the list view. */
 .dialog-header {
+  -webkit-app-region: drag;
   -webkit-box-align: center;
   -webkit-box-orient: horizontal;
-  -webkit-transition: all 180ms ease;
   display: -webkit-box;
+  height: 48px;
+  margin: 0;
+  transition: all 180ms ease;
 }
 
-body:not([new-ui]) .dialog-header {
-  -webkit-margin-end: 7px;
-  height: 30px;
-  margin-bottom: 7px;
-  margin-top: 7px;
-}
-
-body[new-ui] .dialog-header {
-  -webkit-app-region: drag;
-  -webkit-margin-end: 10px;
-  -webkit-margin-start: 10px;
-  height: 45px;
-}
-
-body[new-ui] .search-box-wrapper {
+.search-box-wrapper {
+  -webkit-align-items: center;
   -webkit-box-flex: 1;
-  display: -webkit-box;
+  display: -webkit-flex;
+  height: 100%;
 }
 
-body[new-ui] .decoration-buttons-wrapper {
-  -webkit-box-flex: 0;
-  -webkit-box-pack: end;
-  display: -webkit-box;
+.search-box-wrapper.too-short {
+  visibility: hidden;
 }
 
-body[new-ui] .dialog-header #search-box,
-body[new-ui] .dialog-header #autocomplete-list,
-body[new-ui] .dialog-header .buttonbar button {
+.dialog-header #search-box,
+.dialog-header #autocomplete-list,
+.dialog-header #search-icon,
+.dialog-header #search-clear-button,
+.dialog-header .buttonbar button {
   -webkit-app-region: no-drag;
 }
 
-body[new-ui] .dialog-header #gear-button {
+.dialog-header #gear-button {
   background-image: -webkit-image-set(
     url('../images/files/ui/new-ui/topbar_button_settings.png') 1x,
     url('../images/files/ui/new-ui/2x/topbar_button_settings.png') 2x);
 }
 
-body[new-ui] .dialog-header #maximize-button {
+.dialog-header #maximize-button {
   background-image: -webkit-image-set(
     url('../images/files/ui/new-ui/topbar_button_maximize.png') 1x,
     url('../images/files/ui/new-ui/2x/topbar_button_maximize.png') 2x);
 }
 
-body[new-ui] .dialog-header #close-button {
+.dialog-header #close-button {
   background-image: -webkit-image-set(
     url('../images/files/ui/new-ui/topbar_button_close.png') 1x,
     url('../images/files/ui/new-ui/2x/topbar_button_close.png') 2x);
 }
 
-body[maximized][type='full-page'] .dialog-header {
-  -webkit-padding-end: 75px;
+body:not([type='full-page']) .dialog-header #close-button,
+body:not([type='full-page']) .dialog-header #maximize-button {
+  display: none;
 }
 
 /* Container for the detail and thumbnail list views. */
 .dialog-body {
   -webkit-box-flex: 1;
-  -webkit-box-orient: vertical;
   -webkit-transition: all 180ms ease;
-  border-top: 1px solid #d4d4d4;
-  display: -webkit-box;
-  overflow: hidden;
+  border-top: 1px solid rgb(225, 225, 225);
   position: relative;
 }
 
-body[new-ui] .dialog-body {
-  border-top: 1px solid rgb(225, 225, 225);
-}
-
 .main-panel {
-  -webkit-box-flex: 1;
+  bottom: 0;
   display: -webkit-box;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
 }
 
-body[new-ui] .dialog-middlebar-contents {
+.dialog-middlebar-contents {
   display: -webkit-box;
   max-width: 50%;
   min-width: 45px;
@@ -604,16 +469,8 @@ body[new-ui] .dialog-middlebar-contents {
 .dialog-footer {
   -webkit-box-align: center;
   -webkit-box-orient: horizontal;
-  display: -webkit-box;
-}
-
-body:not([new-ui]) .dialog-footer {
-  border-top: 1px solid #d2d2d2;
-  padding: 10px 17px 14px 15px;
-}
-
-body[new-ui] .dialog-footer {
   border-top: 1px solid rgb(225, 225, 225);
+  display: -webkit-box;
   padding: 10px;
 }
 
@@ -632,10 +489,6 @@ body[new-ui] .dialog-footer {
   -webkit-box-flex: 1;
   -webkit-margin-end: 20px;
   -webkit-margin-start: 20px;
-}
-
-#file-type {
-  -webkit-margin-end: 10px;
 }
 
 /* The container for breadcrumb elements. */
@@ -658,13 +511,13 @@ body[new-ui] .dialog-footer {
 .offline-icon {
   -webkit-margin-end: 0;
   -webkit-margin-start: 10px;
-  -webkit-transition-property: opacity;
   background-image: -webkit-image-set(
     url('../images/files/ui/offline.png') 1x,
     url('../images/files/ui/2x/offline.png') 2x);
   height: 16px;
   opacity: 0;
   transition-duration: 200ms;
+  transition-property: opacity;
   transition-timing-function: ease-out;
   width: 16px;
 }
@@ -674,8 +527,8 @@ body[new-ui] .dialog-footer {
 .offline-icon-space {
   -webkit-margin-end: 0;
   -webkit-margin-start: -26px; /* Clear width of .offline-icon */
-  -webkit-transition-property: width;
   transition-duration: 200ms;
+  transition-property: width;
   transition-timing-function: ease-out;
   width: 0;
 }
@@ -703,38 +556,20 @@ body[drive] .dialog-container[connection='metered'] .offline-icon-space {
 
 /* A single directory name in the list of path breadcrumbs. */
 .breadcrumb-path {
-  color: rgb(38, 86, 146);
+  color: #969696;
   cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-body[new-ui] .breadcrumb-path:not(.breadcrumb-last) {
-  -webkit-app-region: no-drag;
-}
-
-body:not([new-ui]) #search-breadcrumbs .breadcrumb-path {
-  color: #888;
-}
-
-body[new-ui] #search-breadcrumbs .breadcrumb-path {
-  color: #969696;
-}
-
-body[new-ui] #search-breadcrumbs .breadcrumb-path:hover,
-body:not([new-ui]) #search-breadcrumbs .breadcrumb-path:hover {
+.breadcrumb-path:hover {
   color: #666;
 }
 
 /* The final breadcrumb, representing the current directory. */
-body[new-ui] #search-breadcrumbs .breadcrumb-path.breadcrumb-last {
+#search-breadcrumbs .breadcrumb-path.breadcrumb-last {
   color: #141414;
-  cursor: default;
-}
-
-body:not([new-ui]) .breadcrumb-last {
-  color: black;
   cursor: default;
 }
 
@@ -751,19 +586,38 @@ body:not([new-ui]) .breadcrumb-last {
   width: 25px;
 }
 
-body[new-ui] .dialog-header .buttonbar button {
+.dialog-header .buttonbar {
+  -webkit-box-align: center;
+  height: 100%;
+}
+
+.dialog-header .buttonbar button {
+  -webkit-box-shadow: none;
+  -webkit-margin-end: 10px;
   -webkit-margin-start: 0;
+  background-color: transparent;
   background-image: none;
   background-position: center;
   background-repeat: no-repeat;
-  min-width: 29px;
+  border: 0 none transparent;
+  display: block;
+  height: 32px;
+  min-width: 0;
+  outline: none;
   padding: 0;
-  width: 29px;
+  width: 32px;
 }
 
-body[new-ui] .dialog-header button:not(:hover):not(focus) {
-  background-color: transparent;
-  border-color: transparent;
+.dialog-header .buttonbar button:active {
+  -webkit-box-shadow:
+    0 1px 0 0 #c2c2c2 inset,
+    0 0 0 1px #dedede inset;
+}
+
+.dialog-header button:hover,
+.dialog-header button:focus,
+.dialog-header button:active {
+  background-color: #ededed;
 }
 
 #search-box,
@@ -775,119 +629,100 @@ body[new-ui] .dialog-header button:not(:hover):not(focus) {
 }
 
 #search-box {
-  -webkit-transition: width 200ms;
-  background: -webkit-image-set(
-    url('../images/files/ui/icon_search.png') 1x,
-    url('../images/files/ui/2x/icon_search.png') 2x);
+  -webkit-margin-end: 0;
+  -webkit-padding-after: 2px;
+  -webkit-padding-before: 1px;
+  -webkit-padding-end: 24px;
+  -webkit-padding-start: 23px;
   background-color: #fff;
   background-position: 4px 5.5px;
   background-repeat: no-repeat;
+  border-style: none;
   color: #333;
-  display: -webkit-box;
-  height: 29px;
-  line-height: 27px;
-  margin-right: 10px;
-  padding: 1px 6px 2px 23px;
-  width: 150px;
-}
-
-#search-box[hidden] {
-  display: none;  // Required, since overriden by #search-box.
-}
-
-body[new-ui] #search-box {
-  -webkit-transition: max-width 200ms;
-  background: -webkit-image-set(
-    url('../images/files/ui/new-ui/search_icon_active.png') 1x,
-    url('../images/files/ui/new-ui/2x/search_icon_active.png') 2x);
-  background-position: center left;
-  background-repeat: no-repeat;
-  border-color: white;
-  max-width: 150px;
-  padding: 0 0 0 30px;
-  width: 100%;
-}
-
-#search-box:hover {
-  border: 1px solid #b9b9b9;
-  border-top: 1px solid #a0a0a0;
-  box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
-}
-
-body[new-ui] #search-box:hover {
-  border-color: white;
+  display: block;
+  height: 48px;
+  line-height: 1em;
+  max-width: 100%;
+  outline: none;
+  padding: 0;
+  pointer-events: none;
+  position: relative;
+  transition: width 0;
+  width: 0; /* Overrided by script */
 }
 
 #search-box:focus,
-body[new-ui] #search-box:focus {
-  border: 1px solid rgb(77, 144, 254);
-  box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
-  max-width: 240px;
-  outline: none;
-  width: 100%;
+#search-box:active,
+.has-text #search-box {
+  pointer-events: auto;
+}
+
+#search-box[hidden] {
+  display: none;  /* Required, since overriden by #search-box. */
 }
 
 #search-box::-webkit-search-cancel-button {
   -webkit-appearance: none;
-  background-image: -webkit-image-set(
-    url('../images/files/ui/search_clear.png') 1x,
-    url('../images/files/ui/2x/search_clear.png') 2x);
-  height: 16px;
-  width: 16px;
 }
 
-#search-box::-webkit-search-cancel-button:hover {
-  background-image: -webkit-image-set(
-    url('../images/files/ui/search_clear_hover.png') 1x,
-    url('../images/files/ui/2x/search_clear_hover.png') 2x);
+#search-box::-webkit-search-cancel-button {
+  right: 2px;
 }
 
-#search-box::-webkit-search-cancel-button:active {
+#search-icon {
+  -webkit-flex-shrink: 0;
+  -webkit-margin-end: 3px;
+  -webkit-margin-start: 10px;
+  -webkit-order: -1;
   background-image: -webkit-image-set(
-    url('../images/files/ui/search_clear_pressed.png') 1x,
-    url('../images/files/ui/2x/search_clear_pressed.png') 2x);
-}
-
-body:not([new-ui]) button#detail-view::before {
-  background-image: -webkit-image-set(
-    url('../images/files/ui/view_list_black.png') 1x,
-    url('../images/files/ui/2x/view_list_black.png') 2x);
-}
-
-body:not([new-ui]) button#thumbnail-view::before {
-  background-image: -webkit-image-set(
-    url('../images/files/ui/view_thumbs_black.png') 1x,
-    url('../images/files/ui/2x/view_thumbs_black.png') 2x);
-}
-
-body:not([new-ui]) button#detail-view::before,
-body:not([new-ui]) button#thumbnail-view::before {
+    url('../images/files/ui/new-ui/search_icon_inactive.png') 1x,
+    url('../images/files/ui/new-ui/2x/search_icon_inactive.png') 2x);
   background-position: center;
   background-repeat: no-repeat;
-  bottom: 0;
-  content: '';
-  left: 0;
-  opacity: 0.5;
-  position: absolute;
-  right: 0;
-  top: 0;
+  height: 32px;
+  width: 32px;
 }
 
-body:not([new-ui]) button#detail-view[disabled]::before,
-body:not([new-ui]) button#thumbnail-view[disabled]::before {
-  opacity: 0.75;
+#search-icon:hover,
+#search-box:active + #search-icon,
+#search-box:focus + #search-icon,
+.has-text #search-icon {
+  background: -webkit-image-set(
+    url('../images/files/ui/new-ui/search_icon_active.png') 1x,
+    url('../images/files/ui/new-ui/2x/search_icon_active.png') 2x);
 }
 
-body:not([new-ui]) button#detail-view:hover::before,
-body:not([new-ui]) button#thumbnail-view:hover::before {
-  opacity: 1;
+#search-clear-button {
+  -webkit-margin-end: 30px;
+  -webkit-margin-start: 10px;
+  background-image: -webkit-image-set(
+    url('../images/files/ui/new-ui/search_clear.png') 1x,
+    url('../images/files/ui/new-ui/2x/search_clear.png') 2x);
+  background-position: center;
+  background-repeat: no-repeat;
+  display: none;
+  height: 12px;
+  width: 12px;
 }
 
+.search-box-wrapper.has-text + #search-clear-button {
+  display: block;
+}
 
-/* When detail-view is not disabled (thus thumbnail view is disabled), push
-   it up a little, to make it's right glowing border visible while focused.*/
-body:not([new-ui]) button#detail-view:not([disabled]) {
-  z-index: 2;
+.search-box-wrapper.too-short + #search-clear-button {
+  display: none;
+}
+
+#search-clear-button:hover {
+  background-image: -webkit-image-set(
+    url('../images/files/ui/new-ui/search_clear_hover.png') 1x,
+    url('../images/files/ui/new-ui/2x/search_clear_hover.png') 2x);
+}
+
+#search-clear-button:active {
+  background-image: -webkit-image-set(
+    url('../images/files/ui/new-ui/search_clear_pressed.png') 1x,
+    url('../images/files/ui/new-ui/2x/search_clear_pressed.png') 2x);
 }
 
 .filelist-panel {
@@ -912,6 +747,16 @@ body:not([new-ui]) button#detail-view:not([disabled]) {
 #detail-table > list,
 .thumbnail-grid {
   -webkit-box-flex: 1;
+  padding-bottom: 0;  /* For the preview panel. Will be overridden by JS. */
+}
+
+.main-panel #detail-table > list > .drag-selection-border {
+  -webkit-box-sizing: border-box;
+  background-color: rgba(255, 255, 255, 0.3);
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  outline: 1px solid rgba(0, 0, 0, 0.1);
+  position: absolute;
+  z-index: 2;
 }
 
 .spinner {
@@ -952,7 +797,6 @@ body:not([new-ui]) button#detail-view:not([disabled]) {
 .downloads-warning {
   -webkit-box-align: center;
   -webkit-box-orient: horizontal;
-  -webkit-transition: height 70ms linear;
   background-color: #f0f0f0;
   background-image: -webkit-image-set(
     url('../images/files/ui/warning_icon_square.png') 1x,
@@ -965,6 +809,7 @@ body:not([new-ui]) button#detail-view:not([disabled]) {
   height: 57px;
   overflow: hidden;
   padding-left: 57px;  /* Make space for the icon. */
+  transition: height 70ms linear;
 }
 
 .downloads-warning[hidden] {
@@ -986,7 +831,6 @@ body:not([new-ui]) button#detail-view:not([disabled]) {
   background-image: url(chrome://resources/images/clouds.png);
   background-repeat: repeat-x;
   background-size: 150px 44px;
-  border-top: 1px solid rgba(0, 0, 0, 0.1);
   color: #333;
   display: -webkit-box;
   font-size: 13px;
@@ -1021,6 +865,7 @@ body:not([new-ui]) button#detail-view:not([disabled]) {
 /* The cr.ui.Grid representing the detailed file list. */
 .thumbnail-grid {
   overflow-y: auto;
+  padding-bottom: 0;  /* For the preview panel. Will be overridden by JS. */
   width: 100%;
 }
 
@@ -1029,24 +874,13 @@ body[type='full-page'] .thumbnail-frame > .img-container {
 }
 
 body[type='full-page'] .thumbnail-frame > .img-container,
-body[type='full-page'] .detail-name .detail-icon,
-body[type='full-page'] .filename-label > * {
+body[type='full-page'] .detail-name .detail-icon {
   cursor: pointer;
 }
 
-body[type='full-page'] grid .filename-label > :hover {
-  text-decoration: underline;
-}
-
-body[type='full-page'] list .filename-label > :hover,
 .breadcrumb-path:not(.breadcrumb-last):hover,
 .breadcrumb-path.accepts {
   color: rgb(17, 85, 204);
-  text-decoration: underline;
-}
-
-body[new-ui][type='full-page'] list .filename-label > :hover {
-  color: inherit;
   text-decoration: underline;
 }
 
@@ -1067,7 +901,7 @@ body[new-ui][type='full-page'] list .filename-label > :hover {
   position: absolute;
 }
 
-body[new-ui] .img-container > img:not(.cached) {
+.img-container > img:not(.cached):not(.drag-thumbnail) {
   -webkit-animation: fadeIn 500ms ease-in;
 }
 
@@ -1079,7 +913,7 @@ body[new-ui] .img-container > img:not(.cached) {
   cursor: auto;
   display: -webkit-box;
   left: 0;
-  padding: 0 5px;
+  padding: 0 10px;
   position: absolute;
   right: 0;
 }
@@ -1090,37 +924,23 @@ body[new-ui] .img-container > img:not(.cached) {
 
 /* Styles specific for the grid view. */
 
-/* The item width and margins are chosen so that the standard File Open/Save
-   dialogs have three nicely aligned columns of thumbnails. */
 .thumbnail-grid .thumbnail-item {
-  border: 2px solid transparent;  /* Selection will make the border visible. */
-  margin-left: 8px;
+  -webkit-margin-start: 8px;
+  border: 3px solid transparent;  /* Selection will make the border visible. */
   margin-top: 7px;
-  padding: 0;
   position: relative;
-  text-align: center;
 }
 
 .thumbnail-grid .thumbnail-frame {
-  background-image: -webkit-image-set(
-    url('../images/files/ui/hashed_bg.gif') 1x,
-    url('../images/files/ui/2x/hashed_bg.gif') 2x);
-  border: 1px solid rgb(217, 217, 217);
+  background-color: rgb(245, 245, 245);
   height: 180px;
   overflow: hidden;
-  padding-bottom: 30px;  /* .thumbnail-bottom height */
   position: relative;
   width: 240px;
 }
 
-body[new-ui] .thumbnail-grid .thumbnail-frame {
-  background-color: rgb(245, 245, 245);
-  background-image: none;
-}
-
 .thumbnail-grid .thumbnail-item[selected] .thumbnail-frame,
-.thumbnail-grid .thumbnail-item.accepts .thumbnail-frame,
-.thumbnail-grid .thumbnail-item:hover .thumbnail-frame {
+.thumbnail-grid .thumbnail-item.accepts .thumbnail-frame {
   border-color: white;
 }
 
@@ -1130,34 +950,20 @@ body[new-ui] .thumbnail-grid .thumbnail-frame {
 }
 
 .thumbnail-grid .thumbnail-bottom {
-  background: rgba(0, 0, 0, 0.75);
-  color: #eee;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
   height: 30px;
-}
-
-.thumbnail-item .thumbnail-bottom .file-checkbox {
-  left: 9px;
-  position: absolute;
-  top: 10px;
-}
-
-/* Show the file name differently if the checkbox is present */
-.thumbnail-bottom.show-checkbox {
-  -webkit-box-pack: start;
-  padding-left: 28px;
-  text-align: left;
 }
 
 /* In the full page mode we can afford to show thumbnails as large as 320x240
    with no downscaling. */
 body[type='full-page'] .thumbnail-grid .thumbnail-item {
-  margin-left: 21px;
+  -webkit-margin-start: 21px;
   margin-top: 20px;
 }
 
 body[type='full-page'] .thumbnail-grid .thumbnail-frame {
   height: 240px;
-  padding-bottom: 34px;  /* .thumbnail-bottom height */
   width: 320px;
 }
 
@@ -1177,83 +983,43 @@ body[type='full-page'] .thumbnail-grid .thumbnail-bottom {
   background-position: 5px center;
   background-repeat: no-repeat;
   background-size: 16px 16px;
-  line-height: 39px;
   padding-left: 26px;
-}
-
-#list-container list > *,
-#list-container grid > *,
-#default-actions-list > * {
-  background-color: transparent;
-  background-image: none;
-  border-radius: 0;
 }
 
 #list-container list > li[selected],
 #list-container grid > li[selected],
 #default-actions-list > li[selected] {
-  background-color: #dedede;
-}
-
-body[new-ui] #list-container list > li[selected],
-body[new-ui] #list-container grid > li[selected],
-body[new-ui] #default-actions-list > li[selected] {
   background-color: rgb(225, 225, 225);
 }
 
 #list-container list:focus > li[selected],
 #list-container grid:focus > li[selected],
 #default-actions-list:focus > li[selected] {
-  background-color: rgb(203, 219, 241);
-}
-
-body[new-ui] #list-container list:focus > li[selected],
-body[new-ui] #list-container grid:focus > li[selected],
-body[new-ui] #default-actions-list:focus > li[selected] {
-  background-color: rgb(77, 144, 254);
+  background-color: rgb(66, 129, 244);
   color: white;
 }
 
 #list-container list > li.accepts[selected],
-#list-container grid > li.accepts[selected],
-#list-container list > li[selected]:hover,
-#list-container grid > li[selected]:hover,
-#default-actions-list > li[selected]:hover {
-  background-color: rgb(193, 211, 236);
-}
-
-body[new-ui] #list-container list > li.accepts[selected],
-body[new-ui] #list-container grid > li.accepts[selected],
-body[new-ui] #list-container list > li[selected]:hover,
-body[new-ui] #list-container grid > li[selected]:hover,
-body[new-ui] #default-actions-list > li[selected]:hover {
+#list-container grid > li.accepts[selected] {
   background-color: rgb(215, 215, 215);
 }
 
-body[new-ui] #list-container list:focus > li.accepts[selected],
-body[new-ui] #list-container grid:focus > li.accepts[selected],
-body[new-ui] #list-container list:focus > li[selected]:hover,
-body[new-ui] #list-container grid:focus > li[selected]:hover,
-body[new-ui] #default-actions-list:focus > li[selected]:hover {
+#list-container list:focus > li.accepts[selected],
+#list-container grid:focus > li.accepts[selected] {
   background-color: rgb(48, 125, 254);
 }
 
 #list-container list > li.accepts,
-#list-container grid > li.accepts,
-#list-container list > li:hover,
-#list-container grid > li:hover,
-#default-actions-list > li:hover {
+#list-container grid > li.accepts {
   background-color: #f1f1f1;
 }
 
-#list-container.nohover list > :not([selected]):hover,
-#list-container.nohover grid > :not([selected]):hover,
 #list-container.nohover grid > .accepts {
   background-color: transparent;
 }
 
 #directory-tree .tree-item.accepts > .tree-row,
-body[new-ui] #volume-list > .accepts,
+#volume-list > .accepts,
 #list-container list > li.accepts,
 #list-container grid > li.accepts {
   -webkit-animation: acceptsBlink 200ms linear 1s 3;
@@ -1269,6 +1035,7 @@ body[new-ui] #volume-list > .accepts,
 
 .table-row-cell .selection-label {
   -webkit-margin-end: 10px;
+  height: 15px;
 }
 
 .table-row-cell .filename-label,
@@ -1284,9 +1051,8 @@ body[new-ui] #volume-list > .accepts,
 
 /* Text box used for renaming in the detail list. */
 .table-row-cell input.rename {
-  -webkit-margin-start: -3px;
   border-width: 0;
-  line-height: 20px;
+  padding: 2px 0;
 }
 
 input.rename:focus {
@@ -1310,15 +1076,14 @@ input.rename {
 
 /* Text box used for renaming in the thumbnail list. */
 .thumbnail-grid input.rename {
-  -webkit-box-sizing: border-box;
   -webkit-margin-start: -1px;
+  box-sizing: border-box;
   height: 20px;
   width: 114px;
 }
 
 /* The cr.ui.Table representing the detailed file list. */
 .detail-table {
-  border: 0;
   width: 100%;
 }
 
@@ -1326,28 +1091,26 @@ input.rename {
 .preview-panel {
   -webkit-box-align: center;
   -webkit-box-orient: horizontal;
-  -webkit-transform: translate(0, 0);
-  background-color: #f0f0f0;
-  display: -webkit-box;
-  height: 61px;
-  opacity: 1;
-  padding: 0 16px 0 7px;
-  position: relative;
-  z-index: 3;
-}
-
-body[new-ui] .preview-panel {
-  background-color: white;
+  -webkit-transition: background-color 150ms ease;
+  background: linear-gradient(
+      to bottom, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 1));
   border-top: 1px solid rgb(225, 225, 225);
+  bottom: 0;
+  display: -webkit-box;
   height: 51px;
-  padding: 0 12px 0 7px;
+  left: 0;
+  opacity: 1;
+  padding: 0 10px 0 7px;
+  position: absolute;
+  right: 0;
+  z-index: 3;
 }
 
 .preview-panel[visibility=hiding] {
   /* Using all seems to cause preview panel and checkbox flicking issue. */
   -webkit-transform: translate(0, 5px);
-  -webkit-transition: opacity 220ms ease;
-   opacity: 0;
+  opacity: 0;
+  transition: opacity 220ms ease;
 }
 
 .preview-panel[visibility=hidden] {
@@ -1358,48 +1121,26 @@ body[new-ui] .preview-panel {
 .preview-thumbnails {
   -webkit-box-orient: horizontal;
   display: -webkit-box;
-  padding-left: 39px;
-}
-
-body[new-ui] .preview-thumbnails {
   padding-left: 25px;
 }
 
 .preview-thumbnails > .thumbnail {
-  -webkit-box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-  background-color: #f2f2f2;
+  background-color: white;
   border: 1px solid #fff;
-  height: 45px;
-  margin: 0 0 0 -39px;  /* Show 7 pixels of the overlapped image */
-  position: relative;
-  width: 45px;
-}
-
-body[new-ui] .preview-thumbnails > .thumbnail {
-  -webkit-box-shadow: 0 1px 1px rgba(80, 80, 80, 0.5);
-  border: 1px solid #fff;
+  box-shadow: 0 1px 1px rgba(80, 80, 80, 0.5);
   height: 35px;
   margin: 0 0 0 -25px;  /* Overlapped images. */
+  position: relative;
   width: 35px;
 }
 
-body[new-ui] .preview-thumbnails > .thumbnail {
-  background-color: white;
-}
-
 .preview-thumbnails > .thumbnail > .img-container {
-  background-size: 45px 45px;
-  height: 45px;
-  overflow: hidden;
-  position: relative;
-  width: 45px;
-}
-
-body[new-ui] .preview-thumbnails > .thumbnail > .img-container {
-  -webkit-box-sizing: border-box;
   background-size: 35px 35px;
   border: 1px solid white;
+  box-sizing: border-box;
   height: 35px;
+  overflow: hidden;
+  position: relative;
   width: 35px;
 }
 
@@ -1431,8 +1172,8 @@ body[new-ui] .preview-thumbnails > .thumbnail > .img-container {
 }
 
 .preview-thumbnails > * {
-  -webkit-transition: all 180ms ease-in;
-  -webkit-transition-delay: 300ms;
+  transition: all 180ms ease-in;
+  transition-delay: 300ms;
 }
 
 .preview-thumbnails.has-zoom:hover > .popup {
@@ -1445,34 +1186,26 @@ body[new-ui] .preview-thumbnails > .thumbnail > .img-container {
   opacity: 0;
 }
 
-/* cr.ui.Table has a black focus border by default, which we don't want. */
-.detail-table:focus {
-  border: 0;
-}
-
 /* Table splitter element */
 .table-header-splitter {
-  -webkit-border-start: 1px #d4d4d4 solid;
-  background-color: inherit;
-  height: 27px;
+  background-image: -webkit-image-set(
+    url('../images/files/ui/new-ui/vertical_separator.png') 1x,
+    url('../images/files/ui/new-ui/2x/vertical_separator.png') 2x);
+  background-position: center;
+  background-repeat: repeat-y;
+  height: 20px;
+  top: 10px;
+  width: 5px;
 }
 
-body[new-ui] .table-header-splitter {
+.table-header-splitter:last-child {
   display: none;
 }
 
 /* Container for a table header. */
 .table-header {
-  -webkit-box-sizing: border-box;
-  background-color: #f5f5f5;
-  border-bottom: 1px #d2d2d2 solid;
-  height: 27px;
-}
-
-body[new-ui] .table-header {
-  background-color: transparent;
-  border-bottom: none;
-  height: 40px;
+  box-sizing: border-box;
+  height: 47px;
 }
 
 .table-header-sort-image-desc::after {
@@ -1507,23 +1240,19 @@ body[new-ui] .table-header {
 
 /* Text label in a table header. */
 .table-header-label {
-  line-height: 27px;
-}
-
-body[new-ui] .table-header-label {
   color: rgb(100, 100, 100);
   line-height: 40px;
+  margin: 0 7px;
 }
 
 .table-row-cell > * {
   -webkit-box-align: center;
   -webkit-box-flex: 1;
   -webkit-box-orient: horizontal;
-  margin: 0;
   padding: 0 10px;
 }
 
-body[new-ui] .table-row-cell {
+.table-row-cell {
   color: rgb(100, 100, 100);
 }
 
@@ -1531,13 +1260,13 @@ body[new-ui] .table-row-cell {
   display: -webkit-box;
 }
 
-body[new-ui] .table-row-cell > .detail-name {
+.table-row-cell > .detail-name {
   color: rgb(0, 0, 0);
 }
 
 
-body[new-ui] #list-container list:focus > [selected] .table-row-cell,
-body[new-ui] #list-container list:focus > [selected] .detail-name {
+#list-container list:focus > [selected] .table-row-cell,
+#list-container list:focus > [selected] .detail-name {
   color: white;
 }
 
@@ -1553,53 +1282,66 @@ body[new-ui] #list-container list:focus > [selected] .detail-name {
 }
 
 #select-all-checkbox {
-  -webkit-margin-end: 7px;
-  -webkit-margin-start: 2px;
+  -webkit-margin-end: 13px;
+  -webkit-margin-start: 3px;
   margin-bottom: 0;
   margin-top: 0;
   vertical-align: middle;
 }
 
-body[new-ui] #select-all-checkbox {
-  -webkit-margin-end: 13px;
-  -webkit-margin-start: 3px;
-  vertical-align: middle;
+#list-container .table-header #select-all-checkbox,
+#list-container li.table-row .file-checkbox {
+  -webkit-appearance: none;
+  background-image: -webkit-image-set(
+    url('../images/files/ui/new-ui/select_checkbox.png') 1x,
+    url('../images/files/ui/new-ui/2x/select_checkbox.png') 2x);
+  background-position: center;
+  background-repeat: no-repeat;
+  border-style: none;
+  height: 15px;
+  width: 15px;
 }
 
-#list-container li.table-row:hover .file-checkbox,
-#list-container li.table-row:hover .pin,
-#list-container li.thumbnail-item:hover .file-checkbox {
-  opacity: 0.6;
+#list-container li.table-row .file-checkbox {
+  vertical-align: top;
 }
 
-#list-container li.table-row[selected] .file-checkbox,
-#list-container li.table-row[selected] .pin,
-#list-container li.thumbnail-item[selected] .file-checkbox {
-  opacity: 1.0 !important;
+#list-container .table-header #select-all-checkbox::after,
+#list-container li.table-row .file-checkbox::after {
+  content: none;
 }
 
-body[new-ui] #list-container list:focus li.table-row[selected] .file-checkbox {
-  -webkit-filter: contrast(300%) invert(100%);
+#list-container .table-header #select-all-checkbox:checked,
+#list-container li.table-row .file-checkbox:checked {
+  background-image: -webkit-image-set(
+    url('../images/files/ui/new-ui/select_checkbox_checked.png') 1x,
+    url('../images/files/ui/new-ui/2x/select_checkbox_checked.png') 2x);
+}
+
+#list-container .table-header #select-all-checkbox:checked,
+#list-container list li.table-row[selected] .file-checkbox {
+  -webkit-filter: brightness(0) opacity(40%);
+}
+
+#list-container list:focus li.table-row[selected] .file-checkbox {
+  -webkit-filter: brightness(0) invert();
 }
 
 #list-container li.table-row,
 #default-actions-list li {
-  border: 1px solid white;
-  border-left-width: 0;
-  border-right-width: 0;
-  height: 39px;
-  padding-bottom: 1px;
-  padding-top: 1px;
-}
-
-body[new-ui] #list-container li.table-row {
-  height: 30px;
+  height: 29px;
+  line-height: 29px;
 }
 
 /* The icon in the name column. See file_types.css for specific icons. */
 .detail-icon {
   height: 24px;
   width: 24px;
+}
+
+#detail-table .detail-icon {
+  /* To shift the icon position. */
+  margin-bottom: 2px;
 }
 
 .metadata-item {
@@ -1617,6 +1359,17 @@ body[new-ui] #list-container li.table-row {
   -webkit-box-flex: 1;
 }
 
+#delete-button {
+  background-image: -webkit-image-set(
+    url('../images/files/ui/new-ui/onbutton_trash.png') 1x,
+    url('../images/files/ui/new-ui/2x/onbutton_trash.png') 2x);
+  background-position: center;
+  background-repeat: no-repeat;
+  min-width: 21px;  /* overrride */
+  padding: 0;  /* overrride */
+  width: 21px;
+}
+
 #delete-button[disabled] {
   display: none;
 }
@@ -1624,6 +1377,10 @@ body[new-ui] #list-container li.table-row {
 #tasks-menu menuitem:not(.change-default) {
   background-position: left 10px center;
   padding-left: 32px;
+}
+
+menu[showShortcuts] > menuitem[selected]:not([disabled])::after {
+  color: white;
 }
 
 #preview-lines {
@@ -1712,8 +1469,7 @@ body:not([type='saveas-file']) #filename-input-box {
 /* Dimmed items */
 
 body[type='folder'] .file,
-body[drive] .dialog-container[connection='offline'] .dim-offline,
-body[drive] .dialog-container[connection='metered'] .dim-metered {
+body[drive] .dialog-container[connection='offline'] .dim-offline {
   opacity: 0.4;
 }
 
@@ -1745,15 +1501,19 @@ body[overlay-visible] > :not(.overlay-pane) {
 }
 
 #drag-container .drag-contents {
-  -webkit-border-radius: 3px;
   -webkit-box-orient: horizontal;
-  -webkit-box-shadow: 0 2px 2px 0 rgba(0, 0, 0, .2);
-  -webkit-transition: opacity 200ms ease-in;
   background-color: #fafafa;
   border: 1px solid #bbb;
+  border-radius: 3px;
+  box-shadow: 0 2px 2px 0 rgba(0, 0, 0, .2);
   display: -webkit-box;
   margin-bottom: 5px;
   padding: 6px;
+  transition: opacity 200ms ease-in;
+}
+
+#drag-container .drag-contents.for-image  {
+  padding: 2px;
 }
 
 #drag-container .thumbnail-item {
@@ -1761,11 +1521,16 @@ body[overlay-visible] > :not(.overlay-pane) {
   display: -webkit-box;
 }
 
+/* When changing these properties please preserve these conditions:
+   1. width == height (so that the rotated thumbnail does not look off-center)
+   2. width % 8 == 0 (to minimize rounding errors in the centering code) */
 #drag-container .img-container {
   -webkit-box-flex: 0;
   display: -webkit-box;
+  height: 64px;
   overflow: hidden;
   position: relative;
+  width: 64px;
 }
 
 #drag-container .label {
@@ -1779,24 +1544,8 @@ body[overlay-visible] > :not(.overlay-pane) {
   white-space: nowrap;
 }
 
-#drag-container .drag-contents.drag-image-thumbnail  {
-  padding: 2px;
-}
-
-/* When changing these properties please preserve these conditions:
-   1. width == height (so that the rotated thumbnail does not look off-center)
-   2. width % 8 == 0 (to minimize rounding errors in the centering code) */
-#drag-container .img-container {
-  height: 64px;
-  width: 64px;
-}
-
 menu.file-context-menu {
   z-index: 4;
-}
-
-body:not([new-ui]) menu.chrome-menu {
-  min-width: 200px;
 }
 
 menu.chrome-menu hr {
@@ -1822,7 +1571,7 @@ div.offline > * {
 }
 
 div.shade {
-  /* -webkit-transition: opacity 1000ms linear; */
+  /* transition: opacity 1000ms linear; */
   background-color: rgba(255, 255, 255, 0.8);
   bottom: 0;
   left: 0;
@@ -1902,8 +1651,6 @@ body[drive='error'] #unmounted-panel > .error,
   text-decoration: none;
 }
 
-body[ash] .dialog-title,
-
 body[type='folder'] [invisibleif~='folder'],
 body[type='saveas-file'] [invisibleif~='saveas-file'],
 body[type='open-file'] [invisibleif~='open-file'],
@@ -1918,34 +1665,6 @@ body[type='full-page'] [visibleif]:not([visibleif~='full-page']) {
   display: none;
 }
 
-body:not([new-ui]) #gear-button::before {
-  background-image: url('../images/files/ui/settings.svg');
-  background-position: 20px center;
-  background-repeat: no-repeat;
-  bottom: 0;
-  content: '';
-  left: 0;
-  opacity: 0.75;
-  position: absolute;
-  right: 0;
-  top: 0;
-}
-
-body:not([new-ui]) #gear-button:hover::before {
-  opacity: 1;
-}
-
-body:not([new-ui]) #gear-button {
-  overflow: hidden;
-  text-align: left;
-  width: 54px;
-}
-
-body:not([new-ui]) #gear-button span.disclosureindicator {
-  float: none;
-  margin-left: 42px;
-}
-
 .buttonbar > * {
   position: relative;
 }
@@ -1957,11 +1676,10 @@ body:not([new-ui]) #gear-button span.disclosureindicator {
 
 /* Tooltips */
 .tooltip {
-  -webkit-border-radius: 0;
-  -webkit-box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-  -webkit-box-sizing: border-box;
   background: #2d2d2d;
+  border-radius: 0;
   box-shadow: 1px 2px 4px #ccc;
+  box-sizing: border-box;
   color: white;
   display: block;
   font-size: 11px;
@@ -2031,56 +1749,12 @@ body:not([new-ui]) #gear-button span.disclosureindicator {
   display: block;
 }
 
-body:not([new-ui]) #downloads-root-context-menu {
-  min-width: 250px;
-}
-
-body:not([new-ui]) #volume-space-info {
-  -webkit-box-pack: justify;
-  display: -webkit-box;
-}
-
-body:not([new-ui]) #volume-space-info-label {
-  display: block;
-}
-
-body:not([new-ui]) #volume-space-info > div {
-  -webkit-box-flex: 1;
-  border: 1px solid rgb(192, 192, 192);
-  display: block;
-  height: 11px;
-  margin: 8px 0 9px 10px;
-  min-width: 30px;
-}
-
-body:not([new-ui]) #volume-space-info-bar[pending] {
-  -webkit-animation-duration: 800ms;
-  -webkit-animation-iteration-count: infinite;
-  -webkit-animation-name: bg;
-  -webkit-animation-timing-function: linear;
-  background-color: rgb(192, 192, 192);
-  background-image: -webkit-linear-gradient(315deg, transparent,
-      transparent 33%, rgba(0, 0, 0, 0.12) 33%, rgba(0, 0, 0, 0.12) 66%,
-      transparent 66%, transparent);
-  background-position: 0 0;
-  background-repeat: repeat-x;
-  background-size: 16px 8px;
-}
-
-body:not([new-ui]) #volume-space-info-bar {
-  background-color: rgb(192, 192, 192);
-  border: 1px solid rgb(255, 255, 255);
-  box-sizing: border-box;
-  height: 100%;
-  width: 50%;
-}
-
-body[new-ui] #volume-space-info-contents {
+#volume-space-info-contents {
   -webkit-box-align: center;
   display: -webkit-box;
 }
 
-body[new-ui] #volume-space-info-contents > div {
+#volume-space-info-contents > div {
   -webkit-box-flex: 1;
   -webkit-margin-start: 15px;
   display: -webkit-box;
@@ -2091,11 +1765,12 @@ body[new-ui] #volume-space-info-contents > div {
 }
 
 #list-container .table-header-cell:hover {
-  background-color: #ececec;
+  background-color: inherit;
 }
 
-body[new-ui] #list-container .table-header-cell:hover {
-  background-color: inherit;
+#list-container .table-header-cell:first-child {
+  -webkit-box-sizing: border-box;
+  -webkit-padding-start: 8px;
 }
 
 button:focus {
@@ -2116,46 +1791,31 @@ button:focus {
   display: none;
 }
 
-body:not([new-ui]) list.autocomplete-suggestions {
-  -webkit-border-radius: 2px;
-  background-color: white;
-  border: 1px solid #aaa;
-  box-sizing: border-box;  /* To match the width with the search box's. */
-  min-height: 0;
-  position: fixed;
-  z-index: 3;
-}
-
-body[new-ui] list.autocomplete-suggestions {
-  -webkit-box-shadow: 0 1px 4px 0 rgba(0, 0, 0, .5);
+list.autocomplete-suggestions {
+  -webkit-margin-before: -7px;
+  -webkit-margin-start: -38px;
   background-color: rgb(250, 250, 250);
   border: 1px solid rgb(255, 255, 255);
   border-radius: 3px;
+  box-shadow: 0 1px 4px 0 rgba(0, 0, 0, .5);
   box-sizing: border-box;  /* To match the width with the search box's. */
   color: rgb(34, 34, 34);
   overflow: hidden;
   padding: 5px 0;
   position: fixed;
+  width: 300px !important; /* This overrides the value specified by script. */
   z-index: 3;
 }
 
 list.autocomplete-suggestions > li {
-  -webkit-border-radius: 0;
   -webkit-box-align: center;
   display: -webkit-box;
-  margin: 0;  /* To prevent vertical overflow. */
   padding: 3px 0;
 }
 
-body:not([new-ui]) list.autocomplete-suggestions > li:hover {
-  background-color: white;
-  border: 1px solid white;
-}
-
-body[new-ui] list.autocomplete-suggestions > li,
-body[new-ui] list.autocomplete-suggestions > li:hover {
-  background-color: transparent;
-  border: none;
+list.autocomplete-suggestions > li > div.detail-icon {
+  -webkit-margin-end: 6px;
+  -webkit-margin-start: 6px;
 }
 
 list.autocomplete-suggestions > li > div.detail-text {
@@ -2165,22 +1825,11 @@ list.autocomplete-suggestions > li > div.detail-text {
 }
 
 list.autocomplete-suggestions > li > div.detail-text em {
+  color: rgb(150, 150, 150);
   font-style: normal;
 }
 
-body[new-ui] list.autocomplete-suggestions > li > div.detail-text em {
-  color: rgb(150, 150, 150);
-}
-
-body:not([new-ui]) list.autocomplete-suggestions > li > div[search-icon] {
-  background: -webkit-image-set(
-    url('../images/files/ui/icon_search.png') 1x,
-    url('../images/files/ui/2x/icon_search.png') 2x);
-  background-position: center;
-  background-repeat: no-repeat;
-}
-
-body[new-ui] list.autocomplete-suggestions > li > div[search-icon] {
+list.autocomplete-suggestions > li > div[search-icon] {
   background: -webkit-image-set(
     url('../images/files/ui/new-ui/search_icon_active.png') 1x,
     url('../images/files/ui/new-ui/2x/search_icon_active.png') 2x);
@@ -2188,45 +1837,59 @@ body[new-ui] list.autocomplete-suggestions > li > div[search-icon] {
   background-repeat: no-repeat;
 }
 
-body:not([new-ui]) list.autocomplete-suggestions[hasElementFocus] > [selected],
-body:not([new-ui]) list.autocomplete-suggestions[hasElementFocus] > [lead],
-body:not([new-ui]) list.autocomplete-suggestions:not([hasElementFocus]) >
-    [selected],
-body:not([new-ui]) list.autocomplete-suggestions:not([hasElementFocus]) >
-    [lead] {
-  background-color: rgb(238, 238, 238);
-  background-image: none;
-  border: 1px solid white;
+list.autocomplete-suggestions > li[selected] > div[search-icon],
+list.autocomplete-suggestions > li[lead] > div[search-icon] {
+  -webkit-filter: brightness(0) invert();
 }
 
-body[new-ui] list.autocomplete-suggestions[hasElementFocus] > [selected],
-body[new-ui] list.autocomplete-suggestions[hasElementFocus] > [lead],
-body[new-ui] list.autocomplete-suggestions:not([hasElementFocus]) > [selected],
-body[new-ui] list.autocomplete-suggestions:not([hasElementFocus]) > [lead] {
-  background-color: rgb(235, 235, 235);
-  background-image: none;
-  border: none;
+list.autocomplete-suggestions > [selected],
+list.autocomplete-suggestions > [lead] {
+  background-color: rgb(66, 129, 244);
+  color: white;
 }
 
-body[new-ui] #gear-menu > menuitem:not(.menuitem-button) {
+list.autocomplete-suggestions > [selected] > div.detail-text em,
+list.autocomplete-suggestions > [lead] > div.detail-text em {
+  color: white;
+}
+
+#gear-menu {
+  margin-top: 8px;
+}
+
+#gear-menu > menuitem:not(.menuitem-button) {
   margin-right: 50px;
 }
 
 /* View buttons in the gear menu. */
 
-body[new-ui] menuitem#detail-view {
+menuitem#detail-view {
   background-image: -webkit-image-set(
     url('../images/files/ui/new-ui/button_list_view.png') 1x,
     url('../images/files/ui/new-ui/2x/button_list_view.png') 2x);
 }
 
-body[new-ui] menuitem#thumbnail-view {
+menuitem#detail-view[selected]:not([disabled]),
+menuitem#detail-view[lead]:not([disabled]) {
+  background-image: -webkit-image-set(
+    url('../images/files/ui/new-ui/button_list_view_white.png') 1x,
+    url('../images/files/ui/new-ui/2x/button_list_view_white.png') 2x);
+}
+
+menuitem#thumbnail-view {
   background-image: -webkit-image-set(
     url('../images/files/ui/new-ui/button_mosaic_view.png') 1x,
     url('../images/files/ui/new-ui/2x/button_mosaic_view.png') 2x);
 }
 
-body[new-ui] #iframe-drag-area {
+menuitem#thumbnail-view[selected]:not([disabled]),
+menuitem#thumbnail-view[lead]:not([disabled]) {
+  background-image: -webkit-image-set(
+    url('../images/files/ui/new-ui/button_mosaic_view_white.png') 1x,
+    url('../images/files/ui/new-ui/2x/button_mosaic_view_white.png') 2x);
+}
+
+#iframe-drag-area {
   -webkit-app-region: drag;
   height: 45px;
   left: 64px;
@@ -2235,4 +1898,30 @@ body[new-ui] #iframe-drag-area {
   top: 0;
   width: auto;
   z-index: 101;
+}
+
+.cr-dialog-frame.error-dialog-frame {
+  width: 300px;
+}
+
+.error-dialog-frame .error-dialog-img {
+  background-image: -webkit-image-set(
+    url('chrome://theme/IDR_ERROR_NETWORK_GENERIC') 1x,
+    url('chrome://theme/IDR_ERROR_NETWORK_GENERIC@2x') 2x);
+  background-repeat: no-repeat;
+  background-position: center;
+  height: 40px;
+}
+
+.error-dialog-frame .cr-dialog-cancel {
+  display: none;
+}
+
+.error-dialog-frame .cr-dialog-close,
+.error-dialog-frame .cr-dialog-title {
+  display: none;
+}
+
+.error-dialog-frame .cr-dialog-text {
+  text-align: center;
 }

@@ -128,8 +128,7 @@ gboolean ChromeWebContentsViewDelegateGtk::OnNativeViewFocusEvent(
 }
 
 void ChromeWebContentsViewDelegateGtk::ShowContextMenu(
-    const content::ContextMenuParams& params,
-    content::ContextMenuSourceType type) {
+    const content::ContextMenuParams& params) {
   // Find out the RenderWidgetHostView that corresponds to the render widget on
   // which this context menu is showed, so that we can retrieve the last mouse
   // down event on the render widget and use it as the timestamp of the
@@ -137,9 +136,9 @@ void ChromeWebContentsViewDelegateGtk::ShowContextMenu(
   content::RenderWidgetHostView* view = NULL;
   if (params.custom_context.render_widget_id !=
       content::CustomContextMenuContext::kCurrentRenderWidget) {
-    content::RenderWidgetHost* host =
-        web_contents_->GetRenderProcessHost()->GetRenderWidgetHostByID(
-            params.custom_context.render_widget_id);
+    content::RenderWidgetHost* host = content::RenderWidgetHost::FromID(
+        web_contents_->GetRenderProcessHost()->GetID(),
+        params.custom_context.render_widget_id);
     if (!host) {
       NOTREACHED();
       return;

@@ -13,7 +13,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time.h"
-#include "media/audio/audio_input_stream_impl.h"
+#include "media/audio/agc_audio_stream.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_parameters.h"
 
@@ -25,7 +25,7 @@ class AudioManagerLinux;
 // Provides an input stream for audio capture based on the ALSA PCM interface.
 // This object is not thread safe and all methods should be invoked in the
 // thread that created the object.
-class AlsaPcmInputStream : public AudioInputStreamImpl {
+class AlsaPcmInputStream : public AgcAudioStream<AudioInputStream> {
  public:
   // Pass this to the constructor if you want to attempt auto-selection
   // of the audio recording device.
@@ -76,7 +76,7 @@ class AlsaPcmInputStream : public AudioInputStreamImpl {
   AlsaWrapper* wrapper_;
   base::TimeDelta buffer_duration_;  // Length of each recorded buffer.
   AudioInputCallback* callback_;  // Valid during a recording session.
-  base::Time next_read_time_;  // Scheduled time for the next read callback.
+  base::TimeTicks next_read_time_;  // Scheduled time for next read callback.
   snd_pcm_t* device_handle_;  // Handle to the ALSA PCM recording device.
   snd_mixer_t* mixer_handle_; // Handle to the ALSA microphone mixer.
   snd_mixer_elem_t* mixer_element_handle_; // Handle to the capture element.

@@ -254,10 +254,11 @@ void DownloadControllerAndroidImpl::OnDownloadStarted(
 
 void DownloadControllerAndroidImpl::OnDownloadUpdated(DownloadItem* item) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (item->IsDangerous() && !item->IsCancelled())
+  if (item->IsDangerous() &&
+      (item->GetState() != DownloadItem::CANCELLED))
     OnDangerousDownload(item);
 
-  if (!item->IsComplete())
+  if (item->GetState() != DownloadItem::COMPLETE)
     return;
 
   // Multiple OnDownloadUpdated() notifications may be issued while the download
@@ -271,7 +272,7 @@ void DownloadControllerAndroidImpl::OnDownloadUpdated(DownloadItem* item) {
   ScopedJavaLocalRef<jstring> jmime_type =
       ConvertUTF8ToJavaString(env, item->GetMimeType());
   ScopedJavaLocalRef<jstring> jpath =
-      ConvertUTF8ToJavaString(env, item->GetFullPath().value());
+      ConvertUTF8ToJavaString(env, item->GetTargetFilePath().value());
   ScopedJavaLocalRef<jstring> jfilename = ConvertUTF8ToJavaString(
       env, item->GetTargetFilePath().BaseName().value());
 
@@ -362,9 +363,9 @@ void DownloadControllerAndroidImpl::DangerousDownloadValidated(
   if (!item)
     return;
   if (accept)
-    item->DangerousDownloadValidated();
+    item->ValidateDangerousDownload();
   else
-    item->Delete(content::DownloadItem::DELETE_DUE_TO_USER_DISCARD);
+    item->Remove();
 }
 
 DownloadControllerAndroidImpl::DownloadInfoAndroid::DownloadInfoAndroid(

@@ -2,11 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// See c/c/e/features/* to understand this file, in particular feature.h,
+// simple_feature.h, and base_feature_provider.h.
+
 {
   "activeTab": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"],
     "min_manifest_version": 2
+  },
+  "activityLogPrivate": {
+    "channel": "dev",
+    "extension_types": ["extension"],
+    "whitelist": [
+      "acldcpdepobcjbdanifkmfndkjoilgba",  // Activity Log
+      "ajabfgledjhbabeoojlabelaifmakodf"   // For testing
+    ]
   },
   "adview": {
     "channel": "dev",
@@ -25,10 +36,20 @@
     "channel": "stable",
     "extension_types": ["platform_app"]
   },
-  "audio": {
-    "channel": "stable",
-    "extension_types": ["platform_app"]
-  },
+  "audio": [
+    {
+      "channel": "dev",
+      "extension_types": ["platform_app"]
+    },
+    {
+      "channel": "stable",
+      "extension_types": ["platform_app"],
+      "whitelist": [
+        "8C3741E3AF0B93B6E8E0DDD499BB0B74839EA578",
+        "E703483CEF33DEC18B4B6DD84B5C776FB9182BDB"
+      ]
+    }
+  ],
   "autotestPrivate": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"],
@@ -77,7 +98,10 @@
   "chromeosInfoPrivate": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"],
-    "location": "component"
+    "whitelist": [
+      "8C3741E3AF0B93B6E8E0DDD499BB0B74839EA578",  // http://crbug.com/234235
+      "E703483CEF33DEC18B4B6DD84B5C776FB9182BDB"   // http://crbug.com/234235
+    ]
   },
   "clipboardRead": {
     "channel": "stable",
@@ -114,6 +138,21 @@
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
   },
+  "diagnostics": [
+    {
+      "channel": "dev",
+      "extension_types": ["platform_app"]
+    },
+    {
+      "channel": "stable",
+      "extension_types": ["platform_app"],
+      "whitelist": [
+        "mlocfejafidcakdddnndjdngfmncfbeg",  // CCD Development
+        "ganomidahfnpdchomfgdoppjmmedlhia",  // CCD Testing
+        "eemlkeanncmjljgehlbplemhmdmalhdc"   // CCD Release
+      ]
+    }
+  ],
   "debugger": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
@@ -122,8 +161,10 @@
     "channel": "dev",
     "extension_types": ["platform_app"],
     "whitelist": [
-        "lphgohfeebnhcpiohjndkgbhhkoapkjc", // Apps Debugger
-        "gonnpeheodhmhdjiimoiheniambmdcco" // Apps Editor.
+        "lphgohfeebnhcpiohjndkgbhhkoapkjc",  // Apps Debugger
+        "gonnpeheodhmhdjiimoiheniambmdcco",  // Apps Editor old.
+        // TODO(grv) : clean up once after publish.
+        "cbelnpbjogfbjamhpbofhlnklecjpido"  // Apps Editor published.
     ]
   },
   "devtools": {
@@ -163,10 +204,6 @@
       "16CA7A47AAE4BE49B1E75A6B960C3875E945B264"   // Release
     ]
   },
-  "identity": {
-    "channel": "trunk",
-    "extension_types": ["extension", "platform_app"]
-  },
   "enterprise.platformKeysPrivate": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"],
@@ -179,6 +216,15 @@
     "channel": "stable",
     "extension_types": [
       "extension", "packaged_app", "hosted_app", "platform_app"
+    ]
+  },
+  "feedbackPrivate": {
+    "channel": "stable",
+    "extension_types": ["extension", "platform_app"],
+    "whitelist": [
+      "7910EAFDAF64B947E1CB31B333A9BD14CA556B6C",  // Feedback UI.
+      "8C3741E3AF0B93B6E8E0DDD499BB0B74839EA578",  // http://crbug.com/234235
+      "E703483CEF33DEC18B4B6DD84B5C776FB9182BDB"   // http://crbug.com/234235
     ]
   },
   "fileBrowserHandler": {
@@ -197,6 +243,10 @@
     "channel": "stable",
     "extension_types": ["extension"],
     "whitelist": [ "2FC374607C2DF285634B67C64A2E356C607091C3" ]
+  }],
+  "fileSystem.retainFiles": [{
+    "channel": "trunk",
+    "extension_types": ["platform_app"]
   }],
   "fileSystem.write": [{
     "channel": "stable",
@@ -224,6 +274,17 @@
     "channel": "stable",
     "extension_types": ["extension", "packaged_app"]
   },
+  "identity": {
+    "channel": "stable",
+    "extension_types": ["extension", "platform_app"]
+  },
+  "identityPrivate": {
+    "channel": "stable",
+    "extension_types": [
+      "packaged_app"
+    ],
+    "location": "component"
+  },
   "idle": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"]
@@ -233,7 +294,7 @@
     "extension_types": ["extension", "packaged_app"],
     "inplies_full_url_access": true
   },
-  "inputMethodPrivate": {
+  "inputMethodPrivate": [{
     "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "whitelist": [
@@ -241,10 +302,13 @@
       "gnedhmakppccajfpfiihfcdlnpgomkcf",  // Citrix Receiver Beta
       "fjcibdnjlbfnbfdjneajpipnlcppleek",  // Citrix Receiver Dev
       "pnhechapfaindjhompbnflcldabbghjo",  // HTerm
-      "okddffdblfhhnmhodogpojmfkjmhinfp",  // HTerm dev
-      "fpfbhcjppmaeaijcidgiibchfbnhbelj"  // Google Japanese Input
+      "okddffdblfhhnmhodogpojmfkjmhinfp"  // HTerm dev
     ]
-  },
+  },{
+    "channel": "stable",
+    "extension_types": ["extension", "packaged_app", "platform_app"],
+    "location": "component"
+  }],
   "location": [
     {
       "channel": "dev",
@@ -265,10 +329,20 @@
     "extension_types": ["extension", "packaged_app"],
     "location": "component"
   },
-  "management": {
-    "channel": "stable",
-    "extension_types": ["extension", "packaged_app"]
-  },
+  "management": [
+    {
+      "channel": "stable",
+      "extension_types": ["extension", "packaged_app"]
+    },
+    {
+      "channel": "stable",
+      "extension_types": ["platform_app"],
+      "whitelist": [
+          "gonnpeheodhmhdjiimoiheniambmdcco",  // Apps Editor old.
+          "cbelnpbjogfbjamhpbofhlnklecjpido"  // Apps Editor published.
+      ]
+    }
+  ],
   "mediaGalleries": {
     "channel": "stable",
     "extension_types": [ "platform_app" ]
@@ -312,38 +386,39 @@
       "bpmcpldpdmajfigpchkicefoigmkfalc",  // Quickoffice component extension
       "ehibbfinohgbchlgdbfpikodjaojhccn",  // Editor
       "pmofbkohncoogjjhahejjfbppikbjigm",  // Google Now
-      "iejldcgjigodajhjecapkeiggcncflph"   // Google Now dev
+      "iejldcgjigodajhjecapkeiggcncflph",  // Google Now dev
+      "khopmbdjffemhegeeobelklnbglcdgfh",  // RU-NTP
+      "mlocfejafidcakdddnndjdngfmncfbeg",  // CCD Development
+      "ganomidahfnpdchomfgdoppjmmedlhia",  // CCD Testing
+      "eemlkeanncmjljgehlbplemhmdmalhdc"   // CCD Release
     ]
   },
-  "nativeMessaging": [
-    {
-      "channel": "beta",
-      "extension_types": [
-        "extension", "packaged_app", "platform_app"
-      ]
-    },
-    {
-      "channel": "stable",
-      "extension_types": [
-        "extension", "packaged_app", "platform_app"
-      ],
-      "whitelist": [
-        "gbchcmhmhahfdphkhkmpfmihenigjmpp",  // Chrome Remote Desktop
-        "kgngmbheleoaphbjbaiobfdepmghbfah",  // Dogfood Chrome Remote Desktop
-        "odkaodonbgfohohmklejpjiejmcipmib",  // QA Chrome Remote Desktop
-        "ojoimpklfciegopdfgeenehpalipignm"   // Chromoting canary
-      ]
-    }
-  ],
+  "musicManagerPrivate": {
+    "channel": "dev",
+    "extension_types": ["platform_app"],
+    "whitelist": [
+      "4B1D0E19C6C43C008C44A8278C8B5BFE15ABEB3C", // Music Manager
+      "B8F61FD1B25DE03706DBB8906A73261E4DBB992A"  // Test
+    ]
+  },
+  "nativeMessaging": {
+    "channel": "stable",
+    "extension_types": [
+      "extension", "packaged_app", "platform_app"
+    ]
+  },
   "networkingPrivate": {
     "channel": "stable",
-    "extension_types": ["extension", "packaged_app"],
+    "extension_types": ["extension", "packaged_app", "platform_app"],
     "whitelist": [
       "pkedcjkdefgpdelpbcmbmeomcjbeemfm",  // Trusted Tester
       "fmfcbgogabcbclcofgocippekhfcmgfj",  // Staging
       "hfaagokkkhdbgiakmmlclaapfelnkoah",  // Canary
       "F155646B5D1CA545F7E1E4E20D573DFDD44C2540",  // Trusted Tester (public)
-      "16CA7A47AAE4BE49B1E75A6B960C3875E945B264"   // Release
+      "16CA7A47AAE4BE49B1E75A6B960C3875E945B264",  // Release
+      "mlocfejafidcakdddnndjdngfmncfbeg",  // CCD Development
+      "ganomidahfnpdchomfgdoppjmmedlhia",  // CCD Testing
+      "eemlkeanncmjljgehlbplemhmdmalhdc"   // CCD Release
     ]
   },
   "notifications": {
@@ -377,6 +452,13 @@
     "extension_types": [
       "extension", "hosted_app", "packaged_app", "platform_app"
     ]
+  },
+  "preferencesPrivate":  {
+    "channel": "dev",
+    "extension_types": [
+      "extension"
+    ],
+    "location": "component"
   },
   "privacy": {
     "channel": "stable",
@@ -445,6 +527,20 @@
     "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "min_manifest_version": 2
+  },
+  "systemInfo.cpu": {
+    "channel": "dev",
+    "extension_types": [
+      "extension", "packaged_app", "hosted_app", "platform_app"
+    ],
+    "whitelist": [""]
+  },
+  "systemInfo.memory": {
+    "channel": "dev",
+    "extension_types": [
+      "extension", "packaged_app", "hosted_app", "platform_app"
+    ],
+    "whitelist": [""]
   },
   "systemInfo.display": {
     "channel": "stable",

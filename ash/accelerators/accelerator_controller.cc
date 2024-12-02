@@ -37,6 +37,7 @@
 #include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
+#include "ash/system/tray/system_tray_notifier.h"
 #include "ash/system/web_notification/web_notification_tray.h"
 #include "ash/touch/touch_observer_hud.h"
 #include "ash/volume_control_delegate.h"
@@ -113,7 +114,7 @@ bool HandleAccessibleFocusCycle(bool reverse) {
   views::View* view = focus_manager->GetFocusedView();
   if (!view)
     return false;
-  if (view->GetClassName() == views::WebView::kViewClassName)
+  if (!strcmp(view->GetClassName(), views::WebView::kViewClassName))
     return false;
 
   focus_manager->AdvanceFocus(reverse);
@@ -401,8 +402,11 @@ void AcceleratorController::Init() {
   RegisterAccelerators(kDesktopAcceleratorData, kDesktopAcceleratorDataLength);
 #endif
 
-  if (DebugShortcutsEnabled())
+  if (DebugShortcutsEnabled()) {
     RegisterAccelerators(kDebugAcceleratorData, kDebugAcceleratorDataLength);
+    for (size_t i = 0; i < kReservedDebugActionsLength; ++i)
+      reserved_actions_.insert(kReservedDebugActions[i]);
+  }
 
 #if defined(OS_CHROMEOS)
   keyboard_brightness_control_delegate_.reset(
@@ -527,8 +531,11 @@ bool AcceleratorController::PerformAction(int action,
       HandleCycleWindowLinear(CYCLE_FORWARD);
       return true;
 #if defined(OS_CHROMEOS)
-    case CYCLE_DISPLAY_MODE:
-      Shell::GetInstance()->display_controller()->CycleDisplayMode();
+    case ADD_REMOVE_DISPLAY:
+      Shell::GetInstance()->display_manager()->AddRemoveDisplay();
+      return true;
+    case TOGGLE_MIRROR_MODE:
+      Shell::GetInstance()->display_controller()->ToggleMirrorMode();
       return true;
     case LOCK_SCREEN:
       if (key_code == ui::VKEY_L)
@@ -549,7 +556,7 @@ bool AcceleratorController::PerformAction(int action,
     case TOGGLE_SPOKEN_FEEDBACK:
       return HandleToggleSpokenFeedback();
     case TOGGLE_WIFI:
-      Shell::GetInstance()->system_tray_delegate()->ToggleWifi();
+      Shell::GetInstance()->system_tray_notifier()->NotifyRequestToggleWifi();
       return true;
     case TOUCH_HUD_CLEAR: {
       internal::RootWindowController* controller =
@@ -577,7 +584,8 @@ bool AcceleratorController::PerformAction(int action,
       ash::Shell::GetInstance()->delegate()->OpenFeedbackPage();
       return true;
     case EXIT:
-      Shell::GetInstance()->delegate()->Exit();
+      // UMA metrics are recorded in the handler.
+      exit_warning_handler_.HandleAccelerator();
       return true;
     case NEW_INCOGNITO_WINDOW:
       Shell::GetInstance()->delegate()->NewWindow(true /* is_incognito */);
@@ -702,18 +710,14 @@ bool AcceleratorController::PerformAction(int action,
       break;
     case SHOW_SYSTEM_TRAY_BUBBLE: {
       internal::RootWindowController* controller =
-          Shell::IsLauncherPerDisplayEnabled() ?
-          internal::RootWindowController::ForActiveRootWindow() :
-          Shell::GetPrimaryRootWindowController();
+          internal::RootWindowController::ForActiveRootWindow();
       if (!controller->GetSystemTray()->HasSystemBubble())
         controller->GetSystemTray()->ShowDefaultView(BUBBLE_CREATE_NEW);
       break;
     }
     case SHOW_MESSAGE_CENTER_BUBBLE: {
       internal::RootWindowController* controller =
-          Shell::IsLauncherPerDisplayEnabled() ?
-          internal::RootWindowController::ForActiveRootWindow() :
-          Shell::GetPrimaryRootWindowController();
+          internal::RootWindowController::ForActiveRootWindow();
       internal::StatusAreaWidget* status_area_widget =
           controller->shelf()->status_area_widget();
       if (status_area_widget) {
@@ -758,32 +762,32 @@ bool AcceleratorController::PerformAction(int action,
       if (ime_control_delegate_)
         return ime_control_delegate_->HandleSwitchIme(accelerator);
       break;
-    case SELECT_WIN_0:
-      Launcher::ForPrimaryDisplay()->SwitchToWindow(0);
+    case LAUNCH_APP_0:
+      Launcher::ForPrimaryDisplay()->LaunchAppIndexAt(0);
       return true;
-    case SELECT_WIN_1:
-      Launcher::ForPrimaryDisplay()->SwitchToWindow(1);
+    case LAUNCH_APP_1:
+      Launcher::ForPrimaryDisplay()->LaunchAppIndexAt(1);
       return true;
-    case SELECT_WIN_2:
-      Launcher::ForPrimaryDisplay()->SwitchToWindow(2);
+    case LAUNCH_APP_2:
+      Launcher::ForPrimaryDisplay()->LaunchAppIndexAt(2);
       return true;
-    case SELECT_WIN_3:
-      Launcher::ForPrimaryDisplay()->SwitchToWindow(3);
+    case LAUNCH_APP_3:
+      Launcher::ForPrimaryDisplay()->LaunchAppIndexAt(3);
       return true;
-    case SELECT_WIN_4:
-      Launcher::ForPrimaryDisplay()->SwitchToWindow(4);
+    case LAUNCH_APP_4:
+      Launcher::ForPrimaryDisplay()->LaunchAppIndexAt(4);
       return true;
-    case SELECT_WIN_5:
-      Launcher::ForPrimaryDisplay()->SwitchToWindow(5);
+    case LAUNCH_APP_5:
+      Launcher::ForPrimaryDisplay()->LaunchAppIndexAt(5);
       return true;
-    case SELECT_WIN_6:
-      Launcher::ForPrimaryDisplay()->SwitchToWindow(6);
+    case LAUNCH_APP_6:
+      Launcher::ForPrimaryDisplay()->LaunchAppIndexAt(6);
       return true;
-    case SELECT_WIN_7:
-      Launcher::ForPrimaryDisplay()->SwitchToWindow(7);
+    case LAUNCH_APP_7:
+      Launcher::ForPrimaryDisplay()->LaunchAppIndexAt(7);
       return true;
-    case SELECT_LAST_WIN:
-      Launcher::ForPrimaryDisplay()->SwitchToWindow(-1);
+    case LAUNCH_LAST_APP:
+      Launcher::ForPrimaryDisplay()->LaunchAppIndexAt(-1);
       return true;
     case WINDOW_SNAP_LEFT:
     case WINDOW_SNAP_RIGHT: {
@@ -827,10 +831,6 @@ bool AcceleratorController::PerformAction(int action,
       return true;
     }
     case TOGGLE_MAXIMIZED: {
-      if (key_code == ui::VKEY_MEDIA_LAUNCH_APP2) {
-        shell->delegate()->RecordUserMetricsAction(
-            UMA_ACCEL_MAXIMIZE_RESTORE_F4);
-      }
       shell->delegate()->ToggleMaximized();
       return true;
     }
@@ -857,7 +857,7 @@ bool AcceleratorController::PerformAction(int action,
     case TOGGLE_ROOT_WINDOW_FULL_SCREEN:
       return HandleToggleRootWindowFullScreen();
     case DEBUG_TOGGLE_DEVICE_SCALE_FACTOR:
-      internal::DisplayManager::ToggleDisplayScaleFactor();
+      Shell::GetInstance()->display_manager()->ToggleDisplayScaleFactor();
       return true;
     case DEBUG_TOGGLE_SHOW_DEBUG_BORDERS:
       ash::debug::ToggleShowDebugBorders();

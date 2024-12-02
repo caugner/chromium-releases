@@ -39,6 +39,9 @@ TEST_F(WorkspaceLayoutManagerTest, RestoreFromMinimizeKeepsRestore) {
   EXPECT_EQ("0,0 100x100", GetRestoreBoundsInScreen(window.get())->ToString());
   EXPECT_EQ("10,15 25x35", window.get()->bounds().ToString());
 
+  if (!SupportsMultipleDisplays())
+    return;
+
   UpdateDisplay("400x300,500x400");
   window->SetBoundsInScreen(gfx::Rect(600, 0, 100, 100),
                             ScreenAsh::GetSecondaryDisplay());

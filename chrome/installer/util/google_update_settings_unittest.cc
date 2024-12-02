@@ -6,8 +6,8 @@
 #include <shlwapi.h>  // For SHDeleteKey.
 
 #include "base/memory/scoped_ptr.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/test/test_reg_util_win.h"
-#include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -544,11 +544,21 @@ TEST_F(GoogleUpdateSettingsTest, GetAppUpdatePolicyDefaultOverride) {
                                                      &is_overridden));
   EXPECT_FALSE(is_overridden);
 
-  // The default policy should be in force for bogus values.
   EXPECT_EQ(ERROR_SUCCESS,
             RegKey(HKEY_LOCAL_MACHINE, kGoogleUpdatePoliciesKey,
                    KEY_SET_VALUE).WriteValue(kGoogleUpdateUpdateDefault,
                                              static_cast<DWORD>(3)));
+  is_overridden = true;
+  EXPECT_EQ(GoogleUpdateSettings::AUTO_UPDATES_ONLY,
+            GoogleUpdateSettings::GetAppUpdatePolicy(kTestProductGuid,
+                                                     &is_overridden));
+  EXPECT_FALSE(is_overridden);
+
+  // The default policy should be in force for bogus values.
+  EXPECT_EQ(ERROR_SUCCESS,
+            RegKey(HKEY_LOCAL_MACHINE, kGoogleUpdatePoliciesKey,
+                   KEY_SET_VALUE).WriteValue(kGoogleUpdateUpdateDefault,
+                                             static_cast<DWORD>(4)));
   is_overridden = true;
   EXPECT_EQ(kDefaultUpdatePolicy,
             GoogleUpdateSettings::GetAppUpdatePolicy(kTestProductGuid,
@@ -599,11 +609,21 @@ TEST_F(GoogleUpdateSettingsTest, GetAppUpdatePolicyAppOverride) {
                                                      &is_overridden));
   EXPECT_TRUE(is_overridden);
 
-  // The default policy should be in force for bogus values.
   EXPECT_EQ(ERROR_SUCCESS,
             RegKey(HKEY_LOCAL_MACHINE, kGoogleUpdatePoliciesKey,
                    KEY_SET_VALUE).WriteValue(app_policy_value.c_str(),
                                              static_cast<DWORD>(3)));
+  is_overridden = false;
+  EXPECT_EQ(GoogleUpdateSettings::AUTO_UPDATES_ONLY,
+            GoogleUpdateSettings::GetAppUpdatePolicy(kTestProductGuid,
+                                                     &is_overridden));
+  EXPECT_TRUE(is_overridden);
+
+  // The default policy should be in force for bogus values.
+  EXPECT_EQ(ERROR_SUCCESS,
+            RegKey(HKEY_LOCAL_MACHINE, kGoogleUpdatePoliciesKey,
+                   KEY_SET_VALUE).WriteValue(app_policy_value.c_str(),
+                                             static_cast<DWORD>(4)));
   is_overridden = true;
   EXPECT_EQ(GoogleUpdateSettings::UPDATES_DISABLED,
             GoogleUpdateSettings::GetAppUpdatePolicy(kTestProductGuid,

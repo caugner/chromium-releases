@@ -4,16 +4,18 @@
 
 #include "chrome/browser/password_manager/password_manager.h"
 
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_form_manager.h"
 #include "chrome/browser/password_manager/password_manager_delegate.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
-#include "components/autofill/common/autofill_messages.h"
+#include "components/autofill/core/common/autofill_messages.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/user_metrics.h"
@@ -31,6 +33,8 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(PasswordManager);
 namespace {
 
 const char kSpdyProxyRealm[] = "/SpdyProxy";
+const char kOtherPossibleUsernamesExperiment[] =
+    "PasswordManagerOtherPossibleUsernames";
 
 // This routine is called when PasswordManagers are constructed.
 //
@@ -87,8 +91,7 @@ void PasswordManager::CreateForWebContentsAndDelegate(
 PasswordManager::PasswordManager(WebContents* web_contents,
                                  PasswordManagerDelegate* delegate)
     : content::WebContentsObserver(web_contents),
-      delegate_(delegate),
-      observer_(NULL) {
+      delegate_(delegate) {
   DCHECK(delegate_);
   password_manager_enabled_.Init(prefs::kPasswordManagerEnabled,
                                  delegate_->GetProfile()->GetPrefs());
@@ -97,6 +100,7 @@ PasswordManager::PasswordManager(WebContents* web_contents,
 }
 
 PasswordManager::~PasswordManager() {
+  FOR_EACH_OBSERVER(LoginModelObserver, observers_, OnLoginModelDestroying());
 }
 
 void PasswordManager::SetFormHasGeneratedPassword(const PasswordForm& form) {
@@ -196,12 +200,20 @@ void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
   provisionally_saved_form.ssl_valid = form.origin.SchemeIsSecure() &&
       !delegate_->DidLastPageLoadEncounterSSLErrors();
   provisionally_saved_form.preferred = true;
-  manager->ProvisionallySave(provisionally_saved_form);
+  PasswordFormManager::OtherPossibleUsernamesAction action =
+      PasswordFormManager::IGNORE_OTHER_POSSIBLE_USERNAMES;
+  if (OtherPossibleUsernamesEnabled())
+    action = PasswordFormManager::ALLOW_OTHER_POSSIBLE_USERNAMES;
+  manager->ProvisionallySave(provisionally_saved_form, action);
   provisional_save_manager_.swap(manager);
 }
 
-void PasswordManager::SetObserver(LoginModelObserver* observer) {
-  observer_ = observer;
+void PasswordManager::AddObserver(LoginModelObserver* observer) {
+  observers_.AddObserver(observer);
+}
+
+void PasswordManager::RemoveObserver(LoginModelObserver* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 void PasswordManager::DidNavigateAnyFrame(
@@ -256,6 +268,12 @@ void PasswordManager::OnPasswordFormsParsed(
   }
 }
 
+bool PasswordManager::ShouldShowSavePasswordInfoBar() const {
+  return provisional_save_manager_->IsNewLogin() &&
+      !provisional_save_manager_->HasGeneratedPassword() &&
+      !provisional_save_manager_->IsPendingCredentialsPublicSuffixMatch();
+}
+
 void PasswordManager::OnPasswordFormsRendered(
     const std::vector<PasswordForm>& visible_forms) {
   if (!provisional_save_manager_.get())
@@ -290,8 +308,7 @@ void PasswordManager::OnPasswordFormsRendered(
   provisional_save_manager_->SubmitPassed();
   if (provisional_save_manager_->HasGeneratedPassword())
     UMA_HISTOGRAM_COUNTS("PasswordGeneration.Submitted", 1);
-  if (provisional_save_manager_->IsNewLogin() &&
-      !provisional_save_manager_->HasGeneratedPassword()) {
+  if (ShouldShowSavePasswordInfoBar()) {
     delegate_->AddSavePasswordInfoBarIfPermitted(
         provisional_save_manager_.release());
   } else {
@@ -300,11 +317,54 @@ void PasswordManager::OnPasswordFormsRendered(
   }
 }
 
+void PasswordManager::PossiblyInitializeUsernamesExperiment(
+    const PasswordFormMap& best_matches) const {
+  if (base::FieldTrialList::Find(kOtherPossibleUsernamesExperiment))
+    return;
+
+  bool other_possible_usernames_exist = false;
+  for (content::PasswordFormMap::const_iterator it = best_matches.begin();
+       it != best_matches.end(); ++it) {
+    if (!it->second->other_possible_usernames.empty()) {
+      other_possible_usernames_exist = true;
+      break;
+    }
+  }
+
+  if (!other_possible_usernames_exist)
+    return;
+
+  const base::FieldTrial::Probability kDivisor = 100;
+  scoped_refptr<base::FieldTrial> trial(
+      base::FieldTrialList::FactoryGetFieldTrial(
+          kOtherPossibleUsernamesExperiment,
+          kDivisor, "Disabled", 2013, 12, 31, NULL));
+  trial->UseOneTimeRandomization();
+  base::FieldTrial::Probability enabled_probability = 0;
+
+  switch (chrome::VersionInfo::GetChannel()) {
+    case chrome::VersionInfo::CHANNEL_DEV:
+    case chrome::VersionInfo::CHANNEL_BETA:
+      enabled_probability = 50;
+      break;
+    default:
+      break;
+  }
+
+  trial->AppendGroup("Enabled", enabled_probability);
+}
+
+bool PasswordManager::OtherPossibleUsernamesEnabled() const {
+  return base::FieldTrialList::FindFullName(
+      kOtherPossibleUsernamesExperiment) == "Enabled";
+}
+
 void PasswordManager::Autofill(
     const PasswordForm& form_for_autofill,
     const PasswordFormMap& best_matches,
     const PasswordForm& preferred_match,
     bool wait_for_username) const {
+  PossiblyInitializeUsernamesExperiment(best_matches);
   switch (form_for_autofill.scheme) {
     case PasswordForm::SCHEME_HTML: {
       // Note the check above is required because the observer_ for a non-HTML
@@ -314,14 +374,16 @@ void PasswordManager::Autofill(
                                best_matches,
                                &preferred_match,
                                wait_for_username,
+                               OtherPossibleUsernamesEnabled(),
                                &fill_data);
       delegate_->FillPasswordForm(fill_data);
       return;
     }
     default:
-      if (observer_) {
-        observer_->OnAutofillDataAvailable(preferred_match.username_value,
-                                           preferred_match.password_value);
-      }
+      FOR_EACH_OBSERVER(
+          LoginModelObserver,
+          observers_,
+          OnAutofillDataAvailable(preferred_match.username_value,
+                                  preferred_match.password_value));
   }
 }

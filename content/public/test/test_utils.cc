@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/run_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
@@ -176,10 +176,20 @@ WindowedNotificationObserver::WindowedNotificationObserver(
   registrar_.Add(this, notification_type, source);
 }
 
+WindowedNotificationObserver::WindowedNotificationObserver(
+    int notification_type,
+    const ConditionTestCallback& callback)
+    : seen_(false),
+      running_(false),
+      callback_(callback),
+      source_(NotificationService::AllSources()) {
+  registrar_.Add(this, notification_type, source_);
+}
+
 WindowedNotificationObserver::~WindowedNotificationObserver() {}
 
 void WindowedNotificationObserver::Wait() {
-  if (seen_)
+  if (callback_.is_null() ? seen_ : callback_.Run())
     return;
 
   running_ = true;
@@ -195,7 +205,7 @@ void WindowedNotificationObserver::Observe(
   source_ = source;
   details_ = details;
   seen_ = true;
-  if (!running_)
+  if (!running_ || (!callback_.is_null() && !callback_.Run()))
     return;
 
   message_loop_runner_->Quit();

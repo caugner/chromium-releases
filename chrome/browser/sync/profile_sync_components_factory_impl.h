@@ -10,7 +10,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
-#include "components/autofill/browser/webdata/autofill_webdata_service.h"
+#include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 
 
 class CommandLine;
@@ -31,10 +31,12 @@ class ProfileSyncComponentsFactoryImpl : public ProfileSyncComponentsFactory {
   virtual browser_sync::DataTypeManager* CreateDataTypeManager(
       const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>&
           debug_info_listener,
-      browser_sync::SyncBackendHost* backend,
       const browser_sync::DataTypeController::TypeMap* controllers,
+      const browser_sync::DataTypeEncryptionHandler* encryption_handler,
+      browser_sync::SyncBackendHost* backend,
       browser_sync::DataTypeManagerObserver* observer,
-      const FailedDatatypesHandler* failed_datatypes_handler) OVERRIDE;
+      browser_sync::FailedDataTypesHandler* failed_data_types_handler)
+          OVERRIDE;
 
   virtual browser_sync::GenericChangeProcessor* CreateGenericChangeProcessor(
       ProfileSyncService* profile_sync_service,

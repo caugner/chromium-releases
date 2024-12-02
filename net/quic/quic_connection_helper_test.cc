@@ -23,7 +23,7 @@ namespace net {
 namespace test {
 
 const char kData[] = "foo";
-const bool kHasData = true;
+const bool kFromPeer = true;
 
 class TestConnection : public QuicConnection {
  public:
@@ -186,8 +186,8 @@ class QuicConnectionHelperTest : public ::testing::Test {
     header_.public_header.version_flag = true;
     header_.packet_sequence_number = sequence_number;
     header_.entropy_flag = false;
-    header_.fec_entropy_flag = false;
     header_.fec_flag = false;
+    header_.is_in_fec_group = NOT_IN_FEC_GROUP;
     header_.fec_group = 0;
   }
 
@@ -328,7 +328,7 @@ TEST_F(QuicConnectionHelperTest, InitialTimeout) {
 
   // Verify that a single task was posted.
   ASSERT_EQ(1u, runner_->GetPostedTasks().size());
-  EXPECT_EQ(base::TimeDelta::FromMicroseconds(kDefaultTimeoutUs),
+  EXPECT_EQ(base::TimeDelta::FromSeconds(kDefaultInitialTimeoutSecs),
             runner_->GetPostedTasks().front().delay);
 
   EXPECT_CALL(*send_algorithm_, SentPacket(_, 1, _, NOT_RETRANSMISSION));
@@ -336,8 +336,8 @@ TEST_F(QuicConnectionHelperTest, InitialTimeout) {
   EXPECT_CALL(visitor_, ConnectionClose(QUIC_CONNECTION_TIMED_OUT, false));
 
   runner_->RunNextTask();
-  EXPECT_EQ(QuicTime::Zero().Add(
-                QuicTime::Delta::FromMicroseconds(kDefaultTimeoutUs)),
+  EXPECT_EQ(QuicTime::Zero().Add(QuicTime::Delta::FromSeconds(
+                kDefaultInitialTimeoutSecs)),
             clock_.ApproximateNow());
   EXPECT_FALSE(connection_->connected());
   EXPECT_TRUE(AtEof());
@@ -362,7 +362,7 @@ TEST_F(QuicConnectionHelperTest, WritePacketToWireAsync) {
   int error = 0;
   EXPECT_EQ(-1, helper_->WritePacketToWire(*GetWrite(0), &error));
   EXPECT_EQ(ERR_IO_PENDING, error);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_TRUE(AtEof());
 }
 
@@ -372,11 +372,12 @@ TEST_F(QuicConnectionHelperTest, TimeoutAfterSend) {
   Initialize();
 
   EXPECT_TRUE(connection_->connected());
-  EXPECT_EQ(0u, clock_.NowAsDeltaSinceUnixEpoch().ToMicroseconds());
+  QuicTime start = clock_.ApproximateNow();
 
-  // When we send a packet, the timeout will change to 5000 + kDefaultTimeout.
+  // When we send a packet, the timeout will change to 5000 +
+  // kDefaultInitialTimeoutSecs.
   clock_.AdvanceTime(QuicTime::Delta::FromMicroseconds(5000));
-  EXPECT_EQ(5000u, clock_.NowAsDeltaSinceUnixEpoch().ToMicroseconds());
+  EXPECT_EQ(5000u, clock_.ApproximateNow().Subtract(start).ToMicroseconds());
   EXPECT_CALL(*send_algorithm_, SentPacket(_, 1, _, NOT_RETRANSMISSION));
 
   // Send an ack so we don't set the retransmission alarm.
@@ -386,17 +387,18 @@ TEST_F(QuicConnectionHelperTest, TimeoutAfterSend) {
   // network event at t=5000.  The alarm will reregister.
   runner_->RunNextTask();
 
-  EXPECT_EQ(QuicTime::Zero().Add(
-                QuicTime::Delta::FromMicroseconds(kDefaultTimeoutUs)),
+  EXPECT_EQ(QuicTime::Zero().Add(QuicTime::Delta::FromSeconds(
+                kDefaultInitialTimeoutSecs)),
             clock_.ApproximateNow());
   EXPECT_TRUE(connection_->connected());
 
   // This time, we should time out.
-  EXPECT_CALL(visitor_, ConnectionClose(QUIC_CONNECTION_TIMED_OUT, false));
+  EXPECT_CALL(visitor_, ConnectionClose(QUIC_CONNECTION_TIMED_OUT, !kFromPeer));
   EXPECT_CALL(*send_algorithm_, SentPacket(_, 2, _, NOT_RETRANSMISSION));
   runner_->RunNextTask();
-  EXPECT_EQ(kDefaultTimeoutUs + 5000,
-            clock_.NowAsDeltaSinceUnixEpoch().ToMicroseconds());
+  EXPECT_EQ(kDefaultInitialTimeoutSecs * 1000000 + 5000,
+            clock_.ApproximateNow().Subtract(
+                QuicTime::Zero()).ToMicroseconds());
   EXPECT_FALSE(connection_->connected());
   EXPECT_TRUE(AtEof());
 }

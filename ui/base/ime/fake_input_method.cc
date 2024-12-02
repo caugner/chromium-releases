@@ -5,7 +5,7 @@
 #include "ui/base/ime/fake_input_method.h"
 
 #include "base/logging.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "ui/base/events/event.h"
 #include "ui/base/events/event_constants.h"
 #include "ui/base/events/event_utils.h"
@@ -113,12 +113,17 @@ bool FakeInputMethod::DispatchFabricatedKeyEvent(const ui::KeyEvent& event) {
 void FakeInputMethod::Init(bool focused) {}
 void FakeInputMethod::OnFocus() {}
 void FakeInputMethod::OnBlur() {}
+bool FakeInputMethod::OnUntranslatedIMEMessage(const base::NativeEvent& event,
+                                               NativeEventResult* result) {
+  return false;
+}
 void FakeInputMethod::OnTextInputTypeChanged(const TextInputClient* client) {
   FOR_EACH_OBSERVER(InputMethodObserver, observers_,
                     OnTextInputStateChanged(client));
 }
 void FakeInputMethod::OnCaretBoundsChanged(const TextInputClient* client) {}
 void FakeInputMethod::CancelComposition(const TextInputClient* client) {}
+void FakeInputMethod::OnInputLocaleChanged() {}
 
 std::string FakeInputMethod::GetInputLocale() {
   return "";
@@ -130,6 +135,10 @@ base::i18n::TextDirection FakeInputMethod::GetInputTextDirection() {
 
 bool FakeInputMethod::IsActive() {
   return true;
+}
+
+bool FakeInputMethod::IsCandidatePopupOpen() const {
+  return false;
 }
 
 ui::TextInputType FakeInputMethod::GetTextInputType() const {

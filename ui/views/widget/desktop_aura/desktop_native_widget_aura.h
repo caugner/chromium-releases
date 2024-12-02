@@ -10,6 +10,7 @@
 #include "ui/aura/client/activation_delegate.h"
 #include "ui/aura/client/drag_drop_delegate.h"
 #include "ui/aura/client/focus_change_observer.h"
+#include "ui/aura/root_window_observer.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/views/ime/input_method_delegate.h"
 #include "ui/views/widget/native_widget_private.h"
@@ -36,6 +37,7 @@ class DesktopRootWindowHost;
 class DropHelper;
 class NativeWidgetAuraWindowObserver;
 class TooltipManagerAura;
+class WindowReorderer;
 
 class VIEWS_EXPORT DesktopNativeWidgetAura
     : public internal::NativeWidgetPrivate,
@@ -44,7 +46,8 @@ class VIEWS_EXPORT DesktopNativeWidgetAura
       public aura::client::ActivationChangeObserver,
       public aura::client::FocusChangeObserver,
       public views::internal::InputMethodDelegate,
-      public aura::client::DragDropDelegate {
+      public aura::client::DragDropDelegate,
+      public aura::RootWindowObserver {
  public:
   explicit DesktopNativeWidgetAura(internal::NativeWidgetDelegate* delegate);
   virtual ~DesktopNativeWidgetAura();
@@ -66,6 +69,9 @@ class VIEWS_EXPORT DesktopNativeWidgetAura
     return root_window_event_filter_;
   }
 
+  // Overridden from NativeWidget:
+  virtual ui::EventHandler* GetEventHandler() OVERRIDE;
+
  protected:
   // Overridden from internal::NativeWidgetPrivate:
   virtual void InitNativeWidget(const Widget::InitParams& params) OVERRIDE;
@@ -79,8 +85,8 @@ class VIEWS_EXPORT DesktopNativeWidgetAura
   virtual Widget* GetTopLevelWidget() OVERRIDE;
   virtual const ui::Compositor* GetCompositor() const OVERRIDE;
   virtual ui::Compositor* GetCompositor() OVERRIDE;
-  virtual gfx::Vector2d CalculateOffsetToAncestorWithLayer(
-      ui::Layer** layer_parent) OVERRIDE;
+  virtual ui::Layer* GetLayer() OVERRIDE;
+  virtual void ReorderNativeViews() OVERRIDE;
   virtual void ViewRemoved(View* view) OVERRIDE;
   virtual void SetNativeWindowProperty(const char* name, void* value) OVERRIDE;
   virtual void* GetNativeWindowProperty(const char* name) const OVERRIDE;
@@ -136,6 +142,7 @@ class VIEWS_EXPORT DesktopNativeWidgetAura
                             ui::DragDropTypes::DragEventSource source) OVERRIDE;
   virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
+  virtual bool IsMouseEventsEnabled() const OVERRIDE;
   virtual void ClearNativeFocus() OVERRIDE;
   virtual gfx::Rect GetWorkAreaBoundsInScreen() const OVERRIDE;
   virtual void SetInactiveRenderingDisabled(bool value) OVERRIDE;
@@ -194,6 +201,10 @@ class VIEWS_EXPORT DesktopNativeWidgetAura
   virtual void OnDragExited() OVERRIDE;
   virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
 
+  // Overridden from aura::RootWindowObserver:
+  virtual void OnRootWindowHostCloseRequested(
+      const aura::RootWindow* root) OVERRIDE;
+
  private:
   // See class documentation for Widget in widget.h for a note about ownership.
   Widget::InitParams::Ownership ownership_;
@@ -238,6 +249,10 @@ class VIEWS_EXPORT DesktopNativeWidgetAura
   bool restore_focus_on_activate_;
 
   scoped_ptr<corewm::ShadowController> shadow_controller_;
+
+  // Reorders child windows of |window_| associated with a view based on the
+  // order of the associated views in the widget's view hierarchy.
+  scoped_ptr<WindowReorderer> window_reorderer_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopNativeWidgetAura);
 };

@@ -15,8 +15,8 @@
 #include "base/compiler_specific.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
-#include "base/message_pump_libevent.h"
+#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump_libevent.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/non_thread_safe.h"
@@ -130,7 +130,7 @@ LocalInputMonitorLinux::Core::Core(
       x_record_display_(NULL),
       x_record_context_(0) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
-  DCHECK(client_session_control_);
+  DCHECK(client_session_control_.get());
 
   x_record_range_[0] = NULL;
   x_record_range_[1] = NULL;

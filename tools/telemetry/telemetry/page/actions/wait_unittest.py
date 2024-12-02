@@ -5,7 +5,7 @@ import os
 import time
 
 from telemetry.page.actions import wait
-from telemetry.test import tab_test_case
+from telemetry.unittest import tab_test_case
 
 class WaitActionTest(tab_test_case.TabTestCase):
   def testWaitAction(self):
@@ -23,4 +23,4 @@ class WaitActionTest(tab_test_case.TabTestCase):
 
     start_time = time.time()
     i.RunAction(None, self._tab, None)
-    self.assertAlmostEqual(time.time() - start_time, 1, places=2)
+    self.assertAlmostEqual(time.time() - start_time, 1, places=1)

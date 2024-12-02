@@ -3,11 +3,12 @@
 // found in the LICENSE file.
 
 #include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/sandboxed_unpacker.h"
 #include "chrome/common/chrome_paths.h"
@@ -99,12 +100,14 @@ class SandboxedUnpackerTest : public testing::Test {
         temp_dir_.path().AppendASCII("sandboxed_unpacker_test_Temp");
     ASSERT_TRUE(file_util::CreateDirectory(temp_path_));
 
-    sandboxed_unpacker_ =
-        new SandboxedUnpacker(
-            crx_path, false, Manifest::INTERNAL, Extension::NO_FLAGS,
-            extensions_dir_.path(),
-            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
-            client_);
+    sandboxed_unpacker_ = new SandboxedUnpacker(
+        crx_path,
+        false,
+        Manifest::INTERNAL,
+        Extension::NO_FLAGS,
+        extensions_dir_.path(),
+        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE).get(),
+        client_);
 
     EXPECT_TRUE(PrepareUnpackerEnv());
   }
@@ -132,10 +135,10 @@ class SandboxedUnpackerTest : public testing::Test {
 
   bool TempFilesRemoved() {
     // Check that temporary files were cleaned up.
-    int files_and_dirs = file_util::FileEnumerator::DIRECTORIES |
-        file_util::FileEnumerator::FILES;
+    int files_and_dirs = base::FileEnumerator::DIRECTORIES |
+        base::FileEnumerator::FILES;
 
-    file_util::FileEnumerator temp_iterator(
+    base::FileEnumerator temp_iterator(
       temp_path_,
       true,  // recursive
       files_and_dirs
@@ -159,7 +162,7 @@ class SandboxedUnpackerTest : public testing::Test {
   MockSandboxedUnpackerClient* client_;
   scoped_ptr<Unpacker> unpacker_;
   scoped_refptr<SandboxedUnpacker> sandboxed_unpacker_;
-  MessageLoop loop_;
+  base::MessageLoop loop_;
   scoped_ptr<content::TestBrowserThread> file_thread_;
 };
 

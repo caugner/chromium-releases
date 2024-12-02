@@ -9,6 +9,8 @@
     "unhooked-absent",
     "unhooked-anonymous",
     "unhooked-file-exec",
+    "unhooked-file-nonexec-others",
+    "unhooked-file-nonexec-group",
     "unhooked-file-nonexec",
     "unhooked-stack",
     "unhooked-other",
@@ -107,28 +109,41 @@
     },
     {
       "name": "unhooked-anonymous",
-      "stacktrace": "optional",
-      "allocator": "optional"
+      "mappedpathname": "^$",
+      "allocator": "unhooked"
     },
     {
       "name": "unhooked-file-exec",
-      "stacktrace": "optional",
-      "allocator": "optional"
+      "mappedpathname": "^/.*",
+      "mappedpermission": "..x.",
+      "allocator": "unhooked"
+    },
+    {
+      "name": "unhooked-file-nonexec-others",
+      "mappedpathname": "^/.*",
+      "allocator": "unhooked",
+      "sharedwith": ["others"]
+    },
+    {
+      "name": "unhooked-file-nonexec-group",
+      "mappedpathname": "^/.*",
+      "allocator": "unhooked",
+      "sharedwith": ["group"]
     },
     {
       "name": "unhooked-file-nonexec",
-      "stacktrace": "optional",
-      "allocator": "optional"
+      "mappedpathname": "^/.*",
+      "allocator": "unhooked"
     },
     {
       "name": "unhooked-stack",
-      "stacktrace": "optional",
-      "allocator": "optional"
+      "mappedpathname": ".stack.",
+      "allocator": "unhooked"
     },
     {
       "name": "unhooked-other",
-      "stacktrace": "optional",
-      "allocator": "optional"
+      "mappedpathname": ".*",
+      "allocator": "unhooked"
     },
     {
       "name": "mmap-v8-heap-newspace",

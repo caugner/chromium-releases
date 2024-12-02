@@ -16,11 +16,8 @@
 #include "net/spdy/spdy_http_utils.h"
 #include "net/spdy/spdy_protocol.h"
 #include "net/spdy/spdy_session.h"
-#include "net/spdy/spdy_test_util_spdy3.h"
-#include "net/spdy/spdy_websocket_test_util_spdy3.h"
+#include "net/spdy/spdy_websocket_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-using namespace net::test_spdy3;
 
 namespace net {
 
@@ -95,17 +92,16 @@ class SpdyWebSocketStreamEventRecorder : public SpdyWebSocketStream::Delegate {
     if (!on_sent_data_.is_null())
       on_sent_data_.Run(&events_.back());
   }
-  virtual int OnReceivedSpdyResponseHeader(
-      const SpdyHeaderBlock& headers, int status) OVERRIDE {
+  virtual void OnSpdyResponseHeadersUpdated(
+      const SpdyHeaderBlock& response_headers) OVERRIDE {
     events_.push_back(
         SpdyWebSocketStreamEvent(
             SpdyWebSocketStreamEvent::EVENT_RECEIVED_HEADER,
-            headers,
-            status,
+            response_headers,
+            OK,
             std::string()));
     if (!on_received_header_.is_null())
       on_received_header_.Run(&events_.back());
-    return status;
   }
   virtual void OnSentSpdyData(size_t bytes_sent) OVERRIDE {
     events_.push_back(
@@ -188,18 +184,23 @@ class SpdyWebSocketStreamSpdy3Test : public testing::Test {
   }
 
  protected:
-  SpdyWebSocketStreamSpdy3Test() : session_deps_(kProtoSPDY3) {}
+  SpdyWebSocketStreamSpdy3Test()
+      : spdy_util_(kProtoSPDY3),
+        spdy_settings_id_to_set_(SETTINGS_MAX_CONCURRENT_STREAMS),
+        spdy_settings_flags_to_set_(SETTINGS_FLAG_PLEASE_PERSIST),
+        spdy_settings_value_to_set_(1),
+        session_deps_(kProtoSPDY3),
+        stream_id_(0),
+        created_stream_id_(0) {}
   virtual ~SpdyWebSocketStreamSpdy3Test() {}
 
   virtual void SetUp() {
     host_port_pair_.set_host("example.com");
     host_port_pair_.set_port(80);
-    host_port_proxy_pair_.first = host_port_pair_;
-    host_port_proxy_pair_.second = ProxyServer::Direct();
 
-    spdy_settings_id_to_set_ = SETTINGS_MAX_CONCURRENT_STREAMS;
-    spdy_settings_flags_to_set_ = SETTINGS_FLAG_PLEASE_PERSIST;
-    spdy_settings_value_to_set_ = 1;
+    spdy_session_key_ = SpdySessionKey(host_port_pair_,
+                                       ProxyServer::Direct(),
+                                       kPrivacyModeDisabled);
 
     spdy_settings_to_send_[spdy_settings_id_to_set_] =
         SettingsFlagsAndValue(
@@ -207,27 +208,28 @@ class SpdyWebSocketStreamSpdy3Test : public testing::Test {
   }
 
   virtual void TearDown() {
-    MessageLoop::current()->RunUntilIdle();
+    base::MessageLoop::current()->RunUntilIdle();
   }
 
   void Prepare(SpdyStreamId stream_id) {
     stream_id_ = stream_id;
 
-    request_frame_.reset(ConstructSpdyWebSocketSynStream(
+    request_frame_.reset(spdy_util_.ConstructSpdyWebSocketSynStream(
         stream_id_,
         "/echo",
         "example.com",
         "http://example.com/wsdemo"));
 
-    response_frame_.reset(ConstructSpdyWebSocketSynReply(stream_id_));
+    response_frame_.reset(
+        spdy_util_.ConstructSpdyWebSocketSynReply(stream_id_));
 
-    message_frame_.reset(ConstructSpdyWebSocketDataFrame(
+    message_frame_.reset(spdy_util_.ConstructSpdyWebSocketDataFrame(
         kMessageFrame,
         kMessageFrameLength,
         stream_id_,
         false));
 
-    closing_frame_.reset(ConstructSpdyWebSocketDataFrame(
+    closing_frame_.reset(spdy_util_.ConstructSpdyWebSocketDataFrame(
         kClosingFrame,
         kClosingFrameLength,
         stream_id_,
@@ -252,9 +254,9 @@ class SpdyWebSocketStreamSpdy3Test : public testing::Test {
           spdy_settings_value_to_set_);
     }
 
-    EXPECT_FALSE(spdy_session_pool->HasSession(host_port_proxy_pair_));
-    session_ = spdy_session_pool->Get(host_port_proxy_pair_, BoundNetLog());
-    EXPECT_TRUE(spdy_session_pool->HasSession(host_port_proxy_pair_));
+    EXPECT_FALSE(spdy_session_pool->HasSession(spdy_session_key_));
+    session_ = spdy_session_pool->Get(spdy_session_key_, BoundNetLog());
+    EXPECT_TRUE(spdy_session_pool->HasSession(spdy_session_key_));
     transport_params_ = new TransportSocketParams(host_port_pair_, MEDIUM,
                                                   false, false,
                                                   OnHostResolutionCallback());
@@ -281,6 +283,7 @@ class SpdyWebSocketStreamSpdy3Test : public testing::Test {
     websocket_stream_->SendRequest(headers.Pass());
   }
 
+  SpdyWebSocketTestUtil spdy_util_;
   SpdySettingsIds spdy_settings_id_to_set_;
   SpdySettingsFlags spdy_settings_flags_to_set_;
   uint32 spdy_settings_value_to_set_;
@@ -298,7 +301,7 @@ class SpdyWebSocketStreamSpdy3Test : public testing::Test {
   scoped_ptr<SpdyFrame> message_frame_;
   scoped_ptr<SpdyFrame> closing_frame_;
   HostPortPair host_port_pair_;
-  HostPortProxyPair host_port_proxy_pair_;
+  SpdySessionKey spdy_session_key_;
   TestCompletionCallback completion_callback_;
   TestCompletionCallback sync_callback_;
 
@@ -344,13 +347,13 @@ TEST_F(SpdyWebSocketStreamSpdy3Test, Basic) {
       base::Bind(&SpdyWebSocketStreamSpdy3Test::DoSendClosingFrame,
                  base::Unretained(this)));
 
-  websocket_stream_.reset(new SpdyWebSocketStream(session_, &delegate));
+  websocket_stream_.reset(new SpdyWebSocketStream(session_.get(), &delegate));
 
   BoundNetLog net_log;
   GURL url("ws://example.com/echo");
   ASSERT_EQ(OK, websocket_stream_->InitializeStream(url, HIGHEST, net_log));
 
-  ASSERT_TRUE(websocket_stream_->stream_);
+  ASSERT_TRUE(websocket_stream_->stream_.get());
 
   SendRequest();
 
@@ -388,7 +391,7 @@ TEST_F(SpdyWebSocketStreamSpdy3Test, Basic) {
 
   // EOF close SPDY session.
   EXPECT_TRUE(!http_session_->spdy_session_pool()->HasSession(
-      host_port_proxy_pair_));
+      spdy_session_key_));
   EXPECT_TRUE(data()->at_read_eof());
   EXPECT_TRUE(data()->at_write_eof());
 }
@@ -417,7 +420,7 @@ TEST_F(SpdyWebSocketStreamSpdy3Test, DestructionBeforeClose) {
       base::Bind(&SpdyWebSocketStreamSpdy3Test::DoSync,
                  base::Unretained(this)));
 
-  websocket_stream_.reset(new SpdyWebSocketStream(session_, &delegate));
+  websocket_stream_.reset(new SpdyWebSocketStream(session_.get(), &delegate));
 
   BoundNetLog net_log;
   GURL url("ws://example.com/echo");
@@ -450,7 +453,7 @@ TEST_F(SpdyWebSocketStreamSpdy3Test, DestructionBeforeClose) {
   EXPECT_EQ(static_cast<int>(kMessageFrameLength), events[3].result);
 
   EXPECT_TRUE(http_session_->spdy_session_pool()->HasSession(
-      host_port_proxy_pair_));
+      spdy_session_key_));
   EXPECT_TRUE(data()->at_read_eof());
   EXPECT_TRUE(data()->at_write_eof());
 }
@@ -480,7 +483,7 @@ TEST_F(SpdyWebSocketStreamSpdy3Test, DestructionAfterExplicitClose) {
       base::Bind(&SpdyWebSocketStreamSpdy3Test::DoClose,
                  base::Unretained(this)));
 
-  websocket_stream_.reset(new SpdyWebSocketStream(session_, &delegate));
+  websocket_stream_.reset(new SpdyWebSocketStream(session_.get(), &delegate));
 
   BoundNetLog net_log;
   GURL url("ws://example.com/echo");
@@ -513,13 +516,13 @@ TEST_F(SpdyWebSocketStreamSpdy3Test, DestructionAfterExplicitClose) {
   EXPECT_EQ(SpdyWebSocketStreamEvent::EVENT_CLOSE, events[4].event_type);
 
   EXPECT_TRUE(http_session_->spdy_session_pool()->HasSession(
-      host_port_proxy_pair_));
+      spdy_session_key_));
 }
 
 TEST_F(SpdyWebSocketStreamSpdy3Test, IOPending) {
   Prepare(1);
   scoped_ptr<SpdyFrame> settings_frame(
-      ConstructSpdySettings(spdy_settings_to_send_));
+      spdy_util_.ConstructSpdySettings(spdy_settings_to_send_));
   MockWrite writes[] = {
     // Setting throttling make SpdySession send settings frame automatically.
     CreateMockWrite(*settings_frame.get(), 1),
@@ -546,7 +549,7 @@ TEST_F(SpdyWebSocketStreamSpdy3Test, IOPending) {
   SpdyWebSocketStreamEventRecorder block_delegate((CompletionCallback()));
 
   scoped_ptr<SpdyWebSocketStream> block_stream(
-      new SpdyWebSocketStream(session_, &block_delegate));
+      new SpdyWebSocketStream(session_.get(), &block_delegate));
   BoundNetLog block_net_log;
   GURL block_url("ws://example.com/block");
   ASSERT_EQ(OK,
@@ -564,7 +567,7 @@ TEST_F(SpdyWebSocketStreamSpdy3Test, IOPending) {
       base::Bind(&SpdyWebSocketStreamSpdy3Test::DoSendClosingFrame,
                  base::Unretained(this)));
 
-  websocket_stream_.reset(new SpdyWebSocketStream(session_, &delegate));
+  websocket_stream_.reset(new SpdyWebSocketStream(session_.get(), &delegate));
   BoundNetLog net_log;
   GURL url("ws://example.com/echo");
   ASSERT_EQ(ERR_IO_PENDING, websocket_stream_->InitializeStream(
@@ -614,7 +617,7 @@ TEST_F(SpdyWebSocketStreamSpdy3Test, IOPending) {
 
   // EOF close SPDY session.
   EXPECT_TRUE(!http_session_->spdy_session_pool()->HasSession(
-      host_port_proxy_pair_));
+      spdy_session_key_));
   EXPECT_TRUE(data()->at_read_eof());
   EXPECT_TRUE(data()->at_write_eof());
 }

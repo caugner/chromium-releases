@@ -8,10 +8,11 @@
 #include <string>
 
 #include "base/logging.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
+#include "chrome/browser/drive/drive_api_util.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
@@ -42,15 +43,8 @@ ResourceEntry ConvertToResourceEntry(
   // interface and other client to use the 'title' attribute, instead of
   // 'filename', as the file name in the local snapshot.
   output.set_title(input.title());
-  output.set_base_name(util::EscapeUtf8FileName(output.title()));
-
+  output.set_base_name(util::NormalizeFileName(output.title()));
   output.set_resource_id(input.resource_id());
-  output.set_download_url(input.download_url().spec());
-
-  const google_apis::Link* edit_link =
-      input.GetLinkByType(google_apis::Link::LINK_EDIT);
-  if (edit_link)
-    output.set_edit_url(edit_link->href().spec());
 
   // Sets parent Resource ID. On drive.google.com, a file can have multiple
   // parents or no parent, but we are forcing a tree-shaped structure (i.e. no
@@ -60,8 +54,8 @@ ResourceEntry ConvertToResourceEntry(
   const google_apis::Link* parent_link =
       input.GetLinkByType(google_apis::Link::LINK_PARENT);
   if (parent_link) {
-    output.set_parent_resource_id(
-        util::ExtractResourceIdFromUrl(parent_link->href()));
+    output.set_parent_resource_id(util::ExtractResourceIdFromUrl(
+        parent_link->href()));
   }
   // Apply mapping from an empty parent to the special dummy directory.
   if (output.parent_resource_id().empty())
@@ -79,11 +73,10 @@ ResourceEntry ConvertToResourceEntry(
   file_info->set_creation_time(input.published_time().ToInternalValue());
 
   if (input.is_file() || input.is_hosted_document()) {
-    DriveFileSpecificInfo* file_specific_info =
-        output.mutable_file_specific_info();
+    FileSpecificInfo* file_specific_info = output.mutable_file_specific_info();
     if (input.is_file()) {
       file_info->set_size(input.file_size());
-      file_specific_info->set_file_md5(input.file_md5());
+      file_specific_info->set_md5(input.file_md5());
 
       // The resumable-edit-media link should only be present for regular
       // files as hosted documents are not uploadable.
@@ -95,7 +88,7 @@ ResourceEntry ConvertToResourceEntry(
       const std::string document_extension = input.GetHostedDocumentExtension();
       file_specific_info->set_document_extension(document_extension);
       output.set_base_name(
-          util::EscapeUtf8FileName(output.title() + document_extension));
+          util::NormalizeFileName(output.title() + document_extension));
 
       // We don't know the size of hosted docs and it does not matter since
       // is has no effect on the quota.
@@ -105,20 +98,15 @@ ResourceEntry ConvertToResourceEntry(
     file_specific_info->set_content_mime_type(input.content_mime_type());
     file_specific_info->set_is_hosted_document(input.is_hosted_document());
 
-    const google_apis::Link* thumbnail_link = input.GetLinkByType(
-        google_apis::Link::LINK_THUMBNAIL);
+    const google_apis::Link* thumbnail_link =
+        input.GetLinkByType(google_apis::Link::LINK_THUMBNAIL);
     if (thumbnail_link)
       file_specific_info->set_thumbnail_url(thumbnail_link->href().spec());
 
-    const google_apis::Link* alternate_link = input.GetLinkByType(
-        google_apis::Link::LINK_ALTERNATE);
+    const google_apis::Link* alternate_link =
+        input.GetLinkByType(google_apis::Link::LINK_ALTERNATE);
     if (alternate_link)
       file_specific_info->set_alternate_url(alternate_link->href().spec());
-
-    const google_apis::Link* share_link = input.GetLinkByType(
-        google_apis::Link::LINK_SHARE);
-    if (share_link)
-      file_specific_info->set_share_url(share_link->href().spec());
   } else if (input.is_folder()) {
     file_info->set_is_directory(true);
   } else {

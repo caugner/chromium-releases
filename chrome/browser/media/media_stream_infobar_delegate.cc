@@ -5,7 +5,8 @@
 #include "chrome/browser/media/media_stream_infobar_delegate.h"
 
 #include "base/logging.h"
-#include "base/utf_string_conversions.h"
+#include "base/metrics/histogram.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/common/url_constants.h"
@@ -14,7 +15,18 @@
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
+
+namespace {
+
+enum DevicePermissionActions {
+  kAllowHttps = 0,
+  kAllowHttp,
+  kDeny,
+  kCancel,
+  kPermissionActionsMax  // Must always be last!
+};
+
+}  // namespace
 
 MediaStreamInfoBarDelegate::~MediaStreamInfoBarDelegate() {}
 
@@ -59,13 +71,14 @@ MediaStreamInfoBarDelegate::MediaStreamInfoBarDelegate(
 void MediaStreamInfoBarDelegate::InfoBarDismissed() {
   // Deny the request if the infobar was closed with the 'x' button, since
   // we don't want WebRTC to be waiting for an answer that will never come.
+  UMA_HISTOGRAM_ENUMERATION("Media.DevicePermissionActions",
+                            kCancel, kPermissionActionsMax);
   controller_->Deny(false);
 }
 
-gfx::Image* MediaStreamInfoBarDelegate::GetIcon() const {
-  return &ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-      controller_->has_video() ?
-          IDR_INFOBAR_MEDIA_STREAM_CAMERA : IDR_INFOBAR_MEDIA_STREAM_MIC);
+int MediaStreamInfoBarDelegate::GetIconID() const {
+  return controller_->has_video() ?
+      IDR_INFOBAR_MEDIA_STREAM_CAMERA : IDR_INFOBAR_MEDIA_STREAM_MIC;
 }
 
 InfoBarDelegate::Type MediaStreamInfoBarDelegate::GetInfoBarType() const {
@@ -94,11 +107,21 @@ string16 MediaStreamInfoBarDelegate::GetButtonLabel(
 }
 
 bool MediaStreamInfoBarDelegate::Accept() {
+  GURL origin(controller_->GetSecurityOriginSpec());
+  if (origin.SchemeIsSecure()) {
+    UMA_HISTOGRAM_ENUMERATION("Media.DevicePermissionActions",
+                              kAllowHttps, kPermissionActionsMax);
+  } else {
+    UMA_HISTOGRAM_ENUMERATION("Media.DevicePermissionActions",
+                              kAllowHttp, kPermissionActionsMax);
+  }
   controller_->Accept(true);
   return true;
 }
 
 bool MediaStreamInfoBarDelegate::Cancel() {
+  UMA_HISTOGRAM_ENUMERATION("Media.DevicePermissionActions",
+                            kDeny, kPermissionActionsMax);
   controller_->Deny(true);
   return true;
 }

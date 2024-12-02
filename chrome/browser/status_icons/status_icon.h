@@ -8,7 +8,7 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 
 namespace gfx {
 class ImageSkia;
@@ -56,6 +56,9 @@ class StatusIcon {
 
   // Dispatches a click event to the observers.
   void DispatchClickEvent();
+#if defined(OS_WIN)
+  void DispatchBalloonClickEvent();
+#endif
 
  protected:
   // Invoked after a call to SetContextMenu() to let the platform-specific

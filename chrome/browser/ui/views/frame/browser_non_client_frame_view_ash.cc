@@ -10,6 +10,8 @@
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/ash/chrome_shell_delegate.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/immersive_fullscreen_configuration.h"
+#include "chrome/browser/ui/views/avatar_label.h"
 #include "chrome/browser/ui/views/avatar_menu_button.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -33,6 +35,8 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -131,6 +135,10 @@ BrowserNonClientFrameViewAsh::GetTabStripInsets(bool force_restored) const {
   int left = avatar_button() ? kAvatarSideSpacing +
       browser_view()->GetOTRAvatarIcon().width() + kAvatarSideSpacing :
       kTabstripLeftSpacing;
+  if (avatar_label()) {
+    left += avatar_label()->GetPreferredSize().width() +
+            views::kRelatedControlHorizontalSpacing;
+  }
   int right = frame_painter_->GetRightInset() + kTabstripRightSpacing;
   return TabStripInsets(NonClientTopBorderHeight(force_restored), left, right);
 }
@@ -182,7 +190,7 @@ void BrowserNonClientFrameViewAsh::GetWindowMask(const gfx::Size& size,
 }
 
 void BrowserNonClientFrameViewAsh::ResetWindowControls() {
-  if (chrome::UseImmersiveFullscreen()) {
+  if (ImmersiveFullscreenConfiguration::UseImmersiveFullscreen()) {
     // Hide the caption buttons in immersive mode because it's confusing when
     // the user hovers or clicks in the top-right of the screen and hits one.
     // Only show them during a reveal.
@@ -220,13 +228,27 @@ void BrowserNonClientFrameViewAsh::OnPaint(gfx::Canvas* canvas) {
     return;
   // The primary header image changes based on window activation state and
   // theme, so we look it up for each paint.
+  int theme_frame_image_id = GetThemeFrameImageId();
+  int theme_frame_overlay_image_id = GetThemeFrameOverlayImageId();
+
+  ui::ThemeProvider* theme_provider = GetThemeProvider();
+  ash::FramePainter::Themed header_themed = ash::FramePainter::THEMED_NO;
+  if (theme_provider->HasCustomImage(theme_frame_image_id) ||
+      (theme_frame_overlay_image_id != 0 &&
+       theme_provider->HasCustomImage(theme_frame_overlay_image_id))) {
+    header_themed = ash::FramePainter::THEMED_YES;
+  }
+
+  if (frame_painter_->ShouldUseMinimalHeaderStyle(header_themed))
+    theme_frame_image_id = IDR_AURA_WINDOW_HEADER_BASE_MINIMAL;
+
   frame_painter_->PaintHeader(
       this,
       canvas,
       ShouldPaintAsActive() ?
           ash::FramePainter::ACTIVE : ash::FramePainter::INACTIVE,
-      GetThemeFrameImageId(),
-      GetThemeFrameOverlayImage());
+      theme_frame_image_id,
+      theme_frame_overlay_image_id);
   if (browser_view()->ShouldShowWindowTitle())
     frame_painter_->PaintTitleBar(this, canvas, BrowserFrame::GetTitleFont());
   if (browser_view()->IsToolbarVisible())
@@ -242,7 +264,7 @@ void BrowserNonClientFrameViewAsh::Layout() {
   BrowserNonClientFrameView::Layout();
 }
 
-std::string BrowserNonClientFrameViewAsh::GetClassName() const {
+const char* BrowserNonClientFrameViewAsh::GetClassName() const {
   return kViewClassName;
 }
 
@@ -278,6 +300,11 @@ void BrowserNonClientFrameViewAsh::GetAccessibleState(
 
 gfx::Size BrowserNonClientFrameViewAsh::GetMinimumSize() {
   return frame_painter_->GetMinimumSize(this);
+}
+
+void BrowserNonClientFrameViewAsh::OnThemeChanged() {
+  BrowserNonClientFrameView::OnThemeChanged();
+  frame_painter_->OnThemeChanged();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -393,6 +420,8 @@ void BrowserNonClientFrameViewAsh::LayoutAvatar() {
     if (immersive_controller->IsEnabled() &&
         !immersive_controller->IsRevealed()) {
       avatar_button()->SetBoundsRect(gfx::Rect());
+      if (avatar_label())
+        avatar_label()->SetBoundsRect(gfx::Rect());
       return;
     }
   }
@@ -408,6 +437,16 @@ void BrowserNonClientFrameViewAsh::LayoutAvatar() {
                           incognito_icon.width(),
                           avatar_bottom - avatar_y);
   avatar_button()->SetBoundsRect(avatar_bounds);
+  if (avatar_label()) {
+    gfx::Size size = avatar_label()->GetPreferredSize();
+    int label_height = std::min(avatar_bounds.height(), size.height());
+    gfx::Rect label_bounds(
+        avatar_bounds.right() + views::kRelatedControlHorizontalSpacing,
+        avatar_y + (avatar_bounds.height() - label_height) / 2,
+        size.width(),
+        size.height());
+    avatar_label()->SetBoundsRect(label_bounds);
+  }
 }
 
 bool BrowserNonClientFrameViewAsh::ShouldPaint() const {
@@ -518,14 +557,13 @@ int BrowserNonClientFrameViewAsh::GetThemeFrameImageId() const {
       IDR_AURA_WINDOW_HEADER_BASE_INACTIVE;
 }
 
-const gfx::ImageSkia*
-BrowserNonClientFrameViewAsh::GetThemeFrameOverlayImage() const {
+int BrowserNonClientFrameViewAsh::GetThemeFrameOverlayImageId() const {
   ui::ThemeProvider* tp = GetThemeProvider();
   if (tp->HasCustomImage(IDR_THEME_FRAME_OVERLAY) &&
       browser_view()->IsBrowserTypeNormal() &&
       !browser_view()->IsOffTheRecord()) {
-    return tp->GetImageSkiaNamed(ShouldPaintAsActive() ?
-        IDR_THEME_FRAME_OVERLAY : IDR_THEME_FRAME_OVERLAY_INACTIVE);
+    return ShouldPaintAsActive() ?
+        IDR_THEME_FRAME_OVERLAY : IDR_THEME_FRAME_OVERLAY_INACTIVE;
   }
-  return NULL;
+  return 0;
 }

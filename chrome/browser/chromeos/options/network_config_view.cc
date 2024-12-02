@@ -7,8 +7,8 @@
 #include <algorithm>
 
 #include "ash/shell.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/network_property_ui_data.h"
 #include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/options/vpn_config_view.h"
@@ -117,22 +117,20 @@ NetworkConfigView::~NetworkConfigView() {
 }
 
 // static
-bool NetworkConfigView::Show(Network* network, gfx::NativeWindow parent) {
+void NetworkConfigView::Show(Network* network, gfx::NativeWindow parent) {
   if (GetActiveDialog() != NULL)
-    return false;
+    return;
   NetworkConfigView* view = new NetworkConfigView(network);
   view->ShowDialog(parent);
-  return true;
 }
 
 // static
-bool NetworkConfigView::ShowForType(ConnectionType type,
+void NetworkConfigView::ShowForType(ConnectionType type,
                                     gfx::NativeWindow parent) {
   if (GetActiveDialog() != NULL)
-    return false;
+    return;
   NetworkConfigView* view = new NetworkConfigView(type);
   view->ShowDialog(parent);
-  return true;
 }
 
 gfx::NativeWindow NetworkConfigView::GetNativeWindow() const {
@@ -176,6 +174,11 @@ views::View* NetworkConfigView::CreateExtraView() {
 
 views::View* NetworkConfigView::GetInitiallyFocusedView() {
   return child_config_view_->GetInitiallyFocusedView();
+}
+
+string16 NetworkConfigView::GetWindowTitle() const {
+  DCHECK(!child_config_view_->GetTitle().empty());
+  return child_config_view_->GetTitle();
 }
 
 ui::ModalType NetworkConfigView::GetModalType() const {
@@ -234,10 +237,10 @@ gfx::Size NetworkConfigView::GetPreferredSize() {
 }
 
 void NetworkConfigView::ViewHierarchyChanged(
-    bool is_add, views::View* parent, views::View* child) {
+    const ViewHierarchyChangedDetails& details) {
   // Can't init before we're inserted into a Container, because we require
   // a HWND to parent native child controls to.
-  if (is_add && child == this) {
+  if (details.is_add && details.child == this) {
     AddChildView(child_config_view_);
   }
 }
@@ -247,9 +250,8 @@ void NetworkConfigView::ShowDialog(gfx::NativeWindow parent) {
     parent = GetDialogParent();
   // Failed connections may result in a pop-up with no natural parent window,
   // so provide a fallback context on the active display.
-  Widget* window = parent ?
-      Widget::CreateWindowWithParent(this, parent) :
-      Widget::CreateWindowWithContext(this, ash::Shell::GetActiveRootWindow());
+  gfx::NativeWindow context = parent ? NULL : ash::Shell::GetActiveRootWindow();
+  Widget* window = DialogDelegate::CreateDialogWidget(this, context, parent);
   window->SetAlwaysOnTop(true);
   window->Show();
 }
@@ -272,10 +274,10 @@ ControlledSettingIndicatorView::~ControlledSettingIndicatorView() {}
 
 void ControlledSettingIndicatorView::Update(
     const NetworkPropertyUIData& ui_data) {
-  if (managed_ == ui_data.managed())
+  if (managed_ == ui_data.IsManaged())
     return;
 
-  managed_ = ui_data.managed();
+  managed_ = ui_data.IsManaged();
   PreferredSizeChanged();
 }
 

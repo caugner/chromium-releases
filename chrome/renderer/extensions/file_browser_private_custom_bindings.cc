@@ -8,37 +8,40 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
+#include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "grit/renderer_resources.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystem.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystemType.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/public/platform/WebFileSystem.h"
+#include "third_party/WebKit/public/platform/WebFileSystemType.h"
+#include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
 
 namespace extensions {
 
 FileBrowserPrivateCustomBindings::FileBrowserPrivateCustomBindings(
-    Dispatcher* dispatcher, v8::Handle<v8::Context> context)
+    Dispatcher* dispatcher, ChromeV8Context* context)
     : ChromeV8Extension(dispatcher, context) {
   RouteFunction(
-      "GetLocalFileSystem",
-       base::Bind(&FileBrowserPrivateCustomBindings::GetLocalFileSystem,
+      "GetFileSystem",
+       base::Bind(&FileBrowserPrivateCustomBindings::GetFileSystem,
                   base::Unretained(this)));
 }
 
-v8::Handle<v8::Value> FileBrowserPrivateCustomBindings::GetLocalFileSystem(
-    const v8::Arguments& args) {
+void FileBrowserPrivateCustomBindings::GetFileSystem(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
   DCHECK(args.Length() == 2);
   DCHECK(args[0]->IsString());
   DCHECK(args[1]->IsString());
   std::string name(*v8::String::Utf8Value(args[0]));
   std::string path(*v8::String::Utf8Value(args[1]));
 
-  WebKit::WebFrame* webframe = WebKit::WebFrame::frameForContext(v8_context());
+  WebKit::WebFrame* webframe =
+      WebKit::WebFrame::frameForContext(context()->v8_context());
   DCHECK(webframe);
-  return webframe->createFileSystem(
-      WebKit::WebFileSystemTypeExternal,
-      WebKit::WebString::fromUTF8(name.c_str()),
-      WebKit::WebString::fromUTF8(path.c_str()));
+  args.GetReturnValue().Set(
+      webframe->createFileSystem(
+          WebKit::WebFileSystemTypeExternal,
+          WebKit::WebString::fromUTF8(name.c_str()),
+          WebKit::WebString::fromUTF8(path.c_str())));
 }
 
 }  // namespace extensions

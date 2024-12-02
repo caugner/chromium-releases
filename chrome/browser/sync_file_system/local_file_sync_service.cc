@@ -9,17 +9,18 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync_file_system/local_change_processor.h"
+#include "chrome/browser/sync_file_system/logger.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/fileapi/file_system_context.h"
-#include "webkit/fileapi/file_system_url.h"
-#include "webkit/fileapi/syncable/file_change.h"
-#include "webkit/fileapi/syncable/local_file_change_tracker.h"
-#include "webkit/fileapi/syncable/local_file_sync_context.h"
-#include "webkit/fileapi/syncable/sync_file_metadata.h"
+#include "webkit/browser/fileapi/file_system_context.h"
+#include "webkit/browser/fileapi/file_system_url.h"
+#include "webkit/browser/fileapi/syncable/file_change.h"
+#include "webkit/browser/fileapi/syncable/local_file_change_tracker.h"
+#include "webkit/browser/fileapi/syncable/local_file_sync_context.h"
+#include "webkit/browser/fileapi/syncable/sync_file_metadata.h"
 
 using content::BrowserThread;
 using fileapi::FileSystemURL;
@@ -95,8 +96,9 @@ void LocalFileSyncService::OriginChangeMap::SetOriginEnabled(
 LocalFileSyncService::LocalFileSyncService(Profile* profile)
     : profile_(profile),
       sync_context_(new LocalFileSyncContext(
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO))),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI).get(),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)
+              .get())),
       local_change_processor_(NULL) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   sync_context_->AddOriginChangeObserver(this);
@@ -114,11 +116,10 @@ void LocalFileSyncService::Shutdown() {
 
 void LocalFileSyncService::MaybeInitializeFileSystemContext(
     const GURL& app_origin,
-    const std::string& service_name,
     fileapi::FileSystemContext* file_system_context,
     const SyncStatusCallback& callback) {
   sync_context_->MaybeInitializeFileSystemContext(
-      app_origin, service_name, file_system_context,
+      app_origin, file_system_context,
       base::Bind(&LocalFileSyncService::DidInitializeFileSystemContext,
                  AsWeakPtr(), app_origin,
                  make_scoped_refptr(file_system_context), callback));
@@ -146,6 +147,8 @@ void LocalFileSyncService::ProcessLocalChange(
   DCHECK(local_sync_callback_.is_null());
   DCHECK(!origin.is_empty());
   DCHECK(ContainsKey(origin_to_contexts_, origin));
+
+  DVLOG(1) << "Starting ProcessLocalChange";
 
   local_sync_callback_ = callback;
 
@@ -188,8 +191,9 @@ void LocalFileSyncService::GetLocalFileMetadata(
 
 void LocalFileSyncService::PrepareForProcessRemoteChange(
     const FileSystemURL& url,
-    const std::string& service_name,
     const PrepareChangeCallback& callback) {
+  DVLOG(1) << "PrepareForProcessRemoteChange: " << url.DebugString();
+
   if (!ContainsKey(origin_to_contexts_, url.origin())) {
     // This could happen if a remote sync is triggered for the app that hasn't
     // been initialized in this service.
@@ -199,7 +203,19 @@ void LocalFileSyncService::PrepareForProcessRemoteChange(
         extensions::ExtensionSystem::Get(profile_)->extension_service();
     const extensions::Extension* extension = extension_service->GetInstalledApp(
         url.origin());
-    DCHECK(extension);
+    if (!extension) {
+      util::Log(
+          logging::LOG_WARNING,
+          FROM_HERE,
+          "PrepareForProcessRemoteChange called for non-existing origin: %s",
+          url.origin().spec().c_str());
+
+      // The extension has been uninstalled and this method is called
+      // before the remote changes for the origin are removed.
+      callback.Run(SYNC_STATUS_NO_CHANGE_TO_SYNC,
+                   SyncFileMetadata(), FileChangeList());
+      return;
+    }
     GURL site_url = extension_service->GetSiteForExtensionId(extension->id());
     DCHECK(!site_url.is_empty());
     scoped_refptr<fileapi::FileSystemContext> file_system_context =
@@ -207,11 +223,12 @@ void LocalFileSyncService::PrepareForProcessRemoteChange(
             profile_, site_url)->GetFileSystemContext();
     MaybeInitializeFileSystemContext(
         url.origin(),
-        service_name,
-        file_system_context,
+        file_system_context.get(),
         base::Bind(&LocalFileSyncService::DidInitializeForRemoteSync,
-                   AsWeakPtr(), url, service_name,
-                   file_system_context, callback));
+                   AsWeakPtr(),
+                   url,
+                   file_system_context,
+                   callback));
     return;
   }
 
@@ -311,7 +328,6 @@ void LocalFileSyncService::DidInitializeFileSystemContext(
 
 void LocalFileSyncService::DidInitializeForRemoteSync(
     const FileSystemURL& url,
-    const std::string& service_name,
     fileapi::FileSystemContext* file_system_context,
     const PrepareChangeCallback& callback,
     SyncStatusCode status) {
@@ -323,12 +339,14 @@ void LocalFileSyncService::DidInitializeForRemoteSync(
     return;
   }
   origin_to_contexts_[url.origin()] = file_system_context;
-  PrepareForProcessRemoteChange(url, service_name, callback);
+  PrepareForProcessRemoteChange(url, callback);
 }
 
 void LocalFileSyncService::RunLocalSyncCallback(
     SyncStatusCode status,
     const FileSystemURL& url) {
+  DVLOG(1) << "Local sync is finished with: " << status
+           << " on " << url.DebugString();
   DCHECK(!local_sync_callback_.is_null());
   SyncFileCallback callback = local_sync_callback_;
   local_sync_callback_.Reset();

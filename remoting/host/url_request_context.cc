@@ -4,7 +4,7 @@
 
 #include "remoting/host/url_request_context.h"
 
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "net/cert/cert_verifier.h"
 #include "net/dns/host_resolver.h"
 #include "net/http/http_auth_handler_factory.h"
@@ -96,6 +96,7 @@ URLRequestContext::URLRequestContext(
   net::HttpNetworkSession::Params session_params;
   session_params.host_resolver = host_resolver();
   session_params.cert_verifier = cert_verifier();
+  session_params.transport_security_state = transport_security_state();
   session_params.proxy_service = proxy_service();
   session_params.ssl_config_service = ssl_config_service();
   session_params.http_auth_handler_factory = http_auth_handler_factory();
@@ -104,7 +105,7 @@ URLRequestContext::URLRequestContext(
   scoped_refptr<net::HttpNetworkSession> network_session(
       new net::HttpNetworkSession(session_params));
   storage_.set_http_transaction_factory(
-      new net::HttpNetworkLayer(network_session));
+      new net::HttpNetworkLayer(network_session.get()));
   storage_.set_net_log(net_log.release());
 }
 
@@ -115,8 +116,8 @@ URLRequestContextGetter::URLRequestContextGetter(
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> network_task_runner)
     : network_task_runner_(network_task_runner) {
-  proxy_config_service_.reset(
-      CreateSystemProxyConfigService(ui_task_runner, network_task_runner_));
+  proxy_config_service_.reset(CreateSystemProxyConfigService(
+      ui_task_runner.get(), network_task_runner_.get()));
 }
 
 net::URLRequestContext* URLRequestContextGetter::GetURLRequestContext() {

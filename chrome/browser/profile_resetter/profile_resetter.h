@@ -5,15 +5,22 @@
 #ifndef CHROME_BROWSER_PROFILE_RESETTER_PROFILE_RESETTER_H_
 #define CHROME_BROWSER_PROFILE_RESETTER_PROFILE_RESETTER_H_
 
+#include "base/basictypes.h"
 #include "base/callback.h"
-#include "base/compiler_specific.h"
+#include "base/threading/non_thread_safe.h"
+#include "chrome/browser/browsing_data/browsing_data_remover.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class Profile;
+class TemplateURLService;
 
 // This class allows resetting certain aspects of a profile to default values.
 // It is used in case the profile has been damaged due to malware or bad user
 // settings.
-class ProfileResetter {
+class ProfileResetter : public base::NonThreadSafe,
+                        public content::NotificationObserver,
+                        public BrowsingDataRemover::Observer {
  public:
   // Flags indicating what aspects of a profile shall be reset.
   enum Resettable {
@@ -22,30 +29,30 @@ class ProfileResetter {
     CONTENT_SETTINGS = 1 << 2,
     COOKIES_AND_SITE_DATA = 1 << 3,
     EXTENSIONS = 1 << 4,
+    STARTUP_PAGES = 1 << 5,
+    PINNED_TABS = 1 << 6,
     // Update ALL if you add new values and check whether the type of
     // ResettableFlags needs to be enlarged.
     ALL = DEFAULT_SEARCH_ENGINE | HOMEPAGE | CONTENT_SETTINGS |
-          COOKIES_AND_SITE_DATA | EXTENSIONS
-  };
-
-  // How to handle extensions that shall be reset.
-  enum ExtensionHandling {
-    DISABLE_EXTENSIONS,
-    UNINSTALL_EXTENSIONS
+          COOKIES_AND_SITE_DATA | EXTENSIONS | STARTUP_PAGES | PINNED_TABS
   };
 
   // Bit vector for Resettable enum.
   typedef uint32 ResettableFlags;
 
+  COMPILE_ASSERT(sizeof(ResettableFlags) == sizeof(Resettable),
+                 type_ResettableFlags_doesnt_match_Resettable);
+
   explicit ProfileResetter(Profile* profile);
-  ~ProfileResetter();
+  virtual ~ProfileResetter();
 
   // Resets |resettable_flags| and calls |callback| on the UI thread on
   // completion. If |resettable_flags| contains EXTENSIONS, these are handled
   // according to |extension_handling|.
   void Reset(ResettableFlags resettable_flags,
-             ExtensionHandling extension_handling,
              const base::Closure& callback);
+
+  bool IsActive() const;
 
  private:
   // Marks |resettable| as done and triggers |callback_| if all pending jobs
@@ -56,9 +63,20 @@ class ProfileResetter {
   void ResetHomepage();
   void ResetContentSettings();
   void ResetCookiesAndSiteData();
-  void ResetExtensions(ExtensionHandling extension_handling);
+  void ResetExtensions();
+  void ResetStartupPages();
+  void ResetPinnedTabs();
+
+  // content::NotificationObserver:
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
+  // BrowsingDataRemover::Observer:
+  virtual void OnBrowsingDataRemoverDone() OVERRIDE;
 
   Profile* profile_;
+  TemplateURLService* template_url_service_;
 
   // Flags of a Resetable indicating which reset operations we are still waiting
   // for.
@@ -66,6 +84,12 @@ class ProfileResetter {
 
   // Called on UI thread when reset has been completed.
   base::Closure callback_;
+
+  content::NotificationRegistrar registrar_;
+
+  // If non-null it means removal is in progress. BrowsingDataRemover takes care
+  // of deleting itself when done.
+  BrowsingDataRemover* cookies_remover_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileResetter);
 };

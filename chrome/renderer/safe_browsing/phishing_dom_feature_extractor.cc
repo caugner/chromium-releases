@@ -6,21 +6,21 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/hash_tables.h"
+#include "base/containers/hash_tables.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/time.h"
 #include "chrome/renderer/safe_browsing/feature_extractor_clock.h"
 #include "chrome/renderer/safe_browsing/features.h"
 #include "content/public/renderer/render_view.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebNodeCollection.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/public/web/WebElement.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebNodeCollection.h"
+#include "third_party/WebKit/public/web/WebView.h"
+#include "third_party/WebKit/public/platform/WebString.h"
 
 namespace safe_browsing {
 
@@ -132,7 +132,7 @@ void PhishingDOMFeatureExtractor::ExtractFeatures(
     cur_document_ = web_view->mainFrame()->document();
   }
 
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&PhishingDOMFeatureExtractor::ExtractFeaturesWithTimeout,
                  weak_factory_.GetWeakPtr()));
@@ -215,7 +215,7 @@ void PhishingDOMFeatureExtractor::ExtractFeaturesWithTimeout() {
           // clock granularity.
           UMA_HISTOGRAM_TIMES("SBClientPhishing.DOMFeatureChunkTime",
                               chunk_elapsed);
-          MessageLoop::current()->PostTask(
+          base::MessageLoop::current()->PostTask(
               FROM_HERE,
               base::Bind(
                   &PhishingDOMFeatureExtractor::ExtractFeaturesWithTimeout,
@@ -386,8 +386,9 @@ void PhishingDOMFeatureExtractor::ResetFrameData() {
   cur_frame_data_.reset(new FrameData());
   cur_frame_data_->elements = cur_document_.all();
   cur_frame_data_->domain =
-      net::RegistryControlledDomainService::GetDomainAndRegistry(
-          cur_document_.url());
+      net::registry_controlled_domains::GetDomainAndRegistry(
+          cur_document_.url(),
+          net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
 }
 
 WebKit::WebDocument PhishingDOMFeatureExtractor::GetNextDocument() {
@@ -422,8 +423,8 @@ bool PhishingDOMFeatureExtractor::IsExternalDomain(const GURL& url,
   if (url.HostIsIPAddress()) {
     domain->assign(url.host());
   } else {
-    domain->assign(net::RegistryControlledDomainService::GetDomainAndRegistry(
-        url));
+    domain->assign(net::registry_controlled_domains::GetDomainAndRegistry(
+        url, net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES));
   }
 
   return !domain->empty() && *domain != cur_frame_data_->domain;

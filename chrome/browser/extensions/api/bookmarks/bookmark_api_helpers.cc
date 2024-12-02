@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/extensions/api/bookmarks/bookmark_api_constants.h"
@@ -132,7 +132,8 @@ base::DictionaryValue* GetNodeDictionary(const BookmarkNode* node,
     for (int i = 0; i < node->child_count(); ++i) {
       const BookmarkNode* child = node->GetChild(i);
       if (child->IsVisible() && (!only_folders || child->is_folder())) {
-        DictionaryValue* dict = GetNodeDictionary(child, true, only_folders);
+        base::DictionaryValue* dict =
+            GetNodeDictionary(child, true, only_folders);
         children->Append(dict);
       }
     }

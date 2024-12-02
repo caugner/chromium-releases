@@ -5,7 +5,7 @@
 #ifndef UI_VIEWS_CONTROLS_TREE_TREE_VIEW_SELECTOR_H_
 #define UI_VIEWS_CONTROLS_TREE_TREE_VIEW_SELECTOR_H_
 
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/time.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/views/views_export.h"
@@ -31,6 +31,7 @@ class VIEWS_EXPORT TreeViewSelector : public ui::TextInputClient {
   virtual void ClearCompositionText() OVERRIDE;
   virtual void InsertText(const string16& text) OVERRIDE;
   virtual void InsertChar(char16 ch, int flags) OVERRIDE;
+  virtual gfx::NativeWindow GetAttachedWindow() const OVERRIDE;
   virtual ui::TextInputType GetTextInputType() const OVERRIDE;
   virtual bool CanComposeInline() const OVERRIDE;
   virtual gfx::Rect GetCaretBounds() OVERRIDE;

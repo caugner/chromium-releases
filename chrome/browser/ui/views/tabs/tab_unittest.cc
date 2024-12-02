@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/models/list_selection_model.h"
 #include "ui/views/controls/button/image_button.h"
@@ -32,7 +32,8 @@ class FakeTabController : public TabController {
   virtual void AddSelectionFromAnchorTo(Tab* tab) OVERRIDE {}
   virtual void CloseTab(Tab* tab, CloseTabSource source) OVERRIDE {}
   virtual void ShowContextMenuForTab(Tab* tab,
-                                     const gfx::Point& p) OVERRIDE {}
+                                     const gfx::Point& p,
+                                     ui::MenuSourceType source_type) OVERRIDE {}
   virtual bool IsActiveTab(const Tab* tab) const OVERRIDE { return false; }
   virtual bool IsTabSelected(const Tab* tab) const OVERRIDE {
     return false;

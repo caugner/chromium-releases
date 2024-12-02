@@ -8,9 +8,10 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/common/instant_restricted_id_cache.h"
 #include "chrome/common/instant_types.h"
+#include "chrome/common/omnibox_focus_state.h"
 #include "chrome/common/search_types.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/renderer/render_view_observer.h"
@@ -30,6 +31,9 @@ class SearchBox : public content::RenderViewObserver,
 
   // Sends ChromeViewHostMsg_SetSuggestion to the browser.
   void SetSuggestions(const std::vector<InstantSuggestion>& suggestions);
+
+  // Sends ChromeViewHostMsg_SetVoiceSearchSupported to the browser.
+  void SetVoiceSearchSupported(bool supported);
 
   // Marks the current query text as restricted, to make sure that it does
   // not get communicated to the page.  The restricted status lasts until the
@@ -51,7 +55,8 @@ class SearchBox : public content::RenderViewObserver,
   // Sends ChromeViewHostMsg_SearchBoxNavigate to the browser.
   void NavigateToURL(const GURL& url,
                      content::PageTransition transition,
-                     WindowOpenDisposition disposition);
+                     WindowOpenDisposition disposition,
+                     bool is_search_type);
 
   // Shows any attached bars.
   void ShowBars();
@@ -65,10 +70,13 @@ class SearchBox : public content::RenderViewObserver,
   bool query_is_restricted() const { return query_is_restricted_; }
   size_t selection_start() const { return selection_start_; }
   size_t selection_end() const { return selection_end_; }
+  bool is_focused() const { return is_focused_; }
   bool is_key_capture_enabled() const { return is_key_capture_enabled_; }
+  bool is_input_in_progress() const { return is_input_in_progress_; }
   bool display_instant_results() const { return display_instant_results_; }
   const string16& omnibox_font() const { return omnibox_font_; }
   size_t omnibox_font_size() const { return omnibox_font_size_; }
+  bool app_launcher_enabled() const { return app_launcher_enabled_; }
 
   // In extended Instant, returns the start-edge margin of the location bar in
   // screen pixels.
@@ -111,10 +119,29 @@ class SearchBox : public content::RenderViewObserver,
   // browser.
   void UndoAllMostVisitedDeletions();
 
+  // Generates the thumbnail URL of the most visited item specified by the
+  // |transient_url|. If the |transient_url| is valid, returns true and fills in
+  // |url|. If the |transient_url| is invalid, returns false  and |url| is not
+  // set.
+  //
+  // Valid form of |transient_url|:
+  //    chrome-search://thumb/<render_view_id>/<most_visited_item_id>
+  bool GenerateThumbnailURLFromTransientURL(const GURL& transient_url,
+                                            GURL* url) const;
+
+  // Generates the favicon URL of the most visited item specified by the
+  // |transient_url|. If the |transient_url| is valid, returns true and fills in
+  // |url|. If the |transient_url| is invalid, returns false  and |url| is not
+  // set.
+  //
+  // Valid form of |transient_url|:
+  //    chrome-search://favicon/<render_view_id>/<most_visited_item_id>
+  bool GenerateFaviconURLFromTransientURL(const GURL& transient_url,
+                                          GURL* url) const;
+
  private:
   // Overridden from content::RenderViewObserver:
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void DidClearWindowObject(WebKit::WebFrame* frame) OVERRIDE;
 
   void OnChange(const string16& query,
                 bool verbatim,
@@ -134,14 +161,18 @@ class SearchBox : public content::RenderViewObserver,
                          bool verbatim,
                          size_t selection_start,
                          size_t selection_end);
-  void OnKeyCaptureChange(bool is_key_capture_enabled);
+  void OnFocusChanged(OmniboxFocusState new_focus_state,
+                      OmniboxFocusChangeReason reason);
+  void OnSetInputInProgress(bool input_in_progress);
   void OnSetDisplayInstantResults(bool display_instant_results);
   void OnThemeChanged(const ThemeBackgroundInfo& theme_info);
   void OnThemeAreaHeightChanged(int height);
   void OnFontInformationReceived(const string16& omnibox_font,
                                  size_t omnibox_font_size);
+  void OnPromoInformationReceived(bool is_app_launcher_enabled);
   void OnMostVisitedChanged(
-      const std::vector<InstantMostVisitedItemIDPair>& items);
+      const std::vector<InstantMostVisitedItem>& items);
+  void OnToggleVoiceSearch();
 
   // Returns the current zoom factor of the render view or 1 on failure.
   double GetZoom() const;
@@ -152,6 +183,9 @@ class SearchBox : public content::RenderViewObserver,
   // Sets the query to a new value.
   void SetQuery(const string16& query, bool verbatim);
 
+  // Returns the URL of the Most Visited item specified by the |item_id|.
+  GURL GetURLForMostVisitedItem(InstantRestrictedID item_id) const;
+
   string16 query_;
   bool verbatim_;
   bool query_is_restricted_;
@@ -159,11 +193,14 @@ class SearchBox : public content::RenderViewObserver,
   size_t selection_end_;
   int start_margin_;
   gfx::Rect popup_bounds_;
+  bool is_focused_;
   bool is_key_capture_enabled_;
+  bool is_input_in_progress_;
   ThemeBackgroundInfo theme_info_;
   bool display_instant_results_;
   string16 omnibox_font_;
   size_t omnibox_font_size_;
+  bool app_launcher_enabled_;
   InstantRestrictedIDCache<InstantAutocompleteResult>
       autocomplete_results_cache_;
   InstantRestrictedIDCache<InstantMostVisitedItem> most_visited_items_cache_;

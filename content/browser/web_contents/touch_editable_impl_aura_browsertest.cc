@@ -6,8 +6,8 @@
 
 #include "base/command_line.h"
 #include "base/run_loop.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/test/test_timeouts.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
@@ -43,15 +43,15 @@ class TestTouchEditableImplAura : public TouchEditableImplAura {
     waiting_for_gesture_ack_callback_ = false;
   }
 
-  void OnSelectionOrCursorChanged(const gfx::Rect& anchor,
-                                  const gfx::Rect& focus) OVERRIDE {
+  virtual void OnSelectionOrCursorChanged(const gfx::Rect& anchor,
+                                          const gfx::Rect& focus) OVERRIDE {
     selection_changed_callback_arrived_ = true;
     TouchEditableImplAura::OnSelectionOrCursorChanged(anchor, focus);
     if (waiting_for_selection_changed_callback_)
       selection_changed_wait_run_loop_->Quit();
   }
 
-  void GestureEventAck(int gesture_event_type) OVERRIDE {
+  virtual void GestureEventAck(int gesture_event_type) OVERRIDE {
     gesture_ack_callback_arrived_ = true;
     TouchEditableImplAura::GestureEventAck(gesture_event_type);
     if (waiting_for_gesture_ack_callback_)
@@ -152,8 +152,8 @@ class TouchEditableImplAuraTest : public ContentBrowserTest {
     // Lets move the handles a bit to modify the selection
     touch_editable->Reset();
     generator.GestureScrollSequence(
-        gfx::Point(10, 37),
-        gfx::Point(30, 37),
+        gfx::Point(10, 47),
+        gfx::Point(30, 47),
         base::TimeDelta::FromMilliseconds(20),
         1);
     EXPECT_TRUE(touch_editable->touch_selection_controller_.get());
@@ -206,6 +206,73 @@ class TouchEditableImplAuraTest : public ContentBrowserTest {
     std::string selection;
     value->GetAsString(&selection);
     EXPECT_STREQ("Some", selection.c_str());
+  }
+
+  void TestTouchSelectionHiddenWhenScrolling() {
+    ASSERT_NO_FATAL_FAILURE(
+        StartTestWithPage("files/touch_selection.html"));
+    WebContentsImpl* web_contents =
+        static_cast<WebContentsImpl*>(shell()->web_contents());
+    RenderViewHostImpl* view_host = static_cast<RenderViewHostImpl*>(
+        web_contents->GetRenderViewHost());
+    WebContentsViewAura* view_aura = static_cast<WebContentsViewAura*>(
+        web_contents->GetView());
+    TestTouchEditableImplAura* touch_editable = new TestTouchEditableImplAura;
+    view_aura->SetTouchEditableForTest(touch_editable);
+    RenderWidgetHostViewAura* rwhva = static_cast<RenderWidgetHostViewAura*>(
+        web_contents->GetRenderWidgetHostView());
+    aura::Window* content = web_contents->GetView()->GetContentNativeView();
+    aura::test::EventGenerator generator(content->GetRootWindow(), content);
+    gfx::Rect bounds = content->GetBoundsInRootWindow();
+    EXPECT_EQ(touch_editable->rwhva_, rwhva);
+
+    // Long press to select word.
+    ui::GestureEvent long_press(ui::ET_GESTURE_LONG_PRESS,
+                                10,
+                                10,
+                                0,
+                                ui::EventTimeForNow(),
+                                ui::GestureEventDetails(
+                                    ui::ET_GESTURE_LONG_PRESS, 0, 0),
+                                1);
+    touch_editable->Reset();
+    rwhva->OnGestureEvent(&long_press);
+    touch_editable->WaitForSelectionChangeCallback();
+
+    // Check if selection handles are showing.
+    ui::TouchSelectionController* controller =
+        touch_editable->touch_selection_controller_.get();
+    EXPECT_TRUE(controller);
+
+    scoped_ptr<base::Value> value =
+        content::ExecuteScriptAndGetValue(view_host, "get_selection()");
+    std::string selection;
+    value->GetAsString(&selection);
+    EXPECT_STREQ("Some", selection.c_str());
+
+    // Start scrolling. Handles should get hidden.
+    ui::GestureEvent scroll_begin(ui::ET_GESTURE_SCROLL_BEGIN,
+                                  10,
+                                  10,
+                                  0,
+                                  ui::EventTimeForNow(),
+                                  ui::GestureEventDetails(
+                                      ui::ET_GESTURE_LONG_PRESS, 0, 0),
+                                  1);
+    rwhva->OnGestureEvent(&scroll_begin);
+    EXPECT_FALSE(touch_editable->touch_selection_controller_.get());
+
+    // Handles should come back after scroll ends.
+    ui::GestureEvent scroll_end(ui::ET_GESTURE_SCROLL_END,
+                                10,
+                                10,
+                                0,
+                                ui::EventTimeForNow(),
+                                ui::GestureEventDetails(
+                                    ui::ET_GESTURE_LONG_PRESS, 0, 0),
+                                1);
+    rwhva->OnGestureEvent(&scroll_end);
+    EXPECT_TRUE(touch_editable->touch_selection_controller_.get());
   }
 
   void TestTouchCursorInTextfield() {
@@ -269,6 +336,11 @@ class TouchEditableImplAuraTest : public ContentBrowserTest {
 IN_PROC_BROWSER_TEST_F(TouchEditableImplAuraTest,
                        TouchSelectionOriginatingFromWebpageTest) {
   TestTouchSelectionOriginatingFromWebpage();
+}
+
+IN_PROC_BROWSER_TEST_F(TouchEditableImplAuraTest,
+                       TestTouchSelectionHiddenWhenScrolling) {
+  TestTouchSelectionHiddenWhenScrolling();
 }
 
 IN_PROC_BROWSER_TEST_F(TouchEditableImplAuraTest,

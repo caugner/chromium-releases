@@ -6,7 +6,7 @@
 
 #include <utility>
 
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -14,7 +14,6 @@
 #include "content/public/browser/web_contents_view.h"
 
 using content::WebContents;
-
 
 @implementation TabContentsController
 @synthesize webContents = contents_;
@@ -33,7 +32,7 @@ using content::WebContents;
 }
 
 - (void)loadView {
-  scoped_nsobject<NSView> view([[NSView alloc] initWithFrame:NSZeroRect]);
+  base::scoped_nsobject<NSView> view([[NSView alloc] initWithFrame:NSZeroRect]);
   [view setAutoresizingMask:NSViewHeightSizable|NSViewWidthSizable];
   [self setView:view];
 }
@@ -64,9 +63,6 @@ using content::WebContents;
   }
   [contentsNativeView setAutoresizingMask:NSViewWidthSizable|
                                           NSViewHeightSizable];
-  // The find bar will overlap the content's view when it comes out; inform
-  // the view.
-  contents_->GetView()->SetAllowOverlappingViews(true);
 }
 
 - (void)changeWebContents:(WebContents*)newContents {

@@ -32,7 +32,7 @@
 #include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/synchronization/lock.h"
 #include "ipc/file_descriptor_set_posix.h"
 #include "ipc/ipc_descriptors.h"
@@ -841,11 +841,6 @@ bool Channel::ChannelImpl::WillDispatchInputMessage(Message* msg) {
                  << " channel:" << this
                  << " message-type:" << msg->type()
                  << " header()->num_fds:" << header_fds;
-#if defined(CHROMIUM_SELINUX)
-    LOG(WARNING) << "In the case of SELinux this can be caused when "
-                    "using a --user-data-dir to which the default "
-                    "policy doesn't give the renderer access to. ";
-#endif  // CHROMIUM_SELINUX
     // Abort the connection.
     ClearInputFDs();
     return false;

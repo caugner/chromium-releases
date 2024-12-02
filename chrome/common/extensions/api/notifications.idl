@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Use the <code>chrome.notifications</code> API to create rich notifications
+// using templates and show these notifications to users in the system tray.
 namespace notifications {
   [noinline_doc] enum TemplateType {
     // icon, title, message, expandedMessage, up to two buttons
@@ -22,9 +24,16 @@ namespace notifications {
     DOMString message;
   };
 
+  [nodoc] dictionary NotificationBitmap {
+    long width;
+    long height;
+    ArrayBuffer? data;
+  };
+
   dictionary NotificationButton {
     DOMString title;
     DOMString? iconUrl;
+    [nodoc] NotificationBitmap? iconBitmap;
   };
 
   dictionary NotificationOptions {
@@ -33,6 +42,7 @@ namespace notifications {
 
     // Sender's avatar, app icon, or a thumbnail for image notifications.
     DOMString iconUrl;
+    [nodoc] NotificationBitmap? iconBitmap;
 
     // Title of the notification (e.g. sender name for email).
     DOMString title;
@@ -56,6 +66,7 @@ namespace notifications {
 
     // Image thumbnail for image-type notifications.
     DOMString? imageUrl;
+    [nodoc] NotificationBitmap? imageBitmap;
 
     // Items for multi-item notifications.
     NotificationItem[]? items;
@@ -66,6 +77,8 @@ namespace notifications {
   callback UpdateCallback = void (boolean wasUpdated);
 
   callback ClearCallback = void (boolean wasCleared);
+
+  callback GetAllCallback = void (object notifications);
 
   interface Functions {
     // Creates and displays a notification having the contents in |options|,
@@ -89,6 +102,10 @@ namespace notifications {
     // corresponding notification. |callback| indicates whether a matching
     // notification existed.
     static void clear(DOMString notificationId, ClearCallback callback);
+
+    // |callback| is executed with the set of notification_ids currently in
+    // the system.
+    static void getAll(GetAllCallback callback);
   };
 
   interface Events {

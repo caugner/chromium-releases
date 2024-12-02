@@ -20,10 +20,11 @@ function ImageView(container, viewport, metadataCache) {
   this.displayedContentGeneration_ = 0;
   this.displayedViewportGeneration_ = 0;
 
-  this.imageLoader_ = new ImageUtil.ImageLoader(this.document_);
+  this.imageLoader_ = new ImageUtil.ImageLoader(this.document_, metadataCache);
   // We have a separate image loader for prefetch which does not get cancelled
   // when the selection changes.
-  this.prefetchLoader_ = new ImageUtil.ImageLoader(this.document_);
+  this.prefetchLoader_ = new ImageUtil.ImageLoader(
+      this.document_, metadataCache);
 
   // The content cache is used for prefetching the next image when going
   // through the images sequentially. The real life photos can be large
@@ -428,9 +429,8 @@ ImageView.prototype.load = function(url, metadata, effect,
   }
 
   function displayMainImage(loadType, previewShown, content, opt_error) {
-    if (opt_error) {
+    if (opt_error)
       loadType = ImageView.LOAD_TYPE_ERROR;
-    }
 
     // If we already displayed the preview we should not replace the content if:
     //   1. The full content failed to load.
@@ -533,15 +533,13 @@ ImageView.prototype.unload = function(zoomToRect) {
 /**
  *
  * @param {HTMLCanvasElement|HTMLVideoElement} content The image element.
- * @param {boolean=} opt_reuseScreenCanvas True if it is OK to reuse the screen
- *     resolution canvas.
  * @param {number=} opt_width Image width.
  * @param {number=} opt_height Image height.
  * @param {boolean=} opt_preview True if the image is a preview (not full res).
  * @private
  */
 ImageView.prototype.replaceContent_ = function(
-    content, opt_reuseScreenCanvas, opt_width, opt_height, opt_preview) {
+    content, opt_width, opt_height, opt_preview) {
 
   if (this.contentCanvas_ && this.contentCanvas_.parentNode == this.container_)
     this.container_.removeChild(this.contentCanvas_);
@@ -551,14 +549,13 @@ ImageView.prototype.replaceContent_ = function(
     this.videoElement_ = content;
     this.screenImage_ = content;
     this.screenImage_.className = 'image';
+    this.container_.appendChild(this.screenImage_);
+    this.videoElement_.play();
     return;
   }
 
-  if (!opt_reuseScreenCanvas || !this.screenImage_ ||
-      this.screenImage_.constructor.name == 'HTMLVideoElement') {
-    this.screenImage_ = this.document_.createElement('canvas');
-    this.screenImage_.className = 'image';
-  }
+  this.screenImage_ = this.document_.createElement('canvas');
+  this.screenImage_.className = 'image';
 
   this.videoElement_ = null;
   this.contentCanvas_ = content;
@@ -570,9 +567,7 @@ ImageView.prototype.replaceContent_ = function(
   this.viewport_.update();
   this.draw();
 
-  if (opt_reuseScreenCanvas && !this.screenImage_.parentNode) {
-    this.container_.appendChild(this.screenImage_);
-  }
+  this.container_.appendChild(this.screenImage_);
 
   this.preview_ = opt_preview;
   // If this is not a thumbnail, cache the content and the screen-scale image.
@@ -640,17 +635,18 @@ ImageView.prototype.replace = function(
     content, opt_effect, opt_width, opt_height, opt_preview) {
   var oldScreenImage = this.screenImage_;
 
-  this.replaceContent_(
-      content, !opt_effect, opt_width, opt_height, opt_preview);
-
-  if (!opt_effect) return;
+  this.replaceContent_(content, opt_width, opt_height, opt_preview);
+  if (!opt_effect) {
+    if (oldScreenImage)
+      oldScreenImage.parentNode.removeChild(oldScreenImage);
+    return;
+  }
 
   var newScreenImage = this.screenImage_;
 
   if (oldScreenImage)
     ImageUtil.setAttribute(newScreenImage, 'fade', true);
   this.setTransform(newScreenImage, opt_effect, 0 /* instant */);
-  this.container_.appendChild(newScreenImage);
 
   setTimeout(function() {
     this.setTransform(newScreenImage, null,

@@ -11,7 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/synchronization/cancellation_flag.h"
 #include "base/task_runner.h"
 
@@ -84,7 +84,7 @@ CancelableTaskTracker::TaskId CancelableTaskTracker::PostTaskAndReply(
   DCHECK(thread_checker_.CalledOnValidThread());
 
   // We need a MessageLoop to run reply.
-  DCHECK(base::MessageLoopProxy::current());
+  DCHECK(base::MessageLoopProxy::current().get());
 
   // Owned by reply callback below.
   CancellationFlag* flag = new CancellationFlag();
@@ -110,7 +110,7 @@ CancelableTaskTracker::TaskId CancelableTaskTracker::PostTaskAndReply(
 CancelableTaskTracker::TaskId CancelableTaskTracker::NewTrackedTaskId(
     IsCanceledCallback* is_canceled_cb) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(base::MessageLoopProxy::current());
+  DCHECK(base::MessageLoopProxy::current().get());
 
   TaskId id = next_id_;
   next_id_++;  // int64 is big enough that we ignore the potential overflow.

@@ -11,13 +11,12 @@
 #include "base/command_line.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/ime/input_method_manager.h"
 #include "chromeos/ime/xkeyboard.h"
 #include "content/public/browser/page_navigator.h"
@@ -63,19 +62,6 @@ struct I18nContentToMessage {
 } kI18nContentToMessage[] = {
   { "keyboardOverlayLearnMore", IDS_KEYBOARD_OVERLAY_LEARN_MORE },
   { "keyboardOverlayTitle", IDS_KEYBOARD_OVERLAY_TITLE },
-  { "keyboardOverlayF1", IDS_KEYBOARD_OVERLAY_F1 },
-  { "keyboardOverlayF2", IDS_KEYBOARD_OVERLAY_F2 },
-  { "keyboardOverlayF3", IDS_KEYBOARD_OVERLAY_F3 },
-  { "keyboardOverlayF4", IDS_KEYBOARD_OVERLAY_F4 },
-  { "keyboardOverlayF5", IDS_KEYBOARD_OVERLAY_F5 },
-  { "keyboardOverlayF6", IDS_KEYBOARD_OVERLAY_F6 },
-  { "keyboardOverlayF7", IDS_KEYBOARD_OVERLAY_F7 },
-  { "keyboardOverlayF8", IDS_KEYBOARD_OVERLAY_F8 },
-  { "keyboardOverlayF9", IDS_KEYBOARD_OVERLAY_F9 },
-  { "keyboardOverlayF10", IDS_KEYBOARD_OVERLAY_F10 },
-  { "keyboardOverlayF11", IDS_KEYBOARD_OVERLAY_F11 },
-  { "keyboardOverlayF12", IDS_KEYBOARD_OVERLAY_F12 },
-  { "keyboardOverlayInsert", IDS_KEYBOARD_OVERLAY_INSERT },
   { "keyboardOverlayInstructions", IDS_KEYBOARD_OVERLAY_INSTRUCTIONS },
   { "keyboardOverlayInstructionsHide", IDS_KEYBOARD_OVERLAY_INSTRUCTIONS_HIDE },
   { "keyboardOverlayActivateLastLauncherItem",
@@ -133,6 +119,18 @@ struct I18nContentToMessage {
   { "keyboardOverlayDomInspector", IDS_KEYBOARD_OVERLAY_DOM_INSPECTOR },
   { "keyboardOverlayDownloads", IDS_KEYBOARD_OVERLAY_DOWNLOADS },
   { "keyboardOverlayEnd", IDS_KEYBOARD_OVERLAY_END },
+  { "keyboardOverlayF1", IDS_KEYBOARD_OVERLAY_F1 },
+  { "keyboardOverlayF10", IDS_KEYBOARD_OVERLAY_F10 },
+  { "keyboardOverlayF11", IDS_KEYBOARD_OVERLAY_F11 },
+  { "keyboardOverlayF12", IDS_KEYBOARD_OVERLAY_F12 },
+  { "keyboardOverlayF2", IDS_KEYBOARD_OVERLAY_F2 },
+  { "keyboardOverlayF3", IDS_KEYBOARD_OVERLAY_F3 },
+  { "keyboardOverlayF4", IDS_KEYBOARD_OVERLAY_F4 },
+  { "keyboardOverlayF5", IDS_KEYBOARD_OVERLAY_F5 },
+  { "keyboardOverlayF6", IDS_KEYBOARD_OVERLAY_F6 },
+  { "keyboardOverlayF7", IDS_KEYBOARD_OVERLAY_F7 },
+  { "keyboardOverlayF8", IDS_KEYBOARD_OVERLAY_F8 },
+  { "keyboardOverlayF9", IDS_KEYBOARD_OVERLAY_F9 },
   { "keyboardOverlayFindPreviousText",
     IDS_KEYBOARD_OVERLAY_FIND_PREVIOUS_TEXT },
   { "keyboardOverlayFindText", IDS_KEYBOARD_OVERLAY_FIND_TEXT },
@@ -156,6 +154,7 @@ struct I18nContentToMessage {
     IDS_KEYBOARD_OVERLAY_INCREASE_KEY_BRIGHTNESS },
   { "keyboardOverlayInputUnicodeCharacters",
     IDS_KEYBOARD_OVERLAY_INPUT_UNICODE_CHARACTERS },
+  { "keyboardOverlayInsert", IDS_KEYBOARD_OVERLAY_INSERT },
   { "keyboardOverlayJavascriptConsole",
     IDS_KEYBOARD_OVERLAY_JAVASCRIPT_CONSOLE },
   { "keyboardOverlayLockScreen", IDS_KEYBOARD_OVERLAY_LOCK_SCREEN },
@@ -255,7 +254,7 @@ content::WebUIDataSource* CreateKeyboardOverlayUIHTMLSource() {
   source->AddString("keyboardOverlayLearnMoreURL", UTF8ToUTF16(kLearnMoreURL));
   source->AddBoolean("keyboardOverlayHasChromeOSDiamondKey",
                      CommandLine::ForCurrentProcess()->HasSwitch(
-                         switches::kHasChromeOSDiamondKey));
+                         chromeos::switches::kHasChromeOSDiamondKey));
   ash::Shell* shell = ash::Shell::GetInstance();
   ash::internal::DisplayManager* display_manager = shell->display_manager();
   source->AddBoolean("keyboardOverlayIsDisplayRotationEnabled",
@@ -325,7 +324,7 @@ void KeyboardOverlayHandler::RegisterMessages() {
 
 void KeyboardOverlayHandler::GetInputMethodId(const ListValue* args) {
   chromeos::input_method::InputMethodManager* manager =
-      chromeos::input_method::GetInputMethodManager();
+      chromeos::input_method::InputMethodManager::Get();
   const chromeos::input_method::InputMethodDescriptor& descriptor =
       manager->GetCurrentInputMethod();
   StringValue param(descriptor.id());

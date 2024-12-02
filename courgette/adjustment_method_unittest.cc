@@ -4,9 +4,7 @@
 
 #include <string>
 
-#include "base/path_service.h"
-#include "base/file_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 
 #include "courgette/assembly_program.h"
 #include "courgette/courgette.h"

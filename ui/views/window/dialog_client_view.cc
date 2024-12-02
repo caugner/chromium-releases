@@ -20,14 +20,6 @@ namespace {
 // conflict with other groups that could be in the dialog content.
 const int kButtonGroup = 6666;
 
-// Update |button|'s text and enabled state according to |delegate|'s state.
-void UpdateButton(LabelButton* button,
-                  DialogDelegate* dialog,
-                  ui::DialogButton type) {
-  button->SetText(dialog->GetDialogButtonLabel(type));
-  button->SetEnabled(dialog->IsDialogButtonEnabled(type));
-}
-
 // Returns true if the given view should be shown (i.e. exists and is
 // visible).
 bool ShouldShow(View* view) {
@@ -48,19 +40,9 @@ DialogClientView::DialogClientView(Widget* owner, View* contents_view)
       extra_view_(NULL),
       footnote_view_(NULL),
       notified_delegate_(false) {
-  // When using the new style, the background color is set on the bubble frame,
-  // so a transparent background is fine.
-  if (!DialogDelegate::UseNewStyle()) {
-    const SkColor color = owner->GetNativeTheme()->GetSystemColor(
-        ui::NativeTheme::kColorId_DialogBackground);
-    set_background(views::Background::CreateSolidBackground(color));
-  }
 }
 
 DialogClientView::~DialogClientView() {
-  if (focus_manager_)
-    focus_manager_->RemoveFocusChangeListener(this);
-  focus_manager_ = NULL;
 }
 
 void DialogClientView::AcceptWindow() {
@@ -79,19 +61,21 @@ void DialogClientView::CancelWindow() {
 }
 
 void DialogClientView::UpdateDialogButtons() {
-  DialogDelegate* dialog = GetDialogDelegate();
-  const int buttons = dialog->GetDialogButtons();
+  const int buttons = GetDialogDelegate()->GetDialogButtons();
   ui::Accelerator escape(ui::VKEY_ESCAPE, ui::EF_NONE);
+  if (default_button_)
+    default_button_->SetIsDefault(false);
+  default_button_ = NULL;
 
   if (buttons & ui::DIALOG_BUTTON_OK) {
     if (!ok_button_) {
       ok_button_ = CreateDialogButton(ui::DIALOG_BUTTON_OK);
-      if (buttons & ui::DIALOG_BUTTON_CANCEL)
+      if (!(buttons & ui::DIALOG_BUTTON_CANCEL))
         ok_button_->AddAccelerator(escape);
       AddChildView(ok_button_);
     }
 
-    UpdateButton(ok_button_, dialog, ui::DIALOG_BUTTON_OK);
+    UpdateButton(ok_button_, ui::DIALOG_BUTTON_OK);
   } else if (ok_button_) {
     delete ok_button_;
     ok_button_ = NULL;
@@ -104,7 +88,7 @@ void DialogClientView::UpdateDialogButtons() {
       AddChildView(cancel_button_);
     }
 
-    UpdateButton(cancel_button_, dialog, ui::DIALOG_BUTTON_CANCEL);
+    UpdateButton(cancel_button_, ui::DIALOG_BUTTON_CANCEL);
   } else if (cancel_button_) {
     delete cancel_button_;
     cancel_button_ = NULL;
@@ -146,16 +130,11 @@ const DialogClientView* DialogClientView::AsDialogClientView() const {
 
 void DialogClientView::OnWillChangeFocus(View* focused_before,
                                          View* focused_now) {
-  // New style dialogs do not move the default button with the focus.
-  // TODO(msw|wittman): Remove this functionality once the new style has landed.
-  if (DialogDelegate::UseNewStyle())
-    return;
-
   // Make the newly focused button default or restore the dialog's default.
   const int default_button = GetDialogDelegate()->GetDefaultDialogButton();
   LabelButton* new_default_button = NULL;
   if (focused_now &&
-      (focused_now->GetClassName() == LabelButton::kViewClassName)) {
+      !strcmp(focused_now->GetClassName(), LabelButton::kViewClassName)) {
     new_default_button = static_cast<LabelButton*>(focused_now);
   } else if (default_button == ui::DIALOG_BUTTON_OK && ok_button_) {
     new_default_button = ok_button_;
@@ -270,11 +249,19 @@ bool DialogClientView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   return true;
 }
 
-void DialogClientView::ViewHierarchyChanged(bool is_add,
-                                            View* parent,
-                                            View* child) {
-  ClientView::ViewHierarchyChanged(is_add, parent, child);
-  if (is_add && child == this) {
+void DialogClientView::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  ClientView::ViewHierarchyChanged(details);
+  if (details.is_add && details.child == this) {
+    // The old dialog style needs an explicit background color, while the new
+    // dialog style simply inherits the bubble's frame view color.
+    const DialogDelegate* dialog = GetDialogDelegate();
+    const bool use_new_style = dialog ?
+        dialog->UseNewStyleForThisDialog() : DialogDelegate::UseNewStyle();
+    if (!use_new_style)
+      set_background(views::Background::CreateSolidBackground(GetNativeTheme()->
+          GetSystemColor(ui::NativeTheme::kColorId_DialogBackground)));
+
     focus_manager_ = GetFocusManager();
     if (focus_manager_)
       GetFocusManager()->AddFocusChangeListener(this);
@@ -282,6 +269,17 @@ void DialogClientView::ViewHierarchyChanged(bool is_add,
     UpdateDialogButtons();
     CreateExtraView();
     CreateFootnoteView();
+  } else if (!details.is_add && details.child == this) {
+    if (focus_manager_)
+      focus_manager_->RemoveFocusChangeListener(this);
+    focus_manager_ = NULL;
+  } else if (!details.is_add) {
+    if (details.child == default_button_)
+      default_button_ = NULL;
+    if (details.child == ok_button_)
+      ok_button_ = NULL;
+    if (details.child == cancel_button_)
+      cancel_button_ = NULL;
   }
 }
 
@@ -338,6 +336,15 @@ void DialogClientView::CreateFootnoteView() {
     AddChildView(footnote_view_);
 }
 
+void DialogClientView::ChildPreferredSizeChanged(View* child) {
+  if (child == footnote_view_ || child == extra_view_)
+    Layout();
+}
+
+void DialogClientView::ChildVisibilityChanged(View* child) {
+  ChildPreferredSizeChanged(child);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // DialogClientView, private:
 
@@ -350,11 +357,19 @@ LabelButton* DialogClientView::CreateDialogButton(ui::DialogButton type) {
   const int kDialogMinButtonWidth = 75;
   button->set_min_size(gfx::Size(kDialogMinButtonWidth, 0));
   button->SetGroup(kButtonGroup);
-  if (type == GetDialogDelegate()->GetDefaultDialogButton()) {
+  return button;
+}
+
+void DialogClientView::UpdateButton(LabelButton* button,
+                                    ui::DialogButton type) {
+  DialogDelegate* dialog = GetDialogDelegate();
+  button->SetText(dialog->GetDialogButtonLabel(type));
+  button->SetEnabled(dialog->IsDialogButtonEnabled(type));
+
+  if (type == dialog->GetDefaultDialogButton()) {
     default_button_ = button;
     button->SetIsDefault(true);
   }
-  return button;
 }
 
 int DialogClientView::GetButtonsAndExtraViewRowHeight() const {

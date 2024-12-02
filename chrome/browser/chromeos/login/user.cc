@@ -5,8 +5,8 @@
 #include "chrome/browser/chromeos/login/user.h"
 
 #include "base/logging.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/default_user_images.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "grit/theme_resources.h"
@@ -26,15 +26,6 @@ std::string GetUserName(const std::string& email) {
 }
 
 }  // namespace
-
-// Magic e-mail addresses are bad. They exist here because some code already
-// depends on them and it is hard to figure out what. Any user types added in
-// the future should be identified by a new |UserType|, not a new magic e-mail
-// address.
-// The guest user has a magic, empty e-mail address.
-const char kGuestUserEMail[] = "";
-// The retail mode user has a magic, domainless e-mail address.
-const char kRetailModeUserEMail[] = "demouser@";
 
 class RegularUser : public User {
  public:
@@ -251,7 +242,7 @@ bool RegularUser::can_lock() const {
   return true;
 }
 
-GuestUser::GuestUser() : User(kGuestUserEMail) {
+GuestUser::GuestUser() : User(UserManager::kGuestUserName) {
   set_display_email(std::string());
 }
 
@@ -290,7 +281,7 @@ std::string LocallyManagedUser::display_email() const {
   return UTF16ToUTF8(display_name());
 }
 
-RetailModeUser::RetailModeUser() : User(kRetailModeUserEMail) {
+RetailModeUser::RetailModeUser() : User(UserManager::kRetailModeUserName) {
   set_display_email(std::string());
 }
 

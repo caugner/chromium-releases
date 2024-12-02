@@ -69,6 +69,11 @@ def calc_inputs(locale):
   inputs.append(os.path.join(GRIT_DIR,
                 'platform_locale_settings_%s.pak' % locale))
 
+  #e.g. '<(SHARED_INTERMEDIATE_DIR)/components/strings/
+  # component_strings_da.pak',
+  inputs.append(os.path.join(SHARE_INT_DIR, 'components', 'strings',
+                'component_strings_%s.pak' % locale))
+
   if OS != 'ios':
     #e.g. '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_strings_da.pak'
     inputs.append(os.path.join(SHARE_INT_DIR, 'webkit',
@@ -82,9 +87,9 @@ def calc_inputs(locale):
     inputs.append(os.path.join(SHARE_INT_DIR, 'ash_strings',
                   'ash_strings_%s.pak' % locale))
 
-    #e.g. '<(SHARED_INTERMEDIATE_DIR)/device_bluetooth_strings/
+    #e.g. '<(SHARED_INTERMEDIATE_DIR)/device/bluetooth/strings/
     # device_bluetooth_strings_da.pak',
-    inputs.append(os.path.join(SHARE_INT_DIR, 'device_bluetooth_strings',
+    inputs.append(os.path.join(SHARE_INT_DIR, 'device', 'bluetooth', 'strings',
                   'device_bluetooth_strings_%s.pak' % locale))
 
     #e.g. '<(SHARED_INTERMEDIATE_DIR)/ui/app_locale_settings_da.pak',

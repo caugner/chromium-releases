@@ -7,8 +7,6 @@
 // The actual tag is implemented via the browser plugin. The internals of this
 // are hidden via Shadow DOM.
 
-var chrome = requireNative('chrome').GetChrome();
-var forEach = require('utils').forEach;
 var watchForTag = require('tagWatcher').watchForTag;
 
 /** @type {Array.<string>} */
@@ -33,18 +31,34 @@ var WEB_VIEW_API_METHODS = [
 var WEB_VIEW_EVENTS = {
   'close': [],
   'consolemessage': ['level', 'message', 'line', 'sourceId'],
+  'contentload' : [],
   'exit' : ['processId', 'reason'],
   'loadabort' : ['url', 'isTopLevel', 'reason'],
   'loadcommit' : ['url', 'isTopLevel'],
   'loadredirect' : ['oldUrl', 'newUrl', 'isTopLevel'],
   'loadstart' : ['url', 'isTopLevel'],
   'loadstop' : [],
+  'responsive' : ['processId'],
   'sizechanged': ['oldHeight', 'oldWidth', 'newHeight', 'newWidth'],
+  'unresponsive' : ['processId']
 };
 
-window.addEventListener('DOMContentLoaded', function() {
-  watchForTag('WEBVIEW', function(addedNode) { new WebView(addedNode); });
-});
+// The <webview> tags we wish to watch for (watchForTag) does not belong to the
+// current scope's "document" reference. We need to wait until the document
+// begins loading, since only then will the "document" reference
+// point to the page's document (it will be reset between now and then).
+// We can't listen for the "readystatechange" event on the document (because
+// the object that it's dispatched on doesn't exist yet), but we can instead
+// do it at the window level in the capturing phase.
+window.addEventListener('readystatechange', function(e) {
+  if (document.readyState != 'loading') {
+    return;
+  }
+
+  document.addEventListener('DOMContentLoaded', function(e) {
+    watchForTag('WEBVIEW', function(addedNode) { new WebView(addedNode); });
+  });
+}, true /* useCapture */);
 
 /**
  * @constructor
@@ -71,20 +85,28 @@ function WebView(webviewNode) {
 WebView.prototype.createBrowserPluginNode_ = function() {
   var browserPluginNode = document.createElement('object');
   browserPluginNode.type = 'application/browser-plugin';
+  browserPluginNode.setAttribute('api', 'webview');
   // The <object> node fills in the <webview> container.
   browserPluginNode.style.width = '100%';
   browserPluginNode.style.height = '100%';
-  forEach(WEB_VIEW_ATTRIBUTES, function(i, attributeName) {
+  $Array.forEach(WEB_VIEW_ATTRIBUTES, function(attributeName) {
     // Only copy attributes that have been assigned values, rather than copying
     // a series of undefined attributes to BrowserPlugin.
     if (this.webviewNode_.hasAttribute(attributeName)) {
       browserPluginNode.setAttribute(
         attributeName, this.webviewNode_.getAttribute(attributeName));
+    } else if (this.webviewNode_[attributeName]){
+      // Reading property using has/getAttribute does not work on
+      // document.DOMContentLoaded event (but works on
+      // window.DOMContentLoaded event).
+      // So copy from property if copying from attribute fails.
+      browserPluginNode.setAttribute(
+        attributeName, this.webviewNode_[attributeName]);
     }
   }, this);
 
   return browserPluginNode;
-}
+};
 
 /**
  * @private
@@ -106,7 +128,7 @@ WebView.prototype.setupFocusPropagation_ = function() {
     // Blur the BrowserPlugin when the <webview> loses focus.
     self.browserPluginNode_.blur();
   });
-}
+};
 
 /**
  * @private
@@ -115,21 +137,26 @@ WebView.prototype.setupWebviewNodeMethods_ = function() {
   // this.browserPluginNode_[apiMethod] are not necessarily defined immediately
   // after the shadow object is appended to the shadow root.
   var self = this;
-  forEach(WEB_VIEW_API_METHODS, function(i, apiMethod) {
+  $Array.forEach(WEB_VIEW_API_METHODS, function(apiMethod) {
     self.webviewNode_[apiMethod] = function(var_args) {
-      return self.browserPluginNode_[apiMethod].apply(
+      return $Function.apply(self.browserPluginNode_[apiMethod],
           self.browserPluginNode_, arguments);
     };
   }, this);
-}
+  this.setupExecuteCodeAPI_();
+};
 
 /**
  * @private
  */
 WebView.prototype.setupWebviewNodeProperties_ = function() {
+  var ERROR_MSG_CONTENTWINDOW_NOT_AVAILABLE = '<webview>: ' +
+    'contentWindow is not available at this time. It will become available ' +
+        'when the page has finished loading.';
+
   var browserPluginNode = this.browserPluginNode_;
   // Expose getters and setters for the attributes.
-  forEach(WEB_VIEW_ATTRIBUTES, function(i, attributeName) {
+  $Array.forEach(WEB_VIEW_ATTRIBUTES, function(attributeName) {
     Object.defineProperty(this.webviewNode_, attributeName, {
       get: function() {
         return browserPluginNode[attributeName];
@@ -149,13 +176,12 @@ WebView.prototype.setupWebviewNodeProperties_ = function() {
       // contentWindow.postMessage until http://crbug.com/152006 is fixed.
       if (browserPluginNode.contentWindow)
         return browserPluginNode.contentWindow.self;
-      console.error('contentWindow is not available at this time. ' +
-          'It will become available when the page has finished loading.');
+      console.error(ERROR_MSG_CONTENTWINDOW_NOT_AVAILABLE);
     },
     // No setter.
     enumerable: true
   });
-}
+};
 
 /**
  * @private
@@ -163,7 +189,7 @@ WebView.prototype.setupWebviewNodeProperties_ = function() {
 WebView.prototype.setupWebviewNodeAttributes_ = function() {
   this.setupWebviewNodeObservers_();
   this.setupBrowserPluginNodeObservers_();
-}
+};
 
 /**
  * @private
@@ -171,31 +197,31 @@ WebView.prototype.setupWebviewNodeAttributes_ = function() {
 WebView.prototype.setupWebviewNodeObservers_ = function() {
   // Map attribute modifications on the <webview> tag to property changes in
   // the underlying <object> node.
-  var handleMutation = function(i, mutation) {
+  var handleMutation = $Function.bind(function(mutation) {
     this.handleWebviewAttributeMutation_(mutation);
-  }.bind(this);
+  }, this);
   var observer = new WebKitMutationObserver(function(mutations) {
-    forEach(mutations, handleMutation);
+    $Array.forEach(mutations, handleMutation);
   });
   observer.observe(
       this.webviewNode_,
       {attributes: true, attributeFilter: WEB_VIEW_ATTRIBUTES});
-}
+};
 
 /**
  * @private
  */
 WebView.prototype.setupBrowserPluginNodeObservers_ = function() {
-  var handleMutation = function(i, mutation) {
+  var handleMutation = $Function.bind(function(mutation) {
     this.handleBrowserPluginAttributeMutation_(mutation);
-  }.bind(this);
+  }, this);
   var objectObserver = new WebKitMutationObserver(function(mutations) {
-    forEach(mutations, handleMutation);
+    $Array.forEach(mutations, handleMutation);
   });
   objectObserver.observe(
       this.browserPluginNode_,
       {attributes: true, attributeFilter: WEB_VIEW_ATTRIBUTES});
-}
+};
 
 /**
  * @private
@@ -244,6 +270,7 @@ WebView.prototype.setupWebviewNodeEvents_ = function() {
     this.setupEvent_(eventName, WEB_VIEW_EVENTS[eventName]);
   }
   this.setupNewWindowEvent_();
+  this.setupPermissionEvent_();
 };
 
 /**
@@ -255,7 +282,7 @@ WebView.prototype.setupEvent_ = function(eventname, attribs) {
   this.browserPluginNode_.addEventListener(internalname, function(e) {
     var evt = new Event(eventname, { bubbles: true });
     var detail = e.detail ? JSON.parse(e.detail) : {};
-    forEach(attribs, function(i, attribName) {
+    $Array.forEach(attribs, function(attribName) {
       evt[attribName] = detail[attribName];
     });
     webviewNode.dispatchEvent(evt);
@@ -269,7 +296,12 @@ WebView.prototype.setupNewWindowEvent_ = function() {
   var ERROR_MSG_NEWWINDOW_ACTION_ALREADY_TAKEN = '<webview>: ' +
       'An action has already been taken for this "newwindow" event.';
 
+  var ERROR_MSG_NEWWINDOW_UNABLE_TO_ATTACH = '<webview>: ' +
+      'Unable to attach the new window to the provided webview.';
+
   var ERROR_MSG_WEBVIEW_EXPECTED = '<webview> element expected.';
+
+  var WARNING_MSG_NEWWINDOW_BLOCKED = '<webview>: A new window was blocked.';
 
   var NEW_WINDOW_EVENT_ATTRIBUTES = [
     'initialHeight',
@@ -285,7 +317,7 @@ WebView.prototype.setupNewWindowEvent_ = function() {
     var evt = new Event('newwindow', { bubbles: true, cancelable: true });
     var detail = e.detail ? JSON.parse(e.detail) : {};
 
-    NEW_WINDOW_EVENT_ATTRIBUTES.forEach(function(attribName) {
+    $Array.forEach(NEW_WINDOW_EVENT_ATTRIBUTES, function(attribName) {
       evt[attribName] = detail[attribName];
     });
     var requestId = detail.requestId;
@@ -312,8 +344,7 @@ WebView.prototype.setupNewWindowEvent_ = function() {
               browserPluginNode['-internal-attachWindowTo'](webview,
                                                             detail.windowId);
           if (!attached) {
-            console.error('Unable to attach the new window to the provided ' +
-                'webview.');
+            console.error(ERROR_MSG_NEWWINDOW_UNABLE_TO_ATTACH);
           }
           // If the object being passed into attach is not a valid <webview>
           // then we will fail and it will be treated as if the new window
@@ -337,9 +368,122 @@ WebView.prototype.setupNewWindowEvent_ = function() {
       actionTaken = true;
       // The default action is to discard the window.
       browserPluginNode['-internal-setPermission'](requestId, false);
-      console.warn('<webview>: A new window was blocked.');
+      console.warn(WARNING_MSG_NEWWINDOW_BLOCKED);
     }
   });
+};
+
+/**
+ * @private
+ */
+WebView.prototype.setupExecuteCodeAPI_ = function() {
+  var ERROR_MSG_CANNOT_INJECT_SCRIPT = '<webview>: ' +
+      'Script cannot be injected into content until the page has loaded.';
+
+  var self = this;
+  var validateCall = function() {
+    if (!self.browserPluginNode_.getGuestInstanceId()) {
+      throw new Error(ERROR_MSG_CANNOT_INJECT_SCRIPT);
+    }
+  };
+
+  this.webviewNode_['executeScript'] = function(var_args) {
+    validateCall();
+    var args = $Array.concat([self.browserPluginNode_.getGuestInstanceId()],
+                             $Array.slice(arguments));
+    $Function.apply(chrome.webview.executeScript, null, args);
+  }
+  this.webviewNode_['insertCSS'] = function(var_args) {
+    validateCall();
+    var args = $Array.concat([self.browserPluginNode_.getGuestInstanceId()],
+                             $Array.slice(arguments));
+    $Function.apply(chrome.webview.insertCSS, null, args);
+  }
+};
+
+/**
+ * @private
+ */
+WebView.prototype.getPermissionTypes_ = function() {
+  var PERMISSION_TYPES = ['media', 'geolocation', 'pointerLock'];
+  return PERMISSION_TYPES.concat(this.maybeGetExperimentalPermissionTypes_());
+};
+
+/**
+ * @param {!Object} detail The event details, originated from <object>.
+ * @private
+ */
+WebView.prototype.setupPermissionEvent_ = function() {
+  var PERMISSION_TYPES = this.getPermissionTypes_();
+
+  var EXPOSED_PERMISSION_EVENT_ATTRIBS = [
+      'lastUnlockedBySelf',
+      'permission',
+      'requestMethod',
+      'url',
+      'userGesture'
+  ];
+
+  var ERROR_MSG_PERMISSION_ALREADY_DECIDED = '<webview>: ' +
+      'Permission has already been decided for this "permissionrequest" event.';
+
+  var node = this.webviewNode_;
+  var browserPluginNode = this.browserPluginNode_;
+  var internalevent = '-internal-permissionrequest';
+  browserPluginNode.addEventListener(internalevent, function(e) {
+    var evt = new Event('permissionrequest', {bubbles: true, cancelable: true});
+    var detail = e.detail ? JSON.parse(e.detail) : {};
+    $Array.forEach(EXPOSED_PERMISSION_EVENT_ATTRIBS, function(attribName) {
+      if (detail[attribName] !== undefined)
+        evt[attribName] = detail[attribName];
+    });
+    var requestId = detail.requestId;
+
+    if (detail.requestId !== undefined &&
+        PERMISSION_TYPES.indexOf(detail.permission) >= 0) {
+      // TODO(lazyboy): Also fill in evt.details (see webview specs).
+      // http://crbug.com/141197.
+      var decisionMade = false;
+      // Construct the event.request object.
+      var request = {
+        allow: function() {
+          if (decisionMade) {
+            throw new Error(ERROR_MSG_PERMISSION_ALREADY_DECIDED);
+          } else {
+            browserPluginNode['-internal-setPermission'](requestId, true);
+            decisionMade = true;
+          }
+        },
+        deny: function() {
+          if (decisionMade) {
+            throw new Error(ERROR_MSG_PERMISSION_ALREADY_DECIDED);
+          } else {
+            browserPluginNode['-internal-setPermission'](requestId, false);
+            decisionMade = true;
+          }
+        }
+      };
+      evt.request = request;
+
+      // Make browser plugin track lifetime of |request|.
+      browserPluginNode['-internal-persistObject'](
+          request, detail.permission, requestId);
+
+      var defaultPrevented = !node.dispatchEvent(evt);
+      if (!decisionMade && !defaultPrevented) {
+        decisionMade = true;
+        browserPluginNode['-internal-setPermission'](requestId, false);
+      }
+    }
+  });
+};
+
+/**
+ * Implemented when the experimental API is available.
+ * @private
+ */
+WebView.prototype.maybeGetExperimentalPermissionTypes_ = function() {
+  return [];
 };
 
 /**

@@ -7,32 +7,26 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/api/permissions/permissions_api_helpers.h"
 #include "chrome/browser/extensions/extension_prefs.h"
-#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/permissions_updater.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/api/permissions.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/permissions/permissions_data.h"
 #include "chrome/common/extensions/permissions/permissions_info.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/url_pattern_set.h"
 #include "googleurl/src/gurl.h"
 
-using extensions::api::permissions::Permissions;
-using extensions::APIPermission;
-using extensions::APIPermissionSet;
-using extensions::ErrorUtils;
-using extensions::ExtensionPrefs;
-using extensions::ExtensionSystem;
-using extensions::PermissionSet;
-using extensions::PermissionsInfo;
-using extensions::PermissionsUpdater;
+namespace extensions {
 
-namespace Contains = extensions::api::permissions::Contains;
-namespace GetAll = extensions::api::permissions::GetAll;
-namespace Remove = extensions::api::permissions::Remove;
-namespace Request  = extensions::api::permissions::Request;
-namespace helpers = extensions::permissions_api_helpers;
+using api::permissions::Permissions;
+
+namespace Contains = api::permissions::Contains;
+namespace GetAll = api::permissions::GetAll;
+namespace Remove = api::permissions::Remove;
+namespace Request  = api::permissions::Request;
+namespace helpers = permissions_api_helpers;
 
 namespace {
 
@@ -59,22 +53,22 @@ bool PermissionsContainsFunction::RunImpl() {
   scoped_ptr<Contains::Params> params(Contains::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  ExtensionPrefs* prefs = ExtensionSystem::Get(profile_)->extension_prefs();
   scoped_refptr<PermissionSet> permissions =
-      helpers::UnpackPermissionSet(params->permissions,
-                                   prefs->AllowFileAccess(extension_->id()),
-                                   &error_);
+      helpers::UnpackPermissionSet(
+          params->permissions,
+          ExtensionPrefs::Get(profile_)->AllowFileAccess(extension_->id()),
+          &error_);
   if (!permissions.get())
     return false;
 
   results_ = Contains::Results::Create(
-      GetExtension()->GetActivePermissions()->Contains(*permissions));
+      GetExtension()->GetActivePermissions()->Contains(*permissions.get()));
   return true;
 }
 
 bool PermissionsGetAllFunction::RunImpl() {
   scoped_ptr<Permissions> permissions =
-      helpers::PackPermissionSet(GetExtension()->GetActivePermissions());
+      helpers::PackPermissionSet(GetExtension()->GetActivePermissions().get());
   results_ = GetAll::Results::Create(*permissions);
   return true;
 }
@@ -83,15 +77,15 @@ bool PermissionsRemoveFunction::RunImpl() {
   scoped_ptr<Remove::Params> params(Remove::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  ExtensionPrefs* prefs = ExtensionSystem::Get(profile_)->extension_prefs();
   scoped_refptr<PermissionSet> permissions =
-      helpers::UnpackPermissionSet(params->permissions,
-                                   prefs->AllowFileAccess(extension_->id()),
-                                   &error_);
+      helpers::UnpackPermissionSet(
+          params->permissions,
+          ExtensionPrefs::Get(profile_)->AllowFileAccess(extension_->id()),
+          &error_);
   if (!permissions.get())
     return false;
 
-  const extensions::Extension* extension = GetExtension();
+  const Extension* extension = GetExtension();
 
   // Make sure they're only trying to remove permissions supported by this API.
   APIPermissionSet apis = permissions->apis();
@@ -105,7 +99,8 @@ bool PermissionsRemoveFunction::RunImpl() {
   }
 
   // Make sure we don't remove any required pemissions.
-  const PermissionSet* required = extension->required_permission_set();
+  const PermissionSet* required =
+      PermissionsData::GetRequiredPermissions(extension);
   scoped_refptr<PermissionSet> intersection(
       PermissionSet::CreateIntersection(permissions.get(), required));
   if (!intersection->IsEmpty()) {
@@ -152,7 +147,9 @@ PermissionsRequestFunction::~PermissionsRequestFunction() {}
 bool PermissionsRequestFunction::RunImpl() {
   results_ = Request::Results::Create(false);
 
-  if (!user_gesture() && !ignore_user_gesture_for_tests) {
+  if (!user_gesture() &&
+      !ignore_user_gesture_for_tests &&
+      extension_->location() != Manifest::COMPONENT) {
     error_ = kUserGestureRequiredError;
     return false;
   }
@@ -160,12 +157,11 @@ bool PermissionsRequestFunction::RunImpl() {
   scoped_ptr<Request::Params> params(Request::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  ExtensionPrefs* prefs = ExtensionSystem::Get(profile_)->extension_prefs();
-
   requested_permissions_ =
-      helpers::UnpackPermissionSet(params->permissions,
-                                   prefs->AllowFileAccess(extension_->id()),
-                                   &error_);
+      helpers::UnpackPermissionSet(
+          params->permissions,
+          ExtensionPrefs::Get(profile_)->AllowFileAccess(extension_->id()),
+          &error_);
   if (!requested_permissions_.get())
     return false;
 
@@ -182,14 +178,13 @@ bool PermissionsRequestFunction::RunImpl() {
 
   // Filter out permissions that do not need to be listed in the optional
   // section of the manifest.
-  scoped_refptr<extensions::PermissionSet>
-      manifest_required_requested_permissions =
-          PermissionSet::ExcludeNotInManifestPermissions(
-              requested_permissions_.get());
+  scoped_refptr<PermissionSet> manifest_required_requested_permissions =
+      PermissionSet::ExcludeNotInManifestPermissions(
+          requested_permissions_.get());
 
   // The requested permissions must be defined as optional in the manifest.
-  if (!GetExtension()->optional_permission_set()->Contains(
-          *manifest_required_requested_permissions)) {
+  if (!PermissionsData::GetOptionalPermissions(GetExtension())
+          ->Contains(*manifest_required_requested_permissions.get())) {
     error_ = kNotInOptionalPermissionsError;
     return false;
   }
@@ -197,8 +192,9 @@ bool PermissionsRequestFunction::RunImpl() {
   // We don't need to prompt the user if the requested permissions are a subset
   // of the granted permissions set.
   scoped_refptr<const PermissionSet> granted =
-      prefs->GetGrantedPermissions(GetExtension()->id());
-  if (granted && granted->Contains(*requested_permissions_)) {
+      ExtensionPrefs::Get(profile_)->
+          GetGrantedPermissions(GetExtension()->id());
+  if (granted.get() && granted->Contains(*requested_permissions_.get())) {
     PermissionsUpdater perms_updater(profile());
     perms_updater.AddPermissions(GetExtension(), requested_permissions_.get());
     results_ = Request::Results::Create(true);
@@ -217,7 +213,8 @@ bool PermissionsRequestFunction::RunImpl() {
   // are allowed to silently increase their permission level.
   bool has_no_warnings = requested_permissions_->GetWarningMessages(
       GetExtension()->GetType()).empty();
-  if (auto_confirm_for_tests == PROCEED || has_no_warnings) {
+  if (auto_confirm_for_tests == PROCEED || has_no_warnings ||
+      extension_->location() == Manifest::COMPONENT) {
     InstallUIProceed();
   } else if (auto_confirm_for_tests == ABORT) {
     // Pretend the user clicked cancel.
@@ -231,3 +228,5 @@ bool PermissionsRequestFunction::RunImpl() {
 
   return true;
 }
+
+}  // namespace extensions

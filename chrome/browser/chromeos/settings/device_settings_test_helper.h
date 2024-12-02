@@ -13,7 +13,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "chrome/browser/chromeos/policy/device_policy_builder.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
@@ -92,21 +92,29 @@ class DeviceSettingsTestHelper : public SessionManagerClient {
   virtual void NotifyLockScreenShown() OVERRIDE;
   virtual void RequestUnlockScreen() OVERRIDE;
   virtual void NotifyLockScreenDismissed() OVERRIDE;
+  virtual void RetrieveActiveSessions(
+      const ActiveSessionsCallback& callback) OVERRIDE;
   virtual void RetrieveDevicePolicy(
       const RetrievePolicyCallback& callback) OVERRIDE;
-  virtual void RetrieveUserPolicy(
+  virtual void RetrievePolicyForUser(
+      const std::string& username,
       const RetrievePolicyCallback& callback) OVERRIDE;
   virtual void RetrieveDeviceLocalAccountPolicy(
       const std::string& account_id,
       const RetrievePolicyCallback& callback) OVERRIDE;
   virtual void StoreDevicePolicy(const std::string& policy_blob,
                                  const StorePolicyCallback& callback) OVERRIDE;
-  virtual void StoreUserPolicy(const std::string& policy_blob,
-                               const StorePolicyCallback& callback) OVERRIDE;
+  virtual void StorePolicyForUser(const std::string& username,
+                                  const std::string& policy_blob,
+                                  const std::string& policy_key,
+                                  const StorePolicyCallback& callback) OVERRIDE;
   virtual void StoreDeviceLocalAccountPolicy(
       const std::string& account_id,
       const std::string& policy_blob,
       const StorePolicyCallback& callback) OVERRIDE;
+  virtual void SetFlagsForUser(
+      const std::string& account_id,
+      const std::vector<std::string>& flags) OVERRIDE;
 
  private:
   struct PolicyState {
@@ -159,7 +167,7 @@ class DeviceSettingsTestBase : public testing::Test {
   // |device_settings_service_| and flushes the resulting load operation.
   void ReloadDeviceSettings();
 
-  MessageLoop loop_;
+  base::MessageLoop loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
 

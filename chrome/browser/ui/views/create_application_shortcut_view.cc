@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_util.h"
@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_constants.h"
@@ -228,7 +229,7 @@ namespace chrome {
 
 void ShowCreateWebAppShortcutsDialog(gfx::NativeWindow parent_window,
                                      content::WebContents* web_contents) {
-  views::Widget::CreateWindowWithParent(
+  CreateBrowserModalDialogViews(
       new CreateUrlApplicationShortcutView(web_contents),
       parent_window)->Show();
 }
@@ -236,7 +237,7 @@ void ShowCreateWebAppShortcutsDialog(gfx::NativeWindow parent_window,
 void ShowCreateChromeAppShortcutsDialog(gfx::NativeWindow parent_window,
                                         Profile* profile,
                                         const extensions::Extension* app) {
-  views::Widget::CreateWindowWithParent(
+  CreateBrowserModalDialogViews(
       new CreateChromeApplicationShortcutView(profile, app),
       parent_window)->Show();
 }
@@ -354,14 +355,6 @@ bool CreateApplicationShortcutView::IsDialogButtonEnabled(
   return true;
 }
 
-bool CreateApplicationShortcutView::CanResize() const {
-  return false;
-}
-
-bool CreateApplicationShortcutView::CanMaximize() const {
-  return false;
-}
-
 ui::ModalType CreateApplicationShortcutView::GetModalType() const {
   return ui::MODAL_TYPE_WINDOW;
 }
@@ -463,11 +456,13 @@ void CreateUrlApplicationShortcutView::FetchIcon() {
   if (unprocessed_icons_.empty())  // No icons to fetch.
     return;
 
+  int preferred_size = std::max(unprocessed_icons_.back().width,
+                                unprocessed_icons_.back().height);
   pending_download_id_ = web_contents_->DownloadImage(
       unprocessed_icons_.back().url,
-      true,
-      std::max(unprocessed_icons_.back().width,
-               unprocessed_icons_.back().height),
+      true,  // is a favicon
+      preferred_size,
+      0,  // no maximum size
       base::Bind(&CreateUrlApplicationShortcutView::DidDownloadFavicon,
                  base::Unretained(this)));
 
@@ -476,6 +471,7 @@ void CreateUrlApplicationShortcutView::FetchIcon() {
 
 void CreateUrlApplicationShortcutView::DidDownloadFavicon(
     int id,
+    int http_status_code,
     const GURL& image_url,
     int requested_size,
     const std::vector<SkBitmap>& bitmaps) {

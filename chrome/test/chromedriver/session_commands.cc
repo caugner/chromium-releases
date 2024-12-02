@@ -11,17 +11,17 @@
 #include "base/file_util.h"
 #include "base/logging.h"  // For CHECK macros.
 #include "base/memory/ref_counted.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/values.h"
 #include "chrome/test/chromedriver/basic_types.h"
 #include "chrome/test/chromedriver/chrome/automation_extension.h"
 #include "chrome/test/chromedriver/chrome/chrome.h"
-#include "chrome/test/chromedriver/chrome/devtools_event_logger.h"
 #include "chrome/test/chromedriver/chrome/geoposition.h"
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/chrome/web_view.h"
+#include "chrome/test/chromedriver/logging.h"
 #include "chrome/test/chromedriver/session.h"
 #include "chrome/test/chromedriver/session_map.h"
 #include "chrome/test/chromedriver/util.h"
@@ -97,15 +97,6 @@ Status ExecuteGetSessionCapabilities(
   return Status(kOk);
 }
 
-Status ExecuteQuit(
-    SessionMap* session_map,
-    Session* session,
-    const base::DictionaryValue& params,
-    scoped_ptr<base::Value>* value) {
-  CHECK(session_map->Remove(session->id));
-  return session->chrome->Quit();
-}
-
 Status ExecuteGetCurrentWindowHandle(
     Session* session,
     const base::DictionaryValue& params,
@@ -143,9 +134,11 @@ Status ExecuteClose(
   status = session->chrome->GetWebViewIds(&web_view_ids);
   if ((status.code() == kChromeNotReachable && is_last_web_view) ||
       (status.IsOk() && web_view_ids.empty())) {
+    // If no window is open, close is the equivalent of calling "quit".
     CHECK(session_map->Remove(session->id));
-    return Status(kOk);
+    return session->chrome->Quit();
   }
+
   return status;
 }
 
@@ -246,19 +239,22 @@ Status ExecuteSetTimeout(
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
   double ms_double;
-  if (!params.GetDouble("ms", &ms_double) || ms_double < 0)
-    return Status(kUnknownError, "'ms' must be a non-negative number");
+  if (!params.GetDouble("ms", &ms_double))
+    return Status(kUnknownError, "'ms' must be a double");
   std::string type;
   if (!params.GetString("type", &type))
     return Status(kUnknownError, "'type' must be a string");
 
   int ms = static_cast<int>(ms_double);
+  // TODO(frankf): implicit and script timeout should be cleared
+  // if negative timeout is specified.
   if (type == "implicit")
     session->implicit_wait = ms;
   else if (type == "script")
     session->script_timeout = ms;
   else if (type == "page load")
-    session->page_load_timeout = ms;
+    session->page_load_timeout =
+        ((ms < 0) ? Session::kDefaultPageLoadTimeoutMs : ms);
   else
     return Status(kUnknownError, "unknown type of timeout:" + type);
   return Status(kOk);
@@ -284,69 +280,6 @@ Status ExecuteImplicitlyWait(
     return Status(kUnknownError, "'ms' must be a non-negative number");
   session->implicit_wait = static_cast<int>(ms);
   return Status(kOk);
-}
-
-Status ExecuteGetAlert(
-    Session* session,
-    const base::DictionaryValue& params,
-    scoped_ptr<base::Value>* value) {
-  bool is_open;
-  Status status = session->chrome->IsJavaScriptDialogOpen(&is_open);
-  if (status.IsError())
-    return status;
-  value->reset(base::Value::CreateBooleanValue(is_open));
-  return Status(kOk);
-}
-
-Status ExecuteGetAlertText(
-    Session* session,
-    const base::DictionaryValue& params,
-    scoped_ptr<base::Value>* value) {
-  std::string message;
-  Status status = session->chrome->GetJavaScriptDialogMessage(&message);
-  if (status.IsError())
-    return status;
-  value->reset(base::Value::CreateStringValue(message));
-  return Status(kOk);
-}
-
-Status ExecuteSetAlertValue(
-    Session* session,
-    const base::DictionaryValue& params,
-    scoped_ptr<base::Value>* value) {
-  std::string text;
-  if (!params.GetString("text", &text))
-    return Status(kUnknownError, "missing or invalid 'text'");
-
-  bool is_open;
-  Status status = session->chrome->IsJavaScriptDialogOpen(&is_open);
-  if (status.IsError())
-    return status;
-  if (!is_open)
-    return Status(kNoAlertOpen);
-
-  session->prompt_text = text;
-  return Status(kOk);
-}
-
-Status ExecuteAcceptAlert(
-    Session* session,
-    const base::DictionaryValue& params,
-    scoped_ptr<base::Value>* value) {
-  Status status = session->chrome->HandleJavaScriptDialog(
-      true, session->prompt_text);
-  session->prompt_text = "";
-  return status;
-}
-
-Status ExecuteDismissAlert(
-    Session* session,
-    const base::DictionaryValue& params,
-    scoped_ptr<base::Value>* value) {
-  Status status = session->chrome->HandleJavaScriptDialog(
-      false, session->prompt_text);
-  session->prompt_text = "";
-  return status;
 }
 
 Status ExecuteIsLoading(
@@ -480,11 +413,11 @@ Status ExecuteGetAvailableLogTypes(
     Session* session,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
-  scoped_ptr<ListValue> types(new base::ListValue());
-  for (ScopedVector<DevToolsEventLogger>::const_iterator logger =
-       session->devtools_event_loggers.begin();
-       logger != session->devtools_event_loggers.end(); ++logger) {
-    types->AppendString((*logger)->GetLogType());
+  scoped_ptr<base::ListValue> types(new base::ListValue());
+  for (ScopedVector<WebDriverLog>::const_iterator log
+       = session->devtools_logs.begin();
+       log != session->devtools_logs.end(); ++log) {
+    types->AppendString((*log)->GetType());
   }
   value->reset(types.release());
   return Status(kOk);
@@ -498,11 +431,11 @@ Status ExecuteGetLog(
   if (!params.GetString("type", &log_type)) {
     return Status(kUnknownError, "missing or invalid 'type'");
   }
-  for (ScopedVector<DevToolsEventLogger>::const_iterator logger =
-       session->devtools_event_loggers.begin();
-       logger != session->devtools_event_loggers.end(); ++logger) {
-    if (log_type == (*logger)->GetLogType()) {
-      scoped_ptr<ListValue> log_entries = (*logger)->GetAndClearLogEntries();
+  for (ScopedVector<WebDriverLog>::const_iterator log
+       = session->devtools_logs.begin();
+       log != session->devtools_logs.end(); ++log) {
+    if (log_type == (*log)->GetType()) {
+      scoped_ptr<base::ListValue> log_entries = (*log)->GetAndClearEntries();
       value->reset(log_entries.release());
       return Status(kOk);
     }

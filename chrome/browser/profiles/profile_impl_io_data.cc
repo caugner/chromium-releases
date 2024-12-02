@@ -6,14 +6,13 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
 #include "base/prefs/pref_member.h"
 #include "base/prefs/pref_service.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/worker_pool.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
@@ -43,7 +42,7 @@
 #include "net/ssl/server_bound_cert_service.h"
 #include "net/url_request/protocol_intercept_job_factory.h"
 #include "net/url_request/url_request_job_factory_impl.h"
-#include "webkit/quota/special_storage_policy.h"
+#include "webkit/browser/quota/special_storage_policy.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/app/android/chrome_data_reduction_proxy_android.h"
@@ -84,7 +83,7 @@ ProfileImplIOData::Handle::Handle(Profile* profile)
 
 ProfileImplIOData::Handle::~Handle() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (io_data_->predictor_.get() != NULL) {
+  if (io_data_->predictor_ != NULL) {
     // io_data_->predictor_ might be NULL if Init() was never called
     // (i.e. we shut down before ProfileImpl::DoFinalInit() got called).
     PrefService* user_prefs = profile_->GetPrefs();
@@ -110,7 +109,7 @@ void ProfileImplIOData::Handle::Init(
       bool restore_old_session_cookies,
       quota::SpecialStoragePolicy* special_storage_policy) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!io_data_->lazy_params_.get());
+  DCHECK(!io_data_->lazy_params_);
   DCHECK(predictor);
 
   LazyParams* lazy_params = new LazyParams;
@@ -162,14 +161,15 @@ ProfileImplIOData::Handle::CreateMainRequestContextGetter(
     IOThread* io_thread) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   LazyInitialize();
-  DCHECK(!main_request_context_getter_);
+  DCHECK(!main_request_context_getter_.get());
   main_request_context_getter_ = ChromeURLRequestContextGetter::CreateOriginal(
       profile_, io_data_, protocol_handlers);
 
-  io_data_->predictor_->InitNetworkPredictor(profile_->GetPrefs(),
-                                             local_state,
-                                             io_thread,
-                                             main_request_context_getter_);
+  io_data_->predictor_
+      ->InitNetworkPredictor(profile_->GetPrefs(),
+                             local_state,
+                             io_thread,
+                             main_request_context_getter_.get());
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PROFILE_URL_REQUEST_CONTEXT_GETTER_INITIALIZED,
@@ -182,10 +182,10 @@ scoped_refptr<ChromeURLRequestContextGetter>
 ProfileImplIOData::Handle::GetMediaRequestContextGetter() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   LazyInitialize();
-  if (!media_request_context_getter_) {
+  if (!media_request_context_getter_.get()) {
     media_request_context_getter_ =
-        ChromeURLRequestContextGetter::CreateOriginalForMedia(
-            profile_, io_data_);
+        ChromeURLRequestContextGetter::CreateOriginalForMedia(profile_,
+                                                              io_data_);
   }
   return media_request_context_getter_;
 }
@@ -194,10 +194,10 @@ scoped_refptr<ChromeURLRequestContextGetter>
 ProfileImplIOData::Handle::GetExtensionsRequestContextGetter() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   LazyInitialize();
-  if (!extensions_request_context_getter_) {
+  if (!extensions_request_context_getter_.get()) {
     extensions_request_context_getter_ =
-        ChromeURLRequestContextGetter::CreateOriginalForExtensions(
-            profile_, io_data_);
+        ChromeURLRequestContextGetter::CreateOriginalForExtensions(profile_,
+                                                                   io_data_);
   }
   return extensions_request_context_getter_;
 }
@@ -256,7 +256,7 @@ ProfileImplIOData::Handle::GetIsolatedMediaRequestContextGetter(
   ChromeURLRequestContextGetterMap::const_iterator app_iter =
       app_request_context_getter_map_.find(descriptor);
   DCHECK(app_iter != app_request_context_getter_map_.end());
-  ChromeURLRequestContextGetter* app_context = app_iter->second;
+  ChromeURLRequestContextGetter* app_context = app_iter->second.get();
   ChromeURLRequestContextGetter* context =
       ChromeURLRequestContextGetter::CreateOriginalForIsolatedMedia(
           profile_, app_context, io_data_, descriptor);
@@ -318,7 +318,7 @@ ProfileImplIOData::ProfileImplIOData()
 ProfileImplIOData::~ProfileImplIOData() {
   DestroyResourceContext();
 
-  if (media_request_context_.get())
+  if (media_request_context_)
     media_request_context_->AssertNoURLRequests();
 }
 
@@ -372,7 +372,7 @@ void ProfileImplIOData::InitializeInternal(
   if (record_mode || playback_mode) {
     // Don't use existing cookies and use an in-memory store.
     cookie_store = new net::CookieMonster(
-        NULL, profile_params->cookie_monster_delegate);
+        NULL, profile_params->cookie_monster_delegate.get());
     // Don't use existing server-bound certs and use an in-memory store.
     server_bound_cert_service = new net::ServerBoundCertService(
         new net::DefaultServerBoundCertStore(NULL),
@@ -380,18 +380,18 @@ void ProfileImplIOData::InitializeInternal(
   }
 
   // setup cookie store
-  if (!cookie_store) {
+  if (!cookie_store.get()) {
     DCHECK(!lazy_params_->cookie_path.empty());
 
     cookie_store = content::CreatePersistentCookieStore(
         lazy_params_->cookie_path,
         lazy_params_->restore_old_session_cookies,
-        lazy_params_->special_storage_policy,
-        profile_params->cookie_monster_delegate);
+        lazy_params_->special_storage_policy.get(),
+        profile_params->cookie_monster_delegate.get());
     cookie_store->GetCookieMonster()->SetPersistSessionCookies(true);
   }
 
-  main_context->set_cookie_store(cookie_store);
+  main_context->set_cookie_store(cookie_store.get());
 
   // Setup server bound cert service.
   if (!server_bound_cert_service) {
@@ -400,7 +400,7 @@ void ProfileImplIOData::InitializeInternal(
     scoped_refptr<SQLiteServerBoundCertStore> server_bound_cert_db =
         new SQLiteServerBoundCertStore(
             lazy_params_->server_bound_cert_path,
-            lazy_params_->special_storage_policy);
+            lazy_params_->special_storage_policy.get());
     server_bound_cert_service = new net::ServerBoundCertService(
         new net::DefaultServerBoundCertStore(server_bound_cert_db.get()),
         base::WorkerPool::GetTaskRunner(true));
@@ -415,7 +415,8 @@ void ProfileImplIOData::InitializeInternal(
           ChooseCacheBackendType(),
           lazy_params_->cache_path,
           lazy_params_->cache_max_size,
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE));
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE)
+              .get());
   net::HttpNetworkSession::Params network_session_params;
   PopulateNetworkSessionParams(profile_params, &network_session_params);
   net::HttpCache* main_cache = new net::HttpCache(
@@ -437,7 +438,6 @@ void ProfileImplIOData::InitializeInternal(
 #if !defined(DISABLE_FTP_SUPPORT)
   ftp_factory_.reset(
       new net::FtpNetworkLayer(io_thread_globals->host_resolver.get()));
-  main_context->set_ftp_transaction_factory(ftp_factory_.get());
 #endif  // !defined(DISABLE_FTP_SUPPORT)
 
   scoped_ptr<net::URLRequestJobFactoryImpl> main_job_factory(
@@ -447,8 +447,7 @@ void ProfileImplIOData::InitializeInternal(
       main_job_factory.Pass(),
       profile_params->protocol_handler_interceptor.Pass(),
       network_delegate(),
-      main_context->ftp_transaction_factory(),
-      main_context->ftp_auth_cache());
+      ftp_factory_.get());
   main_context->set_job_factory(main_job_factory_.get());
 
 #if defined(ENABLE_EXTENSIONS)
@@ -490,11 +489,6 @@ void ProfileImplIOData::
   extensions_cookie_store->GetCookieMonster()->SetCookieableSchemes(schemes, 2);
   extensions_context->set_cookie_store(extensions_cookie_store);
 
-#if !defined(DISABLE_FTP_SUPPORT)
-  DCHECK(ftp_factory_.get());
-  extensions_context->set_ftp_transaction_factory(ftp_factory_.get());
-#endif  // !defined(DISABLE_FTP_SUPPORT)
-
   scoped_ptr<net::URLRequestJobFactoryImpl> extensions_job_factory(
       new net::URLRequestJobFactoryImpl());
   // TODO(shalev): The extensions_job_factory has a NULL NetworkDelegate.
@@ -505,10 +499,9 @@ void ProfileImplIOData::
   // SetUpJobFactory() to get this effect.
   extensions_job_factory_ = SetUpJobFactoryDefaults(
       extensions_job_factory.Pass(),
-      scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>(NULL),
+      scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>(),
       NULL,
-      extensions_context->ftp_transaction_factory(),
-      extensions_context->ftp_auth_cache());
+      ftp_factory_.get());
   extensions_context->set_job_factory(extensions_job_factory_.get());
 }
 
@@ -546,7 +539,8 @@ ProfileImplIOData::InitializeAppRequestContext(
         ChooseCacheBackendType(),
         cache_path,
         app_cache_max_size_,
-        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE));
+        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE)
+            .get());
   }
   net::HttpNetworkSession* main_network_session =
       main_http_factory_->GetSession();
@@ -567,7 +561,7 @@ ProfileImplIOData::InitializeAppRequestContext(
   }
 
   // Use an app-specific cookie store.
-  if (!cookie_store) {
+  if (!cookie_store.get()) {
     DCHECK(!cookie_path.empty());
 
     // TODO(creis): We should have a cookie delegate for notifying the cookie
@@ -581,7 +575,7 @@ ProfileImplIOData::InitializeAppRequestContext(
   }
 
   // Transfer ownership of the cookies and cache to AppRequestContext.
-  context->SetCookieStore(cookie_store);
+  context->SetCookieStore(cookie_store.get());
   context->SetHttpTransactionFactory(
       scoped_ptr<net::HttpTransactionFactory>(app_http_cache));
 
@@ -597,8 +591,7 @@ ProfileImplIOData::InitializeAppRequestContext(
     top_job_factory = SetUpJobFactoryDefaults(
         job_factory.Pass(), protocol_handler_interceptor.Pass(),
         network_delegate(),
-        context->ftp_transaction_factory(),
-        context->ftp_auth_cache());
+        ftp_factory_.get());
   } else {
     top_job_factory = job_factory.PassAs<net::URLRequestJobFactory>();
   }
@@ -638,7 +631,8 @@ ProfileImplIOData::InitializeMediaRequestContext(
           ChooseCacheBackendType(),
           cache_path,
           cache_max_size,
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE));
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE)
+              .get());
   net::HttpNetworkSession* main_network_session =
       main_http_factory_->GetSession();
   scoped_ptr<net::HttpTransactionFactory> media_http_cache(
@@ -658,7 +652,7 @@ ProfileImplIOData::InitializeMediaRequestContext(
 
 ChromeURLRequestContext*
 ProfileImplIOData::AcquireMediaRequestContext() const {
-  DCHECK(media_request_context_.get());
+  DCHECK(media_request_context_);
   return media_request_context_.get();
 }
 

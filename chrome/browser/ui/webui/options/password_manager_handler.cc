@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -108,7 +108,7 @@ void PasswordManagerHandler::OnLoginsChanged() {
 
 PasswordStore* PasswordManagerHandler::GetPasswordStore() {
   return PasswordStoreFactory::GetForProfile(Profile::FromWebUI(web_ui()),
-                                             Profile::EXPLICIT_ACCESS);
+                                             Profile::EXPLICIT_ACCESS).get();
 }
 
 void PasswordManagerHandler::UpdatePasswordLists(const ListValue* args) {

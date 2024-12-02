@@ -7,17 +7,18 @@
 #include <algorithm>
 
 #include "base/command_line.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_properties.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/theme_image_mapper.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_host.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/common/chrome_constants.h"
+#include "components/web_modal/web_contents_modal_dialog_host.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
@@ -35,6 +36,7 @@
 #include "ui/gfx/path.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/screen.h"
+#include "ui/views/border.h"
 #include "ui/views/color_constants.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/focus/focus_manager.h"
@@ -69,6 +71,8 @@
 #endif
 
 using base::TimeDelta;
+using web_modal::WebContentsModalDialogHost;
+using web_modal::WebContentsModalDialogHostObserver;
 
 namespace views {
 class ClientView;
@@ -115,6 +119,19 @@ class WebContentsModalDialogHostObserverViews
   virtual void OnPositionRequiresUpdate() OVERRIDE {
     gfx::Size size = target_widget_->GetWindowBoundsInScreen().size();
     gfx::Point position = host_->GetDialogPosition(size);
+    views::Border* border =
+        target_widget_->non_client_view()->frame_view()->border();
+    // Border may be null during widget initialization.
+    if (border) {
+      // Align the first row of pixels inside the border. This is the apparent
+      // top of the dialog.
+      position.set_y(position.y() - border->GetInsets().top());
+    }
+
+    if (target_widget_->is_top_level())
+      position += views::Widget::GetWidgetForNativeView(host_->GetHostView())->
+          GetClientAreaBoundsInScreen().OffsetFromOrigin();
+
     target_widget_->SetBounds(gfx::Rect(position, size));
   }
 
@@ -636,14 +653,16 @@ views::Widget* CreateWebContentsModalDialogViews(
   params.child = true;
   WebContentsModalDialogHostObserver* dialog_host_observer = NULL;
   if (views::DialogDelegate::UseNewStyle()) {
-    params.parent =
-        views::Widget::GetTopLevelWidgetForNativeView(parent)->GetNativeView();
+    params.parent = dialog_host->GetHostView();
     params.remove_standard_frame = true;
     dialog_host_observer =
         new WebContentsModalDialogHostObserverViews(
             dialog_host,
             dialog,
             kWebContentsModalDialogHostObserverViewsKey);
+#if defined(USE_AURA)
+    params.transparent = true;
+#endif
   } else {
     params.parent = parent;
   }
@@ -667,11 +686,39 @@ views::Widget* CreateWebContentsModalDialogViews(
   return dialog;
 }
 
+views::Widget* CreateBrowserModalDialogViews(views::DialogDelegate* dialog,
+                                             gfx::NativeWindow parent) {
+  views::Widget* widget =
+      views::DialogDelegate::CreateDialogWidget(dialog, NULL, parent);
+  if (!dialog->UseNewStyleForThisDialog())
+    return widget;
+
+  // Get the browser dialog management and hosting components from |parent|.
+  Browser* browser = chrome::FindBrowserWithWindow(parent);
+  if (browser) {
+    ChromeWebModalDialogManagerDelegate* manager = browser;
+    WebContentsModalDialogHost* host = manager->GetWebContentsModalDialogHost();
+    DCHECK_EQ(parent, host->GetHostView());
+    WebContentsModalDialogHostObserver* dialog_host_observer =
+        new WebContentsModalDialogHostObserverViews(
+            host, widget, kWebContentsModalDialogHostObserverViewsKey);
+    dialog_host_observer->OnPositionRequiresUpdate();
+  }
+  return widget;
+}
+
 views::NonClientFrameView* CreateConstrainedStyleNonClientFrameView(
     views::Widget* widget,
     content::BrowserContext* browser_context) {
-  if (views::DialogDelegate::UseNewStyle())
-    return views::DialogDelegate::CreateNewStyleFrameView(widget);
+  if (views::DialogDelegate::UseNewStyle()) {
+#if defined(USE_AURA)
+    const bool force_opaque_border = false;
+#else
+    const bool force_opaque_border = true;
+#endif
+    return views::DialogDelegate::CreateNewStyleFrameView(widget,
+                                                          force_opaque_border);
+  }
 #if defined(USE_ASH)
   ConstrainedWindowFrameViewAsh* frame = new ConstrainedWindowFrameViewAsh;
   frame->Init(widget);

@@ -29,10 +29,10 @@ const char kChromeUIConflictsURL[] = "chrome://conflicts/";
 const char kChromeUIConstrainedHTMLTestURL[] = "chrome://constrained-test/";
 const char kChromeUICrashesURL[] = "chrome://crashes/";
 const char kChromeUICreditsURL[] = "chrome://credits/";
-const char kChromeUIDevToolsURL[] = "chrome-devtools://devtools/devtools.html";
+const char kChromeUIDevToolsURL[] =
+    "chrome-devtools://devtools/bundled/devtools.html";
 const char kChromeUIDownloadsURL[] = "chrome://downloads/";
 const char kChromeUIEditSearchEngineDialogURL[] = "chrome://editsearchengine/";
-const char kChromeUIExtensionActivityURL[] = "chrome://extension-activity/";
 const char kChromeUIExtensionIconURL[] = "chrome://extension-icon/";
 const char kChromeUIExtensionInfoURL[] = "chrome://extension-info/";
 const char kChromeUIExtensionsFrameURL[] = "chrome://extensions-frame/";
@@ -44,6 +44,8 @@ const char kChromeUIFlashURL[] = "chrome://flash/";
 const char kChromeUIHelpFrameURL[] = "chrome://help-frame/";
 const char kChromeUIHistoryURL[] = "chrome://history/";
 const char kChromeUIHistoryFrameURL[] = "chrome://history-frame/";
+const char kChromeUIIdentityInternalsURL[] = "chrome://identity-internals/";
+const char kChromeUIInlineLoginURL[] = "chrome://inline-login/";
 const char kChromeUIInspectURL[] = "chrome://inspect/";
 const char kChromeUIInstantURL[] = "chrome://instant/";
 const char kChromeUIIPCURL[] = "chrome://ipc/";
@@ -69,7 +71,6 @@ const char kChromeUISettingsFrameURL[] = "chrome://settings-frame/";
 const char kChromeUISuggestionsInternalsURL[] =
     "chrome://suggestions-internals/";
 const char kChromeUISSLClientCertificateSelectorURL[] = "chrome://select-cert/";
-const char kChromeUISyncPromoURL[] = "chrome://signin/";
 const char kChromeUITaskManagerURL[] = "chrome://tasks/";
 const char kChromeUITermsURL[] = "chrome://terms/";
 const char kChromeUIThemeURL[] = "chrome://theme/";
@@ -86,7 +87,6 @@ const char kChromeUIWelcomeURL[] = "chrome://welcome/";
 #if defined(OS_CHROMEOS)
 const char kChromeUIActivationMessage[] = "chrome://activationmessage/";
 const char kChromeUIAppLaunchURL[] = "chrome://app-launch/";
-const char kChromeUIAppLoginURL[] = "chrome://app-login/";
 const char kChromeUIBluetoothPairingURL[] = "chrome://bluetooth-pairing/";
 const char kChromeUIChooseMobileNetworkURL[] =
     "chrome://choose-mobile-network/";
@@ -144,13 +144,13 @@ const char kChromeUICrashesHost[] = "crashes";
 const char kChromeUICrashHost[] = "crash";
 const char kChromeUICreditsHost[] = "credits";
 const char kChromeUIDefaultHost[] = "version";
-const char kChromeUIDevToolsBundledHost[] = "devtools";
-const char kChromeUIDevToolsRemoteHost[] = "remote";
+const char kChromeUIDevToolsHost[] = "devtools";
+const char kChromeUIDevToolsBundledPath[] = "bundled";
+const char kChromeUIDevToolsRemotePath[] = "remote";
 const char kChromeUIDNSHost[] = "dns";
 const char kChromeUIDownloadsHost[] = "downloads";
 const char kChromeUIDriveInternalsHost[] = "drive-internals";
 const char kChromeUIEditSearchEngineDialogHost[] = "editsearchengine";
-const char kChromeUIExtensionActivityHost[] = "extension-activity";
 const char kChromeUIExtensionIconHost[] = "extension-icon";
 const char kChromeUIExtensionInfoHost[] = "extension-info";
 const char kChromeUIExtensionsFrameHost[] = "extensions-frame";
@@ -164,6 +164,8 @@ const char kChromeUIHelpFrameHost[] = "help-frame";
 const char kChromeUIHelpHost[] = "help";
 const char kChromeUIHistoryHost[] = "history";
 const char kChromeUIHistoryFrameHost[] = "history-frame";
+const char kChromeUIIdentityInternalsHost[] = "identity-internals";
+const char kChromeUIInlineLoginHost[] = "inline-login";
 const char kChromeUIInspectHost[] = "inspect";
 const char kChromeUIInstantHost[] = "instant";
 const char kChromeUIIPCHost[] = "ipc";
@@ -198,7 +200,6 @@ const char kChromeUIStatsHost[] = "stats";
 const char kChromeUISyncHost[] = "sync";
 const char kChromeUISyncFileSystemInternalsHost[] = "syncfs-internals";
 const char kChromeUISyncInternalsHost[] = "sync-internals";
-const char kChromeUISyncPromoHost[] = "signin";
 const char kChromeUISyncResourcesHost[] = "syncresources";
 const char kChromeUITaskManagerHost[] = "tasks";
 const char kChromeUITermsHost[] = "terms";
@@ -227,7 +228,6 @@ const char kChromeUISandboxHost[] = "sandbox";
 #if defined(OS_CHROMEOS)
 const char kChromeUIActivationMessageHost[] = "activationmessage";
 const char kChromeUIAppLaunchHost[] = "app-launch";
-const char kChromeUIAppLoginHost[] = "app-login";
 const char kChromeUIBluetoothPairingHost[] = "bluetooth-pairing";
 const char kChromeUIChooseMobileNetworkHost[] = "choose-mobile-network";
 const char kChromeUICryptohomeHost[] = "cryptohome";
@@ -364,6 +364,13 @@ const char kChromeSyncLearnMoreURL[] =
     "http://support.google.com/chrome/bin/answer.py?answer=165139";
 #endif
 
+const char kChromeEnterpriseSignInLearnMoreURL[] =
+  "http://support.google.com/chromeos/bin/answer.py?hl=en&answer=1331549";
+
+const char kSupervisedUserManagementURL[] = "https://www.chrome.com/manage";
+
+const char kSupervisedUserManagementDisplayURL[] = "www.chrome.com/manage";
+
 const char kSettingsSearchHelpURL[] =
 #if defined(OS_CHROMEOS)
     "https://support.google.com/chromeos/?p=settings_search_help";
@@ -456,11 +463,8 @@ const char kCloudPrintLearnMoreURL[] =
     "https://support.google.com/chrome/?p=settings_cloud_print";
 #endif
 
-const char kInvalidPasswordHelpURL[] =
-    "https://support.google.com/accounts/bin/answer.py?ctx=ch&answer=27444";
-
-const char kCanNotAccessAccountURL[] =
-    "https://support.google.com/accounts/bin/answer.py?answer=48598";
+const char kAppLauncherHelpURL[] =
+    "https://support.google.com/chrome_webstore/?p=cws_app_launcher";
 
 const char kSyncEncryptionHelpURL[] =
 #if defined(OS_CHROMEOS)
@@ -471,9 +475,6 @@ const char kSyncEncryptionHelpURL[] =
 
 const char kSyncErrorsHelpURL[] =
     "https://support.google.com/chrome/?p=settings_sync_error";
-
-const char kSyncCreateNewAccountURL[] =
-    "https://accounts.google.com/NewAccount?service=chromiumsync";
 
 const char kChromeToMobileLearnMoreURL[] =
     "https://support.google.com/chrome/?p=ib_chrome_to_mobile";
@@ -490,6 +491,9 @@ const char kNaturalScrollHelpURL[] =
 const char kLearnMoreEnterpriseURL[] =
     "https://support.google.com/chromeos/bin/answer.py?answer=2535613";
 #endif
+
+const char kNotificationsHelpURL[] =
+    "https://support.google.com/chrome/?p=ui_notifications";
 
 const char* const kChromeDebugURLs[] = {
   content::kChromeUICrashURL,

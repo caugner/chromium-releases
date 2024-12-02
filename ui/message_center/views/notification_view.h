@@ -24,10 +24,14 @@ class MESSAGE_CENTER_EXPORT NotificationView : public MessageView {
   // Creates appropriate MessageViews for notifications. Those currently are
   // always NotificationView or MessageSimpleView instances but in the future
   // may be instances of other classes, with the class depending on the
-  // notification type.
+  // notification type. A notification is top level if it needs to be rendered
+  // outside the browser window. No custom shadows are created for top level
+  // notifications on Linux with Aura.
   static MessageView* Create(const Notification& notification,
                              MessageCenter* message_center,
-                             bool expanded);
+                             MessageCenterTray* tray,
+                             bool expanded,
+                             bool top_level);
 
   virtual ~NotificationView();
 
@@ -35,7 +39,11 @@ class MESSAGE_CENTER_EXPORT NotificationView : public MessageView {
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual int GetHeightForWidth(int width) OVERRIDE;
   virtual void Layout() OVERRIDE;
+  virtual void OnFocus() OVERRIDE;
   virtual void ScrollRectToVisible(const gfx::Rect& rect) OVERRIDE;
+  virtual views::View* GetEventHandlerForPoint(
+      const gfx::Point& point) OVERRIDE;
+  virtual gfx::NativeCursor GetCursor(const ui::MouseEvent& event) OVERRIDE;
 
   // Overridden from MessageView:
   virtual void ButtonPressed(views::Button* sender,
@@ -44,6 +52,7 @@ class MESSAGE_CENTER_EXPORT NotificationView : public MessageView {
  protected:
   NotificationView(const Notification& notification,
                    MessageCenter* message_center,
+                   MessageCenterTray* tray,
                    bool expanded);
 
  private:

@@ -7,8 +7,8 @@
 #include <algorithm>
 
 #include "base/strings/string_number_conversions.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -22,10 +22,10 @@
 
 // static
 void DownloadInProgressDialogView::Show(Browser* browser,
-                                        gfx::NativeWindow parent_window) {
+                                        gfx::NativeWindow parent) {
   DownloadInProgressDialogView* window =
       new DownloadInProgressDialogView(browser);
-  views::Widget::CreateWindowWithParent(window, parent_window)->Show();
+  CreateBrowserModalDialogViews(window, parent)->Show();
 }
 
 DownloadInProgressDialogView::DownloadInProgressDialogView(Browser* browser)
@@ -76,11 +76,8 @@ DownloadInProgressDialogView::DownloadInProgressDialogView(Browser* browser)
   cancel_button_text_ = l10n_util::GetStringUTF16(
       IDS_DOWNLOAD_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL);
 
-  views::MessageBoxView::InitParams params(explanation_text);
-  params.clipboard_source_tag =
-    content::BrowserContext::GetMarkerForOffTheRecordContext(
-        browser_->profile());
-  message_box_view_ = new views::MessageBoxView(params);
+  message_box_view_ = new views::MessageBoxView(
+      views::MessageBoxView::InitParams(explanation_text));
 }
 
 DownloadInProgressDialogView::~DownloadInProgressDialogView() {}

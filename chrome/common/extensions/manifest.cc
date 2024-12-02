@@ -7,9 +7,9 @@
 #include "base/basictypes.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_split.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/features/base_feature_provider.h"
 #include "extensions/common/error_utils.h"
@@ -142,8 +142,10 @@ bool Manifest::ValidateManifest(
   // checking to let developers know when they screw up.
 
   FeatureProvider* provider = BaseFeatureProvider::GetByName("manifest");
-  std::set<std::string> feature_names = provider->GetAllFeatureNames();
-  for (std::set<std::string>::iterator feature_name = feature_names.begin();
+  const std::vector<std::string>& feature_names =
+      provider->GetAllFeatureNames();
+  for (std::vector<std::string>::const_iterator feature_name =
+           feature_names.begin();
        feature_name != feature_names.end(); ++feature_name) {
     // Use Get instead of HasKey because the former uses path expansion.
     if (!value_->Get(*feature_name, NULL))

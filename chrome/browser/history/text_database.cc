@@ -11,9 +11,9 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/diagnostics/sqlite_diagnostics.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
@@ -132,7 +132,7 @@ bool TextDatabase::Init() {
       return false;
   }
 
-  db_.set_error_histogram_name("Sqlite.Text.Error");
+  db_.set_histogram_tag("Text");
 
   // Set the database page size to something a little larger to give us
   // better performance (we're typically seek rather than bandwidth limited).

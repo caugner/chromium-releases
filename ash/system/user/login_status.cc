@@ -4,8 +4,10 @@
 
 #include "ash/system/user/login_status.h"
 
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "ash/session_state_delegate.h"
+#include "ash/shell.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "grit/ash_strings.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -26,7 +28,12 @@ base::string16 GetLocalizedSignOutStringForStatus(LoginStatus status,
       message_id = IDS_ASH_STATUS_TRAY_EXIT_PUBLIC;
       break;
     default:
-      message_id = IDS_ASH_STATUS_TRAY_SIGN_OUT;
+      if (ash::Shell::GetInstance()->session_state_delegate()->
+              NumberOfLoggedInUsers() > 1) {
+        message_id = IDS_ASH_STATUS_TRAY_SIGN_OUT_ALL;
+      } else {
+        message_id = IDS_ASH_STATUS_TRAY_SIGN_OUT;
+      }
       break;
   }
   base::string16 message =

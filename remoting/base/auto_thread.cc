@@ -57,9 +57,9 @@ scoped_refptr<AutoThreadTaskRunner> AutoThread::CreateWithType(
     const char* name,
     scoped_refptr<AutoThreadTaskRunner> joiner,
     base::MessageLoop::Type type) {
-  AutoThread* thread = new AutoThread(name, joiner);
+  AutoThread* thread = new AutoThread(name, joiner.get());
   scoped_refptr<AutoThreadTaskRunner> task_runner = thread->StartWithType(type);
-  if (!task_runner)
+  if (!task_runner.get())
     delete thread;
   return task_runner;
 }
@@ -92,7 +92,7 @@ AutoThread::AutoThread(const char* name)
 #if defined(OS_WIN)
     com_init_type_(COM_INIT_NONE),
 #endif
-    thread_(0),
+    thread_(),
     name_(name),
     was_quit_properly_(false) {
 }
@@ -102,7 +102,7 @@ AutoThread::AutoThread(const char* name, AutoThreadTaskRunner* joiner)
 #if defined(OS_WIN)
     com_init_type_(COM_INIT_NONE),
 #endif
-    thread_(0),
+    thread_(),
     name_(name),
     was_quit_properly_(false),
     joiner_(joiner) {
@@ -112,14 +112,14 @@ AutoThread::~AutoThread() {
   DCHECK(!startup_data_);
 
   // Wait for the thread to exit.
-  if (thread_) {
+  if (!thread_.is_null()) {
     base::PlatformThread::Join(thread_);
   }
 }
 
 scoped_refptr<AutoThreadTaskRunner> AutoThread::StartWithType(
     base::MessageLoop::Type type) {
-  DCHECK(!thread_);
+  DCHECK(thread_.is_null());
 #if defined(OS_WIN)
   DCHECK(com_init_type_ != COM_INIT_STA || type == base::MessageLoop::TYPE_UI);
 #endif
@@ -167,9 +167,10 @@ void AutoThread::QuitThread(
   base::MessageLoop::current()->Quit();
   was_quit_properly_ = true;
 
-  if (joiner_) {
-    joiner_->PostTask(FROM_HERE, base::Bind(&AutoThread::JoinAndDeleteThread,
-                                            base::Unretained(this)));
+  if (joiner_.get()) {
+    joiner_->PostTask(
+        FROM_HERE,
+        base::Bind(&AutoThread::JoinAndDeleteThread, base::Unretained(this)));
   }
 }
 

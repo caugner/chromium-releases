@@ -13,14 +13,17 @@
 #include "base/i18n/break_iterator.h"
 #include "base/i18n/rtl.h"
 #include "base/metrics/histogram.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_util.h"
+#include "chrome/browser/safe_browsing/download_feedback_service.h"
+#include "chrome/browser/safe_browsing/download_protection_service.h"
+#include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/views/download/download_shelf_context_menu_view.h"
 #include "chrome/browser/ui/views/download/download_shelf_view.h"
@@ -286,6 +289,8 @@ void DownloadItemView::OnDownloadUpdated(DownloadItem* download_item) {
         break;
       case DownloadItem::CANCELLED:
         StopDownloadProgress();
+        if (complete_animation_)
+          complete_animation_->Stop();
         LoadIcon();
         break;
       default:
@@ -315,10 +320,9 @@ void DownloadItemView::OnDownloadDestroyed(DownloadItem* download) {
 void DownloadItemView::OnDownloadOpened(DownloadItem* download) {
   disabled_while_opening_ = true;
   SetEnabled(false);
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&DownloadItemView::Reenable,
-                 weak_ptr_factory_.GetWeakPtr()),
+      base::Bind(&DownloadItemView::Reenable, weak_ptr_factory_.GetWeakPtr()),
       base::TimeDelta::FromMilliseconds(kDisabledOnOpenDuration));
 
   // Notify our parent.
@@ -406,10 +410,10 @@ bool DownloadItemView::OnMouseDragged(const ui::MouseEvent& event) {
     drag_start_point_ = event.location();
   }
   if (dragging_) {
-    if (download()->IsComplete()) {
+    if (download()->GetState() == DownloadItem::COMPLETE) {
       IconManager* im = g_browser_process->icon_manager();
       gfx::Image* icon = im->LookupIconFromFilepath(
-          download()->GetUserVerifiedFilePath(), IconLoader::SMALL);
+          download()->GetTargetFilePath(), IconLoader::SMALL);
       if (icon) {
         views::Widget* widget = GetWidget();
         download_util::DragDownload(download(), icon,
@@ -513,21 +517,22 @@ void DownloadItemView::OnGestureEvent(ui::GestureEvent* event) {
 }
 
 void DownloadItemView::ShowContextMenuForView(View* source,
-                                              const gfx::Point& point) {
+                                              const gfx::Point& point,
+                                              ui::MenuSourceType source_type) {
   // |point| is in screen coordinates. So convert it to local coordinates first.
   gfx::Point local_point = point;
   ConvertPointFromScreen(this, &local_point);
-  ShowContextMenuImpl(local_point, true);
+  ShowContextMenuImpl(local_point, source_type);
 }
 
 void DownloadItemView::ButtonPressed(
     views::Button* sender, const ui::Event& event) {
   if (sender == discard_button_) {
+    if (model_.ShouldAllowDownloadFeedback() && BeginDownloadFeedback())
+      return;
     UMA_HISTOGRAM_LONG_TIMES("clickjacking.discard_download",
                              base::Time::Now() - creation_time_);
-    if (download()->IsPartialDownload())
-      download()->Cancel(true);
-    download()->Delete(DownloadItem::DELETE_DUE_TO_USER_DISCARD);
+    download()->Remove();
     // WARNING: we are deleted at this point.  Don't access 'this'.
   } else if (save_button_ && sender == save_button_) {
     // The user has confirmed a dangerous download.  We'd record how quickly the
@@ -535,7 +540,7 @@ void DownloadItemView::ButtonPressed(
     UMA_HISTOGRAM_LONG_TIMES("clickjacking.save_download",
                              base::Time::Now() - creation_time_);
     // This will change the state and notify us.
-    download()->DangerousDownloadValidated();
+    download()->ValidateDangerousDownload();
   }
 }
 
@@ -565,7 +570,7 @@ void DownloadItemView::AnimationProgressed(const ui::Animation* animation) {
 // | [   ] [destroy your computer..]  [      ] [         ] |
 // `-------------------------------------------------------'
 //  |  |    |                          |                 \_ No drop down button.
-//  |  |    |                           \_ Buttons are views::TextButtons.
+//  |  |    |                           \_ Buttons are views::LabelButtons.
 //  |  |     \_ Text is in a label (dangerous_download_label_)
 //  |   \_ Warning icon.  No progress animation.
 //   \_ Body is static.  Doesn't respond to mouse hover or press. (NORMAL only)
@@ -577,7 +582,7 @@ void DownloadItemView::AnimationProgressed(const ui::Animation* animation) {
 // `---------------------------------------------+-' |
 //  |  |    |                         |            Drop down button. Responds to
 //  |  |    |                         |            mouse.(NORMAL, HOT or PUSHED)
-//  |  |    |                          \_ Button is a views::TextButton.
+//  |  |    |                          \_ Button is a views::LabelButton.
 //  |  |     \_ Text is in a label (dangerous_download_label_)
 //  |   \_ Warning icon.  No progress animation.
 //   \_ Body is static.  Doesn't respond to mouse hover or press. (NORMAL only)
@@ -776,7 +781,7 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
   // Load the icon.
   IconManager* im = g_browser_process->icon_manager();
   gfx::Image* image = im->LookupIconFromFilepath(
-      download()->GetUserVerifiedFilePath(),IconLoader::SMALL);
+      download()->GetTargetFilePath(), IconLoader::SMALL);
   const gfx::ImageSkia* icon = NULL;
   if (IsShowingWarningDialog())
     icon = warning_icon_;
@@ -790,19 +795,20 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
   // triggered only when we think the status might change.
   if (icon) {
     if (!IsShowingWarningDialog()) {
-      if (download()->IsInProgress()) {
+      DownloadItem::DownloadState state = download()->GetState();
+      if (state == DownloadItem::IN_PROGRESS) {
         download_util::PaintDownloadProgress(canvas, this, 0, 0,
                                              progress_angle_,
                                              model_.PercentComplete(),
                                              download_util::SMALL);
-      } else if (download()->IsComplete() &&
-                 complete_animation_.get() &&
+      } else if (complete_animation_.get() &&
                  complete_animation_->is_animating()) {
-        if (download()->IsInterrupted()) {
+        if (state == DownloadItem::INTERRUPTED) {
           download_util::PaintDownloadInterrupted(canvas, this, 0, 0,
               complete_animation_->GetCurrentValue(),
               download_util::SMALL);
         } else {
+          DCHECK_EQ(DownloadItem::COMPLETE, state);
           download_util::PaintDownloadComplete(canvas, this, 0, 0,
               complete_animation_->GetCurrentValue(),
               download_util::SMALL);
@@ -842,9 +848,25 @@ void DownloadItemView::OpenDownload() {
   UpdateAccessibleName();
 }
 
+bool DownloadItemView::BeginDownloadFeedback() {
+  SafeBrowsingService* sb_service = g_browser_process->safe_browsing_service();
+  if (!sb_service)
+    return false;
+  safe_browsing::DownloadProtectionService* download_protection_service =
+      sb_service->download_protection_service();
+  if (!download_protection_service)
+    return false;
+  UMA_HISTOGRAM_LONG_TIMES("clickjacking.report_and_discard_download",
+                           base::Time::Now() - creation_time_);
+  download_protection_service->feedback_service()->BeginFeedbackForDownload(
+      download());
+  // WARNING: we are deleted at this point.  Don't access 'this'.
+  return true;
+}
+
 void DownloadItemView::LoadIcon() {
   IconManager* im = g_browser_process->icon_manager();
-  last_download_item_path_ = download()->GetUserVerifiedFilePath();
+  last_download_item_path_ = download()->GetTargetFilePath();
   im->LoadIcon(last_download_item_path_,
                IconLoader::SMALL,
                base::Bind(&DownloadItemView::OnExtractIconComplete,
@@ -853,7 +875,7 @@ void DownloadItemView::LoadIcon() {
 }
 
 void DownloadItemView::LoadIconIfItemPathChanged() {
-  base::FilePath current_download_path = download()->GetUserVerifiedFilePath();
+  base::FilePath current_download_path = download()->GetTargetFilePath();
   if (last_download_item_path_ == current_download_path)
     return;
 
@@ -868,7 +890,7 @@ void DownloadItemView::UpdateColorsFromTheme() {
 }
 
 void DownloadItemView::ShowContextMenuImpl(const gfx::Point& p,
-                                           bool is_mouse_gesture) {
+                                           ui::MenuSourceType source_type) {
   gfx::Point point = p;
   gfx::Size size;
 
@@ -885,7 +907,7 @@ void DownloadItemView::ShowContextMenuImpl(const gfx::Point& p,
 
   // If |is_mouse_gesture| is false, |p| is ignored. The menu is shown aligned
   // to drop down arrow button.
-  if (!is_mouse_gesture) {
+  if (!source_type == ui::MENU_SOURCE_MOUSE) {
     drop_down_pressed_ = true;
     SetState(NORMAL, PUSHED);
     point.SetPoint(drop_down_x_left_, box_y_);
@@ -894,7 +916,7 @@ void DownloadItemView::ShowContextMenuImpl(const gfx::Point& p,
   // Post a task to release the button.  When we call the Run method on the menu
   // below, it runs an inner message loop that might cause us to be deleted.
   // Posting a task with a WeakPtr lets us safely handle the button release.
-  MessageLoop::current()->PostNonNestableTask(
+  base::MessageLoop::current()->PostNonNestableTask(
       FROM_HERE,
       base::Bind(&DownloadItemView::ReleaseDropDown,
                  weak_ptr_factory_.GetWeakPtr()));
@@ -905,7 +927,7 @@ void DownloadItemView::ShowContextMenuImpl(const gfx::Point& p,
         new DownloadShelfContextMenuView(download(), shelf_->GetNavigator()));
   }
   context_menu_->Run(GetWidget()->GetTopLevelWidget(),
-                     gfx::Rect(point, size));
+                     gfx::Rect(point, size), source_type);
   // We could be deleted now.
 }
 
@@ -927,7 +949,7 @@ void DownloadItemView::HandlePressEvent(const ui::LocatedEvent& event,
       // so that the positioning of the context menu will be similar to a
       // keyboard invocation.  I.e. we want the menu to always be positioned
       // next to the drop down button instead of the next to the pointer.
-      ShowContextMenuImpl(event.location(), false);
+      ShowContextMenuImpl(event.location(), ui::MENU_SOURCE_KEYBOARD);
       // Once called, it is possible that *this was deleted (e.g.: due to
       // invoking the 'Discard' action.)
     } else if (!IsShowingWarningDialog()) {
@@ -1049,8 +1071,15 @@ void DownloadItemView::ShowWarningDialog() {
     save_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
     AddChildView(save_button_);
   }
-  discard_button_ = new views::LabelButton(
-      this, l10n_util::GetStringUTF16(IDS_DISCARD_DOWNLOAD));
+  if (model_.ShouldAllowDownloadFeedback()) {
+    safe_browsing::DownloadFeedbackService::RecordFeedbackButtonShown(
+        download()->GetDangerType());
+    discard_button_ = new views::LabelButton(
+        this, l10n_util::GetStringUTF16(IDS_REPORT_AND_DISCARD_DOWNLOAD));
+  } else {
+    discard_button_ = new views::LabelButton(
+        this, l10n_util::GetStringUTF16(IDS_DISCARD_DOWNLOAD));
+  }
   discard_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
   AddChildView(discard_button_);
 

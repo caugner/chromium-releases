@@ -4,17 +4,14 @@
 
 #include "chrome/test/chromedriver/chrome/chrome_impl.h"
 
-#include "base/logging.h"
 #include "chrome/test/chromedriver/chrome/devtools_client.h"
-#include "chrome/test/chromedriver/chrome/devtools_event_logger.h"
+#include "chrome/test/chromedriver/chrome/devtools_event_listener.h"
 #include "chrome/test/chromedriver/chrome/devtools_http_client.h"
-#include "chrome/test/chromedriver/chrome/javascript_dialog_manager.h"
+#include "chrome/test/chromedriver/chrome/log.h"
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/chrome/web_view_impl.h"
 
-ChromeImpl::~ChromeImpl() {
-  web_views_.clear();
-}
+ChromeImpl::~ChromeImpl() {}
 
 std::string ChromeImpl::GetVersion() {
   return version_;
@@ -57,14 +54,14 @@ Status ChromeImpl::GetWebViewIds(std::list<std::string>* web_view_ids) {
     if (!found) {
       scoped_ptr<DevToolsClient> client(
           devtools_http_client_->CreateClient(view.id));
-      for (std::list<DevToolsEventLogger*>::const_iterator logger =
-               devtools_event_loggers_.begin();
-           logger != devtools_event_loggers_.end(); ++logger) {
-        client->AddListener(*logger);
-        // Logger's OnConnected will fire when DevToolsClient connects later.
+      for (ScopedVector<DevToolsEventListener>::const_iterator listener =
+               devtools_event_listeners_.begin();
+           listener != devtools_event_listeners_.end(); ++listener) {
+        client->AddListener(*listener);
+        // OnConnected will fire when DevToolsClient connects later.
       }
       web_views_.push_back(make_linked_ptr(new WebViewImpl(
-          view.id, client.Pass())));
+          view.id, client.Pass(), log_)));
     }
   }
 
@@ -102,38 +99,6 @@ Status ChromeImpl::CloseWebView(const std::string& id) {
   return Status(kOk);
 }
 
-Status ChromeImpl::IsJavaScriptDialogOpen(bool* is_open) {
-  JavaScriptDialogManager* manager;
-  Status status = GetDialogManagerForOpenDialog(&manager);
-  if (status.IsError())
-    return status;
-  *is_open = manager != NULL;
-  return Status(kOk);
-}
-
-Status ChromeImpl::GetJavaScriptDialogMessage(std::string* message) {
-  JavaScriptDialogManager* manager;
-  Status status = GetDialogManagerForOpenDialog(&manager);
-  if (status.IsError())
-    return status;
-  if (!manager)
-    return Status(kNoAlertOpen);
-
-  return manager->GetDialogMessage(message);
-}
-
-Status ChromeImpl::HandleJavaScriptDialog(bool accept,
-                                          const std::string& prompt_text) {
-  JavaScriptDialogManager* manager;
-  Status status = GetDialogManagerForOpenDialog(&manager);
-  if (status.IsError())
-    return status;
-  if (!manager)
-    return Status(kNoAlertOpen);
-
-  return manager->HandleDialog(accept, prompt_text);
-}
-
 Status ChromeImpl::GetAutomationExtension(AutomationExtension** extension) {
   return Status(kUnknownError, "automation extension not supported");
 }
@@ -142,30 +107,11 @@ ChromeImpl::ChromeImpl(
     scoped_ptr<DevToolsHttpClient> client,
     const std::string& version,
     int build_no,
-    const std::list<DevToolsEventLogger*>& devtools_event_loggers)
+    ScopedVector<DevToolsEventListener>& devtools_event_listeners,
+    Log* log)
     : devtools_http_client_(client.Pass()),
+      log_(log),
       version_(version),
-      build_no_(build_no),
-      devtools_event_loggers_(devtools_event_loggers) {}
-
-Status ChromeImpl::GetDialogManagerForOpenDialog(
-    JavaScriptDialogManager** manager) {
-  std::list<std::string> web_view_ids;
-  Status status = GetWebViewIds(&web_view_ids);
-  if (status.IsError())
-    return status;
-
-  for (std::list<std::string>::const_iterator it = web_view_ids.begin();
-       it != web_view_ids.end(); ++it) {
-    WebView* web_view;
-    status = GetWebViewById(*it, &web_view);
-    if (status.IsError())
-      return status;
-    if (web_view->GetJavaScriptDialogManager()->IsDialogOpen()) {
-      *manager = web_view->GetJavaScriptDialogManager();
-      return Status(kOk);
-    }
-  }
-  *manager = NULL;
-  return Status(kOk);
+      build_no_(build_no) {
+  devtools_event_listeners_.swap(devtools_event_listeners);
 }

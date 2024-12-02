@@ -4,7 +4,7 @@
 
 #include "base/command_line.h"
 #include "base/memory/scoped_vector.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
@@ -304,6 +304,12 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest,
     // extension domain popups that will close (instead of 1 popup on non-Ash).
     num_popups -= 1;
   }
+#endif
+#if defined(USE_ASH)
+#if !defined(OS_WIN)
+  // On linux ash we close all popup applications when closing its extension.
+  num_popups = 0;
+#endif
 #endif
   EXPECT_TRUE(WaitForTabsAndPopups(browser(), 1, num_popups, 0));
 }

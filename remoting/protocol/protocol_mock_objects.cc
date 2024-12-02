@@ -4,10 +4,6 @@
 
 #include "remoting/protocol/protocol_mock_objects.h"
 
-#include "base/message_loop_proxy.h"
-#include "net/base/ip_endpoint.h"
-#include "remoting/protocol/transport.h"
-
 namespace remoting {
 namespace protocol {
 
@@ -51,6 +47,32 @@ MockSession::~MockSession() {}
 MockSessionManager::MockSessionManager() {}
 
 MockSessionManager::~MockSessionManager() {}
+
+MockPairingRegistryDelegate::MockPairingRegistryDelegate() {
+}
+
+MockPairingRegistryDelegate::~MockPairingRegistryDelegate() {
+}
+
+void MockPairingRegistryDelegate::Save(
+    const std::string& pairings_json,
+    const PairingRegistry::SaveCallback& callback) {
+  pairings_json_ = pairings_json;
+  if (!callback.is_null()) {
+    callback.Run(true);
+  }
+}
+
+void MockPairingRegistryDelegate::Load(
+    const PairingRegistry::LoadCallback& callback) {
+  load_callback_ = base::Bind(base::Bind(callback), pairings_json_);
+}
+
+void MockPairingRegistryDelegate::RunCallback() {
+  DCHECK(!load_callback_.is_null());
+  load_callback_.Run();
+  load_callback_.Reset();
+}
 
 }  // namespace protocol
 }  // namespace remoting

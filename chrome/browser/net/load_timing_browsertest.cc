@@ -12,7 +12,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
@@ -22,7 +22,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_timing_info.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 #include "net/url_request/url_request_file_job.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_job_factory.h"
@@ -135,7 +135,7 @@ class MockUrlRequestJobWithTiming : public net::URLRequestFileJob {
                          base::TimeDelta::FromMilliseconds(100);
     }
 
-    MessageLoop::current()->PostDelayedTask(
+    base::MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&MockUrlRequestJobWithTiming::DelayedStart,
                    weak_factory_.GetWeakPtr()),

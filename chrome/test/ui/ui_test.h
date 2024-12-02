@@ -45,12 +45,6 @@ class FilePath;
 // rather than UITestBase.
 class UITestBase {
  public:
-  // Profile theme type choices.
-  enum ProfileType {
-    DEFAULT_THEME = 0,
-    COMPLEX_THEME = 1,
-  };
-
   // ********* Utility functions *********
 
   // Launches the browser only.
@@ -148,10 +142,6 @@ class UITestBase {
   // Gets the executable file path of the Chrome browser process.
   const base::FilePath::CharType* GetExecutablePath();
 
-  // Returns the directory name where the "typical" user data is that we use
-  // for testing.
-  static base::FilePath ComputeTypicalUserDataSource(ProfileType profile_type);
-
   // Return the user data directory being used by the browser instance in
   // UITest::SetUp().
   base::FilePath user_data_dir() const {
@@ -248,7 +238,7 @@ class UITestBase {
   static const wchar_t kFailedNoCrashService[];
 
   UITestBase();
-  explicit UITestBase(MessageLoop::Type msg_loop_type);
+  explicit UITestBase(base::MessageLoop::Type msg_loop_type);
 
   virtual ~UITestBase();
 
@@ -309,6 +299,10 @@ class UITestBase {
   // This can be set to true to have the test run the dom automation case.
   bool dom_automation_enabled_;
 
+  // This can be set to true to enable the stats collection controller JS
+  // bindings.
+  bool stats_collection_controller_enabled_;
+
   // See set_template_user_data().
   base::FilePath template_user_data_;
 
@@ -328,9 +322,6 @@ class UITestBase {
   // Launches browser and AutomationProxy.
   scoped_ptr<ProxyLauncher> launcher_;
 
-  // Are we using a profile with a complex theme?
-  ProfileType profile_type_;
-
   // PID file for websocket server.
   base::FilePath websocket_pid_file_;
 
@@ -342,9 +333,8 @@ class UITestBase {
 class UITest : public UITestBase, public PlatformTest {
  protected:
   UITest() {}
-  explicit UITest(MessageLoop::Type msg_loop_type)
-    : UITestBase(), PlatformTest(), message_loop_(msg_loop_type) {
-  }
+  explicit UITest(base::MessageLoop::Type msg_loop_type)
+      : UITestBase(), PlatformTest(), message_loop_(msg_loop_type) {}
 
   virtual void SetUp() OVERRIDE;
   virtual void TearDown() OVERRIDE;
@@ -422,7 +412,7 @@ class UITest : public UITestBase, public PlatformTest {
   void NavigateToURLAsync(const GURL& url);
 
  private:
-  MessageLoop message_loop_;  // Enables PostTask to main thread.
+  base::MessageLoop message_loop_;  // Enables PostTask to main thread.
 };
 
 // These exist only to support the gTest assertion macros, and

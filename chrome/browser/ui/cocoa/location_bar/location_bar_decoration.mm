@@ -5,9 +5,8 @@
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_decoration.h"
 
 #include "base/logging.h"
-#include "base/memory/scoped_nsobject.h"
-#include "chrome/browser/search/search.h"
-#include "ui/base/resource/resource_bundle.h"
+#include "base/mac/scoped_nsobject.h"
+#include "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
 
 const CGFloat LocationBarDecoration::kOmittedWidth = 0.0;
 
@@ -20,8 +19,7 @@ void LocationBarDecoration::SetVisible(bool visible) {
 }
 
 
-CGFloat LocationBarDecoration::GetWidthForSpace(CGFloat width,
-                                                CGFloat text_width) {
+CGFloat LocationBarDecoration::GetWidthForSpace(CGFloat width) {
   NOTREACHED();
   return kOmittedWidth;
 }
@@ -70,17 +68,14 @@ NSMenu* LocationBarDecoration::GetMenu() {
 }
 
 NSFont* LocationBarDecoration::GetFont() const {
-  if (chrome::IsInstantExtendedAPIEnabled())
-    return [NSFont fontWithName:@"Helvetica Neue" size:15];
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  return rb.GetFont(ResourceBundle::BaseFont).GetNativeFont();
+  return OmniboxViewMac::GetFieldFont();
 }
 
 // static
 void LocationBarDecoration::DrawLabel(NSString* label,
                                       NSDictionary* attributes,
                                       const NSRect& frame) {
-  scoped_nsobject<NSAttributedString> str(
+  base::scoped_nsobject<NSAttributedString> str(
       [[NSAttributedString alloc] initWithString:label attributes:attributes]);
   DrawAttributedString(str, frame);
 }
@@ -102,8 +97,4 @@ NSSize LocationBarDecoration::GetLabelSize(NSString* label,
 
 ButtonDecoration* LocationBarDecoration::AsButtonDecoration() {
   return NULL;
-}
-
-bool LocationBarDecoration::IsSeparator() const {
-  return false;
 }

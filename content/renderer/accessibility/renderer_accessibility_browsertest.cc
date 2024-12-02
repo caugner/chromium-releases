@@ -2,17 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/common/accessibility_node_data.h"
 #include "content/common/view_messages.h"
 #include "content/public/test/render_view_test.h"
 #include "content/renderer/accessibility/renderer_accessibility_complete.h"
 #include "content/renderer/render_view_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebAccessibilityObject.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/public/platform/WebSize.h"
+#include "third_party/WebKit/public/web/WebAccessibilityObject.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebView.h"
 
 using WebKit::WebAccessibilityObject;
 using WebKit::WebDocument;
@@ -301,13 +301,61 @@ TEST_F(RendererAccessibilityTest, SendFullAccessibilityTreeOnReload) {
   document = view()->GetWebView()->mainFrame()->document();
   root_obj = document.accessibilityObject();
   sink_->ClearMessages();
-  const WebAccessibilityObject& first_child = root_obj.firstChild();
+  const WebAccessibilityObject& first_child = root_obj.childAt(0);
   accessibility->HandleWebAccessibilityNotification(
       first_child,
       WebKit::WebAccessibilityNotificationLiveRegionChanged);
   accessibility->SendPendingAccessibilityNotifications();
   EXPECT_EQ(4, accessibility->browser_tree_node_count());
   EXPECT_EQ(4, CountAccessibilityNodesSentToBrowser());
+}
+
+TEST_F(RendererAccessibilityTest, AccessibilityMessagesQueueWhileSwappedOut) {
+  std::string html =
+      "<body>"
+      "  <p>Hello, world.</p>"
+      "</body>";
+  LoadHTML(html.c_str());
+
+  // Creating a RendererAccessibilityComplete should send the tree
+  // to the browser.
+  scoped_ptr<TestRendererAccessibilityComplete> accessibility(
+      new TestRendererAccessibilityComplete(view()));
+  accessibility->SendPendingAccessibilityNotifications();
+  EXPECT_EQ(3, accessibility->browser_tree_node_count());
+  EXPECT_EQ(3, CountAccessibilityNodesSentToBrowser());
+
+  // Post a "value changed" notification, but then swap out
+  // before sending it. It shouldn't send the notification while
+  // swapped out.
+  sink_->ClearMessages();
+  WebDocument document = view()->GetWebView()->mainFrame()->document();
+  WebAccessibilityObject root_obj = document.accessibilityObject();
+  accessibility->HandleWebAccessibilityNotification(
+      root_obj,
+      WebKit::WebAccessibilityNotificationValueChanged);
+  view()->OnSwapOut();
+  accessibility->SendPendingAccessibilityNotifications();
+  EXPECT_FALSE(sink_->GetUniqueMessageMatching(
+      AccessibilityHostMsg_Notifications::ID));
+
+  // Navigate, so we're not swapped out anymore. Now we should
+  // send accessibility notifications again. Note that the
+  // message that was queued up before will be quickly discarded
+  // because the element it was referring to no longer exists,
+  // so the notification here is from loading this new page.
+  ViewMsg_Navigate_Params nav_params;
+  nav_params.url = GURL("data:text/html,<p>Hello, again.</p>");
+  nav_params.navigation_type = ViewMsg_Navigate_Type::NORMAL;
+  nav_params.transition = PAGE_TRANSITION_TYPED;
+  nav_params.current_history_list_length = 1;
+  nav_params.current_history_list_offset = 0;
+  nav_params.pending_history_list_offset = 1;
+  nav_params.page_id = -1;
+  view()->OnNavigate(nav_params);
+  accessibility->SendPendingAccessibilityNotifications();
+  EXPECT_TRUE(sink_->GetUniqueMessageMatching(
+      AccessibilityHostMsg_Notifications::ID));
 }
 
 TEST_F(RendererAccessibilityTest, HideAccessibilityObject) {

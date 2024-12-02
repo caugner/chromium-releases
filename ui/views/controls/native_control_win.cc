@@ -65,14 +65,14 @@ void NativeControlWin::OnEnabledChanged() {
     EnableWindow(native_view(), enabled());
 }
 
-void NativeControlWin::ViewHierarchyChanged(bool is_add, View* parent,
-                                            View* child) {
+void NativeControlWin::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
   // Call the base class to hide the view if we're being removed.
-  NativeViewHost::ViewHierarchyChanged(is_add, parent, child);
+  NativeViewHost::ViewHierarchyChanged(details);
 
   // Create the HWND when we're added to a valid Widget. Many controls need a
   // parent HWND to function properly.
-  if (is_add && GetWidget() && !native_view())
+  if (details.is_add && GetWidget() && !native_view())
     CreateNativeControl();
 }
 
@@ -109,7 +109,7 @@ void NativeControlWin::OnFocus() {
   // a native win32 control, we don't always send a native (MSAA)
   // focus notification.
   bool send_native_event =
-      parent_view->GetClassName() != Combobox::kViewClassName &&
+      strcmp(parent_view->GetClassName(), Combobox::kViewClassName) &&
       parent_view->HasFocus();
 
   // Send the accessibility focus notification.
@@ -124,10 +124,12 @@ void NativeControlWin::ShowContextMenu(const gfx::Point& location) {
   if (!context_menu_controller())
     return;
 
-  if (location.x() == -1 && location.y() == -1)
-    View::ShowContextMenu(GetKeyboardContextMenuLocation(), false);
-  else
-    View::ShowContextMenu(location, true);
+  if (location.x() == -1 && location.y() == -1) {
+    View::ShowContextMenu(GetKeyboardContextMenuLocation(),
+                          ui::MENU_SOURCE_KEYBOARD);
+  } else {
+    View::ShowContextMenu(location, ui::MENU_SOURCE_MOUSE);
+  }
 }
 
 void NativeControlWin::NativeControlCreated(HWND native_control) {

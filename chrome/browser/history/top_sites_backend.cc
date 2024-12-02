@@ -41,10 +41,12 @@ void TopSitesBackend::GetMostVisitedThumbnails(
   bool* need_history_migration = new bool(false);
 
   tracker->PostTaskAndReply(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB).get(),
       FROM_HERE,
       base::Bind(&TopSitesBackend::GetMostVisitedThumbnailsOnDBThread,
-                 this, thumbnails, need_history_migration),
+                 this,
+                 thumbnails,
+                 need_history_migration),
       base::Bind(callback, thumbnails, base::Owned(need_history_migration)));
 }
 
@@ -72,15 +74,15 @@ void TopSitesBackend::ResetDatabase() {
 void TopSitesBackend::DoEmptyRequest(const base::Closure& reply,
                                      CancelableTaskTracker* tracker) {
   tracker->PostTaskAndReply(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB).get(),
       FROM_HERE,
       base::Bind(&base::DoNothing),
       reply);
 }
 
 TopSitesBackend::~TopSitesBackend() {
-  DCHECK(!db_.get());  // Shutdown should have happened first (which results in
-                       // nulling out db).
+  DCHECK(!db_);  // Shutdown should have happened first (which results in
+                 // nulling out db).
 }
 
 void TopSitesBackend::InitDBOnDBThread(const base::FilePath& path) {
@@ -102,7 +104,7 @@ void TopSitesBackend::GetMostVisitedThumbnailsOnDBThread(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
 
   *need_history_migration = false;
-  if (db_.get()) {
+  if (db_) {
     db_->GetPageThumbnails(&(thumbnails->most_visited),
                            &(thumbnails->url_to_images_map));
     *need_history_migration = db_->may_need_history_migration();
@@ -110,7 +112,7 @@ void TopSitesBackend::GetMostVisitedThumbnailsOnDBThread(
 }
 
 void TopSitesBackend::UpdateTopSitesOnDBThread(const TopSitesDelta& delta) {
-  if (!db_.get())
+  if (!db_)
     return;
 
   for (size_t i = 0; i < delta.deleted.size(); ++i)
@@ -126,7 +128,7 @@ void TopSitesBackend::UpdateTopSitesOnDBThread(const TopSitesDelta& delta) {
 void TopSitesBackend::SetPageThumbnailOnDBThread(const MostVisitedURL& url,
                                                  int url_rank,
                                                  const Images& thumbnail) {
-  if (!db_.get())
+  if (!db_)
     return;
 
   db_->SetPageThumbnail(url, url_rank, thumbnail);

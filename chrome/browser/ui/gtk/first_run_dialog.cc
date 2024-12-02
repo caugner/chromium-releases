@@ -9,7 +9,7 @@
 
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/first_run/first_run_dialog.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/process_singleton.h"
@@ -95,7 +95,7 @@ bool FirstRunDialog::Show() {
     // but that spins a nested message loop and hoses us.  :(
     // http://code.google.com/p/chromium/issues/detail?id=12552
     // Instead, run a loop directly here.
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
   }
 #endif  // defined(GOOGLE_CHROME_BUILD)
   return dialog_shown;
@@ -195,6 +195,6 @@ void FirstRunDialog::FirstRunDone() {
 
   if (dialog_)
     gtk_widget_destroy(dialog_);
-  MessageLoop::current()->Quit();
+  base::MessageLoop::current()->Quit();
   delete this;
 }

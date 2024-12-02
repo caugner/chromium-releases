@@ -8,7 +8,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "base/observer_list.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "remoting/base/constants.h"
 #include "remoting/base/rsa_key_pair.h"
 #include "remoting/base/test_rsa_key_pair.h"
@@ -59,7 +59,7 @@ class RegisterSupportHostRequestTest : public testing::Test {
  protected:
   virtual void SetUp() {
     key_pair_ = RsaKeyPair::FromString(kTestRsaKeyPair);
-    ASSERT_TRUE(key_pair_);
+    ASSERT_TRUE(key_pair_.get());
 
     EXPECT_CALL(signal_strategy_, AddListener(NotNull()))
         .WillRepeatedly(AddListener(&signal_strategy_listeners_));
@@ -120,7 +120,7 @@ TEST_F(RegisterSupportHostRequestTest, Send) {
   EXPECT_GE(now, time);
 
   scoped_refptr<RsaKeyPair> key_pair = RsaKeyPair::FromString(kTestRsaKeyPair);
-  ASSERT_TRUE(key_pair);
+  ASSERT_TRUE(key_pair.get());
 
   std::string expected_signature =
       key_pair->SignMessage(std::string(kTestJid) + ' ' + time_str);

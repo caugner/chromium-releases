@@ -9,7 +9,7 @@
 
 #include "base/bind.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
@@ -133,7 +133,7 @@ class FakeSafeBrowsingUIManager :  public SafeBrowsingUIManager {
 
   void OnMalwareDetailsDone() {
     EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    MessageLoopForUI::current()->Quit();
+    base::MessageLoopForUI::current()->Quit();
   }
 
   std::string GetReport() {
@@ -247,7 +247,7 @@ class FakeMalwareDetails : public MalwareDetails {
   void OnDOMDetailsDone() {
     got_dom_ = true;
     if (waiting_) {
-      MessageLoopForUI::current()->Quit();
+      base::MessageLoopForUI::current()->Quit();
     }
   }
 
@@ -296,7 +296,7 @@ class TestSafeBrowsingBlockingPage : public SafeBrowsingBlockingPageV2 {
       return;
 
     // Notify that we are gone
-    MessageLoopForUI::current()->Quit();
+    base::MessageLoopForUI::current()->Quit();
     wait_for_delete_ = false;
   }
 
@@ -633,7 +633,7 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, MalwareDontProceed) {
   EXPECT_TRUE(ClickAndWaitForDetach("back"));
   AssertNoInterstitial(false);   // Assert the interstitial is gone
   EXPECT_EQ(
-      GURL(chrome::kAboutBlankURL),  // Back to "about:blank"
+      GURL(content::kAboutBlankURL),  // Back to "about:blank"
       browser()->tab_strip_model()->GetActiveWebContents()->GetURL());
 }
 
@@ -679,7 +679,7 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest,
   AssertNoInterstitial(false);  // Assert the interstitial is gone
 
   EXPECT_EQ(
-      GURL(chrome::kAboutBlankURL),  // Back to "about:blank"
+      GURL(content::kAboutBlankURL),  // Back to "about:blank"
       browser()->tab_strip_model()->GetActiveWebContents()->GetURL());
 }
 
@@ -736,7 +736,7 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, ProceedDisabled) {
   EXPECT_TRUE(ClickAndWaitForDetach("proceed"));
   AssertNoInterstitial(true);
   EXPECT_EQ(
-      GURL(chrome::kAboutBlankURL),  // Back to "about:blank"
+      GURL(content::kAboutBlankURL),  // Back to "about:blank"
       browser()->tab_strip_model()->GetActiveWebContents()->GetURL());
 }
 
@@ -766,7 +766,7 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, ReportingDisabled) {
   EXPECT_TRUE(ClickAndWaitForDetach("back"));
   AssertNoInterstitial(false);   // Assert the interstitial is gone
   EXPECT_EQ(
-      GURL(chrome::kAboutBlankURL),  // Back to "about:blank"
+      GURL(content::kAboutBlankURL),  // Back to "about:blank"
       browser()->tab_strip_model()->GetActiveWebContents()->GetURL());
 }
 
@@ -788,11 +788,18 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, PhishingDontProceed) {
   EXPECT_TRUE(ClickAndWaitForDetach("back"));
   AssertNoInterstitial(false);  // Assert the interstitial is gone
   EXPECT_EQ(
-      GURL(chrome::kAboutBlankURL),  // We are back to "about:blank".
+      GURL(content::kAboutBlankURL),  // We are back to "about:blank".
       browser()->tab_strip_model()->GetActiveWebContents()->GetURL());
 }
 
-IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, PhishingProceed) {
+// http://crbug.com/247763
+#if defined(OS_WIN)
+#define MAYBE_PhishingProceed DISABLED_PhishingProceed
+#else
+#define MAYBE_PhishingProceed PhishingProceed
+#endif
+
+IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, MAYBE_PhishingProceed) {
   GURL url = SetupWarningAndNavigate(SB_THREAT_TYPE_URL_PHISHING);
 
   EXPECT_TRUE(ClickAndWaitForDetach("proceed"));
@@ -813,7 +820,14 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, PhishingReportError) {
       browser()->tab_strip_model()->GetActiveWebContents()->GetURL().path());
 }
 
-IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, PhishingLearnMore) {
+// See crbug.com/248447
+#if defined(OS_WIN)
+#define MAYBE_PhishingLearnMore DISABLED_PhishingLearnMore
+#else
+#define MAYBE_PhishingLearnMore PhishingLearnMore
+#endif
+
+IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, MAYBE_PhishingLearnMore) {
   SetupWarningAndNavigate(SB_THREAT_TYPE_URL_PHISHING);
 
   EXPECT_TRUE(ClickAndWaitForDetach("learn-more-link"));

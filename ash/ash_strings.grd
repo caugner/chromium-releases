@@ -188,6 +188,9 @@ This file contains the strings for ash.
       <message name="IDS_AURA_LAUNCHER_CONTEXT_MENU_ALIGN_RIGHT" desc="Title of the menu item in the context menu for aligning the launcher to the right of the screen">
         Right
       </message>
+      <message name="IDS_ASH_LAUNCHER_ACCESSIBLE_NAME" desc="The accessible name of the launcher.">
+        Launcher
+      </message>
 
       <message name="IDS_AURA_SET_DESKTOP_WALLPAPER" desc="The label used for change wallpaper in context menu">
         Set wallpaper...
@@ -214,6 +217,9 @@ Press Ctrl+Alt+Z to disable.
       </message>
       <message name="IDS_ASH_STATUS_TRAY_SIGN_OUT" desc="The label used for the button in the status tray to sign out of the system.">
         Sign out
+      </message>
+      <message name="IDS_ASH_STATUS_TRAY_SIGN_OUT_ALL" desc="The label used for the button in the status tray to sign out all users of the system.">
+        Sign out all
       </message>
       <message name="IDS_ASH_STATUS_TRAY_GUEST_LABEL" desc="The label used in the system tray's user card to indicate that the current session is a guest session.">
         Guest
@@ -244,6 +250,15 @@ Press Ctrl+Alt+Z to disable.
       </message>
       <message name="IDS_ASH_STATUS_TRAY_SMS_NUMBER" desc="Sender for SMS messagees in the system tray.">
         SMS from <ph name="PHONE_NUMBER">$1<ex>08700 776655</ex></ph>
+      </message>
+      <message name="IDS_ASH_STATUS_TRAY_SIGN_IN_ANOTHER_ACCOUNT" desc="The string for the button which lets the user add another account to the current session.">
+        Sign in another account...
+      </message>
+      <message name="IDS_ASH_STATUS_TRAY_CAPTION_CANNOT_ADD_USER" desc="The caption for the error message when the user has reached the limit of multi profile users.">
+        Can't sign into another account.
+      </message>
+      <message name="IDS_ASH_STATUS_TRAY_MESSAGE_CANNOT_ADD_USER" desc="The error message when the user has reached the limit of multi profile users.">
+        You can only have up to three accounts in multiple sign-in.
       </message>
 
       <message name="IDS_ASH_STATUS_TRAY_BLUETOOTH" desc="The label used as the header in the bluetooth popup.">
@@ -296,6 +311,24 @@ Press Ctrl+Alt+Z to disable.
       </message>
       <message name="IDS_ASH_STATUS_TRAY_DISPLAY_EXTENDED" desc="The label used in the tray to show that the current status is extended.">
 	Extending screen to <ph name="DISPLAY_NAME">$1</ph>
+      </message>
+      <message name="IDS_ASH_STATUS_TRAY_DISPLAY_MIRRORING_NO_INTERNAL" desc="The label used in the tray to show that the current status is mirroring and the device doesn't have the internal display.">
+	Mirroring
+      </message>
+      <message name="IDS_ASH_STATUS_TRAY_DISPLAY_EXTENDED_NO_INTERNAL" desc="The label used in the tray to show that the current status is extended and the device doesn't have the internal display.">
+	Extending screen
+      </message>
+      <message name="IDS_ASH_STATUS_TRAY_DISPLAY_DOCKED" desc="The label used in the tray to show that the current status is docked mode.">
+	Dock mode
+      </message>
+      <message name="IDS_ASH_STATUS_TRAY_DISPLAY_RESOLUTION_CHANGED" desc="The label used in the tray to notify that the display resolution settings has changed.">
+	<ph name="DISPLAY_NAME">$1</ph> has been resized to <ph name="RESOLUTION">$2</ph>
+      </message>
+      <message name="IDS_ASH_STATUS_TRAY_DISPLAY_ROTATED" desc="The label used in the tray to notify that the display rotation settings has changed.">
+	<ph name="DISPLAY_NAME">$1</ph> has been rotated
+      </message>
+      <message name="IDS_ASH_STATUS_TRAY_DISPLAY_SINGLE_DISPLAY" desc="The label used in the tray to show the current display's configuration if there is a single display">
+	<ph name="DISPLAY_NAME">$1</ph>: <ph name="RESOLUTION">$2</ph>
       </message>
       <message name="IDS_ASH_STATUS_TRAY_UNKNOWN_DISPLAY_NAME" desc="Label shown in tray for a display whose name is unknown.">
 	Unknown Display
@@ -368,14 +401,20 @@ Press Shift + Alt to switch.
         Spoken feedback
       </message>
       <message name="IDS_ASH_STATUS_TRAY_ACCESSIBILITY_HIGH_CONTRAST_MODE" desc="The label used in the accessibility menu of the system tray to toggle on/off high contrast feature.">
-        High contrast
+        High contrast mode
       </message>
       <message name="IDS_ASH_STATUS_TRAY_ACCESSIBILITY_SCREEN_MAGNIFIER" desc="The label used in the accessibility menu of the system tray to toggle on/off magnifier feature.">
         Screen magnifier
       </message>
+      <message name="IDS_ASH_STATUS_TRAY_ACCESSIBILITY_LARGE_CURSOR" desc="The label used in the accessibility menu of the system tray to toggle on/off large mouse cursor feature.">
+        Large mouse cursor
+      </message>
       <message name="IDS_ASH_STATUS_TRAY_ACCESSIBILITY_LEARN_MORE" desc="The label used in the accessibility menu of the system tray
      to open a webpage (article on help center) containing explanation about accessibility feature.">
         Learn more...
+      </message>
+      <message name="IDS_ASH_STATUS_TRAY_ACCESSIBILITY_SETTINGS" desc="The label of the item 'Settings...' used in the accessibility menu of the system tray to open an accessibility setting page.">
+        Settings...
       </message>
       <message name="IDS_ASH_STATUS_TRAY_BATTERY_FULL" desc="The label in the tray dialog to indicate that the battery is full.">
         Battery full
@@ -490,6 +529,12 @@ Press Shift + Alt to switch.
       </message>
       <message name="IDS_ASH_SCREENSHOT_NOTIFICATION_TEXT_FAIL" desc="The text of the notification when taking a screenshot failed.">
         Failed to save screenshot
+      </message>
+      <message name="IDS_ASH_EXIT_WARNING_POPUP_TEXT" desc="The text of the popup when the user preses the exit shortcut.">
+        Press Ctrl+Shift+Q twice to quit.
+      </message>
+      <message name="IDS_ASH_EXIT_WARNING_POPUP_TEXT_ACCESSIBLE" desc="The message used by accessibility to indicate the content of the popup when the user preses the exit shortcut.">
+        Press Control Shift Q twice to quit.
       </message>
 
       <!-- ChromeOS-specific strings -->

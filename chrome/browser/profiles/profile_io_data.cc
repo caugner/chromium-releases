@@ -15,9 +15,9 @@
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
@@ -149,8 +149,12 @@ Profile* GetProfileOnUI(ProfileManager* profile_manager, Profile* profile) {
 
 #if defined(DEBUG_DEVTOOLS)
 bool IsSupportedDevToolsURL(const GURL& url, base::FilePath* path) {
+  std::string bundled_path_prefix(chrome::kChromeUIDevToolsBundledPath);
+  bundled_path_prefix = "/" + bundled_path_prefix + "/";
+
   if (!url.SchemeIs(chrome::kChromeDevToolsScheme) ||
-      url.host() != chrome::kChromeUIDevToolsBundledHost) {
+      url.host() != chrome::kChromeUIDevToolsHost ||
+      !StartsWithASCII(url.path(), bundled_path_prefix, false)) {
     return false;
   }
 
@@ -170,10 +174,9 @@ bool IsSupportedDevToolsURL(const GURL& url, base::FilePath* path) {
   const std::string& spec = stripped_url.possibly_invalid_spec();
   const url_parse::Parsed& parsed =
       stripped_url.parsed_for_possibly_invalid_spec();
-  // + 1 to skip the slash at the beginning of the path.
-  int offset = parsed.CountCharactersBefore(url_parse::Parsed::PATH, false) + 1;
+  int offset = parsed.CountCharactersBefore(url_parse::Parsed::PATH, false);
   if (offset < static_cast<int>(spec.size()))
-    relative_path.assign(spec.substr(offset));
+    relative_path.assign(spec.substr(offset + bundled_path_prefix.length()));
 
   // Check that |relative_path| is not an absolute path (otherwise
   // AppendASCII() will DCHECK).  The awkward use of StringType is because on
@@ -406,9 +409,9 @@ ProfileIOData::~ProfileIOData() {
   if (BrowserThread::IsMessageLoopValid(BrowserThread::IO))
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  if (main_request_context_.get())
+  if (main_request_context_)
     main_request_context_->AssertNoURLRequests();
-  if (extensions_request_context_.get())
+  if (extensions_request_context_)
     extensions_request_context_->AssertNoURLRequests();
   for (URLRequestContextMap::iterator it = app_request_context_map_.begin();
        it != app_request_context_map_.end(); ++it) {
@@ -433,16 +436,21 @@ ProfileIOData* ProfileIOData::FromResourceContext(
 bool ProfileIOData::IsHandledProtocol(const std::string& scheme) {
   DCHECK_EQ(scheme, StringToLowerASCII(scheme));
   static const char* const kProtocolList[] = {
-    extensions::kExtensionScheme,
-    chrome::kChromeUIScheme,
+    chrome::kFileScheme,
     chrome::kChromeDevToolsScheme,
+    extensions::kExtensionScheme,
+    chrome::kExtensionResourceScheme,
+    chrome::kChromeUIScheme,
+    chrome::kDataScheme,
 #if defined(OS_CHROMEOS)
-    chrome::kMetadataScheme,
     chrome::kDriveScheme,
 #endif  // defined(OS_CHROMEOS)
+    chrome::kAboutScheme,
+#if !defined(DISABLE_FTP_SUPPORT)
+    chrome::kFtpScheme,
+#endif  // !defined(DISABLE_FTP_SUPPORT)
     chrome::kBlobScheme,
     chrome::kFileSystemScheme,
-    chrome::kExtensionResourceScheme,
     chrome::kChromeSearchScheme,
   };
   for (size_t i = 0; i < arraysize(kProtocolList); ++i) {
@@ -536,13 +544,13 @@ ChromeURLRequestContext* ProfileIOData::GetIsolatedMediaRequestContext(
 
 ExtensionInfoMap* ProfileIOData::GetExtensionInfoMap() const {
   DCHECK(initialized_) << "ExtensionSystem not initialized";
-  return extension_info_map_;
+  return extension_info_map_.get();
 }
 
 CookieSettings* ProfileIOData::GetCookieSettings() const {
   // Allow either Init() or SetCookieSettingsForTesting() to initialize.
-  DCHECK(initialized_ || cookie_settings_);
-  return cookie_settings_;
+  DCHECK(initialized_ || cookie_settings_.get());
+  return cookie_settings_.get();
 }
 
 #if defined(ENABLE_NOTIFICATIONS)
@@ -561,6 +569,14 @@ void ProfileIOData::InitializeMetricsEnabledStateOnUIThread() {
   // future to more accurately capture this state.
   chromeos::CrosSettings::Get()->GetBoolean(chromeos::kStatsReportingPref,
                                             &enable_metrics_);
+#elif defined(OS_ANDROID)
+  // TODO(dwkang): rename or unify the pref for UMA once we have conclusion
+  // in crbugs.com/246495.
+  // Android has it's own preferences for metrics / crash uploading.
+  enable_metrics_.Init(prefs::kCrashReportingEnabled,
+                       g_browser_process->local_state());
+  enable_metrics_.MoveToThread(
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
 #else
   // Prep the PrefMember and send it to the IO thread, since this value will be
   // read from there.
@@ -655,10 +671,11 @@ void ProfileIOData::Init(content::ProtocolHandlerMap* protocol_handlers) const {
       new ChromeNetworkDelegate(
           io_thread_globals->extension_event_router_forwarder.get(),
           &enable_referrers_);
-  network_delegate->set_extension_info_map(profile_params_->extension_info_map);
+  network_delegate->set_extension_info_map(
+      profile_params_->extension_info_map.get());
   network_delegate->set_url_blacklist_manager(url_blacklist_manager_.get());
   network_delegate->set_profile(profile_params_->profile);
-  network_delegate->set_cookie_settings(profile_params_->cookie_settings);
+  network_delegate->set_cookie_settings(profile_params_->cookie_settings.get());
   network_delegate->set_enable_do_not_track(&enable_do_not_track_);
   network_delegate->set_force_google_safe_search(&force_safesearch_);
   network_delegate->set_load_time_stats(load_time_stats_);
@@ -683,9 +700,6 @@ void ProfileIOData::Init(content::ProtocolHandlerMap* protocol_handlers) const {
       new TransportSecurityPersister(transport_security_state_.get(),
                                      profile_params_->path,
                                      is_incognito()));
-  const std::string& serialized =
-      command_line.GetSwitchValueASCII(switches::kHstsHosts);
-  transport_security_persister_.get()->DeserializeFromCommandLine(serialized);
 
   // Take ownership over these parameters.
   cookie_settings_ = profile_params_->cookie_settings;
@@ -697,7 +711,7 @@ void ProfileIOData::Init(content::ProtocolHandlerMap* protocol_handlers) const {
   resource_context_->host_resolver_ = io_thread_globals->host_resolver.get();
   resource_context_->request_context_ = main_request_context_.get();
 
-  if (profile_params_->resource_prefetch_predictor_observer_.get()) {
+  if (profile_params_->resource_prefetch_predictor_observer_) {
     resource_prefetch_predictor_observer_.reset(
         profile_params_->resource_prefetch_predictor_observer_.release());
   }
@@ -725,7 +739,7 @@ void ProfileIOData::ApplyProfileParamsToContext(
     ChromeURLRequestContext* context) const {
   context->set_http_user_agent_settings(
       chrome_http_user_agent_settings_.get());
-  context->set_ssl_config_service(profile_params_->ssl_config_service);
+  context->set_ssl_config_service(profile_params_->ssl_config_service.get());
 }
 
 scoped_ptr<net::URLRequestJobFactory> ProfileIOData::SetUpJobFactoryDefaults(
@@ -733,18 +747,18 @@ scoped_ptr<net::URLRequestJobFactory> ProfileIOData::SetUpJobFactoryDefaults(
     scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
         protocol_handler_interceptor,
     net::NetworkDelegate* network_delegate,
-    net::FtpTransactionFactory* ftp_transaction_factory,
-    net::FtpAuthCache* ftp_auth_cache) const {
+    net::FtpTransactionFactory* ftp_transaction_factory) const {
   // NOTE(willchan): Keep these protocol handlers in sync with
   // ProfileIOData::IsHandledProtocol().
   bool set_protocol = job_factory->SetProtocolHandler(
       chrome::kFileScheme, new net::FileProtocolHandler());
   DCHECK(set_protocol);
 
-  DCHECK(extension_info_map_);
+  DCHECK(extension_info_map_.get());
   set_protocol = job_factory->SetProtocolHandler(
       extensions::kExtensionScheme,
-      CreateExtensionProtocolHandler(is_incognito(), extension_info_map_));
+      CreateExtensionProtocolHandler(is_incognito(),
+                                     extension_info_map_.get()));
   DCHECK(set_protocol);
   set_protocol = job_factory->SetProtocolHandler(
       chrome::kExtensionResourceScheme,
@@ -754,7 +768,7 @@ scoped_ptr<net::URLRequestJobFactory> ProfileIOData::SetUpJobFactoryDefaults(
       chrome::kDataScheme, new net::DataProtocolHandler());
   DCHECK(set_protocol);
 #if defined(OS_CHROMEOS)
-  if (!is_incognito() && profile_params_.get()) {
+  if (!is_incognito() && profile_params_) {
     set_protocol = job_factory->SetProtocolHandler(
         chrome::kDriveScheme,
         new drive::DriveProtocolHandler(profile_params_->profile));
@@ -769,8 +783,7 @@ scoped_ptr<net::URLRequestJobFactory> ProfileIOData::SetUpJobFactoryDefaults(
   DCHECK(ftp_transaction_factory);
   job_factory->SetProtocolHandler(
       chrome::kFtpScheme,
-      new net::FtpProtocolHandler(ftp_transaction_factory,
-                                  ftp_auth_cache));
+      new net::FtpProtocolHandler(ftp_transaction_factory));
 #endif  // !defined(DISABLE_FTP_SUPPORT)
 
   scoped_ptr<net::URLRequestJobFactory> top_job_factory =
@@ -812,10 +825,10 @@ void ProfileIOData::ShutdownOnUIThread() {
   signin_allowed_.Destroy();
   session_startup_pref_.Destroy();
 #if defined(ENABLE_CONFIGURATION_POLICY)
-  if (url_blacklist_manager_.get())
+  if (url_blacklist_manager_)
     url_blacklist_manager_->ShutdownOnUIThread();
 #endif
-  if (chrome_http_user_agent_settings_.get())
+  if (chrome_http_user_agent_settings_)
     chrome_http_user_agent_settings_->CleanupOnUIThread();
   bool posted = BrowserThread::DeleteSoon(BrowserThread::IO, FROM_HERE, this);
   if (!posted)

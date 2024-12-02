@@ -4,7 +4,7 @@
 
 #include "base/bind.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_info_cache_observer.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -23,16 +23,17 @@ namespace {
 void OnUnblockOnProfileCreation(Profile* profile,
                                 Profile::CreateStatus status) {
   if (status == Profile::CREATE_STATUS_INITIALIZED)
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
 }
 
 void ProfileCreationComplete(Profile* profile, Profile::CreateStatus status) {
-  ASSERT_NE(status, Profile::CREATE_STATUS_FAIL);
+  ASSERT_NE(status, Profile::CREATE_STATUS_LOCAL_FAIL);
+  ASSERT_NE(status, Profile::CREATE_STATUS_REMOTE_FAIL);
   // No browser should have been created for this profile yet.
   EXPECT_EQ(chrome::GetTotalBrowserCountForProfile(profile), 0U);
   EXPECT_EQ(chrome::GetTotalBrowserCount(), 1U);
   if (status == Profile::CREATE_STATUS_INITIALIZED)
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
 }
 
 class ProfileRemovalObserver : public ProfileInfoCacheObserver {
@@ -50,19 +51,11 @@ class ProfileRemovalObserver : public ProfileInfoCacheObserver {
   std::string last_used_profile_name() { return last_used_profile_name_; }
 
   // ProfileInfoCacheObserver overrides:
-  virtual void OnProfileAdded(const base::FilePath& profile_path) OVERRIDE {}
   virtual void OnProfileWillBeRemoved(
       const base::FilePath& profile_path) OVERRIDE {
     last_used_profile_name_ = g_browser_process->local_state()->GetString(
         prefs::kProfileLastUsed);
   }
-  virtual void OnProfileWasRemoved(const base::FilePath& profile_path,
-                                   const string16& profile_name) OVERRIDE {}
-  virtual void OnProfileNameChanged(const base::FilePath& profile_path,
-                                    const string16& old_profile_name)
-      OVERRIDE {}
-  virtual void OnProfileAvatarChanged(const base::FilePath& profile_path)
-      OVERRIDE {}
 
  private:
   std::string last_used_profile_name_;
@@ -96,7 +89,7 @@ IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest, DeleteSingletonProfile) {
   base::FilePath singleton_profile_path = cache.GetPathOfProfileAtIndex(0);
   EXPECT_FALSE(singleton_profile_path.empty());
   profile_manager->ScheduleProfileForDeletion(singleton_profile_path,
-                                              chrome::HOST_DESKTOP_TYPE_NATIVE);
+                                              ProfileManager::CreateCallback());
 
   // Spin things till profile is actually deleted.
   content::RunAllPendingInMessageLoop();
@@ -142,9 +135,9 @@ IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest, DISABLED_DeleteAllProfiles) {
   EXPECT_FALSE(profile_path1.empty());
   EXPECT_FALSE(profile_path2.empty());
   profile_manager->ScheduleProfileForDeletion(profile_path1,
-                                              chrome::HOST_DESKTOP_TYPE_NATIVE);
+                                              ProfileManager::CreateCallback());
   profile_manager->ScheduleProfileForDeletion(profile_path2,
-                                              chrome::HOST_DESKTOP_TYPE_NATIVE);
+                                              ProfileManager::CreateCallback());
 
   // Spin things so deletion can take place.
   content::RunAllPendingInMessageLoop();
@@ -175,7 +168,6 @@ IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest,
       string16(), // name
       string16(), // icon url
       base::Bind(ProfileCreationComplete),
-      chrome::GetActiveDesktop(),
       false);
   // Wait for profile to finish loading.
   content::RunMessageLoop();

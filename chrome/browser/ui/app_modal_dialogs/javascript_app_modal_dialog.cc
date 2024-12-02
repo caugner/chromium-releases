@@ -57,7 +57,7 @@ ChromeJavaScriptDialogExtraData::ChromeJavaScriptDialogExtraData()
 
 JavaScriptAppModalDialog::JavaScriptAppModalDialog(
     WebContents* web_contents,
-    ChromeJavaScriptDialogExtraData* extra_data,
+    ExtraDataMap* extra_data_map,
     const string16& title,
     content::JavaScriptMessageType javascript_message_type,
     const string16& message_text,
@@ -67,7 +67,7 @@ JavaScriptAppModalDialog::JavaScriptAppModalDialog(
     bool is_reload,
     const JavaScriptDialogManager::DialogClosedCallback& callback)
     : AppModalDialog(web_contents, title),
-      extra_data_(extra_data),
+      extra_data_map_(extra_data_map),
       javascript_message_type_(javascript_message_type),
       display_suppress_checkbox_(display_suppress_checkbox),
       is_before_unload_dialog_(is_before_unload_dialog),
@@ -86,16 +86,11 @@ NativeAppModalDialog* JavaScriptAppModalDialog::CreateNativeDialog() {
       web_contents()->GetView()->GetTopLevelNativeWindow();
 
 #if defined(USE_AURA)
-#if defined(OS_WIN)
-  // JS dialogs should always be top-level windows in desktop Aura on Windows.
-  parent_window = NULL;
-#else
   if (!parent_window->GetRootWindow()) {
     // When we are part of a WebContents that isn't actually being displayed on
     // the screen, we can't actually attach to it.
     parent_window = NULL;
   }
-#endif  // defined(OS_WIN)
 #endif  // defined(USE_AURA)
 
   return NativeAppModalDialog::CreateNativeJavaScriptPrompt(this,
@@ -107,12 +102,12 @@ bool JavaScriptAppModalDialog::IsJavaScriptModalDialog() {
 }
 
 void JavaScriptAppModalDialog::Invalidate() {
-  if (!valid_)
+  if (!IsValid())
     return;
 
-  valid_ = false;
+  AppModalDialog::Invalidate();
   callback_.Reset();
-  if (native_dialog_)
+  if (native_dialog())
     CloseModalDialog();
 }
 
@@ -157,15 +152,22 @@ void JavaScriptAppModalDialog::SetOverridePromptText(
 void JavaScriptAppModalDialog::NotifyDelegate(bool success,
                                               const string16& user_input,
                                               bool suppress_js_messages) {
-  if (!valid_)
+  if (!IsValid())
     return;
 
   callback_.Run(success, user_input);
 
-  extra_data_->last_javascript_message_dismissal_ = base::TimeTicks::Now();
-  extra_data_->suppress_javascript_messages_ = suppress_js_messages;
+  // The callback_ above may delete web_contents_, thus removing the extra
+  // data from the map owned by ChromeJavaScriptDialogManager. Make sure
+  // to only use the data if still present. http://crbug.com/236476
+  ExtraDataMap::iterator extra_data = extra_data_map_->find(web_contents());
+  if (extra_data != extra_data_map_->end()) {
+    extra_data->second.last_javascript_message_dismissal_ =
+        base::TimeTicks::Now();
+    extra_data->second.suppress_javascript_messages_ = suppress_js_messages;
+  }
 
   // On Views, we can end up coming through this code path twice :(.
   // See crbug.com/63732.
-  valid_ = false;
+  AppModalDialog::Invalidate();
 }

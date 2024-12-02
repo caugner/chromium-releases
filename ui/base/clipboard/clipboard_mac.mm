@@ -11,10 +11,10 @@
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/stl_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/clipboard/custom_data_helper.h"
@@ -25,9 +25,6 @@
 namespace ui {
 
 namespace {
-
-// Source tag format type.
-NSString* const kSourceTagPboardType = @"org.chromium.source-tag-data";
 
 // Would be nice if this were in UTCoreTypes.h, but it isn't
 NSString* const kUTTypeURLName = @"public.url-name";
@@ -47,15 +44,6 @@ NSPasteboard* GetPasteboard() {
   NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
   DCHECK(pasteboard);
   return pasteboard;
-}
-
-void WriteDataImpl(NSPasteboard* pb,
-                   NSString* format,
-                   const char* data_data,
-                   size_t data_len) {
-  [pb addTypes:[NSArray arrayWithObject:format] owner:nil];
-  [pb setData:[NSData dataWithBytes:data_data length:data_len]
-      forType:format];
 }
 
 }  // namespace
@@ -102,9 +90,7 @@ Clipboard::~Clipboard() {
   DCHECK(CalledOnValidThread());
 }
 
-void Clipboard::WriteObjectsImpl(Buffer buffer,
-                                 const ObjectMap& objects,
-                                 SourceTag tag) {
+void Clipboard::WriteObjects(Buffer buffer, const ObjectMap& objects) {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, BUFFER_STANDARD);
 
@@ -115,7 +101,6 @@ void Clipboard::WriteObjectsImpl(Buffer buffer,
        iter != objects.end(); ++iter) {
     DispatchObject(static_cast<ObjectType>(iter->first), iter->second);
   }
-  WriteSourceTag(tag);
 }
 
 void Clipboard::WriteText(const char* text_data, size_t text_len) {
@@ -174,21 +159,21 @@ void Clipboard::WriteBitmap(const char* pixel_data, const char* size_data) {
   const gfx::Size* size = reinterpret_cast<const gfx::Size*>(size_data);
 
   // Safe because the image goes away before the call returns.
-  base::mac::ScopedCFTypeRef<CFDataRef> data(
+  base::ScopedCFTypeRef<CFDataRef> data(
       CFDataCreateWithBytesNoCopy(kCFAllocatorDefault,
                                   reinterpret_cast<const UInt8*>(pixel_data),
-                                  size->width()*size->height()*4,
+                                  size->width() * size->height() * 4,
                                   kCFAllocatorNull));
 
-  base::mac::ScopedCFTypeRef<CGDataProviderRef> data_provider(
+  base::ScopedCFTypeRef<CGDataProviderRef> data_provider(
       CGDataProviderCreateWithCFData(data));
 
-  base::mac::ScopedCFTypeRef<CGImageRef> cgimage(
+  base::ScopedCFTypeRef<CGImageRef> cgimage(
       CGImageCreate(size->width(),
                     size->height(),
                     8,
                     32,
-                    size->width()*4,
+                    size->width() * 4,
                     base::mac::GetSRGBColorSpace(),  // TODO(avi): do better
                     kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
                     data_provider,
@@ -200,11 +185,11 @@ void Clipboard::WriteBitmap(const char* pixel_data, const char* size_data) {
   data_provider.reset();
   data.reset();
 
-  scoped_nsobject<NSBitmapImageRep> bitmap(
+  base::scoped_nsobject<NSBitmapImageRep> bitmap(
       [[NSBitmapImageRep alloc] initWithCGImage:cgimage]);
   cgimage.reset();
 
-  scoped_nsobject<NSImage> image([[NSImage alloc] init]);
+  base::scoped_nsobject<NSImage> image([[NSImage alloc] init]);
   [image addRepresentation:bitmap];
 
   // An API to ask the NSImage to write itself to the clipboard comes in 10.6 :(
@@ -221,23 +206,10 @@ void Clipboard::WriteBitmap(const char* pixel_data, const char* size_data) {
 void Clipboard::WriteData(const FormatType& format,
                           const char* data_data,
                           size_t data_len) {
-  WriteDataImpl(GetPasteboard(), format.ToNSString(), data_data, data_len);
-}
-
-void Clipboard::WriteSourceTag(SourceTag tag) {
-  if (tag != SourceTag())
-    WriteSourceTag(GetPasteboard(), tag);
-}
-
-// static
-void Clipboard::WriteSourceTag(NSPasteboard* pb, SourceTag tag) {
-  if (tag != SourceTag()) {
-    ObjectMapParam binary = SourceTag2Binary(tag);
-    WriteDataImpl(pb,
-                  GetSourceTagFormatType().ToNSString(),
-                  &binary[0],
-                  binary.size());
-  }
+  NSPasteboard* pb = GetPasteboard();
+  [pb addTypes:[NSArray arrayWithObject:format.ToNSString()] owner:nil];
+  [pb setData:[NSData dataWithBytes:data_data length:data_len]
+      forType:format.ToNSString()];
 }
 
 // Write an extra flavor that signifies WebKit was the last to modify the
@@ -371,7 +343,7 @@ SkBitmap Clipboard::ReadImage(Buffer buffer) const {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(buffer, BUFFER_STANDARD);
 
-  scoped_nsobject<NSImage> image(
+  base::scoped_nsobject<NSImage> image(
       [[NSImage alloc] initWithPasteboard:GetPasteboard()]);
   if (!image.get())
     return SkBitmap();
@@ -436,13 +408,6 @@ void Clipboard::ReadData(const FormatType& format, std::string* result) const {
   NSData* data = [pb dataForType:format.ToNSString()];
   if ([data length])
     result->assign(static_cast<const char*>([data bytes]), [data length]);
-}
-
-SourceTag Clipboard::ReadSourceTag(Buffer buffer) const {
-  DCHECK_EQ(buffer, BUFFER_STANDARD);
-  std::string result;
-  ReadData(GetSourceTagFormatType(), &result);
-  return Binary2SourceTag(result);
 }
 
 // static
@@ -517,12 +482,6 @@ const Clipboard::FormatType& Clipboard::GetWebCustomDataFormatType() {
 // static
 const Clipboard::FormatType& Clipboard::GetPepperCustomDataFormatType() {
   CR_DEFINE_STATIC_LOCAL(FormatType, type, (kPepperCustomDataPboardType));
-  return type;
-}
-
-// static
-const Clipboard::FormatType& Clipboard::GetSourceTagFormatType() {
-  CR_DEFINE_STATIC_LOCAL(FormatType, type, (kSourceTagPboardType));
   return type;
 }
 

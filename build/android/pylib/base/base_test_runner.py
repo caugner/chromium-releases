@@ -34,12 +34,13 @@ class BaseTestRunner(object):
   the Run() method will set up tests, run them and tear them down.
   """
 
-  def __init__(self, device, tool, build_type):
+  def __init__(self, device, tool, build_type, push_deps):
     """
       Args:
         device: Tests will run on the device of this ID.
         shard_index: Index number of the shard on which the test suite will run.
         build_type: 'Release' or 'Debug'.
+        push_deps: If True, push all dependencies to the device.
     """
     self.device = device
     self.adb = android_commands.AndroidCommands(device=device)
@@ -59,6 +60,7 @@ class BaseTestRunner(object):
     self.test_server_spawner_port = 0
     self.test_server_port = 0
     self.build_type = build_type
+    self._push_deps = push_deps
 
   def _PushTestServerPortInfoToDevice(self):
     """Pushes the latest port information to device."""
@@ -79,14 +81,31 @@ class BaseTestRunner(object):
     """
     raise NotImplementedError
 
-  def PushDependencies(self):
-    """Push all dependencies to device once before all tests are run."""
+  def InstallTestPackage(self):
+    """Installs the test package once before all tests are run."""
+    pass
+
+  def PushDataDeps(self):
+    """Push all data deps to device once before all tests are run."""
     pass
 
   def SetUp(self):
     """Run once before all tests are run."""
     Forwarder.KillDevice(self.adb, self.tool)
-    self.PushDependencies()
+    self.InstallTestPackage()
+    push_size_before = self.adb.GetPushSizeInfo()
+    if self._push_deps:
+      logging.warning('Pushing data files to device.')
+      self.PushDataDeps()
+      push_size_after = self.adb.GetPushSizeInfo()
+      logging.warning(
+          'Total data: %0.3fMB' %
+          ((push_size_after[0] - push_size_before[0]) / float(2 ** 20)))
+      logging.warning(
+          'Total data transferred: %0.3fMB' %
+          ((push_size_after[1] - push_size_before[1]) / float(2 ** 20)))
+    else:
+      logging.warning('Skipping pushing data to device.')
 
   def TearDown(self):
     """Run once after all tests are run."""
@@ -98,12 +117,12 @@ class BaseTestRunner(object):
     Args:
       test_data_paths: A list of files or directories relative to |dest_dir|
           which should be copied to the device. The paths must exist in
-          |CHROME_DIR|.
+          |DIR_SOURCE_ROOT|.
       dest_dir: Absolute path to copy to on the device.
     """
     for p in test_data_paths:
       self.adb.PushIfNeeded(
-          os.path.join(constants.CHROME_DIR, p),
+          os.path.join(constants.DIR_SOURCE_ROOT, p),
           os.path.join(dest_dir, p))
 
   def LaunchTestHttpServer(self, document_root, port=None,

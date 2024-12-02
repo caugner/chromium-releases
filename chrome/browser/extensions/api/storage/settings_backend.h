@@ -40,6 +40,8 @@ class SettingsBackend : public syncer::SyncableService {
   SettingsBackend(
       const scoped_refptr<SettingsStorageFactory>& storage_factory,
       const base::FilePath& base_path,
+      syncer::ModelType sync_type,
+      const syncer::SyncableService::StartSyncFlare& flare,
       const SettingsStorageQuotaEnforcer::Limits& quota,
       const scoped_refptr<SettingsObserverList>& observers);
 
@@ -70,7 +72,7 @@ class SettingsBackend : public syncer::SyncableService {
   // initializing sync with some initial data if sync enabled.
   SyncableSettingsStorage* GetOrCreateStorageWithSyncData(
       const std::string& extension_id,
-      const DictionaryValue& sync_data) const;
+      const base::DictionaryValue& sync_data) const;
 
   // Gets all extension IDs known to extension settings.  This may not be all
   // installed extensions.
@@ -98,8 +100,7 @@ class SettingsBackend : public syncer::SyncableService {
       StorageObjMap;
   mutable StorageObjMap storage_objs_;
 
-  // Current sync model type.  Will be UNSPECIFIED if sync hasn't been enabled
-  // yet, and either SETTINGS or APP_SETTINGS if it has been.
+  // Current sync model type. Either EXTENSION_SETTINGS or APP_SETTINGS.
   syncer::ModelType sync_type_;
 
   // Current sync processor, if any.
@@ -107,6 +108,8 @@ class SettingsBackend : public syncer::SyncableService {
 
   // Current sync error handler if any.
   scoped_ptr<syncer::SyncErrorFactory> sync_error_factory_;
+
+  syncer::SyncableService::StartSyncFlare flare_;
 
   DISALLOW_COPY_AND_ASSIGN(SettingsBackend);
 };

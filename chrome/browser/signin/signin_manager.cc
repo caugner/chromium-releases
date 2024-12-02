@@ -10,10 +10,11 @@
 #include "base/command_line.h"
 #include "base/memory/ref_counted.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/signin/about_signin_internals.h"
 #include "chrome/browser/signin/about_signin_internals_factory.h"
 #include "chrome/browser/signin/signin_global_error.h"
@@ -100,10 +101,6 @@ void SigninManager::SetSigninProcess(int process_id) {
   registrar_.Add(this,
                  content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
                  content::Source<content::RenderProcessHost>(process));
-}
-
-void SigninManager::ClearSigninProcess() {
-  signin_process_id_ = kInvalidProcessId;
 }
 
 bool SigninManager::IsSigninProcess(int process_id) const {
@@ -364,7 +361,115 @@ void SigninManager::SignOut() {
 
   ClearTransientSigninData();
   RevokeOAuthLoginToken();
-  SigninManagerBase::SignOut();
+
+  GoogleServiceSignoutDetails details(GetAuthenticatedUsername());
+  clear_authenticated_username();
+  profile_->GetPrefs()->ClearPref(prefs::kGoogleServicesUsername);
+
+  // Erase (now) stale information from AboutSigninInternals.
+  NotifyDiagnosticsObservers(USERNAME, "");
+  NotifyDiagnosticsObservers(LSID, "");
+  NotifyDiagnosticsObservers(
+      signin_internals_util::SID, "");
+
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_GOOGLE_SIGNED_OUT,
+      content::Source<Profile>(profile_),
+      content::Details<const GoogleServiceSignoutDetails>(&details));
+  TokenService* token_service = TokenServiceFactory::GetForProfile(profile_);
+  token_service->ResetCredentialsInMemory();
+  token_service->EraseTokensFromDB();
+}
+
+void SigninManager::Initialize(Profile* profile, PrefService* local_state) {
+  SigninManagerBase::Initialize(profile, local_state);
+
+  // local_state can be null during unit tests.
+  if (local_state) {
+    local_state_pref_registrar_.Init(local_state);
+    local_state_pref_registrar_.Add(
+        prefs::kGoogleServicesUsernamePattern,
+        base::Bind(&SigninManager::OnGoogleServicesUsernamePatternChanged,
+                   weak_pointer_factory_.GetWeakPtr()));
+  }
+  signin_allowed_.Init(prefs::kSigninAllowed, profile_->GetPrefs(),
+      base::Bind(&SigninManager::OnSigninAllowedPrefChanged,
+                 base::Unretained(this)));
+
+  std::string user = profile_->GetPrefs()->GetString(
+      prefs::kGoogleServicesUsername);
+  if ((!user.empty() && !IsAllowedUsername(user)) || !IsSigninAllowed()) {
+    // User is signed in, but the username is invalid - the administrator must
+    // have changed the policy since the last signin, so sign out the user.
+    SignOut();
+  }
+}
+
+void SigninManager::OnGoogleServicesUsernamePatternChanged() {
+  if (!GetAuthenticatedUsername().empty() &&
+      !IsAllowedUsername(GetAuthenticatedUsername())) {
+    // Signed in user is invalid according to the current policy so sign
+    // the user out.
+    SignOut();
+  }
+}
+
+bool SigninManager::IsSigninAllowed() const {
+  return signin_allowed_.GetValue();
+}
+
+// static
+bool SigninManager::IsSigninAllowedOnIOThread(ProfileIOData* io_data) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  return io_data->signin_allowed()->GetValue();
+}
+
+void SigninManager::OnSigninAllowedPrefChanged() {
+  if (!IsSigninAllowed())
+    SignOut();
+}
+
+// static
+bool SigninManager::IsUsernameAllowedByPolicy(const std::string& username,
+                                              const std::string& policy) {
+  if (policy.empty())
+    return true;
+
+  // Patterns like "*@foo.com" are not accepted by our regex engine (since they
+  // are not valid regular expressions - they should instead be ".*@foo.com").
+  // For convenience, detect these patterns and insert a "." character at the
+  // front.
+  string16 pattern = UTF8ToUTF16(policy);
+  if (pattern[0] == L'*')
+    pattern.insert(pattern.begin(), L'.');
+
+  // See if the username matches the policy-provided pattern.
+  UErrorCode status = U_ZERO_ERROR;
+  const icu::UnicodeString icu_pattern(pattern.data(), pattern.length());
+  icu::RegexMatcher matcher(icu_pattern, UREGEX_CASE_INSENSITIVE, status);
+  if (!U_SUCCESS(status)) {
+    LOG(ERROR) << "Invalid login regex: " << pattern << ", status: " << status;
+    // If an invalid pattern is provided, then prohibit *all* logins (better to
+    // break signin than to quietly allow users to sign in).
+    return false;
+  }
+  string16 username16 = UTF8ToUTF16(username);
+  icu::UnicodeString icu_input(username16.data(), username16.length());
+  matcher.reset(icu_input);
+  status = U_ZERO_ERROR;
+  UBool match = matcher.matches(status);
+  DCHECK(U_SUCCESS(status));
+  return !!match;  // !! == convert from UBool to bool.
+}
+
+bool SigninManager::IsAllowedUsername(const std::string& username) const {
+  const PrefService* local_state = local_state_pref_registrar_.prefs();
+  if (!local_state)
+    return true; // In a unit test with no local state - all names are allowed.
+
+  std::string pattern = local_state->GetString(
+      prefs::kGoogleServicesUsernamePattern);
+  return IsUsernameAllowedByPolicy(username, pattern);
 }
 
 void SigninManager::RevokeOAuthLoginToken() {

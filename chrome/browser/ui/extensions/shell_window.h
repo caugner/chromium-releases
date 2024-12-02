@@ -9,18 +9,19 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/extensions/extension_keybinding_registry.h"
 #include "chrome/browser/sessions/session_id.h"
-#include "chrome/browser/ui/base_window.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager_delegate.h"
+#include "chrome/browser/ui/chrome_web_modal_dialog_manager_delegate.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/console_message_level.h"
+#include "ui/base/ui_base_types.h"  // WindowShowState
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/rect.h"
 
 class GURL;
 class Profile;
 class NativeAppWindow;
+class SkRegion;
 
 namespace content {
 class WebContents;
@@ -32,6 +33,10 @@ class PlatformAppBrowserTest;
 class WindowController;
 
 struct DraggableRegion;
+}
+
+namespace ui {
+class BaseWindow;
 }
 
 // Manages the web contents for Shell Windows. The implementation for this
@@ -66,7 +71,7 @@ class ShellWindowContents {
 class ShellWindow : public content::NotificationObserver,
                     public content::WebContentsDelegate,
                     public extensions::ExtensionKeybindingRegistry::Delegate,
-                    public WebContentsModalDialogManagerDelegate {
+                    public ChromeWebModalDialogManagerDelegate {
  public:
   enum WindowType {
     WINDOW_TYPE_DEFAULT  = 1 << 0,  // Default shell window.
@@ -102,15 +107,8 @@ class ShellWindow : public content::NotificationObserver,
     // The process ID of the process that requested the create.
     int32 creator_process_id;
 
-    enum State {
-      STATE_NORMAL,
-      STATE_FULLSCREEN,
-      STATE_MAXIMIZED,
-      STATE_MINIMIZED
-    };
-
     // Initial state of the window.
-    State state;
+    ui::WindowShowState state;
 
     // If true, don't show the window after creation.
     bool hidden;
@@ -148,6 +146,7 @@ class ShellWindow : public content::NotificationObserver,
   const std::string& window_key() const { return window_key_; }
   const SessionID& session_id() const { return session_id_; }
   const extensions::Extension* extension() const { return extension_; }
+  const std::string& extension_id() const { return extension_id_; }
   content::WebContents* web_contents() const;
   WindowType window_type() const { return window_type_; }
   bool window_type_is_panel() const {
@@ -180,6 +179,9 @@ class ShellWindow : public content::NotificationObserver,
   // or minimized/maximized state has changed.
   void OnNativeWindowChanged();
 
+  // Should be called by native implementations when the window is activated.
+  void OnNativeWindowActivated();
+
   // Specifies a url for the launcher icon.
   void SetAppIconUrl(const GURL& icon_url);
 
@@ -202,6 +204,8 @@ class ShellWindow : public content::NotificationObserver,
     return shell_window_contents_.get();
   }
 
+  static void DisableExternalOpenForTesting();
+
  protected:
   virtual ~ShellWindow();
 
@@ -212,6 +216,8 @@ class ShellWindow : public content::NotificationObserver,
   // content::WebContentsDelegate implementation.
   virtual void CloseContents(content::WebContents* contents) OVERRIDE;
   virtual bool ShouldSuppressDialogs() OVERRIDE;
+  virtual content::ColorChooser* OpenColorChooser(
+      content::WebContents* web_contents, SkColor color) OVERRIDE;
   virtual void RunFileChooser(
       content::WebContents* tab,
       const content::FileChooserParams& params) OVERRIDE;
@@ -254,8 +260,17 @@ class ShellWindow : public content::NotificationObserver,
   void AddMessageToDevToolsConsole(content::ConsoleMessageLevel level,
                                    const std::string& message);
 
-  // Saves the window geometry/position.
+  // Saves the window geometry/position/screen bounds.
   void SaveWindowPosition();
+
+  // Helper method to adjust the cached bounds so that we can make sure it can
+  // be visible on the screen. See http://crbug.com/145752 .
+  void AdjustBoundsToBeVisibleOnScreen(
+      const gfx::Rect& cached_bounds,
+      const gfx::Rect& cached_screen_bounds,
+      const gfx::Rect& current_screen_bounds,
+      const gfx::Size& minimum_size,
+      gfx::Rect* bounds) const;
 
   // Load the app's image, firing a load state change when loaded.
   void UpdateExtensionAppIcon();
@@ -266,14 +281,13 @@ class ShellWindow : public content::NotificationObserver,
   virtual extensions::ActiveTabPermissionGranter*
       GetActiveTabPermissionGranter() OVERRIDE;
 
-  // WebContentsModalDialogManagerDelegate implementation.
-  virtual void SetWebContentsBlocked(content::WebContents* web_contents,
-                                     bool blocked) OVERRIDE;
-
-  virtual WebContentsModalDialogHost* GetWebContentsModalDialogHost() OVERRIDE;
+  // web_modal::WebContentsModalDialogManagerDelegate implementation.
+  virtual web_modal::WebContentsModalDialogHost*
+      GetWebContentsModalDialogHost() OVERRIDE;
 
   // Callback from web_contents()->DownloadFavicon.
   void DidDownloadFavicon(int id,
+                          int http_status_code,
                           const GURL& image_url,
                           int requested_size,
                           const std::vector<SkBitmap>& bitmaps);
@@ -281,6 +295,7 @@ class ShellWindow : public content::NotificationObserver,
   Profile* profile_;  // weak pointer - owned by ProfileManager.
   // weak pointer - owned by ExtensionService.
   const extensions::Extension* extension_;
+  const std::string extension_id_;
 
   // Identifier that is used when saving and restoring geometry for this
   // window.

@@ -12,7 +12,7 @@
 #include "base/basictypes.h"
 #include "base/callback_forward.h"
 #include "base/memory/weak_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 
 namespace win8 {
 
@@ -34,6 +34,9 @@ class OpenWithDialogController {
   // |url_protocol|. |parent_window| may be NULL.  |callback| will be invoked
   // upon completion. This instance may be deleted prior to |callback| being
   // invoked to cancel the operation.
+  // Note: This will fail if |program| is already default for |url_protocol|
+  // since |program| will not show up verbatim in the dialog (e.g., in EN-US, it
+  // will be prefixed by "Keep using ").
   void Begin(HWND parent_window,
              const string16& url_protocol,
              const string16& program,

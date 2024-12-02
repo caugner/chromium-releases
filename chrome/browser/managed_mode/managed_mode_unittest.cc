@@ -118,7 +118,7 @@ class MockCallback : public base::RefCountedThreadSafe<MockCallback> {
 
 class ManagedModeTest : public ::testing::Test {
  public:
-  ManagedModeTest() : message_loop_(MessageLoop::TYPE_UI),
+  ManagedModeTest() : message_loop_(base::MessageLoop::TYPE_UI),
                       ui_thread_(content::BrowserThread::UI, &message_loop_),
                       io_thread_(content::BrowserThread::IO, &message_loop_) {
   }
@@ -129,12 +129,12 @@ class ManagedModeTest : public ::testing::Test {
 
   base::Callback<void(bool)> CreateExpectedCallback(bool success) {
     scoped_refptr<MockCallback> callback = CreateCallback();
-    EXPECT_CALL(*callback, DidEnterManagedMode(success));
+    EXPECT_CALL(*callback.get(), DidEnterManagedMode(success));
     return base::Bind(&MockCallback::CheckManagedMode, callback);
   }
 
  protected:
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread io_thread_;
   TestingProfile managed_mode_profile_;
@@ -178,7 +178,7 @@ TEST_F(ManagedModeTest, QueueRequests) {
       &managed_mode_profile_,
       base::Bind(&MockCallback::CheckManagedMode, callback));
   // The callbacks should run as soon as |other_browser| is closed.
-  EXPECT_CALL(*callback, DidEnterManagedMode(true)).Times(2);
+  EXPECT_CALL(*callback.get(), DidEnterManagedMode(true)).Times(2);
 }
 
 TEST_F(ManagedModeTest, OpenNewBrowser) {
@@ -197,7 +197,7 @@ TEST_F(ManagedModeTest, OpenNewBrowser) {
                                             &managed_mode_profile_);
 
   // Opening another browser should cancel entering managed mode.
-  EXPECT_CALL(*callback, DidEnterManagedMode(false));
+  EXPECT_CALL(*callback.get(), DidEnterManagedMode(false));
   BrowserFixture yet_another_browser(&managed_mode_, &other_profile_);
 }
 
@@ -221,7 +221,7 @@ TEST_F(ManagedModeTest, DifferentProfile) {
 
   // The first request should still succeed as soon as the other browser is
   // closed.
-  EXPECT_CALL(*callback, DidEnterManagedMode(true));
+  EXPECT_CALL(*callback.get(), DidEnterManagedMode(true));
 }
 
 TEST_F(ManagedModeTest, Cancelled) {

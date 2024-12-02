@@ -7,8 +7,8 @@
 
 #include "base/basictypes.h"
 #include "base/callback_forward.h"
-#include "webkit/fileapi/syncable/sync_callbacks.h"
-#include "webkit/fileapi/syncable/sync_status_code.h"
+#include "webkit/browser/fileapi/syncable/sync_callbacks.h"
+#include "webkit/browser/fileapi/syncable/sync_status_code.h"
 
 namespace base {
 class FilePath;
@@ -42,15 +42,13 @@ class RemoteChangeProcessor {
   RemoteChangeProcessor() {}
   virtual ~RemoteChangeProcessor() {}
 
-  // This must be called before processing the change for the |url|
-  // for sync service |service_name|.
+  // This must be called before processing the change for the |url|.
   // This tries to lock the target |url| and returns the local changes
   // if any. (The change returned by the callback is to make a decision
   // on conflict resolution, but NOT for applying local changes to the remote,
   // which is supposed to be done by LocalChangeProcessor)
   virtual void PrepareForProcessRemoteChange(
       const fileapi::FileSystemURL& url,
-      const std::string& service_name,
       const PrepareChangeCallback& callback) = 0;
 
   // This is called to apply the remote |change|. If the change type is

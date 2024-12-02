@@ -8,7 +8,7 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
@@ -133,7 +133,7 @@ void ImporterHost::StartImportSettings(
   writer_ = writer;
   importer_ = importer::CreateImporterByType(source_profile.importer_type);
   // If we fail to create the Importer, exit, as we cannot do anything.
-  if (!importer_) {
+  if (!importer_.get()) {
     NotifyImportEnded();
     return;
   }
@@ -179,7 +179,7 @@ void ImporterHost::OnGoogleGAIACookieChecked(bool result) {
       chrome::AddSelectedTabWithURL(browser_, url,
                                     content::PAGE_TRANSITION_TYPED);
 
-    MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
+    base::MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
         &ImporterHost::OnImportLockDialogEnd,
         weak_ptr_factory_.GetWeakPtr(), false));
   } else {
@@ -200,10 +200,8 @@ ImporterHost::~ImporterHost() {
 
 bool ImporterHost::CheckForFirefoxLock(
     const importer::SourceProfile& source_profile) {
-  if (source_profile.importer_type != importer::TYPE_FIREFOX2 &&
-      source_profile.importer_type != importer::TYPE_FIREFOX3) {
+  if (source_profile.importer_type != importer::TYPE_FIREFOX3)
     return true;
-  }
 
   DCHECK(!firefox_lock_.get());
   firefox_lock_.reset(new FirefoxProfileLock(source_profile.source_path));
@@ -255,7 +253,7 @@ void ImporterHost::InvokeTaskIfDone() {
 }
 
 void ImporterHost::Loaded(BookmarkModel* model, bool ids_reassigned) {
-  DCHECK(model->IsLoaded());
+  DCHECK(model->loaded());
   model->RemoveObserver(this);
   waiting_for_bookmarkbar_model_ = false;
   installed_bookmark_observer_ = false;

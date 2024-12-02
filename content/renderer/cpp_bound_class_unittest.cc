@@ -6,12 +6,13 @@
 // a CppBindingExample class into JavaScript in a custom test shell and tests
 // the binding from the outside by loading JS into the shell.
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "content/public/test/render_view_test.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
-#include "webkit/glue/cpp_binding_example.h"
-#include "webkit/glue/webkit_glue.h"
+#include "third_party/WebKit/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebElement.h"
+#include "webkit/renderer/cpp_binding_example.h"
 
 using webkit_glue::CppArgumentList;
 using webkit_glue::CppBindingExample;
@@ -87,7 +88,9 @@ class CppBoundClassTest : public RenderViewTest {
   // text is empty.
   void CheckJavaScriptFailure(const std::string& javascript) {
     ExecuteJavaScript(javascript.c_str());
-    EXPECT_EQ("", UTF16ToASCII(webkit_glue::DumpDocumentText(GetMainFrame())));
+    EXPECT_EQ(
+        "",
+        UTF16ToASCII(GetMainFrame()->document().documentElement().innerText()));
   }
 
   void CheckTrue(const std::string& expression) {

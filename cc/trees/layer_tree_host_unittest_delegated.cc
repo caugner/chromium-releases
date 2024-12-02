@@ -5,6 +5,7 @@
 #include "cc/trees/layer_tree_host.h"
 
 #include "cc/layers/delegated_renderer_layer.h"
+#include "cc/layers/delegated_renderer_layer_client.h"
 #include "cc/layers/delegated_renderer_layer_impl.h"
 #include "cc/output/delegated_frame_data.h"
 #include "cc/quads/shared_quad_state.h"
@@ -66,14 +67,15 @@ class LayerTreeHostDelegatedTest : public LayerTreeTest {
 };
 
 class LayerTreeHostDelegatedTestCaseSingleDelegatedLayer
-    : public LayerTreeHostDelegatedTest {
+    : public LayerTreeHostDelegatedTest,
+      public DelegatedRendererLayerClient {
  public:
   virtual void SetupTree() OVERRIDE {
     root_ = Layer::Create();
     root_->SetAnchorPoint(gfx::PointF());
     root_->SetBounds(gfx::Size(10, 10));
 
-    delegated_ = FakeDelegatedRendererLayer::Create();
+    delegated_ = FakeDelegatedRendererLayer::Create(this);
     delegated_->SetAnchorPoint(gfx::PointF());
     delegated_->SetBounds(gfx::Size(10, 10));
     delegated_->SetIsDrawable(true);
@@ -89,10 +91,44 @@ class LayerTreeHostDelegatedTestCaseSingleDelegatedLayer
 
   virtual void AfterTest() OVERRIDE {}
 
+  virtual void DidCommitFrameData() OVERRIDE {}
+
  protected:
   scoped_refptr<Layer> root_;
   scoped_refptr<DelegatedRendererLayer> delegated_;
 };
+
+class LayerTreeHostDelegatedTestClientDidCommitCallback
+    : public LayerTreeHostDelegatedTestCaseSingleDelegatedLayer {
+ public:
+  LayerTreeHostDelegatedTestClientDidCommitCallback()
+      : LayerTreeHostDelegatedTestCaseSingleDelegatedLayer(),
+        num_did_commit_frame_data_(0) {}
+
+  virtual void DidCommit() OVERRIDE {
+    if (TestEnded())
+      return;
+
+    EXPECT_EQ(1, num_did_commit_frame_data_);
+    EndTest();
+  }
+
+  virtual void BeginTest() OVERRIDE {
+    delegated_->SetFrameData(CreateFrameData(gfx::Rect(0, 0, 1, 1),
+                                             gfx::Rect(0, 0, 1, 1)));
+    PostSetNeedsCommitToMainThread();
+  }
+
+  virtual void DidCommitFrameData() OVERRIDE {
+    num_did_commit_frame_data_++;
+  }
+
+ protected:
+  int num_did_commit_frame_data_;
+};
+
+SINGLE_AND_MULTI_THREAD_TEST_F(
+    LayerTreeHostDelegatedTestClientDidCommitCallback);
 
 class LayerTreeHostDelegatedTestCreateChildId
     : public LayerTreeHostDelegatedTestCaseSingleDelegatedLayer {
@@ -109,7 +145,7 @@ class LayerTreeHostDelegatedTestCreateChildId
                                              gfx::Rect(0, 0, 1, 1)));
   }
 
-  virtual void TreeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+  virtual void DidActivateTreeOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
     LayerImpl* root_impl = host_impl->active_tree()->root_layer();
     FakeDelegatedRendererLayerImpl* delegated_impl =
         static_cast<FakeDelegatedRendererLayerImpl*>(root_impl->children()[0]);
@@ -358,7 +394,7 @@ class LayerTreeHostDelegatedTestMergeResources
     PostSetNeedsCommitToMainThread();
   }
 
-  virtual void TreeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+  virtual void DidActivateTreeOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
     LayerImpl* root_impl = host_impl->active_tree()->root_layer();
     FakeDelegatedRendererLayerImpl* delegated_impl =
         static_cast<FakeDelegatedRendererLayerImpl*>(root_impl->children()[0]);
@@ -400,7 +436,7 @@ class LayerTreeHostDelegatedTestRemapResourcesInQuads
     PostSetNeedsCommitToMainThread();
   }
 
-  virtual void TreeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+  virtual void DidActivateTreeOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
     LayerImpl* root_impl = host_impl->active_tree()->root_layer();
     FakeDelegatedRendererLayerImpl* delegated_impl =
         static_cast<FakeDelegatedRendererLayerImpl*>(root_impl->children()[0]);
@@ -503,7 +539,9 @@ class LayerTreeHostDelegatedTestReturnUnusedResources
   virtual void AfterTest() OVERRIDE {}
 };
 
-SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostDelegatedTestReturnUnusedResources);
+// Enable this for delegating renderer. crbug.com/239290
+SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_TEST_F(
+    LayerTreeHostDelegatedTestReturnUnusedResources);
 
 class LayerTreeHostDelegatedTestReusedResources
     : public LayerTreeHostDelegatedTestCaseSingleDelegatedLayer {
@@ -562,7 +600,9 @@ class LayerTreeHostDelegatedTestReusedResources
   virtual void AfterTest() OVERRIDE {}
 };
 
-SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostDelegatedTestReusedResources);
+// Enable this for delegating renderer. crbug.com/239290
+SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_TEST_F(
+    LayerTreeHostDelegatedTestReusedResources);
 
 class LayerTreeHostDelegatedTestFrameBeforeAck
     : public LayerTreeHostDelegatedTestCaseSingleDelegatedLayer {
@@ -626,7 +666,7 @@ class LayerTreeHostDelegatedTestFrameBeforeAck
     }
   }
 
-  virtual void TreeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+  virtual void DidActivateTreeOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
     if (host_impl->active_tree()->source_frame_number() != 3)
       return;
 
@@ -659,7 +699,9 @@ class LayerTreeHostDelegatedTestFrameBeforeAck
   virtual void AfterTest() OVERRIDE {}
 };
 
-SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostDelegatedTestFrameBeforeAck);
+// Enable this for delegating renderer. crbug.com/239290
+SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_TEST_F(
+    LayerTreeHostDelegatedTestFrameBeforeAck);
 
 class LayerTreeHostDelegatedTestFrameBeforeTakeResources
     : public LayerTreeHostDelegatedTestCaseSingleDelegatedLayer {
@@ -723,7 +765,7 @@ class LayerTreeHostDelegatedTestFrameBeforeTakeResources
     }
   }
 
-  virtual void TreeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+  virtual void DidActivateTreeOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
     if (host_impl->active_tree()->source_frame_number() != 3)
       return;
 
@@ -763,7 +805,8 @@ class LayerTreeHostDelegatedTestFrameBeforeTakeResources
   virtual void AfterTest() OVERRIDE {}
 };
 
-SINGLE_AND_MULTI_THREAD_TEST_F(
+// Enable this for delegating renderer. crbug.com/239290
+SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_TEST_F(
     LayerTreeHostDelegatedTestFrameBeforeTakeResources);
 
 class LayerTreeHostDelegatedTestBadFrame
@@ -829,7 +872,7 @@ class LayerTreeHostDelegatedTestBadFrame
     }
   }
 
-  virtual void TreeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+  virtual void DidActivateTreeOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
     if (host_impl->active_tree()->source_frame_number() < 1)
       return;
 
@@ -906,7 +949,9 @@ class LayerTreeHostDelegatedTestBadFrame
   virtual void AfterTest() OVERRIDE {}
 };
 
-SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostDelegatedTestBadFrame);
+// Enable this for delegating renderer. crbug.com/239290
+SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_TEST_F(
+    LayerTreeHostDelegatedTestBadFrame);
 
 class LayerTreeHostDelegatedTestUnnamedResource
     : public LayerTreeHostDelegatedTestCaseSingleDelegatedLayer {
@@ -940,7 +985,7 @@ class LayerTreeHostDelegatedTestUnnamedResource
     }
   }
 
-  virtual void TreeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+  virtual void DidActivateTreeOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
     if (host_impl->active_tree()->source_frame_number() != 1)
       return;
 
@@ -1003,7 +1048,7 @@ class LayerTreeHostDelegatedTestDontLeakResource
     }
   }
 
-  virtual void TreeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+  virtual void DidActivateTreeOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
     if (host_impl->active_tree()->source_frame_number() != 1)
       return;
 
@@ -1080,7 +1125,7 @@ class LayerTreeHostDelegatedTestResourceSentToParent
     }
   }
 
-  virtual void TreeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+  virtual void DidActivateTreeOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
     if (host_impl->active_tree()->source_frame_number() < 1)
       return;
 
@@ -1200,7 +1245,7 @@ class LayerTreeHostDelegatedTestCommitWithoutTake
     }
   }
 
-  virtual void TreeActivatedOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+  virtual void DidActivateTreeOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
     if (host_impl->active_tree()->source_frame_number() < 1)
       return;
 

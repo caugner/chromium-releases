@@ -5,7 +5,7 @@
 #include "remoting/protocol/fake_authenticator.h"
 
 #include "base/message_loop.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "net/base/io_buffer.h"
 #include "net/socket/stream_socket.h"
 #include "remoting/base/constants.h"
@@ -36,9 +36,11 @@ void FakeChannelAuthenticator::SecureAndAuthenticate(
 
     scoped_refptr<net::IOBuffer> write_buf = new net::IOBuffer(1);
     write_buf->data()[0] = 0;
-    int result = socket_->Write(
-        write_buf, 1, base::Bind(&FakeChannelAuthenticator::OnAuthBytesWritten,
-                                 weak_factory_.GetWeakPtr()));
+    int result =
+        socket_->Write(write_buf.get(),
+                       1,
+                       base::Bind(&FakeChannelAuthenticator::OnAuthBytesWritten,
+                                  weak_factory_.GetWeakPtr()));
     if (result != net::ERR_IO_PENDING) {
       // This will not call the callback because |did_read_bytes_| is
       // still set to false.
@@ -46,9 +48,11 @@ void FakeChannelAuthenticator::SecureAndAuthenticate(
     }
 
     scoped_refptr<net::IOBuffer> read_buf = new net::IOBuffer(1);
-    result = socket_->Read(
-        read_buf, 1, base::Bind(&FakeChannelAuthenticator::OnAuthBytesRead,
-                                weak_factory_.GetWeakPtr()));
+    result =
+        socket_->Read(read_buf.get(),
+                      1,
+                      base::Bind(&FakeChannelAuthenticator::OnAuthBytesRead,
+                                 weak_factory_.GetWeakPtr()));
     if (result != net::ERR_IO_PENDING)
       OnAuthBytesRead(result);
   } else {

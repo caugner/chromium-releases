@@ -7,7 +7,7 @@
 #include "sync/protocol/proto_value_conversions.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "sync/internal_api/public/base/model_type.h"
@@ -42,9 +42,9 @@ class ProtoValueConversionsTest : public testing::Test {
  protected:
   template <class T>
   void TestSpecificsToValue(
-      DictionaryValue* (*specifics_to_value)(const T&)) {
+      base::DictionaryValue* (*specifics_to_value)(const T&)) {
     const T& specifics(T::default_instance());
-    scoped_ptr<DictionaryValue> value(specifics_to_value(specifics));
+    scoped_ptr<base::DictionaryValue> value(specifics_to_value(specifics));
     // We can't do much but make sure that this doesn't crash.
   }
 };
@@ -53,7 +53,7 @@ TEST_F(ProtoValueConversionsTest, ProtoChangeCheck) {
   // If this number changes, that means we added or removed a data
   // type.  Don't forget to add a unit test for {New
   // type}SpecificsToValue below.
-  EXPECT_EQ(27, MODEL_TYPE_COUNT);
+  EXPECT_EQ(28, MODEL_TYPE_COUNT);
 
   // We'd also like to check if we changed any field in our messages.
   // However, that's hard to do: sizeof could work, but it's
@@ -85,7 +85,8 @@ TEST_F(ProtoValueConversionsTest, TabNavigationToValue) {
 TEST_F(ProtoValueConversionsTest, PasswordSpecificsData) {
   sync_pb::PasswordSpecificsData specifics;
   specifics.set_password_value("secret");
-  scoped_ptr<DictionaryValue> value(PasswordSpecificsDataToValue(specifics));
+  scoped_ptr<base::DictionaryValue> value(
+      PasswordSpecificsDataToValue(specifics));
   EXPECT_FALSE(value->empty());
   std::string password_value;
   EXPECT_TRUE(value->GetString("password_value", &password_value));
@@ -100,7 +101,7 @@ TEST_F(ProtoValueConversionsTest, AppSettingSpecificsToValue) {
   sync_pb::AppNotificationSettings specifics;
   specifics.set_disabled(true);
   specifics.set_oauth_client_id("some_id_value");
-  scoped_ptr<DictionaryValue> value(AppSettingsToValue(specifics));
+  scoped_ptr<base::DictionaryValue> value(AppSettingsToValue(specifics));
   EXPECT_FALSE(value->empty());
   bool disabled_value = false;
   std::string oauth_client_id_value;
@@ -132,7 +133,7 @@ TEST_F(ProtoValueConversionsTest, BookmarkSpecificsData) {
   sync_pb::BookmarkSpecifics specifics;
   specifics.set_creation_time_us(creation_time.ToInternalValue());
   specifics.set_icon_url(icon_url);
-  scoped_ptr<DictionaryValue> value(BookmarkSpecificsToValue(specifics));
+  scoped_ptr<base::DictionaryValue> value(BookmarkSpecificsToValue(specifics));
   EXPECT_FALSE(value->empty());
   std::string encoded_time;
   EXPECT_TRUE(value->GetString("creation_time_us", &encoded_time));
@@ -176,6 +177,10 @@ TEST_F(ProtoValueConversionsTest, HistoryDeleteDirectiveSpecificsToValue) {
 
 TEST_F(ProtoValueConversionsTest, ManagedUserSettingSpecificsToValue) {
   TestSpecificsToValue(ManagedUserSettingSpecificsToValue);
+}
+
+TEST_F(ProtoValueConversionsTest, ManagedUserSpecificsToValue) {
+  TestSpecificsToValue(ManagedUserSpecificsToValue);
 }
 
 TEST_F(ProtoValueConversionsTest, NigoriSpecificsToValue) {
@@ -237,6 +242,7 @@ TEST_F(ProtoValueConversionsTest, EntitySpecificsToValue) {
   SET_FIELD(favicon_tracking);
   SET_FIELD(history_delete_directive);
   SET_FIELD(managed_user_setting);
+  SET_FIELD(managed_user);
   SET_FIELD(nigori);
   SET_FIELD(password);
   SET_FIELD(preference);
@@ -249,7 +255,7 @@ TEST_F(ProtoValueConversionsTest, EntitySpecificsToValue) {
 
 #undef SET_FIELD
 
-  scoped_ptr<DictionaryValue> value(EntitySpecificsToValue(specifics));
+  scoped_ptr<base::DictionaryValue> value(EntitySpecificsToValue(specifics));
   EXPECT_EQ(MODEL_TYPE_COUNT - FIRST_REAL_MODEL_TYPE -
             (LAST_PROXY_TYPE - FIRST_PROXY_TYPE + 1),
             static_cast<int>(value->size()));
@@ -258,11 +264,11 @@ TEST_F(ProtoValueConversionsTest, EntitySpecificsToValue) {
 namespace {
 // Returns whether the given value has specifics under the entries in the given
 // path.
-bool ValueHasSpecifics(const DictionaryValue& value,
+bool ValueHasSpecifics(const base::DictionaryValue& value,
                        const std::string& path) {
-  const ListValue* entities_list = NULL;
-  const DictionaryValue* entry_dictionary = NULL;
-  const DictionaryValue* specifics_dictionary = NULL;
+  const base::ListValue* entities_list = NULL;
+  const base::DictionaryValue* entry_dictionary = NULL;
+  const base::DictionaryValue* specifics_dictionary = NULL;
 
   if (!value.GetList(path, &entities_list))
     return false;
@@ -283,13 +289,13 @@ TEST_F(ProtoValueConversionsTest, ClientToServerMessageToValue) {
   sync_pb::SyncEntity* entity = commit_message->add_entries();
   entity->mutable_specifics();
 
-  scoped_ptr<DictionaryValue> value_with_specifics(
+  scoped_ptr<base::DictionaryValue> value_with_specifics(
       ClientToServerMessageToValue(message, true /* include_specifics */));
   EXPECT_FALSE(value_with_specifics->empty());
   EXPECT_TRUE(ValueHasSpecifics(*(value_with_specifics.get()),
                                 "commit.entries"));
 
-  scoped_ptr<DictionaryValue> value_without_specifics(
+  scoped_ptr<base::DictionaryValue> value_without_specifics(
       ClientToServerMessageToValue(message, false /* include_specifics */));
   EXPECT_FALSE(value_without_specifics->empty());
   EXPECT_FALSE(ValueHasSpecifics(*(value_without_specifics.get()),
@@ -304,13 +310,13 @@ TEST_F(ProtoValueConversionsTest, ClientToServerResponseToValue) {
   sync_pb::SyncEntity* entity = response->add_entries();
   entity->mutable_specifics();
 
-  scoped_ptr<DictionaryValue> value_with_specifics(
+  scoped_ptr<base::DictionaryValue> value_with_specifics(
       ClientToServerResponseToValue(message, true /* include_specifics */));
   EXPECT_FALSE(value_with_specifics->empty());
   EXPECT_TRUE(ValueHasSpecifics(*(value_with_specifics.get()),
                                 "get_updates.entries"));
 
-  scoped_ptr<DictionaryValue> value_without_specifics(
+  scoped_ptr<base::DictionaryValue> value_without_specifics(
       ClientToServerResponseToValue(message, false /* include_specifics */));
   EXPECT_FALSE(value_without_specifics->empty());
   EXPECT_FALSE(ValueHasSpecifics(*(value_without_specifics.get()),

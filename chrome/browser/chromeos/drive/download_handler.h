@@ -76,7 +76,7 @@ class DownloadHandler : public AllDownloadItemNotifier::Observer {
   // Removes the download.
   void RemoveDownload(int id);
 
-  // Callback for FileSystem::GetEntryInfoByPath().
+  // Callback for FileSystem::GetResourceEntryByPath().
   // Used to implement SubstituteDriveDownloadPath().
   void OnEntryFound(const base::FilePath& drive_dir_path,
                     const SubstituteDriveDownloadPathCallback& callback,
@@ -92,8 +92,7 @@ class DownloadHandler : public AllDownloadItemNotifier::Observer {
   void UploadDownloadItem(content::DownloadItem* download);
 
   FileWriteHelper* file_write_helper_;
-  // The file system owned by DriveSystemService.
-  FileSystemInterface* file_system_;
+  FileSystemInterface* file_system_;  // Owned by DriveIntegrationService.
   // Observe the DownloadManager for new downloads.
   scoped_ptr<AllDownloadItemNotifier> notifier_;
 

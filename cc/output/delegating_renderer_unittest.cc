@@ -18,13 +18,8 @@ class DelegatingRendererTest : public LayerTreeTest {
   virtual ~DelegatingRendererTest() {}
 
   virtual scoped_ptr<OutputSurface> CreateOutputSurface() OVERRIDE {
-    scoped_ptr<TestWebGraphicsContext3D> context3d =
-        TestWebGraphicsContext3D::Create(
-            WebKit::WebGraphicsContext3D::Attributes());
-    context3d_ = context3d.get();
     scoped_ptr<FakeOutputSurface> output_surface =
-        FakeOutputSurface::CreateDelegating3d(
-            context3d.PassAs<WebKit::WebGraphicsContext3D>());
+        FakeOutputSurface::CreateDelegating3d();
     output_surface_ = output_surface.get();
     return output_surface.PassAs<OutputSurface>();
   }
@@ -58,6 +53,12 @@ class DelegatingRendererTestDraw : public DelegatingRendererTest {
   }
 
   virtual void DrawLayersOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+    EXPECT_EQ(0u, output_surface_->num_sent_frames());
+  }
+
+  virtual void SwapBuffersOnThread(LayerTreeHostImpl* host_impl,
+                                   bool result) OVERRIDE {
+    EXPECT_TRUE(result);
     EXPECT_EQ(1u, output_surface_->num_sent_frames());
 
     const CompositorFrame& last_frame = output_surface_->last_sent_frame();
@@ -78,7 +79,7 @@ class DelegatingRendererTestDraw : public DelegatingRendererTest {
   }
 };
 
-SINGLE_AND_MULTI_THREAD_TEST_F(DelegatingRendererTestDraw);
+SINGLE_AND_MULTI_THREAD_DELEGATING_RENDERER_TEST_F(DelegatingRendererTestDraw);
 
 class DelegatingRendererTestResources : public DelegatingRendererTest {
  public:
@@ -114,23 +115,30 @@ class DelegatingRendererTestResources : public DelegatingRendererTest {
   }
 
   virtual void DrawLayersOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+    EXPECT_EQ(0u, output_surface_->num_sent_frames());
+  }
+
+  virtual void SwapBuffersOnThread(LayerTreeHostImpl* host_impl,
+                                   bool result) OVERRIDE {
+    EXPECT_TRUE(result);
     EXPECT_EQ(1u, output_surface_->num_sent_frames());
 
     const CompositorFrame& last_frame = output_surface_->last_sent_frame();
     ASSERT_TRUE(last_frame.delegated_frame_data);
 
     EXPECT_EQ(2u, last_frame.delegated_frame_data->render_pass_list.size());
-    // Each render pass has 9 resources in it. And the root render pass has a
-    // mask resource used when drawing the child render pass. The number 9 may
+    // Each render pass has 10 resources in it. And the root render pass has a
+    // mask resource used when drawing the child render pass. The number 10 may
     // change if AppendOneOfEveryQuadType() is updated, and the value here
     // should be updated accordingly.
     EXPECT_EQ(
-        19u, last_frame.delegated_frame_data->resource_list.size());
+        21u, last_frame.delegated_frame_data->resource_list.size());
 
     EndTest();
   }
 };
 
-SINGLE_AND_MULTI_THREAD_TEST_F(DelegatingRendererTestResources);
+SINGLE_AND_MULTI_THREAD_DELEGATING_RENDERER_TEST_F(
+    DelegatingRendererTestResources);
 
 }  // namespace cc

@@ -9,7 +9,7 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification.h"
@@ -94,10 +94,7 @@ BalloonViewImpl::BalloonViewImpl(BalloonCollection* collection)
       collection_(collection),
       frame_container_(NULL),
       html_container_(NULL),
-      html_contents_(NULL),
       close_button_(NULL),
-      animation_(NULL),
-      options_menu_model_(NULL),
       options_menu_button_(NULL),
       enable_web_ui_(false),
       closed_by_user_(false) {
@@ -152,6 +149,7 @@ void BalloonViewImpl::OnMenuButtonClicked(views::View* source,
           options_menu_button_,
           gfx::Rect(screen_location, options_menu_button_->size()),
           views::MenuItemView::TOPRIGHT,
+          ui::MENU_SOURCE_NONE,
           views::MenuRunner::HAS_MNEMONICS) == views::MenuRunner::MENU_DELETED)
     return;
 }
@@ -378,7 +376,6 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   source_label_->SetBackgroundColor(kControlBarBackgroundColor);
   source_label_->SetEnabledColor(kControlBarTextColor);
   source_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  source_label_->SetElideBehavior(views::Label::ELIDE_AT_END);
   source_label_->SetBoundsRect(GetLabelBounds());
 
   SizeContentsWindow();

@@ -191,14 +191,17 @@ Chrome supports. -->
         <message name="IDS_CHROME_FRAME_READY_MODE_LEARN_MORE_URL" desc="Link to knowledge-base article about Chrome Frame Ready Mode">
           http://www.google.com/support/chrome/bin/answer.py?hl=[GRITLANGCODE]&amp;answer=161796
         </message>
+        <message name="IDS_CHROME_FRAME_TURNDOWN_LEARN_MORE_URL" desc="Link to knowledge-base article about Chrome Frame turndown">
+          http://support.google.com/chrome/?p=ib_chromeframe
+        </message>
+        <message name="IDS_CHROME_FRAME_TURNDOWN_TEXT_IE_OLDER" desc="Text of Chrome Frame turndown prompt for IE 6, 7, and 8">
+          This site is using the Chrome Frame plug-in which will soon be unsupported. Please uninstall it and upgrade to a modern browser.
+	</message>
+        <message name="IDS_CHROME_FRAME_TURNDOWN_TEXT_IE_NEWER" desc="Text of Chrome Frame turndown prompt for IE 9 and 10">
+          This site is using the Chrome Frame plug-in that will soon be unsupported. Please uninstall it and download a compatible browser.
+	</message>
         <message name="IDS_SHORTCUT_NEW_WINDOW" desc="The text label of the New window shortcut context menu entry as of Windows 8">
           New window
-        </message>
-        <message name="IDS_MISSING_WINDOWS_SYSTEM_FILES_TITLE" desc="Title string on an error dialog to notify that the system is missing some Windows system files">
-          Windows error detected
-        </message>
-        <message name="IDS_MISSING_WINDOWS_SYSTEM_FILES_MESSAGE" desc="Warning message on an error dialog to notify that the system is missing some Windows system files">
-          Your computer is missing some important Windows system files, so Chrome will be unable to function correctly.
         </message>
       </if>
       <message name="IDS_CERT_ERROR_COMMON_NAME_INVALID_EXTRA_INFO_2" desc="2nd paragraph of extra information for an unsafe common name in an X509 certificate">
@@ -401,12 +404,12 @@ Google Chrome is unable to recover your settings.
       <message name="IDS_CRASH_RECOVERY_CONTENT" desc="Text content telling the user the browser has crashed.">
         Whoa! Google Chrome has crashed. Relaunch now?
       </message>
-      <if expr="not pp_ifdef('android')">
+      <if expr="not is_android">
         <message name="IDS_PASSWORD_MANAGER_SAVE_PASSWORD_PROMPT" desc="Info bar message to save a password">
           Do you want Google Chrome to save your password?
         </message>
       </if>
-      <if expr="pp_ifdef('android')">
+      <if expr="is_android">
         <message name="IDS_PASSWORD_MANAGER_SAVE_PASSWORD_PROMPT" desc="Mobile: Info bar message to save a password">
           Do you want Google Chrome to save your password for this site?
         </message>
@@ -593,11 +596,6 @@ Google Chrome is unable to recover your settings.
         Google Chrome is configured to automatically launch when you start your computer.
       </message>
 
-      <!-- Managed user settings page -->
-      <message name="IDS_SIGNIN_SYNC_ALLOWED" desc="A checkbox in the Managed User Settings dialog for enabling sign in and sync.">
-        Allow signing into Chrome.
-      </message>
-
       <!-- about:flags -->
       <if expr="not pp_ifdef('chromeos')">
         <message name="IDS_FLAGS_RELAUNCH_NOTICE" desc="Notifies the user that he needs to relaunch Chrome. Shown next to a button that says 'Relaunch Now'.">
@@ -614,19 +612,24 @@ Google Chrome is unable to recover your settings.
       </if>
 
       <!-- Obsolete System info bar -->
-      <message name="IDS_SYSTEM_OBSOLETE_MESSAGE" desc="Message shown when your OS is no longer supported. This messages is followed by a 'Learn more' link.">
+      <message name="IDS_SYSTEM_OBSOLETE_MESSAGE" desc="Message shown when your OS is no longer supported. This message is followed by a 'Learn more' link.">
          Google Chrome has stopped updating and no longer supports this version of your operating system.
       </message>
 
+      <!-- Google API keys info bar -->
+      <message name="IDS_MISSING_GOOGLE_API_KEYS" desc="Message shown when Google API keys are missing. This message is followed by a 'Learn more' link.">
+        Google API keys are missing. Some functionality of Google Chrome will be disabled.
+      </message>
+
       <!-- about:memory -->
-      <if expr="not pp_ifdef('android')">
+      <if expr="not is_android">
         <message name="IDS_MEMORY_USAGE_SUMMARY_DESC" desc="Describes the browser summary table in the about memory page, which shows memory usage for Google Chrome and any other active browsers." translateable="false">
 Summary of memory used by currently active browsers. For browsers which use multiple processes, memory reflects aggregate memory used across all browser processes.
 
 For Google Chrome, processes used to display diagnostics information (such as this "about:memory") are excluded.
         </message>
       </if>
-      <if expr="pp_ifdef('android')">
+      <if expr="is_android">
         <message name="IDS_MEMORY_USAGE_SUMMARY_DESC" desc="Describes the browser summary table in the about memory page, which shows memory usage for Google Chrome." translateable="false">
 Summary of memory used by Google Chrome. Since Google Chrome uses multiple processes, memory reflects aggregate memory used across all browser processes.
 
@@ -753,11 +756,6 @@ For Google Chrome, processes used to display diagnostics information (such as th
         </message>
       </if>
 
-      <!-- Sync promo page chrome://signin -->
-      <message name="IDS_SYNC_DIFFERENT_EMAIL" desc="Error message to display when setting up sync for a second time and the user name is different from the previous user name.">
-        You were previously signed in with a different account, signing in will merge your data. Consider creating a new Chrome user via the <ph name="BEGIN_LINK">&lt;a href="chrome://settings/search#Users" target="_parent"&gt;</ph>settings page<ph name="END_LINK">&lt;/a&gt;</ph> for your Chrome stuff.
-      </message>
-
       <!-- One click sign in infobar -->
       <if expr="not pp_ifdef('chromeos')">
         <!-- New one-click signin dialog contents for SAML support -->
@@ -801,9 +799,18 @@ Signing in anyway will merge Chrome information like bookmarks, history, and oth
 	Link my Chrome data to this account
       </message>
 
-      <message name="IDS_AUTOFILL_OPTIONS_POPUP" desc="The value of the Autofill options menu entry.">
-        Chrome Autofill settings
+      <!-- Enterprise sign-in dialog (new-style) -->
+      <!-- TODO(dconnelly): remove "new-style" once the old dialog is gone. -->
+      <message name="IDS_ENTERPRISE_SIGNIN_TITLE_NEW_STYLE" desc="The title of the dialog to confirm linking the browser profile with the signed-in enterprise account">
+        Link your Chrome data to this account?
       </message>
+      <message name="IDS_ENTERPRISE_SIGNIN_EXPLANATION_WITHOUT_PROFILE_CREATION_NEW_STYLE" desc="The warning message displayed to an enterprise user about to link their profile to their Google account. This message is followed by a 'Learn more' link.">
+        You are signing in with a managed account and giving its administrator control over your Google Chrome profile. Your Chrome data, such as your apps, bookmarks, history, passwords, and other settings will become permanently tied to <ph name="USER_NAME">$1<ex>pat@example.com</ex></ph>. You will be able to delete this data via the Google Accounts Dashboard, but you will not be able to associate this data with another account. <ph name="LEARN_MORE">$2<ex>Learn more</ex></ph>
+      </message>
+      <message name="IDS_ENTERPRISE_SIGNIN_EXPLANATION_WITH_PROFILE_CREATION_NEW_STYLE" desc="The warning message displayed to an enterprise user about to link their profile to their Google account. Additionally notifies the user that they can create a new profile instead. This message is followed by a 'Learn more' link.">
+        You are signing in with a managed account and giving its administrator control over your Google Chrome profile. Your Chrome data, such as your apps, bookmarks, history, passwords, and other settings will become permanently tied to <ph name="USER_NAME">$1<ex>pat@example.com</ex></ph>. You will be able to delete this data via the Google Accounts Dashboard, but you will not be able to associate this data with another account. You can optionally create a new profile to keep your existing Chrome data separate. <ph name="LEARN_MORE">$2<ex>Learn more</ex></ph>
+      </message>
+
       <message name="IDS_AUTOFILL_DIALOG_SAVE_LOCALLY_CHECKBOX" desc="Checkbox that controls whether info the user types into the autofill dialog is saved by chrome.">
         Save details in Chrome
       </message>
@@ -830,11 +837,11 @@ Signing in anyway will merge Chrome information like bookmarks, history, and oth
           and deselect any proxies that have been selected.
         </message>
       </if>
-      <if expr="pp_ifdef('android') or pp_ifdef('ios')">
+      <if expr="is_android or pp_ifdef('ios')">
         <message name="IDS_ERRORPAGES_SUGGESTION_PROXY_DISABLE_PLATFORM" desc="Instructions for disabling use of a proxy server (leave empty for Android and iOS).">
         </message>
       </if>
-      <if expr="not pp_ifdef('chromeos') and is_posix and not is_macosx and not pp_ifdef('android') and not pp_ifdef('ios')">
+      <if expr="not pp_ifdef('chromeos') and is_posix and not is_macosx and not is_android and not pp_ifdef('ios')">
         <message name="IDS_ERRORPAGES_SUGGESTION_PROXY_DISABLE_PLATFORM" desc="Linux instructions for disabling use of a proxy server.">
           Go to
           the Chrome menu &gt;
@@ -901,6 +908,16 @@ Signing in anyway will merge Chrome information like bookmarks, history, and oth
       <if expr="pp_ifdef('chromeos')">
         <message name="IDS_TERMS_OF_SERVICE_SCREEN_SUBHEADING" desc="Subheading at the top of the Terms of Service screen.">
           <ph name="DOMAIN">$1<ex>example.com</ex></ph> requires that you read and accept the following Terms of Service before using this device. These terms do not expand, modify or limit the Google Chrome OS Terms.
+        </message>
+      </if>
+
+      <!-- Chrome Notifications center -->
+      <if expr="is_win">
+        <message name="IDS_MESSAGE_CENTER_BALLOON_TITLE" desc="Title of the first run notification ballon describing the notification center.">
+          Chrome Notification Center
+        </message>
+        <message name="IDS_MESSAGE_CENTER_BALLOON_TEXT" desc="Body text for the the first run notification ballon describing the notification center.">
+          You can see all your notifications from Chrome apps, extensions, and websites here.
         </message>
       </if>
     </messages>

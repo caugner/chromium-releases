@@ -44,7 +44,9 @@ void MP4StreamParser::Init(const InitCB& init_cb,
                            const NewConfigCB& config_cb,
                            const NewBuffersCB& audio_cb,
                            const NewBuffersCB& video_cb,
+                           const NewTextBuffersCB& /* text_cb */ ,
                            const NeedKeyCB& need_key_cb,
+                           const AddTextTrackCB& /* add_text_track_cb */ ,
                            const NewMediaSegmentCB& new_segment_cb,
                            const base::Closure& end_of_segment_cb,
                            const LogCB& log_cb) {
@@ -69,7 +71,6 @@ void MP4StreamParser::Init(const InitCB& init_cb,
 
 void MP4StreamParser::Reset() {
   queue_.Reset();
-  moov_.reset();
   runs_.reset();
   moof_head_ = 0;
   mdat_tail_ = 0;
@@ -112,6 +113,7 @@ bool MP4StreamParser::Parse(const uint8* buf, int size) {
 
   if (err) {
     DLOG(ERROR) << "Error while parsing MP4";
+    moov_.reset();
     Reset();
     ChangeState(kError);
     return false;
@@ -157,7 +159,7 @@ bool MP4StreamParser::ParseBox(bool* err) {
 bool MP4StreamParser::ParseMoov(BoxReader* reader) {
   moov_.reset(new Movie);
   RCHECK(moov_->Parse(reader));
-  runs_.reset(new TrackRunIterator(moov_.get(), log_cb_));
+  runs_.reset();
 
   has_audio_ = false;
   has_video_ = false;
@@ -220,12 +222,16 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
       AudioCodec codec = kUnknownAudioCodec;
       ChannelLayout channel_layout = CHANNEL_LAYOUT_NONE;
       int sample_per_second = 0;
+      std::vector<uint8> extra_data;
       // Check if it is MPEG4 AAC defined in ISO 14496 Part 3 or
       // supported MPEG2 AAC varients.
       if (ESDescriptor::IsAAC(audio_type)) {
         codec = kCodecAAC;
         channel_layout = aac.GetChannelLayout(has_sbr_);
         sample_per_second = aac.GetOutputSamplesPerSecond(has_sbr_);
+#if defined(OS_ANDROID)
+        extra_data = aac.codec_specific_data();
+#endif
       } else if (audio_type == kEAC3) {
         codec = kCodecEAC3;
         channel_layout = GuessChannelLayout(entry.channelcount);
@@ -250,10 +256,10 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
 
       is_audio_track_encrypted_ = entry.sinf.info.track_encryption.is_encrypted;
       DVLOG(1) << "is_audio_track_encrypted_: " << is_audio_track_encrypted_;
-      audio_config.Initialize(codec, sample_format,
-                              channel_layout,
-                              sample_per_second,
-                              NULL, 0, is_audio_track_encrypted_, false);
+      audio_config.Initialize(
+          codec, sample_format, channel_layout, sample_per_second,
+          extra_data.size() ? &extra_data[0] : NULL, extra_data.size(),
+          is_audio_track_encrypted_, false);
       has_audio_ = true;
       audio_track_id_ = track->header.track_id;
     }
@@ -314,6 +320,8 @@ bool MP4StreamParser::ParseMoof(BoxReader* reader) {
   RCHECK(moov_.get());  // Must already have initialization segment
   MovieFragment moof;
   RCHECK(moof.Parse(reader));
+  if (!runs_)
+    runs_.reset(new TrackRunIterator(moov_.get(), log_cb_));
   RCHECK(runs_->Init(moof));
   RCHECK(EmitNeedKeyIfNecessary(moof.pssh));
   new_segment_cb_.Run(runs_->GetMinDecodeTimestamp());

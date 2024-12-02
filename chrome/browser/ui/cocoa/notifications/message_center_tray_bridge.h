@@ -5,12 +5,17 @@
 #ifndef CHROME_BROWSER_UI_COCOA_NOTIFICATIONS_MESSAGE_CENTER_TRAY_BRIDGE_H_
 #define CHROME_BROWSER_UI_COCOA_NOTIFICATIONS_MESSAGE_CENTER_TRAY_BRIDGE_H_
 
+#import <AppKit/AppKit.h>
+
 #include "base/basictypes.h"
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "ui/message_center/message_center_tray_delegate.h"
 
 @class MCPopupCollection;
+@class MCStatusItemView;
+@class MCTrayController;
 
 namespace message_center {
 class MessageCenter;
@@ -34,18 +39,36 @@ class MessageCenterTrayBridge :
   virtual void UpdatePopups() OVERRIDE;
   virtual bool ShowMessageCenter() OVERRIDE;
   virtual void HideMessageCenter() OVERRIDE;
+  virtual bool ShowNotifierSettings() OVERRIDE;
 
   message_center::MessageCenter* message_center() { return message_center_; }
 
  private:
+  friend class MessageCenterTrayBridgeTest;
+
+  // Updates the unread count on the status item.
+  void UpdateStatusItem();
+
+  // Opens the message center tray.
+  void OpenTrayWindow();
+
   // The global, singleton message center model object. Weak.
   message_center::MessageCenter* message_center_;
 
   // C++ controller for the notification tray UI.
   scoped_ptr<message_center::MessageCenterTray> tray_;
 
+  // Obj-C window controller for the notification tray.
+  base::scoped_nsobject<MCTrayController> tray_controller_;
+
+  // View that is displayed on the system menu bar item.
+  base::scoped_nsobject<MCStatusItemView> status_item_view_;
+
   // Obj-C controller for the on-screen popup notifications.
-  scoped_nsobject<MCPopupCollection> popup_collection_;
+  base::scoped_nsobject<MCPopupCollection> popup_collection_;
+
+  // Weak pointer factory to posts tasks to self.
+  base::WeakPtrFactory<MessageCenterTrayBridge> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MessageCenterTrayBridge);
 };

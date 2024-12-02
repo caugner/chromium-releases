@@ -10,7 +10,7 @@
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/metrics/statistics_recorder.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::HistogramBase;
@@ -19,7 +19,7 @@ using base::StatisticsRecorder;
 
 class SpellcheckHostMetricsTest : public testing::Test {
  public:
-  SpellcheckHostMetricsTest() : loop_(MessageLoop::TYPE_DEFAULT) {
+  SpellcheckHostMetricsTest() : loop_(base::MessageLoop::TYPE_DEFAULT) {
   }
 
   virtual void SetUp() OVERRIDE {
@@ -31,8 +31,8 @@ class SpellcheckHostMetricsTest : public testing::Test {
   void RecordWordCountsForTesting() { metrics_->RecordWordCounts(); }
 
  private:
-   MessageLoop loop_;
-   scoped_ptr<SpellCheckHostMetrics> metrics_;
+  base::MessageLoop loop_;
+  scoped_ptr<SpellCheckHostMetrics> metrics_;
 };
 
 TEST_F(SpellcheckHostMetricsTest, RecordEnabledStats) {

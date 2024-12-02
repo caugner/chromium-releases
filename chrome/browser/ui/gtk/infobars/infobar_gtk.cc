@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/gtk/infobars/infobar_gtk.h"
 
 #include "base/debug/trace_event.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_properties.h"
@@ -91,9 +91,9 @@ void InfoBarGtk::InitWidgets() {
   gtk_container_add(GTK_CONTAINER(bg_box_), padding);
 
   // Add the icon on the left, if any.
-  gfx::Image* icon = delegate()->GetIcon();
-  if (icon) {
-    GtkWidget* image = gtk_image_new_from_pixbuf(icon->ToGdkPixbuf());
+  gfx::Image icon = delegate()->GetIcon();
+  if (!icon.IsEmpty()) {
+    GtkWidget* image = gtk_image_new_from_pixbuf(icon.ToGdkPixbuf());
 
     gtk_misc_set_alignment(GTK_MISC(image), 0.5, 0.5);
 

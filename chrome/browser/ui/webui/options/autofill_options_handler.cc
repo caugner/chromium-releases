@@ -10,22 +10,23 @@
 #include "base/bind_helpers.h"
 #include "base/guid.h"
 #include "base/logging.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/autofill/country_combobox_model.h"
 #include "chrome/common/url_constants.h"
-#include "components/autofill/browser/autofill_country.h"
-#include "components/autofill/browser/autofill_profile.h"
-#include "components/autofill/browser/credit_card.h"
-#include "components/autofill/browser/personal_data_manager.h"
-#include "components/autofill/browser/phone_number_i18n.h"
-#include "components/autofill/common/autofill_constants.h"
+#include "components/autofill/core/browser/autofill_country.h"
+#include "components/autofill/core/browser/autofill_profile.h"
+#include "components/autofill/core/browser/credit_card.h"
+#include "components/autofill/core/browser/personal_data_manager.h"
+#include "components/autofill/core/browser/phone_number_i18n.h"
+#include "components/autofill/core/common/autofill_constants.h"
 #include "content/public/browser/web_ui.h"
+#include "grit/component_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/webui/web_ui_util.h"
@@ -400,7 +401,8 @@ void AutofillOptionsHandler::LoadAutofillData() {
     entry->Append(new StringValue(card->guid()));
     entry->Append(new StringValue(card->Label()));
     entry->Append(new StringValue(
-        webui::GetBitmapDataUrlFromResource(card->IconResourceId())));
+        webui::GetBitmapDataUrlFromResource(
+            CreditCard::IconResourceId(card->type()))));
     entry->Append(new StringValue(card->TypeForDisplay()));
     credit_cards.Append(entry);
   }

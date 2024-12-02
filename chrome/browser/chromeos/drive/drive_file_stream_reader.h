@@ -21,12 +21,13 @@ class SequencedTaskRunner;
 }  // namespace base
 
 namespace net {
+class HttpByteRange;
 class IOBuffer;
 }  // namespace net
 
 namespace drive {
 namespace util {
-class FileReader;
+class LocalFileReader;
 }  // namespace util
 
 namespace internal {
@@ -56,7 +57,8 @@ class LocalReaderProxy : public ReaderProxy {
   // This class takes its ownership.
   // |length| is the number of bytes to be read. It must be equal or
   // smaller than the remaining data size in the |file_reader|.
-  LocalReaderProxy(scoped_ptr<util::FileReader> file_reader, int64 length);
+  LocalReaderProxy(
+      scoped_ptr<util::LocalFileReader> file_reader, int64 length);
   virtual ~LocalReaderProxy();
 
   // ReaderProxy overrides.
@@ -66,9 +68,9 @@ class LocalReaderProxy : public ReaderProxy {
   virtual void OnCompleted(FileError error) OVERRIDE;
 
  private:
-  scoped_ptr<util::FileReader> file_reader_;
+  scoped_ptr<util::LocalFileReader> file_reader_;
 
-  // Callback for the FileReader::Read.
+  // Callback for the LocalFileReader::Read.
   void OnReadCompleted(
       const net::CompletionCallback& callback, int read_result);
 
@@ -155,8 +157,7 @@ class DriveFileStreamReader {
   // Initializes the stream for the |drive_file_path|.
   // |callback| must not be null.
   void Initialize(const base::FilePath& drive_file_path,
-                  uint64 range_offset,
-                  uint64 range_length,
+                  const net::HttpByteRange& byte_range,
                   const InitializeCompletionCallback& callback);
 
   // Reads the data into |buffer| at most |buffer_length|, and returns
@@ -171,13 +172,10 @@ class DriveFileStreamReader {
            const net::CompletionCallback& callback);
 
  private:
-  // The range of the data to be read.
-  struct Range;
-
   // Part of Initialize. Called after GetFileContentByPath's initialization
   // is done.
   void InitializeAfterGetFileContentByPathInitialized(
-      const Range& range,
+      const net::HttpByteRange& in_byte_range,
       const InitializeCompletionCallback& callback,
       FileError error,
       scoped_ptr<ResourceEntry> entry,
@@ -186,10 +184,10 @@ class DriveFileStreamReader {
 
   // Part of Initialize. Called when the local file open process is done.
   void InitializeAfterLocalFileOpen(
-      uint64 length,
+      int64 length,
       const InitializeCompletionCallback& callback,
       scoped_ptr<ResourceEntry> entry,
-      scoped_ptr<util::FileReader> file_reader,
+      scoped_ptr<util::LocalFileReader> file_reader,
       int open_result);
 
   // Called when the data is received from the server.
@@ -210,9 +208,6 @@ class DriveFileStreamReader {
   base::WeakPtrFactory<DriveFileStreamReader> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(DriveFileStreamReader);
 };
-
-// TODO(hidehiko): Add thin wrapper class inheriting
-// webkit_blob::FileStreamReader for the DriveFileStreamReader.
 
 }  // namespace drive
 

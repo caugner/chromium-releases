@@ -17,37 +17,36 @@ without changes to the corresponding grd file. fb9 -->
       <structure type="chrome_scaled_image" name="IDR_SAD_PLUGIN" file="common\sadplugin.png" />
     </structures>
     <includes>
-      <if expr="pp_ifdef('android')">
+      <if expr="is_android">
         <include name="IDR_MOBILE_YOUTUBE_PLUGIN_HTML" file="mobile_youtube_plugin.html" flattenhtml="true" type="BINDATA" />
       </if>
       <include name="IDR_BLOCKED_PLUGIN_HTML" file="blocked_plugin.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_CLICK_TO_PLAY_PLUGIN_HTML" file="click_to_play_plugin.html" flattenhtml="true" type="BINDATA" />
-      <include name="IDR_CONTENT_WATCHER_JS" file="extensions\content_watcher.js" type="BINDATA" />
       <include name="IDR_DISABLED_PLUGIN_HTML" file="disabled_plugin.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_ERROR_APP_HTML" file="error_app.html" flattenhtml="true" type="BINDATA" />
-      <include name="IDR_EVENT_BINDINGS_JS" file="extensions\event.js" type="BINDATA" />
-      <include name="IDR_GREASEMONKEY_API_JS" file="extensions\greasemonkey_api.js" type="BINDATA" />
-      <include name="IDR_SEARCHBOX_API" file="extensions\searchbox_api.js" type="BINDATA" />
-      <include name="IDR_JSON_JS" file="extensions\json.js" type="BINDATA" />
-      <include name="IDR_JSON_SCHEMA_JS" file="extensions\json_schema.js" type="BINDATA" />
-      <include name="IDR_MISCELLANEOUS_BINDINGS_JS" file="extensions\miscellaneous_bindings.js" type="BINDATA" />
       <include name="IDR_NET_ERROR_HTML" file="neterror.html" flattenhtml="true" type="BINDATA" />
 
-      <!-- Libraries. -->
-      <include name="IDR_TAG_WATCHER_JS" file="extensions\tag_watcher.js" type="BINDATA" />
+      <!-- Extension libraries. -->
+      <include name="IDR_CONTENT_WATCHER_JS" file="extensions\content_watcher.js" type="BINDATA" />
+      <include name="IDR_ENTRY_ID_MANAGER" file="extensions\entry_id_manager.js" type="BINDATA" />
+      <include name="IDR_EVENT_BINDINGS_JS" file="extensions\event.js" type="BINDATA" />
+      <include name="IDR_GREASEMONKEY_API_JS" file="extensions\greasemonkey_api.js" type="BINDATA" />
       <include name="IDR_IMAGE_UTIL_JS" file="extensions\image_util.js" type="BINDATA" />
+      <include name="IDR_JSON_SCHEMA_JS" file="extensions\json_schema.js" type="BINDATA" />
       <include name="IDR_LAST_ERROR_JS" file="extensions\last_error.js" type="BINDATA" />
+      <include name="IDR_MISCELLANEOUS_BINDINGS_JS" file="extensions\miscellaneous_bindings.js" type="BINDATA" />
       <include name="IDR_SCHEMA_UTILS_JS" file="extensions\schema_utils.js" type="BINDATA" />
+      <include name="IDR_SEARCHBOX_API" file="extensions\searchbox_api.js" type="BINDATA" />
       <include name="IDR_SEND_REQUEST_JS" file="extensions\send_request.js" type="BINDATA" />
       <include name="IDR_SET_ICON_JS" file="extensions\set_icon.js" type="BINDATA" />
+      <include name="IDR_TAG_WATCHER_JS" file="extensions\tag_watcher.js" type="BINDATA" />
+      <include name="IDR_UNLOAD_EVENT_JS" file="extensions\unload_event.js" type="BINDATA" />
       <include name="IDR_UTILS_JS" file="extensions\utils.js" type="BINDATA" />
-      <include name="IDR_ENTRY_ID_MANAGER" file="extensions\entry_id_manager.js" type="BINDATA" />
 
       <if expr="pp_ifdef('enable_extensions')">
         <!-- Custom bindings for extension APIs. -->
         <include name="IDR_AD_VIEW_DENY_JS" file="extensions\ad_view_deny.js" type="BINDATA" />
         <include name="IDR_AD_VIEW_JS" file="extensions\ad_view.js" type="BINDATA" />
-        <include name="IDR_AD_VIEW_CUSTOM_JS" file="extensions\ad_view_custom.js" type="BINDATA" />
         <include name="IDR_APP_CUSTOM_BINDINGS_JS" file="extensions\app_custom_bindings.js" type="BINDATA" />
         <include name="IDR_APP_RUNTIME_CUSTOM_BINDINGS_JS" file="extensions\app_runtime_custom_bindings.js" type="BINDATA" />
         <include name="IDR_APP_WINDOW_CUSTOM_BINDINGS_JS" file="extensions\app_window_custom_bindings.js" type="BINDATA" />
@@ -63,6 +62,7 @@ without changes to the corresponding grd file. fb9 -->
         <include name="IDR_EXPERIMENTAL_MEDIA_GALLERIES_CUSTOM_BINDINGS_JS" file="extensions\experimental.media_galleries_custom_bindings.js" type="BINDATA" />
         <include name="IDR_EXPERIMENTAL_OFFSCREENTABS_CUSTOM_BINDINGS_JS" file="extensions\experimental.offscreenTabs_custom_bindings.js" type="BINDATA" />
         <include name="IDR_EXTENSION_CUSTOM_BINDINGS_JS" file="extensions\extension_custom_bindings.js" type="BINDATA" />
+        <include name="IDR_FEEDBACK_PRIVATE_CUSTOM_BINDINGS_JS" file="extensions\feedback_private_custom_bindings.js" type="BINDATA" />
         <include name="IDR_FILE_BROWSER_HANDLER_CUSTOM_BINDINGS_JS" file="extensions\file_browser_handler_custom_bindings.js" type="BINDATA" />
         <include name="IDR_FILE_BROWSER_PRIVATE_CUSTOM_BINDINGS_JS" file="extensions\file_browser_private_custom_bindings.js" type="BINDATA" />
         <include name="IDR_FILE_SYSTEM_CUSTOM_BINDINGS_JS" file="extensions\file_system_custom_bindings.js" type="BINDATA" />

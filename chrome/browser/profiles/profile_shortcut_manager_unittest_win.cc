@@ -9,14 +9,15 @@
 #include "base/location.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/strings/string16.h"
 #include "base/test/scoped_path_override.h"
-#include "base/string16.h"
 #include "base/test/test_shortcut_win.h"
 #include "base/win/shortcut.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_shortcut_manager.h"
 #include "chrome/browser/profiles/profile_shortcut_manager_win.h"
+#include "chrome/browser/shell_integration.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/product.h"
 #include "chrome/installer/util/shell_util.h"
@@ -35,7 +36,6 @@ class ProfileShortcutManagerTest : public testing::Test {
   ProfileShortcutManagerTest()
       : ui_thread_(BrowserThread::UI, &message_loop_),
         file_thread_(BrowserThread::FILE, &message_loop_),
-        profile_shortcut_manager_(NULL),
         profile_info_cache_(NULL),
         fake_user_desktop_(base::DIR_USER_DESKTOP),
         fake_system_desktop_(base::DIR_COMMON_DESKTOP) {
@@ -85,8 +85,9 @@ class ProfileShortcutManagerTest : public testing::Test {
   }
 
   void RunPendingTasks() {
-    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->PostTask(FROM_HERE,
+                                           base::MessageLoop::QuitClosure());
+    base::MessageLoop::current()->Run();
   }
 
   void SetupDefaultProfileShortcut(const tracked_objects::Location& location) {
@@ -137,6 +138,8 @@ class ProfileShortcutManagerTest : public testing::Test {
     EXPECT_TRUE(file_util::PathExists(icon_path)) << location.ToString();
 
     base::win::ShortcutProperties expected_properties;
+    expected_properties.set_app_id(
+        ShellIntegration::GetChromiumModelIdForProfile(profile_path));
     expected_properties.set_target(GetExePath());
     expected_properties.set_description(GetDistribution()->GetAppDescription());
     expected_properties.set_dual_mode(false);
@@ -266,7 +269,7 @@ class ProfileShortcutManagerTest : public testing::Test {
     return system_shortcuts_directory;
   }
 
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
   scoped_ptr<TestingProfileManager> profile_manager_;

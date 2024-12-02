@@ -11,46 +11,63 @@
 #include "base/compiler_specific.h"
 #include "base/memory/singleton.h"
 #include "base/timer.h"
+#include "chrome/browser/chromeos/system/automatic_reboot_manager_observer.h"
 #include "chrome/browser/extensions/update_observer.h"
-#include "chrome/browser/profiles/profile_keyed_service.h"
-#include "chrome/browser/profiles/profile_keyed_service_factory.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service_factory.h"
+
+class Profile;
 
 namespace chromeos {
 
+namespace system {
+class AutomaticRebootManager;
+}
+
 // This class enforces automatic restart on app and Chrome updates in app mode.
-class KioskAppUpdateService : public ProfileKeyedService,
-                              public extensions::UpdateObserver {
+class KioskAppUpdateService : public BrowserContextKeyedService,
+                              public extensions::UpdateObserver,
+                              public system::AutomaticRebootManagerObserver {
  public:
-  explicit KioskAppUpdateService(Profile* profile);
+  KioskAppUpdateService(
+      Profile* profile,
+      system::AutomaticRebootManager* automatic_reboot_manager);
   virtual ~KioskAppUpdateService();
 
   void set_app_id(const std::string& app_id) { app_id_ = app_id; }
   std::string get_app_id() const { return app_id_; }
 
  private:
-  void StartRestartTimer();
-  void ForceRestart();
+  friend class KioskAppUpdateServiceTest;
+
+  void StartAppUpdateRestartTimer();
+  void ForceAppUpdateRestart();
+
+  // BrowserContextKeyedService overrides:
+  virtual void Shutdown() OVERRIDE;
 
   // extensions::UpdateObserver overrides:
   virtual void OnAppUpdateAvailable(const std::string& app_id) OVERRIDE;
   virtual void OnChromeUpdateAvailable() OVERRIDE {}
 
-  // ProfileKeyedService overrides:
-  virtual void Shutdown() OVERRIDE;
+  // system::AutomaticRebootManagerObserver overrides:
+  virtual void OnRebootScheduled(Reason reason) OVERRIDE;
+  virtual void WillDestroyAutomaticRebootManager() OVERRIDE;
 
- private:
   Profile* profile_;
   std::string app_id_;
 
   // After we detect an upgrade we start a one-short timer to force restart.
   base::OneShotTimer<KioskAppUpdateService> restart_timer_;
 
+  system::AutomaticRebootManager* automatic_reboot_manager_;  // Not owned.
+
   DISALLOW_COPY_AND_ASSIGN(KioskAppUpdateService);
 };
 
 // Singleton that owns all KioskAppUpdateServices and associates them with
 // profiles.
-class KioskAppUpdateServiceFactory: public ProfileKeyedServiceFactory {
+class KioskAppUpdateServiceFactory : public BrowserContextKeyedServiceFactory {
  public:
   // Returns the KioskAppUpdateService for |profile|, creating it if it is not
   // yet created.
@@ -65,8 +82,8 @@ class KioskAppUpdateServiceFactory: public ProfileKeyedServiceFactory {
   KioskAppUpdateServiceFactory();
   virtual ~KioskAppUpdateServiceFactory();
 
-  // ProfileKeyedServiceFactory overrides:
-  virtual ProfileKeyedService* BuildServiceInstanceFor(
+  // BrowserContextKeyedServiceFactory overrides:
+  virtual BrowserContextKeyedService* BuildServiceInstanceFor(
       content::BrowserContext* profile) const OVERRIDE;
 };
 

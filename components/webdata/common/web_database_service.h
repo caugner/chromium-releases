@@ -14,8 +14,10 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/ref_counted_delete_on_message_loop.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/observer_list.h"
 #include "components/webdata/common/web_data_service_base.h"
 #include "components/webdata/common/web_database.h"
@@ -45,23 +47,23 @@ class WebDataServiceConsumer;
 ////////////////////////////////////////////////////////////////////////////////
 
 class WEBDATA_EXPORT WebDatabaseService
-    : public base::RefCountedThreadSafe<
-          WebDatabaseService,
-          content::BrowserThread::DeleteOnUIThread> {
+    : public base::RefCountedDeleteOnMessageLoop<WebDatabaseService> {
  public:
   typedef base::Callback<scoped_ptr<WDTypedResult>(WebDatabase*)> ReadTask;
   typedef base::Callback<WebDatabase::State(WebDatabase*)> WriteTask;
 
   // Takes the path to the WebDatabase file.
-  explicit WebDatabaseService(const base::FilePath& path);
+  // WebDatabaseService lives on |ui_thread| and posts tasks to |db_thread|.
+  WebDatabaseService(const base::FilePath& path,
+                     const scoped_refptr<base::MessageLoopProxy>& ui_thread,
+                     const scoped_refptr<base::MessageLoopProxy>& db_thread);
 
   // Adds |table| as a WebDatabaseTable that will participate in
   // managing the database, transferring ownership. All calls to this
   // method must be made before |LoadDatabase| is called.
   virtual void AddTable(scoped_ptr<WebDatabaseTable> table);
 
-  // Initializes the web database service. Takes a callback which will return
-  // the status of the DB after the init.
+  // Initializes the web database service.
   virtual void LoadDatabase();
 
   // Unloads the database without actually shutting down the service.  This can
@@ -71,9 +73,12 @@ class WEBDATA_EXPORT WebDatabaseService
   // Unloads database and will not reload.
   virtual void ShutdownDatabase();
 
-  // Gets a ptr to the WebDatabase (owned by WebDatabaseService).
+  // Gets a pointer to the WebDatabase (owned by WebDatabaseService).
   // TODO(caitkp): remove this method once SyncServices no longer depend on it.
   virtual WebDatabase* GetDatabaseOnDB() const;
+
+  // Returns a pointer to the WebDataServiceBackend.
+  scoped_refptr<WebDataServiceBackend> GetBackend() const;
 
   // Schedule an update/write task on the DB thread.
   virtual void ScheduleDBTask(
@@ -91,18 +96,28 @@ class WEBDATA_EXPORT WebDatabaseService
   // somewhere else.
   virtual void CancelRequest(WebDataServiceBase::Handle h);
 
-  void AddObserver(WebDatabaseObserver* observer);
-  void RemoveObserver(WebDatabaseObserver* observer);
+  // Register a callback to be notified that the database has loaded. Multiple
+  // callbacks may be registered, and each will be called at most once
+  // (following a successful database load), then cleared.
+  // Note: if the database load is already complete, then the callback will NOT
+  // be stored or called.
+  void RegisterDBLoadedCallback(const base::Callback<void(void)>& callback);
+
+  // Register a callback to be notified that the database has failed to load.
+  // Multiple callbacks may be registered, and each will be called at most once
+  // (following a database load failure), then cleared.
+  // Note: if the database load is already complete, then the callback will NOT
+  // be stored or called.
+  void RegisterDBErrorCallback(
+      const base::Callback<void(sql::InitStatus)>& callback);
+
+  bool db_loaded() { return db_loaded_; };
 
  private:
   class BackendDelegate;
-  friend struct content::BrowserThread::DeleteOnThread<
-      content::BrowserThread::UI>;
-  friend class base::DeleteHelper<WebDatabaseService>;
-  // We have to friend RCTS<> so WIN shared-lib build is happy (crbug/112250).
-  friend class base::RefCountedThreadSafe<WebDatabaseService,
-      content::BrowserThread::DeleteOnUIThread>;
   friend class BackendDelegate;
+  friend class base::RefCountedDeleteOnMessageLoop<WebDatabaseService>;
+  friend class base::DeleteHelper<WebDatabaseService>;
 
   virtual ~WebDatabaseService();
 
@@ -114,10 +129,26 @@ class WEBDATA_EXPORT WebDatabaseService
   // PostTask on DB thread may outlive us.
   scoped_refptr<WebDataServiceBackend> wds_backend_;
 
-  ObserverList<WebDatabaseObserver> observer_list_;
-
   // All vended weak pointers are invalidated in ShutdownDatabase().
   base::WeakPtrFactory<WebDatabaseService> weak_ptr_factory_;
+
+  // Types for managing DB loading callbacks.
+  typedef base::Callback<void(void)> DBLoadedCallback;
+  typedef std::vector<DBLoadedCallback> LoadedCallbacks;
+
+  typedef base::Callback<void(sql::InitStatus)> DBLoadErrorCallback;
+  typedef std::vector<DBLoadErrorCallback> ErrorCallbacks;
+
+  // Callbacks to be called once the DB has loaded.
+  LoadedCallbacks loaded_callbacks_;
+
+  // Callbacks to be called if the DB has failed to load.
+  ErrorCallbacks error_callbacks_;
+
+  // True if the WebDatabase has loaded.
+  bool db_loaded_;
+
+  scoped_refptr<base::MessageLoopProxy> db_thread_;
 };
 
 #endif  // COMPONENTS_WEBDATA_COMMON_WEB_DATABASE_SERVICE_H_

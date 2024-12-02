@@ -8,8 +8,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
@@ -77,7 +77,8 @@ class ExtensionBrowsingDataTest : public InProcessBrowserTest,
             details).ptr()));
   }
 
-  int GetAsMask(const DictionaryValue* dict, std::string path, int mask_value) {
+  int GetAsMask(const base::DictionaryValue* dict, std::string path,
+                int mask_value) {
     bool result;
     EXPECT_TRUE(dict->GetBoolean(path, &result)) << "for " << path;
     return result ? mask_value : 0;
@@ -245,10 +246,10 @@ class ExtensionBrowsingDataTest : public InProcessBrowserTest,
       EXPECT_EQ(NULL, RunFunctionAndReturnSingleResult(
         function.get(), args, browser())) << " for " << args;
     } else {
-      EXPECT_TRUE(
-          MatchPattern(RunFunctionAndReturnError(function, args, browser()),
-              extension_browsing_data_api_constants::kDeleteProhibitedError)) <<
-                  " for " << args;
+      EXPECT_TRUE(MatchPattern(
+          RunFunctionAndReturnError(function.get(), args, browser()),
+          extension_browsing_data_api_constants::kDeleteProhibitedError))
+          << " for " << args;
     }
   }
 
@@ -263,11 +264,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowsingDataTest, OneAtATime) {
   BrowsingDataRemover::set_removing(true);
   scoped_refptr<RemoveBrowsingDataFunction> function =
       new RemoveBrowsingDataFunction();
-  EXPECT_TRUE(MatchPattern(
-      RunFunctionAndReturnError(function,
-                                kRemoveEverythingArguments,
-                                browser()),
-      extension_browsing_data_api_constants::kOneAtATimeError));
+  EXPECT_TRUE(
+      MatchPattern(RunFunctionAndReturnError(
+                       function.get(), kRemoveEverythingArguments, browser()),
+                   extension_browsing_data_api_constants::kOneAtATimeError));
   BrowsingDataRemover::set_removing(false);
 
   EXPECT_EQ(base::Time(), GetBeginTime());
@@ -348,7 +348,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowsingDataTest, BrowsingDataOriginSetMask) {
       UNPROTECTED_WEB | PROTECTED_WEB | EXTENSION);
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionBrowsingDataTest, BrowsingDataRemovalMask) {
+IN_PROC_BROWSER_TEST_F(ExtensionBrowsingDataTest,
+                       FLAKY_BrowsingDataRemovalMask) {
   RunRemoveBrowsingDataWithKeyAndCompareRemovalMask(
       "appcache", BrowsingDataRemover::REMOVE_APPCACHE);
   RunRemoveBrowsingDataWithKeyAndCompareRemovalMask(

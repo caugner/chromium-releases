@@ -5,7 +5,7 @@
 [
   {
     "namespace": "webview",
-    "nodoc": true,
+    "description": "none",
     "functions": [
       {
         "name": "executeScript",
@@ -14,13 +14,40 @@
         "parameters": [
           {
             "type": "integer",
-            "name": "processId",
-            "description": "The process ID of the guest <webview> process."
+            "name": "instanceId",
+            "description": "The instance ID of the guest <webview> process."
           },
           {
+            "$ref": "tabs.InjectDetails",
+            "name": "details",
+            "description": "Details of the script to run."
+          },
+          {
+            "type": "function",
+            "name": "callback",
+            "optional": true,
+            "description": "Called after all the JavaScript has been executed.",
+            "parameters": [
+              {
+                "name": "result",
+                "optional": true,
+                "type": "array",
+                "items": {"type": "any", "minimum": 0},
+                "description": "The result of the script in every injected frame."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "insertCSS",
+        "type": "function",
+        "description": "Injects JavaScript code into a <webview> page.",
+        "parameters": [
+          {
             "type": "integer",
-            "name": "routeId",
-            "description": "The route ID of the guest <webview> renderer."
+            "name": "instanceId",
+            "description": "The instance ID of the guest <webview> process."
           },
           {
             "$ref": "tabs.InjectDetails",

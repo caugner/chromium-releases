@@ -4,10 +4,10 @@
 
 #include <Cocoa/Cocoa.h>
 
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #import "chrome/browser/ui/cocoa/bubble_view.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #import "chrome/browser/ui/cocoa/status_bubble_mac.h"
@@ -174,8 +174,8 @@ class StatusBubbleMacTest : public CocoaTest {
     return !IsPointInBubble(relative_x, relative_y);
   }
 
-  MessageLoop message_loop_;
-  scoped_nsobject<StatusBubbleMacTestDelegate> delegate_;
+  base::MessageLoop message_loop_;
+  base::scoped_nsobject<StatusBubbleMacTestDelegate> delegate_;
   StatusBubbleMac* bubble_;  // Strong.
 };
 

@@ -8,11 +8,12 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/i18n/rtl.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/bundle_installer.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -32,6 +33,7 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/link_listener.h"
+#include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/separator.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/grid_layout.h"
@@ -64,6 +66,9 @@ const int kBundleLeftColumnWidth = 300;
 // Width of the left column for external install prompts. The text is long in
 // this case, so make it wider than normal.
 const int kExternalInstallLeftColumnWidth = 350;
+
+// Maximum height of the retained files view.
+const int kMaxRetainedFilesHeight = 100;
 
 void AddResourceIcon(const gfx::ImageSkia* skia_image, void* data) {
   views::View* parent = static_cast<views::View*>(data);
@@ -185,9 +190,43 @@ void ShowExtensionInstallDialogImpl(
     ExtensionInstallPrompt::Delegate* delegate,
     const ExtensionInstallPrompt::Prompt& prompt) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  views::Widget::CreateWindowWithParent(
+  CreateBrowserModalDialogViews(
       new ExtensionInstallDialogView(show_params.navigator, delegate, prompt),
       show_params.parent_window)->Show();
+}
+
+// A ScrollView that imposes a maximum size on its viewport but sizes its
+// contents to its preferred size.
+class MaxSizeScrollView : public views::ScrollView {
+ public:
+  MaxSizeScrollView(int max_height, int max_width);
+  // Overridden from views::View:
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual void Layout() OVERRIDE;
+
+ private:
+  const int max_height_;
+  const int max_width_;
+
+  DISALLOW_COPY_AND_ASSIGN(MaxSizeScrollView);
+};
+
+MaxSizeScrollView::MaxSizeScrollView(int max_height, int max_width)
+    : max_height_(max_height),
+      max_width_(max_width) {}
+
+gfx::Size MaxSizeScrollView::GetPreferredSize() {
+  gfx::Size size = contents()->GetPreferredSize();
+  size.SetToMin(gfx::Size(max_width_, max_height_));
+  gfx::Insets insets = GetInsets();
+  size.Enlarge(insets.width(), insets.height());
+  size.Enlarge(GetScrollBarWidth(), GetScrollBarHeight());
+  return size;
+}
+
+void MaxSizeScrollView::Layout() {
+  contents()->SizeToPreferredSize();
+  views::ScrollView::Layout();
 }
 
 }  // namespace
@@ -255,7 +294,8 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
   int column_set_id = 0;
   views::ColumnSet* column_set = layout->AddColumnSet(column_set_id);
   int left_column_width =
-      prompt.GetPermissionCount() + prompt.GetOAuthIssueCount() > 0 ?
+      (prompt.ShouldShowPermissions() + prompt.GetOAuthIssueCount() +
+       prompt.GetRetainedFileCount()) > 0 ?
           kPermissionsLeftColumnWidth : kNoPermissionsLeftColumnWidth;
   if (is_bundle_install())
     left_column_width = kBundleLeftColumnWidth;
@@ -304,14 +344,25 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
     if (is_inline_install()) {
       // Also span the rating, user_count and store_link rows.
       icon_row_span = 4;
-    } else if (prompt.GetPermissionCount()) {
-      // Also span the permission header and each of the permission rows (all
-      // have a padding row above it).
-      icon_row_span = 3 + prompt.GetPermissionCount() * 2;
+    } else if (prompt.ShouldShowPermissions()) {
+      size_t permission_count = prompt.GetPermissionCount();
+      if (permission_count > 0) {
+        // Also span the permission header and each of the permission rows (all
+        // have a padding row above it).
+        icon_row_span = 3 + permission_count * 2;
+      } else {
+        // This is the 'no special permissions' case, so span the line we add
+        // (without a header) saying the extension has no special privileges.
+        icon_row_span = 4;
+      }
     } else if (prompt.GetOAuthIssueCount()) {
       // Also span the permission header and each of the permission rows (all
       // have a padding row above it).
       icon_row_span = 3 + prompt.GetOAuthIssueCount() * 2;
+    } else if (prompt.GetRetainedFileCount()) {
+      // Also span the permission header and each of the permission rows (all
+      // have a padding row above it).
+      icon_row_span = 3 + prompt.GetRetainedFileCount() * 2;
     }
     layout->AddView(icon, 1, icon_row_span);
   }
@@ -362,38 +413,49 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
     }
   }
 
-  if (prompt.GetPermissionCount()) {
+  if (prompt.ShouldShowPermissions()) {
     layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
-    if (is_inline_install()) {
-      layout->StartRow(0, column_set_id);
-      layout->AddView(new views::Separator(), 3, 1, views::GridLayout::FILL,
-                      views::GridLayout::FILL);
-      layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
-    }
+    if (prompt.GetPermissionCount() > 0) {
+      if (is_inline_install()) {
+        layout->StartRow(0, column_set_id);
+        layout->AddView(new views::Separator(views::Separator::HORIZONTAL),
+                        3, 1, views::GridLayout::FILL, views::GridLayout::FILL);
+        layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+      }
 
-    layout->StartRow(0, column_set_id);
-    views::Label* permissions_header = NULL;
-    if (is_bundle_install()) {
-      // We need to pass the Font in the constructor, rather than calling
-      // SetFont later, because otherwise SizeToFit mis-judges the width
-      // of the line.
-      permissions_header = new views::Label(
-          prompt.GetPermissionsHeading(),
-          rb.GetFont(ui::ResourceBundle::MediumFont));
+      layout->StartRow(0, column_set_id);
+      views::Label* permissions_header = NULL;
+      if (is_bundle_install()) {
+        // We need to pass the Font in the constructor, rather than calling
+        // SetFont later, because otherwise SizeToFit mis-judges the width
+        // of the line.
+        permissions_header = new views::Label(
+            prompt.GetPermissionsHeading(),
+            rb.GetFont(ui::ResourceBundle::MediumFont));
+      } else {
+        permissions_header = new views::Label(prompt.GetPermissionsHeading());
+      }
+      permissions_header->SetMultiLine(true);
+      permissions_header->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+      permissions_header->SizeToFit(left_column_width);
+      layout->AddView(permissions_header);
+
+      for (size_t i = 0; i < prompt.GetPermissionCount(); ++i) {
+        layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+        layout->StartRow(0, column_set_id);
+        views::Label* permission_label = new views::Label(PrepareForDisplay(
+            prompt.GetPermission(i), true));
+        permission_label->SetMultiLine(true);
+        permission_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+        permission_label->SizeToFit(left_column_width);
+        layout->AddView(permission_label);
+      }
     } else {
-      permissions_header = new views::Label(prompt.GetPermissionsHeading());
-    }
-    permissions_header->SetMultiLine(true);
-    permissions_header->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    permissions_header->SizeToFit(left_column_width);
-    layout->AddView(permissions_header);
-
-    for (size_t i = 0; i < prompt.GetPermissionCount(); ++i) {
       layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
       layout->StartRow(0, column_set_id);
-      views::Label* permission_label = new views::Label(PrepareForDisplay(
-          prompt.GetPermission(i), true));
+      views::Label* permission_label = new views::Label(
+          l10n_util::GetStringUTF16(IDS_EXTENSION_NO_SPECIAL_PERMISSIONS));
       permission_label->SetMultiLine(true);
       permission_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
       permission_label->SizeToFit(left_column_width);
@@ -435,6 +497,52 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
           new IssueAdviceView(this, prompt.GetOAuthIssue(i), space_for_oauth);
       layout->AddView(issue_advice_view);
     }
+  }
+  if (prompt.GetRetainedFileCount()) {
+    // Slide in under the permissions or OAuth, if there are any. If there are
+    // either, the retained files prompt stretches all the way to the right of
+    // the dialog. If there are no permissions or OAuth, the retained files
+    // prompt just takes up the left column.
+    int space_for_files = left_column_width;
+    if (prompt.GetPermissionCount() || prompt.GetOAuthIssueCount()) {
+      space_for_files += kIconSize;
+      column_set = layout->AddColumnSet(++column_set_id);
+      column_set->AddColumn(views::GridLayout::FILL,
+                            views::GridLayout::FILL,
+                            1,
+                            views::GridLayout::USE_PREF,
+                            0,  // no fixed width
+                            space_for_files);
+    }
+
+    layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+
+    layout->StartRow(0, column_set_id);
+    views::Label* retained_files_header = NULL;
+    retained_files_header = new views::Label(prompt.GetRetainedFilesHeading());
+    retained_files_header->SetMultiLine(true);
+    retained_files_header->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    retained_files_header->SizeToFit(space_for_files);
+    layout->AddView(retained_files_header);
+
+    layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+    layout->StartRow(0, column_set_id);
+    views::View* files_view = new views::View();
+    files_view->SetLayoutManager(new views::BoxLayout(
+        views::BoxLayout::kVertical,
+        views::kRelatedControlHorizontalSpacing,
+        0,
+        0));
+    for (size_t i = 0; i < prompt.GetRetainedFileCount(); ++i) {
+      views::Label* retained_file_label = new views::Label(PrepareForDisplay(
+          prompt.GetRetainedFile(i), true));
+      retained_file_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+      files_view->AddChildView(retained_file_label);
+    }
+    views::ScrollView* scroll_view =
+        new MaxSizeScrollView(kMaxRetainedFilesHeight, space_for_files);
+    scroll_view->SetContents(files_view);
+    layout->AddView(scroll_view);
   }
 }
 

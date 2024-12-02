@@ -41,6 +41,8 @@ class UI_EXPORT InputMethodIBus
   // Overridden from InputMethod:
   virtual void OnFocus() OVERRIDE;
   virtual void OnBlur() OVERRIDE;
+  virtual bool OnUntranslatedIMEMessage(const base::NativeEvent& event,
+                                        NativeEventResult* result) OVERRIDE;
   virtual void Init(bool focused) OVERRIDE;
   virtual bool DispatchKeyEvent(
       const base::NativeEvent& native_key_event) OVERRIDE;
@@ -48,9 +50,11 @@ class UI_EXPORT InputMethodIBus
   virtual void OnTextInputTypeChanged(const TextInputClient* client) OVERRIDE;
   virtual void OnCaretBoundsChanged(const TextInputClient* client) OVERRIDE;
   virtual void CancelComposition(const TextInputClient* client) OVERRIDE;
+  virtual void OnInputLocaleChanged() OVERRIDE;
   virtual std::string GetInputLocale() OVERRIDE;
   virtual base::i18n::TextDirection GetInputTextDirection() OVERRIDE;
   virtual bool IsActive() OVERRIDE;
+  virtual bool IsCandidatePopupOpen() const OVERRIDE;
 
  protected:
   // chromeos::IBusDaemonController::Observer overrides.
@@ -64,7 +68,7 @@ class UI_EXPORT InputMethodIBus
 
   // Process a key returned from the input method.
   virtual void ProcessKeyEventPostIME(const base::NativeEvent& native_key_event,
-                                      uint32 ibus_keycode,
+                                      uint32 ibus_state,
                                       bool handled);
 
   // Converts |native_event| to ibus representation.
@@ -117,16 +121,10 @@ class UI_EXPORT InputMethodIBus
 
   // Processes a key event that was not filtered by the input method.
   void ProcessUnfilteredKeyPressEvent(const base::NativeEvent& native_key_event,
-                                      uint32 ibus_keycode);
+                                      uint32 ibus_state);
   void ProcessUnfilteredFabricatedKeyPressEvent(EventType type,
                                                 KeyboardCode key_code,
-                                                int flags,
-                                                uint32 ibus_keyval);
-
-  // Processes an unfiltered key press event with character composer.
-  // This method returns true if the key press is filtered by the composer.
-  bool ProcessUnfilteredKeyPressEventWithCharacterComposer(uint32 ibus_keyval,
-                                                           uint32 state);
+                                                int event_flags);
 
   // Sends input method result caused by the given key event to the focused text
   // input client.
@@ -158,21 +156,29 @@ class UI_EXPORT InputMethodIBus
   // Returns true if the input context is ready to use.
   bool IsContextReady();
 
+  // Passes keyevent and executes character composition if necessary. Returns
+  // true if character composer comsumes key event.
+  bool ExecuteCharacterComposer(uint32 ibus_keyval,
+                                uint32 ibus_keycode,
+                                uint32 ibus_state);
+
   // chromeos::IBusInputContextHandlerInterface overrides:
   virtual void CommitText(const chromeos::IBusText& text) OVERRIDE;
   virtual void ForwardKeyEvent(uint32 keyval,
                                uint32 keycode,
-                               uint32 status) OVERRIDE;
+                               uint32 state) OVERRIDE;
   virtual void ShowPreeditText() OVERRIDE;
   virtual void HidePreeditText() OVERRIDE;
   virtual void UpdatePreeditText(const chromeos::IBusText& text,
                                  uint32 cursor_pos,
                                  bool visible) OVERRIDE;
+  virtual void DeleteSurroundingText(int32 offset, uint32 length) OVERRIDE;
 
   void CreateInputContextDone(const dbus::ObjectPath& object_path);
   void CreateInputContextFail();
-  void ProcessKeyEventDone(uint32 id, XEvent* xevent, uint32 keyval,
-                           bool is_handled);
+  void ProcessKeyEventDone(uint32 id, XEvent* xevent,
+                           uint32 ibus_keyval, uint32 ibus_keycode,
+                           uint32 ibus_state, bool is_handled);
 
   // All pending key events. Note: we do not own these object, we just save
   // pointers to these object so that we can abandon them when necessary.

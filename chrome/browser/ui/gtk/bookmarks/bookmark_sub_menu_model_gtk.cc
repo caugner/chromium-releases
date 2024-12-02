@@ -5,8 +5,8 @@
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_sub_menu_model_gtk.h"
 
 #include "base/stl_util.h"
-#include "base/string16.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string16.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -166,6 +166,7 @@ void BookmarkSubMenuModel::MenuWillShow() {
   AddItemWithStringId(IDC_IMPORT_SETTINGS, IDS_IMPORT_SETTINGS_MENU_LABEL);
   AddSeparator(ui::NORMAL_SEPARATOR);
   AddItemWithStringId(IDC_BOOKMARK_PAGE, IDS_BOOKMARK_THIS_PAGE);
+  AddItemWithStringId(IDC_BOOKMARK_ALL_TABS, IDS_BOOKMARK_OPEN_PAGES);
   fixed_items_ = bookmark_end_ = GetItemCount();
   if (!model()) {
     set_model(BookmarkModelFactory::GetForProfile(browser_->profile()));
@@ -174,7 +175,7 @@ void BookmarkSubMenuModel::MenuWillShow() {
     model()->AddObserver(this);
   }
   // We can't do anything further if the model isn't loaded yet.
-  if (!model()->IsLoaded())
+  if (!model()->loaded())
     return;
   // The node count includes the node itself, so 1 means empty.
   if (model()->bookmark_bar_node()->GetTotalNodeCount() > 1) {

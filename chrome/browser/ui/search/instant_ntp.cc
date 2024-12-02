@@ -4,12 +4,14 @@
 
 #include "chrome/browser/ui/search/instant_ntp.h"
 
+#include "chrome/browser/ui/search/search_tab_helper.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 
 InstantNTP::InstantNTP(InstantPage::Delegate* delegate,
-                       const std::string& instant_url)
-    : InstantPage(delegate, instant_url),
+                       const std::string& instant_url,
+                       bool is_incognito)
+    : InstantPage(delegate, instant_url, is_incognito),
       loader_(this) {
 }
 
@@ -21,6 +23,7 @@ void InstantNTP::InitContents(Profile* profile,
                               const base::Closure& on_stale_callback) {
   loader_.Init(GURL(instant_url()), profile, active_tab, on_stale_callback);
   SetContents(loader_.contents());
+  SearchTabHelper::FromWebContents(contents())->InitForPreloadedNTP();
   loader_.Load();
 }
 

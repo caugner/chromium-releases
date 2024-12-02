@@ -2,15 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-[permissions=downloads_internal, nodoc=true]
+// downloadsInternal
+[nodoc=true]
 namespace downloadsInternal {
   interface Functions {
     // Secretly called when onDeterminingFilename handlers return.
     static void determineFilename(long downloadId,
                                   DOMString filename,
                                   DOMString conflict_action);
-  };
-
-  interface Events {
   };
 };

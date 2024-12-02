@@ -9,9 +9,9 @@
 
 #include "base/i18n/break_iterator.h"
 #include "base/i18n/string_search.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_split.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/chromeos/contacts/contact.pb.h"
 #include "chrome/browser/chromeos/contacts/contact_manager.h"
@@ -226,7 +226,7 @@ void ContactProvider::AddContactIfMatched(
 AutocompleteMatch ContactProvider::CreateAutocompleteMatch(
     const AutocompleteInput& input,
     const ContactData& contact) {
-  AutocompleteMatch match(this, 0, false, AutocompleteMatch::CONTACT);
+  AutocompleteMatch match(this, 0, false, AutocompleteMatchType::CONTACT);
   match.inline_autocomplete_offset = string16::npos;
   match.contents = contact.full_name;
   match.fill_into_edit = match.contents;

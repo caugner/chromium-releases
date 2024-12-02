@@ -4,8 +4,8 @@
 
 #include "base/command_line.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -29,7 +29,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "content/test/net/url_request_mock_http_job.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 
 #include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
@@ -157,7 +157,7 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, AllowCookiesUsingExceptions) {
   ASSERT_TRUE(test_server()->Start());
   GURL url = test_server()->GetURL("files/setcookie.html");
   CookieSettings* settings =
-      CookieSettings::Factory::GetForProfile(browser()->profile());
+      CookieSettings::Factory::GetForProfile(browser()->profile()).get();
   settings->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
 
   ui_test_utils::NavigateToURL(browser(), url);
@@ -176,10 +176,10 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, BlockCookiesUsingExceptions) {
   ASSERT_TRUE(test_server()->Start());
   GURL url = test_server()->GetURL("files/setcookie.html");
   CookieSettings* settings =
-      CookieSettings::Factory::GetForProfile(browser()->profile());
-  settings->SetCookieSetting(
-      ContentSettingsPattern::FromURL(url),
-      ContentSettingsPattern::Wildcard(), CONTENT_SETTING_BLOCK);
+      CookieSettings::Factory::GetForProfile(browser()->profile()).get();
+  settings->SetCookieSetting(ContentSettingsPattern::FromURL(url),
+                             ContentSettingsPattern::Wildcard(),
+                             CONTENT_SETTING_BLOCK);
 
   ui_test_utils::NavigateToURL(browser(), url);
   ASSERT_TRUE(GetCookies(browser()->profile(), url).empty());
@@ -204,7 +204,7 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest,
   GURL url = URLRequestMockHTTPJob::GetMockUrl(
       base::FilePath(FILE_PATH_LITERAL("setcookie.html")));
   CookieSettings* settings =
-      CookieSettings::Factory::GetForProfile(browser()->profile());
+      CookieSettings::Factory::GetForProfile(browser()->profile()).get();
   settings->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
 
   ui_test_utils::NavigateToURL(browser(), url);
@@ -371,7 +371,16 @@ IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, BlockException) {
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 }
 
-IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, LoadAllBlockedPlugins) {
+// Crashes on Mac Asan.  http://crbug.com/239169
+#if defined(OS_MACOSX)
+#define MAYBE_LoadAllBlockedPlugins DISABLED_LoadAllBlockedPlugins
+// TODO(jschuh): Flaky plugin tests. crbug.com/244653
+#elif defined(OS_WIN) && defined(ARCH_CPU_X86_64)
+#define MAYBE_LoadAllBlockedPlugins DISABLED_LoadAllBlockedPlugins
+#else
+#define MAYBE_LoadAllBlockedPlugins LoadAllBlockedPlugins
+#endif
+IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, MAYBE_LoadAllBlockedPlugins) {
   browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
 
@@ -403,6 +412,8 @@ IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, LoadAllBlockedPlugins) {
 }
 
 // If this flakes, use http://crbug.com/113057.
+// TODO(jschuh): Hanging plugin tests. crbug.com/244653
+#if !defined(OS_WIN) && !defined(ARCH_CPU_X86_64)
 IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, NoCallbackAtLoad) {
   browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
@@ -428,6 +439,7 @@ IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, NoCallbackAtLoad) {
 
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 }
+#endif
 
 IN_PROC_BROWSER_TEST_F(ClickToPlayPluginTest, DeleteSelfAtLoad) {
   browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
@@ -465,24 +477,25 @@ class PepperContentSettingsTest : public ContentSettingsTest {
 
   // Registers any CDM plugins not registered by default.
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+#if defined(ENABLE_PEPPER_CDMS)
     // Platform-specific filename relative to the chrome executable.
 #if defined(OS_WIN)
-    const wchar_t kLibraryName[] = L"clearkeycdmadapter.dll";
     const std::wstring external_clear_key_mime_type =
         ASCIIToWide(kExternalClearKeyMimeType);
+    const char kLibraryName[] = "clearkeycdmadapter.dll";
 #else  // !defined(OS_WIN)
     const char* external_clear_key_mime_type = kExternalClearKeyMimeType;
 #if defined(OS_MACOSX)
     const char kLibraryName[] = "clearkeycdmadapter.plugin";
 #elif defined(OS_POSIX)
     const char kLibraryName[] = "libclearkeycdmadapter.so";
-#endif
+#endif  // defined(OS_MACOSX)
 #endif  // defined(OS_WIN)
 
     // Append the switch to register the External Clear Key CDM.
     base::FilePath plugin_dir;
     EXPECT_TRUE(PathService::Get(base::DIR_MODULE, &plugin_dir));
-    base::FilePath plugin_lib = plugin_dir.Append(kLibraryName);
+    base::FilePath plugin_lib = plugin_dir.AppendASCII(kLibraryName);
     EXPECT_TRUE(file_util::PathExists(plugin_lib));
     base::FilePath::StringType pepper_plugin = plugin_lib.value();
     pepper_plugin.append(FILE_PATH_LITERAL(
@@ -490,6 +503,8 @@ class PepperContentSettingsTest : public ContentSettingsTest {
     pepper_plugin.append(external_clear_key_mime_type);
     command_line->AppendSwitchNative(switches::kRegisterPepperPlugins,
                                      pepper_plugin);
+#endif  // defined(ENABLE_PEPPER_CDMS)
+
 #if !defined(DISABLE_NACL)
     // Ensure NaCl can run.
     command_line->AppendSwitch(switches::kEnableNaCl);
@@ -554,22 +569,26 @@ IN_PROC_BROWSER_TEST_F(PepperContentSettingsTest, PluginSpecialCases) {
   content_settings->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_ALLOW);
 
+#if defined(ENABLE_PEPPER_CDMS)
   RunLoadPepperPluginTest(kExternalClearKeyMimeType, true);
+#endif  // defined(ENABLE_PEPPER_CDMS)
 
   // Next, test behavior when plug-ins are blocked.
   content_settings->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
 
+#if defined(ENABLE_PEPPER_CDMS)
   // The plugin we loaded above does not load now.
   RunLoadPepperPluginTest(kExternalClearKeyMimeType, false);
 
 #if defined(WIDEVINE_CDM_AVAILABLE)
   RunLoadPepperPluginTest(kWidevineCdmPluginMimeType, true);
-#endif
+#endif  // defined(WIDEVINE_CDM_AVAILABLE)
+#endif  // defined(ENABLE_PEPPER_CDMS)
 
 #if !defined(DISABLE_NACL)
   RunLoadPepperPluginTest("application/x-nacl", true);
-#endif
+#endif  // !defined(DISABLE_NACL)
 
   // Finally, test behavior when (just) JavaScript is blocked.
   content_settings->SetDefaultContentSetting(
@@ -577,16 +596,18 @@ IN_PROC_BROWSER_TEST_F(PepperContentSettingsTest, PluginSpecialCases) {
   content_settings->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_JAVASCRIPT, CONTENT_SETTING_BLOCK);
 
+#if defined(ENABLE_PEPPER_CDMS)
   // This plugin has no special behavior and does not require JavaScript.
   RunJavaScriptBlockedTest("load_clearkey_no_js.html", false);
 
 #if defined(WIDEVINE_CDM_AVAILABLE)
   RunJavaScriptBlockedTest("load_widevine_no_js.html", true);
-#endif
+#endif  // defined(WIDEVINE_CDM_AVAILABLE)
+#endif  // defined(ENABLE_PEPPER_CDMS)
 
 #if !defined(DISABLE_NACL)
   RunJavaScriptBlockedTest("load_nacl_no_js.html", true);
-#endif
+#endif  // !defined(DISABLE_NACL)
 }
 
 #endif  // defined(ENABLE_PLUGINS)

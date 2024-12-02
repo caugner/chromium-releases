@@ -9,13 +9,13 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
-#include "webkit/quota/quota_manager.h"
+#include "webkit/browser/quota/quota_manager.h"
 
 using content::BrowserThread;
 using content::BrowserContext;
@@ -23,8 +23,8 @@ using content::BrowserContext;
 // static
 BrowsingDataQuotaHelper* BrowsingDataQuotaHelper::Create(Profile* profile) {
   return new BrowsingDataQuotaHelperImpl(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI).get(),
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO).get(),
       BrowserContext::GetDefaultStoragePartition(profile)->GetQuotaManager());
 }
 

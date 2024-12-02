@@ -9,10 +9,10 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_split.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/browser/accessibility/accessibility_tree_formatter.h"
 #include "content/browser/accessibility/browser_accessibility.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
@@ -20,8 +20,8 @@
 #include "content/port/browser/render_widget_host_view_port.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_paths.h"
-#include "content/public/test/test_utils.h"
 #include "content/shell/shell.h"
+#include "content/test/accessibility_browser_test_utils.h"
 #include "content/test/content_browser_test.h"
 #include "content/test/content_browser_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -124,13 +124,6 @@ class DumpAccessibilityTreeTest : public ContentBrowserTest {
 void DumpAccessibilityTreeTest::RunTest(
     const base::FilePath::CharType* file_path) {
   NavigateToURL(shell(), GURL("about:blank"));
-  RenderWidgetHostViewPort* host_view = static_cast<RenderWidgetHostViewPort*>(
-      shell()->web_contents()->GetRenderWidgetHostView());
-  RenderWidgetHostImpl* host =
-      RenderWidgetHostImpl::From(host_view->GetRenderWidgetHost());
-  RenderViewHostImpl* view_host = static_cast<RenderViewHostImpl*>(host);
-  view_host->set_save_accessibility_tree_for_testing(true);
-  view_host->SetAccessibilityMode(AccessibilityModeComplete);
 
   // Setup test paths.
   base::FilePath dir_test_data;
@@ -170,14 +163,14 @@ void DumpAccessibilityTreeTest::RunTest(
   html_contents16 = UTF8ToUTF16(html_contents);
   GURL url = GetTestUrl("accessibility",
                         html_file.BaseName().MaybeAsASCII().c_str());
-  scoped_refptr<MessageLoopRunner> loop_runner(new MessageLoopRunner);
-  view_host->SetAccessibilityLoadCompleteCallbackForTesting(
-      loop_runner->QuitClosure());
+  AccessibilityNotificationWaiter waiter(
+      shell(), AccessibilityModeComplete,
+      AccessibilityNotificationLoadComplete);
   NavigateToURL(shell(), url);
+  waiter.WaitForNotification();
 
-  // Wait for the tree.
-  loop_runner->Run();
-
+  RenderWidgetHostViewPort* host_view = RenderWidgetHostViewPort::FromRWHV(
+      shell()->web_contents()->GetRenderWidgetHostView());
   AccessibilityTreeFormatter formatter(
       host_view->GetBrowserAccessibilityManager()->GetRoot());
 
@@ -271,8 +264,7 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaInvalid) {
   RunTest(FILE_PATH_LITERAL("aria-invalid.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       MAYBE(AccessibilityAriaLevel)) {
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaLevel) {
   RunTest(FILE_PATH_LITERAL("aria-level.html"));
 }
 

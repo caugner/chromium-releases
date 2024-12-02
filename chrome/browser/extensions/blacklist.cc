@@ -142,11 +142,11 @@ Blacklist::ScopedDatabaseManagerForTest::~ScopedDatabaseManagerForTest() {
 Blacklist::Blacklist(ExtensionPrefs* prefs) : prefs_(prefs) {
   scoped_refptr<SafeBrowsingDatabaseManager> database_manager =
       g_database_manager.Get().get();
-  if (database_manager) {
-    registrar_.Add(this,
-                   chrome::NOTIFICATION_SAFE_BROWSING_UPDATE_COMPLETE,
-                   content::Source<SafeBrowsingDatabaseManager>(
-                        database_manager));
+  if (database_manager.get()) {
+    registrar_.Add(
+        this,
+        chrome::NOTIFICATION_SAFE_BROWSING_UPDATE_COMPLETE,
+        content::Source<SafeBrowsingDatabaseManager>(database_manager.get()));
   }
 
   // TODO(kalman): Delete anything from the pref blacklist that is in the
@@ -180,10 +180,9 @@ void Blacklist::GetBlacklistedIDs(const std::set<std::string>& ids,
       pref_blacklisted_ids.insert(*it);
   }
 
-  if (!g_database_manager.Get().get()) {
+  if (!g_database_manager.Get().get().get()) {
     base::MessageLoopProxy::current()->PostTask(
-        FROM_HERE,
-        base::Bind(callback, pref_blacklisted_ids));
+        FROM_HERE, base::Bind(callback, pref_blacklisted_ids));
     return;
   }
 

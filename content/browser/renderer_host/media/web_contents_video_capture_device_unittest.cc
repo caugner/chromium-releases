@@ -12,6 +12,7 @@
 #include "base/timer.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/renderer_host/media/video_capture_buffer_pool.h"
+#include "content/browser/renderer_host/media/video_capture_oracle.h"
 #include "content/browser/renderer_host/media/web_contents_capture_util.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
@@ -21,7 +22,7 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "content/test/test_web_contents.h"
 #include "media/base/video_util.h"
@@ -174,7 +175,8 @@ class CaptureTestView : public TestRenderWidgetHostView {
       const scoped_refptr<media::VideoFrame>& target,
       const base::Callback<void(bool)>& callback) OVERRIDE {
     SkColor c = ConvertRgbToYuv(controller_->GetSolidColor());
-    media::FillYUV(target, SkColorGetR(c), SkColorGetG(c), SkColorGetB(c));
+    media::FillYUV(
+        target.get(), SkColorGetR(c), SkColorGetG(c), SkColorGetB(c));
     callback.Run(true);
     controller_->SignalCopy();
   }
@@ -196,9 +198,11 @@ class CaptureTestView : public TestRenderWidgetHostView {
     if (subscriber_ && subscriber_->ShouldCaptureFrame(present_time,
                                                        &target, &callback)) {
       SkColor c = ConvertRgbToYuv(controller_->GetSolidColor());
-      media::FillYUV(target, SkColorGetR(c), SkColorGetG(c), SkColorGetB(c));
-      BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-          base::Bind(callback, present_time, true));
+      media::FillYUV(
+          target.get(), SkColorGetR(c), SkColorGetG(c), SkColorGetB(c));
+      BrowserThread::PostTask(BrowserThread::UI,
+                              FROM_HERE,
+                              base::Bind(callback, present_time, true));
       controller_->SignalCopy();
     }
   }
@@ -226,10 +230,11 @@ class CaptureTestRenderViewHost : public TestRenderViewHost {
                             RenderViewHostDelegate* delegate,
                             RenderWidgetHostDelegate* widget_delegate,
                             int routing_id,
+                            int main_frame_routing_id,
                             bool swapped_out,
                             CaptureTestSourceController* controller)
       : TestRenderViewHost(instance, delegate, widget_delegate, routing_id,
-                           swapped_out),
+                           main_frame_routing_id, swapped_out),
         controller_(controller) {
     // Override the default view installed by TestRenderViewHost; we need
     // our special subclass which has mocked-out tab capture support.
@@ -286,10 +291,12 @@ class CaptureTestRenderViewHostFactory : public RenderViewHostFactory {
       RenderViewHostDelegate* delegate,
       RenderWidgetHostDelegate* widget_delegate,
       int routing_id,
+      int main_frame_routing_id,
       bool swapped_out,
       SessionStorageNamespace* session_storage_namespace) OVERRIDE {
     return new CaptureTestRenderViewHost(instance, delegate, widget_delegate,
-                                         routing_id, swapped_out, controller_);
+                                         routing_id, main_frame_routing_id,
+                                         swapped_out, controller_);
   }
  private:
   CaptureTestSourceController* controller_;
@@ -410,8 +417,8 @@ class StubConsumer : public media::VideoCaptureDevice::EventHandler {
 // Test harness that sets up a minimal environment with necessary stubs.
 class WebContentsVideoCaptureDeviceTest : public testing::Test {
  public:
-  WebContentsVideoCaptureDeviceTest() {}
-
+  // This is public because C++ method pointer scoping rules are silly and make
+  // this hard to use with Bind().
   void ResetWebContents() {
     web_contents_.reset();
   }
@@ -426,10 +433,6 @@ class WebContentsVideoCaptureDeviceTest : public testing::Test {
     // custom RenderViewHostFactory, or else we implant some kind of delegated
     // CopyFromBackingStore functionality into TestRenderViewHost itself.
 
-    // The main thread will serve as the UI thread as well as the test thread.
-    // We'll manually pump the run loop at appropriate times in the test.
-    ui_thread_.reset(new TestBrowserThread(BrowserThread::UI, &message_loop_));
-
     render_process_host_factory_.reset(new MockRenderProcessHostFactory());
     // Create our (self-registering) RVH factory, so that when we create a
     // WebContents, it in turn creates CaptureTestRenderViewHosts.
@@ -440,10 +443,10 @@ class WebContentsVideoCaptureDeviceTest : public testing::Test {
 
     scoped_refptr<SiteInstance> site_instance =
         SiteInstance::Create(browser_context_.get());
-    static_cast<SiteInstanceImpl*>(site_instance.get())->
-        set_render_process_host_factory(render_process_host_factory_.get());
+    SiteInstanceImpl::set_render_process_host_factory(
+        render_process_host_factory_.get());
     web_contents_.reset(
-        TestWebContents::Create(browser_context_.get(), site_instance));
+        TestWebContents::Create(browser_context_.get(), site_instance.get()));
 
     // This is actually a CaptureTestRenderViewHost.
     RenderWidgetHostImpl* rwh =
@@ -456,7 +459,7 @@ class WebContentsVideoCaptureDeviceTest : public testing::Test {
 
     device_.reset(WebContentsVideoCaptureDevice::Create(device_id));
 
-    content::RunAllPendingInMessageLoop();
+    base::RunLoop().RunUntilIdle();
   }
 
   virtual void TearDown() {
@@ -470,14 +473,15 @@ class WebContentsVideoCaptureDeviceTest : public testing::Test {
       device_.reset();
     }
 
-    content::RunAllPendingInMessageLoop();
+    base::RunLoop().RunUntilIdle();
 
     // Destroy the browser objects.
     web_contents_.reset();
     browser_context_.reset();
 
-    content::RunAllPendingInMessageLoop();
+    base::RunLoop().RunUntilIdle();
 
+    SiteInstanceImpl::set_render_process_host_factory(NULL);
     render_view_host_factory_.reset();
     render_process_host_factory_.reset();
   }
@@ -511,11 +515,6 @@ class WebContentsVideoCaptureDeviceTest : public testing::Test {
   // The controller controls which pixel patterns to produce.
   CaptureTestSourceController controller_;
 
-  // We run the UI message loop on the main thread. The capture device
-  // will also spin up its own threads.
-  base::MessageLoopForUI message_loop_;
-  scoped_ptr<TestBrowserThread> ui_thread_;
-
   // Self-registering RenderProcessHostFactory.
   scoped_ptr<MockRenderProcessHostFactory> render_process_host_factory_;
 
@@ -530,7 +529,7 @@ class WebContentsVideoCaptureDeviceTest : public testing::Test {
   // Finally, the WebContentsVideoCaptureDevice under test.
   scoped_ptr<media::VideoCaptureDevice> device_;
 
-  DISALLOW_COPY_AND_ASSIGN(WebContentsVideoCaptureDeviceTest);
+  TestBrowserThreadBundle thread_bundle_;
 };
 
 TEST_F(WebContentsVideoCaptureDeviceTest, InvalidInitialWebContentsError) {
@@ -556,7 +555,7 @@ TEST_F(WebContentsVideoCaptureDeviceTest, WebContentsDestroyed) {
   SimulateDrawEvent();
   ASSERT_NO_FATAL_FAILURE(consumer()->WaitForNextColor(SK_ColorRED));
 
-  content::RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
 
   // Post a task to close the tab. We should see an error reported to the
   // consumer.
@@ -580,7 +579,7 @@ TEST_F(WebContentsVideoCaptureDeviceTest,
   // DestroyCaptureMachineOnUIThread() tasks pending on the current (UI) message
   // loop. These should both succeed without crashing, and the machine should
   // wind up in the idle state.
-  content::RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(WebContentsVideoCaptureDeviceTest, StopWithRendererWorkToDo) {
@@ -591,7 +590,8 @@ TEST_F(WebContentsVideoCaptureDeviceTest, StopWithRendererWorkToDo) {
                      consumer());
   device()->Start();
   // Make a point of not running the UI messageloop here.
-  content::RunAllPendingInMessageLoop();
+  // TODO(ajwong): Why do we care?
+  base::RunLoop().RunUntilIdle();
 
   for (int i = 0; i < 10; ++i)
     SimulateDrawEvent();
@@ -603,14 +603,14 @@ TEST_F(WebContentsVideoCaptureDeviceTest, StopWithRendererWorkToDo) {
   // loop. These should both succeed without crashing, and the machine should
   // wind up in the idle state.
   ASSERT_FALSE(consumer()->HasError());
-  content::RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
   ASSERT_FALSE(consumer()->HasError());
 }
 
 TEST_F(WebContentsVideoCaptureDeviceTest, DeviceRestart) {
   device()->Allocate(kTestWidth, kTestHeight, kTestFramesPerSecond, consumer());
   device()->Start();
-  content::RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
   source()->SetSolidColor(SK_ColorRED);
   SimulateDrawEvent();
   SimulateDrawEvent();
@@ -625,7 +625,7 @@ TEST_F(WebContentsVideoCaptureDeviceTest, DeviceRestart) {
   // Device is stopped, but content can still be animating.
   SimulateDrawEvent();
   SimulateDrawEvent();
-  content::RunAllPendingInMessageLoop();
+  base::RunLoop().RunUntilIdle();
 
   device()->Start();
   source()->SetSolidColor(SK_ColorBLUE);
@@ -721,469 +721,6 @@ TEST_F(WebContentsVideoCaptureDeviceTest, BadFramesGoodFrames) {
 
   device()->Stop();
   device()->DeAllocate();
-}
-
-void SteadyStateSampleAndAdvance(base::TimeDelta vsync,
-                                 SmoothEventSampler* sampler, base::Time* t) {
-  ASSERT_TRUE(sampler->AddEventAndConsiderSampling(*t));
-  ASSERT_TRUE(sampler->HasUnrecordedEvent());
-  sampler->RecordSample();
-  ASSERT_FALSE(sampler->HasUnrecordedEvent());
-  ASSERT_FALSE(sampler->IsOverdueForSamplingAt(*t));
-  *t += vsync;
-  ASSERT_FALSE(sampler->IsOverdueForSamplingAt(*t));
-}
-
-void SteadyStateNoSampleAndAdvance(base::TimeDelta vsync,
-                                   SmoothEventSampler* sampler, base::Time* t) {
-  ASSERT_FALSE(sampler->AddEventAndConsiderSampling(*t));
-  ASSERT_TRUE(sampler->HasUnrecordedEvent());
-  ASSERT_FALSE(sampler->IsOverdueForSamplingAt(*t));
-  *t += vsync;
-  ASSERT_FALSE(sampler->IsOverdueForSamplingAt(*t));
-}
-
-void TestRedundantCaptureStrategy(base::TimeDelta capture_period,
-                                  int redundant_capture_goal,
-                                  SmoothEventSampler* sampler, base::Time* t) {
-  // Before any events have been considered, we're overdue for sampling.
-  ASSERT_TRUE(sampler->IsOverdueForSamplingAt(*t));
-
-  // Consider the first event.  We want to sample that.
-  ASSERT_FALSE(sampler->HasUnrecordedEvent());
-  ASSERT_TRUE(sampler->AddEventAndConsiderSampling(*t));
-  ASSERT_TRUE(sampler->HasUnrecordedEvent());
-  sampler->RecordSample();
-  ASSERT_FALSE(sampler->HasUnrecordedEvent());
-
-  // After more than one capture period has passed without considering an event,
-  // we should repeatedly be overdue for sampling.  However, once the redundant
-  // capture goal is achieved, we should no longer be overdue for sampling.
-  *t += capture_period * 4;
-  for (int i = 0; i < redundant_capture_goal; i++) {
-    SCOPED_TRACE(base::StringPrintf("Iteration %d", i));
-    ASSERT_FALSE(sampler->HasUnrecordedEvent());
-    ASSERT_TRUE(sampler->IsOverdueForSamplingAt(*t))
-        << "Should sample until redundant capture goal is hit";
-    sampler->RecordSample();
-    *t += capture_period;  // Timer fires once every capture period.
-  }
-  ASSERT_FALSE(sampler->IsOverdueForSamplingAt(*t))
-      << "Should not be overdue once redundant capture goal achieved.";
-}
-
-// 60Hz sampled at 30Hz should produce 30Hz.  In addition, this test contains
-// much more comprehensive before/after/edge-case scenarios than the others.
-TEST(SmoothEventSamplerTest, Sample60HertzAt30Hertz) {
-  const base::TimeDelta capture_period = base::TimeDelta::FromSeconds(1) / 30;
-  const int redundant_capture_goal = 200;
-  const base::TimeDelta vsync = base::TimeDelta::FromSeconds(1) / 60;
-
-  SmoothEventSampler sampler(capture_period, true, redundant_capture_goal);
-  base::Time t;
-  ASSERT_TRUE(base::Time::FromString("Sat, 23 Mar 2013 1:21:08 GMT", &t));
-
-  TestRedundantCaptureStrategy(capture_period, redundant_capture_goal,
-                               &sampler, &t);
-
-  // Steady state, we should capture every other vsync, indefinitely.
-  for (int i = 0; i < 100; i++) {
-    SCOPED_TRACE(base::StringPrintf("Iteration %d", i));
-    SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateNoSampleAndAdvance(vsync, &sampler, &t);
-  }
-
-  // Now pretend we're limited by backpressure in the pipeline. In this scenario
-  // case we are adding events but not sampling them.
-  for (int i = 0; i < 20; i++) {
-    SCOPED_TRACE(base::StringPrintf("Iteration %d", i));
-    ASSERT_EQ(i >= 7, sampler.IsOverdueForSamplingAt(t));
-    ASSERT_TRUE(sampler.AddEventAndConsiderSampling(t));
-    ASSERT_TRUE(sampler.HasUnrecordedEvent());
-    t += vsync;
-  }
-
-  // Now suppose we can sample again. We should be back in the steady state,
-  // but at a different phase.
-  ASSERT_TRUE(sampler.IsOverdueForSamplingAt(t));
-  for (int i = 0; i < 100; i++) {
-    SCOPED_TRACE(base::StringPrintf("Iteration %d", i));
-    SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateNoSampleAndAdvance(vsync, &sampler, &t);
-  }
-}
-
-// 50Hz sampled at 30Hz should produce a sequence where some frames are skipped.
-TEST(SmoothEventSamplerTest, Sample50HertzAt30Hertz) {
-  const base::TimeDelta capture_period = base::TimeDelta::FromSeconds(1) / 30;
-  const int redundant_capture_goal = 2;
-  const base::TimeDelta vsync = base::TimeDelta::FromSeconds(1) / 50;
-
-  SmoothEventSampler sampler(capture_period, true, redundant_capture_goal);
-  base::Time t;
-  ASSERT_TRUE(base::Time::FromString("Sat, 23 Mar 2013 1:21:08 GMT", &t));
-
-  TestRedundantCaptureStrategy(capture_period, redundant_capture_goal,
-                               &sampler, &t);
-
-  // Steady state, we should capture 1st, 2nd and 4th frames out of every five
-  // frames, indefinitely.
-  for (int i = 0; i < 100; i++) {
-    SCOPED_TRACE(base::StringPrintf("Iteration %d", i));
-    SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateNoSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateNoSampleAndAdvance(vsync, &sampler, &t);
-  }
-
-  // Now pretend we're limited by backpressure in the pipeline. In this scenario
-  // case we are adding events but not sampling them.
-  for (int i = 0; i < 12; i++) {
-    SCOPED_TRACE(base::StringPrintf("Iteration %d", i));
-    ASSERT_EQ(i >= 5, sampler.IsOverdueForSamplingAt(t));
-    ASSERT_TRUE(sampler.AddEventAndConsiderSampling(t));
-    t += vsync;
-  }
-
-  // Now suppose we can sample again. We should be back in the steady state
-  // again.
-  ASSERT_TRUE(sampler.IsOverdueForSamplingAt(t));
-  for (int i = 0; i < 100; i++) {
-    SCOPED_TRACE(base::StringPrintf("Iteration %d", i));
-    SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateNoSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateNoSampleAndAdvance(vsync, &sampler, &t);
-  }
-}
-
-// 75Hz sampled at 30Hz should produce a sequence where some frames are skipped.
-TEST(SmoothEventSamplerTest, Sample75HertzAt30Hertz) {
-  const base::TimeDelta capture_period = base::TimeDelta::FromSeconds(1) / 30;
-  const int redundant_capture_goal = 32;
-  const base::TimeDelta vsync = base::TimeDelta::FromSeconds(1) / 75;
-
-  SmoothEventSampler sampler(capture_period, true, redundant_capture_goal);
-  base::Time t;
-  ASSERT_TRUE(base::Time::FromString("Sat, 23 Mar 2013 1:21:08 GMT", &t));
-
-  TestRedundantCaptureStrategy(capture_period, redundant_capture_goal,
-                               &sampler, &t);
-
-  // Steady state, we should capture 1st and 3rd frames out of every five
-  // frames, indefinitely.
-  SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-  SteadyStateNoSampleAndAdvance(vsync, &sampler, &t);
-  for (int i = 0; i < 100; i++) {
-    SCOPED_TRACE(base::StringPrintf("Iteration %d", i));
-    SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateNoSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateNoSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateNoSampleAndAdvance(vsync, &sampler, &t);
-  }
-
-  // Now pretend we're limited by backpressure in the pipeline. In this scenario
-  // case we are adding events but not sampling them.
-  for (int i = 0; i < 20; i++) {
-    SCOPED_TRACE(base::StringPrintf("Iteration %d", i));
-    ASSERT_EQ(i >= 8, sampler.IsOverdueForSamplingAt(t));
-    ASSERT_TRUE(sampler.AddEventAndConsiderSampling(t));
-    t += vsync;
-  }
-
-  // Now suppose we can sample again. We capture the next frame, and not the one
-  // after that, and then we're back in the steady state again.
-  ASSERT_TRUE(sampler.IsOverdueForSamplingAt(t));
-  SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-  SteadyStateNoSampleAndAdvance(vsync, &sampler, &t);
-  for (int i = 0; i < 100; i++) {
-    SCOPED_TRACE(base::StringPrintf("Iteration %d", i));
-    SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateNoSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateNoSampleAndAdvance(vsync, &sampler, &t);
-    SteadyStateNoSampleAndAdvance(vsync, &sampler, &t);
-  }
-}
-
-// 30Hz sampled at 30Hz should produce 30Hz.
-TEST(SmoothEventSamplerTest, Sample30HertzAt30Hertz) {
-  const base::TimeDelta capture_period = base::TimeDelta::FromSeconds(1) / 30;
-  const int redundant_capture_goal = 1;
-  const base::TimeDelta vsync = base::TimeDelta::FromSeconds(1) / 30;
-
-  SmoothEventSampler sampler(capture_period, true, redundant_capture_goal);
-  base::Time t;
-  ASSERT_TRUE(base::Time::FromString("Sat, 23 Mar 2013 1:21:08 GMT", &t));
-
-  TestRedundantCaptureStrategy(capture_period, redundant_capture_goal,
-                               &sampler, &t);
-
-  // Steady state, we should capture every vsync, indefinitely.
-  for (int i = 0; i < 200; i++) {
-    SCOPED_TRACE(base::StringPrintf("Iteration %d", i));
-    SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-  }
-
-  // Now pretend we're limited by backpressure in the pipeline. In this scenario
-  // case we are adding events but not sampling them.
-  for (int i = 0; i < 7; i++) {
-    SCOPED_TRACE(base::StringPrintf("Iteration %d", i));
-    ASSERT_EQ(i >= 3, sampler.IsOverdueForSamplingAt(t));
-    ASSERT_TRUE(sampler.AddEventAndConsiderSampling(t));
-    t += vsync;
-  }
-
-  // Now suppose we can sample again. We should be back in the steady state.
-  ASSERT_TRUE(sampler.IsOverdueForSamplingAt(t));
-  for (int i = 0; i < 100; i++) {
-    SCOPED_TRACE(base::StringPrintf("Iteration %d", i));
-    SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-  }
-}
-
-// 24Hz sampled at 30Hz should produce 24Hz.
-TEST(SmoothEventSamplerTest, Sample24HertzAt30Hertz) {
-  const base::TimeDelta capture_period = base::TimeDelta::FromSeconds(1) / 30;
-  const int redundant_capture_goal = 333;
-  const base::TimeDelta vsync = base::TimeDelta::FromSeconds(1) / 24;
-
-  SmoothEventSampler sampler(capture_period, true, redundant_capture_goal);
-  base::Time t;
-  ASSERT_TRUE(base::Time::FromString("Sat, 23 Mar 2013 1:21:08 GMT", &t));
-
-  TestRedundantCaptureStrategy(capture_period, redundant_capture_goal,
-                               &sampler, &t);
-
-  // Steady state, we should capture every vsync, indefinitely.
-  for (int i = 0; i < 200; i++) {
-    SCOPED_TRACE(base::StringPrintf("Iteration %d", i));
-    SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-  }
-
-  // Now pretend we're limited by backpressure in the pipeline. In this scenario
-  // case we are adding events but not sampling them.
-  for (int i = 0; i < 7; i++) {
-    SCOPED_TRACE(base::StringPrintf("Iteration %d", i));
-    ASSERT_EQ(i >= 3, sampler.IsOverdueForSamplingAt(t));
-    ASSERT_TRUE(sampler.AddEventAndConsiderSampling(t));
-    t += vsync;
-  }
-
-  // Now suppose we can sample again. We should be back in the steady state.
-  ASSERT_TRUE(sampler.IsOverdueForSamplingAt(t));
-  for (int i = 0; i < 100; i++) {
-    SCOPED_TRACE(base::StringPrintf("Iteration %d", i));
-    SteadyStateSampleAndAdvance(vsync, &sampler, &t);
-  }
-}
-
-TEST(SmoothEventSamplerTest, DoubleDrawAtOneTimeStillDirties) {
-  const base::TimeDelta capture_period = base::TimeDelta::FromSeconds(1) / 30;
-  const base::TimeDelta overdue_period = base::TimeDelta::FromSeconds(1);
-
-  SmoothEventSampler sampler(capture_period, true, 1);
-  base::Time t;
-  ASSERT_TRUE(base::Time::FromString("Sat, 23 Mar 2013 1:21:08 GMT", &t));
-
-  ASSERT_TRUE(sampler.AddEventAndConsiderSampling(t));
-  sampler.RecordSample();
-  ASSERT_FALSE(sampler.IsOverdueForSamplingAt(t))
-      << "Sampled last event; should not be dirty.";
-  t += overdue_period;
-
-  // Now simulate 2 events with the same clock value.
-  ASSERT_TRUE(sampler.AddEventAndConsiderSampling(t));
-  sampler.RecordSample();
-  ASSERT_FALSE(sampler.AddEventAndConsiderSampling(t))
-      << "Two events at same time -- expected second not to be sampled.";
-  ASSERT_TRUE(sampler.IsOverdueForSamplingAt(t + overdue_period))
-      << "Second event should dirty the capture state.";
-  sampler.RecordSample();
-  ASSERT_FALSE(sampler.IsOverdueForSamplingAt(t + overdue_period));
-}
-
-TEST(SmoothEventSamplerTest, FallbackToPollingIfUpdatesUnreliable) {
-  const base::TimeDelta timer_interval = base::TimeDelta::FromSeconds(1) / 30;
-
-  SmoothEventSampler should_not_poll(timer_interval, true, 1);
-  SmoothEventSampler should_poll(timer_interval, false, 1);
-  base::Time t;
-  ASSERT_TRUE(base::Time::FromString("Sat, 23 Mar 2013 1:21:08 GMT", &t));
-
-  // Do one round of the "happy case" where an event was received and
-  // RecordSample() was called by the client.
-  ASSERT_TRUE(should_not_poll.AddEventAndConsiderSampling(t));
-  ASSERT_TRUE(should_poll.AddEventAndConsiderSampling(t));
-  should_not_poll.RecordSample();
-  should_poll.RecordSample();
-
-  // One time period ahead, neither sampler says we're overdue.
-  for (int i = 0; i < 3; i++) {
-    t += timer_interval;
-    ASSERT_FALSE(should_not_poll.IsOverdueForSamplingAt(t))
-        << "Sampled last event; should not be dirty.";
-    ASSERT_FALSE(should_poll.IsOverdueForSamplingAt(t))
-        << "Dirty interval has not elapsed yet.";
-  }
-
-  // Next time period ahead, both samplers say we're overdue.  The non-polling
-  // sampler is returning true here because it has been configured to allow one
-  // redundant capture.
-  t += timer_interval;
-  ASSERT_TRUE(should_not_poll.IsOverdueForSamplingAt(t))
-      << "Sampled last event; is dirty one time only to meet redundancy goal.";
-  ASSERT_TRUE(should_poll.IsOverdueForSamplingAt(t))
-      << "If updates are unreliable, must fall back to polling when idle.";
-  should_not_poll.RecordSample();
-  should_poll.RecordSample();
-
-  // Forever more, the non-polling sampler returns false while the polling one
-  // returns true.
-  for (int i = 0; i < 100; ++i) {
-    t += timer_interval;
-    ASSERT_FALSE(should_not_poll.IsOverdueForSamplingAt(t))
-        << "Sampled last event; should not be dirty.";
-    ASSERT_TRUE(should_poll.IsOverdueForSamplingAt(t))
-        << "If updates are unreliable, must fall back to polling when idle.";
-    should_poll.RecordSample();
-  }
-  t += timer_interval / 3;
-  ASSERT_FALSE(should_not_poll.IsOverdueForSamplingAt(t))
-      << "Sampled last event; should not be dirty.";
-  ASSERT_TRUE(should_poll.IsOverdueForSamplingAt(t))
-      << "If updates are unreliable, must fall back to polling when idle.";
-  should_poll.RecordSample();
-}
-
-struct DataPoint {
-  bool should_capture;
-  double increment_ms;
-};
-
-void ReplayCheckingSamplerDecisions(const DataPoint* data_points,
-                                    size_t num_data_points,
-                                    SmoothEventSampler* sampler) {
-  base::Time t;
-  ASSERT_TRUE(base::Time::FromString("Sat, 23 Mar 2013 1:21:08 GMT", &t));
-  for (size_t i = 0; i < num_data_points; ++i) {
-    t += base::TimeDelta::FromMicroseconds(
-        static_cast<int64>(data_points[i].increment_ms * 1000));
-    ASSERT_EQ(data_points[i].should_capture,
-              sampler->AddEventAndConsiderSampling(t))
-        << "at data_points[" << i << ']';
-    if (data_points[i].should_capture)
-      sampler->RecordSample();
-  }
-}
-
-TEST(SmoothEventSamplerTest, DrawingAt24FpsWith60HzVsyncSampledAt30Hertz) {
-  // Actual capturing of timing data: Initial instability as a 24 FPS video was
-  // started from a still screen, then clearly followed by steady-state.
-  static const DataPoint data_points[] = {
-    { true, 1437.93 }, { true, 150.484 }, { true, 217.362 }, { true, 50.161 },
-    { true, 33.44 }, { false, 0 }, { true, 16.721 }, { true, 66.88 },
-    { true, 50.161 }, { false, 0 }, { false, 0 }, { true, 50.16 },
-    { true, 33.441 }, { true, 16.72 }, { false, 16.72 }, { true, 117.041 },
-    { true, 16.72 }, { false, 16.72 }, { true, 50.161 }, { true, 50.16 },
-    { true, 33.441 }, { true, 33.44 }, { true, 33.44 }, { true, 16.72 },
-    { false, 0 }, { true, 50.161 }, { false, 0 }, { true, 33.44 },
-    { true, 16.72 }, { false, 16.721 }, { true, 66.881 }, { false, 0 },
-    { true, 33.441 }, { true, 16.72 }, { true, 50.16 }, { true, 16.72 },
-    { false, 16.721 }, { true, 50.161 }, { true, 50.16 }, { false, 0 },
-    { true, 33.441 }, { true, 50.337 }, { true, 50.183 }, { true, 16.722 },
-    { true, 50.161 }, { true, 33.441 }, { true, 50.16 }, { true, 33.441 },
-    { true, 50.16 }, { true, 33.441 }, { true, 50.16 }, { true, 33.44 },
-    { true, 50.161 }, { true, 50.16 }, { true, 33.44 }, { true, 33.441 },
-    { true, 50.16 }, { true, 50.161 }, { true, 33.44 }, { true, 33.441 },
-    { true, 50.16 }, { true, 33.44 }, { true, 50.161 }, { true, 33.44 },
-    { true, 50.161 }, { true, 33.44 }, { true, 50.161 }, { true, 33.44 },
-    { true, 83.601 }, { true, 16.72 }, { true, 33.44 }, { false, 0 }
-  };
-
-  SmoothEventSampler sampler(base::TimeDelta::FromSeconds(1) / 30, true, 3);
-  ReplayCheckingSamplerDecisions(data_points, arraysize(data_points), &sampler);
-}
-
-TEST(SmoothEventSamplerTest, DrawingAt30FpsWith60HzVsyncSampledAt30Hertz) {
-  // Actual capturing of timing data: Initial instability as a 30 FPS video was
-  // started from a still screen, then followed by steady-state.  Drawing
-  // framerate from the video rendering was a bit volatile, but averaged 30 FPS.
-  static const DataPoint data_points[] = {
-    { true, 2407.69 }, { true, 16.733 }, { true, 217.362 }, { true, 33.441 },
-    { true, 33.44 }, { true, 33.44 }, { true, 33.441 }, { true, 33.44 },
-    { true, 33.44 }, { true, 33.441 }, { true, 33.44 }, { true, 33.44 },
-    { true, 16.721 }, { true, 33.44 }, { false, 0 }, { true, 50.161 },
-    { true, 50.16 }, { false, 0 }, { true, 50.161 }, { true, 33.44 },
-    { true, 16.72 }, { false, 0 }, { false, 16.72 }, { true, 66.881 },
-    { false, 0 }, { true, 33.44 }, { true, 16.72 }, { true, 50.161 },
-    { false, 0 }, { true, 33.538 }, { true, 33.526 }, { true, 33.447 },
-    { true, 33.445 }, { true, 33.441 }, { true, 16.721 }, { true, 33.44 },
-    { true, 33.44 }, { true, 50.161 }, { true, 16.72 }, { true, 33.44 },
-    { true, 33.441 }, { true, 33.44 }, { false, 0 }, { false, 16.72 },
-    { true, 66.881 }, { true, 16.72 }, { false, 16.72 }, { true, 50.16 },
-    { true, 33.441 }, { true, 33.44 }, { true, 33.44 }, { true, 33.44 },
-    { true, 33.441 }, { true, 33.44 }, { true, 50.161 }, { false, 0 },
-    { true, 33.44 }, { true, 33.44 }, { true, 50.161 }, { true, 16.72 },
-    { true, 33.44 }, { true, 33.441 }, { false, 0 }, { true, 66.88 },
-    { true, 33.441 }, { true, 33.44 }, { true, 33.44 }, { false, 0 },
-    { true, 33.441 }, { true, 33.44 }, { true, 33.44 }, { false, 0 },
-    { true, 16.72 }, { true, 50.161 }, { false, 0 }, { true, 50.16 },
-    { false, 0.001 }, { true, 16.721 }, { true, 66.88 }, { true, 33.44 },
-    { true, 33.441 }, { true, 33.44 }, { true, 50.161 }, { true, 16.72 },
-    { false, 0 }, { true, 33.44 }, { false, 16.72 }, { true, 66.881 },
-    { true, 33.44 }, { true, 16.72 }, { true, 33.441 }, { false, 16.72 },
-    { true, 66.88 }, { true, 16.721 }, { true, 50.16 }, { true, 33.44 },
-    { true, 16.72 }, { true, 33.441 }, { true, 33.44 }, { true, 33.44 }
-  };
-
-  SmoothEventSampler sampler(base::TimeDelta::FromSeconds(1) / 30, true, 3);
-  ReplayCheckingSamplerDecisions(data_points, arraysize(data_points), &sampler);
-}
-
-TEST(SmoothEventSamplerTest, DrawingAt60FpsWith60HzVsyncSampledAt30Hertz) {
-  // Actual capturing of timing data: WebGL Acquarium demo
-  // (http://webglsamples.googlecode.com/hg/aquarium/aquarium.html) which ran
-  // between 55-60 FPS in the steady-state.
-  static const DataPoint data_points[] = {
-    { true, 16.72 }, { true, 16.72 }, { true, 4163.29 }, { true, 50.193 },
-    { true, 117.041 }, { true, 50.161 }, { true, 50.16 }, { true, 33.441 },
-    { true, 50.16 }, { true, 33.44 }, { false, 0 }, { false, 0 },
-    { true, 50.161 }, { true, 83.601 }, { true, 50.16 }, { true, 16.72 },
-    { true, 33.441 }, { false, 16.72 }, { true, 50.16 }, { true, 16.72 },
-    { false, 0.001 }, { true, 33.441 }, { false, 16.72 }, { true, 16.72 },
-    { true, 50.16 }, { false, 0 }, { true, 16.72 }, { true, 33.441 },
-    { false, 0 }, { true, 33.44 }, { false, 16.72 }, { true, 16.72 },
-    { true, 50.161 }, { false, 0 }, { true, 16.72 }, { true, 33.44 },
-    { false, 0 }, { true, 33.44 }, { false, 16.721 }, { true, 16.721 },
-    { true, 50.161 }, { false, 0 }, { true, 16.72 }, { true, 33.441 },
-    { false, 0 }, { true, 33.44 }, { false, 16.72 }, { true, 33.44 },
-    { false, 0 }, { true, 16.721 }, { true, 50.161 }, { false, 0 },
-    { true, 33.44 }, { false, 0 }, { true, 16.72 }, { true, 33.441 },
-    { false, 0 }, { true, 33.44 }, { false, 16.72 }, { true, 16.72 },
-    { true, 50.16 }, { false, 0 }, { true, 16.721 }, { true, 33.44 },
-    { false, 0 }, { true, 33.44 }, { false, 16.721 }, { true, 16.721 },
-    { true, 50.161 }, { false, 0 }, { true, 16.72 }, { true, 33.44 },
-    { false, 0 }, { true, 33.441 }, { false, 16.72 }, { true, 16.72 },
-    { true, 50.16 }, { false, 0 }, { true, 16.72 }, { true, 33.441 },
-    { true, 33.44 }, { false, 0 }, { true, 33.44 }, { true, 33.441 },
-    { false, 0 }, { true, 33.44 }, { true, 33.441 }, { false, 0 },
-    { true, 33.44 }, { false, 0 }, { true, 33.44 }, { false, 16.72 },
-    { true, 16.721 }, { true, 50.161 }, { false, 0 }, { true, 16.72 },
-    { true, 33.44 }, { true, 33.441 }, { false, 0 }, { true, 33.44 },
-    { true, 33.44 }, { false, 0 }, { true, 33.441 }, { false, 16.72 },
-    { true, 16.72 }, { true, 50.16 }, { false, 0 }, { true, 16.72 },
-    { true, 33.441 }, { false, 0 }, { true, 33.44 }, { false, 16.72 },
-    { true, 33.44 }, { false, 0 }, { true, 16.721 }, { true, 50.161 },
-    { false, 0 }, { true, 16.72 }, { true, 33.44 }, { false, 0 },
-    { true, 33.441 }, { false, 16.72 }, { true, 16.72 }, { true, 50.16 }
-  };
-
-  SmoothEventSampler sampler(base::TimeDelta::FromSeconds(1) / 30, true, 3);
-  ReplayCheckingSamplerDecisions(data_points, arraysize(data_points), &sampler);
 }
 
 }  // namespace

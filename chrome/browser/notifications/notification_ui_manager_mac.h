@@ -8,11 +8,12 @@
 #import <AppKit/AppKit.h>
 
 #include <map>
+#include <set>
 
 #include "base/basictypes.h"
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/notifications/balloon_notification_ui_manager.h"
 
 @protocol CrUserNotification;
@@ -33,6 +34,8 @@ class NotificationUIManagerMac : public BalloonNotificationUIManager {
   // NotificationUIManager:
   virtual void Add(const Notification& notification,
                    Profile* profile) OVERRIDE;
+  virtual std::set<std::string> GetAllIdsByProfileAndSourceOrigin(
+      Profile* profile, const GURL& source_origin) OVERRIDE;
   virtual bool CancelById(const std::string& notification_id) OVERRIDE;
   virtual bool CancelAllBySourceOrigin(const GURL& source_origin) OVERRIDE;
   virtual bool CancelAllByProfile(Profile* profile) OVERRIDE;
@@ -71,7 +74,7 @@ class NotificationUIManagerMac : public BalloonNotificationUIManager {
       const string16& replacement_id) const;
 
   // Cocoa class that receives callbacks from the NSUserNotificationCenter.
-  scoped_nsobject<NotificationCenterDelegate> delegate_;
+  base::scoped_nsobject<NotificationCenterDelegate> delegate_;
 
   // Maps notification_ids to ControllerNotifications. The map owns the value,
   // so it must be deleted when remvoed from the map. This is typically handled

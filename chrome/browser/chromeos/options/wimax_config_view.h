@@ -9,7 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
 #include "chrome/browser/chromeos/options/wifi_config_view.h"
 #include "ui/views/controls/button/button.h"
@@ -45,6 +45,7 @@ class WimaxConfigView : public ChildNetworkConfigView,
                              const ui::Event& event) OVERRIDE;
 
   // ChildNetworkConfigView:
+  virtual string16 GetTitle() const OVERRIDE;
   virtual views::View* GetInitiallyFocusedView() OVERRIDE;
   virtual bool CanLogin() OVERRIDE;
   virtual bool Login() OVERRIDE;

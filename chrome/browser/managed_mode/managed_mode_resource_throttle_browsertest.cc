@@ -53,7 +53,7 @@ IN_PROC_BROWSER_TEST_F(ManagedModeResourceThrottleTest,
       policy::ProfilePolicyConnectorFactory::GetForProfile(profile);
   policy::ManagedModePolicyProvider* policy_provider =
       connector->managed_mode_policy_provider();
-  policy_provider->SetPolicy(
+  policy_provider->SetLocalPolicyForTesting(
       policy::key::kContentPackDefaultFilteringBehavior,
       scoped_ptr<base::Value>(
           new base::FundamentalValue(ManagedModeURLFilter::BLOCK)));
@@ -62,8 +62,7 @@ IN_PROC_BROWSER_TEST_F(ManagedModeResourceThrottleTest,
   scoped_ptr<WebContents> web_contents(
       WebContents::Create(WebContents::CreateParams(profile)));
   NavigationController& controller = web_contents->GetController();
-  content::TestNavigationObserver observer(
-      content::Source<NavigationController>(&controller), 1);
+  content::TestNavigationObserver observer(web_contents.get());
   controller.LoadURL(GURL("http://www.example.com"), content::Referrer(),
                      content::PAGE_TRANSITION_TYPED, std::string());
   observer.Wait();

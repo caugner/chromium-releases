@@ -28,6 +28,10 @@
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
+#if defined(ENABLE_MANAGED_USERS)
+#include "chrome/browser/managed_mode/managed_user_service.h"
+#endif
+
 namespace chrome {
 
 int num_bookmark_urls_before_prompting = 15;
@@ -207,7 +211,7 @@ bool ConfirmDeleteBookmarkNode(const BookmarkNode* node,
 void ShowBookmarkAllTabsDialog(Browser* browser) {
   Profile* profile = browser->profile();
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile);
-  DCHECK(model && model->IsLoaded());
+  DCHECK(model && model->loaded());
 
   const BookmarkNode* parent = model->GetParentForNewNodes();
   BookmarkEditor::EditDetails details =
@@ -250,7 +254,7 @@ void GetURLAndTitleToBookmark(content::WebContents* web_contents,
 }
 
 void ToggleBookmarkBarWhenVisible(content::BrowserContext* browser_context) {
-  PrefService* prefs = components::UserPrefs::Get(browser_context);
+  PrefService* prefs = user_prefs::UserPrefs::Get(browser_context);
   const bool always_show = !prefs->GetBoolean(prefs::kShowBookmarkBar);
 
   // The user changed when the bookmark bar is shown, update the preferences.
@@ -276,7 +280,7 @@ string16 FormatBookmarkURLForDisplay(const GURL& url,
 bool IsAppsShortcutEnabled(const Profile* profile) {
 #if defined(USE_ASH)
   // Don't show the apps shortcut in ash when the app launcher is enabled.
-  if (apps::WasAppLauncherEnabled())
+  if (apps::IsAppLauncherEnabled())
     return false;
 #endif
 
@@ -284,6 +288,13 @@ bool IsAppsShortcutEnabled(const Profile* profile) {
 }
 
 bool ShouldShowAppsShortcutInBookmarkBar(Profile* profile) {
+#if defined(ENABLE_MANAGED_USERS)
+  // Managed users can not have apps installed currently so there's no need to
+  // show the apps shortcut.
+  if (ManagedUserService::ProfileIsManaged(profile))
+    return false;
+#endif
+
   return IsAppsShortcutEnabled(profile) &&
       profile->GetPrefs()->GetBoolean(prefs::kShowAppsShortcutInBookmarkBar);
 }

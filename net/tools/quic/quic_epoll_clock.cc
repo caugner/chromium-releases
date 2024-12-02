@@ -25,9 +25,5 @@ QuicTime QuicEpollClock::Now() const {
       QuicTime::Delta::FromMicroseconds(epoll_server_->NowInUsec()));
 }
 
-QuicTime::Delta QuicEpollClock::NowAsDeltaSinceUnixEpoch() const {
-  return QuicTime::Delta::FromMicroseconds(epoll_server_->NowInUsec());
-}
-
 }  // namespace tools
 }  // namespace net

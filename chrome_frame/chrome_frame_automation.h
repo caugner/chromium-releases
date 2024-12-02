@@ -226,7 +226,8 @@ class AutomationProxyCacheEntry
 
   DWORD WaitForThread(DWORD timeout) {  // NOLINT
     DCHECK(thread_.get());
-    return ::WaitForSingleObject(thread_->thread_handle(), timeout);
+    return ::WaitForSingleObject(thread_->thread_handle().platform_handle(),
+                                 timeout);
   }
 
   bool IsSameProfile(const std::wstring& name) const {
@@ -237,7 +238,7 @@ class AutomationProxyCacheEntry
     return thread_.get();
   }
 
-  MessageLoop* message_loop() const {
+  base::MessageLoop* message_loop() const {
     return thread_->message_loop();
   }
 

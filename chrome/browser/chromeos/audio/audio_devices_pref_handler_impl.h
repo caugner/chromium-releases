@@ -22,12 +22,16 @@ class AudioDevicesPrefHandlerImpl : public AudioDevicesPrefHandler {
   explicit AudioDevicesPrefHandlerImpl(PrefService* local_state);
 
   // Overridden from AudioDevicesPrefHandler.
-  virtual double GetOutputVolumeValue() OVERRIDE;
-  virtual bool GetOutputMuteValue() OVERRIDE;
-  virtual void SetOutputVolumeValue(double volume_percent) OVERRIDE;
-  virtual void SetOutputMuteValue(bool mute_on) OVERRIDE;
+  virtual double GetVolumeGainValue(const AudioDevice& device) OVERRIDE;
+  virtual void SetVolumeGainValue(const AudioDevice& device,
+                                  double value) OVERRIDE;
+
+  virtual bool GetMuteValue(const AudioDevice& device) OVERRIDE;
+  virtual void SetMuteValue(const AudioDevice& device, bool mute_on) OVERRIDE;
+
   virtual bool GetAudioCaptureAllowedValue() OVERRIDE;
   virtual bool GetAudioOutputAllowedValue() OVERRIDE;
+
   virtual void AddAudioPrefObserver(AudioPrefObserver* observer) OVERRIDE;
   virtual void RemoveAudioPrefObserver(AudioPrefObserver* observer) OVERRIDE;
 

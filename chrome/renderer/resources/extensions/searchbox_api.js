@@ -16,52 +16,6 @@ if (!chrome.embeddedSearch) {
     // DEPRECATED. TODO(sreeram): Remove once google.com no longer uses this.
     native function NavigateContentWindow();
 
-    function escapeHTML(text) {
-      return text.replace(/[<>&"']/g, function(match) {
-        switch (match) {
-          case '<': return '&lt;';
-          case '>': return '&gt;';
-          case '&': return '&amp;';
-          case '"': return '&quot;';
-          case "'": return '&apos;';
-        }
-      });
-    }
-
-    var safeObjects = {};
-
-    // Returns the |restrictedText| wrapped in a ShadowDOM.
-    function SafeWrap(restrictedText, height, opt_width, opt_fontSize,
-        opt_direction) {
-      var node = document.createElement('div');
-      var nodeShadow = safeObjects.createShadowRoot.apply(node);
-      nodeShadow.applyAuthorStyles = true;
-      nodeShadow.innerHTML =
-          '<div dir="auto" style="' +
-              (opt_width ? 'width: ' + opt_width + 'px !important;' : '') +
-              'height: ' + height + 'px !important;' +
-              'font-family: \'' + GetFont() + '\', \'Arial\' !important;' +
-              (opt_fontSize ?
-                  'font-size: ' + opt_fontSize + 'px !important;' : '') +
-              'overflow: hidden !important;' +
-              'text-overflow: ellipsis !important;' +
-              'white-space: nowrap !important"' +
-              (opt_direction ? ' dir="' + opt_direction + '"' : '') +
-              '>' +
-            restrictedText +
-          '</div>';
-      safeObjects.defineProperty(node, 'webkitShadowRoot', { value: null });
-      return node;
-    }
-
-    chrome.embeddedSearchOnWindowReady = function() {
-      // |embeddedSearchOnWindowReady| is used for initializing window context
-      // and should be called only once per context.
-      safeObjects.createShadowRoot = Element.prototype.webkitCreateShadowRoot;
-      safeObjects.defineProperty = Object.defineProperty;
-      delete window.chrome.embeddedSearchOnWindowReady;
-    };
-
     // =========================================================================
     //                           Exported functions
     // =========================================================================
@@ -94,12 +48,14 @@ if (!chrome.embeddedSearch) {
       native function GetAutocompleteResults();
       native function GetDisplayInstantResults();
       native function GetFontSize();
+      native function IsFocused();
       native function IsKeyCaptureEnabled();
       native function SetQuery();
       native function SetQueryFromAutocompleteResult();
       native function SetSuggestion();
       native function SetSuggestionFromAutocompleteResult();
       native function SetSuggestions();
+      native function SetVoiceSearchSupported();
       native function ShowOverlay();
       native function FocusOmnibox();
       native function StartCapturingKeyStrokes();
@@ -110,33 +66,10 @@ if (!chrome.embeddedSearch) {
       native function GetSuggestionData();
       native function GetMostVisitedItemData();
 
-      function SafeWrapSuggestion(restrictedText) {
-        return SafeWrap(restrictedText, 22);
-      }
-
-      // If shadowDom is to be used, wraps the AutocompleteResult query and URL
-      // into ShadowDOM nodes so that the JS cannot access them and deletes the
-      // raw values. Else if iframes are to be used, replaces the
-      // destination_url with the chrome search URL that should be used as the
-      // iframe.
-      // TODO(shishir): Remove code to support ShadowDOM once server side
-      // changes are live.
       function GetAutocompleteResultsWrapper() {
         var autocompleteResults = DedupeAutocompleteResults(
             GetAutocompleteResults());
-        var userInput = GetQuery();
         for (var i = 0, result; result = autocompleteResults[i]; ++i) {
-          // TODO(shishir): Fix the naming violations (chrome_search ->
-          // chrome-search etc) when the server supports both names.
-          var className = result.is_search ? 'chrome_search' : 'chrome_url';
-          var combinedElement = '<span class=' + className + '>' +
-              escapeHTML(result.contents) + '</span>';
-          if (result.description) {
-            combinedElement +=
-                '<span class=chrome_separator> &ndash; </span>' +
-                '<span class=chrome_title>' +
-                escapeHTML(result.description) + '</span>';
-          }
           result.destination_url = null;
           result.contents = null;
           result.description = null;
@@ -167,7 +100,7 @@ if (!chrome.embeddedSearch) {
         }
         var dedupedResults = [];
         for (url in urlToResultMap) {
-          dedupedResults.push(urlToResultMap[url]);
+          $Array.push(dedupedResults, urlToResultMap[url]);
         }
         return dedupedResults;
       }
@@ -228,6 +161,7 @@ if (!chrome.embeddedSearch) {
       this.__defineGetter__('startMargin', GetStartMargin);
       this.__defineGetter__('rtl', GetRightToLeft);
       this.__defineGetter__('nativeSuggestions', GetAutocompleteResultsWrapper);
+      this.__defineGetter__('isFocused', IsFocused);
       this.__defineGetter__('isKeyCaptureEnabled', IsKeyCaptureEnabled);
       this.__defineGetter__('displayInstantResults', GetDisplayInstantResults);
       this.__defineGetter__('font', GetFont);
@@ -247,6 +181,9 @@ if (!chrome.embeddedSearch) {
 
       this.setSuggestions = function(text) {
         SetSuggestions(text);
+      };
+      this.setVoiceSearchSupported = function(supported) {
+        SetVoiceSearchSupported(supported);
       };
       this.setAutocompleteText = function(text, behavior) {
         SetSuggestion(text, behavior);
@@ -278,7 +215,7 @@ if (!chrome.embeddedSearch) {
       };
       this.navigateContentWindow = function(destination, disposition) {
         NavigateSearchBox(destination, disposition);
-      }
+      };
       this.showBars = function() {
         ShowBars();
       };
@@ -294,6 +231,8 @@ if (!chrome.embeddedSearch) {
       this.onmarginchange = null;
       this.onnativesuggestions = null;
       this.onbarshidden = null;
+      this.onfocuschange = null;
+      this.ontogglevoicesearch = null;
 
       // DEPRECATED. These methods are from the legacy searchbox API.
       // TODO(jered): Delete these.
@@ -318,16 +257,12 @@ if (!chrome.embeddedSearch) {
       native function UndoAllMostVisitedDeletions();
       native function UndoMostVisitedDeletion();
       native function NavigateNewTabPage();
-
-      function SafeWrapMostVisited(restrictedText, width, opt_direction) {
-        return SafeWrap(restrictedText, 18, width, 11, opt_direction);
-      }
+      native function IsInputInProgress();
+      native function GetAppLauncherEnabled();
 
       function GetMostVisitedItemsWrapper() {
         var mostVisitedItems = GetMostVisitedItems();
         for (var i = 0, item; item = mostVisitedItems[i]; ++i) {
-          var title = escapeHTML(item.title);
-          var domain = escapeHTML(item.domain);
           // These properties are private data and should not be returned to
           // the page. They are only accessible via getMostVisitedItemData().
           item.url = null;
@@ -343,6 +278,8 @@ if (!chrome.embeddedSearch) {
       // =======================================================================
       this.__defineGetter__('mostVisited', GetMostVisitedItemsWrapper);
       this.__defineGetter__('themeBackgroundInfo', GetThemeBackgroundInfo);
+      this.__defineGetter__('isInputInProgress', IsInputInProgress);
+      this.__defineGetter__('appLauncherEnabled', GetAppLauncherEnabled);
 
       this.deleteMostVisitedItem = function(restrictedId) {
         DeleteMostVisitedItem(restrictedId);
@@ -359,6 +296,8 @@ if (!chrome.embeddedSearch) {
 
       this.onmostvisitedchange = null;
       this.onthemechange = null;
+      this.oninputstart = null;
+      this.oninputcancel = null;
     };
 
     // Export legacy searchbox API.

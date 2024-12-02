@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_UI_OMNIBOX_OMNIBOX_EDIT_CONTROLLER_H_
 #define CHROME_BROWSER_UI_OMNIBOX_OMNIBOX_EDIT_CONTROLLER_H_
 
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "content/public/common/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 
@@ -18,6 +18,7 @@ class WebContents;
 
 namespace gfx {
 class Image;
+class Rect;
 }
 
 // I am in hack-and-slash mode right now.
@@ -68,6 +69,9 @@ class OmniboxEditController {
 
   // Returns the WebContents of the currently active tab.
   virtual content::WebContents* GetWebContents() const = 0;
+
+  // Returns the bounds for the omnibox.
+  virtual gfx::Rect GetOmniboxBounds() const = 0;
 
  protected:
   virtual ~OmniboxEditController() {}

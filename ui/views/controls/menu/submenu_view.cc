@@ -30,7 +30,7 @@ const SkColor kDropIndicatorColor = SK_ColorBLACK;
 namespace views {
 
 // static
-const char SubmenuView::kViewClassName[] = "views/SubmenuView";
+const char SubmenuView::kViewClassName[] = "SubmenuView";
 
 SubmenuView::SubmenuView(MenuItemView* parent)
     : parent_menu_item_(parent),
@@ -389,7 +389,7 @@ void SubmenuView::MenuHostDestroyed() {
   GetMenuItem()->GetMenuController()->Cancel(MenuController::EXIT_DESTROYED);
 }
 
-std::string SubmenuView::GetClassName() const {
+const char* SubmenuView::GetClassName() const {
   return kViewClassName;
 }
 

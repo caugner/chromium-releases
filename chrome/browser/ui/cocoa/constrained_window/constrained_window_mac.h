@@ -7,8 +7,8 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/memory/scoped_nsobject.h"
-#include "chrome/browser/ui/native_web_contents_modal_dialog.h"
+#include "base/mac/scoped_nsobject.h"
+#include "components/web_modal/native_web_contents_modal_dialog.h"
 
 namespace content {
 class WebContents;
@@ -39,7 +39,7 @@ class ConstrainedWindowMac {
   void CloseWebContentsModalDialog();
   void FocusWebContentsModalDialog();
   void PulseWebContentsModalDialog();
-  NativeWebContentsModalDialog GetNativeDialog();
+  web_modal::NativeWebContentsModalDialog GetNativeDialog();
 
  private:
   // Gets the parent window of the dialog.
@@ -50,7 +50,7 @@ class ConstrainedWindowMac {
   // The WebContents that owns and constrains this ConstrainedWindowMac. Weak.
   content::WebContents* web_contents_;
 
-  scoped_nsprotocol<id<ConstrainedWindowSheet>> sheet_;
+  base::scoped_nsprotocol<id<ConstrainedWindowSheet>> sheet_;
 
   // This is true if the constrained window has been shown.
   bool shown_;

@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <vector>
 
-#include "base/prefs/pref_service.h"
 #include "chrome/browser/extensions/extension_scoped_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -46,12 +45,10 @@ ExtensionSorting::AppOrdinals::~AppOrdinals() {}
 ////////////////////////////////////////////////////////////////////////////////
 // ExtensionSorting
 
-ExtensionSorting::ExtensionSorting(ExtensionScopedPrefs* extension_scoped_prefs,
-                                   PrefService* pref_service)
+ExtensionSorting::ExtensionSorting(ExtensionScopedPrefs* extension_scoped_prefs)
     : extension_scoped_prefs_(extension_scoped_prefs),
-      pref_service_(pref_service),
-      extension_service_(NULL) {
-  CreateDefaultOrdinals();
+      extension_service_(NULL),
+      default_ordinals_created_(false) {
 }
 
 ExtensionSorting::~ExtensionSorting() {
@@ -344,10 +341,6 @@ syncer::StringOrdinal ExtensionSorting::CreateNextAppLaunchOrdinal(
 }
 
 syncer::StringOrdinal ExtensionSorting::CreateFirstAppPageOrdinal() const {
-  const DictionaryValue* extensions = pref_service_->GetDictionary(
-          ExtensionPrefs::kExtensionsPref);
-  CHECK(extensions);
-
   if (ntp_ordinal_map_.empty())
     return syncer::StringOrdinal::CreateInitialOrdinal();
 
@@ -355,10 +348,6 @@ syncer::StringOrdinal ExtensionSorting::CreateFirstAppPageOrdinal() const {
 }
 
 syncer::StringOrdinal ExtensionSorting::GetNaturalAppPageOrdinal() const {
-  const DictionaryValue* extensions = pref_service_->GetDictionary(
-          ExtensionPrefs::kExtensionsPref);
-  CHECK(extensions);
-
   if (ntp_ordinal_map_.empty())
     return syncer::StringOrdinal::CreateInitialOrdinal();
 
@@ -429,12 +418,6 @@ int ExtensionSorting::PageStringOrdinalAsInteger(
 
 syncer::StringOrdinal ExtensionSorting::PageIntegerAsStringOrdinal(
     size_t page_index) {
-  const DictionaryValue* extensions = pref_service_->GetDictionary(
-          ExtensionPrefs::kExtensionsPref);
-
-  if (!extensions)
-    return syncer::StringOrdinal();
-
   if (page_index < ntp_ordinal_map_.size()) {
     PageOrdinalMap::const_iterator it = ntp_ordinal_map_.begin();
     std::advance(it, page_index);
@@ -547,6 +530,10 @@ void ExtensionSorting::SyncIfNeeded(const std::string& extension_id) {
 }
 
 void ExtensionSorting::CreateDefaultOrdinals() {
+  if (default_ordinals_created_)
+    return;
+  default_ordinals_created_ = true;
+
   // The following defines the default order of apps.
 #if defined(OS_CHROMEOS)
   std::vector<std::string> app_ids;
@@ -573,7 +560,8 @@ void ExtensionSorting::CreateDefaultOrdinals() {
 bool ExtensionSorting::GetDefaultOrdinals(
     const std::string& extension_id,
     syncer::StringOrdinal* page_ordinal,
-    syncer::StringOrdinal* app_launch_ordinal) const {
+    syncer::StringOrdinal* app_launch_ordinal) {
+  CreateDefaultOrdinals();
   AppOrdinalsMap::const_iterator it = default_ordinals_.find(extension_id);
   if (it == default_ordinals_.end())
     return false;

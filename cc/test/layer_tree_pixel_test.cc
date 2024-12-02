@@ -5,30 +5,61 @@
 #include "cc/test/layer_tree_pixel_test.h"
 
 #include "base/path_service.h"
+#include "cc/output/copy_output_request.h"
+#include "cc/output/copy_output_result.h"
+#include "cc/resources/texture_mailbox.h"
 #include "cc/test/paths.h"
 #include "cc/test/pixel_comparator.h"
+#include "cc/test/pixel_test_output_surface.h"
+#include "cc/test/pixel_test_software_output_device.h"
 #include "cc/test/pixel_test_utils.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "ui/gl/gl_implementation.h"
-#include "webkit/gpu/context_provider_in_process.h"
-#include "webkit/gpu/webgraphicscontext3d_in_process_command_buffer_impl.h"
+#include "webkit/common/gpu/context_provider_in_process.h"
+#include "webkit/common/gpu/webgraphicscontext3d_in_process_command_buffer_impl.h"
 
 namespace cc {
 
 LayerTreePixelTest::LayerTreePixelTest()
-    : pixel_comparator_(new ExactPixelComparator(true)) {}
+    : pixel_comparator_(new ExactPixelComparator(true)),
+      test_type_(GL_WITH_DEFAULT) {}
 
 LayerTreePixelTest::~LayerTreePixelTest() {}
 
 scoped_ptr<OutputSurface> LayerTreePixelTest::CreateOutputSurface() {
-  CHECK(gfx::InitializeGLBindings(gfx::kGLImplementationOSMesaGL));
+  gfx::Vector2d viewport_offset(20, 10);
+  gfx::Size surface_expansion_size(40, 60);
+  scoped_ptr<PixelTestOutputSurface> output_surface;
 
-  using webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl;
-  scoped_ptr<WebGraphicsContext3DInProcessCommandBufferImpl> context3d(
-      WebGraphicsContext3DInProcessCommandBufferImpl::CreateOffscreenContext(
-          WebKit::WebGraphicsContext3D::Attributes()));
-  return make_scoped_ptr(
-      new OutputSurface(context3d.PassAs<WebKit::WebGraphicsContext3D>()));
+  switch (test_type_) {
+    case SOFTWARE_WITH_DEFAULT:
+    case SOFTWARE_WITH_BITMAP: {
+      scoped_ptr<PixelTestSoftwareOutputDevice> software_output_device(
+          new PixelTestSoftwareOutputDevice);
+      software_output_device->set_surface_expansion_size(
+          surface_expansion_size);
+      output_surface = make_scoped_ptr(
+          new PixelTestOutputSurface(
+              software_output_device.PassAs<SoftwareOutputDevice>()));
+      break;
+    }
+
+    case GL_WITH_DEFAULT:
+    case GL_WITH_BITMAP: {
+      CHECK(gfx::InitializeGLBindings(gfx::kGLImplementationOSMesaGL));
+
+      using WebKit::WebGraphicsContext3D;
+      using webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl;
+      output_surface = make_scoped_ptr(new PixelTestOutputSurface(
+          WebGraphicsContext3DInProcessCommandBufferImpl::
+              CreateOffscreenContext(WebGraphicsContext3D::Attributes())));
+      break;
+    }
+  }
+
+  output_surface->set_viewport_offset(viewport_offset);
+  output_surface->set_surface_expansion_size(surface_expansion_size);
+  return output_surface.PassAs<OutputSurface>();
 }
 
 scoped_refptr<cc::ContextProvider>
@@ -43,33 +74,40 @@ scoped_refptr<cc::ContextProvider>
 LayerTreePixelTest::OffscreenContextProviderForCompositorThread() {
   scoped_refptr<webkit::gpu::ContextProviderInProcess> provider =
       webkit::gpu::ContextProviderInProcess::Create();
-  CHECK(provider);
+  CHECK(provider.get());
   return provider;
 }
 
-void LayerTreePixelTest::ReadbackResult(scoped_ptr<SkBitmap> bitmap) {
-  ASSERT_TRUE(bitmap);
+scoped_ptr<CopyOutputRequest> LayerTreePixelTest::CreateCopyOutputRequest() {
+  return CopyOutputRequest::CreateBitmapRequest(
+      base::Bind(&LayerTreePixelTest::ReadbackResult, base::Unretained(this)));
+}
 
-  base::FilePath test_data_dir;
-  EXPECT_TRUE(PathService::Get(cc::DIR_TEST_DATA, &test_data_dir));
-
-  // To rebaseline:
-  // EXPECT_TRUE(WritePNGFile(*bitmap, test_data_dir.Append(ref_file_), true));
-
-  EXPECT_TRUE(MatchesPNGFile(*bitmap,
-                             test_data_dir.Append(ref_file_),
-                             *pixel_comparator_));
+void LayerTreePixelTest::ReadbackResult(scoped_ptr<CopyOutputResult> result) {
+  ASSERT_TRUE(result->HasBitmap());
+  result_bitmap_ = result->TakeBitmap().Pass();
   EndTest();
 }
 
 void LayerTreePixelTest::BeginTest() {
-  layer_tree_host()->root_layer()->RequestCopyAsBitmap(
-      base::Bind(&LayerTreePixelTest::ReadbackResult,
-                 base::Unretained(this)));
+  Layer* target = readback_target_ ? readback_target_
+                                   : layer_tree_host()->root_layer();
+  target->RequestCopyOfOutput(CreateCopyOutputRequest().Pass());
   PostSetNeedsCommitToMainThread();
 }
 
-void LayerTreePixelTest::AfterTest() {}
+void LayerTreePixelTest::AfterTest() {
+  base::FilePath test_data_dir;
+  EXPECT_TRUE(PathService::Get(cc::DIR_TEST_DATA, &test_data_dir));
+  base::FilePath ref_file_path = test_data_dir.Append(ref_file_);
+
+  // To rebaseline:
+  // EXPECT_TRUE(WritePNGFile(*result_bitmap_, ref_file_path, true));
+
+  EXPECT_TRUE(MatchesPNGFile(*result_bitmap_,
+                             ref_file_path,
+                             *pixel_comparator_));
+}
 
 scoped_refptr<SolidColorLayer> LayerTreePixelTest::CreateSolidColorLayer(
     gfx::Rect rect, SkColor color) {
@@ -111,11 +149,26 @@ scoped_refptr<SolidColorLayer> LayerTreePixelTest::
 }
 
 void LayerTreePixelTest::RunPixelTest(
+    PixelTestType test_type,
     scoped_refptr<Layer> content_root,
     base::FilePath file_name) {
+  test_type_ = test_type;
   content_root_ = content_root;
+  readback_target_ = NULL;
   ref_file_ = file_name;
-  RunTest(true);
+  RunTest(true, false, true);
+}
+
+void LayerTreePixelTest::RunPixelTestWithReadbackTarget(
+    PixelTestType test_type,
+    scoped_refptr<Layer> content_root,
+    Layer* target,
+    base::FilePath file_name) {
+  test_type_ = test_type;
+  content_root_ = content_root;
+  readback_target_ = target;
+  ref_file_ = file_name;
+  RunTest(true, false, true);
 }
 
 void LayerTreePixelTest::SetupTree() {
@@ -124,6 +177,83 @@ void LayerTreePixelTest::SetupTree() {
   root->AddChild(content_root_);
   layer_tree_host()->SetRootLayer(root);
   LayerTreeTest::SetupTree();
+}
+
+scoped_ptr<SkBitmap> LayerTreePixelTest::CopyTextureMailboxToBitmap(
+    gfx::Size size,
+    const TextureMailbox& texture_mailbox) {
+  DCHECK(texture_mailbox.IsTexture());
+  if (!texture_mailbox.IsTexture())
+    return scoped_ptr<SkBitmap>();
+
+  using webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl;
+  scoped_ptr<WebKit::WebGraphicsContext3D> context3d(
+      WebGraphicsContext3DInProcessCommandBufferImpl::CreateOffscreenContext(
+          WebKit::WebGraphicsContext3D::Attributes()));
+
+  EXPECT_TRUE(context3d->makeContextCurrent());
+
+  if (texture_mailbox.sync_point())
+    context3d->waitSyncPoint(texture_mailbox.sync_point());
+
+  unsigned texture_id = context3d->createTexture();
+  context3d->bindTexture(GL_TEXTURE_2D, texture_id);
+  context3d->texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  context3d->texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  context3d->texParameteri(
+      GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  context3d->texParameteri(
+      GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  context3d->consumeTextureCHROMIUM(texture_mailbox.target(),
+                                    texture_mailbox.data());
+  context3d->bindTexture(GL_TEXTURE_2D, 0);
+
+  unsigned fbo = context3d->createFramebuffer();
+  context3d->bindFramebuffer(GL_FRAMEBUFFER, fbo);
+  context3d->framebufferTexture2D(GL_FRAMEBUFFER,
+                                  GL_COLOR_ATTACHMENT0,
+                                  GL_TEXTURE_2D,
+                                  texture_id,
+                                  0);
+  EXPECT_EQ(static_cast<unsigned>(GL_FRAMEBUFFER_COMPLETE),
+            context3d->checkFramebufferStatus(GL_FRAMEBUFFER));
+
+  scoped_ptr<uint8[]> pixels(new uint8[size.GetArea() * 4]);
+  context3d->readPixels(0,
+                        0,
+                        size.width(),
+                        size.height(),
+                        GL_RGBA,
+                        GL_UNSIGNED_BYTE,
+                        pixels.get());
+
+  context3d->deleteFramebuffer(fbo);
+  context3d->deleteTexture(texture_id);
+
+  scoped_ptr<SkBitmap> bitmap(new SkBitmap);
+  bitmap->setConfig(SkBitmap::kARGB_8888_Config,
+                    size.width(),
+                    size.height());
+  bitmap->allocPixels();
+
+  scoped_ptr<SkAutoLockPixels> lock(new SkAutoLockPixels(*bitmap));
+  uint8* out_pixels = static_cast<uint8*>(bitmap->getPixels());
+
+  size_t row_bytes = size.width() * 4;
+  size_t total_bytes = size.height() * row_bytes;
+  for (size_t dest_y = 0; dest_y < total_bytes; dest_y += row_bytes) {
+    // Flip Y axis.
+    size_t src_y = total_bytes - dest_y - row_bytes;
+    // Swizzle OpenGL -> Skia byte order.
+    for (size_t x = 0; x < row_bytes; x += 4) {
+      out_pixels[dest_y + x + SK_R32_SHIFT/8] = pixels.get()[src_y + x + 0];
+      out_pixels[dest_y + x + SK_G32_SHIFT/8] = pixels.get()[src_y + x + 1];
+      out_pixels[dest_y + x + SK_B32_SHIFT/8] = pixels.get()[src_y + x + 2];
+      out_pixels[dest_y + x + SK_A32_SHIFT/8] = pixels.get()[src_y + x + 3];
+    }
+  }
+
+  return bitmap.Pass();
 }
 
 }  // namespace cc

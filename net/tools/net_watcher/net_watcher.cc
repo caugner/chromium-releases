@@ -134,19 +134,31 @@ int main(int argc, char* argv[]) {
 #if (defined(OS_LINUX) || defined(OS_OPENBSD)) && !defined(OS_CHROMEOS)
   // Needed so ProxyConfigServiceLinux can use gconf.
   // Normally handled by BrowserMainLoop::InitializeToolkit().
-  g_type_init();
+  // From glib version 2.36 onwards, g_type_init is implicitly called and it is
+  // deprecated.
+  // TODO(yael) Simplify this once Ubuntu 10.04 is no longer supported.
+#if defined(G_GNUC_BEGIN_IGNORE_DEPRECATIONS) && \
+    defined(G_GNUC_END_IGNORE_DEPRECATIONS)
+#define USE_GLIB_DEPRECATIONS_MACROS
 #endif
+
+#if defined(USE_GLIB_DEPRECATIONS_MACROS)
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+#endif
+  g_type_init();
+#if defined(USE_GLIB_DEPRECATIONS_MACROS)
+G_GNUC_END_IGNORE_DEPRECATIONS
+#endif
+#undef USE_GLIB_DEPRECATIONS_MACROS
+#endif  // (defined(OS_LINUX) || defined(OS_OPENBSD)) && !defined(OS_CHROMEOS)
   base::AtExitManager exit_manager;
   CommandLine::Init(argc, argv);
-  logging::InitLogging(
-      NULL,
-      logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
-      logging::LOCK_LOG_FILE,
-      logging::DELETE_OLD_LOG_FILE,
-      logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
+  logging::LoggingSettings settings;
+  settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
+  logging::InitLogging(settings);
 
   // Just make the main message loop the network loop.
-  MessageLoopForIO network_loop;
+  base::MessageLoopForIO network_loop;
 
   NetWatcher net_watcher;
 
@@ -156,8 +168,7 @@ int main(int argc, char* argv[]) {
   // Use the network loop as the file loop also.
   scoped_ptr<net::ProxyConfigService> proxy_config_service(
       net::ProxyService::CreateSystemProxyConfigService(
-          network_loop.message_loop_proxy(),
-          &network_loop));
+          network_loop.message_loop_proxy().get(), &network_loop));
 
   // Uses |network_change_notifier|.
   net::NetworkChangeNotifier::AddIPAddressObserver(&net_watcher);

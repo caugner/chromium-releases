@@ -8,7 +8,9 @@
 #include <queue>
 
 #include "base/bind.h"
-#include "base/string_util.h"
+#include "base/i18n/string_search.h"
+#include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chromeos/drive/file_cache.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/escape.h"
@@ -16,10 +18,11 @@
 using content::BrowserThread;
 
 namespace drive {
+namespace internal {
 
 namespace {
 
-// Used to sort the result canididates per the last accessed/modified time. The
+// Used to sort the result candidates per the last accessed/modified time. The
 // recently accessed/modified files come first.
 bool CompareByTimestamp(const ResourceEntry& a, const ResourceEntry& b) {
   const PlatformFileInfoProto& a_file_info = a.file_info();
@@ -72,12 +75,16 @@ class ScopedPriorityQueue {
 };
 
 // Returns true if |entry| is eligible for the search |options| and should be
-// tested for the match with the query.
-// If SEARCH_METADATA_EXCLUDE_HOSTED_DOCUMENTS is requested, the hosted
-// documents are skipped. If SEARCH_METADATA_EXCLUDE_DIRECTORIES is requested,
-// the directories are skipped. If SEARCH_METADATA_SHARED_WITH_ME is requested,
-// only the entries with shared-with-me label will be tested.
-bool IsEligibleEntry(const ResourceEntry& entry, int options) {
+// tested for the match with the query.  If
+// SEARCH_METADATA_EXCLUDE_HOSTED_DOCUMENTS is requested, the hosted documents
+// are skipped. If SEARCH_METADATA_EXCLUDE_DIRECTORIES is requested, the
+// directories are skipped. If SEARCH_METADATA_SHARED_WITH_ME is requested, only
+// the entries with shared-with-me label will be tested. If
+// SEARCH_METADATA_OFFLINE is requested, only hosted documents and cached files
+// match with the query. This option can not be used with other options.
+bool IsEligibleEntry(const ResourceEntry& entry,
+                     internal::FileCache* cache,
+                     int options) {
   if ((options & SEARCH_METADATA_EXCLUDE_HOSTED_DOCUMENTS) &&
       entry.file_specific_info().is_hosted_document())
     return false;
@@ -89,6 +96,16 @@ bool IsEligibleEntry(const ResourceEntry& entry, int options) {
   if (options & SEARCH_METADATA_SHARED_WITH_ME)
     return entry.shared_with_me();
 
+  if (options & SEARCH_METADATA_OFFLINE) {
+    if (entry.file_specific_info().is_hosted_document())
+      return true;
+    FileCacheEntry cache_entry;
+    cache->GetCacheEntry(entry.resource_id(),
+                         std::string(),
+                         &cache_entry);
+    return cache_entry.is_present();
+  }
+
   // Exclude "drive", "drive/root", and "drive/other".
   if (entry.resource_id() == util::kDriveGrandRootSpecialResourceId ||
       entry.parent_resource_id() == util::kDriveGrandRootSpecialResourceId) {
@@ -98,130 +115,98 @@ bool IsEligibleEntry(const ResourceEntry& entry, int options) {
   return true;
 }
 
+// Used to implement SearchMetadata.
+// Adds entry to the result when appropriate.
+void MaybeAddEntryToResult(
+    ResourceMetadata* resource_metadata,
+    FileCache* cache,
+    const std::string& query,
+    int options,
+    size_t at_most_num_matches,
+    ScopedPriorityQueue<MetadataSearchResult,
+                        MetadataSearchResultComparator>* result_candidates,
+    const ResourceEntry& entry) {
+  DCHECK_GE(at_most_num_matches, result_candidates->size());
+
+  // If the candidate set is already full, and this |entry| is old, do nothing.
+  // We perform this check first in order to avoid the costly find-and-highlight
+  // or FilePath lookup as much as possible.
+  if (result_candidates->size() == at_most_num_matches &&
+      !CompareByTimestamp(entry, result_candidates->top()->entry))
+    return;
+
+  // Add |entry| to the result if the entry is eligible for the given
+  // |options| and matches the query. The base name of the entry must
+  // contain |query| to match the query.
+  std::string highlighted;
+  if (!IsEligibleEntry(entry, cache, options) ||
+      !FindAndHighlight(entry.base_name(), query, &highlighted))
+    return;
+
+  base::FilePath path = resource_metadata->GetFilePath(entry.resource_id());
+  if (path.empty())
+    return;
+
+  // Make space for |entry| when appropriate.
+  if (result_candidates->size() == at_most_num_matches)
+    result_candidates->pop();
+  result_candidates->push(new MetadataSearchResult(path, entry, highlighted));
+}
+
+// Implements SearchMetadata().
+scoped_ptr<MetadataSearchResultVector> SearchMetadataOnBlockingPool(
+    ResourceMetadata* resource_metadata,
+    FileCache* cache,
+    const std::string& query,
+    int options,
+    int at_most_num_matches) {
+  ScopedPriorityQueue<MetadataSearchResult,
+                      MetadataSearchResultComparator> result_candidates;
+
+  // Iterate over entries.
+  scoped_ptr<ResourceMetadata::Iterator> it = resource_metadata->GetIterator();
+  for (; !it->IsAtEnd(); it->Advance()) {
+    MaybeAddEntryToResult(resource_metadata, cache, query, options,
+                          at_most_num_matches, &result_candidates, it->Get());
+  }
+
+  // Prepare the result.
+  scoped_ptr<MetadataSearchResultVector> results(
+      new MetadataSearchResultVector);
+  for (; !result_candidates.empty(); result_candidates.pop())
+    results->push_back(*result_candidates.top());
+
+  // Reverse the order here because |result_candidates| puts the most
+  // uninteresting candidate at the top.
+  std::reverse(results->begin(), results->end());
+
+  return results.Pass();
+}
 }  // namespace
 
-// Helper class for searching the local resource metadata.
-class SearchMetadataHelper {
- public:
-  SearchMetadataHelper(internal::ResourceMetadata* resource_metadata,
-                       const std::string& query,
-                       int options,
-                       int at_most_num_matches,
-                       const SearchMetadataCallback& callback)
-    : resource_metadata_(resource_metadata),
-      query_(query),
-      options_(options),
-      at_most_num_matches_(at_most_num_matches),
-      callback_(callback),
-      results_(new MetadataSearchResultVector),
-      weak_ptr_factory_(this) {
-    DCHECK_LE(0, at_most_num_matches);
-  }
-
-  // Starts searching the local resource metadata.
-  void Start() {
-    resource_metadata_->IterateEntries(
-        base::Bind(&SearchMetadataHelper::MaybeAddEntryToResult,
-                   base::Unretained(this)),
-        base::Bind(&SearchMetadataHelper::PrepareResults,
-                   weak_ptr_factory_.GetWeakPtr()));
-  }
-
-
- private:
-  // Adds entry to the result when appropriate.
-  void MaybeAddEntryToResult(const ResourceEntry& entry) {
-    DCHECK_GE(at_most_num_matches_,
-              static_cast<int>(result_candidates_.size()));
-
-    // Add |entry| to the result if the entry is eligible for the given
-    // |options| and matches the query. The base name of the entry must
-    // contains |query| to match the query.
-    std::string highlighted;
-    if (!IsEligibleEntry(entry, options_) ||
-        !FindAndHighlight(entry.base_name(), query_, &highlighted))
-      return;
-
-    // Make space for |entry| when appropriate.
-    if (static_cast<int>(result_candidates_.size()) == at_most_num_matches_ &&
-        CompareByTimestamp(entry, result_candidates_.top()->entry))
-      result_candidates_.pop();
-
-    // Add |entry| to the result when appropriate.
-    if (static_cast<int>(result_candidates_.size()) < at_most_num_matches_) {
-      result_candidates_.push(new MetadataSearchResult(
-          base::FilePath(), entry, highlighted));
-    }
-  }
-
-  // Prepares results by popping candidates one by one.
-  void PrepareResults() {
-    if (result_candidates_.empty()) {
-      Finish(FILE_ERROR_OK);
-      return;
-    }
-    resource_metadata_->GetEntryInfoByResourceId(
-        result_candidates_.top()->entry.resource_id(),
-        base::Bind(&SearchMetadataHelper::ContinuePrepareResults,
-                   weak_ptr_factory_.GetWeakPtr()));
-  }
-
-  // Implements PrepareResults().
-  void ContinuePrepareResults(FileError error,
-                              const base::FilePath& path,
-                              scoped_ptr<ResourceEntry> unused_entry) {
-    if (error != FILE_ERROR_OK) {
-      Finish(error);
-      return;
-    }
-    results_->push_back(*result_candidates_.top());
-    results_->back().path = path;
-    result_candidates_.pop();
-    PrepareResults();
-  }
-
-  // Sends the result to the callback and deletes this instance.
-  void Finish(FileError error) {
-    // Reverse the order here because |result_candidates_| puts the most
-    // uninterested candidate at the top.
-    std::reverse(results_->begin(), results_->end());
-
-    if (error != FILE_ERROR_OK)
-      results_.reset();
-    callback_.Run(error, results_.Pass());
-    delete this;
-  }
-
-  internal::ResourceMetadata* resource_metadata_;
-  const std::string query_;
-  const int options_;
-  const int at_most_num_matches_;
-  const SearchMetadataCallback callback_;
-  ScopedPriorityQueue<MetadataSearchResult,
-                      MetadataSearchResultComparator> result_candidates_;
-  scoped_ptr<MetadataSearchResultVector> results_;
-
-  // Note: This should remain the last member so it'll be destroyed and
-  // invalidate its weak pointers before any other members are destroyed.
-  base::WeakPtrFactory<SearchMetadataHelper> weak_ptr_factory_;
-};
-
-void SearchMetadata(internal::ResourceMetadata* resource_metadata,
-                    const std::string& query,
-                    int options,
-                    int at_most_num_matches,
-                    const SearchMetadataCallback& callback) {
+void SearchMetadata(
+    scoped_refptr<base::SequencedTaskRunner> blocking_task_runner,
+    ResourceMetadata* resource_metadata,
+    FileCache* cache,
+    const std::string& query,
+    int options,
+    int at_most_num_matches,
+    const SearchMetadataCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_LE(0, at_most_num_matches);
   DCHECK(!callback.is_null());
 
-  // |helper| will delete itself when the search is done.
-  SearchMetadataHelper* helper =
-      new SearchMetadataHelper(resource_metadata,
-                               query,
-                               options,
-                               at_most_num_matches,
-                               callback);
-  helper->Start();
+  // TODO(hashimoto): Report error code from ResourceMetadata::IterateEntries
+  // and stop binding FILE_ERROR_OK to |callback|.
+  base::PostTaskAndReplyWithResult(blocking_task_runner.get(),
+                                   FROM_HERE,
+                                   base::Bind(&SearchMetadataOnBlockingPool,
+                                              resource_metadata,
+                                              cache,
+                                              query,
+                                              options,
+                                              at_most_num_matches),
+                                   base::Bind(callback, FILE_ERROR_OK));
 }
 
 bool FindAndHighlight(const std::string& text,
@@ -234,37 +219,24 @@ bool FindAndHighlight(const std::string& text,
   if (query.empty())
     return true;
 
-  // TODO(satorux): Should support non-ASCII characters.
-  std::string lower_text = StringToLowerASCII(text);
-  std::string lower_query = StringToLowerASCII(query);
-
-  int num_matches = 0;
-  std::string::size_type cursor = 0;
-
-  while (cursor < text.size()) {
-    std::string::size_type matched_position =
-        lower_text.find(lower_query, cursor);
-    if (matched_position == std::string::npos)
-      break;
-    ++num_matches;
-
-    std::string skipped_piece =
-        net::EscapeForHTML(text.substr(cursor, matched_position - cursor));
-    std::string matched_piece =
-        net::EscapeForHTML(text.substr(matched_position, query.size()));
-
-    highlighted_text->append(skipped_piece);
-    highlighted_text->append("<b>" + matched_piece + "</b>");
-
-    cursor = matched_position + query.size();
-  }
-  if (num_matches == 0)
+  string16 text16 = base::UTF8ToUTF16(text);
+  string16 query16 = base::UTF8ToUTF16(query);
+  size_t match_start = 0;
+  size_t match_length = 0;
+  if (!base::i18n::StringSearchIgnoringCaseAndAccents(
+      query16, text16, &match_start, &match_length)) {
     return false;
-
-  std::string remaining_piece = text.substr(cursor);
-  highlighted_text->append(net::EscapeForHTML(remaining_piece));
-
+  }
+  string16 pre = text16.substr(0, match_start);
+  string16 match = text16.substr(match_start, match_length);
+  string16 post = text16.substr(match_start + match_length);
+  highlighted_text->append(net::EscapeForHTML(UTF16ToUTF8(pre)));
+  highlighted_text->append("<b>");
+  highlighted_text->append(net::EscapeForHTML(UTF16ToUTF8(match)));
+  highlighted_text->append("</b>");
+  highlighted_text->append(net::EscapeForHTML(UTF16ToUTF8(post)));
   return true;
 }
 
+}  // namespace internal
 }  // namespace drive

@@ -9,11 +9,15 @@
 
 #include "base/basictypes.h"
 #include "base/observer_list.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "ui/app_list/app_list_export.h"
 #include "ui/base/models/list_model.h"
 #include "ui/base/range/range.h"
 #include "ui/gfx/image/image_skia.h"
+
+namespace ui {
+class MenuModel;
+}
 
 namespace app_list {
 
@@ -51,14 +55,14 @@ class APP_LIST_EXPORT SearchResult {
     ActionIconSet(const gfx::ImageSkia& base_image,
                   const gfx::ImageSkia& hover_image,
                   const gfx::ImageSkia& pressed_image,
-                  const string16& tooltip_text);
+                  const base::string16& tooltip_text);
     ~ActionIconSet();
 
     gfx::ImageSkia base_image;
     gfx::ImageSkia hover_image;
     gfx::ImageSkia pressed_image;
 
-    string16 tooltip_text;
+    base::string16 tooltip_text;
   };
   typedef std::vector<ActionIconSet> ActionIconSets;
 
@@ -68,14 +72,14 @@ class APP_LIST_EXPORT SearchResult {
   const gfx::ImageSkia& icon() const { return icon_; }
   void SetIcon(const gfx::ImageSkia& icon);
 
-  const string16& title() const { return title_; }
-  void set_title(const string16& title) { title_ = title;}
+  const base::string16& title() const { return title_; }
+  void set_title(const base::string16& title) { title_ = title;}
 
   const Tags& title_tags() const { return title_tags_; }
   void set_title_tags(const Tags& tags) { title_tags_ = tags; }
 
-  const string16& details() const { return details_; }
-  void set_details(const string16& details) { details_ = details; }
+  const base::string16& details() const { return details_; }
+  void set_details(const base::string16& details) { details_ = details; }
 
   const Tags& details_tags() const { return details_tags_; }
   void set_details_tags(const Tags& tags) { details_tags_ = tags; }
@@ -88,13 +92,17 @@ class APP_LIST_EXPORT SearchResult {
   void AddObserver(SearchResultObserver* observer);
   void RemoveObserver(SearchResultObserver* observer);
 
+  // Returns the context menu model for this item.
+  // Note the returned menu model is owned by this item.
+  virtual ui::MenuModel* GetContextMenuModel();
+
  private:
   gfx::ImageSkia icon_;
 
-  string16 title_;
+  base::string16 title_;
   Tags title_tags_;
 
-  string16 details_;
+  base::string16 details_;
   Tags details_tags_;
 
   // Optional list of icons representing additional actions that can be

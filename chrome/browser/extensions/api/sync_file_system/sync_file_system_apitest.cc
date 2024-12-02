@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/event_names.h"
@@ -17,10 +16,10 @@
 #include "chrome/common/chrome_version_info.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/fileapi/file_system_url.h"
-#include "webkit/fileapi/syncable/sync_status_code.h"
-#include "webkit/fileapi/syncable/syncable_file_system_util.h"
-#include "webkit/quota/quota_manager.h"
+#include "webkit/browser/fileapi/file_system_url.h"
+#include "webkit/browser/fileapi/syncable/sync_status_code.h"
+#include "webkit/browser/fileapi/syncable/syncable_file_system_util.h"
+#include "webkit/browser/quota/quota_manager.h"
 
 using ::testing::_;
 using ::testing::Eq;
@@ -86,7 +85,6 @@ ACTION_P5(ReturnWithFakeFileAddedStatus,
           sync_action_taken) {
   FileSystemURL mock_url = sync_file_system::CreateSyncableFileSystemURL(
       *origin,
-      sync_file_system::DriveFileSyncService::kServiceName,
       base::FilePath(FILE_PATH_LITERAL("foo.txt")));
   mock_remote_service->NotifyRemoteChangeQueueUpdated(0);
   base::MessageLoopProxy::current()->PostTask(

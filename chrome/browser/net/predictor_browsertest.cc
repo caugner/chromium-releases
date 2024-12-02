@@ -69,7 +69,7 @@ class HostResolutionRequestRecorder : public net::HostResolverProc {
     if (is_waiting_for_hostname_ && waiting_for_hostname_ == hostname) {
       is_waiting_for_hostname_ = false;
       waiting_for_hostname_.clear();
-      MessageLoop::current()->Quit();
+      base::MessageLoop::current()->Quit();
     }
   }
 
@@ -104,7 +104,7 @@ class PredictorBrowserTest : public InProcessBrowserTest {
  protected:
   virtual void SetUp() OVERRIDE {
     net::ScopedDefaultHostResolverProc scoped_host_resolver_proc(
-        host_resolution_request_recorder_);
+        host_resolution_request_recorder_.get());
     InProcessBrowserTest::SetUp();
   }
 
@@ -131,7 +131,7 @@ class PredictorBrowserTest : public InProcessBrowserTest {
 
   void PrepareFrameSubresources(const GURL& url) {
     Predictor* predictor = browser()->profile()->GetNetworkPredictor();
-    predictor->PredictFrameSubresources(url);
+    predictor->PredictFrameSubresources(url, GURL());
   }
 
   void GetListFromPrefsAsString(const char* list_path,

@@ -23,6 +23,7 @@
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension_localization_peer.h"
 #include "chrome/common/metrics/variations/variations_util.h"
 #include "chrome/common/net/net_resource_provider.h"
@@ -39,13 +40,13 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_module.h"
 #include "third_party/sqlite/sqlite3.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCrossOriginPreflightResultCache.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFontCache.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/public/web/WebCache.h"
+#include "third_party/WebKit/public/web/WebCrossOriginPreflightResultCache.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebFontCache.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
+#include "third_party/WebKit/public/web/WebView.h"
 #include "v8/include/v8.h"
 
 #if defined(OS_WIN)
@@ -75,11 +76,11 @@ class RendererResourceDelegate : public content::ResourceDispatcherDelegate {
     // Update the browser about our cache.
     // Rate limit informing the host of our cache stats.
     if (!weak_factory_.HasWeakPtrs()) {
-      MessageLoop::current()->PostDelayedTask(
-         FROM_HERE,
-         base::Bind(&RendererResourceDelegate::InformHostOfCacheStats,
-                    weak_factory_.GetWeakPtr()),
-         base::TimeDelta::FromMilliseconds(kCacheStatsDelayMS));
+      base::MessageLoop::current()->PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&RendererResourceDelegate::InformHostOfCacheStats,
+                     weak_factory_.GetWeakPtr()),
+          base::TimeDelta::FromMilliseconds(kCacheStatsDelayMS));
     }
 
     if (error_code == net::ERR_ABORTED) {
@@ -148,6 +149,102 @@ DWORD WINAPI GetFontDataPatch(HDC hdc,
 }
 #endif  // OS_WIN
 
+static const int kWaitForWorkersStatsTimeoutMS = 20;
+
+class HeapStatisticsCollector {
+ public:
+  HeapStatisticsCollector() : round_id_(0) {}
+
+  void InitiateCollection();
+  static HeapStatisticsCollector* Instance();
+
+ private:
+  void CollectOnWorkerThread(scoped_refptr<base::TaskRunner> master,
+                             int round_id);
+  void ReceiveStats(int round_id, size_t total_size, size_t used_size);
+  void SendStatsToBrowser(int round_id);
+
+  size_t total_bytes_;
+  size_t used_bytes_;
+  int workers_to_go_;
+  int round_id_;
+};
+
+HeapStatisticsCollector* HeapStatisticsCollector::Instance() {
+  CR_DEFINE_STATIC_LOCAL(HeapStatisticsCollector, instance, ());
+  return &instance;
+}
+
+void HeapStatisticsCollector::InitiateCollection() {
+  v8::HeapStatistics heap_stats;
+  v8::Isolate::GetCurrent()->GetHeapStatistics(&heap_stats);
+  total_bytes_ = heap_stats.total_heap_size();
+  used_bytes_ = heap_stats.used_heap_size();
+  base::Closure collect = base::Bind(
+      &HeapStatisticsCollector::CollectOnWorkerThread,
+      base::Unretained(this),
+      base::MessageLoopProxy::current(),
+      round_id_);
+  workers_to_go_ = RenderThread::Get()->PostTaskToAllWebWorkers(collect);
+  if (workers_to_go_) {
+    // The guard task to send out partial stats
+    // in case some workers are not responsive.
+    base::MessageLoopProxy::current()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&HeapStatisticsCollector::SendStatsToBrowser,
+                   base::Unretained(this),
+                   round_id_),
+        base::TimeDelta::FromMilliseconds(kWaitForWorkersStatsTimeoutMS));
+  } else {
+    // No worker threads so just send out the main thread data right away.
+    SendStatsToBrowser(round_id_);
+  }
+}
+
+void HeapStatisticsCollector::CollectOnWorkerThread(
+    scoped_refptr<base::TaskRunner> master,
+    int round_id) {
+
+  size_t total_bytes = 0;
+  size_t used_bytes = 0;
+  v8::Isolate* isolate = v8::Isolate::GetCurrent();
+  if (isolate) {
+    v8::HeapStatistics heap_stats;
+    isolate->GetHeapStatistics(&heap_stats);
+    total_bytes = heap_stats.total_heap_size();
+    used_bytes = heap_stats.used_heap_size();
+  }
+  master->PostTask(
+      FROM_HERE,
+      base::Bind(&HeapStatisticsCollector::ReceiveStats,
+                 base::Unretained(this),
+                 round_id,
+                 total_bytes,
+                 used_bytes));
+}
+
+void HeapStatisticsCollector::ReceiveStats(int round_id,
+                                           size_t total_bytes,
+                                           size_t used_bytes) {
+  if (round_id != round_id_)
+    return;
+  total_bytes_ += total_bytes;
+  used_bytes_ += used_bytes;
+  if (!--workers_to_go_)
+    SendStatsToBrowser(round_id);
+}
+
+void HeapStatisticsCollector::SendStatsToBrowser(int round_id) {
+  if (round_id != round_id_)
+    return;
+  // TODO(alph): Do caching heap stats and use the cache if we haven't got
+  //             reply from a worker.
+  //             Currently a busy worker stats are not counted.
+  RenderThread::Get()->Send(new ChromeViewHostMsg_V8HeapStats(
+      total_bytes_, used_bytes_));
+  ++round_id_;
+}
+
 }  // namespace
 
 bool ChromeRenderProcessObserver::is_incognito_process_ = false;
@@ -165,8 +262,9 @@ ChromeRenderProcessObserver::ChromeRenderProcessObserver(
 
 #if defined(ENABLE_AUTOFILL_DIALOG)
   WebRuntimeFeatures::enableRequestAutocomplete(
-      command_line.HasSwitch(switches::kEnableInteractiveAutocomplete) ||
-      command_line.HasSwitch(switches::kEnableExperimentalWebKitFeatures));
+      command_line.HasSwitch(switches::kEnableExperimentalWebKitFeatures) ||
+      command_line.HasSwitch(
+           autofill::switches::kEnableInteractiveAutocomplete));
 #endif
 
   RenderThread* thread = RenderThread::Get();
@@ -277,12 +375,7 @@ void ChromeRenderProcessObserver::OnSetFieldTrialGroup(
 }
 
 void ChromeRenderProcessObserver::OnGetV8HeapStats() {
-  v8::HeapStatistics heap_stats;
-  // TODO(svenpanne) The call below doesn't take web workers into account, this
-  // has to be done manually by iterating over all Isolates involved.
-  v8::Isolate::GetCurrent()->GetHeapStatistics(&heap_stats);
-  RenderThread::Get()->Send(new ChromeViewHostMsg_V8HeapStats(
-      heap_stats.total_heap_size(), heap_stats.used_heap_size()));
+  HeapStatisticsCollector::Instance()->InitiateCollection();
 }
 
 void ChromeRenderProcessObserver::OnPurgeMemory() {

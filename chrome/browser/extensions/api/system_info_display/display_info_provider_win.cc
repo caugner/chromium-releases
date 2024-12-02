@@ -6,7 +6,7 @@
 
 #include <windows.h>
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "ui/base/win/dpi.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/size.h"
@@ -66,6 +66,20 @@ BOOL CALLBACK EnumMonitorCallback(HMONITOR monitor,
 }
 
 }  // namespace
+
+void DisplayInfoProvider::RequestInfo(const RequestInfoCallback& callback) {
+  // Redirect the request to a worker pool thread.
+  StartQueryInfo(callback);
+}
+
+void DisplayInfoProvider::SetInfo(
+    const std::string& display_id,
+    const api::system_info_display::DisplayProperties& info,
+    const SetInfoCallback& callback) {
+  base::MessageLoopProxy::current()->PostTask(
+      FROM_HERE,
+      base::Bind(callback, false, "Not implemented"));
+}
 
 bool DisplayInfoProvider::QueryInfo(DisplayInfo* info) {
   DCHECK(info);

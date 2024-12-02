@@ -5,11 +5,13 @@
 #include "cc/quads/render_pass.h"
 
 #include "cc/base/math_util.h"
+#include "cc/base/scoped_ptr_vector.h"
+#include "cc/output/copy_output_request.h"
 #include "cc/quads/checkerboard_draw_quad.h"
 #include "cc/test/geometry_test_utils.h"
 #include "cc/test/render_pass_test_common.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebFilterOperations.h"
+#include "third_party/WebKit/public/platform/WebFilterOperations.h"
 #include "third_party/skia/include/effects/SkBlurImageFilter.h"
 #include "ui/gfx/transform.h"
 
@@ -29,7 +31,7 @@ struct RenderPassSize {
   gfx::RectF damage_rect;
   bool has_transparent_background;
   bool has_occlusion_from_outside_target_surface;
-  std::vector<RenderPass::RequestCopyAsBitmapCallback> copy_callbacks;
+  ScopedPtrVector<CopyOutputRequest> copy_callbacks;
 };
 
 TEST(RenderPassTest, CopyShouldBeIdenticalExceptIdAndQuads) {
@@ -48,7 +50,7 @@ TEST(RenderPassTest, CopyShouldBeIdenticalExceptIdAndQuads) {
                transform_to_root,
                has_transparent_background,
                has_occlusion_from_outside_target_surface);
-  pass->copy_callbacks.push_back(RenderPass::RequestCopyAsBitmapCallback());
+  pass->copy_requests.push_back(CopyOutputRequest::CreateEmptyRequest());
 
   // Stick a quad in the pass, this should not get copied.
   scoped_ptr<SharedQuadState> shared_state = SharedQuadState::Create();
@@ -74,8 +76,9 @@ TEST(RenderPassTest, CopyShouldBeIdenticalExceptIdAndQuads) {
             copy->has_occlusion_from_outside_target_surface);
   EXPECT_EQ(0u, copy->quad_list.size());
 
-  // The copy callback should not be copied/duplicated.
-  EXPECT_EQ(0u, copy->copy_callbacks.size());
+  // The copy request should not be copied/duplicated.
+  EXPECT_EQ(1u, pass->copy_requests.size());
+  EXPECT_EQ(0u, copy->copy_requests.size());
 
   EXPECT_EQ(sizeof(RenderPassSize), sizeof(RenderPass));
 }

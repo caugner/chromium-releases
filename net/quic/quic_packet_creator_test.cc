@@ -173,13 +173,13 @@ TEST_F(QuicPacketCreatorTest, CreateStreamFrameFinOnly) {
   QuicFrame frame;
   size_t consumed = creator_.CreateStreamFrame(1u, "", 0u, true, &frame);
   EXPECT_EQ(0u, consumed);
-  CheckStreamFrame(frame, 1u, std::string(), 0u, true);
+  CheckStreamFrame(frame, 1u, string(), 0u, true);
   delete frame.stream_frame;
 }
 
 TEST_F(QuicPacketCreatorTest, SerializeVersionNegotiationPacket) {
   QuicPacketCreatorPeer::SetIsServer(&creator_, true);
-  QuicVersionTagList versions;
+  QuicTagVector versions;
   versions.push_back(kQuicVersion1);
   scoped_ptr<QuicEncryptedPacket> encrypted(
       creator_.SerializeVersionNegotiationPacket(versions));
@@ -225,7 +225,8 @@ TEST_P(QuicPacketCreatorTest, CreateStreamFrameTooLarge) {
   }
   // A string larger than fits into a frame.
   creator_.options()->max_packet_length = GetPacketLengthForOneStream(
-      QuicPacketCreatorPeer::SendVersionInPacket(&creator_), 4);
+      QuicPacketCreatorPeer::SendVersionInPacket(&creator_),
+      NOT_IN_FEC_GROUP, 4);
   QuicFrame frame;
   size_t consumed = creator_.CreateStreamFrame(1u, "testTooLong", 0u, true,
                                                &frame);
@@ -243,7 +244,10 @@ TEST_P(QuicPacketCreatorTest, AddFrameAndSerialize) {
   EXPECT_FALSE(creator_.HasPendingFrames());
   EXPECT_EQ(max_plaintext_size -
             GetPacketHeaderSize(
-                QuicPacketCreatorPeer::SendVersionInPacket(&creator_)),
+                creator_.options()->send_guid_length,
+                QuicPacketCreatorPeer::SendVersionInPacket(&creator_),
+                PACKET_6BYTE_SEQUENCE_NUMBER,
+                NOT_IN_FEC_GROUP),
             creator_.BytesFree());
 
   // Add a variety of frame types and then a padding frame.
@@ -284,7 +288,10 @@ TEST_P(QuicPacketCreatorTest, AddFrameAndSerialize) {
   EXPECT_FALSE(creator_.HasPendingFrames());
   EXPECT_EQ(max_plaintext_size -
             GetPacketHeaderSize(
-                QuicPacketCreatorPeer::SendVersionInPacket(&creator_)),
+                creator_.options()->send_guid_length,
+                QuicPacketCreatorPeer::SendVersionInPacket(&creator_),
+                PACKET_6BYTE_SEQUENCE_NUMBER,
+                NOT_IN_FEC_GROUP),
             creator_.BytesFree());
 }
 

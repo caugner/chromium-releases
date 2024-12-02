@@ -70,6 +70,7 @@ class JingleSession : public Session,
                                       const TransportRoute& route) OVERRIDE;
   virtual void OnTransportReady(Transport* transport,
                                 bool ready) OVERRIDE;
+  virtual void OnTransportFailed(Transport* transport) OVERRIDE;
   virtual void OnTransportDeleted(Transport* transport) OVERRIDE;
 
  private:
@@ -84,9 +85,6 @@ class JingleSession : public Session,
   void StartConnection(const std::string& peer_jid,
                        scoped_ptr<Authenticator> authenticator,
                        scoped_ptr<CandidateSessionConfig> config);
-
-  // Adds to a new channel the remote candidates received before it was created.
-  void AddPendingRemoteCandidates(Transport* channel, const std::string& name);
 
   // Called by JingleSessionManager for incoming connections.
   void InitializeIncomingConnection(const JingleMessage& initiate_message,
@@ -167,9 +165,6 @@ class JingleSession : public Session,
 
   base::OneShotTimer<JingleSession> transport_infos_timer_;
   std::list<JingleMessage::NamedCandidate> pending_candidates_;
-
-  // Pending remote candidates, received before the local channels were created.
-  std::list<JingleMessage::NamedCandidate> pending_remote_candidates_;
 
   DISALLOW_COPY_AND_ASSIGN(JingleSession);
 };

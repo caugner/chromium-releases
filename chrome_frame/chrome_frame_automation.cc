@@ -10,17 +10,16 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/debug/trace_event.h"
-#include "base/file_util.h"
 #include "base/file_version_info.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/sys_info.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/app/client_util.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_constants.h"
@@ -226,7 +225,7 @@ AutomationProxyCacheEntry::~AutomationProxyCacheEntry() {
   // The AutomationProxy class uses the SyncChannel which assumes the existence
   // of a MessageLoop instance.
   // We leak the AutomationProxy pointer here to avoid a crash.
-  if (MessageLoop::current() == NULL) {
+  if (base::MessageLoop::current() == NULL) {
     proxy_.release();
   }
 }

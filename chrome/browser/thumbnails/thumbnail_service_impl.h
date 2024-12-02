@@ -31,13 +31,14 @@ class ThumbnailServiceImpl : public ThumbnailService {
       scoped_refptr<base::RefCountedMemory>* bytes) OVERRIDE;
   virtual bool ShouldAcquirePageThumbnail(const GURL& url) OVERRIDE;
 
-  // Implementation of RefcountedProfileKeyedService.
+  // Implementation of RefcountedBrowserContextKeyedService.
   virtual void ShutdownOnUIThread() OVERRIDE;
 
  private:
   virtual ~ThumbnailServiceImpl();
 
   scoped_refptr<history::TopSites> top_sites_;
+  bool use_thumbnail_retargeting_;
 
   DISALLOW_COPY_AND_ASSIGN(ThumbnailServiceImpl);
 };

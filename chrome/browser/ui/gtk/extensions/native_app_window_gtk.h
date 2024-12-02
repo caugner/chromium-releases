@@ -31,13 +31,15 @@ class NativeAppWindowGtk : public NativeAppWindow,
   NativeAppWindowGtk(ShellWindow* shell_window,
                      const ShellWindow::CreateParams& params);
 
-  // BaseWindow implementation.
+  // ui::BaseWindow implementation.
   virtual bool IsActive() const OVERRIDE;
   virtual bool IsMaximized() const OVERRIDE;
   virtual bool IsMinimized() const OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
+  virtual bool IsDetached() const OVERRIDE;
   virtual gfx::NativeWindow GetNativeWindow() OVERRIDE;
   virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
+  virtual ui::WindowShowState GetRestoredState() const OVERRIDE;
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual void Show() OVERRIDE;
   virtual void ShowInactive() OVERRIDE;
@@ -68,12 +70,13 @@ class NativeAppWindowGtk : public NativeAppWindow,
   virtual void RenderViewHostChanged() OVERRIDE;
   virtual gfx::Insets GetFrameInsets() const OVERRIDE;
 
-  // WebContentsModalDialogHost implementation.
+  // web_modal::WebContentsModalDialogHost implementation.
+  virtual gfx::NativeView GetHostView() const OVERRIDE;
   virtual gfx::Point GetDialogPosition(const gfx::Size& size) OVERRIDE;
   virtual void AddObserver(
-      WebContentsModalDialogHostObserver* observer) OVERRIDE;
+      web_modal::WebContentsModalDialogHostObserver* observer) OVERRIDE;
   virtual void RemoveObserver(
-      WebContentsModalDialogHostObserver* observer) OVERRIDE;
+      web_modal::WebContentsModalDialogHostObserver* observer) OVERRIDE;
 
   content::WebContents* web_contents() const {
     return shell_window_->web_contents();
@@ -150,7 +153,7 @@ class NativeAppWindowGtk : public NativeAppWindow,
 
   // Observers to be notified when any web contents modal dialog requires
   // updating its dimensions.
-  ObserverList<WebContentsModalDialogHostObserver> observer_list_;
+  ObserverList<web_modal::WebContentsModalDialogHostObserver> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeAppWindowGtk);
 };

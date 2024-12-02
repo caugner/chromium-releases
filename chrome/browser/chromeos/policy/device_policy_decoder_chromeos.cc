@@ -8,6 +8,7 @@
 
 #include "base/logging.h"
 #include "base/values.h"
+#include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/policy/policy_map.h"
@@ -141,13 +142,14 @@ void DecodeLoginPolicies(const em::ChromeDeviceSettingsProto& policy,
               chromeos::kAccountsPrefDeviceLocalAccountsKeyKioskAppUpdateURL,
               entry->kiosk_app().update_url());
         }
-      } else if (entry->has_id()) {
+      } else if (entry->has_deprecated_public_session_id()) {
         // Deprecated public session specification.
         entry_dict->SetStringWithoutPathExpansion(
-            chromeos::kAccountsPrefDeviceLocalAccountsKeyId, entry->id());
+            chromeos::kAccountsPrefDeviceLocalAccountsKeyId,
+            entry->deprecated_public_session_id());
         entry_dict->SetIntegerWithoutPathExpansion(
             chromeos::kAccountsPrefDeviceLocalAccountsKeyType,
-            chromeos::DEVICE_LOCAL_ACCOUNT_TYPE_PUBLIC_SESSION);
+            DeviceLocalAccount::TYPE_PUBLIC_SESSION);
       }
       account_list->Append(entry_dict.release());
     }
@@ -175,13 +177,26 @@ void DecodeLoginPolicies(const em::ChromeDeviceSettingsProto& policy,
                         container.enable_auto_login_bailout()));
     }
   }
+
+  if (policy.has_supervised_users_settings()) {
+    const em::SupervisedUsersSettingsProto& container =
+        policy.supervised_users_settings();
+    if (container.has_supervised_users_enabled()) {
+      Value* value = Value::CreateBooleanValue(
+          container.supervised_users_enabled());
+      policies->Set(key::kSupervisedUsersEnabled,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    value);
+    }
+  }
 }
 
 void DecodeKioskPolicies(const em::ChromeDeviceSettingsProto& policy,
                          PolicyMap* policies,
                          EnterpriseInstallAttributes* install_attributes) {
   // No policies if this is not KIOSK.
-  if (install_attributes->GetMode() != DEVICE_MODE_KIOSK)
+  if (install_attributes->GetMode() != DEVICE_MODE_RETAIL_KIOSK)
     return;
 
   if (policy.has_forced_logout_timeouts()) {
@@ -271,7 +286,7 @@ void DecodeNetworkPolicies(const em::ChromeDeviceSettingsProto& policy,
 
     // Figure out the level. Proxy policy is mandatory in kiosk mode.
     PolicyLevel level = POLICY_LEVEL_RECOMMENDED;
-    if (install_attributes->GetMode() == DEVICE_MODE_KIOSK)
+    if (install_attributes->GetMode() == DEVICE_MODE_RETAIL_KIOSK)
       level = POLICY_LEVEL_MANDATORY;
 
     if (!proxy_settings->empty()) {
@@ -414,6 +429,50 @@ void DecodeAutoUpdatePolicies(const em::ChromeDeviceSettingsProto& policy,
   }
 }
 
+void DecodeAccessibilityPolicies(const em::ChromeDeviceSettingsProto& policy,
+                                 PolicyMap* policies) {
+  if (policy.has_accessibility_settings()) {
+    const em::AccessibilitySettingsProto&
+        container(policy.accessibility_settings());
+
+    if (container.has_login_screen_default_large_cursor_enabled()) {
+      policies->Set(
+          key::kDeviceLoginScreenDefaultLargeCursorEnabled,
+          POLICY_LEVEL_MANDATORY,
+          POLICY_SCOPE_MACHINE,
+          Value::CreateBooleanValue(
+              container.login_screen_default_large_cursor_enabled()));
+    }
+
+    if (container.has_login_screen_default_spoken_feedback_enabled()) {
+      policies->Set(
+          key::kDeviceLoginScreenDefaultSpokenFeedbackEnabled,
+          POLICY_LEVEL_MANDATORY,
+          POLICY_SCOPE_MACHINE,
+          Value::CreateBooleanValue(
+              container.login_screen_default_spoken_feedback_enabled()));
+    }
+
+    if (container.has_login_screen_default_high_contrast_enabled()) {
+      policies->Set(
+          key::kDeviceLoginScreenDefaultHighContrastEnabled,
+          POLICY_LEVEL_MANDATORY,
+          POLICY_SCOPE_MACHINE,
+          Value::CreateBooleanValue(
+              container.login_screen_default_high_contrast_enabled()));
+    }
+
+    if (container.has_login_screen_default_screen_magnifier_type()) {
+      policies->Set(
+          key::kDeviceLoginScreenDefaultScreenMagnifierType,
+          POLICY_LEVEL_MANDATORY,
+          POLICY_SCOPE_MACHINE,
+          DecodeIntegerValue(
+              container.login_screen_default_screen_magnifier_type()));
+    }
+  }
+}
+
 void DecodeGenericPolicies(const em::ChromeDeviceSettingsProto& policy,
                            PolicyMap* policies) {
   if (policy.has_device_policy_refresh_rate()) {
@@ -531,6 +590,7 @@ void DecodeDevicePolicy(const em::ChromeDeviceSettingsProto& policy,
   DecodeNetworkPolicies(policy, policies, install_attributes);
   DecodeReportingPolicies(policy, policies);
   DecodeAutoUpdatePolicies(policy, policies);
+  DecodeAccessibilityPolicies(policy, policies);
   DecodeGenericPolicies(policy, policies);
 }
 

@@ -4,8 +4,8 @@
 
 #include "chrome/browser/extensions/extension_apitest.h"
 
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/api/test/test_api.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -19,10 +19,11 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "net/base/net_util.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 
 namespace {
 
+const char kTestCustomArg[] = "customArg";
 const char kTestServerPort[] = "testServer.port";
 const char kTestDataDirectory[] = "testDataDirectory";
 const char kTestWebSocketPort[] = "testWebSocketPort";
@@ -82,7 +83,7 @@ void ExtensionApiTest::ResultCatcher::Observe(
       results_.push_back(true);
       messages_.push_back(std::string());
       if (waiting_)
-        MessageLoopForUI::current()->Quit();
+        base::MessageLoopForUI::current()->Quit();
       break;
 
     case chrome::NOTIFICATION_EXTENSION_TEST_FAILED:
@@ -90,7 +91,7 @@ void ExtensionApiTest::ResultCatcher::Observe(
       results_.push_back(false);
       messages_.push_back(*(content::Details<std::string>(details).ptr()));
       if (waiting_)
-        MessageLoopForUI::current()->Quit();
+        base::MessageLoopForUI::current()->Quit();
       break;
 
     default:
@@ -115,19 +116,20 @@ void ExtensionApiTest::TearDownInProcessBrowserTestFixture() {
 
 bool ExtensionApiTest::RunExtensionTest(const char* extension_name) {
   return RunExtensionTestImpl(
-      extension_name, std::string(), kFlagEnableFileAccess);
+      extension_name, std::string(), NULL, kFlagEnableFileAccess);
 }
 
 bool ExtensionApiTest::RunExtensionTestIncognito(const char* extension_name) {
   return RunExtensionTestImpl(extension_name,
                               std::string(),
+                              NULL,
                               kFlagEnableIncognito | kFlagEnableFileAccess);
 }
 
 bool ExtensionApiTest::RunExtensionTestIgnoreManifestWarnings(
     const char* extension_name) {
   return RunExtensionTestImpl(
-      extension_name, std::string(), kFlagIgnoreManifestWarnings);
+      extension_name, std::string(), NULL, kFlagIgnoreManifestWarnings);
 }
 
 bool ExtensionApiTest::RunExtensionTestAllowOldManifestVersion(
@@ -135,24 +137,26 @@ bool ExtensionApiTest::RunExtensionTestAllowOldManifestVersion(
   return RunExtensionTestImpl(
       extension_name,
       std::string(),
+      NULL,
       kFlagEnableFileAccess | kFlagAllowOldManifestVersions);
 }
 
 bool ExtensionApiTest::RunComponentExtensionTest(const char* extension_name) {
   return RunExtensionTestImpl(extension_name,
                               std::string(),
+                              NULL,
                               kFlagEnableFileAccess | kFlagLoadAsComponent);
 }
 
 bool ExtensionApiTest::RunExtensionTestNoFileAccess(
     const char* extension_name) {
-  return RunExtensionTestImpl(extension_name, std::string(), kFlagNone);
+  return RunExtensionTestImpl(extension_name, std::string(), NULL, kFlagNone);
 }
 
 bool ExtensionApiTest::RunExtensionTestIncognitoNoFileAccess(
     const char* extension_name) {
   return RunExtensionTestImpl(
-      extension_name, std::string(), kFlagEnableIncognito);
+      extension_name, std::string(), NULL, kFlagEnableIncognito);
 }
 
 bool ExtensionApiTest::RunExtensionSubtest(const char* extension_name,
@@ -164,7 +168,12 @@ bool ExtensionApiTest::RunExtensionSubtest(const char* extension_name,
                                            const std::string& page_url,
                                            int flags) {
   DCHECK(!page_url.empty()) << "Argument page_url is required.";
-  return RunExtensionTestImpl(extension_name, page_url, flags);
+  // See http://crbug.com/177163 for details.
+#if defined(OS_WIN) && !defined(NDEBUG)
+  LOG(WARNING) << "Workaround for 177163, prematurely returning";
+  return true;
+#endif
+  return RunExtensionTestImpl(extension_name, page_url, NULL, flags);
 }
 
 
@@ -179,17 +188,27 @@ bool ExtensionApiTest::RunPageTest(const std::string& page_url,
 
 bool ExtensionApiTest::RunPlatformAppTest(const char* extension_name) {
   return RunExtensionTestImpl(
-      extension_name, std::string(), kFlagLaunchPlatformApp);
+      extension_name, std::string(), NULL, kFlagLaunchPlatformApp);
+}
+
+bool ExtensionApiTest::RunPlatformAppTestWithArg(
+    const char* extension_name, const char* custom_arg) {
+  return RunExtensionTestImpl(
+      extension_name, std::string(), custom_arg, kFlagLaunchPlatformApp);
 }
 
 // Load |extension_name| extension and/or |page_url| and wait for
 // PASSED or FAILED notification.
 bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
                                             const std::string& page_url,
+                                            const char* custom_arg,
                                             int flags) {
   bool load_as_component = (flags & kFlagLoadAsComponent) != 0;
   bool launch_platform_app = (flags & kFlagLaunchPlatformApp) != 0;
   bool use_incognito = (flags & kFlagUseIncognito) != 0;
+
+  if (custom_arg)
+    test_config_->SetString(kTestCustomArg, custom_arg);
 
   ResultCatcher catcher;
   DCHECK(!std::string(extension_name).empty() || !page_url.empty()) <<
@@ -276,7 +295,7 @@ const extensions::Extension* ExtensionApiTest::GetSingleLoadedExtension() {
       return NULL;
     }
 
-    extension = *it;
+    extension = it->get();
   }
 
   if (!extension) {

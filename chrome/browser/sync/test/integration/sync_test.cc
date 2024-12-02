@@ -11,12 +11,12 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/google/google_url_tracker.h"
@@ -48,7 +48,7 @@
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_config_service_fixed.h"
 #include "net/proxy/proxy_service.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
@@ -79,7 +79,7 @@ class SyncServerStatusChecker : public net::URLFetcherDelegate {
     running_ =
         (source->GetStatus().status() == net::URLRequestStatus::SUCCESS &&
         source->GetResponseCode() == 200 && data.find("ok") == 0);
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
   }
 
   bool running() const { return running_; }
@@ -205,10 +205,6 @@ void SyncTest::AddTestSwitches(CommandLine* cl) {
   if (!cl->HasSwitch(switches::kDisableBackgroundNetworking))
     cl->AppendSwitch(switches::kDisableBackgroundNetworking);
 
-  // TODO(sync): remove this once keystore encryption is enabled by default.
-  if (!cl->HasSwitch(switches::kSyncKeystoreEncryption))
-    cl->AppendSwitch(switches::kSyncKeystoreEncryption);
-
   if (!cl->HasSwitch(switches::kSyncShortInitialRetryOverride))
     cl->AppendSwitch(switches::kSyncShortInitialRetryOverride);
 
@@ -327,20 +323,6 @@ void SyncTest::InitializeInstance(int index) {
       GetProfile(index), Profile::EXPLICIT_ACCESS));
   ui_test_utils::WaitForTemplateURLServiceToLoad(
       TemplateURLServiceFactory::GetForProfile(GetProfile(index)));
-}
-
-void SyncTest::RestartSyncService(int index) {
-  DVLOG(1) << "Restarting profile sync service for profile " << index << ".";
-  delete clients_[index];
-  Profile* profile = GetProfile(index);
-  ProfileSyncService* service =
-      ProfileSyncServiceFactory::GetForProfile(profile);
-  service->ResetForTest();
-  clients_[index] = new ProfileSyncServiceHarness(profile,
-                                                  username_,
-                                                  password_);
-  service->Initialize();
-  GetClient(index)->AwaitSyncRestart();
 }
 
 bool SyncTest::SetupSync() {

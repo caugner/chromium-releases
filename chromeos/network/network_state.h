@@ -8,11 +8,9 @@
 #include <string>
 #include <vector>
 
+#include "base/values.h"
 #include "chromeos/network/managed_state.h"
-
-namespace base {
-class DictionaryValue;
-}
+#include "chromeos/network/onc/onc_constants.h"
 
 namespace chromeos {
 
@@ -22,7 +20,9 @@ namespace chromeos {
 // call NetworkStateHandler::GetNetworkState(path) to retrieve the state for
 // the network.
 class CHROMEOS_EXPORT NetworkState : public ManagedState {
- public:
+public:
+  typedef std::vector<int> FrequencyList;
+
   explicit NetworkState(const std::string& path);
   virtual ~NetworkState();
 
@@ -37,6 +37,10 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   // stored.
   void GetProperties(base::DictionaryValue* dictionary) const;
 
+  // Fills |dictionary| with the state properties required to configure a
+  // network.
+  void GetConfigProperties(base::DictionaryValue* dictionary) const;
+
   // Accessors
   const std::string& security() const { return security_; }
   const std::string& ip_address() const { return ip_address_; }
@@ -46,11 +50,18 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   const std::string& connection_state() const { return connection_state_; }
   const std::string& profile_path() const { return profile_path_; }
   const std::string& error() const { return error_; }
+  const std::string& error_details() const { return error_details_; }
   bool auto_connect() const { return auto_connect_; }
   bool favorite() const { return favorite_; }
   int priority() const { return priority_; }
+  const base::DictionaryValue& proxy_config() const { return proxy_config_; }
+  onc::ONCSource onc_source() const { return onc_source_; }
   // Wireless property accessors
   int signal_strength() const { return signal_strength_; }
+  bool connectable() const { return connectable_; }
+  // Wifi property accessors
+  bool passphrase_required() const { return passphrase_required_; }
+  const FrequencyList& wifi_frequencies() const { return wifi_frequencies_; }
   // Cellular property accessors
   const std::string& technology() const { return technology_; }
   const std::string& activation_state() const { return activation_state_; }
@@ -59,9 +70,16 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
     return activate_over_non_cellular_networks_;
   }
   bool cellular_out_of_credits() const { return cellular_out_of_credits_; }
+  const std::string& usage_url() const { return usage_url_; }
+  const std::string& payment_url() const { return payment_url_; }
+  const std::string& post_method() const { return post_method_; }
+  const std::string& post_data() const { return post_data_; }
 
   bool IsConnectedState() const;
   bool IsConnectingState() const;
+
+  // Returns true if |error_| contains an authentication error.
+  bool HasAuthenticationError() const;
 
   // Helpers (used e.g. when a state is cached)
   static bool StateIsConnected(const std::string& connection_state);
@@ -86,6 +104,8 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
     dns_servers_ = dns_servers;
   }
 
+  // TODO(gauravsh): Audit the list of properties that we are caching. We should
+  // only be doing this for commonly accessed properties. crbug.com/252553
   // Common Network Service properties
   std::string security_;
   std::string device_path_;
@@ -93,9 +113,14 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   std::string connection_state_;
   std::string profile_path_;
   std::string error_;
+  std::string error_details_;
   bool auto_connect_;
   bool favorite_;
   int priority_;
+  // TODO(pneubeck): Remove ProxyConfig and ONCSource once
+  // NetworkConfigurationHandler provides proxy configuration. crbug/241775
+  base::DictionaryValue proxy_config_;
+  onc::ONCSource onc_source_;
   // IPConfig properties.
   // Note: These do not correspond to actual Shill.Service properties
   // but are derived from the service's corresponding IPConfig object.
@@ -103,15 +128,23 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   std::vector<std::string> dns_servers_;
   // Wireless properties
   int signal_strength_;
+  bool connectable_;
   // Wifi properties
   std::string hex_ssid_;
   std::string country_code_;
+  bool passphrase_required_;
+  FrequencyList wifi_frequencies_;
   // Cellular properties
   std::string technology_;
   std::string activation_state_;
   std::string roaming_;
   bool activate_over_non_cellular_networks_;
   bool cellular_out_of_credits_;
+  // Cellular payment portal properties.
+  std::string usage_url_;
+  std::string payment_url_;
+  std::string post_method_;
+  std::string post_data_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkState);
 };

@@ -10,28 +10,36 @@ import errno
 import os
 import shutil
 import subprocess
+import sys
 
-
-GCLIENT_SPEC = """
-solutions = [
+GCLIENT_SPEC_DATA = [
   { "name"        : "src",
     "url"         : "https://chromium.googlesource.com/chromium/src.git",
     "deps_file"   : ".DEPS.git",
     "managed"     : True,
     "custom_deps" : {
-      "src/data/page_cycler": "https://chrome-internal.googlesource.com/" +
+      "src/data/page_cycler": "https://chrome-internal.googlesource.com/"
                               "chrome/data/page_cycler/.git",
-      "src/tools/perf/data": "https://chrome-internal.googlesource.com/" +
+      "src/data/dom_perf": "https://chrome-internal.googlesource.com/"
+                           "chrome/data/dom_perf/.git",
+      "src/tools/perf/data": "https://chrome-internal.googlesource.com/"
                              "chrome/tools/perf/data/.git",
-      "src/v8_bleeding_edge": "git://github.com/v8/v8.git",
     },
     "safesync_url": "",
   },
 ]
-"""
-GCLIENT_SPEC = ''.join([l for l in GCLIENT_SPEC.splitlines()])
+GCLIENT_ANDROID = "\ntarget_os = ['android']"
+GCLIENT_CUSTOM_DEPS_V8 = {"src/v8_bleeding_edge": "git://github.com/v8/v8.git"}
 FILE_DEPS_GIT = '.DEPS.git'
 
+REPO_PARAMS = [
+  'https://chrome-internal.googlesource.com/chromeos/manifest-internal/',
+  '--repo-url',
+  'https://git.chromium.org/external/repo.git'
+]
+
+REPO_SYNC_COMMAND = 'git checkout -f $(git rev-list --max-count=1 '\
+                    '--before=%d remotes/m/master)'
 
 def OutputAnnotationStepStart(name):
   """Outputs appropriate annotation to signal the start of a step to
@@ -74,11 +82,12 @@ def CreateAndChangeToSourceDirectory(working_directory):
   return True
 
 
-def RunGClient(params):
-  """Runs gclient with the specified parameters.
+def SubprocessCall(cmd, cwd=None):
+  """Runs a subprocess with specified parameters.
 
   Args:
     params: A list of parameters to pass to gclient.
+    cwd: Working directory to run from.
 
   Returns:
     The return code of the call.
@@ -88,20 +97,79 @@ def RunGClient(params):
     # for git to find the user's .netrc file.
     if not os.getenv('HOME'):
       os.environ['HOME'] = os.environ['USERPROFILE']
-
   shell = os.name == 'nt'
-  cmd = ['gclient'] + params
-  return subprocess.call(cmd, shell=shell)
+  return subprocess.call(cmd, shell=shell, cwd=cwd)
 
 
-def RunGClientAndCreateConfig():
-  """Runs gclient and creates a config containing both src and src-internal.
+def RunGClient(params, cwd=None):
+  """Runs gclient with the specified parameters.
+
+  Args:
+    params: A list of parameters to pass to gclient.
+    cwd: Working directory to run from.
 
   Returns:
     The return code of the call.
   """
+  cmd = ['gclient'] + params
+
+  return SubprocessCall(cmd, cwd=cwd)
+
+
+def RunRepo(params):
+  """Runs cros repo command with specified parameters.
+
+  Args:
+    params: A list of parameters to pass to gclient.
+
+  Returns:
+    The return code of the call.
+  """
+  cmd = ['repo'] + params
+
+  return SubprocessCall(cmd)
+
+
+def RunRepoSyncAtTimestamp(timestamp):
+  """Syncs all git depots to the timestamp specified using repo forall.
+
+  Args:
+    params: Unix timestamp to sync to.
+
+  Returns:
+    The return code of the call.
+  """
+  repo_sync = REPO_SYNC_COMMAND % timestamp
+  cmd = ['forall', '-c', REPO_SYNC_COMMAND % timestamp]
+  return RunRepo(cmd)
+
+
+def RunGClientAndCreateConfig(opts, custom_deps=None, cwd=None):
+  """Runs gclient and creates a config containing both src and src-internal.
+
+  Args:
+    opts: The options parsed from the command line through parse_args().
+    custom_deps: A dictionary of additional dependencies to add to .gclient.
+    cwd: Working directory to run from.
+
+  Returns:
+    The return code of the call.
+  """
+  spec = GCLIENT_SPEC_DATA
+
+  if custom_deps:
+    for k, v in custom_deps.iteritems():
+      spec[0]['custom_deps'][k] = v
+
+  # Cannot have newlines in string on windows
+  spec = 'solutions =' + str(spec)
+  spec = ''.join([l for l in spec.splitlines()])
+
+  if opts.target_platform == 'android':
+    spec += GCLIENT_SPEC_ANDROID
+
   return_code = RunGClient(
-      ['config', '--spec=%s' % GCLIENT_SPEC, '--git-deps'])
+      ['config', '--spec=%s' % spec, '--git-deps'], cwd=cwd)
   return return_code
 
 
@@ -133,26 +201,28 @@ def RemoveThirdPartyWebkitDirectory():
   return True
 
 
-def RunGClientAndSync(reset):
+def RunGClientAndSync(reset, cwd=None):
   """Runs gclient and does a normal sync.
 
   Args:
     reset: Whether to reset any changes to the depot.
+    cwd: Working directory to run from.
 
   Returns:
     The return code of the call.
   """
-  params = ['sync', '--verbose']
+  params = ['sync', '--verbose', '--nohooks']
   if reset:
     params.extend(['--reset', '--force', '--delete_unversioned_trees'])
-  return RunGClient(params)
+  return RunGClient(params, cwd=cwd)
 
 
-def SetupGitDepot(output_buildbot_annotations, reset):
+def SetupGitDepot(opts, reset):
   """Sets up the depot for the bisection. The depot will be located in a
   subdirectory called 'bisect'.
 
   Args:
+    opts: The options parsed from the command line through parse_args().
     reset: Whether to reset any changes to the depot.
 
   Returns:
@@ -161,12 +231,12 @@ def SetupGitDepot(output_buildbot_annotations, reset):
   """
   name = 'Setting up Bisection Depot'
 
-  if output_buildbot_annotations:
+  if opts.output_buildbot_annotations:
     OutputAnnotationStepStart(name)
 
   passed = False
 
-  if not RunGClientAndCreateConfig():
+  if not RunGClientAndCreateConfig(opts):
     passed_deps_check = True
     if os.path.isfile(os.path.join('src', FILE_DEPS_GIT)):
       cwd = os.getcwd()
@@ -180,11 +250,78 @@ def SetupGitDepot(output_buildbot_annotations, reset):
     if passed_deps_check and not RunGClientAndSync(reset):
       passed = True
 
-  if output_buildbot_annotations:
+  if opts.output_buildbot_annotations:
     print
     OutputAnnotationStepClosed()
 
   return passed
+
+
+def SetupCrosRepo():
+  """Sets up cros repo for bisecting chromeos.
+
+  Returns:
+    Returns 0 on success.
+  """
+  cwd = os.getcwd()
+  try:
+    os.mkdir('cros')
+  except OSError, e:
+    if e.errno != errno.EEXIST:
+      return False
+  os.chdir('cros')
+
+  cmd = ['init', '-u'] + REPO_PARAMS
+
+  passed = False
+
+  if not RunRepo(cmd):
+    if not RunRepo(['sync']):
+      passed = True
+  os.chdir(cwd)
+
+  return passed
+
+
+def SetupAndroidBuildEnvironment(opts):
+  """Sets up the android build environment.
+
+  Args:
+    opts: The options parsed from the command line through parse_args().
+    path_to_file: Path to the bisect script's directory.
+
+  Returns:
+    True if successful.
+  """
+  path_to_file = os.path.join('build', 'android', 'envsetup.sh')
+  proc = subprocess.Popen(['bash', '-c', 'source %s && env' % path_to_file],
+                           stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE,
+                           cwd='src')
+  (out, _) = proc.communicate()
+
+  for line in out.splitlines():
+    (k, _, v) = line.partition('=')
+    os.environ[k] = v
+  return not proc.returncode
+
+
+def SetupPlatformBuildEnvironment(opts):
+  """Performs any platform specific setup.
+
+  Args:
+    opts: The options parsed from the command line through parse_args().
+    path_to_file: Path to the bisect script's directory.
+
+  Returns:
+    True if successful.
+  """
+  if opts.target_platform == 'android':
+    return SetupAndroidBuildEnvironment(opts)
+  elif opts.target_platform == 'cros':
+    return SetupCrosRepo()
+
+  return True
 
 
 def CreateBisectDirectoryAndSetupDepot(opts, reset=False):
@@ -203,7 +340,7 @@ def CreateBisectDirectoryAndSetupDepot(opts, reset=False):
     print
     return 1
 
-  if not SetupGitDepot(opts.output_buildbot_annotations, reset):
+  if not SetupGitDepot(opts, reset):
     print 'Error: Failed to grab source.'
     print
     return 1

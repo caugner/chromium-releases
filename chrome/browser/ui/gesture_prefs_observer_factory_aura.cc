@@ -13,9 +13,9 @@
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "components/browser_context_keyed_service/browser_context_dependency_manager.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_service.h"
@@ -25,6 +25,7 @@
 
 #if defined(USE_ASH)
 #include "ash/wm/workspace/workspace_cycler_configuration.h"
+#include "chrome/browser/ui/immersive_fullscreen_configuration.h"
 #endif  // USE_ASH
 
 #if defined(USE_ASH)
@@ -67,6 +68,11 @@ const std::vector<OverscrollPref>& GetOverscrollPrefs() {
 }
 
 #if defined(USE_ASH)
+const char* kImmersiveModePrefs[] = {
+  prefs::kImmersiveModeRevealDelayMs,
+  prefs::kImmersiveModeRevealXThresholdPixels,
+};
+
 struct WorkspaceCyclerPref {
   const char* pref_name;
   WorkspaceCyclerConfiguration::Property property;
@@ -113,12 +119,12 @@ const std::vector<WorkspaceCyclerPref>& GetWorkspaceCyclerPrefs() {
 #endif  // USE_ASH
 
 // This class manages gesture configuration preferences.
-class GesturePrefsObserver : public ProfileKeyedService {
+class GesturePrefsObserver : public BrowserContextKeyedService {
  public:
   explicit GesturePrefsObserver(PrefService* prefs);
   virtual ~GesturePrefsObserver();
 
-  // ProfileKeyedService implementation.
+  // BrowserContextKeyedService implementation.
   virtual void Shutdown() OVERRIDE;
 
  private:
@@ -134,6 +140,8 @@ class GesturePrefsObserver : public ProfileKeyedService {
   // Notification helper to push overscroll preferences into
   // content.
   void UpdateOverscrollPrefs();
+
+  void UpdateImmersiveModePrefs();
   void UpdateWorkspaceCyclerPrefs();
 
   PrefChangeRegistrar registrar_;
@@ -212,6 +220,9 @@ GesturePrefsObserver::GesturePrefsObserver(PrefService* prefs)
     registrar_.Add(kFlingTouchscreenPrefs[i], notify_callback);
 
 #if defined(USE_ASH)
+  for (size_t i = 0; i < arraysize(kImmersiveModePrefs); ++i)
+    registrar_.Add(kImmersiveModePrefs[i], callback);
+
   const std::vector<WorkspaceCyclerPref>& cycler_prefs =
       GetWorkspaceCyclerPrefs();
   for (size_t i = 0; i < cycler_prefs.size(); ++i)
@@ -300,8 +311,11 @@ void GesturePrefsObserver::Update() {
   GestureConfiguration::set_rail_start_proportion(
       prefs_->GetDouble(
           prefs::kRailStartProportion));
+  GestureConfiguration::set_scroll_prediction_seconds(
+      prefs_->GetDouble(prefs::kScrollPredictionSeconds));
 
   UpdateOverscrollPrefs();
+  UpdateImmersiveModePrefs();
   UpdateWorkspaceCyclerPrefs();
 }
 
@@ -311,6 +325,16 @@ void GesturePrefsObserver::UpdateOverscrollPrefs() {
     content::SetOverscrollConfig(overscroll_prefs[i].config,
         static_cast<float>(prefs_->GetDouble(overscroll_prefs[i].pref_name)));
   }
+}
+
+void GesturePrefsObserver::UpdateImmersiveModePrefs() {
+#if defined(USE_ASH)
+  ImmersiveFullscreenConfiguration::set_immersive_mode_reveal_delay_ms(
+      prefs_->GetInteger(prefs::kImmersiveModeRevealDelayMs));
+  ImmersiveFullscreenConfiguration::
+      set_immersive_mode_reveal_x_threshold_pixels(
+          prefs_->GetInteger(prefs::kImmersiveModeRevealXThresholdPixels));
+#endif  // USE_ASH
 }
 
 void GesturePrefsObserver::UpdateWorkspaceCyclerPrefs() {
@@ -349,12 +373,14 @@ GesturePrefsObserverFactoryAura::GetInstance() {
 }
 
 GesturePrefsObserverFactoryAura::GesturePrefsObserverFactoryAura()
-    : ProfileKeyedServiceFactory("GesturePrefsObserverAura",
-                                 ProfileDependencyManager::GetInstance()) {}
+    : BrowserContextKeyedServiceFactory(
+        "GesturePrefsObserverAura",
+        BrowserContextDependencyManager::GetInstance()) {}
 
 GesturePrefsObserverFactoryAura::~GesturePrefsObserverFactoryAura() {}
 
-ProfileKeyedService* GesturePrefsObserverFactoryAura::BuildServiceInstanceFor(
+BrowserContextKeyedService*
+GesturePrefsObserverFactoryAura::BuildServiceInstanceFor(
     content::BrowserContext* profile) const {
   return new GesturePrefsObserver(static_cast<Profile*>(profile)->GetPrefs());
 }
@@ -386,6 +412,21 @@ void GesturePrefsObserverFactoryAura::RegisterFlingCurveParameters(
         kFlingTouchscreenPrefs[i],
         def_prefs.touchscreen_fling_profile[i],
         user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+}
+
+void GesturePrefsObserverFactoryAura::RegisterImmersiveModePrefs(
+    user_prefs::PrefRegistrySyncable* registry) {
+#if defined(USE_ASH)
+  registry->RegisterIntegerPref(
+      prefs::kImmersiveModeRevealDelayMs,
+      ImmersiveFullscreenConfiguration::immersive_mode_reveal_delay_ms(),
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(
+      prefs::kImmersiveModeRevealXThresholdPixels,
+      ImmersiveFullscreenConfiguration::
+          immersive_mode_reveal_x_threshold_pixels(),
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+#endif  // USE_ASH
 }
 
 void GesturePrefsObserverFactoryAura::RegisterWorkspaceCyclerPrefs(
@@ -521,6 +562,10 @@ void GesturePrefsObserverFactoryAura::RegisterUserPrefs(
       prefs::kRailStartProportion,
       GestureConfiguration::rail_start_proportion(),
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterDoublePref(
+      prefs::kScrollPredictionSeconds,
+      GestureConfiguration::scroll_prediction_seconds(),
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 
   // Register for migration.
   registry->RegisterDoublePref(
@@ -530,10 +575,12 @@ void GesturePrefsObserverFactoryAura::RegisterUserPrefs(
 
   RegisterOverscrollPrefs(registry);
   RegisterFlingCurveParameters(registry);
+  RegisterImmersiveModePrefs(registry);
   RegisterWorkspaceCyclerPrefs(registry);
 }
 
-bool GesturePrefsObserverFactoryAura::ServiceIsCreatedWithProfile() const {
+bool
+GesturePrefsObserverFactoryAura::ServiceIsCreatedWithBrowserContext() const {
   // Create the observer as soon as the profile is created.
   return true;
 }

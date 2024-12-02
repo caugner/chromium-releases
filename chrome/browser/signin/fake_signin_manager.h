@@ -11,17 +11,19 @@
 #include "chrome/browser/signin/signin_manager.h"
 
 class Profile;
-class ProfileKeyedService;
+class BrowserContextKeyedService;
 
+// Overrides InitTokenService to do-nothing in tests.
 class FakeSigninManagerBase : public SigninManagerBase {
  public:
-  explicit FakeSigninManagerBase(Profile* profile);
+  explicit FakeSigninManagerBase();
   virtual ~FakeSigninManagerBase();
 
-  virtual void SignOut() OVERRIDE;
+  virtual void InitTokenService() OVERRIDE;
 
-  // Helper function to be used with ProfileKeyedService::SetTestingFactory().
-  static ProfileKeyedService* Build(content::BrowserContext* profile);
+  // Helper function to be used with
+  // BrowserContextKeyedService::SetTestingFactory().
+  static BrowserContextKeyedService* Build(content::BrowserContext* profile);
 };
 
 #if !defined(OS_CHROMEOS)
@@ -52,8 +54,9 @@ class FakeSigninManager : public SigninManager {
 
   virtual void CompletePendingSignin() OVERRIDE;
 
-  // Helper function to be used with ProfileKeyedService::SetTestingFactory().
-  static ProfileKeyedService* Build(content::BrowserContext* profile);
+  // Helper function to be used with
+  // BrowserContextKeyedService::SetTestingFactory().
+  static BrowserContextKeyedService* Build(content::BrowserContext* profile);
 };
 
 #endif  // !defined (OS_CHROMEOS)

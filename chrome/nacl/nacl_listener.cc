@@ -7,6 +7,10 @@
 #include <errno.h>
 #include <stdlib.h>
 
+#if defined(OS_POSIX)
+#include <unistd.h>
+#endif
+
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -21,6 +25,7 @@
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/ipc_sync_message_filter.h"
 #include "native_client/src/trusted/service_runtime/sel_main_chrome.h"
+#include "native_client/src/trusted/validator/nacl_file_info.h"
 
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
@@ -130,6 +135,38 @@ class BrowserValidationDBProxy : public NaClValidationDB {
     }
   }
 
+  virtual bool ResolveFileToken(struct NaClFileToken* file_token,
+                                int32* fd, std::string* path) OVERRIDE {
+    *fd = -1;
+    *path = "";
+    if (file_token->lo == 0 && file_token->hi == 0) {
+      return false;
+    }
+    IPC::PlatformFileForTransit ipc_fd = IPC::InvalidPlatformFileForTransit();
+    base::FilePath ipc_path;
+    if (!listener_->Send(new NaClProcessMsg_ResolveFileToken(file_token->lo,
+                                                             file_token->hi,
+                                                             &ipc_fd,
+                                                             &ipc_path))) {
+      return false;
+    }
+    if (ipc_fd == IPC::InvalidPlatformFileForTransit()) {
+      return false;
+    }
+    base::PlatformFile handle =
+        IPC::PlatformFileForTransitToPlatformFile(ipc_fd);
+#if defined(OS_WIN)
+    // On Windows, valid handles are 32 bit unsigned integers so this is safe.
+    *fd = reinterpret_cast<uintptr_t>(handle);
+#else
+    *fd = handle;
+#endif
+    // It doesn't matter if the path is invalid UTF8 as long as it's consistent
+    // and unforgeable.
+    *path = ipc_path.AsUTF8Unsafe();
+    return true;
+  }
+
  private:
   // The listener never dies, otherwise this might be a dangling reference.
   NaClListener* listener_;
@@ -141,8 +178,12 @@ NaClListener::NaClListener() : shutdown_event_(true, false),
 #if defined(OS_LINUX)
                                prereserved_sandbox_size_(0),
 #endif
+#if defined(OS_POSIX)
+                               number_of_cores_(-1),  // unknown/error
+#endif
                                main_loop_(NULL) {
-  io_thread_.StartWithOptions(base::Thread::Options(MessageLoop::TYPE_IO, 0));
+  io_thread_.StartWithOptions(
+      base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
 #if defined(OS_WIN)
   DCHECK(g_listener == NULL);
   g_listener = this;
@@ -159,7 +200,7 @@ NaClListener::~NaClListener() {
 
 bool NaClListener::Send(IPC::Message* msg) {
   DCHECK(main_loop_ != NULL);
-  if (MessageLoop::current() == main_loop_) {
+  if (base::MessageLoop::current() == main_loop_) {
     // This thread owns the channel.
     return channel_->Send(msg);
   } else {
@@ -172,12 +213,12 @@ void NaClListener::Listen() {
   std::string channel_name =
       CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kProcessChannelID);
-  channel_.reset(new IPC::SyncChannel(this, io_thread_.message_loop_proxy(),
-                                      &shutdown_event_));
+  channel_.reset(new IPC::SyncChannel(
+      this, io_thread_.message_loop_proxy().get(), &shutdown_event_));
   filter_ = new IPC::SyncMessageFilter(&shutdown_event_);
   channel_->AddFilter(filter_.get());
   channel_->Init(channel_name, IPC::Channel::MODE_CLIENT, true);
-  main_loop_ = MessageLoop::current();
+  main_loop_ = base::MessageLoop::current();
   main_loop_->Run();
 }
 
@@ -204,7 +245,7 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
     IPC::ChannelHandle handle =
         IPC::Channel::GenerateVerifiedChannelID("nacl");
     scoped_refptr<NaClIPCAdapter> ipc_adapter(
-        new NaClIPCAdapter(handle, io_thread_.message_loop_proxy()));
+        new NaClIPCAdapter(handle, io_thread_.message_loop_proxy().get()));
     ipc_adapter->ConnectChannel();
 
     // Pass a NaClDesc to the untrusted side. This will hold a ref to the
@@ -226,6 +267,7 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
     LOG(ERROR) << "Failed to dup() the urandom FD";
     return;
   }
+  args->number_of_cores = number_of_cores_;
   args->create_memory_object_func = CreateMemoryObject;
 # if defined(OS_MACOSX)
   CHECK(handles.size() >= 1);

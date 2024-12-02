@@ -12,6 +12,7 @@
 #include "ui/aura/focus_manager.h"
 #include "ui/aura/test/aura_test_base.h"
 #include "ui/aura/test/event_generator.h"
+#include "ui/aura/test/test_cursor_client.h"
 #include "ui/aura/test/test_event_handler.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/test/test_windows.h"
@@ -502,7 +503,7 @@ std::string EventTypesToString(const EventFilterRecorder::Events& events) {
 
 }  // namespace
 
-TEST_F(RootWindowTest, HoldMouseMove) {
+TEST_F(RootWindowTest, MouseMovesHeld) {
   EventFilterRecorder* filter = new EventFilterRecorder;
   root_window()->SetEventFilter(filter);  // passes ownership
 
@@ -517,7 +518,7 @@ TEST_F(RootWindowTest, HoldMouseMove) {
   // Discard MOUSE_ENTER.
   filter->events().clear();
 
-  root_window()->HoldMouseMoves();
+  root_window()->HoldPointerMoves();
 
   // Check that we don't immediately dispatch the MOUSE_DRAGGED event.
   ui::MouseEvent mouse_dragged_event(ui::ET_MOUSE_DRAGGED, gfx::Point(0, 0),
@@ -550,23 +551,23 @@ TEST_F(RootWindowTest, HoldMouseMove) {
             EventTypesToString(filter->events()));
   filter->events().clear();
 
-  // Check that on ReleaseMouseMoves, held events are not dispatched
+  // Check that on ReleasePointerMoves, held events are not dispatched
   // immediately, but posted instead.
   root_window()->AsRootWindowHostDelegate()->OnHostMouseEvent(
       &mouse_dragged_event);
-  root_window()->ReleaseMouseMoves();
+  root_window()->ReleasePointerMoves();
   EXPECT_TRUE(filter->events().empty());
   RunAllPendingInMessageLoop();
   EXPECT_EQ("MOUSE_DRAGGED", EventTypesToString(filter->events()));
   filter->events().clear();
 
   // However if another message comes in before the dispatch,
-  // the Check that on ReleaseMouseMoves, held events are not dispatched
+  // the Check that on ReleasePointerMoves, held events are not dispatched
   // immediately, but posted instead.
-  root_window()->HoldMouseMoves();
+  root_window()->HoldPointerMoves();
   root_window()->AsRootWindowHostDelegate()->OnHostMouseEvent(
       &mouse_dragged_event);
-  root_window()->ReleaseMouseMoves();
+  root_window()->ReleasePointerMoves();
   root_window()->AsRootWindowHostDelegate()->OnHostMouseEvent(
       &mouse_pressed_event);
   EXPECT_EQ("MOUSE_DRAGGED MOUSE_PRESSED",
@@ -577,15 +578,104 @@ TEST_F(RootWindowTest, HoldMouseMove) {
 
   // Check that if the other message is another MOUSE_DRAGGED, we still coalesce
   // them.
-  root_window()->HoldMouseMoves();
+  root_window()->HoldPointerMoves();
   root_window()->AsRootWindowHostDelegate()->OnHostMouseEvent(
       &mouse_dragged_event);
-  root_window()->ReleaseMouseMoves();
+  root_window()->ReleasePointerMoves();
   root_window()->AsRootWindowHostDelegate()->OnHostMouseEvent(
       &mouse_dragged_event2);
   EXPECT_EQ("MOUSE_DRAGGED", EventTypesToString(filter->events()));
   filter->events().clear();
   RunAllPendingInMessageLoop();
+  EXPECT_TRUE(filter->events().empty());
+}
+
+TEST_F(RootWindowTest, TouchMovesHeld) {
+  EventFilterRecorder* filter = new EventFilterRecorder;
+  root_window()->SetEventFilter(filter);  // passes ownership
+
+  test::TestWindowDelegate delegate;
+  scoped_ptr<aura::Window> window(CreateTestWindowWithDelegate(
+      &delegate, 1, gfx::Rect(0, 0, 100, 100), root_window()));
+
+  // Starting the touch and throwing out the first few events, since the system
+  // is going to generate synthetic mouse events that are not relevant to the
+  // test.
+  ui::TouchEvent touch_pressed_event(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0),
+                                     0, base::TimeDelta());
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(
+      &touch_pressed_event);
+  RunAllPendingInMessageLoop();
+  filter->events().clear();
+
+  root_window()->HoldPointerMoves();
+
+  // Check that we don't immediately dispatch the TOUCH_MOVED event.
+  ui::TouchEvent touch_moved_event(ui::ET_TOUCH_MOVED, gfx::Point(0, 0),
+                                   0, base::TimeDelta());
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(
+      &touch_moved_event);
+  EXPECT_TRUE(filter->events().empty());
+
+  // Check that on ReleasePointerMoves, held events are not dispatched
+  // immediately, but posted instead.
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(
+      &touch_moved_event);
+  root_window()->ReleasePointerMoves();
+  EXPECT_TRUE(filter->events().empty());
+  RunAllPendingInMessageLoop();
+  EXPECT_EQ("TOUCH_MOVED", EventTypesToString(filter->events()));
+  filter->events().clear();
+
+  // If another touch event occurs then the held touch should be dispatched
+  // immediately before it.
+  ui::TouchEvent touch_released_event(ui::ET_TOUCH_RELEASED, gfx::Point(0, 0),
+                                      0, base::TimeDelta());
+  filter->events().clear();
+  root_window()->HoldPointerMoves();
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(
+      &touch_moved_event);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(
+      &touch_released_event);
+  EXPECT_EQ("TOUCH_MOVED TOUCH_RELEASED  GESTURE_END",
+            EventTypesToString(filter->events()));
+  filter->events().clear();
+  root_window()->ReleasePointerMoves();
+  RunAllPendingInMessageLoop();
+  EXPECT_TRUE(filter->events().empty());
+}
+
+// Tests that synthetic mouse events are ignored when mouse
+// events are disabled.
+TEST_F(RootWindowTest, DispatchSyntheticMouseEvents) {
+  EventFilterRecorder* filter = new EventFilterRecorder;
+  root_window()->SetEventFilter(filter);  // passes ownership
+
+  test::TestWindowDelegate delegate;
+  scoped_ptr<aura::Window> window(CreateTestWindowWithDelegate(
+      &delegate, 1234, gfx::Rect(5, 5, 100, 100), root_window()));
+  window->Show();
+  window->SetCapture();
+
+  test::TestCursorClient cursor_client(root_window());
+
+  // Dispatch a non-synthetic mouse event when mouse events are enabled.
+  ui::MouseEvent mouse1(ui::ET_MOUSE_MOVED, gfx::Point(10, 10),
+                        gfx::Point(10, 10), 0);
+  root_window()->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouse1);
+  EXPECT_FALSE(filter->events().empty());
+  filter->events().clear();
+
+  // Dispatch a synthetic mouse event when mouse events are enabled.
+  ui::MouseEvent mouse2(ui::ET_MOUSE_MOVED, gfx::Point(10, 10),
+                        gfx::Point(10, 10), ui::EF_IS_SYNTHESIZED);
+  root_window()->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouse2);
+  EXPECT_FALSE(filter->events().empty());
+  filter->events().clear();
+
+  // Dispatch a synthetic mouse event when mouse events are disabled.
+  cursor_client.DisableMouseEvents();
+  root_window()->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouse2);
   EXPECT_TRUE(filter->events().empty());
 }
 

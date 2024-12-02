@@ -8,8 +8,8 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/in_memory_database.h"
@@ -34,7 +34,7 @@ bool InMemoryHistoryBackend::Init(const base::FilePath& history_filename,
 }
 
 void InMemoryHistoryBackend::AttachToHistoryService(Profile* profile) {
-  if (!db_.get()) {
+  if (!db_) {
     NOTREACHED();
     return;
   }
@@ -103,7 +103,7 @@ void InMemoryHistoryBackend::Observe(
 
 void InMemoryHistoryBackend::OnTypedURLsModified(
     const URLsModifiedDetails& details) {
-  DCHECK(db_.get());
+  DCHECK(db_);
 
   // Add or update the URLs.
   //
@@ -124,7 +124,7 @@ void InMemoryHistoryBackend::OnTypedURLsModified(
 }
 
 void InMemoryHistoryBackend::OnURLsDeleted(const URLsDeletedDetails& details) {
-  DCHECK(db_.get());
+  DCHECK(db_);
 
   if (details.all_history) {
     // When all history is deleted, the individual URLs won't be listed. Just

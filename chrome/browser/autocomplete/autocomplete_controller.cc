@@ -11,14 +11,13 @@
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "base/time.h"
 #include "chrome/browser/autocomplete/autocomplete_controller_delegate.h"
 #include "chrome/browser/autocomplete/bookmark_provider.h"
 #include "chrome/browser/autocomplete/builtin_provider.h"
 #include "chrome/browser/autocomplete/extension_app_provider.h"
-#include "chrome/browser/autocomplete/history_contents_provider.h"
 #include "chrome/browser/autocomplete/history_quick_provider.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
@@ -54,43 +53,43 @@ void AutocompleteMatchToAssistedQuery(
   *subtype = string16::npos;
 
   switch (match) {
-    case AutocompleteMatch::SEARCH_SUGGEST: {
+    case AutocompleteMatchType::SEARCH_SUGGEST: {
       *type = 0;
       return;
     }
-    case AutocompleteMatch::NAVSUGGEST: {
+    case AutocompleteMatchType::NAVSUGGEST: {
       *type = 5;
       return;
     }
-    case AutocompleteMatch::SEARCH_WHAT_YOU_TYPED: {
+    case AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED: {
       *subtype = 57;
       return;
     }
-    case AutocompleteMatch::URL_WHAT_YOU_TYPED: {
+    case AutocompleteMatchType::URL_WHAT_YOU_TYPED: {
       *subtype = 58;
       return;
     }
-    case AutocompleteMatch::SEARCH_HISTORY: {
+    case AutocompleteMatchType::SEARCH_HISTORY: {
       *subtype = 59;
       return;
     }
-    case AutocompleteMatch::HISTORY_URL: {
+    case AutocompleteMatchType::HISTORY_URL: {
       *subtype = 60;
       return;
     }
-    case AutocompleteMatch::HISTORY_TITLE: {
+    case AutocompleteMatchType::HISTORY_TITLE: {
       *subtype = 61;
       return;
     }
-    case AutocompleteMatch::HISTORY_BODY: {
+    case AutocompleteMatchType::HISTORY_BODY: {
       *subtype = 62;
       return;
     }
-    case AutocompleteMatch::HISTORY_KEYWORD: {
+    case AutocompleteMatchType::HISTORY_KEYWORD: {
       *subtype = 63;
       return;
     }
-    case AutocompleteMatch::BOOKMARK_TITLE: {
+    case AutocompleteMatchType::BOOKMARK_TITLE: {
       *subtype = 65;
       return;
     }
@@ -117,6 +116,15 @@ void AppendAvailableAutocompletion(size_t type,
     base::StringAppendF(autocompletions, "i%" PRIuS, subtype);
   if (count > 1)
     base::StringAppendF(autocompletions, "l%d", count);
+}
+
+// Returns whether the autocompletion is trivial enough that we consider it
+// an autocompletion for which the omnibox autocompletion code did not add
+// any value.
+bool IsTrivialAutocompletion(const AutocompleteMatch& match) {
+  return match.type == AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED ||
+      match.type == AutocompleteMatchType::URL_WHAT_YOU_TYPED ||
+      match.type == AutocompleteMatchType::SEARCH_OTHER_ENGINE;
 }
 
 }  // namespace
@@ -159,8 +167,6 @@ AutocompleteController::AutocompleteController(
 #endif
   if (provider_types & AutocompleteProvider::TYPE_EXTENSION_APP)
     providers_.push_back(new ExtensionAppProvider(this, profile));
-  if (provider_types & AutocompleteProvider::TYPE_HISTORY_CONTENTS)
-    providers_.push_back(new HistoryContentsProvider(this, profile, use_hqp));
   if (use_hqp)
     providers_.push_back(new HistoryQuickProvider(this, profile));
   if (provider_types & AutocompleteProvider::TYPE_HISTORY_URL) {
@@ -241,9 +247,18 @@ void AutocompleteController::Start(const AutocompleteInput& input) {
   base::TimeTicks start_time = base::TimeTicks::Now();
   for (ACProviders::iterator i(providers_.begin()); i != providers_.end();
        ++i) {
+    // TODO(mpearson): Remove timing code once bugs 178705 / 237703 / 168933
+    // are resolved.
+    base::TimeTicks provider_start_time = base::TimeTicks::Now();
     (*i)->Start(input_, minimal_changes);
     if (input.matches_requested() != AutocompleteInput::ALL_MATCHES)
       DCHECK((*i)->done());
+    base::TimeTicks provider_end_time = base::TimeTicks::Now();
+    std::string name = std::string("Omnibox.ProviderTime.") + (*i)->GetName();
+    base::HistogramBase* counter = base::Histogram::FactoryGet(
+        name, 1, 5000, 20, base::Histogram::kUmaTargetedHistogramFlag);
+    counter->Add(static_cast<int>(
+        (provider_end_time - provider_start_time).InMilliseconds()));
   }
   if (input.matches_requested() == AutocompleteInput::ALL_MATCHES &&
       (input.text().length() < 6)) {
@@ -294,13 +309,12 @@ void AutocompleteController::Stop(bool clear_result) {
   }
 }
 
-void AutocompleteController::StartZeroSuggest(
-    const GURL& url,
-    const string16& user_text) {
+void AutocompleteController::StartZeroSuggest(const GURL& url,
+                                              const string16& permanent_text) {
   if (zero_suggest_provider_ != NULL) {
     DCHECK(!in_start_);  // We should not be already running a query.
     in_zero_suggest_ = true;
-    zero_suggest_provider_->StartZeroSuggest(url, user_text);
+    zero_suggest_provider_->StartZeroSuggest(url, permanent_text);
   }
 }
 
@@ -362,6 +376,7 @@ void AutocompleteController::ResetSession() {
   for (ACProviders::const_iterator i(providers_.begin()); i != providers_.end();
        ++i)
     (*i)->ResetSession();
+  in_zero_suggest_ = false;
 }
 
 void AutocompleteController::UpdateResult(
@@ -504,9 +519,13 @@ void AutocompleteController::UpdateAssistedQueryStats(
     const TemplateURL* template_url = match->GetTemplateURL(profile_, false);
     if (!template_url || !match->search_terms_args.get())
       continue;
+    std::string selected_index;
+    // Prevent trivial suggestions from getting credit for being selected.
+    if (!IsTrivialAutocompletion(*match))
+      selected_index = base::StringPrintf("%" PRIuS, index);
     match->search_terms_args->assisted_query_stats =
-        base::StringPrintf("chrome.%" PRIuS ".%s",
-                           index,
+        base::StringPrintf("chrome.%s.%s",
+                           selected_index.c_str(),
                            autocompletions.c_str());
     match->destination_url = GURL(template_url->url_ref().ReplaceSearchTerms(
         *match->search_terms_args));
@@ -552,9 +571,14 @@ void AutocompleteController::UpdateKeywordDescriptions(
       if (i->keyword != last_keyword) {
         const TemplateURL* template_url = i->GetTemplateURL(profile_, false);
         if (template_url) {
-          i->description = l10n_util::GetStringFUTF16(
-              IDS_AUTOCOMPLETE_SEARCH_DESCRIPTION,
-              template_url->AdjustedShortNameForLocaleDirection());
+          // For extension keywords, just make the description the extension
+          // name -- don't assume that the normal search keyword description is
+          // applicable.
+          i->description = template_url->AdjustedShortNameForLocaleDirection();
+          if (!template_url->IsExtensionKeyword()) {
+            i->description = l10n_util::GetStringFUTF16(
+                IDS_AUTOCOMPLETE_SEARCH_DESCRIPTION, i->description);
+          }
           i->description_class.push_back(
               ACMatchClassification(0, ACMatchClassification::DIM));
         }
@@ -617,8 +641,11 @@ void AutocompleteController::StartStopTimer() {
   // dropdown.  Furthermore, both Instant and InstantExtended expect
   // all results they inject (regardless of how long they took) to make
   // it to the edit model / dropdown display code.
+#if defined(HTML_INSTANT_EXTENDED_POPUP)
   if (!chrome::IsInstantExtendedAPIEnabled() &&
-      !chrome::IsInstantEnabled(profile_)) {
+      !chrome::IsInstantEnabled(profile_))
+#endif
+  {
     stop_timer_.Start(FROM_HERE,
                       base::TimeDelta::FromMilliseconds(kStopTimeMS),
                       base::Bind(&AutocompleteController::Stop,

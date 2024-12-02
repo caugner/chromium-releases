@@ -8,6 +8,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
+#include "chrome/renderer/extensions/native_handler.h"
 #include "chrome/renderer/extensions/object_backed_native_handler.h"
 #include "v8/include/v8.h"
 
@@ -17,6 +18,8 @@
 #include <vector>
 
 namespace extensions {
+
+class ChromeV8Context;
 
 // A module system for JS similar to node.js' require() function.
 // Each module has three variables in the global scope:
@@ -46,7 +49,11 @@ class ModuleSystem : public ObjectBackedNativeHandler {
   class ExceptionHandler {
    public:
     virtual ~ExceptionHandler() {}
-    virtual void HandleUncaughtException() = 0;
+    virtual void HandleUncaughtException(const v8::TryCatch& try_catch) = 0;
+
+   protected:
+    // Formats |try_catch| as a nice string.
+    std::string CreateExceptionString(const v8::TryCatch& try_catch);
   };
 
   // Enables native bindings for the duration of its lifetime.
@@ -61,25 +68,27 @@ class ModuleSystem : public ObjectBackedNativeHandler {
   };
 
   // |source_map| is a weak pointer.
-  ModuleSystem(v8::Handle<v8::Context> context, SourceMap* source_map);
+  ModuleSystem(ChromeV8Context* context, SourceMap* source_map);
   virtual ~ModuleSystem();
 
   // Require the specified module. This is the equivalent of calling
   // require('module_name') from the loaded JS files.
   v8::Handle<v8::Value> Require(const std::string& module_name);
-  v8::Handle<v8::Value> Require(const v8::Arguments& args);
+  void Require(const v8::FunctionCallbackInfo<v8::Value>& args);
 
   // Calls the specified method exported by the specified module. This is
   // equivalent to calling require('module_name').method_name() from JS.
   v8::Local<v8::Value> CallModuleMethod(const std::string& module_name,
                                         const std::string& method_name);
-
-  // Calls the specified method exported by the specified module. This is
-  // equivalent to calling require('module_name').method_name(args) from JS.
   v8::Local<v8::Value> CallModuleMethod(
       const std::string& module_name,
       const std::string& method_name,
       std::vector<v8::Handle<v8::Value> >* args);
+  v8::Local<v8::Value> CallModuleMethod(
+      const std::string& module_name,
+      const std::string& method_name,
+      int argc,
+      v8::Handle<v8::Value> argv[]);
 
   // Register |native_handler| as a potential target for requireNative(), so
   // calls to requireNative(|name|) from JS will return a new object created by
@@ -110,7 +119,7 @@ class ModuleSystem : public ObjectBackedNativeHandler {
                     const std::string& field,
                     const std::string& module_name,
                     const std::string& module_field,
-                    v8::AccessorGetter getter);
+                    v8::AccessorGetterCallback getter);
 
   // Make |object|.|field| lazily evaluate to the result of
   // requireNative(|module_name|)[|module_field|].
@@ -133,13 +142,13 @@ class ModuleSystem : public ObjectBackedNativeHandler {
   typedef std::map<std::string, linked_ptr<NativeHandler> > NativeHandlerMap;
 
   // Retrieves the lazily defined field specified by |property|.
-  static v8::Handle<v8::Value> LazyFieldGetter(v8::Local<v8::String> property,
-                                               const v8::AccessorInfo& info);
+  static void LazyFieldGetter(v8::Local<v8::String> property,
+                              const v8::PropertyCallbackInfo<v8::Value>& info);
   // Retrieves the lazily defined field specified by |property| on a native
   // object.
-  static v8::Handle<v8::Value> NativeLazyFieldGetter(
+  static void NativeLazyFieldGetter(
       v8::Local<v8::String> property,
-      const v8::AccessorInfo& info);
+      const v8::PropertyCallbackInfo<v8::Value>& info);
 
   // Called when an exception is thrown but not caught.
   void HandleException(const v8::TryCatch& try_catch);
@@ -152,16 +161,16 @@ class ModuleSystem : public ObjectBackedNativeHandler {
   v8::Handle<v8::Value> RunString(v8::Handle<v8::String> code,
                                   v8::Handle<v8::String> name);
 
-  v8::Handle<v8::Value> RequireForJs(const v8::Arguments& args);
+  void RequireForJs(const v8::FunctionCallbackInfo<v8::Value>& args);
   v8::Handle<v8::Value> RequireForJsInner(v8::Handle<v8::String> module_name);
 
   typedef v8::Handle<v8::Value> (ModuleSystem::*RequireFunction)(
       const std::string&);
   // Base implementation of a LazyFieldGetter which uses |require_fn| to require
   // modules.
-  static v8::Handle<v8::Value> LazyFieldGetterInner(
+  static void LazyFieldGetterInner(
       v8::Local<v8::String> property,
-      const v8::AccessorInfo& info,
+      const v8::PropertyCallbackInfo<v8::Value>& info,
       RequireFunction require_function);
 
   // Return the named source file stored in the source map.
@@ -172,10 +181,12 @@ class ModuleSystem : public ObjectBackedNativeHandler {
   // NativeHandler.
   // |args[0]| - the name of a native handler object.
   v8::Handle<v8::Value> RequireNativeFromString(const std::string& native_name);
-  v8::Handle<v8::Value> RequireNative(const v8::Arguments& args);
+  void RequireNative(const v8::FunctionCallbackInfo<v8::Value>& args);
 
   // Wraps |source| in a (function(require, requireNative, exports) {...}).
   v8::Handle<v8::String> WrapSource(v8::Handle<v8::String> source);
+
+  ChromeV8Context* context_;
 
   // A map from module names to the JS source for that module. GetSource()
   // performs a lookup on this map.
@@ -188,8 +199,8 @@ class ModuleSystem : public ObjectBackedNativeHandler {
   // pinned natives as enabled.
   int natives_enabled_;
 
-  // Called when an exception is thrown but not caught in JS.
-  // Non-NULL in tests only.
+  // Called when an exception is thrown but not caught in JS. Overridable by
+  // tests.
   scoped_ptr<ExceptionHandler> exception_handler_;
 
   std::set<std::string> overridden_native_handlers_;
@@ -197,6 +208,6 @@ class ModuleSystem : public ObjectBackedNativeHandler {
   DISALLOW_COPY_AND_ASSIGN(ModuleSystem);
 };
 
-}  // extensions
+}  // namespace extensions
 
 #endif  // CHROME_RENDERER_EXTENSIONS_MODULE_SYSTEM_H_

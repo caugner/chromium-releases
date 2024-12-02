@@ -6,12 +6,11 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #include "base/basictypes.h"
-#include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_store_consumer.h"
 #include "chrome/browser/password_manager/password_store_mac.h"
 #include "chrome/browser/password_manager/password_store_mac_internal.h"
@@ -29,7 +28,7 @@ using testing::WithArg;
 namespace {
 
 class MockPasswordStoreConsumer : public PasswordStoreConsumer {
-public:
+ public:
   MOCK_METHOD2(OnPasswordStoreRequestDone,
                void(CancelableRequestProvider::Handle,
                     const std::vector<content::PasswordForm*>&));
@@ -43,7 +42,7 @@ ACTION(STLDeleteElements0) {
 
 ACTION(QuitUIMessageLoop) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  MessageLoop::current()->Quit();
+  base::MessageLoop::current()->Quit();
 }
 
 }  // namespace
@@ -917,12 +916,13 @@ class PasswordStoreMacTest : public testing::Test {
 
   virtual void TearDown() {
     store_->ShutdownOnUIThread();
-    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->PostTask(FROM_HERE,
+                                           base::MessageLoop::QuitClosure());
+    base::MessageLoop::current()->Run();
   }
 
  protected:
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
 
   MockAppleKeychain* keychain_;  // Owned by store_.
@@ -1003,7 +1003,7 @@ TEST_F(PasswordStoreMacTest, TestStoreUpdate) {
   EXPECT_CALL(consumer, OnGetPasswordStoreResults(_)).WillOnce(
       DoAll(WithArg<0>(STLDeleteElements0()), QuitUIMessageLoop()));
   store_->GetLogins(*joint_form, &consumer);
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
 
   MacKeychainPasswordFormAdapter keychain_adapter(keychain_);
   for (unsigned int i = 0; i < ARRAYSIZE_UNSAFE(updates); ++i) {

@@ -8,6 +8,7 @@
 
 #include "base/logging.h"
 #include "base/strings/string_split.h"
+#include "googleurl/src/gurl.h"
 
 namespace chromeos {
 namespace input_method {
@@ -16,12 +17,12 @@ InputMethodDescriptor::InputMethodDescriptor(
     const std::string& id,
     const std::string& name,
     const std::vector<std::string>& keyboard_layouts,
-    const std::string& language_code,
-    const std::string& options_page_url)
+    const std::vector<std::string>& language_codes,
+    const GURL& options_page_url)
     : id_(id),
       name_(name),
       keyboard_layouts_(keyboard_layouts),
-      language_code_(language_code),
+      language_codes_(language_codes),
       options_page_url_(options_page_url) {
 }
 

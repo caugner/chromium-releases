@@ -39,25 +39,36 @@ QuicServer::QuicServer()
       packets_dropped_(0),
       overflow_supported_(false),
       use_recvmmsg_(false),
-      crypto_config_(kSourceAddressTokenSecret) {
+      crypto_config_(kSourceAddressTokenSecret, QuicRandom::GetInstance()) {
+  // Use hardcoded crypto parameters for now.
+  config_.SetDefaults();
+  Initialize();
+}
+
+QuicServer::QuicServer(const QuicConfig& config)
+    : port_(0),
+      packets_dropped_(0),
+      overflow_supported_(false),
+      use_recvmmsg_(false),
+      config_(config),
+      crypto_config_(kSourceAddressTokenSecret, QuicRandom::GetInstance()) {
+  Initialize();
+}
+
+void QuicServer::Initialize() {
+#if MMSG_MORE
+  use_recvmmsg_ = true;
+#endif
   epoll_server_.set_timeout_in_us(50 * 1000);
   // Initialize the in memory cache now.
   QuicInMemoryCache::GetInstance();
 
-  // Use hardcoded crypto parameters for now.
-  config_.SetDefaults();
-  CryptoHandshakeMessage extra_tags;
-  config_.ToHandshakeMessage(&extra_tags);
   QuicEpollClock clock(&epoll_server_);
 
   scoped_ptr<CryptoHandshakeMessage> scfg(
-      crypto_config_.AddDefaultConfig(QuicRandom::GetInstance(), &clock,
-                                      extra_tags));
-  // If we were using the same config in many servers then we would have to
-  // parse a QuicConfig from config_tags here.
-  if (!config_.SetFromHandshakeMessage(*scfg)) {
-    CHECK(false) << "Crypto config could not be parsed by QuicConfig.";
-  }
+      crypto_config_.AddDefaultConfig(
+          QuicRandom::GetInstance(), &clock,
+          QuicCryptoServerConfig::ConfigOptions()));
 }
 
 QuicServer::~QuicServer() {
@@ -129,7 +140,6 @@ bool QuicServer::Listen(const IPEndPoint& address) {
   }
 
   epoll_server_.RegisterFD(fd_, this, kEpollFlags);
-
   dispatcher_.reset(new QuicDispatcher(config_, crypto_config_, fd_,
                                        &epoll_server_));
 
@@ -160,21 +170,19 @@ void QuicServer::OnEvent(int fd, EpollEvent* event) {
     }
   }
   if (event->in_events & EPOLLOUT) {
-    LOG(INFO) << "Epollout";
     bool can_write_more = dispatcher_->OnCanWrite();
     if (can_write_more) {
       event->out_ready_mask |= EPOLLOUT;
     }
   }
   if (event->in_events & EPOLLERR) {
-    LOG(INFO) << "Epollerr";
   }
 }
 
 bool QuicServer::ReadAndDispatchSinglePacket(int fd,
-                                       int port,
-                                       QuicDispatcher* dispatcher,
-                                       int* packets_dropped) {
+                                             int port,
+                                             QuicDispatcher* dispatcher,
+                                             int* packets_dropped) {
   // Allocate some extra space so we can send an error if the client goes over
   // the limit.
   char buf[2 * kMaxPacketSize];
@@ -193,6 +201,11 @@ bool QuicServer::ReadAndDispatchSinglePacket(int fd,
   QuicEncryptedPacket packet(buf, bytes_read, false);
   QuicGuid guid;
   QuicDataReader reader(packet.data(), packet.length());
+  uint8 public_flags;
+  if (!reader.ReadBytes(&public_flags, 1)) {
+    LOG(DFATAL) << "Unable to read public flags.";
+    return false;
+  }
   if (!reader.ReadUInt64(&guid)) {
     return true;  // We read, we just didn't like the results.
   }

@@ -25,6 +25,7 @@ namespace policy {
 
 // Brokers access to the enterprise-related installation-time attributes on
 // ChromeOS.
+// TODO(zelidrag, mnissler): Rename + move this class - http://crbug.com/249513.
 class EnterpriseInstallAttributes {
  public:
   // Return codes for LockDevice().
@@ -41,7 +42,8 @@ class EnterpriseInstallAttributes {
   // Constants for the possible device modes that can be stored in the lockbox.
   static const char kConsumerDeviceMode[];
   static const char kEnterpiseDeviceMode[];
-  static const char kKioskDeviceMode[];
+  static const char kRetailKioskDeviceMode[];
+  static const char kConsumerKioskDeviceMode[];
   static const char kUnknownDeviceMode[];
 
   // Field names in the lockbox.
@@ -50,8 +52,9 @@ class EnterpriseInstallAttributes {
   static const char kAttrEnterpriseMode[];
   static const char kAttrEnterpriseOwned[];
   static const char kAttrEnterpriseUser[];
+  static const char kAttrConsumerKioskEnabled[];
 
-  explicit EnterpriseInstallAttributes(
+  EnterpriseInstallAttributes(
       chromeos::CryptohomeLibrary* cryptohome,
       chromeos::CryptohomeClient* cryptohome_client);
   ~EnterpriseInstallAttributes();
@@ -79,6 +82,9 @@ class EnterpriseInstallAttributes {
   // Checks whether this is an enterprise device.
   bool IsEnterpriseDevice();
 
+  // Checks whether this is a consumer kiosk enabled device.
+  bool IsConsumerKioskDevice();
+
   // Gets the domain this device belongs to or an empty string if the device is
   // not an enterprise device.
   std::string GetDomain();
@@ -95,6 +101,13 @@ class EnterpriseInstallAttributes {
   // Gets the mode the device was enrolled to. The return value for devices that
   // are not locked yet will be DEVICE_MODE_UNKNOWN.
   DeviceMode GetMode();
+
+ protected:
+  bool device_locked_;
+  std::string registration_user_;
+  std::string registration_domain_;
+  std::string registration_device_id_;
+  DeviceMode registration_mode_;
 
  private:
   // Decodes the install attributes provided in |attr_map|.
@@ -124,11 +137,6 @@ class EnterpriseInstallAttributes {
   chromeos::CryptohomeLibrary* cryptohome_;
   chromeos::CryptohomeClient* cryptohome_client_;
 
-  bool device_locked_;
-  std::string registration_user_;
-  std::string registration_domain_;
-  std::string registration_device_id_;
-  DeviceMode registration_mode_;
   base::WeakPtrFactory<EnterpriseInstallAttributes> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(EnterpriseInstallAttributes);

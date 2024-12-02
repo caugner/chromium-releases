@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread.h"
@@ -14,22 +15,21 @@
 #include "chrome/browser/chromeos/drive/fake_file_system.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/drive/test_util.h"
-#include "chrome/browser/google_apis/fake_drive_service.h"
-#include "chrome/browser/google_apis/task_util.h"
+#include "chrome/browser/drive/fake_drive_service.h"
 #include "chrome/browser/google_apis/test_util.h"
 #include "chrome/common/url_constants.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/test_completion_callback.h"
+#include "net/http/http_byte_range.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-using content::BrowserThread;
 
 namespace drive {
 namespace {
 
-// A simple URLRequestJobFactory implementation to create DriveURLReuqestJob.
+// A simple URLRequestJobFactory implementation to create DriveURLRequestJob.
 class TestURLRequestJobFactory : public net::URLRequestJobFactory {
  public:
   TestURLRequestJobFactory(
@@ -58,6 +58,10 @@ class TestURLRequestJobFactory : public net::URLRequestJobFactory {
 
   virtual bool IsHandledURL(const GURL& url) const OVERRIDE {
     return url.is_valid() && IsHandledProtocol(url.scheme());
+  }
+
+  virtual bool IsSafeRedirectTarget(const GURL& location) const OVERRIDE {
+    return true;
   }
 
  private:
@@ -91,26 +95,28 @@ class TestDelegate : public net::TestDelegate {
 
 class DriveURLRequestJobTest : public testing::Test {
  protected:
-  DriveURLRequestJobTest() : ui_thread_(BrowserThread::UI),
-                             io_thread_(BrowserThread::IO, &message_loop_) {
+  DriveURLRequestJobTest()
+      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {
   }
 
   virtual ~DriveURLRequestJobTest() {
   }
 
   virtual void SetUp() OVERRIDE {
-    ui_thread_.Start();
+    // Initialize FakeDriveService.
+    fake_drive_service_.reset(new FakeDriveService);
+    ASSERT_TRUE(fake_drive_service_->LoadResourceListForWapi(
+        "chromeos/gdata/root_feed.json"));
+    ASSERT_TRUE(fake_drive_service_->LoadAccountMetadataForWapi(
+        "chromeos/gdata/account_metadata.json"));
 
-    BrowserThread::PostTaskAndReply(
-        BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(&DriveURLRequestJobTest::SetUpOnUIThread,
-                   base::Unretained(this)),
-        base::MessageLoop::QuitClosure());
-    message_loop_.Run();
+    // Initialize FakeFileSystem.
+    fake_file_system_.reset(
+        new test_util::FakeFileSystem(fake_drive_service_.get()));
+    ASSERT_TRUE(fake_file_system_->InitializeForTesting());
 
     scoped_refptr<base::SequencedWorkerPool> blocking_pool =
-        BrowserThread::GetBlockingPool();
+        content::BrowserThread::GetBlockingPool();
     test_network_delegate_.reset(new net::TestNetworkDelegate);
     test_url_request_job_factory_.reset(new TestURLRequestJobFactory(
         base::Bind(&DriveURLRequestJobTest::GetFileSystem,
@@ -129,32 +135,6 @@ class DriveURLRequestJobTest : public testing::Test {
     test_url_request_job_factory_.reset();
     test_network_delegate_.reset();
 
-    BrowserThread::PostTaskAndReply(
-        BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(&DriveURLRequestJobTest::TearDownOnUIThread,
-                   base::Unretained(this)),
-        base::MessageLoop::QuitClosure());
-    message_loop_.Run();
-  }
-
-  void SetUpOnUIThread() {
-    // Initialize FakeDriveService.
-    fake_drive_service_.reset(new google_apis::FakeDriveService);
-    ASSERT_TRUE(fake_drive_service_->LoadResourceListForWapi(
-        "chromeos/gdata/root_feed.json"));
-    ASSERT_TRUE(fake_drive_service_->LoadAccountMetadataForWapi(
-        "chromeos/gdata/account_metadata.json"));
-    ASSERT_TRUE(fake_drive_service_->LoadAppListForDriveApi(
-        "chromeos/drive/applist.json"));
-
-    // Initialize FakeFileSystem.
-    fake_file_system_.reset(
-        new test_util::FakeFileSystem(fake_drive_service_.get()));
-    ASSERT_TRUE(fake_file_system_->InitializeForTesting());
-  }
-
-  void TearDownOnUIThread() {
     fake_file_system_.reset();
     fake_drive_service_.reset();
   }
@@ -176,14 +156,17 @@ class DriveURLRequestJobTest : public testing::Test {
         worker_thread->message_loop_proxy()));
     int error = net::ERR_FAILED;
     scoped_ptr<ResourceEntry> entry;
-    reader->Initialize(
-        file_path,
-        0, kuint64max,
-        google_apis::CreateComposedCallback(
-            base::Bind(&google_apis::test_util::RunAndQuit),
-            google_apis::test_util::CreateCopyResultCallback(
-                &error, &entry)));
-    message_loop_.Run();
+    {
+      base::RunLoop run_loop;
+      reader->Initialize(
+          file_path,
+          net::HttpByteRange(),
+          google_apis::test_util::CreateQuitCallback(
+              &run_loop,
+              google_apis::test_util::CreateCopyResultCallback(
+                  &error, &entry)));
+      run_loop.Run();
+    }
     if (error != net::OK || !entry)
       return false;
 
@@ -199,11 +182,9 @@ class DriveURLRequestJobTest : public testing::Test {
     return true;
   }
 
-  MessageLoopForIO message_loop_;
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread io_thread_;
+  content::TestBrowserThreadBundle thread_bundle_;
 
-  scoped_ptr<google_apis::FakeDriveService> fake_drive_service_;
+  scoped_ptr<FakeDriveService> fake_drive_service_;
   scoped_ptr<test_util::FakeFileSystem> fake_file_system_;
 
   scoped_ptr<net::TestNetworkDelegate> test_network_delegate_;
@@ -219,7 +200,7 @@ TEST_F(DriveURLRequestJobTest, NonGetMethod) {
   request.set_method("POST");  // Set non "GET" method.
   request.Start();
 
-  MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   EXPECT_EQ(net::URLRequestStatus::FAILED, request.status().status());
   EXPECT_EQ(net::ERR_METHOD_NOT_SUPPORTED, request.status().error());
@@ -236,7 +217,7 @@ TEST_F(DriveURLRequestJobTest, RegularFile) {
         url_request_context_.get(), test_network_delegate_.get());
     request.Start();
 
-    MessageLoop::current()->Run();
+    base::RunLoop().Run();
 
     EXPECT_EQ(net::URLRequestStatus::SUCCESS, request.status().status());
     // It looks weird, but the mime type for the "File 1.txt" is "audio/mpeg"
@@ -261,7 +242,7 @@ TEST_F(DriveURLRequestJobTest, RegularFile) {
         url_request_context_.get(), test_network_delegate_.get());
     request.Start();
 
-    MessageLoop::current()->Run();
+    base::RunLoop().Run();
 
     EXPECT_EQ(net::URLRequestStatus::SUCCESS, request.status().status());
     std::string mime_type;
@@ -283,7 +264,7 @@ TEST_F(DriveURLRequestJobTest, HostedDocument) {
       url_request_context_.get(), test_network_delegate_.get());
   request.Start();
 
-  MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   EXPECT_EQ(net::URLRequestStatus::SUCCESS, request.status().status());
   // Make sure that a hosted document triggers redirection.
@@ -298,7 +279,7 @@ TEST_F(DriveURLRequestJobTest, RootDirectory) {
       url_request_context_.get(), test_network_delegate_.get());
   request.Start();
 
-  MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   EXPECT_EQ(net::URLRequestStatus::FAILED, request.status().status());
   EXPECT_EQ(net::ERR_FAILED, request.status().error());
@@ -310,7 +291,7 @@ TEST_F(DriveURLRequestJobTest, Directory) {
       url_request_context_.get(), test_network_delegate_.get());
   request.Start();
 
-  MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   EXPECT_EQ(net::URLRequestStatus::FAILED, request.status().status());
   EXPECT_EQ(net::ERR_FAILED, request.status().error());
@@ -322,7 +303,7 @@ TEST_F(DriveURLRequestJobTest, NonExistingFile) {
       url_request_context_.get(), test_network_delegate_.get());
   request.Start();
 
-  MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   EXPECT_EQ(net::URLRequestStatus::FAILED, request.status().status());
   EXPECT_EQ(net::ERR_FILE_NOT_FOUND, request.status().error());
@@ -334,7 +315,7 @@ TEST_F(DriveURLRequestJobTest, WrongFormat) {
       url_request_context_.get(), test_network_delegate_.get());
   request.Start();
 
-  MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   EXPECT_EQ(net::URLRequestStatus::FAILED, request.status().status());
   EXPECT_EQ(net::ERR_INVALID_URL, request.status().error());
@@ -349,9 +330,51 @@ TEST_F(DriveURLRequestJobTest, Cancel) {
   request.Start();
   request.Cancel();
 
-  MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   EXPECT_EQ(net::URLRequestStatus::CANCELED, request.status().status());
+}
+
+TEST_F(DriveURLRequestJobTest, RangeHeader) {
+  const GURL kTestUrl("drive:drive/root/File 1.txt");
+  const base::FilePath kTestFilePath("drive/root/File 1.txt");
+
+  net::URLRequest request(
+      kTestUrl, test_delegate_.get(),
+      url_request_context_.get(), test_network_delegate_.get());
+
+  // Set range header.
+  request.SetExtraRequestHeaderByName(
+      "Range", "bytes=3-5", false /* overwrite */);
+  request.Start();
+
+  base::RunLoop().Run();
+
+  EXPECT_EQ(net::URLRequestStatus::SUCCESS, request.status().status());
+
+  // Reading file must be done after |request| runs, otherwise
+  // it'll create a local cache file, and we cannot test correctly.
+  std::string expected_data;
+  ASSERT_TRUE(ReadDriveFileSync(kTestFilePath, &expected_data));
+  EXPECT_EQ(expected_data.substr(3, 3), test_delegate_->data_received());
+}
+
+TEST_F(DriveURLRequestJobTest, WrongRangeHeader) {
+  const GURL kTestUrl("drive:drive/root/File 1.txt");
+
+  net::URLRequest request(
+      kTestUrl, test_delegate_.get(),
+      url_request_context_.get(), test_network_delegate_.get());
+
+  // Set range header.
+  request.SetExtraRequestHeaderByName(
+      "Range", "Wrong Range Header Value", false /* overwrite */);
+  request.Start();
+
+  base::RunLoop().Run();
+
+  EXPECT_EQ(net::URLRequestStatus::FAILED, request.status().status());
+  EXPECT_EQ(net::ERR_REQUEST_RANGE_NOT_SATISFIABLE, request.status().error());
 }
 
 }  // namespace drive

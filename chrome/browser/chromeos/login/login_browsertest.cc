@@ -8,7 +8,6 @@
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
-#include "chrome/browser/chromeos/cros/mock_network_library.h"
 #include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
@@ -37,29 +36,20 @@ namespace {
 
 class LoginTestBase : public chromeos::CrosInProcessBrowserTest {
  public:
-  LoginTestBase()
-    : mock_cryptohome_library_(NULL),
-      mock_network_library_(NULL) {
-  }
+  LoginTestBase() {}
 
  protected:
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     mock_cryptohome_library_.reset(new chromeos::MockCryptohomeLibrary());
     cros_mock_->InitStatusAreaMocks();
     cros_mock_->SetStatusAreaMocksExpectations();
-    mock_network_library_ = cros_mock_->mock_network_library();
     EXPECT_CALL(*(mock_cryptohome_library_.get()), GetSystemSalt())
         .WillRepeatedly(Return(std::string("stub_system_salt")));
     EXPECT_CALL(*(mock_cryptohome_library_.get()), InstallAttributesIsReady())
         .WillRepeatedly(Return(false));
-    EXPECT_CALL(*mock_network_library_, AddUserActionObserver(_))
-        .Times(AnyNumber());
-    EXPECT_CALL(*mock_network_library_, LoadOncNetworks(_, _))
-        .Times(AnyNumber());
   }
 
   scoped_ptr<chromeos::MockCryptohomeLibrary> mock_cryptohome_library_;
-  chromeos::MockNetworkLibrary* mock_network_library_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(LoginTestBase);
@@ -200,8 +190,7 @@ IN_PROC_BROWSER_TEST_F(LoginGuestTest, CursorShown) {
 // Verifies the cursor is hidden at startup on login screen.
 IN_PROC_BROWSER_TEST_F(LoginCursorTest, CursorHidden) {
   // Login screen needs to be shown explicitly when running test.
-  chromeos::ShowLoginWizard(chromeos::WizardController::kLoginScreenName,
-                            gfx::Size());
+  chromeos::ShowLoginWizard(chromeos::WizardController::kLoginScreenName);
 
   // Cursor should be hidden at startup
   EXPECT_FALSE(ash::Shell::GetInstance()->cursor_manager()->IsCursorVisible());
@@ -210,7 +199,7 @@ IN_PROC_BROWSER_TEST_F(LoginCursorTest, CursorHidden) {
   EXPECT_TRUE(ui_test_utils::SendMouseMoveSync(gfx::Point()));
   EXPECT_TRUE(ash::Shell::GetInstance()->cursor_manager()->IsCursorVisible());
 
-  MessageLoop::current()->DeleteSoon(
+  base::MessageLoop::current()->DeleteSoon(
       FROM_HERE, chromeos::LoginDisplayHostImpl::default_host());
 }
 

@@ -27,21 +27,38 @@ function FileTasks(fileManager, opt_params) {
 }
 
 /**
-* Location of the Chrome Web Store.
-*
-* @const
-* @type {string}
-*/
-FileTasks.CHROME_WEB_STORE_URL = 'https://chrome.google.com/webstore';
-
-/**
-* Location of the FAQ about the file actions.
-*
-* @const
-* @type {string}
-*/
+ * Location of the FAQ about the file actions.
+ *
+ * @const
+ * @type {string}
+ */
 FileTasks.NO_ACTION_FOR_FILE_URL = 'http://support.google.com/chromeos/bin/' +
     'answer.py?answer=1700055&topic=29026&ctx=topic';
+
+/**
+ * Base URL of apps list in the Chrome Web Store. This constant is used in
+ * FileTasks.createWebStoreLink().
+ * @const
+ * @type {string}
+ */
+FileTasks.WEB_STORE_HANDLER_BASE_URL =
+    'https://chrome.google.com/webstore/category/collection/file_handlers';
+
+/**
+ * Returns URL of the Chrome Web Store which show apps supporting the given
+ * file-extension and mime-type.
+ *
+ * @param {string} extension Extension of the file.
+ * @param {string} mimeType Mime type of the file.
+ * @return {string} URL
+ */
+FileTasks.createWebStoreLink = function(extension, mimeType) {
+  var url = FileTasks.WEB_STORE_HANDLER_BASE_URL;
+  url += '?_fe=' + extension.toLowerCase().replace(/[^\w]/g, '');
+  if (mimeType)
+    url += '&_fmt=' + mimeType.replace(/[^-\w\/]/g, '');
+  return url;
+};
 
 /**
  * Complete the initialization.
@@ -126,7 +143,7 @@ FileTasks.recordViewingFileTypeUMA_ = function(urls) {
  */
 FileTasks.prototype.processTasks_ = function(tasks) {
   this.tasks_ = [];
-  var id = util.platform.getAppId();
+  var id = chrome.runtime.id;
   var isOnDrive = false;
   for (var index = 0; index < this.urls_.length; ++index) {
     if (FileType.isOnDrive(this.urls_[index])) {
@@ -249,11 +266,22 @@ FileTasks.prototype.executeDefaultInternal_ = function(urls) {
         var filename = decodeURIComponent(urls[0]);
         if (filename.indexOf('/') != -1)
           filename = filename.substr(filename.lastIndexOf('/') + 1);
+        var extension = filename.lastIndexOf('.') != -1 ?
+            filename.substr(filename.lastIndexOf('.') + 1) : '';
 
-        var text = loadTimeData.getStringF('NO_ACTION_FOR_FILE',
-                                           FileTasks.CHROME_WEB_STORE_URL,
-                                           FileTasks.NO_ACTION_FOR_FILE_URL);
-        this.fileManager_.alert.showHtml(filename, text, function() {});
+        this.fileManager_.metadataCache_.get(urls, 'drive', function(props) {
+          var mimeType;
+          if (props && props[0] && props[0].contentMimeType)
+            mimeType = props[0].contentMimeType;
+
+          var messageString = extension == 'exe' ? 'NO_ACTION_FOR_EXECUTABLE' :
+                                                   'NO_ACTION_FOR_FILE';
+          var webStoreUrl = FileTasks.createWebStoreLink(extension, mimeType);
+          var text = loadTimeData.getStringF(messageString,
+                                             webStoreUrl,
+                                             FileTasks.NO_ACTION_FOR_FILE_URL);
+          this.fileManager_.alert.showHtml(filename, text, function() {});
+        }.bind(this));
       }
     }.bind(this);
 
@@ -288,7 +316,7 @@ FileTasks.prototype.execute_ = function(taskId, opt_urls) {
 FileTasks.prototype.executeInternal_ = function(taskId, urls) {
   this.checkAvailability_(function() {
     var taskParts = taskId.split('|');
-    if (taskParts[0] == util.platform.getAppId() && taskParts[1] == 'file') {
+    if (taskParts[0] == chrome.runtime.id && taskParts[1] == 'file') {
       // For internal tasks we do not listen to the event to avoid
       // handling the same task instance from multiple tabs.
       // So, we manually execute the task.
@@ -387,24 +415,18 @@ FileTasks.prototype.executeInternalTask_ = function(id, urls) {
       urls = fm.getAllUrlsInCurrentDirectory().filter(FileType.isAudio);
       position = urls.indexOf(selectedUrl);
     }
-    if (util.platform.v2()) {
-      chrome.runtime.getBackgroundPage(function(background) {
-        background.launchAudioPlayer({ items: urls, position: position });
-      });
-    } else {
-      chrome.mediaPlayerPrivate.play(urls, position);
-    }
+    chrome.runtime.getBackgroundPage(function(background) {
+      background.launchAudioPlayer({ items: urls, position: position });
+    });
     return;
   }
 
-  if (util.platform.v2()) {
-    if (id == 'watch') {
-      console.assert(urls.length == 1, 'Cannot open multiple videos');
-      chrome.runtime.getBackgroundPage(function(background) {
-        background.launchVideoPlayer(urls[0]);
-      });
-      return;
-    }
+  if (id == 'watch') {
+    console.assert(urls.length == 1, 'Cannot open multiple videos');
+    chrome.runtime.getBackgroundPage(function(background) {
+      background.launchVideoPlayer(urls[0]);
+    });
+    return;
   }
 
   if (id == 'mount-archive') {
@@ -430,7 +452,6 @@ FileTasks.prototype.executeInternalTask_ = function(id, urls) {
       if (!success)
         console.error('chrome.fileBrowserPrivate.viewFiles failed', urls);
     });
-    return;
   }
 };
 
@@ -502,8 +523,7 @@ FileTasks.prototype.openGalleryInternal_ = function(urls) {
 
   if (this.params_ && this.params_.gallery) {
     // Remove the Gallery state from the location, we do not need it any more.
-    util.updateAppState(
-        true /* replace */, null /* keep path */, '' /* remove search. */);
+    util.updateAppState(null /* keep path */, '' /* remove search. */);
   }
 
   var savedAppState = window.appState;
@@ -511,18 +531,14 @@ FileTasks.prototype.openGalleryInternal_ = function(urls) {
 
   // Push a temporary state which will be replaced every time the selection
   // changes in the Gallery and popped when the Gallery is closed.
-  util.updateAppState(false /*push*/);
+  util.updateAppState();
 
   var onBack = function(selectedUrls) {
     fm.directoryModel_.selectUrls(selectedUrls);
-    if (util.platform.v2()) {
-      fm.closeFilePopup_();  // Will call Gallery.unload.
-      window.appState = savedAppState;
-      util.saveAppState();
-      document.title = savedTitle;
-    } else {
-      window.history.back(1);  // This will restore document.title.
-    }
+    fm.closeFilePopup_();  // Will call Gallery.unload.
+    window.appState = savedAppState;
+    util.saveAppState();
+    document.title = savedTitle;
   };
 
   var onClose = function() {
@@ -534,7 +550,6 @@ FileTasks.prototype.openGalleryInternal_ = function(urls) {
   };
 
   galleryFrame.onload = function() {
-    fm.show_();
     galleryFrame.contentWindow.ImageUtil.metrics = metrics;
     window.galleryTestAPI = galleryFrame.contentWindow.galleryTestAPI;
 
@@ -559,13 +574,10 @@ FileTasks.prototype.openGalleryInternal_ = function(urls) {
       searchResults: fm.directoryModel_.isSearching(),
       metadataCache: fm.metadataCache_,
       pageState: this.params_,
-      appWindow: util.platform.v2() ? chrome.app.window.current() : null,
+      appWindow: chrome.app.window.current(),
       onBack: onBack,
       onClose: onClose,
       onMaximize: onMaximize,
-      onThumbnailError: function(imageURL) {
-        fm.metadataCache_.refreshFileMetadata(imageURL);
-      },
       displayStringFunction: strf
     };
     galleryFrame.contentWindow.Gallery.open(context, allUrls, urls);

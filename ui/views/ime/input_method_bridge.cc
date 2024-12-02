@@ -44,8 +44,14 @@ void InputMethodBridge::OnFocus() {
 
 void InputMethodBridge::OnBlur() {
   ConfirmCompositionText();
+
   if (host_->GetTextInputClient() == this)
     host_->SetFocusedTextInputClient(NULL);
+}
+
+bool InputMethodBridge::OnUntranslatedIMEMessage(const base::NativeEvent& event,
+                                                 NativeEventResult* result) {
+  return host_->OnUntranslatedIMEMessage(event, result);
 }
 
 void InputMethodBridge::DispatchKeyEvent(const ui::KeyEvent& key) {
@@ -72,6 +78,10 @@ void InputMethodBridge::CancelComposition(View* view) {
     host_->CancelComposition(this);
 }
 
+void InputMethodBridge::OnInputLocaleChanged() {
+  return host_->OnInputLocaleChanged();
+}
+
 std::string InputMethodBridge::GetInputLocale() {
   return host_->GetInputLocale();
 }
@@ -82,6 +92,10 @@ base::i18n::TextDirection InputMethodBridge::GetInputTextDirection() {
 
 bool InputMethodBridge::IsActive() {
   return host_->IsActive();
+}
+
+bool InputMethodBridge::IsCandidatePopupOpen() const {
+  return host_->IsCandidatePopupOpen();
 }
 
 // Overridden from TextInputClient. Forward an event from the system-wide IME
@@ -115,6 +129,12 @@ void InputMethodBridge::InsertChar(char16 ch, int flags) {
   TextInputClient* client = GetTextInputClient();
   if (client)
     client->InsertChar(ch, flags);
+}
+
+gfx::NativeWindow InputMethodBridge::GetAttachedWindow() const {
+  TextInputClient* client = GetTextInputClient();
+  return client ?
+      client->GetAttachedWindow() : static_cast<gfx::NativeWindow>(NULL);
 }
 
 ui::TextInputType InputMethodBridge::GetTextInputType() const {
@@ -208,12 +228,21 @@ void InputMethodBridge::EnsureCaretInRect(const gfx::Rect& rect) {
 
 // Overridden from FocusChangeListener.
 void InputMethodBridge::OnWillChangeFocus(View* focused_before, View* focused) {
-  ConfirmCompositionText();
+  if (HasCompositionText()) {
+    ConfirmCompositionText();
+    CancelComposition(focused_before);
+  }
 }
 
 void InputMethodBridge::OnDidChangeFocus(View* focused_before, View* focused) {
-  OnTextInputTypeChanged(GetFocusedView());
-  OnCaretBoundsChanged(GetFocusedView());
+  DCHECK_EQ(GetFocusedView(), focused);
+  OnTextInputTypeChanged(focused);
+  OnCaretBoundsChanged(focused);
 }
+
+ui::InputMethod* InputMethodBridge::GetHostInputMethod() const {
+  return host_;
+}
+
 
 }  // namespace views

@@ -8,8 +8,8 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/test/test_timeouts.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
@@ -134,6 +134,8 @@ void PPAPITestBase::SetUpCommandLine(CommandLine* command_line) {
 
   // For TestRequestOSFileHandle.
   command_line->AppendSwitch(switches::kUnlimitedStorage);
+  command_line->AppendSwitchASCII(switches::kAllowNaClFileHandleAPI,
+                                  "127.0.0.1");
 }
 
 void PPAPITestBase::SetUpOnMainThread() {
@@ -314,6 +316,8 @@ OutOfProcessPPAPITest::OutOfProcessPPAPITest() {
 
 void OutOfProcessPPAPITest::SetUpCommandLine(CommandLine* command_line) {
   PPAPITest::SetUpCommandLine(command_line);
+  command_line->AppendSwitch(switches::kUseFakeDeviceForMediaStream);
+  command_line->AppendSwitch(switches::kUseFakeUIForMediaStream);
 }
 
 void PPAPINaClTest::SetUpCommandLine(CommandLine* command_line) {
@@ -327,6 +331,8 @@ void PPAPINaClTest::SetUpCommandLine(CommandLine* command_line) {
   command_line->AppendSwitch(switches::kEnableNaCl);
   command_line->AppendSwitch(switches::kEnablePnacl);
   command_line->AppendSwitchASCII(switches::kAllowNaClSocketAPI, "127.0.0.1");
+  command_line->AppendSwitch(switches::kUseFakeDeviceForMediaStream);
+  command_line->AppendSwitch(switches::kUseFakeUIForMediaStream);
 }
 
 // Append the correct mode and testcase string

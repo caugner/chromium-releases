@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/ui/browser.h"
@@ -96,9 +96,7 @@ class ErrorPageTest : public InProcessBrowserTest {
         ASCIIToUTF16(expected_title));
 
     content::TestNavigationObserver test_navigation_observer(
-        content::Source<NavigationController>(
-              &browser()->tab_strip_model()->GetActiveWebContents()->
-                  GetController()),
+        browser()->tab_strip_model()->GetActiveWebContents(),
         num_navigations);
     if (direction == HISTORY_NAVIGATE_BACK) {
       chrome::GoBack(browser(), CURRENT_TAB);
@@ -109,15 +107,15 @@ class ErrorPageTest : public InProcessBrowserTest {
     }
     test_navigation_observer.WaitForObservation(
         base::Bind(&content::RunMessageLoop),
-        base::Bind(&MessageLoop::Quit,
-                   base::Unretained(MessageLoopForUI::current())));
+        base::Bind(&base::MessageLoop::Quit,
+                   base::Unretained(base::MessageLoopForUI::current())));
 
     EXPECT_EQ(title_watcher.WaitAndGetTitle(), ASCIIToUTF16(expected_title));
   }
 };
 
 // See crbug.com/109669
-#if defined(USE_AURA)
+#if defined(USE_AURA) || defined(OS_WIN)
 #define MAYBE_DNSError_Basic DISABLED_DNSError_Basic
 #else
 #define MAYBE_DNSError_Basic DNSError_Basic

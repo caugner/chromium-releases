@@ -9,7 +9,7 @@
 
 #include "base/logging.h"
 #include "base/strings/string_piece.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/web_contents.h"
@@ -101,10 +101,11 @@ void Shell::PlatformSetIsLoading(bool loading) {
 }
 
 void Shell::PlatformCreateWindow(int width, int height) {
-  SizeTo(width, height);
-
-  if (headless_)
+  ui_elements_height_ = 0;
+  if (headless_) {
+    SizeTo(width, height);
     return;
+  }
 
   window_ = GTK_WINDOW(gtk_window_new(GTK_WINDOW_TOPLEVEL));
   gtk_window_set_title(window_, "Content Shell");
@@ -132,6 +133,12 @@ void Shell::PlatformCreateWindow(int width, int height) {
       accel_group, GDK_n, GDK_CONTROL_MASK,
       GTK_ACCEL_VISIBLE,
       g_cclosure_new(G_CALLBACK(OnNewWindowKeyPressedThunk),
+                    this, NULL));
+
+  gtk_accel_group_connect(
+    accel_group, GDK_F5, (GdkModifierType)0,
+      GTK_ACCEL_VISIBLE,
+      g_cclosure_new(G_CALLBACK(OnReloadKeyPressedThunk),
                     this, NULL));
 
   GtkWidget* toolbar = gtk_toolbar_new();
@@ -195,6 +202,25 @@ void Shell::PlatformCreateWindow(int width, int height) {
   gtk_box_pack_start(GTK_BOX(vbox_), toolbar, FALSE, FALSE, 0);
 
   gtk_container_add(GTK_CONTAINER(window_), vbox_);
+
+  // Trigger layout of the UI elements, so that we can measure their
+  // heights. The width and height passed to this method are meant for the web
+  // contents view, not the top-level window. Since Gtk only seems to provide a
+  // suitable resizing function for top-level windows, we need to know how to
+  // convert from web contents view size to top-level window size.
+  gtk_widget_show_all(GTK_WIDGET(vbox_));
+
+  // Measure the heights of the UI elements, now that they have been laid out.
+  GtkRequisition elm_size;
+  gtk_widget_size_request(menu_bar, &elm_size);
+  ui_elements_height_ += elm_size.height;
+  gtk_widget_size_request(toolbar, &elm_size);
+  ui_elements_height_ += elm_size.height;
+
+  // We're ready to set an initial window size.
+  SizeTo(width, height);
+
+  // Finally, show the window.
   gtk_widget_show_all(GTK_WIDGET(window_));
 }
 
@@ -209,7 +235,13 @@ void Shell::PlatformSetContents() {
 void Shell::SizeTo(int width, int height) {
   content_width_ = width;
   content_height_ = height;
-  if (web_contents_) {
+
+  // Prefer setting the top level window's size (if we have one), rather than
+  // setting the inner widget's minimum size (so that the user can shrink the
+  // window if she wants).
+  if (window_) {
+    gtk_window_resize(window_, width, height + ui_elements_height_);
+  } else if (web_contents_) {
     gtk_widget_set_size_request(web_contents_->GetView()->GetNativeView(),
                                 width, height);
   }
@@ -285,6 +317,14 @@ gboolean Shell::OnHighlightURLView(GtkAccelGroup* accel_group,
                                    guint keyval,
                                    GdkModifierType modifier) {
   gtk_widget_grab_focus(GTK_WIDGET(url_edit_view_));
+  return TRUE;
+}
+
+gboolean Shell::OnReloadKeyPressed(GtkAccelGroup* accel_group,
+                                   GObject* acceleratable,
+                                   guint keyval,
+                                   GdkModifierType modifier) {
+  Reload();
   return TRUE;
 }
 

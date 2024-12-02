@@ -35,10 +35,8 @@ class TestLauncherDelegate : public LauncherDelegate,
   virtual void OnWillRemoveWindow(aura::Window* window) OVERRIDE;
 
   // LauncherDelegate implementation.
-  virtual void OnBrowserShortcutClicked(int event_flags) OVERRIDE;
   virtual void ItemSelected(const LauncherItem& item,
                            const ui::Event& event) OVERRIDE;
-  virtual int GetBrowserShortcutResourceId() OVERRIDE;
   virtual base::string16 GetTitle(const LauncherItem& item) OVERRIDE;
   virtual ui::MenuModel* CreateContextMenu(const LauncherItem& item,
                                            aura::RootWindow* root) OVERRIDE;
@@ -51,6 +49,10 @@ class TestLauncherDelegate : public LauncherDelegate,
   virtual void OnLauncherCreated(Launcher* launcher) OVERRIDE;
   virtual void OnLauncherDestroyed(Launcher* launcher) OVERRIDE;
   virtual bool IsPerAppLauncher() OVERRIDE;
+  virtual LauncherID GetLauncherIDForAppID(const std::string& app_id) OVERRIDE;
+  virtual void PinAppWithID(const std::string& app_id) OVERRIDE;
+  virtual bool IsAppPinned(const std::string& app_id) OVERRIDE;
+  virtual void UnpinAppsWithID(const std::string& app_id) OVERRIDE;
 
  private:
   typedef std::map<aura::Window*, ash::LauncherID> WindowToID;

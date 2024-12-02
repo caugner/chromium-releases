@@ -49,13 +49,21 @@ def RecordInstallMetadata(apk_package, metadata_path):
   """Records the metadata from the device for apk_package."""
   metadata = GetMetadata(apk_package)
   if not metadata:
-    raise 'APK install failed unexpectedly.'
+    if not android_commands.AndroidCommands().IsRootEnabled():
+      raise Exception('APK install failed unexpectedly -- root not enabled on '
+                      'the device (run adb root).')
+    raise Exception('APK install failed unexpectedly.')
 
   with open(metadata_path, 'w') as outfile:
     outfile.write(metadata)
 
 
 def main(argv):
+  if not build_utils.IsDeviceReady():
+    build_utils.PrintBigWarning(
+        'Zero (or multiple) devices attached. Skipping APK install.')
+    return
+
   parser = optparse.OptionParser()
   parser.add_option('--android-sdk-tools',
       help='Path to Android SDK tools.')

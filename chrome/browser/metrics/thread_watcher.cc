@@ -10,10 +10,10 @@
 #include "base/compiler_specific.h"
 #include "base/debug/alias.h"
 #include "base/lazy_instance.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_tokenizer.h"
+#include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/metrics/metrics_service.h"
@@ -184,7 +184,7 @@ void ThreadWatcher::ActivateThreadWatching() {
   active_ = true;
   ping_count_ = unresponsive_threshold_;
   ResetHangCounters();
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&ThreadWatcher::PostPingMessage,
                  weak_ptr_factory_.GetWeakPtr()));
@@ -240,7 +240,7 @@ void ThreadWatcher::PostPingMessage() {
           base::Bind(&ThreadWatcher::OnPingMessage, thread_id_,
                      callback))) {
       // Post a task to check the responsiveness of watched thread.
-      MessageLoop::current()->PostDelayedTask(
+      base::MessageLoop::current()->PostDelayedTask(
           FROM_HERE,
           base::Bind(&ThreadWatcher::OnCheckResponsiveness,
                      weak_ptr_factory_.GetWeakPtr(), ping_sequence_number_),
@@ -276,7 +276,7 @@ void ThreadWatcher::OnPongMessage(uint64 ping_sequence_number) {
   if (!active_ || --ping_count_ <= 0)
     return;
 
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ThreadWatcher::PostPingMessage,
                  weak_ptr_factory_.GetWeakPtr()),
@@ -305,7 +305,7 @@ void ThreadWatcher::OnCheckResponsiveness(uint64 ping_sequence_number) {
   GotNoResponse();
 
   // Post a task to check the responsiveness of watched thread.
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ThreadWatcher::OnCheckResponsiveness,
                  weak_ptr_factory_.GetWeakPtr(), ping_sequence_number_),
@@ -787,7 +787,7 @@ WatchDogThread::~WatchDogThread() {
 bool WatchDogThread::CurrentlyOnWatchDogThread() {
   base::AutoLock lock(g_watchdog_lock.Get());
   return g_watchdog_thread &&
-    g_watchdog_thread->message_loop() == MessageLoop::current();
+      g_watchdog_thread->message_loop() == base::MessageLoop::current();
 }
 
 // static
@@ -811,7 +811,7 @@ bool WatchDogThread::PostTaskHelper(
   {
     base::AutoLock lock(g_watchdog_lock.Get());
 
-    MessageLoop* message_loop = g_watchdog_thread ?
+    base::MessageLoop* message_loop = g_watchdog_thread ?
         g_watchdog_thread->message_loop() : NULL;
     if (message_loop) {
       message_loop->PostDelayedTask(from_here, task, delay);
@@ -933,7 +933,7 @@ void StartupTimeBomb::DeleteStartupWatchdog() {
     startup_watchdog_ = NULL;
     return;
   }
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&StartupTimeBomb::DeleteStartupWatchdog,
                  base::Unretained(this)),

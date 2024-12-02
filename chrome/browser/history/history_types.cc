@@ -107,6 +107,10 @@ URLResult::URLResult(const GURL& url,
     : URLRow(url) {
   title_match_positions_ = title_matches;
 }
+URLResult::URLResult(const URLRow& url_row)
+    : URLRow(url_row),
+      blocked_visit_(false) {
+}
 
 URLResult::~URLResult() {
 }
@@ -117,6 +121,11 @@ void URLResult::SwapResult(URLResult* other) {
   snippet_.Swap(&other->snippet_);
   title_match_positions_.swap(other->title_match_positions_);
   std::swap(blocked_visit_, other->blocked_visit_);
+}
+
+// static
+bool URLResult::CompareVisitTime(const URLResult& lhs, const URLResult& rhs) {
+  return lhs.visit_time() > rhs.visit_time();
 }
 
 // QueryResults ----------------------------------------------------------------
@@ -380,28 +389,10 @@ bool RowQualifiesAsSignificant(const URLRow& row,
 IconMapping::IconMapping()
     : mapping_id(0),
       icon_id(0),
-      icon_type(INVALID_ICON) {
+      icon_type(chrome::INVALID_ICON) {
 }
 
 IconMapping::~IconMapping() {}
-
-// FaviconBitmapResult --------------------------------------------------------
-
-FaviconBitmapResult::FaviconBitmapResult()
-    : expired(false),
-      icon_type(history::INVALID_ICON) {
-}
-
-FaviconBitmapResult::~FaviconBitmapResult() {
-}
-
-// FaviconImageResult ---------------------------------------------------------
-
-FaviconImageResult::FaviconImageResult() {
-}
-
-FaviconImageResult::~FaviconImageResult() {
-}
 
 // FaviconSizes --------------------------------------------------------------
 
@@ -427,14 +418,6 @@ FaviconBitmap::FaviconBitmap()
 }
 
 FaviconBitmap::~FaviconBitmap() {
-}
-
-// ImportedFaviconUsage --------------------------------------------------------
-
-ImportedFaviconUsage::ImportedFaviconUsage() {
-}
-
-ImportedFaviconUsage::~ImportedFaviconUsage() {
 }
 
 // VisitDatabaseObserver -------------------------------------------------------

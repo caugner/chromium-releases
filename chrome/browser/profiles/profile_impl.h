@@ -87,6 +87,8 @@ class ProfileImpl : public Profile {
 
   // Profile implementation:
   virtual scoped_refptr<base::SequencedTaskRunner> GetIOTaskRunner() OVERRIDE;
+  // Note that this implementation returns the Google-services username, if any,
+  // not the Chrome user's display name.
   virtual std::string GetProfileName() OVERRIDE;
   virtual bool IsOffTheRecord() const OVERRIDE;
   virtual Profile* GetOffTheRecordProfile() OVERRIDE;
@@ -203,7 +205,7 @@ class ProfileImpl : public Profile {
 
   // TODO(mnissler, joaodasilva): The |profile_policy_connector_| provides the
   // PolicyService that the |prefs_| depend on, and must outlive |prefs_|.
-  // This can be removed once |prefs_| becomes a ProfileKeyedService too.
+  // This can be removed once |prefs_| becomes a BrowserContextKeyedService too.
   // |profile_policy_connector_| in turn depends on |cloud_policy_manager_|.
 #if defined(ENABLE_CONFIGURATION_POLICY)
   scoped_ptr<policy::CloudPolicyManager> cloud_policy_manager_;
@@ -253,16 +255,16 @@ class ProfileImpl : public Profile {
   // STOP!!!! DO NOT ADD ANY MORE ITEMS HERE!!!!
   //
   // Instead, make your Service/Manager/whatever object you're hanging off the
-  // Profile use our new ProfileKeyedServiceFactory system instead. You can
-  // find the design document here:
+  // Profile use our new BrowserContextKeyedServiceFactory system instead.
+  // You can find the design document here:
   //
   //   https://sites.google.com/a/chromium.org/dev/developers/design-documents/profile-architecture
   //
   // and you can read the raw headers here:
   //
-  //   chrome/browser/profile/profile_keyed_service.h
-  //   chrome/browser/profile/profile_keyed_service_factory.{h,cc}
-  //   chrome/browser/profile/profile_keyed_dependency_manager.{h,cc}
+  //   components/browser_context_keyed_service/browser_context_dependency_manager.{h,cc}
+  //   components/browser_context_keyed_service/browser_context_keyed_service.h
+  //   components/browser_context_keyed_service/browser_context_keyed_service_factory.{h,cc}
 
   Profile::Delegate* delegate_;
 

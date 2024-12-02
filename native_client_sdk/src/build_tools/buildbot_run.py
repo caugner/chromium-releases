@@ -3,37 +3,73 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""THIS SCRIPT IS DEPRECATED AND WILL SOON BE REMOVED.
+"""Main entry point for the NaCl SDK buildbot.
 
-Edit tools/build/scripts/slave/chromium/nacl_sdk_buildbot_run.py instead.
+The entry point used to be build_sdk.py itself, but we want
+to be able to simplify build_sdk (for example separating out
+the test code into test_sdk) and change its default behaviour
+while being able to separately control excactly what the bots
+run.
 """
-
 
 import buildbot_common
 import os
+import subprocess
 import sys
 
-# Set the directory that this script lives in.
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+from buildbot_common import Run
+from build_paths import SRC_DIR, SDK_SRC_DIR, SCRIPT_DIR
+import getos
 
 
-SDK_BUILDER_MAP = {
-    'linux-sdk-mono32':
-        [sys.executable, 'nacl-mono-buildbot.py'],
-    'linux-sdk-mono64':
-        [sys.executable, 'nacl-mono-buildbot.py'],
-    'DEFAULT':
-        [sys.executable, 'build_sdk.py'],
-}
+def StepRunUnittests():
+  buildbot_common.BuildStep('Run unittests')
+
+  # Our tests shouldn't be using the proxy; they should all be connecting to
+  # localhost. Some slaves can't route HTTP traffic through the proxy to
+  # localhost (we get 504 gateway errors), so we clear it here.
+  env = dict(os.environ)
+  if 'http_proxy' in env:
+    del env['http_proxy']
+
+  Run([sys.executable, 'test_all.py'], env=env, cwd=SDK_SRC_DIR)
+
+
+def StepBuildSDK(args):
+  is_win = getos.GetPlatform() == 'win'
+
+  # Windows has a path length limit of 255 characters, after joining cwd with a
+  # relative path. Use subst before building to keep the path lengths short.
+  if is_win:
+    subst_drive = 'S:'
+    root_dir = os.path.dirname(SRC_DIR)
+    new_root_dir = subst_drive + '\\'
+    subprocess.check_call(['subst', subst_drive, root_dir])
+    new_script_dir = os.path.join(new_root_dir,
+                                  os.path.relpath(SCRIPT_DIR, root_dir))
+  else:
+    new_script_dir = SCRIPT_DIR
+
+  try:
+    Run([sys.executable, 'build_sdk.py'] + args, cwd=new_script_dir)
+  finally:
+    if is_win:
+      subprocess.check_call(['subst', '/D', subst_drive])
+
+
+def StepTestSDK():
+  Run([sys.executable, 'test_sdk.py'], cwd=SCRIPT_DIR)
 
 
 def main(args):
-  args = args[1:]
-  buildername = os.environ.get('BUILDBOT_BUILDERNAME', '')
-  cmd = SDK_BUILDER_MAP.get(buildername) or SDK_BUILDER_MAP.get('DEFAULT')
-  buildbot_common.Run(cmd + args, cwd=SCRIPT_DIR)
+  StepRunUnittests()
+  StepBuildSDK(args)
+  StepTestSDK()
   return 0
 
 
 if __name__ == '__main__':
-  sys.exit(main(sys.argv))
+  try:
+    sys.exit(main(sys.argv[1:]))
+  except KeyboardInterrupt:
+    buildbot_common.ErrorExit('buildbot_run: interrupted')

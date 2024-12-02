@@ -7,10 +7,10 @@
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
-#include "gpu/command_buffer/service/gpu_driver_bug_workaround_type.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "gpu/command_buffer/service/texture_manager.h"
+#include "gpu/config/gpu_driver_bug_workaround_type.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_mock.h"
@@ -812,6 +812,13 @@ TEST_F(FeatureInfoTest, InitializeVAOsWithClientSideArrays) {
   info_->AddFeatures(command_line);
   EXPECT_TRUE(info_->workarounds().use_client_side_arrays_for_stream_buffers);
   EXPECT_FALSE(info_->feature_flags().native_vertex_array_object);
+}
+
+TEST_F(FeatureInfoTest, InitializeEXT_frag_depth) {
+  SetupInitExpectations("GL_EXT_frag_depth");
+  info_->Initialize(NULL);
+  EXPECT_TRUE(info_->feature_flags().ext_frag_depth);
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_frag_depth"));
 }
 
 TEST_F(FeatureInfoTest, InitializeSamplersWithARBSamplerObjects) {

@@ -83,7 +83,7 @@ class IframeSourceTest : public testing::Test {
   TestIframeSource* source() { return source_.get(); }
 
   std::string response_string() {
-    if (response_) {
+    if (response_.get()) {
       return std::string(reinterpret_cast<const char*>(response_->front()),
                          response_->size());
     }
@@ -140,7 +140,7 @@ class IframeSourceTest : public testing::Test {
     response_ = data;
   }
 
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread io_thread_;
 

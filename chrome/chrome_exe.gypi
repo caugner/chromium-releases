@@ -64,6 +64,12 @@
             }],
           ]
         }],
+        ['OS == "win" and use_aura==1', {
+          'sources!': [
+            # We still want the _win entry point for sandbox, etc.
+            'app/chrome_exe_main_aura.cc',
+          ],
+        }],
         ['OS == "android"', {
           # Don't put the 'chrome' target in 'all' on android
           'suppress_wildcard': 1,
@@ -142,7 +148,8 @@
               'dependencies': [
                 # On Linux, link the dependencies (libraries) that make up actual
                 # Chromium functionality directly into the executable.
-                '<@(chromium_dependencies)',
+                '<@(chromium_browser_dependencies)',
+                '<@(chromium_child_dependencies)',
                 # Needed for chrome_main.cc initialization of libraries.
                 '../build/linux/system.gyp:gtk',
                 # Needed to use the master_preferences functions
@@ -152,7 +159,8 @@
               'dependencies': [
                 # On Linux, link the dependencies (libraries) that make up actual
                 # Chromium functionality directly into the executable.
-                '<@(chromium_dependencies)',
+                '<@(chromium_browser_dependencies)',
+                '<@(chromium_child_dependencies)',
                 # Needed for chrome_main.cc initialization of libraries.
                 '../build/linux/system.gyp:x11',
                 '../build/linux/system.gyp:pangocairo',
@@ -441,11 +449,6 @@
                 'linux_installer_configs',
               ],
             }],
-            ['selinux==0', {
-              'dependencies': [
-                '../sandbox/sandbox.gyp:sandbox',
-              ],
-            }],
             # For now, do not build nacl_helper when disable_nacl=1
             # http://code.google.com/p/gyp/issues/detail?id=239
             ['disable_nacl==0 and coverage==0', {
@@ -455,11 +458,15 @@
                 ],
             }],
           ],
+          'dependencies': [
+            '../sandbox/sandbox.gyp:sandbox',
+          ],
         }],
         ['OS=="win"', {
           'dependencies': [
             'chrome_dll',
             'chrome_nacl_win64',
+            'chrome_process_finder',
             'chrome_version_resources',
             'installer_util',
             'image_pre_reader',

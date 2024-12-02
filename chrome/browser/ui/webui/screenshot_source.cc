@@ -13,9 +13,9 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
-#include "base/string16.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/profiles/profile.h"
@@ -32,7 +32,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/drive/drive_system_service.h"
+#include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chromeos/login/login_state.h"
@@ -197,11 +197,11 @@ void ScreenshotSource::SendScreenshot(
     GetScreenshotDirectory(&download_path);
     if (drive::util::IsUnderDriveMountPoint(download_path)) {
       drive::FileSystemInterface* file_system =
-          drive::DriveSystemServiceFactory::GetForProfile(
+          drive::DriveIntegrationServiceFactory::GetForProfile(
               profile_)->file_system();
       file_system->GetFileByResourceId(
           decoded_filename,
-          drive::DriveClientContext(drive::USER_INITIATED),
+          drive::ClientContext(drive::USER_INITIATED),
           base::Bind(&ScreenshotSource::GetSavedScreenshotCallback,
                      base::Unretained(this), screenshot_path, callback),
           google_apis::GetContentCallback());
@@ -246,9 +246,8 @@ void ScreenshotSource::GetSavedScreenshotCallback(
     const content::URLDataSource::GotDataCallback& callback,
     drive::FileError error,
     const base::FilePath& file,
-    const std::string& unused_mime_type,
-    drive::DriveFileType file_type) {
-  if (error != drive::FILE_ERROR_OK || file_type != drive::REGULAR_FILE) {
+    scoped_ptr<drive::ResourceEntry> entry) {
+  if (error != drive::FILE_ERROR_OK) {
     ScreenshotDataPtr read_bytes(new ScreenshotData);
     CacheAndSendScreenshot(screenshot_path, callback, read_bytes);
     return;

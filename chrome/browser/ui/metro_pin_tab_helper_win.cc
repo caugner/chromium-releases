@@ -16,7 +16,7 @@
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/win/metro.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/favicon/favicon_util.h"
@@ -394,7 +394,8 @@ void MetroPinTabHelper::TogglePinnedToStartScreen() {
   }
 
   // Request all the candidates.
-  int image_size = 0; // Request the full sized image.
+  int preferred_image_size = 0;  // Request the first image.
+  int max_image_size = 0;  // Do not resize images.
   for (std::vector<content::FaviconURL>::const_iterator iter =
            favicon_url_candidates_.begin();
        iter != favicon_url_candidates_.end();
@@ -402,7 +403,8 @@ void MetroPinTabHelper::TogglePinnedToStartScreen() {
     favicon_chooser_->AddPendingRequest(
         web_contents()->DownloadImage(iter->icon_url,
             true,
-            image_size,
+            preferred_image_size,
+            max_image_size,
             base::Bind(&MetroPinTabHelper::DidDownloadFavicon,
                        base::Unretained(this))));
   }
@@ -428,6 +430,7 @@ void MetroPinTabHelper::DidUpdateFaviconURL(
 
 void MetroPinTabHelper::DidDownloadFavicon(
     int id,
+    int http_status_code,
     const GURL& image_url,
     int requested_size,
     const std::vector<SkBitmap>& bitmaps) {

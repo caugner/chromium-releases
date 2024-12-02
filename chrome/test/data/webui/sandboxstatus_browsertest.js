@@ -50,14 +50,16 @@ TEST_F('SandboxStatusUITest', 'MAYBE_testSUIDSandboxEnabled', function() {
 });
 
 // The seccomp-bpf sandbox is also not compatible with ASAN.
-// The Chrome OS waterfall bot doesn't support BPF: crbug.com/237041.
-GEN('#if defined(OS_LINUX) && !defined(ADDRESS_SANITIZER) && \\');
-GEN('    !defined(OS_CHROMEOS)');
-GEN('# define MAYBE_testBPFSandboxEnabled \\');
-GEN('     testBPFSandboxEnabled');
-GEN('#else');
+GEN('#if !defined(OS_LINUX) || defined(ADDRESS_SANITIZER)');
 GEN('# define MAYBE_testBPFSandboxEnabled \\');
 GEN('     DISABLED_testBPFSandboxEnabled');
+GEN('#elif !defined(OS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)');
+// Not yet available on the ARM linux bots: http://crbug.com/243478
+GEN('# define MAYBE_testBPFSandboxEnabled \\');
+GEN('     DISABLED_testBPFSandboxEnabled');
+GEN('#else');
+GEN('# define MAYBE_testBPFSandboxEnabled \\');
+GEN('     testBPFSandboxEnabled');
 GEN('#endif');
 
 /**

@@ -5,7 +5,7 @@
 [
   {
     "namespace": "metricsPrivate",
-    "nodoc": true,
+    "description": "none",
     "types": [
       {
         "id": "MetricType",
@@ -25,6 +25,37 @@
       }
     ],
     "functions": [
+      {
+        "name": "getIsCrashReportingEnabled",
+        "description": "Returns true if the user opted in to sending crash reports.",
+        "type": "function",
+        "parameters": [
+          {
+            "name": "callback",
+            "type": "function",
+            "optional": "false",
+            "parameters": [
+              { "name": "is_enabled", "type": "boolean" }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "getFieldTrial",
+        "description": "Returns the group name chosen for the named trial, or the empty string if the trial does not exist or is not enabled.",
+        "type": "function",
+        "parameters": [
+          {"name": "name", "type": "string"},
+          {
+            "name": "callback",
+            "type": "function",
+            "optional": "false",
+            "parameters": [
+              { "name": "group", "type": "string" }
+            ]
+          }
+        ]
+      },
       {
         "name": "recordUserAction",
         "type": "function",

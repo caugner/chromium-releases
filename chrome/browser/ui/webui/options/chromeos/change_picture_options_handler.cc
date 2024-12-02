@@ -9,8 +9,8 @@
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/camera_detector.h"
 #include "chrome/browser/chromeos/login/default_user_images.h"
@@ -73,7 +73,7 @@ const char kProfileDownloadReason[] = "Preferences";
 }  // namespace
 
 ChangePictureOptionsHandler::ChangePictureOptionsHandler()
-    : previous_image_url_(chrome::kAboutBlankURL),
+    : previous_image_url_(content::kAboutBlankURL),
       previous_image_index_(User::kInvalidImageIndex),
       weak_factory_(this) {
   registrar_.Add(this, chrome::NOTIFICATION_PROFILE_IMAGE_UPDATED,

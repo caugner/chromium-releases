@@ -18,12 +18,12 @@
 #include "base/logging.h"
 #include "base/logging_win.h"
 #include "base/path_service.h"
-#include "base/string16.h"
-#include "base/string_number_conversions.h"
-#include "base/string_util.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
 #include "chrome/common/chrome_constants.h"
@@ -868,12 +868,9 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance,
 
     g_exit_manager = new base::AtExitManager();
     CommandLine::Init(0, NULL);
-    logging::InitLogging(
-        NULL,
-        logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
-        logging::LOCK_LOG_FILE,
-        logging::DELETE_OLD_LOG_FILE,
-        logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
+    logging::LoggingSettings settings;
+    settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
+    logging::InitLogging(settings);
 
     // Log the same items as Chrome.
     logging::SetLogItems(true,  // enable_process_id

@@ -7,8 +7,8 @@
 
 namespace switches {
 
-// Merge the Browser UI and the renderer compositor threads.
-extern const char kMergeUIAndRendererCompositorThreads[];
+// When set, falls back to using the old disk cache.
+extern const char kDisableSimpleCache[];
 
 // Uses zero-copy buffers in graphics pipeline.
 extern const char kUseZeroCopyBuffers[];

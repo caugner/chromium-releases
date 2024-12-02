@@ -13,15 +13,37 @@ namespace chromeos {
 const char UserManager::kStubUser[] = "stub-user@example.com";
 
 // static
+// Should match cros constant in platform/libchromeos/chromeos/cryptohome.h
+const char UserManager::kGuestUserName[] = "$guest";
+
+// static
 const char UserManager::kLocallyManagedUserDomain[] =
     "locally-managed.localhost";
 
-// static
-const char UserManager::kKioskAppUserDomain[] = "kiosk-apps.localhost";
 
+// static
+const char UserManager::kRetailModeUserName[] = "demouser@";
 static UserManager* g_user_manager = NULL;
 
 UserManager::Observer::~Observer() {
+}
+
+void UserManager::Observer::LocalStateChanged(UserManager* user_manager) {
+}
+
+void UserManager::Observer::MergeSessionStateChanged(MergeSessionState state) {
+}
+
+void UserManager::UserSessionStateObserver::ActiveUserChanged(
+    const User* active_user) {
+}
+
+void UserManager::UserSessionStateObserver::ActiveUserHashChanged(
+    const std::string& hash) {
+}
+
+void UserManager::UserSessionStateObserver::
+PendingUserSessionsRestoreFinished() {
 }
 
 UserManager::UserSessionStateObserver::~UserSessionStateObserver() {

@@ -13,7 +13,7 @@
 
 namespace views {
 
-const char* const ScrollView::kViewClassName = "views/ScrollView";
+const char ScrollView::kViewClassName[] = "ScrollView";
 
 namespace {
 
@@ -84,8 +84,8 @@ class ScrollView::Viewport : public View {
   Viewport() {}
   virtual ~Viewport() {}
 
-  virtual std::string GetClassName() const OVERRIDE {
-    return "views/Viewport";
+  virtual const char* GetClassName() const OVERRIDE {
+    return "ScrollView::Viewport";
   }
 
   virtual void ScrollRectToVisible(const gfx::Rect& rect) OVERRIDE {
@@ -117,6 +117,8 @@ ScrollView::ScrollView()
       vert_sb_(new NativeScrollBar(false)),
       resize_corner_(NULL),
       hide_horizontal_scrollbar_(false) {
+  set_notify_enter_exit_on_child(true);
+
   AddChildView(contents_viewport_);
   AddChildView(header_viewport_);
 
@@ -252,15 +254,17 @@ void ScrollView::Layout() {
   }
 
   if (horiz_sb_required) {
+    int height_offset = horiz_sb_->GetContentOverlapSize();
     horiz_sb_->SetBounds(0,
-                         viewport_bounds.bottom(),
+                         viewport_bounds.bottom() - height_offset,
                          viewport_bounds.right(),
-                         horiz_sb_height);
+                         horiz_sb_height + height_offset);
   }
   if (vert_sb_required) {
-    vert_sb_->SetBounds(viewport_bounds.right(),
+    int width_offset = vert_sb_->GetContentOverlapSize();
+    vert_sb_->SetBounds(viewport_bounds.right() - width_offset,
                         0,
-                        vert_sb_width,
+                        vert_sb_width + width_offset,
                         viewport_bounds.bottom());
   }
   if (resize_corner_required) {
@@ -312,6 +316,20 @@ bool ScrollView::OnMouseWheel(const ui::MouseWheelEvent& e) {
   return processed;
 }
 
+void ScrollView::OnMouseEntered(const ui::MouseEvent& event) {
+  if (horiz_sb_)
+    horiz_sb_->OnMouseEnteredScrollView(event);
+  if (vert_sb_)
+    vert_sb_->OnMouseEnteredScrollView(event);
+}
+
+void ScrollView::OnMouseExited(const ui::MouseEvent& event) {
+  if (horiz_sb_)
+    horiz_sb_->OnMouseExitedScrollView(event);
+  if (vert_sb_)
+    vert_sb_->OnMouseExitedScrollView(event);
+}
+
 void ScrollView::OnGestureEvent(ui::GestureEvent* event) {
   // If the event happened on one of the scrollbars, then those events are
   // sent directly to the scrollbars. Otherwise, only scroll events are sent to
@@ -331,7 +349,7 @@ void ScrollView::OnGestureEvent(ui::GestureEvent* event) {
   }
 }
 
-std::string ScrollView::GetClassName() const {
+const char* ScrollView::GetClassName() const {
   return kViewClassName;
 }
 

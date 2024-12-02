@@ -5,6 +5,8 @@
 #ifndef ASH_SHELF_SHELF_LAYOUT_MANAGER_H_
 #define ASH_SHELF_SHELF_LAYOUT_MANAGER_H_
 
+#include <vector>
+
 #include "ash/ash_export.h"
 #include "ash/launcher/launcher.h"
 #include "ash/shelf/background_animator.h"
@@ -33,10 +35,12 @@ class GestureEvent;
 
 namespace ash {
 class ScreenAsh;
+class ShelfLayoutManagerObserver;
 class ShelfWidget;
 namespace internal {
 
 class PanelLayoutManagerTest;
+class ShelfBezelEventFilter;
 class ShelfLayoutManagerTest;
 class StatusAreaWidget;
 class WorkspaceController;
@@ -54,24 +58,6 @@ class ASH_EXPORT ShelfLayoutManager :
     public keyboard::KeyboardControllerObserver {
  public:
 
-  // TODO(rharrison): Move this observer out of ash::internal::
-  //                  namespace. Tracked in crosbug.com/223936
-  class ASH_EXPORT Observer {
-   public:
-    // Called when the target ShelfLayoutManager will be deleted.
-    virtual void WillDeleteShelf() {}
-
-    // Called when the visibility change is scheduled.
-    virtual void WillChangeVisibilityState(ShelfVisibilityState new_state) {}
-
-    // Called when the auto hide state is changed.
-    virtual void OnAutoHideStateChanged(ShelfAutoHideState new_state) {}
-
-    // Called when the auto hide behavior is changed.
-    virtual void OnAutoHideBehaviorChanged(
-        ShelfAutoHideBehavior new_behavior) {}
-  };
-
   // We reserve a small area on the edge of the workspace area to ensure that
   // the resize handle at the edge of the window can be hit.
   static const int kWorkspaceAreaVisibleInset;
@@ -82,6 +68,10 @@ class ASH_EXPORT ShelfLayoutManager :
 
   // Size of the shelf when auto-hidden.
   static const int kAutoHideSize;
+
+  // The size of the shelf when shown (currently only used in alternate
+  // settings see ash::switches::UseAlternateShelfLayout).
+  static const int kShelfSize;
 
   explicit ShelfLayoutManager(ShelfWidget* shelf);
   virtual ~ShelfLayoutManager();
@@ -118,10 +108,6 @@ class ASH_EXPORT ShelfLayoutManager :
   // behavior setting.
   ShelfVisibilityState CalculateShelfVisibility();
 
-  // Returns shelf visibility state based on current value of auto hide
-  // behavior setting.
-  ShelfVisibilityState CalculateShelfVisibilityWhileDragging();
-
   // Updates the visibility state.
   void UpdateVisibilityState();
 
@@ -140,8 +126,8 @@ class ASH_EXPORT ShelfLayoutManager :
   void SetWindowOverlapsShelf(bool value);
   bool window_overlaps_shelf() const { return window_overlaps_shelf_; }
 
-  void AddObserver(Observer* observer);
-  void RemoveObserver(Observer* observer);
+  void AddObserver(ShelfLayoutManagerObserver* observer);
+  void RemoveObserver(ShelfLayoutManagerObserver* observer);
 
   // Gesture dragging related functions:
   void StartGestureDrag(const ui::GestureEvent& gesture);
@@ -201,6 +187,10 @@ class ASH_EXPORT ShelfLayoutManager :
   // Is the shelf's alignment horizontal?
   bool IsHorizontalAlignment() const;
 
+  // Tests if the browser is currently in fullscreen mode with minimal
+  // Chrome. When minimal Chrome is present the shelf should be displayed.
+  bool FullscreenWithMinimalChrome() const;
+
   // Returns a ShelfLayoutManager on the display which has a launcher for
   // given |window|. See RootWindowController::ForLauncher for more info.
   static ShelfLayoutManager* ForLauncher(aura::Window* window);
@@ -217,6 +207,7 @@ class ASH_EXPORT ShelfLayoutManager :
     ~TargetBounds();
 
     float opacity;
+    float status_opacity;
     gfx::Rect shelf_bounds_in_root;
     gfx::Rect launcher_bounds_in_shelf;
     gfx::Rect status_bounds_in_shelf;
@@ -325,9 +316,12 @@ class ASH_EXPORT ShelfLayoutManager :
 
   // EventFilter used to detect when user moves the mouse over the launcher to
   // trigger showing the launcher.
-  scoped_ptr<AutoHideEventFilter> event_filter_;
+  scoped_ptr<AutoHideEventFilter> auto_hide_event_filter_;
 
-  ObserverList<Observer> observers_;
+  // EventFilter used to detect when user issues a gesture on a bezel sensor.
+  scoped_ptr<ShelfBezelEventFilter> bezel_event_filter_;
+
+  ObserverList<ShelfLayoutManagerObserver> observers_;
 
   // The shelf reacts to gesture-drags, and can be set to auto-hide for certain
   // gestures. Some shelf behaviour (e.g. visibility state, background color

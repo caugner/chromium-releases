@@ -70,7 +70,9 @@ class TestKeyboardControllerProxy : public KeyboardControllerProxy {
   virtual ui::InputMethod* GetInputMethod() OVERRIDE {
     return input_method_.get();
   }
-  virtual void OnKeyboardBoundsChanged(const gfx::Rect& new_bounds) OVERRIDE {}
+  virtual void RequestAudioInput(content::WebContents* web_contents,
+      const content::MediaStreamRequest& request,
+      const content::MediaResponseCallback& callback) OVERRIDE { return; }
 
  private:
   scoped_ptr<aura::Window> window_;
@@ -113,8 +115,11 @@ class TestTextInputClient : public ui::TextInputClient {
       const ui::CompositionText& composition) OVERRIDE {}
   virtual void ConfirmCompositionText() OVERRIDE {}
   virtual void ClearCompositionText() OVERRIDE {}
-  virtual void InsertText(const string16& text) OVERRIDE {}
-  virtual void InsertChar(char16 ch, int flags) OVERRIDE {}
+  virtual void InsertText(const base::string16& text) OVERRIDE {}
+  virtual void InsertChar(base::char16 ch, int flags) OVERRIDE {}
+  virtual gfx::NativeWindow GetAttachedWindow() const OVERRIDE {
+    return static_cast<gfx::NativeWindow>(NULL);
+  }
   virtual ui::TextInputType GetTextInputType() const OVERRIDE {
     return type_;
   }
@@ -136,7 +141,7 @@ class TestTextInputClient : public ui::TextInputClient {
   }
   virtual bool DeleteRange(const ui::Range& range) OVERRIDE { return false; }
   virtual bool GetTextFromRange(const ui::Range& range,
-                                string16* text) OVERRIDE {
+                                base::string16* text) OVERRIDE {
     return false;
   }
   virtual void OnInputMethodChanged() OVERRIDE {}

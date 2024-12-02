@@ -9,7 +9,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
@@ -27,14 +27,11 @@ class ContentSettingDecoration;
 class EVBubbleDecoration;
 class KeywordHintDecoration;
 class LocationBarDecoration;
-class LocationBarViewMacBrowserTest;
 class LocationIconDecoration;
 class PageActionDecoration;
 class PlusDecoration;
 class Profile;
-class SearchTokenDecoration;
 class SelectedKeywordDecoration;
-class SeparatorDecoration;
 class StarDecoration;
 class ToolbarModel;
 class ZoomDecoration;
@@ -168,6 +165,7 @@ class LocationBarViewMac : public LocationBar,
   virtual string16 GetTitle() const OVERRIDE;
   virtual InstantController* GetInstant() OVERRIDE;
   virtual content::WebContents* GetWebContents() const OVERRIDE;
+  virtual gfx::Rect GetOmniboxBounds() const OVERRIDE;
 
   NSImage* GetKeywordImage(const string16& keyword);
 
@@ -183,7 +181,6 @@ class LocationBarViewMac : public LocationBar,
   ToolbarModel* toolbar_model() const { return toolbar_model_; }
 
  private:
-  friend LocationBarViewMacBrowserTest;
   friend ZoomDecorationTest;
 
   // Posts |notification| to the default notification center.
@@ -219,9 +216,6 @@ class LocationBarViewMac : public LocationBar,
   // Ensures the plus decoration is visible or hidden, as required.
   void UpdatePlusDecorationVisibility();
 
-  // Gets the current search provider name.
-  string16 GetSearchProviderName() const;
-
   scoped_ptr<OmniboxViewMac> omnibox_view_;
 
   CommandUpdater* command_updater_;  // Weak, owned by Browser.
@@ -239,14 +233,8 @@ class LocationBarViewMac : public LocationBar,
   // A decoration that shows an icon to the left of the address.
   scoped_ptr<LocationIconDecoration> location_icon_decoration_;
 
-  // A decoration that shows the search provider being used.
-  scoped_ptr<SearchTokenDecoration> search_token_decoration_;
-
   // A decoration that shows the keyword-search bubble on the left.
   scoped_ptr<SelectedKeywordDecoration> selected_keyword_decoration_;
-
-  // A decoration used to draw a separator between other decorations.
-  scoped_ptr<SeparatorDecoration> separator_decoration_;
 
   // A decoration that shows a lock icon and ev-cert label in a bubble
   // on the left.

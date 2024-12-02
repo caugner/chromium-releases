@@ -11,7 +11,7 @@
 
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_co_mem.h"
 #include "base/win/scoped_handle.h"
@@ -59,6 +59,7 @@ HRESULT GetUrlFromShellItem(IShellItem* shell_item, string16* url) {
   return S_OK;
 }
 
+#if defined(USE_AURA)
 bool LaunchChromeBrowserProcess() {
   base::FilePath delegate_exe_path;
   if (!PathService::Get(base::FILE_EXE, &delegate_exe_path))
@@ -88,16 +89,15 @@ bool LaunchChromeBrowserProcess() {
   // Prevent a Chrome window from showing up on the desktop.
   cl.AppendSwitch(switches::kSilentLaunch);
 
-  // Tell Chrome the IPC channel name to use.
-  // TODO(robertshield): Figure out how to get this name to both the launched
-  // desktop browser process and the resulting activated metro process.
-  cl.AppendSwitchASCII(switches::kViewerConnection, "viewer");
+  // Tell Chrome to connect to the Metro viewer process.
+  cl.AppendSwitch(switches::kViewerConnect);
 
   base::LaunchOptions launch_options;
   launch_options.start_hidden = true;
 
   return base::LaunchProcess(cl, launch_options, NULL);
 }
+#endif  // defined(USE_AURA)
 
 }  // namespace
 
@@ -519,6 +519,30 @@ EC_HOST_UI_MODE CommandExecuteImpl::GetLaunchMode() {
     launch_mode_determined = true;
     parameters_ = CommandLine(CommandLine::NO_PROGRAM);
   }
+
+#if defined(USE_AURA)
+  if (launch_mode_determined)
+    return launch_mode;
+
+  CComPtr<IExecuteCommandHost> host;
+  CComQIPtr<IServiceProvider> service_provider = m_spUnkSite;
+  if (service_provider) {
+    service_provider->QueryService(IID_IExecuteCommandHost, &host);
+    if (host) {
+      host->GetUIMode(&launch_mode);
+    }
+  }
+
+  if (launch_mode >= ECHUIM_SYSTEM_LAUNCHER) {
+    // At the end if launch mode is not proper apply heuristics.
+    launch_mode = base::win::IsTouchEnabledDevice() ?
+                          ECHUIM_IMMERSIVE : ECHUIM_DESKTOP;
+  }
+
+  AtlTrace("Launching mode is %d\n", launch_mode);
+  launch_mode_determined = true;
+  return launch_mode;
+#endif
 
   base::win::RegKey reg_key;
   LONG key_result = reg_key.Create(HKEY_CURRENT_USER,

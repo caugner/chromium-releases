@@ -6,6 +6,7 @@
 #include "base/message_loop.h"
 #include "base/time.h"
 #include "media/audio/audio_buffers_state.h"
+#include "media/audio/audio_parameters.h"
 #include "media/audio/fake_audio_consumer.h"
 #include "media/audio/simple_sources.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -58,7 +59,7 @@ class FakeAudioConsumerTest : public testing::Test {
 
     if (source_.callbacks() == 0) {
       RunOnAudioThread();
-      start_time_ = base::Time::Now();
+      start_time_ = base::TimeTicks::Now();
     }
 
     // Keep going until we've seen the requested number of callbacks.
@@ -67,7 +68,7 @@ class FakeAudioConsumerTest : public testing::Test {
           &FakeAudioConsumerTest::TimeCallbacksOnAudioThread,
           base::Unretained(this), callbacks), time_between_callbacks_ / 2);
     } else {
-      end_time_ = base::Time::Now();
+      end_time_ = base::TimeTicks::Now();
       EndTest(callbacks);
     }
   }
@@ -84,8 +85,8 @@ class FakeAudioConsumerTest : public testing::Test {
   AudioParameters params_;
   FakeAudioConsumer fake_consumer_;
   SineWaveAudioSource source_;
-  base::Time start_time_;
-  base::Time end_time_;
+  base::TimeTicks start_time_;
+  base::TimeTicks end_time_;
   base::TimeDelta time_between_callbacks_;
 
  private:

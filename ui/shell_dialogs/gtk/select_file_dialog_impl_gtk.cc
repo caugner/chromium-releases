@@ -11,11 +11,11 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/utf_string_conversions.h"
 #include "grit/ui_strings.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -49,7 +49,7 @@ class SelectFileDialogImplGTK : public ui::SelectFileDialogImpl {
   // |params| is user data we pass back via the Listener interface.
   virtual void SelectFileImpl(
       Type type,
-      const string16& title,
+      const base::string16& title,
       const base::FilePath& default_path,
       const FileTypeInfo* file_types,
       int file_type_index,
@@ -166,7 +166,7 @@ bool SelectFileDialogImplGTK::HasMultipleFileTypeChoicesImpl() {
 // We ignore |default_extension|.
 void SelectFileDialogImplGTK::SelectFileImpl(
     Type type,
-    const string16& title,
+    const base::string16& title,
     const base::FilePath& default_path,
     const FileTypeInfo* file_types,
     int file_type_index,

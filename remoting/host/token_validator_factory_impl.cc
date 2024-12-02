@@ -13,7 +13,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/values.h"
 #include "crypto/random.h"
 #include "googleurl/src/gurl.h"
@@ -49,7 +49,7 @@ class TokenValidatorImpl
         request_context_getter_(request_context_getter) {
     DCHECK(token_url_.is_valid());
     DCHECK(token_validation_url_.is_valid());
-    DCHECK(key_pair_);
+    DCHECK(key_pair_.get());
     token_scope_ = CreateScope(local_jid, remote_jid);
   }
 
@@ -76,7 +76,7 @@ class TokenValidatorImpl
     request_.reset(net::URLFetcher::Create(
         0, token_validation_url_, net::URLFetcher::POST, this));
     request_->SetUploadData("application/x-www-form-urlencoded", post_body);
-    request_->SetRequestContext(request_context_getter_);
+    request_->SetRequestContext(request_context_getter_.get());
     request_->Start();
   }
 

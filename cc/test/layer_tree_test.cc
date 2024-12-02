@@ -10,12 +10,12 @@
 #include "cc/animation/layer_animation_controller.h"
 #include "cc/animation/timing_function.h"
 #include "cc/base/switches.h"
-#include "cc/base/thread_impl.h"
 #include "cc/input/input_handler.h"
 #include "cc/layers/content_layer.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/test/animation_test_common.h"
+#include "cc/test/fake_context_provider.h"
 #include "cc/test/fake_layer_tree_host_client.h"
 #include "cc/test/fake_output_surface.h"
 #include "cc/test/occlusion_tracker_test_common.h"
@@ -27,9 +27,7 @@
 
 namespace cc {
 
-TestHooks::TestHooks()
-    : fake_client_(
-          new FakeLayerTreeHostClient(FakeLayerTreeHostClient::DIRECT_3D)) {}
+TestHooks::TestHooks() {}
 
 TestHooks::~TestHooks() {}
 
@@ -39,22 +37,8 @@ bool TestHooks::PrepareToDrawOnThread(LayerTreeHostImpl* host_impl,
   return true;
 }
 
-bool TestHooks::CanActivatePendingTree() {
+bool TestHooks::CanActivatePendingTree(LayerTreeHostImpl* host_impl) {
   return true;
-}
-
-scoped_ptr<OutputSurface> TestHooks::CreateOutputSurface() {
-  return CreateFakeOutputSurface();
-}
-
-scoped_refptr<cc::ContextProvider> TestHooks::
-    OffscreenContextProviderForMainThread() {
-  return fake_client_->OffscreenContextProviderForMainThread();
-}
-
-scoped_refptr<cc::ContextProvider> TestHooks::
-    OffscreenContextProviderForCompositorThread() {
-  return fake_client_->OffscreenContextProviderForCompositorThread();
 }
 
 // Adapts LayerTreeHostImpl for test. Runs real code, then invokes test hooks.
@@ -96,8 +80,10 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
     LayerTreeHostImpl::CommitComplete();
     test_hooks_->CommitCompleteOnThread(this);
 
-    if (!settings().impl_side_painting)
-      test_hooks_->TreeActivatedOnThread(this);
+    if (!settings().impl_side_painting) {
+      test_hooks_->WillActivateTreeOnThread(this);
+      test_hooks_->DidActivateTreeOnThread(this);
+    }
   }
 
   virtual bool PrepareToDraw(FrameData* frame, gfx::Rect damage_rect) OVERRIDE {
@@ -119,17 +105,29 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
     return result;
   }
 
-  virtual bool ActivatePendingTreeIfNeeded() OVERRIDE {
+  virtual void OnSwapBuffersComplete(const CompositorFrameAck* ack) OVERRIDE {
+    LayerTreeHostImpl::OnSwapBuffersComplete(ack);
+    test_hooks_->SwapBuffersCompleteOnThread(this);
+  }
+
+  virtual void ActivatePendingTreeIfNeeded() OVERRIDE {
     if (!pending_tree())
-      return false;
+      return;
 
-    if (!test_hooks_->CanActivatePendingTree())
-      return false;
+    if (!test_hooks_->CanActivatePendingTree(this))
+      return;
 
-    bool activated = LayerTreeHostImpl::ActivatePendingTreeIfNeeded();
-    if (activated)
-      test_hooks_->TreeActivatedOnThread(this);
-    return activated;
+    LayerTreeHostImpl::ActivatePendingTreeIfNeeded();
+  }
+
+  virtual void ActivatePendingTree() OVERRIDE {
+    if (!test_hooks_->CanActivatePendingTree(this))
+      return;
+
+    test_hooks_->WillActivateTreeOnThread(this);
+    LayerTreeHostImpl::ActivatePendingTree();
+    DCHECK(!pending_tree());
+    test_hooks_->DidActivateTreeOnThread(this);
   }
 
   virtual bool InitializeRenderer(scoped_ptr<OutputSurface> output_surface)
@@ -180,10 +178,10 @@ class LayerTreeHostForTesting : public cc::LayerTreeHost {
       TestHooks* test_hooks,
       cc::LayerTreeHostClient* host_client,
       const cc::LayerTreeSettings& settings,
-      scoped_ptr<cc::Thread> impl_thread) {
+      scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner) {
     scoped_ptr<LayerTreeHostForTesting> layer_tree_host(
         new LayerTreeHostForTesting(test_hooks, host_client, settings));
-    bool success = layer_tree_host->Initialize(impl_thread.Pass());
+    bool success = layer_tree_host->Initialize(impl_task_runner);
     EXPECT_TRUE(success);
     return layer_tree_host.Pass();
   }
@@ -253,16 +251,12 @@ class LayerTreeHostClientForTesting : public LayerTreeHostClient {
     return test_hooks_->CreateOutputSurface();
   }
 
-  virtual void DidRecreateOutputSurface(bool succeeded) OVERRIDE {
-    test_hooks_->DidRecreateOutputSurface(succeeded);
+  virtual void DidInitializeOutputSurface(bool succeeded) OVERRIDE {
+    test_hooks_->DidInitializeOutputSurface(succeeded);
   }
 
   virtual void DidFailToInitializeOutputSurface() OVERRIDE {
     test_hooks_->DidFailToInitializeOutputSurface();
-  }
-
-  virtual scoped_ptr<InputHandlerClient> CreateInputHandlerClient() OVERRIDE {
-    return scoped_ptr<InputHandlerClient>();
   }
 
   virtual void WillCommit() OVERRIDE {}
@@ -275,7 +269,9 @@ class LayerTreeHostClientForTesting : public LayerTreeHostClient {
     test_hooks_->DidCommitAndDrawFrame();
   }
 
-  virtual void DidCompleteSwapBuffers() OVERRIDE {}
+  virtual void DidCompleteSwapBuffers() OVERRIDE {
+    test_hooks_->DidCompleteSwapBuffers();
+  }
 
   virtual void ScheduleComposite() OVERRIDE {
     test_hooks_->ScheduleComposite();
@@ -306,8 +302,8 @@ LayerTreeTest::LayerTreeTest()
       schedule_when_set_visible_true_(false),
       started_(false),
       ended_(false),
+      delegating_renderer_(false),
       timeout_seconds_(0),
-      impl_thread_(NULL),
       weak_factory_(this) {
   main_thread_weak_ptr_ = weak_factory_.GetWeakPtr();
 
@@ -328,19 +324,22 @@ void LayerTreeTest::EndTest() {
   } else if (proxy()) {
     // Racy timeouts and explicit EndTest calls might have cleaned up
     // the tree host. Should check proxy first.
-    proxy()->MainThread()->PostTask(
+    proxy()->MainThreadTaskRunner()->PostTask(
+        FROM_HERE,
         base::Bind(&LayerTreeTest::RealEndTest, main_thread_weak_ptr_));
   }
 }
 
 void LayerTreeTest::EndTestAfterDelay(int delay_milliseconds) {
-  proxy()->MainThread()->PostTask(
+  proxy()->MainThreadTaskRunner()->PostTask(
+      FROM_HERE,
       base::Bind(&LayerTreeTest::EndTest, main_thread_weak_ptr_));
 }
 
 void LayerTreeTest::PostAddAnimationToMainThread(
     Layer* layer_to_receive_animation) {
-  proxy()->MainThread()->PostTask(
+  proxy()->MainThreadTaskRunner()->PostTask(
+      FROM_HERE,
       base::Bind(&LayerTreeTest::DispatchAddAnimation,
                  main_thread_weak_ptr_,
                  base::Unretained(layer_to_receive_animation)));
@@ -348,38 +347,44 @@ void LayerTreeTest::PostAddAnimationToMainThread(
 
 void LayerTreeTest::PostAddInstantAnimationToMainThread(
     Layer* layer_to_receive_animation) {
-  proxy()->MainThread()->PostTask(
+  proxy()->MainThreadTaskRunner()->PostTask(
+      FROM_HERE,
       base::Bind(&LayerTreeTest::DispatchAddInstantAnimation,
                  main_thread_weak_ptr_,
                  base::Unretained(layer_to_receive_animation)));
 }
 
 void LayerTreeTest::PostSetNeedsCommitToMainThread() {
-  proxy()->MainThread()->PostTask(
+  proxy()->MainThreadTaskRunner()->PostTask(
+      FROM_HERE,
       base::Bind(&LayerTreeTest::DispatchSetNeedsCommit,
                  main_thread_weak_ptr_));
 }
 
 void LayerTreeTest::PostAcquireLayerTextures() {
-  proxy()->MainThread()->PostTask(
+  proxy()->MainThreadTaskRunner()->PostTask(
+      FROM_HERE,
       base::Bind(&LayerTreeTest::DispatchAcquireLayerTextures,
                  main_thread_weak_ptr_));
 }
 
 void LayerTreeTest::PostSetNeedsRedrawToMainThread() {
-  proxy()->MainThread()->PostTask(
+  proxy()->MainThreadTaskRunner()->PostTask(
+      FROM_HERE,
       base::Bind(&LayerTreeTest::DispatchSetNeedsRedraw,
                  main_thread_weak_ptr_));
 }
 
 void LayerTreeTest::PostSetNeedsRedrawRectToMainThread(gfx::Rect damage_rect) {
-  proxy()->MainThread()->PostTask(
+  proxy()->MainThreadTaskRunner()->PostTask(
+      FROM_HERE,
       base::Bind(&LayerTreeTest::DispatchSetNeedsRedrawRect,
                  main_thread_weak_ptr_, damage_rect));
 }
 
 void LayerTreeTest::PostSetVisibleToMainThread(bool visible) {
-  proxy()->MainThread()->PostTask(
+  proxy()->MainThreadTaskRunner()->PostTask(
+      FROM_HERE,
       base::Bind(&LayerTreeTest::DispatchSetVisible,
                  main_thread_weak_ptr_,
                  visible));
@@ -388,21 +393,18 @@ void LayerTreeTest::PostSetVisibleToMainThread(bool visible) {
 void LayerTreeTest::DoBeginTest() {
   client_ = LayerTreeHostClientForTesting::Create(this);
 
-  scoped_ptr<cc::Thread> impl_ccthread(NULL);
-  if (impl_thread_) {
-    impl_ccthread = cc::ThreadImpl::CreateForDifferentThread(
-        impl_thread_->message_loop_proxy());
-  }
-  layer_tree_host_ = LayerTreeHostForTesting::Create(this,
-                                                     client_.get(),
-                                                     settings_,
-                                                     impl_ccthread.Pass());
+  DCHECK(!impl_thread_ || impl_thread_->message_loop_proxy());
+  layer_tree_host_ = LayerTreeHostForTesting::Create(
+      this,
+      client_.get(),
+      settings_,
+      impl_thread_ ? impl_thread_->message_loop_proxy() : NULL);
   ASSERT_TRUE(layer_tree_host_);
 
   started_ = true;
   beginning_ = true;
   SetupTree();
-  layer_tree_host_->SetSurfaceReady();
+  layer_tree_host_->SetLayerTreeHostClientReady();
   BeginTest();
   beginning_ = false;
   if (end_when_begin_returns_)
@@ -442,7 +444,8 @@ void LayerTreeTest::ScheduleComposite() {
   if (!started_ || scheduled_)
     return;
   scheduled_ = true;
-  proxy()->MainThread()->PostTask(
+  proxy()->MainThreadTaskRunner()->PostTask(
+      FROM_HERE,
       base::Bind(&LayerTreeTest::DispatchComposite, main_thread_weak_ptr_));
 }
 
@@ -450,7 +453,8 @@ void LayerTreeTest::RealEndTest() {
   ended_ = true;
 
   if (layer_tree_host_ && proxy()->CommitPendingForTesting()) {
-    proxy()->MainThread()->PostTask(
+    proxy()->MainThreadTaskRunner()->PostTask(
+        FROM_HERE,
         base::Bind(&LayerTreeTest::RealEndTest, main_thread_weak_ptr_));
     return;
   }
@@ -540,28 +544,40 @@ void LayerTreeTest::DispatchComposite() {
 
   schedule_when_set_visible_true_ = false;
   base::TimeTicks now = base::TimeTicks::Now();
-  layer_tree_host_->UpdateAnimations(now);
   layer_tree_host_->Composite(now);
 }
 
-void LayerTreeTest::RunTest(bool threaded) {
+void LayerTreeTest::RunTest(bool threaded,
+                            bool delegating_renderer,
+                            bool impl_side_painting) {
   if (threaded) {
     impl_thread_.reset(new base::Thread("Compositor"));
     ASSERT_TRUE(impl_thread_->Start());
   }
 
-  main_ccthread_ = cc::ThreadImpl::CreateForCurrentThread();
+  scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_ =
+      base::MessageLoopProxy::current();
 
-  // Spend less time waiting for vsync because the output is mocked out.
+  delegating_renderer_ = delegating_renderer;
+
+  // Spend less time waiting for BeginFrame because the output is
+  // mocked out.
   settings_.refresh_rate = 200.0;
+  if (impl_side_painting) {
+    DCHECK(threaded) <<
+        "Don't run single thread + impl side painting, it doesn't exist.";
+    settings_.impl_side_painting = true;
+  }
   InitializeSettings(&settings_);
 
-  main_ccthread_->PostTask(
+  main_task_runner_->PostTask(
+      FROM_HERE,
       base::Bind(&LayerTreeTest::DoBeginTest, base::Unretained(this)));
 
   if (timeout_seconds_) {
     timeout_.Reset(base::Bind(&LayerTreeTest::Timeout, base::Unretained(this)));
-    main_ccthread_->PostDelayedTask(
+    main_task_runner_->PostDelayedTask(
+        FROM_HERE,
         timeout_.callback(),
         base::TimeDelta::FromSeconds(timeout_seconds_));
   }
@@ -580,6 +596,35 @@ void LayerTreeTest::RunTest(bool threaded) {
     return;
   }
   AfterTest();
+}
+
+scoped_ptr<OutputSurface> LayerTreeTest::CreateOutputSurface() {
+  scoped_ptr<FakeOutputSurface> output_surface;
+  if (delegating_renderer_)
+    output_surface = FakeOutputSurface::CreateDelegating3d();
+  else
+    output_surface = FakeOutputSurface::Create3d();
+  output_surface_ = output_surface.get();
+  return output_surface.PassAs<OutputSurface>();
+}
+
+scoped_refptr<cc::ContextProvider> LayerTreeTest::
+    OffscreenContextProviderForMainThread() {
+  if (!main_thread_contexts_.get() ||
+      main_thread_contexts_->DestroyedOnMainThread()) {
+    main_thread_contexts_ = FakeContextProvider::Create();
+    if (!main_thread_contexts_->BindToCurrentThread())
+      main_thread_contexts_ = NULL;
+  }
+  return main_thread_contexts_;
+}
+
+scoped_refptr<cc::ContextProvider> LayerTreeTest::
+    OffscreenContextProviderForCompositorThread() {
+  if (!compositor_thread_contexts_.get() ||
+      compositor_thread_contexts_->DestroyedOnMainThread())
+    compositor_thread_contexts_ = FakeContextProvider::Create();
+  return compositor_thread_contexts_;
 }
 
 }  // namespace cc

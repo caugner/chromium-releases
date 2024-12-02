@@ -9,12 +9,13 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/permissions/api_permission_set.h"
+#include "chrome/common/extensions/permissions/permissions_data.h"
 #include "extensions/common/error_utils.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -78,14 +79,12 @@ bool BackgroundInfo::AllowJSAccess(const Extension* extension) {
 
 // static
 bool BackgroundInfo::HasPersistentBackgroundPage(const Extension* extension)  {
-  const BackgroundInfo& info = GetBackgroundInfo(extension);
-  return info.has_background_page() && info.is_persistent_;
+  return GetBackgroundInfo(extension).has_persistent_background_page();
 }
 
 // static
 bool BackgroundInfo::HasLazyBackgroundPage(const Extension* extension) {
-  const BackgroundInfo& info = GetBackgroundInfo(extension);
-  return info.has_background_page() && !info.is_persistent_;
+  return GetBackgroundInfo(extension).has_lazy_background_page();
 }
 
 bool BackgroundInfo::Parse(const Extension* extension, string16* error) {
@@ -103,17 +102,17 @@ bool BackgroundInfo::Parse(const Extension* extension, string16* error) {
 bool BackgroundInfo::LoadBackgroundScripts(const Extension* extension,
                                            const std::string& key,
                                            string16* error) {
-  const Value* background_scripts_value = NULL;
+  const base::Value* background_scripts_value = NULL;
   if (!extension->manifest()->Get(key, &background_scripts_value))
     return true;
 
   CHECK(background_scripts_value);
-  if (background_scripts_value->GetType() != Value::TYPE_LIST) {
+  if (background_scripts_value->GetType() != base::Value::TYPE_LIST) {
     *error = ASCIIToUTF16(errors::kInvalidBackgroundScripts);
     return false;
   }
 
-  const ListValue* background_scripts = NULL;
+  const base::ListValue* background_scripts = NULL;
   background_scripts_value->GetAsList(&background_scripts);
   for (size_t i = 0; i < background_scripts->GetSize(); ++i) {
     std::string script;
@@ -149,7 +148,7 @@ bool BackgroundInfo::LoadBackgroundPage(const Extension* extension,
   if (extension->is_hosted_app()) {
     background_url_ = GURL(background_str);
 
-    if (!extension->initial_api_permissions()->count(
+    if (!PermissionsData::GetInitialAPIPermissions(extension)->count(
             APIPermission::kBackground)) {
       *error = ASCIIToUTF16(errors::kBackgroundPermissionNeeded);
       return false;
@@ -195,7 +194,7 @@ bool BackgroundInfo::LoadBackgroundPersistent(const Extension* extension,
     return true;
   }
 
-  const Value* background_persistent = NULL;
+  const base::Value* background_persistent = NULL;
   if (!extension->manifest()->Get(keys::kBackgroundPersistent,
                                   &background_persistent))
     return true;
@@ -215,12 +214,12 @@ bool BackgroundInfo::LoadBackgroundPersistent(const Extension* extension,
 
 bool BackgroundInfo::LoadAllowJSAccess(const Extension* extension,
                                        string16* error) {
-  const Value* allow_js_access = NULL;
+  const base::Value* allow_js_access = NULL;
   if (!extension->manifest()->Get(keys::kBackgroundAllowJsAccess,
                                   &allow_js_access))
     return true;
 
-  if (!allow_js_access->IsType(Value::TYPE_BOOLEAN) ||
+  if (!allow_js_access->IsType(base::Value::TYPE_BOOLEAN) ||
       !allow_js_access->GetAsBoolean(&allow_js_access_)) {
     *error = ASCIIToUTF16(errors::kInvalidBackgroundAllowJsAccess);
     return false;
@@ -239,6 +238,20 @@ bool BackgroundManifestHandler::Parse(Extension* extension, string16* error) {
   scoped_ptr<BackgroundInfo> info(new BackgroundInfo);
   if (!info->Parse(extension, error))
     return false;
+
+  // Platform apps must have background pages.
+  if (extension->is_platform_app() && !info->has_background_page()) {
+    *error = ASCIIToUTF16(errors::kBackgroundRequiredForPlatformApps);
+    return false;
+  }
+  // Lazy background pages are incompatible with the webRequest API.
+  if (info->has_lazy_background_page() &&
+      PermissionsData::GetInitialAPIPermissions(extension)->count(
+          APIPermission::kWebRequest)) {
+    *error = ASCIIToUTF16(errors::kWebRequestConflictsWithLazyBackground);
+    return false;
+  }
+
   extension->SetManifestData(kBackground, info.release());
   return true;
 }
@@ -280,6 +293,10 @@ bool BackgroundManifestHandler::Validate(
   return true;
 }
 
+bool BackgroundManifestHandler::AlwaysParseForType(Manifest::Type type) const {
+  return type == Manifest::TYPE_PLATFORM_APP;
+}
+
 const std::vector<std::string> BackgroundManifestHandler::Keys() const {
   static const char* keys[] = {
     keys::kBackgroundAllowJsAccess,
@@ -293,4 +310,4 @@ const std::vector<std::string> BackgroundManifestHandler::Keys() const {
   return std::vector<std::string>(keys, keys + arraysize(keys));
 }
 
-}  // extensions
+}  // namespace extensions

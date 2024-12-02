@@ -34,6 +34,15 @@ enum AcceleratorAction {
   FOCUS_PREVIOUS_PANE,
   KEYBOARD_BRIGHTNESS_DOWN,
   KEYBOARD_BRIGHTNESS_UP,
+  LAUNCH_APP_0,
+  LAUNCH_APP_1,
+  LAUNCH_APP_2,
+  LAUNCH_APP_3,
+  LAUNCH_APP_4,
+  LAUNCH_APP_5,
+  LAUNCH_APP_6,
+  LAUNCH_APP_7,
+  LAUNCH_LAST_APP,
   LOCK_PRESSED,
   LOCK_RELEASED,
   MAGNIFY_SCREEN_ZOOM_IN,
@@ -59,15 +68,6 @@ enum AcceleratorAction {
   SCALE_UI_DOWN,
   SCALE_UI_RESET,
   SCALE_UI_UP,
-  SELECT_LAST_WIN,
-  SELECT_WIN_0,
-  SELECT_WIN_1,
-  SELECT_WIN_2,
-  SELECT_WIN_3,
-  SELECT_WIN_4,
-  SELECT_WIN_5,
-  SELECT_WIN_6,
-  SELECT_WIN_7,
   SHOW_KEYBOARD_OVERLAY,
   SHOW_MESSAGE_CENTER_BUBBLE,
   SHOW_OAK,
@@ -97,7 +97,8 @@ enum AcceleratorAction {
   WINDOW_SNAP_LEFT,
   WINDOW_SNAP_RIGHT,
 #if defined(OS_CHROMEOS)
-  CYCLE_DISPLAY_MODE,
+  ADD_REMOVE_DISPLAY,
+  TOGGLE_MIRROR_MODE,
   DISABLE_GPU_WATCHDOG,
   LOCK_SCREEN,
   OPEN_CROSH,
@@ -140,6 +141,14 @@ ASH_EXPORT extern const AcceleratorAction kReservedActions[];
 
 // The number of elements in kReservedActions.
 ASH_EXPORT extern const size_t kReservedActionsLength;
+
+// Actions that should be handled very early in Ash unless the current target
+// window is full-screen, these actions are only handled if
+// DebugShortcutsEnabled is true (command line switch 'ash-debug-shortcuts').
+ASH_EXPORT extern const AcceleratorAction kReservedDebugActions[];
+
+// The number of elements in kReservedDebugActions.
+ASH_EXPORT extern const size_t kReservedDebugActionsLength;
 
 // Actions allowed while user is not signed in or screen is locked.
 ASH_EXPORT extern const AcceleratorAction kActionsAllowedAtLoginOrLockScreen[];

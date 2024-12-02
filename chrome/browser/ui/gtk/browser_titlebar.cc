@@ -16,10 +16,10 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_tokenizer.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/managed_mode/managed_mode.h"
+#include "chrome/browser/managed_mode/managed_user_service.h"
 #include "chrome/browser/profiles/avatar_menu_model.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
@@ -28,6 +28,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/gtk/accelerators_gtk.h"
+#include "chrome/browser/ui/gtk/avatar_menu_bubble_gtk.h"
 #include "chrome/browser/ui/gtk/avatar_menu_button_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
@@ -215,7 +216,11 @@ BrowserTitlebar::BrowserTitlebar(BrowserWindowGtk* browser_window,
       titlebar_right_buttons_hbox_(NULL),
       titlebar_left_avatar_frame_(NULL),
       titlebar_right_avatar_frame_(NULL),
+      titlebar_left_label_frame_(NULL),
+      titlebar_right_label_frame_(NULL),
       avatar_(NULL),
+      avatar_label_(NULL),
+      avatar_label_bg_(NULL),
       top_padding_left_(NULL),
       top_padding_right_(NULL),
       titlebar_alignment_(NULL),
@@ -301,11 +306,25 @@ void BrowserTitlebar::Init() {
   gtk_box_pack_start(GTK_BOX(container_hbox_), titlebar_left_avatar_frame_,
                      FALSE, FALSE, 0);
 
+  titlebar_left_label_frame_ = gtk_alignment_new(0.0, 0.5, 0.0, 0.0);
+  gtk_widget_set_no_show_all(titlebar_left_label_frame_, TRUE);
+  gtk_alignment_set_padding(GTK_ALIGNMENT(titlebar_left_label_frame_), 0,
+      kAvatarBottomSpacing, kAvatarSideSpacing, kAvatarSideSpacing);
+  gtk_box_pack_start(GTK_BOX(container_hbox_), titlebar_left_label_frame_,
+                   FALSE, FALSE, 0);
+
   titlebar_right_avatar_frame_ = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
   gtk_widget_set_no_show_all(titlebar_right_avatar_frame_, TRUE);
   gtk_alignment_set_padding(GTK_ALIGNMENT(titlebar_right_avatar_frame_), 0,
       kAvatarBottomSpacing, kAvatarSideSpacing, kAvatarSideSpacing);
   gtk_box_pack_end(GTK_BOX(container_hbox_), titlebar_right_avatar_frame_,
+                   FALSE, FALSE, 0);
+
+  titlebar_right_label_frame_ = gtk_alignment_new(0.0, 0.5, 0.0, 0.0);
+  gtk_widget_set_no_show_all(titlebar_right_label_frame_, TRUE);
+  gtk_alignment_set_padding(GTK_ALIGNMENT(titlebar_right_label_frame_), 0,
+      kAvatarBottomSpacing, kAvatarSideSpacing, kAvatarSideSpacing);
+  gtk_box_pack_end(GTK_BOX(container_hbox_), titlebar_right_label_frame_,
                    FALSE, FALSE, 0);
 
   titlebar_right_buttons_vbox_ = gtk_vbox_new(FALSE, 0);
@@ -755,10 +774,29 @@ void BrowserTitlebar::UpdateTextColor() {
   }
 }
 
+void BrowserTitlebar::UpdateAvatarLabel() {
+  if (theme_service_ && avatar_label_) {
+    GdkColor text_color =
+        theme_service_->GetGdkColor(ThemeProperties::COLOR_MANAGED_USER_LABEL);
+    GdkColor label_background = theme_service_->GetGdkColor(
+        ThemeProperties::COLOR_MANAGED_USER_LABEL_BACKGROUND);
+    gtk_util::SetLabelColor(avatar_label_, &text_color);
+    gtk_widget_modify_bg(
+        GTK_WIDGET(avatar_label_bg_), GTK_STATE_NORMAL, &label_background);
+    char* markup = g_markup_printf_escaped(
+        "<span size='small'>%s</span>",
+        l10n_util::GetStringUTF8(IDS_MANAGED_USER_AVATAR_LABEL).c_str());
+    gtk_label_set_markup(GTK_LABEL(avatar_label_), markup);
+    g_free(markup);
+  }
+}
+
 void BrowserTitlebar::UpdateAvatar() {
   // Remove previous state.
   gtk_util::RemoveAllChildren(titlebar_left_avatar_frame_);
   gtk_util::RemoveAllChildren(titlebar_right_avatar_frame_);
+  gtk_util::RemoveAllChildren(titlebar_left_label_frame_);
+  gtk_util::RemoveAllChildren(titlebar_right_label_frame_);
 
   if (!ShouldDisplayAvatar())
     return;
@@ -779,6 +817,30 @@ void BrowserTitlebar::UpdateAvatar() {
 
   gtk_widget_show_all(avatar_);
 
+  Profile* profile = browser_window_->browser()->profile();
+  if (ManagedUserService::ProfileIsManaged(profile)) {
+    avatar_label_ = gtk_label_new(NULL);
+    gtk_misc_set_padding(GTK_MISC(avatar_label_), 10, 2);
+    avatar_label_bg_ = gtk_event_box_new();
+    gtk_container_add(GTK_CONTAINER(avatar_label_bg_), avatar_label_);
+    g_signal_connect(avatar_label_bg_, "button-press-event",
+                     G_CALLBACK(OnAvatarLabelButtonPressedThunk), this);
+    UpdateAvatarLabel();
+    gtk_widget_show(avatar_label_bg_);
+    gtk_widget_show(avatar_label_);
+    if (display_avatar_on_left_) {
+      gtk_container_add(GTK_CONTAINER(titlebar_left_label_frame_),
+                        avatar_label_bg_);
+      gtk_widget_show(titlebar_left_label_frame_);
+      gtk_widget_hide(titlebar_right_label_frame_);
+    } else {
+      gtk_container_add(GTK_CONTAINER(titlebar_right_label_frame_),
+                        avatar_label_bg_);
+      gtk_widget_show(titlebar_right_label_frame_);
+      gtk_widget_hide(titlebar_left_label_frame_);
+    }
+  }
+
   if (display_avatar_on_left_) {
     gtk_container_add(GTK_CONTAINER(titlebar_left_avatar_frame_), avatar_);
     gtk_widget_show(titlebar_left_avatar_frame_);
@@ -794,23 +856,16 @@ void BrowserTitlebar::UpdateAvatar() {
 
   bool is_gaia_picture = false;
   gfx::Image avatar;
-  if (ManagedMode::IsInManagedMode()) {
-    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    avatar = rb.GetNativeImageNamed(IDR_MANAGED_MODE_AVATAR,
-                                    ui::ResourceBundle::RTL_ENABLED);
-  } else {
-    ProfileInfoCache& cache =
-        g_browser_process->profile_manager()->GetProfileInfoCache();
-    Profile* profile = browser_window_->browser()->profile();
-    size_t index = cache.GetIndexOfProfileWithPath(profile->GetPath());
-    if (index == std::string::npos)
-      return;
+  ProfileInfoCache& cache =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
+  size_t index = cache.GetIndexOfProfileWithPath(profile->GetPath());
+  if (index == std::string::npos)
+    return;
 
-    is_gaia_picture =
-        cache.IsUsingGAIAPictureOfProfileAtIndex(index) &&
-        cache.GetGAIAPictureOfProfileAtIndex(index);
-    avatar = cache.GetAvatarIconOfProfileAtIndex(index);
-  }
+  is_gaia_picture =
+      cache.IsUsingGAIAPictureOfProfileAtIndex(index) &&
+      cache.GetGAIAPictureOfProfileAtIndex(index);
+  avatar = cache.GetAvatarIconOfProfileAtIndex(index);
   avatar_button_->SetIcon(avatar, is_gaia_picture);
   avatar_button_->set_menu_frame_style(display_avatar_on_left_ ?
       BubbleGtk::ANCHOR_TOP_LEFT : BubbleGtk::ANCHOR_TOP_RIGHT);
@@ -911,6 +966,21 @@ gboolean BrowserTitlebar::OnFaviconMenuButtonPressed(GtkWidget* widget,
   return TRUE;
 }
 
+gboolean BrowserTitlebar::OnAvatarLabelButtonPressed(GtkWidget* widget,
+                                                     GdkEventButton* event) {
+  if (event->button != 1)
+    return FALSE;
+
+  // Show the avatar menu bubble with the upward arrow at the x position where
+  // the user has clicked.
+  gfx::Rect rect = gtk_util::WidgetBounds(widget);
+  rect.set_x(event->x);
+  rect.set_width(0);
+  new AvatarMenuBubbleGtk(
+      browser_window_->browser(), widget, BubbleGtk::ANCHOR_TOP_RIGHT, &rect);
+  return TRUE;
+}
+
 void BrowserTitlebar::ShowContextMenu(GdkEventButton* event) {
   if (!context_menu_.get()) {
     context_menu_model_.reset(new ContextMenuModel(this));
@@ -979,6 +1049,7 @@ void BrowserTitlebar::Observe(int type,
   switch (type) {
     case chrome::NOTIFICATION_BROWSER_THEME_CHANGED: {
       UpdateTextColor();
+      UpdateAvatarLabel();
 
       if (minimize_button_.get())
         UpdateButtonBackground(minimize_button_.get());
@@ -1013,7 +1084,7 @@ void BrowserTitlebar::ActiveWindowChanged(GdkWindow* active_window) {
 }
 
 bool BrowserTitlebar::ShouldDisplayAvatar() {
-  if (IsOffTheRecord() || ManagedMode::IsInManagedMode())
+  if (IsOffTheRecord())
     return true;
 
   if (!browser_window_->browser()->is_type_tabbed())

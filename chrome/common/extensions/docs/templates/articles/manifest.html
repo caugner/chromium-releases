@@ -40,7 +40,11 @@ are <b>name</b> and <b>version</b>.
   "<a href="background_pages.html">background</a>": {"persistent": true, ...},
   "<a href="override.html">chrome_url_overrides</a>": {...},
   "<a href="content_scripts.html">content_scripts</a>": [...],
-  "<a href="../extensions/contentSecurityPolicy.html">content_security_policy</a>": "<em>policyString</em>",
+{{?is_apps}}
+  "<a href="app_csp.html">content_security_policy</a>": "<em>policyString</em>",
+{{:is_apps}}
+  "<a href="contentSecurityPolicy.html">content_security_policy</a>": "<em>policyString</em>",
+{{/is_apps}}
   "<a href="fileBrowserHandler.html">file_browser_handlers</a>": [...],
   "<a href="#file_handlers">file_handlers</a>": {...},
   "<a href="#homepage_url">homepage_url</a>": "http://<em>path/to/homepage</em>",
@@ -113,8 +117,14 @@ see <a href="i18n.html">Internationalization</a> for details.
 
 <p>
 Used by <a href="../apps/app_lifecycle.html#eventpage">packaged apps</a>
-to specify what types of files the app can handle. An app can have multiple <code>file_handlers</code>, with each one having an identifier, a list of MIME types that can be handled, and
-a title. Here's an example of specifying file handlers:
+to specify what types of files the app can handle. An app can have multiple <code>file_handlers</code>, with each one having an identifier, a list of MIME types and/or a list of file extensions that can be handled, and
+a title. The app can handle a file if it either has a matching file extension or
+has a matching MIME type.
+You can use a wildcard <code>"*"</code> in <code>types</code> or
+<code>extensions</code> to indicate that the app can handle any file type or
+<code>"<em>type</em>/*"</code> in <code>types</code> to indicate that the app
+can handle any file with a MIME type of <code><em>type</em></code>.
+Here's an example of specifying file handlers:
 </p>
 
 <pre>
@@ -130,7 +140,16 @@ a title. Here's an example of specifying file handlers:
       "image/png",
       "image/jpeg"
     ],
+    "extensions": [
+      "tiff"
+    ]
     "title": "Image editor"
+  },
+  "any": {
+    "extensions": [
+      "*"
+    ]
+    "title": "Any file type editor"
   }
 }
 </pre>

@@ -36,16 +36,18 @@ ClipResult SimpleThumbnailCrop::GetCanvasCopyInfo(
   return clip_result;
 }
 
-void SimpleThumbnailCrop::ProcessBitmap(ThumbnailingContext* context,
-                                        const ConsumerCallback& callback,
-                                        const SkBitmap& bitmap) {
+void SimpleThumbnailCrop::ProcessBitmap(
+    scoped_refptr<ThumbnailingContext> context,
+    const ConsumerCallback& callback,
+    const SkBitmap& bitmap) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   if (bitmap.isNull() || bitmap.empty())
     return;
 
-  SkBitmap thumbnail = CreateThumbnail(bitmap,
-                                       GetThumbnailSizeInPixel(),
-                                       &context->clip_result);
+  SkBitmap thumbnail = CreateThumbnail(
+      bitmap,
+      ComputeTargetSizeAtMaximumScale(target_size_),
+      &context->clip_result);
 
   context->score.boring_score = CalculateBoringScore(thumbnail);
   context->score.good_clipping =
@@ -53,7 +55,7 @@ void SimpleThumbnailCrop::ProcessBitmap(ThumbnailingContext* context,
        context->clip_result == CLIP_RESULT_TALLER_THAN_WIDE ||
        context->clip_result == CLIP_RESULT_NOT_CLIPPED);
 
-  callback.Run(*context, thumbnail);
+  callback.Run(*context.get(), thumbnail);
 }
 
 double SimpleThumbnailCrop::CalculateBoringScore(const SkBitmap& bitmap) {
@@ -128,24 +130,10 @@ gfx::Size SimpleThumbnailCrop::GetCopySizeForThumbnail(
       DLOG(WARNING) << "Unsupported scale factor. Use the same copy size as "
                     << "ui::SCALE_FACTOR_100P";
       copy_size = gfx::ToFlooredSize(gfx::ScaleSize(
-          copy_size, ui::GetScaleFactorScale(ui::SCALE_FACTOR_200P)));
+          copy_size, ui::GetMaxScaleFactor()));
       break;
   }
   return copy_size;
-}
-
-SimpleThumbnailCrop::~SimpleThumbnailCrop() {
-}
-
-// Returns the size of the thumbnail stored in the database in pixel.
-gfx::Size SimpleThumbnailCrop::GetThumbnailSizeInPixel() const {
-  // Determine the resolution of the thumbnail based on the maximum scale
-  // factor.
-  // TODO(mazda|oshima): Update thumbnail when the max scale factor changes.
-  // crbug.com/159157.
-  float max_scale_factor =
-      ui::GetScaleFactorScale(ui::GetMaxScaleFactor());
-  return gfx::ToFlooredSize(gfx::ScaleSize(target_size_, max_scale_factor));
 }
 
 gfx::Rect SimpleThumbnailCrop::GetClippingRect(const gfx::Size& source_size,
@@ -188,6 +176,19 @@ gfx::Rect SimpleThumbnailCrop::GetClippingRect(const gfx::Size& source_size,
     }
   }
   return clipping_rect;
+}
+
+// static
+gfx::Size SimpleThumbnailCrop::ComputeTargetSizeAtMaximumScale(
+    const gfx::Size& given_size) {
+  // TODO(mazda|oshima): Update thumbnail when the max scale factor changes.
+  // crbug.com/159157.
+  float max_scale_factor =
+      ui::GetScaleFactorScale(ui::GetMaxScaleFactor());
+  return gfx::ToFlooredSize(gfx::ScaleSize(given_size, max_scale_factor));
+}
+
+SimpleThumbnailCrop::~SimpleThumbnailCrop() {
 }
 
 // Creates a downsampled thumbnail from the given bitmap.
@@ -243,4 +244,4 @@ SkBitmap SimpleThumbnailCrop::CreateThumbnail(const SkBitmap& bitmap,
   return result;
 }
 
-}
+} // namespace thumbnails

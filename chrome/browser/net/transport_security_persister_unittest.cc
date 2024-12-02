@@ -21,7 +21,7 @@ using net::TransportSecurityState;
 class TransportSecurityPersisterTest : public testing::Test {
  public:
   TransportSecurityPersisterTest()
-      : message_loop_(MessageLoop::TYPE_IO),
+      : message_loop_(base::MessageLoop::TYPE_IO),
         test_file_thread_(content::BrowserThread::FILE, &message_loop_),
         test_io_thread_(content::BrowserThread::IO, &message_loop_) {
   }
@@ -39,7 +39,7 @@ class TransportSecurityPersisterTest : public testing::Test {
  protected:
   // Ordering is important here. If member variables are not destroyed in the
   // right order, then DCHECKs will fail all over the place.
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
 
   // Needed for ImportantFileWriter, which TransportSecurityPersister uses.
   content::TestBrowserThread test_file_thread_;
@@ -152,7 +152,6 @@ TEST_F(TransportSecurityPersisterTest, SerializeData3) {
   size_t count = 0;
   TransportSecurityState::Iterator j(state_);
   while (j.HasNext()) {
-    EXPECT_TRUE(saved[j.hostname()].Equals(j.domain_state()));
     count++;
     j.Advance();
   }
@@ -209,26 +208,4 @@ TEST_F(TransportSecurityPersisterTest, PublicKeyHashes) {
   EXPECT_EQ(sha1.tag, domain_state.dynamic_spki_hashes[0].tag);
   EXPECT_EQ(0, memcmp(domain_state.dynamic_spki_hashes[0].data(), sha1.data(),
                       sha1.size()));
-}
-
-TEST_F(TransportSecurityPersisterTest, ForcePreloads) {
-  // The static state for docs.google.com, defined in
-  // net/http/transport_security_state_static.h, has pins and mode strict.
-  // This new policy overrides that with no pins and a weaker mode. We apply
-  // this new policy with |DeserializeFromCommandLine| and expect that the
-  // new policy is in effect, overriding the static policy.
-  std::string preload("{"
-                      "\"4AGT3lHihuMSd5rUj7B4u6At0jlSH3HFePovjPR+oLE=\": {"
-                      "\"created\": 0.0,"
-                      "\"expiry\": 2000000000.0,"
-                      "\"include_subdomains\": false,"
-                      "\"mode\": \"pinning-only\""
-                      "}}");
-
-  EXPECT_TRUE(persister_->DeserializeFromCommandLine(preload));
-
-  TransportSecurityState::DomainState domain_state;
-  EXPECT_TRUE(state_.GetDomainState("docs.google.com", true, &domain_state));
-  EXPECT_FALSE(domain_state.HasPublicKeyPins());
-  EXPECT_FALSE(domain_state.ShouldUpgradeToSSL());
 }

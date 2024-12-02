@@ -12,11 +12,12 @@
 #include "base/metrics/histogram.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time.h"
+#include "chrome/browser/safe_browsing/download_feedback_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/sandboxed_zip_analyzer.h"
 #include "chrome/browser/safe_browsing/signature_util.h"
@@ -237,8 +238,8 @@ class DownloadUrlSBClient : public DownloadSBClient {
 
   virtual void StartCheck() OVERRIDE {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    if (!database_manager_ || database_manager_->CheckDownloadUrl(
-           url_chain_, this)) {
+    if (!database_manager_.get() ||
+        database_manager_->CheckDownloadUrl(url_chain_, this)) {
       CheckDone(SB_THREAT_TYPE_SAFE);
     } else {
       AddRef();  // SafeBrowsingService takes a pointer not a scoped_refptr.
@@ -421,6 +422,8 @@ class DownloadProtectionService::CheckClientDownloadRequest
                     << response.verdict();
         reason = REASON_INVALID_RESPONSE_VERDICT;
       }
+      DownloadFeedbackService::MaybeStorePingsForDownload(
+          result, item_, client_download_request_data_, data);
     }
     // We don't need the fetcher anymore.
     fetcher_.reset();
@@ -551,7 +554,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
   void CheckWhitelists() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
     DownloadCheckResultReason reason = REASON_MAX;
-    if (!database_manager_) {
+    if (!database_manager_.get()) {
       reason = REASON_SB_DISABLED;
     } else {
       for (size_t i = 0; i < url_chain_.size(); ++i) {
@@ -636,8 +639,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
         item_->GetTargetFilePath().BaseName().AsUTF8Unsafe());
     request.set_download_type(type_);
     request.mutable_signature()->CopyFrom(signature_info_);
-    std::string request_data;
-    if (!request.SerializeToString(&request_data)) {
+    if (!request.SerializeToString(&client_download_request_data_)) {
       FinishRequest(SAFE, REASON_INVALID_REQUEST_PROTO);
       return;
     }
@@ -651,7 +653,8 @@ class DownloadProtectionService::CheckClientDownloadRequest
     fetcher_->SetLoadFlags(net::LOAD_DISABLE_CACHE);
     fetcher_->SetAutomaticallyRetryOn5xx(false);  // Don't retry on error.
     fetcher_->SetRequestContext(service_->request_context_getter_.get());
-    fetcher_->SetUploadData("application/octet-stream", request_data);
+    fetcher_->SetUploadData("application/octet-stream",
+                            client_download_request_data_);
     fetcher_->Start();
   }
 
@@ -719,7 +722,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
       }
       std::vector<std::string> whitelist_strings;
       DownloadProtectionService::GetCertificateWhitelistStrings(
-          *cert, *issuer, &whitelist_strings);
+          *cert.get(), *issuer.get(), &whitelist_strings);
       for (size_t j = 0; j < whitelist_strings.size(); ++j) {
         if (database_manager_->MatchDownloadWhitelistString(
                 whitelist_strings[j])) {
@@ -754,6 +757,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
   base::TimeTicks zip_analysis_start_time_;
   bool finished_;
   ClientDownloadRequest::DownloadType type_;
+  std::string client_download_request_data_;
   base::WeakPtrFactory<CheckClientDownloadRequest> weakptr_factory_;
   base::TimeTicks start_time_;  // Used for stats.
 
@@ -766,7 +770,9 @@ DownloadProtectionService::DownloadProtectionService(
     : request_context_getter_(request_context_getter),
       enabled_(false),
       signature_util_(new SignatureUtil()),
-      download_request_timeout_ms_(kDownloadRequestTimeoutMs) {
+      download_request_timeout_ms_(kDownloadRequestTimeoutMs),
+      feedback_service_(new DownloadFeedbackService(
+          request_context_getter, BrowserThread::GetBlockingPool())) {
 
   if (sb_service) {
     ui_manager_ = sb_service->ui_manager();

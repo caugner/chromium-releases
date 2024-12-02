@@ -6,8 +6,7 @@
 
 namespace switches {
 
-const char kMergeUIAndRendererCompositorThreads[] =
-    "merge-ui-and-compositor-threads";
+const char kDisableSimpleCache[] = "disable-simple-cache";
 
 const char kUseZeroCopyBuffers[] = "use-zero-copy-buffers";
 

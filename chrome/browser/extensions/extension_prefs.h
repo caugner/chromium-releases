@@ -13,29 +13,26 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/api/content_settings/content_settings_store.h"
-#include "chrome/browser/extensions/extension_prefs_scope.h"
 #include "chrome/browser/extensions/extension_scoped_prefs.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/extensions/extension.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "extensions/common/url_pattern_set.h"
 #include "sync/api/string_ordinal.h"
 
 class ExtensionPrefValueMap;
 class ExtensionSorting;
 class PrefService;
+class Profile;
 
 namespace user_prefs {
 class PrefRegistrySyncable;
 }
 
 namespace extensions {
+class ContentSettingsStore;
 class ExtensionPrefsUninstallExtension;
 class URLPatternSet;
-
-namespace app_file_handler_util {
-struct SavedFileEntry;
-}
 
 // Class for managing global and per-extension preferences.
 //
@@ -52,13 +49,16 @@ struct SavedFileEntry;
 //       preference. Extension-controlled preferences are stored in
 //       PrefValueStore::extension_prefs(), which this class populates and
 //       maintains as the underlying extensions change.
-class ExtensionPrefs : public ContentSettingsStore::Observer,
-                       public ExtensionScopedPrefs {
+class ExtensionPrefs : public ExtensionScopedPrefs,
+                       public BrowserContextKeyedService {
  public:
   // Key name for a preference that keeps track of per-extension settings. This
   // is a dictionary object read from the Preferences file, keyed off of
   // extension ids.
   static const char kExtensionsPref[];
+
+  // Key for what version chrome was last time the extension prefs were loaded.
+  static const char kExtensionsLastChromeVersion[];
 
   typedef std::vector<linked_ptr<ExtensionInfo> > ExtensionsInfo;
 
@@ -80,6 +80,17 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
     // the default for the NTP and chrome.management.launchApp().
     LAUNCH_DEFAULT = LAUNCH_REGULAR
   };
+
+  // This enum is used to store the reason an extension's install has been
+  // delayed.  Do not remove items or re-order this enum as it is used in
+  // preferences.
+  enum DelayReason {
+    DELAY_REASON_NONE = 0,
+    DELAY_REASON_GC = 1,
+    DELAY_REASON_WAIT_FOR_IDLE = 2,
+    DELAY_REASON_WAIT_FOR_IMPORTS = 3,
+  };
+
 
   // Creates base::Time classes. The default implementation is just to return
   // the current time, but tests can inject alternative implementations.
@@ -131,7 +142,9 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
 
   // Creates and initializes an ExtensionPrefs object.
   // Does not take ownership of |prefs| and |extension_pref_value_map|.
-  static scoped_ptr<ExtensionPrefs> Create(
+  // If |extensions_disabled| is true, extension controlled preferences and
+  // content settings do not become effective.
+  static ExtensionPrefs* Create(
       PrefService* prefs,
       const base::FilePath& root_dir,
       ExtensionPrefValueMap* extension_pref_value_map,
@@ -139,7 +152,7 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
 
   // A version of Create which allows injection of a custom base::Time provider.
   // Use this as needed for testing.
-  static scoped_ptr<ExtensionPrefs> Create(
+  static ExtensionPrefs* Create(
       PrefService* prefs,
       const base::FilePath& root_dir,
       ExtensionPrefValueMap* extension_pref_value_map,
@@ -148,15 +161,13 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
 
   virtual ~ExtensionPrefs();
 
+  // Convenience function to get the ExtensionPrefs for a Profile.
+  static ExtensionPrefs* Get(Profile* profile);
+
   // Returns all installed extensions from extension preferences provided by
   // |pref_service|. This is exposed for ProtectedPrefsWatcher because it needs
   // access to the extension ID list before the ExtensionService is initialized.
   static ExtensionIdList GetExtensionsFrom(const PrefService* pref_service);
-
-  // Returns a copy of the Extensions prefs.
-  // TODO(erikkay) Remove this so that external consumers don't need to be
-  // aware of the internal structure of the preferences.
-  base::DictionaryValue* CopyCurrentExtensions();
 
   // Returns true if the specified external extension was uninstalled by the
   // user.
@@ -217,10 +228,8 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
       const std::string& pref_key,
       const base::DictionaryValue** out_value) const OVERRIDE;
 
-  // Getter and setter for browser action visibility.
-  bool GetBrowserActionVisibility(const Extension* extension);
-  void SetBrowserActionVisibility(const Extension* extension,
-     bool visible);
+  virtual bool HasPrefForExtension(const std::string& extension_id) const
+      OVERRIDE;
 
   // Did the extension ask to escalate its permission during an upgrade?
   bool DidExtensionEscalatePermissions(const std::string& id);
@@ -346,30 +355,6 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   void SetActivePermissions(const std::string& extension_id,
                             const PermissionSet* permissions);
 
-  // Returns true if registered events are from this version of Chrome. Else,
-  // clear them, and return false.
-  bool CheckRegisteredEventsUpToDate();
-
-  // Returns the list of events that the given extension has registered for.
-  std::set<std::string> GetRegisteredEvents(const std::string& extension_id);
-  void SetRegisteredEvents(const std::string& extension_id,
-                           const std::set<std::string>& events);
-
-  // Adds a filter to an event.
-  void AddFilterToEvent(const std::string& event_name,
-                        const std::string& extension_id,
-                        const base::DictionaryValue* filter);
-
-  // Removes a filter from an event.
-  void RemoveFilterFromEvent(const std::string& event_name,
-                             const std::string& extension_id,
-                             const base::DictionaryValue* filter);
-
-  // Returns the dictionary of event filters that the given extension has
-  // registered.
-  const base::DictionaryValue* GetFilteredEvents(
-      const std::string& extension_id) const;
-
   // Records whether or not this extension is currently running.
   void SetExtensionRunning(const std::string& extension_id, bool is_running);
 
@@ -377,14 +362,11 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // restart apps across browser restarts.
   bool IsExtensionRunning(const std::string& extension_id);
 
-  void AddSavedFileEntry(const std::string& extension_id,
-                         const std::string& id,
-                         const base::FilePath& file_path,
-                         bool writable);
-  void ClearSavedFileEntries(const std::string& extension_id);
-  void GetSavedFileEntries(
-      const std::string& extension_id,
-      std::vector<app_file_handler_util::SavedFileEntry>* out);
+  // Set/Get whether or not the app is active. Used to force a launch of apps
+  // that don't handle onRestarted() on a restart. We can only safely do that if
+  // the app was active when it was last running.
+  void SetIsActive(const std::string& extension_id, bool is_active);
+  bool IsActive(const std::string& extension_id);
 
   // Returns true if the user enabled this extension to be loaded in incognito
   // mode.
@@ -423,9 +405,10 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
       const std::string& extension_id) const;
 
   // We've downloaded an updated .crx file for the extension, but are waiting
-  // for idle time to install it.
+  // to install it.
   void SetDelayedInstallInfo(const Extension* extension,
                              Extension::State initial_state,
+                             DelayReason delay_reason,
                              const syncer::StringOrdinal& page_ordinal);
 
   // Removes any delayed install information we have for the given
@@ -440,17 +423,11 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   scoped_ptr<ExtensionInfo> GetDelayedInstallInfo(
       const std::string& extension_id) const;
 
+  DelayReason GetDelayedInstallReason(const std::string& extension_id) const;
+
   // Returns information about all the extensions that have delayed install
   // information.
   scoped_ptr<ExtensionsInfo> GetAllDelayedInstallInfo() const;
-
-  // We allow the web store to set a string containing login information when a
-  // purchase is made, so that when a user logs into sync with a different
-  // account we can recognize the situation. The Get function returns true if
-  // there was previously stored data (placing it in |result|), or false
-  // otherwise. The Set will overwrite any previous login.
-  bool GetWebStoreLogin(std::string* result);
-  void SetWebStoreLogin(const std::string& login);
 
   // Returns true if the user repositioned the app on the app launcher via drag
   // and drop.
@@ -460,50 +437,15 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // launcher by drag and dropping it.
   void SetAppDraggedByUser(const std::string& extension_id);
 
-  // The extension's update URL data.  If not empty, the ExtensionUpdater
-  // will append a ap= parameter to the URL when checking if a new version
-  // of the extension is available.
-  void SetUpdateUrlData(const std::string& extension_id,
-                        const std::string& data);
-  std::string GetUpdateUrlData(const std::string& extension_id);
-
-  // Sets a preference value that is controlled by the extension. In other
-  // words, this is not a pref value *about* the extension but something
-  // global the extension wants to override.
-  // Takes ownership of |value|.
-  void SetExtensionControlledPref(const std::string& extension_id,
-                                  const std::string& pref_key,
-                                  ExtensionPrefsScope scope,
-                                  base::Value* value);
-
-  void RemoveExtensionControlledPref(const std::string& extension_id,
-                                     const std::string& pref_key,
-                                     ExtensionPrefsScope scope);
-
-  // Returns true if currently no extension with higher precedence controls the
-  // preference.
-  bool CanExtensionControlPref(const std::string& extension_id,
-                               const std::string& pref_key,
-                               bool incognito);
-
-  // Returns true if extension |extension_id| currently controls the
-  // preference. If |from_incognito| is not NULL, looks at incognito preferences
-  // first, and |from_incognito| is set to true if the effective pref value is
-  // coming from the incognito preferences, false if it is coming from the
-  // normal ones.
-  bool DoesExtensionControlPref(const std::string& extension_id,
-                                const std::string& pref_key,
-                                bool* from_incognito);
-
   // Returns true if there is an extension which controls the preference value
   //  for |pref_key| *and* it is specific to incognito mode.
   bool HasIncognitoPrefValue(const std::string& pref_key);
 
-  // Clears incognito session-only content settings for all extensions.
-  void ClearIncognitoSessionOnlyContentSettings();
-
   // Returns the creation flags mask for the extension.
   int GetCreationFlags(const std::string& extension_id) const;
+
+  // Returns the creation flags mask for a delayed install extension.
+  int GetDelayedInstallCreationFlags(const std::string& extension_id) const;
 
   // Returns true if the extension was installed from the Chrome Web Store.
   bool IsFromWebStore(const std::string& extension_id) const;
@@ -521,6 +463,8 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   base::Time GetInstallTime(const std::string& extension_id) const;
 
   static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
+
+  bool extensions_disabled() { return extensions_disabled_; }
 
   ContentSettingsStore* content_settings_store() {
     return content_settings_store_.get();
@@ -566,15 +510,8 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   ExtensionPrefs(PrefService* prefs,
                  const base::FilePath& root_dir,
                  ExtensionPrefValueMap* extension_pref_value_map,
-                 scoped_ptr<TimeProvider> time_provider);
-
-  // If |extensions_disabled| is true, extension controlled preferences and
-  // content settings do not become effective.
-  void Init(bool extensions_disabled);
-
-  // extensions::ContentSettingsStore::Observer methods:
-  virtual void OnContentSettingChanged(const std::string& extension_id,
-                                       bool incognito) OVERRIDE;
+                 scoped_ptr<TimeProvider> time_provider,
+                 bool extensions_disabled);
 
   // Converts absolute paths in the pref to paths relative to the
   // install_directory_.
@@ -624,27 +561,19 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // doesn't exist.
   const base::DictionaryValue* GetExtensionPref(const std::string& id) const;
 
-  // Loads the preferences controlled by the specified extension from their
-  // dictionary and sets them in the |pref_value_map_|.
-  void LoadExtensionControlledPrefs(const std::string& id,
-                                    ExtensionPrefsScope scope);
-
   // Fix missing preference entries in the extensions that are were introduced
   // in a later Chrome version.
   void FixMissingPrefs(const ExtensionIdList& extension_ids);
 
   // Installs the persistent extension preferences into |prefs_|'s extension
-  // pref store. Does nothing if |extensions_disabled| is true.
-  void InitPrefStore(bool extensions_disabled);
+  // pref store. Does nothing if extensions_disabled_ is true.
+  void InitPrefStore();
 
   // Migrates the permissions data in the pref store.
   void MigratePermissions(const ExtensionIdList& extension_ids);
 
   // Migrates the disable reasons from a single enum to a bit mask.
   void MigrateDisableReasons(const ExtensionIdList& extension_ids);
-
-  // Clears the registered events for event pages.
-  void ClearRegisteredEvents();
 
   // Checks whether there is a state pref for the extension and if so, whether
   // it matches |check_state|.
@@ -691,6 +620,8 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   scoped_refptr<ContentSettingsStore> content_settings_store_;
 
   scoped_ptr<TimeProvider> time_provider_;
+
+  bool extensions_disabled_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionPrefs);
 };

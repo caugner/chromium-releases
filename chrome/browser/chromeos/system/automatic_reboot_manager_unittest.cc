@@ -33,9 +33,9 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chromeos/chromeos_paths.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/mock_dbus_thread_manager.h"
-#include "chromeos/dbus/mock_power_manager_client.h"
-#include "chromeos/dbus/mock_update_engine_client.h"
+#include "chromeos/dbus/fake_power_manager_client.h"
+#include "chromeos/dbus/fake_update_engine_client.h"
+#include "chromeos/dbus/mock_dbus_thread_manager_without_gmock.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -45,10 +45,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/message_center/message_center.h"
 
-using ::testing::AnyNumber;
-using ::testing::Mock;
 using ::testing::ReturnPointee;
-using ::testing::_;
 
 namespace chromeos {
 namespace system {
@@ -137,6 +134,7 @@ class AutomaticRebootManagerBasicTest : public testing::Test {
   void SetUptimeLimit(const base::TimeDelta& limit, bool expect_reboot);
   void NotifyUpdateRebootNeeded();
   void NotifyResumed(bool expect_reboot);
+  void NotifyTerminating(bool expect_reboot);
 
   void FastForwardBy(const base::TimeDelta& delta, bool expect_reboot);
   void FastForwardUntilNoTasksRemain(bool expect_reboot);
@@ -149,7 +147,8 @@ class AutomaticRebootManagerBasicTest : public testing::Test {
   void VerifyGracePeriod(const base::TimeDelta& start_uptime) const;
 
   bool is_user_logged_in_;
-  UpdateEngineClient::Status update_engine_client_status_;
+  bool is_logged_in_as_kiosk_app_;
+
   // The uptime is read in the blocking thread pool and then processed on the
   // UI thread. This causes the UI thread to start processing the uptime when it
   // has increased by a small offset already. The offset is calculated and
@@ -163,13 +162,18 @@ class AutomaticRebootManagerBasicTest : public testing::Test {
 
   scoped_ptr<AutomaticRebootManager> automatic_reboot_manager_;
 
+ protected:
+  FakePowerManagerClient* power_manager_client_;  // Not owned.
+  FakeUpdateEngineClient* update_engine_client_;  // Not owned.
+
+  // Sets the status of |update_engine_client_| to NEED_REBOOT for tests.
+  void SetUpdateStatusNeedReboot();
+
  private:
   void VerifyTimerIsStopped(const Timer* timer) const;
   void VerifyTimerIsRunning(const Timer* timer,
                             const base::TimeDelta& delay) const;
   void VerifyLoginScreenIdleTimerIsRunning() const;
-
-  void VerifyAndResetPowerManagerExpectations();
 
   base::ScopedTempDir temp_dir_;
   base::FilePath update_reboot_needed_uptime_file_;
@@ -178,18 +182,24 @@ class AutomaticRebootManagerBasicTest : public testing::Test {
 
   base::ThreadTaskRunnerHandle ui_thread_task_runner_handle_;
 
-  MockPowerManagerClient* power_manager_client_;  // Not owned.
-  MockUpdateEngineClient* update_engine_client_;  // Not owned.
-
   TestingPrefServiceSimple local_state_;
   MockUserManager* mock_user_manager_;  // Not owned.
   ScopedUserManagerEnabler user_manager_enabler_;
 };
 
-// This class runs each test case twice, once with and once without a logged-in
-// user.
-class AutomaticRebootManagerTest : public AutomaticRebootManagerBasicTest,
-                                   public testing::WithParamInterface<bool> {
+enum AutomaticRebootManagerTestScenario {
+  AUTOMATIC_REBOOT_MANAGER_TEST_SCENARIO_LOGIN_SCREEN,
+  AUTOMATIC_REBOOT_MANAGER_TEST_SCENARIO_KIOSK_APP_SESSION,
+  AUTOMATIC_REBOOT_MANAGER_TEST_SCENARIO_NON_KIOSK_APP_SESSION,
+};
+
+// This class runs each test case three times:
+// * once while the login screen is being shown
+// * once while a kiosk app session is in progress
+// * once while a non-kiosk-app session is in progress
+class AutomaticRebootManagerTest
+    : public AutomaticRebootManagerBasicTest,
+      public testing::WithParamInterface<AutomaticRebootManagerTestScenario> {
  protected:
   AutomaticRebootManagerTest();
   virtual ~AutomaticRebootManagerTest();
@@ -319,11 +329,12 @@ base::TimeTicks MockTimeTickClock::NowTicks() {
 
 AutomaticRebootManagerBasicTest::AutomaticRebootManagerBasicTest()
     : is_user_logged_in_(false),
+      is_logged_in_as_kiosk_app_(false),
       task_runner_(new MockTimeSingleThreadTaskRunner),
-      reboot_after_update_(false),
-      ui_thread_task_runner_handle_(task_runner_),
       power_manager_client_(NULL),
       update_engine_client_(NULL),
+      reboot_after_update_(false),
+      ui_thread_task_runner_handle_(task_runner_),
       mock_user_manager_(new MockUserManager),
       user_manager_enabler_(mock_user_manager_) {
 }
@@ -347,20 +358,19 @@ void AutomaticRebootManagerBasicTest::SetUp() {
 
   TestingBrowserProcess::GetGlobal()->SetLocalState(&local_state_);
   AutomaticRebootManager::RegisterPrefs(local_state_.registry());
-  MockDBusThreadManager* dbus_manager = new MockDBusThreadManager;
+  MockDBusThreadManagerWithoutGMock* dbus_manager =
+      new MockDBusThreadManagerWithoutGMock;
   DBusThreadManager::InitializeForTesting(dbus_manager);
-  power_manager_client_ = dbus_manager->mock_power_manager_client();
-  update_engine_client_ = dbus_manager->mock_update_engine_client();
+  power_manager_client_ = dbus_manager->fake_power_manager_client();
+  update_engine_client_ = dbus_manager->fake_update_engine_client();
 
   EXPECT_CALL(*mock_user_manager_, IsUserLoggedIn())
      .WillRepeatedly(ReturnPointee(&is_user_logged_in_));
-  EXPECT_CALL(*update_engine_client_, GetLastStatus())
-      .WillRepeatedly(ReturnPointee(&update_engine_client_status_));
+  EXPECT_CALL(*mock_user_manager_, IsLoggedInAsKioskApp())
+     .WillRepeatedly(ReturnPointee(&is_logged_in_as_kiosk_app_));
 }
 
 void AutomaticRebootManagerBasicTest::TearDown() {
-  VerifyAndResetPowerManagerExpectations();
-
   // Let the AutomaticRebootManager, if any, unregister itself as an observer of
   // several subsystems.
   automatic_reboot_manager_.reset();
@@ -380,19 +390,18 @@ void AutomaticRebootManagerBasicTest::SetUpdateRebootNeededUptime(
 void AutomaticRebootManagerBasicTest::SetRebootAfterUpdate(
     bool reboot_after_update,
     bool expect_reboot) {
-  EXPECT_CALL(*power_manager_client_, RequestRestart()).Times(expect_reboot);
   reboot_after_update_ = reboot_after_update;
   local_state_.SetManagedPref(
       prefs::kRebootAfterUpdate,
       base::Value::CreateBooleanValue(reboot_after_update));
   task_runner_->RunUntilIdle();
-  VerifyAndResetPowerManagerExpectations();
+  EXPECT_EQ(expect_reboot ? 1 : 0,
+            power_manager_client_->request_restart_call_count());
 }
 
 void AutomaticRebootManagerBasicTest::SetUptimeLimit(
     const base::TimeDelta& limit,
     bool expect_reboot) {
-  EXPECT_CALL(*power_manager_client_, RequestRestart()).Times(expect_reboot);
   uptime_limit_ = limit;
   if (limit == base::TimeDelta()) {
     local_state_.RemoveManagedPref(prefs::kUptimeLimit);
@@ -402,47 +411,57 @@ void AutomaticRebootManagerBasicTest::SetUptimeLimit(
         base::Value::CreateIntegerValue(limit.InSeconds()));
   }
   task_runner_->RunUntilIdle();
-  VerifyAndResetPowerManagerExpectations();
+  EXPECT_EQ(expect_reboot ? 1 : 0,
+            power_manager_client_->request_restart_call_count());
 }
 
 void AutomaticRebootManagerBasicTest::NotifyUpdateRebootNeeded() {
-  EXPECT_CALL(*power_manager_client_, RequestRestart()).Times(0);
-  update_engine_client_status_.status =
-      UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT;
-  automatic_reboot_manager_->UpdateStatusChanged(update_engine_client_status_);
+  SetUpdateStatusNeedReboot();
+  automatic_reboot_manager_->UpdateStatusChanged(
+      update_engine_client_->GetLastStatus());
   task_runner_->RunUntilIdle();
-  VerifyAndResetPowerManagerExpectations();
+  EXPECT_EQ(0, power_manager_client_->request_restart_call_count());
 }
 
 void AutomaticRebootManagerBasicTest::NotifyResumed(bool expect_reboot) {
-  EXPECT_CALL(*power_manager_client_, RequestRestart()).Times(expect_reboot);
   automatic_reboot_manager_->SystemResumed(base::TimeDelta::FromHours(1));
   task_runner_->RunUntilIdle();
-  VerifyAndResetPowerManagerExpectations();
+  EXPECT_EQ(expect_reboot ? 1 : 0,
+            power_manager_client_->request_restart_call_count());
+}
+
+void AutomaticRebootManagerBasicTest::NotifyTerminating(bool expect_reboot) {
+  automatic_reboot_manager_->Observe(
+      chrome::NOTIFICATION_APP_TERMINATING,
+      content::Source<AutomaticRebootManagerBasicTest>(this),
+      content::NotificationService::NoDetails());
+  task_runner_->RunUntilIdle();
+  EXPECT_EQ(expect_reboot ? 1 : 0,
+            power_manager_client_->request_restart_call_count());
 }
 
 void AutomaticRebootManagerBasicTest::FastForwardBy(
     const base::TimeDelta& delta,
     bool expect_reboot) {
-  EXPECT_CALL(*power_manager_client_, RequestRestart()).Times(expect_reboot);
   task_runner_->FastForwardBy(delta);
-  VerifyAndResetPowerManagerExpectations();
+  EXPECT_EQ(expect_reboot ? 1 : 0,
+            power_manager_client_->request_restart_call_count());
 }
 
 void AutomaticRebootManagerBasicTest::FastForwardUntilNoTasksRemain(
     bool expect_reboot) {
-  EXPECT_CALL(*power_manager_client_, RequestRestart()).Times(expect_reboot);
   task_runner_->FastForwardUntilNoTasksRemain();
-  VerifyAndResetPowerManagerExpectations();
+  EXPECT_EQ(expect_reboot ? 1 : 0,
+            power_manager_client_->request_restart_call_count());
 }
 
 void AutomaticRebootManagerBasicTest::CreateAutomaticRebootManager(
     bool expect_reboot) {
-  EXPECT_CALL(*power_manager_client_, RequestRestart()).Times(expect_reboot);
   automatic_reboot_manager_.reset(new AutomaticRebootManager(
       scoped_ptr<base::TickClock>(new MockTimeTickClock(task_runner_))));
   task_runner_->RunUntilIdle();
-  VerifyAndResetPowerManagerExpectations();
+  EXPECT_EQ(expect_reboot ? 1 : 0,
+            power_manager_client_->request_restart_call_count());
 
   uptime_processing_delay_ =
       base::TimeTicks() - automatic_reboot_manager_->boot_time_ -
@@ -525,23 +544,35 @@ void AutomaticRebootManagerBasicTest::
       base::TimeDelta::FromSeconds(60));
 }
 
-void AutomaticRebootManagerBasicTest::VerifyAndResetPowerManagerExpectations() {
-  Mock::VerifyAndClearExpectations(power_manager_client_);
-  EXPECT_CALL(*power_manager_client_, AddObserver(_)).Times(AnyNumber());
-  EXPECT_CALL(*power_manager_client_, RemoveObserver(_)).Times(AnyNumber());
-  EXPECT_CALL(*power_manager_client_, SetPolicy(_)).Times(AnyNumber());
+void AutomaticRebootManagerBasicTest::SetUpdateStatusNeedReboot() {
+  UpdateEngineClient::Status client_status;
+  client_status.status = UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT;
+  update_engine_client_->set_default_status(client_status);
 }
 
 AutomaticRebootManagerTest::AutomaticRebootManagerTest() {
-  is_user_logged_in_ = GetParam();
+  switch (GetParam()) {
+    case AUTOMATIC_REBOOT_MANAGER_TEST_SCENARIO_LOGIN_SCREEN:
+      is_user_logged_in_ = false;
+      is_logged_in_as_kiosk_app_ = false;
+      break;
+    case AUTOMATIC_REBOOT_MANAGER_TEST_SCENARIO_KIOSK_APP_SESSION:
+      is_user_logged_in_ = true;
+      is_logged_in_as_kiosk_app_ = true;
+      break;
+    case AUTOMATIC_REBOOT_MANAGER_TEST_SCENARIO_NON_KIOSK_APP_SESSION:
+      is_user_logged_in_ = true;
+      is_logged_in_as_kiosk_app_ = false;
+      break;
+  }
 }
 
 AutomaticRebootManagerTest::~AutomaticRebootManagerTest() {
 }
 
 // Chrome is showing the login screen. The current uptime is 12 hours.
-// Verifies that the idle timer is running. Further verifies that when a user
-// logs in, the idle timer is stopped.
+// Verifies that the idle timer is running. Further verifies that when a kiosk
+// app session begins, the idle timer is stopped.
 TEST_F(AutomaticRebootManagerBasicTest, LoginStopsIdleTimer) {
   task_runner_->SetUptime(base::TimeDelta::FromHours(12));
 
@@ -549,7 +580,32 @@ TEST_F(AutomaticRebootManagerBasicTest, LoginStopsIdleTimer) {
   // idle timer is started.
   CreateAutomaticRebootManager(false);
 
-  // Notify that a user has logged in.
+  // Notify that a kiosk app session has been started.
+  is_user_logged_in_ = true;
+  is_logged_in_as_kiosk_app_ = true;
+  automatic_reboot_manager_->Observe(
+      chrome::NOTIFICATION_LOGIN_USER_CHANGED,
+      content::Source<AutomaticRebootManagerBasicTest>(this),
+      content::NotificationService::NoDetails());
+
+  // Verify that the login screen idle timer is stopped.
+  VerifyLoginScreenIdleTimerIsStopped();
+
+  // Verify that the device does not reboot eventually.
+  FastForwardUntilNoTasksRemain(false);
+}
+
+// Chrome is showing the login screen. The current uptime is 12 hours.
+// Verifies that the idle timer is running. Further verifies that when a
+// non-kiosk-app session begins, the idle timer is stopped.
+TEST_F(AutomaticRebootManagerBasicTest, NonKioskLoginStopsIdleTimer) {
+  task_runner_->SetUptime(base::TimeDelta::FromHours(12));
+
+  // Verify that the device does not reboot immediately and the login screen
+  // idle timer is started.
+  CreateAutomaticRebootManager(false);
+
+  // Notify that a non-kiosk-app session has been started.
   is_user_logged_in_ = true;
   automatic_reboot_manager_->Observe(
       chrome::NOTIFICATION_LOGIN_USER_CHANGED,
@@ -596,10 +652,32 @@ TEST_F(AutomaticRebootManagerBasicTest, UserActivityResetsIdleTimer) {
   FastForwardBy(base::TimeDelta::FromSeconds(60), true);
 }
 
-// Chrome is running a user session. The current uptime is 10 days.
+// Chrome is running a kiosk app session. The current uptime is 10 days.
 // Verifies that when the device is suspended and then resumes, it does not
 // immediately reboot.
 TEST_F(AutomaticRebootManagerBasicTest, ResumeNoPolicy) {
+  is_user_logged_in_ = true;
+  is_logged_in_as_kiosk_app_ = true;
+  task_runner_->SetUptime(base::TimeDelta::FromDays(10));
+
+  // Verify that the device does not reboot immediately.
+  CreateAutomaticRebootManager(false);
+
+  // Verify that no grace period has started.
+  VerifyNoGracePeriod();
+
+  // Notify that the device has resumed from 1 hour of sleep. Verify that the
+  // device does not reboot immediately.
+  NotifyResumed(false);
+
+  // Verify that the device does not reboot eventually.
+  FastForwardUntilNoTasksRemain(false);
+}
+
+// Chrome is running a non-kiosk-app session. The current uptime is 10 days.
+// Verifies that when the device is suspended and then resumes, it does not
+// immediately reboot.
+TEST_F(AutomaticRebootManagerBasicTest, NonKioskResumeAppNoPolicy) {
   is_user_logged_in_ = true;
   task_runner_->SetUptime(base::TimeDelta::FromDays(10));
 
@@ -617,12 +695,13 @@ TEST_F(AutomaticRebootManagerBasicTest, ResumeNoPolicy) {
   FastForwardUntilNoTasksRemain(false);
 }
 
-// Chrome is running a user session. The uptime limit is 24 hours. The current
-// uptime is 12 hours.
+// Chrome is running a kiosk app session. The uptime limit is 24 hours. The
+// current uptime is 12 hours.
 // Verifies that when the device is suspended and then resumes, it does not
 // immediately reboot.
 TEST_F(AutomaticRebootManagerBasicTest, ResumeBeforeGracePeriod) {
   is_user_logged_in_ = true;
+  is_logged_in_as_kiosk_app_ = true;
   task_runner_->SetUptime(base::TimeDelta::FromHours(12));
 
   // Verify that the device does not reboot immediately.
@@ -642,12 +721,38 @@ TEST_F(AutomaticRebootManagerBasicTest, ResumeBeforeGracePeriod) {
   FastForwardUntilNoTasksRemain(true);
 }
 
-// Chrome is running a user session. The uptime limit is 6 hours. The current
-// uptime is 12 hours.
+// Chrome is running a non-kiosk-app session. The uptime limit is 24 hours. The
+// current uptime is 12 hours.
+// Verifies that when the device is suspended and then resumes, it does not
+// immediately reboot.
+TEST_F(AutomaticRebootManagerBasicTest, NonKioskResumeBeforeGracePeriod) {
+  is_user_logged_in_ = true;
+  task_runner_->SetUptime(base::TimeDelta::FromHours(12));
+
+  // Verify that the device does not reboot immediately.
+  CreateAutomaticRebootManager(false);
+
+  // Set the uptime limit. Verify that the device does not reboot immediately.
+  SetUptimeLimit(base::TimeDelta::FromHours(24), false);
+
+  // Verify that a grace period has been scheduled to start in the future.
+  VerifyGracePeriod(uptime_limit_);
+
+  // Notify that the device has resumed from 1 hour of sleep. Verify that the
+  // device does not reboot immediately.
+  NotifyResumed(false);
+
+  // Verify that the device does not reboot eventually.
+  FastForwardUntilNoTasksRemain(false);
+}
+
+// Chrome is running a kiosk app session. The uptime limit is 6 hours. The
+// current uptime is 12 hours.
 // Verifies that when the device is suspended and then resumes, it immediately
 // reboots.
 TEST_F(AutomaticRebootManagerBasicTest, ResumeInGracePeriod) {
   is_user_logged_in_ = true;
+  is_logged_in_as_kiosk_app_ = true;
   task_runner_->SetUptime(base::TimeDelta::FromHours(12));
 
   // Verify that the device does not reboot immediately.
@@ -664,12 +769,38 @@ TEST_F(AutomaticRebootManagerBasicTest, ResumeInGracePeriod) {
   NotifyResumed(true);
 }
 
-// Chrome is running a user session. The uptime limit is 6 hours. The current
-// uptime is 29 hours 30 minutes.
+// Chrome is running a non-kiosk-app session. The uptime limit is 6 hours. The
+// current uptime is 12 hours.
+// Verifies that when the device is suspended and then resumes, it does not
+// immediately reboot.
+TEST_F(AutomaticRebootManagerBasicTest, NonKioskResumeInGracePeriod) {
+  is_user_logged_in_ = true;
+  task_runner_->SetUptime(base::TimeDelta::FromHours(12));
+
+  // Verify that the device does not reboot immediately.
+  CreateAutomaticRebootManager(false);
+
+  // Set the uptime limit. Verify that the device does not reboot immediately.
+  SetUptimeLimit(base::TimeDelta::FromHours(6), false);
+
+  // Verify that a grace period has started.
+  VerifyGracePeriod(uptime_limit_);
+
+  // Notify that the device has resumed from 1 hour of sleep. Verify that the
+  // device does not reboot immediately.
+  NotifyResumed(false);
+
+  // Verify that the device does not reboot eventually.
+  FastForwardUntilNoTasksRemain(false);
+}
+
+// Chrome is running a kiosk app session. The uptime limit is 6 hours. The
+// current uptime is 29 hours 30 minutes.
 // Verifies that when the device is suspended and then resumes, it immediately
 // reboots.
 TEST_F(AutomaticRebootManagerBasicTest, ResumeAfterGracePeriod) {
   is_user_logged_in_ = true;
+  is_logged_in_as_kiosk_app_ = true;
   task_runner_->SetUptime(base::TimeDelta::FromHours(29) +
                           base::TimeDelta::FromMinutes(30));
 
@@ -685,6 +816,103 @@ TEST_F(AutomaticRebootManagerBasicTest, ResumeAfterGracePeriod) {
   // Notify that the device has resumed from 1 hour of sleep. Verify that the
   // device reboots immediately.
   NotifyResumed(true);
+}
+
+// Chrome is running a non-kiosk-app session. The uptime limit is 6 hours. The
+// current uptime is 29 hours 30 minutes.
+// Verifies that when the device is suspended and then resumes, it does not
+// immediately reboot.
+TEST_F(AutomaticRebootManagerBasicTest, NonKioskResumeAfterGracePeriod) {
+  is_user_logged_in_ = true;
+  task_runner_->SetUptime(base::TimeDelta::FromHours(29) +
+                          base::TimeDelta::FromMinutes(30));
+
+  // Verify that the device does not reboot immediately.
+  CreateAutomaticRebootManager(false);
+
+  // Set the uptime limit. Verify that the device does not reboot immediately.
+  SetUptimeLimit(base::TimeDelta::FromHours(6), false);
+
+  // Verify that a grace period has started.
+  VerifyGracePeriod(uptime_limit_);
+
+  // Notify that the device has resumed from 1 hour of sleep. Verify that the
+  // device does not reboot immediately.
+  NotifyResumed(false);
+
+  // Verify that the device does not reboot eventually.
+  FastForwardUntilNoTasksRemain(false);
+}
+
+// Chrome is running. The current uptime is 10 days.
+// Verifies that when the browser terminates, the device does not immediately
+// reboot.
+TEST_P(AutomaticRebootManagerTest, TerminateNoPolicy) {
+  task_runner_->SetUptime(base::TimeDelta::FromDays(10));
+
+  // Verify that the device does not reboot immediately.
+  CreateAutomaticRebootManager(false);
+
+  // Verify that no grace period has started.
+  VerifyNoGracePeriod();
+
+  // Notify that the browser is terminating. Verify that the device does not
+  // reboot immediately.
+  NotifyTerminating(false);
+
+  // Verify that the device does not reboot eventually.
+  FastForwardUntilNoTasksRemain(false);
+}
+
+// Chrome is running. The uptime limit is set to 24 hours. The current uptime is
+// 12 hours.
+// Verifies that when the browser terminates, it does not immediately reboot.
+TEST_P(AutomaticRebootManagerTest, TerminateBeforeGracePeriod) {
+  task_runner_->SetUptime(base::TimeDelta::FromHours(12));
+
+  // Verify that the device does not reboot immediately.
+  CreateAutomaticRebootManager(false);
+
+  // Set the uptime limit. Verify that the device does not reboot immediately.
+  SetUptimeLimit(base::TimeDelta::FromHours(24), false);
+
+  // Verify that a grace period has been scheduled to start in the future.
+  VerifyGracePeriod(uptime_limit_);
+
+  // Notify that the browser is terminating. Verify that the device does not
+  // reboot immediately.
+  NotifyTerminating(false);
+
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
+}
+
+// Chrome is running. The uptime limit is set to 6 hours. The current uptime is
+// 12 hours.
+// Verifies that when the browser terminates, the device immediately reboots if
+// a kiosk app session is in progress.
+TEST_P(AutomaticRebootManagerTest, TerminateInGracePeriod) {
+  task_runner_->SetUptime(base::TimeDelta::FromHours(12));
+
+  // Verify that the device does not reboot immediately.
+  CreateAutomaticRebootManager(false);
+
+  // Set the uptime limit. Verify that the device does not reboot immediately.
+  SetUptimeLimit(base::TimeDelta::FromHours(6), false);
+
+  // Verify that a grace period has started.
+  VerifyGracePeriod(uptime_limit_);
+
+  // Notify that the browser is terminating. Verify that the device immediately
+  // reboots if a kiosk app session is in progress.
+  NotifyTerminating(is_logged_in_as_kiosk_app_);
+
+  // Verify that if a non-kiosk-app session is in progress, the device does not
+  // reboot eventually.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is running. The current uptime is 12 hours.
@@ -705,8 +933,10 @@ TEST_P(AutomaticRebootManagerTest, BeforeUptimeLimitGracePeriod) {
   // Verify that a grace period has been scheduled to start in the future.
   VerifyGracePeriod(uptime_limit_);
 
-  // Verify that the device reboots eventually.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is running. The current uptime is 12 hours.
@@ -727,13 +957,16 @@ TEST_P(AutomaticRebootManagerTest, InUptimeLimitGracePeriod) {
   // Verify that a grace period has started.
   VerifyGracePeriod(uptime_limit_);
 
-  // Verify that the device reboots eventually.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is running. The current uptime is 10 days.
 // Verifies that when the uptime limit is set to 6 hours, the device reboots
-// immediately because the grace period ended after 6 + 24 hours of uptime.
+// immediately if no non-kiosk-app-session is in progress because the grace
+// period ended after 6 + 24 hours of uptime.
 TEST_P(AutomaticRebootManagerTest, AfterUptimeLimitGracePeriod) {
   task_runner_->SetUptime(base::TimeDelta::FromDays(10));
 
@@ -743,8 +976,15 @@ TEST_P(AutomaticRebootManagerTest, AfterUptimeLimitGracePeriod) {
   // Verify that no grace period has started.
   VerifyNoGracePeriod();
 
-  // Set the uptime limit. Verify that the device reboots immediately.
-  SetUptimeLimit(base::TimeDelta::FromHours(6), true);
+  // Set the uptime limit. Verify that unless a non-kiosk-app session is in
+  // progress, the the device immediately reboots.
+  SetUptimeLimit(base::TimeDelta::FromHours(6), !is_user_logged_in_ ||
+                                                is_logged_in_as_kiosk_app_);
+
+  // Verify that if a non-kiosk-app session is in progress, the device does not
+  // reboot eventually.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is running. The uptime limit is set to 12 hours. The current uptime is
@@ -773,7 +1013,7 @@ TEST_P(AutomaticRebootManagerTest, UptimeLimitOffBeforeGracePeriod) {
   // Verify that the grace period has been removed.
   VerifyNoGracePeriod();
 
-  // Verify that the device does not eventually reboot.
+  // Verify that the device does not reboot eventually.
   FastForwardUntilNoTasksRemain(false);
 }
 
@@ -803,7 +1043,7 @@ TEST_P(AutomaticRebootManagerTest, UptimeLimitOffInGracePeriod) {
   // Verify that the grace period has been removed.
   VerifyNoGracePeriod();
 
-  // Verify that the device does not eventually reboot.
+  // Verify that the device does not reboot eventually.
   FastForwardUntilNoTasksRemain(false);
 }
 
@@ -835,8 +1075,10 @@ TEST_P(AutomaticRebootManagerTest, ExtendUptimeLimitBeforeGracePeriod) {
   // future.
   VerifyGracePeriod(uptime_limit_);
 
-  // Verify that the device eventually reboots.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is running. The uptime limit is set to 12 hours. The current uptime is
@@ -866,8 +1108,10 @@ TEST_P(AutomaticRebootManagerTest, ExtendUptimeLimitInGracePeriod) {
   // Verify that the grace period has been rescheduled to start in the future.
   VerifyGracePeriod(uptime_limit_);
 
-  // Verify that the device eventually reboots.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is running. The uptime limit is set to 18 hours. The current uptime is
@@ -897,8 +1141,10 @@ TEST_P(AutomaticRebootManagerTest, ShortenUptimeLimitBeforeToInGracePeriod) {
   // Verify that the grace period has been rescheduled and has started already.
   VerifyGracePeriod(uptime_limit_);
 
-  // Verify that the device eventually reboots.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is running. The uptime limit is set to 24 hours. The current uptime is
@@ -928,15 +1174,17 @@ TEST_P(AutomaticRebootManagerTest, ShortenUptimeLimitInToInGracePeriod) {
   // Verify that the grace period has been rescheduled to have started earlier.
   VerifyGracePeriod(uptime_limit_);
 
-  // Verify that the device eventually reboots.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is running. The uptime limit is set to 24 hours. The current uptime is
 // 36 hours.
 // Verifies that when the uptime limit is shortened to 6 hours, the device
-// reboots immediately because the grace period ended after 6 + 24 hours of
-// uptime.
+// reboots immediately if no non-kiosk-app session is in progress because the
+// grace period ended after 6 + 24 hours of uptime.
 TEST_P(AutomaticRebootManagerTest, ShortenUptimeLimitInToAfterGracePeriod) {
   task_runner_->SetUptime(base::TimeDelta::FromHours(36));
 
@@ -953,8 +1201,15 @@ TEST_P(AutomaticRebootManagerTest, ShortenUptimeLimitInToAfterGracePeriod) {
   // reboot immediately.
   FastForwardBy(base::TimeDelta::FromSeconds(20), false);
 
-  // Shorten the uptime limit. Verify that the device reboots immediately.
-  SetUptimeLimit(base::TimeDelta::FromHours(6), true);
+  // Shorten the uptime limit. Verify that unless a non-kiosk-app session is in
+  // progress, the the device immediately reboots.
+  SetUptimeLimit(base::TimeDelta::FromHours(6), !is_user_logged_in_ ||
+                                                is_logged_in_as_kiosk_app_);
+
+  // Verify that if a non-kiosk-app session is in progress, the device does not
+  // reboot eventually.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is running. The current uptime is 12 hours.
@@ -984,7 +1239,7 @@ TEST_P(AutomaticRebootManagerTest, UpdateNoPolicy) {
   // Verify that no grace period has started.
   VerifyNoGracePeriod();
 
-  // Verify that the device does not eventually reboot.
+  // Verify that the device does not reboot eventually.
   FastForwardUntilNoTasksRemain(false);
 }
 
@@ -1016,8 +1271,10 @@ TEST_P(AutomaticRebootManagerTest, Update) {
   // Verify that a grace period has started.
   VerifyGracePeriod(update_reboot_needed_uptime_ + uptime_processing_delay_);
 
-  // Verify that the device reboots eventually.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is running. The current uptime is 12 hours.
@@ -1062,8 +1319,10 @@ TEST_P(AutomaticRebootManagerTest, UpdateAfterUpdate) {
       &new_update_reboot_needed_uptime));
   EXPECT_EQ(update_reboot_needed_uptime_, new_update_reboot_needed_uptime);
 
-  // Verify that the device reboots eventually.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is running. The current uptime is 10 minutes.
@@ -1095,8 +1354,10 @@ TEST_P(AutomaticRebootManagerTest, UpdateBeforeMinimumUptime) {
   // Verify that a grace period has been scheduled to begin in the future.
   VerifyGracePeriod(base::TimeDelta::FromHours(1));
 
-  // Verify that the device reboots eventually.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is running. An update was applied and a reboot became necessary to
@@ -1129,16 +1390,18 @@ TEST_P(AutomaticRebootManagerTest, PolicyAfterUpdateInGracePeriod) {
   // Verify that a grace period has started.
   VerifyGracePeriod(base::TimeDelta::FromHours(6) + uptime_processing_delay_);
 
-  // Verify that the device reboots eventually.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is running. An update was applied and a reboot became necessary to
 // complete the update process after 6 hours of uptime. The current uptime is
 // 10 days.
 // Verifies that when the policy to automatically reboot after an update is
-// enabled, the device reboots immediately because the grace period ended after
-// 6 + 24 hours of uptime.
+// enabled, the device reboots immediately if no non-kiosk-app session is in
+// progress because the grace period ended after 6 + 24 hours of uptime.
 TEST_P(AutomaticRebootManagerTest, PolicyAfterUpdateAfterGracePeriod) {
   task_runner_->SetUptime(base::TimeDelta::FromHours(6));
 
@@ -1158,8 +1421,14 @@ TEST_P(AutomaticRebootManagerTest, PolicyAfterUpdateAfterGracePeriod) {
   automatic_reboot_manager_->OnUserActivity();
 
   // Enable automatic rebooting after an update has been applied. Verify that
-  // the device reboots immediately.
-  SetRebootAfterUpdate(true, true);
+  // unless a non-kiosk-app session is in progress, the the device immediately
+  // reboots.
+  SetRebootAfterUpdate(true, !is_user_logged_in_ || is_logged_in_as_kiosk_app_);
+
+  // Verify that if a non-kiosk-app session is in progress, the device does not
+  // reboot eventually.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is running. An update was applied and a reboot became necessary to
@@ -1193,7 +1462,7 @@ TEST_P(AutomaticRebootManagerTest, PolicyOffAfterUpdate) {
   // Verify that the grace period has been removed.
   VerifyNoGracePeriod();
 
-  // Verify that the device does not eventually reboot.
+  // Verify that the device does not reboot eventually.
   FastForwardUntilNoTasksRemain(false);
 }
 
@@ -1231,7 +1500,7 @@ TEST_P(AutomaticRebootManagerTest, NoUptime) {
   // Verify that no grace period has started.
   VerifyNoGracePeriod();
 
-  // Verify that the device does not eventually reboot.
+  // Verify that the device does not reboot eventually.
   FastForwardUntilNoTasksRemain(false);
 }
 
@@ -1271,8 +1540,10 @@ TEST_P(AutomaticRebootManagerTest, UptimeLimitBeforeUpdate) {
   // Verify that the grace period has not been rescheduled.
   VerifyGracePeriod(uptime_limit_);
 
-  // Verify that the device eventually reboots.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is running. The policy to automatically reboot after an update is
@@ -1312,8 +1583,10 @@ TEST_P(AutomaticRebootManagerTest, UpdateBeforeUptimeLimit) {
   // the update became available.
   VerifyGracePeriod(update_reboot_needed_uptime_ + uptime_processing_delay_);
 
-  // Verify that the device eventually reboots.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is running. The uptime limit is set to 24 hours. An update was applied
@@ -1368,7 +1641,7 @@ TEST_P(AutomaticRebootManagerTest, PolicyOffThenUptimeLimitOff) {
   // Verify that the grace period has been removed.
   VerifyNoGracePeriod();
 
-  // Verify that the device does not eventually reboot.
+  // Verify that the device does not reboot eventually.
   FastForwardUntilNoTasksRemain(false);
 }
 
@@ -1426,14 +1699,14 @@ TEST_P(AutomaticRebootManagerTest, UptimeLimitOffThenPolicyOff) {
   // Verify that the grace period has been removed.
   VerifyNoGracePeriod();
 
-  // Verify that the device does not eventually reboot.
+  // Verify that the device does not reboot eventually.
   FastForwardUntilNoTasksRemain(false);
 }
 
 // Chrome is running. The uptime limit is 6 hours. The current uptime is
 // 29 hours 59 minutes 59 seconds.
-// Verifies that the device reboots immediately when the grace period ends after
-// 6 + 24 hours of uptime.
+// Verifies that if no non-kiosk-app session is in progress, the device reboots
+// immediately when the grace period ends after 6 + 24 hours of uptime.
 TEST_P(AutomaticRebootManagerTest, GracePeriodEnd) {
   task_runner_->SetUptime(base::TimeDelta::FromHours(29) +
                           base::TimeDelta::FromMinutes(59) +
@@ -1448,9 +1721,15 @@ TEST_P(AutomaticRebootManagerTest, GracePeriodEnd) {
   // Verify that a grace period has started.
   VerifyGracePeriod(uptime_limit_);
 
-  // Fast forward the uptime by 1 second. Verify that the device reboots
-  // immediately.
-  FastForwardBy(base::TimeDelta::FromSeconds(1), true);
+  // Fast forward the uptime by 1 second. Verify that unless a non-kiosk-app
+  // session is in progress, the the device immediately reboots.
+  FastForwardBy(base::TimeDelta::FromSeconds(1), !is_user_logged_in_ ||
+                                                 is_logged_in_as_kiosk_app_);
+
+  // Verify that if a non-kiosk-app session is in progress, the device does not
+  // reboot eventually.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is starting. The current uptime is 10 days.
@@ -1465,7 +1744,7 @@ TEST_P(AutomaticRebootManagerTest, StartNoPolicy) {
   // Verify that no grace period has started.
   VerifyNoGracePeriod();
 
-  // Verify that the device does not eventually reboot.
+  // Verify that the device does not reboot eventually.
   FastForwardUntilNoTasksRemain(false);
 }
 
@@ -1483,20 +1762,29 @@ TEST_P(AutomaticRebootManagerTest, StartBeforeUptimeLimitGracePeriod) {
   // Verify that a grace period has been scheduled to start in the future.
   VerifyGracePeriod(uptime_limit_);
 
-  // Verify that the device reboots eventually.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is starting. The uptime limit is set to 6 hours. The current uptime is
 // 10 days.
-// Verifies that the device reboots immediately because the grace period ended
-// after 6 + 24 hours of uptime.
+// Verifies that if no non-kiosk-app session is in progress, the device reboots
+// immediately because the grace period ended after 6 + 24 hours of uptime.
 TEST_P(AutomaticRebootManagerTest, StartAfterUptimeLimitGracePeriod) {
   SetUptimeLimit(base::TimeDelta::FromHours(6), false);
   task_runner_->SetUptime(base::TimeDelta::FromDays(10));
 
-  // Verify that the device reboots immediately.
-  CreateAutomaticRebootManager(true);
+  // Verify that unless a non-kiosk-app session is in progress, the the device
+  // immediately reboots.
+  CreateAutomaticRebootManager(!is_user_logged_in_ ||
+                               is_logged_in_as_kiosk_app_);
+
+  // Verify that if a non-kiosk-app session is in progress, the device does not
+  // reboot eventually.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is starting. The uptime limit is set to 6 hours. The current uptime is
@@ -1513,25 +1801,33 @@ TEST_P(AutomaticRebootManagerTest, StartInUptimeLimitGracePeriod) {
   // Verify that a grace period has started.
   VerifyGracePeriod(uptime_limit_);
 
-  // Verify that the device reboots eventually.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is starting. An update was applied and a reboot became necessary to
 // complete the update process after 6 hours of uptime. The current uptime is
 // 10 days.
 // Verifies that when the policy to automatically reboot after an update is
-// enabled, the device reboots immediately because the grace period ended after
-// 6 + 24 hours of uptime.
+// enabled, the device reboots immediately if no non-kiosk-app session is in
+// progress because the grace period ended after 6 + 24 hours of uptime.
 TEST_P(AutomaticRebootManagerTest, StartAfterUpdateGracePeriod) {
-  update_engine_client_status_.status =
-      UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT;
+  SetUpdateStatusNeedReboot();
   SetUpdateRebootNeededUptime(base::TimeDelta::FromHours(6));
   task_runner_->SetUptime(base::TimeDelta::FromDays(10));
   SetRebootAfterUpdate(true, false);
 
-  // Verify that the device reboots immediately.
-  CreateAutomaticRebootManager(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // reboots immediately.
+  CreateAutomaticRebootManager(!is_user_logged_in_ ||
+                               is_logged_in_as_kiosk_app_);
+
+  // Verify that if a non-kiosk-app session is in progress, the device does not
+  // reboot eventually.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is starting. An update was applied and a reboot became necessary to
@@ -1541,8 +1837,7 @@ TEST_P(AutomaticRebootManagerTest, StartAfterUpdateGracePeriod) {
 // enabled, a reboot is requested and a grace period is started that will end
 // after 6 + 24 hours of uptime.
 TEST_P(AutomaticRebootManagerTest, StartInUpdateGracePeriod) {
-  update_engine_client_status_.status =
-      UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT;
+  SetUpdateStatusNeedReboot();
   SetUpdateRebootNeededUptime(base::TimeDelta::FromHours(6));
   task_runner_->SetUptime(base::TimeDelta::FromHours(12));
   SetRebootAfterUpdate(true, false);
@@ -1553,8 +1848,10 @@ TEST_P(AutomaticRebootManagerTest, StartInUpdateGracePeriod) {
   // Verify that a grace period has started.
   VerifyGracePeriod(update_reboot_needed_uptime_);
 
-  // Verify that the device reboots eventually.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is starting. An update was applied and a reboot became necessary to
@@ -1564,8 +1861,7 @@ TEST_P(AutomaticRebootManagerTest, StartInUpdateGracePeriod) {
 // enabled, no reboot occurs and a grace period is scheduled to begin after the
 // minimum of 1 hour of uptime.
 TEST_P(AutomaticRebootManagerTest, StartBeforeUpdateGracePeriod) {
-  update_engine_client_status_.status =
-      UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT;
+  SetUpdateStatusNeedReboot();
   SetUpdateRebootNeededUptime(base::TimeDelta::FromMinutes(10));
   task_runner_->SetUptime(base::TimeDelta::FromMinutes(20));
   SetRebootAfterUpdate(true, false);
@@ -1576,8 +1872,10 @@ TEST_P(AutomaticRebootManagerTest, StartBeforeUpdateGracePeriod) {
   // Verify that a grace period has been scheduled to start in the future.
   VerifyGracePeriod(base::TimeDelta::FromHours(1));
 
-  // Verify that the device reboots eventually.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is starting. An update was applied and a reboot became necessary to
@@ -1586,8 +1884,7 @@ TEST_P(AutomaticRebootManagerTest, StartBeforeUpdateGracePeriod) {
 // Verifies that when the policy to automatically reboot after an update is not
 // enabled, no reboot occurs and no grace period is scheduled.
 TEST_P(AutomaticRebootManagerTest, StartUpdateNoPolicy) {
-  update_engine_client_status_.status =
-      UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT;
+  SetUpdateStatusNeedReboot();
   SetUpdateRebootNeededUptime(base::TimeDelta::FromHours(6));
   task_runner_->SetUptime(base::TimeDelta::FromDays(10));
 
@@ -1597,7 +1894,7 @@ TEST_P(AutomaticRebootManagerTest, StartUpdateNoPolicy) {
   // Verify that no grace period has started.
   VerifyNoGracePeriod();
 
-  // Verify that the device does not eventually reboot.
+  // Verify that the device does not reboot eventually.
   FastForwardUntilNoTasksRemain(false);
 }
 
@@ -1609,8 +1906,7 @@ TEST_P(AutomaticRebootManagerTest, StartUpdateNoPolicy) {
 // reboot after an update is enabled, a reboot is requested and a grace period
 // is started that will end 24 hours from now.
 TEST_P(AutomaticRebootManagerTest, StartUpdateTimeLost) {
-  update_engine_client_status_.status =
-      UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT;
+  SetUpdateStatusNeedReboot();
   task_runner_->SetUptime(base::TimeDelta::FromDays(10));
   SetRebootAfterUpdate(true, false);
 
@@ -1626,8 +1922,10 @@ TEST_P(AutomaticRebootManagerTest, StartUpdateTimeLost) {
   // Verify that a grace period has started.
   VerifyGracePeriod(update_reboot_needed_uptime_ + uptime_processing_delay_);
 
-  // Verify that the device reboots eventually.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is starting. An update was applied and a reboot became necessary to
@@ -1638,8 +1936,7 @@ TEST_P(AutomaticRebootManagerTest, StartUpdateTimeLost) {
 // reboot after an update is not enabled, no reboot occurs and no grace period
 // is scheduled.
 TEST_P(AutomaticRebootManagerTest, StartUpdateNoPolicyTimeLost) {
-  update_engine_client_status_.status =
-      UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT;
+  SetUpdateStatusNeedReboot();
   task_runner_->SetUptime(base::TimeDelta::FromDays(10));
 
   // Verify that the device does not reboot immediately.
@@ -1654,7 +1951,7 @@ TEST_P(AutomaticRebootManagerTest, StartUpdateNoPolicyTimeLost) {
   // Verify that no grace period has started.
   VerifyNoGracePeriod();
 
-  // Verify that the device does not eventually reboot.
+  // Verify that the device does not reboot eventually.
   FastForwardUntilNoTasksRemain(false);
 }
 
@@ -1678,7 +1975,7 @@ TEST_P(AutomaticRebootManagerTest, StartNoUpdate) {
   // Verify that no grace period has started.
   VerifyNoGracePeriod();
 
-  // Verify that the device does not eventually reboot.
+  // Verify that the device does not reboot eventually.
   FastForwardUntilNoTasksRemain(false);
 }
 
@@ -1690,8 +1987,7 @@ TEST_P(AutomaticRebootManagerTest, StartNoUpdate) {
 // after 6 + 24 hours of uptime.
 TEST_P(AutomaticRebootManagerTest, StartUptimeLimitBeforeUpdate) {
   SetUptimeLimit(base::TimeDelta::FromHours(6), false);
-  update_engine_client_status_.status =
-      UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT;
+  SetUpdateStatusNeedReboot();
   SetUpdateRebootNeededUptime(base::TimeDelta::FromHours(8));
   task_runner_->SetUptime(base::TimeDelta::FromHours(12));
   SetRebootAfterUpdate(true, false);
@@ -1702,8 +1998,10 @@ TEST_P(AutomaticRebootManagerTest, StartUptimeLimitBeforeUpdate) {
   // Verify that a grace period has started.
   VerifyGracePeriod(uptime_limit_);
 
-  // Verify that the device reboots eventually.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is starting. The uptime limit is set to 8 hours. Also, an update was
@@ -1714,8 +2012,7 @@ TEST_P(AutomaticRebootManagerTest, StartUptimeLimitBeforeUpdate) {
 // after 6 + 24 hours of uptime.
 TEST_P(AutomaticRebootManagerTest, StartUpdateBeforeUptimeLimit) {
   SetUptimeLimit(base::TimeDelta::FromHours(8), false);
-  update_engine_client_status_.status =
-      UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT;
+  SetUpdateStatusNeedReboot();
   SetUpdateRebootNeededUptime(base::TimeDelta::FromHours(6));
   task_runner_->SetUptime(base::TimeDelta::FromHours(12));
   SetRebootAfterUpdate(true, false);
@@ -1726,8 +2023,10 @@ TEST_P(AutomaticRebootManagerTest, StartUpdateBeforeUptimeLimit) {
   // Verify that a grace period has started.
   VerifyGracePeriod(update_reboot_needed_uptime_);
 
-  // Verify that the device reboots eventually.
-  FastForwardUntilNoTasksRemain(true);
+  // Verify that unless a non-kiosk-app session is in progress, the device
+  // eventually reboots.
+  FastForwardUntilNoTasksRemain(!is_user_logged_in_ ||
+                                is_logged_in_as_kiosk_app_);
 }
 
 // Chrome is starting. The uptime limit is set to 6 hours. Also, an update was
@@ -1737,8 +2036,7 @@ TEST_P(AutomaticRebootManagerTest, StartUpdateBeforeUptimeLimit) {
 // enabled, no reboot occurs and no grace period is scheduled.
 TEST_P(AutomaticRebootManagerTest, StartNoUptime) {
   SetUptimeLimit(base::TimeDelta::FromHours(6), false);
-  update_engine_client_status_.status =
-      UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT;
+  SetUpdateStatusNeedReboot();
   SetUpdateRebootNeededUptime(base::TimeDelta::FromHours(6));
   SetRebootAfterUpdate(true, false);
 
@@ -1748,13 +2046,17 @@ TEST_P(AutomaticRebootManagerTest, StartNoUptime) {
   // Verify that no grace period has started.
   VerifyNoGracePeriod();
 
-  // Verify that the device does not eventually reboot.
+  // Verify that the device does not reboot eventually.
   FastForwardUntilNoTasksRemain(false);
 }
 
-INSTANTIATE_TEST_CASE_P(AutomaticRebootManagerTestInstance,
-                        AutomaticRebootManagerTest,
-                        ::testing::Bool());
+INSTANTIATE_TEST_CASE_P(
+    AutomaticRebootManagerTestInstance,
+    AutomaticRebootManagerTest,
+    ::testing::Values(
+        AUTOMATIC_REBOOT_MANAGER_TEST_SCENARIO_LOGIN_SCREEN,
+        AUTOMATIC_REBOOT_MANAGER_TEST_SCENARIO_KIOSK_APP_SESSION,
+        AUTOMATIC_REBOOT_MANAGER_TEST_SCENARIO_NON_KIOSK_APP_SESSION));
 
 }  // namespace system
 }  // namespace chromeos

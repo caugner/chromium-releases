@@ -5,13 +5,15 @@
 #include "chrome/browser/ui/gtk/extensions/media_galleries_dialog_gtk.h"
 
 #include "base/auto_reset.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/media_galleries/media_galleries_preferences.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "grit/generated_resources.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using web_modal::WebContentsModalDialogManager;
 
 namespace chrome {
 
@@ -62,8 +64,8 @@ void MediaGalleriesDialogGtk::InitWidgets() {
   checkbox_map_.clear();
   confirm_ = NULL;
 
-  GtkWidget* header =
-      gtk_util::CreateBoldLabel(UTF16ToUTF8(controller_->GetHeader()));
+  GtkWidget* header = gtk_util::LeftAlignMisc(gtk_label_new(
+      UTF16ToUTF8(controller_->GetHeader()).c_str()));
   gtk_box_pack_start(GTK_BOX(contents_.get()), header, FALSE, FALSE, 0);
 
   GtkWidget* subtext =
@@ -178,8 +180,7 @@ void MediaGalleriesDialogGtk::UpdateGalleryInContainer(
   g_signal_connect(widget, "toggled", G_CALLBACK(OnToggledThunk), this);
   gtk_box_pack_start(GTK_BOX(checkbox_container), hbox, FALSE, FALSE, 0);
   gtk_box_pack_start(GTK_BOX(hbox), widget, FALSE, FALSE, 0);
-  std::string details = UTF16ToUTF8(
-      MediaGalleriesDialogController::GetGalleryAdditionalDetails(gallery));
+  std::string details = UTF16ToUTF8(gallery.GetGalleryAdditionalDetails());
   GtkWidget* details_label = gtk_label_new(details.c_str());
   gtk_label_set_line_wrap(GTK_LABEL(details_label), FALSE);
   gtk_util::SetLabelColor(details_label, &kDeemphasizedTextColor);
@@ -188,14 +189,11 @@ void MediaGalleriesDialogGtk::UpdateGalleryInContainer(
   gtk_widget_show(hbox);
   checkbox_map_[gallery.pref_id] = widget;
 
-  std::string tooltip_text = UTF16ToUTF8(
-      MediaGalleriesDialogController::GetGalleryTooltip(gallery));
+  std::string tooltip_text = UTF16ToUTF8(gallery.GetGalleryTooltip());
   gtk_widget_set_tooltip_text(widget, tooltip_text.c_str());
 
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(widget), permitted);
-  std::string label = UTF16ToUTF8(
-      MediaGalleriesDialogController::GetGalleryDisplayNameNoAttachment(
-          gallery));
+  std::string label = UTF16ToUTF8(gallery.GetGalleryDisplayName());
   gtk_button_set_label(GTK_BUTTON(widget), label.c_str());
 }
 

@@ -7,9 +7,9 @@
 #include <cmath>
 
 #include "base/bind.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -101,22 +101,96 @@ bool ParseCookieLifetime(net::ParsedCookie* cookie,
   return false;
 }
 
+bool NullableEquals(const int* a, const int* b) {
+  if ((a && !b) || (!a && b))
+    return false;
+  return (!a) || (*a == *b);
+}
+
+bool NullableEquals(const bool* a, const bool* b) {
+  if ((a && !b) || (!a && b))
+    return false;
+  return (!a) || (*a == *b);
+}
+
+bool NullableEquals(const std::string* a, const std::string* b) {
+  if ((a && !b) || (!a && b))
+    return false;
+  return (!a) || (*a == *b);
+}
+
 }  // namespace
 
 RequestCookie::RequestCookie() {}
 RequestCookie::~RequestCookie() {}
 
+bool NullableEquals(const RequestCookie* a, const RequestCookie* b) {
+  if ((a && !b) || (!a && b))
+    return false;
+  if (!a)
+    return true;
+  return NullableEquals(a->name.get(), b->name.get()) &&
+         NullableEquals(a->value.get(), b->value.get());
+}
+
 ResponseCookie::ResponseCookie() {}
 ResponseCookie::~ResponseCookie() {}
+
+bool NullableEquals(const ResponseCookie* a, const ResponseCookie* b) {
+  if ((a && !b) || (!a && b))
+    return false;
+  if (!a)
+    return true;
+  return NullableEquals(a->name.get(), b->name.get()) &&
+         NullableEquals(a->value.get(), b->value.get()) &&
+         NullableEquals(a->expires.get(), b->expires.get()) &&
+         NullableEquals(a->max_age.get(), b->max_age.get()) &&
+         NullableEquals(a->domain.get(), b->domain.get()) &&
+         NullableEquals(a->path.get(), b->path.get()) &&
+         NullableEquals(a->secure.get(), b->secure.get()) &&
+         NullableEquals(a->http_only.get(), b->http_only.get());
+}
 
 FilterResponseCookie::FilterResponseCookie() {}
 FilterResponseCookie::~FilterResponseCookie() {}
 
+bool NullableEquals(const FilterResponseCookie* a,
+                    const FilterResponseCookie* b) {
+  if ((a && !b) || (!a && b))
+    return false;
+  if (!a)
+    return true;
+  return NullableEquals(a->age_lower_bound.get(), b->age_lower_bound.get()) &&
+         NullableEquals(a->age_upper_bound.get(), b->age_upper_bound.get()) &&
+         NullableEquals(a->session_cookie.get(), b->session_cookie.get());
+}
+
 RequestCookieModification::RequestCookieModification() {}
 RequestCookieModification::~RequestCookieModification() {}
 
+bool NullableEquals(const RequestCookieModification* a,
+                    const RequestCookieModification* b) {
+  if ((a && !b) || (!a && b))
+    return false;
+  if (!a)
+    return true;
+  return NullableEquals(a->filter.get(), b->filter.get()) &&
+         NullableEquals(a->modification.get(), b->modification.get());
+}
+
 ResponseCookieModification::ResponseCookieModification() : type(ADD) {}
 ResponseCookieModification::~ResponseCookieModification() {}
+
+bool NullableEquals(const ResponseCookieModification* a,
+                    const ResponseCookieModification* b) {
+  if ((a && !b) || (!a && b))
+    return false;
+  if (!a)
+    return true;
+  return a->type == b->type &&
+         NullableEquals(a->filter.get(), b->filter.get()) &&
+         NullableEquals(a->modification.get(), b->modification.get());
+}
 
 EventResponseDelta::EventResponseDelta(
     const std::string& extension_id, const base::Time& extension_install_time)
@@ -142,10 +216,10 @@ net::NetLog::ParametersCallback CreateNetLogExtensionIdCallback(
 Value* NetLogModificationCallback(
     const EventResponseDelta* delta,
     net::NetLog::LogLevel log_level) {
-  DictionaryValue* dict = new DictionaryValue();
+  base::DictionaryValue* dict = new base::DictionaryValue();
   dict->SetString("extension_id", delta->extension_id);
 
-  ListValue* modified_headers = new ListValue();
+  base::ListValue* modified_headers = new base::ListValue();
   net::HttpRequestHeaders::Iterator modification(
       delta->modified_request_headers);
   while (modification.GetNext()) {
@@ -154,7 +228,7 @@ Value* NetLogModificationCallback(
   }
   dict->Set("modified_headers", modified_headers);
 
-  ListValue* deleted_headers = new ListValue();
+  base::ListValue* deleted_headers = new base::ListValue();
   for (std::vector<std::string>::const_iterator key =
            delta->deleted_request_headers.begin();
        key != delta->deleted_request_headers.end();
@@ -171,8 +245,8 @@ bool InDecreasingExtensionInstallationTimeOrder(
   return a->extension_install_time > b->extension_install_time;
 }
 
-ListValue* StringToCharList(const std::string& s) {
-  ListValue* result = new ListValue;
+base::ListValue* StringToCharList(const std::string& s) {
+  base::ListValue* result = new base::ListValue;
   for (size_t i = 0, n = s.size(); i < n; ++i) {
     result->Append(
         Value::CreateIntegerValue(
@@ -181,7 +255,7 @@ ListValue* StringToCharList(const std::string& s) {
   return result;
 }
 
-bool CharListToString(const ListValue* list, std::string* out) {
+bool CharListToString(const base::ListValue* list, std::string* out) {
   if (!list)
     return false;
   const size_t list_length = list->GetSize();
@@ -1189,9 +1263,9 @@ void NotifyWebRequestAPIUsed(
   if (!g_browser_process->profile_manager()->IsValidProfile(profile))
     return;
 
-  if (profile->GetExtensionService()->HasUsedWebRequest(extension))
+  if (profile->GetExtensionService()->HasUsedWebRequest(extension.get()))
     return;
-  profile->GetExtensionService()->SetHasUsedWebRequest(extension, true);
+  profile->GetExtensionService()->SetHasUsedWebRequest(extension.get(), true);
 
   content::BrowserContext* browser_context = profile;
   for (content::RenderProcessHost::iterator it =

@@ -5,8 +5,8 @@
 #include "chrome/browser/extensions/api/commands/command_service.h"
 
 #include "base/lazy_instance.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/commands/commands.h"
 #include "chrome/browser/extensions/extension_function_registry.h"
 #include "chrome/browser/extensions/extension_keybinding_registry.h"
@@ -23,16 +23,38 @@
 #include "content/public/browser/notification_service.h"
 
 using extensions::Extension;
+using extensions::ExtensionPrefs;
 
 namespace {
 
 const char kExtension[] = "extension";
 const char kCommandName[] = "command_name";
 
+// A preference that indicates that the initial keybindings for the given
+// extension have been set.
+const char kInitialBindingsHaveBeenAssigned[] = "initial_keybindings_set";
+
 std::string GetPlatformKeybindingKeyForAccelerator(
     const ui::Accelerator& accelerator) {
   return extensions::Command::CommandPlatform() + ":" +
-         UTF16ToUTF8(accelerator.GetShortcutText());
+         extensions::Command::AcceleratorToString(accelerator);
+}
+
+void SetInitialBindingsHaveBeenAssigned(
+    ExtensionPrefs* prefs, const std::string& extension_id) {
+  prefs->UpdateExtensionPref(extension_id, kInitialBindingsHaveBeenAssigned,
+                             base::Value::CreateBooleanValue(true));
+}
+
+bool InitialBindingsHaveBeenAssigned(
+    const ExtensionPrefs* prefs, const std::string& extension_id) {
+  bool assigned = false;
+  if (!prefs || !prefs->ReadPrefAsBoolean(extension_id,
+                                          kInitialBindingsHaveBeenAssigned,
+                                          &assigned))
+    return false;
+
+  return assigned;
 }
 
 }  // namespace
@@ -143,14 +165,14 @@ bool CommandService::AddKeybindingPref(
 
   DictionaryPrefUpdate updater(profile_->GetPrefs(),
                                prefs::kExtensionCommands);
-  DictionaryValue* bindings = updater.Get();
+  base::DictionaryValue* bindings = updater.Get();
 
   std::string key = GetPlatformKeybindingKeyForAccelerator(accelerator);
 
   if (!allow_overrides && bindings->HasKey(key))
     return false;  // Already taken.
 
-  DictionaryValue* keybinding = new DictionaryValue();
+  base::DictionaryValue* keybinding = new base::DictionaryValue();
   keybinding->SetString(kExtension, extension_id);
   keybinding->SetString(kCommandName, command_name);
 
@@ -200,10 +222,11 @@ void CommandService::UpdateKeybindingPrefs(const std::string& extension_id,
 
 ui::Accelerator CommandService::FindShortcutForCommand(
     const std::string& extension_id, const std::string& command) {
-  const DictionaryValue* bindings =
+  const base::DictionaryValue* bindings =
       profile_->GetPrefs()->GetDictionary(prefs::kExtensionCommands);
-  for (DictionaryValue::Iterator it(*bindings); !it.IsAtEnd(); it.Advance()) {
-    const DictionaryValue* item = NULL;
+  for (base::DictionaryValue::Iterator it(*bindings); !it.IsAtEnd();
+       it.Advance()) {
+    const base::DictionaryValue* item = NULL;
     it.value().GetAsDictionary(&item);
 
     std::string extension;
@@ -230,6 +253,13 @@ void CommandService::AssignInitialKeybindings(const Extension* extension) {
       CommandsInfo::GetNamedCommands(extension);
   if (!commands)
     return;
+
+  ExtensionService* extension_service =
+      ExtensionSystem::Get(profile_)->extension_service();
+  ExtensionPrefs* extension_prefs = extension_service->extension_prefs();
+  if (InitialBindingsHaveBeenAssigned(extension_prefs, extension->id()))
+    return;
+  SetInitialBindingsHaveBeenAssigned(extension_prefs, extension->id());
 
   extensions::CommandMap::const_iterator iter = commands->begin();
   for (; iter != commands->end(); ++iter) {
@@ -283,12 +313,13 @@ void CommandService::RemoveKeybindingPrefs(const std::string& extension_id,
                                            const std::string& command_name) {
   DictionaryPrefUpdate updater(profile_->GetPrefs(),
                                prefs::kExtensionCommands);
-  DictionaryValue* bindings = updater.Get();
+  base::DictionaryValue* bindings = updater.Get();
 
   typedef std::vector<std::string> KeysToRemove;
   KeysToRemove keys_to_remove;
-  for (DictionaryValue::Iterator it(*bindings); !it.IsAtEnd(); it.Advance()) {
-    const DictionaryValue* item = NULL;
+  for (base::DictionaryValue::Iterator it(*bindings); !it.IsAtEnd();
+       it.Advance()) {
+    const base::DictionaryValue* item = NULL;
     it.value().GetAsDictionary(&item);
 
     std::string extension;

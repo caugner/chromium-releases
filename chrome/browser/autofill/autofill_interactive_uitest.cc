@@ -6,18 +6,20 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/autofill/browser/autofill_common_test.h"
-#include "components/autofill/browser/autofill_external_delegate.h"
-#include "components/autofill/browser/autofill_manager.h"
-#include "components/autofill/browser/autofill_manager_test_delegate.h"
-#include "components/autofill/browser/autofill_profile.h"
-#include "components/autofill/browser/personal_data_manager.h"
-#include "components/autofill/browser/personal_data_manager_observer.h"
+#include "components/autofill/content/browser/autofill_driver_impl.h"
+#include "components/autofill/core/browser/autofill_common_test.h"
+#include "components/autofill/core/browser/autofill_external_delegate.h"
+#include "components/autofill/core/browser/autofill_manager.h"
+#include "components/autofill/core/browser/autofill_manager_test_delegate.h"
+#include "components/autofill/core/browser/autofill_profile.h"
+#include "components/autofill/core/browser/personal_data_manager.h"
+#include "components/autofill/core/browser/personal_data_manager_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
@@ -130,7 +132,7 @@ class WindowedPersonalDataManagerObserver
   // PersonalDataManagerObserver:
   virtual void OnPersonalDataChanged() OVERRIDE {
     if (has_run_message_loop_) {
-      MessageLoopForUI::current()->Quit();
+      base::MessageLoopForUI::current()->Quit();
       has_run_message_loop_ = false;
     }
     alerted_ = true;
@@ -205,12 +207,13 @@ class AutofillInteractiveTest : public InProcessBrowserTest {
     // allows us to forward keyboard events to the popup directly.
     content::WebContents* web_contents =
         browser()->tab_strip_model()->GetActiveWebContents();
-    AutofillManager* autofill_manager =
-        AutofillManager::FromWebContents(web_contents);
+    AutofillDriverImpl* autofill_driver =
+        AutofillDriverImpl::FromWebContents(web_contents);
+    AutofillManager* autofill_manager = autofill_driver->autofill_manager();
     if (autofill_manager->IsNativeUiEnabled()) {
-      external_delegate_.reset(
+      scoped_ptr<AutofillExternalDelegate> external_delegate(
           new TestAutofillExternalDelegate(web_contents, autofill_manager));
-      autofill_manager->SetExternalDelegate(external_delegate_.get());
+      autofill_driver->SetAutofillExternalDelegate(external_delegate.Pass());
     }
     autofill_manager->SetTestDelegate(&test_delegate_);
   }
@@ -220,7 +223,7 @@ class AutofillInteractiveTest : public InProcessBrowserTest {
     content::WebContents* web_contents =
         browser()->tab_strip_model()->GetActiveWebContents();
     AutofillManager* autofill_manager =
-        AutofillManager::FromWebContents(web_contents);
+        AutofillDriverImpl::FromWebContents(web_contents)->autofill_manager();
     autofill_manager->delegate()->HideAutofillPopup();
   }
 
@@ -301,7 +304,7 @@ class AutofillInteractiveTest : public InProcessBrowserTest {
   void SendKeyToPopupAndWait(ui::KeyboardCode key) {
     // TODO(isherman): Remove this condition once the WebKit popup UI code is
     // removed.
-    if (!external_delegate_) {
+    if (!external_delegate()) {
       // When testing the WebKit-based UI, route all keys to the page.
       SendKeyToPageAndWait(key);
       return;
@@ -312,18 +315,20 @@ class AutofillInteractiveTest : public InProcessBrowserTest {
     content::NativeWebKeyboardEvent event;
     event.windowsKeyCode = key;
     test_delegate_.Reset();
-    external_delegate_->keyboard_listener()->HandleKeyPressEvent(event);
+    external_delegate()->keyboard_listener()->HandleKeyPressEvent(event);
     test_delegate_.Wait();
   }
 
   TestAutofillExternalDelegate* external_delegate() {
-    return external_delegate_.get();
+    content::WebContents* web_contents =
+        browser()->tab_strip_model()->GetActiveWebContents();
+    AutofillDriverImpl* autofill_driver =
+        AutofillDriverImpl::FromWebContents(web_contents);
+    return static_cast<TestAutofillExternalDelegate*>(
+        autofill_driver->autofill_external_delegate());
   }
 
   AutofillManagerTestDelegateImpl test_delegate_;
-
- private:
-  scoped_ptr<TestAutofillExternalDelegate> external_delegate_;
 };
 
 IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, DISABLED_AutofillSelectViaTab) {

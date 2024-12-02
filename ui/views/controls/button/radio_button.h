@@ -5,7 +5,7 @@
 #ifndef UI_VIEWS_CONTROLS_BUTTON_RADIO_BUTTON_H_
 #define UI_VIEWS_CONTROLS_BUTTON_RADIO_BUTTON_H_
 
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "ui/views/controls/button/checkbox.h"
 
 namespace views {
@@ -21,7 +21,7 @@ class VIEWS_EXPORT RadioButton : public Checkbox {
   virtual ~RadioButton();
 
   // Overridden from View:
-  virtual std::string GetClassName() const OVERRIDE;
+  virtual const char* GetClassName() const OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual View* GetSelectedViewForGroup(int group) OVERRIDE;
   virtual bool IsGroupFocusTraversable() const OVERRIDE;

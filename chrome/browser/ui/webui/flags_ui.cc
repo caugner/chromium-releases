@@ -11,12 +11,14 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/pref_service_flags_storage.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
@@ -53,12 +55,20 @@ content::WebUIDataSource* CreateFlagsUIHTMLSource() {
                              IDS_FLAGS_NO_EXPERIMENTS_AVAILABLE);
   source->AddLocalizedString("flagsWarningHeader", IDS_FLAGS_WARNING_HEADER);
   source->AddLocalizedString("flagsBlurb", IDS_FLAGS_WARNING_TEXT);
+  source->AddLocalizedString("channelPromoBeta",
+                             IDS_FLAGS_PROMOTE_BETA_CHANNEL);
+  source->AddLocalizedString("channelPromoDev", IDS_FLAGS_PROMOTE_DEV_CHANNEL);
+  source->AddLocalizedString("flagsUnsupportedTableTitle",
+                             IDS_FLAGS_UNSUPPORTED_TABLE_TITLE);
+  source->AddLocalizedString("flagsNoUnsupportedExperiments",
+                             IDS_FLAGS_NO_UNSUPPORTED_EXPERIMENTS);
   source->AddLocalizedString("flagsNotSupported", IDS_FLAGS_NOT_AVAILABLE);
   source->AddLocalizedString("flagsRestartNotice", IDS_FLAGS_RELAUNCH_NOTICE);
   source->AddLocalizedString("flagsRestartButton", IDS_FLAGS_RELAUNCH_BUTTON);
   source->AddLocalizedString("resetAllButton", IDS_FLAGS_RESET_ALL_BUTTON);
   source->AddLocalizedString("disable", IDS_FLAGS_DISABLE);
   source->AddLocalizedString("enable", IDS_FLAGS_ENABLE);
+
 #if defined(OS_CHROMEOS)
   if (!chromeos::UserManager::Get()->IsCurrentUserOwner() &&
       base::chromeos::IsRunningOnChromeOS()) {
@@ -89,7 +99,7 @@ content::WebUIDataSource* CreateFlagsUIHTMLSource() {
 class FlagsDOMHandler : public WebUIMessageHandler {
  public:
   explicit FlagsDOMHandler(PrefService* prefs, about_flags::FlagAccess access)
-      : prefs_(prefs), access_(access) {}
+      : flags_storage_(prefs), access_(access) {}
   virtual ~FlagsDOMHandler() {}
 
   // WebUIMessageHandler implementation.
@@ -108,7 +118,7 @@ class FlagsDOMHandler : public WebUIMessageHandler {
   void HandleResetAllFlags(const ListValue* args);
 
  private:
-  PrefService* prefs_;
+  about_flags::PrefServiceFlagsStorage flags_storage_;
   about_flags::FlagAccess access_;
 
   DISALLOW_COPY_AND_ASSIGN(FlagsDOMHandler);
@@ -130,11 +140,27 @@ void FlagsDOMHandler::RegisterMessages() {
 }
 
 void FlagsDOMHandler::HandleRequestFlagsExperiments(const ListValue* args) {
+  scoped_ptr<ListValue> supported_experiments(new ListValue);
+  scoped_ptr<ListValue> unsupported_experiments(new ListValue);
+  about_flags::GetFlagsExperimentsData(&flags_storage_,
+                                       access_,
+                                       supported_experiments.get(),
+                                       unsupported_experiments.get());
   DictionaryValue results;
-  results.Set("flagsExperiments",
-              about_flags::GetFlagsExperimentsData(prefs_, access_));
+  results.Set("supportedExperiments", supported_experiments.release());
+  results.Set("unsupportedExperiments", unsupported_experiments.release());
   results.SetBoolean("needsRestart",
                      about_flags::IsRestartNeededToCommitChanges());
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
+  results.SetBoolean("showBetaChannelPromotion",
+                     channel == chrome::VersionInfo::CHANNEL_STABLE);
+  results.SetBoolean("showDevChannelPromotion",
+                     channel == chrome::VersionInfo::CHANNEL_BETA);
+#else
+  results.SetBoolean("showBetaChannelPromotion", false);
+  results.SetBoolean("showDevChannelPromotion", false);
+#endif
   web_ui()->CallJavascriptFunction("returnFlagsExperiments", results);
 }
 
@@ -151,7 +177,7 @@ void FlagsDOMHandler::HandleEnableFlagsExperimentMessage(
     return;
 
   about_flags::SetExperimentEnabled(
-      prefs_,
+      &flags_storage_,
       experiment_internal_name,
       enable_str == "true");
 }
@@ -161,7 +187,7 @@ void FlagsDOMHandler::HandleRestartBrowser(const ListValue* args) {
 }
 
 void FlagsDOMHandler::HandleResetAllFlags(const ListValue* args) {
-  about_flags::ResetAllFlags(g_browser_process->local_state());
+  about_flags::ResetAllFlags(&flags_storage_);
 }
 
 }  // namespace

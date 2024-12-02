@@ -15,9 +15,9 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/management/management_api_constants.h"
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
@@ -34,10 +34,12 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
+#include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "chrome/common/extensions/manifest_handlers/offline_enabled_info.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
+#include "chrome/common/extensions/permissions/permissions_data.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/utility_process_host.h"
@@ -76,7 +78,8 @@ AutoConfirmForTest auto_confirm_for_test = DO_NOT_SKIP;
 
 std::vector<std::string> CreateWarningsList(const Extension* extension) {
   std::vector<std::string> warnings_list;
-  PermissionMessages warnings = extension->GetPermissionMessages();
+  PermissionMessages warnings =
+      PermissionsData::GetPermissionMessages(extension);
   for (PermissionMessages::const_iterator iter = warnings.begin();
        iter != warnings.end(); ++iter) {
     warnings_list.push_back(UTF16ToUTF8(iter->message()));
@@ -136,7 +139,7 @@ scoped_ptr<management::ExtensionInfo> CreateExtensionInfo(
 
   if (extension.is_app()) {
     info->app_launch_url.reset(new std::string(
-        extension.GetFullLaunchURL().spec()));
+        AppLaunchInfo::GetFullLaunchURL(&extension).spec()));
   }
 
   const ExtensionIconSet::IconMap& icons =
@@ -204,7 +207,7 @@ void AddExtensionInfo(const ExtensionSet& extensions,
                             ExtensionInfoList* extension_list) {
   for (ExtensionSet::const_iterator iter = extensions.begin();
        iter != extensions.end(); ++iter) {
-    const Extension& extension = **iter;
+    const Extension& extension = *iter->get();
 
     if (extension.location() == Manifest::COMPONENT)
       continue;  // Skip built-in extensions.
@@ -294,10 +297,8 @@ class SafeManifestJSONParser : public UtilityProcessHostClient {
 
   void StartWorkOnIOThread() {
     CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    UtilityProcessHost* host =
-        UtilityProcessHost::Create(
-            this,
-            base::MessageLoopProxy::current());
+    UtilityProcessHost* host = UtilityProcessHost::Create(
+        this, base::MessageLoopProxy::current().get());
     host->EnableZygote();
     host->Send(new ChromeUtilityMsg_ParseJSON(manifest_));
   }
@@ -314,13 +315,13 @@ class SafeManifestJSONParser : public UtilityProcessHostClient {
     return handled;
   }
 
-  void OnJSONParseSucceeded(const ListValue& wrapper) {
+  void OnJSONParseSucceeded(const base::ListValue& wrapper) {
     CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
     const Value* value = NULL;
     CHECK(wrapper.Get(0, &value));
     if (value->IsType(Value::TYPE_DICTIONARY))
       parsed_manifest_.reset(
-          static_cast<const DictionaryValue*>(value)->DeepCopy());
+          static_cast<const base::DictionaryValue*>(value)->DeepCopy());
     else
       error_ = keys::kManifestParseError;
 
@@ -357,7 +358,7 @@ class SafeManifestJSONParser : public UtilityProcessHostClient {
   std::string manifest_;
 
   // Results of parsing.
-  scoped_ptr<DictionaryValue> parsed_manifest_;
+  scoped_ptr<base::DictionaryValue> parsed_manifest_;
 
   std::string error_;
 };
@@ -381,7 +382,7 @@ bool ManagementGetPermissionWarningsByManifestFunction::RunImpl() {
 }
 
 void ManagementGetPermissionWarningsByManifestFunction::OnParseSuccess(
-    DictionaryValue* parsed_manifest) {
+    base::DictionaryValue* parsed_manifest) {
   CHECK(parsed_manifest);
 
   scoped_refptr<Extension> extension = Extension::Create(
@@ -392,9 +393,9 @@ void ManagementGetPermissionWarningsByManifestFunction::OnParseSuccess(
     return;
   }
 
-  std::vector<std::string> warnings = CreateWarningsList(extension);
-  results_ = management::GetPermissionWarningsByManifest::Results::Create(
-      warnings);
+  std::vector<std::string> warnings = CreateWarningsList(extension.get());
+  results_ =
+      management::GetPermissionWarningsByManifest::Results::Create(warnings);
   SendResponse(true);
 
   // Matched with AddRef() in RunImpl().
@@ -675,7 +676,7 @@ void ManagementEventRouter::Observe(
   DCHECK(event_name);
   DCHECK(extension);
 
-  scoped_ptr<ListValue> args(new ListValue());
+  scoped_ptr<base::ListValue> args(new base::ListValue());
   if (event_name == events::kOnExtensionUninstalled) {
     args->Append(Value::CreateStringValue(extension->id()));
   } else {

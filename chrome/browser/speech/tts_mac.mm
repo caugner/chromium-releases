@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/memory/singleton.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/values.h"
@@ -38,7 +38,7 @@ class TtsPlatformImplMac;
 //    crash when trying to call willSpeakWord.
 @interface SingleUseSpeechSynthesizer : NSSpeechSynthesizer {
  @private
-  scoped_nsobject<NSString> utterance_;
+  base::scoped_nsobject<NSString> utterance_;
   bool didSpeak_;
 }
 
@@ -58,13 +58,18 @@ class TtsPlatformImplMac : public TtsPlatformImpl {
       int utterance_id,
       const std::string& utterance,
       const std::string& lang,
+      const VoiceData& voice,
       const UtteranceContinuousParameters& params) OVERRIDE;
 
   virtual bool StopSpeaking() OVERRIDE;
 
+  virtual void Pause() OVERRIDE;
+
+  virtual void Resume() OVERRIDE;
+
   virtual bool IsSpeaking() OVERRIDE;
 
-  virtual bool SendsEvent(TtsEventType event_type) OVERRIDE;
+  virtual void GetVoices(std::vector<VoiceData>* out_voices) OVERRIDE;
 
   // Called by ChromeTtsDelegate when we get a callback from the
   // native speech engine.
@@ -80,11 +85,13 @@ class TtsPlatformImplMac : public TtsPlatformImpl {
   TtsPlatformImplMac();
   virtual ~TtsPlatformImplMac();
 
-  scoped_nsobject<SingleUseSpeechSynthesizer> speech_synthesizer_;
-  scoped_nsobject<ChromeTtsDelegate> delegate_;
+  base::scoped_nsobject<SingleUseSpeechSynthesizer> speech_synthesizer_;
+  base::scoped_nsobject<ChromeTtsDelegate> delegate_;
   int utterance_id_;
   std::string utterance_;
   bool sent_start_event_;
+  int last_char_index_;
+  bool paused_;
 
   friend struct DefaultSingletonTraits<TtsPlatformImplMac>;
 
@@ -100,9 +107,11 @@ bool TtsPlatformImplMac::Speak(
     int utterance_id,
     const std::string& utterance,
     const std::string& lang,
+    const VoiceData& voice,
     const UtteranceContinuousParameters& params) {
   // TODO: convert SSML to SAPI xml. http://crbug.com/88072
   utterance_ = utterance;
+  paused_ = false;
 
   NSString* utterance_nsstring =
       [NSString stringWithUTF8String:utterance_.c_str()];
@@ -117,6 +126,12 @@ bool TtsPlatformImplMac::Speak(
         initWithUtterance:utterance_nsstring]);
   [speech_synthesizer_ setDelegate:delegate_];
 
+  if (!voice.native_voice_identifier.empty()) {
+    NSString* native_voice_identifier =
+        [NSString stringWithUTF8String:voice.native_voice_identifier.c_str()];
+    [speech_synthesizer_ setVoice:native_voice_identifier];
+  }
+
   utterance_id_ = utterance_id;
   sent_start_event_ = false;
 
@@ -130,9 +145,16 @@ bool TtsPlatformImplMac::Speak(
   }
 
   if (params.pitch >= 0.0) {
-    // The TTS api allows an approximate range of 30 to 65 for speech pitch.
+    // The input is a float from 0.0 to 2.0, with 1.0 being the default.
+    // Get the default pitch for this voice and modulate it by 50% - 150%.
+    NSError* errorCode;
+    NSNumber* defaultPitchObj =
+        [speech_synthesizer_ objectForProperty:NSSpeechPitchBaseProperty
+                                         error:&errorCode];
+    int defaultPitch = defaultPitchObj ? [defaultPitchObj intValue] : 48;
+    int newPitch = static_cast<int>(defaultPitch * (0.5 * params.pitch + 0.5));
     [speech_synthesizer_
-        setObject: [NSNumber numberWithInt:(params.pitch * 17 + 30)]
+        setObject:[NSNumber numberWithInt:newPitch]
         forProperty:NSSpeechPitchBaseProperty error:nil];
   }
 
@@ -150,18 +172,86 @@ bool TtsPlatformImplMac::StopSpeaking() {
     [speech_synthesizer_ stopSpeaking];
     speech_synthesizer_.reset(nil);
   }
+  paused_ = false;
   return true;
+}
+
+void TtsPlatformImplMac::Pause() {
+  if (speech_synthesizer_.get() && utterance_id_ && !paused_) {
+    [speech_synthesizer_ pauseSpeakingAtBoundary:NSSpeechImmediateBoundary];
+    paused_ = true;
+    TtsController::GetInstance()->OnTtsEvent(
+        utterance_id_, TTS_EVENT_PAUSE, last_char_index_, "");
+  }
+}
+
+void TtsPlatformImplMac::Resume() {
+  if (speech_synthesizer_.get() && utterance_id_ && paused_) {
+    [speech_synthesizer_ continueSpeaking];
+    paused_ = false;
+    TtsController::GetInstance()->OnTtsEvent(
+        utterance_id_, TTS_EVENT_RESUME, last_char_index_, "");
+  }
 }
 
 bool TtsPlatformImplMac::IsSpeaking() {
   return [NSSpeechSynthesizer isAnyApplicationSpeaking];
 }
 
-bool TtsPlatformImplMac::SendsEvent(TtsEventType event_type) {
-  return (event_type == TTS_EVENT_START ||
-          event_type == TTS_EVENT_END ||
-          event_type == TTS_EVENT_WORD ||
-          event_type == TTS_EVENT_ERROR);
+void TtsPlatformImplMac::GetVoices(std::vector<VoiceData>* outVoices) {
+  NSArray* voices = [NSSpeechSynthesizer availableVoices];
+
+  // Create a new temporary array of the available voices with
+  // the default voice first.
+  NSMutableArray* orderedVoices =
+      [NSMutableArray arrayWithCapacity:[voices count]];
+  NSString* defaultVoice = [NSSpeechSynthesizer defaultVoice];
+  [orderedVoices addObject:defaultVoice];
+  for (NSString* voiceIdentifier in voices) {
+    if (![voiceIdentifier isEqualToString:defaultVoice])
+      [orderedVoices addObject:voiceIdentifier];
+  }
+
+  for (NSString* voiceIdentifier in orderedVoices) {
+    outVoices->push_back(VoiceData());
+    VoiceData& data = outVoices->back();
+
+    NSDictionary* attributes =
+        [NSSpeechSynthesizer attributesForVoice:voiceIdentifier];
+    NSString* name = [attributes objectForKey:NSVoiceName];
+    NSString* gender = [attributes objectForKey:NSVoiceGender];
+    NSString* localeIdentifier =
+        [attributes objectForKey:NSVoiceLocaleIdentifier];
+
+    data.native = true;
+    data.native_voice_identifier = base::SysNSStringToUTF8(voiceIdentifier);
+    data.name = base::SysNSStringToUTF8(name);
+
+    NSDictionary* localeComponents =
+        [NSLocale componentsFromLocaleIdentifier:localeIdentifier];
+    NSString* language = [localeComponents objectForKey:NSLocaleLanguageCode];
+    NSString* country = [localeComponents objectForKey:NSLocaleCountryCode];
+    if (language && country) {
+      data.lang =
+          [[NSString stringWithFormat:@"%@-%@", language, country] UTF8String];
+    } else {
+      data.lang = base::SysNSStringToUTF8(language);
+    }
+    if ([gender isEqualToString:NSVoiceGenderMale])
+      data.gender = TTS_GENDER_MALE;
+    else if ([gender isEqualToString:NSVoiceGenderFemale])
+      data.gender = TTS_GENDER_FEMALE;
+    else
+      data.gender = TTS_GENDER_NONE;
+    data.events.insert(TTS_EVENT_START);
+    data.events.insert(TTS_EVENT_END);
+    data.events.insert(TTS_EVENT_WORD);
+    data.events.insert(TTS_EVENT_ERROR);
+    data.events.insert(TTS_EVENT_CANCELLED);
+    data.events.insert(TTS_EVENT_INTERRUPTED);
+    data.events.insert(TTS_EVENT_PAUSE);
+    data.events.insert(TTS_EVENT_RESUME);
+  }
 }
 
 void TtsPlatformImplMac::OnSpeechEvent(
@@ -185,11 +275,13 @@ void TtsPlatformImplMac::OnSpeechEvent(
   }
   controller->OnTtsEvent(
       utterance_id_, event_type, char_index, error_message);
+  last_char_index_ = char_index;
 }
 
 TtsPlatformImplMac::TtsPlatformImplMac() {
   utterance_id_ = -1;
   sent_start_event_ = true;
+  paused_ = false;
 
   delegate_.reset([[ChromeTtsDelegate alloc] initWithPlatformImplMac:this]);
 }

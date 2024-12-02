@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time.h"
 #include "remoting/base/constants.h"
 #include "remoting/jingle_glue/iq_sender.h"
@@ -108,7 +108,7 @@ void JingleSession::StartConnection(
   // Send session-initiate message.
   JingleMessage message(peer_jid_, JingleMessage::SESSION_INITIATE,
                         session_id_);
-  message.from = session_manager_->signal_strategy_->GetLocalJid();
+  message.initiator = session_manager_->signal_strategy_->GetLocalJid();
   message.description.reset(
       new ContentDescription(candidate_config_->Clone(),
                              authenticator_->GetNextMessage()));
@@ -226,20 +226,6 @@ void JingleSession::Close() {
   CloseInternal(OK);
 }
 
-void JingleSession::AddPendingRemoteCandidates(Transport* channel,
-                                               const std::string& name) {
-  std::list<JingleMessage::NamedCandidate>::iterator it =
-      pending_remote_candidates_.begin();
-  while(it != pending_remote_candidates_.end()) {
-    if (it->name == name) {
-      channel->AddRemoteCandidate(it->candidate);
-      it = pending_remote_candidates_.erase(it);
-    } else {
-      ++it;
-    }
-  }
-}
-
 void JingleSession::CreateStreamChannel(
       const std::string& name,
       const StreamChannelCallback& callback) {
@@ -251,7 +237,6 @@ void JingleSession::CreateStreamChannel(
       session_manager_->transport_factory_->CreateStreamTransport();
   channel->Initialize(name, this, channel_authenticator.Pass());
   channel->Connect(callback);
-  AddPendingRemoteCandidates(channel.get(), name);
   channels_[name] = channel.release();
 }
 
@@ -266,7 +251,6 @@ void JingleSession::CreateDatagramChannel(
       session_manager_->transport_factory_->CreateDatagramTransport();
   channel->Initialize(name, this, channel_authenticator.Pass());
   channel->Connect(callback);
-  AddPendingRemoteCandidates(channel.get(), name);
   channels_[name] = channel.release();
 }
 
@@ -301,6 +285,10 @@ void JingleSession::OnTransportRouteChange(Transport* transport,
 void JingleSession::OnTransportReady(Transport* transport, bool ready) {
   if (event_handler_)
     event_handler_->OnSessionChannelReady(transport->name(), ready);
+}
+
+void JingleSession::OnTransportFailed(Transport* transport) {
+  CloseInternal(CHANNEL_CONNECTION_ERROR);
 }
 
 void JingleSession::OnTransportDeleted(Transport* transport) {
@@ -501,13 +489,11 @@ void JingleSession::ProcessTransportInfo(const JingleMessage& message) {
            message.candidates.begin();
        it != message.candidates.end(); ++it) {
     ChannelsMap::iterator channel = channels_.find(it->name);
-    if (channel != channels_.end()) {
-      channel->second->AddRemoteCandidate(it->candidate);
-    } else {
-      // Transport info was received before the channel was created.
-      // This could happen due to messages being reordered on the wire.
-      pending_remote_candidates_.push_back(*it);
+    if (channel == channels_.end()) {
+      LOG(WARNING) << "Received candidate for unknown channel " << it->name;
+      continue;
     }
+    channel->second->AddRemoteCandidate(it->candidate);
   }
 }
 

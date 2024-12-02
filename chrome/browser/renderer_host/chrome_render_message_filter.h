@@ -14,7 +14,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/content_settings.h"
 #include "content/public/browser/browser_message_filter.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
+#include "third_party/WebKit/public/web/WebCache.h"
 
 class CookieSettings;
 struct ExtensionHostMsg_APIActionOrEvent_Params;
@@ -23,10 +23,6 @@ struct ExtensionHostMsg_Request_Params;
 struct ExtensionMsg_ExternalConnectionInfo;
 class ExtensionInfoMap;
 class GURL;
-
-namespace nacl {
-struct NaClLaunchParams;
-}
 
 namespace net {
 class HostResolver;
@@ -84,18 +80,8 @@ class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
 
   virtual ~ChromeRenderMessageFilter();
 
-#if !defined(DISABLE_NACL)
-  void OnLaunchNaCl(const nacl::NaClLaunchParams& launch_params,
-                    IPC::Message* reply_msg);
-  void OnGetReadonlyPnaclFd(const std::string& filename,
-                            IPC::Message* reply_msg);
-  void OnNaClCreateTemporaryFile(IPC::Message* reply_msg);
-  void OnNaClErrorStatus(int render_view_id, int error_id);
-  void OnOpenNaClExecutable(int render_view_id,
-                            const GURL& file_url,
-                            IPC::Message* reply_msg);
-#endif
   void OnDnsPrefetch(const std::vector<std::string>& hostnames);
+  void OnPreconnect(const GURL& url);
   void OnResourceTypeStats(const WebKit::WebCache::ResourceTypeStats& stats);
   void OnUpdatedCacheStats(const WebKit::WebCache::UsageStats& stats);
   void OnFPS(int routing_id, float fps);
@@ -159,6 +145,9 @@ class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
   void OnAddAPIActionToExtensionActivityLog(
       const std::string& extension_id,
       const ExtensionHostMsg_APIActionOrEvent_Params& params);
+  void OnAddBlockedCallToExtensionActivityLog(
+      const std::string& extension_id,
+      const std::string& function_name);
   void OnAddDOMActionToExtensionActivityLog(
       const std::string& extension_id,
       const ExtensionHostMsg_DOMAction_Params& params);

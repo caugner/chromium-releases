@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -18,10 +18,8 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/common/context_menu_params.h"
 #include "net/dns/mock_host_resolver.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "ui/base/models/menu_model.h"
 
-using WebKit::WebContextMenuData;
 using content::WebContents;
 using extensions::MenuItem;
 using ui::MenuModel;
@@ -94,6 +92,16 @@ class ExtensionContextMenuBrowserTest : public ExtensionBrowserTest {
     return LoadExtension(extension_dir);
   }
 
+  // Helper to load an extension from context_menus/top_level/|subdirectory| in
+  // the extensions test data dir.
+  const extensions::Extension* LoadTopLevelContextMenuExtension(
+      std::string subdirectory) {
+    base::FilePath extension_dir =
+        test_data_dir_.AppendASCII("context_menus").AppendASCII("top_level");
+    extension_dir = extension_dir.AppendASCII(subdirectory);
+    return LoadExtension(extension_dir);
+  }
+
   const extensions::Extension* LoadContextMenuExtensionIncognito(
       std::string subdirectory) {
     base::FilePath extension_dir =
@@ -107,8 +115,7 @@ class ExtensionContextMenuBrowserTest : public ExtensionBrowserTest {
                                         const GURL& frame_url) {
     WebContents* web_contents =
         browser->tab_strip_model()->GetActiveWebContents();
-    WebContextMenuData data;
-    content::ContextMenuParams params(data);
+    content::ContextMenuParams params;
     params.page_url = page_url;
     params.link_url = link_url;
     params.frame_url = frame_url;
@@ -131,7 +138,7 @@ class ExtensionContextMenuBrowserTest : public ExtensionBrowserTest {
     ExtensionSet::const_iterator i;
     for (i = extensions->begin(); i != extensions->end(); ++i) {
       if ((*i)->name() == name) {
-        return *i;
+        return i->get();
       }
     }
     return NULL;
@@ -331,6 +338,70 @@ IN_PROC_BROWSER_TEST_F(ExtensionContextMenuBrowserTest, LongTitle) {
   ASSERT_TRUE(label.size() <= limit);
 }
 
+// Flaky on Windows debug bots. http://crbug.com/251590
+#if defined(OS_WIN)
+#define MAYBE_TopLevel DISABLED_TopLevel
+#else
+#define MAYBE_TopLevel TopLevel
+#endif
+// Checks that Context Menus are ordered alphabetically by their name when
+// extensions have only one single Context Menu item and by the extension name
+// when multiples Context Menu items are created.
+IN_PROC_BROWSER_TEST_F(ExtensionContextMenuBrowserTest, MAYBE_TopLevel) {
+  // We expect to see the following items in the menu:
+  //   An Extension with multiple Context Menus
+  //     Context Menu #1
+  //     Context Menu #2
+  //   Context Menu #1 - Extension #2
+  //   Context Menu #2 - Extension #3
+  //   Context Menu #3 - Extension #1
+  //   Ze Extension with multiple Context Menus
+  //     Context Menu #1
+  //     Context Menu #2
+
+  // Load extensions and wait until it's created a single menu item.
+  ExtensionTestMessageListener listener1("created item", false);
+  ASSERT_TRUE(LoadTopLevelContextMenuExtension("single1"));
+  ASSERT_TRUE(listener1.WaitUntilSatisfied());
+
+  ExtensionTestMessageListener listener2("created item", false);
+  ASSERT_TRUE(LoadTopLevelContextMenuExtension("single2"));
+  ASSERT_TRUE(listener2.WaitUntilSatisfied());
+
+  ExtensionTestMessageListener listener3("created item", false);
+  ASSERT_TRUE(LoadTopLevelContextMenuExtension("single3"));
+  ASSERT_TRUE(listener3.WaitUntilSatisfied());
+
+  // Load extensions and wait until it's created two menu items.
+  ExtensionTestMessageListener listener4("created items", false);
+  ASSERT_TRUE(LoadTopLevelContextMenuExtension("multi4"));
+  ASSERT_TRUE(listener4.WaitUntilSatisfied());
+
+  ExtensionTestMessageListener listener5("created items", false);
+  ASSERT_TRUE(LoadTopLevelContextMenuExtension("multi5"));
+  ASSERT_TRUE(listener5.WaitUntilSatisfied());
+
+  GURL url("http://foo.com/");
+  scoped_ptr<TestRenderViewContextMenu> menu(
+      CreateMenu(browser(), url, GURL(), GURL()));
+
+  int index = 0;
+  MenuModel* model = NULL;
+
+  ASSERT_TRUE(menu->GetMenuModelAndItemIndex(
+      IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST, &model, &index));
+  EXPECT_EQ(UTF8ToUTF16("An Extension with multiple Context Menus"),
+                        model->GetLabelAt(index++));
+  EXPECT_EQ(UTF8ToUTF16("Context Menu #1 - Extension #2"),
+                        model->GetLabelAt(index++));
+  EXPECT_EQ(UTF8ToUTF16("Context Menu #2 - Extension #3"),
+                        model->GetLabelAt(index++));
+  EXPECT_EQ(UTF8ToUTF16("Context Menu #3 - Extension #1"),
+                        model->GetLabelAt(index++));
+  EXPECT_EQ(UTF8ToUTF16("Ze Extension with multiple Context Menus"),
+                        model->GetLabelAt(index++));
+}
+
 // Checks that in |menu|, the item at |index| has type |expected_type| and a
 // label of |expected_label|.
 static void ExpectLabelAndType(const char* expected_label,
@@ -371,6 +442,12 @@ static void VerifyMenuForSeparatorsTest(const MenuModel& menu) {
   EXPECT_EQ(MenuModel::TYPE_SEPARATOR, menu.GetTypeAt(index++));
   ExpectLabelAndType("normal3", MenuModel::TYPE_COMMAND, menu, index++);
 }
+
+#if defined(OS_WIN)
+#define MAYBE_Separators DISABLED_Separators
+#else
+#define MAYBE_Separators Separators
+#endif
 
 // Tests a number of cases for auto-generated and explicitly added separators.
 IN_PROC_BROWSER_TEST_F(ExtensionContextMenuBrowserTest, Separators) {

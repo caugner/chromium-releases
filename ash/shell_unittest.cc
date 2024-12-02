@@ -21,7 +21,7 @@
 #include "ash/test/shell_test_api.h"
 #include "ash/wm/root_window_layout_manager.h"
 #include "ash/wm/window_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
@@ -278,7 +278,7 @@ TEST_F(ShellTest, CreateLockScreenModalWindow) {
   EXPECT_EQ(modal_container, modal_widget->GetNativeWindow()->parent());
 
   // Modal dialog without parent, caused crash see crbug.com/226141
-  views::Widget* modal_dialog = views::DialogDelegateView::CreateDialogWidget(
+  views::Widget* modal_dialog = views::DialogDelegate::CreateDialogWidget(
       new TestModalDialogDelegate(), CurrentContext(), NULL);
 
   modal_dialog->Show();

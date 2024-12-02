@@ -6,15 +6,32 @@
 #define CHROME_BROWSER_CHROMEOS_PROFILES_PROFILE_HELPER_H_
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback_forward.h"
+#include "base/files/file_path.h"
+#include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 
 class Profile;
 
 namespace chromeos {
 
-class ProfileHelper : public UserManager::UserSessionStateObserver {
+// This helper class is used on Chrome OS to keep track of currently
+// active user profile.
+// Whenever active user is changed (either add another user into session or
+// switch between users), ActiveUserHashChanged() will be called thus
+// internal state |active_user_id_hash_| will be updated.
+// Typical use cases for using this class:
+// 1. Get "signin profile" which is a special type of profile that is only used
+//    during signin flow: GetSigninProfile()
+// 2. Get profile dir of an active user, used by ProfileManager:
+//    GetActiveUserProfileDir()
+// 3. Get mapping from user_id_hash to Profile instance/profile path etc.
+class ProfileHelper : public BrowsingDataRemover::Observer,
+                      public UserManager::Observer,
+                      public UserManager::UserSessionStateObserver {
  public:
   ProfileHelper();
   virtual ~ProfileHelper();
@@ -22,8 +39,16 @@ class ProfileHelper : public UserManager::UserSessionStateObserver {
   // Returns Profile instance that corresponds to |user_id_hash|.
   static Profile* GetProfileByUserIdHash(const std::string& user_id_hash);
 
+  // Returns profile path that corresponds to a given |user_id_hash|.
+  static base::FilePath GetProfilePathByUserIdHash(
+      const std::string& user_id_hash);
+
   // Returns OffTheRecord profile for use during signing phase.
   static Profile* GetSigninProfile();
+
+  // Returns user_id hash for |profile| instance or empty string if hash
+  // could not be extracted from |profile|.
+  static std::string GetUserIdHashFromProfile(Profile* profile);
 
   // Returns true if |profile| is the signin Profile. This can be used during
   // construction of the signin Profile to determine if that Profile is the
@@ -34,6 +59,9 @@ class ProfileHelper : public UserManager::UserSessionStateObserver {
   // TODO(dzhioev): Investigate whether or not this method is needed.
   static void ProfileStartup(Profile* profile, bool process_startup);
 
+  // Returns active user profile dir in a format [u-$hash].
+  base::FilePath GetActiveUserProfileDir();
+
   // Should called once after UserManager instance has been created.
   void Initialize();
 
@@ -41,12 +69,31 @@ class ProfileHelper : public UserManager::UserSessionStateObserver {
   // on Chrome OS.
   std::string active_user_id_hash() { return active_user_id_hash_; }
 
+  // Clears site data (cookies, history, etc) for signin profile.
+  // Callback can be empty. Not thread-safe.
+  void ClearSigninProfile(const base::Closure& on_clear_callback);
+
  private:
+  friend class ProfileHelperTest;
+
+  // BrowsingDataRemover::Observer implementation:
+  virtual void OnBrowsingDataRemoverDone() OVERRIDE;
+
+  // UserManager::Observer overrides.
+  virtual void MergeSessionStateChanged(
+      UserManager::MergeSessionState state) OVERRIDE;
+
   // UserManager::UserSessionStateObserver implementation:
   virtual void ActiveUserHashChanged(const std::string& hash) OVERRIDE;
 
   // Identifies path to active user profile on Chrome OS.
   std::string active_user_id_hash_;
+
+  // True if signin profile clearing now.
+  bool signin_profile_clear_requested_;
+
+  // List of callbacks called after signin profile clearance.
+  std::vector<base::Closure> on_clear_callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileHelper);
 };
@@ -54,4 +101,3 @@ class ProfileHelper : public UserManager::UserSessionStateObserver {
 } // namespace chromeos
 
 #endif  // CHROME_BROWSER_CHROMEOS_PROFILES_PROFILE_HELPER_H_
-

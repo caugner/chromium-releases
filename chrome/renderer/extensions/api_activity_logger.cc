@@ -15,27 +15,28 @@ using content::V8ValueConverter;
 namespace extensions {
 
 APIActivityLogger::APIActivityLogger(
-    Dispatcher* dispatcher, v8::Handle<v8::Context> v8_context)
-    : ChromeV8Extension(dispatcher, v8_context) {
+    Dispatcher* dispatcher, ChromeV8Context* context)
+    : ChromeV8Extension(dispatcher, context) {
   RouteFunction("LogEvent", base::Bind(&APIActivityLogger::LogEvent));
   RouteFunction("LogAPICall", base::Bind(&APIActivityLogger::LogAPICall));
 }
 
 // static
-v8::Handle<v8::Value> APIActivityLogger::LogAPICall(const v8::Arguments& args) {
+void APIActivityLogger::LogAPICall(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
   LogInternal(APICALL, args);
-  return v8::Undefined();
 }
 
 // static
-v8::Handle<v8::Value> APIActivityLogger::LogEvent(const v8::Arguments& args) {
+void APIActivityLogger::LogEvent(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
   LogInternal(EVENT, args);
-  return v8::Undefined();
 }
 
 // static
-void APIActivityLogger::LogInternal(const CallType call_type,
-                                    const v8::Arguments& args) {
+void APIActivityLogger::LogInternal(
+    const CallType call_type,
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
   DCHECK_GT(args.Length(), 2);
   DCHECK(args[0]->IsString());
   DCHECK(args[1]->IsString());
@@ -71,6 +72,13 @@ void APIActivityLogger::LogInternal(const CallType call_type,
   }
 }
 
+// static
+void APIActivityLogger::LogBlockedCall(const std::string& extension_id,
+                                       const std::string& function_name) {
+  content::RenderThread::Get()->Send(
+      new ExtensionHostMsg_AddBlockedCallToActivityLog(extension_id,
+                                                       function_name));
+}
+
 
 }  // namespace extensions
-

@@ -10,7 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
@@ -118,7 +118,7 @@ void ExtensionInstalledBubbleGtk::Observe(
         content::Details<const Extension>(details).ptr();
     if (extension == extension_) {
       // PostTask to ourself to allow all EXTENSION_LOADED Observers to run.
-      MessageLoopForUI::current()->PostTask(
+      base::MessageLoopForUI::current()->PostTask(
           FROM_HERE,
           base::Bind(&ExtensionInstalledBubbleGtk::ShowInternal,
                      weak_factory_.GetWeakPtr()));
@@ -126,8 +126,11 @@ void ExtensionInstalledBubbleGtk::Observe(
   } else if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED) {
     const Extension* extension =
         content::Details<extensions::UnloadedExtensionInfo>(details)->extension;
-    if (extension == extension_)
+    if (extension == extension_) {
+      // Extension is going away, make sure ShowInternal won't be called.
+      weak_factory_.InvalidateWeakPtrs();
       extension_ = NULL;
+    }
   } else if (type == chrome::NOTIFICATION_BROWSER_CLOSING) {
     // The browser closed before the bubble could be created.
     if (!bubble_)
@@ -154,7 +157,7 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
         browser_window->GetToolbar()->GetBrowserActionsToolbar();
 
     if (toolbar->animating() && animation_wait_retries_-- > 0) {
-      MessageLoopForUI::current()->PostDelayedTask(
+      base::MessageLoopForUI::current()->PostDelayedTask(
           FROM_HERE,
           base::Bind(&ExtensionInstalledBubbleGtk::ShowInternal,
                      weak_factory_.GetWeakPtr()),

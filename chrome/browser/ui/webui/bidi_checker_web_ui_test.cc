@@ -9,10 +9,10 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/history/history_service.h"
@@ -20,12 +20,11 @@
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/autofill/browser/autofill_common_test.h"
-#include "components/autofill/browser/autofill_profile.h"
-#include "components/autofill/browser/personal_data_manager.h"
+#include "components/autofill/core/browser/autofill_common_test.h"
+#include "components/autofill/core/browser/autofill_profile.h"
+#include "components/autofill/core/browser/personal_data_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -72,9 +71,10 @@ void ReloadLocaleResourcesOnIOThread(const std::string& new_locale) {
 // crbug.com/95425, crbug.com/132752
 void ReloadLocaleResources(const std::string& new_locale) {
   content::BrowserThread::PostTaskAndReply(
-      content::BrowserThread::IO, FROM_HERE,
+      content::BrowserThread::IO,
+      FROM_HERE,
       base::Bind(&ReloadLocaleResourcesOnIOThread, base::ConstRef(new_locale)),
-      MessageLoop::QuitClosure());
+      base::MessageLoop::QuitClosure());
   content::RunMessageLoop();
 }
 
@@ -85,14 +85,6 @@ static const base::FilePath::CharType* kBidiCheckerTestsJS =
 
 void WebUIBidiCheckerBrowserTest::SetUp() {
   argv_ = CommandLine::ForCurrentProcess()->GetArgs();
-
-  // Sync only uses webui when client login is enabled.  Client login is going
-  // away, but to keep it tested for now, force client login to be used.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kUseClientLoginSigninFlow)) {
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kUseClientLoginSigninFlow);
-  }
 }
 
 void WebUIBidiCheckerBrowserTest::TearDown() {
@@ -437,24 +429,6 @@ IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestRTL,
                        TestSettingsSearchEnginesOptionsPage) {
   std::string url(chrome::kChromeUISettingsFrameURL);
   url += std::string(chrome::kSearchEnginesSubPage);
-  RunBidiCheckerOnPage(url);
-}
-
-//===================================
-// chrome://settings-frame/syncSetup
-//===================================
-
-IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestLTR,
-                       TestSettingsFrameSyncSetup) {
-  std::string url(chrome::kChromeUISettingsFrameURL);
-  url += std::string(chrome::kSyncSetupSubPage);
-  RunBidiCheckerOnPage(url);
-}
-
-IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestRTL,
-                       TestSettingsFrameSyncSetup) {
-  std::string url(chrome::kChromeUISettingsFrameURL);
-  url += std::string(chrome::kSyncSetupSubPage);
   RunBidiCheckerOnPage(url);
 }
 

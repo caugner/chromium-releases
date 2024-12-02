@@ -4,17 +4,17 @@
 
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 
-#include <map>
-
 #include "base/bind.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/lazy_instance.h"
+#include "base/logging.h"
 #include "base/memory/ref_counted.h"
+#include "base/process.h"
 #include "base/process_util.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "chrome/browser/extensions/activity_log.h"
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/activity_log/activity_log.h"
+#include "chrome/browser/extensions/activity_log/blocked_actions.h"
 #include "chrome/browser/extensions/extension_function_registry.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -31,9 +31,12 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_view_host_observer.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/common/result_codes.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
+#include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "webkit/glue/resource_type.h"
 
 using extensions::Extension;
@@ -43,12 +46,9 @@ using WebKit::WebSecurityOrigin;
 
 namespace {
 
-const char kAccessDenied[] = "access denied";
-const char kQuotaExceeded[] = "quota exceeded";
-
-void LogSuccess(const Extension* extension,
+void LogSuccess(const std::string& extension_id,
                 const std::string& api_name,
-                scoped_ptr<ListValue> args,
+                scoped_ptr<base::ListValue> args,
                 Profile* profile) {
   // The ActivityLog can only be accessed from the main (UI) thread.  If we're
   // running on the wrong thread, re-dispatch from the main thread.
@@ -56,21 +56,22 @@ void LogSuccess(const Extension* extension,
     BrowserThread::PostTask(BrowserThread::UI,
                             FROM_HERE,
                             base::Bind(&LogSuccess,
-                                       extension,
+                                       extension_id,
                                        api_name,
                                        base::Passed(&args),
                                        profile));
   } else {
     extensions::ActivityLog* activity_log =
         extensions::ActivityLog::GetInstance(profile);
-    activity_log->LogAPIAction(extension, api_name, args.get(), std::string());
+    activity_log->LogAPIAction(
+        extension_id, api_name, args.get(), std::string());
   }
 }
 
-void LogFailure(const Extension* extension,
+void LogFailure(const std::string& extension_id,
                 const std::string& api_name,
-                scoped_ptr<ListValue> args,
-                const char* reason,
+                scoped_ptr<base::ListValue> args,
+                extensions::BlockedAction::Reason reason,
                 Profile* profile) {
   // The ActivityLog can only be accessed from the main (UI) thread.  If we're
   // running on the wrong thread, re-dispatch from the main thread.
@@ -78,7 +79,7 @@ void LogFailure(const Extension* extension,
     BrowserThread::PostTask(BrowserThread::UI,
                             FROM_HERE,
                             base::Bind(&LogFailure,
-                                       extension,
+                                       extension_id,
                                        api_name,
                                        base::Passed(&args),
                                        reason,
@@ -87,7 +88,7 @@ void LogFailure(const Extension* extension,
     extensions::ActivityLog* activity_log =
         extensions::ActivityLog::GetInstance(profile);
     activity_log->LogBlockedAction(
-        extension, api_name, args.get(), reason, std::string());
+        extension_id, api_name, args.get(), reason, std::string());
   }
 }
 
@@ -103,7 +104,116 @@ struct Static {
 };
 base::LazyInstance<Static> g_global_io_data = LAZY_INSTANCE_INITIALIZER;
 
+// Kills the specified process because it sends us a malformed message.
+void KillBadMessageSender(base::ProcessHandle process) {
+  NOTREACHED();
+  content::RecordAction(content::UserMetricsAction("BadMessageTerminate_EFD"));
+  if (process)
+    base::KillProcess(process, content::RESULT_CODE_KILLED_BAD_MESSAGE, false);
+}
+
+void CommonResponseCallback(IPC::Sender* ipc_sender,
+                            int routing_id,
+                            base::ProcessHandle peer_process,
+                            int request_id,
+                            ExtensionFunction::ResponseType type,
+                            const base::ListValue& results,
+                            const std::string& error) {
+  DCHECK(ipc_sender);
+
+  if (type == ExtensionFunction::BAD_MESSAGE) {
+    // The renderer has done validation before sending extension api requests.
+    // Therefore, we should never receive a request that is invalid in a way
+    // that JSON validation in the renderer should have caught. It could be an
+    // attacker trying to exploit the browser, so we crash the renderer instead.
+    LOG(ERROR) <<
+        "Terminating renderer because of malformed extension message.";
+    if (content::RenderProcessHost::run_renderer_in_process()) {
+      // In single process mode it is better if we don't suicide but just crash.
+      CHECK(false);
+    } else {
+      KillBadMessageSender(peer_process);
+    }
+
+    return;
+  }
+
+  ipc_sender->Send(new ExtensionMsg_Response(
+      routing_id, request_id, type == ExtensionFunction::SUCCEEDED, results,
+      error));
+}
+
+void IOThreadResponseCallback(
+    const base::WeakPtr<ChromeRenderMessageFilter>& ipc_sender,
+    int routing_id,
+    int request_id,
+    ExtensionFunction::ResponseType type,
+    const base::ListValue& results,
+    const std::string& error) {
+  if (!ipc_sender.get())
+    return;
+
+  CommonResponseCallback(ipc_sender.get(),
+                         routing_id,
+                         ipc_sender->peer_handle(),
+                         request_id,
+                         type,
+                         results,
+                         error);
+}
+
 }  // namespace
+
+class ExtensionFunctionDispatcher::UIThreadResponseCallbackWrapper
+    : public content::RenderViewHostObserver {
+ public:
+  UIThreadResponseCallbackWrapper(
+      const base::WeakPtr<ExtensionFunctionDispatcher>& dispatcher,
+      RenderViewHost* render_view_host)
+      : content::RenderViewHostObserver(render_view_host),
+        dispatcher_(dispatcher),
+        weak_ptr_factory_(this) {
+  }
+
+  virtual ~UIThreadResponseCallbackWrapper() {
+  }
+
+  // content::RenderViewHostObserver overrides.
+  virtual void RenderViewHostDestroyed(
+      RenderViewHost* render_view_host) OVERRIDE {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    if (dispatcher_.get()) {
+      dispatcher_->ui_thread_response_callback_wrappers_
+          .erase(render_view_host);
+    }
+
+    // This call will delete |this|.
+    content::RenderViewHostObserver::RenderViewHostDestroyed(render_view_host);
+  }
+
+  ExtensionFunction::ResponseCallback CreateCallback(int request_id) {
+    return base::Bind(
+        &UIThreadResponseCallbackWrapper::OnExtensionFunctionCompleted,
+        weak_ptr_factory_.GetWeakPtr(),
+        request_id);
+  }
+
+ private:
+  void OnExtensionFunctionCompleted(int request_id,
+                                    ExtensionFunction::ResponseType type,
+                                    const base::ListValue& results,
+                                    const std::string& error) {
+    CommonResponseCallback(
+        render_view_host(), render_view_host()->GetRoutingID(),
+        render_view_host()->GetProcess()->GetHandle(), request_id, type,
+        results, error);
+  }
+
+  base::WeakPtr<ExtensionFunctionDispatcher> dispatcher_;
+  base::WeakPtrFactory<UIThreadResponseCallbackWrapper> weak_ptr_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(UIThreadResponseCallbackWrapper);
+};
 
 extensions::WindowController*
 ExtensionFunctionDispatcher::Delegate::GetExtensionWindowController()
@@ -142,19 +252,23 @@ void ExtensionFunctionDispatcher::DispatchOnIOThread(
   const Extension* extension =
       extension_info_map->extensions().GetByID(params.extension_id);
   Profile* profile_cast = static_cast<Profile*>(profile);
+
+  ExtensionFunction::ResponseCallback callback(
+      base::Bind(&IOThreadResponseCallback, ipc_sender, routing_id,
+                 params.request_id));
+
   scoped_refptr<ExtensionFunction> function(
       CreateExtensionFunction(params, extension, render_process_id,
                               extension_info_map->process_map(),
                               g_global_io_data.Get().api.get(),
-                              profile,
-                              ipc_sender, NULL, routing_id));
+                              profile, callback));
   scoped_ptr<ListValue> args(params.arguments.DeepCopy());
 
-  if (!function) {
-    LogFailure(extension,
+  if (!function.get()) {
+    LogFailure(extension->id(),
                params.name,
                args.Pass(),
-               kAccessDenied,
+               extensions::BlockedAction::ACCESS_DENIED,
                profile_cast);
     return;
   }
@@ -170,31 +284,31 @@ void ExtensionFunctionDispatcher::DispatchOnIOThread(
   function->set_include_incognito(
       extension_info_map->IsIncognitoEnabled(extension->id()));
 
-  if (!CheckPermissions(function, extension, params, ipc_sender, routing_id)) {
-    LogFailure(extension,
+  if (!CheckPermissions(function.get(), extension, params, callback)) {
+    LogFailure(extension->id(),
                params.name,
                args.Pass(),
-               kAccessDenied,
+               extensions::BlockedAction::ACCESS_DENIED,
                profile_cast);
     return;
   }
 
   ExtensionsQuotaService* quota = extension_info_map->GetQuotaService();
   std::string violation_error = quota->Assess(extension->id(),
-                                              function,
+                                              function.get(),
                                               &params.arguments,
                                               base::TimeTicks::Now());
   if (violation_error.empty()) {
-    LogSuccess(extension,
+    LogSuccess(extension->id(),
                params.name,
                args.Pass(),
                profile_cast);
     function->Run();
   } else {
-    LogFailure(extension,
+    LogFailure(extension->id(),
                params.name,
                args.Pass(),
-               kQuotaExceeded,
+               extensions::BlockedAction::QUOTA_EXCEEDED,
                profile_cast);
     function->OnQuotaExceeded(violation_error);
   }
@@ -212,6 +326,27 @@ ExtensionFunctionDispatcher::~ExtensionFunctionDispatcher() {
 void ExtensionFunctionDispatcher::Dispatch(
     const ExtensionHostMsg_Request_Params& params,
     RenderViewHost* render_view_host) {
+  UIThreadResponseCallbackWrapperMap::const_iterator
+      iter = ui_thread_response_callback_wrappers_.find(render_view_host);
+  UIThreadResponseCallbackWrapper* callback_wrapper = NULL;
+  if (iter == ui_thread_response_callback_wrappers_.end()) {
+    callback_wrapper = new UIThreadResponseCallbackWrapper(AsWeakPtr(),
+                                                           render_view_host);
+    ui_thread_response_callback_wrappers_[render_view_host] = callback_wrapper;
+  } else {
+    callback_wrapper = iter->second;
+  }
+
+  DispatchWithCallback(params, render_view_host,
+                       callback_wrapper->CreateCallback(params.request_id));
+}
+
+void ExtensionFunctionDispatcher::DispatchWithCallback(
+    const ExtensionHostMsg_Request_Params& params,
+    RenderViewHost* render_view_host,
+    const ExtensionFunction::ResponseCallback& callback) {
+  // TODO(yzshen): There is some shared logic between this method and
+  // DispatchOnIOThread(). It is nice to deduplicate.
   ExtensionService* service = profile()->GetExtensionService();
   ExtensionProcessManager* process_manager =
       extensions::ExtensionSystem::Get(profile())->process_manager();
@@ -231,15 +366,14 @@ void ExtensionFunctionDispatcher::Dispatch(
                               render_view_host->GetProcess()->GetID(),
                               *(service->process_map()),
                               extensions::ExtensionAPI::GetSharedInstance(),
-                              profile(), render_view_host, render_view_host,
-                              render_view_host->GetRoutingID()));
+                              profile(), callback));
   scoped_ptr<ListValue> args(params.arguments.DeepCopy());
 
-  if (!function) {
-    LogFailure(extension,
+  if (!function.get()) {
+    LogFailure(extension->id(),
                params.name,
                args.Pass(),
-               kAccessDenied,
+               extensions::BlockedAction::ACCESS_DENIED,
                profile());
     return;
   }
@@ -250,35 +384,35 @@ void ExtensionFunctionDispatcher::Dispatch(
     NOTREACHED();
     return;
   }
+  function_ui->SetRenderViewHost(render_view_host);
   function_ui->set_dispatcher(AsWeakPtr());
   function_ui->set_profile(profile_);
   function->set_include_incognito(service->CanCrossIncognito(extension));
 
-  if (!CheckPermissions(function, extension, params, render_view_host,
-                        render_view_host->GetRoutingID())) {
-    LogFailure(extension,
+  if (!CheckPermissions(function.get(), extension, params, callback)) {
+    LogFailure(extension->id(),
                params.name,
                args.Pass(),
-               kAccessDenied,
+               extensions::BlockedAction::ACCESS_DENIED,
                profile());
     return;
   }
 
   ExtensionsQuotaService* quota = service->quota_service();
   std::string violation_error = quota->Assess(extension->id(),
-                                              function,
+                                              function.get(),
                                               &params.arguments,
                                               base::TimeTicks::Now());
   if (violation_error.empty()) {
     // See crbug.com/39178.
     ExternalProtocolHandler::PermitLaunchUrl();
-    LogSuccess(extension, params.name, args.Pass(), profile());
+    LogSuccess(extension->id(), params.name, args.Pass(), profile());
     function->Run();
   } else {
-    LogFailure(extension,
+    LogFailure(extension->id(),
                params.name,
                args.Pass(),
-               kQuotaExceeded,
+               extensions::BlockedAction::QUOTA_EXCEEDED,
                profile());
     function->OnQuotaExceeded(violation_error);
   }
@@ -308,12 +442,11 @@ bool ExtensionFunctionDispatcher::CheckPermissions(
     ExtensionFunction* function,
     const Extension* extension,
     const ExtensionHostMsg_Request_Params& params,
-    IPC::Sender* ipc_sender,
-    int routing_id) {
+    const ExtensionFunction::ResponseCallback& callback) {
   if (!function->HasPermission()) {
     LOG(ERROR) << "Extension " << extension->id() << " does not have "
                << "permission to function: " << params.name;
-    SendAccessDenied(ipc_sender, routing_id, params.request_id);
+    SendAccessDenied(callback);
     return false;
   }
   return true;
@@ -354,20 +487,17 @@ ExtensionFunction* ExtensionFunctionDispatcher::CreateExtensionFunction(
     const extensions::ProcessMap& process_map,
     extensions::ExtensionAPI* api,
     void* profile,
-    IPC::Sender* ipc_sender,
-    RenderViewHost* render_view_host,
-    int routing_id) {
+    const ExtensionFunction::ResponseCallback& callback) {
   if (!extension) {
     LOG(ERROR) << "Specified extension does not exist.";
-    SendAccessDenied(ipc_sender, routing_id, params.request_id);
+    SendAccessDenied(callback);
     return NULL;
   }
 
   // Most hosted apps can't call APIs.
   bool allowed = true;
   if (extension->is_hosted_app())
-      allowed = AllowHostedAppAPICall(*extension, params.source_url,
-                                      params.name);
+    allowed = AllowHostedAppAPICall(*extension, params.source_url, params.name);
 
   // Privileged APIs can only be called from the process the extension
   // is running in.
@@ -378,7 +508,7 @@ ExtensionFunction* ExtensionFunctionDispatcher::CreateExtensionFunction(
     LOG(ERROR) << "Extension API call disallowed - name:" << params.name
                << " pid:" << requesting_process_id
                << " from URL " << params.source_url.spec();
-    SendAccessDenied(ipc_sender, routing_id, params.request_id);
+    SendAccessDenied(callback);
     return NULL;
   }
 
@@ -386,7 +516,7 @@ ExtensionFunction* ExtensionFunctionDispatcher::CreateExtensionFunction(
       ExtensionFunctionRegistry::GetInstance()->NewFunction(params.name);
   if (!function) {
     LOG(ERROR) << "Unknown Extension API - " << params.name;
-    SendAccessDenied(ipc_sender, routing_id, params.request_id);
+    SendAccessDenied(callback);
     return NULL;
   }
 
@@ -397,21 +527,15 @@ ExtensionFunction* ExtensionFunctionDispatcher::CreateExtensionFunction(
   function->set_user_gesture(params.user_gesture);
   function->set_extension(extension);
   function->set_profile_id(profile);
-
-  UIThreadExtensionFunction* function_ui =
-      function->AsUIThreadExtensionFunction();
-  if (function_ui) {
-    function_ui->SetRenderViewHost(render_view_host);
-  }
+  function->set_response_callback(callback);
 
   return function;
 }
 
 // static
 void ExtensionFunctionDispatcher::SendAccessDenied(
-    IPC::Sender* ipc_sender, int routing_id, int request_id) {
+    const ExtensionFunction::ResponseCallback& callback) {
   ListValue empty_list;
-  ipc_sender->Send(new ExtensionMsg_Response(
-      routing_id, request_id, false, empty_list,
-      "Access to extension API denied."));
+  callback.Run(ExtensionFunction::FAILED, empty_list,
+               "Access to extension API denied.");
 }

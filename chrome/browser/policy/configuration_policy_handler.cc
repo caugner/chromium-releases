@@ -12,15 +12,14 @@
 #include "base/logging.h"
 #include "base/prefs/pref_value_map.h"
 #include "base/stl_util.h"
-#include "base/string16.h"
-#include "base/string_util.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/extensions/external_policy_loader.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
 #include "chrome/browser/policy/policy_error_map.h"
 #include "chrome/browser/policy/policy_map.h"
-#include "chrome/browser/policy/policy_path_parser.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/browser/prefs/proxy_prefs.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
@@ -33,6 +32,10 @@
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "policy/policy_constants.h"
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/policy/policy_path_parser.h"
+#endif
 
 namespace policy {
 
@@ -289,6 +292,8 @@ bool StringToIntEnumListPolicyHandler::CheckPolicySettings(
 void StringToIntEnumListPolicyHandler::ApplyPolicySettings(
     const PolicyMap& policies,
     PrefValueMap* prefs) {
+  if (!pref_path_)
+    return;
   const base::Value* value = policies.GetValue(policy_name());
   scoped_ptr<base::ListValue> list(new base::ListValue());
   if (value && Convert(value, list.get(), NULL))
@@ -357,6 +362,8 @@ IntRangePolicyHandler::~IntRangePolicyHandler() {
 
 void IntRangePolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
                                                 PrefValueMap* prefs) {
+  if (!pref_path_)
+    return;
   const base::Value* value = policies.GetValue(policy_name());
   int value_in_range;
   if (value && EnsureInRange(value, &value_in_range, NULL)) {
@@ -383,6 +390,8 @@ IntPercentageToDoublePolicyHandler::~IntPercentageToDoublePolicyHandler() {
 void IntPercentageToDoublePolicyHandler::ApplyPolicySettings(
     const PolicyMap& policies,
     PrefValueMap* prefs) {
+  if (!pref_path_)
+    return;
   const base::Value* value = policies.GetValue(policy_name());
   int percentage;
   if (value && EnsureInRange(value, &percentage, NULL)) {
@@ -613,6 +622,8 @@ bool ExtensionURLPatternListPolicyHandler::CheckPolicySettings(
 void ExtensionURLPatternListPolicyHandler::ApplyPolicySettings(
     const PolicyMap& policies,
     PrefValueMap* prefs) {
+  if (!pref_path_)
+    return;
   const Value* value = policies.GetValue(policy_name());
   if (value)
     prefs->SetValue(pref_path_, value->DeepCopy());
@@ -633,6 +644,8 @@ SimplePolicyHandler::~SimplePolicyHandler() {
 
 void SimplePolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
                                               PrefValueMap* prefs) {
+  if (!pref_path_)
+    return;
   const Value* value = policies.GetValue(policy_name());
   if (value)
     prefs->SetValue(pref_path_, value->DeepCopy());
@@ -678,6 +691,9 @@ void AutofillPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
   }
 }
 
+// Android doesn't support these policies, and doesn't have a policy_path_parser
+// implementation.
+#if !defined(OS_ANDROID)
 
 // DownloadDirPolicyHandler implementation -------------------------------------
 
@@ -733,6 +749,7 @@ void DiskCacheDirPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
   }
 }
 
+#endif  // !defined(OS_ANDROID)
 
 // FileSelectionDialogsHandler implementation ----------------------------------
 
@@ -1392,69 +1409,72 @@ void JavascriptPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
   }
 }
 
-// ClearSiteDataOnExitPolicyHandler implementation -----------------------------
+// URLBlacklistPolicyHandler implementation ------------------------------------
 
-ClearSiteDataOnExitPolicyHandler::ClearSiteDataOnExitPolicyHandler()
-    : TypeCheckingPolicyHandler(key::kClearSiteDataOnExit,
-                                Value::TYPE_BOOLEAN) {
+URLBlacklistPolicyHandler::URLBlacklistPolicyHandler() {
 }
 
-ClearSiteDataOnExitPolicyHandler::~ClearSiteDataOnExitPolicyHandler() {
+URLBlacklistPolicyHandler::~URLBlacklistPolicyHandler() {
 }
 
-bool ClearSiteDataOnExitPolicyHandler::CheckPolicySettings(
-    const PolicyMap& policies,
-    PolicyErrorMap* errors) {
-  ContentSetting content_setting = CONTENT_SETTING_DEFAULT;
-  if (ClearSiteDataEnabled(policies) &&
-      GetContentSetting(policies, &content_setting) &&
-      content_setting == CONTENT_SETTING_ALLOW) {
-    errors->AddError(key::kDefaultCookiesSetting,
-                     IDS_POLICY_OVERRIDDEN,
-                     policy_name());
+bool URLBlacklistPolicyHandler::CheckPolicySettings(const PolicyMap& policies,
+                                                    PolicyErrorMap* errors) {
+  const Value* disabled_schemes = policies.GetValue(key::kDisabledSchemes);
+  const Value* url_blacklist = policies.GetValue(key::kURLBlacklist);
+
+  if (disabled_schemes && !disabled_schemes->IsType(Value::TYPE_LIST)) {
+    errors->AddError(key::kDisabledSchemes,
+                     IDS_POLICY_TYPE_ERROR,
+                     ValueTypeToString(Value::TYPE_LIST));
   }
 
-  return TypeCheckingPolicyHandler::CheckPolicySettings(policies, errors);
+  if (url_blacklist && !url_blacklist->IsType(Value::TYPE_LIST)) {
+      errors->AddError(key::kURLBlacklist,
+                       IDS_POLICY_TYPE_ERROR,
+                       ValueTypeToString(Value::TYPE_LIST));
+  }
+
+  return true;
 }
 
-void ClearSiteDataOnExitPolicyHandler::ApplyPolicySettings(
-    const PolicyMap& policies,
-    PrefValueMap* prefs) {
-  if (ClearSiteDataEnabled(policies)) {
-    ContentSetting content_setting = CONTENT_SETTING_DEFAULT;
-    if (!GetContentSetting(policies, &content_setting) ||
-        content_setting == CONTENT_SETTING_ALLOW) {
-      prefs->SetValue(
-          prefs::kManagedDefaultCookiesSetting,
-          Value::CreateIntegerValue(CONTENT_SETTING_SESSION_ONLY));
+void URLBlacklistPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
+                                                    PrefValueMap* prefs) {
+  const base::Value* url_blacklist_policy =
+      policies.GetValue(key::kURLBlacklist);
+  const base::ListValue* url_blacklist = NULL;
+  if (url_blacklist_policy)
+    url_blacklist_policy->GetAsList(&url_blacklist);
+  const base::Value* disabled_schemes_policy =
+      policies.GetValue(key::kDisabledSchemes);
+  const base::ListValue* disabled_schemes = NULL;
+  if (disabled_schemes_policy)
+    disabled_schemes_policy->GetAsList(&disabled_schemes);
+
+  scoped_ptr<base::ListValue> merged_url_blacklist(new base::ListValue());
+
+  // We start with the DisabledSchemes because we have size limit when
+  // handling URLBacklists.
+  if (disabled_schemes_policy) {
+    for (base::ListValue::const_iterator entry(disabled_schemes->begin());
+         entry != disabled_schemes->end(); ++entry) {
+      std::string entry_value;
+      if ((*entry)->GetAsString(&entry_value)) {
+        entry_value.append("://*");
+        merged_url_blacklist->AppendString(entry_value);
+      }
     }
   }
-}
 
-bool ClearSiteDataOnExitPolicyHandler::ClearSiteDataEnabled(
-    const PolicyMap& policies) {
-  const base::Value* value = NULL;
-  PolicyErrorMap errors;
-  bool clear_site_data = false;
-
-  return (CheckAndGetValue(policies, &errors, &value) &&
-          value &&
-          value->GetAsBoolean(&clear_site_data) &&
-          clear_site_data);
-}
-
-// static
-bool ClearSiteDataOnExitPolicyHandler::GetContentSetting(
-    const PolicyMap& policies,
-    ContentSetting* content_setting) {
-  const base::Value* value = policies.GetValue(key::kDefaultCookiesSetting);
-  int setting = CONTENT_SETTING_DEFAULT;
-  if (value && value->GetAsInteger(&setting)) {
-    *content_setting = static_cast<ContentSetting>(setting);
-    return true;
+  if (url_blacklist_policy) {
+    for (base::ListValue::const_iterator entry(url_blacklist->begin());
+         entry != url_blacklist->end(); ++entry) {
+      if ((*entry)->IsType(Value::TYPE_STRING))
+        merged_url_blacklist->Append((*entry)->DeepCopy());
+    }
   }
 
-  return false;
+  if (disabled_schemes_policy || url_blacklist_policy)
+    prefs->SetValue(prefs::kUrlBlacklist, merged_url_blacklist.release());
 }
 
 // RestoreOnStartupPolicyHandler implementation --------------------------------

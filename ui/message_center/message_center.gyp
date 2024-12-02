@@ -14,10 +14,9 @@
         '../../base/base.gyp:base',
         '../../base/base.gyp:base_i18n',
         '../../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
-        '../../build/temp_gyp/googleurl.gyp:googleurl',
         '../../skia/skia.gyp:skia',
+        '../../url/url.gyp:url_lib',
         '../base/strings/ui_strings.gyp:ui_strings',
-        '../compositor/compositor.gyp:compositor',
         '../ui.gyp:ui',
         '../ui.gyp:ui_resources',
       ],
@@ -31,14 +30,25 @@
         'cocoa/popup_collection.mm',
         'cocoa/popup_controller.h',
         'cocoa/popup_controller.mm',
+        'cocoa/settings_controller.h',
+        'cocoa/settings_controller.mm',
+        'cocoa/status_item_view.h',
+        'cocoa/status_item_view.mm',
+        'cocoa/tray_controller.h',
+        'cocoa/tray_controller.mm',
+        'cocoa/tray_view_controller.h',
+        'cocoa/tray_view_controller.mm',
+        'dummy_message_center.cc',
         'message_center.cc',
         'message_center.h',
-        'message_center_constants.cc',
-        'message_center_constants.h',
         'message_center_export.h',
+        'notification_delegate.cc',
+        'notification_delegate.h',
         'message_center_impl.cc',
         'message_center_impl.h',
         'message_center_observer.h',
+        'message_center_style.cc',
+        'message_center_style.h',
         'message_center_switches.cc',
         'message_center_switches.h',
         'message_center_tray.cc',
@@ -97,8 +107,40 @@
             '../../third_party/GTM',
           ],
         }],
+        ['toolkit_views==1', {
+          'dependencies': [
+            '../compositor/compositor.gyp:compositor',
+          ],
+        }],
+        ['notifications==0', {  # Android and iOS.
+          'sources/': [
+            # Exclude everything except dummy impl.
+            ['exclude', '\\.(cc|mm)$'],
+            ['include', '^dummy_message_center\\.cc$'],
+            ['include', '^message_center_switches\\.cc$'],
+          ],
+        }, {  # notifications==1
+          'sources!': [ 'dummy_message_center.cc' ],
+        }],
       ],
     },  # target_name: message_center
+    {
+      'target_name': 'message_center_test_support',
+      'type': 'static_library',
+      'dependencies': [
+        '../../base/base.gyp:base',
+        '../../base/base.gyp:test_support_base',
+        '../../skia/skia.gyp:skia',
+        '../ui.gyp:ui',
+        'message_center',
+      ],
+      'sources': [
+        'fake_message_center.h',
+        'fake_message_center.cc',
+        'fake_notifier_settings_provider.h',
+        'fake_notifier_settings_provider.cc',
+      ],
+    },  # target_name: message_center_test_support
     {
       'target_name': 'message_center_unittests',
       'type': 'executable',
@@ -110,14 +152,18 @@
         '../ui.gyp:run_ui_unittests',
         '../ui.gyp:ui',
         'message_center',
+        'message_center_test_support',
       ],
       'sources': [
         'cocoa/notification_controller_unittest.mm',
         'cocoa/popup_collection_unittest.mm',
         'cocoa/popup_controller_unittest.mm',
+        'cocoa/settings_controller_unittest.mm',
+        'cocoa/status_item_view_unittest.mm',
+        'cocoa/tray_controller_unittest.mm',
+        'cocoa/tray_view_controller_unittest.mm',
         'message_center_tray_unittest.cc',
-        'fake_message_center.h',
-        'fake_message_center.cc',
+        'message_center_impl_unittest.cc',
         'notification_list_unittest.cc',
         'test/run_all_unittests.cc',
       ],
@@ -132,7 +178,6 @@
             # Compositor is needed by message_center_view_unittest.cc
             # and for the fonts used by bounded_label_unittest.cc.
             '../compositor/compositor.gyp:compositor',
-            '../compositor/compositor.gyp:compositor_test_support',
             '../views/views.gyp:views',
             '../views/views.gyp:views_test_support',
           ],
@@ -140,6 +185,13 @@
             'views/bounded_label_unittest.cc',
             'views/message_center_view_unittest.cc',
             'views/message_popup_collection_unittest.cc',
+          ],
+        }],
+        ['notifications==0', {  # Android and iOS.
+          'sources/': [
+            # Exclude everything except main().
+            ['exclude', '\\.(cc|mm)$'],
+            ['include', '^test/run_all_unittests\\.cc$'],
           ],
         }],
       ],

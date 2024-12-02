@@ -8,26 +8,28 @@
 #include <string>
 #include <vector>
 
+#if defined(ENABLE_PLUGINS)
+#include <set>
+#endif
+
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "content/public/renderer/content_renderer_client.h"
 
 class ChromeRenderProcessObserver;
 class ExtensionSet;
+class PrescientNetworkingDispatcher;
 class RendererNetPredictor;
 class SpellCheck;
 class SpellCheckProvider;
 
 struct ChromeViewHostMsg_GetPluginInfo_Output;
 
-namespace components {
-class VisitedLinkSlave;
-}
-
 namespace extensions {
 class Dispatcher;
 class Extension;
+class RendererPermissionsPolicyDelegate;
 }
 
 namespace prerender {
@@ -38,6 +40,10 @@ namespace safe_browsing {
 class PhishingClassifierFilter;
 }
 
+namespace visitedlink {
+class VisitedLinkSlave;
+}
+
 namespace webkit {
 struct WebPluginInfo;
 }
@@ -45,6 +51,10 @@ struct WebPluginInfo;
 namespace WebKit {
 class WebSecurityOrigin;
 }
+
+#if defined(ENABLE_WEBRTC)
+class WebRtcLoggingMessageFilter;
+#endif
 
 namespace chrome {
 
@@ -87,6 +97,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                           const GURL& url,
                           const std::string& http_method,
                           bool is_initial_navigation,
+                          bool is_server_redirect,
                           bool* send_referrer) OVERRIDE;
   virtual bool WillSendRequest(WebKit::WebFrame* frame,
                                content::PageTransition transition_type,
@@ -105,6 +116,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                                              size_t length) OVERRIDE;
   virtual bool IsLinkVisited(unsigned long long link_hash) OVERRIDE;
   virtual void PrefetchHostName(const char* hostname, size_t length) OVERRIDE;
+  virtual WebKit::WebPrescientNetworking* GetPrescientNetworking() OVERRIDE;
   virtual bool ShouldOverridePageVisibilityState(
       const content::RenderView* render_view,
       WebKit::WebPageVisibilityState* override_state) const OVERRIDE;
@@ -120,8 +132,13 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       WebKit::WebPluginContainer* container) const OVERRIDE;
   virtual void RegisterPPAPIInterfaceFactories(
       webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager) OVERRIDE;
+  // TODO(victorhsieh): move to ChromeContentBrowserClient once we migrate
+  // PPAPI FileIO host to browser.
+  virtual bool IsPluginAllowedToCallRequestOSFileHandle(
+      WebKit::WebPluginContainer* container) const OVERRIDE;
   virtual WebKit::WebSpeechSynthesizer* OverrideSpeechSynthesizer(
       WebKit::WebSpeechSynthesizerClient* client) OVERRIDE;
+  virtual bool AllowPepperMediaStreamAPI(const GURL& url) const OVERRIDE;
 
   // For testing.
   void SetExtensionDispatcher(extensions::Dispatcher* extension_dispatcher);
@@ -172,11 +189,21 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
 
   scoped_ptr<ChromeRenderProcessObserver> chrome_observer_;
   scoped_ptr<extensions::Dispatcher> extension_dispatcher_;
+  scoped_ptr<extensions::RendererPermissionsPolicyDelegate>
+      permissions_policy_delegate_;
+  scoped_ptr<PrescientNetworkingDispatcher> prescient_networking_dispatcher_;
   scoped_ptr<RendererNetPredictor> net_predictor_;
   scoped_ptr<SpellCheck> spellcheck_;
-  scoped_ptr<components::VisitedLinkSlave> visited_link_slave_;
+  scoped_ptr<visitedlink::VisitedLinkSlave> visited_link_slave_;
   scoped_ptr<safe_browsing::PhishingClassifierFilter> phishing_classifier_;
   scoped_ptr<prerender::PrerenderDispatcher> prerender_dispatcher_;
+#if defined(ENABLE_WEBRTC)
+  scoped_refptr<WebRtcLoggingMessageFilter> webrtc_logging_message_filter_;
+#endif
+
+#if defined(ENABLE_PLUGINS)
+  std::set<std::string> allowed_file_handle_origins_;
+#endif
 };
 
 }  // namespace chrome

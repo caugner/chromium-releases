@@ -8,12 +8,13 @@
 #include "base/bind_helpers.h"
 #include "base/file_util.h"
 #include "base/i18n/file_util_icu.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/common/constants.h"
@@ -43,13 +44,14 @@ void DeleteShortcutsOnFileThread(
 }
 
 void UpdateShortcutsOnFileThread(
+    const string16& old_app_title,
     const ShellIntegration::ShortcutInfo& shortcut_info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   base::FilePath shortcut_data_dir = web_app::GetWebAppDataDirectory(
       shortcut_info.profile_path, shortcut_info.extension_id, GURL());
   return web_app::internals::UpdatePlatformShortcuts(
-      shortcut_data_dir, shortcut_info);
+      shortcut_data_dir, old_app_title, shortcut_info);
 }
 
 }  // namespace
@@ -108,7 +110,9 @@ base::FilePath GetWebAppDataDirectory(const base::FilePath& profile_path,
 base::FilePath GetWebAppDataDirectory(const base::FilePath& profile_path,
                                       const extensions::Extension& extension) {
   return GetWebAppDataDirectory(
-      profile_path, extension.id(), GURL(extension.launch_web_url()));
+      profile_path,
+      extension.id(),
+      GURL(extensions::AppLaunchInfo::GetLaunchWebURL(&extension)));
 }
 
 std::string GenerateApplicationNameFromInfo(
@@ -164,13 +168,14 @@ void DeleteAllShortcuts(const ShellIntegration::ShortcutInfo& shortcut_info) {
       base::Bind(&DeleteShortcutsOnFileThread, shortcut_info));
 }
 
-void UpdateAllShortcuts(const ShellIntegration::ShortcutInfo& shortcut_info) {
+void UpdateAllShortcuts(const string16& old_app_title,
+                        const ShellIntegration::ShortcutInfo& shortcut_info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   BrowserThread::PostTask(
       BrowserThread::FILE,
       FROM_HERE,
-      base::Bind(&UpdateShortcutsOnFileThread, shortcut_info));
+      base::Bind(&UpdateShortcutsOnFileThread, old_app_title, shortcut_info));
 }
 
 bool CreateShortcutsOnFileThread(

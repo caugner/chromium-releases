@@ -30,10 +30,12 @@ var privateHelpers = {
             self.onNetworkChange);
         done();
       };
-      var expectedState = expectedStates.pop();
-      assertEq(expectedState, properties.ConnectionState);
-      if (expectedStates.length == 0)
-        finishTest();
+      if (expectedStates.length > 0) {
+        var expectedState = expectedStates.pop();
+        assertEq(expectedState, properties.ConnectionState);
+        if (expectedStates.length == 0)
+          finishTest();
+      }
     };
     this.onNetworkChange = function(changes) {
       assertEq([network], changes);
@@ -60,17 +62,21 @@ var availableTests = [
     chrome.networkingPrivate.startConnect("stub_wifi2", callbackPass());
   },
   function startDisconnect() {
-    chrome.networkingPrivate.startDisconnect("stub_wifi2", callbackPass());
+    // Must connect to a network before we can disconnect from it.
+    chrome.networkingPrivate.startConnect("stub_wifi2", callbackPass(
+      function() {
+        chrome.networkingPrivate.startDisconnect("stub_wifi2", callbackPass());
+      }));
   },
   function startConnectNonexistent() {
     chrome.networkingPrivate.startConnect(
       "nonexistent_path",
-      callbackFail("Error.InvalidService"));
+      callbackFail("not-found"));
   },
   function startDisconnectNonexistent() {
     chrome.networkingPrivate.startDisconnect(
       "nonexistent_path",
-      callbackFail("Error.InvalidService"));
+      callbackFail("not-found"));
   },
   function startGetPropertiesNonexistent() {
     chrome.networkingPrivate.getProperties(
@@ -276,7 +282,7 @@ var availableTests = [
   function onNetworksChangedEventConnect() {
     var network = "stub_wifi2";
     var done = chrome.test.callbackAdded();
-    var expectedStates = ["Connected", "Connecting"];
+    var expectedStates = ["Connected"];
     var listener =
         new privateHelpers.watchForStateChanges(network, expectedStates, done);
     chrome.networkingPrivate.startConnect(network, callbackPass());

@@ -5,7 +5,6 @@
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
@@ -151,7 +150,7 @@ void DeviceSettingsService::GetOwnershipStatusAsync(
     const OwnershipStatusCallback& callback) {
   if (owner_key_.get()) {
     // If there is a key, report status immediately.
-    MessageLoop::current()->PostTask(
+    base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(callback,
                    owner_key_->public_key() ? OWNERSHIP_TAKEN : OWNERSHIP_NONE,

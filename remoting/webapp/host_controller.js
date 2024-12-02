@@ -9,46 +9,30 @@ var remoting = remoting || {};
 
 /** @constructor */
 remoting.HostController = function() {
-  /** @type {remoting.HostController} */
-  var that = this;
-
-  /** @type {boolean} @private */
-  this.pluginSupported_ = true;
-
-  /** @type {remoting.HostNativeMessaging} @private */
-  this.plugin_ = new remoting.HostNativeMessaging();
-
-  /** @param {boolean} success */
-  var onNativeMessagingInit = function(success) {
-    if (success) {
-      console.log('Native Messaging supported.');
-    } else {
-      console.log('Native Messaging unsupported, falling back to NPAPI.');
-      var plugin = remoting.HostSession.createPlugin();
-      that.plugin_ = new remoting.HostPluginWrapper(plugin);
-      /** @type {HTMLElement} @private */
-      var container = document.getElementById('daemon-plugin-container');
-      container.appendChild(plugin);
-    }
-
-    /** @param {string} version */
-    var printVersion = function(version) {
-      if (version == '') {
-        console.log('Host not installed.');
-      } else {
-        console.log('Host version: ' + version);
-      }
-    };
-    that.pluginSupported_ = true;
-    try {
-      that.plugin_.getDaemonVersion(printVersion);
-    } catch (err) {
-      console.log('Host version not available.');
-      that.pluginSupported_ = false;
-    }
+  /** @return {remoting.HostPlugin} */
+  var createNpapiPlugin = function() {
+    var plugin = remoting.HostSession.createPlugin();
+    /** @type {HTMLElement} @private */
+    var container = document.getElementById('daemon-plugin-container');
+    container.appendChild(plugin);
+    return plugin;
   }
 
-  this.plugin_.initialize(onNativeMessagingInit);
+  /** @type {remoting.HostDispatcher} @private */
+  this.hostDispatcher_ = new remoting.HostDispatcher(createNpapiPlugin);
+
+  /** @param {string} version */
+  var printVersion = function(version) {
+    if (version == '') {
+      console.log('Host not installed.');
+    } else {
+      console.log('Host version: ' + version);
+    }
+  };
+
+  this.hostDispatcher_.getDaemonVersion(printVersion, function() {
+    console.log('Host version not available.');
+  });
 }
 
 // Note that the values in the enums below are copied from
@@ -74,21 +58,12 @@ remoting.HostController.AsyncResult = {
 };
 
 /**
- * Checks whether or not the host plugin is valid.
- *
- * @return {boolean} True if the plugin is supported and loaded; false
- *     otherwise.
- */
-remoting.HostController.prototype.isPluginSupported = function() {
-  return this.pluginSupported_;
-};
-
-/**
  * @param {function(boolean, boolean, boolean):void} callback Callback to be
  *     called when done.
  */
 remoting.HostController.prototype.getConsent = function(callback) {
-  this.plugin_.getUsageStatsConsent(callback);
+  this.hostDispatcher_.getUsageStatsConsent(callback,
+                                            remoting.showErrorMessage);
 };
 
 /**
@@ -144,8 +119,9 @@ remoting.HostController.prototype.start = function(hostPin, consent, callback) {
     var success = (xhr.status == 200);
 
     if (success) {
-      that.plugin_.getPinHash(newHostId, hostPin, startHostWithHash.bind(
-          null, hostName, publicKey, privateKey, xhr));
+      that.hostDispatcher_.getPinHash(newHostId, hostPin,
+          startHostWithHash.bind(null, hostName, publicKey, privateKey, xhr),
+          remoting.showErrorMessage);
     } else {
       console.log('Failed to register the host. Status: ' + xhr.status +
                   ' response: ' + xhr.responseText);
@@ -162,19 +138,20 @@ remoting.HostController.prototype.start = function(hostPin, consent, callback) {
    */
   function startHostWithHash(hostName, publicKey, privateKey, xhr,
                              hostSecretHash) {
-    var hostConfig = JSON.stringify({
+    var hostConfig = {
         xmpp_login: remoting.identity.getCachedEmail(),
         oauth_refresh_token: remoting.oauth2.exportRefreshToken(),
         host_id: newHostId,
         host_name: hostName,
         host_secret_hash: hostSecretHash,
         private_key: privateKey
-    });
+    };
     /** @param {remoting.HostController.AsyncResult} result */
     var onStartDaemon = function(result) {
       onStarted(callback, result, hostName, publicKey);
     };
-    that.plugin_.startDaemon(hostConfig, consent, onStartDaemon);
+    that.hostDispatcher_.startDaemon(hostConfig, consent, onStartDaemon,
+                                     remoting.showErrorMessage);
   }
 
   /**
@@ -225,10 +202,12 @@ remoting.HostController.prototype.start = function(hostPin, consent, callback) {
    * @return {void} Nothing.
    */
   function startWithHostname(hostName) {
-    that.plugin_.generateKeyPair(onKeyGenerated.bind(null, hostName));
+    that.hostDispatcher_.generateKeyPair(onKeyGenerated.bind(null, hostName),
+                                         remoting.showErrorMessage);
   }
 
-  this.plugin_.getHostName(startWithHostname);
+  this.hostDispatcher_.getHostName(startWithHostname,
+                                   remoting.showErrorMessage);
 };
 
 /**
@@ -265,33 +244,18 @@ remoting.HostController.prototype.stop = function(callback) {
     that.getLocalHostId(unregisterHost.bind(null, result));
   };
 
-  this.plugin_.stopDaemon(onStopped);
+  this.hostDispatcher_.stopDaemon(onStopped, remoting.showErrorMessage);
 };
 
 /**
- * Parse a stringified host configuration and return it as a dictionary if it
- * is well-formed and contains both host_id and xmpp_login keys.  null is
- * returned if either key is missing, or if the configuration is corrupt.
- * @param {string} configStr The host configuration, JSON encoded to a string.
- * @return {Object.<string,string>|null} The host configuration.
+ * Check the host configuration is valid (non-null, and contains both host_id
+ * and xmpp_login keys).
+ * @param {Object} config The host configuration.
+ * @return {boolean} True if it is valid.
  */
-function parseHostConfig_(configStr) {
-  var config = /** @type {Object.<string,string>} */ jsonParseSafe(configStr);
-  if (config &&
-      typeof config['host_id'] == 'string' &&
-      typeof config['xmpp_login'] == 'string') {
-    return config;
-  } else {
-    // {} means that host is not configured; '' means that the config file could
-    // not be read.
-    // TODO(jamiewalch): '' is expected if the host isn't installed, but should
-    // be reported as an error otherwise. Fix this once we have an event-based
-    // daemon state mechanism.
-    if (configStr != '{}' && configStr != '') {
-      console.error('Invalid getDaemonConfig response.');
-    }
-  }
-  return null;
+function isHostConfigValid_(config) {
+  return !!config && typeof config['host_id'] == 'string' &&
+      typeof config['xmpp_login'] == 'string';
 }
 
 /**
@@ -304,28 +268,30 @@ remoting.HostController.prototype.updatePin = function(newPin, callback) {
   /** @type {remoting.HostController} */
   var that = this;
 
-  /** @param {string} configStr */
-  function onConfig(configStr) {
-    var config = parseHostConfig_(configStr);
-    if (!config) {
+  /** @param {Object} config */
+  function onConfig(config) {
+    if (!isHostConfigValid_(config)) {
       callback(remoting.HostController.AsyncResult.FAILED);
       return;
     }
+    /** @type {string} */
     var hostId = config['host_id'];
-    that.plugin_.getPinHash(hostId, newPin, updateDaemonConfigWithHash);
-  };
+    that.hostDispatcher_.getPinHash(hostId, newPin, updateDaemonConfigWithHash,
+                                    remoting.showErrorMessage);
+  }
 
   /** @param {string} pinHash */
   function updateDaemonConfigWithHash(pinHash) {
-    var newConfig = JSON.stringify({
-        host_secret_hash: pinHash
-      });
-    that.plugin_.updateDaemonConfig(newConfig, callback);
-  };
+    var newConfig = {
+      host_secret_hash: pinHash
+    };
+    that.hostDispatcher_.updateDaemonConfig(newConfig, callback,
+                                            remoting.showErrorMessage);
+  }
 
   // TODO(sergeyu): When crbug.com/121518 is fixed: replace this call
-  // with an upriveleged version if that is necessary.
-  this.plugin_.getDaemonConfig(onConfig);
+  // with an unprivileged version if that is necessary.
+  this.hostDispatcher_.getDaemonConfig(onConfig, remoting.showErrorMessage);
 };
 
 /**
@@ -335,7 +301,9 @@ remoting.HostController.prototype.updatePin = function(newPin, callback) {
  *     Completion callback.
  */
 remoting.HostController.prototype.getLocalHostState = function(onDone) {
-  this.plugin_.getDaemonState(onDone);
+  this.hostDispatcher_.getDaemonState(onDone, function() {
+    onDone(remoting.HostController.State.NOT_IMPLEMENTED);
+  });
 };
 
 /**
@@ -346,20 +314,18 @@ remoting.HostController.prototype.getLocalHostState = function(onDone) {
 remoting.HostController.prototype.getLocalHostId = function(onDone) {
   /** @type {remoting.HostController} */
   var that = this;
-  /** @param {string} configStr */
-  function onConfig(configStr) {
-    var config = parseHostConfig_(configStr);
+  /** @param {Object} config */
+  function onConfig(config) {
     var hostId = null;
-    if (config) {
-      hostId = config['host_id'];
+    if (isHostConfigValid_(config)) {
+      hostId = /** @type {string} */ config['host_id'];
     }
     onDone(hostId);
   };
-  try {
-    this.plugin_.getDaemonConfig(onConfig);
-  } catch (err) {
+
+  this.hostDispatcher_.getDaemonConfig(onConfig, function(error) {
     onDone(null);
-  }
+  });
 };
 
 /** @type {remoting.HostController} */

@@ -12,7 +12,7 @@
 #include "base/bind_helpers.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread_restrictions.h"
 #include "content/public/browser/browser_context.h"
@@ -122,7 +122,7 @@ void CookieManager::ExecCookieTask(const CookieTask& task,
                                    const bool wait_for_completion) {
   base::WaitableEvent completion(false, false);
 
-  DCHECK(cookie_monster_);
+  DCHECK(cookie_monster_.get());
 
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
       base::Bind(task, wait_for_completion ? &completion : NULL));
@@ -134,7 +134,7 @@ void CookieManager::ExecCookieTask(const CookieTask& task,
 }
 
 void CookieManager::SetCookieMonster(net::CookieMonster* cookie_monster) {
-  DCHECK(!cookie_monster_);
+  DCHECK(!cookie_monster_.get());
   cookie_monster_ = cookie_monster;
 }
 

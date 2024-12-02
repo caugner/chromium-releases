@@ -19,6 +19,7 @@ class TimeDelta;
 class Value;
 }
 
+class DevToolsClient;
 struct Geoposition;
 class JavaScriptDialogManager;
 struct KeyEvent;
@@ -34,6 +35,9 @@ class WebView {
 
   // Make DevToolsCient connect to DevTools if it is disconnected.
   virtual Status ConnectIfNecessary() = 0;
+
+  // Handles events that have been received but not yet handled.
+  virtual Status HandleReceivedEvents() = 0;
 
   // Load a given URL in the main frame.
   virtual Status Load(const std::string& url) = 0;
@@ -101,14 +105,16 @@ class WebView {
 
   // Waits until all pending navigations have completed in the given frame.
   // If |frame_id| is "", waits for navigations on the main frame.
-  virtual Status WaitForPendingNavigations(const std::string& frame_id) = 0;
+  // If a modal dialog appears while waiting, kUnexpectedAlertOpen will be
+  // returned.
+  // If there are still pending navigations after |timeout|ms,
+  // page load is stopped, and kTimeout status is returned.
+  virtual Status WaitForPendingNavigations(const std::string& frame_id,
+                                           int timeout) = 0;
 
   // Returns whether the frame is pending navigation.
   virtual Status IsPendingNavigation(
       const std::string& frame_id, bool* is_pending) = 0;
-
-  // Returns the frame id for the main frame.
-  virtual Status GetMainFrame(std::string* out_frame) = 0;
 
   // Returns the JavaScriptDialogManager. Never null.
   virtual JavaScriptDialogManager* GetJavaScriptDialogManager() = 0;

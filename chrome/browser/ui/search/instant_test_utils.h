@@ -10,7 +10,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/run_loop.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -19,7 +19,7 @@
 #include "chrome/browser/ui/search/instant_overlay_model_observer.h"
 #include "chrome/common/search_types.h"
 #include "googleurl/src/gurl.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 
 class InstantController;
 class InstantModel;
@@ -88,12 +88,13 @@ class InstantTestBase {
   void KillInstantRenderView();
 
   void FocusOmnibox();
-  void FocusOmniboxAndWaitForInstantOverlaySupport();
-  void FocusOmniboxAndWaitForInstantOverlayAndNTPSupport();
+  void FocusOmniboxAndWaitForInstantNTPSupport();
 
   void SetOmniboxText(const std::string& text);
   bool SetOmniboxTextAndWaitForOverlayToShow(const std::string& text);
   void SetOmniboxTextAndWaitForSuggestion(const std::string& text);
+
+  void PressEnterAndWaitForNavigation();
 
   bool GetBoolFromJS(content::WebContents* contents,
                      const std::string& script,

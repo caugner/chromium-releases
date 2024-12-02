@@ -25,11 +25,14 @@ class MockUserManager : public UserManager {
 
   MOCK_METHOD0(Shutdown, void(void));
   MOCK_CONST_METHOD0(GetUsers, const UserList&(void));
+  MOCK_CONST_METHOD0(GetUsersAdmittedForMultiProfile, UserList(void));
   MOCK_CONST_METHOD0(GetLoggedInUsers, const UserList&(void));
+  MOCK_METHOD0(GetLRULoggedInUsers, const UserList&(void));
   MOCK_METHOD3(UserLoggedIn, void(
       const std::string&, const std::string&, bool));
   MOCK_METHOD1(SwitchActiveUser, void(const std::string& email));
   MOCK_METHOD0(SessionStarted, void(void));
+  MOCK_METHOD0(RestoreActiveSessions, void(void));
   MOCK_METHOD2(RemoveUser, void(const std::string&, RemoveUserDelegate*));
   MOCK_METHOD1(RemoveUserFromList, void(const std::string&));
   MOCK_CONST_METHOD1(IsKnownUser, bool(const std::string&));
@@ -56,6 +59,7 @@ class MockUserManager : public UserManager {
   MOCK_CONST_METHOD0(IsLoggedInAsKioskApp, bool(void));
   MOCK_CONST_METHOD0(IsLoggedInAsStub, bool(void));
   MOCK_CONST_METHOD0(IsSessionStarted, bool(void));
+  MOCK_CONST_METHOD0(UserSessionsRestored, bool(void));
   MOCK_CONST_METHOD0(HasBrowserRestarted, bool(void));
   MOCK_CONST_METHOD1(IsUserNonCryptohomeDataEphemeral,
                      bool(const std::string&));
@@ -66,16 +70,20 @@ class MockUserManager : public UserManager {
   MOCK_METHOD1(RemoveSessionStateObserver,
                void(UserManager::UserSessionStateObserver*));
   MOCK_METHOD0(NotifyLocalStateChanged, void(void));
-  MOCK_METHOD0(CreateLocallyManagedUserRecord, void(void));
   MOCK_CONST_METHOD0(GetMergeSessionState, MergeSessionState(void));
   MOCK_METHOD1(SetMergeSessionState, void(MergeSessionState));
   MOCK_METHOD2(SetUserFlow, void(const std::string&, UserFlow*));
   MOCK_METHOD1(ResetUserFlow, void(const std::string&));
   MOCK_CONST_METHOD1(GetManagerForManagedUser, std::string(
       const std::string& managed_user_id));
-  MOCK_METHOD2(CreateLocallyManagedUserRecord, const User*(
-      const std::string& e_mail,
-      const string16& display_name));
+  MOCK_METHOD3(CreateLocallyManagedUserRecord, const User*(
+      const std::string&,
+      const std::string&,
+      const string16&));
+  MOCK_CONST_METHOD1(GetManagerDisplayNameForManagedUser, string16(
+      const std::string&));
+  MOCK_CONST_METHOD1(GetManagerUserIdForManagedUser, std::string(
+      const std::string&));
   MOCK_METHOD0(GenerateUniqueLocallyManagedUserId, std::string(void));
   MOCK_METHOD1(StartLocallyManagedUserCreationTransaction,
       void(const string16&));
@@ -87,6 +95,7 @@ class MockUserManager : public UserManager {
                                                      std::string*));
   MOCK_METHOD2(SetAppModeChromeClientOAuthInfo, void(const std::string&,
                                                      const std::string&));
+  MOCK_CONST_METHOD0(AreLocallyManagedUsersAllowed, bool(void));
 
   // You can't mock these functions easily because nobody can create
   // User objects but the UserManagerImpl and us.

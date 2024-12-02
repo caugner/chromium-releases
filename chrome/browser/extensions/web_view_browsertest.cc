@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/automation/automation_util.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
@@ -13,7 +13,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
@@ -43,7 +42,7 @@ class MockWebContentsDelegate : public content::WebContentsDelegate {
       const content::MediaStreamRequest& request,
       const content::MediaResponseCallback& callback) OVERRIDE {
     requested_ = true;
-    if (message_loop_runner_)
+    if (message_loop_runner_.get())
       message_loop_runner_->Quit();
   }
 
@@ -104,7 +103,7 @@ class MockDownloadWebContentsDelegate : public content::WebContentsDelegate {
 
     if (waiting_for_decision_) {
       EXPECT_EQ(expect_allow_, allow);
-      if (message_loop_runner_)
+      if (message_loop_runner_.get())
         message_loop_runner_->Quit();
       return;
     }
@@ -353,28 +352,25 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
     EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
   }
 
-  void GeolocationTestHelper(const std::string& test_name) {
+  void GeolocationTestHelper(const std::string& test_name,
+                             const std::string& app_location) {
     ASSERT_TRUE(StartTestServer());  // For serving guest pages.
     ExtensionTestMessageListener launched_listener("Launched", false);
-    LoadAndLaunchPlatformApp("web_view/geolocation/embedder_has_permission");
+    LoadAndLaunchPlatformApp(app_location.c_str());
     ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
 
     content::WebContents* embedder_web_contents =
         GetFirstShellWindowWebContents();
     ASSERT_TRUE(embedder_web_contents);
 
-    ExtensionTestMessageListener done_listener("DoneGeolocationTest", false);
+    ExtensionTestMessageListener done_listener("DoneGeolocationTest.PASSED",
+                                               false);
+    done_listener.AlsoListenForFailureMessage("DoneGeolocationTest.FAILED");
     EXPECT_TRUE(content::ExecuteScript(
                     embedder_web_contents,
                     base::StringPrintf("runGeolocationTest('%s')",
                                        test_name.c_str())));
-    done_listener.WaitUntilSatisfied();
-    bool has_test_passed;
-    EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-                    embedder_web_contents,
-                    "window.domAutomationController.send(hasTestPassed());",
-                    &has_test_passed));
-    ASSERT_TRUE(has_test_passed);
+    ASSERT_TRUE(done_listener.WaitUntilSatisfied());
   }
 
   content::WebContents* LoadGuest(const std::string& guest_path,
@@ -403,6 +399,30 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
 
     content::WebContents* guest_web_contents = source->GetWebContents();
     return guest_web_contents;
+  }
+
+  // Runs media_access/allow tests.
+  void MediaAccessAPIAllowTestHelper(const std::string& test_name);
+
+  // Runs media_access/deny tests, each of them are run separately otherwise
+  // they timeout (mostly on Windows).
+  void MediaAccessAPIDenyTestHelper(const std::string& test_name) {
+    ASSERT_TRUE(StartTestServer());  // For serving guest pages.
+    ExtensionTestMessageListener loaded_listener("loaded", false);
+    LoadAndLaunchPlatformApp("web_view/media_access/deny");
+    ASSERT_TRUE(loaded_listener.WaitUntilSatisfied());
+
+    content::WebContents* embedder_web_contents =
+        GetFirstShellWindowWebContents();
+    ASSERT_TRUE(embedder_web_contents);
+
+    ExtensionTestMessageListener test_run_listener("PASSED", false);
+    test_run_listener.AlsoListenForFailureMessage("FAILED");
+    EXPECT_TRUE(
+        content::ExecuteScript(
+            embedder_web_contents,
+            base::StringPrintf("startDenyTest('%s')", test_name.c_str())));
+    ASSERT_TRUE(test_run_listener.WaitUntilSatisfied());
   }
 
  private:
@@ -660,11 +680,18 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, DISABLED_StoragePersistence) {
   EXPECT_EQ("persist2=true", cookie_value);
 }
 
+#if defined(OS_WIN)
+// This test is very flaky on Win Aura and XP. http://crbug.com/248873
+#define MAYBE_DOMStorageIsolation DISABLED_DOMStorageIsolation
+#else
+#define MAYBE_DOMStorageIsolation DOMStorageIsolation
+#endif
+
 // This tests DOM storage isolation for packaged apps with webview tags. It
 // loads an app with multiple webview tags and each tag sets DOM storage
 // entries, which the test checks to ensure proper storage isolation is
 // enforced.
-IN_PROC_BROWSER_TEST_F(WebViewTest, DOMStorageIsolation) {
+IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_DOMStorageIsolation) {
   ASSERT_TRUE(StartTestServer());
   GURL regular_url = test_server()->GetURL("files/title1.html");
 
@@ -748,10 +775,17 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, DOMStorageIsolation) {
   EXPECT_STREQ("badval", output.c_str());
 }
 
+// See crbug.com/248500
+#if defined(OS_WIN)
+#define MAYBE_IndexedDBIsolation DISABLED_IndexedDBIsolation
+#else
+#define MAYBE_IndexedDBIsolation IndexedDBIsolation
+#endif
+
 // This tests IndexedDB isolation for packaged apps with webview tags. It loads
 // an app with multiple webview tags and each tag creates an IndexedDB record,
 // which the test checks to ensure proper storage isolation is enforced.
-IN_PROC_BROWSER_TEST_F(WebViewTest, IndexedDBIsolation) {
+IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_IndexedDBIsolation) {
   ASSERT_TRUE(StartTestServer());
   GURL regular_url = test_server()->GetURL("files/title1.html");
 
@@ -839,14 +873,32 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, CloseOnLoadcommit) {
   ASSERT_TRUE(done_test_listener.WaitUntilSatisfied());
 }
 
-// Disabled for being flaky: http://crbug.com/237985
-IN_PROC_BROWSER_TEST_F(WebViewTest, DISABLED_MediaAccessAPIDeny) {
-  ASSERT_TRUE(StartTestServer());  // For serving guest pages.
-  ASSERT_TRUE(RunPlatformAppTest(
-      "platform_apps/web_view/media_access/deny")) << message_;
+IN_PROC_BROWSER_TEST_F(WebViewTest, MediaAccessAPIDeny_TestDeny) {
+  MediaAccessAPIDenyTestHelper("testDeny");
 }
 
-IN_PROC_BROWSER_TEST_F(WebViewTest, MediaAccessAPIAllow) {
+IN_PROC_BROWSER_TEST_F(WebViewTest,
+                       MediaAccessAPIDeny_TestDenyThenAllowThrows) {
+  MediaAccessAPIDenyTestHelper("testDenyThenAllowThrows");
+
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest,
+                       MediaAccessAPIDeny_TestDenyWithPreventDefault) {
+  MediaAccessAPIDenyTestHelper("testDenyWithPreventDefault");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest,
+                       MediaAccessAPIDeny_TestNoListenersImplyDeny) {
+  MediaAccessAPIDenyTestHelper("testNoListenersImplyDeny");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest,
+                       MediaAccessAPIDeny_TestNoPreventDefaultImpliesDeny) {
+  MediaAccessAPIDenyTestHelper("testNoPreventDefaultImpliesDeny");
+}
+
+void WebViewTest::MediaAccessAPIAllowTestHelper(const std::string& test_name) {
   ASSERT_TRUE(StartTestServer());  // For serving guest pages.
   ExtensionTestMessageListener launched_listener("Launched", false);
   LoadAndLaunchPlatformApp("web_view/media_access/allow");
@@ -858,31 +910,41 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, MediaAccessAPIAllow) {
   MockWebContentsDelegate* mock = new MockWebContentsDelegate;
   embedder_web_contents->SetDelegate(mock);
 
-  const size_t num_tests = 4;
-  std::string test_names[num_tests] = {
-    "testAllow",
-    "testAllowAndThenDeny",
-    "testAllowTwice",
-    "testAllowAsync",
-  };
-  for (size_t i = 0; i < num_tests; ++i) {
-    ExtensionTestMessageListener done_listener("DoneMediaTest", false);
-    EXPECT_TRUE(
-        content::ExecuteScript(
-            embedder_web_contents,
-            base::StringPrintf("startAllowTest('%s')",
-                               test_names[i].c_str())));
-    done_listener.WaitUntilSatisfied();
+  ExtensionTestMessageListener done_listener("DoneMediaTest.PASSED", false);
+  done_listener.AlsoListenForFailureMessage("DoneMediaTest.FAILED");
+  EXPECT_TRUE(
+      content::ExecuteScript(
+          embedder_web_contents,
+          base::StringPrintf("startAllowTest('%s')",
+                             test_name.c_str())));
+  ASSERT_TRUE(done_listener.WaitUntilSatisfied());
 
-    std::string result;
-    EXPECT_TRUE(
-        content::ExecuteScriptAndExtractString(
-            embedder_web_contents,
-            "window.domAutomationController.send(getTestStatus())", &result));
-    ASSERT_EQ(std::string("PASSED"), result);
+  mock->WaitForSetMediaPermission();
+}
 
-    mock->WaitForSetMediaPermission();
-  }
+IN_PROC_BROWSER_TEST_F(WebViewTest, MediaAccessAPIAllow_TestAllow) {
+  MediaAccessAPIAllowTestHelper("testAllow");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, MediaAccessAPIAllow_TestAllowAndThenDeny) {
+  MediaAccessAPIAllowTestHelper("testAllowAndThenDeny");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, MediaAccessAPIAllow_TestAllowTwice) {
+  MediaAccessAPIAllowTestHelper("testAllowTwice");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, MediaAccessAPIAllow_TestAllowAsync) {
+  MediaAccessAPIAllowTestHelper("testAllowAsync");
+}
+
+// Checks that window.screenX/screenY/screenLeft/screenTop works correctly for
+// guests.
+IN_PROC_BROWSER_TEST_F(WebViewTest, ScreenCoordinates) {
+  ASSERT_TRUE(StartTestServer());  // For serving guest pages.
+  ASSERT_TRUE(RunPlatformAppTestWithArg(
+      "platform_apps/web_view/common", "screen_coordinates"))
+          << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, SpeechRecognition) {
@@ -921,14 +983,18 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, TearDownTest) {
   ASSERT_TRUE(second_loaded_listener.WaitUntilSatisfied());
 }
 
-// Embedder does not have geolocation permission for this test.
+// In following GeolocationAPIEmbedderHasNoAccess* tests, embedder (i.e. the
+// platform app) does not have geolocation permission for this test.
 // No matter what the API does, geolocation permission would be denied.
 // Note that the test name prefix must be "GeolocationAPI".
-IN_PROC_BROWSER_TEST_F(WebViewTest, GeolocationAPIEmbedderHasNoAccess) {
-  ASSERT_TRUE(StartTestServer());  // For serving guest pages.
-  ASSERT_TRUE(RunPlatformAppTest(
-      "platform_apps/web_view/geolocation/embedder_has_no_permission"))
-          << message_;
+IN_PROC_BROWSER_TEST_F(WebViewTest, GeolocationAPIEmbedderHasNoAccessAllow) {
+  GeolocationTestHelper("testDenyDenies",
+                        "web_view/geolocation/embedder_has_no_permission");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, GeolocationAPIEmbedderHasNoAccessDeny) {
+  GeolocationTestHelper("testDenyDenies",
+                        "web_view/geolocation/embedder_has_no_permission");
 }
 
 // In following GeolocationAPIEmbedderHasAccess* tests, embedder (i.e. the
@@ -941,25 +1007,22 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, GeolocationAPIEmbedderHasNoAccess) {
 // mock out geolocation for multiple navigator.geolocation calls properly and
 // the tests become flaky.
 // GeolocationAPI* test 1 of 3.
-// Flay test, see http://crbug.com/237536.
-IN_PROC_BROWSER_TEST_F(WebViewTest,
-                       DISABLED_GeolocationAPIEmbedderHasAccessAllow) {
-  GeolocationTestHelper("testAllow");
+IN_PROC_BROWSER_TEST_F(WebViewTest, GeolocationAPIEmbedderHasAccessAllow) {
+  GeolocationTestHelper("testAllow",
+                        "web_view/geolocation/embedder_has_permission");
 }
 
 // GeolocationAPI* test 2 of 3.
-// Flay test, see http://crbug.com/237536.
-IN_PROC_BROWSER_TEST_F(WebViewTest,
-                       DISABLED_GeolocationAPIEmbedderHasAccessDeny) {
-  GeolocationTestHelper("testDeny");
+IN_PROC_BROWSER_TEST_F(WebViewTest, GeolocationAPIEmbedderHasAccessDeny) {
+  GeolocationTestHelper("testDeny",
+                        "web_view/geolocation/embedder_has_permission");
 }
 
 // GeolocationAPI* test 3 of 3.
-// Flay test, see http://crbug.com/237536.
-IN_PROC_BROWSER_TEST_F(
-    WebViewTest,
-    DISABLED_GeolocationAPIEmbedderHasAccessMultipleBridgeIdAllow) {
-  GeolocationTestHelper("testMultipleBridgeIdAllow");
+IN_PROC_BROWSER_TEST_F(WebViewTest,
+                       GeolocationAPIEmbedderHasAccessMultipleBridgeIdAllow) {
+  GeolocationTestHelper("testMultipleBridgeIdAllow",
+                        "web_view/geolocation/embedder_has_permission");
 }
 
 // Tests that
@@ -973,8 +1036,9 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, GeolocationAPICancelGeolocation) {
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, ConsoleMessage) {
   ASSERT_TRUE(StartTestServer());  // For serving guest pages.
-  ASSERT_TRUE(RunPlatformAppTest("platform_apps/web_view/console_messages"))
-      << message_;
+  ASSERT_TRUE(RunPlatformAppTestWithArg(
+      "platform_apps/web_view/common", "console_messages"))
+          << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, DownloadPermission) {
@@ -1030,4 +1094,9 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, WhitelistedContentScript) {
   ExtensionTestMessageListener done_listener("DoneTest", false);
   LoadAndLaunchPlatformApp("web_view/content_script_whitelisted");
   ASSERT_TRUE(done_listener.WaitUntilSatisfied());
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, SetPropertyOnDocumentReady) {
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/web_view/document_ready"))
+                  << message_;
 }

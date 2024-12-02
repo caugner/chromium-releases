@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/stl_util.h"
 #include "chrome/browser/password_manager/password_store_consumer.h"
 #include "content/public/browser/browser_thread.h"
@@ -199,7 +199,7 @@ CancelableRequestProvider::Handle PasswordStore::Schedule(
       NewGetLoginsRequest(
           base::Bind(&PasswordStoreConsumer::OnPasswordStoreRequestDone,
                      base::Unretained(consumer))));
-  AddRequest(request, consumer->cancelable_consumer());
+  AddRequest(request.get(), consumer->cancelable_consumer());
   ScheduleTask(base::Bind(func, this, request));
   return request->handle();
 }
@@ -215,7 +215,7 @@ CancelableRequestProvider::Handle PasswordStore::Schedule(
           base::Bind(&PasswordStoreConsumer::OnPasswordStoreRequestDone,
                      base::Unretained(consumer))));
   request->set_ignore_logins_cutoff(ignore_logins_cutoff);
-  AddRequest(request, consumer->cancelable_consumer());
+  AddRequest(request.get(), consumer->cancelable_consumer());
   ScheduleTask(base::Bind(func, this, request, form));
   return request->handle();
 }

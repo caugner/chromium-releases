@@ -9,11 +9,17 @@
 #include <vector>
 
 #include "ash/ash_export.h"
+#include "ash/display/display_controller.h"
 #include "ash/display/display_info.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "ui/aura/root_window_observer.h"
 #include "ui/aura/window.h"
+#include "ui/gfx/display.h"
+
+#if defined(OS_CHROMEOS)
+#include "chromeos/display/output_configurator.h"
+#endif
 
 namespace gfx {
 class Display;
@@ -34,18 +40,26 @@ namespace internal {
 // This is exported for unittest.
 //
 // TODO(oshima): Make this non internal.
-class ASH_EXPORT DisplayManager : public aura::RootWindowObserver {
+class ASH_EXPORT DisplayManager :
+#if defined(OS_CHROMEOS)
+      public chromeos::OutputConfigurator::SoftwareMirroringController,
+#endif
+      public aura::RootWindowObserver {
  public:
   DisplayManager();
   virtual ~DisplayManager();
 
-  // Used to emulate display change when run in a desktop environment instead
-  // of on a device.
-  static void CycleDisplay();
-  static void ToggleDisplayScaleFactor();
+  // Returns the list of possible UI scales for the display.
+  static std::vector<float> GetScalesForDisplay(const DisplayInfo& info);
 
   // Returns next valid UI scale.
   static float GetNextUIScale(const DisplayInfo& info, bool up);
+
+  // Updates the bounds of |secondary_display| according to |layout|.
+  static void UpdateDisplayBoundsForLayout(
+      const DisplayLayout& layout,
+      const gfx::Display& primary_display,
+      gfx::Display* secondary_display);
 
   // When set to true, the MonitorManager calls OnDisplayBoundsChanged
   // even if the display's bounds didn't change. Used to swap primary
@@ -136,7 +150,7 @@ class ASH_EXPORT DisplayManager : public aura::RootWindowObserver {
 
   // Returns the mirroring status.
   bool IsMirrored() const;
-  int64 mirrored_display_id() const { return mirrored_display_id_; }
+  const gfx::Display& mirrored_display() const { return mirrored_display_; }
 
   // Returns the display object nearest given |window|.
   const gfx::Display& GetDisplayNearestPoint(
@@ -162,11 +176,25 @@ class ASH_EXPORT DisplayManager : public aura::RootWindowObserver {
   // desktop, this returns the first display ID.
   int64 GetDisplayIdForUIScaling() const;
 
-  // RootWindowObserver overrides:
-  virtual void OnRootWindowResized(const aura::RootWindow* root,
-                                   const gfx::Size& new_size) OVERRIDE;
+  // Change the mirror mode.
+  void SetMirrorMode(bool mirrored);
 
- private:
+  // Used to emulate display change when run in a desktop environment instead
+  // of on a device.
+  void AddRemoveDisplay();
+  void ToggleDisplayScaleFactor();
+
+  // RootWindowObserver overrides:
+  virtual void OnRootWindowHostResized(const aura::RootWindow* root) OVERRIDE;
+
+  // SoftwareMirroringController override:
+#if defined(OS_CHROMEOS)
+  virtual void SetSoftwareMirroring(bool enabled) OVERRIDE;
+#else
+  void SetSoftwareMirroring(bool enabled);
+#endif
+
+private:
   FRIEND_TEST_ALL_PREFIXES(ExtendedDesktopTest, ConvertPoint);
   FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest, TestNativeDisplaysChanged);
   FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest,
@@ -184,11 +212,13 @@ class ASH_EXPORT DisplayManager : public aura::RootWindowObserver {
   }
 
   void Init();
-  void CycleDisplayImpl();
-  void ScaleDisplayImpl();
 
   gfx::Display& FindDisplayForRootWindow(const aura::RootWindow* root);
   gfx::Display& FindDisplayForId(int64 id);
+
+  // Add the mirror display's display info if the software based
+  // mirroring is in use.
+  void AddMirrorDisplayInfoIfAny(std::vector<DisplayInfo>* display_info_list);
 
   // Refer to |CreateDisplayFromSpec| API for the format of |spec|.
   void AddDisplayFromSpec(const std::string& spec);
@@ -203,9 +233,17 @@ class ASH_EXPORT DisplayManager : public aura::RootWindowObserver {
   // Creates a display object from the DisplayInfo for |display_id|.
   gfx::Display CreateDisplayFromDisplayInfoById(int64 display_id);
 
+  // Updates the bounds of the secondary display in |display_list|
+  // using the layout registered for the display pair and set the
+  // index of display updated to |updated_index|. Returns true
+  // if the secondary display's bounds has been changed from current
+  // value, or false otherwise.
+  bool UpdateSecondaryDisplayBoundsForLayout(DisplayList* display_list,
+                                             size_t* updated_index) const;
+
   int64 first_display_id_;
 
-  int64 mirrored_display_id_;
+  gfx::Display mirrored_display_;
 
   // List of current active dispays.
   DisplayList displays_;
@@ -223,6 +261,8 @@ class ASH_EXPORT DisplayManager : public aura::RootWindowObserver {
   // window wil update the display properly. This is set to false
   // on device as well as during the unit tests.
   bool change_display_upon_host_resize_;
+
+  bool software_mirroring_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(DisplayManager);
 };

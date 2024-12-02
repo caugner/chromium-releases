@@ -8,10 +8,13 @@
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/app_mode/startup_app_launcher.h"
 #include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/ui/app_launch_view.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chromeos/cryptohome/async_method_caller.h"
 #include "chromeos/cryptohome/cryptohome_library.h"
@@ -22,14 +25,6 @@
 using content::BrowserThread;
 
 namespace chromeos {
-
-namespace {
-
-std::string GetAppUserNameFromAppId(const std::string& app_id) {
-  return app_id + "@" + UserManager::kKioskAppUserDomain;
-}
-
-}  // namespace
 
 // static
 KioskAppLauncher* KioskAppLauncher::running_instance_ = NULL;
@@ -69,7 +64,7 @@ class KioskAppLauncher::CryptohomedChecker
       }
 
       const int retry_delay_in_milliseconds = 500 * (1 << retry_count_);
-      MessageLoop::current()->PostDelayedTask(
+      base::MessageLoop::current()->PostDelayedTask(
           FROM_HERE,
           base::Bind(&CryptohomedChecker::StartCheck, AsWeakPtr()),
           base::TimeDelta::FromMilliseconds(retry_delay_in_milliseconds));
@@ -104,8 +99,13 @@ class KioskAppLauncher::CryptohomedChecker
 
 class KioskAppLauncher::ProfileLoader : public LoginUtils::Delegate {
  public:
-  explicit ProfileLoader(KioskAppLauncher* launcher)
-      : launcher_(launcher) {
+  ProfileLoader(KioskAppManager* kiosk_app_manager,
+                KioskAppLauncher* kiosk_app_launcher)
+      : kiosk_app_launcher_(kiosk_app_launcher) {
+    KioskAppManager::App app;
+    if (!kiosk_app_manager->GetApp(kiosk_app_launcher->app_id_, &app))
+      NOTREACHED() << "Logging into nonexistent kiosk-app account.";
+    user_id_ = app.user_id;
   }
 
   virtual ~ProfileLoader() {
@@ -113,32 +113,52 @@ class KioskAppLauncher::ProfileLoader : public LoginUtils::Delegate {
   }
 
   void Start() {
-    // TODO(nkostylev): Pass real username_hash here.
-    LoginUtils::Get()->PrepareProfile(
-        UserContext(GetAppUserNameFromAppId(launcher_->app_id_),
-                    std::string(),   // password
-                    std::string()),  // auth_code
-        std::string(),  // display email
-        false,  // using_oauth
-        false,  // has_cookies
-        this);
+    cryptohome::AsyncMethodCaller::GetInstance()->AsyncGetSanitizedUsername(
+        user_id_,
+        base::Bind(&ProfileLoader::OnUsernameHashRetrieved,
+                   base::Unretained(this)));
   }
 
  private:
-  // LoginUtils::Delegate overrides:
-  virtual void OnProfilePrepared(Profile* profile) OVERRIDE {
-    launcher_->OnProfilePrepared(profile);
+  void OnUsernameHashRetrieved(bool success,
+                               const std::string& username_hash) {
+    if (!success) {
+      LOG(ERROR) << "Unable to retrieve username hash for user '" << user_id_
+                 << "'.";
+      kiosk_app_launcher_->ReportLaunchResult(
+          KioskAppLaunchError::UNABLE_TO_RETRIEVE_HASH);
+      return;
+    }
+    LoginUtils::Get()->PrepareProfile(
+        UserContext(user_id_,
+                    std::string(),   // password
+                    std::string(),   // auth_code
+                    username_hash),
+        std::string(),  // display email
+        false,  // using_oauth
+        false,  // has_cookies
+        false,  // has_active_session
+        this);
   }
 
-  KioskAppLauncher* launcher_;
+  // LoginUtils::Delegate overrides:
+  virtual void OnProfilePrepared(Profile* profile) OVERRIDE {
+    kiosk_app_launcher_->OnProfilePrepared(profile);
+  }
+
+  KioskAppLauncher* kiosk_app_launcher_;
+  std::string user_id_;
+
   DISALLOW_COPY_AND_ASSIGN(ProfileLoader);
 };
 
 ////////////////////////////////////////////////////////////////////////////////
 // KioskAppLauncher
 
-KioskAppLauncher::KioskAppLauncher(const std::string& app_id)
-    : app_id_(app_id),
+KioskAppLauncher::KioskAppLauncher(KioskAppManager* kiosk_app_manager,
+                                   const std::string& app_id)
+    : kiosk_app_manager_(kiosk_app_manager),
+      app_id_(app_id),
       remove_attempted_(false) {
 }
 
@@ -154,6 +174,10 @@ void KioskAppLauncher::Start() {
   }
 
   running_instance_ = this;  // Reset in ReportLaunchResult.
+
+  // Show app launch splash. The spash is removed either after a successful
+  // launch or chrome exit because of launch failure.
+  chromeos::ShowAppLaunchSplashScreen(app_id_);
 
   // Check cryptohomed. If all goes good, flow goes to StartMount. Otherwise
   // it goes to ReportLaunchResult with failure.
@@ -190,7 +214,7 @@ void KioskAppLauncher::StartMount() {
 void KioskAppLauncher::MountCallback(bool mount_success,
                                      cryptohome::MountError mount_error) {
   if (mount_success) {
-    profile_loader_.reset(new ProfileLoader(this));
+    profile_loader_.reset(new ProfileLoader(kiosk_app_manager_, this));
     profile_loader_->Start();
     return;
   }
@@ -231,7 +255,7 @@ void KioskAppLauncher::OnProfilePrepared(Profile* profile) {
   (new chromeos::StartupAppLauncher(profile, app_id_))->Start();
 
   if (LoginDisplayHostImpl::default_host())
-    LoginDisplayHostImpl::default_host()->OnSessionStart();
+    LoginDisplayHostImpl::default_host()->Finalize();
   UserManager::Get()->SessionStarted();
 
   ReportLaunchResult(KioskAppLaunchError::NONE);

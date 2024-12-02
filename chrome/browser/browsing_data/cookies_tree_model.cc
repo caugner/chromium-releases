@@ -10,8 +10,8 @@
 
 #include "base/bind.h"
 #include "base/memory/linked_ptr.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browsing_data/browsing_data_cookie_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_flash_lso_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_server_bound_cert_helper.h"
@@ -76,8 +76,10 @@ std::string CanonicalizeHost(const GURL& url) {
   }
 
   std::string host = url.host();
-  std::string retval = net::RegistryControlledDomainService::
-      GetDomainAndRegistry(host);
+  std::string retval =
+      net::registry_controlled_domains::GetDomainAndRegistry(
+          host,
+          net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
   if (!retval.length())  // Is an IP address or other special origin.
     return host;
 
@@ -187,7 +189,7 @@ CookieTreeNode::DetailedInfo& CookieTreeNode::DetailedInfo::InitDatabase(
     const BrowsingDataDatabaseHelper::DatabaseInfo* database_info) {
   Init(TYPE_DATABASE);
   this->database_info = database_info;
-  origin = GURL(database_info->origin);
+  origin = database_info->identifier.ToOrigin();
   return *this;
 }
 
@@ -311,9 +313,9 @@ void CookieTreeAppCacheNode::DeleteStoredObjects() {
   LocalDataContainer* container = GetLocalDataContainerForNode(this);
 
   if (container) {
-    DCHECK(container->appcache_helper_);
-    container->appcache_helper_->DeleteAppCacheGroup(
-        appcache_info_->manifest_url);
+    DCHECK(container->appcache_helper_.get());
+    container->appcache_helper_
+        ->DeleteAppCacheGroup(appcache_info_->manifest_url);
     container->appcache_info_[origin_url_].erase(appcache_info_);
   }
 }
@@ -340,7 +342,7 @@ void CookieTreeDatabaseNode::DeleteStoredObjects() {
 
   if (container) {
     container->database_helper_->DeleteDatabase(
-        database_info_->origin_identifier, database_info_->database_name);
+        database_info_->identifier.ToString(), database_info_->database_name);
     container->database_info_list_.erase(database_info_);
   }
 }
@@ -957,7 +959,7 @@ void CookiesTreeModel::UpdateSearchResults(const string16& filter) {
 
 const ExtensionSet* CookiesTreeModel::ExtensionsProtectingNode(
     const CookieTreeNode& cookie_node) {
-  if (!special_storage_policy_)
+  if (!special_storage_policy_.get())
     return NULL;
 
   CookieTreeNode::DetailedInfo info = cookie_node.GetDetailedInfo();
@@ -1111,7 +1113,7 @@ void CookiesTreeModel::PopulateDatabaseInfoWithFilter(
            container->database_info_list_.begin();
        database_info != container->database_info_list_.end();
        ++database_info) {
-    GURL origin(database_info->origin);
+    GURL origin(database_info->identifier.ToOrigin());
 
     if (!filter.size() ||
         (CookieTreeHostNode::TitleForUrl(origin).find(filter) !=

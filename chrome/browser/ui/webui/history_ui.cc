@@ -15,10 +15,10 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -369,22 +369,11 @@ scoped_ptr<DictionaryValue> BrowsingHistoryHandler::HistoryEntry::ToValue(
 #if defined(ENABLE_MANAGED_USERS)
   DCHECK(managed_user_service);
   if (managed_user_service->ProfileIsManaged()) {
-    // URL exceptions take precedence over host exceptions.
-    int manual_behavior = managed_user_service->GetManualBehaviorForURL(url);
-    if (manual_behavior == ManagedUserService::MANUAL_NONE) {
-      manual_behavior =
-          managed_user_service->GetManualBehaviorForHost(url.host());
-    }
-    result->SetInteger("urlManualBehavior", manual_behavior);
-    result->SetInteger("hostManualBehavior",
-        managed_user_service->GetManualBehaviorForHost(url.host()));
-    std::vector<ManagedModeSiteList::Site*> sites;
-    managed_user_service->GetURLFilterForUIThread()->GetSites(url, &sites);
-    result->SetBoolean("urlInContentPack", !sites.empty());
-    sites.clear();
-    managed_user_service->GetURLFilterForUIThread()->GetSites(
-        url.GetWithEmptyPath(), &sites);
-    result->SetBoolean("hostInContentPack", !sites.empty());
+    const ManagedModeURLFilter* url_filter =
+        managed_user_service->GetURLFilterForUIThread();
+    int filtering_behavior =
+        url_filter->GetFilteringBehaviorForURL(url.GetWithEmptyPath());
+    result->SetInteger("hostFilteringBehavior", filtering_behavior);
 
     result->SetBoolean("blockedVisit", blocked_visit);
   }
@@ -428,19 +417,6 @@ void BrowsingHistoryHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("removeBookmark",
       base::Bind(&BrowsingHistoryHandler::HandleRemoveBookmark,
                  base::Unretained(this)));
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
-  web_ui()->RegisterMessageCallback("processManagedUrls",
-      base::Bind(&BrowsingHistoryHandler::HandleProcessManagedUrls,
-                 base::Unretained(this)));
-#endif
-#if defined(ENABLE_MANAGED_USERS)
-  web_ui()->RegisterMessageCallback("setManagedUserElevated",
-      base::Bind(&BrowsingHistoryHandler::HandleSetElevated,
-                 base::Unretained(this)));
-  web_ui()->RegisterMessageCallback("getManagedUserElevated",
-      base::Bind(&BrowsingHistoryHandler::HandleManagedUserGetElevated,
-                 base::Unretained(this)));
-#endif
 }
 
 bool BrowsingHistoryHandler::ExtractIntegerValueAtIndex(const ListValue* value,
@@ -643,129 +619,6 @@ void BrowsingHistoryHandler::HandleRemoveVisits(const ListValue* args) {
   }
 }
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
-void BrowsingHistoryHandler::HandleProcessManagedUrls(const ListValue* args) {
-  bool allow = false;
-  if (!args->GetBoolean(0, &allow)) {
-    LOG(ERROR) << "Unable to extract boolean argument.";
-    web_ui()->CallJavascriptFunction("processingManagedFailed");
-    return;
-  }
-
-  // Check if the managed user is authenticated.
-  ManagedUserService* service = ManagedUserServiceFactory::GetForProfile(
-      Profile::FromWebUI(web_ui()));
-  if (!service->IsElevatedForWebContents(web_ui()->GetWebContents()))
-    return;
-
-  // Since editing a host can have side effects on other hosts, update all of
-  // them but change the behavior only of the checked ones.
-  std::vector<std::string> hosts_to_be_changed;
-  std::vector<GURL> hosts_to_update;
-  // Get the host information. Currently the layout of this data is as follows:
-  // [[<is the host checked (boolean)>, <host (string)>], ...]
-  const ListValue* host_list;
-  if (!args->GetList(1, &host_list)) {
-    LOG(WARNING) << "Unable to extract list argument.";
-    return;
-  }
-  for (ListValue::const_iterator v = host_list->begin();
-       v != host_list->end(); ++v) {
-    ListValue* element;
-    bool is_checked;
-    std::string value;
-    if (!((*v)->GetAsList(&element) &&
-        element->GetBoolean(0, &is_checked) &&
-        element->GetString(1, &value))) {
-      continue;
-    }
-
-    hosts_to_update.push_back(GURL("http://" + value));
-    if (is_checked)
-      hosts_to_be_changed.push_back(value);
-  }
-
-  std::vector<GURL> urls_to_be_changed;
-  std::vector<GURL> urls_to_update;
-  const ListValue* url_list;
-  // The URL information is received as a list of lists as follows:
-  // [[<is the URL checked (boolean)>, <is the host checked (boolean)>,
-  //   <URL (string)>], ...].
-  if (!args->GetList(2, &url_list)) {
-    LOG(WARNING) << "Unable to extract list argument.";
-    return;
-  }
-  for (ListValue::const_iterator v = url_list->begin();
-       v != url_list->end(); ++v) {
-    ListValue* element;
-    bool url_checked;
-    bool host_checked;
-    string16 string16_value;
-    if (!((*v)->GetAsList(&element) &&
-        element->GetBoolean(0, &url_checked) &&
-        element->GetBoolean(1, &host_checked) &&
-        element->GetString(2, &string16_value))) {
-      continue;
-    }
-
-    urls_to_update.push_back(GURL(string16_value));
-    // Do not update individual entries if the whole domain is checked.
-    if (url_checked && !host_checked)
-      urls_to_be_changed.push_back(GURL(string16_value));
-  }
-
-  // Now that the lists are built apply the changes to those domains and URLs.
-  service->SetManualBehaviorForHosts(hosts_to_be_changed,
-                                     allow ? ManagedUserService::MANUAL_ALLOW :
-                                             ManagedUserService::MANUAL_BLOCK);
-  std::vector<GURL> urls_to_remove;
-  for (std::vector<std::string>::iterator it = hosts_to_be_changed.begin();
-       it != hosts_to_be_changed.end(); ++it) {
-    service->GetManualExceptionsForHost(*it, &urls_to_remove);
-  }
-  service->SetManualBehaviorForURLs(urls_to_remove,
-                                    ManagedUserService::MANUAL_NONE);
-  service->SetManualBehaviorForURLs(urls_to_be_changed,
-                                    allow ? ManagedUserService::MANUAL_ALLOW :
-                                            ManagedUserService::MANUAL_BLOCK);
-
-  // Build the list of updated hosts after the changes have been applied.
-  ListValue results;
-  std::vector<GURL>::iterator it;
-  scoped_ptr<DictionaryValue> result_hosts(new DictionaryValue());
-  for (it = hosts_to_update.begin(); it != hosts_to_update.end(); ++it) {
-    std::vector<ManagedModeSiteList::Site*> sites;
-    service->GetURLFilterForUIThread()->GetSites(
-        it->GetWithEmptyPath(), &sites);
-    scoped_ptr<DictionaryValue> entry(new DictionaryValue());
-    entry->SetInteger("manualBehavior",
-                      service->GetManualBehaviorForHost(it->host()));
-    entry->SetInteger("inContentPack", !sites.empty());
-    result_hosts->SetWithoutPathExpansion(it->host(), entry.release());
-  }
-  results.Append(result_hosts.release());
-
-  // Do the same for URLs.
-  scoped_ptr<DictionaryValue> result_urls(new DictionaryValue());
-  for (it = urls_to_update.begin(); it != urls_to_update.end(); ++it) {
-    std::vector<ManagedModeSiteList::Site*> sites;
-    service->GetURLFilterForUIThread()->GetSites(*it, &sites);
-    scoped_ptr<DictionaryValue> entry(new DictionaryValue());
-    int manual_behavior = service->GetManualBehaviorForURL(*it);
-    if (manual_behavior == ManagedUserService::MANUAL_NONE)
-      manual_behavior = service->GetManualBehaviorForHost(it->host());
-    entry->SetInteger("manualBehavior", manual_behavior);
-    entry->SetInteger("inContentPack", !sites.empty());
-    result_urls->SetWithoutPathExpansion(it->spec(), entry.release());
-  }
-  results.Append(result_urls.release());
-
-  // Notify the Javascript side that the changes have been commited and that it
-  // should update the page.
-  web_ui()->CallJavascriptFunction("updateEntries", results);
-}
-#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
-
 void BrowsingHistoryHandler::HandleClearBrowsingData(const ListValue* args) {
 #if defined(OS_ANDROID)
   Profile* profile = Profile::FromWebUI(web_ui());
@@ -788,50 +641,6 @@ void BrowsingHistoryHandler::HandleRemoveBookmark(const ListValue* args) {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile);
   bookmark_utils::RemoveAllBookmarks(model, GURL(url));
 }
-
-#if defined(ENABLE_MANAGED_USERS)
-void BrowsingHistoryHandler::HandleSetElevated(const ListValue* elevated_arg) {
-  bool elevated;
-  elevated_arg->GetBoolean(0, &elevated);
-  ManagedUserService* service = ManagedUserServiceFactory::GetForProfile(
-      Profile::FromWebUI(web_ui()));
-  if (elevated) {
-    service->RequestAuthorization(
-        web_ui()->GetWebContents(),
-        base::Bind(&BrowsingHistoryHandler::PassphraseDialogCallback,
-                   base::Unretained(this)));
-  } else {
-    ManagedModeNavigationObserver* observer =
-        ManagedModeNavigationObserver::FromWebContents(
-            web_ui()->GetWebContents());
-    observer->set_elevated(false);
-    ManagedUserSetElevated();
-  }
-}
-
-void BrowsingHistoryHandler::PassphraseDialogCallback(bool success) {
-  if (success) {
-    ManagedModeNavigationObserver* observer =
-        ManagedModeNavigationObserver::FromWebContents(
-            web_ui()->GetWebContents());
-    observer->set_elevated(true);
-    ManagedUserSetElevated();
-  }
-}
-
-void BrowsingHistoryHandler::ManagedUserSetElevated() {
-  ManagedUserService* service = ManagedUserServiceFactory::GetForProfile(
-      Profile::FromWebUI(web_ui()));
-  base::FundamentalValue is_elevated(service->IsElevatedForWebContents(
-      web_ui()->GetWebContents()));
-  web_ui()->CallJavascriptFunction("managedUserElevated", is_elevated);
-}
-
-void BrowsingHistoryHandler::HandleManagedUserGetElevated(
-    const ListValue* args) {
-  ManagedUserSetElevated();
-}
-#endif
 
 // static
 void BrowsingHistoryHandler::MergeDuplicateResults(

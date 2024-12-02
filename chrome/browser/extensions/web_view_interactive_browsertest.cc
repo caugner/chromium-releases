@@ -2,20 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
 #include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/test_launcher_utils.h"
-#include "chrome/test/base/ui_controls.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/test/browser_test_utils.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/base/test/ui_controls.h"
 
 class WebViewInteractiveTest
     : public extensions::PlatformAppBrowserTest {
@@ -46,7 +50,7 @@ class WebViewInteractiveTest
   }
 
   gfx::NativeWindow GetPlatformAppWindow() {
-    const extensions::ShellWindowRegistry::ShellWindowSet& shell_windows =
+    const extensions::ShellWindowRegistry::ShellWindowList& shell_windows =
         extensions::ShellWindowRegistry::Get(
             browser()->profile())->shell_windows();
     return (*shell_windows.begin())->GetNativeWindow();
@@ -71,6 +75,18 @@ class WebViewInteractiveTest
 #endif
   }
 
+  void SendStartOfLineKeyPressToPlatformApp() {
+#if defined(OS_MACOSX)
+    // Send Cmd+Left on MacOSX.
+    ASSERT_TRUE(ui_test_utils::SendKeyPressToWindowSync(
+        GetPlatformAppWindow(), ui::VKEY_LEFT, false, false, false, true));
+#else
+    // Send Ctrl+Left on Windows and Linux/ChromeOS.
+    ASSERT_TRUE(ui_test_utils::SendKeyPressToWindowSync(
+        GetPlatformAppWindow(), ui::VKEY_LEFT, true, false, false, false));
+#endif
+  }
+
   void SendMouseEvent(ui_controls::MouseButton button,
                       ui_controls::MouseButtonState state) {
    if (first_click_) {
@@ -83,11 +99,32 @@ class WebViewInteractiveTest
    }
   }
 
+  void NewWindowTestHelper(const std::string& test_name,
+                           const std::string& app_location) {
+    ASSERT_TRUE(StartTestServer());  // For serving guest pages.
+    ExtensionTestMessageListener launched_listener("Launched", false);
+    LoadAndLaunchPlatformApp(app_location.c_str());
+    ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
+
+    content::WebContents* embedder_web_contents =
+        GetFirstShellWindowWebContents();
+    ASSERT_TRUE(embedder_web_contents);
+
+    ExtensionTestMessageListener done_listener("DoneNewWindowTest.PASSED",
+                                               false);
+    done_listener.AlsoListenForFailureMessage("DoneNewWindowTest.FAILED");
+    EXPECT_TRUE(content::ExecuteScript(
+                    embedder_web_contents,
+                    base::StringPrintf("runNewWindowTest('%s')",
+                                       test_name.c_str())));
+    ASSERT_TRUE(done_listener.WaitUntilSatisfied());
+  }
+
   void SetupTest(const std::string& app_name,
                  const std::string& guest_url_spec) {
     ASSERT_TRUE(StartTestServer());
-    std::string host_str("localhost");  // Must stay in scope with replace_host.
     GURL::Replacements replace_host;
+    std::string host_str("localhost");  // Must stay in scope with replace_host.
     replace_host.SetHostStr(host_str);
 
     GURL guest_url = test_server()->GetURL(guest_url_spec);
@@ -126,6 +163,116 @@ class WebViewInteractiveTest
 
   gfx::Point corner() {
     return corner_;
+  }
+
+  void SimulateRWHMouseClick(content::RenderWidgetHost* rwh, int x, int y) {
+    WebKit::WebMouseEvent mouse_event;
+    mouse_event.button = WebKit::WebMouseEvent::ButtonLeft;
+    mouse_event.x = mouse_event.windowX = x;
+    mouse_event.y = mouse_event.windowY = y;
+    mouse_event.modifiers = 0;
+
+    mouse_event.type = WebKit::WebInputEvent::MouseDown;
+    rwh->ForwardMouseEvent(mouse_event);
+    mouse_event.type = WebKit::WebInputEvent::MouseUp;
+    rwh->ForwardMouseEvent(mouse_event);
+  }
+
+  class PopupCreatedObserver {
+   public:
+    PopupCreatedObserver() : created_(false), last_render_widget_host_(NULL) {
+      created_callback_ = base::Bind(
+          &PopupCreatedObserver::CreatedCallback, base::Unretained(this));
+      content::RenderWidgetHost::AddCreatedCallback(created_callback_);
+    }
+    virtual ~PopupCreatedObserver() {
+      content::RenderWidgetHost::RemoveCreatedCallback(created_callback_);
+    }
+    void Reset() {
+      created_ = false;
+    }
+    void Start() {
+      if (created_)
+        return;
+      message_loop_ = new content::MessageLoopRunner;
+      message_loop_->Run();
+    }
+    content::RenderWidgetHost* last_render_widget_host() {
+      return last_render_widget_host_;
+    }
+
+   private:
+    void CreatedCallback(content::RenderWidgetHost* rwh) {
+      last_render_widget_host_ = rwh;
+      if (message_loop_.get())
+        message_loop_->Quit();
+      else
+        created_ = true;
+    }
+    content::RenderWidgetHost::CreatedCallback created_callback_;
+    scoped_refptr<content::MessageLoopRunner> message_loop_;
+    bool created_;
+    content::RenderWidgetHost* last_render_widget_host_;
+  };
+
+  void WaitForTitle(const char* title) {
+    string16 expected_title(ASCIIToUTF16(title));
+    string16 error_title(ASCIIToUTF16("FAILED"));
+    content::TitleWatcher title_watcher(guest_web_contents(), expected_title);
+    title_watcher.AlsoWaitForTitle(error_title);
+    ASSERT_EQ(expected_title, title_watcher.WaitAndGetTitle());
+  }
+
+  void PopupTestHelper(const gfx::Point& padding) {
+    PopupCreatedObserver popup_created_observer;
+    popup_created_observer.Reset();
+
+    content::SimulateKeyPress(
+        guest_web_contents(),
+        ui::VKEY_C,  // C to autocomplete.
+        false, false, false, false);
+
+    WaitForTitle("PASSED1");
+
+    popup_created_observer.Start();
+
+    content::RenderWidgetHost* popup_rwh = NULL;
+    popup_rwh = popup_created_observer.last_render_widget_host();
+    // Popup must be present.
+    ASSERT_TRUE(popup_rwh);
+    ASSERT_TRUE(!popup_rwh->IsRenderView());
+    ASSERT_TRUE(popup_rwh->GetView());
+
+    string16 expected_title = ASCIIToUTF16("PASSED2");
+    string16 error_title = ASCIIToUTF16("FAILED");
+    content::TitleWatcher title_watcher(guest_web_contents(), expected_title);
+    title_watcher.AlsoWaitForTitle(error_title);
+    EXPECT_TRUE(content::ExecuteScript(guest_web_contents(),
+                                       "changeTitle();"));
+    ASSERT_EQ(expected_title, title_watcher.WaitAndGetTitle());
+
+    gfx::Rect popup_bounds = popup_rwh->GetView()->GetViewBounds();
+    // (2, 2) is expected to lie on the first datalist element.
+    SimulateRWHMouseClick(popup_rwh, 2, 2);
+
+    content::RenderViewHost* embedder_rvh =
+        GetFirstShellWindowWebContents()->GetRenderViewHost();
+    gfx::Rect embedder_bounds = embedder_rvh->GetView()->GetViewBounds();
+    gfx::Vector2d diff = popup_bounds.origin() - embedder_bounds.origin();
+    LOG(INFO) << "DIFF: x = " << diff.x() << ", y = " << diff.y();
+
+    const int left_spacing = 40 + padding.x();  // div.style.paddingLeft = 40px.
+    // div.style.paddingTop = 50px + (input box height = 26px).
+    const int top_spacing = 50 + 26 + padding.y();
+
+    // If the popup is placed within |threshold_px| of the expected position,
+    // then we consider the test as a pass.
+    const int threshold_px = 10;
+
+    EXPECT_LE(std::abs(diff.x() - left_spacing), threshold_px);
+    EXPECT_LE(std::abs(diff.y() - top_spacing), threshold_px);
+
+    WaitForTitle("PASSED3");
   }
 
  private:
@@ -235,12 +382,88 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, EditCommands) {
 
   ExtensionTestMessageListener copy_listener("copy", false);
   SendCopyKeyPressToPlatformApp();
+
   // Wait for the guest to receive a 'copy' edit command.
   ASSERT_TRUE(copy_listener.WaitUntilSatisfied());
 }
 
-IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow) {
+// Tests that guests receive edit commands and respond appropriately.
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, EditCommandsNoMenu) {
+  SetupTest("web_view/edit_commands_no_menu",
+      "files/extensions/platform_apps/web_view/edit_commands_no_menu/"
+      "guest.html");
+
+  ASSERT_TRUE(ui_test_utils::ShowAndFocusNativeWindow(
+      GetPlatformAppWindow()));
+
+  // Flush any pending events to make sure we start with a clean slate.
+  content::RunAllPendingInMessageLoop();
+
+  ExtensionTestMessageListener start_of_line_listener("StartOfLine", false);
+  SendStartOfLineKeyPressToPlatformApp();
+  // Wait for the guest to receive a 'copy' edit command.
+  ASSERT_TRUE(start_of_line_listener.WaitUntilSatisfied());
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
+                       NewWindow_NewWindowNameTakesPrecedence) {
+  NewWindowTestHelper("testNewWindowNameTakesPrecedence", "web_view/newwindow");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
+                       NewWindow_WebViewNameTakesPrecedence) {
+  NewWindowTestHelper("testWebViewNameTakesPrecedence", "web_view/newwindow");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_NoName) {
+  NewWindowTestHelper("testNoName", "web_view/newwindow");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_Redirect) {
+  NewWindowTestHelper("testNewWindowRedirect", "web_view/newwindow");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_Close) {
+  NewWindowTestHelper("testNewWindowClose", "web_view/newwindow");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_ExecuteScript) {
+  NewWindowTestHelper("testNewWindowExecuteScript", "web_view/newwindow");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_WebRequest) {
+  NewWindowTestHelper("testNewWindowWebRequest", "web_view/newwindow");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, ExecuteCode) {
   ASSERT_TRUE(StartTestServer());  // For serving guest pages.
-  ASSERT_TRUE(RunPlatformAppTest("platform_apps/web_view/newwindow"))
-      << message_;
+  ASSERT_TRUE(RunPlatformAppTestWithArg(
+      "platform_apps/web_view/common", "execute_code")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, PopupPositioning) {
+  SetupTest(
+      "web_view/popup_positioning",
+      "files/extensions/platform_apps/web_view/popup_positioning/guest.html");
+  ASSERT_TRUE(guest_web_contents());
+
+  PopupTestHelper(gfx::Point());
+
+  // moveTo a random location and run the steps again.
+  EXPECT_TRUE(content::ExecuteScript(embedder_web_contents(),
+                                     "window.moveTo(16, 20);"));
+  PopupTestHelper(gfx::Point());
+}
+
+// Tests that moving browser plugin (without resize/UpdateRects) correctly
+// repositions popup.
+// Started flakily failing after a Blink roll: http://crbug.com/245332
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, DISABLED_PopupPositioningMoved) {
+  SetupTest(
+      "web_view/popup_positioning_moved",
+      "files/extensions/platform_apps/web_view/popup_positioning_moved"
+      "/guest.html");
+  ASSERT_TRUE(guest_web_contents());
+
+  PopupTestHelper(gfx::Point(20, 0));
 }

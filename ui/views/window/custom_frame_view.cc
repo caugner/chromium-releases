@@ -6,7 +6,7 @@
 
 #include <algorithm>
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "grit/ui_resources.h"
 #include "grit/ui_strings.h"
 #include "ui/base/hit_test.h"
@@ -237,6 +237,20 @@ void CustomFrameView::Layout() {
 gfx::Size CustomFrameView::GetPreferredSize() {
   return frame_->non_client_view()->GetWindowBoundsForClientBounds(
       gfx::Rect(frame_->client_view()->GetPreferredSize())).size();
+}
+
+gfx::Size CustomFrameView::GetMinimumSize() {
+  return frame_->non_client_view()->GetWindowBoundsForClientBounds(
+      gfx::Rect(frame_->client_view()->GetMinimumSize())).size();
+}
+
+gfx::Size CustomFrameView::GetMaximumSize() {
+  gfx::Size max_size = frame_->client_view()->GetMaximumSize();
+  gfx::Size converted_size =
+      frame_->non_client_view()->GetWindowBoundsForClientBounds(
+          gfx::Rect(max_size)).size();
+  return gfx::Size(max_size.width() == 0 ? 0 : converted_size.width(),
+                   max_size.height() == 0 ? 0 : converted_size.height());
 }
 
 ///////////////////////////////////////////////////////////////////////////////

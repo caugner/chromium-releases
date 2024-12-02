@@ -15,10 +15,10 @@
         '<(DEPTH)/base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '<(DEPTH)/cc/cc.gyp:cc',
         '<(DEPTH)/skia/skia.gyp:skia',
-        '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
+        '<(DEPTH)/third_party/WebKit/public/blink.gyp:blink_minimal',
         '<(DEPTH)/ui/gl/gl.gyp:gl',
         '<(DEPTH)/ui/ui.gyp:ui',
-        '<(DEPTH)/webkit/gpu/webkit_gpu.gyp:webkit_gpu',
+        '<(DEPTH)/webkit/common/gpu/webkit_gpu.gyp:webkit_gpu',
       ],
       'defines': [
         'COMPOSITOR_IMPLEMENTATION',
@@ -68,8 +68,8 @@
           # IDR_BITMAP_BRUSH_IMAGE.
           'dependencies': [
             '<(DEPTH)/ui/ui.gyp:ui_resources',
-            '<(DEPTH)/third_party/angle/src/build_angle.gyp:libEGL',
-            '<(DEPTH)/third_party/angle/src/build_angle.gyp:libGLESv2',
+            '<(angle_path)/src/build_angle.gyp:libEGL',
+            '<(angle_path)/src/build_angle.gyp:libGLESv2',
           ],
         }],
       ],
@@ -79,23 +79,16 @@
       'type': 'static_library',
       'dependencies': [
         '<(DEPTH)/base/base.gyp:base',
-        '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_support',
-        '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
+        '<(DEPTH)/skia/skia.gyp:skia',
+        '<(DEPTH)/ui/gl/gl.gyp:gl',
+        '<(DEPTH)/ui/ui.gyp:ui',
+        'compositor',
       ],
       'sources': [
-        'test/compositor_test_support.cc',
-        'test/compositor_test_support.h',
-      ],
-      'conditions': [
-        ['os_posix == 1 and OS != "mac"', {
-          'conditions': [
-            ['linux_use_tcmalloc==1', {
-              'dependencies': [
-                '<(DEPTH)/base/allocator/allocator.gyp:allocator',
-              ],
-            }],
-          ],
-        }],
+        'test/test_layers.cc',
+        'test/test_layers.h',
+        'test/test_suite.cc',
+        'test/test_suite.h',
       ],
     },
     {
@@ -130,8 +123,6 @@
         'test/test_layer_animation_delegate.h',
         'test/test_layer_animation_observer.cc',
         'test/test_layer_animation_observer.h',
-        'test/test_suite.cc',
-        'test/test_suite.h',
         'test/test_utils.cc',
         'test/test_utils.h',
       ],
@@ -140,6 +131,15 @@
         ['OS=="linux"', {
           'dependencies': [
             '<(DEPTH)/third_party/mesa/mesa.gyp:osmesa',
+          ],
+        }],
+        ['os_posix == 1 and OS != "mac"', {
+          'conditions': [
+            ['linux_use_tcmalloc==1', {
+              'dependencies': [
+                '<(DEPTH)/base/allocator/allocator.gyp:allocator',
+              ],
+            }],
           ],
         }],
       ],

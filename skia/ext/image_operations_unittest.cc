@@ -10,7 +10,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "skia/ext/image_operations.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -459,6 +459,17 @@ TEST(ImageOperations, HalveSubset) {
           *subset_results.getAddr32(x, y));
     }
   }
+}
+
+TEST(ImageOperations, InvalidParams) {
+  // Make our source bitmap.
+  SkBitmap src;
+  src.setConfig(SkBitmap::kA8_Config, 16, 34);
+  src.allocPixels();
+
+  // Scale it, don't die.
+  SkBitmap full_results = skia::ImageOperations::Resize(
+      src, skia::ImageOperations::RESIZE_BOX, 10, 20);
 }
 
 // Resamples an image to the same image, it should give the same result.

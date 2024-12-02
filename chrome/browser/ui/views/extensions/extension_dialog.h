@@ -9,9 +9,8 @@
 #include "base/memory/ref_counted.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "ui/views/widget/widget_delegate.h"
+#include "ui/views/window/dialog_delegate.h"
 
-class BaseWindow;
 class ExtensionDialogObserver;
 class GURL;
 class Profile;
@@ -24,10 +23,14 @@ namespace extensions {
 class ExtensionHost;
 }
 
+namespace ui {
+class BaseWindow;
+}
+
 // Modal dialog containing contents provided by an extension.
 // Dialog is automatically centered in the owning window and has fixed size.
 // For example, used by the Chrome OS file browser.
-class ExtensionDialog : public views::WidgetDelegate,
+class ExtensionDialog : public views::DialogDelegate,
                         public content::NotificationObserver,
                         public base::RefCounted<ExtensionDialog> {
  public:
@@ -37,31 +40,15 @@ class ExtensionDialog : public views::WidgetDelegate,
   // |web_contents| is the tab that spawned the dialog.
   // |width| and |height| are the size of the dialog in pixels.
   static ExtensionDialog* Show(const GURL& url,
-                               BaseWindow* base_window,
+                               ui::BaseWindow* base_window,
                                Profile* profile,
                                content::WebContents* web_contents,
                                int width,
                                int height,
+                               int min_width,
+                               int min_height,
                                const string16& title,
                                ExtensionDialogObserver* observer);
-
-#if defined(USE_AURA)
-  // Create and show a fullscreen dialog with |url|.
-  // |profile| is the profile that the extension is registered with.
-  // |web_contents| is the tab that spawned the dialog.
-  static ExtensionDialog* ShowFullscreen(const GURL& url,
-                                         Profile* profile,
-                                         const string16& title,
-                                         ExtensionDialogObserver* observer);
-#else
-  static ExtensionDialog* ShowFullscreen(const GURL& url,
-                                         Profile* profile,
-                                         const string16& title,
-                                         ExtensionDialogObserver* observer) {
-    NOTIMPLEMENTED();
-    return NULL;
-  }
-#endif
 
   // Notifies the dialog that the observer has been destroyed and should not
   // be sent notifications.
@@ -81,7 +68,8 @@ class ExtensionDialog : public views::WidgetDelegate,
 
   extensions::ExtensionHost* host() const { return extension_host_.get(); }
 
-  // views::WidgetDelegate overrides.
+  // views::DialogDelegate override.
+  virtual int GetDialogButtons() const OVERRIDE;
   virtual bool CanResize() const OVERRIDE;
   virtual ui::ModalType GetModalType() const OVERRIDE;
   virtual bool ShouldShowWindowTitle() const OVERRIDE;
@@ -91,6 +79,7 @@ class ExtensionDialog : public views::WidgetDelegate,
   virtual views::Widget* GetWidget() OVERRIDE;
   virtual const views::Widget* GetWidget() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
+  virtual bool UseNewStyleForThisDialog() const OVERRIDE;
 
   // content::NotificationObserver overrides.
   virtual void Observe(int type,
@@ -108,19 +97,17 @@ class ExtensionDialog : public views::WidgetDelegate,
                   ExtensionDialogObserver* observer);
 
   static ExtensionDialog* ShowInternal(const GURL& url,
-                                       BaseWindow* base_window,
+                                       ui::BaseWindow* base_window,
                                        extensions::ExtensionHost* host,
                                        int width,
                                        int height,
-                                       bool fullscreen,
                                        const string16& title,
                                        ExtensionDialogObserver* observer);
 
   static extensions::ExtensionHost* CreateExtensionHost(const GURL& url,
                                                         Profile* profile);
 
-  void InitWindow(BaseWindow* base_window, int width, int height);
-  void InitWindowFullscreen();
+  void InitWindow(ui::BaseWindow* base_window, int width, int height);
 
   // Window that holds the extension host view.
   views::Widget* window_;

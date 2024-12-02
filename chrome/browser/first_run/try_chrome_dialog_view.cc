@@ -8,7 +8,7 @@
 
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/user_experiment.h"
@@ -240,7 +240,7 @@ TryChromeDialogView::Result TryChromeDialogView::ShowModal(
     // and the 'make default' checkbox and the OK button on the same row.
     layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
     layout->StartRow(0, 6);
-    separator = new views::Separator;
+    separator = new views::Separator(views::Separator::HORIZONTAL);
     layout->AddView(separator);
     layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
 
@@ -301,7 +301,7 @@ TryChromeDialogView::Result TryChromeDialogView::ShowModal(
   popup_->Show();
   if (!listener.is_null())
     listener.Run(popup_->GetNativeView());
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
   if (!listener.is_null())
     listener.Run(NULL);
   return result_;
@@ -374,7 +374,7 @@ void TryChromeDialogView::ButtonPressed(views::Button* sender,
   }
 
   popup_->Close();
-  MessageLoop::current()->Quit();
+  base::MessageLoop::current()->Quit();
 }
 
 void TryChromeDialogView::LinkClicked(views::Link* source, int event_flags) {

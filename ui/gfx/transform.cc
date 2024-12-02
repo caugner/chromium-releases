@@ -9,14 +9,14 @@
 
 #include <cmath>
 
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/point3_f.h"
-#include "ui/gfx/vector3d_f.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/safe_integer_conversions.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/transform_util.h"
+#include "ui/gfx/vector3d_f.h"
 
 namespace gfx {
 
@@ -365,14 +365,6 @@ bool Transform::TransformRectReverse(RectF* rect) const {
 }
 
 bool Transform::Blend(const Transform& from, double progress) {
-  if (progress <= 0.0) {
-    *this = from;
-    return true;
-  }
-
-  if (progress >= 1.0)
-    return true;
-
   DecomposedTransform to_decomp;
   DecomposedTransform from_decomp;
   if (!DecomposeTransform(&to_decomp, *this) ||

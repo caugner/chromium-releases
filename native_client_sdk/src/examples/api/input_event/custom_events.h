@@ -9,8 +9,6 @@
 #include <string>
 #include <vector>
 
-namespace event_queue {
-
 // These functions and classes are used to define a non-Pepper set of
 // events.  This is typical of what many developers might do, since it
 // would be common to convert a Pepper event into some other more
@@ -92,13 +90,15 @@ class MouseEvent : public Event {
              uint32_t xpos,
              uint32_t ypos,
              uint32_t clicks,
-             double time)
+             double time,
+             bool is_context_menu)
       : Event(modifiers),
         mouse_button_(button),
         x_position_(xpos),
         y_position_(ypos),
         click_count_(clicks),
-        timestamp_(time) {}
+        timestamp_(time),
+        is_context_menu_(is_context_menu) {}
   // Convert the WheelEvent to a string
   virtual std::string ToString() const;
 
@@ -108,6 +108,7 @@ class MouseEvent : public Event {
   uint32_t y_position_;
   uint32_t click_count_;
   double timestamp_;
+  bool is_context_menu_;
 
   std::string MouseButtonToString(MouseButton button) const;
 };
@@ -186,7 +187,5 @@ class TouchEvent : public Event {
   std::vector<Touch> touches;
   double timestamp_;
 };
-
-}  // end namespace
 
 #endif  // CUSTOM_EVENTS_H

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/background/background_mode_manager.h"
@@ -96,7 +96,7 @@ class AppBackgroundPageApiTest : public ExtensionApiTest {
   }
 
   void UnloadExtensionViaTask(const std::string& id) {
-    MessageLoop::current()->PostTask(
+    base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&AppBackgroundPageApiTest::UnloadExtension, this, id));
   }
@@ -485,7 +485,7 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, UnloadExtensionWhileHidden) {
           GetAppBackgroundContents(ASCIIToUTF16(extension->id())));
 
   // Close all browsers - app should continue running.
-  SetExitWhenLastBrowserCloses(false);
+  set_exit_when_last_browser_closes(false);
   CloseBrowser(browser());
 
   // Post a task to unload the extension - this should cause Chrome to exit

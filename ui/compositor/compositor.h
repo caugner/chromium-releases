@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "base/hash_tables.h"
+#include "base/containers/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
@@ -25,6 +25,7 @@
 class SkBitmap;
 
 namespace base {
+class MessageLoopProxy;
 class RunLoop;
 }
 
@@ -41,6 +42,7 @@ class GLSurface;
 class GLShareGroup;
 class Point;
 class Rect;
+class Size;
 }
 
 namespace WebKit {
@@ -54,6 +56,9 @@ class CompositorObserver;
 class ContextProviderFromContextFactory;
 class Layer;
 class PostedSwapQueue;
+class Reflector;
+class Texture;
+struct LatencyInfo;
 
 // This class abstracts the creation of the 3D context for the compositor. It is
 // a global object.
@@ -77,7 +82,15 @@ class COMPOSITOR_EXPORT ContextFactory {
 
   // Creates a context used for offscreen rendering. This context can be shared
   // with all compositors.
-  virtual WebKit::WebGraphicsContext3D* CreateOffscreenContext() = 0;
+  virtual scoped_ptr<WebKit::WebGraphicsContext3D> CreateOffscreenContext() = 0;
+
+  // Creates a reflector that copies the content of the |mirrored_compositor|
+  // onto |mirroing_layer|.
+  virtual scoped_refptr<Reflector> CreateReflector(
+      Compositor* mirrored_compositor,
+      Layer* mirroring_layer) = 0;
+  // Removes the reflector, which stops the mirroring.
+  virtual void RemoveReflector(scoped_refptr<Reflector> reflector) = 0;
 
   virtual scoped_refptr<cc::ContextProvider>
       OffscreenContextProviderForMainThread() = 0;
@@ -97,7 +110,14 @@ class COMPOSITOR_EXPORT DefaultContextFactory : public ContextFactory {
   // ContextFactory implementation
   virtual cc::OutputSurface* CreateOutputSurface(
       Compositor* compositor) OVERRIDE;
-  virtual WebKit::WebGraphicsContext3D* CreateOffscreenContext() OVERRIDE;
+  virtual scoped_ptr<WebKit::WebGraphicsContext3D> CreateOffscreenContext()
+      OVERRIDE;
+
+  virtual scoped_refptr<Reflector> CreateReflector(
+      Compositor* compositor,
+      Layer* layer) OVERRIDE;
+  virtual void RemoveReflector(scoped_refptr<Reflector> reflector) OVERRIDE;
+
   virtual scoped_refptr<cc::ContextProvider>
       OffscreenContextProviderForMainThread() OVERRIDE;
   virtual scoped_refptr<cc::ContextProvider>
@@ -107,7 +127,7 @@ class COMPOSITOR_EXPORT DefaultContextFactory : public ContextFactory {
   bool Initialize();
 
  private:
-  WebKit::WebGraphicsContext3D* CreateContextCommon(
+  scoped_ptr<WebKit::WebGraphicsContext3D> CreateContextCommon(
       Compositor* compositor,
       bool offscreen);
 
@@ -128,7 +148,14 @@ class COMPOSITOR_EXPORT TestContextFactory : public ContextFactory {
   // ContextFactory implementation
   virtual cc::OutputSurface* CreateOutputSurface(
       Compositor* compositor) OVERRIDE;
-  virtual WebKit::WebGraphicsContext3D* CreateOffscreenContext() OVERRIDE;
+  virtual scoped_ptr<WebKit::WebGraphicsContext3D> CreateOffscreenContext()
+      OVERRIDE;
+
+  virtual scoped_refptr<Reflector> CreateReflector(
+      Compositor* mirrored_compositor,
+      Layer* mirroring_layer) OVERRIDE;
+  virtual void RemoveReflector(scoped_refptr<Reflector> reflector) OVERRIDE;
+
   virtual scoped_refptr<cc::ContextProvider>
       OffscreenContextProviderForMainThread() OVERRIDE;
   virtual scoped_refptr<cc::ContextProvider>
@@ -188,6 +215,20 @@ class COMPOSITOR_EXPORT CompositorDelegate {
   virtual ~CompositorDelegate() {}
 };
 
+class COMPOSITOR_EXPORT Reflector
+    : public base::RefCountedThreadSafe<Reflector> {
+ public:
+  Reflector() {}
+
+  virtual void OnMirroringCompositorResized() {}
+
+ protected:
+  friend class base::RefCountedThreadSafe<Reflector>;
+  virtual ~Reflector() {}
+
+  DISALLOW_COPY_AND_ASSIGN(Reflector);
+};
+
 // This class represents a lock on the compositor, that can be used to prevent
 // commits to the compositor tree while we're waiting for an asynchronous
 // event. The typical use case is when waiting for a renderer to produce a frame
@@ -223,6 +264,9 @@ class COMPOSITOR_EXPORT DrawWaiterForTest : public ui::CompositorObserver {
   // not to draw.
   static void Wait(Compositor* compositor);
 
+  // Waits for a commit instead of a draw.
+  static void WaitForCommit(Compositor* compositor);
+
  private:
   DrawWaiterForTest();
   virtual ~DrawWaiterForTest();
@@ -242,6 +286,8 @@ class COMPOSITOR_EXPORT DrawWaiterForTest : public ui::CompositorObserver {
 
   scoped_ptr<base::RunLoop> wait_run_loop_;
 
+  bool wait_for_commit_;
+
   DISALLOW_COPY_AND_ASSIGN(DrawWaiterForTest);
 };
 
@@ -260,6 +306,7 @@ class COMPOSITOR_EXPORT Compositor
 
   static void Initialize();
   static bool WasInitializedWithThread();
+  static scoped_refptr<base::MessageLoopProxy> GetCompositorMessageLoop();
   static void Terminate();
 
   // Schedules a redraw of the layer tree associated with this compositor.
@@ -294,6 +341,8 @@ class COMPOSITOR_EXPORT Compositor
   // Schedule redraw and append damage_rect to the damage region calculated
   // from changes to layer properties.
   void ScheduleRedrawRect(const gfx::Rect& damage_rect);
+
+  void SetLatencyInfo(const ui::LatencyInfo& latency_info);
 
   // Reads the region |bounds_in_pixel| of the contents of the last rendered
   // frame into the given bitmap.
@@ -347,9 +396,7 @@ class COMPOSITOR_EXPORT Compositor
                                    float page_scale) OVERRIDE {}
   virtual scoped_ptr<cc::OutputSurface>
       CreateOutputSurface() OVERRIDE;
-  virtual void DidRecreateOutputSurface(bool success) OVERRIDE {}
-  virtual scoped_ptr<cc::InputHandlerClient> CreateInputHandlerClient()
-      OVERRIDE;
+  virtual void DidInitializeOutputSurface(bool success) OVERRIDE {}
   virtual void WillCommit() OVERRIDE {}
   virtual void DidCommit() OVERRIDE;
   virtual void DidCommitAndDrawFrame() OVERRIDE;

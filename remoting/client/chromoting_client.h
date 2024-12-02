@@ -19,7 +19,6 @@
 #include "remoting/protocol/connection_to_host.h"
 #include "remoting/protocol/input_stub.h"
 #include "remoting/protocol/video_stub.h"
-#include "remoting/jingle_glue/xmpp_proxy.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -38,6 +37,7 @@ class ClientUserInterface;
 class FrameConsumerProxy;
 class FrameProducer;
 class RectangleUpdateDecoder;
+class SignalStrategy;
 
 class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
                          public protocol::ClientStub {
@@ -51,10 +51,10 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
 
   virtual ~ChromotingClient();
 
-  // Start/stop the client. Must be called on the main thread.
-  void Start(scoped_refptr<XmppProxy> xmpp_proxy,
+  // Start the client. Must be called on the main thread. |signal_strategy|
+  // must outlive the client.
+  void Start(SignalStrategy* signal_strategy,
              scoped_ptr<protocol::TransportFactory> transport_factory);
-  void Stop(const base::Closure& shutdown_task);
 
   FrameProducer* GetFrameProducer();
 
@@ -64,6 +64,8 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
   // ClientStub implementation.
   virtual void SetCapabilities(
       const protocol::Capabilities& capabilities) OVERRIDE;
+  virtual void SetPairingResponse(
+      const protocol::PairingResponse& pairing_response) OVERRIDE;
 
   // ClipboardStub implementation for receiving clipboard data from host.
   virtual void InjectClipboardEvent(
@@ -85,8 +87,6 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
 
   // Called when all channels are connected.
   void OnChannelsConnected();
-
-  void OnDisconnected(const base::Closure& shutdown_task);
 
   // The following are not owned by this class.
   ClientConfig config_;

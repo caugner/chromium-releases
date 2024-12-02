@@ -10,7 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_member.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/timer.h"
 #include "chrome/browser/spellchecker/spelling_service_client.h"
 #include "chrome/browser/tab_contents/render_view_context_menu_observer.h"
@@ -48,6 +48,7 @@ class SpellingMenuObserver : public RenderViewContextMenuObserver {
   virtual bool IsCommandIdChecked(int command_id) OVERRIDE;
   virtual bool IsCommandIdEnabled(int command_id) OVERRIDE;
   virtual void ExecuteCommand(int command_id) OVERRIDE;
+  virtual void OnMenuCancel() OVERRIDE;
 
   // A callback function called when the Spelling service finishes checking a
   // misspelled word.
@@ -86,6 +87,10 @@ class SpellingMenuObserver : public RenderViewContextMenuObserver {
   // The misspelled word. When we choose the "Add to dictionary" item, we add
   // this word to the custom-word dictionary.
   string16 misspelled_word_;
+
+  // The hash identifier for the misspelled word. Used for collecting user
+  // feedback to spellcheck suggestions.
+  uint32 misspelling_hash_;
 
   // The string representing the result of this call. This string is a
   // suggestion when this call finished successfully. Otherwise it is error

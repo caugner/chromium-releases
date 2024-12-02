@@ -6,16 +6,13 @@
 #define CHROME_BROWSER_GOOGLE_APIS_TASK_UTIL_H_
 
 #include "base/bind.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 
 namespace google_apis {
 
 // Runs task on the thread to which |relay_proxy| belongs.
 void RunTaskOnThread(scoped_refptr<base::MessageLoopProxy> relay_proxy,
                      const base::Closure& task);
-
-// Runs task on UI thread.
-void RunTaskOnUIThread(const base::Closure& task);
 
 namespace internal {
 

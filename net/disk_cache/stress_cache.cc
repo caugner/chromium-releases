@@ -26,11 +26,11 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/string_number_conversions.h"
-#include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
-#include "base/utf_string_conversions.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
@@ -108,11 +108,12 @@ void StressTheCache(int iteration) {
 
   base::Thread cache_thread("CacheThread");
   if (!cache_thread.StartWithOptions(
-          base::Thread::Options(MessageLoop::TYPE_IO, 0)))
+          base::Thread::Options(base::MessageLoop::TYPE_IO, 0)))
     return;
 
   disk_cache::BackendImpl* cache =
-      new disk_cache::BackendImpl(path, mask, cache_thread.message_loop_proxy(),
+      new disk_cache::BackendImpl(path, mask,
+                                  cache_thread.message_loop_proxy().get(),
                                   NULL);
   cache->SetMaxSize(cache_size);
   cache->SetFlags(disk_cache::kNoLoadProtection);
@@ -168,7 +169,8 @@ void StressTheCache(int iteration) {
     base::snprintf(buffer->data(), kSize,
                    "i: %d iter: %d, size: %d, truncate: %d     ", i, iteration,
                    size, truncate ? 1 : 0);
-    rv = entries[slot]->WriteData(0, 0, buffer, size, cb.callback(), truncate);
+    rv = entries[slot]->WriteData(0, 0, buffer.get(), size, cb.callback(),
+                                  truncate);
     CHECK_EQ(size, cb.GetResult(rv));
 
     if (rand() % 100 > 80) {
@@ -188,11 +190,11 @@ void StressTheCache(int iteration) {
 bool g_crashing = false;
 
 // RunSoon() and CrashCallback() reference each other, unfortunately.
-void RunSoon(MessageLoop* target_loop);
+void RunSoon(base::MessageLoop* target_loop);
 
 void CrashCallback() {
   // Keep trying to run.
-  RunSoon(MessageLoop::current());
+  RunSoon(base::MessageLoop::current());
 
   if (g_crashing)
     return;
@@ -210,7 +212,7 @@ void CrashCallback() {
   }
 }
 
-void RunSoon(MessageLoop* target_loop) {
+void RunSoon(base::MessageLoop* target_loop) {
   const base::TimeDelta kTaskDelay = base::TimeDelta::FromSeconds(10);
   target_loop->PostDelayedTask(
       FROM_HERE, base::Bind(&CrashCallback), kTaskDelay);
@@ -268,14 +270,14 @@ int main(int argc, const char* argv[]) {
   logging::LogEventProvider::Initialize(kStressCacheTraceProviderName);
 #else
   CommandLine::Init(argc, argv);
-  logging::InitLogging(NULL, logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
-                       logging::LOCK_LOG_FILE, logging::DELETE_OLD_LOG_FILE,
-                       logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
+  logging::LoggingSettings settings;
+  settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
+  logging::InitLogging(settings);
 #endif
 
   // Some time for the memory manager to flush stuff.
   base::PlatformThread::Sleep(base::TimeDelta::FromSeconds(3));
-  MessageLoop message_loop(MessageLoop::TYPE_IO);
+  base::MessageLoop message_loop(base::MessageLoop::TYPE_IO);
 
   char* end;
   long int iteration = strtol(argv[1], &end, 0);

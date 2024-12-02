@@ -45,7 +45,7 @@ static scoped_refptr<DecoderBuffer> CreateFakeEncryptedBuffer() {
 namespace {
 
 ACTION_P(ReturnBuffer, buffer) {
-  arg0.Run(buffer ? DemuxerStream::kOk : DemuxerStream::kAborted, buffer);
+  arg0.Run(buffer.get() ? DemuxerStream::kOk : DemuxerStream::kAborted, buffer);
 }
 
 ACTION_P(RunCallbackIfNotNull, param) {
@@ -256,6 +256,15 @@ TEST_F(DecryptingDemuxerStreamTest, Initialize_NormalVideo) {
     EXPECT_EQ(0, memcmp(output_config.extra_data(), input_config.extra_data(),
                         input_config.extra_data_size()));
   }
+}
+
+TEST_F(DecryptingDemuxerStreamTest, Initialize_NullDecryptor) {
+  EXPECT_CALL(*this, RequestDecryptorNotification(_))
+      .WillRepeatedly(RunCallbackIfNotNull(static_cast<Decryptor*>(NULL)));
+
+  AudioDecoderConfig input_config(kCodecVorbis, kSampleFormatPlanarF32,
+                                  CHANNEL_LAYOUT_STEREO, 44100, NULL, 0, true);
+  InitializeAudioAndExpectStatus(input_config, DECODER_ERROR_NOT_SUPPORTED);
 }
 
 // Test normal read case.

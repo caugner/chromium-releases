@@ -8,8 +8,8 @@
 
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
-#include "base/stringprintf.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/common/chrome_switches.h"
 
 using chrome::VersionInfo;
@@ -61,7 +61,7 @@ Feature::Availability Feature::CreateAvailability(AvailabilityResult result,
   return Availability(result, message);
 }
 
-Feature::Feature() {}
+Feature::Feature() : no_parent_(false) {}
 
 Feature::~Feature() {}
 

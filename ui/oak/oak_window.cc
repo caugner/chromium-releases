@@ -4,7 +4,7 @@
 
 #include "ui/oak/oak_window.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "grit/ui_resources.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -29,8 +29,7 @@ views::Widget* OakWindow::instance = NULL;
 ////////////////////////////////////////////////////////////////////////////////
 // OakWindow, public:
 
-OakWindow::OakWindow() : tree_(NULL), tree_container_(NULL), details_(NULL) {
-}
+OakWindow::OakWindow() : tree_container_(NULL) {}
 
 OakWindow::~OakWindow() {
   // The tree/table need to be destroyed before the model.
@@ -79,10 +78,9 @@ void OakWindow::OnPaint(gfx::Canvas* canvas) {
   canvas->FillRect(separator_rect_, kBorderColor);
 }
 
-void OakWindow::ViewHierarchyChanged(bool is_add,
-                                     views::View* parent,
-                                     views::View* child) {
-  if (is_add && child == this)
+void OakWindow::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (details.is_add && details.child == this)
     Init();
 }
 

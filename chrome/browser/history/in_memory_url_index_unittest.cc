@@ -11,9 +11,9 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/string16.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_database.h"
@@ -54,15 +54,15 @@ namespace history {
 // Observer class so the unit tests can wait while the cache is being saved.
 class CacheFileSaverObserver : public InMemoryURLIndex::SaveCacheObserver {
  public:
-  explicit CacheFileSaverObserver(MessageLoop* loop);
+  explicit CacheFileSaverObserver(base::MessageLoop* loop);
   virtual void OnCacheSaveFinished(bool succeeded) OVERRIDE;
 
-  MessageLoop* loop_;
+  base::MessageLoop* loop_;
   bool succeeded_;
   DISALLOW_COPY_AND_ASSIGN(CacheFileSaverObserver);
 };
 
-CacheFileSaverObserver::CacheFileSaverObserver(MessageLoop* loop)
+CacheFileSaverObserver::CacheFileSaverObserver(base::MessageLoop* loop)
     : loop_(loop),
       succeeded_(false) {
   DCHECK(loop);
@@ -118,7 +118,7 @@ class InMemoryURLIndexTest : public testing::Test {
   void ExpectPrivateDataEqual(const URLIndexPrivateData& expected,
                               const URLIndexPrivateData& actual);
 
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
   TestingProfile profile_;
@@ -472,7 +472,7 @@ TEST_F(InMemoryURLIndexTest, Retrieval) {
 
   // Search which should result in nearly perfect result.
   matches = url_index_->HistoryItemsForTerms(
-      ASCIIToUTF16("https NearlyPerfectResult"), string16::npos);
+      ASCIIToUTF16("Nearly Perfect Result"), string16::npos);
   ASSERT_EQ(1U, matches.size());
   // The results should have a very high score.
   EXPECT_GT(matches[0].raw_score, 900);
@@ -570,8 +570,8 @@ TEST_F(InMemoryURLIndexTest, URLPrefixMatching) {
   ASSERT_EQ(1U, matches.size());
   EXPECT_TRUE(matches[0].can_inline);
 
-  // "http://drudgere" - found, can inline
-  matches = url_index_->HistoryItemsForTerms(ASCIIToUTF16("http://drudgere"),
+  // "drudgere" - found, can inline
+  matches = url_index_->HistoryItemsForTerms(ASCIIToUTF16("drudgere"),
                                              string16::npos);
   ASSERT_EQ(1U, matches.size());
   EXPECT_TRUE(matches[0].can_inline);
@@ -593,8 +593,8 @@ TEST_F(InMemoryURLIndexTest, URLPrefixMatching) {
   ASSERT_EQ(1U, matches.size());
   EXPECT_TRUE(matches[0].can_inline);
 
-  // "http://view.atdmt" - found, can inline
-  matches = url_index_->HistoryItemsForTerms(ASCIIToUTF16("http://view.atdmt"),
+  // "view.atdmt" - found, can inline
+  matches = url_index_->HistoryItemsForTerms(ASCIIToUTF16("view.atdmt"),
                                              string16::npos);
   ASSERT_EQ(1U, matches.size());
   EXPECT_TRUE(matches[0].can_inline);
@@ -612,14 +612,14 @@ TEST_F(InMemoryURLIndexTest, URLPrefixMatching) {
   ASSERT_EQ(1U, matches.size());
   EXPECT_TRUE(matches[0].can_inline);
 
-  // "ww.cnn.com" - not found because we don't allow ww as a mid-term match
+  // "ww.cnn.com" - found because we allow mid-term matches in hostnames
   matches = url_index_->HistoryItemsForTerms(ASCIIToUTF16("ww.cnn.com"),
                                              string16::npos);
-  ASSERT_EQ(0U, matches.size());
+  ASSERT_EQ(1U, matches.size());
 
-  // "http://www.cnn.com" - found, can inline
+  // "www.cnn.com" - found, can inline
   matches =
-      url_index_->HistoryItemsForTerms(ASCIIToUTF16("http://www.cnn.com"),
+      url_index_->HistoryItemsForTerms(ASCIIToUTF16("www.cnn.com"),
                                        string16::npos);
   ASSERT_EQ(1U, matches.size());
   EXPECT_TRUE(matches[0].can_inline);
@@ -1018,6 +1018,7 @@ TEST_F(InMemoryURLIndexTest, CacheSaveRestore) {
 
   // Capture the current private data for later comparison to restored data.
   scoped_refptr<URLIndexPrivateData> old_data(private_data.Duplicate());
+  const base::Time rebuild_time = private_data.last_time_rebuilt_from_history_;
 
   // Save then restore our private data.
   CacheFileSaverObserver save_observer(&message_loop_);
@@ -1038,7 +1039,7 @@ TEST_F(InMemoryURLIndexTest, CacheSaveRestore) {
   EXPECT_TRUE(private_data.word_starts_map_.empty());
 
   HistoryIndexRestoreObserver restore_observer(
-      base::Bind(&MessageLoop::Quit, base::Unretained(&message_loop_)));
+      base::Bind(&base::MessageLoop::Quit, base::Unretained(&message_loop_)));
   url_index_->set_restore_cache_observer(&restore_observer);
   PostRestoreFromCacheFileTask();
   message_loop_.Run();
@@ -1048,11 +1049,81 @@ TEST_F(InMemoryURLIndexTest, CacheSaveRestore) {
 
   // Make sure the data we have was reloaded from cache.  (Version 0
   // means rebuilt from history; anything else means restored from
-  // a cache version.)
+  // a cache version.)  Also, the rebuild time should not have changed.
   EXPECT_GT(new_data.restored_cache_version_, 0);
+  EXPECT_EQ(rebuild_time, new_data.last_time_rebuilt_from_history_);
 
   // Compare the captured and restored for equality.
-  ExpectPrivateDataEqual(*old_data, new_data);
+  ExpectPrivateDataEqual(*old_data.get(), new_data);
+}
+
+TEST_F(InMemoryURLIndexTest, RebuildFromHistoryIfCacheOld) {
+  base::ScopedTempDir temp_directory;
+  ASSERT_TRUE(temp_directory.CreateUniqueTempDir());
+  set_history_dir(temp_directory.path());
+
+  URLIndexPrivateData& private_data(*GetPrivateData());
+
+  // Ensure that there is really something there to be saved.
+  EXPECT_FALSE(private_data.word_list_.empty());
+  // available_words_ will already be empty since we have freshly built the
+  // data set for this test.
+  EXPECT_TRUE(private_data.available_words_.empty());
+  EXPECT_FALSE(private_data.word_map_.empty());
+  EXPECT_FALSE(private_data.char_word_map_.empty());
+  EXPECT_FALSE(private_data.word_id_history_map_.empty());
+  EXPECT_FALSE(private_data.history_id_word_map_.empty());
+  EXPECT_FALSE(private_data.history_info_map_.empty());
+  EXPECT_FALSE(private_data.word_starts_map_.empty());
+
+  // Make sure the data we have was built from history.  (Version 0
+  // means rebuilt from history.)
+  EXPECT_EQ(0, private_data.restored_cache_version_);
+
+  // Overwrite the build time so that we'll think the data is too old
+  // and rebuild the cache from history.
+  const base::Time fake_rebuild_time =
+      base::Time::Now() - base::TimeDelta::FromDays(30);
+  private_data.last_time_rebuilt_from_history_ = fake_rebuild_time;
+
+  // Capture the current private data for later comparison to restored data.
+  scoped_refptr<URLIndexPrivateData> old_data(private_data.Duplicate());
+
+  // Save then restore our private data.
+  CacheFileSaverObserver save_observer(&message_loop_);
+  url_index_->set_save_cache_observer(&save_observer);
+  PostSaveToCacheFileTask();
+  message_loop_.Run();
+  EXPECT_TRUE(save_observer.succeeded_);
+
+  // Clear and then prove it's clear before restoring.
+  ClearPrivateData();
+  EXPECT_TRUE(private_data.word_list_.empty());
+  EXPECT_TRUE(private_data.available_words_.empty());
+  EXPECT_TRUE(private_data.word_map_.empty());
+  EXPECT_TRUE(private_data.char_word_map_.empty());
+  EXPECT_TRUE(private_data.word_id_history_map_.empty());
+  EXPECT_TRUE(private_data.history_id_word_map_.empty());
+  EXPECT_TRUE(private_data.history_info_map_.empty());
+  EXPECT_TRUE(private_data.word_starts_map_.empty());
+
+  HistoryIndexRestoreObserver restore_observer(
+      base::Bind(&base::MessageLoop::Quit, base::Unretained(&message_loop_)));
+  url_index_->set_restore_cache_observer(&restore_observer);
+  PostRestoreFromCacheFileTask();
+  message_loop_.Run();
+  EXPECT_TRUE(restore_observer.succeeded());
+
+  URLIndexPrivateData& new_data(*GetPrivateData());
+
+  // Make sure the data we have was rebuilt from history.  (Version 0
+  // means rebuilt from history; anything else means restored from
+  // a cache version.)
+  EXPECT_EQ(0, new_data.restored_cache_version_);
+  EXPECT_NE(fake_rebuild_time, new_data.last_time_rebuilt_from_history_);
+
+  // Compare the captured and restored for equality.
+  ExpectPrivateDataEqual(*old_data.get(), new_data);
 }
 
 class InMemoryURLIndexCacheTest : public testing::Test {

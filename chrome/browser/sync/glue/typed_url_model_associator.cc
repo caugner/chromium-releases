@@ -10,7 +10,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "net/base/net_util.h"
@@ -64,7 +64,7 @@ TypedUrlModelAssociator::TypedUrlModelAssociator(
     DataTypeErrorHandler* error_handler)
     : sync_service_(sync_service),
       history_backend_(history_backend),
-      expected_loop_(MessageLoop::current()),
+      expected_loop_(base::MessageLoop::current()),
       pending_abort_(false),
       error_handler_(error_handler),
       num_db_accesses_(0),
@@ -174,7 +174,7 @@ int TypedUrlModelAssociator::GetErrorPercentage() const {
 syncer::SyncError TypedUrlModelAssociator::DoAssociateModels() {
   DVLOG(1) << "Associating TypedUrl Models";
   syncer::SyncError error;
-  DCHECK(expected_loop_ == MessageLoop::current());
+  DCHECK(expected_loop_ == base::MessageLoop::current());
   if (IsAbortPending())
     return syncer::SyncError();
   history::URLRows typed_urls;
@@ -452,7 +452,7 @@ sync_pb::TypedUrlSpecifics TypedUrlModelAssociator::FilterExpiredVisits(
 
 bool TypedUrlModelAssociator::DeleteAllNodes(
     syncer::WriteTransaction* trans) {
-  DCHECK(expected_loop_ == MessageLoop::current());
+  DCHECK(expected_loop_ == base::MessageLoop::current());
 
   // Just walk through all our child nodes and delete them.
   syncer::ReadNode typed_url_root(trans);

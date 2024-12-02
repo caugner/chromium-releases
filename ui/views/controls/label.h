@@ -10,7 +10,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/text_constants.h"
@@ -132,7 +132,7 @@ class VIEWS_EXPORT Label : public View {
   void SetAllowCharacterBreak(bool allow_character_break);
 
   // Sets whether the label text should be elided in the middle or end (if
-  // necessary). The default is to not elide at all.
+  // necessary). The default is to elide at the end.
   // NOTE: Eliding in the middle is not supported for multi-line strings.
   void SetElideBehavior(ElideBehavior elide_behavior);
 
@@ -167,7 +167,7 @@ class VIEWS_EXPORT Label : public View {
   // This method is used to layout multi-line labels. It is equivalent to
   // GetPreferredSize().height() if the receiver is not multi-line.
   virtual int GetHeightForWidth(int w) OVERRIDE;
-  virtual std::string GetClassName() const OVERRIDE;
+  virtual const char* GetClassName() const OVERRIDE;
   virtual View* GetTooltipHandlerForPoint(const gfx::Point& point) OVERRIDE;
   virtual bool HitTestRect(const gfx::Rect& rect) const OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;

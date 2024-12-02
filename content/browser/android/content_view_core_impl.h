@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "base/android/jni_android.h"
 #include "base/android/jni_helper.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -19,7 +20,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/rect_f.h"
 
@@ -32,7 +33,6 @@ class WindowAndroid;
 
 namespace content {
 class RenderWidgetHostViewAndroid;
-class SyncInputEventFilter;
 
 // TODO(jrg): this is a shell.  Upstream the rest.
 class ContentViewCoreImpl : public ContentViewCore,
@@ -59,8 +59,6 @@ class ContentViewCoreImpl : public ContentViewCore,
       float scale,
       gfx::Size* out_size) OVERRIDE;
   virtual float GetDpiScale() const OVERRIDE;
-  virtual void SetInputHandler(
-      WebKit::WebCompositorInputHandler* input_handler) OVERRIDE;
   virtual void RequestContentClipping(const gfx::Rect& clipping,
                                       const gfx::Size& content_size) OVERRIDE;
   virtual void AddFrameInfoCallback(
@@ -122,6 +120,8 @@ class ContentViewCoreImpl : public ContentViewCore,
   void SingleTap(JNIEnv* env, jobject obj, jlong time_ms,
                  jfloat x, jfloat y,
                  jboolean disambiguation_popup_tap);
+  void SingleTapUnconfirmed(JNIEnv* env, jobject obj, jlong time_ms,
+                            jfloat x, jfloat y);
   void ShowPressState(JNIEnv* env, jobject obj, jlong time_ms,
                       jfloat x, jfloat y);
   void ShowPressCancel(JNIEnv* env, jobject obj, jlong time_ms,
@@ -196,6 +196,7 @@ class ContentViewCoreImpl : public ContentViewCore,
   void UpdateVSyncParameters(JNIEnv* env, jobject obj, jlong timebase_micros,
                              jlong interval_micros);
   void OnVSync(JNIEnv* env, jobject /* obj */, jlong frame_time_micros);
+  jboolean OnAnimate(JNIEnv* env, jobject /* obj */, jlong frame_time_micros);
   jboolean PopulateBitmapFromCompositor(JNIEnv* env,
                                         jobject obj,
                                         jobject jbitmap);
@@ -269,8 +270,21 @@ class ContentViewCoreImpl : public ContentViewCore,
   void ShowDisambiguationPopup(
       const gfx::Rect& target_rect, const SkBitmap& zoomed_bitmap);
 
-  void RequestExternalVideoSurface(int player_id);
-  void NotifyGeometryChange(int player_id, const gfx::RectF& rect);
+  // Creates a java-side smooth scroller. Used by
+  // chrome.gpuBenchmarking.smoothScrollBy.
+  base::android::ScopedJavaLocalRef<jobject> CreateSmoothScroller(
+      bool scroll_down, int mouse_event_x, int mouse_event_y);
+
+  // Notifies the java object about the external surface, requesting for one if
+  // necessary.
+  void NotifyExternalSurface(
+      int player_id, bool is_request, const gfx::RectF& rect);
+
+  base::android::ScopedJavaLocalRef<jobject> GetContentVideoViewClient();
+
+  // Returns the context that the ContentViewCore was created with, it would
+  // typically be an Activity context for an on screen view.
+  base::android::ScopedJavaLocalRef<jobject> GetContext();
 
   // --------------------------------------------------------------------------
   // Methods called from native code
@@ -281,18 +295,12 @@ class ContentViewCoreImpl : public ContentViewCore,
   gfx::Size GetViewportSizeOffsetDip() const;
   float GetOverdrawBottomHeightDip() const;
 
-  InputEventAckState FilterInputEvent(const WebKit::WebInputEvent& input_event);
-
   void AttachLayer(scoped_refptr<cc::Layer> layer);
   void RemoveLayer(scoped_refptr<cc::Layer> layer);
-  void SetVSyncNotificationEnabled(bool enabled);
+  void SetNeedsBeginFrame(bool enabled);
+  void SetNeedsAnimate();
 
  private:
-  enum InputEventVSyncStatus {
-      NOT_LAST_INPUT_EVENT_FOR_VSYNC,
-      LAST_INPUT_EVENT_FOR_VSYNC
-  };
-
   class ContentViewUserData;
 
   friend class ContentViewUserData;
@@ -314,8 +322,7 @@ class ContentViewCoreImpl : public ContentViewCore,
   float GetTouchPaddingDip();
 
   WebKit::WebGestureEvent MakeGestureEvent(
-      WebKit::WebInputEvent::Type type, long time_ms,
-      float x, float y, InputEventVSyncStatus vsync_status) const;
+      WebKit::WebInputEvent::Type type, long time_ms, float x, float y) const;
 
   gfx::Size GetViewportSizePix() const;
   gfx::Size GetViewportSizeOffsetPix() const;
@@ -323,6 +330,10 @@ class ContentViewCoreImpl : public ContentViewCore,
   void DeleteScaledSnapshotTexture();
 
   void SendGestureEvent(const WebKit::WebGestureEvent& event);
+
+  // Checks if there there is a corresponding renderer process and updates
+  // |tab_crashed_| accordingly.
+  void UpdateTabCrashedFlag();
 
   // A weak reference to the Java ContentViewCore object.
   JavaObjectWeakGlobalRef java_ref_;
@@ -342,6 +353,10 @@ class ContentViewCoreImpl : public ContentViewCore,
   // Device scale factor.
   float dpi_scale_;
 
+  // Variables used to keep track of frame timestamps and deadlines.
+  base::TimeDelta vsync_interval_;
+  base::TimeDelta expected_browser_composite_time_;
+
   // The Android view that can be used to add and remove decoration layers
   // like AutofillPopup.
   ui::ViewAndroid* view_android_;
@@ -350,9 +365,6 @@ class ContentViewCoreImpl : public ContentViewCore,
   ui::WindowAndroid* window_android_;
 
   std::vector<UpdateFrameInfoCallback> update_frame_info_callbacks_;
-
-  // Optional browser-side input event filtering.
-  scoped_ptr<SyncInputEventFilter> input_event_filter_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentViewCoreImpl);
 };

@@ -14,6 +14,18 @@ function logToConsoleAndStdout(msg) {
 // responds we start the test.
 console.log("asking for api ...");
 chrome.extension.sendRequest("getApi", function(apis) {
+  var apiFeatures = chrome.test.getApiFeatures();
+  function isAvailableToContentScripts(namespace, path) {
+    function checkContexts(contextList) {
+      return contextList == 'all' ||
+          contextList.indexOf('content_script') != -1;
+    }
+    if (apiFeatures.hasOwnProperty(path))
+      return checkContexts(apiFeatures[path]['contexts']);
+    return apiFeatures.hasOwnProperty(namespace) &&
+        checkContexts(apiFeatures[namespace]['contexts']);
+  }
+
   console.log("got api response");
   var privilegedPaths = [];
   var unprivilegedPaths = [];
@@ -31,11 +43,8 @@ chrome.extension.sendRequest("getApi", function(apis) {
         }
 
         var path = namespace + "." + entry.name;
-        // TODO(cduvall): Make this inspect _api_features.json.
-        // http://crbug.com/232247
-        // Manually add chrome.app to the unprivileged APIs since it uses the
-        // feature system now.
-        if (module.unprivileged || entry.unprivileged || namespace == 'app') {
+        if (module.unprivileged || entry.unprivileged ||
+            isAvailableToContentScripts(namespace, path)) {
           unprivilegedPaths.push(path);
         } else {
           privilegedPaths.push(path);
@@ -46,7 +55,8 @@ chrome.extension.sendRequest("getApi", function(apis) {
     if (module.properties) {
       for (var propName in module.properties) {
         var path = namespace + "." + propName;
-        if (module.unprivileged || module.properties[propName].unprivileged) {
+        if (module.unprivileged || module.properties[propName].unprivileged ||
+            isAvailableToContentScripts(namespace, path)) {
           unprivilegedPaths.push(path);
         } else {
           privilegedPaths.push(path);
@@ -67,44 +77,26 @@ function testPath(path, expectError) {
   var module = chrome;
   for (var i = 0; i < parts.length; i++) {
     if (i < parts.length - 1) {
-      // Not the last component. Should not throw an exception, but allowed to
-      // be undefined (because some paths are only defined on some platforms).
-      try {
-        module = module[parts[i]];
-      } catch (err) {
-        logToConsoleAndStdout("testPath failed on " +
-                              parts.slice(0, i+1).join('.') + '(' + err + ')');
-        return false;
-      }
+      // Not the last component. Allowed to be undefined because some paths are
+      // only defined on some platforms.
+      module = module[parts[i]];
       if (typeof(module) == "undefined")
         return true;
     } else {
       // This is the last component - we expect it to either be undefined or
       // to throw an error on access.
-      try {
-        if (typeof(module[parts[i]]) == "undefined" &&
-            path != "extension.lastError" &&
-            path != "runtime.lastError" &&
-            path != "runtime.id") {
-          logToConsoleAndStdout(" fail (undefined and not throwing error): " +
-                                path);
-          return false;
-        } else if (!expectError) {
-          return true;
-        }
-      } catch (err) {
-        if (!expectError) {
-          logToConsoleAndStdout(" fail (did not expect error): " + path);
-          return false;
-        }
-        var str = err.toString();
-        if (str.search("can only be used in extension processes.") != -1) {
+      if (typeof(module[parts[i]]) == "undefined" &&
+          // lastError being defined depends on there being an error obviously.
+          path != "extension.lastError" &&
+          path != "runtime.lastError") {
+        if (expectError) {
           return true;
         } else {
-          logToConsoleAndStdout(
-              "fail: " + path + " (wrong error: '" + str + "')");
+          logToConsoleAndStdout(" fail (should not be undefined): " + path);
           return false;
         }
+      } else if (!expectError) {
+        return true;
       }
     }
   }
@@ -149,7 +141,12 @@ function doTest(privilegedPaths, unprivilegedPaths) {
   // Returns a function that will test a path and record any failures.
   function makeTestFunction(expectError) {
     return function(path) {
-      if (!testPath(path, expectError)) {
+      // runtime.connect and runtime.sendMessage are available in all contexts,
+      // unlike the runtime API in general.
+      var expectErrorForPath = expectError &&
+                               path != 'runtime.connect' &&
+                               path != 'runtime.sendMessage';
+      if (!testPath(path, expectErrorForPath)) {
         success = false;
         failures.push(path);
       }
