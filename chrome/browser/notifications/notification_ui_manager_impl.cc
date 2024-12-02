@@ -9,12 +9,12 @@
 #include "base/memory/linked_ptr.h"
 #include "base/stl_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/fullscreen.h"
 #include "chrome/browser/idle.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
@@ -63,7 +63,7 @@ NotificationUIManagerImpl::~NotificationUIManagerImpl() {
 
 void NotificationUIManagerImpl::Add(const Notification& notification,
                                     Profile* profile) {
-  if (TryReplacement(notification, profile)) {
+  if (Update(notification, profile)) {
     return;
   }
 
@@ -74,13 +74,39 @@ void NotificationUIManagerImpl::Add(const Notification& notification,
   CheckAndShowNotifications();
 }
 
-bool NotificationUIManagerImpl::DoesIdExist(const std::string& id) {
-  for (NotificationDeque::iterator iter = show_queue_.begin();
+bool NotificationUIManagerImpl::Update(const Notification& notification,
+                                       Profile* profile) {
+  const GURL& origin = notification.origin_url();
+  const string16& replace_id = notification.replace_id();
+
+  if (replace_id.empty())
+    return false;
+
+  // First check the queue of pending notifications for replacement.
+  // Then check the list of notifications already being shown.
+  for (NotificationDeque::const_iterator iter = show_queue_.begin();
        iter != show_queue_.end(); ++iter) {
-    if ((*iter)->notification().notification_id() == id)
+    if (profile == (*iter)->profile() &&
+        origin == (*iter)->notification().origin_url() &&
+        replace_id == (*iter)->notification().replace_id()) {
+      (*iter)->Replace(notification);
       return true;
+    }
   }
-  return false;
+
+  // Give the subclass the opportunity to update existing notification.
+  return UpdateNotification(notification, profile);
+}
+
+const Notification* NotificationUIManagerImpl::FindById(
+    const std::string& id) const {
+  for (NotificationDeque::const_iterator iter = show_queue_.begin();
+       iter != show_queue_.end(); ++iter) {
+    if ((*iter)->notification().notification_id() == id) {
+      return &((*iter)->notification());
+    }
+  }
+  return NULL;
 }
 
 bool NotificationUIManagerImpl::CancelById(const std::string& id) {
@@ -185,30 +211,6 @@ void NotificationUIManagerImpl::ShowNotifications() {
       return;
     }
   }
-}
-
-bool NotificationUIManagerImpl::TryReplacement(
-    const Notification& notification, Profile* profile) {
-  const GURL& origin = notification.origin_url();
-  const string16& replace_id = notification.replace_id();
-
-  if (replace_id.empty())
-    return false;
-
-  // First check the queue of pending notifications for replacement.
-  // Then check the list of notifications already being shown.
-  for (NotificationDeque::const_iterator iter = show_queue_.begin();
-       iter != show_queue_.end(); ++iter) {
-    if (profile == (*iter)->profile() &&
-        origin == (*iter)->notification().origin_url() &&
-        replace_id == (*iter)->notification().replace_id()) {
-      (*iter)->Replace(notification);
-      return true;
-    }
-  }
-
-  // Give the subclass the opportunity to update existing notification.
-  return UpdateNotification(notification, profile);
 }
 
 void NotificationUIManagerImpl::GetQueuedNotificationsForTesting(

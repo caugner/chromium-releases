@@ -8,10 +8,10 @@
 #include "base/command_line.h"
 #include "base/guid.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -102,7 +102,7 @@ class AutocompleteActionPredictorTest : public testing::Test {
         switches::kPrerenderFromOmniboxSwitchValueEnabled);
 
     predictor_->CreateLocalCachesFromDatabase();
-    profile_->CreateHistoryService(true, false);
+    ASSERT_TRUE(profile_->CreateHistoryService(true, false));
     profile_->BlockUntilHistoryProcessesPendingRequests();
 
     ASSERT_TRUE(predictor_->initialized_);

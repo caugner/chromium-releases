@@ -8,21 +8,21 @@
 
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/invalidation/invalidator_storage.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/sync/glue/device_info.h"
 #include "chrome/browser/sync/glue/synced_device_tracker.h"
 #include "chrome/browser/sync/sync_prefs.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/test_utils.h"
 #include "google/cacheinvalidation/include/types.h"
-#include "googleurl/src/gurl.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/engine/model_safe_worker.h"
@@ -36,6 +36,7 @@
 #include "sync/util/test_unrecoverable_error_handler.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 using syncer::FakeSyncManager;
@@ -92,25 +93,19 @@ class MockSyncFrontend : public SyncFrontend {
 
 class FakeSyncManagerFactory : public syncer::SyncManagerFactory {
  public:
-  FakeSyncManagerFactory() : fake_manager_(NULL) {}
+  explicit FakeSyncManagerFactory(FakeSyncManager** fake_manager)
+     : fake_manager_(fake_manager) {
+    *fake_manager_ = NULL;
+  }
   virtual ~FakeSyncManagerFactory() {}
 
   // SyncManagerFactory implementation.  Called on the sync thread.
   virtual scoped_ptr<SyncManager> CreateSyncManager(
       std::string name) OVERRIDE {
-    DCHECK(!fake_manager_);
-    fake_manager_ = new FakeSyncManager(initial_sync_ended_types_,
-                                        progress_marker_types_,
-                                        configure_fail_types_);
-    return scoped_ptr<SyncManager>(fake_manager_);
-  }
-
-  // Returns NULL until CreateSyncManager() is called on the sync
-  // thread.  Called on the main thread, but only after
-  // OnBackendInitialized() is called (which is strictly after
-  // CreateSyncManager is called on the sync thread).
-  FakeSyncManager* fake_manager() {
-    return fake_manager_;
+    *fake_manager_ = new FakeSyncManager(initial_sync_ended_types_,
+                                         progress_marker_types_,
+                                         configure_fail_types_);
+    return scoped_ptr<SyncManager>(*fake_manager_);
   }
 
   void set_initial_sync_ended_types(syncer::ModelTypeSet types) {
@@ -129,32 +124,28 @@ class FakeSyncManagerFactory : public syncer::SyncManagerFactory {
   syncer::ModelTypeSet initial_sync_ended_types_;
   syncer::ModelTypeSet progress_marker_types_;
   syncer::ModelTypeSet configure_fail_types_;
-  FakeSyncManager* fake_manager_;
+  FakeSyncManager** fake_manager_;
 };
 
 class SyncBackendHostTest : public testing::Test {
  protected:
   SyncBackendHostTest()
-      : ui_thread_(BrowserThread::UI, &ui_loop_),
-        io_thread_(BrowserThread::IO),
+      : thread_bundle_(content::TestBrowserThreadBundle::REAL_IO_THREAD),
         fake_manager_(NULL) {}
 
   virtual ~SyncBackendHostTest() {}
 
   virtual void SetUp() OVERRIDE {
-    io_thread_.StartIOThread();
     profile_.reset(new TestingProfile());
-    profile_->CreateRequestContext();
     sync_prefs_.reset(new SyncPrefs(profile_->GetPrefs()));
-    invalidator_storage_.reset(new invalidation::InvalidatorStorage(
-        profile_->GetPrefs()));
     backend_.reset(new SyncBackendHost(
         profile_->GetDebugName(),
         profile_.get(),
-        sync_prefs_->AsWeakPtr(),
-        invalidator_storage_->AsWeakPtr()));
+        sync_prefs_->AsWeakPtr()));
     credentials_.email = "user@example.com";
     credentials_.sync_token = "sync_token";
+
+    fake_manager_factory_.reset(new FakeSyncManagerFactory(&fake_manager_));
 
     // These types are always implicitly enabled.
     enabled_types_.PutAll(syncer::ControlTypes());
@@ -174,39 +165,42 @@ class SyncBackendHostTest : public testing::Test {
   virtual void TearDown() OVERRIDE {
     if (backend_) {
       backend_->StopSyncingForShutdown();
-      backend_->Shutdown(false);
+      backend_->Shutdown(SyncBackendHost::STOP);
     }
     backend_.reset();
     sync_prefs_.reset();
-    invalidator_storage_.reset();
     profile_.reset();
     // Pump messages posted by the sync thread (which may end up
     // posting on the IO thread).
-    ui_loop_.RunUntilIdle();
-    io_thread_.Stop();
+    base::RunLoop().RunUntilIdle();
+    content::RunAllPendingInMessageLoop(BrowserThread::IO);
     // Pump any messages posted by the IO thread.
-    ui_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   // Synchronously initializes the backend.
   void InitializeBackend(bool expect_success) {
     EXPECT_CALL(mock_frontend_, OnBackendInitialized(_, _, expect_success)).
         WillOnce(InvokeWithoutArgs(QuitMessageLoop));
-    backend_->Initialize(&mock_frontend_,
-                         syncer::WeakHandle<syncer::JsEventHandler>(),
-                         GURL(std::string()),
-                         credentials_,
-                         true,
-                         &fake_manager_factory_,
-                         &handler_,
-                         NULL);
-    ui_loop_.PostDelayedTask(FROM_HERE,
-        ui_loop_.QuitClosure(), TestTimeouts::action_timeout());
-    ui_loop_.Run();
+    backend_->Initialize(
+        &mock_frontend_,
+        scoped_ptr<base::Thread>(),
+        syncer::WeakHandle<syncer::JsEventHandler>(),
+        GURL(std::string()),
+        credentials_,
+        true,
+        fake_manager_factory_.PassAs<syncer::SyncManagerFactory>(),
+        scoped_ptr<syncer::UnrecoverableErrorHandler>(
+            new syncer::TestUnrecoverableErrorHandler).Pass(),
+        NULL);
+    base::RunLoop run_loop;
+    BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,
+                                   run_loop.QuitClosure(),
+                                   TestTimeouts::action_timeout());
+    run_loop.Run();
     // |fake_manager_factory_|'s fake_manager() is set on the sync
     // thread, but we can rely on the message loop barriers to
     // guarantee that we see the updated value.
-    fake_manager_ = fake_manager_factory_.fake_manager();
     DCHECK(fake_manager_);
   }
 
@@ -230,22 +224,20 @@ class SyncBackendHostTest : public testing::Test {
                    base::Unretained(this)),
         base::Bind(&SyncBackendHostTest::OnDownloadRetry,
                    base::Unretained(this)));
-    ui_loop_.PostDelayedTask(FROM_HERE,
-        ui_loop_.QuitClosure(), TestTimeouts::action_timeout());
-    ui_loop_.Run();
+    base::RunLoop run_loop;
+    BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,
+                                   run_loop.QuitClosure(),
+                                   TestTimeouts::action_timeout());
+    run_loop.Run();
   }
 
   void IssueRefreshRequest(syncer::ModelTypeSet types) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-    syncer::ModelTypeInvalidationMap invalidation_map(
-        ModelTypeSetToInvalidationMap(types, std::string()));
-
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_SYNC_REFRESH_LOCAL,
         content::Source<Profile>(profile_.get()),
-        content::Details<syncer::ModelTypeInvalidationMap>(
-            &invalidation_map));
+        content::Details<syncer::ModelTypeSet>(&types));
   }
 
  protected:
@@ -258,18 +250,14 @@ class SyncBackendHostTest : public testing::Test {
     NOTIMPLEMENTED();
   }
 
-  base::MessageLoop ui_loop_;
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread io_thread_;
+  content::TestBrowserThreadBundle thread_bundle_;
   StrictMock<MockSyncFrontend> mock_frontend_;
   syncer::SyncCredentials credentials_;
-  syncer::TestUnrecoverableErrorHandler handler_;
   scoped_ptr<TestingProfile> profile_;
   scoped_ptr<SyncPrefs> sync_prefs_;
-  scoped_ptr<invalidation::InvalidatorStorage> invalidator_storage_;
   scoped_ptr<SyncBackendHost> backend_;
+  scoped_ptr<FakeSyncManagerFactory> fake_manager_factory_;
   FakeSyncManager* fake_manager_;
-  FakeSyncManagerFactory fake_manager_factory_;
   syncer::ModelTypeSet enabled_types_;
 };
 
@@ -311,8 +299,8 @@ TEST_F(SyncBackendHostTest, FirstTimeSync) {
 TEST_F(SyncBackendHostTest, Restart) {
   sync_prefs_->SetSyncSetupCompleted();
   syncer::ModelTypeSet all_but_nigori = enabled_types_;
-  fake_manager_factory_.set_progress_marker_types(enabled_types_);
-  fake_manager_factory_.set_initial_sync_ended_types(enabled_types_);
+  fake_manager_factory_->set_progress_marker_types(enabled_types_);
+  fake_manager_factory_->set_initial_sync_ended_types(enabled_types_);
   InitializeBackend(true);
   EXPECT_TRUE(fake_manager_->GetAndResetDownloadedTypes().Empty());
   EXPECT_TRUE(Intersection(fake_manager_->GetAndResetCleanedTypes(),
@@ -342,8 +330,8 @@ TEST_F(SyncBackendHostTest, PartialTypes) {
   syncer::ModelTypeSet partial_types(syncer::NIGORI, syncer::BOOKMARKS);
   syncer::ModelTypeSet full_types =
       Difference(enabled_types_, partial_types);
-  fake_manager_factory_.set_progress_marker_types(enabled_types_);
-  fake_manager_factory_.set_initial_sync_ended_types(full_types);
+  fake_manager_factory_->set_progress_marker_types(enabled_types_);
+  fake_manager_factory_->set_initial_sync_ended_types(full_types);
 
   // Bringing up the backend should purge all partial types, then proceed to
   // download the Nigori.
@@ -521,8 +509,8 @@ TEST_F(SyncBackendHostTest, NewlySupportedTypes) {
   // Set sync manager behavior before passing it down. All types have progress
   // markers and initial sync ended except the new types.
   syncer::ModelTypeSet old_types = enabled_types_;
-  fake_manager_factory_.set_progress_marker_types(old_types);
-  fake_manager_factory_.set_initial_sync_ended_types(old_types);
+  fake_manager_factory_->set_progress_marker_types(old_types);
+  fake_manager_factory_->set_initial_sync_ended_types(old_types);
   syncer::ModelTypeSet new_types(syncer::APP_SETTINGS,
                                  syncer::EXTENSION_SETTINGS);
   enabled_types_.PutAll(new_types);
@@ -561,8 +549,8 @@ TEST_F(SyncBackendHostTest, NewlySupportedTypesWithPartialTypes) {
   syncer::ModelTypeSet partial_types(syncer::NIGORI, syncer::BOOKMARKS);
   syncer::ModelTypeSet full_types =
       Difference(enabled_types_, partial_types);
-  fake_manager_factory_.set_progress_marker_types(old_types);
-  fake_manager_factory_.set_initial_sync_ended_types(full_types);
+  fake_manager_factory_->set_progress_marker_types(old_types);
+  fake_manager_factory_->set_initial_sync_ended_types(full_types);
   syncer::ModelTypeSet new_types(syncer::APP_SETTINGS,
                                  syncer::EXTENSION_SETTINGS);
   enabled_types_.PutAll(new_types);
@@ -594,76 +582,6 @@ TEST_F(SyncBackendHostTest, NewlySupportedTypesWithPartialTypes) {
       enabled_types_).Empty());
 }
 
-// Register for some IDs and trigger an invalidation.  This should
-// propagate all the way to the frontend.
-TEST_F(SyncBackendHostTest, Invalidate) {
-  InitializeBackend(true);
-
-  syncer::ObjectIdSet ids;
-  ids.insert(invalidation::ObjectId(1, "id1"));
-  ids.insert(invalidation::ObjectId(2, "id2"));
-  const syncer::ObjectIdInvalidationMap& invalidation_map =
-      syncer::ObjectIdSetToInvalidationMap(ids, "payload");
-
-  EXPECT_CALL(
-      mock_frontend_,
-      OnIncomingInvalidation(invalidation_map))
-      .WillOnce(InvokeWithoutArgs(QuitMessageLoop));
-
-  backend_->UpdateRegisteredInvalidationIds(ids);
-  fake_manager_->Invalidate(invalidation_map);
-  ui_loop_.PostDelayedTask(
-      FROM_HERE, ui_loop_.QuitClosure(), TestTimeouts::action_timeout());
-  ui_loop_.Run();
-}
-
-// Register for some IDs and update the invalidator state.  This
-// should propagate all the way to the frontend.
-TEST_F(SyncBackendHostTest, UpdateInvalidatorState) {
-  InitializeBackend(true);
-
-  EXPECT_CALL(mock_frontend_,
-              OnInvalidatorStateChange(syncer::INVALIDATIONS_ENABLED))
-      .WillOnce(InvokeWithoutArgs(QuitMessageLoop));
-
-  syncer::ObjectIdSet ids;
-  ids.insert(invalidation::ObjectId(3, "id3"));
-  backend_->UpdateRegisteredInvalidationIds(ids);
-  fake_manager_->UpdateInvalidatorState(syncer::INVALIDATIONS_ENABLED);
-  ui_loop_.PostDelayedTask(
-      FROM_HERE, ui_loop_.QuitClosure(), TestTimeouts::action_timeout());
-  ui_loop_.Run();
-}
-
-// Call StopSyncingForShutdown() on the backend and fire some invalidations
-// before calling Shutdown().  Then start up and shut down the backend again.
-// Those notifications shouldn't propagate to the frontend.
-TEST_F(SyncBackendHostTest, InvalidationsAfterStopSyncingForShutdown) {
-  InitializeBackend(true);
-
-  syncer::ObjectIdSet ids;
-  ids.insert(invalidation::ObjectId(5, "id5"));
-  backend_->UpdateRegisteredInvalidationIds(ids);
-
-  backend_->StopSyncingForShutdown();
-
-  // Should not trigger anything.
-  fake_manager_->UpdateInvalidatorState(syncer::TRANSIENT_INVALIDATION_ERROR);
-  fake_manager_->UpdateInvalidatorState(syncer::INVALIDATIONS_ENABLED);
-  const syncer::ObjectIdInvalidationMap& invalidation_map =
-      syncer::ObjectIdSetToInvalidationMap(ids, "payload");
-  fake_manager_->Invalidate(invalidation_map);
-
-  // Make sure the above calls take effect before we continue.
-  fake_manager_->WaitForSyncThread();
-
-  backend_->Shutdown(false);
-  backend_.reset();
-
-  TearDown();
-  SetUp();
-}
-
 // Ensure the device info tracker is initialized properly on startup.
 TEST_F(SyncBackendHostTest, InitializeDeviceInfo) {
   ASSERT_EQ(NULL, backend_->GetSyncedDeviceTracker());
@@ -684,8 +602,8 @@ TEST_F(SyncBackendHostTest, DownloadControlTypes) {
   syncer::ModelTypeSet new_types(syncer::EXPERIMENTS, syncer::DEVICE_INFO);
   syncer::ModelTypeSet old_types =
       Difference(enabled_types_, new_types);
-  fake_manager_factory_.set_progress_marker_types(old_types);
-  fake_manager_factory_.set_initial_sync_ended_types(old_types);
+  fake_manager_factory_->set_progress_marker_types(old_types);
+  fake_manager_factory_->set_initial_sync_ended_types(old_types);
 
   // Bringing up the backend should download the new types without downloading
   // any old types.
@@ -707,7 +625,7 @@ TEST_F(SyncBackendHostTest, DownloadControlTypes) {
 // be successful, but it returned no results.  This means that the usual
 // download retry logic will not be invoked.
 TEST_F(SyncBackendHostTest, SilentlyFailToDownloadControlTypes) {
-  fake_manager_factory_.set_configure_fail_types(syncer::ModelTypeSet::All());
+  fake_manager_factory_->set_configure_fail_types(syncer::ModelTypeSet::All());
   InitializeBackend(false);
 }
 
@@ -748,7 +666,7 @@ TEST_F(SyncBackendHostTest, AttemptForwardLocalRefreshRequestLate) {
   fake_manager_->WaitForSyncThread();
   EXPECT_FALSE(types.Equals(fake_manager_->GetLastRefreshRequestTypes()));
 
-  backend_->Shutdown(false);
+  backend_->Shutdown(SyncBackendHost::STOP);
   backend_.reset();
 }
 

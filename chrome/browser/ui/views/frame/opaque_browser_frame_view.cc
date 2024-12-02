@@ -11,6 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/views/avatar_label.h"
 #include "chrome/browser/ui/views/avatar_menu_button.h"
@@ -19,7 +20,6 @@
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
@@ -235,12 +235,17 @@ gfx::Rect OpaqueBrowserFrameView::GetBoundsForTabStrip(
     return gfx::Rect();
 
   gfx::Rect bounds = GetBoundsForTabStripAndAvatarArea(tabstrip);
-  int space_left_of_tabstrip = browser_view()->ShouldShowAvatar() ?
-      (kAvatarLeftSpacing + avatar_bounds_.width() + kAvatarRightSpacing) :
-      kTabStripIndent;
-  if (avatar_label() && avatar_label()->bounds().width()) {
-    space_left_of_tabstrip += views::kRelatedControlHorizontalSpacing +
-                              avatar_label()->bounds().width();
+  int space_left_of_tabstrip = kTabStripIndent;
+  if (browser_view()->ShouldShowAvatar()) {
+    if (avatar_label() && avatar_label()->bounds().width()) {
+      // Space between the right edge of the avatar label and the tabstrip.
+      const int kAvatarLabelRightSpacing = -10;
+      space_left_of_tabstrip =
+          avatar_label()->bounds().right() + kAvatarLabelRightSpacing;
+    } else {
+      space_left_of_tabstrip =
+          kAvatarLeftSpacing + avatar_bounds_.width() + kAvatarRightSpacing;
+    }
   }
   bounds.Inset(space_left_of_tabstrip, 0, 0, 0);
   return bounds;
@@ -433,29 +438,67 @@ void OpaqueBrowserFrameView::Layout() {
 }
 
 bool OpaqueBrowserFrameView::HitTestRect(const gfx::Rect& rect) const {
-  // If |rect| does not intersect the bounds of the client area, claim it.
-  bool in_nonclient = NonClientFrameView::HitTestRect(rect);
-  if (in_nonclient)
-    return in_nonclient;
-
-  // Otherwise claim it only if it's in a non-tab portion of the tabstrip.
-  if (!browser_view()->tabstrip())
+  if (!views::View::HitTestRect(rect)) {
+    // |rect| is outside OpaqueBrowserFrameView's bounds.
     return false;
-  gfx::Rect tabstrip_bounds(browser_view()->tabstrip()->bounds());
-  gfx::Point tabstrip_origin(tabstrip_bounds.origin());
-  View::ConvertPointToTarget(frame()->client_view(), this, &tabstrip_origin);
-  tabstrip_bounds.set_origin(tabstrip_origin);
-  if (rect.bottom() > tabstrip_bounds.bottom())
+  }
+
+  // If the rect is outside the bounds of the client area, claim it.
+  // TODO(tdanderson): Implement View::ConvertRectToTarget().
+  gfx::Point rect_in_client_view_coords_origin(rect.origin());
+  View::ConvertPointToTarget(this, frame()->client_view(),
+      &rect_in_client_view_coords_origin);
+  gfx::Rect rect_in_client_view_coords(
+      rect_in_client_view_coords_origin, rect.size());
+  if (!frame()->client_view()->HitTestRect(rect_in_client_view_coords))
+    return true;
+
+  // Otherwise, claim |rect| only if it is above the bottom of the tabstrip in
+  // a non-tab portion.
+  TabStrip* tabstrip = browser_view()->tabstrip();
+  if (!tabstrip || !browser_view()->IsTabStripVisible())
     return false;
 
-  // We convert from our parent's coordinates since we assume we fill its bounds
-  // completely. We need to do this since we're not a parent of the tabstrip,
-  // meaning ConvertPointToTarget would otherwise return something bogus.
-  // TODO(tdanderson): Initialize |browser_view_point| using |rect| instead of
-  // its center point once GetEventHandlerForRect() is implemented.
-  gfx::Point browser_view_point(rect.CenterPoint());
-  View::ConvertPointToTarget(parent(), browser_view(), &browser_view_point);
-  return browser_view()->IsPositionInWindowCaption(browser_view_point);
+  gfx::Point rect_in_tabstrip_coords_origin(rect.origin());
+  View::ConvertPointToTarget(this, tabstrip,
+      &rect_in_tabstrip_coords_origin);
+  gfx::Rect rect_in_tabstrip_coords(
+      rect_in_tabstrip_coords_origin, rect.size());
+
+  if (rect_in_tabstrip_coords.bottom() > tabstrip->GetLocalBounds().bottom()) {
+    // |rect| is below the tabstrip.
+    return false;
+  }
+
+  if (tabstrip->HitTestRect(rect_in_tabstrip_coords)) {
+    // Claim |rect| if it is in a non-tab portion of the tabstrip.
+    // TODO(tdanderson): Pass |rect_in_tabstrip_coords| instead of its center
+    // point to TabStrip::IsPositionInWindowCaption() once
+    // GetEventHandlerForRect() is implemented.
+    return tabstrip->IsPositionInWindowCaption(
+        rect_in_tabstrip_coords.CenterPoint());
+  }
+
+  // The window switcher button is to the right of the tabstrip but is
+  // part of the client view.
+  views::View* window_switcher_button =
+      browser_view()->window_switcher_button();
+  if (window_switcher_button && window_switcher_button->visible()) {
+    gfx::Point rect_in_window_switcher_coords_origin(rect.origin());
+    View::ConvertPointToTarget(this, window_switcher_button,
+        &rect_in_window_switcher_coords_origin);
+    gfx::Rect rect_in_window_switcher_coords(
+        rect_in_window_switcher_coords_origin, rect.size());
+
+    if (window_switcher_button->HitTestRect(rect_in_window_switcher_coords))
+      return false;
+  }
+
+  // We claim |rect| because it is above the bottom of the tabstrip, but
+  // neither in the tabstrip nor in the window switcher button. In particular,
+  // the avatar label/button is left of the tabstrip and the window controls
+  // are right of the tabstrip.
+  return true;
 }
 
 void OpaqueBrowserFrameView::GetAccessibleState(
@@ -1030,13 +1073,17 @@ void OpaqueBrowserFrameView::LayoutAvatar() {
     avatar_button()->SetBoundsRect(avatar_bounds_);
 
   if (avatar_label()) {
-    gfx::Size size = avatar_label()->GetPreferredSize();
-    int label_height = std::min(avatar_bounds_.height(), size.height());
+    // Space between the bottom of the avatar and the bottom of the avatar
+    // label.
+    const int kAvatarLabelBottomSpacing = 3;
+    // Space between the frame border and the left edge of the avatar label.
+    const int kAvatarLabelLeftSpacing = -1;
+    gfx::Size label_size = avatar_label()->GetPreferredSize();
     gfx::Rect label_bounds(
-        avatar_bounds_.right() + views::kRelatedControlHorizontalSpacing,
-        avatar_y + (avatar_bounds_.height() - label_height) / 2,
-        size.width(),
-        browser_view()->ShouldShowAvatar() ? size.height() : 0);
+        FrameBorderThickness(false) + kAvatarLabelLeftSpacing,
+        avatar_bottom - kAvatarLabelBottomSpacing - label_size.height(),
+        label_size.width(),
+        browser_view()->ShouldShowAvatar() ? label_size.height() : 0);
     avatar_label()->SetBoundsRect(label_bounds);
   }
 }

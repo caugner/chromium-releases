@@ -8,7 +8,7 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/process_util.h"
+#include "base/process/launch.h"
 #include "base/stl_util.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
@@ -24,7 +24,7 @@ const char kTrimChars[] = "\" ";
 bool GetToolOutput(int argc, const char* argv[], std::string& output) {
   DCHECK_GE(argc, 1);
 
-  if (!file_util::PathExists(base::FilePath(argv[0]))) {
+  if (!base::PathExists(base::FilePath(argv[0]))) {
     LOG(WARNING) << "Tool for statistics not found: " << argv[0];
     return false;
   }

@@ -7,7 +7,7 @@
 #include "base/compiler_specific.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/stringize_macros.h"
@@ -16,7 +16,13 @@
 #include "net/base/net_util.h"
 #include "remoting/host/pin_hash.h"
 #include "remoting/host/setup/test_util.h"
+#include "remoting/protocol/pairing_registry.h"
+#include "remoting/protocol/protocol_mock_objects.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using remoting::protocol::MockPairingRegistryDelegate;
+using remoting::protocol::PairingRegistry;
+using remoting::protocol::SynchronousPairingRegistry;
 
 namespace {
 
@@ -260,7 +266,13 @@ void NativeMessagingHostTest::SetUp() {
 
   daemon_controller_ = new MockDaemonController();
   scoped_ptr<DaemonController> daemon_controller(daemon_controller_);
+
+  scoped_refptr<PairingRegistry> pairing_registry =
+      new SynchronousPairingRegistry(scoped_ptr<PairingRegistry::Delegate>(
+          new MockPairingRegistryDelegate()));
+
   host_.reset(new NativeMessagingHost(daemon_controller.Pass(),
+                                      pairing_registry,
                                       input_read_handle_, output_write_handle_,
                                       message_loop_.message_loop_proxy(),
                                       run_loop_.QuitClosure()));

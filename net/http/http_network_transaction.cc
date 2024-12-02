@@ -21,7 +21,6 @@
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/auth.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
@@ -59,6 +58,7 @@
 #include "net/spdy/spdy_session_pool.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_connection_status_flags.h"
+#include "url/gurl.h"
 
 using base::Time;
 
@@ -66,10 +66,11 @@ namespace net {
 
 namespace {
 
-void ProcessAlternateProtocol(HttpStreamFactory* factory,
-                              HttpServerProperties* http_server_properties,
-                              const HttpResponseHeaders& headers,
-                              const HostPortPair& http_host_port_pair) {
+void ProcessAlternateProtocol(
+    HttpStreamFactory* factory,
+    const base::WeakPtr<HttpServerProperties>& http_server_properties,
+    const HttpResponseHeaders& headers,
+    const HostPortPair& http_host_port_pair) {
   std::string alternate_protocol_str;
 
   if (!headers.EnumerateHeader(NULL, kAlternateProtocolHeader,
@@ -1218,6 +1219,7 @@ int HttpNetworkTransaction::HandleSSLHandshakeError(int error) {
         GetHostAndPort(request_->url));
   }
 
+  bool should_fallback = false;
   uint16 version_max = server_ssl_config_.version_max;
 
   switch (error) {
@@ -1249,18 +1251,33 @@ int HttpNetworkTransaction::HandleSSLHandshakeError(int error) {
             (server_ssl_config_.unrestricted_ssl3_fallback_enabled ||
              !TransportSecurityState::IsGooglePinnedProperty(
                  request_->url.host(), true /* include SNI */))) {
-          net_log_.AddEvent(
-              NetLog::TYPE_SSL_VERSION_FALLBACK,
-              base::Bind(&NetLogSSLVersionFallbackCallback,
-                         &request_->url, error, server_ssl_config_.version_max,
-                         version_max));
-          server_ssl_config_.version_max = version_max;
-          server_ssl_config_.version_fallback = true;
-          ResetConnectionAndRequestForResend();
-          error = OK;
+          should_fallback = true;
         }
       }
       break;
+    case ERR_SSL_BAD_RECORD_MAC_ALERT:
+      if (version_max >= SSL_PROTOCOL_VERSION_TLS1_1 &&
+          version_max > server_ssl_config_.version_min) {
+        // Some broken SSL devices negotiate TLS 1.0 when sent a TLS 1.1 or
+        // 1.2 ClientHello, but then return a bad_record_mac alert. See
+        // crbug.com/260358. In order to make the fallback as minimal as
+        // possible, this fallback is only triggered for >= TLS 1.1.
+        version_max--;
+        should_fallback = true;
+      }
+      break;
+  }
+
+  if (should_fallback) {
+    net_log_.AddEvent(
+        NetLog::TYPE_SSL_VERSION_FALLBACK,
+        base::Bind(&NetLogSSLVersionFallbackCallback,
+                   &request_->url, error, server_ssl_config_.version_max,
+                   version_max));
+    server_ssl_config_.version_max = version_max;
+    server_ssl_config_.version_fallback = true;
+    ResetConnectionAndRequestForResend();
+    error = OK;
   }
 
   return error;

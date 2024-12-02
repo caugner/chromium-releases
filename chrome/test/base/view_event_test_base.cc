@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -20,7 +20,11 @@
 
 #if defined(USE_ASH)
 #include "ash/shell.h"
+#include "ash/test/test_session_state_delegate.h"
 #include "ash/test/test_shell_delegate.h"
+#if defined(OS_WIN)
+#include "ui/compositor/compositor.h"
+#endif
 #endif
 
 #if defined(USE_AURA)
@@ -32,7 +36,6 @@
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/audio/cras_audio_handler.h"
-#include "chromeos/power/power_manager_handler.h"
 #endif
 
 namespace {
@@ -71,8 +74,7 @@ const int kMouseMoveDelayMS = 200;
 
 ViewEventTestBase::ViewEventTestBase()
   : window_(NULL),
-    content_view_(NULL),
-    ui_thread_(content::BrowserThread::UI, &message_loop_) {
+    content_view_(NULL) {
 }
 
 void ViewEventTestBase::Done() {
@@ -102,24 +104,34 @@ void ViewEventTestBase::SetUp() {
   // interactive_ui_tests is brought up on that platform.
   gfx::Screen::SetScreenInstance(
       gfx::SCREEN_TYPE_NATIVE, views::CreateDesktopScreen());
-#else
+
+  // The ContextFactory must exist before any Compositors are created. The
+  // ash::Shell code path below handles this, but since we skip it we must
+  // do this here.
+  bool allow_test_contexts = true;
+  ui::Compositor::InitializeContextFactoryForTests(allow_test_contexts);
+#else  // !OS_WIN
   // Ash Shell can't just live on its own without a browser process, we need to
   // also create the message center.
   message_center::MessageCenter::Initialize();
 #if defined(OS_CHROMEOS)
   chromeos::CrasAudioHandler::InitializeForTesting();
-  chromeos::PowerManagerHandler::Initialize();
-#endif
-  ash::Shell::CreateInstance(new ash::test::TestShellDelegate());
+#endif  // OS_CHROMEOS
+  ash::test::TestShellDelegate* shell_delegate =
+      new ash::test::TestShellDelegate();
+  ash::Shell::CreateInstance(shell_delegate);
+  shell_delegate->test_session_state_delegate()
+      ->SetActiveUserSessionStarted(true);
   context = ash::Shell::GetPrimaryRootWindow();
-#endif
+#endif  // !OS_WIN
 #elif defined(USE_AURA)
   // Instead of using the ash shell, use an AuraTestHelper to create and manage
   // the test screen.
-  aura_test_helper_.reset(new aura::test::AuraTestHelper(&message_loop_));
+  aura_test_helper_.reset(
+      new aura::test::AuraTestHelper(base::MessageLoopForUI::current()));
   aura_test_helper_->SetUp();
   context = aura_test_helper_->root_window();
-#endif
+#endif  // USE_AURA
   window_ = views::Widget::CreateWindowWithContext(this, context);
 }
 
@@ -138,7 +150,6 @@ void ViewEventTestBase::TearDown() {
 #else
   ash::Shell::DeleteInstance();
 #if defined(OS_CHROMEOS)
-  chromeos::PowerManagerHandler::Shutdown();
   chromeos::CrasAudioHandler::Shutdown();
 #endif
   // Ash Shell can't just live on its own without a browser process, we need to

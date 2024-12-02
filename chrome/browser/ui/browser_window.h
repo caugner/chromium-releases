@@ -214,9 +214,6 @@ class BrowserWindow : public ui::BaseWindow {
   // TODO(yosin): Make ShowBookmarkPrompt pure virtual.
   virtual void ShowBookmarkPrompt() {}
 
-  // Shows the Chrome To Mobile bubble.
-  virtual void ShowChromeToMobileBubble() = 0;
-
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   enum OneClickSigninBubbleType {
     ONE_CLICK_SIGNIN_BUBBLE_TYPE_BUBBLE,
@@ -272,8 +269,7 @@ class BrowserWindow : public ui::BaseWindow {
   virtual void ShowWebsiteSettings(Profile* profile,
                                    content::WebContents* web_contents,
                                    const GURL& url,
-                                   const content::SSLStatus& ssl,
-                                   bool show_history) = 0;
+                                   const content::SSLStatus& ssl) = 0;
 
   // Shows the app menu (for accessibility).
   virtual void ShowAppMenu() = 0;
@@ -314,11 +310,6 @@ class BrowserWindow : public ui::BaseWindow {
   virtual bool IsFullscreenWithChrome() = 0;
   virtual bool IsFullscreenWithoutChrome() = 0;
 #endif
-
-  // Returns the desired bounds for Instant in screen coordinates. Note that if
-  // Instant isn't currently visible this returns the bounds Instant would be
-  // placed at.
-  virtual gfx::Rect GetInstantBounds() = 0;
 
   // Return the correct disposition for a popup window based on |bounds|.
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
@@ -363,6 +354,10 @@ class BrowserWindow : public ui::BaseWindow {
       const gfx::Rect& rect,
       const content::PasswordForm& form,
       autofill::PasswordGenerator* password_generator) = 0;
+
+  // Invoked when the amount of vertical overscroll changes. |delta_y| is the
+  // amount of overscroll that has occured in the y-direction.
+  virtual void OverscrollUpdate(int delta_y) {}
 
  protected:
   friend void chrome::CloseAllBrowsers();

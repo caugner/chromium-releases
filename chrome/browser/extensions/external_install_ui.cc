@@ -10,10 +10,11 @@
 #include "base/lazy_instance.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -25,7 +26,6 @@
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/ui/host_desktop.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
@@ -84,8 +84,8 @@ class ExternalInstallDialogDelegate
   scoped_ptr<ExtensionInstallPrompt> install_ui_;
 
   Browser* browser_;
-  ExtensionService* service_;
-  const Extension* extension_;
+  base::WeakPtr<ExtensionService> service_weak_;
+  const std::string extension_id_;
 };
 
 // Only shows a menu item, no bubble. Clicking the menu item shows
@@ -194,7 +194,9 @@ ExternalInstallDialogDelegate::ExternalInstallDialogDelegate(
     ExtensionService* service,
     const Extension* extension,
     bool use_global_error)
-    : browser_(browser), service_(service), extension_(extension) {
+    : browser_(browser),
+      service_weak_(service->AsWeakPtr()),
+      extension_id_(extension->id()) {
   AddRef();  // Balanced in Proceed or Abort.
 
   install_ui_.reset(
@@ -203,21 +205,33 @@ ExternalInstallDialogDelegate::ExternalInstallDialogDelegate(
   const ExtensionInstallPrompt::ShowDialogCallback callback =
       use_global_error ?
       base::Bind(&CreateExternalInstallGlobalError,
-                 service->AsWeakPtr(), extension->id()) :
+                 service_weak_, extension_id_) :
       ExtensionInstallPrompt::GetDefaultShowDialogCallback();
-  install_ui_->ConfirmExternalInstall(this, extension_, callback);
+  install_ui_->ConfirmExternalInstall(this, extension, callback);
 }
 
 ExternalInstallDialogDelegate::~ExternalInstallDialogDelegate() {
 }
 
 void ExternalInstallDialogDelegate::InstallUIProceed() {
-  service_->GrantPermissionsAndEnableExtension(extension_);
+  if (!service_weak_.get())
+    return;
+  const Extension* extension =
+      service_weak_->GetInstalledExtension(extension_id_);
+  if (!extension)
+    return;
+  service_weak_->GrantPermissionsAndEnableExtension(extension);
   Release();
 }
 
 void ExternalInstallDialogDelegate::InstallUIAbort(bool user_initiated) {
-  service_->UninstallExtension(extension_->id(), false, NULL);
+  if (!service_weak_.get())
+    return;
+  const Extension* extension =
+      service_weak_->GetInstalledExtension(extension_id_);
+  if (!extension)
+    return;
+  service_weak_->UninstallExtension(extension_id_, false, NULL);
   Release();
 }
 
@@ -230,7 +244,7 @@ ExternalInstallMenuAlert::ExternalInstallMenuAlert(
       extension_(extension) {
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
                  content::Source<Profile>(service->profile()));
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_REMOVED,
                  content::Source<Profile>(service->profile()));
 }
 
@@ -301,23 +315,17 @@ void ExternalInstallMenuAlert::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  const Extension* extension = NULL;
-  // The error is invalidated if the extension has been reloaded or unloaded.
-  if (type == chrome::NOTIFICATION_EXTENSION_LOADED) {
-    extension = content::Details<const Extension>(details).ptr();
-  } else {
-    DCHECK_EQ(chrome::NOTIFICATION_EXTENSION_UNLOADED, type);
-    extensions::UnloadedExtensionInfo* info =
-        content::Details<extensions::UnloadedExtensionInfo>(details).ptr();
-    extension = info->extension;
-  }
-  if (extension == extension_) {
-    GlobalErrorService* error_service =
-        GlobalErrorServiceFactory::GetForProfile(service_->profile());
-    error_service->RemoveGlobalError(this);
-    service_->AcknowledgeExternalExtension(extension_->id());
-    delete this;
-  }
+  // The error is invalidated if the extension has been loaded or removed.
+  DCHECK(type == chrome::NOTIFICATION_EXTENSION_LOADED ||
+         type == chrome::NOTIFICATION_EXTENSION_REMOVED);
+  const Extension* extension = content::Details<const Extension>(details).ptr();
+  if (extension != extension_)
+    return;
+  GlobalErrorService* error_service =
+      GlobalErrorServiceFactory::GetForProfile(service_->profile());
+  error_service->RemoveGlobalError(this);
+  service_->AcknowledgeExternalExtension(extension_->id());
+  delete this;
 }
 
 // ExternalInstallGlobalError -----------------------------------------------

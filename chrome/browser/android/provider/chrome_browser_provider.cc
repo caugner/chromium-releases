@@ -13,13 +13,14 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/android/provider/blocking_ui_thread_async_request.h"
 #include "chrome/browser/android/provider/bookmark_model_observer_task.h"
 #include "chrome/browser/android/provider/run_on_ui_thread_blocking.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/android/android_history_types.h"
@@ -31,7 +32,6 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/cancelable_task_tracker.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
@@ -894,8 +894,9 @@ class SearchTermTask : public HistoryProviderTask {
         template_service->GetDefaultSearchProvider();
     if (search_engine) {
       const TemplateURLRef* search_url = &search_engine->url_ref();
-      std::string url = search_url->ReplaceSearchTerms(
-                     TemplateURLRef::SearchTermsArgs(row->search_term()));
+      TemplateURLRef::SearchTermsArgs search_terms_args(row->search_term());
+      search_terms_args.append_extra_query_params = true;
+      std::string url = search_url->ReplaceSearchTerms(search_terms_args);
       if (!url.empty()) {
         row->set_url(GURL(url));
         row->set_template_url_id(search_engine->id());
@@ -1039,7 +1040,7 @@ class RemoveSearchTermsFromAPITask : public SearchTermTask {
     RemoveSearchTermsFromAPITask(AndroidHistoryProviderService* service,
                                  CancelableRequestConsumer* cancelable_consumer,
                                  Profile* profile)
-        : SearchTermTask(service, cancelable_consumer, profile) {}
+        : SearchTermTask(service, cancelable_consumer, profile), result_() {}
 
   int Run(const std::string& selection,
           const std::vector<string16>& selection_args) {
@@ -1153,7 +1154,7 @@ bool ChromeBrowserProvider::RegisterChromeBrowserProvider(JNIEnv* env) {
 
 ChromeBrowserProvider::ChromeBrowserProvider(JNIEnv* env, jobject obj)
     : weak_java_provider_(env, obj),
-      template_loaded_event_(true, false) {
+      handling_extensive_changes_(false) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   profile_ = g_browser_process->profile_manager()->GetLastUsedProfile();
   bookmark_model_ = BookmarkModelFactory::GetForProfile(profile_);
@@ -1171,14 +1172,9 @@ ChromeBrowserProvider::ChromeBrowserProvider(JNIEnv* env, jobject obj)
   notification_registrar_.Add(this,
       chrome::NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_UPDATED,
       content::NotificationService::AllSources());
-  notification_registrar_.Add(this,
-      chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED,
-      content::NotificationService::AllSources());
   TemplateURLService* template_service =
         TemplateURLServiceFactory::GetForProfile(profile_);
-  if (template_service->loaded())
-    template_loaded_event_.Signal();
-  else
+  if (!template_service->loaded())
     template_service->Load();
 }
 
@@ -1579,7 +1575,21 @@ ScopedJavaLocalRef<jbyteArray> ChromeBrowserProvider::GetThumbnail(
 
 // ------------- Observer-related methods ------------- //
 
+void ChromeBrowserProvider::ExtensiveBookmarkChangesBeginning(
+    BookmarkModel* model) {
+  handling_extensive_changes_ = true;
+}
+
+void ChromeBrowserProvider::ExtensiveBookmarkChangesEnded(
+    BookmarkModel* model) {
+  handling_extensive_changes_ = false;
+  BookmarkModelChanged();
+}
+
 void ChromeBrowserProvider::BookmarkModelChanged() {
+  if (handling_extensive_changes_)
+    return;
+
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = weak_java_provider_.get(env);
   if (obj.is_null())
@@ -1606,7 +1616,5 @@ void ChromeBrowserProvider::Observe(
     if (obj.is_null())
       return;
     Java_ChromeBrowserProvider_onSearchTermChanged(env, obj.obj());
-  } else if (type == chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED) {
-    template_loaded_event_.Signal();
   }
 }

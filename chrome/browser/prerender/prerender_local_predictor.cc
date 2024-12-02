@@ -14,7 +14,7 @@
 
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/history_database.h"
 #include "chrome/browser/history/history_db_task.h"
@@ -35,9 +35,9 @@
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/page_transition_types.h"
 #include "crypto/secure_hash.h"
-#include "googleurl/src/url_canon.h"
 #include "grit/browser_resources.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "url/url_canon.h"
 
 using content::BrowserThread;
 using content::PageTransition;
@@ -196,6 +196,10 @@ bool IsHomePage(PageTransition transition) {
 
 bool IsIntermediateRedirect(PageTransition transition) {
   return (transition & content::PAGE_TRANSITION_CHAIN_END) == 0;
+}
+
+bool IsFormSubmit(PageTransition transition) {
+  return (transition & content::PAGE_TRANSITION_FORM_SUBMIT) != 0;
 }
 
 bool ShouldExcludeTransitionForPrediction(PageTransition transition) {
@@ -441,7 +445,8 @@ void PrerenderLocalPredictor::OnAddVisit(const history::BriefVisitInfo& info) {
       if (!last_visited.is_null() &&
           last_visited > visits[i].time - max_age &&
           last_visited < visits[i].time - min_age) {
-        next_urls_currently_found.insert(visits[i].url_id);
+        if (!IsFormSubmit(visits[i].transition))
+          next_urls_currently_found.insert(visits[i].url_id);
       }
     }
     if (i == static_cast<int>(visits.size()) - 1 ||
@@ -715,6 +720,7 @@ void PrerenderLocalPredictor::ContinuePrerenderCheck(
   PrerenderProperties* prerender_properties = NULL;
 
   for (int i = 0; i < static_cast<int>(info->candidate_urls_.size()); i++) {
+    RecordEvent(EVENT_CONTINUE_PRERENDER_CHECK_EXAMINE_NEXT_URL);
     url_info.reset(new LocalPredictorURLInfo(info->candidate_urls_[i]));
 
     // We need to check whether we can issue a prerender for this URL.
@@ -737,13 +743,14 @@ void PrerenderLocalPredictor::ContinuePrerenderCheck(
       url_info.reset(NULL);
       continue;
     }
-    if (URLsIdenticalIgnoringFragments(info->source_url_.url,
+    if (!SkipLocalPredictorFragment() &&
+        URLsIdenticalIgnoringFragments(info->source_url_.url,
                                        url_info->url)) {
       RecordEvent(EVENT_CONTINUE_PRERENDER_CHECK_URLS_IDENTICAL_BUT_FRAGMENT);
       url_info.reset(NULL);
       continue;
     }
-    if (url_info->url.SchemeIs("https")) {
+    if (!SkipLocalPredictorHTTPS() && url_info->url.SchemeIs("https")) {
       RecordEvent(EVENT_CONTINUE_PRERENDER_CHECK_HTTPS);
       url_info.reset(NULL);
       continue;
@@ -764,18 +771,24 @@ void PrerenderLocalPredictor::ContinuePrerenderCheck(
       url_info.reset(NULL);
       continue;
     }
-    if (sb_db_manager->CheckSideEffectFreeWhitelistUrl(url_info->url)) {
+    if (!SkipLocalPredictorWhitelist() &&
+        sb_db_manager->CheckSideEffectFreeWhitelistUrl(url_info->url)) {
       // If a page is on the side-effect free whitelist, we will just prerender
       // it without any additional checks.
       RecordEvent(EVENT_CONTINUE_PRERENDER_CHECK_ON_SIDE_EFFECT_FREE_WHITELIST);
       break;
     }
-    if (!url_info->logged_in && url_info->logged_in_lookup_ok) {
+    if (!SkipLocalPredictorLoggedIn() &&
+        !url_info->logged_in && url_info->logged_in_lookup_ok) {
       RecordEvent(EVENT_CONTINUE_PRERENDER_CHECK_NOT_LOGGED_IN);
       break;
     }
-    RecordEvent(EVENT_CONTINUE_PRERENDER_CHECK_FALLTHROUGH_NOT_PRERENDERING);
-    url_info.reset(NULL);
+    if (!SkipLocalPredictorDefaultNoPrerender()) {
+      RecordEvent(EVENT_CONTINUE_PRERENDER_CHECK_FALLTHROUGH_NOT_PRERENDERING);
+      url_info.reset(NULL);
+    } else {
+      RecordEvent(EVENT_CONTINUE_PRERENDER_CHECK_FALLTHROUGH_PRERENDERING);
+    }
   }
   if (!url_info.get())
     return;
@@ -813,11 +826,13 @@ void PrerenderLocalPredictor::IssuePrerender(
             p->prerender_handle.get())) {
       new_prerender_handle->OnCancel();
       new_prerender_handle.reset(NULL);
+      RecordEvent(EVENT_ISSUE_PRERENDER_ALREADY_PRERENDERING);
       break;
     }
   }
 
   if (new_prerender_handle.get()) {
+    RecordEvent(EVENT_ISSUE_PRERENDER_NEW_PRERENDER);
     // The new prerender does not match any existing prerenders. Update
     // prerender_properties so that it reflects the new entry.
     prerender_properties->url_id = url_id;
@@ -829,8 +844,10 @@ void PrerenderLocalPredictor::IssuePrerender(
     prerender_properties->prerender_handle.swap(new_prerender_handle);
     // new_prerender_handle now represents the old previou prerender that we
     // are replacing. So we need to cancel it.
-    if (new_prerender_handle)
+    if (new_prerender_handle) {
       new_prerender_handle->OnCancel();
+      RecordEvent(EVENT_ISSUE_PRERENDER_CANCELLED_OLD_PRERENDER);
+    }
   }
 
   RecordEvent(EVENT_ADD_VISIT_PRERENDERING);

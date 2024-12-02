@@ -198,7 +198,7 @@ table.
 <tr>
   <td> "experimental" </td>
   <td> Required if the extension or app uses any
-       <a href="http://code.google.com/chrome/extensions/dev/experimental.html">chrome.experimental.* APIs</a>.</td>
+       <a href="experimental.html">chrome.experimental.* APIs</a>.</td>
 </tr>
 {{^is_apps}}
 <tr>
@@ -209,7 +209,8 @@ table.
 {{/is_apps}}
 {{?is_apps}}
 <tr>
-  <td id="fileSystem"> "fileSystem", "fileSystem.write" </td>
+  <td id="fileSystem"> "fileSystem", "fileSystem.write",
+    "fileSystem.retainEntries" </td>
   <td> Required if the app uses the
        <a href="fileSystem.html">chrome.fileSystem</a> module.</td>
 </tr>

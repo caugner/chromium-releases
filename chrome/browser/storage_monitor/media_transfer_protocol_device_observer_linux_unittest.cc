@@ -9,14 +9,17 @@
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/storage_monitor/mock_removable_storage_observer.h"
 #include "chrome/browser/storage_monitor/storage_info.h"
 #include "chrome/browser/storage_monitor/storage_monitor.h"
 #include "chrome/browser/storage_monitor/test_storage_monitor.h"
+#include "chrome/test/base/testing_browser_process.h"
 #include "content/public/test/test_browser_thread.h"
+#include "device/media_transfer_protocol/media_transfer_protocol_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chrome {
@@ -38,6 +41,7 @@ std::string GetMtpDeviceId(const std::string& unique_id) {
 // Helper function to get the device storage details such as device id, label
 // and location. On success, fills in |id|, |label| and |location|.
 void GetStorageInfo(const std::string& storage_name,
+                    device::MediaTransferProtocolManager* mtp_manager,
                     std::string* id,
                     string16* label,
                     std::string* location) {
@@ -55,8 +59,10 @@ class TestMediaTransferProtocolDeviceObserverLinux
     : public MediaTransferProtocolDeviceObserverLinux {
  public:
   TestMediaTransferProtocolDeviceObserverLinux(
-      StorageMonitor::Receiver* receiver)
-      : MediaTransferProtocolDeviceObserverLinux(receiver, &GetStorageInfo) {
+      StorageMonitor::Receiver* receiver,
+      device::MediaTransferProtocolManager* mtp_manager)
+      : MediaTransferProtocolDeviceObserverLinux(receiver, mtp_manager,
+                                                 &GetStorageInfo) {
   }
 
   // Notifies MediaTransferProtocolDeviceObserverLinux about the attachment of
@@ -92,13 +98,17 @@ class MediaTransferProtocolDeviceObserverLinuxTest : public testing::Test {
  protected:
   virtual void SetUp() OVERRIDE {
     mock_storage_observer_.reset(new MockRemovableStorageObserver);
+    chrome::test::TestStorageMonitor* monitor =
+        chrome::test::TestStorageMonitor::CreateAndInstall();
     mtp_device_observer_.reset(
-        new TestMediaTransferProtocolDeviceObserverLinux(monitor_.receiver()));
-    monitor_.AddObserver(mock_storage_observer_.get());
+        new TestMediaTransferProtocolDeviceObserverLinux(
+            monitor->receiver(), monitor->media_transfer_protocol_manager()));
+    monitor->AddObserver(mock_storage_observer_.get());
   }
 
   virtual void TearDown() OVERRIDE {
-    monitor_.RemoveObserver(mock_storage_observer_.get());
+    StorageMonitor* monitor = g_browser_process->storage_monitor();
+    monitor->RemoveObserver(mock_storage_observer_.get());
     mtp_device_observer_.reset();
   }
 
@@ -115,7 +125,6 @@ class MediaTransferProtocolDeviceObserverLinuxTest : public testing::Test {
   base::MessageLoop message_loop_;
   content::TestBrowserThread file_thread_;
 
-  chrome::test::TestStorageMonitor monitor_;
   scoped_ptr<TestMediaTransferProtocolDeviceObserverLinux> mtp_device_observer_;
   scoped_ptr<MockRemovableStorageObserver> mock_storage_observer_;
 

@@ -12,7 +12,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "chrome/browser/chromeos/system_logs/system_logs_fetcher.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -23,13 +22,15 @@ const char kNotAvailable[] = "<not available>";
 const char kRoutesKeyName[] = "routes";
 const char kNetworkStatusKeyName[] = "network-status";
 const char kModemStatusKeyName[] = "modem-status";
+const char kWiMaxStatusKeyName[] = "wimax-status";
 const char kUserLogFileKeyName[] = "user_log_files";
 
 namespace chromeos {
 
-DebugDaemonLogSource::DebugDaemonLogSource()
+DebugDaemonLogSource::DebugDaemonLogSource(bool scrub)
     : response_(new SystemLogsResponse()),
       num_pending_requests_(0),
+      scrub_(scrub),
       weak_ptr_factory_(this) {}
 
 DebugDaemonLogSource::~DebugDaemonLogSource() {}
@@ -53,11 +54,20 @@ void DebugDaemonLogSource::Fetch(const SysLogsSourceCallback& callback) {
   client->GetModemStatus(base::Bind(&DebugDaemonLogSource::OnGetModemStatus,
                                     weak_ptr_factory_.GetWeakPtr()));
   ++num_pending_requests_;
-  client->GetAllLogs(base::Bind(&DebugDaemonLogSource::OnGetLogs,
-                                weak_ptr_factory_.GetWeakPtr()));
+  client->GetWiMaxStatus(base::Bind(&DebugDaemonLogSource::OnGetWiMaxStatus,
+                                    weak_ptr_factory_.GetWeakPtr()));
   ++num_pending_requests_;
   client->GetUserLogFiles(base::Bind(&DebugDaemonLogSource::OnGetUserLogFiles,
                                      weak_ptr_factory_.GetWeakPtr()));
+  ++num_pending_requests_;
+
+  if (scrub_) {
+    client->GetScrubbedLogs(base::Bind(&DebugDaemonLogSource::OnGetLogs,
+                                       weak_ptr_factory_.GetWeakPtr()));
+  } else {
+    client->GetAllLogs(base::Bind(&DebugDaemonLogSource::OnGetLogs,
+                                  weak_ptr_factory_.GetWeakPtr()));
+  }
   ++num_pending_requests_;
 }
 
@@ -91,6 +101,17 @@ void DebugDaemonLogSource::OnGetModemStatus(bool succeeded,
     (*response_)[kModemStatusKeyName] = status;
   else
     (*response_)[kModemStatusKeyName] = kNotAvailable;
+  RequestCompleted();
+}
+
+void DebugDaemonLogSource::OnGetWiMaxStatus(bool succeeded,
+                                            const std::string& status) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+
+  if (succeeded)
+    (*response_)[kWiMaxStatusKeyName] = status;
+  else
+    (*response_)[kWiMaxStatusKeyName] = kNotAvailable;
   RequestCompleted();
 }
 

@@ -15,6 +15,7 @@
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/navigation_details.h"
+#include "content/public/browser/navigation_entry.h"
 #include "jni/WebContentsObserverAndroid_jni.h"
 
 using base::android::AttachCurrentThread;
@@ -78,8 +79,19 @@ void WebContentsObserverAndroid::DidStopLoading(
   ScopedJavaLocalRef<jobject> obj(weak_java_observer_.get(env));
   if (obj.is_null())
     return;
+
+  std::string url_string;
+  NavigationEntry* entry =
+    web_contents()->GetController().GetLastCommittedEntry();
+  // Not that GetBaseURLForDataURL is only used by the Android WebView
+  if (entry && !entry->GetBaseURLForDataURL().is_empty()) {
+    url_string = entry->GetBaseURLForDataURL().possibly_invalid_spec();
+  } else {
+    url_string = web_contents()->GetURL().spec();
+  }
+
   ScopedJavaLocalRef<jstring> jstring_url(
-      ConvertUTF8ToJavaString(env, web_contents()->GetURL().spec()));
+      ConvertUTF8ToJavaString(env, url_string));
   Java_WebContentsObserverAndroid_didStopLoading(
       env, obj.obj(), jstring_url.obj());
 }
@@ -133,7 +145,9 @@ void WebContentsObserverAndroid::DidNavigateAnyFrame(
       ConvertUTF8ToJavaString(env, params.url.spec()));
   ScopedJavaLocalRef<jstring> jstring_base_url(
       ConvertUTF8ToJavaString(env, params.base_url.spec()));
-  jboolean jboolean_is_reload = PAGE_TRANSITION_RELOAD == params.transition;
+  jboolean jboolean_is_reload =
+      PageTransitionCoreTypeIs(params.transition, PAGE_TRANSITION_RELOAD);
+
   Java_WebContentsObserverAndroid_didNavigateAnyFrame(
       env, obj.obj(), jstring_url.obj(), jstring_base_url.obj(),
       jboolean_is_reload);

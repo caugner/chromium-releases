@@ -8,7 +8,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/common/chrome_constants.h"
@@ -30,6 +30,7 @@
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/constants.h"
 #include "net/base/data_url.h"
+#include "skia/ext/image_operations.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/public/platform/WebCString.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
@@ -49,9 +50,9 @@
 #include "ui/base/ui_base_switches_util.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/size.h"
+#include "ui/gfx/size_f.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "v8/include/v8-testing.h"
-#include "webkit/glue/image_decoder.h"
 #include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebAccessibilityObject;
@@ -73,6 +74,7 @@ using WebKit::WebURL;
 using WebKit::WebURLRequest;
 using WebKit::WebView;
 using WebKit::WebVector;
+using WebKit::WebWindowFeatures;
 using extensions::APIPermission;
 
 // Delay in milliseconds that we'll wait before capturing the page contents
@@ -169,6 +171,42 @@ GURL StripRef(const GURL& url) {
   replacements.ClearRef();
   return url.ReplaceComponents(replacements);
 }
+
+// If the source image is null or occupies less area than
+// |thumbnail_min_area_pixels|, we return the image unmodified.  Otherwise, we
+// scale down the image so that the width and height do not exceed
+// |thumbnail_max_size_pixels|, preserving the original aspect ratio.
+static SkBitmap Downscale(WebKit::WebImage image,
+                          int thumbnail_min_area_pixels,
+                          gfx::Size thumbnail_max_size_pixels) {
+  if (image.isNull())
+    return SkBitmap();
+
+  gfx::Size image_size = image.size();
+
+  if (image_size.GetArea() < thumbnail_min_area_pixels)
+    return image.getSkBitmap();
+
+  if (image_size.width() <= thumbnail_max_size_pixels.width() &&
+      image_size.height() <= thumbnail_max_size_pixels.height())
+    return image.getSkBitmap();
+
+  gfx::SizeF scaled_size = image_size;
+
+  if (scaled_size.width() > thumbnail_max_size_pixels.width()) {
+    scaled_size.Scale(thumbnail_max_size_pixels.width() / scaled_size.width());
+  }
+
+  if (scaled_size.height() > thumbnail_max_size_pixels.height()) {
+    scaled_size.Scale(
+        thumbnail_max_size_pixels.height() / scaled_size.height());
+  }
+
+  return skia::ImageOperations::Resize(image.getSkBitmap(),
+                                       skia::ImageOperations::RESIZE_GOOD,
+                                       static_cast<int>(scaled_size.width()),
+                                       static_cast<int>(scaled_size.height()));
+}
 }  // namespace
 
 ChromeRenderViewObserver::ChromeRenderViewObserver(
@@ -211,6 +249,8 @@ bool ChromeRenderViewObserver::OnMessageReceived(const IPC::Message& message) {
                         OnSetClientSidePhishingDetection)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetVisuallyDeemphasized,
                         OnSetVisuallyDeemphasized)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_RequestThumbnailForContextNode,
+                        OnRequestThumbnailForContextNode)
 #if defined(OS_CHROMEOS)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_StartFrameSniffer, OnStartFrameSniffer)
 #endif
@@ -222,6 +262,7 @@ bool ChromeRenderViewObserver::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ChromeViewMsg_UpdateTopControlsState,
                         OnUpdateTopControlsState)
 #endif
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetWindowFeatures, OnSetWindowFeatures)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -298,6 +339,11 @@ void ChromeRenderViewObserver::OnUpdateTopControlsState(
 }
 #endif
 
+void ChromeRenderViewObserver::OnSetWindowFeatures(
+    const WebWindowFeatures& window_features) {
+  render_view()->GetWebView()->setWindowFeatures(window_features);
+}
+
 void ChromeRenderViewObserver::Navigate(const GURL& url) {
   // Execute cache clear operations that were postponed until a navigation
   // event (including tab reload).
@@ -328,6 +374,20 @@ void ChromeRenderViewObserver::OnSetVisuallyDeemphasized(bool deemphasized) {
   } else {
     dimmed_color_overlay_.reset();
   }
+}
+
+void ChromeRenderViewObserver::OnRequestThumbnailForContextNode(
+    int thumbnail_min_area_pixels, gfx::Size thumbnail_max_size_pixels) {
+  WebNode context_node = render_view()->GetContextMenuNode();
+  SkBitmap thumbnail;
+  if (context_node.isElementNode()) {
+    WebKit::WebImage image = context_node.to<WebElement>().imageContents();
+    thumbnail = Downscale(image,
+                          thumbnail_min_area_pixels,
+                          thumbnail_max_size_pixels);
+  }
+  Send(new ChromeViewHostMsg_RequestThumbnailForContextNode_ACK(routing_id(),
+                                                                thumbnail));
 }
 
 void ChromeRenderViewObserver::OnStartFrameSniffer(const string16& frame_name) {
@@ -382,19 +442,6 @@ bool ChromeRenderViewObserver::allowScriptFromSource(
   return content_settings_->AllowScriptFromSource(frame,
                                                   enabled_per_settings,
                                                   script_url);
-}
-
-bool ChromeRenderViewObserver::allowScriptExtension(
-    WebFrame* frame, const WebString& extension_name, int extension_group) {
-  return extension_dispatcher_->AllowScriptExtension(
-      frame, extension_name.utf8(), extension_group);
-}
-
-bool ChromeRenderViewObserver::allowScriptExtension(
-    WebFrame* frame, const WebString& extension_name, int extension_group,
-    int world_id) {
-  return extension_dispatcher_->AllowScriptExtension(
-      frame, extension_name.utf8(), extension_group, world_id);
 }
 
 bool ChromeRenderViewObserver::allowStorage(WebFrame* frame, bool local) {
@@ -519,8 +566,7 @@ bool ChromeRenderViewObserver::allowDisplayingInsecureContent(
   if (allowed_per_settings || allow_displaying_insecure_content_)
     return true;
 
-  if (!IsStrictSecurityHost(origin_host))
-    Send(new ChromeViewHostMsg_DidBlockDisplayingInsecureContent(routing_id()));
+  Send(new ChromeViewHostMsg_DidBlockDisplayingInsecureContent(routing_id()));
 
   return false;
 }
@@ -584,8 +630,7 @@ bool ChromeRenderViewObserver::allowRunningInsecureContent(
     SendInsecureContentSignal(INSECURE_CONTENT_RUN_SWF);
 
   if (!allow_running_insecure_content_ && !allowed_per_settings) {
-    if (!IsStrictSecurityHost(origin_host))
-      content_settings_->DidNotAllowMixedScript();
+    content_settings_->DidNotAllowMixedScript();
     return false;
   }
 
@@ -758,8 +803,7 @@ void ChromeRenderViewObserver::CapturePageInfo(int page_id,
   if (contents.size()) {
     // Send the text to the browser for indexing (the browser might decide not
     // to index, if the URL is HTTPS for instance).
-    Send(new ChromeViewHostMsg_PageContents(routing_id(), url, page_id,
-                                            contents));
+    Send(new ChromeViewHostMsg_PageContents(routing_id(), url, contents));
   }
 
 #if defined(FULL_SAFE_BROWSING)

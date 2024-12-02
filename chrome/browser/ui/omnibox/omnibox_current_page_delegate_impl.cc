@@ -10,14 +10,17 @@
 #include "chrome/browser/predictors/autocomplete_action_predictor.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
-#include "googleurl/src/gurl.h"
 #include "ui/base/window_open_disposition.h"
+#include "url/gurl.h"
 
 OmniboxCurrentPageDelegateImpl::OmniboxCurrentPageDelegateImpl(
     OmniboxEditController* controller,
@@ -33,6 +36,17 @@ bool OmniboxCurrentPageDelegateImpl::CurrentPageExists() const {
 
 const GURL& OmniboxCurrentPageDelegateImpl::GetURL() const {
   return controller_->GetWebContents()->GetURL();
+}
+
+bool OmniboxCurrentPageDelegateImpl::IsInstantNTP() const {
+  return chrome::IsInstantNTP(controller_->GetWebContents());
+}
+
+bool OmniboxCurrentPageDelegateImpl::IsSearchResultsPage() const {
+  Profile* profile = Profile::FromBrowserContext(
+      controller_->GetWebContents()->GetBrowserContext());
+  return TemplateURLServiceFactory::GetForProfile(profile)->
+      IsSearchResultsPageFromDefaultSearchProvider(GetURL());
 }
 
 bool OmniboxCurrentPageDelegateImpl::IsLoading() const {
@@ -69,15 +83,12 @@ bool OmniboxCurrentPageDelegateImpl::ProcessExtensionKeyword(
 
 void OmniboxCurrentPageDelegateImpl::NotifySearchTabHelper(
     bool user_input_in_progress,
-    bool cancelling,
-    bool popup_is_open,
-    bool user_text_is_empty) {
+    bool cancelling) {
   if (!controller_->GetWebContents())
     return;
   SearchTabHelper::FromWebContents(
       controller_->GetWebContents())->OmniboxEditModelChanged(
-          user_input_in_progress, cancelling, popup_is_open,
-          user_text_is_empty);
+          user_input_in_progress, cancelling);
 }
 
 void OmniboxCurrentPageDelegateImpl::DoPrerender(

@@ -25,6 +25,7 @@
 #include "base/version.h"
 #include "build/build_config.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
+#include "chrome/browser/component_updater/ppapi_utils.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -32,10 +33,10 @@
 #include "chrome/common/pepper_flash.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
+#include "content/public/common/content_constants.h"
 #include "content/public/common/pepper_plugin_info.h"
 #include "ppapi/c/private/ppb_pdf.h"
-#include "webkit/common/plugins/ppapi/ppapi_utils.h"
-#include "webkit/plugins/plugin_constants.h"
+#include "ppapi/shared_impl/ppapi_permissions.h"
 
 #include "flapper_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
@@ -124,7 +125,7 @@ bool GetPepperFlashDirectory(base::FilePath* latest_dir,
 // Returns true if the Pepper |interface_name| is implemented  by this browser.
 // It does not check if the interface is proxied.
 bool SupportsPepperInterface(const char* interface_name) {
-  if (webkit::ppapi::IsSupportedPepperInterface(interface_name))
+  if (IsSupportedPepperInterface(interface_name))
     return true;
   // The PDF interface is invisible to SupportsInterface() on the browser
   // process because it is provided using PpapiInterfaceFactoryManager. We need
@@ -146,31 +147,31 @@ bool MakePepperFlashPluginInfo(const base::FilePath& flash_path,
   plugin_info->is_internal = false;
   plugin_info->is_out_of_process = out_of_process;
   plugin_info->path = flash_path;
-  plugin_info->name = kFlashPluginName;
+  plugin_info->name = content::kFlashPluginName;
   plugin_info->permissions = kPepperFlashPermissions;
 
   // The description is like "Shockwave Flash 10.2 r154".
   plugin_info->description = base::StringPrintf("%s %d.%d r%d",
-      kFlashPluginName, ver_nums[0], ver_nums[1], ver_nums[2]);
+      content::kFlashPluginName, ver_nums[0], ver_nums[1], ver_nums[2]);
 
   plugin_info->version = flash_version.GetString();
 
-  webkit::WebPluginMimeType swf_mime_type(kFlashPluginSwfMimeType,
-                                          kFlashPluginSwfExtension,
-                                          kFlashPluginName);
+  content::WebPluginMimeType swf_mime_type(content::kFlashPluginSwfMimeType,
+                                           content::kFlashPluginSwfExtension,
+                                           content::kFlashPluginName);
   plugin_info->mime_types.push_back(swf_mime_type);
-  webkit::WebPluginMimeType spl_mime_type(kFlashPluginSplMimeType,
-                                          kFlashPluginSplExtension,
-                                          kFlashPluginName);
+  content::WebPluginMimeType spl_mime_type(content::kFlashPluginSplMimeType,
+                                           content::kFlashPluginSplExtension,
+                                           content::kFlashPluginName);
   plugin_info->mime_types.push_back(spl_mime_type);
   return true;
 }
 
-bool IsPepperFlash(const webkit::WebPluginInfo& plugin) {
+bool IsPepperFlash(const content::WebPluginInfo& plugin) {
   // We try to recognize Pepper Flash by the following criteria:
   // * It is a Pepper plug-in.
   // * It has the special Flash permissions.
-  return webkit::IsPepperPlugin(plugin) &&
+  return plugin.is_pepper_plugin() &&
          (plugin.pepper_permissions & ppapi::PERMISSION_FLASH);
 }
 
@@ -181,9 +182,9 @@ void RegisterPepperFlashWithChrome(const base::FilePath& path,
   if (!MakePepperFlashPluginInfo(path, version, true, &plugin_info))
     return;
 
-  std::vector<webkit::WebPluginInfo> plugins;
+  std::vector<content::WebPluginInfo> plugins;
   PluginService::GetInstance()->GetInternalPlugins(&plugins);
-  for (std::vector<webkit::WebPluginInfo>::const_iterator it = plugins.begin();
+  for (std::vector<content::WebPluginInfo>::const_iterator it = plugins.begin();
        it != plugins.end(); ++it) {
     if (!IsPepperFlash(*it))
       continue;
@@ -274,15 +275,15 @@ bool PepperFlashComponentInstaller::Install(
     return false;
   if (current_version_.CompareTo(version) > 0)
     return false;
-  if (!file_util::PathExists(unpack_path.Append(
+  if (!base::PathExists(unpack_path.Append(
           chrome::kPepperFlashPluginFilename)))
     return false;
   // Passed the basic tests. Time to install it.
   base::FilePath path =
       GetPepperFlashBaseDirectory().AppendASCII(version.GetString());
-  if (file_util::PathExists(path))
+  if (base::PathExists(path))
     return false;
-  if (!file_util::Move(unpack_path, path))
+  if (!base::Move(unpack_path, path))
     return false;
   // Installation is done. Now tell the rest of chrome. Both the path service
   // and to the plugin service.
@@ -358,7 +359,7 @@ void FinishPepperFlashUpdateRegistration(ComponentUpdateService* cus,
 void StartPepperFlashUpdateRegistration(ComponentUpdateService* cus) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   base::FilePath path = GetPepperFlashBaseDirectory();
-  if (!file_util::PathExists(path)) {
+  if (!base::PathExists(path)) {
     if (!file_util::CreateDirectory(path)) {
       NOTREACHED() << "Could not create Pepper Flash directory.";
       return;
@@ -369,7 +370,7 @@ void StartPepperFlashUpdateRegistration(ComponentUpdateService* cus) {
   std::vector<base::FilePath> older_dirs;
   if (GetPepperFlashDirectory(&path, &version, &older_dirs)) {
     path = path.Append(chrome::kPepperFlashPluginFilename);
-    if (file_util::PathExists(path)) {
+    if (base::PathExists(path)) {
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
           base::Bind(&RegisterPepperFlashWithChrome, path, version));
@@ -385,7 +386,7 @@ void StartPepperFlashUpdateRegistration(ComponentUpdateService* cus) {
   // Remove older versions of Pepper Flash.
   for (std::vector<base::FilePath>::iterator iter = older_dirs.begin();
        iter != older_dirs.end(); ++iter) {
-    file_util::Delete(*iter, true);
+    base::DeleteFile(*iter, true);
   }
 }
 #endif  // defined(GOOGLE_CHROME_BUILD) && !defined(OS_LINUX)

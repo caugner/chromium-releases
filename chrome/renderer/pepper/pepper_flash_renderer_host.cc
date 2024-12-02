@@ -7,9 +7,9 @@
 #include <vector>
 
 #include "chrome/renderer/pepper/ppb_pdf_impl.h"
+#include "content/public/renderer/pepper_plugin_instance.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
-#include "googleurl/src/gurl.h"
 #include "ipc/ipc_message_macros.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/trusted/ppb_browser_font_trusted.h"
@@ -28,8 +28,7 @@
 #include "third_party/skia/include/core/SkTemplates.h"
 #include "third_party/skia/include/core/SkTypeface.h"
 #include "ui/gfx/rect.h"
-#include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
-#include "webkit/plugins/ppapi/ppb_image_data_impl.h"
+#include "url/gurl.h"
 
 using ppapi::thunk::EnterResourceNoLock;
 using ppapi::thunk::PPB_ImageData_API;
@@ -90,10 +89,10 @@ int32_t PepperFlashRendererHost::OnGetProxyForURL(
 int32_t PepperFlashRendererHost::OnSetInstanceAlwaysOnTop(
     ppapi::host::HostMessageContext* host_context,
     bool on_top) {
-  webkit::ppapi::PluginInstance* plugin_instance =
+  content::PepperPluginInstance* plugin_instance =
       host_->GetPluginInstance(pp_instance());
   if (plugin_instance)
-    plugin_instance->set_always_on_top(on_top);
+    plugin_instance->SetAlwaysOnTop(on_top);
   // Since no reply is sent for this message, it doesn't make sense to return an
   // error.
   return PP_OK;
@@ -104,17 +103,6 @@ int32_t PepperFlashRendererHost::OnDrawGlyphs(
     ppapi::proxy::PPBFlash_DrawGlyphs_Params params) {
   if (params.glyph_indices.size() != params.glyph_advances.size() ||
       params.glyph_indices.empty())
-    return PP_ERROR_FAILED;
-
-  EnterResourceNoLock<PPB_ImageData_API> enter(
-      params.image_data.host_resource(), true);
-  if (enter.failed())
-    return PP_ERROR_FAILED;
-  webkit::ppapi::PPB_ImageData_Impl* image_resource =
-      static_cast<webkit::ppapi::PPB_ImageData_Impl*>(enter.object());
-
-  webkit::ppapi::ImageDataAutoMapper mapper(image_resource);
-  if (!mapper.is_valid())
     return PP_ERROR_FAILED;
 
   // Set up the typeface.
@@ -130,8 +118,24 @@ int32_t PepperFlashRendererHost::OnDrawGlyphs(
   if (!typeface)
     return PP_ERROR_FAILED;
 
+  EnterResourceNoLock<PPB_ImageData_API> enter(
+      params.image_data.host_resource(), true);
+  if (enter.failed())
+    return PP_ERROR_FAILED;
+
   // Set up the canvas.
-  SkCanvas* canvas = image_resource->GetPlatformCanvas();
+  PPB_ImageData_API* image = static_cast<PPB_ImageData_API*>(
+      enter.object());
+  SkCanvas* canvas = image->GetPlatformCanvas();
+  bool needs_unmapping = false;
+  if (!canvas) {
+    needs_unmapping = true;
+    image->Map();
+    canvas = image->GetPlatformCanvas();
+    if (!canvas)
+      return PP_ERROR_FAILED;  // Failure mapping.
+  }
+
   SkAutoCanvasRestore acr(canvas, true);
 
   // Clip is applied in pixels before the transform.
@@ -173,19 +177,22 @@ int32_t PepperFlashRendererHost::OnDrawGlyphs(
 
   // Build up the skia advances.
   size_t glyph_count = params.glyph_indices.size();
-  if (glyph_count == 0)
-    return PP_OK;
-  std::vector<SkPoint> storage;
-  storage.resize(glyph_count);
-  SkPoint* sk_positions = &storage[0];
-  for (uint32_t i = 0; i < glyph_count; i++) {
-    sk_positions[i].set(x, y);
-    x += SkFloatToScalar(params.glyph_advances[i].x);
-    y += SkFloatToScalar(params.glyph_advances[i].y);
+  if (glyph_count) {
+    std::vector<SkPoint> storage;
+    storage.resize(glyph_count);
+    SkPoint* sk_positions = &storage[0];
+    for (uint32_t i = 0; i < glyph_count; i++) {
+      sk_positions[i].set(x, y);
+      x += SkFloatToScalar(params.glyph_advances[i].x);
+      y += SkFloatToScalar(params.glyph_advances[i].y);
+    }
+
+    canvas->drawPosText(&params.glyph_indices[0], glyph_count * 2, sk_positions,
+                        paint);
   }
 
-  canvas->drawPosText(&params.glyph_indices[0], glyph_count * 2, sk_positions,
-                      paint);
+  if (needs_unmapping)
+    image->Unmap();
 
   return PP_OK;
 }
@@ -199,8 +206,8 @@ int32_t PepperFlashRendererHost::OnNavigate(
     const ppapi::URLRequestInfoData& data,
     const std::string& target,
     bool from_user_action) {
-  // If our PluginInstance is already destroyed, just return a failure.
-  webkit::ppapi::PluginInstance* plugin_instance =
+  // If our PepperPluginInstance is already destroyed, just return a failure.
+  content::PepperPluginInstance* plugin_instance =
       host_->GetPluginInstance(pp_instance());
   if (!plugin_instance)
     return PP_ERROR_FAILED;
@@ -235,7 +242,7 @@ int32_t PepperFlashRendererHost::OnNavigate(
 int32_t PepperFlashRendererHost::OnIsRectTopmost(
     ppapi::host::HostMessageContext* host_context,
     const PP_Rect& rect) {
-  webkit::ppapi::PluginInstance* plugin_instance =
+  content::PepperPluginInstance* plugin_instance =
       host_->GetPluginInstance(pp_instance());
   if (plugin_instance && plugin_instance->IsRectTopmost(
       gfx::Rect(rect.point.x, rect.point.y,rect.size.width, rect.size.height)))

@@ -27,9 +27,7 @@ using ::testing::Return;
 
 namespace policy {
 
-// static
-void DevicePolicyCrosBrowserTest::MarkAsEnterpriseOwned(
-    base::ScopedTempDir* temp_dir) {
+void DevicePolicyCrosBrowserTest::MarkAsEnterpriseOwned() {
   cryptohome::SerializedInstallAttributes install_attrs_proto;
   cryptohome::SerializedInstallAttributes::Attribute* attribute = NULL;
 
@@ -42,7 +40,7 @@ void DevicePolicyCrosBrowserTest::MarkAsEnterpriseOwned(
   attribute->set_value(DevicePolicyBuilder::kFakeUsername);
 
   base::FilePath install_attrs_file =
-      temp_dir->path().AppendASCII("install_attributes.pb");
+      temp_dir_.path().AppendASCII("install_attributes.pb");
   const std::string install_attrs_blob(
       install_attrs_proto.SerializeAsString());
   ASSERT_EQ(static_cast<int>(install_attrs_blob.size()),
@@ -70,7 +68,8 @@ void DevicePolicyCrosBrowserTest::InstallOwnerKey() {
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
   base::FilePath owner_key_file = temp_dir_.path().AppendASCII("owner.key");
   std::vector<uint8> owner_key_bits;
-  ASSERT_TRUE(device_policy()->signing_key()->ExportPublicKey(&owner_key_bits));
+  ASSERT_TRUE(
+      device_policy()->GetSigningKey()->ExportPublicKey(&owner_key_bits));
   ASSERT_EQ(
       file_util::WriteFile(
           owner_key_file,
@@ -82,16 +81,8 @@ void DevicePolicyCrosBrowserTest::InstallOwnerKey() {
 
 void DevicePolicyCrosBrowserTest::RefreshDevicePolicy() {
   // Reset the key to its original state.
-  device_policy_.set_signing_key(PolicyBuilder::CreateTestSigningKey());
+  device_policy_.SetDefaultSigningKey();
   device_policy_.Build();
-  // The local instance of the private half of the owner key must be dropped
-  // as otherwise the NSS library will tell Chrome that the key is available -
-  // which is incorrect and leads to Chrome behaving as if a local owner were
-  // logged in.
-  device_policy_.set_signing_key(
-      make_scoped_ptr<crypto::RSAPrivateKey>(NULL));
-  device_policy_.set_new_signing_key(
-      make_scoped_ptr<crypto::RSAPrivateKey>(NULL));
   session_manager_client()->set_device_policy(device_policy_.GetBlob());
   session_manager_client()->OnPropertyChangeComplete(true);
 }

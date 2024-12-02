@@ -9,11 +9,11 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/time.h"
-#include "googleurl/src/gurl.h"
+#include "base/time/time.h"
 #include "media/base/android/demuxer_stream_player_params.h"
 #include "media/base/media_export.h"
 #include "ui/gl/android/scoped_java_surface.h"
+#include "url/gurl.h"
 
 namespace media {
 
@@ -71,7 +71,7 @@ class MEDIA_EXPORT MediaPlayerAndroid {
   virtual void Release() = 0;
 
   // Set the player volume.
-  virtual void SetVolume(float leftVolume, float rightVolume) = 0;
+  virtual void SetVolume(double volume) = 0;
 
   // Get the media information from the player.
   virtual int GetVideoWidth() = 0;

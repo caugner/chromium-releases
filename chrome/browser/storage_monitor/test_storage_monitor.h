@@ -21,9 +21,24 @@ class TestStorageMonitor : public chrome::StorageMonitor {
 
   void MarkInitialized();
 
-  // Will create a new testing implementation for browser tests,
-  // taking care to deal with the existing singleton correctly.
+  // Create and initialize a new TestStorageMonitor and install it
+  // in the TestingBrowserProcess. The TestingBrowserProcess owns the created
+  // TestStorageMonitor, but it is also returned for convenience. If there is
+  // no TestingBrowserProcess to own the TestStorageMonitor, it is destroyed
+  // and the return value is NULL.
+  static TestStorageMonitor* CreateAndInstall();
+
+  // Create and initialize a new TestStorageMonitor, and install it
+  // in the BrowserProcessImpl. (Browser tests use the production browser
+  // process implementation.) The BrowserProcessImpl owns the created
+  // TestStorageMonitor, but it is also returned for convenience.
   static TestStorageMonitor* CreateForBrowserTests();
+
+  // Remove the singleton StorageMonitor from the TestingBrowserProcess.
+  static void RemoveSingleton();
+
+  // Synchronously initialize the current storage monitor.
+  static void SyncInitialize();
 
   virtual bool GetStorageInfoForPath(
       const base::FilePath& path,
@@ -50,9 +65,13 @@ class TestStorageMonitor : public chrome::StorageMonitor {
 
   const std::string& ejected_device() const { return ejected_device_; }
 
-  bool init_called_;
+  bool init_called() const { return init_called_; }
 
  private:
+  // Whether TestStorageMonitor::Init() has been called for not.
+  bool init_called_;
+
+  // The last device to be ejected.
   std::string ejected_device_;
 
 #if defined(OS_LINUX)

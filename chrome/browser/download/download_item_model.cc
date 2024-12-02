@@ -6,20 +6,22 @@
 
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/rtl.h"
+#include "base/metrics/field_trial.h"
 #include "base/strings/string16.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/supports_user_data.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/download/download_crx_util.h"
+#include "chrome/browser/download/download_util.h"
 #include "chrome/browser/safe_browsing/download_feedback_service.h"
-#include "chrome/common/time_format.h"
 #include "content/public/browser/download_danger_type.h"
 #include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_item.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/l10n/time_format.h"
 #include "ui/base/text/bytes_formatting.h"
 #include "ui/base/text/text_elider.h"
 
@@ -301,40 +303,53 @@ string16 DownloadItemModel::GetWarningText(const gfx::Font& font,
                                            int base_width) const {
   // Should only be called if IsDangerous().
   DCHECK(IsDangerous());
+  string16 elided_filename =
+      ui::ElideFilename(download_->GetFileNameToReportUser(), font, base_width);
   switch (download_->GetDangerType()) {
-    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL:
-      return l10n_util::GetStringUTF16(IDS_PROMPT_MALICIOUS_DOWNLOAD_URL);
-
-    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE:
+    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL: {
+      std::string trial_condition =
+          base::FieldTrialList::FindFullName(download_util::kFinchTrialName);
+      if (trial_condition.empty())
+        return l10n_util::GetStringUTF16(IDS_PROMPT_MALICIOUS_DOWNLOAD_URL);
+      return download_util::AssembleMalwareFinchString(trial_condition,
+                                                       elided_filename);
+    }
+    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE: {
       if (download_crx_util::IsExtensionDownload(*download_)) {
         return l10n_util::GetStringUTF16(
             IDS_PROMPT_DANGEROUS_DOWNLOAD_EXTENSION);
       } else {
-        return l10n_util::GetStringFUTF16(
-            IDS_PROMPT_DANGEROUS_DOWNLOAD,
-            ui::ElideFilename(download_->GetFileNameToReportUser(),
-                              font, base_width));
+        return l10n_util::GetStringFUTF16(IDS_PROMPT_DANGEROUS_DOWNLOAD,
+                                          elided_filename);
       }
-
+    }
     case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT:
-    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST:
+    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST: {
+      std::string trial_condition =
+          base::FieldTrialList::FindFullName(download_util::kFinchTrialName);
+      if (trial_condition.empty()) {
+        return l10n_util::GetStringFUTF16(IDS_PROMPT_MALICIOUS_DOWNLOAD_CONTENT,
+                                          elided_filename);
+      }
+      return download_util::AssembleMalwareFinchString(trial_condition,
+                                                       elided_filename);
+    }
+    case content::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT: {
+      return l10n_util::GetStringFUTF16(IDS_PROMPT_UNCOMMON_DOWNLOAD_CONTENT,
+                                        elided_filename);
+    }
+    case content::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED: {
       return l10n_util::GetStringFUTF16(
-          IDS_PROMPT_MALICIOUS_DOWNLOAD_CONTENT,
-          ui::ElideFilename(download_->GetFileNameToReportUser(),
-                            font, base_width));
-
-    case content::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT:
-      return l10n_util::GetStringFUTF16(
-          IDS_PROMPT_UNCOMMON_DOWNLOAD_CONTENT,
-          ui::ElideFilename(download_->GetFileNameToReportUser(),
-                            font, base_width));
-
+          IDS_PROMPT_DOWNLOAD_CHANGES_SEARCH_SETTINGS, elided_filename);
+    }
     case content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS:
     case content::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT:
     case content::DOWNLOAD_DANGER_TYPE_USER_VALIDATED:
-    case content::DOWNLOAD_DANGER_TYPE_MAX:
-      NOTREACHED();
+    case content::DOWNLOAD_DANGER_TYPE_MAX: {
+      break;
+    }
   }
+  NOTREACHED();
   return string16();
 }
 
@@ -378,6 +393,7 @@ bool DownloadItemModel::IsMalicious() const {
     case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT:
     case content::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT:
     case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST:
+    case content::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED:
       return true;
 
     case content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS:
@@ -402,28 +418,39 @@ bool DownloadItemModel::ShouldAllowDownloadFeedback() const {
 }
 
 bool DownloadItemModel::ShouldRemoveFromShelfWhenComplete() const {
-  // If the download was already opened automatically, it should be removed.
-  if (download_->GetAutoOpened())
-    return true;
+  switch (download_->GetState()) {
+    case DownloadItem::IN_PROGRESS:
+      // If the download is dangerous or malicious, we should display a warning
+      // on the shelf until the user accepts the download.
+      if (IsDangerous())
+        return false;
 
-  // If the download is interrupted or cancelled, it should not be removed.
-  DownloadItem::DownloadState state = download_->GetState();
-  if (state == DownloadItem::INTERRUPTED || state == DownloadItem::CANCELLED)
-    return false;
+      // If the download is an extension, temporary, or will be opened
+      // automatically, then it should be removed from the shelf on completion.
+      // TODO(asanka): The logic for deciding opening behavior should be in a
+      //               central location. http://crbug.com/167702
+      return (download_crx_util::IsExtensionDownload(*download_) ||
+              download_->IsTemporary() ||
+              download_->GetOpenWhenComplete() ||
+              download_->ShouldOpenFileBasedOnExtension());
 
-  // If the download is dangerous or malicious, we should display a warning on
-  // the shelf until the user accepts the download.
-  if (IsDangerous())
-    return false;
+    case DownloadItem::COMPLETE:
+      // If the download completed, then rely on GetAutoOpened() to check for
+      // opening behavior. This should accurately reflect whether the download
+      // was successfully opened.  Extensions, for example, may fail to open.
+      return download_->GetAutoOpened() || download_->IsTemporary();
 
-  // If the download is an extension, temporary, or will be opened
-  // automatically, then it should be removed from the shelf on completion.
-  // TODO(asanka): The logic for deciding opening behavior should be in a
-  //               central location. http://crbug.com/167702
-  return (download_crx_util::IsExtensionDownload(*download_) ||
-          download_->IsTemporary() ||
-          download_->GetOpenWhenComplete() ||
-          download_->ShouldOpenFileBasedOnExtension());
+    case DownloadItem::CANCELLED:
+    case DownloadItem::INTERRUPTED:
+      // Interrupted or cancelled downloads should remain on the shelf.
+      return false;
+
+    case DownloadItem::MAX_DOWNLOAD_STATE:
+      NOTREACHED();
+  }
+
+  NOTREACHED();
+  return false;
 }
 
 bool DownloadItemModel::ShouldShowDownloadStartedAnimation() const {
@@ -506,14 +533,14 @@ string16 DownloadItemModel::GetInProgressStatusString() const {
 
     return l10n_util::GetStringFUTF16(
         IDS_DOWNLOAD_STATUS_OPEN_IN,
-        TimeFormat::TimeRemainingShort(time_remaining));
+        ui::TimeFormat::TimeRemainingShort(time_remaining));
   }
 
   // In progress download with known time left: "100/120 MB, 10 secs left"
   if (time_remaining_known) {
     return l10n_util::GetStringFUTF16(
         IDS_DOWNLOAD_STATUS_IN_PROGRESS, size_ratio,
-        TimeFormat::TimeRemaining(time_remaining));
+        ui::TimeFormat::TimeRemaining(time_remaining));
   }
 
   // In progress download with no known time left and non-zero completed bytes:

@@ -13,6 +13,7 @@
 
 #include "base/mac/scoped_block.h"
 #import "base/mac/scoped_nsobject.h"
+#include "base/strings/string16.h"
 #include "ui/message_center/message_center_export.h"
 
 @class HoverImageButton;
@@ -107,6 +108,9 @@ MESSAGE_CENTER_EXPORT
       testingAnimationEndedCallback_;
 }
 
+// The title that is displayed at the top of the message center tray.
+@property(copy, nonatomic) NSString* trayTitle;
+
 // Designated initializer.
 - (id)initWithMessageCenter:(message_center::MessageCenter*)messageCenter;
 
@@ -124,6 +128,10 @@ MESSAGE_CENTER_EXPORT
 
 // Action for the settings button.
 - (void)showSettings:(id)sender;
+
+// Updates the settings dialog in response to contents change due to something
+// like selecting a different profile.
+- (void)updateSettings;
 
 // Hides the settings dialog if it's open.
 - (void)hideSettings:(id)sender;

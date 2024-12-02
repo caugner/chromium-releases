@@ -11,10 +11,10 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/shared_memory.h"
+#include "base/memory/shared_memory.h"
 #include "base/stl_util.h"
 #include "base/strings/string_piece.h"
-#include "chrome/common/extensions/user_script.h"
+#include "extensions/common/user_script.h"
 #include "third_party/WebKit/public/web/WebScriptSource.h"
 
 class ExtensionSet;

@@ -10,7 +10,7 @@
 // should not be listed here and instead get an exemption in
 // chrome/tools/ipclist/ipclist.cc.
 #if !defined(OS_ANDROID)
-#include "chrome/browser/importer/profile_import_process_messages.h"
+#include "chrome/common/importer/profile_import_process_messages.h"
 #endif
 
 #if defined(ENABLE_AUTOMATION)
@@ -22,4 +22,4 @@
 #endif
 
 #include "chrome/common/common_message_generator.h"
-#include "chrome/common/nacl_messages.h"
+#include "components/nacl/common/nacl_messages.h"

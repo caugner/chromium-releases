@@ -4,15 +4,17 @@
 
 #include "chrome/browser/google_apis/gdata_wapi_url_generator.h"
 
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 namespace google_apis {
 
 class GDataWapiUrlGeneratorTest : public testing::Test {
  public:
   GDataWapiUrlGeneratorTest()
-      : url_generator_(GURL(GDataWapiUrlGenerator::kBaseUrlForProduction)) {
+      : url_generator_(
+          GURL(GDataWapiUrlGenerator::kBaseUrlForProduction),
+          GURL(GDataWapiUrlGenerator::kBaseDownloadUrlForProduction)) {
   }
 
  protected:
@@ -145,6 +147,21 @@ TEST_F(GDataWapiUrlGeneratorTest, GenerateEditUrlWithoutParams) {
       url_generator_.GenerateEditUrlWithoutParams("XXX").spec());
 }
 
+TEST_F(GDataWapiUrlGeneratorTest, GenerateEditUrlWithEmbedOrigin) {
+  EXPECT_EQ(
+      "https://docs.google.com/feeds/default/private/full/XXX?v=3&alt=json"
+      "&showroot=true&embedOrigin=chrome-extension%3A%2F%2Ftest",
+      url_generator_.GenerateEditUrlWithEmbedOrigin(
+          "XXX",
+          GURL("chrome-extension://test")).spec());
+  EXPECT_EQ(
+      "https://docs.google.com/feeds/default/private/full/XXX?v=3&alt=json"
+      "&showroot=true",
+      url_generator_.GenerateEditUrlWithEmbedOrigin(
+          "XXX",
+          GURL()).spec());
+}
+
 TEST_F(GDataWapiUrlGeneratorTest, GenerateContentUrl) {
   EXPECT_EQ(
       "https://docs.google.com/feeds/default/private/full/"
@@ -194,6 +211,12 @@ TEST_F(GDataWapiUrlGeneratorTest, GenerateAccountMetadataUrl) {
       "https://docs.google.com/feeds/metadata/default?v=3&alt=json"
       "&showroot=true",
       url_generator_.GenerateAccountMetadataUrl(false).spec());
+}
+
+TEST_F(GDataWapiUrlGeneratorTest, GenerateDownloadFileUrl) {
+  EXPECT_EQ(
+      "https://www.googledrive.com/host/resourceId",
+      url_generator_.GenerateDownloadFileUrl("file:resourceId").spec());
 }
 
 }  // namespace google_apis

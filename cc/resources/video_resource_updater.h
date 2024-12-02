@@ -11,6 +11,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "cc/base/cc_export.h"
 #include "cc/resources/texture_mailbox.h"
 #include "ui/gfx/size.h"
 
@@ -22,7 +23,7 @@ class VideoFrame;
 namespace cc {
 class ResourceProvider;
 
-class VideoFrameExternalResources {
+class CC_EXPORT VideoFrameExternalResources {
  public:
   // Specifies what type of data is contained in the mailboxes, as well as how
   // many mailboxes will be present.
@@ -47,10 +48,6 @@ class VideoFrameExternalResources {
   ResourceType type;
   std::vector<TextureMailbox> mailboxes;
 
-  // TODO(danakj): Remove these when we get a Mailbox from VideoFrame.
-  unsigned hardware_resource;
-  TextureMailbox::ReleaseCallback hardware_release_callback;
-
   // TODO(danakj): Remove these too.
   std::vector<unsigned> software_resources;
   TextureMailbox::ReleaseCallback software_release_callback;
@@ -61,16 +58,13 @@ class VideoFrameExternalResources {
 
 // VideoResourceUpdater is by the video system to produce frame content as
 // resources consumable by the compositor.
-class VideoResourceUpdater
+class CC_EXPORT VideoResourceUpdater
     : public base::SupportsWeakPtr<VideoResourceUpdater> {
  public:
   explicit VideoResourceUpdater(ResourceProvider* resource_provider);
   ~VideoResourceUpdater();
 
-  VideoFrameExternalResources CreateForHardwarePlanes(
-      const scoped_refptr<media::VideoFrame>& video_frame);
-
-  VideoFrameExternalResources CreateForSoftwarePlanes(
+  VideoFrameExternalResources CreateExternalResourcesFromVideoFrame(
       const scoped_refptr<media::VideoFrame>& video_frame);
 
  private:
@@ -92,6 +86,10 @@ class VideoResourceUpdater
 
   void DeleteResource(unsigned resource_id);
   bool VerifyFrame(const scoped_refptr<media::VideoFrame>& video_frame);
+  VideoFrameExternalResources CreateForHardwarePlanes(
+      const scoped_refptr<media::VideoFrame>& video_frame);
+  VideoFrameExternalResources CreateForSoftwarePlanes(
+      const scoped_refptr<media::VideoFrame>& video_frame);
 
   struct RecycleResourceData {
     unsigned resource_id;
@@ -103,10 +101,6 @@ class VideoResourceUpdater
                               RecycleResourceData data,
                               unsigned sync_point,
                               bool lost_resource);
-  static void ReturnTexture(base::WeakPtr<VideoResourceUpdater> updater,
-                            unsigned resource_id,
-                            unsigned sync_point,
-                            bool lost_resource);
 
   ResourceProvider* resource_provider_;
   scoped_ptr<media::SkCanvasVideoRenderer> video_renderer_;

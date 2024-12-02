@@ -5,11 +5,13 @@
 #include "android_webview/native/android_webview_jni_registrar.h"
 
 #include "android_webview/native/android_protocol_handler.h"
+#include "android_webview/native/aw_autofill_manager_delegate.h"
 #include "android_webview/native/aw_contents.h"
 #include "android_webview/native/aw_contents_client_bridge.h"
 #include "android_webview/native/aw_contents_io_thread_client_impl.h"
 #include "android_webview/native/aw_form_database.h"
 #include "android_webview/native/aw_http_auth_handler.h"
+#include "android_webview/native/aw_picture.h"
 #include "android_webview/native/aw_quota_manager_bridge_impl.h"
 #include "android_webview/native/aw_resource.h"
 #include "android_webview/native/aw_settings.h"
@@ -27,10 +29,12 @@ namespace android_webview {
 static base::android::RegistrationMethod kWebViewRegisteredMethods[] = {
   // Register JNI for android_webview classes.
   { "AndroidProtocolHandler", RegisterAndroidProtocolHandler },
+  { "AwAutofillManagerDelegate", RegisterAwAutofillManagerDelegate },
   { "AwContents", RegisterAwContents },
   { "AwContentsClientBridge", RegisterAwContentsClientBridge },
-  { "AwContentsIoThreadClientImpl", RegisterAwContentsIoThreadClientImpl},
-  { "AwFormDatabase", RegisterAwFormDatabase},
+  { "AwContentsIoThreadClientImpl", RegisterAwContentsIoThreadClientImpl },
+  { "AwFormDatabase", RegisterAwFormDatabase },
+  { "AwPicture", RegisterAwPicture },
   { "AwSettings", RegisterAwSettings },
   { "AwHttpAuthHandler", RegisterAwHttpAuthHandler },
   { "AwQuotaManagerBridge", RegisterAwQuotaManagerBridge },

@@ -5,6 +5,7 @@
 #include "ash/system/chromeos/network/network_state_notifier.h"
 
 #include "ash/shell.h"
+#include "ash/system/chromeos/network/network_connect.h"
 #include "ash/system/chromeos/network/network_observer.h"
 #include "ash/system/tray/system_tray_notifier.h"
 #include "base/strings/string16.h"
@@ -31,79 +32,13 @@ const int kMinTimeBetweenOutOfCreditsNotifySeconds = 10 * 60;
 string16 GetConnectErrorString(const std::string& error_name) {
   if (error_name == NetworkConnectionHandler::kErrorNotFound)
     return l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_CONNECT_FAILED);
-  return string16();
-}
-
-// Error messages based on network_state->error().
-string16 GetErrorString(const NetworkState* network_state) {
-  DCHECK(network_state);
-  const std::string& error = network_state->error();
-  if (error.empty())
-    return string16();
-  if (error == flimflam::kErrorOutOfRange)
-    return l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_OUT_OF_RANGE);
-  if (error == flimflam::kErrorPinMissing)
-    return l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_PIN_MISSING);
-  if (error == flimflam::kErrorDhcpFailed)
-    return l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_DHCP_FAILED);
-  if (error == flimflam::kErrorConnectFailed)
-    return l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_CONNECT_FAILED);
-  if (error == flimflam::kErrorBadPassphrase)
-    return l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_BAD_PASSPHRASE);
-  if (error == flimflam::kErrorBadWEPKey)
-    return l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_BAD_WEPKEY);
-  if (error == flimflam::kErrorActivationFailed) {
+  if (error_name == NetworkConnectionHandler::kErrorConfigureFailed)
+    return l10n_util::GetStringUTF16(
+        IDS_CHROMEOS_NETWORK_ERROR_CONFIGURE_FAILED);
+  if (error_name == ash::network_connect::kErrorActivateFailed)
     return l10n_util::GetStringUTF16(
         IDS_CHROMEOS_NETWORK_ERROR_ACTIVATION_FAILED);
-  }
-  if (error == flimflam::kErrorNeedEvdo)
-    return l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_NEED_EVDO);
-  if (error == flimflam::kErrorNeedHomeNetwork) {
-    return l10n_util::GetStringUTF16(
-        IDS_CHROMEOS_NETWORK_ERROR_NEED_HOME_NETWORK);
-  }
-  if (error == flimflam::kErrorOtaspFailed)
-    return l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_OTASP_FAILED);
-  if (error == flimflam::kErrorAaaFailed)
-    return l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_AAA_FAILED);
-  if (error == flimflam::kErrorInternal)
-    return l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_INTERNAL);
-  if (error == flimflam::kErrorDNSLookupFailed) {
-    return l10n_util::GetStringUTF16(
-        IDS_CHROMEOS_NETWORK_ERROR_DNS_LOOKUP_FAILED);
-  }
-  if (error == flimflam::kErrorHTTPGetFailed) {
-    return l10n_util::GetStringUTF16(
-        IDS_CHROMEOS_NETWORK_ERROR_HTTP_GET_FAILED);
-  }
-  if (error == flimflam::kErrorIpsecPskAuthFailed) {
-    return l10n_util::GetStringUTF16(
-        IDS_CHROMEOS_NETWORK_ERROR_IPSEC_PSK_AUTH_FAILED);
-  }
-  if (error == flimflam::kErrorIpsecCertAuthFailed ||
-      error == shill::kErrorEapAuthenticationFailed) {
-    return l10n_util::GetStringUTF16(
-        IDS_CHROMEOS_NETWORK_ERROR_CERT_AUTH_FAILED);
-  }
-  if (error == shill::kErrorEapLocalTlsFailed) {
-    return l10n_util::GetStringUTF16(
-        IDS_CHROMEOS_NETWORK_ERROR_EAP_LOCAL_TLS_FAILED);
-  }
-  if (error == shill::kErrorEapRemoteTlsFailed) {
-    return l10n_util::GetStringUTF16(
-        IDS_CHROMEOS_NETWORK_ERROR_EAP_REMOTE_TLS_FAILED);
-  }
-  if (error == flimflam::kErrorPppAuthFailed) {
-    return l10n_util::GetStringUTF16(
-        IDS_CHROMEOS_NETWORK_ERROR_PPP_AUTH_FAILED);
-  }
-
-  if (StringToLowerASCII(error) ==
-      StringToLowerASCII(std::string(flimflam::kUnknownString))) {
-    return l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_UNKNOWN);
-  }
-  return l10n_util::GetStringFUTF16(IDS_NETWORK_UNRECOGNIZED_ERROR,
-                                    UTF8ToUTF16(error));
+  return string16();
 }
 
 }  // namespace
@@ -112,17 +47,31 @@ namespace ash {
 
 NetworkStateNotifier::NetworkStateNotifier()
     : cellular_out_of_credits_(false) {
-  if (NetworkHandler::IsInitialized()) {
-    NetworkHandler::Get()->network_state_handler()->AddObserver(
-        this, FROM_HERE);
-    InitializeNetworks();
-  }
+  if (!NetworkHandler::IsInitialized())
+    return;
+  NetworkHandler::Get()->network_state_handler()->AddObserver(this, FROM_HERE);
+
+  // Initialize |last_active_network_|.
+  const NetworkState* default_network =
+      NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
+  if (default_network && default_network->IsConnectedState())
+    last_active_network_ = default_network->path();
 }
 
 NetworkStateNotifier::~NetworkStateNotifier() {
-  if (NetworkHandler::IsInitialized()) {
-    NetworkHandler::Get()->network_state_handler()->RemoveObserver(
-        this, FROM_HERE);
+  if (!NetworkHandler::IsInitialized())
+    return;
+  NetworkHandler::Get()->network_state_handler()->RemoveObserver(
+      this, FROM_HERE);
+}
+
+void NetworkStateNotifier::NetworkListChanged() {
+  // Trigger any pending connect failed error if the network list changes
+  // (which indicates all NetworkState entries are up to date). This is in
+  // case a connect attempt fails because a network is no longer visible.
+  if (!connect_failed_network_.empty()) {
+    ShowNetworkConnectError(
+        flimflam::kErrorConnectFailed, connect_failed_network_);
   }
 }
 
@@ -136,40 +85,15 @@ void NetworkStateNotifier::DefaultNetworkChanged(const NetworkState* network) {
   }
 }
 
-void NetworkStateNotifier::NetworkConnectionStateChanged(
-    const NetworkState* network) {
-  NetworkStateHandler* handler = NetworkHandler::Get()->network_state_handler();
-  std::string prev_state;
-  std::string new_state = network->connection_state();
-  CachedStateMap::iterator iter = cached_state_.find(network->path());
-  if (iter != cached_state_.end()) {
-    prev_state = iter->second;
-    if (prev_state == new_state)
-      return;  // No state change
-    VLOG(1) << "NetworkStateNotifier: State: " << prev_state
-            << " ->: " << new_state;
-    iter->second = new_state;
-  } else {
-    VLOG(1) << "NetworkStateNotifier: New Service: " << network->path()
-            << " State: " << new_state;
-    cached_state_[network->path()] = new_state;
-    return;  // New network, no state change
-  }
-
-  if (new_state != flimflam::kStateFailure)
-    return;
-
-  if (network->path() != handler->connecting_network())
-    return;  // Only show notifications for explicitly connected networks
-
-  NET_LOG_EVENT("ConnectionFailure", network->path());
-
-  ShowConnectError("", network);
-}
-
 void NetworkStateNotifier::NetworkPropertiesUpdated(
     const NetworkState* network) {
   DCHECK(network);
+  // Trigger a pending connect failed error for |network| when the Error
+  // property has been set.
+  if (network->path() == connect_failed_network_ && !network->error().empty()) {
+    ShowNetworkConnectError(
+        flimflam::kErrorConnectFailed, connect_failed_network_);
+  }
   // Trigger "Out of credits" notification if the cellular network is the most
   // recent default network (i.e. we have not switched to another network).
   if (network->type() == flimflam::kTypeCellular &&
@@ -217,17 +141,24 @@ void NetworkStateNotifier::ShowNetworkConnectError(
     const std::string& service_path) {
   const NetworkState* network = NetworkHandler::Get()->network_state_handler()->
       GetNetworkState(service_path);
-  ShowConnectError(error_name, network);
-}
+  if (error_name == flimflam::kErrorConnectFailed &&
+      service_path != connect_failed_network_) {
+    // Shill may not have set the Error property yet. First request an update
+    // and wait for either the update to complete or the network list to be
+    // updated before displaying the error.
+    connect_failed_network_ = service_path;
+    return;
+  }
+  connect_failed_network_.clear();
 
-void NetworkStateNotifier::ShowConnectError(const std::string& error_name,
-                                            const NetworkState* network) {
-  std::vector<string16> no_links;
   string16 error = GetConnectErrorString(error_name);
   if (error.empty() && network)
-    error = GetErrorString(network);
+    error = network_connect::ErrorString(network->error());
   if (error.empty())
     error = l10n_util::GetStringUTF16(IDS_CHROMEOS_NETWORK_ERROR_UNKNOWN);
+  NET_LOG_ERROR("Connect error notification: " + UTF16ToUTF8(error),
+                service_path);
+
   std::string name = network ? network->name() : "";
   string16 error_msg;
   if (network && !network->error_details().empty()) {
@@ -239,6 +170,8 @@ void NetworkStateNotifier::ShowConnectError(const std::string& error_name,
         IDS_NETWORK_CONNECTION_ERROR_MESSAGE_WITH_DETAILS,
         UTF8ToUTF16(name), error);
   }
+
+  std::vector<string16> no_links;
   ash::Shell::GetInstance()->system_tray_notifier()->NotifySetNetworkMessage(
       this,
       NetworkObserver::ERROR_CONNECT_FAILED,
@@ -246,23 +179,6 @@ void NetworkStateNotifier::ShowConnectError(const std::string& error_name,
       l10n_util::GetStringUTF16(IDS_NETWORK_CONNECTION_ERROR_TITLE),
       error_msg,
       no_links);
-}
-
-void NetworkStateNotifier::InitializeNetworks() {
-  NetworkStateHandler::NetworkStateList network_list;
-  NetworkHandler::Get()->network_state_handler()->GetNetworkList(&network_list);
-  VLOG(1) << "NetworkStateNotifier:InitializeNetworks: "
-          << network_list.size();
-  for (NetworkStateHandler::NetworkStateList::iterator iter =
-           network_list.begin(); iter != network_list.end(); ++iter) {
-    const NetworkState* network = *iter;
-    VLOG(2) << " Network: " << network->path();
-    cached_state_[network->path()] = network->connection_state();
-  }
-  const NetworkState* default_network =
-      NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
-  if (default_network && default_network->IsConnectedState())
-    last_active_network_ = default_network->path();
 }
 
 }  // namespace ash

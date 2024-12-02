@@ -11,11 +11,10 @@
 #include "base/debug/trace_event.h"
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "grit/app_locale_settings.h"
 #include "grit/ui_strings.h"
-#include "third_party/icu/public/common/unicode/uchar.h"
+#include "third_party/icu/source/common/unicode/uchar.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
@@ -82,16 +81,10 @@ NativeTextfieldViews::NativeTextfieldViews(Textfield* parent)
       cursor_timer_(this),
       aggregated_clicks_(0) {
   set_border(text_border_);
-
-#if defined(OS_CHROMEOS)
-  GetRenderText()->SetFontList(gfx::FontList(l10n_util::GetStringUTF8(
-      IDS_UI_FONT_FAMILY_CROS)));
-#else
-  GetRenderText()->SetFont(textfield_->font());
-#endif
-
+  GetRenderText()->SetFontList(textfield_->font_list());
   UpdateColorsFromTheme(GetNativeTheme());
   set_context_menu_controller(this);
+  parent->set_context_menu_controller(this);
   set_drag_controller(this);
 }
 
@@ -465,7 +458,7 @@ void NativeTextfieldViews::WriteDragDataForView(views::View* sender,
   data->SetString(GetSelectedText());
   scoped_ptr<gfx::Canvas> canvas(
       views::GetCanvasForDragImage(textfield_->GetWidget(), size()));
-  GetRenderText()->DrawSelectedText(canvas.get());
+  GetRenderText()->DrawSelectedTextForDrag(canvas.get());
   drag_utils::SetDragImageOnDataObject(*canvas, size(),
                                        press_pt.OffsetFromOrigin(),
                                        data);
@@ -575,13 +568,7 @@ void NativeTextfieldViews::UpdateReadOnly() {
 }
 
 void NativeTextfieldViews::UpdateFont() {
-#if defined(OS_CHROMEOS)
-  // For ChromeOS, we support a pre-defined font list per locale. UpdateFont()
-  // only changes the font size, not the font family names.
-  GetRenderText()->SetFontSize(textfield_->font().GetFontSize());
-#else
-  GetRenderText()->SetFont(textfield_->font());
-#endif
+  GetRenderText()->SetFontList(textfield_->font_list());
   OnCaretBoundsChanged();
 }
 
@@ -694,6 +681,7 @@ void NativeTextfieldViews::HandleFocus() {
   GetRenderText()->set_focused(true);
   is_cursor_visible_ = true;
   SchedulePaint();
+  GetInputMethod()->OnFocus();
   OnCaretBoundsChanged();
   // Start blinking cursor.
   base::MessageLoop::current()->PostDelayedTask(
@@ -705,6 +693,7 @@ void NativeTextfieldViews::HandleFocus() {
 
 void NativeTextfieldViews::HandleBlur() {
   GetRenderText()->set_focused(false);
+  GetInputMethod()->OnBlur();
   // Stop blinking cursor.
   cursor_timer_.InvalidateWeakPtrs();
   if (is_cursor_visible_) {
@@ -726,11 +715,11 @@ void NativeTextfieldViews::ClearEditHistory() {
 }
 
 int NativeTextfieldViews::GetFontHeight() {
-  return GetRenderText()->GetFont().GetHeight();
+  return GetRenderText()->font_list().GetHeight();
 }
 
 int NativeTextfieldViews::GetTextfieldBaseline() const {
-  return GetRenderText()->GetFont().GetBaseline();
+  return GetRenderText()->font_list().GetBaseline();
 }
 
 int NativeTextfieldViews::GetWidthNeededForText() const {
@@ -973,6 +962,10 @@ ui::TextInputType NativeTextfieldViews::GetTextInputType() const {
   return textfield_->GetTextInputType();
 }
 
+ui::TextInputMode NativeTextfieldViews::GetTextInputMode() const {
+  return ui::TEXT_INPUT_MODE_DEFAULT;
+}
+
 bool NativeTextfieldViews::CanComposeInline() const {
   return true;
 }
@@ -1131,8 +1124,6 @@ void NativeTextfieldViews::UpdateColorsFromTheme(const ui::NativeTheme* theme) {
       ui::NativeTheme::kColorId_TextfieldSelectionColor));
   render_text->set_selection_background_focused_color(theme->GetSystemColor(
       ui::NativeTheme::kColorId_TextfieldSelectionBackgroundFocused));
-  render_text->set_selection_background_unfocused_color(theme->GetSystemColor(
-      ui::NativeTheme::kColorId_TextfieldSelectionBackgroundUnfocused));
 }
 
 void NativeTextfieldViews::UpdateCursor() {
@@ -1168,7 +1159,7 @@ void NativeTextfieldViews::PaintTextAndCursor(gfx::Canvas* canvas) {
       !textfield_->placeholder_text().empty()) {
     canvas->DrawStringInt(
         textfield_->placeholder_text(),
-        GetRenderText()->GetFont(),
+        GetRenderText()->GetPrimaryFont(),
         textfield_->placeholder_text_color(),
         GetRenderText()->display_rect());
   }
@@ -1226,12 +1217,12 @@ bool NativeTextfieldViews::HandleKeyEvent(const ui::KeyEvent& key_event) {
         // forward/back of the browser history.
         if (alt)
           break;
-        size_t cursor_position = model_->GetCursorPosition();
+        const ui::Range selection_range = GetSelectedRange();
         model_->MoveCursor(
             control ? gfx::WORD_BREAK : gfx::CHARACTER_BREAK,
             (key_code == ui::VKEY_RIGHT) ? gfx::CURSOR_RIGHT : gfx::CURSOR_LEFT,
             shift);
-        cursor_changed = model_->GetCursorPosition() != cursor_position;
+        cursor_changed = GetSelectedRange() != selection_range;
         break;
       }
       case ui::VKEY_END:
@@ -1265,12 +1256,13 @@ bool NativeTextfieldViews::HandleKeyEvent(const ui::KeyEvent& key_event) {
         }
         if (key_code == ui::VKEY_BACK)
           model_->Backspace();
+        else if (shift && model_->HasSelection() && readable)
+          Cut();
         else
           model_->Delete();
 
-        // We have to consume the backspace/delete keys here even if the edit
-        // did not make effects.  This is to prevent further handling of the key
-        // event that might have unintended side-effects.
+        // Consume backspace and delete keys even if the edit did nothing. This
+        // prevents potential unintended side-effects of further event handling.
         text_changed = true;
         break;
       case ui::VKEY_INSERT:
@@ -1424,7 +1416,10 @@ void NativeTextfieldViews::TrackMouseClicks(const ui::MouseEvent& event) {
     base::TimeDelta time_delta = event.time_stamp() - last_click_time_;
     if (time_delta.InMilliseconds() <= GetDoubleClickInterval() &&
         !ExceededDragThresholdFromLastClickLocation(event)) {
-      aggregated_clicks_ = (aggregated_clicks_ + 1) % 3;
+      // Upon clicking after a triple click, the count should go back to double
+      // click and alternate between double and triple. This assignment maps
+      // 0 to 1, 1 to 2, 2 to 1.
+      aggregated_clicks_ = (aggregated_clicks_ % 2) + 1;
     } else {
       aggregated_clicks_ = 0;
     }
@@ -1485,9 +1480,11 @@ bool NativeTextfieldViews::ShouldInsertChar(char16 ch, int flags) {
 }
 
 void NativeTextfieldViews::CreateTouchSelectionControllerAndNotifyIt() {
-  touch_selection_controller_.reset(
-      ui::TouchSelectionController::create(this));
-  if (touch_selection_controller_.get())
+  if (!touch_selection_controller_) {
+    touch_selection_controller_.reset(
+        ui::TouchSelectionController::create(this));
+  }
+  if (touch_selection_controller_)
     touch_selection_controller_->SelectionChanged();
 }
 

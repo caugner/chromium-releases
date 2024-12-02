@@ -17,16 +17,18 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/result_codes.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/common/switches.h"
 #include "net/dns/mock_host_resolver.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(USE_ASH)
-#include "chrome/browser/extensions/shell_window_registry.h"
+#include "apps/shell_window_registry.h"
 #endif
 
 #if defined(USE_ASH) && !defined(OS_WIN)
@@ -41,7 +43,7 @@ using content::WebContents;
 // Disabled, http://crbug.com/64899.
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_WindowOpen) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableExperimentalExtensionApis);
+      extensions::switches::kEnableExperimentalExtensionApis);
 
   ResultCatcher catcher;
   ASSERT_TRUE(LoadExtensionIncognito(test_data_dir_
@@ -51,7 +53,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_WindowOpen) {
 
 int GetPanelCount(Browser* browser) {
 #if defined(USE_ASH_PANELS)
-  return static_cast<int>(extensions::ShellWindowRegistry::Get(
+  return static_cast<int>(apps::ShellWindowRegistry::Get(
       browser->profile())->shell_windows().size());
 #else
   return PanelManager::GetInstance()->num_panels();
@@ -107,7 +109,7 @@ bool WaitForTabsAndPopups(Browser* browser,
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, BrowserIsApp) {
   host_resolver()->AddRule("a.com", "127.0.0.1");
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("window_open").AppendASCII("browser_is_app")));
 
@@ -122,7 +124,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, BrowserIsApp) {
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowOpenPopupDefault) {
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("window_open").AppendASCII("popup")));
 
@@ -132,7 +134,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowOpenPopupDefault) {
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowOpenPopupLarge) {
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("window_open").AppendASCII("popup_large")));
 
@@ -143,7 +145,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowOpenPopupLarge) {
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowOpenPopupSmall) {
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("window_open").AppendASCII("popup_small")));
 
@@ -162,7 +164,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowOpenPopupSmall) {
 #endif
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_PopupBlockingExtension) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
 
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("window_open").AppendASCII("popup_blocking")
@@ -241,15 +243,25 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, MAYBE_WindowOpenPanel) {
   ASSERT_TRUE(RunExtensionTest("window_open/panel")) << message_;
 }
 
+#if defined(USE_ASH_PANELS)
 // On Ash, this currently fails because we're currently opening new panel
 // windows as popup windows instead.
-// This is also flakey on Windows, ASan and Mac builds: crbug.com/179251
-IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, DISABLED_WindowOpenPanelDetached) {
+#define MAYBE_WindowOpenPanelDetached DISABLED_WindowOpenPanelDetached
+#else
+#define MAYBE_WindowOpenPanelDetached WindowOpenPanelDetached
+#endif
+IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, MAYBE_WindowOpenPanelDetached) {
   ASSERT_TRUE(RunExtensionTest("window_open/panel_detached")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest,
                        CloseNonExtensionPanelsOnUninstall) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
 #if defined(USE_ASH_PANELS)
   // On Ash, new panel windows open as popup windows instead.
   int num_popups, num_panels;
@@ -264,7 +276,7 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest,
   int num_popups = 2;
   int num_panels = 2;
 #endif
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
 
   // Setup listeners to wait on strings we expect the extension pages to send.
   std::vector<std::string> test_strings;
@@ -314,15 +326,10 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest,
   EXPECT_TRUE(WaitForTabsAndPopups(browser(), 1, num_popups, 0));
 }
 
-#if defined(OS_CHROMEOS)
-// TODO(derat): See if there's some way to get this to work on Chrome OS.  It
-// crashes there, apparently because we automatically reload crashed pages:
-// http:/crbug.com/161073
-#define MAYBE_ClosePanelsOnExtensionCrash DISABLED_ClosePanelsOnExtensionCrash
-#else
-#define MAYBE_ClosePanelsOnExtensionCrash ClosePanelsOnExtensionCrash
-#endif
-IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, MAYBE_ClosePanelsOnExtensionCrash) {
+// This test isn't applicable on Chrome OS, which automatically reloads
+// crashed pages.
+#if !defined(OS_CHROMEOS)
+IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, ClosePanelsOnExtensionCrash) {
 #if defined(USE_ASH_PANELS)
   // On Ash, new panel windows open as popup windows instead.
   int num_popups = 4;
@@ -331,7 +338,7 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, MAYBE_ClosePanelsOnExtensionCrash) {
   int num_popups = 2;
   int num_panels = 2;
 #endif
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
 
   // Setup listeners to wait on strings we expect the extension pages to send.
   std::vector<std::string> test_strings;
@@ -372,6 +379,7 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, MAYBE_ClosePanelsOnExtensionCrash) {
   // Only expect panels to close. The rest stay open to show a sad-tab.
   EXPECT_TRUE(WaitForTabsAndPopups(browser(), 2, num_popups, 0));
 }
+#endif  // !defined(OS_CHROMEOS)
 
 #if defined(USE_ASH_PANELS)
 // This test is not applicable on Ash. The modified window.open behavior only
@@ -381,7 +389,7 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, MAYBE_ClosePanelsOnExtensionCrash) {
 #define MAYBE_WindowOpenFromPanel WindowOpenFromPanel
 #endif
 IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, MAYBE_WindowOpenFromPanel) {
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
 
   // Load the extension that will open a panel which then calls window.open.
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("window_open").

@@ -11,6 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/download/all_download_item_notifier.h"
+#include "chrome/browser/download/download_danger_prompt.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -120,7 +121,7 @@ class DownloadsDOMHandler : public content::WebUIMessageHandler,
 
   // Conveys danger acceptance from the DownloadDangerPrompt to the
   // DownloadItem.
-  void DangerPromptAccepted(int download_id);
+  void DangerPromptDone(int download_id, DownloadDangerPrompt::Action action);
 
   // Returns true if the records of any downloaded items are allowed (and able)
   // to be deleted.
@@ -129,8 +130,8 @@ class DownloadsDOMHandler : public content::WebUIMessageHandler,
   // Returns the download that is referred to in a given value.
   content::DownloadItem* GetDownloadByValue(const base::ListValue* args);
 
-  // Current search text.
-  string16 search_text_;
+  // Current search terms.
+  scoped_ptr<base::ListValue> search_terms_;
 
   // Notifies OnDownload*() and provides safe access to the DownloadManager.
   AllDownloadItemNotifier main_notifier_;

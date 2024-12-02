@@ -90,10 +90,10 @@ AppListMainView::AppListMainView(AppListViewDelegate* delegate,
                                         kInnerPadding,
                                         kInnerPadding));
 
-  search_box_view_ = new SearchBoxView(this, delegate);
+  search_box_view_ = new SearchBoxView(this, delegate, model_);
   AddChildView(search_box_view_);
 
-  contents_view_ = new ContentsView(this, pagination_model);
+  contents_view_ = new ContentsView(this, pagination_model, model_);
   AddChildView(contents_view_);
 
   search_box_view_->set_contents_view(contents_view_);
@@ -103,9 +103,6 @@ AppListMainView::AppListMainView(AppListViewDelegate* delegate,
   contents_view_->SetFillsBoundsOpaquely(false);
   contents_view_->layer()->SetMasksToBounds(true);
 #endif
-
-  search_box_view_->SetModel(model_->search_box());
-  contents_view_->SetModel(model_);
 }
 
 AppListMainView::~AppListMainView() {
@@ -224,6 +221,16 @@ void AppListMainView::InvokeResultAction(SearchResult* result,
                                          int event_flags) {
   if (delegate_)
     delegate_->InvokeSearchResultAction(result, action_index, event_flags);
+}
+
+void AppListMainView::OnResultInstalled(SearchResult* result) {
+  // Clears the search to show the apps grid. The last installed app
+  // should be highlighted and made visible already.
+  search_box_view_->ClearSearch();
+}
+
+void AppListMainView::OnResultUninstalled(SearchResult* result) {
+  QueryChanged(search_box_view_);
 }
 
 }  // namespace app_list

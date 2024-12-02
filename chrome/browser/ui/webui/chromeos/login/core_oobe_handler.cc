@@ -7,15 +7,15 @@
 #include "ash/magnifier/magnifier_constants.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
-#include "chrome/browser/chromeos/system/statistics_provider.h"
+#include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chromeos/chromeos_constants.h"
 #include "content/public/browser/notification_service.h"
@@ -23,6 +23,8 @@
 #include "grit/generated_resources.h"
 
 namespace {
+
+const char kJsScreenPath[] = "cr.ui.Oobe";
 
 // JS API callbacks names.
 const char kJsApiEnableHighContrast[] = "enableHighContrast";
@@ -39,7 +41,8 @@ namespace chromeos {
 // Note that show_oobe_ui_ defaults to false because WizardController assumes
 // OOBE UI is not visible by default.
 CoreOobeHandler::CoreOobeHandler(OobeUI* oobe_ui)
-    : oobe_ui_(oobe_ui),
+    : BaseScreenHandler(kJsScreenPath),
+      oobe_ui_(oobe_ui),
       show_oobe_ui_(false),
       version_info_updater_(this),
       delegate_(NULL) {
@@ -117,6 +120,65 @@ void CoreOobeHandler::RegisterMessages() {
               &CoreOobeHandler::HandleEnableSpokenFeedback);
   AddCallback("setDeviceRequisition",
               &CoreOobeHandler::HandleSetDeviceRequisition);
+  AddCallback("skipToLoginForTesting",
+              &CoreOobeHandler::HandleSkipToLoginForTesting);
+}
+
+void CoreOobeHandler::ShowSignInError(
+    int login_attempts,
+    const std::string& error_text,
+    const std::string& help_link_text,
+    HelpAppLauncher::HelpTopic help_topic_id) {
+  CallJS("showSignInError", login_attempts, error_text,
+         help_link_text, static_cast<int>(help_topic_id));
+}
+
+void CoreOobeHandler::ShowTpmError() {
+  CallJS("showTpmError");
+}
+
+void CoreOobeHandler::ShowSignInUI(const std::string& email) {
+  CallJS("showSigninUI", email);
+}
+
+void CoreOobeHandler::ResetSignInUI(bool force_online) {
+  CallJS("resetSigninUI", force_online);
+}
+
+void CoreOobeHandler::ClearUserPodPassword() {
+  CallJS("clearUserPodPassword");
+}
+
+void CoreOobeHandler::RefocusCurrentPod() {
+  CallJS("refocusCurrentPod");
+}
+
+void CoreOobeHandler::OnLoginSuccess(const std::string& username) {
+  CallJS("onLoginSuccess", username);
+}
+
+void CoreOobeHandler::ShowPasswordChangedScreen(bool show_password_error) {
+  CallJS("showPasswordChangedScreen", show_password_error);
+}
+
+void CoreOobeHandler::SetUsageStats(bool checked) {
+  CallJS("setUsageStats", checked);
+}
+
+void CoreOobeHandler::SetOemEulaUrl(const std::string& oem_eula_url) {
+  CallJS("setOemEulaUrl", oem_eula_url);
+}
+
+void CoreOobeHandler::SetTpmPassword(const std::string& tpm_password) {
+  CallJS("setTpmPassword", tpm_password);
+}
+
+void CoreOobeHandler::ClearErrors() {
+  CallJS("clearErrors");
+}
+
+void CoreOobeHandler::ReloadContent(const base::DictionaryValue& dictionary) {
+  CallJS("reloadContent", dictionary);
 }
 
 void CoreOobeHandler::HandleInitialized() {
@@ -162,6 +224,11 @@ void CoreOobeHandler::HandleSetDeviceRequisition(
       SetDeviceRequisition(requisition);
 }
 
+void CoreOobeHandler::HandleSkipToLoginForTesting() {
+  if (WizardController::default_controller())
+      WizardController::default_controller()->SkipToLoginForTesting();
+}
+
 void CoreOobeHandler::ShowOobeUI(bool show) {
   if (show == show_oobe_ui_)
     return;
@@ -183,7 +250,7 @@ void CoreOobeHandler::UpdateA11yState() {
                        AccessibilityManager::Get()->IsSpokenFeedbackEnabled());
   a11y_info.SetBoolean("screenMagnifierEnabled",
                        MagnificationManager::Get()->IsMagnifierEnabled());
-  CallJS("cr.ui.Oobe.refreshA11yInfo", a11y_info);
+  CallJS("refreshA11yInfo", a11y_info);
 }
 
 void CoreOobeHandler::UpdateOobeUIVisibility() {
@@ -194,16 +261,10 @@ void CoreOobeHandler::UpdateOobeUIVisibility() {
       channel == chrome::VersionInfo::CHANNEL_BETA) {
     should_show_version = false;
   }
-  CallJS("cr.ui.Oobe.showVersion", should_show_version);
-  CallJS("cr.ui.Oobe.showOobeUI", show_oobe_ui_);
-
-  bool enable_keyboard_flow = false;
-  chromeos::system::StatisticsProvider* provider =
-      chromeos::system::StatisticsProvider::GetInstance();
-  provider->GetMachineFlag(chromeos::system::kOemKeyboardDrivenOobeKey,
-                           &enable_keyboard_flow);
-  if (enable_keyboard_flow)
-    CallJS("cr.ui.Oobe.enableKeyboardFlow", enable_keyboard_flow);
+  CallJS("showVersion", should_show_version);
+  CallJS("showOobeUI", show_oobe_ui_);
+  if (system::keyboard_settings::ForceKeyboardDrivenUINavigation())
+    CallJS("enableKeyboardFlow", true);
 }
 
 void CoreOobeHandler::OnOSVersionLabelTextUpdated(
@@ -211,23 +272,18 @@ void CoreOobeHandler::OnOSVersionLabelTextUpdated(
   UpdateLabel("version", os_version_label_text);
 }
 
-void CoreOobeHandler::OnBootTimesLabelTextUpdated(
-    const std::string& boot_times_label_text) {
-  UpdateLabel("boot-times", boot_times_label_text);
-}
-
 void CoreOobeHandler::OnEnterpriseInfoUpdated(
     const std::string& message_text) {
-  CallJS("cr.ui.Oobe.setEnterpriseInfo", message_text);
+  CallJS("setEnterpriseInfo", message_text);
 }
 
 void CoreOobeHandler::UpdateLabel(const std::string& id,
                                   const std::string& text) {
-  CallJS("cr.ui.Oobe.setLabelText", id, text);
+  CallJS("setLabelText", id, text);
 }
 
 void CoreOobeHandler::UpdateDeviceRequisition() {
-  CallJS("cr.ui.Oobe.updateDeviceRequisition",
+  CallJS("updateDeviceRequisition",
          g_browser_process->browser_policy_connector()->
              GetDeviceCloudPolicyManager()->GetDeviceRequisition());
 }

@@ -4,6 +4,9 @@
 
 #include "chrome/browser/ui/ash/chrome_shell_delegate.h"
 
+#include "apps/native_app_window.h"
+#include "apps/shell_window.h"
+#include "apps/shell_window_registry.h"
 #include "ash/ash_switches.h"
 #include "ash/host/root_window_host_factory.h"
 #include "ash/launcher/launcher_types.h"
@@ -18,7 +21,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
-#include "chrome/browser/extensions/shell_window_registry.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
@@ -35,13 +38,9 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/extensions/native_app_window.h"
-#include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/immersive_fullscreen_configuration.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/time_format.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/chromium_strings.h"
@@ -188,7 +187,7 @@ void ChromeShellDelegate::ToggleFullscreen() {
   }
 
   // |window| may belong to a shell window.
-  ShellWindow* shell_window = extensions::ShellWindowRegistry::
+  apps::ShellWindow* shell_window = apps::ShellWindowRegistry::
       GetShellWindowForNativeWindowAnyProfile(window);
   if (shell_window) {
     if (is_fullscreen)
@@ -256,10 +255,7 @@ app_list::AppListViewDelegate*
 
 ash::LauncherDelegate* ChromeShellDelegate::CreateLauncherDelegate(
     ash::LauncherModel* model) {
-  // Defer Launcher creation until DefaultProfile is created.
-  if (!ProfileManager::IsGetDefaultProfileAllowed())
-    return NULL;
-
+  DCHECK(ProfileManager::IsGetDefaultProfileAllowed());
   // TODO(oshima): This is currently broken with multiple launchers.
   // Refactor so that there is just one launcher delegate in the
   // shell.
@@ -316,6 +312,9 @@ void ChromeShellDelegate::RecordUserMetricsAction(
       break;
     case ash::UMA_ACCEL_NEXTWINDOW_TAB:
       content::RecordAction(content::UserMetricsAction("Accel_NextWindow_Tab"));
+      break;
+    case ash::UMA_ACCEL_OVERVIEW_F5:
+      content::RecordAction(content::UserMetricsAction("Accel_Overview_F5"));
       break;
     case ash::UMA_ACCEL_PREVWINDOW_F5:
       content::RecordAction(content::UserMetricsAction("Accel_PrevWindow_F5"));
@@ -415,14 +414,6 @@ void ChromeShellDelegate::RecordUserMetricsAction(
       content::RecordAction(content::UserMetricsAction("MaxButton_ShowBubble"));
       break;
   }
-}
-
-string16 ChromeShellDelegate::GetTimeRemainingString(base::TimeDelta delta) {
-  return TimeFormat::TimeRemainingLong(delta);
-}
-
-string16 ChromeShellDelegate::GetTimeDurationLongString(base::TimeDelta delta) {
-  return TimeFormat::TimeDurationLong(delta);
 }
 
 ui::MenuModel* ChromeShellDelegate::CreateContextMenu(aura::RootWindow* root) {

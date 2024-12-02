@@ -13,8 +13,8 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
-#include "base/timer.h"
+#include "base/message_loop/message_loop.h"
+#include "base/timer/timer.h"
 #include "ui/base/events/event_constants.h"
 #include "ui/views/controls/menu/menu_delegate.h"
 #include "ui/views/controls/menu/menu_item_view.h"

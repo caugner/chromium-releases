@@ -10,7 +10,7 @@
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 //  These are only used for commented out tests.  If someone wants to enable
 //  them, they should be moved to chrome first.
 //  #include "chrome/browser/history/history_service.h"
@@ -34,6 +34,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/page_state.h"
+#include "content/public/common/url_constants.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_notification_tracker.h"
 #include "content/public/test/test_utils.h"
@@ -506,7 +507,7 @@ TEST_F(NavigationControllerTest, LoadURLWithParams) {
   load_params.load_type = NavigationController::LOAD_TYPE_DEFAULT;
   load_params.is_renderer_initiated = true;
   load_params.override_user_agent = NavigationController::UA_OVERRIDE_TRUE;
-  load_params.transferred_global_request_id = GlobalRequestID(2,3);
+  load_params.transferred_global_request_id = GlobalRequestID(2, 3);
 
   controller.LoadURLWithParams(load_params);
   NavigationEntryImpl* entry =
@@ -527,7 +528,7 @@ TEST_F(NavigationControllerTest, LoadURLWithExtraParams_Data) {
       GURL("data:text/html,dataurl"));
   load_params.load_type = NavigationController::LOAD_TYPE_DATA;
   load_params.base_url_for_data_url = GURL("http://foo");
-  load_params.virtual_url_for_data_url = GURL("about:blank");
+  load_params.virtual_url_for_data_url = GURL(kAboutBlankURL);
   load_params.override_user_agent = NavigationController::UA_OVERRIDE_FALSE;
 
   controller.LoadURLWithParams(load_params);
@@ -867,7 +868,7 @@ TEST_F(NavigationControllerTest, LoadURL_IgnorePreemptsPending) {
   contents()->SetDelegate(delegate.get());
 
   // Without any navigations, the renderer starts at about:blank.
-  const GURL kExistingURL("about:blank");
+  const GURL kExistingURL(kAboutBlankURL);
 
   // Now make a pending new navigation.
   const GURL kNewURL("http://eh");
@@ -1007,10 +1008,10 @@ TEST_F(NavigationControllerTest, LoadURL_RedirectAbortDoesntShowPendingURL) {
           ViewHostMsg_DidFailProvisionalLoadWithError(0,  // routing_id
                                                       params));
 
-  // This should not clear the pending entry or notify of a navigation state
-  // change.
+  // Because the pending entry is renderer initiated and not visible, we
+  // clear it when it fails.
   EXPECT_EQ(-1, controller.GetPendingEntryIndex());
-  EXPECT_TRUE(controller.GetPendingEntry());
+  EXPECT_FALSE(controller.GetPendingEntry());
   EXPECT_EQ(0, controller.GetLastCommittedEntryIndex());
   EXPECT_EQ(0, delegate->navigation_state_change_count());
 
@@ -1044,6 +1045,13 @@ TEST_F(NavigationControllerTest, LoadURL_WithBindings) {
   EXPECT_EQ(0, controller.GetLastCommittedEntryIndex());
   EXPECT_EQ(0, NavigationEntryImpl::FromNavigationEntry(
       controller.GetLastCommittedEntry())->bindings());
+
+  // Manually increase the number of active views in the SiteInstance
+  // that orig_rvh belongs to, to prevent it from being destroyed when
+  // it gets swapped out, so that we can reuse orig_rvh when the
+  // controller goes back.
+  static_cast<SiteInstanceImpl*>(orig_rvh->GetSiteInstance())->
+      increment_active_view_count();
 
   // Navigate to a second URL, simulate the beforeunload ack for the cross-site
   // transition, and set bindings on the pending RenderViewHost to simulate a
@@ -1153,7 +1161,7 @@ TEST_F(NavigationControllerTest, Reload_GeneratesNewPage) {
 
 class TestNavigationObserver : public RenderViewHostObserver {
  public:
-  TestNavigationObserver(RenderViewHost* render_view_host)
+  explicit TestNavigationObserver(RenderViewHost* render_view_host)
       : RenderViewHostObserver(render_view_host) {
   }
 
@@ -1914,6 +1922,7 @@ TEST_F(NavigationControllerTest, InPage) {
   params.gesture = NavigationGestureUser;
   params.is_post = false;
   params.page_state = PageState::CreateFromURL(url2);
+  params.was_within_same_page = true;
 
   // This should generate a new entry.
   EXPECT_TRUE(controller.RendererDidNavigate(params, &details));
@@ -1931,9 +1940,7 @@ TEST_F(NavigationControllerTest, InPage) {
   EXPECT_TRUE(controller.RendererDidNavigate(back_params, &details));
   EXPECT_EQ(1U, navigation_entry_committed_counter_);
   navigation_entry_committed_counter_ = 0;
-  // is_in_page is false in that case but should be true.
-  // See comment in AreURLsInPageNavigation() in navigation_controller.cc
-  // EXPECT_TRUE(details.is_in_page);
+  EXPECT_TRUE(details.is_in_page);
   EXPECT_EQ(2, controller.GetEntryCount());
   EXPECT_EQ(0, controller.GetCurrentEntryIndex());
   EXPECT_EQ(back_params.url, controller.GetActiveEntry()->GetURL());
@@ -2391,20 +2398,25 @@ TEST_F(NavigationControllerTest, RemoveEntry) {
   test_rvh()->SendNavigate(4, url5);
 
   // Try to remove the last entry.  Will fail because it is the current entry.
-  controller.RemoveEntryAtIndex(controller.GetEntryCount() - 1);
+  EXPECT_FALSE(controller.RemoveEntryAtIndex(controller.GetEntryCount() - 1));
   EXPECT_EQ(5, controller.GetEntryCount());
   EXPECT_EQ(4, controller.GetLastCommittedEntryIndex());
 
-  // Go back and remove the last entry.
+  // Go back, but don't commit yet. Check that we can't delete the current
+  // and pending entries.
   controller.GoBack();
+  EXPECT_FALSE(controller.RemoveEntryAtIndex(controller.GetEntryCount() - 1));
+  EXPECT_FALSE(controller.RemoveEntryAtIndex(controller.GetEntryCount() - 2));
+
+  // Now commit and delete the last entry.
   test_rvh()->SendNavigate(3, url4);
-  controller.RemoveEntryAtIndex(controller.GetEntryCount() - 1);
+  EXPECT_TRUE(controller.RemoveEntryAtIndex(controller.GetEntryCount() - 1));
   EXPECT_EQ(4, controller.GetEntryCount());
   EXPECT_EQ(3, controller.GetLastCommittedEntryIndex());
   EXPECT_FALSE(controller.GetPendingEntry());
 
   // Remove an entry which is not the last committed one.
-  controller.RemoveEntryAtIndex(0);
+  EXPECT_TRUE(controller.RemoveEntryAtIndex(0));
   EXPECT_EQ(3, controller.GetEntryCount());
   EXPECT_EQ(2, controller.GetLastCommittedEntryIndex());
   EXPECT_FALSE(controller.GetPendingEntry());
@@ -2599,6 +2611,52 @@ TEST_F(NavigationControllerTest, ReloadTransient) {
   EXPECT_EQ(controller.GetEntryAtIndex(1)->GetURL(), transient_url);
 }
 
+// Ensure that renderer initiated pending entries get replaced, so that we
+// don't show a stale virtual URL when a navigation commits.
+// See http://crbug.com/266922.
+TEST_F(NavigationControllerTest, RendererInitiatedPendingEntries) {
+  NavigationControllerImpl& controller = controller_impl();
+
+  const GURL url1("nonexistent:12121");
+  const GURL url1_fixed("http://nonexistent:12121/");
+  const GURL url2("http://foo");
+
+  // We create pending entries for renderer-initiated navigations so that we
+  // can show them in new tabs when it is safe.
+  contents()->DidStartProvisionalLoadForFrame(
+      test_rvh(), 1, -1, true, url1);
+
+  // Simulate what happens if a BrowserURLHandler rewrites the URL, causing
+  // the virtual URL to differ from the URL.
+  controller.GetPendingEntry()->SetURL(url1_fixed);
+  controller.GetPendingEntry()->SetVirtualURL(url1);
+
+  EXPECT_EQ(url1_fixed, controller.GetPendingEntry()->GetURL());
+  EXPECT_EQ(url1, controller.GetPendingEntry()->GetVirtualURL());
+  EXPECT_TRUE(
+      NavigationEntryImpl::FromNavigationEntry(controller.GetPendingEntry())->
+          is_renderer_initiated());
+
+  // If the user clicks another link, we should replace the pending entry.
+  contents()->DidStartProvisionalLoadForFrame(
+      test_rvh(), 1, -1, true, url2);
+  EXPECT_EQ(url2, controller.GetPendingEntry()->GetURL());
+  EXPECT_EQ(url2, controller.GetPendingEntry()->GetVirtualURL());
+
+  // Once it commits, the URL and virtual URL should reflect the actual page.
+  test_rvh()->SendNavigate(0, url2);
+  EXPECT_EQ(url2, controller.GetLastCommittedEntry()->GetURL());
+  EXPECT_EQ(url2, controller.GetLastCommittedEntry()->GetVirtualURL());
+
+  // We should not replace the pending entry for an error URL.
+  contents()->DidStartProvisionalLoadForFrame(
+      test_rvh(), 1, -1, true, url1);
+  EXPECT_EQ(url1, controller.GetPendingEntry()->GetURL());
+  contents()->DidStartProvisionalLoadForFrame(
+      test_rvh(), 1, -1, true, GURL(kUnreachableWebDataURL));
+  EXPECT_EQ(url1, controller.GetPendingEntry()->GetURL());
+}
+
 // Tests that the URLs for renderer-initiated navigations are not displayed to
 // the user until the navigation commits, to prevent URL spoof attacks.
 // See http://crbug.com/99016.
@@ -2743,8 +2801,17 @@ TEST_F(NavigationControllerTest, IsInPageNavigation) {
   EXPECT_FALSE(controller.IsURLInPageNavigation(url));
   EXPECT_FALSE(controller.IsURLInPageNavigation(other_url));
   const GURL other_url_with_ref("http://www.google.com/home.html#my_other_ref");
-  EXPECT_TRUE(controller.IsURLInPageNavigation(
-      other_url_with_ref));
+  EXPECT_TRUE(controller.IsURLInPageNavigation(other_url_with_ref));
+
+  // Going to the same url again will be considered in-page
+  // if the renderer says it is even if the navigation type isn't IN_PAGE.
+  EXPECT_TRUE(controller.IsURLInPageNavigation(url_with_ref, true,
+      NAVIGATION_TYPE_UNKNOWN));
+
+  // Going back to the non ref url will be considered in-page if the navigation
+  // type is IN_PAGE.
+  EXPECT_TRUE(controller.IsURLInPageNavigation(url, true,
+      NAVIGATION_TYPE_IN_PAGE));
 }
 
 // Some pages can have subframes with the same base URL (minus the reference) as
@@ -3512,7 +3579,7 @@ TEST_F(NavigationControllerTest, ClearFaviconOnRedirect) {
   EXPECT_FALSE(DoImagesMatch(kDefaultFavicon, entry->GetFavicon().image));
 
   test_rvh()->SendNavigateWithTransition(
-      0, // same page ID.
+      0,  // same page ID.
       kPageWithoutFavicon,
       PAGE_TRANSITION_CLIENT_REDIRECT);
   EXPECT_EQ(1U, navigation_entry_committed_counter_);
@@ -3746,7 +3813,7 @@ class NavigationControllerHistoryTest : public NavigationControllerTest {
                                  controller.session_id(), 0);
     controller.SetWindowID(window_id);
 
-    session_helper_.set_service(service);
+    session_helper_.SetService(service);
   }
 
   virtual void TearDown() {
@@ -3767,19 +3834,19 @@ class NavigationControllerHistoryTest : public NavigationControllerTest {
     // Do normal cleanup before deleting the profile directory below.
     NavigationControllerTest::TearDown();
 
-    ASSERT_TRUE(file_util::Delete(test_dir_, true));
-    ASSERT_FALSE(file_util::PathExists(test_dir_));
+    ASSERT_TRUE(base::DeleteFile(test_dir_, true));
+    ASSERT_FALSE(base::PathExists(test_dir_));
   }
 
   // Deletes the current profile manager and creates a new one. Indirectly this
   // shuts down the history database and reopens it.
   void ReopenDatabase() {
-    session_helper_.set_service(NULL);
+    session_helper_.SetService(NULL);
     SessionServiceFactory::SetForTestProfile(profile(), NULL);
 
     SessionService* service = new SessionService(profile());
     SessionServiceFactory::SetForTestProfile(profile(), service);
-    session_helper_.set_service(service);
+    session_helper_.SetService(service);
   }
 
   void GetLastSession() {

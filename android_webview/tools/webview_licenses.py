@@ -111,6 +111,8 @@ def _CheckLicenseHeaders(excluded_dirs_list, whitelisted_files):
   excluded_dirs_list.append('tools/histograms')
   # Arm sysroot tools, doesn't exist in the snapshot
   excluded_dirs_list.append('arm-sysroot')
+  # Data is not part of open source chromium, but are included on some bots.
+  excluded_dirs_list.append('data')
 
   args = ['android_webview/tools/find_copyrights.pl',
           '.'
@@ -186,6 +188,9 @@ def _FindThirdPartyDirs():
     os.path.join('third_party', 'llvm-build'),
     # Binaries doesn't apply to android
     os.path.join('third_party', 'widevine'),
+    # third_party directories in this tree aren't actually third party, but
+    # provide a way to shadow experimental buildfiles into those directories.
+    os.path.join('tools', 'gn', 'secondary'),
   ]
   third_party_dirs = licenses.FindThirdPartyDirs(prune_paths, REPOSITORY_ROOT)
   return licenses.FilterDirsWithFiles(third_party_dirs, REPOSITORY_ROOT)

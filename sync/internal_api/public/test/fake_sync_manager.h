@@ -62,10 +62,11 @@ class FakeSyncManager : public SyncManager {
   ConfigureReason GetAndResetConfigureReason();
 
   // Posts a method to invalidate the given IDs on the sync thread.
-  void Invalidate(const ObjectIdInvalidationMap& invalidation_map);
+  virtual void OnIncomingInvalidation(
+      const ObjectIdInvalidationMap& invalidation_map) OVERRIDE;
 
   // Posts a method to update the invalidator state on the sync thread.
-  void UpdateInvalidatorState(InvalidatorState state);
+  virtual void OnInvalidatorStateChange(InvalidatorState state) OVERRIDE;
 
   // Block until the sync thread has finished processing any pending messages.
   void WaitForSyncThread();
@@ -81,18 +82,16 @@ class FakeSyncManager : public SyncManager {
       bool use_ssl,
       scoped_ptr<HttpPostProviderFactory> post_factory,
       const std::vector<ModelSafeWorker*>& workers,
-      ExtensionsActivityMonitor* extensions_activity_monitor,
+      ExtensionsActivity* extensions_activity,
       ChangeDelegate* change_delegate,
       const SyncCredentials& credentials,
-      scoped_ptr<Invalidator> invalidator,
       const std::string& invalidator_client_id,
       const std::string& restored_key_for_bootstrapping,
       const std::string& restored_keystore_key_for_bootstrapping,
-      scoped_ptr<InternalComponentsFactory> internal_components_factory,
+      InternalComponentsFactory* internal_components_factory,
       Encryptor* encryptor,
-      UnrecoverableErrorHandler* unrecoverable_error_handler,
-      ReportUnrecoverableErrorFunction
-          report_unrecoverable_error_function,
+      scoped_ptr<UnrecoverableErrorHandler> unrecoverable_error_handler,
+      ReportUnrecoverableErrorFunction report_unrecoverable_error_function,
       bool use_oauth2_token) OVERRIDE;
   virtual void ThrowUnrecoverableError() OVERRIDE;
   virtual ModelTypeSet InitialSyncEndedTypes() OVERRIDE;
@@ -100,17 +99,6 @@ class FakeSyncManager : public SyncManager {
       ModelTypeSet types) OVERRIDE;
   virtual bool PurgePartiallySyncedTypes() OVERRIDE;
   virtual void UpdateCredentials(const SyncCredentials& credentials) OVERRIDE;
-  virtual void UpdateEnabledTypes(ModelTypeSet types) OVERRIDE;
-  virtual void RegisterInvalidationHandler(
-      InvalidationHandler* handler) OVERRIDE;
-  virtual void UpdateRegisteredInvalidationIds(
-      InvalidationHandler* handler,
-      const ObjectIdSet& ids) OVERRIDE;
-  virtual void UnregisterInvalidationHandler(
-      InvalidationHandler* handler) OVERRIDE;
-  virtual void AcknowledgeInvalidation(
-      const invalidation::ObjectId& id,
-      const syncer::AckHandle& ack_handle) OVERRIDE;
   virtual void StartSyncingNormally(
       const ModelSafeRoutingInfo& routing_info) OVERRIDE;
   virtual void ConfigureSyncer(
@@ -126,7 +114,7 @@ class FakeSyncManager : public SyncManager {
   virtual void RemoveObserver(Observer* observer) OVERRIDE;
   virtual SyncStatus GetDetailedStatus() const OVERRIDE;
   virtual void SaveChanges() OVERRIDE;
-  virtual void StopSyncingForShutdown(const base::Closure& callback) OVERRIDE;
+  virtual void StopSyncingForShutdown() OVERRIDE;
   virtual void ShutdownOnSyncThread() OVERRIDE;
   virtual UserShare* GetUserShare() OVERRIDE;
   virtual const std::string cache_guid() OVERRIDE;
@@ -136,10 +124,6 @@ class FakeSyncManager : public SyncManager {
   virtual void RefreshTypes(ModelTypeSet types) OVERRIDE;
 
  private:
-  void InvalidateOnSyncThread(
-      const ObjectIdInvalidationMap& invalidation_map);
-  void UpdateInvalidatorStateOnSyncThread(InvalidatorState state);
-
   scoped_refptr<base::SequencedTaskRunner> sync_task_runner_;
 
   ObserverList<SyncManager::Observer> observers_;

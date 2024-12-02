@@ -29,8 +29,8 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/command_updater.h"
-#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/browser.h"
@@ -39,11 +39,10 @@
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
-#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/common/constants.h"
-#include "googleurl/src/url_util.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "skia/ext/skia_utils_win.h"
@@ -62,6 +61,7 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
+#include "ui/base/touch/touch_enabled.h"
 #include "ui/base/win/hwnd_util.h"
 #include "ui/base/win/mouse_wheel_util.h"
 #include "ui/base/win/touch_input.h"
@@ -72,6 +72,7 @@
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/controls/textfield/native_textfield_win.h"
 #include "ui/views/widget/widget.h"
+#include "url/url_util.h"
 #include "win8/util/win8_util.h"
 
 #pragma comment(lib, "oleacc.lib")  // Needed for accessibility support.
@@ -463,12 +464,12 @@ OmniboxViewWin::OmniboxViewWin(OmniboxEditController* controller,
                                LocationBarView* location_bar,
                                CommandUpdater* command_updater,
                                bool popup_window_mode,
-                               const gfx::Font& font,
+                               const gfx::FontList& font_list,
                                int font_y_offset)
     : OmniboxView(location_bar->profile(), controller, toolbar_model,
                   command_updater),
-      popup_view_(
-          OmniboxPopupContentsView::Create(font, this, model(), location_bar)),
+      popup_view_(OmniboxPopupContentsView::Create(
+          font_list, this, model(), location_bar)),
       location_bar_(location_bar),
       popup_window_mode_(popup_window_mode),
       force_hidden_(false),
@@ -478,7 +479,7 @@ OmniboxViewWin::OmniboxViewWin(OmniboxEditController* controller,
       can_discard_mousemove_(false),
       ignore_ime_messages_(false),
       delete_at_end_pressed_(false),
-      font_(font),
+      font_list_(font_list),
       font_y_adjustment_(font_y_offset),
       possible_drag_(false),
       in_drag_(false),
@@ -503,7 +504,7 @@ OmniboxViewWin::OmniboxViewWin(OmniboxEditController* controller,
   Create(location_bar->GetWidget()->GetNativeView(), 0, 0, 0,
          l10n_util::GetExtendedStyles());
   SetReadOnly(popup_window_mode_);
-  gfx::NativeFont native_font(font_.GetNativeFont());
+  gfx::NativeFont native_font(font_list_.GetPrimaryFont().GetNativeFont());
   SetFont(native_font);
 
   // IMF_DUALFONT (on by default) is supposed to use one font for ASCII text
@@ -530,7 +531,7 @@ OmniboxViewWin::OmniboxViewWin(OmniboxEditController* controller,
   base::win::ScopedSelectObject font_in_dc(screen_dc, native_font);
   TEXTMETRIC tm = {0};
   GetTextMetrics(screen_dc, &tm);
-  int cap_height = font_.GetBaseline() - tm.tmInternalLeading;
+  int cap_height = font_list_.GetBaseline() - tm.tmInternalLeading;
   // The ratio of a font's x-height to its cap height.  Sadly, Windows
   // doesn't provide a true value for a font's x-height in its text
   // metrics, so we approximate.
@@ -602,7 +603,7 @@ void OmniboxViewWin::Update(const WebContents* tab_for_state_restoring) {
       model()->UpdatePermanentText(toolbar_model()->GetText(true));
 
   const ToolbarModel::SecurityLevel security_level =
-      toolbar_model()->GetSecurityLevel();
+      toolbar_model()->GetSecurityLevel(false);
   const bool changed_security_level = (security_level != security_level_);
 
   // Bail early when no visible state will actually change (prevents an
@@ -639,26 +640,27 @@ void OmniboxViewWin::Update(const WebContents* tab_for_state_restoring) {
     // we _were_ switching tabs, the RevertAll() above already drew the new
     // permanent text.)
 
-    // Tweak: if the edit was previously nonempty and had all the text selected,
-    // select all the new text.  This makes one particular case better: the
-    // user clicks in the box to change it right before the permanent URL is
-    // changed.  Since the new URL is still fully selected, the user's typing
-    // will replace the edit contents as they'd intended.
-    //
-    // NOTE: The selection can be longer than the text length if the edit is in
-    // in rich text mode and the user has selected the "phantom newline" at the
-    // end, so use ">=" instead of "==" to see if all the text is selected.  In
-    // theory we prevent this case from ever occurring, but this is still safe.
+    // Tweak: if the user had all the text selected, select all the new text.
+    // This makes one particular case better: the user clicks in the box to
+    // change it right before the permanent URL is changed.  Since the new URL
+    // is still fully selected, the user's typing will replace the edit contents
+    // as they'd intended.
     CHARRANGE sel;
     GetSelection(sel);
-    const bool was_reversed = (sel.cpMin > sel.cpMax);
-    const bool was_sel_all = (sel.cpMin != sel.cpMax) &&
-      IsSelectAllForRange(sel);
+    const bool was_select_all = IsSelectAllForRange(sel);
 
     RevertAll();
 
-    if (was_sel_all)
-      SelectAll(was_reversed);
+    // Only select all when we have focus.  If we don't have focus, selecting
+    // all is unnecessary since the selection will change on regaining focus,
+    // and can in fact cause artifacts, e.g. if the user is on the NTP and
+    // clicks a link to navigate, causing |was_select_all| to be vacuously true
+    // for the empty omnibox, and we then select all here, leading to the
+    // trailing portion of a long URL being scrolled into view.  We could try
+    // and address cases like this, but it seems better to just not muck with
+    // things when the omnibox isn't focused to begin with.
+    if (was_select_all && model()->has_focus())
+      SelectAll(sel.cpMin > sel.cpMax);
   } else if (changed_security_level) {
     // Only the security style changed, nothing else.  Redraw our text using it.
     EmphasizeURLComponents();
@@ -812,7 +814,7 @@ void OmniboxViewWin::ApplyCaretVisibility() {
   // internally in Windows, as well.
   ::DestroyCaret();
   if (model()->is_caret_visible()) {
-    ::CreateCaret(m_hWnd, (HBITMAP) NULL, 1, font_.GetHeight());
+    ::CreateCaret(m_hWnd, (HBITMAP) NULL, 1, font_list_.GetHeight());
     // According to the Windows API documentation, a newly created caret needs
     // ShowCaret to be visible.
     ShowCaret();
@@ -900,16 +902,9 @@ bool OmniboxViewWin::OnInlineAutocompleteTextMaybeChanged(
 void OmniboxViewWin::OnRevertTemporaryText() {
   SetSelectionRange(original_selection_);
   // We got here because the user hit the Escape key. We explicitly don't call
-  // TextChanged(), since calling it breaks Instant-Extended, and isn't needed
-  // otherwise (in regular non-Instant or Instant-but-not-Extended modes).
-  //
-  // Why it breaks Instant-Extended: Instant handles the Escape key separately
-  // (cf: OmniboxEditModel::RevertTemporaryText). Calling TextChanged() makes
-  // the page think the user additionally typed some text, causing it to update
-  // its suggestions dropdown with new suggestions, which is wrong.
-  //
-  // Why it isn't needed: OmniboxPopupModel::ResetToDefaultMatch() has already
-  // been called by now; it would've called TextChanged() if it was warranted.
+  // TextChanged(), since OmniboxPopupModel::ResetToDefaultMatch() has already
+  // been called by now, and it would've called TextChanged() if it was
+  // warranted.
 }
 
 void OmniboxViewWin::OnBeforePossibleChange() {
@@ -1027,16 +1022,16 @@ gfx::NativeView OmniboxViewWin::GetRelativeWindowForPopup() const {
   return GetRelativeWindowForNativeView(GetNativeView());
 }
 
-void OmniboxViewWin::SetInstantSuggestion(const string16& suggestion) {
-  location_bar_->SetInstantSuggestion(suggestion);
+void OmniboxViewWin::SetGrayTextAutocompletion(const string16& suggestion) {
+  location_bar_->SetGrayTextAutocompletion(suggestion);
 }
 
 int OmniboxViewWin::TextWidth() const {
   return WidthNeededToDisplay(GetText());
 }
 
-string16 OmniboxViewWin::GetInstantSuggestion() const {
-  return location_bar_->GetInstantSuggestion();
+string16 OmniboxViewWin::GetGrayTextAutocompletion() const {
+  return location_bar_->GetGrayTextAutocompletion();
 }
 
 bool OmniboxViewWin::IsImeComposing() const {
@@ -1183,7 +1178,7 @@ bool OmniboxViewWin::IsCommandIdEnabled(int command_id) const {
     case IDC_COPY_URL:
       return !!CanCopy() &&
           !model()->user_input_in_progress() &&
-          toolbar_model()->WouldReplaceSearchURLWithSearchTerms();
+          toolbar_model()->WouldReplaceSearchURLWithSearchTerms(false);
     case IDC_PASTE:
       return !!CanPaste();
     case IDS_PASTE_AND_GO:
@@ -1447,7 +1442,8 @@ LRESULT OmniboxViewWin::OnCreate(const CREATESTRUCTW* /*create_struct*/) {
     // Enable TSF support of RichEdit.
     SetEditStyle(SES_USECTF, SES_USECTF);
   }
-  if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
+  if ((base::win::GetVersion() >= base::win::VERSION_WIN8) &&
+      ui::AreTouchEventsEnabled()) {
     BOOL touch_mode = RegisterTouchWindow(m_hWnd, TWF_WANTPALM);
     DCHECK(touch_mode);
   }
@@ -2523,7 +2519,7 @@ void OmniboxViewWin::DrawSlashForInsecureScheme(HDC hdc,
   const SkScalar kStrokeWidthPixels = SkIntToScalar(2);
   const int kAdditionalSpaceOutsideFont =
       static_cast<int>(ceil(kStrokeWidthPixels * 1.5f));
-  const int font_ascent = font_.GetBaseline();
+  const int font_ascent = font_list_.GetBaseline();
   const CRect scheme_rect(
       PosFromChar(insecure_scheme_component_.begin).x,
       font_top + font_ascent - font_x_height_ - kAdditionalSpaceOutsideFont,
@@ -2611,7 +2607,7 @@ void OmniboxViewWin::DrawDropHighlight(HDC hdc,
   const CRect highlight_rect(highlight_x,
                              highlight_y,
                              highlight_x + 1,
-                             highlight_y + font_.GetHeight());
+                             highlight_y + font_list_.GetHeight());
 
   // Clip the highlight to the region being painted.
   CRect clip_rect;
@@ -2766,7 +2762,7 @@ void OmniboxViewWin::RepaintDropHighlight(int position) {
   if ((position != -1) && (position <= GetTextLength())) {
     const POINT min_loc(PosFromChar(position));
     const RECT highlight_bounds = {min_loc.x - 1, font_y_adjustment_,
-        min_loc.x + 2, font_.GetHeight() + font_y_adjustment_};
+        min_loc.x + 2, font_list_.GetHeight() + font_y_adjustment_};
     InvalidateRect(&highlight_bounds, false);
   }
 }
@@ -2831,9 +2827,10 @@ int OmniboxViewWin::GetHorizontalMargin() const {
 }
 
 int OmniboxViewWin::WidthNeededToDisplay(const string16& text) const {
-  // Use font_.GetStringWidth() instead of PosFromChar(GetTextLength()) because
-  // PosFromChar() is apparently buggy. In both LTR UI and RTL UI with
-  // left-to-right layout, PosFromChar(i) might return 0 when i is greater than
-  // 1.
-  return font_.GetStringWidth(text) + GetHorizontalMargin();
+  // Use font_list_.GetPrimaryFont().GetStringWidth() instead of
+  // PosFromChar(GetTextLength()) because PosFromChar() is apparently buggy.
+  // In both LTR UI and RTL UI with left-to-right layout, PosFromChar(i) might
+  // return 0 when i is greater than 1.
+  return font_list_.GetPrimaryFont().GetStringWidth(text) +
+      GetHorizontalMargin();
 }

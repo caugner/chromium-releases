@@ -7,7 +7,7 @@ embedder.test = {};
 embedder.baseGuestURL = '';
 embedder.guestURL = '';
 
-window.runGeolocationTest = function(testName) {
+window.runTest = function(testName) {
   if (!embedder.test.testList[testName]) {
     console.log('Incorrect testName: ' + testName);
     embedder.test.fail();
@@ -52,7 +52,7 @@ embedder.test.assertFalse = function(condition) {
 embedder.setUp = function(config) {
   embedder.baseGuestURL = 'http://localhost:' + config.testServer.port;
   embedder.guestURL = embedder.baseGuestURL +
-      '/files/extensions/platform_apps/web_view/geolocation' +
+      '/extensions/platform_apps/web_view/geolocation' +
       '/geolocation_access_guest.html';
   chrome.test.log('Guest url is: ' + embedder.guestURL);
 };

@@ -31,6 +31,7 @@
 <script src="chrome://resources/js/cr.js"></script>
 <script src="chrome://resources/js/cr/ui.js"></script>
 <script src="chrome://resources/js/cr/ui/command.js"></script>
+<script src="chrome://resources/js/cr/ui/focus_manager.js"></script>
 <script src="chrome://resources/js/cr/ui/menu_item.js"></script>
 <script src="chrome://resources/js/cr/ui/menu.js"></script>
 <if expr="not is_android and not pp_ifdef('ios')">
@@ -59,6 +60,12 @@
 </if>
 <if expr="is_android or pp_ifdef('ios')">
 <body i18n-values=".style.fontFamily:fontfamily">
+</if>
+
+<if expr="not is_android and not pp_ifdef('ios')">
+<div id="overlay" class="overlay" hidden>
+  <include src="alert_overlay.html">
+</div>
 </if>
 
 <div id="history-page" class="page">
@@ -131,18 +138,12 @@
   </div>
 </div>
 
-<menu id="action-menu">
+<menu id="action-menu" hidden>
   <button id="more-from-site" i18n-content="moreFromSite"></button>
   <button id="remove-visit" i18n-content="removeFromHistory"></button>
 </menu>
 
 <script src="chrome://history-frame/strings.js"></script>
 <script src="chrome://resources/js/i18n_template2.js"></script>
-
-<if expr="not is_android and not pp_ifdef('ios')">
-<div id="overlay" class="overlay" hidden>
-    <include src="alert_overlay.html">
-</div>
-</if>
 </body>
 </html>

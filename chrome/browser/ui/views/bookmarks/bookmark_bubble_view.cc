@@ -8,14 +8,14 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/bookmarks/bookmark_editor.h"
+#include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bubble_view_observer.h"
+#include "chrome/browser/ui/views/bookmarks/bookmark_sync_promo_view.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -41,6 +41,9 @@ namespace {
 // Minimum width of the the bubble.
 const int kMinBubbleWidth = 350;
 
+// Width of the border of a button.
+const int kControlBorderWidth = 2;
+
 }  // namespace
 
 // Declared in browser_dialogs.h so callers don't have to depend on our header.
@@ -49,10 +52,15 @@ namespace chrome {
 
 void ShowBookmarkBubbleView(views::View* anchor_view,
                             BookmarkBubbleViewObserver* observer,
+                            scoped_ptr<BookmarkBubbleDelegate> delegate,
                             Profile* profile,
                             const GURL& url,
                             bool newly_bookmarked) {
-  BookmarkBubbleView::ShowBubble(anchor_view, observer, profile, url,
+  BookmarkBubbleView::ShowBubble(anchor_view,
+                                 observer,
+                                 delegate.Pass(),
+                                 profile,
+                                 url,
                                  newly_bookmarked);
 }
 
@@ -71,15 +79,21 @@ bool IsBookmarkBubbleViewShowing() {
 BookmarkBubbleView* BookmarkBubbleView::bookmark_bubble_ = NULL;
 
 // static
-void BookmarkBubbleView::ShowBubble(views::View* anchor_view,
-                                    BookmarkBubbleViewObserver* observer,
-                                    Profile* profile,
-                                    const GURL& url,
-                                    bool newly_bookmarked) {
+void BookmarkBubbleView::ShowBubble(
+    views::View* anchor_view,
+    BookmarkBubbleViewObserver* observer,
+    scoped_ptr<BookmarkBubbleDelegate> delegate,
+    Profile* profile,
+    const GURL& url,
+    bool newly_bookmarked) {
   if (IsShowing())
     return;
 
-  bookmark_bubble_ = new BookmarkBubbleView(anchor_view, observer, profile, url,
+  bookmark_bubble_ = new BookmarkBubbleView(anchor_view,
+                                            observer,
+                                            delegate.Pass(),
+                                            profile,
+                                            url,
                                             newly_bookmarked);
   views::BubbleDelegateView::CreateBubble(bookmark_bubble_)->Show();
   // Select the entire title textfield contents when the bubble is first shown.
@@ -123,7 +137,7 @@ void BookmarkBubbleView::WindowClosing() {
 
   if (observer_)
     observer_->OnBookmarkBubbleHidden();
- }
+}
 
 bool BookmarkBubbleView::AcceleratorPressed(
     const ui::Accelerator& accelerator) {
@@ -172,14 +186,22 @@ void BookmarkBubbleView::Init() {
   GridLayout* layout = new GridLayout(this);
   SetLayoutManager(layout);
 
-  const int kTitleColumnSetID = 0;
-  ColumnSet* cs = layout->AddColumnSet(kTitleColumnSetID);
+  // Column sets used in the layout of the bubble.
+  enum ColumnSetID {
+    TITLE_COLUMN_SET_ID,
+    CONTENT_COLUMN_SET_ID,
+    SYNC_PROMO_COLUMN_SET_ID
+  };
+
+  ColumnSet* cs = layout->AddColumnSet(TITLE_COLUMN_SET_ID);
+  cs->AddPaddingColumn(0, views::kButtonHEdgeMarginNew);
   cs->AddColumn(GridLayout::CENTER, GridLayout::CENTER, 0, GridLayout::USE_PREF,
                 0, 0);
+  cs->AddPaddingColumn(0, views::kButtonHEdgeMarginNew);
 
   // The column layout used for middle and bottom rows.
-  const int kFirstColumnSetID = 1;
-  cs = layout->AddColumnSet(kFirstColumnSetID);
+  cs = layout->AddColumnSet(CONTENT_COLUMN_SET_ID);
+  cs->AddPaddingColumn(0, views::kButtonHEdgeMarginNew);
   cs->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
                 GridLayout::USE_PREF, 0, 0);
   cs->AddPaddingColumn(0, views::kUnrelatedControlHorizontalSpacing);
@@ -193,12 +215,13 @@ void BookmarkBubbleView::Init() {
   cs->AddPaddingColumn(0, views::kRelatedButtonHSpacing);
   cs->AddColumn(GridLayout::LEADING, GridLayout::TRAILING, 0,
                 GridLayout::USE_PREF, 0, 0);
+  cs->AddPaddingColumn(0, views::kButtonHEdgeMarginNew);
 
-  layout->StartRow(0, kTitleColumnSetID);
+  layout->StartRow(0, TITLE_COLUMN_SET_ID);
   layout->AddView(title_label);
   layout->AddPaddingRow(0, views::kUnrelatedControlHorizontalSpacing);
 
-  layout->StartRow(0, kFirstColumnSetID);
+  layout->StartRow(0, CONTENT_COLUMN_SET_ID);
   views::Label* label = new views::Label(
       l10n_util::GetStringUTF16(IDS_BOOKMARK_BUBBLE_TITLE_TEXT));
   layout->AddView(label);
@@ -208,28 +231,50 @@ void BookmarkBubbleView::Init() {
 
   layout->AddPaddingRow(0, views::kUnrelatedControlHorizontalSpacing);
 
-  layout->StartRow(0, kFirstColumnSetID);
+  layout->StartRow(0, CONTENT_COLUMN_SET_ID);
   layout->AddView(combobox_label);
   layout->AddView(parent_combobox_, 5, 1);
 
   layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
-  layout->StartRow(0, kFirstColumnSetID);
+  layout->StartRow(0, CONTENT_COLUMN_SET_ID);
   layout->SkipColumns(2);
   layout->AddView(remove_button_);
   layout->AddView(edit_button_);
   layout->AddView(close_button_);
 
+  layout->AddPaddingRow(
+      0,
+      views::kUnrelatedControlVerticalSpacing - kControlBorderWidth);
+
+  if (SyncPromoUI::ShouldShowSyncPromo(profile_)) {
+    // The column layout used for the sync promo.
+    cs = layout->AddColumnSet(SYNC_PROMO_COLUMN_SET_ID);
+    cs->AddColumn(GridLayout::FILL,
+                  GridLayout::FILL,
+                  1,
+                  GridLayout::USE_PREF,
+                  0,
+                  0);
+    layout->StartRow(0, SYNC_PROMO_COLUMN_SET_ID);
+
+    sync_promo_view_ = new BookmarkSyncPromoView(delegate_.get());
+    layout->AddView(sync_promo_view_);
+  }
+
   AddAccelerator(ui::Accelerator(ui::VKEY_RETURN, ui::EF_NONE));
 }
 
-BookmarkBubbleView::BookmarkBubbleView(views::View* anchor_view,
-                                       BookmarkBubbleViewObserver* observer,
-                                       Profile* profile,
-                                       const GURL& url,
-                                       bool newly_bookmarked)
+BookmarkBubbleView::BookmarkBubbleView(
+    views::View* anchor_view,
+    BookmarkBubbleViewObserver* observer,
+    scoped_ptr<BookmarkBubbleDelegate> delegate,
+    Profile* profile,
+    const GURL& url,
+    bool newly_bookmarked)
     : BubbleDelegateView(anchor_view, views::BubbleBorder::TOP_RIGHT),
       observer_(observer),
+      delegate_(delegate.Pass()),
       profile_(profile),
       url_(url),
       newly_bookmarked_(newly_bookmarked),
@@ -242,13 +287,14 @@ BookmarkBubbleView::BookmarkBubbleView(views::View* anchor_view,
       close_button_(NULL),
       title_tf_(NULL),
       parent_combobox_(NULL),
+      sync_promo_view_(NULL),
       remove_bookmark_(false),
       apply_edits_(true) {
   const SkColor background_color = GetNativeTheme()->GetSystemColor(
       ui::NativeTheme::kColorId_DialogBackground);
   set_color(background_color);
   set_background(views::Background::CreateSolidBackground(background_color));
-  set_margins(gfx::Insets(12, 19, 18, 18));
+  set_margins(gfx::Insets(views::kPanelVertMargin, 0, 0, 0));
   // Compensate for built-in vertical padding in the anchor view's image.
   set_anchor_view_insets(gfx::Insets(7, 0, 7, 0));
 }

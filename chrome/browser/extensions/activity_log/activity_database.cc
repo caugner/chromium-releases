@@ -2,16 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/extensions/activity_log/activity_database.h"
+
 #include <string>
+
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_checker.h"
-#include "base/time.h"
 #include "base/time/clock.h"
-#include "chrome/browser/extensions/activity_log/activity_database.h"
+#include "base/time/time.h"
+#include "chrome/browser/extensions/activity_log/fullstream_ui_policy.h"
 #include "chrome/common/chrome_switches.h"
 #include "sql/error_delegate_util.h"
 #include "sql/transaction.h"
@@ -23,19 +26,10 @@
 
 using content::BrowserThread;
 
-namespace {
-
-bool SortActionsByTime(const scoped_refptr<extensions::Action> a,
-                       const scoped_refptr<extensions::Action> b) {
-  return a->time() > b->time();
-}
-
-}  // namespace
-
 namespace extensions {
 
-ActivityDatabase::ActivityDatabase()
-    : testing_clock_(NULL),
+ActivityDatabase::ActivityDatabase(ActivityDatabase::Delegate* delegate)
+    : delegate_(delegate),
       valid_db_(false),
       already_closed_(false),
       did_init_(false) {
@@ -74,23 +68,16 @@ void ActivityDatabase::Init(const base::FilePath& db_name) {
   base::mac::SetFileBackupExclusion(db_name);
 #endif
 
-  db_.Preload();
-
-  // Create the DOMAction database.
-  if (!DOMAction::InitializeTable(&db_))
-    return LogInitFailure();
-
-  // Create the APIAction database.
-  if (!APIAction::InitializeTable(&db_))
-    return LogInitFailure();
-
-  // Create the BlockedAction database.
-  if (!BlockedAction::InitializeTable(&db_))
+  if (!delegate_->InitDatabase(&db_))
     return LogInitFailure();
 
   sql::InitStatus stat = committer.Commit() ? sql::INIT_OK : sql::INIT_FAILURE;
   if (stat != sql::INIT_OK)
     return LogInitFailure();
+
+  // Pre-loads the first <cache-size> pages into the cache.
+  // Doesn't do anything if the database is new.
+  db_.Preload();
 
   valid_db_ = true;
   timer_.Start(FROM_HERE,
@@ -104,27 +91,20 @@ void ActivityDatabase::LogInitFailure() {
   SoftFailureClose();
 }
 
-void ActivityDatabase::RecordAction(scoped_refptr<Action> action) {
-  if (!valid_db_) return;
-  if (batch_mode_) {
-    batched_actions_.push_back(action);
-  } else {
-    if (!action->Record(&db_)) SoftFailureClose();
+void ActivityDatabase::AdviseFlush(int size) {
+  if (!valid_db_)
+    return;
+  if (!batch_mode_ || size == kFlushImmediately) {
+    if (!delegate_->FlushDatabase(&db_))
+      SoftFailureClose();
   }
 }
 
 void ActivityDatabase::RecordBatchedActions() {
-  if (!valid_db_) return;
-  bool failure = false;
-  std::vector<scoped_refptr<Action> >::size_type i;
-  for (i = 0; i != batched_actions_.size(); ++i) {
-    if (!batched_actions_.at(i)->Record(&db_)) {
-      failure = true;
-      break;
-    }
+  if (valid_db_) {
+    if (!delegate_->FlushDatabase(&db_))
+      SoftFailureClose();
   }
-  batched_actions_.clear();
-  if (failure) SoftFailureClose();
 }
 
 void ActivityDatabase::SetBatchModeForTesting(bool batch_mode) {
@@ -140,77 +120,15 @@ void ActivityDatabase::SetBatchModeForTesting(bool batch_mode) {
   batch_mode_ = batch_mode;
 }
 
-scoped_ptr<std::vector<scoped_refptr<Action> > > ActivityDatabase::GetActions(
-    const std::string& extension_id, const int days_ago) {
+sql::Connection* ActivityDatabase::GetSqlConnection() {
   if (BrowserThread::IsMessageLoopValid(BrowserThread::DB))
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
-  DCHECK_GE(days_ago, 0);
-  scoped_ptr<std::vector<scoped_refptr<Action> > >
-      actions(new std::vector<scoped_refptr<Action> >());
-  if (!valid_db_)
-    return actions.Pass();
-  // Compute the time bounds for that day.
-  base::Time morning_midnight = testing_clock_ ?
-      testing_clock_->Now().LocalMidnight() :
-      base::Time::Now().LocalMidnight();
-  int64 early_bound = 0;
-  int64 late_bound = 0;
-  if (days_ago == 0) {
-      early_bound = morning_midnight.ToInternalValue();
-      late_bound = base::Time::Max().ToInternalValue();
+  if (valid_db_) {
+    return &db_;
   } else {
-      base::Time early_time = morning_midnight -
-          base::TimeDelta::FromDays(days_ago);
-      base::Time late_time = morning_midnight -
-          base::TimeDelta::FromDays(days_ago-1);
-      early_bound = early_time.ToInternalValue();
-      late_bound = late_time.ToInternalValue();
+    LOG(WARNING) << "Activity log database is not valid";
+    return NULL;
   }
-  // Get the DOMActions.
-  std::string dom_str = base::StringPrintf("SELECT * FROM %s "
-                                           "WHERE extension_id=? AND "
-                                           "time>? AND time<=?",
-                                           DOMAction::kTableName);
-  sql::Statement dom_statement(db_.GetCachedStatement(SQL_FROM_HERE,
-                                                      dom_str.c_str()));
-  dom_statement.BindString(0, extension_id);
-  dom_statement.BindInt64(1, early_bound);
-  dom_statement.BindInt64(2, late_bound);
-  while (dom_statement.is_valid() && dom_statement.Step()) {
-    scoped_refptr<DOMAction> action = new DOMAction(dom_statement);
-    actions->push_back(action);
-  }
-  // Get the APIActions.
-  std::string api_str = base::StringPrintf("SELECT * FROM %s "
-                                           "WHERE extension_id=? AND "
-                                           "time>? AND time<=?",
-                                            APIAction::kTableName);
-  sql::Statement api_statement(db_.GetCachedStatement(SQL_FROM_HERE,
-                                                      api_str.c_str()));
-  api_statement.BindString(0, extension_id);
-  api_statement.BindInt64(1, early_bound);
-  api_statement.BindInt64(2, late_bound);
-  while (api_statement.is_valid() && api_statement.Step()) {
-    scoped_refptr<APIAction> action = new APIAction(api_statement);
-    actions->push_back(action);
-  }
-  // Get the BlockedActions.
-  std::string blocked_str = base::StringPrintf("SELECT * FROM %s "
-                                               "WHERE extension_id=? AND "
-                                               "time>? AND time<=?",
-                                               BlockedAction::kTableName);
-  sql::Statement blocked_statement(db_.GetCachedStatement(SQL_FROM_HERE,
-                                                          blocked_str.c_str()));
-  blocked_statement.BindString(0, extension_id);
-  blocked_statement.BindInt64(1, early_bound);
-  blocked_statement.BindInt64(2, late_bound);
-  while (blocked_statement.is_valid() && blocked_statement.Step()) {
-    scoped_refptr<BlockedAction> action = new BlockedAction(blocked_statement);
-    actions->push_back(action);
-  }
-  // Sort by time (from newest to oldest).
-  std::sort(actions->begin(), actions->end(), SortActionsByTime);
-  return actions.Pass();
 }
 
 void ActivityDatabase::Close() {
@@ -221,6 +139,9 @@ void ActivityDatabase::Close() {
   }
   valid_db_ = false;
   already_closed_ = true;
+  // Call DatabaseCloseCallback() just before deleting the ActivityDatabase
+  // itself--these two objects should have the same lifetime.
+  delegate_->OnDatabaseClose();
   delete this;
 }
 
@@ -230,12 +151,14 @@ void ActivityDatabase::HardFailureClose() {
   timer_.Stop();
   db_.reset_error_callback();
   db_.RazeAndClose();
+  delegate_->OnDatabaseFailure();
   already_closed_ = true;
 }
 
 void ActivityDatabase::SoftFailureClose() {
   valid_db_ = false;
   timer_.Stop();
+  delegate_->OnDatabaseFailure();
 }
 
 void ActivityDatabase::DatabaseErrorCallback(int error, sql::Statement* stmt) {
@@ -249,10 +172,6 @@ void ActivityDatabase::DatabaseErrorCallback(int error, sql::Statement* stmt) {
   }
 }
 
-void ActivityDatabase::SetClockForTesting(base::Clock* clock) {
-  testing_clock_ = clock;
-}
-
 void ActivityDatabase::RecordBatchedActionsWhileTesting() {
   RecordBatchedActions();
   timer_.Stop();
@@ -264,6 +183,42 @@ void ActivityDatabase::SetTimerForTesting(int ms) {
                base::TimeDelta::FromMilliseconds(ms),
                this,
                &ActivityDatabase::RecordBatchedActionsWhileTesting);
+}
+
+// static
+bool ActivityDatabase::InitializeTable(sql::Connection* db,
+                                       const char* table_name,
+                                       const char* content_fields[],
+                                       const char* field_types[],
+                                       const int num_content_fields) {
+  if (!db->DoesTableExist(table_name)) {
+    std::string table_creator =
+        base::StringPrintf("CREATE TABLE %s (", table_name);
+    for (int i = 0; i < num_content_fields; i++) {
+      table_creator += base::StringPrintf("%s%s %s",
+                                          i == 0 ? "" : ", ",
+                                          content_fields[i],
+                                          field_types[i]);
+    }
+    table_creator += ")";
+    if (!db->Execute(table_creator.c_str()))
+      return false;
+  } else {
+    // In case we ever want to add new fields, this initializes them to be
+    // empty strings.
+    for (int i = 0; i < num_content_fields; i++) {
+      if (!db->DoesColumnExist(table_name, content_fields[i])) {
+        std::string table_updater = base::StringPrintf(
+            "ALTER TABLE %s ADD COLUMN %s %s; ",
+             table_name,
+             content_fields[i],
+             field_types[i]);
+        if (!db->Execute(table_updater.c_str()))
+          return false;
+      }
+    }
+  }
+  return true;
 }
 
 }  // namespace extensions

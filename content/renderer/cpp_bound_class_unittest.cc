@@ -7,18 +7,20 @@
 // the binding from the outside by loading JS into the shell.
 
 #include "base/strings/utf_string_conversions.h"
+#include "content/public/common/url_constants.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "content/public/test/render_view_test.h"
+#include "content/test/cpp_binding_example.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
-#include "webkit/renderer/cpp_binding_example.h"
 
 using webkit_glue::CppArgumentList;
-using webkit_glue::CppBindingExample;
 using webkit_glue::CppVariant;
 
 namespace content {
+
+namespace {
 
 class CppBindingExampleSubObject : public CppBindingExample {
  public:
@@ -67,6 +69,8 @@ class TestObserver : public RenderViewObserver {
   CppBindingExampleWithOptionalFallback example_bound_class_;
 };
 
+}  // namespace
+
 class CppBoundClassTest : public RenderViewTest {
  public:
   CppBoundClassTest() {}
@@ -78,10 +82,15 @@ class CppBoundClassTest : public RenderViewTest {
 
     WebKit::WebURLRequest url_request;
     url_request.initialize();
-    url_request.setURL(GURL("about:blank"));
+    url_request.setURL(GURL(kAboutBlankURL));
 
     GetMainFrame()->loadRequest(url_request);
     ProcessPendingMessages();
+  }
+
+  virtual void TearDown() OVERRIDE {
+    observer_.reset();
+    RenderViewTest::TearDown();
   }
 
   // Executes the specified JavaScript and checks that the resulting document

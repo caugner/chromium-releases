@@ -11,6 +11,7 @@
 #import "chrome/browser/ui/cocoa/key_equivalent_constants.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
 #include "chrome/common/chrome_switches.h"
+#include "ui/base/cocoa/cocoa_event_utils.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/image/image.h"
 
@@ -45,18 +46,29 @@ TabModalConfirmDialog* TabModalConfirmDialog::Create(
   delegate_->Cancel();
 }
 
+- (void)onLinkClicked:(id)sender {
+  WindowOpenDisposition disposition =
+      ui::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
+  delegate_->LinkClicked(disposition);
+}
+
 @end
 
 TabModalConfirmDialogMac::TabModalConfirmDialogMac(
     TabModalConfirmDialogDelegate* delegate,
     content::WebContents* web_contents)
-    : delegate_(delegate) {
+    : closing_(false),
+      delegate_(delegate) {
   bridge_.reset([[TabModalConfirmDialogMacBridge alloc]
       initWithDelegate:delegate]);
 
   alert_.reset([[ConstrainedWindowAlert alloc] init]);
   [alert_ setMessageText:
       l10n_util::FixUpWindowsStyleLabel(delegate->GetTitle())];
+  [alert_ setLinkText:l10n_util::FixUpWindowsStyleLabel(
+                          delegate->GetLinkText())
+               target:bridge_
+               action:@selector(onLinkClicked:)];
   [alert_ setInformativeText:
       l10n_util::FixUpWindowsStyleLabel(delegate->GetMessage())];
   [alert_ addButtonWithTitle:
@@ -92,10 +104,16 @@ void TabModalConfirmDialogMac::CancelTabModalDialog() {
 }
 
 void TabModalConfirmDialogMac::CloseDialog() {
-  window_->CloseWebContentsModalDialog();
+  if (!closing_) {
+    closing_ = true;
+    window_->CloseWebContentsModalDialog();
+  }
 }
 
 void TabModalConfirmDialogMac::OnConstrainedWindowClosed(
     ConstrainedWindowMac* window) {
+  // Provide a disposition in case the dialog was closed without accepting or
+  // cancelling.
+  delegate_->Close();
   delete this;
 }

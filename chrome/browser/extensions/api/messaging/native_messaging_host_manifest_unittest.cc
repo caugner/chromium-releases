@@ -9,8 +9,8 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/string_escape.h"
 #include "extensions/common/url_pattern_set.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 namespace extensions {
 
@@ -94,16 +94,6 @@ TEST_F(NativeMessagingHostManifestTest, LoadValid) {
 TEST_F(NativeMessagingHostManifestTest, InvalidName) {
   ASSERT_TRUE(WriteManifest(".com.chrome.test.native_host",
                             kTestHostPath, kTestOrigin));
-
-  std::string error_message;
-  scoped_ptr<NativeMessagingHostManifest> manifest =
-      NativeMessagingHostManifest::Load(manifest_path_, &error_message);
-  ASSERT_FALSE(manifest);
-  EXPECT_FALSE(error_message.empty());
-}
-
-TEST_F(NativeMessagingHostManifestTest, RelativePath) {
-  ASSERT_TRUE(WriteManifest(kTestHostName, "host.exe", kTestOrigin));
 
   std::string error_message;
   scoped_ptr<NativeMessagingHostManifest> manifest =

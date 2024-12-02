@@ -12,7 +12,7 @@
 #include "base/format_macros.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -26,7 +26,7 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_transition_types.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 using content::NavigationController;
@@ -34,6 +34,8 @@ using content::NavigationEntry;
 using content::WebContents;
 
 namespace safe_browsing {
+
+const int BrowserFeatureExtractor::kMaxMalwareIPPerRequest = 5;
 
 BrowseInfo::BrowseInfo() : http_status_code(0) {}
 
@@ -118,7 +120,7 @@ static void AddNavigationFeatures(
     if (redirect_chain[i].SchemeIsSecure()) {
       printable_redirect = features::kSecureRedirectValue;
     }
-    AddFeature(base::StringPrintf("%s%s[%"PRIuS"]=%s",
+    AddFeature(base::StringPrintf("%s%s[%" PRIuS "]=%s",
                                   feature_prefix.c_str(),
                                   features::kRedirect,
                                   i,
@@ -234,13 +236,20 @@ void BrowserFeatureExtractor::ExtractMalwareFeatures(
   DCHECK(request);
   DCHECK(info);
   DCHECK_EQ(0U, request->url().find("http:"));
-  // get the IPs and hosts that match the malware blacklisted IP list.
+  // get the IPs and urls that match the malware blacklisted IP list.
   if (service_) {
-    for (IPHostMap::const_iterator it = info->ips.begin();
+    int matched_bad_ips = 0;
+    for (IPUrlMap::const_iterator it = info->ips.begin();
          it != info->ips.end(); ++it) {
       if (service_->IsBadIpAddress(it->first)) {
         AddMalwareFeature(features::kBadIpFetch + it->first,
                           it->second, 1.0, request);
+        ++matched_bad_ips;
+        // Limit the number of matched bad IPs in one request to control
+        // the request's size
+        if (matched_bad_ips >= kMaxMalwareIPPerRequest) {
+          return;
+        }
       }
     }
   }
@@ -250,7 +259,7 @@ void BrowserFeatureExtractor::ExtractBrowseInfoFeatures(
     const BrowseInfo& info,
     ClientPhishingRequest* request) {
   if (service_) {
-    for (IPHostMap::const_iterator it = info.ips.begin();
+    for (IPUrlMap::const_iterator it = info.ips.begin();
          it != info.ips.end(); ++it) {
       if (service_->IsBadIpAddress(it->first)) {
         AddFeature(features::kBadIpFetch + it->first, 1.0, request);

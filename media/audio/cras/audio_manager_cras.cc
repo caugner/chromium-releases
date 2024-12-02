@@ -8,7 +8,6 @@
 #include "base/environment.h"
 #include "base/logging.h"
 #include "base/nix/xdg_util.h"
-#include "base/process_util.h"
 #include "base/stl_util.h"
 #include "media/audio/audio_util.h"
 #include "media/audio/cras/cras_input.h"
@@ -22,6 +21,8 @@ static const int kMaxOutputStreams = 50;
 
 // Default sample rate for input and output streams.
 static const int kDefaultSampleRate = 48000;
+
+const char AudioManagerCras::kLoopbackDeviceId[] = "loopback";
 
 bool AudioManagerCras::HasAudioOutputDevices() {
   return true;
@@ -53,7 +54,8 @@ void AudioManagerCras::GetAudioInputDeviceNames(
 AudioParameters AudioManagerCras::GetInputStreamParameters(
     const std::string& device_id) {
   static const int kDefaultInputBufferSize = 1024;
-
+  // TODO(hshi): Fine-tune audio parameters based on |device_id|. The optimal
+  // parameters for the loopback stream may differ from the default.
   return AudioParameters(
       AudioParameters::AUDIO_PCM_LOW_LATENCY, CHANNEL_LAYOUT_STEREO,
       kDefaultSampleRate, 16, kDefaultInputBufferSize);
@@ -125,7 +127,7 @@ AudioOutputStream* AudioManagerCras::MakeOutputStream(
 
 AudioInputStream* AudioManagerCras::MakeInputStream(
     const AudioParameters& params, const std::string& device_id) {
-  return new CrasInputStream(params, this);
+  return new CrasInputStream(params, this, device_id);
 }
 
 }  // namespace media

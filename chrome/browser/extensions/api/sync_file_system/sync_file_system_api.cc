@@ -14,7 +14,8 @@
 #include "chrome/browser/extensions/api/sync_file_system/extension_sync_event_observer_factory.h"
 #include "chrome/browser/extensions/api/sync_file_system/sync_file_system_api_helpers.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync_file_system/drive_file_sync_service.h"
+#include "chrome/browser/sync_file_system/drive_backend/drive_file_sync_service.h"
+#include "chrome/browser/sync_file_system/sync_file_status.h"
 #include "chrome/browser/sync_file_system/sync_file_system_service.h"
 #include "chrome/browser/sync_file_system/sync_file_system_service_factory.h"
 #include "chrome/common/extensions/api/sync_file_system.h"
@@ -24,7 +25,6 @@
 #include "content/public/common/content_client.h"
 #include "webkit/browser/fileapi/file_system_context.h"
 #include "webkit/browser/fileapi/file_system_url.h"
-#include "webkit/browser/fileapi/syncable/sync_file_status.h"
 #include "webkit/browser/quota/quota_manager.h"
 #include "webkit/common/fileapi/file_system_types.h"
 #include "webkit/common/fileapi/file_system_util.h"
@@ -142,7 +142,7 @@ void SyncFileSystemRequestFileSystemFunction::DidInitializeFileSystemContext(
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      Bind(&fileapi::FileSystemContext::OpenSyncableFileSystem,
+      Bind(&fileapi::FileSystemContext::OpenFileSystem,
            GetFileSystemContext(),
            source_url().GetOrigin(),
            fileapi::kFileSystemTypeSyncable,
@@ -357,7 +357,7 @@ bool SyncFileSystemSetConflictResolutionPolicyFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &policy_string));
   ConflictResolutionPolicy policy = ExtensionEnumToConflictResolutionPolicy(
       api::sync_file_system::ParseConflictResolutionPolicy(policy_string));
-  if (policy == sync_file_system::CONFLICT_RESOLUTION_UNKNOWN) {
+  if (policy == sync_file_system::CONFLICT_RESOLUTION_POLICY_UNKNOWN) {
     SetError(base::StringPrintf(kUnsupportedConflictResolutionPolicy,
                                 policy_string.c_str()));
     return false;

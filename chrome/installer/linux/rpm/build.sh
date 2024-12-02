@@ -124,7 +124,7 @@ do_package() {
   # https://bugzilla.novell.com/show_bug.cgi?id=556248
   DEPENDS="lsb >= 4.0, \
   libcurl.so.4${EMPTY_VERSION}${PKG_ARCH}, \
-  libnss3.so(NSS_3.12.3)${PKG_ARCH}, \
+  libnss3.so(NSS_3.14.3)${PKG_ARCH}, \
   wget, \
   xdg-utils, \
   zlib, \
@@ -145,7 +145,7 @@ do_package() {
     --define "_binary_payload w9.bzdio" \
     --define "__os_install_post  %{nil}" \
     "${SPEC}"
-  PKGNAME="${PACKAGE}-${CHANNEL}-${VERSION}-${REVISION}"
+  PKGNAME="${PACKAGE}-${CHANNEL}-${VERSION}-${PACKAGE_RELEASE}"
   mv "$RPMBUILD_DIR/RPMS/$ARCHITECTURE/${PKGNAME}.${ARCHITECTURE}.rpm" \
      "${OUTPUTDIR}"
   # Make sure the package is world-readable, otherwise it causes problems when

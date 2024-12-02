@@ -137,7 +137,9 @@
           ],
           'msvs_settings': {
             'VCManifestTool': {
-              'AdditionalManifestFiles': '$(ProjectDir)\\installer\\mini_installer\\mini_installer.exe.manifest',
+              'AdditionalManifestFiles': [
+                '$(ProjectDir)\\installer\\mini_installer\\mini_installer.exe.manifest',
+              ],
             },
           },
           # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
@@ -233,7 +235,9 @@
           ],
           'msvs_settings': {
             'VCManifestTool': {
-              'AdditionalManifestFiles': '$(ProjectDir)\\installer\\mini_installer\\mini_installer.exe.manifest',
+              'AdditionalManifestFiles': [
+                '$(ProjectDir)\\installer\\mini_installer\\mini_installer.exe.manifest',
+              ],
             },
           },
         },
@@ -264,6 +268,8 @@
           },
           'sources': [
             'installer/mini_installer/chrome.release',
+            'installer/setup/archive_patch_helper.cc',
+            'installer/setup/archive_patch_helper.h',
             'installer/setup/chrome_frame_quick_enable.cc',
             'installer/setup/chrome_frame_quick_enable.h',
             'installer/setup/chrome_frame_ready_mode.cc',
@@ -273,6 +279,7 @@
             'installer/setup/install_worker.cc',
             'installer/setup/install_worker.h',
             'installer/setup/setup_main.cc',
+            'installer/setup/setup_main.h',
             'installer/setup/setup.ico',
             'installer/setup/setup.rc',
             'installer/setup/setup_constants.cc',
@@ -289,7 +296,9 @@
               'SubSystem': '2',     # Set /SUBSYSTEM:WINDOWS
             },
             'VCManifestTool': {
-              'AdditionalManifestFiles': '$(ProjectDir)\\installer\\setup\\setup.exe.manifest',
+              'AdditionalManifestFiles': [
+                '$(ProjectDir)\\installer\\setup\\setup.exe.manifest',
+              ],
             },
           },
           # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
@@ -351,10 +360,8 @@
           ],
           'conditions': [
             ['component == "shared_library"', {
-              'msvs_settings': {
-                'VCManifestTool': {
-                  'EmbedManifest': 'false',
-                },
+              'variables': {
+                'win_use_external_manifest': 1,
               },
             }],
             # TODO(mark):  <(branding_dir) should be defined by the
@@ -420,6 +427,9 @@
             'installer/mini_installer/mini_string.cc',
             'installer/mini_installer/mini_string.h',
             'installer/mini_installer/mini_string_test.cc',
+            'installer/setup/archive_patch_helper.cc',  # Move to lib
+            'installer/setup/archive_patch_helper.h',   # Move to lib
+            'installer/setup/archive_patch_helper_unittest.cc',
             'installer/setup/install.cc',               # Move to lib
             'installer/setup/install.h',                # Move to lib
             'installer/setup/install_unittest.cc',
@@ -781,7 +791,7 @@
                 '<@(packaging_files_deb)',
               ],
               'outputs': [
-                '<(PRODUCT_DIR)/google-chrome-<(channel)_<(version)-r<(revision)_<(deb_arch).deb',
+                '<(PRODUCT_DIR)/google-chrome-<(channel)_<(version)-1_<(deb_arch).deb',
               ],
               'action': [ '<@(deb_cmd)', '-c', '<(channel)', ],
             },
@@ -809,7 +819,7 @@
                 '<@(packaging_files_deb)',
               ],
               'outputs': [
-                '<(PRODUCT_DIR)/google-chrome-<(channel)_<(version)-r<(revision)_<(deb_arch).deb',
+                '<(PRODUCT_DIR)/google-chrome-<(channel)_<(version)-1_<(deb_arch).deb',
               ],
               'action': [ '<@(deb_cmd)', '-c', '<(channel)', ],
             },
@@ -837,7 +847,7 @@
                 '<@(packaging_files_deb)',
               ],
               'outputs': [
-                '<(PRODUCT_DIR)/google-chrome-<(channel)_<(version)-r<(revision)_<(deb_arch).deb',
+                '<(PRODUCT_DIR)/google-chrome-<(channel)_<(version)-1_<(deb_arch).deb',
               ],
               'action': [ '<@(deb_cmd)', '-c', '<(channel)', ],
             },
@@ -865,7 +875,7 @@
                 '<@(packaging_files_deb)',
               ],
               'outputs': [
-                '<(PRODUCT_DIR)/google-chrome-<(channel)_<(version)-r<(revision)_<(deb_arch).deb',
+                '<(PRODUCT_DIR)/google-chrome-<(channel)_<(version)-1_<(deb_arch).deb',
               ],
               'action': [ '<@(deb_cmd)', '-c', '<(channel)', ],
             },
@@ -893,7 +903,7 @@
                 '<@(packaging_files_deb)',
               ],
               'outputs': [
-                '<(PRODUCT_DIR)/google-chrome-<(channel)_<(version)-r<(revision)_<(deb_arch).deb',
+                '<(PRODUCT_DIR)/google-chrome-<(channel)_<(version)-1_<(deb_arch).deb',
               ],
               'action': [ '<@(deb_cmd)', '-c', '<(channel)', ],
             },
@@ -922,7 +932,7 @@
                 '<@(packaging_files_rpm)',
               ],
               'outputs': [
-                '<(PRODUCT_DIR)/google-chrome-<(channel)-<(version)-<(revision).<(rpm_arch).rpm',
+                '<(PRODUCT_DIR)/google-chrome-<(channel)-<(version)-1.<(rpm_arch).rpm',
               ],
               'action': [ '<@(rpm_cmd)', '-c', '<(channel)', ],
             },
@@ -951,7 +961,7 @@
                 '<@(packaging_files_rpm)',
               ],
               'outputs': [
-                '<(PRODUCT_DIR)/google-chrome-<(channel)-<(version)-<(revision).<(rpm_arch).rpm',
+                '<(PRODUCT_DIR)/google-chrome-<(channel)-<(version)-1.<(rpm_arch).rpm',
               ],
               'action': [ '<@(rpm_cmd)', '-c', '<(channel)', ],
             },
@@ -980,7 +990,7 @@
                 '<@(packaging_files_rpm)',
               ],
               'outputs': [
-                '<(PRODUCT_DIR)/google-chrome-<(channel)-<(version)-<(revision).<(rpm_arch).rpm',
+                '<(PRODUCT_DIR)/google-chrome-<(channel)-<(version)-1.<(rpm_arch).rpm',
               ],
               'action': [ '<@(rpm_cmd)', '-c', '<(channel)', ],
             },
@@ -1009,7 +1019,7 @@
                 '<@(packaging_files_rpm)',
               ],
               'outputs': [
-                '<(PRODUCT_DIR)/google-chrome-<(channel)-<(version)-<(revision).<(rpm_arch).rpm',
+                '<(PRODUCT_DIR)/google-chrome-<(channel)-<(version)-1.<(rpm_arch).rpm',
               ],
               'action': [ '<@(rpm_cmd)', '-c', '<(channel)', ],
             },
@@ -1038,7 +1048,7 @@
                 '<@(packaging_files_rpm)',
               ],
               'outputs': [
-                '<(PRODUCT_DIR)/google-chrome-<(channel)-<(version)-<(revision).<(rpm_arch).rpm',
+                '<(PRODUCT_DIR)/google-chrome-<(channel)-<(version)-1.<(rpm_arch).rpm',
               ],
               'action': [ '<@(rpm_cmd)', '-c', '<(channel)', ],
             },

@@ -10,13 +10,13 @@
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/values.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
 #include "chrome/browser/chromeos/login/default_user_images.h"
 #include "chrome/browser/chromeos/login/mock_user_manager.h"
 #include "chrome/browser/chromeos/login/user_image_manager_impl.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -250,7 +250,8 @@ IN_PROC_BROWSER_TEST_F(UserImageManagerTest, PRE_NonJPEGImageFromFile) {
   EXPECT_EQ(saved_image.height(), user->image().height());
 }
 
-IN_PROC_BROWSER_TEST_F(UserImageManagerTest, NonJPEGImageFromFile) {
+// http://crbug.com/257009.
+IN_PROC_BROWSER_TEST_F(UserImageManagerTest, DISABLED_NonJPEGImageFromFile) {
   ExpectImageChange();
   UserManager::Get()->GetUsers();  // Load users.
   // Wait for image load.

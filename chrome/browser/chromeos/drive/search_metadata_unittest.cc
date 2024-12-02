@@ -5,9 +5,11 @@
 #include "chrome/browser/chromeos/drive/search_metadata.h"
 
 #include "base/files/scoped_temp_dir.h"
+#include "base/i18n/string_search.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/drive/fake_free_disk_space_getter.h"
 #include "chrome/browser/chromeos/drive/file_cache.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
@@ -22,6 +24,17 @@ namespace {
 
 const int kDefaultAtMostNumMatches = 10;
 const int64 kCacheEntriesLastAccessedTimeBase = 100;
+
+// A simple wrapper for testing FindAndHighlightWrapper(). It just converts the
+// query text parameter to FixedPatternStringSearchIgnoringCaseAndAccents.
+bool FindAndHighlightWrapper(
+    const std::string& text,
+    const std::string& query_text,
+    std::string* highlighted_text) {
+  base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents query(
+      base::UTF8ToUTF16(query_text));
+  return FindAndHighlight(text, &query, highlighted_text);
+}
 
 // Generator of sequential fake data for ResourceEntry.
 class MetadataInfoGenerator {
@@ -68,12 +81,12 @@ class SearchMetadataTest : public testing::Test {
     fake_free_disk_space_getter_.reset(new FakeFreeDiskSpaceGetter);
 
     metadata_storage_.reset(new ResourceMetadataStorage(
-        temp_dir_.path(), base::MessageLoopProxy::current()));
+        temp_dir_.path(), base::MessageLoopProxy::current().get()));
     ASSERT_TRUE(metadata_storage_->Initialize());
 
     cache_.reset(new FileCache(metadata_storage_.get(),
                                temp_dir_.path(),
-                               base::MessageLoopProxy::current(),
+                               base::MessageLoopProxy::current().get(),
                                fake_free_disk_space_getter_.get()));
     ASSERT_TRUE(cache_->Initialize());
 
@@ -205,7 +218,6 @@ TEST_F(SearchMetadataTest, SearchMetadata_ZeroMatches) {
 
   SearchMetadata(base::MessageLoopProxy::current(),
                  resource_metadata_.get(),
-                 cache_.get(),
                  "NonExistent",
                  SEARCH_METADATA_ALL,
                  kDefaultAtMostNumMatches,
@@ -223,7 +235,6 @@ TEST_F(SearchMetadataTest, SearchMetadata_RegularFile) {
 
   SearchMetadata(base::MessageLoopProxy::current(),
                  resource_metadata_.get(),
-                 cache_.get(),
                  "SubDirectory File 1.txt",
                  SEARCH_METADATA_ALL,
                  kDefaultAtMostNumMatches,
@@ -237,8 +248,8 @@ TEST_F(SearchMetadataTest, SearchMetadata_RegularFile) {
             result->at(0).path.AsUTF8Unsafe());
 }
 
-// This test checks if |FindAndHighlight| does case-insensitive search.
-// Tricker test cases for |FindAndHighlight| can be found below.
+// This test checks if |FindAndHighlightWrapper| does case-insensitive search.
+// Tricker test cases for |FindAndHighlightWrapper| can be found below.
 TEST_F(SearchMetadataTest, SearchMetadata_CaseInsensitiveSearch) {
   FileError error = FILE_ERROR_FAILED;
   scoped_ptr<MetadataSearchResultVector> result;
@@ -246,7 +257,6 @@ TEST_F(SearchMetadataTest, SearchMetadata_CaseInsensitiveSearch) {
   // The query is all in lower case.
   SearchMetadata(base::MessageLoopProxy::current(),
                  resource_metadata_.get(),
-                 cache_.get(),
                  "subdirectory file 1.txt",
                  SEARCH_METADATA_ALL,
                  kDefaultAtMostNumMatches,
@@ -266,7 +276,6 @@ TEST_F(SearchMetadataTest, SearchMetadata_RegularFiles) {
 
   SearchMetadata(base::MessageLoopProxy::current(),
                  resource_metadata_.get(),
-                 cache_.get(),
                  "SubDir",
                  SEARCH_METADATA_ALL,
                  kDefaultAtMostNumMatches,
@@ -296,7 +305,6 @@ TEST_F(SearchMetadataTest, SearchMetadata_AtMostOneFile) {
   // returned.
   SearchMetadata(base::MessageLoopProxy::current(),
                  resource_metadata_.get(),
-                 cache_.get(),
                  "SubDir",
                  SEARCH_METADATA_ALL,
                  1,  // at_most_num_matches
@@ -316,7 +324,6 @@ TEST_F(SearchMetadataTest, SearchMetadata_Directory) {
 
   SearchMetadata(base::MessageLoopProxy::current(),
                  resource_metadata_.get(),
-                 cache_.get(),
                  "Directory 1",
                  SEARCH_METADATA_ALL,
                  kDefaultAtMostNumMatches,
@@ -335,7 +342,6 @@ TEST_F(SearchMetadataTest, SearchMetadata_HostedDocument) {
 
   SearchMetadata(base::MessageLoopProxy::current(),
                  resource_metadata_.get(),
-                 cache_.get(),
                  "Document",
                  SEARCH_METADATA_ALL,
                  kDefaultAtMostNumMatches,
@@ -356,7 +362,6 @@ TEST_F(SearchMetadataTest, SearchMetadata_ExcludeHostedDocument) {
 
   SearchMetadata(base::MessageLoopProxy::current(),
                  resource_metadata_.get(),
-                 cache_.get(),
                  "Document",
                  SEARCH_METADATA_EXCLUDE_HOSTED_DOCUMENTS,
                  kDefaultAtMostNumMatches,
@@ -374,7 +379,6 @@ TEST_F(SearchMetadataTest, SearchMetadata_SharedWithMe) {
 
   SearchMetadata(base::MessageLoopProxy::current(),
                  resource_metadata_.get(),
-                 cache_.get(),
                  "",
                  SEARCH_METADATA_SHARED_WITH_ME,
                  kDefaultAtMostNumMatches,
@@ -394,7 +398,6 @@ TEST_F(SearchMetadataTest, SearchMetadata_FileAndDirectory) {
 
   SearchMetadata(base::MessageLoopProxy::current(),
                  resource_metadata_.get(),
-                 cache_.get(),
                  "excludeDir-test",
                  SEARCH_METADATA_ALL,
                  kDefaultAtMostNumMatches,
@@ -418,7 +421,6 @@ TEST_F(SearchMetadataTest, SearchMetadata_ExcludeDirectory) {
 
   SearchMetadata(base::MessageLoopProxy::current(),
                  resource_metadata_.get(),
-                 cache_.get(),
                  "excludeDir-test",
                  SEARCH_METADATA_EXCLUDE_DIRECTORIES,
                  kDefaultAtMostNumMatches,
@@ -444,7 +446,6 @@ TEST_F(SearchMetadataTest, SearchMetadata_ExcludeSpecialDirectories) {
     const std::string query = kQueries[i];
     SearchMetadata(base::MessageLoopProxy::current(),
                    resource_metadata_.get(),
-                   cache_.get(),
                    query,
                    SEARCH_METADATA_ALL,
                    kDefaultAtMostNumMatches,
@@ -472,7 +473,6 @@ TEST_F(SearchMetadataTest, SearchMetadata_Offline) {
 
   SearchMetadata(base::MessageLoopProxy::current(),
                  resource_metadata_.get(),
-                 cache_.get(),
                  "",
                  SEARCH_METADATA_OFFLINE,
                  kDefaultAtMostNumMatches,
@@ -501,60 +501,51 @@ TEST_F(SearchMetadataTest, SearchMetadata_Offline) {
 
 TEST(SearchMetadataSimpleTest, FindAndHighlight_ZeroMatches) {
   std::string highlighted_text;
-  EXPECT_FALSE(FindAndHighlight("text", "query", &highlighted_text));
-}
-
-TEST(SearchMetadataSimpleTest, FindAndHighlight_EmptyQuery) {
-  std::string highlighted_text;
-  EXPECT_TRUE(FindAndHighlight("text", "", &highlighted_text));
-  EXPECT_EQ("", highlighted_text);
+  EXPECT_FALSE(FindAndHighlightWrapper("text", "query", &highlighted_text));
 }
 
 TEST(SearchMetadataSimpleTest, FindAndHighlight_EmptyText) {
   std::string highlighted_text;
-  EXPECT_FALSE(FindAndHighlight("", "query", &highlighted_text));
-}
-
-TEST(SearchMetadataSimpleTest, FindAndHighlight_EmptyTextAndQuery) {
-  std::string highlighted_text;
-  EXPECT_TRUE(FindAndHighlight("", "", &highlighted_text));
-  EXPECT_EQ("", highlighted_text);
+  EXPECT_FALSE(FindAndHighlightWrapper("", "query", &highlighted_text));
 }
 
 TEST(SearchMetadataSimpleTest, FindAndHighlight_FullMatch) {
   std::string highlighted_text;
-  EXPECT_TRUE(FindAndHighlight("hello", "hello", &highlighted_text));
+  EXPECT_TRUE(FindAndHighlightWrapper("hello", "hello", &highlighted_text));
   EXPECT_EQ("<b>hello</b>", highlighted_text);
 }
 
 TEST(SearchMetadataSimpleTest, FindAndHighlight_StartWith) {
   std::string highlighted_text;
-  EXPECT_TRUE(FindAndHighlight("hello, world", "hello", &highlighted_text));
+  EXPECT_TRUE(FindAndHighlightWrapper("hello, world", "hello",
+                                     &highlighted_text));
   EXPECT_EQ("<b>hello</b>, world", highlighted_text);
 }
 
 TEST(SearchMetadataSimpleTest, FindAndHighlight_EndWith) {
   std::string highlighted_text;
-  EXPECT_TRUE(FindAndHighlight("hello, world", "world", &highlighted_text));
+  EXPECT_TRUE(FindAndHighlightWrapper("hello, world", "world",
+                                     &highlighted_text));
   EXPECT_EQ("hello, <b>world</b>", highlighted_text);
 }
 
 TEST(SearchMetadataSimpleTest, FindAndHighlight_InTheMiddle) {
   std::string highlighted_text;
-  EXPECT_TRUE(FindAndHighlight("yo hello, world", "hello", &highlighted_text));
+  EXPECT_TRUE(FindAndHighlightWrapper("yo hello, world", "hello",
+                                     &highlighted_text));
   EXPECT_EQ("yo <b>hello</b>, world", highlighted_text);
 }
 
 TEST(SearchMetadataSimpleTest, FindAndHighlight_MultipeMatches) {
   std::string highlighted_text;
-  EXPECT_TRUE(FindAndHighlight("yoyoyoyoy", "yoy", &highlighted_text));
+  EXPECT_TRUE(FindAndHighlightWrapper("yoyoyoyoy", "yoy", &highlighted_text));
   // Only the first match is highlighted.
   EXPECT_EQ("<b>yoy</b>oyoyoy", highlighted_text);
 }
 
 TEST(SearchMetadataSimpleTest, FindAndHighlight_IgnoreCase) {
   std::string highlighted_text;
-  EXPECT_TRUE(FindAndHighlight("HeLLo", "hello", &highlighted_text));
+  EXPECT_TRUE(FindAndHighlightWrapper("HeLLo", "hello", &highlighted_text));
   EXPECT_EQ("<b>HeLLo</b>", highlighted_text);
 }
 
@@ -562,7 +553,7 @@ TEST(SearchMetadataSimpleTest, FindAndHighlight_IgnoreCaseNonASCII) {
   std::string highlighted_text;
 
   // Case and accent ignorance in Greek. Find "socra" in "Socra'tes".
-  EXPECT_TRUE(FindAndHighlight(
+  EXPECT_TRUE(FindAndHighlightWrapper(
       "\xCE\xA3\xCF\x89\xCE\xBA\xCF\x81\xCE\xAC\xCF\x84\xCE\xB7\xCF\x82",
       "\xCF\x83\xCF\x89\xCE\xBA\xCF\x81\xCE\xB1", &highlighted_text));
   EXPECT_EQ(
@@ -571,7 +562,7 @@ TEST(SearchMetadataSimpleTest, FindAndHighlight_IgnoreCaseNonASCII) {
 
   // In Japanese characters.
   // Find Hiragana "pi" + "(small)ya" in Katakana "hi" + semi-voiced-mark + "ya"
-  EXPECT_TRUE(FindAndHighlight(
+  EXPECT_TRUE(FindAndHighlightWrapper(
       "\xE3\x81\xB2\xE3\x82\x9A\xE3\x82\x83\xE3\x83\xBC",
       "\xE3\x83\x94\xE3\x83\xA4",
       &highlighted_text));
@@ -580,15 +571,27 @@ TEST(SearchMetadataSimpleTest, FindAndHighlight_IgnoreCaseNonASCII) {
       highlighted_text);
 }
 
+TEST(SearchMetadataSimpleTest, MultiTextBySingleQuery) {
+  base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents query(
+      base::UTF8ToUTF16("hello"));
+
+  std::string highlighted_text;
+  EXPECT_TRUE(FindAndHighlight("hello", &query, &highlighted_text));
+  EXPECT_EQ("<b>hello</b>", highlighted_text);
+  EXPECT_FALSE(FindAndHighlight("goodbye", &query, &highlighted_text));
+  EXPECT_TRUE(FindAndHighlight("1hello2", &query, &highlighted_text));
+  EXPECT_EQ("1<b>hello</b>2", highlighted_text);
+}
+
 TEST(SearchMetadataSimpleTest, FindAndHighlight_MetaChars) {
   std::string highlighted_text;
-  EXPECT_TRUE(FindAndHighlight("<hello>", "hello", &highlighted_text));
+  EXPECT_TRUE(FindAndHighlightWrapper("<hello>", "hello", &highlighted_text));
   EXPECT_EQ("&lt;<b>hello</b>&gt;", highlighted_text);
 }
 
 TEST(SearchMetadataSimpleTest, FindAndHighlight_MoreMetaChars) {
   std::string highlighted_text;
-  EXPECT_TRUE(FindAndHighlight("a&b&c&d", "b&c", &highlighted_text));
+  EXPECT_TRUE(FindAndHighlightWrapper("a&b&c&d", "b&c", &highlighted_text));
   EXPECT_EQ("a&amp;<b>b&amp;c</b>&amp;d", highlighted_text);
 }
 

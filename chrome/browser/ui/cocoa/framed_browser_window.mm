@@ -339,7 +339,7 @@ const CGFloat kWindowGradientHeight = 24.0;
 
   // Only paint the top of the window.
   NSRect windowRect = [view convertRect:[self frame] fromView:nil];
-  windowRect.origin = NSMakePoint(0, 0);
+  windowRect.origin = NSZeroPoint;
 
   NSRect paintRect = windowRect;
   paintRect.origin.y = NSMaxY(paintRect) - kBrowserFrameViewPaintHeight;
@@ -378,7 +378,7 @@ const CGFloat kWindowGradientHeight = 24.0;
     CGFloat lineWidth = [view cr_lineWidth];
 
     windowRect = [view convertRect:[self frame] fromView:nil];
-    windowRect.origin = NSMakePoint(0, 0);
+    windowRect.origin = NSZeroPoint;
     windowRect.origin.y -= 0.5 * lineWidth;
     windowRect.origin.x -= 0.5 * lineWidth;
     windowRect.size.width += lineWidth;
@@ -412,21 +412,19 @@ const CGFloat kWindowGradientHeight = 24.0;
 
   // Find a theme image.
   NSColor* themeImageColor = nil;
-  int themeImageID;
-  if (popup && active)
-    themeImageID = IDR_THEME_TOOLBAR;
-  else if (popup && !active)
-    themeImageID = IDR_THEME_TAB_BACKGROUND;
-  else if (!popup && active && incognito)
-    themeImageID = IDR_THEME_FRAME_INCOGNITO;
-  else if (!popup && active && !incognito)
-    themeImageID = IDR_THEME_FRAME;
-  else if (!popup && !active && incognito)
-    themeImageID = IDR_THEME_FRAME_INCOGNITO_INACTIVE;
-  else
-    themeImageID = IDR_THEME_FRAME_INACTIVE;
-  if (themeProvider->HasCustomImage(IDR_THEME_FRAME))
-    themeImageColor = themeProvider->GetNSImageColorNamed(themeImageID, true);
+  if (!popup) {
+    int themeImageID;
+    if (active && incognito)
+      themeImageID = IDR_THEME_FRAME_INCOGNITO;
+    else if (active && !incognito)
+      themeImageID = IDR_THEME_FRAME;
+    else if (!active && incognito)
+      themeImageID = IDR_THEME_FRAME_INCOGNITO_INACTIVE;
+    else
+      themeImageID = IDR_THEME_FRAME_INACTIVE;
+    if (themeProvider->HasCustomImage(IDR_THEME_FRAME))
+      themeImageColor = themeProvider->GetNSImageColorNamed(themeImageID);
+  }
 
   // If no theme image, use a gradient if incognito.
   NSGradient* gradient = nil;
@@ -489,8 +487,7 @@ const CGFloat kWindowGradientHeight = 24.0;
       !popup) {
     overlayImage = themeProvider->
         GetNSImageNamed(active ? IDR_THEME_FRAME_OVERLAY :
-                                 IDR_THEME_FRAME_OVERLAY_INACTIVE,
-                        true);
+                                 IDR_THEME_FRAME_OVERLAY_INACTIVE);
   }
 
   if (overlayImage) {
@@ -514,21 +511,7 @@ const CGFloat kWindowGradientHeight = 24.0;
     return [NSColor windowFrameTextColor];
 
   ThemedWindowStyle windowStyle = [self themedWindowStyle];
-  BOOL active = [self isMainWindow];
   BOOL incognito = windowStyle & THEMED_INCOGNITO;
-  BOOL popup = windowStyle & THEMED_POPUP;
-
-  NSColor* titleColor = nil;
-  if (popup && active) {
-    titleColor = themeProvider->GetNSColor(
-        ThemeProperties::COLOR_TAB_TEXT, false);
-  } else if (popup && !active) {
-    titleColor = themeProvider->GetNSColor(
-        ThemeProperties::COLOR_BACKGROUND_TAB_TEXT, false);
-  }
-
-  if (titleColor)
-    return titleColor;
 
   if (incognito)
     return [NSColor whiteColor];

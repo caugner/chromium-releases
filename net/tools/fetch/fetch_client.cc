@@ -9,7 +9,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/stats_counters.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -25,6 +25,7 @@
 #include "net/http/http_network_session.h"
 #include "net/http/http_request_info.h"
 #include "net/http/http_server_properties_impl.h"
+#include "net/http/http_stream_factory.h"
 #include "net/http/http_transaction.h"
 #include "net/http/transport_security_state.h"
 #include "net/proxy/proxy_service.h"
@@ -143,6 +144,8 @@ int main(int argc, char** argv) {
   // Do work here.
   base::MessageLoop loop(base::MessageLoop::TYPE_IO);
 
+  net::HttpStreamFactory::EnableNpnHttp2Draft04();
+
   scoped_ptr<net::HostResolver> host_resolver(
       net::HostResolver::CreateDefaultResolver(NULL));
   scoped_ptr<net::CertVerifier> cert_verifier(
@@ -164,7 +167,7 @@ int main(int argc, char** argv) {
   session_params.transport_security_state = transport_security_state.get();
   session_params.proxy_service = proxy_service.get();
   session_params.http_auth_handler_factory = http_auth_handler_factory.get();
-  session_params.http_server_properties = &http_server_properties;
+  session_params.http_server_properties = http_server_properties.GetWeakPtr();
   session_params.ssl_config_service = ssl_config_service.get();
 
   scoped_refptr<net::HttpNetworkSession> network_session(

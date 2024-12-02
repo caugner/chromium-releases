@@ -6,7 +6,7 @@
 
 #include <map>
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/profiles/profile.h"
@@ -107,6 +107,7 @@ class NativePanelTestingWin : public NativePanelTesting {
   virtual bool IsButtonVisible(
       panel::TitlebarButtonType button_type) const OVERRIDE;
   virtual panel::CornerStyle GetWindowCornerStyle() const OVERRIDE;
+  virtual bool EnsureApplicationRunOnForeground() OVERRIDE;
 
   PanelView* panel_view_;
 };
@@ -220,6 +221,11 @@ bool NativePanelTestingWin::IsButtonVisible(
 
 panel::CornerStyle NativePanelTestingWin::GetWindowCornerStyle() const {
   return panel_view_->GetFrameView()->corner_style();
+}
+
+bool NativePanelTestingWin::EnsureApplicationRunOnForeground() {
+  // Not needed on views.
+  return true;
 }
 
 }  // namespace
@@ -677,6 +683,16 @@ bool PanelView::IsPanelMinimizedBySystem() const {
   return window_->IsMinimized();
 }
 
+bool PanelView::IsPanelShownOnActiveDesktop() const {
+#if defined(OS_WIN)
+  // Virtual desktop is not supported by the native Windows system.
+  return true;
+#else
+  NOTIMPLEMENTED();
+  return true;
+#endif
+}
+
 void PanelView::ShowShadow(bool show) {
 #if defined(OS_WIN)
   // The overlapped window has the shadow while the popup window does not have
@@ -952,12 +968,14 @@ void PanelView::OnWidgetActivationChanged(views::Widget* widget, bool active) {
   // bring up the panel with the above alternatives.
   // When the user clicks on the minimized panel, the panel expansion will be
   // done when we process the mouse button pressed message.
+#if defined(OS_WIN)
   if (focused_ && panel_->IsMinimized() &&
       panel_->collection()->type() == PanelCollection::DOCKED &&
       gfx::Screen::GetScreenFor(widget->GetNativeWindow())->
           GetWindowAtCursorScreenPoint() != widget->GetNativeWindow()) {
     panel_->Restore();
   }
+#endif
 
   panel()->OnActiveStateChanged(focused);
 }

@@ -11,6 +11,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/debug/alias.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
@@ -19,6 +20,8 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/content_settings/content_settings_provider.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
@@ -48,7 +51,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_names_io_thread.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -85,7 +87,6 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/drive/drive_protocol_handler.h"
 #include "chrome/browser/chromeos/policy/policy_cert_verifier.h"
-#include "chrome/browser/chromeos/proxy_config_service_impl.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
@@ -228,6 +229,7 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
   params->io_thread = g_browser_process->io_thread();
 
   params->cookie_settings = CookieSettings::Factory::GetForProfile(profile);
+  params->host_content_settings_map = profile->GetHostContentSettingsMap();
   params->ssl_config_service = profile->GetSSLConfigService();
   base::Callback<Profile*(void)> profile_getter =
       base::Bind(&GetProfileOnUI, g_browser_process->profile_manager(),
@@ -260,11 +262,9 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
   params->protocol_handler_interceptor =
       protocol_handler_registry->CreateJobInterceptorFactory();
 
-  ChromeProxyConfigService* proxy_config_service =
-      ProxyServiceFactory::CreateProxyConfigService();
-  params->proxy_config_service.reset(proxy_config_service);
-  profile->GetProxyConfigTracker()->SetChromeProxyConfigService(
-      proxy_config_service);
+  params->proxy_config_service
+      .reset(ProxyServiceFactory::CreateProxyConfigService(
+           profile->GetProxyConfigTracker()));
 #if defined(ENABLE_MANAGED_USERS)
   ManagedUserService* managed_user_service =
       ManagedUserServiceFactory::GetForProfile(profile);
@@ -409,20 +409,80 @@ ProfileIOData::~ProfileIOData() {
   if (BrowserThread::IsMessageLoopValid(BrowserThread::IO))
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
+  // Pull the contents of the request context maps onto the stack for sanity
+  // checking of values in a minidump. http://crbug.com/260425
+  size_t num_app_contexts = app_request_context_map_.size();
+  size_t num_media_contexts = isolated_media_request_context_map_.size();
+  size_t current_context = 0;
+  static const size_t kMaxCachedContexts = 20;
+  ChromeURLRequestContext* app_context_cache[kMaxCachedContexts] = {0};
+  void* app_context_vtable_cache[kMaxCachedContexts] = {0};
+  ChromeURLRequestContext* media_context_cache[kMaxCachedContexts] = {0};
+  void* media_context_vtable_cache[kMaxCachedContexts] = {0};
+  void* tmp_vtable = NULL;
+  base::debug::Alias(&num_app_contexts);
+  base::debug::Alias(&num_media_contexts);
+  base::debug::Alias(&current_context);
+  base::debug::Alias(app_context_cache);
+  base::debug::Alias(app_context_vtable_cache);
+  base::debug::Alias(media_context_cache);
+  base::debug::Alias(media_context_vtable_cache);
+  base::debug::Alias(&tmp_vtable);
+
+  current_context = 0;
+  for (URLRequestContextMap::const_iterator it =
+           app_request_context_map_.begin();
+       current_context < kMaxCachedContexts &&
+           it != app_request_context_map_.end();
+       ++it, ++current_context) {
+    app_context_cache[current_context] = it->second;
+    memcpy(&app_context_vtable_cache[current_context],
+           static_cast<void*>(it->second), sizeof(void*));
+  }
+
+  current_context = 0;
+  for (URLRequestContextMap::const_iterator it =
+           isolated_media_request_context_map_.begin();
+       current_context < kMaxCachedContexts &&
+           it != isolated_media_request_context_map_.end();
+       ++it, ++current_context) {
+    media_context_cache[current_context] = it->second;
+    memcpy(&media_context_vtable_cache[current_context],
+           static_cast<void*>(it->second), sizeof(void*));
+  }
+
+  // TODO(ajwong): These AssertNoURLRequests() calls are unnecessary since they
+  // are already done in the URLRequestContext destructor.
   if (main_request_context_)
     main_request_context_->AssertNoURLRequests();
   if (extensions_request_context_)
     extensions_request_context_->AssertNoURLRequests();
+
+  current_context = 0;
   for (URLRequestContextMap::iterator it = app_request_context_map_.begin();
        it != app_request_context_map_.end(); ++it) {
+    if (current_context < kMaxCachedContexts) {
+      CHECK_EQ(app_context_cache[current_context], it->second);
+      memcpy(&tmp_vtable, static_cast<void*>(it->second), sizeof(void*));
+      CHECK_EQ(app_context_vtable_cache[current_context], tmp_vtable);
+    }
     it->second->AssertNoURLRequests();
     delete it->second;
+    current_context++;
   }
+
+  current_context = 0;
   for (URLRequestContextMap::iterator it =
            isolated_media_request_context_map_.begin();
        it != isolated_media_request_context_map_.end(); ++it) {
+    if (current_context < kMaxCachedContexts) {
+      CHECK_EQ(media_context_cache[current_context], it->second);
+      memcpy(&tmp_vtable, static_cast<void*>(it->second), sizeof(void*));
+      CHECK_EQ(media_context_vtable_cache[current_context], tmp_vtable);
+    }
     it->second->AssertNoURLRequests();
     delete it->second;
+    current_context++;
   }
 }
 
@@ -553,6 +613,11 @@ CookieSettings* ProfileIOData::GetCookieSettings() const {
   return cookie_settings_.get();
 }
 
+HostContentSettingsMap* ProfileIOData::GetHostContentSettingsMap() const {
+  DCHECK(initialized_);
+  return host_content_settings_map_.get();
+}
+
 #if defined(ENABLE_NOTIFICATIONS)
 DesktopNotificationService* ProfileIOData::GetNotificationService() const {
   DCHECK(initialized_);
@@ -596,13 +661,14 @@ bool ProfileIOData::GetMetricsEnabledStateOnIOThread() const {
 #endif  // defined(OS_CHROMEOS)
 }
 
-net::HttpServerProperties* ProfileIOData::http_server_properties() const {
-  return http_server_properties_.get();
+base::WeakPtr<net::HttpServerProperties>
+ProfileIOData::http_server_properties() const {
+  return http_server_properties_->GetWeakPtr();
 }
 
 void ProfileIOData::set_http_server_properties(
-    net::HttpServerProperties* http_server_properties) const {
-  http_server_properties_.reset(http_server_properties);
+    scoped_ptr<net::HttpServerProperties> http_server_properties) const {
+  http_server_properties_ = http_server_properties.Pass();
 }
 
 ProfileIOData::ResourceContext::ResourceContext(ProfileIOData* io_data)
@@ -624,6 +690,23 @@ net::URLRequestContext* ProfileIOData::ResourceContext::GetRequestContext()  {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(io_data_->initialized_);
   return request_context_;
+}
+
+bool ProfileIOData::ResourceContext::AllowMicAccess(const GURL& origin) {
+  return AllowContentAccess(origin, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC);
+}
+
+bool ProfileIOData::ResourceContext::AllowCameraAccess(const GURL& origin) {
+  return AllowContentAccess(origin, CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA);
+}
+
+bool ProfileIOData::ResourceContext::AllowContentAccess(
+    const GURL& origin, ContentSettingsType type) {
+  HostContentSettingsMap* content_settings =
+      io_data_->GetHostContentSettingsMap();
+  ContentSetting setting = content_settings->GetContentSetting(
+      origin, origin, type, NO_RESOURCE_IDENTIFIER);
+  return setting == CONTENT_SETTING_ALLOW;
 }
 
 // static
@@ -703,6 +786,7 @@ void ProfileIOData::Init(content::ProtocolHandlerMap* protocol_handlers) const {
 
   // Take ownership over these parameters.
   cookie_settings_ = profile_params_->cookie_settings;
+  host_content_settings_map_ = profile_params_->host_content_settings_map;
 #if defined(ENABLE_NOTIFICATIONS)
   notification_service_ = profile_params_->notification_service;
 #endif

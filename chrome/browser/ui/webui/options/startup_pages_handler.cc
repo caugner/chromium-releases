@@ -11,11 +11,11 @@
 #include "chrome/browser/autocomplete/autocomplete_controller.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_result.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/custom_home_pages_table_model.h"
-#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/web_ui.h"
@@ -225,7 +225,8 @@ void StartupPagesHandler::RequestAutocompleteSuggestions(
   CHECK(args->GetString(0, &input));
 
   autocomplete_controller_->Start(AutocompleteInput(
-      input, string16::npos, string16(), GURL(), true,
+      input, string16::npos, string16(), GURL(),
+      AutocompleteInput::INVALID_SPEC, true,
       false, false, AutocompleteInput::ALL_MATCHES));
 }
 

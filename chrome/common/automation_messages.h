@@ -14,15 +14,15 @@
 #include "content/public/common/common_param_traits.h"
 #include "content/public/common/page_type.h"
 #include "content/public/common/security_style.h"
-#include "googleurl/src/gurl.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_message_utils.h"
-#include "net/cert/cert_status_flags.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/upload_data.h"
+#include "net/cert/cert_status_flags.h"
 #include "net/url_request/url_request_status.h"
-#include "ui/gfx/rect.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/gfx/rect.h"
+#include "url/gurl.h"
 
 IPC_ENUM_TRAITS(AutomationMsg_NavigationResponseValues)
 IPC_ENUM_TRAITS(content::PageType)
@@ -145,7 +145,7 @@ IPC_STRUCT_BEGIN(AutomationURLRequest)
   IPC_STRUCT_MEMBER(std::string, referrer)
   IPC_STRUCT_MEMBER(std::string, extra_request_headers)
   IPC_STRUCT_MEMBER(scoped_refptr<net::UploadData>, upload_data)
-  IPC_STRUCT_MEMBER(int, resource_type)  // see webkit/glue/resource_type.h
+  IPC_STRUCT_MEMBER(int, resource_type)  // see webkit/common/resource_type.h
   IPC_STRUCT_MEMBER(int, load_flags) // see net/base/load_flags.h
 IPC_STRUCT_END()
 

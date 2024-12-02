@@ -11,7 +11,7 @@
 #include "base/file_version_info_win.h"
 #include "base/files/file_path.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
+#include "base/process/launch.h"
 #include "base/win/registry.h"
 
 namespace cloud_print {
@@ -174,8 +174,8 @@ void DeleteProgramDir(const std::string& delete_switch) {
   base::FilePath temp_path;
   if (!file_util::CreateTemporaryFile(&temp_path))
     return;
-  file_util::CopyFile(installer_source, temp_path);
-  file_util::DeleteAfterReboot(temp_path);
+  base::CopyFile(installer_source, temp_path);
+  base::DeleteFileAfterReboot(temp_path);
   CommandLine command_line(temp_path);
   command_line.AppendSwitchPath(delete_switch, installer_source.DirName());
   base::LaunchOptions options;

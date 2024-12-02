@@ -15,15 +15,9 @@ AutofillDialogView::~AutofillDialogView() {}
 #if defined(TOOLKIT_GTK)
 // TODO(estade): implement the dialog on GTK. See http://crbug.com/157275.
 AutofillDialogView* AutofillDialogView::Create(
-    AutofillDialogController* controller) {
+    AutofillDialogViewDelegate* delegate) {
   return NULL;
 }
 #endif
-
-TestableAutofillDialogView* AutofillDialogView::GetTestableView() {
-  return NULL;
-}
-
-TestableAutofillDialogView::~TestableAutofillDialogView() {}
 
 }  // namespace autofill

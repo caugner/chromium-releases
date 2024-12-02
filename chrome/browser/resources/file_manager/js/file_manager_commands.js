@@ -7,37 +7,49 @@
 var CommandUtil = {};
 
 /**
- * Extracts root on which command event was dispatched.
+ * Extracts path on which command event was dispatched.
  *
- * @param {Event} event Command event for which to retrieve root to operate on.
- * @param {DirectoryTree|VolumeList} list Directory tree or volume list to
- *     extract root node.
- * @return {DirectoryEntry} Found root.
+ * @param {DirectoryTree|DirectoryItem|NavigationList|HTMLLIElement|cr.ui.List}
+ *     element Directory to extract a path from.
+ * @return {?string} Path of the found node.
  */
-CommandUtil.getCommandRoot = function(event, list) {
-  if (list instanceof VolumeList) {
-    var result = list.dataModel.item(
-                     list.getIndexOfListItem(event.target)) ||
-                 list.selectedItem;
-    return result;
-  } else {
-    var entry = list.selectedItem;
+CommandUtil.getCommandPath = function(element) {
+  if (element instanceof NavigationList) {
+    // element is a NavigationList.
+    return element.selectedItem;
+  } else if (element instanceof NavigationListItem) {
+    // element is a subitem of NavigationList.
+    var navigationList = element.parentElement;
+    var index = navigationList.getIndexOfListItem(element);
+    return (index != -1) ? navigationList.dataModel.item(index) : null;
+  } else if (element instanceof DirectoryTree) {
+    // element is a DirectoryTree.
+    var item = element.selectedItem;
+    return item && item.fullPath;
+  } else if (element instanceof DirectoryItem) {
+    // element is a sub item in DirectoryTree.
 
-    if (entry && PathUtil.isRootPath(entry.fullPath))
-      return entry;
-    else
-      return null;
+    // DirectoryItem.fullPath is set on initialization, but entry is lazily.
+    // We may use fullPath just in case that the entry has not been set yet.
+    return element.entry && element.entry.fullPath ||
+           element.fullPath;
+  } else if (cr.ui.List) {
+    // element is a normal List (eg. the file list on the right panel).
+    var entry = element.selectedItem;
+    return entry && entry.fullPath;
+  } else {
+    console.warn('Unsupported element');
+    return null;
   }
 };
 
 /**
- * @param {Event} event Command event for which to retrieve root type.
- * @param {DirectoryTree} directoryTree Directory tree to extract root node.
- * @return {?string} Found root.
+ * @param {NavigationList} navigationList navigation list to extract root node.
+ * @return {?RootType} Type of the found root.
  */
-CommandUtil.getCommandRootType = function(event, directoryTree) {
-  var root = CommandUtil.getCommandRoot(event, directoryTree);
-  return root && PathUtil.getRootType(root.fullPath);
+CommandUtil.getCommandRootType = function(navigationList) {
+  var root = CommandUtil.getCommandPath(navigationList);
+  return root && PathUtil.isRootPath(root) && PathUtil.getRootType(root);
 };
 
 /**
@@ -159,22 +171,22 @@ Commands.defaultCommand = {
 Commands.unmountCommand = {
   /**
    * @param {Event} event Command event.
-   * @param {DirectoryTree} directoryTree Target directory tree.
+   * @param {FileManager} fileManager The file manager instance.
    */
-  execute: function(event, directoryTree, fileManager) {
-    var root = CommandUtil.getCommandRoot(event, directoryTree);
+  execute: function(event, fileManager) {
+    var root = CommandUtil.getCommandPath(event.target);
     if (root)
-      fileManager.unmountVolume(PathUtil.getRootPath(root.fullPath));
+      fileManager.unmountVolume(PathUtil.getRootPath(root));
   },
   /**
    * @param {Event} event Command event.
-   * @param {DirectoryTree} directoryTree Target directory tree.
    */
-  canExecute: function(event, directoryTree) {
-    var rootType = CommandUtil.getCommandRootType(event, directoryTree);
+  canExecute: function(event) {
+    var rootType = CommandUtil.getCommandRootType(event.target);
 
     event.canExecute = (rootType == RootType.ARCHIVE ||
                         rootType == RootType.REMOVABLE);
+    event.command.setHidden(!event.canExecute);
     event.command.label = rootType == RootType.ARCHIVE ?
         str('CLOSE_ARCHIVE_BUTTON_LABEL') :
         str('UNMOUNT_DEVICE_BUTTON_LABEL');
@@ -187,13 +199,13 @@ Commands.unmountCommand = {
 Commands.formatCommand = {
   /**
    * @param {Event} event Command event.
-   * @param {DirectoryTree} directoryTree Target directory tree.
+   * @param {FileManager} fileManager The file manager instance.
    */
-  execute: function(event, directoryTree, fileManager) {
-    var root = CommandUtil.getCommandRoot(event, directoryTree);
+  execute: function(event, fileManager) {
+    var root = CommandUtil.getCommandPath(event.target);
 
     if (root) {
-      var url = util.makeFilesystemUrl(PathUtil.getRootPath(root.fullPath));
+      var url = util.makeFilesystemUrl(PathUtil.getRootPath(root));
       fileManager.confirm.show(
           loadTimeData.getString('FORMATTING_WARNING'),
           chrome.fileBrowserPrivate.formatDevice.bind(null, url));
@@ -201,13 +213,14 @@ Commands.formatCommand = {
   },
   /**
    * @param {Event} event Command event.
-   * @param {DirectoryTree} directoryTree Target directory tree.
+   * @param {FileManager} fileManager The file manager instance.
+   * @param {DirectoryModel} directoryModel The directory model instance.
    */
-  canExecute: function(event, directoryTree, fileManager, directoryModel) {
-    var root = CommandUtil.getCommandRoot(event, directoryTree);
+  canExecute: function(event, fileManager, directoryModel) {
+    var root = CommandUtil.getCommandPath(event.target);
     var removable = root &&
-                    PathUtil.getRootType(root.fullPath) == RootType.REMOVABLE;
-    var isReadOnly = root && directoryModel.isPathReadOnly(root.fullPath);
+                    PathUtil.getRootType(root) == RootType.REMOVABLE;
+    var isReadOnly = root && directoryModel.isPathReadOnly(root);
     event.canExecute = removable && !isReadOnly;
     event.command.setHidden(!removable);
   }
@@ -219,10 +232,10 @@ Commands.formatCommand = {
 Commands.importCommand = {
   /**
    * @param {Event} event Command event.
-   * @param {DirectoryTree} directoryTree Target directory tree.
+   * @param {NavigationList} navigationList Target navigation list.
    */
-  execute: function(event, directoryTree) {
-    var root = CommandUtil.getCommandRoot(event, directoryTree);
+  execute: function(event, navigationList) {
+    var root = CommandUtil.getCommandPath(navigationList);
     if (!root)
       return;
 
@@ -230,10 +243,10 @@ Commands.importCommand = {
   },
   /**
    * @param {Event} event Command event.
-   * @param {DirectoryTree} directoryTree Target directory tree.
+   * @param {NavigationList} navigationList Target navigation list.
    */
-  canExecute: function(event, directoryTree) {
-    var rootType = CommandUtil.getCommandRootType(event, directoryTree);
+  canExecute: function(event, navigationList) {
+    var rootType = CommandUtil.getCommandRootType(navigationList);
     event.canExecute = (rootType != RootType.DRIVE);
   }
 };
@@ -257,8 +270,13 @@ Commands.newFolderCommand = {
  * Initiates new window creation.
  */
 Commands.newWindowCommand = {
-  execute: function(event, fileManager) {
-    chrome.fileBrowserPrivate.openNewWindow(document.location.href);
+  execute: function(event, fileManager, directoryModel) {
+    chrome.runtime.getBackgroundPage(function(background) {
+      var appState = {
+        defaultPath: directoryModel.getCurrentDirPath()
+      };
+      background.launchFileManager(appState);
+    });
   },
   canExecute: function(event, fileManager) {
     event.canExecute = (fileManager.dialogType == DialogType.FULL_PAGE);
@@ -352,16 +370,6 @@ Commands.driveClearCacheCommand = {
 };
 
 /**
- * Reload the metadata of the file system from the server
- */
-Commands.driveReloadCommand = {
-  execute: function() {
-    chrome.fileBrowserPrivate.reloadDrive();
-  },
-  canExecute: CommandUtil.canExecuteVisibleOnDriveWithCtrlKeyOnly
-};
-
-/**
  * Opens drive.google.com.
  */
 Commands.driveGoToDriveCommand = {
@@ -409,11 +417,11 @@ Commands.searchCommand = {
  * Activates the n-th volume.
  */
 Commands.volumeSwitchCommand = {
-  execute: function(event, volumeList, index) {
-    volumeList.selectByIndex(index - 1);
+  execute: function(event, navigationList, index) {
+    navigationList.selectByIndex(index - 1);
   },
-  canExecute: function(event, volumeList, index) {
-    event.canExecute = index > 0 && index <= volumeList.dataModel.length;
+  canExecute: function(event, navigationList, index) {
+    event.canExecute = index > 0 && index <= navigationList.dataModel.length;
   }
 };
 
@@ -423,42 +431,93 @@ Commands.volumeSwitchCommand = {
 Commands.togglePinnedCommand = {
   execute: function(event, fileManager) {
     var pin = !event.command.checked;
-    var entry = CommandUtil.getSingleEntry(event, fileManager);
-
-    var showError = function(filesystem) {
-      fileManager.alert.showHtml(str('DRIVE_OUT_OF_SPACE_HEADER'),
-          strf('DRIVE_OUT_OF_SPACE_MESSAGE',
-               unescape(entry.name),
-               util.bytesToString(filesystem.size)));
-    };
-
-    var callback = function() {
-      if (chrome.runtime.lastError && pin) {
-        fileManager.metadataCache_.get(entry, 'filesystem', showError);
-      }
-      // We don't have update events yet, so clear the cached data.
-      fileManager.metadataCache_.clear(entry, 'drive');
-      fileManager.metadataCache_.get(entry, 'drive', function(drive) {
-        fileManager.updateMetadataInUI_('drive', [entry.toURL()], [drive]);
-      });
-    };
-
-    chrome.fileBrowserPrivate.pinDriveFile(entry.toURL(), pin, callback);
     event.command.checked = pin;
-  },
-  canExecute: function(event, fileManager) {
-    var entry = CommandUtil.getSingleEntry(event, fileManager);
-    var drive = entry && fileManager.metadataCache_.getCached(entry, 'drive');
+    var entries = Commands.togglePinnedCommand.getTargetEntries_();
+    var currentEntry;
+    var error = false;
+    var steps = {
+      // Pick an entry and pin it.
+      start: function() {
+        // Check if all the entries are pinned or not.
+        if (entries.length == 0)
+          return;
+        currentEntry = entries.shift();
+        chrome.fileBrowserPrivate.pinDriveFile(
+            currentEntry.toURL(),
+            pin,
+            steps.entryPinned);
+      },
 
-    if (!fileManager.isOnDrive() || !entry || entry.isDirectory || !drive ||
-        drive.hosted) {
-      event.canExecute = false;
-      event.command.setHidden(true);
-    } else {
+      // Check the result of pinning
+      entryPinned: function() {
+        // Convert to boolean.
+        error = !!chrome.runtime.lastError;
+        if (error && pin) {
+          fileManager.metadataCache_.get(
+              currentEntry, 'filesystem', steps.showError);
+        }
+        fileManager.metadataCache_.clear(currentEntry, 'drive');
+        fileManager.metadataCache_.get(
+            currentEntry, 'drive', steps.updateUI.bind(this));
+      },
+
+      // Update the user interface accoding to the cache state.
+      updateUI: function(drive) {
+        fileManager.updateMetadataInUI_(
+            'drive', [currentEntry.toURL()], [drive]);
+        if (!error)
+          steps.start();
+      },
+
+      // Show the error
+      showError: function(filesystem) {
+        fileManager.alert.showHtml(str('DRIVE_OUT_OF_SPACE_HEADER'),
+                                   strf('DRIVE_OUT_OF_SPACE_MESSAGE',
+                                        unescape(currentEntry.name),
+                                        util.bytesToString(filesystem.size)));
+      }
+    };
+    steps.start();
+  },
+
+  canExecute: function(event, fileManager) {
+    var entries = Commands.togglePinnedCommand.getTargetEntries_();
+    var checked = true;
+    for (var i = 0; i < entries.length; i++) {
+      checked = checked && entries[i].pinned;
+    }
+    if (entries.length > 0) {
       event.canExecute = true;
       event.command.setHidden(false);
-      event.command.checked = drive.pinned;
+      event.command.checked = checked;
+    } else {
+      event.canExecute = false;
+      event.command.setHidden(true);
     }
+  },
+
+  /**
+   * Obtains target entries from the selection.
+   * If directories are included in the selection, it just returns an empty
+   * array to avoid confusing because pinning directory is not supported
+   * currently.
+   *
+   * @return {Array.<Entry>} Target entries.
+   * @private
+   */
+  getTargetEntries_: function() {
+    var hasDirectory = false;
+    var results = fileManager.getSelection().entries.filter(function(entry) {
+      hasDirectory = hasDirectory || entry.isDirectory;
+      if (!entry || hasDirectory)
+        return false;
+      var metadata = fileManager.metadataCache_.getCached(entry, 'drive');
+        if (!metadata || metadata.hosted)
+          return false;
+      entry.pinned = metadata.pinned;
+      return true;
+    });
+    return hasDirectory ? [] : results;
   }
 };
 
@@ -469,8 +528,7 @@ Commands.zipSelectionCommand = {
   execute: function(event, fileManager, directoryModel) {
     var dirEntry = directoryModel.getCurrentDirEntry();
     var selectionEntries = fileManager.getSelection().entries;
-    fileManager.copyManager_.zipSelection(dirEntry, fileManager.isOnDrive(),
-                                          selectionEntries);
+    fileManager.copyManager_.zipSelection(dirEntry, selectionEntries);
   },
   canExecute: function(event, fileManager) {
     var selection = fileManager.getSelection();
@@ -493,6 +551,88 @@ Commands.shareCommand = {
         !fileManager.isDriveOffline() &&
         selection && selection.totalCount == 1;
     event.command.setHidden(!fileManager.isOnDrive());
+  }
+};
+
+/**
+ * Creates a shortcut of the selected folder (single only).
+ */
+Commands.createFolderShortcutCommand = {
+  /**
+   * @param {Event} event Command event.
+   * @param {FileManager} fileManager The file manager instance.
+   */
+  execute: function(event, fileManager) {
+    var path = CommandUtil.getCommandPath(event.target);
+    if (path)
+      fileManager.createFolderShortcut(path);
+  },
+
+  /**
+   * @param {Event} event Command event.
+   * @param {FileManager} fileManager The file manager instance.
+   */
+  canExecute: function(event, fileManager) {
+    var target = event.target;
+    // TODO(yoshiki): remove this after launching folder shortcuts feature.
+    if (!fileManager.isFolderShortcutsEnabled() ||
+        (!target instanceof NavigationListItem &&
+         !target instanceof DirectoryItem)) {
+      event.command.setHidden(true);
+      return;
+    }
+
+    var path = CommandUtil.getCommandPath(event.target);
+    var folderShortcutExists = path && fileManager.folderShortcutExists(path);
+
+    var onlyOneFolderSelected = true;
+    // Only on list, user can select multiple files. The command is enabled only
+    // when a single file is selected.
+    if (event.target instanceof cr.ui.List) {
+      var items = event.target.selectedItems;
+      onlyOneFolderSelected = (items.length == 1 && items[0].isDirectory);
+    }
+
+    var eligible = path && PathUtil.isEligibleForFolderShortcut(path);
+    event.canExecute =
+        eligible && onlyOneFolderSelected && !folderShortcutExists;
+    event.command.setHidden(!eligible || !onlyOneFolderSelected);
+  }
+};
+
+/**
+ * Removes the folder shortcut.
+ */
+Commands.removeFolderShortcutCommand = {
+  /**
+   * @param {Event} event Command event.
+   * @param {FileManager} fileManager The file manager instance.
+   */
+  execute: function(event, fileManager) {
+    var path = CommandUtil.getCommandPath(event.target);
+    if (path)
+      fileManager.removeFolderShortcut(path);
+  },
+
+  /**
+   * @param {Event} event Command event.
+   * @param {FileManager} fileManager The file manager instance.
+   */
+  canExecute: function(event, fileManager) {
+    var target = event.target;
+    // TODO(yoshiki): remove this after launching folder shortcut feature.
+    if (!fileManager.isFolderShortcutsEnabled() ||
+        (!target instanceof NavigationListItem &&
+         !target instanceof DirectoryItem)) {
+      event.command.setHidden(true);
+      return;
+    }
+
+    var path = CommandUtil.getCommandPath(target);
+    var eligible = path && PathUtil.isEligibleForFolderShortcut(path);
+    var isShortcut = path && fileManager.folderShortcutExists(path);
+    event.canExecute = isShortcut && eligible;
+    event.command.setHidden(!event.canExecute);
   }
 };
 

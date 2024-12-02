@@ -12,14 +12,14 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_member.h"
 #include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/extensions/api/web_request/upload_data_presenter.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
@@ -1615,7 +1615,7 @@ TEST(ExtensionWebRequestHelpersTest,
      TestMergeOnBeforeSendHeadersResponses_Cookies) {
   net::HttpRequestHeaders base_headers;
   base_headers.AddHeaderFromString(
-      "Cookie: name=value; name2=value2; name3=value3");
+      "Cookie: name=value; name2=value2; name3=\"value3\"");
   net::CapturingBoundNetLog capturing_net_log;
   net::BoundNetLog net_log = capturing_net_log.bound();
   ExtensionWarningSet warning_set;

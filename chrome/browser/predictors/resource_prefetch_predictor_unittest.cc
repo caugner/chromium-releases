@@ -5,9 +5,9 @@
 #include <iostream>
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/history_types.h"
@@ -186,7 +186,7 @@ ResourcePrefetchPredictorTest::~ResourcePrefetchPredictorTest() {
 void ResourcePrefetchPredictorTest::SetUp() {
   InitializeSampleData();
 
-  profile_->CreateHistoryService(true, false);
+  ASSERT_TRUE(profile_->CreateHistoryService(true, false));
   profile_->BlockUntilHistoryProcessesPendingRequests();
   EXPECT_TRUE(HistoryServiceFactory::GetForProfile(profile_.get(),
                                                    Profile::EXPLICIT_ACCESS));

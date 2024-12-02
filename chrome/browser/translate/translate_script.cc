@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/translate/translate_url_fetcher.h"
 #include "chrome/browser/translate/translate_url_util.h"
@@ -25,7 +25,6 @@ const int kExpirationDelayDays = 1;
 const char kScriptURL[] =
     "https://translate.google.com/translate_a/element.js";
 const char kRequestHeader[] = "Google-Translate-Element-Mode: library";
-const int kFetcherId = 0;
 
 // Used in kTranslateScriptURL to specify a callback function name.
 const char kCallbackQueryName[] = "cb";

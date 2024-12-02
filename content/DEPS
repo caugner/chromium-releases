@@ -27,10 +27,10 @@ include_rules = [
   "-cc/base/scoped_ptr_vector.h",
 
   "+crypto",
+  "+grit/blink_resources.h",
   "+grit/content_resources.h",
   "+grit/ui_resources.h",
   "+grit/ui_strings.h",
-  "+grit/webkit_chromium_resources.h",
   "+grit/webkit_resources.h",
   "+grit/webkit_strings.h",
   "+grit/webui_resources_map.h",
@@ -60,7 +60,6 @@ include_rules = [
   "-tools",
 
   # Allow inclusion of third-party code:
-  "+third_party/angle",
   "+third_party/angle_dx11",
   "+third_party/flac",
   "+third_party/gpsd",
@@ -100,8 +99,6 @@ include_rules = [
   "-ui/views",
 
   "+webkit",
-  "-webkit/dom_storage",
-  "+webkit/dom_storage/dom_storage_types.h",
 
   # For generated JNI includes.
   "+jni",

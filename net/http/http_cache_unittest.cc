@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/scoped_vector.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "net/base/cache_type.h"
@@ -1924,12 +1924,12 @@ TEST(HttpCache, DeleteCacheWaitingForBackend) {
   // We cannot call FinishCreation because the factory itself will go away with
   // the cache, so grab the callback and attempt to use it.
   net::CompletionCallback callback = factory->callback();
-  disk_cache::Backend** backend = factory->backend();
+  scoped_ptr<disk_cache::Backend>* backend = factory->backend();
 
   cache.reset();
   base::MessageLoop::current()->RunUntilIdle();
 
-  *backend = NULL;
+  backend->reset();
   callback.Run(net::ERR_ABORTED);
 }
 
@@ -3393,6 +3393,82 @@ TEST(HttpCache, RangeGET_OK) {
 
   RemoveMockTransaction(&kRangeGET_TransactionOK);
 }
+
+#if defined(OS_ANDROID)
+
+// Checks that with a cache backend having Sparse IO unimplementes the cache
+// entry would be doomed after a range request.
+// TODO(pasko): remove when the SimpleBackendImpl implements Sparse IO.
+TEST(HttpCache, RangeGET_SparseNotImplemented) {
+  MockHttpCache cache;
+  cache.disk_cache()->set_fail_sparse_requests();
+
+  // Run a cacheable request to prime the cache.
+  MockTransaction transaction(kTypicalGET_Transaction);
+  transaction.url = kRangeGET_TransactionOK.url;
+  AddMockTransaction(&transaction);
+  RunTransactionTest(cache.http_cache(), transaction);
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Verify that we added the entry.
+  disk_cache::Entry* entry;
+  net::TestCompletionCallback cb;
+  int rv = cache.disk_cache()->OpenEntry(transaction.url,
+                                         &entry,
+                                         cb.callback());
+  ASSERT_EQ(net::OK, cb.GetResult(rv));
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  entry->Close();
+  RemoveMockTransaction(&transaction);
+
+  // Request the range with the backend that does not support it.
+  MockTransaction transaction2(kRangeGET_TransactionOK);
+  std::string headers;
+  AddMockTransaction(&transaction2);
+  RunTransactionTestWithResponse(cache.http_cache(), transaction2, &headers);
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(2, cache.disk_cache()->open_count());
+  EXPECT_EQ(2, cache.disk_cache()->create_count());
+
+  // Mock cache would return net::ERR_CACHE_OPEN_FAILURE on a doomed entry, even
+  // if it was re-created later, so this effectively checks that the old data is
+  // gone.
+  disk_cache::Entry* entry2;
+  rv = cache.disk_cache()->OpenEntry(transaction2.url,
+                                     &entry2,
+                                     cb.callback());
+  ASSERT_EQ(net::ERR_CACHE_OPEN_FAILURE, cb.GetResult(rv));
+  RemoveMockTransaction(&transaction2);
+}
+
+TEST(HttpCache, RangeGET_SparseNotImplementedOnEmptyCache) {
+  MockHttpCache cache;
+  cache.disk_cache()->set_fail_sparse_requests();
+
+  // Request the range with the backend that does not support it.
+  MockTransaction transaction(kRangeGET_TransactionOK);
+  std::string headers;
+  AddMockTransaction(&transaction);
+  RunTransactionTestWithResponse(cache.http_cache(), transaction, &headers);
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Mock cache would return net::ERR_CACHE_OPEN_FAILURE on a doomed entry, even
+  // if it was re-created later, so this effectively checks that the old data is
+  // gone as a result of a failed range write.
+  disk_cache::Entry* entry;
+  net::TestCompletionCallback cb;
+  int rv = cache.disk_cache()->OpenEntry(transaction.url,
+                                         &entry,
+                                         cb.callback());
+  ASSERT_EQ(net::ERR_CACHE_OPEN_FAILURE, cb.GetResult(rv));
+  RemoveMockTransaction(&transaction);
+}
+
+#endif  // OS_ANDROID
 
 // Tests that we can cache range requests and fetch random blocks from the
 // cache and the network, with synchronous responses.
@@ -5935,17 +6011,22 @@ TEST(HttpCache, SetPriority) {
   EXPECT_EQ(net::ERR_IO_PENDING,
             trans->Start(&info, callback.callback(), net::BoundNetLog()));
 
-  ASSERT_TRUE(cache.network_layer()->last_transaction());
-  EXPECT_EQ(net::LOW,
-            cache.network_layer()->last_create_transaction_priority());
-  EXPECT_EQ(net::LOW,
-            cache.network_layer()->last_transaction()->priority());
+  EXPECT_TRUE(cache.network_layer()->last_transaction());
+  if (cache.network_layer()->last_transaction()) {
+    EXPECT_EQ(net::LOW,
+              cache.network_layer()->last_create_transaction_priority());
+    EXPECT_EQ(net::LOW,
+              cache.network_layer()->last_transaction()->priority());
+  }
 
   trans->SetPriority(net::HIGHEST);
-  EXPECT_EQ(net::LOW,
-            cache.network_layer()->last_create_transaction_priority());
-  EXPECT_EQ(net::HIGHEST,
-            cache.network_layer()->last_transaction()->priority());
+
+  if (cache.network_layer()->last_transaction()) {
+    EXPECT_EQ(net::LOW,
+              cache.network_layer()->last_create_transaction_priority());
+    EXPECT_EQ(net::HIGHEST,
+              cache.network_layer()->last_transaction()->priority());
+  }
 
   EXPECT_EQ(net::OK, callback.WaitForResult());
 }

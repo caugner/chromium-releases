@@ -34,10 +34,8 @@ void QuicConnectionPeer::SetSendAlgorithm(
 }
 
 // static
-QuicAckFrame* QuicConnectionPeer::GetOutgoingAck(
-    QuicConnection* connection) {
-  connection->UpdateOutgoingAck();
-  return &connection->outgoing_ack_;
+QuicAckFrame* QuicConnectionPeer::CreateAckFrame(QuicConnection* connection) {
+  return connection->CreateAckFrame();
 }
 
 // static
@@ -89,7 +87,7 @@ size_t QuicConnectionPeer::GetRetransmissionCount(
 QuicPacketEntropyHash QuicConnectionPeer::GetSentEntropyHash(
     QuicConnection* connection,
     QuicPacketSequenceNumber sequence_number) {
-  return connection->entropy_manager_.SentEntropyHash(sequence_number);
+  return connection->sent_entropy_manager_.EntropyHash(sequence_number);
 }
 
 // static
@@ -98,7 +96,7 @@ bool QuicConnectionPeer::IsValidEntropy(
     QuicPacketSequenceNumber largest_observed,
     const SequenceNumberSet& missing_packets,
     QuicPacketEntropyHash entropy_hash) {
-  return connection->entropy_manager_.IsValidEntropy(
+  return connection->sent_entropy_manager_.IsValidEntropy(
       largest_observed, missing_packets, entropy_hash);
 }
 
@@ -106,7 +104,8 @@ bool QuicConnectionPeer::IsValidEntropy(
 QuicPacketEntropyHash QuicConnectionPeer::ReceivedEntropyHash(
     QuicConnection* connection,
     QuicPacketSequenceNumber sequence_number) {
-  return connection->entropy_manager_.ReceivedEntropyHash(sequence_number);
+  return connection->received_packet_manager_.EntropyHash(
+      sequence_number);
 }
 
 // static
@@ -146,10 +145,36 @@ QuicConnectionHelperInterface* QuicConnectionPeer::GetHelper(
   return connection->helper_.get();
 }
 
+// static
+QuicFramer* QuicConnectionPeer::GetFramer(QuicConnection* connection) {
+  return &connection->framer_;
+}
+
 QuicFecGroup* QuicConnectionPeer::GetFecGroup(QuicConnection* connection,
                                               int fec_group) {
   connection->last_header_.fec_group = fec_group;
   return connection->GetFecGroup();
+}
+
+// static
+QuicAlarm* QuicConnectionPeer::GetAckAlarm(QuicConnection* connection) {
+  return connection->ack_alarm_.get();
+}
+
+// static
+QuicAlarm* QuicConnectionPeer::GetRetransmissionAlarm(
+    QuicConnection* connection) {
+  return connection->retransmission_alarm_.get();
+}
+
+// static
+QuicAlarm* QuicConnectionPeer::GetSendAlarm(QuicConnection* connection) {
+  return connection->send_alarm_.get();
+}
+
+// static
+QuicAlarm* QuicConnectionPeer::GetTimeoutAlarm(QuicConnection* connection) {
+  return connection->timeout_alarm_.get();
 }
 
 }  // namespace test

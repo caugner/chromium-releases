@@ -22,7 +22,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/test/cocoa_test_event_utils.h"
 #import "ui/base/test/ui_cocoa_test_helper.h"
-#include "webkit/plugins/npapi/webplugin.h"
 
 // Declare things that are part of the 10.7 SDK.
 #if !defined(MAC_OS_X_VERSION_10_7) || \
@@ -712,7 +711,8 @@ TEST_F(RenderWidgetHostViewMacTest, ScrollWheelEndEventDelivery) {
 
   // Send an ACK for the first wheel event, so that the queue will be flushed.
   scoped_ptr<IPC::Message> response(new InputHostMsg_HandleInputEvent_ACK(
-      0, WebKit::WebInputEvent::MouseWheel, INPUT_EVENT_ACK_STATE_CONSUMED));
+      0, WebKit::WebInputEvent::MouseWheel, INPUT_EVENT_ACK_STATE_CONSUMED,
+      ui::LatencyInfo()));
   host->OnMessageReceived(*response);
 
   // Post the NSEventPhaseEnded wheel event to NSApp and check whether the
@@ -756,7 +756,8 @@ TEST_F(RenderWidgetHostViewMacTest, IgnoreEmptyUnhandledWheelEvent) {
 
   // Indicate that the wheel event was unhandled.
   scoped_ptr<IPC::Message> response1(new InputHostMsg_HandleInputEvent_ACK(0,
-      WebKit::WebInputEvent::MouseWheel, INPUT_EVENT_ACK_STATE_NOT_CONSUMED));
+      WebKit::WebInputEvent::MouseWheel, INPUT_EVENT_ACK_STATE_NOT_CONSUMED,
+      ui::LatencyInfo()));
   host->OnMessageReceived(*response1);
 
   // Check that the view delegate got an unhandled wheel event.
@@ -770,7 +771,8 @@ TEST_F(RenderWidgetHostViewMacTest, IgnoreEmptyUnhandledWheelEvent) {
 
   // Indicate that the wheel event was also unhandled.
   scoped_ptr<IPC::Message> response2(new InputHostMsg_HandleInputEvent_ACK(0,
-      WebKit::WebInputEvent::MouseWheel, INPUT_EVENT_ACK_STATE_NOT_CONSUMED));
+      WebKit::WebInputEvent::MouseWheel, INPUT_EVENT_ACK_STATE_NOT_CONSUMED,
+      ui::LatencyInfo()));
   host->OnMessageReceived(*response2);
 
   // Check that the view delegate ignored the empty unhandled wheel event.

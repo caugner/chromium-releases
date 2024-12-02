@@ -10,6 +10,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "cc/trees/layer_tree_host_client.h"
+#include "content/browser/renderer_host/image_transport_factory_android.h"
 #include "content/common/content_export.h"
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/public/browser/android/compositor.h"
@@ -23,6 +24,7 @@ class LayerTreeHost;
 }
 
 namespace content {
+class CompositorClient;
 class GraphicsContext;
 
 // -----------------------------------------------------------------------------
@@ -31,9 +33,10 @@ class GraphicsContext;
 class CONTENT_EXPORT CompositorImpl
     : public Compositor,
       public cc::LayerTreeHostClient,
-      public WebGraphicsContext3DSwapBuffersClient {
+      public WebGraphicsContext3DSwapBuffersClient,
+      public ImageTransportFactoryAndroidObserver {
  public:
-  explicit CompositorImpl(Compositor::Client* client);
+  explicit CompositorImpl(CompositorClient* client);
   virtual ~CompositorImpl();
 
   static bool IsInitialized();
@@ -74,7 +77,8 @@ class CONTENT_EXPORT CompositorImpl
   virtual void Layout() OVERRIDE {}
   virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta,
                                    float page_scale) OVERRIDE {}
-  virtual scoped_ptr<cc::OutputSurface> CreateOutputSurface() OVERRIDE;
+  virtual scoped_ptr<cc::OutputSurface> CreateOutputSurface(bool fallback)
+      OVERRIDE;
   virtual void DidInitializeOutputSurface(bool success) OVERRIDE {}
   virtual void WillCommit() OVERRIDE {}
   virtual void DidCommit() OVERRIDE {}
@@ -91,6 +95,9 @@ class CONTENT_EXPORT CompositorImpl
   virtual void OnViewContextSwapBuffersComplete() OVERRIDE;
   virtual void OnViewContextSwapBuffersAborted() OVERRIDE;
 
+  // ImageTransportFactoryAndroidObserver implementation.
+  virtual void OnLostResources() OVERRIDE;
+
  private:
   WebKit::WebGLId BuildBasicTexture();
   WebKit::WGC3Denum GetGLFormatForBitmap(gfx::JavaBitmap& bitmap);
@@ -105,7 +112,7 @@ class CONTENT_EXPORT CompositorImpl
   ANativeWindow* window_;
   int surface_id_;
 
-  Compositor::Client* client_;
+  CompositorClient* client_;
   base::WeakPtrFactory<CompositorImpl> weak_factory_;
 
   scoped_refptr<cc::ContextProvider> null_offscreen_context_provider_;

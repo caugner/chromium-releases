@@ -12,7 +12,7 @@ DownloadRow::DownloadRow()
       state(content::DownloadItem::IN_PROGRESS),
       danger_type(content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS),
       interrupt_reason(content::DOWNLOAD_INTERRUPT_REASON_NONE),
-      db_handle(0),
+      id(content::DownloadItem::kInvalidId),
       opened(false) {
 }
 
@@ -23,26 +23,34 @@ DownloadRow::DownloadRow(
     const GURL& referrer,
     const base::Time& start,
     const base::Time& end,
+    const std::string& etag,
+    const std::string& last_modified,
     int64 received,
     int64 total,
     content::DownloadItem::DownloadState download_state,
     content::DownloadDangerType danger_type,
     content::DownloadInterruptReason interrupt_reason,
-    int64 handle,
-    bool download_opened)
+    uint32 id,
+    bool download_opened,
+    const std::string& ext_id,
+    const std::string& ext_name)
     : current_path(current_path),
       target_path(target_path),
       url_chain(url_chain),
       referrer_url(referrer),
       start_time(start),
       end_time(end),
+      etag(etag),
+      last_modified(last_modified),
       received_bytes(received),
       total_bytes(total),
       state(download_state),
       danger_type(danger_type),
       interrupt_reason(interrupt_reason),
-      db_handle(handle),
-      opened(download_opened) {
+      id(id),
+      opened(download_opened),
+      by_ext_id(ext_id),
+      by_ext_name(ext_name) {
 }
 
 DownloadRow::~DownloadRow() {

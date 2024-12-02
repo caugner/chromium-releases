@@ -4,10 +4,10 @@
 
 #include "content/browser/android/overscroll_glow.h"
 
+#include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "cc/layers/image_layer.h"
 #include "content/browser/android/edge_effect.h"
-#include "skia/ext/image_operations.h"
 #include "ui/gfx/android/java_bitmap.h"
 
 using std::max;
@@ -19,22 +19,16 @@ namespace {
 
 const float kEpsilon = 1e-3f;
 
-SkBitmap CreateBitmap(const char* resource, gfx::Size size) {
-  SkBitmap bitmap = gfx::CreateSkBitmapFromResource(resource);
-  if (bitmap.isNull())
-    return bitmap;
-  return skia::ImageOperations::Resize(bitmap,
-                                       skia::ImageOperations::RESIZE_GOOD,
-                                       size.width(), size.height());
-}
-
 class OverscrollResources {
  public:
-  OverscrollResources()
-    : edge_bitmap_(CreateBitmap("android:drawable/overscroll_edge",
-                                gfx::Size(256, 12))),
-      glow_bitmap_(CreateBitmap("android:drawable/overscroll_glow",
-                                gfx::Size(128, 128))) {
+  OverscrollResources() {
+    TRACE_EVENT0("browser", "OverscrollResources::Create");
+    edge_bitmap_ =
+        gfx::CreateSkBitmapFromResource("android:drawable/overscroll_edge",
+                                        gfx::Size(128, 12));
+    glow_bitmap_ =
+        gfx::CreateSkBitmapFromResource("android:drawable/overscroll_glow",
+                                        gfx::Size(128, 64));
   }
 
   const SkBitmap& edge_bitmap() { return edge_bitmap_; }
@@ -59,10 +53,6 @@ scoped_refptr<cc::Layer> CreateImageLayer(const SkBitmap& bitmap) {
 
 bool IsApproxZero(float value) {
   return std::abs(value) < kEpsilon;
-}
-
-bool IsApproxZero(gfx::Vector2dF vector) {
-  return IsApproxZero(vector.x()) && IsApproxZero(vector.y());
 }
 
 gfx::Vector2dF ZeroSmallComponents(gfx::Vector2dF vector) {
@@ -140,25 +130,32 @@ void OverscrollGlow::OnOverscrolled(base::TimeTicks current_time,
   if (!velocity.IsZero()) {
     // Release effects if scrolling has changed directions.
     if (velocity.x() * old_velocity_.x() < 0)
-      Release(AXIS_X, current_time);
+      ReleaseAxis(AXIS_X, current_time);
     if (velocity.y() * old_velocity_.y() < 0)
-      Release(AXIS_Y, current_time);
+      ReleaseAxis(AXIS_Y, current_time);
 
     Absorb(current_time, velocity, overscroll, old_overscroll_);
   } else {
     // Release effects when overscroll accumulation violates monotonicity.
     if (overscroll.x() * old_overscroll_.x() < 0 ||
         std::abs(overscroll.x()) < std::abs(old_overscroll_.x()))
-      Release(AXIS_X, current_time);
+      ReleaseAxis(AXIS_X, current_time);
     if (overscroll.y() * old_overscroll_.y() < 0 ||
         std::abs(overscroll.y()) < std::abs(old_overscroll_.y()))
-      Release(AXIS_Y, current_time);
+      ReleaseAxis(AXIS_Y, current_time);
 
     Pull(current_time, overscroll - old_overscroll_);
   }
 
   old_velocity_ = velocity;
   old_overscroll_ = overscroll;
+}
+
+void OverscrollGlow::Release(base::TimeTicks current_time) {
+  for (size_t i = 0; i < EdgeEffect::EDGE_COUNT; ++i) {
+    edge_effects_[i]->Release(current_time);
+  }
+  old_overscroll_ = old_velocity_ = gfx::Vector2dF();
 }
 
 bool OverscrollGlow::Animate(base::TimeTicks current_time) {
@@ -249,14 +246,7 @@ void OverscrollGlow::Absorb(base::TimeTicks current_time,
   }
 }
 
-void OverscrollGlow::Release(base::TimeTicks current_time) {
-  for (size_t i = 0; i < EdgeEffect::EDGE_COUNT; ++i) {
-    edge_effects_[i]->Release(current_time);
-  }
-  old_overscroll_ = old_velocity_ = gfx::Vector2dF();
-}
-
-void OverscrollGlow::Release(Axis axis, base::TimeTicks current_time) {
+void OverscrollGlow::ReleaseAxis(Axis axis, base::TimeTicks current_time) {
   switch (axis) {
     case AXIS_X:
       edge_effects_[EdgeEffect::EDGE_LEFT]->Release(current_time);

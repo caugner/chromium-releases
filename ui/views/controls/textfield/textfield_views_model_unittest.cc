@@ -6,7 +6,7 @@
 
 #include "base/auto_reset.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -23,13 +23,12 @@
 #include "base/win/windows_version.h"
 #endif
 
+#define EXPECT_STR_EQ(ascii, utf16) EXPECT_EQ(ASCIIToUTF16(ascii), utf16)
+
 namespace {
 
 struct WordAndCursor {
-  WordAndCursor(const wchar_t* w, size_t c)
-      : word(w),
-        cursor(c) {
-  }
+  WordAndCursor(const wchar_t* w, size_t c) : word(w), cursor(c) {}
 
   const wchar_t* word;
   size_t cursor;
@@ -67,8 +66,6 @@ class TextfieldViewsModelTest : public ViewsTestBase,
   DISALLOW_COPY_AND_ASSIGN(TextfieldViewsModelTest);
 };
 
-#define EXPECT_STR_EQ(ascii, utf16) \
-  EXPECT_EQ(ASCIIToWide(ascii), UTF16ToWide(utf16))
 TEST_F(TextfieldViewsModelTest, EditString) {
   TextfieldViewsModel model(NULL);
   // append two strings
@@ -316,7 +313,7 @@ TEST_F(TextfieldViewsModelTest, Selection_BidiWithNonSpacingMarks) {
   // to test 2 characters belong to the same grapheme.
 #if defined(OS_LINUX)
   model.Append(WideToUTF16(
-      L"abc\x05E9\x05BC\x05C1\x05B8\x05E0\x05B8"L"def"));
+      L"abc\x05E9\x05BC\x05C1\x05B8\x05E0\x05B8" L"def"));
   model.MoveCursor(gfx::CHARACTER_BREAK, gfx::CURSOR_RIGHT, false);
   model.MoveCursor(gfx::CHARACTER_BREAK, gfx::CURSOR_RIGHT, false);
 
@@ -335,19 +332,19 @@ TEST_F(TextfieldViewsModelTest, Selection_BidiWithNonSpacingMarks) {
 
   model.MoveCursor(gfx::CHARACTER_BREAK, gfx::CURSOR_RIGHT, true);
   EXPECT_EQ(ui::Range(2, 10), model.render_text()->selection());
-  EXPECT_EQ(WideToUTF16(L"c\x05E9\x05BC\x05C1\x05B8\x05E0\x05B8"L"d"),
+  EXPECT_EQ(WideToUTF16(L"c\x05E9\x05BC\x05C1\x05B8\x05E0\x05B8" L"d"),
             model.GetSelectedText());
 
   model.ClearSelection();
   EXPECT_EQ(string16(), model.GetSelectedText());
   model.SelectAll(false);
-  EXPECT_EQ(WideToUTF16(L"abc\x05E9\x05BC\x05C1\x05B8\x05E0\x05B8"L"def"),
+  EXPECT_EQ(WideToUTF16(L"abc\x05E9\x05BC\x05C1\x05B8\x05E0\x05B8" L"def"),
             model.GetSelectedText());
 #endif
 
   // In case of "aBc", this test shows how to select "aB" or "Bc", assume 'B' is
   // an RTL character.
-  model.SetText(WideToUTF16(L"a\x05E9"L"b"));
+  model.SetText(WideToUTF16(L"a\x05E9" L"b"));
   MoveCursorTo(model, 0);
   model.MoveCursor(gfx::CHARACTER_BREAK, gfx::CURSOR_RIGHT, true);
   EXPECT_EQ(WideToUTF16(L"a"), model.GetSelectedText());
@@ -356,7 +353,7 @@ TEST_F(TextfieldViewsModelTest, Selection_BidiWithNonSpacingMarks) {
   EXPECT_EQ(WideToUTF16(L"a"), model.GetSelectedText());
 
   model.MoveCursor(gfx::CHARACTER_BREAK, gfx::CURSOR_RIGHT, true);
-  EXPECT_EQ(WideToUTF16(L"a\x05E9"L"b"), model.GetSelectedText());
+  EXPECT_EQ(WideToUTF16(L"a\x05E9" L"b"), model.GetSelectedText());
 
   model.MoveCursor(gfx::CHARACTER_BREAK, gfx::CURSOR_RIGHT, false);
   EXPECT_EQ(3U, model.GetCursorPosition());
@@ -367,7 +364,7 @@ TEST_F(TextfieldViewsModelTest, Selection_BidiWithNonSpacingMarks) {
   EXPECT_EQ(WideToUTF16(L"b"), model.GetSelectedText());
 
   model.MoveCursor(gfx::CHARACTER_BREAK, gfx::CURSOR_LEFT, true);
-  EXPECT_EQ(WideToUTF16(L"a\x05E9"L"b"), model.GetSelectedText());
+  EXPECT_EQ(WideToUTF16(L"a\x05E9" L"b"), model.GetSelectedText());
 
   model.MoveCursor(gfx::LINE_BREAK, gfx::CURSOR_LEFT, false);
   model.MoveCursor(gfx::CHARACTER_BREAK, gfx::CURSOR_RIGHT, true);
@@ -379,12 +376,12 @@ TEST_F(TextfieldViewsModelTest, Selection_BidiWithNonSpacingMarks) {
   model.MoveCursor(gfx::CHARACTER_BREAK, gfx::CURSOR_LEFT, true);
   model.MoveCursor(gfx::CHARACTER_BREAK, gfx::CURSOR_LEFT, true);
   model.MoveCursor(gfx::CHARACTER_BREAK, gfx::CURSOR_RIGHT, true);
-  EXPECT_EQ(WideToUTF16(L"\x05E9"L"b"), model.GetSelectedText());
+  EXPECT_EQ(WideToUTF16(L"\x05E9" L"b"), model.GetSelectedText());
 
   model.ClearSelection();
   EXPECT_EQ(string16(), model.GetSelectedText());
   model.SelectAll(false);
-  EXPECT_EQ(WideToUTF16(L"a\x05E9"L"b"), model.GetSelectedText());
+  EXPECT_EQ(WideToUTF16(L"a\x05E9" L"b"), model.GetSelectedText());
 }
 
 TEST_F(TextfieldViewsModelTest, SelectionAndEdit) {

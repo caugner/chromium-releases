@@ -8,7 +8,7 @@
 #include "ash/launcher/launcher_model.h"
 #include "ash/launcher/launcher_view.h"
 #include "ash/launcher/overflow_button.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "ui/views/animation/bounds_animator.h"
 #include "ui/views/view_model.h"
 
@@ -93,6 +93,11 @@ void LauncherViewTestAPI::RunMessageLoopUntilAnimationsDone() {
   base::MessageLoop::current()->Run();
 
   launcher_view_->bounds_animator_->RemoveObserver(observer.get());
+}
+
+bool LauncherViewTestAPI::SameDragType(LauncherItemType typea,
+                                       LauncherItemType typeb) const {
+  return launcher_view_->SameDragType(typea, typeb);
 }
 
 }  // namespace test

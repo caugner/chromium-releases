@@ -15,7 +15,7 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -50,6 +50,7 @@
 #include "remoting/host/host_event_logger.h"
 #include "remoting/host/host_exit_codes.h"
 #include "remoting/host/host_main.h"
+#include "remoting/host/host_status_sender.h"
 #include "remoting/host/ipc_constants.h"
 #include "remoting/host/ipc_desktop_environment.h"
 #include "remoting/host/ipc_host_event_logger.h"
@@ -63,7 +64,6 @@
 #include "remoting/host/session_manager_factory.h"
 #include "remoting/host/signaling_connector.h"
 #include "remoting/host/token_validator_factory_impl.h"
-#include "remoting/host/ui_strings.h"
 #include "remoting/host/usage_stats_consent.h"
 #include "remoting/jingle_glue/network_settings.h"
 #include "remoting/jingle_glue/xmpp_signal_strategy.h"
@@ -109,6 +109,10 @@ const char kAudioPipeSwitchName[] = "audio-pipe-name";
 // The command line switch used by the parent to request the host to signal it
 // when it is successfully started.
 const char kSignalParentSwitchName[] = "signal-parent";
+
+// Value used for --host-config option to indicate that the path must be read
+// from stdin.
+const char kStdinConfigPath[] = "-";
 
 void QuitMessageLoop(base::MessageLoop* message_loop) {
   message_loop->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
@@ -213,6 +217,7 @@ class HostProcess
   bool OnHostTalkGadgetPrefixPolicyUpdate(const std::string& talkgadget_prefix);
   bool OnHostTokenUrlPolicyUpdate(const GURL& token_url,
                                   const GURL& token_validation_url);
+  bool OnPairingPolicyUpdate(bool pairing_enabled);
 
   void StartHost();
 
@@ -221,7 +226,9 @@ class HostProcess
   void RestartHost();
 
   // Stops the host and shuts down the process with the specified |exit_code|.
-  void ShutdownHost(int exit_code);
+  void ShutdownHost(HostExitCodes exit_code);
+
+  void ScheduleHostShutdown();
 
   void ShutdownOnNetworkThread();
 
@@ -246,6 +253,7 @@ class HostProcess
 
   // Created on the UI thread but used from the network thread.
   base::FilePath host_config_path_;
+  std::string host_config_;
   scoped_ptr<DesktopEnvironmentFactory> desktop_environment_factory_;
 
   // Accessed on the network thread.
@@ -264,6 +272,7 @@ class HostProcess
   scoped_ptr<policy_hack::PolicyWatcher> policy_watcher_;
   bool allow_nat_traversal_;
   std::string talkgadget_prefix_;
+  bool allow_pairing_;
 
   bool curtain_required_;
   GURL token_url_;
@@ -272,6 +281,7 @@ class HostProcess
   scoped_ptr<XmppSignalStrategy> signal_strategy_;
   scoped_ptr<SignalingConnector> signaling_connector_;
   scoped_ptr<HeartbeatSender> heartbeat_sender_;
+  scoped_ptr<HostStatusSender> host_status_sender_;
   scoped_ptr<HostChangeNotificationListener> host_change_notification_listener_;
   scoped_ptr<LogToServer> log_to_server_;
   scoped_ptr<HostEventLogger> host_event_logger_;
@@ -294,6 +304,7 @@ HostProcess::HostProcess(scoped_ptr<ChromotingHostContext> context,
     : context_(context.Pass()),
       state_(HOST_INITIALIZING),
       allow_nat_traversal_(true),
+      allow_pairing_(true),
       curtain_required_(false),
 #if defined(REMOTING_MULTI_PROCESS)
       desktop_session_connector_(NULL),
@@ -360,17 +371,35 @@ bool HostProcess::InitWithCommandLine(const CommandLine* cmd_line) {
                               context_->network_task_runner().get()));
   }
 
-  base::FilePath default_config_dir = remoting::GetConfigDir();
-  host_config_path_ = default_config_dir.Append(kDefaultHostConfigFile);
   if (cmd_line->HasSwitch(kHostConfigSwitchName)) {
     host_config_path_ = cmd_line->GetSwitchValuePath(kHostConfigSwitchName);
+
+    // Read config from stdin if necessary.
+    if (host_config_path_ == base::FilePath(kStdinConfigPath)) {
+      char buf[4096];
+      size_t len;
+      while ((len = fread(buf, 1, sizeof(buf), stdin)) > 0) {
+        host_config_.append(buf, len);
+      }
+    }
+  } else {
+    base::FilePath default_config_dir = remoting::GetConfigDir();
+    host_config_path_ = default_config_dir.Append(kDefaultHostConfigFile);
+  }
+
+  if (host_config_path_ != base::FilePath(kStdinConfigPath) &&
+      !base::PathExists(host_config_path_)) {
+    LOG(ERROR) << "Can't find host config at " << host_config_path_.value();
+    return false;
   }
 #endif  // !defined(REMOTING_MULTI_PROCESS)
 
+  // Ignore certificate requests - the host currently has no client certificate
+  // support, so ignoring certificate requests allows connecting to servers that
+  // request, but don't require, a certificate (optional client authentication).
+  net::URLFetcher::SetIgnoreCertificateRequests(true);
+
   ServiceUrls* service_urls = ServiceUrls::GetInstance();
-  if (service_urls->ignore_urlfetcher_cert_requests()) {
-    net::URLFetcher::SetIgnoreCertificateRequests(true);
-  }
   bool xmpp_server_valid = net::ParseHostAndPort(
       service_urls->xmpp_server_address(),
       &xmpp_server_config_.host, &xmpp_server_config_.port);
@@ -441,11 +470,16 @@ void HostProcess::StartOnNetworkThread() {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
 #if !defined(REMOTING_MULTI_PROCESS)
-  // Start watching the host configuration file.
-  config_watcher_.reset(new ConfigFileWatcher(context_->network_task_runner(),
-                                              context_->file_task_runner(),
-                                              this));
-  config_watcher_->Watch(host_config_path_);
+  if (host_config_path_ == base::FilePath(kStdinConfigPath)) {
+    // Process config we've read from stdin.
+    OnConfigUpdated(host_config_);
+  } else {
+    // Start watching the host configuration file.
+    config_watcher_.reset(new ConfigFileWatcher(context_->network_task_runner(),
+                                                context_->file_task_runner(),
+                                                this));
+    config_watcher_->Watch(host_config_path_);
+  }
 #endif  // !defined(REMOTING_MULTI_PROCESS)
 
 #if defined(OS_POSIX)
@@ -477,9 +511,10 @@ void HostProcess::CreateAuthenticatorFactory() {
     return;
   }
 
-  // TODO(jamiewalch): Create a pairing registry here once all the code
-  // is committed.
-  scoped_refptr<remoting::protocol::PairingRegistry> pairing_registry = NULL;
+  scoped_refptr<protocol::PairingRegistry> pairing_registry = NULL;
+  if (allow_pairing_) {
+    pairing_registry = CreatePairingRegistry(context_->file_task_runner());
+  }
 
   scoped_ptr<protocol::AuthenticatorFactory> factory;
 
@@ -559,7 +594,7 @@ void HostProcess::StartOnUiThread() {
     // Shutdown the host if the command line is invalid.
     context_->network_task_runner()->PostTask(
         FROM_HERE, base::Bind(&HostProcess::ShutdownHost, this,
-                              kInvalidHostConfigurationExitCode));
+                              kUsageExitCode));
     return;
   }
 
@@ -573,9 +608,6 @@ void HostProcess::StartOnUiThread() {
         context_->audio_task_runner(), audio_pipe_name);
   }
 #endif  // defined(OS_LINUX)
-
-  // TODO(alexeypa): Localize the UI strings. See http://crbug.com/155204.
-  UiStrings ui_strings;
 
   // Create a desktop environment factory appropriate to the build type &
   // platform.
@@ -593,8 +625,7 @@ void HostProcess::StartOnUiThread() {
       new Me2MeDesktopEnvironmentFactory(
           context_->network_task_runner(),
           context_->input_task_runner(),
-          context_->ui_task_runner(),
-          ui_strings);
+          context_->ui_task_runner());
 #endif  // !defined(OS_WIN)
 
   desktop_environment_factory_.reset(desktop_environment_factory);
@@ -748,6 +779,11 @@ void HostProcess::OnPolicyUpdate(scoped_ptr<base::DictionaryValue> policies) {
     restart_required |= OnHostTokenUrlPolicyUpdate(
         GURL(token_url_string), GURL(token_validation_url_string));
   }
+  if (policies->GetBoolean(
+          policy_hack::PolicyWatcher::kHostAllowClientPairing,
+          &bool_value)) {
+    restart_required |= OnPairingPolicyUpdate(bool_value);
+  }
 
   if (state_ == HOST_INITIALIZING) {
     StartHost();
@@ -893,6 +929,20 @@ bool HostProcess::OnHostTokenUrlPolicyUpdate(
   return false;
 }
 
+bool HostProcess::OnPairingPolicyUpdate(bool allow_pairing) {
+  DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
+
+  if (allow_pairing_ == allow_pairing)
+    return false;
+
+  if (allow_pairing)
+    LOG(INFO) << "Policy enables client pairing.";
+  else
+    LOG(INFO) << "Policy disables client pairing.";
+  allow_pairing_ = allow_pairing;
+  return true;
+}
+
 void HostProcess::StartHost() {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
   DCHECK(!host_);
@@ -956,6 +1006,9 @@ void HostProcess::StartHost() {
       this, host_id_, signal_strategy_.get(), key_pair_,
       directory_bot_jid_));
 
+  host_status_sender_.reset(new HostStatusSender(
+      host_id_, signal_strategy_.get(), key_pair_, directory_bot_jid_));
+
   host_change_notification_listener_.reset(new HostChangeNotificationListener(
       this, host_id_, signal_strategy_.get(), directory_bot_jid_));
 
@@ -990,16 +1043,21 @@ void HostProcess::RestartHost() {
   ShutdownOnNetworkThread();
 }
 
-void HostProcess::ShutdownHost(int exit_code) {
+void HostProcess::ShutdownHost(HostExitCodes exit_code) {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
   *exit_code_out_ = exit_code;
 
   switch (state_) {
     case HOST_INITIALIZING:
-    case HOST_STARTED:
       state_ = HOST_STOPPING;
       ShutdownOnNetworkThread();
+      break;
+
+    case HOST_STARTED:
+      state_ = HOST_STOPPING;
+      host_status_sender_->SendOfflineStatus(exit_code);
+      ScheduleHostShutdown();
       break;
 
     case HOST_STOPPING_TO_RESTART:
@@ -1013,6 +1071,16 @@ void HostProcess::ShutdownHost(int exit_code) {
   }
 }
 
+// TODO(weitaosu): shut down the host once we get an ACK for the offline status
+//                  XMPP message.
+void HostProcess::ScheduleHostShutdown() {
+  // Delay the shutdown by 2 second to allow SendOfflineStatus to complete.
+  context_->network_task_runner()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&HostProcess::ShutdownOnNetworkThread, base::Unretained(this)),
+      base::TimeDelta::FromSeconds(2));
+}
+
 void HostProcess::ShutdownOnNetworkThread() {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
@@ -1020,6 +1088,7 @@ void HostProcess::ShutdownOnNetworkThread() {
   host_event_logger_.reset();
   log_to_server_.reset();
   heartbeat_sender_.reset();
+  host_status_sender_.reset();
   host_change_notification_listener_.reset();
   signaling_connector_.reset();
   signal_strategy_.reset();

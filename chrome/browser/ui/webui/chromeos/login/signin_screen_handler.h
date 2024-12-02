@@ -34,6 +34,7 @@ class ListValue;
 namespace chromeos {
 
 class CaptivePortalWindowProxy;
+class CoreOobeActor;
 class LocallyManagedUserCreationScreenHandler;
 class NativeWindowDelegate;
 class User;
@@ -171,7 +172,8 @@ class SigninScreenHandler
  public:
   SigninScreenHandler(
       const scoped_refptr<NetworkStateInformer>& network_state_informer,
-      ErrorScreenActor* error_screen_actor);
+      ErrorScreenActor* error_screen_actor,
+      CoreOobeActor* core_oobe_actor);
   virtual ~SigninScreenHandler();
 
   // Shows the sign in screen. |oobe_ui| indicates whether the signin
@@ -189,9 +191,10 @@ class SigninScreenHandler
 
   // NetworkStateInformer::NetworkStateInformerObserver implementation:
   virtual void OnNetworkReady() OVERRIDE;
+  virtual void UpdateState(ErrorScreenActor::ErrorReason reason) OVERRIDE;
 
-  virtual void UpdateState(NetworkStateInformer::State state,
-                           ErrorScreenActor::ErrorReason reason) OVERRIDE;
+  // Required Local State preferences.
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
  private:
   enum UIState {
@@ -217,8 +220,7 @@ class SigninScreenHandler
   // |params| argument.
   void UpdateUIState(UIState ui_state, DictionaryValue* params);
 
-  void UpdateStateInternal(NetworkStateInformer::State state,
-                           ErrorScreenActor::ErrorReason reason,
+  void UpdateStateInternal(ErrorScreenActor::ErrorReason reason,
                            bool force_update);
   void SetupAndShowOfflineMessage(NetworkStateInformer::State state,
                                   ErrorScreenActor::ErrorReason reason);
@@ -309,9 +311,7 @@ class SigninScreenHandler
   void HandleAccountPickerReady();
   void HandleWallpaperReady();
   void HandleLoginWebuiReady();
-  void HandleDemoWebuiReady();
   void HandleSignOutUser();
-  void HandleUserImagesLoaded();
   void HandleNetworkErrorShown();
   void HandleOpenProxySettings();
   void HandleLoginVisible(const std::string& source);
@@ -376,6 +376,12 @@ class SigninScreenHandler
   // Returns true if offline login is allowed.
   bool IsOfflineLoginAllowed() const;
 
+  // Attempts login for test.
+  void SubmitLoginFormForTest();
+
+  // Update current input method (namely keyboard layout) to LRU by this user.
+  void SetUserInputMethod(const std::string& username);
+
   // Current UI state of the signin screen.
   UIState ui_state_;
 
@@ -432,6 +438,7 @@ class SigninScreenHandler
   // Test credentials.
   std::string test_user_;
   std::string test_pass_;
+  bool test_expects_complete_login_;
 
   base::WeakPtrFactory<SigninScreenHandler> weak_factory_;
 
@@ -440,6 +447,7 @@ class SigninScreenHandler
   bool preferences_changed_delayed_;
 
   ErrorScreenActor* error_screen_actor_;
+  CoreOobeActor* core_oobe_actor_;
 
   bool is_first_update_state_call_;
   bool offline_login_active_;
@@ -454,12 +462,6 @@ class SigninScreenHandler
   // NOTIFICATION_AUTH_NEEDED and reset on either NOTIFICATION_AUTH_SUPPLIED or
   // NOTIFICATION_AUTH_CANCELLED.
   bool has_pending_auth_ui_;
-
-  // Whether to ignore the next net::ERR_ABORTED frame error. ERR_ABORTED could
-  // be triggered when reloading gaia frame's src with a pending load.
-  // ReloadGaiaExtension() sets this flag to true to ignore potential
-  // ERR_ABORTED triggered from its reload request. See http://crbug.com/242527.
-  bool ignore_next_user_abort_frame_error_;
 
   DISALLOW_COPY_AND_ASSIGN(SigninScreenHandler);
 };

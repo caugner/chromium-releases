@@ -11,6 +11,7 @@
 #include "base/path_service.h"
 #include "base/threading/thread.h"
 #include "media/base/decrypt_config.h"
+#include "media/base/media_log.h"
 #include "media/base/mock_demuxer_host.h"
 #include "media/base/test_helpers.h"
 #include "media/ffmpeg/ffmpeg_common.h"
@@ -36,7 +37,7 @@ namespace media {
 
 MATCHER(IsEndOfStreamBuffer,
         std::string(negation ? "isn't" : "is") + " end of stream") {
-  return arg->IsEndOfStream();
+  return arg->end_of_stream();
 }
 
 static void EosOnReadDone(bool* got_eos_buffer,
@@ -46,13 +47,13 @@ static void EosOnReadDone(bool* got_eos_buffer,
       FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
 
   EXPECT_EQ(status, DemuxerStream::kOk);
-  if (buffer->IsEndOfStream()) {
+  if (buffer->end_of_stream()) {
     *got_eos_buffer = true;
     return;
   }
 
-  EXPECT_TRUE(buffer->GetData());
-  EXPECT_GT(buffer->GetDataSize(), 0);
+  EXPECT_TRUE(buffer->data());
+  EXPECT_GT(buffer->data_size(), 0);
   *got_eos_buffer = false;
 };
 
@@ -82,8 +83,10 @@ class FFmpegDemuxerTest : public testing::Test {
 
     media::FFmpegNeedKeyCB need_key_cb =
         base::Bind(&FFmpegDemuxerTest::NeedKeyCB, base::Unretained(this));
-    demuxer_.reset(new FFmpegDemuxer(
-        message_loop_.message_loop_proxy(), data_source_.get(), need_key_cb));
+    demuxer_.reset(new FFmpegDemuxer(message_loop_.message_loop_proxy(),
+                                     data_source_.get(),
+                                     need_key_cb,
+                                     new MediaLog()));
   }
 
   MOCK_METHOD1(CheckPoint, void(int v));
@@ -111,9 +114,9 @@ class FFmpegDemuxerTest : public testing::Test {
     EXPECT_EQ(status, DemuxerStream::kOk);
     OnReadDoneCalled(size, timestampInMicroseconds);
     EXPECT_TRUE(buffer.get() != NULL);
-    EXPECT_EQ(size, buffer->GetDataSize());
+    EXPECT_EQ(size, buffer->data_size());
     EXPECT_EQ(base::TimeDelta::FromMicroseconds(timestampInMicroseconds),
-              buffer->GetTimestamp());
+              buffer->timestamp());
 
     DCHECK_EQ(&message_loop_, base::MessageLoop::current());
     message_loop_.PostTask(FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());

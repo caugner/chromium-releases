@@ -13,7 +13,7 @@ import third_party.json_schema_compiler.json_comment_eater as json_comment_eater
 import third_party.json_schema_compiler.model as model
 import url_constants
 
-DEFAULT_ICON_PATH = '/images/sample-default-icon.png'
+DEFAULT_ICON_PATH = 'images/sample-default-icon.png'
 
 class SamplesDataSource(object):
   '''Constructs a list of samples and their respective files and api calls.
@@ -23,18 +23,18 @@ class SamplesDataSource(object):
     Requests.
     '''
     def __init__(self,
-                 channel,
                  host_file_system,
                  compiled_host_fs_factory,
                  app_samples_file_system,
                  compiled_app_samples_fs_factory,
                  ref_resolver_factory,
-                 extension_samples_path):
+                 extension_samples_path,
+                 base_path):
       self._host_file_system = host_file_system
       self._app_samples_file_system = app_samples_file_system
-      self._static_path = '/%s/static' % channel
       self._ref_resolver = ref_resolver_factory.Create()
       self._extension_samples_path = extension_samples_path
+      self._base_path = base_path
       self._extensions_cache = compiled_host_fs_factory.Create(
           self._MakeSamplesList,
           SamplesDataSource,
@@ -50,6 +50,7 @@ class SamplesDataSource(object):
       return SamplesDataSource(self._extensions_cache,
                                self._apps_cache,
                                self._extension_samples_path,
+                               self._base_path,
                                request)
 
     def _GetAPIItems(self, js_file):
@@ -105,18 +106,13 @@ class SamplesDataSource(object):
       for filename in sorted(files):
         if filename.rsplit('/')[-1] != 'manifest.json':
           continue
+
         # This is a little hacky, but it makes a sample page.
         sample_path = filename.rsplit('/', 1)[-2]
         sample_files = [path for path in files
                         if path.startswith(sample_path + '/')]
         js_files = [path for path in sample_files if path.endswith('.js')]
-        try:
-          js_contents = file_system.Read(js_files).Get()
-        except FileNotFoundError as e:
-          logging.warning('Error fetching samples files: %s. Was a file '
-                          'deleted from a sample? This warning should go away '
-                          'in 5 minutes.' % e)
-          continue
+        js_contents = file_system.Read(js_files).Get()
         api_items = set()
         for js in js_contents.values():
           api_items.update(self._GetAPIItems(js))
@@ -138,15 +134,6 @@ class SamplesDataSource(object):
             'name': ref_data['text'],
             'link': ref_data['href']
           })
-        try:
-          manifest_data = self._GetDataFromManifest(sample_path, file_system)
-        except FileNotFoundError as e:
-          logging.warning('Error getting data from samples manifest: %s. If '
-                          'this file was deleted from a sample this message '
-                          'should go away in 5 minutes.' % e)
-          continue
-        if manifest_data is None:
-          continue
 
         sample_base_path = sample_path.split('/', 1)[1]
         if is_apps:
@@ -158,10 +145,11 @@ class SamplesDataSource(object):
           icon_base = sample_base_path
           download_url = sample_base_path + '.zip'
 
+        manifest_data = self._GetDataFromManifest(sample_path, file_system)
         if manifest_data['icon'] is None:
-          icon_path = self._static_path + DEFAULT_ICON_PATH
+          icon_path = '%s/static/%s' % (self._base_path, DEFAULT_ICON_PATH)
         else:
-          icon_path = icon_base + '/' + manifest_data['icon']
+          icon_path = '%s/%s' % (icon_base, manifest_data['icon'])
         manifest_data.update({
           'icon': icon_path,
           'id': hashlib.md5(url).hexdigest(),
@@ -178,10 +166,12 @@ class SamplesDataSource(object):
                extensions_cache,
                apps_cache,
                extension_samples_path,
+               base_path,
                request):
     self._extensions_cache = extensions_cache
     self._apps_cache = apps_cache
     self._extension_samples_path = extension_samples_path
+    self._base_path = base_path
     self._request = request
 
   def _GetAcceptedLanguages(self):

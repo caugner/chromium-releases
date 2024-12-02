@@ -10,7 +10,7 @@
 #include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/path_service.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chromeos/chromeos_paths.h"
 #include "content/public/browser/browser_thread.h"
@@ -27,7 +27,7 @@ ExternalLoader* loader_instance = NULL;
 // if the file does not exist or could not be parsed properly. Caller takes
 // ownership of the returned value.
 base::ListValue* ReadExternalOrdinalFile(const base::FilePath& path) {
-  if (!file_util::PathExists(path))
+  if (!base::PathExists(path))
     return NULL;
 
   JSONFileValueSerializer serializer(path);

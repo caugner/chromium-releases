@@ -24,7 +24,7 @@
 #include "components/autofill/core/browser/personal_data_manager_observer.h"
 #include "components/autofill/core/browser/phone_number.h"
 #include "components/autofill/core/browser/phone_number_i18n.h"
-#include "sync/util/data_encryption_win.h"
+#include "components/webdata/encryptor/encryptor.h"
 
 using base::win::RegKey;
 
@@ -81,12 +81,12 @@ base::string16 ReadAndDecryptValue(const RegKey& key,
   LONG result = key.ReadValue(value_name, NULL, &data_size, &data_type);
   if ((result != ERROR_SUCCESS) || !data_size || data_type != REG_BINARY)
     return base::string16();
-  std::vector<uint8> data;
+  std::string data;
   data.resize(data_size);
   result = key.ReadValue(value_name, &(data[0]), &data_size, &data_type);
   if (result == ERROR_SUCCESS) {
     std::string out_data;
-    if (syncer::DecryptData(data, &out_data)) {
+    if (Encryptor::DecryptString(data, &out_data)) {
       // The actual data is in UTF16 already.
       if (!(out_data.size() & 1) && (out_data.size() > 2) &&
           !out_data[out_data.size() - 1] && !out_data[out_data.size() - 2]) {
@@ -99,7 +99,7 @@ base::string16 ReadAndDecryptValue(const RegKey& key,
 }
 
 struct {
-  AutofillFieldType field_type;
+  ServerFieldType field_type;
   const wchar_t *reg_value_name;
 } profile_reg_values[] = {
   { NAME_FIRST,                    L"name_first" },
@@ -131,7 +131,7 @@ struct {
   // We do not import verification code.
 };
 
-typedef std::map<std::wstring, AutofillFieldType> RegToFieldMap;
+typedef std::map<std::wstring, ServerFieldType> RegToFieldMap;
 
 // Imports address or credit card data from the given registry |key| into the
 // given |form_group|, with the help of |reg_to_field|.  When importing address
@@ -163,9 +163,9 @@ bool ImportSingleFormGroup(const RegKey& key,
 
       // Phone numbers are stored piece-by-piece, and then reconstructed from
       // the pieces.  The rest of the fields are set "as is".
-      if (!phone || !phone->SetInfo(it->second, field_value)) {
+      if (!phone || !phone->SetInfo(AutofillType(it->second), field_value)) {
         has_non_empty_fields = true;
-        form_group->SetInfo(it->second, field_value, app_locale);
+        form_group->SetInfo(AutofillType(it->second), field_value, app_locale);
       }
     }
   }

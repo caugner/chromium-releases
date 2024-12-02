@@ -15,8 +15,6 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
@@ -27,6 +25,12 @@
 #include "chrome/browser/ui/options/options_util.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "chromeos/chromeos_switches.h"
+#include "chromeos/network/device_state.h"
+#include "chromeos/network/network_device_handler.h"
+#include "chromeos/network/network_event_log.h"
+#include "chromeos/network/network_handler.h"
+#include "chromeos/network/network_state_handler.h"
+#include "third_party/cros_system_api/dbus/service_constants.h"
 
 using google::protobuf::RepeatedField;
 using google::protobuf::RepeatedPtrField;
@@ -62,6 +66,7 @@ const char* kKnownSettings[] = {
   kReportDeviceActivityTimes,
   kReportDeviceBootMode,
   kReportDeviceLocation,
+  kReportDeviceNetworkInterfaces,
   kReportDeviceVersionInfo,
   kScreenSaverExtensionId,
   kScreenSaverTimeout,
@@ -70,6 +75,7 @@ const char* kKnownSettings[] = {
   kStartUpUrls,
   kStatsReportingPref,
   kSystemTimezonePolicy,
+  kSystemUse24HourClock,
   kUpdateDisabled,
   kVariationsRestrictParameter,
 };
@@ -84,6 +90,12 @@ bool HasOldMetricsFile() {
   // Temporarily allow it until we fix http://crbug.com/62626
   base::ThreadRestrictions::ScopedAllowIO allow_io;
   return GoogleUpdateSettings::GetCollectStatsConsent();
+}
+
+void LogShillError(
+    const std::string& name,
+    scoped_ptr<base::DictionaryValue> error_data) {
+  NET_LOG_ERROR("Shill error: " + name, "Network operation failed.");
 }
 
 }  // namespace
@@ -364,6 +376,16 @@ void DeviceSettingsProvider::SetInPolicy() {
           flags_proto->add_flags(flag);
       }
     }
+  } else if (prop == kSystemUse24HourClock) {
+    em::SystemUse24HourClockProto* use_24hour_clock_proto =
+        device_settings_.mutable_use_24hour_clock();
+    use_24hour_clock_proto->Clear();
+    bool use_24hour_clock_value;
+    if (value->GetAsBoolean(&use_24hour_clock_value)) {
+      use_24hour_clock_proto->set_use_24hour_clock(use_24hour_clock_value);
+    } else {
+      NOTREACHED();
+    }
   } else {
     // The remaining settings don't support Set(), since they are not
     // intended to be customizable by the user:
@@ -378,6 +400,7 @@ void DeviceSettingsProvider::SetInPolicy() {
     //   kReportDeviceBootMode
     //   kReportDeviceLocation
     //   kReportDeviceVersionInfo
+    //   kReportDeviceNetworkInterfaces
     //   kScreenSaverExtensionId
     //   kScreenSaverTimeout
     //   kStartUpUrls
@@ -612,50 +635,50 @@ void DeviceSettingsProvider::DecodeNetworkPolicies(
 void DeviceSettingsProvider::DecodeAutoUpdatePolicies(
     const em::ChromeDeviceSettingsProto& policy,
     PrefValueMap* new_values_cache) const {
-  if (!policy.has_auto_update_settings())
-    return;
-  const em::AutoUpdateSettingsProto& au_settings_proto =
-      policy.auto_update_settings();
-  if (au_settings_proto.has_update_disabled()) {
-    new_values_cache->SetBoolean(kUpdateDisabled,
-                                 au_settings_proto.update_disabled());
+  if (policy.has_auto_update_settings()) {
+    const em::AutoUpdateSettingsProto& au_settings_proto =
+        policy.auto_update_settings();
+    if (au_settings_proto.has_update_disabled()) {
+      new_values_cache->SetBoolean(kUpdateDisabled,
+                                   au_settings_proto.update_disabled());
+    }
+    const RepeatedField<int>& allowed_connection_types =
+        au_settings_proto.allowed_connection_types();
+    base::ListValue* list = new base::ListValue();
+    for (RepeatedField<int>::const_iterator i(allowed_connection_types.begin());
+         i != allowed_connection_types.end(); ++i) {
+      list->Append(new base::FundamentalValue(*i));
+    }
+    new_values_cache->SetValue(kAllowedConnectionTypesForUpdate, list);
   }
-  const RepeatedField<int>& allowed_connection_types =
-      au_settings_proto.allowed_connection_types();
-  base::ListValue* list = new base::ListValue();
-  for (RepeatedField<int>::const_iterator i = allowed_connection_types.begin(),
-           e = allowed_connection_types.end(); i != e; ++i) {
-    list->Append(new base::FundamentalValue(*i));
-  }
-  new_values_cache->SetValue(kAllowedConnectionTypesForUpdate, list);
 }
 
 void DeviceSettingsProvider::DecodeReportingPolicies(
     const em::ChromeDeviceSettingsProto& policy,
     PrefValueMap* new_values_cache) const {
   if (policy.has_device_reporting()) {
-    if (policy.device_reporting().has_report_version_info()) {
+    const em::DeviceReportingProto& reporting_policy =
+        policy.device_reporting();
+    if (reporting_policy.has_report_version_info()) {
       new_values_cache->SetBoolean(
           kReportDeviceVersionInfo,
-          policy.device_reporting().report_version_info());
+          reporting_policy.report_version_info());
     }
-    if (policy.device_reporting().has_report_activity_times()) {
+    if (reporting_policy.has_report_activity_times()) {
       new_values_cache->SetBoolean(
           kReportDeviceActivityTimes,
-          policy.device_reporting().report_activity_times());
+          reporting_policy.report_activity_times());
     }
-    if (policy.device_reporting().has_report_boot_mode()) {
+    if (reporting_policy.has_report_boot_mode()) {
       new_values_cache->SetBoolean(
           kReportDeviceBootMode,
-          policy.device_reporting().report_boot_mode());
+          reporting_policy.report_boot_mode());
     }
-    // Device location reporting needs to pass privacy review before it can be
-    // enabled. crosbug.com/24681
-    // if (policy.device_reporting().has_report_location()) {
-    //   new_values_cache->SetBoolean(
-    //       kReportDeviceLocation,
-    //       policy.device_reporting().report_location());
-    // }
+    if (reporting_policy.has_report_network_interfaces()) {
+      new_values_cache->SetBoolean(
+          kReportDeviceNetworkInterfaces,
+          reporting_policy.report_network_interfaces());
+    }
   }
 }
 
@@ -689,6 +712,13 @@ void DeviceSettingsProvider::DecodeGenericPolicies(
       new_values_cache->SetString(
           kSystemTimezonePolicy,
           policy.system_timezone().timezone());
+    }
+  }
+
+  if (policy.has_use_24hour_clock()) {
+    if (policy.use_24hour_clock().has_use_24hour_clock()) {
+      new_values_cache->SetBoolean(
+          kSystemUse24HourClock, policy.use_24hour_clock().use_24hour_clock());
     }
   }
 
@@ -777,20 +807,35 @@ void DeviceSettingsProvider::ApplyMetricsSetting(bool use_file,
 }
 
 void DeviceSettingsProvider::ApplyRoamingSetting(bool new_value) {
-  if (!CrosLibrary::Get())
-    return;  // May not be initialized in tests.
-  NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
-  const NetworkDevice* cellular = cros->FindCellularDevice();
-  if (cellular) {
-    bool device_value = cellular->data_roaming_allowed();
-    if (!device_value && cros->IsCellularAlwaysInRoaming()) {
-      // If operator requires roaming always enabled, ignore supplied value
-      // and set data roaming allowed in true always.
-      cros->SetCellularDataRoamingAllowed(true);
-    } else if (device_value != new_value) {
-      cros->SetCellularDataRoamingAllowed(new_value);
-    }
+  // TODO(armansito): Look up the device by explicitly using the device path.
+  const DeviceState* cellular =
+      NetworkHandler::Get()->network_state_handler()->
+          GetDeviceStateByType(flimflam::kTypeCellular);
+  if (!cellular) {
+    NET_LOG_DEBUG("No cellular device is available",
+                  "Roaming is only supported by cellular devices.");
+    return;
   }
+  bool current_value;
+  if (!cellular->properties().GetBooleanWithoutPathExpansion(
+          flimflam::kCellularAllowRoamingProperty, &current_value)) {
+    NET_LOG_ERROR("Could not get \"allow roaming\" property from cellular "
+                  "device.", cellular->path());
+    return;
+  }
+
+  // Only set the value if the current value is different from |new_value|.
+  // If roaming is required by the provider, always try to set to true.
+  new_value = (cellular->provider_requires_roaming() ? true : new_value);
+  if (new_value == current_value)
+    return;
+
+  NetworkHandler::Get()->network_device_handler()->SetDeviceProperty(
+      cellular->path(),
+      flimflam::kCellularAllowRoamingProperty,
+      base::FundamentalValue(new_value),
+      base::Bind(&base::DoNothing),
+      base::Bind(&LogShillError));
 }
 
 void DeviceSettingsProvider::ApplySideEffects(

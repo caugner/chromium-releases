@@ -8,11 +8,11 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "chrome/browser/infobars/infobar_delegate.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 class AlternateNavInfoBarDelegate : public InfoBarDelegate {
  public:
-  // Creates an alternate nav delegate and adds it to |infobar_service|.
+  // Creates an alternate nav infobar delegate and adds it to |infobar_service|.
   static void Create(InfoBarService* infobar_service,
                      const GURL& alternate_nav_url);
 

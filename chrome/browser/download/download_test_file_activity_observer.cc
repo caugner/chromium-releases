@@ -5,7 +5,7 @@
 #include "chrome/browser/download/download_test_file_activity_observer.h"
 
 #include "base/bind.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
@@ -24,7 +24,10 @@ class DownloadTestFileActivityObserver::MockDownloadManagerDelegate
   explicit MockDownloadManagerDelegate(Profile* profile)
       : ChromeDownloadManagerDelegate(profile),
         file_chooser_enabled_(false),
-        file_chooser_displayed_(false) {}
+        file_chooser_displayed_(false) {
+    if (!profile->IsOffTheRecord())
+      SetNextId(content::DownloadItem::kInvalidId + 1);
+  }
 
   void EnableFileChooser(bool enable) {
     file_chooser_enabled_ = enable;
@@ -60,7 +63,7 @@ class DownloadTestFileActivityObserver::MockDownloadManagerDelegate
 DownloadTestFileActivityObserver::DownloadTestFileActivityObserver(
     Profile* profile) {
   test_delegate_ = new MockDownloadManagerDelegate(profile);
-  DownloadServiceFactory::GetForProfile(profile)->
+  DownloadServiceFactory::GetForBrowserContext(profile)->
       SetDownloadManagerDelegateForTesting(test_delegate_.get());
 }
 

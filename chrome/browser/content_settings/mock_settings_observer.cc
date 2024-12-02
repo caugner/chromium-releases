@@ -4,12 +4,12 @@
 
 #include "chrome/browser/content_settings/mock_settings_observer.h"
 
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/content_settings_details.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 MockSettingsObserver::MockSettingsObserver() {
   registrar_.Add(this, chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED,

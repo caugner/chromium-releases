@@ -5,8 +5,8 @@
 #include "chrome/browser/policy/configuration_policy_handler.h"
 
 #include <algorithm>
-#include <string>
 
+#include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
@@ -15,9 +15,11 @@
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/extensions/external_policy_loader.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
+#include "chrome/browser/policy/external_data_fetcher.h"
 #include "chrome/browser/policy/policy_error_map.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
@@ -25,13 +27,12 @@
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
-#include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "policy/policy_constants.h"
+#include "url/gurl.h"
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/policy/policy_path_parser.h"
@@ -99,6 +100,21 @@ const DefaultSearchSimplePolicyHandlerEntry kDefaultSearchPolicyMap[] = {
   { key::kDefaultSearchProviderSearchTermsReplacementKey,
     prefs::kDefaultSearchProviderSearchTermsReplacementKey,
     Value::TYPE_STRING },
+  { key::kDefaultSearchProviderImageURL,
+    prefs::kDefaultSearchProviderImageURL,
+    Value::TYPE_STRING },
+  { key::kDefaultSearchProviderSearchURLPostParams,
+    prefs::kDefaultSearchProviderSearchURLPostParams,
+    Value::TYPE_STRING },
+  { key::kDefaultSearchProviderSuggestURLPostParams,
+    prefs::kDefaultSearchProviderSuggestURLPostParams,
+    Value::TYPE_STRING },
+  { key::kDefaultSearchProviderInstantURLPostParams,
+    prefs::kDefaultSearchProviderInstantURLPostParams,
+    Value::TYPE_STRING },
+  { key::kDefaultSearchProviderImageURLPostParams,
+    prefs::kDefaultSearchProviderImageURLPostParams,
+    Value::TYPE_STRING },
 };
 
 // List of entries determining which proxy policies can be specified, depending
@@ -117,22 +133,7 @@ const ProxyModeValidationEntry kProxyModeValidationMap[] = {
 };
 
 
-// Helper functions ------------------------------------------------------------
-
-std::string ValueTypeToString(Value::Type type) {
-  static const char* strings[] = {
-    "null",
-    "boolean",
-    "integer",
-    "double",
-    "string",
-    "binary",
-    "dictionary",
-    "list"
-  };
-  CHECK(static_cast<size_t>(type) < arraysize(strings));
-  return std::string(strings[type]);
-}
+// Helper function -------------------------------------------------------------
 
 // Utility function that returns a JSON representation of the given |dict| as
 // a StringValue. The caller owns the returned object.
@@ -152,6 +153,22 @@ base::StringValue* DictionaryToJSONString(const base::DictionaryValue* dict) {
 
 // ConfigurationPolicyHandler implementation -----------------------------------
 
+// static
+std::string ConfigurationPolicyHandler::ValueTypeToString(Value::Type type) {
+  static const char* strings[] = {
+    "null",
+    "boolean",
+    "integer",
+    "double",
+    "string",
+    "binary",
+    "dictionary",
+    "list"
+  };
+  CHECK(static_cast<size_t>(type) < arraysize(strings));
+  return std::string(strings[type]);
+}
+
 ConfigurationPolicyHandler::ConfigurationPolicyHandler() {
 }
 
@@ -169,7 +186,10 @@ void ConfigurationPolicyHandler::PrepareForDisplaying(
     const PolicyMap::Entry& entry = it->second;
     if (entry.value->GetAsDictionary(&dict)) {
       base::StringValue* value = DictionaryToJSONString(dict);
-      policies->Set(it->first, entry.level, entry.scope, value);
+      policies->Set(it->first, entry.level, entry.scope,
+                    value, entry.external_data_fetcher ?
+                        new ExternalDataFetcher(*entry.external_data_fetcher) :
+                        NULL);
     } else if (entry.value->GetAsList(&list)) {
       for (size_t i = 0; i < list->GetSize(); ++i) {
         if (list->GetDictionary(i, &dict)) {
@@ -951,6 +971,15 @@ void DefaultSearchPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
                     new ListValue());
     prefs->SetString(prefs::kDefaultSearchProviderSearchTermsReplacementKey,
                      std::string());
+    prefs->SetString(prefs::kDefaultSearchProviderImageURL, std::string());
+    prefs->SetString(prefs::kDefaultSearchProviderSearchURLPostParams,
+                     std::string());
+    prefs->SetString(prefs::kDefaultSearchProviderSuggestURLPostParams,
+                     std::string());
+    prefs->SetString(prefs::kDefaultSearchProviderInstantURLPostParams,
+                     std::string());
+    prefs->SetString(prefs::kDefaultSearchProviderImageURLPostParams,
+                     std::string());
   } else {
     // The search URL is required.  The other entries are optional.  Just make
     // sure that they are all specified via policy, so that the regular prefs
@@ -970,6 +999,16 @@ void DefaultSearchPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
       EnsureListPrefExists(prefs, prefs::kDefaultSearchProviderAlternateURLs);
       EnsureStringPrefExists(prefs,
           prefs::kDefaultSearchProviderSearchTermsReplacementKey);
+      EnsureStringPrefExists(prefs,
+          prefs::kDefaultSearchProviderImageURL);
+      EnsureStringPrefExists(prefs,
+          prefs::kDefaultSearchProviderSearchURLPostParams);
+      EnsureStringPrefExists(prefs,
+          prefs::kDefaultSearchProviderSuggestURLPostParams);
+      EnsureStringPrefExists(prefs,
+          prefs::kDefaultSearchProviderInstantURLPostParams);
+      EnsureStringPrefExists(prefs,
+          prefs::kDefaultSearchProviderImageURLPostParams);
 
       // For the name and keyword, default to the host if not specified.  If
       // there is no host (file: URLs?  Not sure), use "_" to guarantee that the
@@ -995,7 +1034,6 @@ void DefaultSearchPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
       chrome::NOTIFICATION_DEFAULT_SEARCH_POLICY_CHANGED,
       content::NotificationService::AllSources(),
       content::NotificationService::NoDetails());
-
 }
 
 bool DefaultSearchPolicyHandler::CheckIndividualPolicies(

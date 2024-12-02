@@ -10,8 +10,9 @@
 #include <map>
 
 #include "base/basictypes.h"
+#include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 class AutocompleteInput;
 class AutocompleteProvider;
@@ -66,19 +67,11 @@ class AutocompleteResult {
   AutocompleteResult();
   ~AutocompleteResult();
 
-  // operator=() by another name.
-  void CopyFrom(const AutocompleteResult& rhs);
-
   // Copies matches from |old_matches| to provide a consistant result set. See
   // comments in code for specifics.
   void CopyOldMatches(const AutocompleteInput& input,
                       const AutocompleteResult& old_matches,
                       Profile* profile);
-
-  // Adds a single match. The match is inserted at the appropriate position
-  // based on relevancy and display order. This is ONLY for use after
-  // SortAndCull() has been invoked, and preserves default_match_.
-  void AddMatch(const AutocompleteMatch& match);
 
   // Adds a new set of matches to the result set.  Does not re-sort.
   void AppendMatches(const ACMatches& matches);
@@ -107,6 +100,31 @@ class AutocompleteResult {
   // end() if there is no default match.
   const_iterator default_match() const { return default_match_; }
 
+  // Returns true if the top match is a verbatim search or URL match (see
+  // IsVerbatimType() in autocomplete_match.h), and the next match is not also
+  // some kind of verbatim match.  In this case, the top match will be hidden,
+  // and nothing in the dropdown will appear selected by default; hitting enter
+  // will navigate to the (hidden) default match, while pressing the down arrow
+  // key will select the first visible match, which is actually the second match
+  // in the result set.
+  //
+  // Hiding the top match in these cases is possible because users should
+  // already know what will happen on hitting enter from the omnibox text
+  // itself, without needing to see the same text appear again, selected, just
+  // below their typing.  Instead, by hiding the verbatim match, there is one
+  // less line to skip over in order to visually scan downwards to see other
+  // suggested matches.  This makes it more likely that users will see and
+  // select useful non-verbatim matches.  (Note that hiding the verbatim match
+  // this way is similar to how most other browsers' address bars behave.)
+  //
+  // We avoid hiding when the top two matches are both verbatim in order to
+  // avoid potential confusion if a user were to see the second match just below
+  // their typing and assume it would be the default action.
+  //
+  // Note that if the top match should be hidden and it is the only match,
+  // the dropdown should be closed.
+  bool ShouldHideTopMatch() const;
+
   const GURL& alternate_nav_url() const { return alternate_nav_url_; }
 
   // Clears the matches for this result set.
@@ -126,6 +144,8 @@ class AutocompleteResult {
                                      const AutocompleteMatch& match);
 
  private:
+  friend class AutocompleteProviderTest;
+
   typedef std::map<AutocompleteProvider*, ACMatches> ProviderToMatches;
 
 #if defined(OS_ANDROID)
@@ -136,18 +156,29 @@ class AutocompleteResult {
   typedef ACMatches::iterator::difference_type matches_difference_type;
 #endif
 
-  // Populates |provider_to_matches| from |matches_|.
-  void BuildProviderToMatches(ProviderToMatches* provider_to_matches) const;
-
   // Returns true if |matches| contains a match with the same destination as
   // |match|.
   static bool HasMatchByDestination(const AutocompleteMatch& match,
                                     const ACMatches& matches);
 
+  // operator=() by another name.
+  void CopyFrom(const AutocompleteResult& rhs);
+
+  // Adds a single match. The match is inserted at the appropriate position
+  // based on relevancy and display order. This is ONLY for use after
+  // SortAndCull() has been invoked, and preserves default_match_.
+  void AddMatch(AutocompleteInput::PageClassification page_classification,
+                const AutocompleteMatch& match);
+
+  // Populates |provider_to_matches| from |matches_|.
+  void BuildProviderToMatches(ProviderToMatches* provider_to_matches) const;
+
   // Copies matches into this result. |old_matches| gives the matches from the
   // last result, and |new_matches| the results from this result.
-  void MergeMatchesByProvider(const ACMatches& old_matches,
-                              const ACMatches& new_matches);
+  void MergeMatchesByProvider(
+      AutocompleteInput::PageClassification page_classification,
+      const ACMatches& old_matches,
+      const ACMatches& new_matches);
 
   ACMatches matches_;
 

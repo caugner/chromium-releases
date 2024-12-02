@@ -6,19 +6,19 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/web_resource/notification_promo.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_service.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 namespace {
 
@@ -68,7 +68,7 @@ void PromoResourceService::RegisterPrefs(PrefRegistrySimple* registry) {
 }
 
 // static
-void PromoResourceService::RegisterUserPrefs(
+void PromoResourceService::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   // TODO(dbeam): This is registered only for migration; remove in M28
   // when all prefs have been cleared.  http://crbug.com/168887
@@ -76,7 +76,7 @@ void PromoResourceService::RegisterUserPrefs(
       prefs::kNtpPromoResourceCacheUpdate,
       "0",
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  NotificationPromo::RegisterUserPrefs(registry);
+  NotificationPromo::RegisterProfilePrefs(registry);
 }
 
 // static

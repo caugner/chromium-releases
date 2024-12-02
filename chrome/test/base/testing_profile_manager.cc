@@ -4,7 +4,6 @@
 
 #include "chrome/test/base/testing_profile_manager.h"
 
-#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
@@ -49,7 +48,8 @@ TestingProfile* TestingProfileManager::CreateTestingProfile(
     const std::string& profile_name,
     scoped_ptr<PrefServiceSyncable> prefs,
     const string16& user_name,
-    int avatar_id) {
+    int avatar_id,
+    const std::string& managed_user_id) {
   DCHECK(called_set_up_);
 
   // Create a path for the profile based on the name.
@@ -67,8 +67,11 @@ TestingProfile* TestingProfileManager::CreateTestingProfile(
   // Update the user metadata.
   ProfileInfoCache& cache = profile_manager_->GetProfileInfoCache();
   size_t index = cache.GetIndexOfProfileWithPath(profile_path);
-  cache.SetNameOfProfileAtIndex(index, user_name);
   cache.SetAvatarIconOfProfileAtIndex(index, avatar_id);
+  cache.SetManagedUserIdOfProfileAtIndex(index, managed_user_id);
+  // SetNameOfProfileAtIndex may reshuffle the list of profiles, so we do it
+  // last.
+  cache.SetNameOfProfileAtIndex(index, user_name);
 
   testing_profiles_.insert(std::make_pair(profile_name, profile));
 
@@ -79,7 +82,7 @@ TestingProfile* TestingProfileManager::CreateTestingProfile(
     const std::string& name) {
   DCHECK(called_set_up_);
   return CreateTestingProfile(name, scoped_ptr<PrefServiceSyncable>(),
-                              UTF8ToUTF16(name), 0);
+                              UTF8ToUTF16(name), 0, std::string());
 }
 
 void TestingProfileManager::DeleteTestingProfile(const std::string& name) {
@@ -102,6 +105,11 @@ void TestingProfileManager::DeleteProfileInfoCache() {
 
 void TestingProfileManager::SetLoggedIn(bool logged_in) {
   profile_manager_->logged_in_ = logged_in;
+}
+
+const base::FilePath& TestingProfileManager::profiles_dir() {
+  DCHECK(called_set_up_);
+  return profiles_dir_.path();
 }
 
 ProfileManager* TestingProfileManager::profile_manager() {

@@ -4,14 +4,14 @@
 
 #include "chrome/browser/metro_viewer/chrome_metro_viewer_process_host_aurawin.h"
 
+#include "ash/shell.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part_aurawin.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_service.h"
-#include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/search_engines/util.h"
 #include "chrome/browser/ui/ash/ash_init.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -19,14 +19,13 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
-#include "googleurl/src/gurl.h"
 #include "ui/aura/remote_root_window_host_win.h"
 #include "ui/surface/accelerated_surface_win.h"
+#include "url/gurl.h"
 
 namespace {
 
@@ -92,6 +91,8 @@ void ChromeMetroViewerProcessHost::OnSetTargetSurface(
       AcceleratedPresenter::GetForWindow(NULL);
   any_window->SetNewTargetWindow(hwnd);
   aura::RemoteRootWindowHostWin::Instance()->Connected(this);
+  ash::Shell::GetInstance()->CreateLauncher();
+  ash::Shell::GetInstance()->ShowLauncher();
   // Tell the rest of Chrome that Ash is running.
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_ASH_SESSION_STARTED,
@@ -105,15 +106,8 @@ void ChromeMetroViewerProcessHost::OnOpenURL(const string16& url) {
 
 void ChromeMetroViewerProcessHost::OnHandleSearchRequest(
     const string16& search_string) {
-  const TemplateURL* default_provider =
-      TemplateURLServiceFactory::GetForProfile(
-          ProfileManager::GetDefaultProfileOrOffTheRecord())->
-              GetDefaultSearchProvider();
-  if (default_provider) {
-    const TemplateURLRef& search_url = default_provider->url_ref();
-    DCHECK(search_url.SupportsReplacement());
-    GURL request_url = GURL(search_url.ReplaceSearchTerms(
-        TemplateURLRef::SearchTermsArgs(search_string)));
-    OpenURL(request_url);
-  }
+  GURL url(GetDefaultSearchURLForSearchTerms(
+      ProfileManager::GetDefaultProfileOrOffTheRecord(), search_string));
+  if (url.is_valid())
+    OpenURL(url);
 }

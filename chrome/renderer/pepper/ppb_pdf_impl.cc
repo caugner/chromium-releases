@@ -13,36 +13,31 @@
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/printing/print_web_view_helper.h"
 #include "content/public/common/child_process_sandbox_support_linux.h"
-#include "content/public/common/content_client.h"
+#include "content/public/common/referrer.h"
+#include "content/public/renderer/pepper_plugin_instance.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "grit/webkit_resources.h"
 #include "grit/webkit_strings.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/private/ppb_pdf.h"
+#include "ppapi/c/trusted/ppb_browser_font_trusted.h"
+#include "ppapi/shared_impl/ppapi_globals.h"
 #include "ppapi/shared_impl/resource.h"
 #include "ppapi/shared_impl/resource_tracker.h"
 #include "ppapi/shared_impl/var.h"
-#include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebPluginContainer.h"
-#include "third_party/icu/public/i18n/unicode/usearch.h"
+#include "third_party/WebKit/public/web/WebView.h"
+#include "third_party/icu/source/i18n/unicode/usearch.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/image/image_skia.h"
-#include "ui/gfx/image/image_skia_rep.h"
-#include "webkit/plugins/ppapi/host_globals.h"
-#include "webkit/plugins/ppapi/plugin_delegate.h"
-#include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
-#include "webkit/plugins/ppapi/ppb_image_data_impl.h"
 
 using ppapi::PpapiGlobals;
-using webkit::ppapi::HostGlobals;
-using webkit::ppapi::PluginInstance;
 using WebKit::WebElement;
 using WebKit::WebView;
 using content::RenderThread;
@@ -135,13 +130,14 @@ static const ResourceImageInfo kResourceImageMap[] = {
   { PP_RESOURCEIMAGE_PDF_PAN_SCROLL_ICON, IDR_PAN_SCROLL_ICON },
 };
 
-#if defined(ENABLE_PRINTING)
+#if defined(ENABLE_FULL_PRINTING)
 
 WebKit::WebElement GetWebElement(PP_Instance instance_id) {
-  PluginInstance* instance = HostGlobals::Get()->GetInstance(instance_id);
+  content::PepperPluginInstance* instance =
+      content::PepperPluginInstance::Get(instance_id);
   if (!instance)
     return WebKit::WebElement();
-  return instance->container()->element();
+  return instance->GetContainer()->element();
 }
 
 printing::PrintWebViewHelper* GetPrintWebViewHelper(
@@ -159,20 +155,20 @@ bool IsPrintingEnabled(PP_Instance instance_id) {
   return helper && helper->IsPrintingEnabled();
 }
 
-#else  // ENABLE_PRINTING
+#else  // ENABLE_FULL_PRINTING
 
 bool IsPrintingEnabled(PP_Instance instance_id) {
   return false;
 }
 
-#endif  // ENABLE_PRINTING
+#endif  // ENABLE_FULL_PRINTING
 
 
 
 PP_Var GetLocalizedString(PP_Instance instance_id,
                           PP_ResourceString string_id) {
-  PluginInstance* instance =
-      content::GetHostGlobals()->GetInstance(instance_id);
+  content::PepperPluginInstance* instance =
+      content::PepperPluginInstance::Get(instance_id);
   if (!instance)
     return PP_MakeUndefined();
 
@@ -198,7 +194,7 @@ PP_Resource GetFontFileWithFallback(
     PP_PrivateFontCharset charset) {
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
   // Validate the instance before using it below.
-  if (!content::GetHostGlobals()->GetInstance(instance_id))
+  if (!content::PepperPluginInstance::Get(instance_id))
     return 0;
 
   scoped_refptr<ppapi::StringVar> face_name(ppapi::StringVar::FromPPVar(
@@ -292,34 +288,36 @@ void SearchString(PP_Instance instance,
 }
 
 void DidStartLoading(PP_Instance instance_id) {
-  PluginInstance* instance =
-      content::GetHostGlobals()->GetInstance(instance_id);
+  content::PepperPluginInstance* instance =
+      content::PepperPluginInstance::Get(instance_id);
   if (!instance)
     return;
-  instance->delegate()->DidStartLoading();
+  instance->GetRenderView()->DidStartLoading();
 }
 
 void DidStopLoading(PP_Instance instance_id) {
-  PluginInstance* instance =
-      content::GetHostGlobals()->GetInstance(instance_id);
+  content::PepperPluginInstance* instance =
+      content::PepperPluginInstance::Get(instance_id);
   if (!instance)
     return;
-  instance->delegate()->DidStopLoading();
+  instance->GetRenderView()->DidStopLoading();
 }
 
 void SetContentRestriction(PP_Instance instance_id, int restrictions) {
-  PluginInstance* instance =
-      content::GetHostGlobals()->GetInstance(instance_id);
+  content::PepperPluginInstance* instance =
+      content::PepperPluginInstance::Get(instance_id);
   if (!instance)
     return;
-  instance->delegate()->SetContentRestriction(restrictions);
+  instance->GetRenderView()->Send(
+      new ChromeViewHostMsg_PDFUpdateContentRestrictions(
+          instance->GetRenderView()->GetRoutingID(), restrictions));
 }
 
-void HistogramPDFPageCount(PP_Instance /*instance*/, int count) {
+void HistogramPDFPageCount(PP_Instance instance, int count) {
   UMA_HISTOGRAM_COUNTS_10000("PDF.PageCount", count);
 }
 
-void UserMetricsRecordAction(PP_Instance /*instance*/, PP_Var action) {
+void UserMetricsRecordAction(PP_Instance instance, PP_Var action) {
   scoped_refptr<ppapi::StringVar> action_str(
       ppapi::StringVar::FromPPVar(action));
   if (action_str.get())
@@ -327,8 +325,8 @@ void UserMetricsRecordAction(PP_Instance /*instance*/, PP_Var action) {
 }
 
 void HasUnsupportedFeature(PP_Instance instance_id) {
-  PluginInstance* instance =
-      content::GetHostGlobals()->GetInstance(instance_id);
+  content::PepperPluginInstance* instance =
+      content::PepperPluginInstance::Get(instance_id);
   if (!instance)
     return;
 
@@ -336,18 +334,25 @@ void HasUnsupportedFeature(PP_Instance instance_id) {
   if (!instance->IsFullPagePlugin())
     return;
 
-  WebView* view = instance->container()->element().document().frame()->view();
+  WebView* view = instance->GetContainer()->element().document().frame()->view();
   content::RenderView* render_view = content::RenderView::FromWebView(view);
   render_view->Send(new ChromeViewHostMsg_PDFHasUnsupportedFeature(
       render_view->GetRoutingID()));
 }
 
 void SaveAs(PP_Instance instance_id) {
-  PluginInstance* instance =
-      content::GetHostGlobals()->GetInstance(instance_id);
+  content::PepperPluginInstance* instance =
+      content::PepperPluginInstance::Get(instance_id);
   if (!instance)
     return;
-  instance->delegate()->SaveURLAs(instance->plugin_url());
+  GURL url = instance->GetPluginURL();
+
+  content::RenderView* render_view = instance->GetRenderView();
+  WebKit::WebFrame* frame = render_view->GetWebView()->mainFrame();
+  content::Referrer referrer(frame->document().url(),
+                             frame->document().referrerPolicy());
+  render_view->Send(new ChromeViewHostMsg_PDFSaveURLAs(
+      render_view->GetRoutingID(), url, referrer));
 }
 
 PP_Bool IsFeatureEnabled(PP_Instance instance, PP_PDFFeature feature) {
@@ -373,7 +378,11 @@ PP_Resource GetResourceImageForScale(PP_Instance instance_id,
   if (res_id == 0)
     return 0;
 
-  ui::ScaleFactor scale_factor = ui::GetScaleFactorFromScale(scale);
+  // Validate the instance.
+  content::PepperPluginInstance* instance =
+      content::PepperPluginInstance::Get(instance_id);
+  if (!instance)
+    return 0;
 
   gfx::ImageSkia* res_image_skia =
       ResourceBundle::GetSharedInstance().GetImageSkiaNamed(res_id);
@@ -381,38 +390,7 @@ PP_Resource GetResourceImageForScale(PP_Instance instance_id,
   if (!res_image_skia)
     return 0;
 
-  // Validate the instance.
-  if (!content::GetHostGlobals()->GetInstance(instance_id))
-    return 0;
-
-  gfx::ImageSkiaRep image_skia_rep = res_image_skia->GetRepresentation(
-      scale_factor);
-
-  if (image_skia_rep.is_null() || image_skia_rep.scale_factor() != scale_factor)
-    return 0;
-
-  scoped_refptr<webkit::ppapi::PPB_ImageData_Impl> image_data(
-      new webkit::ppapi::PPB_ImageData_Impl(
-          instance_id,
-          webkit::ppapi::PPB_ImageData_Impl::PLATFORM));
-  if (!image_data->Init(
-          webkit::ppapi::PPB_ImageData_Impl::GetNativeImageDataFormat(),
-          image_skia_rep.pixel_width(),
-          image_skia_rep.pixel_height(),
-          false)) {
-    return 0;
-  }
-
-  webkit::ppapi::ImageDataAutoMapper mapper(image_data.get());
-  if (!mapper.is_valid())
-    return 0;
-
-  skia::PlatformCanvas* canvas = image_data->GetPlatformCanvas();
-  // Note: Do not skBitmap::copyTo the canvas bitmap directly because it will
-  // ignore the allocated pixels in shared memory and re-allocate a new buffer.
-  canvas->writePixels(image_skia_rep.sk_bitmap(), 0, 0);
-
-  return image_data->GetReference();
+  return instance->CreateImage(res_image_skia, scale);
 }
 
 PP_Resource GetResourceImage(PP_Instance instance_id,
@@ -447,10 +425,10 @@ const PPB_PDF* PPB_PDF_Impl::GetInterface() {
 
 // static
 void PPB_PDF_Impl::InvokePrintingForInstance(PP_Instance instance_id) {
-#if defined(ENABLE_PRINTING)
+#if defined(ENABLE_FULL_PRINTING)
   WebKit::WebElement element = GetWebElement(instance_id);
   printing::PrintWebViewHelper* helper = GetPrintWebViewHelper(element);
   if (helper)
     helper->PrintNode(element);
-#endif  // ENABLE_PRINTING
+#endif  // ENABLE_FULL_PRINTING
 }

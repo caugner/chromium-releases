@@ -11,7 +11,7 @@
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -48,8 +48,8 @@ class ScreensaverController : public ash::UserActivityObserver,
   // Overridden from PowerManagerClient::Observer:
   virtual void IdleNotify(int64 threshold) OVERRIDE;
 
-  // UserActivityObserver::Observer overrides:
-  virtual void OnUserActivity() OVERRIDE;
+  // UserActivityObserver overrides:
+  virtual void OnUserActivity(const ui::Event* event) OVERRIDE;
 
   void SetupScreensaver(const std::string& screensaver_extension_id);
   void TeardownScreensaver();

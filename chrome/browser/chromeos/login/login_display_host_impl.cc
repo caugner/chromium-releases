@@ -18,11 +18,11 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
@@ -40,15 +40,13 @@
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/mobile_config.h"
 #include "chrome/browser/chromeos/policy/auto_enrollment_client.h"
-#include "chrome/browser/chromeos/system/statistics_provider.h"
+#include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/chromeos/system/timezone_settings.h"
 #include "chrome/browser/chromeos/ui/focus_ring_controller.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/managed_mode/managed_mode.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_constants.h"
 #include "chromeos/chromeos_switches.h"
@@ -61,8 +59,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
-#include "googleurl/src/gurl.h"
-#include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/base/events/event_utils.h"
@@ -76,6 +72,7 @@
 #include "ui/gfx/transform.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/widget/widget.h"
+#include "url/gurl.h"
 
 namespace {
 
@@ -154,6 +151,9 @@ namespace chromeos {
 // static
 LoginDisplayHost* LoginDisplayHostImpl::default_host_ = NULL;
 
+// static
+const int LoginDisplayHostImpl::kShowLoginWebUIid = 0x1111;
+
 ////////////////////////////////////////////////////////////////////////////////
 // LoginDisplayHostImpl, public
 
@@ -218,9 +218,6 @@ LoginDisplayHostImpl::LoginDisplayHostImpl(const gfx::Rect& background_bounds)
   initialize_webui_hidden_ =
       kHiddenWebUIInitializationDefault && !zero_delay_enabled;
 
-  // Prevents white flashing on OOBE (http://crbug.com/131569).
-  aura::Env::GetInstance()->set_render_white_bg(false);
-
   // Check if WebUI init type is overriden.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshWebUIInit)) {
     const std::string override_type = CommandLine::ForCurrentProcess()->
@@ -249,7 +246,7 @@ LoginDisplayHostImpl::LoginDisplayHostImpl(const gfx::Rect& background_bounds)
   // these notifications.
   if ((waiting_for_user_pods_ || waiting_for_wallpaper_load_)
       && initialize_webui_hidden_) {
-    registrar_.Add(this, chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE,
+    registrar_.Add(this, chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
                    content::NotificationService::AllSources());
     registrar_.Add(this, chrome::NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN,
                    content::NotificationService::AllSources());
@@ -260,11 +257,7 @@ LoginDisplayHostImpl::LoginDisplayHostImpl(const gfx::Rect& background_bounds)
                << " wait_for_pods_: " << waiting_for_user_pods_
                << " init_webui_hidden_: " << initialize_webui_hidden_;
 
-  bool keyboard_driven_oobe = false;
-  system::StatisticsProvider::GetInstance()->GetMachineFlag(
-      chromeos::system::kOemKeyboardDrivenOobeKey,
-      &keyboard_driven_oobe);
-  if (keyboard_driven_oobe) {
+  if (system::keyboard_settings::ForceKeyboardDrivenUINavigation()) {
     views::FocusManager::set_arrow_key_traversal_enabled(true);
 
     focus_ring_controller_.reset(new FocusRingController);
@@ -445,8 +438,10 @@ void LoginDisplayHostImpl::StartSignInScreen() {
   }
   LOG(WARNING) << "Login WebUI >> sign in";
 
-  if (!login_window_)
+  if (!login_window_) {
+    TRACE_EVENT_ASYNC_BEGIN0("ui", "ShowLoginWebUI", kShowLoginWebUIid);
     LoadURL(GURL(kLoginURL));
+  }
 
   DVLOG(1) << "Starting sign in screen";
   const chromeos::UserList& users = chromeos::UserManager::Get()->GetUsers();
@@ -559,7 +554,7 @@ void LoginDisplayHostImpl::Observe(
     registrar_.Remove(this,
                       chrome::NOTIFICATION_WALLPAPER_ANIMATION_FINISHED,
                       content::NotificationService::AllSources());
-  } else if (chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE == type ||
+  } else if (chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE == type ||
              chrome::NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN == type) {
     LOG(WARNING) << "Login WebUI >> WEBUI_VISIBLE";
     if (waiting_for_user_pods_ && initialize_webui_hidden_) {
@@ -571,7 +566,7 @@ void LoginDisplayHostImpl::Observe(
       ShowWebUI();
     }
     registrar_.Remove(this,
-                      chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE,
+                      chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
                       content::NotificationService::AllSources());
     registrar_.Remove(this,
                       chrome::NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN,
@@ -603,7 +598,7 @@ void LoginDisplayHostImpl::Observe(
 ////////////////////////////////////////////////////////////////////////////////
 // LoginDisplayHostImpl, WebContentsObserver implementation:
 
-void LoginDisplayHostImpl::RenderViewGone(base::TerminationStatus status) {
+void LoginDisplayHostImpl::RenderProcessGone(base::TerminationStatus status) {
   // Do not try to restore on shutdown
   if (browser_shutdown::GetShutdownType() != browser_shutdown::NOT_VALID)
     return;
@@ -759,7 +754,7 @@ void LoginDisplayHostImpl::InitLoginWindowAndView() {
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   params.bounds = background_bounds();
   params.show_state = ui::SHOW_STATE_FULLSCREEN;
-  params.transparent = true;
+  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
   params.parent =
       ash::Shell::GetContainer(
           ash::Shell::GetPrimaryRootWindow(),
@@ -838,13 +833,6 @@ void ShowLoginWizard(const std::string& first_screen_name) {
   if (browser_shutdown::IsTryingToQuit())
     return;
 
-  // Managed mode is defined as a machine-level setting so we have to reset it
-  // each time login screen is shown. See also http://crbug.com/167642
-  // TODO(nkostylev): Remove this call when managed mode scope is
-  // limited to user session.
-  if (ManagedMode::IsInManagedMode())
-    ManagedMode::LeaveManagedMode();
-
   VLOG(1) << "Showing OOBE screen: " << first_screen_name;
 
   chromeos::input_method::InputMethodManager* manager =
@@ -853,17 +841,15 @@ void ShowLoginWizard(const std::string& first_screen_name) {
   // Set up keyboards. For example, when |locale| is "en-US", enable US qwerty
   // and US dvorak keyboard layouts.
   if (g_browser_process && g_browser_process->local_state()) {
-    const std::string locale = g_browser_process->GetApplicationLocale();
-    // If the preferred keyboard for the login screen has been saved, use it.
+    manager->SetInputMethodDefault();
+
     PrefService* prefs = g_browser_process->local_state();
-    std::string initial_input_method_id =
-        prefs->GetString(chromeos::language_prefs::kPreferredKeyboardLayout);
-    if (initial_input_method_id.empty()) {
-      // If kPreferredKeyboardLayout is not specified, use the hardware layout.
-      initial_input_method_id =
-          manager->GetInputMethodUtil()->GetHardwareInputMethodId();
-    }
-    manager->EnableLayouts(locale, initial_input_method_id);
+    // Apply owner preferences for tap-to-click and mouse buttons swap for
+    // login screen.
+    system::mouse_settings::SetPrimaryButtonRight(
+        prefs->GetBoolean(prefs::kOwnerPrimaryMouseButtonRight));
+    system::touchpad_settings::SetTapToClick(
+      prefs->GetBoolean(prefs::kOwnerTapToClickEnabled));
   }
 
   ui::SetNaturalScroll(CommandLine::ForCurrentProcess()->HasSwitch(
@@ -950,6 +936,9 @@ void ShowLoginWizard(const std::string& first_screen_name) {
       // Set the application locale here so that the language switch
       // menu works properly with the newly loaded locale.
       g_browser_process->SetApplicationLocale(loaded_locale);
+
+      // Reload font settings here to use correct font for initial_locale.
+      LanguageSwitchMenu::LoadFontsForCurrentLocale();
     }
   }
 

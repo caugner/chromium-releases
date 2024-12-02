@@ -17,7 +17,8 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
+#include "base/process/launch.h"
+#include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -174,14 +175,14 @@ bool IsUpdatePendingRestart() {
   base::FilePath new_chrome_exe;
   if (!GetNewerChromeFile(&new_chrome_exe))
     return false;
-  return file_util::PathExists(new_chrome_exe);
+  return base::PathExists(new_chrome_exe);
 }
 
 bool SwapNewChromeExeIfPresent() {
   base::FilePath new_chrome_exe;
   if (!GetNewerChromeFile(&new_chrome_exe))
     return false;
-  if (!file_util::PathExists(new_chrome_exe))
+  if (!base::PathExists(new_chrome_exe))
     return false;
   base::FilePath cur_chrome_exe;
   if (!PathService::Get(base::FILE_EXE, &cur_chrome_exe))

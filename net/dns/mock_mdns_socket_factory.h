@@ -12,8 +12,7 @@
 
 namespace net {
 
-class NET_EXPORT_PRIVATE MockMDnsDatagramServerSocket
-    : public DatagramServerSocket {
+class MockMDnsDatagramServerSocket : public DatagramServerSocket {
  public:
   MockMDnsDatagramServerSocket();
   ~MockMDnsDatagramServerSocket();
@@ -70,8 +69,7 @@ class NET_EXPORT_PRIVATE MockMDnsDatagramServerSocket
   std::string response_packet_;
 };
 
-class NET_EXPORT_PRIVATE MockMDnsSocketFactory
-    : public MDnsConnection::SocketFactory {
+class MockMDnsSocketFactory : public MDnsConnection::SocketFactory {
  public:
   MockMDnsSocketFactory();
 
@@ -79,7 +77,7 @@ class NET_EXPORT_PRIVATE MockMDnsSocketFactory
 
   virtual scoped_ptr<DatagramServerSocket> CreateSocket() OVERRIDE;
 
-  void SimulateReceive(const char* packet, int size);
+  void SimulateReceive(const uint8* packet, int size);
 
   MOCK_METHOD1(OnSendTo, void(const std::string&));
 

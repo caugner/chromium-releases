@@ -5,6 +5,7 @@
 var assertEq = chrome.test.assertEq;
 var assertFalse = chrome.test.assertFalse;
 var assertTrue = chrome.test.assertTrue;
+var assertThrows = chrome.test.assertThrows;
 var fail = chrome.test.callbackFail;
 var pass = chrome.test.callbackPass;
 var listenOnce = chrome.test.listenOnce;
@@ -59,7 +60,7 @@ chrome.test.getConfig(function(config) {
 
   function doReq(domain, callback) {
     var req = new XMLHttpRequest();
-    var url = domain + ":PORT/files/extensions/test_file.txt";
+    var url = domain + ":PORT/extensions/test_file.txt";
     url = url.replace(/PORT/, config.testServer.port);
 
     chrome.test.log("Requesting url: " + url);
@@ -193,8 +194,13 @@ chrome.test.getConfig(function(config) {
             chrome.permissions.getAll(pass(function(permissions) {
               assertTrue(checkPermSetsEq(initialPermissions, permissions));
             }));
-            assertEq(undefined, chrome.bookmarks);
-      }));
+            assertTrue(typeof chrome.bookmarks == 'object' &&
+                       chrome.bookmarks != null);
+            assertThrows(
+              chrome.bookmarks.getTree, [function(){}],
+              "'bookmarks' requires a different Feature that is not present.");
+          }
+      ));
     },
 
     // The user shouldn't have to approve permissions that have no warnings.
@@ -287,7 +293,11 @@ chrome.test.getConfig(function(config) {
       });
       listenOnce(chrome.permissions.onRemoved,
                  function(permissions) {
-        assertEq(undefined, chrome.bookmarks);
+        assertTrue(typeof chrome.bookmarks == 'object' &&
+                   chrome.bookmarks != null);
+        assertThrows(
+          chrome.bookmarks.getTree, [function(){}],
+          "'bookmarks' requires a different Feature that is not present.");
       });
 
       chrome.permissions.request(

@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_HISTORY_HISTORY_TAB_HELPER_H_
 
 #include "base/memory/ref_counted.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -60,9 +60,7 @@ class HistoryTabHelper : public content::WebContentsObserver,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  void OnPageContents(const GURL& url,
-                      int32 page_id,
-                      const string16& contents);
+  void OnPageContents(const GURL& url, const string16& contents);
 
   // Helper function to return the history service.  May return NULL.
   HistoryService* GetHistoryService();

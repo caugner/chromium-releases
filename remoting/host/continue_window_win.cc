@@ -9,7 +9,7 @@
 #include "base/compiler_specific.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/process_util.h"
+#include "base/process/memory.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "remoting/host/continue_window.h"
@@ -21,7 +21,7 @@ namespace {
 
 class ContinueWindowWin : public ContinueWindow {
  public:
-  explicit ContinueWindowWin(const UiStrings& ui_strings);
+  ContinueWindowWin();
   virtual ~ContinueWindowWin();
 
  protected:
@@ -36,16 +36,14 @@ class ContinueWindowWin : public ContinueWindow {
   BOOL OnDialogMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
   void EndDialog();
-  void SetStrings();
 
   HWND hwnd_;
 
   DISALLOW_COPY_AND_ASSIGN(ContinueWindowWin);
 };
 
-ContinueWindowWin::ContinueWindowWin(const UiStrings& ui_strings)
-    : ContinueWindow(ui_strings),
-      hwnd_(NULL) {
+ContinueWindowWin::ContinueWindowWin()
+    : hwnd_(NULL) {
 }
 
 ContinueWindowWin::~ContinueWindowWin() {
@@ -64,7 +62,6 @@ void ContinueWindowWin::ShowUi() {
     return;
   }
 
-  SetStrings();
   ShowWindow(hwnd_, SW_SHOW);
 }
 
@@ -128,30 +125,11 @@ void ContinueWindowWin::EndDialog() {
   }
 }
 
-void ContinueWindowWin::SetStrings() {
-  DCHECK(CalledOnValidThread());
-
-  SetWindowText(hwnd_, ui_strings().product_name.c_str());
-
-  HWND hwndMessage = GetDlgItem(hwnd_, IDC_CONTINUE_MESSAGE);
-  CHECK(hwndMessage);
-  SetWindowText(hwndMessage, ui_strings().continue_prompt.c_str());
-
-  HWND hwndDefault = GetDlgItem(hwnd_, IDC_CONTINUE_DEFAULT);
-  CHECK(hwndDefault);
-  SetWindowText(hwndDefault, ui_strings().continue_button_text.c_str());
-
-  HWND hwndCancel = GetDlgItem(hwnd_, IDC_CONTINUE_CANCEL);
-  CHECK(hwndCancel);
-  SetWindowText(hwndCancel, ui_strings().stop_sharing_button_text.c_str());
-}
-
 }  // namespace
 
 // static
-scoped_ptr<HostWindow> HostWindow::CreateContinueWindow(
-    const UiStrings& ui_strings) {
-  return scoped_ptr<HostWindow>(new ContinueWindowWin(ui_strings));
+scoped_ptr<HostWindow> HostWindow::CreateContinueWindow() {
+  return scoped_ptr<HostWindow>(new ContinueWindowWin());
 }
 
 }  // namespace remoting

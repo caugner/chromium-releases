@@ -20,6 +20,7 @@
       ],
       'include_dirs': [
         '<(INTERMEDIATE_DIR)',
+        '<(grit_out_dir)',
       ],
       'sources': [
         'app_launch_for_metro_restart_win.cc',
@@ -44,10 +45,19 @@
         'app_shim/app_shim_host_mac.h',
         'app_shim/app_shim_host_manager_mac.h',
         'app_shim/app_shim_host_manager_mac.mm',
+        'app_shim/app_shim_mac.cc',
+        'app_shim/app_shim_mac.h',
+        'app_shim/chrome_main_app_mode_mac.mm',
         'app_shim/extension_app_shim_handler_mac.cc',
         'app_shim/extension_app_shim_handler_mac.h',
+        'app_window_contents.cc',
+        'app_window_contents.h',
         'field_trial_names.cc',
         'field_trial_names.h',
+        'launcher.cc',
+        'launcher.h',
+        'metrics_names.h',
+        'native_app_window.h',
         'pref_names.cc',
         'pref_names.h',
         'prefs.cc',
@@ -56,16 +66,23 @@
         'saved_files_service.h',
         'saved_files_service_factory.cc',
         'saved_files_service_factory.h',
+        'shell_window.cc',
+        'shell_window.h',
         'shell_window_geometry_cache.cc',
         'shell_window_geometry_cache.h',
-        'shortcut_manager.cc',
-        'shortcut_manager.h',
-        'shortcut_manager_factory.cc',
-        'shortcut_manager_factory.h',
+        'shell_window_registry.cc',
+        'shell_window_registry.h',
         'switches.cc',
         'switches.h',
       ],
       'conditions': [
+        ['chromeos==1',
+          {
+            'dependencies': [
+              'browser_chromeos',
+            ]
+          }
+        ],
         ['enable_extensions==0',
           {
             'sources/': [

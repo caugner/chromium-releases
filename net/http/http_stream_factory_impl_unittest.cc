@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "net/base/net_log.h"
 #include "net/base/test_completion_callback.h"
 #include "net/cert/mock_cert_verifier.h"
@@ -44,7 +45,7 @@ namespace {
 
 class UseAlternateProtocolsScopedSetter {
  public:
-  UseAlternateProtocolsScopedSetter(bool use_alternate_protocols)
+  explicit UseAlternateProtocolsScopedSetter(bool use_alternate_protocols)
       : use_alternate_protocols_(HttpStreamFactory::use_alternate_protocols()) {
     HttpStreamFactory::set_use_alternate_protocols(use_alternate_protocols);
   }
@@ -200,7 +201,7 @@ class StreamRequestWaiter : public HttpStreamRequest::Delegate {
 
 class WebSocketSpdyStream : public MockWebSocketStream {
  public:
-  explicit WebSocketSpdyStream(SpdySession* spdy_session)
+  explicit WebSocketSpdyStream(const base::WeakPtr<SpdySession>& spdy_session)
       : MockWebSocketStream(kStreamTypeSpdy), spdy_session_(spdy_session) {}
 
   virtual ~WebSocketSpdyStream() {}
@@ -208,7 +209,7 @@ class WebSocketSpdyStream : public MockWebSocketStream {
   SpdySession* spdy_session() { return spdy_session_.get(); }
 
  private:
-  scoped_refptr<SpdySession> spdy_session_;
+  base::WeakPtr<SpdySession> spdy_session_;
 };
 
 class WebSocketBasicStream : public MockWebSocketStream {
@@ -236,51 +237,11 @@ class WebSocketStreamFactory : public WebSocketStreamBase::Factory {
   }
 
   virtual WebSocketStreamBase* CreateSpdyStream(
-      SpdySession* spdy_session,
+      const base::WeakPtr<SpdySession>& spdy_session,
       bool use_relative_url) OVERRIDE {
     return new WebSocketSpdyStream(spdy_session);
   }
 };
-
-struct SessionDependencies {
-  // Custom proxy service dependency.
-  explicit SessionDependencies(ProxyService* proxy_service)
-      : host_resolver(new MockHostResolver),
-        cert_verifier(new MockCertVerifier),
-        transport_security_state(new TransportSecurityState),
-        proxy_service(proxy_service),
-        ssl_config_service(new SSLConfigServiceDefaults),
-        http_auth_handler_factory(
-            HttpAuthHandlerFactory::CreateDefault(host_resolver.get())),
-        net_log(NULL) {}
-
-  scoped_ptr<MockHostResolverBase> host_resolver;
-  scoped_ptr<CertVerifier> cert_verifier;
-  scoped_ptr<TransportSecurityState> transport_security_state;
-  scoped_ptr<ProxyService> proxy_service;
-  scoped_refptr<SSLConfigService> ssl_config_service;
-  MockClientSocketFactory socket_factory;
-  scoped_ptr<HttpAuthHandlerFactory> http_auth_handler_factory;
-  HttpServerPropertiesImpl http_server_properties;
-  NetLog* net_log;
-};
-
-HttpNetworkSession* CreateSession(SessionDependencies* session_deps) {
-  HttpNetworkSession::Params params;
-  params.host_resolver = session_deps->host_resolver.get();
-  params.cert_verifier = session_deps->cert_verifier.get();
-  params.transport_security_state =
-      session_deps->transport_security_state.get();
-  params.proxy_service = session_deps->proxy_service.get();
-  params.ssl_config_service = session_deps->ssl_config_service.get();
-  params.client_socket_factory = &session_deps->socket_factory;
-  params.http_auth_handler_factory =
-      session_deps->http_auth_handler_factory.get();
-  params.net_log = session_deps->net_log;
-  params.http_server_properties = &session_deps->http_server_properties;
-
-  return new HttpNetworkSession(params);
-}
 
 struct TestCase {
   int num_streams;
@@ -424,10 +385,22 @@ CapturePreconnectsSSLSocketPool::CapturePreconnectsSocketPool(
                           NULL),
       last_num_streams_(-1) {}
 
-TEST(HttpStreamFactoryTest, PreconnectDirect) {
+class HttpStreamFactoryTest : public ::testing::Test,
+                              public ::testing::WithParamInterface<NextProto> {
+};
+
+INSTANTIATE_TEST_CASE_P(
+    NextProto,
+    HttpStreamFactoryTest,
+    testing::Values(kProtoSPDY2, kProtoSPDY3, kProtoSPDY31, kProtoSPDY4a2,
+                    kProtoHTTP2Draft04));
+
+TEST_P(HttpStreamFactoryTest, PreconnectDirect) {
   for (size_t i = 0; i < arraysize(kTests); ++i) {
-    SessionDependencies session_deps(ProxyService::CreateDirect());
-    scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+    SpdySessionDependencies session_deps(
+        GetParam(), ProxyService::CreateDirect());
+    scoped_refptr<HttpNetworkSession> session(
+        SpdySessionDependencies::SpdyCreateSession(&session_deps));
     HttpNetworkSessionPeer peer(session);
     CapturePreconnectsTransportSocketPool* transport_conn_pool =
         new CapturePreconnectsTransportSocketPool(
@@ -450,10 +423,12 @@ TEST(HttpStreamFactoryTest, PreconnectDirect) {
   }
 }
 
-TEST(HttpStreamFactoryTest, PreconnectHttpProxy) {
+TEST_P(HttpStreamFactoryTest, PreconnectHttpProxy) {
   for (size_t i = 0; i < arraysize(kTests); ++i) {
-    SessionDependencies session_deps(ProxyService::CreateFixed("http_proxy"));
-    scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+    SpdySessionDependencies session_deps(
+        GetParam(), ProxyService::CreateFixed("http_proxy"));
+    scoped_refptr<HttpNetworkSession> session(
+        SpdySessionDependencies::SpdyCreateSession(&session_deps));
     HttpNetworkSessionPeer peer(session);
     HostPortPair proxy_host("http_proxy", 80);
     CapturePreconnectsHttpProxySocketPool* http_proxy_pool =
@@ -477,11 +452,12 @@ TEST(HttpStreamFactoryTest, PreconnectHttpProxy) {
   }
 }
 
-TEST(HttpStreamFactoryTest, PreconnectSocksProxy) {
+TEST_P(HttpStreamFactoryTest, PreconnectSocksProxy) {
   for (size_t i = 0; i < arraysize(kTests); ++i) {
-    SessionDependencies session_deps(
-        ProxyService::CreateFixed("socks4://socks_proxy:1080"));
-    scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+    SpdySessionDependencies session_deps(
+        GetParam(), ProxyService::CreateFixed("socks4://socks_proxy:1080"));
+    scoped_refptr<HttpNetworkSession> session(
+        SpdySessionDependencies::SpdyCreateSession(&session_deps));
     HttpNetworkSessionPeer peer(session);
     HostPortPair proxy_host("socks_proxy", 1080);
     CapturePreconnectsSOCKSSocketPool* socks_proxy_pool =
@@ -505,18 +481,19 @@ TEST(HttpStreamFactoryTest, PreconnectSocksProxy) {
   }
 }
 
-TEST(HttpStreamFactoryTest, PreconnectDirectWithExistingSpdySession) {
+TEST_P(HttpStreamFactoryTest, PreconnectDirectWithExistingSpdySession) {
   for (size_t i = 0; i < arraysize(kTests); ++i) {
-    SessionDependencies session_deps(ProxyService::CreateDirect());
-    scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+    SpdySessionDependencies session_deps(
+        GetParam(), ProxyService::CreateDirect());
+    scoped_refptr<HttpNetworkSession> session(
+        SpdySessionDependencies::SpdyCreateSession(&session_deps));
     HttpNetworkSessionPeer peer(session);
 
-    // Set an existing SpdySession in the pool.
+    // Put a SpdySession in the pool.
     HostPortPair host_port_pair("www.google.com", 443);
     SpdySessionKey key(host_port_pair, ProxyServer::Direct(),
                        kPrivacyModeDisabled);
-    scoped_refptr<SpdySession> spdy_session =
-        session->spdy_session_pool()->Get(key, BoundNetLog());
+    ignore_result(CreateFakeSpdySession(session->spdy_session_pool(), key));
 
     CapturePreconnectsTransportSocketPool* transport_conn_pool =
         new CapturePreconnectsTransportSocketPool(
@@ -537,18 +514,21 @@ TEST(HttpStreamFactoryTest, PreconnectDirectWithExistingSpdySession) {
     if (kTests[i].ssl)
       EXPECT_EQ(-1, ssl_conn_pool->last_num_streams());
     else
-      EXPECT_EQ(kTests[i].num_streams, transport_conn_pool->last_num_streams());
+      EXPECT_EQ(kTests[i].num_streams,
+                transport_conn_pool->last_num_streams());
   }
 }
 
 // Verify that preconnects to unsafe ports are cancelled before they reach
 // the SocketPool.
-TEST(HttpStreamFactoryTest, PreconnectUnsafePort) {
+TEST_P(HttpStreamFactoryTest, PreconnectUnsafePort) {
   ASSERT_FALSE(IsPortAllowedByDefault(7));
   ASSERT_FALSE(IsPortAllowedByOverride(7));
 
-  SessionDependencies session_deps(ProxyService::CreateDirect());
-  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+  SpdySessionDependencies session_deps(
+      GetParam(), ProxyService::CreateDirect());
+  scoped_refptr<HttpNetworkSession> session(
+      SpdySessionDependencies::SpdyCreateSession(&session_deps));
   HttpNetworkSessionPeer peer(session);
   CapturePreconnectsTransportSocketPool* transport_conn_pool =
       new CapturePreconnectsTransportSocketPool(
@@ -564,22 +544,23 @@ TEST(HttpStreamFactoryTest, PreconnectUnsafePort) {
   EXPECT_EQ(-1, transport_conn_pool->last_num_streams());
 }
 
-TEST(HttpStreamFactoryTest, JobNotifiesProxy) {
+TEST_P(HttpStreamFactoryTest, JobNotifiesProxy) {
   const char* kProxyString = "PROXY bad:99; PROXY maybe:80; DIRECT";
-  SessionDependencies session_deps(
-      ProxyService::CreateFixedFromPacResult(kProxyString));
+  SpdySessionDependencies session_deps(
+      GetParam(), ProxyService::CreateFixedFromPacResult(kProxyString));
 
   // First connection attempt fails
   StaticSocketDataProvider socket_data1;
   socket_data1.set_connect_data(MockConnect(ASYNC, ERR_ADDRESS_UNREACHABLE));
-  session_deps.socket_factory.AddSocketDataProvider(&socket_data1);
+  session_deps.socket_factory->AddSocketDataProvider(&socket_data1);
 
   // Second connection attempt succeeds
   StaticSocketDataProvider socket_data2;
   socket_data2.set_connect_data(MockConnect(ASYNC, OK));
-  session_deps.socket_factory.AddSocketDataProvider(&socket_data2);
+  session_deps.socket_factory->AddSocketDataProvider(&socket_data2);
 
-  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+  scoped_refptr<HttpNetworkSession> session(
+      SpdySessionDependencies::SpdyCreateSession(&session_deps));
 
   // Now request a stream. It should succeed using the second proxy in the
   // list.
@@ -603,17 +584,19 @@ TEST(HttpStreamFactoryTest, JobNotifiesProxy) {
   EXPECT_TRUE(iter != retry_info.end());
 }
 
-TEST(HttpStreamFactoryTest, PrivacyModeDisablesChannelId) {
-  SessionDependencies session_deps(ProxyService::CreateDirect());
+TEST_P(HttpStreamFactoryTest, PrivacyModeDisablesChannelId) {
+  SpdySessionDependencies session_deps(
+      GetParam(), ProxyService::CreateDirect());
 
   StaticSocketDataProvider socket_data;
   socket_data.set_connect_data(MockConnect(ASYNC, OK));
-  session_deps.socket_factory.AddSocketDataProvider(&socket_data);
+  session_deps.socket_factory->AddSocketDataProvider(&socket_data);
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
+  session_deps.socket_factory->AddSSLSocketDataProvider(&ssl);
 
-  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+  scoped_refptr<HttpNetworkSession> session(
+      SpdySessionDependencies::SpdyCreateSession(&session_deps));
 
   // Set an existing SpdySession in the pool.
   HostPortPair host_port_pair("www.google.com", 443);
@@ -655,17 +638,19 @@ int GetSocketPoolGroupCount(ClientSocketPool* pool) {
 }
 }  // namespace
 
-TEST(HttpStreamFactoryTest, PrivacyModeUsesDifferentSocketPoolGroup) {
-  SessionDependencies session_deps(ProxyService::CreateDirect());
+TEST_P(HttpStreamFactoryTest, PrivacyModeUsesDifferentSocketPoolGroup) {
+  SpdySessionDependencies session_deps(
+      GetParam(), ProxyService::CreateDirect());
 
   StaticSocketDataProvider socket_data;
   socket_data.set_connect_data(MockConnect(ASYNC, OK));
-  session_deps.socket_factory.AddSocketDataProvider(&socket_data);
+  session_deps.socket_factory->AddSocketDataProvider(&socket_data);
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
+  session_deps.socket_factory->AddSSLSocketDataProvider(&ssl);
 
-  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+  scoped_refptr<HttpNetworkSession> session(
+      SpdySessionDependencies::SpdyCreateSession(&session_deps));
   SSLClientSocketPool* ssl_pool = session->GetSSLSocketPool(
       HttpNetworkSession::NORMAL_SOCKET_POOL);
 
@@ -706,14 +691,16 @@ TEST(HttpStreamFactoryTest, PrivacyModeUsesDifferentSocketPoolGroup) {
   EXPECT_EQ(GetSocketPoolGroupCount(ssl_pool), 2);
 }
 
-TEST(HttpStreamFactoryTest, GetLoadState) {
-  SessionDependencies session_deps(ProxyService::CreateDirect());
+TEST_P(HttpStreamFactoryTest, GetLoadState) {
+  SpdySessionDependencies session_deps(
+      GetParam(), ProxyService::CreateDirect());
 
   StaticSocketDataProvider socket_data;
   socket_data.set_connect_data(MockConnect(ASYNC, OK));
-  session_deps.socket_factory.AddSocketDataProvider(&socket_data);
+  session_deps.socket_factory->AddSocketDataProvider(&socket_data);
 
-  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+  scoped_refptr<HttpNetworkSession> session(
+      SpdySessionDependencies::SpdyCreateSession(&session_deps));
 
   HttpRequestInfo request_info;
   request_info.method = "GET";
@@ -731,14 +718,16 @@ TEST(HttpStreamFactoryTest, GetLoadState) {
   waiter.WaitForStream();
 }
 
-TEST(HttpStreamFactoryTest, RequestHttpStream) {
-  SessionDependencies session_deps(ProxyService::CreateDirect());
+TEST_P(HttpStreamFactoryTest, RequestHttpStream) {
+  SpdySessionDependencies session_deps(
+      GetParam(), ProxyService::CreateDirect());
 
   StaticSocketDataProvider socket_data;
   socket_data.set_connect_data(MockConnect(ASYNC, OK));
-  session_deps.socket_factory.AddSocketDataProvider(&socket_data);
+  session_deps.socket_factory->AddSocketDataProvider(&socket_data);
 
-  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+  scoped_refptr<HttpNetworkSession> session(
+      SpdySessionDependencies::SpdyCreateSession(&session_deps));
 
   // Now request a stream.  It should succeed using the second proxy in the
   // list.
@@ -767,21 +756,28 @@ TEST(HttpStreamFactoryTest, RequestHttpStream) {
       session->GetTransportSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL)));
   EXPECT_EQ(0, GetSocketPoolGroupCount(session->GetSSLSocketPool(
       HttpNetworkSession::NORMAL_SOCKET_POOL)));
+  EXPECT_EQ(0, GetSocketPoolGroupCount(
+      session->GetTransportSocketPool(
+          HttpNetworkSession::WEBSOCKET_SOCKET_POOL)));
+  EXPECT_EQ(0, GetSocketPoolGroupCount(session->GetSSLSocketPool(
+      HttpNetworkSession::WEBSOCKET_SOCKET_POOL)));
   EXPECT_TRUE(waiter.used_proxy_info().is_direct());
 }
 
-TEST(HttpStreamFactoryTest, RequestHttpStreamOverSSL) {
-  SessionDependencies session_deps(ProxyService::CreateDirect());
+TEST_P(HttpStreamFactoryTest, RequestHttpStreamOverSSL) {
+  SpdySessionDependencies session_deps(
+      GetParam(), ProxyService::CreateDirect());
 
   MockRead mock_read(ASYNC, OK);
   StaticSocketDataProvider socket_data(&mock_read, 1, NULL, 0);
   socket_data.set_connect_data(MockConnect(ASYNC, OK));
-  session_deps.socket_factory.AddSocketDataProvider(&socket_data);
+  session_deps.socket_factory->AddSocketDataProvider(&socket_data);
 
   SSLSocketDataProvider ssl_socket_data(ASYNC, OK);
-  session_deps.socket_factory.AddSSLSocketDataProvider(&ssl_socket_data);
+  session_deps.socket_factory->AddSSLSocketDataProvider(&ssl_socket_data);
 
-  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+  scoped_refptr<HttpNetworkSession> session(
+      SpdySessionDependencies::SpdyCreateSession(&session_deps));
 
   // Now request a stream.
   HttpRequestInfo request_info;
@@ -808,17 +804,24 @@ TEST(HttpStreamFactoryTest, RequestHttpStreamOverSSL) {
       session->GetTransportSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL)));
   EXPECT_EQ(1, GetSocketPoolGroupCount(
       session->GetSSLSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL)));
+  EXPECT_EQ(0, GetSocketPoolGroupCount(
+      session->GetTransportSocketPool(
+          HttpNetworkSession::WEBSOCKET_SOCKET_POOL)));
+  EXPECT_EQ(0, GetSocketPoolGroupCount(session->GetSSLSocketPool(
+      HttpNetworkSession::WEBSOCKET_SOCKET_POOL)));
   EXPECT_TRUE(waiter.used_proxy_info().is_direct());
 }
 
-TEST(HttpStreamFactoryTest, RequestHttpStreamOverProxy) {
-  SessionDependencies session_deps(ProxyService::CreateFixed("myproxy:8888"));
+TEST_P(HttpStreamFactoryTest, RequestHttpStreamOverProxy) {
+  SpdySessionDependencies session_deps(
+      GetParam(), ProxyService::CreateFixed("myproxy:8888"));
 
   StaticSocketDataProvider socket_data;
   socket_data.set_connect_data(MockConnect(ASYNC, OK));
-  session_deps.socket_factory.AddSocketDataProvider(&socket_data);
+  session_deps.socket_factory->AddSocketDataProvider(&socket_data);
 
-  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+  scoped_refptr<HttpNetworkSession> session(
+      SpdySessionDependencies::SpdyCreateSession(&session_deps));
 
   // Now request a stream.  It should succeed using the second proxy in the
   // list.
@@ -852,17 +855,25 @@ TEST(HttpStreamFactoryTest, RequestHttpStreamOverProxy) {
   EXPECT_EQ(0, GetSocketPoolGroupCount(session->GetSocketPoolForSSLWithProxy(
       HttpNetworkSession::NORMAL_SOCKET_POOL,
       HostPortPair("myproxy", 8888))));
+  EXPECT_EQ(0, GetSocketPoolGroupCount(session->GetSocketPoolForHTTPProxy(
+      HttpNetworkSession::WEBSOCKET_SOCKET_POOL,
+      HostPortPair("myproxy", 8888))));
+  EXPECT_EQ(0, GetSocketPoolGroupCount(session->GetSocketPoolForSSLWithProxy(
+      HttpNetworkSession::WEBSOCKET_SOCKET_POOL,
+      HostPortPair("myproxy", 8888))));
   EXPECT_FALSE(waiter.used_proxy_info().is_direct());
 }
 
-TEST(HttpStreamFactoryTest, RequestWebSocketBasicStream) {
-  SessionDependencies session_deps(ProxyService::CreateDirect());
+TEST_P(HttpStreamFactoryTest, RequestWebSocketBasicStream) {
+  SpdySessionDependencies session_deps(
+      GetParam(), ProxyService::CreateDirect());
 
   StaticSocketDataProvider socket_data;
   socket_data.set_connect_data(MockConnect(ASYNC, OK));
-  session_deps.socket_factory.AddSocketDataProvider(&socket_data);
+  session_deps.socket_factory->AddSocketDataProvider(&socket_data);
 
-  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+  scoped_refptr<HttpNetworkSession> session(
+      SpdySessionDependencies::SpdyCreateSession(&session_deps));
 
   // Now request a stream.
   HttpRequestInfo request_info;
@@ -888,25 +899,32 @@ TEST(HttpStreamFactoryTest, RequestWebSocketBasicStream) {
   ASSERT_TRUE(NULL != waiter.websocket_stream());
   EXPECT_EQ(MockWebSocketStream::kStreamTypeBasic,
             waiter.websocket_stream()->type());
-  EXPECT_EQ(1, GetSocketPoolGroupCount(
+  EXPECT_EQ(0, GetSocketPoolGroupCount(
       session->GetTransportSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL)));
   EXPECT_EQ(0, GetSocketPoolGroupCount(
       session->GetSSLSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL)));
+  EXPECT_EQ(1, GetSocketPoolGroupCount(
+      session->GetTransportSocketPool(
+          HttpNetworkSession::WEBSOCKET_SOCKET_POOL)));
+  EXPECT_EQ(0, GetSocketPoolGroupCount(
+      session->GetSSLSocketPool(HttpNetworkSession::WEBSOCKET_SOCKET_POOL)));
   EXPECT_TRUE(waiter.used_proxy_info().is_direct());
 }
 
-TEST(HttpStreamFactoryTest, RequestWebSocketBasicStreamOverSSL) {
-  SessionDependencies session_deps(ProxyService::CreateDirect());
+TEST_P(HttpStreamFactoryTest, RequestWebSocketBasicStreamOverSSL) {
+  SpdySessionDependencies session_deps(
+      GetParam(), ProxyService::CreateDirect());
 
   MockRead mock_read(ASYNC, OK);
   StaticSocketDataProvider socket_data(&mock_read, 1, NULL, 0);
   socket_data.set_connect_data(MockConnect(ASYNC, OK));
-  session_deps.socket_factory.AddSocketDataProvider(&socket_data);
+  session_deps.socket_factory->AddSocketDataProvider(&socket_data);
 
   SSLSocketDataProvider ssl_socket_data(ASYNC, OK);
-  session_deps.socket_factory.AddSSLSocketDataProvider(&ssl_socket_data);
+  session_deps.socket_factory->AddSSLSocketDataProvider(&ssl_socket_data);
 
-  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+  scoped_refptr<HttpNetworkSession> session(
+      SpdySessionDependencies::SpdyCreateSession(&session_deps));
 
   // Now request a stream.
   HttpRequestInfo request_info;
@@ -932,22 +950,29 @@ TEST(HttpStreamFactoryTest, RequestWebSocketBasicStreamOverSSL) {
   ASSERT_TRUE(NULL != waiter.websocket_stream());
   EXPECT_EQ(MockWebSocketStream::kStreamTypeBasic,
             waiter.websocket_stream()->type());
-  EXPECT_EQ(1, GetSocketPoolGroupCount(
+  EXPECT_EQ(0, GetSocketPoolGroupCount(
       session->GetTransportSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL)));
-  EXPECT_EQ(1, GetSocketPoolGroupCount(
+  EXPECT_EQ(0, GetSocketPoolGroupCount(
       session->GetSSLSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL)));
+  EXPECT_EQ(1, GetSocketPoolGroupCount(
+      session->GetTransportSocketPool(
+          HttpNetworkSession::WEBSOCKET_SOCKET_POOL)));
+  EXPECT_EQ(1, GetSocketPoolGroupCount(
+      session->GetSSLSocketPool(HttpNetworkSession::WEBSOCKET_SOCKET_POOL)));
   EXPECT_TRUE(waiter.used_proxy_info().is_direct());
 }
 
-TEST(HttpStreamFactoryTest, RequestWebSocketBasicStreamOverProxy) {
-  SessionDependencies session_deps(ProxyService::CreateFixed("myproxy:8888"));
+TEST_P(HttpStreamFactoryTest, RequestWebSocketBasicStreamOverProxy) {
+  SpdySessionDependencies session_deps(
+      GetParam(), ProxyService::CreateFixed("myproxy:8888"));
 
   MockRead read(SYNCHRONOUS, "HTTP/1.0 200 Connection established\r\n\r\n");
   StaticSocketDataProvider socket_data(&read, 1, 0, 0);
   socket_data.set_connect_data(MockConnect(ASYNC, OK));
-  session_deps.socket_factory.AddSocketDataProvider(&socket_data);
+  session_deps.socket_factory->AddSocketDataProvider(&socket_data);
 
-  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+  scoped_refptr<HttpNetworkSession> session(
+      SpdySessionDependencies::SpdyCreateSession(&session_deps));
 
   // Now request a stream.
   HttpRequestInfo request_info;
@@ -974,34 +999,44 @@ TEST(HttpStreamFactoryTest, RequestWebSocketBasicStreamOverProxy) {
   EXPECT_EQ(MockWebSocketStream::kStreamTypeBasic,
             waiter.websocket_stream()->type());
   EXPECT_EQ(0, GetSocketPoolGroupCount(
-      session->GetTransportSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL)));
+      session->GetTransportSocketPool(
+          HttpNetworkSession::WEBSOCKET_SOCKET_POOL)));
   EXPECT_EQ(0, GetSocketPoolGroupCount(
-      session->GetSSLSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL)));
-  EXPECT_EQ(1, GetSocketPoolGroupCount(session->GetSocketPoolForHTTPProxy(
+      session->GetSSLSocketPool(HttpNetworkSession::WEBSOCKET_SOCKET_POOL)));
+  EXPECT_EQ(0, GetSocketPoolGroupCount(session->GetSocketPoolForHTTPProxy(
       HttpNetworkSession::NORMAL_SOCKET_POOL,
       HostPortPair("myproxy", 8888))));
   EXPECT_EQ(0, GetSocketPoolGroupCount(session->GetSocketPoolForSSLWithProxy(
       HttpNetworkSession::NORMAL_SOCKET_POOL,
       HostPortPair("myproxy", 8888))));
+  EXPECT_EQ(1, GetSocketPoolGroupCount(session->GetSocketPoolForHTTPProxy(
+      HttpNetworkSession::WEBSOCKET_SOCKET_POOL,
+      HostPortPair("myproxy", 8888))));
+  EXPECT_EQ(0, GetSocketPoolGroupCount(session->GetSocketPoolForSSLWithProxy(
+      HttpNetworkSession::WEBSOCKET_SOCKET_POOL,
+      HostPortPair("myproxy", 8888))));
   EXPECT_FALSE(waiter.used_proxy_info().is_direct());
 }
 
-TEST(HttpStreamFactoryTest, RequestSpdyHttpStream) {
-  SpdySessionDependencies session_deps(kProtoSPDY3,
+TEST_P(HttpStreamFactoryTest, RequestSpdyHttpStream) {
+  SpdySessionDependencies session_deps(GetParam(),
                                        ProxyService::CreateDirect());
 
   MockRead mock_read(ASYNC, OK);
-  StaticSocketDataProvider socket_data(&mock_read, 1, NULL, 0);
+  DeterministicSocketData socket_data(&mock_read, 1, NULL, 0);
   socket_data.set_connect_data(MockConnect(ASYNC, OK));
-  session_deps.socket_factory->AddSocketDataProvider(&socket_data);
+  session_deps.deterministic_socket_factory->AddSocketDataProvider(
+      &socket_data);
 
   SSLSocketDataProvider ssl_socket_data(ASYNC, OK);
-  ssl_socket_data.SetNextProto(kProtoSPDY3);
-  session_deps.socket_factory->AddSSLSocketDataProvider(&ssl_socket_data);
+  ssl_socket_data.SetNextProto(GetParam());
+  session_deps.deterministic_socket_factory->AddSSLSocketDataProvider(
+      &ssl_socket_data);
 
   HostPortPair host_port_pair("www.google.com", 443);
   scoped_refptr<HttpNetworkSession>
-      session(SpdySessionDependencies::SpdyCreateSession(&session_deps));
+      session(SpdySessionDependencies::SpdyCreateSessionDeterministic(
+          &session_deps));
 
   // Now request a stream.
   HttpRequestInfo request_info;
@@ -1028,11 +1063,16 @@ TEST(HttpStreamFactoryTest, RequestSpdyHttpStream) {
       session->GetTransportSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL)));
   EXPECT_EQ(1, GetSocketPoolGroupCount(
       session->GetSSLSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL)));
+  EXPECT_EQ(0, GetSocketPoolGroupCount(
+      session->GetTransportSocketPool(
+          HttpNetworkSession::WEBSOCKET_SOCKET_POOL)));
+  EXPECT_EQ(0, GetSocketPoolGroupCount(
+      session->GetSSLSocketPool(HttpNetworkSession::WEBSOCKET_SOCKET_POOL)));
   EXPECT_TRUE(waiter.used_proxy_info().is_direct());
 }
 
-TEST(HttpStreamFactoryTest, RequestWebSocketSpdyStream) {
-  SpdySessionDependencies session_deps(kProtoSPDY3,
+TEST_P(HttpStreamFactoryTest, RequestWebSocketSpdyStream) {
+  SpdySessionDependencies session_deps(GetParam(),
                                        ProxyService::CreateDirect());
 
   MockRead mock_read(SYNCHRONOUS, ERR_IO_PENDING);
@@ -1041,7 +1081,7 @@ TEST(HttpStreamFactoryTest, RequestWebSocketSpdyStream) {
   session_deps.socket_factory->AddSocketDataProvider(&socket_data);
 
   SSLSocketDataProvider ssl_socket_data(ASYNC, OK);
-  ssl_socket_data.SetNextProto(kProtoSPDY3);
+  ssl_socket_data.SetNextProto(GetParam());
   session_deps.socket_factory->AddSSLSocketDataProvider(&ssl_socket_data);
 
   HostPortPair host_port_pair("www.google.com", 80);
@@ -1095,34 +1135,43 @@ TEST(HttpStreamFactoryTest, RequestWebSocketSpdyStream) {
             static_cast<WebSocketSpdyStream*>(waiter1.websocket_stream())->
             spdy_session());
 
-  EXPECT_EQ(1, GetSocketPoolGroupCount(
+  EXPECT_EQ(0, GetSocketPoolGroupCount(
       session->GetTransportSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL)));
-  EXPECT_EQ(1, GetSocketPoolGroupCount(
+  EXPECT_EQ(0, GetSocketPoolGroupCount(
       session->GetSSLSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL)));
+  EXPECT_EQ(1, GetSocketPoolGroupCount(
+      session->GetTransportSocketPool(
+          HttpNetworkSession::WEBSOCKET_SOCKET_POOL)));
+  EXPECT_EQ(1, GetSocketPoolGroupCount(
+      session->GetSSLSocketPool(HttpNetworkSession::WEBSOCKET_SOCKET_POOL)));
   EXPECT_TRUE(waiter1.used_proxy_info().is_direct());
 }
 
-TEST(HttpStreamFactoryTest, OrphanedWebSocketStream) {
+TEST_P(HttpStreamFactoryTest, OrphanedWebSocketStream) {
   UseAlternateProtocolsScopedSetter use_alternate_protocols(true);
-  SpdySessionDependencies session_deps(kProtoSPDY3,
+  SpdySessionDependencies session_deps(GetParam(),
                                        ProxyService::CreateDirect());
 
   MockRead mock_read(ASYNC, OK);
-  StaticSocketDataProvider socket_data(&mock_read, 1, NULL, 0);
+  DeterministicSocketData socket_data(&mock_read, 1, NULL, 0);
   socket_data.set_connect_data(MockConnect(ASYNC, OK));
-  session_deps.socket_factory->AddSocketDataProvider(&socket_data);
+  session_deps.deterministic_socket_factory->AddSocketDataProvider(
+      &socket_data);
 
   MockRead mock_read2(ASYNC, OK);
-  StaticSocketDataProvider socket_data2(&mock_read2, 1, NULL, 0);
+  DeterministicSocketData socket_data2(&mock_read2, 1, NULL, 0);
   socket_data2.set_connect_data(MockConnect(ASYNC, ERR_IO_PENDING));
-  session_deps.socket_factory->AddSocketDataProvider(&socket_data2);
+  session_deps.deterministic_socket_factory->AddSocketDataProvider(
+      &socket_data2);
 
   SSLSocketDataProvider ssl_socket_data(ASYNC, OK);
-  ssl_socket_data.SetNextProto(kProtoSPDY3);
-  session_deps.socket_factory->AddSSLSocketDataProvider(&ssl_socket_data);
+  ssl_socket_data.SetNextProto(GetParam());
+  session_deps.deterministic_socket_factory->AddSSLSocketDataProvider(
+      &ssl_socket_data);
 
   scoped_refptr<HttpNetworkSession>
-      session(SpdySessionDependencies::SpdyCreateSession(&session_deps));
+      session(SpdySessionDependencies::SpdyCreateSessionDeterministic(
+          &session_deps));
 
   // Now request a stream.
   HttpRequestInfo request_info;
@@ -1156,10 +1205,15 @@ TEST(HttpStreamFactoryTest, OrphanedWebSocketStream) {
 
   // Make sure that there was an alternative connection
   // which consumes extra connections.
-  EXPECT_EQ(2, GetSocketPoolGroupCount(
+  EXPECT_EQ(0, GetSocketPoolGroupCount(
       session->GetTransportSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL)));
-  EXPECT_EQ(1, GetSocketPoolGroupCount(
+  EXPECT_EQ(0, GetSocketPoolGroupCount(
       session->GetSSLSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL)));
+  EXPECT_EQ(2, GetSocketPoolGroupCount(
+      session->GetTransportSocketPool(
+          HttpNetworkSession::WEBSOCKET_SOCKET_POOL)));
+  EXPECT_EQ(1, GetSocketPoolGroupCount(
+      session->GetSSLSocketPool(HttpNetworkSession::WEBSOCKET_SOCKET_POOL)));
   EXPECT_TRUE(waiter.used_proxy_info().is_direct());
 
   // Make sure there is no orphaned job. it is already canceled.

@@ -45,6 +45,11 @@ static const int32 kV4l2RawFmts[] = {
   V4L2_PIX_FMT_YUYV
 };
 
+// Linux USB camera devices have names like "UVC Camera (1234:fdcb)"
+static const char kUsbSuffixStart[] = " (";
+static const size_t kUsbModelSize = 9;
+static const char kUsbSuffixEnd[] = ")";
+
 static VideoCaptureCapability::Format V4l2ColorToVideoCaptureColorFormat(
     int32 v4l2_fourcc) {
   VideoCaptureCapability::Format result = VideoCaptureCapability::kColorUnknown;
@@ -109,9 +114,8 @@ void VideoCaptureDevice::GetDeviceNames(Names* device_names) {
   while (!enumerator.Next().empty()) {
     base::FileEnumerator::FileInfo info = enumerator.GetInfo();
 
-    Name name;
-    name.unique_id = path.value() + info.GetName().value();
-    if ((fd = open(name.unique_id.c_str() , O_RDONLY)) < 0) {
+    std::string unique_id = path.value() + info.GetName().value();
+    if ((fd = open(unique_id.c_str() , O_RDONLY)) < 0) {
       // Failed to open this device.
       continue;
     }
@@ -122,14 +126,34 @@ void VideoCaptureDevice::GetDeviceNames(Names* device_names) {
         !(cap.capabilities & V4L2_CAP_VIDEO_OUTPUT)) {
       // This is a V4L2 video capture device
       if (HasUsableFormats(fd)) {
-        name.device_name = base::StringPrintf("%s", cap.card);
-        device_names->push_back(name);
+        Name device_name(base::StringPrintf("%s", cap.card), unique_id);
+        device_names->push_back(device_name);
       } else {
         DVLOG(1) << "No usable formats reported by " << info.GetName().value();
       }
     }
     close(fd);
   }
+}
+
+const std::string VideoCaptureDevice::Name::GetModel() const {
+  const size_t usb_suffix_start_size = sizeof(kUsbSuffixStart) - 1;
+  const size_t usb_suffix_end_size = sizeof(kUsbSuffixEnd) - 1;
+  const size_t suffix_size =
+      usb_suffix_start_size + kUsbModelSize + usb_suffix_end_size;
+  if (device_name_.length() < suffix_size)
+    return "";
+  const std::string suffix = device_name_.substr(
+      device_name_.length() - suffix_size, suffix_size);
+
+  int start_compare =
+      suffix.compare(0, usb_suffix_start_size, kUsbSuffixStart);
+  int end_compare = suffix.compare(suffix_size - usb_suffix_end_size,
+      usb_suffix_end_size, kUsbSuffixEnd);
+  if (start_compare != 0 || end_compare != 0)
+    return "";
+
+  return suffix.substr(usb_suffix_start_size, kUsbModelSize);
 }
 
 VideoCaptureDevice* VideoCaptureDevice::Create(const Name& device_name) {
@@ -139,7 +163,7 @@ VideoCaptureDevice* VideoCaptureDevice::Create(const Name& device_name) {
   // Test opening the device driver. This is to make sure it is available.
   // We will reopen it again in our worker thread when someone
   // allocates the camera.
-  int fd = open(device_name.unique_id.c_str(), O_RDONLY);
+  int fd = open(device_name.id().c_str(), O_RDONLY);
   if (fd < 0) {
     DVLOG(1) << "Cannot open device";
     delete self;
@@ -173,18 +197,21 @@ VideoCaptureDeviceLinux::~VideoCaptureDeviceLinux() {
   }
 }
 
-void VideoCaptureDeviceLinux::Allocate(int width,
-                                       int height,
-                                       int frame_rate,
-                                       EventHandler* observer) {
+void VideoCaptureDeviceLinux::Allocate(
+    const VideoCaptureCapability& capture_format,
+    EventHandler* observer) {
   if (v4l2_thread_.IsRunning()) {
     return;  // Wrong state.
   }
   v4l2_thread_.Start();
-  v4l2_thread_.message_loop()->PostTask(
-      FROM_HERE,
-      base::Bind(&VideoCaptureDeviceLinux::OnAllocate, base::Unretained(this),
-                 width, height, frame_rate, observer));
+  v4l2_thread_.message_loop()
+      ->PostTask(FROM_HERE,
+                 base::Bind(&VideoCaptureDeviceLinux::OnAllocate,
+                            base::Unretained(this),
+                            capture_format.width,
+                            capture_format.height,
+                            capture_format.frame_rate,
+                            observer));
 }
 
 void VideoCaptureDeviceLinux::Start() {
@@ -234,7 +261,7 @@ void VideoCaptureDeviceLinux::OnAllocate(int width,
   observer_ = observer;
 
   // Need to open camera with O_RDWR after Linux kernel 3.3.
-  if ((device_fd_ = open(device_name_.unique_id.c_str(), O_RDWR)) < 0) {
+  if ((device_fd_ = open(device_name_.id().c_str(), O_RDWR)) < 0) {
     SetErrorState("Failed to open V4L2 device driver.");
     return;
   }

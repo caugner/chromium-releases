@@ -12,7 +12,7 @@
 #include "base/i18n/rtl.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "ui/base/dragdrop/drag_utils.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/events/event_constants.h"
@@ -90,11 +90,6 @@ bool TitleMatchesMnemonic(MenuItemView* menu, char16 key) {
 }
 
 }  // namespace
-
-// Convenience for scrolling the view such that the origin is visible.
-static void ScrollToVisible(View* view) {
-  view->ScrollRectToVisible(view->GetLocalBounds());
-}
 
 // Returns the first descendant of |view| that is hot tracked.
 static View* GetFirstHotTrackedView(View* view) {
@@ -795,8 +790,10 @@ void MenuController::SetSelection(MenuItemView* menu_item,
   }
 
   // Notify the new path it is selected.
-  for (size_t i = paths_differ_at; i < new_size; ++i)
+  for (size_t i = paths_differ_at; i < new_size; ++i) {
+    new_path[i]->ScrollRectToVisible(new_path[i]->GetLocalBounds());
     new_path[i]->SetSelected(true);
+  }
 
   if (menu_item && menu_item->GetDelegate())
     menu_item->GetDelegate()->SelectionChanged(menu_item);
@@ -1887,7 +1884,6 @@ void MenuController::IncrementSelection(int delta) {
     // select the first menu item.
     if (item->GetSubmenu()->GetMenuItemCount()) {
       SetSelection(item->GetSubmenu()->GetMenuItemAt(0), SELECTION_DEFAULT);
-      ScrollToVisible(item->GetSubmenu()->GetMenuItemAt(0));
       return;
     }
   }
@@ -1926,7 +1922,6 @@ void MenuController::IncrementSelection(int delta) {
               FindNextSelectableMenuItem(parent, i, delta);
           if (!to_select)
             break;
-          ScrollToVisible(to_select);
           SetSelection(to_select, SELECTION_DEFAULT);
           View* to_make_hot = GetInitialFocusableView(to_select, delta == 1);
           if (to_make_hot && !strcmp(to_make_hot->GetClassName(),

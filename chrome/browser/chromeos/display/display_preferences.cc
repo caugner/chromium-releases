@@ -5,8 +5,10 @@
 #include "chrome/browser/chromeos/display/display_preferences.h"
 
 #include "ash/display/display_controller.h"
+#include "ash/display/display_layout_store.h"
 #include "ash/display/display_manager.h"
 #include "ash/display/display_pref_util.h"
+#include "ash/display/resolution_notification_controller.h"
 #include "ash/shell.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
@@ -20,12 +22,12 @@
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/display/output_configurator.h"
-#include "googleurl/src/url_canon.h"
-#include "googleurl/src/url_util.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/screen.h"
+#include "url/url_canon.h"
+#include "url/url_util.h"
 
 namespace chromeos {
 namespace {
@@ -82,13 +84,8 @@ ash::DisplayController* GetDisplayController() {
 
 void LoadDisplayLayouts() {
   PrefService* local_state = g_browser_process->local_state();
-  ash::DisplayController* display_controller = GetDisplayController();
-
-  ash::DisplayLayout default_layout = ash::DisplayLayout::FromInts(
-      local_state->GetInteger(prefs::kSecondaryDisplayLayout),
-      local_state->GetInteger(prefs::kSecondaryDisplayOffset));
-  default_layout.primary_id = local_state->GetInt64(prefs::kPrimaryDisplayID);
-  display_controller->SetDefaultDisplayLayout(default_layout);
+  ash::internal::DisplayLayoutStore* layout_store =
+      GetDisplayManager()->layout_store();
 
   const base::DictionaryValue* layouts = local_state->GetDictionary(
       prefs::kSecondaryDisplays);
@@ -110,14 +107,7 @@ void LoadDisplayLayouts() {
           id2 == gfx::Display::kInvalidDisplayID) {
         continue;
       }
-      display_controller->RegisterLayoutForDisplayIdPair(id1, id2, layout);
-    } else {
-      int64 id = gfx::Display::kInvalidDisplayID;
-      if (!base::StringToInt64(it.key(), &id) ||
-          id == gfx::Display::kInvalidDisplayID) {
-        continue;
-      }
-      display_controller->RegisterLayoutForDisplayId(id, layout);
+      layout_store->RegisterLayoutForDisplayIdPair(id1, id2, layout);
     }
   }
 }
@@ -146,13 +136,20 @@ void LoadDisplayProperties() {
     int ui_scale_value = 0;
     if (dict_value->GetInteger("ui-scale", &ui_scale_value))
       ui_scale = static_cast<float>(ui_scale_value) / 1000.0f;
+
+    int width = 0, height = 0;
+    dict_value->GetInteger("width", &width);
+    dict_value->GetInteger("height", &height);
+    gfx::Size resolution_in_pixels(width, height);
+
     gfx::Insets insets;
     if (ValueToInsets(*dict_value, &insets))
       insets_to_set = &insets;
     GetDisplayManager()->RegisterDisplayProperty(id,
                                                  rotation,
                                                  ui_scale,
-                                                 insets_to_set);
+                                                 insets_to_set,
+                                                 resolution_in_pixels);
   }
 }
 
@@ -178,10 +175,9 @@ void StoreCurrentDisplayLayoutPrefs() {
   if (!IsValidUser() || GetDisplayManager()->num_connected_displays() < 2)
     return;
 
-  ash::DisplayController* display_controller = GetDisplayController();
-  ash::DisplayIdPair pair = display_controller->GetCurrentDisplayIdPair();
+  ash::DisplayIdPair pair = GetDisplayController()->GetCurrentDisplayIdPair();
   ash::DisplayLayout display_layout =
-      display_controller->GetRegisteredDisplayLayout(pair);
+      GetDisplayManager()->layout_store()->GetRegisteredDisplayLayout(pair);
   StoreDisplayLayoutPref(pair, display_layout);
 }
 
@@ -194,7 +190,8 @@ void StoreCurrentDisplayProperties() {
 
   size_t num = display_manager->GetNumDisplays();
   for (size_t i = 0; i < num; ++i) {
-    int64 id = display_manager->GetDisplayAt(i)->id();
+    const gfx::Display& display = display_manager->GetDisplayAt(i);
+    int64 id = display.id();
     ash::internal::DisplayInfo info = display_manager->GetDisplayInfo(id);
 
     scoped_ptr<base::DictionaryValue> property_value(
@@ -202,7 +199,14 @@ void StoreCurrentDisplayProperties() {
     property_value->SetInteger("rotation", static_cast<int>(info.rotation()));
     property_value->SetInteger("ui-scale",
                                static_cast<int>(info.ui_scale() * 1000));
-    if (info.has_custom_overscan_insets())
+    gfx::Size resolution;
+    if (!display.IsInternal() &&
+        display_manager->GetSelectedResolutionForDisplayId(id, &resolution)) {
+      property_value->SetInteger("width", resolution.width());
+      property_value->SetInteger("height", resolution.height());
+    }
+
+    if (!info.overscan_insets_in_dip().empty())
       InsetsToValue(info.overscan_insets_in_dip(), property_value.get());
     pref_data->Set(base::Int64ToString(id), property_value.release());
   }
@@ -246,46 +250,29 @@ void StoreCurrentDisplayPowerState() {
 }  // namespace
 
 void RegisterDisplayLocalStatePrefs(PrefRegistrySimple* registry) {
-  // The default secondary display layout.
-  registry->RegisterIntegerPref(prefs::kSecondaryDisplayLayout,
-                                static_cast<int>(ash::DisplayLayout::RIGHT));
-  // The default offset of the secondary display position from the primary
-  // display.
-  registry->RegisterIntegerPref(prefs::kSecondaryDisplayOffset, 0);
   // Per-display preference.
   registry->RegisterDictionaryPref(prefs::kSecondaryDisplays);
   registry->RegisterDictionaryPref(prefs::kDisplayProperties);
   DisplayPowerStateToStringMap::const_iterator iter =
       GetDisplayPowerStateToStringMap()->find(chromeos::DISPLAY_POWER_ALL_ON);
   registry->RegisterStringPref(prefs::kDisplayPowerState, iter->second);
-  registry->RegisterInt64Pref(prefs::kPrimaryDisplayID,
-                              gfx::Display::kInvalidDisplayID);
 }
 
 void StoreDisplayPrefs() {
-  if (!IsValidUser())
+  // Do not store prefs when the confirmation dialog is shown.
+  if (!IsValidUser() ||
+      ash::Shell::GetInstance()->resolution_notification_controller()->
+          DoesNotificationTimeout()) {
     return;
+  }
   StoreCurrentDisplayLayoutPrefs();
   StoreCurrentDisplayProperties();
   StoreCurrentDisplayPowerState();
 }
 
-void SetCurrentAndDefaultDisplayLayout(const ash::DisplayLayout& layout) {
+void SetCurrentDisplayLayout(const ash::DisplayLayout& layout) {
   ash::DisplayController* display_controller = GetDisplayController();
   display_controller->SetLayoutForCurrentDisplays(layout);
-
-  if (IsValidUser()) {
-    PrefService* local_state = g_browser_process->local_state();
-    ash::DisplayIdPair pair = display_controller->GetCurrentDisplayIdPair();
-    // Use registered layout as the layout might have been inverted when
-    // the displays are swapped.
-    ash::DisplayLayout display_layout =
-        display_controller->GetRegisteredDisplayLayout(pair);
-    local_state->SetInteger(prefs::kSecondaryDisplayLayout,
-                            static_cast<int>(display_layout.position));
-    local_state->SetInteger(prefs::kSecondaryDisplayOffset,
-                            display_layout.offset);
-  }
 }
 
 void LoadDisplayPreferences(bool first_run_after_boot) {

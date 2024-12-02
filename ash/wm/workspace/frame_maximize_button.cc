@@ -9,8 +9,10 @@
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
+#include "ash/touch/touch_uma.h"
 #include "ash/wm/maximize_bubble_controller.h"
 #include "ash/wm/property_util.h"
+#include "ash/wm/window_animations.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/phantom_window_controller.h"
@@ -145,7 +147,11 @@ void FrameMaximizeButton::SnapButtonHovered(SnapType type) {
 }
 
 void FrameMaximizeButton::ExecuteSnapAndCloseMenu(SnapType snap_type) {
-  DCHECK_NE(snap_type_, SNAP_NONE);
+  // We can come here with no snap type set in case that the mouse opened the
+  // maximize button and a touch event "touched" a button.
+  if (snap_type_ == SNAP_NONE)
+    SnapButtonHovered(snap_type);
+
   Cancel(true);
   // Tell our menu to close.
   maximizer_.reset();
@@ -279,8 +285,11 @@ void FrameMaximizeButton::OnGestureEvent(ui::GestureEvent* event) {
     // for TAP and SCROLL_END). So it is necessary to update the snap-state for
     // the current event.
     ProcessUpdateEvent(*event);
-    if (event->type() == ui::ET_GESTURE_TAP)
+    if (event->type() == ui::ET_GESTURE_TAP) {
       snap_type_ = SnapTypeForLocation(event->location());
+      TouchUMA::GetInstance()->RecordGestureAction(
+          TouchUMA::GESTURE_FRAMEMAXIMIZE_TAP);
+    }
     ProcessEndEvent(*event);
     event->SetHandled();
     return;
@@ -486,19 +495,13 @@ gfx::Rect FrameMaximizeButton::ScreenBoundsForType(
           window->parent(),
           ScreenAsh::GetMaximizedWindowBoundsInParent(window));
     case SNAP_MINIMIZE: {
-      Launcher* launcher = Launcher::ForWindow(window);
-      // Launcher is created lazily and can be NULL.
-      if (!launcher)
-        return gfx::Rect();
-      gfx::Rect item_rect(launcher->GetScreenBoundsOfItemIconForWindow(
-          window));
-      if (!item_rect.IsEmpty()) {
+      gfx::Rect rect = GetMinimizeAnimationTargetBoundsInScreen(window);
+      if (!rect.IsEmpty()) {
         // PhantomWindowController insets slightly, outset it so the phantom
         // doesn't appear inset.
-        item_rect.Inset(-8, -8);
-        return item_rect;
+        rect.Inset(-8, -8);
       }
-      return launcher->shelf_widget()->GetWindowBoundsInScreen();
+      return rect;
     }
     case SNAP_RESTORE: {
       const gfx::Rect* restore = GetRestoreBoundsInScreen(window);
@@ -598,7 +601,8 @@ FrameMaximizeButton::GetMaximizeBubbleFrameState() const {
     return FRAME_STATE_FULL;
   // For Left/right maximize we need to check the dimensions.
   gfx::Rect bounds = frame_->GetWidget()->GetWindowBoundsInScreen();
-  gfx::Rect screen = Shell::GetScreen()->GetDisplayMatching(bounds).work_area();
+  gfx::Rect screen = Shell::GetScreen()->GetDisplayNearestWindow(
+      frame_->GetWidget()->GetNativeView()).work_area();
   if (bounds.width() < (screen.width() * kMinSnapSizePercent) / 100)
     return FRAME_STATE_NONE;
   // We might still have a horizontally filled window at this point which we

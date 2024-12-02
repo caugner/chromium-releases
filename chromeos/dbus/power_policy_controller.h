@@ -47,7 +47,8 @@ class CHROMEOS_EXPORT PowerPolicyController
     int battery_screen_lock_delay_ms;
     int battery_idle_warning_delay_ms;
     int battery_idle_delay_ms;
-    Action idle_action;
+    Action ac_idle_action;
+    Action battery_idle_action;
     Action lid_closed_action;
     bool use_audio_activity;
     bool use_video_activity;
@@ -73,6 +74,9 @@ class CHROMEOS_EXPORT PowerPolicyController
   // Updates |prefs_policy_| with |values| and sends an updated policy.
   void ApplyPrefs(const PrefValues& values);
 
+  // Resets |prefs_policy_| to its defaults and sends an updated policy.
+  void ClearPrefs();
+
   // Registers a request to temporarily prevent the screen from getting
   // dimmed or turned off or the system from suspending in response to user
   // inactivity and sends an updated policy.  |reason| is a human-readable
@@ -93,6 +97,8 @@ class CHROMEOS_EXPORT PowerPolicyController
   virtual void PowerManagerRestarted() OVERRIDE;
 
  private:
+  friend class PowerPrefsTest;
+
   typedef std::map<int, std::string> WakeLockMap;
 
   // Sends a policy based on |prefs_policy_| to the power manager.

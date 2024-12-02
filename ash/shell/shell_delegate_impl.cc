@@ -16,7 +16,7 @@
 #include "ash/shell/toplevel_window.h"
 #include "ash/shell_window_ids.h"
 #include "ash/wm/window_util.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "ui/aura/window.h"
 #include "ui/keyboard/keyboard_controller_proxy.h"
 #include "ui/views/corewm/input_method_event_filter.h"
@@ -229,16 +229,6 @@ void ShellDelegateImpl::HandleMediaPlayPause() {
 }
 
 void ShellDelegateImpl::HandleMediaPrevTrack() {
-}
-
-base::string16 ShellDelegateImpl::GetTimeRemainingString(
-    base::TimeDelta delta) {
-  return base::string16();
-}
-
-base::string16 ShellDelegateImpl::GetTimeDurationLongString(
-    base::TimeDelta delta) {
-  return base::string16();
 }
 
 void ShellDelegateImpl::SaveScreenMagnifierScale(double scale) {

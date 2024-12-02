@@ -11,9 +11,9 @@
 #include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/form_field_data.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
+#include "url/gurl.h"
 
 using WebKit::WebInputElement;
 
@@ -442,9 +442,12 @@ TEST(FormStructureTest, HeuristicsAutocompleteAttribute) {
   ASSERT_EQ(3U, form_structure->field_count());
   ASSERT_EQ(3U, form_structure->autofill_count());
 
-  EXPECT_EQ(NAME_FIRST, form_structure->field(0)->heuristic_type());
-  EXPECT_EQ(NAME_LAST, form_structure->field(1)->heuristic_type());
-  EXPECT_EQ(EMAIL_ADDRESS, form_structure->field(2)->heuristic_type());
+  EXPECT_EQ(HTML_TYPE_GIVEN_NAME, form_structure->field(0)->html_type());
+  EXPECT_EQ(HTML_TYPE_FAMILY_NAME, form_structure->field(1)->html_type());
+  EXPECT_EQ(HTML_TYPE_EMAIL, form_structure->field(2)->html_type());
+  EXPECT_EQ(UNKNOWN_TYPE, form_structure->field(0)->heuristic_type());
+  EXPECT_EQ(UNKNOWN_TYPE, form_structure->field(1)->heuristic_type());
+  EXPECT_EQ(UNKNOWN_TYPE, form_structure->field(2)->heuristic_type());
 }
 
 // Verify that we can correctly process the 'autocomplete' attribute for phone
@@ -480,12 +483,12 @@ TEST(FormStructureTest, HeuristicsAutocompleteAttributePhoneTypes) {
   ASSERT_EQ(3U, form_structure->field_count());
   EXPECT_EQ(3U, form_structure->autofill_count());
 
-  EXPECT_EQ(PHONE_HOME_NUMBER, form_structure->field(0)->heuristic_type());
+  EXPECT_EQ(HTML_TYPE_TEL_LOCAL, form_structure->field(0)->html_type());
   EXPECT_EQ(AutofillField::IGNORED, form_structure->field(0)->phone_part());
-  EXPECT_EQ(PHONE_HOME_NUMBER, form_structure->field(1)->heuristic_type());
+  EXPECT_EQ(HTML_TYPE_TEL_LOCAL_PREFIX, form_structure->field(1)->html_type());
   EXPECT_EQ(AutofillField::PHONE_PREFIX,
             form_structure->field(1)->phone_part());
-  EXPECT_EQ(PHONE_HOME_NUMBER, form_structure->field(2)->heuristic_type());
+  EXPECT_EQ(HTML_TYPE_TEL_LOCAL_SUFFIX, form_structure->field(2)->html_type());
   EXPECT_EQ(AutofillField::PHONE_SUFFIX,
             form_structure->field(2)->phone_part());
 }
@@ -673,7 +676,7 @@ TEST(FormStructureTest, HeuristicsAutocompleteAttributeWithSectionsRepeated) {
 
   field.autocomplete_attribute = "section-foo email";
   form.fields.push_back(field);
-  field.autocomplete_attribute = "section-foo street-address";
+  field.autocomplete_attribute = "section-foo address-line1";
   form.fields.push_back(field);
 
   FormStructure form_structure(form, std::string());
@@ -702,7 +705,7 @@ TEST(FormStructureTest, HeuristicsDontOverrideAutocompleteAttributeSections) {
   field.form_control_type = "text";
 
   field.name = ASCIIToUTF16("one");
-  field.autocomplete_attribute = "street-address";
+  field.autocomplete_attribute = "address-line1";
   form.fields.push_back(field);
   field.name = base::string16();
   field.autocomplete_attribute = "section-foo email";
@@ -711,7 +714,7 @@ TEST(FormStructureTest, HeuristicsDontOverrideAutocompleteAttributeSections) {
   field.autocomplete_attribute = "name";
   form.fields.push_back(field);
   field.name = ASCIIToUTF16("two");
-  field.autocomplete_attribute = "street-address";
+  field.autocomplete_attribute = "address-line1";
   form.fields.push_back(field);
 
   FormStructure form_structure(form, std::string());
@@ -1667,7 +1670,7 @@ TEST(FormStructureTest, EncodeQueryRequest) {
 
 TEST(FormStructureTest, EncodeUploadRequest) {
   scoped_ptr<FormStructure> form_structure;
-  std::vector<FieldTypeSet> possible_field_types;
+  std::vector<ServerFieldTypeSet> possible_field_types;
   FormData form;
   form.method = ASCIIToUTF16("post");
   form_structure.reset(new FormStructure(form, std::string()));
@@ -1679,34 +1682,34 @@ TEST(FormStructureTest, EncodeUploadRequest) {
   field.label = ASCIIToUTF16("First Name");
   field.name = ASCIIToUTF16("firstname");
   form.fields.push_back(field);
-  possible_field_types.push_back(FieldTypeSet());
+  possible_field_types.push_back(ServerFieldTypeSet());
   possible_field_types.back().insert(NAME_FIRST);
 
   field.label = ASCIIToUTF16("Last Name");
   field.name = ASCIIToUTF16("lastname");
   form.fields.push_back(field);
-  possible_field_types.push_back(FieldTypeSet());
+  possible_field_types.push_back(ServerFieldTypeSet());
   possible_field_types.back().insert(NAME_LAST);
 
   field.label = ASCIIToUTF16("Email");
   field.name = ASCIIToUTF16("email");
   field.form_control_type = "email";
   form.fields.push_back(field);
-  possible_field_types.push_back(FieldTypeSet());
+  possible_field_types.push_back(ServerFieldTypeSet());
   possible_field_types.back().insert(EMAIL_ADDRESS);
 
   field.label = ASCIIToUTF16("Phone");
   field.name = ASCIIToUTF16("phone");
   field.form_control_type = "number";
   form.fields.push_back(field);
-  possible_field_types.push_back(FieldTypeSet());
+  possible_field_types.push_back(ServerFieldTypeSet());
   possible_field_types.back().insert(PHONE_HOME_WHOLE_NUMBER);
 
   field.label = ASCIIToUTF16("Country");
   field.name = ASCIIToUTF16("country");
   field.form_control_type = "select-one";
   form.fields.push_back(field);
-  possible_field_types.push_back(FieldTypeSet());
+  possible_field_types.push_back(ServerFieldTypeSet());
   possible_field_types.back().insert(ADDRESS_HOME_COUNTRY);
 
   // Add checkable field.
@@ -1715,7 +1718,7 @@ TEST(FormStructureTest, EncodeUploadRequest) {
   checkable_field.label = ASCIIToUTF16("Checkable1");
   checkable_field.name = ASCIIToUTF16("Checkable1");
   form.fields.push_back(checkable_field);
-  possible_field_types.push_back(FieldTypeSet());
+  possible_field_types.push_back(ServerFieldTypeSet());
   possible_field_types.back().insert(ADDRESS_HOME_COUNTRY);
 
   form_structure.reset(new FormStructure(form, std::string()));
@@ -1724,7 +1727,7 @@ TEST(FormStructureTest, EncodeUploadRequest) {
   for (size_t i = 0; i < form_structure->field_count(); ++i)
     form_structure->field(i)->set_possible_types(possible_field_types[i]);
 
-  FieldTypeSet available_field_types;
+  ServerFieldTypeSet available_field_types;
   available_field_types.insert(NAME_FIRST);
   available_field_types.insert(NAME_LAST);
   available_field_types.insert(ADDRESS_HOME_LINE1);
@@ -1769,7 +1772,7 @@ TEST(FormStructureTest, EncodeUploadRequest) {
     field.name = ASCIIToUTF16("address");
     field.form_control_type = "text";
     form.fields.push_back(field);
-    possible_field_types.push_back(FieldTypeSet());
+    possible_field_types.push_back(ServerFieldTypeSet());
     possible_field_types.back().insert(ADDRESS_HOME_LINE1);
     possible_field_types.back().insert(ADDRESS_HOME_LINE2);
     possible_field_types.back().insert(ADDRESS_BILLING_LINE1);
@@ -1809,7 +1812,7 @@ TEST(FormStructureTest, EncodeUploadRequest) {
     field.name = ASCIIToUTF16("address");
     field.form_control_type = "text";
     form.fields.push_back(field);
-    possible_field_types.push_back(FieldTypeSet());
+    possible_field_types.push_back(ServerFieldTypeSet());
     possible_field_types.back().insert(ADDRESS_HOME_LINE1);
     possible_field_types.back().insert(ADDRESS_HOME_LINE2);
     possible_field_types.back().insert(ADDRESS_BILLING_LINE1);
@@ -1825,7 +1828,7 @@ TEST(FormStructureTest, EncodeUploadRequest) {
 
 TEST(FormStructureTest, EncodeFieldAssignments) {
   scoped_ptr<FormStructure> form_structure;
-  std::vector<FieldTypeSet> possible_field_types;
+  std::vector<ServerFieldTypeSet> possible_field_types;
   FormData form;
   form.method = ASCIIToUTF16("post");
   form_structure.reset(new FormStructure(form, std::string()));
@@ -1837,34 +1840,34 @@ TEST(FormStructureTest, EncodeFieldAssignments) {
   field.label = ASCIIToUTF16("First Name");
   field.name = ASCIIToUTF16("firstname");
   form.fields.push_back(field);
-  possible_field_types.push_back(FieldTypeSet());
+  possible_field_types.push_back(ServerFieldTypeSet());
   possible_field_types.back().insert(NAME_FIRST);
 
   field.label = ASCIIToUTF16("Last Name");
   field.name = ASCIIToUTF16("lastname");
   form.fields.push_back(field);
-  possible_field_types.push_back(FieldTypeSet());
+  possible_field_types.push_back(ServerFieldTypeSet());
   possible_field_types.back().insert(NAME_LAST);
 
   field.label = ASCIIToUTF16("Email");
   field.name = ASCIIToUTF16("email");
   field.form_control_type = "email";
   form.fields.push_back(field);
-  possible_field_types.push_back(FieldTypeSet());
+  possible_field_types.push_back(ServerFieldTypeSet());
   possible_field_types.back().insert(EMAIL_ADDRESS);
 
   field.label = ASCIIToUTF16("Phone");
   field.name = ASCIIToUTF16("phone");
   field.form_control_type = "number";
   form.fields.push_back(field);
-  possible_field_types.push_back(FieldTypeSet());
+  possible_field_types.push_back(ServerFieldTypeSet());
   possible_field_types.back().insert(PHONE_HOME_WHOLE_NUMBER);
 
   field.label = ASCIIToUTF16("Country");
   field.name = ASCIIToUTF16("country");
   field.form_control_type = "select-one";
   form.fields.push_back(field);
-  possible_field_types.push_back(FieldTypeSet());
+  possible_field_types.push_back(ServerFieldTypeSet());
   possible_field_types.back().insert(ADDRESS_HOME_COUNTRY);
 
   // Add checkable field.
@@ -1873,7 +1876,7 @@ TEST(FormStructureTest, EncodeFieldAssignments) {
   checkable_field.label = ASCIIToUTF16("Checkable1");
   checkable_field.name = ASCIIToUTF16("Checkable1");
   form.fields.push_back(checkable_field);
-  possible_field_types.push_back(FieldTypeSet());
+  possible_field_types.push_back(ServerFieldTypeSet());
   possible_field_types.back().insert(ADDRESS_HOME_COUNTRY);
 
   form_structure.reset(new FormStructure(form, std::string()));
@@ -1882,7 +1885,7 @@ TEST(FormStructureTest, EncodeFieldAssignments) {
   for (size_t i = 0; i < form_structure->field_count(); ++i)
     form_structure->field(i)->set_possible_types(possible_field_types[i]);
 
-  FieldTypeSet available_field_types;
+  ServerFieldTypeSet available_field_types;
   available_field_types.insert(NAME_FIRST);
   available_field_types.insert(NAME_LAST);
   available_field_types.insert(ADDRESS_HOME_LINE1);
@@ -1914,7 +1917,7 @@ TEST(FormStructureTest, EncodeFieldAssignments) {
     field.name = ASCIIToUTF16("address");
     field.form_control_type = "text";
     form.fields.push_back(field);
-    possible_field_types.push_back(FieldTypeSet());
+    possible_field_types.push_back(ServerFieldTypeSet());
     possible_field_types.back().insert(ADDRESS_HOME_LINE1);
     possible_field_types.back().insert(ADDRESS_HOME_LINE2);
     possible_field_types.back().insert(ADDRESS_BILLING_LINE1);
@@ -1972,7 +1975,7 @@ TEST(FormStructureTest, CheckDataPresence) {
 
   FormStructure form_structure(form, std::string());
 
-  FieldTypeSet unknown_type;
+  ServerFieldTypeSet unknown_type;
   unknown_type.insert(UNKNOWN_TYPE);
   for (size_t i = 0; i < form_structure.field_count(); ++i)
     form_structure.field(i)->set_possible_types(unknown_type);
@@ -1980,7 +1983,7 @@ TEST(FormStructureTest, CheckDataPresence) {
   // No available types.
   // datapresent should be "" == trimmmed(0x0000000000000000) ==
   //     0b0000000000000000000000000000000000000000000000000000000000000000
-  FieldTypeSet available_field_types;
+  ServerFieldTypeSet available_field_types;
 
   std::string encoded_xml;
   EXPECT_TRUE(form_structure.EncodeUploadRequest(available_field_types, false,
@@ -2193,7 +2196,7 @@ TEST(FormStructureTest, CheckMultipleTypes) {
   // 33 == ADDRESS_HOME_CITY
   // 34 == ADDRESS_HOME_STATE
   // 60 == COMPANY_NAME
-  FieldTypeSet available_field_types;
+  ServerFieldTypeSet available_field_types;
   available_field_types.insert(NAME_FIRST);
   available_field_types.insert(NAME_LAST);
   available_field_types.insert(EMAIL_ADDRESS);
@@ -2205,7 +2208,7 @@ TEST(FormStructureTest, CheckMultipleTypes) {
 
   // Check that multiple types for the field are processed correctly.
   scoped_ptr<FormStructure> form_structure;
-  std::vector<FieldTypeSet> possible_field_types;
+  std::vector<ServerFieldTypeSet> possible_field_types;
   FormData form;
   form.method = ASCIIToUTF16("post");
 
@@ -2215,25 +2218,25 @@ TEST(FormStructureTest, CheckMultipleTypes) {
   field.label = ASCIIToUTF16("email");
   field.name = ASCIIToUTF16("email");
   form.fields.push_back(field);
-  possible_field_types.push_back(FieldTypeSet());
+  possible_field_types.push_back(ServerFieldTypeSet());
   possible_field_types.back().insert(EMAIL_ADDRESS);
 
   field.label = ASCIIToUTF16("First Name");
   field.name = ASCIIToUTF16("first");
   form.fields.push_back(field);
-  possible_field_types.push_back(FieldTypeSet());
+  possible_field_types.push_back(ServerFieldTypeSet());
   possible_field_types.back().insert(NAME_FIRST);
 
   field.label = ASCIIToUTF16("Last Name");
   field.name = ASCIIToUTF16("last");
   form.fields.push_back(field);
-  possible_field_types.push_back(FieldTypeSet());
+  possible_field_types.push_back(ServerFieldTypeSet());
   possible_field_types.back().insert(NAME_LAST);
 
   field.label = ASCIIToUTF16("Address");
   field.name = ASCIIToUTF16("address");
   form.fields.push_back(field);
-  possible_field_types.push_back(FieldTypeSet());
+  possible_field_types.push_back(ServerFieldTypeSet());
   possible_field_types.back().insert(ADDRESS_HOME_LINE1);
 
   form_structure.reset(new FormStructure(form, std::string()));
@@ -2355,6 +2358,26 @@ TEST(FormStructureTest, CheckFormSignature) {
   EXPECT_EQ(FormStructureTest::Hash64Bit(
       std::string("https://login.facebook.com&login_form&email&first")),
       form_structure->FormSignature());
+
+  field.label = ASCIIToUTF16("Random Field label");
+  field.name = ASCIIToUTF16("random1234");
+  field.form_control_type = "text";
+  form.fields.push_back(field);
+  field.label = ASCIIToUTF16("Random Field label2");
+  field.name = ASCIIToUTF16("random12345");
+  form.fields.push_back(field);
+  field.label = ASCIIToUTF16("Random Field label3");
+  field.name = ASCIIToUTF16("1random12345678");
+  form.fields.push_back(field);
+  field.label = ASCIIToUTF16("Random Field label3");
+  field.name = ASCIIToUTF16("12345random");
+  form.fields.push_back(field);
+  form_structure.reset(new FormStructure(form, std::string()));
+  EXPECT_EQ(FormStructureTest::Hash64Bit(
+      std::string("https://login.facebook.com&login_form&email&first&"
+                  "random1234&random&1random&random")),
+      form_structure->FormSignature());
+
 }
 
 TEST(FormStructureTest, ToFormData) {

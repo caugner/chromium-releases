@@ -12,7 +12,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/condition_variable.h"
@@ -1669,7 +1669,7 @@ class OnDiskSyncableDirectoryTest : public SyncableDirectoryTest {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     file_path_ = temp_dir_.path().Append(
         FILE_PATH_LITERAL("Test.sqlite3"));
-    file_util::Delete(file_path_, true);
+    base::DeleteFile(file_path_, true);
     CreateDirectory();
   }
 
@@ -1677,7 +1677,7 @@ class OnDiskSyncableDirectoryTest : public SyncableDirectoryTest {
     // This also closes file handles.
     dir_->SaveChanges();
     dir_.reset();
-    file_util::Delete(file_path_, true);
+    base::DeleteFile(file_path_, true);
   }
 
   // Creates a new directory.  Deletes the old directory, if it exists.
@@ -2125,7 +2125,7 @@ TEST_F(SyncableDirectoryManagement, TestFileRelease) {
   dir.Close();
 
   // Closing the directory should have released the backing database file.
-  ASSERT_TRUE(file_util::Delete(path, true));
+  ASSERT_TRUE(base::DeleteFile(path, true));
 }
 
 class StressTransactionsDelegate : public base::PlatformThread::Delegate {

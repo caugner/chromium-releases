@@ -53,6 +53,8 @@ const struct {
     "\xe6\x8b\xbc" },
   { "_comp_ime_nmblnjkfdkabgdofidlkienfnnbjhnabzh-t-i0-pinyin",
     "\xe6\x8b\xbc" },
+  { "_comp_ime_gjhclobljhjhgoebiipblnmdodbmpdgdzh-t-i0-wubi-1986",
+    "\xe4\xba\x94" }, // U+4E94
   { "pinyin-dv", "\xe6\x8b\xbc" },
   // For traditional Chinese input methods
   { "mozc-chewing", "\xe9\x85\xb7" },  // U+9177
@@ -68,6 +70,14 @@ const struct {
   { "m17n:zh:quick", "\xe9\x80\x9f" },  // U+901F
   // For Hangul input method.
   { "mozc-hangul", "\xed\x95\x9c" },  // U+D55C
+  { "_comp_ime_bdgdidmhaijohebebipajioienkglgfohangul_2set", "\xed\x95\x9c" },
+  { "_comp_ime_bdgdidmhaijohebebipajioienkglgfohangul_3set390",
+    "\xed\x95\x9c" },
+  { "_comp_ime_bdgdidmhaijohebebipajioienkglgfohangul_3setfinal",
+    "\xed\x95\x9c" },
+  { "_comp_ime_bdgdidmhaijohebebipajioienkglgfohangul_3setnoshift",
+    "\xed\x95\x9c" },
+  { "_comp_ime_bdgdidmhaijohebebipajioienkglgfohangul_romaja", "\xed\x95\x9c" },
 };
 
 const size_t kMappingFromIdToIndicatorTextLen =
@@ -91,6 +101,8 @@ const struct {
   { "_comp_ime_cpgalbafkoofkjmaeonnfijgpfennjjnzh-t-i0-pinyin",
     IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_SIMPLIFIED},
   { "_comp_ime_nmblnjkfdkabgdofidlkienfnnbjhnabzh-t-i0-pinyin",
+    IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_SIMPLIFIED },
+  { "_comp_ime_gjhclobljhjhgoebiipblnmdodbmpdgdzh-t-i0-wubi-1986",
     IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_SIMPLIFIED },
   { "_comp_ime_ekbifjdfhkmdeeajnolmgdlmkllopefizh-hant-t-i0-und",
     IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_TRADITIONAL },
@@ -119,6 +131,7 @@ const struct {
   { "zh-TW", "us",
     "_comp_ime_goedamlknlnjaengojinmfgpmdjmkooozh-hant-t-i0-und" },
   { "th", "us", "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_th" },
+  { "vi", "us", "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_vi_tcvn" },
   { "vi", "us", "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_vi_tcvn" },
 };
 

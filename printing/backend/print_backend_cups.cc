@@ -16,15 +16,16 @@
 #include <gcrypt.h>
 #endif
 
+#include "base/debug/leak_annotations.h"
 #include "base/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/values.h"
-#include "googleurl/src/gurl.h"
 #include "printing/backend/cups_helper.h"
 #include "printing/backend/print_backend_consts.h"
+#include "url/gurl.h"
 
 #if (CUPS_VERSION_MAJOR == 1 && CUPS_VERSION_MINOR < 4)
 const int CUPS_PRINTER_SCANNER = 0x2000000;  // Scanner-only device
@@ -80,8 +81,14 @@ class GcryptInitializer {
                 << " in " << kGnuTlsFiles[i];
         continue;
       }
-      if ((*pgnutls_global_init)() != 0)
-        LOG(ERROR) << "gnutls_global_init() failed";
+      {
+        // GnuTLS has a genuine small memory leak that is easier to annotate
+        // than suppress. See http://crbug.com/176888#c7
+        // TODO(earthdok): remove this once the leak is fixed.
+        ANNOTATE_SCOPED_MEMORY_LEAK;
+        if ((*pgnutls_global_init)() != 0)
+          LOG(ERROR) << "gnutls_global_init() failed";
+      }
       return;
     }
     LOG(ERROR) << "Cannot find libgnutls";
@@ -246,7 +253,7 @@ bool PrintBackendCUPS::GetPrinterCapsAndDefaults(
   std::string content;
   bool res = file_util::ReadFileToString(ppd_path, &content);
 
-  file_util::Delete(ppd_path, false);
+  base::DeleteFile(ppd_path, false);
 
   if (res) {
     printer_info->printer_capabilities.swap(content);
@@ -368,7 +375,7 @@ base::FilePath PrintBackendCUPS::GetPPD(const char* name) {
                    << ", name: " << name
                    << ", CUPS error: " << static_cast<int>(error_code)
                    << ", HTTP error: " << http_error;
-        file_util::Delete(ppd_path, false);
+        base::DeleteFile(ppd_path, false);
         ppd_path.clear();
       }
     }

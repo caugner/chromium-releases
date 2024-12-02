@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_UI_TAB_CONTENTS_CORE_TAB_HELPER_H_
 #define CHROME_BROWSER_UI_TAB_CONTENTS_CORE_TAB_HELPER_H_
 
-#include "base/time.h"
+#include "base/time/time.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 
@@ -31,6 +31,16 @@ class CoreTabHelper : public content::WebContentsObserver,
   // cancels a window close via another tab's beforeunload dialog.
   void OnCloseCanceled();
 
+  // Set the time during close when unload is started. Normally, this is set
+  // after the beforeunload dialog. However, for a window close, it is set
+  // after all the beforeunload dialogs have finished.
+  void OnUnloadStarted();
+
+  // Set the time during close when the tab is no longer visible.
+  void OnUnloadDetachedStarted();
+
+  void UpdateContentRestrictions(int content_restrictions);
+
   CoreTabHelperDelegate* delegate() const { return delegate_; }
   void set_delegate(CoreTabHelperDelegate* d) { delegate_ = d; }
 
@@ -39,12 +49,15 @@ class CoreTabHelper : public content::WebContentsObserver,
   }
 
   base::TimeTicks new_tab_start_time() const { return new_tab_start_time_; }
+  int content_restrictions() const { return content_restrictions_; }
 
  private:
   explicit CoreTabHelper(content::WebContents* web_contents);
   friend class content::WebContentsUserData<CoreTabHelper>;
 
   // content::WebContentsObserver overrides:
+  virtual void DidStartLoading(
+      content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void WasShown() OVERRIDE;
   virtual void WebContentsDestroyed(
       content::WebContents* web_contents) OVERRIDE;
@@ -63,6 +76,13 @@ class CoreTabHelper : public content::WebContentsObserver,
 
   // The time when onbeforeunload ended.
   base::TimeTicks before_unload_end_time_;
+
+  // The time when the tab was removed from view during close.
+  base::TimeTicks unload_detached_start_time_;
+
+  // Content restrictions, used to disable print/copy etc based on content's
+  // (full-page plugins for now only) permissions.
+  int content_restrictions_;
 
   DISALLOW_COPY_AND_ASSIGN(CoreTabHelper);
 };

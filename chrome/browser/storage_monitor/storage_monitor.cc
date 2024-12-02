@@ -6,12 +6,11 @@
 
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/storage_monitor/removable_storage_observer.h"
 #include "chrome/browser/storage_monitor/transient_device_ids.h"
 
 namespace chrome {
-
-static StorageMonitor* g_storage_monitor = NULL;
 
 StorageMonitor::Receiver::~Receiver() {
 }
@@ -46,7 +45,10 @@ void StorageMonitor::ReceiverImpl::MarkInitialized() {
 }
 
 StorageMonitor* StorageMonitor::GetInstance() {
-  return g_storage_monitor;
+  if (g_browser_process)
+    return g_browser_process->storage_monitor();
+
+  return NULL;
 }
 
 std::vector<StorageInfo> StorageMonitor::GetAllAvailableStorages() const {
@@ -117,18 +119,9 @@ StorageMonitor::StorageMonitor()
       initialized_(false),
       transient_device_ids_(new TransientDeviceIds) {
   receiver_.reset(new ReceiverImpl(this));
-
-  DCHECK(!g_storage_monitor);
-  g_storage_monitor = this;
 }
 
 StorageMonitor::~StorageMonitor() {
-  g_storage_monitor = NULL;
-}
-
-// static
-void StorageMonitor::RemoveSingletonForTesting() {
-  g_storage_monitor = NULL;
 }
 
 StorageMonitor::Receiver* StorageMonitor::receiver() const {
@@ -156,7 +149,7 @@ void StorageMonitor::ProcessAttach(const StorageInfo& info) {
     storage_map_.insert(std::make_pair(info.device_id(), info));
   }
 
-  DVLOG(1) << "RemovableStorageAttached with name " << UTF16ToUTF8(info.name())
+  DVLOG(1) << "StorageAttached with name " << UTF16ToUTF8(info.name())
            << " and id " << info.device_id();
   if (StorageInfo::IsRemovableDevice(info.device_id())) {
     observer_list_->Notify(
@@ -175,7 +168,7 @@ void StorageMonitor::ProcessDetach(const std::string& id) {
     storage_map_.erase(it);
   }
 
-  DVLOG(1) << "RemovableStorageDetached for id " << id;
+  DVLOG(1) << "StorageDetached for id " << id;
   if (StorageInfo::IsRemovableDevice(info.device_id())) {
     observer_list_->Notify(
         &RemovableStorageObserver::OnRemovableStorageDetached, info);

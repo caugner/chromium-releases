@@ -13,18 +13,28 @@
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_notification_view.h"
+#include "base/bind.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/message_center/message_center.h"
+#include "ui/message_center/notification.h"
+#include "ui/message_center/notification_delegate.h"
+#include "ui/message_center/notification_list.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
 
+using message_center::Notification;
+
 namespace ash {
 namespace internal {
 namespace {
+
+static const char kDisplayNotificationId[] = "chrome://settings/display";
 
 DisplayManager* GetDisplayManager() {
   return Shell::GetInstance()->display_manager();
@@ -35,18 +45,62 @@ base::string16 GetDisplayName(int64 display_id) {
 }
 
 base::string16 GetDisplaySize(int64 display_id) {
-  return UTF8ToUTF16(
-      GetDisplayManager()->GetDisplayForId(display_id).size().ToString());
+  DisplayManager* display_manager = GetDisplayManager();
+
+  const gfx::Display* display = &display_manager->GetDisplayForId(display_id);
+  if (display_manager->IsMirrored() &&
+      display_manager->mirrored_display().id() == display_id) {
+    display = &display_manager->mirrored_display();
+  }
+
+  DCHECK(display->is_valid());
+  return UTF8ToUTF16(display->size().ToString());
 }
 
-bool ShouldShowResolution(int64 display_id) {
-  if (!GetDisplayManager()->GetDisplayForId(display_id).is_valid())
-    return false;
-
+// Returns 1-line information for the specified display, like
+// "InternalDisplay: 1280x750"
+base::string16 GetDisplayInfoLine(int64 display_id) {
   const DisplayInfo& display_info =
       GetDisplayManager()->GetDisplayInfo(display_id);
-  return display_info.rotation() != gfx::Display::ROTATE_0 ||
-      display_info.ui_scale() != 1.0f;
+
+  base::string16 size_text = GetDisplaySize(display_id);
+  base::string16 display_data;
+  if (display_info.has_overscan()) {
+    display_data = l10n_util::GetStringFUTF16(
+        IDS_ASH_STATUS_TRAY_DISPLAY_ANNOTATION,
+        size_text,
+        l10n_util::GetStringUTF16(
+            IDS_ASH_STATUS_TRAY_DISPLAY_ANNOTATION_OVERSCAN));
+  } else {
+    display_data = size_text;
+  }
+
+  return l10n_util::GetStringFUTF16(
+      IDS_ASH_STATUS_TRAY_DISPLAY_SINGLE_DISPLAY,
+      GetDisplayName(display_id),
+      display_data);
+}
+
+base::string16 GetAllDisplayInfo() {
+  DisplayManager* display_manager = GetDisplayManager();
+  std::vector<base::string16> lines;
+  int64 internal_id = gfx::Display::kInvalidDisplayID;
+  // Make sure to show the internal display first.
+  if (display_manager->HasInternalDisplay() &&
+      display_manager->IsInternalDisplayId(
+          display_manager->first_display_id())) {
+    internal_id = display_manager->first_display_id();
+    lines.push_back(GetDisplayInfoLine(internal_id));
+  }
+
+  for (size_t i = 0; i < display_manager->GetNumDisplays(); ++i) {
+    int64 id = display_manager->GetDisplayAt(i).id();
+    if (id == internal_id)
+      continue;
+    lines.push_back(GetDisplayInfoLine(id));
+  }
+
+  return JoinString(lines, '\n');
 }
 
 // Returns the name of the currently connected external display.
@@ -57,7 +111,7 @@ base::string16 GetExternalDisplayName() {
   if (external_id == gfx::Display::kInvalidDisplayID) {
     int64 internal_display_id = gfx::Display::InternalDisplayId();
     for (size_t i = 0; i < display_manager->GetNumDisplays(); ++i) {
-      int64 id = display_manager->GetDisplayAt(i)->id();
+      int64 id = display_manager->GetDisplayAt(i).id();
       if (id != internal_display_id) {
         external_id = id;
         break;
@@ -71,8 +125,21 @@ base::string16 GetExternalDisplayName() {
   // The external display name may have an annotation of "(width x height)" in
   // case that the display is rotated or its resolution is changed.
   base::string16 name = GetDisplayName(external_id);
-  if (ShouldShowResolution(external_id))
-    name += UTF8ToUTF16(" (") + GetDisplaySize(external_id) + UTF8ToUTF16(")");
+  const DisplayInfo& display_info =
+      display_manager->GetDisplayInfo(external_id);
+  if (display_info.rotation() != gfx::Display::ROTATE_0 ||
+      display_info.ui_scale() != 1.0f ||
+      !display_info.overscan_insets_in_dip().empty()) {
+    name = l10n_util::GetStringFUTF16(
+        IDS_ASH_STATUS_TRAY_DISPLAY_ANNOTATED_NAME,
+        name, GetDisplaySize(external_id));
+  } else if (display_info.overscan_insets_in_dip().empty() &&
+             display_info.has_overscan()) {
+    name = l10n_util::GetStringFUTF16(
+        IDS_ASH_STATUS_TRAY_DISPLAY_ANNOTATED_NAME,
+        name, l10n_util::GetStringUTF16(
+            IDS_ASH_STATUS_TRAY_DISPLAY_ANNOTATION_OVERSCAN));
+  }
 
   return name;
 }
@@ -114,6 +181,32 @@ void OpenSettings(user::LoginStatus login_status) {
   }
 }
 
+void UpdateDisplayNotification(const base::string16& message) {
+  // Always remove the notification to make sure the notification appears
+  // as a popup in any situation.
+  message_center::MessageCenter::Get()->RemoveNotification(
+      kDisplayNotificationId, false /* by_user */);
+
+  if (message.empty())
+    return;
+
+  ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
+  scoped_ptr<Notification> notification(new Notification(
+      message_center::NOTIFICATION_TYPE_SIMPLE,
+      kDisplayNotificationId,
+      message,
+      base::string16(),  // body is intentionally empty, see crbug.com/265915
+      bundle.GetImageNamed(IDR_AURA_UBER_TRAY_DISPLAY),
+      base::string16(),  // display_source
+      "",  // extension_id
+      message_center::RichNotificationData(),
+      new message_center::HandleNotificationClickedDelegate(
+          base::Bind(&OpenSettings,
+                     Shell::GetInstance()->system_tray_delegate()->
+                     GetUserLoginStatus()))));
+  message_center::MessageCenter::Get()->AddNotification(notification.Pass());
+}
+
 }  // namespace
 
 class DisplayView : public ash::internal::ActionableView {
@@ -143,8 +236,8 @@ class DisplayView : public ash::internal::ActionableView {
 
   void Update() {
     base::string16 message = GetTrayDisplayMessage();
-    if (message.empty())
-      message = GetInternalDisplayInfo();
+    if (message.empty() && ShouldShowFirstDisplayInfo())
+      message = GetDisplayInfoLine(GetDisplayManager()->first_display_id());
     SetVisible(!message.empty());
     label_->SetText(message);
   }
@@ -155,24 +248,22 @@ class DisplayView : public ash::internal::ActionableView {
   virtual bool GetTooltipText(const gfx::Point& p,
                               base::string16* tooltip) const OVERRIDE {
     base::string16 tray_message = GetTrayDisplayMessage();
-    base::string16 internal_message = GetInternalDisplayInfo();
-    if (tray_message.empty() && internal_message.empty())
+    base::string16 display_message = GetAllDisplayInfo();
+    if (tray_message.empty() && display_message.empty())
       return false;
 
-    *tooltip = tray_message + ASCIIToUTF16("\n") + internal_message;
+    *tooltip = tray_message + ASCIIToUTF16("\n") + display_message;
     return true;
   }
 
  private:
-  base::string16 GetInternalDisplayInfo() const {
-    int64 first_id = GetDisplayManager()->first_display_id();
-    if (!ShouldShowResolution(first_id))
-      return base::string16();
-
-    return l10n_util::GetStringFUTF16(
-        IDS_ASH_STATUS_TRAY_DISPLAY_SINGLE_DISPLAY,
-        GetDisplayName(first_id),
-        GetDisplaySize(first_id));
+  bool ShouldShowFirstDisplayInfo() const {
+    const DisplayInfo& display_info = GetDisplayManager()->GetDisplayInfo(
+        GetDisplayManager()->first_display_id());
+    return display_info.rotation() != gfx::Display::ROTATE_0 ||
+        display_info.ui_scale() != 1.0f ||
+        !display_info.overscan_insets_in_dip().empty() ||
+        display_info.has_overscan();
   }
 
   // Overridden from ActionableView.
@@ -233,53 +324,81 @@ class DisplayNotificationView : public TrayNotificationView {
 
 TrayDisplay::TrayDisplay(SystemTray* system_tray)
     : SystemTrayItem(system_tray),
-      default_(NULL),
-      notification_(NULL) {
-  current_message_ = GetDisplayMessageForNotification();
+      default_(NULL) {
   Shell::GetInstance()->display_controller()->AddObserver(this);
+  UpdateDisplayInfo(NULL);
 }
 
 TrayDisplay::~TrayDisplay() {
   Shell::GetInstance()->display_controller()->RemoveObserver(this);
 }
 
-base::string16 TrayDisplay::GetDisplayMessageForNotification() {
+void TrayDisplay::UpdateDisplayInfo(TrayDisplay::DisplayInfoMap* old_info) {
+  if (old_info)
+    old_info->swap(display_info_);
+  display_info_.clear();
+
   DisplayManager* display_manager = GetDisplayManager();
-  DisplayInfoMap old_info;
-  old_info.swap(display_info_);
   for (size_t i = 0; i < display_manager->GetNumDisplays(); ++i) {
-    int64 id = display_manager->GetDisplayAt(i)->id();
+    int64 id = display_manager->GetDisplayAt(i).id();
     display_info_[id] = display_manager->GetDisplayInfo(id);
   }
+}
 
+bool TrayDisplay::GetDisplayMessageForNotification(
+    base::string16* message,
+    const TrayDisplay::DisplayInfoMap& old_info) {
   // Display is added or removed. Use the same message as the one in
   // the system tray.
-  if (display_info_.size() != old_info.size())
-    return GetTrayDisplayMessage();
+  if (display_info_.size() != old_info.size()) {
+    *message = GetTrayDisplayMessage();
+    return true;
+  }
 
   for (DisplayInfoMap::const_iterator iter = display_info_.begin();
        iter != display_info_.end(); ++iter) {
     DisplayInfoMap::const_iterator old_iter = old_info.find(iter->first);
-    // A display is removed and added at the same time. It won't happen
-    // in the actual environment, but falls back to the system tray's
-    // message just in case.
-    if (old_iter == old_info.end())
-      return GetTrayDisplayMessage();
+    // The display's number is same but different displays. This happens
+    // for the transition between docked mode and mirrored display. Falls back
+    // to GetTrayDisplayMessage().
+    if (old_iter == old_info.end()) {
+      *message = GetTrayDisplayMessage();
+      return true;
+    }
 
     if (iter->second.ui_scale() != old_iter->second.ui_scale()) {
-      return l10n_util::GetStringFUTF16(
+      *message = l10n_util::GetStringFUTF16(
           IDS_ASH_STATUS_TRAY_DISPLAY_RESOLUTION_CHANGED,
           GetDisplayName(iter->first),
           GetDisplaySize(iter->first));
+      return true;
     }
     if (iter->second.rotation() != old_iter->second.rotation()) {
-      return l10n_util::GetStringFUTF16(
-          IDS_ASH_STATUS_TRAY_DISPLAY_ROTATED, GetDisplayName(iter->first));
+      int rotation_text_id = 0;
+      switch (iter->second.rotation()) {
+        case gfx::Display::ROTATE_0:
+          rotation_text_id = IDS_ASH_STATUS_TRAY_DISPLAY_STANDARD_ORIENTATION;
+          break;
+        case gfx::Display::ROTATE_90:
+          rotation_text_id = IDS_ASH_STATUS_TRAY_DISPLAY_ORIENTATION_90;
+          break;
+        case gfx::Display::ROTATE_180:
+          rotation_text_id = IDS_ASH_STATUS_TRAY_DISPLAY_ORIENTATION_180;
+          break;
+        case gfx::Display::ROTATE_270:
+          rotation_text_id = IDS_ASH_STATUS_TRAY_DISPLAY_ORIENTATION_270;
+          break;
+      }
+      *message = l10n_util::GetStringFUTF16(
+          IDS_ASH_STATUS_TRAY_DISPLAY_ROTATED,
+          GetDisplayName(iter->first),
+          l10n_util::GetStringUTF16(rotation_text_id));
+      return true;
     }
   }
 
   // Found nothing special
-  return base::string16();
+  return false;
 }
 
 views::View* TrayDisplay::CreateDefaultView(user::LoginStatus status) {
@@ -288,37 +407,22 @@ views::View* TrayDisplay::CreateDefaultView(user::LoginStatus status) {
   return default_;
 }
 
-views::View* TrayDisplay::CreateNotificationView(user::LoginStatus status) {
-  DCHECK(notification_ == NULL);
-  notification_ = new DisplayNotificationView(status, this, current_message_);
-  return notification_;
-}
-
 void TrayDisplay::DestroyDefaultView() {
   default_ = NULL;
 }
 
-void TrayDisplay::DestroyNotificationView() {
-  notification_ = NULL;
-}
-
-bool TrayDisplay::ShouldShowLauncher() const {
-  return false;
-}
-
 void TrayDisplay::OnDisplayConfigurationChanged() {
+  DisplayInfoMap old_info;
+  UpdateDisplayInfo(&old_info);
+
   if (!Shell::GetInstance()->system_tray_delegate()->
           ShouldShowDisplayNotification()) {
     return;
   }
 
-  // TODO(mukai): do not show the notification when the configuration changed
-  // due to the user operation on display settings page.
-  current_message_ = GetDisplayMessageForNotification();
-  if (notification_)
-    notification_->Update(current_message_);
-  else if (!current_message_.empty())
-    ShowNotificationView();
+  base::string16 message;
+  if (GetDisplayMessageForNotification(&message, old_info))
+    UpdateDisplayNotification(message);
 }
 
 base::string16 TrayDisplay::GetDefaultViewMessage() {
@@ -326,6 +430,23 @@ base::string16 TrayDisplay::GetDefaultViewMessage() {
     return base::string16();
 
   return static_cast<DisplayView*>(default_)->label()->text();
+}
+
+base::string16 TrayDisplay::GetNotificationMessage() {
+  message_center::NotificationList::Notifications notifications =
+      message_center::MessageCenter::Get()->GetNotifications();
+  for (message_center::NotificationList::Notifications::const_iterator iter =
+           notifications.begin(); iter != notifications.end(); ++iter) {
+    if ((*iter)->id() == kDisplayNotificationId)
+      return (*iter)->title();
+  }
+
+  return base::string16();
+}
+
+void TrayDisplay::CloseNotificationForTest() {
+  message_center::MessageCenter::Get()->RemoveNotification(
+      kDisplayNotificationId, false);
 }
 
 }  // namespace internal

@@ -81,6 +81,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual gfx::NativeView BuildInputMethodsGtkMenu() OVERRIDE;
 #endif  // defined(TOOLKIT_GTK)
   virtual void OnSwapCompositorFrame(
+      uint32 output_surface_id,
       scoped_ptr<cc::CompositorFrame> frame) OVERRIDE;
 
   // RenderWidgetHostViewPort implementation.
@@ -92,24 +93,27 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual void WasHidden() OVERRIDE {}
   virtual void MovePluginWindows(
       const gfx::Vector2d& scroll_offset,
-      const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE {}
+      const std::vector<WebPluginGeometry>& moves) OVERRIDE {}
   virtual void Focus() OVERRIDE {}
   virtual void Blur() OVERRIDE {}
   virtual void SetIsLoading(bool is_loading) OVERRIDE {}
   virtual void UpdateCursor(const WebCursor& cursor) OVERRIDE {}
   virtual void TextInputTypeChanged(ui::TextInputType type,
-                                    bool can_compose_inline) OVERRIDE {}
+                                    bool can_compose_inline,
+                                    ui::TextInputMode input_mode) OVERRIDE {}
   virtual void ImeCancelComposition() OVERRIDE {}
+#if defined(OS_MACOSX) || defined(OS_WIN) || defined(USE_AURA)
   virtual void ImeCompositionRangeChanged(
       const ui::Range& range,
       const std::vector<gfx::Rect>& character_bounds) OVERRIDE {}
+#endif
   virtual void DidUpdateBackingStore(
       const gfx::Rect& scroll_rect,
       const gfx::Vector2d& scroll_delta,
       const std::vector<gfx::Rect>& rects,
       const ui::LatencyInfo& latency_info) OVERRIDE {}
-  virtual void RenderViewGone(base::TerminationStatus status,
-                              int error_code) OVERRIDE;
+  virtual void RenderProcessGone(base::TerminationStatus status,
+                                 int error_code) OVERRIDE;
   virtual void WillDestroyRenderWidget(RenderWidgetHost* rwh) { }
   virtual void Destroy() OVERRIDE;
   virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE {}
@@ -262,7 +266,7 @@ class TestRenderViewHost
   void TestOnUpdateStateWithFile(
       int process_id, const base::FilePath& file_path);
 
-  void TestOnStartDragging(const WebDropData& drop_data);
+  void TestOnStartDragging(const DropData& drop_data);
 
   // If set, *delete_counter is incremented when this object destructs.
   void set_delete_counter(int* delete_counter) {
@@ -303,6 +307,9 @@ class TestRenderViewHost
   // RenderView (ViewHostMsg_FrameNavigate_Params::history_list_was_cleared).
   // False by default.
   void set_simulate_history_list_was_cleared(bool cleared);
+
+  // The opener route id passed to CreateRenderView().
+  int opener_route_id() const { return opener_route_id_; }
 
   // RenderViewHost overrides --------------------------------------------------
 
@@ -345,6 +352,9 @@ class TestRenderViewHost
 
   // See SetContentsMimeType() above.
   std::string contents_mime_type_;
+
+  // See opener_route_id() above.
+  int opener_route_id_;
 
   DISALLOW_COPY_AND_ASSIGN(TestRenderViewHost);
 };

@@ -4,7 +4,7 @@
 
 #include "chrome/browser/geolocation/geolocation_infobar_delegate.h"
 
-#include "chrome/browser/geolocation/geolocation_infobar_queue_controller.h"
+#include "chrome/browser/content_settings/permission_queue_controller.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "content/public/browser/navigation_details.h"
@@ -27,29 +27,34 @@ typedef GeolocationInfoBarDelegate DelegateType;
 // static
 InfoBarDelegate* GeolocationInfoBarDelegate::Create(
     InfoBarService* infobar_service,
-    GeolocationInfoBarQueueController* controller,
-    const GeolocationPermissionRequestID& id,
+    PermissionQueueController* controller,
+    const PermissionRequestID& id,
     const GURL& requesting_frame,
     const std::string& display_languages) {
+  const content::NavigationEntry* committed_entry =
+      infobar_service->web_contents()->GetController().GetLastCommittedEntry();
   return infobar_service->AddInfoBar(scoped_ptr<InfoBarDelegate>(
       new DelegateType(infobar_service, controller, id, requesting_frame,
+                       committed_entry ? committed_entry->GetUniqueID() : 0,
                        display_languages)));
 }
 
 GeolocationInfoBarDelegate::GeolocationInfoBarDelegate(
     InfoBarService* infobar_service,
-    GeolocationInfoBarQueueController* controller,
-    const GeolocationPermissionRequestID& id,
+    PermissionQueueController* controller,
+    const PermissionRequestID& id,
     const GURL& requesting_frame,
+    int contents_unique_id,
     const std::string& display_languages)
     : ConfirmInfoBarDelegate(infobar_service),
       controller_(controller),
       id_(id),
       requesting_frame_(requesting_frame),
+      contents_unique_id_(contents_unique_id),
       display_languages_(display_languages) {
-  const content::NavigationEntry* committed_entry = infobar_service->
-      web_contents()->GetController().GetLastCommittedEntry();
-   contents_unique_id_ = committed_entry ? committed_entry->GetUniqueID() : 0;
+}
+
+GeolocationInfoBarDelegate::~GeolocationInfoBarDelegate() {
 }
 
 bool GeolocationInfoBarDelegate::Accept() {
@@ -59,9 +64,11 @@ bool GeolocationInfoBarDelegate::Accept() {
 
 void GeolocationInfoBarDelegate::SetPermission(bool update_content_setting,
                                                bool allowed) {
-  controller_->OnPermissionSet(id_, requesting_frame_,
-                               web_contents()->GetURL(),
-                               update_content_setting, allowed);
+  if (web_contents()) {
+    controller_->OnPermissionSet(id_, requesting_frame_,
+                                 web_contents()->GetURL(),
+                                 update_content_setting, allowed);
+  }
 }
 
 int GeolocationInfoBarDelegate::GetIconID() const {
@@ -112,11 +119,10 @@ bool GeolocationInfoBarDelegate::LinkClicked(
       "https://www.google.com/support/chrome/bin/answer.py?answer=142065";
 #endif
 
-  content::OpenURLParams params(
+  web_contents()->OpenURL(content::OpenURLParams(
       google_util::AppendGoogleLocaleParam(GURL(kGeolocationLearnMoreUrl)),
       content::Referrer(),
       (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
-      content::PAGE_TRANSITION_LINK, false);
-  web_contents()->OpenURL(params);
+      content::PAGE_TRANSITION_LINK, false));
   return false;  // Do not dismiss the info bar.
 }

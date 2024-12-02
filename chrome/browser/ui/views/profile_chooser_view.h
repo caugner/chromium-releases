@@ -16,6 +16,10 @@ namespace gfx {
 class Image;
 }
 
+namespace views {
+class LabelButton;
+}
+
 class AvatarMenuModel;
 class Browser;
 class ProfileItemView;
@@ -39,9 +43,17 @@ class ProfileChooserView : public views::BubbleDelegateView,
   static bool IsShowing();
   static void Hide();
 
+  // We normally close the bubble any time it becomes inactive but this can lead
+  // to flaky tests where unexpected UI events are triggering this behavior.
+  // Tests should call this with "false" for more consistent operation.
+  static void set_close_on_deactivate(bool close) {
+    close_on_deactivate_ = close;
+  }
+
  private:
   friend class AvatarMenuButtonTest;
   FRIEND_TEST_ALL_PREFIXES(AvatarMenuButtonTest, NewSignOut);
+  FRIEND_TEST_ALL_PREFIXES(AvatarMenuButtonTest, LaunchUserManagerScreen);
 
   typedef std::vector<size_t> Indexes;
   typedef std::map<views::View*, int> ViewIndexes;
@@ -67,6 +79,7 @@ class ProfileChooserView : public views::BubbleDelegateView,
       AvatarMenuModel* avatar_menu_model) OVERRIDE;
 
   static ProfileChooserView* profile_bubble_;
+  static bool close_on_deactivate_;
 
   views::View* CreateProfileImageView(const gfx::Image& icon, int side);
   views::View* CreateProfileCardView(size_t avatar_to_show);
@@ -77,8 +90,9 @@ class ProfileChooserView : public views::BubbleDelegateView,
   scoped_ptr<AvatarMenuModel> avatar_menu_model_;
   Browser* browser_;
   views::View* current_profile_view_;
+  views::LabelButton* guest_button_view_;
+  views::LabelButton* users_button_view_;
   ViewIndexes open_other_profile_indexes_map_;
-  views::View* option_buttons_view_;
   views::View* other_profiles_view_;
   views::View* signout_current_profile_view_;
 

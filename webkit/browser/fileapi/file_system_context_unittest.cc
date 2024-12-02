@@ -5,12 +5,11 @@
 #include "webkit/browser/fileapi/file_system_context.h"
 
 #include "base/files/scoped_temp_dir.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/stringprintf.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/browser/fileapi/external_mount_points.h"
-#include "webkit/browser/fileapi/file_system_mount_point_provider.h"
-#include "webkit/browser/fileapi/file_system_task_runners.h"
+#include "webkit/browser/fileapi/file_system_backend.h"
 #include "webkit/browser/fileapi/isolated_context.h"
 #include "webkit/browser/fileapi/mock_file_system_options.h"
 #include "webkit/browser/quota/mock_quota_manager.h"
@@ -60,11 +59,12 @@ class FileSystemContextTest : public testing::Test {
  protected:
   FileSystemContext* CreateFileSystemContextForTest(
       ExternalMountPoints* external_mount_points) {
-    return new FileSystemContext(FileSystemTaskRunners::CreateMockTaskRunners(),
+    return new FileSystemContext(base::MessageLoopProxy::current().get(),
+                                 base::MessageLoopProxy::current().get(),
                                  external_mount_points,
                                  storage_policy_.get(),
                                  mock_quota_manager_->proxy(),
-                                 ScopedVector<FileSystemMountPointProvider>(),
+                                 ScopedVector<FileSystemBackend>(),
                                  data_dir_.path(),
                                  CreateAllowFileAccessOptions());
   }

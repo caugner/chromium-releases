@@ -19,14 +19,14 @@
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/log_to_server.h"
 #include "remoting/host/plugin/host_plugin_utils.h"
 #include "remoting/host/setup/daemon_controller.h"
-#include "remoting/host/ui_strings.h"
 #include "remoting/jingle_glue/xmpp_signal_strategy.h"
+#include "remoting/protocol/pairing_registry.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/npfunctions.h"
 #include "third_party/npapi/bindings/npruntime.h"
@@ -105,6 +105,16 @@ class HostNPScriptObject {
   //////////////////////////////////////////////////////////
   // Plugin methods for Me2Me host.
 
+  // Deletes all paired clients from the registry.
+  bool ClearPairedClients(const NPVariant* args,
+                          uint32_t arg_count,
+                          NPVariant* result);
+
+  // Deletes a paired client referenced by client id.
+  bool DeletePairedClient(const NPVariant* args,
+                          uint32_t arg_count,
+                          NPVariant* result);
+
   // Fetches the host name, passing it to the supplied callback. Args are:
   //   function(string) callback
   // Returns false if the parameters are invalid.
@@ -150,6 +160,11 @@ class HostNPScriptObject {
   // called with the obtained version. The version is passed as a dotted
   // version string, described in daemon_controller.h.
   bool GetDaemonVersion(const NPVariant* args,
+                        uint32_t arg_count,
+                        NPVariant* result);
+
+  // Retrieves the list of paired clients as a JSON-encoded string.
+  bool GetPairedClients(const NPVariant* args,
                         uint32_t arg_count,
                         NPVariant* result);
 
@@ -222,6 +237,10 @@ class HostNPScriptObject {
   void InvokeAsyncResultCallback(const ScopedRefNPObject& callback,
                                  DaemonController::AsyncResult result);
 
+  // Callback handler for PairingRegistry methods that return a boolean
+  // success status.
+  void InvokeBooleanCallback(const ScopedRefNPObject& callback, bool result);
+
   // Callback handler for DaemonController::GetConfig().
   void InvokeGetDaemonConfigCallback(const ScopedRefNPObject& callback,
                                      scoped_ptr<base::DictionaryValue> config);
@@ -229,6 +248,11 @@ class HostNPScriptObject {
   // Callback handler for DaemonController::GetVersion().
   void InvokeGetDaemonVersionCallback(const ScopedRefNPObject& callback,
                                       const std::string& version);
+
+  // Callback handler for GetPairedClients().
+  void InvokeGetPairedClientsCallback(
+      const ScopedRefNPObject& callback,
+      scoped_ptr<base::ListValue> paired_clients);
 
   // Callback handler for DaemonController::GetUsageStatsConsent().
   void InvokeGetUsageStatsConsentCallback(const ScopedRefNPObject& callback,
@@ -277,9 +301,6 @@ class HostNPScriptObject {
   base::TimeDelta access_code_lifetime_;
   std::string client_username_;
 
-  // Localized strings for use by the |it2me_impl_| UI.
-  UiStrings ui_strings_;
-
   // IT2Me Talk server configuration used by |it2me_impl_| to connect.
   XmppSignalStrategy::XmppServerConfig xmpp_server_config_;
 
@@ -300,6 +321,9 @@ class HostNPScriptObject {
   // SequencedWorkerPool. Problem is that SequencedWorkerPool relies
   // on MessageLoopProxy::current().
   scoped_refptr<AutoThreadTaskRunner> worker_thread_;
+
+  // Used to load and update the paired clients for this host.
+  scoped_refptr<protocol::PairingRegistry> pairing_registry_;
 
   //////////////////////////////////////////////////////////
   // Plugin state used for both Ir2Me and Me2Me.

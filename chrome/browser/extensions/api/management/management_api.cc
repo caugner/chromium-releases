@@ -18,6 +18,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/management/management_api_constants.h"
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
@@ -28,7 +29,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/api/management.h"
 #include "chrome/common/extensions/extension.h"
@@ -48,7 +48,7 @@
 #include "extensions/common/url_pattern.h"
 
 #if !defined(OS_ANDROID)
-#include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
+#include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
 #endif
 
 using base::IntToString;
@@ -209,8 +209,8 @@ void AddExtensionInfo(const ExtensionSet& extensions,
        iter != extensions.end(); ++iter) {
     const Extension& extension = *iter->get();
 
-    if (extension.location() == Manifest::COMPONENT)
-      continue;  // Skip built-in extensions.
+    if (extension.ShouldNotBeVisible())
+      continue;  // Skip built-in extensions/apps.
 
     extension_list->push_back(make_linked_ptr<management::ExtensionInfo>(
         CreateExtensionInfo(extension, system).release()));
@@ -437,7 +437,7 @@ bool ManagementLaunchAppFunction::RunImpl() {
                                                   launch_container,
                                                   NEW_FOREGROUND_TAB));
 #if !defined(OS_ANDROID)
-  AppLauncherHandler::RecordAppLaunchType(
+  CoreAppLauncherHandler::RecordAppLaunchType(
       extension_misc::APP_LAUNCH_EXTENSION_API,
       extension->GetType());
 #endif
@@ -459,7 +459,7 @@ bool ManagementSetEnabledFunction::RunImpl() {
   extension_id_ = params->id;
 
   const Extension* extension = service()->GetInstalledExtension(extension_id_);
-  if (!extension) {
+  if (!extension || extension->ShouldNotBeVisible()) {
     error_ = ErrorUtils::FormatErrorMessage(
         keys::kNoExtensionError, extension_id_);
     return false;
@@ -524,7 +524,7 @@ bool ManagementUninstallFunctionBase::Uninstall(
     bool show_confirm_dialog) {
   extension_id_ = extension_id;
   const Extension* extension = service()->GetExtensionById(extension_id_, true);
-  if (!extension) {
+  if (!extension || extension->ShouldNotBeVisible()) {
     error_ = ErrorUtils::FormatErrorMessage(
         keys::kNoExtensionError, extension_id_);
     return false;
@@ -675,6 +675,9 @@ void ManagementEventRouter::Observe(
   }
   DCHECK(event_name);
   DCHECK(extension);
+
+  if (extension->ShouldNotBeVisible())
+    return; // Don't dispatch events for built-in extensions.
 
   scoped_ptr<base::ListValue> args(new base::ListValue());
   if (event_name == events::kOnExtensionUninstalled) {

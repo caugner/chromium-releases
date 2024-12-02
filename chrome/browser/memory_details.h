@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/process_util.h"
+#include "base/process/process_metrics.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/site_details.h"
 #include "content/public/common/process_type.h"
@@ -85,6 +85,24 @@ struct ProcessData {
 
 #if defined(OS_MACOSX)
 class ProcessInfoSnapshot;
+#endif
+
+#if defined(OS_CHROMEOS)
+struct SwapData {
+  SwapData()
+      : num_reads(0),
+        num_writes(0),
+        compr_data_size(0),
+        orig_data_size(0),
+        mem_used_total(0) {
+  }
+
+  uint64 num_reads;
+  uint64 num_writes;
+  uint64 compr_data_size;
+  uint64 orig_data_size;
+  uint64 mem_used_total;
+};
 #endif
 
 // MemoryDetails fetches memory details about current running browsers.
@@ -176,12 +194,20 @@ class MemoryDetails : public base::RefCountedThreadSafe<MemoryDetails> {
   // Updates the global histograms for tracking memory usage.
   void UpdateHistograms();
 
+#if defined(OS_CHROMEOS)
+  void UpdateSwapHistograms();
+#endif
+
   // Returns a pointer to the ProcessData structure for Chrome.
   ProcessData* ChromeBrowser();
 
   std::vector<ProcessData> process_data_;
 
   UserMetricsMode user_metrics_mode_;
+
+#if defined(OS_CHROMEOS)
+  SwapData swap_data_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(MemoryDetails);
 };

@@ -7,6 +7,7 @@
 #include "base/prefs/pref_service.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
@@ -16,6 +17,7 @@
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/browser/signin/signin_promo.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
@@ -23,10 +25,9 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_utils.h"
-#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/content_restriction.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/profiling.h"
 #include "content/public/browser/native_web_keyboard_event.h"
@@ -35,7 +36,6 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/common/content_restriction.h"
 #include "content/public/common/url_constants.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
@@ -171,11 +171,6 @@ BrowserCommandController::BrowserCommandController(
         prefs::kAllowFileSelectionDialogs,
         base::Bind(
             &BrowserCommandController::UpdateCommandsForFileSelectionDialogs,
-            base::Unretained(this)));
-    local_pref_registrar_.Add(
-        prefs::kInManagedMode,
-        base::Bind(
-            &BrowserCommandController::UpdateCommandsForMultipleProfiles,
             base::Unretained(this)));
   }
 
@@ -502,9 +497,6 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_PRINT_TO_DESTINATION:
       PrintToDestination(browser_);
       break;
-    case IDC_CHROME_TO_MOBILE_PAGE:
-      ShowChromeToMobileBubble(browser_);
-      break;
     case IDC_ENCODING_AUTO_DETECT:
       browser_->ToggleEncodingAutoDetect();
       break;
@@ -692,7 +684,7 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       ShowHelp(browser_, HELP_SOURCE_MENU);
       break;
     case IDC_SHOW_SIGNIN:
-      ShowBrowserSignin(browser_, SyncPromoUI::SOURCE_MENU);
+      ShowBrowserSignin(browser_, signin::SOURCE_MENU);
       break;
     case IDC_TOGGLE_SPEECH_INPUT:
       ToggleSpeechInput(browser_);
@@ -1050,11 +1042,11 @@ void BrowserCommandController::UpdateCommandsForContentRestrictionState() {
   int restrictions = GetContentRestrictions(browser_);
 
   command_updater_.UpdateCommandEnabled(
-      IDC_COPY, !(restrictions & content::CONTENT_RESTRICTION_COPY));
+      IDC_COPY, !(restrictions & CONTENT_RESTRICTION_COPY));
   command_updater_.UpdateCommandEnabled(
-      IDC_CUT, !(restrictions & content::CONTENT_RESTRICTION_CUT));
+      IDC_CUT, !(restrictions & CONTENT_RESTRICTION_CUT));
   command_updater_.UpdateCommandEnabled(
-      IDC_PASTE, !(restrictions & content::CONTENT_RESTRICTION_PASTE));
+      IDC_PASTE, !(restrictions & CONTENT_RESTRICTION_PASTE));
   UpdateSaveAsState();
   UpdatePrintingState();
 }

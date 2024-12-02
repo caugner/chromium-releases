@@ -5,7 +5,7 @@
 #include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/platform_file.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::FilePath;
@@ -103,7 +103,7 @@ TEST(PlatformFile, CreatePlatformFile) {
   EXPECT_EQ(base::PLATFORM_FILE_OK, error_code);
 
   EXPECT_TRUE(base::ClosePlatformFile(file));
-  EXPECT_FALSE(file_util::PathExists(file_path));
+  EXPECT_FALSE(base::PathExists(file_path));
 }
 
 TEST(PlatformFile, DeleteOpenFile) {
@@ -139,7 +139,7 @@ TEST(PlatformFile, DeleteOpenFile) {
   // Close both handles and check that the file is gone.
   base::ClosePlatformFile(file);
   base::ClosePlatformFile(same_file);
-  EXPECT_FALSE(file_util::PathExists(file_path));
+  EXPECT_FALSE(base::PathExists(file_path));
 }
 
 TEST(PlatformFile, ReadWritePlatformFile) {

@@ -11,7 +11,7 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "crypto/rsa_private_key.h"
 #include "net/base/completion_callback.h"
 #include "remoting/jingle_glue/iq_sender.h"
@@ -85,6 +85,9 @@ class JingleSession : public Session,
   void StartConnection(const std::string& peer_jid,
                        scoped_ptr<Authenticator> authenticator,
                        scoped_ptr<CandidateSessionConfig> config);
+
+  // Adds to a new channel the remote candidates received before it was created.
+  void AddPendingRemoteCandidates(Transport* channel, const std::string& name);
 
   // Called by JingleSessionManager for incoming connections.
   void InitializeIncomingConnection(const JingleMessage& initiate_message,
@@ -165,6 +168,9 @@ class JingleSession : public Session,
 
   base::OneShotTimer<JingleSession> transport_infos_timer_;
   std::list<JingleMessage::NamedCandidate> pending_candidates_;
+
+  // Pending remote candidates, received before the local channels were created.
+  std::list<JingleMessage::NamedCandidate> pending_remote_candidates_;
 
   DISALLOW_COPY_AND_ASSIGN(JingleSession);
 };

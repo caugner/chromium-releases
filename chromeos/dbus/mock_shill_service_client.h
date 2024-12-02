@@ -31,6 +31,10 @@ class MockShillServiceClient : public ShillServiceClient {
                                  const base::Value& value,
                                  const base::Closure& callback,
                                  const ErrorCallback& error_callback));
+  MOCK_METHOD4(SetProperties, void(const dbus::ObjectPath& service_path,
+                                   const base::DictionaryValue& properties,
+                                   const base::Closure& callback,
+                                   const ErrorCallback& error_callback));
   MOCK_METHOD4(ClearProperty, void(const dbus::ObjectPath& service_path,
                                    const std::string& name,
                                    const base::Closure& callback,
@@ -60,6 +64,9 @@ class MockShillServiceClient : public ShillServiceClient {
   MOCK_METHOD2(CallActivateCellularModemAndBlock,
                bool(const dbus::ObjectPath& service_path,
                     const std::string& carrier));
+  MOCK_METHOD2(GetLoadableProfileEntries,
+               void(const dbus::ObjectPath& service_path,
+                    const DictionaryValueCallback& callback));
   MOCK_METHOD0(GetTestInterface, TestInterface*());
 };
 

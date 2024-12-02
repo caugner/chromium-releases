@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_UI_WEBUI_EXTENSIONS_EXTENSION_INFO_UI_H_
 
 #include "content/public/browser/web_ui_controller.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 
 namespace base {
@@ -16,6 +16,8 @@ class ListValue;
 namespace content {
 class WebUIDataSource;
 }
+
+namespace extensions {
 
 // WebUI controller for the informative bubble shown on clicking a script badge.
 class ExtensionInfoUI : public content::WebUIController {
@@ -35,5 +37,7 @@ class ExtensionInfoUI : public content::WebUIController {
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionInfoUI);
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_UI_WEBUI_EXTENSIONS_EXTENSION_INFO_UI_H_

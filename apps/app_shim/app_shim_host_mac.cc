@@ -12,7 +12,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "ipc/ipc_channel_proxy.h"
 
-AppShimHost::AppShimHost() {}
+AppShimHost::AppShimHost() : initial_launch_finished_(false) {}
 
 AppShimHost::~AppShimHost() {
   DCHECK(CalledOnValidThread());
@@ -46,6 +46,7 @@ bool AppShimHost::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(AppShimHost, message)
     IPC_MESSAGE_HANDLER(AppShimHostMsg_LaunchApp, OnLaunchApp)
     IPC_MESSAGE_HANDLER(AppShimHostMsg_FocusApp, OnFocus)
+    IPC_MESSAGE_HANDLER(AppShimHostMsg_SetAppHidden, OnSetHidden)
     IPC_MESSAGE_HANDLER(AppShimHostMsg_QuitApp, OnQuit)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -67,25 +68,32 @@ void AppShimHost::OnLaunchApp(base::FilePath profile_dir,
                               apps::AppShimLaunchType launch_type) {
   DCHECK(CalledOnValidThread());
   DCHECK(profile_path_.empty());
-  if (!profile_path_.empty()) {
-    // Only one app launch message per channel.
-    Send(new AppShimMsg_LaunchApp_Done(false));
+  // Only one app launch message per channel.
+  if (!profile_path_.empty())
     return;
-  }
 
   profile_path_ = profile_dir;
   app_id_ = app_id;
 
   apps::AppShimHandler* handler = apps::AppShimHandler::GetForAppMode(app_id_);
-  bool success = handler && handler->OnShimLaunch(this, launch_type);
-  Send(new AppShimMsg_LaunchApp_Done(success));
+  if (handler)
+    handler->OnShimLaunch(this, launch_type);
+  // |handler| can only be NULL after AppShimHostManager is destroyed. Since
+  // this only happens at shutdown, do nothing here.
 }
 
-void AppShimHost::OnFocus() {
+void AppShimHost::OnFocus(apps::AppShimFocusType focus_type) {
   DCHECK(CalledOnValidThread());
   apps::AppShimHandler* handler = apps::AppShimHandler::GetForAppMode(app_id_);
   if (handler)
-    handler->OnShimFocus(this);
+    handler->OnShimFocus(this, focus_type);
+}
+
+void AppShimHost::OnSetHidden(bool hidden) {
+  DCHECK(CalledOnValidThread());
+  apps::AppShimHandler* handler = apps::AppShimHandler::GetForAppMode(app_id_);
+  if (handler)
+    handler->OnShimSetHidden(this, hidden);
 }
 
 void AppShimHost::OnQuit() {
@@ -93,6 +101,13 @@ void AppShimHost::OnQuit() {
   apps::AppShimHandler* handler = apps::AppShimHandler::GetForAppMode(app_id_);
   if (handler)
     handler->OnShimQuit(this);
+}
+
+void AppShimHost::OnAppLaunchComplete(apps::AppShimLaunchResult result) {
+  if (!initial_launch_finished_) {
+    Send(new AppShimMsg_LaunchApp_Done(result));
+    initial_launch_finished_ = true;
+  }
 }
 
 void AppShimHost::OnAppClosed() {

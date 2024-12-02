@@ -11,10 +11,10 @@ embedder.iframeURL = '';
 embedder.setUp_ = function(config) {
   embedder.baseGuestURL = 'http://localhost:' + config.testServer.port;
   embedder.guestURL = embedder.baseGuestURL +
-      '/files/extensions/platform_apps/web_view/geolocation' +
+      '/extensions/platform_apps/web_view/geolocation' +
       '/cancel_request/pages/guest.html';
   embedder.iframeURL = embedder.baseGuestURL +
-      '/files/extensions/platform_apps/web_view/geolocation' +
+      '/extensions/platform_apps/web_view/geolocation' +
       '/cancel_request/pages/iframe.html';
   chrome.test.log('Guest url is: ' + embedder.guestURL);
 };
@@ -33,7 +33,7 @@ embedder.setUpGuest_ = function() {
 };
 
 /** @private */
-embedder.setUpLoadCommit_ = function(webview, testName, opt_iframeURL) {
+embedder.setUpLoadStop_ = function(webview, testName, opt_iframeURL) {
   var loadstopCalled = false;
   var onWebviewLoadStop = function(e) {
     if (loadstopCalled) {
@@ -94,7 +94,7 @@ function testCancelGeolocationInIFrame() {
   };
   webview.addEventListener('permissionrequest', onPermissionRequest);
 
-  embedder.setUpLoadCommit_(webview, 'test1');
+  embedder.setUpLoadStop_(webview, 'test1');
   embedder.registerAndWaitForPostMessage_(
       webview, ['test1', 'PASSED']);
 }

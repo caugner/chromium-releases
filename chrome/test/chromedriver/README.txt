@@ -4,19 +4,24 @@ contribute.
 ChromeDriver is an implementation of the WebDriver standard,
 which allows users to automate testing of their website across browsers.
 
+See the user site at http://code.google.com/p/chromedriver.
+
 =====Getting started=====
-Build ChromeDriver by building the 'chromedriver2' target. This will create
-a shared library in the build folder named 'chromedriver2.dll' (win),
-'chromedriver2.so' (mac), or 'libchromedriver2.so' (linux).
+Build ChromeDriver by building the 'chromedriver2_server' target. This will
+create an executable binary in the build folder named
+'chromedriver2_server[.exe]'.
 
 Once built, ChromeDriver can be used interactively with python.
-This can be easily done by running python in this directory (or including
-this directory in your PYTHONPATH).
 
+$ export PYTHONPATH=<THIS_DIR>/server:<THIS_DIR>/client
 $ python
+>>> import server
 >>> import chromedriver
->>> driver = chromedriver.ChromeDriver('/path/to/chromedriver2/library')
+>>> cd_server = server.Server('/path/to/chromedriver2_server/executable')
+>>> driver = chromedriver.ChromeDriver(cd_server.GetUrl())
 >>> driver.Load('http://www.google.com')
+>>> driver.Quit()
+>>> cd_server.Kill()
 
 ChromeDriver will use the system installed Chrome by default.
 
@@ -26,54 +31,57 @@ adb_commands.py and the adb tool from the Android SDK must be set in PATH. For
 more detailed instructions see the wiki:
     https://code.google.com/p/chromedriver/wiki/ChromeDriver2forAndroid
 
-NOTE: on 64-bit OSX machines (most modern ones, including laptops) it is
-necessary to set the environment variable VERSIONER_PYTHON_PREFER_32_BIT=yes,
-because the 'chromedriver2.so' library is 32-bit, while on 64-bit OSX machines
-(most modern ones including laptops), python starts as a 64-bit binary by
-default and would not be able to load the library.
-
 =====Architecture=====
 ChromeDriver is shipped separately from Chrome. It controls Chrome out of
-process through DevTools (WebKit Inspector). ChromeDriver is a shared library
-which exports a few functions for executing WebDriver-standard commands, which
-are packaged in JSON. For internal use, a custom python client for ChromeDriver
-is available in chromedriver.py, which works on desktop (win/mac/linux) with
-the shared library ChromeDriver.
+process through DevTools. ChromeDriver is a standalone server which
+communicates with the WebDriver client via the WebDriver wire protocol, which
+is essentially synchronous JSON commands over HTTP. WebDriver clients are
+available in many languages, and many are available from the open source
+selenium/webdriver project: http://code.google.com/p/selenium. ChromeDriver
+uses the webserver from net/server.
 
-The ChromeDriver shared library runs commands on the same thread that calls
-ExecuteCommand. It doesn't create any additional threads except for the IO
-thread. The IO thread is used to keep reading incoming data from Chrome in the
-background.
+ChromeDriver has a main thread, called the command thread, an IO thread,
+and a thread per session. The webserver receives a request on the IO thread,
+which is sent to a handler on the command thread. The handler executes the
+appropriate command function, which completes asynchronously. The create
+session command may create a new thread for subsequent session-related commands,
+which will execute on the dedicated session thread synchronously. When a
+command is finished, it will invoke a callback, which will eventually make its
+way back to the IO thread as a HTTP response for the server to send.
 
-ChromeDriver is also available as a standalone server executable which
-communicates via the WebDriver JSON wire protocol. This can be used with the
-open source WebDriver client libraries.
-
-=====Code structure=====
-Code under the 'chrome' subdirectory is intended to be unaware of WebDriver and
-serve as a basic C++ interface for controlling Chrome remotely via DevTools.
-As such, it should not have any WebDriver-related dependencies.
-
-1) chrome/test/chromedriver
+=====Code structure (relative to this file)=====
+1) .
 Implements chromedriver commands.
 
-2) chrome/test/chromedriver/chrome
-Code to deal with chrome specific stuff, like starting Chrome on different OS
-platforms, controlling Chrome via DevTools, handling events from DevTools, etc.
+2) chrome/
+A basic interface for controlling Chrome. Should not depend on or reference
+WebDriver-related code or concepts.
 
-3) chrome/test/chromedriver/js
+3) js/
 Javascript helper scripts.
 
-4) chrome/test/chromedriver/net
+4) net/
 Code to deal with network communication, such as connection to DevTools.
 
-5) chrome/test/chromedriver/server
-Code for the chromedriver server.
+5) client/
+Code for a python client.
 
-6) chrome/test/chromedriver/third_party
+6) server/
+Code for the chromedriver server.
+A python wrapper to the chromedriver server.
+
+7) extension/
+An extension used for automating the desktop browser.
+
+8) test/
+Integration tests.
+
+9) third_party/
 Third party libraries used by chromedriver.
 
 =====Testing=====
+See the ChromeDriver waterfall at:
+    http://build.chromium.org/p/chromium.chromedriver/waterfall
 There are 4 test suites for verifying ChromeDriver's correctness:
 
 1) chromedriver2_unittests (chrome/chrome_tests.gypi)
@@ -85,15 +93,14 @@ default. Tests should take a few milliseconds and be very stable.
 This is a collection of C++ medium sized tests which can be run optionally
 on the trybots.
 
-3) python tests
-These are integration tests which can be found in run_py_tests.py. They are
-run on the chromium QA bots:
-    http://build.chromium.org/p/chromium.pyauto/waterfall
+3) python integration tests
+Run test/run_py_tests.py --help for more info. These are only run on the
+ChromeDriver waterfall.
 
 4) WebDriver Java acceptance tests
 These are integration tests from the WebDriver open source project which can
-be run via run_java_tests.py. They are also run on the chromium QA bots.
-See http://src.chromium.org/viewvc/chrome/trunk/deps/third_party/webdriver
+be run via test/run_java_tests.py. They are only run on the ChromeDriver
+bots. Run with --help for more info.
 
 =====Contributing=====
 Find an open issue and submit a patch for review by an individual listed in

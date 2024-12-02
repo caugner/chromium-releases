@@ -4,8 +4,8 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/time.h"
-#include "googleurl/src/gurl.h"
+#include "base/time/time.h"
+#include "url/gurl.h"
 
 @interface ExternalProtocolDialogController : NSObject {
  @private

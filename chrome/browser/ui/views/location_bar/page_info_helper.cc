@@ -34,12 +34,13 @@ void PageInfoHelper::ProcessEvent(const ui::LocatedEvent& event) {
   if (!tab)
     return;
   const NavigationController& controller = tab->GetController();
-  NavigationEntry* nav_entry = controller.GetActiveEntry();
+  // Important to use GetVisibleEntry to match what's showing in the omnibox.
+  NavigationEntry* nav_entry = controller.GetVisibleEntry();
   if (!nav_entry) {
     NOTREACHED();
     return;
   }
 
   location_bar_->delegate()->ShowWebsiteSettings(
-      tab, nav_entry->GetURL(), nav_entry->GetSSL(), true);
+      tab, nav_entry->GetURL(), nav_entry->GetSSL());
 }

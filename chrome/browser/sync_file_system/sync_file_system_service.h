@@ -13,18 +13,18 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync_file_system/conflict_resolution_policy.h"
 #include "chrome/browser/sync_file_system/file_status_observer.h"
-#include "chrome/browser/sync_file_system/local_file_sync_service.h"
+#include "chrome/browser/sync_file_system/local/local_file_sync_service.h"
 #include "chrome/browser/sync_file_system/remote_file_sync_service.h"
+#include "chrome/browser/sync_file_system/sync_callbacks.h"
 #include "chrome/browser/sync_file_system/sync_service_state.h"
 #include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "googleurl/src/gurl.h"
-#include "webkit/browser/fileapi/syncable/sync_callbacks.h"
+#include "url/gurl.h"
 
 class ProfileSyncServiceBase;
 
@@ -45,6 +45,8 @@ class SyncFileSystemService
       public content::NotificationObserver,
       public base::SupportsWeakPtr<SyncFileSystemService> {
  public:
+  typedef base::Callback<void(const base::ListValue* files)> DumpFilesCallback;
+
   // BrowserContextKeyedService overrides.
   virtual void Shutdown() OVERRIDE;
 
@@ -55,10 +57,7 @@ class SyncFileSystemService
 
   SyncServiceState GetSyncServiceState();
   void GetExtensionStatusMap(std::map<GURL, std::string>* status_map);
-  void GetFileMetadataMap(
-      RemoteFileSyncService::OriginFileMetadataMap* metadata_map,
-      size_t* num_results,
-      const SyncStatusCallback& callback);
+  void DumpFiles(const GURL& origin, const DumpFilesCallback& callback);
 
   // Returns the file |url|'s sync status.
   void GetFileSyncStatus(
@@ -89,6 +88,10 @@ class SyncFileSystemService
   void DidRegisterOrigin(const GURL& app_origin,
                          const SyncStatusCallback& callback,
                          SyncStatusCode status);
+
+  void DidInitializeFileSystemForDump(const GURL& app_origin,
+                                      const DumpFilesCallback& callback,
+                                      SyncStatusCode status);
 
   // Overrides sync_enabled_ setting. This should be called only by tests.
   void SetSyncEnabledForTesting(bool enabled);
@@ -132,6 +135,8 @@ class SyncFileSystemService
   void HandleExtensionInstalled(const content::NotificationDetails& details);
   void HandleExtensionUnloaded(int type,
                                const content::NotificationDetails& details);
+  void HandleExtensionUninstalled(int type,
+                                  const content::NotificationDetails& details);
   void HandleExtensionEnabled(int type,
                               const content::NotificationDetails& details);
 

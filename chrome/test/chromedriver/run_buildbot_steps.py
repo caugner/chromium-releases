@@ -32,7 +32,7 @@ DOWNLOAD_SCRIPT = os.path.join(SLAVE_SCRIPT_DIR, 'gsutil_download.py')
 
 def Archive(revision):
   util.MarkBuildStepStart('archive')
-  prebuilts = ['libchromedriver2.so', 'chromedriver2_server',
+  prebuilts = ['chromedriver2_server',
                'chromedriver2_unittests', 'chromedriver2_tests']
   build_dir = chrome_paths.GetBuildDir(prebuilts[0:1])
   zip_name = '%s_r%s.zip' % (GS_ZIP_PREFIX, revision)
@@ -202,7 +202,7 @@ def main():
 
   cmd = [
       sys.executable,
-      os.path.join(_THIS_DIR, 'run_all_tests.py'),
+      os.path.join(_THIS_DIR, 'test', 'run_all_tests.py'),
   ]
   if options.android_package:
     cmd.append('--android-package=' + options.android_package)

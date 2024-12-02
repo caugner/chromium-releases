@@ -13,15 +13,14 @@
 #include "base/command_line.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
-#include "base/process.h"
-#include "base/process_util.h"
+#include "base/process/process.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part_chromeos.h"
@@ -568,7 +567,8 @@ OomPriorityManager::TabStatsList OomPriorityManager::GetTabStatsOnUIThread() {
       if (!contents->IsCrashed()) {
         TabStats stats;
         stats.is_app = is_browser_for_app;
-        stats.is_reloadable_ui = IsReloadableUI(contents->GetURL());
+        stats.is_reloadable_ui =
+            IsReloadableUI(contents->GetLastCommittedURL());
         stats.is_playing_audio = chrome::IsPlayingAudio(contents);
         stats.is_pinned = model->IsTabPinned(i);
         stats.is_selected = browser_active && model->IsTabSelected(i);

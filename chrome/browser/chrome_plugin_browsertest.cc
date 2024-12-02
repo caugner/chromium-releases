@@ -10,24 +10,24 @@
 #include "base/file_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
+#include "base/process/kill.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_process_type.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/plugin_service.h"
+#include "content/public/common/content_constants.h"
 #include "content/public/common/content_paths.h"
+#include "content/public/common/process_type.h"
+#include "content/public/common/webplugininfo.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "net/base/net_util.h"
-#include "webkit/plugins/plugin_constants.h"
-#include "webkit/plugins/webplugininfo.h"
 
 using content::BrowserThread;
 
@@ -78,7 +78,7 @@ class ChromePluginTest : public InProcessBrowserTest {
     base::FilePath path;
     PathService::Get(content::DIR_TEST_DATA, &path);
     path = path.AppendASCII("plugin").AppendASCII(filename);
-    CHECK(file_util::PathExists(path));
+    CHECK(base::PathExists(path));
     return net::FilePathToFileURL(path);
   }
 
@@ -106,16 +106,16 @@ class ChromePluginTest : public InProcessBrowserTest {
 
   static void GetFlashPath(std::vector<base::FilePath>* paths) {
     paths->clear();
-    std::vector<webkit::WebPluginInfo> plugins = GetPlugins();
-    for (std::vector<webkit::WebPluginInfo>::const_iterator it =
+    std::vector<content::WebPluginInfo> plugins = GetPlugins();
+    for (std::vector<content::WebPluginInfo>::const_iterator it =
              plugins.begin(); it != plugins.end(); ++it) {
-      if (it->name == ASCIIToUTF16(kFlashPluginName))
+      if (it->name == ASCIIToUTF16(content::kFlashPluginName))
         paths->push_back(it->path);
     }
   }
 
-  static std::vector<webkit::WebPluginInfo> GetPlugins() {
-    std::vector<webkit::WebPluginInfo> plugins;
+  static std::vector<content::WebPluginInfo> GetPlugins() {
+    std::vector<content::WebPluginInfo> plugins;
     scoped_refptr<content::MessageLoopRunner> runner =
         new content::MessageLoopRunner;
     content::PluginService::GetInstance()->GetPlugins(
@@ -170,9 +170,9 @@ class ChromePluginTest : public InProcessBrowserTest {
   }
 
   static void GetPluginsInfoCallback(
-      std::vector<webkit::WebPluginInfo>* rv,
+      std::vector<content::WebPluginInfo>* rv,
       const base::Closure& quit_task,
-      const std::vector<webkit::WebPluginInfo>& plugins) {
+      const std::vector<content::WebPluginInfo>& plugins) {
     *rv = plugins;
     quit_task.Run();
   }
@@ -252,7 +252,7 @@ IN_PROC_BROWSER_TEST_F(ChromePluginTest, InstalledPlugins) {
 #endif
   };
 
-  std::vector<webkit::WebPluginInfo> plugins = GetPlugins();
+  std::vector<content::WebPluginInfo> plugins = GetPlugins();
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(expected); ++i) {
     size_t j = 0;
     for (; j < plugins.size(); ++j) {

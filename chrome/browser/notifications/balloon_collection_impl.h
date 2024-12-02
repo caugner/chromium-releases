@@ -12,7 +12,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/balloon_collection_base.h"
 #include "content/public/browser/notification_observer.h"
@@ -46,7 +46,7 @@ class BalloonCollectionImpl : public BalloonCollection,
   // BalloonCollection interface.
   virtual void Add(const Notification& notification,
                    Profile* profile) OVERRIDE;
-  virtual bool DoesIdExist(const std::string& id) OVERRIDE;
+  virtual const Notification* FindById(const std::string& id) const OVERRIDE;
   virtual bool RemoveById(const std::string& id) OVERRIDE;
   virtual bool RemoveBySourceOrigin(const GURL& source_origin) OVERRIDE;
   virtual bool RemoveByProfile(Profile* profile) OVERRIDE;

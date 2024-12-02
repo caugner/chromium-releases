@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/balloon_host.h"
 #include "chrome/browser/notifications/notification.h"
@@ -14,7 +15,6 @@
 #include "chrome/browser/ui/panels/docked_panel_collection.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "ui/gfx/rect.h"
@@ -92,8 +92,9 @@ void BalloonCollectionImpl::Add(const Notification& notification,
   AddImpl(notification, profile, false);
 }
 
-bool BalloonCollectionImpl::DoesIdExist(const std::string& id) {
-  return base_.DoesIdExist(id);
+const Notification* BalloonCollectionImpl::FindById(
+    const std::string& id) const {
+  return base_.FindById(id);
 }
 
 bool BalloonCollectionImpl::RemoveById(const std::string& id) {

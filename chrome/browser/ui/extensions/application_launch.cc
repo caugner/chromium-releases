@@ -6,13 +6,13 @@
 
 #include <string>
 
+#include "apps/launcher.h"
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/extensions/platform_app_launcher.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -86,7 +86,7 @@ ui::WindowShowState DetermineWindowShowState(
     return ui::SHOW_STATE_DEFAULT;
   }
 
-  if (chrome::ShouldForceFullscreenApp())
+  if (chrome::IsRunningInForcedAppMode())
     return ui::SHOW_STATE_FULLSCREEN;
 
 #if defined(USE_ASH)
@@ -342,7 +342,7 @@ WebContents* OpenApplication(const AppLaunchParams& params) {
   UMA_HISTOGRAM_ENUMERATION("Extensions.AppLaunchContainer", container, 100);
 
   if (extension->is_platform_app()) {
-    extensions::LaunchPlatformAppWithCommandLine(
+    apps::LaunchPlatformAppWithCommandLine(
         profile, extension, params.command_line, params.current_directory);
     return NULL;
   }

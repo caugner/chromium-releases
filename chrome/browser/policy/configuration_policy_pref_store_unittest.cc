@@ -4,13 +4,16 @@
 
 #include <string>
 
+#include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_store_observer_mock.h"
 #include "base/run_loop.h"
 #include "chrome/browser/policy/configuration_policy_handler.h"
+#include "chrome/browser/policy/configuration_policy_handler_list.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
+#include "chrome/browser/policy/external_data_fetcher.h"
 #include "chrome/browser/policy/mock_configuration_policy_provider.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/policy/policy_service_impl.h"
@@ -53,6 +56,7 @@ class ConfigurationPolicyPrefStoreTest : public testing::Test {
     providers.push_back(&provider_);
     policy_service_.reset(new PolicyServiceImpl(providers));
     store_ = new ConfigurationPolicyPrefStore(policy_service_.get(),
+                                              &handler_list_,
                                               POLICY_LEVEL_MANDATORY);
   }
 
@@ -66,6 +70,7 @@ class ConfigurationPolicyPrefStoreTest : public testing::Test {
     loop.RunUntilIdle();
   }
 
+  ConfigurationPolicyHandlerList handler_list_;
   MockConfigurationPolicyProvider provider_;
   scoped_ptr<PolicyServiceImpl> policy_service_;
   scoped_refptr<ConfigurationPolicyPrefStore> store_;
@@ -87,7 +92,7 @@ TEST_P(ConfigurationPolicyPrefStoreListTest, SetValue) {
   in_value->Append(base::Value::CreateStringValue("test2,"));
   PolicyMap policy;
   policy.Set(GetParam().policy_name(), POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, in_value);
+             POLICY_SCOPE_USER, in_value, NULL);
   UpdateProviderPolicy(policy);
   const base::Value* value = NULL;
   EXPECT_TRUE(store_->GetValue(GetParam().pref_name(), &value));
@@ -127,7 +132,7 @@ TEST_P(ConfigurationPolicyPrefStoreStringTest, SetValue) {
   PolicyMap policy;
   policy.Set(GetParam().policy_name(), POLICY_LEVEL_MANDATORY,
              POLICY_SCOPE_USER,
-             base::Value::CreateStringValue("http://chromium.org"));
+             base::Value::CreateStringValue("http://chromium.org"), NULL);
   UpdateProviderPolicy(policy);
   const base::Value* value = NULL;
   EXPECT_TRUE(store_->GetValue(GetParam().pref_name(), &value));
@@ -179,7 +184,7 @@ TEST_P(ConfigurationPolicyPrefStoreBooleanTest, GetDefault) {
 TEST_P(ConfigurationPolicyPrefStoreBooleanTest, SetValue) {
   PolicyMap policy;
   policy.Set(GetParam().policy_name(), POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(false));
+             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(false), NULL);
   UpdateProviderPolicy(policy);
   const base::Value* value = NULL;
   EXPECT_TRUE(store_->GetValue(GetParam().pref_name(), &value));
@@ -190,7 +195,7 @@ TEST_P(ConfigurationPolicyPrefStoreBooleanTest, SetValue) {
   EXPECT_FALSE(boolean_value);
 
   policy.Set(GetParam().policy_name(), POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(true));
+             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(true), NULL);
   UpdateProviderPolicy(policy);
   value = NULL;
   EXPECT_TRUE(store_->GetValue(GetParam().pref_name(), &value));
@@ -244,6 +249,8 @@ INSTANTIATE_TEST_CASE_P(
                       prefs::kDisableSSLRecordSplitting),
         PolicyAndPref(key::kEnableOnlineRevocationChecks,
                       prefs::kCertRevocationCheckingEnabled),
+        PolicyAndPref(key::kRequireOnlineRevocationChecksForLocalAnchors,
+                      prefs::kCertRevocationCheckingRequiredLocalAnchors),
         PolicyAndPref(key::kDisableAuthNegotiateCnameLookup,
                       prefs::kDisableAuthNegotiateCnameLookup),
         PolicyAndPref(key::kEnableAuthNegotiatePort,
@@ -328,7 +335,7 @@ TEST_P(ConfigurationPolicyPrefStoreIntegerTest, GetDefault) {
 TEST_P(ConfigurationPolicyPrefStoreIntegerTest, SetValue) {
   PolicyMap policy;
   policy.Set(GetParam().policy_name(), POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, base::Value::CreateIntegerValue(2));
+             POLICY_SCOPE_USER, base::Value::CreateIntegerValue(2), NULL);
   UpdateProviderPolicy(policy);
   const base::Value* value = NULL;
   EXPECT_TRUE(store_->GetValue(GetParam().pref_name(), &value));
@@ -405,13 +412,15 @@ class ConfigurationPolicyPrefStoreProxyTest
 TEST_F(ConfigurationPolicyPrefStoreProxyTest, ManualOptions) {
   PolicyMap policy;
   policy.Set(key::kProxyBypassList, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             base::Value::CreateStringValue("http://chromium.org/override"));
+             base::Value::CreateStringValue("http://chromium.org/override"),
+             NULL);
   policy.Set(key::kProxyServer, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             base::Value::CreateStringValue("chromium.org"));
+             base::Value::CreateStringValue("chromium.org"), NULL);
   policy.Set(
       key::kProxyServerMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
       base::Value::CreateIntegerValue(
-          ProxyPolicyHandler::PROXY_MANUALLY_CONFIGURED_PROXY_SERVER_MODE));
+          ProxyPolicyHandler::PROXY_MANUALLY_CONFIGURED_PROXY_SERVER_MODE),
+      NULL);
   UpdateProviderPolicy(policy);
 
   VerifyProxyPrefs("chromium.org",
@@ -425,11 +434,13 @@ TEST_F(ConfigurationPolicyPrefStoreProxyTest, ManualOptionsReversedApplyOrder) {
   policy.Set(
       key::kProxyServerMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
       base::Value::CreateIntegerValue(
-          ProxyPolicyHandler::PROXY_MANUALLY_CONFIGURED_PROXY_SERVER_MODE));
+          ProxyPolicyHandler::PROXY_MANUALLY_CONFIGURED_PROXY_SERVER_MODE),
+      NULL);
   policy.Set(key::kProxyBypassList, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             base::Value::CreateStringValue("http://chromium.org/override"));
+             base::Value::CreateStringValue("http://chromium.org/override"),
+             NULL);
   policy.Set(key::kProxyServer, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             base::Value::CreateStringValue("chromium.org"));
+             base::Value::CreateStringValue("chromium.org"), NULL);
   UpdateProviderPolicy(policy);
 
   VerifyProxyPrefs("chromium.org",
@@ -443,7 +454,8 @@ TEST_F(ConfigurationPolicyPrefStoreProxyTest, ManualOptionsInvalid) {
   policy.Set(
       key::kProxyServerMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
       base::Value::CreateIntegerValue(
-          ProxyPolicyHandler::PROXY_MANUALLY_CONFIGURED_PROXY_SERVER_MODE));
+          ProxyPolicyHandler::PROXY_MANUALLY_CONFIGURED_PROXY_SERVER_MODE),
+      NULL);
   UpdateProviderPolicy(policy);
 
   const base::Value* value = NULL;
@@ -455,7 +467,8 @@ TEST_F(ConfigurationPolicyPrefStoreProxyTest, NoProxyServerMode) {
   PolicyMap policy;
   policy.Set(key::kProxyServerMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
              base::Value::CreateIntegerValue(
-                 ProxyPolicyHandler::PROXY_SERVER_MODE));
+                 ProxyPolicyHandler::PROXY_SERVER_MODE),
+             NULL);
   UpdateProviderPolicy(policy);
   VerifyProxyPrefs(
       std::string(), std::string(), std::string(), ProxyPrefs::MODE_DIRECT);
@@ -464,7 +477,8 @@ TEST_F(ConfigurationPolicyPrefStoreProxyTest, NoProxyServerMode) {
 TEST_F(ConfigurationPolicyPrefStoreProxyTest, NoProxyModeName) {
   PolicyMap policy;
   policy.Set(key::kProxyMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             base::Value::CreateStringValue(ProxyPrefs::kDirectProxyModeName));
+             base::Value::CreateStringValue(ProxyPrefs::kDirectProxyModeName),
+             NULL);
   UpdateProviderPolicy(policy);
   VerifyProxyPrefs(
       std::string(), std::string(), std::string(), ProxyPrefs::MODE_DIRECT);
@@ -475,7 +489,8 @@ TEST_F(ConfigurationPolicyPrefStoreProxyTest, AutoDetectProxyServerMode) {
   policy.Set(
       key::kProxyServerMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
       base::Value::CreateIntegerValue(
-          ProxyPolicyHandler::PROXY_AUTO_DETECT_PROXY_SERVER_MODE));
+          ProxyPolicyHandler::PROXY_AUTO_DETECT_PROXY_SERVER_MODE),
+      NULL);
   UpdateProviderPolicy(policy);
   VerifyProxyPrefs(std::string(),
                    std::string(),
@@ -487,7 +502,8 @@ TEST_F(ConfigurationPolicyPrefStoreProxyTest, AutoDetectProxyModeName) {
   PolicyMap policy;
   policy.Set(key::kProxyMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
              base::Value::CreateStringValue(
-                 ProxyPrefs::kAutoDetectProxyModeName));
+                 ProxyPrefs::kAutoDetectProxyModeName),
+             NULL);
   UpdateProviderPolicy(policy);
   VerifyProxyPrefs(std::string(),
                    std::string(),
@@ -498,10 +514,12 @@ TEST_F(ConfigurationPolicyPrefStoreProxyTest, AutoDetectProxyModeName) {
 TEST_F(ConfigurationPolicyPrefStoreProxyTest, PacScriptProxyMode) {
   PolicyMap policy;
   policy.Set(key::kProxyPacUrl, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             base::Value::CreateStringValue("http://short.org/proxy.pac"));
+             base::Value::CreateStringValue("http://short.org/proxy.pac"),
+             NULL);
   policy.Set(key::kProxyMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
              base::Value::CreateStringValue(
-                 ProxyPrefs::kPacScriptProxyModeName));
+                 ProxyPrefs::kPacScriptProxyModeName),
+             NULL);
   UpdateProviderPolicy(policy);
   VerifyProxyPrefs(std::string(),
                    "http://short.org/proxy.pac",
@@ -513,7 +531,8 @@ TEST_F(ConfigurationPolicyPrefStoreProxyTest, PacScriptProxyModeInvalid) {
   PolicyMap policy;
   policy.Set(key::kProxyMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
              base::Value::CreateStringValue(
-                 ProxyPrefs::kPacScriptProxyModeName));
+                 ProxyPrefs::kPacScriptProxyModeName),
+             NULL);
   UpdateProviderPolicy(policy);
   const base::Value* value = NULL;
   EXPECT_FALSE(store_->GetValue(prefs::kProxy, &value));
@@ -526,14 +545,17 @@ TEST_F(ConfigurationPolicyPrefStoreProxyTest, PacScriptProxyModeBug78016) {
   policy.Set(key::kProxyServer,
              POLICY_LEVEL_MANDATORY,
              POLICY_SCOPE_USER,
-             base::Value::CreateStringValue(std::string()));
+             base::Value::CreateStringValue(std::string()),
+             NULL);
   policy.Set(key::kProxyPacUrl,
              POLICY_LEVEL_MANDATORY,
              POLICY_SCOPE_USER,
-             base::Value::CreateStringValue("http://short.org/proxy.pac"));
+             base::Value::CreateStringValue("http://short.org/proxy.pac"),
+             NULL);
   policy.Set(key::kProxyMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
              base::Value::CreateStringValue(
-                 ProxyPrefs::kPacScriptProxyModeName));
+                 ProxyPrefs::kPacScriptProxyModeName),
+             NULL);
   UpdateProviderPolicy(policy);
   VerifyProxyPrefs(std::string(),
                    "http://short.org/proxy.pac",
@@ -545,7 +567,8 @@ TEST_F(ConfigurationPolicyPrefStoreProxyTest, UseSystemProxyServerMode) {
   PolicyMap policy;
   policy.Set(key::kProxyServerMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
       base::Value::CreateIntegerValue(
-          ProxyPolicyHandler::PROXY_USE_SYSTEM_PROXY_SERVER_MODE));
+          ProxyPolicyHandler::PROXY_USE_SYSTEM_PROXY_SERVER_MODE),
+      NULL);
   UpdateProviderPolicy(policy);
   VerifyProxyPrefs(
       std::string(), std::string(), std::string(), ProxyPrefs::MODE_SYSTEM);
@@ -554,7 +577,8 @@ TEST_F(ConfigurationPolicyPrefStoreProxyTest, UseSystemProxyServerMode) {
 TEST_F(ConfigurationPolicyPrefStoreProxyTest, UseSystemProxyMode) {
   PolicyMap policy;
   policy.Set(key::kProxyMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             base::Value::CreateStringValue(ProxyPrefs::kSystemProxyModeName));
+             base::Value::CreateStringValue(ProxyPrefs::kSystemProxyModeName),
+             NULL);
   UpdateProviderPolicy(policy);
   VerifyProxyPrefs(
       std::string(), std::string(), std::string(), ProxyPrefs::MODE_SYSTEM);
@@ -565,10 +589,12 @@ TEST_F(ConfigurationPolicyPrefStoreProxyTest,
   PolicyMap policy;
   policy.Set(key::kProxyServerMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
              base::Value::CreateIntegerValue(
-                 ProxyPolicyHandler::PROXY_SERVER_MODE));
+                 ProxyPolicyHandler::PROXY_SERVER_MODE),
+             NULL);
   policy.Set(key::kProxyMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
              base::Value::CreateStringValue(
-                 ProxyPrefs::kAutoDetectProxyModeName));
+                 ProxyPrefs::kAutoDetectProxyModeName),
+             NULL);
   UpdateProviderPolicy(policy);
   VerifyProxyPrefs(std::string(),
                    std::string(),
@@ -580,14 +606,16 @@ TEST_F(ConfigurationPolicyPrefStoreProxyTest, ProxyInvalid) {
   // No mode expects all three parameters being set.
   PolicyMap policy;
   policy.Set(key::kProxyPacUrl, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             base::Value::CreateStringValue("http://short.org/proxy.pac"));
+             base::Value::CreateStringValue("http://short.org/proxy.pac"),
+             NULL);
   policy.Set(key::kProxyBypassList, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             base::Value::CreateStringValue("http://chromium.org/override"));
+             base::Value::CreateStringValue("http://chromium.org/override"),
+             NULL);
   policy.Set(key::kProxyServer, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             base::Value::CreateStringValue("chromium.org"));
+             base::Value::CreateStringValue("chromium.org"), NULL);
   for (int i = 0; i < ProxyPolicyHandler::MODE_COUNT; ++i) {
     policy.Set(key::kProxyServerMode, POLICY_LEVEL_MANDATORY,
-               POLICY_SCOPE_USER, base::Value::CreateIntegerValue(i));
+               POLICY_SCOPE_USER, base::Value::CreateIntegerValue(i), NULL);
     UpdateProviderPolicy(policy);
     const base::Value* value = NULL;
     EXPECT_FALSE(store_->GetValue(prefs::kProxy, &value));
@@ -611,6 +639,8 @@ class ConfigurationPolicyPrefStoreDefaultSearchTest
   static const char* const kName;
   static const char* const kKeyword;
   static const char* const kReplacementKey;
+  static const char* const kImageURL;
+  static const char* const kImageParams;
 
   // Build a default search policy by setting search-related keys in |policy| to
   // reasonable values. You can update any of the keys after calling this
@@ -632,6 +662,10 @@ const char* const ConfigurationPolicyPrefStoreDefaultSearchTest::kKeyword =
     "MyKeyword";
 const char* const
     ConfigurationPolicyPrefStoreDefaultSearchTest::kReplacementKey = "espv";
+const char* const ConfigurationPolicyPrefStoreDefaultSearchTest::kImageURL =
+    "http://test.com/searchbyimage/upload";
+const char* const ConfigurationPolicyPrefStoreDefaultSearchTest::kImageParams =
+    "image_content=content,image_url=http://test.com/test.png";
 
 void ConfigurationPolicyPrefStoreDefaultSearchTest::
     BuildDefaultSearchPolicy(PolicyMap* policy) {
@@ -639,24 +673,34 @@ void ConfigurationPolicyPrefStoreDefaultSearchTest::
   encodings->AppendString("UTF-16");
   encodings->AppendString("UTF-8");
   policy->Set(key::kDefaultSearchProviderEnabled, POLICY_LEVEL_MANDATORY,
-              POLICY_SCOPE_USER, base::Value::CreateBooleanValue(true));
+              POLICY_SCOPE_USER, base::Value::CreateBooleanValue(true), NULL);
   policy->Set(key::kDefaultSearchProviderSearchURL, POLICY_LEVEL_MANDATORY,
-              POLICY_SCOPE_USER, base::Value::CreateStringValue(kSearchURL));
+              POLICY_SCOPE_USER, base::Value::CreateStringValue(kSearchURL),
+              NULL);
   policy->Set(key::kDefaultSearchProviderName, POLICY_LEVEL_MANDATORY,
-              POLICY_SCOPE_USER, base::Value::CreateStringValue(kName));
+              POLICY_SCOPE_USER, base::Value::CreateStringValue(kName), NULL);
   policy->Set(key::kDefaultSearchProviderKeyword, POLICY_LEVEL_MANDATORY,
-              POLICY_SCOPE_USER, base::Value::CreateStringValue(kKeyword));
+              POLICY_SCOPE_USER, base::Value::CreateStringValue(kKeyword),
+              NULL);
   policy->Set(key::kDefaultSearchProviderSuggestURL, POLICY_LEVEL_MANDATORY,
-              POLICY_SCOPE_USER, base::Value::CreateStringValue(kSuggestURL));
+              POLICY_SCOPE_USER, base::Value::CreateStringValue(kSuggestURL),
+              NULL);
   policy->Set(key::kDefaultSearchProviderIconURL, POLICY_LEVEL_MANDATORY,
-              POLICY_SCOPE_USER, base::Value::CreateStringValue(kIconURL));
+              POLICY_SCOPE_USER, base::Value::CreateStringValue(kIconURL),
+              NULL);
   policy->Set(key::kDefaultSearchProviderEncodings, POLICY_LEVEL_MANDATORY,
-              POLICY_SCOPE_USER, encodings);
+              POLICY_SCOPE_USER, encodings, NULL);
   policy->Set(key::kDefaultSearchProviderAlternateURLs, POLICY_LEVEL_MANDATORY,
-              POLICY_SCOPE_USER, default_alternate_urls_.DeepCopy());
+              POLICY_SCOPE_USER, default_alternate_urls_.DeepCopy(), NULL);
   policy->Set(key::kDefaultSearchProviderSearchTermsReplacementKey,
               POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-              base::Value::CreateStringValue(kReplacementKey));
+              base::Value::CreateStringValue(kReplacementKey), NULL);
+  policy->Set(key::kDefaultSearchProviderImageURL,
+              POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
+              base::Value::CreateStringValue(kImageURL), NULL);
+  policy->Set(key::kDefaultSearchProviderImageURLPostParams,
+              POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
+              base::Value::CreateStringValue(kImageParams), NULL);
 }
 
 // Checks that if the policy for default search is valid, i.e. there's a
@@ -664,9 +708,10 @@ void ConfigurationPolicyPrefStoreDefaultSearchTest::
 TEST_F(ConfigurationPolicyPrefStoreDefaultSearchTest, MinimallyDefined) {
   PolicyMap policy;
   policy.Set(key::kDefaultSearchProviderEnabled, POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(true));
+             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(true), NULL);
   policy.Set(key::kDefaultSearchProviderSearchURL, POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, base::Value::CreateStringValue(kSearchURL));
+             POLICY_SCOPE_USER, base::Value::CreateStringValue(kSearchURL),
+             NULL);
   UpdateProviderPolicy(policy);
 
   const base::Value* value = NULL;
@@ -700,6 +745,25 @@ TEST_F(ConfigurationPolicyPrefStoreDefaultSearchTest, MinimallyDefined) {
   EXPECT_TRUE(
       store_->GetValue(prefs::kDefaultSearchProviderSearchTermsReplacementKey,
       &value));
+  EXPECT_TRUE(base::StringValue(std::string()).Equals(value));
+
+  EXPECT_TRUE(store_->GetValue(prefs::kDefaultSearchProviderImageURL, &value));
+  EXPECT_TRUE(base::StringValue(std::string()).Equals(value));
+
+  EXPECT_TRUE(store_->GetValue(
+      prefs::kDefaultSearchProviderSearchURLPostParams, &value));
+  EXPECT_TRUE(base::StringValue(std::string()).Equals(value));
+
+  EXPECT_TRUE(store_->GetValue(
+      prefs::kDefaultSearchProviderSuggestURLPostParams, &value));
+  EXPECT_TRUE(base::StringValue(std::string()).Equals(value));
+
+  EXPECT_TRUE(store_->GetValue(
+      prefs::kDefaultSearchProviderInstantURLPostParams, &value));
+  EXPECT_TRUE(base::StringValue(std::string()).Equals(value));
+
+  EXPECT_TRUE(store_->GetValue(
+      prefs::kDefaultSearchProviderImageURLPostParams, &value));
   EXPECT_TRUE(base::StringValue(std::string()).Equals(value));
 }
 
@@ -738,6 +802,25 @@ TEST_F(ConfigurationPolicyPrefStoreDefaultSearchTest, FullyDefined) {
       store_->GetValue(prefs::kDefaultSearchProviderSearchTermsReplacementKey,
       &value));
   EXPECT_TRUE(base::StringValue(kReplacementKey).Equals(value));
+
+  EXPECT_TRUE(store_->GetValue(prefs::kDefaultSearchProviderImageURL, &value));
+  EXPECT_TRUE(base::StringValue(std::string(kImageURL)).Equals(value));
+
+  EXPECT_TRUE(store_->GetValue(prefs::kDefaultSearchProviderImageURLPostParams,
+                               &value));
+  EXPECT_TRUE(base::StringValue(std::string(kImageParams)).Equals(value));
+
+  EXPECT_TRUE(store_->GetValue(
+      prefs::kDefaultSearchProviderSearchURLPostParams, &value));
+  EXPECT_TRUE(base::StringValue(std::string()).Equals(value));
+
+  EXPECT_TRUE(store_->GetValue(
+      prefs::kDefaultSearchProviderSuggestURLPostParams, &value));
+  EXPECT_TRUE(base::StringValue(std::string()).Equals(value));
+
+  EXPECT_TRUE(store_->GetValue(
+      prefs::kDefaultSearchProviderInstantURLPostParams, &value));
+  EXPECT_TRUE(base::StringValue(std::string()).Equals(value));
 }
 
 // Checks that if the default search policy is missing, that no elements of the
@@ -758,6 +841,9 @@ TEST_F(ConfigurationPolicyPrefStoreDefaultSearchTest, MissingUrl) {
                                 NULL));
   EXPECT_FALSE(store_->GetValue(
       prefs::kDefaultSearchProviderSearchTermsReplacementKey, NULL));
+  EXPECT_FALSE(store_->GetValue(prefs::kDefaultSearchProviderImageURL, NULL));
+  EXPECT_FALSE(store_->GetValue(
+      prefs::kDefaultSearchProviderImageURLPostParams, NULL));
 }
 
 // Checks that if the default search policy is invalid, that no elements of the
@@ -768,7 +854,7 @@ TEST_F(ConfigurationPolicyPrefStoreDefaultSearchTest, Invalid) {
   const char* const bad_search_url = "http://test.com/noSearchTerms";
   policy.Set(key::kDefaultSearchProviderSearchURL, POLICY_LEVEL_MANDATORY,
              POLICY_SCOPE_USER,
-             base::Value::CreateStringValue(bad_search_url));
+             base::Value::CreateStringValue(bad_search_url), NULL);
   UpdateProviderPolicy(policy);
 
   EXPECT_FALSE(store_->GetValue(prefs::kDefaultSearchProviderSearchURL, NULL));
@@ -781,6 +867,9 @@ TEST_F(ConfigurationPolicyPrefStoreDefaultSearchTest, Invalid) {
                                 NULL));
   EXPECT_FALSE(store_->GetValue(
       prefs::kDefaultSearchProviderSearchTermsReplacementKey, NULL));
+  EXPECT_FALSE(store_->GetValue(prefs::kDefaultSearchProviderImageURL, NULL));
+  EXPECT_FALSE(store_->GetValue(
+      prefs::kDefaultSearchProviderImageURLPostParams, NULL));
 }
 
 // Checks that if the default search policy is invalid, that no elements of the
@@ -788,7 +877,7 @@ TEST_F(ConfigurationPolicyPrefStoreDefaultSearchTest, Invalid) {
 TEST_F(ConfigurationPolicyPrefStoreDefaultSearchTest, Disabled) {
   PolicyMap policy;
   policy.Set(key::kDefaultSearchProviderEnabled, POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(false));
+             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(false), NULL);
   UpdateProviderPolicy(policy);
 
   const base::Value* value = NULL;
@@ -819,12 +908,14 @@ class ConfigurationPolicyPrefStoreIncognitoModeTest
       policy.Set(key::kIncognitoEnabled, POLICY_LEVEL_MANDATORY,
                  POLICY_SCOPE_USER,
                  base::Value::CreateBooleanValue(
-                     incognito_enabled == INCOGNITO_ENABLED_TRUE));
+                     incognito_enabled == INCOGNITO_ENABLED_TRUE),
+                 NULL);
     }
     if (availability >= 0) {
       policy.Set(key::kIncognitoModeAvailability, POLICY_LEVEL_MANDATORY,
                  POLICY_SCOPE_USER,
-                 base::Value::CreateIntegerValue(availability));
+                 base::Value::CreateIntegerValue(availability),
+                 NULL);
     }
     UpdateProviderPolicy(policy);
   }
@@ -902,7 +993,7 @@ TEST_F(ConfigurationPolicyPrefStoreSyncTest, Default) {
 TEST_F(ConfigurationPolicyPrefStoreSyncTest, Enabled) {
   PolicyMap policy;
   policy.Set(key::kSyncDisabled, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             base::Value::CreateBooleanValue(false));
+             base::Value::CreateBooleanValue(false), NULL);
   UpdateProviderPolicy(policy);
   // Enabling Sync should not set the pref.
   EXPECT_FALSE(store_->GetValue(prefs::kSyncManaged, NULL));
@@ -911,7 +1002,7 @@ TEST_F(ConfigurationPolicyPrefStoreSyncTest, Enabled) {
 TEST_F(ConfigurationPolicyPrefStoreSyncTest, Disabled) {
   PolicyMap policy;
   policy.Set(key::kSyncDisabled, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             base::Value::CreateBooleanValue(true));
+             base::Value::CreateBooleanValue(true), NULL);
   UpdateProviderPolicy(policy);
   // Sync should be flagged as managed.
   const base::Value* value = NULL;
@@ -939,7 +1030,8 @@ TEST_F(ConfigurationPolicyPrefStorePromptDownloadTest, SetDownloadDirectory) {
   policy.Set(key::kDownloadDirectory,
              POLICY_LEVEL_MANDATORY,
              POLICY_SCOPE_USER,
-             base::Value::CreateStringValue(std::string()));
+             base::Value::CreateStringValue(std::string()),
+             NULL);
   UpdateProviderPolicy(policy);
 
   // Setting a DownloadDirectory should disable the PromptForDownload pref.
@@ -959,7 +1051,7 @@ TEST_F(ConfigurationPolicyPrefStorePromptDownloadTest,
   PolicyMap policy;
   EXPECT_FALSE(store_->GetValue(prefs::kPromptForDownload, NULL));
   policy.Set(key::kAllowFileSelectionDialogs, POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(true));
+             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(true), NULL);
   UpdateProviderPolicy(policy);
 
   // Allowing file-selection dialogs should not influence the PromptForDownload
@@ -972,7 +1064,7 @@ TEST_F(ConfigurationPolicyPrefStorePromptDownloadTest,
   PolicyMap policy;
   EXPECT_FALSE(store_->GetValue(prefs::kPromptForDownload, NULL));
   policy.Set(key::kAllowFileSelectionDialogs, POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(false));
+             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(false), NULL);
   UpdateProviderPolicy(policy);
 
   // Disabling file-selection dialogs should disable the PromptForDownload pref.
@@ -997,7 +1089,7 @@ TEST_F(ConfigurationPolicyPrefStoreAutofillTest, Default) {
 TEST_F(ConfigurationPolicyPrefStoreAutofillTest, Enabled) {
   PolicyMap policy;
   policy.Set(key::kAutoFillEnabled, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             base::Value::CreateBooleanValue(true));
+             base::Value::CreateBooleanValue(true), NULL);
   UpdateProviderPolicy(policy);
   // Enabling Autofill should not set the pref.
   EXPECT_FALSE(store_->GetValue(autofill::prefs::kAutofillEnabled, NULL));
@@ -1006,7 +1098,7 @@ TEST_F(ConfigurationPolicyPrefStoreAutofillTest, Enabled) {
 TEST_F(ConfigurationPolicyPrefStoreAutofillTest, Disabled) {
   PolicyMap policy;
   policy.Set(key::kAutoFillEnabled, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             base::Value::CreateBooleanValue(false));
+             base::Value::CreateBooleanValue(false), NULL);
   UpdateProviderPolicy(policy);
   // Disabling Autofill should switch the pref to managed.
   const base::Value* value = NULL;
@@ -1031,7 +1123,7 @@ TEST_F(ConfigurationPolicyPrefStoreScreenMagnifierTypeTest, Default) {
 TEST_F(ConfigurationPolicyPrefStoreScreenMagnifierTypeTest, Disabled) {
   PolicyMap policy;
   policy.Set(key::kScreenMagnifierType, POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, base::Value::CreateIntegerValue(0));
+             POLICY_SCOPE_USER, base::Value::CreateIntegerValue(0), NULL);
   UpdateProviderPolicy(policy);
   const base::Value* enabled = NULL;
   EXPECT_TRUE(store_->GetValue(prefs::kScreenMagnifierEnabled, &enabled));
@@ -1046,7 +1138,7 @@ TEST_F(ConfigurationPolicyPrefStoreScreenMagnifierTypeTest, Disabled) {
 TEST_F(ConfigurationPolicyPrefStoreScreenMagnifierTypeTest, Enabled) {
   PolicyMap policy;
   policy.Set(key::kScreenMagnifierType, POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, base::Value::CreateIntegerValue(1));
+             POLICY_SCOPE_USER, base::Value::CreateIntegerValue(1), NULL);
   UpdateProviderPolicy(policy);
   const base::Value* enabled = NULL;
   EXPECT_TRUE(store_->GetValue(prefs::kScreenMagnifierEnabled, &enabled));
@@ -1083,7 +1175,7 @@ TEST_F(ConfigurationPolicyPrefStoreRefreshTest, Refresh) {
   EXPECT_CALL(observer_, OnPrefValueChanged(prefs::kHomePage)).Times(1);
   PolicyMap policy;
   policy.Set(key::kHomepageLocation, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             base::Value::CreateStringValue("http://www.chromium.org"));
+             base::Value::CreateStringValue("http://www.chromium.org"), NULL);
   UpdateProviderPolicy(policy);
   Mock::VerifyAndClearExpectations(&observer_);
   EXPECT_TRUE(store_->GetValue(prefs::kHomePage, &value));
@@ -1120,11 +1212,11 @@ TEST_F(ConfigurationPolicyPrefStoreOthersTest, JavascriptEnabled) {
   EXPECT_FALSE(store_->GetValue(prefs::kManagedDefaultJavaScriptSetting, NULL));
   PolicyMap policy;
   policy.Set(key::kJavascriptEnabled, POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(true));
+             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(true), NULL);
   UpdateProviderPolicy(policy);
   EXPECT_FALSE(store_->GetValue(prefs::kManagedDefaultJavaScriptSetting, NULL));
   policy.Set(key::kJavascriptEnabled, POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(false));
+             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(false), NULL);
   UpdateProviderPolicy(policy);
   const base::Value* value = NULL;
   EXPECT_TRUE(store_->GetValue(prefs::kManagedDefaultJavaScriptSetting,
@@ -1136,7 +1228,7 @@ TEST_F(ConfigurationPolicyPrefStoreOthersTest, JavascriptEnabledOverridden) {
   EXPECT_FALSE(store_->GetValue(prefs::kManagedDefaultJavaScriptSetting, NULL));
   PolicyMap policy;
   policy.Set(key::kJavascriptEnabled, POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(false));
+             POLICY_SCOPE_USER, base::Value::CreateBooleanValue(false), NULL);
   UpdateProviderPolicy(policy);
   const base::Value* value = NULL;
   EXPECT_TRUE(store_->GetValue(prefs::kManagedDefaultJavaScriptSetting,
@@ -1145,7 +1237,8 @@ TEST_F(ConfigurationPolicyPrefStoreOthersTest, JavascriptEnabledOverridden) {
   // DefaultJavaScriptSetting overrides JavascriptEnabled.
   policy.Set(key::kDefaultJavaScriptSetting, POLICY_LEVEL_MANDATORY,
              POLICY_SCOPE_USER,
-             base::Value::CreateIntegerValue(CONTENT_SETTING_ALLOW));
+             base::Value::CreateIntegerValue(CONTENT_SETTING_ALLOW),
+             NULL);
   UpdateProviderPolicy(policy);
   EXPECT_TRUE(store_->GetValue(prefs::kManagedDefaultJavaScriptSetting,
                                &value));

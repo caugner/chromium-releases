@@ -17,9 +17,10 @@
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
@@ -38,9 +39,9 @@
 #include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/prerender/prerender_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/prerender_messages.h"
@@ -56,6 +57,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/favicon_url.h"
+#include "content/public/common/url_constants.h"
 #include "extensions/common/constants.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -111,7 +113,8 @@ bool NeedMatchCompleteDummyForFinalStatus(FinalStatus final_status) {
       final_status != FINAL_STATUS_CACHE_OR_HISTORY_CLEARED &&
       final_status != FINAL_STATUS_CANCELLED &&
       final_status != FINAL_STATUS_DEVTOOLS_ATTACHED &&
-      final_status != FINAL_STATUS_CROSS_SITE_NAVIGATION_PENDING;
+      final_status != FINAL_STATUS_CROSS_SITE_NAVIGATION_PENDING &&
+      final_status != FINAL_STATUS_PAGE_BEING_CAPTURED;
 }
 
 void CheckIfCookiesExistForDomainResultOnUIThread(
@@ -275,9 +278,13 @@ PrerenderManager::PrerenderManager(Profile* profile,
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_COOKIE_CHANGED,
       content::NotificationService::AllBrowserContextsAndSources());
+
+  MediaCaptureDevicesDispatcher::GetInstance()->AddObserver(this);
 }
 
 PrerenderManager::~PrerenderManager() {
+  MediaCaptureDevicesDispatcher::GetInstance()->RemoveObserver(this);
+
   // The earlier call to BrowserContextKeyedService::Shutdown() should have
   // emptied these vectors already.
   DCHECK(active_prerenders_.empty());
@@ -435,6 +442,12 @@ bool PrerenderManager::MaybeUsePrerenderedPage(WebContents* web_contents,
   // Do not use the prerendered version if there is an opener object.
   if (web_contents->HasOpener()) {
     prerender_data->contents()->Destroy(FINAL_STATUS_WINDOW_OPENER);
+    return false;
+  }
+
+  // Do not swap in the prerender if the current WebContents is being captured.
+  if (web_contents->GetCapturerCount() > 0) {
+    prerender_data->contents()->Destroy(FINAL_STATUS_PAGE_BEING_CAPTURED);
     return false;
   }
 
@@ -890,6 +903,11 @@ bool PrerenderManager::DoesURLHaveValidScheme(const GURL& url) {
   return (IsWebURL(url) ||
           url.SchemeIs(extensions::kExtensionScheme) ||
           url.SchemeIs("data"));
+}
+
+// static
+bool PrerenderManager::DoesSubresourceURLHaveValidScheme(const GURL& url) {
+  return DoesURLHaveValidScheme(url) || url == GURL(content::kAboutBlankURL);
 }
 
 DictionaryValue* PrerenderManager::GetAsValue() const {
@@ -1434,6 +1452,21 @@ void PrerenderManager::Observe(int type,
   }
   DCHECK(type == chrome::NOTIFICATION_COOKIE_CHANGED);
   CookieChanged(content::Details<ChromeCookieDetails>(details).ptr());
+}
+
+void PrerenderManager::OnCreatingAudioStream(int render_process_id,
+                                             int render_view_id) {
+  WebContents* tab = tab_util::GetWebContentsByID(
+      render_process_id, render_view_id);
+  if (!tab)
+    return;
+
+  if (!IsWebContentsPrerendering(tab, NULL))
+    return;
+
+  prerender_tracker()->TryCancel(
+      render_process_id, render_view_id,
+      prerender::FINAL_STATUS_CREATING_AUDIO_STREAM);
 }
 
 void PrerenderManager::RecordLikelyLoginOnURL(const GURL& url) {

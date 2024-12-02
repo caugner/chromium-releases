@@ -6,7 +6,7 @@
 #include "base/md5.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/common/cloud_print/cloud_print_constants.h"
@@ -635,14 +635,13 @@ MockPrintSystem::MockPrintSystem()
     : job_spooler_(new NiceMock<MockJobSpooler>()),
       printer_watcher_(new NiceMock<MockPrinterWatcher>()),
       print_server_watcher_(new NiceMock<MockPrintServerWatcher>()) {
-  ON_CALL(*this, CreateJobSpooler())
-      .WillByDefault(Return(job_spooler_));
+  ON_CALL(*this, CreateJobSpooler()).WillByDefault(Return(job_spooler_.get()));
 
   ON_CALL(*this, CreatePrinterWatcher(_))
-      .WillByDefault(Return(printer_watcher_));
+      .WillByDefault(Return(printer_watcher_.get()));
 
   ON_CALL(*this, CreatePrintServerWatcher())
-      .WillByDefault(Return(print_server_watcher_));
+      .WillByDefault(Return(print_server_watcher_.get()));
 
   ON_CALL(*this, IsValidPrinter(_)).
       WillByDefault(Return(true));

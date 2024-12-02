@@ -4,25 +4,31 @@
 
 #include "content/browser/renderer_host/java/java_bridge_dispatcher_host.h"
 
+#include "base/android/java_handler_thread.h"
 #include "base/bind.h"
 #include "base/lazy_instance.h"
-#include "base/threading/thread.h"
 #include "content/browser/renderer_host/java/java_bridge_channel_host.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/child/child_process.h"
-#include "content/child/npobject_stub.h"
-#include "content/child/npobject_util.h"  // For CreateNPVariantParam()
+#include "content/child/npapi/npobject_stub.h"
+#include "content/child/npapi/npobject_util.h"  // For CreateNPVariantParam()
 #include "content/common/java_bridge_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "third_party/WebKit/public/web/WebBindings.h"
 
+#if !defined(OS_ANDROID)
+#error "JavaBridge currently only supports OS_ANDROID"
+#endif
+
 namespace content {
 
 namespace {
-class JavaBridgeThread : public base::Thread {
+// The JavaBridge needs to use a Java thread so the callback
+// will happen on a thread with a prepared Looper.
+class JavaBridgeThread : public base::android::JavaHandlerThread {
  public:
-  JavaBridgeThread() : base::Thread("JavaBridge") {
+  JavaBridgeThread() : base::android::JavaHandlerThread("JavaBridge") {
     Start();
   }
   virtual ~JavaBridgeThread() {

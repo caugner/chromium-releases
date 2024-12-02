@@ -9,9 +9,9 @@
 #include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "base/version.h"
-#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 
@@ -54,7 +54,7 @@ void URLListToPref(const base::ListValue* url_list, SessionStartupPref* pref) {
 }  // namespace
 
 // static
-void SessionStartupPref::RegisterUserPrefs(
+void SessionStartupPref::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterIntegerPref(
       prefs::kRestoreOnStartup,

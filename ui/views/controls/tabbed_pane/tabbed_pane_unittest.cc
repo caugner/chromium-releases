@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/views/controls/tabbed_pane/tabbed_pane.h"
@@ -34,7 +34,7 @@ typedef ViewsTestBase TabbedPaneTest;
 
 // Tests TabbedPane::GetPreferredSize() and TabbedPane::Layout().
 TEST_F(TabbedPaneTest, SizeAndLayout) {
-  scoped_ptr<TabbedPane> tabbed_pane(new TabbedPane());
+  scoped_ptr<TabbedPane> tabbed_pane(new TabbedPane(false));
   View* child1 = new FixedSizeView(gfx::Size(20, 10));
   tabbed_pane->AddTab(ASCIIToUTF16("tab1"), child1);
   View* child2 = new FixedSizeView(gfx::Size(5, 5));
@@ -66,7 +66,7 @@ TEST_F(TabbedPaneTest, SizeAndLayout) {
 }
 
 TEST_F(TabbedPaneTest, AddAndSelect) {
-  scoped_ptr<TabbedPane> tabbed_pane(new TabbedPane());
+  scoped_ptr<TabbedPane> tabbed_pane(new TabbedPane(false));
   // Add several tabs; only the first should be a selected automatically.
   for (int i = 0; i < 3; ++i) {
     View* tab = new View();

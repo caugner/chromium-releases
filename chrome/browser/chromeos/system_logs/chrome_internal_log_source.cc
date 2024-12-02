@@ -7,7 +7,6 @@
 #include "base/json/json_string_value_serializer.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/system_logs/system_logs_fetcher.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -94,7 +93,7 @@ void ChromeInternalLogSource::PopulateExtensionInfoLogs(
   for (ExtensionSet::const_iterator it = extensions->begin();
        it != extensions->end();
        ++it) {
-    const extensions::Extension* extension = *it;
+    const extensions::Extension* extension = it->get();
     if (extensions_list.empty()) {
       extensions_list = extension->name();
     } else {

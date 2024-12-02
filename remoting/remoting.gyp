@@ -20,6 +20,8 @@
     'remoting_multi_process%': '<(remoting_multi_process)',
     'remoting_rdp_session%': 1,
 
+    'remoting_localize_path': 'tools/build/remoting_localize.py',
+
     # The |major|, |build| and |patch| versions are inherited from Chrome.
     # Since Chrome's |minor| version is always '0', we replace it with a
     # Chromoting-specific patch version.
@@ -41,15 +43,10 @@
       '<!(python <(version_py_path) -f <(chrome_version_path) -f <(remoting_version_path) -t "@PATCH@")',
 
     'branding_path': '../remoting/branding_<(branding)',
-    'copyright_info': '<!(python <(version_py_path) -f <(branding_path) -t "@COPYRIGHT@")',
 
     'webapp_locale_dir': '<(SHARED_INTERMEDIATE_DIR)/remoting/webapp/_locales',
 
-    # Use consistent strings across all platforms.
-    # These values must match host/plugin/constants.h
     'host_plugin_mime_type': 'application/vnd.chromium.remoting-host',
-    'host_plugin_description': '<!(python <(version_py_path) -f <(branding_path) -t "@HOST_PLUGIN_DESCRIPTION@")',
-    'host_plugin_name': '<!(python <(version_py_path) -f <(branding_path) -t "@HOST_PLUGIN_FILE_NAME@")',
 
     'conditions': [
       # Remoting host is supported only on Windows, OSX and Linux (with X11).
@@ -98,49 +95,24 @@
         'rdp_desktop_session_clsid': '<!(python tools/uuidgen.py 2)',
       }],
     ],
+
+    'remoting_locales': [
+      'ar', 'bg', 'ca', 'cs', 'da', 'de', 'el', 'en', 'en-GB', 'es',
+      'es-419', 'et', 'fi', 'fil', 'fr', 'he', 'hi', 'hr', 'hu', 'id',
+      'it', 'ja', 'ko', 'lt', 'lv', 'nb', 'nl', 'pl', 'pt-BR', 'pt-PT',
+      'ro', 'ru', 'sk', 'sl', 'sr', 'sv', 'th', 'tr', 'uk', 'vi',
+      'zh-CN', 'zh-TW',
+    ],
+    'remoting_locale_files': [
+      # Build the list of .pak files generated from remoting_strings.grd.
+      '<!@pymod_do_main(remoting_copy_locales -o -p <(OS) -x '
+          '<(PRODUCT_DIR) <(remoting_locales))',
+    ],
     'remoting_webapp_locale_files': [
-      '<(webapp_locale_dir)/ar/messages.json',
-      '<(webapp_locale_dir)/bg/messages.json',
-      '<(webapp_locale_dir)/ca/messages.json',
-      '<(webapp_locale_dir)/cs/messages.json',
-      '<(webapp_locale_dir)/da/messages.json',
-      '<(webapp_locale_dir)/de/messages.json',
-      '<(webapp_locale_dir)/el/messages.json',
-      '<(webapp_locale_dir)/en/messages.json',
-      '<(webapp_locale_dir)/en_GB/messages.json',
-      '<(webapp_locale_dir)/es/messages.json',
-      '<(webapp_locale_dir)/es_419/messages.json',
-      '<(webapp_locale_dir)/et/messages.json',
-      '<(webapp_locale_dir)/fi/messages.json',
-      '<(webapp_locale_dir)/fil/messages.json',
-      '<(webapp_locale_dir)/fr/messages.json',
-      '<(webapp_locale_dir)/he/messages.json',
-      '<(webapp_locale_dir)/hi/messages.json',
-      '<(webapp_locale_dir)/hr/messages.json',
-      '<(webapp_locale_dir)/hu/messages.json',
-      '<(webapp_locale_dir)/id/messages.json',
-      '<(webapp_locale_dir)/it/messages.json',
-      '<(webapp_locale_dir)/ja/messages.json',
-      '<(webapp_locale_dir)/ko/messages.json',
-      '<(webapp_locale_dir)/lt/messages.json',
-      '<(webapp_locale_dir)/lv/messages.json',
-      '<(webapp_locale_dir)/nb/messages.json',
-      '<(webapp_locale_dir)/nl/messages.json',
-      '<(webapp_locale_dir)/pl/messages.json',
-      '<(webapp_locale_dir)/pt_BR/messages.json',
-      '<(webapp_locale_dir)/pt_PT/messages.json',
-      '<(webapp_locale_dir)/ro/messages.json',
-      '<(webapp_locale_dir)/ru/messages.json',
-      '<(webapp_locale_dir)/sk/messages.json',
-      '<(webapp_locale_dir)/sl/messages.json',
-      '<(webapp_locale_dir)/sr/messages.json',
-      '<(webapp_locale_dir)/sv/messages.json',
-      '<(webapp_locale_dir)/th/messages.json',
-      '<(webapp_locale_dir)/tr/messages.json',
-      '<(webapp_locale_dir)/uk/messages.json',
-      '<(webapp_locale_dir)/vi/messages.json',
-      '<(webapp_locale_dir)/zh_CN/messages.json',
-      '<(webapp_locale_dir)/zh_TW/messages.json',
+      # Build the list of .json files generated from remoting_strings.grd.
+      '<!@pymod_do_main(remoting_localize --locale_output '
+          '"<(webapp_locale_dir)/@{json_suffix}/messages.json" '
+          '--print_only <(remoting_locales))',
     ],
     'remoting_webapp_files': [
       'resources/chromoting16.webp',
@@ -194,11 +166,14 @@
       'webapp/host_settings.js',
       'webapp/host_setup_dialog.js',
       'webapp/host_table_entry.js',
+      'webapp/identity.js',
       'webapp/l10n.js',
       'webapp/log_to_server.js',
       'webapp/menu_button.js',
       'webapp/oauth2.js',
+      'webapp/oauth2_api.js',
       'webapp/oauth2_callback.js',
+      'webapp/paired_client_manager.js',
       'webapp/plugin_settings.js',
       'webapp/remoting.js',
       'webapp/server_log_entry.js',
@@ -249,6 +224,10 @@
 
   'target_defaults': {
     'defines': [
+      'BINARY_CORE=1',
+      'BINARY_DESKTOP=2',
+      'BINARY_HOST_ME2ME=3',
+      'BINARY_HOST_PLUGIN=4',
     ],
     'include_dirs': [
       '..',  # Root of Chrome checkout
@@ -292,6 +271,7 @@
             'remoting_base',
             'remoting_jingle_glue',
             'remoting_protocol',
+            'remoting_resources',
             '../crypto/crypto.gyp:crypto',
             '../google_apis/google_apis.gyp:google_apis',
             '../ipc/ipc.gyp:ipc',
@@ -358,11 +338,14 @@
             'host/dns_blackhole_checker.h',
             'host/heartbeat_sender.cc',
             'host/heartbeat_sender.h',
+            'host/host_status_sender.cc',
+            'host/host_status_sender.h',
             'host/host_change_notification_listener.cc',
             'host/host_change_notification_listener.h',
             'host/host_config.cc',
             'host/host_config.h',
             'host/host_exit_codes.h',
+            'host/host_exit_codes.cc',
             'host/host_secret.cc',
             'host/host_secret.h',
             'host/host_status_monitor.h',
@@ -413,11 +396,13 @@
             'host/me2me_desktop_environment.h',
             'host/mouse_clamping_filter.cc',
             'host/mouse_clamping_filter.h',
+            'host/pairing_registry_delegate.cc',
             'host/pairing_registry_delegate.h',
             'host/pairing_registry_delegate_linux.cc',
             'host/pairing_registry_delegate_linux.h',
             'host/pairing_registry_delegate_mac.cc',
             'host/pairing_registry_delegate_win.cc',
+            'host/pairing_registry_delegate_win.h',
             'host/pam_authorization_factory_posix.cc',
             'host/pam_authorization_factory_posix.h',
             'host/pin_hash.cc',
@@ -440,8 +425,6 @@
             'host/screen_resolution.h',
             'host/server_log_entry.cc',
             'host/server_log_entry.h',
-            'host/service_client.cc',
-            'host/service_client.h',
             'host/service_urls.cc',
             'host/service_urls.h',
             'host/session_manager_factory.cc',
@@ -450,17 +433,11 @@
             'host/signaling_connector.h',
             'host/token_validator_factory_impl.cc',
             'host/token_validator_factory_impl.h',
-            'host/ui_strings.cc',
-            'host/ui_strings.h',
-            'host/url_request_context.cc',
-            'host/url_request_context.h',
             'host/usage_stats_consent.h',
             'host/usage_stats_consent_mac.cc',
             'host/usage_stats_consent_win.cc',
             'host/video_scheduler.cc',
             'host/video_scheduler.h',
-            'host/vlog_net_log.cc',
-            'host/vlog_net_log.h',
             'host/win/com_security.cc',
             'host/win/com_security.h',
             'host/win/launch_process_with_token.cc',
@@ -639,6 +616,8 @@
             'host/setup/oauth_helper.h',
             'host/setup/pin_validator.cc',
             'host/setup/pin_validator.h',
+            'host/setup/service_client.cc',
+            'host/setup/service_client.h',
             'host/setup/test_util.cc',
             'host/setup/test_util.h',
             'host/setup/win/auth_code_getter.cc',
@@ -662,19 +641,24 @@
           'variables': { 'enable_wexit_time_destructors': 1, },
           'product_extension': '<(host_plugin_extension)',
           'product_prefix': '<(host_plugin_prefix)',
+          'defines': [
+            'HOST_PLUGIN_MIME_TYPE=<(host_plugin_mime_type)',
+          ],
           'dependencies': [
+            '../base/base.gyp:base_i18n',
+            '../net/net.gyp:net',
+            '../third_party/npapi/npapi.gyp:npapi',
             'remoting_base',
             'remoting_host',
             'remoting_host_event_logger',
             'remoting_host_logging',
+            'remoting_infoplist_strings',
             'remoting_host_setup_base',
             'remoting_jingle_glue',
-            '../net/net.gyp:net',
-            '../third_party/npapi/npapi.gyp:npapi',
+            'remoting_resources',
           ],
           'sources': [
             'base/dispatch_win.h',
-            'host/win/core_resource.h',
             'host/plugin/host_log_handler.cc',
             'host/plugin/host_log_handler.h',
             'host/plugin/host_plugin.cc',
@@ -682,6 +666,7 @@
             'host/plugin/host_plugin_utils.h',
             'host/plugin/host_script_object.cc',
             'host/plugin/host_script_object.h',
+            'host/win/core_resource.h',
           ],
           'conditions': [
             ['OS=="mac"', {
@@ -693,7 +678,7 @@
                 # TODO(maruel): Use INFOPLIST_PREFIX_HEADER to remove the need to
                 # duplicate string once
                 # http://code.google.com/p/gyp/issues/detail?id=243 is fixed.
-                'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'HOST_PLUGIN_MIME_TYPE="<(host_plugin_mime_type)" HOST_PLUGIN_NAME="<(host_plugin_name)" HOST_PLUGIN_DESCRIPTION="<(host_plugin_description)"',
+                'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'HOST_PLUGIN_MIME_TYPE="<(host_plugin_mime_type)" VERSION_FULL="<(version_full)" VERSION_SHORT="<(version_short)"',
               },
               # TODO(mark): Come up with a fancier way to do this.  It should
               # only be necessary to list host_plugin-Info.plist once, not the
@@ -704,6 +689,12 @@
                 'resources/chromoting16.png',
                 'resources/chromoting48.png',
                 'resources/chromoting128.png',
+                '<!@pymod_do_main(remoting_copy_locales -o -p <(OS) -x <(PRODUCT_DIR) <(remoting_locales))',
+
+                # Localized strings for 'Info.plist'
+                '<!@pymod_do_main(remoting_localize --locale_output '
+                    '"<(SHARED_INTERMEDIATE_DIR)/remoting/host_plugin_resources/@{json_suffix}.lproj/InfoPlist.strings" '
+                    '--print_only <(remoting_locales))',
               ],
               'mac_bundle_resources!': [
                 'host/plugin/host_plugin-Info.plist',
@@ -719,48 +710,136 @@
             }],  # OS=="mac"
             [ 'OS=="win"', {
               'defines': [
+                'BINARY=BINARY_HOST_PLUGIN',
                 'ISOLATION_AWARE_ENABLED=1',
               ],
               'dependencies': [
                 'remoting_lib_idl',
+                'remoting_core_resources',
                 'remoting_version_resources',
               ],
               'include_dirs': [
                 '<(INTERMEDIATE_DIR)',
               ],
               'sources': [
-                '<(SHARED_INTERMEDIATE_DIR)/remoting/remoting_host_plugin_version.rc',
-                'host/win/core.rc',
+                '<(SHARED_INTERMEDIATE_DIR)/remoting/core.rc',
+                '<(SHARED_INTERMEDIATE_DIR)/remoting/version.rc',
                 'host/plugin/host_plugin.def',
               ],
+              'msvs_settings': {
+                'VCManifestTool': {
+                  'EmbedManifest': 'true',
+                },
+                'VCLinkerTool': {
+                  'AdditionalOptions': [
+                    "\"/manifestdependency:type='win32' "
+                        "name='Microsoft.Windows.Common-Controls' "
+                        "version='6.0.0.0' "
+                        "processorArchitecture='*' "
+                        "publicKeyToken='6595b64144ccf1df' language='*'\"",
+                  ],
+                },
+              },
             }],
           ],
         },  # end of target 'remoting_host_plugin'
-
         {
-          'target_name': 'remoting_native_messaging_host',
-          'type': 'executable',
-          'variables': { 'enable_wexit_time_destructors': 1, },
+          'target_name': 'remoting_infoplist_strings',
+          'type': 'none',
           'dependencies': [
-            '../base/base.gyp:base',
-            'remoting_host',
-            'remoting_host_logging',
-            'remoting_host_setup_base',
+            'remoting_resources',
           ],
-          'defines': [
-            'VERSION=<(version_full)',
-          ],
-          'sources': [
-            'host/setup/native_messaging_host_main.cc',
-          ],
-          'conditions': [
-            ['OS=="linux" and linux_use_tcmalloc==1', {
-              'dependencies': [
-                '../base/allocator/allocator.gyp:allocator',
+          'actions': [
+            {
+              'action_name': 'generate_host_plugin_strings',
+              'inputs': [
+                '<(remoting_localize_path)',
+                'host/plugin/host_plugin-InfoPlist.strings.jinja2',
               ],
-            }],
+              'outputs': [
+                '<!@pymod_do_main(remoting_localize --locale_output '
+                    '"<(SHARED_INTERMEDIATE_DIR)/remoting/host_plugin_resources/@{json_suffix}.lproj/InfoPlist.strings" '
+                    '--print_only <(remoting_locales))',
+              ],
+              'action': [
+                'python',
+                '<(remoting_localize_path)',
+                '--locale_dir', '<(webapp_locale_dir)',
+                '--template', 'host/plugin/host_plugin-InfoPlist.strings.jinja2',
+                '--locale_output',
+                '<(SHARED_INTERMEDIATE_DIR)/remoting/host_plugin_resources/@{json_suffix}.lproj/InfoPlist.strings',
+                '--encoding', 'utf-8',
+                '<@(remoting_locales)',
+              ],
+            },
+            {
+              'action_name': 'generate_host_strings',
+              'inputs': [
+                '<(remoting_localize_path)',
+                'host/remoting_me2me_host-InfoPlist.strings.jinja2',
+              ],
+              'outputs': [
+                '<!@pymod_do_main(remoting_localize --locale_output '
+                    '"<(SHARED_INTERMEDIATE_DIR)/remoting/host_resources/@{json_suffix}.lproj/InfoPlist.strings" '
+                    '--print_only <(remoting_locales))',
+              ],
+              'action': [
+                'python',
+                '<(remoting_localize_path)',
+                '--locale_dir', '<(webapp_locale_dir)',
+                '--template', 'host/remoting_me2me_host-InfoPlist.strings.jinja2',
+                '--locale_output',
+                '<(SHARED_INTERMEDIATE_DIR)/remoting/host_resources/@{json_suffix}.lproj/InfoPlist.strings',
+                '--encoding', 'utf-8',
+                '<@(remoting_locales)',
+              ],
+            },
+            {
+              'action_name': 'generate_preference_pane_strings',
+              'inputs': [
+                '<(remoting_localize_path)',
+                'host/mac/me2me_preference_pane-InfoPlist.strings.jinja2',
+              ],
+              'outputs': [
+                '<!@pymod_do_main(remoting_localize --locale_output '
+                    '"<(SHARED_INTERMEDIATE_DIR)/remoting/preference_pane_resources/@{json_suffix}.lproj/InfoPlist.strings" '
+                    '--print_only <(remoting_locales))',
+              ],
+              'action': [
+                'python',
+                '<(remoting_localize_path)',
+                '--locale_dir', '<(webapp_locale_dir)',
+                '--template', 'host/mac/me2me_preference_pane-InfoPlist.strings.jinja2',
+                '--locale_output',
+                '<(SHARED_INTERMEDIATE_DIR)/remoting/preference_pane_resources/@{json_suffix}.lproj/InfoPlist.strings',
+                '--encoding', 'utf-8',
+                '<@(remoting_locales)',
+              ],
+            },
+            {
+              'action_name': 'generate_uninstaller_strings',
+              'inputs': [
+                '<(remoting_localize_path)',
+                'host/installer/mac/uninstaller/remoting_uninstaller-InfoPlist.strings.jinja2',
+              ],
+              'outputs': [
+                '<!@pymod_do_main(remoting_localize --locale_output '
+                    '"<(SHARED_INTERMEDIATE_DIR)/remoting/uninstaller_resources/@{json_suffix}.lproj/InfoPlist.strings" '
+                    '--print_only <(remoting_locales))',
+              ],
+              'action': [
+                'python',
+                '<(remoting_localize_path)',
+                '--locale_dir', '<(webapp_locale_dir)',
+                '--template', 'host/installer/mac/uninstaller/remoting_uninstaller-InfoPlist.strings.jinja2',
+                '--locale_output',
+                '<(SHARED_INTERMEDIATE_DIR)/remoting/uninstaller_resources/@{json_suffix}.lproj/InfoPlist.strings',
+                '--encoding', 'utf-8',
+                '<@(remoting_locales)',
+              ],
+            },
           ],
-        },  # end of target 'remoting_native_messaging_host'
+        },  # end of target 'remoting_infoplist_strings'
       ],  # end of 'targets'
     }],  # 'enable_remoting_host==1'
 
@@ -853,6 +932,8 @@
             'remoting_host',
             'remoting_host_event_logger',
             'remoting_host_logging',
+            'remoting_host_setup_base',
+            'remoting_infoplist_strings',
             'remoting_jingle_glue',
             'remoting_me2me_host_static',
           ],
@@ -873,12 +954,18 @@
               'xcode_settings': {
                 'INFOPLIST_FILE': 'host/remoting_me2me_host-Info.plist',
                 'INFOPLIST_PREPROCESS': 'YES',
-                'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'VERSION_FULL="<(version_full)" VERSION_SHORT="<(version_short)" BUNDLE_ID="<(host_bundle_id)" COPYRIGHT_INFO="<(copyright_info)"',
+                'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'VERSION_FULL="<(version_full)" VERSION_SHORT="<(version_short)" BUNDLE_ID="<(host_bundle_id)"',
               },
               'mac_bundle_resources': [
                 'host/disconnect_window.xib',
                 'host/remoting_me2me_host.icns',
                 'host/remoting_me2me_host-Info.plist',
+                '<!@pymod_do_main(remoting_copy_locales -o -p <(OS) -x <(PRODUCT_DIR) <(remoting_locales))',
+
+                # Localized strings for 'Info.plist'
+                '<!@pymod_do_main(remoting_localize --locale_output '
+                    '"<(SHARED_INTERMEDIATE_DIR)/remoting/host_resources/@{json_suffix}.lproj/InfoPlist.strings" '
+                    '--print_only <(remoting_locales))',
               ],
               'mac_bundle_resources!': [
                 'host/remoting_me2me_host-Info.plist',
@@ -924,7 +1011,31 @@
             }],  # OS=linux
           ],  # end of 'conditions'
         },  # end of target 'remoting_me2me_host'
-
+        {
+          'target_name': 'remoting_native_messaging_host',
+          'type': 'executable',
+          'variables': { 'enable_wexit_time_destructors': 1, },
+          'dependencies': [
+            '../base/base.gyp:base',
+            'remoting_host',
+            'remoting_host_logging',
+            'remoting_host_setup_base',
+            'remoting_native_messaging_manifest',
+          ],
+          'defines': [
+            'VERSION=<(version_full)',
+          ],
+          'sources': [
+            'host/setup/native_messaging_host_main.cc',
+          ],
+          'conditions': [
+            ['OS=="linux" and linux_use_tcmalloc==1', {
+              'dependencies': [
+                '../base/allocator/allocator.gyp:allocator',
+              ],
+            }],
+          ],
+        },  # end of target 'remoting_native_messaging_host'
       ],  # end of 'targets'
     }],  # 'OS!="win" and enable_remoting_host==1'
 
@@ -995,10 +1106,10 @@
           'mac_bundle': 1,
           'variables': {
             'bundle_id': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_UNINSTALLER_BUNDLE_ID@")',
-            'bundle_name': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_UNINSTALLER_BUNDLE_NAME@")',
           },
           'dependencies': [
             '<(DEPTH)/base/base.gyp:base',
+            'remoting_infoplist_strings',
           ],
           'sources': [
             'host/constants_mac.cc',
@@ -1011,12 +1122,17 @@
           'xcode_settings': {
             'INFOPLIST_FILE': 'host/installer/mac/uninstaller/remoting_uninstaller-Info.plist',
             'INFOPLIST_PREPROCESS': 'YES',
-            'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'VERSION_FULL="<(version_full)" VERSION_SHORT="<(version_short)" BUNDLE_NAME="<(bundle_name)" BUNDLE_ID="<(bundle_id)" COPYRIGHT_INFO="<(copyright_info)"',
+            'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'VERSION_FULL="<(version_full)" VERSION_SHORT="<(version_short)" BUNDLE_ID="<(bundle_id)"',
           },
           'mac_bundle_resources': [
             'host/installer/mac/uninstaller/remoting_uninstaller.icns',
             'host/installer/mac/uninstaller/remoting_uninstaller.xib',
             'host/installer/mac/uninstaller/remoting_uninstaller-Info.plist',
+
+            # Localized strings for 'Info.plist'
+            '<!@pymod_do_main(remoting_localize --locale_output '
+                '"<(SHARED_INTERMEDIATE_DIR)/remoting/uninstaller_resources/@{json_suffix}.lproj/InfoPlist.strings" '
+                '--print_only <(remoting_locales))',
           ],
           'mac_bundle_resources!': [
             'host/installer/mac/uninstaller/remoting_uninstaller-Info.plist',
@@ -1068,7 +1184,6 @@
                 'VERSION_SHORT=<(version_short)',
                 'VERSION_MAJOR=<(version_major)',
                 'VERSION_MINOR=<(version_minor)',
-                'COPYRIGHT_INFO=<(copyright_info)',
                 'HOST_NAME=<(host_name)',
                 'HOST_SERVICE_NAME=<(host_service_name)',
                 'HOST_UNINSTALLER_NAME=<(host_uninstaller_name)',
@@ -1116,6 +1231,9 @@
           'defines': [
             'JSON_USE_EXCEPTION=0',
           ],
+          'dependencies': [
+            'remoting_infoplist_strings',
+          ],
           'include_dirs': [
             '../third_party/jsoncpp/overrides/include/',
             '../third_party/jsoncpp/source/include/',
@@ -1153,20 +1271,13 @@
           },
           'variables': {
             'bundle_id': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_PREFPANE_BUNDLE_ID@")',
-            'bundle_name': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_PREFPANE_BUNDLE_NAME@")',
-            # The XML new-line entity splits the label into two lines, which
-            # is the maximum number of lines allowed by the System Preferences
-            # applet.
-            # TODO(lambroslambrou): When these strings are localized, use "\n"
-            # instead of "&#x0a;" for linebreaks.
-            'pref_pane_icon_label': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_PREFPANE_ICON_LABEL@")',
           },
           'xcode_settings': {
             'ARCHS': ['i386', 'x86_64'],
             'GCC_ENABLE_OBJC_GC': 'supported',
             'INFOPLIST_FILE': 'host/mac/me2me_preference_pane-Info.plist',
             'INFOPLIST_PREPROCESS': 'YES',
-            'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'VERSION_FULL="<(version_full)" VERSION_SHORT="<(version_short)" BUNDLE_NAME="<(bundle_name)" BUNDLE_ID="<(bundle_id)" COPYRIGHT_INFO="<(copyright_info)" PREF_PANE_ICON_LABEL="<(pref_pane_icon_label)"',
+            'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'VERSION_FULL="<(version_full)" VERSION_SHORT="<(version_short)" BUNDLE_ID="<(bundle_id)"',
           },
           'mac_bundle_resources': [
             'host/mac/me2me_preference_pane.xib',
@@ -1174,6 +1285,11 @@
             'host/mac/me2me_preference_pane_disable.xib',
             'host/mac/me2me_preference_pane-Info.plist',
             'resources/chromoting128.png',
+
+            # Localized strings for 'Info.plist'
+            '<!@pymod_do_main(remoting_localize --locale_output '
+                '"<(SHARED_INTERMEDIATE_DIR)/remoting/preference_pane_resources/@{json_suffix}.lproj/InfoPlist.strings" '
+                '--print_only <(remoting_locales))',
           ],
           'mac_bundle_resources!': [
             'host/mac/me2me_preference_pane-Info.plist',
@@ -1347,15 +1463,23 @@
           'target_name': 'remoting_console',
           'type': 'executable',
           'variables': { 'enable_wexit_time_destructors': 1, },
+          'defines': [
+            'BINARY=BINARY_HOST_ME2ME',
+          ],
           'dependencies': [
             'remoting_core',
             'remoting_version_resources',
           ],
           'sources': [
-            '<(SHARED_INTERMEDIATE_DIR)/remoting/remoting_host_version.rc',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/version.rc',
             'host/win/entry_point.cc',
           ],
           'msvs_settings': {
+            'VCManifestTool': {
+              'AdditionalManifestFiles': [
+                'host/win/dpi_aware.manifest',
+              ],
+            },
             'VCLinkerTool': {
               'EntryPointSymbol': 'HostEntryPoint',
               'IgnoreAllDefaultLibraries': 'true',
@@ -1363,39 +1487,6 @@
             },
           },
         },  # end of target 'remoting_console'
-        {
-          'target_name': 'remoting_console_manifest',
-          'type': 'none',
-          'dependencies': [
-            'remoting_console',
-          ],
-          'hard_dependency': '1',
-          'msvs_cygwin_shell': 0,
-          'actions': [
-            {
-              'action_name': 'Embedding manifest into remoting_console.exe',
-              'binary': '<(PRODUCT_DIR)/remoting_console.exe',
-              'manifests': [
-                'host/win/dpi_aware.manifest',
-              ],
-              'inputs': [
-                '<(_binary)',
-                '<@(_manifests)',
-              ],
-              'outputs': [
-                '<(_binary).embedded.manifest',
-              ],
-              'action': [
-                'mt',
-                '-nologo',
-                '-manifest',
-                '<@(_manifests)',
-                '-outputresource:<(_binary);#1',
-                '-out:<(_binary).embedded.manifest',
-              ],
-            },
-          ],  # actions
-        },  # end of target 'remoting_console_manifest'
         {
           'target_name': 'remoting_core',
           'type': 'shared_library',
@@ -1405,6 +1496,7 @@
             '_ATL_CSTRING_EXPLICIT_CONSTRUCTORS',
             '_ATL_NO_AUTOMATIC_NAMESPACE',
             '_ATL_NO_EXCEPTIONS',
+            'BINARY=BINARY_CORE',
             'DAEMON_CONTROLLER_CLSID="{<(daemon_controller_clsid)}"',
             'RDP_DESKTOP_SESSION_CLSID="{<(rdp_desktop_session_clsid)}"',
             'HOST_IMPLEMENTATION',
@@ -1421,21 +1513,23 @@
             '../third_party/webrtc/modules/modules.gyp:desktop_capture',
             'remoting_base',
             'remoting_breakpad',
+            'remoting_core_resources',
             'remoting_host',
             'remoting_host_event_logger',
             'remoting_host_logging',
+            'remoting_host_setup_base',
             'remoting_lib_idl',
             'remoting_lib_ps',
             'remoting_lib_rc',
             'remoting_me2me_host_static',
             'remoting_protocol',
             'remoting_version_resources',
-            '../third_party/webrtc/modules/modules.gyp:desktop_capture',
           ],
           'sources': [
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/core.rc',
             '<(SHARED_INTERMEDIATE_DIR)/remoting/host/chromoting_lib.rc',
             '<(SHARED_INTERMEDIATE_DIR)/remoting/host/remoting_host_messages.rc',
-            '<(SHARED_INTERMEDIATE_DIR)/remoting/remoting_core_version.rc',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/version.rc',
             'host/chromoting_messages.cc',
             'host/chromoting_messages.h',
             'host/config_file_watcher.cc',
@@ -1453,6 +1547,7 @@
             'host/desktop_session_win.cc',
             'host/desktop_session_win.h',
             'host/host_exit_codes.h',
+            'host/host_exit_codes.cc',
             'host/host_export.h',
             'host/host_main.cc',
             'host/host_main.h',
@@ -1466,7 +1561,6 @@
             'host/win/chromoting_module.cc',
             'host/win/chromoting_module.h',
             'host/win/core.cc',
-            'host/win/core.rc',
             'host/win/core_resource.h',
             'host/win/elevated_controller.cc',
             'host/win/elevated_controller.h',
@@ -1485,6 +1579,9 @@
             'host/worker_process_ipc_delegate.h',
           ],
           'msvs_settings': {
+            'VCManifestTool': {
+              'EmbedManifest': 'true',
+            },
             'VCLinkerTool': {
               'AdditionalDependencies': [
                 'comctl32.lib',
@@ -1493,10 +1590,16 @@
                 'uuid.lib',
                 'wtsapi32.lib',
               ],
-              # Export the proxy/stub entry points. Note that the generated
-              # routines have 'Ps' prefix to avoid conflicts with our own
-              # DllMain().
               'AdditionalOptions': [
+                "\"/manifestdependency:type='win32' "
+                    "name='Microsoft.Windows.Common-Controls' "
+                    "version='6.0.0.0' "
+                    "processorArchitecture='*' "
+                    "publicKeyToken='6595b64144ccf1df' language='*'\"",
+
+                # Export the proxy/stub entry points. Note that the generated
+                # routines have 'Ps' prefix to avoid conflicts with our own
+                # DllMain().
                 '/EXPORT:DllGetClassObject=PsDllGetClassObject,PRIVATE',
                 '/EXPORT:DllCanUnloadNow=PsDllCanUnloadNow,PRIVATE',
                 '/EXPORT:DllRegisterServer=PsDllRegisterServer,PRIVATE',
@@ -1506,52 +1609,71 @@
           },
         },  # end of target 'remoting_core'
         {
-          'target_name': 'remoting_core_manifest',
+          'target_name': 'remoting_core_resources',
           'type': 'none',
           'dependencies': [
-            'remoting_core',
+            'remoting_resources',
           ],
-          'hard_dependency': '1',
-          'msvs_cygwin_shell': 0,
-          'actions': [
+          'hard_dependency': 1,
+          'direct_dependent_settings': {
+            'include_dirs': [
+              '<(SHARED_INTERMEDIATE_DIR)',
+            ],
+          },
+          'sources': [
+            'host/win/core.rc.jinja2'
+          ],
+          'rules': [
             {
-              'action_name': 'Embedding manifest into remoting_core.dll',
-              'binary': '<(PRODUCT_DIR)/remoting_core.dll',
-              'manifests': [
-                'host/win/comctl32_v6.manifest',
-              ],
-              'inputs': [
-                '<(_binary)',
-                '<@(_manifests)',
-              ],
+              'rule_name': 'version',
+              'extension': 'jinja2',
               'outputs': [
-                '<(_binary).embedded.manifest',
+                '<(SHARED_INTERMEDIATE_DIR)/remoting/core.rc'
               ],
               'action': [
-                'mt',
-                '-nologo',
-                '-manifest',
-                '<@(_manifests)',
-                '-outputresource:<(_binary);#2',
-                '-out:<(_binary).embedded.manifest',
+                'python',
+                '<(remoting_localize_path)',
+                '--locale_dir', '<(webapp_locale_dir)',
+                '--template', '<(RULE_INPUT_PATH)',
+                '--output', '<@(_outputs)',
+                '<@(remoting_locales)',
               ],
+              'message': 'Localizing the dialogs and strings'
             },
-          ],  # actions
-        },  # end of target 'remoting_core_manifest'
+          ],
+        },  # end of target 'remoting_core_resources'
         {
           'target_name': 'remoting_desktop',
           'type': 'executable',
           'variables': { 'enable_wexit_time_destructors': 1, },
+          'defines': [
+            'BINARY=BINARY_DESKTOP',
+          ],
           'dependencies': [
             'remoting_core',
             'remoting_version_resources',
           ],
           'sources': [
-            '<(SHARED_INTERMEDIATE_DIR)/remoting/remoting_desktop_version.rc',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/version.rc',
             'host/win/entry_point.cc',
           ],
           'msvs_settings': {
+            'VCManifestTool': {
+              'AdditionalManifestFiles': [
+                'host/win/dpi_aware.manifest',
+              ],
+            },
             'VCLinkerTool': {
+              'EnableUAC': 'true',
+              # Add 'level="requireAdministrator" uiAccess="true"' to
+              # the manifest only for the official builds because it requires
+              # the binary to be signed to work.
+              'conditions': [
+                ['buildtype == "Official"', {
+                  'UACExecutionLevel': 2,
+                  'UACUIAccess': 'true',
+                }],
+              ],
               'EntryPointSymbol': 'HostEntryPoint',
               'IgnoreAllDefaultLibraries': 'true',
               'SubSystem': '2', # /SUBSYSTEM:WINDOWS
@@ -1559,62 +1681,27 @@
           },
         },  # end of target 'remoting_desktop'
         {
-          'target_name': 'remoting_desktop_manifest',
-          'type': 'none',
-          'dependencies': [
-            'remoting_desktop',
-          ],
-          'hard_dependency': '1',
-          'msvs_cygwin_shell': 0,
-          'actions': [
-            {
-              'action_name': 'Embedding manifest into remoting_desktop.exe',
-              'binary': '<(PRODUCT_DIR)/remoting_desktop.exe',
-              'manifests': [
-                'host/win/dpi_aware.manifest',
-              ],
-              # Add 'level="requireAdministrator" uiAccess="true"' to
-              # the manifest only for the official builds because it requires
-              # the binary to be signed to work.
-              'conditions': [
-                ['buildtype == "Official"', {
-                  'manifests': [
-                    'host/win/require_administrator.manifest',
-                  ],
-                }],
-              ],
-              'inputs': [
-                '<(_binary)',
-                '<@(_manifests)',
-              ],
-              'outputs': [
-                '<(_binary).embedded.manifest',
-              ],
-              'action': [
-                'mt',
-                '-nologo',
-                '-manifest',
-                '<@(_manifests)',
-                '-outputresource:<(_binary);#1',
-                '-out:<(_binary).embedded.manifest',
-              ],
-            },
-          ],  # actions
-        },  # end of target 'remoting_desktop_manifest'
-        {
           'target_name': 'remoting_host_exe',
           'product_name': 'remoting_host',
           'type': 'executable',
           'variables': { 'enable_wexit_time_destructors': 1, },
+          'defines': [
+            'BINARY=BINARY_HOST_ME2ME',
+          ],
           'dependencies': [
             'remoting_core',
             'remoting_version_resources',
           ],
           'sources': [
-            '<(SHARED_INTERMEDIATE_DIR)/remoting/remoting_host_version.rc',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/version.rc',
             'host/win/entry_point.cc',
           ],
           'msvs_settings': {
+            'VCManifestTool': {
+              'AdditionalManifestFiles': [
+                'host/win/dpi_aware.manifest',
+              ],
+            },
             'VCLinkerTool': {
               'EntryPointSymbol': 'HostEntryPoint',
               'IgnoreAllDefaultLibraries': 'true',
@@ -1625,142 +1712,182 @@
           },
         },  # end of target 'remoting_host_exe'
         {
-          'target_name': 'remoting_host_manifest',
+          'target_name': 'remoting_host_messages',
           'type': 'none',
           'dependencies': [
-            'remoting_host_exe',
+            'remoting_resources',
           ],
-          'hard_dependency': '1',
-          'msvs_cygwin_shell': 0,
-          'actions': [
+          'hard_dependency': 1,
+          'direct_dependent_settings': {
+            'include_dirs': [
+              '<(SHARED_INTERMEDIATE_DIR)',
+            ],
+          },
+          'sources': [
+            'host/win/host_messages.mc.jinja2'
+          ],
+          'rules': [
             {
-              'action_name': 'Embedding manifest into remoting_host.exe',
-              'binary': '<(PRODUCT_DIR)/remoting_host.exe',
-              'manifests': [
-                'host/win/dpi_aware.manifest',
-              ],
-              'inputs': [
-                '<(_binary)',
-                '<@(_manifests)',
-              ],
+              'rule_name': 'localize',
+              'extension': 'jinja2',
               'outputs': [
-                '<(_binary).embedded.manifest',
+                '<(SHARED_INTERMEDIATE_DIR)/remoting/host/remoting_host_messages.mc',
               ],
               'action': [
-                'mt',
-                '-nologo',
-                '-manifest',
-                '<@(_manifests)',
-                '-outputresource:<(_binary);#1',
-                '-out:<(_binary).embedded.manifest',
+                'python',
+                '<(remoting_localize_path)',
+                '--locale_dir', '<(webapp_locale_dir)',
+                '--template', '<(RULE_INPUT_PATH)',
+                '--output', '<@(_outputs)',
+                '<@(remoting_locales)',
               ],
+              'message': 'Localizing the event log messages'
             },
-          ],  # actions
-        },  # end of target 'remoting_host_manifest'
-
-        {
-          'target_name': 'remoting_host_plugin_manifest',
-          'type': 'none',
-          'dependencies': [
-            'remoting_host_plugin',
           ],
-          'hard_dependency': '1',
-          'msvs_cygwin_shell': 0,
-          'actions': [
-            {
-              'action_name': 'Embedding manifest into remoting_host_plugin.dll',
-              'binary': '<(PRODUCT_DIR)/remoting_host_plugin.dll',
-              'manifests': [
-                'host/win/comctl32_v6.manifest',
-              ],
-              'inputs': [
-                '<(_binary)',
-                '<@(_manifests)',
-              ],
-              'outputs': [
-                '<(_binary).embedded.manifest',
-              ],
-              'action': [
-                'mt',
-                '-nologo',
-                '-manifest',
-                '<@(_manifests)',
-                '-outputresource:<(_binary);#2',
-                '-out:<(_binary).embedded.manifest',
-              ],
-            },
-          ],  # actions
-        },  # end of target 'remoting_host_plugin_manifest'
+        },  # end of target 'remoting_host_messages'
 
-        # Generates the version information resources for the Windows binaries.
-        # The .RC files are generated from the "version.rc.version" template and
-        # placed in the "<(SHARED_INTERMEDIATE_DIR)/remoting" folder.
+        # Generates localized the version information resources for the Windows
+        # binaries. 
         # The substitution strings are taken from:
         #   - build/util/LASTCHANGE - the last source code revision.
         #   - chrome/VERSION - the major, build & patch versions.
         #   - remoting/VERSION - the chromoting patch version (and overrides
         #       for chrome/VERSION).
-        #   - (branding_path) - UI/localizable strings.
-        #   - xxx.ver - per-binary non-localizable strings such as the binary
-        #     name.
+        #   - translated webapp strings
         {
           'target_name': 'remoting_version_resources',
           'type': 'none',
-          'inputs': [
-            '<(branding_path)',
-            'version.rc.version',
-            '<(DEPTH)/build/util/LASTCHANGE',
-            '<(remoting_version_path)',
-            '<(chrome_version_path)',
+          'dependencies': [
+            'remoting_resources',
           ],
+          'hard_dependency': 1,
           'direct_dependent_settings': {
             'include_dirs': [
-              '<(SHARED_INTERMEDIATE_DIR)/remoting',
+              '<(SHARED_INTERMEDIATE_DIR)',
             ],
           },
           'sources': [
-            'host/plugin/remoting_host_plugin.ver',
-            'host/win/remoting_core.ver',
-            'host/win/remoting_desktop.ver',
-            'host/win/remoting_host.ver',
+            'host/win/version.rc.jinja2'
           ],
           'rules': [
             {
               'rule_name': 'version',
-              'extension': 'ver',
+              'extension': 'jinja2',
               'variables': {
                 'lastchange_path': '<(DEPTH)/build/util/LASTCHANGE',
-                'template_input_path': 'version.rc.version',
               },
               'inputs': [
-                '<(branding_path)',
                 '<(chrome_version_path)',
                 '<(lastchange_path)',
                 '<(remoting_version_path)',
-                '<(template_input_path)',
               ],
               'outputs': [
-                '<(SHARED_INTERMEDIATE_DIR)/remoting/<(RULE_INPUT_ROOT)_version.rc',
+                '<(SHARED_INTERMEDIATE_DIR)/remoting/version.rc',
               ],
               'action': [
                 'python',
-                '<(version_py_path)',
-                '-f', '<(RULE_INPUT_PATH)',
-                '-f', '<(chrome_version_path)',
+                '<(remoting_localize_path)',
+                '--variables', '<(chrome_version_path)',
                 # |remoting_version_path| must be after |chrome_version_path|
                 # because it can contain overrides for the version numbers.
-                '-f', '<(remoting_version_path)',
-                '-f', '<(branding_path)',
-                '-f', '<(lastchange_path)',
-                '<(template_input_path)',
-                '<@(_outputs)',
+                '--variables', '<(remoting_version_path)',
+                '--variables', '<(lastchange_path)',
+                '--locale_dir', '<(webapp_locale_dir)',
+                '--template', '<(RULE_INPUT_PATH)',
+                '--output', '<@(_outputs)',
+                '<@(remoting_locales)',
               ],
-              'message': 'Generating version information in <@(_outputs)'
+              'message': 'Localizing the version information'
             },
           ],
         },  # end of target 'remoting_version_resources'
       ],  # end of 'targets'
     }],  # 'OS=="win"'
+
+    ['OS=="android"', {
+      'targets': [
+        {
+          'target_name': 'remoting_client_jni',
+          'type': 'shared_library',
+          'dependencies': [
+            'remoting_base',
+            'remoting_client',
+            'remoting_jingle_glue',
+            'remoting_protocol',
+            '../google_apis/google_apis.gyp:google_apis',
+          ],
+          'sources': [
+            'client/jni/android_keymap.cc',
+            'client/jni/android_keymap.h',
+            'client/jni/chromoting_jni_instance.cc',
+            'client/jni/chromoting_jni_instance.h',
+            'client/jni/chromoting_jni_runtime.cc',
+            'client/jni/chromoting_jni_runtime.h',
+            'client/jni/jni_frame_consumer.cc',
+            'client/jni/jni_frame_consumer.h',
+            'client/jni/jni_interface.cc',
+          ],
+        },  # end of target 'remoting_client_jni'
+        {
+          'target_name': 'remoting_android_resources',
+          'type': 'none',
+          'copies': [
+            {
+              'destination': '<(SHARED_INTERMEDIATE_DIR)/remoting/android/res/drawable',
+              'files': [
+                'resources/chromoting128.png',
+                'resources/icon_host.png',
+              ],
+            },
+            {
+              'destination': '<(SHARED_INTERMEDIATE_DIR)/remoting/android/res/layout',
+              'files': [
+                'resources/layout/main.xml',
+                'resources/layout/host.xml',
+                'resources/layout/pin_dialog.xml',
+              ],
+            },
+            {
+              'destination': '<(SHARED_INTERMEDIATE_DIR)/remoting/android/res/menu',
+              'files': [
+                'resources/menu/chromoting_actionbar.xml',
+                'resources/menu/desktop_actionbar.xml',
+              ],
+            },
+            {
+              'destination': '<(SHARED_INTERMEDIATE_DIR)/remoting/android/res/values',
+              'files': [
+                'resources/strings.xml',
+                'resources/styles.xml',
+              ],
+            },
+          ],
+        },  # end of target 'remoting_android_resources'
+        {
+          'target_name': 'remoting_apk',
+          'type': 'none',
+          'dependencies': [
+            'remoting_client_jni',
+            'remoting_android_resources',
+          ],
+          'variables': {
+            'apk_name': 'Chromoting',
+            'manifest_package_name': 'org.chromium.chromoting',
+            'native_lib_target': 'libremoting_client_jni',
+            'java_in_dir': 'android/java',
+            'additional_res_dirs': [ '<(SHARED_INTERMEDIATE_DIR)/remoting/android/res' ],
+            'additional_input_paths': [
+              'android/java/src/org/chromium/chromoting/Chromoting.java',
+              'android/java/src/org/chromium/chromoting/Desktop.java',
+              'android/java/src/org/chromium/chromoting/DesktopView.java',
+              'android/java/src/org/chromium/chromoting/jni/JniInterface.java',
+              '<(PRODUCT_DIR)/obj/remoting/remoting_android_resources.actions_rules_copies.stamp',
+            ],
+          },
+          'includes': [ '../build/java_apk.gypi' ],
+        },  # end of target 'remoting_apk'
+      ],  # end of 'targets'
+    }],  # 'OS=="android"'
 
     # The host installation is generated only if WiX is available. If
     # component build is used the produced installation will not work due to
@@ -1807,9 +1934,10 @@
           'target_name': 'remoting_me2me_host_archive',
           'type': 'none',
           'dependencies': [
-            'remoting_core_manifest',
-            'remoting_desktop_manifest',
-            'remoting_host_manifest',
+            'remoting_core',
+            'remoting_desktop',
+            'remoting_host_exe',
+            'remoting_native_messaging_manifest',
           ],
           'compiled_inputs': [
             '<(PRODUCT_DIR)/remoting_core.dll',
@@ -1841,11 +1969,13 @@
           'generated_files': [
             '<@(_compiled_inputs)',
             '<(sas_dll_path)/sas.dll',
+            '<(PRODUCT_DIR)/remoting/native_messaging_manifest.json',
             'resources/chromoting.ico',
           ],
           'generated_files_dst': [
             '<@(_compiled_inputs_dst)',
             'files/sas.dll',
+            'files/native_messaging_manifest.json',
             'files/chromoting.ico',
           ],
           'zip_path': '<(PRODUCT_DIR)/remoting-me2me-host-<(OS).zip',
@@ -1981,10 +2111,13 @@
       ],
       'conditions': [
         ['OS=="win"', {
-          'sources': [
-            'host/remoting_host_messages.mc',
+          'dependencies': [
+            'remoting_host_messages',
           ],
           'output_dir': '<(SHARED_INTERMEDIATE_DIR)/remoting/host',
+          'sources': [
+            '<(_output_dir)/remoting_host_messages.mc',
+          ],
           'include_dirs': [
             '<(_output_dir)',
           ],
@@ -1993,8 +2126,8 @@
               '<(_output_dir)',
             ],
           },
-          # Rule to run the message compiler.
           'rules': [
+            # Rule to run the message compiler.
             {
               'rule_name': 'message_compiler',
               'extension': 'mc',
@@ -2008,6 +2141,7 @@
                 'mc.exe',
                 '-h', '<(_output_dir)',
                 '-r', '<(_output_dir)/.',
+                '-u',
                 '<(RULE_INPUT_PATH)',
               ],
               'process_outputs_as_sources': 1,
@@ -2027,25 +2161,20 @@
         ],
         'remoting_webapp_apps_v2_js_files': [
           'webapp/background.js',
-          'webapp/identity.js',
         ],
       },
       'dependencies': [
         'remoting_resources',
         'remoting_host_plugin',
       ],
-      'sources': [
-        'webapp/build-webapp.py',
-        '<(remoting_version_path)',
-        '<(chrome_version_path)',
-        '<@(remoting_webapp_apps_v2_js_files)',
-        '<@(remoting_webapp_files)',
-        '<@(remoting_webapp_js_files)',
+      'locale_files': [
         '<@(remoting_webapp_locale_files)',
-        '<@(remoting_webapp_patch_files)',
       ],
       'conditions': [
         ['enable_remoting_host==1', {
+          'locale_files': [
+            '<@(remoting_locale_files)',
+          ],
           'variables': {
               'plugin_path': '<(PRODUCT_DIR)/<(host_plugin_prefix)remoting_host_plugin.<(host_plugin_extension)',
           },
@@ -2055,11 +2184,6 @@
           },
           'dependencies!': [
             'remoting_host_plugin',
-          ],
-        }],
-        ['OS=="win"', {
-          'dependencies': [
-            'remoting_host_plugin_manifest',
           ],
         }],
       ],
@@ -2074,7 +2198,7 @@
             '<(remoting_version_path)',
             '<@(remoting_webapp_files)',
             '<@(remoting_webapp_js_files)',
-            '<@(remoting_webapp_locale_files)',
+            '<@(_locale_files)',
           ],
           'conditions': [
             ['enable_remoting_host==1', {
@@ -2098,9 +2222,9 @@
             '<@(remoting_webapp_files)',
             '<@(remoting_webapp_js_files)',
             '--locales',
-            '<@(remoting_webapp_locale_files)',
+            '<@(_locale_files)',
           ],
-          'msvs_cygwin_shell': 1,
+          'msvs_cygwin_shell': 0,
         },
       ],
       'target_conditions': [
@@ -2154,13 +2278,60 @@
                 '--patches',
                 '<@(remoting_webapp_patch_files)',
               ],
-              'msvs_cygwin_shell': 1,
+              'msvs_cygwin_shell': 0,
             },
           ],
         }],
       ],
     }, # end of target 'remoting_webapp'
 
+    # Generates 'native_messaging_manifest.json' to be included in the
+    # installation.
+    {
+      'target_name': 'remoting_native_messaging_manifest',
+      'type': 'none',
+      'dependencies': [
+        'remoting_resources',
+      ],
+      'variables': {
+        'input': 'host/setup/native_messaging_manifest.json',
+        'output': '<(PRODUCT_DIR)/remoting/native_messaging_manifest.json',
+      },
+      'conditions': [
+        [ 'OS=="win"', {
+          'variables': {
+            'native_messaging_host_path': 'remoting_host.exe',
+          },
+        }, {
+          'variables': {
+            'native_messaging_host_path': '/opt/google/chrome-remote-desktop/native-messaging-host',
+          },
+        }],
+      ],
+      'actions': [
+        {
+          'action_name': 'generate_manifest',
+          'inputs': [
+            '<(remoting_localize_path)',
+            '<(input)',
+          ],
+          'outputs': [
+            '<(output)',
+          ],
+          'action': [
+            'python',
+            '<(remoting_localize_path)',
+            '--define', 'NATIVE_MESSAGING_HOST_PATH=<(native_messaging_host_path)',
+            '--locale_dir', '<(webapp_locale_dir)',
+            '--template', '<(input)',
+            '--locale_output',
+            '<(output)',
+            '--encoding', 'utf-8',
+            'en',
+          ],
+        },
+      ],
+    },  # end of target 'remoting_native_messaging_manifest'
     {
       'target_name': 'remoting_resources',
       'type': 'none',
@@ -2169,15 +2340,23 @@
         'grit_resource_ids': 'resources/resource_ids',
         'sources': [
           'base/resources_unittest.cc',
-          'host/plugin/host_script_object.cc',
+          'host/continue_window_mac.mm',
+          'host/disconnect_window_mac.mm',
+          'host/installer/mac/uninstaller/remoting_uninstaller-InfoPlist.strings.jinja2',
+          'host/mac/me2me_preference_pane-InfoPlist.strings.jinja2',
+          'host/plugin/host_plugin-InfoPlist.strings.jinja2',
+          'host/win/core.rc.jinja2',
+          'host/win/host_messages.mc.jinja2',
+          'host/win/version.rc.jinja2',
           'webapp/butter_bar.js',
           'webapp/client_screen.js',
           'webapp/error.js',
           'webapp/host_list.js',
-          'webapp/host_table_entry.js',
           'webapp/host_setup_dialog.js',
+          'webapp/host_table_entry.js',
           'webapp/main.html',
           'webapp/manifest.json',
+          'webapp/paired_client_manager.js',
           'webapp/remoting.js',
         ],
       },
@@ -2186,7 +2365,6 @@
           'action_name': 'verify_resources',
           'inputs': [
             'resources/remoting_strings.grd',
-            'resources/common_resources.grd',
             'tools/verify_resources.py',
             '<@(sources)'
           ],
@@ -2198,7 +2376,6 @@
             'tools/verify_resources.py',
             '-t', '<(PRODUCT_DIR)/remoting_resources_verified.stamp',
             '-r', 'resources/remoting_strings.grd',
-            '-r', 'resources/common_resources.grd',
             '<@(sources)',
          ],
         },
@@ -2210,68 +2387,26 @@
           'includes': [ '../build/grit_action.gypi' ],
         },
         {
-          'action_name': 'common_resources',
+          'action_name': 'copy_locales',
           'variables': {
-            'grit_grd_file': 'resources/common_resources.grd',
+            'copy_output_dir%': '<(PRODUCT_DIR)',
           },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-      ],
-      'copies': [
-        # Copy results to the product directory.
-        {
-          'destination': '<(PRODUCT_DIR)/remoting_locales',
-          'files': [
-            '<(grit_out_dir)/remoting/resources/ar.pak',
-            '<(grit_out_dir)/remoting/resources/bg.pak',
-            '<(grit_out_dir)/remoting/resources/ca.pak',
-            '<(grit_out_dir)/remoting/resources/cs.pak',
-            '<(grit_out_dir)/remoting/resources/da.pak',
-            '<(grit_out_dir)/remoting/resources/de.pak',
-            '<(grit_out_dir)/remoting/resources/el.pak',
-            '<(grit_out_dir)/remoting/resources/en-US.pak',
-            '<(grit_out_dir)/remoting/resources/en-GB.pak',
-            '<(grit_out_dir)/remoting/resources/es.pak',
-            '<(grit_out_dir)/remoting/resources/es-419.pak',
-            '<(grit_out_dir)/remoting/resources/et.pak',
-            '<(grit_out_dir)/remoting/resources/fi.pak',
-            '<(grit_out_dir)/remoting/resources/fil.pak',
-            '<(grit_out_dir)/remoting/resources/fr.pak',
-            '<(grit_out_dir)/remoting/resources/he.pak',
-            '<(grit_out_dir)/remoting/resources/hi.pak',
-            '<(grit_out_dir)/remoting/resources/hr.pak',
-            '<(grit_out_dir)/remoting/resources/hu.pak',
-            '<(grit_out_dir)/remoting/resources/id.pak',
-            '<(grit_out_dir)/remoting/resources/it.pak',
-            '<(grit_out_dir)/remoting/resources/ja.pak',
-            '<(grit_out_dir)/remoting/resources/ko.pak',
-            '<(grit_out_dir)/remoting/resources/lt.pak',
-            '<(grit_out_dir)/remoting/resources/lv.pak',
-            '<(grit_out_dir)/remoting/resources/nb.pak',
-            '<(grit_out_dir)/remoting/resources/nl.pak',
-            '<(grit_out_dir)/remoting/resources/pl.pak',
-            '<(grit_out_dir)/remoting/resources/pt-BR.pak',
-            '<(grit_out_dir)/remoting/resources/pt-PT.pak',
-            '<(grit_out_dir)/remoting/resources/ro.pak',
-            '<(grit_out_dir)/remoting/resources/ru.pak',
-            '<(grit_out_dir)/remoting/resources/sk.pak',
-            '<(grit_out_dir)/remoting/resources/sl.pak',
-            '<(grit_out_dir)/remoting/resources/sr.pak',
-            '<(grit_out_dir)/remoting/resources/sv.pak',
-            '<(grit_out_dir)/remoting/resources/th.pak',
-            '<(grit_out_dir)/remoting/resources/tr.pak',
-            '<(grit_out_dir)/remoting/resources/uk.pak',
-            '<(grit_out_dir)/remoting/resources/vi.pak',
-            '<(grit_out_dir)/remoting/resources/zh-CN.pak',
-            '<(grit_out_dir)/remoting/resources/zh-TW.pak',
+          'inputs': [
+            'tools/build/remoting_copy_locales.py',
+            '<!@pymod_do_main(remoting_copy_locales -i -p <(OS) -g <(grit_out_dir) <(remoting_locales))'
           ],
-        },
-        {
-          'destination': '<(PRODUCT_DIR)',
-          'files': [
-            '<(grit_out_dir)/remoting/resources/chrome_remote_desktop.pak',
-          ]
-        },
+          'outputs': [
+            '<!@pymod_do_main(remoting_copy_locales -o -p <(OS) -x <(copy_output_dir) <(remoting_locales))'
+          ],
+          'action': [
+            'python',
+            'tools/build/remoting_copy_locales.py',
+            '-p', '<(OS)',
+            '-g', '<(grit_out_dir)',
+            '-x', '<(copy_output_dir)/.',
+            '<@(remoting_locales)',
+          ],
+        }
       ],
       'includes': [ '../build/grit_target.gypi' ],
     },  # end of target 'remoting_resources'
@@ -2325,17 +2460,24 @@
         'base/plugin_thread_task_runner.h',
         'base/rate_counter.cc',
         'base/rate_counter.h',
-        'base/resources.cc',
         'base/resources.h',
+        'base/resources_linux.cc',
+        'base/resources_mac.cc',
+        'base/resources_win.cc',
         'base/rsa_key_pair.cc',
         'base/rsa_key_pair.h',
         'base/running_average.cc',
         'base/running_average.h',
+        'base/scoped_sc_handle_win.h',
         'base/socket_reader.cc',
         'base/socket_reader.h',
         'base/typed_buffer.h',
+        'base/url_request_context.cc',
+        'base/url_request_context.h',
         'base/util.cc',
         'base/util.h',
+        'base/vlog_net_log.cc',
+        'base/vlog_net_log.h',
         'codec/audio_decoder.cc',
         'codec/audio_decoder.h',
         'codec/audio_decoder_opus.cc',
@@ -2388,6 +2530,7 @@
         'remoting_base',
         'remoting_jingle_glue',
         'remoting_protocol',
+        '../third_party/webrtc/modules/modules.gyp:desktop_capture',
       ],
       'sources': [
         'client/audio_decode_scheduler.cc',
@@ -2645,6 +2788,7 @@
         'host/desktop_session_agent.cc',
         'host/desktop_session_agent.h',
         'host/heartbeat_sender_unittest.cc',
+        'host/host_status_sender_unittest.cc',
         'host/host_change_notification_listener_unittest.cc',
         'host/host_mock_objects.cc',
         'host/host_mock_objects.h',
@@ -2655,6 +2799,7 @@
         'host/local_input_monitor_unittest.cc',
         'host/log_to_server_unittest.cc',
         'host/pairing_registry_delegate_linux_unittest.cc',
+        'host/pairing_registry_delegate_win_unittest.cc',
         'host/pin_hash_unittest.cc',
         'host/policy_hack/fake_policy_watcher.cc',
         'host/policy_hack/fake_policy_watcher.h',
@@ -2735,19 +2880,19 @@
           # valgrind and test errors.
           #
           # Javascript unittests are disabled on Windows because they add a
-	  # dependency on 'common_constants' which (only on Windows) requires
-	  # additional dependencies:
+          # dependency on 'common_constants' which (only on Windows) requires
+          # additional dependencies:
           #   '../content/content.gyp:content_common',
           #   'installer_util',
-	  # These targets are defined in .gypi files that would need to be
-	  # included here:
+          # These targets are defined in .gypi files that would need to be
+          # included here:
           #   '../chrome/chrome_common.gypi',
           #   '../chrome/chrome_installer.gypi',
           #   '../chrome/chrome_installer_util.gypi',
-	  # But we can't do that because ninja will complain about multiple
-	  # target definitions.
-	  # TODO(garykac): Move installer_util into a proper .gyp file so that
-	  # it can be included in multiple .gyp files.
+          # But we can't do that because ninja will complain about multiple
+          # target definitions.
+          # TODO(garykac): Move installer_util into a proper .gyp file so that
+          # it can be included in multiple .gyp files.
           'includes': [
             '../chrome/js_unittest_rules.gypi',
           ],

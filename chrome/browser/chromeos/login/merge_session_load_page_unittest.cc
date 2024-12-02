@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/run_loop.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/login/merge_session_load_page.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -81,7 +81,7 @@ class MergeSessionLoadPageTest : public ChromeRenderViewHostTestHarness {
   }
 
  private:
-  ScopedStubCrosEnabler stub_cros_enabler_;
+  ScopedStubNetworkLibraryEnabler stub_network_library_enabler_;
   ScopedTestDeviceSettingsService test_device_settings_service_;
   ScopedTestCrosSettings test_cros_settings_;
   scoped_ptr<chromeos::ScopedTestUserManager> test_user_manager_;
@@ -124,7 +124,7 @@ TEST_F(MergeSessionLoadPageTest, MergeSessionPageShown) {
   base::RunLoop().RunUntilIdle();
 
   // The URL remains to be URL2.
-  EXPECT_EQ(kURL2, web_contents()->GetURL().spec());
+  EXPECT_EQ(kURL2, web_contents()->GetVisibleURL().spec());
 
   // Commit navigation and the interstitial page is gone.
   Navigate(kURL2, 2);

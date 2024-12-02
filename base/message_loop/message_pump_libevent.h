@@ -11,7 +11,7 @@
 #include "base/message_loop/message_pump.h"
 #include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
-#include "base/time.h"
+#include "base/time/time.h"
 
 // Declare structs we need from libevent.h rather than including it
 struct event_base;
@@ -98,6 +98,7 @@ class BASE_EXPORT MessagePumpLibevent : public MessagePump {
   };
 
   MessagePumpLibevent();
+  virtual ~MessagePumpLibevent();
 
   // Have the current thread's message loop watch for a a situation in which
   // reading/writing to the FD can be performed without blocking.
@@ -125,9 +126,6 @@ class BASE_EXPORT MessagePumpLibevent : public MessagePump {
   virtual void Quit() OVERRIDE;
   virtual void ScheduleWork() OVERRIDE;
   virtual void ScheduleDelayedWork(const TimeTicks& delayed_work_time) OVERRIDE;
-
- protected:
-  virtual ~MessagePumpLibevent();
 
  private:
   friend class MessagePumpLibeventTest;

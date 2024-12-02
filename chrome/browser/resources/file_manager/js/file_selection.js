@@ -264,7 +264,8 @@ FileSelectionHandler.prototype.updateOkButton = function() {
   var selectable;
   var dialogType = this.fileManager_.dialogType;
 
-  if (dialogType == DialogType.SELECT_FOLDER) {
+  if (dialogType == DialogType.SELECT_FOLDER ||
+      dialogType == DialogType.SELECT_UPLOAD_FOLDER) {
     // In SELECT_FOLDER mode, we allow to select current directory
     // when nothing is selected.
     selectable = this.selection.directoryCount <= 1 &&
@@ -325,8 +326,14 @@ FileSelectionHandler.prototype.setPreviewPanelMustBeHidden = function(hidden) {
 FileSelectionHandler.prototype.updatePreviewPanelVisibility_ = function() {
   var panel = this.previewPanel_;
   var state = panel.getAttribute('visibility');
-  var mustBeVisible = (this.selection.totalCount > 0 ||
-      !PathUtil.isRootPath(this.fileManager_.getCurrentDirectory()));
+  var mustBeVisible =
+       // If one or more files are selected, show the file info.
+      (this.selection.totalCount > 0 ||
+       // If the directory is not root dir, show the directory info.
+       !PathUtil.isRootPath(this.fileManager_.getCurrentDirectory()) ||
+       // On Open File dialog, the preview panel is always shown.
+       this.fileManager_.dialogType == DialogType.SELECT_OPEN_FILE ||
+       this.fileManager_.dialogType == DialogType.SELECT_OPEN_MULTI_FILE);
 
   var stopHidingAndShow = function() {
     clearTimeout(this.hidingTimeout_);
@@ -375,7 +382,7 @@ FileSelectionHandler.prototype.updatePreviewPanelVisibility_ = function() {
  * @private
  */
 FileSelectionHandler.prototype.isPreviewPanelVisibile_ = function() {
-  return this.previewPanel_.getAttribute('visibility') != 'hidden';
+  return this.previewPanel_.getAttribute('visibility') == 'visible';
 };
 
 /**
@@ -512,9 +519,10 @@ FileSelectionHandler.prototype.updateFileSelectionAsync = function(selection) {
   if (selection.totalCount == 1) {
     // Shows the breadcrumb list when a file is selected.
     updateTarget = selection.entries[0].fullPath;
-  } else if (selection.totalCount == 0 && !PathUtil.isRootPath(path)) {
-    // Shows the breadcrumb list when no file is selected and the current
-    // directory is non-root path.
+  } else if (selection.totalCount == 0 &&
+             this.isPreviewPanelVisibile_()) {
+    // Shows the breadcrumb list when no file is selected and the preview
+    // panel is visible.
     updateTarget = path;
   }
   this.updatePreviewPanelBreadcrumbs_(updateTarget);
@@ -526,11 +534,8 @@ FileSelectionHandler.prototype.updateFileSelectionAsync = function(selection) {
   }
 
   // Sync the commands availability.
-  if (selection.totalCount != 0) {
-    var commands = this.fileManager_.dialogDom_.querySelectorAll('command');
-    for (var i = 0; i < commands.length; i++)
-      commands[i].canExecuteChange();
-  }
+  if (selection.totalCount != 0)
+    this.fileManager_.updateCommands();
 
   // Update context menu.
   this.fileManager_.updateContextMenuActionItems(null, false);
@@ -643,7 +648,7 @@ FileSelectionHandler.prototype.renderThumbnail_ = function(entry, callback) {
                                 entry,
                                 this.fileManager_.metadataCache_,
                                 ThumbnailLoader.FillMode.FILL,
-                                ThumbnailLoader.OptimizationMode.NEVER_DISCARD,
+                                FileGrid.ThumbnailQuality.LOW,
                                 callback);
   return thumbnail;
 };
@@ -696,7 +701,7 @@ FileSelectionHandler.prototype.decorateThumbnailZoom_ = function(
     largeImageBox, img, transform) {
   var width = img.width;
   var height = img.height;
-  var THUMBNAIL_SIZE = 45;
+  var THUMBNAIL_SIZE = 35;
   if (width < THUMBNAIL_SIZE * 2 && height < THUMBNAIL_SIZE * 2)
     return false;
 

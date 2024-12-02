@@ -11,9 +11,9 @@
 #include "base/compiler_specific.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_service.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "components/browser_context_keyed_service/browser_context_dependency_manager.h"
 #include "components/user_prefs/pref_registry_syncable.h"
@@ -24,12 +24,7 @@
 #include "ui/base/gestures/gesture_configuration.h"
 
 #if defined(USE_ASH)
-#include "ash/wm/workspace/workspace_cycler_configuration.h"
 #include "chrome/browser/ui/immersive_fullscreen_configuration.h"
-#endif  // USE_ASH
-
-#if defined(USE_ASH)
-using ash::WorkspaceCyclerConfiguration;
 #endif  // USE_ASH
 
 using ui::GestureConfiguration;
@@ -55,7 +50,9 @@ const std::vector<OverscrollPref>& GetOverscrollPrefs() {
       { prefs::kOverscrollVerticalThresholdComplete,
         OVERSCROLL_CONFIG_VERT_THRESHOLD_COMPLETE },
       { prefs::kOverscrollMinimumThresholdStart,
-        OVERSCROLL_CONFIG_MIN_THRESHOLD_START },
+        OVERSCROLL_CONFIG_HORIZ_THRESHOLD_START },
+      { prefs::kOverscrollVerticalThresholdStart,
+        OVERSCROLL_CONFIG_VERT_THRESHOLD_START },
       { prefs::kOverscrollHorizontalResistThreshold,
         OVERSCROLL_CONFIG_HORIZ_RESIST_AFTER },
       { prefs::kOverscrollVerticalResistThreshold,
@@ -72,50 +69,6 @@ const char* kImmersiveModePrefs[] = {
   prefs::kImmersiveModeRevealDelayMs,
   prefs::kImmersiveModeRevealXThresholdPixels,
 };
-
-struct WorkspaceCyclerPref {
-  const char* pref_name;
-  WorkspaceCyclerConfiguration::Property property;
-};
-
-const std::vector<WorkspaceCyclerPref>& GetWorkspaceCyclerPrefs() {
-  CR_DEFINE_STATIC_LOCAL(std::vector<WorkspaceCyclerPref>, cycler_prefs, ());
-  if (cycler_prefs.empty()) {
-    const WorkspaceCyclerPref kCyclerPrefs[] = {
-      { prefs::kWorkspaceCyclerShallowerThanSelectedYOffsets,
-        WorkspaceCyclerConfiguration::SHALLOWER_THAN_SELECTED_Y_OFFSETS },
-      { prefs::kWorkspaceCyclerDeeperThanSelectedYOffsets,
-        WorkspaceCyclerConfiguration::DEEPER_THAN_SELECTED_Y_OFFSETS },
-      { prefs::kWorkspaceCyclerSelectedYOffset,
-        WorkspaceCyclerConfiguration::SELECTED_Y_OFFSET },
-      { prefs::kWorkspaceCyclerSelectedScale,
-        WorkspaceCyclerConfiguration::SELECTED_SCALE },
-      { prefs::kWorkspaceCyclerMinScale,
-        WorkspaceCyclerConfiguration::MIN_SCALE },
-      { prefs::kWorkspaceCyclerMaxScale,
-        WorkspaceCyclerConfiguration::MAX_SCALE },
-      { prefs::kWorkspaceCyclerMinBrightness,
-        WorkspaceCyclerConfiguration::MIN_BRIGHTNESS },
-      { prefs::kWorkspaceCyclerBackgroundOpacity,
-        WorkspaceCyclerConfiguration::BACKGROUND_OPACITY },
-      { prefs::kWorkspaceCyclerDesktopWorkspaceBrightness,
-        WorkspaceCyclerConfiguration::DESKTOP_WORKSPACE_BRIGHTNESS },
-      { prefs::kWorkspaceCyclerDistanceToInitiateCycling,
-        WorkspaceCyclerConfiguration::DISTANCE_TO_INITIATE_CYCLING },
-      { prefs::kWorkspaceCyclerScrollDistanceToCycleToNextWorkspace,
-        WorkspaceCyclerConfiguration::
-            SCROLL_DISTANCE_TO_CYCLE_TO_NEXT_WORKSPACE },
-      { prefs::kWorkspaceCyclerCyclerStepAnimationDurationRatio,
-        WorkspaceCyclerConfiguration::CYCLER_STEP_ANIMATION_DURATION_RATIO },
-      { prefs::kWorkspaceCyclerStartCyclerAnimationDuration,
-        WorkspaceCyclerConfiguration::START_CYCLER_ANIMATION_DURATION },
-      { prefs::kWorkspaceCyclerStopCyclerAnimationDuration,
-        WorkspaceCyclerConfiguration::STOP_CYCLER_ANIMATION_DURATION },
-    };
-    cycler_prefs.assign(kCyclerPrefs, kCyclerPrefs + arraysize(kCyclerPrefs));
-  }
-  return cycler_prefs;
-}
 #endif  // USE_ASH
 
 // This class manages gesture configuration preferences.
@@ -142,7 +95,6 @@ class GesturePrefsObserver : public BrowserContextKeyedService {
   void UpdateOverscrollPrefs();
 
   void UpdateImmersiveModePrefs();
-  void UpdateWorkspaceCyclerPrefs();
 
   PrefChangeRegistrar registrar_;
   PrefService* prefs_;
@@ -199,6 +151,31 @@ GesturePrefsObserver::GesturePrefsObserver(PrefService* prefs)
   // Clear for migration.
   prefs->ClearPref(kTouchScreenFlingAccelerationAdjustment);
 
+  // TODO(mohsen): Remove following code in M32. By then, gesture prefs will
+  // have been cleared for majority of the users: crbug.com/269292.
+  // Do a one-time wipe of all gesture preferences.
+  if (!prefs->GetBoolean(prefs::kGestureConfigIsTrustworthy)) {
+    for (size_t i = 0; i < arraysize(kPrefsToObserve); ++i)
+      prefs->ClearPref(kPrefsToObserve[i]);
+
+    const std::vector<OverscrollPref>& overscroll_prefs = GetOverscrollPrefs();
+    for (size_t i = 0; i < overscroll_prefs.size(); ++i)
+      prefs->ClearPref(overscroll_prefs[i].pref_name);
+
+    for (size_t i = 0; i < arraysize(kFlingTouchpadPrefs); ++i)
+      prefs->ClearPref(kFlingTouchpadPrefs[i]);
+
+    for (size_t i = 0; i < arraysize(kFlingTouchscreenPrefs); ++i)
+      prefs->ClearPref(kFlingTouchscreenPrefs[i]);
+
+#if defined(USE_ASH)
+    for (size_t i = 0; i < arraysize(kImmersiveModePrefs); ++i)
+      prefs->ClearPref(kImmersiveModePrefs[i]);
+#endif  // USE_ASH
+
+    prefs->SetBoolean(prefs::kGestureConfigIsTrustworthy, true);
+  }
+
   registrar_.Init(prefs);
   registrar_.RemoveAll();
   base::Closure callback = base::Bind(&GesturePrefsObserver::Update,
@@ -222,11 +199,6 @@ GesturePrefsObserver::GesturePrefsObserver(PrefService* prefs)
 #if defined(USE_ASH)
   for (size_t i = 0; i < arraysize(kImmersiveModePrefs); ++i)
     registrar_.Add(kImmersiveModePrefs[i], callback);
-
-  const std::vector<WorkspaceCyclerPref>& cycler_prefs =
-      GetWorkspaceCyclerPrefs();
-  for (size_t i = 0; i < cycler_prefs.size(); ++i)
-    registrar_.Add(cycler_prefs[i].pref_name, callback);
 #endif  // USE_ASH
   Update();
 }
@@ -316,7 +288,6 @@ void GesturePrefsObserver::Update() {
 
   UpdateOverscrollPrefs();
   UpdateImmersiveModePrefs();
-  UpdateWorkspaceCyclerPrefs();
 }
 
 void GesturePrefsObserver::UpdateOverscrollPrefs() {
@@ -334,24 +305,6 @@ void GesturePrefsObserver::UpdateImmersiveModePrefs() {
   ImmersiveFullscreenConfiguration::
       set_immersive_mode_reveal_x_threshold_pixels(
           prefs_->GetInteger(prefs::kImmersiveModeRevealXThresholdPixels));
-#endif  // USE_ASH
-}
-
-void GesturePrefsObserver::UpdateWorkspaceCyclerPrefs() {
-#if defined(USE_ASH)
-  const std::vector<WorkspaceCyclerPref>& cycler_prefs =
-      GetWorkspaceCyclerPrefs();
-  for (size_t i = 0; i < cycler_prefs.size(); ++i) {
-    WorkspaceCyclerConfiguration::Property property =
-        cycler_prefs[i].property;
-    if (WorkspaceCyclerConfiguration::IsListProperty(property)) {
-      WorkspaceCyclerConfiguration::SetListValue(property,
-          *prefs_->GetList(cycler_prefs[i].pref_name));
-    } else {
-      WorkspaceCyclerConfiguration::SetDouble(property,
-          prefs_->GetDouble(cycler_prefs[i].pref_name));
-    }
-  }
 #endif  // USE_ASH
 }
 
@@ -429,30 +382,7 @@ void GesturePrefsObserverFactoryAura::RegisterImmersiveModePrefs(
 #endif  // USE_ASH
 }
 
-void GesturePrefsObserverFactoryAura::RegisterWorkspaceCyclerPrefs(
-    user_prefs::PrefRegistrySyncable* registry) {
-#if defined(USE_ASH)
-  const std::vector<WorkspaceCyclerPref>& cycler_prefs =
-      GetWorkspaceCyclerPrefs();
-  for (size_t i = 0; i < cycler_prefs.size(); ++i) {
-    WorkspaceCyclerConfiguration::Property property =
-        cycler_prefs[i].property;
-    if (WorkspaceCyclerConfiguration::IsListProperty(property)) {
-      registry->RegisterListPref(
-          cycler_prefs[i].pref_name,
-          WorkspaceCyclerConfiguration::GetListValue(property).DeepCopy(),
-          user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-    } else {
-      registry->RegisterDoublePref(
-          cycler_prefs[i].pref_name,
-          WorkspaceCyclerConfiguration::GetDouble(property),
-          user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-    }
-  }
-#endif  // USE_ASH
-}
-
-void GesturePrefsObserverFactoryAura::RegisterUserPrefs(
+void GesturePrefsObserverFactoryAura::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterDoublePref(
       prefs::kFlingAccelerationCurveCoefficient0,
@@ -576,7 +506,12 @@ void GesturePrefsObserverFactoryAura::RegisterUserPrefs(
   RegisterOverscrollPrefs(registry);
   RegisterFlingCurveParameters(registry);
   RegisterImmersiveModePrefs(registry);
-  RegisterWorkspaceCyclerPrefs(registry);
+
+  // Register pref for a one-time wipe of all gesture preferences.
+  registry->RegisterBooleanPref(
+      prefs::kGestureConfigIsTrustworthy,
+      false,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 bool

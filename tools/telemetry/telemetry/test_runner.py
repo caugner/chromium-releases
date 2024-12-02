@@ -17,6 +17,7 @@ import sys
 from telemetry import test
 from telemetry.core import browser_options
 from telemetry.core import discover
+from telemetry.core import util
 
 
 class Command(object):
@@ -47,10 +48,10 @@ class Help(Command):
   """Display help information"""
 
   def Run(self, options, args):
-    print >> sys.stderr, ('usage: %s <command> [<args>]' % _GetScriptName())
-    print >> sys.stderr, 'Available commands are:'
+    print ('usage: %s <command> [<args>]' % _GetScriptName())
+    print 'Available commands are:'
     for command in COMMANDS:
-      print >> sys.stderr, '  %-10s %s' % (command.name, command.description)
+      print '  %-10s %s' % (command.name, command.description)
     return 0
 
 
@@ -70,12 +71,15 @@ class List(Command):
               'enabled': test_class.enabled,
               'options': test_class.options,
             })
-      print >> sys.stderr, json.dumps(test_list)
+      print json.dumps(test_list)
     else:
-      print >> sys.stderr, 'Available tests are:'
+      print 'Available tests are:'
       for test_name, test_class in sorted(_GetTests().items()):
-        print >> sys.stderr, '  %-20s %s' % (test_name,
-            test_class.__doc__.splitlines()[0])
+        if test_class.__doc__:
+          print '  %-20s %s' % (test_name,
+              test_class.__doc__.splitlines()[0])
+        else:
+          print '  %-20s' % test_name
     return 0
 
 
@@ -114,18 +118,10 @@ def _GetScriptName():
   return os.path.basename(sys.argv[0])
 
 
-def _GetBaseDir():
-  main_module = sys.modules['__main__']
-  if hasattr(main_module, '__file__'):
-    return os.path.dirname(main_module.__file__)
-  else:
-    return os.getcwd()
-
-
 def _GetTests():
   # Lazy load and cache results.
   if not hasattr(_GetTests, 'tests'):
-    base_dir = _GetBaseDir()
+    base_dir = util.GetBaseDir()
     _GetTests.tests = discover.DiscoverClasses(base_dir, base_dir, test.Test,
                                                index_by_class_name=True)
   return _GetTests.tests

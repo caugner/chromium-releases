@@ -15,11 +15,11 @@
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -63,7 +63,7 @@
 using autofill::AutofillChange;
 using autofill::AutofillChangeList;
 using autofill::AutofillEntry;
-using autofill::AutofillFieldType;
+using autofill::ServerFieldType;
 using autofill::AutofillKey;
 using autofill::AutofillProfile;
 using autofill::AutofillProfileChange;
@@ -504,7 +504,6 @@ class ProfileSyncServiceAutofillTest
   virtual void SetUp() OVERRIDE {
     AbstractProfileSyncServiceTest::SetUp();
     profile_.reset(new ProfileMock());
-    profile_->CreateRequestContext();
     web_database_.reset(new WebDatabaseFake(&autofill_table_));
     MockWebDataServiceWrapper* wrapper =
         static_cast<MockWebDataServiceWrapper*>(
@@ -542,7 +541,6 @@ class ProfileSyncServiceAutofillTest
     web_data_service_->ShutdownOnUIThread();
     web_data_service_->ShutdownSyncableService();
     web_data_service_ = NULL;
-    profile_->ResetRequestContext();
     // To prevent a leak, fully release TestURLRequestContext to ensure its
     // destruction on the IO message loop.
     profile_.reset();
@@ -565,7 +563,7 @@ class ProfileSyncServiceAutofillTest
     AbstractAutofillFactory* factory = GetFactory(type);
     SigninManagerBase* signin =
         SigninManagerFactory::GetForProfile(profile_.get());
-    signin->SetAuthenticatedUsername("test_user");
+    signin->SetAuthenticatedUsername("test_user@gmail.com");
     sync_service_ = static_cast<TestProfileSyncService*>(
         ProfileSyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
             profile_.get(), &TestProfileSyncService::BuildAutoStartAsyncInit));
@@ -925,7 +923,7 @@ namespace {
 // of the field in |profile2|.
 bool IncludesField(const AutofillProfile& profile1,
                    const AutofillProfile& profile2,
-                   AutofillFieldType field_type) {
+                   ServerFieldType field_type) {
   std::vector<string16> values1;
   profile1.GetRawMultiInfo(field_type, &values1);
   std::vector<string16> values2;

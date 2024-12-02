@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_ZOOM_BUBBLE_VIEW_H_
 
 #include "base/basictypes.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -114,10 +114,6 @@ class ZoomBubbleView : public views::BubbleDelegateView,
   // |web_contents_|.
   // Not owned.
   ImmersiveModeController* immersive_mode_controller_;
-
-  // Keeps the top-of-window views revealed (but does not initiate a reveal)
-  // when the bubble is visible in immersive fullscreen.
-  scoped_ptr<ImmersiveRevealedLock> immersive_reveal_lock_;
 
   // Used to register for fullscreen change notifications.
   content::NotificationRegistrar registrar_;

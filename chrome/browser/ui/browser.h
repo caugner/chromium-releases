@@ -26,7 +26,6 @@
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/chrome_web_modal_dialog_manager_delegate.h"
 #include "chrome/browser/ui/host_desktop.h"
-#include "chrome/browser/ui/search/search_model_observer.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper_delegate.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
@@ -61,11 +60,11 @@ class SearchModel;
 class StatusBubble;
 class TabStripModel;
 class TabStripModelDelegate;
-struct SearchMode;
 struct WebApplicationInfo;
 
 namespace chrome {
 class BrowserCommandController;
+class FastUnloadController;
 class UnloadController;
 }
 
@@ -104,8 +103,7 @@ class Browser : public TabStripModelObserver,
                 public ZoomObserver,
                 public content::PageNavigator,
                 public content::NotificationObserver,
-                public ui::SelectFileDialog::Listener,
-                public SearchModelObserver {
+                public ui::SelectFileDialog::Listener {
  public:
   // SessionService::WindowType mirrors these values.  If you add to this
   // enum, look at SessionService::WindowType to see if it needs to be
@@ -293,6 +291,13 @@ class Browser : public TabStripModelObserver,
   // Gives beforeunload handlers the chance to cancel the close.
   bool ShouldCloseWindow();
 
+  // Figure out if there are tabs that have beforeunload handlers.
+  // It starts beforeunload/unload processing as a side-effect.
+  bool TabsNeedBeforeUnloadFired();
+
+  // Returns true if all tabs' beforeunload/unload events have fired.
+  bool HasCompletedUnloadProcessing() const;
+
   bool IsAttemptingToCloseBrowser() const;
 
   // Invoked when the window containing us is closing. Performs the necessary
@@ -315,7 +320,7 @@ class Browser : public TabStripModelObserver,
   DownloadClosePreventionType OkToCloseWithInProgressDownloads(
       int* num_downloads_blocking) const;
 
-  // Tab adding/showing functions /////////////////////////////////////////////
+  // External state change handling ////////////////////////////////////////////
 
   // Invoked when the fullscreen state of the window changes.
   // BrowserWindow::EnterFullscreen invokes this after the window has become
@@ -324,6 +329,11 @@ class Browser : public TabStripModelObserver,
 
   // Invoked when visible SSL state (as defined by SSLStatus) changes.
   void VisibleSSLStateChanged(content::WebContents* web_contents);
+
+  // Invoked when the |web_contents| no longer supports Instant. Refreshes the
+  // omnibox so it no longer shows search terms.
+  void OnWebContentsInstantSupportDisabled(
+      const content::WebContents* web_contents);
 
   // Assorted browser commands ////////////////////////////////////////////////
 
@@ -429,9 +439,7 @@ class Browser : public TabStripModelObserver,
   virtual void HandleKeyboardEvent(
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
-
-  // Figure out if there are tabs that have beforeunload handlers.
-  bool TabsNeedBeforeUnloadFired();
+  virtual void OverscrollUpdate(int delta_y) OVERRIDE;
 
   bool is_type_tabbed() const { return type_ == TYPE_TABBED; }
   bool is_type_popup() const { return type_ == TYPE_POPUP; }
@@ -563,14 +571,17 @@ class Browser : public TabStripModelObserver,
       int route_id,
       WindowContainerType window_container_type,
       const string16& frame_name,
-      const GURL& target_url) OVERRIDE;
+      const GURL& target_url,
+      const content::Referrer& referrer,
+      WindowOpenDisposition disposition,
+      const WebKit::WebWindowFeatures& features,
+      bool user_action,
+      bool opener_suppressed) OVERRIDE;
   virtual void WebContentsCreated(content::WebContents* source_contents,
                                   int64 source_frame_id,
                                   const string16& frame_name,
                                   const GURL& target_url,
                                   content::WebContents* new_contents) OVERRIDE;
-  virtual void ContentRestrictionsChanged(
-      content::WebContents* source) OVERRIDE;
   virtual void RendererUnresponsive(content::WebContents* source) OVERRIDE;
   virtual void RendererResponsive(content::WebContents* source) OVERRIDE;
   virtual void WorkerCrashed(content::WebContents* source) OVERRIDE;
@@ -666,10 +677,6 @@ class Browser : public TabStripModelObserver,
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
-
-  // Overridden from SearchModelObserver:
-  virtual void ModelChanged(const SearchModel::State& old_state,
-                            const SearchModel::State& new_state) OVERRIDE;
 
   // Command and state updating ///////////////////////////////////////////////
 
@@ -865,6 +872,7 @@ class Browser : public TabStripModelObserver,
   const chrome::HostDesktopType host_desktop_type_;
 
   scoped_ptr<chrome::UnloadController> unload_controller_;
+  scoped_ptr<chrome::FastUnloadController> fast_unload_controller_;
 
   // The following factory is used to close the frame at a later time.
   base::WeakPtrFactory<Browser> weak_factory_;

@@ -4,8 +4,7 @@
 
 #include "chrome/browser/chromeos/system_logs/network_event_log_source.h"
 
-#include "base/message_loop.h"
-#include "chrome/browser/chromeos/system_logs/system_logs_fetcher.h"
+#include "base/message_loop/message_loop.h"
 #include "chromeos/network/network_event_log.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -18,7 +17,7 @@ void NetworkEventLogSource::Fetch(const SysLogsSourceCallback& callback) {
   DCHECK(!callback.is_null());
 
   scoped_ptr<SystemLogsResponse> response(new SystemLogsResponse);
-  const int kMaxNetworkEventsForAboutSystem = 200;
+  const int kMaxNetworkEventsForAboutSystem = 400;
   (*response)[kNetworkEventLogEntry] = network_event_log::GetAsString(
       network_event_log::OLDEST_FIRST,
       "time,file,desc",

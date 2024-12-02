@@ -17,7 +17,7 @@
 #include "base/memory/weak_ptr.h"
 #include "cc/resources/texture_mailbox.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
-#include "content/browser/renderer_host/image_transport_factory.h"
+#include "content/browser/aura/image_transport_factory.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/content_export.h"
 #include "content/common/gpu/client/gl_helper.h"
@@ -40,6 +40,7 @@ class WindowTracker;
 }
 
 namespace cc {
+class CopyOutputResult;
 class DelegatedFrameData;
 }
 
@@ -55,6 +56,7 @@ class Texture;
 }
 
 namespace content {
+class MemoryHolder;
 class RenderWidgetHostImpl;
 class RenderWidgetHostView;
 
@@ -167,13 +169,14 @@ class RenderWidgetHostViewAura
   virtual void WasHidden() OVERRIDE;
   virtual void MovePluginWindows(
       const gfx::Vector2d& scroll_offset,
-      const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
+      const std::vector<WebPluginGeometry>& moves) OVERRIDE;
   virtual void Focus() OVERRIDE;
   virtual void Blur() OVERRIDE;
   virtual void UpdateCursor(const WebCursor& cursor) OVERRIDE;
   virtual void SetIsLoading(bool is_loading) OVERRIDE;
   virtual void TextInputTypeChanged(ui::TextInputType type,
-                                    bool can_compose_inline) OVERRIDE;
+                                    bool can_compose_inline,
+                                    ui::TextInputMode input_mode) OVERRIDE;
   virtual void ImeCancelComposition() OVERRIDE;
   virtual void ImeCompositionRangeChanged(
       const ui::Range& range,
@@ -183,8 +186,8 @@ class RenderWidgetHostViewAura
       const gfx::Vector2d& scroll_delta,
       const std::vector<gfx::Rect>& copy_rects,
       const ui::LatencyInfo& latency_info) OVERRIDE;
-  virtual void RenderViewGone(base::TerminationStatus status,
-                              int error_code) OVERRIDE;
+  virtual void RenderProcessGone(base::TerminationStatus status,
+                                 int error_code) OVERRIDE;
   virtual void Destroy() OVERRIDE;
   virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE;
   virtual void SelectionChanged(const string16& text,
@@ -219,7 +222,8 @@ class RenderWidgetHostViewAura
   virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) OVERRIDE;
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE;
   virtual gfx::Rect GetBoundsInRootWindow() OVERRIDE;
-  virtual void GestureEventAck(int gesture_event_type) OVERRIDE;
+  virtual void GestureEventAck(int gesture_event_type,
+                               InputEventAckState ack_result) OVERRIDE;
   virtual void ProcessAckedTouchEvent(
       const TouchEventWithLatencyInfo& touch,
       InputEventAckState ack_result) OVERRIDE;
@@ -239,6 +243,7 @@ class RenderWidgetHostViewAura
   virtual bool LockMouse() OVERRIDE;
   virtual void UnlockMouse() OVERRIDE;
   virtual void OnSwapCompositorFrame(
+      uint32 output_surface_id,
       scoped_ptr<cc::CompositorFrame> frame) OVERRIDE;
 #if defined(OS_WIN)
   virtual void SetParentNativeViewAccessible(
@@ -254,6 +259,7 @@ class RenderWidgetHostViewAura
   virtual void InsertChar(char16 ch, int flags) OVERRIDE;
   virtual gfx::NativeWindow GetAttachedWindow() const OVERRIDE;
   virtual ui::TextInputType GetTextInputType() const OVERRIDE;
+  virtual ui::TextInputMode GetTextInputMode() const OVERRIDE;
   virtual bool CanComposeInline() const OVERRIDE;
   virtual gfx::Rect GetCaretBounds() OVERRIDE;
   virtual bool GetCompositionCharacterBounds(uint32 index,
@@ -322,6 +328,8 @@ class RenderWidgetHostViewAura
   // Overridden from aura::RootWindowObserver:
   virtual void OnRootWindowHostMoved(const aura::RootWindow* root,
                                      const gfx::Point& new_origin) OVERRIDE;
+
+  bool CanCopyToBitmap() const;
 
 #if defined(OS_WIN)
   // Sets the cutout rects from constrained windows. These are rectangles that
@@ -433,14 +441,27 @@ class RenderWidgetHostViewAura
   // after it was released as the frontbuffer.
   void SetSurfaceNotInUseByCompositor(scoped_refptr<ui::Texture>);
 
-  // Called after async thumbnailer task completes.  Used to call
-  // AdjustSurfaceProtection.
-  static void CopyFromCompositingSurfaceFinished(
-      const SkBitmap& bitmap,
+  // Called after async thumbnailer task completes.  Scales and crops the result
+  // of the copy.
+  static void CopyFromCompositingSurfaceHasResult(
+      const gfx::Size& dst_size_in_pixel,
       const base::Callback<void(bool, const SkBitmap&)>& callback,
-      bool result);
+      scoped_ptr<cc::CopyOutputResult> result);
+  static void PrepareTextureCopyOutputResult(
+      const gfx::Size& dst_size_in_pixel,
+      const base::Callback<void(bool, const SkBitmap&)>& callback,
+      scoped_ptr<cc::CopyOutputResult> result);
+  static void PrepareBitmapCopyOutputResult(
+      const gfx::Size& dst_size_in_pixel,
+      const base::Callback<void(bool, const SkBitmap&)>& callback,
+      scoped_ptr<cc::CopyOutputResult> result);
+  static void CopyFromCompositingSurfaceHasResultForVideo(
+      base::WeakPtr<RenderWidgetHostViewAura> rwhva,
+      scoped_refptr<media::VideoFrame> video_frame,
+      const base::Callback<void(bool)>& callback,
+      scoped_ptr<cc::CopyOutputResult> result);
 
-  ui::Compositor* GetCompositor();
+  ui::Compositor* GetCompositor() const;
 
   // Detaches |this| from the input method object.
   void DetachFromInputMethod();
@@ -477,16 +498,21 @@ class RenderWidgetHostViewAura
       const scoped_refptr<ui::Texture>& texture_to_return);
 
   void SwapDelegatedFrame(
+      uint32 output_surface_id,
       scoped_ptr<cc::DelegatedFrameData> frame_data,
       float frame_device_scale_factor,
       const ui::LatencyInfo& latency_info);
-  void SendDelegatedFrameAck();
+  void SendDelegatedFrameAck(uint32 output_surface_id);
 
   void SwapSoftwareFrame(
+      uint32 output_surface_id,
       scoped_ptr<cc::SoftwareFrameData> frame_data,
       float frame_device_scale_factor,
       const ui::LatencyInfo& latency_info);
-  void SendSoftwareFrameAck(unsigned software_frame_id);
+  void SendSoftwareFrameAck(uint32 output_surface_id,
+                            unsigned software_frame_id);
+
+  void DidReceiveFrameFromRenderer();
 
   BrowserAccessibilityManager* GetOrCreateBrowserAccessibilityManager();
 
@@ -559,8 +585,8 @@ class RenderWidgetHostViewAura
   // The current frontbuffer texture.
   scoped_refptr<ui::Texture> current_surface_;
 
-  // The current software frontbuffer.
-  cc::TextureMailbox current_software_frame_;
+  // This holds the current software framebuffer.
+  scoped_refptr<MemoryHolder> framebuffer_holder_;
 
   // The damage in the previously presented buffer.
   SkRegion previous_damage_;
@@ -653,7 +679,7 @@ class RenderWidgetHostViewAura
   std::vector<gfx::Rect> transient_rects_;
   std::vector<gfx::Rect> constrained_rects_;
 
-  typedef std::map<HWND, webkit::npapi::WebPluginGeometry> PluginWindowMoves;
+  typedef std::map<HWND, WebPluginGeometry> PluginWindowMoves;
   // Contains information about each windowed plugin's clip and cutout rects (
   // from the renderer). This is needed because when the transient windoiws
   // over this view changes, we need this information in order to create a new

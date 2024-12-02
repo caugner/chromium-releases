@@ -10,8 +10,9 @@
 
 #include "apps/app_lifetime_monitor.h"
 #include "apps/app_shim/app_shim_handler_mac.h"
+#include "apps/shell_window_registry.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/extensions/shell_window_registry.h"
+#include "base/memory/weak_ptr.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -43,8 +44,10 @@ class ExtensionAppShimHandler : public AppShimHandler,
 
     virtual bool ProfileExistsForPath(const base::FilePath& path);
     virtual Profile* ProfileForPath(const base::FilePath& path);
+    virtual void LoadProfileAsync(const base::FilePath& path,
+                                  base::Callback<void(Profile*)> callback);
 
-    virtual extensions::ShellWindowRegistry::ShellWindowList GetWindows(
+    virtual ShellWindowRegistry::ShellWindowList GetWindows(
         Profile* profile, const std::string& extension_id);
 
     virtual const extensions::Extension* GetAppExtension(
@@ -54,15 +57,21 @@ class ExtensionAppShimHandler : public AppShimHandler,
     virtual void LaunchShim(Profile* profile,
                             const extensions::Extension* extension);
 
+    virtual void MaybeTerminate();
   };
 
   ExtensionAppShimHandler();
   virtual ~ExtensionAppShimHandler();
 
+  AppShimHandler::Host* FindHost(Profile* profile, const std::string& app_id);
+
+  static void QuitAppForWindow(ShellWindow* shell_window);
+
   // AppShimHandler overrides:
-  virtual bool OnShimLaunch(Host* host, AppShimLaunchType launch_type) OVERRIDE;
+  virtual void OnShimLaunch(Host* host, AppShimLaunchType launch_type) OVERRIDE;
   virtual void OnShimClose(Host* host) OVERRIDE;
-  virtual void OnShimFocus(Host* host) OVERRIDE;
+  virtual void OnShimFocus(Host* host, AppShimFocusType focus_type) OVERRIDE;
+  virtual void OnShimSetHidden(Host* host, bool hidden) OVERRIDE;
   virtual void OnShimQuit(Host* host) OVERRIDE;
 
   // AppLifetimeMonitor::Observer overrides:
@@ -74,6 +83,11 @@ class ExtensionAppShimHandler : public AppShimHandler,
   virtual void OnAppStop(Profile* profile, const std::string& app_id) OVERRIDE;
   virtual void OnChromeTerminating() OVERRIDE;
 
+  // content::NotificationObserver overrides:
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
  protected:
   typedef std::map<std::pair<Profile*, std::string>, AppShimHandler::Host*>
       HostMap;
@@ -84,19 +98,23 @@ class ExtensionAppShimHandler : public AppShimHandler,
   content::NotificationRegistrar& registrar() { return registrar_; }
 
  private:
-  // Listen to the NOTIFICATION_EXTENSION_HOST_DESTROYED message to detect when
-  // an app closes. When that happens, call OnAppClosed on the relevant
-  // AppShimHandler::Host which causes the app shim process to quit.
-  // The host will call OnShimClose on this.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  // This is passed to Delegate::LoadProfileAsync for shim-initiated launches
+  // where the profile was not yet loaded.
+  void OnProfileLoaded(Host* host,
+                       AppShimLaunchType launch_type,
+                       Profile* profile);
 
   scoped_ptr<Delegate> delegate_;
 
   HostMap hosts_;
 
   content::NotificationRegistrar registrar_;
+
+  bool browser_opened_ever_;
+
+  base::WeakPtrFactory<ExtensionAppShimHandler> weak_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(ExtensionAppShimHandler);
 };
 
 }  // namespace apps

@@ -15,8 +15,8 @@
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_data.h"
-#include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager_observer.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
@@ -25,7 +25,6 @@
 #include "chrome/browser/chromeos/settings/owner_key_util.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chromeos/cryptohome/async_method_caller.h"
 #include "chromeos/cryptohome/cryptohome_library.h"
@@ -146,7 +145,7 @@ void KioskAppManager::OnLockDevice(
 
 void KioskAppManager::OnOwnerFileChecked(
     const KioskAppManager::GetConsumerKioskModeStatusCallback& callback,
-    bool *owner_present) {
+    bool* owner_present) {
   ownership_established_ = *owner_present;
 
   if (callback.is_null())
@@ -249,6 +248,10 @@ void KioskAppManager::AddApp(const std::string& app_id) {
 }
 
 void KioskAppManager::RemoveApp(const std::string& app_id) {
+  // Resets auto launch app if it is the removed app.
+  if (auto_launch_app_id_ == app_id)
+    SetAutoLaunchApp(std::string());
+
   std::vector<policy::DeviceLocalAccount> device_local_accounts =
       policy::GetDeviceLocalAccounts(CrosSettings::Get());
   if (device_local_accounts.empty())
@@ -383,7 +386,8 @@ void KioskAppManager::UpdateAppData() {
        it != old_apps.end(); ++it) {
     it->second->ClearCache();
     cryptohome::AsyncMethodCaller::GetInstance()->AsyncRemove(
-        it->first, base::Bind(&OnRemoveAppCryptohomeComplete, it->first));
+        it->second->user_id(),
+        base::Bind(&OnRemoveAppCryptohomeComplete, it->first));
   }
   STLDeleteValues(&old_apps);
 

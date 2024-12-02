@@ -12,7 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "ui/aura/aura_export.h"
 #include "ui/aura/client/capture_delegate.h"
 #include "ui/aura/root_window_host_delegate.h"
@@ -311,11 +311,8 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
   // factor. The RootWindowHostDelegate dispatches events in the physical pixel
   // coordinate. But the event processing from RootWindow onwards happen in
   // device-independent pixel coordinate. So it is necessary to update the event
-  // received from the host. When |keep_inside_root| is true and the event's
-  // system location is inside host window's bounds, the location will be
-  // kept inside the root window's bounds.
-  void TransformEventForDeviceScaleFactor(bool keep_inside_root,
-                                          ui::LocatedEvent* event);
+  // received from the host.
+  void TransformEventForDeviceScaleFactor(ui::LocatedEvent* event);
 
   // Moves the cursor to the specified location. This method is internally used
   // by MoveCursorTo() and MoveCursorToHostLocation().
@@ -341,11 +338,8 @@ class AURA_EXPORT RootWindow : public ui::CompositorDelegate,
 
   // Called when a window becomes invisible, either by being removed
   // from root window hierarchy, via SetVisible(false) or being destroyed.
-  // |reason| specifies what triggered the hiding. |new_root| is the new root
-  // window, and may be NULL.
-  void OnWindowHidden(Window* invisible,
-                      WindowHiddenReason reason,
-                      RootWindow* new_root);
+  // |reason| specifies what triggered the hiding.
+  void OnWindowHidden(Window* invisible, WindowHiddenReason reason);
 
   // Cleans up the gesture recognizer for all windows in |window| (including
   // |window| itself).

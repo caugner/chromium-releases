@@ -39,9 +39,11 @@ AutocheckoutRequestManager* AutocheckoutRequestManager::FromBrowserContext(
 void AutocheckoutRequestManager::SendAutocheckoutStatus(
     AutocheckoutStatus status,
     const GURL& source_url,
+    const std::vector<AutocheckoutStatistic>& latency_statistics,
     const std::string& google_transaction_id) {
   wallet_client_.SendAutocheckoutStatus(status,
                                         source_url,
+                                        latency_statistics,
                                         google_transaction_id);
 }
 
@@ -57,6 +59,15 @@ DialogType AutocheckoutRequestManager::GetDialogType() const {
 std::string AutocheckoutRequestManager::GetRiskData() const {
   NOTREACHED();
   return std::string();
+}
+
+std::string AutocheckoutRequestManager::GetWalletCookieValue() const {
+  return std::string();
+}
+
+bool AutocheckoutRequestManager::IsShippingAddressRequired() const {
+  NOTREACHED();
+  return true;
 }
 
 void AutocheckoutRequestManager::OnDidAcceptLegalDocuments() {
@@ -77,37 +88,10 @@ void AutocheckoutRequestManager::OnDidGetWalletItems(
   NOTREACHED();
 }
 
-void AutocheckoutRequestManager::OnDidSaveAddress(
-    const std::string& address_id,
-    const std::vector<wallet::RequiredAction>& required_actions,
-    const std::vector<wallet::FormFieldError>& form_field_errors) {
-  NOTREACHED();
-}
 
-void AutocheckoutRequestManager::OnDidSaveInstrument(
-    const std::string& instrument_id,
-    const std::vector<wallet::RequiredAction>& required_actions,
-    const std::vector<wallet::FormFieldError>& form_field_errors) {
-  NOTREACHED();
-}
-
-void AutocheckoutRequestManager::OnDidSaveInstrumentAndAddress(
+void AutocheckoutRequestManager::OnDidSaveToWallet(
     const std::string& instrument_id,
     const std::string& address_id,
-    const std::vector<wallet::RequiredAction>& required_actions,
-    const std::vector<wallet::FormFieldError>& form_field_errors) {
-  NOTREACHED();
-}
-
-void AutocheckoutRequestManager::OnDidUpdateAddress(
-    const std::string& address_id,
-    const std::vector<wallet::RequiredAction>& required_actions,
-    const std::vector<wallet::FormFieldError>& form_field_errors) {
-  NOTREACHED();
-}
-
-void AutocheckoutRequestManager::OnDidUpdateInstrument(
-    const std::string& instrument_id,
     const std::vector<wallet::RequiredAction>& required_actions,
     const std::vector<wallet::FormFieldError>& form_field_errors) {
   NOTREACHED();

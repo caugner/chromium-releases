@@ -10,7 +10,7 @@
 #include "cc/layers/solid_color_layer.h"
 #include "cc/quads/solid_color_draw_quad.h"
 #include "cc/test/fake_impl_proxy.h"
-#include "cc/test/fake_layer_tree_host_impl.h"
+#include "cc/test/fake_layer_tree_host.h"
 #include "cc/test/layer_test_common.h"
 #include "cc/test/mock_quad_culler.h"
 #include "cc/trees/single_thread_proxy.h"
@@ -96,9 +96,6 @@ TEST(SolidColorLayerImplTest, VerifyCorrectOpacityInQuad) {
 }
 
 TEST(SolidColorLayerImplTest, VerifyOpaqueRect) {
-  FakeImplProxy proxy;
-  FakeLayerTreeHostImpl host_impl(&proxy);
-
   gfx::Size layer_size = gfx::Size(100, 100);
   gfx::Rect visible_content_rect = gfx::Rect(layer_size);
 
@@ -109,24 +106,21 @@ TEST(SolidColorLayerImplTest, VerifyOpaqueRect) {
   scoped_refptr<Layer> root = Layer::Create();
   root->AddChild(layer);
 
-  LayerList render_surface_layer_list;
-  LayerTreeHostCommon::CalculateDrawProperties(root.get(),
-                                               gfx::Size(500, 500),
-                                               gfx::Transform(),
-                                               1.f,
-                                               1.f,
-                                               NULL,
-                                               1024,
-                                               false,
-                                               false,
-                                               &render_surface_layer_list);
+  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  host->SetRootLayer(root);
+
+  RenderSurfaceLayerList render_surface_layer_list;
+  LayerTreeHostCommon::CalcDrawPropsMainInputsForTesting inputs(
+      root, gfx::Size(500, 500), &render_surface_layer_list);
+  LayerTreeHostCommon::CalculateDrawProperties(&inputs);
 
   EXPECT_FALSE(layer->contents_opaque());
   layer->SetBackgroundColor(SkColorSetARGBInline(255, 10, 20, 30));
   EXPECT_TRUE(layer->contents_opaque());
   {
     scoped_ptr<SolidColorLayerImpl> layer_impl =
-        SolidColorLayerImpl::Create(host_impl.active_tree(), layer->id());
+        SolidColorLayerImpl::Create(host->host_impl()->active_tree(),
+                                    layer->id());
     layer->PushPropertiesTo(layer_impl.get());
 
     // The impl layer should call itself opaque as well.
@@ -150,7 +144,8 @@ TEST(SolidColorLayerImplTest, VerifyOpaqueRect) {
   EXPECT_FALSE(layer->contents_opaque());
   {
     scoped_ptr<SolidColorLayerImpl> layer_impl =
-        SolidColorLayerImpl::Create(host_impl.active_tree(), layer->id());
+        SolidColorLayerImpl::Create(host->host_impl()->active_tree(),
+                                    layer->id());
     layer->PushPropertiesTo(layer_impl.get());
 
     // The impl layer should callnot itself opaque anymore.

@@ -37,6 +37,7 @@
         'emf_win.cc',
         'emf_win.h',
         'image.cc',
+        'image_android.cc',
         'image_linux.cc',
         'image_mac.cc',
         'image_win.cc',
@@ -92,7 +93,7 @@
         ],
       },
       'conditions': [
-        ['enable_printing!=1', {
+        ['enable_printing==0', {
           'sources/': [
             ['exclude', '.'],
           ],
@@ -228,6 +229,11 @@
             'printing_context_gtk.h',
           ],
         }],
+        ['OS=="android"', {
+          'sources': [
+            'printing_context_android.h',
+          ],
+        }],
       ],
     },
     {
@@ -252,7 +258,7 @@
         'units_unittest.cc',
       ],
       'conditions': [
-        ['enable_printing!=1', {
+        ['enable_printing==0', {
           'sources/': [
             ['exclude', '.'],
             ['include', 'run_all_unittests.cc'],

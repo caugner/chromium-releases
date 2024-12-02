@@ -86,6 +86,15 @@ class BasePanelBrowserTest : public InProcessBrowserTest {
                             const gfx::Rect& bounds,
                             StackedPanelCollection* stack);
 
+  Panel* CreateInactivePanel(const std::string& name);
+  Panel* CreateInactiveDockedPanel(const std::string& name,
+                                   const gfx::Rect& bounds);
+  Panel* CreateInactiveDetachedPanel(const std::string& name,
+                                     const gfx::Rect& bounds);
+
+  void ActivatePanel(Panel* panel);
+  void DeactivatePanel(Panel* panel);
+
   static NativePanelTesting* CreateNativePanelTesting(Panel* panel);
 
   void WaitForPanelActiveState(Panel* panel, ActiveState state);
@@ -102,6 +111,10 @@ class BasePanelBrowserTest : public InProcessBrowserTest {
   static void MoveMouse(const gfx::Point& position);
   void CloseWindowAndWait(Panel* panel);
   static std::string MakePanelName(int index);
+
+  // Checks if the WM supports activation. This may not be true sometimes on
+  // buildbots for example when the wm has crashed.
+  static bool WmSupportWindowActivation();
 
   MockDisplaySettingsProvider* mock_display_settings_provider() const {
     return mock_display_settings_provider_;

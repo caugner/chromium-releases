@@ -8,7 +8,7 @@
 #include "base/bind_helpers.h"
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/prefs/json_pref_store.h"
 #include "base/prefs/pref_value_store.h"
@@ -82,7 +82,7 @@ TestExtensionPrefs::pref_registry() {
 
 void TestExtensionPrefs::ResetPrefRegistry() {
   pref_registry_ = new user_prefs::PrefRegistrySyncable;
-  ExtensionPrefs::RegisterUserPrefs(pref_registry_.get());
+  ExtensionPrefs::RegisterProfilePrefs(pref_registry_.get());
 }
 
 void TestExtensionPrefs::RecreateExtensionPrefs() {
@@ -161,6 +161,7 @@ scoped_refptr<Extension> TestExtensionPrefs::AddExtensionWithManifestAndFlags(
   EXPECT_TRUE(Extension::IdIsValid(extension->id()));
   prefs_->OnExtensionInstalled(extension.get(),
                                Extension::ENABLED,
+                               Blacklist::NOT_BLACKLISTED,
                                syncer::StringOrdinal::CreateInitialOrdinal());
   return extension;
 }

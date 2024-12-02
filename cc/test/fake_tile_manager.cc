@@ -15,6 +15,8 @@ class FakeRasterWorkerPool : public RasterWorkerPool {
   FakeRasterWorkerPool() : RasterWorkerPool(NULL, 1) {}
 
   virtual void ScheduleTasks(RasterTask::Queue* queue) OVERRIDE {}
+  virtual void OnRasterTasksFinished() OVERRIDE {}
+  virtual void OnRasterTasksRequiredForActivationFinished() OVERRIDE {}
 };
 
 }  // namespace
@@ -24,7 +26,6 @@ FakeTileManager::FakeTileManager(TileManagerClient* client)
                   NULL,
                   make_scoped_ptr<RasterWorkerPool>(new FakeRasterWorkerPool),
                   1,
-                  false,
                   NULL,
                   GL_RGBA) {}
 
@@ -34,7 +35,23 @@ FakeTileManager::FakeTileManager(TileManagerClient* client,
                   resource_provider,
                   make_scoped_ptr<RasterWorkerPool>(new FakeRasterWorkerPool),
                   1,
-                  false,
                   NULL,
                   resource_provider->best_texture_format()) {}
+
+FakeTileManager::~FakeTileManager() {}
+
+void FakeTileManager::AssignMemoryToTiles() {
+  tiles_for_raster.clear();
+  all_tiles.Clear();
+
+  GetPrioritizedTileSet(&all_tiles);
+  AssignGpuMemoryToTiles(&all_tiles, &tiles_for_raster);
 }
+
+bool FakeTileManager::HasBeenAssignedMemory(Tile* tile) {
+  return std::find(tiles_for_raster.begin(),
+                   tiles_for_raster.end(),
+                   tile) != tiles_for_raster.end();
+}
+
+}  // namespace cc

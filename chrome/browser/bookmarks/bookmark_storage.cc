@@ -11,7 +11,7 @@
 #include "base/json/json_file_value_serializer.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/metrics/histogram.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/bookmarks/bookmark_codec.h"
 #include "chrome/browser/bookmarks/bookmark_index.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -33,7 +33,7 @@ const int kSaveDelayMS = 2500;
 
 void BackupCallback(const base::FilePath& path) {
   base::FilePath backup_path = path.ReplaceExtension(kBackupExtension);
-  file_util::CopyFile(path, backup_path);
+  base::CopyFile(path, backup_path);
 }
 
 // Adds node to the model's index, recursing through all children as well.
@@ -53,7 +53,7 @@ void LoadCallback(const base::FilePath& path,
                   BookmarkLoadDetails* details) {
   startup_metric_utils::ScopedSlowStartupUMA
       scoped_timer("Startup.SlowStartupBookmarksLoad");
-  bool bookmark_file_exists = file_util::PathExists(path);
+  bool bookmark_file_exists = base::PathExists(path);
   if (bookmark_file_exists) {
     JSONFileValueSerializer serializer(path);
     scoped_ptr<Value> root(serializer.Deserialize(NULL, NULL));

@@ -11,11 +11,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/pref_member.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/notifications/notification_ui_manager_impl.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_observer.h"
 #include "ui/message_center/message_center_tray_delegate.h"
@@ -32,13 +34,15 @@ class MessageCenterNotificationManager
       public message_center::MessageCenter::Delegate,
       public message_center::MessageCenterObserver {
  public:
-  explicit MessageCenterNotificationManager(
+  MessageCenterNotificationManager(
       message_center::MessageCenter* message_center,
-      PrefService* local_state);
+      PrefService* local_state,
+      scoped_ptr<message_center::NotifierSettingsProvider> settings_provider);
   virtual ~MessageCenterNotificationManager();
 
   // NotificationUIManager
-  virtual bool DoesIdExist(const std::string& notification_id) OVERRIDE;
+  virtual const Notification* FindById(
+      const std::string& notification_id) const OVERRIDE;
   virtual bool CancelById(const std::string& notification_id) OVERRIDE;
   virtual std::set<std::string> GetAllIdsByProfileAndSourceOrigin(
       Profile* profile,
@@ -79,6 +83,12 @@ class MessageCenterNotificationManager
   // Takes ownership of |delegate|.
   void SetMessageCenterTrayDelegateForTest(
       message_center::MessageCenterTrayDelegate* delegate);
+
+ protected:
+  // content::NotificationObserver override.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   class ImageDownloadsObserver {
@@ -182,8 +192,7 @@ class MessageCenterNotificationManager
   // Helpers that add/remove the notification from local map and MessageCenter.
   // They take ownership of profile_notification object.
   void AddProfileNotification(ProfileNotification* profile_notification);
-  void RemoveProfileNotification(ProfileNotification* profile_notification,
-                                 bool by_user);
+  void RemoveProfileNotification(ProfileNotification* profile_notification);
 
   // Returns the ProfileNotification for the |id|, or NULL if no such
   // notification is found.
@@ -211,7 +220,10 @@ class MessageCenterNotificationManager
   base::WeakPtrFactory<MessageCenterNotificationManager> weak_factory_;
 #endif
 
-  scoped_ptr<MessageCenterSettingsController> settings_controller_;
+  scoped_ptr<message_center::NotifierSettingsProvider> settings_provider_;
+
+  // Registrar for the other kind of notifications (event signaling).
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(MessageCenterNotificationManager);
 };

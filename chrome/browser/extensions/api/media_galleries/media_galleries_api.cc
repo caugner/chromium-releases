@@ -10,19 +10,18 @@
 #include <string>
 #include <vector>
 
+#include "apps/shell_window.h"
+#include "apps/shell_window_registry.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/media_galleries/media_file_system_registry.h"
 #include "chrome/browser/media_galleries/media_galleries_dialog_controller.h"
 #include "chrome/browser/storage_monitor/storage_monitor.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
-#include "chrome/browser/ui/extensions/shell_window.h"
-#include "chrome/common/extensions/api/experimental_media_galleries.h"
 #include "chrome/common/extensions/api/media_galleries.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/permissions/api_permission.h"
@@ -39,6 +38,7 @@
 #include "base/strings/sys_string_conversions.h"
 #endif
 
+using apps::ShellWindow;
 using chrome::MediaFileSystemInfo;
 using chrome::MediaFileSystemRegistry;
 using chrome::MediaFileSystemsCallback;
@@ -157,6 +157,10 @@ void MediaGalleriesGetMediaFileSystemsFunction::ReturnGalleries(
       MediaGalleriesPermission::kReadPermission);
   bool has_read_permission = PermissionsData::CheckAPIPermissionWithParam(
       GetExtension(), APIPermission::kMediaGalleries, &read_param);
+  MediaGalleriesPermission::CheckParam copy_to_param(
+      MediaGalleriesPermission::kCopyToPermission);
+  bool has_copy_to_permission = PermissionsData::CheckAPIPermissionWithParam(
+      GetExtension(), APIPermission::kMediaGalleries, &copy_to_param);
 
   const int child_id = rvh->GetProcess()->GetID();
   base::ListValue* list = new base::ListValue();
@@ -188,12 +192,13 @@ void MediaGalleriesGetMediaFileSystemsFunction::ReturnGalleries(
     if (filesystems[i].path.empty())
       continue;
 
-    if (has_read_permission) {
+    if (has_read_permission || has_copy_to_permission) {
       content::ChildProcessSecurityPolicy* policy =
           ChildProcessSecurityPolicy::GetInstance();
-      if (!policy->CanReadFile(child_id, filesystems[i].path))
-        policy->GrantReadFile(child_id, filesystems[i].path);
-      policy->GrantReadFileSystem(child_id, filesystems[i].fsid);
+      if (has_read_permission)
+        policy->GrantReadFileSystem(child_id, filesystems[i].fsid);
+      if (has_copy_to_permission)
+        policy->GrantCopyIntoFileSystem(child_id, filesystems[i].fsid);
     }
   }
 
@@ -205,18 +210,11 @@ void MediaGalleriesGetMediaFileSystemsFunction::ShowDialog() {
   WebContents* contents = WebContents::FromRenderViewHost(render_view_host());
   WebContentsModalDialogManager* web_contents_modal_dialog_manager =
       WebContentsModalDialogManager::FromWebContents(contents);
-  // If there's no user gesture associated with the API call, do not show
-  // the dialog.
-  if (!user_gesture()) {
-    GetAndReturnGalleries();
-    return;
-  }
-
   if (!web_contents_modal_dialog_manager) {
     // If there is no WebContentsModalDialogManager, then this contents is
     // probably the background page for an app. Try to find a shell window to
     // host the dialog.
-    ShellWindow* window = ShellWindowRegistry::Get(profile())->
+    ShellWindow* window = apps::ShellWindowRegistry::Get(profile())->
         GetCurrentShellWindowForApp(GetExtension()->id());
     if (window) {
       contents = window->web_contents();
@@ -245,20 +243,6 @@ void MediaGalleriesGetMediaFileSystemsFunction::GetMediaFileSystemsForExtension(
       g_browser_process->media_file_system_registry();
   registry->GetMediaFileSystemsForExtension(
       render_view_host(), GetExtension(), cb);
-}
-
-// MediaGalleriesAssembleMediaFileFunction -------------------------------------
-
-MediaGalleriesAssembleMediaFileFunction::
-    ~MediaGalleriesAssembleMediaFileFunction() {}
-
-bool MediaGalleriesAssembleMediaFileFunction::RunImpl() {
-  if (!ApiIsAccessible(&error_))
-    return false;
-
-  // TODO(vandebo) Update the metadata and return the new file.
-  SetResult(base::Value::CreateNullValue());
-  return true;
 }
 
 }  // namespace extensions

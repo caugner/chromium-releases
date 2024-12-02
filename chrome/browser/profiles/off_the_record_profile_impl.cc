@@ -28,6 +28,9 @@
 #include "chrome/browser/geolocation/chrome_geolocation_permission_context.h"
 #include "chrome/browser/geolocation/chrome_geolocation_permission_context_factory.h"
 #include "chrome/browser/io_thread.h"
+#include "chrome/browser/media/chrome_midi_permission_context.h"
+#include "chrome/browser/media/chrome_midi_permission_context_factory.h"
+#include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
@@ -54,12 +57,13 @@
 #include "webkit/browser/database/database_tracker.h"
 
 #if defined(OS_ANDROID) || defined(OS_IOS)
+#include "chrome/browser/prefs/proxy_prefs.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #endif  // defined(OS_ANDROID) || defined(OS_IOS)
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/preferences.h"
-#include "chrome/browser/chromeos/proxy_config_service_impl.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #endif
 
 using content::BrowserThread;
@@ -115,7 +119,8 @@ void OffTheRecordProfileImpl::Init() {
   InitHostZoomMap();
 
   // Make the chrome//extension-icon/ resource available.
-  ExtensionIconSource* icon_source = new ExtensionIconSource(profile_);
+  extensions::ExtensionIconSource* icon_source =
+      new extensions::ExtensionIconSource(profile_);
   content::URLDataSource::Add(this, icon_source);
 
 #if defined(ENABLE_PLUGINS)
@@ -189,7 +194,7 @@ std::string OffTheRecordProfileImpl::GetProfileName() {
   return std::string();
 }
 
-base::FilePath OffTheRecordProfileImpl::GetPath() {
+base::FilePath OffTheRecordProfileImpl::GetPath() const {
   return profile_->GetPath();
 }
 
@@ -228,6 +233,10 @@ ExtensionSpecialStoragePolicy*
   return GetOriginalProfile()->GetExtensionSpecialStoragePolicy();
 }
 
+bool OffTheRecordProfileImpl::IsManaged() {
+  return GetOriginalProfile()->IsManaged();
+}
+
 PrefService* OffTheRecordProfileImpl::GetPrefs() {
   return prefs_;
 }
@@ -237,7 +246,7 @@ PrefService* OffTheRecordProfileImpl::GetOffTheRecordPrefs() {
 }
 
 DownloadManagerDelegate* OffTheRecordProfileImpl::GetDownloadManagerDelegate() {
-  return DownloadServiceFactory::GetForProfile(this)->
+  return DownloadServiceFactory::GetForBrowserContext(this)->
       GetDownloadManagerDelegate();
 }
 
@@ -277,6 +286,19 @@ OffTheRecordProfileImpl::GetMediaRequestContextForStoragePartition(
     bool in_memory) {
   return io_data_.GetIsolatedAppRequestContextGetter(partition_path, in_memory)
       .get();
+}
+
+void OffTheRecordProfileImpl::RequestMIDISysExPermission(
+      int render_process_id,
+      int render_view_id,
+      const GURL& requesting_frame,
+      const MIDISysExPermissionCallback& callback) {
+  ChromeMIDIPermissionContext* context =
+      ChromeMIDIPermissionContextFactory::GetForProfile(this);
+  context->RequestMIDISysExPermission(render_process_id,
+                                      render_view_id,
+                                      requesting_frame,
+                                      callback);
 }
 
 net::URLRequestContextGetter*
@@ -319,11 +341,6 @@ HostContentSettingsMap* OffTheRecordProfileImpl::GetHostContentSettingsMap() {
 content::GeolocationPermissionContext*
     OffTheRecordProfileImpl::GetGeolocationPermissionContext() {
   return ChromeGeolocationPermissionContextFactory::GetForProfile(this);
-}
-
-content::SpeechRecognitionPreferences*
-    OffTheRecordProfileImpl::GetSpeechRecognitionPreferences() {
-  return profile_->GetSpeechRecognitionPreferences();
 }
 
 quota::SpecialStoragePolicy*
@@ -393,10 +410,8 @@ void OffTheRecordProfileImpl::OnLogin() {
 #endif  // defined(OS_CHROMEOS)
 
 PrefProxyConfigTracker* OffTheRecordProfileImpl::GetProxyConfigTracker() {
-  if (!pref_proxy_config_tracker_) {
-    pref_proxy_config_tracker_.reset(
-        ProxyServiceFactory::CreatePrefProxyConfigTracker(GetPrefs()));
-  }
+  if (!pref_proxy_config_tracker_)
+    pref_proxy_config_tracker_.reset(CreateProxyConfigTracker());
   return pref_proxy_config_tracker_.get();
 }
 
@@ -470,3 +485,15 @@ void OffTheRecordProfileImpl::OnZoomLevelChanged(
        return;
   }
 }
+
+PrefProxyConfigTracker* OffTheRecordProfileImpl::CreateProxyConfigTracker() {
+#if defined(OS_CHROMEOS)
+  if (chromeos::ProfileHelper::IsSigninProfile(this)) {
+    return ProxyServiceFactory::CreatePrefProxyConfigTrackerOfLocalState(
+        g_browser_process->local_state());
+  }
+#endif  // defined(OS_CHROMEOS)
+  return ProxyServiceFactory::CreatePrefProxyConfigTrackerOfProfile(
+      GetPrefs(), g_browser_process->local_state());
+}
+

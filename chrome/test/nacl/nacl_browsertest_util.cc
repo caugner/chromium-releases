@@ -17,8 +17,8 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/webplugininfo.h"
 #include "net/base/net_util.h"
-#include "webkit/plugins/webplugininfo.h"
 
 typedef TestMessageHandler::MessageResponse MessageResponse;
 
@@ -194,7 +194,6 @@ NaClBrowserTestBase::~NaClBrowserTestBase() {
 }
 
 void NaClBrowserTestBase::SetUpCommandLine(CommandLine* command_line) {
-  command_line->AppendSwitch(switches::kNoFirstRun);
   command_line->AppendSwitch(switches::kEnableNaCl);
 }
 
@@ -202,7 +201,7 @@ void NaClBrowserTestBase::SetUpInProcessBrowserTestFixture() {
   // Sanity check.
   base::FilePath plugin_lib;
   ASSERT_TRUE(PathService::Get(chrome::FILE_NACL_PLUGIN, &plugin_lib));
-  ASSERT_TRUE(file_util::PathExists(plugin_lib)) << plugin_lib.value();
+  ASSERT_TRUE(base::PathExists(plugin_lib)) << plugin_lib.value();
 
   ASSERT_TRUE(StartTestServer()) << "Cannot start test server.";
 }
@@ -288,9 +287,9 @@ void NaClBrowserTestPnacl::SetUpCommandLine(CommandLine* command_line) {
   command_line->AppendSwitch(switches::kEnablePnacl);
 }
 
-NaClBrowserTestPnaclWithNewCache::NaClBrowserTestPnaclWithNewCache() {
+NaClBrowserTestPnaclWithOldCache::NaClBrowserTestPnaclWithOldCache() {
   scoped_ptr<base::Environment> env(base::Environment::Create());
-  env->SetVar("PNACL_USE_NEW_CACHE", "true");
+  env->SetVar("PNACL_USE_OLD_CACHE", "true");
 }
 
 base::FilePath::StringType NaClBrowserTestStatic::Variant() {

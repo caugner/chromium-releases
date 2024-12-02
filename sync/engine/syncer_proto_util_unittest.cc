@@ -8,8 +8,8 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/message_loop.h"
-#include "base/time.h"
+#include "base/message_loop/message_loop.h"
+#include "base/time/time.h"
 #include "sync/internal_api/public/base/model_type_test_util.h"
 #include "sync/protocol/bookmark_specifics.pb.h"
 #include "sync/protocol/password_specifics.pb.h"
@@ -225,6 +225,20 @@ TEST_F(SyncerProtoUtilTest, VerifyResponseBirthday) {
 
   response.set_error_code(sync_pb::SyncEnums::CLEAR_PENDING);
   EXPECT_FALSE(SyncerProtoUtil::VerifyResponseBirthday(response, directory()));
+}
+
+TEST_F(SyncerProtoUtilTest, VerifyDisabledByAdmin) {
+  // No error code
+  sync_pb::ClientToServerResponse response;
+  EXPECT_FALSE(SyncerProtoUtil::IsSyncDisabledByAdmin(response));
+
+  // Has error code, but not disabled
+  response.set_error_code(sync_pb::SyncEnums::NOT_MY_BIRTHDAY);
+  EXPECT_FALSE(SyncerProtoUtil::IsSyncDisabledByAdmin(response));
+
+  // Has error code, and is disabled by admin
+  response.set_error_code(sync_pb::SyncEnums::DISABLED_BY_ADMIN);
+  EXPECT_TRUE(SyncerProtoUtil::IsSyncDisabledByAdmin(response));
 }
 
 TEST_F(SyncerProtoUtilTest, AddRequestBirthday) {

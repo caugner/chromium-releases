@@ -13,7 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop/message_loop_proxy.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "content/renderer/media/rtc_video_decoder_factory_tv.h"
 #include "media/base/bind_to_loop.h"
 #include "media/base/decoder_buffer.h"
@@ -25,8 +25,7 @@ RTCVideoDecoderBridgeTv::RTCVideoDecoderBridgeTv(
     RTCVideoDecoderFactoryTv* factory)
     : factory_(factory),
       is_initialized_(false),
-      first_frame_(true),
-      decode_complete_callback_(NULL) {}
+      first_frame_(true) {}
 
 RTCVideoDecoderBridgeTv::~RTCVideoDecoderBridgeTv() {}
 
@@ -57,7 +56,7 @@ int32_t RTCVideoDecoderBridgeTv::Decode(
   if (missing_frames || !input_image._completeFrame)
     return WEBRTC_VIDEO_CODEC_ERROR;
 
-  if (!is_initialized_ || decode_complete_callback_ == NULL)
+  if (!is_initialized_)
     return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
 
   if (first_frame_) {
@@ -87,24 +86,17 @@ int32_t RTCVideoDecoderBridgeTv::Decode(
   scoped_refptr<media::DecoderBuffer> buffer =
       media::DecoderBuffer::CopyFrom(input_image._buffer, input_image._length);
   if (render_time_ms != -1) {
-    buffer->SetTimestamp(base::TimeDelta::FromMilliseconds(
+    buffer->set_timestamp(base::TimeDelta::FromMilliseconds(
         render_time_ms - timestamp_offset_millis_));
   }
 
-  factory_->QueueBuffer(
-      buffer,
-      base::Bind(&RTCVideoDecoderBridgeTv::RunDecodeCompleteCallback,
-                 decode_complete_callback_,
-                 input_image._timeStamp,
-                 size_),
-      new_size);
+  factory_->QueueBuffer(buffer, new_size);
 
   return WEBRTC_VIDEO_CODEC_OK;
 }
 
 int32_t RTCVideoDecoderBridgeTv::RegisterDecodeCompleteCallback(
     webrtc::DecodedImageCallback* callback) {
-  decode_complete_callback_ = callback;
   return WEBRTC_VIDEO_CODEC_OK;
 }
 
@@ -116,23 +108,6 @@ int32_t RTCVideoDecoderBridgeTv::Release() {
 int32_t RTCVideoDecoderBridgeTv::Reset() {
   first_frame_ = true;
   return WEBRTC_VIDEO_CODEC_OK;
-}
-
-// static
-void RTCVideoDecoderBridgeTv::RunDecodeCompleteCallback(
-    webrtc::DecodedImageCallback* callback,
-    int64_t timestamp,
-    gfx::Size size) {
-  // We call the decode complete callback function to notify libjingle that
-  // decoding is finished. In addition, this also reports back to libjingle that
-  // the particular video frame with |timestamp| is correctly rendered to
-  // libjingle, so that it can generate proper stats.
-  webrtc::I420VideoFrame dummy_video_frame;
-  int half_width = (size.width() + 1) / 2;
-  dummy_video_frame.CreateEmptyFrame(
-      size.width(), size.height(), size.width(), half_width, half_width);
-  dummy_video_frame.set_timestamp(timestamp);
-  callback->Decoded(dummy_video_frame);
 }
 
 }  // namespace content

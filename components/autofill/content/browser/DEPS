@@ -9,7 +9,6 @@ include_rules = [
   "+sql",
   "+third_party/libjingle",
   "+third_party/libphonenumber",  # For phone number i18n.
-  "+webkit/plugins/webplugininfo.h",
 ]
 
 specific_include_rules = {
@@ -32,5 +31,11 @@ specific_include_rules = {
   ],
   'autofill_driver_impl_unittest.cc': [
     "!chrome/test/base/chrome_render_view_host_test_harness.h",
+  ],
+  'wallet_client_unittest.cc': [
+    "!chrome/test/base/testing_profile.h"
+  ],
+  'wallet_signin_helper_unittest.cc': [
+    "!chrome/test/base/testing_profile.h"
   ],
 }

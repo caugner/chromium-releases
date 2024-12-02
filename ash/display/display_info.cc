@@ -22,6 +22,11 @@
 namespace ash {
 namespace internal {
 
+Resolution::Resolution(const gfx::Size& size, bool interlaced)
+    : size(size),
+      interlaced(interlaced) {
+}
+
 // satic
 DisplayInfo DisplayInfo::CreateFromSpec(const std::string& spec) {
   return CreateFromSpecWithID(spec, gfx::Display::kInvalidDisplayID);
@@ -40,10 +45,10 @@ DisplayInfo DisplayInfo::CreateFromSpecWithID(const std::string& spec,
   static int64 synthesized_display_id = 2200000000LL;
 
 #if defined(OS_WIN)
-  gfx::Rect bounds(aura::RootWindowHost::GetNativeScreenSize());
+  gfx::Rect bounds_in_pixel(aura::RootWindowHost::GetNativeScreenSize());
 #else
-  gfx::Rect bounds(kDefaultHostWindowX, kDefaultHostWindowY,
-                   kDefaultHostWindowWidth, kDefaultHostWindowHeight);
+  gfx::Rect bounds_in_pixel(kDefaultHostWindowX, kDefaultHostWindowY,
+                            kDefaultHostWindowWidth, kDefaultHostWindowHeight);
 #endif
   std::string main_spec = spec;
 
@@ -89,7 +94,7 @@ DisplayInfo DisplayInfo::CreateFromSpecWithID(const std::string& spec,
              &width, &height, &device_scale_factor) >= 2 ||
       sscanf(main_spec.c_str(), "%d+%d-%dx%d*%f", &x, &y, &width, &height,
              &device_scale_factor) >= 4) {
-    bounds.SetRect(x, y, width, height);
+    bounds_in_pixel.SetRect(x, y, width, height);
   }
   if (id == gfx::Display::kInvalidDisplayID)
     id = synthesized_display_id++;
@@ -98,7 +103,16 @@ DisplayInfo DisplayInfo::CreateFromSpecWithID(const std::string& spec,
   display_info.set_device_scale_factor(device_scale_factor);
   display_info.set_rotation(rotation);
   display_info.set_ui_scale(ui_scale);
-  display_info.SetBounds(bounds);
+  display_info.SetBounds(bounds_in_pixel);
+
+  // To test the overscan, it creates the default 5% overscan.
+  if (has_overscan) {
+    int width = bounds_in_pixel.width() / device_scale_factor / 40;
+    int height = bounds_in_pixel.height() / device_scale_factor / 40;
+    display_info.SetOverscanInsets(gfx::Insets(height, width, height, width));
+    display_info.UpdateDisplaySize();
+  }
+
   DVLOG(1) << "DisplayInfoFromSpec info=" << display_info.ToString()
            << ", spec=" << spec;
   return display_info;
@@ -110,7 +124,6 @@ DisplayInfo::DisplayInfo()
       rotation_(gfx::Display::ROTATE_0),
       device_scale_factor_(1.0f),
       overscan_insets_in_dip_(0, 0, 0, 0),
-      has_custom_overscan_insets_(false),
       ui_scale_(1.0f),
       native_(false) {
 }
@@ -124,7 +137,6 @@ DisplayInfo::DisplayInfo(int64 id,
       rotation_(gfx::Display::ROTATE_0),
       device_scale_factor_(1.0f),
       overscan_insets_in_dip_(0, 0, 0, 0),
-      has_custom_overscan_insets_(false),
       ui_scale_(1.0f),
       native_(false) {
 }
@@ -141,6 +153,14 @@ void DisplayInfo::Copy(const DisplayInfo& native_info) {
   bounds_in_pixel_ = native_info.bounds_in_pixel_;
   size_in_pixel_ = native_info.size_in_pixel_;
   device_scale_factor_ = native_info.device_scale_factor_;
+  resolutions_ = native_info.resolutions_;
+
+  // Copy overscan_insets_in_dip_ if it's not empty. This is for test
+  // cases which use "/o" annotation which sets the overscan inset
+  // to native, and that overscan has to be propagated. This does not
+  // happen on the real environment.
+  if (!native_info.overscan_insets_in_dip_.empty())
+    overscan_insets_in_dip_ = native_info.overscan_insets_in_dip_;
 
   // Rotation_ and ui_scale_ are given by preference, or unit
   // tests. Don't copy if this native_info came from
@@ -162,20 +182,9 @@ void DisplayInfo::SetBounds(const gfx::Rect& new_bounds_in_pixel) {
 
 void DisplayInfo::UpdateDisplaySize() {
   size_in_pixel_ = bounds_in_pixel_.size();
-  if (has_custom_overscan_insets_) {
+  if (!overscan_insets_in_dip_.empty()) {
     gfx::Insets insets_in_pixel =
         overscan_insets_in_dip_.Scale(device_scale_factor_);
-    size_in_pixel_.Enlarge(-insets_in_pixel.width(), -insets_in_pixel.height());
-  } else if (has_overscan_) {
-    // Currently we assume 5% overscan and hope for the best if TV claims it
-    // overscan, but doesn't expose how much.
-    // TODO(oshima): The insets has to be applied after rotation.
-    // Fix this.
-    int width = bounds_in_pixel_.width() / 40;
-    int height = bounds_in_pixel_.height() / 40;
-    gfx::Insets insets_in_pixel(height, width, height, width);
-    overscan_insets_in_dip_ =
-        insets_in_pixel.Scale(1.0 / device_scale_factor_);
     size_in_pixel_.Enlarge(-insets_in_pixel.width(), -insets_in_pixel.height());
   } else {
     overscan_insets_in_dip_.Set(0, 0, 0, 0);
@@ -189,9 +198,7 @@ void DisplayInfo::UpdateDisplaySize() {
   size_in_pixel_ = gfx::ToFlooredSize(size_f);
 }
 
-void DisplayInfo::SetOverscanInsets(bool custom,
-                                    const gfx::Insets& insets_in_dip) {
-  has_custom_overscan_insets_ = custom;
+void DisplayInfo::SetOverscanInsets(const gfx::Insets& insets_in_dip) {
   overscan_insets_in_dip_ = insets_in_dip;
 }
 
@@ -202,7 +209,7 @@ gfx::Insets DisplayInfo::GetOverscanInsetsInPixel() const {
 std::string DisplayInfo::ToString() const {
   int rotation_degree = static_cast<int>(rotation_) * 90;
   return base::StringPrintf(
-      "DisplayInfo[%lld] bounds=%s, size=%s, scale=%f, "
+      "DisplayInfo[%lld] native bounds=%s, size=%s, scale=%f, "
       "overscan=%s, rotation=%d, ui-scale=%f",
       static_cast<long long int>(id_),
       bounds_in_pixel_.ToString().c_str(),
@@ -211,6 +218,19 @@ std::string DisplayInfo::ToString() const {
       overscan_insets_in_dip_.ToString().c_str(),
       rotation_degree,
       ui_scale_);
+}
+
+std::string DisplayInfo::ToFullString() const {
+  std::string resolutions_str;
+  std::vector<Resolution>::const_iterator iter = resolutions_.begin();
+  for (; iter != resolutions_.end(); ++iter) {
+    if (!resolutions_str.empty())
+      resolutions_str += ",";
+    resolutions_str += iter->size.ToString();
+    if (iter->interlaced)
+      resolutions_str += "(i)";
+  }
+  return ToString() + ", resolutions=" + resolutions_str;
 }
 
 }  // namespace internal

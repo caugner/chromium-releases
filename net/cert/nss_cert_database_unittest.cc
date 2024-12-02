@@ -11,7 +11,7 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
@@ -360,7 +360,7 @@ TEST_F(CertDatabaseNSSTest, ImportCACert_ObjSignTrust) {
 
 TEST_F(CertDatabaseNSSTest, ImportCA_NotCACert) {
   CertificateList certs = CreateCertificateListFromFile(
-      GetTestCertsDirectory(), "google.single.pem",
+      GetTestCertsDirectory(), "ok_cert.pem",
       X509Certificate::FORMAT_AUTO);
   ASSERT_EQ(1U, certs.size());
   EXPECT_FALSE(certs[0]->os_cert_handle()->isperm);

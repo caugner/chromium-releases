@@ -12,14 +12,13 @@
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "base/threading/thread_checker.h"
+#include "base/time/time.h"
 #include "components/autofill/content/browser/autocheckout_page_meta_data.h"
+#include "components/autofill/content/browser/autocheckout_statistic.h"
+#include "components/autofill/core/browser/autocheckout_bubble_state.h"
 #include "components/autofill/core/common/autocheckout_status.h"
 
 class GURL;
-
-namespace content {
-struct SSLStatus;
-}
 
 namespace gfx {
 class RectF;
@@ -50,9 +49,10 @@ class AutocheckoutManager {
   // gathered from the requestAutocomplete dialog.
   void FillForms();
 
-  // Called when clicking a proceed element in an Autocheckout flow fails.
-  // |status| is the reason for the failure.
-  void OnClickFailed(AutocheckoutStatus status);
+  // Called to signal that the renderer has completed processing a page in the
+  // Autocheckout flow. |status| is the reason for the failure, or |SUCCESS| if
+  // there were no errors.
+  void OnAutocheckoutPageCompleted(AutocheckoutStatus status);
 
   // Sets |page_meta_data_| with the meta data for the current page.
   void OnLoadedPageMetaData(
@@ -67,11 +67,17 @@ class AutocheckoutManager {
 
   // Causes the Autocheckout bubble to be displayed if the user hasn't seen it
   // yet for the current page. |frame_url| is the page where Autocheckout is
-  // being initiated. |ssl_status| is the SSL status of the page. |bounding_box|
-  // is the bounding box of the input field in focus.
+  // being initiated. |bounding_box| is the bounding box of the input field in
+  // focus.
   virtual void MaybeShowAutocheckoutBubble(const GURL& frame_url,
-                                           const content::SSLStatus& ssl_status,
                                            const gfx::RectF& bounding_box);
+
+  // Determine whether we should keep the dialog visible.
+  bool should_preserve_dialog() const { return should_preserve_dialog_; }
+
+  void set_should_show_bubble(bool should_show_bubble) {
+    should_show_bubble_ = should_show_bubble;
+  }
 
   bool is_autocheckout_bubble_showing() const {
     return is_autocheckout_bubble_showing_;
@@ -82,13 +88,13 @@ class AutocheckoutManager {
   bool in_autocheckout_flow() const { return in_autocheckout_flow_; }
 
   // Exposed for testing.
-  bool autocheckout_offered() const { return autocheckout_offered_; }
+  bool should_show_bubble() const { return should_show_bubble_; }
 
-  // Show the requestAutocomplete dialog if |show_dialog| is true. Also, does
-  // bookkeeping for whether or not the bubble is showing.
+  // Show the requestAutocomplete dialog if |state| is
+  // AUTOCHECKOUT_BUBBLE_ACCEPTED. Also, does bookkeeping for whether or not
+  // the bubble is showing.
   virtual void MaybeShowAutocheckoutDialog(const GURL& frame_url,
-                                           const content::SSLStatus& ssl_status,
-                                           bool show_dialog);
+                                           AutocheckoutBubbleState state);
 
   // Callback called from AutofillDialogController on filling up the UI form.
   void ReturnAutocheckoutData(const FormStructure* result,
@@ -99,11 +105,10 @@ class AutocheckoutManager {
 
  private:
   // Shows the Autocheckout bubble. Must be called on the UI thread. |frame_url|
-  // is the page where Autocheckout is being initiated. |ssl_status| is the SSL
-  // status of the page. |bounding_box| is the bounding box of the input field
-  // in focus. |cookies| is any Google Account cookies.
+  // is the page where Autocheckout is being initiated. |bounding_box| is the
+  // bounding box of the input field in focus. |cookies| is any Google Account
+  // cookies.
   void ShowAutocheckoutBubble(const GURL& frame_url,
-                              const content::SSLStatus& ssl_status,
                               const gfx::RectF& bounding_box,
                               const std::string& cookies);
 
@@ -123,6 +128,14 @@ class AutocheckoutManager {
   // Sets the progress of all steps for the given page to the provided value.
   void SetStepProgressForPage(int page_number, AutocheckoutStepStatus status);
 
+  // Account time spent between now and |last_step_completion_timestamp_|
+  // towards |page_number|.
+  void RecordTimeTaken(int page_number);
+
+  // Terminate the Autocheckout flow and send Autocheckout status to Wallet
+  // server.
+  void EndAutocheckout(AutocheckoutStatus status);
+
   AutofillManager* autofill_manager_;  // WEAK; owns us
 
   // Credit card verification code.
@@ -137,15 +150,13 @@ class AutocheckoutManager {
   // Billing address built using data supplied by requestAutocomplete dialog.
   scoped_ptr<AutofillProfile> billing_address_;
 
-  // Autocheckout specific page meta data.
+  // Autocheckout specific page meta data of current page.
   scoped_ptr<AutocheckoutPageMetaData> page_meta_data_;
 
   scoped_ptr<AutofillMetrics> metric_logger_;
 
-  // Whether or not the Autocheckout bubble has been displayed to the user for
-  // the current forms. Ensures the Autocheckout bubble is only shown to a
-  // user once per pageview.
-  bool autocheckout_offered_;
+  // Whether or not the Autocheckout bubble should be shown to user.
+  bool should_show_bubble_;
 
   // Whether or not the Autocheckout bubble is being displayed to the user.
   bool is_autocheckout_bubble_showing_;
@@ -153,8 +164,18 @@ class AutocheckoutManager {
   // Whether or not the user is in an Autocheckout flow.
   bool in_autocheckout_flow_;
 
+  // Whether or not the currently visible dialog, if there is one, should be
+  // preserved.
+  bool should_preserve_dialog_;
+
   // AutocheckoutStepTypes for the various pages of the flow.
   std::map<int, std::vector<AutocheckoutStepType> > page_types_;
+
+  // Timestamp of last step's completion.
+  base::TimeTicks last_step_completion_timestamp_;
+
+  // Per page latency statistics.
+  std::vector<AutocheckoutStatistic> latency_statistics_;
 
   std::string google_transaction_id_;
 

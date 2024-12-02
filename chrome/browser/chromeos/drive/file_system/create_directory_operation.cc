@@ -167,15 +167,13 @@ void CreateDirectoryOperation::CreateDirectoryRecursively(
   std::vector<base::FilePath::StringType> components;
   relative_file_path.GetComponents(&components);
   DCHECK(!components.empty());
-  // TODO(hidehiko): Rename this variable to "title" with other variable names.
-  // crbug.com/242794.
-  base::FilePath name(components[0]);
+  base::FilePath title(components[0]);
   base::FilePath remaining_path;
-  name.AppendRelativePath(relative_file_path, &remaining_path);
+  title.AppendRelativePath(relative_file_path, &remaining_path);
 
   scheduler_->AddNewDirectory(
       parent_resource_id,
-      name.AsUTF8Unsafe(),
+      title.AsUTF8Unsafe(),
       base::Bind(&CreateDirectoryOperation
                      ::CreateDirectoryRecursivelyAfterAddNewDirectory,
                  weak_ptr_factory_.GetWeakPtr(), remaining_path, callback));
@@ -189,12 +187,18 @@ void CreateDirectoryOperation::CreateDirectoryRecursivelyAfterAddNewDirectory(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
-  FileError error = util::GDataToFileError(gdata_error);
+  FileError error = GDataToFileError(gdata_error);
   if (error != FILE_ERROR_OK) {
     callback.Run(error);
     return;
   }
   DCHECK(resource_entry);
+
+  ResourceEntry entry;
+  if (!ConvertToResourceEntry(*resource_entry, &entry)) {
+    callback.Run(FILE_ERROR_NOT_A_FILE);
+    return;
+  }
 
   // Note that the created directory may be renamed inside
   // ResourceMetadata::AddEntry due to name confliction.
@@ -206,7 +210,7 @@ void CreateDirectoryOperation::CreateDirectoryRecursivelyAfterAddNewDirectory(
       FROM_HERE,
       base::Bind(&UpdateLocalStateForCreateDirectoryRecursively,
                  metadata_,
-                 ConvertToResourceEntry(*resource_entry),
+                 entry,
                  file_path),
       base::Bind(&CreateDirectoryOperation::
                      CreateDirectoryRecursivelyAfterUpdateLocalState,

@@ -26,12 +26,16 @@ class NotificationUIManager {
   static NotificationUIManager* Create(PrefService* local_state);
 
   // Adds a notification to be displayed. Virtual for unit test override.
-  virtual void Add(const Notification& notification,
-                   Profile* profile) = 0;
+  virtual void Add(const Notification& notification, Profile* profile) = 0;
 
-  // Returns true if any notifications match the supplied ID, either currently
-  // displayed or in the queue.
-  virtual bool DoesIdExist(const std::string& notification_id) = 0;
+  // Updates an existing notification. If |update_progress_only|, assume
+  // only message and progress properties are updated.
+  virtual bool Update(const Notification& notification, Profile* profile) = 0;
+
+  // Returns the pointer to a notification if it match the supplied ID, either
+  // currently displayed or in the queue.
+  virtual const Notification* FindById(
+      const std::string& notification_id) const = 0;
 
   // Removes any notifications matching the supplied ID, either currently
   // displayed or in the queue.  Returns true if anything was removed.

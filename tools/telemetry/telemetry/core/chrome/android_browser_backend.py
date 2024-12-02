@@ -6,12 +6,13 @@ import logging
 import os
 import subprocess
 import sys
-import tempfile
 import time
 
 from telemetry.core import exceptions
+from telemetry.core import util
+from telemetry.core.backends import browser_backend
+from telemetry.core.backends.chrome import chrome_browser_backend
 from telemetry.core.chrome import adb_commands
-from telemetry.core.chrome import browser_backend
 
 
 class AndroidBrowserBackendSettings(object):
@@ -27,7 +28,7 @@ class AndroidBrowserBackendSettings(object):
 
   def RemoveProfile(self):
     self.adb.RunShellCommand(
-        'su -c rm -r "%s"' % self._profile_dir)
+        'su -c rm -r "%s"' % self.profile_dir)
 
   def PushProfile(self, _):
     logging.critical('Profiles cannot be overriden with current configuration')
@@ -38,7 +39,7 @@ class AndroidBrowserBackendSettings(object):
     return False
 
   @property
-  def _profile_dir(self):
+  def profile_dir(self):
     raise NotImplementedError()
 
 
@@ -58,10 +59,10 @@ class ChromeBackendSettings(AndroidBrowserBackendSettings):
     return 'localabstract:chrome_devtools_remote'
 
   def PushProfile(self, new_profile_dir):
-    self.adb.Push(new_profile_dir, self._profile_dir)
+    self.adb.Push(new_profile_dir, self.profile_dir)
 
   @property
-  def _profile_dir(self):
+  def profile_dir(self):
     return '/data/data/%s/app_chrome/' % self.package
 
 
@@ -82,7 +83,7 @@ class ContentShellBackendSettings(AndroidBrowserBackendSettings):
     return True
 
   @property
-  def _profile_dir(self):
+  def profile_dir(self):
     return '/data/data/%s/app_content_shell/' % self.package
 
 
@@ -103,7 +104,7 @@ class ChromiumTestShellBackendSettings(AndroidBrowserBackendSettings):
     return True
 
   @property
-  def _profile_dir(self):
+  def profile_dir(self):
     return '/data/data/%s/app_chromiumtestshell/' % self.package
 
 
@@ -138,11 +139,11 @@ class WebviewBackendSettings(AndroidBrowserBackendSettings):
     return 'localabstract:webview_devtools_remote_%s' % str(pid)
 
   @property
-  def _profile_dir(self):
+  def profile_dir(self):
     return '/data/data/%s/app_webview/' % self.package
 
 
-class AndroidBrowserBackend(browser_backend.BrowserBackend):
+class AndroidBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
   """The backend for controlling a browser instance running on Android.
   """
   def __init__(self, options, backend_settings):
@@ -163,7 +164,6 @@ class AndroidBrowserBackend(browser_backend.BrowserBackend):
 
     # Kill old browser.
     self._adb.CloseApplication(self._backend_settings.package)
-    self._adb.KillAll('device_forwarder')
 
     if self._adb.Adb().CanAccessProtectedFileContents():
       if not options.dont_override_profile:
@@ -193,8 +193,14 @@ class AndroidBrowserBackend(browser_backend.BrowserBackend):
     args = map(QuoteIfNeeded, args)
     self._adb.Adb().SetProtectedFileContents(
         self._backend_settings.cmdline_file, ' '.join(args))
+    cmdline = self._adb.Adb().GetProtectedFileContents(
+        self._backend_settings.cmdline_file)
+    if len(cmdline) != 1 or cmdline[0] != ' '.join(args):
+      logging.critical('Failed to set Chrome command line. '
+                       'Fix this by flashing to a userdebug build.')
+      sys.exit(1)
 
-    # Start it up with a fresh log.
+  def Start(self):
     self._adb.RunShellCommand('logcat -c')
     self._adb.StartActivity(self._backend_settings.package,
                             self._backend_settings.activity,
@@ -203,17 +209,19 @@ class AndroidBrowserBackend(browser_backend.BrowserBackend):
                             'chrome://newtab/')
 
     self._adb.Forward('tcp:%d' % self._port,
-                      backend_settings.GetDevtoolsRemotePort())
+                      self._backend_settings.GetDevtoolsRemotePort())
 
     try:
       self._WaitForBrowserToComeUp()
       self._PostBrowserStartupInitialization()
     except exceptions.BrowserGoneException:
       logging.critical('Failed to connect to browser.')
-      if not self._adb.IsRootEnabled():
+      if not self._adb.Adb().CanAccessProtectedFileContents():
         logging.critical(
-          'Ensure web debugging is enabled in Chrome at '
-          '"Settings > Developer tools > Enable USB Web debugging".')
+          'Resolve this by either: '
+          '(1) Flashing to a userdebug build OR '
+          '(2) Manually enabling web debugging in Chrome at '
+          'Settings > Developer tools > Enable USB Web debugging.')
       sys.exit(1)
     except:
       import traceback
@@ -235,6 +243,14 @@ class AndroidBrowserBackend(browser_backend.BrowserBackend):
   @property
   def pid(self):
     return int(self._adb.ExtractPid(self._backend_settings.package)[0])
+
+  @property
+  def browser_directory(self):
+    return None
+
+  @property
+  def profile_directory(self):
+    return self._backend_settings.profile_dir
 
   def __del__(self):
     self.Close()
@@ -258,31 +274,31 @@ class AndroidBrowserBackend(browser_backend.BrowserBackend):
     return local_port
 
   def GetStandardOutput(self):
-    # If we can find symbols and there is a stack, output the symbolized stack.
-    symbol_paths = [
-        os.path.join(adb_commands.GetOutDirectory(), 'Release', 'lib'),
-        os.path.join(adb_commands.GetOutDirectory(), 'Debug', 'lib'),
-        os.path.join(adb_commands.GetOutDirectory(), 'Release', 'lib.target'),
-        os.path.join(adb_commands.GetOutDirectory(), 'Debug', 'lib.target')]
-    for symbol_path in symbol_paths:
-      if not os.path.isdir(symbol_path):
-        continue
-      with tempfile.NamedTemporaryFile() as f:
-        lines = self._adb.RunShellCommand('logcat -d')
-        for line in lines:
-          f.write(line + '\n')
-        symbolized_stack = None
-        try:
-          logging.info('Symbolizing stack...')
-          symbolized_stack = subprocess.Popen([
-              'ndk-stack', '-sym', symbol_path,
-              '-dump', f.name], stdout=subprocess.PIPE).communicate()[0]
-        except Exception:
-          pass
-        if symbolized_stack:
-          return symbolized_stack
-    # Otherwise, just return the last 100 lines of logcat.
-    return '\n'.join(self._adb.RunShellCommand('logcat -d -t 100'))
+    return '\n'.join(self._adb.RunShellCommand('logcat -d -t 500'))
+
+  def GetStackTrace(self):
+    def Decorate(title, content):
+      return title + '\n' + content + '\n' + '*' * 80 + '\n'
+    # Get the last lines of logcat (large enough to contain stacktrace)
+    logcat = self.GetStandardOutput()
+    ret = Decorate('Logcat', logcat)
+    stack = os.path.join(util.GetChromiumSrcDir(), 'third_party',
+                         'android_platform', 'development', 'scripts', 'stack')
+    # Try to symbolize logcat.
+    if os.path.exists(stack):
+      p = subprocess.Popen([stack], stdin=subprocess.PIPE,
+                           stdout=subprocess.PIPE)
+      ret += Decorate('Stack from Logcat', p.communicate(input=logcat)[0])
+
+    # Try to get tombstones.
+    tombstones = os.path.join(util.GetChromiumSrcDir(), 'build', 'android',
+                              'tombstones.py')
+    if os.path.exists(tombstones):
+      ret += Decorate('Tombstones',
+                      subprocess.Popen([tombstones, '-w', '--device',
+                                        self._adb.device()],
+                                       stdout=subprocess.PIPE).communicate()[0])
+    return ret
 
   def CreateForwarder(self, *port_pairs):
     return adb_commands.Forwarder(self._adb, *port_pairs)

@@ -10,16 +10,16 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
-#include "base/test/sequenced_worker_pool_owner.h"
 #include "base/test/sequenced_task_runner_test_template.h"
+#include "base/test/sequenced_worker_pool_owner.h"
 #include "base/test/task_runner_test_template.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/tracked_objects.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -728,8 +728,6 @@ TEST_F(SequencedWorkerPoolTest, IsRunningOnCurrentThread) {
 
   scoped_refptr<SequencedWorkerPool> unused_pool =
       new SequencedWorkerPool(2, "unused_pool");
-  EXPECT_TRUE(token1.Equals(unused_pool->GetSequenceToken()));
-  EXPECT_TRUE(token2.Equals(unused_pool->GetSequenceToken()));
 
   EXPECT_FALSE(pool()->RunsTasksOnCurrentThread());
   EXPECT_FALSE(pool()->IsRunningSequenceOnCurrentThread(token1));

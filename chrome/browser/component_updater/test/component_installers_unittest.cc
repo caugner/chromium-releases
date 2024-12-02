@@ -8,7 +8,7 @@
 #include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/version.h"
 #include "build/build_config.h"
@@ -65,7 +65,7 @@ TEST(ComponentInstallerTest, MAYBE_PepperFlashCheck) {
   manifest = manifest.Append(kDataPath);
   manifest = manifest.AppendASCII("manifest.json");
 
-  if (!file_util::PathExists(manifest)) {
+  if (!base::PathExists(manifest)) {
     LOG(WARNING) << "No test manifest available. Skipping.";
     return;
   }

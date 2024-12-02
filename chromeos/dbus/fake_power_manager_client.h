@@ -36,10 +36,9 @@ class FakePowerManagerClient : public PowerManagerClient {
   virtual void RequestRestart() OVERRIDE;
   virtual void RequestShutdown() OVERRIDE;
   virtual void RequestIdleNotification(int64 threshold_secs) OVERRIDE;
-  virtual void NotifyUserActivity() OVERRIDE;
-  virtual void NotifyVideoActivity(
-      const base::TimeTicks& last_activity_time,
-      bool is_fullscreen) OVERRIDE;
+  virtual void NotifyUserActivity(
+      power_manager::UserActivityType type) OVERRIDE;
+  virtual void NotifyVideoActivity(bool is_fullscreen) OVERRIDE;
   virtual void SetPolicy(
       const power_manager::PowerManagementPolicy& policy) OVERRIDE;
   virtual void SetIsProjecting(bool is_projecting) OVERRIDE;

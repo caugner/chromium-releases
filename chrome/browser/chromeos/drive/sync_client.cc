@@ -38,6 +38,9 @@ namespace {
 // and shorten the delay. crbug.com/134774
 const int kDelaySeconds = 5;
 
+// The delay constant is used to delay retrying a sync task on server errors.
+const int kLongDelaySeconds = 600;
+
 // Appends |resource_id| to |to_fetch| if the file is pinned but not fetched
 // (not present locally), or to |to_upload| if the file is dirty but not
 // uploaded.
@@ -78,6 +81,7 @@ SyncClient::SyncClient(base::SequencedTaskRunner* blocking_task_runner,
                                                          metadata,
                                                          cache)),
       delay_(base::TimeDelta::FromSeconds(kDelaySeconds)),
+      long_delay_(base::TimeDelta::FromSeconds(kLongDelaySeconds)),
       weak_ptr_factory_(this) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
@@ -110,7 +114,7 @@ void SyncClient::StartCheckingExistingPinnedFiles() {
 void SyncClient::AddFetchTask(const std::string& resource_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  AddTaskToQueue(FETCH, resource_id);
+  AddTaskToQueue(FETCH, resource_id, delay_);
 }
 
 void SyncClient::RemoveFetchTask(const std::string& resource_id) {
@@ -123,11 +127,12 @@ void SyncClient::RemoveFetchTask(const std::string& resource_id) {
 void SyncClient::AddUploadTask(const std::string& resource_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  AddTaskToQueue(UPLOAD, resource_id);
+  AddTaskToQueue(UPLOAD, resource_id, delay_);
 }
 
 void SyncClient::AddTaskToQueue(SyncType type,
-                                const std::string& resource_id) {
+                                const std::string& resource_id,
+                                const base::TimeDelta& delay) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // If the same task is already queued, ignore this task.
@@ -141,6 +146,7 @@ void SyncClient::AddTaskToQueue(SyncType type,
       }
       break;
     case UPLOAD:
+    case UPLOAD_NO_CONTENT_CHECK:
       if (upload_list_.find(resource_id) == upload_list_.end()) {
         upload_list_.insert(resource_id);
       } else {
@@ -155,7 +161,7 @@ void SyncClient::AddTaskToQueue(SyncType type,
                  weak_ptr_factory_.GetWeakPtr(),
                  type,
                  resource_id),
-      delay_);
+      delay);
 }
 
 void SyncClient::StartTask(SyncType type, const std::string& resource_id) {
@@ -180,10 +186,13 @@ void SyncClient::StartTask(SyncType type, const std::string& resource_id) {
       }
       break;
     case UPLOAD:
+    case UPLOAD_NO_CONTENT_CHECK:
       DVLOG(1) << "Uploading " << resource_id;
       update_operation_->UpdateFileByResourceId(
           resource_id,
           ClientContext(BACKGROUND),
+          type == UPLOAD ? file_system::UpdateOperation::RUN_CONTENT_CHECK
+                         : file_system::UpdateOperation::NO_CONTENT_CHECK,
           base::Bind(&SyncClient::OnUploadFileComplete,
                      weak_ptr_factory_.GetWeakPtr(),
                      resource_id));
@@ -201,13 +210,13 @@ void SyncClient::OnGetResourceIdsOfBacklog(
   for (size_t i = 0; i < to_upload->size(); ++i) {
     const std::string& resource_id = (*to_upload)[i];
     DVLOG(1) << "Queuing to upload: " << resource_id;
-    AddTaskToQueue(UPLOAD, resource_id);
+    AddTaskToQueue(UPLOAD_NO_CONTENT_CHECK, resource_id, delay_);
   }
 
   for (size_t i = 0; i < to_fetch->size(); ++i) {
     const std::string& resource_id = (*to_fetch)[i];
     DVLOG(1) << "Queuing to fetch: " << resource_id;
-    AddTaskToQueue(FETCH, resource_id);
+    AddTaskToQueue(FETCH, resource_id, delay_);
   }
 }
 
@@ -280,7 +289,7 @@ void SyncClient::OnPinned(const std::string& resource_id,
   }
 
   // Finally, adding to the queue.
-  AddTaskToQueue(FETCH, resource_id);
+  AddTaskToQueue(FETCH, resource_id, delay_);
 }
 
 void SyncClient::OnFetchFileComplete(const std::string& resource_id,
@@ -304,7 +313,11 @@ void SyncClient::OnFetchFileComplete(const std::string& resource_id,
         break;
       case FILE_ERROR_NO_CONNECTION:
         // Re-queue the task so that we'll retry once the connection is back.
-        AddTaskToQueue(FETCH, resource_id);
+        AddTaskToQueue(FETCH, resource_id, delay_);
+        break;
+      case FILE_ERROR_SERVICE_UNAVAILABLE:
+        // Re-queue the task so that we'll retry once the service is back.
+        AddTaskToQueue(FETCH, resource_id, long_delay_);
         break;
       default:
         LOG(WARNING) << "Failed to fetch " << resource_id
@@ -322,9 +335,19 @@ void SyncClient::OnUploadFileComplete(const std::string& resource_id,
   if (error == FILE_ERROR_OK) {
     DVLOG(1) << "Uploaded " << resource_id;
   } else {
-    // TODO(satorux): We should re-queue if the error is recoverable.
-    LOG(WARNING) << "Failed to upload " << resource_id << ": "
-                 << FileErrorToString(error);
+    switch (error) {
+      case FILE_ERROR_NO_CONNECTION:
+        // Re-queue the task so that we'll retry once the connection is back.
+        AddTaskToQueue(UPLOAD_NO_CONTENT_CHECK, resource_id, delay_);
+        break;
+      case FILE_ERROR_SERVICE_UNAVAILABLE:
+        // Re-queue the task so that we'll retry once the service is back.
+        AddTaskToQueue(UPLOAD_NO_CONTENT_CHECK, resource_id, long_delay_);
+        break;
+      default:
+        LOG(WARNING) << "Failed to upload " << resource_id << ": "
+                     << FileErrorToString(error);
+    }
   }
 }
 

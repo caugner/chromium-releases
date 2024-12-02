@@ -727,6 +727,26 @@ def _CheckNoAbbreviationInPngFileName(input_api, output_api):
   return results
 
 
+def _DepsFilesToCheck(re, changed_lines):
+  """Helper method for _CheckAddedDepsHaveTargetApprovals. Returns
+  a set of DEPS entries that we should look up."""
+  results = set()
+
+  # This pattern grabs the path without basename in the first
+  # parentheses, and the basename (if present) in the second. It
+  # relies on the simple heuristic that if there is a basename it will
+  # be a header file ending in ".h".
+  pattern = re.compile(
+      r"""['"]\+([^'"]+?)(/[a-zA-Z0-9_]+\.h)?['"].*""")
+  for changed_line in changed_lines:
+    m = pattern.match(changed_line)
+    if m:
+      path = m.group(1)
+      if not (path.startswith('grit/') or path == 'grit'):
+        results.add('%s/DEPS' % m.group(1))
+  return results
+
+
 def _CheckAddedDepsHaveTargetApprovals(input_api, output_api):
   """When a dependency prefixed with + is added to a DEPS file, we
   want to make sure that the change is reviewed by an OWNER of the
@@ -743,18 +763,7 @@ def _CheckAddedDepsHaveTargetApprovals(input_api, output_api):
   if not changed_lines:
     return []
 
-  virtual_depended_on_files = set()
-  # This pattern grabs the path without basename in the first
-  # parentheses, and the basename (if present) in the second. It
-  # relies on the simple heuristic that if there is a basename it will
-  # be a header file ending in ".h".
-  pattern = input_api.re.compile(
-      r"""['"]\+([^'"]+?)(/[a-zA-Z0-9_]+\.h)?['"].*""")
-  for changed_line in changed_lines:
-    m = pattern.match(changed_line)
-    if m:
-      virtual_depended_on_files.add('%s/DEPS' % m.group(1))
-
+  virtual_depended_on_files = _DepsFilesToCheck(input_api.re, changed_lines)
   if not virtual_depended_on_files:
     return []
 
@@ -825,6 +834,11 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckNoAbbreviationInPngFileName(input_api, output_api))
   results.extend(_CheckForInvalidOSMacros(input_api, output_api))
   results.extend(_CheckAddedDepsHaveTargetApprovals(input_api, output_api))
+  results.extend(
+      input_api.canned_checks.CheckChangeHasNoTabs(
+          input_api,
+          output_api,
+          source_file_filter=lambda x: x.LocalPath().endswith('.grd')))
 
   if any('PRESUBMIT.py' == f.LocalPath() for f in input_api.AffectedFiles()):
     results.extend(input_api.canned_checks.RunUnitTestsInDirectory(
@@ -1004,11 +1018,11 @@ def GetPreferredTrySlaves(project, change):
     return []
 
   if all(re.search('\.(m|mm)$|(^|[/_])mac[/_.]', f) for f in files):
-    return ['mac_rel', 'mac_asan', 'mac:compile']
+    return ['mac_rel', 'mac:compile']
   if all(re.search('(^|[/_])win[/_.]', f) for f in files):
     return ['win_rel', 'win7_aura', 'win:compile']
   if all(re.search('(^|[/_])android[/_.]', f) for f in files):
-    return ['android_dbg', 'android_clang_dbg']
+    return ['android_aosp', 'android_dbg', 'android_clang_dbg']
   if all(re.search('^native_client_sdk', f) for f in files):
     return ['linux_nacl_sdk', 'win_nacl_sdk', 'mac_nacl_sdk']
   if all(re.search('[/_]ios[/_.]', f) for f in files):
@@ -1024,17 +1038,24 @@ def GetPreferredTrySlaves(project, change):
       'linux_chromeos',
       'linux_clang:compile',
       'linux_rel',
-      'mac_asan',
       'mac_rel',
       'mac:compile',
       'win7_aura',
       'win_rel',
       'win:compile',
+      'win_x64_rel:compile',
   ]
 
   # Match things like path/aura/file.cc and path/file_aura.cc.
   # Same for chromeos.
   if any(re.search('[/_](aura|chromeos)', f) for f in files):
     trybots += ['linux_chromeos_clang:compile', 'linux_chromeos_asan']
+
+  # The AOSP bot doesn't build the chrome/ layer, so ignore any changes to it
+  # unless they're .gyp(i) files as changes to those files can break the gyp
+  # step on that bot.
+  if (not all(re.search('^chrome', f) for f in files) or
+      any(re.search('\.gypi?$', f) for f in files)):
+    trybots += ['android_aosp']
 
   return trybots

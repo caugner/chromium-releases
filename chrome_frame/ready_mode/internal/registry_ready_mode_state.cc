@@ -7,10 +7,10 @@
 #include <windows.h>
 
 #include "base/logging.h"
-#include "base/process_util.h"
+#include "base/process/launch.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_handle.h"

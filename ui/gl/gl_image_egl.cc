@@ -5,6 +5,7 @@
 #include "ui/gl/gl_image_egl.h"
 
 #include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_surface_egl.h"
 
 namespace gfx {
 
@@ -18,16 +19,16 @@ GLImageEGL::~GLImageEGL() {
 }
 
 bool GLImageEGL::Initialize(gfx::GpuMemoryBufferHandle buffer) {
-  EGLClientBuffer cbuf = static_cast<EGLClientBuffer>(buffer);
+  DCHECK(buffer.native_buffer);
   EGLint attrs[] = {
     EGL_IMAGE_PRESERVED_KHR, EGL_TRUE,
     EGL_NONE,
   };
   egl_image_ = eglCreateImageKHR(
-      eglGetDisplay(EGL_DEFAULT_DISPLAY),
+      GLSurfaceEGL::GetHardwareDisplay(),
       EGL_NO_CONTEXT,
       EGL_NATIVE_BUFFER_ANDROID,
-      cbuf,
+      buffer.native_buffer,
       attrs);
 
   if (egl_image_ == EGL_NO_IMAGE_KHR) {
@@ -63,7 +64,7 @@ void GLImageEGL::Destroy() {
     return;
 
   EGLBoolean success = eglDestroyImageKHR(
-      eglGetDisplay(EGL_DEFAULT_DISPLAY), egl_image_);
+      GLSurfaceEGL::GetHardwareDisplay(), egl_image_);
 
   if (success == EGL_FALSE) {
     EGLint error = eglGetError();
@@ -74,8 +75,16 @@ void GLImageEGL::Destroy() {
 }
 
 void GLImageEGL::ReleaseTexImage() {
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 0, 0, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-      NULL);
+  char zero[4] = { 0, };
+  glTexImage2D(GL_TEXTURE_2D,
+               0,
+               GL_RGBA,
+               1,
+               1,
+               0,
+               GL_RGBA,
+               GL_UNSIGNED_BYTE,
+               &zero);
 }
 
 }  // namespace gfx

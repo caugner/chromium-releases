@@ -85,9 +85,9 @@ void Scheduler::FinishCommit() {
   ProcessScheduledActions();
 }
 
-void Scheduler::BeginFrameAbortedByMainThread() {
+void Scheduler::BeginFrameAbortedByMainThread(bool did_handle) {
   TRACE_EVENT0("cc", "Scheduler::BeginFrameAbortedByMainThread");
-  state_machine_.BeginFrameAbortedByMainThread();
+  state_machine_.BeginFrameAbortedByMainThread(did_handle);
   ProcessScheduledActions();
 }
 
@@ -132,7 +132,8 @@ void Scheduler::SetupNextBeginFrameIfNeeded() {
   // because every SetNeedsBeginFrame will force a redraw.
   bool proactive_begin_frame_wanted =
       state_machine_.ProactiveBeginFrameWantedByImplThread() &&
-      !settings_.using_synchronous_renderer_compositor;
+      !settings_.using_synchronous_renderer_compositor &&
+      settings_.throttle_frame_production;
   bool needs_begin_frame = needs_begin_frame_to_draw ||
                            proactive_begin_frame_wanted;
   bool immediate_disables_needed =
@@ -210,8 +211,8 @@ void Scheduler::ProcessScheduledActions() {
       case SchedulerStateMachine::ACTION_COMMIT:
         client_->ScheduledActionCommit();
         break;
-      case SchedulerStateMachine::ACTION_CHECK_FOR_COMPLETED_TILE_UPLOADS:
-        client_->ScheduledActionCheckForCompletedTileUploads();
+      case SchedulerStateMachine::ACTION_UPDATE_VISIBLE_TILES:
+        client_->ScheduledActionUpdateVisibleTiles();
         break;
       case SchedulerStateMachine::ACTION_ACTIVATE_PENDING_TREE_IF_NEEDED:
         client_->ScheduledActionActivatePendingTreeIfNeeded();

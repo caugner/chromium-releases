@@ -56,20 +56,22 @@
   if (NSMinY(dirtyRect) < backgroundHeight) {
     gfx::ScopedNSGraphicsContextSaveGState scopedGState;
     NSGraphicsContext *context = [NSGraphicsContext currentContext];
-    [context cr_setPatternPhase:[[self window] themePatternPhase] forView:self];
+    NSPoint phase = [[self window] themePatternPhaseForAlignment:
+        THEME_PATTERN_ALIGN_WITH_TAB_STRIP];
+    [context cr_setPatternPhase:phase forView:self];
 
     // Themes don't have an inactive image so only look for one if there's no
     // theme.
     bool active = [[self window] isKeyWindow] || [[self window] isMainWindow] ||
                   !themeProvider->UsingDefaultTheme();
     int resource_id = active ? IDR_THEME_TOOLBAR : IDR_THEME_TOOLBAR_INACTIVE;
-    [themeProvider->GetNSImageColorNamed(resource_id, true) set];
+    [themeProvider->GetNSImageColorNamed(resource_id) set];
     NSRectFill(
         NSMakeRect(NSMinX(dirtyRect), 0, NSWidth(dirtyRect), backgroundHeight));
   }
 
   // Draw the border bitmap, which is partially transparent.
-  NSImage* image = themeProvider->GetNSImageNamed(IDR_TOOLBAR_SHADE_TOP, true);
+  NSImage* image = themeProvider->GetNSImageNamed(IDR_TOOLBAR_SHADE_TOP);
   if (NSMinY(dirtyRect) >= [image size].height)
     return;
 

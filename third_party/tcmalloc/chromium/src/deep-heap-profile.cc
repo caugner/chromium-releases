@@ -129,7 +129,7 @@ size_t DeepHeapProfile::MemoryInfoGetterLinux::CommittedSize(
     if (Read(&state, pageframe_type_ != DUMP_NO_PAGEFRAME) == false) {
       // We can't read the last region (e.g vsyscall).
 #ifndef NDEBUG
-      RAW_LOG(0, "pagemap read failed @ %#llx %"PRId64" bytes",
+      RAW_LOG(0, "pagemap read failed @ %#llx %" PRId64 " bytes",
               first_address, last_address - first_address + 1);
 #endif
       return 0;
@@ -289,6 +289,8 @@ DeepHeapProfile::DeepHeapProfile(HeapProfileTable* heap_profile,
       reinterpret_cast<char*>(heap_profile_->alloc_(prefix_length + 1));
   memcpy(filename_prefix_, prefix, prefix_length);
   filename_prefix_[prefix_length] = '\0';
+
+  strncpy(run_id_, "undetermined-run-id", sizeof(run_id_));
 }
 
 DeepHeapProfile::~DeepHeapProfile() {
@@ -316,7 +318,19 @@ void DeepHeapProfile::DumpOrderedProfile(const char* reason,
 
   // Re-open files in /proc/pid/ if the process is newly forked one.
   if (most_recent_pid_ != getpid()) {
+    char hostname[64];
+    if (0 == gethostname(hostname, sizeof(hostname))) {
+      char* dot = strchr(hostname, '.');
+      if (dot != NULL)
+        *dot = '\0';
+    } else {
+      strcpy(hostname, "unknown");
+    }
+
     most_recent_pid_ = getpid();
+
+    snprintf(run_id_, sizeof(run_id_), "%s-linux-%d-%lu",
+             hostname, most_recent_pid_, time(NULL));
 
     memory_residence_info_getter_->Initialize();
     deep_table_.ResetIsLogged();
@@ -353,6 +367,10 @@ void DeepHeapProfile::DumpOrderedProfile(const char* reason,
   }
 
   AppendCommandLine(&buffer);
+
+  buffer.AppendString("RunID: ", 0);
+  buffer.AppendString(run_id_, 0);
+  buffer.AppendChar('\n');
 
   buffer.AppendString("PageSize: ", 0);
   buffer.AppendInt(getpagesize(), 0, 0);
@@ -477,9 +495,9 @@ bool DeepHeapProfile::TextBuffer::AppendInt64(int64 value, int width) {
   int available = size_ - cursor_;
   int appended;
   if (width == 0)
-    appended = snprintf(position, available, "%"PRId64, value);
+    appended = snprintf(position, available, "%" PRId64, value);
   else
-    appended = snprintf(position, available, "%*"PRId64, width, value);
+    appended = snprintf(position, available, "%*" PRId64, width, value);
   return ForwardCursor(appended);
 }
 
@@ -488,9 +506,9 @@ bool DeepHeapProfile::TextBuffer::AppendPtr(uint64 value, int width) {
   int available = size_ - cursor_;
   int appended;
   if (width == 0)
-    appended = snprintf(position, available, "%"PRIx64, value);
+    appended = snprintf(position, available, "%" PRIx64, value);
   else
-    appended = snprintf(position, available, "%0*"PRIx64, width, value);
+    appended = snprintf(position, available, "%0*" PRIx64, width, value);
   return ForwardCursor(appended);
 }
 
@@ -929,7 +947,8 @@ void DeepHeapProfile::GlobalStats::SnapshotMaps(
       int written = procmaps_iter.FormatLine(buffer, sizeof(buffer),
                                              vma_start_addr, vma_last_addr,
                                              flags, offset, inode, filename, 0);
-      RAW_LOG(0, "[%d] Mismatched total in VMA %"PRId64":%"PRId64" (%"PRId64")",
+      RAW_LOG(0, "[%d] Mismatched total in VMA %" PRId64 ":"
+              "%" PRId64 " (%" PRId64 ")",
               getpid(), vma_total, vma_subtotal, vma_total - vma_subtotal);
       RAW_LOG(0, "[%d]   in %s", getpid(), buffer);
     }

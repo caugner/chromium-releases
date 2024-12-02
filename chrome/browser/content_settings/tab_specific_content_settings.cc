@@ -16,11 +16,11 @@
 #include "chrome/browser/browsing_data/browsing_data_indexed_db_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
 #include "chrome/browser/browsing_data/cookies_tree_model.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/content_settings_details.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/browser/browser_thread.h"
@@ -79,7 +79,8 @@ TabSpecificContentSettings::TabSpecificContentSettings(WebContents* tab)
       profile_(Profile::FromBrowserContext(tab->GetBrowserContext())),
       allowed_local_shared_objects_(profile_),
       blocked_local_shared_objects_(profile_),
-      geolocation_settings_state_(profile_),
+      geolocation_usages_state_(profile_, CONTENT_SETTINGS_TYPE_GEOLOCATION),
+      midi_usages_state_(profile_, CONTENT_SETTINGS_TYPE_MIDI_SYSEX),
       pending_protocol_handler_(ProtocolHandler::EmptyProtocolHandler()),
       previous_protocol_handler_(ProtocolHandler::EmptyProtocolHandler()),
       pending_protocol_handler_setting_(CONTENT_SETTING_DEFAULT),
@@ -210,8 +211,11 @@ bool TabSpecificContentSettings::IsContentBlocked(
       content_type == CONTENT_SETTINGS_TYPE_MEDIASTREAM ||
       content_type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC ||
       content_type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA ||
-      content_type == CONTENT_SETTINGS_TYPE_PPAPI_BROKER)
+      content_type == CONTENT_SETTINGS_TYPE_PPAPI_BROKER ||
+      content_type == CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS ||
+      content_type == CONTENT_SETTINGS_TYPE_MIDI_SYSEX) {
     return content_blocked_[content_type];
+  }
 
   return false;
 }
@@ -229,12 +233,14 @@ void TabSpecificContentSettings::SetBlockageHasBeenIndicated(
 bool TabSpecificContentSettings::IsContentAllowed(
     ContentSettingsType content_type) const {
   // This method currently only returns meaningful values for the content type
-  // cookies, mediastream, and PPAPI broker.
+  // cookies, mediastream, PPAPI broker, and downloads.
   if (content_type != CONTENT_SETTINGS_TYPE_COOKIES &&
       content_type != CONTENT_SETTINGS_TYPE_MEDIASTREAM &&
       content_type != CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC &&
       content_type != CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA &&
-      content_type != CONTENT_SETTINGS_TYPE_PPAPI_BROKER) {
+      content_type != CONTENT_SETTINGS_TYPE_PPAPI_BROKER &&
+      content_type != CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS &&
+      content_type != CONTENT_SETTINGS_TYPE_MIDI_SYSEX) {
     return false;
   }
 
@@ -447,8 +453,7 @@ void TabSpecificContentSettings::OnFileSystemAccessed(
 void TabSpecificContentSettings::OnGeolocationPermissionSet(
     const GURL& requesting_origin,
     bool allowed) {
-  geolocation_settings_state_.OnGeolocationPermissionSet(requesting_origin,
-                                                         allowed);
+  geolocation_usages_state_.OnPermissionSet(requesting_origin, allowed);
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED,
       content::Source<WebContents>(web_contents()),
@@ -494,6 +499,18 @@ void TabSpecificContentSettings::OnCameraAccessBlocked() {
   OnContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, std::string());
 }
 
+void TabSpecificContentSettings::OnMIDISysExAccessed(
+    const GURL& requesting_origin) {
+  midi_usages_state_.OnPermissionSet(requesting_origin, true);
+  OnContentAllowed(CONTENT_SETTINGS_TYPE_MIDI_SYSEX);
+}
+
+void TabSpecificContentSettings::OnMIDISysExAccessBlocked(
+    const GURL& requesting_origin) {
+  midi_usages_state_.OnPermissionSet(requesting_origin, false);
+  OnContentBlocked(CONTENT_SETTINGS_TYPE_MIDI_SYSEX, std::string());
+}
+
 void TabSpecificContentSettings::ClearBlockedContentSettingsExceptForCookies() {
   for (size_t i = 0; i < arraysize(content_blocked_); ++i) {
     if (i == CONTENT_SETTINGS_TYPE_COOKIES)
@@ -522,6 +539,17 @@ void TabSpecificContentSettings::ClearCookieSpecificContentSettings() {
       content::NotificationService::NoDetails());
 }
 
+void TabSpecificContentSettings::SetDownloadsBlocked(bool blocked) {
+  content_blocked_[CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS] = blocked;
+  content_allowed_[CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS] = !blocked;
+  content_blockage_indicated_to_user_[
+    CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS] = false;
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED,
+      content::Source<WebContents>(web_contents()),
+      content::NotificationService::NoDetails());
+}
+
 void TabSpecificContentSettings::SetPopupsBlocked(bool blocked) {
   content_blocked_[CONTENT_SETTINGS_TYPE_POPUPS] = blocked;
   content_blockage_indicated_to_user_[CONTENT_SETTINGS_TYPE_POPUPS] = false;
@@ -533,11 +561,20 @@ void TabSpecificContentSettings::SetPopupsBlocked(bool blocked) {
 
 void TabSpecificContentSettings::GeolocationDidNavigate(
       const content::LoadCommittedDetails& details) {
-  geolocation_settings_state_.DidNavigate(details);
+  geolocation_usages_state_.DidNavigate(details);
+}
+
+void TabSpecificContentSettings::MIDIDidNavigate(
+    const content::LoadCommittedDetails& details) {
+  midi_usages_state_.DidNavigate(details);
 }
 
 void TabSpecificContentSettings::ClearGeolocationContentSettings() {
-  geolocation_settings_state_.ClearStateMap();
+  geolocation_usages_state_.ClearStateMap();
+}
+
+void TabSpecificContentSettings::ClearMIDIContentSettings() {
+  midi_usages_state_.ClearStateMap();
 }
 
 void TabSpecificContentSettings::SetPepperBrokerAllowed(bool allowed) {
@@ -572,6 +609,7 @@ void TabSpecificContentSettings::DidNavigateMainFrame(
     // Clear "blocked" flags.
     ClearBlockedContentSettingsExceptForCookies();
     GeolocationDidNavigate(details);
+    MIDIDidNavigate(details);
   }
 }
 
@@ -592,6 +630,7 @@ void TabSpecificContentSettings::DidStartProvisionalLoadForFrame(
   if (!is_error_page)
     ClearCookieSpecificContentSettings();
   ClearGeolocationContentSettings();
+  ClearMIDIContentSettings();
 }
 
 void TabSpecificContentSettings::AppCacheAccessed(const GURL& manifest_url,
@@ -613,12 +652,12 @@ void TabSpecificContentSettings::Observe(
 
   content::Details<const ContentSettingsDetails> settings_details(details);
   const NavigationController& controller = web_contents()->GetController();
-  NavigationEntry* entry = controller.GetActiveEntry();
+  NavigationEntry* entry = controller.GetVisibleEntry();
   GURL entry_url;
   if (entry)
     entry_url = entry->GetURL();
   if (settings_details.ptr()->update_all() ||
-      // The active NavigationEntry is the URL in the URL field of a tab.
+      // The visible NavigationEntry is the URL in the URL field of a tab.
       // Currently this should be matched by the |primary_pattern|.
       settings_details.ptr()->primary_pattern().Matches(entry_url)) {
     Profile* profile =

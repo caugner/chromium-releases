@@ -15,10 +15,11 @@
 #include "cc/layers/delegated_renderer_layer.h"
 #include "cc/layers/solid_color_layer.h"
 #include "cc/layers/texture_layer.h"
+#include "cc/output/copy_output_request.h"
 #include "cc/output/delegated_frame_data.h"
+#include "cc/output/filter_operation.h"
+#include "cc/output/filter_operations.h"
 #include "cc/resources/transferable_resource.h"
-#include "third_party/WebKit/public/platform/WebFilterOperation.h"
-#include "third_party/WebKit/public/platform/WebFilterOperations.h"
 #include "ui/base/animation/animation.h"
 #include "ui/compositor/compositor_switches.h"
 #include "ui/compositor/dip_util.h"
@@ -311,22 +312,22 @@ void Layer::SetBackgroundZoom(float zoom, int inset) {
 }
 
 void Layer::SetLayerFilters() {
-  WebKit::WebFilterOperations filters;
+  cc::FilterOperations filters;
   if (layer_saturation_) {
-    filters.append(WebKit::WebFilterOperation::createSaturateFilter(
+    filters.Append(cc::FilterOperation::CreateSaturateFilter(
         layer_saturation_));
   }
   if (layer_grayscale_) {
-    filters.append(WebKit::WebFilterOperation::createGrayscaleFilter(
+    filters.Append(cc::FilterOperation::CreateGrayscaleFilter(
         layer_grayscale_));
   }
   if (layer_inverted_)
-    filters.append(WebKit::WebFilterOperation::createInvertFilter(1.0));
+    filters.Append(cc::FilterOperation::CreateInvertFilter(1.0));
   // Brightness goes last, because the resulting colors neeed clamping, which
   // cause further color matrix filters to be applied separately. In this order,
   // they all can be combined in a single pass.
   if (layer_brightness_) {
-    filters.append(WebKit::WebFilterOperation::createSaturatingBrightnessFilter(
+    filters.Append(cc::FilterOperation::CreateSaturatingBrightnessFilter(
         layer_brightness_));
   }
 
@@ -334,14 +335,12 @@ void Layer::SetLayerFilters() {
 }
 
 void Layer::SetLayerBackgroundFilters() {
-  WebKit::WebFilterOperations filters;
-  if (zoom_ != 1) {
-    filters.append(WebKit::WebFilterOperation::createZoomFilter(zoom_,
-                                                                zoom_inset_));
-  }
+  cc::FilterOperations filters;
+  if (zoom_ != 1)
+    filters.Append(cc::FilterOperation::CreateZoomFilter(zoom_, zoom_inset_));
 
   if (background_blur_radius_) {
-    filters.append(WebKit::WebFilterOperation::createBlurFilter(
+    filters.Append(cc::FilterOperation::CreateBlurFilter(
         background_blur_radius_));
   }
 
@@ -627,6 +626,10 @@ void Layer::OnDeviceScaleFactorChanged(float device_scale_factor) {
     layer_mask_->OnDeviceScaleFactorChanged(device_scale_factor);
 }
 
+void Layer::RequestCopyOfOutput(scoped_ptr<cc::CopyOutputRequest> request) {
+  cc_layer_->RequestCopyOfOutput(request.Pass());
+}
+
 void Layer::PaintContents(SkCanvas* sk_canvas,
                           gfx::Rect clip,
                           gfx::RectF* opaque) {
@@ -647,7 +650,7 @@ void Layer::PaintContents(SkCanvas* sk_canvas,
     canvas->Restore();
 }
 
-unsigned Layer::PrepareTexture(cc::ResourceUpdateQueue* queue) {
+unsigned Layer::PrepareTexture() {
   DCHECK(texture_layer_.get());
   return texture_->PrepareTexture();
 }
@@ -659,7 +662,8 @@ WebKit::WebGraphicsContext3D* Layer::Context3d() {
   return NULL;
 }
 
-bool Layer::PrepareTextureMailbox(cc::TextureMailbox* mailbox) {
+bool Layer::PrepareTextureMailbox(cc::TextureMailbox* mailbox,
+                                  bool use_shared_memory) {
   return false;
 }
 

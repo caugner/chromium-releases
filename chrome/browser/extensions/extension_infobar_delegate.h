@@ -35,7 +35,7 @@ class ExtensionInfoBarDelegate : public InfoBarDelegate,
 
   virtual ~ExtensionInfoBarDelegate();
 
-  // Creates an extension delegate and adds it to |infobar_service|.
+  // Creates an extension infobar delegate and adds it to |infobar_service|.
   static void Create(InfoBarService* infobar_service,
                      Browser* browser,
                      const extensions::Extension* extension,
@@ -55,6 +55,7 @@ class ExtensionInfoBarDelegate : public InfoBarDelegate,
                            InfoBarService* infobar_service,
                            const extensions::Extension* extension,
                            const GURL& url,
+                           content::WebContents* web_contents,
                            int height);
 
   // InfoBarDelegate:
@@ -69,7 +70,9 @@ class ExtensionInfoBarDelegate : public InfoBarDelegate,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  Browser* browser_;
+#if defined(TOOLKIT_VIEWS)
+  Browser* browser_;  // We pass this to the ExtensionInfoBar.
+#endif
 
   // The extension host we are showing the InfoBar for. The delegate needs to
   // own this since the InfoBar gets deleted and recreated when you switch tabs

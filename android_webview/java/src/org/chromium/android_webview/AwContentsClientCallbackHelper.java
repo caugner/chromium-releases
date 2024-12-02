@@ -4,11 +4,15 @@
 
 package org.chromium.android_webview;
 
+import android.graphics.Picture;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
+import android.os.SystemClock;
 
 import org.chromium.content.browser.ContentViewCore;
+
+import java.util.concurrent.Callable;
 
 /**
  * This class is responsible for calling certain client callbacks on the UI thread.
@@ -70,6 +74,14 @@ class AwContentsClientCallbackHelper {
     private final static int MSG_ON_DOWNLOAD_START = 3;
     private final static int MSG_ON_RECEIVED_LOGIN_REQUEST = 4;
     private final static int MSG_ON_RECEIVED_ERROR = 5;
+    private final static int MSG_ON_NEW_PICTURE = 6;
+
+    // Minimum period allowed between consecutive onNewPicture calls, to rate-limit the callbacks.
+    private static final long ON_NEW_PICTURE_MIN_PERIOD_MILLIS = 500;
+    // Timestamp of the most recent onNewPicture callback.
+    private long mLastPictureTime = 0;
+    // True when a onNewPicture callback is currenly in flight.
+    private boolean mHasPendingOnNewPicture = false;
 
     private final AwContentsClient mContentsClient;
 
@@ -102,6 +114,18 @@ class AwContentsClientCallbackHelper {
                     OnReceivedErrorInfo info = (OnReceivedErrorInfo) msg.obj;
                     mContentsClient.onReceivedError(info.mErrorCode, info.mDescription,
                             info.mFailingUrl);
+                    break;
+                }
+                case MSG_ON_NEW_PICTURE: {
+                    Picture picture = null;
+                    try {
+                        if (msg.obj != null) picture = (Picture) ((Callable<?>) msg.obj).call();
+                    } catch (Exception e) {
+                        throw new RuntimeException("Error getting picture", e);
+                    }
+                    mContentsClient.onNewPicture(picture);
+                    mLastPictureTime = SystemClock.uptimeMillis();
+                    mHasPendingOnNewPicture = false;
                     break;
                 }
                 default:
@@ -138,5 +162,14 @@ class AwContentsClientCallbackHelper {
     public void postOnReceivedError(int errorCode, String description, String failingUrl) {
         OnReceivedErrorInfo info = new OnReceivedErrorInfo(errorCode, description, failingUrl);
         mHandler.sendMessage(mHandler.obtainMessage(MSG_ON_RECEIVED_ERROR, info));
+    }
+
+    public void postOnNewPicture(Callable<Picture> pictureProvider) {
+        if (mHasPendingOnNewPicture) return;
+        mHasPendingOnNewPicture = true;
+        long pictureTime = java.lang.Math.max(mLastPictureTime + ON_NEW_PICTURE_MIN_PERIOD_MILLIS,
+                SystemClock.uptimeMillis());
+        mHandler.sendMessageAtTime(mHandler.obtainMessage(MSG_ON_NEW_PICTURE, pictureProvider),
+                pictureTime);
     }
 }

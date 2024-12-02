@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/base/constants.h"
 #include "remoting/host/audio_capturer.h"
@@ -277,6 +277,8 @@ TEST_F(ClientSessionTest, ClipboardStubFilter) {
   message_loop_.Run();
 }
 
+namespace {
+
 MATCHER_P2(EqualsUsbEvent, usb_keycode, pressed, "") {
   return arg.usb_keycode() == (unsigned int)usb_keycode &&
          arg.pressed() == pressed;
@@ -288,6 +290,8 @@ MATCHER_P2(EqualsMouseEvent, x, y, "") {
 
 MATCHER_P2(EqualsMouseButtonEvent, button, down, "") {
   return arg.button() == button && arg.button_down() == down;
+}
+
 }
 
 TEST_F(ClientSessionTest, InputStubFilter) {

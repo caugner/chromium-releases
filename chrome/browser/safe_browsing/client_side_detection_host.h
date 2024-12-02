@@ -17,7 +17,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 namespace safe_browsing {
 class ClientPhishingRequest;
@@ -79,7 +79,7 @@ class ClientSideDetectionHost : public content::WebContentsObserver,
   void MalwareFeatureExtractionDone(scoped_ptr<ClientMalwareRequest> request);
 
   // Update the entries in browse_info_->ips map.
-  void UpdateIPHostMap(const std::string& ip, const std::string& host);
+  void UpdateIPUrlMap(const std::string& ip, const std::string& url);
 
   // From NotificationObserver.  Called when a notification comes in.  This
   // method is called in the UI thread.
@@ -101,6 +101,10 @@ class ClientSideDetectionHost : public content::WebContentsObserver,
   void set_safe_browsing_managers(
       SafeBrowsingUIManager* ui_manager,
       SafeBrowsingDatabaseManager* database_manager);
+
+  // Get/Set malware_killswitch_on_ value. These methods called on UI thread.
+  bool MalwareKillSwitchIsOn();
+  void SetMalwareKillSwitch(bool killswitch_on);
 
   // This pointer may be NULL if client-side phishing detection is disabled.
   ClientSideDetectionService* csd_service_;
@@ -127,8 +131,8 @@ class ClientSideDetectionHost : public content::WebContentsObserver,
 
   // Max number of ips we save for each browse
   static const int kMaxIPsPerBrowse;
-  // Max number of hosts we report for each malware IP.
-  static const int kMaxHostsPerIP;
+  // Max number of urls we report for each malware IP.
+  static const int kMaxUrlsPerIP;
 
   base::WeakPtrFactory<ClientSideDetectionHost> weak_factory_;
 
@@ -137,8 +141,14 @@ class ClientSideDetectionHost : public content::WebContentsObserver,
   int unsafe_unique_page_id_;
   scoped_ptr<SafeBrowsingUIManager::UnsafeResource> unsafe_resource_;
 
+  // Whether the malware IP matching feature killswitch is on.
+  // This should be accessed from UI thread.
+  bool malware_killswitch_on_;
+
   // Whether the malware bad ip matching and report feature is enabled.
+  // This should be accessed from UI thread.
   bool malware_report_enabled_;
+
   DISALLOW_COPY_AND_ASSIGN(ClientSideDetectionHost);
 };
 

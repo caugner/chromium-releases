@@ -15,6 +15,7 @@
 #include "gpu/command_buffer/service/command_buffer_service.h"
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/gl_context_virtual.h"
+#include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
 #include "gpu/command_buffer/service/image_manager.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
@@ -69,7 +70,6 @@ void GLManager::Initialize(const GLManager::Options& options) {
   const size_t kStartTransferBufferSize = 4 * 1024 * 1024;
   const size_t kMinTransferBufferSize = 1 * 256 * 1024;
   const size_t kMaxTransferBufferSize = 16 * 1024 * 1024;
-  const bool kShareResources = true;
 
   context_lost_allowed_ = options.context_lost_allowed;
 
@@ -131,6 +131,7 @@ void GLManager::Initialize(const GLManager::Options& options) {
   if (!context_group) {
     context_group = new gles2::ContextGroup(mailbox_manager_.get(),
                                             options.image_manager,
+                                            NULL,
                                             NULL,
                                             options.bind_generates_resource);
   }
@@ -198,7 +199,6 @@ void GLManager::Initialize(const GLManager::Options& options) {
       gles2_helper_.get(),
       client_share_group,
       transfer_buffer_.get(),
-      kShareResources,
       options.bind_generates_resource,
       options.image_factory));
 
@@ -251,6 +251,10 @@ void GLManager::Destroy() {
     decoder_->Destroy(true);
     decoder_.reset();
   }
+}
+
+const gpu::gles2::FeatureInfo::Workarounds& GLManager::workarounds() const {
+  return decoder_->GetContextGroup()->feature_info()->workarounds();
 }
 
 void GLManager::PumpCommands() {

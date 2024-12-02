@@ -27,7 +27,6 @@ class WebGLConformanceTest : public ContentBrowserTest {
     // Allow privileged WebGL extensions.
     command_line->AppendSwitch(switches::kEnablePrivilegedWebGLExtensions);
 #if defined(OS_ANDROID)
-    command_line->AppendSwitch(switches::kEnableExperimentalWebGL);
     command_line->AppendSwitch(
         switches::kDisableGestureRequirementForMediaPlayback);
 #endif
@@ -40,7 +39,7 @@ class WebGLConformanceTest : public ContentBrowserTest {
         FILE_PATH_LITERAL("third_party"));
     webgl_conformance_path = webgl_conformance_path.Append(
         FILE_PATH_LITERAL("webgl_conformance"));
-    ASSERT_TRUE(file_util::DirectoryExists(webgl_conformance_path))
+    ASSERT_TRUE(base::DirectoryExists(webgl_conformance_path))
         << "Missing conformance tests: " << webgl_conformance_path.value();
 
     PathService::Get(DIR_TEST_DATA, &test_path_);
@@ -56,7 +55,7 @@ class WebGLConformanceTest : public ContentBrowserTest {
     ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &path));
     path = path.Append(FILE_PATH_LITERAL("gpu"))
         .Append(FILE_PATH_LITERAL("webgl_conformance_test_expectations.txt"));
-    ASSERT_TRUE(file_util::PathExists(path));
+    ASSERT_TRUE(base::PathExists(path));
     ASSERT_TRUE(test_expectations_.LoadTestExpectations(path));
   }
 

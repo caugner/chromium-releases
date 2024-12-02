@@ -8,6 +8,7 @@
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "components/autofill/core/browser/autofill_type.h"
 
 namespace {
 
@@ -30,6 +31,8 @@ namespace autofill {
 AutofillField::AutofillField()
     : server_type_(NO_SERVER_DATA),
       heuristic_type_(UNKNOWN_TYPE),
+      html_type_(HTML_TYPE_UNKNOWN),
+      html_mode_(HTML_MODE_NONE),
       phone_part_(IGNORED) {
 }
 
@@ -39,12 +42,14 @@ AutofillField::AutofillField(const FormFieldData& field,
       unique_name_(unique_name),
       server_type_(NO_SERVER_DATA),
       heuristic_type_(UNKNOWN_TYPE),
+      html_type_(HTML_TYPE_UNKNOWN),
+      html_mode_(HTML_MODE_NONE),
       phone_part_(IGNORED) {
 }
 
 AutofillField::~AutofillField() {}
 
-void AutofillField::set_heuristic_type(AutofillFieldType type) {
+void AutofillField::set_heuristic_type(ServerFieldType type) {
   if (type >= 0 && type < MAX_VALID_FIELD_TYPE &&
       type != FIELD_WITH_DEFAULT_VALUE) {
     heuristic_type_ = type;
@@ -56,7 +61,7 @@ void AutofillField::set_heuristic_type(AutofillFieldType type) {
   }
 }
 
-void AutofillField::set_server_type(AutofillFieldType type) {
+void AutofillField::set_server_type(ServerFieldType type) {
   // Chrome no longer supports fax numbers, but the server still does.
   if (type >= PHONE_FAX_NUMBER && type <= PHONE_FAX_WHOLE_NUMBER)
     return;
@@ -64,11 +69,24 @@ void AutofillField::set_server_type(AutofillFieldType type) {
   server_type_ = type;
 }
 
-AutofillFieldType AutofillField::type() const {
-  if (server_type_ != NO_SERVER_DATA)
-    return server_type_;
+void AutofillField::SetHtmlType(HtmlFieldType type, HtmlFieldMode mode) {
+  html_type_ = type;
+  html_mode_ = mode;
 
-  return heuristic_type_;
+  if (type == HTML_TYPE_TEL_LOCAL_PREFIX)
+    phone_part_ = AutofillField::PHONE_PREFIX;
+  else if (type == HTML_TYPE_TEL_LOCAL_SUFFIX)
+    phone_part_ = AutofillField::PHONE_SUFFIX;
+}
+
+AutofillType AutofillField::Type() const {
+  if (html_type_ != HTML_TYPE_UNKNOWN)
+    return AutofillType(html_type_, html_mode_);
+
+  if (server_type_ != NO_SERVER_DATA)
+    return AutofillType(server_type_);
+
+  return AutofillType(heuristic_type_);
 }
 
 bool AutofillField::IsEmpty() const {
@@ -82,7 +100,7 @@ std::string AutofillField::FieldSignature() const {
 }
 
 bool AutofillField::IsFieldFillable() const {
-  return type() != UNKNOWN_TYPE;
+  return !Type().IsUnknown();
 }
 
 }  // namespace autofill

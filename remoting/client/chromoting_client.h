@@ -42,6 +42,7 @@ class SignalStrategy;
 class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
                          public protocol::ClientStub {
  public:
+  // |audio_player| may be null, in which case audio will not be requested.
   ChromotingClient(const ClientConfig& config,
                    ClientContext* client_context,
                    protocol::ConnectionToHost* connection,
@@ -66,6 +67,8 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
       const protocol::Capabilities& capabilities) OVERRIDE;
   virtual void SetPairingResponse(
       const protocol::PairingResponse& pairing_response) OVERRIDE;
+  virtual void DeliverHostMessage(
+      const protocol::ExtensionMessage& message) OVERRIDE;
 
   // ClipboardStub implementation for receiving clipboard data from host.
   virtual void InjectClipboardEvent(

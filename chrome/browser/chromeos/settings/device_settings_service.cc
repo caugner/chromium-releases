@@ -6,13 +6,13 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/settings/owner_key_util.h"
 #include "chrome/browser/chromeos/settings/session_manager_operation.h"
 #include "chrome/browser/policy/proto/chromeos/chrome_device_policy.pb.h"
 #include "chrome/browser/policy/proto/cloud/device_management_backend.pb.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -75,10 +75,14 @@ DeviceSettingsService::DeviceSettingsService()
       weak_factory_(this),
       store_status_(STORE_SUCCESS),
       load_retries_left_(kMaxLoadRetries) {
+  if (CertLoader::IsInitialized())
+    CertLoader::Get()->AddObserver(this);
 }
 
 DeviceSettingsService::~DeviceSettingsService() {
   DCHECK(pending_operations_.empty());
+  if (CertLoader::IsInitialized())
+    CertLoader::Get()->RemoveObserver(this);
 }
 
 void DeviceSettingsService::SetSessionManager(
@@ -206,6 +210,14 @@ void DeviceSettingsService::PropertyChangeComplete(bool success) {
   }
 
   EnsureReload(false);
+}
+
+void DeviceSettingsService::OnCertificatesLoaded(
+    const net::CertificateList& cert_list,
+    bool initial_load) {
+  // CertLoader initializes the TPM and NSS database which is necessary to
+  // determine ownership. Force a reload once we know these are initialized.
+  EnsureReload(true);
 }
 
 void DeviceSettingsService::Enqueue(SessionManagerOperation* operation) {

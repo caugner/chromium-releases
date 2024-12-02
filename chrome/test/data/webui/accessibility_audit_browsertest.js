@@ -120,6 +120,7 @@ function expectReportConsoleWarning() {
 function createMockAudit() {
   function StubAudit() {};
   StubAudit.prototype.run = function() {};
+
   return mock(StubAudit);
 }
 
@@ -150,6 +151,7 @@ function expectAuditWillRun(times) {
   expectedInvocation.will.apply(expectedInvocation, willArgs);
   axs.Audit = audit.proxy();
   axs.Audit.createReport = realAudit.createReport;
+  axs.Audit.auditResults = realAudit.auditResults;
   axs.Audit.accessibilityErrorMessage = realAudit.accessibilityErrorMessage;
 }
 
@@ -359,7 +361,7 @@ TEST_F('WebUIAccessibilityAuditBrowserTest_IssuesAreWarnings',
 
   accessibilityResults.length = 0;
 
-  this.accessibilityAuditConfig.ignoreSelectors('lowContrastElements', 'P');
+  this.accessibilityAuditConfig().ignoreSelectors('lowContrastElements', 'P');
   try {
     assertAccessibilityOk(accessibilityResults);
   } catch (e) {

@@ -16,24 +16,55 @@ found in the LICENSE file.
 
 <body>
 
-<div id="top">
-  <div class="section-header">
+<div id="container">
+  <div id="navigation">
+    <div id="caption">DevTools</div>
+  </div>
+  <div id="content">
+    <div id="devices-tab">
+      <div class="content-header">Devices</div>
+      <div id="port-forwarding-settings">
+        <label for="port-forwarding-enable">
+          <input id="port-forwarding-enable" type="checkbox" disabled/>
+          <span>Enable port forwarding</span>
+        </label>
+        <button id="port-forwarding-config-open" disabled>
+          Configure port forwarding</button>
+      </div>
+      <div id="devices"></div>
+    </div>
+    <div id="pages-tab">
+      <div class="content-header">Pages</div>
+      <div id="pages" class="list"></div>
+    </div>
+    <div id="extensions-tab">
+      <div class="content-header">Extensions</div>
+      <div id="extensions" class="list"></div>
+    </div>
+    <div id="apps-tab">
+      <div class="content-header">Apps</div>
+      <div id="apps" class="list"></div>
+    </div>
+    <div id="workers-tab">
+      <div class="content-header">Shared workers</div>
+      <div id="workers" class="list"></div>
+    </div>
+    <div id="other-tab">
+      <div class="content-header">Other</div>
+      <div id="others" class="list"></div>
+    </div>
   </div>
 </div>
-
-<div id="devices"></div>
-
-<div class="section">Pages</div>
-<div id="pages" class="list"></div>
-
-<div class="section">Extensions</div>
-<div id="extensions" class="list"></div>
-
-<div class="section">Shared workers</div>
-<div id="workers" class="list"></div>
-
-<div class="section">Other</div>
-<div id="others" class="list"></div>
-
+<div id="port-forwarding-overlay">
+  <div id="port-forwarding-config">
+    <div id="port-forwarding-config-close" class="close-button"></div>
+    <div id="port-forwarding-config-title">Port forwarding settings</div>
+    <div id="port-forwarding-config-list">
+    </div>
+    <div id="port-forwarding-config-buttons">
+      <button id="port-forwarding-config-done">Done</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

@@ -25,16 +25,16 @@ CHROMEOS_EXPORT extern const char kAshWebUIInit[];
 CHROMEOS_EXPORT extern const char kAuthExtensionPath[];
 CHROMEOS_EXPORT extern const char kChromeOSReleaseBoard[];
 CHROMEOS_EXPORT extern const char kDbusStub[];
-CHROMEOS_EXPORT extern const char kDisableAppMode[];
+CHROMEOS_EXPORT extern const char kDefaultStubNetworkStateIdle[];
 CHROMEOS_EXPORT extern const char kDisableBootAnimation[];
 CHROMEOS_EXPORT extern const char kDisableChromeCaptivePortalDetector[];
 CHROMEOS_EXPORT extern const char kDisableDrive[];
 CHROMEOS_EXPORT extern const char kDisableLocalAccounts[];
 CHROMEOS_EXPORT extern const char kDisableLoginAnimations[];
-CHROMEOS_EXPORT extern const char kDisableNewNetworkChangeNotifier[];
+CHROMEOS_EXPORT extern const char kDisableNewChannelSwitcherUI[];
+CHROMEOS_EXPORT extern const char kDisableOOBEBlockingUpdate[];
 CHROMEOS_EXPORT extern const char kDisableOnlineEULA[];
 CHROMEOS_EXPORT extern const char kDisableOobeAnimation[];
-CHROMEOS_EXPORT extern const char kDisableOOBEBlockingUpdate[];
 CHROMEOS_EXPORT extern const char kDisableQuickofficeComponentApp[];
 CHROMEOS_EXPORT extern const char kDisableStubEthernet[];
 CHROMEOS_EXPORT extern const char kEchoExtensionPath[];
@@ -47,13 +47,13 @@ CHROMEOS_EXPORT extern const char kEnableRequestTabletSite[];
 CHROMEOS_EXPORT extern const char kEnableScreensaverExtensions[];
 CHROMEOS_EXPORT extern const char kEnableStaticIPConfig[];
 CHROMEOS_EXPORT extern const char kEnableStubInteractive[];
+CHROMEOS_EXPORT extern const char kEnableStubPortalledWifi[];
 CHROMEOS_EXPORT extern const char kEnableTouchpadThreeFingerClick[];
-CHROMEOS_EXPORT extern const char kEnableTouchpadThreeFingerSwipe[];
 CHROMEOS_EXPORT extern const char kEnterpriseEnrollmentInitialModulus[];
 CHROMEOS_EXPORT extern const char kEnterpriseEnrollmentModulusLimit[];
 CHROMEOS_EXPORT extern const char kFileManagerShowCheckboxes[];
-CHROMEOS_EXPORT extern const char kFileManagerEnableSharing[];
-CHROMEOS_EXPORT extern const char kFirstBoot[];
+CHROMEOS_EXPORT extern const char kFileManagerEnableWebstoreIntegration[];
+CHROMEOS_EXPORT extern const char kFirstExecAfterBoot[];
 CHROMEOS_EXPORT extern const char kForceLoginManagerInTests[];
 CHROMEOS_EXPORT extern const char kGuestSession[];
 CHROMEOS_EXPORT extern const char kHasChromeOSDiamondKey[];
@@ -66,14 +66,12 @@ CHROMEOS_EXPORT extern const char kLoginProfile[];
 CHROMEOS_EXPORT extern const char kLoginUser[];
 CHROMEOS_EXPORT extern const char kNaturalScrollDefault[];
 CHROMEOS_EXPORT extern const char kNoDiscardTabs[];
-#ifndef NDEBUG
+CHROMEOS_EXPORT extern const char kNoSwapMetrics[];
 CHROMEOS_EXPORT extern const char kOobeSkipPostLogin[];
-#endif
 CHROMEOS_EXPORT extern const char kSkipHWIDCheck[];
 CHROMEOS_EXPORT extern const char kSmsTestMessages[];
 CHROMEOS_EXPORT extern const char kStubCrosSettings[];
 CHROMEOS_EXPORT extern const char kUseNewNetworkConfigurationHandlers[];
-CHROMEOS_EXPORT extern const char kUseNewNetworkConnectionHandler[];
 
 }  // namespace switches
 }  // namespace chromeos

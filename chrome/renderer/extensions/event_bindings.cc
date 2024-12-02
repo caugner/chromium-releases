@@ -6,11 +6,11 @@
 
 #include <vector>
 
-#include "base/bind.h"
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -25,16 +25,17 @@
 #include "chrome/renderer/extensions/extension_helper.h"
 #include "chrome/renderer/extensions/user_script_slave.h"
 #include "content/public/renderer/render_thread.h"
+#include "content/public/renderer/render_view.h"
 #include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/event_filter.h"
 #include "extensions/common/view_type.h"
-#include "googleurl/src/gurl.h"
 #include "grit/renderer_resources.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebView.h"
+#include "url/gurl.h"
 #include "v8/include/v8.h"
 
 using WebKit::WebFrame;
@@ -91,65 +92,56 @@ class ExtensionImpl : public ChromeV8Extension {
 
   // Attach an event name to an object.
   void AttachEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    DCHECK(args.Length() == 1);
-    // TODO(erikkay) should enforce that event name is a string in the bindings
-    DCHECK(args[0]->IsString() || args[0]->IsUndefined());
+    CHECK_EQ(1, args.Length());
+    CHECK(args[0]->IsString());
 
-    if (args[0]->IsString()) {
-      std::string event_name = *v8::String::AsciiValue(args[0]->ToString());
-      CHECK(context());
+    std::string event_name = *v8::String::AsciiValue(args[0]->ToString());
 
-      if (!dispatcher_->CheckContextAccessToExtensionAPI(event_name, context()))
-        return;
+    if (!dispatcher_->CheckContextAccessToExtensionAPI(event_name, context()))
+      return;
 
-      std::string extension_id = context()->GetExtensionID();
-      EventListenerCounts& listener_counts =
-          g_listener_counts.Get()[extension_id];
-      if (++listener_counts[event_name] == 1) {
-        content::RenderThread::Get()->Send(
-            new ExtensionHostMsg_AddListener(extension_id, event_name));
-      }
+    std::string extension_id = context()->GetExtensionID();
+    EventListenerCounts& listener_counts =
+        g_listener_counts.Get()[extension_id];
+    if (++listener_counts[event_name] == 1) {
+      content::RenderThread::Get()->Send(
+          new ExtensionHostMsg_AddListener(extension_id, event_name));
+    }
 
-      // This is called the first time the page has added a listener. Since
-      // the background page is the only lazy page, we know this is the first
-      // time this listener has been registered.
-      if (IsLazyBackgroundPage(GetRenderView(), context()->extension())) {
-        content::RenderThread::Get()->Send(
-            new ExtensionHostMsg_AddLazyListener(extension_id, event_name));
-      }
+    // This is called the first time the page has added a listener. Since
+    // the background page is the only lazy page, we know this is the first
+    // time this listener has been registered.
+    if (IsLazyBackgroundPage(GetRenderView(), context()->extension())) {
+      content::RenderThread::Get()->Send(
+          new ExtensionHostMsg_AddLazyListener(extension_id, event_name));
     }
   }
 
   void DetachEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    DCHECK(args.Length() == 2);
-    // TODO(erikkay) should enforce that event name is a string in the bindings
-    DCHECK(args[0]->IsString() || args[0]->IsUndefined());
+    CHECK_EQ(2, args.Length());
+    CHECK(args[0]->IsString());
+    CHECK(args[1]->IsBoolean());
 
-    if (args[0]->IsString() && args[1]->IsBoolean()) {
-      std::string event_name = *v8::String::AsciiValue(args[0]->ToString());
-      bool is_manual = args[1]->BooleanValue();
+    std::string event_name = *v8::String::AsciiValue(args[0]);
+    bool is_manual = args[1]->BooleanValue();
 
-      if (!context())
-        return;
+    std::string extension_id = context()->GetExtensionID();
+    EventListenerCounts& listener_counts =
+        g_listener_counts.Get()[extension_id];
 
-      std::string extension_id = context()->GetExtensionID();
-      EventListenerCounts& listener_counts =
-          g_listener_counts.Get()[extension_id];
+    if (--listener_counts[event_name] == 0) {
+      content::RenderThread::Get()->Send(
+          new ExtensionHostMsg_RemoveListener(extension_id, event_name));
+    }
 
-      if (--listener_counts[event_name] == 0) {
-        content::RenderThread::Get()->Send(
-            new ExtensionHostMsg_RemoveListener(extension_id, event_name));
-      }
-
-      // DetachEvent is called when the last listener for the context is
-      // removed. If the context is the background page, and it removes the
-      // last listener manually, then we assume that it is no longer interested
-      // in being awakened for this event.
-      if (is_manual && IsLazyBackgroundPage(GetRenderView(),
-                                            context()->extension())) {
-        content::RenderThread::Get()->Send(
-            new ExtensionHostMsg_RemoveLazyListener(extension_id, event_name));
-      }
+    // DetachEvent is called when the last listener for the context is
+    // removed. If the context is the background page, and it removes the
+    // last listener manually, then we assume that it is no longer interested
+    // in being awakened for this event.
+    if (is_manual && IsLazyBackgroundPage(GetRenderView(),
+                                          context()->extension())) {
+      content::RenderThread::Get()->Send(
+          new ExtensionHostMsg_RemoveLazyListener(extension_id, event_name));
     }
   }
 
@@ -159,17 +151,12 @@ class ExtensionImpl : public ChromeV8Extension {
   // returns the id assigned to the listener, which will be returned from calls
   // to MatchAgainstEventFilter where this listener matches.
   void AttachFilteredEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    DCHECK_EQ(2, args.Length());
-    DCHECK(args[0]->IsString());
-    DCHECK(args[1]->IsObject());
-
-    DCHECK(context());
-    if (!context()) {
-      args.GetReturnValue().Set(static_cast<int32_t>(-1));
-      return;
-    }
+    CHECK_EQ(2, args.Length());
+    CHECK(args[0]->IsString());
+    CHECK(args[1]->IsObject());
 
     std::string event_name = *v8::String::AsciiValue(args[0]);
+
     // This method throws an exception if it returns false.
     if (!dispatcher_->CheckContextAccessToExtensionAPI(event_name, context()))
       return;
@@ -246,12 +233,10 @@ class ExtensionImpl : public ChromeV8Extension {
   // manual - false if this is part of the extension unload process where all
   //          listeners are automatically detached.
   void DetachFilteredEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    DCHECK_EQ(2, args.Length());
-    DCHECK(args[0]->IsInt32());
-    DCHECK(args[1]->IsBoolean());
+    CHECK_EQ(2, args.Length());
+    CHECK(args[0]->IsInt32());
+    CHECK(args[1]->IsBoolean());
     bool is_manual = args[1]->BooleanValue();
-    if (!context())
-      return;
 
     std::string extension_id = context()->GetExtensionID();
     if (extension_id.empty())
@@ -280,12 +265,13 @@ class ExtensionImpl : public ChromeV8Extension {
   void MatchAgainstEventFilter(
       const v8::FunctionCallbackInfo<v8::Value>& args) {
     typedef std::set<EventFilter::MatcherID> MatcherIDs;
-
     EventFilter& event_filter = g_event_filter.Get();
     std::string event_name = *v8::String::AsciiValue(args[0]->ToString());
     EventFilteringInfo info = ParseFromObject(args[1]->ToObject());
+    // Only match events routed to this context's RenderView or ones that don't
+    // have a routingId in their filter.
     MatcherIDs matched_event_filters = event_filter.MatchEvent(
-        event_name, info);
+        event_name, info, context()->GetRenderView()->GetRoutingID());
     v8::Handle<v8::Array> array(v8::Array::New(matched_event_filters.size()));
     int i = 0;
     for (MatcherIDs::iterator it = matched_event_filters.begin();
@@ -320,10 +306,11 @@ class ExtensionImpl : public ChromeV8Extension {
             helper->view_type() == VIEW_TYPE_EXTENSION_BACKGROUND_PAGE);
   }
 
-  static scoped_ptr<EventMatcher> ParseEventMatcher(
+  scoped_ptr<EventMatcher> ParseEventMatcher(
       base::DictionaryValue* filter_dict) {
     return scoped_ptr<EventMatcher>(new EventMatcher(
-        scoped_ptr<base::DictionaryValue>(filter_dict->DeepCopy())));
+        scoped_ptr<base::DictionaryValue>(filter_dict->DeepCopy()),
+            context()->GetRenderView()->GetRoutingID()));
   }
 };
 

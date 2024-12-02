@@ -34,18 +34,19 @@ const int kQueryId = 5;
 // A constant value to use as an Autofill profile ID.
 const int kAutofillProfileId = 1;
 
-class MockAutofillExternalDelegate : public AutofillExternalDelegate {
+class MockAutofillDriver : public TestAutofillDriver {
  public:
-  MockAutofillExternalDelegate(content::WebContents* web_contents,
-                               AutofillManager* autofill_manger)
-      : AutofillExternalDelegate(web_contents, autofill_manger) {}
+  explicit MockAutofillDriver(content::WebContents* web_contents)
+      : TestAutofillDriver(web_contents) {}
 
-  ~MockAutofillExternalDelegate() {}
-
-  MOCK_METHOD0(ClearPreviewedForm, void());
+  // Mock methods to enable testability.
+  MOCK_METHOD1(SetRendererActionOnFormDataReception,
+               void(RendererFormDataAction action));
+  MOCK_METHOD0(RendererShouldClearFilledForm, void());
+  MOCK_METHOD0(RendererShouldClearPreviewedForm, void());
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MockAutofillExternalDelegate);
+  DISALLOW_COPY_AND_ASSIGN(MockAutofillDriver);
 };
 
 class MockAutofillManagerDelegate
@@ -61,6 +62,10 @@ class MockAutofillManagerDelegate
                     const std::vector<base::string16>& icons,
                     const std::vector<int>& identifiers,
                     base::WeakPtr<AutofillPopupDelegate> delegate));
+
+  MOCK_METHOD2(UpdateAutofillPopupDataListValues,
+               void(const std::vector<base::string16>& values,
+                    const std::vector<base::string16>& lables));
 
   MOCK_METHOD0(HideAutofillPopup, void());
 
@@ -95,14 +100,14 @@ class AutofillExternalDelegateUnitTest
  protected:
   virtual void SetUp() OVERRIDE {
     ChromeRenderViewHostTestHarness::SetUp();
-    autofill_driver_.reset(new TestAutofillDriver(web_contents()));
+    autofill_driver_.reset(new MockAutofillDriver(web_contents()));
     autofill_manager_.reset(
         new MockAutofillManager(autofill_driver_.get(),
                                 &manager_delegate_));
     external_delegate_.reset(
-        new testing::NiceMock<MockAutofillExternalDelegate>(
+        new AutofillExternalDelegate(
             web_contents(),
-            autofill_manager_.get()));
+            autofill_manager_.get(), autofill_driver_.get()));
   }
 
   virtual void TearDown() OVERRIDE {
@@ -128,10 +133,9 @@ class AutofillExternalDelegateUnitTest
   }
 
   MockAutofillManagerDelegate manager_delegate_;
-  scoped_ptr<AutofillDriver> autofill_driver_;
+  scoped_ptr<MockAutofillDriver> autofill_driver_;
   scoped_ptr<MockAutofillManager> autofill_manager_;
-  scoped_ptr<testing::NiceMock<MockAutofillExternalDelegate> >
-      external_delegate_;
+  scoped_ptr<AutofillExternalDelegate> external_delegate_;
 };
 
 // Test that our external delegate called the virtual methods at the right time.
@@ -163,6 +167,9 @@ TEST_F(AutofillExternalDelegateUnitTest, TestExternalDelegateVirtualCalls) {
   // Called by DidAutofillSuggestions, add expectation to remove warning.
   EXPECT_CALL(*autofill_manager_, OnFillAutofillFormData(_, _, _, _));
 
+  EXPECT_CALL(*autofill_driver_, SetRendererActionOnFormDataReception(
+      AutofillDriver::FORM_DATA_ACTION_FILL));
+
   EXPECT_CALL(manager_delegate_, HideAutofillPopup());
 
   // This should trigger a call to hide the popup since we've selected an
@@ -176,13 +183,9 @@ TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegateDataList) {
 
   std::vector<base::string16> data_list_items;
   data_list_items.push_back(base::string16());
-  std::vector<int> data_list_ids;
-  data_list_ids.push_back(WebAutofillClient::MenuItemIDDataListEntry);
 
   external_delegate_->SetCurrentDataListValues(data_list_items,
-                                               data_list_items,
-                                               data_list_items,
-                                               data_list_ids);
+                                               data_list_items);
 
   // The enums must be cast to ints to prevent compile errors on linux_rel.
   EXPECT_CALL(manager_delegate_,
@@ -229,6 +232,62 @@ TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegateDataList) {
                                             autofill_ids);
 }
 
+// Test that datalist values can get updated while a popup is showing.
+TEST_F(AutofillExternalDelegateUnitTest, UpdateDataListWhileShowingPopup) {
+  IssueOnQuery(kQueryId);
+
+  EXPECT_CALL(manager_delegate_,
+              ShowAutofillPopup(_, _, _, _, _, _, _)).Times(0);
+
+  // Make sure just setting the data list values doesn't cause the popup to
+  // appear.
+  std::vector<base::string16> data_list_items;
+  data_list_items.push_back(base::string16());
+
+  external_delegate_->SetCurrentDataListValues(data_list_items,
+                                               data_list_items);
+
+  // The enums must be cast to ints to prevent compile errors on linux_rel.
+  EXPECT_CALL(manager_delegate_,
+              ShowAutofillPopup(
+                  _, _, _, _, _,
+                  testing::ElementsAre(
+                      static_cast<int>(
+                          WebAutofillClient::MenuItemIDDataListEntry),
+                      static_cast<int>(WebAutofillClient::MenuItemIDSeparator),
+                      kAutofillProfileId,
+                      static_cast<int>(WebAutofillClient::MenuItemIDSeparator),
+                      static_cast<int>(
+                          WebAutofillClient::MenuItemIDAutofillOptions)),
+                  _));
+
+  // Ensure the popup is displayed.
+  std::vector<base::string16> autofill_item;
+  autofill_item.push_back(base::string16());
+  std::vector<int> autofill_ids;
+  autofill_ids.push_back(kAutofillProfileId);
+  external_delegate_->OnSuggestionsReturned(kQueryId,
+                                            autofill_item,
+                                            autofill_item,
+                                            autofill_item,
+                                            autofill_ids);
+
+  // This would normally get called from ShowAutofillPopup, but it is mocked
+  // we need to call OnPopupShown ourselves.
+  external_delegate_->OnPopupShown(NULL);
+
+  // Update the current data list and ensure the popup is updated.
+  data_list_items.push_back(base::string16());
+
+  // The enums must be cast to ints to prevent compile errors on linux_rel.
+  EXPECT_CALL(manager_delegate_,
+              UpdateAutofillPopupDataListValues(data_list_items,
+                                                data_list_items));
+
+  external_delegate_->SetCurrentDataListValues(data_list_items,
+                                               data_list_items);
+}
+
 // Test that the Autofill popup is able to display warnings explaining why
 // Autofill is disabled for a website.
 // Regression test for http://crbug.com/247880
@@ -256,21 +315,53 @@ TEST_F(AutofillExternalDelegateUnitTest, AutofillWarnings) {
                                             autofill_ids);
 }
 
+// Test that the Autofill popup doesn't display a warning explaining why
+// Autofill is disabled for a website when there are no Autofill suggestions.
+// Regression test for http://crbug.com/105636
+TEST_F(AutofillExternalDelegateUnitTest, NoAutofillWarningsWithoutSuggestions) {
+  const FormData form;
+  FormFieldData field;
+  field.is_focusable = true;
+  field.should_autocomplete = false;
+  const gfx::RectF element_bounds;
+
+  external_delegate_->OnQuery(kQueryId, form, field, element_bounds, true);
+
+  EXPECT_CALL(manager_delegate_,
+              ShowAutofillPopup(_, _, _, _, _, _, _)).Times(0);
+  EXPECT_CALL(manager_delegate_, HideAutofillPopup()).Times(1);
+
+  // This should not call ShowAutofillPopup.
+  std::vector<base::string16> autofill_item;
+  autofill_item.push_back(base::string16());
+  std::vector<int> autofill_ids;
+  autofill_ids.push_back(WebAutofillClient::MenuItemIDAutocompleteEntry);
+  external_delegate_->OnSuggestionsReturned(kQueryId,
+                                            autofill_item,
+                                            autofill_item,
+                                            autofill_item,
+                                            autofill_ids);
+}
+
 // Test that the Autofill delegate doesn't try and fill a form with a
 // negative unique id.
 TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegateInvalidUniqueId) {
   // Ensure it doesn't try to preview the negative id.
   EXPECT_CALL(*autofill_manager_, OnFillAutofillFormData(_, _, _, _)).Times(0);
-  EXPECT_CALL(*external_delegate_, ClearPreviewedForm()).Times(1);
+  EXPECT_CALL(*autofill_driver_,
+              SetRendererActionOnFormDataReception(_)).Times(0);
+  EXPECT_CALL(*autofill_driver_, RendererShouldClearPreviewedForm()).Times(1);
   external_delegate_->DidSelectSuggestion(-1);
 
   // Ensure it doesn't try to fill the form in with the negative id.
   EXPECT_CALL(manager_delegate_, HideAutofillPopup());
   EXPECT_CALL(*autofill_manager_, OnFillAutofillFormData(_, _, _, _)).Times(0);
+  EXPECT_CALL(*autofill_driver_,
+              SetRendererActionOnFormDataReception(_)).Times(0);
   external_delegate_->DidAcceptSuggestion(base::string16(), -1);
 }
 
-// Test that the ClearPreview IPC is only sent the form was being previewed
+// Test that the ClearPreview call is only sent if the form was being previewed
 // (i.e. it isn't autofilling a password).
 TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegateClearPreviewedForm) {
   // Called by DidSelectSuggestion, add expectation to remove warning.
@@ -278,11 +369,13 @@ TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegateClearPreviewedForm) {
 
   // Ensure selecting a new password entries or Autofill entries will
   // cause any previews to get cleared.
-  EXPECT_CALL(*external_delegate_, ClearPreviewedForm()).Times(1);
+  EXPECT_CALL(*autofill_driver_, RendererShouldClearPreviewedForm()).Times(1);
   external_delegate_->DidSelectSuggestion(
       WebAutofillClient::MenuItemIDPasswordEntry);
 
-  EXPECT_CALL(*external_delegate_, ClearPreviewedForm()).Times(1);
+  EXPECT_CALL(*autofill_driver_, RendererShouldClearPreviewedForm()).Times(1);
+  EXPECT_CALL(*autofill_driver_, SetRendererActionOnFormDataReception(
+      AutofillDriver::FORM_DATA_ACTION_PREVIEW));
   external_delegate_->DidSelectSuggestion(1);
 }
 
@@ -338,6 +431,17 @@ TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegatePasswordSuggestions) {
   external_delegate_->DidAcceptSuggestion(
       suggestions[0],
       WebAutofillClient::MenuItemIDPasswordEntry);
+}
+
+// Test that the driver is directed to clear the form after being notified that
+// the user accepted the suggestion to clear the form.
+TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegateClearForm) {
+  EXPECT_CALL(manager_delegate_, HideAutofillPopup());
+  EXPECT_CALL(*autofill_driver_, RendererShouldClearFilledForm());
+
+  external_delegate_->DidAcceptSuggestion(
+      base::string16(),
+      WebAutofillClient::MenuItemIDClearForm);
 }
 
 TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegateHideWarning) {

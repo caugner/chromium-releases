@@ -15,6 +15,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using net::test::GetMinStreamFrameSize;
 using net::test::FramerVisitorCapturingFrames;
 using net::test::MockSendAlgorithm;
 using net::test::QuicConnectionPeer;
@@ -39,7 +40,7 @@ class TestConnectionHelper : public QuicEpollConnectionHelper {
 
   virtual int WritePacketToWire(const QuicEncryptedPacket& packet,
                                 int* error) OVERRIDE {
-    QuicFramer framer(kQuicVersion1, QuicTime::Zero(), true);
+    QuicFramer framer(QuicVersionMax(), QuicTime::Zero(), true);
     FramerVisitorCapturingFrames visitor;
     framer.set_visitor(&visitor);
     EXPECT_TRUE(framer.ProcessPacket(packet));
@@ -59,7 +60,7 @@ class TestConnection : public QuicConnection {
   TestConnection(QuicGuid guid,
                  IPEndPoint address,
                  TestConnectionHelper* helper)
-      : QuicConnection(guid, address, helper, false) {
+      : QuicConnection(guid, address, helper, false, QuicVersionMax()) {
   }
 
   void SendAck() {
@@ -73,11 +74,11 @@ class TestConnection : public QuicConnection {
   using QuicConnection::SendOrQueuePacket;
 };
 
-class QuicConnectionHelperTest : public ::testing::Test {
+class QuicEpollConnectionHelperTest : public ::testing::Test {
  protected:
-  QuicConnectionHelperTest()
+  QuicEpollConnectionHelperTest()
       : guid_(42),
-        framer_(kQuicVersion1, QuicTime::Zero(), false),
+        framer_(QuicVersionMax(), QuicTime::Zero(), false),
         send_algorithm_(new testing::StrictMock<MockSendAlgorithm>),
         helper_(new TestConnectionHelper(0, &epoll_server_)),
         connection_(guid_, IPEndPoint(), helper_),
@@ -85,8 +86,8 @@ class QuicConnectionHelperTest : public ::testing::Test {
     connection_.set_visitor(&visitor_);
     connection_.SetSendAlgorithm(send_algorithm_);
     epoll_server_.set_timeout_in_us(-1);
-    EXPECT_CALL(*send_algorithm_, TimeUntilSend(_, _, _)).WillRepeatedly(Return(
-        QuicTime::Delta::Zero()));
+    EXPECT_CALL(*send_algorithm_, TimeUntilSend(_, _, _, _)).
+        WillRepeatedly(Return(QuicTime::Delta::Zero()));
   }
 
   QuicPacket* ConstructDataPacket(QuicPacketSequenceNumber number,
@@ -102,7 +103,7 @@ class QuicConnectionHelperTest : public ::testing::Test {
     QuicFrames frames;
     QuicFrame frame(&frame1_);
     frames.push_back(frame);
-    return framer_.ConstructFrameDataPacket(header_, frames).packet;
+    return framer_.BuildUnsizedDataPacket(header_, frames).packet;
   }
 
   QuicGuid guid_;
@@ -118,15 +119,17 @@ class QuicConnectionHelperTest : public ::testing::Test {
   QuicStreamFrame frame1_;
 };
 
-TEST_F(QuicConnectionHelperTest, DISABLED_TestRetransmission) {
+TEST_F(QuicEpollConnectionHelperTest, DISABLED_TestRetransmission) {
   //FLAGS_fake_packet_loss_percentage = 100;
+  EXPECT_CALL(*send_algorithm_, RetransmissionDelay()).WillRepeatedly(
+      Return(QuicTime::Delta::Zero()));
   const int64 kDefaultRetransmissionTimeMs = 500;
 
   const char buffer[] = "foo";
   const size_t packet_size =
       GetPacketHeaderSize(PACKET_8BYTE_GUID, kIncludeVersion,
                           PACKET_6BYTE_SEQUENCE_NUMBER, NOT_IN_FEC_GROUP) +
-      QuicFramer::GetMinStreamFrameSize() + arraysize(buffer) - 1;
+      GetMinStreamFrameSize(framer_.version()) + arraysize(buffer) - 1;
   EXPECT_CALL(*send_algorithm_,
               SentPacket(_, 1, packet_size, NOT_RETRANSMISSION));
   EXPECT_CALL(*send_algorithm_, AbandoningPacket(1, packet_size));
@@ -139,7 +142,7 @@ TEST_F(QuicConnectionHelperTest, DISABLED_TestRetransmission) {
   EXPECT_EQ(2u, helper_->header()->packet_sequence_number);
 }
 
-TEST_F(QuicConnectionHelperTest, InitialTimeout) {
+TEST_F(QuicEpollConnectionHelperTest, InitialTimeout) {
   EXPECT_TRUE(connection_.connected());
 
   EXPECT_CALL(*send_algorithm_, SentPacket(_, 1, _, NOT_RETRANSMISSION));
@@ -149,7 +152,7 @@ TEST_F(QuicConnectionHelperTest, InitialTimeout) {
   EXPECT_EQ(kDefaultInitialTimeoutSecs * 1000000, epoll_server_.NowInUsec());
 }
 
-TEST_F(QuicConnectionHelperTest, TimeoutAfterSend) {
+TEST_F(QuicEpollConnectionHelperTest, TimeoutAfterSend) {
   EXPECT_TRUE(connection_.connected());
   EXPECT_EQ(0, epoll_server_.NowInUsec());
 
@@ -176,11 +179,13 @@ TEST_F(QuicConnectionHelperTest, TimeoutAfterSend) {
   EXPECT_FALSE(connection_.connected());
 }
 
-TEST_F(QuicConnectionHelperTest, SendSchedulerDelayThenSend) {
+TEST_F(QuicEpollConnectionHelperTest, SendSchedulerDelayThenSend) {
   // Test that if we send a packet with a delay, it ends up queued.
+  EXPECT_CALL(*send_algorithm_, RetransmissionDelay()).WillRepeatedly(
+      Return(QuicTime::Delta::Zero()));
   QuicPacket* packet = ConstructDataPacket(1, 0);
   EXPECT_CALL(
-      *send_algorithm_, TimeUntilSend(_, NOT_RETRANSMISSION, _)).WillOnce(
+      *send_algorithm_, TimeUntilSend(_, NOT_RETRANSMISSION, _, _)).WillOnce(
           testing::Return(QuicTime::Delta::FromMicroseconds(1)));
   connection_.SendOrQueuePacket(ENCRYPTION_NONE, 1, packet, 0,
                                 HAS_RETRANSMITTABLE_DATA);
@@ -189,9 +194,8 @@ TEST_F(QuicConnectionHelperTest, SendSchedulerDelayThenSend) {
 
   // Advance the clock to fire the alarm, and configure the scheduler
   // to permit the packet to be sent.
-  EXPECT_CALL(
-      *send_algorithm_, TimeUntilSend(_, NOT_RETRANSMISSION, _)).WillRepeatedly(
-          testing::Return(QuicTime::Delta::Zero()));
+  EXPECT_CALL(*send_algorithm_, TimeUntilSend(_, NOT_RETRANSMISSION, _, _)).
+      WillRepeatedly(testing::Return(QuicTime::Delta::Zero()));
   EXPECT_CALL(visitor_, OnCanWrite()).WillOnce(testing::Return(true));
   epoll_server_.AdvanceByAndCallCallbacks(1);
   EXPECT_EQ(0u, connection_.NumQueuedPackets());

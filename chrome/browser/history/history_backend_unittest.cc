@@ -15,13 +15,13 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/platform_file.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
-#include "chrome/browser/favicon/imported_favicon_usage.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_service.h"
@@ -32,6 +32,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/importer/imported_favicon_usage.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -39,11 +40,11 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/test_browser_thread.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/image/image.h"
+#include "url/gurl.h"
 
 using base::Time;
 using base::TimeDelta;
@@ -75,7 +76,7 @@ bool FaviconBitmapLessThan(const history::FaviconBitmap& a,
   return a.pixel_size.GetArea() < b.pixel_size.GetArea();
 }
 
-}  // namepace
+}  // namespace
 
 namespace history {
 
@@ -391,7 +392,7 @@ class HistoryBackendTest : public testing::Test {
       backend_->Closing();
     backend_ = NULL;
     mem_backend_.reset();
-    file_util::Delete(test_dir_, true);
+    base::DeleteFile(test_dir_, true);
     base::RunLoop().RunUntilIdle();
   }
 
@@ -461,9 +462,9 @@ TEST_F(HistoryBackendTest, DeleteAll) {
   GURL favicon_url1("http://www.google.com/favicon.ico");
   GURL favicon_url2("http://news.google.com/favicon.ico");
   chrome::FaviconID favicon2 = backend_->thumbnail_db_->AddFavicon(favicon_url2,
-      chrome::FAVICON, GetSizesSmallAndLarge());
+      chrome::FAVICON);
   chrome::FaviconID favicon1 = backend_->thumbnail_db_->AddFavicon(favicon_url1,
-      chrome::FAVICON, GetSizesSmallAndLarge());
+      chrome::FAVICON);
 
   std::vector<unsigned char> data;
   data.push_back('a');
@@ -504,12 +505,10 @@ TEST_F(HistoryBackendTest, DeleteAll) {
   VisitVector visits;
   backend_->db_->GetVisitsForURL(row1_id, &visits);
   ASSERT_EQ(1U, visits.size());
-  VisitID visit1_id = visits[0].visit_id;
 
   visits.clear();
   backend_->db_->GetVisitsForURL(row2_id, &visits);
   ASSERT_EQ(1U, visits.size());
-  VisitID visit2_id = visits[0].visit_id;
 
   // The in-memory backend should have been set and it should have gotten the
   // typed URL.
@@ -538,16 +537,6 @@ TEST_F(HistoryBackendTest, DeleteAll) {
   // Star row1.
   bookmark_model_.AddURL(
       bookmark_model_.bookmark_bar_node(), 0, string16(), row1.url());
-
-  // Set full text index for each one.
-  backend_->text_database_->AddPageData(row1.url(), row1_id, visit1_id,
-                                        row1.last_visit(),
-                                        UTF8ToUTF16("Title 1"),
-                                        UTF8ToUTF16("Body 1"));
-  backend_->text_database_->AddPageData(row2.url(), row2_id, visit2_id,
-                                        row2.last_visit(),
-                                        UTF8ToUTF16("Title 2"),
-                                        UTF8ToUTF16("Body 2"));
 
   // Now finally clear all history.
   backend_->DeleteAllHistory();
@@ -615,15 +604,6 @@ TEST_F(HistoryBackendTest, DeleteAll) {
 
   // The first URL should still be bookmarked.
   EXPECT_TRUE(bookmark_model_.IsBookmarked(row1.url()));
-
-  // The full text database should have no data.
-  std::vector<TextDatabase::Match> text_matches;
-  Time first_time_searched;
-  backend_->text_database_->GetTextMatches(UTF8ToUTF16("Body"),
-                                           QueryOptions(),
-                                           &text_matches,
-                                           &first_time_searched);
-  EXPECT_EQ(0U, text_matches.size());
 }
 
 // Checks that adding a visit, then calling DeleteAll, and then trying to add
@@ -659,9 +639,8 @@ TEST_F(HistoryBackendTest, DeleteAllThenAddData) {
   backend_->db_->GetAllVisitsInRange(Time(), Time(), 0, &all_visits);
   ASSERT_EQ(0U, all_visits.size());
 
-  // Try and set the full text index.
+  // Try and set the title.
   backend_->SetPageTitle(url, UTF8ToUTF16("Title"));
-  backend_->SetPageContents(url, UTF8ToUTF16("Body"));
 
   // The row should still be deleted.
   EXPECT_FALSE(backend_->db_->GetRowForURL(url, &outrow));
@@ -669,15 +648,6 @@ TEST_F(HistoryBackendTest, DeleteAllThenAddData) {
   // The visit should still be deleted.
   backend_->db_->GetAllVisitsInRange(Time(), Time(), 0, &all_visits);
   ASSERT_EQ(0U, all_visits.size());
-
-  // The full text database should have no data.
-  std::vector<TextDatabase::Match> text_matches;
-  Time first_time_searched;
-  backend_->text_database_->GetTextMatches(UTF8ToUTF16("Body"),
-                                           QueryOptions(),
-                                           &text_matches,
-                                           &first_time_searched);
-  EXPECT_EQ(0U, text_matches.size());
 }
 
 TEST_F(HistoryBackendTest, URLsNoLongerBookmarked) {
@@ -689,7 +659,6 @@ TEST_F(HistoryBackendTest, URLsNoLongerBookmarked) {
   chrome::FaviconID favicon1 = backend_->thumbnail_db_->AddFavicon(
       favicon_url1,
       chrome::FAVICON,
-      GetDefaultFaviconSizes(),
       new base::RefCountedBytes(data),
       Time::Now(),
       gfx::Size());
@@ -698,7 +667,6 @@ TEST_F(HistoryBackendTest, URLsNoLongerBookmarked) {
   chrome::FaviconID favicon2 = backend_->thumbnail_db_->AddFavicon(
       favicon_url2,
       chrome::FAVICON,
-      GetDefaultFaviconSizes(),
       new base::RefCountedBytes(data),
       Time::Now(),
       gfx::Size());
@@ -871,7 +839,6 @@ TEST_F(HistoryBackendTest, ImportedFaviconsTest) {
   chrome::FaviconID favicon1 = backend_->thumbnail_db_->AddFavicon(
       favicon_url1,
       chrome::FAVICON,
-      GetDefaultFaviconSizes(),
       base::RefCountedBytes::TakeVector(&data),
       Time::Now(),
       gfx::Size());
@@ -1278,11 +1245,11 @@ TEST_F(HistoryBackendTest, MigrationVisitSource) {
   // Copy history database file to current directory so that it will be deleted
   // in Teardown.
   base::FilePath new_history_path(getTestDir());
-  file_util::Delete(new_history_path, true);
+  base::DeleteFile(new_history_path, true);
   file_util::CreateDirectory(new_history_path);
   base::FilePath new_history_file =
       new_history_path.Append(chrome::kHistoryFilename);
-  ASSERT_TRUE(file_util::CopyFile(old_history_path, new_history_file));
+  ASSERT_TRUE(base::CopyFile(old_history_path, new_history_file));
 
   backend_ = new HistoryBackend(new_history_path,
                                 0,
@@ -2073,7 +2040,7 @@ TEST_F(HistoryBackendTest, GetFaviconsFromDBNoFaviconBitmaps) {
   const GURL icon_url("http://www.google.com/icon1");
 
   chrome::FaviconID icon_id = backend_->thumbnail_db_->AddFavicon(
-      icon_url, chrome::FAVICON, GetSizesSmallAndLarge());
+      icon_url, chrome::FAVICON);
   EXPECT_NE(0, icon_id);
   EXPECT_NE(0, backend_->thumbnail_db_->AddIconMapping(page_url, icon_id));
 
@@ -2198,7 +2165,6 @@ TEST_F(HistoryBackendTest, GetFaviconsFromDBExpired) {
   chrome::FaviconID icon_id =
       backend_->thumbnail_db_->AddFavicon(icon_url,
                                           chrome::FAVICON,
-                                          GetSizesSmallAndLarge(),
                                           bitmap_data,
                                           last_updated,
                                           kSmallSize);
@@ -2518,14 +2484,14 @@ TEST_F(HistoryBackendTest, MigrationVisitDuration) {
   // Copy history database file to current directory so that it will be deleted
   // in Teardown.
   base::FilePath new_history_path(getTestDir());
-  file_util::Delete(new_history_path, true);
+  base::DeleteFile(new_history_path, true);
   file_util::CreateDirectory(new_history_path);
   base::FilePath new_history_file =
       new_history_path.Append(chrome::kHistoryFilename);
   base::FilePath new_archived_file =
       new_history_path.Append(chrome::kArchivedHistoryFilename);
-  ASSERT_TRUE(file_util::CopyFile(old_history, new_history_file));
-  ASSERT_TRUE(file_util::CopyFile(old_archived, new_archived_file));
+  ASSERT_TRUE(base::CopyFile(old_history, new_history_file));
+  ASSERT_TRUE(base::CopyFile(old_archived, new_archived_file));
 
   backend_ = new HistoryBackend(new_history_path,
                                 0,
@@ -2795,7 +2761,7 @@ TEST_F(HistoryBackendSegmentDurationTest, SegmentDuration) {
 TEST_F(HistoryBackendTest, RemoveNotification) {
   scoped_ptr<TestingProfile> profile(new TestingProfile());
 
-  profile->CreateHistoryService(false, false);
+  ASSERT_TRUE(profile->CreateHistoryService(false, false));
   profile->CreateBookmarkModel(true);
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile.get());
   ui_test_utils::WaitForBookmarkModelToLoad(model);
@@ -2814,6 +2780,37 @@ TEST_F(HistoryBackendTest, RemoveNotification) {
   // This won't actually delete the URL, rather it'll empty out the visits.
   // This triggers blocking on the BookmarkModel.
   service->DeleteURL(url);
+}
+
+// Test DeleteFTSIndexDatabases deletes expected files.
+TEST_F(HistoryBackendTest, DeleteFTSIndexDatabases) {
+  ASSERT_TRUE(backend_.get());
+
+  base::FilePath history_path(getTestDir());
+  base::FilePath db1(history_path.AppendASCII("History Index 2013-05"));
+  base::FilePath db1_journal(db1.InsertBeforeExtensionASCII("-journal"));
+  base::FilePath db1_wal(db1.InsertBeforeExtensionASCII("-wal"));
+  base::FilePath db2_symlink(history_path.AppendASCII("History Index 2013-06"));
+  base::FilePath db2_actual(history_path.AppendASCII("Underlying DB"));
+
+  // Setup dummy index database files.
+  const char* data = "Dummy";
+  const size_t data_len = 5;
+  ASSERT_TRUE(file_util::WriteFile(db1, data, data_len));
+  ASSERT_TRUE(file_util::WriteFile(db1_journal, data, data_len));
+  ASSERT_TRUE(file_util::WriteFile(db1_wal, data, data_len));
+  ASSERT_TRUE(file_util::WriteFile(db2_actual, data, data_len));
+#if defined(OS_POSIX)
+  EXPECT_TRUE(file_util::CreateSymbolicLink(db2_actual, db2_symlink));
+#endif
+
+  // Delete all DTS index databases.
+  backend_->DeleteFTSIndexDatabases();
+  EXPECT_FALSE(base::PathExists(db1));
+  EXPECT_FALSE(base::PathExists(db1_wal));
+  EXPECT_FALSE(base::PathExists(db1_journal));
+  EXPECT_FALSE(base::PathExists(db2_symlink));
+  EXPECT_TRUE(base::PathExists(db2_actual));  // Symlinks shouldn't be followed.
 }
 
 }  // namespace history

@@ -9,6 +9,7 @@
 
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/history/history_service.h"
@@ -16,8 +17,7 @@
 #include "chrome/browser/history/url_database.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
-#include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
-#include "chrome/common/chrome_notification_types.h"
+#include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "content/public/browser/notification_source.h"
@@ -54,7 +54,7 @@ void ExtensionAppProvider::LaunchAppFromOmnibox(
   if (!extension)
     return;
 
-  AppLauncherHandler::RecordAppLaunchType(
+  CoreAppLauncherHandler::RecordAppLaunchType(
       extension_misc::APP_LAUNCH_OMNIBOX_APP,
       extension->GetType());
 
@@ -79,7 +79,7 @@ AutocompleteMatch ExtensionAppProvider::CreateAutocompleteMatch(
   match.fill_into_edit =
       app.should_match_against_launch_url ? app.launch_url : input.text();
   match.destination_url = GURL(app.launch_url);
-  match.inline_autocomplete_offset = string16::npos;
+  match.allowed_to_be_default_match = true;
   match.contents = AutocompleteMatch::SanitizeString(app.name);
   AutocompleteMatch::ClassifyLocationInString(name_match_index,
       input.text().length(), app.name.length(), ACMatchClassification::NONE,

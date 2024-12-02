@@ -11,7 +11,10 @@
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_webkitplatformsupport_impl.h"
+#include "content/test/test_media_stream_client.h"
+#include "third_party/WebKit/public/platform/WebDeviceMotionData.h"
 #include "third_party/WebKit/public/platform/WebGamepads.h"
+#include "third_party/WebKit/public/testing/WebFrameTestProxy.h"
 #include "third_party/WebKit/public/testing/WebTestProxy.h"
 
 #if defined(OS_WIN) && !defined(USE_AURA)
@@ -22,9 +25,11 @@
 #include "content/browser/renderer_host/popup_menu_helper_mac.h"
 #endif
 
+using WebKit::WebDeviceMotionData;
 using WebKit::WebGamepads;
 using WebKit::WebRect;
 using WebKit::WebSize;
+using WebTestRunner::WebFrameTestProxy;
 using WebTestRunner::WebTestProxy;
 using WebTestRunner::WebTestProxyBase;
 
@@ -46,6 +51,21 @@ RenderViewImpl* CreateWebTestProxy(RenderViewImplParams* params) {
   return render_view_proxy;
 }
 
+RenderFrameImpl* CreateWebFrameTestProxy(
+    RenderViewImpl* render_view,
+    int32 routing_id) {
+  typedef WebTestProxy<RenderViewImpl, RenderViewImplParams*> ViewProxy;
+  typedef WebFrameTestProxy<RenderFrameImpl, RenderViewImpl*, int32> FrameProxy;
+
+  ViewProxy* render_view_proxy = static_cast<ViewProxy*>(render_view);
+  WebTestProxyBase* base = static_cast<WebTestProxyBase*>(render_view_proxy);
+  FrameProxy* render_frame_proxy = new FrameProxy(render_view, routing_id);
+  render_frame_proxy->setBaseProxy(base);
+  render_frame_proxy->setVersion(2);
+
+  return render_frame_proxy;
+}
+
 }  // namespace
 
 
@@ -53,10 +73,15 @@ void EnableWebTestProxyCreation(
     const base::Callback<void(RenderView*, WebTestProxyBase*)>& callback) {
   g_callback.Get() = callback;
   RenderViewImpl::InstallCreateHook(CreateWebTestProxy);
+  RenderFrameImpl::InstallCreateHook(CreateWebFrameTestProxy);
 }
 
 void SetMockGamepads(const WebGamepads& pads) {
   RendererWebKitPlatformSupportImpl::SetMockGamepadsForTesting(pads);
+}
+
+void SetMockDeviceMotionData(const WebDeviceMotionData& data) {
+  RendererWebKitPlatformSupportImpl::SetMockDeviceMotionDataForTesting(data);
 }
 
 void EnableRendererLayoutTestMode() {
@@ -113,8 +138,10 @@ void DisableAutoResizeMode(RenderView* render_view, const WebSize& new_size) {
       ->DisableAutoResizeForTesting(new_size);
 }
 
-scoped_refptr<base::MessageLoopProxy> GetMediaThreadMessageLoopProxy() {
-  return RenderThreadImpl::current()->GetMediaThreadMessageLoopProxy();
+void UseMockMediaStreams(RenderView* render_view) {
+  RenderViewImpl* render_view_impl = static_cast<RenderViewImpl*>(render_view);
+  render_view_impl->SetMediaStreamClientForTesting(
+      new TestMediaStreamClient(render_view_impl));
 }
 
 }  // namespace content

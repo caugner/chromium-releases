@@ -23,8 +23,55 @@ const CGFloat kGap = 6.0;  // gap between icon and text.
 
 @implementation AutofillTextField
 
+@synthesize delegate = delegate_;
+
 + (Class)cellClass {
   return [AutofillTextFieldCell class];
+}
+
+- (id)initWithFrame:(NSRect)frame {
+  if (self = [super initWithFrame:frame])
+    [super setDelegate:self];
+  return self;
+}
+
+- (BOOL)becomeFirstResponder {
+  BOOL result = [super becomeFirstResponder];
+  if (result && delegate_)
+    [delegate_ fieldBecameFirstResponder:self];
+  return result;
+}
+
+- (void)controlTextDidEndEditing:(NSNotification*)notification {
+  if (delegate_)
+    [delegate_ didEndEditing:self];
+}
+
+- (void)controlTextDidChange:(NSNotification*)aNotification {
+  if (delegate_)
+    [delegate_ didChange:self];
+}
+
+- (NSString*)fieldValue {
+  return [[self cell] fieldValue];
+}
+
+- (void)setFieldValue:(NSString*)fieldValue {
+  [[self cell] setFieldValue:fieldValue];
+}
+
+- (NSString*)validityMessage {
+  return validityMessage_;
+}
+
+- (void)setValidityMessage:(NSString*)validityMessage {
+  validityMessage_.reset([validityMessage copy]);
+  [[self cell] setInvalid:[self invalid]];
+  [self setNeedsDisplay:YES];
+}
+
+- (BOOL)invalid {
+  return [validityMessage_ length] != 0;
 }
 
 @end
@@ -39,6 +86,14 @@ const CGFloat kGap = 6.0;  // gap between icon and text.
 
 - (void)setIcon:(NSImage*) icon {
   icon_.reset([icon retain]);
+}
+
+- (NSString*)fieldValue {
+  return [self stringValue];
+}
+
+- (void)setFieldValue:(NSString*)fieldValue {
+  [self setStringValue:fieldValue];
 }
 
 - (NSRect)textFrameForFrame:(NSRect)frame {

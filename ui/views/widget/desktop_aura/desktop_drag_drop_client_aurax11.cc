@@ -7,7 +7,7 @@
 #include <X11/Xatom.h>
 
 #include "base/event_types.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/client/drag_drop_delegate.h"
 #include "ui/aura/root_window.h"
@@ -18,7 +18,7 @@
 #include "ui/base/events/event.h"
 #include "ui/base/x/selection_utils.h"
 #include "ui/base/x/x11_util.h"
-#include "ui/views/widget/desktop_aura/desktop_root_window_host_x11.h"
+#include "ui/views/widget/desktop_aura/desktop_native_cursor_manager.h"
 
 using aura::client::DragDropDelegate;
 using ui::OSExchangeData;
@@ -366,12 +366,11 @@ bool DesktopDragDropClientAuraX11::X11DragContext::Dispatch(
 ///////////////////////////////////////////////////////////////////////////////
 
 DesktopDragDropClientAuraX11::DesktopDragDropClientAuraX11(
-    views::DesktopRootWindowHostX11* root_window_host,
     aura::RootWindow* root_window,
+    views::DesktopNativeCursorManager* cursor_manager,
     Display* xdisplay,
     ::Window xwindow)
     : move_loop_(this),
-      root_window_host_(root_window_host),
       root_window_(root_window),
       xdisplay_(xdisplay),
       xwindow_(xwindow),
@@ -381,7 +380,10 @@ DesktopDragDropClientAuraX11::DesktopDragDropClientAuraX11(
       source_current_window_(None),
       drag_drop_in_progress_(false),
       drag_operation_(0),
-      resulting_operation_(0) {
+      resulting_operation_(0),
+      grab_cursor_(cursor_manager->GetInitializedCursor(ui::kCursorGrabbing)),
+      copy_grab_cursor_(cursor_manager->GetInitializedCursor(ui::kCursorCopy)),
+      move_grab_cursor_(cursor_manager->GetInitializedCursor(ui::kCursorMove)) {
   DCHECK(g_live_client_map.find(xwindow) == g_live_client_map.end());
   g_live_client_map.insert(std::make_pair(xwindow, this));
 
@@ -458,8 +460,24 @@ void DesktopDragDropClientAuraX11::OnXdndStatus(
   DVLOG(1) << "XdndStatus";
 
   unsigned long source_window = event.data.l[0];
-  if (event.data.l[1] & 1)
-    negotiated_operation_[source_window] = event.data.l[4];
+  int drag_operation = ui::DragDropTypes::DRAG_NONE;
+  if (event.data.l[1] & 1) {
+    ::Atom atom_operation = event.data.l[4];
+    negotiated_operation_[source_window] = atom_operation;
+    drag_operation = AtomToDragOperation(atom_operation);
+  }
+
+  switch (drag_operation) {
+    case ui::DragDropTypes::DRAG_COPY:
+      move_loop_.UpdateCursor(copy_grab_cursor_);
+      break;
+    case ui::DragDropTypes::DRAG_MOVE:
+      move_loop_.UpdateCursor(move_grab_cursor_);
+      break;
+    default:
+      move_loop_.UpdateCursor(grab_cursor_);
+      break;
+  }
 
   // Note: event.data.[2,3] specify a rectangle. It is a request by the other
   // window to not send further XdndPosition messages while the cursor is
@@ -468,9 +486,6 @@ void DesktopDragDropClientAuraX11::OnXdndStatus(
   // it. GTK+ doesn't bother with this, so neither should we.
 
   waiting_on_status_.erase(source_window);
-
-  // TODO(erg): We should be using the response to try to update the cursor or
-  // something.
 
   if (ContainsKey(pending_drop_, source_window)) {
     // We were waiting on the status message so we could send the XdndDrop.
@@ -569,7 +584,7 @@ int DesktopDragDropClientAuraX11::StartDragAndDrop(
   // Windows has a specific method, DoDragDrop(), which performs the entire
   // drag. We have to emulate this, so we spin off a nested runloop which will
   // track all cursor movement and reroute events to a specific handler.
-  move_loop_.RunMoveLoop(source_window);
+  move_loop_.RunMoveLoop(source_window, grab_cursor_);
 
   source_provider_ = NULL;
   drag_drop_in_progress_ = false;

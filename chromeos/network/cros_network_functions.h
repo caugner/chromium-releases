@@ -228,28 +228,11 @@ CHROMEOS_EXPORT void CrosRequestCellularRegister(
     const std::string& network_id,
     const NetworkOperationCallback& callback);
 
-// Enables or disables the specific network device for connection.
-// Set offline mode. This will turn off all radios.
-// Returns false on failure and true on success.
-CHROMEOS_EXPORT bool CrosSetOfflineMode(bool offline);
-
 // Gets a list of all the NetworkIPConfigs using a given device path,
 // and returns the information via callback.
 CHROMEOS_EXPORT void CrosListIPConfigs(
     const std::string& device_path,
     const NetworkGetIPConfigsCallback& callback);
-
-// DEPRECATED, DO NOT USE: Use the asynchronous CrosListIPConfigs, above,
-// instead.
-// Gets a list of all the NetworkIPConfigs using a given device path.
-// Optionally, you can get ipconfig-paths and the hardware address. Pass NULL as
-// |ipconfig_paths| and |hardware_address| if you are not interested in these
-// values.
-CHROMEOS_EXPORT bool CrosListIPConfigsAndBlock(
-    const std::string& device_path,
-    NetworkIPConfigVector* ipconfig_vector,
-    std::vector<std::string>* ipconfig_paths,
-    std::string* hardware_address);
 
 // Refreshes the IP config |ipconfig_path| to pick up changes in
 // configuration, and renew the DHCP lease, if any.
@@ -264,9 +247,6 @@ CHROMEOS_EXPORT void CrosConfigureService(
 CHROMEOS_EXPORT void CrosSetCarrier(const std::string& device_path,
                                     const std::string& carrier,
                                     const NetworkOperationCallback& callback);
-
-// Resets the device.
-CHROMEOS_EXPORT void CrosReset(const std::string& device_path);
 
 }  // namespace chromeos
 

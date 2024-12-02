@@ -15,8 +15,11 @@
 #include "content/public/common/url_constants.h"
 #include "net/socket/unix_domain_socket_posix.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "webkit/common/user_agent/user_agent_util.h"
 
 namespace {
+const char kFrontEndURL[] =
+    "http://chrome-devtools-frontend.appspot.com/serve_rev/%s/devtools.html";
 const char kSocketNameFormat[] = "webview_devtools_remote_%d";
 }
 
@@ -29,7 +32,8 @@ AwDevToolsDelegate::AwDevToolsDelegate(content::BrowserContext* browser_context)
           base::StringPrintf(kSocketNameFormat, getpid()),
           "",
           base::Bind(&content::CanUserConnectToDevTools)),
-      "",
+      base::StringPrintf(kFrontEndURL,
+                         webkit_glue::GetWebKitRevision().c_str()),
       this);
 }
 
@@ -189,7 +193,7 @@ std::string AwDevToolsDelegate::GetDiscoveryPageHTML() {
 }
 
 bool AwDevToolsDelegate::BundlesFrontendResources() {
-  return true;
+  return false;
 }
 
 base::FilePath AwDevToolsDelegate::GetDebugFrontendDir() {
@@ -220,7 +224,7 @@ std::string AwDevToolsDelegate::GetViewDescription(
   if (!bvr) return "";
   base::DictionaryValue description;
   description.SetBoolean("attached", bvr->IsAttachedToWindow());
-  description.SetBoolean("visible", bvr->IsViewVisible());
+  description.SetBoolean("visible", bvr->IsVisible());
   gfx::Rect screen_rect = bvr->GetScreenRect();
   description.SetInteger("screenX", screen_rect.x());
   description.SetInteger("screenY", screen_rect.y());

@@ -12,10 +12,9 @@
 #include "content/browser/indexed_db/indexed_db_factory.h"
 #include "content/browser/indexed_db/indexed_db_leveldb_coding.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/web/WebSecurityOrigin.h"
-
-using WebKit::WebSecurityOrigin;
-using WebKit::WebIDBKey;
+#include "third_party/WebKit/public/platform/WebIDBTypes.h"
+#include "url/gurl.h"
+#include "webkit/common/database/database_identifier.h"
 
 namespace content {
 
@@ -25,21 +24,14 @@ class IndexedDBBackingStoreTest : public testing::Test {
  public:
   IndexedDBBackingStoreTest() {}
   virtual void SetUp() {
-    string16 file_identifier;
+    std::string file_identifier;
     backing_store_ = IndexedDBBackingStore::OpenInMemory(file_identifier);
 
     // useful keys and values during tests
-    const char raw_value1[] = "value1";
-
-    const char raw_value2[] = "value2";
-    const char raw_value3[] = "value3";
-    m_value1.insert(
-        m_value1.end(), &raw_value1[0], &raw_value1[0] + sizeof(raw_value1));
-    m_value2.insert(
-        m_value2.end(), &raw_value2[0], &raw_value2[0] + sizeof(raw_value2));
-    m_value3.insert(
-        m_value3.end(), &raw_value3[0], &raw_value3[0] + sizeof(raw_value3));
-    m_key1 = IndexedDBKey(99, WebIDBKey::NumberType);
+    m_value1 = "value1";
+    m_value2 = "value2";
+    m_value3 = "value3";
+    m_key1 = IndexedDBKey(99, WebKit::WebIDBKeyTypeNumber);
     m_key2 = IndexedDBKey(ASCIIToUTF16("key2"));
     m_key3 = IndexedDBKey(ASCIIToUTF16("key3"));
   }
@@ -51,14 +43,14 @@ class IndexedDBBackingStoreTest : public testing::Test {
   IndexedDBKey m_key1;
   IndexedDBKey m_key2;
   IndexedDBKey m_key3;
-  std::vector<char> m_value1;
-  std::vector<char> m_value2;
-  std::vector<char> m_value3;
+  std::string m_value1;
+  std::string m_value2;
+  std::string m_value3;
 };
 
 TEST_F(IndexedDBBackingStoreTest, PutGetConsistency) {
   {
-    IndexedDBBackingStore::Transaction transaction1(backing_store_.get());
+    IndexedDBBackingStore::Transaction transaction1(backing_store_);
     transaction1.Begin();
     IndexedDBBackingStore::RecordIdentifier record;
     bool ok = backing_store_->PutRecord(
@@ -68,9 +60,9 @@ TEST_F(IndexedDBBackingStoreTest, PutGetConsistency) {
   }
 
   {
-    IndexedDBBackingStore::Transaction transaction2(backing_store_.get());
+    IndexedDBBackingStore::Transaction transaction2(backing_store_);
     transaction2.Begin();
-    std::vector<char> result_value;
+    std::string result_value;
     bool ok =
         backing_store_->GetRecord(&transaction2, 1, 1, m_key1, &result_value);
     transaction2.Commit();
@@ -90,10 +82,10 @@ TEST_F(IndexedDBBackingStoreTest, HighIds) {
   const int64 invalid_high_index_id = 1ULL << 37;
 
   const IndexedDBKey& index_key = m_key2;
-  std::vector<char> index_key_raw;
+  std::string index_key_raw;
   EncodeIDBKey(index_key, &index_key_raw);
   {
-    IndexedDBBackingStore::Transaction transaction1(backing_store_.get());
+    IndexedDBBackingStore::Transaction transaction1(backing_store_);
     transaction1.Begin();
     IndexedDBBackingStore::RecordIdentifier record;
     bool ok = backing_store_->PutRecord(&transaction1,
@@ -125,9 +117,9 @@ TEST_F(IndexedDBBackingStoreTest, HighIds) {
   }
 
   {
-    IndexedDBBackingStore::Transaction transaction2(backing_store_.get());
+    IndexedDBBackingStore::Transaction transaction2(backing_store_);
     transaction2.Begin();
-    std::vector<char> result_value;
+    std::string result_value;
     bool ok = backing_store_->GetRecord(&transaction2,
                                         high_database_id,
                                         high_object_store_id,
@@ -167,9 +159,9 @@ TEST_F(IndexedDBBackingStoreTest, InvalidIds) {
   const int64 index_id = kMinimumIndexId;
   const int64 invalid_low_index_id = 19;  // index_ids must be > kMinimumIndexId
 
-  std::vector<char> result_value;
+  std::string result_value;
 
-  IndexedDBBackingStore::Transaction transaction1(backing_store_.get());
+  IndexedDBBackingStore::Transaction transaction1(backing_store_);
   transaction1.Begin();
 
   IndexedDBBackingStore::RecordIdentifier record;
@@ -269,7 +261,7 @@ TEST_F(IndexedDBBackingStoreTest, CreateDatabase) {
     EXPECT_TRUE(ok);
     EXPECT_GT(database_id, 0);
 
-    IndexedDBBackingStore::Transaction transaction(backing_store_.get());
+    IndexedDBBackingStore::Transaction transaction(backing_store_);
     transaction.Begin();
 
     ok = backing_store_->CreateObjectStore(&transaction,
@@ -328,14 +320,17 @@ TEST_F(IndexedDBBackingStoreTest, CreateDatabase) {
 
 class MockIDBFactory : public IndexedDBFactory {
  public:
-  static scoped_refptr<MockIDBFactory> Create() {
-    return make_scoped_refptr(new MockIDBFactory());
-  }
-
   scoped_refptr<IndexedDBBackingStore> TestOpenBackingStore(
-      const WebSecurityOrigin& origin,
+      const GURL& origin,
       const base::FilePath& data_directory) {
-    return OpenBackingStore(origin.databaseIdentifier(), data_directory);
+    WebKit::WebIDBCallbacks::DataLoss data_loss =
+        WebKit::WebIDBCallbacks::DataLossNone;
+    scoped_refptr<IndexedDBBackingStore> backing_store =
+        OpenBackingStore(webkit_database::GetIdentifierFromOrigin(origin),
+                         data_directory,
+                         &data_loss);
+    EXPECT_EQ(WebKit::WebIDBCallbacks::DataLossNone, data_loss);
+    return backing_store;
   }
 
  private:
@@ -343,12 +338,10 @@ class MockIDBFactory : public IndexedDBFactory {
 };
 
 TEST(IndexedDBFactoryTest, BackingStoreLifetime) {
-  WebSecurityOrigin origin1 =
-      WebSecurityOrigin::createFromString("http://localhost:81");
-  WebSecurityOrigin origin2 =
-      WebSecurityOrigin::createFromString("http://localhost:82");
+  GURL origin1("http://localhost:81");
+  GURL origin2("http://localhost:82");
 
-  scoped_refptr<MockIDBFactory> factory = MockIDBFactory::Create();
+  scoped_refptr<MockIDBFactory> factory = new MockIDBFactory();
 
   base::ScopedTempDir temp_directory;
   ASSERT_TRUE(temp_directory.CreateUniqueTempDir());
@@ -371,12 +364,10 @@ TEST(IndexedDBFactoryTest, BackingStoreLifetime) {
 }
 
 TEST(IndexedDBFactoryTest, MemoryBackingStoreLifetime) {
-  WebSecurityOrigin origin1 =
-      WebSecurityOrigin::createFromString("http://localhost:81");
-  WebSecurityOrigin origin2 =
-      WebSecurityOrigin::createFromString("http://localhost:82");
+  GURL origin1("http://localhost:81");
+  GURL origin2("http://localhost:82");
 
-  scoped_refptr<MockIDBFactory> factory = MockIDBFactory::Create();
+  scoped_refptr<MockIDBFactory> factory = new MockIDBFactory();
   scoped_refptr<IndexedDBBackingStore> mem_store1 =
       factory->TestOpenBackingStore(origin1, base::FilePath());
   EXPECT_FALSE(mem_store1->HasOneRef());  // mem_store1 and factory
@@ -401,29 +392,25 @@ TEST(IndexedDBFactoryTest, MemoryBackingStoreLifetime) {
   EXPECT_TRUE(mem_store1->HasOneRef());
 }
 
-TEST(IndexedDBFactoryTest, RejectLongOrigins)
-{
+TEST(IndexedDBFactoryTest, RejectLongOrigins) {
   base::ScopedTempDir temp_directory;
   ASSERT_TRUE(temp_directory.CreateUniqueTempDir());
   const base::FilePath base_path = temp_directory.path();
-  scoped_refptr<MockIDBFactory> factory = MockIDBFactory::Create();
+  scoped_refptr<MockIDBFactory> factory = new MockIDBFactory();
 
   int limit = file_util::GetMaximumPathComponentLength(base_path);
   EXPECT_GT(limit, 0);
 
   std::string origin(limit + 1, 'x');
-  WebSecurityOrigin too_long_origin =
-      WebSecurityOrigin::createFromString(WebKit::WebString::fromUTF8(
-          std::string("http://" + origin + ":81/").c_str()));
+  GURL too_long_origin("http://" + origin + ":81/");
   scoped_refptr<IndexedDBBackingStore> diskStore1 =
       factory->TestOpenBackingStore(too_long_origin, base_path);
-  EXPECT_FALSE(diskStore1.get());
+  EXPECT_FALSE(diskStore1);
 
-  WebSecurityOrigin ok_origin =
-      WebSecurityOrigin::createFromString("http://someorigin.com:82/");
+  GURL ok_origin("http://someorigin.com:82/");
   scoped_refptr<IndexedDBBackingStore> diskStore2 =
       factory->TestOpenBackingStore(ok_origin, base_path);
-  EXPECT_TRUE(diskStore2.get());
+  EXPECT_TRUE(diskStore2);
 }
 
 }  // namespace

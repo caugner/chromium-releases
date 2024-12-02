@@ -12,11 +12,11 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 
 namespace content {
 
-class MediaPlayerManagerImpl;
+class BrowserMediaPlayerManager;
 
 // Native mirror of ContentVideoView.java. This class is responsible for
 // creating the Java video view and pass all the player status change to
@@ -29,7 +29,7 @@ class ContentVideoView {
   ContentVideoView(
       const base::android::ScopedJavaLocalRef<jobject>& context,
       const base::android::ScopedJavaLocalRef<jobject>& client,
-      MediaPlayerManagerImpl* manager);
+      BrowserMediaPlayerManager* manager);
 
   ~ContentVideoView();
 
@@ -76,9 +76,13 @@ class ContentVideoView {
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject(JNIEnv* env);
 
  private:
+  // Destroy the |j_content_video_view_|. If |native_view_destroyed| is true,
+  // no further calls to the native object is allowed.
+  void DestroyContentVideoView(bool native_view_destroyed);
+
   // Object that manages the fullscreen media player. It is responsible for
   // handling all the playback controls.
-  MediaPlayerManagerImpl* manager_;
+  BrowserMediaPlayerManager* manager_;
 
   // Weak reference of corresponding Java object.
   JavaObjectWeakGlobalRef j_content_video_view_;

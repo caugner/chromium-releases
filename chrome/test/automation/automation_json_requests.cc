@@ -13,7 +13,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/test_timeouts.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/test/automation/automation_proxy.h"
@@ -284,7 +284,7 @@ bool SendExecuteJavascriptJSONRequest(
     const WebViewLocator& locator,
     const std::string& frame_xpath,
     const std::string& javascript,
-    Value** result,
+    scoped_ptr<Value>* result,
     Error* error) {
   DictionaryValue dict;
   dict.SetString("command", "ExecuteJavascript");
@@ -382,7 +382,7 @@ bool SendHeapProfilerDumpJSONRequestDeprecated(
 bool SendGetCookiesJSONRequest(
     AutomationMessageSender* sender,
     const std::string& url,
-    ListValue** cookies,
+    scoped_ptr<ListValue>* cookies,
     Error* error) {
   DictionaryValue dict;
   dict.SetString("command", "GetCookies");
@@ -390,13 +390,12 @@ bool SendGetCookiesJSONRequest(
   DictionaryValue reply_dict;
   if (!SendAutomationJSONRequest(sender, dict, &reply_dict, error))
     return false;
-  Value* cookies_unscoped_value;
-  if (!reply_dict.Remove("cookies", &cookies_unscoped_value))
+  scoped_ptr<Value> cookies_value;
+  if (!reply_dict.Remove("cookies", &cookies_value))
     return false;
-  scoped_ptr<Value> cookies_value(cookies_unscoped_value);
   if (!cookies_value->IsType(Value::TYPE_LIST))
     return false;
-  *cookies = static_cast<ListValue*>(cookies_value.release());
+  cookies->reset(static_cast<ListValue*>(cookies_value.release()));
   return true;
 }
 

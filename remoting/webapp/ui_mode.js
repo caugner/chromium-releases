@@ -47,6 +47,7 @@ remoting.AppMode = {
       HOST_SETUP_PROCESSING: 'home.host-setup.processing',
       HOST_SETUP_DONE: 'home.host-setup.done',
       HOST_SETUP_ERROR: 'home.host-setup.error',
+    HOME_MANAGE_PAIRINGS: 'home.manage-pairings',
   IN_SESSION: 'in-session'
 };
 
@@ -130,7 +131,8 @@ remoting.setMode = function(mode) {
                                  remoting.onVisibilityChanged, false);
     // TODO(jamiewalch): crbug.com/252796: Remove this once crbug.com/240772
     // is fixed.
-    document.body.parentNode.classList.remove('no-scroll');
+    var htmlNode = /** @type {HTMLElement} */ (document.body.parentNode);
+    htmlNode.classList.remove('no-scroll');
   }
 };
 
@@ -198,7 +200,7 @@ remoting.resetInfographics = function() {
  */
 remoting.initModalDialogs = function() {
   var dialogs = document.querySelectorAll('.kd-modaldialog');
-  var observer = new WebKitMutationObserver(confineOrRestoreFocus_);
+  var observer = new MutationObserver(confineOrRestoreFocus_);
   var options = {
     subtree: false,
     attributes: true

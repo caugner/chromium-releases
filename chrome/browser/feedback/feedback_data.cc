@@ -11,6 +11,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/feedback/feedback_util.h"
+#include "chrome/browser/feedback/tracing_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -19,20 +20,16 @@
 #include "ash/shell_delegate.h"
 #endif
 
-#if defined(OS_CHROMEOS)
-#include "third_party/zlib/google/zip.h"
-#endif
-
 using content::BrowserThread;
 
 #if defined(OS_CHROMEOS)
 namespace {
 
-const char kLogsFilename[] = "system_logs.txt";
-
 const char kMultilineIndicatorString[] = "<multiline>\n";
 const char kMultilineStartString[] = "---------- START ----------\n";
 const char kMultilineEndString[] = "---------- END ----------\n\n";
+
+const char kTraceFilename[] = "tracing.log\n";
 
 std::string LogsToString(chromeos::SystemLogsResponse* sys_info) {
   std::string syslogs_string;
@@ -57,35 +54,11 @@ std::string LogsToString(chromeos::SystemLogsResponse* sys_info) {
   return syslogs_string;
 }
 
-bool ZipString(const std::string& logs,
-               std::string* compressed_logs) {
-  base::FilePath temp_path;
-  base::FilePath zip_file;
-
-  // Create a temporary directory, put the logs into a file in it. Create
-  // another temporary file to receive the zip file in.
-  if (!file_util::CreateNewTempDirectory("", &temp_path))
-    return false;
-  if (file_util::WriteFile(
-      temp_path.Append(kLogsFilename), logs.c_str(), logs.size()) == -1)
-    return false;
-  if (!file_util::CreateTemporaryFile(&zip_file))
-    return false;
-
-  if (!zip::Zip(temp_path, zip_file, false))
-    return false;
-
-  if (!file_util::ReadFileToString(zip_file, compressed_logs))
-    return false;
-
-  return true;
-}
-
 void ZipLogs(chromeos::SystemLogsResponse* sys_info,
              std::string* compressed_logs) {
   DCHECK(compressed_logs);
   std::string logs_string = LogsToString(sys_info);
-  if (!ZipString(logs_string, compressed_logs)) {
+  if (!FeedbackUtil::ZipString(logs_string, compressed_logs)) {
     compressed_logs->clear();
   }
 }
@@ -97,6 +70,7 @@ FeedbackData::FeedbackData() : profile_(NULL),
                                feedback_page_data_complete_(false) {
 #if defined(OS_CHROMEOS)
   sys_info_.reset(NULL);
+  trace_id_ = 0;
   attached_filedata_.reset(NULL);
   send_sys_info_ = true;
   read_attached_file_complete_ = false;
@@ -124,6 +98,19 @@ void FeedbackData::SendReport() {
 
 void FeedbackData::FeedbackPageDataComplete() {
 #if defined(OS_CHROMEOS)
+  if (trace_id_ != 0) {
+    TracingManager* manager = TracingManager::Get();
+    // When there is a trace id attached to this report, fetch it and attach it
+    // as a file.  In this case, return early and retry this function later.
+    if (manager &&
+        manager->GetTraceData(
+            trace_id_,
+            base::Bind(&FeedbackData::OnGetTraceData, this))) {
+      return;
+    } else {
+      trace_id_ = 0;
+    }
+  }
   if (attached_filename_.size() &&
       base::FilePath::IsSeparator(attached_filename_[0]) &&
       !attached_filedata_.get()) {
@@ -197,7 +184,8 @@ void FeedbackData::ReadFileComplete() {
 }
 
 void FeedbackData::StartSyslogsCollection() {
-  chromeos::SystemLogsFetcher* fetcher = new chromeos::SystemLogsFetcher();
+  chromeos::ScrubbedSystemLogsFetcher* fetcher =
+      new chromeos::ScrubbedSystemLogsFetcher();
   fetcher->Fetch(base::Bind(&FeedbackData::CompressSyslogs, this));
 }
 
@@ -208,4 +196,15 @@ void FeedbackData::ReadAttachedFile(const base::FilePath& from) {
       attached_filedata_->clear();
   }
 }
+
+void FeedbackData::OnGetTraceData(
+    scoped_refptr<base::RefCountedString> trace_data) {
+  scoped_ptr<std::string> data(new std::string(trace_data->data()));
+
+  set_attached_filename(kTraceFilename);
+  set_attached_filedata(data.Pass());
+  trace_id_ = 0;
+  FeedbackPageDataComplete();
+}
+
 #endif

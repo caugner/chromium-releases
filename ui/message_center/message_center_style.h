@@ -25,13 +25,22 @@ MESSAGE_CENTER_EXPORT extern const int kSettingsIconSize;
 MESSAGE_CENTER_EXPORT extern const size_t kMaxVisiblePopupNotifications;
 MESSAGE_CENTER_EXPORT extern const size_t kMaxVisibleMessageCenterNotifications;
 
+// DIP dimension
+MESSAGE_CENTER_EXPORT extern const int kNotificationWidth;  // H size of the
+                                                            // whole card.
+
+// Colors.
+MESSAGE_CENTER_EXPORT extern const SkColor kMessageCenterBorderColor;
+MESSAGE_CENTER_EXPORT extern const SkColor kMessageCenterShadowColor;
+
 // Within a notification ///////////////////////////////////////////////////////
 
 // DIP dimensions (H = horizontal, V = vertical).
 extern const int kControlButtonSize;  // Square size of close & expand buttons.
-extern const int kNotificationWidth;  // H size of the whole card.
 extern const int kIconToTextPadding;  // H space between icon & title/message.
 extern const int kTextTopPadding;     // V space between text elements.
+extern const int kIconBottomPadding;  // Minimum non-zero V space between icon
+                                      // and frame.
 
 // Text sizes.
 extern const int kTitleFontSize;      // For title only.
@@ -70,6 +79,13 @@ const int kButtonIconToTitlePadding = 16;  // In DIPs.
 const SkColor kButtonSeparatorColor = SkColorSetRGB(234, 234, 234);
 const SkColor kHoveredButtonBackgroundColor = SkColorSetRGB(243, 243, 243);
 #endif
+
+// Progress bar.
+const int kProgressBarThickness = 5;
+const int kProgressBarTopPadding = 16;
+const int kProgressBarCornerRadius = 3;
+const SkColor kProgressBarBackgroundColor = SkColorSetRGB(216, 216, 216);
+const SkColor kProgressBarSliceColor = SkColorSetRGB(120, 120, 120);
 
 // Line limits.
 const int kTitleLineLimit = 3;

@@ -94,6 +94,10 @@ const double kWidthOfMouseResizeArea = 4.0;
       [[app windows] count] == static_cast<NSUInteger>([controller numPanels]);
 }
 
+- (void)performMiniaturize:(id)sender {
+  [[self windowController] minimizeButtonClicked:0];
+}
+
 // Ignore key events if window cannot become key window to fix problem
 // where keyboard input is still going into a minimized panel even though
 // the app has been deactivated in -[PanelWindowControllerCocoa deactivate:].
@@ -803,17 +807,47 @@ NSCursor* LoadWebKitCursor(WebKit::WebCursorInfo::Type type) {
 }
 
 - (void)windowDidResize:(NSNotification*)notification {
-  // Hide the web contents view when the panel is not taller than the titlebar.
-  // This is to ensure that the titlebar view is not overlapped with the web
-  // contents view because the the web contents view assumes that its
-  // view will never be overlapped by another view in order to perform
-  // optimization. If we do not do this, some part of the web contents view
-  // will become visible and overlapp the bottom area of the titlebar.
-  if (WebContents* contents = windowShim_->panel()->GetWebContents()) {
-    BOOL hideContents =
-        NSHeight([self contentRectForFrameRect:[[self window] frame]]) <=
-        panel::kTitlebarHeight;
-    [contents->GetView()->GetNativeView() setHidden:hideContents];
+  Panel* panel = windowShim_->panel();
+  if (![self isAnimatingBounds] ||
+      panel->collection()->type() != PanelCollection::DOCKED)
+    return;
+
+  // Remove the web contents view from the view hierarchy when the panel is not
+  // taller than the titlebar. Put it back when the panel grows taller than
+  // the titlebar. Note that RenderWidgetHostViewMac works for the case that
+  // the web contents view does not exist in the view hierarchy (i.e. the tab
+  // is not the main one), but it does not work well, like causing occasional
+  // crashes (http://crbug.com/265932), if the web contents view is made hidden.
+  //
+  // This is needed when the docked panels are being animated. When the
+  // animation starts, the contents view autosizing is disabled. After the
+  // animation ends, the contents view autosizing is reenabled and the frame
+  // of contents view is updated. Thus it is likely that the contents view will
+  // overlap with the titlebar view when the panel shrinks to be very small.
+  // The implementation of the web contents view assumes that it will never
+  // overlap with another view in order to paint the web contents view directly.
+  content::WebContents* webContents = panel->GetWebContents();
+  if (!webContents)
+    return;
+  NSView* contentView = webContents->GetView()->GetNativeView();
+  if (NSHeight([self contentRectForFrameRect:[[self window] frame]]) <= 0) {
+    // No need to retain the view before it is removed from its superview
+    // because WebContentsView keeps a reference to this view.
+    if ([contentView superview])
+      [contentView removeFromSuperview];
+  } else {
+    if (![contentView superview]) {
+      [[[self window] contentView] addSubview:contentView];
+
+      // When the web contents view is put back, we need to tell its render
+      // widget host view to accept focus.
+      content::RenderWidgetHostView* rwhv =
+          webContents->GetRenderWidgetHostView();
+      if (rwhv) {
+        [[self window] makeFirstResponder:rwhv->GetNativeView()];
+        rwhv->SetActive([[self window] isMainWindow]);
+      }
+    }
   }
 }
 

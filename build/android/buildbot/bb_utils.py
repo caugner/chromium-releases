@@ -9,8 +9,10 @@ import pipes
 import subprocess
 import sys
 
+import bb_annotations
+
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from pylib import buildbot_report
+from pylib import constants
 
 
 TESTING = 'BUILDBOT_TESTING' in os.environ
@@ -29,7 +31,7 @@ def CommandToString(command):
   return ' '.join(map(pipes.quote, command))
 
 
-def SpawnCmd(command):
+def SpawnCmd(command, stdout=None, cwd=CHROME_SRC):
   """Spawn a process without waiting for termination."""
   print '>', CommandToString(command)
   sys.stdout.flush()
@@ -39,20 +41,21 @@ def SpawnCmd(command):
       def wait():
         return 0
     return MockPopen()
-  return subprocess.Popen(command, cwd=CHROME_SRC)
+  return subprocess.Popen(command, cwd=cwd, stdout=stdout)
 
 
 def RunCmd(command, flunk_on_failure=True, halt_on_failure=False,
-           warning_code=88):
+           warning_code=constants.WARNING_EXIT_CODE, stdout=None,
+           cwd=CHROME_SRC):
   """Run a command relative to the chrome source root."""
-  code = SpawnCmd(command).wait()
+  code = SpawnCmd(command, stdout, cwd).wait()
   print '<', CommandToString(command)
   if code != 0:
     print 'ERROR: process exited with code %d' % code
     if code != warning_code and flunk_on_failure:
-      buildbot_report.PrintError()
+      bb_annotations.PrintError()
     else:
-      buildbot_report.PrintWarning()
+      bb_annotations.PrintWarning()
     # Allow steps to have both halting (i.e. 1) and non-halting exit codes.
     if code != warning_code and halt_on_failure:
       print 'FATAL %d != %d' % (code, warning_code)
@@ -78,16 +81,12 @@ def EncodeProperties(options):
           '--build-properties=%s' % json.dumps(options.build_properties)]
 
 
-def RunSteps(all_steps, options):
-  if not options.steps:
-    return
-
-  steps = options.steps.split(',')
-  unknown_steps = set(steps) - set(step for step, _ in all_steps)
+def RunSteps(steps, step_cmds, options):
+  unknown_steps = set(steps) - set(step for step, _ in step_cmds)
   if unknown_steps:
     print >> sys.stderr, 'FATAL: Unknown steps %s' % list(unknown_steps)
     sys.exit(1)
 
-  for step, cmd in all_steps:
+  for step, cmd in step_cmds:
     if step in steps:
       cmd(options)

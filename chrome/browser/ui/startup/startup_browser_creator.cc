@@ -31,33 +31,28 @@
 #include "chrome/browser/automation/automation_provider_list.h"
 #include "chrome/browser/automation/testing_automation_provider.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/extensions/startup_helper.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
-#include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
-#include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
-#include "chrome/browser/printing/print_dialog_cloud.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_service.h"
-#include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/search_engines/util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -84,6 +79,12 @@
 #if defined(OS_WIN)
 #include "chrome/browser/automation/chrome_frame_automation_provider_win.h"
 #include "chrome/browser/ui/startup/startup_browser_creator_win.h"
+#endif
+
+#if defined(ENABLE_FULL_PRINTING)
+#include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
+#include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
+#include "chrome/browser/printing/print_dialog_cloud.h"
 #endif
 
 using content::BrowserThread;
@@ -384,22 +385,17 @@ std::vector<GURL> StartupBrowserCreator::GetURLsFromCommandLine(
     const base::FilePath& cur_dir,
     Profile* profile) {
   std::vector<GURL> urls;
-  const CommandLine::StringVector& params = command_line.GetArgs();
 
+  const CommandLine::StringVector& params = command_line.GetArgs();
   for (size_t i = 0; i < params.size(); ++i) {
     base::FilePath param = base::FilePath(params[i]);
     // Handle Vista way of searching - "? <search-term>"
-    if (param.value().size() > 2 &&
-        param.value()[0] == '?' && param.value()[1] == ' ') {
-      const TemplateURL* default_provider =
-          TemplateURLServiceFactory::GetForProfile(profile)->
-          GetDefaultSearchProvider();
-      if (default_provider) {
-        const TemplateURLRef& search_url = default_provider->url_ref();
-        DCHECK(search_url.SupportsReplacement());
-        string16 search_term = param.LossyDisplayName().substr(2);
-        urls.push_back(GURL(search_url.ReplaceSearchTerms(
-            TemplateURLRef::SearchTermsArgs(search_term))));
+    if ((param.value().size() > 2) && (param.value()[0] == '?') &&
+        (param.value()[1] == ' ')) {
+      GURL url(GetDefaultSearchURLForSearchTerms(
+          profile, param.LossyDisplayName().substr(2)));
+      if (url.is_valid()) {
+        urls.push_back(url);
         continue;
       }
     }
@@ -436,9 +432,9 @@ std::vector<GURL> StartupBrowserCreator::GetURLsFromCommandLine(
     // If we are in Windows 8 metro mode and were launched as a result of the
     // search charm or via a url navigation in metro, then fetch the
     // corresponding url.
-    GURL url = chrome::GetURLToOpen(profile);
+    GURL url(chrome::GetURLToOpen(profile));
     if (url.is_valid())
-      urls.push_back(GURL(url));
+      urls.push_back(url);
   }
 #endif  // OS_WIN
   return urls;
@@ -533,6 +529,7 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
   }
 #endif  // defined(ENABLE_AUTOMATION)
 
+#if defined(ENABLE_FULL_PRINTING)
   // If we are just displaying a print dialog we shouldn't open browser
   // windows.
   if (command_line.HasSwitch(switches::kCloudPrintFile) &&
@@ -549,6 +546,7 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
       // launching and quit.
       return false;
   }
+#endif  // defined(ENABLE_FULL_PRINTING)
 
   if (command_line.HasSwitch(switches::kExplicitlyAllowedPorts)) {
     std::string allowed_ports =
@@ -735,7 +733,8 @@ void StartupBrowserCreator::ProcessCommandLineAlreadyRunning(
   if (!profile) {
     profile_manager->CreateProfileAsync(profile_path,
         base::Bind(&StartupBrowserCreator::ProcessCommandLineOnProfileCreated,
-                   command_line, cur_dir), string16(), string16(), false);
+                   command_line, cur_dir), string16(), string16(),
+                   std::string());
     return;
   }
 

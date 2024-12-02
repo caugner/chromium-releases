@@ -14,11 +14,10 @@
 
     <meta name="google" value="notranslate">
 
-    <link rel="stylesheet" href="chrome://resources/css/menu.css"></link>
-
     <link rel="stylesheet" href="css/list.css"></link>
     <link rel="stylesheet" href="css/table.css"></link>
     <link rel="stylesheet" href="css/tree.css"></link>
+    <link rel="stylesheet" href="css/menu.css"></link>
     <link rel="stylesheet" href="css/combobutton.css"></link>
     <link rel="stylesheet" href="css/file_manager.css"></link>
     <link rel="stylesheet" href="css/file_types.css"></link>
@@ -89,6 +88,7 @@
       <script src="js/butter_bar.js"></script>
       <script src="js/directory_contents.js"></script>
       <script src="js/directory_model.js"></script>
+      <script src="js/directory_tree.js"></script>
       <script src="js/drag_selector.js"></script>
       <script src="js/drive_banners.js"></script>
       <script src="js/error_dialog.js"></script>
@@ -101,11 +101,14 @@
       <script src="js/file_tasks.js"></script>
       <script src="js/file_transfer_controller.js"></script>
       <script src="js/file_type.js"></script>
+      <script src="js/file_watcher.js"></script>
+      <script src="js/folder_shortcuts_data_model.js"></script>
+      <script src="js/navigation_list.js"></script>
       <script src="js/scrollbar.js"></script>
-      <script src="js/sidebar.js"></script>
+      <script src="js/share_client.js"></script>
+      <script src="js/share_dialog.js"></script>
       <script src="js/tree.css.js"></script>
       <script src="js/volume_manager.js"></script>
-      <script src="js/volume_list.js"></script>
       <script src="js/media/media_util.js"></script>
       <script src="js/metadata/metadata_cache.js"></script>
       <script src="js/default_action_dialog.js"></script>
@@ -117,8 +120,8 @@
     </if>
 
   </head>
-  <body i18n-values=".style.fontFamily:WEB_FONT_FAMILY;
-                     .style.fontSize:WEB_FONT_SIZE" new-ui>
+  <body tabindex="-1" i18n-values=".style.fontFamily:WEB_FONT_FAMILY;
+                                   .style.fontSize:WEB_FONT_SIZE">
     <commands>
       <!-- We have to use U+XXXX notation here according to event.keyIdentifier
            property -->
@@ -131,6 +134,10 @@
       <command id="rename" i18n-values="label:RENAME_BUTTON_LABEL"
                shortcut="Enter-Ctrl">
       <command id="delete" shortcut="U+007F">
+      <command id="create-folder-shortcut"
+               i18n-values="label:CREATE_FOLDER_SHORTCUT_BUTTON_LABEL">
+      <command id="remove-folder-shortcut"
+               i18n-values="label:REMOVE_FOLDER_SHORTCUT_BUTTON_LABEL">
       <command id="newfolder" i18n-values="label:NEW_FOLDER_BUTTON_LABEL"
                shortcut="U+0045-Ctrl">
       <command id="newwindow" i18n-values="label:NEW_WINDOW_BUTTON_LABEL">
@@ -159,7 +166,6 @@
                i18n-values="label:DRIVE_BUY_MORE_SPACE">
       <command id="drive-clear-local-cache"
                i18n-values="label:DRIVE_CLEAR_LOCAL_CACHE">
-      <command id="drive-reload" i18n-values="label:DRIVE_RELOAD">
       <command id="drive-go-to-drive"
                i18n-values="label:DRIVE_VISIT_DRIVE_GOOGLE_COM">
 
@@ -170,7 +176,7 @@
                i18n-values="label:ZIP_SELECTION_BUTTON_LABEL">
       <command id="share" i18n-values="label:SHARE_BUTTON_LABEL">
 
-      <command id="zoom-in" shortcut="U+00BB-Shift-Ctrl U+00BD-Shift-Ctrl">
+      <command id="zoom-in" shortcut="U+00BB-Ctrl">
       <command id="zoom-out" shortcut="U+00BD-Ctrl">
       <command id="zoom-reset" shortcut="U+0030-Ctrl">
     </commands>
@@ -183,6 +189,7 @@
       <hr id="default-action-separator" visibleif="full-page" hidden>
       <menuitem command="#toggle-pinned" checkable></menuitem>
       <menuitem command="#share"></menuitem>
+      <menuitem command="#create-folder-shortcut"></menuitem>
       <hr command="#share">
       <menuitem command="#cut" visibleif="full-page"></menuitem>
       <menuitem command="#copy" visibleif="full-page"></menuitem>
@@ -195,24 +202,31 @@
       <menuitem command="#newfolder"
                 visibleif="saveas-file full-page"></menuitem>
     </menu>
+
     <menu id="roots-context-menu" class="chrome-menu" >
       <menuitem command="#import-photos"></menuitem>
       <menuitem command="#unmount"></menuitem>
       <menuitem command="#format"></menuitem>
+      <menuitem command="#remove-folder-shortcut"></menuitem>
+    </menu>
+
+    <menu id="directory-tree-context-menu" class="chrome-menu" >
+      <menuitem command="#create-folder-shortcut"></menuitem>
     </menu>
 
     <menu id="gear-menu" class="chrome-menu" showShortcuts>
-      <menuitem command="#newwindow"></menuitem>
-      <menuitem command="#newfolder"></menuitem>
-      <menuitem command="#change-default-app"></menuitem>
+      <menuitem id="gear-menu-newwindow" command="#newwindow"></menuitem>
+      <menuitem id="gear-menu-newfolder" command="#newfolder"></menuitem>
+      <menuitem id="gear-menu-change-default-app"
+                command="#change-default-app"></menuitem>
       <hr id="drive-separator">
       <menuitem id="drive-sync-settings"
                 i18n-content=DRIVE_MOBILE_CONNECTION_OPTION></menuitem>
       <menuitem id="drive-hosted-settings"
                 i18n-content=DRIVE_SHOW_HOSTED_FILES_OPTION></menuitem>
       <hr command="#drive-clear-local-cache">
-      <menuitem command="#drive-clear-local-cache"></menuitem>
-      <menuitem command="#drive-reload"></menuitem>
+      <menuitem id="gear-menu-drive-clear-local-cache"
+                command="#drive-clear-local-cache"></menuitem>
       <hr>
       <div>
         View
@@ -224,9 +238,12 @@
               i18n-values="aria-label:THUMBNAIL_VIEW_TOOLTIP">
       </menuitem>
       <hr>
-      <menuitem command="#drive-buy-more-space"></menuitem>
-      <menuitem command="#drive-go-to-drive"></menuitem>
-      <menuitem command="#volume-help"></menuitem>
+      <menuitem id="gear-menu-drive-buy-more-space"
+                command="#drive-buy-more-space"></menuitem>
+      <menuitem id="gear-menu-drive-go-to-drive"
+                command="#drive-go-to-drive"></menuitem>
+      <menuitem id="gear-menu-volume-help"
+                command="#volume-help"></menuitem>
       <hr>
       <div id="volume-space-info">
         <div id="volume-space-info-contents">
@@ -282,7 +299,9 @@
           <div id="search-clear-button"></div>
           <div class="buttonbar">
             <button class="menubutton" id="gear-button" tabindex="10"
-                    menu="#gear-menu">
+                    menu="#gear-menu"
+                    i18n-values="aria-label:GEAR_BUTTON_TOOLTIP"
+                    aria-activedescendant="gear-menu">
             </button>
             <button id="maximize-button" visibleif="full-page" tabindex="-1">
             </button>
@@ -319,50 +338,66 @@
               <div class=downloads-warning hidden></div>
             </div>
           </div>
-          <div class="preview-panel" visibility="hidden">
-            <div>
-              <div class="preview-thumbnails"></div>
-            </div>
-            <div id="preview-lines">
-              <div class="preview-summary">
-                <span class="preview-text"></span>
-                <span class="calculating-size" hidden></span>
+          <div class="preview-panel progressable" visibility="hidden">
+            <div class="left">
+              <div>
+                <div class="preview-thumbnails"></div>
               </div>
-              <div id="search-breadcrumbs" class="breadcrumbs"></div>
+              <div id="preview-lines">
+                <div class="preview-summary">
+                  <span class="preview-text"></span>
+                  <span class="calculating-size" hidden></span>
+                </div>
+                <div id="search-breadcrumbs" class="breadcrumbs"></div>
+              </div>
             </div>
             <div class="right buttonbar" visibleif="full-page">
+              <button id="share-button" command="#share" tabindex="2"
+                      i18n-values="aria-label:SHARE_BUTTON_LABEL"></button>
               <button id="tasks" class="combobutton" menu="#tasks-menu"
-                      tabindex="2">
-              </button>
-              <button id="delete-button" command="#delete" tabindex="3"
+                      tabindex="3"></button>
+              <button id="delete-button" command="#delete" tabindex="4"
                       i18n-values="aria-label:DELETE_BUTTON_LABEL"></button>
+            </div>
+            <div class=preparing-label i18n-content=PREPARING_LABEL></div>
+            <div class=progress-bar>
+              <div class=progress-track></div>
+            </div>
+            <div class="right buttonbar" id="open-panel"
+                 visibleif="open-file open-multi-file">
+              <select class="file-type"></select>
+              <button class=ok disabled tabindex="7"></button>
+              <button class=cancel i18n-content=CANCEL_LABEL tabindex="8"></button>
             </div>
           </div>
           <div id="unmounted-panel"></div>
           <div id="format-panel">
-              <div class="error"></div>
-              <button id="format-button" command="#format"></button>
+            <div class="error"></div>
+            <button id="format-button" command="#format"></button>
           </div>
         </div>
       </div>
     </div>
-    <div class=dialog-footer invisibleif="full-page">
-      <button id="new-folder" i18n-content=NEW_FOLDER_BUTTON_LABEL
-              visibleif="saveas-file folder" command="#newfolder" tabindex="4">
-      </button>
-      <div id="filename-input-box">
-        <div class=filename-label i18n-content=FILENAME_LABEL></div>
-        <input type=text spellcheck=false tabindex="5">
-      </div>
-      <div class=horizontal-spacer></div>
-      <div class=preparing-label i18n-content=PREPARING_LABEL></div>
-      <div class=progress-bar>
-        <div class=progress-track></div>
+    <div class="dialog-footer progressable" tabindex="-1"
+         visibleif="saveas-file folder">
+      <div class="left">
+        <button id="new-folder" i18n-content=NEW_FOLDER_BUTTON_LABEL
+                visibleif="saveas-file folder" command="#newfolder"
+                tabindex="5">
+        </button>
+        <div id="filename-input-box">
+          <div class=filename-label i18n-content=FILENAME_LABEL></div>
+          <input type=text spellcheck=false tabindex="6">
+        </div>
+        <div class=preparing-label i18n-content=PREPARING_LABEL></div>
+        <div class=progress-bar>
+          <div class=progress-track></div>
+        </div>
       </div>
       <div class="right buttonbar">
-        <select id="file-type"></select>
-        <button class=ok disabled tabindex="6"></button>
-        <button class=cancel i18n-content=CANCEL_LABEL tabindex="7"></button>
+        <select class="file-type"></select>
+        <button class=ok disabled tabindex="7"></button>
+        <button class=cancel i18n-content=CANCEL_LABEL tabindex="8"></button>
       </div>
     </div>
     <div id="drag-container"></div>

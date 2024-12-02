@@ -30,7 +30,8 @@ class LocalNTPTest : public InProcessBrowserTest,
   }
 };
 
-IN_PROC_BROWSER_TEST_F(LocalNTPTest, LocalNTPJavascriptTest) {
+// Flaky: crbug.com/267117
+IN_PROC_BROWSER_TEST_F(LocalNTPTest, DISABLED_LocalNTPJavascriptTest) {
   ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
   FocusOmniboxAndWaitForInstantNTPSupport();
 
@@ -69,9 +70,6 @@ IN_PROC_BROWSER_TEST_F(LocalNTPTest, MAYBE_NTPRespectsBrowserLanguageSetting) {
 
   // Setup Instant.
   ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
-
-  // The second argument says to use only the local overlay and NTP.
-  instant()->SetInstantEnabled(false, true);
   FocusOmniboxAndWaitForInstantNTPSupport();
 
   // Open a new tab.
@@ -79,7 +77,8 @@ IN_PROC_BROWSER_TEST_F(LocalNTPTest, MAYBE_NTPRespectsBrowserLanguageSetting) {
       browser(),
       GURL(chrome::kChromeUINewTabURL),
       NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB |
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
   // Verify that the NTP is in French.
   content::WebContents* active_tab =

@@ -21,7 +21,7 @@ function FileTasks(fileManager, opt_params) {
    * List of invocations to be called once tasks are available.
    *
    * @private
-   * @type {Array,<Object>}
+   * @type {Array.<Object>}
    */
   this.pendingInvocations_ = [];
 }
@@ -286,7 +286,7 @@ FileTasks.prototype.executeDefaultInternal_ = function(urls) {
     }.bind(this);
 
     this.checkAvailability_(function() {
-      chrome.fileBrowserPrivate.viewFiles(urls, 'default', callback);
+      chrome.fileBrowserPrivate.viewFiles(urls, callback);
     }.bind(this));
   }
 
@@ -448,7 +448,7 @@ FileTasks.prototype.executeInternalTask_ = function(id, urls) {
 
   if (id == 'view-pdf' || id == 'view-swf' || id == 'view-in-browser' ||
       id == 'install-crx' || id.match(/^open-hosted-/) || id == 'watch') {
-    chrome.fileBrowserPrivate.viewFiles(urls, id, function(success) {
+    chrome.fileBrowserPrivate.viewFiles(urls, function(success) {
       if (!success)
         console.error('chrome.fileBrowserPrivate.viewFiles failed', urls);
     });

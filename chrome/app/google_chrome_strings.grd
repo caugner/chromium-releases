@@ -196,10 +196,10 @@ Chrome supports. -->
         </message>
         <message name="IDS_CHROME_FRAME_TURNDOWN_TEXT_IE_OLDER" desc="Text of Chrome Frame turndown prompt for IE 6, 7, and 8">
           This site is using the Chrome Frame plug-in which will soon be unsupported. Please uninstall it and upgrade to a modern browser.
-	</message>
+        </message>
         <message name="IDS_CHROME_FRAME_TURNDOWN_TEXT_IE_NEWER" desc="Text of Chrome Frame turndown prompt for IE 9 and 10">
           This site is using the Chrome Frame plug-in that will soon be unsupported. Please uninstall it and download a compatible browser.
-	</message>
+        </message>
         <message name="IDS_SHORTCUT_NEW_WINDOW" desc="The text label of the New window shortcut context menu entry as of Windows 8">
           New window
         </message>
@@ -573,6 +573,16 @@ Google Chrome is unable to recover your settings.
         Adding to Chrome...
       </message>
 
+      <message name="IDS_PROMPT_DOWNLOAD_CHANGES_SETTINGS"
+               desc="Message shown on the download shelf when the download is known to change browser settings.">
+        <ph name="FILE_NAME">$1<ex>bla.exe</ex></ph> may change your Chrome settings.
+      </message>
+
+      <message name="IDS_PROMPT_DOWNLOAD_CHANGES_SEARCH_SETTINGS"
+               desc="Message shown on the download shelf when the download is known to change search engine settings in the browser.">
+        <ph name="FILE_NAME">$1<ex>bla.exe</ex></ph> may change how your searches work in Chrome.
+      </message>
+
       <!-- Remove in-progress downloads confirmation dialog -->
       <message name="IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION" desc="Explanation of the dialog asking for user confirmation to close the browser when one download is in progress.">
         A download is currently in progress. Do you want to exit Google Chrome and cancel the download?
@@ -586,8 +596,8 @@ Google Chrome is unable to recover your settings.
 
       <!-- "Create application shortcuts" dialog -->
       <if expr="is_posix and not is_macosx">
-        <message name="IDS_CREATE_SHORTCUTS_ERROR_LABEL" desc="Contents of the main label in the error dialog box when creating an application shortcut failed.">
-          Google Chrome cannot create an application shortcut because it cannot determine the current desktop environment.
+        <message name="IDS_CREATE_SHORTCUTS_ERROR_LABEL" desc="Contents of the main label in the error dialog box when creating an application shortcut failed for unknown reasons.">
+          Google Chrome could not create an application shortcut.
         </message>
       </if>
 
@@ -648,6 +658,11 @@ For Google Chrome, processes used to display diagnostics information (such as th
           Nearly up-to-date! Restart your device to finish updating.
         </message>
       </if>
+      <if expr="pp_ifdef('chromeos')">
+        <message name="IDS_UPGRADE_SUCCESSFUL_CHANNEL_SWITCH" desc="Status label: Channel was successfully switched on Chrome OS">
+          Channel changed. Restart your device to apply changes.
+        </message>
+      </if>
       <if expr="not pp_ifdef('chromeos')">
         <message name="IDS_UPGRADE_UP_TO_DATE" desc="Status label: Already up to date (Google Chrome)">
           Google Chrome is up to date.
@@ -666,6 +681,11 @@ For Google Chrome, processes used to display diagnostics information (such as th
       <if expr="pp_ifdef('chromeos')">
         <message name="IDS_UPGRADE_UPDATING" desc="Status label: Updating Chrome OS">
           Updating your device...
+        </message>
+      </if>
+      <if expr="pp_ifdef('chromeos')">
+        <message name="IDS_UPGRADE_UPDATING_CHANNEL_SWITCH" desc="Status label: Updating Chrome OS to a specified channel">
+          Updating your device to <ph name="CHANNEL_NAME">$1<ex>stable</ex></ph> channel...
         </message>
       </if>
 
@@ -759,15 +779,11 @@ For Google Chrome, processes used to display diagnostics information (such as th
       <!-- One click sign in infobar -->
       <if expr="not pp_ifdef('chromeos')">
         <!-- New one-click signin dialog contents for SAML support -->
-        <message name="IDS_ONE_CLICK_SIGNIN_DIALOG_TITLE_NEW" desc="The title of the modal dialog window that opens when the user chooses to use one click sign in.">
-          Sign in to Chrome with <ph name="USER_EMAIL_ADDRESS">$1<ex>foo@gmail.com</ex></ph>?
+        <message name="IDS_ONE_CLICK_SIGNIN_DIALOG_TITLE" desc="The title of the modal dialog window that opens when the user chooses to use one click sign in.">
+          You're signed in to Chrome!
         </message>
         <message name="IDS_ONE_CLICK_SIGNIN_DIALOG_MESSAGE_NEW" desc="The message of the one click sign in dialog.">
           You're signing in to Chrome using your <ph name="USER_EMAIL_ADDRESS">$1<ex>foo@gmail.com</ex></ph> account. You will be able to access your bookmarks, history, and other settings on all of your signed in devices.
-        </message>
-        <!-- Delete DIALOG_TITLE/MESSAGE when we switch to the _NEW versions -->
-        <message name="IDS_ONE_CLICK_SIGNIN_DIALOG_TITLE" desc="The title of the modal dialog window that opens when the user chooses to use one click sign in.">
-          You're signed in to Chrome!
         </message>
         <message name="IDS_ONE_CLICK_SIGNIN_BUBBLE_MESSAGE" desc="The body of the sync promo NTP bubble.">
           You're now signed in to Chrome! Your bookmarks, history, and other settings will be synced to your Google Account.
@@ -790,13 +806,13 @@ Signing in anyway will merge Chrome information like bookmarks, history, and oth
         Important information regarding your Chrome data
       </message>
       <message name="IDS_ENTERPRISE_SIGNIN_PROFILE_LINK_MESSAGE" desc="The warning message displayed to an enterprise user about to link their profile to their Google account. This message is followed by a 'Learn more' link.">
-	You are signing in with a managed account and giving its administrator control over your Google Chrome profile. Your Chrome data, such as your apps, bookmarks, history, passwords, and other settings will become permanently tied to <ph name="USER_NAME">$1<ex>pat@example.com</ex></ph>. You will be able to delete this data via the Google Accounts Dashboard, but you will not be able to associate this data with another account.
+        You are signing in with a managed account and giving its administrator control over your Google Chrome profile. Your Chrome data, such as your apps, bookmarks, history, passwords, and other settings will become permanently tied to <ph name="USER_NAME">$1<ex>pat@example.com</ex></ph>. You will be able to delete this data via the Google Accounts Dashboard, but you will not be able to associate this data with another account.
       </message>
       <message name="IDS_ENTERPRISE_SIGNIN_CREATE_NEW_PROFILE_PROMPT" desc="The text of the prompt to create a new profile after signing into an enterprise account">
-	If you prefer to keep your existing Chrome data separate, you can create a new Chrome user for <ph name="USER_NAME">$1<ex>pat@example.com</ex></ph>.
+        If you prefer to keep your existing Chrome data separate, you can create a new Chrome user for <ph name="USER_NAME">$1<ex>pat@example.com</ex></ph>.
       </message>
       <message name="IDS_ENTERPRISE_SIGNIN_CREATE_NEW_PROFILE_NO" desc="Text of the button to link the current profile with the signed-in enterprise account">
-	Link my Chrome data to this account
+        Link my Chrome data to this account
       </message>
 
       <!-- Enterprise sign-in dialog (new-style) -->
@@ -813,6 +829,12 @@ Signing in anyway will merge Chrome information like bookmarks, history, and oth
 
       <message name="IDS_AUTOFILL_DIALOG_SAVE_LOCALLY_CHECKBOX" desc="Checkbox that controls whether info the user types into the autofill dialog is saved by chrome.">
         Save details in Chrome
+      </message>
+      <message name="IDS_AUTOFILL_DIALOG_SAVE_LOCALLY_TOOLTIP" desc="Tooltip which explains function of checkbox that controls whether info the user types into the autofill dialog is saved by chrome.">
+        Chrome will securely store your information so you don't need to type it in again, but you will still need to verify your card's security code for future payments.
+      </message>
+      <message name="IDS_AUTOFILL_NEW_CREDIT_CARD_BUBBLE_TITLE" desc="Title text of the new credit card bubble informing a user their billing information has been saved in chrome.">
+        Your billing details have been saved in Chrome.
       </message>
 
       <!-- Network Error Pages -->
@@ -920,6 +942,23 @@ Signing in anyway will merge Chrome information like bookmarks, history, and oth
           You can see all your notifications from Chrome apps, extensions, and websites here.
         </message>
       </if>
+      <message name="IDS_MESSAGE_CENTER_TOOLTIP" desc="Tooltip for notification tray icon without unread notifications">
+        Chrome - Notifications
+      </message>
+      <message name="IDS_MESSAGE_CENTER_TOOLTIP_UNREAD" desc="Tooltip for notification tray icon with unread notifications">
+        Chrome - Notifications (<ph name="QUANTITY">$1<ex>3</ex></ph> unread)
+      </message>
+
+      <!-- MediaStream capture status tray icon -->
+      <message name="IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_AUDIO_AND_VIDEO" desc="Tool tip for the capture status tray icon when microphone and camera are being used">
+        Google Chrome is using your camera and microphone.
+      </message>
+      <message name="IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_AUDIO_ONLY" desc="Tool tip for the capture status tray icon when microphone is being used">
+        Google Chrome is using your microphone.
+      </message>
+      <message name="IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_VIDEO_ONLY" desc="Tool tip for the capture status tray icon when camera is being used">
+        Google Chrome is using your camera.
+      </message>
     </messages>
   </release>
 </grit>

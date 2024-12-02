@@ -157,6 +157,9 @@ class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
     return tray_accessibility_;
   }
 
+  // Overridden from TrayBackgroundView.
+  virtual bool IsPressed() OVERRIDE;
+
  private:
   // Creates the default set of items for the sytem tray.
   void CreateItems(SystemTrayDelegate* delegate);
@@ -188,6 +191,10 @@ class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
   // |notification_items_|, or destroys it if there are no notification items.
   void UpdateNotificationBubble();
 
+  // Checks the current status of the system tray and updates the web
+  // notification tray according to the current status.
+  void UpdateWebNotifications();
+
   const ScopedVector<SystemTrayItem>& items() const { return items_; }
 
   // Overridden from internal::ActionableView.
@@ -216,6 +223,11 @@ class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
   // Set to true when system notifications should be hidden (e.g. web
   // notification bubble is visible).
   bool hide_notifications_;
+
+  // This is true when the displayed system tray menu is a full tray menu,
+  // otherwise a single line item menu like the volume slider is shown.
+  // Note that the value is only valid when |system_bubble_| is true.
+  bool full_system_tray_menu_;
 
   internal::TrayAccessibility* tray_accessibility_;  // not owned
 

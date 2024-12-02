@@ -108,6 +108,10 @@ class SpdyProxyClientSocketTest
     data_->Run();
   }
 
+  void CloseSpdySession(net::Error error, const std::string& description) {
+    spdy_session_->CloseSessionOnError(error, description);
+  }
+
   SpdyTestUtil spdy_util_;
   scoped_ptr<SpdyProxyClientSocket> sock_;
   TestCompletionCallback read_callback_;
@@ -120,7 +124,7 @@ class SpdyProxyClientSocketTest
   scoped_refptr<IOBuffer> read_buf_;
   SpdySessionDependencies session_deps_;
   MockConnect connect_data_;
-  scoped_refptr<SpdySession> spdy_session_;
+  base::WeakPtr<SpdySession> spdy_session_;
   BufferedSpdyFramer framer_;
 
   std::string user_agent_;
@@ -129,14 +133,15 @@ class SpdyProxyClientSocketTest
   HostPortPair endpoint_host_port_pair_;
   ProxyServer proxy_;
   SpdySessionKey endpoint_spdy_session_key_;
-  scoped_refptr<TransportSocketParams> transport_params_;
 
   DISALLOW_COPY_AND_ASSIGN(SpdyProxyClientSocketTest);
 };
 
-INSTANTIATE_TEST_CASE_P(NextProto,
-                        SpdyProxyClientSocketTest,
-                        testing::Values(kProtoSPDY2, kProtoSPDY3));
+INSTANTIATE_TEST_CASE_P(
+    NextProto,
+    SpdyProxyClientSocketTest,
+    testing::Values(kProtoSPDY2, kProtoSPDY3, kProtoSPDY31, kProtoSPDY4a2,
+                    kProtoHTTP2Draft04));
 
 SpdyProxyClientSocketTest::SpdyProxyClientSocketTest()
     : spdy_util_(GetParam()),
@@ -144,7 +149,6 @@ SpdyProxyClientSocketTest::SpdyProxyClientSocketTest()
       read_buf_(NULL),
       session_deps_(GetParam()),
       connect_data_(SYNCHRONOUS, OK),
-      spdy_session_(NULL),
       framer_(spdy_util_.spdy_version(), false),
       user_agent_(kUserAgent),
       url_(kRequestUrl),
@@ -153,12 +157,7 @@ SpdyProxyClientSocketTest::SpdyProxyClientSocketTest()
       proxy_(ProxyServer::SCHEME_HTTPS, proxy_host_port_),
       endpoint_spdy_session_key_(endpoint_host_port_pair_,
                                  proxy_,
-                                 kPrivacyModeDisabled),
-      transport_params_(new TransportSocketParams(proxy_host_port_,
-                                                  LOWEST,
-                                                  false,
-                                                  false,
-                                                  OnHostResolutionCallback())) {
+                                 kPrivacyModeDisabled) {
   session_deps_.net_log = net_log_.bound().net_log();
 }
 
@@ -188,22 +187,10 @@ void SpdyProxyClientSocketTest::Initialize(MockRead* reads,
   session_ = SpdySessionDependencies::SpdyCreateSessionDeterministic(
       &session_deps_);
 
-  // Creates a new spdy session.
+  // Creates the SPDY session and stream.
   spdy_session_ =
-      session_->spdy_session_pool()->Get(endpoint_spdy_session_key_,
-                                         net_log_.bound());
-
-  // Perform the TCP connect.
-  scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
-  EXPECT_EQ(OK,
-            connection->Init(endpoint_host_port_pair_.ToString(),
-                             transport_params_, LOWEST, CompletionCallback(),
-                             session_->GetTransportSocketPool(
-                                 HttpNetworkSession::NORMAL_SOCKET_POOL),
-                             net_log_.bound()));
-  spdy_session_->InitializeWithSocket(connection.release(), false, OK);
-
-  // Create the SPDY Stream.
+      CreateInsecureSpdySession(
+          session_, endpoint_spdy_session_key_, BoundNetLog());
   base::WeakPtr<SpdyStream> spdy_stream(
       CreateStreamSynchronously(
           SPDY_BIDIRECTIONAL_STREAM, spdy_session_, url_, LOWEST,
@@ -1193,7 +1180,7 @@ TEST_P(SpdyProxyClientSocketTest, WritePendingOnClose) {
   scoped_ptr<SpdyFrame> conn(ConstructConnectRequestFrame());
   MockWrite writes[] = {
     CreateMockWrite(*conn, 0, SYNCHRONOUS),
-    MockWrite(ASYNC, ERR_IO_PENDING, 2),
+    MockWrite(ASYNC, ERR_ABORTED, 2),
   };
 
   scoped_ptr<SpdyFrame> resp(ConstructConnectReplyFrame());
@@ -1212,7 +1199,7 @@ TEST_P(SpdyProxyClientSocketTest, WritePendingOnClose) {
   EXPECT_EQ(ERR_IO_PENDING,
             sock_->Write(buf.get(), buf->size(), write_callback_.callback()));
 
-  Run(1);
+  CloseSpdySession(ERR_ABORTED, std::string());
 
   EXPECT_EQ(ERR_CONNECTION_CLOSED, write_callback_.WaitForResult());
 }
@@ -1284,7 +1271,7 @@ TEST_P(SpdyProxyClientSocketTest, RstWithReadAndWritePending) {
   scoped_ptr<SpdyFrame> conn(ConstructConnectRequestFrame());
   MockWrite writes[] = {
     CreateMockWrite(*conn, 0, SYNCHRONOUS),
-    MockWrite(ASYNC, ERR_IO_PENDING, 2),
+    MockWrite(ASYNC, ERR_ABORTED, 3),
   };
 
   scoped_ptr<SpdyFrame> resp(ConstructConnectReplyFrame());
@@ -1292,7 +1279,8 @@ TEST_P(SpdyProxyClientSocketTest, RstWithReadAndWritePending) {
       spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
   MockRead reads[] = {
     CreateMockRead(*resp, 1, ASYNC),
-    CreateMockRead(*rst, 3, ASYNC),
+    CreateMockRead(*rst, 2, ASYNC),
+    MockRead(ASYNC, 0, 4)  // EOF
   };
 
   Initialize(reads, arraysize(reads), writes, arraysize(writes));
@@ -1407,7 +1395,7 @@ TEST_P(SpdyProxyClientSocketTest, RstWithReadAndWritePendingDelete) {
   scoped_ptr<SpdyFrame> conn(ConstructConnectRequestFrame());
   MockWrite writes[] = {
     CreateMockWrite(*conn, 0, SYNCHRONOUS),
-    MockWrite(ASYNC, ERR_IO_PENDING, 2),
+    MockWrite(ASYNC, ERR_ABORTED, 3),
   };
 
   scoped_ptr<SpdyFrame> resp(ConstructConnectReplyFrame());
@@ -1415,7 +1403,8 @@ TEST_P(SpdyProxyClientSocketTest, RstWithReadAndWritePendingDelete) {
       spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
   MockRead reads[] = {
     CreateMockRead(*resp, 1, ASYNC),
-    CreateMockRead(*rst, 3, ASYNC),
+    CreateMockRead(*rst, 2, ASYNC),
+    MockRead(ASYNC, 0, 4),  // EOF
   };
 
   Initialize(reads, arraysize(reads), writes, arraysize(writes));
@@ -1436,7 +1425,7 @@ TEST_P(SpdyProxyClientSocketTest, RstWithReadAndWritePendingDelete) {
       sock_->Write(
           write_buf.get(), write_buf->size(), write_callback_.callback()));
 
-  Run(2);
+  Run(1);
 
   EXPECT_FALSE(sock_.get());
   EXPECT_TRUE(read_callback.have_result());

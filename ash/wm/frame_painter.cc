@@ -13,7 +13,6 @@
 #include "ash/wm/property_util.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
-#include "ash/wm/workspace_controller.h"
 #include "base/logging.h"  // DCHECK
 #include "grit/ash_resources.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -48,18 +47,18 @@ namespace {
 const int kBorderThickness = 0;
 // Space between left edge of window and popup window icon.
 const int kIconOffsetX = 9;
-// Space between top of window and popup window icon.
-const int kIconOffsetY = 5;
 // Height and width of window icon.
 const int kIconSize = 16;
 // Space between the title text and the caption buttons.
 const int kTitleLogoSpacing = 5;
 // Space between window icon and title text.
-const int kTitleIconOffsetX = 4;
+const int kTitleIconOffsetX = 5;
 // Space between window edge and title text, when there is no icon.
 const int kTitleNoIconOffsetX = 8;
-// Color for the title text.
-const SkColor kTitleTextColor = SkColorSetRGB(40, 40, 40);
+// Color for the non-maximized window title text.
+const SkColor kNonMaximizedWindowTitleTextColor = SkColorSetRGB(40, 40, 40);
+// Color for the maximized window title text.
+const SkColor kMaximizedWindowTitleTextColor = SK_ColorWHITE;
 // Size of header/content separator line below the header image.
 const int kHeaderContentSeparatorSize = 1;
 // Color of header bottom edge line.
@@ -165,11 +164,15 @@ bool IsVisibleToRoot(Window* child) {
 }
 
 // Returns true if |window| is a "normal" window for purposes of solo window
-// computations.
+// computations. Returns false for windows that are:
+// * Not drawn (for example, DragDropTracker uses one for mouse capture)
+// * Modal alerts (it looks odd for headers to change when an alert opens)
+// * Constrained windows (ditto)
 bool IsSoloWindowHeaderCandidate(aura::Window* window) {
-  // A normal, non-modal, non-constrained window.
   return window &&
       window->type() == aura::client::WINDOW_TYPE_NORMAL &&
+      window->layer() &&
+      window->layer()->type() != ui::LAYER_NOT_DRAWN &&
       window->GetProperty(aura::client::kModalKey) == ui::MODAL_TYPE_NONE &&
       !window->GetProperty(ash::kConstrainedWindowKey);
 }
@@ -180,24 +183,21 @@ std::vector<Window*> GetWindowsForSoloHeaderUpdate(RootWindow* root_window) {
   std::vector<Window*> windows;
   // During shutdown there may not be a workspace controller. In that case
   // we don't care about updating any windows.
-  ash::internal::WorkspaceController* workspace_controller =
-      ash::GetRootWindowController(root_window)->workspace_controller();
-  if (workspace_controller) {
-    // Avoid memory allocations for typical window counts.
-    windows.reserve(16);
-    // Collect windows from the active workspace.
-    Window* workspace = workspace_controller->GetActiveWorkspaceWindow();
-    windows.insert(windows.end(),
-                   workspace->children().begin(),
-                   workspace->children().end());
-    // Collect "always on top" windows.
-    Window* top_container =
-        ash::Shell::GetContainer(
-            root_window, ash::internal::kShellWindowId_AlwaysOnTopContainer);
-    windows.insert(windows.end(),
-                   top_container->children().begin(),
-                   top_container->children().end());
-  }
+  // Avoid memory allocations for typical window counts.
+  windows.reserve(16);
+  // Collect windows from the desktop.
+  Window* desktop = ash::Shell::GetContainer(
+      root_window, ash::internal::kShellWindowId_DefaultContainer);
+  windows.insert(windows.end(),
+                 desktop->children().begin(),
+                 desktop->children().end());
+  // Collect "always on top" windows.
+  Window* top_container =
+      ash::Shell::GetContainer(
+          root_window, ash::internal::kShellWindowId_AlwaysOnTopContainer);
+  windows.insert(windows.end(),
+                 top_container->children().begin(),
+                 top_container->children().end());
   return windows;
 }
 }  // namespace
@@ -236,9 +236,6 @@ FramePainter::~FramePainter() {
   // Sometimes we are destroyed before the window closes, so ensure we clean up.
   if (window_) {
     window_->RemoveObserver(this);
-    aura::RootWindow* root = window_->GetRootWindow();
-    if (root)
-      root->RemoveObserver(this);
   }
 }
 
@@ -288,12 +285,9 @@ void FramePainter::Init(views::Widget* frame,
   // itself in OnWindowDestroying() below, or in the destructor if we go away
   // before the window.
   window_->AddObserver(this);
-  aura::Window* root = window_->GetRootWindow();
-  if (root)
-    root->AddObserver(this);
 
   // Solo-window header updates are handled by the workspace controller when
-  // this window is added to the active workspace.
+  // this window is added to the desktop.
 }
 
 // static
@@ -406,13 +400,11 @@ bool FramePainter::ShouldUseMinimalHeaderStyle(Themed header_themed) const {
   // Use the minimalistic header style whenever |frame_| is maximized or
   // fullscreen EXCEPT:
   // - If the user has installed a theme with custom images for the header.
-  // - For windows whose workspace is not tracked by the workspace code (which
-  //   are used for tab dragging).
-  // - When the user is cycling through workspaces.
+  // - For windows which are not tracked by the workspace code (which are used
+  //   for tab dragging).
   return ((frame_->IsMaximized() || frame_->IsFullscreen()) &&
       header_themed == THEMED_NO &&
-      GetTrackedByWorkspace(frame_->GetNativeWindow()) &&
-      !IsCyclingThroughWorkspaces());
+      GetTrackedByWorkspace(frame_->GetNativeWindow()));
 }
 
 void FramePainter::PaintHeader(views::NonClientFrameView* view,
@@ -459,7 +451,7 @@ void FramePainter::PaintHeader(views::NonClientFrameView* view,
   }
   header_frame_bounds_ = gfx::Rect(0, 0, view->width(), theme_frame->height());
 
-  const int kCornerRadius = 2;
+  int corner_radius = GetHeaderCornerRadius();
   SkPaint paint;
 
   if (crossfade_animation_.get() && crossfade_animation_->is_animating()) {
@@ -490,7 +482,7 @@ void FramePainter::PaintHeader(views::NonClientFrameView* view,
                                   crossfade_theme_frame_overlay,
                                   paint,
                                   header_frame_bounds_,
-                                  kCornerRadius,
+                                  corner_radius,
                                   GetThemeBackgroundXInset());
 
       paint.setAlpha(new_alpha);
@@ -505,7 +497,7 @@ void FramePainter::PaintHeader(views::NonClientFrameView* view,
                               theme_frame_overlay,
                               paint,
                               header_frame_bounds_,
-                              kCornerRadius,
+                              corner_radius,
                               GetThemeBackgroundXInset());
 
   previous_theme_frame_id_ = theme_frame_id;
@@ -521,15 +513,12 @@ void FramePainter::PaintHeader(views::NonClientFrameView* view,
                        close_button_->y());
 
   // We don't need the extra lightness in the edges when we're at the top edge
-  // of the screen or maximized. We have the maximized check as during
-  // animations the bounds may not be at 0, but the border shouldn't be drawn.
+  // of the screen or when the header's corners are not rounded.
   //
   // TODO(sky): this isn't quite right. What we really want is a method that
   // returns bounds ignoring transforms on certain windows (such as workspaces)
   // and is relative to the root.
-  if (frame_->GetNativeWindow()->bounds().y() == 0 ||
-      frame_->IsMaximized() ||
-      frame_->IsFullscreen())
+  if (frame_->GetNativeWindow()->bounds().y() == 0 || corner_radius == 0)
     return;
 
   // Draw the top corners and edge.
@@ -590,10 +579,12 @@ void FramePainter::PaintTitleBar(views::NonClientFrameView* view,
   // The window icon is painted by its own views::View.
   views::WidgetDelegate* delegate = frame_->widget_delegate();
   if (delegate && delegate->ShouldShowWindowTitle()) {
-    gfx::Rect title_bounds = GetTitleBounds(view, title_font);
+    gfx::Rect title_bounds = GetTitleBounds(title_font);
+    SkColor title_color = frame_->IsMaximized() ?
+        kMaximizedWindowTitleTextColor : kNonMaximizedWindowTitleTextColor;
     canvas->DrawStringInt(delegate->GetWindowTitle(),
                           title_font,
-                          kTitleTextColor,
+                          title_color,
                           view->GetMirroredXForRect(title_bounds),
                           title_bounds.y(),
                           title_bounds.width(),
@@ -668,15 +659,14 @@ void FramePainter::LayoutHeader(views::NonClientFrameView* view,
       size_button_size.height());
 
   if (window_icon_) {
-    window_icon_->SetBoundsRect(
-        gfx::Rect(kIconOffsetX, kIconOffsetY, kIconSize, kIconSize));
+    // Vertically center the window icon with respect to the close button.
+    int icon_offset_y = GetCloseButtonCenterY() - window_icon_->height() / 2;
+    window_icon_->SetBounds(kIconOffsetX, icon_offset_y, kIconSize, kIconSize);
   }
 }
 
-void FramePainter::SchedulePaintForTitle(views::NonClientFrameView* view,
-                                         const gfx::Font& title_font) {
-  frame_->non_client_view()->SchedulePaintInRect(
-      GetTitleBounds(view, title_font));
+void FramePainter::SchedulePaintForTitle(const gfx::Font& title_font) {
+  frame_->non_client_view()->SchedulePaintInRect(GetTitleBounds(title_font));
 }
 
 void FramePainter::OnThemeChanged() {
@@ -700,13 +690,11 @@ void FramePainter::OnThemeChanged() {
 void FramePainter::OnWindowPropertyChanged(aura::Window* window,
                                            const void* key,
                                            intptr_t old) {
-  // When either 'kWindowTrackedByWorkspaceKey' changes or
-  // 'kCyclingThroughWorkspacesKey' changes, we are going to paint the header
-  // differently. Schedule a paint to ensure everything is updated correctly.
+  // When 'kWindowTrackedByWorkspaceKey' changes, we are going to paint the
+  // header differently. Schedule a paint to ensure everything is updated
+  // correctly.
   if (key == internal::kWindowTrackedByWorkspaceKey &&
       GetTrackedByWorkspace(window)) {
-    frame_->non_client_view()->SchedulePaint();
-  } else if (key == internal::kCyclingThroughWorkspacesKey) {
     frame_->non_client_view()->SchedulePaint();
   }
 
@@ -728,7 +716,7 @@ void FramePainter::OnWindowPropertyChanged(aura::Window* window,
 
 void FramePainter::OnWindowVisibilityChanged(aura::Window* window,
                                              bool visible) {
-  // Ignore updates from the root window.
+  // OnWindowVisibilityChanged can be called for the child windows of |window_|.
   if (window != window_)
     return;
 
@@ -738,18 +726,15 @@ void FramePainter::OnWindowVisibilityChanged(aura::Window* window,
 }
 
 void FramePainter::OnWindowDestroying(aura::Window* destroying) {
-  aura::RootWindow* root = window_->GetRootWindow();
-  DCHECK(destroying == window_ || destroying == root);
+  DCHECK_EQ(window_, destroying);
 
   // Must be removed here and not in the destructor, as the aura::Window is
   // already destroyed when our destructor runs.
   window_->RemoveObserver(this);
-  if (root)
-    root->RemoveObserver(this);
 
   // If we have two or more windows open and we close this one, we might trigger
   // the solo window appearance for another window.
-  UpdateSoloWindowInRoot(root, window_);
+  UpdateSoloWindowInRoot(window_->GetRootWindow(), window_);
 
   window_ = NULL;
 }
@@ -757,10 +742,6 @@ void FramePainter::OnWindowDestroying(aura::Window* destroying) {
 void FramePainter::OnWindowBoundsChanged(aura::Window* window,
                                          const gfx::Rect& old_bounds,
                                          const gfx::Rect& new_bounds) {
-  // Ignore updates from the root window.
-  if (window != window_)
-    return;
-
   // TODO(sky): this isn't quite right. What we really want is a method that
   // returns bounds ignoring transforms on certain windows (such as workspaces).
   if ((!frame_->IsMaximized() && !frame_->IsFullscreen()) &&
@@ -771,24 +752,16 @@ void FramePainter::OnWindowBoundsChanged(aura::Window* window,
 }
 
 void FramePainter::OnWindowAddedToRootWindow(aura::Window* window) {
-  DCHECK_EQ(window_, window);
-  RootWindow* root = window->GetRootWindow();
-  root->AddObserver(this);
-
   // Needs to trigger the window appearance change if the window moves across
   // root windows and a solo window is already in the new root.
-  UpdateSoloWindowInRoot(root, NULL /* ignore_window */);
+  UpdateSoloWindowInRoot(window->GetRootWindow(), NULL /* ignore_window */);
 }
 
 void FramePainter::OnWindowRemovingFromRootWindow(aura::Window* window) {
-  DCHECK_EQ(window_, window);
-  RootWindow* root = window->GetRootWindow();
-  root->RemoveObserver(this);
-
   // Needs to trigger the window appearance change if the window moves across
   // root windows and only one window is left in the previous root.  Because
   // |window| is not yet moved, |window| has to be ignored.
-  UpdateSoloWindowInRoot(root, window);
+  UpdateSoloWindowInRoot(window->GetRootWindow(), window);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -833,6 +806,20 @@ int FramePainter::GetTitleOffsetX() const {
       kTitleNoIconOffsetX;
 }
 
+int FramePainter::GetCloseButtonCenterY() const {
+  return close_button_->y() + close_button_->height() / 2;
+}
+
+int FramePainter::GetHeaderCornerRadius() const {
+  // Use square corners for maximized and fullscreen windows when they are
+  // tracked by the workspace code. (Windows which are not tracked by the
+  // workspace code are used for tab dragging.)
+  bool square_corners = ((frame_->IsMaximized() || frame_->IsFullscreen())) &&
+      GetTrackedByWorkspace(frame_->GetNativeWindow());
+  const int kCornerRadius = 2;
+  return square_corners ? 0 : kCornerRadius;
+}
+
 int FramePainter::GetHeaderOpacity(
     HeaderMode header_mode,
     int theme_frame_id,
@@ -857,11 +844,6 @@ int FramePainter::GetHeaderOpacity(
   if (header_mode == ACTIVE)
     return kActiveWindowOpacity;
   return kInactiveWindowOpacity;
-}
-
-bool FramePainter::IsCyclingThroughWorkspaces() const {
-  aura::RootWindow* root = window_->GetRootWindow();
-  return root && root->GetProperty(internal::kCyclingThroughWorkspacesKey);
 }
 
 bool FramePainter::UseSoloWindowHeader() const {
@@ -917,8 +899,8 @@ void FramePainter::UpdateSoloWindowInRoot(RootWindow* root,
   if (old_solo_header == new_solo_header)
     return;
   root->SetProperty(internal::kSoloWindowHeaderKey, new_solo_header);
-  // Invalidate all the window frames in the active workspace. There should
-  // only be a few.
+  // Invalidate all the window frames in the desktop. There should only be
+  // a few.
   std::vector<Window*> windows = GetWindowsForSoloHeaderUpdate(root);
   for (std::vector<Window*>::const_iterator it = windows.begin();
        it != windows.end();
@@ -937,13 +919,12 @@ void FramePainter::SchedulePaintForHeader() {
                 std::max(top_left_height, top_right_height)));
 }
 
-gfx::Rect FramePainter::GetTitleBounds(views::NonClientFrameView* view,
-                                       const gfx::Font& title_font) {
+gfx::Rect FramePainter::GetTitleBounds(const gfx::Font& title_font) {
   int title_x = GetTitleOffsetX();
-  // Center the text in the middle of the caption - this way it adapts
-  // automatically to the caption height (which is given by the owner).
-  int title_y =
-      (view->GetBoundsForClientView().y() - title_font.GetHeight()) / 2;
+  // Center the text with respect to the close button. This way it adapts to
+  // the caption height and aligns exactly with the window icon. Don't use
+  // |window_icon_| for this computation as it may be NULL.
+  int title_y = GetCloseButtonCenterY() - title_font.GetHeight() / 2;
   return gfx::Rect(
       title_x,
       std::max(0, title_y),

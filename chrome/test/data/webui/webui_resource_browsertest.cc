@@ -103,6 +103,12 @@ IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, GridTest) {
   RunTest(base::FilePath(FILE_PATH_LITERAL("grid_test.html")));
 }
 
+IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, LinkControllerTest) {
+  AddLibrary(IDR_WEBUI_JS_CR);
+  AddLibrary(IDR_WEBUI_JS_CR_LINK_CONTROLLER);
+  RunTest(base::FilePath(FILE_PATH_LITERAL("link_controller_test.html")));
+}
+
 IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, ListSelectionModelTest) {
   AddLibrary(IDR_WEBUI_JS_CR);
   AddLibrary(IDR_WEBUI_JS_CR_EVENT_TARGET);
@@ -110,9 +116,21 @@ IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, ListSelectionModelTest) {
   RunTest(base::FilePath(FILE_PATH_LITERAL("list_selection_model_test.html")));
 }
 
+IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, ListSingleSelectionModelTest) {
+  AddLibrary(IDR_WEBUI_JS_CR);
+  AddLibrary(IDR_WEBUI_JS_CR_EVENT_TARGET);
+  AddLibrary(IDR_WEBUI_JS_CR_UI_LIST_SINGLE_SELECTION_MODEL);
+  RunTest(base::FilePath(FILE_PATH_LITERAL(
+      "list_single_selection_model_test.html")));
+}
+
 IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, LocalStringsTest) {
   AddLibrary(IDR_WEBUI_JS_LOCAL_STRINGS);
   RunTest(base::FilePath(FILE_PATH_LITERAL("local_strings_test.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, MockTimerTest) {
+  RunTest(base::FilePath(FILE_PATH_LITERAL("mock_timer_test.html")));
 }
 
 IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, ParseHtmlSubsetTest) {
@@ -124,4 +142,17 @@ IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, PositionUtilTest) {
   AddLibrary(IDR_WEBUI_JS_CR);
   AddLibrary(IDR_WEBUI_JS_CR_UI_POSITION_UTIL);
   RunTest(base::FilePath(FILE_PATH_LITERAL("position_util_test.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, PromiseTest) {
+  AddLibrary(IDR_WEBUI_JS_CR);
+  AddLibrary(IDR_WEBUI_JS_CR_PROMISE);
+  RunTest(base::FilePath(FILE_PATH_LITERAL("promise_test.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, RepeatingButtonTest) {
+  AddLibrary(IDR_WEBUI_JS_CR);
+  AddLibrary(IDR_WEBUI_JS_CR_UI);
+  AddLibrary(IDR_WEBUI_JS_CR_UI_REPEATING_BUTTON);
+  RunTest(base::FilePath(FILE_PATH_LITERAL("repeating_button_test.html")));
 }

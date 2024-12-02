@@ -11,6 +11,7 @@ MockInputMethodManager::MockInputMethodManager()
     : add_observer_count_(0),
       remove_observer_count_(0),
       util_(&delegate_, whitelist_.GetSupportedInputMethods()) {
+  active_input_method_ids_.push_back("xkb:us::eng");
 }
 
 MockInputMethodManager::~MockInputMethodManager() {
@@ -50,6 +51,11 @@ MockInputMethodManager::GetActiveInputMethods() const {
   return result.Pass();
 }
 
+const std::vector<std::string>&
+MockInputMethodManager::GetActiveInputMethodIds() const {
+  return active_input_method_ids_;
+}
+
 size_t MockInputMethodManager::GetNumActiveInputMethods() const {
   return 1;
 }
@@ -63,7 +69,18 @@ bool MockInputMethodManager::EnableInputMethods(
   return true;
 }
 
+bool MockInputMethodManager::EnableInputMethod(
+    const std::string& new_active_input_method_id) {
+  return true;
+}
+
 bool MockInputMethodManager::MigrateOldInputMethods(
+    std::vector<std::string>* input_method_ids) {
+  return false;
+}
+
+bool MockInputMethodManager::MigrateKoreanKeyboard(
+    const std::string& keyboard_id,
     std::vector<std::string>* input_method_ids) {
   return false;
 }
@@ -103,11 +120,15 @@ void MockInputMethodManager::SetEnabledExtensionImes(
     std::vector<std::string>* ids) {
 }
 
+void MockInputMethodManager::SetInputMethodDefault() {
+}
+
 bool MockInputMethodManager::SwitchToNextInputMethod() {
   return true;
 }
 
-bool MockInputMethodManager::SwitchToPreviousInputMethod() {
+bool MockInputMethodManager::SwitchToPreviousInputMethod(
+    const ui::Accelerator& accelerator) {
   return true;
 }
 
@@ -156,5 +177,9 @@ void MockInputMethodManager::set_hardware_keyboard_layout(
   delegate_.set_hardware_keyboard_layout(value);
 }
 
+bool MockInputMethodManager::IsFullLatinKeyboard(
+    const std::string& layout) const {
+  return true;
+}
 }  // namespace input_method
 }  // namespace chromeos

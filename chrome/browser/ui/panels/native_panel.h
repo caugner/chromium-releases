@@ -88,6 +88,10 @@ class NativePanel {
   // iconic.
   virtual bool IsPanelMinimizedBySystem() const = 0;
 
+  // Returns true if the panel is shown in the active desktop. The user could
+  // create and use multiple virtual desktops or workspaces.
+  virtual bool IsPanelShownOnActiveDesktop() const = 0;
+
   // Turns on/off the shadow effect around the window shape.
   virtual void ShowShadow(bool show) = 0;
 
@@ -136,6 +140,10 @@ class NativePanelTesting {
   virtual bool IsButtonVisible(panel::TitlebarButtonType button_type) const = 0;
 
   virtual panel::CornerStyle GetWindowCornerStyle() const = 0;
+
+  // Makes sure that the application is running on foreground. Returns false
+  // if the effort fails.
+  virtual bool EnsureApplicationRunOnForeground() = 0;
 };
 
 #endif  // CHROME_BROWSER_UI_PANELS_NATIVE_PANEL_H_

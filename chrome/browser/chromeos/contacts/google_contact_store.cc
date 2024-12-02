@@ -14,9 +14,12 @@
 #include "chrome/browser/chromeos/contacts/contact_database.h"
 #include "chrome/browser/chromeos/contacts/contact_store_observer.h"
 #include "chrome/browser/chromeos/contacts/gdata_contacts_service.h"
+#include "chrome/browser/chromeos/profiles/profile_util.h"
 #include "chrome/browser/google_apis/auth_service.h"
 #include "chrome/browser/google_apis/time_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/profile_oauth2_token_service.h"
+#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -49,6 +52,9 @@ const int kUpdateFailureInitialRetrySec = 5;
 
 // Amount by which |update_delay_on_next_failure_| is multiplied on failure.
 const int kUpdateFailureBackoffFactor = 2;
+
+// OAuth2 scope for the Contacts API.
+const char kContactsScope[] = "https://www.google.com/m8/feeds/";
 
 }  // namespace
 
@@ -120,9 +126,14 @@ void GoogleContactStore::Init() {
 
   // Create a GData service if one hasn't already been assigned for testing.
   if (!gdata_service_.get()) {
+    std::vector<std::string> scopes;
+    scopes.push_back(kContactsScope);
+
     gdata_service_.reset(new GDataContactsService(
-        url_request_context_getter_, profile_));
-    gdata_service_->Initialize();
+        url_request_context_getter_,
+        new google_apis::AuthService(
+            ProfileOAuth2TokenServiceFactory::GetForProfile(profile_),
+            url_request_context_getter_, scopes)));
   }
 
   base::FilePath db_path = profile_->GetPath().Append(kDatabaseDirectoryName);
@@ -403,7 +414,7 @@ bool GoogleContactStoreFactory::CanCreateContactStoreForProfile(
     Profile* profile) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(profile);
-  return google_apis::AuthService::CanAuthenticate(profile);
+  return chromeos::IsProfileAssociatedWithGaiaAccount(profile);
 }
 
 ContactStore* GoogleContactStoreFactory::CreateContactStore(Profile* profile) {

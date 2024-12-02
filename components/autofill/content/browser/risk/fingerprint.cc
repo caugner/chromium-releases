@@ -16,10 +16,11 @@
 #include "base/callback.h"
 #include "base/cpu.h"
 #include "base/logging.h"
+#include "base/scoped_observer.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "components/autofill/content/browser/risk/proto/fingerprint.pb.h"
 #include "content/public/browser/browser_thread.h"
@@ -34,12 +35,12 @@
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/geoposition.h"
+#include "content/public/common/webplugininfo.h"
 #include "gpu/config/gpu_info.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebScreenInfo.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/screen.h"
-#include "webkit/plugins/webplugininfo.h"
 
 using WebKit::WebScreenInfo;
 
@@ -101,15 +102,15 @@ void AddFontsToFingerprint(const base::ListValue& fonts,
 }
 
 // Adds the list of |plugins| to the |machine|.
-void AddPluginsToFingerprint(const std::vector<webkit::WebPluginInfo>& plugins,
+void AddPluginsToFingerprint(const std::vector<content::WebPluginInfo>& plugins,
                              Fingerprint::MachineCharacteristics* machine) {
-  for (std::vector<webkit::WebPluginInfo>::const_iterator it = plugins.begin();
+  for (std::vector<content::WebPluginInfo>::const_iterator it = plugins.begin();
        it != plugins.end(); ++it) {
     Fingerprint::MachineCharacteristics::Plugin* plugin =
         machine->add_plugin();
     plugin->set_name(UTF16ToUTF8(it->name));
     plugin->set_description(UTF16ToUTF8(it->desc));
-    for (std::vector<webkit::WebPluginMimeType>::const_iterator mime_type =
+    for (std::vector<content::WebPluginMimeType>::const_iterator mime_type =
              it->mime_types.begin();
          mime_type != it->mime_types.end(); ++mime_type) {
       plugin->add_mime_type(mime_type->mime_type);
@@ -212,7 +213,7 @@ class FingerprintDataLoader : public content::GpuDataManagerObserver {
 
   // Callbacks for asynchronously loaded data.
   void OnGotFonts(scoped_ptr<base::ListValue> fonts);
-  void OnGotPlugins(const std::vector<webkit::WebPluginInfo>& plugins);
+  void OnGotPlugins(const std::vector<content::WebPluginInfo>& plugins);
   void OnGotGeoposition(const content::Geoposition& geoposition);
 
   // Methods that run on the IO thread to communicate with the
@@ -230,6 +231,10 @@ class FingerprintDataLoader : public content::GpuDataManagerObserver {
   // The GPU data provider.
   // Weak reference because the GpuDataManager class is a singleton.
   content::GpuDataManager* const gpu_data_manager_;
+
+  // Ensures that any observer registratiosn for the GPU data are cleaned up by
+  // the time this object is destroyed.
+  ScopedObserver<content::GpuDataManager, FingerprintDataLoader> gpu_observer_;
 
   // The callback used as an "observer" of the GeolocationProvider.  Accessed
   // only on the IO thread.
@@ -249,7 +254,7 @@ class FingerprintDataLoader : public content::GpuDataManagerObserver {
 
   // Data that will be loaded asynchronously.
   scoped_ptr<base::ListValue> fonts_;
-  std::vector<webkit::WebPluginInfo> plugins_;
+  std::vector<content::WebPluginInfo> plugins_;
   bool waiting_on_plugins_;
   content::Geoposition geoposition_;
 
@@ -275,6 +280,7 @@ FingerprintDataLoader::FingerprintDataLoader(
     const std::string& app_locale,
     const base::Callback<void(scoped_ptr<Fingerprint>)>& callback)
     : gpu_data_manager_(content::GpuDataManager::GetInstance()),
+      gpu_observer_(this),
       obfuscated_gaia_id_(obfuscated_gaia_id),
       window_bounds_(window_bounds),
       content_bounds_(content_bounds),
@@ -290,7 +296,7 @@ FingerprintDataLoader::FingerprintDataLoader(
 
   // Load GPU data if needed.
   if (!gpu_data_manager_->IsCompleteGpuInfoAvailable()) {
-    gpu_data_manager_->AddObserver(this);
+    gpu_observer_.Add(gpu_data_manager_);
     gpu_data_manager_->RequestCompleteGpuInfoIfNeeded();
   }
 
@@ -317,7 +323,7 @@ void FingerprintDataLoader::OnGpuInfoUpdate() {
   if (!gpu_data_manager_->IsCompleteGpuInfoAvailable())
     return;
 
-  gpu_data_manager_->RemoveObserver(this);
+  gpu_observer_.Remove(gpu_data_manager_);
   MaybeFillFingerprint();
 }
 
@@ -328,7 +334,7 @@ void FingerprintDataLoader::OnGotFonts(scoped_ptr<base::ListValue> fonts) {
 }
 
 void FingerprintDataLoader::OnGotPlugins(
-    const std::vector<webkit::WebPluginInfo>& plugins) {
+    const std::vector<content::WebPluginInfo>& plugins) {
   DCHECK(waiting_on_plugins_);
   waiting_on_plugins_ = false;
   plugins_ = plugins;

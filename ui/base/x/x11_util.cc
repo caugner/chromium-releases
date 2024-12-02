@@ -25,7 +25,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -475,8 +475,8 @@ XcursorImage* SkBitmapToXcursorImage(const SkBitmap* cursor_image,
 
   const SkBitmap* bitmap = needs_scale ? &scaled : cursor_image;
   XcursorImage* image = XcursorImageCreate(bitmap->width(), bitmap->height());
-  image->xhot = hotspot_point.x();
-  image->yhot = hotspot_point.y();
+  image->xhot = std::min(bitmap->width() - 1, hotspot_point.x());
+  image->yhot = std::min(bitmap->height() - 1, hotspot_point.y());
 
   if (bitmap->width() && bitmap->height()) {
     bitmap->lockPixels();

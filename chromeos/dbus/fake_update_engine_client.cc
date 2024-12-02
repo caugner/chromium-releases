@@ -33,13 +33,6 @@ void FakeUpdateEngineClient::RebootAfterUpdate() {
   reboot_after_update_call_count_++;
 }
 
-void FakeUpdateEngineClient::SetReleaseTrack(const std::string& track) {
-}
-
-void FakeUpdateEngineClient::GetReleaseTrack(
-    const GetReleaseTrackCallback& callback) {
-}
-
 UpdateEngineClient::Status FakeUpdateEngineClient::GetLastStatus() {
   if (status_queue_.empty())
     return default_status_;
@@ -47,6 +40,14 @@ UpdateEngineClient::Status FakeUpdateEngineClient::GetLastStatus() {
   UpdateEngineClient::Status last_status = status_queue_.front();
   status_queue_.pop();
   return last_status;
+}
+
+void FakeUpdateEngineClient::SetChannel(const std::string& target_channel,
+                                        bool is_powerwash_allowed) {
+}
+
+void FakeUpdateEngineClient::GetChannel(bool get_current_channel,
+                                        const GetChannelCallback& callback) {
 }
 
 void FakeUpdateEngineClient::set_default_status(

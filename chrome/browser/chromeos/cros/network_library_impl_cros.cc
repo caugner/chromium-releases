@@ -10,7 +10,6 @@
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/native_network_constants.h"
 #include "chrome/browser/chromeos/cros/native_network_parser.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -48,8 +47,6 @@ NetworkLibraryImplCros::~NetworkLibraryImplCros() {
 }
 
 void NetworkLibraryImplCros::Init() {
-  CHECK(CrosLibrary::Get()->libcros_loaded())
-      << "libcros must be loaded before NetworkLibraryImplCros::Init()";
   // First, get the currently available networks. This data is cached
   // on the connman side, so the call should be quick.
   VLOG(1) << "Requesting initial network manager info from libcros.";
@@ -201,7 +198,6 @@ void NetworkLibraryImplCros::NetworkConnectCallback(
     const std::string& service_path,
     NetworkMethodErrorType error,
     const std::string& error_message) {
-  DCHECK(CrosLibrary::Get()->libcros_loaded());
   NetworkConnectStatus status;
   if (error == NETWORK_METHOD_ERROR_NONE) {
     status = CONNECT_SUCCESS;
@@ -347,7 +343,6 @@ void NetworkLibraryImplCros::PinOperationCallback(
     const std::string& path,
     NetworkMethodErrorType error,
     const std::string& error_message) {
-  DCHECK(CrosLibrary::Get()->libcros_loaded());
   PinOperationError pin_error;
   VLOG(1) << "PinOperationCallback, error: " << error
           << " error_msg: " << error_message;
@@ -394,7 +389,6 @@ void NetworkLibraryImplCros::CellularRegisterCallback(
     const std::string& path,
     NetworkMethodErrorType error,
     const std::string& error_message) {
-  DCHECK(CrosLibrary::Get()->libcros_loaded());
   // TODO(dpolukhin): Notify observers about network registration status
   // but not UI doesn't assume such notification so just ignore result.
 }
@@ -421,15 +415,6 @@ void NetworkLibraryImplCros::SetCarrier(
     return;
   }
   CrosSetCarrier(cellular->device_path(), carrier, completed);
-}
-
-void NetworkLibraryImplCros::ResetModem() {
-  const NetworkDevice* cellular = FindCellularDevice();
-  if (!cellular) {
-    NOTREACHED() << "Calling ResetModem method w/o cellular device.";
-    return;
-  }
-  CrosReset(cellular->device_path());
 }
 
 bool NetworkLibraryImplCros::IsCellularAlwaysInRoaming() {
@@ -502,13 +487,6 @@ void NetworkLibraryImplCros::CallRemoveNetwork(const Network* network) {
   CrosRequestRemoveNetworkService(service_path);
 }
 
-void NetworkLibraryImplCros::EnableOfflineMode(bool enable) {
-  // If network device is already enabled/disabled, then don't do anything.
-  if (CrosSetOfflineMode(enable))
-    offline_mode_ = enable;
-}
-
-
 void NetworkLibraryImplCros::GetIPConfigsCallback(
     const NetworkGetIPConfigsCallback& callback,
     HardwareAddressFormat format,
@@ -542,34 +520,6 @@ void NetworkLibraryImplCros::GetIPConfigs(
                                weak_ptr_factory_.GetWeakPtr(),
                                callback,
                                format));
-}
-
-NetworkIPConfigVector NetworkLibraryImplCros::GetIPConfigsAndBlock(
-    const std::string& device_path,
-    std::string* hardware_address,
-    HardwareAddressFormat format) {
-  NetworkIPConfigVector ipconfig_vector;
-  CrosListIPConfigsAndBlock(device_path,
-                            &ipconfig_vector,
-                            NULL,
-                            hardware_address);
-
-  for (size_t i = 0; i < hardware_address->size(); ++i)
-    (*hardware_address)[i] = toupper((*hardware_address)[i]);
-  if (format == FORMAT_COLON_SEPARATED_HEX) {
-    if (hardware_address->size() % 2 == 0) {
-      std::string output;
-      for (size_t i = 0; i < hardware_address->size(); ++i) {
-        if ((i != 0) && (i % 2 == 0))
-          output.push_back(':');
-        output.push_back((*hardware_address)[i]);
-      }
-      *hardware_address = output;
-    }
-  } else {
-    DCHECK_EQ(format, FORMAT_RAW_HEX);
-  }
-  return ipconfig_vector;
 }
 
 void NetworkLibraryImplCros::SetIPParameters(const std::string& service_path,
@@ -664,12 +614,6 @@ bool NetworkLibraryImplCros::NetworkManagerStatusChanged(
     case PROPERTY_INDEX_DEFAULT_TECHNOLOGY:
       // Currently we ignore DefaultTechnology.
       break;
-    case PROPERTY_INDEX_OFFLINE_MODE: {
-      DCHECK_EQ(value->GetType(), Value::TYPE_BOOLEAN);
-      value->GetAsBoolean(&offline_mode_);
-      NotifyNetworkManagerChanged(false);  // Not forced.
-      break;
-    }
     case PROPERTY_INDEX_ACTIVE_PROFILE: {
       std::string prev = active_profile_path_;
       DCHECK_EQ(value->GetType(), Value::TYPE_STRING);

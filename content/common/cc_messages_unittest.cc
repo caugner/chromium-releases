@@ -6,14 +6,19 @@
 
 #include <string.h>
 
+#include "base/command_line.h"
 #include "cc/output/compositor_frame.h"
+#include "content/public/common/content_switches.h"
 #include "ipc/ipc_message.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/effects/SkBlurImageFilter.h"
 
 using cc::CheckerboardDrawQuad;
 using cc::DelegatedFrameData;
 using cc::DebugBorderDrawQuad;
 using cc::DrawQuad;
+using cc::FilterOperation;
+using cc::FilterOperations;
 using cc::IOSurfaceDrawQuad;
 using cc::PictureDrawQuad;
 using cc::RenderPass;
@@ -28,8 +33,6 @@ using cc::StreamVideoDrawQuad;
 using cc::VideoLayerImpl;
 using cc::YUVVideoDrawQuad;
 using gfx::Transform;
-using WebKit::WebFilterOperation;
-using WebKit::WebFilterOperations;
 
 namespace content {
 namespace {
@@ -134,7 +137,10 @@ class CCMessagesTest : public testing::Test {
               b->contents_changed_since_last_frame);
     EXPECT_EQ(a->mask_uv_rect.ToString(), b->mask_uv_rect.ToString());
     EXPECT_EQ(a->filters, b->filters);
-    EXPECT_EQ(a->filter, b->filter);
+    if (!a->filter || !b->filter)
+        EXPECT_EQ(a->filter, b->filter);
+    else
+        EXPECT_EQ(a->filter->countInputs(), b->filter->countInputs());
     EXPECT_EQ(a->background_filters, b->background_filters);
   }
 
@@ -153,6 +159,7 @@ class CCMessagesTest : public testing::Test {
     EXPECT_EQ(a->premultiplied_alpha, b->premultiplied_alpha);
     EXPECT_EQ(a->uv_top_left, b->uv_top_left);
     EXPECT_EQ(a->uv_bottom_right, b->uv_bottom_right);
+    EXPECT_EQ(a->background_color, b->background_color);
     EXPECT_EQ(a->vertex_opacity[0], b->vertex_opacity[0]);
     EXPECT_EQ(a->vertex_opacity[1], b->vertex_opacity[1]);
     EXPECT_EQ(a->vertex_opacity[2], b->vertex_opacity[2]);
@@ -187,6 +194,10 @@ class CCMessagesTest : public testing::Test {
 };
 
 TEST_F(CCMessagesTest, AllQuads) {
+  CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (!command_line.HasSwitch(switches::kAllowFiltersOverIPC))
+    command_line.AppendSwitch(switches::kAllowFiltersOverIPC);
+
   IPC::Message msg(1, 2, IPC::Message::PRIORITY_NORMAL);
 
   Transform arbitrary_matrix;
@@ -219,17 +230,18 @@ TEST_F(CCMessagesTest, AllQuads) {
   ResourceProvider::ResourceId arbitrary_resourceid2 = 47;
   ResourceProvider::ResourceId arbitrary_resourceid3 = 23;
   ResourceProvider::ResourceId arbitrary_resourceid4 = 16;
+  SkScalar arbitrary_sigma = SkFloatToScalar(2.0f);
 
-  WebFilterOperations arbitrary_filters1;
-  arbitrary_filters1.append(WebFilterOperation::createGrayscaleFilter(
+  FilterOperations arbitrary_filters1;
+  arbitrary_filters1.Append(FilterOperation::CreateGrayscaleFilter(
       arbitrary_float1));
 
-  WebFilterOperations arbitrary_filters2;
-  arbitrary_filters2.append(WebFilterOperation::createBrightnessFilter(
+  FilterOperations arbitrary_filters2;
+  arbitrary_filters2.Append(FilterOperation::CreateBrightnessFilter(
       arbitrary_float2));
 
-  // TODO(danakj): filter is not serialized.
-  skia::RefPtr<SkImageFilter> arbitrary_filter;
+  skia::RefPtr<SkImageFilter> arbitrary_filter = skia::AdoptRef(
+    new SkBlurImageFilter(arbitrary_sigma, arbitrary_sigma));
 
   scoped_ptr<SharedQuadState> shared_state1_in = SharedQuadState::Create();
   shared_state1_in->SetAll(arbitrary_matrix,
@@ -289,7 +301,7 @@ TEST_F(CCMessagesTest, AllQuads) {
                         arbitrary_rect1,
                         arbitrary_rectf1,
                         arbitrary_filters1,
-                        arbitrary_filter,  // TODO(piman): not serialized.
+                        arbitrary_filter,
                         arbitrary_filters2);
   scoped_ptr<RenderPassDrawQuad> renderpass_cmp = renderpass_in->Copy(
       renderpass_in->shared_quad_state, renderpass_in->render_pass_id);
@@ -346,6 +358,7 @@ TEST_F(CCMessagesTest, AllQuads) {
                      arbitrary_bool2,
                      arbitrary_pointf1,
                      arbitrary_pointf2,
+                     arbitrary_color,
                      arbitrary_float_array,
                      arbitrary_bool3);
   scoped_ptr<DrawQuad> texture_cmp = texture_in->Copy(

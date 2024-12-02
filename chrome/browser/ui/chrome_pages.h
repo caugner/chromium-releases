@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "chrome/browser/ui/sync/sync_promo_ui.h"
+#include "chrome/browser/signin/signin_promo.h"
 #include "chrome/common/content_settings_types.h"
 
 class Browser;
@@ -45,6 +45,7 @@ void ShowFeedbackPage(Browser* browser,
 
 void ShowHelp(Browser* browser, HelpSource source);
 void ShowPolicy(Browser* browser);
+void ShowSlow(Browser* browser);
 
 // Various things that open in a settings UI.
 void ShowSettings(Browser* browser);
@@ -58,7 +59,7 @@ void ShowAboutChrome(Browser* browser);
 void ShowSearchEngineSettings(Browser* browser);
 // If the user is already signed in, shows the "Signin" portion of Settings,
 // otherwise initiates signin.
-void ShowBrowserSignin(Browser* browser, SyncPromoUI::Source source);
+void ShowBrowserSignin(Browser* browser, signin::Source source);
 
 // Open a tab to sign into GAIA.
 void ShowGaiaSignin(Browser* browser,

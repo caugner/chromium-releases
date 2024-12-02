@@ -9,6 +9,7 @@ from appengine_wrappers import GetAppVersion
 from app_yaml_helper import AppYamlHelper
 from cron_servlet import CronServlet
 from empty_dir_file_system import EmptyDirFileSystem
+from host_file_system_creator import HostFileSystemCreator
 from local_file_system import LocalFileSystem
 from mock_file_system import MockFileSystem
 from servlet import Request
@@ -29,10 +30,13 @@ class _TestDelegate(CronServlet.Delegate):
   def CreateBranchUtility(self, object_store_creator):
     return TestBranchUtility.CreateWithCannedData()
 
-  def CreateHostFileSystemForBranchAndRevision(self, branch, revision):
-    file_system = self._create_file_system(revision)
-    self.file_systems.append(file_system)
-    return file_system
+  def CreateHostFileSystemCreator(self, object_store_creator):
+    def constructor(branch=None, revision=None):
+      file_system = self._create_file_system(revision)
+      self.file_systems.append(file_system)
+      return file_system
+    return HostFileSystemCreator(object_store_creator,
+                                 constructor_for_test=constructor)
 
   def CreateAppSamplesFileSystem(self, object_store_creator):
     return EmptyDirFileSystem()
@@ -54,18 +58,24 @@ class CronServletTest(unittest.TestCase):
     # Test that the cron runs successfully.
     response = CronServlet(Request.ForTest('trunk'),
                            delegate_for_test=delegate).Get()
-    self.assertEqual(1, len(delegate.file_systems))
     self.assertEqual(200, response.status)
+
+    # Save the file systems created, start with a fresh set for the next run.
+    first_run_file_systems = delegate.file_systems[:]
+    delegate.file_systems[:] = []
 
     # When re-running, all file systems should be Stat()d the same number of
     # times, but the second round shouldn't have been re-Read() since the
     # Stats haven't changed.
     response = CronServlet(Request.ForTest('trunk'),
                            delegate_for_test=delegate).Get()
-    self.assertEqual(2, len(delegate.file_systems))
-    self.assertTrue(*delegate.file_systems[1].CheckAndReset(
-        read_count=0,
-        stat_count=delegate.file_systems[0].GetStatCount()))
+    self.assertEqual(200, response.status)
+
+    self.assertEqual(len(first_run_file_systems), len(delegate.file_systems))
+    for i, second_run_file_system in enumerate(delegate.file_systems):
+      self.assertTrue(*second_run_file_system.CheckAndReset(
+          read_count=0,
+          stat_count=first_run_file_systems[i].GetStatCount()))
 
   def testSafeRevision(self):
     test_data = {
@@ -111,7 +121,7 @@ class CronServletTest(unittest.TestCase):
     storage_html_path = 'docs/templates/public/apps/storage.html'
     static_txt_path = 'docs/static/static.txt'
 
-    def create_file_system(revision):
+    def create_file_system(revision=None):
       '''Creates a MockFileSystem at |revision| by applying that many |updates|
       to it.
       '''

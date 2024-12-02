@@ -24,12 +24,6 @@ class DriveIntegrationServiceTest : public testing::Test {
         new DummyFileSystem));
   }
 
-  virtual void TearDown() OVERRIDE {
-    integration_service_.reset();
-    google_apis::test_util::RunBlockingPoolTask();
-    profile_.reset();
-  }
-
  protected:
   content::TestBrowserThreadBundle thread_bundle_;
   scoped_ptr<TestingProfile> profile_;
@@ -38,7 +32,7 @@ class DriveIntegrationServiceTest : public testing::Test {
 
 TEST_F(DriveIntegrationServiceTest, InitializeAndShutdown) {
   integration_service_->Initialize();
-  google_apis::test_util::RunBlockingPoolTask();
+  test_util::RunBlockingPoolTask();
   integration_service_->Shutdown();
 }
 

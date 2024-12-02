@@ -10,8 +10,8 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "content/public/browser/interstitial_page_delegate.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/network_change_notifier.h"
+#include "url/gurl.h"
 
 namespace base {
 class DictionaryValue;
@@ -73,10 +73,6 @@ class OfflineLoadPage
   void GetAppOfflineStrings(const extensions::Extension* app,
                             base::DictionaryValue* strings) const;
   void GetNormalOfflineStrings(base::DictionaryValue* strings) const;
-
-  // True if there is a mobile network is available but
-  // has not been activated.
-  bool ShowActivationMessage();
 
   CompletionCallback callback_;
 

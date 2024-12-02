@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -9,16 +11,17 @@
 #include "chrome/browser/extensions/process_map.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
+#include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
+#include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -28,6 +31,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 #include "sync/api/string_ordinal.h"
 
 using content::NavigationController;
@@ -44,8 +48,8 @@ class AppApiTest : public ExtensionApiTest {
     GURL::Replacements replace_host;
     std::string host_str("localhost");  // must stay in scope with replace_host
     replace_host.SetHostStr(host_str);
-    GURL base_url = test_server()->GetURL(
-        "files/extensions/api_test/" + test_directory + "/");
+    GURL base_url = embedded_test_server()->GetURL(
+        "/extensions/api_test/" + test_directory + "/");
     return base_url.ReplaceComponents(replace_host);
   }
 
@@ -67,7 +71,7 @@ class AppApiTest : public ExtensionApiTest {
         browser()->profile())->extension_service()->process_map();
 
     host_resolver()->AddRule("*", "127.0.0.1");
-    ASSERT_TRUE(test_server()->Start());
+    ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
     ASSERT_TRUE(LoadExtension(
         test_data_dir_.AppendASCII(app_name)));
@@ -144,7 +148,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, DISABLED_AppProcess) {
       browser()->profile())->extension_service()->process_map();
 
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("app_process")));
 
@@ -291,7 +295,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_BookmarkAppGetsNormalProcess) {
   extensions::ProcessMap* process_map = service->process_map();
 
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
   GURL base_url = GetTestBaseURL("app_process");
 
   // Load an app as a bookmark app.
@@ -304,6 +308,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_BookmarkAppGetsNormalProcess) {
   service->OnExtensionInstalled(extension.get(),
                                 syncer::StringOrdinal::CreateInitialOrdinal(),
                                 false /* no requirement errors */,
+                                extensions::Blacklist::NOT_BLACKLISTED,
                                 false /* don't wait for idle */);
   ASSERT_TRUE(extension.get());
   ASSERT_TRUE(extension->from_bookmark());
@@ -371,7 +376,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_BookmarkAppGetsNormalProcess) {
 // See http://crbug.com/61757
 IN_PROC_BROWSER_TEST_F(AppApiTest, AppProcessRedirectBack) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("app_process")));
 
@@ -397,7 +402,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, AppProcessRedirectBack) {
   // 3 tabs, including the initial about:blank. The last 2 should be the same
   // process.
   ASSERT_EQ(3, browser()->tab_strip_model()->count());
-  EXPECT_EQ("/files/extensions/api_test/app_process/path1/empty.html",
+  EXPECT_EQ("/extensions/api_test/app_process/path1/empty.html",
             browser()->tab_strip_model()->GetWebContentsAt(2)->
                 GetController().GetLastCommittedEntry()->GetURL().path());
   EXPECT_EQ(browser()->tab_strip_model()->GetWebContentsAt(1)->
@@ -416,7 +421,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, NavigateIntoAppProcess) {
       browser()->profile())->extension_service()->process_map();
 
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // The app under test acts on URLs whose host is "localhost",
   // so the URLs we navigate to must have host "localhost".
@@ -463,7 +468,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, ReloadIntoAppProcess) {
       browser()->profile())->extension_service()->process_map();
 
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // The app under test acts on URLs whose host is "localhost",
   // so the URLs we navigate to must have host "localhost".
@@ -528,7 +533,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, ReloadIntoAppProcessWithJavaScript) {
       browser()->profile())->extension_service()->process_map();
 
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // The app under test acts on URLs whose host is "localhost",
   // so the URLs we navigate to must have host "localhost".
@@ -598,11 +603,17 @@ void RenderViewHostCreated(std::vector<content::RenderViewHost*>* rvh_vector,
 // empty.html) results in the new window being in an app process. See
 // http://crbug.com/89272 for more details.
 IN_PROC_BROWSER_TEST_F(AppApiTest, OpenAppFromIframe) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   extensions::ProcessMap* process_map = extensions::ExtensionSystem::Get(
       browser()->profile())->extension_service()->process_map();
 
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   GURL base_url = GetTestBaseURL("app_process");
 
@@ -638,27 +649,35 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, OpenAppFromIframe) {
 #endif
 IN_PROC_BROWSER_TEST_F(BlockedAppApiTest, MAYBE_OpenAppFromIframe) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // Load app and start URL (not in the app).
   const Extension* app =
       LoadExtension(test_data_dir_.AppendASCII("app_process"));
   ASSERT_TRUE(app);
 
-  content::WindowedNotificationObserver blocker_observer(
-      chrome::NOTIFICATION_CONTENT_BLOCKED_STATE_CHANGED,
-      content::NotificationService::AllSources());
   ui_test_utils::NavigateToURL(
       browser(), GetTestBaseURL("app_process").Resolve("path3/container.html"));
-
-  blocker_observer.Wait();
 
   WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
   BlockedContentTabHelper* blocked_content_tab_helper =
       BlockedContentTabHelper::FromWebContents(tab);
-  std::vector<WebContents*> blocked_contents;
-  blocked_content_tab_helper->GetBlockedContents(&blocked_contents);
-  EXPECT_EQ(blocked_contents.size(), 1u);
+  PopupBlockerTabHelper* popup_blocker_tab_helper =
+      PopupBlockerTabHelper::FromWebContents(tab);
+  if (!blocked_content_tab_helper->GetBlockedContentsCount() &&
+      (!popup_blocker_tab_helper ||
+       !popup_blocker_tab_helper->GetBlockedPopupsCount())) {
+    content::WindowedNotificationObserver observer(
+        chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED,
+        content::NotificationService::AllSources());
+    observer.Wait();
+  }
+
+  EXPECT_EQ(1u,
+            blocked_content_tab_helper->GetBlockedContentsCount() +
+                (popup_blocker_tab_helper
+                     ? popup_blocker_tab_helper->GetBlockedPopupsCount()
+                     : 0));
 }
 
 // Tests that if an extension launches an app via chrome.tabs.create with an URL
@@ -666,7 +685,7 @@ IN_PROC_BROWSER_TEST_F(BlockedAppApiTest, MAYBE_OpenAppFromIframe) {
 // up with an app process. See http://crbug.com/99349 for more details.
 IN_PROC_BROWSER_TEST_F(AppApiTest, ServerRedirectToAppFromExtension) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
 
   LoadExtension(test_data_dir_.AppendASCII("app_process"));
   const Extension* launcher =
@@ -708,7 +727,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, ServerRedirectToAppFromExtension) {
 // up with an app process.
 IN_PROC_BROWSER_TEST_F(AppApiTest, ClientRedirectToAppFromExtension) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
 
   LoadExtension(test_data_dir_.AppendASCII("app_process"));
   const Extension* launcher =
@@ -757,7 +776,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, OpenWebPopupFromWebIframe) {
       browser()->profile())->extension_service()->process_map();
 
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   GURL base_url = GetTestBaseURL("app_process");
 
@@ -794,7 +813,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_ReloadAppAfterCrash) {
       browser()->profile())->extension_service()->process_map();
 
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("app_process")));
 

@@ -616,31 +616,100 @@ TEST(X509CertificateTest, Policy) {
 
   CertPolicy policy;
 
-  EXPECT_EQ(policy.Check(google_cert.get()), CertPolicy::UNKNOWN);
-  EXPECT_EQ(policy.Check(webkit_cert.get()), CertPolicy::UNKNOWN);
+  // To begin with, everything should be unknown.
+  EXPECT_EQ(CertPolicy::UNKNOWN,
+            policy.Check(google_cert.get(), CERT_STATUS_DATE_INVALID));
+  EXPECT_EQ(CertPolicy::UNKNOWN,
+            policy.Check(webkit_cert.get(), CERT_STATUS_COMMON_NAME_INVALID));
   EXPECT_FALSE(policy.HasAllowedCert());
   EXPECT_FALSE(policy.HasDeniedCert());
 
-  policy.Allow(google_cert.get());
-
-  EXPECT_EQ(policy.Check(google_cert.get()), CertPolicy::ALLOWED);
-  EXPECT_EQ(policy.Check(webkit_cert.get()), CertPolicy::UNKNOWN);
+  // Test adding one certificate with one error.
+  policy.Allow(google_cert.get(), CERT_STATUS_DATE_INVALID);
+  EXPECT_EQ(CertPolicy::ALLOWED,
+            policy.Check(google_cert.get(), CERT_STATUS_DATE_INVALID));
+  EXPECT_EQ(CertPolicy::UNKNOWN,
+            policy.Check(google_cert.get(), CERT_STATUS_COMMON_NAME_INVALID));
+  EXPECT_EQ(CertPolicy::UNKNOWN,
+            policy.Check(google_cert.get(),
+                CERT_STATUS_DATE_INVALID | CERT_STATUS_COMMON_NAME_INVALID));
+  EXPECT_EQ(CertPolicy::UNKNOWN,
+            policy.Check(webkit_cert.get(), CERT_STATUS_COMMON_NAME_INVALID));
   EXPECT_TRUE(policy.HasAllowedCert());
   EXPECT_FALSE(policy.HasDeniedCert());
 
-  policy.Deny(google_cert.get());
+  // Test saving the same certificate with a new error.
+  policy.Allow(google_cert.get(), CERT_STATUS_AUTHORITY_INVALID);
+  EXPECT_EQ(CertPolicy::UNKNOWN,
+            policy.Check(google_cert.get(), CERT_STATUS_DATE_INVALID));
+  EXPECT_EQ(CertPolicy::ALLOWED,
+            policy.Check(google_cert.get(), CERT_STATUS_AUTHORITY_INVALID));
+  EXPECT_EQ(CertPolicy::UNKNOWN,
+            policy.Check(webkit_cert.get(), CERT_STATUS_COMMON_NAME_INVALID));
+  EXPECT_TRUE(policy.HasAllowedCert());
+  EXPECT_FALSE(policy.HasDeniedCert());
 
-  EXPECT_EQ(policy.Check(google_cert.get()), CertPolicy::DENIED);
-  EXPECT_EQ(policy.Check(webkit_cert.get()), CertPolicy::UNKNOWN);
+  // Test adding one certificate with two errors.
+  policy.Allow(google_cert.get(),
+               CERT_STATUS_DATE_INVALID | CERT_STATUS_AUTHORITY_INVALID);
+  EXPECT_EQ(CertPolicy::ALLOWED,
+            policy.Check(google_cert.get(), CERT_STATUS_DATE_INVALID));
+  EXPECT_EQ(CertPolicy::ALLOWED,
+            policy.Check(google_cert.get(), CERT_STATUS_AUTHORITY_INVALID));
+  EXPECT_EQ(CertPolicy::UNKNOWN,
+            policy.Check(google_cert.get(), CERT_STATUS_COMMON_NAME_INVALID));
+  EXPECT_EQ(CertPolicy::UNKNOWN,
+            policy.Check(webkit_cert.get(), CERT_STATUS_COMMON_NAME_INVALID));
+  EXPECT_TRUE(policy.HasAllowedCert());
+  EXPECT_FALSE(policy.HasDeniedCert());
+
+  // Test removing a certificate that was previously allowed.
+  policy.Deny(google_cert.get(), CERT_STATUS_DATE_INVALID);
+  EXPECT_EQ(CertPolicy::DENIED,
+            policy.Check(google_cert.get(), CERT_STATUS_DATE_INVALID));
+  EXPECT_EQ(CertPolicy::UNKNOWN,
+            policy.Check(webkit_cert.get(), CERT_STATUS_COMMON_NAME_INVALID));
   EXPECT_FALSE(policy.HasAllowedCert());
   EXPECT_TRUE(policy.HasDeniedCert());
 
-  policy.Allow(webkit_cert.get());
+  // Test removing a certificate that was previously unknown.
+  policy.Deny(webkit_cert.get(), CERT_STATUS_COMMON_NAME_INVALID);
+  EXPECT_EQ(CertPolicy::DENIED,
+            policy.Check(google_cert.get(), CERT_STATUS_DATE_INVALID));
+  EXPECT_EQ(CertPolicy::DENIED,
+            policy.Check(webkit_cert.get(), CERT_STATUS_COMMON_NAME_INVALID));
+  EXPECT_FALSE(policy.HasAllowedCert());
+  EXPECT_TRUE(policy.HasDeniedCert());
 
-  EXPECT_EQ(policy.Check(google_cert.get()), CertPolicy::DENIED);
-  EXPECT_EQ(policy.Check(webkit_cert.get()), CertPolicy::ALLOWED);
+  // Test saving a certificate that was previously denied.
+  policy.Allow(webkit_cert.get(), CERT_STATUS_COMMON_NAME_INVALID);
+  EXPECT_EQ(CertPolicy::DENIED,
+            policy.Check(google_cert.get(), CERT_STATUS_DATE_INVALID));
+  EXPECT_EQ(CertPolicy::ALLOWED,
+            policy.Check(webkit_cert.get(), CERT_STATUS_COMMON_NAME_INVALID));
   EXPECT_TRUE(policy.HasAllowedCert());
   EXPECT_TRUE(policy.HasDeniedCert());
+
+  // Test denying an overlapping certificate.
+  policy.Allow(google_cert.get(),
+               CERT_STATUS_COMMON_NAME_INVALID | CERT_STATUS_DATE_INVALID);
+  policy.Deny(google_cert.get(), CERT_STATUS_DATE_INVALID);
+  EXPECT_EQ(CertPolicy::DENIED,
+            policy.Check(google_cert.get(), CERT_STATUS_DATE_INVALID));
+  EXPECT_EQ(CertPolicy::UNKNOWN,
+            policy.Check(google_cert.get(), CERT_STATUS_COMMON_NAME_INVALID));
+  EXPECT_EQ(CertPolicy::DENIED,
+            policy.Check(google_cert.get(),
+                CERT_STATUS_COMMON_NAME_INVALID | CERT_STATUS_DATE_INVALID));
+
+  // Test denying an overlapping certificate (other direction).
+  policy.Allow(webkit_cert.get(), CERT_STATUS_COMMON_NAME_INVALID);
+  policy.Deny(webkit_cert.get(), CERT_STATUS_COMMON_NAME_INVALID);
+  policy.Deny(webkit_cert.get(), CERT_STATUS_DATE_INVALID);
+  EXPECT_EQ(CertPolicy::DENIED,
+            policy.Check(webkit_cert.get(), CERT_STATUS_COMMON_NAME_INVALID));
+  EXPECT_EQ(CertPolicy::DENIED,
+            policy.Check(webkit_cert.get(), CERT_STATUS_DATE_INVALID));
 }
 
 TEST(X509CertificateTest, IntermediateCertificates) {
@@ -724,58 +793,63 @@ TEST(X509CertificateTest, IsIssuedByEncoded) {
 }
 
 TEST(X509CertificateTest, IsIssuedByEncodedWithIntermediates) {
+  static const unsigned char kPolicyRootDN[] = {
+    0x30, 0x1e, 0x31, 0x1c, 0x30, 0x1a, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0c,
+    0x13, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x20, 0x54, 0x65, 0x73, 0x74,
+    0x20, 0x52, 0x6f, 0x6f, 0x74, 0x20, 0x43, 0x41
+  };
+  static const unsigned char kPolicyIntermediateDN[] = {
+    0x30, 0x26, 0x31, 0x24, 0x30, 0x22, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0c,
+    0x1b, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x20, 0x54, 0x65, 0x73, 0x74,
+    0x20, 0x49, 0x6e, 0x74, 0x65, 0x72, 0x6d, 0x65, 0x64, 0x69, 0x61, 0x74,
+    0x65, 0x20, 0x43, 0x41
+  };
+
   base::FilePath certs_dir = GetTestCertsDirectory();
 
-  scoped_refptr<X509Certificate> server_cert =
-      ImportCertFromFile(certs_dir, "www_us_army_mil_cert.der");
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), server_cert);
+  CertificateList policy_chain = CreateCertificateListFromFile(
+      certs_dir, "explicit-policy-chain.pem", X509Certificate::FORMAT_AUTO);
+  ASSERT_EQ(3u, policy_chain.size());
 
   // The intermediate CA certificate's policyConstraints extension has a
   // requireExplicitPolicy field with SkipCerts=0.
-  scoped_refptr<X509Certificate> intermediate_cert =
-      ImportCertFromFile(certs_dir, "dod_ca_17_cert.der");
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), intermediate_cert);
-
-  std::string dod_ca_17_issuer(reinterpret_cast<const char*>(DodCA17DN),
-                               sizeof(DodCA17DN));
-
-  scoped_refptr<X509Certificate> root_cert =
-      ImportCertFromFile(certs_dir, "dod_root_ca_2_cert.der");
-
-  std::string dod_root_ca_2_issuer(
-      reinterpret_cast<const char*>(DodRootCA2DN), sizeof(DodRootCA2DN));
+  std::string policy_intermediate_dn(
+      reinterpret_cast<const char*>(kPolicyIntermediateDN),
+      sizeof(kPolicyIntermediateDN));
+  std::string policy_root_dn(reinterpret_cast<const char*>(kPolicyRootDN),
+                             sizeof(kPolicyRootDN));
 
   X509Certificate::OSCertHandles intermediates;
-  intermediates.push_back(intermediate_cert->os_cert_handle());
+  intermediates.push_back(policy_chain[1]->os_cert_handle());
   scoped_refptr<X509Certificate> cert_chain =
-      X509Certificate::CreateFromHandle(server_cert->os_cert_handle(),
+      X509Certificate::CreateFromHandle(policy_chain[0]->os_cert_handle(),
                                         intermediates);
 
   std::vector<std::string> issuers;
 
-  // Check that the chain is issued by DOD CA-17.
+  // Check that the chain is issued by the intermediate.
   issuers.clear();
-  issuers.push_back(dod_ca_17_issuer);
+  issuers.push_back(policy_intermediate_dn);
   EXPECT_TRUE(cert_chain->IsIssuedByEncoded(issuers));
 
-  // Check that the chain is also issued by DoD Root CA 2.
+  // Check that the chain is also issued by the root.
   issuers.clear();
-  issuers.push_back(dod_root_ca_2_issuer);
+  issuers.push_back(policy_root_dn);
   EXPECT_TRUE(cert_chain->IsIssuedByEncoded(issuers));
 
-  // Check that the chain is issued by either one of the two DOD issuers.
+  // Check that the chain is issued by either the intermediate or the root.
   issuers.clear();
-  issuers.push_back(dod_ca_17_issuer);
-  issuers.push_back(dod_root_ca_2_issuer);
+  issuers.push_back(policy_intermediate_dn);
+  issuers.push_back(policy_root_dn);
   EXPECT_TRUE(cert_chain->IsIssuedByEncoded(issuers));
 
   // Check that an empty issuers list returns false.
   issuers.clear();
   EXPECT_FALSE(cert_chain->IsIssuedByEncoded(issuers));
 
-  // Check that the chain is not issued by MIT
-  std::string mit_issuer(reinterpret_cast<const char*>(MITDN),
-                         sizeof(MITDN));
+  // Check that the chain is not issued by Verisign
+  std::string mit_issuer(reinterpret_cast<const char*>(VerisignDN),
+                         sizeof(VerisignDN));
   issuers.clear();
   issuers.push_back(mit_issuer);
   EXPECT_FALSE(cert_chain->IsIssuedByEncoded(issuers));
@@ -794,132 +868,6 @@ TEST(X509CertificateTest, GetDefaultNickname) {
             "Secure Email CA ID", nickname);
 }
 #endif
-
-#if !defined(OS_IOS)  // TODO(ios): Unable to create certificates.
-#if defined(USE_NSS) || defined(OS_WIN) || defined(OS_MACOSX)
-// This test creates a self-signed cert from a private key and then verify the
-// content of the certificate.
-TEST(X509CertificateTest, CreateSelfSigned) {
-  scoped_ptr<crypto::RSAPrivateKey> private_key(
-      crypto::RSAPrivateKey::Create(1024));
-  scoped_refptr<X509Certificate> cert =
-      X509Certificate::CreateSelfSigned(
-          private_key.get(), "CN=subject", 1, base::TimeDelta::FromDays(1));
-
-  EXPECT_EQ("subject", cert->subject().GetDisplayName());
-  EXPECT_FALSE(cert->HasExpired());
-
-  const uint8 private_key_info[] = {
-    0x30, 0x82, 0x02, 0x78, 0x02, 0x01, 0x00, 0x30,
-    0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7,
-    0x0d, 0x01, 0x01, 0x01, 0x05, 0x00, 0x04, 0x82,
-    0x02, 0x62, 0x30, 0x82, 0x02, 0x5e, 0x02, 0x01,
-    0x00, 0x02, 0x81, 0x81, 0x00, 0xb8, 0x7f, 0x2b,
-    0x20, 0xdc, 0x7c, 0x9b, 0x0c, 0xdc, 0x51, 0x61,
-    0x99, 0x0d, 0x36, 0x0f, 0xd4, 0x66, 0x88, 0x08,
-    0x55, 0x84, 0xd5, 0x3a, 0xbf, 0x2b, 0xa4, 0x64,
-    0x85, 0x7b, 0x0c, 0x04, 0x13, 0x3f, 0x8d, 0xf4,
-    0xbc, 0x38, 0x0d, 0x49, 0xfe, 0x6b, 0xc4, 0x5a,
-    0xb0, 0x40, 0x53, 0x3a, 0xd7, 0x66, 0x09, 0x0f,
-    0x9e, 0x36, 0x74, 0x30, 0xda, 0x8a, 0x31, 0x4f,
-    0x1f, 0x14, 0x50, 0xd7, 0xc7, 0x20, 0x94, 0x17,
-    0xde, 0x4e, 0xb9, 0x57, 0x5e, 0x7e, 0x0a, 0xe5,
-    0xb2, 0x65, 0x7a, 0x89, 0x4e, 0xb6, 0x47, 0xff,
-    0x1c, 0xbd, 0xb7, 0x38, 0x13, 0xaf, 0x47, 0x85,
-    0x84, 0x32, 0x33, 0xf3, 0x17, 0x49, 0xbf, 0xe9,
-    0x96, 0xd0, 0xd6, 0x14, 0x6f, 0x13, 0x8d, 0xc5,
-    0xfc, 0x2c, 0x72, 0xba, 0xac, 0xea, 0x7e, 0x18,
-    0x53, 0x56, 0xa6, 0x83, 0xa2, 0xce, 0x93, 0x93,
-    0xe7, 0x1f, 0x0f, 0xe6, 0x0f, 0x02, 0x03, 0x01,
-    0x00, 0x01, 0x02, 0x81, 0x80, 0x03, 0x61, 0x89,
-    0x37, 0xcb, 0xf2, 0x98, 0xa0, 0xce, 0xb4, 0xcb,
-    0x16, 0x13, 0xf0, 0xe6, 0xaf, 0x5c, 0xc5, 0xa7,
-    0x69, 0x71, 0xca, 0xba, 0x8d, 0xe0, 0x4d, 0xdd,
-    0xed, 0xb8, 0x48, 0x8b, 0x16, 0x93, 0x36, 0x95,
-    0xc2, 0x91, 0x40, 0x65, 0x17, 0xbd, 0x7f, 0xd6,
-    0xad, 0x9e, 0x30, 0x28, 0x46, 0xe4, 0x3e, 0xcc,
-    0x43, 0x78, 0xf9, 0xfe, 0x1f, 0x33, 0x23, 0x1e,
-    0x31, 0x12, 0x9d, 0x3c, 0xa7, 0x08, 0x82, 0x7b,
-    0x7d, 0x25, 0x4e, 0x5e, 0x19, 0xa8, 0x9b, 0xed,
-    0x86, 0xb2, 0xcb, 0x3c, 0xfe, 0x4e, 0xa1, 0xfa,
-    0x62, 0x87, 0x3a, 0x17, 0xf7, 0x60, 0xec, 0x38,
-    0x29, 0xe8, 0x4f, 0x34, 0x9f, 0x76, 0x9d, 0xee,
-    0xa3, 0xf6, 0x85, 0x6b, 0x84, 0x43, 0xc9, 0x1e,
-    0x01, 0xff, 0xfd, 0xd0, 0x29, 0x4c, 0xfa, 0x8e,
-    0x57, 0x0c, 0xc0, 0x71, 0xa5, 0xbb, 0x88, 0x46,
-    0x29, 0x5c, 0xc0, 0x4f, 0x01, 0x02, 0x41, 0x00,
-    0xf5, 0x83, 0xa4, 0x64, 0x4a, 0xf2, 0xdd, 0x8c,
-    0x2c, 0xed, 0xa8, 0xd5, 0x60, 0x5a, 0xe4, 0xc7,
-    0xcc, 0x61, 0xcd, 0x38, 0x42, 0x20, 0xd3, 0x82,
-    0x18, 0xf2, 0x35, 0x00, 0x72, 0x2d, 0xf7, 0x89,
-    0x80, 0x67, 0xb5, 0x93, 0x05, 0x5f, 0xdd, 0x42,
-    0xba, 0x16, 0x1a, 0xea, 0x15, 0xc6, 0xf0, 0xb8,
-    0x8c, 0xbc, 0xbf, 0x54, 0x9e, 0xf1, 0xc1, 0xb2,
-    0xb3, 0x8b, 0xb6, 0x26, 0x02, 0x30, 0xc4, 0x81,
-    0x02, 0x41, 0x00, 0xc0, 0x60, 0x62, 0x80, 0xe1,
-    0x22, 0x78, 0xf6, 0x9d, 0x83, 0x18, 0xeb, 0x72,
-    0x45, 0xd7, 0xc8, 0x01, 0x7f, 0xa9, 0xca, 0x8f,
-    0x7d, 0xd6, 0xb8, 0x31, 0x2b, 0x84, 0x7f, 0x62,
-    0xd9, 0xa9, 0x22, 0x17, 0x7d, 0x06, 0x35, 0x6c,
-    0xf3, 0xc1, 0x94, 0x17, 0x85, 0x5a, 0xaf, 0x9c,
-    0x5c, 0x09, 0x3c, 0xcf, 0x2f, 0x44, 0x9d, 0xb6,
-    0x52, 0x68, 0x5f, 0xf9, 0x59, 0xc8, 0x84, 0x2b,
-    0x39, 0x22, 0x8f, 0x02, 0x41, 0x00, 0xb2, 0x04,
-    0xe2, 0x0e, 0x56, 0xca, 0x03, 0x1a, 0xc0, 0xf9,
-    0x12, 0x92, 0xa5, 0x6b, 0x42, 0xb8, 0x1c, 0xda,
-    0x4d, 0x93, 0x9d, 0x5f, 0x6f, 0xfd, 0xc5, 0x58,
-    0xda, 0x55, 0x98, 0x74, 0xfc, 0x28, 0x17, 0x93,
-    0x1b, 0x75, 0x9f, 0x50, 0x03, 0x7f, 0x7e, 0xae,
-    0xc8, 0x95, 0x33, 0x75, 0x2c, 0xd6, 0xa4, 0x35,
-    0xb8, 0x06, 0x03, 0xba, 0x08, 0x59, 0x2b, 0x17,
-    0x02, 0xdc, 0x4c, 0x7a, 0x50, 0x01, 0x02, 0x41,
-    0x00, 0x9d, 0xdb, 0x39, 0x59, 0x09, 0xe4, 0x30,
-    0xa0, 0x24, 0xf5, 0xdb, 0x2f, 0xf0, 0x2f, 0xf1,
-    0x75, 0x74, 0x0d, 0x5e, 0xb5, 0x11, 0x73, 0xb0,
-    0x0a, 0xaa, 0x86, 0x4c, 0x0d, 0xff, 0x7e, 0x1d,
-    0xb4, 0x14, 0xd4, 0x09, 0x91, 0x33, 0x5a, 0xfd,
-    0xa0, 0x58, 0x80, 0x9b, 0xbe, 0x78, 0x2e, 0x69,
-    0x82, 0x15, 0x7c, 0x72, 0xf0, 0x7b, 0x18, 0x39,
-    0xff, 0x6e, 0xeb, 0xc6, 0x86, 0xf5, 0xb4, 0xc7,
-    0x6f, 0x02, 0x41, 0x00, 0x8d, 0x1a, 0x37, 0x0f,
-    0x76, 0xc4, 0x82, 0xfa, 0x5c, 0xc3, 0x79, 0x35,
-    0x3e, 0x70, 0x8a, 0xbf, 0x27, 0x49, 0xb0, 0x99,
-    0x63, 0xcb, 0x77, 0x5f, 0xa8, 0x82, 0x65, 0xf6,
-    0x03, 0x52, 0x51, 0xf1, 0xae, 0x2e, 0x05, 0xb3,
-    0xc6, 0xa4, 0x92, 0xd1, 0xce, 0x6c, 0x72, 0xfb,
-    0x21, 0xb3, 0x02, 0x87, 0xe4, 0xfd, 0x61, 0xca,
-    0x00, 0x42, 0x19, 0xf0, 0xda, 0x5a, 0x53, 0xe3,
-    0xb1, 0xc5, 0x15, 0xf3
-  };
-
-  std::vector<uint8> input;
-  input.resize(sizeof(private_key_info));
-  memcpy(&input.front(), private_key_info, sizeof(private_key_info));
-
-  private_key.reset(crypto::RSAPrivateKey::CreateFromPrivateKeyInfo(input));
-  ASSERT_TRUE(private_key.get());
-
-  cert = X509Certificate::CreateSelfSigned(
-      private_key.get(), "CN=subject", 1, base::TimeDelta::FromDays(1));
-
-  EXPECT_EQ("subject", cert->subject().GetDisplayName());
-  EXPECT_FALSE(cert->HasExpired());
-}
-
-TEST(X509CertificateTest, GetDEREncoded) {
-  scoped_ptr<crypto::RSAPrivateKey> private_key(
-      crypto::RSAPrivateKey::Create(1024));
-  scoped_refptr<X509Certificate> cert =
-      X509Certificate::CreateSelfSigned(
-          private_key.get(), "CN=subject", 0, base::TimeDelta::FromDays(1));
-
-  std::string der_cert;
-  EXPECT_TRUE(X509Certificate::GetDEREncoded(cert->os_cert_handle(),
-                                             &der_cert));
-  EXPECT_FALSE(der_cert.empty());
-}
-#endif
-#endif  // !defined(OS_IOS)
 
 class X509CertificateParseTest
     : public testing::TestWithParam<CertificateFormatTestData> {

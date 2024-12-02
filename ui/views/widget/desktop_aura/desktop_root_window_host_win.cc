@@ -56,7 +56,8 @@ DesktopRootWindowHostWin::DesktopRootWindowHostWin(
     internal::NativeWidgetDelegate* native_widget_delegate,
     DesktopNativeWidgetAura* desktop_native_widget_aura,
     const gfx::Rect& initial_bounds)
-    : message_handler_(new HWNDMessageHandler(this)),
+    : root_window_(NULL),
+      message_handler_(new HWNDMessageHandler(this)),
       native_widget_delegate_(native_widget_delegate),
       desktop_native_widget_aura_(desktop_native_widget_aura),
       root_window_host_delegate_(NULL),
@@ -83,7 +84,7 @@ aura::Window* DesktopRootWindowHostWin::GetContentWindowForHWND(HWND hwnd) {
 ui::NativeTheme* DesktopRootWindowHost::GetNativeTheme(aura::Window* window) {
   // Use NativeThemeWin for windows shown on the desktop, those not on the
   // desktop come from Ash and get NativeThemeAura.
-  aura::RootWindow* root = window->GetRootWindow();
+  aura::RootWindow* root = window ? window->GetRootWindow() : NULL;
   if (root) {
     HWND root_hwnd = root->GetAcceleratedWidget();
     if (root_hwnd &&
@@ -191,8 +192,14 @@ void DesktopRootWindowHostWin::InitFocus(aura::Window* window) {
 void DesktopRootWindowHostWin::Close() {
   if (should_animate_window_close_) {
     pending_close_ = true;
-    // OnWindowHidingAnimationCompleted does the actual Close.
     content_window_->Hide();
+    const bool is_animating =
+        content_window_->layer()->GetAnimator()->IsAnimatingProperty(
+            ui::LayerAnimationElement::VISIBILITY);
+    // Animation may not start for a number of reasons.
+    if (!is_animating)
+      message_handler_->Close();
+    // else case, OnWindowHidingAnimationCompleted does the actual Close.
   } else {
     message_handler_->Close();
   }
@@ -383,14 +390,9 @@ void DesktopRootWindowHostWin::OnNativeWidgetBlur() {
 
 void DesktopRootWindowHostWin::SetInactiveRenderingDisabled(
     bool disable_inactive) {
-  // We call DefWindowProc of WM_NCACTIVATE to paint the caption as active or
-  // inactive. This is safe with the only sideeffect being the
-  // WM_GETTEXT message which is sent by DefWindowProc to get the text to be
-  // displayed on the caption.
-  ::DefWindowProc(message_handler_->hwnd(),
-                  WM_NCACTIVATE,
-                  !!disable_inactive,
-                  0);
+  // Force the non-client area (most notably the title bar) to paint as either
+  // active or inactive, depending on the input.
+  SendMessage(message_handler_->hwnd(), WM_NCACTIVATE, !!disable_inactive, 0);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -524,7 +526,7 @@ void DesktopRootWindowHostWin::PrepareForShutdown() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DesktopRootWindowHostWin, aura::WindowAnimationHost implementation:
+// DesktopRootWindowHostWin, aura::AnimationHost implementation:
 
 void DesktopRootWindowHostWin::SetHostTransitionBounds(
     const gfx::Rect& bounds) {
@@ -660,6 +662,19 @@ void DesktopRootWindowHostWin::HandleActivationChanged(bool active) {
   if (active)
     root_window_host_delegate_->OnHostActivated();
   native_widget_delegate_->OnNativeWidgetActivationChanged(active);
+  // If we're not active we need to deactivate the corresponding aura::Window.
+  // This way if a child widget is active it gets correctly deactivated (child
+  // widgets don't get native desktop activation changes, only aura activation
+  // changes).
+  if (!active) {
+    aura::client::ActivationClient* activation_client =
+        aura::client::GetActivationClient(root_window_);
+    if (activation_client) {
+      aura::Window* active_window = activation_client->GetActiveWindow();
+      if (active_window)
+        activation_client->DeactivateWindow(active_window);
+    }
+  }
 }
 
 bool DesktopRootWindowHostWin::HandleAppCommand(short command) {

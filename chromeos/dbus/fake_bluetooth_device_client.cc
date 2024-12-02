@@ -18,10 +18,10 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
 #include "base/threading/worker_pool.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_bluetooth_adapter_client.h"
 #include "chromeos/dbus/fake_bluetooth_agent_manager_client.h"
@@ -995,6 +995,12 @@ void FakeBluetoothDeviceClient::SimulateKeypress(
           DBusThreadManager::Get()->GetBluetoothAgentManagerClient());
   FakeBluetoothAgentServiceProvider* agent_service_provider =
       fake_bluetooth_agent_manager_client->GetAgentServiceProvider();
+
+  // The agent service provider object could have been destroyed after the
+  // pairing is canceled.
+  if (!agent_service_provider)
+    return;
+
   agent_service_provider->DisplayPasskey(object_path, 123456, entered);
 
   if (entered < 7) {

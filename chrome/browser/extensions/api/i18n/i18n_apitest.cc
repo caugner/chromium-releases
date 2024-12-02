@@ -10,27 +10,27 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, I18N) {
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionTest("i18n")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, I18NUpdate) {
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
   // Create an Extension whose messages.json file will be updated.
   base::ScopedTempDir extension_dir;
   ASSERT_TRUE(extension_dir.CreateUniqueTempDir());
-  file_util::CopyFile(
+  base::CopyFile(
       test_data_dir_.AppendASCII("i18nUpdate")
                     .AppendASCII("manifest.json"),
       extension_dir.path().AppendASCII("manifest.json"));
-  file_util::CopyFile(
+  base::CopyFile(
       test_data_dir_.AppendASCII("i18nUpdate")
                     .AppendASCII("contentscript.js"),
       extension_dir.path().AppendASCII("contentscript.js"));
-  file_util::CopyDirectory(
+  base::CopyDirectory(
       test_data_dir_.AppendASCII("i18nUpdate")
                     .AppendASCII("_locales"),
       extension_dir.path().AppendASCII("_locales"),
@@ -42,7 +42,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, I18NUpdate) {
 
   // Test that the messages.json file is loaded and the i18n message is loaded.
   ui_test_utils::NavigateToURL(
-      browser(), test_server()->GetURL("file/extensions/test_file.html"));
+      browser(),
+      embedded_test_server()->GetURL("/extensions/test_file.html"));
   EXPECT_TRUE(catcher.GetNextResult());
 
   string16 title;
@@ -50,7 +51,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, I18NUpdate) {
   EXPECT_EQ(std::string("FIRSTMESSAGE"), UTF16ToUTF8(title));
 
   // Change messages.json file and reload extension.
-  file_util::CopyFile(
+  base::CopyFile(
       test_data_dir_.AppendASCII("i18nUpdate")
                     .AppendASCII("messages2.json"),
       extension_dir.path().AppendASCII("_locales/en/messages.json"));
@@ -58,7 +59,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, I18NUpdate) {
 
   // Check that the i18n message is also changed.
   ui_test_utils::NavigateToURL(
-      browser(), test_server()->GetURL("file/extensions/test_file.html"));
+      browser(),
+      embedded_test_server()->GetURL("/extensions/test_file.html"));
   EXPECT_TRUE(catcher.GetNextResult());
 
   ui_test_utils::GetCurrentTabTitle(browser(), &title);

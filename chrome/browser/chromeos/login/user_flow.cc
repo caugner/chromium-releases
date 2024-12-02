@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/chromeos/login/user_flow.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 
@@ -23,6 +23,10 @@ UserFlow::UserFlow() : host_(NULL) {}
 UserFlow::~UserFlow() {}
 
 DefaultUserFlow::~DefaultUserFlow() {}
+
+bool DefaultUserFlow::ShouldShowSettings() {
+  return true;
+}
 
 bool DefaultUserFlow::ShouldLaunchBrowser() {
   return true;
@@ -52,6 +56,10 @@ ExtendedUserFlow::ExtendedUserFlow(const std::string& user_id)
 }
 
 ExtendedUserFlow::~ExtendedUserFlow() {
+}
+
+bool ExtendedUserFlow::ShouldShowSettings() {
+  return true;
 }
 
 void ExtendedUserFlow::UnregisterFlowSoon() {

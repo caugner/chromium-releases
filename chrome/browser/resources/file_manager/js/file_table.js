@@ -217,7 +217,7 @@ FileTable.decorate = function(self, metadataCache, fullPage) {
   cr.ui.Table.decorate(self);
   self.__proto__ = FileTable.prototype;
   self.metadataCache_ = metadataCache;
-  self.collator_ = v8Intl.Collator([], {numeric: true, sensitivity: 'base'});
+  self.collator_ = Intl.Collator([], {numeric: true, sensitivity: 'base'});
 
   var columns = [
     new cr.ui.table.TableColumn('name', str('NAME_COLUMN_LABEL'),
@@ -256,6 +256,10 @@ FileTable.decorate = function(self, metadataCache, fullPage) {
      * @type {number}
      */
     size: {
+      /**
+       * @this {FileTableColumnModel}
+       * @return {number} Number of columns.
+       */
       get: function() {
         return this.totalSize;
       }
@@ -266,6 +270,10 @@ FileTable.decorate = function(self, metadataCache, fullPage) {
      * @type {number}
      */
     totalSize: {
+      /**
+       * @this {FileTableColumnModel}
+       * @return {number} Number of columns.
+       */
       get: function() {
         return columns.length;
       }
@@ -273,11 +281,14 @@ FileTable.decorate = function(self, metadataCache, fullPage) {
 
     /**
      * Obtains a column by the specified horizontal positon.
-     * @param {number} x Horizontal position.
-     * @return {object} The object that contains column index, column width, and
-     *     hitPosition where the horizontal position is hit in the column.
      */
     getHitColumn: {
+      /**
+       * @this {FileTableColumnModel}
+       * @param {number} x Horizontal position.
+       * @return {object} The object that contains column index, column width,
+       *     and hitPosition where the horizontal position is hit in the column.
+       */
       value: function(x) {
         for (var i = 0; x >= this.columns_[i].width; i++) {
           x -= this.columns_[i].width;
@@ -313,9 +324,16 @@ FileTable.decorate = function(self, metadataCache, fullPage) {
       new AsyncUtil.Aggregation(self.relayoutImmediately_.bind(self));
 
   Object.defineProperty(self.list_, 'selectionModel', {
+    /**
+     * @this {cr.ui.List}
+     * @return {cr.ui.ListSelectionModel} The current selection model.
+     */
     get: function() {
       return this.selectionModel_;
     },
+    /**
+     * @this {cr.ui.List}
+     */
     set: function(value) {
       var sm = this.selectionModel;
       if (sm)
@@ -353,11 +371,11 @@ FileTable.decorate = function(self, metadataCache, fullPage) {
  * @param {boolean} use12hourClock True if 12 hours clock, False if 24 hours.
  */
 FileTable.prototype.setDateTimeFormat = function(use12hourClock) {
-  this.timeFormatter_ = v8Intl.DateTimeFormat(
+  this.timeFormatter_ = Intl.DateTimeFormat(
         [] /* default locale */,
         {hour: 'numeric', minute: 'numeric',
          hour12: use12hourClock});
-  this.dateFormatter_ = v8Intl.DateTimeFormat(
+  this.dateFormatter_ = Intl.DateTimeFormat(
         [] /* default locale */,
         {year: 'numeric', month: 'short', day: 'numeric',
          hour: 'numeric', minute: 'numeric',
@@ -926,10 +944,17 @@ filelist.decorateListItem = function(li, entry, metadataCache) {
   li.setAttribute('role', 'option');
 
   Object.defineProperty(li, 'selected', {
+    /**
+     * @this {ListItem}
+     * @return {boolean} True if the list item is selected.
+     */
     get: function() {
       return this.hasAttribute('selected');
     },
 
+    /**
+     * @this {ListItem}
+     */
     set: function(v) {
       if (v)
         this.setAttribute('selected');

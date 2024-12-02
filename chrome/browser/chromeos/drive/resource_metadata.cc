@@ -137,7 +137,7 @@ FileError ResourceMetadata::Initialize() {
   DCHECK(blocking_task_runner_->RunsTasksOnCurrentThread());
 
   if (!EnoughDiskSpaceIsAvailableForDBOperation(storage_->directory_path()))
-    return FILE_ERROR_NO_SPACE;
+    return FILE_ERROR_NO_LOCAL_SPACE;
 
   if (!SetUpDefaultEntries())
     return FILE_ERROR_FAILED;
@@ -170,7 +170,7 @@ FileError ResourceMetadata::Reset() {
   DCHECK(blocking_task_runner_->RunsTasksOnCurrentThread());
 
   if (!EnoughDiskSpaceIsAvailableForDBOperation(storage_->directory_path()))
-    return FILE_ERROR_NO_SPACE;
+    return FILE_ERROR_NO_LOCAL_SPACE;
 
   if (!storage_->SetLargestChangestamp(0) ||
       !RemoveEntryRecursively(util::kDriveGrandRootSpecialResourceId) ||
@@ -245,7 +245,7 @@ FileError ResourceMetadata::SetLargestChangestamp(int64 value) {
   DCHECK(blocking_task_runner_->RunsTasksOnCurrentThread());
 
   if (!EnoughDiskSpaceIsAvailableForDBOperation(storage_->directory_path()))
-    return FILE_ERROR_NO_SPACE;
+    return FILE_ERROR_NO_LOCAL_SPACE;
 
   storage_->SetLargestChangestamp(value);
   return FILE_ERROR_OK;
@@ -266,7 +266,7 @@ FileError ResourceMetadata::AddEntry(const ResourceEntry& entry) {
   DCHECK(blocking_task_runner_->RunsTasksOnCurrentThread());
 
   if (!EnoughDiskSpaceIsAvailableForDBOperation(storage_->directory_path()))
-    return FILE_ERROR_NO_SPACE;
+    return FILE_ERROR_NO_LOCAL_SPACE;
 
   ResourceEntry existing_entry;
   if (storage_->GetEntry(entry.resource_id(), &existing_entry))
@@ -316,7 +316,7 @@ FileError ResourceMetadata::RemoveEntry(const std::string& resource_id) {
   DCHECK(blocking_task_runner_->RunsTasksOnCurrentThread());
 
   if (!EnoughDiskSpaceIsAvailableForDBOperation(storage_->directory_path()))
-    return FILE_ERROR_NO_SPACE;
+    return FILE_ERROR_NO_LOCAL_SPACE;
 
   // Disallow deletion of special entries "/drive" and "/drive/other".
   if (util::IsSpecialResourceId(resource_id))
@@ -434,7 +434,7 @@ FileError ResourceMetadata::RefreshEntry(const ResourceEntry& entry) {
   DCHECK(blocking_task_runner_->RunsTasksOnCurrentThread());
 
   if (!EnoughDiskSpaceIsAvailableForDBOperation(storage_->directory_path()))
-    return FILE_ERROR_NO_SPACE;
+    return FILE_ERROR_NO_LOCAL_SPACE;
 
   ResourceEntry old_entry;
   if (!storage_->GetEntry(entry.resource_id(), &old_entry))
@@ -525,7 +525,7 @@ FileError ResourceMetadata::MoveEntryToDirectory(
   DCHECK(out_file_path);
 
   if (!EnoughDiskSpaceIsAvailableForDBOperation(storage_->directory_path()))
-    return FILE_ERROR_NO_SPACE;
+    return FILE_ERROR_NO_LOCAL_SPACE;
 
   ResourceEntry entry, destination;
   if (!FindEntryByPathSync(file_path, &entry) ||
@@ -544,26 +544,26 @@ FileError ResourceMetadata::MoveEntryToDirectory(
 
 FileError ResourceMetadata::RenameEntry(
     const base::FilePath& file_path,
-    const std::string& new_name,
+    const std::string& new_title,
     base::FilePath* out_file_path) {
   DCHECK(blocking_task_runner_->RunsTasksOnCurrentThread());
   DCHECK(!file_path.empty());
-  DCHECK(!new_name.empty());
+  DCHECK(!new_title.empty());
   DCHECK(out_file_path);
 
-  DVLOG(1) << "RenameEntry " << file_path.value() << " to " << new_name;
+  DVLOG(1) << "RenameEntry " << file_path.value() << " to " << new_title;
 
   if (!EnoughDiskSpaceIsAvailableForDBOperation(storage_->directory_path()))
-    return FILE_ERROR_NO_SPACE;
+    return FILE_ERROR_NO_LOCAL_SPACE;
 
   ResourceEntry entry;
   if (!FindEntryByPathSync(file_path, &entry))
     return FILE_ERROR_NOT_FOUND;
 
-  if (base::FilePath::FromUTF8Unsafe(new_name) == file_path.BaseName())
+  if (base::FilePath::FromUTF8Unsafe(new_title) == file_path.BaseName())
     return FILE_ERROR_EXISTS;
 
-  entry.set_title(new_name);
+  entry.set_title(new_title);
 
   FileError error = RefreshEntry(entry);
   if (error == FILE_ERROR_OK)
@@ -627,7 +627,7 @@ FileError ResourceMetadata::RefreshDirectory(
   DCHECK(!directory_fetch_info.empty());
 
   if (!EnoughDiskSpaceIsAvailableForDBOperation(storage_->directory_path()))
-    return FILE_ERROR_NO_SPACE;
+    return FILE_ERROR_NO_LOCAL_SPACE;
 
   ResourceEntry directory;
   if (!storage_->GetEntry(directory_fetch_info.resource_id(), &directory))
@@ -640,12 +640,11 @@ FileError ResourceMetadata::RefreshDirectory(
       directory_fetch_info.changestamp());
   storage_->PutEntry(directory);
 
-  // First, go through the entry map. We'll handle existing entries and new
-  // entries in the loop. We'll process deleted entries afterwards.
+  // Go through the entry map. Handle existing entries and new entries.
   for (ResourceEntryMap::const_iterator it = entry_map.begin();
        it != entry_map.end(); ++it) {
     if (!EnoughDiskSpaceIsAvailableForDBOperation(storage_->directory_path()))
-      return FILE_ERROR_NO_SPACE;
+      return FILE_ERROR_NO_LOCAL_SPACE;
 
     const ResourceEntry& entry = it->second;
     // Skip if the parent resource ID does not match. This is needed to
@@ -663,19 +662,6 @@ FileError ResourceMetadata::RefreshDirectory(
 
     if (!PutEntryUnderDirectory(CreateEntryWithProperBaseName(entry)))
       return FILE_ERROR_FAILED;
-  }
-
-  // Go through the existing entries and remove deleted entries.
-  std::vector<std::string> children;
-  storage_->GetChildren(directory.resource_id(), &children);
-  for (size_t i = 0; i < children.size(); ++i) {
-    if (!EnoughDiskSpaceIsAvailableForDBOperation(storage_->directory_path()))
-      return FILE_ERROR_NO_SPACE;
-
-    if (entry_map.count(children[i]) == 0) {
-      if (!RemoveEntryRecursively(children[i]))
-        return FILE_ERROR_FAILED;
-    }
   }
 
   if (out_file_path)
@@ -746,7 +732,7 @@ bool ResourceMetadata::PutEntryUnderDirectory(
 
   // Do file name de-duplication - Keep changing |entry|'s name until there is
   // no other entry with the same name under the parent.
-  int modifier = 1;
+  int modifier = 0;
   std::string new_base_name = updated_entry.base_name();
   while (true) {
     const std::string existing_entry_id =
@@ -759,7 +745,7 @@ bool ResourceMetadata::PutEntryUnderDirectory(
     new_path =
         new_path.InsertBeforeExtension(base::StringPrintf(" (%d)", ++modifier));
     // The new filename must be different from the previous one.
-    DCHECK(new_base_name != new_path.AsUTF8Unsafe());
+    DCHECK_NE(new_base_name, new_path.AsUTF8Unsafe());
     new_base_name = new_path.AsUTF8Unsafe();
   }
   updated_entry.set_base_name(new_base_name);

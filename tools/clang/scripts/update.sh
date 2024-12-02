@@ -8,7 +8,7 @@
 # Do NOT CHANGE this if you don't know what you're doing -- see
 # https://code.google.com/p/chromium/wiki/UpdatingClang
 # Reverting problematic clang rolls is safe, though.
-CLANG_REVISION=182481
+CLANG_REVISION=186332
 
 THIS_DIR="$(dirname "${0}")"
 LLVM_DIR="${THIS_DIR}/../../../third_party/llvm"
@@ -270,8 +270,8 @@ if [[ -n "${bootstrap}" ]]; then
         --disable-pthreads \
         --without-llvmgcc \
         --without-llvmgxx
-    MACOSX_DEPLOYMENT_TARGET=10.5 make -j"${NUM_JOBS}"
   fi
+  MACOSX_DEPLOYMENT_TARGET=10.5 make -j"${NUM_JOBS}"
   if [[ -n "${run_tests}" ]]; then
     make check-all
   fi
@@ -296,6 +296,12 @@ if [[ ! -f ./config.status ]]; then
 fi
 
 MACOSX_DEPLOYMENT_TARGET=10.5 make -j"${NUM_JOBS}"
+STRIP_FLAGS=
+if [ "${OS}" = "Darwin" ]; then
+  # See http://crbug.com/256342
+  STRIP_FLAGS=-x
+fi
+strip ${STRIP_FLAGS} Release+Asserts/bin/clang
 cd -
 
 if [[ -n "${with_android}" ]]; then

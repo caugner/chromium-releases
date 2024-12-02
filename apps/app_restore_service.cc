@@ -6,13 +6,15 @@
 
 #include "apps/app_lifetime_monitor_factory.h"
 #include "apps/app_restore_service_factory.h"
+#include "apps/launcher.h"
 #include "apps/saved_files_service.h"
+#include "apps/shell_window.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/app_runtime/app_runtime_api.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/extensions/platform_app_launcher.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_set.h"
 
@@ -136,7 +138,7 @@ void AppRestoreService::RecordAppActiveState(const std::string& id,
 }
 
 void AppRestoreService::RestoreApp(const Extension* extension) {
-  extensions::RestartPlatformApp(profile_, extension);
+  RestartPlatformApp(profile_, extension);
 }
 
 void AppRestoreService::StartObservingAppLifetime() {

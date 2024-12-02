@@ -1,7 +1,6 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "nacl_io/mount_html5fs.h"
 
@@ -15,6 +14,8 @@
 #include "nacl_io/mount_node_html5fs.h"
 #include "sdk_util/auto_lock.h"
 
+namespace nacl_io {
+
 namespace {
 
 #if defined(WIN32)
@@ -27,18 +28,14 @@ int64_t strtoull(const char* nptr, char** endptr, int base) {
 
 Error MountHtml5Fs::Access(const Path& path, int a_mode) {
   // a_mode is unused, since all files are readable, writable and executable.
-  MountNode* node;
-  Error error = Open(path, O_RDONLY, &node);
-  if (error)
-    return error;
-
-  node->Release();
-  return 0;
+  ScopedMountNode node;
+  return Open(path, O_RDONLY, &node);
 }
 
-Error MountHtml5Fs::Open(const Path& path, int mode, MountNode** out_node) {
-  *out_node = NULL;
-
+Error MountHtml5Fs::Open(const Path& path,
+                         int mode,
+                         ScopedMountNode* out_node) {
+  out_node->reset(NULL);
   Error error = BlockUntilFilesystemOpen();
   if (error)
     return error;
@@ -48,12 +45,10 @@ Error MountHtml5Fs::Open(const Path& path, int mode, MountNode** out_node) {
   if (!fileref)
     return ENOENT;
 
-  MountNodeHtml5Fs* node = new MountNodeHtml5Fs(this, fileref);
+  ScopedMountNode node(new MountNodeHtml5Fs(this, fileref));
   error = node->Init(mode);
-  if (error) {
-    node->Release();
+  if (error)
     return error;
-  }
 
   *out_node = node;
   return 0;
@@ -170,9 +165,9 @@ void MountHtml5Fs::Destroy() {
 }
 
 Error MountHtml5Fs::BlockUntilFilesystemOpen() {
-  AutoLock lock(&lock_);
+  AUTO_LOCK(filesysem_open_lock_);
   while (!filesystem_open_has_result_) {
-    pthread_cond_wait(&filesystem_open_cond_, &lock_);
+    pthread_cond_wait(&filesystem_open_cond_, filesysem_open_lock_.mutex());
   }
   return filesystem_open_error_;
 }
@@ -185,8 +180,11 @@ void MountHtml5Fs::FilesystemOpenCallbackThunk(void* user_data,
 }
 
 void MountHtml5Fs::FilesystemOpenCallback(int32_t result) {
-  AutoLock lock(&lock_);
+  AUTO_LOCK(filesysem_open_lock_);
   filesystem_open_has_result_ = true;
   filesystem_open_error_ = PPErrorToErrno(result);
   pthread_cond_signal(&filesystem_open_cond_);
 }
+
+}  // namespace nacl_io
+

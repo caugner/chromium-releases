@@ -5,8 +5,11 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "content/child/indexed_db/indexed_db_dispatcher.h"
+#include "content/child/indexed_db/indexed_db_key_builders.h"
 #include "content/child/indexed_db/proxy_webidbcursor_impl.h"
+#include "content/child/thread_safe_sender.h"
 #include "content/common/indexed_db/indexed_db_key.h"
+#include "ipc/ipc_sync_message_filter.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/WebData.h"
 #include "third_party/WebKit/public/platform/WebIDBCallbacks.h"
@@ -14,8 +17,8 @@
 using WebKit::WebData;
 using WebKit::WebIDBCallbacks;
 using WebKit::WebIDBDatabase;
-using WebKit::WebIDBDatabaseError;
 using WebKit::WebIDBKey;
+using WebKit::WebIDBKeyTypeNumber;
 
 namespace content {
 
@@ -23,8 +26,9 @@ namespace {
 
 class MockDispatcher : public IndexedDBDispatcher {
  public:
-  MockDispatcher()
-      : prefetch_calls_(0),
+  MockDispatcher(ThreadSafeSender* thread_safe_sender)
+      : IndexedDBDispatcher(thread_safe_sender),
+        prefetch_calls_(0),
         last_prefetch_count_(0),
         continue_calls_(0),
         destroyed_cursor_id_(0) {}
@@ -70,7 +74,7 @@ class MockContinueCallbacks : public WebIDBCallbacks {
                          const WebData& value) {
 
     if (key_)
-      *key_ = IndexedDBKey(key);
+      *key_ = IndexedDBKeyBuilder::Build(key);
   }
 
  private:
@@ -84,10 +88,18 @@ TEST(RendererWebIDBCursorImplTest, PrefetchTest) {
   WebIDBKey null_key;
   null_key.assignNull();
 
-  MockDispatcher dispatcher;
+  scoped_refptr<base::MessageLoopProxy> message_loop_proxy(
+      base::MessageLoopProxy::current());
+  scoped_refptr<IPC::SyncMessageFilter> sync_message_filter(
+      new IPC::SyncMessageFilter(NULL));
+  scoped_refptr<ThreadSafeSender> thread_safe_sender(new ThreadSafeSender(
+      message_loop_proxy.get(), sync_message_filter.get()));
+
+  MockDispatcher dispatcher(thread_safe_sender.get());
 
   {
-    RendererWebIDBCursorImpl cursor(RendererWebIDBCursorImpl::kInvalidCursorId);
+    RendererWebIDBCursorImpl cursor(RendererWebIDBCursorImpl::kInvalidCursorId,
+                                    thread_safe_sender.get());
 
     // Call continue() until prefetching should kick in.
     int continue_calls = 0;
@@ -123,7 +135,7 @@ TEST(RendererWebIDBCursorImplTest, PrefetchTest) {
       std::vector<IndexedDBKey> primary_keys(prefetch_count);
       std::vector<WebData> values(prefetch_count);
       for (int i = 0; i < prefetch_count; ++i) {
-        keys.push_back(IndexedDBKey(expected_key + i, WebIDBKey::NumberType));
+        keys.push_back(IndexedDBKey(expected_key + i, WebIDBKeyTypeNumber));
       }
       cursor.SetPrefetchData(keys, primary_keys, values);
 
@@ -138,7 +150,7 @@ TEST(RendererWebIDBCursorImplTest, PrefetchTest) {
         EXPECT_EQ(continue_calls, dispatcher.continue_calls());
         EXPECT_EQ(repetitions + 1, dispatcher.prefetch_calls());
 
-        EXPECT_EQ(WebIDBKey::NumberType, key.type());
+        EXPECT_EQ(WebIDBKeyTypeNumber, key.type());
         EXPECT_EQ(expected_key++, key.number());
       }
     }

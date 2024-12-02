@@ -5,11 +5,12 @@
 #include "chrome/browser/chromeos/drive/drive_app_registry.h"
 
 #include "base/files/file_path.h"
+#include "base/prefs/testing_pref_service.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/drive/job_scheduler.h"
+#include "chrome/browser/chromeos/drive/test_util.h"
 #include "chrome/browser/drive/fake_drive_service.h"
-#include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -18,18 +19,17 @@ namespace drive {
 class DriveAppRegistryTest : public testing::Test {
  protected:
   virtual void SetUp() OVERRIDE {
-    profile_.reset(new TestingProfile);
+    pref_service_.reset(new TestingPrefServiceSimple);
+    test_util::RegisterDrivePrefs(pref_service_->registry());
 
-    // The fake object will be manually deleted in TearDown().
     fake_drive_service_.reset(new FakeDriveService);
-    fake_drive_service_->LoadAppListForDriveApi("chromeos/drive/applist.json");
+    fake_drive_service_->LoadAppListForDriveApi("drive/applist.json");
 
-    scheduler_.reset(new JobScheduler(profile_.get(), fake_drive_service_.get(),
-                                      base::MessageLoopProxy::current()));
+    scheduler_.reset(new JobScheduler(pref_service_.get(),
+                                      fake_drive_service_.get(),
+                                      base::MessageLoopProxy::current().get()));
 
     web_apps_registry_.reset(new DriveAppRegistry(scheduler_.get()));
-    web_apps_registry_->Update();
-    base::RunLoop().RunUntilIdle();
   }
 
   bool VerifyApp(const ScopedVector<DriveAppInfo>& list,
@@ -52,18 +52,21 @@ class DriveAppRegistryTest : public testing::Test {
       }
     }
     EXPECT_TRUE(found) << "Unable to find app with web_store_id "
-        << web_store_id;
+                       << web_store_id;
     return found;
   }
 
   content::TestBrowserThreadBundle thread_bundle_;
-  scoped_ptr<TestingProfile> profile_;
+  scoped_ptr<TestingPrefServiceSimple> pref_service_;
   scoped_ptr<FakeDriveService> fake_drive_service_;
   scoped_ptr<JobScheduler> scheduler_;
   scoped_ptr<DriveAppRegistry> web_apps_registry_;
 };
 
 TEST_F(DriveAppRegistryTest, LoadAndFindDriveApps) {
+  web_apps_registry_->Update();
+  base::RunLoop().RunUntilIdle();
+
   // Find by primary extension 'exe'.
   ScopedVector<DriveAppInfo> ext_results;
   base::FilePath ext_file(FILE_PATH_LITERAL("drive/file.exe"));
@@ -87,6 +90,19 @@ TEST_F(DriveAppRegistryTest, LoadAndFindDriveApps) {
   ASSERT_EQ(1U, secondary_app.size());
   VerifyApp(secondary_app, "abcdefghabcdefghabcdefghabcdefgh", "123456788192",
             "Drive app 1", "", false);
+}
+
+TEST_F(DriveAppRegistryTest, MultipleUpdate) {
+  // Call Update().
+  web_apps_registry_->Update();
+
+  // Call Update() again.
+  // This call should be ignored because there is already an ongoing update.
+  web_apps_registry_->Update();
+
+  // The app list should be loaded only once.
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1, fake_drive_service_->app_list_load_count());
 }
 
 }  // namespace drive

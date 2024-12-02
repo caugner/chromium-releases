@@ -12,6 +12,13 @@ package remoting.protocol;
 
 // Defines a keyboard event.
 message KeyEvent {
+
+  // The keyboard (Caps/Num) lock states.
+  enum LockStates {
+    LOCK_STATES_CAPSLOCK = 1;
+    LOCK_STATES_NUMLOCK = 2;
+  }
+
   // The Windows Virtual Key code.
   //optional int32 keycode = 1;
   optional bool pressed = 2;
@@ -20,6 +27,9 @@ message KeyEvent {
   // The upper 16-bits are the USB Page (0x07 for key events).
   // The lower 16-bits are the USB Usage ID (which identifies the actual key).
   optional uint32 usb_keycode = 3;
+
+  // The keyboard lock states.
+  optional uint32 lock_states = 4 [default = 0];
 }
 
 // Defines a mouse event message on the event channel. 
@@ -42,10 +52,12 @@ message MouseEvent {
   optional bool button_down = 6;
 
   // Mouse wheel information.
-  // These values encode the number of pixels of movement that would result
-  // from the wheel event on the client system.
+  // These values encode the number of pixels and 'ticks' of movement that
+  // would result from the wheel event on the client system.
   optional float wheel_delta_x = 7;
   optional float wheel_delta_y = 8;
+  optional float wheel_ticks_x = 9;
+  optional float wheel_ticks_y = 10;
 }
 
 // Defines an event that sends clipboard data between peers.

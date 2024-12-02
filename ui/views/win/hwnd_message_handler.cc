@@ -14,6 +14,7 @@
 #include "ui/base/events/event_utils.h"
 #include "ui/base/gestures/gesture_sequence.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
+#include "ui/base/touch/touch_enabled.h"
 #include "ui/base/win/dpi.h"
 #include "ui/base/win/hwnd_util.h"
 #include "ui/base/win/mouse_wheel_util.h"
@@ -653,8 +654,13 @@ void HWNDMessageHandler::Activate() {
 
 void HWNDMessageHandler::Deactivate() {
   HWND next_hwnd = ::GetNextWindow(hwnd(), GW_HWNDNEXT);
-  if (next_hwnd)
-    ::SetForegroundWindow(next_hwnd);
+  while (next_hwnd) {
+    if (::IsWindowVisible(next_hwnd)) {
+      ::SetForegroundWindow(next_hwnd);
+      return;
+    }
+    next_hwnd = ::GetNextWindow(next_hwnd, GW_HWNDNEXT);
+  }
 }
 
 void HWNDMessageHandler::SetAlwaysOnTop(bool on_top) {
@@ -1024,17 +1030,16 @@ void HWNDMessageHandler::ClientAreaSizeChanged() {
   }
 }
 
-gfx::Insets HWNDMessageHandler::GetClientAreaInsets() const {
-  gfx::Insets insets;
-  if (delegate_->GetClientAreaInsets(&insets))
-    return insets;
-  DCHECK(insets.empty());
+bool HWNDMessageHandler::GetClientAreaInsets(gfx::Insets* insets) const {
+  if (delegate_->GetClientAreaInsets(insets))
+    return true;
+  DCHECK(insets->empty());
 
-  // Returning an empty Insets object causes the default handling in
-  // NativeWidgetWin::OnNCCalcSize() to be invoked.
+  // Returning false causes the default handling in OnNCCalcSize() to
+  // be invoked.
   if (!delegate_->IsWidgetWindow() ||
       (!delegate_->IsUsingCustomFrame() && !remove_standard_frame_)) {
-    return insets;
+    return false;
   }
 
   if (IsMaximized()) {
@@ -1043,8 +1048,9 @@ gfx::Insets HWNDMessageHandler::GetClientAreaInsets() const {
     int border_thickness = GetSystemMetrics(SM_CXSIZEFRAME);
     if (remove_standard_frame_)
       border_thickness -= 1;
-    return gfx::Insets(border_thickness, border_thickness, border_thickness,
-                       border_thickness);
+    *insets = gfx::Insets(
+        border_thickness, border_thickness, border_thickness, border_thickness);
+    return true;
   }
 
   // Returning empty insets for a window with the standard frame removed seems
@@ -1061,8 +1067,17 @@ gfx::Insets HWNDMessageHandler::GetClientAreaInsets() const {
   // means that the client area is reported 1px larger than it really is, so
   // user code has to compensate by making its content shorter if it wants
   // everything to appear inside the window.
-  if (remove_standard_frame_)
-    return gfx::Insets(0, 0, IsMaximized() ? 0 : kClientAreaBottomInsetHack, 0);
+  if (remove_standard_frame_) {
+    *insets =
+        gfx::Insets(0, 0, IsMaximized() ? 0 : kClientAreaBottomInsetHack, 0);
+    return true;
+  }
+
+#if defined(USE_AURA)
+  // The -1 hack below breaks rendering in Aura.
+  // See http://crbug.com/172099 http://crbug.com/267131
+  *insets = gfx::Insets();
+#else
   // This is weird, but highly essential. If we don't offset the bottom edge
   // of the client rect, the window client area and window area will match,
   // and when returning to glass rendering mode from non-glass, the client
@@ -1074,13 +1089,20 @@ gfx::Insets HWNDMessageHandler::GetClientAreaInsets() const {
   // rect when using the opaque frame.
   // Note: this is only required for non-fullscreen windows. Note that
   // fullscreen windows are in restored state, not maximized.
-  return gfx::Insets(0, 0, fullscreen_handler_->fullscreen() ? 0 : 1, 0);
+  *insets = gfx::Insets(0, 0, fullscreen_handler_->fullscreen() ? 0 : 1, 0);
+#endif
+  return true;
 }
 
 void HWNDMessageHandler::ResetWindowRegion(bool force) {
   // A native frame uses the native window region, and we don't want to mess
   // with it.
-  if (!delegate_->IsUsingCustomFrame() || !delegate_->IsWidgetWindow()) {
+  // WS_EX_COMPOSITED is used instead of WS_EX_LAYERED under aura. WS_EX_LAYERED
+  // automatically makes clicks on transparent pixels fall through, that isn't
+  // the case with WS_EX_COMPOSITED. So, we route WS_EX_COMPOSITED through to
+  // the delegate to allow for a custom hit mask.
+  if ((window_ex_style() & WS_EX_COMPOSITED) == 0 &&
+      (!delegate_->IsUsingCustomFrame() || !delegate_->IsWidgetWindow())) {
     if (force)
       SetWindowRgn(hwnd(), NULL, TRUE);
     return;
@@ -1282,8 +1304,9 @@ LRESULT HWNDMessageHandler::OnCreate(CREATESTRUCT* create_struct) {
   // Get access to a modifiable copy of the system menu.
   GetSystemMenu(hwnd(), false);
 
-  if (base::win::GetVersion() >= base::win::VERSION_WIN7)
-    RegisterTouchWindow(hwnd(), 0);
+  if (base::win::GetVersion() >= base::win::VERSION_WIN7 &&
+      ui::AreTouchEventsEnabled())
+    RegisterTouchWindow(hwnd(), TWF_WANTPALM);
 
   // We need to allow the delegate to size its contents since the window may not
   // receive a size notification when its initial bounds are specified at window
@@ -1631,8 +1654,9 @@ LRESULT HWNDMessageHandler::OnNCCalcSize(BOOL mode, LPARAM l_param) {
     }
   }
 
-  gfx::Insets insets = GetClientAreaInsets();
-  if (insets.empty() && !fullscreen_handler_->fullscreen() &&
+  gfx::Insets insets;
+  bool got_insets = GetClientAreaInsets(&insets);
+  if (!got_insets && !fullscreen_handler_->fullscreen() &&
       !(mode && remove_standard_frame_)) {
     SetMsgHandled(FALSE);
     return 0;
@@ -1846,26 +1870,27 @@ LRESULT HWNDMessageHandler::OnNotify(int w_param, NMHDR* l_param) {
 }
 
 void HWNDMessageHandler::OnPaint(HDC dc) {
-  RECT dirty_rect;
+  // Call BeginPaint()/EndPaint() around the paint handling, as that seems
+  // to do more to actually validate the window's drawing region. This only
+  // appears to matter for Windows that have the WS_EX_COMPOSITED style set
+  // but will be valid in general too.
+  PAINTSTRUCT ps;
+  HDC display_dc = BeginPaint(hwnd(), &ps);
+  CHECK(display_dc);
+
   // Try to paint accelerated first.
-  if (GetUpdateRect(hwnd(), &dirty_rect, FALSE) &&
-      !IsRectEmpty(&dirty_rect)) {
-    if (delegate_->HandlePaintAccelerated(gfx::Rect(dirty_rect))) {
-      ValidateRect(hwnd(), NULL);
-    } else {
+  if (!IsRectEmpty(&ps.rcPaint) &&
+      !delegate_->HandlePaintAccelerated(gfx::Rect(ps.rcPaint))) {
 #if defined(USE_AURA)
-      delegate_->HandlePaint(NULL);
+    delegate_->HandlePaint(NULL);
 #else
-      scoped_ptr<gfx::CanvasPaint> canvas(
-          gfx::CanvasPaint::CreateCanvasPaint(hwnd()));
-      delegate_->HandlePaint(canvas->AsCanvas());
+    scoped_ptr<gfx::CanvasSkiaPaint> canvas(
+        new gfx::CanvasSkiaPaint(hwnd(), display_dc, ps));
+    delegate_->HandlePaint(canvas.get());
 #endif
-    }
-  } else {
-    // TODO(msw): Find a better solution for this crbug.com/93530 workaround.
-    // Some scenarios otherwise fail to validate minimized app/popup windows.
-    ValidateRect(hwnd(), NULL);
   }
+
+  EndPaint(hwnd(), &ps);
 }
 
 LRESULT HWNDMessageHandler::OnReflectedMessage(UINT message,
@@ -2137,7 +2162,8 @@ void HWNDMessageHandler::OnWindowPosChanged(WINDOWPOS* window_pos) {
   if (DidClientAreaSizeChange(window_pos))
     ClientAreaSizeChanged();
   if (remove_standard_frame_ && window_pos->flags & SWP_FRAMECHANGED &&
-      ui::win::IsAeroGlassEnabled()) {
+      ui::win::IsAeroGlassEnabled() &&
+      (window_ex_style() & WS_EX_COMPOSITED) == 0) {
     MARGINS m = {10, 10, 10, 10};
     DwmExtendFrameIntoClientArea(hwnd(), &m);
   }

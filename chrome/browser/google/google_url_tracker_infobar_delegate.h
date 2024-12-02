@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_GOOGLE_GOOGLE_URL_TRACKER_INFOBAR_DELEGATE_H_
 
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 class GoogleURLTracker;
 
@@ -14,8 +14,8 @@ class GoogleURLTracker;
 // changed.
 class GoogleURLTrackerInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  // Creates a Google URL tracker delegate and adds it to |infobar_service|.
-  // Returns the delegate if it was successfully added.
+  // Creates a Google URL tracker infobar delegate and adds it to
+  // |infobar_service|.  Returns the delegate if it was successfully added.
   static GoogleURLTrackerInfoBarDelegate* Create(
       InfoBarService* infobar_service,
       GoogleURLTracker* google_url_tracker,

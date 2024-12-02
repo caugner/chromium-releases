@@ -8,7 +8,6 @@
 #include "base/cpu.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -17,12 +16,13 @@
 #include "build/build_config.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_process_type.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pepper_flash.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "components/nacl/common/nacl_process_type.h"
+#include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/pepper_plugin_info.h"
 #include "content/public/common/url_constants.h"
@@ -34,9 +34,6 @@
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/common/user_agent/user_agent_util.h"
-#include "webkit/plugins/npapi/plugin_list.h"
-#include "webkit/plugins/plugin_constants.h"
-#include "webkit/plugins/plugin_switches.h"
 
 #include "flapper_version.h"  // In SHARED_INTERMEDIATE_DIR.
 #include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
@@ -46,7 +43,7 @@
 #include "base/win/windows_version.h"
 #include "sandbox/win/src/sandbox.h"
 #elif defined(OS_MACOSX)
-#include "chrome/common/chrome_sandbox_type_mac.h"
+#include "components/nacl/common/nacl_sandbox_type_mac.h"
 #endif
 
 #if defined(WIDEVINE_CDM_AVAILABLE) && defined(ENABLE_PEPPER_CDMS) && \
@@ -137,14 +134,14 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
   static bool skip_pdf_file_check = false;
   base::FilePath path;
   if (PathService::Get(chrome::FILE_PDF_PLUGIN, &path)) {
-    if (skip_pdf_file_check || file_util::PathExists(path)) {
+    if (skip_pdf_file_check || base::PathExists(path)) {
       content::PepperPluginInfo pdf;
       pdf.path = path;
       pdf.name = chrome::ChromeContentClient::kPDFPluginName;
-      webkit::WebPluginMimeType pdf_mime_type(kPDFPluginMimeType,
-                                              kPDFPluginExtension,
-                                              kPDFPluginDescription);
-      webkit::WebPluginMimeType print_preview_pdf_mime_type(
+      content::WebPluginMimeType pdf_mime_type(kPDFPluginMimeType,
+                                               kPDFPluginExtension,
+                                               kPDFPluginDescription);
+      content::WebPluginMimeType print_preview_pdf_mime_type(
           kPDFPluginPrintPreviewMimeType,
           kPDFPluginExtension,
           kPDFPluginDescription);
@@ -165,18 +162,18 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
   // switch.
   static bool skip_nacl_file_check = false;
   if (PathService::Get(chrome::FILE_NACL_PLUGIN, &path)) {
-    if (skip_nacl_file_check || file_util::PathExists(path)) {
+    if (skip_nacl_file_check || base::PathExists(path)) {
       content::PepperPluginInfo nacl;
       nacl.path = path;
       nacl.name = chrome::ChromeContentClient::kNaClPluginName;
-      webkit::WebPluginMimeType nacl_mime_type(kNaClPluginMimeType,
-                                               kNaClPluginExtension,
-                                               kNaClPluginDescription);
+      content::WebPluginMimeType nacl_mime_type(kNaClPluginMimeType,
+                                                kNaClPluginExtension,
+                                                kNaClPluginDescription);
       nacl.mime_types.push_back(nacl_mime_type);
       if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnablePnacl)) {
-        webkit::WebPluginMimeType pnacl_mime_type(kPnaclPluginMimeType,
-                                                  kPnaclPluginExtension,
-                                                  kPnaclPluginDescription);
+        content::WebPluginMimeType pnacl_mime_type(kPnaclPluginMimeType,
+                                                   kPnaclPluginExtension,
+                                                   kPnaclPluginDescription);
         nacl.mime_types.push_back(pnacl_mime_type);
       }
       nacl.permissions = kNaClPluginPermissions;
@@ -190,16 +187,16 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
   // entirely with o1d.
   static bool skip_o3d_file_check = false;
   if (PathService::Get(chrome::FILE_O3D_PLUGIN, &path)) {
-    if (skip_o3d_file_check || file_util::PathExists(path)) {
+    if (skip_o3d_file_check || base::PathExists(path)) {
       content::PepperPluginInfo o3d;
       o3d.path = path;
       o3d.name = kO3DPluginName;
       o3d.is_out_of_process = true;
       o3d.is_sandboxed = false;
       o3d.permissions = kO3DPluginPermissions;
-      webkit::WebPluginMimeType o3d_mime_type(kO3DPluginMimeType,
-                                              kO3DPluginExtension,
-                                              kO3DPluginDescription);
+      content::WebPluginMimeType o3d_mime_type(kO3DPluginMimeType,
+                                               kO3DPluginExtension,
+                                               kO3DPluginDescription);
       o3d.mime_types.push_back(o3d_mime_type);
       plugins->push_back(o3d);
 
@@ -209,16 +206,16 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
 
   static bool skip_o1d_file_check = false;
   if (PathService::Get(chrome::FILE_O1D_PLUGIN, &path)) {
-    if (skip_o1d_file_check || file_util::PathExists(path)) {
+    if (skip_o1d_file_check || base::PathExists(path)) {
       content::PepperPluginInfo o1d;
       o1d.path = path;
       o1d.name = kO1DPluginName;
       o1d.is_out_of_process = true;
       o1d.is_sandboxed = false;
       o1d.permissions = kO1DPluginPermissions;
-      webkit::WebPluginMimeType o1d_mime_type(kO1DPluginMimeType,
-                                              kO1DPluginExtension,
-                                              kO1DPluginDescription);
+      content::WebPluginMimeType o1d_mime_type(kO1DPluginMimeType,
+                                               kO1DPluginExtension,
+                                               kO1DPluginDescription);
       o1d.mime_types.push_back(o1d_mime_type);
       plugins->push_back(o1d);
 
@@ -228,16 +225,16 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
 
   static bool skip_gtalk_file_check = false;
   if (PathService::Get(chrome::FILE_GTALK_PLUGIN, &path)) {
-    if (skip_gtalk_file_check || file_util::PathExists(path)) {
+    if (skip_gtalk_file_check || base::PathExists(path)) {
       content::PepperPluginInfo gtalk;
       gtalk.path = path;
       gtalk.name = kGTalkPluginName;
       gtalk.is_out_of_process = true;
       gtalk.is_sandboxed = false;
       gtalk.permissions = kGTalkPluginPermissions;
-      webkit::WebPluginMimeType gtalk_mime_type(kGTalkPluginMimeType,
-                                                kGTalkPluginExtension,
-                                                kGTalkPluginDescription);
+      content::WebPluginMimeType gtalk_mime_type(kGTalkPluginMimeType,
+                                                 kGTalkPluginExtension,
+                                                 kGTalkPluginDescription);
       gtalk.mime_types.push_back(gtalk_mime_type);
       plugins->push_back(gtalk);
 
@@ -249,14 +246,14 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
     !defined(WIDEVINE_CDM_IS_COMPONENT)
   static bool skip_widevine_cdm_file_check = false;
   if (PathService::Get(chrome::FILE_WIDEVINE_CDM_ADAPTER, &path)) {
-    if (skip_widevine_cdm_file_check || file_util::PathExists(path)) {
+    if (skip_widevine_cdm_file_check || base::PathExists(path)) {
       content::PepperPluginInfo widevine_cdm;
       widevine_cdm.is_out_of_process = true;
       widevine_cdm.path = path;
       widevine_cdm.name = kWidevineCdmDisplayName;
       widevine_cdm.description = kWidevineCdmDescription;
       widevine_cdm.version = WIDEVINE_CDM_VERSION_STRING;
-      webkit::WebPluginMimeType widevine_cdm_mime_type(
+      content::WebPluginMimeType widevine_cdm_mime_type(
           kWidevineCdmPluginMimeType,
           kWidevineCdmPluginExtension,
           kWidevineCdmPluginMimeTypeDescription);
@@ -278,7 +275,7 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
   info.name = kRemotingViewerPluginName;
   info.description = kRemotingViewerPluginDescription;
   info.path = base::FilePath(kRemotingViewerPluginPath);
-  webkit::WebPluginMimeType remoting_mime_type(
+  content::WebPluginMimeType remoting_mime_type(
       kRemotingViewerPluginMimeType,
       kRemotingViewerPluginMimeExtension,
       kRemotingViewerPluginMimeDescription);
@@ -301,7 +298,7 @@ content::PepperPluginInfo CreatePepperFlashInfo(const base::FilePath& path,
   // for testing purposes.
   plugin.is_out_of_process = !CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kPpapiFlashInProcess);
-  plugin.name = kFlashPluginName;
+  plugin.name = content::kFlashPluginName;
   plugin.path = path;
   plugin.permissions = kPepperFlashPermissions;
 
@@ -322,13 +319,13 @@ content::PepperPluginInfo CreatePepperFlashInfo(const base::FilePath& path,
   plugin.description = plugin.name + " " + flash_version_numbers[0] + "." +
       flash_version_numbers[1] + " r" + flash_version_numbers[2];
   plugin.version = JoinString(flash_version_numbers, '.');
-  webkit::WebPluginMimeType swf_mime_type(kFlashPluginSwfMimeType,
-                                          kFlashPluginSwfExtension,
-                                          kFlashPluginSwfDescription);
+  content::WebPluginMimeType swf_mime_type(content::kFlashPluginSwfMimeType,
+                                           content::kFlashPluginSwfExtension,
+                                           content::kFlashPluginSwfDescription);
   plugin.mime_types.push_back(swf_mime_type);
-  webkit::WebPluginMimeType spl_mime_type(kFlashPluginSplMimeType,
-                                          kFlashPluginSplExtension,
-                                          kFlashPluginSplDescription);
+  content::WebPluginMimeType spl_mime_type(content::kFlashPluginSplMimeType,
+                                           content::kFlashPluginSplExtension,
+                                           content::kFlashPluginSplDescription);
   plugin.mime_types.push_back(spl_mime_type);
 
   return plugin;
@@ -387,13 +384,6 @@ bool GetBundledPepperFlash(content::PepperPluginInfo* plugin) {
 
 namespace chrome {
 
-std::string ChromeContentClient::GetProductImpl() {
-  chrome::VersionInfo version_info;
-  std::string product("Chrome/");
-  product += version_info.is_valid() ? version_info.Version() : "0.0.0.0";
-  return product;
-}
-
 void ChromeContentClient::SetActiveURL(const GURL& url) {
   child_process_logging::SetActiveURL(url);
 }
@@ -410,10 +400,6 @@ void ChromeContentClient::AddPepperPlugins(
   content::PepperPluginInfo plugin;
   if (GetBundledPepperFlash(&plugin))
     plugins->push_back(plugin);
-}
-
-void ChromeContentClient::AddNPAPIPlugins(
-    webkit::npapi::PluginList* plugin_list) {
 }
 
 void ChromeContentClient::AddAdditionalSchemes(
@@ -439,7 +425,9 @@ bool ChromeContentClient::CanHandleWhileSwappedOut(
 }
 
 std::string ChromeContentClient::GetProduct() const {
-  return GetProductImpl();
+  chrome::VersionInfo version_info;
+  return version_info.is_valid() ?
+      version_info.ProductNameAndVersionForUserAgent() : std::string();
 }
 
 std::string ChromeContentClient::GetUserAgent() const {
@@ -474,8 +462,6 @@ gfx::Image& ChromeContentClient::GetNativeImageNamed(int resource_id) const {
 
 std::string ChromeContentClient::GetProcessTypeNameInEnglish(int type) {
   switch (type) {
-    case PROCESS_TYPE_PROFILE_IMPORT:
-      return "Profile Import helper";
     case PROCESS_TYPE_NACL_LOADER:
       return "Native Client module";
     case PROCESS_TYPE_NACL_BROKER:
@@ -491,7 +477,7 @@ bool ChromeContentClient::GetSandboxProfileForSandboxType(
     int sandbox_type,
     int* sandbox_profile_resource_id) const {
   DCHECK(sandbox_profile_resource_id);
-  if (sandbox_type == CHROME_SANDBOX_TYPE_NACL_LOADER) {
+  if (sandbox_type == NACL_SANDBOX_TYPE_NACL_LOADER) {
     *sandbox_profile_resource_id = IDR_NACL_SANDBOX_PROFILE;
     return true;
   }

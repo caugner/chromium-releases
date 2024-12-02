@@ -9,7 +9,7 @@
 #include "ash/shell_observer.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "ui/app_list/pagination_model_observer.h"
 #include "ui/aura/client/focus_change_observer.h"
 #include "ui/aura/window_observer.h"
@@ -62,12 +62,12 @@ class AppListController : public ui::EventHandler,
   // Returns app list window or NULL if it is not visible.
   aura::Window* GetWindow();
 
+ private:
   // If |drag_and_drop_host| is not NULL it will be called upon drag and drop
   // operations outside the application list.
   void SetDragAndDropHostOfCurrentAppList(
       app_list::ApplicationDragAndDropHost* drag_and_drop_host);
 
- private:
   // Sets the app list view and attempts to show it.
   void SetView(app_list::AppListView* view);
 
@@ -110,6 +110,7 @@ class AppListController : public ui::EventHandler,
   // app_list::PaginationModelObserver overrides:
   virtual void TotalPagesChanged() OVERRIDE;
   virtual void SelectedPageChanged(int old_selected, int new_selected) OVERRIDE;
+  virtual void TransitionStarted() OVERRIDE;
   virtual void TransitionChanged() OVERRIDE;
 
   scoped_ptr<app_list::PaginationModel> pagination_model_;

@@ -7,6 +7,7 @@
 #include <android/keycodes.h>
 
 #include "base/android/jni_android.h"
+#include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "components/web_contents_delegate_android/color_chooser_android.h"
 #include "content/public/browser/android/content_view_core.h"
@@ -18,10 +19,10 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/referrer.h"
-#include "googleurl/src/gurl.h"
 #include "jni/WebContentsDelegateAndroid_jni.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/rect.h"
+#include "url/gurl.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ConvertUTF8ToJavaString;
@@ -85,10 +86,24 @@ WebContents* WebContentsDelegateAndroid::OpenURLFromTab(
     JNIEnv* env = AttachCurrentThread();
     ScopedJavaLocalRef<jstring> java_url =
         ConvertUTF8ToJavaString(env, url.spec());
+    ScopedJavaLocalRef<jstring> extra_headers =
+            ConvertUTF8ToJavaString(env, params.extra_headers);
+    ScopedJavaLocalRef<jbyteArray> post_data;
+    if (params.uses_post &&
+        params.browser_initiated_post_data.get() &&
+        params.browser_initiated_post_data.get()->size()) {
+      post_data = base::android::ToJavaByteArray(
+          env,
+          reinterpret_cast<const uint8*>(
+              params.browser_initiated_post_data.get()->front()),
+          params.browser_initiated_post_data.get()->size());
+    }
     Java_WebContentsDelegateAndroid_openNewTab(env,
                                                obj.obj(),
                                                java_url.obj(),
-                                               disposition == OFF_THE_RECORD);
+                                               extra_headers.obj(),
+                                               post_data.obj(),
+                                               disposition);
     return NULL;
   }
 

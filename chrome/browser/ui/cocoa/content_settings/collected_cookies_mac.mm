@@ -8,7 +8,7 @@
 
 #include "base/mac/bundle_locations.h"
 #import "base/mac/mac_util.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/browsing_data/browsing_data_appcache_helper.h"
@@ -18,6 +18,7 @@
 #include "chrome/browser/browsing_data/browsing_data_indexed_db_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_server_bound_cert_helper.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/local_shared_objects_container.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -28,7 +29,6 @@
 #import "chrome/browser/ui/cocoa/content_settings/cookie_details_view_controller.h"
 #import "chrome/browser/ui/cocoa/vertical_gradient_view.h"
 #include "chrome/browser/ui/collected_cookies_infobar_delegate.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -243,7 +243,7 @@ void CollectedCookiesMac::OnConstrainedWindowClosed(
     CookieTreeHostNode* host_node =
         static_cast<CookieTreeHostNode*>(cookie);
     host_node->CreateContentException(
-        CookieSettings::Factory::GetForProfile(profile), setting);
+        CookieSettings::Factory::GetForProfile(profile).get(), setting);
     if (!lastDomain.empty())
       multipleDomainsChanged = YES;
     lastDomain = host_node->GetTitle();

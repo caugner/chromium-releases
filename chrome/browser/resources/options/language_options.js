@@ -58,7 +58,7 @@ cr.define('options', function() {
    * @type {string}
    * @const
    */
-  var TRANSLATE_LANGUAGE_BLACKLIST_PREF = 'translate_language_blacklist';
+  var TRANSLATE_BLOCKED_LANGUAGES_PREF = 'translate_blocked_languages';
 
   /**
    * The preference key that is a string that describes the spell check
@@ -127,7 +127,7 @@ cr.define('options', function() {
      * @type {Array}
      * @private
      */
-    translateLanguageBlacklist_: [],
+    translateBlockedLanguages_: [],
 
     /**
      * The list of the languages supported by Translate server
@@ -186,8 +186,8 @@ cr.define('options', function() {
           this.handleDontTranslateCheckboxClick_.bind(this));
 
       Preferences.getInstance().addEventListener(
-          TRANSLATE_LANGUAGE_BLACKLIST_PREF,
-          this.handleTranslateLanguageBlacklistPrefChange_.bind(this));
+          TRANSLATE_BLOCKED_LANGUAGES_PREF,
+          this.handleTranslateBlockedLanguagesPrefChange_.bind(this));
       Preferences.getInstance().addEventListener(SPELL_CHECK_DICTIONARY_PREF,
           this.handleSpellCheckDictionaryPrefChange_.bind(this));
       this.translateSupportedLanguages_ =
@@ -201,10 +201,11 @@ cr.define('options', function() {
         if (match) {
           var addLanguageCode = match[1];
           $('language-options-list').addLanguage(addLanguageCode);
+          this.addBlockedLanguage_(addLanguageCode);
         } else {
           OptionsPage.navigateToPage('addLanguage');
         }
-      };
+      }.bind(this);
 
       if (!cr.isMac) {
         // Set up the button for editing custom spelling dictionary.
@@ -332,6 +333,7 @@ cr.define('options', function() {
         if (inputMethod.optionsPage) {
           var button = document.createElement('button');
           button.textContent = loadTimeData.getString('configure');
+          button.inputMethodId = inputMethod.id;
           button.onclick = function(optionsPage, e) {
             window.open(optionsPage);
           }.bind(this, inputMethod.optionsPage);
@@ -363,6 +365,42 @@ cr.define('options', function() {
         OptionsPage.navigateToPage(pageName);
       };
       return button;
+    },
+
+    /**
+     * Adds a language to the preference 'translate_blocked_languages'. If
+     * |langCode| is already added, nothing happens. |langCode| is converted
+     * to a Translate language synonym before added.
+     * @param {string} langCode A language code like 'en'
+     * @private
+     */
+    addBlockedLanguage_: function(langCode) {
+      langCode = this.convertLangCodeForTranslation_(langCode);
+      if (this.translateBlockedLanguages_.indexOf(langCode) == -1) {
+        this.translateBlockedLanguages_.push(langCode);
+        Preferences.setListPref(TRANSLATE_BLOCKED_LANGUAGES_PREF,
+                                this.translateBlockedLanguages_, true);
+      }
+    },
+
+    /**
+     * Removes a language from the preference 'translate_blocked_languages'.
+     * If |langCode| doesn't exist in the preference, nothing happens.
+     * |langCode| is converted to a Translate language synonym before removed.
+     * @param {string} langCode A language code like 'en'
+     * @private
+     */
+    removeBlockedLanguage_: function(langCode) {
+      langCode = this.convertLangCodeForTranslation_(langCode);
+      if (this.translateBlockedLanguages_.indexOf(langCode) != -1) {
+        this.translateBlockedLanguages_ =
+            this.translateBlockedLanguages_.filter(
+                function(langCodeNotTranslated) {
+                  return langCodeNotTranslated != langCode;
+                });
+        Preferences.setListPref(TRANSLATE_BLOCKED_LANGUAGES_PREF,
+                                this.translateBlockedLanguages_, true);
+      }
     },
 
     /**
@@ -658,8 +696,8 @@ cr.define('options', function() {
       }
 
       var dontTranslate = div.querySelector('div');
-      var cannnotTranslate = $('cannot-translate-in-this-language');
-      var nodes = [dontTranslate, cannnotTranslate];
+      var cannotTranslate = $('cannot-translate-in-this-language');
+      var nodes = [dontTranslate, cannotTranslate];
 
       var convertedLangCode = this.convertLangCodeForTranslation_(languageCode);
       if (this.translateSupportedLanguages_.indexOf(convertedLangCode) != -1) {
@@ -670,8 +708,22 @@ cr.define('options', function() {
       }
 
       var checkbox = $('dont-translate-in-this-language');
-      var blacklist = this.translateLanguageBlacklist_;
-      var checked = blacklist.indexOf(convertedLangCode) != -1;
+
+      // If the language corresponds to the default target language (in most
+      // cases, the user's locale language), "Don't Translate" checkbox should
+      // be always checked.
+      var defaultTargetLanguage =
+          loadTimeData.getString('defaultTargetLanguage');
+      if (convertedLangCode == defaultTargetLanguage) {
+        checkbox.disabled = true;
+        checkbox.checked = true;
+        return;
+      }
+
+      checkbox.disabled = false;
+
+      var blockedLanguages = this.translateBlockedLanguages_;
+      var checked = blockedLanguages.indexOf(convertedLangCode) != -1;
       checkbox.checked = checked;
     },
 
@@ -781,19 +833,10 @@ cr.define('options', function() {
       var languageOptionsList = $('language-options-list');
       var selectedLanguageCode = languageOptionsList.getSelectedLanguageCode();
 
-      var langCode = this.convertLangCodeForTranslation_(selectedLanguageCode);
-      var blacklist = this.translateLanguageBlacklist_;
-      if (checked && blacklist.indexOf(langCode) == -1) {
-        blacklist.push(langCode);
-      } else if (!checked && blacklist.indexOf(langCode) != -1) {
-        blacklist = blacklist.filter(function(blacklistedLangCode) {
-          return blacklistedLangCode != langCode;
-        });
-      }
-      this.translateLanguageBlacklist_ = blacklist;
-
-      Preferences.setListPref(TRANSLATE_LANGUAGE_BLACKLIST_PREF,
-                              this.translateLanguageBlacklist_, true);
+      if (checked)
+        this.addBlockedLanguage_(selectedLanguageCode);
+      else
+        this.removeBlockedLanguage_(selectedLanguageCode);
     },
 
     /**
@@ -832,7 +875,9 @@ cr.define('options', function() {
       var selectedIndex = languagesSelect.selectedIndex;
       if (selectedIndex >= 0) {
         var selection = languagesSelect.options[selectedIndex];
-        $('language-options-list').addLanguage(String(selection.value));
+        var langCode = String(selection.value);
+        $('language-options-list').addLanguage(langCode);
+        this.addBlockedLanguage_(langCode);
         OptionsPage.closeOverlay();
       }
     },
@@ -862,15 +907,14 @@ cr.define('options', function() {
      },
 
     /**
-     * Handles translateLanguageBlacklistPref change.
+     * Handles translateBlockedLanguagesPref change.
      * @param {Event} e Change event.
      * @private
      */
-    handleTranslateLanguageBlacklistPrefChange_: function(e) {
+    handleTranslateBlockedLanguagesPrefChange_: function(e) {
       var languageOptionsList = $('language-options-list');
       var selectedLanguageCode = languageOptionsList.getSelectedLanguageCode();
-      this.translateLanguageBlacklist_ = e.value.value;
-
+      this.translateBlockedLanguages_ = e.value.value;
       this.updateDontTranslateCheckbox_(selectedLanguageCode);
     },
 
@@ -1032,6 +1076,11 @@ cr.define('options', function() {
         if (!checkboxes[i].inputMethodId.match(/^_ext_ime_/))
           checkboxes[i].checked = (checkboxes[i].inputMethodId in dictionary);
       }
+      var configureButtons = inputMethodList.querySelectorAll('button');
+      for (var i = 0; i < configureButtons.length; i++) {
+        configureButtons[i].hidden =
+            !(configureButtons[i].inputMethodId in dictionary);
+      }
     },
 
     /**
@@ -1181,7 +1230,6 @@ cr.define('options', function() {
     convertLangCodeForTranslation_: function(languageCode) {
       var tokens = languageCode.split('-');
       var main = tokens[0];
-      var dialect = tokens[1];
 
       // See also: chrome/renderer/translate/translate_helper.cc.
       var synonyms = {
@@ -1194,8 +1242,8 @@ cr.define('options', function() {
       if (main in synonyms) {
         return synonyms[main];
       } else if (main == 'zh') {
-        // In Translation, general Chinese is not used.
-        assert(dialect);
+        // In Translation, general Chinese is not used, and the sub code is
+        // necessary as a language code for Translate server.
         return languageCode;
       }
 

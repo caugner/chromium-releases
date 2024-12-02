@@ -9,7 +9,7 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/stringprintf.h"
 #include "cloud_print/gcp20/prototype/dns_packet_parser.h"
 #include "cloud_print/gcp20/prototype/dns_response_builder.h"
@@ -21,7 +21,7 @@
 
 namespace {
 
-const char* kDefaultIpAddressMulticast = "224.0.0.251";
+const char kDefaultIpAddressMulticast[] = "224.0.0.251";
 const uint16 kDefaultPortMulticast = 5353;
 
 const double kTimeToNextAnnouncement = 0.8;  // relatively to TTL
@@ -66,7 +66,7 @@ bool DnsSdServer::Start(const ServiceParameters& serv_params, uint32 full_ttl,
   SendAnnouncement(full_ttl_);
   base::MessageLoop::current()->PostTask(
       FROM_HERE,
-      base::Bind(&DnsSdServer::OnDatagramReceived, base::Unretained(this)));
+      base::Bind(&DnsSdServer::OnDatagramReceived, AsWeakPtr()));
 
   return true;
 }
@@ -183,13 +183,13 @@ void DnsSdServer::ProcessMessage(int len, net::IOBufferWithSize* buf) {
 
   VLOG(1) << "Current TTL for respond: " << current_ttl;
 
-  bool multicast_respond =
-      CommandLine::ForCurrentProcess()->HasSwitch("multicast-respond");
+  bool unicast_respond =
+      CommandLine::ForCurrentProcess()->HasSwitch("unicast-respond");
   socket_->SendTo(buffer.get(), buffer.get()->size(),
-                  multicast_respond ? multicast_address_ : recv_address_,
+                  unicast_respond ? recv_address_ : multicast_address_,
                   base::Bind(&DoNothingAfterSendToSocket));
   VLOG(1) << "Responded to "
-      << (multicast_respond ? multicast_address_ : recv_address_).ToString();
+      << (unicast_respond ? recv_address_ : multicast_address_).ToString();
 }
 
 void DnsSdServer::ProccessQuery(uint32 current_ttl, const DnsQueryRecord& query,
@@ -241,10 +241,9 @@ void DnsSdServer::DoLoop(int rv) {
   // TODO(maksymb): Check what happened if buffer will be overflowed
   do {
     if (rv > 0)
-      ProcessMessage(rv, recv_buf_);
-    rv = socket_->RecvFrom(recv_buf_, recv_buf_->size(), &recv_address_,
-                           base::Bind(&DnsSdServer::DoLoop,
-                                      base::Unretained(this)));
+      ProcessMessage(rv, recv_buf_.get());
+    rv = socket_->RecvFrom(recv_buf_.get(), recv_buf_->size(), &recv_address_,
+                           base::Bind(&DnsSdServer::DoLoop, AsWeakPtr()));
   } while (rv > 0);
 
   // TODO(maksymb): Add handler for errors
@@ -283,7 +282,7 @@ void DnsSdServer::SendAnnouncement(uint32 ttl) {
   // Schedule next announcement.
   base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&DnsSdServer::Update, base::Unretained(this)),
+      base::Bind(&DnsSdServer::Update, AsWeakPtr()),
       base::TimeDelta::FromSeconds(static_cast<int64>(
           kTimeToNextAnnouncement*full_ttl_)));
 }

@@ -29,6 +29,10 @@ const char kAshCopyHostBackgroundAtBoot[] = "ash-copy-host-background-at-boot";
 // Enable keyboard shortcuts useful for debugging.
 const char kAshDebugShortcuts[] = "ash-debug-shortcuts";
 
+// UI to show preferred networks in the status area (for testing).
+const char kAshDebugShowPreferredNetworks[] =
+    "ash-debug-show-preferred-networks";
+
 // Default wallpaper to use in guest mode (as paths to trusted,
 // non-user-writable JPEG files).
 const char kAshDefaultGuestWallpaperLarge[] =
@@ -39,6 +43,13 @@ const char kAshDefaultGuestWallpaperSmall[] =
 // Default wallpaper to use (as paths to trusted, non-user-writable JPEG files).
 const char kAshDefaultWallpaperLarge[] = "ash-default-wallpaper-large";
 const char kAshDefaultWallpaperSmall[] = "ash-default-wallpaper-small";
+
+#if defined(OS_CHROMEOS)
+// Disable the status tray volume menu for allowing the user to choose an audio
+// input and output device.
+const char kAshDisableAudioDeviceMenu[] =
+    "ash-disable-audio-device-menu";
+#endif
 
 // Disable auto window maximization logic.
 const char kAshDisableAutoMaximizing[] = "ash-disable-auto-maximizing";
@@ -51,9 +62,6 @@ const char kAshDisableAutoWindowPlacement[] =
 // can change display settings.
 const char kAshDisableDisplayChangeLimiter[] =
     "ash-disable-display-change-limiter";
-
-// Disable the new cras audio handler.
-const char kAshDisableNewAudioHandler[] = "ash-disable-new-audio-handler";
 
 // If present new lock animations are enabled.
 const char kAshDisableNewLockAnimations[] = "ash-disable-new-lock-animations";
@@ -78,12 +86,12 @@ const char kAshDisableSoftwareMirroring[] = "ash-disable-software-mirroring";
 // Disable the notification when a low-power USB charger is connected.
 const char kAshDisableUsbChargerNotification[] =
     "ash-disable-usb-charger-notification";
-#endif
 
-// Extend the status tray volume item to allow the user to choose an audio
-// input and output device.
-const char kAshEnableAudioDeviceMenu[] =
-    "ash-enable-audio-device-menu";
+// TODO(jamescook): Remove this unused flag. It exists only to allow the
+// "Enable audio device menu" about:flags item to have the tri-state
+// default/enabled/disabled UI.
+const char kAshEnableAudioDeviceMenu[] = "ash-enable-audio-device-menu";
+#endif  // defined(OS_CHROMEOS)
 
 // Enable advanced gestures (e.g. for window management).
 const char kAshEnableAdvancedGestures[] = "ash-enable-advanced-gestures";
@@ -106,14 +114,14 @@ const char kAshEnableMemoryMonitor[] = "ash-enable-memory-monitor";
 // Enables the Oak tree viewer.
 const char kAshEnableOak[] = "ash-enable-oak";
 
+// Enables overview mode for window switching.
+const char kAshEnableOverviewMode[] = "ash-enable-overview-mode";
+
 // Enables "sticky" edges instead of "snap-to-edge"
 const char kAshEnableStickyEdges[] = "ash-enable-sticky-edges";
 
 // Enables showing the tray bubble by dragging on the shelf.
 const char kAshEnableTrayDragging[] = "ash-enable-tray-dragging";
-
-// Enable workspace switching via a three finger vertical scroll.
-const char kAshEnableWorkspaceScrubbing[] = "ash-enable-workspace-scrubbing";
 
 // Forces chrome to use mirror mode when an external display is connected.
 const char kAshForceMirrorMode[] = "ash-force-mirror-mode";
@@ -177,23 +185,17 @@ const char kAshDisableDragAndDropAppListToLauncher[] =
 // in maximized mode.
 const char kForcedMaximizeMode[] = "forced-maximize-mode";
 
-bool UseNewAudioHandler() {
-  return !CommandLine::ForCurrentProcess()->
-      HasSwitch(ash::switches::kAshDisableNewAudioHandler);
-}
-
-bool ShowAudioDeviceMenu() {
-  return ash::switches::UseNewAudioHandler() &&
-      CommandLine::ForCurrentProcess()->
-          HasSwitch(ash::switches::kAshEnableAudioDeviceMenu);
-}
-
 bool UseAlternateShelfLayout() {
   return CommandLine::ForCurrentProcess()->
         HasSwitch(ash::switches::kAshUseAlternateShelfLayout);
 }
 
 #if defined(OS_CHROMEOS)
+bool ShowAudioDeviceMenu() {
+  return !CommandLine::ForCurrentProcess()->
+      HasSwitch(ash::switches::kAshDisableAudioDeviceMenu);
+}
+
 bool UseUsbChargerNotification() {
   return !CommandLine::ForCurrentProcess()->
         HasSwitch(ash::switches::kAshDisableUsbChargerNotification);

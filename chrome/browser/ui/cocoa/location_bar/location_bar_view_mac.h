@@ -9,7 +9,6 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
@@ -29,7 +28,6 @@ class KeywordHintDecoration;
 class LocationBarDecoration;
 class LocationIconDecoration;
 class PageActionDecoration;
-class PlusDecoration;
 class Profile;
 class SelectedKeywordDecoration;
 class StarDecoration;
@@ -55,8 +53,6 @@ class LocationBarViewMac : public LocationBar,
 
   // Overridden from LocationBar:
   virtual void ShowFirstRunBubble() OVERRIDE;
-  virtual void SetInstantSuggestion(
-      const InstantSuggestion& suggestion) OVERRIDE;
   virtual string16 GetInputString() const OVERRIDE;
   virtual WindowOpenDisposition GetWindowOpenDisposition() const OVERRIDE;
   virtual content::PageTransition GetPageTransition() const OVERRIDE;
@@ -67,6 +63,7 @@ class LocationBarViewMac : public LocationBar,
   virtual void UpdatePageActions() OVERRIDE;
   virtual void InvalidatePageActions() OVERRIDE;
   virtual void UpdateOpenPDFInReaderPrompt() OVERRIDE;
+  virtual void UpdateGeneratedCreditCardView() OVERRIDE;
   virtual void SaveStateToContents(content::WebContents* contents) OVERRIDE;
   virtual void Revert() OVERRIDE;
   virtual const OmniboxView* GetLocationEntry() const OVERRIDE;
@@ -79,7 +76,6 @@ class LocationBarViewMac : public LocationBar,
   virtual ExtensionAction* GetPageAction(size_t index) OVERRIDE;
   virtual ExtensionAction* GetVisiblePageAction(size_t index) OVERRIDE;
   virtual void TestPageActionPressed(size_t index) OVERRIDE;
-  virtual void TestActionBoxMenuItemSelected(int command_id) OVERRIDE;
   virtual bool GetBookmarkStarVisibility() OVERRIDE;
 
   // Set/Get the editable state of the field.
@@ -88,10 +84,6 @@ class LocationBarViewMac : public LocationBar,
 
   // Set the starred state of the bookmark star.
   void SetStarred(bool starred);
-
-  // Set (or resets) the icon image resource for the action box plus decoration.
-  void ResetActionBoxIcon();
-  void SetActionBoxIcon(int image_id);
 
   // Happens when the zoom changes for the active tab. |can_show_bubble| is
   // false when the change in zoom for the active tab wasn't an explicit user
@@ -103,10 +95,6 @@ class LocationBarViewMac : public LocationBar,
   // Get the point in window coordinates on the star for the bookmark bubble to
   // aim at.
   NSPoint GetBookmarkBubblePoint() const;
-
-  // Get the point in window coordinates on the Action Box icon for
-  // anchoring its bubbles.
-  NSPoint GetActionBoxAnchorPoint() const;
 
   // Get the point in window coordinates in the security icon at which the page
   // info bubble aims.
@@ -165,7 +153,6 @@ class LocationBarViewMac : public LocationBar,
   virtual string16 GetTitle() const OVERRIDE;
   virtual InstantController* GetInstant() OVERRIDE;
   virtual content::WebContents* GetWebContents() const OVERRIDE;
-  virtual gfx::Rect GetOmniboxBounds() const OVERRIDE;
 
   NSImage* GetKeywordImage(const string16& keyword);
 
@@ -213,9 +200,6 @@ class LocationBarViewMac : public LocationBar,
   // Ensures the star decoration is visible or hidden, as required.
   void UpdateStarDecorationVisibility();
 
-  // Ensures the plus decoration is visible or hidden, as required.
-  void UpdatePlusDecorationVisibility();
-
   scoped_ptr<OmniboxViewMac> omnibox_view_;
 
   CommandUpdater* command_updater_;  // Weak, owned by Browser.
@@ -239,9 +223,6 @@ class LocationBarViewMac : public LocationBar,
   // A decoration that shows a lock icon and ev-cert label in a bubble
   // on the left.
   scoped_ptr<EVBubbleDecoration> ev_bubble_decoration_;
-
-  // Action "plus" button right of bookmark star.
-  scoped_ptr<PlusDecoration> plus_decoration_;
 
   // Bookmark star right of page actions.
   scoped_ptr<StarDecoration> star_decoration_;

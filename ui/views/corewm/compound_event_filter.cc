@@ -171,6 +171,7 @@ void CompoundEventFilter::SetCursorVisibilityOnEvent(aura::Window* target,
                                                      bool show) {
   if (event->flags() & ui::EF_IS_SYNTHESIZED)
     return;
+
   aura::client::CursorClient* client =
       aura::client::GetCursorClient(target->GetRootWindow());
   if (!client)

@@ -13,6 +13,9 @@
 namespace chromeos {
 
 CHROMEOS_EXPORT extern const base::FilePath::CharType kDriveCacheDirname[];
+CHROMEOS_EXPORT extern const base::FilePath::CharType kNssCertDbPath[];
+CHROMEOS_EXPORT extern const base::FilePath::CharType kNssDirPath[];
+CHROMEOS_EXPORT extern const base::FilePath::CharType kNssKeyDbPath[];
 
 }  // namespace chromeos
 

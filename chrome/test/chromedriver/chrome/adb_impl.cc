@@ -8,14 +8,14 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/test/chromedriver/chrome/log.h"
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/net/adb_client_socket.h"
@@ -71,10 +71,10 @@ void ExecuteCommandOnIOThread(
 }  // namespace
 
 AdbImpl::AdbImpl(
-    const scoped_refptr<base::MessageLoopProxy>& io_message_loop_proxy,
+    const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner,
     Log* log)
-    : io_message_loop_proxy_(io_message_loop_proxy), log_(log) {
-  CHECK(io_message_loop_proxy_.get());
+    : io_task_runner_(io_task_runner), log_(log) {
+  CHECK(io_task_runner_.get());
 }
 
 AdbImpl::~AdbImpl() {}
@@ -112,18 +112,24 @@ Status AdbImpl::ForwardPort(
                 device_serial + ": " + response);
 }
 
-Status AdbImpl::SetChromeArgs(const std::string& device_serial,
-                              const std::string& args) {
+Status AdbImpl::SetCommandLineFile(const std::string& device_serial,
+                                   const std::string& command_line_file,
+                                   const std::string& exec_name,
+                                   const std::string& args) {
   std::string response;
+  if (args.find("'") != std::string::npos)
+    return Status(kUnknownError,
+        "Chrome command line arguments must not contain single quotes");
   Status status = ExecuteHostShellCommand(
       device_serial,
-      "echo chrome " + args + "> /data/local/chrome-command-line; echo $?",
+      "echo '" + exec_name +
+      " " + args + "'> " + command_line_file + "; echo $?",
       &response);
   if (!status.IsOk())
     return status;
   if (response.find("0") == std::string::npos)
-    return Status(kUnknownError, "Failed to set Chrome flags on device " +
-                  device_serial);
+    return Status(kUnknownError, "Failed to set command line file " +
+                  command_line_file + " on device " + device_serial);
   return Status(kOk);
 }
 
@@ -159,8 +165,8 @@ Status AdbImpl::Launch(
   std::string response;
   Status status = ExecuteHostShellCommand(
       device_serial,
-      "am start -a android.intent.action.VIEW -S -W -n " +
-          package + "/" + activity + " -d \"data:text/html;charset=utf-8,\"",
+      "am start -W -n " + package + "/" + activity +
+      " -d \"data:text/html;charset=utf-8,\"",
       &response);
   if (!status.IsOk())
     return status;
@@ -178,11 +184,42 @@ Status AdbImpl::ForceStop(
       device_serial, "am force-stop " + package, &response);
 }
 
+Status AdbImpl::GetPidByName(const std::string& device_serial,
+                             const std::string& process_name,
+                             int* pid) {
+  std::string response;
+  Status status = ExecuteHostShellCommand(device_serial, "ps", &response);
+  if (!status.IsOk())
+    return status;
+
+  std::vector<std::string> lines;
+  base::SplitString(response, '\n', &lines);
+  for (size_t i = 0; i < lines.size(); ++i) {
+    std::string line = lines[i];
+    if (line.empty())
+      continue;
+    std::vector<std::string> tokens;
+    base::SplitStringAlongWhitespace(line, &tokens);
+    if (tokens.size() != 9)
+      continue;
+    if (tokens[8].compare(process_name) == 0) {
+      if (base::StringToInt(tokens[1], pid)) {
+        return Status(kOk);
+      } else {
+        break;
+      }
+    }
+  }
+
+  return Status(kUnknownError,
+                "Failed to get PID for the following process: " + process_name);
+}
+
 Status AdbImpl::ExecuteCommand(
     const std::string& command, std::string* response) {
   scoped_refptr<ResponseBuffer> response_buffer = new ResponseBuffer;
   log_->AddEntry(Log::kDebug, "Sending adb command: " + command);
-  io_message_loop_proxy_->PostTask(
+  io_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&ExecuteCommandOnIOThread, command, response_buffer));
   Status status = response_buffer->GetResponse(

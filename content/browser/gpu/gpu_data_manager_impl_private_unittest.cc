@@ -3,16 +3,16 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "content/browser/gpu/gpu_data_manager_impl_private.h"
 #include "content/public/browser/gpu_data_manager_observer.h"
 #include "content/public/common/gpu_feature_type.h"
 #include "content/public/common/gpu_info.h"
-#include "googleurl/src/gurl.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 #define LONG_STRING_CONST(...) #__VA_ARGS__
 

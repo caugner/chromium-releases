@@ -5,7 +5,11 @@
 #ifndef MEDIA_BASE_ANDROID_MEDIA_PLAYER_MANAGER_H_
 #define MEDIA_BASE_ANDROID_MEDIA_PLAYER_MANAGER_H_
 
-#include "base/time.h"
+#include <string>
+#include <vector>
+
+#include "base/basictypes.h"
+#include "base/time/time.h"
 #include "media/base/android/demuxer_stream_player_params.h"
 #include "media/base/media_export.h"
 #include "media/base/media_keys.h"
@@ -97,8 +101,8 @@ class MEDIA_EXPORT MediaPlayerManager {
   virtual void DestroyAllMediaPlayers() = 0;
 
   // Callback when DemuxerStreamPlayer wants to read data from the demuxer.
-  virtual void OnReadFromDemuxer(
-      int player_id, media::DemuxerStream::Type type, bool seek_done) = 0;
+  virtual void OnReadFromDemuxer(int player_id,
+                                 media::DemuxerStream::Type type) = 0;
 
   // Called when player wants the media element to initiate a seek.
   virtual void OnMediaSeekRequest(int player_id, base::TimeDelta time_to_seek,
@@ -110,24 +114,27 @@ class MEDIA_EXPORT MediaPlayerManager {
   // Get the MediaDrmBridge object for the given media key Id.
   virtual media::MediaDrmBridge* GetDrmBridge(int media_keys_id) = 0;
 
+  // Called by the player to get a hardware protected surface.
+  virtual void OnProtectedSurfaceRequested(int player_id) = 0;
+
   // TODO(xhwang): The following three methods needs to be decoupled from
   // MediaPlayerManager to support the W3C Working Draft version of the EME
   // spec.
 
-  // Called when the DRM engine wants to send a KeyAdded.
-  virtual void OnKeyAdded(int key_id,
+  // Called when MediaDrmBridge wants to send a KeyAdded.
+  virtual void OnKeyAdded(int media_keys_id,
                           const std::string& session_id) = 0;
 
-  // Called when the DRM engine wants to send a KeyError.
-  virtual void OnKeyError(int key_id,
+  // Called when MediaDrmBridge wants to send a KeyError.
+  virtual void OnKeyError(int media_keys_id,
                           const std::string& session_id,
                           media::MediaKeys::KeyError error_code,
                           int system_code) = 0;
 
-  // Called when the DRM engine wants to send a KeyMessage.
-  virtual void OnKeyMessage(int key_id,
+  // Called when MediaDrmBridge wants to send a KeyMessage.
+  virtual void OnKeyMessage(int media_keys_id,
                             const std::string& session_id,
-                            const std::string& message,
+                            const std::vector<uint8>& message,
                             const std::string& destination_url) = 0;
 };
 

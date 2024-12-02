@@ -9,7 +9,7 @@
 
 #include "ash/ash_switches.h"
 #include "ash/display/display_controller.h"
-#include "ash/display/display_manager.h"
+#include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_helper.h"
 #include "ash/test/display_manager_test_api.h"
@@ -84,10 +84,11 @@ content::WebContents* AshTestViewsDelegate::CreateWebContents(
 
 AshTestBase::AshTestBase()
     : setup_called_(false),
-      teardown_called_(false) {
+      teardown_called_(false),
+      start_session_(true) {
   // Must initialize |ash_test_helper_| here because some tests rely on
   // AshTestBase methods before they call AshTestBase::SetUp().
-  ash_test_helper_.reset(new AshTestHelper(&message_loop_));
+  ash_test_helper_.reset(new AshTestHelper(base::MessageLoopForUI::current()));
 }
 
 AshTestBase::~AshTestBase() {
@@ -109,7 +110,7 @@ void AshTestBase::SetUp() {
 #endif
   ui::InitializeInputMethodForTesting();
 
-  ash_test_helper_->SetUp();
+  ash_test_helper_->SetUp(start_session_);
 
   Shell::GetPrimaryRootWindow()->Show();
   Shell::GetPrimaryRootWindow()->ShowRootWindow();
@@ -192,6 +193,15 @@ bool AshTestBase::SupportsMultipleDisplays() {
 #endif
 }
 
+// static
+bool AshTestBase::SupportsHostWindowResize() {
+#if defined(OS_WIN)
+  return base::win::GetVersion() < base::win::VERSION_WIN8;
+#else
+  return true;
+#endif
+}
+
 void AshTestBase::UpdateDisplay(const std::string& display_specs) {
   DisplayManagerTestApi display_manager_test_api(
       Shell::GetInstance()->display_manager());
@@ -244,7 +254,7 @@ aura::Window* AshTestBase::CreateTestWindowInShellWithDelegateAndType(
     SetDefaultParentByPrimaryRootWindow(window);
   } else {
     gfx::Display display =
-      ash::Shell::GetInstance()->display_manager()->GetDisplayMatching(bounds);
+        Shell::GetScreen()->GetDisplayMatching(bounds);
     aura::RootWindow* root = ash::Shell::GetInstance()->display_controller()->
         GetRootWindowForDisplayId(display.id());
     gfx::Point origin = bounds.origin();
@@ -279,6 +289,39 @@ void AshTestBase::SetCanLockScreen(bool can_lock_screen) {
   ash_test_helper_->test_shell_delegate()->test_session_state_delegate()->
       SetCanLockScreen(can_lock_screen);
 }
+
+void AshTestBase::SetUserAddingScreenRunning(bool user_adding_screen_running) {
+  ash_test_helper_->test_shell_delegate()->test_session_state_delegate()->
+      SetUserAddingScreenRunning(user_adding_screen_running);
+}
+
+void AshTestBase::BlockUserSession(UserSessionBlockReason block_reason) {
+  switch (block_reason) {
+    case BLOCKED_BY_LOCK_SCREEN:
+      SetSessionStarted(true);
+      SetUserAddingScreenRunning(false);
+      Shell::GetInstance()->session_state_delegate()->LockScreen();
+      break;
+    case BLOCKED_BY_LOGIN_SCREEN:
+      SetUserAddingScreenRunning(false);
+      SetSessionStarted(false);
+      break;
+    case BLOCKED_BY_USER_ADDING_SCREEN:
+      SetUserAddingScreenRunning(true);
+      SetSessionStarted(true);
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
+}
+
+void AshTestBase::UnblockUserSession() {
+  Shell::GetInstance()->session_state_delegate()->UnlockScreen();
+  SetSessionStarted(true);
+  SetUserAddingScreenRunning(false);
+}
+
 
 }  // namespace test
 }  // namespace ash

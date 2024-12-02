@@ -17,7 +17,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/nix/xdg_util.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
+#include "base/process/process_metrics.h"
 #include "build/build_config.h"
 
 #if defined(OS_FREEBSD)
@@ -80,7 +80,7 @@ bool PathProviderPosix(int key, FilePath* result) {
       std::string cr_source_root;
       if (env->GetVar("CR_SOURCE_ROOT", &cr_source_root)) {
         path = FilePath(cr_source_root);
-        if (file_util::PathExists(path)) {
+        if (base::PathExists(path)) {
           *result = path;
           return true;
         } else {

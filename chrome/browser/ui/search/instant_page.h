@@ -12,6 +12,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
+#include "chrome/browser/search/instant_service_observer.h"
 #include "chrome/browser/ui/search/instant_ipc_sender.h"
 #include "chrome/browser/ui/search/search_model_observer.h"
 #include "chrome/common/instant_types.h"
@@ -20,6 +21,8 @@
 #include "content/public/common/page_transition_types.h"
 
 class GURL;
+class InstantService;
+class Profile;
 
 namespace content {
 struct FrameNavigateParams;
@@ -33,9 +36,10 @@ class Rect;
 
 // InstantPage is used to exchange messages with a page that implements the
 // Instant/Embedded Search API (http://dev.chromium.org/embeddedsearch).
-// InstantPage is not used directly but via one of its derived classes:
-// InstantOverlay, InstantNTP and InstantTab.
+// InstantPage is not used directly but via one of its derived classes,
+// InstantNTP and InstantTab.
 class InstantPage : public content::WebContentsObserver,
+                    public InstantServiceObserver,
                     public SearchModelObserver {
  public:
   // InstantPage calls its delegate in response to messages received from the
@@ -43,39 +47,15 @@ class InstantPage : public content::WebContentsObserver,
   // we are observing.
   class Delegate {
    public:
-    // Called when a RenderView is created, so that state can be initialized.
-    virtual void InstantPageRenderViewCreated(
-        const content::WebContents* contents) = 0;
-
     // Called upon determination of Instant API support. Either in response to
     // the page loading or because we received some other message.
     virtual void InstantSupportDetermined(const content::WebContents* contents,
                                           bool supports_instant) = 0;
 
-    // Called when the underlying RenderView crashed.
-    virtual void InstantPageRenderViewGone(
-        const content::WebContents* contents) = 0;
-
     // Called when the page is about to navigate to |url|.
     virtual void InstantPageAboutToNavigateMainFrame(
         const content::WebContents* contents,
         const GURL& url) = 0;
-
-    // Called when the page has suggestions. Usually in response to Update(),
-    // SendAutocompleteResults() or UpOrDownKeyPressed().
-    virtual void SetSuggestions(
-        const content::WebContents* contents,
-        const std::vector<InstantSuggestion>& suggestions) = 0;
-
-    // Called when the page wants to be shown. Usually in response to Update()
-    // or SendAutocompleteResults().
-    virtual void ShowInstantOverlay(const content::WebContents* contents,
-                                    int height,
-                                    InstantSizeUnits units) = 0;
-
-    // Called when the page shows suggestions for logging purposes, regardless
-    // of whether the page is processing the call.
-    virtual void LogDropdownShown() = 0;
 
     // Called when the page wants the omnibox to be focused. |state| specifies
     // the omnibox focus state.
@@ -91,6 +71,11 @@ class InstantPage : public content::WebContentsObserver,
                                content::PageTransition transition,
                                WindowOpenDisposition disposition,
                                bool is_search_type) = 0;
+
+    // Called when the page wants to paste the |text| (or the clipboard content
+    // if the |text| is empty) into the omnibox.
+    virtual void PasteIntoOmnibox(const content::WebContents* contents,
+                                  const string16& text) = 0;
 
     // Called when the SearchBox wants to delete a Most Visited item.
     virtual void DeleteMostVisitedItem(const GURL& url) = 0;
@@ -136,7 +121,7 @@ class InstantPage : public content::WebContentsObserver,
 
  protected:
   InstantPage(Delegate* delegate, const std::string& instant_url,
-              bool is_incognito);
+              Profile* profile, bool is_incognito);
 
   // Sets |web_contents| as the page to communicate with. |web_contents| may be
   // NULL, which effectively stops all communication.
@@ -144,17 +129,16 @@ class InstantPage : public content::WebContentsObserver,
 
   Delegate* delegate() const { return delegate_; }
 
+  Profile* profile() const { return profile_; }
+
   // These functions are called before processing messages received from the
   // page. By default, all messages are handled, but any derived classes may
   // choose to ignore some or all of the received messages by overriding these
   // methods.
-  virtual bool ShouldProcessRenderViewCreated();
-  virtual bool ShouldProcessRenderViewGone();
   virtual bool ShouldProcessAboutToNavigateMainFrame();
-  virtual bool ShouldProcessSetSuggestions();
-  virtual bool ShouldProcessShowInstantOverlay();
   virtual bool ShouldProcessFocusOmnibox();
   virtual bool ShouldProcessNavigateToURL();
+  virtual bool ShouldProcessPasteIntoOmnibox();
   virtual bool ShouldProcessDeleteMostVisitedItem();
   virtual bool ShouldProcessUndoMostVisitedDeletion();
   virtual bool ShouldProcessUndoAllMostVisitedDeletions();
@@ -174,10 +158,7 @@ class InstantPage : public content::WebContentsObserver,
                            IgnoreMessageReceivedFromIncognitoPage);
 
   // Overridden from content::WebContentsObserver:
-  virtual void RenderViewCreated(
-      content::RenderViewHost* render_view_host) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
   virtual void DidCommitProvisionalLoadForFrame(
       int64 frame_id,
       bool is_main_frame,
@@ -195,6 +176,11 @@ class InstantPage : public content::WebContentsObserver,
       const string16& error_description,
       content::RenderViewHost* render_view_host) OVERRIDE;
 
+  // Overridden from InstantServiceObserver:
+  virtual void ThemeInfoChanged(const ThemeBackgroundInfo& theme_info) OVERRIDE;
+  virtual void MostVisitedItemsChanged(
+      const std::vector<InstantMostVisitedItem>& items) OVERRIDE;
+
   // Overridden from SearchModelObserver:
   virtual void ModelChanged(const SearchModel::State& old_state,
                             const SearchModel::State& new_state) OVERRIDE;
@@ -202,23 +188,29 @@ class InstantPage : public content::WebContentsObserver,
   // Update the status of Instant support.
   void InstantSupportDetermined(bool supports_instant);
 
-  void OnSetSuggestions(int page_id,
-                        const std::vector<InstantSuggestion>& suggestions);
-  void OnShowInstantOverlay(int page_id,
-                            int height,
-                            InstantSizeUnits units);
   void OnFocusOmnibox(int page_id, OmniboxFocusState state);
   void OnSearchBoxNavigate(int page_id,
                            const GURL& url,
                            content::PageTransition transition,
                            WindowOpenDisposition disposition,
                            bool is_search_type);
+  void OnSearchBoxPaste(int page_id, const string16& text);
+  void OnCountMouseover(int page_id);
   void OnDeleteMostVisitedItem(int page_id, const GURL& url);
   void OnUndoMostVisitedDeletion(int page_id, const GURL& url);
   void OnUndoAllMostVisitedDeletions(int page_id);
 
   void ClearContents();
 
+  // Removes recommended URLs if a matching URL is already open in the Browser,
+  // if the Most Visited Tile Placement experiment is enabled, and the client is
+  // in the experiment group.
+  void MaybeRemoveMostVisitedItems(std::vector<InstantMostVisitedItem>* items);
+
+  // Returns the InstantService for the |profile_|.
+  InstantService* GetInstantService();
+
+  Profile* profile_;
   Delegate* const delegate_;
   scoped_ptr<InstantIPCSender> ipc_sender_;
   const std::string instant_url_;

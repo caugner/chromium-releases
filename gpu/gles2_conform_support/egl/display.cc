@@ -113,7 +113,7 @@ EGLSurface Display::CreateWindowSurface(EGLConfig config,
     return NULL;
 
   scoped_refptr<gpu::gles2::ContextGroup> group(
-      new gpu::gles2::ContextGroup(NULL, NULL, NULL, true));
+      new gpu::gles2::ContextGroup(NULL, NULL, NULL, NULL, true));
 
   decoder_.reset(gpu::gles2::GLES2Decoder::Create(group.get()));
   if (!decoder_.get())
@@ -224,12 +224,10 @@ EGLContext Display::CreateContext(EGLConfig config,
 
   DCHECK(command_buffer_ != NULL);
   DCHECK(transfer_buffer_.get());
-  bool share_resources = share_ctx != NULL;
   context_.reset(new gpu::gles2::GLES2Implementation(
       gles2_cmd_helper_.get(),
       NULL,
       transfer_buffer_.get(),
-      share_resources,
       true,
       NULL));
 

@@ -24,16 +24,15 @@ namespace {
 
 const char kServerHostname[] = "www.example.com";
 
-class QuicClientSessionTest : public ::testing::Test {
+class ToolsQuicClientSessionTest : public ::testing::Test {
  protected:
-  QuicClientSessionTest()
+  ToolsQuicClientSessionTest()
       : guid_(1),
         connection_(new PacketSavingConnection(guid_, IPEndPoint(), false)) {
     crypto_config_.SetDefaults();
     session_.reset(new QuicClientSession(kServerHostname, QuicConfig(),
                                          connection_, &crypto_config_));
     session_->config()->SetDefaults();
-    session_->config()->set_max_streams_per_connection(1, 1);
   }
 
   void CompleteCryptoHandshake() {
@@ -48,7 +47,7 @@ class QuicClientSessionTest : public ::testing::Test {
   QuicCryptoClientConfig crypto_config_;
 };
 
-TEST_F(QuicClientSessionTest, CryptoConnect) {
+TEST_F(ToolsQuicClientSessionTest, CryptoConnect) {
   if (!Aes128Gcm12Encrypter::IsSupported()) {
     LOG(INFO) << "AES GCM not supported. Test skipped.";
     return;
@@ -56,7 +55,8 @@ TEST_F(QuicClientSessionTest, CryptoConnect) {
   CompleteCryptoHandshake();
 }
 
-TEST_F(QuicClientSessionTest, DISABLED_MaxNumConnections) {
+TEST_F(ToolsQuicClientSessionTest, MaxNumStreams) {
+  session_->config()->set_max_streams_per_connection(1, 1);
   if (!Aes128Gcm12Encrypter::IsSupported()) {
     LOG(INFO) << "AES GCM not supported. Test skipped.";
     return;
@@ -76,7 +76,7 @@ TEST_F(QuicClientSessionTest, DISABLED_MaxNumConnections) {
   EXPECT_TRUE(stream);
 }
 
-TEST_F(QuicClientSessionTest, GoAwayReceived) {
+TEST_F(ToolsQuicClientSessionTest, GoAwayReceived) {
   if (!Aes128Gcm12Encrypter::IsSupported()) {
     LOG(INFO) << "AES GCM not supported. Test skipped.";
     return;

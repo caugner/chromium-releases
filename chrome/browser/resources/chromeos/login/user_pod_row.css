@@ -277,7 +277,11 @@ html[dir=rtl] .action-box-area {
 
 .action-box-menu-title-name {
   display: -webkit-box;
-  min-height: 23px;
+  height: 23px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 180px;
 }
 
 .action-box-menu-title-email {
@@ -302,7 +306,7 @@ html[dir=rtl] .action-box-area {
   outline: none;
 }
 
-.action-box-remove-managed-user-warning {
+.action-box-remove-user-warning {
   border-top: 1px solid lightgray;
   color: #000;
   font-size: 12px;
@@ -310,11 +314,11 @@ html[dir=rtl] .action-box-area {
   padding: 20px;
 }
 
-.action-box-remove-managed-user-warning-text {
+.action-box-remove-user-warning-text {
   padding-bottom: 20px;
 }
 
-.action-box-remove-managed-user-warning .remove-warning-button {
+.action-box-remove-user-warning .remove-warning-button {
   width: 100%;
 }
 

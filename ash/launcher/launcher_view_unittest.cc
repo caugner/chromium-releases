@@ -7,11 +7,13 @@
 #include <algorithm>
 #include <vector>
 
+#include "ash/ash_switches.h"
 #include "ash/launcher/launcher.h"
 #include "ash/launcher/launcher_button.h"
 #include "ash/launcher/launcher_icon_observer.h"
 #include "ash/launcher/launcher_model.h"
 #include "ash/launcher/launcher_tooltip_manager.h"
+#include "ash/launcher/launcher_types.h"
 #include "ash/root_window_controller.h"
 #include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shelf/shelf_widget.h"
@@ -22,6 +24,7 @@
 #include "ash/test/shell_test_api.h"
 #include "ash/test/test_launcher_delegate.h"
 #include "base/basictypes.h"
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "grit/ash_resources.h"
@@ -331,17 +334,33 @@ class LauncherViewTest : public AshTestBase {
     }
   }
 
-  views::View* SimulateDrag(internal::LauncherButtonHost::Pointer pointer,
-                            int button_index,
-                            int destination_index) {
+  views::View* SimulateButtonPressed(
+      internal::LauncherButtonHost::Pointer pointer,
+      int button_index) {
     internal::LauncherButtonHost* button_host = launcher_view_;
-
-    // Mouse down.
     views::View* button = test_api_->GetButton(button_index);
     ui::MouseEvent click_event(ui::ET_MOUSE_PRESSED,
                                button->bounds().origin(),
                                button->bounds().origin(), 0);
     button_host->PointerPressedOnButton(button, pointer, click_event);
+    return button;
+  }
+
+  views::View* SimulateClick(internal::LauncherButtonHost::Pointer pointer,
+                             int button_index) {
+    internal::LauncherButtonHost* button_host = launcher_view_;
+    views::View* button = SimulateButtonPressed(pointer, button_index);
+    button_host->PointerReleasedOnButton(button,
+                                         internal::LauncherButtonHost::MOUSE,
+                                         false);
+    return button;
+  }
+
+  views::View* SimulateDrag(internal::LauncherButtonHost::Pointer pointer,
+                            int button_index,
+                            int destination_index) {
+    internal::LauncherButtonHost* button_host = launcher_view_;
+    views::View* button = SimulateButtonPressed(pointer, button_index);
 
     // Drag.
     views::View* destination = test_api_->GetButton(destination_index);
@@ -431,6 +450,49 @@ TEST_P(LauncherViewTextDirectionTest, IdealBoundsOfItemIcon) {
   ideal_bounds.Offset(screen_origin.x(), screen_origin.y());
   EXPECT_EQ(item_bounds.x(), ideal_bounds.x());
   EXPECT_EQ(item_bounds.y(), ideal_bounds.y());
+}
+
+// Checks that launcher view contents are considered in the correct drag group.
+TEST_F(LauncherViewTest, EnforceDragType) {
+  EXPECT_TRUE(test_api_->SameDragType(TYPE_TABBED, TYPE_TABBED));
+  EXPECT_TRUE(test_api_->SameDragType(TYPE_TABBED, TYPE_PLATFORM_APP));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_TABBED, TYPE_APP_SHORTCUT));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_TABBED, TYPE_BROWSER_SHORTCUT));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_TABBED, TYPE_WINDOWED_APP));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_TABBED, TYPE_APP_LIST));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_TABBED, TYPE_APP_PANEL));
+
+  EXPECT_TRUE(test_api_->SameDragType(TYPE_PLATFORM_APP, TYPE_PLATFORM_APP));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_PLATFORM_APP, TYPE_APP_SHORTCUT));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_PLATFORM_APP,
+                                       TYPE_BROWSER_SHORTCUT));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_PLATFORM_APP, TYPE_WINDOWED_APP));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_PLATFORM_APP, TYPE_APP_LIST));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_PLATFORM_APP, TYPE_APP_PANEL));
+
+  EXPECT_TRUE(test_api_->SameDragType(TYPE_APP_SHORTCUT, TYPE_APP_SHORTCUT));
+  EXPECT_TRUE(test_api_->SameDragType(TYPE_APP_SHORTCUT,
+                                      TYPE_BROWSER_SHORTCUT));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_APP_SHORTCUT,
+                                       TYPE_WINDOWED_APP));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_APP_SHORTCUT, TYPE_APP_LIST));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_APP_SHORTCUT, TYPE_APP_PANEL));
+
+  EXPECT_TRUE(test_api_->SameDragType(TYPE_BROWSER_SHORTCUT,
+                                      TYPE_BROWSER_SHORTCUT));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_BROWSER_SHORTCUT,
+                                       TYPE_WINDOWED_APP));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_BROWSER_SHORTCUT, TYPE_APP_LIST));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_BROWSER_SHORTCUT, TYPE_APP_PANEL));
+
+  EXPECT_TRUE(test_api_->SameDragType(TYPE_WINDOWED_APP, TYPE_WINDOWED_APP));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_WINDOWED_APP, TYPE_APP_LIST));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_WINDOWED_APP, TYPE_APP_PANEL));
+
+  EXPECT_TRUE(test_api_->SameDragType(TYPE_APP_LIST, TYPE_APP_LIST));
+  EXPECT_FALSE(test_api_->SameDragType(TYPE_APP_LIST, TYPE_APP_PANEL));
+
+  EXPECT_TRUE(test_api_->SameDragType(TYPE_APP_PANEL, TYPE_APP_PANEL));
 }
 
 // Adds browser button until overflow and verifies that the last added browser
@@ -751,6 +813,31 @@ TEST_F(LauncherViewTest, SimultaneousDrag) {
   ASSERT_NO_FATAL_FAILURE(CheckModelIDs(id_map));
 }
 
+// Check that clicking first on one item and then dragging another works as
+// expected.
+TEST_F(LauncherViewTest, ClickOneDragAnother) {
+  internal::LauncherButtonHost* button_host = launcher_view_;
+
+  std::vector<std::pair<LauncherID, views::View*> > id_map;
+  SetupForDragTest(&id_map);
+
+  // A click on item 1 is simulated.
+  SimulateClick(internal::LauncherButtonHost::MOUSE, 1);
+
+  // Dragging browser index at 0 should change the model order correctly.
+  EXPECT_TRUE(model_->items()[0].type == TYPE_BROWSER_SHORTCUT);
+  views::View* dragged_button = SimulateDrag(
+      internal::LauncherButtonHost::MOUSE, 0, 2);
+  std::rotate(id_map.begin(),
+              id_map.begin() + 1,
+              id_map.begin() + 3);
+  ASSERT_NO_FATAL_FAILURE(CheckModelIDs(id_map));
+  button_host->PointerReleasedOnButton(dragged_button,
+                                       internal::LauncherButtonHost::MOUSE,
+                                       false);
+  EXPECT_TRUE(model_->items()[2].type == TYPE_BROWSER_SHORTCUT);
+}
+
 // Confirm that item status changes are reflected in the buttons.
 TEST_F(LauncherViewTest, LauncherItemStatus) {
   ASSERT_EQ(test_api_->GetLastVisibleIndex() + 1,
@@ -768,6 +855,51 @@ TEST_F(LauncherViewTest, LauncherItemStatus) {
   item.status = ash::STATUS_ATTENTION;
   model_->Set(index, item);
   ASSERT_EQ(internal::LauncherButton::STATE_ATTENTION, button->state());
+}
+
+TEST_F(LauncherViewTest, LauncherItemPositionReflectedOnStateChanged) {
+  ASSERT_EQ(test_api_->GetLastVisibleIndex() + 1,
+            test_api_->GetButtonCount());
+
+  // Add 2 items to the launcher.
+  LauncherID item1_id = AddTabbedBrowser();
+  LauncherID item2_id = AddPlatformAppNoWait();
+  internal::LauncherButton* item1_button = GetButtonByID(item1_id);
+  internal::LauncherButton* item2_button = GetButtonByID(item2_id);
+
+  internal::LauncherButton::State state_mask =
+      static_cast<internal::LauncherButton::State>
+          (internal::LauncherButton::STATE_NORMAL |
+          internal::LauncherButton::STATE_HOVERED |
+          internal::LauncherButton::STATE_RUNNING |
+          internal::LauncherButton::STATE_ACTIVE |
+          internal::LauncherButton::STATE_ATTENTION |
+          internal::LauncherButton::STATE_FOCUSED);
+
+  // Clear the button states.
+  item1_button->ClearState(state_mask);
+  item2_button->ClearState(state_mask);
+
+  // Since default alignment in tests is bottom, state is reflected in y-axis.
+  ASSERT_EQ(item1_button->GetIconBounds().y(),
+            item2_button->GetIconBounds().y());
+  item1_button->AddState(internal::LauncherButton::STATE_HOVERED);
+  ASSERT_NE(item1_button->GetIconBounds().y(),
+            item2_button->GetIconBounds().y());
+  item1_button->ClearState(internal::LauncherButton::STATE_HOVERED);
+
+  // Enable the alternate shelf layout.
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      ash::switches::kAshUseAlternateShelfLayout);
+  launcher_view_->Layout();
+
+  // Since default alignment in tests is bottom, state is reflected in y-axis.
+  // In alternate shelf layout there is no visible hovered state.
+  ASSERT_EQ(item1_button->GetIconBounds().y(),
+            item2_button->GetIconBounds().y());
+  item1_button->AddState(internal::LauncherButton::STATE_HOVERED);
+  ASSERT_EQ(item1_button->GetIconBounds().y(),
+            item2_button->GetIconBounds().y());
 }
 
 // Confirm that item status changes are reflected in the buttons

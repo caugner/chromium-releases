@@ -4,10 +4,11 @@
 
 #include "content/browser/renderer_host/test_render_view_host.h"
 
-#include "content/browser/dom_storage/dom_storage_context_impl.h"
+#include "content/browser/dom_storage/dom_storage_context_wrapper.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/browser/renderer_host/test_backing_store.h"
 #include "content/browser/site_instance_impl.h"
+#include "content/common/dom_storage/dom_storage_types.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_controller.h"
@@ -18,23 +19,11 @@
 #include "content/test/test_web_contents.h"
 #include "media/base/video_frame.h"
 #include "ui/gfx/rect.h"
-#include "webkit/common/dom_storage/dom_storage_types.h"
 #include "webkit/common/webpreferences.h"
 
 namespace content {
 
 namespace {
-// Normally this is done by the NavigationController, but we'll fake it out
-// here for testing.
-SessionStorageNamespaceImpl* CreateSessionStorageNamespace(
-    SiteInstance* instance) {
-  RenderProcessHost* process_host = instance->GetProcess();
-  DOMStorageContext* dom_storage_context =
-      BrowserContext::GetStoragePartition(process_host->GetBrowserContext(),
-                                          instance)->GetDOMStorageContext();
-  return new SessionStorageNamespaceImpl(
-      static_cast<DOMStorageContextImpl*>(dom_storage_context));
-}
 
 const int64 kFrameId = 13UL;
 
@@ -107,8 +96,8 @@ bool TestRenderWidgetHostView::IsShowing() {
   return is_showing_;
 }
 
-void TestRenderWidgetHostView::RenderViewGone(base::TerminationStatus status,
-                                              int error_code) {
+void TestRenderWidgetHostView::RenderProcessGone(base::TerminationStatus status,
+                                                 int error_code) {
   delete this;
 }
 
@@ -210,6 +199,7 @@ gfx::NativeView TestRenderWidgetHostView::BuildInputMethodsGtkMenu() {
 #endif  // defined(TOOLKIT_GTK)
 
 void TestRenderWidgetHostView::OnSwapCompositorFrame(
+    uint32 output_surface_id,
     scoped_ptr<cc::CompositorFrame> frame) {
   did_swap_compositor_frame_ = true;
 }
@@ -257,13 +247,13 @@ TestRenderViewHost::TestRenderViewHost(
                          widget_delegate,
                          routing_id,
                          main_frame_routing_id,
-                         swapped_out,
-                         CreateSessionStorageNamespace(instance)),
+                         swapped_out),
       render_view_created_(false),
       delete_counter_(NULL),
       simulate_fetch_via_proxy_(false),
       simulate_history_list_was_cleared_(false),
-      contents_mime_type_("text/html") {
+      contents_mime_type_("text/html"),
+      opener_route_id_(MSG_ROUTING_NONE) {
   // TestRenderWidgetHostView installs itself into this->view_ in its
   // constructor, and deletes itself when TestRenderWidgetHostView::Destroy() is
   // called.
@@ -283,6 +273,7 @@ bool TestRenderViewHost::CreateRenderView(
     int32 max_page_id) {
   DCHECK(!render_view_created_);
   render_view_created_ = true;
+  opener_route_id_ = opener_route_id;
   return true;
 }
 
@@ -320,8 +311,12 @@ void TestRenderViewHost::SendNavigateWithFile(
 void TestRenderViewHost::SendNavigateWithTransitionAndResponseCode(
     int page_id, const GURL& url, PageTransition transition,
     int response_code) {
-  OnDidStartProvisionalLoadForFrame(kFrameId, -1, true, url);
-  SendNavigateWithParameters(page_id, url, transition, url, response_code, 0);
+  // DidStartProvisionalLoad may delete the pending entry that holds |url|,
+  // so we keep a copy of it to use in SendNavigateWithParameters.
+  GURL url_copy(url);
+  OnDidStartProvisionalLoadForFrame(kFrameId, -1, true, url_copy);
+  SendNavigateWithParameters(page_id, url_copy, transition, url_copy,
+                             response_code, 0);
 }
 
 void TestRenderViewHost::SendNavigateWithParameters(
@@ -383,7 +378,7 @@ void TestRenderViewHost::SimulateWasShown() {
 }
 
 void TestRenderViewHost::TestOnStartDragging(
-    const WebDropData& drop_data) {
+    const DropData& drop_data) {
   WebKit::WebDragOperationsMask drag_operation = WebKit::WebDragOperationEvery;
   DragEventSourceInfo event_info;
   OnStartDragging(drop_data, drag_operation, SkBitmap(), gfx::Vector2d(),

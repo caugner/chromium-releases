@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/win/scoped_comptr.h"
 #include "chrome_frame/chrome_frame_delegate.h"
 #include "chrome_frame/urlmon_upload_data_stream.h"
@@ -17,7 +17,7 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/upload_data.h"
 #include "net/url_request/url_request_status.h"
-#include "webkit/glue/resource_type.h"
+#include "webkit/common/resource_type.h"
 
 class PluginUrlRequest;
 class PluginUrlRequestDelegate;

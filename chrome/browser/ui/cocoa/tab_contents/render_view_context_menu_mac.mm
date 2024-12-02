@@ -5,12 +5,10 @@
 #include "chrome/browser/ui/cocoa/tab_contents/render_view_context_menu_mac.h"
 
 #include "base/compiler_specific.h"
-#include "base/mac/scoped_nsobject.h"
 #import "base/mac/scoped_sending_event.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "grit/generated_resources.h"
@@ -110,13 +108,6 @@ void RenderViewContextMenuMac::PlatformCancel() {
 }
 
 void RenderViewContextMenuMac::ExecuteCommand(int command_id, int event_flags) {
-  // Auxiliary windows that do not have address bars (Panels for example)
-  // may not have Instant support.
-  NSWindow* parent_window = [parent_view_ window];
-  BrowserWindowController* controller =
-      [BrowserWindowController browserWindowControllerForWindow:parent_window];
-  [controller commitInstant];  // It's ok if controller is nil.
-
   switch (command_id) {
     case IDC_CONTENT_CONTEXT_LOOK_UP_IN_DICTIONARY:
       LookUpInDictionary();

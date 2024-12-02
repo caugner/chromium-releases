@@ -8,7 +8,7 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/tracked_objects.h"
 #include "chrome/browser/sync/glue/change_processor_mock.h"
 #include "chrome/browser/sync/glue/data_type_controller_mock.h"
@@ -209,8 +209,9 @@ TEST_F(SyncFrontendDataTypeControllerTest, StartAssociationFailed) {
       WillOnce(DoAll(SetArgumentPointee<0>(true), Return(true)));
   EXPECT_CALL(*model_associator_, AssociateModels(_, _)).
       WillOnce(Return(syncer::SyncError(FROM_HERE,
-                                "error",
-                                syncer::BOOKMARKS)));
+                                        syncer::SyncError::DATATYPE_ERROR,
+                                        "error",
+                                        syncer::BOOKMARKS)));
 
   EXPECT_CALL(*dtc_mock_.get(), RecordAssociationTime(_));
   SetStartFailExpectations(DataTypeController::ASSOCIATION_FAILED);

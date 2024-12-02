@@ -5,7 +5,7 @@
 #include <errno.h>
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/icu/public/common/unicode/ucnv.h"
+#include "third_party/icu/source/common/unicode/ucnv.h"
 #include "url/url_canon.h"
 #include "url/url_canon_icu.h"
 #include "url/url_canon_internal.h"
@@ -378,7 +378,7 @@ TEST(URLCanonTest, Host) {
     {NULL, L"GOO\x200b\x2060\xfeffgoo.com", "googoo.com", url_parse::Component(0, 10), CanonHostInfo::NEUTRAL, -1, ""},
       // Ideographic full stop (full-width period for Chinese, etc.) should be
       // treated as a dot.
-    {NULL, L"www.foo\x3002"L"bar.com", "www.foo.bar.com", url_parse::Component(0, 15), CanonHostInfo::NEUTRAL, -1, ""},
+    {NULL, L"www.foo\x3002" L"bar.com", "www.foo.bar.com", url_parse::Component(0, 15), CanonHostInfo::NEUTRAL, -1, ""},
       // Invalid unicode characters should fail...
       // ...In wide input, ICU will barf and we'll end up with the input as
       //    escaped UTF-8 (the invalid character should be replaced with the

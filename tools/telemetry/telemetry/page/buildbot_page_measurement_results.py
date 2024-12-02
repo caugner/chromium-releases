@@ -33,12 +33,16 @@ class BuildbotPageMeasurementResults(
       success_page_results = self._page_results
 
     # Print out the list of unique pages.
+    # Use a set and a list to efficiently create an order preserving list of
+    # unique URLs.
     unique_page_urls = []
+    unique_page_urls_set = set()
     for page_values in success_page_results:
       url = page_values.page.display_url
-      if unique_page_urls and unique_page_urls[0] == url:
-        break
+      if url in unique_page_urls_set:
+        continue
       unique_page_urls.append(url)
+      unique_page_urls_set.add(url)
     perf_tests_helper.PrintPages(unique_page_urls)
 
     # Build the results summary.
@@ -83,6 +87,8 @@ class BuildbotPageMeasurementResults(
             continue
           url_value_map[url].append(value)
         for url in unique_page_urls:
+          if not len(url_value_map[url]):
+            continue
           self._PrintPerfResult(measurement + '_by_url', url,
                                 url_value_map[url], units, by_url_data_type)
 

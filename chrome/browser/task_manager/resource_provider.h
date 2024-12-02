@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "base/process_util.h"
+#include "base/process/process_handle.h"
 #include "base/strings/string16.h"
 #include "third_party/WebKit/public/web/WebCache.h"
 
@@ -38,7 +38,6 @@ namespace task_manager {
     def(WORKER)          /* A web worker process. */ \
     def(NACL)            /* A NativeClient loader or broker process. */ \
     def(UTILITY)         /* A browser utility process. */ \
-    def(PROFILE_IMPORT)  /* A profile import process. */ \
     def(ZYGOTE)          /* A Linux zygote process. */ \
     def(SANDBOX_HELPER)  /* A sandbox helper process. */ \
     def(GPU)             /* A graphics process. */
@@ -170,6 +169,6 @@ class ResourceProvider : public base::RefCountedThreadSafe<ResourceProvider> {
   virtual ~ResourceProvider() {}
 };
 
-}  // namepace task_manager
+}  // namespace task_manager
 
 #endif  // CHROME_BROWSER_TASK_MANAGER_RESOURCE_PROVIDER_H_

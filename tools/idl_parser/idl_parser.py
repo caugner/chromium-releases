@@ -359,7 +359,7 @@ class IDLParser(object):
 
   # [24]
   def p_Typedef(self, p):
-    """Typedef : TYPEDEF ExtendedAttributeList Type identifier ';'"""
+    """Typedef : TYPEDEF ExtendedAttributeListNoComments Type identifier ';'"""
     p[0] = self.BuildNamed('Typedef', p, 4, ListFromConcat(p[2], p[3]))
 
   # [24.1] Error recovery for Typedefs
@@ -401,7 +401,7 @@ class IDLParser(object):
   def p_BooleanLiteral(self, p):
     """BooleanLiteral : TRUE
                       | FALSE"""
-    value = self.BuildAttribute('NAME', Boolean(p[1] == 'true'))
+    value = self.BuildAttribute('VALUE', Boolean(p[1] == 'true'))
     p[0] = ListFromConcat(self.BuildAttribute('TYPE', 'boolean'), value)
 
   # [29]
@@ -571,7 +571,15 @@ class IDLParser(object):
     """ExceptionField : error"""
     p[0] = self.BuildError(p, 'ExceptionField')
 
-  # [49] Add optional comment field
+  # [49] No comment version for mid statement attributes.
+  def p_ExtendedAttributeListNoComments(self, p):
+    """ExtendedAttributeListNoComments : '[' ExtendedAttribute ExtendedAttributes ']'
+                                       | """
+    if len(p) > 2:
+      items = ListFromConcat(p[2], p[3])
+      p[0] = self.BuildProduction('ExtAttributes', p, 1, items)
+
+  # [49.1] Add optional comment field for start of statements.
   def p_ExtendedAttributeList(self, p):
     """ExtendedAttributeList : Comments '[' ExtendedAttribute ExtendedAttributes ']'
                              | Comments """
@@ -751,7 +759,7 @@ class IDLParser(object):
     """TypeSuffix : '[' integer ']' TypeSuffix
                   | '[' ']' TypeSuffix
                   | '?' TypeSuffixStartingWithArray
-                  |"""
+                  | """
     if len(p) == 5:
       p[0] = self.BuildNamed('Array', p, 2, p[4])
 
@@ -981,7 +989,7 @@ class IDLParser(object):
 
     try:
       self.lexer.Tokenize(data, filename)
-      nodes = self.yaccobj.parse(lexer=self.lexer)
+      nodes = self.yaccobj.parse(lexer=self.lexer) or []
       name = self.BuildAttribute('NAME', filename)
       return IDLNode('File', filename, 0, 0, nodes + [name])
 
@@ -1002,7 +1010,7 @@ def ParseFile(parser, filename):
 
     except Exception as e:
       last = parser.LastToken()
-      sys.stderr.write('%s(%d) : Internal parsing error - %s.' % (
+      sys.stderr.write('%s(%d) : Internal parsing error\n\t%s.\n' % (
                        filename, last.lineno, str(e)))
 
 
@@ -1012,15 +1020,15 @@ def main(argv):
   errors = 0
   for filename in argv:
     filenode = ParseFile(parser, filename)
-    errors += filenode.GetProperty('ERRORS')
-    nodes.append(filenode)
+    if (filenode):
+      errors += filenode.GetProperty('ERRORS')
+      nodes.append(filenode)
 
   ast = IDLNode('AST', '__AST__', 0, 0, nodes)
 
   print '\n'.join(ast.Tree(accept_props=['PROD']))
   if errors:
     print '\nFound %d errors.\n' % errors
-
 
   return errors
 

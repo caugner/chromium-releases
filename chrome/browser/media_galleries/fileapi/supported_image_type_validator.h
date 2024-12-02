@@ -9,7 +9,7 @@
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "webkit/browser/fileapi/copy_or_move_file_validator.h"
+#include "chrome/browser/media_galleries/fileapi/av_scanning_file_validator.h"
 
 class ImageDecoder;
 
@@ -19,15 +19,14 @@ class MediaFileValidatorFactory;
 
 // Use ImageDecoder to determine if the file decodes without error. Handles
 // image files supported by Chrome.
-class SupportedImageTypeValidator : public fileapi::CopyOrMoveFileValidator {
+class SupportedImageTypeValidator : public AVScanningFileValidator {
  public:
   virtual ~SupportedImageTypeValidator();
 
   static bool SupportsFileType(const base::FilePath& path);
 
-  virtual void StartValidation(
-      const fileapi::CopyOrMoveFileValidator::ResultCallback&
-          result_callback) OVERRIDE;
+  virtual void StartPreWriteValidation(
+      const ResultCallback& result_callback) OVERRIDE;
 
  private:
   friend class MediaFileValidatorFactory;

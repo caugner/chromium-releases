@@ -48,6 +48,10 @@
 #include "ui/views/widget/desktop_aura/desktop_root_window_host_win.h"
 #endif
 
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
+#include "ui/views/widget/desktop_aura/desktop_root_window_host_x11.h"
+#endif
+
 #if !defined(OS_CHROMEOS)
 #include "ui/views/widget/desktop_aura/desktop_root_window_host.h"
 #endif
@@ -106,7 +110,8 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
   window_->SetProperty(aura::client::kShowStateKey, params.show_state);
   if (params.type == Widget::InitParams::TYPE_BUBBLE)
     aura::client::SetHideOnDeactivate(window_, true);
-  window_->SetTransparent(params.transparent);
+  window_->SetTransparent(
+      params.opacity == Widget::InitParams::TRANSLUCENT_WINDOW);
   window_->Init(params.layer_type);
   if (params.type == Widget::InitParams::TYPE_CONTROL)
     window_->Show();
@@ -438,8 +443,8 @@ void NativeWidgetAura::Hide() {
 
 void NativeWidgetAura::ShowMaximizedWithBounds(
     const gfx::Rect& restored_bounds) {
-  ShowWithWindowState(ui::SHOW_STATE_MAXIMIZED);
   SetRestoreBounds(window_, restored_bounds);
+  ShowWithWindowState(ui::SHOW_STATE_MAXIMIZED);
 }
 
 void NativeWidgetAura::ShowWithWindowState(ui::WindowShowState state) {
@@ -621,10 +626,10 @@ void NativeWidgetAura::SetVisibilityChangedAnimationsEnabled(bool value) {
 
 ui::NativeTheme* NativeWidgetAura::GetNativeTheme() const {
 #if !defined(OS_CHROMEOS)
-  if (window_)
-    return DesktopRootWindowHost::GetNativeTheme(window_);
-#endif
+  return DesktopRootWindowHost::GetNativeTheme(window_);
+#else
   return ui::NativeThemeAura::instance();
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -914,13 +919,10 @@ void Widget::NotifyLocaleChanged() {
   // Deliberately not implemented.
 }
 
-#if defined(OS_WIN)
 namespace {
-BOOL CALLBACK WindowCallbackProc(HWND hwnd, LPARAM lParam) {
-  aura::Window* root_window =
-      DesktopRootWindowHostWin::GetContentWindowForHWND(hwnd);
-  if (root_window) {
-    Widget* widget = Widget::GetWidgetForNativeView(root_window);
+void CloseWindow(aura::Window* window) {
+  if (window) {
+    Widget* widget = Widget::GetWidgetForNativeView(window);
     if (widget && widget->is_secondary_widget())
       // To avoid the delay in shutdown caused by using Close which may wait
       // for animations, use CloseNow. Because this is only used on secondary
@@ -928,15 +930,28 @@ BOOL CALLBACK WindowCallbackProc(HWND hwnd, LPARAM lParam) {
       // Close.
       widget->CloseNow();
   }
+}
+#if defined(OS_WIN)
+BOOL CALLBACK WindowCallbackProc(HWND hwnd, LPARAM lParam) {
+  aura::Window* root_window =
+      DesktopRootWindowHostWin::GetContentWindowForHWND(hwnd);
+  CloseWindow(root_window);
   return TRUE;
 }
-}  // namespace
 #endif
+}  // namespace
 
 // static
 void Widget::CloseAllSecondaryWidgets() {
 #if defined(OS_WIN)
   EnumThreadWindows(GetCurrentThreadId(), WindowCallbackProc, 0);
+#endif
+
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
+  std::vector<aura::Window*> open_windows =
+      DesktopRootWindowHostX11::GetAllOpenWindows();
+  std::for_each(open_windows.begin(), open_windows.end(), CloseWindow);
+  DesktopRootWindowHostX11::CleanUpWindowList();
 #endif
 }
 

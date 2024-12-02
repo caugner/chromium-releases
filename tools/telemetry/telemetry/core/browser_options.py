@@ -1,14 +1,18 @@
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-import optparse
-import sys
-import shlex
-import logging
+
 import copy
+import logging
+import optparse
+import os
+import shlex
+import sys
 
 from telemetry.core import browser_finder
 from telemetry.core import profile_types
+from telemetry.core import repeat_options
+from telemetry.core import util
 from telemetry.core import wpr_modes
 from telemetry.core.platform.profiler import profiler_finder
 
@@ -33,22 +37,23 @@ class BrowserOptions(optparse.Values):
     self.extra_wpr_args = []
     self.show_stdout = False
     self.extensions_to_load = []
+    self.clear_sytem_cache_for_browser_and_profile_on_start = False
 
     self.cros_remote = None
     self.wpr_mode = wpr_modes.WPR_OFF
-    self.wpr_make_javascript_deterministic = True
 
     self.browser_user_agent_type = None
 
-    self.profiler_tool = None
-    self.profiler_dir = None
-    self.trace_dir = None
+    self.profiler = None
     self.verbosity = 0
 
     self.page_filter = None
     self.page_filter_exclude = None
 
     self.no_proxy_server = False
+
+    self.repeat_options = repeat_options.RepeatOptions()
+    self.output_file = None
 
   def Copy(self):
     return copy.deepcopy(self)
@@ -84,9 +89,15 @@ class BrowserOptions(optparse.Values):
         '--remote',
         dest='cros_remote',
         help='The IP address of a remote ChromeOS device to use.')
+    identity = None
+    testing_rsa = os.path.join(
+        util.GetChromiumSrcDir(),
+        'third_party', 'chromite', 'ssh_keys', 'testing_rsa')
+    if os.path.exists(testing_rsa):
+      identity = testing_rsa
     group.add_option('--identity',
         dest='cros_ssh_identity',
-        default=None,
+        default=identity,
         help='The identity file to use when ssh\'ing into the ChromeOS device')
     parser.add_option_group(group)
 
@@ -100,6 +111,10 @@ class BrowserOptions(optparse.Values):
         choices=profile_choices,
         help=('The user profile to use. A clean profile is used by default. '
               'Supported values: ' + ', '.join(profile_choices)))
+    group.add_option('--profile-dir',
+        dest='profile_dir',
+        help='Profile directory to launch the browser with. '
+             'A clean profile is used by default')
     group.add_option('--extra-browser-args',
         dest='extra_browser_args_as_string',
         help='Additional arguments to pass to the browser when it starts')
@@ -114,12 +129,6 @@ class BrowserOptions(optparse.Values):
 
     # Page set options
     group = optparse.OptionGroup(parser, 'Page set options')
-    group.add_option('--page-repeat', dest='page_repeat', default=1,
-        help='Number of times to repeat each individual ' +
-        'page in the pageset before proceeding.')
-    group.add_option('--pageset-repeat', dest='pageset_repeat', default=1,
-        help='Number of times to repeat the entire pageset ' +
-        'before finishing.')
     group.add_option('--pageset-shuffle', action='store_true',
         dest='pageset_shuffle',
         help='Shuffle the order of pages within a pageset.')
@@ -140,17 +149,12 @@ class BrowserOptions(optparse.Values):
 
     # Debugging options
     group = optparse.OptionGroup(parser, 'When things go wrong')
+    profiler_choices = profiler_finder.GetAllAvailableProfilers(None)
     group.add_option(
-      '--profiler-tool', dest='profiler_tool', default=None, type='choice',
-      choices=profiler_finder.GetAllAvailableProfilers(),
-      help=('Record sampling profilers with this tool. Supported values: ' +
-            ', '.join(profiler_finder.GetAllAvailableProfilers())))
-    group.add_option(
-      '--profiler-dir', dest='profiler_dir', default=None,
-      help='Record sampling profiles and store them in this directory.')
-    group.add_option(
-      '--trace-dir', dest='trace_dir', default=None,
-      help='Record traces and store them in this directory.')
+      '--profiler', default=None, type='choice',
+      choices=profiler_choices,
+      help=('Record profiling data using this tool. Supported values: ' +
+            ', '.join(profiler_choices)))
     group.add_option(
       '-v', '--verbose', action='count', dest='verbosity',
       help='Increase verbosity level (repeat as needed)')
@@ -168,6 +172,9 @@ class BrowserOptions(optparse.Values):
         'This option prevents Telemetry from tweaking such platform settings.')
     parser.add_option_group(group)
 
+    # Repeat options
+    repeat_options.RepeatOptions.AddCommandLineOptions(parser)
+
     real_parse = parser.parse_args
     def ParseArgs(args=None):
       defaults = parser.get_default_values()
@@ -184,17 +191,8 @@ class BrowserOptions(optparse.Values):
       else:
         logging.basicConfig(level=logging.WARNING)
 
-      if ((self.profiler_tool and not self.profiler_dir) or
-          (not self.profiler_tool and self.profiler_dir)):
-        sys.stderr.write(
-            'Must use --profiler-tool and --profiler-dir together.\n')
-        sys.exit(1)
       if self.browser_executable and not self.browser_type:
         self.browser_type = 'exact'
-      if not self.browser_executable and not self.browser_type:
-        sys.stderr.write('Must provide --browser=<type>. ' +
-                         'Use --browser=list for valid options.\n')
-        sys.exit(1)
       if self.browser_type == 'list':
         try:
           types = browser_finder.GetAllAvailableBrowserTypes(self)
@@ -216,7 +214,20 @@ class BrowserOptions(optparse.Values):
         delattr(self, 'extra_wpr_args_as_string')
       if self.profile_type == 'default':
         self.dont_override_profile = True
-      self.profile_dir = profile_types.GetProfileDir(self.profile_type)
+
+      if ((hasattr(self, 'output_format') and self.output_format == 'html') and
+          (not hasattr(self, 'output_file') or not self.output_file)):
+        self.output_file = os.path.join(util.GetBaseDir(), 'results.html')
+
+      # Parse repeat options
+      self.repeat_options.UpdateFromParseResults(self, parser)
+
+      # TODO(jeremy): I'm in the process of adding explicit knowledge of profile
+      # directories to Telemetry. As part of this work profile_type needs to be
+      # reworked to not override profile_dir.
+      if not self.profile_dir:
+        self.profile_dir = profile_types.GetProfileDir(self.profile_type)
+
       return ret
     parser.parse_args = ParseArgs
     return parser
@@ -224,3 +235,7 @@ class BrowserOptions(optparse.Values):
   def AppendExtraBrowserArg(self, arg):
     if arg not in self.extra_browser_args:
       self.extra_browser_args.append(arg)
+
+  def MergeDefaultValues(self, defaults):
+    for k, v in defaults.__dict__.items():
+      self.ensure_value(k, v)

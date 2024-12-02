@@ -19,6 +19,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "ui/gfx/rect.h"
@@ -42,6 +43,12 @@ IN_PROC_BROWSER_TEST_F(PreservedWindowPlacement, PRE_Test) {
 #define MAYBE_Test Test
 #endif
 IN_PROC_BROWSER_TEST_F(PreservedWindowPlacement, MAYBE_Test) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   gfx::Rect bounds = browser()->window()->GetBounds();
   gfx::Rect expected_bounds(gfx::Rect(20, 30, 400, 500));
   ASSERT_EQ(expected_bounds.ToString(), bounds.ToString());
@@ -77,10 +84,10 @@ class PreferenceServiceTest : public InProcessBrowserTest {
       tmp_pref_file_ = user_data_directory.Append(chrome::kLocalStateFilename);
     }
 
-    CHECK(file_util::PathExists(reference_pref_file));
+    CHECK(base::PathExists(reference_pref_file));
     // Copy only the Preferences file if |new_profile_|, or Local State if not,
     // and the rest will be automatically created.
-    CHECK(file_util::CopyFile(reference_pref_file, tmp_pref_file_));
+    CHECK(base::CopyFile(reference_pref_file, tmp_pref_file_));
 
 #if defined(OS_WIN)
     // Make the copy writable.  On POSIX we assume the umask allows files
@@ -112,6 +119,12 @@ class PreservedWindowPlacementIsLoaded : public PreferenceServiceTest {
 };
 
 IN_PROC_BROWSER_TEST_F(PreservedWindowPlacementIsLoaded, Test) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   // The window should open with the new reference profile, with window
   // placement values stored in the user data directory.
   JSONFileValueSerializer deserializer(tmp_pref_file_);
@@ -165,6 +178,12 @@ class PreservedWindowPlacementIsMigrated : public PreferenceServiceTest {
 };
 
 IN_PROC_BROWSER_TEST_F(PreservedWindowPlacementIsMigrated, Test) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   // The window should open with the old reference profile, with window
   // placement values stored in Local State.
 

@@ -4,14 +4,18 @@
 
 #include "ash/wm/window_cycle_list.h"
 
+#include "ash/shell.h"
+#include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/window_util.h"
 #include "ui/aura/window.h"
+#include "ui/views/corewm/window_animations.h"
 
 namespace ash {
 
 WindowCycleList::WindowCycleList(const WindowList& windows)
     : windows_(windows),
       current_index_(-1) {
+  ash::Shell::GetInstance()->mru_window_tracker()->SetIgnoreActivations(true);
   // Locate the currently active window in the list to use as our start point.
   aura::Window* active_window = wm::GetActiveWindow();
 
@@ -26,6 +30,7 @@ WindowCycleList::WindowCycleList(const WindowList& windows)
 }
 
 WindowCycleList::~WindowCycleList() {
+  ash::Shell::GetInstance()->mru_window_tracker()->SetIgnoreActivations(false);
   for (WindowList::const_iterator i = windows_.begin(); i != windows_.end();
        ++i) {
     (*i)->RemoveObserver(this);
@@ -41,8 +46,12 @@ void WindowCycleList::Step(Direction direction) {
     // provided window list.  Just switch to the first (or last) one.
     current_index_ = (direction == FORWARD ? 0 : windows_.size() - 1);
   } else {
-    if (windows_.size() == 1)
+    // When there is only one window, we should give a feedback to user.
+    if (windows_.size() == 1) {
+      AnimateWindow(windows_[0],
+                    views::corewm::WINDOW_ANIMATION_TYPE_BOUNCE);
       return;
+    }
     // We're in a valid cycle, so step forward or backward.
     current_index_ += (direction == FORWARD ? 1 : -1);
   }

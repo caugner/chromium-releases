@@ -15,9 +15,10 @@
 #include "base/prefs/pref_service.h"
 #include "base/rand_util.h"
 #include "base/threading/worker_pool.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/default_user_images.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/user_image.h"
@@ -25,7 +26,6 @@
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile_downloader.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -145,7 +145,7 @@ void DeleteImageFile(const std::string& image_path) {
   BrowserThread::PostTask(
       BrowserThread::FILE,
       FROM_HERE,
-      base::Bind(base::IgnoreResult(&file_util::Delete),
+      base::Bind(base::IgnoreResult(&base::DeleteFile),
                  fp, /* recursive= */  false));
 }
 
@@ -399,6 +399,10 @@ void UserImageManagerImpl::DeleteUserImage(const std::string& username) {
 
 void UserImageManagerImpl::DownloadProfileImage(const std::string& reason) {
   DownloadProfileData(reason, true);
+}
+
+void UserImageManagerImpl::Shutdown() {
+  profile_image_downloader_.reset();
 }
 
 const gfx::ImageSkia& UserImageManagerImpl::DownloadedProfileImage() const {

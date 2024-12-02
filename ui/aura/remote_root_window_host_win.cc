@@ -8,14 +8,13 @@
 
 #include <algorithm>
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_sender.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/cursor/cursor_loader_win.h"
-#include "ui/base/events/event.h"
 #include "ui/base/events/event_utils.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
 #include "ui/base/view_prop.h"
@@ -56,24 +55,28 @@ void SetVirtualKeyStates(uint32 flags) {
 void HandleOpenFile(const base::string16& title,
                     const base::FilePath& default_path,
                     const base::string16& filter,
-                    const OpenFileCompletion& callback) {
+                    const OpenFileCompletion& on_success,
+                    const FileSelectionCanceled& on_failure) {
   DCHECK(aura::RemoteRootWindowHostWin::Instance());
   aura::RemoteRootWindowHostWin::Instance()->HandleOpenFile(title,
                                                             default_path,
                                                             filter,
-                                                            callback);
+                                                            on_success,
+                                                            on_failure);
 }
 
 void HandleOpenMultipleFiles(const base::string16& title,
                              const base::FilePath& default_path,
                              const base::string16& filter,
-                             const OpenMultipleFilesCompletion& callback) {
+                             const OpenMultipleFilesCompletion& on_success,
+                             const FileSelectionCanceled& on_failure) {
   DCHECK(aura::RemoteRootWindowHostWin::Instance());
   aura::RemoteRootWindowHostWin::Instance()->HandleOpenMultipleFiles(
       title,
       default_path,
       filter,
-      callback);
+      on_success,
+      on_failure);
 }
 
 void HandleSaveFile(const base::string16& title,
@@ -81,21 +84,25 @@ void HandleSaveFile(const base::string16& title,
                     const base::string16& filter,
                     int filter_index,
                     const base::string16& default_extension,
-                    const SaveFileCompletion& callback) {
+                    const SaveFileCompletion& on_success,
+                    const FileSelectionCanceled& on_failure) {
   DCHECK(aura::RemoteRootWindowHostWin::Instance());
   aura::RemoteRootWindowHostWin::Instance()->HandleSaveFile(title,
                                                             default_path,
                                                             filter,
                                                             filter_index,
                                                             default_extension,
-                                                            callback);
+                                                            on_success,
+                                                            on_failure);
 }
 
 void HandleSelectFolder(const base::string16& title,
-                        const SelectFolderCompletion& callback) {
+                        const SelectFolderCompletion& on_success,
+                        const FileSelectionCanceled& on_failure) {
   DCHECK(aura::RemoteRootWindowHostWin::Instance());
   aura::RemoteRootWindowHostWin::Instance()->HandleSelectFolder(title,
-                                                                callback);
+                                                                on_success,
+                                                                on_failure);
 }
 
 RemoteRootWindowHostWin* g_instance = NULL;
@@ -169,13 +176,17 @@ void RemoteRootWindowHostWin::HandleOpenFile(
     const base::string16& title,
     const base::FilePath& default_path,
     const base::string16& filter,
-    const OpenFileCompletion& callback) {
+    const OpenFileCompletion& on_success,
+    const FileSelectionCanceled& on_failure) {
   if (!host_)
     return;
 
   // Can only have one of these operations in flight.
   DCHECK(file_open_completion_callback_.is_null());
-  file_open_completion_callback_ = callback;
+  DCHECK(failure_callback_.is_null());
+
+  file_open_completion_callback_ = on_success;
+  failure_callback_ = on_failure;
 
   host_->Send(new MetroViewerHostMsg_DisplayFileOpen(title,
                                                      filter,
@@ -187,13 +198,16 @@ void RemoteRootWindowHostWin::HandleOpenMultipleFiles(
     const base::string16& title,
     const base::FilePath& default_path,
     const base::string16& filter,
-    const OpenMultipleFilesCompletion& callback) {
+    const OpenMultipleFilesCompletion& on_success,
+    const FileSelectionCanceled& on_failure) {
   if (!host_)
     return;
 
   // Can only have one of these operations in flight.
   DCHECK(multi_file_open_completion_callback_.is_null());
-  multi_file_open_completion_callback_ = callback;
+  DCHECK(failure_callback_.is_null());
+  multi_file_open_completion_callback_ = on_success;
+  failure_callback_ = on_failure;
 
   host_->Send(new MetroViewerHostMsg_DisplayFileOpen(title,
                                                      filter,
@@ -207,7 +221,8 @@ void RemoteRootWindowHostWin::HandleSaveFile(
     const base::string16& filter,
     int filter_index,
     const base::string16& default_extension,
-    const SaveFileCompletion& callback) {
+    const SaveFileCompletion& on_success,
+    const FileSelectionCanceled& on_failure) {
   if (!host_)
     return;
 
@@ -216,25 +231,35 @@ void RemoteRootWindowHostWin::HandleSaveFile(
   params.default_extension = default_extension;
   params.filter = filter;
   params.filter_index = filter_index;
+  params.suggested_name = default_path;
 
   // Can only have one of these operations in flight.
   DCHECK(file_saveas_completion_callback_.is_null());
-  file_saveas_completion_callback_ = callback;
+  DCHECK(failure_callback_.is_null());
+  file_saveas_completion_callback_ = on_success;
+  failure_callback_ = on_failure;
 
   host_->Send(new MetroViewerHostMsg_DisplayFileSaveAs(params));
 }
 
 void RemoteRootWindowHostWin::HandleSelectFolder(
     const base::string16& title,
-    const SelectFolderCompletion& callback) {
+    const SelectFolderCompletion& on_success,
+    const FileSelectionCanceled& on_failure) {
   if (!host_)
     return;
 
   // Can only have one of these operations in flight.
   DCHECK(select_folder_completion_callback_.is_null());
-  select_folder_completion_callback_ = callback;
+  DCHECK(failure_callback_.is_null());
+  select_folder_completion_callback_ = on_success;
+  failure_callback_ = on_failure;
 
   host_->Send(new MetroViewerHostMsg_DisplaySelectFolder(title));
+}
+
+Window* RemoteRootWindowHostWin::GetAshWindow() {
+  return GetRootWindow();
 }
 
 void RemoteRootWindowHostWin::SetDelegate(RootWindowHostDelegate* delegate) {
@@ -381,14 +406,28 @@ void RemoteRootWindowHostWin::OnMouseMoved(int32 x, int32 y, int32 flags) {
 void RemoteRootWindowHostWin::OnMouseButton(
     int32 x, int32 y, int32 extra, ui::EventType type, ui::EventFlags flags) {
   gfx::Point location(x, y);
-  ui::MouseEvent mouse_event(type, location, location, 0);
-  mouse_event.set_flags(flags);
+  ui::MouseEvent mouse_event(type, location, location, flags);
 
   if (type == ui::ET_MOUSEWHEEL) {
     ui::MouseWheelEvent wheel_event(mouse_event, 0, extra);
     delegate_->OnHostMouseEvent(&wheel_event);
+  } else if (type == ui::ET_MOUSE_PRESSED) {
+    // TODO(shrikant): Ideally modify code in event.cc by adding automatic
+    // tracking of double clicks in synthetic MouseEvent constructor code.
+    // Non-synthetic MouseEvent constructor code does automatically track
+    // this. Need to use some caution while modifying synthetic constructor
+    // as many tests and other code paths depend on it and apparently
+    // specifically depend on non implicit tracking of previous mouse event.
+    if (last_mouse_click_event_ &&
+        ui::MouseEvent::IsRepeatedClickEvent(mouse_event,
+                                             *last_mouse_click_event_)) {
+      mouse_event.SetClickCount(2);
+    } else {
+      mouse_event.SetClickCount(1);
+    }
+    last_mouse_click_event_ .reset(new ui::MouseEvent(mouse_event));
+    delegate_->OnHostMouseEvent(&mouse_event);
   } else {
-    mouse_event.SetClickCount(1);
     delegate_->OnHostMouseEvent(&mouse_event);
   }
 }
@@ -458,38 +497,45 @@ void RemoteRootWindowHostWin::OnTouchMoved(int32 x,
 void RemoteRootWindowHostWin::OnFileSaveAsDone(bool success,
                                                const base::FilePath& filename,
                                                int filter_index) {
-  if (success) {
+  if (success)
     file_saveas_completion_callback_.Run(filename, filter_index, NULL);
-  }
+  else
+    failure_callback_.Run(NULL);
   file_saveas_completion_callback_.Reset();
+  failure_callback_.Reset();
 }
 
 
 void RemoteRootWindowHostWin::OnFileOpenDone(bool success,
                                              const base::FilePath& filename) {
-  if (success) {
-    file_open_completion_callback_.Run(
-        base::FilePath(filename), 0, NULL);
-  }
+  if (success)
+    file_open_completion_callback_.Run(base::FilePath(filename), 0, NULL);
+  else
+    failure_callback_.Run(NULL);
   file_open_completion_callback_.Reset();
+  failure_callback_.Reset();
 }
 
 void RemoteRootWindowHostWin::OnMultiFileOpenDone(
     bool success,
     const std::vector<base::FilePath>& files) {
-  if (success) {
+  if (success)
     multi_file_open_completion_callback_.Run(files, NULL);
-  }
+  else
+    failure_callback_.Run(NULL);
   multi_file_open_completion_callback_.Reset();
+  failure_callback_.Reset();
 }
 
 void RemoteRootWindowHostWin::OnSelectFolderDone(
     bool success,
     const base::FilePath& folder) {
-  if (success) {
+  if (success)
     select_folder_completion_callback_.Run(base::FilePath(folder), 0, NULL);
-  }
+  else
+    failure_callback_.Run(NULL);
   select_folder_completion_callback_.Reset();
+  failure_callback_.Reset();
 }
 
 void RemoteRootWindowHostWin::OnWindowActivated(bool active) {

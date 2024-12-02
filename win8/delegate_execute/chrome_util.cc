@@ -15,7 +15,9 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/md5.h"
-#include "base/process_util.h"
+#include "base/process/kill.h"
+#include "base/process/launch.h"
+#include "base/process/process_handle.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/registry.h"
@@ -81,7 +83,7 @@ bool IsBrowserRunning(const base::FilePath& chrome_exe) {
 // |chrome_exe|.
 bool NewChromeExeExists(const base::FilePath& chrome_exe) {
   base::FilePath new_chrome_exe(chrome_exe.DirName().Append(kNewChromeExe));
-  return file_util::PathExists(new_chrome_exe);
+  return base::PathExists(new_chrome_exe);
 }
 
 bool GetUpdateCommand(bool is_per_user, string16* update_command) {

@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/common/form_data.h"
@@ -79,26 +79,26 @@ enum FieldTypeGroupForMetrics {
 //
 // Clients must ensure that |field_type| is one of the types Chrome supports
 // natively, e.g. |field_type| must not be a billng address.
-int GetFieldTypeGroupMetric(const AutofillFieldType field_type,
+int GetFieldTypeGroupMetric(const ServerFieldType field_type,
                             const int metric,
                             const int num_possible_metrics) {
   DCHECK_LT(metric, num_possible_metrics);
 
   FieldTypeGroupForMetrics group;
   switch (AutofillType(field_type).group()) {
-    case AutofillType::NO_GROUP:
+    case ::autofill::NO_GROUP:
       group = AMBIGUOUS;
       break;
 
-    case AutofillType::NAME:
+    case ::autofill::NAME:
       group = NAME;
       break;
 
-    case AutofillType::COMPANY:
+    case ::autofill::COMPANY:
       group = COMPANY;
       break;
 
-    case AutofillType::ADDRESS_HOME:
+    case ::autofill::ADDRESS_HOME:
       switch (field_type) {
         case ADDRESS_HOME_LINE1:
           group = ADDRESS_LINE_1;
@@ -124,15 +124,15 @@ int GetFieldTypeGroupMetric(const AutofillFieldType field_type,
       }
       break;
 
-    case AutofillType::EMAIL:
+    case ::autofill::EMAIL:
       group = EMAIL;
       break;
 
-    case AutofillType::PHONE_HOME:
+    case ::autofill::PHONE_HOME:
       group = PHONE;
       break;
 
-    case AutofillType::CREDIT_CARD:
+    case ::autofill::CREDIT_CARD:
       switch (field_type) {
         case ::autofill::CREDIT_CARD_NAME:
           group = CREDIT_CARD_NAME;
@@ -182,18 +182,10 @@ std::string WalletApiMetricToString(
       return "GetFullWallet";
     case AutofillMetrics::GET_WALLET_ITEMS:
       return "GetWalletItems";
-    case AutofillMetrics::SAVE_ADDRESS:
-      return "SaveAddress";
-    case AutofillMetrics::SAVE_INSTRUMENT:
-      return "SaveInstrument";
-    case AutofillMetrics::SAVE_INSTRUMENT_AND_ADDRESS:
-      return "SaveInstrumentAndAddress";
+    case AutofillMetrics::SAVE_TO_WALLET:
+      return "SaveToWallet";
     case AutofillMetrics::SEND_STATUS:
       return "SendStatus";
-    case AutofillMetrics::UPDATE_ADDRESS:
-      return "UpdateAddress";
-    case AutofillMetrics::UPDATE_INSTRUMENT:
-      return "UpdateInstrument";
     case AutofillMetrics::UNKNOWN_API_CALL:
       NOTREACHED();
       return "UnknownApiCall";
@@ -258,7 +250,7 @@ void LogUMAHistogramLongTimes(const std::string& name,
 void LogTypeQualityMetric(const std::string& base_name,
                           const int metric,
                           const int num_possible_metrics,
-                          const AutofillFieldType field_type,
+                          const ServerFieldType field_type,
                           const std::string& experiment_id) {
   DCHECK_LT(metric, num_possible_metrics);
 
@@ -489,7 +481,7 @@ void AutofillMetrics::LogDeveloperEngagementMetric(
 
 void AutofillMetrics::LogHeuristicTypePrediction(
     FieldTypeQualityMetric metric,
-    AutofillFieldType field_type,
+    ServerFieldType field_type,
     const std::string& experiment_id) const {
   LogTypeQualityMetric("Autofill.Quality.HeuristicType",
                        metric, NUM_FIELD_TYPE_QUALITY_METRICS,
@@ -498,7 +490,7 @@ void AutofillMetrics::LogHeuristicTypePrediction(
 
 void AutofillMetrics::LogOverallTypePrediction(
     FieldTypeQualityMetric metric,
-    AutofillFieldType field_type,
+    ServerFieldType field_type,
     const std::string& experiment_id) const {
   LogTypeQualityMetric("Autofill.Quality.PredictedType",
                        metric, NUM_FIELD_TYPE_QUALITY_METRICS,
@@ -507,7 +499,7 @@ void AutofillMetrics::LogOverallTypePrediction(
 
 void AutofillMetrics::LogServerTypePrediction(
     FieldTypeQualityMetric metric,
-    AutofillFieldType field_type,
+    ServerFieldType field_type,
     const std::string& experiment_id) const {
   LogTypeQualityMetric("Autofill.Quality.ServerType",
                        metric, NUM_FIELD_TYPE_QUALITY_METRICS,

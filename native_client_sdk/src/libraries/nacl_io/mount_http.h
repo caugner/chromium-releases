@@ -1,7 +1,7 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 
 #ifndef LIBRARIES_NACL_IO_MOUNT_HTTP_H_
 #define LIBRARIES_NACL_IO_MOUNT_HTTP_H_
@@ -9,20 +9,22 @@
 #include <string>
 #include "nacl_io/mount.h"
 #include "nacl_io/pepper_interface.h"
+#include "nacl_io/typed_mount_factory.h"
+
+class MountHttpMock;
+
+namespace nacl_io {
 
 class MountNode;
-class MountNodeDir;
-class MountNodeHttp;
-class MountHttpMock;
 
 std::string NormalizeHeaderKey(const std::string& s);
 
 class MountHttp : public Mount {
  public:
-  typedef std::map<std::string, MountNode*> NodeMap_t;
+  typedef std::map<std::string, ScopedMountNode> NodeMap_t;
 
   virtual Error Access(const Path& path, int a_mode);
-  virtual Error Open(const Path& path, int mode, MountNode** out_node);
+  virtual Error Open(const Path& path, int mode, ScopedMountNode* out_node);
   virtual Error Unlink(const Path& path);
   virtual Error Mkdir(const Path& path, int permissions);
   virtual Error Rmdir(const Path& path);
@@ -37,7 +39,7 @@ class MountHttp : public Mount {
 
   virtual Error Init(int dev, StringMap_t& args, PepperInterface* ppapi);
   virtual void Destroy();
-  Error FindOrCreateDir(const Path& path, MountNodeDir** out_node);
+  Error FindOrCreateDir(const Path& path, ScopedMountNode* out_node);
   Error LoadManifest(const std::string& path, char** out_manifest);
   Error ParseManifest(char *text);
 
@@ -54,9 +56,11 @@ class MountHttp : public Mount {
   bool cache_stat_;
   bool cache_content_;
 
-  friend class Mount;
+  friend class TypedMountFactory<MountHttp>;
   friend class MountNodeHttp;
-  friend class MountHttpMock;
+  friend class ::MountHttpMock;
 };
+
+}  // namespace nacl_io
 
 #endif  // LIBRARIES_NACL_IO_MOUNT_HTTP_H_

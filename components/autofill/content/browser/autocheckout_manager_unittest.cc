@@ -7,7 +7,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/tuple.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
-#include "chrome/test/base/testing_profile.h"
 #include "components/autofill/content/browser/autocheckout_manager.h"
 #include "components/autofill/core/browser/autofill_common_test.h"
 #include "components/autofill/core/browser/autofill_manager.h"
@@ -36,6 +35,11 @@ typedef Tuple4<std::vector<FormData>,
                std::vector<WebElementDescriptor>,
                WebElementDescriptor> AutofillParam;
 
+enum ProceedElementPresence {
+  NO_PROCEED_ELEMENT,
+  HAS_PROCEED_ELEMENT,
+};
+
 FormFieldData BuildFieldWithValue(
     const std::string& autocomplete_attribute,
     const std::string& value) {
@@ -52,7 +56,7 @@ FormFieldData BuildField(const std::string& autocomplete_attribute) {
 }
 
 scoped_ptr<FormStructure> CreateTestFormStructure(
-    const std::vector<AutofillFieldType>& autofill_types) {
+    const std::vector<ServerFieldType>& autofill_types) {
   FormData form;
   form.name = ASCIIToUTF16("MyForm");
   form.method = ASCIIToUTF16("POST");
@@ -80,7 +84,7 @@ scoped_ptr<FormStructure> CreateTestFormStructure(
 }
 
 scoped_ptr<FormStructure> CreateTestAddressFormStructure() {
-  std::vector<AutofillFieldType> autofill_types;
+  std::vector<ServerFieldType> autofill_types;
   autofill_types.push_back(NAME_FULL);
   autofill_types.push_back(PHONE_HOME_WHOLE_NUMBER);
   autofill_types.push_back(EMAIL_ADDRESS);
@@ -94,7 +98,7 @@ scoped_ptr<FormStructure> CreateTestAddressFormStructure() {
 }
 
 scoped_ptr<FormStructure> CreateTestCreditCardFormStructure() {
-  std::vector<AutofillFieldType> autofill_types;
+  std::vector<ServerFieldType> autofill_types;
   autofill_types.push_back(CREDIT_CARD_NAME);
   autofill_types.push_back(CREDIT_CARD_NUMBER);
   autofill_types.push_back(CREDIT_CARD_EXP_MONTH);
@@ -123,6 +127,9 @@ scoped_ptr<FormStructure> CreateTestFormStructureWithDefaultValues() {
   FormFieldData female = BuildFieldWithValue("sex", "female");
   female.is_checkable = true;
   form.fields.push_back(female);
+  FormFieldData select = BuildField("SelectField");
+  select.form_control_type = "select-one";
+  form.fields.push_back(select);
 
   scoped_ptr<FormStructure> form_structure(
       new FormStructure(form, std::string()));
@@ -132,6 +139,8 @@ scoped_ptr<FormStructure> CreateTestFormStructureWithDefaultValues() {
   form_structure->field(0)->set_default_value("female");
   form_structure->field(1)->set_server_type(FIELD_WITH_DEFAULT_VALUE);
   form_structure->field(1)->set_default_value("female");
+  form_structure->field(2)->set_server_type(FIELD_WITH_DEFAULT_VALUE);
+  form_structure->field(2)->set_default_value("Default Value");
 
   return form_structure.Pass();
 }
@@ -169,16 +178,19 @@ scoped_ptr<AutocheckoutPageMetaData> CreateNotInFlowMetaData() {
   return not_in_flow.Pass();
 }
 
-scoped_ptr<AutocheckoutPageMetaData> CreateEndOfFlowMetaData() {
+scoped_ptr<AutocheckoutPageMetaData> CreateEndOfFlowMetaData(
+    ProceedElementPresence proceed_element_presence) {
   scoped_ptr<AutocheckoutPageMetaData> end_of_flow(
       new AutocheckoutPageMetaData());
   end_of_flow->current_page_number = 2;
   end_of_flow->total_pages = 3;
-  PopulateClickElement(&end_of_flow->proceed_element_descriptor, "#foo");
+  if (proceed_element_presence == HAS_PROCEED_ELEMENT)
+    PopulateClickElement(&end_of_flow->proceed_element_descriptor, "#foo");
   return end_of_flow.Pass();
 }
 
-scoped_ptr<AutocheckoutPageMetaData> CreateOnePageFlowMetaData() {
+scoped_ptr<AutocheckoutPageMetaData> CreateOnePageFlowMetaData(
+    ProceedElementPresence proceed_element_presence) {
   scoped_ptr<AutocheckoutPageMetaData> one_page_flow(
       new AutocheckoutPageMetaData());
   one_page_flow->current_page_number = 0;
@@ -186,7 +198,8 @@ scoped_ptr<AutocheckoutPageMetaData> CreateOnePageFlowMetaData() {
   one_page_flow->page_types[0].push_back(AUTOCHECKOUT_STEP_SHIPPING);
   one_page_flow->page_types[0].push_back(AUTOCHECKOUT_STEP_DELIVERY);
   one_page_flow->page_types[0].push_back(AUTOCHECKOUT_STEP_BILLING);
-  PopulateClickElement(&one_page_flow->proceed_element_descriptor, "#foo");
+  if (proceed_element_presence == HAS_PROCEED_ELEMENT)
+    PopulateClickElement(&one_page_flow->proceed_element_descriptor, "#foo");
   return one_page_flow.Pass();
 }
 
@@ -216,7 +229,7 @@ scoped_ptr<AutocheckoutPageMetaData> CreateMultiClickMetaData() {
 struct TestField {
   const char* const field_type;
   const char* const field_value;
-  AutofillFieldType autofill_type;
+  ServerFieldType autofill_type;
 };
 
 const TestField kTestFields[] = {
@@ -261,7 +274,8 @@ class MockAutofillManagerDelegate : public TestAutofillManagerDelegate {
  public:
   MockAutofillManagerDelegate()
       : request_autocomplete_dialog_open_(false),
-        autocheckout_bubble_shown_(false) {}
+        autocheckout_bubble_shown_(false),
+        should_autoclick_bubble_(true) {}
 
   virtual ~MockAutofillManagerDelegate() {}
 
@@ -272,12 +286,14 @@ class MockAutofillManagerDelegate : public TestAutofillManagerDelegate {
   MOCK_METHOD0(OnAutocheckoutError, void());
   MOCK_METHOD0(OnAutocheckoutSuccess, void());
 
-  virtual void ShowAutocheckoutBubble(
+  virtual bool ShowAutocheckoutBubble(
       const gfx::RectF& bounds,
       bool is_google_user,
-      const base::Callback<void(bool)>& callback) OVERRIDE {
+      const base::Callback<void(AutocheckoutBubbleState)>& callback) OVERRIDE {
     autocheckout_bubble_shown_ = true;
-    callback.Run(true);
+    if (should_autoclick_bubble_)
+      callback.Run(AUTOCHECKOUT_BUBBLE_ACCEPTED);
+    return true;
   }
 
   virtual void ShowRequestAutocompleteDialog(
@@ -317,6 +333,10 @@ class MockAutofillManagerDelegate : public TestAutofillManagerDelegate {
     return request_autocomplete_dialog_open_;
   }
 
+  void set_should_autoclick_bubble(bool should_autoclick_bubble) {
+    should_autoclick_bubble_ = should_autoclick_bubble;
+  }
+
   bool AutocheckoutStepExistsWithStatus(
       AutocheckoutStepType step_type,
       AutocheckoutStepStatus step_status) const {
@@ -326,9 +346,20 @@ class MockAutofillManagerDelegate : public TestAutofillManagerDelegate {
   }
 
  private:
+  // Whether or not ShowRequestAutocompleteDialog method has been called.
   bool request_autocomplete_dialog_open_;
+
+  // Whether or not Autocheckout bubble is displayed to user.
   bool autocheckout_bubble_shown_;
+
+  // Whether or not to accept the Autocheckout bubble when offered.
+  bool should_autoclick_bubble_;
+
+  // User specified data that would be returned to AutocheckoutManager when
+  // dialog is accepted.
   scoped_ptr<FormStructure> user_supplied_data_;
+
+  // Step status of various Autocheckout steps in this checkout flow.
   std::map<AutocheckoutStepType, AutocheckoutStepStatus> autocheckout_steps_;
 };
 
@@ -367,10 +398,19 @@ class TestAutocheckoutManager: public AutocheckoutManager {
   const MockAutofillMetrics& metric_logger() const {
     return static_cast<const MockAutofillMetrics&>(
        AutocheckoutManager::metric_logger());
-   }
+  }
+
+  virtual void MaybeShowAutocheckoutBubble(
+      const GURL& frame_url,
+      const gfx::RectF& bounding_box) OVERRIDE {
+    AutocheckoutManager::MaybeShowAutocheckoutBubble(frame_url,
+                                                     bounding_box);
+    // Needed for AutocheckoutManager to post task on IO thread.
+    content::RunAllPendingInMessageLoop(BrowserThread::IO);
+  }
 
   using AutocheckoutManager::in_autocheckout_flow;
-  using AutocheckoutManager::autocheckout_offered;
+  using AutocheckoutManager::should_show_bubble;
   using AutocheckoutManager::MaybeShowAutocheckoutDialog;
   using AutocheckoutManager::ReturnAutocheckoutData;
 };
@@ -382,7 +422,6 @@ class AutocheckoutManagerTest : public ChromeRenderViewHostTestHarness {
   virtual void SetUp() OVERRIDE {
     SetThreadBundleOptions(content::TestBrowserThreadBundle::REAL_IO_THREAD);
     ChromeRenderViewHostTestHarness::SetUp();
-    profile()->CreateRequestContext();
     autofill_manager_delegate_.reset(new MockAutofillManagerDelegate());
     autofill_driver_.reset(new TestAutofillDriver(web_contents()));
     autofill_manager_.reset(new TestAutofillManager(
@@ -397,7 +436,6 @@ class AutocheckoutManagerTest : public ChromeRenderViewHostTestHarness {
     autofill_manager_delegate_.reset();
     autofill_manager_.reset();
     autofill_driver_.reset();
-    profile()->ResetRequestContext();
     ChromeRenderViewHostTestHarness::TearDown();
   }
 
@@ -410,7 +448,8 @@ class AutocheckoutManagerTest : public ChromeRenderViewHostTestHarness {
     return autofill_param.a;
   }
 
-  void CheckFillFormsAndClickIpc() {
+  void CheckFillFormsAndClickIpc(
+      ProceedElementPresence proceed_element_presence) {
     EXPECT_EQ(1U, process()->sink().message_count());
     uint32 kMsgID = AutofillMsg_FillFormsAndClick::ID;
     const IPC::Message* message =
@@ -418,8 +457,12 @@ class AutocheckoutManagerTest : public ChromeRenderViewHostTestHarness {
     EXPECT_TRUE(message);
     AutofillParam autofill_param;
     AutofillMsg_FillFormsAndClick::Read(message, &autofill_param);
-    EXPECT_EQ(WebElementDescriptor::ID, autofill_param.d.retrieval_method);
-    EXPECT_EQ("#foo", autofill_param.d.descriptor);
+    if (proceed_element_presence == HAS_PROCEED_ELEMENT) {
+      EXPECT_EQ(WebElementDescriptor::ID, autofill_param.d.retrieval_method);
+      EXPECT_EQ("#foo", autofill_param.d.descriptor);
+    } else {
+      EXPECT_EQ(WebElementDescriptor::NONE, autofill_param.d.retrieval_method);
+    }
     ClearIpcSink();
   }
 
@@ -439,15 +482,15 @@ class AutocheckoutManagerTest : public ChromeRenderViewHostTestHarness {
     autofill_manager_delegate_->SetUserSuppliedData(
         FakeUserSubmittedFormStructure());
     GURL frame_url;
-    content::SSLStatus ssl_status;
     EXPECT_CALL(autocheckout_manager_->metric_logger(),
                 LogAutocheckoutBuyFlowMetric(
                     AutofillMetrics::AUTOCHECKOUT_BUY_FLOW_STARTED)).Times(1);
-    autocheckout_manager_->MaybeShowAutocheckoutDialog(frame_url,
-                                                       ssl_status,
-                                                       true);
-    CheckFillFormsAndClickIpc();
+    autocheckout_manager_->MaybeShowAutocheckoutDialog(
+        frame_url,
+        AUTOCHECKOUT_BUBBLE_ACCEPTED);
+    CheckFillFormsAndClickIpc(HAS_PROCEED_ELEMENT);
     EXPECT_TRUE(autocheckout_manager_->in_autocheckout_flow());
+    EXPECT_TRUE(autocheckout_manager_->should_preserve_dialog());
     EXPECT_TRUE(autofill_manager_delegate_->request_autocomplete_dialog_open());
     EXPECT_TRUE(autofill_manager_delegate_
         ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_SHIPPING,
@@ -466,6 +509,120 @@ class AutocheckoutManagerTest : public ChromeRenderViewHostTestHarness {
     autofill_manager_delegate_->HideRequestAutocompleteDialog();
     EXPECT_FALSE(
         autofill_manager_delegate_->request_autocomplete_dialog_open());
+  }
+
+  // Test a multi-page Autocheckout flow end to end.
+  // |proceed_element_presence_on_last_page| indicates whether the last page
+  // of the flow should have a proceed element.
+  void TestFullAutocheckoutFlow(
+      ProceedElementPresence proceed_element_presence_on_last_page) {
+    // Test for progression through last page.
+    OpenRequestAutocompleteDialog();
+    EXPECT_TRUE(autofill_manager_delegate_
+        ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_SHIPPING,
+                                           AUTOCHECKOUT_STEP_STARTED));
+    // Complete the first page.
+    autocheckout_manager_->OnAutocheckoutPageCompleted(SUCCESS);
+    EXPECT_TRUE(autocheckout_manager_->should_preserve_dialog());
+    EXPECT_TRUE(autofill_manager_delegate_
+        ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_SHIPPING,
+                                           AUTOCHECKOUT_STEP_COMPLETED));
+
+    // Go to the second page.
+    EXPECT_CALL(*autofill_manager_delegate_, OnAutocheckoutSuccess()).Times(1);
+    autocheckout_manager_->OnLoadedPageMetaData(CreateInFlowMetaData());
+    EXPECT_TRUE(autocheckout_manager_->in_autocheckout_flow());
+    EXPECT_TRUE(autocheckout_manager_->should_preserve_dialog());
+    CheckFillFormsAndClickIpc(HAS_PROCEED_ELEMENT);
+    EXPECT_TRUE(autofill_manager_delegate_
+        ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_DELIVERY,
+                                           AUTOCHECKOUT_STEP_STARTED));
+    autocheckout_manager_->OnAutocheckoutPageCompleted(SUCCESS);
+    EXPECT_TRUE(autofill_manager_delegate_
+        ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_DELIVERY,
+                                           AUTOCHECKOUT_STEP_COMPLETED));
+
+    // Go to the third page.
+    EXPECT_CALL(autocheckout_manager_->metric_logger(),
+                LogAutocheckoutBuyFlowMetric(
+                    AutofillMetrics::AUTOCHECKOUT_BUY_FLOW_SUCCESS)).Times(1);
+    autocheckout_manager_->OnLoadedPageMetaData(
+        CreateEndOfFlowMetaData(proceed_element_presence_on_last_page));
+    CheckFillFormsAndClickIpc(proceed_element_presence_on_last_page);
+    EXPECT_TRUE(autocheckout_manager_->in_autocheckout_flow());
+    EXPECT_TRUE(autocheckout_manager_->should_preserve_dialog());
+    EXPECT_TRUE(autofill_manager_delegate_
+        ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_BILLING,
+                                           AUTOCHECKOUT_STEP_STARTED));
+    autocheckout_manager_->OnAutocheckoutPageCompleted(SUCCESS);
+    EXPECT_FALSE(autocheckout_manager_->in_autocheckout_flow());
+    EXPECT_TRUE(autocheckout_manager_->should_preserve_dialog());
+    EXPECT_TRUE(autofill_manager_delegate_
+        ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_BILLING,
+                                           AUTOCHECKOUT_STEP_COMPLETED));
+
+    EXPECT_TRUE(autofill_manager_delegate_->request_autocomplete_dialog_open());
+
+    // Go to the page after the flow.
+    autocheckout_manager_->OnLoadedPageMetaData(
+          scoped_ptr<AutocheckoutPageMetaData>());
+    EXPECT_EQ(proceed_element_presence_on_last_page == HAS_PROCEED_ELEMENT,
+              autocheckout_manager_->should_preserve_dialog());
+    // Go to another page and we should not preserve the dialog now.
+    autocheckout_manager_->OnLoadedPageMetaData(
+          scoped_ptr<AutocheckoutPageMetaData>());
+    EXPECT_FALSE(autocheckout_manager_->should_preserve_dialog());
+  }
+
+  // Test a signle-page Autocheckout flow. |proceed_element_presence| indicates
+  // whether the page should have a proceed element.
+  void TestSinglePageFlow(ProceedElementPresence proceed_element_presence) {
+    // Test one page flow.
+    EXPECT_FALSE(autocheckout_manager_->in_autocheckout_flow());
+    EXPECT_FALSE(
+        autofill_manager_delegate_->request_autocomplete_dialog_open());
+    EXPECT_CALL(autocheckout_manager_->metric_logger(),
+                LogAutocheckoutBubbleMetric(
+                    AutofillMetrics::BUBBLE_COULD_BE_DISPLAYED)).Times(1);
+    EXPECT_CALL(*autofill_manager_delegate_, OnAutocheckoutSuccess()).Times(1);
+    autocheckout_manager_->OnLoadedPageMetaData(
+        CreateOnePageFlowMetaData(proceed_element_presence));
+    // Simulate the user submitting some data via the requestAutocomplete UI.
+    autofill_manager_delegate_->SetUserSuppliedData(
+        FakeUserSubmittedFormStructure());
+    GURL frame_url;
+    EXPECT_CALL(autocheckout_manager_->metric_logger(),
+                LogAutocheckoutBuyFlowMetric(
+                    AutofillMetrics::AUTOCHECKOUT_BUY_FLOW_STARTED)).Times(1);
+    EXPECT_CALL(autocheckout_manager_->metric_logger(),
+                LogAutocheckoutBuyFlowMetric(
+                    AutofillMetrics::AUTOCHECKOUT_BUY_FLOW_SUCCESS)).Times(1);
+    autocheckout_manager_->MaybeShowAutocheckoutDialog(
+        frame_url,
+        AUTOCHECKOUT_BUBBLE_ACCEPTED);
+    autocheckout_manager_->OnAutocheckoutPageCompleted(SUCCESS);
+    CheckFillFormsAndClickIpc(proceed_element_presence);
+    EXPECT_FALSE(autocheckout_manager_->in_autocheckout_flow());
+    EXPECT_TRUE(autocheckout_manager_->should_preserve_dialog());
+    EXPECT_TRUE(autofill_manager_delegate_->request_autocomplete_dialog_open());
+    EXPECT_TRUE(autofill_manager_delegate_
+        ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_SHIPPING,
+                                           AUTOCHECKOUT_STEP_COMPLETED));
+    EXPECT_TRUE(autofill_manager_delegate_
+        ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_DELIVERY,
+                                           AUTOCHECKOUT_STEP_COMPLETED));
+    EXPECT_TRUE(autofill_manager_delegate_
+        ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_BILLING,
+                                           AUTOCHECKOUT_STEP_COMPLETED));
+    // Go to the page after the flow.
+    autocheckout_manager_->OnLoadedPageMetaData(
+          scoped_ptr<AutocheckoutPageMetaData>());
+    EXPECT_EQ(proceed_element_presence == HAS_PROCEED_ELEMENT,
+              autocheckout_manager_->should_preserve_dialog());
+    // Go to another page, and we should not preserve the dialog now.
+    autocheckout_manager_->OnLoadedPageMetaData(
+          scoped_ptr<AutocheckoutPageMetaData>());
+    EXPECT_FALSE(autocheckout_manager_->should_preserve_dialog());
   }
 
  protected:
@@ -531,30 +688,27 @@ TEST_F(AutocheckoutManagerTest, TestFillForms) {
 
   filled_forms = ReadFilledForms();
   ASSERT_EQ(1U, filled_forms.size());
-  ASSERT_EQ(2U, filled_forms[0].fields.size());
+  ASSERT_EQ(3U, filled_forms[0].fields.size());
   EXPECT_FALSE(filled_forms[0].fields[0].is_checked);
   EXPECT_EQ(ASCIIToUTF16("male"), filled_forms[0].fields[0].value);
   EXPECT_TRUE(filled_forms[0].fields[1].is_checked);
   EXPECT_EQ(ASCIIToUTF16("female"), filled_forms[0].fields[1].value);
+  EXPECT_EQ(ASCIIToUTF16("Default Value"), filled_forms[0].fields[2].value);
 }
 
 TEST_F(AutocheckoutManagerTest, OnFormsSeenTest) {
   GURL frame_url;
-  content::SSLStatus ssl_status;
   gfx::RectF bounding_box;
   EXPECT_CALL(autocheckout_manager_->metric_logger(),
               LogAutocheckoutBubbleMetric(
                   AutofillMetrics::BUBBLE_COULD_BE_DISPLAYED)).Times(1);
   autocheckout_manager_->OnLoadedPageMetaData(CreateStartOfFlowMetaData());
-  autocheckout_manager_->MaybeShowAutocheckoutBubble(frame_url,
-                                                     ssl_status,
-                                                     bounding_box);
-  content::RunAllPendingInMessageLoop(BrowserThread::IO);
+  autocheckout_manager_->MaybeShowAutocheckoutBubble(frame_url, bounding_box);
 
-  EXPECT_TRUE(autocheckout_manager_->autocheckout_offered());
+  EXPECT_FALSE(autocheckout_manager_->should_show_bubble());
   // OnFormsSeen resets whether or not the bubble was shown.
   autocheckout_manager_->OnFormsSeen();
-  EXPECT_FALSE(autocheckout_manager_->autocheckout_offered());
+  EXPECT_TRUE(autocheckout_manager_->should_show_bubble());
 }
 
 TEST_F(AutocheckoutManagerTest, OnClickFailedTestMissingAdvance) {
@@ -566,7 +720,7 @@ TEST_F(AutocheckoutManagerTest, OnClickFailedTestMissingAdvance) {
       LogAutocheckoutBuyFlowMetric(
           AutofillMetrics::AUTOCHECKOUT_BUY_FLOW_MISSING_ADVANCE_ELEMENT))
       .Times(1);
-  autocheckout_manager_->OnClickFailed(MISSING_ADVANCE);
+  autocheckout_manager_->OnAutocheckoutPageCompleted(MISSING_ADVANCE);
   EXPECT_FALSE(autocheckout_manager_->in_autocheckout_flow());
   EXPECT_TRUE(
       autofill_manager_delegate_->request_autocomplete_dialog_open());
@@ -584,7 +738,7 @@ TEST_F(AutocheckoutManagerTest, OnClickFailedTestMissingClickBeforeFilling) {
       LogAutocheckoutBuyFlowMetric(AutofillMetrics::
           AUTOCHECKOUT_BUY_FLOW_MISSING_CLICK_ELEMENT_BEFORE_FORM_FILLING))
       .Times(1);
-  autocheckout_manager_->OnClickFailed(
+  autocheckout_manager_->OnAutocheckoutPageCompleted(
       MISSING_CLICK_ELEMENT_BEFORE_FORM_FILLING);
   EXPECT_FALSE(autocheckout_manager_->in_autocheckout_flow());
   EXPECT_TRUE(
@@ -600,7 +754,7 @@ TEST_F(AutocheckoutManagerTest, OnClickFailedTestMissingClickAfterFilling) {
       LogAutocheckoutBuyFlowMetric(AutofillMetrics::
           AUTOCHECKOUT_BUY_FLOW_MISSING_CLICK_ELEMENT_AFTER_FORM_FILLING))
       .Times(1);
-  autocheckout_manager_->OnClickFailed(
+  autocheckout_manager_->OnAutocheckoutPageCompleted(
       MISSING_CLICK_ELEMENT_AFTER_FORM_FILLING);
   EXPECT_FALSE(autocheckout_manager_->in_autocheckout_flow());
   EXPECT_TRUE(
@@ -609,18 +763,14 @@ TEST_F(AutocheckoutManagerTest, OnClickFailedTestMissingClickAfterFilling) {
 
 TEST_F(AutocheckoutManagerTest, MaybeShowAutocheckoutBubbleTest) {
   GURL frame_url;
-  content::SSLStatus ssl_status;
   gfx::RectF bounding_box;
   EXPECT_CALL(autocheckout_manager_->metric_logger(),
               LogAutocheckoutBubbleMetric(
                   AutofillMetrics::BUBBLE_COULD_BE_DISPLAYED)).Times(1);
   autocheckout_manager_->OnLoadedPageMetaData(CreateStartOfFlowMetaData());
   // MaybeShowAutocheckoutBubble shows bubble if it has not been shown.
-  autocheckout_manager_->MaybeShowAutocheckoutBubble(frame_url,
-                                                     ssl_status,
-                                                     bounding_box);
-  content::RunAllPendingInMessageLoop(BrowserThread::IO);
-  EXPECT_TRUE(autocheckout_manager_->autocheckout_offered());
+  autocheckout_manager_->MaybeShowAutocheckoutBubble(frame_url, bounding_box);
+  EXPECT_FALSE(autocheckout_manager_->should_show_bubble());
   EXPECT_TRUE(autofill_manager_delegate_->autocheckout_bubble_shown());
 
   // Reset |autofill_manager_delegate_|.
@@ -629,11 +779,8 @@ TEST_F(AutocheckoutManagerTest, MaybeShowAutocheckoutBubbleTest) {
 
   // MaybeShowAutocheckoutBubble does nothing if the bubble was already shown
   // for the current page.
-  autocheckout_manager_->MaybeShowAutocheckoutBubble(frame_url,
-                                                     ssl_status,
-                                                     bounding_box);
-  content::RunAllPendingInMessageLoop(BrowserThread::IO);
-  EXPECT_TRUE(autocheckout_manager_->autocheckout_offered());
+  autocheckout_manager_->MaybeShowAutocheckoutBubble(frame_url, bounding_box);
+  EXPECT_FALSE(autocheckout_manager_->should_show_bubble());
   EXPECT_FALSE(autofill_manager_delegate_->autocheckout_bubble_shown());
   EXPECT_FALSE(autofill_manager_delegate_->request_autocomplete_dialog_open());
 }
@@ -668,6 +815,7 @@ TEST_F(AutocheckoutManagerTest, OnLoadedPageMetaDataRepeatedStartPage) {
   EXPECT_EQ(0U, process()->sink().message_count());
   EXPECT_TRUE(
       autofill_manager_delegate_->request_autocomplete_dialog_open());
+
   EXPECT_TRUE(autofill_manager_delegate_
       ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_SHIPPING,
                                          AUTOCHECKOUT_STEP_FAILED));
@@ -679,7 +827,7 @@ TEST_F(AutocheckoutManagerTest, OnLoadedPageMetaDataRepeatedPage) {
   // Go to second page.
   autocheckout_manager_->OnLoadedPageMetaData(CreateInFlowMetaData());
   EXPECT_TRUE(autocheckout_manager_->in_autocheckout_flow());
-  CheckFillFormsAndClickIpc();
+  CheckFillFormsAndClickIpc(HAS_PROCEED_ELEMENT);
   EXPECT_CALL(*autofill_manager_delegate_, OnAutocheckoutError()).Times(1);
   EXPECT_CALL(
       autocheckout_manager_->metric_logger(),
@@ -701,7 +849,7 @@ TEST_F(AutocheckoutManagerTest, OnLoadedPageMetaDataNotInFlow) {
   // Go to second page.
   autocheckout_manager_->OnLoadedPageMetaData(CreateInFlowMetaData());
   EXPECT_TRUE(autocheckout_manager_->in_autocheckout_flow());
-  CheckFillFormsAndClickIpc();
+  CheckFillFormsAndClickIpc(HAS_PROCEED_ELEMENT);
   EXPECT_CALL(*autofill_manager_delegate_, OnAutocheckoutError()).Times(1);
   EXPECT_CALL(
       autocheckout_manager_->metric_logger(),
@@ -731,36 +879,11 @@ TEST_F(AutocheckoutManagerTest,
 }
 
 TEST_F(AutocheckoutManagerTest, FullAutocheckoutFlow) {
-  // Test for progression through last page.
-  OpenRequestAutocompleteDialog();
-  EXPECT_TRUE(autofill_manager_delegate_
-      ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_SHIPPING,
-                                         AUTOCHECKOUT_STEP_STARTED));
-  // Go to second page.
-  EXPECT_CALL(*autofill_manager_delegate_, OnAutocheckoutSuccess()).Times(1);
-  autocheckout_manager_->OnLoadedPageMetaData(CreateInFlowMetaData());
-  EXPECT_TRUE(autocheckout_manager_->in_autocheckout_flow());
-  EXPECT_TRUE(autofill_manager_delegate_
-      ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_SHIPPING,
-                                         AUTOCHECKOUT_STEP_COMPLETED));
-  CheckFillFormsAndClickIpc();
-  EXPECT_TRUE(autofill_manager_delegate_
-      ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_DELIVERY,
-                                         AUTOCHECKOUT_STEP_STARTED));
-  // Go to third page.
-  EXPECT_CALL(autocheckout_manager_->metric_logger(),
-              LogAutocheckoutBuyFlowMetric(
-                  AutofillMetrics::AUTOCHECKOUT_BUY_FLOW_SUCCESS)).Times(1);
-  autocheckout_manager_->OnLoadedPageMetaData(CreateEndOfFlowMetaData());
-  CheckFillFormsAndClickIpc();
-  EXPECT_TRUE(autofill_manager_delegate_
-      ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_DELIVERY,
-                                         AUTOCHECKOUT_STEP_COMPLETED));
-  EXPECT_FALSE(autocheckout_manager_->in_autocheckout_flow());
-  EXPECT_TRUE(autofill_manager_delegate_->request_autocomplete_dialog_open());
-  EXPECT_TRUE(autofill_manager_delegate_
-      ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_BILLING,
-                                         AUTOCHECKOUT_STEP_COMPLETED));
+  TestFullAutocheckoutFlow(HAS_PROCEED_ELEMENT);
+}
+
+TEST_F(AutocheckoutManagerTest, FullAutocheckoutFlowNoClickOnLastPage) {
+  TestFullAutocheckoutFlow(NO_PROCEED_ELEMENT);
 }
 
 TEST_F(AutocheckoutManagerTest, CancelledAutocheckoutFlow) {
@@ -769,7 +892,7 @@ TEST_F(AutocheckoutManagerTest, CancelledAutocheckoutFlow) {
   // Go to second page.
   autocheckout_manager_->OnLoadedPageMetaData(CreateInFlowMetaData());
   EXPECT_TRUE(autocheckout_manager_->in_autocheckout_flow());
-  CheckFillFormsAndClickIpc();
+  CheckFillFormsAndClickIpc(HAS_PROCEED_ELEMENT);
 
   // Cancel the flow.
   autocheckout_manager_->ReturnAutocheckoutData(NULL, std::string());
@@ -778,46 +901,49 @@ TEST_F(AutocheckoutManagerTest, CancelledAutocheckoutFlow) {
   // Go to third page.
   EXPECT_CALL(autocheckout_manager_->metric_logger(),
               LogAutocheckoutBuyFlowMetric(testing::_)).Times(0);
-  autocheckout_manager_->OnLoadedPageMetaData(CreateEndOfFlowMetaData());
+  autocheckout_manager_->OnLoadedPageMetaData(
+      CreateEndOfFlowMetaData(HAS_PROCEED_ELEMENT));
   EXPECT_EQ(0U, process()->sink().message_count());
 }
 
 TEST_F(AutocheckoutManagerTest, SinglePageFlow) {
-  // Test one page flow.
+  TestSinglePageFlow(HAS_PROCEED_ELEMENT);
+}
+
+TEST_F(AutocheckoutManagerTest, SinglePageFlowNoClickElement) {
+  TestSinglePageFlow(NO_PROCEED_ELEMENT);
+}
+
+TEST_F(AutocheckoutManagerTest, CancelAutocheckoutBubble) {
+  GURL frame_url;
+  gfx::RectF bounding_box;
+  autofill_manager_delegate_->set_should_autoclick_bubble(false);
   EXPECT_FALSE(autocheckout_manager_->in_autocheckout_flow());
-  EXPECT_FALSE(
-      autofill_manager_delegate_->request_autocomplete_dialog_open());
+  EXPECT_FALSE(autofill_manager_delegate_->request_autocomplete_dialog_open());
+  EXPECT_FALSE(autocheckout_manager_->is_autocheckout_bubble_showing());
   EXPECT_CALL(autocheckout_manager_->metric_logger(),
               LogAutocheckoutBubbleMetric(
                   AutofillMetrics::BUBBLE_COULD_BE_DISPLAYED)).Times(1);
-  EXPECT_CALL(*autofill_manager_delegate_, OnAutocheckoutSuccess()).Times(1);
-  autocheckout_manager_->OnLoadedPageMetaData(CreateOnePageFlowMetaData());
-  // Simulate the user submitting some data via the requestAutocomplete UI.
-  autofill_manager_delegate_->SetUserSuppliedData(
-      FakeUserSubmittedFormStructure());
-  GURL frame_url;
-  content::SSLStatus ssl_status;
-  EXPECT_CALL(autocheckout_manager_->metric_logger(),
-              LogAutocheckoutBuyFlowMetric(
-                  AutofillMetrics::AUTOCHECKOUT_BUY_FLOW_STARTED)).Times(1);
-  EXPECT_CALL(autocheckout_manager_->metric_logger(),
-              LogAutocheckoutBuyFlowMetric(
-                  AutofillMetrics::AUTOCHECKOUT_BUY_FLOW_SUCCESS)).Times(1);
-  autocheckout_manager_->MaybeShowAutocheckoutDialog(frame_url,
-                                                     ssl_status,
-                                                     true);
-  CheckFillFormsAndClickIpc();
-  EXPECT_FALSE(autocheckout_manager_->in_autocheckout_flow());
-  EXPECT_TRUE(autofill_manager_delegate_->request_autocomplete_dialog_open());
-  EXPECT_TRUE(autofill_manager_delegate_
-      ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_SHIPPING,
-                                         AUTOCHECKOUT_STEP_COMPLETED));
-  EXPECT_TRUE(autofill_manager_delegate_
-      ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_DELIVERY,
-                                         AUTOCHECKOUT_STEP_COMPLETED));
-  EXPECT_TRUE(autofill_manager_delegate_
-      ->AutocheckoutStepExistsWithStatus(AUTOCHECKOUT_STEP_BILLING,
-                                         AUTOCHECKOUT_STEP_COMPLETED));
+  autocheckout_manager_->OnLoadedPageMetaData(CreateStartOfFlowMetaData());
+
+  autocheckout_manager_->MaybeShowAutocheckoutBubble(frame_url, bounding_box);
+  EXPECT_TRUE(autocheckout_manager_->is_autocheckout_bubble_showing());
+  autocheckout_manager_->MaybeShowAutocheckoutDialog(
+      frame_url,
+      AUTOCHECKOUT_BUBBLE_IGNORED);
+  EXPECT_FALSE(autocheckout_manager_->is_autocheckout_bubble_showing());
+  EXPECT_TRUE(autocheckout_manager_->should_show_bubble());
+
+  autocheckout_manager_->MaybeShowAutocheckoutBubble(frame_url, bounding_box);
+  EXPECT_TRUE(autocheckout_manager_->is_autocheckout_bubble_showing());
+  autocheckout_manager_->MaybeShowAutocheckoutDialog(
+      frame_url,
+      AUTOCHECKOUT_BUBBLE_CANCELED);
+  EXPECT_FALSE(autocheckout_manager_->is_autocheckout_bubble_showing());
+  EXPECT_FALSE(autocheckout_manager_->should_show_bubble());
+
+  autocheckout_manager_->MaybeShowAutocheckoutBubble(frame_url, bounding_box);
+  EXPECT_FALSE(autocheckout_manager_->is_autocheckout_bubble_showing());
 }
 
 }  // namespace autofill

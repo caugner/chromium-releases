@@ -33,16 +33,15 @@ namespace message_center {
 class MessageBubbleBase;
 class MessageCenter;
 class MessageCenterBubble;
-class MessagePopupBubble;
 class MessagePopupCollection;
 }
 
 namespace ash {
-
 namespace internal {
 class StatusAreaWidget;
 class WebNotificationBubbleWrapper;
 class WebNotificationButton;
+class WorkAreaObserver;
 }
 
 class ASH_EXPORT WebNotificationTray
@@ -56,8 +55,10 @@ class ASH_EXPORT WebNotificationTray
       internal::StatusAreaWidget* status_area_widget);
   virtual ~WebNotificationTray();
 
-  // Set whether or not the popup notifications should be hidden.
-  void SetHidePopupBubble(bool hide);
+  // Sets the height of the system tray from the edge of the work area so that
+  // the notification popups don't overlap with the tray. Passes 0 if no UI is
+  // shown in the system tray side.
+  void SetSystemTrayHeight(int height);
 
   // Updates tray visibility login status of the system changes.
   void UpdateAfterLoginStatusChange(user::LoginStatus login_status);
@@ -104,18 +105,25 @@ class ASH_EXPORT WebNotificationTray
   virtual bool ShowMessageCenter() OVERRIDE;
   virtual void HideMessageCenter() OVERRIDE;
   virtual bool ShowPopups() OVERRIDE;
-  virtual void UpdatePopups() OVERRIDE;
   virtual void HidePopups() OVERRIDE;
   virtual bool ShowNotifierSettings() OVERRIDE;
+  virtual message_center::MessageCenterTray* GetMessageCenterTray() OVERRIDE;
+
+  // Overridden from TrayBackgroundView.
+  virtual bool IsPressed() OVERRIDE;
 
   message_center::MessageCenter* message_center();
 
  private:
+  friend class WebNotificationTrayTest;
+
   FRIEND_TEST_ALL_PREFIXES(WebNotificationTrayTest, WebNotifications);
   FRIEND_TEST_ALL_PREFIXES(WebNotificationTrayTest, WebNotificationPopupBubble);
   FRIEND_TEST_ALL_PREFIXES(WebNotificationTrayTest,
                            ManyMessageCenterNotifications);
   FRIEND_TEST_ALL_PREFIXES(WebNotificationTrayTest, ManyPopupNotifications);
+  FRIEND_TEST_ALL_PREFIXES(WebNotificationTrayTest, PopupShownOnBothDisplays);
+  FRIEND_TEST_ALL_PREFIXES(WebNotificationTrayTest, PopupAndSystemTray);
 
   void UpdateTrayContent();
 
@@ -138,18 +146,12 @@ class ASH_EXPORT WebNotificationTray
     return message_center_bubble_.get();
   }
 
-  internal::WebNotificationBubbleWrapper* popup_bubble() const {
-    return popup_bubble_.get();
-  }
-
   // Testing accessors.
   bool IsPopupVisible() const;
   message_center::MessageCenterBubble* GetMessageCenterBubbleForTest();
-  message_center::MessagePopupBubble* GetPopupBubbleForTest();
 
   scoped_ptr<message_center::MessageCenterTray> message_center_tray_;
   scoped_ptr<internal::WebNotificationBubbleWrapper> message_center_bubble_;
-  scoped_ptr<internal::WebNotificationBubbleWrapper> popup_bubble_;
   scoped_ptr<message_center::MessagePopupCollection> popup_collection_;
   scoped_ptr<views::MenuRunner> quiet_mode_menu_runner_;
   internal::WebNotificationButton* button_;
@@ -163,6 +165,9 @@ class ASH_EXPORT WebNotificationTray
   // the check can be called when creating this object, so it would cause
   // flickers of the shelf from hidden to shown. See: crbug.com/181213
   bool should_block_shelf_auto_hide_;
+
+  // Observes the work area for |popup_collection_| and notifies to it.
+  scoped_ptr<internal::WorkAreaObserver> work_area_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(WebNotificationTray);
 };

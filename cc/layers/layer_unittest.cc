@@ -44,6 +44,7 @@ class MockLayerTreeHost : public LayerTreeHost {
   }
 
   MOCK_METHOD0(SetNeedsCommit, void());
+  MOCK_METHOD0(SetNeedsUpdateLayers, void());
   MOCK_METHOD0(SetNeedsFullTreeSync, void());
 };
 
@@ -147,6 +148,10 @@ TEST_F(LayerTest, BasicCreateAndDestroy) {
 
   EXPECT_CALL(*layer_tree_host_, SetNeedsCommit()).Times(0);
   test_layer->SetLayerTreeHost(layer_tree_host_.get());
+  Mock::VerifyAndClearExpectations(layer_tree_host_.get());
+
+  EXPECT_CALL(*layer_tree_host_, SetNeedsCommit()).Times(0);
+  test_layer->SetLayerTreeHost(NULL);
 }
 
 TEST_F(LayerTest, AddAndRemoveChild) {
@@ -194,7 +199,7 @@ TEST_F(LayerTest, InsertChild) {
   scoped_refptr<Layer> child3 = Layer::Create();
   scoped_refptr<Layer> child4 = Layer::Create();
 
-  parent->SetLayerTreeHost(layer_tree_host_.get());
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1, layer_tree_host_->SetRootLayer(parent));
 
   ASSERT_EQ(0U, parent->children().size());
 
@@ -229,7 +234,7 @@ TEST_F(LayerTest, InsertChild) {
   EXPECT_EQ(child4, parent->children()[3]);
   EXPECT_EQ(parent.get(), child4->parent());
 
-  EXPECT_CALL(*layer_tree_host_, SetNeedsFullTreeSync()).Times(AtLeast(1));
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1, layer_tree_host_->SetRootLayer(NULL));
 }
 
 TEST_F(LayerTest, InsertChildPastEndOfList) {
@@ -258,7 +263,7 @@ TEST_F(LayerTest, InsertSameChildTwice) {
   scoped_refptr<Layer> child1 = Layer::Create();
   scoped_refptr<Layer> child2 = Layer::Create();
 
-  parent->SetLayerTreeHost(layer_tree_host_.get());
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1, layer_tree_host_->SetRootLayer(parent));
 
   ASSERT_EQ(0U, parent->children().size());
 
@@ -278,7 +283,7 @@ TEST_F(LayerTest, InsertSameChildTwice) {
   EXPECT_EQ(child2, parent->children()[0]);
   EXPECT_EQ(child1, parent->children()[1]);
 
-  EXPECT_CALL(*layer_tree_host_, SetNeedsFullTreeSync()).Times(AtLeast(1));
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1, layer_tree_host_->SetRootLayer(NULL));
 }
 
 TEST_F(LayerTest, ReplaceChildWithNewChild) {
@@ -371,7 +376,8 @@ TEST_F(LayerTest, SetChildren) {
   EXPECT_EQ(old_parent.get(), child1->parent());
   EXPECT_FALSE(child2->parent());
 
-  new_parent->SetLayerTreeHost(layer_tree_host_.get());
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(
+      1, layer_tree_host_->SetRootLayer(new_parent));
 
   EXPECT_SET_NEEDS_FULL_TREE_SYNC(
       AtLeast(1), new_parent->SetChildren(new_children));
@@ -380,7 +386,28 @@ TEST_F(LayerTest, SetChildren) {
   EXPECT_EQ(new_parent.get(), child1->parent());
   EXPECT_EQ(new_parent.get(), child2->parent());
 
-  EXPECT_CALL(*layer_tree_host_, SetNeedsFullTreeSync()).Times(AtLeast(1));
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1, layer_tree_host_->SetRootLayer(NULL));
+}
+
+TEST_F(LayerTest, HasAncestor) {
+  scoped_refptr<Layer> parent = Layer::Create();
+  EXPECT_FALSE(parent->HasAncestor(parent));
+
+  scoped_refptr<Layer> child = Layer::Create();
+  parent->AddChild(child);
+
+  EXPECT_FALSE(child->HasAncestor(child));
+  EXPECT_TRUE(child->HasAncestor(parent));
+  EXPECT_FALSE(parent->HasAncestor(child));
+
+  scoped_refptr<Layer> child_child = Layer::Create();
+  child->AddChild(child_child);
+
+  EXPECT_FALSE(child_child->HasAncestor(child_child));
+  EXPECT_TRUE(child_child->HasAncestor(parent));
+  EXPECT_TRUE(child_child->HasAncestor(child));
+  EXPECT_FALSE(parent->HasAncestor(child));
+  EXPECT_FALSE(parent->HasAncestor(child_child));
 }
 
 TEST_F(LayerTest, GetRootLayerAfterTreeManipulations) {
@@ -441,11 +468,12 @@ TEST_F(LayerTest, GetRootLayerAfterTreeManipulations) {
 TEST_F(LayerTest, CheckSetNeedsDisplayCausesCorrectBehavior) {
   // The semantics for SetNeedsDisplay which are tested here:
   //   1. sets NeedsDisplay flag appropriately.
-  //   2. indirectly calls SetNeedsCommit, exactly once for each call to
+  //   2. indirectly calls SetNeedsUpdate, exactly once for each call to
   //      SetNeedsDisplay.
 
   scoped_refptr<Layer> test_layer = Layer::Create();
-  test_layer->SetLayerTreeHost(layer_tree_host_.get());
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(
+      1, layer_tree_host_->SetRootLayer(test_layer));
   EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetIsDrawable(true));
 
   gfx::Size test_bounds = gfx::Size(501, 508);
@@ -461,7 +489,7 @@ TEST_F(LayerTest, CheckSetNeedsDisplayCausesCorrectBehavior) {
   // This is just initialization, but SetNeedsCommit behavior is verified anyway
   // to avoid warnings.
   EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetBounds(test_bounds));
-  EXPECT_TRUE(test_layer->NeedsDisplayForTesting());
+  EXPECT_FALSE(test_layer->NeedsDisplayForTesting());
 
   // The real test begins here.
   test_layer->ResetNeedsDisplayForTesting();
@@ -470,7 +498,7 @@ TEST_F(LayerTest, CheckSetNeedsDisplayCausesCorrectBehavior) {
   // Case 1: Layer should accept dirty rects that go beyond its bounds.
   test_layer->ResetNeedsDisplayForTesting();
   EXPECT_FALSE(test_layer->NeedsDisplayForTesting());
-  EXPECT_SET_NEEDS_COMMIT(
+  EXPECT_SET_NEEDS_UPDATE(
       1, test_layer->SetNeedsDisplayRect(out_of_bounds_dirty_rect));
   EXPECT_TRUE(test_layer->NeedsDisplayForTesting());
   test_layer->ResetNeedsDisplayForTesting();
@@ -478,21 +506,28 @@ TEST_F(LayerTest, CheckSetNeedsDisplayCausesCorrectBehavior) {
   // Case 2: SetNeedsDisplay() without the dirty rect arg.
   test_layer->ResetNeedsDisplayForTesting();
   EXPECT_FALSE(test_layer->NeedsDisplayForTesting());
-  EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetNeedsDisplay());
+  EXPECT_SET_NEEDS_UPDATE(1, test_layer->SetNeedsDisplay());
   EXPECT_TRUE(test_layer->NeedsDisplayForTesting());
   test_layer->ResetNeedsDisplayForTesting();
 
-  // Case 3: SetNeedsDisplay() with a non-drawable layer
+  // Case 3: SetNeedsDisplay() with an empty rect.
+  test_layer->ResetNeedsDisplayForTesting();
+  EXPECT_FALSE(test_layer->NeedsDisplayForTesting());
+  EXPECT_SET_NEEDS_COMMIT(0, test_layer->SetNeedsDisplayRect(gfx::Rect()));
+  EXPECT_FALSE(test_layer->NeedsDisplayForTesting());
+
+  // Case 4: SetNeedsDisplay() with a non-drawable layer
   EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetIsDrawable(false));
   test_layer->ResetNeedsDisplayForTesting();
   EXPECT_FALSE(test_layer->NeedsDisplayForTesting());
-  EXPECT_SET_NEEDS_COMMIT(0, test_layer->SetNeedsDisplayRect(dirty1));
+  EXPECT_SET_NEEDS_UPDATE(0, test_layer->SetNeedsDisplayRect(dirty1));
   EXPECT_TRUE(test_layer->NeedsDisplayForTesting());
 }
 
 TEST_F(LayerTest, CheckPropertyChangeCausesCorrectBehavior) {
   scoped_refptr<Layer> test_layer = Layer::Create();
-  test_layer->SetLayerTreeHost(layer_tree_host_.get());
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(
+      1, layer_tree_host_->SetRootLayer(test_layer));
   EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetIsDrawable(true));
 
   scoped_refptr<Layer> dummy_layer1 = Layer::Create();
@@ -542,29 +577,13 @@ TEST_F(LayerTest, CheckPropertyChangeCausesCorrectBehavior) {
   EXPECT_CALL(*layer_tree_host_, SetNeedsFullTreeSync()).Times((AnyNumber()));
 }
 
-TEST_F(LayerTest, SetBoundsTriggersSetNeedsRedrawAfterGettingNonEmptyBounds) {
-  scoped_refptr<Layer> test_layer = Layer::Create();
-  test_layer->SetLayerTreeHost(layer_tree_host_.get());
-  EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetIsDrawable(true));
-
-  EXPECT_FALSE(test_layer->NeedsDisplayForTesting());
-  EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetBounds(gfx::Size(0, 10)));
-  EXPECT_FALSE(test_layer->NeedsDisplayForTesting());
-  EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetBounds(gfx::Size(10, 10)));
-  EXPECT_TRUE(test_layer->NeedsDisplayForTesting());
-
-  test_layer->ResetNeedsDisplayForTesting();
-  EXPECT_FALSE(test_layer->NeedsDisplayForTesting());
-
-  // Calling SetBounds only invalidates on the first time.
-  EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetBounds(gfx::Size(7, 10)));
-  EXPECT_FALSE(test_layer->NeedsDisplayForTesting());
-}
-
 TEST_F(LayerTest, PushPropertiesAccumulatesUpdateRect) {
   scoped_refptr<Layer> test_layer = Layer::Create();
   scoped_ptr<LayerImpl> impl_layer =
       LayerImpl::Create(host_impl_.active_tree(), 1);
+
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1,
+                                  layer_tree_host_->SetRootLayer(test_layer));
 
   test_layer->SetNeedsDisplayRect(gfx::RectF(0.f, 0.f, 5.f, 5.f));
   test_layer->PushPropertiesTo(impl_layer.get());
@@ -592,9 +611,12 @@ TEST_F(LayerTest, PushPropertiesCausesSurfacePropertyChangedForTransform) {
   scoped_ptr<LayerImpl> impl_layer =
       LayerImpl::Create(host_impl_.active_tree(), 1);
 
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1,
+                                  layer_tree_host_->SetRootLayer(test_layer));
+
   gfx::Transform transform;
   transform.Rotate(45.0);
-  test_layer->SetTransform(transform);
+  EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetTransform(transform));
 
   EXPECT_FALSE(impl_layer->LayerSurfacePropertyChanged());
 
@@ -608,7 +630,10 @@ TEST_F(LayerTest, PushPropertiesCausesSurfacePropertyChangedForOpacity) {
   scoped_ptr<LayerImpl> impl_layer =
       LayerImpl::Create(host_impl_.active_tree(), 1);
 
-  test_layer->SetOpacity(0.5f);
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1,
+                                  layer_tree_host_->SetRootLayer(test_layer));
+
+  EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetOpacity(0.5f));
 
   EXPECT_FALSE(impl_layer->LayerSurfacePropertyChanged());
 
@@ -623,6 +648,9 @@ TEST_F(LayerTest,
   scoped_ptr<LayerImpl> impl_layer =
       LayerImpl::Create(host_impl_.active_tree(), 1);
 
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1,
+                                  layer_tree_host_->SetRootLayer(test_layer));
+
   scoped_ptr<AnimationRegistrar> registrar = AnimationRegistrar::Create();
   impl_layer->layer_animation_controller()->SetAnimationRegistrar(
       registrar.get());
@@ -634,7 +662,7 @@ TEST_F(LayerTest,
 
   gfx::Transform transform;
   transform.Rotate(45.0);
-  test_layer->SetTransform(transform);
+  EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetTransform(transform));
 
   EXPECT_FALSE(impl_layer->LayerSurfacePropertyChanged());
   test_layer->PushPropertiesTo(impl_layer.get());
@@ -648,7 +676,7 @@ TEST_F(LayerTest,
   impl_layer->layer_animation_controller()->GetAnimation(Animation::Transform)->
       set_is_impl_only(true);
   transform.Rotate(45.0);
-  test_layer->SetTransform(transform);
+  EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetTransform(transform));
 
   EXPECT_FALSE(impl_layer->LayerSurfacePropertyChanged());
   test_layer->PushPropertiesTo(impl_layer.get());
@@ -661,6 +689,9 @@ TEST_F(LayerTest,
   scoped_ptr<LayerImpl> impl_layer =
       LayerImpl::Create(host_impl_.active_tree(), 1);
 
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1,
+                                  layer_tree_host_->SetRootLayer(test_layer));
+
   scoped_ptr<AnimationRegistrar> registrar = AnimationRegistrar::Create();
   impl_layer->layer_animation_controller()->SetAnimationRegistrar(
       registrar.get());
@@ -671,7 +702,7 @@ TEST_F(LayerTest,
                                    0.7f,
                                    false);
 
-  test_layer->SetOpacity(0.5f);
+  EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetOpacity(0.5f));
 
   EXPECT_FALSE(impl_layer->LayerSurfacePropertyChanged());
   test_layer->PushPropertiesTo(impl_layer.get());
@@ -685,7 +716,7 @@ TEST_F(LayerTest,
                                    false);
   impl_layer->layer_animation_controller()->GetAnimation(Animation::Opacity)->
       set_is_impl_only(true);
-  test_layer->SetOpacity(0.75f);
+  EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetOpacity(0.75f));
 
   EXPECT_FALSE(impl_layer->LayerSurfacePropertyChanged());
   test_layer->PushPropertiesTo(impl_layer.get());
@@ -964,7 +995,6 @@ TEST(LayerLayerTreeHostTest, ShouldNotAddAnimationWithoutAnimationRegistrar) {
   LayerTreeHostFactory factory;
   scoped_ptr<LayerTreeHost> layer_tree_host = factory.Create(settings);
   layer_tree_host->SetRootLayer(layer);
-  layer->SetLayerTreeHost(layer_tree_host.get());
   AssertLayerTreeHostMatchesForSubtree(layer.get(), layer_tree_host.get());
 
   // Case 3: with a LayerTreeHost where accelerated animation is disabled, the

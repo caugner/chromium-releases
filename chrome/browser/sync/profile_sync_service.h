@@ -14,13 +14,12 @@
 #include "base/gtest_prod_util.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
-#include "base/time.h"
-#include "base/timer.h"
-#include "chrome/browser/invalidation/invalidation_frontend.h"
-#include "chrome/browser/invalidation/invalidator_storage.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/signin/oauth2_token_service.h"
 #include "chrome/browser/signin/signin_global_error.h"
 #include "chrome/browser/sync/backend_unrecoverable_error_handler.h"
@@ -38,7 +37,6 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
 #include "google_apis/gaia/google_service_auth_error.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/backoff_entry.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/engine/model_safe_worker.h"
@@ -46,6 +44,7 @@
 #include "sync/internal_api/public/util/experiments.h"
 #include "sync/internal_api/public/util/unrecoverable_error_handler.h"
 #include "sync/js/sync_js_controller.h"
+#include "url/gurl.h"
 
 class Profile;
 class ProfileSyncComponentsFactory;
@@ -65,7 +64,6 @@ namespace sessions { class SyncSessionSnapshot; }
 
 namespace syncer {
 class BaseTransaction;
-class InvalidatorRegistrar;
 struct SyncCredentials;
 struct UserShare;
 }
@@ -165,9 +163,9 @@ class ProfileSyncService : public ProfileSyncServiceBase,
                            public syncer::UnrecoverableErrorHandler,
                            public content::NotificationObserver,
                            public BrowserContextKeyedService,
-                           public invalidation::InvalidationFrontend,
                            public browser_sync::DataTypeEncryptionHandler,
-                           public OAuth2TokenService::Consumer {
+                           public OAuth2TokenService::Consumer,
+                           public OAuth2TokenService::Observer {
  public:
   typedef browser_sync::SyncBackendHost::Status Status;
 
@@ -239,11 +237,14 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   virtual bool HasSyncSetupCompleted() const OVERRIDE;
   virtual bool ShouldPushChanges() OVERRIDE;
   virtual syncer::ModelTypeSet GetActiveDataTypes() const OVERRIDE;
-  virtual void AddObserver(Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(Observer* observer) OVERRIDE;
-  virtual bool HasObserver(Observer* observer) const OVERRIDE;
+  virtual void AddObserver(ProfileSyncServiceBase::Observer* observer) OVERRIDE;
+  virtual void RemoveObserver(
+      ProfileSyncServiceBase::Observer* observer) OVERRIDE;
+  virtual bool HasObserver(
+      ProfileSyncServiceBase::Observer* observer) const OVERRIDE;
 
   void RegisterAuthNotifications();
+  void UnregisterAuthNotifications();
 
   // Returns true if sync is enabled/not suppressed and the user is logged in.
   // (being logged in does not mean that tokens are available - tokens may
@@ -280,6 +281,10 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   virtual scoped_ptr<browser_sync::DeviceInfo> GetDeviceInfo(
       const std::string& client_id) const;
 
+  // Gets the device info for all devices signed into the account associated
+  // with this profile.
+  virtual ScopedVector<browser_sync::DeviceInfo> GetAllSignedInDevices() const;
+
   // Fills state_map with a map of current data types that are possible to
   // sync, as well as their states.
   void GetDataTypeControllerStates(
@@ -287,12 +292,6 @@ class ProfileSyncService : public ProfileSyncServiceBase,
 
   // Disables sync for user. Use ShowLoginDialog to enable.
   virtual void DisableForUser();
-
-  // syncer::InvalidationHandler implementation (via SyncFrontend).
-  virtual void OnInvalidatorStateChange(
-      syncer::InvalidatorState state) OVERRIDE;
-  virtual void OnIncomingInvalidation(
-      const syncer::ObjectIdInvalidationMap& invalidation_map) OVERRIDE;
 
   // SyncFrontend implementation.
   virtual void OnBackendInitialized(
@@ -600,22 +599,7 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // The set of currently enabled sync experiments.
   const syncer::Experiments& current_experiments() const;
 
-  // InvalidationFrontend implementation.  It is an error to have
-  // registered handlers when Shutdown() is called.
-  virtual void RegisterInvalidationHandler(
-      syncer::InvalidationHandler* handler) OVERRIDE;
-  virtual void UpdateRegisteredInvalidationIds(
-      syncer::InvalidationHandler* handler,
-      const syncer::ObjectIdSet& ids) OVERRIDE;
-  virtual void UnregisterInvalidationHandler(
-      syncer::InvalidationHandler* handler) OVERRIDE;
-  virtual void AcknowledgeInvalidation(
-      const invalidation::ObjectId& id,
-      const syncer::AckHandle& ack_handle) OVERRIDE;
-
-  virtual syncer::InvalidatorState GetInvalidatorState() const OVERRIDE;
-
-  // OAuth2TokenService::Consumer implementation
+  // OAuth2TokenService::Consumer implementation.
   virtual void OnGetTokenSuccess(
       const OAuth2TokenService::Request* request,
       const std::string& access_token,
@@ -624,14 +608,17 @@ class ProfileSyncService : public ProfileSyncServiceBase,
       const OAuth2TokenService::Request* request,
       const GoogleServiceAuthError& error) OVERRIDE;
 
+  // OAuth2TokenService::Observer implementation.
+  virtual void OnRefreshTokenAvailable(const std::string& account_id) OVERRIDE;
+  virtual void OnRefreshTokenRevoked(
+      const std::string& account_id,
+      const GoogleServiceAuthError& error) OVERRIDE;
+  virtual void OnRefreshTokensLoaded() OVERRIDE;
+  virtual void OnRefreshTokensCleared() OVERRIDE;
+
   // BrowserContextKeyedService implementation.  This must be called exactly
   // once (before this object is destroyed).
   virtual void Shutdown() OVERRIDE;
-
-  // Simulate an incoming notification for the given id and payload.
-  void EmitInvalidationForTest(
-      const invalidation::ObjectId& id,
-      const std::string& payload);
 
   // Called when a datatype (SyncableService) has a need for sync to start
   // ASAP, presumably because a local change event has occurred but we're
@@ -650,11 +637,14 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   void ConfigureDataTypeManager();
 
   // Shuts down the backend sync components.
-  // |sync_disabled| indicates if syncing is being disabled or not.
-  void ShutdownImpl(bool sync_disabled);
+  // |option| indicates if syncing is being disabled or not, and whether
+  // to claim ownership of sync thread from backend.
+  void ShutdownImpl(browser_sync::SyncBackendHost::ShutdownOption option);
 
   // Return SyncCredentials from the TokenService.
   syncer::SyncCredentials GetCredentials();
+
+  virtual syncer::WeakHandle<syncer::JsEventHandler> GetJsEventHandler();
 
   // Test need to override this to create backends that allow setting up
   // initial conditions, such as populating sync nodes.
@@ -703,8 +693,6 @@ class ProfileSyncService : public ProfileSyncServiceBase,
     ERROR_REASON_ACTIONABLE_ERROR,
     ERROR_REASON_LIMIT
   };
-  typedef std::vector<std::pair<invalidation::ObjectId,
-                                syncer::AckHandle> > AckHandleReplayQueue;
   friend class ProfileSyncServicePasswordTest;
   friend class SyncTest;
   friend class TestProfileSyncService;
@@ -751,6 +739,7 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   void UpdateLastSyncedTime();
 
   void NotifyObservers();
+  void NotifySyncCycleCompleted();
 
   void ClearStaleErrors();
 
@@ -800,11 +789,6 @@ class ProfileSyncService : public ProfileSyncServiceBase,
                                     bool delete_sync_database,
                                     UnrecoverableErrorReason reason);
 
-  // Must be called every time |backend_initialized_| or
-  // |invalidator_state_| is changed (but only if
-  // |invalidator_registrar_| is not NULL).
-  void UpdateInvalidatorRegistrarState();
-
   // Returns the username (in form of an email address) that should be used in
   // the credentials.
   std::string GetEffectiveUsername();
@@ -818,9 +802,6 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // The class that handles getting, setting, and persisting sync
   // preferences.
   browser_sync::SyncPrefs sync_prefs_;
-
-  // TODO(tim): Move this to InvalidationService, once it exists. Bug 124137.
-  invalidation::InvalidatorStorage invalidator_storage_;
 
   // TODO(ncarter): Put this in a profile, once there is UI for it.
   // This specifies where to find the sync server.
@@ -877,7 +858,7 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // Manages the start and stop of the various data types.
   scoped_ptr<browser_sync::DataTypeManager> data_type_manager_;
 
-  ObserverList<Observer> observers_;
+  ObserverList<ProfileSyncServiceBase::Observer> observers_;
 
   syncer::SyncJsController sync_js_controller_;
 
@@ -927,9 +908,6 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // or must delay loading for some reason).
   browser_sync::FailedDataTypesHandler failed_data_types_handler_;
 
-  scoped_ptr<browser_sync::BackendUnrecoverableErrorHandler>
-      backend_unrecoverable_error_handler_;
-
   browser_sync::DataTypeManager::ConfigureStatus configure_status_;
 
   // If |true|, there is setup UI visible so we should not start downloading
@@ -939,24 +917,16 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // The set of currently enabled sync experiments.
   syncer::Experiments current_experiments_;
 
-  // Factory the backend will use to build the SyncManager.
-  syncer::SyncManagerFactory sync_manager_factory_;
-
-  // Holds the current invalidator state as updated by
-  // OnInvalidatorStateChange().  Note that this is different from the
-  // state known by |invalidator_registrar_| (See
-  // UpdateInvalidatorState()).
-  syncer::InvalidatorState invalidator_state_;
-
-  // Dispatches invalidations to handlers.  Set in Initialize() and
-  // unset in Shutdown().
-  scoped_ptr<syncer::InvalidatorRegistrar> invalidator_registrar_;
-  // Queues any acknowledgements received while the backend is uninitialized.
-  AckHandleReplayQueue ack_replay_queue_;
-
   // Sync's internal debug info listener. Used to record datatype configuration
   // and association information.
   syncer::WeakHandle<syncer::DataTypeDebugInfoListener> debug_info_listener_;
+
+  // A thread where all the sync operations happen.
+  // OWNERSHIP Notes:
+  //     * Created when backend starts for the first time.
+  //     * If sync is disabled, PSS claims ownership from backend.
+  //     * If sync is reenabled, PSS passes ownership to new backend.
+  scoped_ptr<base::Thread> sync_thread_;
 
   // Specifies whenever to use oauth2 access token or ClientLogin token in
   // communications with sync and xmpp servers.

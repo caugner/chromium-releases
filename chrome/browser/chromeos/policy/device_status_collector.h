@@ -12,8 +12,8 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/chromeos/version_loader.h"
 #include "chrome/browser/idle.h"
 #include "chrome/browser/policy/cloud/cloud_policy_client.h"
@@ -38,8 +38,8 @@ namespace enterprise_management {
 class DeviceStatusReportRequest;
 }
 
-class PrefService;
 class PrefRegistrySimple;
+class PrefService;
 
 namespace policy {
 
@@ -145,6 +145,8 @@ class DeviceStatusCollector : public CloudPolicyClient::StatusProvider,
       enterprise_management::DeviceStatusReportRequest* request);
   void GetLocation(
       enterprise_management::DeviceStatusReportRequest* request);
+  void GetNetworkInterfaces(
+      enterprise_management::DeviceStatusReportRequest* request);
 
   // Update the cached values of the reporting settings.
   void UpdateReportingSettings();
@@ -204,6 +206,7 @@ class DeviceStatusCollector : public CloudPolicyClient::StatusProvider,
   bool report_activity_times_;
   bool report_boot_mode_;
   bool report_location_;
+  bool report_network_interfaces_;
 
   scoped_refptr<Context> context_;
 

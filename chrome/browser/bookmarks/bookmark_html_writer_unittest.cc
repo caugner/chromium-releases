@@ -11,18 +11,18 @@
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
-#include "chrome/browser/bookmarks/bookmark_html_reader.h"
+#include "base/time/time.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/imported_bookmark_entry.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/favicon/imported_favicon_usage.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/common/importer/imported_bookmark_entry.h"
+#include "chrome/common/importer/imported_favicon_usage.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "chrome/utility/importer/bookmark_html_reader.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "grit/generated_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -148,7 +148,7 @@ TEST_F(BookmarkHTMLWriterTest, Test) {
   content::TestBrowserThreadBundle thread_bundle;
 
   TestingProfile profile;
-  profile.CreateHistoryService(true, false);
+  ASSERT_TRUE(profile.CreateHistoryService(true, false));
   profile.BlockUntilHistoryProcessesPendingRequests();
   profile.CreateFaviconService();
   profile.CreateBookmarkModel(true);

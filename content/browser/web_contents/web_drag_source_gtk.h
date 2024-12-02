@@ -9,24 +9,24 @@
 
 #include "base/basictypes.h"
 #include "base/files/file_path.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/web_contents.h"
-#include "googleurl/src/gurl.h"
 #include "third_party/WebKit/public/web/WebDragOperation.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/vector2d.h"
+#include "url/gurl.h"
 
 class SkBitmap;
-struct WebDropData;
 
 namespace content {
 
 class RenderViewHostImpl;
 class WebContentsImpl;
+struct DropData;
 
 // WebDragSourceGtk takes care of managing the drag from a WebContents
 // with Gtk.
@@ -38,7 +38,7 @@ class CONTENT_EXPORT WebDragSourceGtk :
 
   // Starts a drag for the WebContents this WebDragSourceGtk was created for.
   // Returns false if the drag could not be started.
-  bool StartDragging(const WebDropData& drop_data,
+  bool StartDragging(const DropData& drop_data,
                      WebKit::WebDragOperationsMask allowed_ops,
                      GdkEventButton* last_mouse_down,
                      const SkBitmap& image,
@@ -67,7 +67,7 @@ class CONTENT_EXPORT WebDragSourceGtk :
 
   // The drop data for the current drag (for drags that originate in the render
   // view). Non-NULL iff there is a current drag.
-  scoped_ptr<WebDropData> drop_data_;
+  scoped_ptr<DropData> drop_data_;
 
   // The image used for depicting the drag, and the offset between the cursor
   // and the top left pixel.

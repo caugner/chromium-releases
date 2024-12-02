@@ -6,14 +6,16 @@
 // Multiply-included message file, hence no include guard.
 
 #include <string>
+#include <vector>
 
-#include "base/time.h"
+#include "base/basictypes.h"
+#include "base/time/time.h"
 #include "content/common/content_export.h"
-#include "googleurl/src/gurl.h"
 #include "ipc/ipc_message_macros.h"
 #include "media/base/android/media_player_android.h"
 #include "media/base/media_keys.h"
 #include "ui/gfx/rect_f.h"
+#include "url/gurl.h"
 
 #undef IPC_MESSAGE_EXPORT
 #define IPC_MESSAGE_EXPORT CONTENT_EXPORT
@@ -48,8 +50,7 @@ IPC_STRUCT_TRAITS_BEGIN(media::MediaPlayerHostMsg_ReadFromDemuxerAck_Params)
   IPC_STRUCT_TRAITS_MEMBER(access_units)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(
-    media::MediaPlayerHostMsg_ReadFromDemuxerAck_Params::AccessUnit)
+IPC_STRUCT_TRAITS_BEGIN(media::AccessUnit)
   IPC_STRUCT_TRAITS_MEMBER(status)
   IPC_STRUCT_TRAITS_MEMBER(end_of_stream)
   IPC_STRUCT_TRAITS_MEMBER(data)
@@ -133,10 +134,9 @@ IPC_MESSAGE_ROUTED3(MediaPlayerMsg_MediaSeekRequest,
                     uint32 /* seek_request_id */)
 
 // The media source player reads data from demuxer
-IPC_MESSAGE_ROUTED3(MediaPlayerMsg_ReadFromDemuxer,
+IPC_MESSAGE_ROUTED2(MediaPlayerMsg_ReadFromDemuxer,
                     int /* player_id */,
-                    media::DemuxerStream::Type /* type */,
-                    bool /* seek_done */)
+                    media::DemuxerStream::Type /* type */)
 
 // The player needs new config data
 IPC_MESSAGE_ROUTED1(MediaPlayerMsg_MediaConfigRequest,
@@ -153,36 +153,36 @@ IPC_MESSAGE_ROUTED0(MediaPlayerHostMsg_DestroyAllMediaPlayers)
 
 // Initialize a media player object with the given player_id.
 IPC_MESSAGE_ROUTED4(
-    MediaPlayerHostMsg_MediaPlayerInitialize,
+    MediaPlayerHostMsg_Initialize,
     int /* player_id */,
     GURL /* url */,
     media::MediaPlayerAndroid::SourceType /* source_type */,
     GURL /* first_party_for_cookies */)
 
 // Pause the player.
-IPC_MESSAGE_ROUTED1(MediaPlayerHostMsg_MediaPlayerPause,
-                    int /* player_id */)
+IPC_MESSAGE_ROUTED1(MediaPlayerHostMsg_Pause, int /* player_id */)
 
 // Release player resources, but keep the object for future usage.
-IPC_MESSAGE_ROUTED1(MediaPlayerHostMsg_MediaPlayerRelease,
-                    int /* player_id */)
+IPC_MESSAGE_ROUTED1(MediaPlayerHostMsg_Release, int /* player_id */)
 
 // Perform a seek.
-IPC_MESSAGE_ROUTED2(MediaPlayerHostMsg_MediaPlayerSeek,
+IPC_MESSAGE_ROUTED2(MediaPlayerHostMsg_Seek,
                     int /* player_id */,
                     base::TimeDelta /* time */)
 
 // Start the player for playback.
-IPC_MESSAGE_ROUTED1(MediaPlayerHostMsg_MediaPlayerStart,
-                    int /* player_id */)
+IPC_MESSAGE_ROUTED1(MediaPlayerHostMsg_Start, int /* player_id */)
+
+// Start the player for playback.
+IPC_MESSAGE_ROUTED2(MediaPlayerHostMsg_SetVolume,
+                    int /* player_id */,
+                    double /* volume */)
 
 // Request the player to enter fullscreen.
-IPC_MESSAGE_ROUTED1(MediaPlayerHostMsg_EnterFullscreen,
-                    int /* player_id */)
+IPC_MESSAGE_ROUTED1(MediaPlayerHostMsg_EnterFullscreen, int /* player_id */)
 
 // Request the player to exit fullscreen.
-IPC_MESSAGE_ROUTED1(MediaPlayerHostMsg_ExitFullscreen,
-                    int /* player_id */)
+IPC_MESSAGE_ROUTED1(MediaPlayerHostMsg_ExitFullscreen, int /* player_id */)
 
 // Sent when the seek request is received by the WebMediaPlayerAndroid.
 IPC_MESSAGE_ROUTED2(MediaPlayerHostMsg_MediaSeekRequestAck,
@@ -248,5 +248,5 @@ IPC_MESSAGE_ROUTED4(MediaKeysMsg_KeyError,
 IPC_MESSAGE_ROUTED4(MediaKeysMsg_KeyMessage,
                     int /* media_keys_id */,
                     std::string /* session_id */,
-                    std::string /* message */,
+                    std::vector<uint8> /* message */,
                     std::string /* destination_url */)

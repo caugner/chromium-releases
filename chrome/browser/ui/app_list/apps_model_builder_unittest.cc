@@ -9,6 +9,7 @@
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_service.h"
+#include "base/run_loop.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/extensions/extension_service_unittest.h"
@@ -160,7 +161,27 @@ TEST_F(AppsModelBuilderTest, Uninstall) {
   EXPECT_EQ(std::string("Packaged App 1,Hosted App"),
             GetModelContent(model.get()));
 
-  loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
+}
+
+TEST_F(AppsModelBuilderTest, UninstallTerminatedApp) {
+  scoped_ptr<app_list::AppListModel::Apps> model(
+      new app_list::AppListModel::Apps);
+  AppsModelBuilder builder(profile_.get(), model.get(), NULL);
+  builder.Build();
+
+  const extensions::Extension* app =
+      service_->GetInstalledExtension(kPackagedApp2Id);
+  ASSERT_TRUE(app != NULL);
+
+  // Simulate an app termination.
+  service_->TrackTerminatedExtensionForTest(app);
+
+  service_->UninstallExtension(kPackagedApp2Id, false, NULL);
+  EXPECT_EQ(std::string("Packaged App 1,Hosted App"),
+            GetModelContent(model.get()));
+
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(AppsModelBuilderTest, OrdinalPrefsChange) {

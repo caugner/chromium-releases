@@ -7,6 +7,8 @@
 #include "apps/app_load_service.h"
 #include "apps/app_restore_service.h"
 #include "apps/saved_files_service.h"
+#include "apps/shell_window.h"
+#include "apps/shell_window_registry.h"
 #include "base/base64.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
@@ -15,26 +17,25 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/api/developer_private/developer_private_api_factory.h"
 #include "chrome/browser/extensions/api/developer_private/entry_picker.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
+#include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/extension_disabled_ui.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/management_policy.h"
-#include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync_file_system/drive_file_sync_service.h"
+#include "chrome/browser/sync_file_system/drive_backend/drive_file_sync_service.h"
+#include "chrome/browser/sync_file_system/syncable_file_system_util.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
-#include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
-#include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/developer_private.h"
 #include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/incognito_handler.h"
@@ -47,25 +48,31 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/site_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/view_type_utils.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_resource.h"
+#include "extensions/common/install_warning.h"
+#include "extensions/common/switches.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/webui/web_ui_util.h"
 #include "webkit/browser/fileapi/file_system_context.h"
+#include "webkit/browser/fileapi/file_system_operation.h"
 #include "webkit/browser/fileapi/file_system_operation_runner.h"
-#include "webkit/browser/fileapi/local_file_system_operation.h"
-#include "webkit/browser/fileapi/syncable/syncable_file_system_util.h"
 #include "webkit/common/blob/shareable_file_reference.h"
 
+using apps::ShellWindow;
+using apps::ShellWindowRegistry;
 using content::RenderViewHost;
 
 namespace extensions {
+
+namespace events = event_names;
 
 namespace {
 
@@ -105,6 +112,13 @@ const Extension* GetExtensionByPath(const ExtensionSet* extensions,
   return NULL;
 }
 
+std::string GetExtensionID(const RenderViewHost* render_view_host) {
+  if (!render_view_host->GetSiteInstance())
+    return std::string();
+
+  return render_view_host->GetSiteInstance()->GetSiteURL().host();
+}
+
 }  // namespace
 
 namespace AllowFileAccess = api::developer_private::AllowFileAccess;
@@ -121,23 +135,86 @@ DeveloperPrivateAPI* DeveloperPrivateAPI::Get(Profile* profile) {
   return DeveloperPrivateAPIFactory::GetForProfile(profile);
 }
 
-DeveloperPrivateAPI::DeveloperPrivateAPI(Profile* profile) {
+DeveloperPrivateAPI::DeveloperPrivateAPI(Profile* profile) : profile_(profile) {
   RegisterNotifications();
 }
 
+DeveloperPrivateEventRouter::DeveloperPrivateEventRouter(Profile* profile)
+: profile_(profile) {
+  int types[] = {
+    chrome::NOTIFICATION_EXTENSION_INSTALLED,
+    chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
+    chrome::NOTIFICATION_EXTENSION_LOADED,
+    chrome::NOTIFICATION_EXTENSION_UNLOADED,
+    chrome::NOTIFICATION_EXTENSION_VIEW_REGISTERED,
+    chrome::NOTIFICATION_EXTENSION_VIEW_UNREGISTERED
+  };
 
-void DeveloperPrivateAPI::Observe(
+  CHECK(registrar_.IsEmpty());
+  for (size_t i = 0; i < arraysize(types); ++i) {
+    registrar_.Add(this,
+                   types[i],
+                   content::Source<Profile>(profile_));
+  }
+}
+
+
+DeveloperPrivateEventRouter::~DeveloperPrivateEventRouter() {}
+
+void DeveloperPrivateEventRouter::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
+  const char* event_name = NULL;
+  Profile* profile = content::Source<Profile>(source).ptr();
+  CHECK(profile);
+  CHECK(profile_->IsSameProfile(profile));
+  developer::EventData event_data;
+  const Extension* extension = NULL;
+
   switch (type) {
-    // TODO(grv): Listen to other notifications and expose them
-    // as events in API.
-    case chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED:
+    case chrome::NOTIFICATION_EXTENSION_INSTALLED:
+      event_data.event_type = developer::EVENT_TYPE_INSTALLED;
+      extension =
+          content::Details<const InstalledExtensionInfo>(details)->extension;
+      break;
+    case chrome::NOTIFICATION_EXTENSION_UNINSTALLED:
+      event_data.event_type = developer::EVENT_TYPE_UNINSTALLED;
+      extension = content::Details<const Extension>(details).ptr();
+      break;
+    case chrome::NOTIFICATION_EXTENSION_LOADED:
+      event_data.event_type = developer::EVENT_TYPE_LOADED;
+      extension = content::Details<const Extension>(details).ptr();
+      break;
+    case chrome::NOTIFICATION_EXTENSION_UNLOADED:
+      event_data.event_type = developer::EVENT_TYPE_UNLOADED;
+      extension =
+          content::Details<const UnloadedExtensionInfo>(details)->extension;
+      break;
+    case chrome::NOTIFICATION_EXTENSION_VIEW_UNREGISTERED:
+      event_data.event_type = developer::EVENT_TYPE_VIEW_UNREGISTERED;
+      event_data.item_id = GetExtensionID(
+          content::Details<const RenderViewHost>(details).ptr());
+      break;
+    case chrome::NOTIFICATION_EXTENSION_VIEW_REGISTERED:
+      event_data.event_type = developer::EVENT_TYPE_VIEW_REGISTERED;
+      event_data.item_id = GetExtensionID(
+          content::Details<const RenderViewHost>(details).ptr());
       break;
     default:
       NOTREACHED();
+      return;
   }
+
+  if (extension)
+    event_data.item_id = extension->id();
+
+  scoped_ptr<ListValue> args(new ListValue());
+  args->Append(event_data.ToValue().release());
+
+  event_name = events::kDeveloperPrivateOnItemStateChanged;
+  scoped_ptr<Event> event(new Event(event_name, args.Pass()));
+  ExtensionSystem::Get(profile)->event_router()->BroadcastEvent(event.Pass());
 }
 
 void DeveloperPrivateAPI::SetLastUnpackedDirectory(const base::FilePath& path) {
@@ -145,14 +222,27 @@ void DeveloperPrivateAPI::SetLastUnpackedDirectory(const base::FilePath& path) {
 }
 
 void DeveloperPrivateAPI::RegisterNotifications() {
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED,
-                 content::NotificationService::AllBrowserContextsAndSources());
+  ExtensionSystem::Get(profile_)->event_router()->RegisterObserver(
+      this, events::kDeveloperPrivateOnItemStateChanged);
 }
 
 DeveloperPrivateAPI::~DeveloperPrivateAPI() {}
 
 void DeveloperPrivateAPI::Shutdown() {}
+
+void DeveloperPrivateAPI::OnListenerAdded(
+    const EventListenerInfo& details) {
+  if (!developer_private_event_router_)
+    developer_private_event_router_.reset(
+        new DeveloperPrivateEventRouter(profile_));
+}
+
+void DeveloperPrivateAPI::OnListenerRemoved(
+    const EventListenerInfo& details) {
+  if (!ExtensionSystem::Get(profile_)->event_router()->HasEventListener(
+          event_names::kDeveloperPrivateOnItemStateChanged))
+    developer_private_event_router_.reset(NULL);
+}
 
 namespace api {
 
@@ -210,6 +300,14 @@ scoped_ptr<developer::ItemInfo>
   if (Manifest::IsUnpackedLocation(item.location())) {
     info->path.reset(
         new std::string(UTF16ToUTF8(item.path().LossyDisplayName())));
+    for (std::vector<extensions::InstallWarning>::const_iterator it =
+             item.install_warnings().begin();
+         it != item.install_warnings().end(); ++it) {
+      developer::InstallWarning* warning = new developer::InstallWarning();
+      warning->is_html = (it->format == InstallWarning::FORMAT_HTML);
+      warning->message = it->message;
+      info->install_warnings.push_back(make_linked_ptr(warning));
+    }
   }
 
   info->incognito_enabled = service->IsIncognitoEnabled(item.id());
@@ -387,20 +485,9 @@ bool DeveloperPrivateGetItemsInfoFunction::RunImpl() {
        iter != items.end(); ++iter) {
     const Extension& item = *iter->get();
 
-    // Don't show component extensions because they are only extensions as an
-    // implementation detail of Chrome.
-    if (item.location() == Manifest::COMPONENT &&
-        !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kShowComponentExtensionOptions)) {
+    // Don't show component extensions and invisible apps.
+    if (item.ShouldNotBeVisible())
       continue;
-    }
-
-    // Don't show apps that aren't visible in either launcher or ntp.
-    if (item.is_app() && !item.ShouldDisplayInAppLauncher() &&
-        !item.ShouldDisplayInNewTabPage() &&
-        !Manifest::IsUnpackedLocation(item.location())) {
-      continue;
-    }
 
     item_list.push_back(make_linked_ptr<developer::ItemInfo>(
         CreateItemInfo(
@@ -536,6 +623,11 @@ bool DeveloperPrivateRestartFunction::RunImpl() {
 
   apps::AppLoadService* service = apps::AppLoadService::Get(profile());
   EXTENSION_FUNCTION_VALIDATE(!params->item_id.empty());
+  ExtensionService* extension_service = profile()->GetExtensionService();
+  // Don't restart disabled applications.
+  if (!extension_service->IsExtensionEnabled(params->item_id))
+    return false;
+
   service->RestartApplication(params->item_id);
   return true;
 }
@@ -826,38 +918,37 @@ bool DeveloperPrivateExportSyncfsFolderToLocalfsFunction::RunImpl() {
 
 void DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
     ClearPrexistingDirectoryContent(const base::FilePath& project_path) {
-  if (!file_util::Delete(project_path, true/*recursive*/)) {
-    SetError("Error in copying files from sync filesystem.");
-    content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-        base::Bind(&DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
-                       SendResponse,
-                   this,
-                   false));
-    return;
-  }
+
+  // Clear the project directory before copying new files.
+  base::DeleteFile(project_path, true/*recursive*/);
+
+  pendingCopyOperationsCount_ = 1;
 
   content::BrowserThread::PostTask(content::BrowserThread::IO, FROM_HERE,
       base::Bind(&DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
                  ReadSyncFileSystemDirectory,
-                 this, project_path));
+                 this, project_path, project_path.BaseName()));
 }
 
 void DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
-    ReadSyncFileSystemDirectory(const base::FilePath& project_path) {
+    ReadSyncFileSystemDirectory(const base::FilePath& project_path,
+                                const base::FilePath& destination_path) {
   std::string origin_url(
       Extension::GetBaseURLFromExtensionId(extension_id()).spec());
   fileapi::FileSystemURL url(sync_file_system::CreateSyncableFileSystemURL(
       GURL(origin_url),
-      project_path.BaseName()));
+      destination_path));
 
   context_->operation_runner()->ReadDirectory(
       url, base::Bind(&DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
-                      ReadSyncFileSystemDirectoryCb, this, project_path));
+                      ReadSyncFileSystemDirectoryCb,
+                      this, project_path, destination_path));
 }
 
 void DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
     ReadSyncFileSystemDirectoryCb(
     const base::FilePath& project_path,
+    const base::FilePath& destination_path,
     base::PlatformFileError status,
     const fileapi::FileSystemOperation::FileEntryList& file_list,
     bool has_more) {
@@ -867,24 +958,27 @@ void DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
     return;
   }
 
-  // Create an empty project folder if there are no files.
-  if (!file_list.size()) {
-    content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
-                     CreateFolderAndSendResponse,
-                 this,
-                 project_path));
-    return;
-  }
-
-  pendingCallbacksCount_ = file_list.size();
+  // We add 1 to the pending copy operations for both files and directories. We
+  // release the directory copy operation once all the files under the directory
+  // are added for copying. We do that to ensure that pendingCopyOperationsCount
+  // does not become zero before all copy operations are finished.
+  // In case the directory happens to be executing the last copy operation it
+  // will call SendResponse to send the response to the API. The pending copy
+  // operations of files are released by the CopyFile function.
+  pendingCopyOperationsCount_ += file_list.size();
 
   for (size_t i = 0; i < file_list.size(); ++i) {
+    if (file_list[i].is_directory) {
+      ReadSyncFileSystemDirectory(project_path.Append(file_list[i].name),
+                                  destination_path.Append(file_list[i].name));
+      continue;
+    }
+
     std::string origin_url(
         Extension::GetBaseURLFromExtensionId(extension_id()).spec());
     fileapi::FileSystemURL url(sync_file_system::CreateSyncableFileSystemURL(
         GURL(origin_url),
-        project_path.BaseName().Append(file_list[i].name)));
+        destination_path.Append(file_list[i].name)));
     base::FilePath target_path = project_path;
     target_path = target_path.Append(file_list[i].name);
 
@@ -895,19 +989,19 @@ void DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
                 SnapshotFileCallback,
             this,
             target_path));
-  }
-}
 
-void DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
-    CreateFolderAndSendResponse(const base::FilePath& project_path) {
-  if (!(success_ = file_util::CreateDirectory(project_path))) {
-    SetError("Error in copying files from sync filesystem.");
   }
-  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
-                     SendResponse,
-                 this,
-                 success_));
+
+  // Directory copy operation released here.
+  pendingCopyOperationsCount_--;
+
+  if (!pendingCopyOperationsCount_) {
+    content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
+        base::Bind(&DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
+                       SendResponse,
+                   this,
+                   success_));
+  }
 }
 
 void DeveloperPrivateExportSyncfsFolderToLocalfsFunction::SnapshotFileCallback(
@@ -938,12 +1032,12 @@ void DeveloperPrivateExportSyncfsFolderToLocalfsFunction::CopyFile(
   }
 
   if (success_)
-    file_util::CopyFile(src_path, target_path);
+    base::CopyFile(src_path, target_path);
 
-  CHECK(pendingCallbacksCount_ > 0);
-  pendingCallbacksCount_--;
+  CHECK(pendingCopyOperationsCount_ > 0);
+  pendingCopyOperationsCount_--;
 
-  if (!pendingCallbacksCount_) {
+  if (!pendingCopyOperationsCount_) {
     content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
         base::Bind(&DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
                        SendResponse,
@@ -954,7 +1048,7 @@ void DeveloperPrivateExportSyncfsFolderToLocalfsFunction::CopyFile(
 
 DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
     DeveloperPrivateExportSyncfsFolderToLocalfsFunction()
-    : pendingCallbacksCount_(0), success_(true) {}
+    : pendingCopyOperationsCount_(0), success_(true) {}
 
 DeveloperPrivateExportSyncfsFolderToLocalfsFunction::
     ~DeveloperPrivateExportSyncfsFolderToLocalfsFunction() {}
@@ -1073,13 +1167,18 @@ bool DeveloperPrivateGetStringsFunction::RunImpl() {
   SET_STRING("extensionSettings", IDS_MANAGE_EXTENSIONS_SETTING_WINDOWS_TITLE);
 
   SET_STRING("appsDevtoolSearch", IDS_APPS_DEVTOOL_SEARCH);
-  SET_STRING("appsDevtoolNoApps", IDS_APPS_DEVTOOL_NO_APPS_INSTALLED);
   SET_STRING("appsDevtoolApps", IDS_APPS_DEVTOOL_APPS_INSTALLED);
   SET_STRING("appsDevtoolExtensions", IDS_APPS_DEVTOOL_EXTENSIONS_INSTALLED);
   SET_STRING("appsDevtoolNoExtensions", IDS_EXTENSIONS_NONE_INSTALLED);
   SET_STRING("appsDevtoolUnpacked", IDS_APPS_DEVTOOL_UNPACKED_INSTALLED);
-  SET_STRING("appsDevtoolNoUnpacked", IDS_APPS_DEVTOOL_NO_UNPACKED_INSTALLED);
-  SET_STRING("appsDevtoolTitle", IDS_APPS_DEVTOOL_TITLE);
+  SET_STRING("appsDevtoolInstalled", IDS_APPS_DEVTOOL_INSTALLED);
+  SET_STRING("appsDevtoolNoPackedApps", IDS_APPS_DEVTOOL_NO_PACKED_APPS);
+  SET_STRING("appsDevtoolNoUnpackedApps", IDS_APPS_DEVTOOL_NO_UNPACKED_APPS);
+  SET_STRING("appsDevtoolNoPackedExtensions",
+      IDS_APPS_DEVTOOL_NO_PACKED_EXTENSIONS);
+  SET_STRING("appsDevtoolNoUnpackedExtensions",
+      IDS_APPS_DEVTOOL_NO_UNPACKED_EXTENSIONS);
+  SET_STRING("appsDevtoolUpdating", IDS_APPS_DEVTOOL_UPDATING);
   SET_STRING("extensionSettingsGetMoreExtensions", IDS_GET_MORE_EXTENSIONS);
   SET_STRING("extensionSettingsExtensionId", IDS_EXTENSIONS_ID);
   SET_STRING("extensionSettingsExtensionPath", IDS_EXTENSIONS_PATH);
@@ -1133,8 +1232,8 @@ bool DeveloperPrivateGetStringsFunction::RunImpl() {
   SET_STRING("packExtensionOverlay", IDS_EXTENSION_PACK_DIALOG_TITLE);
   SET_STRING("packExtensionHeading", IDS_EXTENSION_ADT_PACK_DIALOG_HEADING);
   SET_STRING("packExtensionCommit", IDS_EXTENSION_PACK_BUTTON);
-  SET_STRING("ok",IDS_OK);
-  SET_STRING("cancel",IDS_CANCEL);
+  SET_STRING("ok", IDS_OK);
+  SET_STRING("cancel", IDS_CANCEL);
   SET_STRING("packExtensionRootDir",
      IDS_EXTENSION_PACK_DIALOG_ROOT_DIRECTORY_LABEL);
   SET_STRING("packExtensionPrivateKey",
@@ -1143,6 +1242,16 @@ bool DeveloperPrivateGetStringsFunction::RunImpl() {
   SET_STRING("packExtensionProceedAnyway", IDS_EXTENSION_PROCEED_ANYWAY);
   SET_STRING("packExtensionWarningTitle", IDS_EXTENSION_PACK_WARNING_TITLE);
   SET_STRING("packExtensionErrorTitle", IDS_EXTENSION_PACK_ERROR_TITLE);
+
+// Delete confirmation dialog.
+  SET_STRING("deleteConfirmationDeleteButton",
+      IDS_APPS_DEVTOOL_DELETE_CONFIRMATION_BUTTON);
+  SET_STRING("deleteConfirmationTitle",
+      IDS_APPS_DEVTOOL_DELETE_CONFIRMATION_TITLE);
+  SET_STRING("deleteConfirmationMessageApp",
+      IDS_APPS_DEVTOOL_DELETE_CONFIRMATION_MESSAGE_APP);
+  SET_STRING("deleteConfirmationMessageExtension",
+      IDS_APPS_DEVTOOL_DELETE_CONFIRMATION_MESSAGE_EXTENSION);
 
   #undef   SET_STRING
   return true;

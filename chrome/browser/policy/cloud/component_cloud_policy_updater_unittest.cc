@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/sequenced_task_runner.h"
@@ -16,17 +17,18 @@
 #include "chrome/browser/policy/cloud/component_cloud_policy_store.h"
 #include "chrome/browser/policy/cloud/policy_builder.h"
 #include "chrome/browser/policy/cloud/resource_cache.h"
+#include "chrome/browser/policy/external_data_fetcher.h"
 #include "chrome/browser/policy/policy_bundle.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/policy/policy_types.h"
 #include "chrome/browser/policy/proto/cloud/chrome_extension_policy.pb.h"
 #include "chrome/browser/policy/proto/cloud/device_management_backend.pb.h"
-#include "googleurl/src/gurl.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 namespace em = enterprise_management;
 
@@ -103,9 +105,9 @@ void ComponentCloudPolicyUpdaterTest::SetUp() {
   PolicyNamespace ns(POLICY_DOMAIN_EXTENSIONS, kTestExtension);
   PolicyMap& policy = expected_bundle_.Get(ns);
   policy.Set("Name", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             base::Value::CreateStringValue("disabled"));
+             base::Value::CreateStringValue("disabled"), NULL);
   policy.Set("Second", POLICY_LEVEL_RECOMMENDED, POLICY_SCOPE_USER,
-             base::Value::CreateStringValue("maybe"));
+             base::Value::CreateStringValue("maybe"), NULL);
 }
 
 scoped_ptr<em::PolicyFetchResponse>

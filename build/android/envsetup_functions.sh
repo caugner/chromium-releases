@@ -62,6 +62,8 @@ common_vars_defines() {
   export PATH=$PATH:${ANDROID_NDK_ROOT}
   export PATH=$PATH:${ANDROID_SDK_ROOT}/tools
   export PATH=$PATH:${ANDROID_SDK_ROOT}/platform-tools
+  export PATH=$PATH:${ANDROID_SDK_ROOT}/build-tools/\
+${ANDROID_SDK_BUILD_TOOLS_VERSION}
 
   # This must be set before ANDROID_TOOLCHAIN, so that clang could find the
   # gold linker.
@@ -216,19 +218,23 @@ process_options() {
 #  > make
 ################################################################################
 sdk_build_init() {
-  # If ANDROID_NDK_ROOT is set when envsetup is run, use the ndk pointed to by
-  # the environment variable.  Otherwise, use the default ndk from the tree.
+
+  # Allow the caller to override a few environment variables. If any of them is
+  # unset, we default to a sane value that's known to work. This allows for
+  # experimentation with a custom SDK.
   if [[ -z "${ANDROID_NDK_ROOT}" || ! -d "${ANDROID_NDK_ROOT}" ]]; then
     export ANDROID_NDK_ROOT="${CHROME_SRC}/third_party/android_tools/ndk/"
   fi
-
-  # If ANDROID_SDK_ROOT is set when envsetup is run, and if it has the
-  # right SDK-compatible directory layout, use the sdk pointed to by the
-  # environment variable.  Otherwise, use the default sdk from the tree.
+  if [[ -z "${ANDROID_SDK_VERSION}" ]]; then
+    export ANDROID_SDK_VERSION=18
+  fi
   local sdk_suffix=platforms/android-${ANDROID_SDK_VERSION}
   if [[ -z "${ANDROID_SDK_ROOT}" || \
        ! -d "${ANDROID_SDK_ROOT}/${sdk_suffix}" ]]; then
     export ANDROID_SDK_ROOT="${CHROME_SRC}/third_party/android_tools/sdk/"
+  fi
+  if [[ -z "${ANDROID_SDK_BUILD_TOOLS_VERSION}" ]]; then
+    export ANDROID_SDK_BUILD_TOOLS_VERSION=18.0.1
   fi
 
   unset ANDROID_BUILD_TOP
@@ -252,6 +258,9 @@ sdk_build_init() {
     return 1
   fi
 
+  # Directory containing build-tools: aapt, aidl, dx
+  export ANDROID_SDK_TOOLS="${ANDROID_SDK_ROOT}/build-tools/\
+${ANDROID_SDK_BUILD_TOOLS_VERSION}"
 }
 
 ################################################################################
@@ -260,6 +269,9 @@ sdk_build_init() {
 # settings specified there.
 #############################################################################
 webview_build_init() {
+  # Use the latest API in the AOSP prebuilts directory (change with AOSP roll).
+  export ANDROID_SDK_VERSION=17
+
   # For the WebView build we always use the NDK and SDK in the Android tree,
   # and we don't touch ANDROID_TOOLCHAIN which is already set by Android.
   export ANDROID_NDK_ROOT=${ANDROID_BUILD_TOP}/prebuilts/ndk/8
@@ -297,6 +309,11 @@ ${ANDROID_SDK_VERSION}
   DEFINES+=" android_sdk_tools=\$(PWD)/${ANDROID_SDK_TOOLS}"
   DEFINES+=" android_sdk_version=${ANDROID_SDK_VERSION}"
   DEFINES+=" android_toolchain=${ANDROID_TOOLCHAIN}"
+  if [[ -n "$CHROME_ANDROID_WEBVIEW_ENABLE_DMPROF" ]]; then
+    DEFINES+=" disable_debugallocation=1"
+    DEFINES+=" android_full_debug=1"
+    DEFINES+=" android_use_tcmalloc=1"
+  fi
   export GYP_DEFINES="${DEFINES}"
 
   export GYP_GENERATORS="android"

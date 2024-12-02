@@ -11,21 +11,22 @@
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/gtk_window_util.h"
 #include "chrome/browser/ui/gtk/panels/panel_drag_gtk.h"
 #include "chrome/browser/ui/gtk/panels/panel_titlebar_gtk.h"
+#include "chrome/browser/ui/panels/display_settings_provider.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_constants.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/panels/stacked_panel_collection.h"
 #include "chrome/browser/web_applications/web_app.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
@@ -36,6 +37,7 @@
 #include "ui/base/gtk/gtk_expanded_container.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/x/active_window_watcher_x.h"
+#include "ui/base/x/x11_util.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/cairo_cached_surface.h"
 #include "ui/gfx/image/image.h"
@@ -330,6 +332,26 @@ void PanelGtk::MinimizePanelBySystem() {
 
 bool PanelGtk::IsPanelMinimizedBySystem() const {
   return is_minimized_;
+}
+
+bool PanelGtk::IsPanelShownOnActiveDesktop() const {
+  // IsWindowVisible checks _NET_WM_DESKTOP.
+  if (!ui::IsWindowVisible(ui::GetX11WindowFromGtkWidget(GTK_WIDGET(window_))))
+    return false;
+
+  // Certain window manager, like Unity, does not update _NET_WM_DESKTOP when a
+  // window is moved to other workspace. However, it treats all workspaces as
+  // concatenated together in one big coordinate space. When the user switches
+  // to another workspace, the window manager will update the origins of all
+  // windows in previous active workspace to move by the size of display
+  // area.
+  gfx::Rect display_area = PanelManager::GetInstance()->
+      display_settings_provider()->GetDisplayAreaMatching(bounds_);
+  int win_x = 0, win_y = 0;
+  gdk_window_get_origin(gtk_widget_get_window(GTK_WIDGET(window_)),
+                                              &win_x, &win_y);
+  return abs(win_x - bounds_.x()) < display_area.width() &&
+         abs(win_y - bounds_.y()) < display_area.height();
 }
 
 void PanelGtk::ShowShadow(bool show) {
@@ -1091,6 +1113,7 @@ class GtkNativePanelTesting : public NativePanelTesting {
   virtual bool IsButtonVisible(
       panel::TitlebarButtonType button_type) const OVERRIDE;
   virtual panel::CornerStyle GetWindowCornerStyle() const OVERRIDE;
+  virtual bool EnsureApplicationRunOnForeground() OVERRIDE;
 
   PanelGtk* panel_gtk_;
 };
@@ -1165,8 +1188,7 @@ bool GtkNativePanelTesting::VerifyDrawingAttention() const {
 }
 
 bool GtkNativePanelTesting::VerifyActiveState(bool is_active) {
-  // TODO(jianli): to be implemented. http://crbug.com/102737
-  return false;
+  return gtk_window_is_active(panel_gtk_->GetNativePanelWindow()) == is_active;
 }
 
 bool GtkNativePanelTesting::VerifyAppIcon() const {
@@ -1212,4 +1234,9 @@ bool GtkNativePanelTesting::IsButtonVisible(
 
 panel::CornerStyle GtkNativePanelTesting::GetWindowCornerStyle() const {
   return panel_gtk_->corner_style_;
+}
+
+bool GtkNativePanelTesting::EnsureApplicationRunOnForeground() {
+  // Not needed on GTK.
+  return true;
 }

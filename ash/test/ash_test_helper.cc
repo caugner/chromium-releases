@@ -8,6 +8,7 @@
 #include "ash/shell.h"
 #include "ash/test/display_manager_test_api.h"
 #include "ash/test/shell_test_api.h"
+#include "ash/test/test_session_state_delegate.h"
 #include "ash/test/test_shell_delegate.h"
 #include "base/run_loop.h"
 #include "ui/aura/env.h"
@@ -17,7 +18,6 @@
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/audio/cras_audio_handler.h"
-#include "chromeos/power/power_manager_handler.h"
 #endif
 
 #if defined(USE_X11)
@@ -39,7 +39,7 @@ AshTestHelper::AshTestHelper(base::MessageLoopForUI* message_loop)
 AshTestHelper::~AshTestHelper() {
 }
 
-void AshTestHelper::SetUp() {
+void AshTestHelper::SetUp(bool start_session) {
   // Disable animations during tests.
   zero_duration_mode_.reset(new ui::ScopedAnimationDurationScaleMode(
       ui::ScopedAnimationDurationScaleMode::ZERO_DURATION));
@@ -53,20 +53,23 @@ void AshTestHelper::SetUp() {
   message_center::MessageCenter::Initialize();
 
 #if defined(OS_CHROMEOS)
-  if (ash::switches::UseNewAudioHandler()) {
-    // Create CrasAuidoHandler for testing since g_browser_process is not
-    // created in AshTestBase tests.
-    chromeos::CrasAudioHandler::InitializeForTesting();
-  }
-  chromeos::PowerManagerHandler::Initialize();
+  // Create CrasAudioHandler for testing since g_browser_process is not
+  // created in AshTestBase tests.
+  chromeos::CrasAudioHandler::InitializeForTesting();
 #endif
 
   ash::Shell::CreateInstance(test_shell_delegate_);
   Shell* shell = Shell::GetInstance();
+  if (start_session) {
+    test_shell_delegate_->test_session_state_delegate()->
+        SetActiveUserSessionStarted(true);
+    test_shell_delegate_->test_session_state_delegate()->
+        SetHasActiveUser(true);
+  }
+
   test::DisplayManagerTestApi(shell->display_manager()).
       DisableChangeDisplayUponHostResize();
   ShellTestApi(shell).DisableOutputConfiguratorAnimation();
-
 }
 
 void AshTestHelper::TearDown() {
@@ -77,9 +80,7 @@ void AshTestHelper::TearDown() {
   message_center::MessageCenter::Shutdown();
 
 #if defined(OS_CHROMEOS)
-  if (ash::switches::UseNewAudioHandler())
-    chromeos::CrasAudioHandler::Shutdown();
-  chromeos::PowerManagerHandler::Shutdown();
+  chromeos::CrasAudioHandler::Shutdown();
 #endif
 
   aura::Env::DeleteInstance();

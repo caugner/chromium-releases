@@ -6,7 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/files/file_path.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_condition.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_constants.h"
@@ -348,6 +348,7 @@ scoped_ptr<DictionaryValue> GetDictionaryFromArray(
     const std::string* value = array[i+1];
     if (dictionary->HasKey(*name)) {
       Value* entry = NULL;
+      scoped_ptr<Value> entry_owned;
       ListValue* list = NULL;
       if (!dictionary->GetWithoutPathExpansion(*name, &entry))
         return scoped_ptr<DictionaryValue>();
@@ -355,8 +356,8 @@ scoped_ptr<DictionaryValue> GetDictionaryFromArray(
         case Value::TYPE_STRING:  // Replace the present string with a list.
           list = new ListValue;
           // Ignoring return value, we already verified the entry is there.
-          dictionary->RemoveWithoutPathExpansion(*name, &entry);
-          list->Append(entry);
+          dictionary->RemoveWithoutPathExpansion(*name, &entry_owned);
+          list->Append(entry_owned.release());
           list->Append(Value::CreateStringValue(*value));
           dictionary->SetWithoutPathExpansion(*name, list);
           break;

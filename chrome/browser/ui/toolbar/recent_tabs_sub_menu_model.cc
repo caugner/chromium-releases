@@ -10,9 +10,9 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/favicon/favicon_types.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_delegate.h"
@@ -24,9 +24,8 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/favicon/favicon_types.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/time_format.h"
-#include "chrome/common/url_constants.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -129,9 +128,11 @@ struct RecentTabsSubMenuModel::TabNavigationItem {
 
   TabNavigationItem(const std::string& session_tag,
                     const SessionID::id_type& tab_id,
+                    const string16& title,
                     const GURL& url)
       : session_tag(session_tag),
         tab_id(tab_id),
+        title(title),
         url(url) {}
 
   // For use by std::set for sorting.
@@ -141,6 +142,7 @@ struct RecentTabsSubMenuModel::TabNavigationItem {
 
   std::string session_tag;  // Empty for local tabs, non-empty for foreign tabs.
   SessionID::id_type tab_id;  // -1 for invalid, >= 0 otherwise.
+  string16 title;
   GURL url;
 };
 
@@ -298,6 +300,22 @@ int RecentTabsSubMenuModel::GetMaxWidthForItemAtIndex(int item_index) const {
   return 320;
 }
 
+bool RecentTabsSubMenuModel::GetURLAndTitleForItemAtIndex(
+    int index,
+    std::string* url,
+    string16* title) const {
+  int command_id = GetCommandIdAt(index);
+  if (IsTabModelCommandId(command_id)) {
+    int model_idx = CommandIdToTabModelIndex(command_id);
+    DCHECK(model_idx >= 0 &&
+           model_idx < static_cast<int>(tab_navigation_items_.size()));
+    *url = tab_navigation_items_[model_idx].url.possibly_invalid_spec();
+    *title = tab_navigation_items_[model_idx].title;
+    return true;
+  }
+  return false;
+}
+
 void RecentTabsSubMenuModel::Build() {
   // The menu contains:
   // - Recently closed tabs header, then list of tabs, then separator
@@ -316,6 +334,12 @@ void RecentTabsSubMenuModel::BuildRecentTabs() {
   ListValue recently_closed_list;
   TabRestoreService* service =
       TabRestoreServiceFactory::GetForProfile(browser_->profile());
+  if (service) {
+    // This does nothing if the tabs have already been loaded or they
+    // shouldn't be loaded.
+    service->LoadTabsFromLastSession();
+  }
+
   if (!service || service->entries().size() == 0) {
     // This is to show a disabled restore tab entry with the accelerator to
     // teach users about this command.
@@ -392,8 +416,8 @@ void RecentTabsSubMenuModel::BuildDevices() {
           continue;
         const sessions::SerializedNavigationEntry& current_navigation =
             tab->navigations.at(tab->normalized_navigation_index());
-        if (current_navigation.virtual_url() ==
-            GURL(chrome::kChromeUINewTabURL)) {
+        if (chrome::IsNTPURL(current_navigation.virtual_url(),
+                             browser_->profile())) {
           continue;
         }
         tabs_in_session.push_back(tab);
@@ -431,7 +455,7 @@ void RecentTabsSubMenuModel::BuildLocalTabItem(
     int session_id,
     const string16& title,
     const GURL& url) {
-  TabNavigationItem item("", session_id, url);
+  TabNavigationItem item("", session_id, title, url);
   int command_id = TabModelIndexToCommandId(tab_navigation_items_.size());
   // There may be no tab title, in which case, use the url as tab title.
   AddItem(command_id, title.empty() ? UTF8ToUTF16(item.url.spec()) : title);
@@ -445,6 +469,7 @@ void RecentTabsSubMenuModel::BuildForeignTabItem(
   const sessions::SerializedNavigationEntry& current_navigation =
       tab.navigations.at(tab.normalized_navigation_index());
   TabNavigationItem item(session_tag, tab.tab_id.id(),
+                         current_navigation.title(),
                          current_navigation.virtual_url());
   int command_id = TabModelIndexToCommandId(tab_navigation_items_.size());
   // There may be no tab title, in which case, use the url as tab title.

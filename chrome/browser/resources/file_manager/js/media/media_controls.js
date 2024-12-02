@@ -161,6 +161,16 @@ MediaControls.prototype.togglePlayState = function() {
 };
 
 /**
+ * Toggle play/pause state on a mouse click on the play/pause button. Can be
+ * called externally. TODO(mtomasz): Remove it. http://www.crbug.com/254318.
+ *
+ * @param {Event=} opt_event Mouse click event.
+ */
+MediaControls.prototype.onPlayButtonClicked = function(opt_event) {
+  this.togglePlayState();
+};
+
+/**
  * @param {HTMLElement=} opt_parent Parent container.
  */
 MediaControls.prototype.initPlayButton = function(opt_parent) {
@@ -1067,10 +1077,11 @@ VideoControls.prototype.onMediaComplete = function() {
 VideoControls.prototype.toggleLoopedModeWithFeedback = function(on) {
   if (!this.getMedia().duration)
     return;
-
   this.toggleLoopedMode(on);
-  if (on)
+  if (on) {
+    // TODO(mtomasz): Simplify, crbug.com/254318.
     this.showTextBanner_('GALLERY_VIDEO_LOOPED_MODE');
+  }
 };
 
 /**

@@ -7,10 +7,10 @@
 #include <gdk/gdkkeysyms.h>
 
 #include "base/i18n/rtl.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ui/gtk/bubble/bubble_accelerators_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
@@ -539,6 +539,7 @@ void BubbleGtk::Observe(int type,
 }
 
 void BubbleGtk::StopGrabbingInput() {
+  UngrabPointerAndKeyboard();
   if (!grab_input_)
     return;
   grab_input_ = false;
@@ -596,6 +597,12 @@ void BubbleGtk::GrabPointerAndKeyboard() {
                   << keyboard_grab_status << ")";
     }
   }
+}
+
+void BubbleGtk::UngrabPointerAndKeyboard() {
+  gdk_pointer_ungrab(GDK_CURRENT_TIME);
+  if (grab_input_)
+    gdk_keyboard_ungrab(GDK_CURRENT_TIME);
 }
 
 gboolean BubbleGtk::OnGtkAccelerator(GtkAccelGroup* group,
@@ -734,7 +741,11 @@ gboolean BubbleGtk::OnGrabBroken(GtkWidget* widget,
                                  GdkEventGrabBroken* grab_broken) {
   // |grab_input_| may have been changed to false.
   if (!grab_input_)
-    return false;
+    return FALSE;
+
+  // |grab_window| can be NULL.
+  if (!grab_broken->grab_window)
+    return FALSE;
 
   gpointer user_data;
   gdk_window_get_user_data(grab_broken->grab_window, &user_data);

@@ -5,21 +5,8 @@
 #ifndef CHROME_BROWSER_FIRST_RUN_FIRST_RUN_INTERNAL_H_
 #define CHROME_BROWSER_FIRST_RUN_FIRST_RUN_INTERNAL_H_
 
-#include <vector>
-
-#include "base/basictypes.h"
-#include "base/compiler_specific.h"
-#include "base/gtest_prod_util.h"
-#include "base/memory/ref_counted.h"
-#include "ui/gfx/native_widget_types.h"
-
-class CommandLine;
-class GURL;
-class ImporterHost;
-class ImporterList;
+class MasterPrefs;
 class Profile;
-class ProcessSingleton;
-class TemplateURLService;
 
 namespace base {
 class FilePath;
@@ -36,7 +23,9 @@ namespace internal {
 enum FirstRunState {
   FIRST_RUN_UNKNOWN,  // The state is not tested or set yet.
   FIRST_RUN_TRUE,
-  FIRST_RUN_FALSE
+  FIRST_RUN_FALSE,
+  FIRST_RUN_CANCEL,  // This shouldn't be considered first run but the sentinel
+                     // should be created anyways.
 };
 
 // This variable should only be accessed through IsChromeFirstRun().
@@ -60,6 +49,9 @@ void SetupMasterPrefsFromInstallPrefs(
     MasterPrefs* out_prefs);
 
 void SetDefaultBrowser(installer::MasterPreferences* install_prefs);
+
+// Creates the sentinel file that signals that chrome has been configured.
+bool CreateSentinel();
 
 // -- Platform-specific functions --
 

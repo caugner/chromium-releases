@@ -8,11 +8,12 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/api/runtime/runtime_api.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
@@ -26,7 +27,6 @@
 #include "chrome/browser/extensions/process_map.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/api/extension_api.h"
@@ -109,8 +109,10 @@ void EventRouter::LogExtensionEventMessage(void* profile_id,
     Profile* profile = reinterpret_cast<Profile*>(profile_id);
     if (!g_browser_process->profile_manager()->IsValidProfile(profile))
       return;
-    ActivityLog::GetInstance(profile)->LogEventAction(
-        extension_id, event_name, event_args.get(), std::string());
+    scoped_refptr<Action> action = new Action(
+        extension_id, base::Time::Now(), Action::ACTION_API_EVENT, event_name);
+    action->set_args(event_args.Pass());
+    ActivityLog::GetInstance(profile)->LogAction(action);
   }
 }
 
@@ -141,8 +143,9 @@ void EventRouter::DispatchExtensionMessage(IPC::Sender* ipc_sender,
 
   // DispatchExtensionMessage does _not_ take ownership of event_args, so we
   // must ensure that the destruction of args does not attempt to free it.
-  Value* removed_event_args = NULL;
+  scoped_ptr<Value> removed_event_args;
   args.Remove(1, &removed_event_args);
+  ignore_result(removed_event_args.release());
 }
 
 // static
@@ -167,7 +170,6 @@ void EventRouter::DispatchEvent(IPC::Sender* ipc_sender,
 EventRouter::EventRouter(Profile* profile, ExtensionPrefs* extension_prefs)
     : profile_(profile),
       listeners_(this),
-      activity_log_(ActivityLog::GetInstance(profile)),
       dispatch_chrome_updated_event_(false) {
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
                  content::NotificationService::AllSources());
@@ -243,7 +245,7 @@ void EventRouter::OnListenerAdded(const EventListener* listener) {
     scoped_ptr<ListValue> args(new ListValue());
     if (listener->filter)
       args->Append(listener->filter->DeepCopy());
-    activity_log_->LogAPIAction(
+    ActivityLog::GetInstance(profile)->LogAPIAction(
         extension, event_name + ".addListener", args.get(), std::string());
   }
 #endif
@@ -273,7 +275,7 @@ void EventRouter::OnListenerRemoved(const EventListener* listener) {
                                             ExtensionService::INCLUDE_ENABLED);
   if (extension) {
     scoped_ptr<ListValue> args(new ListValue());
-    activity_log_->LogAPIAction(
+    ActivityLog::GetInstance(profile)->LogAPIAction(
         extension, event_name + ".removeListener", args.get(), std::string());
   }
 #endif
@@ -491,6 +493,18 @@ void EventRouter::DispatchEventToExtension(const std::string& extension_id,
                                            scoped_ptr<Event> event) {
   DCHECK(!extension_id.empty());
   DispatchEventImpl(extension_id, linked_ptr<Event>(event.release()));
+}
+
+void EventRouter::DispatchEventWithLazyListener(const std::string& extension_id,
+                                                scoped_ptr<Event> event) {
+  DCHECK(!extension_id.empty());
+  std::string event_name = event->event_name;
+  bool has_listener = ExtensionHasEventListener(extension_id, event_name);
+  if (!has_listener)
+    AddLazyEventListener(event_name, extension_id);
+  DispatchEventToExtension(extension_id, event.Pass());
+  if (!has_listener)
+    RemoveLazyEventListener(event_name, extension_id);
 }
 
 void EventRouter::DispatchEventImpl(const std::string& restrict_to_extension_id,

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/ash/launcher/app_shortcut_launcher_item_controller.h"
 
+#include "apps/native_app_window.h"
 #include "ash/wm/window_util.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -17,7 +18,6 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/extensions/native_app_window.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
@@ -227,6 +227,19 @@ content::WebContents* AppShortcutLauncherItemController::GetLRUApplication() {
     for (int index = 0; index < tab_strip->count(); index++) {
       content::WebContents* web_contents = tab_strip->GetWebContentsAt(
           (index + active_index) % tab_strip->count());
+      if (WebContentMatchesApp(extension, refocus_pattern, web_contents))
+        return web_contents;
+    }
+  }
+  // Coming here our application was not in the LRU list. This could have
+  // happened because it did never get activated yet. So check the browser list
+  // as well.
+  for (BrowserList::const_iterator it = ash_browser_list->begin();
+       it != ash_browser_list->end(); ++it) {
+    Browser* browser = *it;
+    TabStripModel* tab_strip = browser->tab_strip_model();
+    for (int index = 0; index < tab_strip->count(); index++) {
+      content::WebContents* web_contents = tab_strip->GetWebContentsAt(index);
       if (WebContentMatchesApp(extension, refocus_pattern, web_contents))
         return web_contents;
     }

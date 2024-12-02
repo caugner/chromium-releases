@@ -5,14 +5,15 @@
 #include "apps/app_load_service.h"
 
 #include "apps/app_load_service_factory.h"
+#include "apps/launcher.h"
+#include "apps/shell_window_registry.h"
+#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/extensions/platform_app_launcher.h"
-#include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/public/browser/notification_details.h"
@@ -31,7 +32,7 @@ AppLoadService::PostReloadAction::PostReloadAction()
 AppLoadService::AppLoadService(Profile* profile)
     : profile_(profile) {
   registrar_.Add(
-      this, chrome::NOTIFICATION_EXTENSION_LOADED,
+      this, chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
       content::NotificationService::AllSources());
   registrar_.Add(
       this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
@@ -74,8 +75,13 @@ void AppLoadService::Observe(int type,
                              const content::NotificationSource& source,
                              const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_EXTENSION_LOADED: {
-      const Extension* extension = content::Details<Extension>(details).ptr();
+    case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING: {
+      extensions::ExtensionHost* host =
+          content::Details<extensions::ExtensionHost>(details).ptr();
+      const Extension* extension = host->extension();
+      // It is possible for an extension to be unloaded before it stops loading.
+      if (!extension)
+        break;
       std::map<std::string, PostReloadAction>::iterator it =
           post_reload_actions_.find(extension->id());
       if (it == post_reload_actions_.end())
@@ -83,13 +89,13 @@ void AppLoadService::Observe(int type,
 
       switch (it->second.action_type) {
         case LAUNCH:
-          extensions::LaunchPlatformApp(profile_, extension);
+          LaunchPlatformApp(profile_, extension);
           break;
         case RESTART:
-          extensions::RestartPlatformApp(profile_, extension);
+          RestartPlatformApp(profile_, extension);
           break;
         case LAUNCH_WITH_COMMAND_LINE:
-          extensions::LaunchPlatformAppWithCommandLine(
+          LaunchPlatformAppWithCommandLine(
               profile_, extension, &it->second.command_line,
               it->second.current_dir);
           break;
@@ -106,21 +112,35 @@ void AppLoadService::Observe(int type,
       if (!unload_info->extension->is_platform_app())
         break;
 
-      if (unload_info->reason == extension_misc::UNLOAD_REASON_DISABLE) {
-        ExtensionPrefs* prefs = ExtensionPrefs::Get(profile_);
-        if ((prefs->GetDisableReasons(unload_info->extension->id()) &
-                Extension::DISABLE_RELOAD) &&
-            !extensions::ShellWindowRegistry::Get(profile_)->
-                GetShellWindowsForApp(unload_info->extension->id()).empty()) {
-          post_reload_actions_[unload_info->extension->id()].action_type =
-              LAUNCH;
-        }
+      if (WasUnloadedForReload(*unload_info) &&
+          HasShellWindows(unload_info->extension->id()) &&
+          !HasPostReloadAction(unload_info->extension->id())) {
+        post_reload_actions_[unload_info->extension->id()].action_type = LAUNCH;
       }
       break;
     }
     default:
       NOTREACHED();
   }
+}
+
+bool AppLoadService::HasShellWindows(const std::string& extension_id) {
+  return !ShellWindowRegistry::Get(profile_)->
+      GetShellWindowsForApp(extension_id).empty();
+}
+
+bool AppLoadService::WasUnloadedForReload(
+    const extensions::UnloadedExtensionInfo& unload_info) {
+  if (unload_info.reason == extension_misc::UNLOAD_REASON_DISABLE) {
+    ExtensionPrefs* prefs = ExtensionPrefs::Get(profile_);
+     return (prefs->GetDisableReasons(unload_info.extension->id()) &
+        Extension::DISABLE_RELOAD) != 0;
+  }
+  return false;
+}
+
+bool AppLoadService::HasPostReloadAction(const std::string& extension_id) {
+  return post_reload_actions_.find(extension_id) != post_reload_actions_.end();
 }
 
 }  // namespace apps

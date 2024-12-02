@@ -2,22 +2,33 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
-#include "googleurl/src/gurl.h"
+#include "extensions/common/switches.h"
 #include "net/dns/mock_host_resolver.h"
+#include "url/gurl.h"
 
 class ExtensionResourceRequestPolicyTest : public ExtensionApiTest {
  protected:
+  virtual void SetUp() OVERRIDE {
+    // TODO(danakj): The GPU Video Decoder needs real GL bindings.
+    // crbug.com/269087
+    UseRealGLBindings();
+
+    ExtensionApiTest::SetUp();
+  }
+
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kAllowLegacyExtensionManifests);
+    command_line->AppendSwitch(
+        extensions::switches::kAllowLegacyExtensionManifests);
   }
 };
 
@@ -25,6 +36,12 @@ class ExtensionResourceRequestPolicyTest : public ExtensionApiTest {
 // extension_resource_request_policy.*, but we have it as a browser test so that
 // can make sure it works end-to-end.
 IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest, OriginPrivileges) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(LoadExtensionWithFlags(test_data_dir_

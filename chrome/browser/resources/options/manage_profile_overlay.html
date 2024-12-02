@@ -79,8 +79,15 @@
           <input id="create-profile-managed" type="checkbox">
           <span id="create-profile-managed-signed-in">
             <span id="create-profile-managed-signed-in-label"></span>
-            <button id="create-profile-managed-signed-in-link"
+            <span id="create-profile-managed-account-details-out-of-date-label"
+                hidden>
+            </span>
+            <button id="create-profile-managed-signed-in-learn-more-link"
                 class="link-button" i18n-content="learnMore">
+            </button>
+            <button id="create-profile-managed-sign-in-again-link"
+                class="link-button"
+                i18n-content="manageProfilesManagedSignInAgainLink" hidden>
             </button>
           </span>
           <span id="create-profile-managed-not-signed-in" hidden>
@@ -93,6 +100,23 @@
             </button>
           </span>
         </label>
+        <label>
+          <span id="select-existing-managed-profile">
+            <input id="select-existing-managed-profile-checkbox"
+                type="checkbox">
+            <span id="select-existing-managed-profile-label"
+                for="select-existing-managed-profile-checkbox"
+                i18n-content="manageProfilesSelectExistingManagedProfileLabel">
+            </span>
+          </span>
+        </label>
+        <label>
+          <select id="choose-existing-managed-profile">
+          </select>
+        </label>
+        <span id="create-profile-managed-indicator"
+            class="bubble-button controlled-setting-indicator">
+        </span>
       </div>
     </div>
     <div class="action-area">

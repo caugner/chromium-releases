@@ -14,13 +14,14 @@
 #include "base/debug/trace_event.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/accessibility/accessibility_events.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/defaults.h"
@@ -46,11 +47,9 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 #include "chrome/browser/ui/content_settings/content_setting_image_model.h"
-#include "chrome/browser/ui/gtk/action_box_button_gtk.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_bubble_gtk.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_utils_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
-#include "chrome/browser/ui/gtk/chrome_to_mobile_bubble_gtk.h"
 #include "chrome/browser/ui/gtk/content_setting_bubble_gtk.h"
 #include "chrome/browser/ui/gtk/extensions/extension_popup_gtk.h"
 #include "chrome/browser/ui/gtk/first_run_bubble.h"
@@ -70,7 +69,6 @@
 #include "chrome/browser/ui/webui/extensions/extension_info_ui.h"
 #include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/common/badge_util.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
@@ -94,7 +92,6 @@
 #include "ui/gfx/font.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/rect.h"
 
 using content::NavigationEntry;
 using content::OpenURLParams;
@@ -316,6 +313,11 @@ void ContentSettingImageViewGtk::BubbleClosing(
   content_setting_bubble_ = NULL;
 }
 
+gfx::Rect AllocationToRect(const GtkAllocation& allocation) {
+  return gfx::Rect(allocation.x, allocation.y,
+                   allocation.width, allocation.height);
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -483,19 +485,6 @@ void LocationBarViewGtk::Init(bool popup_window_mode) {
   // doesn't work, someone is probably calling show_all on our parent box.
   gtk_box_pack_end(GTK_BOX(entry_box_), tab_to_search_hint_, FALSE, FALSE, 0);
 
-  if (extensions::FeatureSwitch::action_box()->IsEnabled()) {
-    // TODO(mpcomplete): should we hide this if ShouldOnlyShowLocation()==true?
-    action_box_button_.reset(new ActionBoxButtonGtk(browser_));
-
-    GtkWidget* alignment = gtk_alignment_new(0, 0, 1, 1);
-    gtk_alignment_set_padding(GTK_ALIGNMENT(alignment),
-                              0, 0, 0, InnerPadding());
-    gtk_container_add(GTK_CONTAINER(alignment), action_box_button_->widget());
-
-    gtk_box_pack_end(GTK_BOX(hbox_.get()), alignment,
-                     FALSE, FALSE, 0);
-  }
-
   if (browser_defaults::bookmarks_enabled && !ShouldOnlyShowLocation()) {
     // Hide the star icon in popups, app windows, etc.
     CreateStarButton();
@@ -626,10 +615,6 @@ void LocationBarViewGtk::SetSiteTypeDragSource() {
 
 WebContents* LocationBarViewGtk::GetWebContents() const {
   return browser_->tab_strip_model()->GetActiveWebContents();
-}
-
-gfx::Rect LocationBarViewGtk::GetOmniboxBounds() const {
-  return gfx::Rect();
 }
 
 void LocationBarViewGtk::SetPreviewEnabledPageAction(
@@ -853,11 +838,6 @@ void LocationBarViewGtk::ShowFirstRunBubble() {
                  weak_ptr_factory_.GetWeakPtr()));
 }
 
-void LocationBarViewGtk::SetInstantSuggestion(
-    const InstantSuggestion& suggestion) {
-  location_entry_->model()->SetInstantSuggestion(suggestion);
-}
-
 string16 LocationBarViewGtk::GetInputString() const {
   return location_input_;
 }
@@ -962,6 +942,10 @@ void LocationBarViewGtk::UpdateOpenPDFInReaderPrompt() {
   // Not implemented on Gtk.
 }
 
+void LocationBarViewGtk::UpdateGeneratedCreditCardView() {
+  NOTIMPLEMENTED();
+}
+
 void LocationBarViewGtk::SaveStateToContents(WebContents* contents) {
   location_entry_->SaveStateToTab(contents);
 }
@@ -1022,11 +1006,6 @@ void LocationBarViewGtk::TestPageActionPressed(size_t index) {
   }
 
   page_action_views_[index]->TestActivatePageAction();
-}
-
-void LocationBarViewGtk::TestActionBoxMenuItemSelected(int command_id) {
-  action_box_button_->action_box_button_controller()->
-      ExecuteCommand(command_id, 0);
 }
 
 bool LocationBarViewGtk::GetBookmarkStarVisibility() {
@@ -1211,7 +1190,7 @@ void LocationBarViewGtk::UpdateSiteTypeArea() {
       GTK_IMAGE(location_icon_image_),
       theme_service_->GetImageNamed(resource_id).ToGdkPixbuf());
 
-  if (toolbar_model_->GetSecurityLevel() == ToolbarModel::EV_SECURE) {
+  if (toolbar_model_->GetSecurityLevel(false) == ToolbarModel::EV_SECURE) {
     if (!gtk_util::IsActingAsRoundedWindow(site_type_event_box_)) {
       // Fun fact: If wee try to make |site_type_event_box_| act as a
       // rounded window while it doesn't have a visible window, GTK interprets
@@ -1392,13 +1371,14 @@ gboolean LocationBarViewGtk::OnIconReleased(GtkWidget* sender,
     if (event->x == 0 && event->y == 0)
       return FALSE;
 
-    NavigationEntry* nav_entry = tab->GetController().GetActiveEntry();
+    // Important to use GetVisibleEntry to match what's showing in the omnibox.
+    NavigationEntry* nav_entry = tab->GetController().GetVisibleEntry();
     if (!nav_entry) {
       NOTREACHED();
       return FALSE;
     }
     chrome::ShowWebsiteSettings(browser_, tab, nav_entry->GetURL(),
-                                nav_entry->GetSSL(), true);
+                                nav_entry->GetSSL());
     return TRUE;
   } else if (event->button == 2) {
     // When the user middle clicks on the location icon, try to open the
@@ -1459,6 +1439,10 @@ void LocationBarViewGtk::OnHboxSizeAllocate(GtkWidget* sender,
   if (hbox_width_ != allocation->width) {
     hbox_width_ = allocation->width;
     UpdateEVCertificateLabelSize();
+  }
+  if (browser_ && browser_->instant_controller()) {
+    browser_->instant_controller()->
+        SetOmniboxBounds(AllocationToRect(*allocation));
   }
 }
 
@@ -1545,10 +1529,6 @@ void LocationBarViewGtk::ShowStarBubble(const GURL& url,
   }
 }
 
-void LocationBarViewGtk::ShowChromeToMobileBubble() {
-  ChromeToMobileBubbleGtk::Show(action_box_button_->widget(), browser_);
-}
-
 void LocationBarViewGtk::SetStarred(bool starred) {
   if (starred == starred_)
     return;
@@ -1617,9 +1597,6 @@ void LocationBarViewGtk::UpdateStarIcon() {
   command_updater_->UpdateCommandEnabled(IDC_BOOKMARK_PAGE, star_enabled);
   command_updater_->UpdateCommandEnabled(IDC_BOOKMARK_PAGE_FROM_STAR,
                                          star_enabled);
-  if (extensions::FeatureSwitch::action_box()->IsEnabled() && !starred_) {
-    star_enabled = false;
-  }
   if (star_enabled) {
     gtk_widget_show_all(star_.get());
     int id = starred_ ? IDR_STAR_LIT : IDR_STAR;
@@ -2085,7 +2062,7 @@ gboolean LocationBarViewGtk::PageActionViewGtk::OnButtonPressed(
 
     case LocationBarController::ACTION_SHOW_SCRIPT_POPUP:
       ExtensionPopupGtk::Show(
-          ExtensionInfoUI::GetURL(extension->id()),
+          extensions::ExtensionInfoUI::GetURL(extension->id()),
           owner_->browser_,
           event_box_.get(),
           ExtensionPopupGtk::SHOW);

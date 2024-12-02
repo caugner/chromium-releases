@@ -5,6 +5,7 @@
 #include "android_webview/lib/main/aw_main_delegate.h"
 
 #include "android_webview/browser/aw_content_browser_client.h"
+#include "android_webview/browser/gpu_memory_buffer_factory_impl.h"
 #include "android_webview/browser/scoped_allow_wait_for_legacy_web_view_api.h"
 #include "android_webview/lib/aw_browser_dependency_factory_impl.h"
 #include "android_webview/native/aw_geolocation_permission_context.h"
@@ -20,6 +21,8 @@
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
+#include "gpu/command_buffer/client/gl_in_process_context.h"
+#include "gpu/command_buffer/service/in_process_command_buffer.h"
 #include "webkit/common/gpu/webgraphicscontext3d_in_process_command_buffer_impl.h"
 
 namespace android_webview {
@@ -33,7 +36,8 @@ base::LazyInstance<scoped_ptr<ScopedAllowWaitForLegacyWebViewApi> >
 
 }
 
-AwMainDelegate::AwMainDelegate() {
+AwMainDelegate::AwMainDelegate()
+    : gpu_memory_buffer_factory_(new GpuMemoryBufferFactoryImpl) {
 }
 
 AwMainDelegate::~AwMainDelegate() {
@@ -42,16 +46,32 @@ AwMainDelegate::~AwMainDelegate() {
 bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   content::SetContentClient(&content_client_);
 
-  webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl
-      ::EnableVirtualizedContext();
+  gpu::GLInProcessContext::SetGpuMemoryBufferFactory(
+      gpu_memory_buffer_factory_.get());
+  gpu::InProcessCommandBuffer::EnableVirtualizedContext();
 
   CommandLine* cl = CommandLine::ForCurrentProcess();
   cl->AppendSwitch(switches::kEnableBeginFrameScheduling);
   if (!cl->HasSwitch("disable-map-image"))
     cl->AppendSwitch(cc::switches::kUseMapImage);
 
-  // WebView uses the existing Android View edge effect for overscroll glow.
+  // WebView uses the Android system's scrollbars and overscroll glow.
+  cl->AppendSwitch(switches::kHideScrollbars);
   cl->AppendSwitch(switches::kDisableOverscrollEdgeEffect);
+
+  // Not yet secure in single-process mode.
+  cl->AppendSwitch(switches::kDisableExperimentalWebGL);
+
+  // Ganesh backed 2D-Canvas is not yet working and causes crashes.
+  cl->AppendSwitch(switches::kDisableAccelerated2dCanvas);
+
+  // File system API not supported (requires some new API; internal bug 6930981)
+  // TODO(joth): export and use switches::kDisableFileSystem
+  cl->AppendSwitch("disable-file-system");
+
+  // Enable D-PAD navigation for application compatibility.
+  // TODO(joth): export and use switches::EnableSpatialNavigation.
+  cl->AppendSwitch("enable-spatial-navigation");
 
   return false;
 }

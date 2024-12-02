@@ -27,7 +27,7 @@ Check out the
 <h2 id="external">Referencing external resources</h2>
 
 <p>
-The <a href="app_csp.html">Content Security Policy</a> used by apps disallows
+The <a href="contentSecurityPolicy.html">Content Security Policy</a> used by apps disallows
 the use of many kinds of remote URLs, so you can't directly reference external
 images, stylesheets, or fonts from an app page. Instead, you can use use
 cross-origin XMLHttpRequests to fetch these resources,
@@ -125,7 +125,7 @@ These pages are then exempt from their Content Security Policy.
 Sandboxed pages can use iframes, inline scripting,
 and <code>eval()</code>.
 Check out the manifest field description for
-<a href="manifest.html#sandbox">sandbox</a>.
+<a href="manifest/sandbox.html">sandbox</a>.
 </p>
 
 <p>
@@ -176,6 +176,16 @@ you can create a window that the sandboxed page opens in.
 Here's a sample that creates two windows,
 one for the main app window that isn't sandboxed,
 and one for the sandboxed page:
+</p>
+
+<p class="warning">
+NOTE:
+<a href="https://code.google.com/p/chromium/issues/detail?id=154662">issue 154662</a>
+is a bug when using sandbox pages to create windows.
+The effect is that an error "Uncaught TypeError: Cannot call method
+'initializeAppWindow' of undefined" is output to the developer console
+and that the app.window.create call does not call the callback function
+with a window object. However, the sandbox page is created as a new window.
 </p>
 
 <pre>

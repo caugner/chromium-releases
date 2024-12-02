@@ -5,17 +5,18 @@
 #include "chrome/app/chrome_main_delegate.h"
 
 #include "base/command_line.h"
+#include "base/files/file_path.h"
 #include "base/lazy_instance.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/stats_counters.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
+#include "base/process/memory.h"
+#include "base/process/process_handle.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/diagnostics/diagnostics_main.h"
 #include "chrome/browser/policy/policy_path_parser.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_content_client.h"
@@ -61,21 +62,28 @@
 #if defined(OS_POSIX)
 #include <locale.h>
 #include <signal.h>
+#include "chrome/app/chrome_breakpad_client.h"
+#include "components/breakpad/breakpad_client.h"
 #endif
 
 #if !defined(DISABLE_NACL) && defined(OS_LINUX)
-#include "chrome/app/nacl_fork_delegate_linux.h"
-#include "chrome/common/nacl_paths.h"
+#include "components/nacl/common/nacl_paths.h"
+#include "components/nacl/zygote/nacl_fork_delegate_linux.h"
 #endif
 
 #if defined(OS_CHROMEOS)
 #include "base/sys_info.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chromeos/chromeos_paths.h"
+#include "chromeos/chromeos_switches.h"
 #endif
 
 #if defined(OS_ANDROID)
 #include "chrome/common/descriptors_android.h"
+#else
+// Diagnostics is only available on non-android platforms.
+#include "chrome/browser/diagnostics/diagnostics_controller.h"
+#include "chrome/browser/diagnostics/diagnostics_writer.h"
 #endif
 
 #if defined(USE_X11)
@@ -84,18 +92,28 @@
 #include "ui/base/x/x11_util.h"
 #endif
 
-#if defined(USE_LINUX_BREAKPAD)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "chrome/app/breakpad_linux.h"
 #endif
 
+#if !defined(CHROME_MULTIPLE_DLL_CHILD)
 base::LazyInstance<chrome::ChromeContentBrowserClient>
     g_chrome_content_browser_client = LAZY_INSTANCE_INITIALIZER;
+#endif
+
+#if !defined(CHROME_MULTIPLE_DLL_BROWSER)
 base::LazyInstance<chrome::ChromeContentRendererClient>
     g_chrome_content_renderer_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<chrome::ChromeContentUtilityClient>
     g_chrome_content_utility_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<chrome::ChromeContentPluginClient>
     g_chrome_content_plugin_client = LAZY_INSTANCE_INITIALIZER;
+#endif
+
+#if defined(OS_POSIX)
+base::LazyInstance<chrome::ChromeBreakpadClient>::Leaky
+    g_chrome_breakpad_client = LAZY_INSTANCE_INITIALIZER;
+#endif
 
 extern int NaClMain(const content::MainFunctionParams&);
 extern int ServiceProcessMain(const content::MainFunctionParams&);
@@ -356,21 +374,104 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
 #endif
 #endif  // OS_POSIX
 
-  // No support for ANDROID yet as DiagnosticsMain needs wchar support.
-#if !defined(OS_ANDROID)
-  // If we are in diagnostics mode this is the end of the line. After the
-  // diagnostics are run the process will invariably exit.
-  if (command_line.HasSwitch(switches::kDiagnostics)) {
-    *exit_code = DiagnosticsMain(command_line);
-    return true;
-  }
-#endif
-
 #if defined(OS_WIN)
   // Must do this before any other usage of command line!
   if (HasDeprecatedArguments(command_line.GetCommandLineString())) {
     *exit_code = 1;
     return true;
+  }
+#endif
+
+  chrome::RegisterPathProvider();
+#if defined(OS_CHROMEOS)
+  chromeos::RegisterPathProvider();
+#endif
+#if !defined(DISABLE_NACL) && defined(OS_LINUX)
+  nacl::RegisterPathProvider();
+#endif
+
+// No support for ANDROID yet as DiagnosticsController needs wchar support.
+// TODO(gspencer): That's not true anymore, or at least there are no w-string
+// references anymore. Not sure if that means this can be enabled on Android or
+// not though: it still uses string16. As there is no easily accessible command
+// line on Android, I'm not sure this is a big deal, at least for purposes of
+// troubleshooting with a customer.
+#if !defined(OS_ANDROID) && !defined(CHROME_MULTIPLE_DLL_CHILD)
+  // If we are in diagnostics mode this is the end of the line: after the
+  // diagnostics are run the process will invariably exit.
+  if (command_line.HasSwitch(switches::kDiagnostics)) {
+    diagnostics::DiagnosticsWriter::FormatType format =
+        diagnostics::DiagnosticsWriter::HUMAN;
+    if (command_line.HasSwitch(switches::kDiagnosticsFormat)) {
+      std::string format_str =
+          command_line.GetSwitchValueASCII(switches::kDiagnosticsFormat);
+      if (format_str == "machine") {
+        format = diagnostics::DiagnosticsWriter::MACHINE;
+      } else if (format_str == "log") {
+        format = diagnostics::DiagnosticsWriter::LOG;
+      } else {
+        DCHECK_EQ("human", format_str);
+      }
+    }
+
+    diagnostics::DiagnosticsWriter writer(format);
+    *exit_code = diagnostics::DiagnosticsController::GetInstance()->Run(
+        command_line, &writer);
+    diagnostics::DiagnosticsController::GetInstance()->ClearResults();
+    return true;
+  }
+#endif
+
+#if defined(OS_CHROMEOS)
+  // If we are recovering from a crash on ChromeOS, then we will do some
+  // recovery using the diagnostics module, and then continue on. We fake up a
+  // command line to tell it that we want it to recover, and to preserve the
+  // original command line.
+  if (command_line.HasSwitch(chromeos::switches::kLoginUser) ||
+      command_line.HasSwitch(switches::kDiagnosticsRecovery)) {
+    CommandLine interim_command_line(command_line.GetProgram());
+    if (command_line.HasSwitch(switches::kUserDataDir)) {
+      interim_command_line.AppendSwitchPath(
+          switches::kUserDataDir,
+          command_line.GetSwitchValuePath(switches::kUserDataDir));
+    }
+    interim_command_line.AppendSwitch(switches::kDiagnostics);
+    interim_command_line.AppendSwitch(switches::kDiagnosticsRecovery);
+
+    diagnostics::DiagnosticsWriter::FormatType format =
+        diagnostics::DiagnosticsWriter::LOG;
+    if (command_line.HasSwitch(switches::kDiagnosticsFormat)) {
+      std::string format_str =
+          command_line.GetSwitchValueASCII(switches::kDiagnosticsFormat);
+      if (format_str == "machine") {
+        format = diagnostics::DiagnosticsWriter::MACHINE;
+      } else if (format_str == "human") {
+        format = diagnostics::DiagnosticsWriter::HUMAN;
+      } else {
+        DCHECK_EQ("log", format_str);
+      }
+    }
+
+    diagnostics::DiagnosticsWriter writer(format);
+    int diagnostics_exit_code =
+        diagnostics::DiagnosticsController::GetInstance()->Run(command_line,
+                                                               &writer);
+    if (diagnostics_exit_code) {
+      // Diagnostics has failed somehow, so we exit.
+      *exit_code = diagnostics_exit_code;
+      return true;
+    }
+
+    // Now we run the actual recovery tasks.
+    int recovery_exit_code =
+        diagnostics::DiagnosticsController::GetInstance()->RunRecovery(
+            command_line, &writer);
+
+    if (recovery_exit_code) {
+      // Recovery has failed somehow, so we exit.
+      *exit_code = recovery_exit_code;
+      return true;
+    }
   }
 #endif
 
@@ -472,12 +573,8 @@ void ChromeMainDelegate::PreSandboxStartup() {
   std::string process_type =
       command_line.GetSwitchValueASCII(switches::kProcessType);
 
-  chrome::RegisterPathProvider();
-#if defined(OS_CHROMEOS)
-  chromeos::RegisterPathProvider();
-#endif
-#if !defined(DISABLE_NACL) && defined(OS_LINUX)
-  nacl::RegisterPathProvider();
+#if defined(OS_POSIX)
+  breakpad::SetBreakpadClient(g_chrome_breakpad_client.Pointer());
 #endif
 
 #if defined(OS_MACOSX)
@@ -595,9 +692,14 @@ void ChromeMainDelegate::PreSandboxStartup() {
     // only do this when ResourcesBundle has been initialized).
     SetMacProcessName(command_line);
 #endif  // defined(OS_MACOSX)
+
+#if !defined(CHROME_MULTIPLE_DLL_BROWSER)
+    if (process_type == switches::kUtilityProcess)
+      chrome::ChromeContentUtilityClient::PreSandboxStartup();
+#endif
   }
 
-#if defined(USE_LINUX_BREAKPAD)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
   // Needs to be called after we have chrome::DIR_USER_DATA.  BrowserMain
   // sets this up for the browser process in a different manner. Zygotes
   // need to call InitCrashReporter() in RunZygote().
@@ -637,15 +739,20 @@ int ChromeMainDelegate::RunProcess(
     const content::MainFunctionParams& main_function_params) {
   // ANDROID doesn't support "service", so no ServiceProcessMain, and arraysize
   // doesn't support empty array. So we comment out the block for Android.
-#if !defined(OS_ANDROID)
+#if !defined(OS_ANDROID) && \
+    (!defined(CHROME_MULTIPLE_DLL) || defined(CHROME_MULTIPLE_DLL_BROWSER))
   static const MainFunction kMainFunctions[] = {
+#if defined(ENABLE_FULL_PRINTING)
     { switches::kServiceProcess,     ServiceProcessMain },
+#endif
+
 #if defined(OS_MACOSX)
     { switches::kRelauncherProcess,
       mac_relauncher::internal::RelauncherMain },
 #endif
-    // TODO(scottmg): http://crbug.com/237249 NaCl -> child.
-#if !defined(DISABLE_NACL)
+
+#if !defined(DISABLE_NACL) && \
+    (!defined(CHROME_MULTIPLE_DLL) || defined(CHROME_MULTIPLE_DLL_CHILD))
     { switches::kNaClLoaderProcess, NaClMain },
 #endif  // DISABLE_NACL
   };
@@ -704,7 +811,7 @@ void ChromeMainDelegate::ZygoteForked() {
     SetUpProfilingShutdownHandler();
   }
 
-#if defined(USE_LINUX_BREAKPAD)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
   // Needs to be called after we have chrome::DIR_USER_DATA.  BrowserMain sets
   // this up for the browser process in a different manner.
   InitCrashReporter();
@@ -714,22 +821,36 @@ void ChromeMainDelegate::ZygoteForked() {
 #endif  // OS_MACOSX
 
 content::ContentBrowserClient*
-    ChromeMainDelegate::CreateContentBrowserClient() {
+ChromeMainDelegate::CreateContentBrowserClient() {
+#if defined(CHROME_MULTIPLE_DLL_CHILD)
+  return NULL;
+#else
   return &g_chrome_content_browser_client.Get();
+#endif
 }
 
 content::ContentPluginClient* ChromeMainDelegate::CreateContentPluginClient() {
-  // TODO(scottmg): http://crbug.com/237249 This will have to be split out into
-  // browser and child parts.
+#if defined(CHROME_MULTIPLE_DLL_BROWSER)
+  return NULL;
+#else
   return &g_chrome_content_plugin_client.Get();
+#endif
 }
 
 content::ContentRendererClient*
-    ChromeMainDelegate::CreateContentRendererClient() {
+ChromeMainDelegate::CreateContentRendererClient() {
+#if defined(CHROME_MULTIPLE_DLL_BROWSER)
+  return NULL;
+#else
   return &g_chrome_content_renderer_client.Get();
+#endif
 }
 
 content::ContentUtilityClient*
-    ChromeMainDelegate::CreateContentUtilityClient() {
+ChromeMainDelegate::CreateContentUtilityClient() {
+#if defined(CHROME_MULTIPLE_DLL_BROWSER)
+  return NULL;
+#else
   return &g_chrome_content_utility_client.Get();
+#endif
 }

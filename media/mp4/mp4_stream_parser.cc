@@ -7,7 +7,7 @@
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/logging.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/stream_parser_buffer.h"
 #include "media/base/video_decoder_config.h"
@@ -42,8 +42,7 @@ MP4StreamParser::~MP4StreamParser() {}
 
 void MP4StreamParser::Init(const InitCB& init_cb,
                            const NewConfigCB& config_cb,
-                           const NewBuffersCB& audio_cb,
-                           const NewBuffersCB& video_cb,
+                           const NewBuffersCB& new_buffers_cb,
                            const NewTextBuffersCB& /* text_cb */ ,
                            const NeedKeyCB& need_key_cb,
                            const AddTextTrackCB& /* add_text_track_cb */ ,
@@ -54,15 +53,14 @@ void MP4StreamParser::Init(const InitCB& init_cb,
   DCHECK(init_cb_.is_null());
   DCHECK(!init_cb.is_null());
   DCHECK(!config_cb.is_null());
-  DCHECK(!audio_cb.is_null() || !video_cb.is_null());
+  DCHECK(!new_buffers_cb.is_null());
   DCHECK(!need_key_cb.is_null());
   DCHECK(!end_of_segment_cb.is_null());
 
   ChangeState(kParsingBoxes);
   init_cb_ = init_cb;
   config_cb_ = config_cb;
-  audio_cb_ = audio_cb;
-  video_cb_ = video_cb;
+  new_buffers_cb_ = new_buffers_cb;
   need_key_cb_ = need_key_cb;
   new_segment_cb_ = new_segment_cb;
   end_of_segment_cb_ = end_of_segment_cb;
@@ -312,7 +310,7 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
   if (!init_cb_.is_null())
     base::ResetAndReturn(&init_cb_).Run(true, duration);
 
-  RCHECK(EmitNeedKeyIfNecessary(moov_->pssh));
+  EmitNeedKeyIfNecessary(moov_->pssh);
   return true;
 }
 
@@ -323,19 +321,19 @@ bool MP4StreamParser::ParseMoof(BoxReader* reader) {
   if (!runs_)
     runs_.reset(new TrackRunIterator(moov_.get(), log_cb_));
   RCHECK(runs_->Init(moof));
-  RCHECK(EmitNeedKeyIfNecessary(moof.pssh));
-  new_segment_cb_.Run(runs_->GetMinDecodeTimestamp());
+  EmitNeedKeyIfNecessary(moof.pssh);
+  new_segment_cb_.Run();
   ChangeState(kEmittingSamples);
   return true;
 }
 
-bool MP4StreamParser::EmitNeedKeyIfNecessary(
+void MP4StreamParser::EmitNeedKeyIfNecessary(
     const std::vector<ProtectionSystemSpecificHeader>& headers) {
   // TODO(strobe): ensure that the value of init_data (all PSSH headers
   // concatenated in arbitrary order) matches the EME spec.
   // See https://www.w3.org/Bugs/Public/show_bug.cgi?id=17673.
   if (headers.empty())
-    return true;
+    return;
 
   size_t total_size = 0;
   for (size_t i = 0; i < headers.size(); i++)
@@ -348,7 +346,7 @@ bool MP4StreamParser::EmitNeedKeyIfNecessary(
            headers[i].raw_box.size());
     pos += headers[i].raw_box.size();
   }
-  return need_key_cb_.Run(kMp4InitDataType, init_data.Pass(), total_size);
+  need_key_cb_.Run(kMp4InitDataType, init_data.Pass(), total_size);
 }
 
 bool MP4StreamParser::PrepareAVCBuffer(
@@ -463,6 +461,10 @@ bool MP4StreamParser::EnqueueSample(BufferQueue* audio_buffers,
   std::vector<SubsampleEntry> subsamples;
   if (runs_->is_encrypted()) {
     decrypt_config = runs_->GetDecryptConfig();
+    if (!decrypt_config) {
+      *err = true;
+      return false;
+    }
     subsamples = decrypt_config->subsamples();
   }
 
@@ -509,10 +511,10 @@ bool MP4StreamParser::EnqueueSample(BufferQueue* audio_buffers,
                                  runs_->is_keyframe());
 
   if (decrypt_config)
-    stream_buf->SetDecryptConfig(decrypt_config.Pass());
+    stream_buf->set_decrypt_config(decrypt_config.Pass());
 
-  stream_buf->SetDuration(runs_->duration());
-  stream_buf->SetTimestamp(runs_->cts());
+  stream_buf->set_duration(runs_->duration());
+  stream_buf->set_timestamp(runs_->cts());
   stream_buf->SetDecodeTimestamp(runs_->dts());
 
   DVLOG(3) << "Pushing frame: aud=" << audio
@@ -534,16 +536,13 @@ bool MP4StreamParser::EnqueueSample(BufferQueue* audio_buffers,
 
 bool MP4StreamParser::SendAndFlushSamples(BufferQueue* audio_buffers,
                                           BufferQueue* video_buffers) {
-  bool err = false;
-  if (!audio_buffers->empty()) {
-    err |= (audio_cb_.is_null() || !audio_cb_.Run(*audio_buffers));
-    audio_buffers->clear();
-  }
-  if (!video_buffers->empty()) {
-    err |= (video_cb_.is_null() || !video_cb_.Run(*video_buffers));
-    video_buffers->clear();
-  }
-  return !err;
+  if (audio_buffers->empty() && video_buffers->empty())
+    return true;
+
+  bool success = new_buffers_cb_.Run(*audio_buffers, *video_buffers);
+  audio_buffers->clear();
+  video_buffers->clear();
+  return success;
 }
 
 bool MP4StreamParser::ReadAndDiscardMDATsUntil(const int64 offset) {

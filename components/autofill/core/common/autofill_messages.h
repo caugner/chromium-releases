@@ -6,7 +6,7 @@
 
 #include <string>
 
-#include "base/time.h"
+#include "base/time/time.h"
 #include "components/autofill/core/common/autocheckout_status.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/form_data_predictions.h"
@@ -18,12 +18,11 @@
 #include "content/public/common/common_param_traits.h"
 #include "content/public/common/common_param_traits_macros.h"
 #include "content/public/common/password_form.h"
-#include "content/public/common/ssl_status.h"
-#include "googleurl/src/gurl.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_message_utils.h"
 #include "third_party/WebKit/public/web/WebFormElement.h"
 #include "ui/gfx/rect.h"
+#include "url/gurl.h"
 
 #define IPC_MESSAGE_START AutofillMsgStart
 
@@ -107,15 +106,6 @@ IPC_ENUM_TRAITS(WebKit::WebFormElement::AutocompleteResult)
 // Request to parse all the forms without field count limit.
 IPC_MESSAGE_ROUTED0(AutofillMsg_GetAllForms)
 
-// Reply to the AutofillHostMsg_QueryFormFieldAutofill message with the
-// Autofill suggestions.
-IPC_MESSAGE_ROUTED5(AutofillMsg_SuggestionsReturned,
-                    int /* id of the request message */,
-                    std::vector<base::string16> /* names */,
-                    std::vector<base::string16> /* labels */,
-                    std::vector<base::string16> /* icons */,
-                    std::vector<int> /* unique_ids */)
-
 // Reply to the AutofillHostMsg_FillAutofillFormData message with the
 // Autofill form data.
 IPC_MESSAGE_ROUTED2(AutofillMsg_FormDataFilled,
@@ -125,9 +115,8 @@ IPC_MESSAGE_ROUTED2(AutofillMsg_FormDataFilled,
 // Fill a password form and prepare field autocomplete for multiple
 // matching logins. Lets the renderer know if it should disable the popup
 // because the browser process will own the popup UI.
-IPC_MESSAGE_ROUTED2(AutofillMsg_FillPasswordForm,
-                    autofill::PasswordFormFillData, /* the fill form data*/
-                    bool /* disable popup */ )
+IPC_MESSAGE_ROUTED1(AutofillMsg_FillPasswordForm,
+                    autofill::PasswordFormFillData /* the fill form data*/)
 
 // Send the heuristic and server field type predictions to the renderer.
 IPC_MESSAGE_ROUTED1(
@@ -194,6 +183,10 @@ IPC_MESSAGE_ROUTED4(AutofillMsg_FillFormsAndClick,
 // metadata.
 IPC_MESSAGE_ROUTED0(AutofillMsg_AutocheckoutSupported)
 
+// Sent when the current page is actually displayed in the browser, possibly
+// after being preloaded.
+IPC_MESSAGE_ROUTED0(AutofillMsg_PageShown)
+
 // Autofill messages sent from the renderer to the browser.
 
 // TODO(creis): check in the browser that the renderer actually has permission
@@ -240,10 +233,6 @@ IPC_MESSAGE_ROUTED5(AutofillHostMsg_QueryFormFieldAutofill,
                     gfx::RectF /* input field bounds, window-relative */,
                     bool /* display warning if autofill disabled */)
 
-// Sent when the popup with Autofill suggestions for a form is shown.
-IPC_MESSAGE_ROUTED1(AutofillHostMsg_DidShowAutofillSuggestions,
-                    bool /* is this a new popup? */)
-
 // Instructs the browser to fill in the values for a form using Autofill
 // profile data.
 IPC_MESSAGE_ROUTED4(AutofillHostMsg_FillAutofillFormData,
@@ -264,12 +253,6 @@ IPC_MESSAGE_ROUTED2(AutofillHostMsg_RequestAutocomplete,
                     autofill::FormData /* form_data */,
                     GURL /* frame_url */)
 
-// Instructs the browser to remove the specified Autocomplete entry from the
-// database.
-IPC_MESSAGE_ROUTED2(AutofillHostMsg_RemoveAutocompleteEntry,
-                    base::string16 /* field name */,
-                    base::string16 /* value */)
-
 // Instructs the browser to show the Autofill dialog.
 IPC_MESSAGE_ROUTED0(AutofillHostMsg_ShowAutofillDialog)
 
@@ -277,12 +260,11 @@ IPC_MESSAGE_ROUTED0(AutofillHostMsg_ShowAutofillDialog)
 IPC_MESSAGE_ROUTED0(AutofillHostMsg_DidEndTextFieldEditing)
 
 // Instructs the browser to hide the Autofill UI.
-IPC_MESSAGE_ROUTED0(AutofillHostMsg_HideAutofillUi)
+IPC_MESSAGE_ROUTED0(AutofillHostMsg_HideAutofillUI)
 
-// Sent when the renderer attempts to click an element in an Autocheckout flow
-// and either the element could not be found or the click did not have the
-// desired effect.
-IPC_MESSAGE_ROUTED1(AutofillHostMsg_ClickFailed,
+// Sent when the renderer filled an Autocheckout page and clicked the proceed
+// button or if there was an error.
+IPC_MESSAGE_ROUTED1(AutofillHostMsg_AutocheckoutPageCompleted,
                     autofill::AutocheckoutStatus /* status */)
 
 // Instructs the browser to show the password generation bubble at the
@@ -307,8 +289,6 @@ IPC_MESSAGE_ROUTED4(AutofillHostMsg_ShowPasswordSuggestions,
                     std::vector<base::string16> /* realms */)
 
 // Inform browser of data list values for the curent field.
-IPC_MESSAGE_ROUTED4(AutofillHostMsg_SetDataList,
+IPC_MESSAGE_ROUTED2(AutofillHostMsg_SetDataList,
                     std::vector<base::string16> /* values */,
-                    std::vector<base::string16> /* labels */,
-                    std::vector<base::string16> /* icons */,
-                    std::vector<int> /* unique ids */)
+                    std::vector<base::string16> /* labels */)

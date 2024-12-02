@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/installer/setup/setup_main.h"
+
 #include <windows.h>
 #include <msi.h>
 #include <shellapi.h>
@@ -17,7 +19,7 @@
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
+#include "base/process/launch.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -33,6 +35,7 @@
 #include "breakpad/src/client/windows/handler/exception_handler.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/installer/setup/archive_patch_helper.h"
 #include "chrome/installer/setup/chrome_frame_quick_enable.h"
 #include "chrome/installer/setup/chrome_frame_ready_mode.h"
 #include "chrome/installer/setup/install.h"
@@ -62,7 +65,6 @@
 #include "chrome/installer/util/self_cleaning_temp_dir.h"
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/user_experiment.h"
-#include "chrome/installer/util/util_constants.h"
 
 #include "installer_util_strings.h"  // NOLINT
 
@@ -85,71 +87,103 @@ const MINIDUMP_TYPE kLargerDumpType = static_cast<MINIDUMP_TYPE>(
 
 namespace {
 
-// This method unpacks and uncompresses the given archive file. For Chrome
-// install we are creating a uncompressed archive that contains all the files
-// needed for the installer. This uncompressed archive is later compressed.
-//
-// This method first uncompresses archive specified by parameter "archive"
-// and assumes that it will result in an uncompressed full archive file
-// (chrome.7z) or uncompressed archive patch file (chrome_patch.diff). If it
-// is patch file, it is applied to the old archive file that should be
-// present on the system already. As the final step the new archive file
-// is unpacked in the path specified by parameter "output_directory".
-DWORD UnPackArchive(const base::FilePath& archive,
-                    const InstallerState& installer_state,
-                    const base::FilePath& temp_path,
-                    const base::FilePath& output_directory,
-                    installer::ArchiveType* archive_type) {
-  DCHECK(archive_type);
-
-  installer_state.UpdateStage(installer::UNCOMPRESSING);
-
-  // First uncompress the payload. This could be a differential
-  // update (patch.7z) or full archive (chrome.7z). If this uncompress fails
-  // return with error.
-  string16 unpacked_file;
-  int32 ret = LzmaUtil::UnPackArchive(archive.value(), temp_path.value(),
-                                      &unpacked_file);
-  if (ret != NO_ERROR)
-    return ret;
-
-  base::FilePath uncompressed_archive(
-      temp_path.Append(installer::kChromeArchive));
-  scoped_ptr<Version> archive_version(
-      installer::GetMaxVersionFromArchiveDir(installer_state.target_path()));
-
-  // Check if this is differential update and if it is, patch it to the
-  // installer archive that should already be on the machine. We assume
-  // it is a differential installer if chrome.7z is not found.
-  if (!file_util::PathExists(uncompressed_archive)) {
-    *archive_type = installer::INCREMENTAL_ARCHIVE_TYPE;
-    VLOG(1) << "Differential patch found. Applying to existing archive.";
-    if (!archive_version.get()) {
-      LOG(ERROR) << "Can not use differential update when Chrome is not "
-                 << "installed on the system.";
-      return installer::CHROME_NOT_INSTALLED;
-    }
-
-    base::FilePath existing_archive(installer_state.target_path().AppendASCII(
-        archive_version->GetString()));
-    existing_archive = existing_archive.Append(installer::kInstallerDir);
-    existing_archive = existing_archive.Append(installer::kChromeArchive);
-    if (int i = installer::ApplyDiffPatch(existing_archive,
-                                          base::FilePath(unpacked_file),
-                                          uncompressed_archive,
-                                          &installer_state)) {
-      LOG(ERROR) << "Binary patching failed with error " << i;
-      return i;
-    }
-  } else {
-    *archive_type = installer::FULL_ARCHIVE_TYPE;
+// Returns NULL if no compressed archive is available for processing, otherwise
+// returns a patch helper configured to uncompress and patch.
+scoped_ptr<installer::ArchivePatchHelper> CreateChromeArchiveHelper(
+    const CommandLine& command_line,
+    const installer::InstallerState& installer_state,
+    const base::FilePath& working_directory) {
+  // A compressed archive is ordinarily given on the command line by the mini
+  // installer. If one was not given, look for chrome.packed.7z next to the
+  // running program.
+  base::FilePath compressed_archive(
+      command_line.GetSwitchValuePath(installer::switches::kInstallArchive));
+  bool compressed_archive_specified = !compressed_archive.empty();
+  if (!compressed_archive_specified) {
+    compressed_archive =
+        command_line.GetProgram().DirName().Append(
+            installer::kChromeCompressedArchive);
   }
 
-  installer_state.UpdateStage(installer::UNPACKING);
+  // Fail if no compressed archive is found.
+  if (!base::PathExists(compressed_archive)) {
+    if (compressed_archive_specified) {
+      LOG(ERROR) << installer::switches::kInstallArchive << "="
+                 << compressed_archive.value() << " not found.";
+    }
+    return scoped_ptr<installer::ArchivePatchHelper>();
+  }
 
-  // Unpack the uncompressed archive.
-  return LzmaUtil::UnPackArchive(uncompressed_archive.value(),
-      output_directory.value(), &unpacked_file);
+  // chrome.7z is either extracted directly from the compressed archive into the
+  // working dir or is the target of patching in the working dir.
+  base::FilePath target(working_directory.Append(installer::kChromeArchive));
+  DCHECK(!base::PathExists(target));
+
+  // Specify an empty path for the patch source since it isn't yet known that
+  // one is needed. It will be supplied in UncompressAndPatchChromeArchive if it
+  // is.
+  return scoped_ptr<installer::ArchivePatchHelper>(
+      new installer::ArchivePatchHelper(working_directory,
+                                        compressed_archive,
+                                        base::FilePath(),
+                                        target));
+}
+
+// Workhorse for producing an uncompressed archive (chrome.7z) given a
+// chrome.packed.7z containing either a patch file based on the version of
+// chrome being updated or the full uncompressed archive. Returns true on
+// success, in which case |archive_type| is populated based on what was found.
+// Returns false on failure, in which case |install_status| contains the error
+// code and the result is written to the registry (via WriteInstallerResult).
+bool UncompressAndPatchChromeArchive(
+    const installer::InstallationState& original_state,
+    const installer::InstallerState& installer_state,
+    installer::ArchivePatchHelper* archive_helper,
+    installer::ArchiveType* archive_type,
+    installer::InstallStatus* install_status) {
+  installer_state.UpdateStage(installer::UNCOMPRESSING);
+  if (!archive_helper->Uncompress(NULL)) {
+    *install_status = installer::UNCOMPRESSION_FAILED;
+    installer_state.WriteInstallerResult(*install_status,
+                                         IDS_INSTALL_UNCOMPRESSION_FAILED_BASE,
+                                         NULL);
+    return false;
+  }
+
+  // Short-circuit if uncompression produced the uncompressed archive rather
+  // than a patch file.
+  if (base::PathExists(archive_helper->target())) {
+    *archive_type = installer::FULL_ARCHIVE_TYPE;
+    return true;
+  }
+
+  // Find the installed version's archive to serve as the source for patching.
+  base::FilePath patch_source(installer::FindArchiveToPatch(original_state,
+                                                            installer_state));
+  if (patch_source.empty()) {
+    LOG(ERROR) << "Failed to find archive to patch.";
+    *install_status = installer::DIFF_PATCH_SOURCE_MISSING;
+    installer_state.WriteInstallerResult(*install_status,
+                                         IDS_INSTALL_UNCOMPRESSION_FAILED_BASE,
+                                         NULL);
+    return false;
+  }
+  archive_helper->set_patch_source(patch_source);
+
+  // Try courgette first. Failing that, try bspatch.
+  if ((installer_state.UpdateStage(installer::ENSEMBLE_PATCHING),
+       !archive_helper->EnsemblePatch()) &&
+      (installer_state.UpdateStage(installer::BINARY_PATCHING),
+       !archive_helper->BinaryPatch())) {
+    *install_status = installer::APPLY_DIFF_PATCH_FAILED;
+    installer_state.WriteInstallerResult(*install_status,
+                                         IDS_INSTALL_UNCOMPRESSION_FAILED_BASE,
+                                         NULL);
+    return false;
+  }
+
+  *archive_type = installer::INCREMENTAL_ARCHIVE_TYPE;
+  return true;
 }
 
 // In multi-install, adds all products to |installer_state| that are
@@ -627,332 +661,30 @@ bool CheckPreInstallConditions(const InstallationState& original_state,
   return true;
 }
 
-installer::InstallStatus InstallProductsHelper(
-    const InstallationState& original_state,
-    const CommandLine& cmd_line,
-    const MasterPreferences& prefs,
+// Initializes |temp_path| to "Temp" within the target directory, and
+// |unpack_path| to a random directory beginning with "source" within
+// |temp_path|. Returns false on error.
+bool CreateTemporaryAndUnpackDirectories(
     const InstallerState& installer_state,
-    installer::ArchiveType* archive_type,
-    bool* delegated_to_existing) {
-  DCHECK(archive_type);
-  const bool system_install = installer_state.system_install();
-  installer::InstallStatus install_status = installer::UNKNOWN_STATUS;
+    installer::SelfCleaningTempDir* temp_path,
+    base::FilePath* unpack_path) {
+  DCHECK(temp_path && unpack_path);
 
-  // Drop to background processing mode if the process was started below the
-  // normal process priority class.
-  bool entered_background_mode = installer::AdjustProcessPriority();
-  VLOG_IF(1, entered_background_mode) << "Entered background processing mode.";
-
-  // For install the default location for chrome.packed.7z is in current
-  // folder, so get that value first.
-  base::FilePath archive(cmd_line.GetProgram().DirName().Append(
-      installer::kChromeCompressedArchive));
-
-  // If --install-archive is given, get the user specified value
-  if (cmd_line.HasSwitch(installer::switches::kInstallArchive)) {
-    archive = cmd_line.GetSwitchValuePath(
-        installer::switches::kInstallArchive);
-  }
-
-  const Products& products = installer_state.products();
-
-  // Create a temp folder where we will unpack Chrome archive. If it fails,
-  // then we are doomed, so return immediately and no cleanup is required.
-  installer::SelfCleaningTempDir temp_path;
-  if (!temp_path.Initialize(installer_state.target_path().DirName(),
-                            installer::kInstallTempDir)) {
+  if (!temp_path->Initialize(installer_state.target_path().DirName(),
+                             installer::kInstallTempDir)) {
     PLOG(ERROR) << "Could not create temporary path.";
-    installer_state.WriteInstallerResult(installer::TEMP_DIR_FAILED,
-        IDS_INSTALL_TEMP_DIR_FAILED_BASE, NULL);
-    return installer::TEMP_DIR_FAILED;
+    return false;
   }
-  VLOG(1) << "created path " << temp_path.path().value();
+  VLOG(1) << "Created path " << temp_path->path().value();
 
-  base::FilePath unpack_path;
-  if (!file_util::CreateTemporaryDirInDir(temp_path.path(),
+  if (!file_util::CreateTemporaryDirInDir(temp_path->path(),
                                           installer::kInstallSourceDir,
-                                          &unpack_path)) {
+                                          unpack_path)) {
     PLOG(ERROR) << "Could not create temporary path for unpacked archive.";
-    installer_state.WriteInstallerResult(installer::TEMP_DIR_FAILED,
-        IDS_INSTALL_TEMP_DIR_FAILED_BASE, NULL);
-    return installer::TEMP_DIR_FAILED;
+    return false;
   }
 
-  bool unpacked = false;
-
-  // We want to keep uncompressed archive (chrome.7z) that we get after
-  // uncompressing and binary patching. Get the location for this file.
-  base::FilePath archive_to_copy;
-  if (file_util::PathExists(archive)) {
-    VLOG(1) << "Archive found to install Chrome " << archive.value();
-    if (UnPackArchive(archive, installer_state, temp_path.path(), unpack_path,
-                      archive_type)) {
-      install_status = (*archive_type) == installer::INCREMENTAL_ARCHIVE_TYPE ?
-          installer::APPLY_DIFF_PATCH_FAILED : installer::UNCOMPRESSION_FAILED;
-      installer_state.WriteInstallerResult(
-          install_status,
-          IDS_INSTALL_UNCOMPRESSION_FAILED_BASE,
-          NULL);
-    } else {
-      unpacked = true;
-      archive_to_copy = temp_path.path().Append(installer::kChromeArchive);
-    }
-  } else {
-    base::FilePath uncompressed_archive(cmd_line.GetProgram().DirName().Append(
-        installer::kChromeArchive));
-
-    if (file_util::PathExists(uncompressed_archive)) {
-      VLOG(1) << "Uncompressed archive found to install Chrome "
-              << uncompressed_archive.value();
-      *archive_type = installer::FULL_ARCHIVE_TYPE;
-      string16 unpacked_file;
-      if (LzmaUtil::UnPackArchive(uncompressed_archive.value(),
-                                  unpack_path.value(), &unpacked_file)) {
-        installer_state.WriteInstallerResult(
-            installer::UNCOMPRESSION_FAILED,
-            IDS_INSTALL_UNCOMPRESSION_FAILED_BASE,
-            NULL);
-      } else {
-        unpacked = true;
-        archive_to_copy = uncompressed_archive;
-      }
-    }
-  }
-  if (unpacked) {
-    VLOG(1) << "unpacked to " << unpack_path.value();
-    base::FilePath src_path(
-        unpack_path.Append(installer::kInstallSourceChromeDir));
-    scoped_ptr<Version>
-        installer_version(installer::GetMaxVersionFromArchiveDir(src_path));
-    if (!installer_version.get()) {
-      LOG(ERROR) << "Did not find any valid version in installer.";
-      install_status = installer::INVALID_ARCHIVE;
-      installer_state.WriteInstallerResult(install_status,
-          IDS_INSTALL_INVALID_ARCHIVE_BASE, NULL);
-    } else {
-      VLOG(1) << "version to install: " << installer_version->GetString();
-      bool proceed_with_installation = true;
-
-      if (installer_state.operation() == InstallerState::MULTI_INSTALL) {
-        // This is a new install of a multi-install product. Rather than give up
-        // in case a higher version of the binaries (including a single-install
-        // of Chrome, which can safely be migrated to multi-install by way of
-        // CheckMultiInstallConditions) is already installed, delegate to the
-        // installed setup.exe to install the product at hand.
-        base::FilePath setup_exe;
-        if (GetExistingHigherInstaller(original_state, system_install,
-                                       *installer_version, &setup_exe)) {
-          VLOG(1) << "Deferring to existing installer.";
-          installer_state.UpdateStage(installer::DEFERRING_TO_HIGHER_VERSION);
-          if (DeferToExistingInstall(setup_exe, cmd_line, installer_state,
-                                     temp_path.path(), &install_status)) {
-            *delegated_to_existing = true;
-            return install_status;
-          }
-        }
-      }
-
-      uint32 higher_products = 0;
-      COMPILE_ASSERT(
-          sizeof(higher_products) * 8 > BrowserDistribution::NUM_TYPES,
-          too_many_distribution_types_);
-      const Products& products = installer_state.products();
-      for (Products::const_iterator it = products.begin(); it < products.end();
-           ++it) {
-        const Product& product = **it;
-        const ProductState* product_state =
-            original_state.GetProductState(system_install,
-                                           product.distribution()->GetType());
-        if (product_state != NULL &&
-            (product_state->version().CompareTo(*installer_version) > 0)) {
-          LOG(ERROR) << "Higher version of "
-                     << product.distribution()->GetAppShortCutName()
-                     << " is already installed.";
-          higher_products |= (1 << product.distribution()->GetType());
-        }
-      }
-
-      if (higher_products != 0) {
-        COMPILE_ASSERT(BrowserDistribution::NUM_TYPES == 4,
-                       add_support_for_new_products_here_);
-        const uint32 kBrowserBit = 1 << BrowserDistribution::CHROME_BROWSER;
-        const uint32 kGCFBit = 1 << BrowserDistribution::CHROME_FRAME;
-        const uint32 kAppHostBit = 1 << BrowserDistribution::CHROME_APP_HOST;
-        int message_id = 0;
-
-        proceed_with_installation = false;
-        install_status = installer::HIGHER_VERSION_EXISTS;
-        switch (higher_products) {
-          case kBrowserBit:
-            message_id = IDS_INSTALL_HIGHER_VERSION_BASE;
-            break;
-          case kGCFBit:
-            message_id = IDS_INSTALL_HIGHER_VERSION_CF_BASE;
-            break;
-          case kGCFBit | kBrowserBit:
-            message_id = IDS_INSTALL_HIGHER_VERSION_CB_CF_BASE;
-            break;
-          default:
-            message_id = IDS_INSTALL_HIGHER_VERSION_APP_LAUNCHER_BASE;
-            break;
-        }
-
-        installer_state.WriteInstallerResult(install_status, message_id, NULL);
-      }
-
-      proceed_with_installation =
-          proceed_with_installation &&
-          CheckGroupPolicySettings(original_state, installer_state,
-                                   *installer_version, &install_status);
-
-      if (proceed_with_installation) {
-        // If Google Update is absent at user-level, install it using the
-        // Google Update installer from an existing system-level installation.
-        // This is for quick-enable App Host install from a system-level
-        // Chrome Binaries installation.
-        if (!system_install && installer_state.ensure_google_update_present()) {
-          if (!google_update::EnsureUserLevelGoogleUpdatePresent()) {
-            LOG(ERROR) << "Failed to install Google Update";
-            proceed_with_installation = false;
-            install_status = installer::INSTALL_OF_GOOGLE_UPDATE_FAILED;
-            installer_state.WriteInstallerResult(install_status, 0, NULL);
-          }
-        }
-      }
-
-      if (proceed_with_installation) {
-        base::FilePath prefs_source_path(cmd_line.GetSwitchValueNative(
-            installer::switches::kInstallerData));
-        install_status = installer::InstallOrUpdateProduct(
-            original_state, installer_state, cmd_line.GetProgram(),
-            archive_to_copy, temp_path.path(), src_path, prefs_source_path,
-            prefs, *installer_version);
-
-        int install_msg_base = IDS_INSTALL_FAILED_BASE;
-        string16 chrome_exe;
-        string16 quoted_chrome_exe;
-        if (install_status == installer::SAME_VERSION_REPAIR_FAILED) {
-          if (installer_state.FindProduct(BrowserDistribution::CHROME_FRAME)) {
-            install_msg_base = IDS_SAME_VERSION_REPAIR_FAILED_CF_BASE;
-          } else {
-            install_msg_base = IDS_SAME_VERSION_REPAIR_FAILED_BASE;
-          }
-        } else if (install_status != installer::INSTALL_FAILED) {
-          if (installer_state.target_path().empty()) {
-            // If we failed to construct install path, it means the OS call to
-            // get %ProgramFiles% or %AppData% failed. Report this as failure.
-            install_msg_base = IDS_INSTALL_OS_ERROR_BASE;
-            install_status = installer::OS_ERROR;
-          } else {
-            chrome_exe = installer_state.target_path()
-                .Append(installer::kChromeExe).value();
-            quoted_chrome_exe = L"\"" + chrome_exe + L"\"";
-            install_msg_base = 0;
-          }
-        }
-
-        installer_state.UpdateStage(installer::FINISHING);
-
-        // Only do Chrome-specific stuff (like launching the browser) if
-        // Chrome was specifically requested (rather than being upgraded as
-        // part of a multi-install).
-        const Product* chrome_install = prefs.install_chrome() ?
-            installer_state.FindProduct(BrowserDistribution::CHROME_BROWSER) :
-            NULL;
-
-        bool do_not_register_for_update_launch = false;
-        if (chrome_install) {
-          prefs.GetBool(
-              installer::master_preferences::kDoNotRegisterForUpdateLaunch,
-              &do_not_register_for_update_launch);
-        } else {
-          do_not_register_for_update_launch = true;  // Never register.
-        }
-
-        bool write_chrome_launch_string =
-            (!do_not_register_for_update_launch &&
-             install_status != installer::IN_USE_UPDATED);
-
-        installer_state.WriteInstallerResult(install_status, install_msg_base,
-            write_chrome_launch_string ? &quoted_chrome_exe : NULL);
-
-        if (install_status == installer::FIRST_INSTALL_SUCCESS) {
-          VLOG(1) << "First install successful.";
-          if (chrome_install) {
-            // We never want to launch Chrome in system level install mode.
-            bool do_not_launch_chrome = false;
-            prefs.GetBool(
-                installer::master_preferences::kDoNotLaunchChrome,
-                &do_not_launch_chrome);
-            if (!system_install && !do_not_launch_chrome)
-              chrome_install->LaunchChrome(installer_state.target_path());
-          }
-        } else if ((install_status == installer::NEW_VERSION_UPDATED) ||
-                   (install_status == installer::IN_USE_UPDATED)) {
-          const Product* chrome = installer_state.FindProduct(
-              BrowserDistribution::CHROME_BROWSER);
-          if (chrome != NULL) {
-            DCHECK_NE(chrome_exe, string16());
-            installer::RemoveChromeLegacyRegistryKeys(chrome->distribution(),
-                                                      chrome_exe);
-          }
-        }
-
-        if (prefs.install_chrome_app_launcher() &&
-            InstallUtil::GetInstallReturnCode(install_status) == 0) {
-          std::string webstore_item(google_update::GetUntrustedDataValue(
-              installer::kInstallFromWebstore));
-          if (!webstore_item.empty()) {
-            bool success = installer::InstallFromWebstore(webstore_item);
-            VLOG_IF(1, !success) << "Failed to launch app installation.";
-          }
-        }
-      }
-    }
-
-    // There might be an experiment (for upgrade usually) that needs to happen.
-    // An experiment's outcome can include chrome's uninstallation. If that is
-    // the case we would not do that directly at this point but in another
-    // instance of setup.exe
-    //
-    // There is another way to reach this same function if this is a system
-    // level install. See HandleNonInstallCmdLineOptions().
-    {
-      // If installation failed, use the path to the currently running setup.
-      // If installation succeeded, use the path to setup in the installer dir.
-      base::FilePath setup_path(cmd_line.GetProgram());
-      if (InstallUtil::GetInstallReturnCode(install_status) == 0) {
-        setup_path = installer_state.GetInstallerDirectory(*installer_version)
-            .Append(setup_path.BaseName());
-      }
-      for (Products::const_iterator it = products.begin(); it < products.end();
-           ++it) {
-        const Product& product = **it;
-        product.LaunchUserExperiment(setup_path, install_status,
-                                     system_install);
-      }
-    }
-  }
-
-  // Delete the master profile file if present. Note that we do not care about
-  // rollback here and we schedule for deletion on reboot if the delete fails.
-  // As such, we do not use DeleteTreeWorkItem.
-  if (cmd_line.HasSwitch(installer::switches::kInstallerData)) {
-    base::FilePath prefs_path(cmd_line.GetSwitchValuePath(
-        installer::switches::kInstallerData));
-    if (!file_util::Delete(prefs_path, true)) {
-      LOG(ERROR) << "Failed deleting master preferences file "
-                 << prefs_path.value()
-                 << ", scheduling for deletion after reboot.";
-      ScheduleFileSystemEntityForDeletion(prefs_path.value().c_str());
-    }
-  }
-
-  // temp_path's dtor will take care of deleting or scheduling itself for
-  // deletion at reboot when this scope closes.
-  VLOG(1) << "Deleting temporary directory " << temp_path.path().value();
-
-  return install_status;
+  return true;
 }
 
 installer::InstallStatus InstallProducts(
@@ -964,7 +696,7 @@ installer::InstallStatus InstallProducts(
   const bool system_install = installer_state->system_install();
   installer::InstallStatus install_status = installer::UNKNOWN_STATUS;
   installer::ArchiveType archive_type = installer::UNKNOWN_ARCHIVE_TYPE;
-  bool incremental_install = false;
+  bool delegated_to_existing = false;
   installer_state->UpdateStage(installer::PRECONDITIONS);
   // The stage provides more fine-grained information than -multifail, so remove
   // the -multifail suffix from the Google Update "ap" value.
@@ -973,21 +705,34 @@ installer::InstallStatus InstallProducts(
   if (CheckPreInstallConditions(original_state, installer_state,
                                 &install_status)) {
     VLOG(1) << "Installing to " << installer_state->target_path().value();
-    bool delegated_to_existing = false;
     install_status = InstallProductsHelper(
         original_state, cmd_line, prefs, *installer_state, &archive_type,
         &delegated_to_existing);
-    // Early exit if this setup.exe delegated to another, since that one would
-    // have taken care of UpdateInstallStatus and UpdateStage.
-    if (delegated_to_existing)
-      return install_status;
   } else {
     // CheckPreInstallConditions must set the status on failure.
     DCHECK_NE(install_status, installer::UNKNOWN_STATUS);
   }
 
-  const Products& products = installer_state->products();
+  // Delete the master preferences file if present. Note that we do not care
+  // about rollback here and we schedule for deletion on reboot if the delete
+  // fails. As such, we do not use DeleteTreeWorkItem.
+  if (cmd_line.HasSwitch(installer::switches::kInstallerData)) {
+    base::FilePath prefs_path(cmd_line.GetSwitchValuePath(
+        installer::switches::kInstallerData));
+    if (!base::DeleteFile(prefs_path, false)) {
+      LOG(ERROR) << "Failed deleting master preferences file "
+                 << prefs_path.value()
+                 << ", scheduling for deletion after reboot.";
+      ScheduleFileSystemEntityForDeletion(prefs_path.value().c_str());
+    }
+  }
 
+  // Early exit if this setup.exe delegated to another, since that one would
+  // have taken care of UpdateInstallStatus and UpdateStage.
+  if (delegated_to_existing)
+    return install_status;
+
+  const Products& products = installer_state->products();
   for (Products::const_iterator it = products.begin(); it < products.end();
        ++it) {
     (*it)->distribution()->UpdateInstallStatus(
@@ -1057,12 +802,12 @@ installer::InstallStatus UninstallProducts(
       base::FilePath first_run_sentinel;
       InstallUtil::GetSentinelFilePath(
           chrome::kFirstRunSentinel, dist, &first_run_sentinel);
-      if (file_util::PathExists(first_run_sentinel)) {
+      if (base::PathExists(first_run_sentinel)) {
         // If the Chrome being self-destructed has already undergone First Run,
         // trigger Active Setup and make sure the system-level Chrome doesn't go
         // through first run.
         trigger_active_setup = true;
-        system_level_cmd.AppendSwitch(::switches::kNoFirstRun);
+        system_level_cmd.AppendSwitch(::switches::kCancelFirstRun);
       }
     }
   }
@@ -1204,7 +949,7 @@ installer::InstallStatus RegisterDevChrome(
     chrome_exe = base::MakeAbsoluteFilePath(chrome_exe);
 
   installer::InstallStatus status = installer::FIRST_INSTALL_SUCCESS;
-  if (file_util::PathExists(chrome_exe)) {
+  if (base::PathExists(chrome_exe)) {
     Product chrome(chrome_dist);
 
     // Create the Start menu shortcut and pin it to the taskbar.
@@ -1236,6 +981,55 @@ installer::InstallStatus RegisterDevChrome(
   return status;
 }
 
+// Migrates multi-install Chrome Frame to single-install at the current
+// level. Does not remove the multi-install binaries if no other products are
+// using them. --uncompressed-archive=chrome.7z is expected to be given on the
+// command line to point this setup.exe at the (possibly patched) archive from
+// the calling instance.
+installer::InstallStatus MigrateChromeFrame(
+    const InstallationState& original_state,
+    InstallerState* installer_state) {
+  const bool system_level = installer_state->system_install();
+
+  // Nothing to do if multi-install Chrome Frame is not installed.
+  const ProductState* multi_chrome_frame = original_state.GetProductState(
+      system_level, BrowserDistribution::CHROME_FRAME);
+  if (!multi_chrome_frame || !multi_chrome_frame->is_multi_install())
+    return installer::INVALID_STATE_FOR_OPTION;
+
+  // Install SxS Chrome Frame.
+  InstallerState install_gcf(installer_state->level());
+  {
+    scoped_ptr<Product> chrome_frame(
+        new Product(BrowserDistribution::GetSpecificDistribution(
+            BrowserDistribution::CHROME_FRAME)));
+    install_gcf.AddProduct(&chrome_frame);
+  }
+  DCHECK(!install_gcf.is_multi_install());
+
+  installer::ArchiveType archive_type = installer::UNKNOWN_ARCHIVE_TYPE;
+  bool delegated_to_existing = false;
+  installer::InstallStatus install_status = InstallProductsHelper(
+      original_state, *CommandLine::ForCurrentProcess(),
+      MasterPreferences::ForCurrentProcess(), install_gcf,
+      &archive_type, &delegated_to_existing);
+
+  if (!InstallUtil::GetInstallReturnCode(install_status)) {
+    // Migration was successful. There's no turning back now. The multi-install
+    // npchrome_frame.dll and/or chrome.exe may still be in use at this point,
+    // although the user-level helper will not be. It is not safe to delete the
+    // multi-install binaries until npchrome_frame.dll and chrome.exe are no
+    // longer in use. The remaining tasks here are best-effort. Failure does not
+    // do any harm.
+    installer::MigrateGoogleUpdateStateMultiToSingle(
+        system_level,
+        BrowserDistribution::CHROME_FRAME,
+        original_state);
+  }
+
+  return install_status;
+}
+
 // This method processes any command line options that make setup.exe do
 // various tasks other than installation (renaming chrome.exe, showing eula
 // among others). This function returns true if any such command line option
@@ -1261,20 +1055,15 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
     if (!temp_path.CreateUniqueTempDir()) {
       PLOG(ERROR) << "Could not create temporary path.";
     } else {
-      string16 setup_patch = cmd_line.GetSwitchValueNative(
-          installer::switches::kUpdateSetupExe);
-      VLOG(1) << "Opening archive " << setup_patch;
-      string16 uncompressed_patch;
-      if (LzmaUtil::UnPackArchive(setup_patch, temp_path.path().value(),
-                                  &uncompressed_patch) == NO_ERROR) {
-        base::FilePath old_setup_exe = cmd_line.GetProgram();
-        base::FilePath new_setup_exe = cmd_line.GetSwitchValuePath(
-            installer::switches::kNewSetupExe);
-        if (!installer::ApplyDiffPatch(old_setup_exe,
-                                       base::FilePath(uncompressed_patch),
-                                       new_setup_exe,
-                                       installer_state))
-          status = installer::NEW_VERSION_UPDATED;
+      base::FilePath compressed_archive(cmd_line.GetSwitchValuePath(
+          installer::switches::kUpdateSetupExe));
+      VLOG(1) << "Opening archive " << compressed_archive.value();
+      if (installer::ArchivePatchHelper::UncompressAndPatch(
+              temp_path.path(),
+              compressed_archive,
+              cmd_line.GetProgram(),
+              cmd_line.GetSwitchValuePath(installer::switches::kNewSetupExe))) {
+        status = installer::NEW_VERSION_UPDATED;
       }
       if (!temp_path.Delete()) {
         // PLOG would be nice, but Delete() doesn't leave a meaningful value in
@@ -1497,6 +1286,8 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
     } else {
       *exit_code = installer::PATCH_INVALID_ARGUMENTS;
     }
+  } else if (cmd_line.HasSwitch(installer::switches::kMigrateChromeFrame)) {
+    *exit_code = MigrateChromeFrame(original_state, installer_state);
   } else {
     handled = false;
   }
@@ -1607,6 +1398,315 @@ google_breakpad::ExceptionHandler* InitializeCrashReporting(
 }
 
 }  // namespace
+
+namespace installer {
+
+installer::InstallStatus InstallProductsHelper(
+    const InstallationState& original_state,
+    const CommandLine& cmd_line,
+    const MasterPreferences& prefs,
+    const InstallerState& installer_state,
+    installer::ArchiveType* archive_type,
+    bool* delegated_to_existing) {
+  DCHECK(archive_type);
+  DCHECK(delegated_to_existing);
+  const bool system_install = installer_state.system_install();
+  installer::InstallStatus install_status = installer::UNKNOWN_STATUS;
+
+  // Drop to background processing mode if the process was started below the
+  // normal process priority class.
+  bool entered_background_mode = installer::AdjustProcessPriority();
+  VLOG_IF(1, entered_background_mode) << "Entered background processing mode.";
+
+  // Create a temp folder where we will unpack Chrome archive. If it fails,
+  // then we are doomed, so return immediately and no cleanup is required.
+  installer::SelfCleaningTempDir temp_path;
+  base::FilePath unpack_path;
+  if (!CreateTemporaryAndUnpackDirectories(installer_state, &temp_path,
+                                           &unpack_path)) {
+    installer_state.WriteInstallerResult(installer::TEMP_DIR_FAILED,
+                                         IDS_INSTALL_TEMP_DIR_FAILED_BASE,
+                                         NULL);
+    return installer::TEMP_DIR_FAILED;
+  }
+
+  // Uncompress and optionally patch the archive if an uncompressed archive was
+  // not specified on the command line and a compressed archive is found.
+  *archive_type = installer::UNKNOWN_ARCHIVE_TYPE;
+  base::FilePath uncompressed_archive(cmd_line.GetSwitchValuePath(
+      installer::switches::kUncompressedArchive));
+  if (uncompressed_archive.empty()) {
+    scoped_ptr<installer::ArchivePatchHelper> archive_helper(
+        CreateChromeArchiveHelper(cmd_line, installer_state, unpack_path));
+    if (archive_helper) {
+      VLOG(1) << "Installing Chrome from compressed archive "
+              << archive_helper->compressed_archive().value();
+      if (!UncompressAndPatchChromeArchive(original_state,
+                                           installer_state,
+                                           archive_helper.get(),
+                                           archive_type,
+                                           &install_status)) {
+        DCHECK_NE(install_status, installer::UNKNOWN_STATUS);
+        return install_status;
+      }
+      uncompressed_archive = archive_helper->target();
+      DCHECK(!uncompressed_archive.empty());
+    }
+  }
+
+  // Check for an uncompressed archive alongside the current executable if one
+  // was not given or generated.
+  if (uncompressed_archive.empty()) {
+    uncompressed_archive =
+        cmd_line.GetProgram().DirName().Append(installer::kChromeArchive);
+  }
+
+  if (*archive_type == installer::UNKNOWN_ARCHIVE_TYPE) {
+    // An archive was not uncompressed or patched above.
+    if (uncompressed_archive.empty() ||
+        !base::PathExists(uncompressed_archive)) {
+      LOG(ERROR) << "Cannot install Chrome without an uncompressed archive.";
+      installer_state.WriteInstallerResult(
+          installer::INVALID_ARCHIVE, IDS_INSTALL_INVALID_ARCHIVE_BASE, NULL);
+      return installer::INVALID_ARCHIVE;
+    }
+    *archive_type = installer::FULL_ARCHIVE_TYPE;
+  }
+
+  // Unpack the uncompressed archive.
+  if (LzmaUtil::UnPackArchive(uncompressed_archive.value(),
+                              unpack_path.value(),
+                              NULL)) {
+    installer_state.WriteInstallerResult(
+        installer::UNCOMPRESSION_FAILED,
+        IDS_INSTALL_UNCOMPRESSION_FAILED_BASE,
+        NULL);
+    return installer::UNCOMPRESSION_FAILED;
+  }
+
+  VLOG(1) << "unpacked to " << unpack_path.value();
+  base::FilePath src_path(
+      unpack_path.Append(installer::kInstallSourceChromeDir));
+  scoped_ptr<Version>
+      installer_version(installer::GetMaxVersionFromArchiveDir(src_path));
+  if (!installer_version.get()) {
+    LOG(ERROR) << "Did not find any valid version in installer.";
+    install_status = installer::INVALID_ARCHIVE;
+    installer_state.WriteInstallerResult(install_status,
+        IDS_INSTALL_INVALID_ARCHIVE_BASE, NULL);
+  } else {
+    VLOG(1) << "version to install: " << installer_version->GetString();
+    bool proceed_with_installation = true;
+
+    if (installer_state.operation() == InstallerState::MULTI_INSTALL) {
+      // This is a new install of a multi-install product. Rather than give up
+      // in case a higher version of the binaries (including a single-install
+      // of Chrome, which can safely be migrated to multi-install by way of
+      // CheckMultiInstallConditions) is already installed, delegate to the
+      // installed setup.exe to install the product at hand.
+      base::FilePath setup_exe;
+      if (GetExistingHigherInstaller(original_state, system_install,
+                                     *installer_version, &setup_exe)) {
+        VLOG(1) << "Deferring to existing installer.";
+        installer_state.UpdateStage(installer::DEFERRING_TO_HIGHER_VERSION);
+        if (DeferToExistingInstall(setup_exe, cmd_line, installer_state,
+                                   temp_path.path(), &install_status)) {
+          *delegated_to_existing = true;
+          return install_status;
+        }
+      }
+    }
+
+    uint32 higher_products = 0;
+    COMPILE_ASSERT(
+        sizeof(higher_products) * 8 > BrowserDistribution::NUM_TYPES,
+        too_many_distribution_types_);
+    const Products& products = installer_state.products();
+    for (Products::const_iterator it = products.begin(); it < products.end();
+         ++it) {
+      const Product& product = **it;
+      const ProductState* product_state =
+          original_state.GetProductState(system_install,
+                                         product.distribution()->GetType());
+      if (product_state != NULL &&
+          (product_state->version().CompareTo(*installer_version) > 0)) {
+        LOG(ERROR) << "Higher version of "
+                   << product.distribution()->GetAppShortCutName()
+                   << " is already installed.";
+        higher_products |= (1 << product.distribution()->GetType());
+      }
+    }
+
+    if (higher_products != 0) {
+      COMPILE_ASSERT(BrowserDistribution::NUM_TYPES == 4,
+                     add_support_for_new_products_here_);
+      const uint32 kBrowserBit = 1 << BrowserDistribution::CHROME_BROWSER;
+      const uint32 kGCFBit = 1 << BrowserDistribution::CHROME_FRAME;
+      const uint32 kAppHostBit = 1 << BrowserDistribution::CHROME_APP_HOST;
+      int message_id = 0;
+
+      proceed_with_installation = false;
+      install_status = installer::HIGHER_VERSION_EXISTS;
+      switch (higher_products) {
+        case kBrowserBit:
+          message_id = IDS_INSTALL_HIGHER_VERSION_BASE;
+          break;
+        case kGCFBit:
+          message_id = IDS_INSTALL_HIGHER_VERSION_CF_BASE;
+          break;
+        case kGCFBit | kBrowserBit:
+          message_id = IDS_INSTALL_HIGHER_VERSION_CB_CF_BASE;
+          break;
+        default:
+          message_id = IDS_INSTALL_HIGHER_VERSION_APP_LAUNCHER_BASE;
+          break;
+      }
+
+      installer_state.WriteInstallerResult(install_status, message_id, NULL);
+    }
+
+    proceed_with_installation =
+        proceed_with_installation &&
+        CheckGroupPolicySettings(original_state, installer_state,
+                                 *installer_version, &install_status);
+
+    if (proceed_with_installation) {
+      // If Google Update is absent at user-level, install it using the
+      // Google Update installer from an existing system-level installation.
+      // This is for quick-enable App Host install from a system-level
+      // Chrome Binaries installation.
+      if (!system_install && installer_state.ensure_google_update_present()) {
+        if (!google_update::EnsureUserLevelGoogleUpdatePresent()) {
+          LOG(ERROR) << "Failed to install Google Update";
+          proceed_with_installation = false;
+          install_status = installer::INSTALL_OF_GOOGLE_UPDATE_FAILED;
+          installer_state.WriteInstallerResult(install_status, 0, NULL);
+        }
+      }
+    }
+
+    if (proceed_with_installation) {
+      base::FilePath prefs_source_path(cmd_line.GetSwitchValueNative(
+          installer::switches::kInstallerData));
+      install_status = installer::InstallOrUpdateProduct(
+          original_state, installer_state, cmd_line.GetProgram(),
+          uncompressed_archive, temp_path.path(), src_path, prefs_source_path,
+          prefs, *installer_version);
+
+      int install_msg_base = IDS_INSTALL_FAILED_BASE;
+      string16 chrome_exe;
+      string16 quoted_chrome_exe;
+      if (install_status == installer::SAME_VERSION_REPAIR_FAILED) {
+        if (installer_state.FindProduct(BrowserDistribution::CHROME_FRAME)) {
+          install_msg_base = IDS_SAME_VERSION_REPAIR_FAILED_CF_BASE;
+        } else {
+          install_msg_base = IDS_SAME_VERSION_REPAIR_FAILED_BASE;
+        }
+      } else if (install_status != installer::INSTALL_FAILED) {
+        if (installer_state.target_path().empty()) {
+          // If we failed to construct install path, it means the OS call to
+          // get %ProgramFiles% or %AppData% failed. Report this as failure.
+          install_msg_base = IDS_INSTALL_OS_ERROR_BASE;
+          install_status = installer::OS_ERROR;
+        } else {
+          chrome_exe = installer_state.target_path()
+              .Append(installer::kChromeExe).value();
+          quoted_chrome_exe = L"\"" + chrome_exe + L"\"";
+          install_msg_base = 0;
+        }
+      }
+
+      installer_state.UpdateStage(installer::FINISHING);
+
+      // Only do Chrome-specific stuff (like launching the browser) if
+      // Chrome was specifically requested (rather than being upgraded as
+      // part of a multi-install).
+      const Product* chrome_install = prefs.install_chrome() ?
+          installer_state.FindProduct(BrowserDistribution::CHROME_BROWSER) :
+          NULL;
+
+      bool do_not_register_for_update_launch = false;
+      if (chrome_install) {
+        prefs.GetBool(
+            installer::master_preferences::kDoNotRegisterForUpdateLaunch,
+            &do_not_register_for_update_launch);
+      } else {
+        do_not_register_for_update_launch = true;  // Never register.
+      }
+
+      bool write_chrome_launch_string =
+          (!do_not_register_for_update_launch &&
+           install_status != installer::IN_USE_UPDATED);
+
+      installer_state.WriteInstallerResult(install_status, install_msg_base,
+          write_chrome_launch_string ? &quoted_chrome_exe : NULL);
+
+      if (install_status == installer::FIRST_INSTALL_SUCCESS) {
+        VLOG(1) << "First install successful.";
+        if (chrome_install) {
+          // We never want to launch Chrome in system level install mode.
+          bool do_not_launch_chrome = false;
+          prefs.GetBool(
+              installer::master_preferences::kDoNotLaunchChrome,
+              &do_not_launch_chrome);
+          if (!system_install && !do_not_launch_chrome)
+            chrome_install->LaunchChrome(installer_state.target_path());
+        }
+      } else if ((install_status == installer::NEW_VERSION_UPDATED) ||
+                 (install_status == installer::IN_USE_UPDATED)) {
+        const Product* chrome = installer_state.FindProduct(
+            BrowserDistribution::CHROME_BROWSER);
+        if (chrome != NULL) {
+          DCHECK_NE(chrome_exe, string16());
+          installer::RemoveChromeLegacyRegistryKeys(chrome->distribution(),
+                                                    chrome_exe);
+        }
+      }
+
+      if (prefs.install_chrome_app_launcher() &&
+          InstallUtil::GetInstallReturnCode(install_status) == 0) {
+        std::string webstore_item(google_update::GetUntrustedDataValue(
+            installer::kInstallFromWebstore));
+        if (!webstore_item.empty()) {
+          bool success = installer::InstallFromWebstore(webstore_item);
+          VLOG_IF(1, !success) << "Failed to launch app installation.";
+        }
+      }
+    }
+  }
+
+  // There might be an experiment (for upgrade usually) that needs to happen.
+  // An experiment's outcome can include chrome's uninstallation. If that is
+  // the case we would not do that directly at this point but in another
+  // instance of setup.exe
+  //
+  // There is another way to reach this same function if this is a system
+  // level install. See HandleNonInstallCmdLineOptions().
+  {
+    // If installation failed, use the path to the currently running setup.
+    // If installation succeeded, use the path to setup in the installer dir.
+    base::FilePath setup_path(cmd_line.GetProgram());
+    if (InstallUtil::GetInstallReturnCode(install_status) == 0) {
+      setup_path = installer_state.GetInstallerDirectory(*installer_version)
+          .Append(setup_path.BaseName());
+    }
+    const Products& products = installer_state.products();
+    for (Products::const_iterator it = products.begin(); it < products.end();
+         ++it) {
+      const Product& product = **it;
+      product.LaunchUserExperiment(setup_path, install_status,
+                                   system_install);
+    }
+  }
+
+  // temp_path's dtor will take care of deleting or scheduling itself for
+  // deletion at reboot when this scope closes.
+  VLOG(1) << "Deleting temporary directory " << temp_path.path().value();
+
+  return install_status;
+}
+
+}  // namespace installer
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
                     wchar_t* command_line, int show_command) {

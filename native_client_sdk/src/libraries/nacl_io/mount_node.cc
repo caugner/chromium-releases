@@ -1,19 +1,24 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #include "nacl_io/mount_node.h"
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <string.h>
 #include <sys/stat.h>
+
+#include <algorithm>
 #include <string>
 
 #include "nacl_io/kernel_wrap_real.h"
 #include "nacl_io/mount.h"
 #include "nacl_io/osmman.h"
 #include "sdk_util/auto_lock.h"
+
+namespace nacl_io {
 
 static const int USR_ID = 1001;
 static const int GRP_ID = 1002;
@@ -44,11 +49,17 @@ void MountNode::Destroy() {
   }
 }
 
+// Declared in EventEmitter, default to regular files which always return
+// a ready of TRUE for read, write, or error.
+uint32_t MountNode::GetEventStatus() {
+  uint32_t val = POLLIN | POLLOUT | POLLERR;
+  return val;
+}
+
+
 Error MountNode::FSync() { return 0; }
 
-Error MountNode::FTruncate(off_t length) {
-  return EINVAL;
-}
+Error MountNode::FTruncate(off_t length) { return EINVAL; }
 
 Error MountNode::GetDents(size_t offs,
                           struct dirent* pdir,
@@ -59,14 +70,12 @@ Error MountNode::GetDents(size_t offs,
 }
 
 Error MountNode::GetStat(struct stat* pstat) {
-  AutoLock lock(&lock_);
+  AUTO_LOCK(node_lock_);
   memcpy(pstat, &stat_, sizeof(stat_));
   return 0;
 }
 
-Error MountNode::Ioctl(int request, char* arg) {
-  return EINVAL;
-}
+Error MountNode::Ioctl(int request, char* arg) { return EINVAL; }
 
 Error MountNode::Read(size_t offs, void* buf, size_t count, int* out_bytes) {
   *out_bytes = 0;
@@ -116,6 +125,19 @@ Error MountNode::MMap(void* addr,
   return 0;
 }
 
+Error MountNode::Tcflush(int queue_selector) {
+  return EINVAL;
+}
+
+Error MountNode::Tcgetattr(struct termios* termios_p) {
+  return EINVAL;
+}
+
+Error MountNode::Tcsetattr(int optional_actions,
+                           const struct termios *termios_p) {
+  return EINVAL;
+}
+
 int MountNode::GetLinks() { return stat_.st_nlink; }
 
 int MountNode::GetMode() { return stat_.st_mode & ~S_IFMT; }
@@ -133,29 +155,23 @@ bool MountNode::IsaFile() { return (stat_.st_mode & S_IFREG) != 0; }
 
 bool MountNode::IsaTTY() { return (stat_.st_mode & S_IFCHR) != 0; }
 
-Error MountNode::AddChild(const std::string& name, MountNode* node) {
+Error MountNode::AddChild(const std::string& name,
+                          const ScopedMountNode& node) {
   return ENOTDIR;
 }
 
-Error MountNode::RemoveChild(const std::string& name) {
+Error MountNode::RemoveChild(const std::string& name) { return ENOTDIR; }
+
+Error MountNode::FindChild(const std::string& name, ScopedMountNode* out_node) {
+  out_node->reset(NULL);
   return ENOTDIR;
 }
 
-Error MountNode::FindChild(const std::string& name, MountNode** out_node) {
-  *out_node = NULL;
-  return ENOTDIR;
-}
+int MountNode::ChildCount() { return 0; }
 
-int MountNode::ChildCount() {
-  return 0;
-}
+void MountNode::Link() { stat_.st_nlink++; }
 
-void MountNode::Link() {
-  Acquire();
-  stat_.st_nlink++;
-}
+void MountNode::Unlink() { stat_.st_nlink--; }
 
-void MountNode::Unlink() {
-  stat_.st_nlink--;
-  Release();
-}
+}  // namespace nacl_io
+

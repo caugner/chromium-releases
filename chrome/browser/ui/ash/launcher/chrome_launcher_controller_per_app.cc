@@ -20,6 +20,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/app_icon_loader_impl.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -54,7 +55,6 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/manifest_handlers/icons_handler.h"
@@ -326,10 +326,18 @@ ash::LauncherID ChromeLauncherControllerPerApp::CreateAppLauncherItem(
     const std::string& app_id,
     ash::LauncherItemStatus status) {
   CHECK(controller);
+  int index = 0;
+  // Panels are inserted on the left so as not to push all existing panels over.
+  if (controller->GetLauncherItemType() != ash::TYPE_APP_PANEL) {
+    index = model_->item_count();
+    // For the alternate shelf layout increment the index (after the app icon)
+    if (ash::switches::UseAlternateShelfLayout())
+      ++index;
+  }
   return InsertAppLauncherItem(controller,
                                app_id,
                                status,
-                               model_->item_count(),
+                               index,
                                controller->GetLauncherItemType());
 }
 
@@ -617,14 +625,9 @@ void ChromeLauncherControllerPerApp::SetAppImage(
 }
 
 void ChromeLauncherControllerPerApp::OnAutoHideBehaviorChanged(
+    aura::RootWindow* root_window,
     ash::ShelfAutoHideBehavior new_behavior) {
-  ash::Shell::RootWindowList root_windows = ash::Shell::GetAllRootWindows();
-
-  for (ash::Shell::RootWindowList::const_iterator iter =
-           root_windows.begin();
-       iter != root_windows.end(); ++iter) {
-    SetShelfAutoHideBehaviorPrefs(new_behavior, *iter);
-  }
+  SetShelfAutoHideBehaviorPrefs(new_behavior, root_window);
 }
 
 void ChromeLauncherControllerPerApp::SetLauncherItemImage(
@@ -1390,13 +1393,19 @@ void ChromeLauncherControllerPerApp::UpdateAppLaunchersFromPref() {
   // of iterators because of model mutations as part of the loop.
   std::vector<std::string>::const_iterator pref_app_id(pinned_apps.begin());
   int index = 0;
-  for (; index < model_->item_count() && pref_app_id != pinned_apps.end();
-       ++index) {
+  int max_index = model_->item_count();
+  // Using the alternate shelf layout the App Icon should be the first item in
+  // the list thus start adding items at slot 1 (instead of slot 0).
+  if (ash::switches::UseAlternateShelfLayout()) {
+    ++index;
+    ++max_index;
+  }
+  for (; index < max_index && pref_app_id != pinned_apps.end(); ++index) {
     // If the next app launcher according to the pref is present in the model,
     // delete all app launcher entries in between.
     if (*pref_app_id == extension_misc::kChromeAppId ||
         IsAppPinned(*pref_app_id)) {
-      for (; index < model_->item_count(); ++index) {
+      for (; index < max_index; ++index) {
         const ash::LauncherItem& item(model_->items()[index]);
         if (item.type != ash::TYPE_APP_SHORTCUT &&
             item.type != ash::TYPE_BROWSER_SHORTCUT)
@@ -1418,13 +1427,14 @@ void ChromeLauncherControllerPerApp::UpdateAppLaunchersFromPref() {
             MoveItemWithoutPinnedStateChangeNotification(index, index + 1);
           } else {
             LauncherItemClosed(item.id);
+            --max_index;
           }
           --index;
         }
       }
       // If the item wasn't found, that means id_to_item_controller_map_
       // is out of sync.
-      DCHECK(index < model_->item_count());
+      DCHECK(index < max_index);
     } else {
       // This app wasn't pinned before, insert a new entry.
       ash::LauncherID id = CreateAppShortcutLauncherItem(*pref_app_id, index);
@@ -1491,7 +1501,7 @@ void ChromeLauncherControllerPerApp::SetShelfAutoHideBehaviorFromPrefs() {
 
 void ChromeLauncherControllerPerApp::SetShelfAlignmentFromPrefs() {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kShowLauncherAlignmentMenu))
+          switches::kShowShelfAlignmentMenu))
     return;
 
   ash::Shell::RootWindowList root_windows = ash::Shell::GetAllRootWindows();
@@ -1631,6 +1641,9 @@ int ChromeLauncherControllerPerApp::GetChromeIconIndexFromPref() const {
   size_t index = profile_->GetPrefs()->GetInteger(prefs::kShelfChromeIconIndex);
   const base::ListValue* pinned_apps_pref =
       profile_->GetPrefs()->GetList(prefs::kPinnedLauncherApps);
+  if (ash::switches::UseAlternateShelfLayout())
+    return std::max(static_cast<size_t>(1),
+                    std::min(pinned_apps_pref->GetSize(), index));
   return std::max(static_cast<size_t>(0),
                   std::min(pinned_apps_pref->GetSize(), index));
 }

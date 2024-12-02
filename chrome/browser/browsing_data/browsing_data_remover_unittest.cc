@@ -12,17 +12,17 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/guid.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/platform_file.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/mock_extension_special_storage_policy.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
@@ -32,6 +32,7 @@
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/personal_data_manager_observer.h"
 #include "content/public/browser/dom_storage_context.h"
+#include "content/public/browser/local_storage_usage_info.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/test/test_browser_thread.h"
@@ -43,11 +44,8 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/platform/WebCString.h"
-#include "third_party/WebKit/public/platform/WebString.h"
 #include "webkit/browser/quota/mock_quota_manager.h"
 #include "webkit/browser/quota/quota_manager.h"
-#include "webkit/common/dom_storage/dom_storage_types.h"
 #include "webkit/common/quota/quota_types.h"
 
 using content::BrowserThread;
@@ -172,7 +170,7 @@ class AwaitCompletionHelper : public BrowsingDataRemover::Observer {
 
 class RemoveCookieTester {
  public:
-  RemoveCookieTester() : get_cookie_success_(false) {
+  RemoveCookieTester() : get_cookie_success_(false), monster_(NULL) {
   }
 
   // Returns true, if the given cookie exists in the cookie store.
@@ -225,7 +223,6 @@ class RemoveCookieTester {
 class RemoveProfileCookieTester : public RemoveCookieTester {
  public:
   explicit RemoveProfileCookieTester(TestingProfile* profile) {
-    profile->CreateRequestContext();
     SetMonster(profile->GetRequestContext()->GetURLRequestContext()->
         cookie_store()->GetCookieMonster());
   }
@@ -267,7 +264,6 @@ class RemoveServerBoundCertTester : public net::SSLConfigService::Observer {
  public:
   explicit RemoveServerBoundCertTester(TestingProfile* profile)
       : ssl_config_changed_count_(0) {
-    profile->CreateRequestContext();
     server_bound_cert_service_ = profile->GetRequestContext()->
         GetURLRequestContext()->server_bound_cert_service();
     ssl_config_service_ = profile->GetSSLConfigService();
@@ -288,8 +284,10 @@ class RemoveServerBoundCertTester : public net::SSLConfigService::Observer {
                                    base::Time creation_time,
                                    base::Time expiration_time) {
     GetCertStore()->SetServerBoundCert(server_identifier,
-                                       net::CLIENT_CERT_RSA_SIGN, creation_time,
-                                       expiration_time, "a", "b");
+                                       creation_time,
+                                       expiration_time,
+                                       "a",
+                                       "b");
   }
 
   // Add a server bound cert for |server|, with the current time as the
@@ -335,11 +333,14 @@ class RemoveServerBoundCertTester : public net::SSLConfigService::Observer {
 
 class RemoveHistoryTester {
  public:
-  explicit RemoveHistoryTester(TestingProfile* profile)
-      : query_url_success_(false) {
-    profile->CreateHistoryService(true, false);
+  RemoveHistoryTester() : query_url_success_(false), history_service_(NULL) {}
+
+  bool Init(TestingProfile* profile) WARN_UNUSED_RESULT {
+    if (!profile->CreateHistoryService(true, false))
+      return false;
     history_service_ = HistoryServiceFactory::GetForProfile(
         profile, Profile::EXPLICIT_ACCESS);
+    return true;
   }
 
   // Returns true, if the given URL exists in the history service.
@@ -521,7 +522,7 @@ class RemoveLocalStorageTester {
                    base::Unretained(this)));
   }
   void OnGotLocalStorageUsage(
-      const std::vector<dom_storage::LocalStorageUsageInfo>& infos) {
+      const std::vector<content::LocalStorageUsageInfo>& infos) {
     infos_ = infos;
     await_completion_.Notify();
   }
@@ -530,7 +531,7 @@ class RemoveLocalStorageTester {
   TestingProfile* profile_;
   content::DOMStorageContext* dom_storage_context_;
 
-  std::vector<dom_storage::LocalStorageUsageInfo> infos_;
+  std::vector<content::LocalStorageUsageInfo> infos_;
 
   AwaitCompletionHelper await_completion_;
 
@@ -828,7 +829,8 @@ TEST_F(BrowsingDataRemoverTest, RemoveLocalStorageForLastWeek) {
 }
 
 TEST_F(BrowsingDataRemoverTest, RemoveHistoryForever) {
-  RemoveHistoryTester tester(GetProfile());
+  RemoveHistoryTester tester;
+  ASSERT_TRUE(tester.Init(GetProfile()));
 
   tester.AddHistory(kOrigin1, base::Time::Now());
   ASSERT_TRUE(tester.HistoryContainsURL(kOrigin1));
@@ -842,7 +844,8 @@ TEST_F(BrowsingDataRemoverTest, RemoveHistoryForever) {
 }
 
 TEST_F(BrowsingDataRemoverTest, RemoveHistoryForLastHour) {
-  RemoveHistoryTester tester(GetProfile());
+  RemoveHistoryTester tester;
+  ASSERT_TRUE(tester.Init(GetProfile()));
 
   base::Time two_hours_ago = base::Time::Now() - base::TimeDelta::FromHours(2);
 
@@ -864,7 +867,8 @@ TEST_F(BrowsingDataRemoverTest, RemoveHistoryForLastHour) {
 // here.
 #if defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON)
 TEST_F(BrowsingDataRemoverTest, RemoveHistoryProhibited) {
-  RemoveHistoryTester tester(GetProfile());
+  RemoveHistoryTester tester;
+  ASSERT_TRUE(tester.Init(GetProfile()));
   PrefService* prefs = GetProfile()->GetPrefs();
   prefs->SetBoolean(prefs::kAllowDeletingBrowserHistory, false);
 
@@ -888,7 +892,8 @@ TEST_F(BrowsingDataRemoverTest, RemoveHistoryProhibited) {
 
 TEST_F(BrowsingDataRemoverTest, RemoveMultipleTypes) {
   // Add some history.
-  RemoveHistoryTester history_tester(GetProfile());
+  RemoveHistoryTester history_tester;
+  ASSERT_TRUE(history_tester.Init(GetProfile()));
   history_tester.AddHistory(kOrigin1, base::Time::Now());
   ASSERT_TRUE(history_tester.HistoryContainsURL(kOrigin1));
 
@@ -917,7 +922,8 @@ TEST_F(BrowsingDataRemoverTest, RemoveMultipleTypesHistoryProhibited) {
   prefs->SetBoolean(prefs::kAllowDeletingBrowserHistory, false);
 
   // Add some history.
-  RemoveHistoryTester history_tester(GetProfile());
+  RemoveHistoryTester history_tester;
+  ASSERT_TRUE(history_tester.Init(GetProfile()));
   history_tester.AddHistory(kOrigin1, base::Time::Now());
   ASSERT_TRUE(history_tester.HistoryContainsURL(kOrigin1));
 
@@ -1290,7 +1296,8 @@ TEST_F(BrowsingDataRemoverTest, RemoveQuotaManagedIgnoreExtensionsAndDevTools) {
 }
 
 TEST_F(BrowsingDataRemoverTest, OriginBasedHistoryRemoval) {
-  RemoveHistoryTester tester(GetProfile());
+  RemoveHistoryTester tester;
+  ASSERT_TRUE(tester.Init(GetProfile()));
 
   base::Time two_hours_ago = base::Time::Now() - base::TimeDelta::FromHours(2);
 
@@ -1311,7 +1318,8 @@ TEST_F(BrowsingDataRemoverTest, OriginBasedHistoryRemoval) {
 }
 
 TEST_F(BrowsingDataRemoverTest, OriginAndTimeBasedHistoryRemoval) {
-  RemoveHistoryTester tester(GetProfile());
+  RemoveHistoryTester tester;
+  ASSERT_TRUE(tester.Init(GetProfile()));
 
   base::Time two_hours_ago = base::Time::Now() - base::TimeDelta::FromHours(2);
 

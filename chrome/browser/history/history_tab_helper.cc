@@ -12,7 +12,6 @@
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/search/instant_overlay.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
@@ -128,13 +127,6 @@ void HistoryTabHelper::DidNavigateAnyFrame(
     }
   }
 
-  InstantOverlay* instant_overlay =
-      InstantOverlay::FromWebContents(web_contents());
-  if (instant_overlay) {
-    instant_overlay->DidNavigate(add_page_args);
-    return;
-  }
-
 #if !defined(OS_ANDROID)
   // Don't update history if this web contents isn't associatd with a tab.
   Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
@@ -163,7 +155,6 @@ void HistoryTabHelper::Observe(int type,
 }
 
 void HistoryTabHelper::OnPageContents(const GURL& url,
-                                      int32 page_id,
                                       const string16& contents) {
   // Don't index any https pages. People generally don't want their bank
   // accounts, etc. indexed on their computer, especially since some of these
