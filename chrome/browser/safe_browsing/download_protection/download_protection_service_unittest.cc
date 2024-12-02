@@ -23,6 +23,7 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/path_service.h"
@@ -708,7 +709,7 @@ class DownloadProtectionServiceTestBase
 
   scoped_refptr<FakeSafeBrowsingService> sb_service_;
   scoped_refptr<MockBinaryFeatureExtractor> binary_feature_extractor_;
-  DownloadProtectionService* download_service_;
+  raw_ptr<DownloadProtectionService> download_service_;
   DownloadCheckResult result_;
   bool has_result_;
   std::unique_ptr<content::InProcessUtilityThreadHelper>
@@ -727,7 +728,7 @@ class DownloadProtectionServiceTestBase
   base::FilePath final_path_;
   std::string hash_;
   base::ScopedTempDir temp_dir_;
-  extensions::TestEventRouter* test_event_router_;
+  raw_ptr<extensions::TestEventRouter> test_event_router_;
   TestingProfileManager testing_profile_manager_;
   std::unique_ptr<IdentityTestEnvironmentProfileAdaptor>
       identity_test_env_adaptor_;
@@ -3795,6 +3796,26 @@ TEST_F(DownloadProtectionServiceTest,
   EXPECT_TRUE(IsResult(DownloadCheckResult::SAFE));
   EXPECT_TRUE(HasClientDownloadRequest());
   ClearClientDownloadRequest();
+}
+
+TEST_F(DownloadProtectionServiceTest,
+       FileSystemAccessWriteRequest_ProfileDestroyed) {
+  Profile* profile1 =
+      testing_profile_manager_.CreateTestingProfile("profile 1");
+  auto item = PrepareBasicFileSystemAccessWriteItem(
+      /*tmp_path_literal=*/FILE_PATH_LITERAL("a.exe.crswap"),
+      /*final_path_literal=*/FILE_PATH_LITERAL("a.exe"));
+  item->browser_context = profile1;
+
+  RunLoop run_loop;
+  download_service_->CheckFileSystemAccessWrite(
+      CloneFileSystemAccessWriteItem(item.get()),
+      base::BindOnce(&DownloadProtectionServiceTest::CheckDoneCallback,
+                     base::Unretained(this), run_loop.QuitClosure()));
+  // RemovePendingDownloadRequests is called when profile is destroyed.
+  download_service_->RemovePendingDownloadRequests(profile1);
+  testing_profile_manager_.DeleteTestingProfile("profile 1");
+  run_loop.RunUntilIdle();
 }
 
 TEST_F(DownloadProtectionServiceTest,
